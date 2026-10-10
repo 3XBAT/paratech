@@ -1,0 +1,1119 @@
+{
+    "project": {
+        "name": "Interview Trainer Bot",
+        "version": "1.0",
+        "prd_source": "prd/PRD-InterviewTrainerBot-2026-01-10.md",
+        "created_at": "2026-01-25"
+    },
+    "agent_instructions": {
+        "before_start": [
+            "Прочитай этот файл и git log --oneline -20",
+            "Выбери ОДНУ задачу со статусом pending и наивысшим приоритетом",
+            "Проверь, что все dependencies этой задачи имеют статус done"
+        ],
+        "during_work": [
+            "Работай только над выбранной задачей",
+            "Делай коммиты после каждого логического изменения",
+            "Не трогай код, не связанный с текущей задачей"
+        ],
+        "before_finish": [
+            "Выполни ВСЕ test_steps из задачи",
+            "Меняй status на done ТОЛЬКО после успешного прохождения всех тестов",
+            "Напиши summary в progress.md",
+            "ЗАПРЕЩЕНО удалять или редактировать задачи — только менять status"
+        ]
+    },
+    "tasks": [
+        {
+            "id": "TASK-001",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "Инициализация проекта с uv и базовой структурой",
+            "acceptance_criteria": [
+                "Создан pyproject.toml с Python 3.13+ и всеми зависимостями из PRD",
+                "Структура папок соответствует архитектуре: src/bot/ с core/, handlers/, services/, repositories/, domain/, infrastructure/",
+                "Файл .python-version указывает на 3.13",
+                "Создан .env.example со всеми необходимыми переменными"
+            ],
+            "test_steps": [
+                "Запустить: uv sync",
+                "Проверить: uv run python --version (должен быть 3.13+)",
+                "Проверить наличие всех папок: ls -la src/bot/",
+                "Проверить: cat pyproject.toml | grep aiogram"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-002",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "Настройка конфигурации через Pydantic Settings",
+            "acceptance_criteria": [
+                "Создан src/bot/core/config.py с Settings классом",
+                "Поддержка загрузки из .env файла",
+                "Валидация всех критичных переменных: TELEGRAM_BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY",
+                "Типизация через SecretStr для токенов"
+            ],
+            "test_steps": [
+                "Создать .env с тестовыми значениями",
+                "Запустить: uv run python -c 'from bot.core.config import settings; print(settings.telegram_bot_token)'",
+                "Проверить, что отсутствие обязательной переменной вызывает ValidationError"
+            ],
+            "dependencies": [
+                "TASK-001"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-003",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "Настройка подключения к Supabase",
+            "acceptance_criteria": [
+                "Создан src/bot/infrastructure/database/connection.py",
+                "Реализован async client для Supabase",
+                "Функция get_supabase_client() возвращает готовый клиент",
+                "Graceful handling ошибок подключения"
+            ],
+            "test_steps": [
+                "Создать тестовый проект в Supabase",
+                "Добавить credentials в .env",
+                "Запустить: uv run python -c 'from bot.infrastructure.database.connection import get_supabase_client; print(get_supabase_client())'",
+                "Проверить, что неверные credentials выдают понятную ошибку"
+            ],
+            "dependencies": [
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-004",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "Создание схемы базы данных в Supabase",
+            "acceptance_criteria": [
+                "Созданы таблицы: users, user_profiles, question_sessions, user_progress, subscriptions, reminder_settings",
+                "Все таблицы имеют корректные типы и constraints согласно PRD",
+                "Созданы индексы для производительности",
+                "SQL миграции сохранены в src/bot/infrastructure/database/migrations/"
+            ],
+            "test_steps": [
+                "Выполнить SQL миграции в Supabase Dashboard",
+                "Проверить: SELECT * FROM users LIMIT 1; (должно работать без ошибок)",
+                "Проверить наличие индексов: SELECT indexname FROM pg_indexes WHERE schemaname = 'public'",
+                "Попробовать вставить тестовую запись в users"
+            ],
+            "dependencies": [
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-005",
+            "category": "infrastructure",
+            "priority": "high",
+            "description": "Базовый каркас aiogram бота с long-polling",
+            "acceptance_criteria": [
+                "Создан src/bot/__main__.py как точка входа",
+                "Создан src/bot/app.py с фабрикой бота",
+                "Бот запускается в long-polling режиме",
+                "Настроен базовый Dispatcher с роутерами"
+            ],
+            "test_steps": [
+                "Запустить: uv run python -m bot",
+                "Отправить /start боту в Telegram",
+                "Бот должен получить обновление (можно проверить через логи)",
+                "Остановить бота через Ctrl+C — должен завершиться gracefully"
+            ],
+            "dependencies": [
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-006",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Доменные модели: User, UserProfile, Progress",
+            "acceptance_criteria": [
+                "Созданы Pydantic модели в src/bot/domain/entities/",
+                "User: id, telegram_id, username, first_name, timezone, created_at",
+                "UserProfile: specialty, grade, tech_stack, focus_areas, current_difficulty",
+                "Progress: current_streak, longest_streak, total_questions, questions_today",
+                "Созданы Enums для Grade, Specialty, Category"
+            ],
+            "test_steps": [
+                "Запустить: uv run python -c 'from bot.domain.entities.user import User; u = User(telegram_id=123); print(u)'",
+                "Проверить валидацию: Grade.JUNIOR, Grade.MIDDLE, Grade.SENIOR",
+                "Проверить сериализацию в JSON: user.model_dump_json()"
+            ],
+            "dependencies": [
+                "TASK-001"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-007",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Repository для пользователей",
+            "acceptance_criteria": [
+                "Создан src/bot/repositories/user_repository.py",
+                "Методы: get_by_telegram_id(), create(), update()",
+                "Возвращает доменные модели, не сырые dict",
+                "Обработка ошибок Supabase"
+            ],
+            "test_steps": [
+                "Написать тест: создать пользователя через create()",
+                "Получить его через get_by_telegram_id()",
+                "Сравнить данные — должны совпадать",
+                "Удалить тестового пользователя через Supabase Dashboard"
+            ],
+            "dependencies": [
+                "TASK-004",
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-008",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Repository для профилей пользователей",
+            "acceptance_criteria": [
+                "Создан src/bot/repositories/profile_repository.py",
+                "Методы: get_by_user_id(), create(), update_difficulty()",
+                "Связь с user через user_id",
+                "Поддержка массивов tech_stack и focus_areas"
+            ],
+            "test_steps": [
+                "Создать профиль для существующего пользователя",
+                "Получить профиль и проверить tech_stack как список",
+                "Обновить difficulty и проверить изменение"
+            ],
+            "dependencies": [
+                "TASK-007"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-009",
+            "category": "ui",
+            "priority": "critical",
+            "description": "Обработчик команды /start с приветствием",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/start.py",
+                "При /start новый пользователь видит приветственное сообщение",
+                "Существующий пользователь видит приветствие с его именем",
+                "Создаётся запись в БД для нового пользователя"
+            ],
+            "test_steps": [
+                "Отправить /start от нового Telegram аккаунта",
+                "Проверить приветственное сообщение",
+                "Проверить запись в таблице users в Supabase",
+                "Отправить /start повторно — бот должен узнать пользователя"
+            ],
+            "dependencies": [
+                "TASK-005",
+                "TASK-007"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-010",
+            "category": "ui",
+            "priority": "critical",
+            "description": "FSM состояния для онбординга",
+            "acceptance_criteria": [
+                "Создан src/bot/states/onboarding.py с StatesGroup",
+                "Состояния: waiting_specialty, waiting_grade, waiting_tech_stack, waiting_focus_areas",
+                "Состояния корректно переключаются через FSMContext"
+            ],
+            "test_steps": [
+                "Импортировать: from bot.states.onboarding import OnboardingStates",
+                "Проверить: OnboardingStates.waiting_grade.state содержит корректное имя",
+                "Проверить наследование от StatesGroup"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-011",
+            "category": "ui",
+            "priority": "critical",
+            "description": "Клавиатуры для онбординга",
+            "acceptance_criteria": [
+                "Создан src/bot/keyboards/onboarding.py",
+                "Inline-клавиатура для выбора специальности (только Backend в MVP)",
+                "Inline-клавиатура для выбора грейда (Junior/Middle/Senior)",
+                "Inline-клавиатура для выбора tech_stack (мультивыбор)",
+                "CallbackData фабрики для типобезопасной обработки"
+            ],
+            "test_steps": [
+                "Импортировать клавиатуры и создать каждую",
+                "Проверить, что кнопки содержат корректный callback_data",
+                "Проверить количество кнопок: грейд должен иметь 3 кнопки"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-012",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Обработчик онбординга: выбор специальности и грейда",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/onboarding.py",
+                "После /start показывается выбор специальности",
+                "После выбора специальности — выбор грейда",
+                "Данные сохраняются в FSMContext между шагами"
+            ],
+            "test_steps": [
+                "Отправить /start",
+                "Нажать кнопку Backend",
+                "Убедиться, что появилась клавиатура выбора грейда",
+                "Нажать Junior — убедиться в переходе к следующему шагу"
+            ],
+            "dependencies": [
+                "TASK-009",
+                "TASK-010",
+                "TASK-011"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-013",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Обработчик онбординга: выбор tech_stack",
+            "acceptance_criteria": [
+                "Мультивыбор технологий: Python, Java, Go, Node.js, etc.",
+                "Кнопка 'Готово' для завершения выбора",
+                "Выбранные технологии отмечаются визуально",
+                "Минимум 1 технология должна быть выбрана"
+            ],
+            "test_steps": [
+                "Дойти до этапа выбора tech_stack",
+                "Выбрать Python — кнопка должна измениться (добавить галочку)",
+                "Выбрать ещё Go",
+                "Нажать 'Готово' — перейти к следующему шагу"
+            ],
+            "dependencies": [
+                "TASK-012"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-014",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Обработчик онбординга: выбор focus_areas и сохранение профиля",
+            "acceptance_criteria": [
+                "Мультивыбор областей: Алгоритмы, БД, System Design, API Design, etc.",
+                "После завершения — создаётся UserProfile в БД",
+                "FSM очищается после успешного онбординга",
+                "Пользователь видит подтверждение с сводкой профиля"
+            ],
+            "test_steps": [
+                "Дойти до этапа выбора focus_areas",
+                "Выбрать 2-3 области и нажать 'Готово'",
+                "Проверить сообщение подтверждения",
+                "Проверить запись в user_profiles в Supabase"
+            ],
+            "dependencies": [
+                "TASK-008",
+                "TASK-013"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-015",
+            "category": "integration",
+            "priority": "critical",
+            "description": "Интеграция с OpenAI: базовый клиент",
+            "acceptance_criteria": [
+                "Создан src/bot/infrastructure/openai/client.py",
+                "Async клиент с конфигурацией из Settings",
+                "Retry logic с exponential backoff",
+                "Таймаут и обработка ошибок API"
+            ],
+            "test_steps": [
+                "Добавить OPENAI_API_KEY в .env",
+                "Запустить простой запрос к API через клиент",
+                "Проверить, что retry работает: временно отключить интернет и проверить логи",
+                "Проверить таймаут: установить 1ms и поймать исключение"
+            ],
+            "dependencies": [
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-016",
+            "category": "integration",
+            "priority": "critical",
+            "description": "Сервис генерации вопросов через OpenAI",
+            "acceptance_criteria": [
+                "Создан src/bot/services/question_service.py",
+                "Метод generate_question(profile: UserProfile) -> Question",
+                "Промпт использует grade, tech_stack, focus_areas, difficulty",
+                "Вопрос парсится в доменную модель Question"
+            ],
+            "test_steps": [
+                "Создать тестовый UserProfile",
+                "Вызвать generate_question()",
+                "Проверить, что вопрос релевантен профилю",
+                "Проверить структуру: category, difficulty, text"
+            ],
+            "dependencies": [
+                "TASK-006",
+                "TASK-015"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-017",
+            "category": "integration",
+            "priority": "critical",
+            "description": "Сервис оценки ответов через OpenAI",
+            "acceptance_criteria": [
+                "Создан src/bot/services/evaluation_service.py",
+                "Метод evaluate_answer(question, answer, grade) -> Evaluation",
+                "Evaluation содержит: score (1-10), strengths, improvements, reference_answer",
+                "Ответ парсится из JSON-формата OpenAI"
+            ],
+            "test_steps": [
+                "Взять тестовый вопрос и написать ответ",
+                "Вызвать evaluate_answer()",
+                "Проверить, что score в диапазоне 1-10",
+                "Проверить наличие всех полей в Evaluation"
+            ],
+            "dependencies": [
+                "TASK-015"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-018",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Доменная модель Question и QuestionSession",
+            "acceptance_criteria": [
+                "Question: id, text, category, difficulty",
+                "QuestionSession: question, user_answer, ai_score, ai_feedback, reference_answer, created_at",
+                "Enum Category: language, algorithms, databases, api_design, system_design, etc."
+            ],
+            "test_steps": [
+                "Создать Question с валидными данными",
+                "Создать QuestionSession с ссылкой на Question",
+                "Проверить сериализацию обеих моделей"
+            ],
+            "dependencies": [
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-019",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Repository для сессий вопросов",
+            "acceptance_criteria": [
+                "Создан src/bot/repositories/session_repository.py",
+                "Методы: create(), get_last_n_by_user(user_id, n), get_today_count(user_id)",
+                "Возвращает QuestionSession модели"
+            ],
+            "test_steps": [
+                "Создать сессию через create()",
+                "Получить через get_last_n_by_user()",
+                "Проверить get_today_count() — должен вернуть 1"
+            ],
+            "dependencies": [
+                "TASK-004",
+                "TASK-018"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-020",
+            "category": "ui",
+            "priority": "critical",
+            "description": "Обработчик команды /practice — начало сессии",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/practice.py",
+                "Команда /practice генерирует вопрос и отправляет его",
+                "Формат сообщения: категория, сложность, текст вопроса",
+                "Проверка наличия профиля — если нет, направить на онбординг"
+            ],
+            "test_steps": [
+                "Завершить онбординг",
+                "Отправить /practice",
+                "Получить вопрос с указанием категории и сложности",
+                "Отправить /practice без профиля — получить сообщение о необходимости онбординга"
+            ],
+            "dependencies": [
+                "TASK-014",
+                "TASK-016"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-021",
+            "category": "functional",
+            "priority": "critical",
+            "description": "FSM состояния для практики",
+            "acceptance_criteria": [
+                "Создан src/bot/states/practice.py",
+                "Состояния: waiting_answer, processing_answer",
+                "Корректный переход между состояниями"
+            ],
+            "test_steps": [
+                "Проверить импорт состояний",
+                "Убедиться в корректных именах состояний"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-022",
+            "category": "ui",
+            "priority": "critical",
+            "description": "Обработка текстового ответа пользователя",
+            "acceptance_criteria": [
+                "После получения вопроса бот ожидает ответ",
+                "Текстовый ответ отправляется на оценку",
+                "Во время обработки показывается typing action",
+                "После оценки — вывод фидбэка"
+            ],
+            "test_steps": [
+                "Получить вопрос через /practice",
+                "Написать текстовый ответ",
+                "Увидеть индикатор печати",
+                "Получить фидбэк с оценкой, сильными сторонами, улучшениями"
+            ],
+            "dependencies": [
+                "TASK-017",
+                "TASK-020",
+                "TASK-021"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-023",
+            "category": "ui",
+            "priority": "critical",
+            "description": "Форматирование и отправка фидбэка",
+            "acceptance_criteria": [
+                "Создан форматтер для Evaluation → текст сообщения",
+                "Формат: оценка, сильные стороны (буллеты), что улучшить (буллеты), эталонный ответ",
+                "Добавлен streak и прогресс дня в конце",
+                "Кнопка 'Следующий вопрос'"
+            ],
+            "test_steps": [
+                "Ответить на вопрос",
+                "Проверить форматирование фидбэка",
+                "Убедиться в наличии всех секций",
+                "Нажать 'Следующий вопрос' — получить новый вопрос"
+            ],
+            "dependencies": [
+                "TASK-022"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-024",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Сохранение сессии вопроса в БД",
+            "acceptance_criteria": [
+                "После каждого ответа создаётся запись в question_sessions",
+                "Сохраняются: вопрос, ответ, тип ответа, оценка, фидбэк",
+                "Время ответа (response_time_ms) вычисляется и сохраняется"
+            ],
+            "test_steps": [
+                "Ответить на 2-3 вопроса",
+                "Проверить записи в question_sessions в Supabase",
+                "Убедиться, что все поля заполнены корректно"
+            ],
+            "dependencies": [
+                "TASK-019",
+                "TASK-022"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-025",
+            "category": "integration",
+            "priority": "high",
+            "description": "Интеграция Whisper API для транскрипции",
+            "acceptance_criteria": [
+                "Создан src/bot/services/transcription_service.py",
+                "Метод transcribe(audio_file) -> str",
+                "Поддержка русского и английского языков",
+                "Обработка ошибок транскрипции"
+            ],
+            "test_steps": [
+                "Подготовить тестовый аудиофайл",
+                "Вызвать transcribe()",
+                "Проверить корректность транскрипции",
+                "Проверить обработку повреждённого файла"
+            ],
+            "dependencies": [
+                "TASK-015"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-026",
+            "category": "ui",
+            "priority": "high",
+            "description": "Обработка голосовых сообщений",
+            "acceptance_criteria": [
+                "Бот принимает голосовые сообщения вместо текста",
+                "Аудио скачивается и передаётся в Whisper",
+                "Транскрипция используется для оценки",
+                "Аудио удаляется после обработки"
+            ],
+            "test_steps": [
+                "Получить вопрос",
+                "Отправить голосовое сообщение (до 1 минуты)",
+                "Получить фидбэк как при текстовом ответе",
+                "Проверить, что временный файл удалён"
+            ],
+            "dependencies": [
+                "TASK-022",
+                "TASK-025"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-027",
+            "category": "functional",
+            "priority": "high",
+            "description": "Repository для прогресса пользователя",
+            "acceptance_criteria": [
+                "Создан src/bot/repositories/progress_repository.py",
+                "Методы: get_by_user_id(), create(), update_streak(), increment_questions_today()",
+                "Логика сброса questions_today в новый день"
+            ],
+            "test_steps": [
+                "Создать прогресс для пользователя",
+                "Вызвать increment_questions_today() 3 раза",
+                "Проверить questions_today == 3",
+                "Проверить сброс при смене дня (мок времени)"
+            ],
+            "dependencies": [
+                "TASK-004",
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-028",
+            "category": "functional",
+            "priority": "high",
+            "description": "Сервис прогресса и streak",
+            "acceptance_criteria": [
+                "Создан src/bot/services/progress_service.py",
+                "Методы: record_answer(), check_daily_goal(), update_streak()",
+                "Streak увеличивается при достижении дневной нормы (5 вопросов)",
+                "Streak сбрасывается при пропуске дня",
+                "Учёт timezone пользователя"
+            ],
+            "test_steps": [
+                "Ответить на 5 вопросов за день",
+                "Проверить, что streak увеличился на 1",
+                "Симулировать пропуск дня (мок времени)",
+                "Проверить сброс streak"
+            ],
+            "dependencies": [
+                "TASK-027"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-029",
+            "category": "functional",
+            "priority": "high",
+            "description": "Адаптивная система сложности",
+            "acceptance_criteria": [
+                "Создан алгоритм в question_service или отдельно",
+                "Анализ последних 5 ответов (performance_window)",
+                "Если среднее >= 8: сложность +1",
+                "Если среднее <= 4: сложность -1",
+                "Сложность ограничена грейдом: Junior [1-4], Middle [3-7], Senior [5-10]"
+            ],
+            "test_steps": [
+                "Ответить на 5 вопросов с оценками 9, 9, 8, 9, 8",
+                "Проверить увеличение сложности",
+                "Ответить на 5 вопросов с оценками 3, 2, 4, 3, 2",
+                "Проверить уменьшение сложности",
+                "Проверить, что Junior не может превысить сложность 4"
+            ],
+            "dependencies": [
+                "TASK-019",
+                "TASK-028"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-030",
+            "category": "ui",
+            "priority": "high",
+            "description": "Команда /stats — статистика пользователя",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/stats.py",
+                "Показывает: текущий streak, longest_streak, всего вопросов, вопросов сегодня",
+                "Показывает текущую сложность и грейд",
+                "Среднюю оценку за последние N вопросов"
+            ],
+            "test_steps": [
+                "Ответить на несколько вопросов",
+                "Отправить /stats",
+                "Проверить корректность всех показателей",
+                "Сравнить с данными в БД"
+            ],
+            "dependencies": [
+                "TASK-027",
+                "TASK-019"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-031",
+            "category": "ui",
+            "priority": "medium",
+            "description": "Команда /settings — настройки пользователя",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/settings.py",
+                "Возможность изменить грейд",
+                "Возможность изменить tech_stack",
+                "Возможность изменить focus_areas",
+                "Настройки напоминаний (вкл/выкл)"
+            ],
+            "test_steps": [
+                "Отправить /settings",
+                "Изменить грейд с Junior на Middle",
+                "Проверить изменение в БД",
+                "Проверить, что следующие вопросы соответствуют новому грейду"
+            ],
+            "dependencies": [
+                "TASK-008",
+                "TASK-014"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-032",
+            "category": "functional",
+            "priority": "medium",
+            "description": "Repository для напоминаний",
+            "acceptance_criteria": [
+                "Создан src/bot/repositories/reminder_repository.py",
+                "Методы: get_by_user_id(), update_settings(), get_users_for_reminder(time)",
+                "Хранение времени напоминаний как массив TIME[]"
+            ],
+            "test_steps": [
+                "Создать настройки напоминаний",
+                "Обновить время напоминаний",
+                "Получить список пользователей для напоминания в 10:00"
+            ],
+            "dependencies": [
+                "TASK-004"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-033",
+            "category": "functional",
+            "priority": "medium",
+            "description": "Scheduler для напоминаний",
+            "acceptance_criteria": [
+                "Создан src/bot/scheduler/jobs.py",
+                "APScheduler интегрирован с ботом",
+                "Job check_and_send_reminders() запускается каждую минуту",
+                "Напоминания отправляются по локальному времени пользователя"
+            ],
+            "test_steps": [
+                "Настроить напоминание на ближайшую минуту",
+                "Дождаться отправки напоминания",
+                "Проверить, что после выполнения нормы напоминания не приходят"
+            ],
+            "dependencies": [
+                "TASK-032",
+                "TASK-028"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-034",
+            "category": "ui",
+            "priority": "medium",
+            "description": "Сообщения напоминаний",
+            "acceptance_criteria": [
+                "Текст напоминания мотивирующий",
+                "Показывает сколько вопросов осталось до нормы",
+                "Кнопка 'Продолжить практику' → /practice",
+                "Максимум 3 напоминания в день"
+            ],
+            "test_steps": [
+                "Получить напоминание",
+                "Проверить текст и наличие кнопки",
+                "Нажать кнопку — получить вопрос",
+                "Убедиться, что после 3 напоминаний больше не приходит"
+            ],
+            "dependencies": [
+                "TASK-033"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-035",
+            "category": "ui",
+            "priority": "medium",
+            "description": "Milestone celebrations для streak",
+            "acceptance_criteria": [
+                "При достижении 7 дней — специальное сообщение",
+                "При достижении 30 дней — специальное сообщение",
+                "При достижении 100 дней — специальное сообщение",
+                "Сообщения с эмодзи и поздравлениями"
+            ],
+            "test_steps": [
+                "Симулировать streak = 7 (мок в БД)",
+                "Ответить на вопрос для триггера",
+                "Получить поздравление с milestone"
+            ],
+            "dependencies": [
+                "TASK-028"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-036",
+            "category": "functional",
+            "priority": "high",
+            "description": "Доменная модель Subscription",
+            "acceptance_criteria": [
+                "Subscription: id, user_id, plan_type, stars_paid, starts_at, expires_at, is_active",
+                "Enum PlanType: week, month, three_months",
+                "Метод is_expired() → bool"
+            ],
+            "test_steps": [
+                "Создать Subscription с разными планами",
+                "Проверить is_expired() для истекшей подписки",
+                "Проверить is_expired() для активной подписки"
+            ],
+            "dependencies": [
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-037",
+            "category": "functional",
+            "priority": "high",
+            "description": "Repository для подписок",
+            "acceptance_criteria": [
+                "Создан src/bot/repositories/subscription_repository.py",
+                "Методы: get_active_by_user_id(), create(), deactivate()",
+                "Корректная проверка expires_at"
+            ],
+            "test_steps": [
+                "Создать подписку",
+                "Получить через get_active_by_user_id()",
+                "Деактивировать и проверить, что не возвращается"
+            ],
+            "dependencies": [
+                "TASK-004",
+                "TASK-036"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-038",
+            "category": "functional",
+            "priority": "high",
+            "description": "Сервис подписок",
+            "acceptance_criteria": [
+                "Создан src/bot/services/subscription_service.py",
+                "Методы: check_access(), activate_subscription(), has_free_questions_today()",
+                "Лимит бесплатных вопросов: 5 в день",
+                "Подписчики имеют безлимит"
+            ],
+            "test_steps": [
+                "Проверить has_free_questions_today() при 0 вопросов → True",
+                "Проверить при 5 вопросах → False",
+                "Проверить check_access() для подписчика → всегда True"
+            ],
+            "dependencies": [
+                "TASK-037",
+                "TASK-027"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-039",
+            "category": "integration",
+            "priority": "high",
+            "description": "Интеграция Telegram Payments (Stars)",
+            "acceptance_criteria": [
+                "Создан src/bot/infrastructure/telegram/payments.py",
+                "Функция create_invoice() для создания счёта",
+                "Обработчик pre_checkout_query",
+                "Обработчик successful_payment"
+            ],
+            "test_steps": [
+                "Создать тестовый invoice",
+                "Проверить формат LabeledPrice",
+                "Симулировать successful_payment webhook (тестовый режим)"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-040",
+            "category": "ui",
+            "priority": "high",
+            "description": "Обработчик команды /subscribe",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/subscription.py",
+                "Показывает планы подписки с ценами",
+                "Кнопки для каждого плана (неделя, месяц, 3 месяца)",
+                "При нажатии — отправляется invoice"
+            ],
+            "test_steps": [
+                "Отправить /subscribe",
+                "Увидеть 3 варианта подписки",
+                "Нажать на план — получить invoice от Telegram",
+                "Проверить корректность суммы в Stars"
+            ],
+            "dependencies": [
+                "TASK-039"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-041",
+            "category": "functional",
+            "priority": "high",
+            "description": "Активация подписки после оплаты",
+            "acceptance_criteria": [
+                "При successful_payment создаётся Subscription в БД",
+                "telegram_payment_charge_id сохраняется для refund",
+                "Пользователь получает подтверждение",
+                "Подписка активна сразу после оплаты"
+            ],
+            "test_steps": [
+                "Симулировать successful_payment",
+                "Проверить запись в subscriptions",
+                "Проверить, что check_access() возвращает True",
+                "Отправить /subscribe снова — показать статус подписки"
+            ],
+            "dependencies": [
+                "TASK-038",
+                "TASK-040"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-042",
+            "category": "ui",
+            "priority": "high",
+            "description": "Paywall при исчерпании лимита",
+            "acceptance_criteria": [
+                "После 5 бесплатных вопросов — сообщение о лимите",
+                "Предложение оформить подписку",
+                "Кнопка 'Оформить подписку' → /subscribe",
+                "Показ streak и прогресса для мотивации"
+            ],
+            "test_steps": [
+                "Ответить на 5 вопросов",
+                "Отправить /practice",
+                "Получить сообщение о лимите",
+                "Нажать кнопку — перейти к подписке"
+            ],
+            "dependencies": [
+                "TASK-038",
+                "TASK-020"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-043",
+            "category": "security",
+            "priority": "high",
+            "description": "Middleware аутентификации пользователя",
+            "acceptance_criteria": [
+                "Создан src/bot/middlewares/auth.py",
+                "При каждом сообщении проверяется/создаётся пользователь в БД",
+                "User объект добавляется в data для handlers"
+            ],
+            "test_steps": [
+                "Отправить сообщение от нового пользователя",
+                "Проверить создание записи в users",
+                "Проверить, что handler получает user в data"
+            ],
+            "dependencies": [
+                "TASK-007",
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-044",
+            "category": "security",
+            "priority": "high",
+            "description": "Middleware проверки подписки",
+            "acceptance_criteria": [
+                "Создан src/bot/middlewares/subscription.py",
+                "Проверка лимита перед обработкой /practice",
+                "При превышении — блокировка и paywall"
+            ],
+            "test_steps": [
+                "Исчерпать бесплатный лимит",
+                "Отправить /practice",
+                "Проверить, что middleware блокирует и показывает paywall"
+            ],
+            "dependencies": [
+                "TASK-038",
+                "TASK-043"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-045",
+            "category": "security",
+            "priority": "medium",
+            "description": "Rate limiting middleware",
+            "acceptance_criteria": [
+                "Создан src/bot/middlewares/rate_limit.py",
+                "Максимум 60 запросов в минуту на пользователя",
+                "При превышении — вежливое сообщение",
+                "Счётчик сбрасывается через минуту"
+            ],
+            "test_steps": [
+                "Отправить 60 сообщений за минуту",
+                "61-е сообщение должно быть заблокировано",
+                "Подождать минуту — снова можно отправлять"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-046",
+            "category": "security",
+            "priority": "medium",
+            "description": "Валидация и санитизация входных данных",
+            "acceptance_criteria": [
+                "Все callback_data валидируются",
+                "Текстовые ответы очищаются от потенциально опасного контента",
+                "Длина ответа ограничена (например, 10000 символов)"
+            ],
+            "test_steps": [
+                "Отправить очень длинный ответ (>10000 символов)",
+                "Проверить обрезку или сообщение об ошибке",
+                "Отправить callback с невалидным форматом — обработка ошибки"
+            ],
+            "dependencies": [
+                "TASK-022"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-047",
+            "category": "infrastructure",
+            "priority": "medium",
+            "description": "Логирование запросов и ошибок",
+            "acceptance_criteria": [
+                "Создан src/bot/core/logging.py",
+                "Настроен структурированный logging",
+                "Все API вызовы логируются",
+                "Ошибки логируются с traceback"
+            ],
+            "test_steps": [
+                "Запустить бота",
+                "Выполнить несколько действий",
+                "Проверить логи — должны быть читаемыми",
+                "Симулировать ошибку — проверить traceback в логах"
+            ],
+            "dependencies": [
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-048",
+            "category": "ui",
+            "priority": "low",
+            "description": "Обработчик команды /help",
+            "acceptance_criteria": [
+                "Создан src/bot/handlers/help.py",
+                "Список всех команд с описаниями",
+                "Краткое объяснение работы бота",
+                "Ссылка на поддержку (если есть)"
+            ],
+            "test_steps": [
+                "Отправить /help",
+                "Получить список команд",
+                "Проверить корректность описаний"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-049",
+            "category": "infrastructure",
+            "priority": "medium",
+            "description": "Dockerfile для деплоя",
+            "acceptance_criteria": [
+                "Создан docker/Dockerfile согласно PRD",
+                "Multi-stage build для оптимизации размера",
+                "uv используется для установки зависимостей",
+                "Бот запускается корректно в контейнере"
+            ],
+            "test_steps": [
+                "docker build -t interview-bot .",
+                "docker run --env-file .env interview-bot",
+                "Проверить работу бота в контейнере"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-050",
+            "category": "infrastructure",
+            "priority": "low",
+            "description": "CI/CD через GitHub Actions для Coolify",
+            "acceptance_criteria": [
+                "Создан .github/workflows/deploy.yml",
+                "При push в main — автодеплой",
+                "Запуск тестов перед деплоем",
+                "Уведомление о статусе деплоя"
+            ],
+            "test_steps": [
+                "Push в main branch",
+                "Проверить запуск workflow",
+                "Проверить деплой на Coolify"
+            ],
+            "dependencies": [
+                "TASK-049"
+            ],
+            "status": "pending"
+        }
+    ]
+}

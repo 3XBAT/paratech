@@ -1,0 +1,7 @@
+# The code repository is nested and versioned/pushed separately.
+/paratech/
+# Old PRD drafts kept outside the workspace history
+/prd/
+/promts/
+.DS_Store
+.claude/settings.local.json

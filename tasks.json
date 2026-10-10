@@ -1,0 +1,1203 @@
+{
+    "project": {
+        "name": "Learning Assistant",
+        "version": "1.0",
+        "prd_source": "docs/prd/learning-assistant-prd-v0.4.md",
+        "created_at": "2026-10-10"
+    },
+    "agent_instructions": {
+        "before_start": [
+            "Прочитай этот файл, progress.txt, CLAUDE.md, docs/architecture.md и git log --oneline -20 (git log кода: git -C paratech log --oneline -20)",
+            "Выбери ОДНУ задачу со статусом pending и наивысшим приоритетом",
+            "Проверь, что все dependencies этой задачи имеют статус done"
+        ],
+        "during_work": [
+            "Работай только над выбранной задачей",
+            "Делай коммиты после каждого логического изменения",
+            "Не трогай код, не связанный с текущей задачей",
+            "Код пиши в каталоге paratech/ строго по docs/architecture.md: пути пакетов в задачах ориентировочные, архитектура главнее. Go-, npm- и buf-команды из test_steps выполняй из каталога paratech/; docs/, tasks.json и progress.txt лежат в корне рабочей области",
+            "Организационные файлы (docs, промпты, определения агентов) никогда не кладутся в paratech/"
+        ],
+        "before_finish": [
+            "Выполни ВСЕ test_steps из задачи; архитектурный тест (tests/arch_test.go) и go vet должны проходить",
+            "Меняй status на done ТОЛЬКО после успешного прохождения всех тестов",
+            "Если задачу нельзя завершить автономно (нужна проверка человеком на Windows, нужное решение пользователя, внешний доступ) — поставь status blocked и опиши причину в progress.txt",
+            "Напиши summary в progress.txt",
+            "ЗАПРЕЩЕНО удалять или редактировать задачи — только менять status"
+        ]
+    },
+    "tasks": [
+        {
+            "id": "TASK-001",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "[Инфра] Инструменты репозитория: golangci-lint, buf в shared/, рабочий CI, документированные dev-команды",
+            "acceptance_criteria": [
+                "Добавлен .golangci.yml с небольшим набором линтеров; golangci-lint run ./... проходит на текущем скелете",
+                "В shared/ добавлены buf.yaml и buf.gen.yaml (генерация Go + Connect-RPC), buf lint проходит на placeholder-proto",
+                "CI запускает vet и test для desktop, hub, shared; Windows-job дополнительно выполняет GOOS=windows go vet",
+                "README содержит точные команды установки для Windows и macOS"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить golangci-lint run ./...",
+                "Шаг 2: выполнить (cd shared && buf lint && buf generate)",
+                "Шаг 3: выполнить go build ./desktop/... ./hub/... ./shared/... и GOOS=windows go vet ./desktop/...",
+                "Шаг 4: проверить, что .github/workflows/ci.yml синтаксически корректен (python3 -c 'import yaml;yaml.safe_load(open(\".github/workflows/ci.yml\"))')"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-002",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "[Инфра] Каркас архитектуры и автоматические проверки: структура desktop/hub по docs/architecture.md, depguard, tests/arch_test.go",
+            "acceptance_criteria": [
+                "В desktop и hub созданы каталоги по разделу 2 docs/architecture.md: cmd/<binary>, config, internal/{domain,cases,adapters,input,app,metrics}, testenv, tests; в каждом слое doc.go с назначением и ссылкой на правила; пример-шаблон контекста domain/<context>/ с doc.go и глоссарием",
+                "Минимальные internal/app (New/Run/Close), config и cmd/desktop, cmd/hub: пустые приложения собираются и запускаются (ARCH-50…53)",
+                ".golangci.yml содержит depguard-правила по матрице импортов из раздела 9 для каждого слоя",
+                "tests/arch_test.go в каждом модуле проверяет: матрицу импортов, отсутствие time.Now и math/rand в domain и cases, отсутствие import \"C\" в desktop, отсутствие организационных файлов (docs, tasks, prompts) в репозитории кода; тест имеет негативную проверку на искусственном нарушении",
+                "В docs/adr добавлен ADR с картой начальных контекстов (по разделу 12 docs/architecture.md)"
+            ],
+            "test_steps": [
+                "Шаг 1: из каталога paratech выполнить go test -race -count=1 ./desktop/tests/... ./hub/tests/...",
+                "Шаг 2: временно добавить в desktop/internal/domain/<любой пакет> импорт пакета из adapters, убедиться, что arch_test и golangci-lint падают, затем откатить правку",
+                "Шаг 3: выполнить golangci-lint run ./... и GOOS=windows go vet ./desktop/...",
+                "Шаг 4: выполнить go run ./desktop/cmd/desktop --help и go run ./hub/cmd/hub --help (должны завершаться без паники)"
+            ],
+            "dependencies": [
+                "TASK-001"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-003",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "[Инфра] Контракты ядра: порты use cases и черновик SQL-схемы",
+            "acceptance_criteria": [
+                "Порты (интерфейсы без реализации) объявлены в ports.go соответствующих use cases desktop/internal/cases/<usecase>/ по ARCH-21: репозитории агрегатов, Clock, Recorder, STTEngine, PowerMonitor, CredentialStore, ArtifactStore, CalendarAdapter, EmailAdapter, LLMClient, Tx; через порты проходят только типы домена и примитивы (ARCH-26)",
+                "Типизированные идентификаторы между контекстами в domain/shared",
+                "Черновик SQL-схемы в docs/contracts/schema.sql: jobs (все состояния из PRD §7.2 включая WAITING_FOR_POWER), recordings, transcripts, assignments, schedule_entries, stt_models, deliveries, settings; секретов в схеме нет",
+                "Каждый порт снабжен doc-комментарием со ссылкой на раздел PRD; реализаций нет"
+            ],
+            "test_steps": [
+                "Шаг 1: из каталога paratech выполнить go build ./desktop/...",
+                "Шаг 2: выполнить go vet ./desktop/... и GOOS=windows go vet ./desktop/...",
+                "Шаг 3: выполнить go test ./desktop/tests/... (архитектурный тест проходит)",
+                "Шаг 4: сверить список состояний в docs/contracts/schema.sql с PRD §6.2 и §7.2 (grep по названиям состояний)"
+            ],
+            "dependencies": [
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-004",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "[Hub] Протобуф-контракт клиент↔Hub (Connect-RPC): LLM-запрос, квоты, ключ идемпотентности",
+            "acceptance_criteria": [
+                "shared/proto/hub/v1/*.proto: сервис Gateway (Complete/CompleteStream для LLM-запроса с idempotency_key, operation_type, model_alias) и сервис Quota (Reserve, Settle, Release, GetRemaining)",
+                "Типизированные коды ошибок: QUOTA_EXCEEDED, RATE_LIMITED, INVALID_API_KEY, PROVIDER_ERROR",
+                "Сгенерированный Go-код закоммичен в shared/gen и собирается",
+                "buf lint проходит; настроен buf breaking"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd shared && buf lint && buf generate)",
+                "Шаг 2: выполнить go build ./shared/... ./hub/... ./desktop/...",
+                "Шаг 3: выполнить (cd shared && buf breaking --against '.git#branch=HEAD~1' || true) и убедиться, что команда запускается",
+                "Шаг 4: проверить, что в сообщениях нет полей для произвольных URL, задаваемых клиентом"
+            ],
+            "dependencies": [
+                "TASK-001"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-005",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "[Хранилище] SQLite: подключение через modernc.org/sqlite, миграции goose, запросы через sqlc",
+            "acceptance_criteria": [
+                "Адаптер desktop/internal/adapters/sqlite: открытие БД (WAL, foreign keys, busy timeout), миграции goose в adapters/sqlite/migrations по docs/contracts/schema.sql; реализация порта Tx (ARCH-23)",
+                "sqlc сконфигурирован, сгенерированный код закоммичен",
+                "Сборка desktop без CGO: CGO_ENABLED=0 go build ./desktop/...",
+                "Тест применения миграций на пустой БД и повторного запуска (идемпотентность)"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить CGO_ENABLED=0 go build ./desktop/...",
+                "Шаг 2: выполнить go test -race ./desktop/internal/adapters/sqlite/...",
+                "Шаг 3: проверить, что зависимости не требуют CGO (go list -deps ./desktop/internal/adapters/sqlite | grep -i sqlite)",
+                "Шаг 4: выполнить GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-006",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[Хранилище] Файловое хранилище артефактов: порт ArtifactStore и адаптер filestore, атомарные записи, удаление",
+            "acceptance_criteria": [
+                "Порт ArtifactStore (в use cases) и адаптер desktop/internal/adapters/filestore: приватный каталог данных приложения, структура каталогов (recordings, transcripts, models, exports), атомарная запись файла (temp+rename)",
+                "Любой доступ use cases и домена к файлам идет только через порт ArtifactStore, путь нормализуется и не может выйти за корень данных (защита от path traversal)",
+                "Семантика удаления: удаление записи удаляет связанные транскрипты и производные артефакты и очищает метаданные в БД (PRD §13.1)",
+                "Покрытие тестами: атомарность при сбое посреди записи, path traversal, удаление"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race ./desktop/internal/adapters/filestore/...",
+                "Шаг 2: в тесте попытаться записать файл с путем '../x' и убедиться в ошибке",
+                "Шаг 3: смоделировать сбой между temp-записью и rename и проверить, что целевой файл не поврежден",
+                "Шаг 4: выполнить GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-007",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[Хранилище] Настройки приложения: автопредложение записи, обработка только от розетки, уведомления",
+            "acceptance_criteria": [
+                "Репозиторий настроек поверх Storage Manager с типизированными значениями и дефолтами: recording_prompts_enabled=true, process_only_on_ac_power=true, notify_on_processing_complete=true",
+                "Чтение и запись настроек атомарны и сохраняются между запусками",
+                "Покрытие AC-02 и AC-22 на уровне хранилища настроек"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race ./desktop/internal/...",
+                "Шаг 2: в тесте записать настройку, пересоздать менеджер и проверить сохранение значения",
+                "Шаг 3: проверить дефолты на пустой БД"
+            ],
+            "dependencies": [
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-008",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[Задачи] Persistent Job Store: очередь в SQLite, claim, переходы состояний, идемпотентность",
+            "acceptance_criteria": [
+                "Агрегат Job в domain/jobs/job: статусы и допустимые переходы по PRD §7.2 заданы таблицей, фабрики New/Restore, недопустимый переход — доменная ошибка (ARCH-14, ARCH-19); порт JobRepository в use case и реализация в adapters/sqlite: Enqueue, Claim (атомарно, без двойного захвата двумя воркерами), Complete, Fail, Cancel",
+                "Состояния: QUEUED, RUNNING, COMPLETED, RETRY_WAIT, CANCELLED, FAILED, WAITING_FOR_NETWORK, WAITING_FOR_QUOTA, WAITING_FOR_POWER",
+                "Идемпотентный Enqueue по ключу: повторная постановка эквивалентной задачи не создает дубликат (дубль клика Generate, PRD §14)",
+                "Недопустимые переходы возвращают ошибку; тесты на конкурентный Claim"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: запустить в тесте 20 горутин, claim-ящих одну задачу, и проверить, что она взята ровно одним",
+                "Шаг 3: проверить, что повторный Enqueue с тем же ключом возвращает существующую задачу",
+                "Шаг 4: проверить отказ при переходе COMPLETED → RUNNING"
+            ],
+            "dependencies": [
+                "TASK-005"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-009",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[Задачи] Worker pool: исполнение задач, ограниченный экспоненциальный backoff, таймауты, отмена",
+            "acceptance_criteria": [
+                "Пул воркеров на горутинах с настраиваемым числом; регистрация обработчиков по типу задачи",
+                "Transient-ошибка переводит в RETRY_WAIT с экспоненциальным backoff и верхним пределом попыток; задача не повторяется бесконечно (AC-10)",
+                "Таймаут контекста на выполнение; отмена пользователем останавливает обработчик через context там, где это безопасно",
+                "Прогресс и состояния сохраняются в БД, а не только в памяти"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест с обработчиком, падающим 3 раза, затем успешным: проверить RETRY_WAIT → COMPLETED и рост интервалов (с fake clock)",
+                "Шаг 3: тест с постоянно падающим обработчиком: после лимита попыток статус FAILED",
+                "Шаг 4: тест отмены: обработчик получает ctx.Done(), статус CANCELLED"
+            ],
+            "dependencies": [
+                "TASK-008"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-010",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задачи] Job Recovery при старте: обнаружение зависших RUNNING и безопасный requeue/resume",
+            "acceptance_criteria": [
+                "При запуске задачи в RUNNING без живого воркера переводятся в QUEUED или возобновляются по политике типа задачи (AC-09)",
+                "Задачи с внешними побочными эффектами не повторяются вслепую, а получают статус для сверки (например UNKNOWN для доставки email)",
+                "Тест эмуляции краша: БД с RUNNING-задачами → новый запуск → корректные состояния"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: в тесте создать RUNNING-задачу, пересоздать менеджер задач и проверить результат recovery",
+                "Шаг 3: проверить, что задача типа 'email_delivery' не уходит в слепой retry"
+            ],
+            "dependencies": [
+                "TASK-009"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-011",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Задачи] PowerMonitor: определение питания от сети (Windows API) и fake-реализация",
+            "acceptance_criteria": [
+                "Интерфейс PowerMonitor: IsOnACPower() и подписка на события смены питания",
+                "Windows-реализация (//go:build windows) через GetSystemPowerStatus из golang.org/x/sys/windows и уведомления об изменении питания",
+                "Реализация-заглушка для остальных ОС и fake для тестов с ручным переключением состояния",
+                "Нет CGO"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить GOOS=windows go build ./desktop/... и CGO_ENABLED=0 go build ./desktop/...",
+                "Шаг 2: выполнить go test -race ./desktop/internal/...",
+                "Шаг 3: проверить в тесте, что fake рассылает события подписчикам при переключении"
+            ],
+            "dependencies": [
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-012",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задачи] Политика обработки только от розетки: WAITING_FOR_POWER, настройка отключения, «Запустить сейчас»",
+            "acceptance_criteria": [
+                "Тяжелые задачи (STT) при питании от батареи и включенной настройке переходят в WAITING_FOR_POWER, при возврате питания автоматически возвращаются в QUEUED (AC-21)",
+                "Если питание пропало во время задачи, воркер останавливается на ближайшей контрольной точке, сохраняет прогресс и переводит задачу в WAITING_FOR_POWER",
+                "Настройка process_only_on_ac_power отключает ограничение; для отдельной задачи доступно принудительное «Запустить сейчас» (AC-22)",
+                "Легкие задачи (LLM-запросы, email, календарь) ограничением не затрагиваются"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест с fake PowerMonitor: постановка тяжелой задачи на батарее → WAITING_FOR_POWER → возврат питания → выполнение",
+                "Шаг 3: тест отключения настройки: задача выполняется на батарее",
+                "Шаг 4: тест 'Run now' для одной задачи при включенной настройке"
+            ],
+            "dependencies": [
+                "TASK-009",
+                "TASK-011",
+                "TASK-007"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-013",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[Запись] Recording Manager: конечный автомат записи, чанковая запись, лимит 3 часа",
+            "acceptance_criteria": [
+                "Агрегат Recording в domain/recording/recording: состояния STARTING, RECORDING, STOPPING, FINALIZING, COMPLETED, FAILED, RECOVERY_REQUIRED с допустимыми переходами из PRD §6.2 (таблица в агрегате, ARCH-19), лимит длительности как доменное правило; состояние сохраняется через порт репозитория",
+                "Запись идет чанками на диск через Recorder-интерфейс; тесты используют fake-источник звука",
+                "При достижении лимита (по умолчанию 3 часа, настраиваемо) запись автоматически финализируется (AC-04)",
+                "Старт/стоп записи доступны через Core API (AC-03)"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест с fake clock: запись достигает лимита и переходит в FINALIZING → COMPLETED",
+                "Шаг 3: тест недопустимого перехода (COMPLETED → RECORDING) возвращает ошибку",
+                "Шаг 4: проверить, что чанки записаны в каталог через StorageManager"
+            ],
+            "dependencies": [
+                "TASK-006",
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-014",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Запись] Watchdog и восстановление прерванных записей после перезапуска",
+            "acceptance_criteria": [
+                "Heartbeat активной записи пишется в БД с интервалом",
+                "При старте приложения записи со старым heartbeat помечаются RECOVERY_REQUIRED, читаемые чанки собираются в итоговый файл или предлагаются пользователю на восстановление (AC-05)",
+                "Тест эмуляции краша: остановка без финализации → новый запуск → запись восстановлена"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: создать запись с 3 чанками без финализации, пересоздать менеджер, проверить RECOVERY_REQUIRED и успешную сборку",
+                "Шаг 3: тест: битый последний чанк отбрасывается, остальные сохраняются"
+            ],
+            "dependencies": [
+                "TASK-013"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-015",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Запись] Прототипы захвата системного звука Windows (WASAPI loopback) и ADR с рекомендацией",
+            "acceptance_criteria": [
+                "Прототипы кандидатов под //go:build windows: malgo (CGO), чисто-Go биндинг WASAPI, отдельный процесс-рекордер; каждый компилируется (GOOS=windows)",
+                "Документ docs/refs/audio.md: проверенные по официальной документации возможности каждого варианта, версии библиотек и источники",
+                "ADR docs/adr/0002-audio-capture.md: сравнение (надежность, зависимость от CGO относительно правила 1 из CLAUDE.md, смена устройства вывода, читаемость чанков после kill) и рекомендация",
+                "Рабочие проверки на реальной Windows вынесены в отдельную задачу [Windows-проверка]"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить GOOS=windows go vet ./desktop/spikes/audio-capture/...",
+                "Шаг 2: проверить, что ADR содержит разделы Decision и Consequences и ссылки на источники",
+                "Шаг 3: проверить, что основной бинарник desktop по-прежнему собирается с CGO_ENABLED=0, если не выбран вариант с CGO"
+            ],
+            "dependencies": [
+                "TASK-001"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-016",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Windows-проверка] Захват системного звука на реальной Windows: 10 минут во время онлайн-звонка",
+            "acceptance_criteria": [
+                "Пользователь запускает прототипы из desktop/spikes/audio-capture/ на Windows и подтверждает: звук Zoom/Telemost записывается, чанки читаются после принудительного завершения процесса",
+                "Результаты занесены в ADR 0002 (раздел Verification)"
+            ],
+            "test_steps": [
+                "Шаг 1: задача требует Windows-машины и человека: агент ставит статус blocked и описывает в progress.txt, что именно проверить",
+                "Шаг 2: после проверки пользователь вручную меняет статус на done"
+            ],
+            "dependencies": [
+                "TASK-015"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-017",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Запись] Windows-реализация Recorder по решению ADR 0002",
+            "acceptance_criteria": [
+                "Реализация интерфейса Recorder под //go:build windows, выбранная в ADR 0002, пишет чанки WAV/FLAC системного звука одним треком через StorageManager (AC-24)",
+                "Для остальных ОС есть заглушка, тесты в CI проходят на любой платформе",
+                "Обработка смены устройства вывода и ошибок устройства: переход в FAILED/RECOVERY_REQUIRED, а не паника",
+                "Если выбранный вариант требует CGO, изменение правила 1 в CLAUDE.md сделано только с записью в ADR"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить GOOS=windows go build ./desktop/... и go vet ./desktop/...",
+                "Шаг 2: выполнить go test -race ./desktop/internal/...",
+                "Шаг 3: проверить, что реализация использует Storage Manager для записи файлов"
+            ],
+            "dependencies": [
+                "TASK-015",
+                "TASK-013"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-018",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Расписание] Scheduler: локальное расписание и событие «занятие начинается»",
+            "acceptance_criteria": [
+                "Scheduler читает расписание из БД и публикует событие начала занятия за настраиваемое время",
+                "Работает на абстракции часов (fake clock в тестах); не создает дубликатов события при перезапуске в течение того же занятия",
+                "Учитывает часовой пояс записи расписания"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест с fake clock: событие приходит ровно один раз для занятия",
+                "Шаг 3: тест перезапуска планировщика в середине занятия не дублирует событие"
+            ],
+            "dependencies": [
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-019",
+            "category": "ui",
+            "priority": "critical",
+            "description": "[UI] Каркас Wails v3: главное окно, трей, отдельное окно-попап; фиксация версии и ADR",
+            "acceptance_criteria": [
+                "Минимальное Wails v3 приложение в desktop/: главное окно, иконка в трее, безрамочное always-on-top окно-попап, открываемое по команде",
+                "Версия Wails v3 зафиксирована в go.mod; особенности API записаны в docs/refs/wails.md с источниками",
+                "ADR docs/adr/0003-wails-popup.md с результатом: что получилось (фокус, трей, уведомление, single-instance, автозапуск), что нужно проверить на Windows",
+                "Проект собирается GOOS=windows go build; ручная проверка вынесена в отдельную задачу"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить GOOS=windows go build ./desktop/...",
+                "Шаг 2: выполнить go vet ./desktop/...",
+                "Шаг 3: проверить, что docs/refs/wails.md содержит версию и ссылки на документацию"
+            ],
+            "dependencies": [
+                "TASK-001",
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-020",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Windows-проверка] Попап без кражи фокуса, трей и уведомление на реальной Windows",
+            "acceptance_criteria": [
+                "Пользователь проверяет на Windows при активном Zoom/другом окне: попап появляется без кражи фокуса, не блокирует другие окна, корректно позиционируется на нескольких мониторах",
+                "Результат внесен в ADR 0003"
+            ],
+            "test_steps": [
+                "Шаг 1: задача требует Windows и человека: агент ставит blocked и описывает чек-лист в progress.txt",
+                "Шаг 2: после проверки пользователь вручную меняет статус на done"
+            ],
+            "dependencies": [
+                "TASK-019"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-021",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UI] React + TypeScript (Vite) каркас, Wails-биндинги, навигация и страница настроек",
+            "acceptance_criteria": [
+                "desktop/frontend: Vite + React + TypeScript, сборка встраивается в Wails",
+                "Навигация: Записи, Модели, Домашние задания, Расписание, Настройки",
+                "Страница настроек: переключатель автопредложения записи (AC-02) и переключатель «Обрабатывать только от розетки» (AC-22), значения читаются и пишутся через Go-биндинги",
+                "UI не обращается к Hub напрямую и не хранит секреты"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm ci && npm run build)",
+                "Шаг 2: выполнить go build ./desktop/...",
+                "Шаг 3: проверить, что страница настроек вызывает биндинги настроек (grep по импортам биндингов)"
+            ],
+            "dependencies": [
+                "TASK-019",
+                "TASK-007"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-022",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Запись] Сценарий «занятие началось»: попап с кнопкой «Начать запись»",
+            "acceptance_criteria": [
+                "Событие Scheduler показывает non-modal попап, главное окно не выводится на передний план (AC-01); при выключенной настройке попап не показывается (AC-02)",
+                "Действие «Начать запись» запускает Recording Manager; «Отложить/Пропустить» работают по настройкам",
+                "Логика оркестрации в Core покрыта тестами с fake-окном"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: событие при включенной настройке → вызван ShowPopup; при выключенной → не вызван",
+                "Шаг 3: тест: Start recording → Recording Manager переходит в STARTING/RECORDING"
+            ],
+            "dependencies": [
+                "TASK-013",
+                "TASK-018",
+                "TASK-007",
+                "TASK-019"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-023",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[UI] Экран записей и задач: список записей, статусы, причина ожидания (WAITING_FOR_POWER и др.)",
+            "acceptance_criteria": [
+                "Список записей с состояниями и длительностью, кнопка остановки активной записи",
+                "Список задач со статусами; для WAITING_FOR_POWER / WAITING_FOR_NETWORK / WAITING_FOR_QUOTA показана причина; кнопка «Запустить сейчас» для задач, ожидающих питание",
+                "Данные поступают из Go через биндинги"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm run build)",
+                "Шаг 2: если есть тесты компонентов, выполнить npm run test",
+                "Шаг 3: проверить в коде наличие отображения причины ожидания для каждого WAITING_* статуса"
+            ],
+            "dependencies": [
+                "TASK-021",
+                "TASK-009"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-024",
+            "category": "integration",
+            "priority": "critical",
+            "description": "[STT] STTEngine через sidecar whisper-cli: запуск процесса на задачу, прогресс, отмена, результат",
+            "acceptance_criteria": [
+                "Реализация STTEngine запускает whisper-cli отдельным процессом на каждую задачу (без сервера и портов), аргументы включают путь к модели и входной аудиофайл",
+                "Парсинг результата (JSON/SRT) в структуру транскрипта, парсинг прогресса из вывода; stderr и код выхода захватываются",
+                "Отмена убивает процесс и не оставляет битых выходных файлов",
+                "Тесты используют тестовый fake-бинарник вместо whisper-cli; нет CGO",
+                "Документ docs/refs/whisper.md: откуда официальные бинарники для Windows, формат вывода, проверенный список аргументов с источниками"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест отмены: процесс завершен, временные файлы удалены",
+                "Шаг 3: тест ненулевого кода выхода → ошибка с захваченным stderr",
+                "Шаг 4: выполнить CGO_ENABLED=0 go build ./desktop/... и GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-003",
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-025",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Windows-проверка] Запуск настоящего whisper-cli на Windows с реальной моделью и записью",
+            "acceptance_criteria": [
+                "Пользователь скачивает whisper-cli и модель, запускает транскрипцию через STTEngine на образце записи",
+                "Подтверждено: результат парсится, отмена работает; фактическая скорость записана для информации (без настройки производительности)"
+            ],
+            "test_steps": [
+                "Шаг 1: задача требует Windows и человека: агент ставит blocked и описывает шаги в progress.txt",
+                "Шаг 2: после проверки пользователь вручную меняет статус на done"
+            ],
+            "dependencies": [
+                "TASK-024"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-026",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[STT] Model Manager: каталог моделей, установленные модели, выбор по умолчанию, pin версии, безопасное удаление",
+            "acceptance_criteria": [
+                "Манифест каталога (JSON): имя, версия, размер, SHA-256, URL источника, квантизация, рекомендации; список доступных и установленных моделей",
+                "Несколько моделей установлены одновременно; выбор модели по умолчанию (AC-07)",
+                "Задача STT фиксирует точную модель и версию (AC-08); удаление блокируется, если активная задача использует модель",
+                "Тесты на конкурентное удаление и выбор"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: установить две модели, сменить дефолтную, проверить",
+                "Шаг 3: тест: удаление модели, используемой RUNNING-задачей, возвращает ошибку"
+            ],
+            "dependencies": [
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-027",
+            "category": "integration",
+            "priority": "critical",
+            "description": "[STT] Скачивание моделей приложением: докачка, прогресс, проверка SHA-256, проверка свободного места",
+            "acceptance_criteria": [
+                "HTTP-скачивание с поддержкой Range и докачкой после обрыва, прогресс доступен подписчикам",
+                "Перед загрузкой проверяется свободное место; предупреждение пользователю",
+                "Проверка SHA-256: при несовпадении файл отбрасывается и не устанавливается; источник ограничен allowlist из манифеста",
+                "Тесты на httptest-сервере: обрыв посередине, докачка, неверный checksum"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: сервер обрывает соединение на 50%, повторная загрузка докачивает файл, checksum совпадает",
+                "Шаг 3: тест: подмененный файл отклоняется, модель не появляется в списке установленных"
+            ],
+            "dependencies": [
+                "TASK-026"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-028",
+            "category": "functional",
+            "priority": "high",
+            "description": "[STT] Ручной путь: открыть страницу источника модели и импортировать скачанный файл",
+            "acceptance_criteria": [
+                "Операция «открыть страницу источника» возвращает URL для открытия в браузере по умолчанию",
+                "Импорт файла: копирование через StorageManager, проверка SHA-256 для моделей каталога",
+                "Импорт модели вне каталога возможен только после явного подтверждения пользователя и с вычислением/показом checksum (AC-23)",
+                "Тесты: корректный импорт, повреждённый файл, модель вне каталога без подтверждения"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест импорта файла с неверным checksum → отказ",
+                "Шаг 3: тест импорта своей модели без подтверждения → отказ, с подтверждением → успех"
+            ],
+            "dependencies": [
+                "TASK-026"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-029",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[STT] Задача транскрибации: запись → транскрипт, локально, с pin модели",
+            "acceptance_criteria": [
+                "Обработчик задачи 'stt' берет аудио записи, запускает STTEngine с pinned моделью и сохраняет транскрипт через StorageManager (AC-06: аудио никуда не отправляется)",
+                "Задача поддерживает прогресс, отмену и возобновление после перезапуска; учитывает политику питания",
+                "В записи транскрипта сохранены имя и версия модели (AC-08)",
+                "После завершения создается событие для уведомления и постановки пост-обработки"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/... ./desktop/internal/...",
+                "Шаг 2: интеграционный тест с fake whisper-cli: запись → транскрипт сохранен, модель/версия записаны",
+                "Шаг 3: проверить, что на пути STT нет сетевых вызовов (пакет stt не импортирует net/http)"
+            ],
+            "dependencies": [
+                "TASK-009",
+                "TASK-024",
+                "TASK-026",
+                "TASK-012",
+                "TASK-010"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-030",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UI] Экран Model Manager: каталог, скачать, импорт, выбор по умолчанию, удаление, прогресс",
+            "acceptance_criteria": [
+                "Список доступных и установленных моделей с размером и рекомендацией",
+                "Кнопки: скачать (с прогрессом и предупреждением о месте), открыть страницу источника, импортировать файл, сделать по умолчанию, удалить",
+                "Ошибки checksum и нехватки места показываются понятным сообщением"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm run build)",
+                "Шаг 2: проверить вызовы всех операций Model Manager через биндинги",
+                "Шаг 3: если есть тесты компонентов, выполнить npm run test"
+            ],
+            "dependencies": [
+                "TASK-021",
+                "TASK-027",
+                "TASK-028"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-031",
+            "category": "infrastructure",
+            "priority": "critical",
+            "description": "[Hub] Каркас сервера Hub: Connect-RPC, конфигурация, Postgres, миграции, healthz, docker-compose",
+            "acceptance_criteria": [
+                "hub/cmd/hub: HTTP-сервер (chi) с Connect-обработчиками из shared, graceful shutdown, конфиг из переменных окружения",
+                "Postgres через pgx, миграции goose (hub/migrations); docker-compose.yml для локальной разработки",
+                "Эндпоинты /healthz и /readyz",
+                "Тесты, зависящие от БД, читают HUB_TEST_DATABASE_URL и пропускаются, если он не задан; Dockerfile для Hub"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go vet ./hub/... && go build ./hub/...",
+                "Шаг 2: выполнить docker compose up -d postgres, затем HUB_TEST_DATABASE_URL=... go test -race ./hub/... (если Docker недоступен, отметить задачу blocked с причиной)",
+                "Шаг 3: запустить hub и проверить curl localhost:<port>/healthz"
+            ],
+            "dependencies": [
+                "TASK-004",
+                "TASK-002"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-032",
+            "category": "security",
+            "priority": "critical",
+            "description": "[Hub] Аутентификация запросов по персональным API-ключам тестеров, отзыв ключей",
+            "acceptance_criteria": [
+                "Interceptor проверяет ключ из заголовка; в БД хранится только хеш ключа (AC-25)",
+                "CLI-команда hub keys create/revoke/list: выпуск ключа показывает его один раз",
+                "Неверный или отозванный ключ → INVALID_API_KEY, сравнение хешей за постоянное время",
+                "Тесты на валидный, отозванный и отсутствующий ключ"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить HUB_TEST_DATABASE_URL=... go test -race ./hub/internal/...",
+                "Шаг 2: выпустить ключ через CLI, вызвать защищенный метод с ключом и без него (curl или тестовый клиент)",
+                "Шаг 3: отозвать ключ и убедиться, что запрос отклоняется",
+                "Шаг 4: проверить, что в БД нет открытого ключа"
+            ],
+            "dependencies": [
+                "TASK-031"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-033",
+            "category": "functional",
+            "priority": "critical",
+            "description": "[Hub] Квоты: транзакционные reserve/settle/release с идемпотентностью и журналом",
+            "acceptance_criteria": [
+                "Reserve до запроса, Settle по фактическому использованию, Release при отмене или ошибке; ключ идемпотентности исключает двойное списание (AC-11)",
+                "Операции транзакционные; журнал (ledger) всех движений квоты на ключ",
+                "Единица квоты определена в конфиге (токены как стартовый вариант), решение отражено в ADR",
+                "Тесты на конкурентные reserve, повтор с тем же ключом, нехватку квоты"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить HUB_TEST_DATABASE_URL=... go test -race -count=1 ./hub/internal/...",
+                "Шаг 2: тест: 2 параллельных reserve с одним ключом списывают квоту один раз",
+                "Шаг 3: тест: reserve > остатка → QUOTA_EXCEEDED, остаток не изменился",
+                "Шаг 4: тест: release возвращает неиспользованную часть"
+            ],
+            "dependencies": [
+                "TASK-031"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-034",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Hub] Адаптер LLM-провайдера: интерфейс, Anthropic-адаптер, allowlist моделей, fake для тестов",
+            "acceptance_criteria": [
+                "Интерфейс Provider и реализация на anthropic-sdk-go; ключи провайдера только в конфиге сервера",
+                "Allowlist моделей по alias, клиент не может передать произвольный URL или имя модели вне allowlist",
+                "Таймауты и классификация ошибок (временные/постоянные); fake-провайдер для тестов",
+                "Фактическое использование токенов возвращается для settle"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./hub/internal/...",
+                "Шаг 2: тест: запрос неразрешенной модели отклоняется",
+                "Шаг 3: тест: fake-провайдер возвращает usage, а таймаут дает временную ошибку"
+            ],
+            "dependencies": [
+                "TASK-031"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-035",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Hub] LLM Gateway: валидация, лимиты, reserve → provider → settle/release",
+            "acceptance_criteria": [
+                "Метод Complete проверяет запрос, лимиты размера payload и rate limit на ключ",
+                "Оркестрация: Reserve → вызов провайдера → Settle при успехе, Release при отмене/ошибке; повторный запрос с тем же idempotency_key не дублирует вызов и списание",
+                "Минимальные логи без содержимого промптов; сервер не принимает от клиента внешние URL",
+                "Интеграционный тест с fake-провайдером"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить HUB_TEST_DATABASE_URL=... go test -race -count=1 ./hub/...",
+                "Шаг 2: тест: успешный запрос списал фактическое количество токенов",
+                "Шаг 3: тест: ошибка провайдера освобождает резерв",
+                "Шаг 4: тест: повтор с тем же ключом возвращает тот же результат без второго вызова провайдера"
+            ],
+            "dependencies": [
+                "TASK-032",
+                "TASK-033",
+                "TASK-034"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-036",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub] Метод GetRemaining: остаток квоты для клиента",
+            "acceptance_criteria": [
+                "RPC возвращает остаток и период квоты для ключа (AC-12)",
+                "Облачное значение авторитетно, клиент может кэшировать только для показа",
+                "Тест на корректный остаток после reserve/settle"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить HUB_TEST_DATABASE_URL=... go test -race ./hub/internal/...",
+                "Шаг 2: тест: остаток уменьшается после settle и восстанавливается после release"
+            ],
+            "dependencies": [
+                "TASK-033"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-037",
+            "category": "security",
+            "priority": "critical",
+            "description": "[Безопасность] CredentialStore: Windows Credential Manager и in-memory реализация для тестов",
+            "acceptance_criteria": [
+                "Интерфейс CredentialStore (Get/Set/Delete) и Windows-реализация (//go:build windows) на wincred или аналогичной проверенной библиотеке",
+                "In-memory реализация для остальных ОС и тестов",
+                "Токены и ключи не записываются в SQLite и логи (AC-19); тест-страж, проверяющий отсутствие полей с секретами в схеме БД"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить GOOS=windows go build ./desktop/... и go test -race ./desktop/internal/...",
+                "Шаг 2: выполнить grep -ri 'token\\|secret\\|api_key' docs/contracts/schema.sql и убедиться, что секретов в схеме нет",
+                "Шаг 3: тест: значение, записанное в in-memory Store, читается обратно, после Delete отсутствует"
+            ],
+            "dependencies": [
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-038",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Hub] LLM Client в десктопе: Connect-клиент, API-ключ из CredentialStore, идемпотентность, ретраи",
+            "acceptance_criteria": [
+                "Клиент использует сгенерированный Connect-клиент и API-ключ из CredentialStore; для каждой операции формируется idempotency_key",
+                "Ошибки маппятся на состояния задач: сетевая → WAITING_FOR_NETWORK, QUOTA_EXCEEDED → WAITING_FOR_QUOTA, временные → retry с backoff",
+                "Таймауты запросов; клиент не отправляет аудио и лишние данные",
+                "Тесты против локального fake-сервера Hub (httptest)"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: сервер отвечает QUOTA_EXCEEDED → возвращена ошибка, мапящаяся на WAITING_FOR_QUOTA",
+                "Шаг 3: тест: повторная отправка той же операции использует тот же idempotency_key"
+            ],
+            "dependencies": [
+                "TASK-004",
+                "TASK-009",
+                "TASK-037"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-039",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[UI] Экран ключа доступа к Hub и отображение остатка квоты",
+            "acceptance_criteria": [
+                "Ввод API-ключа сохраняется через Core в CredentialStore, в UI ключ не отображается после сохранения",
+                "Отображение остатка квоты (AC-12) с пометкой, что значение из кэша, и кнопкой обновления"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm run build)",
+                "Шаг 2: проверить в коде, что ключ не возвращается обратно в UI после сохранения"
+            ],
+            "dependencies": [
+                "TASK-021",
+                "TASK-036",
+                "TASK-038"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-040",
+            "category": "security",
+            "priority": "high",
+            "description": "[Безопасность] Граница побочных эффектов: LLM предлагает → Core валидирует → подтверждение → адаптер",
+            "acceptance_criteria": [
+                "Тип ActionProposal и пайплайн: структурированный вывод LLM проходит валидацию по доверенному локальному состоянию, политику и подтверждение пользователя, и только затем вызывается адаптер",
+                "Адаптеры (email, файлы, календарь) принимают только валидированные команды из Core, а не данные модели напрямую (AC-18)",
+                "Тесты, имитирующие prompt injection в тексте транскрипта: вредоносная инструкция не приводит к вызову адаптера без подтверждения",
+                "Документ docs/refs/prompt-injection.md с описанием границы и правил для будущих функций"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: вывод LLM с командой 'send email to attacker' не вызывает EmailAdapter",
+                "Шаг 3: тест: валидный proposal без подтверждения пользователя не выполняется"
+            ],
+            "dependencies": [
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-041",
+            "category": "functional",
+            "priority": "high",
+            "description": "[AI] Prompt & Context Manager: минимальный контекст, структурированные схемы вывода, разделение инструкций и данных",
+            "acceptance_criteria": [
+                "Сборка промптов для операций: summary, extract_homework_deadlines, homework_draft; в запрос попадает минимально нужный контекст (PRD §9.1)",
+                "Данные пользователя (транскрипт) отделены от системных инструкций и помечены как недоверенные",
+                "JSON-схемы структурированных ответов и строгий валидатор вывода",
+                "Тесты: лишние поля контекста не попадают в запрос; невалидный вывод отклоняется"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: построенный запрос не содержит данных, не относящихся к операции",
+                "Шаг 3: тест: ответ, не соответствующий схеме, возвращает ошибку валидации"
+            ],
+            "dependencies": [
+                "TASK-003"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-042",
+            "category": "functional",
+            "priority": "high",
+            "description": "[AI] Пост-обработка: транскрипт → краткое содержание → домашние задания и дедлайны",
+            "acceptance_criteria": [
+                "Задачи 'summarize' и 'extract_homework' ставятся после завершения STT и используют LLM Client",
+                "Результаты проходят валидацию схемы и сохраняются локально в БД (assignments, deadlines, summaries)",
+                "Пользователь может править извлеченные задания и дедлайны; правки сохраняются и не перезаписываются повторной обработкой",
+                "Тест end-to-end с fake Hub: транскрипт → сохраненные структуры"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: интеграционный тест с fake LLM Client: из транскрипта получены summary и 2 дедлайна в БД",
+                "Шаг 3: тест: невалидный ответ LLM не создает записей и приводит к управляемой ошибке задачи"
+            ],
+            "dependencies": [
+                "TASK-029",
+                "TASK-038",
+                "TASK-041",
+                "TASK-040"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-043",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Домашка] Генерация домашнего задания: черновик, правка, доп. инструкции, перегенерация, экспорт",
+            "acceptance_criteria": [
+                "Сценарий: выбор задания/занятия → черновик → локальное редактирование → дополнительные инструкции → перегенерация (AC-13)",
+                "Версии черновиков сохраняются; дубль клика Generate не создает параллельные эквивалентные задачи",
+                "Экспорт финального артефакта в файл через StorageManager",
+                "Тесты с fake LLM Client"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: generate → edit → regenerate с инструкцией, сохранены 2 версии",
+                "Шаг 3: тест: два одновременных Generate → одна задача",
+                "Шаг 4: тест экспорта создает файл в каталоге exports"
+            ],
+            "dependencies": [
+                "TASK-042"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-044",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Почта] Отправка домашки: SMTP-адаптер, подтверждение, запись доставки, сверка при неизвестном исходе",
+            "acceptance_criteria": [
+                "EmailAdapter на SMTP (go-mail), учетные данные в CredentialStore; отправка только после явного подтверждения пользователя (AC-14), через границу из задачи boundary",
+                "Запись доставки (получатель, артефакт, результат) в БД; при таймауте после возможного принятия ставится статус UNKNOWN и повторная отправка не выполняется слепо (AC-15)",
+                "Идемпотентность по ключу доставки; операция сверки",
+                "Тесты с локальным fake SMTP-сервером"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: отправка без подтверждения невозможна",
+                "Шаг 3: тест: таймаут после принятия письма → UNKNOWN, повторная попытка не отправляет дубль",
+                "Шаг 4: проверить, что пароль SMTP не попадает в БД"
+            ],
+            "dependencies": [
+                "TASK-040",
+                "TASK-009",
+                "TASK-037"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-045",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UI] Экран домашнего задания: редактор, инструкции, перегенерация, диалог подтверждения отправки",
+            "acceptance_criteria": [
+                "Редактор черновика, поле дополнительных инструкций, история версий",
+                "Диалог подтверждения отправки показывает получателя, тему и вложение; без подтверждения отправка не вызывается (AC-14)",
+                "Отображение статуса доставки, включая UNKNOWN"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm run build)",
+                "Шаг 2: проверить в коде, что вызов отправки доступен только из обработчика кнопки диалога подтверждения"
+            ],
+            "dependencies": [
+                "TASK-021",
+                "TASK-043",
+                "TASK-044"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-046",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Расписание] Движок импорта: валидация, превью, коммит; CSV-парсер",
+            "acceptance_criteria": [
+                "Поток parse → validate → preview (изменения и конфликты) → commit; ошибочный файл не изменяет локальное расписание (AC-16)",
+                "Коммит атомарный (одна транзакция), пользователь явно подтверждает",
+                "CSV-парсер с документированным форматом колонок",
+                "Тесты: валидный файл, файл с ошибками, конфликт с существующим расписанием"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: файл с ошибкой в строке 3 → расписание не изменилось",
+                "Шаг 3: тест: preview показывает добавленные/измененные/конфликтующие занятия до коммита"
+            ],
+            "dependencies": [
+                "TASK-006"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-047",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Расписание] Парсер ICS (повторяющиеся события, часовые пояса)",
+            "acceptance_criteria": [
+                "Парсер на golang-ical преобразует VEVENT в записи расписания, включая RRULE и TZID",
+                "Подключен к движку импорта",
+                "Тесты на образцах ICS из Google Calendar и университетских расписаний"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: еженедельное повторяющееся событие разворачивается в нужные даты в границах импорта"
+            ],
+            "dependencies": [
+                "TASK-046"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-048",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Расписание] Парсер XLSX",
+            "acceptance_criteria": [
+                "Парсер на excelize читает лист с тем же форматом колонок, что и CSV",
+                "Подключен к движку импорта; ошибки ячеек указывают на строку и колонку",
+                "Тесты на сгенерированных в тесте XLSX-файлах"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: XLSX и эквивалентный CSV дают одинаковый результат превью"
+            ],
+            "dependencies": [
+                "TASK-046"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-049",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[UI] Экран импорта расписания: выбор файла, превью, подтверждение",
+            "acceptance_criteria": [
+                "Выбор файла ICS/CSV/XLSX, показ ошибок валидации и превью изменений",
+                "Кнопка «Применить» вызывает коммит только после превью"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm run build)",
+                "Шаг 2: проверить, что коммит доступен только после получения превью"
+            ],
+            "dependencies": [
+                "TASK-021",
+                "TASK-046"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-050",
+            "category": "security",
+            "priority": "high",
+            "description": "[Календарь] Авторизация Google: Authorization Code + PKCE, loopback-redirect, токены в CredentialStore",
+            "acceptance_criteria": [
+                "Авторизация через системный браузер, PKCE, без client secret в бинарнике",
+                "Refresh-токен хранится только в CredentialStore (AC-19); выход и отзыв доступа",
+                "Запрашивается только scope calendar.app.created; проверено по официальной документации Google, выводы записаны в docs/refs/google-calendar.md",
+                "Ответ по режиму Testing/verification для пилота (срок жизни refresh-токена, лимит тестеров) оформлен как ADR 0004 со ссылками на источники",
+                "Тесты потока с fake OAuth-сервером"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: обмен кода использует code_verifier, токены записаны в in-memory CredentialStore, не в БД",
+                "Шаг 3: проверить, что в ADR 0004 есть ссылки на официальную документацию Google"
+            ],
+            "dependencies": [
+                "TASK-037"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-051",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Календарь] Google Calendar адаптер: отдельный календарь приложения, идемпотентные upsert, sync-задача",
+            "acceptance_criteria": [
+                "Адаптер создает вторичный календарь «Learning Assistant» и пишет события только в него; доступ к Google изолирован за адаптером (AC-17)",
+                "Стабильные внешние ID событий и идемпотентные upsert; повторная синхронизация не создает дубликатов (PRD §14)",
+                "Синхронизация выполняется задачей из job store с retry; локальные данные остаются источником истины, обратной записи из календаря нет (AC-20)",
+                "Тесты против fake Google API (httptest)"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: два подряд запуска sync дают одно и то же число событий",
+                "Шаг 3: тест: изменение занятия обновляет событие, а не создает новое"
+            ],
+            "dependencies": [
+                "TASK-050",
+                "TASK-046",
+                "TASK-009"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-052",
+            "category": "ui",
+            "priority": "low",
+            "description": "[UI] Экран «Как увидеть события в Apple Calendar»",
+            "acceptance_criteria": [
+                "Инструкция по варианту A (добавить Google-аккаунт на iPhone/Mac) как основная и варианту B (подписка по секретной ссылке) как запасная; вариант C (публичный календарь) помечен как не рекомендованный",
+                "В приложении нет запросов к API Apple и нет публичных календарей"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить (cd desktop/frontend && npm run build)",
+                "Шаг 2: проверить, что текст соответствует PRD §11.3"
+            ],
+            "dependencies": [
+                "TASK-021"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-053",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Уведомления] Политика уведомлений: включение/выключение, без спама по одному состоянию",
+            "acceptance_criteria": [
+                "Настройка уведомления о завершении обработки; интерфейс Notifier с Windows-реализацией через Wails и fake для тестов",
+                "Для одной задачи и одного состояния уведомление отправляется не чаще одного раза (PRD §15)",
+                "Учитываются настройки Windows там, где API это позволяет"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/internal/...",
+                "Шаг 2: тест: три одинаковых события состояния → одно уведомление",
+                "Шаг 3: тест: уведомления выключены → ни одного вызова Notifier"
+            ],
+            "dependencies": [
+                "TASK-007",
+                "TASK-009"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-054",
+            "category": "infrastructure",
+            "priority": "medium",
+            "description": "[Инфра] Сборка Windows-инсталлятора (NSIS через Wails) и скрипт релизной сборки",
+            "acceptance_criteria": [
+                "Скрипт сборки инсталлятора по документации Wails v3 (NSIS), версия приложения берется из тега/файла",
+                "Документ docs/refs/packaging.md с зависимостями (NSIS, WebView2) и шагами",
+                "Автообновление не реализуется"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить GOOS=windows go build ./desktop/...",
+                "Шаг 2: проверить, что скрипт запускается с флагом --help или dry-run без ошибок",
+                "Шаг 3: сборку реального установщика выполняет пользователь на Windows (описано в docs/refs/packaging.md)"
+            ],
+            "dependencies": [
+                "TASK-019"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-055",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Инфра] Сквозной тест на fake-компонентах и чек-лист ручной проверки AC на Windows",
+            "acceptance_criteria": [
+                "Автотест: расписание → событие занятия → fake-запись → STT (fake whisper-cli) → fake Hub → summary/домашка в БД; проверяет цепочку состояний задач",
+                "Документ docs/qa/windows-checklist.md: по каждому AC из PRD §16, который нельзя проверить автоматически (попап, звук, питание, уведомления, Credential Manager), конкретные шаги ручной проверки",
+                "Таблица соответствия AC → автотест/ручная проверка в конце чек-листа"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/...",
+                "Шаг 2: проверить, что в чек-листе перечислены все AC-01…AC-25 с указанием способа проверки",
+                "Шаг 3: выполнить GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-022",
+                "TASK-042",
+                "TASK-029"
+            ],
+            "status": "pending"
+        }
+    ]
+}
