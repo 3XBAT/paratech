@@ -1,7 +1,12 @@
-# The code repository is nested and versioned/pushed separately.
-/paratech/
-# Old PRD drafts kept outside the workspace history
+# Old PRD drafts kept outside the repo history
 /prd/
 /promts/
+# OS / IDE
 .DS_Store
+.idea/
+.vscode/
+# Claude Code local overrides
 .claude/settings.local.json
+# Secrets
+.env
+.env.*

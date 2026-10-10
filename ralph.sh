@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ralph loop (run from the workspace root; code lives in the nested git repo $CODE_DIR): on every iteration a fresh agent session picks ONE pending task from tasks.json,
+# Ralph loop (run from the repository root; code lives in $CODE_DIR): on every iteration a fresh agent session picks ONE pending task from tasks.json,
 # implements and verifies it, records progress in progress.txt and commits.
 # Memory between iterations lives only in files: tasks.json, progress.txt, git history.
 #
@@ -11,7 +11,7 @@
 set -uo pipefail
 
 TASKS_FILE="${TASKS_FILE:-tasks.json}"
-CODE_DIR="${CODE_DIR:-paratech}"   # nested code repository
+CODE_DIR="${CODE_DIR:-paratech}"   # directory with the code
 MAX_ITERATIONS="${RALPH_MAX_ITERATIONS:-50}"
 MAX_STALLS="${RALPH_MAX_STALLS:-3}"
 USE_REVIEW="${RALPH_REVIEW:-1}"
@@ -68,9 +68,9 @@ count_status() {
     grep -Ec "\"status\"[[:space:]]*:[[:space:]]*\"$1\"" "$TASKS_FILE" 2>/dev/null || true
 }
 
-# The code repository must exist; never commit ralph work straight to main/master there.
+# Never commit ralph work straight to main/master.
 if ! git -C "$CODE_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-    echo "$CODE_DIR не является git-репозиторием: ralph делает коммит кода после каждой задачи." >&2
+    echo "$CODE_DIR не находится в git-репозитории: ralph делает коммит кода после каждой задачи." >&2
     exit 1
 fi
 branch="$(git -C "$CODE_DIR" rev-parse --abbrev-ref HEAD)"
@@ -80,7 +80,7 @@ if [[ "$branch" == "main" || "$branch" == "master" ]]; then
     git -C "$CODE_DIR" switch -c "$new_branch" || exit 1
 fi
 
-# tasks.json and progress.txt belong to the workspace repo (if there is one); the script commits them, not the agent.
+# tasks.json and progress.txt are committed by the script, not by the agent.
 commit_workspace() {
     if git rev-parse --git-dir >/dev/null 2>&1; then
         git add tasks.json progress.txt >/dev/null 2>&1
@@ -103,8 +103,8 @@ read -r -d '' PROMPT_BASE <<'EOF'
    (нужна проверка человеком на Windows, решение пользователя, внешний доступ) — причину опиши в progress.txt.
    Задачи удалять и переписывать ЗАПРЕЩЕНО.
 5. Добавь запись в КОНЕЦ progress.txt в формате из шапки этого файла. Используй её как заметку для следующей итерации.
-6. Сделай git commit кода ВНУТРИ paratech/ (`git -C paratech add -A && git -C paratech commit`; сообщение: `TASK-XXX: краткое описание`). Не делай git push.
-   Файлы tasks.json и progress.txt в корне рабочей области сам не коммить: это сделает скрипт.
+6. Сделай git commit кода ВНУТРИ paratech/ (`git -C paratech add -A . && git -C paratech commit`; сообщение: `TASK-XXX: краткое описание`). Не делай git push.
+   Файлы tasks.json и progress.txt в корне репозитория сам не коммить: это сделает скрипт.
 РАБОТАЙ ТОЛЬКО НАД ОДНОЙ ЗАДАЧЕЙ.
 EOF
 

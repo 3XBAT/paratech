@@ -1,0 +1,23 @@
+# Go / build
+*.exe
+*.test
+*.out
+/bin/
+/dist/
+# Node / frontend
+node_modules/
+desktop/frontend/dist/
+# Wails
+desktop/build/bin/
+# Local data and secrets
+.env
+.env.*
+*.db
+*.sqlite
+*.wav
+*.flac
+/models/
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

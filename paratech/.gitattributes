@@ -1,0 +1,5 @@
+# Keep LF everywhere so the repo behaves the same on macOS and Windows.
+* text=auto eol=lf
+*.docx binary
+*.png binary
+*.ico binary

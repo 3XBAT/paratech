@@ -21,6 +21,6 @@ Check, in this order:
 5. Tests: behavior and failure cases, pass with `-race`, architecture test present and passing; domain tested without mocks.
 6. Dependencies added without approval; invented or misused library APIs.
 7. Windows compatibility: build tags, path handling, `GOOS=windows go vet`.
-8. Workspace hygiene: no organization files (docs, tasks, prompts, agent definitions) inside `paratech/`.
+8. Repository hygiene: no organization files (docs, tasks, prompts, agent definitions) inside `paratech/`.
 
 Report: verdict (approve / changes requested), numbered findings ordered by severity (architecture violations first) with rule id, file:line and a concrete fix suggestion, and any PRD or architecture ambiguities.

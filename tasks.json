@@ -15,7 +15,7 @@
             "Работай только над выбранной задачей",
             "Делай коммиты после каждого логического изменения",
             "Не трогай код, не связанный с текущей задачей",
-            "Код пиши в каталоге paratech/ строго по docs/architecture.md: пути пакетов в задачах ориентировочные, архитектура главнее. Go-, npm- и buf-команды из test_steps выполняй из каталога paratech/; docs/, tasks.json и progress.txt лежат в корне рабочей области",
+            "Код пиши в каталоге paratech/ строго по docs/architecture.md: пути пакетов в задачах ориентировочные, архитектура главнее. Go-, npm- и buf-команды из test_steps выполняй из каталога paratech/; docs/, tasks.json и progress.txt лежат в корне репозитория",
             "Организационные файлы (docs, промпты, определения агентов) никогда не кладутся в paratech/"
         ],
         "before_finish": [
@@ -56,7 +56,7 @@
                 "В desktop и hub созданы каталоги по разделу 2 docs/architecture.md: cmd/<binary>, config, internal/{domain,cases,adapters,input,app,metrics}, testenv, tests; в каждом слое doc.go с назначением и ссылкой на правила; пример-шаблон контекста domain/<context>/ с doc.go и глоссарием",
                 "Минимальные internal/app (New/Run/Close), config и cmd/desktop, cmd/hub: пустые приложения собираются и запускаются (ARCH-50…53)",
                 ".golangci.yml содержит depguard-правила по матрице импортов из раздела 9 для каждого слоя",
-                "tests/arch_test.go в каждом модуле проверяет: матрицу импортов, отсутствие time.Now и math/rand в domain и cases, отсутствие import \"C\" в desktop, отсутствие организационных файлов (docs, tasks, prompts) в репозитории кода; тест имеет негативную проверку на искусственном нарушении",
+                "tests/arch_test.go в каждом модуле проверяет: матрицу импортов, отсутствие time.Now и math/rand в domain и cases, отсутствие import \"C\" в desktop, отсутствие организационных файлов (docs, tasks, prompts) в каталоге paratech/; тест имеет негативную проверку на искусственном нарушении",
                 "В docs/adr добавлен ADR с картой начальных контекстов (по разделу 12 docs/architecture.md)"
             ],
             "test_steps": [

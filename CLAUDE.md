@@ -3,24 +3,24 @@
 Windows desktop assistant for a student's **online** classes: records system audio, transcribes locally,
 summarizes/extracts homework via a cloud LLM Hub, syncs deadlines to Google Calendar.
 
-## Workspace layout (two levels)
-This directory is the **workspace**; Claude Code and `ralph.sh` run here. It holds everything about *organizing the work*.
-The **code repository** is the nested directory `paratech/` (its own git repo, the only thing pushed to GitHub).
+## Repository layout
+One git repository (for now). The root holds everything about *organizing the work*; the code lives in the `paratech/` subdirectory,
+which is kept self-contained so it can be split into its own repository later. Claude Code and `ralph.sh` run from the repository root.
 
 ```
-para-tech/                    # workspace (own git repo, code repo ignored)
+./                            # repository root
 ├── CLAUDE.md                 # this file
 ├── .claude/                  # subagents and settings
+├── .github/workflows/        # CI (runs inside paratech/)
 ├── docs/                     # PRD, architecture, ADRs, task drafts, process, refs
 ├── tasks.json, progress.txt  # ralph loop memory
 ├── ralph.sh                  # autonomous loop
-└── paratech/                 # CODE REPOSITORY (git repo, pushed to GitHub)
-    ├── desktop/   hub/   shared/   go.work   .github/
+└── paratech/                 # CODE: desktop/  hub/  shared/  go.work
 ```
 
-Path convention: `docs/`, `tasks.json`, `progress.txt` are relative to the workspace root; `desktop/`, `hub/`, `shared/` and every Go/npm/buf command
-from tasks and test steps are relative to `paratech/` — **run them with `cd paratech` first**. Commit code **inside `paratech/`** (`git -C paratech ...`).
-Never put workspace/organization files (docs, tasks, prompts, agent definitions) into `paratech/`.
+Path convention: `docs/`, `tasks.json`, `progress.txt` are relative to the repository root; `desktop/`, `hub/`, `shared/` and every Go/npm/buf command
+from tasks and test steps are relative to `paratech/` — **run them with `cd paratech` first**. Stage and commit code with `git -C paratech add -A .` and `git -C paratech commit`.
+Never put organization files (docs, tasks, prompts, agent definitions) inside `paratech/`: that directory must contain only code, so it can be extracted cleanly.
 
 Source of truth for requirements: `docs/prd/learning-assistant-prd-v0.4.md`.
 Code architecture (mandatory): **`docs/architecture.md`** — read it before writing or reviewing any code.
@@ -75,13 +75,13 @@ Always check that Windows code compiles: `cd paratech && GOOS=windows go vet ./d
 - Final report of every task: what changed, what is not done, which PRD AC ids are covered, how it was verified.
 
 ## Ralph loop (autonomous mode)
-`./ralph.sh` (run from the workspace root) runs fresh agent sessions in a loop; each session does exactly ONE task from `tasks.json` and commits the code.
+`./ralph.sh` (run from the repository root) runs fresh agent sessions in a loop; each session does exactly ONE task from `tasks.json` and commits the code.
 Memory between sessions is only files and git:
 - `tasks.json` — task list (generated from the PRD with `docs/process/prd-to-tasks.prompt.md`). Statuses: `pending`, `done`, `blocked`.
   Agents may change only the `status` field; never delete or rewrite tasks.
 - `progress.txt` — append-only log; read the latest entries before starting, append an entry when finishing (format in the file header).
 - `docs/tasks/` — human-written detailed specs/drafts; `tasks.json` is what the loop executes.
-The script itself commits `tasks.json`/`progress.txt` changes to the workspace repo after each iteration; agents commit only code, inside `paratech/`.
+The script itself commits `tasks.json`/`progress.txt` after each iteration; agents commit only code (`git -C paratech add -A .`).
 Mark a task `blocked` (with the reason in `progress.txt`) when it cannot be finished autonomously: it needs verification on real Windows,
 a user decision, or external access. Never mark `done` without running every `test_steps` item.
 Options: `RALPH_AGENT`, `RALPH_MAX_ITERATIONS`, `RALPH_MAX_STALLS`, `RALPH_REVIEW` (see the top of `ralph.sh`).
