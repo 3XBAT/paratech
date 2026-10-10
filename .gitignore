@@ -10,3 +10,16 @@
 # Secrets
 .env
 .env.*
+
+# Go binaries and test artifacts (go.work is intentionally tracked)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+!coverage.go
+*.coverprofile
+profile.cov
