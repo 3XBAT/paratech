@@ -1,5 +1,7 @@
 # Tasks
 
+> These drafts predate `docs/architecture.md`: where a path or structure here differs from the architecture or from `tasks.json`, the architecture and `tasks.json` win.
+>
 > The autonomous ralph loop executes `tasks.json` in the repository root (generated via `docs/process/prd-to-tasks.prompt.md`). The files in this folder are human-written specs and drafts that feed that generation.
 
 Status legend: `todo` / `doing` / `review` / `done`. Each task lives in its own file (copy `_TEMPLATE.md`).
