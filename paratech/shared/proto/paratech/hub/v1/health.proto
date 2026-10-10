@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package paratech.hub.v1;
 
-// Placeholder that keeps the buf toolchain exercised. Real contracts replace it in TASK-002.
+// Placeholder that keeps the buf toolchain exercised. Real contracts replace it in TASK-004.
 service HealthService {
   rpc Check(CheckRequest) returns (CheckResponse);
 }

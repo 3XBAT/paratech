@@ -28,6 +28,7 @@ Open a new terminal afterwards so the updated `PATH` is picked up, then check `g
 Run all commands below from this directory (`paratech/`).
 
 ## Build
+On Windows run these in Git Bash (they use POSIX shell syntax).
 
 ```bash
 go build ./desktop/... ./hub/... ./shared/...
