@@ -1,0 +1,14 @@
+version: v2
+# Plugins run through `go run`, so their versions are pinned by shared/go.mod and no extra installs are needed.
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: paratech/shared/gen
+plugins:
+  - local: [go, run, google.golang.org/protobuf/cmd/protoc-gen-go]
+    out: gen
+    opt: paths=source_relative
+  - local: [go, run, connectrpc.com/connect/cmd/protoc-gen-connect-go]
+    out: gen
+    opt: paths=source_relative

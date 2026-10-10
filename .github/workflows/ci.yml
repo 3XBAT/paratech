@@ -7,21 +7,34 @@ defaults:
   run:
     working-directory: paratech
 jobs:
-  hub-and-shared:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: go vet ./hub/... ./shared/...
-      - run: go test ./hub/... ./shared/...
-  desktop-windows:
+      - run: go build ./desktop/... ./hub/... ./shared/...
+      - run: go vet ./desktop/... ./hub/... ./shared/...
+      - run: go test -race ./desktop/... ./hub/... ./shared/...
+      # Windows-only code must compile even when developed on another OS.
+      - run: GOOS=windows go vet ./desktop/...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+          working-directory: paratech
+      - uses: bufbuild/buf-action@v1
+        with:
+          input: paratech/shared
+          breaking: false
+          push: false
+          pr_comment: false
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: go vet ./desktop/...
-      - run: go test ./desktop/...
+      - run: go vet ./desktop/... ./hub/... ./shared/...
+      - run: go test ./desktop/... ./hub/... ./shared/...
