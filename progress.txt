@@ -41,3 +41,30 @@
 - Платформа разработки — macOS, целевая — Windows: Windows-специфичный код прячь за интерфейсами и build tags (см. CLAUDE.md)
 
 ---
+
+## [TASK-001] Инструменты репозитория (golangci-lint, buf, CI, README)
+**Дата:** 2026-10-10 23:59
+**Статус:** partial
+
+### Что сделано
+- paratech/.golangci.yml (golangci-lint v2: errcheck, govet, ineffassign, staticcheck, unused, misspell + gofmt, goimports)
+- paratech/shared/buf.yaml, buf.gen.yaml (плагины protoc-gen-go и protoc-gen-connect-go через `go run`, версии из shared/go.mod), placeholder proto shared/proto/paratech/hub/v1/health.proto, сгенерированный код в shared/gen (коммитится, ARCH-35)
+- Новые зависимости shared/go.mod (hard rule 9; следуют из ADR-0001 «Connect-RPC (protobuf, buf)»): google.golang.org/protobuf v1.36.12, connectrpc.com/connect v1.21.0
+- .github/workflows/ci.yml: Linux-job (build, vet, test -race, GOOS=windows vet, golangci-lint обычный и GOOS=windows, buf lint/format, проверка актуальности shared/gen), Windows-job (vet, test)
+- README: команды установки для Windows (winget) и macOS (brew), раздел Build
+- Ревью (reviewer): блокеров нет, замечания 2,3,5,6,8,9,10 исправлены
+
+### Тесты
+- [ ] Шаг 1: `golangci-lint run ./...` — НЕ проходит дословно: paratech/ — корень go.work, а не модуль (exit 7). `golangci-lint run ./desktop/... ./hub/... ./shared/...` — 0 issues
+- [x] Шаг 2: `(cd shared && buf lint && buf generate)` — ok
+- [x] Шаг 3: `go build ./desktop/... ./hub/... ./shared/...`, `GOOS=windows go vet ./desktop/...`, go vet и go test — ok
+- [x] Шаг 4: ci.yml — yaml.safe_load ok
+
+### Заметки для следующих агентов
+- Статус в tasks.json НЕ менялся (pending): дословный шаг 1 / критерий 1 неисполнимы; нужно решение пользователя — поправить формулировку на `golangci-lint run ./desktop/... ./hub/... ./shared/...`.
+- Один .golangci.yml на workspace (paratech/), а не по модулю: TASK-002 должен учесть это для depguard (docs/architecture.md п.10 говорит «каждого модуля») — уточнить через ADR.
+- Путь proto: shared/proto/paratech/hub/v1 (package paratech.hub.v1), а TASK-004 пишет shared/proto/hub/v1 — путь индикативный.
+- golangci-lint v2.14.0 и buf 1.73.0 в этой среде установлены через `go install` в каталог scratchpad, не через winget.
+- Когда в desktop появится Wails, Linux-job CI потребует GTK/WebKit или разделения по build tags.
+
+---
