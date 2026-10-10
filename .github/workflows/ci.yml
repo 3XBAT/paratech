@@ -22,6 +22,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
+          args: ./desktop/... ./hub/... ./shared/...
           working-directory: paratech
       - uses: bufbuild/buf-action@v1
         with:
