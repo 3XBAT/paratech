@@ -65,7 +65,7 @@ Always check that Windows code compiles: `cd paratech && GOOS=windows go vet ./d
 - Frontend: `npm run build` / `npm run test` in `desktop/frontend`
 
 ## Working agreements
-- Small, reviewable commits on a non-`main` branch of the code repo (`task/...` when run manually, `ralph/...` when run by `ralph.sh`). Do not push; the user pushes.
+- Small, reviewable commits on a non-default branch (not `master`) of the code repo (`task/...` when run manually, `ralph/...` when run by `ralph.sh`). Do not push; the user pushes.
 - Work only inside the files/modules listed in the task. If more is needed, stop and report instead of expanding scope.
 - Place new code according to `docs/architecture.md`. Package paths written in tasks are indicative; the architecture wins.
 - Write tests with the code. A task is done only when its acceptance criteria hold and tests (including the architecture test) pass.

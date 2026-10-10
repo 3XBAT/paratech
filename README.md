@@ -38,7 +38,7 @@ RALPH_MAX_ITERATIONS=3 ./ralph.sh      # first run: a few iterations only
   runs the checks, sets the task status, appends to `progress.txt` and commits. The script creates a `ralph/<timestamp>` branch and never pushes.
 - Tasks that need a human (checks on real Windows, decisions) end up `blocked`; read `progress.txt` for the reason, do the check, then set `done` by hand.
 - Options: `RALPH_AGENT=claude|codex`, `RALPH_MAX_ITERATIONS`, `RALPH_MAX_STALLS`, `RALPH_REVIEW=0|1`.
-- Review the branch (`git log`, `git diff main...`) before merging into `main`.
+- Review the branch (`git log`, `git diff master...`) before merging into `master`.
 
 ## Setup on macOS / Linux
 `brew install go node git`, then the same steps in a normal shell. Windows-only code is behind build tags: check it with
