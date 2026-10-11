@@ -101,6 +101,43 @@ func TestMigrateRefusesNewerSchema(t *testing.T) {
 	}
 }
 
+// Open without Migrate still refuses a database from a newer build.
+func TestOpenRefusesNewerSchemaWithAndWithoutMigrate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "newer.db")
+	first, err := Open(context.Background(), Options{Path: path, Migrate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, first, "INSERT INTO goose_db_version (version_id, is_applied) VALUES (99, 1)")
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, migrate := range []bool{false, true} {
+		db, err := Open(context.Background(), Options{Path: path, Migrate: migrate})
+		if err == nil {
+			_ = db.Close()
+		}
+		if !errors.Is(err, ErrSchemaTooNew) {
+			t.Errorf("Open(Migrate=%v) on a newer database: %v, want ErrSchemaTooNew", migrate, err)
+		}
+	}
+}
+
+// The version check of Open(Migrate=false) and SchemaVersion only read: they must not create goose_db_version.
+func TestSchemaChecksHaveNoSideEffects(t *testing.T) {
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	const query = "SELECT count(*) FROM sqlite_master WHERE name = 'goose_db_version'"
+	if n := scanInt(t, db.sql, query); n != 0 {
+		t.Fatalf("goose_db_version exists after Open without Migrate")
+	}
+	if v, err := db.SchemaVersion(context.Background()); err != nil || v != 0 {
+		t.Fatalf("SchemaVersion = %d, %v; want 0", v, err)
+	}
+	if n := scanInt(t, db.sql, query); n != 0 {
+		t.Fatalf("goose_db_version exists after SchemaVersion")
+	}
+}
+
 func TestMigrateDownAndUpAgain(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,7 +53,16 @@ type Options struct {
 type DB struct {
 	sql    *sql.DB
 	logger *slog.Logger
-	closed atomic.Bool
+
+	// writeSlot (capacity 1) serializes the write transactions of this process. A writer takes it BEFORE it takes a
+	// pool connection, so writers that wait do not hold connections and readers keep finding one (see Do).
+	writeSlot chan struct{}
+
+	// mu orders Close against the registration of abandoned BEGIN attempts in bg (see begin and Close).
+	mu     sync.RWMutex
+	closed atomic.Bool    // set under mu.Lock
+	done   chan struct{}  // closed by Close; wakes writers that wait for the slot
+	bg     sync.WaitGroup // BEGIN attempts that still run in the background
 }
 
 // buildDSN returns the driver DSN. Verified against modernc.org/sqlite v1.60.1 (see docs/refs/sqlite-goose-sqlc.md):
@@ -112,7 +122,7 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 	pool.SetMaxIdleConns(maxConns)
 	pool.SetConnMaxLifetime(0)
 
-	db := &DB{sql: pool, logger: logger}
+	db := &DB{sql: pool, logger: logger, writeSlot: make(chan struct{}, 1), done: make(chan struct{})}
 	if err := db.verifyPragmas(ctx); err != nil {
 		_ = pool.Close()
 		return nil, err
@@ -122,6 +132,10 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 			_ = pool.Close()
 			return nil, err
 		}
+	} else if err := db.refuseNewerSchema(ctx); err != nil {
+		// Without Migrate the schema is used as it is, so a database from a newer build must still be refused.
+		_ = pool.Close()
+		return nil, err
 	}
 	return db, nil
 }
@@ -148,10 +162,19 @@ func (db *DB) verifyPragmas(ctx context.Context) error {
 
 // Close closes all connections; the WAL files are checkpointed and removed when the last connection closes. It is
 // safe to call more than once. Do returns ErrClosed afterwards.
+//
+// A Do that returned early because its context ended may still have a BEGIN waiting for a lock of another process
+// (SQLite cannot be told to stop). Close waits for those attempts, at most one busy timeout, so that the connection
+// they hold is released and the files are closed when Close returns.
 func (db *DB) Close() error {
-	if !db.closed.CompareAndSwap(false, true) {
+	db.mu.Lock()
+	first := !db.closed.Swap(true)
+	db.mu.Unlock()
+	if !first {
 		return nil
 	}
+	close(db.done)
+	db.bg.Wait()
 	return MapError(context.Background(), db.sql.Close())
 }
 
