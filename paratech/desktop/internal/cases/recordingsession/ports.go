@@ -17,28 +17,45 @@ type RecordingRepository interface {
 	Get(ctx context.Context, id shared.RecordingID) (*recording.Recording, error)
 
 	// Save inserts or updates the full state of a recording, including status and heartbeat
-	// (PRD section 6.2: persistent state, watchdog). It is a compare-and-swap on the aggregate version (ADR-0004): it
-	// returns an error wrapping shared.ErrConflict when the stored version differs from the one the recording was
-	// loaded with.
+	// (PRD section 6.2: persistent state, watchdog). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
 	Save(ctx context.Context, r *recording.Recording) error
 
 	// ListByStatus returns the recordings in any of the given statuses. Startup recovery uses it to find
 	// sessions that were still active when the app died (PRD section 6.2, section 14 case 1, AC-05).
 	ListByStatus(ctx context.Context, statuses ...recording.Status) ([]*recording.Recording, error)
 
-	// Delete removes the recording row only (PRD section 13.1, clear deletion semantics). The transcripts of the
-	// recording are removed explicitly through RecordingTranscripts.DeleteByRecording in the same Tx.Do, and the
-	// audio files through ArtifactStore before that. The use case does not rely on the DB-level ON DELETE CASCADE of
+	// Delete removes the row of r (PRD section 13.1, clear deletion semantics), guarded like Save: the row is deleted
+	// WHERE id = ? AND version = r.Version(), and a recording that changed meanwhile (for example the watchdog or a
+	// recovery moved it out of a deletable status) or is gone yields shared.ErrVersionConflict and nothing is deleted.
+	// r is the recording loaded INSIDE the Tx.Do that deletes it, after the aggregate allowed the deletion in that
+	// same transaction (see RecordingTranscripts for the whole flow). The transcripts of the recording are removed
+	// explicitly through RecordingTranscripts.DeleteByRecording in the same Tx.Do, and the audio files through
+	// ArtifactStore before that. The use case does not rely on the DB-level ON DELETE CASCADE of
 	// transcripts.recording_id: the cascade stays in the schema only as a safety net behind PRAGMA foreign_keys.
-	Delete(ctx context.Context, id shared.RecordingID) error
+	Delete(ctx context.Context, r *recording.Recording) error
 }
 
 // RecordingTranscripts lets the deletion of a recording find and remove the transcripts that belong to it
 // (PRD section 13.1: deleting a recording deletes its transcripts and derived artifacts). Implemented by the sqlite
-// adapter. The deletion order is fixed so that a crash in the middle is repaired by repeating the request: first
-// list the files (ListArtifactsByRecording) and delete them through ArtifactStore (idempotent, outside any
-// transaction because it is file I/O), then, in one Tx.Do, DeleteByRecording and RecordingRepository.Delete. A
-// crash after the file removal leaves rows that point at missing files, which the repeated deletion cleans up.
+// adapter.
+//
+// Delete flow (ADR-0004(a) allows this second two-aggregate transaction because deleting a parent with its dependents
+// has no cross-aggregate invariant to break, and a partial commit would leave orphans). The order is fixed so that a
+// crash in the middle is repaired by repeating the request:
+//  1. Decide first. Load the recording and ask the aggregate whether deletion is allowed (TASK-013 adds the method;
+//     it refuses while the status is STARTING, RECORDING, STOPPING or FINALIZING, PRD section 6.2). The rule lives
+//     in the aggregate, not in the use case (ARCH-22). If it refuses, nothing is touched: no file is deleted.
+//  2. List the files (ListArtifactsByRecording) and delete them through ArtifactStore (idempotent, outside any
+//     transaction because it is file I/O).
+//  3. In one Tx.Do: reload the recording, ask the aggregate again (the guard is re-checked inside the transaction),
+//     then DeleteByRecording and RecordingRepository.Delete(r) with the loaded version. A version conflict or a
+//     refusal here rolls everything back and fails the request. The window between step 1 and step 3 is small and
+//     only a status change after step 1 can open it (for example a recovery restarting FINALIZING); a crash or
+//     failure after step 2 leaves rows that point at missing files, which a repeated deletion cleans up.
 type RecordingTranscripts interface {
 	// ListArtifactsByRecording returns the references of the files that belong to the transcripts of the recording
 	// (PRD section 13.1), so that the use case can delete them. A recording without transcripts yields an empty list.
@@ -118,8 +135,10 @@ type IDGenerator interface {
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
-// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
-// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
+// is one use case method call and it changes one aggregate. The two documented exceptions (ADR-0004) are the batch
+// import of LessonRepository.ApplyChanges and the deletion of a recording together with its transcripts
+// (RecordingTranscripts.DeleteByRecording and RecordingRepository.Delete in one Tx.Do). Implemented by the sqlite
+// adapter (TASK-005).
 type Tx interface {
 	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
 	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front

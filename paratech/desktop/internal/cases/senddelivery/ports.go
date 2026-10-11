@@ -55,10 +55,15 @@ type DeliveryRepository interface {
 	// shared.ErrNotFound if there is none.
 	GetByIdempotencyKey(ctx context.Context, key string) (*delivery.Delivery, error)
 
-	// Save inserts or updates a delivery, including its status and the last error (PRD section 10, AC-15). It is a
-	// compare-and-swap on the aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when
-	// the stored version differs from the one the delivery was loaded with, and also when inserting a second
-	// delivery with an existing idempotency key.
+	// Save inserts or updates a delivery, including its status and the last error (PRD section 10, AC-15). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
+	// Two different failures are told apart: a stale version yields shared.ErrVersionConflict (reload and decide
+	// again), while inserting a second delivery with an existing idempotency key yields shared.ErrDuplicate (load the
+	// first one with GetByIdempotencyKey and continue with it). Both satisfy errors.Is(err, shared.ErrConflict); use
+	// cases check the narrow sentinel.
 	Save(ctx context.Context, d *delivery.Delivery) error
 
 	// ListByStatus returns the deliveries in any of the given statuses, for example the UNKNOWN ones to reconcile or
@@ -122,8 +127,10 @@ type IDGenerator interface {
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
-// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
-// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
+// is one use case method call and it changes one aggregate. The two documented exceptions (ADR-0004) are the batch
+// import of LessonRepository.ApplyChanges and the deletion of a recording together with its transcripts
+// (RecordingTranscripts.DeleteByRecording and RecordingRepository.Delete in one Tx.Do). Implemented by the sqlite
+// adapter (TASK-005).
 type Tx interface {
 	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
 	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front

@@ -20,15 +20,28 @@ type ModelRepository interface {
 	// List returns all installed models (PRD section 8: display installed models).
 	List(ctx context.Context) ([]*sttmodel.Model, error)
 
-	// Save inserts or updates an installed model (PRD section 8). It is a compare-and-swap on the aggregate version
-	// (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version differs from the one the
-	// model was loaded with, and also when another model with the same name and version exists.
+	// Save inserts or updates an installed model (PRD section 8). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
+	// Another installed model with the same name and version yields shared.ErrDuplicate (also errors.Is
+	// shared.ErrConflict), which is a different cause from a stale version.
 	Save(ctx context.Context, m *sttmodel.Model) error
 
 	// Delete removes the model record (PRD section 8: model removal). Whether removal is allowed is decided by the
 	// model aggregate and ModelPins before this is called. The pin check and this Delete must run inside the same
 	// Tx.Do (a write transaction), otherwise a job enqueued between the check and the delete could pin a model that
 	// is being removed (PRD section 14 case 11).
+	//
+	// Default model (ADR-0004): settings.default_stt_model_id references the model with ON DELETE RESTRICT, so the
+	// database never clears the default behind the settings aggregate's back. If the model is the default, the use
+	// case first clears the default through the settings aggregate and SettingsRepository.Save, as its own step in its
+	// own Tx.Do (ARCH-23: one aggregate per transaction), and then runs the pin check and this Delete. The steps are
+	// repeatable. If the user selects the model as default again in between, the database rejects the delete; the
+	// adapter maps that foreign key violation to an error wrapping shared.ErrConflict, and the use case clears the
+	// default again or reports that the model is in use. Rows of transcripts that reference the model keep their
+	// copied model name and version and lose only the reference (ON DELETE SET NULL).
 	Delete(ctx context.Context, id shared.SttModelID) error
 }
 
@@ -48,8 +61,13 @@ type SettingsRepository interface {
 	// Load returns the current settings, defaults applied (PRD section 15).
 	Load(ctx context.Context) (*settings.Settings, error)
 
-	// Save persists the settings (PRD section 8: select the active default model). It is a compare-and-swap on the
-	// aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version differs.
+	// Save persists the settings (PRD section 8: select the active default model). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
+	// The row is a singleton: Load without a stored row returns the defaults with Version() == 0 and the first Save
+	// inserts it; two concurrent first saves resolve as one INSERT and one shared.ErrVersionConflict.
 	Save(ctx context.Context, s *settings.Settings) error
 }
 
@@ -87,8 +105,10 @@ type IDGenerator interface {
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
-// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
-// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
+// is one use case method call and it changes one aggregate. The two documented exceptions (ADR-0004) are the batch
+// import of LessonRepository.ApplyChanges and the deletion of a recording together with its transcripts
+// (RecordingTranscripts.DeleteByRecording and RecordingRepository.Delete in one Tx.Do). Implemented by the sqlite
+// adapter (TASK-005).
 type Tx interface {
 	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
 	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front

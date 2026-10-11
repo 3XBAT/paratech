@@ -38,8 +38,9 @@ var (
 	quotedValue = regexp.MustCompile(`'([^']*)'`)
 	columnName  = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s`)
 	// A SQL column definition of the aggregate version, see the conventions in the schema header.
-	versionColumn  = regexp.MustCompile(`(?im)^\s*version\s+INTEGER\s+NOT NULL\s+DEFAULT\s+0\b`)
-	constraintWord = map[string]bool{"check": true, "unique": true, "primary": true, "foreign": true, "constraint": true}
+	versionColumn        = regexp.MustCompile(`(?im)^\s*version\s+INTEGER\s+NOT NULL\s+DEFAULT\s+0\b`)
+	defaultModelRestrict = regexp.MustCompile(`(?is)default_stt_model_id\s+TEXT\s+REFERENCES\s+stt_models\s*\(\s*id\s*\)\s+ON\s+DELETE\s+RESTRICT`)
+	constraintWord       = map[string]bool{"check": true, "unique": true, "primary": true, "foreign": true, "constraint": true}
 	// Names that must never appear in a table or column name: secrets live in Windows Credential Manager (ARCH-34).
 	secretLike = regexp.MustCompile(`(?i)api_?key|oauth|token|passw|secret|credential|private_?key|refresh`)
 )
@@ -226,6 +227,18 @@ func TestSchemaVersionColumns(t *testing.T) {
 		if !versionColumn.MatchString(body) {
 			t.Errorf("table %s has no `version INTEGER NOT NULL DEFAULT 0` column (optimistic concurrency, ADR-0004)", name)
 		}
+	}
+}
+
+// A reference that a versioned aggregate owns as state must not be cleared by the database behind its version
+// (ADR-0004): the default STT model of the settings is RESTRICT, so the use case clears it through the aggregate.
+func TestSchemaSettingsDefaultModelIsRestrict(t *testing.T) {
+	body := readSchema(t)["settings"]
+	if !defaultModelRestrict.MatchString(body) {
+		t.Error("settings.default_stt_model_id must be `REFERENCES stt_models (id) ON DELETE RESTRICT` (ADR-0004)")
+	}
+	if defaultModelRestrict.MatchString("default_stt_model_id TEXT REFERENCES stt_models (id) ON DELETE SET NULL") {
+		t.Error("defaultModelRestrict accepts ON DELETE SET NULL")
 	}
 }
 

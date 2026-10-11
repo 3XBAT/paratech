@@ -21,17 +21,22 @@ type LessonRepository interface {
 	// lesson is soft-deleted.
 	Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
 
-	// Save inserts or updates a lesson (PRD section 11). It is a compare-and-swap on the aggregate version
-	// (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version differs from the one the
-	// lesson was loaded with, for example when an import changed it while the calendar synchronization marked it
-	// synchronized.
+	// Save inserts or updates a lesson (PRD section 11). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
+	// A stale version happens for example when an import changed the lesson while the calendar synchronization marked
+	// it synchronized: the synchronization marks the lesson synced and saves the same instance once, and reloads on
+	// shared.ErrVersionConflict.
 	Save(ctx context.Context, l *lesson.Lesson) error
 
 	// ApplyChanges stores the upserted lessons and the lessons the import deleted in ONE transaction. It is the
 	// commit of an import: either the whole previewed change applies or nothing does (PRD sections 11.2 and 14
 	// case 9, AC-16). This batch of same-type aggregates is the documented exception to the one-aggregate rule
 	// of ARCH-23 (ADR-0004); the calendar synchronization job is enqueued afterwards as a separate repeatable step.
-	// Every lesson is saved with the version compare-and-swap of Save and any ErrConflict rolls back the whole batch.
+	// Every lesson is saved with the version compare-and-swap of Save (the adapter calls Persisted on each one after the
+	// commit) and any shared.ErrVersionConflict rolls back the whole batch.
 	// The deleted lessons were already marked deleted through the aggregate; the adapter persists them as soft
 	// deleted rows and never issues a DELETE.
 	ApplyChanges(ctx context.Context, upserts, deleted []*lesson.Lesson) error
@@ -107,8 +112,10 @@ type IDGenerator interface {
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
-// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
-// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
+// is one use case method call and it changes one aggregate. The two documented exceptions (ADR-0004) are the batch
+// import of LessonRepository.ApplyChanges and the deletion of a recording together with its transcripts
+// (RecordingTranscripts.DeleteByRecording and RecordingRepository.Delete in one Tx.Do). Implemented by the sqlite
+// adapter (TASK-005).
 type Tx interface {
 	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
 	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front

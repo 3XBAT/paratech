@@ -34,10 +34,13 @@ type AssignmentRepository interface {
 	// Get loads an assignment (PRD section 10). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.AssignmentID) (*assignment.Assignment, error)
 
-	// Save inserts or updates an assignment (PRD section 10: review and edit locally). It is a compare-and-swap on
-	// the aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version
-	// differs from the one the assignment was loaded with, for example when the user edited it while a
-	// reprocessing job produced new values.
+	// Save inserts or updates an assignment (PRD section 10: review and edit locally). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
+	// A stale version happens for example when the user edited the assignment while a reprocessing job produced new
+	// values.
 	Save(ctx context.Context, a *assignment.Assignment) error
 }
 
@@ -86,8 +89,10 @@ type IDGenerator interface {
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
-// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
-// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
+// is one use case method call and it changes one aggregate. The two documented exceptions (ADR-0004) are the batch
+// import of LessonRepository.ApplyChanges and the deletion of a recording together with its transcripts
+// (RecordingTranscripts.DeleteByRecording and RecordingRepository.Delete in one Tx.Do). Implemented by the sqlite
+// adapter (TASK-005).
 type Tx interface {
 	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
 	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front

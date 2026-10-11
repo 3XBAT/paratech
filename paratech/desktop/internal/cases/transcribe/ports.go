@@ -19,7 +19,7 @@ import (
 //
 // Job progress: the transcribe handler turns the progress callback into job.Progress reports to the job runner
 // (the report function it receives in Handle) and does not save the job itself, because the runner is the only
-// owner of a claimed job (ADR-0004).
+// owner of a claimed job (ADR-0004). It receives the job as a read-only job.Snapshot, not as the aggregate.
 //
 // The adapter reads and writes below the artifact root it was wired with; references keep the core free of OS paths.
 type STTEngine interface {
@@ -35,9 +35,11 @@ type TranscriptRepository interface {
 	// Get loads a transcript (PRD section 8). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.TranscriptID) (*transcript.Transcript, error)
 
-	// Save inserts or updates a transcript with the pinned model name and version (PRD section 8, AC-08). It is a
-	// compare-and-swap on the aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when the
-	// stored version differs from the one the transcript was loaded with.
+	// Save inserts or updates a transcript with the pinned model name and version (PRD section 8, AC-08). It is the
+	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
+	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
+	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
+	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
 	Save(ctx context.Context, t *transcript.Transcript) error
 }
 
@@ -111,8 +113,10 @@ type IDGenerator interface {
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
-// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
-// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
+// is one use case method call and it changes one aggregate. The two documented exceptions (ADR-0004) are the batch
+// import of LessonRepository.ApplyChanges and the deletion of a recording together with its transcripts
+// (RecordingTranscripts.DeleteByRecording and RecordingRepository.Delete in one Tx.Do). Implemented by the sqlite
+// adapter (TASK-005).
 type Tx interface {
 	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
 	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front
