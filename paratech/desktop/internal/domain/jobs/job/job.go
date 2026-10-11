@@ -32,6 +32,30 @@ func Statuses() []Status {
 // String returns the status as stored and shown.
 func (s Status) String() string { return string(s) }
 
+// IsTerminal reports whether no transition leaves the status (PRD section 7.2): COMPLETED, FAILED and CANCELLED.
+// This is a classification of the enumeration, not a transition rule; the transition table arrives with TASK-008.
+func (s Status) IsTerminal() bool {
+	switch s {
+	case StatusCompleted, StatusFailed, StatusCancelled:
+		return true
+	}
+	return false
+}
+
+// ActiveStatuses returns the statuses of unfinished jobs, those that are not terminal: QUEUED, RUNNING, RETRY_WAIT
+// and the three WAITING_* statuses. Use cases and repositories use it wherever "an unfinished job" matters, for
+// example the check that a model is still pinned (PRD section 14 case 11), so the notion lives in the domain
+// and not in an adapter query.
+func ActiveStatuses() []Status {
+	var out []Status
+	for _, s := range Statuses() {
+		if !s.IsTerminal() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // Type names the kind of work a job performs and selects its handler, for example "stt" (TASK-029),
 // "summarize" and "extract_homework" (TASK-042). The set is open: the task that adds a handler defines
 // its type name.
