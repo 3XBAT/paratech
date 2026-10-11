@@ -127,3 +127,29 @@
 - Минор: ports_test/schema_test ищут docs/ относительно репозитория; при выделении paratech/ в отдельный репозиторий нужен PARATECH_REQUIRE_DOCS=0 или перенос схемы
 
 ---
+
+## [TASK-004] Протобуф-контракт клиент↔Hub (Connect-RPC)
+**Дата:** 2026-10-12 13:00
+**Статус:** done
+
+### Что сделано
+- shared/proto/paratech/hub/v1: common, errors, gateway (Complete, CompleteStream), quota (Reserve, Settle, Release, GetRemaining); placeholder health.proto удалён; код в shared/gen
+- Типизированные ошибки QUOTA_EXCEEDED, RATE_LIMITED, INVALID_API_KEY, PROVIDER_ERROR (+ IDEMPOTENCY_CONFLICT), ErrorDetail с retry_after и retryable
+- Семантика: попытки резервации по ключу идемпотентности, отмена стрима списывает израсходованные токены (SettleRequest.partial), ключи в пространстве имён API-ключа, TTL результатов 24 ч
+- Тесты shared: contract_test.go (нет полей с URL/host, golden-список string-полей, типы полей, таблица RPC с public/internal) и transport_test.go (ErrorDetail через httptest, unary и stream)
+- docs/adr/0005-hub-contract-decisions.md; команда buf breaking в README
+- Ревью (reviewer): changes requested (2 high: контракт Reserve при повторе, бесплатный вывод при отмене стрима) -> исправлено
+
+### Тесты
+- [x] Шаг 1: (cd shared && buf lint && buf generate) — ok, дрейфа нет
+- [x] Шаг 2: go build ./shared/... ./hub/... ./desktop/... — ok; go vet, GOOS=windows go vet, go test -race, golangci-lint — ok
+- [x] Шаг 3: рабочая форма: (cd shared && buf breaking --against '../../.git#ref=HEAD~1,subdir=paratech/shared') — exit 0 (форма из задачи `.git#branch=HEAD~1` в этом layout не работает); против master — удаление health.proto, это намеренно
+- [x] Шаг 4: тест запрещает поля url/uri/endpoint/host/webhook/proxy/... и Any/Struct
+
+### Заметки для следующих агентов
+- Подтвердить: единица квоты только tokens (PRD §19 п.4 открыт); Reserve/Settle/Release в публичном QuotaService, но по комментариям и тесту доступны только внутри Hub (вариант: вынести в QuotaLedgerService); payload = instructions + untrusted_data
+- Включить `buf breaking` в CI ПОСЛЕ попадания этих изменений в master (иначе падает из-за health.proto); добавить rm -rf shared/gen && buf generate перед проверкой дрейфа
+- Реестр Settle (account+reservation) vs ARCH-23 решить в задаче Hub-квот
+- Не сделано: схема структурированного вывода (PRD §13.3), desktop-порт GetRemaining (AC-12), uint32 vs int64 у max_output_tokens
+
+---
