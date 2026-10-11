@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/shared"
@@ -29,6 +31,7 @@ func TestMapErrorWithRealDriverErrors(t *testing.T) {
 		run     func(db *DB) error
 		is      []error
 		isNot   []error
+		pk      bool   // IsPrimaryKeyViolation
 		wantMsg string // part of the message; the table and column help diagnosing
 	}{
 		{
@@ -51,6 +54,7 @@ func TestMapErrorWithRealDriverErrors(t *testing.T) {
 			},
 			is:    []error{shared.ErrDuplicate, shared.ErrConflict},
 			isNot: []error{shared.ErrVersionConflict},
+			pk:    true,
 		},
 		{
 			name: "integer primary key (rowid alias)",
@@ -62,6 +66,7 @@ func TestMapErrorWithRealDriverErrors(t *testing.T) {
 				return err
 			},
 			is: []error{shared.ErrDuplicate},
+			pk: true,
 		},
 		{
 			name: "foreign key",
@@ -138,6 +143,9 @@ func TestMapErrorWithRealDriverErrors(t *testing.T) {
 				t.Fatal("expected a database error")
 			}
 			got := MapError(ctx, raw)
+			if IsPrimaryKeyViolation(got) != tc.pk {
+				t.Errorf("IsPrimaryKeyViolation(%v) = %v, want %v", got, !tc.pk, tc.pk)
+			}
 			for _, want := range tc.is {
 				if !errors.Is(got, want) {
 					t.Errorf("errors.Is(%v, %v) = false", got, want)
@@ -280,17 +288,89 @@ func TestVersionCASClassification(t *testing.T) {
 	}
 }
 
+const insertJob = `INSERT INTO jobs (id, type, status, idempotency_key, max_attempts, next_run_at, created_at, updated_at)
+	VALUES (?, 'stt', 'QUEUED', ?, 3, 0, 0, 0)`
+
+const insertLesson = `INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, source_uid, created_at, updated_at)
+	VALUES (?, 'math', 1, 2, 'Europe/Berlin', ?, 0, 0)`
+
+func insertModelSQL() string {
+	return `INSERT INTO stt_models (id, name, model_version, file_ref, size_bytes, sha256, installed_at)
+	VALUES (?, ?, ?, 'models/small.bin', 10, '` + strings.Repeat("a", 64) + `', 0)`
+}
+
+// ADR-0004(d): a version-0 insert whose id exists is a version conflict, a violation of any other uniqueness rule stays
+// a duplicate.
 func TestInsertDuplicateIdBecomesVersionConflict(t *testing.T) {
-	db := openTest(t, nil)
 	ctx := context.Background()
-	q := db.Queries(ctx)
-	if err := q.InsertSettings(ctx, insertParams(1)); err != nil {
-		t.Fatal(err)
+	exec := func(query string, args ...any) func(db *DB) error {
+		return func(db *DB) error { _, err := db.sql.ExecContext(ctx, query, args...); return err }
 	}
-	err := DuplicateAsVersionConflict(MapError(ctx, q.InsertSettings(ctx, insertParams(2))))
-	if !errors.Is(err, shared.ErrVersionConflict) || errors.Is(err, shared.ErrDuplicate) {
-		t.Fatalf("err = %v, want ErrVersionConflict", err)
+	tests := []struct {
+		name   string
+		seed   func(db *DB) error
+		insert func(db *DB) error
+		wantVC bool // shared.ErrVersionConflict, otherwise shared.ErrDuplicate
+	}{
+		{
+			name:   "settings duplicate id",
+			seed:   func(db *DB) error { return db.Queries(ctx).InsertSettings(ctx, insertParams(1)) },
+			insert: func(db *DB) error { return db.Queries(ctx).InsertSettings(ctx, insertParams(2)) },
+			wantVC: true,
+		},
+		{
+			name:   "jobs duplicate id, new idempotency key",
+			seed:   exec(insertJob, "j1", "k1"),
+			insert: exec(insertJob, "j1", "k2"),
+			wantVC: true,
+		},
+		{
+			name:   "jobs new id, duplicate idempotency key",
+			seed:   exec(insertJob, "j1", "k1"),
+			insert: exec(insertJob, "j2", "k1"),
+		},
+		{
+			name:   "stt_models new id, existing name and model_version",
+			seed:   exec(insertModelSQL(), "m1", "small", "1"),
+			insert: exec(insertModelSQL(), "m2", "small", "1"),
+		},
+		{
+			name:   "lessons new id, existing source_uid",
+			seed:   exec(insertLesson, "l1", "uid-1"),
+			insert: exec(insertLesson, "l2", "uid-1"),
+		},
+		{
+			name:   "lessons duplicate id, new source_uid",
+			seed:   exec(insertLesson, "l1", "uid-1"),
+			insert: exec(insertLesson, "l1", "uid-2"),
+			wantVC: true,
+		},
+		{
+			name:   "stt_models duplicate id, new name",
+			seed:   exec(insertModelSQL(), "m1", "small", "1"),
+			insert: exec(insertModelSQL(), "m1", "base", "1"),
+			wantVC: true,
+		},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTest(t, nil)
+			if err := tc.seed(db); err != nil {
+				t.Fatal(err)
+			}
+			got := DuplicateAsVersionConflict(MapError(ctx, tc.insert(db)))
+			if tc.wantVC {
+				if !errors.Is(got, shared.ErrVersionConflict) || errors.Is(got, shared.ErrDuplicate) {
+					t.Fatalf("err = %v, want ErrVersionConflict", got)
+				}
+				return
+			}
+			if !errors.Is(got, shared.ErrDuplicate) || errors.Is(got, shared.ErrVersionConflict) {
+				t.Fatalf("err = %v, want ErrDuplicate and not ErrVersionConflict", got)
+			}
+		})
+	}
+
 	other := errors.New("other")
 	if DuplicateAsVersionConflict(nil) != nil || DuplicateAsVersionConflict(other) != other {
 		t.Fatal("DuplicateAsVersionConflict must pass through nil and unrelated errors")
@@ -339,5 +419,79 @@ func TestCountJobsByStatus(t *testing.T) {
 	want := []sqlcgen.CountJobsByStatusRow{{Status: "QUEUED", Total: 2}, {Status: "RETRY_WAIT", Total: 1}}
 	if len(rows) != len(want) || rows[0] != want[0] || rows[1] != want[1] {
 		t.Fatalf("rows = %v, want %v", rows, want)
+	}
+}
+
+// Documents what SQLite reports when one INSERT violates both the primary key and a secondary UNIQUE rule (the
+// limitation described at DuplicateAsVersionConflict): the secondary rule, so the result is shared.ErrDuplicate and not
+// a version conflict. If a SQLite upgrade changes the order this test fails and the documentation has to follow.
+func TestUniquenessCheckOrder(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"jobs: same id and same idempotency key", insertJob, []any{"j1", "k1"}},
+		{"stt_models: same id and same name+model_version", insertModelSQL(), []any{"m1", "small", "1"}},
+		{"lessons: same id and same source_uid (partial unique index)", insertLesson, []any{"l1", "uid-1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTest(t, nil)
+			mustExec(t, db, tc.query, tc.args...)
+			_, raw := db.sql.ExecContext(ctx, tc.query, tc.args...)
+			err := MapError(ctx, raw)
+			if !errors.Is(err, shared.ErrDuplicate) {
+				t.Fatalf("err = %v, want a duplicate", err)
+			}
+			if IsPrimaryKeyViolation(err) {
+				t.Errorf("SQLite now reports the primary key first: %v; update the doc of DuplicateAsVersionConflict", err)
+			}
+			if got := DuplicateAsVersionConflict(err); !errors.Is(got, shared.ErrDuplicate) {
+				t.Errorf("DuplicateAsVersionConflict = %v, want ErrDuplicate for a double collision", got)
+			}
+		})
+	}
+}
+
+func TestMapErrorClosedPool(t *testing.T) {
+	db := openTest(t, nil)
+	ctx := context.Background()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Queries(ctx).GetSettings(ctx)
+	if err == nil {
+		t.Fatal("query on a closed pool succeeded")
+	}
+	if got := MapError(ctx, err); !errors.Is(got, ErrClosed) {
+		t.Fatalf("MapError(%q) = %v, want ErrClosed", err, got)
+	}
+}
+
+// A call whose context has ended before the driver answered BUSY reports the context error, not a busy database.
+func TestMapErrorBusyAfterContextEnded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busyctx.db")
+	holder := openAt(t, path, nil)
+	other := openAt(t, path, func(o *Options) { o.BusyTimeout = 100 * time.Millisecond; o.Migrate = false })
+	release := holdWriteLock(t, holder)
+	defer release()
+
+	raw := func() error {
+		tx, err := other.sql.BeginTx(context.Background(), nil)
+		if err == nil {
+			_ = tx.Rollback()
+		}
+		return err
+	}
+	if got := MapError(context.Background(), raw()); !errors.Is(got, ErrBusy) {
+		t.Fatalf("live context: %v, want ErrBusy", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := MapError(ctx, raw())
+	if !errors.Is(got, context.Canceled) || errors.Is(got, ErrBusy) {
+		t.Fatalf("ended context: %v, want context.Canceled and not ErrBusy", got)
 	}
 }
