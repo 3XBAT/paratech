@@ -45,7 +45,7 @@
                 "Шаг 4: проверить, что .github/workflows/ci.yml синтаксически корректен (python3 -c 'import yaml;yaml.safe_load(open(\".github/workflows/ci.yml\"))')"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-002",
@@ -68,7 +68,7 @@
             "dependencies": [
                 "TASK-001"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-003",
