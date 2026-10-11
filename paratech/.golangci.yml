@@ -1,0 +1,15 @@
+# Small linter set on purpose (TASK-001). Layer rules (depguard) are added in TASK-002 per docs/architecture.md section 9.
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+formatters:
+  enable:
+    - gofmt
+    - goimports

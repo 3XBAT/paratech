@@ -7,21 +7,52 @@ defaults:
   run:
     working-directory: paratech
 jobs:
-  hub-and-shared:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: go vet ./hub/... ./shared/...
-      - run: go test ./hub/... ./shared/...
-  desktop-windows:
+          cache-dependency-path: paratech/*/go.sum
+      - run: go build ./desktop/... ./hub/... ./shared/...
+      - run: go vet ./desktop/... ./hub/... ./shared/...
+      - run: go test -race ./desktop/... ./hub/... ./shared/...
+      # Windows-only code must compile even when developed on another OS.
+      - run: GOOS=windows go vet ./desktop/...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+          args: ./desktop/... ./hub/... ./shared/...
+          working-directory: paratech
+      # The default run above skips //go:build windows files.
+      - uses: golangci/golangci-lint-action@v9
+        env:
+          GOOS: windows
+        with:
+          version: v2.14.0
+          args: ./desktop/...
+          working-directory: paratech
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: 1.73.0
+          input: paratech/shared
+          lint: true
+          format: true
+          breaking: false
+          push: false
+          pr_comment: false
+      # Generated code is committed (ARCH-35): fail when it drifts from the proto files.
+      - run: |
+          (cd shared && buf generate)
+          test -z "$(git status --porcelain -- shared/gen)"
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: go vet ./desktop/...
-      - run: go test ./desktop/...
+          cache-dependency-path: paratech/*/go.sum
+      - run: go vet ./desktop/... ./hub/... ./shared/...
+      - run: go test ./desktop/... ./hub/... ./shared/...
