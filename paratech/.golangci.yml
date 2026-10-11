@@ -1,14 +1,362 @@
-# Small linter set on purpose (TASK-001). Layer rules (depguard) are added in TASK-002 per docs/architecture.md section 9.
+# golangci-lint configuration for the whole workspace (golangci-lint v2).
+#
+# Run from paratech/ as `golangci-lint run ./desktop/... ./hub/... ./shared/...`: paratech/ is a workspace root
+# without its own go.mod, so a bare `./...` does not work. One config at the workspace root is used instead of one
+# per module because the tool is started from here (ADR-0002).
+#
+# Small linter set on purpose. depguard implements the import matrix of docs/architecture.md section 9
+# (ARCH-10, 11, 20, 30, 36, 40, 51, 52) with `files` globs per module and layer. Limits of depguard:
+#   - it cannot say "own package/context only" for names that are not known in advance, so cross-adapter and
+#     cross-transport imports (ARCH-30, 40) and imports between domain contexts added later (ARCH-11) are
+#     enforced only by tests/arch_test.go in each module. Domain contexts known from docs/architecture.md
+#     section 12 get a per-context rule below; cases use an allow list, which also rejects cross-use-case imports;
+#   - it cannot see time.Now() calls; ARCH-15/ARCH-24 and "no import C" are enforced by tests/arch_test.go.
+# Keep both mechanisms in sync when a layer rule changes (change requires an ADR).
 version: "2"
 linters:
   default: none
   enable:
+    - depguard
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
     - misspell
+  settings:
+    depguard:
+      rules:
+        # ---------------- desktop ----------------
+        # desktop must not import the hub module (section 9: a sibling service is not in the matrix).
+        desktop-no-sibling-service:
+          list-mode: lax
+          files:
+            - "**/desktop/**"
+          deny:
+            - pkg: "paratech/hub"
+              desc: "desktop must not import the hub module"
+
+        # ARCH-10, ARCH-15: domain imports only std and the domain layer; no third-party, no randomness (time.Now: arch_test).
+        desktop-domain:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain"
+          deny:
+            - pkg: "math/rand"
+              desc: "ARCH-15: randomness comes in through parameters"
+            - pkg: "crypto/rand"
+              desc: "ARCH-15: randomness comes in through parameters"
+
+        # ARCH-10, ARCH-11: the shared kernel imports only std and itself.
+        desktop-domain-shared-kernel:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/shared/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+
+        # ARCH-11: context recording imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-recording:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/recording/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/recording"
+
+        # ARCH-11: context jobs imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-jobs:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/jobs/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/jobs"
+
+        # ARCH-11: context transcription imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-transcription:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/transcription/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/transcription"
+
+        # ARCH-11: context schedule imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-schedule:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/schedule/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/schedule"
+
+        # ARCH-11: context coursework imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-coursework:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/coursework/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/coursework"
+
+        # ARCH-11: context delivery imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-delivery:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/delivery/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/delivery"
+
+        # ARCH-11: context settings imports only std, domain/shared and itself (contexts added later: arch_test).
+        desktop-domain-settings:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/domain/settings/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain/shared"
+            - "paratech/desktop/internal/domain/settings"
+
+        # ARCH-20, ARCH-36: cases import std, domain/** and internal/metrics only (an allow list, so other cases/* are rejected too).
+        desktop-cases:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/cases/**"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain"
+            - "paratech/desktop/internal/metrics"
+          deny:
+            - pkg: "math/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+            - pkg: "crypto/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+
+        # ARCH-20: test files of cases may additionally use testenv and cases/* (the own package for external tests; cross-use-case imports in tests: arch_test).
+        desktop-cases-tests:
+          list-mode: strict
+          files:
+            - "**/desktop/internal/cases/**/*_test.go"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/internal/domain"
+            - "paratech/desktop/internal/metrics"
+            - "paratech/desktop/internal/cases"
+            - "paratech/desktop/testenv"
+          deny:
+            - pkg: "math/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+            - pkg: "crypto/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+
+        # ARCH-30: adapters never import cases, input or app (other adapters: arch_test).
+        desktop-adapters:
+          list-mode: lax
+          files:
+            - "**/desktop/internal/adapters/**"
+          deny:
+            - pkg: "paratech/desktop/internal/cases"
+              desc: "ARCH-30: adapters implement ports structurally and must not import cases"
+            - pkg: "paratech/desktop/internal/input"
+              desc: "ARCH-30: adapters must not import input"
+            - pkg: "paratech/desktop/internal/app"
+              desc: "ARCH-30: only app wires layers"
+
+        # ARCH-40: input never imports adapters or app (other transports: arch_test).
+        desktop-input:
+          list-mode: lax
+          files:
+            - "**/desktop/internal/input/**"
+          deny:
+            - pkg: "paratech/desktop/internal/adapters"
+              desc: "ARCH-40: input talks to use cases, not adapters"
+            - pkg: "paratech/desktop/internal/app"
+              desc: "ARCH-40: only app wires layers"
+
+        # ARCH-52: config depends only on the standard library (and its own package from external tests).
+        desktop-config:
+          list-mode: strict
+          files:
+            - "**/desktop/config/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/config"
+
+        # ARCH-51: cmd is thin and reaches the core only through config and internal/app.
+        desktop-cmd:
+          list-mode: lax
+          files:
+            - "**/desktop/cmd/**"
+          deny:
+            - pkg: "paratech/desktop/internal/domain"
+              desc: "ARCH-51: cmd contains no logic; use internal/app"
+            - pkg: "paratech/desktop/internal/cases"
+              desc: "ARCH-51: cmd contains no logic; use internal/app"
+            - pkg: "paratech/desktop/internal/adapters"
+              desc: "ARCH-51: wiring belongs to internal/app (ARCH-50)"
+            - pkg: "paratech/desktop/internal/input"
+              desc: "ARCH-51: wiring belongs to internal/app (ARCH-50)"
+            - pkg: "paratech/desktop/internal/metrics"
+              desc: "ARCH-51: cmd contains no logic; use internal/app"
+
+        # ---------------- hub ----------------
+        # hub must not import the desktop module (section 9: a sibling service is not in the matrix).
+        hub-no-sibling-service:
+          list-mode: lax
+          files:
+            - "**/hub/**"
+          deny:
+            - pkg: "paratech/desktop"
+              desc: "hub must not import the desktop module"
+
+        # ARCH-10, ARCH-15: domain imports only std and the domain layer; no third-party, no randomness (time.Now: arch_test).
+        hub-domain:
+          list-mode: strict
+          files:
+            - "**/hub/internal/domain/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain"
+          deny:
+            - pkg: "math/rand"
+              desc: "ARCH-15: randomness comes in through parameters"
+            - pkg: "crypto/rand"
+              desc: "ARCH-15: randomness comes in through parameters"
+
+        # ARCH-10, ARCH-11: the shared kernel imports only std and itself.
+        hub-domain-shared-kernel:
+          list-mode: strict
+          files:
+            - "**/hub/internal/domain/shared/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain/shared"
+
+        # ARCH-11: context access imports only std, domain/shared and itself (contexts added later: arch_test).
+        hub-domain-access:
+          list-mode: strict
+          files:
+            - "**/hub/internal/domain/access/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain/shared"
+            - "paratech/hub/internal/domain/access"
+
+        # ARCH-11: context quota imports only std, domain/shared and itself (contexts added later: arch_test).
+        hub-domain-quota:
+          list-mode: strict
+          files:
+            - "**/hub/internal/domain/quota/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain/shared"
+            - "paratech/hub/internal/domain/quota"
+
+        # ARCH-11: context llm imports only std, domain/shared and itself (contexts added later: arch_test).
+        hub-domain-llm:
+          list-mode: strict
+          files:
+            - "**/hub/internal/domain/llm/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain/shared"
+            - "paratech/hub/internal/domain/llm"
+
+        # ARCH-20, ARCH-36: cases import std, domain/** and internal/metrics only (an allow list, so other cases/* are rejected too).
+        hub-cases:
+          list-mode: strict
+          files:
+            - "**/hub/internal/cases/**"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain"
+            - "paratech/hub/internal/metrics"
+          deny:
+            - pkg: "math/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+            - pkg: "crypto/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+
+        # ARCH-20: test files of cases may additionally use testenv and cases/* (the own package for external tests; cross-use-case imports in tests: arch_test).
+        hub-cases-tests:
+          list-mode: strict
+          files:
+            - "**/hub/internal/cases/**/*_test.go"
+          allow:
+            - "$gostd"
+            - "paratech/hub/internal/domain"
+            - "paratech/hub/internal/metrics"
+            - "paratech/hub/internal/cases"
+            - "paratech/hub/testenv"
+          deny:
+            - pkg: "math/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+            - pkg: "crypto/rand"
+              desc: "ARCH-24: randomness comes in through a port"
+
+        # ARCH-30: adapters never import cases, input or app (other adapters: arch_test).
+        hub-adapters:
+          list-mode: lax
+          files:
+            - "**/hub/internal/adapters/**"
+          deny:
+            - pkg: "paratech/hub/internal/cases"
+              desc: "ARCH-30: adapters implement ports structurally and must not import cases"
+            - pkg: "paratech/hub/internal/input"
+              desc: "ARCH-30: adapters must not import input"
+            - pkg: "paratech/hub/internal/app"
+              desc: "ARCH-30: only app wires layers"
+
+        # ARCH-40: input never imports adapters or app (other transports: arch_test).
+        hub-input:
+          list-mode: lax
+          files:
+            - "**/hub/internal/input/**"
+          deny:
+            - pkg: "paratech/hub/internal/adapters"
+              desc: "ARCH-40: input talks to use cases, not adapters"
+            - pkg: "paratech/hub/internal/app"
+              desc: "ARCH-40: only app wires layers"
+
+        # ARCH-52: config depends only on the standard library (and its own package from external tests).
+        hub-config:
+          list-mode: strict
+          files:
+            - "**/hub/config/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/config"
+
+        # ARCH-51: cmd is thin and reaches the core only through config and internal/app.
+        hub-cmd:
+          list-mode: lax
+          files:
+            - "**/hub/cmd/**"
+          deny:
+            - pkg: "paratech/hub/internal/domain"
+              desc: "ARCH-51: cmd contains no logic; use internal/app"
+            - pkg: "paratech/hub/internal/cases"
+              desc: "ARCH-51: cmd contains no logic; use internal/app"
+            - pkg: "paratech/hub/internal/adapters"
+              desc: "ARCH-51: wiring belongs to internal/app (ARCH-50)"
+            - pkg: "paratech/hub/internal/input"
+              desc: "ARCH-51: wiring belongs to internal/app (ARCH-50)"
+            - pkg: "paratech/hub/internal/metrics"
+              desc: "ARCH-51: cmd contains no logic; use internal/app"
 formatters:
   enable:
     - gofmt

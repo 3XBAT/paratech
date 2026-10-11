@@ -68,3 +68,31 @@
 - Когда в desktop появится Wails, Linux-job CI потребует GTK/WebKit или разделения по build tags.
 
 ---
+
+## [TASK-002] Каркас архитектуры и автоматические проверки
+**Дата:** 2026-10-11 12:00
+**Статус:** done
+
+### Что сделано
+- desktop и hub: каталоги по разделу 2 docs/architecture.md, doc.go в каждом слое, шаблонные контексты domain/jobs (desktop) и domain/quota (hub) + domain/shared
+- internal/app (New/Run/Close), config (только std), cmd/desktop и cmd/hub (флаги --help/--version/--check)
+- paratech/.golangci.yml: depguard-правила по матрице раздела 9 (glob-ы по модулям и слоям)
+- tests/arch_test.go в каждом модуле: матрица импортов, time.Now/math/rand в domain и cases, import "C" в desktop, раскладка, организационные файлы в paratech/; негативные тесты на синтетических деревьях
+- docs/adr/0002-initial-bounded-contexts.md (карта контекстов, единый корневой .golangci.yml, путь proto)
+- Ревью (reviewer): вердикт approve, блокеров и high нет
+
+### Тесты
+- [x] Шаг 1: go test -race -count=1 ./desktop/tests/... ./hub/tests/... — ok
+- [x] Шаг 2: временный импорт adapters в domain/jobs — arch_test и golangci-lint (depguard) падают; правка откатана
+- [x] Шаг 3: golangci-lint run ./desktop/... ./hub/... ./shared/... (и GOOS=windows для desktop) — 0 issues; GOOS=windows go vet ./desktop/... — ok. Дословный `golangci-lint run ./...` не работает в корне workspace (см. TASK-001 / ADR-0002)
+- [x] Шаг 4: go run ./desktop/cmd/desktop --help, go run ./hub/cmd/hub --help — ok
+
+### Заметки для следующих агентов
+Замечания ревью уровня medium/low, НЕ исправленные (кандидаты в отдельную задачу усиления проверок):
+- ARCH-01: код вне перечисленных каталогов модуля (например desktop/pkg/...) не классифицируется и не проверяется; .go-файлы прямо в internal/ тоже
+- Hard rule 5 / ARCH-15: ввод-вывод в domain/cases (os, net/*, database/sql, go-statements) не запрещён ни depguard, ни arch_test
+- testenv можно импортировать из не-тестовых файлов adapters/input/app; нужно разрешить только из _test.go и tests/
+- ADR-0002 ослабляет букву ARCH-20/61 (cases/_test.go может импортировать testenv, доп. правила crypto/rand, cmd, desktop<->hub); docs/architecture.md (разд. 9 и 10: «.golangci.yml каждого модуля») не обновлён — нужен архитектор/пользователь
+- Низкие: dot-import time, ARCH-52/53 и ARCH-02 не проверяются машинно; флаги cmd не перекрывают невалидное значение из окружения (config.Load валидирует до применения флагов); glob-ы `**/desktop/**` не привязаны к каталогу paratech/; go.work.sum добавлен тулчейном
+
+---
