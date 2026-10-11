@@ -16,7 +16,8 @@ import "paratech/hub/v1/common.proto";
 // made (the API key scope of the request); a reservation of another tester is reported as "not_found". Splitting the
 // internal part into its own service is an option for the Hub quota task (ADR-0005).
 //
-// Reservation life cycle: RESERVED -> SETTLED | RELEASED. Settle and Release are idempotent per reservation_id.
+// Reservation life cycle: RESERVED -> SETTLED | RELEASED, plus RELEASED by expiry -> SETTLED when a late Settle arrives (it
+// charges the actual usage, see Settle). Settle and Release are idempotent per reservation_id.
 //
 // Life cycle of an idempotency key. Reserve is keyed by idempotency_key, namespaced per tester (see common.proto). A key
 // has a fingerprint (operation_type, model_alias, amount; recorded with its first reservation) and a list of attempts,
@@ -24,7 +25,7 @@ import "paratech/hub/v1/common.proto";
 //   - no reservation yet, or the earlier Reserve failed with ERROR_CODE_QUOTA_EXCEEDED (it holds nothing and records
 //     nothing): a new reservation is created, or the call fails again with QUOTA_EXCEEDED;
 //   - the latest reservation is RESERVED and has not expired: it is returned as it is and nothing extra is held (this is
-//     how a concurrent duplicate sees the same reservation);
+//     a ledger-level guard only: the Gateway rejects a duplicate call of a RUNNING attempt with `aborted` before it reaches Reserve);
 //   - the latest reservation is SETTLED by a complete call: it is returned as it is (a replay);
 //   - the latest reservation is RELEASED (by Release, by expiry, or after a failed call), or was settled as partial
 //     usage (SettleRequest.partial, a cancelled call): the attempt is over and Reserve creates a NEW reservation with a
@@ -32,6 +33,9 @@ import "paratech/hub/v1/common.proto";
 //     after expiry with the same key; replaying a dead reservation would make such a retry impossible;
 //   - arguments that differ from the fingerprint fail with ERROR_CODE_IDEMPOTENCY_CONFLICT, in every state.
 // Settle and Release address exactly one attempt by its reservation_id and never touch another attempt of the same key.
+// A late attempt: if the reservation of a still running call was released by expiry and a NEWER attempt already exists for
+// the key, the late call is charged for its actual usage (Settle) but its result is discarded and never replayed; the
+// newer attempt owns the key.
 //
 // Expiry. An unsettled reservation expires at expires_at and is then released by the Hub, so that a crashed gateway
 // cannot lock quota for good. expires_at must exceed the longest request timeout of the gateway (provider call plus

@@ -98,7 +98,7 @@ func MapError(ctx context.Context, err error) error {
 	if errors.Is(err, sql.ErrTxDone) {
 		return &Error{Kind: ErrTxClosed}
 	}
-	if err.Error() == errDBClosedText {
+	if strings.Contains(err.Error(), errDBClosedText) {
 		return &Error{Kind: ErrClosed}
 	}
 	var se *msqlite.Error

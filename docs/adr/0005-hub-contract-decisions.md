@@ -80,8 +80,8 @@ is the parent of `paratech/`. The working form, run from `paratech/shared`, is
 changes). Breaking detection is NOT enabled in CI yet: the `master` baseline still contains `health.proto`, which this change removes,
 so enabling it would fail this PR. Follow-up, right after this change reaches `master`: set `breaking: true` in the buf-action step
 of `.github/workflows/ci.yml` with the pull-request base as baseline. Another follow-up idea, a CI-safe stale-file check: `buf generate` does
-not delete generated files of a removed proto, so the existing drift check misses a stale `.pb.go`; the check should run
-`rm -rf shared/gen && buf generate` before `git status --porcelain -- shared/gen`.
+not delete generated files of a removed proto, so the existing drift check misses a stale `.pb.go`; the check empties `shared/gen`
+(`find shared/gen -type f -delete`) before `buf generate` and `git status --porcelain -- shared/gen`; implemented in CI by TASK-005.
 
 ### h. Ledger consistency (to be decided in the Hub quota task)
 Reserve and Settle change two records, the account balance and the reservation, which ARCH-23 would call two aggregates in one

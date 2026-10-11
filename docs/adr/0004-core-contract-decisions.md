@@ -68,7 +68,9 @@ its table. One protocol, used by every repository:
   On success the adapter calls `agg.Persisted(newVersion)`, so the same instance can be saved again: the runner saves one
   `*job.Job` after every progress report and once more for the final transition, and the calendar synchronization marks a
   lesson synchronized and saves the same instance, without reloading in between. `Save` returns only an error because the new
-  version is recorded on the aggregate; there is exactly one place where it is set.
+  version is recorded on the aggregate; there is exactly one place where it is set. `Persisted` is applied inside `Save`, before the
+  outermost commit: when the enclosing `Do` returns an error (rollback or failed commit), the aggregates saved inside it must be
+  reloaded, not reused. If that proves error-prone, TASK-007/008 may add an on-commit hook that applies `Persisted` after the commit.
 - **Other writers follow the same rule.** `JobRepository.Enqueue` stores a version-0 job and calls `Persisted(1)` when it was
   created (not when the idempotency key already existed); `LessonRepository.ApplyChanges` applies the rule to each lesson and
   calls `Persisted` on each after the commit; `RecordingRepository.Delete(r)` deletes `WHERE id = ? AND version = r.Version()`.
@@ -125,7 +127,8 @@ model fails the foreign key check and surfaces as `shared.ErrConflict`.
 ## Consequences
 - `docs/architecture.md` ARCH-23 points here for the two exceptions (a).
 - TASK-005 turns `docs/contracts/schema.sql` into goose migrations and must execute them against SQLite in its tests (the contract
-  test in `desktop/tests` has no SQL engine). It implements the version guard and the guarded claim in the sqlite adapter.
+  test in `desktop/tests` has no SQL engine). It provides the `VersionCAS`, `DuplicateAsVersionConflict` and `IsPrimaryKeyViolation` helpers in the sqlite adapter; the guarded claim
+  belongs to TASK-008 and every repository write must run through `DB.Do`.
 - TASK-008, TASK-013, TASK-018, TASK-044 (and the owners of the assignment, transcript, model and settings aggregates) make
   `Restore` take the stored version, keep `Version()`/`Persisted()` as they are, and keep the status tables in sync with the
   schema CHECK lists. The contract test `desktop/tests/save_contract_test.go` fails if a storing port takes a type without them.

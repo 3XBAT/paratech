@@ -147,5 +147,7 @@ type Tx interface {
 	// do not. Nesting: a Do called with the context of a running fn joins the outer transaction (no savepoint) and
 	// only the outermost Do commits or rolls back. fn performs no external I/O (network, e-mail, calendar, files,
 	// subprocesses): it holds the database write lock and only reads and writes local aggregates.
+	// When Do returns an error, aggregates saved inside it must be reloaded before reuse: Save records the new
+	// version on the instance (Persisted) before the outermost commit, which a rollback does not undo (ADR-0004(d)).
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }

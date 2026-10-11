@@ -10,8 +10,10 @@
 // database error with MapError and implement the optimistic concurrency protocol of ADR-0004(d) with VersionCAS.
 //
 // Connection model. Every pooled connection is opened with the same DSN (see Open), so the pragmas that are
-// per-connection (foreign keys, busy timeout, synchronous) hold on all of them. Reads run concurrently under WAL;
-// writers are serialized by SQLite itself: a write transaction starts with BEGIN IMMEDIATE and waits up to the busy
-// timeout for the write lock, then fails with ErrBusy. A function running inside DB.Do holds that lock, so it must be
-// short and do no external I/O.
+// per-connection (foreign keys, busy timeout, synchronous) hold on all of them. Reads run concurrently under WAL.
+// Writers are serialized inside the process by a write slot that DB.Do takes before it takes a pooled connection, so
+// waiting writers never hold connections; SQLite's BEGIN IMMEDIATE and busy timeout then arbitrate only against other
+// processes and fail with ErrBusy. A function running inside DB.Do holds the write lock, so it must be short and do no
+// external I/O. Rule for repositories: every write runs through DB.Do (a nested Do joins the outer transaction); a bare
+// autocommit write on the pool would skip the slot and could wait in SQLite's busy handler while holding a connection.
 package sqlite
