@@ -5,7 +5,8 @@ package tests
 //   - every use case of docs/architecture.md section 12 has a ports.go and a doc.go;
 //   - ports.go holds interfaces only (no implementations, no DTO types of the use case);
 //   - every interface and every method has a doc comment with a PRD section reference;
-//   - only primitives, standard library types and domain types appear in method signatures;
+//   - only primitives, standard library types and domain types appear in method signatures, and the standard
+//     packages that stand for I/O or the OS (os, database/sql, net/http, net, unsafe, io/fs) never do;
 //   - methods take context.Context first (ARCH-25), except the pure Clock and IDGenerator ports.
 
 import (
@@ -30,9 +31,11 @@ var useCases = []string{
 // requiredPorts lists the ports TASK-003 must declare, and in which use case at least one declares them.
 var requiredPorts = map[string][]string{
 	"RecordingRepository":  {"recordingsession"},
+	"RecordingTranscripts": {"recordingsession"},
 	"JobRepository":        {"jobrunner"},
 	"TranscriptRepository": {"transcribe"},
 	"ModelRepository":      {"modelcatalog"},
+	"ModelPins":            {"modelcatalog"},
 	"LessonRepository":     {"schedulesync"},
 	"AssignmentRepository": {"homeworkflow"},
 	"DeliveryRepository":   {"senddelivery"},
@@ -48,6 +51,7 @@ var requiredPorts = map[string][]string{
 	"CalendarAdapter":      {"schedulesync"},
 	"EmailAdapter":         {"senddelivery"},
 	"LLMClient":            {"homeworkflow"},
+	"Handler":              {"jobrunner"},
 	"Tx":                   {"recordingsession", "jobrunner", "transcribe", "modelcatalog", "schedulesync", "homeworkflow", "senddelivery"},
 }
 
@@ -56,6 +60,12 @@ var prdRef = regexp.MustCompile(`PRD sections? \d`)
 // noContextPorts are pure in-memory ports that need no context (ARCH-24).
 var noContextPorts = map[string]bool{"Clock": true, "IDGenerator": true}
 
+// deniedStd are standard packages whose types must not appear in port signatures: they would tie the core to
+// the OS, the database or the network (hard rule 5, ARCH-26). io, context and time stay allowed.
+var deniedStd = map[string]bool{
+	"os": true, "database/sql": true, "net/http": true, "net": true, "unsafe": true, "io/fs": true,
+}
+
 var builtinTypes = map[string]bool{
 	"string": true, "bool": true, "error": true, "int": true, "int64": true, "byte": true,
 }
@@ -63,6 +73,14 @@ var builtinTypes = map[string]bool{
 const domainImportPrefix = modulePath + "/internal/domain/"
 
 type portIssue struct{ file, msg string }
+
+// portTypePackageAllowed reports whether types of the import path may appear in a port: the standard library
+// (the first element has no dot, and it is not this module) or a domain package.
+func portTypePackageAllowed(path string) bool {
+	first, _, _ := strings.Cut(path, "/")
+	isStd := !strings.Contains(first, ".") && first != "paratech"
+	return isStd || strings.HasPrefix(path, domainImportPrefix)
+}
 
 // checkPortsFile applies the rules above to one ports.go and returns the interface names it declares.
 func checkPortsFile(file string) (names []string, issues []portIssue) {
@@ -75,20 +93,20 @@ func checkPortsFile(file string) (names []string, issues []portIssue) {
 		issues = append(issues, portIssue{file, fmt.Sprintf(format, args...)})
 	}
 
-	// import name -> allowed?
-	imports := map[string]bool{}
+	// import name (the alias, or the last path element) -> import path
+	imports := map[string]string{}
 	for _, spec := range f.Imports {
 		p, _ := strconv.Unquote(spec.Path.Value)
 		name := p[strings.LastIndex(p, "/")+1:]
 		if spec.Name != nil {
 			name = spec.Name.Name
 		}
-		first, _, _ := strings.Cut(p, "/")
-		isStd := !strings.Contains(first, ".") && first != "paratech"
-		isDomain := strings.HasPrefix(p, domainImportPrefix)
-		imports[name] = isStd || isDomain
-		if !isStd && !isDomain {
+		imports[name] = p
+		if !portTypePackageAllowed(p) {
 			bad("imports %q: only std and domain types may appear in ports (ARCH-26, ARCH-36)", p)
+		}
+		if deniedStd[p] {
+			bad("imports %q: this standard package must not appear in ports (hard rule 5, ARCH-26)", p)
 		}
 	}
 
@@ -124,7 +142,7 @@ func checkPortsFile(file string) (names []string, issues []portIssue) {
 	return names, issues
 }
 
-func checkMethod(iface string, m *ast.Field, imports map[string]bool, bad func(string, ...any)) {
+func checkMethod(iface string, m *ast.Field, imports map[string]string, bad func(string, ...any)) {
 	if len(m.Names) != 1 {
 		bad("%s embeds an interface or has an unnamed method; ports list their methods explicitly", iface)
 		return
@@ -167,8 +185,9 @@ func isContext(e ast.Expr) bool {
 }
 
 // checkType walks a type expression: bare identifiers must be builtins, qualified ones must come from
-// an allowed (std or domain) package. A bare non-builtin identifier would be a type of the use case itself.
-func checkType(method string, e ast.Expr, imports map[string]bool, bad func(string, ...any)) {
+// an allowed (std or domain) package that is not on the deny list. A bare non-builtin identifier would be a
+// type of the use case itself.
+func checkType(method string, e ast.Expr, imports map[string]string, bad func(string, ...any)) {
 	switch t := e.(type) {
 	case *ast.Ident:
 		if !builtinTypes[t.Name] {
@@ -176,8 +195,18 @@ func checkType(method string, e ast.Expr, imports map[string]bool, bad func(stri
 		}
 	case *ast.SelectorExpr:
 		x, ok := t.X.(*ast.Ident)
-		if !ok || !imports[x.Name] {
-			bad("method %s uses a type from a package that is not std or domain (ARCH-26, ARCH-36)", method)
+		if !ok {
+			bad("method %s uses an unsupported qualified type", method)
+			return
+		}
+		path, imported := imports[x.Name]
+		switch {
+		case !imported:
+			bad("method %s uses qualifier %s that is not imported", method, x.Name)
+		case deniedStd[path]:
+			bad("method %s uses a type from the denied standard package %q (hard rule 5, ARCH-26)", method, path)
+		case !portTypePackageAllowed(path):
+			bad("method %s uses a type from package %q that is not std or domain (ARCH-26, ARCH-36)", method, path)
 		}
 	case *ast.StarExpr:
 		checkType(method, t.X, imports, bad)
@@ -234,14 +263,21 @@ func TestUseCasePorts(t *testing.T) {
 	}
 }
 
-// TestPortsCheckerDetectsViolations feeds the checker a synthetic ports.go that breaks every rule.
+// TestPortsCheckerDetectsViolations feeds the checker a synthetic ports.go that breaks every rule. Each
+// expectation names the method it belongs to, so a violation cannot be "found" for another reason.
 func TestPortsCheckerDetectsViolations(t *testing.T) {
 	src := `package x
 
 import (
 	"context"
+	"database/sql"
+	"io/fs"
+	"net"
+	"net/http"
+	"os"
+	"unsafe"
 
-	"paratech/shared/gen/paratech/hub/v1"
+	hubv1 "paratech/shared/gen/paratech/hub/v1"
 	"paratech/desktop/internal/cases/other"
 )
 
@@ -260,14 +296,91 @@ type Leaky interface {
 	Local(ctx context.Context, d Dto) error
 	// Foreign uses a generated type (PRD section 1).
 	Foreign(ctx context.Context, r hubv1.Request) error
+	// Ghost uses a qualifier that is not imported (PRD section 1).
+	Ghost(ctx context.Context, r ghost.Thing) error
 	// NoCtx forgot the context (PRD section 1).
 	NoCtx(id string) error
 }
 
+// Denied uses standard packages that stand for I/O (PRD section 1).
+type Denied interface {
+	// OS takes a file (PRD section 1).
+	OS(ctx context.Context, f *os.File) error
+	// SQL takes a database handle (PRD section 1).
+	SQL(ctx context.Context, db *sql.DB) error
+	// HTTP takes a client (PRD section 1).
+	HTTP(ctx context.Context, c *http.Client) error
+	// Net takes a connection (PRD section 1).
+	Net(ctx context.Context, c net.Conn) error
+	// Unsafe takes a pointer (PRD section 1).
+	Unsafe(ctx context.Context, p unsafe.Pointer) error
+	// FS takes a file system (PRD section 1).
+	FS(ctx context.Context, f fs.FS) error
+}
+
 func Impl() {}
 `
-	dir := t.TempDir()
-	file := filepath.Join(dir, "ports.go")
+	issues := checkSource(t, src)
+	for _, want := range []string{
+		`imports "paratech/shared/gen/paratech/hub/v1"`,
+		`imports "paratech/desktop/internal/cases/other"`,
+		`imports "os": this standard package must not appear in ports`,
+		`imports "database/sql": this standard package`,
+		`imports "net/http": this standard package`,
+		`imports "net": this standard package`,
+		`imports "unsafe": this standard package`,
+		`imports "io/fs": this standard package`,
+		"interface Undocumented has no doc comment",
+		"method Undocumented.Do has no doc comment",
+		"type Dto is not an interface",
+		"method Leaky.Local uses type Dto",
+		`method Leaky.Foreign uses a type from package "paratech/shared/gen/paratech/hub/v1" that is not std or domain`,
+		"method Leaky.Ghost uses qualifier ghost that is not imported",
+		"method Leaky.NoCtx must take context.Context first",
+		`method Denied.OS uses a type from the denied standard package "os"`,
+		`method Denied.SQL uses a type from the denied standard package "database/sql"`,
+		`method Denied.HTTP uses a type from the denied standard package "net/http"`,
+		`method Denied.Net uses a type from the denied standard package "net"`,
+		`method Denied.Unsafe uses a type from the denied standard package "unsafe"`,
+		`method Denied.FS uses a type from the denied standard package "io/fs"`,
+		"declares func Impl",
+	} {
+		if !strings.Contains(issues, want) {
+			t.Errorf("checker did not report %q; got:\n%s", want, issues)
+		}
+	}
+}
+
+// TestPortsCheckerAcceptsValidFile is the control for the test above: a clean ports.go yields no issues, so
+// violations are reported for the right reason and allowed packages (io, time, domain) are not rejected.
+func TestPortsCheckerAcceptsValidFile(t *testing.T) {
+	src := `package x
+
+import (
+	"context"
+	"io"
+	"time"
+
+	"paratech/desktop/internal/domain/shared"
+)
+
+// Store keeps things (PRD section 1).
+type Store interface {
+	// Open reads an artifact (PRD section 1).
+	Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error)
+	// Touch uses time and a callback (PRD section 1).
+	Touch(ctx context.Context, at time.Time, progress func(percent int)) error
+}
+`
+	if issues := checkSource(t, src); issues != "" {
+		t.Fatalf("valid ports.go reported issues:\n%s", issues)
+	}
+}
+
+// checkSource writes src as ports.go in a temp dir, runs the checker and joins the messages.
+func checkSource(t *testing.T, src string) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "ports.go")
 	if err := os.WriteFile(file, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -276,22 +389,7 @@ func Impl() {}
 	for _, is := range issues {
 		all = append(all, is.msg)
 	}
-	joined := strings.Join(all, "\n")
-	for _, want := range []string{
-		"imports \"paratech/shared/gen",
-		"imports \"paratech/desktop/internal/cases/other\"",
-		"interface Undocumented has no doc comment",
-		"method Undocumented.Do has no doc comment",
-		"type Dto is not an interface",
-		"uses type Dto",
-		"not std or domain",
-		"Leaky.NoCtx must take context.Context first",
-		"declares func Impl",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("checker did not report %q; got:\n%s", want, joined)
-		}
-	}
+	return strings.Join(all, "\n")
 }
 
 func contains(list []string, s string) bool {
