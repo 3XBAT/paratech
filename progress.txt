@@ -153,3 +153,30 @@
 - Не сделано: схема структурированного вывода (PRD §13.3), desktop-порт GetRemaining (AC-12), uint32 vs int64 у max_output_tokens
 
 ---
+
+## [TASK-005] SQLite: подключение, миграции goose, запросы sqlc
+**Дата:** 2026-10-12 17:00
+**Статус:** done
+
+### Что сделано
+- desktop/internal/adapters/sqlite: Open (WAL, foreign_keys, busy_timeout=5000, synchronous=NORMAL, _txlock=immediate на каждом соединении пула), Migrate/SchemaVersion (ErrSchemaTooNew), порт Tx (BEGIN IMMEDIATE, вложенный Do присоединяется, откат при error/panic/Goexit, слот записи в процессе), MapError/VersionCAS/DuplicateAsVersionConflict/IsPrimaryKeyViolation (ARCH-32)
+- Миграция migrations/0001_init.sql = docs/contracts/schema.sql (тест на совпадение с контрактом)
+- sqlc v1.31.1 (go run, не в go.mod): sqlc.yaml, queries (settings, jobs — подтверждение тулчейна), sqlcgen закоммичен
+- Зависимости (правило 9; стек в ADR-0001): modernc.org/sqlite v1.60.1, modernc.org/libc v1.77.1, pressly/goose/v3 v3.28.0 (v3.29.0 не подходит из-за libc); go.work -> go 1.26.0; docs/refs/sqlite-goose-sqlc.md
+- CI: шаги проверки дрейфа shared/gen (с очисткой каталога) и sqlcgen
+- Ревью (reviewer): approve; medium (писатели держали соединения пула; дубликат PK vs secondary UNIQUE) исправлены, low частично
+
+### Тесты
+- [x] Шаг 1: CGO_ENABLED=0 go build ./desktop/... — ok
+- [x] Шаг 2: go test -race ./desktop/internal/adapters/sqlite/... — ok (в т.ч. -count=3)
+- [x] Шаг 3: go list -deps ./desktop/internal/adapters/sqlite | grep -i sqlite — только modernc.org/sqlite[/lib,/vtab]; CgoFiles у не-std пакетов нет
+- [x] Шаг 4: GOOS=windows go vet ./desktop/... — ok; golangci-lint v2.14.0 0 issues
+
+### Заметки для следующих агентов
+- app пока не использует sqlite: первая задача-потребитель вызывает sqlite.Open(ctx, Options{Path, Migrate: true}) в internal/app с путём от Storage Manager
+- Вложенный Do с контекстом БЕЗ транзакции ждёт внешний Do (слот записи); с вечным контекстом блокируется навсегда — репозитории обязаны передавать ctx транзакции
+- При вставке, нарушающей и PK, и secondary UNIQUE, SQLite сообщает secondary (тест TestUniquenessCheckOrder): DuplicateAsVersionConflict в таком случае вернёт ErrDuplicate
+- Включить `buf breaking` в CI после попадания ветки в master; schema_test в desktop/tests можно перевести на чтение миграций
+- Не сделано (низкие): оставшиеся low из ревью (wal_autocheckpoint/journal_size_limit не настраивались)
+
+---

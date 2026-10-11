@@ -43,9 +43,15 @@ jobs:
           push: false
           pr_comment: false
       # Generated code is committed (ARCH-35): fail when it drifts from the proto files.
+      # gen is emptied first because buf generate never deletes files of removed protos.
       - run: |
+          find shared/gen -type f -delete
           (cd shared && buf generate)
           test -z "$(git status --porcelain -- shared/gen)"
+      # Same for the sqlc output of the SQLite adapter.
+      - run: |
+          (cd desktop/internal/adapters/sqlite && go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate)
+          test -z "$(git status --porcelain -- desktop/internal/adapters/sqlite/sqlcgen)"
   windows:
     runs-on: windows-latest
     steps:
