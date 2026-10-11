@@ -16,8 +16,10 @@ import (
 // by the hubclient adapter (TASK-038), which authenticates with the per-tester API key from the credential store; a
 // fake serves tests. Only text and ids cross it: raw audio never does (AC-06).
 //
-// The result is UNTRUSTED model output (hard rule 3, PRD section 13.3). Callers validate it against a strict schema and
-// trusted local state; it must never reach an email, file or calendar adapter directly (AC-18).
+// The result is UNTRUSTED model output (hard rule 3, PRD section 13.3). It is typed as values.UntrustedOutput, not a
+// string, so that it cannot flow into another port by accident. Callers validate it against a strict schema and
+// trusted local state; it must never reach an email, file or calendar adapter directly (AC-18). The request is a
+// validated value object (values.NewLLMRequest), so the adapter never sees a URL as a model alias.
 type LLMClient interface {
 	// Complete runs the operation described by req. The Hub reserves quota before and settles after the call, and the
 	// IdempotencyKey of req guarantees that a retry is not charged twice (PRD section 9.2, AC-11).
@@ -32,7 +34,10 @@ type AssignmentRepository interface {
 	// Get loads an assignment (PRD section 10). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.AssignmentID) (*assignment.Assignment, error)
 
-	// Save inserts or updates an assignment (PRD section 10: review and edit locally).
+	// Save inserts or updates an assignment (PRD section 10: review and edit locally). It is a compare-and-swap on
+	// the aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version
+	// differs from the one the assignment was loaded with, for example when the user edited it while a
+	// reprocessing job produced new values.
 	Save(ctx context.Context, a *assignment.Assignment) error
 }
 
@@ -80,11 +85,16 @@ type IDGenerator interface {
 	NewJobID() shared.JobID
 }
 
-// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary is one use case method call and it changes
-// one aggregate. Implemented by the sqlite adapter (TASK-005).
+// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
+// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
+// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
 type Tx interface {
-	// Do runs fn in a database transaction and commits if it returns nil, otherwise it rolls back and returns
-	// the error (PRD section 7.3: persistent state transitions). Repositories called with the context passed to
-	// fn take part in the transaction; calls with another context do not.
+	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
+	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front
+	// (BEGIN IMMEDIATE), so a read inside fn cannot be invalidated by another writer before the commit.
+	// Repositories called with the context passed to fn take part in the transaction; calls with another context
+	// do not. Nesting: a Do called with the context of a running fn joins the outer transaction (no savepoint) and
+	// only the outermost Do commits or rolls back. fn performs no external I/O (network, e-mail, calendar, files,
+	// subprocesses): it holds the database write lock and only reads and writes local aggregates.
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }

@@ -17,6 +17,10 @@ import (
 // (TASK-024) which starts the whisper-cli sidecar as a separate CPU-only process for each call; a fake serves tests.
 // There is no cloud implementation and there must never be one.
 //
+// Job progress: the transcribe handler turns the progress callback into job.Progress reports to the job runner
+// (the report function it receives in Handle) and does not save the job itself, because the runner is the only
+// owner of a claimed job (ADR-0004).
+//
 // The adapter reads and writes below the artifact root it was wired with; references keep the core free of OS paths.
 type STTEngine interface {
 	// Transcribe recognises the audio file audio with the model file model and writes the result to output.
@@ -31,7 +35,9 @@ type TranscriptRepository interface {
 	// Get loads a transcript (PRD section 8). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.TranscriptID) (*transcript.Transcript, error)
 
-	// Save inserts or updates a transcript with the pinned model name and version (PRD section 8, AC-08).
+	// Save inserts or updates a transcript with the pinned model name and version (PRD section 8, AC-08). It is a
+	// compare-and-swap on the aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when the
+	// stored version differs from the one the transcript was loaded with.
 	Save(ctx context.Context, t *transcript.Transcript) error
 }
 
@@ -54,16 +60,6 @@ type ModelReader interface {
 type SettingsReader interface {
 	// Load returns the current settings, defaults applied (PRD sections 7.4 and 15).
 	Load(ctx context.Context) (*settings.Settings, error)
-}
-
-// JobRepository lets the handler persist the progress and checkpoint of its own job (PRD sections 7.3 and 7.4).
-// Implemented by the sqlite adapter.
-type JobRepository interface {
-	// Get loads a job (PRD section 7.2). It returns an error wrapping shared.ErrNotFound if there is none.
-	Get(ctx context.Context, id shared.JobID) (*job.Job, error)
-
-	// Save persists the full state of a job, including progress (PRD section 7.3: persistent progress).
-	Save(ctx context.Context, j *job.Job) error
 }
 
 // JobEnqueuer creates the follow-up jobs of a finished transcription, for example summarisation
@@ -114,11 +110,16 @@ type IDGenerator interface {
 	NewJobID() shared.JobID
 }
 
-// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary is one use case method call and it changes
-// one aggregate. Implemented by the sqlite adapter (TASK-005).
+// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
+// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
+// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
 type Tx interface {
-	// Do runs fn in a database transaction and commits if it returns nil, otherwise it rolls back and returns
-	// the error (PRD section 7.3: persistent state transitions). Repositories called with the context passed to
-	// fn take part in the transaction; calls with another context do not.
+	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
+	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front
+	// (BEGIN IMMEDIATE), so a read inside fn cannot be invalidated by another writer before the commit.
+	// Repositories called with the context passed to fn take part in the transaction; calls with another context
+	// do not. Nesting: a Do called with the context of a running fn joins the outer transaction (no savepoint) and
+	// only the outermost Do commits or rolls back. fn performs no external I/O (network, e-mail, calendar, files,
+	// subprocesses): it holds the database write lock and only reads and writes local aggregates.
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }

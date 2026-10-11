@@ -11,23 +11,38 @@ import (
 
 // JobRepository is the durable job store (PRD sections 7.1 and 7.3): the worker is ephemeral, the job state is
 // durable. Implemented by the sqlite adapter (TASK-008).
+//
+// Ownership (ARCH-14, ARCH-22, ADR-0004): from Claim until it leaves RUNNING, a job belongs to the jobrunner use
+// case. Only the runner calls Save for a claimed job. A Handler never saves the job it works on; it reports
+// progress through the callback it is given. Other use cases only Enqueue. This keeps one writer per running job,
+// so progress writes and the final status transition cannot overwrite each other.
 type JobRepository interface {
-	// Enqueue stores a new job. If a job with the same idempotency key exists, nothing is created and the ID
-	// of the existing job is returned with created == false, so a repeated request never duplicates work
+	// Enqueue stores a new job (version 0). If a job with the same idempotency key exists, nothing is created and
+	// the ID of the existing job is returned with created == false, so a repeated request never duplicates work
 	// (PRD section 7.3, section 14 case 5, hard rule 7).
 	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
 
 	// Get loads a job (PRD section 7.2). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.JobID) (*job.Job, error)
 
-	// Save persists the full state of a job after an aggregate method changed it, including status,
-	// attempts, next run time and progress (PRD section 7.3: persistent state transitions).
+	// Save persists the full state of a job after an aggregate method changed it, including status, attempts,
+	// next run time and progress (PRD section 7.3: persistent state transitions). It is a compare-and-swap on the
+	// aggregate version (ADR-0004): the write succeeds only if the stored version equals the version the job was
+	// loaded with, and then increments it. Otherwise nothing is written and the error wraps shared.ErrConflict, for
+	// example when the user cancelled the job meanwhile; the runner then reloads the job and decides again.
 	Save(ctx context.Context, j *job.Job) error
 
-	// Claim atomically takes the next job that is QUEUED and due at now, restricted to the given job types,
-	// and returns it already moved to RUNNING. Two workers never receive the same job (PRD section 7.2).
-	// ok is false when nothing is eligible.
-	Claim(ctx context.Context, now time.Time, types []job.Type) (j *job.Job, ok bool, err error)
+	// Claim atomically takes the next job that is QUEUED, due at now and admitted by filter, and returns it already
+	// moved to RUNNING. Two workers never receive the same job (PRD section 7.2). ok is false when nothing is eligible.
+	//
+	// The adapter does not set the status itself: it selects the candidate, restores the aggregate, calls the
+	// domain transition QUEUED to RUNNING with now (the state machine lives in the aggregate, ARCH-14, ARCH-19, so
+	// attempts and started_at follow its rules), and persists the result with a guarded
+	// UPDATE ... WHERE id = ? AND status = 'QUEUED' AND version = ?. A raw "UPDATE jobs SET status = 'RUNNING'" is
+	// not allowed. If the guarded update changes no row, another worker won the race and the adapter tries the next
+	// candidate. filter.Admits is the reference semantics, including the "Run now" override: a run_now job is
+	// claimable even when its heavy type is otherwise filtered out by the power state (PRD section 7.4, AC-22).
+	Claim(ctx context.Context, now time.Time, filter job.ClaimFilter) (j *job.Job, ok bool, err error)
 
 	// ListByStatus returns the jobs in any of the given statuses, for example stale RUNNING jobs at startup
 	// recovery, or WAITING_FOR_POWER jobs when AC power returns (PRD sections 7.2 and 7.4).
@@ -40,7 +55,16 @@ type Handler interface {
 	// Handle performs the job and returns nil on success. It must honour cancellation of ctx and be
 	// idempotent when the job has external side effects (PRD section 7.3, hard rule 7). How errors map to
 	// statuses (transient, permanent, waiting for network, quota or power) is decided with TASK-009.
-	Handle(ctx context.Context, j *job.Job) error
+	//
+	// j is a read-only snapshot of the claimed job: the handler reads its payload, pinned versions and checkpoint
+	// and never calls its mutators or persists it (the runner owns it, see JobRepository). report is the narrow
+	// progress port: the handler calls it at safe points with the percentage and an opaque checkpoint (PRD
+	// sections 7.3 and 7.4), and the runner applies them to the aggregate and saves with its version guard. report
+	// is a plain function type on purpose, so that a handler in another use case satisfies this interface without
+	// importing this package (ARCH-20). If report returns an error that wraps shared.ErrConflict or
+	// shared.ErrNotFound, the job was changed or removed elsewhere, for example cancelled: the handler stops
+	// promptly and returns that error.
+	Handle(ctx context.Context, j *job.Job, report func(ctx context.Context, p job.Progress) error) error
 }
 
 // PowerMonitor reports the power source of the computer (PRD sections 4.3 and 7.4, AC-21). Implemented by a Windows
@@ -70,11 +94,16 @@ type Clock interface {
 	Now() time.Time
 }
 
-// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary is one use case method call and it changes
-// one aggregate. Implemented by the sqlite adapter (TASK-005).
+// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
+// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
+// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
 type Tx interface {
-	// Do runs fn in a database transaction and commits if it returns nil, otherwise it rolls back and returns
-	// the error (PRD section 7.3: persistent state transitions). Repositories called with the context passed to
-	// fn take part in the transaction; calls with another context do not.
+	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
+	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front
+	// (BEGIN IMMEDIATE), so a read inside fn cannot be invalidated by another writer before the commit.
+	// Repositories called with the context passed to fn take part in the transaction; calls with another context
+	// do not. Nesting: a Do called with the context of a running fn joins the outer transaction (no savepoint) and
+	// only the outermost Do commits or rolls back. fn performs no external I/O (network, e-mail, calendar, files,
+	// subprocesses): it holds the database write lock and only reads and writes local aggregates.
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }

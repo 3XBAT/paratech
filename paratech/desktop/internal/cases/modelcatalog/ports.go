@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
@@ -19,21 +20,26 @@ type ModelRepository interface {
 	// List returns all installed models (PRD section 8: display installed models).
 	List(ctx context.Context) ([]*sttmodel.Model, error)
 
-	// Save inserts or updates an installed model (PRD section 8). It returns an error wrapping shared.ErrConflict if
-	// another model with the same name and version exists.
+	// Save inserts or updates an installed model (PRD section 8). It is a compare-and-swap on the aggregate version
+	// (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version differs from the one the
+	// model was loaded with, and also when another model with the same name and version exists.
 	Save(ctx context.Context, m *sttmodel.Model) error
 
 	// Delete removes the model record (PRD section 8: model removal). Whether removal is allowed is decided by the
-	// model aggregate and ModelPins before this is called.
+	// model aggregate and ModelPins before this is called. The pin check and this Delete must run inside the same
+	// Tx.Do (a write transaction), otherwise a job enqueued between the check and the delete could pin a model that
+	// is being removed (PRD section 14 case 11).
 	Delete(ctx context.Context, id shared.SttModelID) error
 }
 
 // ModelPins answers whether an unfinished job pins a model, so that removal can be blocked
-// (PRD section 8 diagram, section 14 case 11). Implemented by the sqlite adapter.
+// (PRD section 8 diagram, section 14 case 11). Implemented by the sqlite adapter. The adapter holds no business rule
+// about which job statuses count as unfinished: the use case passes job.ActiveStatuses() from the domain.
 type ModelPins interface {
-	// IsPinnedByActiveJob reports whether any job that is not COMPLETED, FAILED or CANCELLED pins the model
-	// (PRD section 14 case 11: a job pins the model version, so removing a pinned model is unsafe).
-	IsPinnedByActiveJob(ctx context.Context, id shared.SttModelID) (bool, error)
+	// IsPinnedByJobInStatuses reports whether any job in one of the given statuses pins the model (PRD section 14
+	// case 11: a job pins the model version, so removing a pinned model is unsafe). The caller passes
+	// job.ActiveStatuses(). Call it inside the same Tx.Do as ModelRepository.Delete.
+	IsPinnedByJobInStatuses(ctx context.Context, id shared.SttModelID, statuses []job.Status) (bool, error)
 }
 
 // SettingsRepository stores the settings aggregate; choosing the default model changes only this aggregate
@@ -42,7 +48,8 @@ type SettingsRepository interface {
 	// Load returns the current settings, defaults applied (PRD section 15).
 	Load(ctx context.Context) (*settings.Settings, error)
 
-	// Save persists the settings (PRD section 8: select the active default model).
+	// Save persists the settings (PRD section 8: select the active default model). It is a compare-and-swap on the
+	// aggregate version (ADR-0004): it returns an error wrapping shared.ErrConflict when the stored version differs.
 	Save(ctx context.Context, s *settings.Settings) error
 }
 
@@ -79,11 +86,16 @@ type IDGenerator interface {
 	NewSttModelID() shared.SttModelID
 }
 
-// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary is one use case method call and it changes
-// one aggregate. Implemented by the sqlite adapter (TASK-005).
+// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
+// is one use case method call and it changes one aggregate; the single documented exception is the batch import of
+// LessonRepository.ApplyChanges (ADR-0004). Implemented by the sqlite adapter (TASK-005).
 type Tx interface {
-	// Do runs fn in a database transaction and commits if it returns nil, otherwise it rolls back and returns
-	// the error (PRD section 7.3: persistent state transitions). Repositories called with the context passed to
-	// fn take part in the transaction; calls with another context do not.
+	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
+	// error (PRD section 7.3: persistent state transitions). The sqlite adapter opens a write transaction up front
+	// (BEGIN IMMEDIATE), so a read inside fn cannot be invalidated by another writer before the commit.
+	// Repositories called with the context passed to fn take part in the transaction; calls with another context
+	// do not. Nesting: a Do called with the context of a running fn joins the outer transaction (no savepoint) and
+	// only the outermost Do commits or rolls back. fn performs no external I/O (network, e-mail, calendar, files,
+	// subprocesses): it holds the database write lock and only reads and writes local aggregates.
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
