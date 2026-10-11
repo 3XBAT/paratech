@@ -9,7 +9,10 @@ import "paratech/desktop/internal/domain/shared"
 // hard rule 7, and is a proposal to confirm: PENDING (delivery job created after the user's confirmation,
 // nothing attempted), SENDING (an attempt is in flight; a crash in this state means the outcome is
 // unknown), SENT (provider accepted), FAILED (permanent rejection, nothing was sent), UNKNOWN (ambiguous
-// outcome, to be reconciled before any retry). A transient failure is a retry of the job, not a status.
+// outcome, to be reconciled before any retry). SENDING is persisted before the message is handed to the
+// provider, so a crash during an attempt leaves SENDING, which startup recovery turns into UNKNOWN. A transient
+// failure (definitely not accepted) returns the delivery SENDING -> PENDING for a later attempt. The full
+// transition table is TASK-044; the decision is recorded in ADR-0004.
 //
 // Values only: transition rules are added by TASK-044, not here.
 type Status string
