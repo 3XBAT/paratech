@@ -14,12 +14,18 @@
 --   * Booleans are INTEGER 0/1 with a CHECK. JSON is TEXT guarded by json_valid().
 --   * *_ref columns hold a shared.ArtifactRef in its stored form "<kind>/<path>" (recordings/, transcripts/,
 --     models/, exports/ below the private data root). Files never live in SQLite (PRD section 5.2).
---   * Optimistic concurrency (ADR-0004): every table whose aggregate has a Save port carries
---     `version INTEGER NOT NULL DEFAULT 0`. Save is a compare-and-swap:
---     UPDATE ... SET version = version + 1 WHERE id = ? AND version = <loaded version>; zero rows changed means
---     the aggregate changed meanwhile and the adapter returns an error wrapping shared.ErrConflict. A new aggregate
---     is INSERTed with its initial version. The version is state of the aggregate (Restore takes it, a Version()
---     accessor returns it); the database never changes it behind the aggregate's back except through Save.
+--   * Optimistic concurrency (ADR-0004(d)): every table whose aggregate has a Save port carries
+--     `version INTEGER NOT NULL DEFAULT 0`. A never-stored aggregate has Version() 0 and is INSERTed by the adapter with
+--     version 1 (an existing row with that id: shared.ErrVersionConflict). A stored aggregate has Version() >= 1 and Save
+--     is a compare-and-swap: UPDATE ... SET version = version + 1 WHERE id = ? AND version = <loaded version>; zero rows
+--     changed means the row changed or was purged meanwhile and the adapter returns shared.ErrVersionConflict, it never
+--     re-inserts. After a successful write the adapter calls Persisted(newVersion) on the aggregate, so the same instance
+--     can be saved again. The version is state of the aggregate (Restore takes it, Version() returns it); the database
+--     never changes it except through Save. The DEFAULT 0 is only a safety net: no row is ever stored with version 0.
+--   * Foreign keys never change an aggregate behind its version, except the documented clean-up of references that are
+--     copies of identity (lesson_id, transcript_id, model_id of transcripts: ON DELETE SET NULL). A reference that a
+--     versioned aggregate OWNS as state (settings.default_stt_model_id) is ON DELETE RESTRICT: the use case clears it
+--     through the aggregate first. Adapters map a foreign key violation to an error wrapping shared.ErrConflict.
 --   * Status columns carry a CHECK that lists exactly the Go constants of the aggregate (job.Statuses,
 --     recording.Statuses, delivery.Statuses). desktop/tests/schema_test.go keeps both in sync.
 --   * NO SECRETS, TOKENS OR PASSWORDS IN THIS SCHEMA (hard rule 4, PRD section 12, AC-19, ARCH-34). Refresh
@@ -240,7 +246,7 @@ CREATE TABLE settings (
     recording_prompts_enabled     INTEGER NOT NULL DEFAULT 1 CHECK (recording_prompts_enabled IN (0, 1)),     -- AC-02
     process_only_on_ac_power      INTEGER NOT NULL DEFAULT 1 CHECK (process_only_on_ac_power IN (0, 1)),      -- AC-21, AC-22
     notify_on_processing_complete INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_processing_complete IN (0, 1)), -- section 15
-    default_stt_model_id          TEXT    REFERENCES stt_models (id) ON DELETE SET NULL,                      -- AC-07
+    default_stt_model_id          TEXT    REFERENCES stt_models (id) ON DELETE RESTRICT,                      -- AC-07; the use case clears it via the settings aggregate before removing a model (ADR-0004)
     version                       INTEGER NOT NULL DEFAULT 0,                                                  -- optimistic concurrency (ADR-0004)
     updated_at                    INTEGER NOT NULL
 );
