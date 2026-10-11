@@ -2,11 +2,16 @@ package config
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 )
+
+const programName = "desktop"
 
 // Environment variable names read by Load.
 const (
@@ -28,9 +33,10 @@ func Default() Config {
 	return Config{LogLevel: "info"}
 }
 
-// Load reads the configuration from the environment through getenv (os.Getenv in production,
-// a map lookup in tests) and validates it. It is the only place that reads the environment (ARCH-52).
-func Load(getenv func(string) string) (Config, error) {
+// Load builds the configuration from defaults, then the environment (through getenv), then the command-line
+// flags in args, and validates the result. It is the only place that reads the environment and flags (ARCH-52).
+// For -h/--help it prints the usage to out and returns flag.ErrHelp.
+func Load(args []string, out io.Writer, getenv func(string) string) (Config, error) {
 	cfg := Default()
 	if v := getenv(EnvLogLevel); v != "" {
 		cfg.LogLevel = v
@@ -38,10 +44,43 @@ func Load(getenv func(string) string) (Config, error) {
 	if v := getenv(EnvDataDir); v != "" {
 		cfg.DataDir = v
 	}
+
+	// Flag defaults are the environment values, so a flag wins over the environment.
+	fs := flag.NewFlagSet(programName, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error (env "+EnvLogLevel+")")
+	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "absolute path of the local data directory (env "+EnvDataDir+")")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprintln(out, "Usage of "+programName+":")
+			fs.SetOutput(out)
+			fs.PrintDefaults()
+		}
+
+		return Config{}, err
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
+
 	return cfg, nil
+}
+
+// MustLoad is Load for the program entry point: it exits instead of returning an error
+// (status 0 for --help, 2 for a bad flag or configuration).
+func MustLoad(args []string, out io.Writer, getenv func(string) string) Config {
+	cfg, err := Load(args, out, getenv)
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(0)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintln(out, programName+": config:", err)
+		os.Exit(2)
+	}
+
+	return cfg
 }
 
 // Validate reports every problem found, so a misconfigured start fails once with a complete message.
