@@ -12,12 +12,14 @@ import (
 
 const getSettings = `-- name: GetSettings :one
 
+
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
        default_stt_model_id, version, updated_at
 FROM settings
 WHERE id = 1
 `
 
+// NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-007 owner may replace or remove them.
 // Settings singleton (row id = 1) with the optimistic-concurrency protocol of ADR-0004(d).
 // These queries are the first consumer of the toolchain; the settings repository (TASK-007 owner) builds on them.
 func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {

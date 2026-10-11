@@ -1,3 +1,5 @@
+-- NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-007 owner may replace or remove them.
+
 -- Settings singleton (row id = 1) with the optimistic-concurrency protocol of ADR-0004(d).
 -- These queries are the first consumer of the toolchain; the settings repository (TASK-007 owner) builds on them.
 
