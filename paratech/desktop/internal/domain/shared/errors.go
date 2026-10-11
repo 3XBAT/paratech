@@ -24,6 +24,6 @@ var (
 	ErrInvalidID = errors.New("invalid identifier")
 
 	// ErrInvalidArtifactRef is returned for artifact references that are malformed or try to leave
-	// the artifact root (PRD section 5.2).
+	// the artifact root (the reference convention is defined by TASK-006).
 	ErrInvalidArtifactRef = errors.New("invalid artifact reference")
 )

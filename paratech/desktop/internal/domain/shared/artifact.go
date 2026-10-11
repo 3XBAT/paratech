@@ -3,10 +3,11 @@ package shared
 import (
 	"fmt"
 	"strings"
-	"unicode"
 )
 
-// ArtifactKind is a top-level directory of the private application data root (PRD section 5.2).
+// ArtifactKind is a top-level directory of the private application data root. The directory layout (recordings,
+// transcripts, models, exports) is a convention of this project defined by TASK-006; PRD section 5.2 only requires
+// that large artifacts stay outside SQLite and are reached through the Storage Manager.
 type ArtifactKind string
 
 // Artifact kinds, one per top-level directory of the data root.
@@ -26,12 +27,15 @@ func (k ArtifactKind) valid() bool {
 }
 
 // ArtifactRef names a file or directory inside the data root without exposing an OS path
-// (PRD sections 5.2 and 13.1). It is the only way ports talk about files, so use cases and the
-// domain never see a real path (hard rule 5).
+// (PRD section 13.1 deletion semantics; PRD section 5.2 for the Storage Manager). It is the only way ports talk
+// about files, so use cases and the domain never see a real path (hard rule 5). The "<kind>/<path>" form is an
+// identifier convention of this project (TASK-006), not something the PRD prescribes.
 //
-// The path is relative, slash separated and cannot contain "." or ".." segments, absolute paths,
-// drive letters or backslashes. This makes a traversal out of the data root unrepresentable
-// whatever adapter resolves the reference. The stored form is "<kind>/<path>".
+// The path is relative and slash separated. Every segment must be a safe file name on Windows and elsewhere: no
+// empty, "." or ".." segment, no backslash, colon, control character or any of * ? < > | ", no trailing dot or
+// space, and not a reserved device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, in any case, with or without an
+// extension). This makes a traversal out of the data root unrepresentable whatever adapter resolves the
+// reference. The stored form is "<kind>/<path>".
 type ArtifactRef struct {
 	kind ArtifactKind
 	path string
@@ -45,14 +49,12 @@ func NewArtifactRef(kind ArtifactKind, path string) (ArtifactRef, error) {
 	if path == "" {
 		return ArtifactRef{}, fmt.Errorf("%w: empty path", ErrInvalidArtifactRef)
 	}
-	for _, r := range path {
-		if r == '\\' || r == ':' || unicode.IsControl(r) {
-			return ArtifactRef{}, fmt.Errorf("%w: path %q contains a forbidden character", ErrInvalidArtifactRef, path)
-		}
-	}
 	for _, seg := range strings.Split(path, "/") {
-		if seg == "" || seg == "." || seg == ".." {
-			return ArtifactRef{}, fmt.Errorf("%w: path %q has an empty, \".\" or \"..\" segment", ErrInvalidArtifactRef, path)
+		if seg == "" {
+			return ArtifactRef{}, fmt.Errorf("%w: path %q has an empty segment", ErrInvalidArtifactRef, path)
+		}
+		if why := nameProblem(seg); why != "" {
+			return ArtifactRef{}, fmt.Errorf("%w: path %q: segment %q %s", ErrInvalidArtifactRef, path, seg, why)
 		}
 	}
 	return ArtifactRef{kind: kind, path: path}, nil

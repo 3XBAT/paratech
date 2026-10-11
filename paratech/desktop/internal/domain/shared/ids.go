@@ -6,6 +6,8 @@ import (
 )
 
 // maxIDLen bounds identifier length; identifiers are opaque strings produced by the IDGenerator ports.
+// They are also used as file-name segments (for example recordings/<id>), so validateID applies the same
+// file-name rules as ArtifactRef segments.
 const maxIDLen = 128
 
 func validateID(kind, id string) error {
@@ -20,6 +22,9 @@ func validateID(kind, id string) error {
 			return fmt.Errorf("%w: %s id contains whitespace or control characters", ErrInvalidID, kind)
 		}
 	}
+	if why := nameProblem(id); why != "" {
+		return fmt.Errorf("%w: %s id %s", ErrInvalidID, kind, why)
+	}
 	return nil
 }
 
@@ -29,7 +34,7 @@ type RecordingID string
 // String returns the identifier as a plain string.
 func (id RecordingID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id RecordingID) Validate() error { return validateID("recording", string(id)) }
 
 // JobID identifies a persistent job (PRD section 7.1).
@@ -38,7 +43,7 @@ type JobID string
 // String returns the identifier as a plain string.
 func (id JobID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id JobID) Validate() error { return validateID("job", string(id)) }
 
 // TranscriptID identifies a transcript (PRD section 8, AC-08).
@@ -47,7 +52,7 @@ type TranscriptID string
 // String returns the identifier as a plain string.
 func (id TranscriptID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id TranscriptID) Validate() error { return validateID("transcript", string(id)) }
 
 // SttModelID identifies an installed speech-to-text model (PRD section 8).
@@ -56,7 +61,7 @@ type SttModelID string
 // String returns the identifier as a plain string.
 func (id SttModelID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id SttModelID) Validate() error { return validateID("stt model", string(id)) }
 
 // LessonID identifies a schedule entry, a lesson (PRD section 11).
@@ -65,7 +70,7 @@ type LessonID string
 // String returns the identifier as a plain string.
 func (id LessonID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id LessonID) Validate() error { return validateID("lesson", string(id)) }
 
 // AssignmentID identifies a homework assignment (PRD section 10).
@@ -74,7 +79,7 @@ type AssignmentID string
 // String returns the identifier as a plain string.
 func (id AssignmentID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id AssignmentID) Validate() error { return validateID("assignment", string(id)) }
 
 // DeliveryID identifies an attempt to send an artifact to a recipient (PRD section 10).
@@ -83,5 +88,5 @@ type DeliveryID string
 // String returns the identifier as a plain string.
 func (id DeliveryID) String() string { return string(id) }
 
-// Validate reports whether the identifier is well formed (non-empty, bounded, printable).
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id DeliveryID) Validate() error { return validateID("delivery", string(id)) }
