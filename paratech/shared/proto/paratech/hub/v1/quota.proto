@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package paratech.hub.v1;
+
+import "google/protobuf/timestamp.proto";
+import "paratech/hub/v1/common.proto";
+
+// QuotaService is the quota ledger (PRD section 9.2): reserve before an expensive request, settle against actual usage,
+// release when the request is cancelled or failed. The cloud state is authoritative.
+//
+// Exposure. Reserve, Settle and Release are driven by the Gateway; Settle in particular takes the usage the provider
+// reported, which a client must not be able to dictate. The Hub therefore serves Reserve, Settle and Release only to its
+// own gateway (in-process or an internal listener) and registers only GetRemaining on the public, API-key-protected
+// listener. The full service is in the contract so that the use case and its tests have one typed surface.
+//
+// Reservation life cycle: RESERVED -> SETTLED | RELEASED. Both end states are final and every call is idempotent:
+//   - Reserve is keyed by idempotency_key: the same key with the same arguments returns the same reservation (in
+//     whatever state it has reached) and holds nothing extra; the same key with different arguments fails with
+//     ERROR_CODE_IDEMPOTENCY_CONFLICT.
+//   - Settle and Release are keyed by reservation_id.
+//   - A reservation that is neither settled nor released expires at expires_at and is then released by the Hub, so a
+//     crashed gateway cannot lock quota for good.
+service QuotaService {
+  // Reserve holds an upper-bound amount before the provider is called. It fails with ERROR_CODE_QUOTA_EXCEEDED when the
+  // remaining quota is smaller than the requested amount; nothing is held then.
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+
+  // Settle charges the actual usage and returns the unused part of the reservation to the balance. A repeat with the same
+  // actual amount returns the original outcome; a repeat with a different amount fails with
+  // ERROR_CODE_IDEMPOTENCY_CONFLICT; settling a RELEASED reservation fails with "failed_precondition".
+  rpc Settle(SettleRequest) returns (SettleResponse);
+
+  // Release returns the whole reservation to the balance without charging. Releasing a RELEASED reservation is a no-op;
+  // releasing a SETTLED one changes nothing and reports the state SETTLED (the charge stands).
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // GetRemaining returns the caller's current quota (the caller is identified by the API key). It changes nothing.
+  rpc GetRemaining(GetRemainingRequest) returns (GetRemainingResponse);
+}
+
+// ReservationState is the state of a reservation.
+enum ReservationState {
+  RESERVATION_STATE_UNSPECIFIED = 0;
+  // The amount is held; awaiting Settle or Release.
+  RESERVATION_STATE_RESERVED = 1;
+  // The actual usage was charged and the rest returned. Final.
+  RESERVATION_STATE_SETTLED = 2;
+  // The whole amount was returned, including by expiry. Final.
+  RESERVATION_STATE_RELEASED = 3;
+}
+
+// Reservation is the ledger entry of one held amount.
+message Reservation {
+  string reservation_id = 1;
+  ReservationState state = 2;
+  // The held amount. Stays the original reserved amount in every state.
+  QuotaAmount reserved = 3;
+  // The amount actually charged: zero while RESERVED and after RELEASED, the settled amount after SETTLED.
+  QuotaAmount charged = 4;
+  // When an unsettled reservation is released by the Hub on its own.
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message ReserveRequest {
+  // Same key as the completion this reservation pays for: 1 to 128 printable ASCII characters without spaces.
+  string idempotency_key = 1;
+  OperationType operation_type = 2;
+  string model_alias = 3;
+  // Upper bound of what the request may use.
+  QuotaAmount amount = 4;
+}
+
+message ReserveResponse {
+  Reservation reservation = 1;
+  // Quota after the hold.
+  QuotaSnapshot quota = 2;
+}
+
+message SettleRequest {
+  string reservation_id = 1;
+  // What the provider reported as used. Trusted only because the caller is the Gateway (see the exposure note above). If
+  // it exceeds the reservation, the Hub charges the lesser of the actual amount and what the account can bear, never
+  // driving the balance below zero, and reports it in Reservation.charged.
+  QuotaAmount actual = 2;
+}
+
+message SettleResponse {
+  Reservation reservation = 1;
+  QuotaSnapshot quota = 2;
+}
+
+message ReleaseRequest {
+  string reservation_id = 1;
+}
+
+message ReleaseResponse {
+  Reservation reservation = 1;
+  QuotaSnapshot quota = 2;
+}
+
+message GetRemainingRequest {}
+
+message GetRemainingResponse {
+  QuotaSnapshot quota = 1;
+}

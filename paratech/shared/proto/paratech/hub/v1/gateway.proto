@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package paratech.hub.v1;
+
+import "paratech/hub/v1/common.proto";
+
+// GatewayService is the LLM gateway (PRD sections 4.2, 9.2 and 13.2): it authenticates the caller, validates and rate
+// limits the request, reserves quota, calls the provider chosen server-side and settles against the actual usage.
+//
+// Both RPCs are idempotent by CompletionSpec.idempotency_key:
+//   - the first call with a key runs the request;
+//   - a repeat with the same key and an identical spec returns the stored result without calling the provider again and
+//     without charging again (CompletionResult.replayed is true);
+//   - a repeat while the first attempt is still running fails with the Connect code "aborted" (retry with backoff);
+//   - the same key with a different spec fails with ERROR_CODE_IDEMPOTENCY_CONFLICT.
+//
+// A call that failed before the provider answered (quota, rate limit, provider error) is not stored: its reservation is
+// released and a retry with the same key runs the request afresh.
+service GatewayService {
+  // Complete runs one LLM operation and returns the whole answer.
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+
+  // CompleteStream runs one LLM operation and streams the answer. Stream semantics:
+  //   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
+  //   - the concatenation of all deltas equals CompletionResult.output;
+  //   - a failure is delivered as a Connect error (in the end-of-stream error for a stream that already started), with an
+  //     ErrorDetail; a stream without a final "result" is a failed call: the reservation is released and nothing is charged;
+  //   - when the client cancels, the Hub releases the reservation;
+  //   - a replay (same idempotency key) delivers the stored output as a single delta followed by the result.
+  rpc CompleteStream(CompleteStreamRequest) returns (stream CompleteStreamResponse);
+}
+
+// CompletionSpec describes one LLM operation. It is shared by Complete and CompleteStream so that both validate the same
+// way. There is deliberately no field for a URL, host or provider: the model is an alias resolved by the Hub.
+message CompletionSpec {
+  // Client-generated key, stable across retries of the same job: 1 to 128 printable ASCII characters without spaces.
+  string idempotency_key = 1;
+  OperationType operation_type = 2;
+  // Hub-side alias of a model (for example "default"): 1 to 64 characters from [a-z0-9_-]. Resolved against the server
+  // allowlist; an alias that is unknown, or not allowed for the operation_type, is rejected with "invalid_argument".
+  string model_alias = 3;
+  // Trusted instruction text written by the app.
+  string instructions = 4;
+  // User data such as transcript excerpts. Kept apart from the instructions on purpose: the Hub passes it to the model
+  // as data, and neither side may treat it as instructions (PRD section 13.3). Raw audio is never part of a request.
+  string untrusted_data = 5;
+  // Upper bound on generated tokens; 0 means the Hub default for the alias. The Hub clamps it to its own cap and bases
+  // the reservation on it.
+  uint32 max_output_tokens = 6;
+}
+
+// CompletionResult is the final outcome of a completion.
+message CompletionResult {
+  // Model output. UNTRUSTED: it may contain text derived from the transcript and from prompt injection. The client must
+  // validate it against a strict schema and trusted local state before any side effect (PRD section 13.3).
+  string output = 1;
+  // Usage reported by the provider, as settled.
+  Usage usage = 2;
+  // Quota after settlement.
+  QuotaSnapshot quota = 3;
+  // The quota reservation that paid for this call (see QuotaService).
+  string reservation_id = 4;
+  // True when this answer is the stored result of an earlier call with the same idempotency key.
+  bool replayed = 5;
+}
+
+message CompleteRequest {
+  CompletionSpec spec = 1;
+}
+
+message CompleteResponse {
+  CompletionResult result = 1;
+}
+
+message CompleteStreamRequest {
+  CompletionSpec spec = 1;
+}
+
+message CompleteStreamResponse {
+  oneof event {
+    // Next chunk of output text, UNTRUSTED like CompletionResult.output.
+    string delta = 1;
+    // Always the last message of a successful stream.
+    CompletionResult result = 2;
+  }
+}

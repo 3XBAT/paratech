@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+// Client-Hub contract (PRD sections 4.2, 4.4, 9, 12 and 13.2). Everything in this package follows these rules:
+//
+//   - Authentication. The per-tester API key travels ONLY in the HTTP header "Authorization: Bearer <key>" (set by a
+//     client interceptor). It is never a message field, so it cannot end up in request logs, stored payloads or
+//     idempotency records. The Hub stores only a hash of the key. A missing, unknown or revoked key is rejected with
+//     the Connect code "unauthenticated" and an ErrorDetail carrying ERROR_CODE_INVALID_API_KEY.
+//   - No client-chosen destinations. No message carries a URL, host or endpoint. The client names a model by a Hub-side
+//     alias; the Hub resolves it against a strict server-side provider/model allowlist. Provider credentials never
+//     leave the Hub. (Enforced by shared/contract_test.go.)
+//   - Idempotency. Every operation that costs quota is keyed by a client-generated idempotency key that is stable across
+//     retries of the same job. Repeating a call with the same key never charges twice (AC-11).
+//   - Errors. Failures are Connect errors; see errors.proto.
+//   - The cloud quota state is authoritative (PRD section 9.2); amounts returned here are a snapshot for display.
+package paratech.hub.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// OperationType names the LLM operation being requested. The set is closed and mirrors the operation catalog of the
+// desktop core; the Hub uses it for validation, routing and per-operation limits. An unknown or UNSPECIFIED value is
+// rejected with the Connect code "invalid_argument".
+enum OperationType {
+  OPERATION_TYPE_UNSPECIFIED = 0;
+  // Lesson summary.
+  OPERATION_TYPE_SUMMARY = 1;
+  // Extraction of homework and deadlines from a transcript.
+  OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES = 2;
+  // Draft of a homework answer.
+  OPERATION_TYPE_HOMEWORK_DRAFT = 3;
+}
+
+// QuotaUnit is the unit of a QuotaAmount. The PRD leaves the final quota unit open (section 19, decision 4); the field
+// is explicit so that another unit (weighted credits, processing time) can be added without changing message shapes.
+enum QuotaUnit {
+  QUOTA_UNIT_UNSPECIFIED = 0;
+  // Provider tokens, input and output counted together.
+  QUOTA_UNIT_TOKENS = 1;
+}
+
+// QuotaAmount is an exact, non-negative quantity of quota. Integers only: never a floating point number.
+message QuotaAmount {
+  QuotaUnit unit = 1;
+  // Number of units; never negative.
+  int64 value = 2;
+}
+
+// QuotaSnapshot is the state of the caller's quota at the moment the Hub produced the answer. The UI may cache it, but
+// it is not an authority: the next Reserve decides.
+message QuotaSnapshot {
+  // What can still be reserved right now (limit minus used minus currently held by reservations).
+  QuotaAmount remaining = 1;
+  // Held by reservations that are neither settled nor released yet.
+  QuotaAmount reserved = 2;
+  // Total allowance of the current period.
+  QuotaAmount limit = 3;
+  // End of the current period, when the allowance renews; unset when the quota does not renew.
+  google.protobuf.Timestamp period_ends_at = 4;
+}
+
+// Usage is the token usage reported by the provider for one completed request.
+message Usage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+}
