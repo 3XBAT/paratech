@@ -96,3 +96,34 @@
 - Низкие: dot-import time, ARCH-52/53 и ARCH-02 не проверяются машинно; флаги cmd не перекрывают невалидное значение из окружения (config.Load валидирует до применения флагов); glob-ы `**/desktop/**` не привязаны к каталогу paratech/; go.work.sum добавлен тулчейном
 
 ---
+
+## [TASK-003] Контракты ядра: порты use cases и черновик SQL-схемы
+**Дата:** 2026-10-12 10:00
+**Статус:** done
+
+### Что сделано
+- domain/shared: типизированные ID, ArtifactRef (усилена проверка имён под Windows), sentinel-ошибки
+- Минимальные скелеты агрегатов (только ID()/Status() и перечисления состояний PRD §6.2/§7.2/delivery), job.ClaimFilter/Progress/ActiveStatuses, coursework/values.LLMRequest (валидируемый) и UntrustedOutput
+- ports.go для семи use cases (recordingsession, jobrunner, transcribe, modelcatalog, schedulesync, homeworkflow, senddelivery): репозитории, Clock, IDGenerator, Recorder, STTEngine, PowerMonitor, CredentialStore, ArtifactStore, CalendarAdapter, EmailAdapter, LLMClient, Tx
+- docs/contracts/schema.sql: 8 таблиц, CHECK по состояниям, version (CAS) на агрегатах, soft delete занятий, нет секретов
+- docs/adr/0004-core-contract-decisions.md; ARCH-23 дополнен ссылкой на ADR
+- Тесты: tests/ports_test.go (форма портов, deny-list std), tests/schema_test.go (схема vs константы vs PRD)
+- Ревью (reviewer): changes requested -> исправлены все high и большинство medium
+
+### Тесты
+- [x] Шаг 1: go build ./desktop/... (и CGO_ENABLED=0) — ok
+- [x] Шаг 2: go vet ./desktop/... и GOOS=windows go vet ./desktop/... — ok
+- [x] Шаг 3: go test ./desktop/tests/... (архитектурный тест) — ok; весь go test -race ./desktop/... ./hub/... ./shared/... ok; golangci-lint (в т.ч. GOOS=windows) 0 issues
+- [x] Шаг 4: состояния в schema.sql совпадают с PRD §6.2 (7) и §7.2 (9); схема загружается в SQLite 3.45 (8 таблиц)
+
+### Заметки для следующих агентов
+Решения, требующие подтверждения пользователем (ADR-0004): статусы delivery PENDING/SENDING/SENT/FAILED/UNKNOWN (PRD называет только UNKNOWN); ApplyChanges как атомарный пакет однотипных агрегатов (исключение из ARCH-23); ArtifactRef в domain/shared.
+Не сделано (оставлено владельцам задач):
+- TASK-005 должен выполнить schema.sql в SQLite-тесте и реализовать Tx как BEGIN IMMEDIATE (вложенный Do присоединяется)
+- Порт парсера/источника импорта расписания (TASK-046..048); загрузчик моделей и свободное место на диске (TASK-027); recovery-хук по типу задачи (TASK-010); сигнал возобновления WAITING_FOR_NETWORK/QUOTA (TASK-009); классификация ошибок transient/permanent/rate-limited/invalid-key в shared; параметры STTEngine (язык, потоки; TASK-029); агрегат homeworkdraft и его порт (PRD §10)
+- Стартовый reconcile: COMPLETED recording без stt-задачи (TASK-013/029) или outbox
+- Reconcile письма по Message-ID невозможен по чистому SMTP (нужен IMAP) — решить в TASK-010/044; PowerMonitor при неизвестном источнике питания возвращает true — подтвердить по PRD §7.4
+- Агрегаты без New/Restore/Version(): их добавляют задачи-владельцы ПЕРЕД работой адаптеров; Handler.Handle получает *job.Job только для чтения (проверяется документацией)
+- Минор: ports_test/schema_test ищут docs/ относительно репозитория; при выделении paratech/ в отдельный репозиторий нужен PARATECH_REQUIRE_DOCS=0 или перенос схемы
+
+---

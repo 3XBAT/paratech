@@ -14,6 +14,12 @@
 --   * Booleans are INTEGER 0/1 with a CHECK. JSON is TEXT guarded by json_valid().
 --   * *_ref columns hold a shared.ArtifactRef in its stored form "<kind>/<path>" (recordings/, transcripts/,
 --     models/, exports/ below the private data root). Files never live in SQLite (PRD section 5.2).
+--   * Optimistic concurrency (ADR-0004): every table whose aggregate has a Save port carries
+--     `version INTEGER NOT NULL DEFAULT 0`. Save is a compare-and-swap:
+--     UPDATE ... SET version = version + 1 WHERE id = ? AND version = <loaded version>; zero rows changed means
+--     the aggregate changed meanwhile and the adapter returns an error wrapping shared.ErrConflict. A new aggregate
+--     is INSERTed with its initial version. The version is state of the aggregate (Restore takes it, a Version()
+--     accessor returns it); the database never changes it behind the aggregate's back except through Save.
 --   * Status columns carry a CHECK that lists exactly the Go constants of the aggregate (job.Statuses,
 --     recording.Statuses, delivery.Statuses). desktop/tests/schema_test.go keeps both in sync.
 --   * NO SECRETS, TOKENS OR PASSWORDS IN THIS SCHEMA (hard rule 4, PRD section 12, AC-19, ARCH-34). Refresh
@@ -28,7 +34,7 @@
 CREATE TABLE stt_models (
     id            TEXT    PRIMARY KEY,
     name          TEXT    NOT NULL CHECK (length(name) > 0),
-    version       TEXT    NOT NULL CHECK (length(version) > 0),
+    model_version TEXT    NOT NULL CHECK (length(model_version) > 0), -- the model's own version; the column `version` is the aggregate version below
     catalog_id    TEXT,                                    -- NULL: imported outside the catalog after explicit confirmation (AC-23)
     file_ref      TEXT    NOT NULL,                        -- models/<file>
     size_bytes    INTEGER NOT NULL CHECK (size_bytes > 0),
@@ -36,31 +42,56 @@ CREATE TABLE stt_models (
     quantization  TEXT,                                    -- e.g. q5_1; informational (section 8.1)
     capabilities  TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(capabilities)), -- e.g. languages (section 8)
     installed_at  INTEGER NOT NULL,
-    UNIQUE (name, version)
+    version       INTEGER NOT NULL DEFAULT 0,              -- optimistic concurrency (ADR-0004)
+    UNIQUE (name, model_version)
 );
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- schedule_entries: the local class schedule, system of record (PRD section 11, section 5.3; AC-16, AC-20).
 -- Aggregate schedule/lesson. A recurring ICS rule is stored as expanded occurrences (assumption, TASK-047).
+--
+-- Soft delete (ADR-0004): removing a lesson from the schedule sets deleted_at; the row stays so that the calendar
+-- synchronization can still delete the Google event of a lesson the user no longer has (section 11.3, AC-16).
+-- After the event deletion is confirmed, the use case purges the row (LessonRepository.PurgeDeleted). Reads for the
+-- UI and the scheduler ignore rows with deleted_at set.
+--
+-- Calendar projection: the Google event id is DERIVED from the lesson id by the calendar adapter (stable, idempotent
+-- upserts, section 11.3 and section 14 case 8), so no event id is stored here. Whether a lesson is out of date in the
+-- calendar is decided with two revision counters instead of timestamps (no ties, no clock dependence):
+-- content_revision grows on every change of what the calendar shows (including deletion); calendar_synced_revision
+-- is the content_revision last written to the calendar. Pending = deleted_at IS NOT NULL (until purged) OR
+-- calendar_synced_revision IS NULL OR calendar_synced_revision < content_revision. The lesson aggregate exposes
+-- the same predicate (TASK-018); the adapter must agree with it.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE schedule_entries (
-    id                  TEXT    PRIMARY KEY,
-    title               TEXT    NOT NULL CHECK (length(title) > 0),
-    starts_at           INTEGER NOT NULL,
-    ends_at             INTEGER NOT NULL,
-    timezone            TEXT    NOT NULL CHECK (length(timezone) > 0), -- IANA name of the source record (TASK-018)
-    source_uid          TEXT    UNIQUE,                    -- identity in the imported file, for diffing imports (section 11.2); NULL for manual entries
-    start_notified_at   INTEGER,                           -- the "lesson is starting" prompt was raised; prevents duplicates after a restart (section 6.1, TASK-018)
-    calendar_event_id   TEXT,                              -- Google event id once projected (section 11.3); an external view only
-    calendar_synced_at  INTEGER,
-    created_at          INTEGER NOT NULL,
-    updated_at          INTEGER NOT NULL,
-    CHECK (ends_at > starts_at)
+    id                        TEXT    PRIMARY KEY,
+    title                     TEXT    NOT NULL CHECK (length(title) > 0),
+    starts_at                 INTEGER NOT NULL,
+    ends_at                   INTEGER NOT NULL,
+    timezone                  TEXT    NOT NULL CHECK (length(timezone) > 0), -- IANA name of the source record (TASK-018)
+    -- Identity of the occurrence in the imported file, for diffing imports (section 11.2). A recurring rule is
+    -- stored as expanded occurrences, so the uid includes the occurrence: "<ICS UID>#<RECURRENCE-ID or DTSTART>".
+    -- NULL for manual entries. Unique among live rows only (see the index below).
+    source_uid                TEXT,
+    start_notified_at         INTEGER,                     -- the "lesson is starting" prompt was raised; prevents duplicates after a restart (section 6.1, TASK-018)
+    content_revision          INTEGER NOT NULL DEFAULT 1 CHECK (content_revision >= 1),
+    calendar_synced_revision  INTEGER CHECK (calendar_synced_revision IS NULL OR calendar_synced_revision >= 1), -- NULL: never written to the calendar
+    calendar_synced_at        INTEGER,                     -- when the last write happened; informational (UI), not used to decide what is pending
+    deleted_at                INTEGER,                     -- soft delete, see above; NULL: the lesson is live
+    version                   INTEGER NOT NULL DEFAULT 0,  -- optimistic concurrency (ADR-0004)
+    created_at                INTEGER NOT NULL,
+    updated_at                INTEGER NOT NULL,
+    CHECK (ends_at > starts_at),
+    CHECK (calendar_synced_revision IS NULL OR calendar_synced_revision <= content_revision)
 );
-CREATE INDEX idx_schedule_entries_starts_at ON schedule_entries (starts_at);
--- Entries that still need a calendar write (section 11.3, controlled synchronization).
-CREATE INDEX idx_schedule_entries_calendar_pending ON schedule_entries (updated_at)
-    WHERE calendar_synced_at IS NULL OR calendar_synced_at < updated_at;
+-- A deleted occurrence does not block importing the same occurrence again: the new row gets a new id (and so a new
+-- event id) while the old row waits for its event deletion.
+CREATE UNIQUE INDEX idx_schedule_entries_source_uid ON schedule_entries (source_uid)
+    WHERE source_uid IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX idx_schedule_entries_starts_at ON schedule_entries (starts_at) WHERE deleted_at IS NULL;
+-- Entries that still need a calendar write or deletion (section 11.3, controlled synchronization).
+CREATE INDEX idx_schedule_entries_calendar_pending ON schedule_entries (starts_at)
+    WHERE deleted_at IS NOT NULL OR calendar_synced_revision IS NULL OR calendar_synced_revision < content_revision;
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- recordings: one capture of system audio (PRD section 6.2, 6.3; AC-03, AC-04, AC-05, AC-24).
@@ -82,6 +113,7 @@ CREATE TABLE recordings (
     chunks_ref      TEXT    NOT NULL,                      -- recordings/<id>: directory of chunk files (section 6.3)
     audio_ref       TEXT,                                  -- recordings/<id>.<ext>: the single final track
     failure_reason  TEXT,                                  -- short non-sensitive text for the UI
+    version         INTEGER NOT NULL DEFAULT 0,            -- optimistic concurrency (ADR-0004)
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL,
     CHECK (status <> 'COMPLETED' OR audio_ref IS NOT NULL)
@@ -92,7 +124,9 @@ CREATE INDEX idx_recordings_lesson ON recordings (lesson_id);
 -- ---------------------------------------------------------------------------------------------------------------
 -- transcripts: local STT result of one recording (PRD section 8, section 14 case 11; AC-06, AC-08).
 -- Aggregate transcription/transcript. model_name/model_version are copies so the pin stays readable after
--- the model is removed (AC-08). Deleting a recording deletes its transcripts (section 13.1).
+-- the model is removed (AC-08). Deleting a recording deletes its transcripts (section 13.1): the use case does it
+-- explicitly (RecordingTranscripts.DeleteByRecording, in the same transaction as the recording delete). The
+-- ON DELETE CASCADE below is only a safety net behind PRAGMA foreign_keys = ON; no code path relies on it.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE transcripts (
     id             TEXT    PRIMARY KEY,
@@ -102,6 +136,7 @@ CREATE TABLE transcripts (
     model_version  TEXT    NOT NULL CHECK (length(model_version) > 0),
     language       TEXT,
     text_ref       TEXT    NOT NULL,                       -- transcripts/<id>: the transcript file
+    version        INTEGER NOT NULL DEFAULT 0,             -- optimistic concurrency (ADR-0004)
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX idx_transcripts_recording ON transcripts (recording_id);
@@ -119,6 +154,7 @@ CREATE TABLE assignments (
     description    TEXT    NOT NULL DEFAULT '',
     due_at         INTEGER,
     user_edited    INTEGER NOT NULL DEFAULT 0 CHECK (user_edited IN (0, 1)), -- reprocessing must not overwrite user edits (TASK-042)
+    version        INTEGER NOT NULL DEFAULT 0,             -- optimistic concurrency (ADR-0004): an edit and a reprocessing job must not overwrite each other
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL
 );
@@ -128,6 +164,8 @@ CREATE INDEX idx_assignments_due ON assignments (due_at);
 -- ---------------------------------------------------------------------------------------------------------------
 -- jobs: persistent job store (PRD section 7.1, 7.2, 7.3, 7.4; AC-09, AC-10, AC-21, AC-22).
 -- Aggregate jobs/job. Status values = job.Statuses = all states of PRD section 7.2, including WAITING_FOR_POWER.
+-- Ownership (ADR-0004): from Claim on, a job is written only by the jobrunner use case (version guarded); handlers
+-- report progress and checkpoint through the runner and never save the job.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE jobs (
     id               TEXT    PRIMARY KEY,
@@ -139,29 +177,37 @@ CREATE TABLE jobs (
     -- discriminator in it when the same subject may legitimately be processed again (section 7.3, 14 case 5, hard rule 7).
     idempotency_key  TEXT    NOT NULL UNIQUE CHECK (length(idempotency_key) > 0),
     payload          TEXT    NOT NULL DEFAULT '{}' CHECK (json_valid(payload)), -- ids and pinned versions only; no secrets, no audio, no prompts
-    pinned_model_id  TEXT,                                 -- STT job pins the exact model (AC-08); no FK on purpose: finished jobs must not block model removal (section 14 case 11)
+    -- STT job pins the exact model (AC-08). No FK on purpose: finished jobs must not block model removal. Whether a
+    -- model is pinned is decided with job.ActiveStatuses() passed by the use case; the pin check and the model delete
+    -- run in one write transaction (section 14 case 11).
+    pinned_model_id  TEXT,
     attempts         INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     max_attempts     INTEGER NOT NULL CHECK (max_attempts >= 1),   -- bounded retries (section 7.3, AC-10)
     next_run_at      INTEGER NOT NULL,                     -- QUEUED jobs are eligible when next_run_at <= now; RETRY_WAIT: end of backoff
-    run_now          INTEGER NOT NULL DEFAULT 0 CHECK (run_now IN (0, 1)),  -- "Run now" override of the AC-power wait (section 7.4, AC-22)
+    -- "Run now" override of the AC-power wait (section 7.4, AC-22). Claim uses it through job.ClaimFilter: a QUEUED
+    -- run_now job is claimable even when its heavy type is filtered out because the computer runs on battery.
+    run_now          INTEGER NOT NULL DEFAULT 0 CHECK (run_now IN (0, 1)),
     progress_percent INTEGER NOT NULL DEFAULT 0 CHECK (progress_percent BETWEEN 0 AND 100),
     checkpoint       TEXT,                                 -- opaque resume info persisted at a safe point, e.g. last finished chunk (section 7.4)
     last_error       TEXT,                                 -- sanitised message for the UI; never secrets or prompt text
     created_at       INTEGER NOT NULL,
     started_at       INTEGER,
     finished_at      INTEGER,
+    version          INTEGER NOT NULL DEFAULT 0,           -- optimistic concurrency (ADR-0004); Claim is a guarded UPDATE ... WHERE status = 'QUEUED' AND version = ?
     updated_at       INTEGER NOT NULL,
     CHECK (attempts <= max_attempts),
     CHECK (status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED') OR finished_at IS NOT NULL)
 );
--- Claim: next eligible QUEUED job (section 7.2).
+-- Claim: next eligible QUEUED job (section 7.2). The adapter restores the aggregate, calls the domain transition and
+-- saves it with the guarded update; it never sets the status with a raw UPDATE.
 CREATE INDEX idx_jobs_status_next_run ON jobs (status, next_run_at);
 CREATE INDEX idx_jobs_pinned_model ON jobs (pinned_model_id) WHERE pinned_model_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- deliveries: attempts to email an artifact (PRD section 10, section 14 case 7; AC-14, AC-15; hard rule 7).
 -- Aggregate delivery/delivery. Status values = delivery.Statuses. The PRD names only UNKNOWN; the rest is a
--- proposal derived from section 10 (see the delivery package) and awaits confirmation.
+-- proposal derived from section 10 (see the delivery package and ADR-0004): SENDING is saved before the message is
+-- handed to the provider, so a crash becomes UNKNOWN; a transient failure returns SENDING to PENDING.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE deliveries (
     id               TEXT    PRIMARY KEY,
@@ -169,13 +215,14 @@ CREATE TABLE deliveries (
     recipient        TEXT    NOT NULL CHECK (length(recipient) > 0),  -- an email address, not a secret
     subject          TEXT    NOT NULL,
     artifact_ref     TEXT    NOT NULL,                     -- exports/<file>: the attachment
-    message_id       TEXT    NOT NULL UNIQUE,              -- RFC 5322 Message-ID generated BEFORE sending: the handle for reconciliation of UNKNOWN
+    message_id       TEXT    NOT NULL UNIQUE,              -- RFC 5322 Message-ID from IDGenerator.NewMessageID, generated BEFORE sending: the handle for reconciliation of UNKNOWN
     idempotency_key  TEXT    NOT NULL UNIQUE CHECK (length(idempotency_key) > 0),
     status           TEXT    NOT NULL CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'FAILED', 'UNKNOWN')),
     attempts         INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     last_error       TEXT,                                 -- sanitised; never credentials
     confirmed_at     INTEGER NOT NULL,                     -- explicit user confirmation; a delivery cannot exist without it (AC-14)
     sent_at          INTEGER,
+    version          INTEGER NOT NULL DEFAULT 0,           -- optimistic concurrency (ADR-0004)
     created_at       INTEGER NOT NULL,
     updated_at       INTEGER NOT NULL,
     CHECK (status <> 'SENT' OR sent_at IS NOT NULL)
@@ -194,5 +241,6 @@ CREATE TABLE settings (
     process_only_on_ac_power      INTEGER NOT NULL DEFAULT 1 CHECK (process_only_on_ac_power IN (0, 1)),      -- AC-21, AC-22
     notify_on_processing_complete INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_processing_complete IN (0, 1)), -- section 15
     default_stt_model_id          TEXT    REFERENCES stt_models (id) ON DELETE SET NULL,                      -- AC-07
+    version                       INTEGER NOT NULL DEFAULT 0,                                                  -- optimistic concurrency (ADR-0004)
     updated_at                    INTEGER NOT NULL
 );
