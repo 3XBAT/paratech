@@ -39,4 +39,4 @@ golangci-lint run ./desktop/... ./hub/... ./shared/...   # bare ./... fails: par
 (cd shared && buf lint && buf generate)   # regenerates shared/gen from shared/proto
 ```
 
-Code architecture rules are enforced by `.golangci.yml` and `tests/arch_test.go` in each module.
+Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.

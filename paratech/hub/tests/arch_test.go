@@ -126,10 +126,10 @@ func classifyImport(modPath, imp string) (importKind, pkgRef) {
 // importViolation applies the matrix of docs/architecture.md section 9. It returns an empty rule when the import is allowed.
 func importViolation(modPath string, src pkgRef, isTest bool, imp string) (rule, why string) {
 	kind, dst := classifyImport(modPath, imp)
-	switch {
-	case kind == kindStd:
+	switch kind {
+	case kindStd:
 		return "", ""
-	case kind == kindOther:
+	case kindOther:
 		return "section-9", "a service must not import a sibling service module"
 	}
 
