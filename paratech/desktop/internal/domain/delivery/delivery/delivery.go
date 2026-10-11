@@ -36,8 +36,9 @@ func (s Status) String() string { return string(s) }
 
 // Delivery is an attempt to send an artifact to a recipient (PRD section 10). Skeleton: see the package comment.
 type Delivery struct {
-	id     shared.DeliveryID
-	status Status
+	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
+	id      shared.DeliveryID
+	status  Status
 }
 
 // ID returns the delivery identifier.
@@ -45,3 +46,14 @@ func (d *Delivery) ID() shared.DeliveryID { return d.id }
 
 // Status returns the current status.
 func (d *Delivery) Status() Status { return d.status }
+
+// Version returns the version this instance was last loaded or saved with: 0 for an aggregate that was never
+// stored, otherwise the stored version, which is at least 1 (optimistic concurrency, ADR-0004). The repository
+// compares it with the stored one in Save.
+func (d *Delivery) Version() int64 { return d.version }
+
+// Persisted records the version the store assigned after a successful Save. It is called by the repository adapter
+// only, after the write succeeded, so that saving the same instance again compares against its own earlier write
+// (ADR-0004). It holds no persistence logic and is not a state change of the business entity: use cases and
+// handlers never call it.
+func (d *Delivery) Persisted(version int64) { d.version = version }

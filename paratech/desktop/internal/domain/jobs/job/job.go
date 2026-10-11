@@ -34,6 +34,8 @@ func (s Status) String() string { return string(s) }
 
 // IsTerminal reports whether no transition leaves the status (PRD section 7.2): COMPLETED, FAILED and CANCELLED.
 // This is a classification of the enumeration, not a transition rule; the transition table arrives with TASK-008.
+// TASK-008 must derive IsTerminal from that table (a status with no outgoing transition), or the table from this
+// classification, so that there is one source of truth (ADR-0004); a test there must keep them equal.
 func (s Status) IsTerminal() bool {
 	switch s {
 	case StatusCompleted, StatusFailed, StatusCancelled:
@@ -64,9 +66,10 @@ type Type string
 // Job is a durable record of work that must be completed; the worker is ephemeral, the job is durable
 // (PRD section 7.1). Skeleton: see the package comment.
 type Job struct {
-	id     shared.JobID
-	typ    Type
-	status Status
+	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
+	id      shared.JobID
+	typ     Type
+	status  Status
 }
 
 // ID returns the job identifier.
@@ -77,3 +80,14 @@ func (j *Job) Type() Type { return j.typ }
 
 // Status returns the current status.
 func (j *Job) Status() Status { return j.status }
+
+// Version returns the version this instance was last loaded or saved with: 0 for an aggregate that was never
+// stored, otherwise the stored version, which is at least 1 (optimistic concurrency, ADR-0004). The repository
+// compares it with the stored one in Save.
+func (j *Job) Version() int64 { return j.version }
+
+// Persisted records the version the store assigned after a successful Save. It is called by the repository adapter
+// only, after the write succeeded, so that saving the same instance again compares against its own earlier write
+// (ADR-0004). It holds no persistence logic and is not a state change of the business entity: use cases and
+// handlers never call it.
+func (j *Job) Persisted(version int64) { j.version = version }

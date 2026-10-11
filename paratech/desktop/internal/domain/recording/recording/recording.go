@@ -33,8 +33,9 @@ func (s Status) String() string { return string(s) }
 // Recording is one capture of system audio of an online class (PRD section 6.2).
 // Skeleton: see the package comment.
 type Recording struct {
-	id     shared.RecordingID
-	status Status
+	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
+	id      shared.RecordingID
+	status  Status
 }
 
 // ID returns the recording identifier.
@@ -42,3 +43,14 @@ func (r *Recording) ID() shared.RecordingID { return r.id }
 
 // Status returns the current lifecycle state.
 func (r *Recording) Status() Status { return r.status }
+
+// Version returns the version this instance was last loaded or saved with: 0 for an aggregate that was never
+// stored, otherwise the stored version, which is at least 1 (optimistic concurrency, ADR-0004). The repository
+// compares it with the stored one in Save.
+func (r *Recording) Version() int64 { return r.version }
+
+// Persisted records the version the store assigned after a successful Save. It is called by the repository adapter
+// only, after the write succeeded, so that saving the same instance again compares against its own earlier write
+// (ADR-0004). It holds no persistence logic and is not a state change of the business entity: use cases and
+// handlers never call it.
+func (r *Recording) Persisted(version int64) { r.version = version }
