@@ -39,4 +39,17 @@ golangci-lint run ./desktop/... ./hub/... ./shared/...   # bare ./... fails: par
 (cd shared && buf lint && buf generate)   # regenerates shared/gen from shared/proto
 ```
 
+Contract compatibility (`buf breaking`, rule set FILE from `shared/buf.yaml`). The git repository root is the parent of this directory, so
+the input must point at the `.git` directory above and at the module's subdirectory; run it from `paratech/shared`:
+
+```bash
+# against the previous commit (any ref works: HEAD~1, master, a tag)
+(cd shared && buf breaking --against '../../.git#ref=HEAD~1,subdir=paratech/shared')
+```
+
+Exit code 0 means no breaking change; 100 means breaking changes were found and are listed. Use `ref=`: the form `.git#branch=HEAD~1` does not work in this
+layout (`HEAD~1` is not a branch, and `.git` is not under `shared/`). When `paratech/` becomes its own repository the module moves to `shared/` of that
+repository and the command becomes `(cd shared && buf breaking --against '../.git#ref=HEAD~1,subdir=shared')` (not verified yet). It is not part of CI
+yet, see ADR-0005.
+
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.
