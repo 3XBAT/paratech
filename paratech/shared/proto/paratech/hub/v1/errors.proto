@@ -9,20 +9,38 @@ import "paratech/hub/v1/common.proto";
 // the server attaches to the Connect error (connect.NewErrorDetail on the server, Err.Details() on the client).
 //
 // Mapping to Connect codes (the server sets both; the client first reads the detail, and falls back to the Connect code
-// when no ErrorDetail is present):
+// when no ErrorDetail is present, see below):
 //
 //   ERROR_CODE_QUOTA_EXCEEDED        -> resource_exhausted   not retryable until quota is available; the client's job
-//                                                            goes to WAITING_FOR_QUOTA (PRD section 7.2)
+//                                                            goes to WAITING_FOR_QUOTA (PRD section 7.2). Nothing was
+//                                                            reserved, so a later retry with the same idempotency key
+//                                                            opens a new attempt
 //   ERROR_CODE_RATE_LIMITED          -> resource_exhausted   retryable after ErrorDetail.retry_after
 //   ERROR_CODE_INVALID_API_KEY       -> unauthenticated      not retryable; the user must fix the key
 //   ERROR_CODE_PROVIDER_ERROR        -> unavailable          the upstream LLM provider failed; the reservation was
-//                                                            released; retryable with the same idempotency key
+//                                                            released. Whether a retry can help is ErrorDetail.retryable:
+//                                                            true for a transient failure (timeout, overload), false for
+//                                                            a permanent one (context too long, refusal). A retry with
+//                                                            the same idempotency key opens a new attempt
 //   ERROR_CODE_IDEMPOTENCY_CONFLICT  -> failed_precondition  the idempotency key was already used with a different
 //                                                            request; the client has a bug, do not retry
 //
 // Failures that need no detail keep a plain Connect code: "invalid_argument" (malformed request, unknown operation,
-// model alias not in the allowlist, payload over the limit), "aborted" (an earlier attempt with the same idempotency key
-// is still running; retry with backoff), "not_found" (unknown reservation id), "internal".
+// model alias not in the allowlist, payload over the limit), "aborted" (an attempt with the same idempotency key is still
+// running; retry with backoff), "not_found" (unknown reservation id, or one that belongs to another tester),
+// "failed_precondition" without detail (Settle of an explicitly released reservation), "internal".
+//
+// Fallback when the detail is missing. A proxy, a TLS-intercepting student network or a transport limit can answer
+// without the Hub's detail, and the client must still classify the failure from the Connect code alone:
+//
+//   resource_exhausted without detail -> treat as RATE_LIMITED: retry with exponential backoff, a bounded number of
+//                                        times; the client may call QuotaService.GetRemaining to tell a real quota
+//                                        shortage apart. The Hub itself answers an oversized message at the transport
+//                                        level (connect.WithReadMaxBytes) with exactly this code and no detail
+//   unauthenticated without detail    -> treat as INVALID_API_KEY
+//   unavailable without detail        -> treat as a transient failure, retry with backoff
+//   aborted                           -> retry with backoff
+//   any other code                    -> not retryable
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
   ERROR_CODE_QUOTA_EXCEEDED = 1;
@@ -43,4 +61,8 @@ message ErrorDetail {
   string message = 3;
   // Set for ERROR_CODE_QUOTA_EXCEEDED so the UI can show what is left without another call.
   QuotaSnapshot quota = 4;
+  // True when repeating the same request (same idempotency key, unchanged) may succeed without the user doing anything:
+  // always true for RATE_LIMITED, true or false for PROVIDER_ERROR as the Hub classified the provider failure, always
+  // false for QUOTA_EXCEEDED (it waits for quota, not for time), INVALID_API_KEY and IDEMPOTENCY_CONFLICT.
+  bool retryable = 5;
 }

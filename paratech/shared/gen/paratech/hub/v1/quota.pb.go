@@ -31,7 +31,8 @@ const (
 	ReservationState_RESERVATION_STATE_RESERVED ReservationState = 1
 	// The actual usage was charged and the rest returned. Final.
 	ReservationState_RESERVATION_STATE_SETTLED ReservationState = 2
-	// The whole amount was returned, including by expiry. Final.
+	// The whole amount was returned, by Release, after a failed call, or by expiry. Final for Reserve (it is never
+	// reused; the next Reserve of the key opens a new one). A reservation released by expiry can still be settled once.
 	ReservationState_RESERVATION_STATE_RELEASED ReservationState = 3
 )
 
@@ -87,7 +88,7 @@ type Reservation struct {
 	Reserved *QuotaAmount `protobuf:"bytes,3,opt,name=reserved,proto3" json:"reserved,omitempty"`
 	// The amount actually charged: zero while RESERVED and after RELEASED, the settled amount after SETTLED.
 	Charged *QuotaAmount `protobuf:"bytes,4,opt,name=charged,proto3" json:"charged,omitempty"`
-	// When an unsettled reservation is released by the Hub on its own.
+	// When an unsettled reservation is released by the Hub on its own. Later than the longest request timeout.
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -160,7 +161,8 @@ func (x *Reservation) GetExpiresAt() *timestamppb.Timestamp {
 
 type ReserveRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Same key as the completion this reservation pays for: 1 to 128 printable ASCII characters without spaces.
+	// Same key as the completion this reservation pays for: 1 to 128 printable ASCII characters without spaces. Namespaced
+	// per tester; see the key life cycle in the QuotaService comment.
 	IdempotencyKey string        `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	OperationType  OperationType `protobuf:"varint,2,opt,name=operation_type,json=operationType,proto3,enum=paratech.hub.v1.OperationType" json:"operation_type,omitempty"`
 	ModelAlias     string        `protobuf:"bytes,3,opt,name=model_alias,json=modelAlias,proto3" json:"model_alias,omitempty"`
@@ -287,7 +289,11 @@ type SettleRequest struct {
 	// What the provider reported as used. Trusted only because the caller is the Gateway (see the exposure note above). If
 	// it exceeds the reservation, the Hub charges the lesser of the actual amount and what the account can bear, never
 	// driving the balance below zero, and reports it in Reservation.charged.
-	Actual        *QuotaAmount `protobuf:"bytes,2,opt,name=actual,proto3" json:"actual,omitempty"`
+	Actual *QuotaAmount `protobuf:"bytes,2,opt,name=actual,proto3" json:"actual,omitempty"`
+	// True when the call did not complete and the amount is only what was consumed until it was stopped (a cancelled
+	// stream, PRD section 9.2 step 4). Such an attempt is over: it stores no result, so a later Reserve with the same key
+	// opens a new attempt instead of replaying this one. False for a call that completed and has a stored result.
+	Partial       bool `protobuf:"varint,3,opt,name=partial,proto3" json:"partial,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -334,6 +340,13 @@ func (x *SettleRequest) GetActual() *QuotaAmount {
 		return x.Actual
 	}
 	return nil
+}
+
+func (x *SettleRequest) GetPartial() bool {
+	if x != nil {
+		return x.Partial
+	}
+	return false
 }
 
 type SettleResponse struct {
@@ -584,10 +597,11 @@ const file_paratech_hub_v1_quota_proto_rawDesc = "" +
 	"\x06amount\x18\x04 \x01(\v2\x1c.paratech.hub.v1.QuotaAmountR\x06amount\"\x87\x01\n" +
 	"\x0fReserveResponse\x12>\n" +
 	"\vreservation\x18\x01 \x01(\v2\x1c.paratech.hub.v1.ReservationR\vreservation\x124\n" +
-	"\x05quota\x18\x02 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota\"l\n" +
+	"\x05quota\x18\x02 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota\"\x86\x01\n" +
 	"\rSettleRequest\x12%\n" +
 	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x124\n" +
-	"\x06actual\x18\x02 \x01(\v2\x1c.paratech.hub.v1.QuotaAmountR\x06actual\"\x86\x01\n" +
+	"\x06actual\x18\x02 \x01(\v2\x1c.paratech.hub.v1.QuotaAmountR\x06actual\x12\x18\n" +
+	"\apartial\x18\x03 \x01(\bR\apartial\"\x86\x01\n" +
 	"\x0eSettleResponse\x12>\n" +
 	"\vreservation\x18\x01 \x01(\v2\x1c.paratech.hub.v1.ReservationR\vreservation\x124\n" +
 	"\x05quota\x18\x02 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota\"7\n" +

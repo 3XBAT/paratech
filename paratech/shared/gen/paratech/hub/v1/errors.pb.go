@@ -26,20 +26,38 @@ const (
 // the server attaches to the Connect error (connect.NewErrorDetail on the server, Err.Details() on the client).
 //
 // Mapping to Connect codes (the server sets both; the client first reads the detail, and falls back to the Connect code
-// when no ErrorDetail is present):
+// when no ErrorDetail is present, see below):
 //
 //	ERROR_CODE_QUOTA_EXCEEDED        -> resource_exhausted   not retryable until quota is available; the client's job
-//	                                                         goes to WAITING_FOR_QUOTA (PRD section 7.2)
+//	                                                         goes to WAITING_FOR_QUOTA (PRD section 7.2). Nothing was
+//	                                                         reserved, so a later retry with the same idempotency key
+//	                                                         opens a new attempt
 //	ERROR_CODE_RATE_LIMITED          -> resource_exhausted   retryable after ErrorDetail.retry_after
 //	ERROR_CODE_INVALID_API_KEY       -> unauthenticated      not retryable; the user must fix the key
 //	ERROR_CODE_PROVIDER_ERROR        -> unavailable          the upstream LLM provider failed; the reservation was
-//	                                                         released; retryable with the same idempotency key
+//	                                                         released. Whether a retry can help is ErrorDetail.retryable:
+//	                                                         true for a transient failure (timeout, overload), false for
+//	                                                         a permanent one (context too long, refusal). A retry with
+//	                                                         the same idempotency key opens a new attempt
 //	ERROR_CODE_IDEMPOTENCY_CONFLICT  -> failed_precondition  the idempotency key was already used with a different
 //	                                                         request; the client has a bug, do not retry
 //
 // Failures that need no detail keep a plain Connect code: "invalid_argument" (malformed request, unknown operation,
-// model alias not in the allowlist, payload over the limit), "aborted" (an earlier attempt with the same idempotency key
-// is still running; retry with backoff), "not_found" (unknown reservation id), "internal".
+// model alias not in the allowlist, payload over the limit), "aborted" (an attempt with the same idempotency key is still
+// running; retry with backoff), "not_found" (unknown reservation id, or one that belongs to another tester),
+// "failed_precondition" without detail (Settle of an explicitly released reservation), "internal".
+//
+// Fallback when the detail is missing. A proxy, a TLS-intercepting student network or a transport limit can answer
+// without the Hub's detail, and the client must still classify the failure from the Connect code alone:
+//
+//	resource_exhausted without detail -> treat as RATE_LIMITED: retry with exponential backoff, a bounded number of
+//	                                     times; the client may call QuotaService.GetRemaining to tell a real quota
+//	                                     shortage apart. The Hub itself answers an oversized message at the transport
+//	                                     level (connect.WithReadMaxBytes) with exactly this code and no detail
+//	unauthenticated without detail    -> treat as INVALID_API_KEY
+//	unavailable without detail        -> treat as a transient failure, retry with backoff
+//	aborted                           -> retry with backoff
+//	any other code                    -> not retryable
 type ErrorCode int32
 
 const (
@@ -109,7 +127,11 @@ type ErrorDetail struct {
 	// Short human-readable explanation written by the Hub and safe to show to the user.
 	Message string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	// Set for ERROR_CODE_QUOTA_EXCEEDED so the UI can show what is left without another call.
-	Quota         *QuotaSnapshot `protobuf:"bytes,4,opt,name=quota,proto3" json:"quota,omitempty"`
+	Quota *QuotaSnapshot `protobuf:"bytes,4,opt,name=quota,proto3" json:"quota,omitempty"`
+	// True when repeating the same request (same idempotency key, unchanged) may succeed without the user doing anything:
+	// always true for RATE_LIMITED, true or false for PROVIDER_ERROR as the Hub classified the provider failure, always
+	// false for QUOTA_EXCEEDED (it waits for quota, not for time), INVALID_API_KEY and IDEMPOTENCY_CONFLICT.
+	Retryable     bool `protobuf:"varint,5,opt,name=retryable,proto3" json:"retryable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -172,17 +194,25 @@ func (x *ErrorDetail) GetQuota() *QuotaSnapshot {
 	return nil
 }
 
+func (x *ErrorDetail) GetRetryable() bool {
+	if x != nil {
+		return x.Retryable
+	}
+	return false
+}
+
 var File_paratech_hub_v1_errors_proto protoreflect.FileDescriptor
 
 const file_paratech_hub_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\x1cparatech/hub/v1/errors.proto\x12\x0fparatech.hub.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cparatech/hub/v1/common.proto\"\xc9\x01\n" +
+	"\x1cparatech/hub/v1/errors.proto\x12\x0fparatech.hub.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cparatech/hub/v1/common.proto\"\xe7\x01\n" +
 	"\vErrorDetail\x12.\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x1a.paratech.hub.v1.ErrorCodeR\x04code\x12:\n" +
 	"\vretry_after\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\n" +
 	"retryAfter\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x124\n" +
-	"\x05quota\x18\x04 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota*\xc7\x01\n" +
+	"\x05quota\x18\x04 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota\x12\x1c\n" +
+	"\tretryable\x18\x05 \x01(\bR\tretryable*\xc7\x01\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19ERROR_CODE_QUOTA_EXCEEDED\x10\x01\x12\x1b\n" +

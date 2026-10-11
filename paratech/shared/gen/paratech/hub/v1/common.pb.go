@@ -14,7 +14,14 @@
 //     alias; the Hub resolves it against a strict server-side provider/model allowlist. Provider credentials never
 //     leave the Hub. (Enforced by shared/contract_test.go.)
 //   - Idempotency. Every operation that costs quota is keyed by a client-generated idempotency key that is stable across
-//     retries of the same job. Repeating a call with the same key never charges twice (AC-11).
+//     retries of the same job. Repeating a call with the same key never charges twice for the same answer (AC-11). Keys
+//     are namespaced per authenticated tester (per API key): the same string sent by two testers names two unrelated
+//     keys, and one tester can never see, replay or collide with another one's. The exact life cycle of a key (attempts,
+//     what is replayed, what starts a new attempt) is defined in gateway.proto and quota.proto. The Hub keeps the record
+//     of a key, including a stored result, for a retention time of at most 24 hours (configurable on the Hub); after that
+//     the same string is a new key. The Hub must not keep model output or any other text derived from a transcript longer
+//     than that (PRD sections 4.2 and 13.2: the cloud is not the system of record for the user's academic data); the
+//     request text itself (instructions, untrusted_data) is kept only as a hash for conflict detection, and is not logged.
 //   - Errors. Failures are Connect errors; see errors.proto.
 //   - The cloud quota state is authoritative (PRD section 9.2); amounts returned here are a snapshot for display.
 

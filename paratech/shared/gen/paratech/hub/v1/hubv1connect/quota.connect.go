@@ -46,17 +46,21 @@ const (
 
 // QuotaServiceClient is a client for the paratech.hub.v1.QuotaService service.
 type QuotaServiceClient interface {
-	// Reserve holds an upper-bound amount before the provider is called. It fails with ERROR_CODE_QUOTA_EXCEEDED when the
-	// remaining quota is smaller than the requested amount; nothing is held then.
+	// Reserve (INTERNAL) holds an upper-bound amount before the provider is called, following the key rules above. It fails
+	// with ERROR_CODE_QUOTA_EXCEEDED when the remaining quota is smaller than the requested amount; nothing is held then.
 	Reserve(context.Context, *connect.Request[v1.ReserveRequest]) (*connect.Response[v1.ReserveResponse], error)
-	// Settle charges the actual usage and returns the unused part of the reservation to the balance. A repeat with the same
-	// actual amount returns the original outcome; a repeat with a different amount fails with
-	// ERROR_CODE_IDEMPOTENCY_CONFLICT; settling a RELEASED reservation fails with "failed_precondition".
+	// Settle (INTERNAL) charges the actual usage and returns the unused part of the reservation to the balance. A repeat
+	// with the same actual amount and partial flag returns the original outcome; a repeat with different values fails with
+	// ERROR_CODE_IDEMPOTENCY_CONFLICT. Settling a reservation that was released by Release fails with "failed_precondition".
+	// Settling a reservation that the Hub released by EXPIRY still succeeds: the provider has already done the work, so the
+	// actual usage is charged (bounded as described at SettleRequest.actual) and the reservation becomes SETTLED; refusing
+	// would turn a slow call into free output.
 	Settle(context.Context, *connect.Request[v1.SettleRequest]) (*connect.Response[v1.SettleResponse], error)
-	// Release returns the whole reservation to the balance without charging. Releasing a RELEASED reservation is a no-op;
-	// releasing a SETTLED one changes nothing and reports the state SETTLED (the charge stands).
+	// Release (INTERNAL) returns the whole reservation to the balance without charging. Releasing a RELEASED reservation is a
+	// no-op; releasing a SETTLED one changes nothing and reports the state SETTLED (the charge stands).
 	Release(context.Context, *connect.Request[v1.ReleaseRequest]) (*connect.Response[v1.ReleaseResponse], error)
-	// GetRemaining returns the caller's current quota (the caller is identified by the API key). It changes nothing.
+	// GetRemaining (PUBLIC) returns the caller's current quota (the caller is identified by the API key). It changes
+	// nothing.
 	GetRemaining(context.Context, *connect.Request[v1.GetRemainingRequest]) (*connect.Response[v1.GetRemainingResponse], error)
 }
 
@@ -128,17 +132,21 @@ func (c *quotaServiceClient) GetRemaining(ctx context.Context, req *connect.Requ
 
 // QuotaServiceHandler is an implementation of the paratech.hub.v1.QuotaService service.
 type QuotaServiceHandler interface {
-	// Reserve holds an upper-bound amount before the provider is called. It fails with ERROR_CODE_QUOTA_EXCEEDED when the
-	// remaining quota is smaller than the requested amount; nothing is held then.
+	// Reserve (INTERNAL) holds an upper-bound amount before the provider is called, following the key rules above. It fails
+	// with ERROR_CODE_QUOTA_EXCEEDED when the remaining quota is smaller than the requested amount; nothing is held then.
 	Reserve(context.Context, *connect.Request[v1.ReserveRequest]) (*connect.Response[v1.ReserveResponse], error)
-	// Settle charges the actual usage and returns the unused part of the reservation to the balance. A repeat with the same
-	// actual amount returns the original outcome; a repeat with a different amount fails with
-	// ERROR_CODE_IDEMPOTENCY_CONFLICT; settling a RELEASED reservation fails with "failed_precondition".
+	// Settle (INTERNAL) charges the actual usage and returns the unused part of the reservation to the balance. A repeat
+	// with the same actual amount and partial flag returns the original outcome; a repeat with different values fails with
+	// ERROR_CODE_IDEMPOTENCY_CONFLICT. Settling a reservation that was released by Release fails with "failed_precondition".
+	// Settling a reservation that the Hub released by EXPIRY still succeeds: the provider has already done the work, so the
+	// actual usage is charged (bounded as described at SettleRequest.actual) and the reservation becomes SETTLED; refusing
+	// would turn a slow call into free output.
 	Settle(context.Context, *connect.Request[v1.SettleRequest]) (*connect.Response[v1.SettleResponse], error)
-	// Release returns the whole reservation to the balance without charging. Releasing a RELEASED reservation is a no-op;
-	// releasing a SETTLED one changes nothing and reports the state SETTLED (the charge stands).
+	// Release (INTERNAL) returns the whole reservation to the balance without charging. Releasing a RELEASED reservation is a
+	// no-op; releasing a SETTLED one changes nothing and reports the state SETTLED (the charge stands).
 	Release(context.Context, *connect.Request[v1.ReleaseRequest]) (*connect.Response[v1.ReleaseResponse], error)
-	// GetRemaining returns the caller's current quota (the caller is identified by the API key). It changes nothing.
+	// GetRemaining (PUBLIC) returns the caller's current quota (the caller is identified by the API key). It changes
+	// nothing.
 	GetRemaining(context.Context, *connect.Request[v1.GetRemainingRequest]) (*connect.Response[v1.GetRemainingResponse], error)
 }
 

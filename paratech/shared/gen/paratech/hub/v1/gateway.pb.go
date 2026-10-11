@@ -23,21 +23,33 @@ const (
 
 // CompletionSpec describes one LLM operation. It is shared by Complete and CompleteStream so that both validate the same
 // way. There is deliberately no field for a URL, host or provider: the model is an alias resolved by the Hub.
+//
+// The limits below mirror the desktop core (desktop/internal/domain/coursework/values/llm.go), which rejects a bad
+// request locally. The Hub enforces them again and answers a violation with "invalid_argument". Sizes are bytes of UTF-8.
 type CompletionSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Client-generated key, stable across retries of the same job: 1 to 128 printable ASCII characters without spaces.
+	// Client-generated key, stable across retries of the same job: 1 to 128 printable ASCII characters (0x21 to 0x7E, so no
+	// spaces). Namespaced per tester; see the key life cycle above.
 	IdempotencyKey string        `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	OperationType  OperationType `protobuf:"varint,2,opt,name=operation_type,json=operationType,proto3,enum=paratech.hub.v1.OperationType" json:"operation_type,omitempty"`
-	// Hub-side alias of a model (for example "default"): 1 to 64 characters from [a-z0-9_-]. Resolved against the server
-	// allowlist; an alias that is unknown, or not allowed for the operation_type, is rejected with "invalid_argument".
+	// Hub-side alias of a model (for example "default"): 1 to 64 characters from [a-z0-9_-], starting with a letter or a
+	// digit. Resolved against the server allowlist; an alias that is unknown, or not allowed for the operation_type, is
+	// rejected with "invalid_argument".
 	ModelAlias string `protobuf:"bytes,3,opt,name=model_alias,json=modelAlias,proto3" json:"model_alias,omitempty"`
-	// Trusted instruction text written by the app.
+	// Trusted instruction text written by the app. Must not be empty; valid UTF-8 without NUL.
 	Instructions string `protobuf:"bytes,4,opt,name=instructions,proto3" json:"instructions,omitempty"`
 	// User data such as transcript excerpts. Kept apart from the instructions on purpose: the Hub passes it to the model
-	// as data, and neither side may treat it as instructions (PRD section 13.3). Raw audio is never part of a request.
+	// as data, and neither side may treat it as instructions (PRD section 13.3). Raw audio is never part of a request. May
+	// be empty; valid UTF-8 without NUL. Together with instructions it is at most 1 MiB (1048576 bytes).
+	//
+	// The Hub bounds the request before parsing it: the handler is built with connect.WithReadMaxBytes of 1 MiB plus a
+	// small headroom for the envelope, so that a request over the 1 MiB rule but still under the transport limit gets a
+	// clear "invalid_argument" from the Hub, and only a grossly oversized message is cut off by the transport with
+	// "resource_exhausted" and no ErrorDetail (see the fallback in errors.proto).
 	UntrustedData string `protobuf:"bytes,5,opt,name=untrusted_data,json=untrustedData,proto3" json:"untrusted_data,omitempty"`
-	// Upper bound on generated tokens; 0 means the Hub default for the alias. The Hub clamps it to its own cap and bases
-	// the reservation on it.
+	// Upper bound on tokens the model may generate for this call; 0 means the Hub default for the alias. The Hub clamps it
+	// silently to its own cap for the alias and operation (a larger value is not an error). The reservation is based on the
+	// estimated input tokens plus this effective value, so it is also the most the call can cost.
 	MaxOutputTokens uint32 `protobuf:"varint,6,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache

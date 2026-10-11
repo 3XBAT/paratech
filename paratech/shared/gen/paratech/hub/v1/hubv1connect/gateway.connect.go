@@ -42,15 +42,30 @@ const (
 
 // GatewayServiceClient is a client for the paratech.hub.v1.GatewayService service.
 type GatewayServiceClient interface {
-	// Complete runs one LLM operation and returns the whole answer.
+	// Complete runs one LLM operation and returns the whole answer. If the client cancels after the provider was called, the
+	// Hub lets the provider call finish (bounded by its call timeout), settles it in full and stores the result, so that
+	// a retry with the same key replays the answer it has paid for; if the provider was never called, it releases the
+	// reservation.
 	Complete(context.Context, *connect.Request[v1.CompleteRequest]) (*connect.Response[v1.CompleteResponse], error)
 	// CompleteStream runs one LLM operation and streams the answer. Stream semantics:
 	//   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
 	//   - the concatenation of all deltas equals CompletionResult.output;
 	//   - a failure is delivered as a Connect error (in the end-of-stream error for a stream that already started), with an
-	//     ErrorDetail; a stream without a final "result" is a failed call: the reservation is released and nothing is charged;
-	//   - when the client cancels, the Hub releases the reservation;
-	//   - a replay (same idempotency key) delivers the stored output as a single delta followed by the result.
+	//     ErrorDetail. A stream without a final "result" is a failed call; the client must discard the deltas it received.
+	//     When the failure is the Hub's or the provider's (ERROR_CODE_PROVIDER_ERROR, a Hub crash), the reservation is
+	//     released and nothing is charged;
+	//   - when the client cancels or the connection drops, the outcome depends on how far the call got (PRD section 9.2,
+	//     step 4):
+	//   - the provider was never called, or has produced nothing yet: the Hub releases the whole reservation;
+	//   - the provider call has started and produced output: the Hub stops it and settles the tokens consumed so far,
+	//     that is the input tokens plus the output tokens generated until the stop, as reported by the provider for
+	//     the interrupted call or, when the provider reports nothing, estimated by the Hub (never more than the
+	//     reservation). The settlement is marked partial (SettleRequest.partial) and no result is stored. The Hub does
+	//     this on a context that is not tied to the cancelled request;
+	//   - if the provider had already finished when the cancel was seen, the call completes normally: settled in full,
+	//     result stored, replayable;
+	//   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
+	//     result.
 	CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest]) (*connect.ServerStreamForClient[v1.CompleteStreamResponse], error)
 }
 
@@ -98,15 +113,30 @@ func (c *gatewayServiceClient) CompleteStream(ctx context.Context, req *connect.
 
 // GatewayServiceHandler is an implementation of the paratech.hub.v1.GatewayService service.
 type GatewayServiceHandler interface {
-	// Complete runs one LLM operation and returns the whole answer.
+	// Complete runs one LLM operation and returns the whole answer. If the client cancels after the provider was called, the
+	// Hub lets the provider call finish (bounded by its call timeout), settles it in full and stores the result, so that
+	// a retry with the same key replays the answer it has paid for; if the provider was never called, it releases the
+	// reservation.
 	Complete(context.Context, *connect.Request[v1.CompleteRequest]) (*connect.Response[v1.CompleteResponse], error)
 	// CompleteStream runs one LLM operation and streams the answer. Stream semantics:
 	//   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
 	//   - the concatenation of all deltas equals CompletionResult.output;
 	//   - a failure is delivered as a Connect error (in the end-of-stream error for a stream that already started), with an
-	//     ErrorDetail; a stream without a final "result" is a failed call: the reservation is released and nothing is charged;
-	//   - when the client cancels, the Hub releases the reservation;
-	//   - a replay (same idempotency key) delivers the stored output as a single delta followed by the result.
+	//     ErrorDetail. A stream without a final "result" is a failed call; the client must discard the deltas it received.
+	//     When the failure is the Hub's or the provider's (ERROR_CODE_PROVIDER_ERROR, a Hub crash), the reservation is
+	//     released and nothing is charged;
+	//   - when the client cancels or the connection drops, the outcome depends on how far the call got (PRD section 9.2,
+	//     step 4):
+	//   - the provider was never called, or has produced nothing yet: the Hub releases the whole reservation;
+	//   - the provider call has started and produced output: the Hub stops it and settles the tokens consumed so far,
+	//     that is the input tokens plus the output tokens generated until the stop, as reported by the provider for
+	//     the interrupted call or, when the provider reports nothing, estimated by the Hub (never more than the
+	//     reservation). The settlement is marked partial (SettleRequest.partial) and no result is stored. The Hub does
+	//     this on a context that is not tied to the cancelled request;
+	//   - if the provider had already finished when the cancel was seen, the call completes normally: settled in full,
+	//     result stored, replayable;
+	//   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
+	//     result.
 	CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest], *connect.ServerStream[v1.CompleteStreamResponse]) error
 }
 
