@@ -1,0 +1,16 @@
+# sqlc configuration of the sqlite adapter (ARCH-35: generated code lives inside the adapter package tree).
+# Regenerate from paratech/ with the command in paratech/README.md ("Regenerate sqlc code"); the generated files in
+# sqlcgen/ are committed and must never be edited by hand.
+# The schema is the goose migrations directory: sqlc reads the "Up" part of every migration in version order and
+# ignores everything after the goose Down marker, so queries are checked against the real schema.
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "migrations"
+    queries: "queries"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "sqlcgen"
+        emit_interface: true
+        emit_empty_slices: true

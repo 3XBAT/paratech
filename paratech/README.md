@@ -52,4 +52,20 @@ layout (`HEAD~1` is not a branch, and `.git` is not under `shared/`). When `para
 repository and the command becomes `(cd shared && buf breaking --against '../.git#ref=HEAD~1,subdir=shared')` (not verified yet). It is not part of CI
 yet, see ADR-0005.
 
+## Local database (SQLite adapter)
+`desktop/internal/adapters/sqlite` owns the database: driver `modernc.org/sqlite` (pure Go, the desktop builds with `CGO_ENABLED=0`),
+goose migrations embedded from `desktop/internal/adapters/sqlite/migrations`, and sqlc queries in `queries/` with generated code in `sqlcgen/`
+(committed, never edited by hand). `docs/contracts/schema.sql` is the source of truth for the schema; a test fails when the migrations and that file
+define different objects. A schema change is a NEW migration file (never edit an applied one) plus the same change in `docs/contracts/schema.sql`.
+
+Regenerate sqlc code after changing `migrations/` or `queries/` (from this directory; sqlc is run from the Go module proxy, it is not a dependency of go.mod;
+the version is pinned here and recorded in `docs/refs/sqlite-goose-sqlc.md`):
+
+```bash
+CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate -f desktop/internal/adapters/sqlite/sqlc.yaml
+git diff --stat desktop/internal/adapters/sqlite/sqlcgen   # commit the result
+```
+
+The first run downloads and compiles sqlc and takes a few minutes; later runs use the Go build cache.
+
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.
