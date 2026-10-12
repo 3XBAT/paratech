@@ -1,0 +1,18 @@
+package recording
+
+import "errors"
+
+// Errors of the recording package (ARCH-18).
+var (
+	// ErrInvalidRecording is returned by New, Restore and the methods that take data for an inconsistent recording.
+	ErrInvalidRecording = errors.New("invalid recording")
+
+	// ErrInvalidTransition means the status table does not allow the requested change.
+	ErrInvalidTransition = errors.New("invalid recording status transition")
+
+	// ErrLimitNotReached means the hard cap was asked to finalize a recording before its deadline.
+	ErrLimitNotReached = errors.New("recording limit not reached")
+
+	// ErrNotDeletable means the recording is still being captured or finalized and cannot be deleted.
+	ErrNotDeletable = errors.New("recording cannot be deleted while it is in progress")
+)
