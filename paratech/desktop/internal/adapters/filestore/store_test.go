@@ -911,3 +911,16 @@ func TestWriteSurvivesVanishedDirectory(t *testing.T) {
 		}
 	})
 }
+
+func TestNewRefusesLinkedKindDirectory(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	makeDirLink(t, filepath.Join(root, "recordings"), outside)
+
+	if _, err := New(root); !errors.Is(err, ErrInvalidRoot) {
+		t.Fatalf("New with a linked recordings dir: err = %v, want ErrInvalidRoot", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("link target was modified: %v", entries)
+	}
+}

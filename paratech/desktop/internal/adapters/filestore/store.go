@@ -65,9 +65,12 @@ func New(root string) (*Store, error) {
 	}
 	for _, k := range kinds {
 		name := string(k)
-		if err := r.Mkdir(name, dirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
-			_ = r.Close()
-			return nil, storageFail("create "+name, err)
+		// Lstat first: Mkdir on a pre-planted junction can create a directory outside the root (GO-2026-6604).
+		if _, err := r.Lstat(name); errors.Is(err, fs.ErrNotExist) {
+			if err := r.Mkdir(name, dirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
+				_ = r.Close()
+				return nil, storageFail("create "+name, err)
+			}
 		}
 		fi, err := r.Lstat(name)
 		if err != nil || !fi.IsDir() {

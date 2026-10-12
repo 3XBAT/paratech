@@ -38,6 +38,7 @@ Not security findings: denial of service, resource exhaustion, rate limiting, mi
 
 ## Automatic layers (no agent needed)
 - `gosec` linter in `.golangci.yml` and `govulncheck` in CI catch known bad patterns and known vulnerable dependencies.
+  `govulncheck` runs through `.github/scripts/vulncheck.py` for every module. A finding that does not apply to the product may be listed in `.github/vulncheck-allow.txt` only after `security-skeptic` refutes it, with a reason and a removal condition; stale entries fail CI. Prefer bumping Go or the dependency.
 - The Anthropic `Security Guidance` plugin (hooks on edits and on stop, if enabled in the session) adds pattern warnings; treat its warnings as input for the auditor, not as a verdict.
 - `claude-security` (Anthropic plugin) can be used for an occasional deep scan of the whole repository; its findings go through the same refute step.
 

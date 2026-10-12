@@ -8,7 +8,7 @@ Local-first Windows assistant for online classes. This repository contains only 
 - `go.work` — Go workspace tying the modules together
 
 ## Setup
-Required tools: Git, Go 1.26+, Node.js LTS (frontend), `golangci-lint` v2, `buf`. Windows builds also need WebView2 (bundled with recent Windows).
+Required tools: Git, Go 1.26.9+, Node.js LTS (frontend), `golangci-lint` v2, `buf`. Windows builds also need WebView2 (bundled with recent Windows).
 
 Windows (PowerShell or Git Bash):
 ```bash

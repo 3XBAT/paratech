@@ -1,6 +1,6 @@
 module paratech/shared
 
-go 1.26
+go 1.26.9
 
 require (
 	connectrpc.com/connect v1.21.0
