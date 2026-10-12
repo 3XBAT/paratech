@@ -244,3 +244,18 @@
 - Heavy/power-aware типы, startup recovery и WAITING_* — TASK-010/012
 
 ---
+
+## [TASK-007] Настройки приложения
+**Дата:** 2026-10-13 12:00
+**Статус:** done
+
+### Что сделано
+- domain/settings/settings: агрегат с дефолтами (подсказка записи, только от розетки, уведомления = true), валидируемые методы, New/Restore, Version/Persisted; adapters/sqlite/settings.go: Load (дефолты без строки), Save (insert или CAS), тесты на перезапуск; AC-02 и AC-22 на уровне хранилища
+- Порты переиспользованы (modelcatalog.SettingsRepository и SettingsReader в других use cases), новый use case не заводился
+- Ревью: approve. Security: найдено 0.
+
+### Заметки
+- Сервис настроек для экрана UI появится с UI-задачей (TASK-021); в app не подключено
+- Повторное сохранение без изменений всё равно повышает версию (решено оставить)
+
+---
