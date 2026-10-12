@@ -14,9 +14,8 @@ type Querier interface {
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error)
-	// NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-007 owner may replace or remove them.
-	// Settings singleton (row id = 1) with the optimistic-concurrency protocol of ADR-0004(d).
-	// These queries are the first consumer of the toolchain; the settings repository (TASK-007 owner) builds on them.
+	// Settings singleton (row id = 1) of the settings repository, with the optimistic-concurrency protocol of ADR-0004(d).
+	// No row means the defaults of the aggregate (version 0).
 	GetSettings(ctx context.Context) (Setting, error)
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
