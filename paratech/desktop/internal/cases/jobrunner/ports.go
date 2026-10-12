@@ -63,8 +63,8 @@ type Handler interface {
 	// statuses (transient, permanent, waiting for network, quota or power) is decided with TASK-009.
 	//
 	// snap is a read-only value copy of the claimed job (job.Snapshot): the handler reads from it what it needs, such
-	// as the job type, and has no way to mutate or persist the aggregate, which the runner owns (see JobRepository);
-	// TASK-008 adds the payload, pinned versions and checkpoint to the snapshot. report is the narrow
+	// as the job type, and has no way to mutate or persist the aggregate, which the runner owns (see JobRepository).
+	// report is the narrow
 	// progress port: the handler calls it at safe points with the percentage and an opaque checkpoint (PRD
 	// sections 7.3 and 7.4), and the runner applies them to the aggregate and saves with its version guard. report
 	// is a plain function type on purpose, so that a handler in another use case satisfies this interface without
