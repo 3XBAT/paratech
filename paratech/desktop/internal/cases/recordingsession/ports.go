@@ -72,6 +72,9 @@ type RecordingTranscripts interface {
 // elsewhere. Audio never leaves the machine (AC-06).
 //
 // The adapter writes below the artifact root it was wired with; references keep the core free of OS paths.
+//
+// Every method must return soon after its ctx ends: the use case bounds the shutdown steps (Stop) with a timeout and
+// cancels Wait and Finalize on a forced Close, and Close waits for them to return.
 type Recorder interface {
 	// Start begins capturing for the recording id and writes chunk files into the directory chunks
 	// (PRD section 6.3: chunked writes, a crash loses at most the latest chunk). It returns once capture runs.

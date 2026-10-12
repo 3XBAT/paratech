@@ -18,7 +18,10 @@ import (
 
 var t0 = time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 
-const chunkLen = time.Minute
+const (
+	chunkLen  = time.Minute
+	retryStep = saveRetryBase // how far the clock moves per poll while a test waits for retries
+)
 
 var errDevice = errors.New("output device changed")
 
@@ -30,6 +33,7 @@ type env struct {
 	tx    *fakeTx
 	files *testenv.MemArtifacts
 	rec   *testenv.FakeRecorder
+	hooks *hookRecorder // what the service sees: rec with extra failures
 	svc   *Service
 }
 
@@ -40,8 +44,9 @@ func newEnv(t *testing.T, cfg Config) *env {
 		files: testenv.NewMemArtifacts(),
 	}
 	e.rec = testenv.NewFakeRecorder(e.files, chunkLen)
+	e.hooks = &hookRecorder{FakeRecorder: e.rec}
 	svc, err := New(Deps{
-		Recordings: e.repo, Transcripts: e.tr, Recorder: e.rec, Artifacts: e.files, Tx: e.tx,
+		Recordings: e.repo, Transcripts: e.tr, Recorder: e.hooks, Artifacts: e.files, Tx: e.tx,
 		Clock: e.clock, Sleeper: e.clock, IDs: &seqIDs{},
 	}, cfg)
 	if err != nil {
@@ -92,15 +97,54 @@ func (e *env) stored(id shared.RecordingID) *recording.Recording {
 	return r
 }
 
+// awaitStatus waits for the stored status of a session that ends by itself.
 func (e *env) awaitStatus(id shared.RecordingID, want recording.Status) *recording.Recording {
+	e.t.Helper()
+	return e.awaitStatusWith(id, want, nil)
+}
+
+// awaitStatusMoving is awaitStatus while the clock moves, so retry delays pass.
+func (e *env) awaitStatusMoving(id shared.RecordingID, want recording.Status) *recording.Recording {
+	e.t.Helper()
+	return e.awaitStatusWith(id, want, func() { e.clock.Advance(retryStep) })
+}
+
+func (e *env) awaitStatusWith(id shared.RecordingID, want recording.Status, between func()) *recording.Recording {
 	e.t.Helper()
 	testenv.Eventually(e.t, "status "+want.String(), func() bool {
 		r, err := e.repo.Get(context.Background(), id)
 		return err == nil && r.Status() == want
-	}, nil)
+	}, between)
 	_, _ = e.svc.Stop(testCtx(e.t), id) // the session has ended once Stop of a finished recording returns
 	testenv.Eventually(e.t, "free slot", func() bool { _, active := e.svc.Active(); return !active }, nil)
 	return e.stored(id)
+}
+
+// advancing runs fn while the fake clock moves by retryStep, so retry delays pass.
+func (e *env) advancing(fn func()) {
+	e.t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+
+	testenv.Eventually(e.t, "a call under a moving clock", func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, func() { e.clock.Advance(retryStep) })
+}
+
+// stopAdvancing is Stop under a moving clock.
+func (e *env) stopAdvancing(id shared.RecordingID) (info Info, err error) {
+	e.t.Helper()
+	ctx := testCtx(e.t)
+	e.advancing(func() { info, err = e.svc.Stop(ctx, id) })
+	return info, err
 }
 
 func (e *env) content(ref shared.ArtifactRef) string {
@@ -291,12 +335,49 @@ func TestDiskErrorFailsAndKeepsChunks(t *testing.T) {
 	if _, err := e.rec.Feed(testCtx(t), info.ID, []byte("c")); !errors.Is(err, shared.ErrStorageFull) {
 		t.Fatalf("Feed on a full disk = %v", err)
 	}
-	r := e.awaitStatus(info.ID, recording.StatusFailed)
+	r := e.awaitStatusMoving(info.ID, recording.StatusFailed)
 	if !strings.Contains(r.Problem(), problemFinalizeFailed) || r.Chunks() != 2 || !r.Audio().IsZero() {
 		t.Fatalf("failed recording: problem %q, chunks %d, audio %s", r.Problem(), r.Chunks(), r.Audio())
 	}
 	if want := []string{"recordings/rec-1/chunk-0001", "recordings/rec-1/chunk-0002"}; !slices.Equal(e.files.Paths(), want) {
 		t.Fatalf("files = %v, want the chunks kept", e.files.Paths())
+	}
+}
+
+// A transient Finalize error is retried; one that persists fails the recording and keeps the chunks.
+func TestFinalizeRetries(t *testing.T) {
+	cases := []struct {
+		name      string
+		fails     int
+		want      recording.Status
+		wantCalls int
+	}{
+		{"fails once", 1, recording.StatusCompleted, 2},
+		{"fails every attempt", finalizeAttempts, recording.StatusFailed, finalizeAttempts},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testenv.NoGoroutineLeaks(t)
+			e := newEnv(t, DefaultConfig())
+			info := e.start()
+			e.feed(info.ID, "a")
+			for range tc.fails {
+				e.hooks.failFinalizes(shared.ErrStorageBusy)
+			}
+
+			got, err := e.stopAdvancing(info.ID)
+			if err != nil || got.Status != tc.want || got.Chunks != 1 {
+				t.Fatalf("Stop = %+v, %v", got, err)
+			}
+			if n := e.hooks.finalizeCalls(); n != tc.wantCalls {
+				t.Fatalf("Finalize called %d times, want %d", n, tc.wantCalls)
+			}
+			requireHistory(t, e.repo.statuses(), recording.StatusStarting, recording.StatusRecording, recording.StatusStopping,
+				recording.StatusFinalizing, tc.want)
+			if !slices.Contains(e.files.Paths(), "recordings/rec-1/chunk-0001") {
+				t.Fatalf("files = %v, want the chunk kept", e.files.Paths())
+			}
+		})
 	}
 }
 
@@ -307,7 +388,7 @@ func TestFinalizeErrorAfterStopFails(t *testing.T) {
 	e.feed(info.ID, "a")
 	e.rec.FailFinalize(shared.ErrStoragePermission)
 
-	got, err := e.svc.Stop(testCtx(t), info.ID)
+	got, err := e.stopAdvancing(info.ID)
 	if err != nil || got.Status != recording.StatusFailed || got.Chunks != 1 {
 		t.Fatalf("Stop = %+v, %v", got, err)
 	}
@@ -318,6 +399,7 @@ func TestFinalizeErrorAfterStopFails(t *testing.T) {
 	}
 }
 
+// Without chunks there is nothing to assemble: the recording fails at once, without retries.
 func TestStopWithoutAudioFails(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newEnv(t, DefaultConfig())
@@ -325,6 +407,9 @@ func TestStopWithoutAudioFails(t *testing.T) {
 	got, err := e.svc.Stop(testCtx(t), info.ID)
 	if err != nil || got.Status != recording.StatusFailed || got.Chunks != 0 {
 		t.Fatalf("Stop = %+v, %v", got, err)
+	}
+	if n := e.hooks.finalizeCalls(); n != 1 {
+		t.Fatalf("Finalize called %d times, want 1", n)
 	}
 }
 
@@ -374,6 +459,67 @@ func TestStartInsertErrorLeavesNothing(t *testing.T) {
 	}
 	if _, ok := e.svc.Active(); ok {
 		t.Fatal("the slot was not freed")
+	}
+}
+
+// The save of RECORDING is retried on a transient error; a conflict or the last failed attempt stops the capture.
+func TestBeginSaveIsRetried(t *testing.T) {
+	busy := func(n int) []error {
+		errs := make([]error, n)
+		for i := range errs {
+			errs[i] = shared.ErrStorageBusy
+		}
+		return errs
+	}
+	cases := []struct {
+		name      string
+		fails     []error
+		wantErr   []error // nil = Start succeeds
+		wantSaves int     // Save calls after the insert
+	}{
+		{"transient", busy(1), nil, 2},
+		{"gives up", busy(saveAttempts), []error{ErrAbandoned, shared.ErrStorageBusy}, saveAttempts},
+		{"conflict is not retried", []error{shared.ErrVersionConflict}, []error{ErrAbandoned, shared.ErrVersionConflict}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testenv.NoGoroutineLeaks(t)
+			e := newEnv(t, DefaultConfig())
+			inserted := 0
+			e.rec.OnStarted(func(shared.RecordingID) {
+				inserted = e.repo.saveCalls()
+				e.repo.failNextSaves(tc.fails...)
+			})
+
+			var info Info
+			var err error
+			ctx := testCtx(t)
+			e.advancing(func() { info, err = e.svc.Start(ctx, StartRequest{}) })
+			if n := e.repo.saveCalls() - inserted; n != tc.wantSaves {
+				t.Fatalf("%d saves after the insert, want %d", n, tc.wantSaves)
+			}
+
+			if tc.wantErr == nil {
+				if err != nil || info.Status != recording.StatusRecording || !e.rec.Running(info.ID) {
+					t.Fatalf("Start = %+v, %v", info, err)
+				}
+				requireHistory(t, e.repo.statuses(), recording.StatusStarting, recording.StatusRecording)
+				return
+			}
+
+			for _, want := range tc.wantErr {
+				if !errors.Is(err, want) {
+					t.Fatalf("Start = %v, want %v", err, want)
+				}
+			}
+			if e.rec.Running("rec-1") {
+				t.Fatal("capture runs after an abandoned start")
+			}
+			if _, active := e.svc.Active(); active {
+				t.Fatal("the slot was not freed")
+			}
+			requireHistory(t, e.repo.statuses(), recording.StatusStarting)
+		})
 	}
 }
 
@@ -571,6 +717,59 @@ func TestForcedCloseLeavesTheStateForRecovery(t *testing.T) {
 	}
 }
 
+// A Recorder.Stop that hangs until its context ends does not block Close beyond detachedTimeout.
+func TestCloseIsBoundedWhenStopHangs(t *testing.T) {
+	cases := []struct {
+		name       string
+		forced     bool
+		wantClose  error
+		wantStored recording.Status
+	}{
+		{"graceful: the chunks are assembled", false, nil, recording.StatusCompleted},
+		{"forced: the state stays for the recovery", true, context.Canceled, recording.StatusStopping},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testenv.NoGoroutineLeaks(t)
+			e := newEnv(t, DefaultConfig())
+			info := e.start()
+			e.feed(info.ID, "a")
+			entered := e.hooks.hangStops()
+
+			ctx, cancel := context.WithCancel(testCtx(t))
+			defer cancel()
+			closed := make(chan error, 1)
+			go func() { closed <- e.svc.Close(ctx) }()
+			<-entered
+
+			// The hard cap and the bound of the hanging Stop sleep now.
+			if err := e.clock.AwaitSleepers(testCtx(t), 2); err != nil {
+				t.Fatal(err)
+			}
+			if tc.forced {
+				cancel()
+				testenv.Eventually(t, "shutdown", func() bool { return e.svc.life.Err() != nil }, nil)
+			}
+			select {
+			case err := <-closed:
+				t.Fatalf("Close returned before the bound: %v", err)
+			default:
+			}
+
+			e.clock.Advance(detachedTimeout)
+			if err := <-closed; !errors.Is(err, tc.wantClose) {
+				t.Fatalf("Close = %v, want %v", err, tc.wantClose)
+			}
+			if cause := e.hooks.stopCauseSeen(); !errors.Is(cause, errDetachedTimeout) {
+				t.Fatalf("Stop ended by %v, want the bound", cause)
+			}
+			if r := e.stored(info.ID); r.Status() != tc.wantStored {
+				t.Fatalf("stored %s, want %s", r.Status(), tc.wantStored)
+			}
+		})
+	}
+}
+
 func TestShutdownWhileRecordingAbandons(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newEnv(t, DefaultConfig())
@@ -639,7 +838,7 @@ func TestFinalSaveGivesUp(t *testing.T) {
 	info := e.start()
 	e.feed(info.ID, "a")
 
-	errs := make([]error, 2+finalSaveAttempts)
+	errs := make([]error, 2+saveAttempts)
 	for i := range errs {
 		errs[i] = shared.ErrStorageBusy
 	}

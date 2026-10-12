@@ -27,8 +27,9 @@ var (
 	ErrAbandoned = errors.New("recording session ended before the recording was finished")
 )
 
-// Reasons a start in progress is cancelled; they are context causes, never returned to callers.
+// Reasons a context of the session is cancelled; they are context causes, never returned to callers.
 var (
-	errStopRequested = errors.New("stop requested")
-	errShutdown      = errors.New("recording service is shutting down")
+	errStopRequested   = errors.New("stop requested")
+	errShutdown        = errors.New("recording service is shutting down")
+	errDetachedTimeout = errors.New("detached call timed out")
 )

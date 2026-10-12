@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/testenv"
 )
 
 // stateOf copies the stored form of a recording, so the fake repository never shares an instance with the service.
@@ -26,6 +28,7 @@ type memRepo struct {
 	rows      map[shared.RecordingID]recording.State
 	history   []recording.Status // statuses of successful saves, in order
 	failSaves []error            // errors returned by the next saves, one each
+	saves     int                // Save calls, failed ones included
 }
 
 func newMemRepo() *memRepo { return &memRepo{rows: map[shared.RecordingID]recording.State{}} }
@@ -52,6 +55,7 @@ func (m *memRepo) Get(ctx context.Context, id shared.RecordingID) (*recording.Re
 func (m *memRepo) Save(_ context.Context, r *recording.Recording) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.saves++
 	if len(m.failSaves) > 0 {
 		err := m.failSaves[0]
 		m.failSaves = m.failSaves[1:]
@@ -117,6 +121,12 @@ func (m *memRepo) statuses() []recording.Status {
 	return append([]recording.Status(nil), m.history...)
 }
 
+func (m *memRepo) saveCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saves
+}
+
 func (m *memRepo) statusOf(id shared.RecordingID) recording.Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -163,6 +173,81 @@ func (f *fakeTx) Do(ctx context.Context, fn func(ctx context.Context) error) err
 		f.before()
 	}
 	return fn(ctx)
+}
+
+// hookRecorder adds to the fake recorder what it cannot script: a Stop that hangs until its context ends and
+// Finalize errors for the next calls only.
+type hookRecorder struct {
+	*testenv.FakeRecorder
+
+	mu            sync.Mutex
+	stopHang      chan struct{} // closed when a hanging Stop is entered; nil = Stop does not hang
+	stopCause     error         // context.Cause seen by the hanging Stop
+	finalizeFails []error       // errors returned by the next Finalize calls, one each
+	finalizes     int           // Finalize calls, failed ones included
+}
+
+// hangStops makes the next Stop calls block until their context ends; the channel closes when the first one enters.
+func (h *hookRecorder) hangStops() <-chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.stopHang = make(chan struct{})
+	return h.stopHang
+}
+
+func (h *hookRecorder) Stop(ctx context.Context, id shared.RecordingID) error {
+	h.mu.Lock()
+	entered := h.stopHang
+	if entered != nil {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+	}
+	h.mu.Unlock()
+	if entered == nil {
+		return h.FakeRecorder.Stop(ctx, id)
+	}
+
+	<-ctx.Done()
+	h.mu.Lock()
+	h.stopCause = context.Cause(ctx)
+	h.mu.Unlock()
+	return ctx.Err()
+}
+
+func (h *hookRecorder) stopCauseSeen() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.stopCause
+}
+
+func (h *hookRecorder) failFinalizes(errs ...error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.finalizeFails = append(h.finalizeFails, errs...)
+}
+
+func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (time.Duration, error) {
+	h.mu.Lock()
+	h.finalizes++
+	var err error
+	if len(h.finalizeFails) > 0 {
+		err, h.finalizeFails = h.finalizeFails[0], h.finalizeFails[1:]
+	}
+	h.mu.Unlock()
+
+	if err != nil {
+		return 0, err
+	}
+	return h.FakeRecorder.Finalize(ctx, chunks, output)
+}
+
+func (h *hookRecorder) finalizeCalls() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.finalizes
 }
 
 // seqIDs hands out rec-1, rec-2, ...
