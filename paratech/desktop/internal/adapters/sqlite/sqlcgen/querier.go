@@ -9,16 +9,28 @@ import (
 )
 
 type Querier interface {
-	// NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-008 owner may replace or remove them.
-	// Read-only job statistics; the job repository (TASK-008 owner) adds Enqueue, Claim and Save.
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
+	// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
+	// transition, the queries only store the result.
+	GetJob(ctx context.Context, id string) (Job, error)
+	GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error)
 	// NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-007 owner may replace or remove them.
 	// Settings singleton (row id = 1) with the optimistic-concurrency protocol of ADR-0004(d).
 	// These queries are the first consumer of the toolchain; the settings repository (TASK-007 owner) builds on them.
 	GetSettings(ctx context.Context) (Setting, error)
+	// A never-stored job (version 0) is inserted with version 1.
+	InsertJob(ctx context.Context, arg InsertJobParams) error
 	// A never-stored settings aggregate (version 0) is inserted with version 1. A second insert violates the primary key,
 	// which the adapter reports as shared.ErrVersionConflict (someone else created the row first).
 	InsertSettings(ctx context.Context, arg InsertSettingsParams) error
+	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
+	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
+	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
+	NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error)
+	// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
+	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)
+	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
+	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
 	// Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 	// with VersionCAS to shared.ErrVersionConflict.
 	UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error)

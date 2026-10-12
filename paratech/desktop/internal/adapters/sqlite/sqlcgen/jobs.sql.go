@@ -7,11 +7,11 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
+	"strings"
 )
 
 const countJobsByStatus = `-- name: CountJobsByStatus :many
-
-
 SELECT status, COUNT(*) AS total
 FROM jobs
 GROUP BY status
@@ -23,8 +23,6 @@ type CountJobsByStatusRow struct {
 	Total  int64
 }
 
-// NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-008 owner may replace or remove them.
-// Read-only job statistics; the job repository (TASK-008 owner) adds Enqueue, Claim and Save.
 func (q *Queries) CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error) {
 	rows, err := q.db.QueryContext(ctx, countJobsByStatus)
 	if err != nil {
@@ -46,4 +44,318 @@ func (q *Queries) CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow
 		return nil, err
 	}
 	return items, nil
+}
+
+const getJob = `-- name: GetJob :one
+
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs WHERE id = ?1
+`
+
+// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
+// transition, the queries only store the result.
+func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getJob, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.IdempotencyKey,
+		&i.Payload,
+		&i.PinnedModelID,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextRunAt,
+		&i.RunNow,
+		&i.ProgressPercent,
+		&i.Checkpoint,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getJobIDByKey = `-- name: GetJobIDByKey :one
+SELECT id FROM jobs WHERE idempotency_key = ?1
+`
+
+func (q *Queries) GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getJobIDByKey, idempotencyKey)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertJob = `-- name: InsertJob :exec
+INSERT INTO jobs (id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at,
+                  run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version,
+                  updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5,
+        ?6, ?7, ?8, ?9,
+        ?10, ?11, ?12, ?13,
+        ?14, ?15, ?16, 1, ?17)
+`
+
+type InsertJobParams struct {
+	ID              string
+	Type            string
+	Status          string
+	IdempotencyKey  string
+	Payload         string
+	PinnedModelID   sql.NullString
+	Attempts        int64
+	MaxAttempts     int64
+	NextRunAt       int64
+	RunNow          int64
+	ProgressPercent int64
+	Checkpoint      sql.NullString
+	LastError       sql.NullString
+	CreatedAt       int64
+	StartedAt       sql.NullInt64
+	FinishedAt      sql.NullInt64
+	UpdatedAt       int64
+}
+
+// A never-stored job (version 0) is inserted with version 1.
+func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
+	_, err := q.db.ExecContext(ctx, insertJob,
+		arg.ID,
+		arg.Type,
+		arg.Status,
+		arg.IdempotencyKey,
+		arg.Payload,
+		arg.PinnedModelID,
+		arg.Attempts,
+		arg.MaxAttempts,
+		arg.NextRunAt,
+		arg.RunNow,
+		arg.ProgressPercent,
+		arg.Checkpoint,
+		arg.LastError,
+		arg.CreatedAt,
+		arg.StartedAt,
+		arg.FinishedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const listJobsByStatus = `-- name: ListJobsByStatus :many
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+WHERE status IN (/*SLICE:statuses*/?)
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error) {
+	query := listJobsByStatus
+	var queryParams []interface{}
+	if len(statuses) > 0 {
+		for _, v := range statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Status,
+			&i.IdempotencyKey,
+			&i.Payload,
+			&i.PinnedModelID,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.NextRunAt,
+			&i.RunNow,
+			&i.ProgressPercent,
+			&i.Checkpoint,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Version,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const nextClaimableJob = `-- name: NextClaimableJob :one
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+WHERE status = 'QUEUED'
+  AND next_run_at <= ?1
+  AND type IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+  AND (CAST(?3 AS INTEGER) = 1
+       OR run_now = 1
+       OR type NOT IN (SELECT value FROM json_each(CAST(?4 AS TEXT))))
+ORDER BY next_run_at, created_at, id
+LIMIT 1
+`
+
+type NextClaimableJobParams struct {
+	Now          int64
+	Types        string
+	HeavyAllowed int64
+	HeavyTypes   string
+}
+
+// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
+// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
+func (q *Queries) NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error) {
+	row := q.db.QueryRowContext(ctx, nextClaimableJob,
+		arg.Now,
+		arg.Types,
+		arg.HeavyAllowed,
+		arg.HeavyTypes,
+	)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.IdempotencyKey,
+		&i.Payload,
+		&i.PinnedModelID,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextRunAt,
+		&i.RunNow,
+		&i.ProgressPercent,
+		&i.Checkpoint,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateClaimedJob = `-- name: UpdateClaimedJob :execrows
+UPDATE jobs
+SET status           = ?1,
+    attempts         = ?2,
+    next_run_at      = ?3,
+    run_now          = ?4,
+    progress_percent = ?5,
+    checkpoint       = ?6,
+    last_error       = ?7,
+    started_at       = ?8,
+    finished_at      = ?9,
+    version          = version + 1,
+    updated_at       = ?10
+WHERE id = ?11 AND status = 'QUEUED' AND version = ?12
+`
+
+type UpdateClaimedJobParams struct {
+	Status          string
+	Attempts        int64
+	NextRunAt       int64
+	RunNow          int64
+	ProgressPercent int64
+	Checkpoint      sql.NullString
+	LastError       sql.NullString
+	StartedAt       sql.NullInt64
+	FinishedAt      sql.NullInt64
+	UpdatedAt       int64
+	ID              string
+	ExpectedVersion int64
+}
+
+// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
+func (q *Queries) UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateClaimedJob,
+		arg.Status,
+		arg.Attempts,
+		arg.NextRunAt,
+		arg.RunNow,
+		arg.ProgressPercent,
+		arg.Checkpoint,
+		arg.LastError,
+		arg.StartedAt,
+		arg.FinishedAt,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateJob = `-- name: UpdateJob :execrows
+UPDATE jobs
+SET status           = ?1,
+    attempts         = ?2,
+    next_run_at      = ?3,
+    run_now          = ?4,
+    progress_percent = ?5,
+    checkpoint       = ?6,
+    last_error       = ?7,
+    started_at       = ?8,
+    finished_at      = ?9,
+    version          = version + 1,
+    updated_at       = ?10
+WHERE id = ?11 AND version = ?12
+`
+
+type UpdateJobParams struct {
+	Status          string
+	Attempts        int64
+	NextRunAt       int64
+	RunNow          int64
+	ProgressPercent int64
+	Checkpoint      sql.NullString
+	LastError       sql.NullString
+	StartedAt       sql.NullInt64
+	FinishedAt      sql.NullInt64
+	UpdatedAt       int64
+	ID              string
+	ExpectedVersion int64
+}
+
+// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
+func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateJob,
+		arg.Status,
+		arg.Attempts,
+		arg.NextRunAt,
+		arg.RunNow,
+		arg.ProgressPercent,
+		arg.Checkpoint,
+		arg.LastError,
+		arg.StartedAt,
+		arg.FinishedAt,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
