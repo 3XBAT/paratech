@@ -223,3 +223,24 @@
 - Уведомления об изменении питания реализованы опросом (отклонение от формулировки задачи, обосновано в refs); неизвестный источник питания считается сетью (PRD §7.4 не уточняет)
 
 ---
+
+## [TASK-009] Worker pool
+**Дата:** 2026-10-12 22:00
+**Статус:** done
+
+### Что сделано
+- cases/jobrunner: пул воркеров, регистрация обработчиков по типу, таймаут попытки, отмена (бегущей, в очереди, ожидающей), прогресс с CAS, graceful/forced Stop, promoter RETRY_WAIT -> QUEUED, повтор финального Save
+- domain/jobs/services/backoff: ограниченный экспоненциальный backoff, классификация ошибок (Transient/Permanent); Job.Requeue проверяет срок (ErrNotDue)
+- Порты Sleeper и Jitter, testenv: FakeClock, NoGoroutineLeaks, Eventually; сценарные тесты на реальном SQLite
+- Ревью: approve, medium исправлены. Security: найдено 2 (F1 опровергнуто, F2 понижено до Low и частично исправлено).
+
+### Тесты
+- [x] go test -race ./desktop/... (в т.ч. -count=3, -cpu 1,4); шаги 2-4 покрыты сценариями retry/fail/cancel; golangci-lint, vulncheck чисто
+
+### Заметки
+- Не подключено в internal/app: нужны реальные Clock/Sleeper и случайный Jitter
+- TASK-010 и TASK-044 обязаны проверить: задача с внешним эффектом, прерванная таймаутом/остановкой после SENDING, не отправляет повторно (защита в агрегате delivery, не в раннере)
+- Handler-ошибки пишутся в last_error и лог: адаптеры anthropic/hubclient/smtp должны возвращать классифицированные ошибки с короткими фиксированными сообщениями
+- Heavy/power-aware типы, startup recovery и WAITING_* — TASK-010/012
+
+---
