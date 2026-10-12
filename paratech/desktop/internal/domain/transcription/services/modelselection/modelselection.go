@@ -54,13 +54,10 @@ func (Selector) Resolve(requested, defaultID shared.SttModelID, installed []*stt
 	return nil, ErrNoDefaultModel
 }
 
-// DefaultAfterRemoval returns the default model that remains when removed is removed, and whether it changed. Removing
-// the default leaves no default: the user picks the next one (PRD section 8, AC-07); nothing is chosen silently.
-func (Selector) DefaultAfterRemoval(current, removed shared.SttModelID) (shared.SttModelID, bool) {
-	if current == "" || current != removed {
-		return current, false
-	}
-	return "", true
+// ClearsDefault reports whether removing a model clears the current default. Removing the default leaves no default:
+// the user picks the next one (PRD section 8, AC-07); no successor is chosen silently.
+func (Selector) ClearsDefault(current, removed shared.SttModelID) bool {
+	return current != "" && current == removed
 }
 
 // Recommend returns the catalog model to suggest for a machine (PRD sections 8 and 8.1). Only preferred entries (the

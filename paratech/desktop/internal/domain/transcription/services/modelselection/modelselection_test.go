@@ -64,19 +64,19 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-func TestDefaultAfterRemoval(t *testing.T) {
+func TestClearsDefault(t *testing.T) {
 	cases := []struct {
-		current, removed, want shared.SttModelID
-		changed                bool
+		current, removed shared.SttModelID
+		want             bool
 	}{
-		{"a", "a", "", true},
-		{"a", "b", "a", false},
-		{"", "a", "", false},
+		{"a", "a", true},
+		{"a", "b", false},
+		{"", "a", false},
+		{"", "", false},
 	}
 	for _, tc := range cases {
-		got, changed := New().DefaultAfterRemoval(tc.current, tc.removed)
-		if got != tc.want || changed != tc.changed {
-			t.Errorf("DefaultAfterRemoval(%q, %q) = %q, %v; want %q, %v", tc.current, tc.removed, got, changed, tc.want, tc.changed)
+		if got := New().ClearsDefault(tc.current, tc.removed); got != tc.want {
+			t.Errorf("ClearsDefault(%q, %q) = %v, want %v", tc.current, tc.removed, got, tc.want)
 		}
 	}
 }

@@ -1,0 +1,347 @@
+package modelcatalog
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/domain/transcription/services/modelselection"
+	"paratech/desktop/internal/domain/transcription/sttmodel"
+	"paratech/desktop/internal/domain/transcription/values"
+)
+
+// Operation names, used in error messages.
+const (
+	opListAvailable = "modelcatalog: list available models"
+	opListInstalled = "modelcatalog: list installed models"
+	opRegister      = "modelcatalog: register model"
+	opSetDefault    = "modelcatalog: set default model"
+	opDelete        = "modelcatalog: delete model"
+	opResolve       = "modelcatalog: resolve model for job"
+)
+
+// conflictAttempts bounds every reload-and-retry loop: version conflicts on the settings and a default that is selected
+// again while a removal clears it.
+const conflictAttempts = 3
+
+// Service manages local STT models (PRD sections 8 and 8.1): the catalog, installed models, the default model, the
+// model an STT job pins and safe removal. Every write runs in its own Tx.Do and changes one aggregate (ARCH-23).
+type Service struct {
+	models   ModelRepository
+	pins     ModelPins
+	settings SettingsRepository
+	files    ArtifactStore
+	catalog  CatalogSource
+	clock    Clock
+	ids      IDGenerator
+	tx       Tx
+	sel      modelselection.Selector
+}
+
+// New builds the Service.
+func New(d Deps) (*Service, error) {
+	if d.Models == nil || d.Pins == nil || d.Settings == nil || d.Files == nil || d.Catalog == nil ||
+		d.Clock == nil || d.IDs == nil || d.Tx == nil {
+		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
+	}
+
+	return &Service{
+		models: d.Models, pins: d.Pins, settings: d.Settings, files: d.Files, catalog: d.Catalog,
+		clock: d.Clock, ids: d.IDs, tx: d.Tx, sel: modelselection.New(),
+	}, nil
+}
+
+// ListAvailable returns the catalog in manifest order with the installed model of each entry, the recommendation for
+// machine and the slow-hardware warning (PRD sections 8 and 8.1). Pass the zero values.Machine when the hardware is
+// unknown.
+func (s *Service) ListAvailable(ctx context.Context, machine values.Machine) ([]AvailableModel, error) {
+	cat, err := s.loadCatalog(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListAvailable, err)
+	}
+	installed, err := s.models.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListAvailable, err)
+	}
+
+	type identity struct {
+		name    values.ModelName
+		version values.ModelVersion
+	}
+	installedIDs := make(map[identity]shared.SttModelID, len(installed))
+	for _, m := range installed {
+		installedIDs[identity{m.Name(), m.ModelVersion()}] = m.ID()
+	}
+
+	entries := cat.Entries()
+	recommended, haveRecommendation := s.sel.Recommend(entries, machine)
+	out := make([]AvailableModel, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, AvailableModel{
+			Entry:       e,
+			InstalledID: installedIDs[identity{e.Name(), e.Version()}],
+			Recommended: haveRecommendation && e.ID() == recommended.ID(),
+			LikelySlow:  s.sel.LikelySlow(e, machine),
+		})
+	}
+	return out, nil
+}
+
+// ListInstalled returns the installed models ordered by name and version, with the default marked (PRD section 8,
+// AC-07).
+func (s *Service) ListInstalled(ctx context.Context) ([]InstalledModel, error) {
+	models, err := s.models.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListInstalled, err)
+	}
+	st, err := s.settings.Load(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListInstalled, err)
+	}
+
+	out := make([]InstalledModel, 0, len(models))
+	for _, m := range models {
+		out = append(out, installedModel(m, m.ID() == st.DefaultSttModel()))
+	}
+	return out, nil
+}
+
+// Register installs a verified model file (PRD section 8.1, AC-07, AC-23). The file must already be stored below
+// models/; its size is read from the store. A catalog model must match its entry's size and SHA-256, otherwise
+// values.ErrSizeMismatch or values.ErrChecksumMismatch is returned and nothing is installed. A second model with the
+// same name and version yields ErrAlreadyInstalled. The file is left in place on every error: the caller owns it
+// until Register succeeds.
+func (s *Service) Register(ctx context.Context, r Registration) (InstalledModel, error) {
+	size, err := s.files.Size(ctx, r.File)
+	if err != nil {
+		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+	}
+
+	spec, err := s.registrationSpec(ctx, r, size)
+	if err != nil {
+		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+	}
+	m, err := sttmodel.New(spec, s.clock.Now())
+	if err != nil {
+		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+	}
+
+	err = s.tx.Do(ctx, func(ctx context.Context) error { return s.models.Save(ctx, m) })
+	if errors.Is(err, shared.ErrDuplicate) {
+		return InstalledModel{}, fmt.Errorf("%s: %s %s: %w", opRegister, m.Name(), m.ModelVersion(), ErrAlreadyInstalled)
+	}
+	if err != nil {
+		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+	}
+	return installedModel(m, false), nil
+}
+
+func (s *Service) registrationSpec(ctx context.Context, r Registration, size int64) (sttmodel.Spec, error) {
+	id := s.ids.NewSttModelID()
+	if r.CatalogID == "" {
+		return sttmodel.Spec{
+			ID: id, Name: r.Name, ModelVersion: r.ModelVersion, File: r.File, SizeBytes: size, SHA256: r.SHA256,
+			Quantization: r.Quantization, Capabilities: r.Capabilities,
+		}, nil
+	}
+
+	if r.Name != "" || r.ModelVersion != "" || r.Quantization != "" || len(r.Capabilities) > 0 {
+		return sttmodel.Spec{}, fmt.Errorf("%w: a catalog model takes its identity from the catalog", ErrInvalidRegistration)
+	}
+	cat, err := s.loadCatalog(ctx)
+	if err != nil {
+		return sttmodel.Spec{}, err
+	}
+	entry, ok := cat.Entry(r.CatalogID)
+	if !ok {
+		return sttmodel.Spec{}, fmt.Errorf("%q: %w", r.CatalogID, ErrNotInCatalog)
+	}
+	if err := entry.Verify(r.SHA256, size); err != nil {
+		return sttmodel.Spec{}, err
+	}
+	return sttmodel.CatalogSpec(id, entry, r.File), nil
+}
+
+// SetDefault makes an installed model the default (PRD section 8, AC-07). It changes only the settings aggregate, in
+// one transaction that also checks that the model is installed; a model that is not installed yields
+// modelselection.ErrModelNotInstalled.
+func (s *Service) SetDefault(ctx context.Context, id shared.SttModelID) error {
+	if err := id.Validate(); err != nil {
+		return fmt.Errorf("%s: %w", opSetDefault, err)
+	}
+
+	err := retryVersionConflicts(func() error {
+		return s.tx.Do(ctx, func(ctx context.Context) error {
+			if _, err := s.models.Get(ctx, id); err != nil {
+				return err
+			}
+			st, err := s.settings.Load(ctx)
+			if err != nil {
+				return err
+			}
+			if err := st.SelectDefaultSttModel(id, s.clock.Now()); err != nil {
+				return err
+			}
+			return s.settings.Save(ctx, st)
+		})
+	})
+	if isMissingModel(err) {
+		return fmt.Errorf("%s %s: %w", opSetDefault, id, modelselection.ErrModelNotInstalled)
+	}
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opSetDefault, id, err)
+	}
+	return nil
+}
+
+// Delete removes an installed model and its file (PRD section 8: removal only when no active job depends on it;
+// section 14 case 11). A model pinned by an unfinished job yields sttmodel.ErrPinned and nothing is changed. The
+// steps follow ADR-0004(g) and are each repeatable:
+//
+//  1. the model aggregate decides on the pins of job.ActiveStatuses (nothing is touched if it refuses);
+//  2. a default pointing at the model is cleared through the settings aggregate, in its own transaction;
+//  3. the file is deleted through the artifact store, outside any transaction;
+//  4. in one transaction the pins are checked again and the row is deleted.
+//
+// A job that pins the model between 3 and 4 makes step 4 refuse with sttmodel.ErrPinned after the file is gone; that
+// job then finds no model file and fails, which PRD section 14 case 11 allows ("marks job unavailable"). A default
+// selected again between 2 and 4 makes the database refuse the delete; Delete then starts over, and after
+// conflictAttempts rounds returns ErrDefaultReselected. A model that a concurrent Delete removed first is not an error.
+func (s *Service) Delete(ctx context.Context, id shared.SttModelID) error {
+	for attempt := 1; ; attempt++ {
+		err := s.deleteOnce(ctx, id)
+		switch {
+		case err == nil:
+			return nil
+		case !errors.Is(err, errDefaultReselected):
+			return fmt.Errorf("%s %s: %w", opDelete, id, err)
+		case attempt >= conflictAttempts:
+			return fmt.Errorf("%s %s: %w", opDelete, id, ErrDefaultReselected)
+		}
+	}
+}
+
+func (s *Service) deleteOnce(ctx context.Context, id shared.SttModelID) error {
+	m, err := s.models.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.checkRemoval(ctx, m); err != nil {
+		return err
+	}
+	if err := s.clearDefault(ctx, id); err != nil {
+		return err
+	}
+	if err := s.files.Delete(ctx, m.File()); err != nil {
+		return err
+	}
+
+	err = s.tx.Do(ctx, func(ctx context.Context) error {
+		if err := s.checkRemoval(ctx, m); err != nil {
+			return err
+		}
+		return s.models.Delete(ctx, id)
+	})
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil // a concurrent removal finished first
+	case isForeignKeyConflict(err):
+		return errDefaultReselected
+	}
+	return err
+}
+
+// checkRemoval asks the aggregate with the pins of the unfinished job statuses.
+func (s *Service) checkRemoval(ctx context.Context, m *sttmodel.Model) error {
+	pinned, err := s.pins.IsPinnedByJobInStatuses(ctx, m.ID(), job.ActiveStatuses())
+	if err != nil {
+		return err
+	}
+	return m.CheckRemoval(pinned)
+}
+
+// clearDefault clears the default through the settings aggregate when it points at the model being removed.
+func (s *Service) clearDefault(ctx context.Context, id shared.SttModelID) error {
+	return retryVersionConflicts(func() error {
+		return s.tx.Do(ctx, func(ctx context.Context) error {
+			st, err := s.settings.Load(ctx)
+			if err != nil {
+				return err
+			}
+			if !s.sel.ClearsDefault(st.DefaultSttModel(), id) {
+				return nil
+			}
+			if err := st.ClearDefaultSttModel(s.clock.Now()); err != nil {
+				return err
+			}
+			return s.settings.Save(ctx, st)
+		})
+	})
+}
+
+// ResolveForJob returns the exact model an STT job pins (PRD section 8, AC-08): requested if set, otherwise the
+// default, otherwise the only installed model (modelselection.Selector.Resolve). The reads run in one Tx.Do; call it
+// with the context of the Tx.Do that enqueues the job, so that no removal can slip between the choice and the pin.
+func (s *Service) ResolveForJob(ctx context.Context, requested shared.SttModelID) (PinnedModel, error) {
+	var pinned PinnedModel
+	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		st, err := s.settings.Load(ctx)
+		if err != nil {
+			return err
+		}
+		installed, err := s.models.List(ctx)
+		if err != nil {
+			return err
+		}
+		m, err := s.sel.Resolve(requested, st.DefaultSttModel(), installed)
+		if err != nil {
+			return err
+		}
+		pinned = PinnedModel{ID: m.ID(), Name: m.Name(), ModelVersion: m.ModelVersion()}
+		return nil
+	})
+	if err != nil {
+		return PinnedModel{}, fmt.Errorf("%s: %w", opResolve, err)
+	}
+	return pinned, nil
+}
+
+func (s *Service) loadCatalog(ctx context.Context) (values.Catalog, error) {
+	data, err := s.catalog.Manifest(ctx)
+	if err != nil {
+		return values.Catalog{}, err
+	}
+	return values.ParseCatalog(data)
+}
+
+func installedModel(m *sttmodel.Model, isDefault bool) InstalledModel {
+	return InstalledModel{
+		ID: m.ID(), Name: m.Name(), ModelVersion: m.ModelVersion(), CatalogID: m.CatalogID(), SizeBytes: m.SizeBytes(),
+		SHA256: m.SHA256(), Quantization: m.Quantization(), Capabilities: m.Capabilities(), InstalledAt: m.InstalledAt(),
+		IsDefault: isDefault,
+	}
+}
+
+// retryVersionConflicts reruns fn, which reloads what it changes, while it meets a stale version (ADR-0004(d)).
+func retryVersionConflicts(fn func() error) error {
+	var err error
+	for range conflictAttempts {
+		if err = fn(); !errors.Is(err, shared.ErrVersionConflict) {
+			return err
+		}
+	}
+	return err
+}
+
+// isForeignKeyConflict tells the plain conflict of a foreign key (ADR-0004(g)) from its narrower relatives.
+func isForeignKeyConflict(err error) bool {
+	return errors.Is(err, shared.ErrConflict) && !errors.Is(err, shared.ErrVersionConflict) &&
+		!errors.Is(err, shared.ErrDuplicate) && !errors.Is(err, sttmodel.ErrPinned)
+}
+
+// isMissingModel reports a model that is gone: not found, or removed before the settings referencing it were saved.
+func isMissingModel(err error) bool {
+	return errors.Is(err, shared.ErrNotFound) || isForeignKeyConflict(err)
+}
