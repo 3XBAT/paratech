@@ -3,29 +3,20 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"fmt"
-	"io/fs"
 
 	"github.com/pressly/goose/v3"
+
+	"paratech/desktop/pkg/migrations"
 )
 
-// The migrations are a build-time constant of the binary, so this is the one package-level variable of the adapter.
-//
-//go:embed migrations/*.sql
-var migrationsFS embed.FS
-
-// provider builds a goose provider over the embedded migrations. goose.Provider.Close closes the *sql.DB it was given,
-// so it is never called here.
+// provider builds a goose provider over the embedded migrations of pkg/migrations (ARCH-04: migrations live there, the
+// adapter only runs them). goose.Provider.Close closes the *sql.DB it was given, so it is never called here.
 //
 // WithDisableGlobalRegistry: only the embedded SQL files are migrations, never Go migrations registered elsewhere in
 // the process.
 func (db *DB) provider() (*goose.Provider, error) {
-	sub, err := fs.Sub(migrationsFS, "migrations")
-	if err != nil {
-		return nil, &Error{Kind: ErrDatabase, Detail: err.Error()}
-	}
-	p, err := goose.NewProvider(goose.DialectSQLite3, db.sql, sub,
+	p, err := goose.NewProvider(goose.DialectSQLite3, db.sql, migrations.FS(),
 		goose.WithSlog(db.logger),
 		goose.WithDisableGlobalRegistry(true),
 	)

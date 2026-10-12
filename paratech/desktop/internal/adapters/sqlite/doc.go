@@ -1,9 +1,10 @@
 // Package sqlite is the SQLite storage adapter of the desktop core (ARCH-30..35, ADR-0001, ADR-0004).
 //
 // It owns everything that touches the local database file: opening it with the pure Go driver modernc.org/sqlite (no
-// CGO, hard rule 1), the goose migrations that turn docs/contracts/schema.sql into the real schema, the sqlc-generated
-// queries (package sqlcgen, committed), the transaction port implementation (DB.Do) and the translation of driver
-// errors into domain sentinels (MapError, VersionCAS).
+// CGO, hard rule 1), running the goose migrations that turn docs/contracts/schema.sql into the real schema (the SQL
+// files live in pkg/migrations, ARCH-04, ADR-0006), the sqlc-generated queries (package sqlcgen, committed), the
+// transaction port implementation (DB.Do) and the translation of driver errors into domain sentinels (MapError,
+// VersionCAS).
 //
 // Repositories for the aggregates are added by the tasks that own the aggregates (jobs, settings, recording, ...).
 // They live in this package, take the active transaction from the context with DB.DBTX or DB.Queries, translate every
