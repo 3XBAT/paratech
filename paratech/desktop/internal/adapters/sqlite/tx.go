@@ -102,6 +102,11 @@ func (db *DB) Do(ctx context.Context, fn func(ctx context.Context) error) error 
 	}
 	st.done.Store(true)
 	if err := tx.Commit(); err != nil {
+		// A cancelled ctx makes database/sql roll back on its own, so Commit may report ErrTxDone.
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, sql.ErrTxDone) {
+			return ctxErr
+		}
+
 		return MapError(ctx, err)
 	}
 	committed = true
