@@ -30,6 +30,19 @@ const (
 	retryStep     = 15 * time.Millisecond
 )
 
+// Operation names used in error messages.
+const (
+	opOpen       = "open"
+	opSize       = "size"
+	opList       = "list"
+	opDelete     = "delete"
+	opWrite      = "write"
+	opCleanup    = "cleanup"
+	opCreateRoot = "create root"
+	opOpenRoot   = "open root"
+	opCreateDir  = "create"
+)
+
 var kinds = []shared.ArtifactKind{
 	shared.ArtifactRecordings, shared.ArtifactTranscripts, shared.ArtifactModels, shared.ArtifactExports,
 }
@@ -56,28 +69,34 @@ func New(root string) (*Store, error) {
 	if root == "" || !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("%w: the path must be absolute", ErrInvalidRoot)
 	}
+
 	if err := os.MkdirAll(root, dirPerm); err != nil {
-		return nil, storageFail("create root", err)
+		return nil, storageFail(opCreateRoot, err)
 	}
+
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, storageFail("open root", err)
+		return nil, storageFail(opOpenRoot, err)
 	}
+
 	for _, k := range kinds {
 		name := string(k)
+
 		// Lstat first: Mkdir on a pre-planted junction can create a directory outside the root (GO-2026-6604).
 		if _, err := r.Lstat(name); errors.Is(err, fs.ErrNotExist) {
 			if err := r.Mkdir(name, dirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
 				_ = r.Close()
-				return nil, storageFail("create "+name, err)
+				return nil, storageFail(opCreateDir+" "+name, err)
 			}
 		}
+
 		fi, err := r.Lstat(name)
 		if err != nil || !fi.IsDir() {
 			_ = r.Close()
 			return nil, fmt.Errorf("%w: %s is not a plain directory", ErrInvalidRoot, name)
 		}
 	}
+
 	return &Store{root: r}, nil
 }
 
@@ -86,51 +105,59 @@ func (s *Store) Close() error { return s.root.Close() }
 
 // Open returns a reader of the file; a missing file yields shared.ErrNotFound.
 func (s *Store) Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
-	rel, fi, err := s.lookup(ctx, "open", ref, false)
+	rel, fi, err := s.lookup(ctx, opOpen, ref, false)
 	if err != nil {
 		return nil, err
 	}
+
 	if fi.IsDir() {
 		return nil, isDirErr(ref)
 	}
+
 	f, err := s.root.Open(rel)
 	if err != nil {
-		return nil, mapErr("open", ref, err)
+		return nil, mapErr(opOpen, ref, err)
 	}
+
 	return f, nil
 }
 
 // Size returns the size of the file in bytes.
 func (s *Store) Size(ctx context.Context, ref shared.ArtifactRef) (int64, error) {
-	_, fi, err := s.lookup(ctx, "size", ref, false)
+	_, fi, err := s.lookup(ctx, opSize, ref, false)
 	if err != nil {
 		return 0, err
 	}
+
 	if fi.IsDir() {
 		return 0, isDirErr(ref)
 	}
+
 	return fi.Size(), nil
 }
 
 // List returns the direct children of a directory sorted by name. Temporary files, links and entries that
 // cannot be references are skipped.
 func (s *Store) List(ctx context.Context, dir shared.ArtifactRef) ([]shared.ArtifactRef, error) {
-	rel, fi, err := s.lookup(ctx, "list", dir, false)
+	rel, fi, err := s.lookup(ctx, opList, dir, false)
 	if err != nil {
 		return nil, err
 	}
 	if !fi.IsDir() {
 		return nil, fmt.Errorf("%w: %s is not a directory", shared.ErrConflict, dir)
 	}
+
 	d, err := s.root.Open(rel)
 	if err != nil {
-		return nil, mapErr("list", dir, err)
+		return nil, mapErr(opList, dir, err)
 	}
+
 	entries, err := d.ReadDir(-1)
 	_ = d.Close()
 	if err != nil {
-		return nil, mapErr("list", dir, err)
+		return nil, mapErr(opList, dir, err)
 	}
+
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), tmpPrefix) || e.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
@@ -138,27 +165,31 @@ func (s *Store) List(ctx context.Context, dir shared.ArtifactRef) ([]shared.Arti
 		}
 		names = append(names, e.Name())
 	}
+
 	sort.Strings(names)
+
 	out := make([]shared.ArtifactRef, 0, len(names))
 	for _, n := range names {
 		if child, err := dir.Child(n); err == nil {
 			out = append(out, child)
 		}
 	}
+
 	return out, nil
 }
 
 // Delete removes a file or a whole directory tree. A missing target is not an error. If the target itself is a
 // link, only the link is removed.
 func (s *Store) Delete(ctx context.Context, ref shared.ArtifactRef) error {
-	rel, _, err := s.lookup(ctx, "delete", ref, true)
+	rel, _, err := s.lookup(ctx, opDelete, ref, true)
 	if errors.Is(err, shared.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return mapErr("delete", ref, retry(ctx, func() error { return s.root.RemoveAll(rel) }))
+
+	return mapErr(opDelete, ref, retry(ctx, func() error { return s.root.RemoveAll(rel) }))
 }
 
 // Write stores the content atomically: temporary file in the same directory, fsync, rename over the target.
@@ -170,19 +201,22 @@ func (s *Store) Write(ctx context.Context, ref shared.ArtifactRef, content io.Re
 		return err
 	}
 	s.wrote.Store(true)
+
 	parts, err := locate(ref)
 	if err != nil {
 		return err
 	}
+
 	fi, err := s.inspect(parts, false)
 	switch {
 	case errors.Is(err, errNotDir):
 		return fmt.Errorf("%w: a parent of %s is a file", shared.ErrConflict, ref)
 	case err != nil:
-		return mapErr("write", ref, err)
+		return mapErr(opWrite, ref, err)
 	case fi != nil && fi.IsDir():
 		return isDirErr(ref)
 	}
+
 	rel := filepath.Join(parts...)
 	dir := filepath.Dir(rel)
 
@@ -193,29 +227,37 @@ func (s *Store) Write(ctx context.Context, ref shared.ArtifactRef, content io.Re
 		if err := s.root.MkdirAll(dir, dirPerm); err != nil {
 			return writeErr(ref, err)
 		}
+
 		if tmp, err = tmpName(dir); err != nil {
 			return writeErr(ref, err)
 		}
+
 		if s.afterMkdir != nil {
 			s.afterMkdir()
 		}
+
 		f, err = s.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
 		if err == nil {
 			break
 		}
+
 		if attempt > 0 || !errors.Is(err, fs.ErrNotExist) {
 			return writeErr(ref, err)
 		}
 	}
+
 	// Cleanup is explicit, not deferred: a panic (a simulated crash in tests) must leave the temp file behind.
 	src := &errTrackReader{ctx: ctx, r: content}
+
 	_, err = io.Copy(f, src)
 	if err == nil {
 		err = f.Sync()
 	}
+
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+
 	if err != nil {
 		_ = s.root.Remove(tmp)
 		if src.err != nil && errors.Is(err, src.err) {
@@ -223,15 +265,18 @@ func (s *Store) Write(ctx context.Context, ref shared.ArtifactRef, content io.Re
 		}
 		return writeErr(ref, err)
 	}
+
 	if s.beforeRename != nil {
 		s.beforeRename()
 	}
+
 	// The content is consumed, so a vanished directory (and with it the temp file) cannot be redone here.
 	if err := retry(ctx, func() error { return s.root.Rename(tmp, rel) }); err != nil {
 		_ = s.root.Remove(tmp)
 		return writeErr(ref, err)
 	}
 	syncDir(s.root, dir)
+
 	return nil
 }
 
@@ -244,7 +289,7 @@ func writeErr(ref shared.ArtifactRef, err error) error {
 			cause: bareErr(err),
 		}
 	}
-	return mapErr("write", ref, err)
+	return mapErr(opWrite, ref, err)
 }
 
 // CleanupTemp removes temporary files left by crashed writes and returns how many it removed. Call it once at
@@ -254,21 +299,25 @@ func (s *Store) CleanupTemp(ctx context.Context) (int, error) {
 	if s.wrote.Load() {
 		return 0, fmt.Errorf("%w: CleanupTemp must run before any Write", shared.ErrConflict)
 	}
+
 	n := 0
 	var first error
 	note := func(err error) {
 		if first == nil {
-			first = storageFail("cleanup", err)
+			first = storageFail(opCleanup, err)
 		}
 	}
+
 	err := fs.WalkDir(s.root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
+
 		if err != nil {
 			note(err)
 			return nil
 		}
+
 		if d.Type().IsRegular() && strings.HasPrefix(d.Name(), tmpPrefix) {
 			switch err := s.root.Remove(filepath.FromSlash(p)); {
 			case err == nil:
@@ -277,11 +326,13 @@ func (s *Store) CleanupTemp(ctx context.Context) (int, error) {
 				note(err)
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
 		return n, err
 	}
+
 	return n, first
 }
 
@@ -290,10 +341,12 @@ func (s *Store) lookup(ctx context.Context, op string, ref shared.ArtifactRef, a
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
+
 	parts, err := locate(ref)
 	if err != nil {
 		return "", nil, err
 	}
+
 	fi, err := s.inspect(parts, allowFinalLink)
 	if errors.Is(err, errNotDir) || (err == nil && fi == nil) {
 		return "", nil, fmt.Errorf("%w: %s", shared.ErrNotFound, ref)
@@ -301,6 +354,7 @@ func (s *Store) lookup(ctx context.Context, op string, ref shared.ArtifactRef, a
 	if err != nil {
 		return "", nil, mapErr(op, ref, err)
 	}
+
 	return filepath.Join(parts...), fi, nil
 }
 
@@ -309,19 +363,23 @@ func locate(ref shared.ArtifactRef) ([]string, error) {
 	if ref.IsZero() {
 		return nil, fmt.Errorf("%w: zero reference", shared.ErrInvalidArtifactRef)
 	}
+
 	// ArtifactRef is already validated; this is defense in depth against a future change of its rules.
 	if _, err := shared.NewArtifactRef(ref.Kind(), ref.Path()); err != nil {
 		return nil, err
 	}
+
 	parts := append([]string{string(ref.Kind())}, strings.Split(ref.Path(), "/")...)
 	for _, p := range parts {
 		if strings.HasPrefix(p, tmpPrefix) {
 			return nil, fmt.Errorf("%w: %s uses the reserved temporary prefix", shared.ErrInvalidArtifactRef, ref)
 		}
 	}
+
 	if !filepath.IsLocal(filepath.Join(parts...)) {
 		return nil, fmt.Errorf("%w: %s leaves the root", shared.ErrInvalidArtifactRef, ref)
 	}
+
 	return parts, nil
 }
 
@@ -331,6 +389,7 @@ func (s *Store) inspect(parts []string, allowFinalLink bool) (fs.FileInfo, error
 	var fi fs.FileInfo
 	for i := range parts {
 		var err error
+
 		fi, err = s.root.Lstat(filepath.Join(parts[:i+1]...))
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
@@ -338,17 +397,21 @@ func (s *Store) inspect(parts []string, allowFinalLink bool) (fs.FileInfo, error
 		if err != nil {
 			return nil, err
 		}
+
 		last := i == len(parts)-1
+
 		if fi.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
 			if last && allowFinalLink {
 				return fi, nil
 			}
 			return nil, fmt.Errorf("%w: %s is a link", shared.ErrInvalidArtifactRef, path.Join(parts[:i+1]...))
 		}
+
 		if !last && !fi.IsDir() {
 			return nil, errNotDir
 		}
 	}
+
 	return fi, nil
 }
 
@@ -358,9 +421,11 @@ func isDirErr(ref shared.ArtifactRef) error {
 
 func tmpName(dir string) (string, error) {
 	var b [8]byte
+
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
+
 	return filepath.Join(dir, tmpPrefix+hex.EncodeToString(b[:])), nil
 }
 
