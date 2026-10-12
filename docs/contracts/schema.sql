@@ -1,6 +1,6 @@
 -- Learning Assistant desktop: local SQLite schema DRAFT (TASK-003).
 --
--- Consumed by TASK-005: goose migrations in desktop/internal/adapters/sqlite/migrations and sqlc queries are
+-- Consumed by TASK-005: goose migrations in desktop/pkg/migrations (ARCH-04, ADR-0006) and sqlc queries are
 -- written from this file. This is a draft of the contract, not a migration: it has no goose annotations.
 -- Architecture: docs/architecture.md (aggregates map to tables, ARCH-13 references are plain id columns).
 -- Source of requirements: docs/prd/learning-assistant-prd-v0.4.md.

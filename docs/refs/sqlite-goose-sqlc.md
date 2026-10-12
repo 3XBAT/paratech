@@ -76,10 +76,11 @@ remyoudompheng/bigfft, sethvargo/go-retry, go.uber.org/multierr, golang.org/x/sy
 ## goose v3.28.0 (library use, SQL migrations embedded)
 
 ```go
-//go:embed migrations/*.sql
-var migrationsFS embed.FS
+// package migrations (desktop/pkg/migrations, ARCH-04, ADR-0006), next to the *.sql files:
+//go:embed *.sql
+var files embed.FS
 
-sub, _ := fs.Sub(migrationsFS, "migrations")          // goose wants the migration files at the root of the fs.FS
+sub := migrations.FS()                                // func FS() fs.FS: the migration files are at its root, as goose wants
 p, err := goose.NewProvider(goose.DialectSQLite3, sqlDB, sub,
     goose.WithSlog(logger),                           // else it logs through the std log package
     goose.WithDisableGlobalRegistry(true))            // only the embedded files are migrations
@@ -107,7 +108,7 @@ _, err = p.DownTo(ctx, 0)                             // used by tests only
 - Run without adding it to go.mod, from `paratech/` (builds with `CGO_ENABLED=0`, the first run compiles it for a few minutes):
   `CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate -f desktop/internal/adapters/sqlite/sqlc.yaml`
   (paths inside the yaml are relative to the yaml file). `... version` prints `v1.31.1`.
-- `sqlc.yaml` (version "2"): `engine: sqlite`, `schema: migrations` (the goose directory: sqlc reads the Up part of each file in order and stops at the
+- `sqlc.yaml` (version "2"): `engine: sqlite`, `schema: ../../../pkg/migrations` (the goose directory desktop/pkg/migrations, relative to the yaml: sqlc reads the Up part of each file in order and stops at the
   goose Down marker), `queries: queries`, `gen.go.package/out: sqlcgen`, `emit_interface: true`, `emit_empty_slices: true`.
 - Generated: `db.go` (`DBTX` interface, `New(DBTX)`, `WithTx(*sql.Tx)`), `models.go`, `querier.go`, one `<file>.sql.go` per query file. INTEGER maps to `int64`,
   TEXT NOT NULL to `string`, nullable TEXT to `sql.NullString`, nullable INTEGER to `sql.NullInt64`.
