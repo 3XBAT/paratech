@@ -10,29 +10,30 @@ import (
 
 type Querier interface {
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
-	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
-	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
+	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
+	DeleteSttModel(ctx context.Context, id string) (int64, error)
 	// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error)
-	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
-	// store the result.
-	GetRecording(ctx context.Context, id string) (Recording, error)
 	// Settings singleton (row id = 1) of the settings repository, with the optimistic-concurrency protocol of ADR-0004(d).
 	// No row means the defaults of the aggregate (version 0).
 	GetSettings(ctx context.Context) (Setting, error)
+	// Installed STT models (PRD section 8) with the optimistic-concurrency protocol of ADR-0004(d), and the pin lookup
+	// that blocks the removal of a model an unfinished job depends on (PRD section 14 case 11).
+	GetSttModel(ctx context.Context, id string) (SttModel, error)
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
-	// A never-stored recording (version 0) is inserted with version 1.
-	InsertRecording(ctx context.Context, arg InsertRecordingParams) error
 	// A never-stored settings aggregate (version 0) is inserted with version 1. A second insert violates the primary key,
 	// which the adapter reports as shared.ErrVersionConflict (someone else created the row first).
 	InsertSettings(ctx context.Context, arg InsertSettingsParams) error
+	// A never-stored model (version 0) is inserted with version 1. A second (name, model_version) violates the UNIQUE
+	// rule and surfaces as shared.ErrDuplicate.
+	InsertSttModel(ctx context.Context, arg InsertSttModelParams) error
+	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
+	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
-	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
-	// Transcripts of a recording, for its deletion (PRD section 13.1).
-	ListTranscriptRefsByRecording(ctx context.Context, recordingID string) ([]string, error)
+	ListSttModels(ctx context.Context) ([]SttModel, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
@@ -41,12 +42,12 @@ type Querier interface {
 	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
-	// Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
-	// never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
-	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
 	// Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 	// with VersionCAS to shared.ErrVersionConflict.
 	UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error)
+	// Compare-and-swap on the loaded version. An installed model does not change today; the update exists so that Save
+	// keeps the protocol of every repository.
+	UpdateSttModel(ctx context.Context, arg UpdateSttModelParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)
