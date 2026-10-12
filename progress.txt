@@ -180,3 +180,46 @@
 - Не сделано (низкие): оставшиеся low из ревью (wal_autocheckpoint/journal_size_limit не настраивались)
 
 ---
+
+## [TASK-006] Файловое хранилище артефактов
+**Дата:** 2026-10-12 21:00
+**Статус:** done
+
+### Что сделано
+- adapters/filestore: Write/Open/List/Size/Delete поверх os.Root, ArtifactRef-only пути, отказ идти по symlink/junction, атомарная запись (temp, fsync, rename), CleanupTemp(ctx), права 0700/0600
+- shared.ErrStorage (+Permission/Full/Busy), conformance-тест порта ArtifactStore, тесты обхода путей и конкурентной записи
+- Ревью: approve, medium исправлены. Security: найдено 0.
+
+### Заметки
+- Follow-up: на Windows перезапись открытого файла даёт ACCESS_DENIED, который сейчас мапится в ErrStoragePermission (постоянная), а не Busy; нужен реальный Windows-тест
+- CleanupTemp вызывать один раз при старте до первой записи (app при подключении)
+
+---
+
+## [TASK-008] Persistent Job Store
+**Дата:** 2026-10-12 21:00
+**Статус:** done
+
+### Что сделано
+- Агрегат Job: таблица переходов PRD §7.2, New/Restore, Version/Persisted, ForceRun, учёт попыток; репозиторий в adapters/sqlite: идемпотентный Enqueue, Claim (предчтение + guarded UPDATE), Save с CAS; sqlc-запросы
+- Ревью: approve, medium исправлены. Security: найдено 0 (ревью безопасности пройдено на уровне всего диффа).
+
+### Заметки
+- РЕШЕНИЕ ДЛЯ ПОДТВЕРЖДЕНИЯ: CANCELLED разрешён из RETRY_WAIT и WAITING_* (PRD §7.2 в тексте не ограничивает отмену, диаграмма названа примером; без этого ожидающую задачу нельзя отменить). Диаграмму PRD стоит обновить.
+- Follow-up: повреждённая строка очереди сейчас тихо пропускается Claim; нужен карантин (FAILED с last_error) и/или логирование (TASK-010); Get/ListByStatus возвращают ошибку на невалидной строке: восстановление при старте не должно падать целиком
+- use case Service для job store и подключение в app не делались
+
+---
+
+## [TASK-011] PowerMonitor
+**Дата:** 2026-10-12 21:00
+**Статус:** done
+
+### Что сделано
+- adapters/winpower: GetSystemPowerStatus через kernel32 (в x/sys/windows обёртки нет), опрос каждые 5 с вместо RegisterPowerSettingNotification, заглушка для не-Windows, FakePower в testenv; зависимость golang.org/x/sys v0.48.0 (docs/refs/winpower.md)
+- Ревью: approve. Security: найдено 0.
+
+### Заметки
+- Уведомления об изменении питания реализованы опросом (отклонение от формулировки задачи, обосновано в refs); неизвестный источник питания считается сетью (PRD §7.4 не уточняет)
+
+---

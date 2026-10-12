@@ -19,8 +19,7 @@ import (
 // even when its heavy type is otherwise filtered out. Admits is the reference semantics of the whole rule; a
 // repository adapter that filters in SQL must agree with it, and a fake repository can simply call it.
 //
-// This type only answers "may this job be considered"; the QUEUED to RUNNING transition itself belongs to the
-// job aggregate (TASK-008).
+// This type only answers "may this job be considered"; the QUEUED to RUNNING transition is Job.Claim.
 type ClaimFilter struct {
 	types        []Type
 	heavy        []Type
@@ -61,10 +60,15 @@ func NewClaimFilter(types, heavy []Type, heavyAllowed bool) (ClaimFilter, error)
 }
 
 func validateType(t Type) error {
-	if t == "" || strings.IndexFunc(string(t), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+	if !validName(string(t)) {
 		return fmt.Errorf("%w: blank or malformed type %q", ErrInvalidClaimFilter, string(t))
 	}
 	return nil
+}
+
+// validName reports whether s is non-empty without whitespace or control characters.
+func validName(s string) bool {
+	return s != "" && strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }
 
 // Types returns a copy of the claimable job types.

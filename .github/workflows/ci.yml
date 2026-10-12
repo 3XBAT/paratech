@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.9"
           cache-dependency-path: paratech/*/go.sum
       - run: go build ./desktop/... ./hub/... ./shared/...
       - run: go vet ./desktop/... ./hub/... ./shared/...
@@ -58,21 +58,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.9"
           cache-dependency-path: paratech/*/go.sum
       - run: go vet ./desktop/... ./hub/... ./shared/...
       - run: go test ./desktop/... ./hub/... ./shared/...
   vulncheck:
     # Known vulnerabilities in the Go standard library and dependencies that the code actually calls.
-    # Fix by bumping the Go patch version or the dependency; see docs/process/security-review.md.
+    # Not-applicable findings are listed with a reason in .github/vulncheck-allow.txt (docs/process/security-review.md).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.9"
           cache-dependency-path: paratech/*/go.sum
-      - run: |
-          for m in desktop hub shared; do
-            (cd "$m" && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...)
-          done
+      - run: python3 ../.github/scripts/vulncheck.py

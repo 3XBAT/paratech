@@ -1,0 +1,3 @@
+# Known govulncheck findings that do not apply to this product. Format: OSV-id | why it does not apply | remove when
+# CI fails if a called vulnerability is not listed here, and also if a listed id is no longer found (so entries do not go stale).
+# Empty on purpose: prefer fixing (bumping Go or the dependency) over listing.
