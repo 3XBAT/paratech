@@ -75,6 +75,8 @@ type RecordingTranscripts interface {
 type Recorder interface {
 	// Start begins capturing for the recording id and writes chunk files into the directory chunks
 	// (PRD section 6.3: chunked writes, a crash loses at most the latest chunk). It returns once capture runs.
+	// ctx bounds only the start: cancelling it aborts a start in progress (the user stopped meanwhile), never a
+	// capture that already runs.
 	Start(ctx context.Context, id shared.RecordingID, chunks shared.ArtifactRef) error
 
 	// Stop ends the capture of id and flushes the last chunk (PRD section 6.2: STOPPING).
@@ -125,6 +127,14 @@ type JobEnqueuer interface {
 type Clock interface {
 	// Now returns the current time (PRD section 6.2).
 	Now() time.Time
+}
+
+// Sleeper waits on the same time source as Clock (ARCH-24): the wait for the hard cap of a recording
+// (PRD section 6.2, AC-04). Implemented by the clock adapter and by a controllable fake in tests.
+type Sleeper interface {
+	// Sleep blocks until d has passed and returns nil, or until ctx ends and returns its error (PRD section 6.2).
+	// A non-positive d returns at once.
+	Sleep(ctx context.Context, d time.Duration) error
 }
 
 // IDGenerator supplies identifiers (ARCH-24; the domain never generates them; PRD section 6.2). Implemented by an adapter and by a

@@ -234,10 +234,18 @@ func (r *Recording) Version() int64 { return r.version }
 // handlers never call it.
 func (r *Recording) Persisted(version int64) { r.version = version }
 
-// TrackRef returns the reference of the final track recordings/<id>.<ext>; ext is a short alphanumeric extension.
-func (r *Recording) TrackRef(ext string) (shared.ArtifactRef, error) {
+// ValidateTrackExtension checks the extension of a final track: short, ASCII letters and digits only.
+func ValidateTrackExtension(ext string) error {
 	if ext == "" || len(ext) > maxTrackExtBytes || strings.ContainsFunc(ext, notAlnum) {
-		return shared.ArtifactRef{}, fmt.Errorf("%w: track extension %q", ErrInvalidRecording, ext)
+		return fmt.Errorf("%w: track extension %q", ErrInvalidRecording, ext)
+	}
+	return nil
+}
+
+// TrackRef returns the reference of the final track recordings/<id>.<ext>.
+func (r *Recording) TrackRef(ext string) (shared.ArtifactRef, error) {
+	if err := ValidateTrackExtension(ext); err != nil {
+		return shared.ArtifactRef{}, err
 	}
 	return shared.NewArtifactRef(shared.ArtifactRecordings, string(r.id)+"."+ext)
 }
