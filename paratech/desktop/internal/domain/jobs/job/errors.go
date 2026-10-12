@@ -16,7 +16,7 @@ var (
 	// ErrInvalidTransition means the status table does not allow the requested change.
 	ErrInvalidTransition = errors.New("invalid job status transition")
 
-	// ErrNotDue means a QUEUED job cannot be claimed before its next run time.
+	// ErrNotDue means a QUEUED job cannot be claimed, or a RETRY_WAIT job requeued, before its next run time.
 	ErrNotDue = errors.New("job is not due yet")
 
 	// ErrAttemptsExhausted means a job has no attempt left to start.

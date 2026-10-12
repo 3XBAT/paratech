@@ -59,8 +59,15 @@ type JobRepository interface {
 // (PRD section 7.1). It is implemented by other use cases (structurally, ARCH-20), for example transcription.
 type Handler interface {
 	// Handle performs the job and returns nil on success. It must honour cancellation of ctx and be
-	// idempotent when the job has external side effects (PRD section 7.3, hard rule 7). How errors map to
-	// statuses (transient, permanent, waiting for network, quota or power) is decided with TASK-009.
+	// idempotent when the job has external side effects (PRD section 7.3, hard rule 7).
+	//
+	// The returned error decides the next status. Wrap it with backoff.Permanent to fail the job at once;
+	// backoff.Transient or any unclassified error retries with backoff until the attempts are used up (AC-10).
+	// Waiting statuses (network, quota, power) are not produced from errors yet.
+	//
+	// The error text is stored in jobs.last_error and written to the log, so it must contain no secrets, no prompt
+	// or transcript text and no response bodies. Adapters return classified errors with short fixed messages.
+	// A panic is stored as "handler panic" plus its type only; the panic value goes to the log alone.
 	//
 	// snap is a read-only value copy of the claimed job (job.Snapshot): the handler reads from it what it needs, such
 	// as the job type, and has no way to mutate or persist the aggregate, which the runner owns (see JobRepository).
@@ -99,6 +106,21 @@ type SettingsReader interface {
 type Clock interface {
 	// Now returns the current time (PRD section 7.3).
 	Now() time.Time
+}
+
+// Sleeper waits on the same time source as Clock (ARCH-24): the idle polling of the workers and the per-attempt
+// timeout (PRD section 7.3). Implemented by the clock adapter and by a controllable fake in tests.
+type Sleeper interface {
+	// Sleep blocks until d has passed and returns nil, or until ctx ends and returns its error (PRD section 7.3).
+	// A non-positive d returns at once.
+	Sleep(ctx context.Context, d time.Duration) error
+}
+
+// Jitter supplies the randomness of the retry delay (PRD section 7.3, ARCH-24). Implemented by a random adapter and
+// by a fixed fake in tests.
+type Jitter interface {
+	// Permille returns a random number from 0 to 999 (PRD section 7.3). An error means no jitter for this retry.
+	Permille(ctx context.Context) (int, error)
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
