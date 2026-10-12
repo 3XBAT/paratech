@@ -62,6 +62,9 @@ const (
 	MaxErrorBytes   = 1024
 )
 
+// msgAttemptsExhausted prefixes the last error of a job that failed for lack of attempts.
+const msgAttemptsExhausted = "attempts exhausted: "
+
 // Job is a durable record of work that must be completed; the worker is ephemeral, the job is durable
 // (PRD section 7.1). Fields change only through the methods below.
 type Job struct {
@@ -332,6 +335,9 @@ func (j *Job) Retry(now, runAt time.Time, msg string) error {
 		j.nextRunAt = now
 	}
 	j.lastError = limitText(msg)
+	if to == StatusFailed {
+		j.lastError = limitText(msgAttemptsExhausted + msg)
+	}
 	return nil
 }
 
@@ -366,16 +372,19 @@ func (j *Job) WaitFor(reason Status, now time.Time) error {
 
 // Requeue moves a RETRY_WAIT or WAITING_* job back to QUEUED, and also a stale RUNNING job at startup recovery;
 // the crashed attempt counts, so a stale RUNNING job without attempts left becomes FAILED. A RETRY_WAIT job keeps its
-// backoff time, the others are due at once.
+// backoff time and is refused with ErrNotDue before it elapses; the others are due at once.
 func (j *Job) Requeue(now time.Time) error {
 	switch {
 	case j.status == StatusRunning && j.attempts >= j.maxAttempts:
 		if err := j.move(StatusFailed, now); err != nil {
 			return err
 		}
-		j.lastError = "interrupted, no attempts left"
+		j.lastError = msgAttemptsExhausted + "interrupted before it finished"
 		return nil
 	case j.status == StatusRetryWait:
+		if j.nextRunAt.After(now) {
+			return ErrNotDue
+		}
 		return j.move(StatusQueued, now)
 	}
 	if err := j.move(StatusQueued, now); err != nil {

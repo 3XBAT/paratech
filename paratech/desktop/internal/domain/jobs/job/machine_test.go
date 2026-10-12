@@ -307,13 +307,16 @@ func TestRetryAndExhaustion(t *testing.T) {
 			if j.Status() != StatusRetryWait || !j.NextRunAt().Equal(now.Add(time.Minute)) || j.LastError() != "network reset" {
 				t.Fatalf("after retry #%d: %s %v %q", i, j.Status(), j.NextRunAt(), j.LastError())
 			}
-			if err := j.Requeue(now); err != nil || j.Status() != StatusQueued || !j.NextRunAt().Equal(now.Add(time.Minute)) {
+			if err := j.Requeue(now.Add(time.Minute)); err != nil || j.Status() != StatusQueued || !j.NextRunAt().Equal(now.Add(time.Minute)) {
 				t.Fatalf("requeue: %v %s %v", err, j.Status(), j.NextRunAt())
 			}
 		}
 	}
 	if j.Status() != StatusFailed || j.FinishedAt().IsZero() {
 		t.Fatalf("exhausted job is %s", j.Status())
+	}
+	if want := "attempts exhausted: network reset"; j.LastError() != want {
+		t.Fatalf("lastError = %q, want %q", j.LastError(), want)
 	}
 }
 
@@ -365,6 +368,38 @@ func TestRequeueDueAtOnce(t *testing.T) {
 	}
 }
 
+func TestRequeueOfRetryWaitMirrorsClaimDueCheck(t *testing.T) {
+	runAt := t0.Add(time.Minute) // inStatus backs RETRY_WAIT off by a minute
+	tests := []struct {
+		name    string
+		now     time.Time
+		wantErr error
+	}{
+		{"before the backoff", runAt.Add(-time.Nanosecond), ErrNotDue},
+		{"exactly due", runAt, nil},
+		{"after the backoff", runAt.Add(time.Hour), nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			j := inStatus(t, StatusRetryWait)
+			before := *j
+			err := j.Requeue(tc.now)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Requeue = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				if *j != before {
+					t.Fatal("a refused requeue changed the job")
+				}
+				return
+			}
+			if j.Status() != StatusQueued || !j.NextRunAt().Equal(runAt) {
+				t.Fatalf("status %s next %v, want QUEUED keeping the backoff time", j.Status(), j.NextRunAt())
+			}
+		})
+	}
+}
+
 func TestRequeueStaleRunning(t *testing.T) {
 	j := inStatus(t, StatusRunning)
 	if err := j.Requeue(t0.Add(time.Hour)); err != nil || j.Status() != StatusQueued || j.Attempts() != 1 {
@@ -374,6 +409,9 @@ func TestRequeueStaleRunning(t *testing.T) {
 	_ = last.Claim(t0)
 	if err := last.Requeue(t0); err != nil || last.Status() != StatusFailed || last.FinishedAt().IsZero() {
 		t.Fatalf("last attempt: err %v status %s", err, last.Status())
+	}
+	if !strings.HasPrefix(last.LastError(), "attempts exhausted: ") {
+		t.Fatalf("lastError = %q, want the attempts exhausted text", last.LastError())
 	}
 }
 
