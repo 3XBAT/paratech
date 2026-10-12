@@ -18,6 +18,9 @@ import (
 // cancelAttempts bounds the reload-and-retry loop of a cancellation that keeps meeting version conflicts.
 const cancelAttempts = 3
 
+// permilleScale turns the permille of the Jitter port into a fraction.
+const permilleScale = 1000
+
 // Outcomes of one attempt, for the log.
 const (
 	outcomeCompleted   = "completed"
@@ -384,13 +387,13 @@ func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 		s.log.Info("job was changed elsewhere, outcome dropped", slog.String("job", id), slog.String("outcome", outcomeDropped))
 		return
 	}
-	outcome, err := s.transition(j, herr, cause, timeout)
+	// The save must happen even when the runner is shutting down.
+	saveCtx := context.WithoutCancel(s.runCtx)
+	outcome, err := s.transition(saveCtx, j, herr, cause, timeout)
 	if err != nil {
 		s.log.Error("job transition refused", slog.String("job", id), slog.String("outcome", outcome), slog.Any("error", err))
 		return
 	}
-	// The save must happen even when the runner is shutting down.
-	saveCtx := context.WithoutCancel(s.runCtx)
 	switch err := s.jobs.Save(saveCtx, j); {
 	case err == nil:
 		s.log.Info("job attempt finished", slog.String("job", id), slog.String("type", string(j.Type())),
@@ -404,7 +407,7 @@ func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 
 // transition picks the aggregate method for the result of the attempt. cause is why the handler context ended, if
 // it did.
-func (s *Service) transition(j *job.Job, herr, cause error, timeout time.Duration) (string, error) {
+func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error, timeout time.Duration) (string, error) {
 	now := s.clock.Now()
 	switch {
 	case herr == nil:
@@ -421,16 +424,22 @@ func (s *Service) transition(j *job.Job, herr, cause error, timeout time.Duratio
 	if errors.Is(cause, errTimeout) {
 		msg = fmt.Sprintf("attempt timed out after %v: %s", timeout, msg)
 	}
-	delay, retry := s.policy.Next(j.Attempts(), s.jitterUnit())
+	delay, retry := s.policy.Next(j.Attempts(), s.jitterUnit(ctx))
 	if !retry {
 		return outcomeFailed, j.Fail(now, "attempts exhausted: "+msg)
 	}
 	return outcomeRetry, j.Retry(now, now.Add(delay), msg)
 }
 
-func (s *Service) jitterUnit() float64 {
+// jitterUnit returns a number in [0, 1) for the backoff; any problem with the source means no jitter.
+func (s *Service) jitterUnit(ctx context.Context) float64 {
 	if s.jitter == nil {
 		return 0
 	}
-	return s.jitter.Fraction()
+	n, err := s.jitter.Permille(ctx)
+	if err != nil {
+		s.log.Warn("jitter source failed, retrying without jitter", slog.Any("error", err))
+		return 0
+	}
+	return float64(n) / permilleScale
 }

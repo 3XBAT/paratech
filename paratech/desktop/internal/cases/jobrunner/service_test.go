@@ -94,34 +94,20 @@ func (e *env) enqueue(typ job.Type, maxAttempts int) shared.JobID {
 
 func (e *env) status(id shared.JobID) job.Status { return e.repo.snapshot(id).Status }
 
-// eventually polls cond in real time; the code under test runs on goroutines.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testenv.Eventually(t, what, cond, nil)
 }
 
 func (e *env) waitStatus(id shared.JobID, want job.Status) {
 	e.t.Helper()
-	eventually(e.t, fmt.Sprintf("%s to be %s (is %s)", id, want, e.status(id)), func() bool { return e.status(id) == want })
+	eventually(e.t, fmt.Sprintf("%s to be %s", id, want), func() bool { return e.status(id) == want })
 }
 
 // drive moves the fake clock in poll-sized steps until cond holds, so waits and retries come due.
 func (e *env) drive(what string, cond func() bool) {
 	e.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			e.t.Fatalf("timed out driving the clock until %s", what)
-		}
-		e.clock.Advance(time.Second)
-		time.Sleep(time.Millisecond)
-	}
+	testenv.Eventually(e.t, what, cond, func() { e.clock.Advance(time.Second) })
 }
 
 func (e *env) idle(workers int) {
@@ -446,7 +432,7 @@ func TestErrorClassification(t *testing.T) {
 }
 
 func TestJitterShortensTheDelay(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.Backoff.Jitter = 0.5 }, fixedJitter(0.5))
+	e := newEnv(t, func(c *Config) { c.Backoff.Jitter = 0.5 }, fixedJitter(500))
 	e.register(typeStt, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error {
 		return errors.New("boom")
 	})

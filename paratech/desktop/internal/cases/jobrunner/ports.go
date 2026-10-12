@@ -104,18 +104,19 @@ type Clock interface {
 	Now() time.Time
 }
 
-// Sleeper waits on the same time source as Clock (ARCH-24): the idle polling of the workers, the per-job timeout.
-// Implemented by the clock adapter and by a controllable fake in tests.
+// Sleeper waits on the same time source as Clock (ARCH-24): the idle polling of the workers and the per-attempt
+// timeout (PRD section 7.3). Implemented by the clock adapter and by a controllable fake in tests.
 type Sleeper interface {
-	// Sleep blocks until d has passed and returns nil, or until ctx ends and returns its error. A non-positive d
-	// returns at once.
+	// Sleep blocks until d has passed and returns nil, or until ctx ends and returns its error (PRD section 7.3).
+	// A non-positive d returns at once.
 	Sleep(ctx context.Context, d time.Duration) error
 }
 
-// Jitter supplies the randomness of the retry delay (ARCH-24). Implemented by a random adapter and by a fixed fake.
+// Jitter supplies the randomness of the retry delay (PRD section 7.3, ARCH-24). Implemented by a random adapter and
+// by a fixed fake in tests.
 type Jitter interface {
-	// Fraction returns a number in [0, 1).
-	Fraction() float64
+	// Permille returns a random number from 0 to 999 (PRD section 7.3). An error means no jitter for this retry.
+	Permille(ctx context.Context) (int, error)
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary

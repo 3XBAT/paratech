@@ -147,7 +147,7 @@ func (f handlerFunc) Handle(ctx context.Context, snap job.Snapshot, report func(
 	return f(ctx, snap, report)
 }
 
-// fixedJitter always returns the same fraction.
-type fixedJitter float64
+// fixedJitter always returns the same permille.
+type fixedJitter int
 
-func (f fixedJitter) Fraction() float64 { return float64(f) }
+func (f fixedJitter) Permille(context.Context) (int, error) { return int(f), nil }
