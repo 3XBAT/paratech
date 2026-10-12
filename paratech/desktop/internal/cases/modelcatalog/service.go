@@ -208,7 +208,8 @@ func (s *Service) SetDefault(ctx context.Context, id shared.SttModelID) error {
 // A job that pins the model between 3 and 4 makes step 4 refuse with sttmodel.ErrPinned after the file is gone; that
 // job then finds no model file and fails, which PRD section 14 case 11 allows ("marks job unavailable"). A default
 // selected again between 2 and 4 makes the database refuse the delete; Delete then starts over, and after
-// conflictAttempts rounds returns ErrDefaultReselected. A model that a concurrent Delete removed first is not an error.
+// conflictAttempts rounds returns ErrDefaultReselected. A model that is not installed wraps shared.ErrNotFound; one that a
+// concurrent Delete removes while this one runs is not an error.
 func (s *Service) Delete(ctx context.Context, id shared.SttModelID) error {
 	for attempt := 1; ; attempt++ {
 		err := s.deleteOnce(ctx, id)
