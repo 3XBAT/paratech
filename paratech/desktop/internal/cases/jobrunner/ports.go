@@ -65,6 +65,10 @@ type Handler interface {
 	// backoff.Transient or any unclassified error retries with backoff until the attempts are used up (AC-10).
 	// Waiting statuses (network, quota, power) are not produced from errors yet.
 	//
+	// The error text is stored in jobs.last_error and written to the log, so it must contain no secrets, no prompt
+	// or transcript text and no response bodies. Adapters return classified errors with short fixed messages.
+	// A panic is stored as "handler panic" plus its type only; the panic value goes to the log alone.
+	//
 	// snap is a read-only value copy of the claimed job (job.Snapshot): the handler reads from it what it needs, such
 	// as the job type, and has no way to mutate or persist the aggregate, which the runner owns (see JobRepository).
 	// report is the narrow

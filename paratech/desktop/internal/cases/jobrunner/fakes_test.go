@@ -140,6 +140,28 @@ func (r *memRepo) path(id shared.JobID) []stored {
 	return append([]stored(nil), r.history[id]...)
 }
 
+// hookRepo wraps a memRepo to inject failures and to pause after a save.
+type hookRepo struct {
+	*memRepo
+	beforeSave func(j *job.Job) error // a non-nil result fails the save without storing anything
+	afterSave  func(j *job.Job)       // runs after a successful save
+}
+
+func (r *hookRepo) Save(ctx context.Context, j *job.Job) error {
+	if r.beforeSave != nil {
+		if err := r.beforeSave(j); err != nil {
+			return err
+		}
+	}
+	if err := r.memRepo.Save(ctx, j); err != nil {
+		return err
+	}
+	if r.afterSave != nil {
+		r.afterSave(j)
+	}
+	return nil
+}
+
 // handlerFunc adapts a function to Handler.
 type handlerFunc func(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error) error
 

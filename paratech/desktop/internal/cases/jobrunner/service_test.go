@@ -1,9 +1,11 @@
 package jobrunner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,13 +45,23 @@ type env struct {
 
 func newEnv(t *testing.T, mutate func(*Config), jitter Jitter) *env {
 	t.Helper()
+	return newEnvOn(t, mutate, jitter, nil)
+}
+
+// newEnvOn is newEnv with the runner reaching the repository through wrap, for tests that inject failures.
+func newEnvOn(t *testing.T, mutate func(*Config), jitter Jitter, wrap func(*memRepo) JobRepository) *env {
+	t.Helper()
 	testenv.NoGoroutineLeaks(t)
 	cfg := testConfig()
 	if mutate != nil {
 		mutate(&cfg)
 	}
 	e := &env{t: t, repo: newMemRepo(), clock: testenv.NewFakeClock(t0)}
-	svc, err := New(Deps{Jobs: e.repo, Clock: e.clock, Sleeper: e.clock, Jitter: jitter}, cfg)
+	var jobs JobRepository = e.repo
+	if wrap != nil {
+		jobs = wrap(e.repo)
+	}
+	svc, err := New(Deps{Jobs: jobs, Clock: e.clock, Sleeper: e.clock, Jitter: jitter}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +406,8 @@ func TestAttemptsAreBounded(t *testing.T) {
 				t.Fatalf("handler calls = %d, want %d", got, tc.wantCalls)
 			}
 			st := e.repo.snapshot(id)
-			if st.Status != job.StatusFailed || st.Attempts != int(tc.wantCalls) || !strings.Contains(st.LastError, "always broken") {
+			if st.Status != job.StatusFailed || st.Attempts != int(tc.wantCalls) || !strings.Contains(st.LastError, "always broken") ||
+				!strings.HasPrefix(st.LastError, "attempts exhausted: ") {
 				t.Fatalf("final: %s attempts=%d lastError=%q", st.Status, st.Attempts, st.LastError)
 			}
 		})
@@ -841,5 +854,173 @@ func TestIdleWorkersPollOnTheInterval(t *testing.T) {
 	e.idle(3)
 	if got := e.clock.Sleepers(); got != 4 {
 		t.Fatalf("sleepers = %d, want 3 workers and the promoter", got)
+	}
+}
+
+func TestFinalSaveIsRetriedOnTransientErrors(t *testing.T) {
+	errBusy := errors.New("database is locked")
+	tests := []struct {
+		name      string
+		err       error
+		failures  int // failing final saves in a row; negative means all of them
+		wantSaves int32
+		wantDone  bool
+	}{
+		{"fails once", errBusy, 1, 2, true},
+		{"fails until the last attempt", errBusy, finalSaveAttempts - 1, finalSaveAttempts, true},
+		{"fails every time", errBusy, -1, finalSaveAttempts, false},
+		{"conflict is not retried", shared.ErrVersionConflict, -1, 1, false},
+		{"missing job is not retried", shared.ErrNotFound, -1, 1, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var finalSaves atomic.Int32
+			e := newEnvOn(t, nil, nil, func(m *memRepo) JobRepository {
+				return &hookRepo{memRepo: m, beforeSave: func(j *job.Job) error {
+					if j.Status() == job.StatusRunning { // progress writes are not under test
+						return nil
+					}
+					if n := int(finalSaves.Add(1)); tc.failures < 0 || n <= tc.failures {
+						return tc.err
+					}
+					return nil
+				}}
+			})
+			e.register(typeStt, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error { return nil })
+			id := e.enqueue(typeStt, 2)
+			e.start()
+
+			e.drive("the final save attempts are made", func() bool { return finalSaves.Load() >= tc.wantSaves })
+			if tc.wantDone {
+				e.waitStatus(id, job.StatusCompleted)
+			}
+			for range 50 { // time goes on: nothing more may be tried
+				e.clock.Advance(time.Minute)
+			}
+			time.Sleep(20 * time.Millisecond)
+			if got := finalSaves.Load(); got != tc.wantSaves {
+				t.Fatalf("final saves = %d, want %d", got, tc.wantSaves)
+			}
+			if !tc.wantDone && e.status(id) != job.StatusRunning {
+				t.Fatalf("status = %s, want RUNNING left for startup recovery", e.status(id))
+			}
+		})
+	}
+}
+
+func TestCancelReachesTheRunClaimedAfterARequeue(t *testing.T) {
+	var (
+		calls     atomic.Int32
+		secondRun atomic.Bool
+		cause     atomic.Value
+		once      sync.Once
+		saved     = make(chan struct{})
+		release   = make(chan struct{})
+	)
+	e := newEnvOn(t, func(c *Config) { c.Workers = 2 }, nil, func(m *memRepo) JobRepository {
+		return &hookRepo{memRepo: m, afterSave: func(j *job.Job) {
+			if j.Status() != job.StatusRetryWait {
+				return
+			}
+			// The first run has stored its retry but not yet left execute; hold it there.
+			once.Do(func() {
+				close(saved)
+				<-release
+			})
+		}}
+	})
+	e.register(typeStt, func(ctx context.Context, _ job.Snapshot, _ func(context.Context, job.Progress) error) error {
+		if calls.Add(1) == 1 {
+			return errors.New("boom")
+		}
+		secondRun.Store(true)
+		<-ctx.Done()
+		cause.Store(context.Cause(ctx))
+		return ctx.Err()
+	})
+	id := e.enqueue(typeStt, 3)
+	e.start()
+
+	<-saved
+	e.drive("the requeued job is claimed by the other worker", secondRun.Load)
+	close(release)
+
+	// Three sleepers: the promoter, the second run's timer and the first worker, idle again once its execute returned.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := e.clock.AwaitSleepers(ctx, 3); err != nil {
+		t.Fatalf("the first worker did not leave execute: %v", err)
+	}
+
+	if err := e.svc.Cancel(context.Background(), id); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	e.waitStatus(id, job.StatusCancelled)
+	if c, _ := cause.Load().(error); !errors.Is(c, errCancelled) {
+		t.Fatalf("handler of the second run saw cause %v, want the user cancellation", c)
+	}
+}
+
+func TestStoredErrorTextHasNoPanicValue(t *testing.T) {
+	const marker = "SECRET-TRANSCRIPT-TEXT"
+	tests := []struct {
+		name     string
+		handle   func() error
+		want     job.Status
+		contains []string
+		absent   string
+	}{
+		{"panic with a string", func() error { panic(marker) }, job.StatusFailed, []string{"handler panic", "string"}, marker},
+		{"panic with an error", func() error { panic(errors.New(marker)) }, job.StatusFailed, []string{"handler panic", "*errors.errorString"}, marker},
+		{"ordinary error keeps its message", func() error { return errors.New("upstream said no: " + marker) }, job.StatusRetryWait, []string{"upstream said no", marker}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, nil, nil)
+			e.register(typeStt, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error {
+				return tc.handle()
+			})
+			id := e.enqueue(typeStt, 3)
+			e.start()
+			e.waitStatus(id, tc.want)
+
+			got := e.repo.snapshot(id).LastError
+			for _, s := range tc.contains {
+				if !strings.Contains(got, s) {
+					t.Errorf("lastError = %q, want it to contain %q", got, s)
+				}
+			}
+			if tc.absent != "" && strings.Contains(got, tc.absent) {
+				t.Errorf("lastError = %q leaks %q", got, tc.absent)
+			}
+		})
+	}
+}
+
+func TestInterruptedJobWithoutAttemptsFailsAndIsLoggedAsFailed(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	var logs bytes.Buffer // read only after Stop has waited for the workers
+	e.svc.log = slog.New(slog.NewTextHandler(&logs, nil))
+	started := make(chan struct{})
+	e.register(typeStt, func(ctx context.Context, _ job.Snapshot, _ func(context.Context, job.Progress) error) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	id := e.enqueue(typeStt, 1)
+	e.start()
+	<-started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := e.svc.Stop(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Stop = %v", err)
+	}
+	st := e.repo.snapshot(id)
+	if st.Status != job.StatusFailed || !strings.HasPrefix(st.LastError, "attempts exhausted") {
+		t.Fatalf("job: %s %q, want FAILED with the attempts exhausted text", st.Status, st.LastError)
+	}
+	if out := logs.String(); !strings.Contains(out, "outcome=failed") || strings.Contains(out, "outcome=interrupted") {
+		t.Fatalf("log does not show the real outcome:\n%s", out)
 	}
 }

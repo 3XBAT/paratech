@@ -18,6 +18,13 @@ import (
 // cancelAttempts bounds the reload-and-retry loop of a cancellation that keeps meeting version conflicts.
 const cancelAttempts = 3
 
+// Bounds of the final save of an attempt: a transient storage error (for example a busy database) is retried with a
+// doubling delay, so the job does not stay RUNNING until the next start.
+const (
+	finalSaveAttempts  = 4
+	finalSaveRetryBase = 200 * time.Millisecond
+)
+
 // permilleScale turns the permille of the Jitter port into a fraction.
 const permilleScale = 1000
 
@@ -192,6 +199,9 @@ func (s *Service) Stop(ctx context.Context) error {
 // CANCELLED when the handler returns; if the handler finishes successfully anyway, the job is COMPLETED. A queued or
 // waiting job is cancelled directly. A finished job, or a running job of an Uncancellable type, is refused with
 // ErrNotCancellable.
+//
+// There is a narrow window at shutdown: if the run's context was already ended by the shutdown, Cancel still returns
+// nil, but the job is requeued like any interrupted job, not cancelled.
 func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 	s.mu.Lock()
 	r := s.running[id]
@@ -252,10 +262,10 @@ func (s *Service) promoteDue(ctx context.Context) error {
 	}
 	now := s.clock.Now()
 	for _, j := range waiting {
-		if j.NextRunAt().After(now) {
-			continue
-		}
 		if err := j.Requeue(now); err != nil {
+			if errors.Is(err, job.ErrNotDue) {
+				continue
+			}
 			s.log.Error("requeue of a due retry refused", slog.String("job", j.ID().String()), slog.Any("error", err))
 			continue
 		}
@@ -325,7 +335,10 @@ func (s *Service) execute(j *job.Job) {
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		delete(s.running, j.ID())
+		// The job may be requeued and claimed by another worker before this line; keep that run's entry.
+		if s.running[j.ID()] == r {
+			delete(s.running, j.ID())
+		}
 		s.mu.Unlock()
 		cancel(errFinished)
 	}()
@@ -368,8 +381,10 @@ func (s *Service) call(ctx context.Context, h Handler, r *run) (err error) {
 	snap := r.job.Snapshot()
 	defer func() {
 		if p := recover(); p != nil {
-			s.log.Error("job handler panicked", slog.String("job", snap.ID().String()), slog.Any("panic", p), slog.String("stack", string(debug.Stack())))
-			err = backoff.Permanent(fmt.Errorf("handler panic: %v", p))
+			// The value may carry user data; only the log gets it, the stored error gets just the type.
+			s.log.Error("job handler panicked", slog.String("job", snap.ID().String()), slog.String("type", fmt.Sprintf("%T", p)),
+				slog.Any("panic", p), slog.String("stack", string(debug.Stack())))
+			err = backoff.Permanent(fmt.Errorf("handler panic: %T", p))
 		}
 	}()
 	return h.Handle(ctx, snap, r.report)
@@ -394,7 +409,12 @@ func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 		s.log.Error("job transition refused", slog.String("job", id), slog.String("outcome", outcome), slog.Any("error", err))
 		return
 	}
-	switch err := s.jobs.Save(saveCtx, j); {
+	// The aggregate decides the final status: an exhausted job fails whatever the runner meant to do.
+	if j.Status() == job.StatusFailed {
+		outcome = outcomeFailed
+	}
+
+	switch err := s.saveFinal(saveCtx, j); {
 	case err == nil:
 		s.log.Info("job attempt finished", slog.String("job", id), slog.String("type", string(j.Type())),
 			slog.Int("attempt", attempt), slog.String("outcome", outcome), slog.String("status", j.Status().String()))
@@ -402,6 +422,25 @@ func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 		s.log.Info("job was changed elsewhere, outcome dropped", slog.String("job", id), slog.String("outcome", outcomeDropped))
 	default:
 		s.log.Error("saving the job failed; it stays RUNNING until startup recovery", slog.String("job", id), slog.Any("error", err))
+	}
+}
+
+// saveFinal saves the final state of an attempt, retrying other errors than a conflict or a missing job (those mean
+// someone else owns the job now) a few times with a doubling delay. The version is unchanged after a failed save, so
+// the same aggregate can be saved again.
+func (s *Service) saveFinal(ctx context.Context, j *job.Job) error {
+	delay := finalSaveRetryBase
+	for attempt := 1; ; attempt++ {
+		err := s.jobs.Save(ctx, j)
+		if err == nil || errors.Is(err, shared.ErrConflict) || errors.Is(err, shared.ErrNotFound) || attempt == finalSaveAttempts {
+			return err
+		}
+
+		s.log.Warn("saving the job failed, retrying", slog.String("job", j.ID().String()), slog.Int("save_attempt", attempt), slog.Any("error", err))
+		if s.sleeper.Sleep(ctx, delay) != nil {
+			return err
+		}
+		delay *= 2
 	}
 }
 
