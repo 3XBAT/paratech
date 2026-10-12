@@ -1,7 +1,5 @@
--- NOTE: toolchain proof: these queries show that sqlc, goose and the adapter work together. The TASK-007 owner may replace or remove them.
-
--- Settings singleton (row id = 1) with the optimistic-concurrency protocol of ADR-0004(d).
--- These queries are the first consumer of the toolchain; the settings repository (TASK-007 owner) builds on them.
+-- Settings singleton (row id = 1) of the settings repository, with the optimistic-concurrency protocol of ADR-0004(d).
+-- No row means the defaults of the aggregate (version 0).
 
 -- name: GetSettings :one
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
