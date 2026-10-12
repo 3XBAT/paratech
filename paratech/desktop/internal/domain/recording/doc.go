@@ -1,5 +1,6 @@
 // Package recording is the bounded context of capturing the audio of an online class (PRD sections 6.2 and 6.3).
-// Aggregates: domain/recording/recording. Domain services (domain/recording/services/limits) are added by later tasks.
+// Aggregates: domain/recording/recording. Domain services: domain/recording/services/limits (hard cap, one
+// recording at a time).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //
