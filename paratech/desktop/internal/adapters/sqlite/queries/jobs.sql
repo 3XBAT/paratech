@@ -51,10 +51,13 @@ WHERE id = sqlc.arg(id) AND status = 'QUEUED' AND version = sqlc.arg(expected_ve
 
 -- Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 -- unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
+-- skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 -- name: NextClaimableJob :one
 SELECT * FROM jobs
 WHERE status = 'QUEUED'
+  AND attempts < max_attempts
   AND next_run_at <= sqlc.arg(now)
+  AND id NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(skip_ids) AS TEXT)))
   AND type IN (SELECT value FROM json_each(CAST(sqlc.arg(types) AS TEXT)))
   AND (CAST(sqlc.arg(heavy_allowed) AS INTEGER) = 1
        OR run_now = 1

@@ -82,8 +82,9 @@ func (r *JobRepository) Save(ctx context.Context, j *job.Job) error {
 	return nil
 }
 
-// Claim takes the next due QUEUED job admitted by filter and returns it RUNNING. The write transaction and the
-// guarded UPDATE (status and version) each keep two workers from receiving the same job.
+// Claim takes the next due QUEUED job admitted by filter and returns it RUNNING. An idle poll only reads; the write
+// transaction starts when a candidate exists. The write transaction and the guarded UPDATE (status and version) each
+// keep two workers from receiving the same job.
 func (r *JobRepository) Claim(ctx context.Context, now time.Time, filter job.ClaimFilter) (*job.Job, bool, error) {
 	if filter.IsZero() {
 		return nil, false, nil
@@ -102,23 +103,20 @@ func (r *JobRepository) Claim(ctx context.Context, now time.Time, filter job.Cla
 	}
 	query := sqlcgen.NextClaimableJobParams{Now: jobMs(now), Types: types, HeavyAllowed: heavyAllowed, HeavyTypes: heavy}
 
+	// Cheap read without the write slot; the candidate is looked up again inside the transaction.
+	peek, err := nextClaimCandidate(ctx, r.db.Queries(ctx), query, now, nil)
+	if err != nil || peek == nil {
+		return nil, false, err
+	}
+
 	var claimed *job.Job
 	err = r.db.Do(ctx, func(ctx context.Context) error {
 		q := r.db.Queries(ctx)
+		skip := []string{}
 		for range claimRetries {
-			row, err := q.NextClaimableJob(ctx, query)
-			if err != nil {
-				if err = MapError(ctx, err); errors.Is(err, shared.ErrNotFound) {
-					return nil // nothing eligible
-				}
-				return err
-			}
-			j, err := jobFromRow(row)
-			if err != nil {
-				return err
-			}
-			if err := j.Claim(now); err != nil {
-				return fmt.Errorf("sqlite: claim job %s: %w", j.ID(), err)
+			j, err := nextClaimCandidate(ctx, q, query, now, &skip)
+			if err != nil || j == nil {
+				return err // nothing eligible any more
 			}
 			n, err := q.UpdateClaimedJob(ctx, sqlcgen.UpdateClaimedJobParams(jobUpdateParams(j)))
 			if err = MapError(ctx, err); err != nil {
@@ -140,6 +138,34 @@ func (r *JobRepository) Claim(ctx context.Context, now time.Time, filter job.Cla
 	}
 	claimed.Persisted(claimed.Version() + 1)
 	return claimed, true, nil
+}
+
+// nextClaimCandidate returns the first stored job that can be claimed, already moved to RUNNING in memory, or nil if
+// there is none. A row that cannot be restored or claimed is corrupt: its id goes to skip and the next row is tried,
+// so one bad row never starves the queue behind it. skip may be nil; the query is not changed.
+func nextClaimCandidate(ctx context.Context, q *sqlcgen.Queries, query sqlcgen.NextClaimableJobParams, now time.Time, skip *[]string) (*job.Job, error) {
+	local := []string{} // never nil: JSON null would make NOT IN match nothing
+	if skip == nil {
+		skip = &local
+	}
+	for {
+		ids, err := json.Marshal(*skip)
+		if err != nil {
+			return nil, err
+		}
+		query.SkipIds = string(ids)
+		row, err := q.NextClaimableJob(ctx, query)
+		if err != nil {
+			if err = MapError(ctx, err); errors.Is(err, shared.ErrNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if j, err := jobFromRow(row); err == nil && j.Claim(now) == nil {
+			return j, nil
+		}
+		*skip = append(*skip, row.ID) // each pass adds an id, so the loop ends
+	}
 }
 
 // ListByStatus returns the jobs in any of the statuses, oldest first.

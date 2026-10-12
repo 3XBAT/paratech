@@ -231,6 +231,89 @@ func TestClaimOrderAndZeroFilter(t *testing.T) {
 	}
 }
 
+func TestCorruptHeadRowDoesNotStarveTheQueue(t *testing.T) {
+	cases := []struct{ name, corrupt string }{
+		{"restore fails", "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'a-bad'"},
+		{"version zero", "UPDATE jobs SET version = 0 WHERE id = 'a-bad'"},
+		{"attempts exhausted", "UPDATE jobs SET attempts = max_attempts WHERE id = 'a-bad'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTest(t, nil)
+			r, ctx := NewJobRepository(db), context.Background()
+			enqueueJob(t, r, jobSpec("a-bad", "stt"))
+			enqueueJob(t, r, jobSpec("b-good", "stt"))
+			enqueueJob(t, r, jobSpec("c-good", "stt"))
+			if _, err := db.sql.ExecContext(ctx, tc.corrupt); err != nil {
+				t.Fatal(err)
+			}
+			now := jobT0.Add(time.Second)
+			for _, want := range []shared.JobID{"b-good", "c-good"} {
+				j, ok, err := r.Claim(ctx, now, anyJobFilter(t, "stt"))
+				if err != nil || !ok || j.ID() != want {
+					t.Fatalf("Claim = %v ok=%v err=%v, want %s", j, ok, err, want)
+				}
+			}
+			if _, ok, err := r.Claim(ctx, now, anyJobFilter(t, "stt")); ok || err != nil {
+				t.Fatalf("Claim with only the corrupt row left: ok=%v err=%v", ok, err)
+			}
+			if got := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE id = 'a-bad' AND status = 'QUEUED'"); got != 1 {
+				t.Fatalf("the corrupt row was changed")
+			}
+		})
+	}
+}
+
+// An idle poll must not take the write slot: it has to work while another writer holds it.
+func TestIdleClaimDoesNotWaitForTheWriteSlot(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, db *DB, r *JobRepository)
+	}{
+		{"empty queue", func(*testing.T, *DB, *JobRepository) {}},
+		{"only a corrupt row", func(t *testing.T, db *DB, r *JobRepository) {
+			enqueueJob(t, r, jobSpec("bad", "stt"))
+			if _, err := db.sql.Exec("UPDATE jobs SET version = 0"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTest(t, nil)
+			r := NewJobRepository(db)
+			tc.setup(t, db, r)
+
+			held, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- db.Do(context.Background(), func(context.Context) error {
+					close(held)
+					<-release
+					return nil
+				})
+			}()
+			<-held
+			defer func() {
+				close(release)
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			start := time.Now()
+			if _, ok, err := r.Claim(ctx, jobT0, anyJobFilter(t, "stt")); ok || err != nil {
+				t.Fatalf("Claim: ok=%v err=%v", ok, err)
+			}
+			if d := time.Since(start); d > 2*time.Second {
+				t.Fatalf("idle Claim took %v while another writer held the slot", d)
+			}
+		})
+	}
+}
+
 func TestOnlyOneOfManyClaimersTakesTheJob(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	db1 := openAt(t, path, nil)

@@ -26,6 +26,7 @@ type Querier interface {
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
+	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 	NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error)
 	// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
 	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)

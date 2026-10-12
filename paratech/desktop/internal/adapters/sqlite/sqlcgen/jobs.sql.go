@@ -205,17 +205,20 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, statuses []string) ([]Jo
 const nextClaimableJob = `-- name: NextClaimableJob :one
 SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
 WHERE status = 'QUEUED'
+  AND attempts < max_attempts
   AND next_run_at <= ?1
-  AND type IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
-  AND (CAST(?3 AS INTEGER) = 1
+  AND id NOT IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+  AND type IN (SELECT value FROM json_each(CAST(?3 AS TEXT)))
+  AND (CAST(?4 AS INTEGER) = 1
        OR run_now = 1
-       OR type NOT IN (SELECT value FROM json_each(CAST(?4 AS TEXT))))
+       OR type NOT IN (SELECT value FROM json_each(CAST(?5 AS TEXT))))
 ORDER BY next_run_at, created_at, id
 LIMIT 1
 `
 
 type NextClaimableJobParams struct {
 	Now          int64
+	SkipIds      string
 	Types        string
 	HeavyAllowed int64
 	HeavyTypes   string
@@ -223,9 +226,11 @@ type NextClaimableJobParams struct {
 
 // Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 // unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
+// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 func (q *Queries) NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error) {
 	row := q.db.QueryRowContext(ctx, nextClaimableJob,
 		arg.Now,
+		arg.SkipIds,
 		arg.Types,
 		arg.HeavyAllowed,
 		arg.HeavyTypes,
