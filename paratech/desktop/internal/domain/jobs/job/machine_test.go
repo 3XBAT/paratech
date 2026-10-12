@@ -14,21 +14,25 @@ var t0 = time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 // The expected pairs are copied from the diagram of PRD section 7.2, independently of the table under test.
 func TestTransitionMatrix(t *testing.T) {
 	allowed := map[[2]Status]bool{
-		{StatusQueued, StatusRunning}:            true,
-		{StatusRunning, StatusCompleted}:         true,
-		{StatusRunning, StatusRetryWait}:         true,
-		{StatusRetryWait, StatusQueued}:          true,
-		{StatusRunning, StatusFailed}:            true,
-		{StatusRunning, StatusWaitingForNetwork}: true,
-		{StatusWaitingForNetwork, StatusQueued}:  true,
-		{StatusRunning, StatusWaitingForQuota}:   true,
-		{StatusWaitingForQuota, StatusQueued}:    true,
-		{StatusQueued, StatusWaitingForPower}:    true,
-		{StatusRunning, StatusWaitingForPower}:   true,
-		{StatusWaitingForPower, StatusQueued}:    true,
-		{StatusQueued, StatusCancelled}:          true,
-		{StatusRunning, StatusCancelled}:         true,
-		{StatusRunning, StatusQueued}:            true,
+		{StatusQueued, StatusRunning}:              true,
+		{StatusRunning, StatusCompleted}:           true,
+		{StatusRunning, StatusRetryWait}:           true,
+		{StatusRetryWait, StatusQueued}:            true,
+		{StatusRunning, StatusFailed}:              true,
+		{StatusRunning, StatusWaitingForNetwork}:   true,
+		{StatusWaitingForNetwork, StatusQueued}:    true,
+		{StatusRunning, StatusWaitingForQuota}:     true,
+		{StatusWaitingForQuota, StatusQueued}:      true,
+		{StatusQueued, StatusWaitingForPower}:      true,
+		{StatusRunning, StatusWaitingForPower}:     true,
+		{StatusWaitingForPower, StatusQueued}:      true,
+		{StatusQueued, StatusCancelled}:            true,
+		{StatusRunning, StatusCancelled}:           true,
+		{StatusRetryWait, StatusCancelled}:         true,
+		{StatusWaitingForNetwork, StatusCancelled}: true,
+		{StatusWaitingForQuota, StatusCancelled}:   true,
+		{StatusWaitingForPower, StatusCancelled}:   true,
+		{StatusRunning, StatusQueued}:              true,
 	}
 	count := 0
 	for _, from := range Statuses() {
@@ -334,6 +338,23 @@ func TestWaitForGivesAttemptBack(t *testing.T) {
 	}
 }
 
+func TestWaitForClearsRunNow(t *testing.T) {
+	j, _ := New(Spec{ID: "j", Type: "x", Key: "k", MaxAttempts: 2, RunNow: true}, t0)
+	if err := j.WaitFor(StatusWaitingForPower, t0); err != nil || j.RunNow() {
+		t.Fatalf("err %v runNow %v", err, j.RunNow())
+	}
+}
+
+func TestCancelFromWaitingStatuses(t *testing.T) {
+	for _, s := range []Status{StatusRetryWait, StatusWaitingForNetwork, StatusWaitingForQuota, StatusWaitingForPower} {
+		j := inStatus(t, s)
+		now := t0.Add(time.Hour)
+		if err := j.Cancel(now); err != nil || j.Status() != StatusCancelled || !j.FinishedAt().Equal(now) {
+			t.Errorf("%s: err %v status %s finished %v", s, err, j.Status(), j.FinishedAt())
+		}
+	}
+}
+
 func TestRequeueDueAtOnce(t *testing.T) {
 	for _, s := range []Status{StatusWaitingForNetwork, StatusWaitingForQuota, StatusWaitingForPower} {
 		j := inStatus(t, s)
@@ -421,6 +442,11 @@ func TestRestore(t *testing.T) {
 		{"terminal without finish", with(func(s *State) { s.Status = StatusFailed }), true},
 		{"bad percent", with(func(s *State) { s.Percent = 101 }), true},
 		{"bad payload", with(func(s *State) { s.Payload = "nope" }), true},
+		{"running without start", with(func(s *State) { s.StartedAt = time.Time{} }), true},
+		{"queued with finish", with(func(s *State) { s.Status = StatusQueued; s.FinishedAt = t0 }), true},
+		{"running with finish", with(func(s *State) { s.FinishedAt = t0 }), true},
+		{"retry wait with finish", with(func(s *State) { s.Status = StatusRetryWait; s.FinishedAt = t0 }), true},
+		{"queued never started", with(func(s *State) { s.Status = StatusQueued; s.StartedAt = time.Time{}; s.Attempts = 0 }), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

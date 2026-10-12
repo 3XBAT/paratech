@@ -165,6 +165,12 @@ func Restore(s State) (*Job, error) {
 	if s.Status.IsTerminal() && s.FinishedAt.IsZero() {
 		return nil, fmt.Errorf("%w: %s job without finish time", ErrInvalidJob, s.Status)
 	}
+	if !s.Status.IsTerminal() && !s.FinishedAt.IsZero() {
+		return nil, fmt.Errorf("%w: %s job with finish time", ErrInvalidJob, s.Status)
+	}
+	if s.Status == StatusRunning && s.StartedAt.IsZero() {
+		return nil, fmt.Errorf("%w: RUNNING job without start time", ErrInvalidJob)
+	}
 	if _, err := NewProgress(s.Percent, s.Checkpoint); err != nil {
 		return nil, err
 	}
@@ -338,7 +344,7 @@ func (j *Job) Fail(now time.Time, msg string) error {
 	return nil
 }
 
-// Cancel moves a QUEUED or RUNNING job to CANCELLED.
+// Cancel moves any non-terminal job to CANCELLED (user cancellation).
 func (j *Job) Cancel(now time.Time) error { return j.move(StatusCancelled, now) }
 
 // WaitFor moves the job to one of the WAITING_FOR_* statuses. Waiting is not a failure: the attempt of a RUNNING
@@ -354,6 +360,7 @@ func (j *Job) WaitFor(reason Status, now time.Time) error {
 	if wasRunning && j.attempts > 0 {
 		j.attempts--
 	}
+	j.runNow = false // a power wait must hold again after the override
 	return nil
 }
 

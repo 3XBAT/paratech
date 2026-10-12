@@ -9,10 +9,11 @@ var transitions = map[Status][]Status{
 		StatusWaitingForPower, StatusCancelled,
 		StatusQueued, // startup recovery of a stale RUNNING job
 	},
-	StatusRetryWait:         {StatusQueued},
-	StatusWaitingForNetwork: {StatusQueued},
-	StatusWaitingForQuota:   {StatusQueued},
-	StatusWaitingForPower:   {StatusQueued},
+	// A waiting job runs nothing, so a user cancellation is safe there (PRD section 7.2, 7.3).
+	StatusRetryWait:         {StatusQueued, StatusCancelled},
+	StatusWaitingForNetwork: {StatusQueued, StatusCancelled},
+	StatusWaitingForQuota:   {StatusQueued, StatusCancelled},
+	StatusWaitingForPower:   {StatusQueued, StatusCancelled},
 	StatusCompleted:         nil,
 	StatusFailed:            nil,
 	StatusCancelled:         nil,
