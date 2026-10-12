@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -341,7 +342,7 @@ func TestCrashBetweenTempWriteAndRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s2.Close() }()
-	n, err := s2.CleanupTemp()
+	n, err := s2.CleanupTemp(context.Background())
 	if err != nil || n != 2 {
 		t.Fatalf("CleanupTemp = %d, %v; want 2, nil", n, err)
 	}
@@ -351,7 +352,7 @@ func TestCrashBetweenTempWriteAndRename(t *testing.T) {
 	if got := read(t, s2, existing); got != "old" {
 		t.Fatalf("existing target = %q after cleanup", got)
 	}
-	if n, err := s2.CleanupTemp(); err != nil || n != 0 {
+	if n, err := s2.CleanupTemp(context.Background()); err != nil || n != 0 {
 		t.Fatalf("second CleanupTemp = %d, %v", n, err)
 	}
 }
@@ -779,4 +780,134 @@ func TestWriteReadsContentOnce(t *testing.T) {
 	if got := read(t, s, r); got != "hello" {
 		t.Errorf("got %q", got)
 	}
+}
+
+func TestCleanupTempRefusesAfterWrite(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if n, err := s.CleanupTemp(ctx); err != nil || n != 0 {
+		t.Fatalf("CleanupTemp before any Write = %d, %v", n, err)
+	}
+	put(t, s, ref(t, shared.ArtifactExports, "a.txt"), "a")
+	if _, err := s.CleanupTemp(ctx); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("CleanupTemp after Write = %v, want ErrConflict", err)
+	}
+}
+
+func TestCleanupTempStopsOnCancel(t *testing.T) {
+	s, root := newStore(t)
+	crashDuringWrite(t, s, ref(t, shared.ArtifactRecordings, "r1/x"), "x")
+	s2, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	n, err := s2.CleanupTemp(ctx)
+	if !errors.Is(err, context.Canceled) || n != 0 {
+		t.Fatalf("CleanupTemp = %d, %v; want 0, Canceled", n, err)
+	}
+	if len(tempFiles(t, root)) != 1 {
+		t.Error("a cancelled cleanup removed the file")
+	}
+}
+
+func TestCleanupTempContinuesAfterError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs unreadable directories")
+	}
+	s, root := newStore(t)
+	crashDuringWrite(t, s, ref(t, shared.ArtifactTranscripts, "t1/x"), "x")
+	locked := filepath.Join(root, "recordings", "locked")
+	if err := os.Mkdir(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+
+	s2, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	n, err := s2.CleanupTemp(context.Background())
+	if n != 1 || !errors.Is(err, shared.ErrStoragePermission) {
+		t.Fatalf("CleanupTemp = %d, %v; want 1 removal and a permission error", n, err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Errorf("error leaks the root: %v", err)
+	}
+}
+
+func TestStorageErrorClassification(t *testing.T) {
+	r := ref(t, shared.ArtifactRecordings, "a/b")
+	path := "/secret/root/recordings/a/b"
+	cases := []struct {
+		name string
+		err  error
+		is   []error
+		not  []error
+	}{
+		{"plain", &fs.PathError{Op: "read", Path: path, Err: errors.New("boom")},
+			[]error{ErrStorage, shared.ErrStorage}, []error{shared.ErrStoragePermission, shared.ErrStorageFull, shared.ErrStorageBusy, shared.ErrNotFound}},
+		{"permission", &fs.PathError{Op: "open", Path: path, Err: fs.ErrPermission},
+			[]error{ErrStorage, shared.ErrStorage, shared.ErrStoragePermission, fs.ErrPermission}, []error{shared.ErrStorageFull, shared.ErrStorageBusy}},
+		{"link error", &os.LinkError{Op: "rename", Old: path, New: path + "2", Err: fs.ErrPermission},
+			[]error{shared.ErrStoragePermission}, nil},
+	}
+	cases = append(cases, platformStorageCases(path)...)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mapErr("op", r, tc.err)
+			for _, want := range tc.is {
+				if !errors.Is(err, want) {
+					t.Errorf("errors.Is(%v, %v) = false", err, want)
+				}
+			}
+			for _, not := range tc.not {
+				if errors.Is(err, not) {
+					t.Errorf("errors.Is(%v, %v) = true", err, not)
+				}
+			}
+			var pe *fs.PathError
+			var le *os.LinkError
+			if strings.Contains(err.Error(), "secret") || errors.As(err, &pe) || errors.As(err, &le) {
+				t.Errorf("error leaks the path: %v", err)
+			}
+		})
+	}
+}
+
+func TestWriteSurvivesVanishedDirectory(t *testing.T) {
+	s, root := newStore(t)
+	ctx := context.Background()
+	target := ref(t, shared.ArtifactRecordings, "r1/x")
+
+	t.Run("directory removed before the temp file is created", func(t *testing.T) {
+		once := false
+		s.afterMkdir = func() {
+			if !once {
+				once = true
+				_ = os.RemoveAll(filepath.Join(root, "recordings", "r1"))
+			}
+		}
+		defer func() { s.afterMkdir = nil }()
+		if err := s.Write(ctx, target, strings.NewReader("data")); err != nil {
+			t.Fatalf("Write = %v, want a retry to succeed", err)
+		}
+		if got := read(t, s, target); got != "data" {
+			t.Errorf("content = %q", got)
+		}
+	})
+	t.Run("directory removed before the rename", func(t *testing.T) {
+		s.beforeRename = func() { _ = os.RemoveAll(filepath.Join(root, "recordings", "r1")) }
+		defer func() { s.beforeRename = nil }()
+		err := s.Write(ctx, target, strings.NewReader("data2"))
+		if errors.Is(err, shared.ErrNotFound) || !errors.Is(err, shared.ErrStorageBusy) {
+			t.Fatalf("Write = %v, want ErrStorageBusy and not ErrNotFound", err)
+		}
+	})
 }

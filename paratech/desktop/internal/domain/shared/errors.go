@@ -50,3 +50,20 @@ var (
 	// existing row (for example GetByIdempotencyKey) instead of creating another.
 	ErrDuplicate = fmt.Errorf("%w: duplicate key", ErrConflict)
 )
+
+// Storage failures. ErrStorage is the general class of I/O failures that have no domain meaning (artifact files);
+// the narrower errors wrap it, so errors.Is(err, ErrStorage) holds for all of them.
+var (
+	// ErrStorage is any storage I/O failure not covered by a narrower error.
+	ErrStorage = errors.New("storage failure")
+
+	// ErrStoragePermission means access was denied. It is permanent: retrying does not help.
+	ErrStoragePermission = fmt.Errorf("%w: permission denied", ErrStorage)
+
+	// ErrStorageFull means the disk is full. It lasts until the user frees space.
+	ErrStorageFull = fmt.Errorf("%w: no space left", ErrStorage)
+
+	// ErrStorageBusy means the target is in use by another process or was changed concurrently. It is transient:
+	// a later retry may succeed.
+	ErrStorageBusy = fmt.Errorf("%w: resource busy", ErrStorage)
+)

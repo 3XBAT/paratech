@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"paratech/desktop/internal/domain/shared"
@@ -42,6 +43,12 @@ type Store struct {
 
 	// beforeRename is a test hook called after the temporary file is closed and before the rename.
 	beforeRename func()
+
+	// afterMkdir is a test hook called after the directory of a write is ensured, before the temp file is created.
+	afterMkdir func()
+
+	// wrote is set by the first Write; CleanupTemp refuses to run after it.
+	wrote atomic.Bool
 }
 
 // New opens the data root (an absolute path), creating it and the per-kind directories if needed.
@@ -50,17 +57,17 @@ func New(root string) (*Store, error) {
 		return nil, fmt.Errorf("%w: the path must be absolute", ErrInvalidRoot)
 	}
 	if err := os.MkdirAll(root, dirPerm); err != nil {
-		return nil, fmt.Errorf("%w: create root: %s", ErrStorage, reason(err))
+		return nil, storageFail("create root", err)
 	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, fmt.Errorf("%w: open root: %s", ErrStorage, reason(err))
+		return nil, storageFail("open root", err)
 	}
 	for _, k := range kinds {
 		name := string(k)
 		if err := r.Mkdir(name, dirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
 			_ = r.Close()
-			return nil, fmt.Errorf("%w: create %s: %s", ErrStorage, name, reason(err))
+			return nil, storageFail("create "+name, err)
 		}
 		fi, err := r.Lstat(name)
 		if err != nil || !fi.IsDir() {
@@ -152,11 +159,14 @@ func (s *Store) Delete(ctx context.Context, ref shared.ArtifactRef) error {
 }
 
 // Write stores the content atomically: temporary file in the same directory, fsync, rename over the target.
-// A failed or interrupted write leaves the previous content untouched.
+// A failed or interrupted write leaves the previous content untouched. It never returns shared.ErrNotFound: a
+// directory removed concurrently is recreated once, and a later loss is shared.ErrStorageBusy. On Windows close
+// readers of the target before overwriting it; an open file blocks the rename (ErrStorageBusy after a few retries).
 func (s *Store) Write(ctx context.Context, ref shared.ArtifactRef, content io.Reader) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.wrote.Store(true)
 	parts, err := locate(ref)
 	if err != nil {
 		return err
@@ -172,17 +182,27 @@ func (s *Store) Write(ctx context.Context, ref shared.ArtifactRef, content io.Re
 	}
 	rel := filepath.Join(parts...)
 	dir := filepath.Dir(rel)
-	if err := s.root.MkdirAll(dir, dirPerm); err != nil {
-		return mapErr("write", ref, err)
-	}
 
-	tmp, err := tmpName(dir)
-	if err != nil {
-		return mapErr("write", ref, err)
-	}
-	f, err := s.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
-	if err != nil {
-		return mapErr("write", ref, err)
+	var tmp string
+	var f *os.File
+	// The directory may vanish between MkdirAll and the create (concurrent Delete); try once more.
+	for attempt := 0; ; attempt++ {
+		if err := s.root.MkdirAll(dir, dirPerm); err != nil {
+			return writeErr(ref, err)
+		}
+		if tmp, err = tmpName(dir); err != nil {
+			return writeErr(ref, err)
+		}
+		if s.afterMkdir != nil {
+			s.afterMkdir()
+		}
+		f, err = s.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
+		if err == nil {
+			break
+		}
+		if attempt > 0 || !errors.Is(err, fs.ErrNotExist) {
+			return writeErr(ref, err)
+		}
 	}
 	// Cleanup is explicit, not deferred: a panic (a simulated crash in tests) must leave the temp file behind.
 	src := &errTrackReader{ctx: ctx, r: content}
@@ -198,39 +218,68 @@ func (s *Store) Write(ctx context.Context, ref shared.ArtifactRef, content io.Re
 		if src.err != nil && errors.Is(err, src.err) {
 			return fmt.Errorf("read content of %s: %w", ref, err)
 		}
-		return mapErr("write", ref, err)
+		return writeErr(ref, err)
 	}
 	if s.beforeRename != nil {
 		s.beforeRename()
 	}
+	// The content is consumed, so a vanished directory (and with it the temp file) cannot be redone here.
 	if err := retry(ctx, func() error { return s.root.Rename(tmp, rel) }); err != nil {
 		_ = s.root.Remove(tmp)
-		return mapErr("write", ref, err)
+		return writeErr(ref, err)
 	}
 	syncDir(s.root, dir)
 	return nil
 }
 
-// CleanupTemp removes temporary files left by crashed writes and returns how many were removed. Call it once at
-// startup, before any Write.
-func (s *Store) CleanupTemp() (int, error) {
+// writeErr maps an error of Write; a missing path is a concurrent change, not "artifact not found".
+func writeErr(ref shared.ArtifactRef, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return &storageError{
+			msg:   fmt.Sprintf("%v: write %s: directory removed concurrently", ErrStorage, ref),
+			kinds: []error{ErrStorage, shared.ErrStorageBusy},
+			cause: bareErr(err),
+		}
+	}
+	return mapErr("write", ref, err)
+}
+
+// CleanupTemp removes temporary files left by crashed writes and returns how many it removed. Call it once at
+// startup, before any Write: it fails with shared.ErrConflict if this Store has already written. It keeps going
+// after an error and returns the first one; on a cancelled context it stops and returns the context error.
+func (s *Store) CleanupTemp(ctx context.Context) (int, error) {
+	if s.wrote.Load() {
+		return 0, fmt.Errorf("%w: CleanupTemp must run before any Write", shared.ErrConflict)
+	}
 	n := 0
+	var first error
+	note := func(err error) {
+		if first == nil {
+			first = storageFail("cleanup", err)
+		}
+	}
 	err := fs.WalkDir(s.root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
-			return err
+			note(err)
+			return nil
 		}
 		if d.Type().IsRegular() && strings.HasPrefix(d.Name(), tmpPrefix) {
-			if err := s.root.Remove(filepath.FromSlash(p)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
+			switch err := s.root.Remove(filepath.FromSlash(p)); {
+			case err == nil:
+				n++
+			case !errors.Is(err, fs.ErrNotExist):
+				note(err)
 			}
-			n++
 		}
 		return nil
 	})
 	if err != nil {
-		return n, fmt.Errorf("%w: cleanup: %s", ErrStorage, reason(err))
+		return n, err
 	}
-	return n, nil
+	return n, first
 }
 
 // lookup resolves ref and inspects it. A missing target (or a file where a directory is expected) is ErrNotFound.

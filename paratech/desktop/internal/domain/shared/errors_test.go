@@ -34,3 +34,23 @@ func TestConflictErrorsRelations(t *testing.T) {
 		})
 	}
 }
+
+func TestStorageErrorsRelations(t *testing.T) {
+	narrow := []error{ErrStoragePermission, ErrStorageFull, ErrStorageBusy}
+	for _, e := range narrow {
+		if !errors.Is(fmt.Errorf("write: %w", e), ErrStorage) {
+			t.Errorf("errors.Is(%v, ErrStorage) = false", e)
+		}
+		if errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) {
+			t.Errorf("%v must not match conflict or not found", e)
+		}
+		for _, o := range narrow {
+			if o != e && errors.Is(e, o) {
+				t.Errorf("errors.Is(%v, %v) = true", e, o)
+			}
+		}
+	}
+	if errors.Is(ErrStorage, ErrStoragePermission) {
+		t.Error("the general class must not match a narrower error")
+	}
+}

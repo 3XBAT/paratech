@@ -13,13 +13,38 @@ import (
 // Typed errors of the adapter (ARCH-32).
 var (
 	// ErrStorage is any I/O failure that has no domain meaning (disk full, access denied, file in use, ...).
-	ErrStorage = errors.New("artifact storage failure")
+	// It wraps shared.ErrStorage; the narrower shared.ErrStoragePermission, ErrStorageFull and ErrStorageBusy
+	// are added where the OS error allows.
+	ErrStorage = fmt.Errorf("artifact %w", shared.ErrStorage)
 
 	// ErrInvalidRoot means the data root passed to New is unusable.
 	ErrInvalidRoot = errors.New("invalid artifact root")
 )
 
-// mapErr translates an os error into a shared sentinel or ErrStorage without OS paths in the message.
+// storageError carries the cause for errors.Is but prints only the path-free message.
+type storageError struct {
+	msg   string
+	kinds []error // ErrStorage and maybe a narrower shared error
+	cause error   // bare OS error without a path
+}
+
+func (e *storageError) Error() string   { return e.msg }
+func (e *storageError) Unwrap() []error { return append(append([]error(nil), e.kinds...), e.cause) }
+
+// storageFail builds an ErrStorage error from an OS error without OS paths in the message.
+func storageFail(what string, err error) error {
+	bare := bareErr(err)
+	kinds := []error{ErrStorage}
+	switch k := osKind(bare); {
+	case k != nil:
+		kinds = append(kinds, k)
+	case errors.Is(bare, fs.ErrPermission):
+		kinds = append(kinds, shared.ErrStoragePermission)
+	}
+	return &storageError{msg: fmt.Sprintf("%v: %s: %s", ErrStorage, what, bare), kinds: kinds, cause: bare}
+}
+
+// mapErr translates an os error into a shared sentinel or an ErrStorage error.
 func mapErr(op string, ref shared.ArtifactRef, err error) error {
 	switch {
 	case err == nil:
@@ -30,18 +55,18 @@ func mapErr(op string, ref shared.ArtifactRef, err error) error {
 	case errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("%w: %s", shared.ErrNotFound, ref)
 	}
-	return fmt.Errorf("%w: %s %s: %s", ErrStorage, op, ref, reason(err))
+	return storageFail(op+" "+ref.String(), err)
 }
 
-// reason returns the cause text without the file path that os errors carry.
-func reason(err error) string {
+// bareErr drops the path that os errors carry.
+func bareErr(err error) error {
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
-		return pe.Err.Error()
+		return pe.Err
 	}
 	var le *os.LinkError
 	if errors.As(err, &le) {
-		return le.Err.Error()
+		return le.Err
 	}
-	return err.Error()
+	return err
 }
