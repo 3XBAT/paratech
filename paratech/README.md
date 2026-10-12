@@ -54,11 +54,11 @@ yet, see ADR-0005.
 
 ## Local database (SQLite adapter)
 `desktop/internal/adapters/sqlite` owns the database: driver `modernc.org/sqlite` (pure Go, the desktop builds with `CGO_ENABLED=0`),
-goose migrations embedded from `desktop/internal/adapters/sqlite/migrations`, and sqlc queries in `queries/` with generated code in `sqlcgen/`
+goose migrations that live in `desktop/pkg/migrations` (ARCH-04, ADR-0006: migrations of any database always live in `pkg/migrations`; the adapter only runs them), and sqlc queries in `queries/` with generated code in `sqlcgen/`
 (committed, never edited by hand). `docs/contracts/schema.sql` is the source of truth for the schema; a test fails when the migrations and that file
-define different objects. A schema change is a NEW migration file (never edit an applied one) plus the same change in `docs/contracts/schema.sql`.
+define different objects. A schema change is a NEW migration file in `desktop/pkg/migrations` (never edit an applied one) plus the same change in `docs/contracts/schema.sql`.
 
-Regenerate sqlc code after changing `migrations/` or `queries/` (from this directory; sqlc is run from the Go module proxy, it is not a dependency of go.mod;
+Regenerate sqlc code after changing `desktop/pkg/migrations/` or `queries/` (from this directory; sqlc is run from the Go module proxy, it is not a dependency of go.mod;
 the version is pinned here and recorded in `docs/refs/sqlite-goose-sqlc.md`):
 
 ```bash
