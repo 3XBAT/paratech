@@ -82,7 +82,7 @@ func newRecordingEnv(t *testing.T, dir string) *recordingEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { e.close(context.Background()) })
+	t.Cleanup(func() { _ = e.close(context.Background()) })
 	return e
 }
 

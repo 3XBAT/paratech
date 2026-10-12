@@ -251,7 +251,7 @@ func (r *Recording) TrackRef(ext string) (shared.ArtifactRef, error) {
 }
 
 func notAlnum(c rune) bool {
-	return c > unicode.MaxASCII || !(unicode.IsLetter(c) || unicode.IsDigit(c))
+	return c > unicode.MaxASCII || !unicode.IsLetter(c) && !unicode.IsDigit(c)
 }
 
 // move applies one table transition.
