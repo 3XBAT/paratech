@@ -87,5 +87,7 @@ a user decision, or external access. Never mark `done` without running every `te
 Options: `RALPH_AGENT`, `RALPH_MAX_ITERATIONS`, `RALPH_MAX_STALLS`, `RALPH_REVIEW` (see the top of `ralph.sh`).
 
 ## Subagents
-Defined in `.claude/agents/`: `architect`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`.
+Defined in `.claude/agents/`: `architect`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`, `security-auditor`, `security-skeptic`.
+Security review is adversarial and mandatory for every task (`docs/process/security-review.md`): `security-auditor` finds holes, one `security-skeptic` per finding tries to refute it,
+only confirmed findings are fixed (by the implementing agent, with a regression test).
 Subagents do not see the conversation: always point them to the task file, the PRD sections, `docs/architecture.md` and the files they may touch.
