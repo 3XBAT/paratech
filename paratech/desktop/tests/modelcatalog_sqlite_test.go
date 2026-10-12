@@ -136,7 +136,7 @@ func (e *catalogEnv) store(f modelFile) shared.ArtifactRef {
 func (e *catalogEnv) installCatalog(f modelFile) modelcatalog.InstalledModel {
 	e.t.Helper()
 	m, err := e.svc.Register(context.Background(), modelcatalog.Registration{
-		CatalogID: values.CatalogID(f.id), File: e.store(f), SHA256: f.sum(),
+		CatalogID: values.CatalogID(f.id), File: e.store(f),
 	})
 	if err != nil {
 		e.t.Fatalf("install %s: %v", f.id, err)
@@ -191,10 +191,13 @@ func TestModelManagerScenario(t *testing.T) {
 	e := openCatalogEnv(t, dir, clock, ids)
 	tiny, base := e.installCatalog(fileTiny), e.installCatalog(fileBase)
 	own, err := e.svc.Register(ctx, modelcatalog.Registration{
-		Name: "own", ModelVersion: "1", File: e.store(fileOwn), SHA256: fileOwn.sum(),
+		Name: "own", ModelVersion: "1", File: e.store(fileOwn),
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if own.SHA256 != fileOwn.sum() {
+		t.Fatalf("imported model digest %s, want the digest of its file %s", own.SHA256, fileOwn.sum())
 	}
 	if _, err := e.svc.ResolveForJob(ctx, ""); !errors.Is(err, modelselection.ErrNoDefaultModel) {
 		t.Fatalf("three models without a default: %v", err)
@@ -285,9 +288,50 @@ func mustModelRef(t *testing.T, f modelFile) shared.ArtifactRef {
 	return ref
 }
 
+// TestModelManagerRegisterVerifiesTheFile: on the real file store a corrupted catalog file is refused by its own
+// digest, and a file of an installed model cannot be registered again under another name or letter case.
+func TestModelManagerRegisterVerifiesTheFile(t *testing.T) {
+	ctx := context.Background()
+	e := openCatalogEnv(t, t.TempDir(), testenv.NewFakeClock(catalogT0), &seqIDs{})
+	defer e.close()
+
+	corrupt := fileBase
+	corrupt.content = bytes.Clone(fileBase.content)
+	corrupt.content[0] ^= 0xff
+	_, err := e.svc.Register(ctx, modelcatalog.Registration{CatalogID: values.CatalogID(fileBase.id), File: e.store(corrupt)})
+	if !errors.Is(err, values.ErrChecksumMismatch) {
+		t.Fatalf("corrupted file: %v, want values.ErrChecksumMismatch", err)
+	}
+
+	base := e.installCatalog(fileBase)
+	upper, err := shared.NewArtifactRef(shared.ArtifactModels, "BASE-Q5_1.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		ref          shared.ArtifactRef
+		mayBeMissing bool // only on a case-sensitive file system (not Windows)
+	}{
+		{mustModelRef(t, fileBase), false},
+		{upper, true},
+	}
+	for _, tc := range cases {
+		_, err := e.svc.Register(ctx, modelcatalog.Registration{Name: "own", ModelVersion: "1", File: tc.ref})
+		missing := tc.mayBeMissing && errors.Is(err, shared.ErrNotFound)
+		if !errors.Is(err, sttmodel.ErrFileInUse) && !missing {
+			t.Fatalf("register %s again: %v, want sttmodel.ErrFileInUse", tc.ref, err)
+		}
+	}
+
+	installed, err := e.svc.ListInstalled(ctx)
+	if err != nil || len(installed) != 1 || installed[0].ID != base.ID {
+		t.Fatalf("installed = %+v, %v; want only %s", installed, err, base.ID)
+	}
+}
+
 // TestModelManagerConcurrentDeleteSelectAndPin races removal, default selection and job pinning of one model on the
 // real database. Whatever the order: a removed model is neither the default (the foreign key) nor pinned by an
-// unfinished job, and every call ends with one of the documented outcomes.
+// unfinished job, an installed model keeps its file, and every call ends with one of the documented outcomes.
 func TestModelManagerConcurrentDeleteSelectAndPin(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	ctx := context.Background()
@@ -339,6 +383,11 @@ func TestModelManagerConcurrentDeleteSelectAndPin(t *testing.T) {
 			t.Fatal(err)
 		}
 		removed := errors.Is(getErr, shared.ErrNotFound)
+		if !removed {
+			if _, err := e.files.Size(ctx, mustModelRef(t, fileBase)); err != nil {
+				t.Errorf("round %d: an installed model lost its file: %v", round, err)
+			}
+		}
 		if removed && pinned {
 			t.Errorf("round %d: a removed model is pinned by an unfinished job", round)
 		}
