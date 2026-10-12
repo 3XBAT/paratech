@@ -96,3 +96,87 @@
 - Низкие: dot-import time, ARCH-52/53 и ARCH-02 не проверяются машинно; флаги cmd не перекрывают невалидное значение из окружения (config.Load валидирует до применения флагов); glob-ы `**/desktop/**` не привязаны к каталогу paratech/; go.work.sum добавлен тулчейном
 
 ---
+
+## [TASK-003] Контракты ядра: порты use cases и черновик SQL-схемы
+**Дата:** 2026-10-12 10:00
+**Статус:** done
+
+### Что сделано
+- domain/shared: типизированные ID, ArtifactRef (усилена проверка имён под Windows), sentinel-ошибки
+- Минимальные скелеты агрегатов (только ID()/Status() и перечисления состояний PRD §6.2/§7.2/delivery), job.ClaimFilter/Progress/ActiveStatuses, coursework/values.LLMRequest (валидируемый) и UntrustedOutput
+- ports.go для семи use cases (recordingsession, jobrunner, transcribe, modelcatalog, schedulesync, homeworkflow, senddelivery): репозитории, Clock, IDGenerator, Recorder, STTEngine, PowerMonitor, CredentialStore, ArtifactStore, CalendarAdapter, EmailAdapter, LLMClient, Tx
+- docs/contracts/schema.sql: 8 таблиц, CHECK по состояниям, version (CAS) на агрегатах, soft delete занятий, нет секретов
+- docs/adr/0004-core-contract-decisions.md; ARCH-23 дополнен ссылкой на ADR
+- Тесты: tests/ports_test.go (форма портов, deny-list std), tests/schema_test.go (схема vs константы vs PRD)
+- Ревью (reviewer): changes requested -> исправлены все high и большинство medium
+
+### Тесты
+- [x] Шаг 1: go build ./desktop/... (и CGO_ENABLED=0) — ok
+- [x] Шаг 2: go vet ./desktop/... и GOOS=windows go vet ./desktop/... — ok
+- [x] Шаг 3: go test ./desktop/tests/... (архитектурный тест) — ok; весь go test -race ./desktop/... ./hub/... ./shared/... ok; golangci-lint (в т.ч. GOOS=windows) 0 issues
+- [x] Шаг 4: состояния в schema.sql совпадают с PRD §6.2 (7) и §7.2 (9); схема загружается в SQLite 3.45 (8 таблиц)
+
+### Заметки для следующих агентов
+Решения, требующие подтверждения пользователем (ADR-0004): статусы delivery PENDING/SENDING/SENT/FAILED/UNKNOWN (PRD называет только UNKNOWN); ApplyChanges как атомарный пакет однотипных агрегатов (исключение из ARCH-23); ArtifactRef в domain/shared.
+Не сделано (оставлено владельцам задач):
+- TASK-005 должен выполнить schema.sql в SQLite-тесте и реализовать Tx как BEGIN IMMEDIATE (вложенный Do присоединяется)
+- Порт парсера/источника импорта расписания (TASK-046..048); загрузчик моделей и свободное место на диске (TASK-027); recovery-хук по типу задачи (TASK-010); сигнал возобновления WAITING_FOR_NETWORK/QUOTA (TASK-009); классификация ошибок transient/permanent/rate-limited/invalid-key в shared; параметры STTEngine (язык, потоки; TASK-029); агрегат homeworkdraft и его порт (PRD §10)
+- Стартовый reconcile: COMPLETED recording без stt-задачи (TASK-013/029) или outbox
+- Reconcile письма по Message-ID невозможен по чистому SMTP (нужен IMAP) — решить в TASK-010/044; PowerMonitor при неизвестном источнике питания возвращает true — подтвердить по PRD §7.4
+- Агрегаты без New/Restore/Version(): их добавляют задачи-владельцы ПЕРЕД работой адаптеров; Handler.Handle получает *job.Job только для чтения (проверяется документацией)
+- Минор: ports_test/schema_test ищут docs/ относительно репозитория; при выделении paratech/ в отдельный репозиторий нужен PARATECH_REQUIRE_DOCS=0 или перенос схемы
+
+---
+
+## [TASK-004] Протобуф-контракт клиент↔Hub (Connect-RPC)
+**Дата:** 2026-10-12 13:00
+**Статус:** done
+
+### Что сделано
+- shared/proto/paratech/hub/v1: common, errors, gateway (Complete, CompleteStream), quota (Reserve, Settle, Release, GetRemaining); placeholder health.proto удалён; код в shared/gen
+- Типизированные ошибки QUOTA_EXCEEDED, RATE_LIMITED, INVALID_API_KEY, PROVIDER_ERROR (+ IDEMPOTENCY_CONFLICT), ErrorDetail с retry_after и retryable
+- Семантика: попытки резервации по ключу идемпотентности, отмена стрима списывает израсходованные токены (SettleRequest.partial), ключи в пространстве имён API-ключа, TTL результатов 24 ч
+- Тесты shared: contract_test.go (нет полей с URL/host, golden-список string-полей, типы полей, таблица RPC с public/internal) и transport_test.go (ErrorDetail через httptest, unary и stream)
+- docs/adr/0005-hub-contract-decisions.md; команда buf breaking в README
+- Ревью (reviewer): changes requested (2 high: контракт Reserve при повторе, бесплатный вывод при отмене стрима) -> исправлено
+
+### Тесты
+- [x] Шаг 1: (cd shared && buf lint && buf generate) — ok, дрейфа нет
+- [x] Шаг 2: go build ./shared/... ./hub/... ./desktop/... — ok; go vet, GOOS=windows go vet, go test -race, golangci-lint — ok
+- [x] Шаг 3: рабочая форма: (cd shared && buf breaking --against '../../.git#ref=HEAD~1,subdir=paratech/shared') — exit 0 (форма из задачи `.git#branch=HEAD~1` в этом layout не работает); против master — удаление health.proto, это намеренно
+- [x] Шаг 4: тест запрещает поля url/uri/endpoint/host/webhook/proxy/... и Any/Struct
+
+### Заметки для следующих агентов
+- Подтвердить: единица квоты только tokens (PRD §19 п.4 открыт); Reserve/Settle/Release в публичном QuotaService, но по комментариям и тесту доступны только внутри Hub (вариант: вынести в QuotaLedgerService); payload = instructions + untrusted_data
+- Включить `buf breaking` в CI ПОСЛЕ попадания этих изменений в master (иначе падает из-за health.proto); добавить rm -rf shared/gen && buf generate перед проверкой дрейфа
+- Реестр Settle (account+reservation) vs ARCH-23 решить в задаче Hub-квот
+- Не сделано: схема структурированного вывода (PRD §13.3), desktop-порт GetRemaining (AC-12), uint32 vs int64 у max_output_tokens
+
+---
+
+## [TASK-005] SQLite: подключение, миграции goose, запросы sqlc
+**Дата:** 2026-10-12 17:00
+**Статус:** done
+
+### Что сделано
+- desktop/internal/adapters/sqlite: Open (WAL, foreign_keys, busy_timeout=5000, synchronous=NORMAL, _txlock=immediate на каждом соединении пула), Migrate/SchemaVersion (ErrSchemaTooNew), порт Tx (BEGIN IMMEDIATE, вложенный Do присоединяется, откат при error/panic/Goexit, слот записи в процессе), MapError/VersionCAS/DuplicateAsVersionConflict/IsPrimaryKeyViolation (ARCH-32)
+- Миграция migrations/0001_init.sql = docs/contracts/schema.sql (тест на совпадение с контрактом)
+- sqlc v1.31.1 (go run, не в go.mod): sqlc.yaml, queries (settings, jobs — подтверждение тулчейна), sqlcgen закоммичен
+- Зависимости (правило 9; стек в ADR-0001): modernc.org/sqlite v1.60.1, modernc.org/libc v1.77.1, pressly/goose/v3 v3.28.0 (v3.29.0 не подходит из-за libc); go.work -> go 1.26.0; docs/refs/sqlite-goose-sqlc.md
+- CI: шаги проверки дрейфа shared/gen (с очисткой каталога) и sqlcgen
+- Ревью (reviewer): approve; medium (писатели держали соединения пула; дубликат PK vs secondary UNIQUE) исправлены, low частично
+
+### Тесты
+- [x] Шаг 1: CGO_ENABLED=0 go build ./desktop/... — ok
+- [x] Шаг 2: go test -race ./desktop/internal/adapters/sqlite/... — ok (в т.ч. -count=3)
+- [x] Шаг 3: go list -deps ./desktop/internal/adapters/sqlite | grep -i sqlite — только modernc.org/sqlite[/lib,/vtab]; CgoFiles у не-std пакетов нет
+- [x] Шаг 4: GOOS=windows go vet ./desktop/... — ok; golangci-lint v2.14.0 0 issues
+
+### Заметки для следующих агентов
+- app пока не использует sqlite: первая задача-потребитель вызывает sqlite.Open(ctx, Options{Path, Migrate: true}) в internal/app с путём от Storage Manager
+- Вложенный Do с контекстом БЕЗ транзакции ждёт внешний Do (слот записи); с вечным контекстом блокируется навсегда — репозитории обязаны передавать ctx транзакции
+- При вставке, нарушающей и PK, и secondary UNIQUE, SQLite сообщает secondary (тест TestUniquenessCheckOrder): DuplicateAsVersionConflict в таком случае вернёт ErrDuplicate
+- Включить `buf breaking` в CI после попадания ветки в master; schema_test в desktop/tests можно перевести на чтение миграций
+- Не сделано (низкие): оставшиеся low из ревью (wal_autocheckpoint/journal_size_limit не настраивались)
+
+---

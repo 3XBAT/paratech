@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package paratech.hub.v1;
+
+import "google/protobuf/timestamp.proto";
+import "paratech/hub/v1/common.proto";
+
+// QuotaService is the quota ledger (PRD section 9.2): reserve before an expensive request, settle against actual usage,
+// release when the request is cancelled or failed. The cloud state is authoritative.
+//
+// Exposure. Reserve, Settle and Release are INTERNAL: they are driven by the Hub's own gateway path (in-process or an
+// internal listener) and are never registered on the public, API-key-protected listener, because Settle takes the usage
+// the provider reported and a client must not be able to dictate it, nor hold quota without making a request. Only
+// GetRemaining is PUBLIC, next to GatewayService. shared/contract_test.go pins this split, so changing it is a conscious
+// edit. Even internally, Settle and Release verify that the reservation belongs to the tester on whose behalf the call is
+// made (the API key scope of the request); a reservation of another tester is reported as "not_found". Splitting the
+// internal part into its own service is an option for the Hub quota task (ADR-0005).
+//
+// Reservation life cycle: RESERVED -> SETTLED | RELEASED, plus RELEASED by expiry -> SETTLED when a late Settle arrives (it
+// charges the actual usage, see Settle). Settle and Release are idempotent per reservation_id.
+//
+// Life cycle of an idempotency key. Reserve is keyed by idempotency_key, namespaced per tester (see common.proto). A key
+// has a fingerprint (operation_type, model_alias, amount; recorded with its first reservation) and a list of attempts,
+// each with its own reservation. Reserve decides by the latest attempt:
+//   - no reservation yet, or the earlier Reserve failed with ERROR_CODE_QUOTA_EXCEEDED (it holds nothing and records
+//     nothing): a new reservation is created, or the call fails again with QUOTA_EXCEEDED;
+//   - the latest reservation is RESERVED and has not expired: it is returned as it is and nothing extra is held (this is
+//     a ledger-level guard only: the Gateway rejects a duplicate call of a RUNNING attempt with `aborted` before it reaches Reserve);
+//   - the latest reservation is SETTLED by a complete call: it is returned as it is (a replay);
+//   - the latest reservation is RELEASED (by Release, by expiry, or after a failed call), or was settled as partial
+//     usage (SettleRequest.partial, a cancelled call): the attempt is over and Reserve creates a NEW reservation with a
+//     new reservation_id for the same key, a new attempt. This is what lets the Gateway retry after PROVIDER_ERROR or
+//     after expiry with the same key; replaying a dead reservation would make such a retry impossible;
+//   - arguments that differ from the fingerprint fail with ERROR_CODE_IDEMPOTENCY_CONFLICT, in every state.
+// Settle and Release address exactly one attempt by its reservation_id and never touch another attempt of the same key.
+// A late attempt: if the reservation of a still running call was released by expiry and a NEWER attempt already exists for
+// the key, the late call is charged for its actual usage (Settle) but its result is discarded and never replayed; the
+// newer attempt owns the key.
+//
+// Expiry. An unsettled reservation expires at expires_at and is then released by the Hub, so that a crashed gateway
+// cannot lock quota for good. expires_at must exceed the longest request timeout of the gateway (provider call plus
+// settlement), otherwise a slow but healthy call would be released under its own feet.
+service QuotaService {
+  // Reserve (INTERNAL) holds an upper-bound amount before the provider is called, following the key rules above. It fails
+  // with ERROR_CODE_QUOTA_EXCEEDED when the remaining quota is smaller than the requested amount; nothing is held then.
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+
+  // Settle (INTERNAL) charges the actual usage and returns the unused part of the reservation to the balance. A repeat
+  // with the same actual amount and partial flag returns the original outcome; a repeat with different values fails with
+  // ERROR_CODE_IDEMPOTENCY_CONFLICT. Settling a reservation that was released by Release fails with "failed_precondition".
+  // Settling a reservation that the Hub released by EXPIRY still succeeds: the provider has already done the work, so the
+  // actual usage is charged (bounded as described at SettleRequest.actual) and the reservation becomes SETTLED; refusing
+  // would turn a slow call into free output.
+  rpc Settle(SettleRequest) returns (SettleResponse);
+
+  // Release (INTERNAL) returns the whole reservation to the balance without charging. Releasing a RELEASED reservation is a
+  // no-op; releasing a SETTLED one changes nothing and reports the state SETTLED (the charge stands).
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // GetRemaining (PUBLIC) returns the caller's current quota (the caller is identified by the API key). It changes
+  // nothing.
+  rpc GetRemaining(GetRemainingRequest) returns (GetRemainingResponse);
+}
+
+// ReservationState is the state of a reservation.
+enum ReservationState {
+  RESERVATION_STATE_UNSPECIFIED = 0;
+  // The amount is held; awaiting Settle or Release.
+  RESERVATION_STATE_RESERVED = 1;
+  // The actual usage was charged and the rest returned. Final.
+  RESERVATION_STATE_SETTLED = 2;
+  // The whole amount was returned, by Release, after a failed call, or by expiry. Final for Reserve (it is never
+  // reused; the next Reserve of the key opens a new one). A reservation released by expiry can still be settled once.
+  RESERVATION_STATE_RELEASED = 3;
+}
+
+// Reservation is the ledger entry of one held amount.
+message Reservation {
+  string reservation_id = 1;
+  ReservationState state = 2;
+  // The held amount. Stays the original reserved amount in every state.
+  QuotaAmount reserved = 3;
+  // The amount actually charged: zero while RESERVED and after RELEASED, the settled amount after SETTLED.
+  QuotaAmount charged = 4;
+  // When an unsettled reservation is released by the Hub on its own. Later than the longest request timeout.
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message ReserveRequest {
+  // Same key as the completion this reservation pays for: 1 to 128 printable ASCII characters without spaces. Namespaced
+  // per tester; see the key life cycle in the QuotaService comment.
+  string idempotency_key = 1;
+  OperationType operation_type = 2;
+  string model_alias = 3;
+  // Upper bound of what the request may use.
+  QuotaAmount amount = 4;
+}
+
+message ReserveResponse {
+  Reservation reservation = 1;
+  // Quota after the hold.
+  QuotaSnapshot quota = 2;
+}
+
+message SettleRequest {
+  string reservation_id = 1;
+  // What the provider reported as used. Trusted only because the caller is the Gateway (see the exposure note above). If
+  // it exceeds the reservation, the Hub charges the lesser of the actual amount and what the account can bear, never
+  // driving the balance below zero, and reports it in Reservation.charged.
+  QuotaAmount actual = 2;
+  // True when the call did not complete and the amount is only what was consumed until it was stopped (a cancelled
+  // stream, PRD section 9.2 step 4). Such an attempt is over: it stores no result, so a later Reserve with the same key
+  // opens a new attempt instead of replaying this one. False for a call that completed and has a stored result.
+  bool partial = 3;
+}
+
+message SettleResponse {
+  Reservation reservation = 1;
+  QuotaSnapshot quota = 2;
+}
+
+message ReleaseRequest {
+  string reservation_id = 1;
+}
+
+message ReleaseResponse {
+  Reservation reservation = 1;
+  QuotaSnapshot quota = 2;
+}
+
+message GetRemainingRequest {}
+
+message GetRemainingResponse {
+  QuotaSnapshot quota = 1;
+}

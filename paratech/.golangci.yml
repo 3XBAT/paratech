@@ -5,7 +5,7 @@
 # per module because the tool is started from here (ADR-0002).
 #
 # Small linter set on purpose. depguard implements the import matrix of docs/architecture.md section 9
-# (ARCH-10, 11, 20, 30, 36, 40, 51, 52) with `files` globs per module and layer. Limits of depguard:
+# (ARCH-04, 10, 11, 20, 30, 36, 40, 51, 52) with `files` globs per module and layer. Limits of depguard:
 #   - it cannot say "own package/context only" for names that are not known in advance, so cross-adapter and
 #     cross-transport imports (ARCH-30, 40) and imports between domain contexts added later (ARCH-11) are
 #     enforced only by tests/arch_test.go in each module. Domain contexts known from docs/architecture.md
@@ -45,6 +45,8 @@ linters:
             - "$gostd"
             - "paratech/desktop/internal/domain"
           deny:
+            - pkg: "paratech/desktop/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "math/rand"
               desc: "ARCH-15: randomness comes in through parameters"
             - pkg: "crypto/rand"
@@ -140,6 +142,8 @@ linters:
             - "paratech/desktop/internal/domain"
             - "paratech/desktop/internal/metrics"
           deny:
+            - pkg: "paratech/desktop/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "math/rand"
               desc: "ARCH-24: randomness comes in through a port"
             - pkg: "crypto/rand"
@@ -157,6 +161,8 @@ linters:
             - "paratech/desktop/internal/cases"
             - "paratech/desktop/testenv"
           deny:
+            - pkg: "paratech/desktop/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "math/rand"
               desc: "ARCH-24: randomness comes in through a port"
             - pkg: "crypto/rand"
@@ -181,6 +187,8 @@ linters:
           files:
             - "**/desktop/internal/input/**"
           deny:
+            - pkg: "paratech/desktop/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "paratech/desktop/internal/adapters"
               desc: "ARCH-40: input talks to use cases, not adapters"
             - pkg: "paratech/desktop/internal/app"
@@ -195,12 +203,32 @@ linters:
             - "$gostd"
             - "paratech/desktop/config"
 
+        # ARCH-04: pkg (embedded migrations and similar assets) depends only on the standard library (and its own tree from external tests).
+        desktop-pkg:
+          list-mode: strict
+          files:
+            - "**/desktop/pkg/**"
+          allow:
+            - "$gostd"
+            - "paratech/desktop/pkg"
+
+        # ARCH-04: metrics must not import pkg (its other imports are not restricted by the matrix).
+        desktop-metrics:
+          list-mode: lax
+          files:
+            - "**/desktop/internal/metrics/**"
+          deny:
+            - pkg: "paratech/desktop/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
+
         # ARCH-51: cmd is thin and reaches the core only through config and internal/app.
         desktop-cmd:
           list-mode: lax
           files:
             - "**/desktop/cmd/**"
           deny:
+            - pkg: "paratech/desktop/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "paratech/desktop/internal/domain"
               desc: "ARCH-51: cmd contains no logic; use internal/app"
             - pkg: "paratech/desktop/internal/cases"
@@ -231,6 +259,8 @@ linters:
             - "$gostd"
             - "paratech/hub/internal/domain"
           deny:
+            - pkg: "paratech/hub/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "math/rand"
               desc: "ARCH-15: randomness comes in through parameters"
             - pkg: "crypto/rand"
@@ -286,6 +316,8 @@ linters:
             - "paratech/hub/internal/domain"
             - "paratech/hub/internal/metrics"
           deny:
+            - pkg: "paratech/hub/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "math/rand"
               desc: "ARCH-24: randomness comes in through a port"
             - pkg: "crypto/rand"
@@ -303,6 +335,8 @@ linters:
             - "paratech/hub/internal/cases"
             - "paratech/hub/testenv"
           deny:
+            - pkg: "paratech/hub/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "math/rand"
               desc: "ARCH-24: randomness comes in through a port"
             - pkg: "crypto/rand"
@@ -327,6 +361,8 @@ linters:
           files:
             - "**/hub/internal/input/**"
           deny:
+            - pkg: "paratech/hub/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "paratech/hub/internal/adapters"
               desc: "ARCH-40: input talks to use cases, not adapters"
             - pkg: "paratech/hub/internal/app"
@@ -341,12 +377,32 @@ linters:
             - "$gostd"
             - "paratech/hub/config"
 
+        # ARCH-04: pkg (embedded migrations and similar assets) depends only on the standard library (and its own tree from external tests).
+        hub-pkg:
+          list-mode: strict
+          files:
+            - "**/hub/pkg/**"
+          allow:
+            - "$gostd"
+            - "paratech/hub/pkg"
+
+        # ARCH-04: metrics must not import pkg (its other imports are not restricted by the matrix).
+        hub-metrics:
+          list-mode: lax
+          files:
+            - "**/hub/internal/metrics/**"
+          deny:
+            - pkg: "paratech/hub/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
+
         # ARCH-51: cmd is thin and reaches the core only through config and internal/app.
         hub-cmd:
           list-mode: lax
           files:
             - "**/hub/cmd/**"
           deny:
+            - pkg: "paratech/hub/pkg"
+              desc: "ARCH-04: pkg is imported only by adapters and app"
             - pkg: "paratech/hub/internal/domain"
               desc: "ARCH-51: cmd contains no logic; use internal/app"
             - pkg: "paratech/hub/internal/cases"

@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package paratech.hub.v1;
+
+import "paratech/hub/v1/common.proto";
+
+// GatewayService is the LLM gateway (PRD sections 4.2, 9.2 and 13.2): it authenticates the caller, validates and rate
+// limits the request, reserves quota, calls the provider chosen server-side and settles against the actual usage. Both
+// RPCs are served on the public, API-key-protected listener.
+//
+// Life cycle of an idempotency key. The key names one logical request of one tester (keys are namespaced per API key,
+// see common.proto). The Hub records, per key, a fingerprint (a hash of the whole CompletionSpec) and a list of attempts.
+// An attempt is one run of the reserve -> execute -> settle/release sequence and owns exactly one quota reservation
+// (QuotaService). Calls with a key are decided by the latest attempt:
+//   - no attempt yet, or the latest attempt FAILED or was CANCELLED (see below): a new attempt starts, with a new
+//     reservation;
+//   - the latest attempt is RUNNING (its reservation is RESERVED and not expired): the call fails with the Connect code
+//     "aborted" (retry with backoff). A gateway that crashed leaves such an attempt behind; it stops blocking at the
+//     latest when its reservation expires and is released by the Hub;
+//   - the latest attempt COMPLETED (its reservation is SETTLED and its result is stored): the stored result is returned
+//     without calling the provider and without charging again (CompletionResult.replayed is true);
+//   - a call whose spec differs from the fingerprint fails with ERROR_CODE_IDEMPOTENCY_CONFLICT, whatever the state of
+//     the attempts. The fingerprint is recorded with the first reservation of the key.
+// How an attempt ends:
+//   - COMPLETED: the provider finished, the reservation is settled in full, the result is stored.
+//   - FAILED: the reservation was released (or never made) and nothing is charged: ERROR_CODE_QUOTA_EXCEEDED (nothing was
+//     reserved), ERROR_CODE_PROVIDER_ERROR, expiry of the reservation, or a Hub failure before the provider was called.
+//   - CANCELLED: the client cancelled after the provider was called (see CompleteStream); the consumed tokens were settled
+//     as partial usage and no result is stored. The retry is a new attempt and is charged again: the earlier tokens were
+//     really consumed, so a cancel never gives free output.
+// Attempts are independent ledger entries: the earlier attempt keeps its final state, and Settle or Release by an
+// earlier attempt's reservation_id never touches a later attempt. The record of a key (including a stored result) lives
+// for the retention time described in common.proto, then the key starts afresh.
+service GatewayService {
+  // Complete runs one LLM operation and returns the whole answer. If the client cancels after the provider was called, the
+  // Hub lets the provider call finish (bounded by its call timeout), settles it in full and stores the result, so that
+  // a retry with the same key replays the answer it has paid for; if the provider was never called, it releases the
+  // reservation.
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+
+  // CompleteStream runs one LLM operation and streams the answer. Stream semantics:
+  //   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
+  //   - the concatenation of all deltas equals CompletionResult.output;
+  //   - a failure is delivered as a Connect error (in the end-of-stream error for a stream that already started), with an
+  //     ErrorDetail. A stream without a final "result" is a failed call; the client must discard the deltas it received.
+  //     When the failure is the Hub's or the provider's (ERROR_CODE_PROVIDER_ERROR, a Hub crash), the reservation is
+  //     released and nothing is charged;
+  //   - when the client cancels or the connection drops, the outcome depends on how far the call got (PRD section 9.2,
+  //     step 4):
+  //       * the provider was never called, or has produced nothing yet: the Hub releases the whole reservation;
+  //       * the provider call has started and produced output: the Hub stops it and settles the tokens consumed so far,
+  //         that is the input tokens plus the output tokens generated until the stop, as reported by the provider for
+  //         the interrupted call or, when the provider reports nothing, estimated by the Hub (never more than the
+  //         reservation). The settlement is marked partial (SettleRequest.partial) and no result is stored. The Hub does
+  //         this on a context that is not tied to the cancelled request;
+  //       * if the provider had already finished when the cancel was seen, the call completes normally: settled in full,
+  //         result stored, replayable;
+  //   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
+  //     result.
+  rpc CompleteStream(CompleteStreamRequest) returns (stream CompleteStreamResponse);
+}
+
+// CompletionSpec describes one LLM operation. It is shared by Complete and CompleteStream so that both validate the same
+// way. There is deliberately no field for a URL, host or provider: the model is an alias resolved by the Hub.
+//
+// The limits below mirror the desktop core (desktop/internal/domain/coursework/values/llm.go), which rejects a bad
+// request locally. The Hub enforces them again and answers a violation with "invalid_argument". Sizes are bytes of UTF-8.
+message CompletionSpec {
+  // Client-generated key, stable across retries of the same job: 1 to 128 printable ASCII characters (0x21 to 0x7E, so no
+  // spaces). Namespaced per tester; see the key life cycle above.
+  string idempotency_key = 1;
+  OperationType operation_type = 2;
+  // Hub-side alias of a model (for example "default"): 1 to 64 characters from [a-z0-9_-], starting with a letter or a
+  // digit. Resolved against the server allowlist; an alias that is unknown, or not allowed for the operation_type, is
+  // rejected with "invalid_argument".
+  string model_alias = 3;
+  // Trusted instruction text written by the app. Must not be empty; valid UTF-8 without NUL.
+  string instructions = 4;
+  // User data such as transcript excerpts. Kept apart from the instructions on purpose: the Hub passes it to the model
+  // as data, and neither side may treat it as instructions (PRD section 13.3). Raw audio is never part of a request. May
+  // be empty; valid UTF-8 without NUL. Together with instructions it is at most 1 MiB (1048576 bytes).
+  //
+  // The Hub bounds the request before parsing it: the handler is built with connect.WithReadMaxBytes of 1 MiB plus a
+  // small headroom for the envelope, so that a request over the 1 MiB rule but still under the transport limit gets a
+  // clear "invalid_argument" from the Hub, and only a grossly oversized message is cut off by the transport with
+  // "resource_exhausted" and no ErrorDetail (see the fallback in errors.proto).
+  string untrusted_data = 5;
+  // Upper bound on tokens the model may generate for this call; 0 means the Hub default for the alias. The Hub clamps it
+  // silently to its own cap for the alias and operation (a larger value is not an error). The reservation is based on the
+  // estimated input tokens plus this effective value, so it is also the most the call can cost.
+  uint32 max_output_tokens = 6;
+}
+
+// CompletionResult is the final outcome of a completion.
+message CompletionResult {
+  // Model output. UNTRUSTED: it may contain text derived from the transcript and from prompt injection. The client must
+  // validate it against a strict schema and trusted local state before any side effect (PRD section 13.3).
+  string output = 1;
+  // Usage reported by the provider, as settled.
+  Usage usage = 2;
+  // Quota after settlement.
+  QuotaSnapshot quota = 3;
+  // The quota reservation that paid for this call (see QuotaService).
+  string reservation_id = 4;
+  // True when this answer is the stored result of an earlier call with the same idempotency key.
+  bool replayed = 5;
+}
+
+message CompleteRequest {
+  CompletionSpec spec = 1;
+}
+
+message CompleteResponse {
+  CompletionResult result = 1;
+}
+
+message CompleteStreamRequest {
+  CompletionSpec spec = 1;
+}
+
+message CompleteStreamResponse {
+  oneof event {
+    // Next chunk of output text, UNTRUSTED like CompletionResult.output.
+    string delta = 1;
+    // Always the last message of a successful stream.
+    CompletionResult result = 2;
+  }
+}

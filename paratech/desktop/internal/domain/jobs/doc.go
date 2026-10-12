@@ -1,6 +1,7 @@
 // Package jobs is the template bounded context for durable background jobs (PRD sections 7.1 and 7.2).
-// It only documents the context and its ubiquitous language; aggregates (domain/jobs/job) and
-// domain services (domain/jobs/services/backoff, domain/jobs/services/powerpolicy) are added by later tasks.
+// It documents the context and its ubiquitous language. The aggregate domain/jobs/job is a skeleton (identity and the
+// status enumeration, TASK-003); its state machine arrives with TASK-008. Domain services
+// (domain/jobs/services/backoff, domain/jobs/services/powerpolicy) are added by later tasks.
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //

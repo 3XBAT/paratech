@@ -1,0 +1,23 @@
+// Package coursework is the bounded context of homework: assignments extracted from lessons, drafts generated
+// with the cloud LLM and the minimal context sent to it (PRD sections 9 and 10, AC-13, AC-18).
+// Aggregates: domain/coursework/assignment (homeworkdraft with versions is added by a later task).
+// Value objects shared by aggregates live in domain/coursework/values. The domain service
+// domain/coursework/services/contextselection is added by a later task.
+//
+// Layout of a context (docs/architecture.md section 3.1):
+//
+//	coursework/doc.go                  this file: purpose and glossary
+//	coursework/<aggregate>/            one package per aggregate
+//	coursework/values/                 value objects shared by several aggregates of the context
+//	coursework/services/<service>/     domain services and policies
+//
+// Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared.
+//
+// # Glossary
+//
+//   - Assignment: a homework item with an optional deadline; the local copy is the system of record.
+//   - Draft: an LLM-generated homework text that the user reviews, edits and refines before sending.
+//   - LLM request: the operation, the trusted instructions and the untrusted user data sent to the Hub.
+//   - Untrusted data: transcripts and LLM output; it never triggers a side effect by itself (hard rule 3, PRD section 13.3).
+//   - Minimal context: only the local data an operation needs is sent to the LLM (PRD section 9.1).
+package coursework

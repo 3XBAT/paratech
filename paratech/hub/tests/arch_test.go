@@ -3,7 +3,7 @@ package tests
 // Architecture test (ARCH-64). It enforces docs/architecture.md with go/parser only (no dependencies):
 //   - the import matrix of section 9 (ARCH-10, 11, 20, 30, 36, 40, 51, 52);
 //   - no time.Now / math/rand in domain and cases (ARCH-15, ARCH-24);
-//   - the directory layout of section 2 (ARCH-01);
+//   - the directory layout of section 2 (ARCH-01) and the rules for pkg/ (ARCH-04);
 //   - no organization files (docs, tasks, prompts, ...) inside the code directory paratech/.
 //
 // The checks are plain functions over a root directory, so TestCheckersDetectViolations can feed them
@@ -39,6 +39,7 @@ const (
 	layerInput    layer = "input"
 	layerApp      layer = "app"
 	layerMetrics  layer = "metrics"
+	layerPkg      layer = "pkg" // non-business, technology-bound artifacts such as pkg/migrations (ARCH-04)
 	layerConfig   layer = "config"
 	layerCmd      layer = "cmd"
 	layerTestenv  layer = "testenv"
@@ -79,6 +80,8 @@ func classify(rel string) pkgRef {
 			return pkgRef{layerMetrics, ""}
 		}
 		return pkgRef{layerUnknown, unit(1)}
+	case "pkg":
+		return pkgRef{layerPkg, unit(1)}
 	case "config":
 		return pkgRef{layerConfig, ""}
 	case "cmd":
@@ -123,6 +126,10 @@ func classifyImport(modPath, imp string) (importKind, pkgRef) {
 	return kindStd, pkgRef{} // includes the pseudo-package "C", checked separately
 }
 
+// mayImportPkg lists the layers allowed to import pkg (ARCH-04). Test-only layers are unrestricted, as in section 9.
+// The root and unknown layers are not listed: the root has no imports and an unknown directory is reported by checkLayout.
+var mayImportPkg = map[layer]bool{layerAdapters: true, layerApp: true, layerTests: true, layerTestenv: true}
+
 // importViolation applies the matrix of docs/architecture.md section 9. It returns an empty rule when the import is allowed.
 func importViolation(modPath string, src pkgRef, isTest bool, imp string) (rule, why string) {
 	kind, dst := classifyImport(modPath, imp)
@@ -131,6 +138,17 @@ func importViolation(modPath string, src pkgRef, isTest bool, imp string) (rule,
 		return "", ""
 	case kindOther:
 		return "section-9", "a service must not import a sibling service module"
+	}
+
+	// ARCH-04: pkg imports only std (and its own tree for external tests); only adapters and app (and tests) import pkg.
+	if src.layer == layerPkg {
+		if kind == kindOwn && dst.layer == layerPkg {
+			return "", ""
+		}
+		return "ARCH-04", "pkg may depend only on the standard library"
+	}
+	if kind == kindOwn && dst.layer == layerPkg && !mayImportPkg[src.layer] {
+		return "ARCH-04", fmt.Sprintf("the %s layer must not import pkg (only adapters and app may)", src.layer)
 	}
 
 	switch src.layer {
@@ -360,9 +378,14 @@ func checkDeterminism(root string) ([]string, error) {
 
 var internalLayers = map[string]bool{"domain": true, "cases": true, "adapters": true, "input": true, "app": true, "metrics": true}
 
+// topLevelDirs are the directories of the module root that may contain Go packages (section 2). Directories without
+// Go files (a frontend, build assets) are not checked.
+var topLevelDirs = map[string]bool{"cmd": true, "config": true, "internal": true, "pkg": true, "testenv": true, "tests": true}
+
 // checkLayout verifies the directory layout of docs/architecture.md section 2 (ARCH-01):
-// every layer has a doc.go, cmd/<binary>/main.go exists, internal/ has no unknown top-level directory
-// and every bounded context has a doc.go.
+// every layer has a doc.go, cmd/<binary>/main.go exists, internal/ has no unknown top-level directory,
+// every bounded context has a doc.go, only the directories of section 2 (including pkg/) hold Go packages at the
+// module top level and every package directory directly under pkg/ has a doc.go (ARCH-04).
 func checkLayout(root string) []string {
 	var out []string
 	exists := func(rel string) bool {
@@ -400,6 +423,21 @@ func checkLayout(root string) []string {
 	for _, c := range contexts {
 		if c.IsDir() && c.Name() != "shared" && !exists("internal/domain/"+c.Name()+"/doc.go") {
 			out = append(out, violation("ARCH-01", "internal/domain/"+c.Name(), "bounded context has no doc.go (purpose and glossary)"))
+		}
+	}
+
+	files, _ := goFiles(root)
+	seenTop := map[string]bool{}
+	for _, rel := range files {
+		if top, _, nested := strings.Cut(rel, "/"); nested && !topLevelDirs[top] && !seenTop[top] {
+			seenTop[top] = true
+			out = append(out, violation("ARCH-01", top, "unknown top-level directory holding Go code (new ones need an ADR)"))
+		}
+	}
+	pkgs, _ := os.ReadDir(filepath.Join(root, "pkg"))
+	for _, p := range pkgs {
+		if p.IsDir() && !exists("pkg/"+p.Name()+"/doc.go") {
+			out = append(out, violation("ARCH-04", "pkg/"+p.Name(), "package under pkg has no doc.go (purpose)"))
 		}
 	}
 	return out
@@ -571,6 +609,10 @@ func TestImportMatrix(t *testing.T) {
 		{name: "cmd thin", file: "cmd/hub/main.go", imps: []string{m + "/config", m + "/internal/app", "flag"}},
 		{name: "config std", file: "config/config.go", imps: []string{"os", "fmt"}},
 		{name: "config external test imports config", file: "config/config_test.go", imps: []string{m + "/config"}},
+		{name: "adapter imports pkg", file: "internal/adapters/postgres/migrate.go", imps: []string{m + "/pkg/migrations"}},
+		{name: "app imports pkg", file: "internal/app/app.go", imps: []string{m + "/pkg/migrations"}},
+		{name: "pkg std only", file: "pkg/migrations/migrations.go", imps: []string{"embed", "io/fs"}},
+		{name: "pkg external test imports its package", file: "pkg/migrations/migrations_test.go", imps: []string{m + "/pkg/migrations"}},
 		{name: "tests unrestricted", file: "tests/flow_test.go", imps: []string{m + "/internal/adapters/postgres", m + "/internal/cases/run"}},
 
 		// violations
@@ -602,6 +644,17 @@ func TestImportMatrix(t *testing.T) {
 		{name: "config imports third party", file: "config/config.go", imps: []string{"github.com/joho/godotenv"}, want: "ARCH-52"},
 		{name: "cmd imports domain", file: "cmd/hub/main.go", imps: []string{m + "/internal/domain/shared"}, want: "ARCH-51"},
 		{name: "cmd imports adapters", file: "cmd/hub/main.go", imps: []string{m + "/internal/adapters/postgres"}, want: "ARCH-51"},
+		{name: "pkg imports domain", file: "pkg/migrations/migrations.go", imps: []string{m + "/internal/domain/shared"}, want: "ARCH-04"},
+		{name: "pkg imports adapters", file: "pkg/migrations/migrations.go", imps: []string{m + "/internal/adapters/postgres"}, want: "ARCH-04"},
+		{name: "pkg imports config", file: "pkg/migrations/migrations.go", imps: []string{m + "/config"}, want: "ARCH-04"},
+		{name: "pkg imports third party", file: "pkg/migrations/migrations.go", imps: []string{"github.com/pressly/goose/v3"}, want: "ARCH-04"},
+		{name: "pkg imports shared gen", file: "pkg/migrations/migrations.go", imps: []string{"paratech/shared/gen/paratech/hub/v1"}, want: "ARCH-04"},
+		{name: "domain imports pkg", file: "internal/domain/quota/account/account.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
+		{name: "cases import pkg", file: "internal/cases/run/service.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
+		{name: "input imports pkg", file: "internal/input/connect/api.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
+		{name: "cmd imports pkg", file: "cmd/hub/main.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
+		{name: "config imports pkg", file: "config/config.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
+		{name: "metrics imports pkg", file: "internal/metrics/metrics.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
 		{name: "sibling service", file: "internal/app/app.go", imps: []string{"paratech/desktop/internal/domain/shared"}, want: "section-9"},
 	}
 	for _, tt := range tests {
@@ -720,6 +773,26 @@ func TestCheckersDetectViolations(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) []string { return checkLayout(root) },
 			want:  []string{"ARCH-01: internal/rogue", "ARCH-01: internal/domain/quota: bounded context has no doc.go"},
+		},
+		{
+			name: "layout unknown top-level Go directory, pkg without doc.go; frontend without Go is fine",
+			files: map[string]string{
+				"config/doc.go": "package config", "testenv/doc.go": "package testenv", "tests/doc.go": "package tests",
+				"cmd/hub/main.go":               "package main",
+				"internal/domain/doc.go":        "package domain",
+				"internal/domain/shared/doc.go": "package shared",
+				"internal/cases/doc.go":         "package cases",
+				"internal/adapters/doc.go":      "package adapters",
+				"internal/input/doc.go":         "package input",
+				"internal/app/doc.go":           "package app",
+				"internal/metrics/doc.go":       "package metrics",
+				"pkg/migrations/migrations.go":  "package migrations",
+				"pkg/assets/doc.go":             "package assets",
+				"rogue/rogue.go":                "package rogue",
+				"frontend/src/main.tsx":         "x",
+			},
+			check: func(t *testing.T, root string) []string { return checkLayout(root) },
+			want:  []string{"ARCH-01: rogue: unknown top-level directory", "ARCH-04: pkg/migrations: package under pkg has no doc.go"},
 		},
 		{
 			name: "organization files",
