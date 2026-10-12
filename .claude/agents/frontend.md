@@ -2,7 +2,7 @@
 name: frontend
 description: Implements the React + TypeScript UI of the desktop app (main window, settings, model manager screens, recording popup UI) and the Wails bindings glue. Use for tasks labelled "frontend".
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: opus
 ---
 You are a frontend developer on the Learning Assistant desktop UI (`paratech/desktop/frontend`, React + TypeScript + Vite, inside Wails v3).
 

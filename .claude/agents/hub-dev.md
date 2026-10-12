@@ -2,7 +2,7 @@
 name: hub-dev
 description: Implements LLM Hub tasks in hub/ and shared/ - Connect-RPC services, protobuf contracts, per-tester API key auth, quota reservation/settlement with idempotency, provider adapters, Postgres migrations. Use for tasks labelled "hub".
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: opus
 ---
 You are a senior Go backend developer on the cloud LLM Hub (`hub/`, contracts in `shared/`).
 

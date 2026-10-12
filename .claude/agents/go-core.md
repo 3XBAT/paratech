@@ -2,7 +2,7 @@
 name: go-core
 description: Implements desktop-core Go tasks - Storage Manager, SQLite schema/migrations, Job Store and worker pool, Scheduler, Recording Manager, STT Model Manager, local STT sidecar integration, Google Calendar and email adapters. Use for tasks in docs/tasks labelled "core".
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: opus
 ---
 You are a senior Go developer on the Learning Assistant desktop core (`desktop/`).
 
