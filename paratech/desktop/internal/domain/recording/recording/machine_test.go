@@ -322,13 +322,28 @@ func TestFinishedRecordingKeepsResults(t *testing.T) {
 		t.Fatalf("negative chunks: %v, chunks %d", err, r.Chunks())
 	}
 	track := mustRef(t, "recordings/r1.wav")
-	for _, bad := range []struct {
+	bad := []struct {
+		name  string
 		audio shared.ArtifactRef
 		d     time.Duration
-	}{{shared.ArtifactRef{}, time.Hour}, {mustRef(t, "exports/r1.wav"), time.Hour}, {track, -time.Second}} {
-		if err := r.Complete(t0.Add(time.Hour), bad.audio, bad.d); !errors.Is(err, ErrInvalidRecording) || r.Status() != StatusFinalizing {
-			t.Fatalf("Complete(%v, %v) = %v, status %s", bad.audio, bad.d, err, r.Status())
-		}
+	}{
+		{"no track", shared.ArtifactRef{}, time.Hour},
+		{"other kind", mustRef(t, "exports/r1.wav"), time.Hour},
+		{"other recording", mustRef(t, "recordings/r2.wav"), time.Hour},
+		{"id prefix only", mustRef(t, "recordings/r10.wav"), time.Hour},
+		{"inside the chunk directory", mustRef(t, "recordings/r1/chunk-0001"), time.Hour},
+		{"no extension", mustRef(t, "recordings/r1"), time.Hour},
+		{"bad extension", mustRef(t, "recordings/r1.w-v"), time.Hour},
+		{"nested", mustRef(t, "recordings/r1.wav/x"), time.Hour},
+		{"negative duration", track, -time.Second},
+		{"zero duration", track, 0},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := r.Complete(t0.Add(time.Hour), tc.audio, tc.d); !errors.Is(err, ErrInvalidRecording) || r.Status() != StatusFinalizing {
+				t.Fatalf("Complete(%v, %v) = %v, status %s", tc.audio, tc.d, err, r.Status())
+			}
+		})
 	}
 	if err := r.Complete(t0.Add(time.Hour), track, 59*time.Minute); err != nil {
 		t.Fatal(err)

@@ -250,6 +250,21 @@ func (r *Recording) TrackRef(ext string) (shared.ArtifactRef, error) {
 	return shared.NewArtifactRef(shared.ArtifactRecordings, string(r.id)+"."+ext)
 }
 
+// ownsTrack reports whether ref is recordings/<id>.<ext> of this recording with a valid extension.
+func (r *Recording) ownsTrack(ref shared.ArtifactRef) bool {
+	if ref.Kind() != shared.ArtifactRecordings {
+		return false
+	}
+
+	ext, ok := strings.CutPrefix(ref.Path(), string(r.id)+".")
+	if !ok {
+		return false
+	}
+
+	want, err := r.TrackRef(ext)
+	return err == nil && want == ref
+}
+
 func notAlnum(c rune) bool {
 	return c > unicode.MaxASCII || !unicode.IsLetter(c) && !unicode.IsDigit(c)
 }
@@ -345,12 +360,13 @@ func (r *Recording) ObserveChunks(n int, now time.Time) error {
 	return nil
 }
 
-// Complete moves a FINALIZING recording to COMPLETED with its final track and duration.
+// Complete moves a FINALIZING recording to COMPLETED with its final track and duration. The track must be the
+// TrackRef of this recording and the duration positive.
 func (r *Recording) Complete(now time.Time, audio shared.ArtifactRef, duration time.Duration) error {
-	if audio.IsZero() || audio.Kind() != shared.ArtifactRecordings {
-		return fmt.Errorf("%w: final track %q", ErrInvalidRecording, audio)
+	if !r.ownsTrack(audio) {
+		return fmt.Errorf("%w: final track %q of recording %s", ErrInvalidRecording, audio, r.id)
 	}
-	if duration < 0 {
+	if duration <= 0 {
 		return fmt.Errorf("%w: duration %v", ErrInvalidRecording, duration)
 	}
 	if err := r.move(StatusCompleted, now); err != nil {
