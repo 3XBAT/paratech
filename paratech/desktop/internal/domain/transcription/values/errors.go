@@ -39,4 +39,7 @@ var (
 
 	// ErrSizeMismatch means a file does not have the size the catalog promises.
 	ErrSizeMismatch = errors.New("size mismatch")
+
+	// ErrReservedIdentity means an imported model claims the name and version of a catalog entry.
+	ErrReservedIdentity = errors.New("name and version belong to a catalog model")
 )

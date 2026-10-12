@@ -165,6 +165,48 @@ func TestCheckRemoval(t *testing.T) {
 	}
 }
 
+func TestCheckFileFree(t *testing.T) {
+	newModel := func(id shared.SttModelID, name values.ModelName, path string) *Model {
+		t.Helper()
+		spec := goodSpec(t)
+		spec.ID, spec.Name, spec.File = id, name, ref(t, shared.ArtifactModels, path)
+		m, err := New(spec, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	m := newModel("m1", "base", "dir/base.bin")
+
+	cases := []struct {
+		name  string
+		other *Model
+		want  error
+	}{
+		{"other file", newModel("m2", "tiny", "dir/tiny.bin"), nil},
+		{"same file", newModel("m2", "tiny", "dir/base.bin"), ErrFileInUse},
+		{"same file in other case", newModel("m2", "tiny", "DIR/Base.BIN"), ErrFileInUse},
+		{"inside the other's directory", newModel("m2", "tiny", "dir"), ErrFileInUse},
+		{"contains the other's file", newModel("m2", "tiny", "dir/base.bin/x.bin"), ErrFileInUse},
+		{"name prefix only", newModel("m2", "tiny", "dir/base.bin2"), nil},
+		{"the model itself", newModel("m1", "base", "dir/base.bin"), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := m.CheckFileFree([]*Model{tc.other})
+			if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+				t.Fatalf("CheckFileFree = %v, want %v", err, tc.want)
+			}
+			if tc.want != nil && !errors.Is(err, shared.ErrDuplicate) {
+				t.Fatalf("CheckFileFree = %v, want shared.ErrDuplicate", err)
+			}
+		})
+	}
+	if err := m.CheckFileFree(nil); err != nil {
+		t.Fatalf("no other model: %v", err)
+	}
+}
+
 func TestPersisted(t *testing.T) {
 	m, err := New(goodSpec(t), t0)
 	if err != nil {

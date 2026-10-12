@@ -3,7 +3,8 @@
 // A model is a verified file below models/ with its identity (name and model version; the pair is unique among
 // installed models), size, SHA-256, quantization and capabilities, and whether it came from the catalog. The source
 // URL is not part of the aggregate: it belongs to the catalog entry (values.CatalogEntry), and an imported model has
-// none. The aggregate decides whether it may be removed (CheckRemoval). It does no I/O.
+// none. The aggregate decides whether it may be removed (CheckRemoval) and whether its file is free of other installed
+// models (CheckFileFree). It does no I/O.
 //
 // The "default model" is not stored here but in the settings aggregate (a change of the default then touches
 // one aggregate, ARCH-23).

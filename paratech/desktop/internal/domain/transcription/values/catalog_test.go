@@ -266,5 +266,38 @@ func TestCatalogEntryVerify(t *testing.T) {
 		if err := e.Verify(tc.sum, tc.size); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
 			t.Errorf("%s: Verify = %v, want %v", tc.name, err, tc.want)
 		}
+
+		wantSize := tc.want
+		if errors.Is(wantSize, ErrChecksumMismatch) {
+			wantSize = nil
+		}
+		if err := e.VerifySize(tc.size); !errors.Is(err, wantSize) || (wantSize == nil && err != nil) {
+			t.Errorf("%s: VerifySize = %v, want %v", tc.name, err, wantSize)
+		}
+	}
+}
+
+func TestCatalogCheckImportIdentity(t *testing.T) {
+	c, err := ParseCatalog([]byte(manifest(entryJSON(nil), secondEntry())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		model   ModelName
+		version ModelVersion
+		want    error
+	}{
+		{"first entry", "base", "1", ErrReservedIdentity},
+		{"second entry", "small", "1", ErrReservedIdentity},
+		{"catalog name, other version", "base", "2", nil},
+		{"own name", "own", "1", nil},
+		{"name differs in case", "Base", "1", nil},
+	}
+	for _, tc := range cases {
+		err := c.CheckImportIdentity(tc.model, tc.version)
+		if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+			t.Errorf("%s: CheckImportIdentity = %v, want %v", tc.name, err, tc.want)
+		}
 	}
 }

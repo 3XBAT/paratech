@@ -3,6 +3,7 @@ package sttmodel
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"paratech/desktop/internal/domain/shared"
@@ -143,6 +144,24 @@ func (m *Model) CheckRemoval(pinnedByActiveJob bool) error {
 		return fmt.Errorf("%w: %s %s", ErrPinned, m.name, m.modelVersion)
 	}
 	return nil
+}
+
+// CheckFileFree refuses the model when its file overlaps the file of another model in installed (the same id is
+// skipped): one file per installed model, so removing a model never destroys another one's file.
+func (m *Model) CheckFileFree(installed []*Model) error {
+	for _, other := range installed {
+		if other.id != m.id && filesOverlap(m.file, other.file) {
+			return fmt.Errorf("%w: %s is used by %s %s", ErrFileInUse, m.file, other.name, other.modelVersion)
+		}
+	}
+	return nil
+}
+
+// filesOverlap reports whether a and b are the same file or one is inside the other, ignoring letter case because
+// Windows file names are case-insensitive (NTFS compares upcased names).
+func filesOverlap(a, b shared.ArtifactRef) bool {
+	x, y := strings.ToUpper(a.String()), strings.ToUpper(b.String())
+	return x == y || strings.HasPrefix(x, y+"/") || strings.HasPrefix(y, x+"/")
 }
 
 // Version returns the version this instance was last loaded or saved with: 0 for an aggregate that was never

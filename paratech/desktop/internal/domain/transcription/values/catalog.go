@@ -113,11 +113,19 @@ func (e CatalogEntry) Recommendation() Recommendation { return e.recommendation 
 // Verify reports whether a file with the given digest and size is this model (PRD section 8.1: a file that does not
 // match is rejected and not installed).
 func (e CatalogEntry) Verify(sum SHA256, size int64) error {
-	if size != e.size {
-		return fmt.Errorf("%w: %s %s: %d bytes, want %d", ErrSizeMismatch, e.name, e.version, size, e.size)
+	if err := e.VerifySize(size); err != nil {
+		return err
 	}
 	if sum != e.sha256 {
 		return fmt.Errorf("%w: %s %s", ErrChecksumMismatch, e.name, e.version)
+	}
+	return nil
+}
+
+// VerifySize is the size part of Verify: a cheap check before a file is hashed.
+func (e CatalogEntry) VerifySize(size int64) error {
+	if size != e.size {
+		return fmt.Errorf("%w: %s %s: %d bytes, want %d", ErrSizeMismatch, e.name, e.version, size, e.size)
 	}
 	return nil
 }
@@ -137,6 +145,18 @@ func (c Catalog) Entry(id CatalogID) (CatalogEntry, bool) {
 		}
 	}
 	return CatalogEntry{}, false
+}
+
+// CheckImportIdentity refuses a name and version of a catalog entry for a model imported outside the catalog
+// (PRD section 8.1, AC-23). An unverified file must neither pass for the catalog model nor take the identity that the
+// real catalog install needs (installed name and version pairs are unique).
+func (c Catalog) CheckImportIdentity(name ModelName, version ModelVersion) error {
+	for _, e := range c.entries {
+		if e.name == name && e.version == version {
+			return fmt.Errorf("%w: %s %s is catalog entry %s", ErrReservedIdentity, name, version, e.id)
+		}
+	}
+	return nil
 }
 
 // manifestDoc is the JSON form of the manifest:
