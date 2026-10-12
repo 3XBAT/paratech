@@ -23,6 +23,12 @@ linters:
     - staticcheck
     - unused
     - misspell
+    - gosec # security patterns (docs/process/security-review.md); test files are excluded below
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
   settings:
     depguard:
       rules:
