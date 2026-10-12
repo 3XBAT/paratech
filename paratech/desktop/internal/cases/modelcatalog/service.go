@@ -55,7 +55,8 @@ func New(d Deps) (*Service, error) {
 
 // ListAvailable returns the catalog in manifest order with the installed model of each entry, the recommendation for
 // machine and the slow-hardware warning (PRD sections 8 and 8.1). Pass the zero values.Machine when the hardware is
-// unknown.
+// unknown. An entry counts as installed only through a model installed from it (its CatalogID), never through an
+// imported model, which was not verified against the entry.
 func (s *Service) ListAvailable(ctx context.Context, machine values.Machine) ([]AvailableModel, error) {
 	cat, err := s.loadCatalog(ctx)
 	if err != nil {
@@ -66,13 +67,11 @@ func (s *Service) ListAvailable(ctx context.Context, machine values.Machine) ([]
 		return nil, fmt.Errorf("%s: %w", opListAvailable, err)
 	}
 
-	type identity struct {
-		name    values.ModelName
-		version values.ModelVersion
-	}
-	installedIDs := make(map[identity]shared.SttModelID, len(installed))
+	installedIDs := make(map[values.CatalogID]shared.SttModelID, len(installed))
 	for _, m := range installed {
-		installedIDs[identity{m.Name(), m.ModelVersion()}] = m.ID()
+		if m.CatalogID() != "" {
+			installedIDs[m.CatalogID()] = m.ID()
+		}
 	}
 
 	entries := cat.Entries()
@@ -81,7 +80,7 @@ func (s *Service) ListAvailable(ctx context.Context, machine values.Machine) ([]
 	for _, e := range entries {
 		out = append(out, AvailableModel{
 			Entry:       e,
-			InstalledID: installedIDs[identity{e.Name(), e.Version()}],
+			InstalledID: installedIDs[e.ID()],
 			Recommended: haveRecommendation && e.ID() == recommended.ID(),
 			LikelySlow:  s.sel.LikelySlow(e, machine),
 		})
@@ -108,11 +107,20 @@ func (s *Service) ListInstalled(ctx context.Context) ([]InstalledModel, error) {
 	return out, nil
 }
 
-// Register installs a verified model file (PRD section 8.1, AC-07, AC-23). The file must already be stored below
-// models/; its size is read from the store. A catalog model must match its entry's size and SHA-256, otherwise
-// values.ErrSizeMismatch or values.ErrChecksumMismatch is returned and nothing is installed. A second model with the
-// same name and version yields ErrAlreadyInstalled. The file is left in place on every error: the caller owns it
-// until Register succeeds.
+// Register installs a model file (PRD section 8.1, AC-07, AC-23). The file must already be stored below models/.
+// Register reads its size and computes its SHA-256 itself (streaming, outside any transaction, honoring ctx), so no
+// caller-supplied digest is trusted.
+//
+//   - A catalog model must match its entry's size and digest, otherwise values.ErrSizeMismatch or
+//     values.ErrChecksumMismatch.
+//   - An imported model stores the computed digest; the name and version of a catalog entry yield
+//     values.ErrReservedIdentity.
+//   - A second model with the same name and version yields ErrAlreadyInstalled; a file that is, contains or lies inside
+//     the file of another installed model yields sttmodel.ErrFileInUse (both wrap shared.ErrDuplicate).
+//
+// Nothing is installed on error and the file is left in place: the caller owns it until Register succeeds. Give every
+// install a file name of its own (for example with a fresh suffix): Delete removes the file after the row, so a file
+// written at the name of a model that is being removed can be lost.
 func (s *Service) Register(ctx context.Context, r Registration) (InstalledModel, error) {
 	size, err := s.files.Size(ctx, r.File)
 	if err != nil {
@@ -128,40 +136,69 @@ func (s *Service) Register(ctx context.Context, r Registration) (InstalledModel,
 		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
 	}
 
-	err = s.tx.Do(ctx, func(ctx context.Context) error { return s.models.Save(ctx, m) })
-	if errors.Is(err, shared.ErrDuplicate) {
+	// The file check and the insert share one write transaction, so two registrations cannot claim one file.
+	err = s.tx.Do(ctx, func(ctx context.Context) error {
+		installed, err := s.models.List(ctx)
+		if err != nil {
+			return err
+		}
+		if err := m.CheckFileFree(installed); err != nil {
+			return err
+		}
+		return s.models.Save(ctx, m)
+	})
+	switch {
+	case errors.Is(err, sttmodel.ErrFileInUse):
+		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+	case errors.Is(err, shared.ErrDuplicate):
 		return InstalledModel{}, fmt.Errorf("%s: %s %s: %w", opRegister, m.Name(), m.ModelVersion(), ErrAlreadyInstalled)
-	}
-	if err != nil {
+	case err != nil:
 		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
 	}
 	return installedModel(m, false), nil
 }
 
+// registrationSpec checks the registration against the catalog and hashes the file; a catalog file of the wrong size
+// is refused before it is read.
 func (s *Service) registrationSpec(ctx context.Context, r Registration, size int64) (sttmodel.Spec, error) {
-	id := s.ids.NewSttModelID()
+	cat, err := s.loadCatalog(ctx)
+	if err != nil {
+		return sttmodel.Spec{}, err
+	}
+
 	if r.CatalogID == "" {
+		if err := cat.CheckImportIdentity(r.Name, r.ModelVersion); err != nil {
+			return sttmodel.Spec{}, err
+		}
+		sum, err := s.digestFile(ctx, r.File, size)
+		if err != nil {
+			return sttmodel.Spec{}, err
+		}
 		return sttmodel.Spec{
-			ID: id, Name: r.Name, ModelVersion: r.ModelVersion, File: r.File, SizeBytes: size, SHA256: r.SHA256,
-			Quantization: r.Quantization, Capabilities: r.Capabilities,
+			ID: s.ids.NewSttModelID(), Name: r.Name, ModelVersion: r.ModelVersion, File: r.File, SizeBytes: size,
+			SHA256: sum, Quantization: r.Quantization, Capabilities: r.Capabilities,
 		}, nil
 	}
 
 	if r.Name != "" || r.ModelVersion != "" || r.Quantization != "" || len(r.Capabilities) > 0 {
 		return sttmodel.Spec{}, fmt.Errorf("%w: a catalog model takes its identity from the catalog", ErrInvalidRegistration)
 	}
-	cat, err := s.loadCatalog(ctx)
-	if err != nil {
-		return sttmodel.Spec{}, err
-	}
 	entry, ok := cat.Entry(r.CatalogID)
 	if !ok {
 		return sttmodel.Spec{}, fmt.Errorf("%q: %w", r.CatalogID, ErrNotInCatalog)
 	}
-	if err := entry.Verify(r.SHA256, size); err != nil {
+	if err := entry.VerifySize(size); err != nil {
 		return sttmodel.Spec{}, err
 	}
-	return sttmodel.CatalogSpec(id, entry, r.File), nil
+
+	sum, err := s.digestFile(ctx, r.File, size)
+	if err != nil {
+		return sttmodel.Spec{}, err
+	}
+	if err := entry.Verify(sum, size); err != nil {
+		return sttmodel.Spec{}, err
+	}
+	return sttmodel.CatalogSpec(s.ids.NewSttModelID(), entry, r.File), nil
 }
 
 // SetDefault makes an installed model the default (PRD section 8, AC-07). It changes only the settings aggregate, in
@@ -197,19 +234,24 @@ func (s *Service) SetDefault(ctx context.Context, id shared.SttModelID) error {
 }
 
 // Delete removes an installed model and its file (PRD section 8: removal only when no active job depends on it;
-// section 14 case 11). A model pinned by an unfinished job yields sttmodel.ErrPinned and nothing is changed. The
-// steps follow ADR-0004(g) and are each repeatable:
+// section 14 case 11). The steps follow ADR-0004(g):
 //
-//  1. the model aggregate decides on the pins of job.ActiveStatuses (nothing is touched if it refuses);
+//  1. the model is loaded and its aggregate decides on the pins of job.ActiveStatuses; a refusal
+//     (sttmodel.ErrPinned) changes nothing;
 //  2. a default pointing at the model is cleared through the settings aggregate, in its own transaction;
-//  3. the file is deleted through the artifact store, outside any transaction;
-//  4. in one transaction the pins are checked again and the row is deleted.
+//  3. in one transaction the pins are checked again and the row is deleted;
+//  4. after the commit the file is deleted through the artifact store, unless another row still uses it.
 //
-// A job that pins the model between 3 and 4 makes step 4 refuse with sttmodel.ErrPinned after the file is gone; that
-// job then finds no model file and fails, which PRD section 14 case 11 allows ("marks job unavailable"). A default
-// selected again between 2 and 4 makes the database refuse the delete; Delete then starts over, and after
-// conflictAttempts rounds returns ErrDefaultReselected. A model that is not installed wraps shared.ErrNotFound; one that a
-// concurrent Delete removes while this one runs is not an error.
+// The file is touched only after the row is gone, so a refusal never destroys anything: a job that pins the model
+// between 1 and 3 makes step 3 return sttmodel.ErrPinned, and a default selected again between 2 and 3 makes the
+// database refuse the delete; Delete then starts over, and after conflictAttempts rounds returns
+// ErrDefaultReselected. Such a late refusal leaves only the default cleared.
+//
+// A model that is not installed wraps shared.ErrNotFound. When step 4 fails, the error is returned and the model
+// stays uninstalled; a repeated Delete then finds no row and returns shared.ErrNotFound, leaving an orphan file below
+// models/ that no row references. It is harmless garbage: nothing loads it, and a reinstall at the same name
+// overwrites it. A row that a concurrent Delete removed after step 1 is not an error: the file is deleted again
+// (idempotent), in case the other removal failed at step 4.
 func (s *Service) Delete(ctx context.Context, id shared.SttModelID) error {
 	for attempt := 1; ; attempt++ {
 		err := s.deleteOnce(ctx, id)
@@ -225,6 +267,7 @@ func (s *Service) Delete(ctx context.Context, id shared.SttModelID) error {
 }
 
 func (s *Service) deleteOnce(ctx context.Context, id shared.SttModelID) error {
+	// Step 1: load and pre-check.
 	m, err := s.models.Get(ctx, id)
 	if err != nil {
 		return err
@@ -232,26 +275,50 @@ func (s *Service) deleteOnce(ctx context.Context, id shared.SttModelID) error {
 	if err := s.checkRemoval(ctx, m); err != nil {
 		return err
 	}
+
+	// Step 2: clear the default (ADR-0004(g)).
 	if err := s.clearDefault(ctx, id); err != nil {
 		return err
 	}
-	if err := s.files.Delete(ctx, m.File()); err != nil {
+
+	// Step 3: re-check and delete the row.
+	fileInUse := false
+	err = s.tx.Do(ctx, func(ctx context.Context) error {
+		err := s.removeRow(ctx, m)
+		if err != nil && !errors.Is(err, shared.ErrNotFound) {
+			return err
+		}
+
+		rest, err := s.models.List(ctx)
+		if err != nil {
+			return err
+		}
+		fileInUse = m.CheckFileFree(rest) != nil
+		return nil
+	})
+	if isForeignKeyConflict(err) {
+		return errDefaultReselected
+	}
+	if err != nil {
 		return err
 	}
 
-	err = s.tx.Do(ctx, func(ctx context.Context) error {
-		if err := s.checkRemoval(ctx, m); err != nil {
-			return err
-		}
-		return s.models.Delete(ctx, id)
-	})
-	switch {
-	case errors.Is(err, shared.ErrNotFound):
-		return nil // a concurrent removal finished first
-	case isForeignKeyConflict(err):
-		return errDefaultReselected
+	// Step 4: delete the file after the commit.
+	if fileInUse {
+		return nil // defensive: rows registered before one file per model was enforced
 	}
-	return err
+	return s.files.Delete(ctx, m.File())
+}
+
+// removeRow re-checks the pins and deletes the row; a row that is already gone wraps shared.ErrNotFound.
+func (s *Service) removeRow(ctx context.Context, m *sttmodel.Model) error {
+	if _, err := s.models.Get(ctx, m.ID()); err != nil {
+		return err
+	}
+	if err := s.checkRemoval(ctx, m); err != nil {
+		return err
+	}
+	return s.models.Delete(ctx, m.ID())
 }
 
 // checkRemoval asks the aggregate with the pins of the unfinished job statuses.

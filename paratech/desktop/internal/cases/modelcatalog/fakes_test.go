@@ -3,6 +3,8 @@ package modelcatalog
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"maps"
@@ -37,7 +39,8 @@ type world struct {
 	manifestErr       error
 	settingsConflicts int    // the next saves of the settings fail with a version conflict
 	fileDeleteErr     error  // returned by the file delete
-	beforeFileDelete  func() // runs at the start of the file delete, outside every lock
+	beforeTx          func() // runs at the start of every outermost transaction, outside every lock
+	onRead            func() // runs before every read of an opened file
 
 	txMu sync.Mutex
 }
@@ -61,6 +64,13 @@ func newWorld(t *testing.T, manifest []byte) *world {
 func (w *world) requireTx(ctx context.Context, op string) {
 	if !inTx(ctx) {
 		w.t.Errorf("%s outside Tx.Do", op)
+	}
+}
+
+// requireNoTx guards the Tx contract: no file I/O while the write lock is held.
+func (w *world) requireNoTx(ctx context.Context, op string) {
+	if inTx(ctx) {
+		w.t.Errorf("%s inside Tx.Do", op)
 	}
 }
 
@@ -100,6 +110,14 @@ func (x fakeTx) Do(ctx context.Context, fn func(ctx context.Context) error) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	x.w.mu.Lock()
+	hook := x.w.beforeTx
+	x.w.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+
 	x.w.txMu.Lock()
 	defer x.w.txMu.Unlock()
 
@@ -261,14 +279,28 @@ func (f fakePins) IsPinnedByJobInStatuses(_ context.Context, id shared.SttModelI
 
 type fakeFiles struct{ w *world }
 
-func (f fakeFiles) Open(_ context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
+func (f fakeFiles) Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
+	f.w.requireNoTx(ctx, "ArtifactStore.Open")
 	f.w.mu.Lock()
 	defer f.w.mu.Unlock()
 	b, ok := f.w.files[ref]
 	if !ok {
 		return nil, shared.ErrNotFound
 	}
-	return io.NopCloser(bytes.NewReader(b)), nil
+	return io.NopCloser(hookedReader{r: bytes.NewReader(b), hook: f.w.onRead}), nil
+}
+
+// hookedReader runs hook before every read, to act in the middle of a long read.
+type hookedReader struct {
+	r    io.Reader
+	hook func()
+}
+
+func (h hookedReader) Read(p []byte) (int, error) {
+	if h.hook != nil {
+		h.hook()
+	}
+	return h.r.Read(p)
 }
 
 func (f fakeFiles) Write(_ context.Context, ref shared.ArtifactRef, content io.Reader) error {
@@ -282,7 +314,8 @@ func (f fakeFiles) Write(_ context.Context, ref shared.ArtifactRef, content io.R
 	return nil
 }
 
-func (f fakeFiles) Size(_ context.Context, ref shared.ArtifactRef) (int64, error) {
+func (f fakeFiles) Size(ctx context.Context, ref shared.ArtifactRef) (int64, error) {
+	f.w.requireNoTx(ctx, "ArtifactStore.Size")
 	f.w.mu.Lock()
 	defer f.w.mu.Unlock()
 	b, ok := f.w.files[ref]
@@ -292,19 +325,13 @@ func (f fakeFiles) Size(_ context.Context, ref shared.ArtifactRef) (int64, error
 	return int64(len(b)), nil
 }
 
-func (f fakeFiles) Delete(_ context.Context, ref shared.ArtifactRef) error {
-	f.w.mu.Lock()
-	hook, failure := f.w.beforeFileDelete, f.w.fileDeleteErr
-	f.w.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-	if failure != nil {
-		return failure
-	}
-
+func (f fakeFiles) Delete(ctx context.Context, ref shared.ArtifactRef) error {
+	f.w.requireNoTx(ctx, "ArtifactStore.Delete")
 	f.w.mu.Lock()
 	defer f.w.mu.Unlock()
+	if f.w.fileDeleteErr != nil {
+		return f.w.fileDeleteErr
+	}
 	delete(f.w.files, ref)
 	return nil
 }
@@ -343,7 +370,15 @@ type catalogModel struct {
 	preferred bool
 }
 
-func (c catalogModel) sum() values.SHA256 { return values.SHA256(fmt.Sprintf("%064x", c.size)) }
+// content is the file of the model: size zero bytes; the sizes differ, so the digests do.
+func (c catalogModel) content() []byte { return make([]byte, c.size) }
+
+func (c catalogModel) sum() values.SHA256 { return digest(c.content()) }
+
+func digest(b []byte) values.SHA256 {
+	s := sha256.Sum256(b)
+	return values.SHA256(hex.EncodeToString(s[:]))
+}
 
 func (c catalogModel) json() string {
 	return fmt.Sprintf(`{"id": %q, "name": %q, "version": "1", "size_bytes": %d, "sha256": %q,
@@ -378,15 +413,27 @@ func newEnv(t *testing.T) *env {
 	return &env{t: t, w: w, clock: clock, svc: svc}
 }
 
-// putFile stores a file of size bytes at models/<name>.
+// putFile stores a file of size zero bytes at models/<name>.
 func (e *env) putFile(name string, size int64) shared.ArtifactRef {
 	e.t.Helper()
-	ref, err := shared.NewArtifactRef(shared.ArtifactModels, name)
-	if err != nil {
+	return e.putBytes(name, make([]byte, size))
+}
+
+// putBytes stores content at models/<name>.
+func (e *env) putBytes(name string, content []byte) shared.ArtifactRef {
+	e.t.Helper()
+	ref := modelRef(e.t, name)
+	if err := (fakeFiles{e.w}).Write(context.Background(), ref, bytes.NewReader(content)); err != nil {
 		e.t.Fatal(err)
 	}
-	if err := (fakeFiles{e.w}).Write(context.Background(), ref, bytes.NewReader(make([]byte, size))); err != nil {
-		e.t.Fatal(err)
+	return ref
+}
+
+func modelRef(t *testing.T, name string) shared.ArtifactRef {
+	t.Helper()
+	ref, err := shared.NewArtifactRef(shared.ArtifactModels, name)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return ref
 }
@@ -395,10 +442,50 @@ func (e *env) putFile(name string, size int64) shared.ArtifactRef {
 func (e *env) install(c catalogModel) InstalledModel {
 	e.t.Helper()
 	m, err := e.svc.Register(context.Background(), Registration{
-		CatalogID: values.CatalogID(c.id), File: e.putFile(c.id+".bin", c.size), SHA256: c.sum(),
+		CatalogID: values.CatalogID(c.id), File: e.putBytes(c.id+".bin", c.content()),
 	})
 	if err != nil {
 		e.t.Fatalf("install %s: %v", c.id, err)
 	}
 	return m
+}
+
+// seed stores a model row directly, bypassing Register, like data written before a rule existed.
+func (e *env) seed(id shared.SttModelID, name values.ModelName, file shared.ArtifactRef) {
+	e.t.Helper()
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	e.w.models[id] = sttmodel.State{
+		Spec: sttmodel.Spec{
+			ID: id, Name: name, ModelVersion: "1", File: file, SizeBytes: 1, SHA256: catTiny.sum(),
+		},
+		Version: 1, InstalledAt: t0,
+	}
+}
+
+// beforeEachTx runs fn at the start of every outermost transaction; transactions that fn opens itself skip it.
+// Single-goroutine tests only.
+func (e *env) beforeEachTx(fn func()) {
+	busy := false
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	e.w.beforeTx = func() {
+		if busy {
+			return
+		}
+		busy = true
+		defer func() { busy = false }()
+		fn()
+	}
+}
+
+// atTx runs fn once, at the start of the n-th outermost transaction from now (1-based).
+func (e *env) atTx(n int, fn func()) {
+	count := 0
+	e.beforeEachTx(func() {
+		count++
+		if count == n {
+			fn()
+		}
+	})
 }

@@ -7,8 +7,9 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Errors of the model catalog use case (ARCH-18). Domain errors (sttmodel.ErrPinned, modelselection.ErrNoDefaultModel,
-// values.ErrChecksumMismatch, ...) are returned wrapped, not translated.
+// Errors of the model catalog use case (ARCH-18). Domain errors (sttmodel.ErrPinned, sttmodel.ErrFileInUse,
+// modelselection.ErrNoDefaultModel, values.ErrChecksumMismatch, values.ErrReservedIdentity, ...) are returned
+// wrapped, not translated.
 var (
 	// ErrInvalidConfig is returned by New when a port is missing.
 	ErrInvalidConfig = errors.New("invalid model catalog configuration")

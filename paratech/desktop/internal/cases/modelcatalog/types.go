@@ -23,7 +23,7 @@ type Deps struct {
 // slow-hardware warning).
 type AvailableModel struct {
 	Entry       values.CatalogEntry
-	InstalledID shared.SttModelID // the installed model with the same name and version; empty if not installed
+	InstalledID shared.SttModelID // the model installed from this entry; empty if not installed
 	Recommended bool              // the model suggested for this machine
 	LikelySlow  bool              // the machine is below the recommended hardware
 }
@@ -42,16 +42,15 @@ type InstalledModel struct {
 	IsDefault    bool
 }
 
-// Registration describes a verified model file to install (PRD section 8.1). The download (TASK-027) and import
-// (TASK-028) flows call Register after they wrote the file below models/ and computed its digest.
+// Registration describes a model file to install (PRD section 8.1). The download (TASK-027) and import (TASK-028)
+// flows call Register after they wrote the file below models/.
 //
-// A catalog model names only CatalogID, File and SHA256: identity, size and capabilities come from the catalog entry,
-// and the file must match the entry's size and digest. An imported model (empty CatalogID, after explicit user
-// confirmation, AC-23) names its identity itself. The size is always read from the stored file.
+// A catalog model names only CatalogID and File: identity, size and capabilities come from the catalog entry, and the
+// file must match the entry's size and digest. An imported model (empty CatalogID, after explicit user confirmation,
+// AC-23) names its identity itself. Size and SHA-256 are always taken from the stored file by Register.
 type Registration struct {
 	CatalogID values.CatalogID
 	File      shared.ArtifactRef
-	SHA256    values.SHA256 // digest of File computed by the caller
 
 	// Imported models only.
 	Name         values.ModelName

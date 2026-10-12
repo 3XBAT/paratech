@@ -90,6 +90,41 @@ func TestListAvailable(t *testing.T) {
 	}
 }
 
+// TestListAvailableIgnoresImportedModels: only a model installed from an entry marks it installed. An imported model
+// with a catalog name neither passes for the entry nor blocks its real install.
+func TestListAvailableIgnoresImportedModels(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	if _, err := e.svc.Register(ctx, Registration{Name: "base", ModelVersion: "2", File: e.putFile("own.bin", 5)}); err != nil {
+		t.Fatalf("import with a catalog name and another version: %v", err)
+	}
+	e.seed("legacy", "tiny", modelRef(t, "legacy.bin")) // a row with the identity of tiny, not from the catalog
+
+	installedOf := func() map[values.CatalogID]shared.SttModelID {
+		t.Helper()
+		got, err := e.svc.ListAvailable(ctx, values.Machine{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[values.CatalogID]shared.SttModelID{}
+		for _, a := range got {
+			if a.InstalledID != "" {
+				out[a.Entry.ID()] = a.InstalledID
+			}
+		}
+		return out
+	}
+	if got := installedOf(); len(got) != 0 {
+		t.Fatalf("imported models pass for catalog entries: %v", got)
+	}
+
+	base := e.install(catBase)
+	if got := installedOf(); len(got) != 1 || got["base-q5_1"] != base.ID {
+		t.Fatalf("installed entries = %v, want only base-q5_1 = %s", got, base.ID)
+	}
+}
+
 func TestListAvailableRejectsBadManifest(t *testing.T) {
 	e := newEnv(t)
 	e.w.manifest = []byte(`{"schema_version": 1, "models": [{"id": "x"}]}`)
@@ -130,35 +165,39 @@ func TestRegisterRejects(t *testing.T) {
 		reg  func(e *env) Registration
 		want error
 	}{
-		{"wrong digest", func(e *env) Registration {
-			return Registration{CatalogID: "base-q5_1", File: e.putFile("b.bin", catBase.size), SHA256: catTiny.sum()}
+		{"corrupted file of the right size", func(e *env) Registration {
+			corrupt := catBase.content()
+			corrupt[len(corrupt)/2] ^= 0xff
+			return Registration{CatalogID: "base-q5_1", File: e.putBytes("b.bin", corrupt)}
 		}, values.ErrChecksumMismatch},
+		{"another catalog model's file", func(e *env) Registration {
+			return Registration{CatalogID: "base-q5_1", File: e.putBytes("b.bin", catTiny.content())}
+		}, values.ErrSizeMismatch},
 		{"wrong size", func(e *env) Registration {
-			return Registration{CatalogID: "base-q5_1", File: e.putFile("b.bin", catBase.size+1), SHA256: catBase.sum()}
+			return Registration{CatalogID: "base-q5_1", File: e.putFile("b.bin", catBase.size+1)}
 		}, values.ErrSizeMismatch},
 		{"unknown catalog id", func(e *env) Registration {
-			return Registration{CatalogID: "nope", File: e.putFile("b.bin", 1), SHA256: catBase.sum()}
+			return Registration{CatalogID: "nope", File: e.putFile("b.bin", 1)}
 		}, ErrNotInCatalog},
 		{"catalog model with its own identity", func(e *env) Registration {
-			return Registration{CatalogID: "base-q5_1", Name: "evil", File: e.putFile("b.bin", catBase.size), SHA256: catBase.sum()}
+			return Registration{CatalogID: "base-q5_1", Name: "evil", File: e.putBytes("b.bin", catBase.content())}
 		}, ErrInvalidRegistration},
 		{"missing file", func(e *env) Registration {
-			ref, _ := shared.NewArtifactRef(shared.ArtifactModels, "missing.bin")
-			return Registration{CatalogID: "base-q5_1", File: ref, SHA256: catBase.sum()}
+			return Registration{CatalogID: "base-q5_1", File: modelRef(e.t, "missing.bin")}
 		}, shared.ErrNotFound},
 		{"imported model without a name", func(e *env) Registration {
-			return Registration{ModelVersion: "1", File: e.putFile("own.bin", 5), SHA256: catBase.sum()}
+			return Registration{ModelVersion: "1", File: e.putFile("own.bin", 5)}
 		}, sttmodel.ErrInvalidModel},
-		{"imported model with a bad digest", func(e *env) Registration {
-			return Registration{Name: "own", ModelVersion: "1", File: e.putFile("own.bin", 5), SHA256: "abc"}
-		}, sttmodel.ErrInvalidModel},
+		{"imported model with a catalog identity", func(e *env) Registration {
+			return Registration{Name: "base", ModelVersion: "1", File: e.putBytes("own.bin", catBase.content())}
+		}, values.ErrReservedIdentity},
 		{"file outside models", func(e *env) Registration {
 			ref, _ := shared.NewArtifactRef(shared.ArtifactExports, "own.bin")
 			e.w.files[ref] = []byte{1}
-			return Registration{Name: "own", ModelVersion: "1", File: ref, SHA256: catBase.sum()}
+			return Registration{Name: "own", ModelVersion: "1", File: ref}
 		}, sttmodel.ErrInvalidModel},
 		{"empty file", func(e *env) Registration {
-			return Registration{Name: "own", ModelVersion: "1", File: e.putFile("own.bin", 0), SHA256: catBase.sum()}
+			return Registration{Name: "own", ModelVersion: "1", File: e.putFile("own.bin", 0)}
 		}, sttmodel.ErrInvalidModel},
 	}
 	for _, tc := range cases {
@@ -175,31 +214,89 @@ func TestRegisterRejects(t *testing.T) {
 	}
 }
 
+// TestRegisterHonorsCancellation: the digest of a large file stops in the middle when the context ends.
+func TestRegisterHonorsCancellation(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reads := 0
+	e.w.onRead = func() {
+		reads++
+		cancel()
+	}
+	file := e.putFile("own.bin", 1<<20)
+
+	_, err := e.svc.Register(ctx, Registration{Name: "own", ModelVersion: "1", File: file})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Register = %v, want context.Canceled", err)
+	}
+	if reads != 1 || len(e.w.models) != 0 {
+		t.Fatalf("%d reads, %d models; want the digest to stop after the first read and nothing installed", reads, len(e.w.models))
+	}
+}
+
 func TestRegisterImportedAndDuplicates(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
+	content := []byte("own model weights")
 	own := Registration{
 		Name: "own", ModelVersion: "2", Quantization: "f16", Capabilities: []values.Capability{"en"},
-		File: e.putFile("own.bin", 7), SHA256: catLarge.sum(),
-	}
-	got, err := e.svc.Register(ctx, own)
-	if err != nil || got.CatalogID != "" || got.SizeBytes != 7 || got.Name != "own" || got.Quantization != "f16" {
-		t.Fatalf("Register imported = %+v, %v", got, err)
+		File: e.putBytes("own.bin", content),
 	}
 
-	own.File = e.putFile("own-copy.bin", 7)
+	got, err := e.svc.Register(ctx, own)
+	if err != nil || got.CatalogID != "" || got.SizeBytes != int64(len(content)) || got.Name != "own" ||
+		got.Quantization != "f16" {
+		t.Fatalf("Register imported = %+v, %v", got, err)
+	}
+	if got.SHA256 != digest(content) {
+		t.Fatalf("stored digest %s, want the digest of the file %s", got.SHA256, digest(content))
+	}
+
+	own.File = e.putBytes("own-copy.bin", content)
 	_, err = e.svc.Register(ctx, own)
 	if !errors.Is(err, ErrAlreadyInstalled) || !errors.Is(err, shared.ErrDuplicate) {
 		t.Fatalf("second own 2: %v, want ErrAlreadyInstalled", err)
 	}
 
 	e.install(catBase)
-	_, err = e.svc.Register(ctx, Registration{CatalogID: "base-q5_1", File: e.putFile("again.bin", catBase.size), SHA256: catBase.sum()})
+	_, err = e.svc.Register(ctx, Registration{CatalogID: "base-q5_1", File: e.putBytes("again.bin", catBase.content())})
 	if !errors.Is(err, ErrAlreadyInstalled) {
 		t.Fatalf("second base: %v, want ErrAlreadyInstalled", err)
 	}
 	if len(e.w.models) != 2 {
 		t.Fatalf("installed %d models, want 2", len(e.w.models))
+	}
+}
+
+// TestRegisterRefusesAFileInUse: one file per installed model, compared case-insensitively as on Windows.
+func TestRegisterRefusesAFileInUse(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+	}{
+		{"same name", "base-q5_1.bin"},
+		{"name in other case", "Base-Q5_1.BIN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.install(catBase)
+
+			_, err := e.svc.Register(context.Background(), Registration{
+				Name: "own", ModelVersion: "1", File: e.putBytes(tc.file, catBase.content()),
+			})
+			if !errors.Is(err, sttmodel.ErrFileInUse) || !errors.Is(err, shared.ErrDuplicate) {
+				t.Fatalf("Register = %v, want sttmodel.ErrFileInUse", err)
+			}
+			if errors.Is(err, ErrAlreadyInstalled) {
+				t.Fatalf("Register = %v: a file in use is not a second install of the same model", err)
+			}
+			if len(e.w.models) != 1 {
+				t.Fatalf("installed %d models, want 1", len(e.w.models))
+			}
+		})
 	}
 }
 
@@ -271,7 +368,7 @@ func TestDelete(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	tiny, base := e.install(catTiny), e.install(catBase)
-	tinyFile, _ := shared.NewArtifactRef(shared.ArtifactModels, "tiny-q5_1.bin")
+	tinyFile := modelRef(t, "tiny-q5_1.bin")
 
 	if err := e.svc.Delete(ctx, tiny.ID); err != nil {
 		t.Fatal(err)
@@ -314,7 +411,6 @@ func TestDeletePinned(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.w.pin("j1", base.ID, status)
-			file, _ := shared.NewArtifactRef(shared.ArtifactModels, "base-q5_1.bin")
 
 			err := e.svc.Delete(ctx, base.ID)
 			if status.IsTerminal() {
@@ -326,14 +422,78 @@ func TestDeletePinned(t *testing.T) {
 			if !errors.Is(err, sttmodel.ErrPinned) {
 				t.Fatalf("Delete with a %s job: %v, want sttmodel.ErrPinned", status, err)
 			}
-			if !e.w.hasModel(base.ID) || !e.w.hasFile(file) || e.w.defaultModel() != base.ID {
+			if !e.w.hasModel(base.ID) || !e.w.hasFile(modelRef(t, "base-q5_1.bin")) || e.w.defaultModel() != base.ID {
 				t.Fatal("a refused removal changed the row, the file or the default")
 			}
 		})
 	}
 }
 
-func TestDeleteKeepsTheRowWhenTheFileStays(t *testing.T) {
+// TestDeleteLateRefusalKeepsTheFile: a pin or a default selection that appears between the pre-check and the row
+// delete refuses the removal, and neither the row nor the file is touched.
+func TestDeleteLateRefusalKeepsTheFile(t *testing.T) {
+	const removalTx = 2 // the clearing of the default is the first transaction of Delete
+
+	cases := []struct {
+		name  string
+		setup func(e *env, id shared.SttModelID)
+		want  error
+	}{
+		{"pinned by a job", func(e *env, id shared.SttModelID) {
+			e.atTx(removalTx, func() { e.w.pin("late", id, job.StatusQueued) })
+		}, sttmodel.ErrPinned},
+		{"selected as default every time", func(e *env, id shared.SttModelID) {
+			e.beforeEachTx(func() {
+				if e.w.defaultModel() == "" {
+					if err := e.svc.SetDefault(context.Background(), id); err != nil {
+						e.t.Errorf("SetDefault during the removal: %v", err)
+					}
+				}
+			})
+		}, ErrDefaultReselected},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			base := e.install(catBase)
+			tc.setup(e, base.ID)
+
+			if err := e.svc.Delete(context.Background(), base.ID); !errors.Is(err, tc.want) {
+				t.Fatalf("Delete = %v, want %v", err, tc.want)
+			}
+			if !e.w.hasModel(base.ID) || !e.w.hasFile(modelRef(t, "base-q5_1.bin")) {
+				t.Fatal("a refused removal destroyed the row or the file")
+			}
+		})
+	}
+}
+
+// TestDeleteWhileSelectedAgain covers ADR-0004(g): the user selects the model as default between the clearing and the
+// row delete once; the database refuses and the removal starts over and succeeds.
+func TestDeleteWhileSelectedAgain(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	base := e.install(catBase)
+	if err := e.svc.SetDefault(ctx, base.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	e.atTx(2, func() {
+		if err := e.svc.SetDefault(ctx, base.ID); err != nil {
+			t.Errorf("SetDefault during the removal: %v", err)
+		}
+	})
+	if err := e.svc.Delete(ctx, base.ID); err != nil {
+		t.Fatalf("Delete after one reselection: %v", err)
+	}
+	if e.w.hasModel(base.ID) || e.w.defaultModel() != "" || e.w.hasFile(modelRef(t, "base-q5_1.bin")) {
+		t.Fatal("model, default or file survived")
+	}
+}
+
+// TestDeleteFileFailureLeavesAnOrphan: the row is gone before the file; a failed file delete is reported, and the file
+// stays as unreferenced garbage that a repeated Delete no longer knows.
+func TestDeleteFileFailureLeavesAnOrphan(t *testing.T) {
 	e := newEnv(t)
 	base := e.install(catBase)
 	e.w.fileDeleteErr = shared.ErrStorageBusy
@@ -341,65 +501,61 @@ func TestDeleteKeepsTheRowWhenTheFileStays(t *testing.T) {
 	if err := e.svc.Delete(context.Background(), base.ID); !errors.Is(err, shared.ErrStorageBusy) {
 		t.Fatalf("Delete = %v, want the storage error", err)
 	}
-	if !e.w.hasModel(base.ID) {
-		t.Fatal("the row was removed although the file is still there")
+	if e.w.hasModel(base.ID) || !e.w.hasFile(modelRef(t, "base-q5_1.bin")) {
+		t.Fatal("want the row removed and the file left")
 	}
 
 	e.w.fileDeleteErr = nil
-	if err := e.svc.Delete(context.Background(), base.ID); err != nil {
-		t.Fatalf("repeated Delete: %v", err)
+	if err := e.svc.Delete(context.Background(), base.ID); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("repeated Delete: %v, want shared.ErrNotFound", err)
+	}
+	if _, err := e.svc.Register(context.Background(), Registration{
+		CatalogID: "base-q5_1", File: e.putBytes("base-q5_1.bin", catBase.content()),
+	}); err != nil {
+		t.Fatalf("reinstall over the orphan: %v", err)
 	}
 }
 
-// TestDeleteWhileSelectedAgain covers ADR-0004(g): the user selects the model as default between the clearing and the
-// row delete; the database refuses and the removal starts over.
-func TestDeleteWhileSelectedAgain(t *testing.T) {
+// TestDeleteAfterConcurrentRemoval: another removal deleted the row after the pre-check (and failed on the file);
+// this one still deletes the file it knows.
+func TestDeleteAfterConcurrentRemoval(t *testing.T) {
+	e := newEnv(t)
+	base := e.install(catBase)
+	e.atTx(2, func() {
+		e.w.mu.Lock()
+		defer e.w.mu.Unlock()
+		delete(e.w.models, base.ID)
+	})
+
+	if err := e.svc.Delete(context.Background(), base.ID); err != nil {
+		t.Fatalf("Delete = %v, want success", err)
+	}
+	if e.w.hasFile(modelRef(t, "base-q5_1.bin")) {
+		t.Fatal("the file survived")
+	}
+}
+
+// TestDeleteKeepsASharedFile: rows that share a file (stored before one file per model was enforced) keep it until the
+// last of them is removed.
+func TestDeleteKeepsASharedFile(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	base := e.install(catBase)
+	file := e.putFile("shared.bin", 1)
+	e.seed("a", "own-a", file)
+	e.seed("b", "own-b", modelRef(t, "SHARED.bin"))
 
-	reselections := 0
-	e.w.beforeFileDelete = func() {
-		if reselections < 1 {
-			reselections++
-			if err := e.svc.SetDefault(ctx, base.ID); err != nil {
-				t.Errorf("SetDefault during the removal: %v", err)
-			}
-		}
+	if err := e.svc.Delete(ctx, "a"); err != nil {
+		t.Fatal(err)
 	}
-	if err := e.svc.Delete(ctx, base.ID); err != nil {
-		t.Fatalf("Delete after one reselection: %v", err)
-	}
-	if e.w.hasModel(base.ID) || e.w.defaultModel() != "" {
-		t.Fatal("model or default survived")
+	if e.w.hasModel("a") || !e.w.hasFile(file) {
+		t.Fatal("want row a removed and the shared file kept")
 	}
 
-	stubborn := e.install(catTiny)
-	e.w.beforeFileDelete = func() {
-		if err := e.svc.SetDefault(ctx, stubborn.ID); err != nil {
-			t.Errorf("SetDefault during the removal: %v", err)
-		}
+	if err := e.svc.Delete(ctx, "b"); err != nil {
+		t.Fatal(err)
 	}
-	err := e.svc.Delete(ctx, stubborn.ID)
-	if !errors.Is(err, ErrDefaultReselected) || !errors.Is(err, shared.ErrConflict) {
-		t.Fatalf("Delete against a default selected every time: %v, want ErrDefaultReselected", err)
-	}
-	if !e.w.hasModel(stubborn.ID) || e.w.defaultModel() != stubborn.ID {
-		t.Fatal("the database contract was broken: the default model was removed")
-	}
-}
-
-// TestDeleteWhilePinnedAfterTheFile covers a job that pins the model after the pre-check: the row delete re-checks.
-func TestDeleteWhilePinnedAfterTheFile(t *testing.T) {
-	e := newEnv(t)
-	base := e.install(catBase)
-	e.w.beforeFileDelete = func() { e.w.pin("late", base.ID, job.StatusQueued) }
-
-	if err := e.svc.Delete(context.Background(), base.ID); !errors.Is(err, sttmodel.ErrPinned) {
-		t.Fatalf("Delete = %v, want sttmodel.ErrPinned from the final check", err)
-	}
-	if !e.w.hasModel(base.ID) {
-		t.Fatal("a pinned model row was removed")
+	if e.w.hasModel("b") {
+		t.Fatal("row b survived")
 	}
 }
 
@@ -431,7 +587,7 @@ func TestResolveForJob(t *testing.T) {
 
 // TestConcurrentDeleteSelectAndPin races removals, default selections and job pins on one model. Whatever the
 // interleaving: a removed model is neither the default nor pinned by an unfinished job, a pinned model is never
-// removed, and every call returns one of the documented outcomes.
+// removed, an installed model keeps its file, and every call returns one of the documented outcomes.
 func TestConcurrentDeleteSelectAndPin(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	for round := range 30 {
@@ -483,8 +639,11 @@ func TestConcurrentDeleteSelectAndPin(t *testing.T) {
 		}
 
 		pinned, _ := fakePins{e.w}.IsPinnedByJobInStatuses(ctx, base.ID, job.ActiveStatuses())
+		installed := e.w.hasModel(base.ID)
 		switch {
-		case e.w.hasModel(base.ID):
+		case installed && !e.w.hasFile(modelRef(t, "base-q5_1.bin")):
+			t.Fatalf("round %d: an installed model lost its file", round)
+		case installed:
 		case pinned:
 			t.Fatalf("round %d: a removed model is pinned by a running job", round)
 		case e.w.defaultModel() == base.ID:
