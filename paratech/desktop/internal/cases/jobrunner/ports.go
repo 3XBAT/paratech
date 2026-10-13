@@ -70,7 +70,7 @@ type Handler interface {
 	//
 	// The returned error decides the next status. Wrap it with backoff.Permanent to fail the job at once;
 	// backoff.Transient or any unclassified error retries with backoff until the attempts are used up (AC-10).
-	// Waiting statuses (network, quota, power) are not produced from errors yet.
+	// WAITING_FOR_POWER comes only from report (below); the network and quota waits are not produced from errors yet.
 	//
 	// The error text is stored in jobs.last_error and written to the log, so it must contain no secrets, no prompt
 	// or transcript text and no response bodies. Adapters return classified errors with short fixed messages.
@@ -85,6 +85,12 @@ type Handler interface {
 	// importing this package (ARCH-20). If report returns an error that wraps shared.ErrConflict (a version
 	// conflict) or shared.ErrNotFound, the job was changed or removed elsewhere, for example cancelled: the handler
 	// stops promptly and returns that error.
+	//
+	// Power (PRD section 7.4, AC-21): a handler of a Heavy type reports at every safe checkpoint, such as a chunk
+	// boundary. When AC power is lost and the job must wait, report saves the progress first and then returns
+	// powerpolicy.ErrPowerLost: the handler stops at once and returns that error (wrapping is fine), and the job moves
+	// to WAITING_FOR_POWER with its checkpoint, which the next attempt reads from snap.Checkpoint(). The handler context
+	// is not cancelled for power loss, so a Heavy handler that never reports runs its attempt to the end.
 	Handle(ctx context.Context, snap job.Snapshot, report func(ctx context.Context, p job.Progress) error) error
 }
 
@@ -122,7 +128,8 @@ type Reconciler interface {
 // adapter (TASK-011) and by a fake elsewhere.
 type PowerMonitor interface {
 	// IsOnACPower reports whether the computer runs on AC power (PRD section 7.4). Where it cannot be determined,
-	// such as a desktop without a battery, the adapter reports true.
+	// such as a desktop without a battery, the adapter reports true. The runner calls it at Start, and every poll
+	// when there is no subscription; on an error it keeps the last known source (unknown at first, which counts as AC).
 	IsOnACPower(ctx context.Context) (bool, error)
 
 	// Subscribe returns a channel that receives true when AC power is connected and false when it is lost

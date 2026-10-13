@@ -25,6 +25,9 @@ var (
 	// safe to interrupt.
 	ErrNotCancellable = errors.New("job cannot be cancelled")
 
+	// ErrCannotRunNow means the "Run now" override does not apply: the job is neither QUEUED nor WAITING_FOR_POWER.
+	ErrCannotRunNow = errors.New("job cannot be run now")
+
 	// ErrJobFinished is what a progress report returns after its job has left RUNNING in this runner. It wraps
 	// shared.ErrConflict, so a handler that stops on conflicts stops on this too.
 	ErrJobFinished = fmt.Errorf("%w: job is no longer running", shared.ErrConflict)
