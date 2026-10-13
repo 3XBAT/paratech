@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,21 +39,40 @@ import (
 // requireDocsEnv forces the docs-dependent tests to fail instead of skip when docs/ is missing.
 const requireDocsEnv = "PARATECH_REQUIRE_DOCS"
 
+// sqlIdent is a bare identifier or one quoted with "", “ or [] (SQLite accepts all three).
+const sqlIdent = "(\"[^\"\\n]+\"|`[^`\\n]+`|\\[[^\\]\\n]+\\]|\\w+)"
+
 var (
 	sqlComment  = regexp.MustCompile(`--[^\n]*`)
-	createTable = regexp.MustCompile(`(?is)CREATE TABLE (?:IF NOT EXISTS )?(\w+) \((.*?)\n\);`)
+	createTable = regexp.MustCompile(`(?is)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + sqlIdent + `\s*\((.*?)\n\);`)
 	statusCheck = regexp.MustCompile(`(?is)\bstatus\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*status\s+IN\s*\(([^)]*)\)`)
 	quotedValue = regexp.MustCompile(`'([^']*)'`)
-	columnName  = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s`)
+	columnName  = regexp.MustCompile(`^\s*` + sqlIdent)
 	// A SQL column definition of the aggregate version, see the conventions in the schema header.
 	versionColumn        = regexp.MustCompile(`(?im)^\s*version\s+INTEGER\s+NOT NULL\s+DEFAULT\s+0\b`)
 	defaultModelRestrict = regexp.MustCompile(`(?is)default_stt_model_id\s+TEXT\s+REFERENCES\s+stt_models\s*\(\s*id\s*\)\s+ON\s+DELETE\s+RESTRICT`)
 	constraintWord       = map[string]bool{"check": true, "unique": true, "primary": true, "foreign": true, "constraint": true}
 	// Names that must never appear in a table or column name: secrets live in Windows Credential Manager (ARCH-34).
-	secretLike = regexp.MustCompile(`(?i)api_?key|oauth|token|passw|secret|credential|private_?key|refresh`)
-	// A column added by a later migration; its name is checked like a CREATE TABLE column.
-	alterAddColumn = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+(\w+)\s+ADD\s+(?:COLUMN\s+)?(\w+)`)
+	secretLike = regexp.MustCompile(`(?i)api[_ ]?key|oauth|token|passw|secret|credential|private[_ ]?key|refresh`)
+	// Columns and tables that later migrations add or rename; the new names are checked like CREATE TABLE ones.
+	alterAddColumn    = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+` + sqlIdent + `\s+ADD\s+(?:COLUMN\s+)?` + sqlIdent)
+	alterRenameColumn = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+` + sqlIdent + `\s+RENAME\s+(?:COLUMN\s+)?` + sqlIdent + `\s+TO\s+` + sqlIdent)
+	alterRenameTable  = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+` + sqlIdent + `\s+RENAME\s+TO\s+` + sqlIdent)
+
+	// A key:"value" pair of a Go struct tag.
+	tagValue = regexp.MustCompile(`\w+:"([^"]*)"`)
 )
+
+// unquoteIdent strips the quotes of a SQL identifier.
+func unquoteIdent(s string) string {
+	if len(s) >= 2 && strings.ContainsRune("\"`[", rune(s[0])) {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// tableKey is the map key of a table name: unquoted, lower case (SQL names are case-insensitive).
+func tableKey(ident string) string { return strings.ToLower(unquoteIdent(ident)) }
 
 // docsStatus is the outcome of looking for the repository-root docs/ directory.
 type docsStatus int
@@ -107,7 +127,7 @@ func parseTables(sql string) map[string]string {
 	sql = sqlComment.ReplaceAllString(sql, "")
 	tables := map[string]string{}
 	for _, m := range createTable.FindAllStringSubmatch(sql, -1) {
-		tables[strings.ToLower(m[1])] = m[2]
+		tables[tableKey(m[1])] = m[2]
 	}
 	return tables
 }
@@ -133,13 +153,18 @@ func secretNames(tables map[string]string) []string {
 		if secretLike.MatchString(table) {
 			found = append(found, "table "+table)
 		}
-		for _, line := range strings.Split(body, "\n") {
-			m := columnName.FindStringSubmatch(line)
+
+		// Lines and commas both separate definitions, so `a TEXT, b TEXT` is seen twice.
+		parts := strings.FieldsFunc(body, func(r rune) bool { return r == '\n' || r == ',' })
+		for _, part := range parts {
+			m := columnName.FindStringSubmatch(part)
+
+			// A bare constraint keyword starts a table constraint; quoted, it is a column name.
 			if m == nil || constraintWord[strings.ToLower(m[1])] {
 				continue
 			}
-			if secretLike.MatchString(m[1]) {
-				found = append(found, "column "+table+"."+m[1])
+			if name := unquoteIdent(m[1]); secretLike.MatchString(name) {
+				found = append(found, "column "+table+"."+name)
 			}
 		}
 	}
@@ -147,18 +172,27 @@ func secretNames(tables map[string]string) []string {
 	return found
 }
 
-// migrationTables is parseTables plus the columns that ALTER TABLE ... ADD [COLUMN] appends.
+// migrationTables is parseTables plus the columns and tables that ALTER TABLE adds or renames. A renamed table keeps
+// its body under both names (statement order is not tracked), which can only add findings.
 func migrationTables(sql string) map[string]string {
 	tables := parseTables(sql)
-	for _, m := range alterAddColumn.FindAllStringSubmatch(sqlComment.ReplaceAllString(sql, ""), -1) {
-		table := strings.ToLower(m[1])
-		tables[table] += "\n    " + m[2] + " ANY"
+	sql = sqlComment.ReplaceAllString(sql, "")
+
+	for _, m := range alterAddColumn.FindAllStringSubmatch(sql, -1) {
+		tables[tableKey(m[1])] += "\n    " + m[2] + " ANY"
+	}
+	for _, m := range alterRenameColumn.FindAllStringSubmatch(sql, -1) {
+		tables[tableKey(m[1])] += "\n    " + m[3] + " ANY"
+	}
+	for _, m := range alterRenameTable.FindAllStringSubmatch(sql, -1) {
+		tables[tableKey(m[2])] += tables[tableKey(m[1])]
 	}
 	return tables
 }
 
-// secretFields returns the struct fields of the Go files in dir (recursive, tests excluded) whose names look like
-// they hold a secret. structs counts the struct types seen, so a vacuous pass is visible.
+// secretFields returns the struct fields of the Go files in dir (recursive, tests excluded) whose names, embedded
+// type names or tag values (db:"api_key") look like they hold a secret. structs counts the struct types seen, so a
+// vacuous pass is visible.
 func secretFields(t *testing.T, dir string) (found []string, structs int) {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -181,11 +215,7 @@ func secretFields(t *testing.T, dir string) (found []string, structs int) {
 			}
 			structs++
 			for _, field := range st.Fields.List {
-				for _, name := range field.Names {
-					if secretLike.MatchString(name.Name) {
-						found = append(found, ts.Name.Name+"."+name.Name)
-					}
-				}
+				found = append(found, secretFieldNames(ts.Name.Name, field)...)
 			}
 			return true
 		})
@@ -196,6 +226,51 @@ func secretFields(t *testing.T, dir string) (found []string, structs int) {
 	}
 	sort.Strings(found)
 	return found, structs
+}
+
+// secretFieldNames checks one struct field: its names (or embedded type name) and its tag values.
+func secretFieldNames(typeName string, field *ast.Field) []string {
+	var found []string
+
+	names := make([]string, 0, len(field.Names))
+	for _, n := range field.Names {
+		names = append(names, n.Name)
+	}
+	if len(names) == 0 {
+		names = append(names, embeddedName(field.Type))
+	}
+	for _, n := range names {
+		if secretLike.MatchString(n) {
+			found = append(found, typeName+"."+n)
+		}
+	}
+
+	if field.Tag == nil {
+		return found
+	}
+	tag, err := strconv.Unquote(field.Tag.Value)
+	if err != nil {
+		tag = field.Tag.Value
+	}
+	for _, m := range tagValue.FindAllStringSubmatch(tag, -1) {
+		if secretLike.MatchString(m[1]) {
+			found = append(found, typeName+"."+strings.Join(names, ",")+" tag "+m[1])
+		}
+	}
+	return found
+}
+
+// embeddedName returns the type name of an embedded field (T, *T, pkg.T).
+func embeddedName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.StarExpr:
+		return embeddedName(e.X)
+	case *ast.SelectorExpr:
+		return e.Sel.Name
+	case *ast.Ident:
+		return e.Name
+	}
+	return ""
 }
 
 var (
@@ -422,15 +497,32 @@ CREATE TABLE settings (
 ALTER TABLE settings ADD COLUMN hub_api_key TEXT; -- comment ALTER TABLE x ADD fake_token
 alter table Jobs add Refresh TEXT;
 ALTER TABLE settings ADD COLUMN theme TEXT;
+ALTER TABLE "settings" ADD COLUMN "google_oauth" TEXT;
+ALTER TABLE [settings] ADD ` + "`mail_Passwd`" + ` TEXT;
+ALTER TABLE settings RENAME COLUMN theme TO smtp_password;
+ALTER TABLE settings RENAME note TO [private key];
+ALTER TABLE settings RENAME COLUMN theme TO colour;
+CREATE TABLE "plain" (
+    id TEXT PRIMARY KEY
+);
+ALTER TABLE plain RENAME TO user_tokens;
+ALTER TABLE plain RENAME TO archive;
 `
 	got := secretNames(migrationTables(sql))
-	want := []string{"column jobs.Refresh", "column settings.hub_api_key"}
+	want := []string{
+		"column jobs.Refresh", "column settings.google_oauth", "column settings.hub_api_key",
+		"column settings.mail_Passwd", "column settings.private key", "column settings.smtp_password",
+		"table user_tokens",
+	}
 	if !equalStrings(got, want) {
 		t.Errorf("secretNames(migration) = %v, want %v", got, want)
 	}
 
 	dir := t.TempDir()
-	src := "package x\n\ntype Row struct {\n\tID string\n\tAPIKey string\n\tGoogleRefreshToken, Title string\n}\n\ntype Clean struct{ Name string }\n"
+	src := "package x\n\n" +
+		"type Row struct {\n\tID string\n\tAPIKey string\n\tGoogleRefreshToken, Title string\n" +
+		"\tValue string `db:\"api_key\" json:\"value\"`\n\tName string `db:\"name\"`\n\t*OAuthGrant\n\tpkg.Embedded\n}\n\n" +
+		"type Clean struct{ Name string }\n"
 	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +530,7 @@ ALTER TABLE settings ADD COLUMN theme TEXT;
 		t.Fatal(err)
 	}
 	fields, structs := secretFields(t, dir)
-	if want := []string{"Row.APIKey", "Row.GoogleRefreshToken"}; !equalStrings(fields, want) || structs != 2 {
+	if want := []string{"Row.APIKey", "Row.GoogleRefreshToken", "Row.OAuthGrant", "Row.Value tag api_key"}; !equalStrings(fields, want) || structs != 2 {
 		t.Errorf("secretFields = %v (%d structs), want %v (2 structs)", fields, structs, want)
 	}
 }
@@ -452,7 +544,11 @@ CREATE TABLE jobs (
     version INTEGER NOT NULL DEFAULT 0,
     Refresh_Token TEXT,
     API_KEY TEXT,
-    "ignored" TEXT,
+    "api_key" TEXT,
+    ` + "`Oauth_Grant`" + ` TEXT,
+    [refresh] TEXT,
+    "check" TEXT, note TEXT, hub_token TEXT,
+    "title" TEXT,
     CHECK (id <> '')
 );
 create table OAuth_Grants (
@@ -461,9 +557,16 @@ create table OAuth_Grants (
     client_secret TEXT,
     user_credentials TEXT
 );
+CREATE TABLE "Api_Keys" (
+    id TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS [stored_secrets](
+    id TEXT PRIMARY KEY
+);
 CREATE TABLE clean (
     id TEXT PRIMARY KEY,
-    title TEXT
+    "title" TEXT, body TEXT,
+    status TEXT NOT NULL CHECK (status IN ('a', 'b'))
 );
 `
 	tables := parseTables(sql)
@@ -475,9 +578,10 @@ CREATE TABLE clean (
 	}
 	got := secretNames(tables)
 	want := []string{
-		"column jobs.API_KEY", "column jobs.Refresh_Token",
+		"column jobs.API_KEY", "column jobs.Oauth_Grant", "column jobs.Refresh_Token", "column jobs.api_key",
+		"column jobs.hub_token", "column jobs.refresh",
 		"column oauth_grants.Password_Hash", "column oauth_grants.client_secret", "column oauth_grants.user_credentials",
-		"table oauth_grants",
+		"table api_keys", "table oauth_grants", "table stored_secrets",
 	}
 	if !equalStrings(got, want) {
 		t.Errorf("secretNames = %v, want %v", got, want)
