@@ -7,13 +7,28 @@
 // directory below the data root, the configured thread count and a language from the whisper.cpp allowlist. The
 // binary path comes from configuration only, never from job data. The process gets an explicit, minimal
 // environment (nothing from the parent), a fixed working directory (its run directory) and no stdin; stdout,
-// which carries the recognised text, is discarded; stderr is kept in a bounded tail for error messages (with the
-// data root redacted) and parsed for progress.
+// which carries the recognised text, is discarded; stderr is kept in a bounded tail for error messages and parsed
+// for progress. The tail is decoded from the CLI's encoding (the ANSI code page on Windows) and the data root and
+// binary directory are redacted in both forms.
+//
+// The progress callback runs on a goroutine of the adapter, fed with the latest value, so a slow callback never
+// blocks the stderr pipe; it must be safe to call from another goroutine. Calls never overlap and end before
+// Transcribe returns.
 //
 // The result is the JSON file of the CLI (-oj). It is read with a size limit, parsed strictly (required fields,
-// no trailing data, validated timestamps) and stored as a normalised transcript document through the artifact
-// store (an atomic write), only after a successful run. Cancelling the context kills the process (on Windows the
-// whole process tree, through a job object) and the run directory is removed, so no partial output remains.
+// no trailing data, timestamps within 0..24 h; an odd segment order is clamped, not rejected) and stored as a
+// normalised transcript document through the artifact store (an atomic write), only after a successful run.
+// Cancelling the context kills the process (on Windows the whole process tree, through a job object) and the run
+// directory is removed, so no partial output remains.
+//
+// Open points for the wiring and later tasks:
+//   - The Paths resolver is not implemented anywhere yet. The wiring task must add Path(ctx, ref) to the filestore
+//     adapter and check every path component for links: this adapter only Lstats the last element.
+//   - The transcript document (Transcript, TranscriptFormatVersion) is owned by this adapter for now; TASK-029 must
+//     move the format into a domain value.
+//   - On Windows a data root with characters outside the ANSI code page is rejected (ErrConfig, or ErrInvalidInput
+//     per file). Whether the app uses an ASCII-only data root, or configures one, is a product decision for TASK-025.
+//   - The run directory mode 0700 has no effect on Windows; there the data root's ACL protects the run directories.
 //
 // Verified CLI flags, exit codes and output formats: docs/refs/whisper.md. Rules that apply: ARCH-30..33.
 package whispercli
