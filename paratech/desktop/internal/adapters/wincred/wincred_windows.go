@@ -29,9 +29,6 @@ const (
 	credPersistLocalMachine = 2
 )
 
-// errNoSession is ERROR_NO_SUCH_LOGON_SESSION: the session has no credential set (service or network logon).
-var errNoSession = fmt.Errorf("%w: no credential set in this logon session", shared.ErrStorage)
-
 // credential mirrors CREDENTIALW (wincred.h); Go aligns it like C (80 bytes on 64-bit, 52 on 32-bit).
 type credential struct {
 	Flags              uint32
@@ -164,7 +161,7 @@ func mapErrno(op string, err error) error {
 	case windows.ERROR_ACCESS_DENIED:
 		return fmt.Errorf("%w: credential manager %s", shared.ErrStoragePermission, op)
 	case windows.ERROR_NO_SUCH_LOGON_SESSION:
-		return fmt.Errorf("credential manager %s: %w", op, errNoSession)
+		return fmt.Errorf("credential manager %s: %w", op, ErrNoSession)
 	}
 	return fmt.Errorf("%w: credential manager %s failed with code %d", shared.ErrStorage, op, uint32(errno))
 }

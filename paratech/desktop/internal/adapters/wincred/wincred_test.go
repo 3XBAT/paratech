@@ -50,6 +50,70 @@ func (f *fakeBackend) remove(target string) error {
 	return nil
 }
 
+// requireCredmanEnv=1 turns a session without a credential set into a failure instead of a skip.
+const requireCredmanEnv = "PARATECH_REQUIRE_CREDMAN"
+
+type verdict int
+
+const (
+	verdictRun verdict = iota
+	verdictSkip
+	verdictFail
+)
+
+// sessionVerdict decides what a real-API test does with the error of its first call: only ErrNoSession may skip.
+func sessionVerdict(err error, getenv func(string) string) verdict {
+	switch {
+	case err == nil:
+		return verdictRun
+	case errors.Is(err, ErrNoSession) && getenv(requireCredmanEnv) != "1":
+		return verdictSkip
+	}
+	return verdictFail
+}
+
+func TestSessionVerdict(t *testing.T) {
+	noEnv := func(string) string { return "" }
+	force := func(k string) string {
+		if k == requireCredmanEnv {
+			return "1"
+		}
+		return ""
+	}
+	wrapped := fmt.Errorf("credential manager read: %w", ErrNoSession)
+
+	cases := []struct {
+		desc   string
+		err    error
+		getenv func(string) string
+		want   verdict
+	}{
+		{"no error", nil, noEnv, verdictRun},
+		{"no error, forced", nil, force, verdictRun},
+		{"no session", wrapped, noEnv, verdictSkip},
+		{"no session, forced", wrapped, force, verdictFail},
+		{"other storage error", fmt.Errorf("%w: x", shared.ErrStorage), noEnv, verdictFail},
+		{"access denied", shared.ErrStoragePermission, noEnv, verdictFail},
+		{"unsupported", ErrUnsupported, noEnv, verdictFail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			if got := sessionVerdict(tc.err, tc.getenv); got != tc.want {
+				t.Fatalf("sessionVerdict = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestErrNoSessionIsStorage(t *testing.T) {
+	if !errors.Is(ErrNoSession, shared.ErrStorage) {
+		t.Fatal("ErrNoSession must wrap shared.ErrStorage")
+	}
+	if strings.Contains(ErrNoSession.Error(), TargetPrefix) {
+		t.Fatalf("ErrNoSession names a target: %v", ErrNoSession)
+	}
+}
+
 func newTestStore(t *testing.T, service string) (*Store, *fakeBackend) {
 	t.Helper()
 	fb := newFakeBackend()

@@ -55,7 +55,7 @@ func TestMapErrno(t *testing.T) {
 	}{
 		{"not found", windows.ERROR_NOT_FOUND, shared.ErrNotFound},
 		{"access denied", windows.ERROR_ACCESS_DENIED, shared.ErrStoragePermission},
-		{"no logon session", windows.ERROR_NO_SUCH_LOGON_SESSION, errNoSession},
+		{"no logon session", windows.ERROR_NO_SUCH_LOGON_SESSION, ErrNoSession},
 		{"other errno", windows.ERROR_INVALID_FLAGS, shared.ErrStorage},
 		{"not an errno", errors.New("odd"), shared.ErrStorage},
 	}
@@ -76,6 +76,17 @@ func TestMapErrno(t *testing.T) {
 	}
 }
 
+// requireSession skips only on ErrNoSession (and fails even then when PARATECH_REQUIRE_CREDMAN=1).
+func requireSession(t *testing.T, err error) {
+	t.Helper()
+	switch sessionVerdict(err, os.Getenv) {
+	case verdictSkip:
+		t.Skipf("no credential set in this logon session (set %s=1 to fail): %v", requireCredmanEnv, err)
+	case verdictFail:
+		t.Fatalf("credential manager: %v", err)
+	}
+}
+
 // TestRealCredentialManager writes to the Credential Manager of the current user under a unique test service.
 func TestRealCredentialManager(t *testing.T) {
 	ctx := context.Background()
@@ -85,12 +96,7 @@ func TestRealCredentialManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.Set(ctx, "token", "first"); err != nil {
-		if errors.Is(err, errNoSession) {
-			t.Skipf("no credential set in this logon session: %v", err)
-		}
-		t.Fatal(err)
-	}
+	requireSession(t, s.Set(ctx, "token", "first"))
 
 	// Registered after the first write succeeded; it runs even when a later check fails.
 	t.Cleanup(func() {

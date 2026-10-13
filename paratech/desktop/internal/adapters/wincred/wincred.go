@@ -5,6 +5,9 @@
 // the union of the consumer ports: Set, Exists and Delete satisfy senddelivery.CredentialStore; Get is for the
 // adapters that read their own secret (smtp, hubclient, Google OAuth), which declare their own narrow interface.
 //
+// WARNING: the blob is raw UTF-8; editing an entry in the Credential Manager UI re-encodes it and corrupts it.
+// WARNING: Exists reads the whole secret into memory (and wipes it): CredReadW has no existence-only mode.
+//
 // Off Windows every call fails with ErrUnsupported, so a production build on another OS fails loudly instead of
 // keeping secrets somewhere weaker. Tests use testenv.MemCredentials.
 package wincred
@@ -32,6 +35,10 @@ const (
 var (
 	// ErrUnsupported means Credential Manager is not available (any OS but Windows).
 	ErrUnsupported = fmt.Errorf("wincred: credential manager is available only on Windows: %w", errors.ErrUnsupported)
+
+	// ErrNoSession means the logon session has no credential set (service or network logon). It wraps
+	// shared.ErrStorage.
+	ErrNoSession = fmt.Errorf("%w: no credential set in this logon session", shared.ErrStorage)
 
 	// ErrInvalidName means a service or credential name is not a fixed identifier of the app.
 	ErrInvalidName = fmt.Errorf("%w: credential name", shared.ErrInvalidID)
@@ -99,7 +106,7 @@ func (s *Store) Get(ctx context.Context, name string) (string, error) {
 	return string(blob), nil
 }
 
-// Exists reports whether a secret is stored under name, without returning it.
+// Exists reports whether a secret is stored under name, without returning it. It still reads and wipes the blob.
 func (s *Store) Exists(ctx context.Context, name string) (bool, error) {
 	target, err := s.target(ctx, name)
 	if err != nil {
