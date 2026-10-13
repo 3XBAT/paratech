@@ -8,7 +8,9 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Mirrors of the wincred limits; tests/credentialstore_contract_test.go runs one contract against both stores.
+// Mirrors of the wincred limits (adapter tests import testenv, so testenv code does not import adapters).
+// tests/credentialstore_contract_test.go runs one contract against both stores; credentials_test.go compares the
+// limits and the name rule with wincred directly.
 const (
 	memMaxSecretBytes = 5 * 512
 	memMaxNameLen     = 64

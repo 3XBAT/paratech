@@ -7,6 +7,7 @@ package tests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"strconv"
@@ -62,11 +63,15 @@ func realWincred(t *testing.T) secretStore {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A session without a credential set (service or network logon) cannot run the contract; the adapter tests
-	// report that case themselves.
-	if _, err := s.Exists(context.Background(), contractNames[0]); err != nil {
-		t.Skipf("credential manager not usable in this session: %v", err)
+	// Only a session without a credential set (service or network logon) may skip; any other error fails.
+	_, err = s.Exists(context.Background(), contractNames[0])
+	switch credmanVerdict(err, os.Getenv) {
+	case credmanSkip:
+		t.Skipf("no credential set in this logon session (set %s=1 to fail): %v", requireCredmanEnv, err)
+	case credmanFail:
+		t.Fatalf("credential manager: %v", err)
 	}
+
 	t.Cleanup(func() {
 		for _, n := range contractNames {
 			if err := s.Delete(context.Background(), n); err != nil {
@@ -77,12 +82,74 @@ func realWincred(t *testing.T) secretStore {
 	return s
 }
 
+// requireCredmanEnv=1 turns a session without a credential set into a failure instead of a skip.
+const requireCredmanEnv = "PARATECH_REQUIRE_CREDMAN"
+
+type credmanStatus int
+
+const (
+	credmanRun credmanStatus = iota
+	credmanSkip
+	credmanFail
+)
+
+// credmanVerdict decides what the real-wincred subtest does with the error of its probe.
+func credmanVerdict(err error, getenv func(string) string) credmanStatus {
+	switch {
+	case err == nil:
+		return credmanRun
+	case errors.Is(err, wincred.ErrNoSession) && getenv(requireCredmanEnv) != "1":
+		return credmanSkip
+	}
+	return credmanFail
+}
+
+func TestCredmanVerdict(t *testing.T) {
+	noEnv := func(string) string { return "" }
+	force := func(k string) string {
+		if k == requireCredmanEnv {
+			return "1"
+		}
+		return ""
+	}
+	noSession := fmt.Errorf("credential manager read: %w", wincred.ErrNoSession)
+
+	cases := []struct {
+		desc   string
+		err    error
+		getenv func(string) string
+		want   credmanStatus
+	}{
+		{"usable", nil, noEnv, credmanRun},
+		{"no session", noSession, noEnv, credmanSkip},
+		{"no session, forced", noSession, force, credmanFail},
+		{"other storage error", fmt.Errorf("%w: x", shared.ErrStorage), noEnv, credmanFail},
+		{"unsupported", wincred.ErrUnsupported, noEnv, credmanFail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			if got := credmanVerdict(tc.err, tc.getenv); got != tc.want {
+				t.Fatalf("credmanVerdict = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// Boundary names and secrets of the contract.
+var (
+	name64 = strings.Repeat("n", wincred.MaxNameLen)
+	name65 = name64 + "n"
+)
+
 // contractNames are every name the contract writes, for cleanup.
-var contractNames = []string{"smtp-password", "limit", "hub.api_key"}
+var contractNames = []string{"smtp-password", "limit", "hub.api_key", name64}
 
 func runCredentialContract(t *testing.T, s secretStore) {
 	ctx := context.Background()
 	limit := strings.Repeat("k", wincred.MaxSecretBytes)
+	set := func(name, secret string) func() error {
+		return func() error { return s.Set(ctx, name, secret) }
+	}
 
 	steps := []struct {
 		desc string
@@ -97,11 +164,31 @@ func runCredentialContract(t *testing.T, s secretStore) {
 		{"exists", expectExists(ctx, s, "smtp-password", true), nil},
 		{"value at the size limit", func() error { return s.Set(ctx, "limit", limit) }, nil},
 		{"get at the size limit", expectGet(ctx, s, "limit", limit), nil},
-		{"one byte over is rejected", func() error { return s.Set(ctx, "limit", limit+"k") }, shared.ErrInvalidSecret},
+		{"one byte over is rejected", set("limit", limit+"k"), shared.ErrInvalidSecret},
 		{"rejected value kept the old one", expectGet(ctx, s, "limit", limit), nil},
-		{"empty secret is rejected", func() error { return s.Set(ctx, "hub.api_key", "") }, shared.ErrInvalidSecret},
-		{"path-like name", func() error { return s.Set(ctx, "../hub", "x") }, shared.ErrInvalidID},
-		{"control character", func() error { return s.Set(ctx, "a\nb", "x") }, shared.ErrInvalidID},
+		{"two-byte runes at the size limit", set("limit", strings.Repeat("я", wincred.MaxSecretBytes/2)), nil},
+		{"get two-byte runes", expectGet(ctx, s, "limit", strings.Repeat("я", wincred.MaxSecretBytes/2)), nil},
+		{"two-byte runes one byte over", set("limit", strings.Repeat("я", wincred.MaxSecretBytes/2)+"k"), shared.ErrInvalidSecret},
+		{"limit in runes is over in bytes", set("limit", strings.Repeat("я", wincred.MaxSecretBytes)), shared.ErrInvalidSecret},
+		{"empty secret is rejected", set("hub.api_key", ""), shared.ErrInvalidSecret},
+
+		{"name at the length limit", set(name64, "x"), nil},
+		{"get at the name limit", expectGet(ctx, s, name64, "x"), nil},
+		{"delete at the name limit", func() error { return s.Delete(ctx, name64) }, nil},
+		{"name one over the limit", set(name65, "x"), shared.ErrInvalidID},
+		{"get one over the name limit", func() error { _, err := s.Get(ctx, name65); return err }, shared.ErrInvalidID},
+		{"empty name", set("", "x"), shared.ErrInvalidID},
+		{"leading dot", set(".key", "x"), shared.ErrInvalidID},
+		{"leading dash", set("-key", "x"), shared.ErrInvalidID},
+		{"leading underscore", set("_key", "x"), shared.ErrInvalidID},
+		{"inner dot, dash and underscore", set("hub.api_key", "x"), nil},
+		{"space inside", set("smtp password", "x"), shared.ErrInvalidID},
+		{"leading space", set(" key", "x"), shared.ErrInvalidID},
+		{"non-ASCII name", set("пароль", "x"), shared.ErrInvalidID},
+		{"non-ASCII letter inside", set("naïve", "x"), shared.ErrInvalidID},
+		{"path-like name", set("../hub", "x"), shared.ErrInvalidID},
+		{"backslash", set(`a\b`, "x"), shared.ErrInvalidID},
+		{"control character", set("a\nb", "x"), shared.ErrInvalidID},
 		{"upper case", func() error { _, err := s.Exists(ctx, "Smtp"); return err }, shared.ErrInvalidID},
 		{"delete", func() error { return s.Delete(ctx, "smtp-password") }, nil},
 		{"get after delete", func() error { _, err := s.Get(ctx, "smtp-password"); return err }, shared.ErrNotFound},
