@@ -35,6 +35,7 @@ const (
 	modeMissing  = "missing"
 	modeSpam     = "spam"
 	modeEmpty    = "empty"
+	modeFlood    = "flood"
 )
 
 // Exit codes of the fake that point at a broken argument vector.
@@ -133,8 +134,8 @@ func fakeWhisper(args []string) int {
 
 	switch mode {
 	case modeOK:
-		fmt.Fprintf(os.Stderr, "whisper_init_from_file_with_params_no_state: loading model from '%s'\n", a.model)
-		fmt.Fprintf(os.Stderr, "main: processing '%s' (160000 samples, 10.0 sec), %s threads, lang = %s\n", a.file, a.threads, a.lang)
+		fmt.Fprintf(os.Stderr, "whisper_init_from_file_with_params_no_state: loading model from '%s'\n", native(a.model))
+		fmt.Fprintf(os.Stderr, "main: processing '%s' (160000 samples, 10.0 sec), %s threads, lang = %s\n", native(a.file), a.threads, a.lang)
 		for p := 0; p <= 100; p += 5 {
 			fmt.Fprintf(os.Stderr, "whisper_print_progress_callback: progress = %3d%%\n", p)
 		}
@@ -142,7 +143,7 @@ func fakeWhisper(args []string) int {
 			{0, 2500, " Hello, \"world\" \\ ok."},
 			{2500, 5000, " second\tline\nwith a raw newline"},
 		}))
-		fmt.Fprintf(os.Stderr, "output_json: saving output to '%s'\n", result)
+		fmt.Fprintf(os.Stderr, "output_json: saving output to '%s'\n", native(result))
 		return 0
 
 	case modeEcho:
@@ -158,8 +159,8 @@ func fakeWhisper(args []string) int {
 		return 0
 
 	case modeExit3:
-		fmt.Fprintf(os.Stderr, "whisper_init_from_file_with_params_no_state: loading model from '%s'\n", a.model)
-		fmt.Fprintf(os.Stderr, "whisper_model_load: invalid model data (bad magic) in %s\n", strings.ToUpper(a.model))
+		fmt.Fprintf(os.Stderr, "whisper_init_from_file_with_params_no_state: loading model from '%s'\n", native(a.model))
+		fmt.Fprintf(os.Stderr, "whisper_model_load: invalid model data (bad magic) in %s\n", native(strings.ToUpper(a.model)))
 		fmt.Fprintf(os.Stderr, "error: failed to initialize whisper context\n")
 		return 3
 
@@ -169,8 +170,8 @@ func fakeWhisper(args []string) int {
 
 	case modeHang:
 		writeFile(result, `{"transcription": [`)
-		fmt.Fprintf(os.Stderr, "whisper_print_progress_callback: progress =  10%%\n")
 		heartbeat(a.model + beatSuffix)
+		fmt.Fprintf(os.Stderr, "whisper_print_progress_callback: progress =  10%%\n")
 		select {}
 
 	case modeTree:
@@ -180,9 +181,21 @@ func fakeWhisper(args []string) int {
 			return 50
 		}
 		waitFile(a.model+childBeatSuffix, 10*time.Second)
-		fmt.Fprintf(os.Stderr, "whisper_print_progress_callback: progress =  10%%\n")
 		heartbeat(a.model + beatSuffix)
+		fmt.Fprintf(os.Stderr, "whisper_print_progress_callback: progress =  10%%\n")
 		select {}
+
+	case modeFlood:
+		// Far more than a pipe buffer after the first progress line: a blocked reader would stall the process.
+		noise := strings.Repeat("n", 200) + "\n"
+		for p := 0; p <= 100; p += 5 {
+			fmt.Fprintf(os.Stderr, "whisper_print_progress_callback: progress = %3d%%\n", p)
+			for range (64 << 10) / len(noise) {
+				fmt.Fprint(os.Stderr, noise)
+			}
+		}
+		writeFile(result, whisperJSON(a.model, []fakeSeg{{0, 1000, "flood"}}))
+		return 0
 
 	case modeGarbage:
 		writeFile(result, "not json {")
@@ -193,7 +206,7 @@ func fakeWhisper(args []string) int {
 		return 0
 
 	case modeBadTS:
-		writeFile(result, whisperJSON(a.model, []fakeSeg{{5000, 1000, "backwards"}}))
+		writeFile(result, whisperJSON(a.model, []fakeSeg{{-5, 1000, "negative"}}))
 		return 0
 
 	case modeTrailing:
@@ -205,12 +218,12 @@ func fakeWhisper(args []string) int {
 		return 0
 
 	case modeSpam:
-		line := fmt.Sprintf("log line with the model path %s\n", a.model)
+		line := fmt.Sprintf("log line with the model path %s\n", native(a.model))
 		for range (1 << 20) / len(line) {
 			fmt.Fprint(os.Stderr, line)
 		}
 		fmt.Fprint(os.Stderr, strings.Repeat("y", 200<<10))
-		fmt.Fprintf(os.Stderr, "\nerror: input file(s) failed near %s\n", a.file)
+		fmt.Fprintf(os.Stderr, "\nerror: input file(s) failed near %s\n", native(a.file))
 		return 1
 
 	case modeEmpty:
@@ -270,16 +283,27 @@ func jsonOf(texts []string) string {
 	return string(data)
 }
 
+// native returns s as whisper-cli prints it (ANSI code page bytes on Windows).
+func native(s string) string {
+	if n, ok := nativeForm(s); ok {
+		return n
+	}
+	return s
+}
+
 func writeFile(path, content string) {
 	_ = os.WriteFile(path, []byte(content), 0o600)
 }
 
-// heartbeat appends to path forever, so a test can see whether the process still runs.
+// heartbeat appends to path forever, so a test can see whether the process still runs. The first beat is
+// written before it returns.
 func heartbeat(path string) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // test helper
 	if err != nil {
 		return
 	}
+	_, _ = f.WriteString(".")
+
 	go func() {
 		for {
 			_, _ = f.WriteString(".")

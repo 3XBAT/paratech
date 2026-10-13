@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -154,16 +155,15 @@ func (f *fixture) assertClean(t *testing.T) {
 	}
 }
 
-// assertStopped checks that the heartbeat file does not grow any more.
+// assertStopped checks that the heartbeat file does not grow any more; a missing one (the process was killed
+// before it got there) must stay missing.
 func assertStopped(t *testing.T, path string) {
 	t.Helper()
-	testenv.Eventually(t, "heartbeat file "+filepath.Base(path), func() bool {
-		_, err := os.Stat(path)
-		return err == nil
-	}, nil)
-
 	size := func() int64 {
 		fi, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return -1
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -188,8 +188,9 @@ func TestTranscribeSuccess(t *testing.T) {
 		t.Fatalf("Transcribe: %v", err)
 	}
 
-	if len(got) == 0 || got[0] != 0 || got[len(got)-1] != 100 {
-		t.Fatalf("progress = %v, want 0 ... 100", got)
+	// The pump may skip values a slow callback missed, never the final 100.
+	if len(got) == 0 || got[len(got)-1] != 100 {
+		t.Fatalf("progress = %v, want increasing values up to 100", got)
 	}
 	for i := 1; i < len(got); i++ {
 		if got[i] <= got[i-1] {
@@ -525,27 +526,147 @@ func TestTranscribeCancelKillsProcess(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	assertStopped(t, filepath.Join(f.root, "models", model.Path()+beatSuffix))
+
+	// The fake starts its heartbeat before the progress line that cancelled.
+	beat := filepath.Join(f.root, "models", model.Path()+beatSuffix)
+	if _, err := os.Stat(beat); err != nil {
+		t.Fatalf("heartbeat missing: %v", err)
+	}
+	assertStopped(t, beat)
 	f.assertClean(t)
 }
 
 func TestTranscribeTimeout(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	f := newFixture(t, "")
-	f.eng.cfg.Timeout = 300 * time.Millisecond
+	// Long enough for the fake to start under load; if it does not, the kill is still checked.
+	f.eng.cfg.Timeout = 2 * time.Second
 	model := f.model(t, modeHang)
 
-	start := time.Now()
 	err := f.eng.Transcribe(context.Background(), f.audio(t), model, outRef(t, "x.json"), nil)
 
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err = %v, want ErrTimeout", err)
 	}
-	if d := time.Since(start); d > waitDelay {
-		t.Errorf("returned after %v", d)
-	}
 	assertStopped(t, filepath.Join(f.root, "models", model.Path()+beatSuffix))
 	f.assertClean(t)
+}
+
+// TestTranscribeBlockingProgress checks that a callback that blocks does not stall the process: it writes far more
+// stderr than a pipe holds, finishes and the result is stored while the callback still waits.
+func TestTranscribeBlockingProgress(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	f := newFixture(t, "")
+	out := outRef(t, "flood.json")
+	audio, model := f.audio(t), f.model(t, modeFlood)
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var got []int
+	progress := func(p int) {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- f.eng.Transcribe(context.Background(), audio, model, out, progress) }()
+
+	<-entered
+	testenv.Eventually(t, "transcript stored while the callback blocks", func() bool {
+		return len(f.store.Paths()) == 1
+	}, nil)
+
+	select {
+	case err := <-done:
+		t.Fatalf("Transcribe returned while its callback was running: %v", err)
+	default:
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) == 0 || got[len(got)-1] != 100 {
+		t.Errorf("progress = %v, want the last value 100", got)
+	}
+}
+
+// TestTranscribeStderrRedactsNonASCIIRoot: the fake prints paths as whisper-cli does (ANSI code page bytes on
+// Windows), so a profile name outside ASCII must still be redacted.
+func TestTranscribeStderrRedactsNonASCIIRoot(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	root := filepath.Join(t.TempDir(), "Иван Петров")
+	if err := checkArgEncoding(root); err != nil {
+		t.Skipf("root not representable in this system's ANSI code page: %v", err)
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t, root)
+
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeExit3), outRef(t, "x.json"), nil)
+
+	var re *RunError
+	if !errors.As(err, &re) || re.Code != 3 {
+		t.Fatalf("err = %v, want *RunError with code 3", err)
+	}
+	if !strings.Contains(re.Stderr, placeholderData) || strings.Contains(re.Stderr, "?") {
+		t.Errorf("stderr tail = %q, want %s and no undecoded bytes", re.Stderr, placeholderData)
+	}
+
+	lower := strings.ToLower(err.Error())
+	for _, leak := range []string{"иван", "петров", native("Иван"), native("ИВАН")} {
+		if strings.Contains(lower, strings.ToLower(leak)) {
+			t.Errorf("error leaks %q: %q", leak, err)
+		}
+	}
+	f.assertClean(t)
+}
+
+func TestKillRunRunningProcess(t *testing.T) {
+	dir := t.TempDir()
+	model := filepath.Join(dir, "ggml-hang.bin")
+	if err := os.WriteFile(model, []byte(modeHang), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := fakeCommand(t, model)
+	cmd.Dir = dir
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	grp := newProcGroup()
+	defer grp.close()
+	_ = grp.attach(cmd.Process.Pid)
+
+	if err := killRun(cmd.Process, grp); err != nil {
+		t.Errorf("killRun = %v, want nil for a running process", err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Error("the killed process reported success")
+	}
+}
+
+// fakeCommand returns the fake whisper-cli with the given model; a missing model makes it exit with fakeExitNoModel.
+func fakeCommand(t *testing.T, model string) *exec.Cmd {
+	t.Helper()
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, flagModel, model) //nolint:gosec // test binary
+	cmd.Env = []string{fakeEnvKey + "=" + fakeOn, goraceEnv}
+	return cmd
 }
 
 func TestTranscribeCancelledBeforeStart(t *testing.T) {

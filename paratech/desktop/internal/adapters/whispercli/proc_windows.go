@@ -91,6 +91,22 @@ func (g *procGroup) close() {
 	}
 }
 
+// processDone reports whether the started, not yet waited process has exited. The PID is not reused before Wait.
+func processDone(pid int) bool {
+	if pid <= 0 || pid > math.MaxUint32 {
+		return false
+	}
+
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+
+	ev, err := windows.WaitForSingleObject(h, 0)
+	return err == nil && ev == windows.WAIT_OBJECT_0
+}
+
 // setProcAttrs keeps the console process from opening a window next to the GUI app.
 func setProcAttrs(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
@@ -124,7 +140,7 @@ func checkCodePage(s string, cp uint32) error {
 		return bad
 	}
 
-	back, err := fromANSI(ansi, cp)
+	back, err := fromANSI(ansi, cp, mbErrInvalidChars)
 	if err != nil || !slices.Equal(back, wide) {
 		return bad
 	}
@@ -168,21 +184,57 @@ func toANSI(wide []uint16, cp uint32) ([]byte, error) {
 	return buf, nil
 }
 
-func fromANSI(ansi []byte, cp uint32) ([]uint16, error) {
+// fromANSI converts from the code page; flags 0 replaces invalid bytes instead of failing.
+func fromANSI(ansi []byte, cp, flags uint32) ([]uint16, error) {
 	if len(ansi) == 0 || len(ansi) > math.MaxInt32 {
 		return nil, errors.New("bad length")
 	}
 
-	n, err := windows.MultiByteToWideChar(cp, mbErrInvalidChars, &ansi[0], int32(len(ansi)), nil, 0) //nolint:gosec // bounded above
+	n, err := windows.MultiByteToWideChar(cp, flags, &ansi[0], int32(len(ansi)), nil, 0) //nolint:gosec // bounded above
 	if err != nil {
 		return nil, err
 	}
 
 	wide := make([]uint16, n)
-	if _, err := windows.MultiByteToWideChar(cp, mbErrInvalidChars, &ansi[0], int32(len(ansi)), &wide[0], n); err != nil { //nolint:gosec // bounded above
+	if _, err := windows.MultiByteToWideChar(cp, flags, &ansi[0], int32(len(ansi)), &wide[0], n); err != nil { //nolint:gosec // bounded above
 		return nil, err
 	}
 	return wide, nil
+}
+
+// decodeStderr converts the CLI's stderr to UTF-8: it prints paths and messages in the ANSI code page.
+func decodeStderr(b []byte) string {
+	return decodeANSI(b, windows.GetACP())
+}
+
+func decodeANSI(b []byte, cp uint32) string {
+	if cp == cpUTF8 || isASCII(string(b)) {
+		return strings.ToValidUTF8(string(b), "?")
+	}
+
+	wide, err := fromANSI(b, cp, 0)
+	if err != nil {
+		// Lossy, but nothing non-ASCII survives to leak.
+		return strings.ToValidUTF8(string(b), "?")
+	}
+	return string(utf16.Decode(wide))
+}
+
+// nativeForm returns s in the ANSI code page, as the CLI echoes it; ok is false when that is s itself or impossible.
+func nativeForm(s string) (string, bool) {
+	return nativeFormCP(s, windows.GetACP())
+}
+
+func nativeFormCP(s string, cp uint32) (string, bool) {
+	if cp == cpUTF8 || isASCII(s) {
+		return "", false
+	}
+
+	b, err := toANSI(utf16.Encode([]rune(s)), cp)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
 }
 
 func isASCII(s string) bool {

@@ -90,7 +90,7 @@ func readResult(path string, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-// parseResult validates the CLI JSON and converts it into a Transcript.
+// parseResult validates the CLI JSON and converts it into a Transcript with non-decreasing starts.
 func parseResult(data []byte) (Transcript, error) {
 	dec := json.NewDecoder(bytes.NewReader(escapeControls(data)))
 
@@ -128,7 +128,9 @@ func parseResult(data []byte) (Transcript, error) {
 	return out, nil
 }
 
-// convertSegment checks one segment: required fields, 0 <= from <= to <= limit, starts not decreasing.
+// convertSegment checks one segment: required fields and 0 <= from, to <= limit. An odd order is clamped, not
+// rejected, so one strange segment does not fail a whole lecture: the start is raised to the previous start and
+// the end to the start.
 func convertSegment(s cliSegment, prevStart int64) (Segment, error) {
 	if s.Offsets == nil || s.Offsets.From == nil || s.Offsets.To == nil || s.Text == nil {
 		return Segment{}, errors.New("missing offsets or text")
@@ -138,13 +140,12 @@ func convertSegment(s cliSegment, prevStart int64) (Segment, error) {
 	switch {
 	case from < 0 || to < 0:
 		return Segment{}, errors.New("negative timestamp")
-	case from > to:
-		return Segment{}, errors.New("start after end")
-	case to > maxOffsetMs:
+	case from > maxOffsetMs || to > maxOffsetMs:
 		return Segment{}, errors.New("timestamp out of range")
-	case from < prevStart:
-		return Segment{}, errors.New("segments out of order")
 	}
+
+	from = max(from, prevStart)
+	to = max(to, from)
 
 	if len(*s.Text) > maxSegmentText {
 		return Segment{}, errors.New("text too long")

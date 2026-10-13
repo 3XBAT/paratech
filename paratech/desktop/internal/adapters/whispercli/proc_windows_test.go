@@ -5,9 +5,13 @@ package whispercli
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"paratech/desktop/testenv"
 )
@@ -21,11 +25,7 @@ func makeDirLink(t *testing.T, link, target string) {
 }
 
 func TestCheckCodePage(t *testing.T) {
-	const (
-		cpWestern  = 1252
-		cpCyrillic = 1251
-		cpJapanese = 932
-	)
+	const cpWestern = 1252
 
 	tests := []struct {
 		name string
@@ -92,6 +92,103 @@ func TestTranscribeCancelKillsProcessTree(t *testing.T) {
 	assertStopped(t, modelPath+beatSuffix)
 	assertStopped(t, modelPath+childBeatSuffix)
 	f.assertClean(t)
+}
+
+const (
+	cpCyrillic = 1251
+	cpJapanese = 932
+)
+
+func TestDecodeANSI(t *testing.T) {
+	tests := []struct {
+		name string
+		cp   uint32
+		in   string
+	}{
+		{"ascii", cpCyrillic, `C:\Users\Ivan`},
+		{"cyrillic", cpCyrillic, `C:\Users\Иван Петров`},
+		{"japanese", cpJapanese, `C:\Users\日本`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := tt.in
+			if n, ok := nativeFormCP(tt.in, tt.cp); ok {
+				raw = n
+			}
+			if got := decodeANSI([]byte(raw), tt.cp); got != tt.in {
+				t.Errorf("decodeANSI = %q, want %q", got, tt.in)
+			}
+		})
+	}
+
+	// A lone lead byte is replaced, not an error.
+	if got := decodeANSI([]byte("ok \x82"), cpJapanese); !strings.HasPrefix(got, "ok ") || !utf8.ValidString(got) {
+		t.Errorf("decodeANSI with a lone lead byte = %q", got)
+	}
+}
+
+// TestStderrTailANSIRoot uses the real code page conversion: a 1251 (or 932) root echoed by the CLI is redacted.
+func TestStderrTailANSIRoot(t *testing.T) {
+	tests := []struct {
+		name   string
+		cp     uint32
+		root   string
+		leaks  []string
+		native bool
+	}{
+		{"cyrillic, decoded", cpCyrillic, `C:\Users\Иван Петров\AppData\Local\Paratech`, []string{"иван", "петров"}, false},
+		{"cyrillic, native and decoded", cpCyrillic, `C:\Users\Иван Петров\AppData\Local\Paratech`, []string{"иван", "петров"}, true},
+		{"japanese, native and decoded", cpJapanese, `C:\Users\日本\data`, []string{"日本"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			enc := func(s string) string {
+				n, ok := nativeFormCP(s, tt.cp)
+				if !ok {
+					t.Fatalf("%q not representable in %d", s, tt.cp)
+				}
+				return n
+			}
+
+			r := redaction{dir: tt.root, placeholder: placeholderData}
+			if tt.native {
+				r.native = []string{enc(tt.root), enc(strings.ReplaceAll(tt.root, `\`, "/"))}
+			}
+
+			s := newStderrSink(newReporter(nil, 0, time.Now))
+			s.decode = func(b []byte) string { return decodeANSI(b, tt.cp) }
+			_, _ = s.Write([]byte("loading '" + enc(tt.root) + `\models\m.bin'` + "\n" +
+				"bad magic in " + enc(strings.ToUpper(tt.root)) + "\n"))
+			got := s.tailText([]redaction{r})
+
+			if !strings.Contains(got, `'<data>\models\m.bin'`) || !strings.Contains(got, "bad magic in <data>") {
+				t.Errorf("tail %q not redacted", got)
+			}
+			for _, leak := range append(tt.leaks, enc(tt.leaks[0])) {
+				if strings.Contains(strings.ToLower(got), leak) {
+					t.Errorf("tail %q leaks %q", got, leak)
+				}
+			}
+		})
+	}
+}
+
+// TestKillRunExitedProcess: a process that has exited but is not waited yet is reported as done, so exec keeps
+// its real exit status.
+func TestKillRunExitedProcess(t *testing.T) {
+	cmd := fakeCommand(t, filepath.Join(t.TempDir(), "missing.bin"))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, "the fake to exit", func() bool { return processDone(cmd.Process.Pid) }, nil)
+
+	if err := killRun(cmd.Process, nil); !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("killRun = %v, want os.ErrProcessDone", err)
+	}
+	if err := cmd.Wait(); cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != fakeExitNoModel {
+		t.Errorf("Wait = %v, want exit code %d", err, fakeExitNoModel)
+	}
 }
 
 func TestProcGroupNilIsSafe(t *testing.T) {

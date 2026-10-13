@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"paratech/desktop/testenv"
 )
 
 func TestStderrProgress(t *testing.T) {
@@ -159,6 +161,7 @@ func TestStderrTail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newStderrSink(newReporter(nil, 0, time.Now))
+			s.decode = decodeUTF8
 			for chunk := range slices.Chunk([]byte(tt.input), 4096) {
 				_, _ = s.Write(chunk)
 			}
@@ -178,6 +181,140 @@ func TestStderrTail(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// decodeUTF8 is the decoder off Windows; these cases are about redaction, not code pages.
+func decodeUTF8(b []byte) string { return strings.ToValidUTF8(string(b), "?") }
+
+// encode1251 and decode1251 cover ASCII and А..я of code page 1251 (0xC0..0xFF), enough for these tests.
+func encode1251(t *testing.T, s string) string {
+	t.Helper()
+	b := make([]byte, 0, len(s))
+	for _, r := range s {
+		switch {
+		case r < 0x80:
+			b = append(b, byte(r))
+		case r >= 'А' && r <= 'я':
+			b = append(b, byte(r-'А'+0xC0))
+		default:
+			t.Fatalf("encode1251: %q", r)
+		}
+	}
+	return string(b)
+}
+
+func decode1251(b []byte) string {
+	var sb strings.Builder
+	for _, c := range b {
+		if c < 0x80 {
+			sb.WriteByte(c)
+		} else if c >= 0xC0 {
+			sb.WriteRune(rune(c-0xC0) + 'А')
+		} else {
+			sb.WriteByte('?')
+		}
+	}
+	return sb.String()
+}
+
+// decodeLossy stands for a decoder that cannot map the code page: only native redaction can help.
+func decodeLossy(b []byte) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 0x80 {
+			return '?'
+		}
+		return r
+	}, strings.ToValidUTF8(string(b), "?"))
+}
+
+// TestStderrTailNonASCIIRoot: the CLI prints a code page 1251 root (Windows); it must not reach the tail.
+func TestStderrTailNonASCIIRoot(t *testing.T) {
+	root := `C:\Users\Иван Петров\AppData\Local\Paratech`
+	slash := strings.ReplaceAll(root, `\`, "/")
+	input := "loading '" + encode1251(t, root) + `\models\m.bin'` + "\n" +
+		"bad magic in " + encode1251(t, strings.ToUpper(root)) + `\MODELS\M.BIN` + "\n" +
+		"slash " + encode1251(t, slash) + "/x\n"
+
+	tests := []struct {
+		name     string
+		decode   func([]byte) string
+		native   bool
+		contains []string
+	}{
+		{
+			name:     "decoded, then folded",
+			decode:   decode1251,
+			contains: []string{`'<data>\models\m.bin'`, `in <data>\MODELS\M.BIN`, "slash <data>/x"},
+		},
+		{
+			name:     "native forms and decoding",
+			decode:   decode1251,
+			native:   true,
+			contains: []string{`'<data>\models\m.bin'`, `in <data>\MODELS\M.BIN`, "slash <data>/x"},
+		},
+		{
+			name:     "native forms with a lossy decoder",
+			decode:   decodeLossy,
+			native:   true,
+			contains: []string{`'<data>\models\m.bin'`, "slash <data>/x"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := redaction{dir: root, placeholder: placeholderData}
+			if tt.native {
+				r.native = []string{encode1251(t, root), encode1251(t, slash)}
+			}
+
+			s := newStderrSink(newReporter(nil, 0, time.Now))
+			s.decode = tt.decode
+			_, _ = s.Write([]byte(input))
+			got := s.tailText([]redaction{r})
+
+			for _, c := range tt.contains {
+				if !strings.Contains(got, c) {
+					t.Errorf("tail %q does not contain %q", got, c)
+				}
+			}
+			for _, leak := range []string{"иван", "петров", encode1251(t, "Иван"), encode1251(t, "ИВАН")} {
+				if strings.Contains(strings.ToLower(got), strings.ToLower(leak)) {
+					t.Errorf("tail %q leaks %q", got, leak)
+				}
+			}
+		})
+	}
+}
+
+func TestProgressPump(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var got []int
+	first := true
+	p := startPump(func(v int) {
+		if first {
+			first = false
+			close(entered)
+			<-release
+		}
+		got = append(got, v)
+	})
+
+	p.send(0)
+	<-entered
+
+	// The callback blocks: sends must not, and only the latest value is kept.
+	for v := 1; v <= 50; v++ {
+		p.send(v)
+	}
+	close(release)
+
+	p.send(100)
+	p.stop()
+
+	if len(got) < 2 || got[0] != 0 || got[len(got)-1] != 100 || len(got) > 3 {
+		t.Errorf("calls = %v, want 0, maybe 50, then 100", got)
 	}
 }
 

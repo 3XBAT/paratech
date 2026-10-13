@@ -137,8 +137,8 @@ func New(cfg Config, paths Paths, artifacts Artifacts) (*Engine, error) {
 		threads:   threads,
 		language:  lang,
 		redact: []redaction{
-			{dir: cfg.DataRoot, placeholder: placeholderData},
-			{dir: filepath.Dir(cfg.Binary), placeholder: placeholderBin},
+			newRedaction(cfg.DataRoot, placeholderData),
+			newRedaction(filepath.Dir(cfg.Binary), placeholderBin),
 		},
 		env:           []string{},
 		maxOutput:     defaultMaxOutput,
@@ -192,9 +192,12 @@ func checkDirs(root, work string) error {
 	return nil
 }
 
-// Transcribe recognises audio with model and stores the transcript document at output. progress, if not nil,
-// receives increasing percentages up to 100 (100 only after the result is stored). Cancelling ctx kills the
+// Transcribe recognises audio with model and stores the transcript document at output. Cancelling ctx kills the
 // process; on any failure nothing is written and the run directory is removed.
+//
+// progress, if not nil, receives increasing percentages up to 100 (100 only after the result is stored), possibly
+// skipping values. It is called on a goroutine of the adapter, so it must be safe for that; calls never overlap and
+// none happens after Transcribe returns. A slow callback never stalls the process, but Transcribe waits for it.
 func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int)) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -228,7 +231,14 @@ func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.Art
 	outPrefix := filepath.Join(runDir, outName)
 	args := buildArgs(modelPath, audioPath, outPrefix, e.threads, e.language)
 
-	sink := newStderrSink(newReporter(progress, e.progressEvery, e.now))
+	var send func(int)
+	if progress != nil {
+		pump := startPump(progress)
+		defer pump.stop()
+		send = pump.send
+	}
+
+	sink := newStderrSink(newReporter(send, e.progressEvery, e.now))
 
 	if err := e.run(ctx, runDir, args, sink); err != nil {
 		return err
@@ -319,11 +329,7 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 	cmd.Stderr = sink
 	cmd.WaitDelay = waitDelay
 	setProcAttrs(cmd)
-	cmd.Cancel = func() error {
-		grp.kill()
-		_ = cmd.Process.Kill()
-		return nil
-	}
+	cmd.Cancel = func() error { return killRun(cmd.Process, grp) }
 
 	if err := cmd.Start(); err != nil {
 		if cerr := stopped(ctx, runCtx); cerr != nil {
@@ -352,6 +358,20 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 	}
 
 	return &RunError{Err: ErrExit, Code: code, Stderr: sink.tailText(e.redact)}
+}
+
+// killRun is exec.Cmd.Cancel. It returns os.ErrProcessDone for a process that has already exited, so exec keeps
+// its real exit status and a finished run is not reported as cancelled or timed out.
+func killRun(p *os.Process, grp *procGroup) error {
+	if processDone(p.Pid) {
+		return os.ErrProcessDone
+	}
+
+	grp.kill()
+	if err := p.Kill(); errors.Is(err, os.ErrProcessDone) {
+		return os.ErrProcessDone
+	}
+	return nil
 }
 
 // stopped maps a done context to the caller's error: the time limit or the caller's cancellation.

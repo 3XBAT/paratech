@@ -27,7 +27,7 @@ const (
 // anchored at a function name, so a path echoed by another log line cannot fake progress.
 var progressLine = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*: progress = *([0-9]{1,3})%\s*$`)
 
-// reporter forwards increasing percentages to the port's callback, at most once per interval.
+// reporter forwards increasing percentages to fn (the progress pump), at most once per interval.
 type reporter struct {
 	fn     func(percent int)
 	every  time.Duration
@@ -54,11 +54,79 @@ func (r *reporter) report(p int) {
 	r.fn(p)
 }
 
+// progressPump calls the port's callback on its own goroutine with the latest value, so a slow callback never
+// blocks the stderr pipe (and with it the process). Calls never overlap.
+type progressPump struct {
+	fn   func(percent int)
+	mu   sync.Mutex
+	val  int
+	has  bool
+	wake chan struct{}
+	quit chan struct{}
+	done chan struct{}
+}
+
+func startPump(fn func(int)) *progressPump {
+	p := &progressPump{
+		fn:   fn,
+		wake: make(chan struct{}, 1),
+		quit: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	go p.loop()
+	return p
+}
+
+// send stores v for the pump goroutine; it never blocks on the callback.
+func (p *progressPump) send(v int) {
+	p.mu.Lock()
+	p.val, p.has = v, true
+	p.mu.Unlock()
+
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (p *progressPump) take() (int, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	v, ok := p.val, p.has
+	p.has = false
+	return v, ok
+}
+
+func (p *progressPump) loop() {
+	defer close(p.done)
+	for {
+		select {
+		case <-p.wake:
+			if v, ok := p.take(); ok {
+				p.fn(v)
+			}
+		case <-p.quit:
+			// Deliver the last value (100 after success), then end.
+			if v, ok := p.take(); ok {
+				p.fn(v)
+			}
+			return
+		}
+	}
+}
+
+// stop delivers a pending value and waits for the goroutine (and a running callback) to end.
+func (p *progressPump) stop() {
+	close(p.quit)
+	<-p.done
+}
+
 // stderrSink receives the process's stderr: it keeps a bounded tail and reports progress lines. The exec
 // package writes to it from its copying goroutine; stop makes later writes inert.
 type stderrSink struct {
 	mu       sync.Mutex
 	rep      *reporter
+	decode   func([]byte) string
 	line     []byte
 	overlong bool
 	tail     []byte
@@ -67,7 +135,7 @@ type stderrSink struct {
 }
 
 func newStderrSink(rep *reporter) *stderrSink {
-	return &stderrSink{rep: rep}
+	return &stderrSink{rep: rep, decode: decodeStderr}
 }
 
 func (s *stderrSink) Write(p []byte) (int, error) {
@@ -126,10 +194,13 @@ func (s *stderrSink) final() {
 }
 
 // tailText returns the last stderrMax bytes of stderr with the secrets replaced and control characters removed.
+// The CLI writes paths in its own encoding (the ANSI code page on Windows): their native forms are redacted
+// first, then the text is decoded to UTF-8 and redacted again, case-insensitively.
 func (s *stderrSink) tailText(redact []redaction) string {
 	s.mu.Lock()
 	raw := string(s.tail)
 	cut := s.cut || len(s.tail) > rawTailMax
+	decode := s.decode
 	s.mu.Unlock()
 
 	if len(raw) > rawTailMax {
@@ -145,7 +216,8 @@ func (s *stderrSink) tailText(redact []redaction) string {
 		}
 	}
 
-	text := clean(applyRedactions(strings.ToValidUTF8(raw, "?"), redact))
+	text := decode([]byte(redactNative(raw, redact)))
+	text = clean(applyRedactions(text, redact))
 	text = strings.TrimSpace(text)
 	if len(text) <= stderrMax {
 		return text
@@ -172,6 +244,32 @@ func clean(s string) string {
 type redaction struct {
 	dir         string
 	placeholder string
+
+	// native holds dir as the CLI prints it, when that differs from UTF-8 (the ANSI code page on Windows).
+	native []string
+}
+
+func newRedaction(dir, placeholder string) redaction {
+	r := redaction{dir: dir, placeholder: placeholder}
+	for _, d := range []string{dir, strings.ReplaceAll(dir, `\`, "/")} {
+		if n, ok := nativeForm(d); ok {
+			r.native = append(r.native, n)
+		}
+	}
+	return r
+}
+
+// redactNative replaces the exact native forms in the undecoded bytes. Folding is left to applyRedactions:
+// a code page byte is not a rune.
+func redactNative(s string, rs []redaction) string {
+	for _, r := range rs {
+		for _, n := range r.native {
+			if n != "" {
+				s = strings.ReplaceAll(s, n, r.placeholder)
+			}
+		}
+	}
+	return s
 }
 
 // applyRedactions replaces every occurrence of each directory, case-insensitively (Windows paths), also in the

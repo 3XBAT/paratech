@@ -51,6 +51,18 @@ func TestParseResult(t *testing.T) {
 			input: doc("en", seg(10, 10, "a"), seg(10, 20, "b")),
 			want:  Transcript{Version: TranscriptFormatVersion, Language: "en", Segments: []Segment{{10, 10, "a"}, {10, 20, "b"}}},
 		},
+		{
+			name:  "start after end is clamped",
+			input: doc("en", seg(5000, 1000, "a")),
+			want:  Transcript{Version: TranscriptFormatVersion, Language: "en", Segments: []Segment{{5000, 5000, "a"}}},
+		},
+		{
+			name:  "out of order is clamped",
+			input: doc("en", seg(2000, 3000, "a"), seg(1000, 1500, "b"), seg(1200, 4000, "c")),
+			want: Transcript{Version: TranscriptFormatVersion, Language: "en", Segments: []Segment{
+				{2000, 3000, "a"}, {2000, 2000, "b"}, {2000, 4000, "c"},
+			}},
+		},
 		{name: "not json", input: "not json {", wantErr: ErrOutput},
 		{name: "empty file", input: "", wantErr: ErrOutput},
 		{name: "array instead of object", input: "[]", wantErr: ErrOutput},
@@ -65,9 +77,9 @@ func TestParseResult(t *testing.T) {
 		{name: "string offset", input: `{"transcription": [{"offsets": {"from": "0", "to": 1}, "text": "x"}]}`, wantErr: ErrOutput},
 		{name: "fractional offset", input: `{"transcription": [{"offsets": {"from": 0.5, "to": 1}, "text": "x"}]}`, wantErr: ErrOutput},
 		{name: "negative", input: doc("en", seg(-10, 5, "x")), wantErr: ErrOutput},
-		{name: "start after end", input: doc("en", seg(5000, 1000, "x")), wantErr: ErrOutput},
-		{name: "out of range", input: doc("en", seg(0, maxOffsetMs+1, "x")), wantErr: ErrOutput},
-		{name: "out of order", input: doc("en", seg(2000, 3000, "a"), seg(1000, 1500, "b")), wantErr: ErrOutput},
+		{name: "negative end", input: doc("en", seg(0, -1, "x")), wantErr: ErrOutput},
+		{name: "end out of range", input: doc("en", seg(0, maxOffsetMs+1, "x")), wantErr: ErrOutput},
+		{name: "start out of range", input: doc("en", seg(maxOffsetMs+1, 0, "x")), wantErr: ErrOutput},
 		{name: "text too long", input: doc("en", seg(0, 1, strings.Repeat("x", maxSegmentText+1))), wantErr: ErrOutput},
 		{name: "huge number", input: `{"transcription": [{"offsets": {"from": 0, "to": 1e30}, "text": "x"}]}`, wantErr: ErrOutput},
 	}
