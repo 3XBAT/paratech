@@ -91,6 +91,15 @@ type ArtifactStore interface {
 	Delete(ctx context.Context, ref shared.ArtifactRef) error
 }
 
+// CatalogSource supplies the catalog manifest of downloadable models as raw bytes (PRD section 8.1). The use case
+// parses and validates it with values.ParseCatalog, so the source is not trusted. Implementations read an embedded or
+// locally stored manifest; fetching a manifest over the network is not part of this port.
+type CatalogSource interface {
+	// Manifest returns the JSON manifest (PRD section 8.1: name, version, size, SHA-256, source URL, quantization,
+	// capabilities and recommended hardware of each model).
+	Manifest(ctx context.Context) ([]byte, error)
+}
+
 // Clock supplies the current time (ARCH-24; PRD section 8). Implemented by the clock adapter and by a controllable fake in tests.
 type Clock interface {
 	// Now returns the current time (PRD section 8: installation time of a model).

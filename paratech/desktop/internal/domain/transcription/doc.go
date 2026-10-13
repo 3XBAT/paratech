@@ -1,7 +1,8 @@
 // Package transcription is the bounded context of local speech-to-text: installed STT models and the
 // transcripts they produce (PRD sections 6.3 and 8, AC-06, AC-07, AC-08, AC-23).
-// Aggregates: domain/transcription/sttmodel and domain/transcription/transcript. The domain service
-// domain/transcription/services/modelselection is added by a later task.
+// Aggregates: domain/transcription/sttmodel and domain/transcription/transcript. Domain service:
+// domain/transcription/services/modelselection. Shared value objects (model identity, SHA-256, source URL, catalog
+// manifest): domain/transcription/values.
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //

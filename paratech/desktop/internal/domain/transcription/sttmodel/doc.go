@@ -1,7 +1,11 @@
-// Package sttmodel is the aggregate of one installed speech-to-text model (PRD section 8, AC-07, AC-23).
+// Package sttmodel is the aggregate of one installed speech-to-text model (PRD section 8, AC-07, AC-08, AC-23).
 //
-// TASK-003 skeleton: only the identity exists so that use case ports can name the type. Name, version,
-// size, SHA-256, capabilities, the artifact reference and the New/Restore factories arrive with TASK-026.
+// A model is a verified file below models/ with its identity (name and model version; the pair is unique among
+// installed models), size, SHA-256, quantization and capabilities, and whether it came from the catalog. The source
+// URL is not part of the aggregate: it belongs to the catalog entry (values.CatalogEntry), and an imported model has
+// none. The aggregate decides whether it may be removed (CheckRemoval) and whether its file is free of other installed
+// models (CheckFileFree). It does no I/O.
+//
 // The "default model" is not stored here but in the settings aggregate (a change of the default then touches
 // one aggregate, ARCH-23).
 package sttmodel
