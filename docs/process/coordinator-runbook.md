@@ -29,3 +29,6 @@ On a usage limit the session just stops. State is in git, `tasks.json` and `prog
 
 ## Open points carried between tasks
 Kept in the last entries of `progress.txt` (for example single-instance guard before wiring `Recover`, the handler contract for side-effect jobs in TASK-044, filestore path resolver, ASCII-only data root decision in TASK-025).
+
+## Two-level control
+Batches are normally run by the `coordinator` agent (`.claude/agents/coordinator.md`); the main session acts as supervisor and audits every coordinator report with `.github/scripts/audit-pr.sh <pr>` (`docs/process/supervision.md`). Both follow this runbook.
