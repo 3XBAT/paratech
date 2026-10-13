@@ -109,7 +109,7 @@ func (winBackend) read(target string) ([]byte, error) {
 	if n == 0 || c.CredentialBlob == nil {
 		return []byte{}, nil
 	}
-	native := unsafe.Slice(c.CredentialBlob, n)
+	native := unsafe.Slice(c.CredentialBlob, n) //nolint:gosec // view of the CredReadW buffer, n from the same struct
 	out := make([]byte, n)
 	copy(out, native)
 	clear(native)
