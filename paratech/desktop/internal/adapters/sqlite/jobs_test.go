@@ -1,10 +1,13 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -548,6 +551,72 @@ func TestListByStatus(t *testing.T) {
 			got, err := r.ListByStatus(ctx, tc.statuses...)
 			if err != nil || len(got) != tc.want {
 				t.Fatalf("ListByStatus = %d jobs, %v; want %d", len(got), err, tc.want)
+			}
+		})
+	}
+}
+
+func TestListByStatusTolerantReportsCorruptRows(t *testing.T) {
+	var logs bytes.Buffer
+	db := openTest(t, func(o *Options) { o.Logger = slog.New(slog.NewTextHandler(&logs, nil)) })
+	r, ctx := NewJobRepository(db), context.Background()
+	for _, id := range []string{"a-good", "b-pin", "c-scan", "d-nostart", "e-queued", "f-good", "g-noid", "h-noid"} {
+		enqueueJob(t, r, jobSpec(id, "stt"))
+	}
+	mustExec(t, db, "UPDATE jobs SET status = 'RUNNING', attempts = 1, started_at = created_at WHERE id <> 'e-queued'")
+	mustExec(t, db, "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'b-pin'")
+	mustExec(t, db, "UPDATE jobs SET next_run_at = 'not a number' WHERE id = 'c-scan'")
+	mustExec(t, db, "UPDATE jobs SET started_at = NULL WHERE id = 'd-nostart'")
+	mustExec(t, db, "UPDATE jobs SET id = NULL WHERE id IN ('g-noid', 'h-noid')")
+	logs.Reset()
+
+	if _, err := r.ListByStatus(ctx, job.StatusRunning); err == nil {
+		t.Fatal("ListByStatus accepted corrupt rows; the tolerant variant would be pointless")
+	}
+
+	jobs, corrupt, err := r.ListByStatusTolerant(ctx, job.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []shared.JobID
+	for _, j := range jobs {
+		got = append(got, j.ID())
+	}
+	if fmt.Sprint(got) != "[a-good f-good]" || fmt.Sprint(corrupt) != "[b-pin c-scan d-nostart]" {
+		t.Fatalf("jobs = %v, corrupt = %v", got, corrupt)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE status = 'RUNNING'"); n != 7 {
+		t.Fatalf("RUNNING rows = %d after listing, want 7 (rows are reported, not changed)", n)
+	}
+	if got := strings.Count(logs.String(), "without an id"); got != 1 || !strings.Contains(logs.String(), "count=2") {
+		t.Fatalf("NULL-id rows must be logged once with their count:\n%s", logs.String())
+	}
+}
+
+func TestListByStatusTolerant(t *testing.T) {
+	db := openTest(t, nil)
+	r := NewJobRepository(db)
+	enqueueJob(t, r, jobSpec("queued", "stt"))
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cases := []struct {
+		name     string
+		ctx      context.Context
+		statuses []job.Status
+		want     int
+		wantErr  error
+	}{
+		{"no statuses", context.Background(), nil, 0, nil},
+		{"absent status", context.Background(), []job.Status{job.StatusRunning}, 0, nil},
+		{"present status", context.Background(), []job.Status{job.StatusQueued}, 1, nil},
+		{"ended context fails the whole call", cancelled, []job.Status{job.StatusQueued}, 0, context.Canceled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			jobs, corrupt, err := r.ListByStatusTolerant(tc.ctx, tc.statuses...)
+			if !errors.Is(err, tc.wantErr) || len(jobs) != tc.want || len(corrupt) != 0 {
+				t.Fatalf("jobs=%d corrupt=%v err=%v; want %d jobs, err %v", len(jobs), corrupt, err, tc.want, tc.wantErr)
 			}
 		})
 	}

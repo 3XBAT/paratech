@@ -65,7 +65,7 @@ func newRunnerEnv(t *testing.T, path string, clock *testenv.FakeClock, workers i
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Register(jobrunner.Registration{Type: runnerType, Handler: h}); err != nil {
+	if err := svc.Register(jobrunner.Registration{Type: runnerType, Handler: h, Recovery: jobrunner.RecoveryRequeue}); err != nil {
 		t.Fatal(err)
 	}
 	e := &runnerEnv{t: t, db: db, repo: repo, clock: clock, svc: svc}

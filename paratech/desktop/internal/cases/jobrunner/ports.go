@@ -53,6 +53,13 @@ type JobRepository interface {
 	// ListByStatus returns the jobs in any of the given statuses, for example stale RUNNING jobs at startup
 	// recovery, or WAITING_FOR_POWER jobs when AC power returns (PRD sections 7.2 and 7.4).
 	ListByStatus(ctx context.Context, statuses ...job.Status) ([]*job.Job, error)
+
+	// ListByStatusTolerant is ListByStatus for startup recovery (PRD section 7.2, AC-09): a stored row that cannot be
+	// read or restored does not fail the call; its id is returned in corrupt and the row is left unchanged, so one bad
+	// row never blocks the recovery of the others. A row without an id has nothing to return: the adapter leaves it out
+	// and logs how many there are. A job that left the statuses between the reads is skipped. Other storage errors fail
+	// the whole call.
+	ListByStatusTolerant(ctx context.Context, statuses ...job.Status) (jobs []*job.Job, corrupt []shared.JobID, err error)
 }
 
 // Handler executes jobs of one type; handlers are registered per job type when the app is wired
@@ -79,6 +86,36 @@ type Handler interface {
 	// conflict) or shared.ErrNotFound, the job was changed or removed elsewhere, for example cancelled: the handler
 	// stops promptly and returns that error.
 	Handle(ctx context.Context, snap job.Snapshot, report func(ctx context.Context, p job.Progress) error) error
+}
+
+// Reconciler finds out what became of an interrupted job with external side effects before anything runs it again
+// (PRD sections 7.2, 7.3 and 14 case 7, AC-15, hard rule 7: reconcile, never retry blindly). It is registered with the
+// handler of its type (Registration.Reconciler) and implemented by the use case that owns the side effect, for
+// example the email delivery (TASK-044), structurally like Handler (ARCH-20).
+type Reconciler interface {
+	// Reconcile is called by Service.Recover for a job of its type that a previous process left RUNNING
+	// (PRD sections 7.2 and 14 case 7). snap is the stale job. It looks the outcome up in the state it owns (for a
+	// delivery: SENDING becomes UNKNOWN, then the provider is asked where possible) and returns the next job status:
+	//
+	//   - job.StatusCompleted: the side effect is known to have happened; the job completes;
+	//   - job.StatusQueued: it is known not to have happened; the job is requeued (the crashed attempt counts, so a
+	//     job without attempts left fails instead);
+	//   - job.StatusFailed: anything else, including an outcome that stays unknown; the job fails with reason as its
+	//     last error and the owning aggregate keeps the state the user resolves (for a delivery: UNKNOWN).
+	//
+	// Any other status, an error or a panic leaves the job RUNNING and the next Recover asks again. Reconcile must
+	// never perform the side effect itself and must be idempotent: it may be called again after a crash or a version
+	// conflict. reason is a short fixed text without secrets or user content; it is stored and logged.
+	//
+	// ctx ends after a fixed bound per call (Recover holds up the app start); Reconcile must honour it. A timeout is
+	// an error like any other.
+	//
+	// Reconcile covers only interruptions (crash, shutdown). An attempt that returns an error, a timeout included,
+	// never reaches it: the runner retries that through Retry like any transient error and does not check whether the
+	// side effect may have happened. So the Handler of a RecoveryReconcile type must itself return backoff.Permanent,
+	// or record the unknown outcome in its own aggregate (for a delivery: UNKNOWN) so the next attempt does not
+	// resend, whenever the outcome of the send is ambiguous. TASK-044 must have this as an acceptance criterion.
+	Reconcile(ctx context.Context, snap job.Snapshot) (next job.Status, reason string, err error)
 }
 
 // PowerMonitor reports the power source of the computer (PRD sections 4.3 and 7.4, AC-21). Implemented by a Windows
