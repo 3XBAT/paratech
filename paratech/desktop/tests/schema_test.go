@@ -5,7 +5,9 @@ package tests
 //   - the CHECK lists of the status columns equal the Go status constants of the aggregates;
 //   - the state names of PRD sections 6.2 and 7.2 (read from their stateDiagram blocks) equal those lists;
 //   - the schema has the required tables, a version column on every table with a Save port, and no table or column
-//     that could hold a secret (hard rule 4, AC-19).
+//     that could hold a secret (hard rule 4, AC-19);
+//   - the same secret guard over the real migrations in pkg/migrations and the struct fields of the sqlite adapter
+//     (TASK-037); these two run without docs/.
 //
 // The files live in the repository root next to paratech/. When the root docs/ directory is not found (paratech/
 // was extracted into its own repository) the tests skip with a message; set PARATECH_REQUIRE_DOCS=1 (CI of the
@@ -16,6 +18,10 @@ package tests
 // move this test to read the migrations. The schema was checked by hand with the sqlite3 module of Python.
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +32,7 @@ import (
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/pkg/migrations"
 )
 
 // requireDocsEnv forces the docs-dependent tests to fail instead of skip when docs/ is missing.
@@ -43,6 +50,8 @@ var (
 	constraintWord       = map[string]bool{"check": true, "unique": true, "primary": true, "foreign": true, "constraint": true}
 	// Names that must never appear in a table or column name: secrets live in Windows Credential Manager (ARCH-34).
 	secretLike = regexp.MustCompile(`(?i)api_?key|oauth|token|passw|secret|credential|private_?key|refresh`)
+	// A column added by a later migration; its name is checked like a CREATE TABLE column.
+	alterAddColumn = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+(\w+)\s+ADD\s+(?:COLUMN\s+)?(\w+)`)
 )
 
 // docsStatus is the outcome of looking for the repository-root docs/ directory.
@@ -136,6 +145,57 @@ func secretNames(tables map[string]string) []string {
 	}
 	sort.Strings(found)
 	return found
+}
+
+// migrationTables is parseTables plus the columns that ALTER TABLE ... ADD [COLUMN] appends.
+func migrationTables(sql string) map[string]string {
+	tables := parseTables(sql)
+	for _, m := range alterAddColumn.FindAllStringSubmatch(sqlComment.ReplaceAllString(sql, ""), -1) {
+		table := strings.ToLower(m[1])
+		tables[table] += "\n    " + m[2] + " ANY"
+	}
+	return tables
+}
+
+// secretFields returns the struct fields of the Go files in dir (recursive, tests excluded) whose names look like
+// they hold a secret. structs counts the struct types seen, so a vacuous pass is visible.
+func secretFields(t *testing.T, dir string) (found []string, structs int) {
+	t.Helper()
+	fset := token.NewFileSet()
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			structs++
+			for _, field := range st.Fields.List {
+				for _, name := range field.Names {
+					if secretLike.MatchString(name.Name) {
+						found = append(found, ts.Name.Name+"."+name.Name)
+					}
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(found)
+	return found, structs
 }
 
 var (
@@ -314,6 +374,72 @@ func TestSchemaStatesMatchPRD(t *testing.T) {
 func TestSchemaHasNoSecretColumns(t *testing.T) {
 	if found := secretNames(readSchema(t)); len(found) > 0 {
 		t.Errorf("names that look like they hold a secret (secrets live in Windows Credential Manager, hard rule 4): %v", found)
+	}
+}
+
+// The migrations that really run (pkg/migrations), including later ALTER TABLE ... ADD COLUMN, hold no secret
+// (AC-19, hard rule 4). Unlike the contract schema this needs no docs/ directory.
+func TestMigrationsHaveNoSecretColumns(t *testing.T) {
+	files, err := fs.Glob(migrations.FS(), "*.sql")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no migrations found: %v", err)
+	}
+
+	tables := 0
+	for _, name := range files {
+		data, err := fs.ReadFile(migrations.FS(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed := migrationTables(string(data))
+		tables += len(parsed)
+		if found := secretNames(parsed); len(found) > 0 {
+			t.Errorf("%s: names that look like they hold a secret (secrets live in Windows Credential Manager): %v", name, found)
+		}
+	}
+	if tables == 0 {
+		t.Fatal("no CREATE TABLE parsed from the migrations: the guard would pass vacuously")
+	}
+}
+
+// No struct of the sqlite adapter (sqlc rows and params included) has a field for a secret (AC-19, ARCH-34).
+func TestPersistedStructsHaveNoSecretFields(t *testing.T) {
+	found, structs := secretFields(t, filepath.Join(moduleRoot(t), "internal", "adapters", "sqlite"))
+	if structs == 0 {
+		t.Fatal("no struct types found in the sqlite adapter: the guard would pass vacuously")
+	}
+	if len(found) > 0 {
+		t.Errorf("persisted structs with secret-like fields (secrets live in Windows Credential Manager): %v", found)
+	}
+}
+
+// The two guards above detect what they look for.
+func TestSecretGuardsDetectProblems(t *testing.T) {
+	sql := `
+CREATE TABLE settings (
+    id TEXT PRIMARY KEY
+);
+ALTER TABLE settings ADD COLUMN hub_api_key TEXT; -- comment ALTER TABLE x ADD fake_token
+alter table Jobs add Refresh TEXT;
+ALTER TABLE settings ADD COLUMN theme TEXT;
+`
+	got := secretNames(migrationTables(sql))
+	want := []string{"column jobs.Refresh", "column settings.hub_api_key"}
+	if !equalStrings(got, want) {
+		t.Errorf("secretNames(migration) = %v, want %v", got, want)
+	}
+
+	dir := t.TempDir()
+	src := "package x\n\ntype Row struct {\n\tID string\n\tAPIKey string\n\tGoogleRefreshToken, Title string\n}\n\ntype Clean struct{ Name string }\n"
+	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x_test.go"), []byte("package x\n\ntype T struct{ Password string }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fields, structs := secretFields(t, dir)
+	if want := []string{"Row.APIKey", "Row.GoogleRefreshToken"}; !equalStrings(fields, want) || structs != 2 {
+		t.Errorf("secretFields = %v (%d structs), want %v (2 structs)", fields, structs, want)
 	}
 }
 
