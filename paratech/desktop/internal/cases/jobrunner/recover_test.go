@@ -186,6 +186,104 @@ func TestReconcilerPanicLeavesTheJobRunning(t *testing.T) {
 	}
 }
 
+// A hung reconciler must not block the app start: each call is bounded and a timeout leaves the job RUNNING.
+func TestReconcilerIsBounded(t *testing.T) {
+	tests := []struct {
+		name       string
+		answer     func(ctx context.Context) (job.Status, string, error)
+		wantStatus job.Status
+		wantBucket string
+	}{
+		{"hung reconciler times out", func(ctx context.Context) (job.Status, string, error) {
+			return "", "", ctx.Err()
+		}, job.StatusRunning, "errors"},
+		{"an answer given after the bound is kept", func(context.Context) (job.Status, string, error) {
+			return job.StatusFailed, "", nil
+		}, job.StatusFailed, "failed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, nil, nil)
+			e.registerRecovery(typeMail, RecoveryReconcile, reconcilerFunc(func(ctx context.Context, _ job.Snapshot) (job.Status, string, error) {
+				<-ctx.Done()
+				return tc.answer(ctx)
+			}))
+			e.register(typeStt, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error { return nil })
+			hung := e.seedRunning(typeMail, 1, 3)
+			next := e.seedRunning(typeStt, 1, 3)
+
+			type result struct {
+				rep RecoveryReport
+				err error
+			}
+			done := make(chan result, 1)
+			go func() {
+				rep, err := e.svc.Recover(context.Background())
+				done <- result{rep, err}
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := e.clock.AwaitSleepers(ctx, 1); err != nil {
+				t.Fatalf("the reconciler bound did not start: %v", err)
+			}
+			e.clock.Advance(reconcileTimeout)
+
+			var res result
+			select {
+			case res = <-done:
+			case <-ctx.Done():
+				t.Fatal("Recover did not return after the reconciler bound")
+			}
+			if res.err != nil {
+				t.Fatal(res.err)
+			}
+			if got := e.status(hung); got != tc.wantStatus || bucketOf(t, res.rep, hung) != tc.wantBucket {
+				t.Fatalf("hung job: %s in %s, want %s in %s", got, bucketOf(t, res.rep, hung), tc.wantStatus, tc.wantBucket)
+			}
+			if tc.wantBucket == "errors" && !errors.Is(res.rep.Errors[0].Err, ErrReconcileTimeout) {
+				t.Fatalf("report error = %v, want ErrReconcileTimeout", res.rep.Errors[0].Err)
+			}
+			if got := e.status(next); got != job.StatusQueued {
+				t.Fatalf("the next job is %s, want QUEUED", got)
+			}
+			e.start()
+		})
+	}
+}
+
+// A RUNNING job without a run in this runner is moved only by Recover, never cancelled behind its back.
+func TestCancelRefusesAStaleRunningJob(t *testing.T) {
+	tests := []struct {
+		name     string
+		typ      job.Type // of the stale job
+		register job.Type
+		policy   Recovery
+		started  bool
+	}{
+		{"requeue type before start", typeStt, typeStt, RecoveryRequeue, false},
+		{"reconcile type before start", typeMail, typeMail, RecoveryReconcile, false},
+		{"unregistered type while running", typeLegacy, typeStt, RecoveryRequeue, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, nil, nil)
+			e.registerRecovery(tc.register, tc.policy, nil)
+			id := e.seedRunning(tc.typ, 1, 3)
+			if tc.started {
+				e.start()
+			}
+
+			if err := e.svc.Cancel(context.Background(), id); !errors.Is(err, ErrNotCancellable) {
+				t.Fatalf("Cancel = %v, want ErrNotCancellable", err)
+			}
+			if st := e.repo.snapshot(id); st.Status != job.StatusRunning || st.Version != 1 {
+				t.Fatalf("stale job was written: %s version %d", st.Status, st.Version)
+			}
+		})
+	}
+}
+
 func TestRecoverHandlesEveryJobIndependently(t *testing.T) {
 	errDisk := errors.New("disk full")
 	var conflicted, saveFails shared.JobID
@@ -408,6 +506,11 @@ func TestShutdownLeavesUnsafeJobsForRecovery(t *testing.T) {
 			}
 			if st := e.repo.snapshot(id); st.Status != tc.afterStop || st.Attempts != 1 {
 				t.Fatalf("after the shutdown: %s attempts=%d, want %s", st.Status, st.Attempts, tc.afterStop)
+			}
+			if tc.afterStop == job.StatusRunning {
+				if err := e.svc.Cancel(context.Background(), id); !errors.Is(err, ErrNotCancellable) {
+					t.Fatalf("Cancel of a job left RUNNING by Stop = %v, want ErrNotCancellable", err)
+				}
 			}
 
 			// The next process on the same store.

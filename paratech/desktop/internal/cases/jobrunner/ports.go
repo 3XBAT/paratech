@@ -56,8 +56,9 @@ type JobRepository interface {
 
 	// ListByStatusTolerant is ListByStatus for startup recovery (PRD section 7.2, AC-09): a stored row that cannot be
 	// read or restored does not fail the call; its id is returned in corrupt and the row is left unchanged, so one bad
-	// row never blocks the recovery of the others. A job that left the statuses between the reads is skipped. Other
-	// storage errors fail the whole call.
+	// row never blocks the recovery of the others. A row without an id has nothing to return: the adapter leaves it out
+	// and logs how many there are. A job that left the statuses between the reads is skipped. Other storage errors fail
+	// the whole call.
 	ListByStatusTolerant(ctx context.Context, statuses ...job.Status) (jobs []*job.Job, corrupt []shared.JobID, err error)
 }
 
@@ -105,6 +106,15 @@ type Reconciler interface {
 	// Any other status, an error or a panic leaves the job RUNNING and the next Recover asks again. Reconcile must
 	// never perform the side effect itself and must be idempotent: it may be called again after a crash or a version
 	// conflict. reason is a short fixed text without secrets or user content; it is stored and logged.
+	//
+	// ctx ends after a fixed bound per call (Recover holds up the app start); Reconcile must honour it. A timeout is
+	// an error like any other.
+	//
+	// Reconcile covers only interruptions (crash, shutdown). An attempt that returns an error, a timeout included,
+	// never reaches it: the runner retries that through Retry like any transient error and does not check whether the
+	// side effect may have happened. So the Handler of a RecoveryReconcile type must itself return backoff.Permanent,
+	// or record the unknown outcome in its own aggregate (for a delivery: UNKNOWN) so the next attempt does not
+	// resend, whenever the outcome of the send is ambiguous. TASK-044 must have this as an acceptance criterion.
 	Reconcile(ctx context.Context, snap job.Snapshot) (next job.Status, reason string, err error)
 }
 

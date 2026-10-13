@@ -32,13 +32,18 @@ var (
 	// ErrInvalidReconciliation means a Reconciler returned a status other than COMPLETED, QUEUED or FAILED; the job
 	// stays RUNNING.
 	ErrInvalidReconciliation = errors.New("invalid reconciliation result")
+
+	// ErrReconcileTimeout means a Reconciler did not answer within its bound; the job stays RUNNING.
+	ErrReconcileTimeout = errors.New("reconciliation timed out")
 )
 
-// Reasons a running handler is stopped; they are context causes, never returned to callers.
+// Reasons a running handler or reconciler is stopped; they are context causes, never returned to callers.
 var (
 	errCancelled = errors.New("cancelled by the user")
 	errTimeout   = errors.New("job timed out")
 	errLost      = errors.New("job changed elsewhere")
 	errShutdown  = errors.New("job runner is stopping")
 	errFinished  = errors.New("handler returned")
+
+	errReconcileTimeout = errors.New("reconciler timed out")
 )

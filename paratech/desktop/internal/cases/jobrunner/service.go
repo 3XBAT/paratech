@@ -44,7 +44,8 @@ const (
 //
 //   - success: COMPLETED;
 //   - permanent error, or no attempt left: FAILED;
-//   - any other error, including a timeout: RETRY_WAIT with bounded exponential backoff, back to QUEUED when due;
+//   - any other error, including a timeout: RETRY_WAIT with bounded exponential backoff, back to QUEUED when due,
+//     for every Recovery policy (see Registration.Reconciler for what that asks of side-effect handlers);
 //   - user cancellation: the handler context is cancelled and the job becomes CANCELLED;
 //   - shutdown during an attempt: a RecoveryRequeue job is requeued like a stale RUNNING job at startup recovery;
 //     any other job stays RUNNING and Recover handles it at the next start, as after a crash (hard rule 7).
@@ -179,9 +180,13 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops claiming and waits for the running handlers to finish. If ctx ends first, the handlers are interrupted
-// (their jobs are requeued or left RUNNING for Recover, by type), Stop still waits for them to return, and it reports ctx's error. Handlers must honour
-// their context, otherwise Stop does not return. It is safe to call more than once and before Start.
+// Stop stops claiming and waits for the running handlers to finish. If ctx ends first, the handlers are interrupted,
+// Stop still waits for them to return, and it reports ctx's error. Handlers must honour their context, otherwise Stop
+// does not return. It is safe to call more than once and before Start.
+//
+// An interrupted RecoveryRequeue job is requeued. Any other interrupted job stays RUNNING, exactly as after a crash,
+// and Cancel refuses it (see Cancel). A stopped Service cannot start again: app wiring that starts a new runner in the
+// same process after Stop must call Recover on it before Start, or those jobs stay RUNNING.
 func (s *Service) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	started, unwatch := s.started, s.unwatch
@@ -209,28 +214,33 @@ func (s *Service) Stop(ctx context.Context) error {
 
 // Cancel cancels a job at the user's request. A running job gets its handler context cancelled and becomes
 // CANCELLED when the handler returns; if the handler finishes successfully anyway, the job is COMPLETED. A queued or
-// waiting job is cancelled directly. A finished job, or a running job of an Uncancellable type, is refused with
-// ErrNotCancellable.
+// waiting job is cancelled directly. ErrNotCancellable refuses:
+//
+//   - a finished job;
+//   - a running job of an Uncancellable type;
+//   - a RUNNING job that no handler of this runner runs: left by a crash or a Stop, of an unregistered type, or
+//     claimed a moment ago and not started yet. Only Recover may move a stale job, so a side effect is never hidden
+//     behind CANCELLED; a just-claimed job can be cancelled again once its handler runs.
 //
 // There is a narrow window at shutdown: if the run's context was already ended by the shutdown, Cancel still returns
 // nil, but the job is treated like any interrupted job (requeued or left for Recover), not cancelled.
 func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
-	s.mu.Lock()
-	r := s.running[id]
-	s.mu.Unlock()
-	if r != nil {
-		if r.uncancellable {
-			return fmt.Errorf("%w: %s handler is not safe to interrupt", ErrNotCancellable, r.typ)
-		}
-		r.cancel(errCancelled)
-		return nil
-	}
-
 	var err error
 	for range cancelAttempts {
+		// Looked up on every pass: after a conflict the job may have been claimed by a worker.
+		s.mu.Lock()
+		r := s.running[id]
+		s.mu.Unlock()
+		if r != nil {
+			return r.cancelByUser()
+		}
+
 		var j *job.Job
 		if j, err = s.jobs.Get(ctx, id); err != nil {
 			return err
+		}
+		if j.Status() == job.StatusRunning {
+			return fmt.Errorf("%w: %s is RUNNING but not run by this runner; startup recovery handles it", ErrNotCancellable, id)
 		}
 		if err = j.Cancel(s.clock.Now()); err != nil {
 			return fmt.Errorf("%w: %w", ErrNotCancellable, err)
@@ -313,6 +323,15 @@ type run struct {
 	lost     error
 }
 
+// cancelByUser ends the handler context with the user cancellation, unless the type is not safe to interrupt.
+func (r *run) cancelByUser() error {
+	if r.uncancellable {
+		return fmt.Errorf("%w: %s handler is not safe to interrupt", ErrNotCancellable, r.typ)
+	}
+	r.cancel(errCancelled)
+	return nil
+}
+
 // report is the progress callback handed to the handler.
 func (r *run) report(ctx context.Context, p job.Progress) error {
 	r.mu.Lock()
@@ -356,7 +375,7 @@ func (s *Service) execute(j *job.Job) {
 		cancel(errFinished)
 	}()
 
-	// A cancellation between the claim and the registration above went to the database only; look again.
+	// A change by another writer between the claim and the registration above went to the database only; look again.
 	if cur, err := s.jobs.Get(ctx, j.ID()); err == nil && (cur.Version() != j.Version() || cur.Status() != job.StatusRunning) {
 		s.log.Info("claimed job was changed elsewhere", slog.String("job", j.ID().String()), slog.String("outcome", outcomeDropped))
 		return
@@ -479,6 +498,9 @@ func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error,
 		return outcomeInterrupted, j.Requeue(now)
 	}
 
+	// Every policy retries here, RecoveryReconcile too, even when a side effect may have happened: the runner does
+	// not check it. Such a handler MUST return backoff.Permanent or record the unknown outcome in its own aggregate
+	// when the send outcome is ambiguous (Registration.Reconciler, TASK-044).
 	msg := herr.Error()
 	if errors.Is(cause, errTimeout) {
 		msg = fmt.Sprintf("attempt timed out after %v: %s", timeout, msg)

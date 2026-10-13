@@ -53,8 +53,12 @@ type Registration struct {
 	Recovery Recovery
 
 	// Reconciler decides the fate of an interrupted job of a RecoveryReconcile type. It is allowed only with that
-	// policy; without it such a job fails instead of running again. A timeout is not an interruption: it retries like
-	// any error, so the handler itself must not resend after an unknown outcome (the delivery aggregate guards this).
+	// policy; without it such a job fails instead of running again.
+	//
+	// Only interruptions reach it. ANY transient error or timeout of an attempt, even after a possible side effect,
+	// goes through Retry; the runner does not enforce anything here. When the outcome of the send is ambiguous the
+	// Handler MUST return backoff.Permanent or record the unknown outcome in its own aggregate (for a delivery:
+	// UNKNOWN), so the retry does not resend. TASK-044 must have this as an acceptance criterion.
 	Reconciler Reconciler
 }
 

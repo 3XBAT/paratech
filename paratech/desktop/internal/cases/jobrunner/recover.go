@@ -19,6 +19,9 @@ const (
 	msgReconciledAsFails = "interrupted; reconciliation decided not to run it again"
 )
 
+// reconcileTimeout bounds one Reconcile call: Recover holds up Start, so a hung lookup must not block the app start.
+const reconcileTimeout = 30 * time.Second
+
 // Outcomes of recovering one stale job, for the log.
 const (
 	outcomeRequeued     = "requeued"
@@ -34,7 +37,8 @@ const (
 //
 //   - RecoveryRequeue: back to QUEUED through the aggregate (the crashed attempt counts; no attempt left: FAILED);
 //   - RecoveryReconcile: the Reconciler of the type decides COMPLETED, QUEUED or FAILED; without one the job fails,
-//     it is never resent blindly (hard rule 7, AC-15);
+//     it is never resent blindly (hard rule 7, AC-15). Each call is bounded by reconcileTimeout; a timeout leaves the
+//     job RUNNING with ErrReconcileTimeout in the report;
 //   - RecoveryFail: FAILED.
 //
 // A job of an unregistered type is left untouched, so a type registered by a later build still recovers it. Every job
@@ -163,8 +167,22 @@ func applyReconciled(j *job.Job, next job.Status, reason string, now time.Time) 
 	return fmt.Errorf("%w: %q", ErrInvalidReconciliation, next)
 }
 
-// reconcile calls the hook and turns a panic into an error, so one broken reconciler does not stop the recovery.
+// reconcile calls the hook under reconcileTimeout and turns a panic into an error, so one broken or hung reconciler
+// does not stop the recovery. A timeout is an error like any other: the job stays RUNNING.
 func (s *Service) reconcile(ctx context.Context, rc Reconciler, snap job.Snapshot) (next job.Status, reason string, err error) {
+	rctx, cancel := context.WithCancelCause(ctx)
+	timerDone := make(chan struct{})
+	go func() {
+		defer close(timerDone)
+		if s.sleeper.Sleep(rctx, reconcileTimeout) == nil {
+			cancel(errReconcileTimeout)
+		}
+	}()
+	defer func() {
+		cancel(errFinished)
+		<-timerDone
+	}()
+
 	defer func() {
 		if p := recover(); p != nil {
 			s.log.Error("job reconciler panicked", slog.String("job", snap.ID().String()), slog.String("type", fmt.Sprintf("%T", p)),
@@ -172,5 +190,10 @@ func (s *Service) reconcile(ctx context.Context, rc Reconciler, snap job.Snapsho
 			next, reason, err = "", "", fmt.Errorf("reconciler panic: %T", p)
 		}
 	}()
-	return rc.Reconcile(ctx, snap)
+
+	next, reason, err = rc.Reconcile(rctx, snap)
+	if err != nil && errors.Is(context.Cause(rctx), errReconcileTimeout) {
+		err = fmt.Errorf("%w after %v: %w", ErrReconcileTimeout, reconcileTimeout, err)
+	}
+	return next, reason, err
 }
