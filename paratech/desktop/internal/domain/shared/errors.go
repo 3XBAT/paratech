@@ -33,6 +33,10 @@ var (
 	// ErrInvalidArtifactRef is returned for artifact references that are malformed or try to leave
 	// the artifact root (the reference convention is defined by TASK-006).
 	ErrInvalidArtifactRef = errors.New("invalid artifact reference")
+
+	// ErrInvalidSecret is returned by a secret store for a value it cannot keep: empty, or larger than the store
+	// limit (PRD section 12). Long tokens are rejected, never truncated. The error text never contains the value.
+	ErrInvalidSecret = errors.New("invalid secret")
 )
 
 // Conflict causes. They wrap ErrConflict (errors.Is(err, ErrConflict) holds) and are distinct from each other, so a

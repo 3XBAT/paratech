@@ -338,3 +338,20 @@
 - Не подключено в app
 
 ---
+
+## [TASK-037] CredentialStore
+**Дата:** 2026-10-14 12:00
+**Статус:** done
+
+### Что сделано
+- adapters/wincred: хранение секретов в Windows Credential Manager через вызовы advapi32 (x/sys, без новой зависимости; проверена раскладка CREDENTIALW для 32/64 бит), имена paratech/<service>/<name> только [a-z0-9._-], лимит 2560 байт без усечения, обнуление копий, ошибки без секретов и имён; вне Windows все операции возвращают ErrUnsupported
+- testenv.MemCredentials (с тем же контрактом и дифф-тестом имён), общий контрактный тест, тест-страж AC-19 (миграции и структуры SQLite без секретных полей)
+- docs/refs/wincred.md; shared.ErrInvalidSecret
+- Ревью: approve, medium исправлены. Security: найдено 0.
+
+### Решения (подтвердить)
+- Критерий называл библиотеку wincred; сделано напрямую через x/sys (hard rule 9: нет новой зависимости)
+- Вне Windows хранилище не работает (ErrUnsupported), а не подменяется памятью: dev-fallback решат TASK-038/050; Get есть только у адаптера, потребители (smtp, hubclient, Google OAuth) объявят свои узкие интерфейсы
+- Реальные тесты Credential Manager пропускаются только при отсутствии сессии хранилища (wincred.ErrNoSession); PARATECH_REQUIRE_CREDMAN=1 превращает пропуск в ошибку
+
+---

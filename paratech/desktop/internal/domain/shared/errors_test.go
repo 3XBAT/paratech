@@ -54,3 +54,12 @@ func TestStorageErrorsRelations(t *testing.T) {
 		t.Error("the general class must not match a narrower error")
 	}
 }
+
+// ErrInvalidSecret is a caller error, not a storage failure or a missing value.
+func TestInvalidSecretIsDistinct(t *testing.T) {
+	for _, other := range []error{ErrStorage, ErrNotFound, ErrInvalidID, ErrConflict} {
+		if errors.Is(ErrInvalidSecret, other) || errors.Is(other, ErrInvalidSecret) {
+			t.Errorf("ErrInvalidSecret and %v must not match", other)
+		}
+	}
+}
