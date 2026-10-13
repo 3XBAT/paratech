@@ -553,6 +553,66 @@ func TestListByStatus(t *testing.T) {
 	}
 }
 
+func TestListByStatusTolerantReportsCorruptRows(t *testing.T) {
+	db := openTest(t, nil)
+	r, ctx := NewJobRepository(db), context.Background()
+	for _, id := range []string{"a-good", "b-pin", "c-scan", "d-nostart", "e-queued", "f-good"} {
+		enqueueJob(t, r, jobSpec(id, "stt"))
+	}
+	mustExec(t, db, "UPDATE jobs SET status = 'RUNNING', attempts = 1, started_at = created_at WHERE id <> 'e-queued'")
+	mustExec(t, db, "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'b-pin'")
+	mustExec(t, db, "UPDATE jobs SET next_run_at = 'not a number' WHERE id = 'c-scan'")
+	mustExec(t, db, "UPDATE jobs SET started_at = NULL WHERE id = 'd-nostart'")
+
+	if _, err := r.ListByStatus(ctx, job.StatusRunning); err == nil {
+		t.Fatal("ListByStatus accepted corrupt rows; the tolerant variant would be pointless")
+	}
+
+	jobs, corrupt, err := r.ListByStatusTolerant(ctx, job.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []shared.JobID
+	for _, j := range jobs {
+		got = append(got, j.ID())
+	}
+	if fmt.Sprint(got) != "[a-good f-good]" || fmt.Sprint(corrupt) != "[b-pin c-scan d-nostart]" {
+		t.Fatalf("jobs = %v, corrupt = %v", got, corrupt)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE status = 'RUNNING'"); n != 5 {
+		t.Fatalf("RUNNING rows = %d after listing, want 5 (rows are reported, not changed)", n)
+	}
+}
+
+func TestListByStatusTolerant(t *testing.T) {
+	db := openTest(t, nil)
+	r := NewJobRepository(db)
+	enqueueJob(t, r, jobSpec("queued", "stt"))
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cases := []struct {
+		name     string
+		ctx      context.Context
+		statuses []job.Status
+		want     int
+		wantErr  error
+	}{
+		{"no statuses", context.Background(), nil, 0, nil},
+		{"absent status", context.Background(), []job.Status{job.StatusRunning}, 0, nil},
+		{"present status", context.Background(), []job.Status{job.StatusQueued}, 1, nil},
+		{"ended context fails the whole call", cancelled, []job.Status{job.StatusQueued}, 0, context.Canceled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			jobs, corrupt, err := r.ListByStatusTolerant(tc.ctx, tc.statuses...)
+			if !errors.Is(err, tc.wantErr) || len(jobs) != tc.want || len(corrupt) != 0 {
+				t.Fatalf("jobs=%d corrupt=%v err=%v; want %d jobs, err %v", len(jobs), corrupt, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestQueueSurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	db := openAt(t, path, nil)

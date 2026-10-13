@@ -70,6 +70,13 @@ SELECT * FROM jobs
 WHERE status IN (sqlc.slice('statuses'))
 ORDER BY created_at, id;
 
+-- Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
+-- SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
+-- name: ListJobIDsByStatus :many
+SELECT id FROM jobs
+WHERE status IN (sqlc.slice('statuses')) AND id IS NOT NULL
+ORDER BY created_at, id;
+
 -- name: CountJobsByStatus :many
 SELECT status, COUNT(*) AS total
 FROM jobs

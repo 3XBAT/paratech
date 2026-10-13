@@ -39,6 +39,9 @@ type Querier interface {
 	InsertSttModel(ctx context.Context, arg InsertSttModelParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
+	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
+	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
+	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)

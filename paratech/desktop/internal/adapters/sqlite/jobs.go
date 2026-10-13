@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
@@ -15,6 +17,9 @@ import (
 
 // claimRetries bounds the candidates tried by one Claim when the guarded update loses a race.
 const claimRetries = 8
+
+// scanErrorPrefix starts the message of database/sql when a column value cannot be converted (pinned by a test).
+const scanErrorPrefix = "sql: Scan error"
 
 // JobRepository stores jobs (the jobrunner.JobRepository port). The status machine stays in job.Job: the repository
 // restores the aggregate, lets it make the transition and only persists the result.
@@ -170,11 +175,7 @@ func nextClaimCandidate(ctx context.Context, q *sqlcgen.Queries, query sqlcgen.N
 
 // ListByStatus returns the jobs in any of the statuses, oldest first.
 func (r *JobRepository) ListByStatus(ctx context.Context, statuses ...job.Status) ([]*job.Job, error) {
-	names := make([]string, len(statuses))
-	for i, s := range statuses {
-		names[i] = string(s)
-	}
-	rows, err := r.db.Queries(ctx).ListJobsByStatus(ctx, names)
+	rows, err := r.db.Queries(ctx).ListJobsByStatus(ctx, jobStatusNames(statuses))
 	if err != nil {
 		return nil, MapError(ctx, err)
 	}
@@ -187,6 +188,55 @@ func (r *JobRepository) ListByStatus(ctx context.Context, statuses ...job.Status
 		out = append(out, j)
 	}
 	return out, nil
+}
+
+// ListByStatusTolerant is ListByStatus for startup recovery: a row that cannot be read or restored does not fail the
+// listing, its id goes to corrupt and the row is left unchanged. A job that left the statuses or disappeared between
+// the two reads is skipped. Other database errors fail the whole call.
+func (r *JobRepository) ListByStatusTolerant(ctx context.Context, statuses ...job.Status) ([]*job.Job, []shared.JobID, error) {
+	q := r.db.Queries(ctx)
+	ids, err := q.ListJobIDsByStatus(ctx, jobStatusNames(statuses))
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
+	}
+
+	jobs, corrupt := make([]*job.Job, 0, len(ids)), []shared.JobID{}
+	for _, id := range ids {
+		row, err := q.GetJob(ctx, id)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case isScanError(err):
+			corrupt = append(corrupt, shared.JobID(id))
+			continue
+		case err != nil:
+			return nil, nil, MapError(ctx, err)
+		}
+
+		j, err := jobFromRow(row)
+		if err != nil {
+			corrupt = append(corrupt, shared.JobID(id))
+			continue
+		}
+		if slices.Contains(statuses, j.Status()) {
+			jobs = append(jobs, j)
+		}
+	}
+	return jobs, corrupt, nil
+}
+
+// isScanError reports a column value that database/sql could not convert, such as text in an INTEGER column of a
+// tampered row. database/sql exports no type for it, so the stable message prefix is the handle.
+func isScanError(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), scanErrorPrefix)
+}
+
+func jobStatusNames(statuses []job.Status) []string {
+	names := make([]string, len(statuses))
+	for i, s := range statuses {
+		names[i] = string(s)
+	}
+	return names
 }
 
 func jobTypeList(types []job.Type) (string, error) {
