@@ -91,3 +91,6 @@ Defined in `.claude/agents/`: `architect`, `go-core`, `hub-dev`, `frontend`, `te
 Security review is adversarial and mandatory for every task (`docs/process/security-review.md`): `security-auditor` finds holes, one `security-skeptic` per finding tries to refute it,
 only confirmed findings are fixed (by the implementing agent, with a regression test).
 Subagents do not see the conversation: always point them to the task file, the PRD sections, `docs/architecture.md` and the files they may touch.
+
+## Continuing the loop in a new session
+Read `docs/process/coordinator-runbook.md` first: it describes how tasks are executed one by one (branch, implementation by opus agents, `.github/scripts/verify.sh`, review, security review, PR, merge), the conventions and how to find the current state (`git status`, `gh pr list`, tail of `progress.txt`).
