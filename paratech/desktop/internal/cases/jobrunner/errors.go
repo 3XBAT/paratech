@@ -28,6 +28,10 @@ var (
 	// ErrJobFinished is what a progress report returns after its job has left RUNNING in this runner. It wraps
 	// shared.ErrConflict, so a handler that stops on conflicts stops on this too.
 	ErrJobFinished = fmt.Errorf("%w: job is no longer running", shared.ErrConflict)
+
+	// ErrInvalidReconciliation means a Reconciler returned a status other than COMPLETED, QUEUED or FAILED; the job
+	// stays RUNNING.
+	ErrInvalidReconciliation = errors.New("invalid reconciliation result")
 )
 
 // Reasons a running handler is stopped; they are context causes, never returned to callers.

@@ -78,7 +78,7 @@ func newEnvOn(t *testing.T, mutate func(*Config), jitter Jitter, wrap func(*memR
 
 func (e *env) register(typ job.Type, h handlerFunc) {
 	e.t.Helper()
-	if err := e.svc.Register(Registration{Type: typ, Handler: h}); err != nil {
+	if err := e.svc.Register(Registration{Type: typ, Handler: h, Recovery: RecoveryRequeue}); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -186,14 +186,18 @@ func TestNewValidatesConfig(t *testing.T) {
 
 func TestRegisterValidation(t *testing.T) {
 	noop := handlerFunc(func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error { return nil })
+	noReconcile := reconcilerFunc(func(context.Context, job.Snapshot) (job.Status, string, error) { return job.StatusFailed, "", nil })
 	tests := []struct {
 		name string
 		reg  Registration
 	}{
 		{"nil handler", Registration{Type: typeStt}},
-		{"blank type", Registration{Type: "", Handler: noop}},
-		{"type with space", Registration{Type: "a b", Handler: noop}},
-		{"negative timeout", Registration{Type: typeStt, Handler: noop, Timeout: -time.Second}},
+		{"blank type", Registration{Type: "", Handler: noop, Recovery: RecoveryRequeue}},
+		{"type with space", Registration{Type: "a b", Handler: noop, Recovery: RecoveryRequeue}},
+		{"negative timeout", Registration{Type: typeStt, Handler: noop, Timeout: -time.Second, Recovery: RecoveryRequeue}},
+		{"no recovery policy", Registration{Type: typeStt, Handler: noop}},
+		{"unknown recovery policy", Registration{Type: typeStt, Handler: noop, Recovery: RecoveryFail + 1}},
+		{"reconciler without the reconcile policy", Registration{Type: typeStt, Handler: noop, Recovery: RecoveryRequeue, Reconciler: noReconcile}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,7 +211,7 @@ func TestRegisterValidation(t *testing.T) {
 	t.Run("duplicate type", func(t *testing.T) {
 		e := newEnv(t, nil, nil)
 		e.register(typeStt, noop)
-		if err := e.svc.Register(Registration{Type: typeStt, Handler: noop}); !errors.Is(err, ErrInvalidConfig) {
+		if err := e.svc.Register(Registration{Type: typeStt, Handler: noop, Recovery: RecoveryRequeue}); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("second Register = %v, want ErrInvalidConfig", err)
 		}
 	})
@@ -229,7 +233,7 @@ func TestLifecycleErrors(t *testing.T) {
 		if err := e.svc.Start(context.Background()); !errors.Is(err, ErrAlreadyStarted) {
 			t.Fatalf("second Start = %v, want ErrAlreadyStarted", err)
 		}
-		if err := e.svc.Register(Registration{Type: typeMail, Handler: noop}); !errors.Is(err, ErrAlreadyStarted) {
+		if err := e.svc.Register(Registration{Type: typeMail, Handler: noop, Recovery: RecoveryRequeue}); !errors.Is(err, ErrAlreadyStarted) {
 			t.Fatalf("Register after Start = %v, want ErrAlreadyStarted", err)
 		}
 	})
@@ -459,7 +463,7 @@ func TestJitterShortensTheDelay(t *testing.T) {
 
 func TestTimeoutInterruptsTheHandlerAndRetries(t *testing.T) {
 	e := newEnv(t, nil, nil)
-	if err := e.svc.Register(Registration{Type: typeStt, Timeout: 30 * time.Second, Handler: handlerFunc(
+	if err := e.svc.Register(Registration{Type: typeStt, Timeout: 30 * time.Second, Recovery: RecoveryRequeue, Handler: handlerFunc(
 		func(ctx context.Context, _ job.Snapshot, _ func(context.Context, job.Progress) error) error {
 			<-ctx.Done()
 			return ctx.Err()
@@ -608,7 +612,7 @@ func TestCancelIsRefused(t *testing.T) {
 	t.Run("running job of an uncancellable type", func(t *testing.T) {
 		e := newEnv(t, nil, nil)
 		started, release := make(chan struct{}), make(chan struct{})
-		err := e.svc.Register(Registration{Type: typeMail, Uncancellable: true, Handler: handlerFunc(
+		err := e.svc.Register(Registration{Type: typeMail, Uncancellable: true, Recovery: RecoveryReconcile, Handler: handlerFunc(
 			func(ctx context.Context, _ job.Snapshot, _ func(context.Context, job.Progress) error) error {
 				close(started)
 				<-release

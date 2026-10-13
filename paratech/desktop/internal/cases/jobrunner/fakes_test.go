@@ -2,6 +2,7 @@ package jobrunner
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -126,6 +127,39 @@ func (r *memRepo) ListByStatus(_ context.Context, statuses ...job.Status) ([]*jo
 	return out, nil
 }
 
+func (r *memRepo) ListByStatusTolerant(_ context.Context, statuses ...job.Status) ([]*job.Job, []shared.JobID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*job.Job
+	var corrupt []shared.JobID
+	for _, id := range r.order {
+		st := r.rows[id]
+		if !slices.Contains(statuses, st.Status) {
+			continue
+		}
+		j, err := job.Restore(st)
+		if err != nil {
+			corrupt = append(corrupt, id)
+			continue
+		}
+		out = append(out, j)
+	}
+	return out, corrupt, nil
+}
+
+// putRaw stores a state as it is, for example a corrupt one, with version 1 unless it has its own.
+func (r *memRepo) putRaw(st job.State) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if st.Version == 0 {
+		st.Version = 1
+	}
+	if _, ok := r.rows[st.ID]; !ok {
+		r.order = append(r.order, st.ID)
+	}
+	r.rows[st.ID] = st
+}
+
 // snapshot returns the stored state of a job.
 func (r *memRepo) snapshot(id shared.JobID) job.State {
 	r.mu.Lock()
@@ -145,6 +179,14 @@ type hookRepo struct {
 	*memRepo
 	beforeSave func(j *job.Job) error // a non-nil result fails the save without storing anything
 	afterSave  func(j *job.Job)       // runs after a successful save
+	listErr    error                  // fails ListByStatusTolerant
+}
+
+func (r *hookRepo) ListByStatusTolerant(ctx context.Context, statuses ...job.Status) ([]*job.Job, []shared.JobID, error) {
+	if r.listErr != nil {
+		return nil, nil, r.listErr
+	}
+	return r.memRepo.ListByStatusTolerant(ctx, statuses...)
 }
 
 func (r *hookRepo) Save(ctx context.Context, j *job.Job) error {
@@ -167,6 +209,13 @@ type handlerFunc func(ctx context.Context, snap job.Snapshot, report func(contex
 
 func (f handlerFunc) Handle(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error) error {
 	return f(ctx, snap, report)
+}
+
+// reconcilerFunc adapts a function to Reconciler.
+type reconcilerFunc func(ctx context.Context, snap job.Snapshot) (job.Status, string, error)
+
+func (f reconcilerFunc) Reconcile(ctx context.Context, snap job.Snapshot) (job.Status, string, error) {
+	return f(ctx, snap)
 }
 
 // fixedJitter always returns the same permille.

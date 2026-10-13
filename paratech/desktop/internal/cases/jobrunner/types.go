@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // Deps are the ports the Service needs.
@@ -46,4 +47,56 @@ type Registration struct {
 	// Uncancellable marks a handler that is not safe to interrupt: a user cancellation of its running job is
 	// refused with ErrNotCancellable (a queued or waiting job can still be cancelled).
 	Uncancellable bool
+
+	// Recovery says what happens to a job of this type that was interrupted: left RUNNING by a crash (Recover) or
+	// stopped by a shutdown. It is required, so that no type is rerun by default (hard rule 7).
+	Recovery Recovery
+
+	// Reconciler decides the fate of an interrupted job of a RecoveryReconcile type. It is allowed only with that
+	// policy; without it such a job fails instead of running again. A timeout is not an interruption: it retries like
+	// any error, so the handler itself must not resend after an unknown outcome (the delivery aggregate guards this).
+	Reconciler Reconciler
+}
+
+// Recovery is the policy for an interrupted job of one type (PRD section 7.2: resume or safely requeue by job type).
+type Recovery int
+
+// Recovery policies. The zero value is not a policy: Register refuses it.
+const (
+	recoveryUnset Recovery = iota
+
+	// RecoveryRequeue is for idempotent work: the job goes back to QUEUED and the crashed attempt counts, so a job
+	// without attempts left fails with "attempts exhausted".
+	RecoveryRequeue
+
+	// RecoveryReconcile is for work with external side effects (hard rule 7), such as email delivery: the job is never
+	// requeued blindly. A shutdown leaves it RUNNING; Recover asks the Reconciler of the type, or fails the job when
+	// there is none.
+	RecoveryReconcile
+
+	// RecoveryFail is for work that must not run again after an interruption and has nothing to reconcile: a shutdown
+	// leaves the job RUNNING and Recover fails it.
+	RecoveryFail
+)
+
+// valid reports whether r is one of the policies.
+func (r Recovery) valid() bool { return r > recoveryUnset && r <= RecoveryFail }
+
+// RecoveryReport is the summary of one Recover call. Every stale job is in exactly one list.
+type RecoveryReport struct {
+	Requeued  []shared.JobID // back to QUEUED, the crashed attempt counted
+	Completed []shared.JobID // the reconciler confirmed the work was done
+	Failed    []shared.JobID // attempts exhausted, RecoveryFail, no reconciler, or reconciled as failed
+
+	Unregistered []shared.JobID  // no registration for the type: left RUNNING for a build that knows it
+	Corrupt      []shared.JobID  // rows that cannot be restored: reported, not changed
+	Conflicts    []shared.JobID  // changed elsewhere between the read and the write: skipped
+	Errors       []RecoveryError // left RUNNING; the next Recover tries again
+}
+
+// RecoveryError is a stale job whose recovery failed.
+type RecoveryError struct {
+	Job  shared.JobID
+	Type job.Type
+	Err  error
 }
