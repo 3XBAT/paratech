@@ -44,7 +44,7 @@ type Options struct {
 	// Migrate applies pending migrations during Open.
 	Migrate bool
 
-	// Logger receives migration progress. Nil discards it.
+	// Logger receives migration progress and data warnings (counts only, no row content). Nil discards it.
 	Logger *slog.Logger
 }
 

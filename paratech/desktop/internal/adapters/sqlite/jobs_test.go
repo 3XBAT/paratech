@@ -1,10 +1,13 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -554,15 +557,18 @@ func TestListByStatus(t *testing.T) {
 }
 
 func TestListByStatusTolerantReportsCorruptRows(t *testing.T) {
-	db := openTest(t, nil)
+	var logs bytes.Buffer
+	db := openTest(t, func(o *Options) { o.Logger = slog.New(slog.NewTextHandler(&logs, nil)) })
 	r, ctx := NewJobRepository(db), context.Background()
-	for _, id := range []string{"a-good", "b-pin", "c-scan", "d-nostart", "e-queued", "f-good"} {
+	for _, id := range []string{"a-good", "b-pin", "c-scan", "d-nostart", "e-queued", "f-good", "g-noid", "h-noid"} {
 		enqueueJob(t, r, jobSpec(id, "stt"))
 	}
 	mustExec(t, db, "UPDATE jobs SET status = 'RUNNING', attempts = 1, started_at = created_at WHERE id <> 'e-queued'")
 	mustExec(t, db, "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'b-pin'")
 	mustExec(t, db, "UPDATE jobs SET next_run_at = 'not a number' WHERE id = 'c-scan'")
 	mustExec(t, db, "UPDATE jobs SET started_at = NULL WHERE id = 'd-nostart'")
+	mustExec(t, db, "UPDATE jobs SET id = NULL WHERE id IN ('g-noid', 'h-noid')")
+	logs.Reset()
 
 	if _, err := r.ListByStatus(ctx, job.StatusRunning); err == nil {
 		t.Fatal("ListByStatus accepted corrupt rows; the tolerant variant would be pointless")
@@ -579,8 +585,11 @@ func TestListByStatusTolerantReportsCorruptRows(t *testing.T) {
 	if fmt.Sprint(got) != "[a-good f-good]" || fmt.Sprint(corrupt) != "[b-pin c-scan d-nostart]" {
 		t.Fatalf("jobs = %v, corrupt = %v", got, corrupt)
 	}
-	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE status = 'RUNNING'"); n != 5 {
-		t.Fatalf("RUNNING rows = %d after listing, want 5 (rows are reported, not changed)", n)
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE status = 'RUNNING'"); n != 7 {
+		t.Fatalf("RUNNING rows = %d after listing, want 7 (rows are reported, not changed)", n)
+	}
+	if got := strings.Count(logs.String(), "without an id"); got != 1 || !strings.Contains(logs.String(), "count=2") {
+		t.Fatalf("NULL-id rows must be logged once with their count:\n%s", logs.String())
 	}
 }
 

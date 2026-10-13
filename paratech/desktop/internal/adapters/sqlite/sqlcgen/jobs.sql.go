@@ -46,6 +46,29 @@ func (q *Queries) CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow
 	return items, nil
 }
 
+const countJobsWithoutIDByStatus = `-- name: CountJobsWithoutIDByStatus :one
+SELECT COUNT(*) FROM jobs
+WHERE status IN (/*SLICE:statuses*/?) AND id IS NULL
+`
+
+// Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
+func (q *Queries) CountJobsWithoutIDByStatus(ctx context.Context, statuses []string) (int64, error) {
+	query := countJobsWithoutIDByStatus
+	var queryParams []interface{}
+	if len(statuses) > 0 {
+		for _, v := range statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	row := q.db.QueryRowContext(ctx, query, queryParams...)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getJob = `-- name: GetJob :one
 
 SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs WHERE id = ?1

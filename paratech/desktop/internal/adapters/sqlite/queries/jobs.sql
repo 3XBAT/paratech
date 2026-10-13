@@ -77,6 +77,11 @@ SELECT id FROM jobs
 WHERE status IN (sqlc.slice('statuses')) AND id IS NOT NULL
 ORDER BY created_at, id;
 
+-- Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
+-- name: CountJobsWithoutIDByStatus :one
+SELECT COUNT(*) FROM jobs
+WHERE status IN (sqlc.slice('statuses')) AND id IS NULL;
+
 -- name: CountJobsByStatus :many
 SELECT status, COUNT(*) AS total
 FROM jobs

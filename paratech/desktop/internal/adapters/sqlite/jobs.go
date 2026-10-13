@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -191,13 +192,22 @@ func (r *JobRepository) ListByStatus(ctx context.Context, statuses ...job.Status
 }
 
 // ListByStatusTolerant is ListByStatus for startup recovery: a row that cannot be read or restored does not fail the
-// listing, its id goes to corrupt and the row is left unchanged. A job that left the statuses or disappeared between
-// the two reads is skipped. Other database errors fail the whole call.
+// listing, its id goes to corrupt and the row is left unchanged. A row with a NULL id has no id to report: it is left
+// out and their number is logged once per call. A job that left the statuses or disappeared between the two reads is
+// skipped. Other database errors fail the whole call.
 func (r *JobRepository) ListByStatusTolerant(ctx context.Context, statuses ...job.Status) ([]*job.Job, []shared.JobID, error) {
-	q := r.db.Queries(ctx)
-	ids, err := q.ListJobIDsByStatus(ctx, jobStatusNames(statuses))
+	q, names := r.db.Queries(ctx), jobStatusNames(statuses)
+	ids, err := q.ListJobIDsByStatus(ctx, names)
 	if err != nil {
 		return nil, nil, MapError(ctx, err)
+	}
+
+	noID, err := q.CountJobsWithoutIDByStatus(ctx, names)
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
+	}
+	if noID > 0 {
+		r.db.logger.Warn("job rows without an id are left out of the listing", slog.Int64("count", noID))
 	}
 
 	jobs, corrupt := make([]*job.Job, 0, len(ids)), []shared.JobID{}
