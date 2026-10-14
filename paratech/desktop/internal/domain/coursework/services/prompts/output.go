@@ -341,4 +341,4 @@ func unsafeInText(r rune) bool {
 
 // bidiControl reports the embedding, override and isolate controls, which can make displayed text differ from what
 // it is (the "Trojan Source" trick); ordinary text does not need them.
-func bidiControl(r rune) bool { return (r >= '‪' && r <= '‮') || (r >= '⁦' && r <= '⁩') }
+func bidiControl(r rune) bool { return (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) }
