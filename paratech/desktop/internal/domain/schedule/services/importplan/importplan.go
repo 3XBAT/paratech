@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
@@ -25,6 +26,9 @@ var ErrUnknownSource = errors.New("unknown import source")
 // ErrUnreadableFile is wrapped by parsers for a file that cannot be read as a whole (wrong encoding, no header, too
 // large). Row problems are not errors but RowError values.
 var ErrUnreadableFile = errors.New("unreadable schedule file")
+
+// ErrInvalidWindow is returned for a Window whose From is not before To (a parser bug, not a file problem).
+var ErrInvalidWindow = errors.New("invalid import window")
 
 // Source is the import format and the namespace of its source uids.
 type Source string
@@ -66,10 +70,26 @@ type RowError struct {
 	Reason string
 }
 
-// Parsed is what a parser produced: the rows it could read and the problems of the rows it could not.
+// Window is the time range a file covers: lessons starting in [From, To). The zero Window covers all time.
+type Window struct {
+	From time.Time
+	To   time.Time
+}
+
+// IsZero reports whether the window covers all time.
+func (w Window) IsZero() bool { return w.From.IsZero() && w.To.IsZero() }
+
+// Contains reports whether t lies in the window.
+func (w Window) Contains(t time.Time) bool {
+	return w.IsZero() || (!t.Before(w.From) && t.Before(w.To))
+}
+
+// Parsed is what a parser produced: the rows it could read and the problems of the rows it could not. Window is
+// set by parsers that read only part of a file's time range (ICS expands recurrences within it).
 type Parsed struct {
 	Rows   []Row
 	Errors []RowError
+	Window Window
 }
 
 // Addition is a row without a live lesson of the same uid: a new lesson.
@@ -111,6 +131,7 @@ type Conflict struct {
 // Plan is the preview of an import. A plan with Errors has no diff and cannot be committed.
 type Plan struct {
 	Source             Source
+	Window             Window // the import dates, zero for the whole file
 	Errors             []RowError
 	Added              []Addition
 	Changed            []Change
@@ -135,20 +156,25 @@ func Build(source Source, parsed Parsed, current []*lesson.Lesson) (Plan, error)
 	if err := source.Validate(); err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{Source: source}
+	if w := parsed.Window; !w.IsZero() && !w.From.Before(w.To) {
+		return Plan{}, ErrInvalidWindow
+	}
+	plan := Plan{Source: source, Window: parsed.Window}
 
 	errs := append([]RowError(nil), parsed.Errors...)
 	uids := make([]string, len(parsed.Rows))
 	firstLine := map[string]int{}
 	switch {
-	case len(parsed.Rows) == 0 && len(errs) == 0:
+	case len(parsed.Rows) == 0 && len(errs) == 0 && parsed.Window.IsZero():
 		errs = append(errs, RowError{Reason: "the file contains no lessons"})
+	case len(parsed.Rows) == 0 && len(errs) == 0:
+		errs = append(errs, RowError{Reason: "the file contains no lessons in the import dates"})
 	case len(parsed.Rows) > MaxRows:
 		errs = append(errs, RowError{Reason: fmt.Sprintf("more than %d lessons", MaxRows)})
 	}
 	for i, r := range parsed.Rows {
 		uids[i] = source.UID(r.Key)
-		if e, bad := rowProblem(r, uids[i]); bad {
+		if e, bad := rowProblem(r, uids[i], parsed.Window); bad {
 			errs = append(errs, e)
 			continue
 		}
@@ -165,12 +191,14 @@ func Build(source Source, parsed Parsed, current []*lesson.Lesson) (Plan, error)
 	}
 
 	live := map[string]*lesson.Lesson{}
-	var kept []*lesson.Lesson // live lessons the import does not own
+	var kept []*lesson.Lesson // live lessons the import does not change
+	var owned []*lesson.Lesson
 	for _, l := range current {
 		switch {
 		case l.Deleted():
 		case source.Owns(l.SourceUID()):
 			live[l.SourceUID()] = l
+			owned = append(owned, l)
 		default:
 			kept = append(kept, l)
 		}
@@ -190,8 +218,16 @@ func Build(source Source, parsed Parsed, current []*lesson.Lesson) (Plan, error)
 			plan.Changed = append(plan.Changed, c)
 		}
 	}
-	for uid, l := range live {
-		plan.Removed = append(plan.Removed, Removal{UID: uid, Lesson: l.ID(), Version: l.Version(), Content: l.Content()})
+	// owned keeps the order of current, so kept does not depend on map order.
+	for _, l := range owned {
+		if _, missing := live[l.SourceUID()]; !missing {
+			continue
+		}
+		if !parsed.Window.Contains(l.Content().Start) {
+			kept = append(kept, l) // outside the import dates: the file says nothing about it
+			continue
+		}
+		plan.Removed = append(plan.Removed, Removal{UID: l.SourceUID(), Lesson: l.ID(), Version: l.Version(), Content: l.Content()})
 	}
 
 	sort.SliceStable(plan.Added, func(i, j int) bool { return plan.Added[i].Line < plan.Added[j].Line })
@@ -210,7 +246,7 @@ func Build(source Source, parsed Parsed, current []*lesson.Lesson) (Plan, error)
 	return plan, nil
 }
 
-func rowProblem(r Row, uid string) (RowError, bool) {
+func rowProblem(r Row, uid string, w Window) (RowError, bool) {
 	if strings.TrimSpace(r.Key) == "" {
 		return RowError{Line: r.Line, Field: "uid", Reason: "no lesson identity"}, true
 	}
@@ -219,6 +255,9 @@ func rowProblem(r Row, uid string) (RowError, bool) {
 	}
 	if err := r.Content.Validate(); err != nil {
 		return RowError{Line: r.Line, Reason: reason(err)}, true
+	}
+	if !w.Contains(r.Content.Start) {
+		return RowError{Line: r.Line, Reason: "starts outside the import dates"}, true
 	}
 	return RowError{}, false
 }

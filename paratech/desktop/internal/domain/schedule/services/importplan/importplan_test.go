@@ -281,3 +281,84 @@ func TestFingerprintChangesWithConflictingLesson(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildWindow(t *testing.T) {
+	w := Window{From: at(0), To: at(10)}
+	inside := content("Inside", at(2))
+	current := []*lesson.Lesson{
+		stored(t, "l-past", "ics:past", content("Past", at(-5)), false),    // before the window: kept
+		stored(t, "l-gone", "ics:gone", content("Gone", at(4)), false),     // inside and missing: removed
+		stored(t, "l-later", "ics:later", content("Later", at(10)), false), // at To (excluded): kept
+		stored(t, "l-moved", "ics:moved", content("Moved", at(-3)), false), // matched by uid from outside: changed
+		stored(t, "l-csv", "csv:x", content("CSV", at(5)), false),          // other source: never removed
+	}
+	parsed := Parsed{Window: w, Rows: []Row{
+		row(3, "inside", inside),
+		row(9, "moved", content("Moved", at(6))),
+		row(12, "edge", content("Edge", at(-1).Add(30*time.Minute))), // starts before From
+	}}
+
+	p, err := Build(SourceICS, parsed, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Valid() || len(p.Errors) != 1 || p.Errors[0].Line != 12 || p.Errors[0].Reason != "starts outside the import dates" {
+		t.Fatalf("row outside the window: errors = %+v", p.Errors)
+	}
+
+	parsed.Rows = parsed.Rows[:2]
+	p, err = Build(SourceICS, parsed, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Valid() || p.Window != w {
+		t.Fatalf("plan = %+v", p)
+	}
+	if len(p.Removed) != 1 || p.Removed[0].Lesson != "l-gone" {
+		t.Errorf("removed = %+v, want only the lesson inside the window", p.Removed)
+	}
+	if len(p.Changed) != 1 || p.Changed[0].Lesson != "l-moved" || len(p.Added) != 1 {
+		t.Errorf("changed = %+v, added = %+v", p.Changed, p.Added)
+	}
+
+	// A kept lesson outside the window still counts for conflicts.
+	parsed.Rows = append(parsed.Rows, row(15, "late", content("Late", at(9).Add(30*time.Minute))))
+	p, err = Build(SourceICS, parsed, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Conflicts) != 1 || p.Conflicts[0].Line != 15 || p.Conflicts[0].WithLesson != "l-later" {
+		t.Errorf("conflicts = %+v", p.Conflicts)
+	}
+
+	// Nothing in the window: the reason names the import dates.
+	p, err = Build(SourceICS, Parsed{Window: w}, nil)
+	if err != nil || len(p.Errors) != 1 || p.Errors[0].Reason != "the file contains no lessons in the import dates" {
+		t.Errorf("empty window: %+v, %v", p.Errors, err)
+	}
+
+	if _, err := Build(SourceICS, Parsed{Window: Window{From: at(1), To: at(1)}}, nil); !errors.Is(err, ErrInvalidWindow) {
+		t.Errorf("empty window range: %v", err)
+	}
+}
+
+func TestWindowContains(t *testing.T) {
+	w := Window{From: at(0), To: at(1)}
+	tests := []struct {
+		name string
+		w    Window
+		t    time.Time
+		want bool
+	}{
+		{"zero covers all", Window{}, at(-1000), true},
+		{"from is inside", w, at(0), true},
+		{"to is outside", w, at(1), false},
+		{"before", w, at(-1), false},
+		{"inside", w, at(0).Add(time.Minute), true},
+	}
+	for _, tt := range tests {
+		if got := tt.w.Contains(tt.t); got != tt.want {
+			t.Errorf("%s: Contains = %v", tt.name, got)
+		}
+	}
+}

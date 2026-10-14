@@ -4,6 +4,7 @@ go 1.26.9
 
 require (
 	connectrpc.com/connect v1.21.0
+	github.com/arran4/golang-ical v0.3.7
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.29
 	golang.org/x/sys v0.48.0
