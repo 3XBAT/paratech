@@ -11,7 +11,8 @@ import (
 
 // JobType is the type of the delivery job. The app registers Service with the job runner for it as the handler and
 // the reconciler, with RecoveryReconcile (an interrupted send is never rerun blindly), Uncancellable (a user
-// cancellation in the middle of a send would only make the outcome unknown) and a Timeout above the SMTP timeout.
+// cancellation in the middle of a send would only make the outcome unknown) and a Timeout of at least twice the SMTP
+// timeout (the smtp adapter's deadline covers the session setup and then the transaction separately).
 const JobType = job.Type(delivery.JobType)
 
 // Defaults of Config.
@@ -42,7 +43,7 @@ type Deps struct {
 type Config struct {
 	Subject        string // subject of a homework email; set by the app, never by the model
 	CredentialName string // credential entry of the SMTP password
-	MaxAttempts    int    // attempts of one delivery job
+	MaxAttempts    int    // attempts of one delivery job; at most the job runner's backoff MaxAttempts, so the last one is known
 }
 
 // View is a delivery as the UI shows it (PRD section 10: the stored delivery result, AC-15).

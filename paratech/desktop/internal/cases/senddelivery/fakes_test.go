@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -19,7 +20,10 @@ import (
 	"paratech/desktop/testenv"
 )
 
-var t0 = time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+var (
+	t0      = time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	errDisk = errors.New("disk error")
+)
 
 const homework = "# Homework\n\nExercise 3: done.\n"
 
@@ -31,6 +35,7 @@ type store struct {
 	mu         sync.Mutex
 	deliveries map[shared.DeliveryID]delivery.State
 	saveErr    error // returned by the next saves when set
+	saveFails  int   // when above 0, the next saves fail with errDisk, one less each
 	saves      int
 
 	jobs   map[string]*job.Job
@@ -75,6 +80,10 @@ func (s *store) Save(ctx context.Context, d *delivery.Delivery) error {
 	defer s.mu.Unlock()
 	if s.saveErr != nil {
 		return s.saveErr
+	}
+	if s.saveFails > 0 {
+		s.saveFails--
+		return errDisk
 	}
 	stored, exists := s.deliveries[d.ID()]
 	if (d.Version() == 0) == exists || (exists && stored.Version != d.Version()) {
@@ -156,6 +165,30 @@ func (s *store) jobKeys() []string {
 	return out
 }
 
+// claim runs the job runner's part of one attempt of the job with key: a job that ran before is retried and
+// requeued first, then the job is claimed, which counts the attempt. It returns the snapshot a handler gets.
+func (s *store) claim(t *testing.T, key string) job.Snapshot {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[key]
+	if !ok {
+		t.Fatalf("no job %s", key)
+	}
+	if j.Status() == job.StatusRunning {
+		if err := j.Retry(t0, t0, "retry"); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.Requeue(t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := j.Claim(t0); err != nil {
+		t.Fatalf("claim %s: %v", key, err)
+	}
+	return j.Snapshot()
+}
+
 func (s *store) snapshot(t *testing.T, key string) job.Snapshot {
 	t.Helper()
 	s.mu.Lock()
@@ -219,25 +252,51 @@ func (e *email) count() int {
 	return len(e.sent)
 }
 
+// artifacts is the artifact store of the tests; openErr makes Open fail (a read error, not a missing file).
+type artifacts struct {
+	*testenv.MemArtifacts
+
+	mu      sync.Mutex
+	openErr error
+}
+
+func (a *artifacts) Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
+	a.mu.Lock()
+	err := a.openErr
+	a.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return a.MemArtifacts.Open(ctx, ref)
+}
+
+func (a *artifacts) failOpen(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.openErr = err
+}
+
 type env struct {
 	st    *store
 	email *email
-	files *testenv.MemArtifacts
+	files *artifacts
 	creds *testenv.MemCredentials
 	clock *testenv.FakeClock
 	svc   *Service
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { t.Helper(); return newEnvWith(t, Config{}) }
+
+func newEnvWith(t *testing.T, cfg Config) *env {
 	t.Helper()
 	e := &env{
-		st: newStore(t), email: &email{}, files: testenv.NewMemArtifacts(), creds: testenv.NewMemCredentials(),
-		clock: testenv.NewFakeClock(t0),
+		st: newStore(t), email: &email{}, files: &artifacts{MemArtifacts: testenv.NewMemArtifacts()},
+		creds: testenv.NewMemCredentials(), clock: testenv.NewFakeClock(t0),
 	}
 	svc, err := New(Deps{
 		Deliveries: e.st, Artifacts: e.files, Email: e.email, Jobs: e.st, Credentials: e.creds, Clock: e.clock,
 		IDs: e.st, Tx: e.st,
-	}, Config{})
+	}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +365,11 @@ func (e *env) created(t *testing.T) (shared.DeliveryID, job.Snapshot) {
 		t.Fatalf("SendHomework: %v", err)
 	}
 	st := e.st.only()
-	return st.ID, e.st.snapshot(t, "send_email:"+string(st.ID)+":0")
+	return st.ID, e.st.snapshot(t, jobKey(st.ID, 0))
+}
+
+func jobKey(id shared.DeliveryID, round int) string {
+	return fmt.Sprintf("send_email:%s:%d", id, round)
 }
 
 func noReport(context.Context, job.Progress) error { return nil }

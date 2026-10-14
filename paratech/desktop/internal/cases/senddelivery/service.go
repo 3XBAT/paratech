@@ -97,7 +97,8 @@ func (s *Service) SendHomework(ctx context.Context, cmd proposal.EmailCommand) e
 	existing, err := s.deliveries.GetByIdempotencyKey(ctx, cmd.IdempotencyKey())
 	switch {
 	case err == nil:
-		return s.ensureJob(ctx, existing, opSendHomework)
+		_, err := s.ensureJob(ctx, existing, opSendHomework)
+		return err
 	case !errors.Is(err, shared.ErrNotFound):
 		return fmt.Errorf("%s: %w", opSendHomework, err)
 	}
@@ -125,12 +126,14 @@ func (s *Service) SendHomework(ctx context.Context, cmd proposal.EmailCommand) e
 		if gerr != nil {
 			return fmt.Errorf("%s: %w", opSendHomework, errors.Join(err, gerr))
 		}
-		return s.ensureJob(ctx, existing, opSendHomework)
+		_, err := s.ensureJob(ctx, existing, opSendHomework)
+		return err
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", opSendHomework, err)
 	}
-	return s.ensureJob(ctx, d, opSendHomework)
+	_, err = s.ensureJob(ctx, d, opSendHomework)
+	return err
 }
 
 // newDelivery checks the attachment against the confirmed digest and builds the PENDING delivery.
@@ -184,22 +187,24 @@ func unresolvedStatuses() []delivery.Status {
 	return out
 }
 
-// ensureJob enqueues the job of the current round of a PENDING delivery; the key makes a repeat create nothing.
-// Deliveries in other statuses need no job.
-func (s *Service) ensureJob(ctx context.Context, d *delivery.Delivery, op string) error {
-	if d.Status() != delivery.StatusPending {
-		return nil
+// ensureJob enqueues the job of the current send round of a PENDING delivery and returns its id: the key is per round,
+// so a repeat or a restart creates nothing and returns the job that exists, in whatever state. Deliveries in other
+// statuses need no job (empty id).
+func (s *Service) ensureJob(ctx context.Context, d *delivery.Delivery, op string) (shared.JobID, error) {
+	if !d.Sendable() {
+		return "", nil
 	}
 	j, err := job.New(job.Spec{
 		ID: s.ids.NewJobID(), Type: JobType, Key: d.JobKey(), Payload: d.JobPayload(), MaxAttempts: s.maxAttempts,
 	}, s.clock.Now())
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	}
-	if _, _, err := s.jobs.Enqueue(ctx, j); err != nil {
-		return fmt.Errorf("%s: enqueue: %w", op, err)
+	id, _, err := s.jobs.Enqueue(ctx, j)
+	if err != nil {
+		return "", fmt.Errorf("%s: enqueue: %w", op, err)
 	}
-	return nil
+	return id, nil
 }
 
 // Get returns a delivery; a missing one wraps shared.ErrNotFound.
@@ -236,7 +241,8 @@ func (s *Service) MarkSent(ctx context.Context, id shared.DeliveryID) (View, err
 }
 
 // SendAgain records the user's decision to send an UNKNOWN delivery again, accepting a possible duplicate
-// (UNKNOWN -> PENDING), and enqueues a new job for it. Any other status yields delivery.ErrInvalidTransition.
+// (UNKNOWN -> PENDING), which starts a new send round, and enqueues the job of that round. Any other status yields
+// delivery.ErrInvalidTransition.
 func (s *Service) SendAgain(ctx context.Context, id shared.DeliveryID) (View, error) {
 	return s.resend(ctx, id, opSendAgain)
 }
@@ -256,7 +262,7 @@ func (s *Service) resend(ctx context.Context, id shared.DeliveryID, op string) (
 	if err != nil {
 		return View{}, fmt.Errorf("%s: %w", op, err)
 	}
-	if err := s.ensureJob(ctx, d, op); err != nil {
+	if _, err := s.ensureJob(ctx, d, op); err != nil {
 		return View{}, err
 	}
 	return viewOf(d), nil
@@ -291,7 +297,7 @@ func (s *Service) ReconcileDelivery(ctx context.Context, id shared.DeliveryID) (
 	if err != nil {
 		return View{}, fmt.Errorf("%s: %w", opReconcile, err)
 	}
-	if d.Status() != delivery.StatusUnknown {
+	if !d.OutcomeUnknown() {
 		return viewOf(d), nil
 	}
 
@@ -313,9 +319,11 @@ func (s *Service) ReconcileDelivery(ctx context.Context, id shared.DeliveryID) (
 // errNotInFlight skips a delivery that left SENDING between the listing and the change.
 var errNotInFlight = errors.New("delivery is no longer in flight")
 
-// Recover turns the deliveries a previous process left SENDING into UNKNOWN (PRD section 14 case 7). Call it at
-// startup before the job runner starts: a live attempt is SENDING too. It returns how many it changed; one delivery
-// that fails does not stop the others, and calling it again changes nothing more.
+// Recover turns the deliveries a previous process left SENDING into UNKNOWN (PRD section 14 case 7). At startup the
+// app calls jobrunner.Recover (it reconciles the RUNNING delivery jobs through Reconcile), then this Recover, then
+// Resume, and only then starts the runner: a live attempt is SENDING too. Only this Recover finds a SENDING delivery
+// whose job already ended, for example when the result of an attempt could not be stored (ErrResultNotStored). It
+// returns how many it changed; one delivery that fails does not stop the others, and calling it again changes nothing.
 func (s *Service) Recover(ctx context.Context) (int, error) {
 	stale, err := s.deliveries.ListByStatus(ctx, delivery.StatusSending)
 	if err != nil {
@@ -325,7 +333,7 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 	changed := 0
 	for _, d := range stale {
 		_, err := s.change(ctx, d.ID(), func(d *delivery.Delivery) error {
-			if d.Status() != delivery.StatusSending {
+			if !d.InFlight() {
 				return errNotInFlight
 			}
 			return d.Interrupted(s.clock.Now())
@@ -342,8 +350,10 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 	return changed, errors.Join(errs...)
 }
 
-// Resume enqueues the job of every PENDING delivery that has none, for example after its job used up its attempts
-// on transient failures. The job keys make it safe to call at every start.
+// Resume enqueues the job of the current send round of every PENDING delivery that has none, for example when the
+// app stopped between storing the delivery and enqueueing its job. A delivery whose round has a job, in any state,
+// gets nothing: only SendAgain starts a new round, so calling Resume at every start never adds jobs or attempts. A job
+// that ends on its last attempt fails its delivery (Handle), so no PENDING delivery is left without a live job.
 func (s *Service) Resume(ctx context.Context) error {
 	pending, err := s.deliveries.ListByStatus(ctx, delivery.StatusPending)
 	if err != nil {
@@ -351,7 +361,8 @@ func (s *Service) Resume(ctx context.Context) error {
 	}
 	var errs []error
 	for _, d := range pending {
-		errs = append(errs, s.ensureJob(ctx, d, opResume))
+		_, err := s.ensureJob(ctx, d, opResume)
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

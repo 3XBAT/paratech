@@ -9,6 +9,8 @@ package tests
 //   - Step 3 (timeout after acceptance -> UNKNOWN, no duplicate): TestTimeoutAfterAcceptanceIsUnknownAndNotResent,
 //     TestCrashDuringSendIsReconciledNotResent
 //   - Step 4 (the SMTP password never reaches the database): TestSMTPPasswordNeverReachesTheDatabase
+//
+// Bounded retries (PRD section 7.3): TestTransientFailuresEndFailedWithOneJob, TestUnreadableAttachmentEndsFailed.
 
 import (
 	"bytes"
@@ -18,11 +20,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,7 +90,23 @@ type deliveryEnv struct {
 	svc    *senddelivery.Service
 	runner *jobrunner.Service
 
-	stopped bool
+	filesFail atomic.Bool // makes every Open of an artifact fail with a read error (not a missing file)
+	stopped   bool
+}
+
+// flakyFiles is the filestore with a switch that makes Open fail.
+type flakyFiles struct {
+	*filestore.Store
+	fail *atomic.Bool
+}
+
+var errReadFailed = errors.New("read failed")
+
+func (f flakyFiles) Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
+	if f.fail.Load() {
+		return nil, errReadFailed
+	}
+	return f.Store.Open(ctx, ref)
 }
 
 // newDeliveryEnv builds everything on a fresh database with the assignments a1 and a2 and their exported homework.
@@ -133,7 +153,7 @@ func (e *deliveryEnv) open(smtpTimeout time.Duration) {
 		e.t.Fatal(err)
 	}
 	e.svc, err = senddelivery.New(senddelivery.Deps{
-		Deliveries: e.dlv, Artifacts: e.files, Email: mailer, Jobs: e.jobs, Credentials: e.creds, Clock: e.clock,
+		Deliveries: e.dlv, Artifacts: flakyFiles{Store: e.files, fail: &e.filesFail}, Email: mailer, Jobs: e.jobs, Credentials: e.creds, Clock: e.clock,
 		IDs: e.ids, Tx: e.db,
 	}, senddelivery.Config{})
 	if err != nil {
@@ -570,4 +590,87 @@ func asBytes(v any) []byte {
 		return b
 	}
 	return nil
+}
+
+// deliveryJobs returns every job of the delivery, of any round.
+func (e *deliveryEnv) deliveryJobs(d *delivery.Delivery) []*job.Job {
+	e.t.Helper()
+	jobs, err := e.jobs.ListByStatus(context.Background(), job.Statuses()...)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var out []*job.Job
+	for _, j := range jobs {
+		if strings.HasPrefix(j.Key(), fmt.Sprintf("%s:%s:", delivery.JobType, d.ID())) {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// The server answers every RCPT with 451 (definitely not accepted, try later). Repeated requests and Resume while the
+// job waits for its retry add no job; after the attempts of its one job the delivery is FAILED, nothing was sent, and
+// a new delivery of the same homework is allowed (PRD section 7.3: bounded retries).
+func TestTransientFailuresEndFailedWithOneJob(t *testing.T) {
+	e := newDeliveryEnv(t, testenv.SMTPBehavior{RcptReply: "451 4.3.0 try again later"}, 5*time.Second)
+	ctx := context.Background()
+	cmd := e.confirmed("p1", "a1")
+	if err := e.svc.SendHomework(ctx, cmd); err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+
+	e.drive("first transient failure", func() bool { return e.delivery("proposal:p1").Attempts() >= 1 })
+	for range 3 {
+		if err := e.svc.SendHomework(ctx, cmd); err != nil {
+			t.Fatalf("repeated request: %v", err)
+		}
+		if err := e.svc.Resume(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.drive("delivery FAILED", func() bool { return e.delivery("proposal:p1").Status() == delivery.StatusFailed })
+	d := e.delivery("proposal:p1")
+	e.drive("job finished", func() bool { return e.jobOf(d, 0).Status().IsTerminal() })
+	jobs := e.deliveryJobs(d)
+	if len(jobs) != 1 || jobs[0].Status() != job.StatusFailed || jobs[0].Attempts() != senddelivery.DefaultMaxAttempts {
+		t.Fatalf("%d jobs, first %s after %d attempts; want one FAILED after %d", len(jobs), jobs[0].Status(),
+			jobs[0].Attempts(), senddelivery.DefaultMaxAttempts)
+	}
+	if d.Attempts() != senddelivery.DefaultMaxAttempts || !strings.HasPrefix(d.LastError(), "attempts exhausted") ||
+		len(e.srv.Messages()) != 0 {
+		t.Fatalf("delivery attempts %d, last error %q, messages %d", d.Attempts(), d.LastError(), len(e.srv.Messages()))
+	}
+
+	e.srv.SetBehavior(testenv.SMTPBehavior{User: mailUser, Password: mailPassword})
+	if err := e.svc.SendHomework(ctx, e.confirmed("p2", "a1")); err != nil {
+		t.Fatalf("new delivery of the same homework: %v", err)
+	}
+	e.drive("new delivery sent", func() bool { return e.delivery("proposal:p2").Status() == delivery.StatusSent })
+}
+
+// The attachment cannot be read on any attempt (a storage error before anything is handed over): the last attempt of
+// the job fails the delivery instead of leaving it PENDING with no job, and the server is never contacted.
+func TestUnreadableAttachmentEndsFailed(t *testing.T) {
+	e := newDeliveryEnv(t, testenv.SMTPBehavior{}, 5*time.Second)
+	ctx := context.Background()
+	if err := e.svc.SendHomework(ctx, e.confirmed("p1", "a1")); err != nil {
+		t.Fatal(err)
+	}
+	e.filesFail.Store(true)
+	e.start()
+
+	e.drive("delivery FAILED", func() bool { return e.delivery("proposal:p1").Status() == delivery.StatusFailed })
+	d := e.delivery("proposal:p1")
+	e.drive("job finished", func() bool { return e.jobOf(d, 0).Status().IsTerminal() })
+	if j := e.jobOf(d, 0); j.Status() != job.StatusFailed || j.Attempts() != senddelivery.DefaultMaxAttempts {
+		t.Fatalf("job %s after %d attempts", j.Status(), j.Attempts())
+	}
+	if d.Attempts() != 0 || !strings.HasPrefix(d.LastError(), "attempts exhausted") || e.srv.Sessions() != 0 {
+		t.Fatalf("delivery attempts %d, last error %q, sessions %d", d.Attempts(), d.LastError(), e.srv.Sessions())
+	}
+	if err := e.svc.Resume(ctx); err != nil || len(e.deliveryJobs(d)) != 1 {
+		t.Fatalf("Resume = %v, %d jobs", err, len(e.deliveryJobs(d)))
+	}
 }
