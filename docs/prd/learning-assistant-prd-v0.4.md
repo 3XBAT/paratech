@@ -285,6 +285,8 @@ When Scheduler detects that a lesson is starting, the application presents a sma
 - The popup must not block other applications.
 - The user can disable automatic recording prompts globally.
 - The user can re-enable prompts from settings.
+- The prompt is offered from the configured lead time before the start until 20 seconds after the start; later (app started mid-lesson, PC asleep at the start) there is no prompt and a missed window is not caught up.
+- If prompts are turned off during a lesson, that lesson does not prompt again, even if prompts are turned back on.
 
 ```mermaid
 flowchart TD
@@ -694,7 +696,7 @@ The MVP should provide a minimal notification policy rather than a full notifica
 
 | ID | Acceptance criterion | Area |
 |---|---|---|
-| AC-01 | At scheduled lesson start, a non-modal recording popup can be shown without forcing the main application window to the foreground. | Recording UX |
+| AC-01 | At scheduled lesson start, a non-modal recording popup can be shown without forcing the main application window to the foreground. The prompt is offered no later than 20 seconds after the start. | Recording UX |
 | AC-02 | The user can globally disable and re-enable automatic recording prompts. | Recording UX |
 | AC-03 | A recording can be started/stopped from the popup and is durably stored locally. | Recording |
 | AC-04 | A recording is automatically finalized at the configured hard maximum (target: 3 hours). | Recording |
