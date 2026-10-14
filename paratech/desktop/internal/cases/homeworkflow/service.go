@@ -2,8 +2,9 @@ package homeworkflow
 
 import "fmt"
 
-// Service runs the homework workflow (PRD sections 9, 10 and 13.3). This task adds the action proposal pipeline
-// (proposals.go); post-processing (TASK-042) and drafts (TASK-043) extend it.
+// Service runs the homework workflow (PRD sections 9, 10 and 13.3): the action proposal pipeline (proposals.go) and
+// the user's edits of assignments (assignments.go); drafts (TASK-043) extend it. The post-processing jobs of a
+// transcript run in PostProcessor (postprocess.go), which needs other ports.
 type Service struct {
 	proposals   ProposalRepository
 	assignments AssignmentRepository

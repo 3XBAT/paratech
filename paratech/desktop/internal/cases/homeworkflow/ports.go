@@ -7,8 +7,11 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/transcript"
 )
@@ -35,14 +38,45 @@ type AssignmentRepository interface {
 	// Get loads an assignment (PRD section 10). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.AssignmentID) (*assignment.Assignment, error)
 
+	// GetBySource loads the assignment made from item index of the extraction answer of transcript t, so that
+	// reprocessing updates it instead of adding a second one (PRD sections 9 and 7.3). It returns an error wrapping
+	// shared.ErrNotFound if there is none.
+	GetBySource(ctx context.Context, t shared.TranscriptID, index int) (*assignment.Assignment, error)
+
 	// Save inserts or updates an assignment (PRD section 10: review and edit locally). It is the
 	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
 	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or
 	// was purged meanwhile yields shared.ErrVersionConflict (never an insert). On success the adapter calls
 	// Persisted(newVersion) on the aggregate, so saving the same instance again works.
 	// A stale version happens for example when the user edited the assignment while a reprocessing job produced new
-	// values.
+	// values. A second assignment for the same extraction item (GetBySource) yields shared.ErrDuplicate.
 	Save(ctx context.Context, a *assignment.Assignment) error
+}
+
+// SummaryRepository stores the summaries of transcripts in the local database (PRD sections 5.3 and 9).
+// Implemented by the sqlite adapter.
+type SummaryRepository interface {
+	// Get loads a summary (PRD section 9). It returns an error wrapping shared.ErrNotFound if there is none.
+	Get(ctx context.Context, id summary.ID) (*summary.Summary, error)
+
+	// Save inserts or updates a summary (PRD section 9). It is the version compare-and-swap of ADR-0004(d), like
+	// AssignmentRepository.Save: an insert of an existing id or a stale version yields shared.ErrVersionConflict.
+	Save(ctx context.Context, s *summary.Summary) error
+}
+
+// RecordingReader gives read access to the recording a transcript was made from, for the lesson it belongs to and its
+// start time (PRD sections 6.2 and 9.1). Implemented by the sqlite adapter.
+type RecordingReader interface {
+	// Get loads a recording (PRD section 6.2). It returns an error wrapping shared.ErrNotFound if there is none.
+	Get(ctx context.Context, id shared.RecordingID) (*recording.Recording, error)
+}
+
+// LessonReader gives read access to the schedule entry of a recording: its title and start are the minimal lesson
+// context of an LLM operation (PRD sections 9.1 and 11). Implemented by the sqlite adapter.
+type LessonReader interface {
+	// Get loads a live lesson (PRD section 11). It returns an error wrapping shared.ErrNotFound if there is none or it
+	// was removed from the schedule.
+	Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
 }
 
 // ProposalRepository stores the actions the LLM proposed, with their validation and confirmation state
@@ -128,7 +162,8 @@ type JobEnqueuer interface {
 
 // Clock supplies the current time (ARCH-24; PRD section 10). Implemented by the clock adapter and by a controllable fake in tests.
 type Clock interface {
-	// Now returns the current time (PRD section 10: draft versions and timestamps).
+	// Now returns the current time in the student's time zone (PRD section 10: draft versions and timestamps). Its
+	// location is the zone in which lesson times are shown to the model and deadlines are read (PRD section 9.1).
 	Now() time.Time
 }
 

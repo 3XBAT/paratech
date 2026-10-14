@@ -1,0 +1,345 @@
+package homeworkflow
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/coursework/summary"
+	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
+	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/domain/transcription/transcript"
+	"paratech/desktop/testenv"
+)
+
+// The student's zone in these tests; lesson times reach the model with this offset.
+var msk = time.FixedZone("MSK", 3*60*60)
+
+// ppT0 is "now" of the post-processing tests: the evening of the lesson day, in the student's zone.
+var ppT0 = time.Date(2026, 10, 14, 20, 0, 0, 0, msk)
+
+// lessonStart is the start of lesson l1 (Wednesday 14 October 2026, 10:00 MSK).
+var lessonStart = time.Date(2026, 10, 14, 10, 0, 0, 0, msk)
+
+// ppStore is the in-memory local database of the post-processing fakes. Aggregates are kept as State and rebuilt with
+// Restore, as the sqlite adapter does, and Save is the version compare-and-swap of ADR-0004(d).
+type ppStore struct {
+	mu          sync.Mutex
+	transcripts map[shared.TranscriptID]*transcript.Transcript
+	recordings  map[shared.RecordingID]*recording.Recording
+	lessons     map[shared.LessonID]*lesson.Lesson
+	summaries   map[summary.ID]summary.State
+	assignments map[shared.AssignmentID]assignment.State
+	jobs        map[string]*job.Job // by idempotency key
+	saves       int                 // successful summary and assignment saves
+
+	failNextSave error // returned once by the next summary or assignment save
+	readErr      error // returned by every transcript Get when set
+	seq          int
+}
+
+func newPPStore() *ppStore {
+	return &ppStore{
+		transcripts: map[shared.TranscriptID]*transcript.Transcript{}, recordings: map[shared.RecordingID]*recording.Recording{},
+		lessons: map[shared.LessonID]*lesson.Lesson{}, summaries: map[summary.ID]summary.State{},
+		assignments: map[shared.AssignmentID]assignment.State{}, jobs: map[string]*job.Job{},
+	}
+}
+
+type ppTranscripts struct{ s *ppStore }
+
+func (r ppTranscripts) Get(_ context.Context, id shared.TranscriptID) (*transcript.Transcript, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.readErr != nil {
+		return nil, r.s.readErr
+	}
+	t, ok := r.s.transcripts[id]
+	if !ok {
+		return nil, fmt.Errorf("transcript %s: %w", id, shared.ErrNotFound)
+	}
+	return t, nil
+}
+
+type ppRecordings struct{ s *ppStore }
+
+func (r ppRecordings) Get(_ context.Context, id shared.RecordingID) (*recording.Recording, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	rec, ok := r.s.recordings[id]
+	if !ok {
+		return nil, fmt.Errorf("recording %s: %w", id, shared.ErrNotFound)
+	}
+	return rec, nil
+}
+
+type ppLessons struct{ s *ppStore }
+
+func (r ppLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	l, ok := r.s.lessons[id]
+	if !ok {
+		return nil, fmt.Errorf("lesson %s: %w", id, shared.ErrNotFound)
+	}
+	return l, nil
+}
+
+type ppSummaries struct{ s *ppStore }
+
+func (r ppSummaries) Get(_ context.Context, id summary.ID) (*summary.Summary, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	st, ok := r.s.summaries[id]
+	if !ok {
+		return nil, fmt.Errorf("summary %s: %w", id, shared.ErrNotFound)
+	}
+	return summary.Restore(st)
+}
+
+func (r ppSummaries) Save(_ context.Context, s *summary.Summary) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if err := r.s.takeSaveErr(); err != nil {
+		return err
+	}
+	stored, exists := r.s.summaries[s.ID()]
+	if (s.Version() == 0) == exists || (exists && stored.Version != s.Version()) {
+		return shared.ErrVersionConflict
+	}
+	st := s.State()
+	st.Version++
+	r.s.summaries[s.ID()] = st
+	r.s.saves++
+	s.Persisted(st.Version)
+	return nil
+}
+
+type ppAssignments struct{ s *ppStore }
+
+func (r ppAssignments) Get(_ context.Context, id shared.AssignmentID) (*assignment.Assignment, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	st, ok := r.s.assignments[id]
+	if !ok {
+		return nil, fmt.Errorf("assignment %s: %w", id, shared.ErrNotFound)
+	}
+	return assignment.Restore(st)
+}
+
+func (r ppAssignments) GetBySource(_ context.Context, t shared.TranscriptID, index int) (*assignment.Assignment, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for _, st := range r.s.assignments {
+		if st.Transcript == t && st.SourceIndex == index {
+			return assignment.Restore(st)
+		}
+	}
+	return nil, fmt.Errorf("assignment %s/%d: %w", t, index, shared.ErrNotFound)
+}
+
+func (r ppAssignments) Save(_ context.Context, a *assignment.Assignment) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if err := r.s.takeSaveErr(); err != nil {
+		return err
+	}
+	stored, exists := r.s.assignments[a.ID()]
+	if (a.Version() == 0) == exists || (exists && stored.Version != a.Version()) {
+		return shared.ErrVersionConflict
+	}
+	st := a.State()
+	if !exists {
+		for _, other := range r.s.assignments {
+			if st.SourceIndex >= 0 && other.Transcript == st.Transcript && other.SourceIndex == st.SourceIndex {
+				return shared.ErrDuplicate
+			}
+		}
+	}
+	st.Version++
+	r.s.assignments[a.ID()] = st
+	r.s.saves++
+	a.Persisted(st.Version)
+	return nil
+}
+
+// takeSaveErr returns and clears failNextSave; the caller holds mu.
+func (s *ppStore) takeSaveErr() error {
+	err := s.failNextSave
+	s.failNextSave = nil
+	return err
+}
+
+type ppJobs struct{ s *ppStore }
+
+func (r ppJobs) Enqueue(_ context.Context, j *job.Job) (shared.JobID, bool, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if old, ok := r.s.jobs[j.Key()]; ok {
+		return old.ID(), false, nil
+	}
+	r.s.jobs[j.Key()] = j
+	j.Persisted(1)
+	return j.ID(), true, nil
+}
+
+type ppIDs struct{ s *ppStore }
+
+func (g ppIDs) next(prefix string) string {
+	g.s.mu.Lock()
+	defer g.s.mu.Unlock()
+	g.s.seq++
+	return fmt.Sprintf("%s%d", prefix, g.s.seq)
+}
+
+func (g ppIDs) NewAssignmentID() shared.AssignmentID { return shared.AssignmentID(g.next("a")) }
+func (g ppIDs) NewJobID() shared.JobID               { return shared.JobID(g.next("j")) }
+func (g ppIDs) NewProposalID() proposal.ID           { return proposal.ID(g.next("p")) }
+
+// assignmentsOf returns the stored assignments of a transcript ordered by source index.
+func (s *ppStore) assignmentsOf(t shared.TranscriptID) []assignment.State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []assignment.State
+	for i := 0; i < len(s.assignments)+1; i++ {
+		for _, st := range s.assignments {
+			if st.Transcript == t && st.SourceIndex == i {
+				out = append(out, st)
+			}
+		}
+	}
+	return out
+}
+
+func (s *ppStore) summaryOf(t shared.TranscriptID) (summary.State, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.summaries[summary.IDOf(t)]
+	return st, ok
+}
+
+func (s *ppStore) records() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.summaries) + len(s.assignments)
+}
+
+// ppEnv is a PostProcessor over the fakes with lesson l1, its recording r1 and transcript t1.
+type ppEnv struct {
+	*ppStore
+	t     *testing.T
+	llm   *testenv.FakeLLM
+	files *testenv.MemArtifacts
+	clock *testenv.FakeClock
+	pp    *PostProcessor
+}
+
+const testAlias = "default"
+
+func newPPEnv(t *testing.T) *ppEnv {
+	t.Helper()
+	e := &ppEnv{
+		ppStore: newPPStore(), t: t, llm: testenv.NewFakeLLM(), files: testenv.NewMemArtifacts(),
+		clock: testenv.NewFakeClock(ppT0),
+	}
+	pp, err := NewPostProcessor(e.deps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.pp = pp
+
+	l, err := lesson.New(lesson.Spec{ID: "l1", Content: lesson.Content{
+		Title: "Geography", Start: lessonStart.UTC(), End: lessonStart.Add(90 * time.Minute).UTC(), TimeZone: "Europe/Moscow",
+	}}, ppT0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.lessons["l1"] = l
+	e.addTranscript("r1", "l1", "t1", lessonStart.Add(2*time.Minute), "Today we talk about rivers.", "Homework: read chapter 4 by Friday.")
+	return e
+}
+
+func (e *ppEnv) deps() PostProcessDeps {
+	return PostProcessDeps{
+		LLM: e.llm, Transcripts: ppTranscripts{e.ppStore}, Recordings: ppRecordings{e.ppStore}, Lessons: ppLessons{e.ppStore},
+		Artifacts: e.files, Summaries: ppSummaries{e.ppStore}, Assignments: ppAssignments{e.ppStore}, Jobs: ppJobs{e.ppStore},
+		Clock: e.clock, IDs: ppIDs{e.ppStore}, ModelAlias: testAlias,
+	}
+}
+
+// addTranscript stores a completed recording started at start, its transcript and the document with lines.
+func (e *ppEnv) addTranscript(rec shared.RecordingID, les shared.LessonID, id shared.TranscriptID, start time.Time, lines ...string) {
+	e.t.Helper()
+	r, err := recording.New(recording.Spec{ID: rec, LessonID: les, MaxDuration: 3 * time.Hour}, start)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.recordings[rec] = r
+
+	ref, err := transcript.DocumentRef(id)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	tr, err := transcript.New(transcript.Spec{
+		ID: id, RecordingID: rec, ModelID: "m1", ModelName: "base", ModelVersion: "1", Language: "ru", Text: ref,
+	}, start.Add(time.Hour))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.transcripts[id] = tr
+	e.writeDocument(ref, lines...)
+}
+
+func (e *ppEnv) writeDocument(ref shared.ArtifactRef, lines ...string) {
+	e.t.Helper()
+	segs := make([]transcript.Segment, len(lines))
+	for i, l := range lines {
+		segs[i] = transcript.Segment{StartMs: int64(i) * 1000, EndMs: int64(i)*1000 + 900, Text: l}
+	}
+	doc, err := transcript.NewDocument("ru", segs)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	data, err := doc.Encode()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.files.Write(context.Background(), ref, strings.NewReader(string(data))); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// snapshot builds the job a worker would run for typ and transcript t.
+func (e *ppEnv) snapshot(id shared.JobID, typ job.Type, t shared.TranscriptID) job.Snapshot {
+	e.t.Helper()
+	j, err := job.New(job.Spec{
+		ID: id, Type: typ, Key: string(id), Payload: fmt.Sprintf(`{"transcript_id":%q}`, t), MaxAttempts: 3,
+	}, ppT0)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return j.Snapshot()
+}
+
+func (e *ppEnv) handle(snap job.Snapshot) error {
+	return e.pp.Handle(context.Background(), snap, nil)
+}
+
+// Compile-time checks: the fakes satisfy the ports they stand for.
+var (
+	_ TranscriptReader     = ppTranscripts{}
+	_ RecordingReader      = ppRecordings{}
+	_ LessonReader         = ppLessons{}
+	_ SummaryRepository    = ppSummaries{}
+	_ AssignmentRepository = ppAssignments{}
+	_ JobEnqueuer          = ppJobs{}
+	_ IDGenerator          = ppIDs{}
+	_ LLMClient            = (*testenv.FakeLLM)(nil)
+)
