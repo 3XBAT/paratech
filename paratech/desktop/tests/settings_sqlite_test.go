@@ -1,7 +1,8 @@
 package tests
 
 // The SQLite settings repository behind the use case ports that consume it (TASK-007, ARCH-21): the writer port of
-// modelcatalog and the reader ports of recordingsession, jobrunner and transcribe.
+// modelcatalog and the reader ports of recordingsession and jobrunner. The STT handler (transcribe) reads no settings:
+// its model comes from the job pin and the power switch is applied by the job runner.
 
 import (
 	"context"
@@ -13,14 +14,12 @@ import (
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/recordingsession"
-	"paratech/desktop/internal/cases/transcribe"
 )
 
 var (
 	_ modelcatalog.SettingsRepository = (*sqlite.SettingsRepository)(nil)
 	_ recordingsession.SettingsReader = (*sqlite.SettingsRepository)(nil)
 	_ jobrunner.SettingsReader        = (*sqlite.SettingsRepository)(nil)
-	_ transcribe.SettingsReader       = (*sqlite.SettingsRepository)(nil)
 )
 
 // withSettings is one run of the app: open the database, build the repository, close everything afterwards.
@@ -81,10 +80,8 @@ func TestSettingsThroughPortsSurviveRestart(t *testing.T) {
 			t.Errorf("jobrunner reader: acOnly=%v err=%v, want the restriction off (AC-22)", s != nil && s.ProcessOnlyOnACPower(), err)
 		}
 
-		var stt transcribe.SettingsReader = r
-		s, err = stt.Load(ctx)
-		if err != nil || s.ProcessOnlyOnACPower() || s.Version() != 1 || !s.NotifyOnProcessingComplete() {
-			t.Errorf("transcribe reader: got %+v, %v; want the stored row with version 1", s, err)
+		if err == nil && (s.Version() != 1 || !s.NotifyOnProcessingComplete()) {
+			t.Errorf("jobrunner reader: got %+v; want the stored row with version 1", s)
 		}
 	})
 }
