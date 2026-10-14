@@ -132,7 +132,14 @@ func (e CatalogEntry) VerifySize(size int64) error {
 
 // Catalog is the validated manifest of downloadable models, in manifest order (PRD section 8.1). Ids, name and
 // version pairs and digests are unique.
-type Catalog struct{ entries []CatalogEntry }
+type Catalog struct {
+	entries []CatalogEntry
+	hosts   HostAllowlist
+}
+
+// DownloadHosts returns the hosts a download may reach: the host of every entry's source URL and the extra hosts of
+// the manifest's download_hosts (for example the CDN a source redirects to).
+func (c Catalog) DownloadHosts() HostAllowlist { return c.hosts }
 
 // Entries returns a copy of the entries.
 func (c Catalog) Entries() []CatalogEntry { return append([]CatalogEntry(nil), c.entries...) }
@@ -164,10 +171,14 @@ func (c Catalog) CheckImportIdentity(name ModelName, version ModelVersion) error
 //	{"schema_version": 1, "models": [{"id": "base-q5_1", "name": "base", "version": "1",
 //	  "size_bytes": 59707625, "sha256": "<64 hex>", "source_url": "https://host/path/file.bin",
 //	  "quantization": "q5_1", "capabilities": ["multilingual"],
-//	  "recommendation": {"min_cpu_cores": 2, "min_ram_mb": 1024, "preferred": true}}]}
+//	  "recommendation": {"min_cpu_cores": 2, "min_ram_mb": 1024, "preferred": true}}],
+//	 "download_hosts": ["cdn.example.com"]}
+//
+// download_hosts is optional.
 type manifestDoc struct {
 	SchemaVersion int                `json:"schema_version"`
 	Models        []manifestEntryDoc `json:"models"`
+	DownloadHosts []string           `json:"download_hosts"`
 }
 
 type manifestEntryDoc struct {
@@ -191,7 +202,8 @@ type recommendationDoc struct {
 // ParseCatalog parses and validates a manifest (PRD section 8.1). It is strict: valid UTF-8 of at most
 // MaxCatalogBytes, exactly one JSON object, only known lowercase keys, no repeated key in any object, the expected
 // schema version, 1..MaxCatalogEntries entries that pass NewCatalogEntry, and no two entries with the same id, the
-// same name and version, or the same SHA-256.
+// same name and version, or the same SHA-256. download_hosts and the hosts of the source URLs must pass
+// NewHostAllowlist.
 func ParseCatalog(data []byte) (Catalog, error) {
 	if len(data) > MaxCatalogBytes {
 		return Catalog{}, fmt.Errorf("%w: larger than %d bytes", ErrInvalidCatalog, MaxCatalogBytes)
@@ -216,7 +228,13 @@ func ParseCatalog(data []byte) (Catalog, error) {
 		return Catalog{}, fmt.Errorf("%w: %d models, want 1..%d", ErrInvalidCatalog, len(doc.Models), MaxCatalogEntries)
 	}
 
+	hosts, err := NewHostAllowlist(doc.DownloadHosts)
+	if err != nil {
+		return Catalog{}, fmt.Errorf("%w: download_hosts: %w", ErrInvalidCatalog, err)
+	}
+
 	entries := make([]CatalogEntry, 0, len(doc.Models))
+	sourceHosts := make([]string, 0, len(doc.Models))
 	ids := map[CatalogID]bool{}
 	identities := map[[2]string]bool{}
 	sums := map[SHA256]bool{}
@@ -235,10 +253,16 @@ func ParseCatalog(data []byte) (Catalog, error) {
 		case sums[e.sha256]:
 			return Catalog{}, fmt.Errorf("%w: model %d: sha256 repeats", ErrInvalidCatalog, i)
 		}
+		host, err := NormalizeHost(e.source.Host())
+		if err != nil {
+			return Catalog{}, fmt.Errorf("%w: model %d: %w", ErrInvalidCatalog, i, err)
+		}
+
 		ids[e.id], identities[identity], sums[e.sha256] = true, true, true
 		entries = append(entries, e)
+		sourceHosts = append(sourceHosts, host)
 	}
-	return Catalog{entries: entries}, nil
+	return Catalog{entries: entries, hosts: hosts.with(sourceHosts...)}, nil
 }
 
 func (m manifestEntryDoc) entry() (CatalogEntry, error) {
