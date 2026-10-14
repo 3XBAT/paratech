@@ -47,8 +47,8 @@ const (
 	msgReadAttachment = "smtp: cannot read the attachment"
 	msgTooLarge       = "smtp: attachment is larger than the limit"
 	msgChanged        = "smtp: attachment is not the confirmed content"
-	msgNoPassword     = "smtp: mail password is not configured"
-	msgCredentials    = "smtp: credential store unavailable"
+	msgNotConfigured  = "smtp: mail password is not configured"
+	msgStoreDown      = "smtp: credential store unavailable"
 	msgMessage        = "smtp: cannot build the message"
 	msgCancelled      = "smtp: cancelled before sending"
 	msgConnect        = "smtp: cannot reach the server"
@@ -169,9 +169,9 @@ func (m *Mailer) Send(ctx context.Context, d *delivery.Delivery, attachment io.R
 	password, err := m.secrets.Get(ctx, m.cfg.CredentialName)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return fail(msgNoPassword, delivery.ErrRejected)
+		return fail(msgNotConfigured, delivery.ErrRejected)
 	case err != nil:
-		return fail(msgCredentials, delivery.ErrTransient)
+		return fail(msgStoreDown, delivery.ErrTransient)
 	}
 	if ctx.Err() != nil {
 		return fail(msgCancelled, delivery.ErrTransient)

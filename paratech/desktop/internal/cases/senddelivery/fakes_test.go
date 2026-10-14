@@ -111,16 +111,6 @@ func (s *store) ListByStatus(ctx context.Context, statuses ...delivery.Status) (
 	return out, nil
 }
 
-// put stores a delivery in the given state directly, for tests that start from a state.
-func (s *store) put(d *delivery.Delivery) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st := d.State()
-	st.Version = d.Version() + 1
-	s.deliveries[d.ID()] = st
-	d.Persisted(st.Version)
-}
-
 func (s *store) status(id shared.DeliveryID) delivery.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
