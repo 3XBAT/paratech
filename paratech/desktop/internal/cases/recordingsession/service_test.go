@@ -25,6 +25,10 @@ const (
 
 var errDevice = errors.New("output device changed")
 
+// heartbeatOff is longer than any cap: newEnv uses it for a config with the default interval, so that a test that is
+// not about the heartbeat sees only the saves it causes. Heartbeat tests set their own interval.
+const heartbeatOff = 24 * time.Hour
+
 type env struct {
 	t     *testing.T
 	clock *testenv.FakeClock
@@ -39,6 +43,9 @@ type env struct {
 
 func newEnv(t *testing.T, cfg Config) *env {
 	t.Helper()
+	if cfg.HeartbeatInterval == DefaultHeartbeatInterval {
+		cfg.HeartbeatInterval = heartbeatOff
+	}
 	e := &env{
 		t: t, clock: testenv.NewFakeClock(t0), repo: newMemRepo(), tr: newMemTranscripts(), tx: &fakeTx{},
 		files: testenv.NewMemArtifacts(),
@@ -191,6 +198,8 @@ func TestNewValidates(t *testing.T) {
 		{"cap too long", nil, func(c Config) Config { c.MaxDuration = 13 * time.Hour; return c }},
 		{"no extension", nil, func(c Config) Config { c.TrackExtension = ""; return c }},
 		{"bad extension", nil, func(c Config) Config { c.TrackExtension = "../x"; return c }},
+		{"no heartbeat", nil, func(c Config) Config { c.HeartbeatInterval = 0; return c }},
+		{"negative heartbeat", nil, func(c Config) Config { c.HeartbeatInterval = -time.Second; return c }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

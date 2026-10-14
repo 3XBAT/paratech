@@ -22,15 +22,19 @@ type Deps struct {
 	Log         *slog.Logger // optional: nil discards
 }
 
+// DefaultHeartbeatInterval is how often the session of a running capture stores its liveness mark (PRD section 6.2).
+const DefaultHeartbeatInterval = 15 * time.Second
+
 // Config tunes the Service.
 type Config struct {
-	MaxDuration    time.Duration // hard cap of a recording; validated by the limits policy
-	TrackExtension string        // extension of the final track recordings/<id>.<ext>
+	MaxDuration       time.Duration // hard cap of a recording; validated by the limits policy
+	TrackExtension    string        // extension of the final track recordings/<id>.<ext>
+	HeartbeatInterval time.Duration // how often a running capture stores its heartbeat; positive
 }
 
-// DefaultConfig returns the 3 hour cap and a WAV track.
+// DefaultConfig returns the 3 hour cap, a WAV track and a heartbeat every 15 seconds.
 func DefaultConfig() Config {
-	return Config{MaxDuration: limits.DefaultMaxDuration, TrackExtension: "wav"}
+	return Config{MaxDuration: limits.DefaultMaxDuration, TrackExtension: "wav", HeartbeatInterval: DefaultHeartbeatInterval}
 }
 
 // StartRequest is what the popup or the UI asks for.
