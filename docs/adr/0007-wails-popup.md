@@ -13,8 +13,8 @@
 ## Result (checked on Windows 10 22H2, WebView2 155, via scripts; not with Zoom)
 | Goal | Result |
 |---|---|
-| Popup without focus steal | Works with a workaround. Popup: frameless, always on top, off the taskbar, fixed size, bottom-right of the work area, `WS_EX_NOACTIVATE`. Wails `Show()` activates it anyway, so `ShowPopup` first calls `ShowWindow(SW_SHOWNOACTIVATE)`; then the foreground window stayed unchanged. Clicking the popup may activate it. |
-| Tray | Works: icon, menu, left click opens the main window. Icon is the Wails default until an app icon exists. |
+| Popup without focus steal | Works with a workaround. Popup: frameless, always on top, off the taskbar, fixed size, bottom-right of the work area, `WS_EX_NOACTIVATE`. Wails `Show()` activates it anyway, so `ShowPopup` first calls `ShowWindow(SW_SHOWNOACTIVATE)`; then the foreground window stayed unchanged (measured in a scratch program with the same window options and show sequence). Clicking the popup may activate it. |
+| Tray | Icon appears (Wails default until an app icon exists). Menu and click handlers are wired but were not clicked by the scripts. |
 | Single instance | Works: Wails `SingleInstance` (named mutex). A second launch exits with code 0 within ~70 ms; the first one gets a callback that shows its main window (not observed visually). |
 | Graceful stop | Works: Ctrl+Break (Go maps it to `os.Interrupt` like Ctrl+C) cancels the context, the shell quits and `main` logs "gracefully stopped". |
 | Notifications | Feasible: Wails `services/notifications` (toast). Not used yet: it writes registry keys; decide with the notification policy (PRD §15). |
