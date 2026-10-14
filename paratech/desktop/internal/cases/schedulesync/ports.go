@@ -68,8 +68,9 @@ type LessonRepository interface {
 }
 
 // ScheduleParser reads one import format (CSV, ICS or XLSX) into rows (PRD section 11.2, AC-16). Implemented by one
-// adapter per format (csvschedule for CSV). It only reads: nothing is stored, and the same bytes give the same rows,
-// so the commit can parse the file again and compare with the preview.
+// adapter per format (csvschedule for CSV, icsschedule for ICS). It only reads: nothing is stored, and the same bytes
+// give the same rows (for ICS within one day: its import dates follow the clock), so the commit can parse the file
+// again and compare with the preview.
 type ScheduleParser interface {
 	// Parse reads the whole file (PRD section 11.2). Problems of single rows are returned as data in
 	// importplan.Parsed.Errors with their line numbers; an error wrapping importplan.ErrUnreadableFile means the file
