@@ -340,3 +340,35 @@ func assertClean(t *testing.T, err error) {
 		t.Fatalf("error %q spans lines", text)
 	}
 }
+
+// The server closes the connection without a reply at different points. Before the content (RCPT, DATA) nothing can
+// have been accepted: transient. While the content is written the server may still have taken it: unknown.
+func TestConnectionDrops(t *testing.T) {
+	big := strings.Repeat("homework line\n", 300_000) // about 4 MB: far more than the socket buffers, so a write fails
+	tests := []struct {
+		name string
+		drop testenv.Drop
+		body string
+		want error
+		msg  string
+	}{
+		{"before the RCPT reply", testenv.DropAtRcpt, content, delivery.ErrTransient, msgCheck},
+		{"no reply to DATA", testenv.DropAtData, content, delivery.ErrTransient, msgCheck},
+		{"while writing the content", testenv.DropInContent, big, delivery.ErrOutcomeUnknown, msgWrite},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t, testenv.SMTPBehavior{Drop: tt.drop}, func(c *Config) { c.Timeout = 5 * time.Second })
+			err := f.send(t, context.Background(), tt.body)
+			if !errors.Is(err, tt.want) || !strings.HasPrefix(err.Error(), tt.msg) {
+				t.Fatalf("Send = %v, want %v with %q", err, tt.want, tt.msg)
+			}
+			if tt.want == delivery.ErrTransient && errors.Is(err, delivery.ErrOutcomeUnknown) {
+				t.Fatalf("Send = %v: nothing was handed over, the outcome is known", err)
+			}
+			if len(f.srv.Messages()) != 0 {
+				t.Fatalf("server received %d messages", len(f.srv.Messages()))
+			}
+		})
+	}
+}

@@ -35,6 +35,23 @@ const (
 	AfterDataDrop
 )
 
+// Drop is a point at which the fake SMTP server closes the connection without a word.
+type Drop int
+
+// Drop points.
+const (
+	DropNone Drop = iota
+
+	// DropAtRcpt closes the connection instead of answering RCPT TO: nothing of the message was sent.
+	DropAtRcpt
+
+	// DropAtData closes the connection instead of answering DATA: the client never got to send the content.
+	DropAtData
+
+	// DropInContent answers DATA with 354 and closes the connection while the client writes the content.
+	DropInContent
+)
+
 // SMTPBehavior scripts the fake SMTP server. A reply is a full SMTP reply line such as "550 5.1.1 no such user";
 // an empty reply means success.
 type SMTPBehavior struct {
@@ -49,6 +66,7 @@ type SMTPBehavior struct {
 	DataReply  string // reply to DATA (354 by default)
 	FinalReply string // reply after the message (250 by default)
 	AfterData  AfterData
+	Drop       Drop
 }
 
 // SMTPLogin is one AUTH attempt the fake server saw.
@@ -246,8 +264,14 @@ func (f *FakeSMTP) session(c net.Conn) {
 		case "MAIL":
 			err = s.reply(orDefault(b.MailReply, "250 2.1.0 ok"))
 		case "RCPT":
+			if b.Drop == DropAtRcpt {
+				return
+			}
 			err = s.reply(orDefault(b.RcptReply, "250 2.1.5 ok"))
 		case "DATA":
+			if b.Drop == DropAtData {
+				return
+			}
 			if keep := f.data(s, b); !keep {
 				return
 			}
@@ -330,6 +354,9 @@ func (f *FakeSMTP) data(s *smtpConn, b SMTPBehavior) bool {
 	}
 	if !strings.HasPrefix(reply, "354") {
 		return true
+	}
+	if b.Drop == DropInContent {
+		return false
 	}
 
 	var msg bytes.Buffer
