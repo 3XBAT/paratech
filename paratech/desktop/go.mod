@@ -3,10 +3,13 @@ module paratech/desktop
 go 1.26.9
 
 require (
+	connectrpc.com/connect v1.21.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.29
 	golang.org/x/sys v0.48.0
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.60.1
+	paratech/shared v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -28,3 +31,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace paratech/shared => ../shared
