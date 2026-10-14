@@ -10,7 +10,8 @@ package tests
 //     TestCrashDuringSendIsReconciledNotResent
 //   - Step 4 (the SMTP password never reaches the database): TestSMTPPasswordNeverReachesTheDatabase
 //
-// Bounded retries (PRD section 7.3): TestTransientFailuresEndFailedWithOneJob, TestUnreadableAttachmentEndsFailed.
+// Bounded retries (PRD section 7.3): TestTransientFailuresEndFailedWithOneJob, TestUnreadableAttachmentEndsFailed,
+// TestCrashBeforeSendingIsRequeued.
 
 import (
 	"bytes"
@@ -672,5 +673,38 @@ func TestUnreadableAttachmentEndsFailed(t *testing.T) {
 	}
 	if err := e.svc.Resume(ctx); err != nil || len(e.deliveryJobs(d)) != 1 {
 		t.Fatalf("Resume = %v, %d jobs", err, len(e.deliveryJobs(d)))
+	}
+}
+
+// The process dies after the job was claimed but before SENDING was stored. Recovery finds the job of the current
+// round by its key (no new job is added) and requeues it; the message is sent exactly once.
+func TestCrashBeforeSendingIsRequeued(t *testing.T) {
+	e := newDeliveryEnv(t, testenv.SMTPBehavior{}, 5*time.Second)
+	ctx := context.Background()
+	if err := e.svc.SendHomework(ctx, e.confirmed("p1", "a1")); err != nil {
+		t.Fatal(err)
+	}
+	filter, err := job.NewClaimFilter([]job.Type{senddelivery.JobType}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := e.jobs.Claim(ctx, e.clock.Now(), filter); err != nil || !ok {
+		t.Fatalf("Claim: %v %v", ok, err)
+	}
+	e.stop()
+
+	e.open(5 * time.Second)
+	rep, err := e.runner.Recover(ctx)
+	if err != nil || len(rep.Requeued) != 1 || len(rep.Failed)+len(rep.Completed)+len(rep.Errors) != 0 {
+		t.Fatalf("Recover = %+v, %v", rep, err)
+	}
+	if err := e.svc.Resume(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+
+	e.drive("delivery sent", func() bool { return e.delivery("proposal:p1").Status() == delivery.StatusSent })
+	if d := e.delivery("proposal:p1"); len(e.deliveryJobs(d)) != 1 || len(e.srv.Messages()) != 1 {
+		t.Fatalf("%d jobs, %d messages; want 1 and 1", len(e.deliveryJobs(d)), len(e.srv.Messages()))
 	}
 }
