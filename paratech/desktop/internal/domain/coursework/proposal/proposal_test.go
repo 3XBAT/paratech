@@ -28,8 +28,25 @@ func mustRecipient(t *testing.T, s string) Recipient {
 	return r
 }
 
+// Digests of two different export contents.
+const (
+	shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	shaB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
+func mustDigest(t *testing.T, sha string, size int64) Digest {
+	t.Helper()
+	d, err := NewDigest(sha, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 func goodFacts(t *testing.T) Facts {
-	return Facts{AssignmentExists: true, Recipient: mustRecipient(t, "teacher@school.example"), ArtifactExists: true}
+	return Facts{
+		AssignmentExists: true, Recipient: mustRecipient(t, "teacher@school.example"), Attachment: mustDigest(t, shaA, 11),
+	}
 }
 
 func mustNew(t *testing.T, out string) *Proposal {
@@ -67,6 +84,12 @@ func inStatus(t *testing.T, out string, s Status) *Proposal {
 		step(p.Validate(goodFacts(t), t0))
 		step(p.Confirm(t0.Add(time.Minute)))
 		step(p.MarkExecuted(t0.Add(2 * time.Minute)))
+	case StatusStale:
+		step(p.Validate(goodFacts(t), t0))
+		step(p.Confirm(t0.Add(time.Minute)))
+		if err := p.Recheck(Facts{}, t0.Add(2*time.Minute)); !errors.Is(err, ErrStale) {
+			t.Fatalf("Recheck = %v, want ErrStale", err)
+		}
 	default:
 		t.Fatalf("no recipe for %s", s)
 	}
@@ -84,6 +107,7 @@ func TestTransitionMatrix(t *testing.T) {
 		{StatusValidated, StatusConfirmed}: true,
 		{StatusValidated, StatusDeclined}:  true,
 		{StatusConfirmed, StatusExecuted}:  true,
+		{StatusConfirmed, StatusStale}:     true,
 	}
 	for _, from := range Statuses() {
 		for _, to := range Statuses() {
@@ -99,7 +123,7 @@ func TestTransitionMatrix(t *testing.T) {
 		t.Fatal("unknown status must not be valid or transition")
 	}
 	for _, s := range Statuses() {
-		want := s == StatusRejected || s == StatusDeclined || s == StatusExecuted
+		want := s == StatusRejected || s == StatusDeclined || s == StatusExecuted || s == StatusStale
 		if s.IsTerminal() != want {
 			t.Errorf("%s.IsTerminal() = %v, want %v", s, s.IsTerminal(), want)
 		}
@@ -256,7 +280,7 @@ func TestValidate(t *testing.T) {
 		{"export unknown assignment", outExport, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
 		{"deadline unknown assignment", outDeadline, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
 		{"email no recipient", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, t0, StatusRejected, ReasonNoRecipient},
-		{"email no artifact", outEmail, func(f *Facts) { f.ArtifactExists = false }, t0, StatusRejected, ReasonNoArtifact},
+		{"email no artifact", outEmail, func(f *Facts) { f.Attachment = Digest{} }, t0, StatusRejected, ReasonNoArtifact},
 		{"export needs no artifact or recipient", outExport, func(f *Facts) { *f = Facts{AssignmentExists: true} }, t0, StatusValidated, ""},
 		{"deadline in the past", outDeadline, nil, t0.AddDate(0, 0, 7), StatusRejected, ReasonDueOutOfRange},
 		{"deadline too far ahead", outDeadline, nil, t0.Add(-MaxDueAhead - 7*24*time.Hour), StatusRejected, ReasonDueOutOfRange},
@@ -274,9 +298,12 @@ func TestValidate(t *testing.T) {
 			if p.Status() != tc.status || p.Reason() != tc.reason {
 				t.Fatalf("status %s reason %q, want %s %q", p.Status(), p.Reason(), tc.status, tc.reason)
 			}
-			wantRecipient := p.Kind() == KindSendHomework && tc.status == StatusValidated
-			if wantRecipient != (p.Recipient() == f.Recipient && !p.Recipient().IsZero()) {
+			pinned := p.Kind() == KindSendHomework && tc.status == StatusValidated
+			if pinned != (p.Recipient() == f.Recipient && !p.Recipient().IsZero()) {
 				t.Fatalf("recipient = %q", p.Recipient().Address())
+			}
+			if pinned != (p.AttachmentDigest() == f.Attachment && !p.AttachmentDigest().IsZero()) {
+				t.Fatalf("attachment = %+v", p.AttachmentDigest())
 			}
 		})
 	}
@@ -326,7 +353,8 @@ func TestCommandContents(t *testing.T) {
 		t.Fatal(err)
 	}
 	if email.IdempotencyKey() != "proposal:p1" || email.AssignmentID() != "a1" ||
-		email.Recipient().Address() != "teacher@school.example" || email.Attachment() != ref {
+		email.Recipient().Address() != "teacher@school.example" || email.Attachment() != ref ||
+		email.AttachmentDigest() != mustDigest(t, shaA, 11) {
 		t.Fatalf("email command: %+v", email)
 	}
 
@@ -398,6 +426,17 @@ func TestRestoreRejectsInconsistentState(t *testing.T) {
 		{"validated with confirmation time", base(outEmail, StatusValidated), func(s *State) { s.ConfirmedAt = t0 }},
 		{"executed without time", base(outEmail, StatusExecuted), func(s *State) { s.ExecutedAt = time.Time{} }},
 		{"confirmed with execution time", base(outEmail, StatusConfirmed), func(s *State) { s.ExecutedAt = t0 }},
+		{"confirmed email without attachment", base(outEmail, StatusConfirmed), func(s *State) { s.AttachmentSHA256, s.AttachmentSize = "", 0 }},
+		{"confirmed email with bad digest", base(outEmail, StatusConfirmed), func(s *State) { s.AttachmentSHA256 = "ABC" }},
+		{"confirmed email with negative size", base(outEmail, StatusConfirmed), func(s *State) { s.AttachmentSize = -1 }},
+		{"export with attachment", base(outExport, StatusConfirmed), func(s *State) { s.AttachmentSHA256 = shaA }},
+		{"proposed email with attachment", base(outEmail, StatusProposed), func(s *State) { s.AttachmentSHA256 = shaA }},
+		{"stale without reason", base(outEmail, StatusStale), func(s *State) { s.Reason = "" }},
+		{"stale with a validation reason", base(outEmail, StatusStale), func(s *State) { s.Reason = ReasonDueOutOfRange }},
+		{"rejected with a stale reason", base(outEmail, StatusRejected), func(s *State) { s.Reason = ReasonRecipientChanged }},
+		{"stale without confirmation time", base(outEmail, StatusStale), func(s *State) { s.ConfirmedAt = time.Time{} }},
+		{"stale with execution time", base(outEmail, StatusStale), func(s *State) { s.ExecutedAt = t0 }},
+		{"stale email without attachment", base(outEmail, StatusStale), func(s *State) { s.AttachmentSHA256, s.AttachmentSize = "", 0 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -407,6 +446,107 @@ func TestRestoreRejectsInconsistentState(t *testing.T) {
 				t.Fatalf("Restore accepted %+v as %s", st, p.Status())
 			}
 		})
+	}
+}
+
+// Recheck before execution: what the user confirmed must still hold, else the proposal goes STALE and no command
+// can be built from it.
+func TestRecheck(t *testing.T) {
+	cases := []struct {
+		name   string
+		out    string
+		facts  func(f *Facts)
+		reason RejectReason // empty: still valid
+	}{
+		{"email unchanged", outEmail, nil, ""},
+		{"export unchanged", outExport, nil, ""},
+		{"deadline unchanged", outDeadline, nil, ""},
+		{"export ignores recipient and file", outExport, func(f *Facts) { *f = Facts{AssignmentExists: true} }, ""},
+		{"deadline ignores recipient and file", outDeadline, func(f *Facts) { *f = Facts{AssignmentExists: true} }, ""},
+		{"email assignment deleted", outEmail, func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
+		{"export assignment deleted", outExport, func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
+		{"deadline assignment deleted", outDeadline, func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
+		{"recipient changed", outEmail, func(f *Facts) { f.Recipient = mustRecipient(t, "other@school.example") }, ReasonRecipientChanged},
+		{"recipient removed", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, ReasonRecipientChanged},
+		{"attachment removed", outEmail, func(f *Facts) { f.Attachment = Digest{} }, ReasonNoArtifact},
+		{"attachment content changed", outEmail, func(f *Facts) { f.Attachment = mustDigest(t, shaB, 11) }, ReasonArtifactChanged},
+		{"attachment size changed", outEmail, func(f *Facts) { f.Attachment = mustDigest(t, shaA, 12) }, ReasonArtifactChanged},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := inStatus(t, tc.out, StatusConfirmed)
+			f := goodFacts(t)
+			if tc.facts != nil {
+				tc.facts(&f)
+			}
+			err := p.Recheck(f, t0.Add(time.Hour))
+			if tc.reason == "" {
+				if err != nil || p.Status() != StatusConfirmed || p.Reason() != "" {
+					t.Fatalf("err = %v, status %s, reason %q", err, p.Status(), p.Reason())
+				}
+				return
+			}
+			if !errors.Is(err, ErrStale) || p.Status() != StatusStale || p.Reason() != tc.reason {
+				t.Fatalf("err = %v, status %s, reason %q; want ErrStale, STALE, %q", err, p.Status(), p.Reason(), tc.reason)
+			}
+			if _, err := p.EmailCommand(); !errors.Is(err, ErrNotConfirmed) {
+				t.Fatalf("command from a stale proposal: %v", err)
+			}
+		})
+	}
+}
+
+func TestRecheckOnlyFromConfirmed(t *testing.T) {
+	for _, s := range Statuses() {
+		if s == StatusConfirmed {
+			continue
+		}
+		p := inStatus(t, outEmail, s)
+		if err := p.Recheck(goodFacts(t), t0.Add(time.Hour)); !errors.Is(err, ErrNotConfirmed) || p.Status() != s {
+			t.Errorf("Recheck from %s = %v, status %s", s, err, p.Status())
+		}
+		if err := p.Recheck(Facts{}, t0.Add(time.Hour)); !errors.Is(err, ErrNotConfirmed) || p.Status() != s {
+			t.Errorf("Recheck with stale facts from %s = %v, status %s", s, err, p.Status())
+		}
+	}
+}
+
+func TestNewDigest(t *testing.T) {
+	cases := []struct {
+		sha  string
+		size int64
+		ok   bool
+	}{
+		{shaA, 0, true},
+		{"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1 << 20, true},
+		{"", 0, false},
+		{shaA[:63], 1, false},
+		{shaA + "a", 1, false},
+		{strings.ToUpper(shaA), 1, false},
+		{"g" + shaA[1:], 1, false},
+		{shaA, -1, false},
+	}
+	for _, tc := range cases {
+		d, err := NewDigest(tc.sha, tc.size)
+		if tc.ok != (err == nil) {
+			t.Errorf("NewDigest(%q, %d) = %v, want ok = %v", tc.sha, tc.size, err, tc.ok)
+			continue
+		}
+		if !tc.ok && (!errors.Is(err, ErrInvalidDigest) || !d.IsZero()) {
+			t.Errorf("NewDigest(%q, %d) = %+v, %v", tc.sha, tc.size, d, err)
+		}
+		if tc.ok && (d.SHA256() != tc.sha || d.Size() != tc.size || d.IsZero()) {
+			t.Errorf("NewDigest(%q, %d) = %+v", tc.sha, tc.size, d)
+		}
+	}
+}
+
+func TestKindNeeds(t *testing.T) {
+	for _, k := range Kinds() {
+		want := k == KindSendHomework
+		if k.NeedsRecipient() != want || k.NeedsAttachment() != want {
+			t.Errorf("%s: NeedsRecipient %v, NeedsAttachment %v, want %v", k, k.NeedsRecipient(), k.NeedsAttachment(), want)
+		}
 	}
 }
 

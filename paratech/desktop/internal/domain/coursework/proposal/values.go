@@ -51,21 +51,35 @@ func (k Kind) Valid() bool {
 	return false
 }
 
-// RejectReason tells why validation rejected a proposal. The set is closed and written by the core, never by the model.
+// NeedsRecipient reports whether the kind is checked against the configured recipient.
+func (k Kind) NeedsRecipient() bool { return k == KindSendHomework }
+
+// NeedsAttachment reports whether the kind is checked against the content of the export file.
+func (k Kind) NeedsAttachment() bool { return k == KindSendHomework }
+
+// RejectReason tells why a proposal was rejected at validation or went stale before execution. The set is closed and
+// written by the core, never by the model.
 type RejectReason string
 
 // Reject reasons.
 const (
 	ReasonUnknownAssignment RejectReason = "unknown_assignment"        // the referenced assignment does not exist locally
 	ReasonNoRecipient       RejectReason = "no_recipient_configured"   // no homework recipient in the local settings
-	ReasonNoArtifact        RejectReason = "homework_artifact_missing" // nothing was exported for the assignment yet
+	ReasonNoArtifact        RejectReason = "homework_artifact_missing" // nothing was exported for the assignment (yet)
 	ReasonDueOutOfRange     RejectReason = "due_out_of_range"          // the deadline is in the past or too far ahead
+
+	// Stale only: the trusted state the user confirmed changed before execution.
+	ReasonRecipientChanged RejectReason = "recipient_changed"         // the configured recipient is not the confirmed one
+	ReasonArtifactChanged  RejectReason = "homework_artifact_changed" // the export file is not the confirmed content
 )
 
-func (r RejectReason) valid() bool {
-	switch r {
-	case ReasonUnknownAssignment, ReasonNoRecipient, ReasonNoArtifact, ReasonDueOutOfRange:
-		return true
+// validFor reports whether r is a reason a proposal in status s may carry.
+func (r RejectReason) validFor(s Status) bool {
+	switch s {
+	case StatusRejected:
+		return r == ReasonUnknownAssignment || r == ReasonNoRecipient || r == ReasonNoArtifact || r == ReasonDueOutOfRange
+	case StatusStale:
+		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact || r == ReasonArtifactChanged
 	}
 	return false
 }
@@ -105,12 +119,38 @@ func (r Recipient) Address() string { return r.address }
 // IsZero reports whether no recipient is set.
 func (r Recipient) IsZero() bool { return r.address == "" }
 
-// Facts is the trusted local state a proposal is validated against. The use case reads it from local ports (the
-// assignment repository, the settings, the Storage Manager); nothing in it comes from the model.
+// Digest pins the content of a file: its SHA-256 and size. The use case computes it; the domain only compares.
+type Digest struct {
+	sha256 string
+	size   int64
+}
+
+// NewDigest validates a lowercase hex SHA-256 (64 characters) and a non-negative size.
+func NewDigest(sha256Hex string, size int64) (Digest, error) {
+	if len(sha256Hex) != 64 || size < 0 || strings.ContainsFunc(sha256Hex, func(r rune) bool {
+		return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+	}) {
+		return Digest{}, fmt.Errorf("%w: want 64 lowercase hex characters and a non-negative size", ErrInvalidDigest)
+	}
+	return Digest{sha256: sha256Hex, size: size}, nil
+}
+
+// SHA256 returns the lowercase hex SHA-256 of the content.
+func (d Digest) SHA256() string { return d.sha256 }
+
+// Size returns the content size in bytes.
+func (d Digest) Size() int64 { return d.size }
+
+// IsZero reports whether no content is pinned (an empty file still has a digest).
+func (d Digest) IsZero() bool { return d == Digest{} }
+
+// Facts is the trusted local state a proposal is validated and, before execution, re-checked against. The use case
+// reads it from local ports (the assignment repository, the settings, the Storage Manager), only what the kind needs
+// (Kind.NeedsRecipient, Kind.NeedsAttachment); nothing in it comes from the model.
 type Facts struct {
 	AssignmentExists bool      // the referenced assignment is in the local database
 	Recipient        Recipient // the configured homework recipient; zero if none
-	ArtifactExists   bool      // ExportRef of the assignment exists
+	Attachment       Digest    // the content of ExportRef of the assignment; zero if the file does not exist
 }
 
 // exportFile is the file name of the exported homework inside exports/<assignment id>/.

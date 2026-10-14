@@ -25,6 +25,7 @@ type store struct {
 	proposals   map[proposal.ID]proposal.State
 	assignments map[shared.AssignmentID]bool
 	recipient   string
+	recipErr    error // returned by HomeworkRecipient when set
 	nextID      int
 	saveErr     error // returned by the next proposal saves
 
@@ -96,6 +97,9 @@ type recipients struct{ s *store }
 func (r recipients) HomeworkRecipient(context.Context) (proposal.Recipient, error) {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
+	if r.s.recipErr != nil {
+		return proposal.Recipient{}, r.s.recipErr
+	}
 	if r.s.recipient == "" {
 		return proposal.Recipient{}, nil
 	}

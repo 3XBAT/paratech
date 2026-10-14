@@ -11,11 +11,12 @@ const (
 	StatusConfirmed Status = "CONFIRMED" // the user explicitly approved it (AC-14)
 	StatusDeclined  Status = "DECLINED"  // the user said no; never executed
 	StatusExecuted  Status = "EXECUTED"  // the side effect was performed
+	StatusStale     Status = "STALE"     // confirmed, but the trusted state changed before execution; never executed
 )
 
 // Statuses returns every status.
 func Statuses() []Status {
-	return []Status{StatusProposed, StatusValidated, StatusRejected, StatusConfirmed, StatusDeclined, StatusExecuted}
+	return []Status{StatusProposed, StatusValidated, StatusRejected, StatusConfirmed, StatusDeclined, StatusExecuted, StatusStale}
 }
 
 // String returns the status as stored and shown.
@@ -25,10 +26,11 @@ func (s Status) String() string { return string(s) }
 var transitions = map[Status][]Status{
 	StatusProposed:  {StatusValidated, StatusRejected},
 	StatusValidated: {StatusConfirmed, StatusDeclined},
-	StatusConfirmed: {StatusExecuted},
+	StatusConfirmed: {StatusExecuted, StatusStale},
 	StatusRejected:  nil,
 	StatusDeclined:  nil,
 	StatusExecuted:  nil,
+	StatusStale:     nil,
 }
 
 // CanTransition reports whether the table allows moving a proposal from one status to another.

@@ -14,6 +14,14 @@ var (
 	// ErrInvalidRecipient is returned by NewRecipient for an address the core will not send to.
 	ErrInvalidRecipient = errors.New("invalid recipient")
 
+	// ErrInvalidDigest is returned by NewDigest for a malformed content digest.
+	ErrInvalidDigest = errors.New("invalid content digest")
+
+	// ErrStale means the trusted state a CONFIRMED proposal was validated against changed (the assignment is gone, the
+	// recipient or the export file differs), so it is not executed. Recheck moves the proposal to STALE; a mailer
+	// returns it for an attachment that no longer matches the pinned digest.
+	ErrStale = errors.New("proposal is stale: trusted state changed after confirmation")
+
 	// ErrInvalidProposal is returned by New and Restore for inconsistent input (no time, an inconsistent state).
 	ErrInvalidProposal = errors.New("invalid proposal")
 

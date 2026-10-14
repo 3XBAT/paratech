@@ -2,7 +2,10 @@ package homeworkflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,16 +82,145 @@ func TestProposeEmailFreezesTrustedRecipient(t *testing.T) {
 		t.Fatalf("recipient = %q", v.Recipient)
 	}
 
-	// Changing the settings afterwards does not change what the user confirms and what is sent.
+	// Changing the settings afterwards does not change what the user confirms, and nothing is sent to either address:
+	// the confirmed recipient is no longer the configured one.
 	e.recipient = "other@school.example"
 	if _, err := e.svc.Confirm(context.Background(), v.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Execute(context.Background(), v.ID); err != nil {
+	if _, err := e.svc.Execute(context.Background(), v.ID); !errors.Is(err, proposal.ErrStale) {
+		t.Fatalf("Execute = %v, want ErrStale", err)
+	}
+	if n := len(e.mailer.Calls()); n != 0 {
+		t.Fatalf("%d emails sent", n)
+	}
+	if got, _ := e.svc.Get(context.Background(), v.ID); got.Status != proposal.StatusStale || got.Reason != proposal.ReasonRecipientChanged {
+		t.Fatalf("stored %s %q", got.Status, got.Reason)
+	}
+}
+
+// The export content is pinned at validation and travels in the command, so the mailer can refuse other bytes.
+func TestProposeEmailPinsAttachment(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t).withHomework(t)
+	v := propose(t, e, outEmail)
+	if _, err := e.svc.Confirm(ctx, v.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.mailer.Calls()[0].Recipient().Address(); got != "teacher@school.example" {
-		t.Fatalf("sent to %q", got)
+	if _, err := e.svc.Execute(ctx, v.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	sum := sha256.Sum256([]byte("my homework"))
+	want, err := proposal.NewDigest(hex.EncodeToString(sum[:]), int64(len("my homework")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.mailer.Calls()[0].AttachmentDigest(); got != want {
+		t.Fatalf("command digest %+v, want %+v", got, want)
+	}
+	if st := e.proposals[v.ID]; st.AttachmentSHA256 != want.SHA256() || st.AttachmentSize != want.Size() {
+		t.Fatalf("stored digest %q %d", st.AttachmentSHA256, st.AttachmentSize)
+	}
+}
+
+// Trusted state that changes between confirmation and execution stops the side effect: no port is called, the
+// proposal is stored STALE with the reason, and it can never be executed afterwards.
+func TestExecuteRefusesStaleProposal(t *testing.T) {
+	ref, _ := proposal.ExportRef("a1")
+	cases := []struct {
+		name   string
+		out    string
+		change func(e *env)
+		reason proposal.RejectReason
+	}{
+		{"attachment rewritten (a later export)", outEmail, func(e *env) {
+			_ = e.files.Write(context.Background(), ref, strings.NewReader("someone else's homework"))
+		}, proposal.ReasonArtifactChanged},
+		{"attachment rewritten with the same size", outEmail, func(e *env) {
+			_ = e.files.Write(context.Background(), ref, strings.NewReader("MY HOMEWORK"))
+		}, proposal.ReasonArtifactChanged},
+		{"attachment deleted", outEmail, func(e *env) { _ = e.files.Delete(context.Background(), ref) }, proposal.ReasonNoArtifact},
+		{"recipient removed", outEmail, func(e *env) { e.recipient = "" }, proposal.ReasonRecipientChanged},
+		{"email assignment deleted", outEmail, func(e *env) { delete(e.assignments, "a1") }, proposal.ReasonUnknownAssignment},
+		{"export assignment deleted", outExport, func(e *env) { delete(e.assignments, "a1") }, proposal.ReasonUnknownAssignment},
+		{"deadline assignment deleted", outDeadline, func(e *env) { delete(e.assignments, "a1") }, proposal.ReasonUnknownAssignment},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			e := newEnv(t).withHomework(t)
+			v := propose(t, e, tc.out)
+			if _, err := e.svc.Confirm(ctx, v.ID); err != nil {
+				t.Fatal(err)
+			}
+			tc.change(e)
+
+			if _, err := e.svc.Execute(ctx, v.ID); !errors.Is(err, proposal.ErrStale) {
+				t.Fatalf("Execute = %v, want ErrStale", err)
+			}
+			if got, _ := e.svc.Get(ctx, v.ID); got.Status != proposal.StatusStale || got.Reason != tc.reason {
+				t.Fatalf("stored %s %q, want STALE %q", got.Status, got.Reason, tc.reason)
+			}
+			if _, err := e.svc.Execute(ctx, v.ID); !errors.Is(err, proposal.ErrNotConfirmed) {
+				t.Fatalf("second Execute = %v, want ErrNotConfirmed", err)
+			}
+			if n := e.sideEffects(); n != 0 {
+				t.Fatalf("%d side effects", n)
+			}
+		})
+	}
+}
+
+// If storing STALE fails, both errors are returned and still no port is called.
+func TestExecuteStaleSaveFails(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t).withHomework(t)
+	v := propose(t, e, outDeadline)
+	if _, err := e.svc.Confirm(ctx, v.ID); err != nil {
+		t.Fatal(err)
+	}
+	delete(e.assignments, "a1")
+	e.saveErr = shared.ErrStorageBusy
+
+	_, err := e.svc.Execute(ctx, v.ID)
+	if !errors.Is(err, proposal.ErrStale) || !errors.Is(err, shared.ErrStorageBusy) {
+		t.Fatalf("Execute = %v, want ErrStale and the save error", err)
+	}
+	if n := e.sideEffects(); n != 0 {
+		t.Fatalf("%d side effects", n)
+	}
+	if got, _ := e.svc.Get(ctx, v.ID); got.Status != proposal.StatusConfirmed {
+		t.Fatalf("status %s, want CONFIRMED (nothing stored)", got.Status)
+	}
+}
+
+// Facts are read per kind: only an email needs the recipient settings and the export file.
+func TestFactsArePerKind(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("settings unreadable")
+	for _, out := range []string{outExport, outDeadline} {
+		e := newEnv(t).withHomework(t)
+		ref, _ := proposal.ExportRef("a1")
+		_ = e.files.Delete(ctx, ref)
+		e.recipErr = boom
+
+		v := propose(t, e, out)
+		if v.Status != proposal.StatusValidated {
+			t.Fatalf("%s: status %s %q", v.Kind, v.Status, v.Reason)
+		}
+		if _, err := e.svc.Confirm(ctx, v.ID); err != nil {
+			t.Fatal(err)
+		}
+		if x, err := e.svc.Execute(ctx, v.ID); err != nil || x.Status != proposal.StatusExecuted {
+			t.Fatalf("%s: Execute = %+v, %v", v.Kind, x, err)
+		}
+	}
+
+	e := newEnv(t).withHomework(t)
+	e.recipErr = boom
+	if _, err := e.svc.Propose(ctx, values.NewUntrustedOutput(outEmail)); !errors.Is(err, boom) {
+		t.Fatalf("email Propose = %v, want the settings error", err)
 	}
 }
 

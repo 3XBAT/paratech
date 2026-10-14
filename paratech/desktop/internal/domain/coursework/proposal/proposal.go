@@ -38,6 +38,7 @@ type Proposal struct {
 	// Set by the core.
 	reason      RejectReason
 	recipient   Recipient // the trusted recipient frozen at validation; email proposals only
+	attachment  Digest    // the export content pinned at validation; email proposals only
 	createdAt   time.Time
 	updatedAt   time.Time
 	confirmedAt time.Time
@@ -183,14 +184,18 @@ type State struct {
 	Due          time.Time
 	Reason       RejectReason
 	Recipient    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	ConfirmedAt  time.Time
-	ExecutedAt   time.Time
+	// The pinned attachment (Digest); empty and 0 when none.
+	AttachmentSHA256 string
+	AttachmentSize   int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ConfirmedAt      time.Time
+	ExecutedAt       time.Time
 }
 
 // Restore rebuilds a stored proposal without side effects; it checks that the state is consistent, so a tampered row
-// cannot produce a confirmed proposal without a confirmation time or an email command without a recipient.
+// cannot produce a confirmed proposal without a confirmation time or an email command without a recipient and a
+// pinned attachment.
 func Restore(s State) (*Proposal, error) {
 	bad := func(what string) (*Proposal, error) {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidProposal, what)
@@ -224,11 +229,11 @@ func Restore(s State) (*Proposal, error) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidProposal, err)
 	}
 
-	rejected := s.Status == StatusRejected
-	if rejected != s.Reason.valid() || (!rejected && s.Reason != "") {
-		return bad("a reject reason exists exactly for a rejected proposal")
+	if hasReason := s.Status == StatusRejected || s.Status == StatusStale; hasReason != s.Reason.validFor(s.Status) ||
+		(!hasReason && s.Reason != "") {
+		return bad("a fitting reason exists exactly for a rejected or stale proposal")
 	}
-	past := map[Status]bool{StatusValidated: true, StatusConfirmed: true, StatusDeclined: true, StatusExecuted: true}
+	past := map[Status]bool{StatusValidated: true, StatusConfirmed: true, StatusDeclined: true, StatusExecuted: true, StatusStale: true}
 	var recipient Recipient
 	if s.Recipient != "" {
 		r, err := NewRecipient(s.Recipient)
@@ -237,10 +242,21 @@ func Restore(s State) (*Proposal, error) {
 		}
 		recipient = r
 	}
-	if wantRecipient := p.kind == KindSendHomework && past[s.Status]; wantRecipient == recipient.IsZero() {
+	if wantRecipient := p.kind.NeedsRecipient() && past[s.Status]; wantRecipient == recipient.IsZero() {
 		return bad("a recipient exists exactly for a validated email proposal")
 	}
-	confirmed := s.Status == StatusConfirmed || s.Status == StatusExecuted
+	var attachment Digest
+	if s.AttachmentSHA256 != "" || s.AttachmentSize != 0 {
+		d, err := NewDigest(s.AttachmentSHA256, s.AttachmentSize)
+		if err != nil {
+			return nil, err
+		}
+		attachment = d
+	}
+	if wantAttachment := p.kind.NeedsAttachment() && past[s.Status]; wantAttachment == attachment.IsZero() {
+		return bad("a pinned attachment exists exactly for a validated email proposal")
+	}
+	confirmed := s.Status == StatusConfirmed || s.Status == StatusExecuted || s.Status == StatusStale
 	if confirmed == s.ConfirmedAt.IsZero() || (s.Status == StatusExecuted) == s.ExecutedAt.IsZero() {
 		return bad("confirmation and execution times do not match the status")
 	}
@@ -250,6 +266,7 @@ func Restore(s State) (*Proposal, error) {
 	p.status = s.Status
 	p.reason = s.Reason
 	p.recipient = recipient
+	p.attachment = attachment
 	p.createdAt, p.updatedAt = s.CreatedAt, s.UpdatedAt
 	p.confirmedAt, p.executedAt = s.ConfirmedAt, s.ExecutedAt
 	return p, nil
@@ -262,6 +279,7 @@ func (p *Proposal) State() State {
 	return State{
 		Version: p.version, ID: p.id, Kind: p.kind, Status: p.status, AssignmentID: p.assignment,
 		Title: p.title, Body: p.body, Due: p.due, Reason: p.reason, Recipient: p.recipient.Address(),
+		AttachmentSHA256: p.attachment.SHA256(), AttachmentSize: p.attachment.Size(),
 		CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt, ExecutedAt: p.executedAt,
 	}
 }
@@ -282,8 +300,9 @@ func (p *Proposal) move(to Status, now time.Time) error {
 // is an outcome, not an error: the reason is kept for the user. The checks are:
 //
 //   - the assignment exists locally;
-//   - send_homework_email: a recipient is configured and the export of the assignment exists; the recipient is frozen
-//     into the proposal, so the user confirms exactly the address that will be used;
+//   - send_homework_email: a recipient is configured and the export of the assignment exists; the recipient and the
+//     digest of the export are frozen into the proposal, so the user confirms exactly the address and the content
+//     that will be sent;
 //   - create_deadline_event: the due time is not in the past and at most MaxDueAhead ahead.
 func (p *Proposal) Validate(f Facts, now time.Time) error {
 	if p.status != StatusProposed {
@@ -302,8 +321,11 @@ func (p *Proposal) Validate(f Facts, now time.Time) error {
 	if err := p.move(StatusValidated, now); err != nil {
 		return err
 	}
-	if p.kind == KindSendHomework {
+	if p.kind.NeedsRecipient() {
 		p.recipient = f.Recipient
+	}
+	if p.kind.NeedsAttachment() {
+		p.attachment = f.Attachment
 	}
 	return nil
 }
@@ -312,18 +334,49 @@ func (p *Proposal) check(f Facts, now time.Time) RejectReason {
 	if !f.AssignmentExists {
 		return ReasonUnknownAssignment
 	}
-	switch p.kind {
-	case KindSendHomework:
-		if f.Recipient.IsZero() {
-			return ReasonNoRecipient
-		}
-		if !f.ArtifactExists {
-			return ReasonNoArtifact
-		}
-	case KindDeadlineEvent:
-		if p.due.Before(now) || p.due.After(now.Add(MaxDueAhead)) {
-			return ReasonDueOutOfRange
-		}
+	if p.kind.NeedsRecipient() && f.Recipient.IsZero() {
+		return ReasonNoRecipient
+	}
+	if p.kind.NeedsAttachment() && f.Attachment.IsZero() {
+		return ReasonNoArtifact
+	}
+	if p.kind == KindDeadlineEvent && (p.due.Before(now) || p.due.After(now.Add(MaxDueAhead))) {
+		return ReasonDueOutOfRange
+	}
+	return ""
+}
+
+// Recheck compares a CONFIRMED proposal with fresh trusted facts right before execution. If what the user confirmed
+// no longer holds (the assignment is gone; for an email the recipient or the export content differs), the proposal
+// moves to the terminal STALE status with the reason and Recheck returns an error wrapping ErrStale; the caller saves
+// the proposal and calls no port. Any other status yields ErrNotConfirmed. The due time is not checked again: the
+// user confirmed it.
+func (p *Proposal) Recheck(f Facts, now time.Time) error {
+	if p.status != StatusConfirmed {
+		return fmt.Errorf("%w: status %s", ErrNotConfirmed, p.status)
+	}
+
+	reason := p.staleReason(f)
+	if reason == "" {
+		return nil
+	}
+	if err := p.move(StatusStale, now); err != nil {
+		return err
+	}
+	p.reason = reason
+	return fmt.Errorf("%w: %s", ErrStale, reason)
+}
+
+func (p *Proposal) staleReason(f Facts) RejectReason {
+	switch {
+	case !f.AssignmentExists:
+		return ReasonUnknownAssignment
+	case p.kind.NeedsRecipient() && f.Recipient != p.recipient:
+		return ReasonRecipientChanged
+	case p.kind.NeedsAttachment() && f.Attachment.IsZero():
+		return ReasonNoArtifact
+	case p.kind.NeedsAttachment() && f.Attachment != p.attachment:
+		return ReasonArtifactChanged
 	}
 	return ""
 }
@@ -373,11 +426,14 @@ func (p *Proposal) Body() string { return p.body }
 // Due returns the model-supplied deadline (create_deadline_event only), in UTC.
 func (p *Proposal) Due() time.Time { return p.due }
 
-// Reason returns why the proposal was rejected; empty unless REJECTED.
+// Reason returns why the proposal was rejected or went stale; empty unless REJECTED or STALE.
 func (p *Proposal) Reason() RejectReason { return p.reason }
 
 // Recipient returns the trusted recipient frozen at validation (send_homework_email only).
 func (p *Proposal) Recipient() Recipient { return p.recipient }
+
+// AttachmentDigest returns the export content pinned at validation (send_homework_email only).
+func (p *Proposal) AttachmentDigest() Digest { return p.attachment }
 
 // CreatedAt returns when the proposal was parsed.
 func (p *Proposal) CreatedAt() time.Time { return p.createdAt }

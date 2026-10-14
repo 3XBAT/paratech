@@ -2,8 +2,11 @@ package homeworkflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/proposal"
@@ -24,7 +27,7 @@ const (
 //
 //	Propose  untrusted model output -> parsed proposal -> validated against local state -> stored VALIDATED or REJECTED
 //	Confirm  explicit user action   -> CONFIRMED
-//	Execute  CONFIRMED only         -> command -> side-effect port -> EXECUTED
+//	Execute  CONFIRMED only         -> facts re-checked (else STALE) -> command -> side-effect port -> EXECUTED
 //
 // No step calls a side-effect port on model output: Execute needs a confirmation that only the user's Confirm call
 // records, and the ports accept only commands built by a confirmed proposal.
@@ -39,7 +42,7 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
 
-	facts, err := s.facts(ctx, p.AssignmentID())
+	facts, err := s.facts(ctx, p)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
@@ -53,36 +56,57 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 	return viewOf(p), nil
 }
 
-// facts reads the trusted local state a proposal is checked against. It runs outside a transaction because it opens a
-// file.
-func (s *Service) facts(ctx context.Context, a shared.AssignmentID) (proposal.Facts, error) {
+// facts reads the trusted local state a proposal is checked against, only what its kind needs. It runs outside a
+// transaction because it reads a file.
+func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Facts, error) {
 	var f proposal.Facts
 
-	switch _, err := s.assignments.Get(ctx, a); {
+	switch _, err := s.assignments.Get(ctx, p.AssignmentID()); {
 	case err == nil:
 		f.AssignmentExists = true
 	case !errors.Is(err, shared.ErrNotFound):
 		return f, err
 	}
 
-	r, err := s.recipients.HomeworkRecipient(ctx)
-	if err != nil {
-		return f, err
+	if p.Kind().NeedsRecipient() {
+		r, err := s.recipients.HomeworkRecipient(ctx)
+		if err != nil {
+			return f, err
+		}
+		f.Recipient = r
 	}
-	f.Recipient = r
 
-	ref, err := proposal.ExportRef(a)
-	if err != nil {
-		return f, err
-	}
-	switch rc, err := s.artifacts.Open(ctx, ref); {
-	case err == nil:
-		f.ArtifactExists = true
-		_ = rc.Close() // only existence matters; nothing was read
-	case !errors.Is(err, shared.ErrNotFound):
-		return f, err
+	if p.Kind().NeedsAttachment() {
+		d, err := s.exportDigest(ctx, p.AssignmentID())
+		if err != nil {
+			return f, err
+		}
+		f.Attachment = d
 	}
 	return f, nil
+}
+
+// exportDigest streams the export file of the assignment through SHA-256; a missing file yields the zero digest.
+func (s *Service) exportDigest(ctx context.Context, a shared.AssignmentID) (proposal.Digest, error) {
+	ref, err := proposal.ExportRef(a)
+	if err != nil {
+		return proposal.Digest{}, err
+	}
+	rc, err := s.artifacts.Open(ctx, ref)
+	if errors.Is(err, shared.ErrNotFound) {
+		return proposal.Digest{}, nil
+	}
+	if err != nil {
+		return proposal.Digest{}, err
+	}
+	defer func() { _ = rc.Close() }() // read-only: a close error loses nothing
+
+	h := sha256.New()
+	n, err := io.Copy(h, rc)
+	if err != nil {
+		return proposal.Digest{}, err
+	}
+	return proposal.NewDigest(hex.EncodeToString(h.Sum(nil)), n)
 }
 
 // Get returns a proposal for the confirmation dialog.
@@ -128,9 +152,11 @@ func (s *Service) change(ctx context.Context, op string, id proposal.ID, apply f
 }
 
 // Execute performs the side effect of a CONFIRMED proposal and marks it EXECUTED. Any other status is refused before
-// a port is called (proposal.ErrNotConfirmed). Executing an EXECUTED proposal again does nothing. If the port fails,
-// the proposal stays CONFIRMED and Execute may be repeated: the command carries the same idempotency key, so the
-// adapter does not act twice (hard rule 7). The port is called outside the transaction (Tx forbids external I/O).
+// a port is called (proposal.ErrNotConfirmed). Executing an EXECUTED proposal again does nothing. Right before the
+// port, the trusted facts are read again: if what the user confirmed changed, the proposal is stored STALE and
+// proposal.ErrStale is returned without calling a port. If the port fails, the proposal stays CONFIRMED and Execute
+// may be repeated: the command carries the same idempotency key, so the adapter does not act twice (hard rule 7).
+// The port is called outside the transaction (Tx forbids external I/O).
 func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, error) {
 	p, err := s.proposals.Get(ctx, id)
 	if err != nil {
@@ -139,6 +165,21 @@ func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, er
 	if p.Executed() {
 		return viewOf(p), nil
 	}
+
+	facts, err := s.facts(ctx, p)
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
+	}
+	if err := p.Recheck(facts, s.clock.Now()); err != nil {
+		if errors.Is(err, proposal.ErrStale) {
+			// The version check of Save refuses this if a concurrent Execute changed the proposal meanwhile.
+			if serr := s.tx.Do(ctx, func(ctx context.Context) error { return s.proposals.Save(ctx, p) }); serr != nil {
+				return ProposalView{}, fmt.Errorf("%s: %w", opExecute, errors.Join(err, serr))
+			}
+		}
+		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
+	}
+
 	if err := s.perform(ctx, p); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}

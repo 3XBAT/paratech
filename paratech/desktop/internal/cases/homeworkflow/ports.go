@@ -76,7 +76,9 @@ type RecipientSource interface {
 // idempotency key and reconciles an unknown outcome instead of sending again (AC-15).
 type HomeworkMailer interface {
 	// SendHomework sends cmd.Attachment to cmd.Recipient (PRD section 10). A repeat with the same idempotency key
-	// must not send a second email.
+	// must not send a second email. The attachment must be exactly the content the user confirmed: the adapter reads
+	// the file once, checks its SHA-256 and size against cmd.AttachmentDigest and sends those same bytes; on a
+	// mismatch it sends nothing and returns an error wrapping proposal.ErrStale (the file changed after Execute's check).
 	SendHomework(ctx context.Context, cmd proposal.EmailCommand) error
 }
 
