@@ -10,6 +10,7 @@ import {
   jobStatusLabels,
   jobTypeLabel,
   loadErrorText,
+  recordingDurationText,
   recordingStatusLabel,
   recordingStatusLabels,
   waitingStatuses,
@@ -81,8 +82,20 @@ test("errors of the core map to Russian text, unknown ones to a generic text", (
   assert.equal(generic, "Не удалось выполнить действие.");
   assert.equal(actionErrorText(undefined), generic);
   assert.equal(actionErrorText(new Error("constructor")), generic);
-  assert.equal(loadErrorText(new Error(errorMessages.unavailable)), "Записи и задачи сейчас недоступны.");
-  assert.equal(loadErrorText(new Error("x")), "Не удалось загрузить записи и задачи.");
+  assert.equal(loadErrorText(new Error(errorMessages.unavailable), "jobs"), "Записи и задачи сейчас недоступны.");
+  assert.equal(loadErrorText(new Error("x"), "recordings"), "Не удалось загрузить записи.");
+  assert.equal(loadErrorText(new Error("x"), "jobs"), "Не удалось загрузить задачи.");
+});
+
+test("a running recording shows the time elapsed by the client clock", () => {
+  const start = Date.parse("2026-10-15T10:00:00Z");
+  const running = { ...recording, status: "RECORDING", stoppedAt: "", durationSeconds: 0, hasDuration: false };
+  assert.equal(recordingDurationText(running, start + 3661_000), "1:01:01");
+  assert.equal(recordingDurationText(running, start - 5000), "0:00:00");
+  assert.equal(recordingDurationText({ ...running, startedAt: "" }, start), "—");
+  assert.equal(recordingDurationText({ ...running, startedAt: "bad" }, start), "—");
+  assert.equal(recordingDurationText({ ...running, status: "STOPPING" }, start + 60_000), "—");
+  assert.equal(recordingDurationText(recording, start + 99_999_000), "1:00:00");
 });
 
 test("parse accepts well-formed items and drops extra fields", () => {

@@ -68,6 +68,27 @@ export function formatDuration(seconds: number): string {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/**
+ * Duration cell of a recording: the final duration when known, otherwise for a running recording the time elapsed
+ * since startedAt by the client clock `now` (ms since epoch; clock skew is clamped to 0), otherwise "—".
+ */
+export function recordingDurationText(
+  r: { status: string; startedAt: string; durationSeconds: number; hasDuration: boolean },
+  now: number,
+): string {
+  if (r.hasDuration) {
+    return formatDuration(r.durationSeconds);
+  }
+  if (r.status !== "RECORDING" || r.startedAt === "") {
+    return "—";
+  }
+  const started = new Date(r.startedAt).getTime();
+  if (Number.isNaN(started) || !Number.isFinite(now)) {
+    return "—";
+  }
+  return formatDuration(Math.max(0, (now - started) / 1000));
+}
+
 /** Formats an RFC 3339 time in local time; "" or an unparsable value is "—". */
 export function formatTime(rfc3339: string): string {
   if (rfc3339 === "") {
@@ -89,11 +110,14 @@ const actionErrors: Readonly<Record<string, string>> = {
 
 const genericActionError = "Не удалось выполнить действие.";
 
-/** Russian text for a failed load of the lists; the raw error text is not shown. */
-export function loadErrorText(err: unknown): string {
-  return errorMessage(err) === errorMessages.unavailable
-    ? actionErrors[errorMessages.unavailable]
-    : "Не удалось загрузить записи и задачи.";
+const loadErrors: Readonly<Record<"recordings" | "jobs", string>> = {
+  recordings: "Не удалось загрузить записи.",
+  jobs: "Не удалось загрузить задачи.",
+};
+
+/** Russian text for a failed load of one list; the raw error text is not shown. */
+export function loadErrorText(err: unknown, list: "recordings" | "jobs"): string {
+  return errorMessage(err) === errorMessages.unavailable ? actionErrors[errorMessages.unavailable] : loadErrors[list];
 }
 
 /** Russian text for an error of an action; an unknown error gets a generic text (raw text is not shown). */

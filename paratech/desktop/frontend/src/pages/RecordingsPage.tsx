@@ -3,11 +3,11 @@ import { activityApi, type JobItem, type RecordingItem } from "../bindings/activ
 import { callByName } from "../bindings/runtime";
 import {
   actionErrorText,
-  formatDuration,
   formatTime,
   jobStatusLabel,
   jobTypeLabel,
   loadErrorText,
+  recordingDurationText,
   recordingStatusLabel,
 } from "../activityView";
 
@@ -18,7 +18,8 @@ export function RecordingsPage() {
   const api = useMemo(() => activityApi(callByName), []);
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
-  const [loadError, setLoadError] = useState("");
+  const [recordingsError, setRecordingsError] = useState("");
+  const [jobsError, setJobsError] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const loading = useRef(false);
@@ -36,16 +37,20 @@ export function RecordingsPage() {
     try {
       do {
         again.current = false;
-        try {
-          const [r, j] = await Promise.all([api.listRecordings(), api.listJobs()]);
-          if (mounted.current) {
-            setRecordings(r);
-            setJobs(j);
-            setLoadError("");
+        // Each list loads on its own: a failing one keeps its last good data and shows its own error.
+        const [r, j] = await Promise.allSettled([api.listRecordings(), api.listJobs()]);
+        if (mounted.current) {
+          if (r.status === "fulfilled") {
+            setRecordings(r.value);
+            setRecordingsError("");
+          } else {
+            setRecordingsError(loadErrorText(r.reason, "recordings"));
           }
-        } catch (err) {
-          if (mounted.current) {
-            setLoadError(loadErrorText(err));
+          if (j.status === "fulfilled") {
+            setJobs(j.value);
+            setJobsError("");
+          } else {
+            setJobsError(loadErrorText(j.reason, "jobs"));
           }
         }
       } while (again.current && mounted.current);
@@ -87,22 +92,25 @@ export function RecordingsPage() {
     }
   }
 
+  // Read on every render; the 3 s poll re-renders, so the elapsed time of a running recording advances with it.
+  const now = Date.now();
+
   return (
     <section>
       <h1>Записи</h1>
-      {loadError && (
-        <p className="error" role="alert">
-          {loadError}
-        </p>
-      )}
       {actionError && (
         <p className="error" role="alert">
           {actionError}
         </p>
       )}
 
+      {recordingsError && (
+        <p className="error" role="alert">
+          {recordingsError}
+        </p>
+      )}
       {recordings === null ? (
-        !loadError && <p className="muted">Загрузка…</p>
+        !recordingsError && <p className="muted">Загрузка…</p>
       ) : recordings.length === 0 ? (
         <p className="muted">Записей пока нет.</p>
       ) : (
@@ -121,7 +129,7 @@ export function RecordingsPage() {
               <tr key={r.id}>
                 <td>{formatTime(r.startedAt)}</td>
                 <td>{recordingStatusLabel(r.status)}</td>
-                <td>{r.hasDuration ? formatDuration(r.durationSeconds) : "—"}</td>
+                <td>{recordingDurationText(r, now)}</td>
                 <td className="problem">{r.problem}</td>
                 <td>
                   {r.stoppable && (
@@ -141,8 +149,13 @@ export function RecordingsPage() {
       )}
 
       <h2>Задачи</h2>
+      {jobsError && (
+        <p className="error" role="alert">
+          {jobsError}
+        </p>
+      )}
       {jobs === null ? (
-        !loadError && <p className="muted">Загрузка…</p>
+        !jobsError && <p className="muted">Загрузка…</p>
       ) : jobs.length === 0 ? (
         <p className="muted">Задач пока нет.</p>
       ) : (
