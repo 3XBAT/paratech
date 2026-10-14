@@ -48,7 +48,8 @@ var errOverBudget = errors.New("over the unpacked size budget")
 // its unpacked size.
 func checkPart(zf *zip.File, budget int64) (int64, error) {
 	tooLarge := &Error{Kind: ErrTooLarge, Detail: fmt.Sprintf("more than %d bytes unpacked", MaxUnzippedBytes)}
-	if zf.UncompressedSize64 > uint64(budget) {
+	// Size is the declared size as int64; a declared size over math.MaxInt64 becomes negative.
+	if size := zf.FileInfo().Size(); size < 0 || size > budget {
 		return 0, tooLarge
 	}
 	rc, err := zf.Open()
