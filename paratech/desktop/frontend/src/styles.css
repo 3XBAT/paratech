@@ -1,0 +1,11 @@
+body { margin: 0; font-family: "Segoe UI", sans-serif; background: #fff; color: #222; }
+.layout { display: flex; min-height: 100vh; }
+.nav { display: flex; flex-direction: column; width: 200px; padding: 12px 8px; background: #f3f3f3; border-right: 1px solid #ddd; }
+.nav button { text-align: left; padding: 8px 12px; margin-bottom: 2px; border: 0; border-radius: 4px; background: none; font: inherit; cursor: pointer; }
+.nav button:hover { background: #e6e6e6; }
+.nav button.active { background: #dde8f6; font-weight: 600; }
+.content { flex: 1; padding: 16px 24px; }
+h1 { font-size: 1.4rem; margin: 0 0 16px; }
+.toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.muted { color: #666; }
+.error { color: #b00020; }

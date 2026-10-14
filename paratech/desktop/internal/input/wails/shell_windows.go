@@ -33,6 +33,13 @@ func (s *Shell) run(ctx context.Context) error {
 	// The single-instance callback runs after New returns; it reads u under the shell lock through ShowMain.
 	app := application.New(appOptions(s.opts, func() { _ = s.ShowMain() }))
 
+	// Only the first instance gets here, so a second launch never opens the database (ADR-0007).
+	b, err := s.openBindings(ctx)
+	if err != nil {
+		return err
+	}
+	app.RegisterService(application.NewService(b.settings))
+
 	u := &windowsUI{app: app}
 	var offs []func()
 	u.main, offs = newWindow(app, mainWindowSpec(s.opts.Name), offs)
