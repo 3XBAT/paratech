@@ -10,6 +10,7 @@ LLM output (values.UntrustedOutput)
   -> proposal.New        strict parse: closed kinds, closed fields per kind, bounded text      else ErrMalformed, nothing stored
   -> Proposal.Validate   check against trusted local state (proposal.Facts)                    else REJECTED with a reason
   -> Proposal.Confirm    explicit user action only                                              else never executed
+  -> Proposal.Recheck    fresh facts still match what was confirmed                             else STALE, ErrStale, no port
   -> EmailCommand / ExportCommand / CalendarCommand   only from a CONFIRMED proposal
   -> side-effect port    HomeworkMailer / HomeworkExporter / DeadlineCalendar
 ```
@@ -30,6 +31,10 @@ Transcripts are sent to the LLM only as `UntrustedData`, separate from the instr
    `desktop/tests/sideeffect_boundary_test.go`.
 5. Confirmation is a user action through the UI; nothing derived from model output may call `Confirm`.
    The user confirms what the dialog shows, including the trusted target frozen at validation.
+8. Pin what the user confirms. Validation freezes the target and the content it acts on (the recipient, the SHA-256
+   and size of the attachment); Execute reads the facts again and `Proposal.Recheck` moves a mismatch to STALE
+   without calling a port. The adapter sends only bytes matching the pinned digest, else returns `proposal.ErrStale`.
+   Read only the facts the kind needs (`Kind.NeedsRecipient`, `Kind.NeedsAttachment`).
 6. Commands carry an idempotency key; adapters make a repeat with the same key harmless (hard rule 7).
 7. Do not rely on the model refusing: tests use an "obedient" fake model that returns the attacker's output
    (`desktop/internal/cases/homeworkflow/injection_test.go`).
