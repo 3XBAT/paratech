@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ var lessonStart = time.Date(2026, 10, 14, 7, 0, 0, 0, time.UTC)
 
 const (
 	testLead = 10 * time.Minute
-	testPoll = 30 * time.Second
+	testPoll = DefaultPollInterval
 )
 
 func newService(t *testing.T, store *lessonStore, clock *testenv.FakeClock, events *eventLog) *Service {
@@ -74,6 +75,12 @@ func TestNew(t *testing.T) {
 		{"lead too long", func(d Deps) Deps { return d }, Config{Lead: lesson.MaxStartLead + 1, PollInterval: time.Second}, false},
 		{"negative lead", func(d Deps) Deps { return d }, Config{Lead: -time.Second, PollInterval: time.Second}, false},
 		{"no poll interval", func(d Deps) Deps { return d }, Config{Lead: testLead}, false},
+		{"poll just under the grace", func(d Deps) Deps { return d },
+			Config{Lead: testLead, PollInterval: lesson.StartLateGrace - time.Nanosecond}, true},
+		{"poll as long as the grace", func(d Deps) Deps { return d },
+			Config{Lead: testLead, PollInterval: lesson.StartLateGrace}, false},
+		{"poll longer than the grace", func(d Deps) Deps { return d },
+			Config{Lead: testLead, PollInterval: time.Minute}, false},
 		{"no lessons", func(d Deps) Deps { d.Lessons = nil; return d }, DefaultConfig(), false},
 		{"no clock", func(d Deps) Deps { d.Clock = nil; return d }, DefaultConfig(), false},
 		{"no sleeper", func(d Deps) Deps { d.Sleeper = nil; return d }, DefaultConfig(), false},
@@ -124,6 +131,7 @@ func TestRestartDuringLessonDoesNotDuplicate(t *testing.T) {
 	}{
 		{"restart right after the announcement", time.Minute, -testLead + 2*time.Minute},
 		{"restart at the start", 5 * time.Minute, 0},
+		{"restart within the late grace", time.Minute, 10 * time.Second},
 		{"restart in the middle", 20 * time.Minute, 45 * time.Minute},
 		{"restart just before the end", 20 * time.Minute, 89 * time.Minute},
 	}
@@ -148,17 +156,118 @@ func TestRestartDuringLessonDoesNotDuplicate(t *testing.T) {
 	}
 }
 
-// An app started in the middle of a lesson it has not announced yet still offers the prompt, once.
-func TestStartInTheMiddleAnnouncesOnce(t *testing.T) {
-	testenv.NoGoroutineLeaks(t)
-	store, events := newLessonStore(), &eventLog{}
-	store.add(t, "math", lessonStart, 90*time.Minute, "Europe/Moscow")
-	clock := testenv.NewFakeClock(lessonStart.Add(40 * time.Minute))
+// An app started just after the start still offers the prompt, once; started later, it stays silent for the lesson.
+func TestLateAppStart(t *testing.T) {
+	tests := []struct {
+		name    string
+		startAt time.Duration // offset from the lesson start where the app starts
+		want    int
+	}{
+		{"19 s after the start", 19 * time.Second, 1},
+		{"21 s after the start", 21 * time.Second, 0},
+		{"in the middle", 40 * time.Minute, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testenv.NoGoroutineLeaks(t)
+			store, events := newLessonStore(), &eventLog{}
+			store.add(t, "math", lessonStart, 90*time.Minute, "Europe/Moscow")
+			clock := testenv.NewFakeClock(lessonStart.Add(tt.startAt))
 
-	runFor(t, newService(t, store, clock, events), clock, time.Hour)
+			runFor(t, newService(t, store, clock, events), clock, time.Hour)
 
-	if got := events.all(); len(got) != 1 || !got[0].AnnouncedAt.Equal(lessonStart.Add(40*time.Minute)) {
-		t.Fatalf("events = %+v, want one at the first tick", got)
+			got := events.all()
+			if len(got) != tt.want || (tt.want == 1 && !got[0].AnnouncedAt.Equal(lessonStart.Add(tt.startAt))) {
+				t.Fatalf("events = %+v, want %d at the first tick", got, tt.want)
+			}
+		})
+	}
+}
+
+// With a zero lead the window is only the late grace; the default poll still lands in it whatever the phase.
+func TestZeroLeadAnnouncesWithinTheGrace(t *testing.T) {
+	for phase := time.Duration(0); phase < testPoll; phase += time.Second {
+		store, events := newLessonStore(), &eventLog{}
+		store.add(t, "math", lessonStart, time.Hour, "UTC")
+		clock := testenv.NewFakeClock(lessonStart.Add(-time.Minute + phase))
+		s, err := New(Deps{Lessons: store, Clock: clock, Sleeper: clock, Events: events}, Config{Lead: 0, PollInterval: testPoll})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for clock.Now().Before(lessonStart.Add(time.Minute)) {
+			if _, err := s.Tick(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			clock.Advance(testPoll)
+		}
+		got := events.all()
+		if len(got) != 1 || got[0].AnnouncedAt.Before(lessonStart) || !got[0].AnnouncedAt.Before(lessonStart.Add(lesson.StartLateGrace)) {
+			t.Fatalf("phase %v: events = %+v, want one in the grace", phase, got)
+		}
+	}
+}
+
+// promptGate is a consumer that applies the "prompts enabled" setting (AC-02) as TASK-022 does: a disabled prompt
+// drops the announcement.
+type promptGate struct {
+	mu      sync.Mutex
+	enabled bool
+	shown   []lesson.StartAnnounced
+}
+
+func (g *promptGate) setEnabled(on bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.enabled = on
+}
+
+func (g *promptGate) LessonStarting(_ context.Context, ev lesson.StartAnnounced) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.enabled {
+		g.shown = append(g.shown, ev)
+	}
+	return nil
+}
+
+func (g *promptGate) count() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.shown)
+}
+
+// Prompts turned off when a lesson becomes due drop its prompt for good: turning them back on during the lesson
+// shows nothing, because the scheduler stored the mark anyway. The next lesson is prompted again.
+func TestPromptsTurnedOffDuringLessonStaySilent(t *testing.T) {
+	store, gate := newLessonStore(), &promptGate{}
+	store.add(t, "math", lessonStart, time.Hour, "UTC")
+	store.add(t, "physics", lessonStart.Add(2*time.Hour), time.Hour, "UTC")
+	clock := testenv.NewFakeClock(lessonStart)
+	s, err := New(Deps{Lessons: store, Clock: clock, Sleeper: clock, Events: gate}, Config{Lead: testLead, PollInterval: testPoll})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tick := func(at time.Time, want int) {
+		t.Helper()
+		clock.Advance(at.Sub(clock.Now()))
+		if n, err := s.Tick(context.Background()); n != want || err != nil {
+			t.Fatalf("Tick at %v = %d, %v; want %d", at, n, err, want)
+		}
+	}
+	tick(lessonStart, 1) // announced while prompts are off
+	if gate.count() != 0 || store.get(t, "math").StartNotifiedAt().IsZero() {
+		t.Fatalf("shown %d, mark %v: want nothing shown and the mark stored", gate.count(), store.get(t, "math").StartNotifiedAt())
+	}
+	gate.setEnabled(true)
+	tick(lessonStart.Add(10*time.Second), 0)
+	tick(lessonStart.Add(30*time.Minute), 0)
+	if gate.count() != 0 {
+		t.Fatalf("shown %d after turning prompts on mid-lesson, want 0", gate.count())
+	}
+	tick(lessonStart.Add(2*time.Hour-testLead), 1)
+	if gate.count() != 1 {
+		t.Fatalf("shown %d for the next lesson, want 1", gate.count())
 	}
 }
 
@@ -198,12 +307,34 @@ func TestTick(t *testing.T) {
 			now: lessonStart.Add(time.Hour),
 		},
 		{
-			name: "long lesson still running",
+			name: "at start",
+			setup: func(t *testing.T, s *lessonStore) {
+				s.add(t, "a", lessonStart, time.Hour, "UTC")
+			},
+			now:  lessonStart,
+			want: []shared.LessonID{"a"},
+		},
+		{
+			name: "19 s after start",
+			setup: func(t *testing.T, s *lessonStore) {
+				s.add(t, "a", lessonStart, time.Hour, "UTC")
+			},
+			now:  lessonStart.Add(19 * time.Second),
+			want: []shared.LessonID{"a"},
+		},
+		{
+			name: "21 s after start",
+			setup: func(t *testing.T, s *lessonStore) {
+				s.add(t, "a", lessonStart, time.Hour, "UTC")
+			},
+			now: lessonStart.Add(21 * time.Second),
+		},
+		{
+			name: "mid-lesson",
 			setup: func(t *testing.T, s *lessonStore) {
 				s.add(t, "a", lessonStart, lesson.MaxDuration, "UTC")
 			},
-			now:  lessonStart.Add(lesson.MaxDuration - time.Second),
-			want: []shared.LessonID{"a"},
+			now: lessonStart.Add(time.Hour),
 		},
 		{
 			name: "deleted lesson",

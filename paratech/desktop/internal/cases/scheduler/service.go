@@ -37,8 +37,10 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	switch {
 	case deps.Lessons == nil || deps.Clock == nil || deps.Sleeper == nil || deps.Events == nil:
 		return nil, fmt.Errorf("%w: lessons, clock, sleeper and events are required", ErrInvalidConfig)
-	case cfg.PollInterval <= 0:
-		return nil, fmt.Errorf("%w: poll interval %v", ErrInvalidConfig, cfg.PollInterval)
+	case cfg.PollInterval <= 0 || cfg.PollInterval >= lesson.StartLateGrace:
+		// A poll must land inside the late grace, or a lesson with a zero lead could be skipped between two polls.
+		return nil, fmt.Errorf("%w: poll interval %v, want more than 0 and less than %v",
+			ErrInvalidConfig, cfg.PollInterval, lesson.StartLateGrace)
 	}
 	if err := lesson.ValidateStartLead(cfg.Lead); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
@@ -72,8 +74,8 @@ func (s *Service) Run(ctx context.Context) error {
 func (s *Service) Tick(ctx context.Context) (int, error) {
 	now, lead := s.clock.Now(), s.cfg.Lead
 
-	// A lesson may still be running if it started up to lesson.MaxDuration ago.
-	from, to := now.Add(-lesson.MaxDuration-rangeMargin), now.Add(lead+rangeMargin)
+	// Only a lesson that started less than lesson.StartLateGrace ago or starts within the lead can be due.
+	from, to := now.Add(-lesson.StartLateGrace-rangeMargin), now.Add(lead+rangeMargin)
 	candidates, err := s.lessons.ListStartingBetween(ctx, from, to)
 	if err != nil {
 		return 0, fmt.Errorf("scheduler: %s: %w", opList, err)

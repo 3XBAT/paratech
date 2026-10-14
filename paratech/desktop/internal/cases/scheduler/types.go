@@ -23,7 +23,7 @@ type Deps struct {
 // Config tunes the scheduler.
 type Config struct {
 	Lead         time.Duration // how long before the start the lesson is announced, 0..lesson.MaxStartLead
-	PollInterval time.Duration // wait between two reads of the schedule; an announcement may be this late
+	PollInterval time.Duration // wait between two reads of the schedule, below lesson.StartLateGrace; an announcement may be this late
 }
 
 // DefaultConfig returns the scheduler settings of the desktop.

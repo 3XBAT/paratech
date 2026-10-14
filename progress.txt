@@ -670,3 +670,20 @@
 - Флаки: TestSTTJobTranscribesRecording упал один раз у реализатора (attempts 2), повтор зелёный
 
 ---
+
+## [TASK-018] owner decisions
+**Дата:** 2026-10-14
+**Статус:** done
+
+### Что сделано
+- Решение 1: окно предложения [start-lead, start+20 с), а не [start-lead, end). Константа lesson.StartLateGrace = 20 с; занятие, начавшееся раньше, не предлагается (приложение, запущенное посреди занятия, молчит). scheduler.New требует 0 < PollInterval < StartLateGrace (дефолт 15 с), чтобы опрос попал в окно и при lead = 0; Tick берёт кандидатов от now-StartLateGrace
+- Решение 2: если предложения выключены во время занятия, это занятие больше не предлагается, даже если их включить снова. Отметка сохраняется и при выключенных предложениях, потребитель (TASK-022) только отбрасывает событие; тест TestPromptsTurnedOffDuringLessonStaySilent, контракт описан в doc.go и порте Events
+
+### Тесты
+- [x] CGO_ENABLED=0 go build, go vet, GOOS=windows go vet, PARATECH_REQUIRE_DOCS=1 go test -race -count=1 ./desktop/..., golangci-lint v2.14.0 (native и GOOS=windows) — зелёные
+- [x] Юнит и SQLite-сценарий (TestSchedulerPromptWindowOnSQLite): предложение в start-lead, start, start+19 с; нет в start+21 с и посреди занятия; одно на время начала
+
+### Заметки для следующих агентов
+- TASK-022: проверять «предложения включены» у себя и просто отбрасывать событие; не просить повторного события — его не будет (это и есть решение 2)
+
+---

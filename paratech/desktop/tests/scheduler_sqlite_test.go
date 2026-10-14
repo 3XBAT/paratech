@@ -55,12 +55,9 @@ func openScheduleDB(t *testing.T, path string) *sqlite.DB {
 	return db
 }
 
-func TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "app.db")
-	db := openScheduleDB(t, path)
-	t.Cleanup(func() { _ = db.Close() }) // a second Close after the restart below is harmless
-	clock := testenv.NewFakeClock(time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC))
-
+// importSchedule imports dstSchedule into db through the real CSV parser and import use case.
+func importSchedule(t *testing.T, db *sqlite.DB, clock *testenv.FakeClock) {
+	t.Helper()
 	imp, err := schedulesync.New(schedulesync.Deps{
 		Lessons: sqlite.NewLessonRepository(db),
 		Parsers: map[importplan.Source]schedulesync.ScheduleParser{importplan.SourceCSV: csvschedule.New()},
@@ -78,23 +75,75 @@ func TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func newSQLiteScheduler(t *testing.T, db *sqlite.DB, clock *testenv.FakeClock, events *startEvents) *scheduler.Service {
+	t.Helper()
+	s, err := scheduler.New(scheduler.Deps{
+		Lessons: sqlite.NewLessonRepository(db), Clock: clock, Sleeper: clock, Events: events,
+	}, scheduler.Config{Lead: 10 * time.Minute, PollInterval: scheduler.DefaultPollInterval})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// tickAt moves clock to at, ticks s once and checks how many lessons it announced.
+func tickAt(t *testing.T, s *scheduler.Service, clock *testenv.FakeClock, at time.Time, want int) {
+	t.Helper()
+	clock.Advance(at.Sub(clock.Now()))
+	if n, err := s.Tick(context.Background()); n != want || err != nil {
+		t.Fatalf("Tick at %v = %d, %v; want %d", at, n, err, want)
+	}
+}
+
+// The prompt window is [start-lead, start+lesson.StartLateGrace): an app that first looks at the schedule at the
+// given moment prompts once or not at all, and a second look right after stays silent.
+func TestSchedulerPromptWindowOnSQLite(t *testing.T) {
+	london := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		at   time.Time
+		want int
+	}{
+		{"at start minus lead", london.Add(-10 * time.Minute), 1},
+		{"at start", london, 1},
+		{"19 s after start", london.Add(19 * time.Second), 1},
+		{"21 s after start", london.Add(21 * time.Second), 0},
+		{"mid-lesson", london.Add(45 * time.Minute), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openScheduleDB(t, filepath.Join(t.TempDir(), "app.db"))
+			t.Cleanup(func() { _ = db.Close() })
+			clock := testenv.NewFakeClock(time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC))
+			importSchedule(t, db, clock)
+
+			events := &startEvents{}
+			s := newSQLiteScheduler(t, db, clock, events)
+			tickAt(t, s, clock, tt.at, tt.want)
+			tickAt(t, s, clock, tt.at.Add(time.Second), 0)
+			if n := events.count(); n != tt.want {
+				t.Fatalf("%d events, want %d", n, tt.want)
+			}
+		})
+	}
+}
+
+func TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.db")
+	db := openScheduleDB(t, path)
+	t.Cleanup(func() { _ = db.Close() }) // a second Close after the restart below is harmless
+	clock := testenv.NewFakeClock(time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC))
+	importSchedule(t, db, clock)
 
 	events := &startEvents{}
 	newScheduler := func(db *sqlite.DB, clock *testenv.FakeClock) *scheduler.Service {
-		s, err := scheduler.New(scheduler.Deps{
-			Lessons: sqlite.NewLessonRepository(db), Clock: clock, Sleeper: clock, Events: events,
-		}, scheduler.Config{Lead: 10 * time.Minute, PollInterval: time.Minute})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
+		return newSQLiteScheduler(t, db, clock, events)
 	}
 	tick := func(s *scheduler.Service, clock *testenv.FakeClock, at time.Time, want int) {
 		t.Helper()
-		clock.Advance(at.Sub(clock.Now()))
-		if n, err := s.Tick(context.Background()); n != want || err != nil {
-			t.Fatalf("Tick at %v = %d, %v; want %d", at, n, err, want)
-		}
+		tickAt(t, s, clock, at, want)
 	}
 
 	s := newScheduler(db, clock)
@@ -104,7 +153,8 @@ func TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart(t *testing.T) {
 	tick(s, clock, time.Date(2026, 11, 1, 13, 50, 0, 0, time.UTC), 1) // 08:50 EST
 	tick(s, clock, time.Date(2026, 11, 1, 13, 55, 0, 0, time.UTC), 0)
 
-	// A real restart in the middle of the New York lesson: the database is closed and opened again.
+	// A real restart at the start of the New York lesson, inside the late grace: the database is closed and opened
+	// again, and the stored mark keeps the restarted scheduler silent.
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +162,7 @@ func TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart(t *testing.T) {
 	t.Cleanup(func() { _ = db2.Close() })
 	clock2 := testenv.NewFakeClock(time.Date(2026, 11, 1, 14, 0, 0, 0, time.UTC))
 	s2 := newScheduler(db2, clock2)
+	tick(s2, clock2, time.Date(2026, 11, 1, 14, 0, 10, 0, time.UTC), 0)
 	tick(s2, clock2, time.Date(2026, 11, 1, 14, 30, 0, 0, time.UTC), 0)
 	tick(s2, clock2, time.Date(2026, 11, 1, 14, 59, 0, 0, time.UTC), 0)
 

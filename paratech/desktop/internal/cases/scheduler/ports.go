@@ -34,6 +34,7 @@ type Sleeper interface {
 // Events receives the "lesson is starting" events (PRD section 6.1). Implemented by the consumer that shows the
 // recording prompt (TASK-022). It must not block for long: Tick waits for it.
 type Events interface {
-	// LessonStarting delivers one announcement. An error is logged and the announcement is not repeated.
+	// LessonStarting delivers one announcement. An error is logged and the announcement is not repeated. The
+	// announcement is already stored when it arrives: a consumer that drops it (prompts turned off) drops it for good.
 	LessonStarting(ctx context.Context, e lesson.StartAnnounced) error
 }

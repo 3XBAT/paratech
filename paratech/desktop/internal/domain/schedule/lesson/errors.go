@@ -17,6 +17,6 @@ var (
 	// ErrAlreadyAnnounced means the "lesson is starting" prompt of this start was already raised.
 	ErrAlreadyAnnounced = errors.New("lesson start is already announced")
 
-	// ErrNotDue means the start announcement was requested outside its window [start-lead, end).
+	// ErrNotDue means the start announcement was requested outside its window [start-lead, start+StartLateGrace).
 	ErrNotDue = errors.New("lesson start announcement is not due")
 )

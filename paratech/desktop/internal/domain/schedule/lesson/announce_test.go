@@ -25,7 +25,7 @@ func TestValidateStartLead(t *testing.T) {
 	}
 }
 
-// The lesson of newLesson runs from t0 to t0+90m.
+// The lesson of newLesson runs from t0 to t0+90m; the window is [start-lead, start+StartLateGrace).
 func TestStartAnnouncementDue(t *testing.T) {
 	const lead = 10 * time.Minute
 	tests := []struct {
@@ -37,12 +37,16 @@ func TestStartAnnouncementDue(t *testing.T) {
 		{"before the lead window", t0.Add(-lead - time.Nanosecond), lead, false},
 		{"at start minus lead", t0.Add(-lead), lead, true},
 		{"at start", t0, lead, true},
-		{"in the middle", t0.Add(45 * time.Minute), lead, true},
-		{"just before the end", t0.Add(90*time.Minute - time.Nanosecond), lead, true},
-		{"at the end", t0.Add(90 * time.Minute), lead, false},
+		{"19 s after start", t0.Add(19 * time.Second), lead, true},
+		{"just before the grace ends", t0.Add(StartLateGrace - time.Nanosecond), lead, true},
+		{"when the grace ends", t0.Add(StartLateGrace), lead, false},
+		{"21 s after start", t0.Add(21 * time.Second), lead, false},
+		{"in the middle", t0.Add(45 * time.Minute), lead, false},
 		{"after the end", t0.Add(2 * time.Hour), lead, false},
 		{"zero lead before start", t0.Add(-time.Nanosecond), 0, false},
 		{"zero lead at start", t0, 0, true},
+		{"zero lead 19 s after start", t0.Add(19 * time.Second), 0, true},
+		{"zero lead 21 s after start", t0.Add(21 * time.Second), 0, false},
 		{"invalid lead", t0, -time.Minute, false},
 		{"zero time", time.Time{}, lead, false},
 	}
@@ -120,6 +124,8 @@ func TestAnnounceStart(t *testing.T) {
 		want error
 	}{
 		{"too early", at.Add(-time.Second), lead, nil, ErrNotDue},
+		{"after the grace", t0.Add(StartLateGrace), lead, nil, ErrNotDue},
+		{"mid-lesson", t0.Add(45 * time.Minute), lead, nil, ErrNotDue},
 		{"over", t0.Add(90 * time.Minute), lead, nil, ErrNotDue},
 		{"invalid lead", t0, MaxStartLead + time.Minute, nil, ErrInvalidLead},
 		{"zero time", time.Time{}, lead, nil, ErrInvalidLesson},
