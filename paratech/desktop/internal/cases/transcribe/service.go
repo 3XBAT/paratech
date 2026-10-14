@@ -103,16 +103,17 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		return s.retry(snap, stepTranscript, ErrStorage, err)
 	}
 
-	rec, model, err := s.inputs(ctx, snap, req, modelID)
+	rec, audio, model, err := s.inputs(ctx, snap, req, modelID)
 	if err != nil {
 		return err
 	}
 
-	doc, err := s.prepareDocument(ctx, snap, rec.Audio(), model.File(), docRef, report)
+	doc, err := s.prepareDocument(ctx, snap, audio, model.File(), docRef, report)
 	if err != nil {
 		return err
 	}
 
+	// When an earlier attempt's document is resumed, Created is the time of this attempt, not of the engine run.
 	t, err := transcript.New(transcript.Spec{
 		ID: id, RecordingID: rec.ID(), ModelID: model.ID(), ModelName: model.Name(), ModelVersion: model.ModelVersion(),
 		Language: doc.Language(), Text: docRef,
@@ -137,28 +138,31 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 	return s.finish(ctx, snap, req, t)
 }
 
-// inputs loads the recording and the pinned model and checks that they can be transcribed.
+// inputs loads the recording with its final track and the pinned model.
 func (s *Service) inputs(ctx context.Context, snap job.Snapshot, req values.STTRequest, modelID shared.SttModelID) (
-	*recording.Recording, *sttmodel.Model, error) {
+	*recording.Recording, shared.ArtifactRef, *sttmodel.Model, error) {
+	none := shared.ArtifactRef{}
 	rec, err := s.recordings.Get(ctx, req.Recording())
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil, nil, s.permanent(snap, stepRecording, ErrRecordingNotFound, err)
+		return nil, none, nil, s.permanent(snap, stepRecording, ErrRecordingNotFound, err)
 	case err != nil:
-		return nil, nil, s.retry(snap, stepRecording, ErrStorage, err)
-	case rec.Status() != recording.StatusCompleted || rec.Audio().IsZero():
-		return nil, nil, s.permanent(snap, stepRecording, ErrRecordingNotReady, nil)
+		return nil, none, nil, s.retry(snap, stepRecording, ErrStorage, err)
+	}
+	audio, ok := rec.TranscribableAudio()
+	if !ok {
+		return nil, none, nil, s.permanent(snap, stepRecording, ErrRecordingNotReady, nil)
 	}
 
 	model, err := s.models.Get(ctx, modelID)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil, nil, s.permanent(snap, stepModel, ErrModelNotInstalled, err)
+		return nil, none, nil, s.permanent(snap, stepModel, ErrModelNotInstalled, err)
 	case err != nil:
-		return nil, nil, s.retry(snap, stepModel, ErrStorage, err)
+		return nil, none, nil, s.retry(snap, stepModel, ErrStorage, err)
 	}
 
-	return rec, model, nil
+	return rec, audio, model, nil
 }
 
 // prepareDocument returns the document of this job, running the engine unless an earlier attempt stored a valid one,

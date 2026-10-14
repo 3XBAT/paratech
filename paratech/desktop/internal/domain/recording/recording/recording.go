@@ -403,6 +403,15 @@ func (r *Recording) RequireRecovery(now time.Time, problem string) error {
 	return nil
 }
 
+// TranscribableAudio returns the final track to transcribe; ok is false unless the recording is COMPLETED with a
+// final track: only such a recording can be transcribed.
+func (r *Recording) TranscribableAudio() (audio shared.ArtifactRef, ok bool) {
+	if r.status != StatusCompleted || r.audio.IsZero() {
+		return shared.ArtifactRef{}, false
+	}
+	return r.audio, true
+}
+
 // CheckDeletable refuses deletion while the recording is captured or finalized (ADR-0004(a)).
 func (r *Recording) CheckDeletable() error {
 	if r.status.InProgress() {

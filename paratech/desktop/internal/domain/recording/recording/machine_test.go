@@ -384,6 +384,25 @@ func TestCheckDeletable(t *testing.T) {
 	}
 }
 
+func TestTranscribableAudio(t *testing.T) {
+	for _, s := range Statuses() {
+		t.Run(string(s), func(t *testing.T) {
+			r := inStatus(t, s)
+			audio, ok := r.TranscribableAudio()
+			want := s == StatusCompleted
+			if ok != want {
+				t.Fatalf("TranscribableAudio ok = %v, want %v", ok, want)
+			}
+			if want && audio != mustRef(t, "recordings/r1.wav") {
+				t.Fatalf("TranscribableAudio = %v, want the final track", audio)
+			}
+			if !want && !audio.IsZero() {
+				t.Fatalf("TranscribableAudio = %v, want the zero reference", audio)
+			}
+		})
+	}
+}
+
 func TestTrackRef(t *testing.T) {
 	r := newRec(t)
 	cases := []struct {
