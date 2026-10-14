@@ -540,3 +540,38 @@
 - Чек-лист владельцу (также в ADR-0007): 1) в звонке Zoom/Телемост с фокусом в чате открыть попап из трея — ввод продолжается, главное окно не выходит вперёд; 2) попап поверх развёрнутого/полноэкранного звонка, у трея, Dismiss прячет; 3) два монитора с разным масштабом — позиция и размер; 4) закрытие главного окна оставляет трей, Open возвращает, Quit выходит; 5) второй запуск выводит работающее окно вперёд. Результат внести в ADR-0007 и вручную поставить done
 
 ---
+
+## [TASK-046] Движок импорта расписания: валидация, превью, коммит; CSV-парсер
+**Дата:** 2026-10-14 14:00
+**Статус:** done
+
+### Что сделано
+- Агрегат lesson: Content (title, start, end, IANA-зона как строка), New/Restore, ChangeContent (ревизия только при реальном изменении; сдвиг начала сбрасывает start_notified_at), MarkDeleted (мягкое удаление), CalendarPending (совпадает с SQL, проверено тестом); лимиты: title <= 512 байт без управляющих символов, длительность <= 24 ч
+- Доменный сервис domain/schedule/services/importplan: строки -> план (added/changed/unchanged/removed/conflicts, ошибки по строкам), fingerprint плана
+- cases/schedulesync: PreviewImport (ничего не пишет, возвращает ConfirmToken = SHA-256 плана с версиями) и CommitImport (без токена ErrNotConfirmed; в одном Tx.Do повторный разбор тех же байтов, пересборка плана, несовпадение -> ErrStalePreview, одна ApplyChanges); порты ScheduleParser.Parse(ctx, []byte) и LessonRepository.ListLive
+- adapters/csvschedule (encoding/csv + time/tzdata, ~450 КБ: на Windows нет базы зон); формат в docs/refs/schedule-csv.md; лимиты 2 МиБ / 5000 строк; значения ячеек не попадают в сообщения об ошибках
+- adapters/sqlite LessonRepository целиком (CAS версий, атомарный ApplyChanges, удаления до вставок, мягкое удаление, pending, purge), sqlc v1.31.1
+- Сценарные тесты tests/schedule_import_sqlite_test.go на настоящем SQLite
+- Изменённые существующие тесты: нет (BOM-литералы в parser_test.go — тесты этой же задачи)
+- Ревью: request changes -> high (BOM был mojibake, Excel «CSV UTF-8» отклонялся), medium (start_notified_at не сбрасывался при сдвиге), 3 low -> всё исправлено в 3fb9425. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), на финальном head после rebase на 3b80a4b
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestScheduleImportErrorInRow3LeavesScheduleUnchanged (+ TestCommitRefusals/file_with_errors)
+- [x] Шаг 3: TestScheduleImportPreviewShowsChangesAndConflicts (+ TestBuildDiff, TestBuildConflicts)
+
+### Решения (подтвердить)
+- source_uid: "csv:id:<uid>" при колонке uid, иначе "csv:auto:<date> <start> <title>" (смена названия/даты/начала без uid = удаление + добавление)
+- Файл источника S — полное расписание S: отсутствующие живые занятия с префиксом "S:" мягко удаляются; ручные и других источников не трогаются
+- Конфликты (пересечение внутри файла или с оставшимся занятием) — предупреждения, коммит не блокируют; любая ошибка строки делает план некоммитируемым; пустой файл — ошибка
+- Превью без состояния: на коммит input передаёт те же байты и токен
+
+### Заметки (follow-up)
+- TASK-047/048: префиксы ics:/xlsx: в source_uid, парсер регистрируется в Deps.Parsers по importplan.Source
+- TASK-051: после коммита задача синхронизации не ставится (занятия pending по состоянию); MarkCalendarSynced не реализован; заголовки — недоверенный текст
+- TASK-018: использует ListStartingBetween и start_notified_at (сброс при сдвиге уже в агрегате)
+- Нет подключения в app/input и UI (input читает файл с лимитом 2 МиБ)
+- Low (security, инфо): fingerprint хэширует UnixNano — переполнение для дат вне 1678-2262, недостижимо при модели угроз
+
+---
