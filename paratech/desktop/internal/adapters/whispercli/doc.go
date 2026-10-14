@@ -22,10 +22,9 @@
 // directory is removed, so no partial output remains.
 //
 // Open points for the wiring and later tasks:
-//   - The Paths resolver is not implemented anywhere yet. The wiring task must add Path(ctx, ref) to the filestore
-//     adapter and check every path component for links: this adapter only Lstats the last element.
-//   - The transcript document (Transcript, TranscriptFormatVersion) is owned by this adapter for now; TASK-029 must
-//     move the format into a domain value.
+//   - The Paths resolver is filestore.Store.Path, which refuses links in every path component; this adapter Lstats
+//     the last element again.
+//   - The stored transcript document format is owned by the domain (transcript.Document); the adapter only fills it.
 //   - On Windows a data root with characters outside the ANSI code page is rejected (ErrConfig, or ErrInvalidInput
 //     per file). Whether the app uses an ASCII-only data root, or configures one, is a product decision for TASK-025.
 //   - The run directory mode 0700 has no effect on Windows; there the data root's ACL protects the run directories.
