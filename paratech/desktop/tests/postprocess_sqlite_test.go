@@ -483,26 +483,52 @@ func TestInvalidLLMAnswerFailsTheJobWithoutRecords(t *testing.T) {
 	e := newPPEnv(t, llm)
 	e.start()
 
+	var failed []shared.JobID
 	for _, typ := range []job.Type{homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType} {
 		j := e.waitPost(typ, job.StatusFailed)
+		failed = append(failed, j.ID())
 		if j.Attempts() != 1 || !strings.HasSuffix(j.LastError(), homeworkflow.ErrInvalidAnswer.Error()) ||
 			strings.Contains(j.LastError(), "teacher@example.com") || strings.Contains(j.LastError(), "rivers") {
 			t.Fatalf("%s: attempts %d, last error %q", typ, j.Attempts(), j.LastError())
 		}
 	}
-	// A failed job never runs again (AC-10).
+	// A failed job never runs again (AC-10). Two hours pass; a sentinel job (failing before any LLM call) shows that
+	// the runner polled after that, and Stop waits for every handler still running, so the count is final.
 	for range 120 {
 		e.clock.Advance(time.Minute)
 	}
-	time.Sleep(20 * time.Millisecond)
+	ctx := context.Background()
+	sentinel, err := job.New(job.Spec{
+		ID: "sentinel", Type: homeworkflow.SummarizeJobType, Key: "sentinel", Payload: `{"recording_id":"r1"}`, MaxAttempts: 1,
+	}, e.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.jobs.Enqueue(ctx, sentinel); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, "the sentinel job fails", func() bool {
+		j, err := e.jobs.Get(ctx, "sentinel")
+		return err == nil && j.Status() == job.StatusFailed
+	}, func() { e.clock.Advance(time.Second) })
+	stopCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := e.runner.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
 	if n := len(llm.Requests()); n != 2 {
 		t.Fatalf("LLM requests = %d, want 2 (no retry of a permanent failure)", n)
+	}
+	for _, id := range failed {
+		if j, err := e.jobs.Get(ctx, id); err != nil || j.Status() != job.StatusFailed || j.Attempts() != 1 {
+			t.Fatalf("job %s after two hours: %v, %v", id, j, err)
+		}
 	}
 
 	if list := e.storedAssignments(); len(list) != 0 {
 		t.Fatalf("assignments = %d, want 0", len(list))
 	}
-	if _, err := e.summaries.Get(context.Background(), summary.IDOf(ppTranscript)); err == nil {
+	if _, err := e.summaries.Get(ctx, summary.IDOf(ppTranscript)); err == nil {
 		t.Fatal("a summary was stored from an invalid answer")
 	}
 }

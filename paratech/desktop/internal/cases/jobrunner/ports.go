@@ -73,6 +73,7 @@ type Handler interface {
 	// WAITING_FOR_POWER comes only from report (below). An error that wraps shared.ErrNetworkUnavailable or
 	// shared.ErrQuotaExceeded and is not marked permanent moves the job to WAITING_FOR_NETWORK or WAITING_FOR_QUOTA
 	// (backoff.WaitStatus) without using an attempt; the runner tries it again after Config.Rechecks.
+	// Only LLM (Hub) adapters may return these two errors, so that only LLM jobs are parked this way.
 	//
 	// The error text is stored in jobs.last_error and written to the log, so it must contain no secrets, no prompt
 	// or transcript text and no response bodies. Adapters return classified errors with short fixed messages.
