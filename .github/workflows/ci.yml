@@ -62,6 +62,29 @@ jobs:
           cache-dependency-path: paratech/*/go.sum
       - run: go vet ./desktop/... ./hub/... ./shared/...
       - run: go test ./desktop/... ./hub/... ./shared/...
+  frontend:
+    # Build and test the React UI once desktop/frontend exists (TASK-021); skipped until then.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paratech/desktop/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - id: present
+        working-directory: .
+        run: test -f paratech/desktop/frontend/package-lock.json && echo "yes=true" >> "$GITHUB_OUTPUT" || echo "yes=false" >> "$GITHUB_OUTPUT"
+      - if: steps.present.outputs.yes == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: paratech/desktop/frontend/package-lock.json
+      - if: steps.present.outputs.yes == 'true'
+        run: npm ci
+      - if: steps.present.outputs.yes == 'true'
+        run: npm run build
+      - if: steps.present.outputs.yes == 'true'
+        run: npm run test
   vulncheck:
     # Known vulnerabilities in the Go standard library and dependencies that the code actually calls.
     # Not-applicable findings are listed with a reason in .github/vulncheck-allow.txt (docs/process/security-review.md).
