@@ -277,3 +277,9 @@ ALTER TABLE assignments ADD COLUMN source_index INTEGER CHECK (source_index IS N
 ALTER TABLE assignments ADD COLUMN prompt_version INTEGER CHECK (prompt_version IS NULL OR prompt_version >= 1);
 CREATE UNIQUE INDEX idx_assignments_source ON assignments (transcript_id, source_index)
     WHERE transcript_id IS NOT NULL AND source_index IS NOT NULL;
+
+-- deliveries: the SHA-256 and size of the attachment the user confirmed (AC-14). The adapter sends the file only if the
+-- bytes it read match, so a file changed after the confirmation is never sent. The DEFAULTs exist only because SQLite
+-- needs them to add a NOT NULL column; no delivery row exists before this migration, and the aggregate rejects them.
+ALTER TABLE deliveries ADD COLUMN attachment_sha256 TEXT NOT NULL DEFAULT '' CHECK (attachment_sha256 = '' OR length(attachment_sha256) = 64);
+ALTER TABLE deliveries ADD COLUMN attachment_size INTEGER NOT NULL DEFAULT 0 CHECK (attachment_size >= 0);
