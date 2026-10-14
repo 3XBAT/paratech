@@ -21,7 +21,7 @@ syntax and RRULE values; recurrence expansion in our code). PRD sections 4.3 and
 | `DTSTART` | with `TZID` (IANA or Windows name such as `Russian Standard Time`), UTC `Z`, or floating (needs `X-WR-TIMEZONE`) |
 | `DTEND` / `DURATION` | exactly one of them |
 | `RRULE` | one per event: `FREQ=DAILY/WEEKLY/MONTHLY/YEARLY`, `INTERVAL` 1..1000, `COUNT` or `UNTIL`, `BYDAY` without numbers (DAILY, WEEKLY), `WKST` |
-| `EXDATE` / `RDATE` | remove / add occurrences (`RDATE` date-times only) |
+| `EXDATE` / `RDATE` | remove / add occurrences (`RDATE` date-times only; a date-only `EXDATE` is a date in the shown zone); at most 5000 values each per event |
 | `RECURRENCE-ID` | a changed or cancelled occurrence of the series with the same `UID` |
 | `STATUS:CANCELLED` | drops the event (on the master: the whole series) |
 | `X-WR-TIMEZONE` | zone for floating times and the shown zone of UTC events |
@@ -32,9 +32,13 @@ syntax and RRULE values; recurrence expansion in our code). PRD sections 4.3 and
 - Ignored: `LOCATION`, `DESCRIPTION`, alarms, attendees.
 
 ## Identity and re-import
-- Each occurrence is `ics:<UID>/<original start in UTC, RFC 3339>`; a long or non-printable UID is hashed
-  (`sha256-...`); without UID `auto-<hash of title>`.
-- A moved occurrence (`RECURRENCE-ID`) keeps the key of the start it replaces, so it shows as "changed".
+- A one-off event with a `UID` (no `RRULE`, `RDATE` or changed occurrences) is `ics:<UID>`: moving it shows as
+  "changed".
+- A series occurrence is `ics:<UID>/<original start in UTC, RFC 3339>`. A moved occurrence (`RECURRENCE-ID`) keeps
+  the key of the start it replaces, so it shows as "changed". Moving the `DTSTART` of a whole series changes every
+  original start, so it shows as remove + add.
+- A long or non-printable `UID`, or one with `/`, is hashed (`sha256-...`), so the two key forms never collide.
+  Without `UID` the key is `ics:auto-<hash of title>/<start>` (moving such an event is remove + add).
 - Re-importing the same file changes nothing. Manual and CSV/XLSX lessons are never touched.
 
 ## Errors

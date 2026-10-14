@@ -22,6 +22,9 @@ const (
 	compEvent    = "VEVENT"
 )
 
+// parseProperty is golang-ical's property parser; a test replaces it to check the panic recovery.
+var parseProperty = ics.ParseProperty
+
 // layout is what the pre-scan learned about the file: golang-ical keeps no line numbers.
 type layout struct {
 	// events holds the physical line of each BEGIN:VEVENT directly inside the VCALENDAR, in file order. It matches
@@ -42,8 +45,14 @@ func (l layout) physical(logicalLine int) int {
 }
 
 // scan unfolds the content lines like golang-ical does (a line starting with a space or a tab continues the previous
-// one; CRLF and LF both end a line), enforces the line limits and tracks BEGIN/END to find the events.
-func scan(data []byte) (layout, error) {
+// one; CRLF and LF both end a line), enforces the line limits and tracks BEGIN/END to find the events. A panic of
+// golang-ical's property parser on hostile input becomes a malformed-file error, as in parseCalendar.
+func scan(data []byte) (lay layout, err error) {
+	defer func() {
+		if recover() != nil {
+			lay, err = layout{}, &Error{Kind: ErrMalformed, Detail: "not valid iCalendar syntax"}
+		}
+	}()
 	var (
 		out       layout
 		cur       []byte
@@ -85,6 +94,9 @@ func scan(data []byte) (layout, error) {
 				return &Error{Kind: ErrMalformed, Line: curStart, Detail: fmt.Sprintf("components nested deeper than %d", maxDepth)}
 			}
 		case tokenEnd:
+			if depth == 0 {
+				return &Error{Kind: ErrMalformed, Line: curStart, Detail: "END without BEGIN"}
+			}
 			depth--
 			if depth == 0 && value == compCalendar {
 				closed = true
@@ -152,7 +164,7 @@ func beginEnd(line []byte) (token, value string, ok bool) {
 	if !bytes.Contains(line, []byte(tokenBegin)) && !bytes.Contains(line, []byte(tokenEnd)) {
 		return "", "", false
 	}
-	p, err := ics.ParseProperty(ics.ContentLine(line))
+	p, err := parseProperty(ics.ContentLine(line))
 	if err != nil || p == nil {
 		return "", "", false // golang-ical refuses the line too and Parse reports it
 	}

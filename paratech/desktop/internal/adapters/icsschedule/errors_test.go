@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	ics "github.com/arran4/golang-ical"
+
 	"paratech/desktop/internal/domain/schedule/services/importplan"
 )
 
@@ -140,10 +142,17 @@ func TestFileErrors(t *testing.T) {
 		{"folded long line", cal("X-PAD:a\n" + strings.Repeat(" "+strings.Repeat("b", 1000)+"\n", 70)), time.Time{}, 0, ErrMalformed},
 		{"many parameters", cal("X-P" + strings.Repeat(";A=1", maxParamSeparators+1) + ":" + secret + "\n"), time.Time{}, 0, ErrMalformed},
 		{"deep nesting", cal(strings.Repeat("BEGIN:X\n", maxDepth) + strings.Repeat("END:X\n", maxDepth)), time.Time{}, 0, ErrMalformed},
+		{"end before the calendar", "END:X\n" + cal(""), time.Time{}, 0, ErrMalformed},
+		{"end after the calendar", cal("") + "END:VCALENDAR\n", time.Time{}, 0, ErrMalformed},
+		{"end below the calendar", cal("END:VEVENT\nEND:VEVENT\n"), time.Time{}, 0, ErrMalformed},
 		{"broken syntax", cal(ev(1, "UID:a\n"+secret+"\n")), time.Time{}, 0, ErrMalformed},
 		{"too many events", cal(ev(MaxEvents+1, "")), time.Time{}, 0, ErrTooMany},
 		{"too many lessons", cal(ev(1, "UID:d\nSUMMARY:Daily\nDTSTART:20260101T090000Z\nDURATION:PT1H\nRRULE:FREQ=DAILY\n")),
 			time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0, ErrTooMany},
+		{"too many rdates", cal(ev(1, "UID:r\nSUMMARY:R\nDTSTART:20261001T000000Z\nDURATION:PT1H\n"+
+			dateLines("RDATE", 10_000, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Hour))), time.Time{}, 0, ErrTooMany},
+		{"too many exdates", cal(ev(1, "UID:x\nSUMMARY:X\nDTSTART:20261001T000000Z\nDURATION:PT1H\nRRULE:FREQ=DAILY\n"+
+			dateLines("EXDATE", 10_000, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Hour))), time.Time{}, 0, ErrTooMany},
 		{"too complex", cal(complexBody), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 1, ErrTooComplex},
 	}
 	for _, tt := range tests {
@@ -166,6 +175,35 @@ func TestFileErrors(t *testing.T) {
 				t.Fatalf("message quotes the file: %v", err)
 			}
 		})
+	}
+}
+
+// dateLines writes n UTC date-times from start, step apart, as property lines of 1000 values each.
+func dateLines(prop string, n int, start time.Time, step time.Duration) string {
+	var b strings.Builder
+	for i := 0; i < n; i += 1000 {
+		b.WriteString(prop + ":")
+		for j := i; j < min(i+1000, n); j++ {
+			if j > i {
+				b.WriteByte(',')
+			}
+			b.WriteString(start.Add(time.Duration(j) * step).Format("20060102T150405Z"))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// golang-ical's property parser runs in the pre-scan too; a panic there is a malformed file, not a crash.
+func TestScanRecoversFromPanic(t *testing.T) {
+	orig := parseProperty
+	t.Cleanup(func() { parseProperty = orig })
+	parseProperty = func(ics.ContentLine) (*ics.BaseProperty, error) { panic("hostile input") }
+
+	p := newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	_, err := p.Parse(context.Background(), []byte("BEGIN:VCALENDAR\nEND:VCALENDAR\n"))
+	if !errors.Is(err, ErrMalformed) || !errors.Is(err, importplan.ErrUnreadableFile) {
+		t.Fatalf("Parse = %v", err)
 	}
 }
 

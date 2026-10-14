@@ -110,7 +110,10 @@ func (p *Parser) Parse(ctx context.Context, data []byte) (importplan.Parsed, err
 				return importplan.Parsed{}, err
 			}
 		}
-		e, rowErr := r.read(ev, lay.events[i])
+		e, rowErr, err := r.read(ev, lay.events[i])
+		if err != nil {
+			return importplan.Parsed{}, err
+		}
 		if rowErr != nil {
 			out.Errors = append(out.Errors, *rowErr)
 			continue
@@ -191,14 +194,14 @@ func occurrences(ctx context.Context, w importplan.Window, events []event) ([]im
 	x := expansion{ctx: ctx, budget: new(int)}
 	*x.budget = MaxExpansionSteps
 	var rows []importplan.Row
-	add := func(e *event, original, start time.Time) error {
+	add := func(e *event, k string, start time.Time) error {
 		if len(rows) == importplan.MaxRows {
 			return &Error{Kind: ErrTooMany, Detail: fmt.Sprintf("more than %d lessons in the import dates", importplan.MaxRows)}
 		}
 		start = start.In(e.label)
 		rows = append(rows, importplan.Row{
 			Line: e.line,
-			Key:  key(e.id, original),
+			Key:  k,
 			Content: lesson.Content{
 				Title: e.title, Start: start, End: start.Add(e.duration), TimeZone: e.label.String(),
 			},
@@ -219,7 +222,7 @@ func occurrences(ctx context.Context, w importplan.Window, events []event) ([]im
 
 		if e.recurrenceID != nil {
 			if w.Contains(e.start) {
-				if err := add(e, *e.recurrenceID, e.start); err != nil {
+				if err := add(e, key(e.id, *e.recurrenceID), e.start); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -238,11 +241,18 @@ func occurrences(ctx context.Context, w importplan.Window, events []event) ([]im
 		if e.uid == "" {
 			replaced = nil
 		}
+		// A one-off event is keyed by its id alone, so moving it shows as a change. Without a UID the id is the
+		// title, which needs the start to tell events apart.
+		single := e.uid != "" && !e.hasRule && len(e.rdates) == 0 && len(replaced) == 0
 		for _, s := range starts {
 			if replaced[s.Unix()] {
 				continue
 			}
-			if err := add(e, s, s); err != nil {
+			k := e.id
+			if !single {
+				k = key(e.id, s)
+			}
+			if err := add(e, k, s); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -266,9 +276,14 @@ func series(x expansion, w importplan.Window, e *event) ([]time.Time, string, er
 	}
 
 	loc := e.start.Location()
-	seen := map[int64]bool{}
+	seen := make(map[int64]bool, len(starts)+len(e.rdates))
 	var out []time.Time
-	for _, s := range append(starts, e.rdates...) {
+	for i, s := range append(starts, e.rdates...) {
+		if i%cancelCheck == 0 {
+			if err := x.ctx.Err(); err != nil {
+				return nil, "", err
+			}
+		}
 		s = s.In(loc)
 		u := s.Unix()
 		if seen[u] || !w.Contains(s) || excluded(e, s) {
@@ -281,17 +296,8 @@ func series(x expansion, w importplan.Window, e *event) ([]time.Time, string, er
 	return out, "", nil
 }
 
+// excluded reports whether EXDATE removes the occurrence at s. A date-only EXDATE is a date in the zone the lesson is
+// shown in, so for a UTC series of a calendar with X-WR-TIMEZONE it is the local date, not the UTC one.
 func excluded(e *event, s time.Time) bool {
-	for _, x := range e.exInstant {
-		if x.Equal(s) {
-			return true
-		}
-	}
-	day := civilDate(s)
-	for _, d := range e.exDay {
-		if d.Equal(day) {
-			return true
-		}
-	}
-	return false
+	return e.exInstant[s.Unix()] || e.exDay[civilDate(s.In(e.label)).Unix()]
 }

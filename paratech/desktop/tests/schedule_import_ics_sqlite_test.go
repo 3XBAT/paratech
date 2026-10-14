@@ -114,7 +114,7 @@ func TestScheduleImportICSWeeklyEventWithinImportDates(t *testing.T) {
 			t.Errorf("lesson on %v = %+v (found %v)", d, l, ok)
 		}
 	}
-	if c := lessons["ics:consult@uni.example/2026-10-16T12:00:00Z"]; c.Zone != "Europe/Moscow" || c.Title != "Consultation" {
+	if c := lessons["ics:consult@uni.example"]; c.Zone != "Europe/Moscow" || c.Title != "Consultation" {
 		t.Errorf("single UTC event = %+v", c)
 	}
 

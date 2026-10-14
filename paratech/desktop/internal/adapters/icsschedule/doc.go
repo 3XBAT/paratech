@@ -35,10 +35,12 @@
 // when its own start is in the bounds. Series whose DTSTART is at or after To, or whose UNTIL is before From, are not
 // checked against the subset. MaxExpansionSteps bounds the work for the whole file.
 //
-// Identity: the row key of an occurrence is "<id>/<original start in UTC, RFC 3339>"; <id> is the UID, its
-// "sha256-<hex>" when longer than 255 bytes or not printable, and "auto-<hash of the title>" without a UID. A changed
-// occurrence keeps the key of the start it replaces, so moving it changes the lesson. The stored source uid is
-// "ics:<key>" (importplan). One master per UID and one change per RECURRENCE-ID; repeats are row errors.
+// Identity: a one-off event with a UID (no RRULE, RDATE or changed occurrences) has the key "<id>", so moving it
+// changes the lesson. A series occurrence has "<id>/<original start in UTC, RFC 3339>", and so has an event without a
+// UID. <id> is the UID, its "sha256-<hex>" when longer than 255 bytes, not printable or containing '/', and
+// "auto-<hash of the title>" without a UID. A changed occurrence keeps the key of the start it replaces. The stored
+// source uid is "ics:<key>" (importplan). One master per UID and one change per RECURRENCE-ID; repeats are row errors.
+// A date-only EXDATE is a date in the zone the lessons are shown in.
 //
 // Line numbers are lines of the file: a row and its errors point at the BEGIN:VEVENT of the event (golang-ical has
 // no line numbers; a pre-scan computes them). A row problem is returned as data; a file that cannot be read at all

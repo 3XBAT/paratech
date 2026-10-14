@@ -3,6 +3,7 @@ package icsschedule
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -32,12 +33,16 @@ const (
 	paramRange      = "RANGE"
 )
 
+// maxDatesPerEvent bounds the EXDATE and the RDATE values of one event (each).
+const maxDatesPerEvent = importplan.MaxRows
+
 // Identity of events in row keys.
 const (
 	maxRawUIDBytes = 255 // longer or odd UIDs are hashed so the source uid stays within lesson.MaxSourceUIDBytes
 	idHashPrefix   = "sha256-"
 	idAutoPrefix   = "auto-" // no UID: the identity is the title (with the start in the key)
 	keyTimeLayout  = time.RFC3339
+	keySeparator   = "/"
 )
 
 // Row error reasons of an event; they quote nothing from the file.
@@ -77,8 +82,8 @@ type event struct {
 	rule      *rule
 	ruleEnded bool // RRULE ends before the import bounds
 	hasRule   bool
-	exInstant []time.Time
-	exDay     []time.Time // EXDATE;VALUE=DATE: civil dates
+	exInstant map[int64]bool // EXDATE instants, Unix seconds
+	exDay     map[int64]bool // EXDATE;VALUE=DATE: civil dates as midnight UTC, Unix seconds
 	rdates    []time.Time
 }
 
@@ -95,7 +100,8 @@ func rowError(line int, field, reason string) *importplan.RowError {
 
 // read converts one VEVENT. All-day events are returned with allDay set and nothing else checked: they are not
 // lessons and are skipped. A cancelled event needs only its identity.
-func (r *reader) read(ev *ics.VEvent, line int) (event, *importplan.RowError) {
+// err is a file error: too many EXDATE or RDATE values.
+func (r *reader) read(ev *ics.VEvent, line int) (event, *importplan.RowError, error) {
 	e := event{line: line}
 	if p := prop(ev, propUID); p != nil {
 		e.uid = strings.TrimSpace(p.Value)
@@ -112,52 +118,52 @@ func (r *reader) read(ev *ics.VEvent, line int) (event, *importplan.RowError) {
 	startProp := prop(ev, propDTStart)
 	if startProp == nil {
 		if e.cancelled && recur == nil {
-			return e, nil
+			return e, nil, nil
 		}
-		return e, rowError(line, propDTStart, reasonNoStart)
+		return e, rowError(line, propDTStart, reasonNoStart), nil
 	}
 	st, rerr := single(startProp, line, propDTStart)
 	if rerr != nil {
-		return e, rerr
+		return e, rerr, nil
 	}
 	if st.date {
 		e.allDay = true
-		return e, nil
+		return e, nil, nil
 	}
 	loc, label, reason := r.eventZone(st)
 	if reason != "" {
-		return e, rowError(line, propDTStart, reason)
+		return e, rowError(line, propDTStart, reason), nil
 	}
 	e.label = label
 	if e.start, reason = r.instant(st, loc); reason != "" {
-		return e, rowError(line, propDTStart, reason)
+		return e, rowError(line, propDTStart, reason), nil
 	}
 
 	if recur != nil {
 		if len(param(recur, paramRange)) > 0 {
-			return e, rowError(line, propRecurrenceID, reasonRange)
+			return e, rowError(line, propRecurrenceID, reasonRange), nil
 		}
 		rs, rerr := single(recur, line, propRecurrenceID)
 		if rerr != nil {
-			return e, rerr
+			return e, rerr, nil
 		}
 		if rs.date {
-			return e, rowError(line, propRecurrenceID, reasonDateMix)
+			return e, rowError(line, propRecurrenceID, reasonDateMix), nil
 		}
 		t, reason := r.instant(rs, loc)
 		if reason != "" {
-			return e, rowError(line, propRecurrenceID, reason)
+			return e, rowError(line, propRecurrenceID, reason), nil
 		}
 		e.recurrenceID = &t
 	}
 	if e.cancelled {
-		return e, nil
+		return e, nil, nil
 	}
 
 	if rerr := r.readDuration(ev, &e, loc); rerr != nil {
-		return e, rerr
+		return e, rerr, nil
 	}
-	return e, r.readRecurrence(ev, &e, loc)
+	return r.readRecurrence(ev, e, loc)
 }
 
 func (r *reader) readDuration(ev *ics.VEvent, e *event, loc *time.Location) *importplan.RowError {
@@ -192,62 +198,79 @@ func (r *reader) readDuration(ev *ics.VEvent, e *event, loc *time.Location) *imp
 	return nil
 }
 
-func (r *reader) readRecurrence(ev *ics.VEvent, e *event, loc *time.Location) *importplan.RowError {
+func (r *reader) readRecurrence(ev *ics.VEvent, e event, loc *time.Location) (event, *importplan.RowError, error) {
 	if len(props(ev, propExRule)) > 0 {
-		return rowError(e.line, propExRule, reasonExRule)
+		return e, rowError(e.line, propExRule, reasonExRule), nil
 	}
 	rules := props(ev, propRRule)
 	switch {
 	case len(rules) > 1:
-		return rowError(e.line, propRRule, reasonManyRules)
+		return e, rowError(e.line, propRRule, reasonManyRules), nil
 	case len(rules) == 1 && e.recurrenceID != nil:
-		return rowError(e.line, propRRule, reasonOverrideRule)
+		return e, rowError(e.line, propRRule, reasonOverrideRule), nil
 	case len(rules) == 1:
 		e.hasRule = true
 		// A series that starts after the bounds has no occurrence in them; its rule is not checked.
 		if e.start.Before(r.to) {
 			ru, ended, reason := compileRule(rules[0].Value, loc, r.from)
 			if reason != "" {
-				return rowError(e.line, propRRule, reason)
+				return e, rowError(e.line, propRRule, reason), nil
 			}
 			e.rule, e.ruleEnded = ru, ended
 		}
 	}
 
+	exCount := 0
 	for _, p := range props(ev, propExDate) {
 		stamps, err := parseStamps(p)
 		if err != nil {
-			return rowError(e.line, propExDate, reasonBadTime)
+			return e, rowError(e.line, propExDate, reasonBadTime), nil
+		}
+		if exCount += len(stamps); exCount > maxDatesPerEvent {
+			return e, nil, tooManyDates(propExDate)
 		}
 		for _, s := range stamps {
 			if s.date {
-				e.exDay = append(e.exDay, s.civil)
+				if e.exDay == nil {
+					e.exDay = map[int64]bool{}
+				}
+				e.exDay[s.civil.Unix()] = true
 				continue
 			}
 			t, reason := r.instant(s, loc)
 			if reason != "" {
-				return rowError(e.line, propExDate, reason)
+				return e, rowError(e.line, propExDate, reason), nil
 			}
-			e.exInstant = append(e.exInstant, t)
+			if e.exInstant == nil {
+				e.exInstant = map[int64]bool{}
+			}
+			e.exInstant[t.Unix()] = true
 		}
 	}
 	for _, p := range props(ev, propRDate) {
 		stamps, err := parseStamps(p)
 		if err != nil {
-			return rowError(e.line, propRDate, reasonBadTime) // also VALUE=PERIOD, which is not supported
+			return e, rowError(e.line, propRDate, reasonBadTime), nil // also VALUE=PERIOD, which is not supported
+		}
+		if len(e.rdates)+len(stamps) > maxDatesPerEvent {
+			return e, nil, tooManyDates(propRDate)
 		}
 		for _, s := range stamps {
 			if s.date {
-				return rowError(e.line, propRDate, reasonDateMix)
+				return e, rowError(e.line, propRDate, reasonDateMix), nil
 			}
 			t, reason := r.instant(s, loc)
 			if reason != "" {
-				return rowError(e.line, propRDate, reason)
+				return e, rowError(e.line, propRDate, reason), nil
 			}
 			e.rdates = append(e.rdates, t)
 		}
 	}
-	return nil
+	return e, nil, nil
+}
+
+func tooManyDates(field string) error {
+	return &Error{Kind: ErrTooMany, Detail: fmt.Sprintf("more than %d %s values in an event", maxDatesPerEvent, field)}
 }
 
 // single reads a property that holds exactly one value.
@@ -331,23 +354,25 @@ func cleanTitle(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// identity is the stable part of an event's row keys: the UID when it is short printable text, else its SHA-256;
-// without a UID, a hash of the title (so the key is "title + start", as for CSV rows without uid).
+// identity is the stable part of an event's row keys: the UID when it is short printable text without '/', else its
+// SHA-256; without a UID, a hash of the title (so the key is "title + start", as for CSV rows without uid). No id
+// contains '/', so the key of a single event never equals the key of a series occurrence.
 func identity(uid, title string) string {
 	switch {
 	case uid == "":
 		sum := sha256.Sum256([]byte(title))
 		return idAutoPrefix + hex.EncodeToString(sum[:16])
-	case len(uid) > maxRawUIDBytes || !utf8.ValidString(uid) || strings.ContainsFunc(uid, unicode.IsControl):
+	case len(uid) > maxRawUIDBytes || !utf8.ValidString(uid) || strings.ContainsFunc(uid, unicode.IsControl) ||
+		strings.Contains(uid, keySeparator):
 		sum := sha256.Sum256([]byte(uid))
 		return idHashPrefix + hex.EncodeToString(sum[:])
 	}
 	return uid
 }
 
-// key is the row key of an occurrence: the event identity and the original start of the occurrence in UTC. A changed
-// occurrence keeps the key of the time it replaces, so moving it in the calendar changes the lesson instead of
+// key is the row key of a series occurrence: the event identity and the original start of the occurrence in UTC. A
+// changed occurrence keeps the key of the time it replaces, so moving it in the calendar changes the lesson instead of
 // replacing it.
 func key(id string, original time.Time) string {
-	return id + "/" + original.UTC().Format(keyTimeLayout)
+	return id + keySeparator + original.UTC().Format(keyTimeLayout)
 }

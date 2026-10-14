@@ -176,3 +176,88 @@ func TestOverrides(t *testing.T) {
 		t.Fatalf("orphan override = %+v", got)
 	}
 }
+
+// RDATE and EXDATE are matched through sets: an event with the most values allowed parses quickly.
+func TestManyDatesInOneEvent(t *testing.T) {
+	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	// RDATEs at hours 1..5000, EXDATEs at the even hours 0..9998: DTSTART (hour 0) and the even RDATEs go.
+	src := calendar("", []string{"DTSTART:20261001T000000Z", "DURATION:PT30M",
+		strings.TrimSuffix(dateLines("RDATE", maxDatesPerEvent, day.Add(time.Hour), time.Hour), "\n"),
+		strings.TrimSuffix(dateLines("EXDATE", maxDatesPerEvent, day, 2*time.Hour), "\n")}, "")
+	began := time.Now()
+	got := parseWith(t, newParser(t, day, day.AddDate(1, 0, 0)), src)
+	if elapsed := time.Since(began); elapsed > 10*time.Second {
+		t.Fatalf("took %v", elapsed)
+	}
+	if len(got.Errors) != 0 || len(got.Rows) != maxDatesPerEvent/2 {
+		t.Fatalf("%d rows, errors %+v", len(got.Rows), got.Errors)
+	}
+	for _, r := range got.Rows {
+		if r.Content.Start.Sub(day)/time.Hour%2 != 1 {
+			t.Fatalf("excluded occurrence imported: %v", r.Content.Start)
+		}
+	}
+}
+
+// A date-only EXDATE is a date in the shown zone: here Moscow, while the series recurs in UTC.
+func TestDateExdateOfUTCSeries(t *testing.T) {
+	msk := zone(t, "Europe/Moscow")
+	src := calendar("X-WR-TIMEZONE:Europe/Moscow",
+		[]string{"DTSTART:20261005T220000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY;COUNT=3", "EXDATE;VALUE=DATE:20261006"}, "")
+	got := parseWith(t, newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)), src)
+	var starts []string
+	for _, r := range got.Rows {
+		starts = append(starts, r.Content.Start.In(msk).Format("2006-01-02 15:04"))
+	}
+	if len(got.Errors) != 0 || strings.Join(starts, ", ") != "2026-10-07 01:00, 2026-10-08 01:00" {
+		t.Fatalf("starts = %v, errors %+v", starts, got.Errors)
+	}
+}
+
+func TestRowKeys(t *testing.T) {
+	const start, moved = "DTSTART:20261005T060000Z", "DTSTART:20261009T060000Z"
+	const occ = "/2026-10-05T06:00:00Z"
+	override := "BEGIN:VEVENT\nUID:ev-1\nRECURRENCE-ID:20261005T060000Z\nDTSTART:20261005T060000Z\nSTATUS:CANCELLED\nEND:VEVENT\n"
+	noUID := func(dtstart string) string {
+		return "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Class\n" + dtstart + "\nDURATION:PT1H\nEND:VEVENT\nEND:VCALENDAR\n"
+	}
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{"single event", calendar("", []string{start, "DURATION:PT1H"}, ""), []string{"ev-1"}},
+		{"moved single event keeps its key", calendar("", []string{moved, "DURATION:PT1H"}, ""), []string{"ev-1"}},
+		{"single event with exdate", calendar("", []string{start, "DURATION:PT1H", "EXDATE:20261006T060000Z"}, ""), []string{"ev-1"}},
+		{"series", calendar("", []string{start, "DURATION:PT1H", "RRULE:FREQ=DAILY;COUNT=2"}, ""),
+			[]string{"ev-1" + occ, "ev-1/2026-10-06T06:00:00Z"}},
+		{"rdate makes a series", calendar("", []string{start, "DURATION:PT1H", "RDATE:20261007T060000Z"}, ""),
+			[]string{"ev-1" + occ, "ev-1/2026-10-07T06:00:00Z"}},
+		{"override makes a series", calendar("", []string{moved, "DURATION:PT1H"}, override), []string{"ev-1/2026-10-09T06:00:00Z"}},
+		{"no uid keeps the start", noUID(start), []string{identity("", "Class") + occ}},
+	}
+	p := newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseWith(t, p, tt.src)
+			var keys []string
+			for _, r := range got.Rows {
+				keys = append(keys, r.Key)
+			}
+			if len(got.Errors) != 0 || strings.Join(keys, " ") != strings.Join(tt.want, " ") {
+				t.Fatalf("keys = %v, errors %+v; want %v", keys, got.Errors, tt.want)
+			}
+		})
+	}
+
+	// A UID with '/' is hashed, so a single event cannot take the key of an occurrence of another series.
+	src := "BEGIN:VCALENDAR\n" +
+		"BEGIN:VEVENT\nUID:x" + occ + "\nSUMMARY:A\n" + start + "\nDURATION:PT1H\nEND:VEVENT\n" +
+		"BEGIN:VEVENT\nUID:x\nSUMMARY:B\n" + start + "\nDURATION:PT1H\nRRULE:FREQ=DAILY;COUNT=1\nEND:VEVENT\n" +
+		"END:VCALENDAR\n"
+	got := parseWith(t, p, src)
+	if len(got.Rows) != 2 || got.Rows[1].Key != "x"+occ || got.Rows[0].Key == got.Rows[1].Key ||
+		!strings.HasPrefix(got.Rows[0].Key, idHashPrefix) {
+		t.Fatalf("rows = %+v", got.Rows)
+	}
+}

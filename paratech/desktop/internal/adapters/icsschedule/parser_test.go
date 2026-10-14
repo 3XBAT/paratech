@@ -210,9 +210,9 @@ func TestGoogleCalendarExport(t *testing.T) {
 	moved := time.Date(2026, 10, 12, 11, 0, 0, 0, msk)
 	want = append(want, wantRow{lines[1], k(math, time.Date(2026, 10, 12, 9, 0, 0, 0, msk)),
 		"Математический анализ (перенос)", moved, 90 * time.Minute, "Europe/Moscow"})
-	// A single event in UTC is shown in the calendar zone X-WR-TIMEZONE.
+	// A single event in UTC is shown in the calendar zone X-WR-TIMEZONE; its key is the UID alone.
 	consult := time.Date(2026, 10, 16, 15, 0, 0, 0, msk)
-	want = append(want, wantRow{lines[3], k(phys, consult), "Консультация по физике", consult, 90 * time.Minute, "Europe/Moscow"})
+	want = append(want, wantRow{lines[3], phys, "Консультация по физике", consult, 90 * time.Minute, "Europe/Moscow"})
 	// Berlin leaves summer time on 2026-10-25: the class stays at 18:00 local, which is an hour later in UTC.
 	for _, day := range []int{6, 13, 20, 27} {
 		s := time.Date(2026, 10, day, 18, 0, 0, 0, ber)
@@ -318,8 +318,8 @@ func TestUniversityPortalExport(t *testing.T) {
 
 	// Floating times are read in X-WR-TIMEZONE; line numbers count the folded line (the last event is on line 31).
 	want := []wantRow{
-		{7, k("lesson-104512@schedule.example.edu", at(5, 8, 30)), "Операционные системы (лекция); поток 1", at(5, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
-		{16, k("lesson-104513@schedule.example.edu", at(5, 10, 15)), "Компьютерные сети (лабораторная работа, подгруппа 2, чётная неделя)", at(5, 10, 15), 90 * time.Minute, "Asia/Yekaterinburg"},
+		{7, "lesson-104512@schedule.example.edu", "Операционные системы (лекция); поток 1", at(5, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
+		{16, "lesson-104513@schedule.example.edu", "Компьютерные сети (лабораторная работа, подгруппа 2, чётная неделя)", at(5, 10, 15), 90 * time.Minute, "Asia/Yekaterinburg"},
 		{25, k(pe, at(6, 12, 0)), "Физическая культура", at(6, 12, 0), 90 * time.Minute, "Asia/Yekaterinburg"},
 		{31, k("lesson-104520@schedule.example.edu", at(7, 8, 30)), "Интенсив: Python", at(7, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
 		{31, k("lesson-104520@schedule.example.edu", at(8, 8, 30)), "Интенсив: Python", at(8, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
