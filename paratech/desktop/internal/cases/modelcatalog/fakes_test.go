@@ -39,6 +39,7 @@ type world struct {
 	manifestErr       error
 	settingsConflicts int    // the next saves of the settings fail with a version conflict
 	fileDeleteErr     error  // returned by the file delete
+	appendErr         error  // returned by Append, as a failing disk
 	beforeTx          func() // runs at the start of every outermost transaction, outside every lock
 	onRead            func() // runs before every read of an opened file
 
@@ -333,6 +334,37 @@ func (f fakeFiles) Delete(ctx context.Context, ref shared.ArtifactRef) error {
 		return f.w.fileDeleteErr
 	}
 	delete(f.w.files, ref)
+	return nil
+}
+
+// Append copies the content in, keeping what arrived before a read error, like the filestore adapter.
+func (f fakeFiles) Append(ctx context.Context, ref shared.ArtifactRef, content io.Reader) (int64, error) {
+	f.w.requireNoTx(ctx, "ArtifactStore.Append")
+	var buf bytes.Buffer
+	n, err := io.Copy(&buf, ctxReader{ctx: ctx, r: content})
+
+	f.w.mu.Lock()
+	defer f.w.mu.Unlock()
+	if f.w.appendErr != nil {
+		return 0, f.w.appendErr
+	}
+	f.w.files[ref] = append(f.w.files[ref], buf.Bytes()...)
+	return n, err
+}
+
+func (f fakeFiles) Rename(ctx context.Context, from, to shared.ArtifactRef) error {
+	f.w.requireNoTx(ctx, "ArtifactStore.Rename")
+	f.w.mu.Lock()
+	defer f.w.mu.Unlock()
+	b, ok := f.w.files[from]
+	if !ok {
+		return fmt.Errorf("file %s: %w", from, shared.ErrNotFound)
+	}
+	if _, exists := f.w.files[to]; exists {
+		return fmt.Errorf("file %s exists: %w", to, shared.ErrConflict)
+	}
+	delete(f.w.files, from)
+	f.w.files[to] = b
 	return nil
 }
 

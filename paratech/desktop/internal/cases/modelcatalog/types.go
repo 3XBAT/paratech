@@ -65,3 +65,40 @@ type PinnedModel struct {
 	Name         values.ModelName
 	ModelVersion values.ModelVersion
 }
+
+// DownloadDeps are the ports a Downloader needs on top of the Service; all are required.
+type DownloadDeps struct {
+	Source ModelSource
+	Space  DiskSpace
+}
+
+// DownloadPhase is the stage of a download that a progress event reports.
+type DownloadPhase string
+
+// Phases of a download.
+const (
+	PhaseDownloading DownloadPhase = "downloading"
+	PhaseVerifying   DownloadPhase = "verifying"
+	PhaseInstalled   DownloadPhase = "installed"
+	PhaseFailed      DownloadPhase = "failed"
+)
+
+// DownloadProgress is one progress event of a download (PRD section 8: progress). Subscribers may miss intermediate
+// events but always get the latest one.
+type DownloadProgress struct {
+	CatalogID  values.CatalogID
+	Phase      DownloadPhase
+	DoneBytes  int64 // bytes of the file stored so far, resumed bytes included
+	TotalBytes int64 // size of the file from the catalog
+}
+
+// DownloadPlan is what a download of a catalog model needs, for the disk space warning before it starts
+// (PRD section 8).
+type DownloadPlan struct {
+	CatalogID      values.CatalogID
+	TotalBytes     int64 // size of the model file
+	HaveBytes      int64 // bytes already downloaded and kept for resume
+	RequiredBytes  int64 // free space the download needs, margin included
+	AvailableBytes int64 // free space on the disk of the data directory
+	Enough         bool  // AvailableBytes >= RequiredBytes
+}

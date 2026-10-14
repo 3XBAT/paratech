@@ -413,3 +413,44 @@
 - Path: окно TOCTOU между проверкой и запуском процесса (атакующий = тот же локальный пользователь) — принято как вне модели угроз
 
 ---
+
+## [TASK-031] Каркас сервера Hub
+**Дата:** 2026-10-14 17:30
+**Статус:** blocked
+
+### Причина
+- Шаг 2 требует docker compose up -d postgres; Docker на машине разработки не установлен (установка ПО — решение владельца). По тексту задачи: «если Docker недоступен, отметить задачу blocked с причиной»
+- Разблокировать: установить Docker Desktop (или дать HUB_TEST_DATABASE_URL на доступный Postgres) и вернуть статус pending
+
+---
+
+## [TASK-027] Скачивание моделей: докачка, прогресс, SHA-256, свободное место
+**Дата:** 2026-10-14 17:30
+**Статус:** done
+
+### Что сделано
+- domain/transcription/values: HostAllowlist + NormalizeHost (https, без userinfo, нижний регистр, без точки в конце и порта 443, только ASCII), план докачки PlanResume (206 -> дописать, 200 -> заменить, 416/неверный старт -> заново), правило свободного места (размер - уже скачано + 64 МиБ, InsufficientSpaceError); манифест: необязательный download_hosts (CDN-редиректы)
+- cases/modelcatalog.Downloader: Preflight (план для предупреждения UI), Download (один на запись, allowlist, место, partial-файл models/downloads/<id>-<sha16>.partial, Range, проверка SHA-256, rename в уникальное имя, Register), DiscardPartial, Subscribe (последнее событие вытесняет, не блокирует); порты ModelSource, DiskSpace, ArtifactStore.Append/Rename
+- adapters/httpdownload: allowlist на каждом редиректе и финальном URL, строгий Content-Range, без прокси/cookie/сжатия, dialer пускает только публичные адреса (после DNS), watchdog простоя
+- adapters/filestore: Append, Rename (без перезаписи, без ссылок), FreeBytes (windows GetDiskFreeSpaceEx, linux/darwin Statfs, прочие ErrUnsupported)
+- Тесты: домен, use case с фейками, адаптер на httptest TLS, интеграция на SQLite + filestore + httpdownload (обрыв на 50% и докачка; подменённый файл отклонён, модели нет в установленных)
+- Ревью: approve (только low). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0.
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаги 1-3: go test -race -count=1 ./desktop/internal/...; tests/modeldownload_sqlite_test.go
+
+### Решения (подтвердить)
+- Allowlist = хосты source_url записей + download_hosts манифеста; редиректы только на них
+- Без If-Range: размер сверяется с манифестом на каждом ответе, чтение ограничено размером, финальный шлюз — SHA-256
+- Без автоповтора внутри Download: вызывающий повторяет для докачки
+- Транспорт по умолчанию игнорирует системный прокси (нужен реальный адрес пира для проверки) — может мешать пользователям за прокси
+
+### Заметки (follow-up)
+- Не подключено в app: httpdownload.New(), filestore как DiskSpace, Downloader, проброс Subscribe в UI
+- Low (ревью): после 200/416 при докачке место не перепроверяется под полный размер; ErrDownloadInterrupted оборачивает и постоянные ошибки (404/403/ErrBadReply) — решить при подключении UI/задачи; 6to4 (2002::/16) и Teredo (2001::/32) не в списке непубличных; публикация прогресса на каждый Read под общим mu (можно троттлить)
+- Partial-файлы записей, удалённых из манифеста, не чистятся; нет защиты от двух экземпляров приложения на одном partial (single-instance guard)
+- Корень доверия — манифест (download_hosts и SHA-256); подлинность манифеста вне задачи
+- Нестабильный тест: cases/jobrunner TestCancelIsRefused/finished_job один раз упал у ревьюера («Cancel = <nil>, want ErrNotCancellable»), при повторе прошёл; ветка jobrunner не трогает — разобрать отдельно
+
+---

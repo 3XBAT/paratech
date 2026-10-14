@@ -23,6 +23,13 @@ var (
 	// ErrAlreadyInstalled means a model with the same name and version is installed.
 	ErrAlreadyInstalled = fmt.Errorf("%w: model with this name and version is installed", shared.ErrDuplicate)
 
+	// ErrDownloadInProgress means the same catalog model is being downloaded already.
+	ErrDownloadInProgress = fmt.Errorf("%w: model is being downloaded", shared.ErrConflict)
+
+	// ErrDownloadInterrupted means the transfer stopped before the file was complete (a broken connection, a
+	// cancelled context). The partial file is kept: Download again to resume it.
+	ErrDownloadInterrupted = errors.New("model download interrupted")
+
 	// ErrDefaultReselected means the model was selected as the default again each time its removal tried to clear it.
 	ErrDefaultReselected = fmt.Errorf("%w: model was selected as default again during removal", shared.ErrConflict)
 )
