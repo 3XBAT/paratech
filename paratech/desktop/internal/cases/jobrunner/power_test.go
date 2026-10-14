@@ -46,6 +46,30 @@ func (f *fakeSettings) Load(context.Context) (*settings.Settings, error) {
 	return settings.Restore(settings.State{Version: 1, ProcessOnlyOnACPower: f.onlyOnAC})
 }
 
+// blockingSettings blocks its first Load until released or ctx ends, so a test can act while Start reads the settings.
+type blockingSettings struct {
+	*fakeSettings
+	first   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newBlockingSettings(onlyOnAC bool) *blockingSettings {
+	return &blockingSettings{fakeSettings: newFakeSettings(onlyOnAC), entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (b *blockingSettings) Load(ctx context.Context) (*settings.Settings, error) {
+	if b.first.CompareAndSwap(false, true) {
+		close(b.entered)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return b.fakeSettings.Load(ctx)
+}
+
 // brokenPower cannot tell the power source at all.
 type brokenPower struct{}
 
@@ -149,6 +173,86 @@ func TestHeavyJobWaitsOnBatteryAndRunsWhenACReturns(t *testing.T) {
 	}
 	if sttCalls.Load() != 1 || mailCalls.Load() != 1 {
 		t.Fatalf("calls stt=%d mail=%d, want 1 each", sttCalls.Load(), mailCalls.Load())
+	}
+}
+
+func TestStartDoesNotBlockTheServiceDuringPowerInit(t *testing.T) {
+	st := newBlockingSettings(true)
+	e := newPowerEnv(t, testenv.NewFakePower(false), st)
+	var sttCalls atomic.Int32
+	e.registerHeavy(typeStt, countingHandler(&sttCalls))
+	e.register(typeMail, countingHandler(new(atomic.Int32)))
+	stt := e.enqueue(typeStt, 3)
+	mail := e.enqueue(typeMail, 3)
+
+	startErr := make(chan error, 1)
+	go func() { startErr <- e.svc.Start(context.Background()) }()
+	<-st.entered
+
+	noop := countingHandler(new(atomic.Int32))
+	if err := e.svc.Register(Registration{Type: "other", Handler: noop, Recovery: RecoveryRequeue}); !errors.Is(err, ErrAlreadyStarted) {
+		t.Fatalf("Register during Start = %v, want ErrAlreadyStarted", err)
+	}
+	if err := e.svc.Cancel(context.Background(), "job-404"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("Cancel of an unknown job = %v, want ErrNotFound", err)
+	}
+	if err := e.svc.Cancel(context.Background(), mail); err != nil {
+		t.Fatalf("Cancel of a queued job = %v", err)
+	}
+	if got := e.status(mail); got != job.StatusCancelled {
+		t.Fatalf("cancelled job is %s", got)
+	}
+
+	close(st.release)
+	if err := <-startErr; err != nil {
+		t.Fatalf("Start = %v", err)
+	}
+	// The workers started with the battery and the setting known: the heavy job was never claimed (AC-21).
+	e.waitStatus(stt, job.StatusWaitingForPower)
+	if sttCalls.Load() != 0 {
+		t.Fatalf("heavy calls = %d, want 0", sttCalls.Load())
+	}
+}
+
+func TestStopDuringPowerInitIsClean(t *testing.T) {
+	tests := []struct {
+		name string
+		stop func(e *env, cancel context.CancelFunc) error
+	}{
+		{"Stop", func(e *env, _ context.CancelFunc) error { return e.svc.Stop(context.Background()) }},
+		{"start context cancelled", func(_ *env, cancel context.CancelFunc) error {
+			cancel()
+			return nil
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newBlockingSettings(true)
+			e := newPowerEnv(t, testenv.NewFakePower(true), st)
+			var calls atomic.Int32
+			e.register(typeMail, countingHandler(&calls))
+			mail := e.enqueue(typeMail, 3)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			startErr := make(chan error, 1)
+			go func() { startErr <- e.svc.Start(ctx) }()
+			<-st.entered
+
+			// The settings read ends with the loop context, so neither Stop nor Start waits for the release.
+			if err := tc.stop(e, cancel); err != nil {
+				t.Fatalf("stop = %v", err)
+			}
+			if err := <-startErr; err != nil {
+				t.Fatalf("Start = %v", err)
+			}
+			if err := e.svc.Stop(context.Background()); err != nil {
+				t.Fatalf("Stop = %v", err)
+			}
+			if calls.Load() != 0 || e.status(mail) != job.StatusQueued {
+				t.Fatalf("after a stop during init: calls=%d status=%s, want no claim", calls.Load(), e.status(mail))
+			}
+		})
 	}
 }
 

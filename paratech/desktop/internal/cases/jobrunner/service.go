@@ -156,11 +156,47 @@ func (s *Service) Register(r Registration) error {
 	return nil
 }
 
-// Start launches the workers and returns at once; it waits for a running Recover. Cancelling ctx is a forced stop:
-// handlers are interrupted and their jobs handled by the Recovery policy of their type. For a graceful stop call Stop.
+// Start launches the workers; it waits for a running Recover. It first reads the setting and the power source, so it
+// returns once those reads do; meanwhile Register is refused, Cancel works, and Stop or cancelling ctx ends the reads
+// and then waits for Start. Cancelling ctx is a forced stop: handlers are interrupted and their jobs handled by the
+// Recovery policy of their type. For a graceful stop call Stop.
 func (s *Service) Start(ctx context.Context) error {
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
+	if err := s.begin(ctx); err != nil {
+		return err
+	}
+
+	// Without s.mu: these are DB reads and syscalls. The power source and the setting are known before the first
+	// claim, so no heavy job starts on battery by accident. loopCtx ends on Stop and, through unwatch, with ctx.
+	events := s.initPower(s.loopCtx)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		// unwatch stops the loop asynchronously; stop it now so no worker claims a job.
+		s.stopLoop()
+		s.stopRuns(errShutdown)
+	}
+	s.wg.Add(s.cfg.Workers + 1)
+	for range s.cfg.Workers {
+		go s.worker()
+	}
+	go s.keeper()
+	if events != nil {
+		s.wg.Add(1)
+		go s.watchPower(events)
+	}
+	go func() {
+		s.wg.Wait()
+		close(s.stopped)
+	}()
+	return nil
+}
+
+// begin checks the lifecycle state and marks the Service started. started and unwatch are set together under s.mu,
+// so a Stop sees both or neither; once started, s.stopped is always closed, because Start always launches the workers.
+func (s *Service) begin(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started {
@@ -185,24 +221,8 @@ func (s *Service) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	s.powerPolicy, s.started = policy, true
-
-	// The power source and the setting are known before the first claim, so no heavy job starts on battery by accident.
-	events := s.initPower(ctx)
-
-	s.wg.Add(s.cfg.Workers + 1)
-	for range s.cfg.Workers {
-		go s.worker()
-	}
-	go s.keeper()
-	if events != nil {
-		s.wg.Add(1)
-		go s.watchPower(events)
-	}
-	go func() {
-		s.wg.Wait()
-		close(s.stopped)
-	}()
 	s.unwatch = context.AfterFunc(ctx, func() {
 		s.stopLoop()
 		s.stopRuns(errShutdown)
@@ -337,6 +357,8 @@ func (s *Service) step() (worked bool, err error) {
 	if err != nil || !ok {
 		return false, err
 	}
+	// forced uses cond from before the claim: a Run-now job claimed on AC is not forced and stops at a checkpoint if
+	// power drops later (PRD 7.4); only a start that needed the override is protected (AC-22).
 	s.execute(j, s.powerPolicy.StartedByOverride(j.Type(), cond))
 	return true, nil
 }

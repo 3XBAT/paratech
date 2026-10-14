@@ -133,8 +133,8 @@ type PowerMonitor interface {
 	IsOnACPower(ctx context.Context) (bool, error)
 
 	// Subscribe returns a channel that receives true when AC power is connected and false when it is lost
-	// (PRD section 7.4: resume on AC power, stop at the next checkpoint when it is lost). The channel is closed when
-	// ctx is cancelled.
+	// (PRD section 7.4: resume on AC power, stop at the next checkpoint when it is lost). The first value is the
+	// current state (the Windows adapter replays it). The channel is closed when ctx is cancelled.
 	Subscribe(ctx context.Context) (<-chan bool, error)
 }
 
