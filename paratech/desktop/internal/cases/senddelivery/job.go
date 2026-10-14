@@ -28,6 +28,8 @@ const (
 	reasonNoDelivery = "delivery not found"
 	reasonFailed     = "delivery failed"
 	reasonUnknown    = "delivery outcome unknown; mark it as sent or send it again"
+	reasonSuperseded = "superseded by the job of a new send round"
+	reasonExhausted  = "attempts exhausted before the message was handed over"
 )
 
 // Handle runs one attempt of a delivery job (jobrunner.Handler). It sends only a PENDING delivery: SENDING is saved
@@ -35,11 +37,14 @@ const (
 // cancelled, so a job timeout or a shutdown during the send still records UNKNOWN. The returned error never lets the
 // runner resend a message that may have been accepted: an unknown or unsaved outcome is permanent, and a later
 // attempt of the same job finds the delivery no longer PENDING and does nothing (Registration.Reconciler contract).
+// On the last attempt of the job (Config.MaxAttempts) a failure that proves nothing was handed over ends the
+// delivery FAILED, so it never stays PENDING without a job to send it.
 func (s *Service) Handle(ctx context.Context, snap job.Snapshot, _ func(ctx context.Context, p job.Progress) error) error {
 	id, err := delivery.ParseJobPayload(snap.Payload())
 	if err != nil {
 		return backoff.Permanent(fmt.Errorf("%s: %w", stepPayload, err))
 	}
+	last := snap.Attempt() >= s.maxAttempts
 
 	d, err := s.deliveries.Get(ctx, id)
 	switch {
@@ -47,7 +52,7 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, _ func(ctx cont
 		return backoff.Permanent(fmt.Errorf("%s: %w", stepLoad, err))
 	case err != nil:
 		return fmt.Errorf("%s: %w", stepLoad, err)
-	case d.Status() != delivery.StatusPending:
+	case !d.Sendable():
 		// Sent, failed, unknown, or in flight in another attempt: never sent from here.
 		return nil
 	}
@@ -57,7 +62,7 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, _ func(ctx cont
 		return s.failUnsent(ctx, d, ErrAttachmentMissing)
 	}
 	if err != nil {
-		return fmt.Errorf("%s: %w", stepAttachment, err)
+		return s.notHandedOver(ctx, id, last, stepAttachment, err)
 	}
 	defer func() { _ = attachment.Close() }()
 
@@ -66,11 +71,15 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, _ func(ctx cont
 	}
 	if err := s.tx.Do(ctx, func(ctx context.Context) error { return s.deliveries.Save(ctx, d) }); err != nil {
 		// Nothing was handed over; a version conflict means someone else changed it, the next attempt re-reads.
-		return fmt.Errorf("%s: %w", stepStart, err)
+		return s.notHandedOver(ctx, id, last, stepStart, err)
 	}
 
 	sendErr := s.email.Send(ctx, d, attachment)
-	outcome, err := d.RecordResult(sendErr, s.clock.Now())
+	record := d.RecordResult
+	if last {
+		record = d.RecordFinalResult
+	}
+	outcome, err := record(sendErr, s.clock.Now())
 	if err != nil {
 		return backoff.Permanent(fmt.Errorf("%s: %w", stepResult, err))
 	}
@@ -104,11 +113,37 @@ func (s *Service) failUnsent(ctx context.Context, d *delivery.Delivery, reason e
 	return backoff.Permanent(fmt.Errorf("%s: %w", stepAttachment, reason))
 }
 
+// notHandedOver handles a failure of step before the message was handed over. The runner retries it; on the last
+// attempt the delivery, reloaded because a failed save may leave the instance stale, ends FAILED. If that fails too,
+// the job still ends and the delivery stays PENDING: nothing more can be done in this process.
+func (s *Service) notHandedOver(ctx context.Context, id shared.DeliveryID, last bool, step string, cause error) error {
+	err := fmt.Errorf("%s: %w", step, cause)
+	if !last {
+		return err
+	}
+
+	d, gerr := s.deliveries.Get(ctx, id)
+	if gerr != nil {
+		return errors.Join(err, gerr)
+	}
+	if !d.Sendable() {
+		return backoff.Permanent(err)
+	}
+	if ferr := d.FailUnsent(fmt.Errorf("%w: %s", delivery.ErrAttemptsExhausted, step), s.clock.Now()); ferr != nil {
+		return backoff.Permanent(errors.Join(err, ferr))
+	}
+	if serr := s.tx.Do(ctx, func(ctx context.Context) error { return s.deliveries.Save(ctx, d) }); serr != nil {
+		return errors.Join(err, serr)
+	}
+	return backoff.Permanent(err)
+}
+
 // Reconcile decides the fate of a delivery job a previous process left RUNNING (jobrunner.Reconciler). It never sends.
-// The delivery decides: PENDING (the crash came before SENDING was saved) requeues the job; SENT completes it; FAILED
-// fails it; SENDING becomes UNKNOWN and, like UNKNOWN, is looked up with EmailAdapter.Reconcile: accepted completes
-// the job (SENT), not accepted requeues it (PENDING), undecided fails the job and leaves the delivery UNKNOWN for the
-// user. Errors leave the job RUNNING for the next Recover.
+// The delivery decides: PENDING requeues the job if it is the job of the current round with attempts left; SENT
+// completes it; FAILED fails it; SENDING becomes UNKNOWN and, like UNKNOWN, is looked up with EmailAdapter.Reconcile:
+// accepted completes the job (SENT), not accepted starts a new round (SendAgain) with its own job and fails this one,
+// undecided fails the job and leaves the delivery UNKNOWN for the user. Errors leave the job RUNNING for the next
+// Recover, and a repeat after a crash continues from the state it left.
 func (s *Service) Reconcile(ctx context.Context, snap job.Snapshot) (job.Status, string, error) {
 	id, err := delivery.ParseJobPayload(snap.Payload())
 	if err != nil {
@@ -124,7 +159,7 @@ func (s *Service) Reconcile(ctx context.Context, snap job.Snapshot) (job.Status,
 
 	switch d.Status() {
 	case delivery.StatusPending:
-		return job.StatusQueued, "", nil
+		return s.reconcilePending(ctx, snap, d)
 	case delivery.StatusSent:
 		return job.StatusCompleted, "", nil
 	case delivery.StatusFailed:
@@ -156,5 +191,29 @@ func (s *Service) Reconcile(ctx context.Context, snap job.Snapshot) (job.Status,
 	if accepted {
 		return job.StatusCompleted, "", nil
 	}
-	return job.StatusQueued, "", nil
+	return s.reconcilePending(ctx, snap, d)
+}
+
+// reconcilePending settles a stale job of a PENDING delivery. The job of the current round (found by its key, which
+// also enqueues it if a crash came first) is requeued or, without attempts left, the delivery fails unsent. A job of
+// an earlier round is superseded and fails, so a delivery never has two live jobs.
+func (s *Service) reconcilePending(ctx context.Context, snap job.Snapshot, d *delivery.Delivery) (job.Status, string, error) {
+	current, err := s.ensureJob(ctx, d, opReconcile)
+	if err != nil {
+		return "", "", err
+	}
+	if current != snap.ID() {
+		return job.StatusFailed, reasonSuperseded, nil
+	}
+	if snap.Attempt() < s.maxAttempts {
+		return job.StatusQueued, "", nil
+	}
+
+	if err := d.FailUnsent(fmt.Errorf("%w: %s", delivery.ErrAttemptsExhausted, opReconcile), s.clock.Now()); err != nil {
+		return "", "", fmt.Errorf("%s: %w", opReconcile, err)
+	}
+	if err := s.tx.Do(ctx, func(ctx context.Context) error { return s.deliveries.Save(ctx, d) }); err != nil {
+		return "", "", fmt.Errorf("%s: %w", opReconcile, err)
+	}
+	return job.StatusFailed, reasonExhausted, nil
 }

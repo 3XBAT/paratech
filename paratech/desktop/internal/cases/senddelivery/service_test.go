@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -303,7 +305,7 @@ func TestReconcileInterruptedJob(t *testing.T) {
 		{"crash while sending, provider found it", crashWhileSending,
 			func(*delivery.Delivery) (bool, error) { return true, nil }, job.StatusCompleted, delivery.StatusSent},
 		{"crash while sending, provider says not accepted", crashWhileSending,
-			func(*delivery.Delivery) (bool, error) { return false, nil }, job.StatusQueued, delivery.StatusPending},
+			func(*delivery.Delivery) (bool, error) { return false, nil }, job.StatusFailed, delivery.StatusPending},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -463,5 +465,130 @@ func TestMailPassword(t *testing.T) {
 	}
 	if err := e.svc.SetMailPassword(ctx, ""); !errors.Is(err, shared.ErrInvalidSecret) {
 		t.Fatalf("empty password = %v", err)
+	}
+}
+
+var errTransient = fmt.Errorf("smtp: connect failed: %w", delivery.ErrTransient)
+
+// After a transient failure the delivery is PENDING while its job waits for the retry. A repeated request and the
+// startup Resume find that job by the key of the round and add none, so the retries stay bounded (PRD section 7.3).
+func TestTransientFailureKeepsOneJob(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	id, _ := e.created(t)
+	e.email.result = func(context.Context, *delivery.Delivery) error { return errTransient }
+
+	if err := e.svc.Handle(ctx, e.st.claim(t, jobKey(id, 0)), noReport); backoff.Classify(err) != backoff.ClassTransient {
+		t.Fatalf("Handle = %v, want transient", err)
+	}
+	if st := e.st.only(); st.Status != delivery.StatusPending || st.Attempts != 1 {
+		t.Fatalf("delivery %s after %d attempts, want PENDING after 1", st.Status, st.Attempts)
+	}
+
+	for range 3 {
+		if err := e.svc.SendHomework(ctx, command(t, "p1", "a1", homework)); err != nil {
+			t.Fatalf("repeated SendHomework: %v", err)
+		}
+		if err := e.svc.Resume(ctx); err != nil {
+			t.Fatalf("Resume: %v", err)
+		}
+	}
+	if keys := e.st.jobKeys(); !slices.Equal(keys, []string{jobKey(id, 0)}) {
+		t.Fatalf("jobs %v, want only the job of round 0", keys)
+	}
+}
+
+// On the last attempt of its job a delivery that was not handed over ends FAILED instead of staying PENDING without a
+// job, and then no longer blocks a new delivery of the same assignment.
+func TestLastAttemptEndsTheDelivery(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(e *env) // before every attempt
+		sends   int
+		lastErr string
+	}{
+		{"transient on every attempt", func(e *env) {
+			e.email.result = func(context.Context, *delivery.Delivery) error { return errTransient }
+		}, 2, "attempts exhausted: smtp: connect failed"},
+		{"attachment unreadable", func(e *env) { e.files.failOpen(errDisk) }, 0, "attempts exhausted: senddelivery: open attachment"},
+		{"sending not stored", func(e *env) { e.st.saveFails = 1 }, 0, "attempts exhausted: senddelivery: save sending"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnvWith(t, Config{MaxAttempts: 2})
+			ctx := context.Background()
+			id, _ := e.created(t)
+
+			tt.prepare(e)
+			if err := e.svc.Handle(ctx, e.st.claim(t, jobKey(id, 0)), noReport); err == nil ||
+				backoff.Classify(err) == backoff.ClassPermanent {
+				t.Fatalf("first attempt = %v, want a retryable error", err)
+			}
+			if got := e.st.status(id); got != delivery.StatusPending {
+				t.Fatalf("after the first attempt %s, want PENDING", got)
+			}
+
+			tt.prepare(e)
+			if err := e.svc.Handle(ctx, e.st.claim(t, jobKey(id, 0)), noReport); backoff.Classify(err) != backoff.ClassPermanent {
+				t.Fatalf("last attempt = %v, want permanent", err)
+			}
+			st := e.st.only()
+			if st.Status != delivery.StatusFailed || !strings.HasPrefix(st.LastError, tt.lastErr) || e.email.count() != tt.sends {
+				t.Fatalf("delivery %s, last error %q, sent %d; want FAILED, %q, %d", st.Status, st.LastError, e.email.count(),
+					tt.lastErr, tt.sends)
+			}
+
+			e.files.failOpen(nil)
+			e.writeHomework(t, "a1", homework+"v2")
+			if err := e.svc.SendHomework(ctx, command(t, "p2", "a1", homework+"v2")); err != nil {
+				t.Fatalf("new delivery of the assignment: %v", err)
+			}
+		})
+	}
+}
+
+// The job reconciler: "not accepted" starts a new round with its own job and fails the stale one, so one delivery
+// never has two live jobs; asking again (a crash in between) and Resume add nothing; the new job sends it.
+func TestReconcileNotAcceptedStartsANewRound(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	id, snap := e.created(t)
+	crashWhileSending(t, e, snap)
+	e.email.reconcile = func(*delivery.Delivery) (bool, error) { return false, nil }
+
+	for range 2 {
+		next, reason, err := e.svc.Reconcile(ctx, snap)
+		if err != nil || next != job.StatusFailed || reason != reasonSuperseded {
+			t.Fatalf("Reconcile = %s, %q, %v; want FAILED superseded", next, reason, err)
+		}
+	}
+	if err := e.svc.Resume(ctx); err != nil {
+		t.Fatal(err)
+	}
+	keys := e.st.jobKeys()
+	slices.Sort(keys)
+	if !slices.Equal(keys, []string{jobKey(id, 0), jobKey(id, 1)}) || e.email.count() != 0 {
+		t.Fatalf("jobs %v, sent %d", keys, e.email.count())
+	}
+
+	if err := e.svc.Handle(ctx, e.st.claim(t, jobKey(id, 1)), noReport); err != nil || e.st.status(id) != delivery.StatusSent {
+		t.Fatalf("new round = %v, status %s", err, e.st.status(id))
+	}
+}
+
+// A stale job of a PENDING delivery without attempts left fails the delivery instead of leaving it PENDING forever.
+func TestReconcileLastAttemptFailsThePendingDelivery(t *testing.T) {
+	e := newEnvWith(t, Config{MaxAttempts: 1})
+	id, _ := e.created(t)
+	snap := e.st.claim(t, jobKey(id, 0)) // the crash came before SENDING was stored
+
+	next, reason, err := e.svc.Reconcile(context.Background(), snap)
+	if err != nil || next != job.StatusFailed || reason != reasonExhausted {
+		t.Fatalf("Reconcile = %s, %q, %v; want FAILED exhausted", next, reason, err)
+	}
+	st := e.st.only()
+	if st.Status != delivery.StatusFailed ||
+		!strings.HasPrefix(st.LastError, delivery.ErrAttemptsExhausted.Error()) || e.email.count() != 0 {
+		t.Fatalf("delivery %s, last error %q, sent %d", st.Status, st.LastError, e.email.count())
 	}
 }
