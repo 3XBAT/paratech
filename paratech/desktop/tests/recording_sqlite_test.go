@@ -61,6 +61,12 @@ type recordingEnv struct {
 // newRecordingEnv opens the database and the data root below dir. The cleanup closes the service before the files.
 func newRecordingEnv(t *testing.T, dir string) *recordingEnv {
 	t.Helper()
+	return newRecordingEnvWith(t, dir, recordingsession.DefaultConfig())
+}
+
+// newRecordingEnvWith is newRecordingEnv with the given service configuration.
+func newRecordingEnvWith(t *testing.T, dir string, cfg recordingsession.Config) *recordingEnv {
+	t.Helper()
 	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: filepath.Join(dir, "app.db"), Migrate: true})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +84,7 @@ func newRecordingEnv(t *testing.T, dir string) *recordingEnv {
 	e.svc, err = recordingsession.New(recordingsession.Deps{
 		Recordings: e.repo, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: e.rec, Artifacts: store, Tx: db,
 		Clock: e.clock, Sleeper: e.clock, IDs: &recIDs{},
-	}, recordingsession.DefaultConfig())
+	}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +132,8 @@ func TestRecordingReachesTheCapOnDisk(t *testing.T) {
 	e.feed(info.ID, "one-", "two-", "three")
 	for i, want := range []string{"one-", "two-", "three"} {
 		path := filepath.Join(e.root, "recordings", string(info.ID), fmt.Sprintf("chunk-%04d", i+1))
-		if got := readFile(t, path); got != want {
-			t.Fatalf("chunk %d = %q, want %q", i+1, got, want)
+		if got, ok := testenv.ChunkPayload([]byte(readFile(t, path))); !ok || string(got) != want {
+			t.Fatalf("chunk %d = %q (complete %v), want %q", i+1, got, ok, want)
 		}
 	}
 
