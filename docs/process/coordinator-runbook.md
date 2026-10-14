@@ -32,3 +32,4 @@ Kept in the last entries of `progress.txt` (for example single-instance guard be
 
 ## Two-level control
 Batches are normally run by the `coordinator` agent (`.claude/agents/coordinator.md`); the main session acts as supervisor and audits every coordinator report with `.github/scripts/audit-pr.sh <pr>` (`docs/process/supervision.md`). Both follow this runbook.
+The coordinator handles one task per run; the supervisor starts it again for the next task.
