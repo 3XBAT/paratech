@@ -256,18 +256,23 @@ func (e *email) count() int {
 type artifacts struct {
 	*testenv.MemArtifacts
 
-	mu      sync.Mutex
-	openErr error
+	mu        sync.Mutex
+	openErr   error
+	afterOpen func() // called after a successful Open when set
 }
 
 func (a *artifacts) Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
 	a.mu.Lock()
-	err := a.openErr
+	err, after := a.openErr, a.afterOpen
 	a.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return a.MemArtifacts.Open(ctx, ref)
+	rc, err := a.MemArtifacts.Open(ctx, ref)
+	if err == nil && after != nil {
+		after()
+	}
+	return rc, err
 }
 
 func (a *artifacts) failOpen(err error) {

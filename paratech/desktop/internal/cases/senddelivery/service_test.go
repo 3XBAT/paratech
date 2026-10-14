@@ -547,6 +547,50 @@ func TestLastAttemptEndsTheDelivery(t *testing.T) {
 	}
 }
 
+// A job timeout on the last attempt before the hand-over still ends the delivery FAILED, not PENDING without a job.
+func TestLastAttemptEndsTheDeliveryAfterTheContextEnded(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(e *env, cancel context.CancelFunc)
+		lastErr string
+	}{
+		{"timeout opening the attachment", func(e *env, cancel context.CancelFunc) {
+			cancel()
+			e.files.failOpen(context.DeadlineExceeded)
+		}, "attempts exhausted: senddelivery: open attachment"},
+		{"timeout saving sending", func(e *env, cancel context.CancelFunc) {
+			// The attachment opens, then the deadline ends before SENDING is saved.
+			e.files.afterOpen = cancel
+		}, "attempts exhausted: senddelivery: save sending"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnvWith(t, Config{MaxAttempts: 1})
+			id, _ := e.created(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			tt.prepare(e, cancel)
+			if err := e.svc.Handle(ctx, e.st.claim(t, jobKey(id, 0)), noReport); backoff.Classify(err) != backoff.ClassPermanent {
+				t.Fatalf("last attempt = %v, want permanent", err)
+			}
+			st := e.st.only()
+			if st.Status != delivery.StatusFailed || !strings.HasPrefix(st.LastError, tt.lastErr) || e.email.count() != 0 {
+				t.Fatalf("delivery %s, last error %q, sent %d; want FAILED, %q, 0", st.Status, st.LastError,
+					e.email.count(), tt.lastErr)
+			}
+		})
+	}
+}
+
+// The default attempts of a delivery job must fit the job runner's cap, or the last attempt the use case counts on
+// never runs and the delivery stays PENDING.
+func TestDefaultMaxAttemptsFitsTheRunner(t *testing.T) {
+	if runner := backoff.DefaultSpec().MaxAttempts; DefaultMaxAttempts > runner {
+		t.Fatalf("DefaultMaxAttempts = %d, above the runner's default %d", DefaultMaxAttempts, runner)
+	}
+}
+
 // The job reconciler: "not accepted" starts a new round with its own job and fails the stale one, so one delivery
 // never has two live jobs; asking again (a crash in between) and Resume add nothing; the new job sends it.
 func TestReconcileNotAcceptedStartsANewRound(t *testing.T) {
