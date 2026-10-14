@@ -21,6 +21,10 @@ var (
 	// ErrAttachmentChanged means the attachment is not the content the user confirmed (its SHA-256 or size
 	// differs). Nothing was sent; the delivery fails, the user confirms the new content in a new proposal.
 	ErrAttachmentChanged = errors.New("attachment differs from the confirmed content")
+
+	// ErrAttemptsExhausted means the job of the delivery used up its attempts without handing the message over;
+	// the delivery fails (FailUnsent), nothing was sent.
+	ErrAttemptsExhausted = errors.New("attempts exhausted")
 )
 
 // Errors of the aggregate.

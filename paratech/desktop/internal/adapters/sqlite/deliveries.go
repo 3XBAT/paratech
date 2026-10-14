@@ -87,12 +87,12 @@ func (r *DeliveryRepository) Save(ctx context.Context, d *delivery.Delivery) err
 				ID: string(st.ID), AssignmentID: string(st.AssignmentID), Recipient: st.Recipient, Subject: st.Subject,
 				ArtifactRef: st.Attachment.String(), AttachmentSha256: st.SHA256, AttachmentSize: st.Size,
 				MessageID: st.MessageID, IdempotencyKey: st.Key, Status: string(st.Status), Attempts: int64(st.Attempts),
-				LastError: jobNullString(st.LastError), ConfirmedAt: jobMs(st.ConfirmedAt), SentAt: jobNullMs(st.SentAt),
+				SendRound: int64(st.Round), LastError: jobNullString(st.LastError), ConfirmedAt: jobMs(st.ConfirmedAt), SentAt: jobNullMs(st.SentAt),
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 		}
 		n, err := q.UpdateDelivery(ctx, sqlcgen.UpdateDeliveryParams{
-			Status: string(st.Status), Attempts: int64(st.Attempts), LastError: jobNullString(st.LastError),
+			Status: string(st.Status), Attempts: int64(st.Attempts), SendRound: int64(st.Round), LastError: jobNullString(st.LastError),
 			SentAt: jobNullMs(st.SentAt), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 		})
 		return VersionCAS(ctx, n, err)
@@ -114,7 +114,7 @@ func deliveryFromRow(row sqlcgen.Delivery) (*delivery.Delivery, error) {
 		Version: row.Version, ID: shared.DeliveryID(row.ID), Status: delivery.Status(row.Status),
 		AssignmentID: shared.AssignmentID(row.AssignmentID), Recipient: row.Recipient, Subject: row.Subject,
 		Attachment: ref, SHA256: row.AttachmentSha256, Size: row.AttachmentSize, MessageID: row.MessageID,
-		Key: row.IdempotencyKey, Attempts: int(row.Attempts), LastError: nullText(row.LastError),
+		Key: row.IdempotencyKey, Attempts: int(row.Attempts), Round: int(row.SendRound), LastError: nullText(row.LastError),
 		ConfirmedAt: jobFromMs(row.ConfirmedAt), SentAt: jobFromNullMs(row.SentAt),
 		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})

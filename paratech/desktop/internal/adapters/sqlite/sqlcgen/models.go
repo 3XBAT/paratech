@@ -41,6 +41,7 @@ type Delivery struct {
 	UpdatedAt        int64
 	AttachmentSha256 string
 	AttachmentSize   int64
+	SendRound        int64
 }
 
 type Job struct {
