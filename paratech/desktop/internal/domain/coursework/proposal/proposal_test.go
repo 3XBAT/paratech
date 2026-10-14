@@ -348,13 +348,15 @@ func TestCommandContents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	email, err := inStatus(t, outEmail, StatusConfirmed).EmailCommand()
+	confirmed := inStatus(t, outEmail, StatusConfirmed)
+	email, err := confirmed.EmailCommand()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if email.IdempotencyKey() != "proposal:p1" || email.AssignmentID() != "a1" ||
 		email.Recipient().Address() != "teacher@school.example" || email.Attachment() != ref ||
-		email.AttachmentDigest() != mustDigest(t, shaA, 11) {
+		email.AttachmentDigest() != mustDigest(t, shaA, 11) || email.ConfirmedAt().IsZero() ||
+		!email.ConfirmedAt().Equal(confirmed.ConfirmedAt()) {
 		t.Fatalf("email command: %+v", email)
 	}
 
