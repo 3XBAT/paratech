@@ -16,6 +16,11 @@ type Deps struct {
 	Sleeper Sleeper
 	Jitter  Jitter       // optional: nil means no jitter
 	Log     *slog.Logger // optional: nil discards
+
+	// Power and Settings drive the power-aware policy (PRD section 7.4). Both are optional: without a monitor the
+	// power source is unknown, which counts as AC power; without settings the default "only on AC power" applies.
+	Power    PowerMonitor
+	Settings SettingsReader
 }
 
 // Config tunes the worker pool.
@@ -43,6 +48,10 @@ type Registration struct {
 
 	// Timeout limits one attempt; zero means Config.DefaultTimeout.
 	Timeout time.Duration
+
+	// Heavy marks local CPU-bound work such as STT: on battery with "process only on AC power" on, its jobs wait in
+	// WAITING_FOR_POWER, and a running one stops at its next progress report (PRD section 7.4, AC-21).
+	Heavy bool
 
 	// Uncancellable marks a handler that is not safe to interrupt: a user cancellation of its running job is
 	// refused with ErrNotCancellable (a queued or waiting job can still be cancelled).

@@ -8,15 +8,17 @@ import (
 	"runtime/debug"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
+	"paratech/desktop/internal/domain/jobs/services/powerpolicy"
 	"paratech/desktop/internal/domain/shared"
 )
 
-// cancelAttempts bounds the reload-and-retry loop of a cancellation that keeps meeting version conflicts.
-const cancelAttempts = 3
+// changeAttempts bounds the reload-and-retry loop of a user change (cancel, run now) that keeps meeting version conflicts.
+const changeAttempts = 3
 
 // Bounds of the final save of an attempt: a transient storage error (for example a busy database) is retried with a
 // doubling delay, so the job does not stay RUNNING until the next start.
@@ -48,17 +50,26 @@ const (
 //     for every Recovery policy (see Registration.Reconciler for what that asks of side-effect handlers);
 //   - user cancellation: the handler context is cancelled and the job becomes CANCELLED;
 //   - shutdown during an attempt: a RecoveryRequeue job is requeued like a stale RUNNING job at startup recovery;
-//     any other job stays RUNNING and Recover handles it at the next start, as after a crash (hard rule 7).
+//     any other job stays RUNNING and Recover handles it at the next start, as after a crash (hard rule 7);
+//   - AC power lost during a Heavy attempt with "only on AC power" on: the next progress report saves the checkpoint
+//     and returns powerpolicy.ErrPowerLost, and the job becomes WAITING_FOR_POWER with the attempt given back.
+//
+// Power-aware processing (PRD section 7.4, AC-21, AC-22) follows powerpolicy: on battery with the setting on, Heavy
+// jobs are not claimed and due QUEUED ones are parked in WAITING_FOR_POWER; when AC power returns or the setting is
+// turned off they go back to QUEUED. Light jobs are never affected, and ForceRun starts one job regardless. The power
+// source comes from PowerMonitor events, the setting is re-read every poll interval.
 //
 // An error that no handler classified counts as transient, so it stops at the attempt cap (AC-10).
 // The runner is the only writer of a claimed job (ADR-0004); a version conflict on Save means someone else changed
 // the job, and the runner then drops its own outcome.
 type Service struct {
-	jobs    JobRepository
-	clock   Clock
-	sleeper Sleeper
-	jitter  Jitter
-	log     *slog.Logger
+	jobs     JobRepository
+	clock    Clock
+	sleeper  Sleeper
+	jitter   Jitter
+	power    PowerMonitor
+	settings SettingsReader
+	log      *slog.Logger
 
 	cfg    Config
 	policy backoff.Policy
@@ -72,12 +83,19 @@ type Service struct {
 
 	mu       sync.Mutex
 	handlers map[job.Type]Registration
-	filter   job.ClaimFilter
 	started  bool
 	running  map[shared.JobID]*run
 	stopped  chan struct{} // closed when every worker has exited
 	unwatch  func() bool
 	wg       sync.WaitGroup
+
+	powerPolicy powerpolicy.Policy // set by Start, read-only afterwards
+	enforceMu   sync.Mutex         // serialises the power policy runs of the keeper and of power events
+	subscribed  atomic.Bool        // power events arrive; otherwise the keeper polls the monitor
+
+	condMu          sync.Mutex
+	cond            powerpolicy.Conditions
+	settingsFailing bool // the last settings read failed; logged once per failure streak
 }
 
 // New validates the configuration and builds a stopped Service.
@@ -101,7 +119,8 @@ func New(deps Deps, cfg Config) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	s := &Service{
-		jobs: deps.Jobs, clock: deps.Clock, sleeper: deps.Sleeper, jitter: deps.Jitter, log: log,
+		jobs: deps.Jobs, clock: deps.Clock, sleeper: deps.Sleeper, jitter: deps.Jitter, power: deps.Power, settings: deps.Settings,
+		log: log,
 		cfg: cfg, policy: policy,
 		handlers: map[job.Type]Registration{}, running: map[shared.JobID]*run{},
 		stopped: make(chan struct{}),
@@ -137,11 +156,47 @@ func (s *Service) Register(r Registration) error {
 	return nil
 }
 
-// Start launches the workers and returns at once; it waits for a running Recover. Cancelling ctx is a forced stop:
-// handlers are interrupted and their jobs handled by the Recovery policy of their type. For a graceful stop call Stop.
+// Start launches the workers; it waits for a running Recover. It first reads the setting and the power source, so it
+// returns once those reads do; meanwhile Register is refused, Cancel works, and Stop or cancelling ctx ends the reads
+// and then waits for Start. Cancelling ctx is a forced stop: handlers are interrupted and their jobs handled by the
+// Recovery policy of their type. For a graceful stop call Stop.
 func (s *Service) Start(ctx context.Context) error {
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
+	if err := s.begin(ctx); err != nil {
+		return err
+	}
+
+	// Without s.mu: these are DB reads and syscalls. The power source and the setting are known before the first
+	// claim, so no heavy job starts on battery by accident. loopCtx ends on Stop and, through unwatch, with ctx.
+	events := s.initPower(s.loopCtx)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		// unwatch stops the loop asynchronously; stop it now so no worker claims a job.
+		s.stopLoop()
+		s.stopRuns(errShutdown)
+	}
+	s.wg.Add(s.cfg.Workers + 1)
+	for range s.cfg.Workers {
+		go s.worker()
+	}
+	go s.keeper()
+	if events != nil {
+		s.wg.Add(1)
+		go s.watchPower(events)
+	}
+	go func() {
+		s.wg.Wait()
+		close(s.stopped)
+	}()
+	return nil
+}
+
+// begin checks the lifecycle state and marks the Service started. started and unwatch are set together under s.mu,
+// so a Stop sees both or neither; once started, s.stopped is always closed, because Start always launches the workers.
+func (s *Service) begin(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started {
@@ -153,26 +208,21 @@ func (s *Service) Start(ctx context.Context) error {
 	if len(s.handlers) == 0 {
 		return ErrNoHandlers
 	}
-	types := make([]job.Type, 0, len(s.handlers))
-	for t := range s.handlers {
+	var types, heavy []job.Type
+	for t, reg := range s.handlers {
 		types = append(types, t)
+		if reg.Heavy {
+			heavy = append(heavy, t)
+		}
 	}
 	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
-	filter, err := job.NewClaimFilter(types, nil, true)
+	sort.Slice(heavy, func(i, j int) bool { return heavy[i] < heavy[j] })
+	policy, err := powerpolicy.New(types, heavy)
 	if err != nil {
 		return err
 	}
-	s.filter, s.started = filter, true
 
-	s.wg.Add(s.cfg.Workers + 1)
-	for range s.cfg.Workers {
-		go s.worker()
-	}
-	go s.promoter()
-	go func() {
-		s.wg.Wait()
-		close(s.stopped)
-	}()
+	s.powerPolicy, s.started = policy, true
 	s.unwatch = context.AfterFunc(ctx, func() {
 		s.stopLoop()
 		s.stopRuns(errShutdown)
@@ -226,7 +276,7 @@ func (s *Service) Stop(ctx context.Context) error {
 // nil, but the job is treated like any interrupted job (requeued or left for Recover), not cancelled.
 func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 	var err error
-	for range cancelAttempts {
+	for range changeAttempts {
 		// Looked up on every pass: after a conflict the job may have been claimed by a worker.
 		s.mu.Lock()
 		r := s.running[id]
@@ -266,13 +316,14 @@ func (s *Service) worker() {
 	}
 }
 
-// promoter moves RETRY_WAIT jobs whose backoff has elapsed back to QUEUED.
-func (s *Service) promoter() {
+// keeper moves RETRY_WAIT jobs whose backoff has elapsed back to QUEUED and applies the power policy every poll.
+func (s *Service) keeper() {
 	defer s.wg.Done()
 	for s.loopCtx.Err() == nil {
 		if err := s.promoteDue(s.loopCtx); err != nil && s.loopCtx.Err() == nil {
 			s.log.Error("promoting due retries failed", slog.Any("error", err))
 		}
+		s.enforcePower(s.loopCtx)
 		_ = s.sleeper.Sleep(s.loopCtx, s.cfg.PollInterval)
 	}
 }
@@ -301,11 +352,14 @@ func (s *Service) promoteDue(ctx context.Context) error {
 
 // step claims one due job and runs it to the end. worked is false when nothing was eligible.
 func (s *Service) step() (worked bool, err error) {
-	j, ok, err := s.jobs.Claim(s.loopCtx, s.clock.Now(), s.filter)
+	cond := s.conditions()
+	j, ok, err := s.jobs.Claim(s.loopCtx, s.clock.Now(), s.powerPolicy.Filter(cond))
 	if err != nil || !ok {
 		return false, err
 	}
-	s.execute(j)
+	// forced uses cond from before the claim: a Run-now job claimed on AC is not forced and stops at a checkpoint if
+	// power drops later (PRD 7.4); only a start that needed the override is protected (AC-22).
+	s.execute(j, s.powerPolicy.StartedByOverride(j.Type(), cond))
 	return true, nil
 }
 
@@ -315,12 +369,14 @@ type run struct {
 	typ           job.Type
 	uncancellable bool
 	recovery      Recovery
+	forced        bool // started by the "Run now" override: power loss does not stop this attempt
 	cancel        context.CancelCauseFunc
 
-	mu       sync.Mutex // guards job, finished and lost: reports may come from several goroutines
+	mu       sync.Mutex // guards job, finished, lost and stopping: reports may come from several goroutines
 	job      *job.Job
 	finished bool
 	lost     error
+	stopping bool // a report returned powerpolicy.ErrPowerLost: the attempt ends in WAITING_FOR_POWER
 }
 
 // cancelByUser ends the handler context with the user cancellation, unless the type is not safe to interrupt.
@@ -352,16 +408,22 @@ func (r *run) report(ctx context.Context, p job.Progress) error {
 		}
 		return err
 	}
+
+	// Checked after the save, so the checkpoint the job resumes from is stored. Once stopping, it stays stopping.
+	if r.stopping || r.svc.mustWaitForPower(r) {
+		r.stopping = true
+		return powerpolicy.ErrPowerLost
+	}
 	return nil
 }
 
-func (s *Service) execute(j *job.Job) {
+func (s *Service) execute(j *job.Job, forced bool) {
 	s.mu.Lock()
 	reg, ok := s.handlers[j.Type()]
 	s.mu.Unlock()
 
 	ctx, cancel := context.WithCancelCause(s.runCtx)
-	r := &run{svc: s, typ: j.Type(), uncancellable: reg.Uncancellable, recovery: reg.Recovery, cancel: cancel, job: j}
+	r := &run{svc: s, typ: j.Type(), uncancellable: reg.Uncancellable, recovery: reg.Recovery, forced: forced, cancel: cancel, job: j}
 	s.mu.Lock()
 	s.running[j.ID()] = r
 	s.mu.Unlock()
@@ -436,7 +498,8 @@ func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 	}
 	// The save must happen even when the runner is shutting down.
 	saveCtx := context.WithoutCancel(s.runCtx)
-	outcome, err := s.transition(saveCtx, j, herr, cause, timeout, r.recovery)
+	waitPower := r.stopping && errors.Is(herr, powerpolicy.ErrPowerLost)
+	outcome, err := s.transition(saveCtx, j, herr, cause, timeout, r.recovery, waitPower)
 	if err != nil {
 		s.log.Error("job transition refused", slog.String("job", id), slog.String("outcome", outcome), slog.Any("error", err))
 		return
@@ -482,14 +545,19 @@ func (s *Service) saveFinal(ctx context.Context, j *job.Job) error {
 }
 
 // transition picks the aggregate method for the result of the attempt. cause is why the handler context ended, if
-// it did. An interrupted job that is not safe to requeue is not changed: outcomeLeftRunning.
-func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error, timeout time.Duration, recovery Recovery) (string, error) {
+// it did; waitPower means the handler stopped at a checkpoint because AC power was lost. An interrupted job that is
+// not safe to requeue is not changed: outcomeLeftRunning.
+func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error, timeout time.Duration, recovery Recovery,
+	waitPower bool) (string, error) {
 	now := s.clock.Now()
 	switch {
 	case herr == nil:
 		return outcomeCompleted, j.Complete(now)
 	case errors.Is(cause, errCancelled):
 		return outcomeCancelled, j.Cancel(now)
+	case waitPower:
+		// The checkpoint is saved and waiting is not a failure: the aggregate gives the attempt back.
+		return outcomeWaitingPower, j.WaitFor(job.StatusWaitingForPower, now)
 	case backoff.Classify(herr) == backoff.ClassPermanent:
 		return outcomeFailed, j.Fail(now, herr.Error())
 	case cause != nil && !errors.Is(cause, errTimeout) && recovery != RecoveryRequeue:
