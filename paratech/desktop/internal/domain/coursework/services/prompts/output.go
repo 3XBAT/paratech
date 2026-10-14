@@ -27,6 +27,9 @@ const (
 	// A deadline outside [lesson start - MaxDueBefore, lesson start + MaxDueAhead] is a model error.
 	MaxDueBefore = 24 * time.Hour
 	MaxDueAhead  = 2 * 365 * 24 * time.Hour
+
+	// MaxNesting bounds the depth of arrays and objects; the schemas need 3.
+	MaxNesting = 8
 )
 
 // Summary is the validated answer of the summary operation.
@@ -155,8 +158,8 @@ func ParseSummary(out values.UntrustedOutput) (Summary, error) {
 }
 
 // ParseExtraction checks the answer of an extract_homework_deadlines request: at most MaxHomework assignments, each
-// with a one-line title, a description (may be empty) and a due that is null or an RFC 3339 time within
-// [lessonStart - MaxDueBefore, lessonStart + MaxDueAhead]. lessonStart is the one the request was built with; a zero
+// with a one-line title, a description (may be empty) and a due that is null or an RFC 3339 time with the UTC offset
+// of lessonStart within [lessonStart - MaxDueBefore, lessonStart + MaxDueAhead]. lessonStart is the one the request was built with; a zero
 // one wraps ErrNoContext. Other errors wrap ErrMalformedOutput.
 func ParseExtraction(out values.UntrustedOutput, lessonStart time.Time) (Extraction, error) {
 	if lessonStart.IsZero() {
@@ -203,12 +206,22 @@ func checkHomework(a homeworkWire, lessonStart time.Time) (Homework, error) {
 		if err != nil {
 			return Homework{}, malformed("due is not an RFC 3339 time")
 		}
+		// The instructions ask for the offset of lesson_start; another one means the model converted or guessed the
+		// time zone, so the wall-clock time may be wrong.
+		if _, off := due.Zone(); off != offset(lessonStart) {
+			return Homework{}, malformed("due must use the UTC offset of the lesson start")
+		}
 		if due.Before(lessonStart.Add(-MaxDueBefore)) || due.After(lessonStart.Add(MaxDueAhead)) {
 			return Homework{}, malformed("due is out of range of the lesson date")
 		}
 		h.due = due.UTC()
 	}
 	return h, nil
+}
+
+func offset(t time.Time) int {
+	_, off := t.Zone()
+	return off
 }
 
 // ParseDraft checks the answer of a homework_draft request: a one-line title and a body of 1 to MaxDraftBodyRunes.
@@ -262,7 +275,7 @@ func decode(out values.UntrustedOutput, v any, names ...string) error {
 }
 
 // checkKeys walks the tokens of text and rejects an object key that is not exactly one of names or repeats within
-// its object. Structure and types are left to the decoder.
+// its object, and nesting deeper than MaxNesting. Structure and types are left to the decoder.
 func checkKeys(text string, names []string) error {
 	known := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -310,7 +323,14 @@ func checkKeys(text string, names []string) error {
 			top.expectKey = true
 		}
 		if d, ok := tok.(json.Delim); ok {
-			stack = append(stack, &frame{object: d == '{', keys: map[string]bool{}, expectKey: true})
+			if len(stack) == MaxNesting {
+				return malformed("JSON is nested too deeply")
+			}
+			f := &frame{object: d == '{', expectKey: true}
+			if f.object {
+				f.keys = map[string]bool{}
+			}
+			stack = append(stack, f)
 		}
 	}
 }
@@ -333,12 +353,26 @@ func checkText(field, s string, maxRunes int, allowEmpty bool) (string, error) {
 	return s, nil
 }
 
-func unsafeInLine(r rune) bool { return unicode.IsControl(r) || bidiControl(r) }
+// unsafeInLine also rejects the line and paragraph separators, which break a line in many renderers.
+func unsafeInLine(r rune) bool {
+	return unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || bidiControl(r)
+}
 
 func unsafeInText(r rune) bool {
 	return (unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t') || bidiControl(r)
 }
 
-// bidiControl reports the embedding, override and isolate controls, which can make displayed text differ from what
-// it is (the "Trojan Source" trick); ordinary text does not need them.
-func bidiControl(r rune) bool { return (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) }
+// bidiControl reports the directional marks, embedding, override and isolate controls and the tag characters, which
+// can make displayed text differ from what it is (the "Trojan Source" trick) or hide text; ordinary text does not
+// need them. Other format characters such as ZWJ and ZWNJ are used by some scripts and emoji, so they stay allowed.
+func bidiControl(r rune) bool {
+	switch {
+	case r == 0x200E, r == 0x200F, r == 0x061C: // LRM, RLM, ALM
+		return true
+	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		return true
+	case r >= 0xE0000 && r <= 0xE007F: // tags
+		return true
+	}
+	return false
+}

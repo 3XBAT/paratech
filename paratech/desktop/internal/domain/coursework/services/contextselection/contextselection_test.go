@@ -76,6 +76,9 @@ func TestSelectRejects(t *testing.T) {
 		{"transcript too large", values.OperationSummary, with(func(m *Material) {
 			m.Transcript = []Segment{{Text: strings.Repeat("a", MaxTranscriptBytes/2)}, {Text: strings.Repeat("b", MaxTranscriptBytes/2)}}
 		}), ErrInvalidMaterial},
+		{"title with line separator", values.OperationSummary, with(func(m *Material) { m.Lesson.Title = "a\u2028b" }), ErrInvalidMaterial},
+		{"segment with paragraph separator", values.OperationSummary, with(func(m *Material) { m.Transcript[0].Text = "a\u2029b" }), ErrInvalidMaterial},
+		{"assignment title with line separator", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Title = "a\u2028b" }), ErrInvalidMaterial},
 		{"title with control", values.OperationSummary, with(func(m *Material) { m.Lesson.Title = "a\tb" }), ErrInvalidMaterial},
 		{"title too long", values.OperationHomeworkDraft, with(func(m *Material) { m.Lesson.Title = strings.Repeat("я", MaxTitleRunes+1) }), ErrInvalidMaterial},
 		{"assignment title with newline", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Title = "a\nb" }), ErrInvalidMaterial},
@@ -93,6 +96,23 @@ func TestSelectRejects(t *testing.T) {
 				t.Fatalf("a refused selection returned a non-zero context")
 			}
 		})
+	}
+}
+
+func TestSelectTranscriptSizeBoundary(t *testing.T) {
+	// Two segments joined by one newline.
+	at := []Segment{{Text: strings.Repeat("a", 1000)}, {Text: strings.Repeat("b", MaxTranscriptBytes-1001)}}
+	c, err := Select(values.OperationSummary, Material{Transcript: at})
+	if err != nil {
+		t.Fatalf("transcript of exactly %d bytes: %v", MaxTranscriptBytes, err)
+	}
+	if len(c.Transcript()) != MaxTranscriptBytes {
+		t.Fatalf("transcript is %d bytes, want %d", len(c.Transcript()), MaxTranscriptBytes)
+	}
+
+	over := []Segment{at[0], {Text: at[1].Text + "b"}}
+	if _, err := Select(values.OperationSummary, Material{Transcript: over}); !errors.Is(err, ErrInvalidMaterial) {
+		t.Fatalf("transcript of %d bytes: error = %v, want ErrInvalidMaterial", MaxTranscriptBytes+1, err)
 	}
 }
 

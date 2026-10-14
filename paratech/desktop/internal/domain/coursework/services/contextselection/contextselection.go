@@ -137,7 +137,7 @@ func oneLine(field, s string) (string, error) {
 	switch {
 	case !utf8.ValidString(s):
 		return "", invalid(field, "is not valid UTF-8")
-	case strings.ContainsFunc(s, unicode.IsControl):
+	case strings.ContainsFunc(s, notInLine):
 		return "", invalid(field, "contains control characters")
 	case utf8.RuneCountInString(s) > MaxTitleRunes:
 		return "", invalid(field, fmt.Sprintf("is longer than %d characters", MaxTitleRunes))
@@ -160,6 +160,9 @@ func multiLine(field, s string, maxBytes int) (string, error) {
 
 func badControl(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' }
 
+// notInLine also rejects the line and paragraph separators, which break a line in many renderers.
+func notInLine(r rune) bool { return unicode.IsControl(r) || r == 0x2028 || r == 0x2029 }
+
 // joinTranscript keeps the segment texts only, one per line, without empty segments.
 func joinTranscript(segments []Segment) (string, error) {
 	var b strings.Builder
@@ -168,7 +171,7 @@ func joinTranscript(segments []Segment) (string, error) {
 		if text == "" {
 			continue
 		}
-		if !utf8.ValidString(text) || strings.ContainsFunc(text, unicode.IsControl) {
+		if !utf8.ValidString(text) || strings.ContainsFunc(text, notInLine) {
 			return "", invalid(fmt.Sprintf("transcript segment %d", i), "is not one line of valid UTF-8 text")
 		}
 		if b.Len() > 0 {

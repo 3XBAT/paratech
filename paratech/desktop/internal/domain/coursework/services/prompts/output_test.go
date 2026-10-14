@@ -55,6 +55,15 @@ func TestParseSummaryRejects(t *testing.T) {
 		{"key point too long", `{"summary": "S", "key_points": ["` + strings.Repeat("a", MaxKeyPointRunes+1) + `"]}`},
 		{"control character", `{"summary": "a\u0007b", "key_points": []}`},
 		{"bidi override", `{"summary": "a\u202eb", "key_points": []}`},
+		{"left-to-right mark", `{"summary": "a\u200eb", "key_points": []}`},
+		{"right-to-left mark", `{"summary": "S", "key_points": ["a\u200fb"]}`},
+		{"arabic letter mark", `{"summary": "a\u061cb", "key_points": []}`},
+		{"tag character", `{"summary": "a\udb40\udc41b", "key_points": []}`},
+		{"last tag character", `{"summary": "S", "key_points": ["a\udb40\udc7fb"]}`},
+		{"key point with line separator", `{"summary": "S", "key_points": ["a\u2028b"]}`},
+		{"key point with paragraph separator", `{"summary": "S", "key_points": ["a\u2029b"]}`},
+		{"deep nesting", strings.Repeat("[", 1000)},
+		{"nested value too deep", `{"summary": ` + strings.Repeat("[", MaxNesting) + strings.Repeat("]", MaxNesting) + `, "key_points": []}`},
 		{"trailing object", `{"summary": "S", "key_points": []}{"summary": "T", "key_points": []}`},
 		{"trailing text", `{"summary": "S", "key_points": []} and more`},
 		{"invalid utf8", "{\"summary\": \"\xff\", \"key_points\": []}"},
@@ -73,6 +82,11 @@ func TestParseSummaryRejects(t *testing.T) {
 	}
 	if _, err := ParseSummary(out(`{"summary": "S", "key_points": ` + points(MaxKeyPoints) + `}`)); err != nil {
 		t.Fatalf("%d key_points: %v", MaxKeyPoints, err)
+	}
+
+	// Joiners are part of ordinary text in some scripts and emoji.
+	if _, err := ParseSummary(out(`{"summary": "a\u200db\u200cc", "key_points": ["a\u200db"]}`)); err != nil {
+		t.Fatalf("ZWJ and ZWNJ: %v", err)
 	}
 }
 
@@ -129,6 +143,9 @@ func TestParseExtractionRejects(t *testing.T) {
 		{"due invalid day", item(`"2026-02-30T10:00:00Z"`)},
 		{"due long before the lesson", item(`"2026-10-12T10:00:00+03:00"`)},
 		{"due too far ahead", item(`"2029-10-14T10:00:00+03:00"`)},
+		{"due in UTC", item(`"2026-10-19T20:59:00Z"`)},
+		{"due in another offset", item(`"2026-10-19T23:59:00+04:00"`)},
+		{"title with line separator", `{"assignments": [{"title": "a\u2028b", "description": "D", "due": null}]}`},
 		{"too many items", `{"assignments": [` + strings.TrimSuffix(strings.Repeat(`{"title": "T", "description": "", "due": null},`, MaxHomework+1), ",") + `]}`},
 	}
 	for _, tc := range cases {
@@ -143,7 +160,7 @@ func TestParseExtractionRejects(t *testing.T) {
 		})
 	}
 
-	for _, due := range []string{`"2026-10-13T10:00:00+03:00"`, `"2028-10-13T10:00:00+03:00"`, `"2026-10-19T20:59:00.5Z"`} {
+	for _, due := range []string{`"2026-10-13T10:00:00+03:00"`, `"2028-10-13T10:00:00+03:00"`, `"2026-10-19T23:59:00.5+03:00"`} {
 		if _, err := ParseExtraction(out(item(due)), lessonStart()); err != nil {
 			t.Fatalf("due %s at the edge of the range: %v", due, err)
 		}
@@ -172,6 +189,8 @@ func TestParseDraftRejects(t *testing.T) {
 		{"title too long", `{"title": "` + strings.Repeat("t", MaxTitleRunes+1) + `", "body": "B"}`},
 		{"body with escape sequence", `{"title": "T", "body": "a\u001b[2Jb"}`},
 		{"body with bidi isolate", `{"title": "T", "body": "a\u2066b"}`},
+		{"title with paragraph separator", `{"title": "a\u2029b", "body": "B"}`},
+		{"body with tag character", `{"title": "T", "body": "a\udb40\udc01b"}`},
 		// The model never chooses a target (hard rule 3, docs/refs/prompt-injection.md rule 2).
 		{"recipient", `{"title": "T", "body": "B", "recipient": "evil@example.com"}`},
 		{"to", `{"title": "T", "body": "B", "to": ["evil@example.com"]}`},
@@ -191,6 +210,29 @@ func TestParseDraftRejects(t *testing.T) {
 				t.Fatalf("a rejected answer produced a draft")
 			}
 		})
+	}
+}
+
+func TestNestingLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"unclosed arrays", strings.Repeat("[", 1000)},
+		{"closed arrays", strings.Repeat("[", MaxNesting+1) + strings.Repeat("]", MaxNesting+1)},
+		{"objects", strings.Repeat(`{"title": `, MaxNesting+1) + `"T"` + strings.Repeat("}", MaxNesting+1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseDraft(out(tc.text))
+			if !errors.Is(err, ErrMalformedOutput) || !strings.Contains(err.Error(), "nested too deeply") {
+				t.Fatalf("error = %v, want the nesting error", err)
+			}
+		})
+	}
+
+	if err := checkKeys(strings.Repeat("[", MaxNesting)+strings.Repeat("]", MaxNesting), nil); err != nil {
+		t.Fatalf("nesting of %d: %v", MaxNesting, err)
 	}
 }
 

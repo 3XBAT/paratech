@@ -72,6 +72,9 @@ func walk(t *testing.T, node map[string]any, typ reflect.Type, path string, foun
 		if !reflect.DeepEqual(node["type"], []any{"string", "null"}) {
 			t.Fatalf("%s: type %v, the parser takes a string or null", path, node["type"])
 		}
+		if node["format"] != "date-time" {
+			t.Fatalf("%s: format %v, the parser takes an RFC 3339 time", path, node["format"])
+		}
 		return
 	case reflect.TypeOf(""):
 		if node["type"] != "string" {

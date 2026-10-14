@@ -77,7 +77,7 @@ func TestBuildSendsOnlyTheContextOfTheOperation(t *testing.T) {
 			op:       values.OperationSummary,
 			keys:     []string{"lesson_title", "transcript"},
 			included: []string{"LESSON-TITLE", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO"},
-			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2026-10-14", "2031", "123456", "234567"},
+			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2026-10-14", "Wednesday", "2031", "123456", "234567"},
 		},
 		{
 			op:       values.OperationExtractHomework,
