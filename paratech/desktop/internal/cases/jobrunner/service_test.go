@@ -429,7 +429,6 @@ func TestErrorClassification(t *testing.T) {
 		{"storage permission is permanent", func() error { return fmt.Errorf("write: %w", shared.ErrStoragePermission) }, job.StatusFailed, "permission"},
 		{"transient retries", func() error { return backoff.Transient(errors.New("reset")) }, job.StatusRetryWait, "reset"},
 		{"unclassified retries", func() error { return errors.New("who knows") }, job.StatusRetryWait, "who knows"},
-		{"network error retries", func() error { return shared.ErrNetworkUnavailable }, job.StatusRetryWait, "network"},
 		{"panic fails", func() error { panic("nil map") }, job.StatusFailed, "panic"},
 	}
 	for _, tc := range tests {

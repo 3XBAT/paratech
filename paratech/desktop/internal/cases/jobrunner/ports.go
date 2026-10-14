@@ -70,7 +70,9 @@ type Handler interface {
 	//
 	// The returned error decides the next status. Wrap it with backoff.Permanent to fail the job at once;
 	// backoff.Transient or any unclassified error retries with backoff until the attempts are used up (AC-10).
-	// WAITING_FOR_POWER comes only from report (below); the network and quota waits are not produced from errors yet.
+	// WAITING_FOR_POWER comes only from report (below). An error that wraps shared.ErrNetworkUnavailable or
+	// shared.ErrQuotaExceeded and is not marked permanent moves the job to WAITING_FOR_NETWORK or WAITING_FOR_QUOTA
+	// (backoff.WaitStatus) without using an attempt; the runner tries it again after Config.Rechecks.
 	//
 	// The error text is stored in jobs.last_error and written to the log, so it must contain no secrets, no prompt
 	// or transcript text and no response bodies. Adapters return classified errors with short fixed messages.

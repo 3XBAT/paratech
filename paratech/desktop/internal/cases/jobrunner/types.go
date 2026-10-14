@@ -29,6 +29,10 @@ type Config struct {
 	PollInterval   time.Duration // wait between polls of an idle worker
 	DefaultTimeout time.Duration // limit of one attempt for a type without its own
 	Backoff        backoff.Spec  // retry delays and the cap on attempts
+
+	// Rechecks says when a job waiting for the network or the quota is tried again; the zero value means
+	// backoff.DefaultRechecks.
+	Rechecks backoff.Rechecks
 }
 
 // DefaultConfig returns the settings for a desktop with one background class recording.
@@ -38,6 +42,7 @@ func DefaultConfig() Config {
 		PollInterval:   time.Second,
 		DefaultTimeout: 30 * time.Minute,
 		Backoff:        backoff.DefaultSpec(),
+		Rechecks:       backoff.DefaultRechecks(),
 	}
 }
 
