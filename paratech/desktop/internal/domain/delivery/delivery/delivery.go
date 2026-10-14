@@ -302,6 +302,13 @@ func (d *Delivery) SendAgain(now time.Time) error {
 	return d.move(StatusPending, now)
 }
 
+// Blocks reports whether this delivery prevents a new delivery of assignment a: it belongs to a and is unresolved
+// (PENDING, SENDING or UNKNOWN), so its message may still go out or may already have gone out. A new delivery of the
+// same homework while one is UNKNOWN would bypass the reconciliation (hard rule 7).
+func (d *Delivery) Blocks(a shared.AssignmentID) bool {
+	return d.assignment == a && d.status.IsUnresolved()
+}
+
 // ID returns the delivery identifier.
 func (d *Delivery) ID() shared.DeliveryID { return d.id }
 
