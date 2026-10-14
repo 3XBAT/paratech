@@ -18,6 +18,7 @@ type EmailCommand struct {
 	recipient  Recipient
 	attachment shared.ArtifactRef
 	digest     Digest
+	confirmed  time.Time
 }
 
 // ExportCommand writes homework text to the export file of an assignment (PRD section 10 step 6).
@@ -60,7 +61,8 @@ func (p *Proposal) EmailCommand() (EmailCommand, error) {
 	if err != nil {
 		return EmailCommand{}, err
 	}
-	return EmailCommand{key: p.idempotencyKey(), assignment: p.assignment, recipient: p.recipient, attachment: ref, digest: p.attachment}, nil
+	return EmailCommand{key: p.idempotencyKey(), assignment: p.assignment, recipient: p.recipient, attachment: ref, digest: p.attachment,
+		confirmed: p.confirmedAt}, nil
 }
 
 // ExportCommand returns the command of a CONFIRMED export_homework proposal.
@@ -97,6 +99,9 @@ func (c EmailCommand) Attachment() shared.ArtifactRef { return c.attachment }
 
 // AttachmentDigest returns the content the user confirmed; the mailer sends the attachment only if it matches.
 func (c EmailCommand) AttachmentDigest() Digest { return c.digest }
+
+// ConfirmedAt returns when the user confirmed the sending; the delivery records it (AC-14).
+func (c EmailCommand) ConfirmedAt() time.Time { return c.confirmed }
 
 // IsZero reports whether c is the zero value, which no adapter may act on.
 func (c EmailCommand) IsZero() bool { return c == EmailCommand{} }
