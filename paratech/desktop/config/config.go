@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,7 @@ const programName = "desktop"
 const (
 	EnvLogLevel = "LA_LOG_LEVEL"
 	EnvDataDir  = "LA_DATA_DIR"
+	EnvHeadless = "LA_HEADLESS"
 )
 
 // Config is the validated desktop configuration.
@@ -26,6 +28,8 @@ type Config struct {
 	// DataDir is the root of local application data. Empty means "choose the default later";
 	// when set it must be an absolute path.
 	DataDir string
+	// Headless runs the core without the Windows UI shell (tray, windows), e.g. in tests and on other OSes.
+	Headless bool
 }
 
 // Default returns the configuration used when nothing is overridden.
@@ -45,11 +49,21 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		cfg.DataDir = v
 	}
 
+	var envErr error
+	if v := getenv(EnvHeadless); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			envErr = fmt.Errorf("%s=%q is not a boolean", EnvHeadless, v)
+		}
+		cfg.Headless = b
+	}
+
 	// Flag defaults are the environment values, so a flag wins over the environment.
 	fs := flag.NewFlagSet(programName, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error (env "+EnvLogLevel+")")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "absolute path of the local data directory (env "+EnvDataDir+")")
+	fs.BoolVar(&cfg.Headless, "headless", cfg.Headless, "run without the UI shell: no tray and no windows (env "+EnvHeadless+")")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -61,7 +75,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		return Config{}, err
 	}
 
-	if err := cfg.Validate(); err != nil {
+	if err := errors.Join(envErr, cfg.Validate()); err != nil {
 		return Config{}, err
 	}
 

@@ -494,3 +494,49 @@
 - Low (ревью): Execute читает факты до проверки статуса (ошибка I/O маскирует ErrNotConfirmed); validFor не учитывает вид для STALE-причин; нет лимита числа предложений на транскрипт (TASK-042); Confirm защищён соглашением — тест «Confirm вызывает только input/wails» при появлении Wails; список sideEffectPorts ручной; нумерация правил в prompt-injection.md (8 перед 6, 7); заголовок календаря не отсекает U+2028/2029 и bidi — экранировать в адаптере календаря
 
 ---
+
+## [TASK-019] Каркас Wails v3: главное окно, трей, попап; версия и ADR
+**Дата:** 2026-10-14 22:00
+**Статус:** done
+
+### Что сделано
+- github.com/wailsapp/wails/v3 v3.0.0-beta.29 (последний тег v3; Windows-бэкенд на чистом Go, сборка CGO_ENABLED=0); косвенные: adrg/xdg, coder/websocket, go-ole, godbus/dbus, mattn/go-colorable; vulncheck чистый
+- input/wails: Shell (Run/ShowPopup/HidePopup/ShowMain), Wails только в shell_windows.go, shell_other.go -> ErrUnsupported; встроенные статические assets (index/popup, CSP default-src 'self'), без npm
+- Попап: Frameless, AlwaysOnTop, Hidden, HiddenOnTaskbar, 360x130 справа внизу; ExStyle NOACTIVATE|TOPMOST|TOOLWINDOW|CONTROLPARENT; показ через ShowWindow(SW_SHOWNOACTIVATE) перед Show() (обычный Show() крадёт фокус)
+- Трей: Open / Show recording popup / Quit; SingleInstance (именованный mutex) -> ShowMain; закрытие окна прячет его
+- app: Run запускает оболочку на main-горутине, отмена ctx -> Quit после ApplicationStarted; config: --headless / LA_HEADLESS (тесты и не-Windows)
+- docs/adr/0007-wails-popup.md (номер 0003 занят), docs/refs/wails.md
+- Изменён существующий тест app_test.go TestRunBlocksUntilCancelled: теперь headless (иначе запустил бы UI); в TestNew добавлен случай headless
+- Ревью: approve, только low. Security: найдено 0, опровергнуто 0, исправлено 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), после rebase на f4112e9
+- [x] Шаг 1: GOOS=windows go build ./desktop/... (CGO_ENABLED=0)
+- [x] Шаг 2: go vet ./desktop/...
+- [x] Шаг 3: docs/refs/wails.md содержит версию и ссылки
+- [x] Живой запуск на Windows 10: главное окно, иконка трея, второй экземпляр выходит, Ctrl+Break -> gracefully stopped; фокус попапа проверен на отдельной программе с теми же опциями
+
+### Решения (подтвердить)
+- ADR 0007 вместо 0003 (номер занят)
+- Не-Windows без --headless: ошибка с подсказкой (продукт только Windows)
+- Автозапуск и уведомления возможны через Wails (app.Autostart, services/notifications), но не включены: это пользовательские настройки
+
+### Заметки (follow-up)
+- Релизная сборка обязана быть с -tags production (иначе asset server слушает FRONTEND_DEVSERVER_URL) — TASK-054
+- Проверка single-instance сейчас внутри Shell.Run (Wails делает os.Exit во втором экземпляре): перенести до открытия SQLite/воркеров (адаптер named mutex)
+- При старте скрытый попап может на миг взять фокус (создание окна); при старте в трей — ленивое создание попапа
+- Low (ревью): setUI до старта Wails / после Quit — ставить ui по ApplicationStarted, сбрасывать в OnShutdown, когда появятся вызывающие; данные второго экземпляра (argv, cwd) игнорируются — переаудит, если начнут использоваться; биндинги и CSP переаудировать в TASK-021
+- WebView2 данные в %AppData%\<exe>; иконка приложения; Ctrl+C в GUI-сборке
+- GOOS=linux go vet без CGO_ENABLED=0 падает на этой машине (нет gcc для linux), на master так же — проблема окружения
+
+---
+
+## [TASK-020] Windows-проверка попапа, трея и уведомления
+**Дата:** 2026-10-14 22:00
+**Статус:** blocked
+
+### Причина
+- По тексту задачи нужен человек на реальной Windows (шаг 1: агент ставит blocked)
+- Чек-лист владельцу (также в ADR-0007): 1) в звонке Zoom/Телемост с фокусом в чате открыть попап из трея — ввод продолжается, главное окно не выходит вперёд; 2) попап поверх развёрнутого/полноэкранного звонка, у трея, Dismiss прячет; 3) два монитора с разным масштабом — позиция и размер; 4) закрытие главного окна оставляет трей, Open возвращает, Quit выходит; 5) второй запуск выводит работающее окно вперёд. Результат внести в ADR-0007 и вручную поставить done
+
+---

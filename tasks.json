@@ -431,7 +431,7 @@
                 "TASK-001",
                 "TASK-002"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-020",
@@ -449,7 +449,7 @@
             "dependencies": [
                 "TASK-019"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-021",

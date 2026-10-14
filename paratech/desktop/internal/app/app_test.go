@@ -13,6 +13,13 @@ import (
 
 func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// headless is the default configuration without the UI shell: tests never open windows.
+func headless() config.Config {
+	cfg := config.Default()
+	cfg.Headless = true
+	return cfg
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -21,6 +28,7 @@ func TestNew(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "ok", cfg: config.Default(), log: discard()},
+		{name: "headless", cfg: headless(), log: discard()},
 		{name: "nil logger", cfg: config.Default(), log: nil, wantErr: true},
 		{name: "invalid config", cfg: config.Config{LogLevel: "loud"}, log: discard(), wantErr: true},
 	}
@@ -38,7 +46,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestRunBlocksUntilCancelled(t *testing.T) {
-	a, err := app.New(config.Default(), discard())
+	a, err := app.New(headless(), discard())
 	if err != nil {
 		t.Fatal(err)
 	}
