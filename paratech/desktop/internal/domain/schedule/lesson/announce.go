@@ -23,7 +23,8 @@ func ValidateStartLead(lead time.Duration) error {
 
 // StartAnnouncementDue reports whether the "lesson is starting" prompt should be raised at now (PRD section 6.1):
 // the lesson is live, its prompt was not raised yet, and now lies in [start-lead, start+StartLateGrace). An app
-// started in the middle of a class does not offer to record it. Times are compared as instants, so the zone of the record and daylight-saving changes cannot shift the window.
+// started in the middle of a class does not offer to record it. Times are compared as instants, so the zone of the
+// record and daylight-saving changes cannot shift the window.
 func (l *Lesson) StartAnnouncementDue(now time.Time, lead time.Duration) bool {
 	if l.Deleted() || !l.startNotifiedAt.IsZero() || now.IsZero() || ValidateStartLead(lead) != nil {
 		return false

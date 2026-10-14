@@ -132,8 +132,9 @@ func TestRestartDuringLessonDoesNotDuplicate(t *testing.T) {
 		{"restart right after the announcement", time.Minute, -testLead + 2*time.Minute},
 		{"restart at the start", 5 * time.Minute, 0},
 		{"restart within the late grace", time.Minute, 10 * time.Second},
-		{"restart in the middle", 20 * time.Minute, 45 * time.Minute},
-		{"restart just before the end", 20 * time.Minute, 89 * time.Minute},
+		// The window is closed at these restarts, so they pass without the mark too.
+		{"restart in the middle: window closed", 20 * time.Minute, 45 * time.Minute},
+		{"restart just before the end: window closed", 20 * time.Minute, 89 * time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

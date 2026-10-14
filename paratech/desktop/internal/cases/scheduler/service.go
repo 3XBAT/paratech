@@ -39,6 +39,8 @@ func New(deps Deps, cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("%w: lessons, clock, sleeper and events are required", ErrInvalidConfig)
 	case cfg.PollInterval <= 0 || cfg.PollInterval >= lesson.StartLateGrace:
 		// A poll must land inside the late grace, or a lesson with a zero lead could be skipped between two polls.
+		// The real gap is PollInterval plus Tick time, and sleep or a clock jump can skip the window entirely; a
+		// missed window is not caught up (owner decision), see the package doc.
 		return nil, fmt.Errorf("%w: poll interval %v, want more than 0 and less than %v",
 			ErrInvalidConfig, cfg.PollInterval, lesson.StartLateGrace)
 	}
