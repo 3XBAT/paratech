@@ -119,16 +119,19 @@ func (e *powerEnv) setOnlyOnAC(on bool) {
 }
 
 // chunkHandler is a heavy handler that resumes from its checkpoint: a job without one reports chunk after chunk until
-// the runner tells it to stop, a job with one finishes at once.
+// the runner tells it to stop, a job with one finishes at once. The test paces the chunks through next.
 type chunkHandler struct {
 	mu      sync.Mutex
 	calls   map[shared.JobID][]string
 	started chan shared.JobID
+	next    chan struct{}
 	stopErr chan error
 }
 
 func newChunkHandler() *chunkHandler {
-	return &chunkHandler{calls: map[shared.JobID][]string{}, started: make(chan shared.JobID, 8), stopErr: make(chan error, 8)}
+	return &chunkHandler{
+		calls: map[shared.JobID][]string{}, started: make(chan shared.JobID, 8), next: make(chan struct{}), stopErr: make(chan error, 8),
+	}
 }
 
 func (h *chunkHandler) Handle(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error) error {
@@ -149,9 +152,31 @@ func (h *chunkHandler) Handle(ctx context.Context, snap job.Snapshot, report fun
 			h.stopErr <- err
 			return fmt.Errorf("stopped after chunk %d: %w", i, err)
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-h.next:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return nil
+}
+
+// stepUntilStopped lets the handler report one chunk at a time until the runner stops it, running between (if not
+// nil) before each new poll, and returns the error the handler was stopped with.
+func (h *chunkHandler) stepUntilStopped(t *testing.T, what string, between func()) error {
+	t.Helper()
+	var stopErr error
+	testenv.Eventually(t, what, func() bool {
+		select {
+		case stopErr = <-h.stopErr:
+			return true
+		case h.next <- struct{}{}:
+			return false
+		default:
+			return false
+		}
+	}, between)
+	return stopErr
 }
 
 func (h *chunkHandler) of(id shared.JobID) []string {
@@ -195,7 +220,7 @@ func TestPowerAwareProcessingOnSQLite(t *testing.T) {
 	e.drive("the heavy job starts on AC", func() bool { return len(heavy.of(stt)) == 1 })
 	<-heavy.started
 	power.Set(false)
-	if err := <-heavy.stopErr; !errors.Is(err, powerpolicy.ErrPowerLost) {
+	if err := heavy.stepUntilStopped(t, "the handler stops on battery", nil); !errors.Is(err, powerpolicy.ErrPowerLost) {
 		t.Fatalf("the handler was stopped with %v, want ErrPowerLost", err)
 	}
 	runnerEventually(t, "WAITING_FOR_POWER after the power loss", func() bool { return e.status(stt) == job.StatusWaitingForPower })
@@ -220,15 +245,7 @@ func TestPowerAwareProcessingOnSQLite(t *testing.T) {
 	e.drive("the heavy job starts on battery", func() bool { return len(heavy.of(quick)) == 1 })
 	<-heavy.started
 	e.setOnlyOnAC(true) // and on again: the running job stops at its next checkpoint once a poll re-reads the setting
-	var stopErr error
-	e.drive("the running job is stopped", func() bool {
-		select {
-		case stopErr = <-heavy.stopErr:
-			return true
-		default:
-			return false
-		}
-	})
+	stopErr := heavy.stepUntilStopped(t, "the running job is stopped", func() { e.clock.Advance(time.Second) })
 	if !errors.Is(stopErr, powerpolicy.ErrPowerLost) {
 		t.Fatalf("the handler was stopped with %v, want ErrPowerLost", stopErr)
 	}
