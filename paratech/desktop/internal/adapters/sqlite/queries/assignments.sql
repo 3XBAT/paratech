@@ -31,3 +31,8 @@ SET title          = sqlc.arg(title),
     version        = version + 1,
     updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+-- (ON DELETE RESTRICT), and the row is kept.
+-- name: DeleteAssignment :execrows
+DELETE FROM assignments WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);

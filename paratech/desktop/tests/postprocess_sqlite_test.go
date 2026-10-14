@@ -565,6 +565,61 @@ func TestUserEditSurvivesReprocessing(t *testing.T) {
 	}
 }
 
+// A shorter answer on reprocessing withdraws the extracted assignment it no longer has; one that a delivery references
+// (ON DELETE RESTRICT) is kept and the job still completes.
+func TestShorterReprocessingAnswerWithdrawsStaleAssignments(t *testing.T) {
+	llm := testenv.NewFakeLLM()
+	llm.Answer(values.OperationSummary, ppSummary)
+	llm.Answer(values.OperationExtractHomework, `{"assignments":[`+
+		`{"title":"Read chapter 4","description":"","due":"2026-10-16T23:59:00+03:00"},`+
+		`{"title":"Draw a map of rivers","description":"","due":"2026-10-21T10:00:00+03:00"},`+
+		`{"title":"Essay on deltas","description":"","due":"2026-10-23T10:00:00+03:00"}]}`)
+	e := newPPEnv(t, llm)
+	e.start()
+	e.waitPost(homeworkflow.ExtractHomeworkJobType, job.StatusCompleted)
+
+	ctx := context.Background()
+	first := e.storedAssignments()
+	if len(first) != 3 {
+		t.Fatalf("assignments = %d, want 3", len(first))
+	}
+	if _, err := e.db.DBTX(ctx).ExecContext(ctx, `INSERT INTO deliveries (id, assignment_id, recipient, subject,
+		artifact_ref, message_id, idempotency_key, status, confirmed_at, sent_at, created_at, updated_at)
+		VALUES ('d1', ?, 'teacher@example.com', 'Essay', 'exports/essay.pdf', 'msg-1', 'dk-1', 'SENT', 1, 1, 1, 1)`,
+		string(first[2].ID())); err != nil {
+		t.Fatal(err)
+	}
+
+	llm.Answer(values.OperationExtractHomework, `{"assignments":[`+
+		`{"title":"Read chapter 4","description":"","due":"2026-10-16T23:59:00+03:00"}]}`)
+	req, err := values.NewPostProcessRequest(ppTranscript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := job.New(job.Spec{
+		ID: "reprocess-1", Type: homeworkflow.ExtractHomeworkJobType, Key: "extract_homework:stt-1:reprocess-1",
+		Payload: req.Payload(), MaxAttempts: 3,
+	}, e.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.jobs.Enqueue(ctx, again); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, "the reprocessing job completes", func() bool {
+		j, err := e.jobs.Get(ctx, "reprocess-1")
+		return err == nil && j.Status() == job.StatusCompleted
+	}, func() { e.clock.Advance(time.Second) })
+
+	list := e.storedAssignments()
+	if len(list) != 2 || list[0].ID() != first[0].ID() || list[1].ID() != first[2].ID() {
+		t.Fatalf("assignments = %d, want item 0 and the delivered item 2", len(list))
+	}
+	if _, err := e.assignments.Get(ctx, first[1].ID()); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("stale assignment: %v, want it withdrawn", err)
+	}
+}
+
 // PRD sections 7.2 and 9.2: no quota parks the job without using attempts; it runs again after the recheck.
 func TestQuotaExceededWaitsAndResumes(t *testing.T) {
 	llm := testenv.NewFakeLLM()

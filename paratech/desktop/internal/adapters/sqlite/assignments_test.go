@@ -209,6 +209,82 @@ func TestAssignmentsListByTranscript(t *testing.T) {
 	}
 }
 
+func TestAssignmentDelete(t *testing.T) {
+	ctx := context.Background()
+	stored := func(t *testing.T, e *courseworkEnv) *assignment.Assignment {
+		t.Helper()
+		a := newExtracted(t, "a1", "t1", 0, time.Time{})
+		if err := e.assignments.Save(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, e *courseworkEnv) *assignment.Assignment
+		want  error // nil: deleted
+	}{
+		{"current version", stored, nil},
+		{"stale version", func(t *testing.T, e *courseworkEnv) *assignment.Assignment {
+			a := stored(t, e)
+			stale, err := e.assignments.Get(ctx, a.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.Edit(a.Details(), asgT0.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.assignments.Save(ctx, a); err != nil {
+				t.Fatal(err)
+			}
+			return stale
+		}, shared.ErrVersionConflict},
+		{"already gone", func(t *testing.T, e *courseworkEnv) *assignment.Assignment {
+			a := stored(t, e)
+			mustExec(t, e.db, "DELETE FROM assignments WHERE id = 'a1'")
+			return a
+		}, shared.ErrVersionConflict},
+		{"never stored", func(t *testing.T, _ *courseworkEnv) *assignment.Assignment {
+			return newExtracted(t, "a1", "t1", 0, time.Time{})
+		}, shared.ErrVersionConflict},
+		{"referenced by a delivery", func(t *testing.T, e *courseworkEnv) *assignment.Assignment {
+			a := stored(t, e)
+			mustExec(t, e.db, `INSERT INTO deliveries (id, assignment_id, recipient, subject, artifact_ref, message_id,
+				idempotency_key, status, confirmed_at, created_at, updated_at)
+				VALUES ('d1', 'a1', 'a@b.c', 's', 'exports/x', 'msg-1', 'dk-1', 'PENDING', 0, 0, 0)`)
+			return a
+		}, assignment.ErrInUse},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newCourseworkEnv(t)
+			a := tc.setup(t, e)
+			err := e.assignments.Delete(ctx, a)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("Delete: %v", err)
+				}
+				if _, err := e.assignments.Get(ctx, a.ID()); !errors.Is(err, shared.ErrNotFound) {
+					t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Delete = %v, want %v", err, tc.want)
+			}
+			if tc.want == assignment.ErrInUse {
+				if errors.Is(err, shared.ErrVersionConflict) {
+					t.Fatalf("Delete = %v: a kept row is not a version conflict", err)
+				}
+				if n := scanInt(t, e.db.sql, "SELECT count(*) FROM assignments"); n != 1 {
+					t.Fatalf("assignments after a refused delete = %d, want 1", n)
+				}
+			}
+		})
+	}
+
+}
+
 // Deleting the transcript (with its recording) keeps the assignments: they are the user's data (AC-20).
 func TestAssignmentSurvivesTranscriptDeletion(t *testing.T) {
 	e, ctx := newCourseworkEnv(t), context.Background()

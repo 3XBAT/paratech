@@ -13,6 +13,9 @@ type Querier interface {
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
 	// Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
 	CountJobsWithoutIDByStatus(ctx context.Context, statuses []string) (int64, error)
+	// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+	// (ON DELETE RESTRICT), and the row is kept.
+	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)

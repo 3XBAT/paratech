@@ -365,7 +365,54 @@ func (p *PostProcessor) extract(ctx context.Context, snap job.Snapshot, report f
 			return err
 		}
 	}
+	return p.withdrawSuperseded(ctx, snap, in, len(details))
+}
+
+// withdrawSuperseded deletes the extracted assignments of the transcript that an answer of items items left behind,
+// one aggregate per delete (ARCH-23); the aggregate decides which (assignment.Superseded).
+func (p *PostProcessor) withdrawSuperseded(ctx context.Context, snap job.Snapshot, in lessonInput, items int) error {
+	list, err := p.assignments.ListByTranscript(ctx, in.transcript)
+	if err != nil {
+		return p.retry(snap, stepSave, ErrStorage, err)
+	}
+	for _, a := range list {
+		if err := p.withdraw(ctx, snap, a, items); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// withdraw deletes a when it is superseded. An assignment in use (a delivery references it) is kept.
+func (p *PostProcessor) withdraw(ctx context.Context, snap job.Snapshot, a *assignment.Assignment, items int) error {
+	var last error
+	for range saveAttempts {
+		if !a.Superseded(items) {
+			return nil
+		}
+		last = p.assignments.Delete(ctx, a)
+		switch {
+		case last == nil:
+			return nil
+		case errors.Is(last, assignment.ErrInUse):
+			p.log.Info("superseded assignment kept: it is in use", slog.String("job", snap.ID().String()),
+				slog.String("assignment", a.ID().String()))
+			return nil
+		case !errors.Is(last, shared.ErrVersionConflict):
+			return p.retry(snap, stepSave, ErrStorage, last)
+		}
+
+		// Changed meanwhile, for example by a user edit: reload, the aggregate decides again.
+		var err error
+		a, err = p.assignments.Get(ctx, a.ID())
+		switch {
+		case errors.Is(err, shared.ErrNotFound):
+			return nil
+		case err != nil:
+			return p.retry(snap, stepSave, ErrStorage, err)
+		}
+	}
+	return p.retry(snap, stepSave, ErrStorage, last)
 }
 
 // storeAssignment creates the assignment of item index or applies the new details to the one made before.

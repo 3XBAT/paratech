@@ -297,6 +297,102 @@ func TestReprocessingKeepsUserEdits(t *testing.T) {
 	}
 }
 
+// A shorter answer withdraws the extracted assignments it no longer has, except the ones the user edited or a delivery
+// uses; matching is by position (assignment package doc).
+func TestShorterAnswerWithdrawsSupersededAssignments(t *testing.T) {
+	e := newPPEnv(t)
+	e.llm.Answer(values.OperationExtractHomework, `{"assignments":[`+
+		`{"title":"Item 0","description":"","due":null},{"title":"Item 1","description":"","due":null},`+
+		`{"title":"Item 2","description":"","due":null},{"title":"Item 3","description":"","due":null}]}`)
+	if err := e.handle(e.snapshot("j1", ExtractHomeworkJobType, "t1")); err != nil {
+		t.Fatal(err)
+	}
+	first := e.assignmentsOf("t1")
+	e.editAssignment(first[2])
+	e.inUse[first[3].ID] = true
+
+	e.llm.Answer(values.OperationExtractHomework, `{"assignments":[{"title":"Item 0 again","description":"","due":null}]}`)
+	if err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	got := e.assignmentsOf("t1")
+	var ids []shared.AssignmentID
+	for _, st := range got {
+		ids = append(ids, st.ID)
+	}
+	if len(got) != 3 || got[0].Title != "Item 0 again" || got[1].ID != first[2].ID || got[2].ID != first[3].ID {
+		t.Fatalf("assignments = %v, want item 0 updated, item 1 withdrawn, items 2 (edited) and 3 (in use) kept", ids)
+	}
+
+	// An empty answer withdraws the rest that may go.
+	e.llm.Answer(values.OperationExtractHomework, `{"assignments":[]}`)
+	if err := e.handle(e.snapshot("j3", ExtractHomeworkJobType, "t1")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := e.assignmentsOf("t1"); len(got) != 2 || got[0].ID != first[2].ID || got[1].ID != first[3].ID {
+		t.Fatalf("assignments after an empty answer = %+v", got)
+	}
+}
+
+// A delete that meets a concurrent change reloads and lets the aggregate decide again; a storage failure is retried.
+func TestWithdrawAfterAConflictOrAFailure(t *testing.T) {
+	setup := func(t *testing.T) *ppEnv {
+		e := newPPEnv(t)
+		e.llm.Answer(values.OperationExtractHomework, extractAnswer)
+		if err := e.handle(e.snapshot("j1", ExtractHomeworkJobType, "t1")); err != nil {
+			t.Fatal(err)
+		}
+		e.llm.Answer(values.OperationExtractHomework, `{"assignments":[{"title":"Read chapter 4","description":"","due":null}]}`)
+		return e
+	}
+
+	t.Run("the user edits it meanwhile", func(t *testing.T) {
+		e := setup(t)
+		second := e.assignmentsOf("t1")[1]
+		e.beforeDelete = func() { e.editAssignment(second) }
+		if err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1")); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+		if got := e.assignmentsOf("t1"); len(got) != 2 || !got[1].UserEdited {
+			t.Fatalf("assignments = %+v, want the edited one kept", got)
+		}
+	})
+	t.Run("another attempt changed it", func(t *testing.T) {
+		e := setup(t)
+		e.failNextDelete = shared.ErrVersionConflict
+		if err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1")); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+		if got := e.assignmentsOf("t1"); len(got) != 1 {
+			t.Fatalf("assignments = %+v, want 1", got)
+		}
+	})
+	t.Run("storage failure", func(t *testing.T) {
+		e := setup(t)
+		e.failNextDelete = errors.New("disk I/O error")
+		err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1"))
+		if !errors.Is(err, ErrStorage) || backoff.Classify(err) == backoff.ClassPermanent {
+			t.Fatalf("Handle = %v, want a retried ErrStorage", err)
+		}
+	})
+}
+
+// editAssignment stores a user edit of the assignment with state st.
+func (e *ppEnv) editAssignment(st assignment.State) {
+	e.t.Helper()
+	a, err := assignment.Restore(st)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := a.Edit(a.Details(), ppT0.Add(time.Hour)); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := (ppAssignments{e.ppStore}).Save(context.Background(), a); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 // Test step 3 of TASK-042: an invalid answer creates no records and fails the job permanently.
 func TestInvalidAnswerStoresNothing(t *testing.T) {
 	tooMany := make([]string, prompts.MaxHomework+1)

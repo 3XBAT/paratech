@@ -9,5 +9,10 @@
 // assignment it made before instead of adding a second one. The values come from model output and are data only
 // (hard rule 3): they never trigger a side effect.
 //
+// Matching on reprocessing is by position only, not by content: item i of the new answer updates the assignment of
+// item i of the earlier one. A user-edited assignment keeps its slot, so a different new item at that position is not
+// stored. Assignments at positions the new answer no longer has are withdrawn unless the user edited them
+// (Superseded) or a delivery still references them.
+//
 // Invariant: once the user edited an assignment (Edit), reprocessing never changes it again (Reextract keeps it).
 package assignment

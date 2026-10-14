@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
@@ -16,6 +17,7 @@ const (
 	opGetAssignmentBySource = "sqlite: get assignment by source"
 	opListAssignmentsBySrc  = "sqlite: list assignments of a transcript"
 	opSaveAssignment        = "sqlite: save assignment"
+	opDeleteAssignment      = "sqlite: delete assignment"
 )
 
 // Values of assignment.State that are NULL in the row.
@@ -52,7 +54,8 @@ func (r *AssignmentRepository) GetBySource(ctx context.Context, t shared.Transcr
 	return assignmentFromRow(row)
 }
 
-// ListByTranscript returns the assignments extracted from transcript t, in the order of the extraction answer.
+// ListByTranscript returns the assignments extracted from transcript t, in the order of the extraction answer; none is
+// an empty list.
 func (r *AssignmentRepository) ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error) {
 	rows, err := r.db.Queries(ctx).ListAssignmentsByTranscript(ctx, jobNullString(string(t)))
 	if err != nil {
@@ -102,6 +105,26 @@ func (r *AssignmentRepository) Save(ctx context.Context, a *assignment.Assignmen
 	}
 
 	a.Persisted(next)
+	return nil
+}
+
+// Delete removes the stored assignment as a version compare-and-swap (ADR-0004(d)): a row that changed or is gone
+// yields shared.ErrVersionConflict, a row a delivery references (ON DELETE RESTRICT) is kept and yields
+// assignment.ErrInUse.
+func (r *AssignmentRepository) Delete(ctx context.Context, a *assignment.Assignment) error {
+	if a.Version() < 1 {
+		return fmt.Errorf("%s %s: never stored: %w", opDeleteAssignment, a.ID(), shared.ErrVersionConflict)
+	}
+
+	n, err := r.db.Queries(ctx).DeleteAssignment(ctx, sqlcgen.DeleteAssignmentParams{ID: string(a.ID()), ExpectedVersion: a.Version()})
+	err = VersionCAS(ctx, n, err)
+	if errors.Is(err, shared.ErrConflict) && !errors.Is(err, shared.ErrVersionConflict) {
+		// A delete can only break the foreign key of a referencing row.
+		return fmt.Errorf("%s %s: %w", opDeleteAssignment, a.ID(), assignment.ErrInUse)
+	}
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opDeleteAssignment, a.ID(), err)
+	}
 	return nil
 }
 

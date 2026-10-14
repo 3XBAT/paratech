@@ -10,6 +10,25 @@ import (
 	"database/sql"
 )
 
+const deleteAssignment = `-- name: DeleteAssignment :execrows
+DELETE FROM assignments WHERE id = ?1 AND version = ?2
+`
+
+type DeleteAssignmentParams struct {
+	ID              string
+	ExpectedVersion int64
+}
+
+// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+// (ON DELETE RESTRICT), and the row is kept.
+func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteAssignment, arg.ID, arg.ExpectedVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getAssignment = `-- name: GetAssignment :one
 
 SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version FROM assignments WHERE id = ?1

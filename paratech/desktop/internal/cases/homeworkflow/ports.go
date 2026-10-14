@@ -43,6 +43,15 @@ type AssignmentRepository interface {
 	// shared.ErrNotFound if there is none.
 	GetBySource(ctx context.Context, t shared.TranscriptID, index int) (*assignment.Assignment, error)
 
+	// ListByTranscript loads the assignments extracted from transcript t in the order of the extraction answer, so
+	// that reprocessing finds the ones a shorter answer no longer has (PRD section 10). None is an empty list.
+	ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error)
+
+	// Delete removes an assignment reprocessing withdrew (PRD section 10, assignment.Superseded). It is a version
+	// compare-and-swap (ADR-0004(d)): a row that changed or is gone yields shared.ErrVersionConflict. An assignment
+	// that other records (a delivery) reference is kept and yields assignment.ErrInUse.
+	Delete(ctx context.Context, a *assignment.Assignment) error
+
 	// Save inserts or updates an assignment (PRD section 10: review and edit locally). It is the
 	// version compare-and-swap as defined in ADR-0004(d): Version() == 0 is a new aggregate and is
 	// INSERTed with version 1; Version() >= 1 is UPDATEd WHERE id = ? AND version = Version(), and a row that changed or

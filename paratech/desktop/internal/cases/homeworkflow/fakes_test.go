@@ -90,6 +90,16 @@ func (r assignmentRepo) GetBySource(context.Context, shared.TranscriptID, int) (
 	return nil, shared.ErrNotFound
 }
 
+func (r assignmentRepo) ListByTranscript(context.Context, shared.TranscriptID) ([]*assignment.Assignment, error) {
+	r.s.t.Error("the proposal pipeline must not list the assignments of a transcript")
+	return nil, nil
+}
+
+func (r assignmentRepo) Delete(context.Context, *assignment.Assignment) error {
+	r.s.t.Error("the proposal pipeline must not delete assignments")
+	return nil
+}
+
 func (r assignmentRepo) Save(context.Context, *assignment.Assignment) error {
 	r.s.t.Error("the proposal pipeline must not write assignments")
 	return nil

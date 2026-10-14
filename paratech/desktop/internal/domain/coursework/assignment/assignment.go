@@ -156,6 +156,13 @@ func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (cha
 	return true, nil
 }
 
+// Superseded reports whether a new extraction answer of the same transcript with items items leaves the assignment
+// behind, so that reprocessing may withdraw (delete) it: it was extracted at a position the answer no longer has and
+// the user never edited it. Matching is by position only (see the package doc).
+func (a *Assignment) Superseded(items int) bool {
+	return a.source != noSource && a.source >= items && !a.userEdited
+}
+
 // Edit stores the details the user entered (PRD section 10: review and edit locally, AC-13). From then on the
 // assignment is user-edited and reprocessing never overwrites it. Saving unchanged details also counts: the user has
 // confirmed them.

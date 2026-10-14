@@ -3,6 +3,7 @@ package homeworkflow
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,9 +41,12 @@ type ppStore struct {
 	jobs        map[string]*job.Job // by idempotency key
 	saves       int                 // successful summary and assignment saves
 
-	failNextSave error // returned once by the next summary or assignment save
-	readErr      error // returned by every transcript Get when set
-	seq          int
+	failNextSave   error                        // returned once by the next summary or assignment save
+	failNextDelete error                        // returned once by the next assignment delete
+	beforeDelete   func()                       // run once before the next assignment delete, without the lock
+	inUse          map[shared.AssignmentID]bool // assignments a delivery references
+	readErr        error                        // returned by every transcript Get when set
+	seq            int
 }
 
 func newPPStore() *ppStore {
@@ -50,6 +54,7 @@ func newPPStore() *ppStore {
 		transcripts: map[shared.TranscriptID]*transcript.Transcript{}, recordings: map[shared.RecordingID]*recording.Recording{},
 		lessons: map[shared.LessonID]*lesson.Lesson{}, summaries: map[summary.ID]summary.State{},
 		assignments: map[shared.AssignmentID]assignment.State{}, jobs: map[string]*job.Job{},
+		inUse: map[shared.AssignmentID]bool{},
 	}
 }
 
@@ -145,6 +150,41 @@ func (r ppAssignments) GetBySource(_ context.Context, t shared.TranscriptID, ind
 	return nil, fmt.Errorf("assignment %s/%d: %w", t, index, shared.ErrNotFound)
 }
 
+func (r ppAssignments) ListByTranscript(_ context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error) {
+	out := []*assignment.Assignment{}
+	for _, st := range r.s.assignmentsOf(t) {
+		a, err := assignment.Restore(st)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func (r ppAssignments) Delete(_ context.Context, a *assignment.Assignment) error {
+	if hook := r.s.beforeDelete; hook != nil {
+		r.s.beforeDelete = nil
+		hook()
+	}
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.failNextDelete != nil {
+		err := r.s.failNextDelete
+		r.s.failNextDelete = nil
+		return err
+	}
+	stored, ok := r.s.assignments[a.ID()]
+	if !ok || stored.Version != a.Version() {
+		return shared.ErrVersionConflict
+	}
+	if r.s.inUse[a.ID()] {
+		return assignment.ErrInUse
+	}
+	delete(r.s.assignments, a.ID())
+	return nil
+}
+
 func (r ppAssignments) Save(_ context.Context, a *assignment.Assignment) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
@@ -208,13 +248,12 @@ func (s *ppStore) assignmentsOf(t shared.TranscriptID) []assignment.State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []assignment.State
-	for i := 0; i < len(s.assignments)+1; i++ {
-		for _, st := range s.assignments {
-			if st.Transcript == t && st.SourceIndex == i {
-				out = append(out, st)
-			}
+	for _, st := range s.assignments {
+		if st.Transcript == t && st.SourceIndex >= 0 {
+			out = append(out, st)
 		}
 	}
+	slices.SortFunc(out, func(a, b assignment.State) int { return a.SourceIndex - b.SourceIndex })
 	return out
 }
 

@@ -270,3 +270,47 @@ func TestPersisted(t *testing.T) {
 		t.Fatalf("version = %d", a.Version())
 	}
 }
+
+func TestSuperseded(t *testing.T) {
+	at := func(index int, edited bool) *Assignment {
+		t.Helper()
+		a, err := NewExtracted(Spec{
+			ID: "a1", Origin: Origin{Transcript: "t1", Index: index}, PromptVersion: 1, Details: details(t, "Essay", "", time.Time{}),
+		}, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if edited {
+			if err := a.Edit(a.Details(), t0.Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return a
+	}
+	manual, err := Restore(State{
+		Version: 1, ID: "m1", SourceIndex: noSource, Title: "Mine", CreatedAt: t0, UpdatedAt: t0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name  string
+		a     *Assignment
+		items int
+		want  bool
+	}{
+		{"position past a shorter answer", at(2, false), 2, true},
+		{"every item of an empty answer", at(0, false), 0, true},
+		{"position still in the answer", at(1, false), 2, false},
+		{"edited by the user", at(2, true), 2, false},
+		{"not extracted", manual, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.a.Superseded(tc.items); got != tc.want {
+				t.Fatalf("Superseded(%d) = %v, want %v", tc.items, got, tc.want)
+			}
+		})
+	}
+}
