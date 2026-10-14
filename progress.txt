@@ -608,3 +608,34 @@
 - Флаки: TestSTTJobTranscribesRecording (desktop/tests, TASK-029) один раз упал с attempts 2 вместо 1 под нагрузкой полного прогона; -count=10 отдельно зелёный. Разобрать (вероятно повтор попытки из-за таймаута/гонки в fake whisper)
 
 ---
+
+## [TASK-041] Prompt & Context Manager: минимальный контекст, схемы вывода, разделение инструкций и данных
+**Дата:** 2026-10-14 21:00
+**Статус:** done
+
+### Что сделано
+- domain/coursework/services/contextselection: Select оставляет только поля, нужные операции (summary / extract_homework_deadlines / homework_draft); тайм-коды сегментов и срок задания не отправляются; транскрипт <= 512 КиБ (отказ, не обрезка); проверка UTF-8, управляющих символов, U+2028/2029 в однострочных полях
+- domain/coursework/services/prompts: Instructions(op) — постоянный текст + JSON Schema ответа, без данных пользователя; Build кладёт контекст одним JSON-объектом между <untrusted_data>...</untrusted_data> в UntrustedData (encoding/json экранирует < >, маркер подделать нельзя); отдельная структура payload на операцию; детерминированно; Version = 1
+- Строгие парсеры ParseSummary/ParseExtraction/ParseDraft: <= 256 КиБ, точные имена ключей (без регистронезависимости), дубли ключей (в т.ч. через \u), лишние поля, хвост, глубина <= 8, лимиты длины, bidi/LRM/RLM/ALM/теги U+E00xx; due — RFC 3339 со смещением lesson_start, в окне [-24 ч, +2 г]; ошибки не цитируют вывод модели
+- TestSchemasMatchTheParsers сверяет схемы с wire-структурами и константами
+- Изменённые существующие тесты: только тесты этой задачи (фикстура due 20:59:00.5Z -> 23:59:00.5+03:00 из-за правила смещения)
+- Ревью: approve, 5 low -> исправлены в f5f00c5. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0 (2 low-заметки аудитора, см. ниже)
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на f5f00c5
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestBuildSendsOnlyTheContextOfTheOperation (+ TestSelectKeepsOnlyWhatTheOperationUses, TestInstructionsHoldNoUserData)
+- [x] Шаг 3: TestParseSummaryRejects, TestParseExtractionRejects, TestParseDraftRejects
+
+### Решения (подтвердить)
+- JSON Schema передаётся внутри инструкций и проверяется локально (поле schema в CompletionSpec не добавлено; закрывает follow-up ADR-0005 неявно — стоит одна строка в ADR)
+- due с другим UTC-смещением отклоняет весь ответ извлечения (строго; модель могла перепутать зону)
+- LRM/RLM/ALM запрещены в выводе модели — может мешать RTL-языкам; для русского/английского неважно. В contextselection (данные студента) bidi не запрещаются
+
+### Заметки (follow-up)
+- Hub (gateway): Instructions -> system role, UntrustedData -> отдельное user-сообщение; сейчас Hub UntrustedData не читает — без этого разделение AC-2 теряется у провайдера, нужен тест
+- TASK-042/homeworkflow: сохранять prompts.Version вместе с результатом; idempotency_key и modelAlias передаёт вызывающий
+- Low (security): экранирование < > & увеличивает байты до 6x — транскрипт, прошедший Select, может не пройти лимит 1 МиБ NewLLMRequest (понятная ошибка)
+- Флаки: cases/jobrunner TestCancelJobThatWaits/waiting_for_the_retry один раз упал у ревьюера (RETRY_WAIT вместо CANCELLED), -count=5 зелёный; рядом с флаки TASK-029
+
+---
