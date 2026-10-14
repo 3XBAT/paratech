@@ -7,7 +7,11 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 export GIT_TERMINAL_PROMPT=0 GIT_EDITOR=true
 
 git fetch -q origin
-git stash -q -u 2>/dev/null
+# The stash list is shared by all worktrees: stash only when this tree is dirty and pop exactly that entry.
+STASHED=
+if [ -n "$(git status --porcelain)" ]; then
+  git stash push -q -u -m "verify.sh $$ $(git branch --show-current)" && STASHED=$(git rev-parse -q --verify refs/stash)
+fi
 git rebase origin/master >/dev/null 2>&1
 for _ in $(seq 12); do
   U=$(git diff --name-only --diff-filter=U)
@@ -15,8 +19,11 @@ for _ in $(seq 12); do
   for f in $U; do git checkout --theirs "$f" >/dev/null 2>&1 && git add "$f"; done
   git rebase --continue >/dev/null 2>&1
 done
-git stash pop -q 2>/dev/null
-if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then echo "REBASE_UNRESOLVED"; git status --short | head; exit 2; fi
+if [ -n "$STASHED" ]; then
+  REF=$(git stash list --format='%gd %H' | awk -v h="$STASHED" '$2 == h { print $1; exit }')
+  [ -n "$REF" ] && git stash pop -q "$REF"
+fi
+if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then echo "REBASE_UNRESOLVED"; git status --short | head; exit 2; fi
 
 cd paratech || exit 1
 (cd desktop/internal/adapters/sqlite && go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate >/dev/null 2>&1; git status --porcelain -- sqlcgen | sed 's/^/SQLC_CHANGED /')
