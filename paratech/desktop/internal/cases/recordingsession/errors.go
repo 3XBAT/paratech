@@ -11,7 +11,8 @@ var (
 	// ErrClosed is returned by Start and Recover after Close.
 	ErrClosed = errors.New("recording service is closed")
 
-	// ErrRecovering is returned by Start and Recover while Recover runs: the interrupted recordings are finished first.
+	// ErrRecovering is returned by Recover while another Recover runs, by Start while Recover marks the interrupted
+	// recordings, and by Delete of a recording that the running Recover has not finished yet.
 	ErrRecovering = errors.New("interrupted recordings are being recovered")
 
 	// ErrStartFailed means the capture could not start; the recording is FAILED.

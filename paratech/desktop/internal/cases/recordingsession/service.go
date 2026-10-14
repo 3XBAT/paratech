@@ -75,11 +75,11 @@ type Service struct {
 	life     context.Context // parent of the session work; ends on a forced Close
 	shutdown context.CancelFunc
 
-	mu         sync.Mutex
-	active     *session
-	recovering bool // Recover runs; Start is refused meanwhile
-	closed     bool
-	wg         sync.WaitGroup // one per session, from the reservation in Start until it ends, and one per Recover
+	mu       sync.Mutex
+	active   *session
+	recovery *recoveryRun // the running Recover; nil if none
+	closed   bool
+	wg       sync.WaitGroup // one per session, from the reservation in Start until it ends, and one per Recover
 }
 
 // New validates the configuration and builds the Service.
@@ -228,7 +228,7 @@ func (s *Service) reserve(rec *recording.Recording) (*session, error) {
 	if s.closed {
 		return nil, ErrClosed
 	}
-	if s.recovering {
+	if s.recovery != nil && s.recovery.marking {
 		return nil, ErrRecovering
 	}
 
@@ -655,13 +655,18 @@ func (s *Service) Active() (Info, bool) {
 
 // Delete removes a finished recording with its files and transcripts (PRD section 13.1) in the order of ADR-0004(a):
 // the aggregate decides first, the files go next, then both rows in one transaction where the aggregate is asked
-// again. A failure after the files were removed is repaired by repeating the request.
+// again. A failure after the files were removed is repaired by repeating the request. A recording that the running
+// Recover has not finished yet is refused with ErrRecovering, before the files and again in the transaction, so the
+// recovery cannot write a track for a deleted row.
 func (s *Service) Delete(ctx context.Context, id shared.RecordingID) error {
 	rec, err := s.recordings.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", opDelete, id, err)
 	}
 	if err := rec.CheckDeletable(); err != nil {
+		return fmt.Errorf("%s %s: %w", opDelete, id, err)
+	}
+	if err := s.checkNotRecovering(id); err != nil {
 		return fmt.Errorf("%s %s: %w", opDelete, id, err)
 	}
 
@@ -689,6 +694,9 @@ func (s *Service) Delete(ctx context.Context, id shared.RecordingID) error {
 			return err
 		}
 		if err := cur.CheckDeletable(); err != nil {
+			return err
+		}
+		if err := s.checkNotRecovering(id); err != nil {
 			return err
 		}
 		if err := s.transcripts.DeleteByRecording(ctx, id); err != nil {

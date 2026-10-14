@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/shared"
@@ -190,6 +192,7 @@ func TestHeartbeatIsStored(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	cfg := recordingsession.DefaultConfig()
 	e := newRecordingEnvWith(t, t.TempDir(), cfg)
+	sleeps := e.trackSleeps(cfg)
 	ctx := context.Background()
 	info, err := e.svc.Start(ctx, recordingsession.StartRequest{})
 	if err != nil {
@@ -197,9 +200,7 @@ func TestHeartbeatIsStored(t *testing.T) {
 	}
 
 	for i := 1; i <= 2; i++ {
-		if err := e.clock.AwaitSleepers(ctx, 1); err != nil {
-			t.Fatal(err)
-		}
+		sleeps.awaitOnly(t, cfg.HeartbeatInterval)
 		e.clock.Advance(cfg.HeartbeatInterval)
 		want := recT0.Add(time.Duration(i) * cfg.HeartbeatInterval)
 		testenv.Eventually(t, "stored heartbeat", func() bool {
@@ -212,4 +213,68 @@ func TestHeartbeatIsStored(t *testing.T) {
 	if got, err := e.svc.Stop(ctx, info.ID); err != nil || got.Status != recording.StatusCompleted {
 		t.Fatalf("Stop = %+v, %v", got, err)
 	}
+}
+
+// trackSleeps replaces the service of the idle env by one with the same ports whose Sleeper records the sleeps in
+// flight, so that a heartbeat test advances the clock only once the watch of the session sleeps.
+func (e *recordingEnv) trackSleeps(cfg recordingsession.Config) *recSleepLog {
+	e.t.Helper()
+	if err := e.svc.Close(context.Background()); err != nil {
+		e.t.Fatal(err)
+	}
+	sleeps := &recSleepLog{clock: e.clock, inFlight: map[time.Duration]int{}}
+	svc, err := recordingsession.New(recordingsession.Deps{
+		Recordings: e.repo, Transcripts: sqlite.NewRecordingTranscripts(e.db), Recorder: e.rec, Artifacts: e.store,
+		Tx: e.db, Clock: e.clock, Sleeper: sleeps, IDs: &recIDs{},
+	}, cfg)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.svc = svc
+	return sleeps
+}
+
+// recSleepLog is a Sleeper on the fake clock that records the sleeps in flight by duration. Waiting for any sleeper
+// is not enough: the timer of a detached save may still sleep, and an advance before the watch sleeps again is lost.
+type recSleepLog struct {
+	clock *testenv.FakeClock
+
+	mu       sync.Mutex
+	started  int
+	inFlight map[time.Duration]int
+}
+
+func (l *recSleepLog) Sleep(ctx context.Context, d time.Duration) error {
+	l.mu.Lock()
+	l.started++
+	l.inFlight[d]++
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.inFlight[d]--
+		l.mu.Unlock()
+	}()
+	return l.clock.Sleep(ctx, d)
+}
+
+func (l *recSleepLog) only(d time.Duration) (started int, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	total := 0
+	for _, n := range l.inFlight {
+		total += n
+	}
+	return l.started, total == 1 && l.inFlight[d] == 1
+}
+
+// awaitOnly waits until the only sleep is one of d and the clock holds it (see sleepLog in the recordingsession
+// tests for why the count is read twice).
+func (l *recSleepLog) awaitOnly(t *testing.T, d time.Duration) {
+	t.Helper()
+	testenv.Eventually(t, "a single sleep of "+d.String(), func() bool {
+		before, ok := l.only(d)
+		held := l.clock.Sleepers() == 1
+		after, still := l.only(d)
+		return ok && held && still && before == after
+	}, nil)
 }

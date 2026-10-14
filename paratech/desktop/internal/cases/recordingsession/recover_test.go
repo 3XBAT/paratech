@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,12 +19,12 @@ import (
 // restart builds the Service of a new process on the same database and files: a fresh recorder and no sessions.
 func (e *env) restart() *env {
 	e.t.Helper()
-	n := &env{t: e.t, clock: e.clock, repo: e.repo, tr: e.tr, tx: e.tx, files: e.files}
+	n := &env{t: e.t, clock: e.clock, sleeps: newSleepLog(e.clock), repo: e.repo, tr: e.tr, tx: e.tx, files: e.files}
 	n.rec = testenv.NewFakeRecorder(n.files, chunkLen)
 	n.hooks = &hookRecorder{FakeRecorder: n.rec}
 	svc, err := New(Deps{
 		Recordings: n.repo, Transcripts: n.tr, Recorder: n.hooks, Artifacts: n.files, Tx: n.tx,
-		Clock: n.clock, Sleeper: n.clock, IDs: &seqIDs{n: 100},
+		Clock: n.clock, Sleeper: n.sleeps, IDs: &seqIDs{n: 100},
 	}, DefaultConfig())
 	if err != nil {
 		e.t.Fatal(err)
@@ -244,7 +245,15 @@ func TestRecoverLeavesFinishedRecordings(t *testing.T) {
 // A transient assembly error keeps the recording for the next start, with a problem for the UI; the next Recover
 // finishes it.
 func TestRecoverRetriesAtTheNextStart(t *testing.T) {
-	for _, status := range []recording.Status{recording.StatusRecording, recording.StatusFinalizing} {
+	cases := []struct {
+		status  recording.Status
+		problem string // after the completion by the second Recover
+	}{
+		{recording.StatusRecording, problemInterrupted},
+		{recording.StatusFinalizing, ""},
+	}
+	for _, tc := range cases {
+		status := tc.status
 		t.Run(string(status), func(t *testing.T) {
 			testenv.NoGoroutineLeaks(t)
 			e := newEnv(t, DefaultConfig())
@@ -265,14 +274,18 @@ func TestRecoverRetriesAtTheNextStart(t *testing.T) {
 			if n := e.hooks.finalizeCalls(); n != finalizeAttempts {
 				t.Fatalf("Finalize called %d times, want %d", n, finalizeAttempts)
 			}
-			if r := e.stored("old"); r.Status() != kept || r.Problem() != infos[0].Problem {
+			if r := e.stored("old"); r.Status() != kept || r.Problem() != infos[0].Problem ||
+				!strings.HasPrefix(r.Problem(), tc.problem) {
 				t.Fatalf("stored %s %q", r.Status(), r.Problem())
 			}
 
 			again := e.restart()
 			infos, err = again.svc.Recover(testCtx(t))
-			if err != nil || len(infos) != 1 || infos[0].Status != recording.StatusCompleted {
+			if err != nil || len(infos) != 1 || infos[0].Status != recording.StatusCompleted || infos[0].Problem != tc.problem {
 				t.Fatalf("second Recover = %+v, %v", infos, err)
+			}
+			if r := again.stored("old"); r.Status() != recording.StatusCompleted || r.Problem() != tc.problem {
+				t.Fatalf("stored after the second Recover: %s %q, want problem %q", r.Status(), r.Problem(), tc.problem)
 			}
 		})
 	}
@@ -344,7 +357,8 @@ func TestRecoverListError(t *testing.T) {
 	}
 }
 
-// Recover never races a session: it refuses while one runs, and Start waits for it to end.
+// Recover never races a session: it refuses while one runs, and Start waits only while the interrupted recordings
+// are marked.
 func TestRecoverAndStartExcludeEachOther(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newEnv(t, DefaultConfig())
@@ -359,25 +373,176 @@ func TestRecoverAndStartExcludeEachOther(t *testing.T) {
 	}
 
 	e.leftBehind("old", recording.StatusRecording, t0.Add(-time.Hour), chunk{payload: "a"})
-	entered, release := e.rec.HoldFinalize()
+	e.repo.failNextSaves(shared.ErrStorageBusy) // the mark waits for a retry on the fake clock
 	done := make(chan error, 1)
 	go func() {
 		_, err := e.svc.Recover(testCtx(t))
 		done <- err
 	}()
-	<-entered
+	if err := e.clock.AwaitSleepers(testCtx(t), 1); err != nil { // the clock stands still, so the mark is not stored
+		t.Fatal(err)
+	}
 	if _, err := e.svc.Start(testCtx(t), StartRequest{}); !errors.Is(err, ErrRecovering) {
-		t.Fatalf("Start during Recover = %v", err)
+		t.Fatalf("Start while Recover marks = %v", err)
 	}
 	if _, err := e.svc.Recover(testCtx(t)); !errors.Is(err, ErrRecovering) {
 		t.Fatalf("a second Recover = %v", err)
 	}
-	release()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	testenv.Eventually(t, "the end of Recover", func() bool {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Recover = %v", err)
+			}
+			return true
+		default:
+			return false
+		}
+	}, func() { e.clock.Advance(retryStep) })
+	if r := e.stored("old"); r.Status() != recording.StatusCompleted {
+		t.Fatalf("recovered: %s", r.Status())
 	}
 	if next := e.start(); next.Status != recording.StatusRecording {
 		t.Fatalf("Start after Recover = %+v", next)
+	}
+}
+
+// A crash in the middle of a class must not keep the student from recording the next one: Start works while Recover
+// assembles a long recording, and both recordings end correctly.
+func TestStartWhileRecoverAssembles(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	e := newEnv(t, DefaultConfig())
+	e.leftBehind("old", recording.StatusRecording, t0.Add(-time.Hour), chunk{payload: "a"}, chunk{payload: "b"})
+	entered, release := e.rec.HoldFinalize()
+	defer release()
+
+	type result struct {
+		infos []Info
+		err   error
+	}
+	recovered := make(chan result, 1)
+	go func() {
+		infos, err := e.svc.Recover(testCtx(t))
+		recovered <- result{infos, err}
+	}()
+	<-entered
+
+	info := e.start()
+	if _, err := e.svc.Recover(testCtx(t)); !errors.Is(err, ErrRecovering) {
+		t.Fatalf("a second Recover = %v", err)
+	}
+	if _, err := e.svc.Start(testCtx(t), StartRequest{}); !errors.Is(err, limits.ErrRecordingInProgress) {
+		t.Fatalf("a second Start = %v", err)
+	}
+	e.feed(info.ID, "x", "y")
+
+	// The new recording is finalized while the recovery still assembles the old one.
+	type stopped struct {
+		info Info
+		err  error
+	}
+	stop := make(chan stopped, 1)
+	go func() {
+		got, err := e.svc.Stop(testCtx(t), info.ID)
+		stop <- stopped{got, err}
+	}()
+	testenv.Eventually(t, "the finalization of the new recording", func() bool { return e.hooks.finalizeCalls() == 2 }, nil)
+	release()
+
+	res := <-recovered
+	if res.err != nil || len(res.infos) != 1 || res.infos[0].ID != "old" || res.infos[0].Status != recording.StatusCompleted {
+		t.Fatalf("Recover = %+v, %v", res.infos, res.err)
+	}
+	st := <-stop
+	if st.err != nil || st.info.Status != recording.StatusCompleted || st.info.Problem != "" {
+		t.Fatalf("Stop = %+v, %v", st.info, st.err)
+	}
+	if got := e.content(e.stored("old").Audio()); got != "ab" {
+		t.Fatalf("old track = %q", got)
+	}
+	if got := e.content(e.stored(info.ID).Audio()); got != "xy" {
+		t.Fatalf("new track = %q", got)
+	}
+	if infos, err := e.svc.Recover(testCtx(t)); err != nil || len(infos) != 0 {
+		t.Fatalf("Recover after both = %+v, %v", infos, err)
+	}
+}
+
+// Delete refuses a recording that the running Recover still has to assemble, so no track is written for a removed
+// row; other recordings can be deleted meanwhile, and the recovered one afterwards.
+func TestDeleteWaitsForTheRecovery(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	e := newEnv(t, DefaultConfig())
+	e.leftBehind("old", recording.StatusRecoveryRequired, t0.Add(-time.Hour), chunk{payload: "a"})
+	e.leftBehind("done", recording.StatusCompleted, t0.Add(-2*time.Hour))
+	entered, release := e.rec.HoldFinalize()
+	defer release()
+
+	recovered := make(chan error, 1)
+	go func() {
+		_, err := e.svc.Recover(testCtx(t))
+		recovered <- err
+	}()
+	<-entered
+	if err := e.svc.Delete(testCtx(t), "old"); !errors.Is(err, ErrRecovering) {
+		t.Fatalf("Delete during the assembly = %v", err)
+	}
+	if !e.repo.has("old") || !slices.Contains(e.files.Paths(), "recordings/old/chunk-0001") {
+		t.Fatal("a refused Delete removed something")
+	}
+	if err := e.svc.Delete(testCtx(t), "done"); err != nil {
+		t.Fatalf("Delete of another recording = %v", err)
+	}
+	release()
+	if err := <-recovered; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.svc.Delete(testCtx(t), "old"); err != nil {
+		t.Fatalf("Delete after the recovery = %v", err)
+	}
+	for _, p := range e.files.Paths() {
+		if strings.HasPrefix(p, "recordings/old") {
+			t.Fatalf("left behind: %s", p)
+		}
+	}
+}
+
+// The refusal is asked again in the transaction: a Recover that listed the recording after the first check keeps it.
+func TestDeleteRecheckedAgainstTheRecovery(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	e := newEnv(t, DefaultConfig())
+	e.leftBehind("old", recording.StatusRecoveryRequired, t0.Add(-time.Hour), chunk{payload: "a"})
+	entered, release := e.rec.HoldFinalize()
+	defer release()
+
+	recovered := make(chan error, 1)
+	var once sync.Once
+	e.tx.before = func() {
+		once.Do(func() {
+			go func() {
+				_, err := e.svc.Recover(testCtx(t))
+				recovered <- err
+			}()
+			<-entered
+		})
+	}
+	if err := e.svc.Delete(testCtx(t), "old"); !errors.Is(err, ErrRecovering) {
+		t.Fatalf("Delete = %v", err)
+	}
+	if !e.repo.has("old") {
+		t.Fatal("the row was deleted under the recovery")
+	}
+	release()
+	if err := <-recovered; err != nil {
+		t.Fatal(err)
+	}
+	// The files went before the transaction (ADR-0004(a)): the recovery found no audio, and a repeated Delete cleans up.
+	if r := e.stored("old"); r.Status() != recording.StatusFailed {
+		t.Fatalf("recovered: %s", r.Status())
+	}
+	if err := e.svc.Delete(testCtx(t), "old"); err != nil || e.repo.has("old") {
+		t.Fatalf("repeated Delete = %v", err)
 	}
 }
 
