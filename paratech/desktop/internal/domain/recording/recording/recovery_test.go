@@ -2,6 +2,7 @@ package recording
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -145,6 +146,65 @@ func TestRecoveryOutcomesValidate(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A deferral shows its note next to the earlier reason; a later recovery, in another process, completes the recording
+// with that reason and without the stale note.
+func TestDeferredRecoveryCompletesWithTheEarlierReason(t *testing.T) {
+	long := strings.Repeat("x", MaxProblemBytes)
+	cases := []struct {
+		name     string
+		reach    func(t *testing.T) *Recording
+		reason   string // problem after the completion
+		deferred string // problem after the second deferral
+	}{
+		{"former RECORDING", func(t *testing.T) *Recording {
+			r := inStatus(t, StatusRecording)
+			if err := r.MarkInterrupted(t0.Add(time.Hour), "the app stopped"); err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}, "the app stopped", "the app stopped; assembly pending: file locked"},
+		{"stopping", func(t *testing.T) *Recording { return inStatus(t, StatusStopping) },
+			"", "assembly pending: file locked"},
+		{"interrupted capture", func(t *testing.T) *Recording {
+			r := inStatus(t, StatusRecording)
+			if err := r.Interrupt(t0.Add(time.Hour), "device lost"); err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}, "device lost", "device lost; assembly pending: file locked"},
+		{"a long reason leaves no room for the note", func(t *testing.T) *Recording {
+			r := inStatus(t, StatusRecording)
+			if err := r.MarkInterrupted(t0.Add(time.Hour), long); err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}, long, long},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.reach(t)
+			for i, note := range []string{"disk busy", "file locked"} {
+				if err := r.DeferRecovery(t0.Add(time.Duration(2+i)*time.Hour), note); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				if r, err = restoreStored(r); err != nil { // the next start loads the stored state
+					t.Fatal(err)
+				}
+			}
+			if r.Problem() != tc.deferred {
+				t.Fatalf("deferred problem = %q, want %q", r.Problem(), tc.deferred)
+			}
+			if err := r.CompleteRecovery(t0.Add(5*time.Hour), mustRef(t, "recordings/r1.wav"), time.Minute); err != nil {
+				t.Fatal(err)
+			}
+			if r.Status() != StatusCompleted || r.Problem() != tc.reason {
+				t.Fatalf("completed %s with problem %q, want %q", r.Status(), r.Problem(), tc.reason)
+			}
+		})
 	}
 }
 

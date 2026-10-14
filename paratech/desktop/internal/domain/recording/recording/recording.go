@@ -449,7 +449,9 @@ func (r *Recording) checkAwaitsAssembly() error {
 }
 
 // CompleteRecovery finishes a recording that AwaitsAssembly with the track the recovery assembled: it moves through
-// FINALIZING to COMPLETED, with the same rules for the track and the duration as Complete. Nothing changes on an error.
+// FINALIZING to COMPLETED, with the same rules for the track and the duration as Complete. The note of an earlier
+// DeferRecovery is dropped and the reason the recording had before it stays (for a former RECORDING, why its session
+// ended). Nothing changes on an error.
 func (r *Recording) CompleteRecovery(now time.Time, audio shared.ArtifactRef, duration time.Duration) error {
 	if err := r.checkAwaitsAssembly(); err != nil {
 		return err
@@ -460,12 +462,17 @@ func (r *Recording) CompleteRecovery(now time.Time, audio shared.ArtifactRef, du
 	if duration <= 0 {
 		return fmt.Errorf("%w: duration %v", ErrInvalidRecording, duration)
 	}
+	reason := r.reasonBeforeDeferral()
 	if r.status != StatusFinalizing {
 		if err := r.move(StatusFinalizing, now); err != nil {
 			return err
 		}
 	}
-	return r.Complete(now, audio, duration)
+	if err := r.Complete(now, audio, duration); err != nil {
+		return err
+	}
+	r.problem = reason
+	return nil
 }
 
 // FailRecovery moves a recording that AwaitsAssembly to FAILED because its chunks hold no readable audio. A STOPPING
@@ -485,18 +492,42 @@ func (r *Recording) FailRecovery(now time.Time, problem string) error {
 	return r.Fail(now, problem)
 }
 
-// DeferRecovery keeps a recording that AwaitsAssembly in its status with problem, after an assembly that failed for a
-// reason that may pass (a locked file, a busy disk): the next recovery tries again.
-func (r *Recording) DeferRecovery(now time.Time, problem string) error {
-	text, err := problemText(problem)
+// pendingMark starts the note of DeferRecovery in the problem text. The schema has no column for the note, so the
+// aggregate keeps it in the problem after the earlier reason and finds it again by this mark.
+const pendingMark = "assembly pending: "
+
+// DeferRecovery keeps a recording that AwaitsAssembly in its status after an assembly that failed for a reason that
+// may pass (a locked file, a busy disk): the next recovery tries again. The problem becomes the earlier reason (without
+// the note of an earlier deferral) followed by note; CompleteRecovery restores the reason. A reason near
+// MaxProblemBytes leaves no room for the note, and the reason wins.
+func (r *Recording) DeferRecovery(now time.Time, note string) error {
+	text, err := problemText(note)
 	if err != nil {
 		return err
 	}
 	if err := r.checkAwaitsAssembly(); err != nil {
 		return err
 	}
+	text = pendingMark + text
+	if reason := r.reasonBeforeDeferral(); reason != "" {
+		text = reason + "; " + text
+	}
+	if text, err = problemText(text); err != nil {
+		return err
+	}
 	r.problem, r.updatedAt = text, now
 	return nil
+}
+
+// reasonBeforeDeferral returns the problem without the note that DeferRecovery appended.
+func (r *Recording) reasonBeforeDeferral() string {
+	if strings.HasPrefix(r.problem, pendingMark) {
+		return ""
+	}
+	if reason, _, ok := strings.Cut(r.problem, "; "+pendingMark); ok {
+		return reason
+	}
+	return r.problem
 }
 
 // TranscribableAudio returns the final track to transcribe; ok is false unless the recording is COMPLETED with a
