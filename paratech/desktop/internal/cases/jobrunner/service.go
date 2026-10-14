@@ -282,7 +282,10 @@ func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 		r := s.running[id]
 		s.mu.Unlock()
 		if r != nil {
-			return r.cancelByUser()
+			if handled, err := r.cancelByUser(); handled {
+				return err
+			}
+			// The attempt is over but its entry is not removed yet: the stored job decides, as for any other job.
 		}
 
 		var j *job.Job
@@ -372,27 +375,32 @@ type run struct {
 	forced        bool // started by the "Run now" override: power loss does not stop this attempt
 	cancel        context.CancelCauseFunc
 
-	mu       sync.Mutex // guards job, finished, lost and stopping: reports may come from several goroutines
+	finished atomic.Bool // set when the attempt ends, before its outcome is stored; read by Cancel without mu
+
+	mu       sync.Mutex // guards job, lost and stopping: reports may come from several goroutines
 	job      *job.Job
-	finished bool
 	lost     error
 	stopping bool // a report returned powerpolicy.ErrPowerLost: the attempt ends in WAITING_FOR_POWER
 }
 
 // cancelByUser ends the handler context with the user cancellation, unless the type is not safe to interrupt.
-func (r *run) cancelByUser() error {
+// handled is false when the attempt is already over: its outcome may be stored while the run is still registered.
+func (r *run) cancelByUser() (handled bool, err error) {
+	if r.finished.Load() {
+		return false, nil
+	}
 	if r.uncancellable {
-		return fmt.Errorf("%w: %s handler is not safe to interrupt", ErrNotCancellable, r.typ)
+		return true, fmt.Errorf("%w: %s handler is not safe to interrupt", ErrNotCancellable, r.typ)
 	}
 	r.cancel(errCancelled)
-	return nil
+	return true, nil
 }
 
 // report is the progress callback handed to the handler.
 func (r *run) report(ctx context.Context, p job.Progress) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.finished {
+	if r.finished.Load() {
 		return ErrJobFinished
 	}
 	if r.lost != nil {
@@ -488,7 +496,7 @@ func (s *Service) call(ctx context.Context, h Handler, r *run) (err error) {
 func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.finished = true
+	r.finished.Store(true)
 	j := r.job
 	id, attempt := j.ID().String(), j.Attempts()
 

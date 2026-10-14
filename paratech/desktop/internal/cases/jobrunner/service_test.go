@@ -632,6 +632,36 @@ func TestCancelIsRefused(t *testing.T) {
 	})
 }
 
+func TestCancelIsRefusedWhileTheFinishedRunIsStillRegistered(t *testing.T) {
+	var once sync.Once
+	stored, release := make(chan struct{}), make(chan struct{})
+	e := newEnvOn(t, nil, nil, func(m *memRepo) JobRepository {
+		return &hookRepo{memRepo: m, afterSave: func(j *job.Job) {
+			if j.Status() != job.StatusCompleted {
+				return
+			}
+			// The outcome is stored but the run has not left execute: it is still in the running map.
+			once.Do(func() {
+				close(stored)
+				<-release
+			})
+		}}
+	})
+	e.register(typeStt, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error { return nil })
+	id := e.enqueue(typeStt, 2)
+	e.start()
+	<-stored
+
+	err := e.svc.Cancel(context.Background(), id)
+	close(release)
+	if !errors.Is(err, ErrNotCancellable) {
+		t.Fatalf("Cancel = %v, want ErrNotCancellable", err)
+	}
+	if got := e.status(id); got != job.StatusCompleted {
+		t.Fatalf("status = %s, want COMPLETED", got)
+	}
+}
+
 func TestHandlerThatFinishesDespiteCancellationCompletes(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	started, release := make(chan struct{}), make(chan struct{})
