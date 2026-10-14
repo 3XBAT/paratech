@@ -24,21 +24,23 @@ type Assignment struct {
 }
 
 type Delivery struct {
-	ID             string
-	AssignmentID   string
-	Recipient      string
-	Subject        string
-	ArtifactRef    string
-	MessageID      string
-	IdempotencyKey string
-	Status         string
-	Attempts       int64
-	LastError      sql.NullString
-	ConfirmedAt    int64
-	SentAt         sql.NullInt64
-	Version        int64
-	CreatedAt      int64
-	UpdatedAt      int64
+	ID               string
+	AssignmentID     string
+	Recipient        string
+	Subject          string
+	ArtifactRef      string
+	MessageID        string
+	IdempotencyKey   string
+	Status           string
+	Attempts         int64
+	LastError        sql.NullString
+	ConfirmedAt      int64
+	SentAt           sql.NullInt64
+	Version          int64
+	CreatedAt        int64
+	UpdatedAt        int64
+	AttachmentSha256 string
+	AttachmentSize   int64
 }
 
 type Job struct {
