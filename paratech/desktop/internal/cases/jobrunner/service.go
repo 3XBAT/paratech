@@ -272,8 +272,10 @@ func (s *Service) Stop(ctx context.Context) error {
 //     claimed a moment ago and not started yet. Only Recover may move a stale job, so a side effect is never hidden
 //     behind CANCELLED; a just-claimed job can be cancelled again once its handler runs.
 //
-// There is a narrow window at shutdown: if the run's context was already ended by the shutdown, Cancel still returns
-// nil, but the job is treated like any interrupted job (requeued or left for Recover), not cancelled.
+// A run whose attempt is over is judged by the stored state: RUNNING until its final save, then the outcome.
+//
+// There is a narrow window as an attempt ends (its handler returned, or the shutdown ended its context): Cancel still
+// returns nil, but the outcome of the attempt stands (for example COMPLETED, or requeued at shutdown).
 func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 	var err error
 	for range changeAttempts {
@@ -373,7 +375,7 @@ type run struct {
 	recovery      Recovery
 	forced        bool // started by the "Run now" override: power loss does not stop this attempt
 	cancel        context.CancelCauseFunc
-	ended         atomic.Bool // the handler has returned: cancelling the context can no longer change the outcome
+	ended         atomic.Bool // the attempt is over and being finished: cancelling the context changes nothing
 
 	mu       sync.Mutex // guards job, finished, lost and stopping: reports may come from several goroutines
 	job      *job.Job
