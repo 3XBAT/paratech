@@ -355,3 +355,31 @@
 - Реальные тесты Credential Manager пропускаются только при отсутствии сессии хранилища (wincred.ErrNoSession); PARATECH_REQUIRE_CREDMAN=1 превращает пропуск в ошибку
 
 ---
+
+## [TASK-012] Обработка только от розетки: WAITING_FOR_POWER, настройка, «Запустить сейчас»
+**Дата:** 2026-10-14 10:27
+**Статус:** done
+
+### Что сделано
+- domain/jobs/services/powerpolicy: чистая политика (класс heavy/light по зарегистрированному типу, Park/Release/Decide/Filter/StartedByOverride); неизвестный источник питания = от сети
+- jobrunner: Registration.Heavy; на батарее при process_only_on_ac_power тяжёлые QUEUED -> WAITING_FOR_POWER, при возврате сети -> QUEUED (keeper + подписка PowerMonitor, без подписки — опрос); потеря питания во время задачи: остановка на ближайшем report, прогресс сохранён, задача -> WAITING_FOR_POWER (ErrPowerLost); ForceRun («Запустить сейчас», через агрегат) на одну попытку; лёгкие задачи не затрагиваются; настройка перечитывается каждый тик
+- Start читает настройку и питание без s.mu (Register/Cancel/Stop не блокируются медленной БД), до запуска воркеров
+- Тесты: fake PowerMonitor (AC-21, отключение настройки, Run now — AC-22, остановка на контрольной точке), сценарии на реальном SQLite, блокирующий Load в Start
+- Ревью: approve (medium: блокировка s.mu в Start -> исправлено, повторное ревью approve). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0.
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] go test -race -count=1 ./desktop/internal/... и шаги 2-4 (power_test.go, tests/jobpower_sqlite_test.go)
+
+### Решения (подтвердить)
+- «Запустить сейчас» защищает только старт, которому нужен был override: задача, взятая в работу от сети, при потере питания останавливается на контрольной точке и уходит в WAITING_FOR_POWER (PRD 7.4; AC-22 говорит о «ждущей» задаче); пользователь может снова нажать Run now
+- Порог заряда батареи (PRD 7.4 «point to confirm») не реализован
+
+### Заметки (follow-up)
+- ВАЖНО: WaitFor возвращает попытку, поэтому при «мигающем» питании тяжёлая задача может ходить по кругу без расхода attempts. Никогда не помечать тип с внешним побочным эффектом (email, календарь, Hub) как Heavy
+- Отложено: keeper каждый тик грузит полные строки QUEUED/WAITING_FOR_POWER через ListByStatus; при росте очереди нужен лёгкий запрос
+- Адаптеры PowerMonitor/SettingsReader обязаны уважать ctx: иначе Stop во время Start ждёт их; Recover ждёт медленный Start (lifecycle) — по замыслу
+- Контракт Subscribe: первое значение в канале — текущее состояние (winpower это делает)
+- Не подключено в app (вызов ForceRun из UI, настройка из settings — при подключении)
+
+---
