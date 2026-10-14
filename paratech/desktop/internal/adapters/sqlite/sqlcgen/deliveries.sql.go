@@ -13,7 +13,7 @@ import (
 
 const getDelivery = `-- name: GetDelivery :one
 
-SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size FROM deliveries WHERE id = ?1
+SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries WHERE id = ?1
 `
 
 // Deliveries, the attempts to email an artifact (PRD section 10, AC-15), with the optimistic-concurrency protocol of
@@ -39,12 +39,13 @@ func (q *Queries) GetDelivery(ctx context.Context, id string) (Delivery, error) 
 		&i.UpdatedAt,
 		&i.AttachmentSha256,
 		&i.AttachmentSize,
+		&i.SendRound,
 	)
 	return i, err
 }
 
 const getDeliveryByIdempotencyKey = `-- name: GetDeliveryByIdempotencyKey :one
-SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size FROM deliveries WHERE idempotency_key = ?1
+SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries WHERE idempotency_key = ?1
 `
 
 func (q *Queries) GetDeliveryByIdempotencyKey(ctx context.Context, idempotencyKey string) (Delivery, error) {
@@ -68,18 +69,19 @@ func (q *Queries) GetDeliveryByIdempotencyKey(ctx context.Context, idempotencyKe
 		&i.UpdatedAt,
 		&i.AttachmentSha256,
 		&i.AttachmentSize,
+		&i.SendRound,
 	)
 	return i, err
 }
 
 const insertDelivery = `-- name: InsertDelivery :exec
 INSERT INTO deliveries (id, assignment_id, recipient, subject, artifact_ref, attachment_sha256, attachment_size,
-                        message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version,
+                        message_id, idempotency_key, status, attempts, send_round, last_error, confirmed_at, sent_at, version,
                         created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, ?13, ?14, 1,
-        ?15, ?16)
+        ?10, ?11, ?12, ?13, ?14, ?15, 1,
+        ?16, ?17)
 `
 
 type InsertDeliveryParams struct {
@@ -94,6 +96,7 @@ type InsertDeliveryParams struct {
 	IdempotencyKey   string
 	Status           string
 	Attempts         int64
+	SendRound        int64
 	LastError        sql.NullString
 	ConfirmedAt      int64
 	SentAt           sql.NullInt64
@@ -115,6 +118,7 @@ func (q *Queries) InsertDelivery(ctx context.Context, arg InsertDeliveryParams) 
 		arg.IdempotencyKey,
 		arg.Status,
 		arg.Attempts,
+		arg.SendRound,
 		arg.LastError,
 		arg.ConfirmedAt,
 		arg.SentAt,
@@ -125,7 +129,7 @@ func (q *Queries) InsertDelivery(ctx context.Context, arg InsertDeliveryParams) 
 }
 
 const listDeliveriesByStatus = `-- name: ListDeliveriesByStatus :many
-SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size FROM deliveries
+SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries
 WHERE status IN (/*SLICE:statuses*/?)
 ORDER BY created_at, id
 `
@@ -167,6 +171,7 @@ func (q *Queries) ListDeliveriesByStatus(ctx context.Context, statuses []string)
 			&i.UpdatedAt,
 			&i.AttachmentSha256,
 			&i.AttachmentSize,
+			&i.SendRound,
 		); err != nil {
 			return nil, err
 		}
@@ -185,16 +190,18 @@ const updateDelivery = `-- name: UpdateDelivery :execrows
 UPDATE deliveries
 SET status     = ?1,
     attempts   = ?2,
-    last_error = ?3,
-    sent_at    = ?4,
+    send_round = ?3,
+    last_error = ?4,
+    sent_at    = ?5,
     version    = version + 1,
-    updated_at = ?5
-WHERE id = ?6 AND version = ?7
+    updated_at = ?6
+WHERE id = ?7 AND version = ?8
 `
 
 type UpdateDeliveryParams struct {
 	Status          string
 	Attempts        int64
+	SendRound       int64
 	LastError       sql.NullString
 	SentAt          sql.NullInt64
 	UpdatedAt       int64
@@ -208,6 +215,7 @@ func (q *Queries) UpdateDelivery(ctx context.Context, arg UpdateDeliveryParams) 
 	result, err := q.db.ExecContext(ctx, updateDelivery,
 		arg.Status,
 		arg.Attempts,
+		arg.SendRound,
 		arg.LastError,
 		arg.SentAt,
 		arg.UpdatedAt,

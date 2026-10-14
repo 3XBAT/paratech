@@ -14,10 +14,10 @@ import (
 // open set of names and contexts do not import each other (ARCH-11), so the name is defined here.
 const JobType = "send_email"
 
-// JobKey is the idempotency key of the job of one round of a delivery. A round is the attempts made so far: a new
-// job is created only after the delivery went back to PENDING outside a running job (send again), so a repeated
-// request finds the job of the current round instead of adding one.
-func (d *Delivery) JobKey() string { return fmt.Sprintf("%s:%s:%d", JobType, d.id, d.attempts) }
+// JobKey is the idempotency key of the job of the current send round of a delivery. The round changes only on
+// SendAgain, so a repeated request or a restart finds the job of the round, whatever its state, instead of adding a
+// job with a new set of attempts (PRD section 7.3: bounded retries).
+func (d *Delivery) JobKey() string { return fmt.Sprintf("%s:%s:%d", JobType, d.id, d.round) }
 
 type wirePayload struct {
 	DeliveryID *string `json:"delivery_id"`

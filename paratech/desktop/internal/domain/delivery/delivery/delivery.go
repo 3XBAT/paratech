@@ -54,6 +54,7 @@ type Delivery struct {
 	key        string
 
 	attempts  int
+	round     int // send round: 0 for the first job, +1 for every SendAgain (JobKey)
 	lastError string
 
 	confirmedAt time.Time
@@ -121,6 +122,7 @@ type State struct {
 	MessageID    string
 	Key          string
 	Attempts     int
+	Round        int
 	LastError    string
 	ConfirmedAt  time.Time
 	SentAt       time.Time // zero unless SENT
@@ -153,6 +155,10 @@ func Restore(s State) (*Delivery, error) {
 	if s.Attempts < 0 || len(s.LastError) > MaxLastErrorBytes {
 		return bad("attempts or last error out of range")
 	}
+	// Every round but the first follows an UNKNOWN attempt, so there are at least as many attempts as later rounds.
+	if s.Round < 0 || s.Round > s.Attempts {
+		return bad("send round out of range")
+	}
 	if s.Attempts == 0 && (s.Status == StatusSending || s.Status == StatusSent || s.Status == StatusUnknown) {
 		return bad("a delivery that was handed over has at least one attempt")
 	}
@@ -160,7 +166,7 @@ func Restore(s State) (*Delivery, error) {
 	d := &Delivery{
 		version: s.Version, id: s.ID, status: s.Status, assignment: s.AssignmentID, recipient: s.Recipient,
 		subject: s.Subject, attachment: att, messageID: s.MessageID, key: s.Key, attempts: s.Attempts,
-		lastError: s.LastError, confirmedAt: s.ConfirmedAt, sentAt: s.SentAt, createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
+		round: s.Round, lastError: s.LastError, confirmedAt: s.ConfirmedAt, sentAt: s.SentAt, createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
 	}
 	if err := d.validate(); err != nil {
 		return nil, err
@@ -173,7 +179,7 @@ func (d *Delivery) State() State {
 	return State{
 		Version: d.version, ID: d.id, Status: d.status, AssignmentID: d.assignment, Recipient: d.recipient,
 		Subject: d.subject, Attachment: d.attachment.ref, SHA256: d.attachment.sha256, Size: d.attachment.size,
-		MessageID: d.messageID, Key: d.key, Attempts: d.attempts, LastError: d.lastError,
+		MessageID: d.messageID, Key: d.key, Attempts: d.attempts, Round: d.round, LastError: d.lastError,
 		ConfirmedAt: d.confirmedAt, SentAt: d.sentAt, CreatedAt: d.createdAt, UpdatedAt: d.updatedAt,
 	}
 }
@@ -231,10 +237,28 @@ func OutcomeOf(err error) Outcome {
 // RecordResult ends the attempt in flight (SENDING) with the result of the send and returns its outcome: SENT,
 // PENDING (retry later), FAILED or UNKNOWN. The error text becomes the last error; adapters give short fixed texts.
 func (d *Delivery) RecordResult(sendErr error, now time.Time) (Outcome, error) {
+	return d.record(sendErr, false, now)
+}
+
+// RecordFinalResult is RecordResult for the last attempt of the job: a retry outcome ends FAILED ("attempts
+// exhausted") instead of PENDING, because no attempt is left to send it (PRD section 7.3: bounded retries). This is
+// safe: a retry outcome proves nothing was accepted. Every other outcome is the same as with RecordResult.
+func (d *Delivery) RecordFinalResult(sendErr error, now time.Time) (Outcome, error) {
+	return d.record(sendErr, true, now)
+}
+
+func (d *Delivery) record(sendErr error, final bool, now time.Time) (Outcome, error) {
 	if d.status != StatusSending {
 		return 0, fmt.Errorf("%w: record a result in %s", ErrInvalidTransition, d.status)
 	}
 	out := OutcomeOf(sendErr)
+	msg := ""
+	if sendErr != nil {
+		msg = sendErr.Error()
+	}
+	if out == OutcomeRetry && final {
+		out, msg = OutcomeFailed, ErrAttemptsExhausted.Error()+": "+msg
+	}
 	to := map[Outcome]Status{
 		OutcomeSent: StatusSent, OutcomeRetry: StatusPending, OutcomeFailed: StatusFailed, OutcomeUnknown: StatusUnknown,
 	}[out]
@@ -246,12 +270,12 @@ func (d *Delivery) RecordResult(sendErr error, now time.Time) (Outcome, error) {
 		d.lastError = ""
 		return out, nil
 	}
-	d.lastError = limitError(sendErr.Error())
+	d.lastError = limitError(msg)
 	return out, nil
 }
 
-// FailUnsent fails a PENDING delivery before any attempt, for example because its attachment is gone or changed.
-// Nothing was handed to the provider.
+// FailUnsent fails a PENDING delivery, which is never in the hands of the provider: its attachment is gone or changed,
+// or its job used up its attempts before handing it over (reason wraps ErrAttemptsExhausted).
 func (d *Delivery) FailUnsent(reason error, now time.Time) error {
 	if d.status != StatusPending {
 		return fmt.Errorf("%w: fail an unsent delivery in %s", ErrInvalidTransition, d.status)
@@ -293,13 +317,18 @@ func (d *Delivery) MarkSent(now time.Time) error {
 }
 
 // SendAgain resolves an UNKNOWN delivery as not accepted, so it is sent again: reconciliation proved the message was
-// not accepted, or the user chose to send again accepting a possible duplicate. UNKNOWN -> PENDING. The Message-ID
-// stays the same, so a receiving system can still recognise a duplicate.
+// not accepted, or the user chose to send again accepting a possible duplicate. UNKNOWN -> PENDING. It starts a new
+// send round, so the delivery gets a new job (JobKey) with a full set of attempts. The Message-ID stays the same, so a
+// receiving system can still recognise a duplicate.
 func (d *Delivery) SendAgain(now time.Time) error {
 	if d.status != StatusUnknown {
 		return fmt.Errorf("%w: send again in %s", ErrInvalidTransition, d.status)
 	}
-	return d.move(StatusPending, now)
+	if err := d.move(StatusPending, now); err != nil {
+		return err
+	}
+	d.round++
+	return nil
 }
 
 // Blocks reports whether this delivery prevents a new delivery of assignment a: it belongs to a and is unresolved
@@ -308,6 +337,15 @@ func (d *Delivery) SendAgain(now time.Time) error {
 func (d *Delivery) Blocks(a shared.AssignmentID) bool {
 	return d.assignment == a && d.status.IsUnresolved()
 }
+
+// Sendable reports whether a job may hand the message to the provider now: only a PENDING delivery is sent.
+func (d *Delivery) Sendable() bool { return d.status == StatusPending }
+
+// InFlight reports whether an attempt was started and its result is not stored yet (SENDING).
+func (d *Delivery) InFlight() bool { return d.status == StatusSending }
+
+// OutcomeUnknown reports whether the delivery waits for reconciliation or the user's decision (UNKNOWN).
+func (d *Delivery) OutcomeUnknown() bool { return d.status == StatusUnknown }
 
 // ID returns the delivery identifier.
 func (d *Delivery) ID() shared.DeliveryID { return d.id }
@@ -335,6 +373,9 @@ func (d *Delivery) IdempotencyKey() string { return d.key }
 
 // Attempts returns how many attempts were handed to the provider.
 func (d *Delivery) Attempts() int { return d.attempts }
+
+// Round returns the send round: 0 until the first SendAgain, then one more for each.
+func (d *Delivery) Round() int { return d.round }
 
 // LastError returns the reason of the last failed or unknown attempt; empty after success.
 func (d *Delivery) LastError() string { return d.lastError }

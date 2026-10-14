@@ -15,4 +15,7 @@
 // attempt is classified by OutcomeOf, and anything that does not prove "not accepted" becomes UNKNOWN. A SENDING
 // delivery left by a crash becomes UNKNOWN (Interrupted). UNKNOWN is never sent again by itself: reconciliation or the
 // user resolves it with MarkSent ("mark as sent") or SendAgain ("send again").
+//
+// Each send round has one job (JobKey); only SendAgain starts a new round. On the last attempt of the job a retry
+// outcome ends FAILED (RecordFinalResult), so a delivery never stays PENDING without a job to send it.
 package delivery

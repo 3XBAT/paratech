@@ -227,6 +227,10 @@ func TestMethodsFollowTheTable(t *testing.T) {
 			_, err := d.RecordResult(nil, now)
 			return err
 		}, StatusSent},
+		{"RecordFinalResult", func(s Status) bool { return s == StatusSending }, func(d *Delivery) error {
+			_, err := d.RecordFinalResult(fmt.Errorf("x: %w", ErrTransient), now)
+			return err
+		}, StatusFailed},
 	}
 	for _, m := range methods {
 		for _, from := range Statuses() {
@@ -362,6 +366,8 @@ func TestRestoreRejectsInconsistentState(t *testing.T) {
 		{"send time while pending", func(s *State) { s.Status = StatusPending }},
 		{"sent without attempts", func(s *State) { s.Attempts = 0 }},
 		{"negative attempts", func(s *State) { s.Attempts = -1 }},
+		{"negative round", func(s *State) { s.Round = -1 }},
+		{"more rounds than attempts", func(s *State) { s.Round = s.Attempts + 1 }},
 		{"long last error", func(s *State) { s.LastError = strings.Repeat("x", MaxLastErrorBytes+1) }},
 		{"empty digest", func(s *State) { s.SHA256 = "" }},
 		{"no attachment", func(s *State) { s.Attachment = shared.ArtifactRef{} }},
@@ -414,6 +420,74 @@ func TestBlocks(t *testing.T) {
 			}
 			if d.Blocks("a2") {
 				t.Fatalf("Blocks(other assignment) in %s", s)
+			}
+		})
+	}
+}
+
+// On the last attempt of the job a retry outcome fails the delivery (nothing was accepted); the others are unchanged.
+func TestRecordFinalResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		out     Outcome
+		status  Status
+		lastErr string
+	}{
+		{"accepted", nil, OutcomeSent, StatusSent, ""},
+		{"transient is exhausted", fmt.Errorf("smtp: connect failed: %w", ErrTransient), OutcomeFailed, StatusFailed,
+			"attempts exhausted: smtp: connect failed: delivery failed transiently"},
+		{"rejected", fmt.Errorf("smtp: refused: %w", ErrRejected), OutcomeFailed, StatusFailed, "smtp: refused: delivery rejected"},
+		{"unknown stays unknown", fmt.Errorf("smtp: no final reply: %w", ErrOutcomeUnknown), OutcomeUnknown, StatusUnknown,
+			"smtp: no final reply: delivery outcome unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := inStatus(t, StatusSending)
+			out, err := d.RecordFinalResult(tt.err, t0.Add(time.Hour))
+			if err != nil || out != tt.out || d.Status() != tt.status || d.LastError() != tt.lastErr {
+				t.Fatalf("RecordFinalResult = %v, %v; status %s, last error %q", out, err, d.Status(), d.LastError())
+			}
+		})
+	}
+	if _, err := inStatus(t, StatusPending).RecordFinalResult(nil, t0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("RecordFinalResult of PENDING = %v, want ErrInvalidTransition", err)
+	}
+}
+
+// The job key changes only when SendAgain starts a new round: retries after transient failures keep the key, so a
+// repeated request or a restart cannot add a second job for the same round.
+func TestJobKeyChangesOnlyOnSendAgain(t *testing.T) {
+	d := newPending(t)
+	for i := 0; i < 3; i++ {
+		mustOK(t, d.StartSending(t0.Add(time.Second)))
+		mustOutcome(t, d, fmt.Errorf("x: %w", ErrTransient), OutcomeRetry)
+	}
+	if d.JobKey() != "send_email:d1:0" || d.Round() != 0 || d.Attempts() != 3 {
+		t.Fatalf("after transient failures: key %s round %d attempts %d", d.JobKey(), d.Round(), d.Attempts())
+	}
+
+	mustOK(t, d.StartSending(t0.Add(time.Second)))
+	mustOutcome(t, d, fmt.Errorf("x: %w", ErrOutcomeUnknown), OutcomeUnknown)
+	mustOK(t, d.SendAgain(t0.Add(time.Second)))
+	if d.JobKey() != "send_email:d1:1" || d.Round() != 1 {
+		t.Fatalf("after send again: key %s round %d", d.JobKey(), d.Round())
+	}
+
+	d.Persisted(2)
+	r, err := Restore(d.State())
+	if err != nil || r.Round() != 1 || r.JobKey() != d.JobKey() {
+		t.Fatalf("Restore keeps the round: %v, round %d", err, r.Round())
+	}
+}
+
+func TestStatusPredicates(t *testing.T) {
+	for _, s := range Statuses() {
+		t.Run(string(s), func(t *testing.T) {
+			d := inStatus(t, s)
+			if d.Sendable() != (s == StatusPending) || d.InFlight() != (s == StatusSending) ||
+				d.OutcomeUnknown() != (s == StatusUnknown) {
+				t.Fatalf("predicates in %s: sendable %v in flight %v unknown %v", s, d.Sendable(), d.InFlight(), d.OutcomeUnknown())
 			}
 		})
 	}

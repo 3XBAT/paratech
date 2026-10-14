@@ -200,3 +200,36 @@ func TestDeliveryTamperedRowIsRefused(t *testing.T) {
 		t.Fatalf("digest of wrong length = %v, want ErrConstraint", err)
 	}
 }
+
+// The send round is stored by the update and checked on load: more rounds than attempts is refused, a negative one is
+// refused by the schema.
+func TestDeliverySendRoundIsStored(t *testing.T) {
+	db, repo := newDeliveryEnv(t)
+	ctx := context.Background()
+	d := newTestDelivery(t, "d1", "k1")
+	now := dlvT0.Add(time.Second)
+	for _, step := range []func() error{
+		func() error { return repo.Save(ctx, d) },
+		func() error { return d.StartSending(now) },
+		func() error { return d.Interrupted(now) },
+		func() error { return d.SendAgain(now) },
+		func() error { return repo.Save(ctx, d) },
+	} {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.Get(ctx, "d1")
+	if err != nil || got.Round() != 1 || got.JobKey() != "send_email:d1:1" {
+		t.Fatalf("Get = %v, round %d", err, got.Round())
+	}
+
+	mustExec(t, db, `UPDATE deliveries SET send_round = 2 WHERE id = 'd1'`)
+	if _, err := repo.Get(ctx, "d1"); !errors.Is(err, delivery.ErrInvalidDelivery) {
+		t.Fatalf("Get with more rounds than attempts = %v, want ErrInvalidDelivery", err)
+	}
+	_, err = db.sql.ExecContext(ctx, `UPDATE deliveries SET send_round = -1 WHERE id = 'd1'`)
+	if !errors.Is(MapError(ctx, err), ErrConstraint) {
+		t.Fatalf("negative round = %v, want ErrConstraint", err)
+	}
+}

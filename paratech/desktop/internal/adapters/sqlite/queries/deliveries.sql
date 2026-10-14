@@ -15,11 +15,11 @@ ORDER BY created_at, id;
 -- A never-stored delivery (version 0) is inserted with version 1.
 -- name: InsertDelivery :exec
 INSERT INTO deliveries (id, assignment_id, recipient, subject, artifact_ref, attachment_sha256, attachment_size,
-                        message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version,
+                        message_id, idempotency_key, status, attempts, send_round, last_error, confirmed_at, sent_at, version,
                         created_at, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(assignment_id), sqlc.arg(recipient), sqlc.arg(subject), sqlc.arg(artifact_ref),
         sqlc.arg(attachment_sha256), sqlc.arg(attachment_size), sqlc.arg(message_id), sqlc.arg(idempotency_key),
-        sqlc.arg(status), sqlc.arg(attempts), sqlc.arg(last_error), sqlc.arg(confirmed_at), sqlc.arg(sent_at), 1,
+        sqlc.arg(status), sqlc.arg(attempts), sqlc.arg(send_round), sqlc.arg(last_error), sqlc.arg(confirmed_at), sqlc.arg(sent_at), 1,
         sqlc.arg(created_at), sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version. What the user confirmed (recipient, subject, attachment, Message-ID, key,
@@ -28,6 +28,7 @@ VALUES (sqlc.arg(id), sqlc.arg(assignment_id), sqlc.arg(recipient), sqlc.arg(sub
 UPDATE deliveries
 SET status     = sqlc.arg(status),
     attempts   = sqlc.arg(attempts),
+    send_round = sqlc.arg(send_round),
     last_error = sqlc.arg(last_error),
     sent_at    = sqlc.arg(sent_at),
     version    = version + 1,
