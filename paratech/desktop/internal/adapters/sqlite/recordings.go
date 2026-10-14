@@ -68,6 +68,28 @@ func (r *RecordingRepository) ListByStatus(ctx context.Context, statuses ...reco
 	return out, nil
 }
 
+// ListRecent returns at most limit recordings, newest first; a limit below 1 lists nothing (SQLite reads a negative
+// LIMIT as no limit).
+func (r *RecordingRepository) ListRecent(ctx context.Context, limit int) ([]*recording.Recording, error) {
+	if limit < 1 {
+		return []*recording.Recording{}, nil
+	}
+	rows, err := r.db.Queries(ctx).ListRecentRecordings(ctx, int64(limit))
+	if err != nil {
+		return nil, MapError(ctx, err)
+	}
+
+	out := make([]*recording.Recording, 0, len(rows))
+	for _, row := range rows {
+		rec, err := recordingFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
 // Delete removes the row of rec if it still has the version rec was loaded with (ADR-0004(d)).
 func (r *RecordingRepository) Delete(ctx context.Context, rec *recording.Recording) error {
 	return r.db.Do(ctx, func(ctx context.Context) error {

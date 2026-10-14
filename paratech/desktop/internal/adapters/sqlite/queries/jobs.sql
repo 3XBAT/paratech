@@ -70,6 +70,12 @@ SELECT * FROM jobs
 WHERE status IN (sqlc.slice('statuses'))
 ORDER BY created_at, id;
 
+-- The newest jobs for the jobs screen (TASK-023); the caller bounds the list.
+-- name: ListRecentJobs :many
+SELECT * FROM jobs
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(max_rows);
+
 -- Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 -- SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 -- name: ListJobIDsByStatus :many

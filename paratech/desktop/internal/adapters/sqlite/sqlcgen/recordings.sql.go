@@ -114,6 +114,52 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 	return err
 }
 
+const listRecentRecordings = `-- name: ListRecentRecordings :many
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at FROM recordings
+ORDER BY created_at DESC, id DESC
+LIMIT ?1
+`
+
+// The newest recordings for the recordings screen (TASK-023); the caller bounds the list.
+func (q *Queries) ListRecentRecordings(ctx context.Context, maxRows int64) ([]Recording, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentRecordings, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Recording{}
+	for rows.Next() {
+		var i Recording
+		if err := rows.Scan(
+			&i.ID,
+			&i.LessonID,
+			&i.Status,
+			&i.StartedAt,
+			&i.StoppedAt,
+			&i.HeartbeatAt,
+			&i.MaxDurationMs,
+			&i.DurationMs,
+			&i.ChunkCount,
+			&i.ChunksRef,
+			&i.AudioRef,
+			&i.FailureReason,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecordingsByStatus = `-- name: ListRecordingsByStatus :many
 SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at FROM recordings
 WHERE status IN (/*SLICE:statuses*/?)

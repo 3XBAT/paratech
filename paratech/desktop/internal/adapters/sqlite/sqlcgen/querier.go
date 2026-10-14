@@ -78,6 +78,10 @@ type Querier interface {
 	ListLessonsPendingCalendarSync(ctx context.Context, maxRows int64) ([]ScheduleEntry, error)
 	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
+	// The newest jobs for the jobs screen (TASK-023); the caller bounds the list.
+	ListRecentJobs(ctx context.Context, maxRows int64) ([]Job, error)
+	// The newest recordings for the recordings screen (TASK-023); the caller bounds the list.
+	ListRecentRecordings(ctx context.Context, maxRows int64) ([]Recording, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).

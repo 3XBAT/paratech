@@ -34,6 +34,12 @@ SELECT * FROM recordings
 WHERE status IN (sqlc.slice('statuses'))
 ORDER BY created_at, id;
 
+-- The newest recordings for the recordings screen (TASK-023); the caller bounds the list.
+-- name: ListRecentRecordings :many
+SELECT * FROM recordings
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(max_rows);
+
 -- name: DeleteRecording :execrows
 DELETE FROM recordings WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 

@@ -191,6 +191,27 @@ func (r *JobRepository) ListByStatus(ctx context.Context, statuses ...job.Status
 	return out, nil
 }
 
+// ListRecent returns at most limit jobs, newest first; a limit below 1 lists nothing (SQLite reads a negative LIMIT
+// as no limit).
+func (r *JobRepository) ListRecent(ctx context.Context, limit int) ([]*job.Job, error) {
+	if limit < 1 {
+		return []*job.Job{}, nil
+	}
+	rows, err := r.db.Queries(ctx).ListRecentJobs(ctx, int64(limit))
+	if err != nil {
+		return nil, MapError(ctx, err)
+	}
+	out := make([]*job.Job, 0, len(rows))
+	for _, row := range rows {
+		j, err := jobFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}
+
 // ListByStatusTolerant is ListByStatus for startup recovery: a row that cannot be read or restored does not fail the
 // listing, its id goes to corrupt and the row is left unchanged. A row with a NULL id has no id to report: it is left
 // out and their number is logged once per call. A job that left the statuses or disappeared between the two reads is
