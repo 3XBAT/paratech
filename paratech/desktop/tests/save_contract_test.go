@@ -54,6 +54,7 @@ var storingMethods = []struct {
 	{ifaceOf[schedulesync.LessonRepository](), "Save", 1, false},
 	{ifaceOf[schedulesync.LessonRepository](), "ApplyChanges", 1, true},
 	{ifaceOf[homeworkflow.AssignmentRepository](), "Save", 1, false},
+	{ifaceOf[homeworkflow.ProposalRepository](), "Save", 1, false},
 	{ifaceOf[senddelivery.DeliveryRepository](), "Save", 1, false},
 }
 

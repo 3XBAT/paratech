@@ -45,8 +45,8 @@ type AssignmentRepository interface {
 	Save(ctx context.Context, a *assignment.Assignment) error
 }
 
-// ProposalRepository stores the actions the LLM proposed, with their validation and confirmation state (PRD section
-// 13.3, AC-14, AC-18). Implemented by the sqlite adapter (a later task); an in-memory fake serves tests.
+// ProposalRepository stores the actions the LLM proposed, with their validation and confirmation state
+// (PRD section 13.3, AC-14, AC-18). Implemented by the sqlite adapter (a later task); an in-memory fake serves tests.
 type ProposalRepository interface {
 	// Get loads a proposal (PRD section 13.3). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id proposal.ID) (*proposal.Proposal, error)
