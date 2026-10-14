@@ -96,7 +96,7 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if err != nil {
 		return wails.Core{}, fmt.Errorf("app: preferences: %w", err)
 	}
-	history, err := activity.New(sqlite.NewRecordingRepository(db), sqlite.NewJobRepository(db))
+	history, err := activity.New(sqlite.NewRecordingRepository(db), sqlite.NewJobRepository(db), a.log)
 	if err != nil {
 		return wails.Core{}, fmt.Errorf("app: activity: %w", err)
 	}
