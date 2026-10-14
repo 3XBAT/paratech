@@ -454,3 +454,43 @@
 - Нестабильный тест: cases/jobrunner TestCancelIsRefused/finished_job один раз упал у ревьюера («Cancel = <nil>, want ErrNotCancellable»), при повторе прошёл; ветка jobrunner не трогает — разобрать отдельно
 
 ---
+
+## [TASK-025] Windows-проверка настоящего whisper-cli с реальной моделью
+**Дата:** 2026-10-14 20:00
+**Статус:** blocked
+
+### Причина
+- По тексту задачи нужен человек: пользователь скачивает whisper-cli и модель и запускает транскрипцию на образце записи (шаг 1: агент ставит blocked)
+- Шаги для владельца: скачать whisper-cli (CPU) и модель каталога, указать их в настройках/тесте, запустить transcribe на образце записи, проверить разбор результата и отмену, записать фактическую скорость; затем вручную поставить done
+
+---
+
+## [TASK-040] Граница побочных эффектов: LLM предлагает -> Core валидирует -> подтверждение -> адаптер
+**Дата:** 2026-10-14 20:00
+**Статус:** done
+
+### Что сделано
+- domain/coursework/proposal: агрегат ActionProposal, таблица переходов PROPOSED -> VALIDATED|REJECTED, VALIDATED -> CONFIRMED|DECLINED, CONFIRMED -> EXECUTED|STALE; строгий JSON (3 вида: send_homework_email, export_homework, create_deadline_event; лишние поля и хвост отклоняются; в схеме нет получателя/пути/URL); Validate(Facts) по доверенному состоянию, получатель и Digest вложения (SHA-256 + размер) фиксируются при валидации; Recheck перед выполнением -> STALE; команды EmailCommand/ExportCommand/CalendarCommand только из CONFIRMED, ключ идемпотентности proposal:<id>
+- cases/homeworkflow: Service Propose/Get/Confirm/Decline/Execute; порты ProposalRepository, RecipientSource, HomeworkMailer, HomeworkExporter, DeadlineCalendar, IDGenerator.NewProposalID; факты читаются по виду; порт вызывается вне Tx
+- testenv/sideeffects.go (FakeMailer/FakeExporter/FakeCalendar); tests/sideeffect_boundary_test.go (порты побочных эффектов не принимают UntrustedOutput/LLMResult; новые порты принимают только команды); docs/refs/prompt-injection.md
+- Изменён существующий тест TestProposeEmailFreezesTrustedRecipient (появился в этой же задаче): смена получателя после подтверждения теперь даёт ErrStale и ноль писем (строже); save_contract_test.go: добавлена строка ProposalRepository.Save
+- Ревью: approve; medium (вложение не закреплено между подтверждением и отправкой) и low (нет перепроверки фактов, факты не по виду) -> исправлены, повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0 (два прохода аудитора)
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), на финальном head
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestPromptInjectionDoesNotCallEmailAdapter (+ TestPromptInjectionDoesNotReachFilesOrCalendar)
+- [x] Шаг 3: TestValidProposalWithoutConfirmationIsNotExecuted
+
+### Решения (подтвердить)
+- Агрегат proposal в контексте coursework, без нового контекста и ADR
+- Получатель — из RecipientSource (локальные настройки), файл вложения выводится ядром: exports/<assignment id>/homework.md
+- Изменение получателя или файла после подтверждения делает предложение STALE: пользователь предлагает заново
+- Два параллельных Execute могут оба дойти до порта: дедупликация по ключу команды обязательна в адаптерах
+
+### Заметки (follow-up)
+- TASK-044: реализация HomeworkMailer через senddelivery (доставка с ключом команды, сверка UNKNOWN) — нужен мост в app (use case не импортирует use case); адаптер обязан читать файл один раз, сверять Digest на отправляемых байтах (TOCTOU между Recheck и чтением), ErrStale из perform сейчас оставляет CONFIRMED; после неизвестного исхода повтор с изменённым файлом уходит в STALE без сверки — учесть правило 7
+- Нет sqlite ProposalRepository/таблицы proposals и настройки получателя; Propose не подключён к LLM-задаче (TASK-041/042); нет UI подтверждения
+- Low (ревью): Execute читает факты до проверки статуса (ошибка I/O маскирует ErrNotConfirmed); validFor не учитывает вид для STALE-причин; нет лимита числа предложений на транскрипт (TASK-042); Confirm защищён соглашением — тест «Confirm вызывает только input/wails» при появлении Wails; список sideEffectPorts ручной; нумерация правил в prompt-injection.md (8 перед 6, 7); заголовок календаря не отсекает U+2028/2029 и bidi — экранировать в адаптере календаря
+
+---
