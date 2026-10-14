@@ -20,6 +20,9 @@ type Querier interface {
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error)
+	// Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
+	// delete of ADR-0004(e): removing a lesson sets deleted_at, only PurgeDeletedLesson deletes a row.
+	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
 	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
 	// store the result.
 	GetRecording(ctx context.Context, id string) (Recording, error)
@@ -34,6 +37,8 @@ type Querier interface {
 	GetTranscript(ctx context.Context, id string) (Transcript, error)
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
+	// A never-stored lesson (version 0) is inserted with version 1.
+	InsertLesson(ctx context.Context, arg InsertLessonParams) error
 	// A never-stored recording (version 0) is inserted with version 1.
 	InsertRecording(ctx context.Context, arg InsertRecordingParams) error
 	// A never-stored settings aggregate (version 0) is inserted with version 1. A second insert violates the primary key,
@@ -46,10 +51,16 @@ type Querier interface {
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
+	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
+	LessonExists(ctx context.Context, id string) (bool, error)
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
+	// The rule of lesson.CalendarPending, stated on the columns (and matching idx_schedule_entries_calendar_pending).
+	ListLessonsPendingCalendarSync(ctx context.Context, maxRows int64) ([]ScheduleEntry, error)
+	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
+	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
@@ -58,10 +69,13 @@ type Querier interface {
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 	NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error)
+	PurgeDeletedLesson(ctx context.Context, id string) (int64, error)
 	// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
 	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
+	// Compare-and-swap on the loaded version. The id and the creation time never change.
+	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
 	// never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
