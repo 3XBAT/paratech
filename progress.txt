@@ -575,3 +575,36 @@
 - Low (security, инфо): fingerprint хэширует UnixNano — переполнение для дат вне 1678-2262, недостижимо при модели угроз
 
 ---
+
+## [TASK-038] LLM Client в десктопе: Connect-клиент, API-ключ из CredentialStore, идемпотентность
+**Дата:** 2026-10-14 18:00
+**Статус:** done
+
+### Что сделано
+- adapters/hubclient: реализует homeworkflow.LLMClient через сгенерированный Connect-клиент GatewayService.Complete (unary, protobuf); ключ читается из узкого интерфейса Credentials.Get (wincred.Store, testenv.MemCredentials) на каждый вызов, Authorization: Bearer; ключ только печатный ASCII 1..2560
+- idempotency_key берётся из values.LLMRequest как есть (повтор = тот же ключ); отправляются только поля контракта (тест proto.Equal + нет unknown fields)
+- Ошибки: ErrorDetail первым, код Connect запасным; QUOTA_EXCEEDED -> shared.ErrQuotaExceeded (без маркера класса), отсутствие связи (net.Error) -> shared.ErrNetworkUnavailable, RATE_LIMITED/aborted/unavailable/timeout -> transient (+RetryAfter до 1 ч), неверный ключ/конфликт идемпотентности/прочее -> permanent; тексты ошибок фиксированные
+- Таймаут запроса (2 мин по умолчанию) + запасной http.Client.Timeout; базовый URL только https или http на loopback; редиректы не выполняются; TLS 1.2+; ответ <= 2 МиБ
+- desktop/go.mod: connectrpc.com/connect v1.21.0, google.golang.org/protobuf v1.36.12 (стек ADR-0001, те же версии, что в shared), paratech/shared через replace => ../shared (GOWORK=off тоже собирается); go.work не менялся
+- Изменённые существующие тесты: нет
+- Ревью: approve, только low. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) после rebase на 6251da6 (первый прогон упал на флаки-тесте TASK-029, см. заметки)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestQuotaAndNetworkMapToWaitStates, TestErrorMapping (quota exceeded)
+- [x] Шаг 3: TestRetrySendsSameIdempotencyKey
+
+### Решения (подтвердить)
+- Ретраи с backoff не в адаптере: одна попытка на вызов, классификация backoff.ErrTransient/ErrPermanent, повторяет jobrunner (TASK-009)
+- Вне Windows dev-fallback для ключа не сделан (wincred -> ErrUnsupported -> permanent ErrCredentials); выбор хранилища при подключении в app
+- max_output_tokens = 0 (дефолт Hub): в values.LLMRequest нет такого поля
+
+### Заметки (follow-up)
+- TASK-042 (обработчик LLM-задачи): сам маппит ErrQuotaExceeded/ErrNetworkUnavailable в WAITING_FOR_QUOTA/WAITING_FOR_NETWORK (jobrunner этого пока не делает, до тех пор квота тратит attempts); формирует idempotency_key детерминированно из задачи/операции; может использовать RetryAfter() через errors.As
+- Нет compile-time проверки в desktop/tests, что *hubclient.Client реализует homeworkflow.LLMClient и wincred.Store — hubclient.Credentials; добавить при подключении в app
+- Не сделано: CompleteStream, GetRemaining (AC-12)
+- Low (ревью): TLS/x509 ошибки перехватывающей сети -> ErrUnavailable (transient), не WAITING_FOR_NETWORK; ошибка чтения хранилища ключей помечена transient (сожжёт attempts при постоянной поломке)
+- Флаки: TestSTTJobTranscribesRecording (desktop/tests, TASK-029) один раз упал с attempts 2 вместо 1 под нагрузкой полного прогона; -count=10 отдельно зелёный. Разобрать (вероятно повтор попытки из-за таймаута/гонки в fake whisper)
+
+---
