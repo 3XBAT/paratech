@@ -688,3 +688,42 @@
 
 ---
 - TASK-022 (review follow-up): окно не догоняется — сон/гибернация или скачок часов через окно означают отсутствие предложения для занятия; не добавлять «догоняющее» предложение без решения владельца
+
+---
+
+## [TASK-042] Пост-обработка: транскрипт -> краткое содержание -> задания и дедлайны
+**Дата:** 2026-10-14
+**Статус:** done
+
+### Что сделано
+- domain/coursework/assignment (полный агрегат: NewExtracted/Restore/Reextract/Edit/Superseded; правка пользователя не перезаписывается повторной обработкой) и новый агрегат coursework/summary (одно summary на транскрипт)
+- Миграция 0002_postprocessing.sql (таблица summaries; assignments.source_index, prompt_version, уникальный индекс (transcript_id, source_index)); зеркало в docs/contracts/schema.sql. Дедлайн = assignments.due_at, отдельной таблицы нет
+- cases/homeworkflow.PostProcessor: TranscriptCreated (реализует transcribe.EventPublisher) ставит summarize и extract_homework с ключом <type>:<transcript>:v<prompts.Version>; обработчики используют LLMClient, строгие парсеры prompts, сохраняют prompts.Version; невалидный ответ -> постоянная ошибка без записей; Service.EditAssignment
+- Ключ идемпотентности LLM: pp:<op>:v<N>:<hex(sha256(jobID,op,alias,instructions,data)[:16])> — повтор той же задачи с тем же содержимым = тот же ключ (AC-11), изменённое содержимое (переименование занятия) = новый ключ (иначе IDEMPOTENCY_CONFLICT навсегда)
+- Повторная обработка с более коротким ответом удаляет неправленые извлечённые задания за пределами ответа; правленые и использованные доставкой (FK RESTRICT -> ErrInUse) остаются; сопоставление по позиции описано в assignment/doc.go
+- jobrunner: ErrQuotaExceeded/ErrNetworkUnavailable паркуют задачу в WAITING_FOR_QUOTA/WAITING_FOR_NETWORK без траты попытки, перепроверка через Config.Rechecks (дефолт 1 мин / 15 мин) — follow-up TASK-038
+- testenv.FakeLLM, testenv.FakeHub (TLS, отпечаток запроса на ключ); сценарии в desktop/tests/postprocess_sqlite_test.go
+- В app не подключено (регистрация обработчиков, PostProcessor как transcribe.Deps.Events, ID-генератор, model alias, Rechecks)
+- Изменённые существующие тесты: jobrunner TestErrorClassification — удалена строка «network error retries» (теперь ожидание, покрыто waits_test.go); sqlite migrate_test — summaries в contractTables, версия схемы 2; homeworkflow fakes_test — новые методы порта; tests/save_contract_test — строка SummaryRepository.Save; tests/sideeffect_boundary_test — новый тест
+- Ревью: changes requested (2 medium: ключ идемпотентности, устаревшие задания при коротком ответе) -> исправлено, повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0 (две проверки: весь diff и коммиты исправлений)
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), после rebase на origin/master 4553069
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestTranscriptToSummaryAndDeadlines (desktop/tests, реальный SQLite), TestTranscriptToStructuresThroughFakeHub (через hubclient)
+- [x] Шаг 3: TestInvalidLLMAnswerFailsTheJobWithoutRecords (FAILED после 1 попытки, записей нет)
+
+### Решения (подтвердить)
+- summaries и assignments остаются после удаления транскрипта (SET NULL) — сверить с PRD §13.1 (удаление производных данных)
+- Задания, выпавшие из ответа повторной обработки, удаляются (если не правлены и не отправлены) — PRD об этом молчит
+- Ожидания сети/квоты бессрочные (без максимального возраста); упавшую задачу нельзя перезапустить в той же версии промптов (ключ задачи постоянный) — для «переобработать» нужен новый ключ
+- Второй транскрипт той же записи создаст второй набор заданий для занятия
+
+### Заметки (follow-up)
+- Подключение в app (см. выше); comment в adapters/hubclient/errors.go («runner that does not park jobs yet») устарел
+- Low: комментарий EditAssignment (assignments.go:20-23) — правка удалённого повторной обработкой задания вернёт ErrNotFound, UI показывает как удалённое
+- Low: отправленное (in use) задание сопоставляется по позиции — более длинный ответ перезапишет его title/due; в TASK-044 считать отправленное как правленое
+- Low: две extract-задачи одного транскрипта параллельно могут смешать ответы (без дублей)
+- Low: WaitFor не пишет last_error при входе в ожидание; ожидания разрешены для любого типа задач (сейчас ошибки возвращает только hubclient)
+- TASK-043/календарь: удалённое задание оставит экспорт/событие календаря — синхронизация должна убирать; новые таблицы со ссылкой на assignments — ON DELETE RESTRICT
+- Security note: Hub должен хранить ключи идемпотентности в пространстве тестера; ID задач — непредсказуемые (нет адаптера ID-генератора)
