@@ -1,0 +1,277 @@
+package hubclient
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"strings"
+	"time"
+
+	"connectrpc.com/connect"
+
+	"paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/shared"
+	hubv1 "paratech/shared/gen/paratech/hub/v1"
+	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
+)
+
+// Defaults and bounds of the client.
+const (
+	DefaultCredentialName = "api-key"
+	DefaultRequestTimeout = 2 * time.Minute
+
+	// maxAPIKeyLen is the wincred blob limit; a longer value cannot be a key the app stored.
+	maxAPIKeyLen = 5 * 512
+
+	// maxResponseBytes bounds one answer: 1 MiB of output is far above any operation, plus envelope headroom.
+	maxResponseBytes = 2 << 20
+
+	// clientGrace lets the per-call context fire before the http.Client backstop timeout.
+	clientGrace = 5 * time.Second
+
+	dialTimeout   = 30 * time.Second
+	tlsTimeout    = 15 * time.Second
+	idleConnLimit = 90 * time.Second
+)
+
+// Operation names used in error messages.
+const (
+	opNew      = "hubclient: new"
+	opComplete = "hubclient: complete"
+)
+
+// Credentials is the part of the secret store the client needs (adapters/wincred.Store, testenv.MemCredentials).
+// Get returns an error wrapping shared.ErrNotFound when no secret is stored under name.
+type Credentials interface {
+	Get(ctx context.Context, name string) (string, error)
+}
+
+// Config configures a Client. Zero values take the defaults.
+type Config struct {
+	// BaseURL of the Hub, from the app configuration only: https, or http to a loopback host (tests, local Hub).
+	BaseURL string
+
+	// CredentialName is the name of the API key in the credential store; default DefaultCredentialName.
+	CredentialName string
+
+	// RequestTimeout bounds one call; default DefaultRequestTimeout.
+	RequestTimeout time.Duration
+
+	// HTTPClient replaces the default transport (tests). The client copies it and always refuses redirects.
+	HTTPClient *http.Client
+}
+
+// Client calls the Hub gateway. It is safe for concurrent use.
+type Client struct {
+	gateway  hubv1connect.GatewayServiceClient
+	creds    Credentials
+	credName string
+	timeout  time.Duration
+}
+
+// New validates cfg and builds a client.
+func New(cfg Config, creds Credentials) (*Client, error) {
+	if creds == nil {
+		return nil, fmt.Errorf("%s: %w: no credential store", opNew, ErrInvalidConfig)
+	}
+	base, err := checkBaseURL(cfg.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.RequestTimeout < 0 {
+		return nil, fmt.Errorf("%s: %w: negative request timeout", opNew, ErrInvalidConfig)
+	}
+
+	c := &Client{creds: creds, credName: cfg.CredentialName, timeout: cfg.RequestTimeout}
+	if c.credName == "" {
+		c.credName = DefaultCredentialName
+	}
+	if c.timeout == 0 {
+		c.timeout = DefaultRequestTimeout
+	}
+
+	httpClient := httpClientFor(cfg.HTTPClient, c.timeout)
+	c.gateway = hubv1connect.NewGatewayServiceClient(httpClient, base, connect.WithReadMaxBytes(maxResponseBytes))
+	return c, nil
+}
+
+// Complete runs one operation on the Hub (homeworkflow.LLMClient). See the package doc for the error contract.
+func (c *Client) Complete(ctx context.Context, req values.LLMRequest) (values.LLMResult, error) {
+	if err := ctx.Err(); err != nil {
+		return values.LLMResult{}, fmt.Errorf("%s: %w", opComplete, err)
+	}
+	spec, err := specOf(req)
+	if err != nil {
+		return values.LLMResult{}, err
+	}
+	key, err := c.apiKey(ctx)
+	if err != nil {
+		return values.LLMResult{}, err
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	creq := connect.NewRequest(&hubv1.CompleteRequest{Spec: spec})
+	creq.Header().Set("Authorization", "Bearer "+key)
+	resp, err := c.gateway.Complete(callCtx, creq)
+	if err != nil {
+		if perr := ctx.Err(); perr != nil {
+			return values.LLMResult{}, fmt.Errorf("%s: %w", opComplete, perr)
+		}
+		return values.LLMResult{}, mapCallError(opComplete, err)
+	}
+	return resultOf(resp.Msg)
+}
+
+// specOf copies exactly the contract fields of the request; nothing else reaches the wire.
+func specOf(req values.LLMRequest) (*hubv1.CompletionSpec, error) {
+	if req.IsZero() {
+		return nil, permanent(opComplete, ErrInvalidRequest)
+	}
+	op, ok := operationType(req.Operation())
+	if !ok {
+		return nil, permanent(opComplete, ErrInvalidRequest)
+	}
+	return &hubv1.CompletionSpec{
+		IdempotencyKey: req.IdempotencyKey(),
+		OperationType:  op,
+		ModelAlias:     req.ModelAlias(),
+		Instructions:   req.Instructions(),
+		UntrustedData:  req.UntrustedData(),
+	}, nil
+}
+
+func operationType(op values.Operation) (hubv1.OperationType, bool) {
+	switch op {
+	case values.OperationSummary:
+		return hubv1.OperationType_OPERATION_TYPE_SUMMARY, true
+	case values.OperationExtractHomework:
+		return hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES, true
+	case values.OperationHomeworkDraft:
+		return hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT, true
+	}
+	return hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED, false
+}
+
+// apiKey reads the key for one call. The store's errors carry no secret (wincred contract), so they are wrapped.
+func (c *Client) apiKey(ctx context.Context) (string, error) {
+	key, err := c.creds.Get(ctx, c.credName)
+	switch {
+	case err == nil:
+	case errors.Is(err, shared.ErrNotFound):
+		return "", permanent(opComplete, ErrMissingAPIKey)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "", fmt.Errorf("%s: %w", opComplete, err)
+	case errors.Is(err, errors.ErrUnsupported), errors.Is(err, shared.ErrInvalidID):
+		return "", permanent(opComplete, fmt.Errorf("%w: %w", ErrCredentials, err))
+	default:
+		return "", transient(opComplete, fmt.Errorf("%w: %w", ErrCredentials, err))
+	}
+
+	if !validAPIKey(key) {
+		return "", permanent(opComplete, ErrMalformedAPIKey)
+	}
+	return key, nil
+}
+
+// validAPIKey accepts 1..maxAPIKeyLen printable ASCII characters without spaces, so the header cannot be split.
+func validAPIKey(key string) bool {
+	if key == "" || len(key) > maxAPIKeyLen {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < 0x21 || key[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// resultOf converts the answer; the output stays untrusted (hard rule 3).
+func resultOf(resp *hubv1.CompleteResponse) (values.LLMResult, error) {
+	res := resp.GetResult()
+	if res == nil {
+		return values.LLMResult{}, permanent(opComplete, ErrBadResponse)
+	}
+	out, err := values.NewLLMResult(values.NewUntrustedOutput(res.GetOutput()),
+		res.GetUsage().GetInputTokens(), res.GetUsage().GetOutputTokens())
+	if err != nil {
+		return values.LLMResult{}, permanent(opComplete, ErrBadResponse)
+	}
+	return out, nil
+}
+
+// checkBaseURL accepts https://host[:port][/path], or http only for a loopback host.
+func checkBaseURL(raw string) (string, error) {
+	bad := func(why string) (string, error) {
+		return "", fmt.Errorf("%s: %w: base url %s", opNew, ErrInvalidConfig, why)
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case raw == "":
+		return bad("is empty")
+	case err != nil:
+		return bad("does not parse")
+	case u.Host == "" || u.Opaque != "":
+		return bad("has no host")
+	case u.User != nil:
+		return bad("must not carry credentials")
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return bad("must not have a query or fragment")
+	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !isLoopback(u.Hostname()) {
+			return bad("must use https")
+		}
+	default:
+		return bad("must use https")
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
+}
+
+// httpClientFor copies base (or builds a default client) and refuses redirects, so the Authorization header never
+// follows one. Timeout is a backstop; each call has its own context deadline.
+func httpClientFor(base *http.Client, timeout time.Duration) *http.Client {
+	var c http.Client
+	if base != nil {
+		c = *base
+	} else {
+		c.Transport = defaultTransport()
+	}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	if c.Timeout == 0 {
+		c.Timeout = timeout + clientGrace
+	}
+	return &c
+}
+
+func defaultTransport() *http.Transport {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t = &http.Transport{Proxy: http.ProxyFromEnvironment}
+	} else {
+		t = t.Clone()
+	}
+	// Student networks often need the environment proxy, so Proxy stays as in the default transport.
+	t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	t.TLSHandshakeTimeout = tlsTimeout
+	t.IdleConnTimeout = idleConnLimit
+	t.DialContext = (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext
+	return t
+}
