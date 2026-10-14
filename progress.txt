@@ -758,3 +758,40 @@
 - Корень артефактов filestore — подкаталог DataDir (напр. <DataDir>\artifacts), чтобы ссылка артефакта не доставала до .db
 - Low: при ошибке openCore окно не появляется, только лог — позже фатальный диалог
 - Ручная проверка владельцем на Windows: клики переключателей и вёрстка (GetSettings через рантайм проверен запуском)
+
+---
+
+## [TASK-047] Парсер ICS (повторяющиеся события, часовые пояса)
+**Дата:** 2026-10-14
+**Статус:** done
+
+### Что сделано
+- adapters/icsschedule на github.com/arran4/golang-ical v0.3.7 (назван в задаче и PRD §4.3; без CGO и новых транзитивных зависимостей): VEVENT -> строки importplan; RRULE (DAILY/WEEKLY/MONTHLY/YEARLY, INTERVAL, COUNT, UNTIL, BYDAY, WKST), EXDATE, RDATE, RECURRENCE-ID (перенос/отмена), TZID (IANA, Windows-имена через таблицу golang-ical, UTC, плавающее время с X-WR-TIMEZONE)
+- Подключение к движку: реализует порт schedulesync.ScheduleParser, регистрируется в Deps.Parsers под importplan.SourceICS; icsschedule.New(clock); сценарий tests/schedule_import_ics_sqlite_test.go (CSV и ICS рядом, реальный SQLite)
+- importplan.Window{From,To}: при заданном окне отсутствующие занятия источника удаляются только внутри окна, строки вне окна — ошибка; у CSV окно нулевое, поведение не изменилось
+- Лимиты: 2 МиБ, 5000 событий/занятий, 200 000 шагов развёртки, 64 КиБ строка, 32 параметра, вложенность 16, по 5000 EXDATE и RDATE на событие; паники библиотеки перехватываются; ошибки не цитируют содержимое файла
+- Формат: docs/refs/schedule-ics.md
+- Изменённые существующие тесты: нет (правились только тесты этой задачи)
+- Ревью: request changes (2 medium: квадратичная EXDATE x RDATE, ключ одиночного события включал начало; low: recover в предварительном сканировании, END на глубине 0, EXDATE-дата UTC-серии) -> исправлено в 177af27, повторное ревью approve. Security: найдено 1 (N1, квадратичная проверка EXDATE, DoS), опровергнуто 1 (класс DoS исключён), всё равно исправлено (п.1 ревью); аудит коммита исправлений — 0
+
+### Тесты
+- [x] verify-проверки — ALL_GREEN (golangci-lint v2.14.0) на 177af27, origin/master b8ab437 (см. заметку про stash)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestWeeklyRecurringEventExpandsWithinBounds, TestWeeklyRecurringEventExpandsWithinClockWindow, TestScheduleImportICSWeeklyEventWithinImportDates
+- [x] Образцы: TestGoogleCalendarExport, TestUniversityExchangeExport, TestUniversityPortalExport
+
+### Решения (подтвердить)
+- Окно импорта: от начала вчерашнего дня UTC на 366 дней по часам; превью и коммит в разные дни UTC могут дать ErrStalePreview; прошлые ICS-занятия поздние импорты не удаляют
+- События на весь день пропускаются молча; VTIMEZONE не читается (пользовательский TZID — ошибка строки)
+- Неподдерживаемые части RRULE (BYMONTHDAY, BYSETPOS, BYDAY с номером, EXRULE, несколько RRULE, RANGE) — ошибка строки
+- DST: серия держит настенное время в зоне события; вхождение в «дыре» DST — ошибка строки
+- Ключ: одиночное событие с UID — ics:<UID>; вхождения серии — ics:<UID>/<исходное начало UTC>; UID длиннее 255 байт, непечатный или с '/' хэшируется; без UID — auto-<хэш названия>/<начало>
+
+### Заметки (follow-up)
+- Подключение в app/input и UI (как для CSV): New(clock) с тем же адаптером часов, что у сервиса
+- Low: политика окна импорта живёт в адаптере со своими часами; лучше чистая функция в importplan и окно через порт (меняет порт TASK-046 — ADR или решение владельца)
+- Low: вхождение в «дыре» DST валит всю серию, даже если его убирают EXDATE/RECURRENCE-ID
+- Low: производный id (sha256-/auto-) может совпасть с настоящим UID такого же вида — только внутри своего источника (дубль строки)
+- Low (док): превращение одиночного события в серию (или обратно) меняет ключи -> удаление + добавление; добавить фразу в schedule-ics.md
+- Nit: временная проверка 10 с в TestManyDatesInOneEvent не ловит квадратичный регресс (работу ограничивает лимит)
+- ПРОЦЕСС (важно): .github/scripts/verify.sh делает `git stash -u` / `git stash pop`, а stash общий для всех worktree. В чистом дереве pop забирает чужой stash: в этой задаче verify.sh из paratech-team2 вытащил stash ветки ralph/20261014-task-044 (go.mod/go.sum с go-mail); он возвращён в stash с пометкой. Финальные проверки шли копией verify.sh без шагов stash/rebase (ветка уже на origin/master). verify.sh нужно поправить (stash только при наличии изменений, или pop по своему ref)
