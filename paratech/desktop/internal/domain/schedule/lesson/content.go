@@ -28,21 +28,40 @@ type Content struct {
 
 // Validate checks the invariants of a lesson's content.
 func (c Content) Validate() error {
-	switch {
-	case strings.TrimSpace(c.Title) == "":
-		return fmt.Errorf("%w: empty title", ErrInvalidLesson)
-	case len(c.Title) > MaxTitleBytes:
-		return fmt.Errorf("%w: title longer than %d bytes", ErrInvalidLesson, MaxTitleBytes)
-	case !utf8.ValidString(c.Title) || strings.ContainsFunc(c.Title, unicode.IsControl):
-		return fmt.Errorf("%w: title is not valid text", ErrInvalidLesson)
-	case c.Start.IsZero() || c.End.IsZero():
-		return fmt.Errorf("%w: missing start or end", ErrInvalidLesson)
-	case !c.End.After(c.Start):
-		return fmt.Errorf("%w: end is not after start", ErrInvalidLesson)
-	case c.End.Sub(c.Start) > MaxDuration:
-		return fmt.Errorf("%w: longer than %v", ErrInvalidLesson, MaxDuration)
+	if err := ValidateTitle(c.Title); err != nil {
+		return err
+	}
+	if err := ValidateSpan(c.Start, c.End); err != nil {
+		return err
 	}
 	return ValidateTimeZoneName(c.TimeZone)
+}
+
+// ValidateTitle checks a lesson title: not blank, at most MaxTitleBytes, valid text without control characters.
+// Parsers call it to name the column of a bad title.
+func ValidateTitle(title string) error {
+	switch {
+	case strings.TrimSpace(title) == "":
+		return fmt.Errorf("%w: empty title", ErrInvalidLesson)
+	case len(title) > MaxTitleBytes:
+		return fmt.Errorf("%w: title longer than %d bytes", ErrInvalidLesson, MaxTitleBytes)
+	case !utf8.ValidString(title) || strings.ContainsFunc(title, unicode.IsControl):
+		return fmt.Errorf("%w: title is not valid text", ErrInvalidLesson)
+	}
+	return nil
+}
+
+// ValidateSpan checks the time range of a lesson: both ends set, end after start, at most MaxDuration.
+func ValidateSpan(start, end time.Time) error {
+	switch {
+	case start.IsZero() || end.IsZero():
+		return fmt.Errorf("%w: missing start or end", ErrInvalidLesson)
+	case !end.After(start):
+		return fmt.Errorf("%w: end is not after start", ErrInvalidLesson)
+	case end.Sub(start) > MaxDuration:
+		return fmt.Errorf("%w: longer than %v", ErrInvalidLesson, MaxDuration)
+	}
+	return nil
 }
 
 // Equal reports whether both contents show the same lesson: same title, same instants, same zone name.

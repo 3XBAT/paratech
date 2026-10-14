@@ -161,7 +161,7 @@ func TestScheduleImportXLSXMatchesCSV(t *testing.T) {
 	}
 }
 
-// The same row problems in both formats block the preview at the same rows; XLSX names the column letter.
+// The same row problems in both formats block the preview at the same rows and fields; XLSX adds the column letter.
 func TestScheduleImportXLSXRowErrorsMatchCSV(t *testing.T) {
 	const csvFile = "title,date,start,end,timezone\n" +
 		"Ok,2026-10-05,08:00,08:30,UTC\n" +
@@ -178,9 +178,10 @@ func TestScheduleImportXLSXRowErrorsMatchCSV(t *testing.T) {
 	if pc.Plan.Valid() || px.Plan.Valid() || px.ConfirmToken != "" || len(px.Plan.Errors) != len(pc.Plan.Errors) {
 		t.Fatalf("previews: csv %+v, xlsx %+v", pc.Plan.Errors, px.Plan.Errors)
 	}
-	wantField := []string{"end (column D)", "timezone (column E)"}
+	wantField, wantLetter := []string{"end", "timezone"}, []string{"D", "E"}
 	for i, a := range pc.Plan.Errors {
-		if b := px.Plan.Errors[i]; a.Line != b.Line || b.Field != wantField[i] || !strings.HasPrefix(b.Field, a.Field+" ") {
+		b := px.Plan.Errors[i]
+		if a.Line != b.Line || a.Field != wantField[i] || b.Field != a.Field || !strings.HasPrefix(b.Reason, "column "+wantLetter[i]+": ") {
 			t.Errorf("error %d: csv %+v, xlsx %+v", i, a, b)
 		}
 	}

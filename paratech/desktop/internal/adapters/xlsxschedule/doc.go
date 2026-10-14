@@ -23,7 +23,8 @@
 // Identity is that of CSV: "id:<uid>" with a uid, else "auto:<date> <start> <title>", so an XLSX and the equivalent
 // CSV give the same rows. The stored source uid is "xlsx:<key>" (importplan).
 //
-// Line numbers are sheet row numbers; a row problem names the column and its letter, e.g. "start (column C)". A
+// Line numbers are sheet row numbers; a row problem has the bare column name as Field, as in CSV, and its Reason
+// starts with the column letter, e.g. "column C: not a time cell ...". A
 // file that cannot be read at all gives an *Error wrapping importplan.ErrUnreadableFile. Messages never quote cell
 // values.
 package xlsxschedule

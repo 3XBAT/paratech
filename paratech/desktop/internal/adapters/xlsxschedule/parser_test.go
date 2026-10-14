@@ -111,39 +111,47 @@ func TestParseValid(t *testing.T) {
 func TestRowErrors(t *testing.T) {
 	ok := []any{"Ok", day(2026, 10, 14), clock(8, 0), clock(8, 30), "UTC"}
 	tests := []struct {
-		name  string
-		row   []any
-		edit  func(t *testing.T, f *excelize.File)
-		field string
+		name   string
+		row    []any
+		edit   func(t *testing.T, f *excelize.File)
+		field  string
+		letter string
 	}{
-		{"empty title", []any{" ", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"}, nil, "title (column A)"},
-		{"bad date text", []any{"Math", "14.10." + secret, clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"impossible date", []any{"Math", "2026-02-30", clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"date with a time", []any{"Math", time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC), clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"date serial in February 1900", []any{"Math", 59, clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"date serial too large", []any{"Math", 3e6, clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"negative date serial", []any{"Math", -46000, clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"hex number", []any{"Math", "0x1p4", clock(9, 0), clock(10, 0), "UTC"}, nil, "date (column B)"},
-		{"bad start", []any{"Math", day(2026, 10, 14), "9am" + secret, clock(10, 0), "UTC"}, nil, "start (column C)"},
-		{"start with seconds", []any{"Math", day(2026, 10, 14), 0.375 + 30.0/secondsPerDay, clock(10, 0), "UTC"}, nil, "start (column C)"},
-		{"start is a date and time", []any{"Math", day(2026, 10, 14), time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC), clock(10, 0), "UTC"}, nil, "start (column C)"},
-		{"negative start", []any{"Math", day(2026, 10, 14), -0.25, clock(10, 0), "UTC"}, nil, "start (column C)"},
-		{"infinite start", []any{"Math", day(2026, 10, 14), "Inf", clock(10, 0), "UTC"}, nil, "start (column C)"},
-		{"start rounds to 24:00", []any{"Math", day(2026, 10, 14), 0.999999999, clock(10, 0), "UTC"}, nil, "start (column C)"},
-		{"missing end", []any{"Math", day(2026, 10, 14), clock(9, 0), nil, "UTC"}, nil, "end (column D)"},
-		{"end before start", []any{"Math", day(2026, 10, 14), clock(10, 0), clock(9, 0), "UTC"}, nil, "end (column D)"},
-		{"unknown zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), secret + "/Base"}, nil, "timezone (column E)"},
-		{"missing zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0)}, nil, "timezone (column E)"},
-		{"local zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), "Local"}, nil, "timezone (column E)"},
-		{"number as zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), 3}, nil, "timezone (column E)"},
-		{"dst gap", []any{"Math", day(2026, 3, 29), clock(2, 30), clock(3, 30), "Europe/Berlin"}, nil, "start (column C)"},
+		{"empty title", []any{" ", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"}, nil, "title", "A"},
+		{"bad date text", []any{"Math", "14.10." + secret, clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"impossible date", []any{"Math", "2026-02-30", clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"date with a time", []any{"Math", time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC), clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"date serial in February 1900", []any{"Math", 59, clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"date serial too large", []any{"Math", 3e6, clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"negative date serial", []any{"Math", -46000, clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"hex number", []any{"Math", "0x1p4", clock(9, 0), clock(10, 0), "UTC"}, nil, "date", "B"},
+		{"bad start", []any{"Math", day(2026, 10, 14), "9am" + secret, clock(10, 0), "UTC"}, nil, "start", "C"},
+		{"start with seconds", []any{"Math", day(2026, 10, 14), 0.375 + 30.0/secondsPerDay, clock(10, 0), "UTC"}, nil, "start", "C"},
+		{"start is a date and time", []any{"Math", day(2026, 10, 14), time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC), clock(10, 0), "UTC"}, nil, "start", "C"},
+		{"negative start", []any{"Math", day(2026, 10, 14), -0.25, clock(10, 0), "UTC"}, nil, "start", "C"},
+		{"infinite start", []any{"Math", day(2026, 10, 14), "Inf", clock(10, 0), "UTC"}, nil, "start", "C"},
+		{"start rounds to 24:00", []any{"Math", day(2026, 10, 14), 0.999999999, clock(10, 0), "UTC"}, nil, "start", "C"},
+		{"missing end", []any{"Math", day(2026, 10, 14), clock(9, 0), nil, "UTC"}, nil, "end", "D"},
+		{"end before start", []any{"Math", day(2026, 10, 14), clock(10, 0), clock(9, 0), "UTC"}, nil, "end", "D"},
+		{"unknown zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), secret + "/Base"}, nil, "timezone", "E"},
+		{"missing zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0)}, nil, "timezone", "E"},
+		{"local zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), "Local"}, nil, "timezone", "E"},
+		{"number as zone", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), 3}, nil, "timezone", "E"},
+		{"dst gap", []any{"Math", day(2026, 3, 29), clock(2, 30), clock(3, 30), "Europe/Berlin"}, nil, "start", "C"},
 		{"formula without a saved value", []any{nil, day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"},
-			func(t *testing.T, f *excelize.File) { must(t, f.SetCellFormula(sheet1, "A3", `"`+secret+`"`)) }, "title (column A)"},
+			func(t *testing.T, f *excelize.File) { must(t, f.SetCellFormula(sheet1, "A3", `"`+secret+`"`)) }, "title", "A"},
 		{"error value", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"},
 			func(t *testing.T, f *excelize.File) {
 				must(t, f.SetCellValue(sheet1, "C3", "#N/A"))
 				must(t, f.SetCellFormula(sheet1, "C3", "NA()"))
-			}, "start (column C)"},
+			}, "start", "C"},
+		{"line break in title", []any{"Math\nGroup 2", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"}, nil, "title", "A"},
+		{"title over the limit", []any{strings.Repeat("a", lesson.MaxTitleBytes+1), day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"}, nil, "title", "A"},
+		{"title too long for the automatic identity", []any{strings.Repeat("a", lesson.MaxTitleBytes), day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC"}, nil, "title", "A"},
+		{"uid over the limit", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC", strings.Repeat("u", 600)}, nil, "uid", "F"},
+		{"tab in uid", []any{"Math", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC", "a\tb"}, nil, "uid", "F"},
+		// The night the clocks go back has 25 hours: 00:00 to 23:30 lasts 24.5 h, over lesson.MaxDuration.
+		{"longer than the limit", []any{"Night", day(2026, 10, 25), clock(0, 0), clock(23, 30), "Europe/Berlin"}, nil, "end", "D"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,8 +164,10 @@ func TestRowErrors(t *testing.T) {
 				t.Fatalf("parsed = %+v", p)
 			}
 			e := p.Errors[0]
-			if e.Line != 3 || e.Field != tt.field || e.Reason == "" || strings.Contains(e.Reason, secret) {
-				t.Fatalf("error = %+v, want line 3 field %q", e, tt.field)
+			prefix := "column " + tt.letter + ": "
+			if e.Line != 3 || e.Field != tt.field || !strings.HasPrefix(e.Reason, prefix) || len(e.Reason) == len(prefix) ||
+				strings.Contains(e.Reason, secret) {
+				t.Fatalf("error = %+v, want line 3 field %q reason %q...", e, tt.field, prefix)
 			}
 			plan, err := importplan.Build(importplan.SourceXLSX, p, nil)
 			if err != nil || plan.Valid() {
@@ -177,7 +187,7 @@ func TestColumnLetterFollowsTheHeader(t *testing.T) {
 		must(t, f.SetCellValue(sheet1, "AB2", " "))
 	})
 	p := parse(t, data)
-	if len(p.Errors) != 1 || p.Errors[0].Field != "title (column AB)" || p.Errors[0].Line != 2 {
+	if len(p.Errors) != 1 || p.Errors[0].Field != "title" || !strings.HasPrefix(p.Errors[0].Reason, "column AB: ") || p.Errors[0].Line != 2 {
 		t.Fatalf("parsed = %+v", p)
 	}
 }
@@ -190,7 +200,8 @@ func TestHeaderBelowEmptyRowsAndGaps(t *testing.T) {
 		must(t, f.SetCellValue(sheet1, "H6", "   ")) // a row of blanks is skipped
 	})
 	p := parse(t, data)
-	if len(p.Rows) != 1 || p.Rows[0].Line != 4 || len(p.Errors) != 1 || p.Errors[0].Line != 9 || p.Errors[0].Field != "start (column D)" {
+	if len(p.Rows) != 1 || p.Rows[0].Line != 4 || len(p.Errors) != 1 || p.Errors[0].Line != 9 || p.Errors[0].Field != "start" ||
+		!strings.HasPrefix(p.Errors[0].Reason, "column D: ") {
 		t.Fatalf("parsed = %+v", p)
 	}
 }

@@ -57,7 +57,9 @@ func (p *Parser) Parse(ctx context.Context, data []byte) (importplan.Parsed, err
 	return out, nil
 }
 
-// safely turns a panic of excelize on hostile input into a malformed-file error instead of ending the app.
+// safely turns a panic of excelize on hostile input into a malformed-file error instead of ending the app. It wraps
+// readRows on purpose: Rows.Next and Rows.Columns decode the sheet XML lazily, so excelize panics surface there. A bug
+// of our own row code is hidden the same way, but it only refuses the file; the row tests cover that code.
 func safely(fn func() error) (err error) {
 	defer func() {
 		if recover() != nil {

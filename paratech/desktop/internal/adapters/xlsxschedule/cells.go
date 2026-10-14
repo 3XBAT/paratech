@@ -84,9 +84,12 @@ func newRowReader(line int, header []string, date1904 bool) (*rowReader, error) 
 	return &rowReader{cols: cols, date1904: date1904, zones: map[string]*time.Location{}}, nil
 }
 
-// field names the column for a row error, with its letter as Excel shows it.
-func (r *rowReader) field(col string) string {
-	return fmt.Sprintf("%s (column %s)", col, columnLetters(r.cols[col]))
+// fail is a row error of one column. Field is the bare column name, as in CSV and the domain; the reason starts with
+// the column letter as Excel shows it.
+func (r *rowReader) fail(line int, col, reason string) (importplan.Row, *importplan.RowError) {
+	return importplan.Row{}, &importplan.RowError{
+		Line: line, Field: col, Reason: "column " + columnLetters(r.cols[col]) + ": " + reason,
+	}
 }
 
 func (r *rowReader) parse(line int, cells []string) (importplan.Row, *importplan.RowError) {
@@ -97,42 +100,53 @@ func (r *rowReader) parse(line int, cells []string) (importplan.Row, *importplan
 		}
 		return strings.TrimSpace(cells[i])
 	}
-	fail := func(col, reason string) (importplan.Row, *importplan.RowError) {
-		return importplan.Row{}, &importplan.RowError{Line: line, Field: r.field(col), Reason: reason}
-	}
 
+	// The domain checks run here too so that each problem names its column; importplan would reject the same rows
+	// later without one.
 	title := get(colTitle)
-	if title == "" {
-		return fail(colTitle, "empty title")
+	if err := lesson.ValidateTitle(title); err != nil {
+		return r.fail(line, colTitle, domainReason(err))
 	}
 	zone, err := loadZone(get(colTimeZone), r.zones)
 	if err != nil {
-		return fail(colTimeZone, "not a known IANA time zone (for example Europe/Moscow)")
+		return r.fail(line, colTimeZone, "not a known IANA time zone (for example Europe/Moscow)")
 	}
 	date, ok := r.date(get(colDate))
 	if !ok {
-		return fail(colDate, "not a date cell or a date in the form YYYY-MM-DD")
+		return r.fail(line, colDate, "not a date cell or a date in the form YYYY-MM-DD")
 	}
 	start, ok := clockOn(date, get(colStart), zone)
 	if !ok {
-		return fail(colStart, "not a time cell or a time in the form HH:MM that exists on that date")
+		return r.fail(line, colStart, "not a time cell or a time in the form HH:MM that exists on that date")
 	}
 	end, ok := clockOn(date, get(colEnd), zone)
 	if !ok {
-		return fail(colEnd, "not a time cell or a time in the form HH:MM that exists on that date")
+		return r.fail(line, colEnd, "not a time cell or a time in the form HH:MM that exists on that date")
 	}
-	if !end.After(start) {
-		return fail(colEnd, "end is not after start")
+	if err := lesson.ValidateSpan(start, end); err != nil {
+		return r.fail(line, colEnd, domainReason(err))
 	}
 
-	key := keyAutoStart + date.Format(dateLayout) + " " + start.Format(clockLayout) + " " + title
+	key, keyCol := keyAutoStart+date.Format(dateLayout)+" "+start.Format(clockLayout)+" "+title, colTitle
 	if uid := get(colUID); r.cols[colUID] >= 0 && uid != "" {
-		key = keyIDStart + uid
+		key, keyCol = keyIDStart+uid, colUID
+	}
+
+	if err := lesson.ValidateSourceUID(importplan.SourceXLSX.UID(key)); err != nil {
+		if keyCol == colTitle { // the automatic identity contains the title
+			return r.fail(line, colTitle, "title too long for the lesson identity; add a uid column")
+		}
+		return r.fail(line, colUID, domainReason(err))
 	}
 	return importplan.Row{
 		Line: line, Key: key,
 		Content: lesson.Content{Title: title, Start: start, End: end, TimeZone: zone.String()},
 	}, nil
+}
+
+// domainReason strips the sentinel prefix, as importplan does: "title longer than 512 bytes".
+func domainReason(err error) string {
+	return strings.TrimPrefix(err.Error(), lesson.ErrInvalidLesson.Error()+": ")
 }
 
 // date reads YYYY-MM-DD text or a whole-day date serial; the result is midnight UTC of that civil date.
