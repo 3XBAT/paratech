@@ -404,3 +404,17 @@ func TestJobPayloadAndKey(t *testing.T) {
 		}
 	}
 }
+
+func TestBlocks(t *testing.T) {
+	for _, s := range Statuses() {
+		t.Run(string(s), func(t *testing.T) {
+			d := inStatus(t, s)
+			if got := d.Blocks("a1"); got != s.IsUnresolved() {
+				t.Fatalf("Blocks(own assignment) in %s = %v", s, got)
+			}
+			if d.Blocks("a2") {
+				t.Fatalf("Blocks(other assignment) in %s", s)
+			}
+		})
+	}
+}
