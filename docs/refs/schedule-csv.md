@@ -27,7 +27,8 @@ Physics,2026-10-14,10:45,12:15,Europe/Moscow,
 
 ## Identity and re-import
 - With `uid`: the lesson is `csv:id:<uid>`; changing its time or title shows as "changed".
-- Without `uid`: `csv:auto:<date> <start> <title>`; moving it shows as removed + added.
+- Without `uid`: `csv:auto:<date> <start> <title>`; a change of title, date or start shows as removed + added
+  (only an `end` change shows as "changed").
 - A CSV file is the full CSV schedule: CSV lessons missing from the new file are removed (soft delete).
   Manual lessons and ICS/XLSX lessons are never touched.
 - Re-importing the same file changes nothing.

@@ -104,7 +104,7 @@ func (l *Lesson) validate() error {
 }
 
 // ChangeContent replaces what the lesson shows. A real change bumps the content revision, so the calendar projection
-// becomes pending; the same content changes nothing and reports false.
+// becomes pending; a new start time also clears StartNotifiedAt. The same content changes nothing and reports false.
 func (l *Lesson) ChangeContent(c Content, now time.Time) (changed bool, err error) {
 	switch {
 	case l.Deleted():
@@ -119,6 +119,10 @@ func (l *Lesson) ChangeContent(c Content, now time.Time) (changed bool, err erro
 		return false, nil
 	}
 
+	// A moved lesson starts again later, so its "lesson is starting" prompt must be raised again (PRD 6.1).
+	if !c.Start.Equal(l.content.Start) {
+		l.startNotifiedAt = time.Time{}
+	}
 	l.content = c
 	l.contentRevision++
 	l.updatedAt = now

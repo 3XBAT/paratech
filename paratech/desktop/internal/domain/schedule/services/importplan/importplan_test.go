@@ -257,3 +257,27 @@ func TestFingerprintChangesWithVersion(t *testing.T) {
 		t.Error("a lesson saved meanwhile did not change the fingerprint")
 	}
 }
+
+func TestFingerprintChangesWithConflictingLesson(t *testing.T) {
+	parsed := Parsed{Rows: []Row{row(2, "math", content("Math", at(0)))}}
+	build := func(c lesson.Content) Plan {
+		t.Helper()
+		p, err := Build(SourceCSV, parsed, []*lesson.Lesson{stored(t, "l-manual", "", c, false)})
+		if err != nil || len(p.Conflicts) != 1 {
+			t.Fatalf("conflicts = %+v, err %v", p.Conflicts, err)
+		}
+		return p
+	}
+	base := content("Manual", at(0).Add(30*time.Minute))
+	moved := base
+	moved.Start, moved.End = base.Start.Add(-15*time.Minute), base.End.Add(-15*time.Minute)
+	longer := base
+	longer.End = base.End.Add(time.Hour)
+
+	a := build(base)
+	for name, c := range map[string]lesson.Content{"moved start": moved, "longer end": longer} {
+		if build(c).Fingerprint == a.Fingerprint {
+			t.Errorf("%s of the conflicting kept lesson did not change the fingerprint", name)
+		}
+	}
+}

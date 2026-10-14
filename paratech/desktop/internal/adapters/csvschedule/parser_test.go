@@ -26,7 +26,7 @@ func TestParseValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := "ï»¿Title,Date,Start,End,TimeZone,UID,Room\r\n" +
+	src := "\xef\xbb\xbfTitle,Date,Start,End,TimeZone,UID,Room\r\n" +
 		"Math,2026-10-14,09:00,10:30,Europe/Moscow,m-1,101\r\n" +
 		"\"Physics, lab\",2026-10-14,9:45,11:15,UTC,,202\r\n" +
 		"=SUM(A1),2026-10-15, 12:00 , 13:00 ,Europe/Moscow,,\r\n"
@@ -54,6 +54,15 @@ func TestParseValid(t *testing.T) {
 	}
 	if !p.Rows[0].Content.Start.Equal(time.Date(2026, 10, 14, 6, 0, 0, 0, time.UTC)) {
 		t.Errorf("Moscow 09:00 is %v, want 06:00 UTC", p.Rows[0].Content.Start.UTC())
+	}
+}
+
+func TestParseStripsUTF8BOM(t *testing.T) {
+	// Built from raw bytes so the source cannot hide a mis-encoded BOM.
+	src := string([]byte{0xEF, 0xBB, 0xBF}) + "title,date,start,end,timezone\nMath,2026-10-14,09:00,10:00,UTC\n"
+	p := parse(t, src)
+	if len(p.Errors) != 0 || len(p.Rows) != 1 || p.Rows[0].Content.Title != "Math" {
+		t.Fatalf("parsed = %+v", p)
 	}
 }
 
@@ -117,7 +126,7 @@ func TestParseFileErrors(t *testing.T) {
 		line int
 	}{
 		{"empty", "", ErrHeader, 0},
-		{"bom only", "ï»¿", ErrHeader, 0},
+		{"bom only", "\xef\xbb\xbf", ErrHeader, 0},
 		{"missing column", "title,date,start,end\nMath,2026-10-14,09:00,10:00\n", ErrHeader, 1},
 		{"duplicate column", "title,date,start,end,timezone,Title\n", ErrHeader, 1},
 		{"not utf-8", "title,date,start,end,timezone\nMa\xffth,2026-10-14,09:00,10:00,UTC\n", ErrEncoding, 0},

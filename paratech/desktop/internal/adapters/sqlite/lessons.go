@@ -67,6 +67,7 @@ func (r *LessonRepository) ApplyChanges(ctx context.Context, upserts, deleted []
 	if err != nil {
 		return err
 	}
+	// Inside an outer Tx, Do joins it: an outer rollback undoes the rows but not this, so reload (ADR-0004(d)).
 	for _, l := range batch {
 		l.Persisted(l.Version() + 1)
 	}

@@ -41,7 +41,7 @@ const (
 	keyIDStart   = "id:"
 )
 
-var bom = []byte("ï»¿")
+var bom = []byte{0xEF, 0xBB, 0xBF} // UTF-8 BOM, written by Excel "CSV UTF-8"
 
 // Parser reads the CSV schedule format of the package comment. The zero value is ready to use.
 type Parser struct{}

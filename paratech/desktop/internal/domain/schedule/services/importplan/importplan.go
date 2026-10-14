@@ -331,6 +331,8 @@ func fingerprint(p Plan) string {
 		num(int64(c.Line))
 		num(int64(c.WithLine))
 		field(string(c.WithLesson))
+		// A kept lesson's version is not in the plan, so its shown content must be, or an edit of it keeps the token.
+		writeContent(field, num, c.WithContent)
 	}
 	if p.ConflictsTruncated {
 		field("T")

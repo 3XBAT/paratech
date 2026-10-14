@@ -233,6 +233,44 @@ func TestChangeContent(t *testing.T) {
 	})
 }
 
+func TestChangeContentStartNotification(t *testing.T) {
+	notified := t0.Add(-5 * time.Minute)
+	tests := []struct {
+		name   string
+		mutate func(*Content)
+		kept   bool
+	}{
+		{"moved start clears it", func(c *Content) { c.Start, c.End = c.Start.Add(time.Hour), c.End.Add(time.Hour) }, false},
+		{"title only keeps it", func(c *Content) { c.Title = "Physics" }, true},
+		{"end only keeps it", func(c *Content) { c.End = c.End.Add(time.Minute) }, true},
+		{"same instant in another location keeps it", func(c *Content) {
+			c.Title = "Physics"
+			c.Start = c.Start.In(time.FixedZone("MSK", 3*3600))
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := validState()
+			s.StartNotifiedAt = notified
+			l, err := Restore(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := l.Content()
+			tt.mutate(&c)
+			if changed, err := l.ChangeContent(c, t0.Add(time.Hour)); err != nil || !changed {
+				t.Fatalf("changed=%v err=%v", changed, err)
+			}
+			if kept := l.StartNotifiedAt().Equal(notified); kept != tt.kept {
+				t.Fatalf("StartNotifiedAt = %v, kept %v, want kept %v", l.StartNotifiedAt(), kept, tt.kept)
+			}
+			if !tt.kept && !l.StartNotifiedAt().IsZero() {
+				t.Fatalf("StartNotifiedAt = %v, want zero", l.StartNotifiedAt())
+			}
+		})
+	}
+}
+
 func TestMarkDeleted(t *testing.T) {
 	t1 := t0.Add(time.Hour)
 	l := newLesson(t)
