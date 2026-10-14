@@ -6,6 +6,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,7 +81,18 @@ type sttEnv struct {
 	rec         *recording.Recording
 }
 
+// sttOptions replace parts of the stack; the zero value is whispercli with the fake binary and no power monitor.
+type sttOptions struct {
+	engine func(store *filestore.Store) transcribe.STTEngine
+	power  jobrunner.PowerMonitor
+}
+
 func newSTTEnv(t *testing.T) *sttEnv {
+	t.Helper()
+	return newSTTEnvWith(t, sttOptions{})
+}
+
+func newSTTEnvWith(t *testing.T, opts sttOptions) *sttEnv {
 	t.Helper()
 	dir := t.TempDir()
 	e := &sttEnv{t: t, dataRoot: filepath.Join(dir, "data"), clock: testenv.NewFakeClock(sttT0), events: &sttEvents{}}
@@ -95,15 +108,20 @@ func newSTTEnv(t *testing.T) *sttEnv {
 	e.models = sqlite.NewModelRepository(e.db)
 	e.transcripts = sqlite.NewTranscriptRepository(e.db)
 
-	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine, err := whispercli.New(whispercli.Config{
-		Binary: bin, DataRoot: e.dataRoot, WorkDir: filepath.Join(e.dataRoot, sttWorkDir), Threads: 1,
-	}, store, store)
-	if err != nil {
-		t.Fatalf("whispercli.New: %v", err)
+	var engine transcribe.STTEngine
+	if opts.engine != nil {
+		engine = opts.engine(store)
+	} else {
+		bin, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		engine, err = whispercli.New(whispercli.Config{
+			Binary: bin, DataRoot: e.dataRoot, WorkDir: filepath.Join(e.dataRoot, sttWorkDir), Threads: 1,
+		}, store, store)
+		if err != nil {
+			t.Fatalf("whispercli.New: %v", err)
+		}
 	}
 
 	e.stt, err = transcribe.New(transcribe.Deps{
@@ -114,7 +132,11 @@ func newSTTEnv(t *testing.T) *sttEnv {
 		t.Fatal(err)
 	}
 
-	e.runner, err = jobrunner.New(jobrunner.Deps{Jobs: e.jobs, Clock: e.clock, Sleeper: e.clock}, runnerConfig(1))
+	deps := jobrunner.Deps{Jobs: e.jobs, Clock: e.clock, Sleeper: e.clock}
+	if opts.power != nil {
+		deps.Power, deps.Settings = opts.power, sqlite.NewSettingsRepository(e.db)
+	}
+	e.runner, err = jobrunner.New(deps, runnerConfig(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,3 +423,115 @@ func TestSTTJobMissingRecordingFailsAtOnce(t *testing.T) {
 		t.Errorf("attempts %d, last error %q", j.Attempts(), j.LastError())
 	}
 }
+
+// pacedSTT is FakeSTT with a paced mode: it reports 10%, signals started and then reports one more step per value on
+// next until it is killed, so the test decides when the runner sees a report.
+type pacedSTT struct {
+	*testenv.FakeSTT
+	paced   atomic.Bool
+	started chan struct{}
+	next    chan struct{}
+}
+
+func (p *pacedSTT) Transcribe(ctx context.Context, audio, model, out shared.ArtifactRef, progress func(percent int)) error {
+	if !p.paced.Load() {
+		return p.FakeSTT.Transcribe(ctx, audio, model, out, progress)
+	}
+	progress(10)
+	p.started <- struct{}{}
+	for percent := 20; ; percent = min(percent+10, 100) {
+		select {
+		case <-p.next:
+			progress(percent)
+		case <-ctx.Done():
+			return fmt.Errorf("paced stt: stopped: %w", ctx.Err())
+		}
+	}
+}
+
+// TestSTTJobPowerLossWaitsAndResumes (PRD section 7.4, section 14 case 12): with process_only_on_ac_power on, a
+// running STT job that loses AC power stops at its next report and waits without a transcript; when power returns it
+// completes with exactly one transcript.
+func TestSTTJobPowerLossWaitsAndResumes(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	power := testenv.NewFakePower(true)
+	doc, err := transcript.NewDocument("ru", []transcript.Segment{{StartMs: 0, EndMs: 1500, Text: "Привет"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &pacedSTT{started: make(chan struct{}, 1), next: make(chan struct{})}
+	engine.paced.Store(true)
+	e := newSTTEnvWith(t, sttOptions{
+		engine: func(store *filestore.Store) transcribe.STTEngine {
+			engine.FakeSTT = testenv.NewFakeSTT(store, doc)
+			return engine
+		},
+		power: power,
+	})
+
+	st, err := e.settings().Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetProcessOnlyOnACPower(true, e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.settings().Save(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
+
+	m := e.installModel("m-1", "base", "1", testenv.WhisperOK)
+	e.enqueue("job-1", e.rec.ID(), m.ID())
+	e.start()
+	<-engine.started
+
+	// A second STT job queues behind the running one (one worker); once it parks, the runner has seen the loss.
+	other := e.completedRecording("rec-2")
+	e.enqueue("job-2", other.ID(), m.ID())
+	power.Set(false)
+	e.waitFor("job-2", job.StatusWaitingForPower)
+
+	// The next report is refused, the use case kills the engine and the attempt is given back.
+	select {
+	case engine.next <- struct{}{}:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the engine did not wait for the next step")
+	}
+	e.waitFor("job-1", job.StatusWaitingForPower)
+	if j := e.job("job-1"); j.Attempts() != 0 || j.LastError() != "" {
+		t.Errorf("waiting job: attempts %d, last error %q", j.Attempts(), j.LastError())
+	}
+	if _, err := e.transcripts.Get(context.Background(), "job-1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("transcript after the power loss: %v, want ErrNotFound", err)
+	}
+	if files := e.transcriptFiles(); len(files) != 0 {
+		t.Fatalf("transcripts after the power loss: %v", files)
+	}
+	if ev := e.events.list(); len(ev) != 0 {
+		t.Fatalf("events after the power loss: %v", ev)
+	}
+
+	// Power returns: both jobs run to the end; job-1 has exactly one transcript.
+	engine.paced.Store(false)
+	power.Set(true)
+	e.waitFor("job-1", job.StatusCompleted)
+	e.waitFor("job-2", job.StatusCompleted)
+
+	if j := e.job("job-1"); j.Attempts() != 1 || j.LastError() != "" {
+		t.Errorf("completed job: attempts %d, last error %q", j.Attempts(), j.LastError())
+	}
+	if files := e.transcriptFiles(); len(files) != 1 {
+		t.Errorf("transcripts of the recording: %v, want one", files)
+	}
+	if tr, err := e.transcripts.Get(context.Background(), "job-1"); err != nil || tr.RecordingID() != e.rec.ID() {
+		t.Fatalf("transcript of job-1: %v", err)
+	}
+	if ev := e.events.list(); len(ev) != 2 {
+		t.Errorf("events = %+v, want one per job", ev)
+	}
+	if calls := engine.Calls(); len(calls) != 2 {
+		t.Errorf("unpaced engine calls = %d, want 2 (the resumed job-1 and job-2)", len(calls))
+	}
+}
+
+func (e *sttEnv) settings() *sqlite.SettingsRepository { return sqlite.NewSettingsRepository(e.db) }
