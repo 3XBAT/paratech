@@ -23,6 +23,8 @@ func TestLayeredPrefersTheBuiltApp(t *testing.T) {
 		{name: "popup from committed pages", fsys: layered{built, committed}, file: "popup.html", want: "popup", found: true},
 		{name: "fallback without a build", fsys: layered{fstest.MapFS{}, committed}, file: "index.html", want: "fallback", found: true},
 		{name: "missing everywhere", fsys: layered{built, committed}, file: "nope.js"},
+		{name: "dotfile refused", fsys: layered{fstest.MapFS{".env": {Data: []byte("x")}}}, file: ".env"},
+		{name: "dot directory refused", fsys: layered{fstest.MapFS{".git/config": {Data: []byte("x")}}}, file: ".git/config"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

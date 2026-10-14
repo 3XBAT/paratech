@@ -81,7 +81,7 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if a.cfg.DataDir == "" {
 		return wails.Core{}, fmt.Errorf("app: no data directory: pass --data-dir or set %s", config.EnvDataDir)
 	}
-	// 0o700: the data directory is private to the user (PRD section 13.1).
+	// Windows ignores the 0o700 mode bits; privacy comes from the per-user %LOCALAPPDATA% ACL (PRD section 13.1).
 	if err := os.MkdirAll(a.cfg.DataDir, 0o700); err != nil {
 		return wails.Core{}, fmt.Errorf("app: create data directory: %w", err)
 	}

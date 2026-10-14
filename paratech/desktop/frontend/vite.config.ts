@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "../internal/input/wails/assets/app",
+    // outDir must stay the dedicated app/ subfolder: emptyOutDir wipes it, and the committed popup lives next to it.
     emptyOutDir: true,
   },
 });
