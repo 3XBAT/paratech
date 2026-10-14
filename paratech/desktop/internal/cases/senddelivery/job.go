@@ -122,6 +122,9 @@ func (s *Service) notHandedOver(ctx context.Context, id shared.DeliveryID, last 
 		return err
 	}
 
+	// The failure may be the job's own timeout: settle the delivery with a context that is not cancelled.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resultSaveTimeout)
+	defer cancel()
 	d, gerr := s.deliveries.Get(ctx, id)
 	if gerr != nil {
 		return errors.Join(err, gerr)
