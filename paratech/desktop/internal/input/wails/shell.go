@@ -32,6 +32,10 @@ type Options struct {
 // Core is what the pages of the main window call through the bindings.
 type Core struct {
 	Settings SettingsUseCase
+	Activity ActivityUseCase
+	// Stopper and Forcer are optional: without them the page lists but cannot act (ErrActionUnavailable).
+	Stopper RecordingStopper
+	Forcer  JobForcer
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -114,6 +118,7 @@ func (s *Shell) ShowMain() error {
 // bindings are the services bound to the pages; Wails needs each one as its concrete type.
 type bindings struct {
 	settings *SettingsService
+	activity *ActivityService
 }
 
 // openBindings opens the core and builds the services bound to the pages.
@@ -125,7 +130,13 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Settings == nil {
 		return bindings{}, errors.New("wails: open core: no settings use case")
 	}
-	return bindings{settings: NewSettingsService(core.Settings, s.opts.Log)}, nil
+	if core.Activity == nil {
+		return bindings{}, errors.New("wails: open core: no activity use case")
+	}
+	return bindings{
+		settings: NewSettingsService(core.Settings, s.opts.Log),
+		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
+	}, nil
 }
 
 func (s *Shell) markStarted() error {
