@@ -9,6 +9,7 @@ import (
 	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
+	"paratech/desktop/internal/domain/transcription/values"
 )
 
 // ModelRepository stores the installed STT models in the local database (PRD section 8: name, version, size,
@@ -89,6 +90,33 @@ type ArtifactStore interface {
 	// Delete removes a file or a whole directory tree. Deleting what is already gone is not an error
 	// (PRD section 8: model removal).
 	Delete(ctx context.Context, ref shared.ArtifactRef) error
+
+	// Append adds content to the end of a file, creating it, and flushes it; the bytes written before a failure
+	// stay, so a partial download can resume (PRD section 8: resume support). It returns how many bytes it wrote,
+	// also on error.
+	Append(ctx context.Context, ref shared.ArtifactRef, content io.Reader) (int64, error)
+
+	// Rename moves a file to a reference that does not exist yet, for example a verified download to its installed
+	// name (PRD section 8.1). An existing target yields shared.ErrConflict.
+	Rename(ctx context.Context, from, to shared.ArtifactRef) error
+}
+
+// ModelSource fetches a catalog model file over the network (PRD section 8: download started by the application,
+// with resume support). Implemented by the httpdownload adapter. It only transfers bytes: the use case decides with
+// the catalog entry what a reply means (values.CatalogEntry.PlanResume).
+type ModelSource interface {
+	// Fetch requests src from byte offset (0: the whole file) and returns how the server answered and the body,
+	// which the caller closes (PRD sections 8 and 8.1). The request and every redirect go only to https hosts of
+	// allow, otherwise the error wraps values.ErrHostNotAllowed (PRD section 13.2: no arbitrary outbound URLs). A
+	// RangeNotSatisfiable reply has an empty body.
+	Fetch(ctx context.Context, src values.SourceURL, offset int64, allow values.HostAllowlist) (values.RangeReply, io.ReadCloser, error)
+}
+
+// DiskSpace reports the free disk space where model files are stored (PRD section 8: warn about required disk space
+// before download). Implemented by the filestore adapter.
+type DiskSpace interface {
+	// FreeBytes returns the bytes available to this user on the disk of the data directory (PRD section 8).
+	FreeBytes(ctx context.Context) (int64, error)
 }
 
 // CatalogSource supplies the catalog manifest of downloadable models as raw bytes (PRD section 8.1). The use case
