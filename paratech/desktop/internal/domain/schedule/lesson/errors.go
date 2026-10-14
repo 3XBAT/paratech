@@ -10,4 +10,13 @@ var (
 
 	// ErrDeleted means a change was requested on a soft-deleted lesson.
 	ErrDeleted = errors.New("lesson is deleted")
+
+	// ErrInvalidLead is returned for a start announcement lead time outside 0..MaxStartLead.
+	ErrInvalidLead = errors.New("invalid start announcement lead time")
+
+	// ErrAlreadyAnnounced means the "lesson is starting" prompt of this start was already raised.
+	ErrAlreadyAnnounced = errors.New("lesson start is already announced")
+
+	// ErrNotDue means the start announcement was requested outside its window [start-lead, end).
+	ErrNotDue = errors.New("lesson start announcement is not due")
 )

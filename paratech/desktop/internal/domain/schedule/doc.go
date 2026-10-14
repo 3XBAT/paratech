@@ -18,5 +18,7 @@
 //   - Import: ICS, CSV or XLSX file parsed into lessons through parse, validate, preview, commit; a malformed
 //     file never changes the local schedule.
 //   - Source UID: the identity of an entry in the imported file, used to diff a new import against the stored schedule.
+//   - Start announcement: the "lesson is starting" event that offers the recording prompt, raised once per start
+//     time, from the lead time before the start until the end of the lesson.
 //   - Calendar projection: the copy of a lesson in the app-created Google calendar; an external view, never the source of truth.
 package schedule
