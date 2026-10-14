@@ -2,8 +2,9 @@
 // with the cloud LLM and the minimal context sent to it (PRD sections 9 and 10, AC-13, AC-18).
 // Aggregates: domain/coursework/assignment, domain/coursework/proposal (the side-effect boundary, PRD section 13.3);
 // homeworkdraft with versions is added by a later task.
-// Value objects shared by aggregates live in domain/coursework/values. The domain service
-// domain/coursework/services/contextselection is added by a later task.
+// Value objects shared by aggregates live in domain/coursework/values. Domain services:
+// domain/coursework/services/contextselection (the minimal context of an LLM operation, PRD section 9.1) and
+// domain/coursework/services/prompts (instructions, answer schemas and strict answer parsing).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //

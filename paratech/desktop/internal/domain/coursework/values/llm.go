@@ -8,8 +8,8 @@ import (
 )
 
 // Operation names an LLM operation (PRD sections 9.1 and 9.2). The catalog is closed: the Hub only serves
-// these operations, so the core refuses to build a request for anything else. TASK-041 attaches prompts and
-// schemas to them.
+// these operations, so the core refuses to build a request for anything else. Their prompts and answer
+// schemas are in domain/coursework/services/prompts.
 type Operation string
 
 // LLM operations (PRD sections 9.1 and 9.2).
