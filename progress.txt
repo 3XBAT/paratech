@@ -795,3 +795,41 @@
 - Low (док): превращение одиночного события в серию (или обратно) меняет ключи -> удаление + добавление; добавить фразу в schedule-ics.md
 - Nit: временная проверка 10 с в TestManyDatesInOneEvent не ловит квадратичный регресс (работу ограничивает лимит)
 - ПРОЦЕСС (важно): .github/scripts/verify.sh делает `git stash -u` / `git stash pop`, а stash общий для всех worktree. В чистом дереве pop забирает чужой stash: в этой задаче verify.sh из paratech-team2 вытащил stash ветки ralph/20261014-task-044 (go.mod/go.sum с go-mail); он возвращён в stash с пометкой. Финальные проверки шли копией verify.sh без шагов stash/rebase (ветка уже на origin/master). verify.sh нужно поправить (stash только при наличии изменений, или pop по своему ref)
+
+## [TASK-023] UI: экран записей и задач (статусы, причина ожидания, «Запустить сейчас»)
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/jobs/job: Status.OffersRunNow() (только WAITING_FOR_POWER); другое поведение задач не менялось
+- sqlite: ListJobActivityIDs / ListRecordingActivityIDs — все незавершённые строки (статусы из job.ActiveStatuses() / recording.UnfinishedStatuses()) + 100 последних завершённых, новые сверху; строки читаются по одной, нечитаемые пропускаются и возвращаются их id
+- cases/activity: списки для экрана (DTO, Stoppable из recording.CanTransition(..., STOPPING), Waiting, RunNowOffered); нечитаемые id логируются при изменении набора
+- input/wails ActivityService: ListRecordings, ListJobs, StopRecording(id), RunJobNow(id); ошибки странице — фиксированные тексты, причины в лог; id проверяются shared.*ID.Validate
+- app.openCore: activity подключён; Stopper/Forcer = nil (рекордер и job runner в app ещё не собираются) -> кнопки отвечают «Это действие пока недоступно.»
+- frontend: RecordingsPage (Записи, Задачи), activityView.ts (подписи статусов, причины WAITING_FOR_POWER/NETWORK/QUOTA, длительность, время идущей записи), bindings/activity.ts; опрос раз в 3 с без наложения, списки грузятся независимо (allSettled)
+- Изменённые существующие тесты: settings_test.go TestFrontendCallsBoundNames — таблица (settings.ts + activity.ts); shell_test.go validOptions — Activity обязателен; TestOpenBindings — проверка activity и кейс без него
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1-2: npm ci && npm run build && npm run test (16 тестов)
+- [x] Шаг 3: activity.test.mjs — отдельная непустая причина для каждого WAITING_*; список WAITING_* сверен с доменом
+- Ревью: approve (3 medium: нечитаемая строка, ожидающая задача за пределом 100, Promise.all -> исправлено; повторное ревью approve). Security: найдено 0, опровергнуто 0, исправлено 0 (две проверки: весь diff и коммиты исправлений)
+
+### Решения (подтвердить)
+- Экран: все незавершённые + 100 последних завершённых записей/задач
+- last_error задачи и problem записи показываются пользователю как есть (текстом, без HTML) — могут содержать локальные пути/stderr
+- Кнопка «Остановить» только для RECORDING (STARTING не предлагается: домен разрешает STOPPING только из RECORDING)
+
+### Ручная проверка владельцем на Windows
+- Идущая запись: «Идёт запись», растущее время, «Остановить» -> «Остановка…» -> «Завершена» с h:mm:ss (после подключения рекордера)
+- На батарее с «Обрабатывать только от розетки»: задача «Ждёт питания от сети» и «Запустить сейчас»; кнопка исчезает после запуска (после подключения job runner)
+- Тексты ошибок по-русски (напр. стоп записи прошлого сеанса -> «Запись не идёт в этом сеансе.»); если видна общая фраза — рантайм Wails оборачивает ошибку иначе
+- Автообновление ~3 с, переключение разделов без ошибок; вёрстка таблиц, перенос длинных ошибок, пустые/загрузочные состояния
+
+### Заметки (follow-up)
+- НУЖНА ЗАДАЧА (владелец): собрать в app recordingsession.Service и jobrunner.Service и передать как wails.Core.Stopper / Core.Forcer; до этого кнопки не работают, а списки пусты (AC-22 «Run now» покрыт частично)
+- Low: адаптер сам берёт набор незавершённых статусов из домена (в modelcatalog его передаёт use case) — можно передавать через порт
+- Low: при недоступном ядре одинаковая ошибка показывается в обеих секциях
+- Low: recordings.go повторяет цикл статусов вместо хелпера; комментарий recording.UnfinishedStatuses говорит только о восстановлении
+- Low: нет индекса по created_at (опрос раз в 3 с сканирует таблицы; для MVP ок); коммит 4c913f7 сам по себе не собирается (собирается с 18af6fa)
+- ПРОЦЕСС: старый verify.sh (база ветки до PR #34) снова вытащил в дерево team2 чужой stash coordinator #1 (go.mod/go.sum с go-mail, TASK-044); вернуть его в stash не дали права; изменения сохранены патчем в scratchpad супервизора и не закоммичены
