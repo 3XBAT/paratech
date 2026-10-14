@@ -75,10 +75,14 @@ type Config struct {
 	Username string   // the login; the password is in the credential store
 	From     string   // the sender address, a plain local@domain
 
-	CredentialName     string        // "": DefaultCredentialName
-	Timeout            time.Duration // whole session; 0: DefaultTimeout
-	MaxAttachmentBytes int64         // 0: DefaultMaxAttachmentBytes
-	Body               string        // text of the email; "": DefaultBody
+	// Timeout is the I/O deadline of the session; 0: DefaultTimeout. go-mail sets it when it dials and resets it once
+	// before the message, so it bounds the setup (connect, TLS, EHLO, AUTH) and then MAIL through the final reply
+	// separately: a session may take up to twice as long. The job Timeout must be at least 2x this value.
+	Timeout time.Duration
+
+	CredentialName     string // "": DefaultCredentialName
+	MaxAttachmentBytes int64  // 0: DefaultMaxAttachmentBytes
+	Body               string // text of the email; "": DefaultBody
 
 	// RootCAs replaces the system roots for verifying the server certificate; nil uses the system roots. Tests pass
 	// the CA of the fake server. Verification itself is never disabled.
