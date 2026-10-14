@@ -6,16 +6,25 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
 	// Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
 	CountJobsWithoutIDByStatus(ctx context.Context, statuses []string) (int64, error)
+	// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+	// (ON DELETE RESTRICT), and the row is kept.
+	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
+	// Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
+	// deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
+	// reprocessed (TASK-042).
+	GetAssignment(ctx context.Context, id string) (Assignment, error)
+	GetAssignmentBySource(ctx context.Context, arg GetAssignmentBySourceParams) (Assignment, error)
 	// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
@@ -32,9 +41,14 @@ type Querier interface {
 	// Installed STT models (PRD section 8) with the optimistic-concurrency protocol of ADR-0004(d), and the pin lookup
 	// that blocks the removal of a model an unfinished job depends on (PRD section 14 case 11).
 	GetSttModel(ctx context.Context, id string) (SttModel, error)
+	// Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
+	// the transcript id, one summary per transcript (TASK-042).
+	GetSummary(ctx context.Context, id string) (Summary, error)
 	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
 	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).
 	GetTranscript(ctx context.Context, id string) (Transcript, error)
+	// A never-stored assignment (version 0) is inserted with version 1.
+	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
 	// A never-stored lesson (version 0) is inserted with version 1.
@@ -47,12 +61,15 @@ type Querier interface {
 	// A never-stored model (version 0) is inserted with version 1. A second (name, model_version) violates the UNIQUE
 	// rule and surfaces as shared.ErrDuplicate.
 	InsertSttModel(ctx context.Context, arg InsertSttModelParams) error
+	// A never-stored summary (version 0) is inserted with version 1.
+	InsertSummary(ctx context.Context, arg InsertSummaryParams) error
 	// A never-stored transcript (version 0) is inserted with version 1.
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
+	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
@@ -70,6 +87,9 @@ type Querier interface {
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 	NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error)
 	PurgeDeletedLesson(ctx context.Context, id string) (int64, error)
+	// Compare-and-swap on the loaded version. The origin (lesson, transcript, source index) and the creation time never
+	// change, so a stale save cannot undo ON DELETE SET NULL of the lesson or the transcript.
+	UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (int64, error)
 	// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
 	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
@@ -85,6 +105,9 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. An installed model does not change today; the update exists so that Save
 	// keeps the protocol of every repository.
 	UpdateSttModel(ctx context.Context, arg UpdateSttModelParams) (int64, error)
+	// Compare-and-swap on the loaded version. The transcript and the lesson never change, so a stale save cannot undo
+	// ON DELETE SET NULL.
+	UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error)
 	// Compare-and-swap on the loaded version. A transcript does not change today; the update exists so that Save keeps
 	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
 	// stale save cannot undo ON DELETE SET NULL of the model.

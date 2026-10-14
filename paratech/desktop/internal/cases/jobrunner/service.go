@@ -39,6 +39,7 @@ const (
 	outcomeInterrupted = "interrupted"
 	outcomeDropped     = "dropped"
 	outcomeLeftRunning = "left_running"
+	outcomeWaiting     = "waiting"
 )
 
 // Service runs persistent jobs on a pool of workers (PRD section 7). Handlers are registered per job type before
@@ -52,7 +53,9 @@ const (
 //   - shutdown during an attempt: a RecoveryRequeue job is requeued like a stale RUNNING job at startup recovery;
 //     any other job stays RUNNING and Recover handles it at the next start, as after a crash (hard rule 7);
 //   - AC power lost during a Heavy attempt with "only on AC power" on: the next progress report saves the checkpoint
-//     and returns powerpolicy.ErrPowerLost, and the job becomes WAITING_FOR_POWER with the attempt given back.
+//     and returns powerpolicy.ErrPowerLost, and the job becomes WAITING_FOR_POWER with the attempt given back;
+//   - an error that wraps shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded (backoff.WaitStatus): the job becomes
+//     WAITING_FOR_NETWORK or WAITING_FOR_QUOTA with the attempt given back, and is requeued after Config.Rechecks.
 //
 // Power-aware processing (PRD section 7.4, AC-21, AC-22) follows powerpolicy: on battery with the setting on, Heavy
 // jobs are not claimed and due QUEUED ones are parked in WAITING_FOR_POWER; when AC power returns or the setting is
@@ -109,6 +112,12 @@ func New(deps Deps, cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("%w: poll interval %v", ErrInvalidConfig, cfg.PollInterval)
 	case cfg.DefaultTimeout <= 0:
 		return nil, fmt.Errorf("%w: default timeout %v", ErrInvalidConfig, cfg.DefaultTimeout)
+	}
+	if cfg.Rechecks == (backoff.Rechecks{}) {
+		cfg.Rechecks = backoff.DefaultRechecks()
+	}
+	if err := cfg.Rechecks.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
 	policy, err := backoff.New(cfg.Backoff)
 	if err != nil {
@@ -320,7 +329,8 @@ func (s *Service) worker() {
 	}
 }
 
-// keeper moves RETRY_WAIT jobs whose backoff has elapsed back to QUEUED and applies the power policy every poll.
+// keeper moves RETRY_WAIT jobs whose backoff has elapsed, and network and quota waits that are due for a recheck, back
+// to QUEUED and applies the power policy every poll.
 func (s *Service) keeper() {
 	defer s.wg.Done()
 	for s.loopCtx.Err() == nil {
@@ -333,12 +343,16 @@ func (s *Service) keeper() {
 }
 
 func (s *Service) promoteDue(ctx context.Context) error {
-	waiting, err := s.jobs.ListByStatus(ctx, job.StatusRetryWait)
+	waiting, err := s.jobs.ListByStatus(ctx, job.StatusRetryWait, job.StatusWaitingForNetwork, job.StatusWaitingForQuota)
 	if err != nil {
 		return err
 	}
 	now := s.clock.Now()
 	for _, j := range waiting {
+		// A retry is due by its backoff time (Requeue checks it); a network or quota wait by the recheck interval.
+		if j.Status() != job.StatusRetryWait && !s.cfg.Rechecks.Due(j.Status(), j.UpdatedAt(), now) {
+			continue
+		}
 		if err := j.Requeue(now); err != nil {
 			if errors.Is(err, job.ErrNotDue) {
 				continue
@@ -556,6 +570,7 @@ func (s *Service) saveFinal(ctx context.Context, j *job.Job) error {
 func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error, timeout time.Duration, recovery Recovery,
 	waitPower bool) (string, error) {
 	now := s.clock.Now()
+	wait, waits := backoff.WaitStatus(herr)
 	switch {
 	case herr == nil:
 		return outcomeCompleted, j.Complete(now)
@@ -564,6 +579,10 @@ func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error,
 	case waitPower:
 		// The checkpoint is saved and waiting is not a failure: the aggregate gives the attempt back.
 		return outcomeWaitingPower, j.WaitFor(job.StatusWaitingForPower, now)
+	case cause == nil && waits:
+		// No network or no quota (PRD sections 7.2 and 9.2): the job waits without using an attempt, and the keeper
+		// tries it again after Config.Rechecks.
+		return outcomeWaiting, j.WaitFor(wait, now)
 	case backoff.Classify(herr) == backoff.ClassPermanent:
 		return outcomeFailed, j.Fail(now, herr.Error())
 	case cause != nil && !errors.Is(cause, errTimeout) && recovery != RecoveryRequeue:

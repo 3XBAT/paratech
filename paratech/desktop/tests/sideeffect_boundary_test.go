@@ -116,3 +116,33 @@ func TestCarriesDetectsNestedModelOutput(t *testing.T) {
 		t.Fatal("EmailCommand reported as carrying model output")
 	}
 }
+
+// The post-processing of a transcript (TASK-042) only stores data: none of its ports is a side-effect port, and no
+// port it calls takes model output, so the answer of the model reaches the database only as validated aggregate values.
+func TestPostProcessorReachesNoSideEffect(t *testing.T) {
+	deps := reflect.TypeOf(homeworkflow.PostProcessDeps{})
+	ports := 0
+	for i := range deps.NumField() {
+		f := deps.Field(i)
+		if f.Type.Kind() != reflect.Interface {
+			continue
+		}
+		ports++
+		for _, se := range sideEffectPorts {
+			if f.Type == se {
+				t.Errorf("PostProcessDeps.%s is the side-effect port %s (hard rule 3)", f.Name, se.Name())
+			}
+		}
+		for j := range f.Type.NumMethod() {
+			m := f.Type.Method(j)
+			for k := range m.Type.NumIn() {
+				if in := m.Type.In(k); carries(in, map[reflect.Type]bool{}) {
+					t.Errorf("%s.%s parameter %d (%v) takes model output", f.Type.Name(), m.Name, k, in)
+				}
+			}
+		}
+	}
+	if ports < 10 {
+		t.Fatalf("checked %d ports of PostProcessDeps, the walker missed some", ports)
+	}
+}

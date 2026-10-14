@@ -9,16 +9,18 @@ import (
 )
 
 type Assignment struct {
-	ID           string
-	LessonID     sql.NullString
-	TranscriptID sql.NullString
-	Title        string
-	Description  string
-	DueAt        sql.NullInt64
-	UserEdited   int64
-	Version      int64
-	CreatedAt    int64
-	UpdatedAt    int64
+	ID            string
+	LessonID      sql.NullString
+	TranscriptID  sql.NullString
+	Title         string
+	Description   string
+	DueAt         sql.NullInt64
+	UserEdited    int64
+	Version       int64
+	CreatedAt     int64
+	UpdatedAt     int64
+	SourceIndex   sql.NullInt64
+	PromptVersion sql.NullInt64
 }
 
 type Delivery struct {
@@ -117,6 +119,18 @@ type SttModel struct {
 	Capabilities string
 	InstalledAt  int64
 	Version      int64
+}
+
+type Summary struct {
+	ID            string
+	TranscriptID  sql.NullString
+	LessonID      sql.NullString
+	Body          string
+	KeyPoints     string
+	PromptVersion int64
+	Version       int64
+	CreatedAt     int64
+	UpdatedAt     int64
 }
 
 type Transcript struct {

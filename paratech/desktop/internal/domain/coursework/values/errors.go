@@ -9,4 +9,7 @@ var (
 
 	// ErrInvalidLLMResult is returned by NewLLMResult for malformed accounting data.
 	ErrInvalidLLMResult = errors.New("invalid LLM result")
+
+	// ErrInvalidPostProcessRequest is returned for a post-processing job payload that is not a valid request.
+	ErrInvalidPostProcessRequest = errors.New("invalid post-processing request")
 )

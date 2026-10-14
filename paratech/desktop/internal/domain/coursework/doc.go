@@ -1,7 +1,8 @@
 // Package coursework is the bounded context of homework: assignments extracted from lessons, drafts generated
 // with the cloud LLM and the minimal context sent to it (PRD sections 9 and 10, AC-13, AC-18).
-// Aggregates: domain/coursework/assignment, domain/coursework/proposal (the side-effect boundary, PRD section 13.3);
-// homeworkdraft with versions is added by a later task.
+// Aggregates: domain/coursework/assignment (with its deadline), domain/coursework/summary (one per transcript),
+// domain/coursework/proposal (the side-effect boundary, PRD section 13.3); homeworkdraft with versions is added by a
+// later task.
 // Value objects shared by aggregates live in domain/coursework/values. Domain services:
 // domain/coursework/services/contextselection (the minimal context of an LLM operation, PRD section 9.1) and
 // domain/coursework/services/prompts (instructions, answer schemas and strict answer parsing).
@@ -17,7 +18,11 @@
 //
 // # Glossary
 //
-//   - Assignment: a homework item with an optional deadline; the local copy is the system of record.
+//   - Assignment: a homework item with an optional deadline; the local copy is the system of record. An assignment the
+//     user edited is never overwritten by reprocessing.
+//   - Deadline: the due time of an assignment; not a separate record.
+//   - Summary: the LLM summary of one lesson transcript, with key points.
+//   - Post-processing: the summarize and extract_homework jobs that run after a transcript is stored.
 //   - Draft: an LLM-generated homework text that the user reviews, edits and refines before sending.
 //   - LLM request: the operation, the trusted instructions and the untrusted user data sent to the Hub.
 //   - Untrusted data: transcripts and LLM output; it never triggers a side effect by itself (hard rule 3, PRD section 13.3).
