@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"paratech/desktop/config"
+	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/domain/jobs/job"
 )
 
 func newTestApp(t *testing.T, dataDir string) *App {
@@ -57,6 +60,35 @@ func TestOpenCoreStoresSettings(t *testing.T) {
 	}
 	if got.ProcessOnlyOnACPower || !got.RecordingPromptsEnabled {
 		t.Fatalf("after restart: %+v, want AC restriction off and prompts on (default)", got)
+	}
+}
+
+// The recordings and jobs page reads SQLite through the core; the actions are not wired yet.
+func TestOpenCoreListsActivity(t *testing.T) {
+	ctx := context.Background()
+	a := newTestApp(t, t.TempDir())
+	core, err := a.openCore(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if core.Activity == nil || core.Stopper != nil || core.Forcer != nil {
+		t.Fatalf("core = %+v: want the activity use case and no actions", core)
+	}
+
+	j, err := job.New(job.Spec{ID: "j1", Type: "stt", Key: "stt:r1", MaxAttempts: 3}, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sqlite.NewJobRepository(a.db).Enqueue(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := core.Activity.ListJobs(ctx)
+	if err != nil || len(jobs) != 1 || jobs[0].ID != "j1" {
+		t.Fatalf("ListJobs = %+v, %v; want the stored job", jobs, err)
+	}
+	recs, err := core.Activity.ListRecordings(ctx)
+	if err != nil || len(recs) != 0 {
+		t.Fatalf("ListRecordings = %+v, %v; want none", recs, err)
 	}
 }
 
