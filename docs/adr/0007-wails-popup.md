@@ -1,0 +1,36 @@
+# ADR-0007: Wails v3 shell, tray and recording popup
+
+- **Status:** Accepted (behavior on a real lesson to be confirmed in TASK-020)
+- **Source:** TASK-019, spike S-001, PRD §6.1, AC-01, AC-02; API notes in `docs/refs/wails.md`
+
+## Decision
+- Pin `github.com/wailsapp/wails/v3` **v3.0.0-beta.29**. The Windows backend is pure Go, so the desktop binary stays `CGO_ENABLED=0`.
+- The UI shell lives in `internal/input/wails`; Wails is imported only from `*_windows.go`. Elsewhere `Shell.Run` returns `ErrUnsupported`.
+- `app.Run` runs the shell on the main goroutine (Wails locks the main OS thread) until the context is cancelled or the user picks Quit
+  in the tray. `--headless` / `LA_HEADLESS` runs the core without UI (tests, non-Windows). The Wails signal handler is off; `main` owns signals.
+- Windows: a main window (close = hide), a tray icon (Open, Show recording popup, Quit) and a popup window created hidden.
+
+## Result (checked on Windows 10 22H2, WebView2 155, via scripts; not with Zoom)
+| Goal | Result |
+|---|---|
+| Popup without focus steal | Works with a workaround. Popup: frameless, always on top, off the taskbar, fixed size, bottom-right of the work area, `WS_EX_NOACTIVATE`. Wails `Show()` activates it anyway, so `ShowPopup` first calls `ShowWindow(SW_SHOWNOACTIVATE)`; then the foreground window stayed unchanged. Clicking the popup may activate it. |
+| Tray | Works: icon, menu, left click opens the main window. Icon is the Wails default until an app icon exists. |
+| Single instance | Works: Wails `SingleInstance` (named mutex). A second launch exits with code 0 within ~70 ms; the first one gets a callback that shows its main window (not observed visually). |
+| Graceful stop | Works: Ctrl+Break (Go maps it to `os.Interrupt` like Ctrl+C) cancels the context, the shell quits and `main` logs "gracefully stopped". |
+| Notifications | Feasible: Wails `services/notifications` (toast). Not used yet: it writes registry keys; decide with the notification policy (PRD §15). |
+| Autostart | Feasible: `app.Autostart.Enable` (HKCU `Run` key). Not enabled: it must be a user setting. |
+
+## Consequences
+- Creating a window activates it once, so at startup the hidden popup may briefly take the foreground before the main window shows.
+  Harmless now (the main window is shown at start); a start minimized to tray (autostart) must create the popup lazily or restore the foreground.
+- The single-instance check runs inside `Shell.Run`, and the second instance calls `os.Exit` there. Once `app.New` opens SQLite or starts
+  workers, the check must move before them (e.g. a named-mutex adapter).
+- Release builds must use `-tags production` (see `docs/refs/wails.md`).
+
+## Check on Windows by a human (TASK-020)
+1. Start a Zoom/Telemost call and click into its chat. Open the popup from the tray menu, then switch back to the call; better, let a test
+   build show it on a timer. Typing in the call must continue; the call window must stay in front of the main window.
+2. The popup stays above a fullscreen or maximized call window, sits next to the tray on the primary monitor, and Dismiss hides it.
+3. With two monitors (different scale): popup placement and size are correct.
+4. Closing the main window keeps the tray icon; tray "Open" brings it back; tray "Quit" ends the process.
+5. A second launch brings the running app to the front and exits.
