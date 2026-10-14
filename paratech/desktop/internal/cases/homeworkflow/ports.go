@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
@@ -42,6 +43,59 @@ type AssignmentRepository interface {
 	// A stale version happens for example when the user edited the assignment while a reprocessing job produced new
 	// values.
 	Save(ctx context.Context, a *assignment.Assignment) error
+}
+
+// ProposalRepository stores the actions the LLM proposed, with their validation and confirmation state
+// (PRD section 13.3, AC-14, AC-18). Implemented by the sqlite adapter (a later task); an in-memory fake serves tests.
+type ProposalRepository interface {
+	// Get loads a proposal (PRD section 13.3). It returns an error wrapping shared.ErrNotFound if there is none.
+	Get(ctx context.Context, id proposal.ID) (*proposal.Proposal, error)
+
+	// Save inserts or updates a proposal (PRD section 13.3). It is the version compare-and-swap of ADR-0004(d), like
+	// AssignmentRepository.Save: a stale version yields shared.ErrVersionConflict and nothing is written.
+	Save(ctx context.Context, p *proposal.Proposal) error
+}
+
+// RecipientSource reads the configured homework recipient from the local settings, the trusted source of the address a
+// homework is emailed to (PRD sections 10 and 13.3). The model never supplies it. Implemented over the settings by a
+// later task (TASK-044).
+type RecipientSource interface {
+	// HomeworkRecipient returns the configured recipient, or the zero proposal.Recipient when none is configured
+	// (PRD section 10). An error means the settings could not be read.
+	HomeworkRecipient(ctx context.Context) (proposal.Recipient, error)
+}
+
+// The three side-effect ports below are the only way an action proposal reaches the outside world (PRD section 13.3,
+// AC-18, ARCH-27). Each takes a command type that only a CONFIRMED proposal can produce, never model text, so model
+// output cannot reach them directly. Each command carries an idempotency key: the use case may repeat a call after a
+// crash or a failed save, and two concurrent executions may both call, so the implementation must make a repeat with
+// the same key harmless (hard rule 7). Implementations reject a zero command.
+
+// HomeworkMailer emails the exported homework of an assignment to the trusted recipient (PRD section 10 steps 7-10,
+// AC-14). Implemented by a later task (TASK-044) through the delivery flow, which keys the delivery by the command's
+// idempotency key and reconciles an unknown outcome instead of sending again (AC-15).
+type HomeworkMailer interface {
+	// SendHomework sends cmd.Attachment to cmd.Recipient (PRD section 10). A repeat with the same idempotency key
+	// must not send a second email. The attachment must be exactly the content the user confirmed: the adapter reads
+	// the file once, checks its SHA-256 and size against cmd.AttachmentDigest and sends those same bytes; on a
+	// mismatch it sends nothing and returns an error wrapping proposal.ErrStale (the file changed after Execute's check).
+	SendHomework(ctx context.Context, cmd proposal.EmailCommand) error
+}
+
+// HomeworkExporter writes homework text to the export file the core derived for the assignment (PRD sections 5.2 and
+// 10 step 6). Implemented over the Storage Manager (hard rule 5); the target never comes from the model.
+type HomeworkExporter interface {
+	// ExportHomework writes cmd.Content to cmd.Target atomically (PRD section 10 step 6). Writing the same command
+	// again yields the same file.
+	ExportHomework(ctx context.Context, cmd proposal.ExportCommand) error
+}
+
+// DeadlineCalendar puts an assignment deadline into the app-created calendar (PRD section 11.3, AC-17, AC-20).
+// Implemented by the googlecal adapter (TASK-051); the calendar is the adapter's dedicated one, never one the model names.
+type DeadlineCalendar interface {
+	// UpsertDeadline creates or updates the event of cmd.AssignmentID with a stable event id (PRD section 11.3:
+	// idempotent upserts).
+	UpsertDeadline(ctx context.Context, cmd proposal.CalendarCommand) error
 }
 
 // TranscriptReader gives read access to the transcript that a post-processing job works on (PRD sections 8 and 9.1).
@@ -86,6 +140,9 @@ type IDGenerator interface {
 
 	// NewJobID returns a fresh job identifier (PRD section 7.1).
 	NewJobID() shared.JobID
+
+	// NewProposalID returns a fresh identifier of an action proposal (PRD section 13.3).
+	NewProposalID() proposal.ID
 }
 
 // Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The transaction boundary
