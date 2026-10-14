@@ -29,6 +29,9 @@ type Querier interface {
 	// Installed STT models (PRD section 8) with the optimistic-concurrency protocol of ADR-0004(d), and the pin lookup
 	// that blocks the removal of a model an unfinished job depends on (PRD section 14 case 11).
 	GetSttModel(ctx context.Context, id string) (SttModel, error)
+	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
+	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).
+	GetTranscript(ctx context.Context, id string) (Transcript, error)
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
 	// A never-stored recording (version 0) is inserted with version 1.
@@ -39,6 +42,8 @@ type Querier interface {
 	// A never-stored model (version 0) is inserted with version 1. A second (name, model_version) violates the UNIQUE
 	// rule and surfaces as shared.ErrDuplicate.
 	InsertSttModel(ctx context.Context, arg InsertSttModelParams) error
+	// A never-stored transcript (version 0) is inserted with version 1.
+	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
@@ -66,6 +71,10 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. An installed model does not change today; the update exists so that Save
 	// keeps the protocol of every repository.
 	UpdateSttModel(ctx context.Context, arg UpdateSttModelParams) (int64, error)
+	// Compare-and-swap on the loaded version. A transcript does not change today; the update exists so that Save keeps
+	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
+	// stale save cannot undo ON DELETE SET NULL of the model.
+	UpdateTranscript(ctx context.Context, arg UpdateTranscriptParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)
