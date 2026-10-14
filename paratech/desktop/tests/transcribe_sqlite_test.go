@@ -44,6 +44,9 @@ var (
 
 const sttWorkDir = "stt-work"
 
+// sttAttemptTimeout is far beyond the fake time any test spends in one attempt.
+const sttAttemptTimeout = 365 * 24 * time.Hour
+
 var sttT0 = time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
 
 // sttEvents records the published completion events.
@@ -140,7 +143,12 @@ func newSTTEnvWith(t *testing.T, opts sttOptions) *sttEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := jobrunner.Registration{Type: transcribe.JobType, Handler: e.stt, Heavy: true, Recovery: jobrunner.RecoveryRequeue}
+	// The waits below advance the fake clock a second per millisecond of real time, so a slow sidecar (a loaded
+	// machine, -race) would outlive any realistic fake timeout and the runner would rightly retry the attempt.
+	// Timeouts are covered by the runner's own tests; here the attempt must not expire.
+	reg := jobrunner.Registration{
+		Type: transcribe.JobType, Handler: e.stt, Heavy: true, Recovery: jobrunner.RecoveryRequeue, Timeout: sttAttemptTimeout,
+	}
 	if err := e.runner.Register(reg); err != nil {
 		t.Fatal(err)
 	}

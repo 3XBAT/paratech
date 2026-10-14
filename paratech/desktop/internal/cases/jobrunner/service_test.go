@@ -632,6 +632,34 @@ func TestCancelIsRefused(t *testing.T) {
 	})
 }
 
+// The run stays registered until its worker leaves execute, after the final save: a cancellation in that window must
+// see the stored state, not the finished run.
+func TestCancelOfAJobSavedAsCompletedBeforeTheRunIsForgotten(t *testing.T) {
+	var (
+		saved   = make(chan struct{})
+		release = make(chan struct{})
+	)
+	e := newEnvOn(t, nil, nil, func(m *memRepo) JobRepository {
+		return &hookRepo{memRepo: m, afterSave: func(j *job.Job) {
+			if j.Status() == job.StatusCompleted {
+				close(saved)
+				<-release
+			}
+		}}
+	})
+	e.register(typeStt, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error { return nil })
+	id := e.enqueue(typeStt, 2)
+	e.start()
+
+	<-saved
+	err := e.svc.Cancel(context.Background(), id)
+	close(release)
+	if !errors.Is(err, ErrNotCancellable) {
+		t.Fatalf("Cancel = %v, want ErrNotCancellable", err)
+	}
+	e.waitStatus(id, job.StatusCompleted)
+}
+
 func TestHandlerThatFinishesDespiteCancellationCompletes(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	started, release := make(chan struct{}), make(chan struct{})
