@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/schedule/lesson"
+	"paratech/desktop/internal/domain/schedule/services/importplan"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -41,6 +42,10 @@ type LessonRepository interface {
 	// deleted rows and never issues a DELETE.
 	ApplyChanges(ctx context.Context, upserts, deleted []*lesson.Lesson) error
 
+	// ListLive returns every live (not soft-deleted) lesson, ordered by start. The import diffs a file against it and
+	// finds the conflicts with lessons it keeps (PRD sections 11.2 and 14 case 9).
+	ListLive(ctx context.Context) ([]*lesson.Lesson, error)
+
 	// ListStartingBetween returns the live lessons whose start lies in [from, to), ordered by start. The scheduler
 	// uses it to find lessons that are about to begin (PRD section 6.1). Soft-deleted lessons are not returned.
 	ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
@@ -60,6 +65,16 @@ type LessonRepository interface {
 	// returns an error wrapping shared.ErrConflict, so a live lesson can never be removed by mistake. References from
 	// recordings and assignments become NULL (ON DELETE SET NULL in the schema).
 	PurgeDeleted(ctx context.Context, id shared.LessonID) error
+}
+
+// ScheduleParser reads one import format (CSV, ICS or XLSX) into rows (PRD section 11.2, AC-16). Implemented by one
+// adapter per format (csvschedule for CSV). It only reads: nothing is stored, and the same bytes give the same rows,
+// so the commit can parse the file again and compare with the preview.
+type ScheduleParser interface {
+	// Parse reads the whole file (PRD section 11.2). Problems of single rows are returned as data in
+	// importplan.Parsed.Errors with their line numbers; an error wrapping importplan.ErrUnreadableFile means the file
+	// cannot be read at all (encoding, header, size).
+	Parse(ctx context.Context, data []byte) (importplan.Parsed, error)
 }
 
 // CalendarAdapter isolates the Google Calendar API from the core (PRD sections 4.1 and 11.3, AC-17). Implemented by
