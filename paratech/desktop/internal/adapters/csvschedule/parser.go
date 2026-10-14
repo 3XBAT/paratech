@@ -9,9 +9,10 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
+
 	// The zone database is compiled in: Windows has no IANA database and the app must not depend on a Go install.
 	_ "time/tzdata"
-	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/schedule/services/importplan"

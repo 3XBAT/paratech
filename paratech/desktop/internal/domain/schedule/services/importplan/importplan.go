@@ -302,7 +302,7 @@ func conflictOf(rows []Row, uids []string, a, b span) Conflict {
 // encode the same.
 func fingerprint(p Plan) string {
 	h := sha256.New()
-	field := func(s string) { fmt.Fprintf(h, "%d:%s", len(s), s) }
+	field := func(s string) { _, _ = fmt.Fprintf(h, "%d:%s", len(s), s) } // a hash never fails to write
 	num := func(n int64) { field(strconv.FormatInt(n, 10)) }
 
 	field(string(p.Source))
