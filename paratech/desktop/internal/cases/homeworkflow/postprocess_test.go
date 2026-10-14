@@ -113,7 +113,7 @@ func TestSummarizeStoresTheSummary(t *testing.T) {
 	if strings.Contains(r.Instructions(), "rivers") {
 		t.Fatal("transcript text leaked into the trusted instructions")
 	}
-	if want := llmKey("j1", values.OperationSummary); r.IdempotencyKey() != want || !strings.HasPrefix(want, "pp:summary:v1:") {
+	if want := llmKey("j1", r); r.IdempotencyKey() != want || !strings.HasPrefix(want, "pp:summary:v1:") {
 		t.Fatalf("idempotency key = %q, want %q", r.IdempotencyKey(), want)
 	}
 	if len(e.assignments) != 0 {
@@ -206,8 +206,44 @@ func TestRetryOfTheSameJobDuplicatesNothing(t *testing.T) {
 			t.Fatalf("%s: requests %d with keys differing between attempts", op, len(reqs))
 		}
 	}
-	if llmKey("j1", values.OperationSummary) == llmKey("j3", values.OperationSummary) {
+	sum := e.llm.RequestsFor(values.OperationSummary)[0]
+	if llmKey("j1", sum) == llmKey("j3", sum) {
 		t.Fatal("two jobs share an idempotency key")
+	}
+}
+
+// ADR-0005(d): the key follows the request content, so a retry after a local change (the lesson was renamed while the
+// job waited for quota) gets a fresh key instead of IDEMPOTENCY_CONFLICT, and an unchanged retry reuses the key.
+func TestLLMKeyFollowsTheRequestContent(t *testing.T) {
+	e := newPPEnv(t)
+	e.llm.Answer(values.OperationSummary, summaryAnswer)
+	snap := e.snapshot("j1", SummarizeJobType, "t1")
+
+	run := func() values.LLMRequest {
+		t.Helper()
+		if err := e.handle(snap); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+		reqs := e.llm.Requests()
+		return reqs[len(reqs)-1]
+	}
+	first := run()
+	if again := run(); again.IdempotencyKey() != first.IdempotencyKey() {
+		t.Fatal("an unchanged retry used another key")
+	}
+
+	l := e.lessons["l1"]
+	c := l.Content()
+	c.Title = "Physical geography"
+	if _, err := l.ChangeContent(c, ppT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	renamed := run()
+	if renamed.IdempotencyKey() == first.IdempotencyKey() {
+		t.Fatal("a changed request reused the key")
+	}
+	if len(renamed.IdempotencyKey()) > values.MaxIdempotencyKeyLen || !strings.HasPrefix(renamed.IdempotencyKey(), "pp:summary:v1:") {
+		t.Fatalf("key = %q", renamed.IdempotencyKey())
 	}
 }
 

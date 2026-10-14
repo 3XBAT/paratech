@@ -7,6 +7,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	"paratech/desktop/internal/domain/transcription/transcript"
 	tvalues "paratech/desktop/internal/domain/transcription/values"
 	"paratech/desktop/testenv"
+	hubv1 "paratech/shared/gen/paratech/hub/v1"
 )
 
 // The adapters satisfy the ports of the post-processing, and the PostProcessor is both the STT completion consumer
@@ -375,6 +377,100 @@ func TestTranscriptToStructuresThroughFakeHub(t *testing.T) {
 		if hub.Authorizations()[i] != "Bearer la_test_key_0123456789" {
 			t.Fatalf("request %d not authenticated with the tester key", i)
 		}
+	}
+}
+
+// fakeHubClient returns the real Hub client of a started fake Hub, authenticated with a tester key.
+func fakeHubClient(t *testing.T, hub *testenv.FakeHub) *hubclient.Client {
+	t.Helper()
+	url, httpClient := testenv.StartFakeHub(t, hub)
+	creds := testenv.NewMemCredentials()
+	if err := creds.Set(context.Background(), hubclient.DefaultCredentialName, "la_test_key_0123456789"); err != nil {
+		t.Fatal(err)
+	}
+	client, err := hubclient.New(hubclient.Config{BaseURL: url, HTTPClient: httpClient, RequestTimeout: 10 * time.Second}, creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+// The fake Hub refuses a key reused with another request, as the real one does (ADR-0005(d)).
+func TestFakeHubRefusesAKeyReusedWithAnotherRequest(t *testing.T) {
+	hub := testenv.NewFakeHub()
+	hub.Answer(values.OperationSummary, ppSummary)
+	client := fakeHubClient(t, hub)
+
+	send := func(data string) error {
+		req, err := values.NewLLMRequest(values.OperationSummary, "default", "Summarise.", data, "key-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.Complete(context.Background(), req)
+		return err
+	}
+	if err := send("lesson A"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := send("lesson A"); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if err := send("lesson B"); !errors.Is(err, hubclient.ErrIdempotencyConflict) {
+		t.Fatalf("same key, other request = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
+// ADR-0005(d), AC-11: the lesson is renamed while a job waits for its retry. The unchanged retry reuses the key; the
+// retry after the rename sends a new request under a new key, so the Hub does not refuse it and the job completes.
+func TestRenamedLessonBetweenAttemptsStillCompletes(t *testing.T) {
+	hub := testenv.NewFakeHub() // no summary answer yet: the Hub is unavailable for it
+	hub.Answer(values.OperationExtractHomework, ppExtract)
+	e := newPPEnv(t, fakeHubClient(t, hub))
+	e.start()
+
+	waitAttempts := func(n int) {
+		t.Helper()
+		testenv.Eventually(t, fmt.Sprintf("summary attempt %d failed", n), func() bool {
+			j, ok := e.postJob(homeworkflow.SummarizeJobType)
+			return ok && j.Status() == job.StatusRetryWait && j.Attempts() == n
+		}, func() { e.clock.Advance(time.Second) })
+	}
+	waitAttempts(1)
+	waitAttempts(2)
+
+	ctx := context.Background()
+	lessons := sqlite.NewLessonRepository(e.db)
+	l, err := lessons.Get(ctx, "l1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := l.Content()
+	c.Title = "Physical geography"
+	if _, err := l.ChangeContent(c, e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := lessons.Save(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+
+	hub.Answer(values.OperationSummary, ppSummary)
+	j := e.waitPost(homeworkflow.SummarizeJobType, job.StatusCompleted)
+	if j.Attempts() != 3 {
+		t.Fatalf("attempts = %d, want 3", j.Attempts())
+	}
+
+	var keys []string
+	for _, r := range hub.Requests() {
+		if r.GetSpec().GetOperationType() == hubv1.OperationType_OPERATION_TYPE_SUMMARY {
+			keys = append(keys, r.GetSpec().GetIdempotencyKey())
+		}
+	}
+	if len(keys) != 3 || keys[0] != keys[1] || keys[1] == keys[2] {
+		t.Fatalf("summary keys = %v, want the same key twice, then a new one", keys)
+	}
+	s, err := e.summaries.Get(ctx, summary.IDOf(ppTranscript))
+	if err != nil || s.Content().Text() != "Rivers and their deltas." {
+		t.Fatalf("summary: %v", err)
 	}
 }
 

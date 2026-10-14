@@ -48,10 +48,12 @@ const (
 // job at once (permanent): the Hub returns the same stored answer for the same idempotency key, so a retry cannot help.
 //
 // Idempotency (hard rule 7): the job keys are derived from the transcript and the prompts version, so a repeated
-// event creates no second job; the LLM idempotency key is derived from the job, the operation and the prompts version,
-// so a retry of the job is not charged twice (AC-11); the summary id is the transcript id and an assignment is found
+// event creates no second job; the LLM idempotency key is a digest of the job and the built request (llmKey), so a
+// retry of the job is not charged twice (AC-11); the summary id is the transcript id and an assignment is found
 // again by its origin (transcript, item index), so a rerun updates instead of adding. An assignment the user edited is
-// kept as it is (assignment.Reextract). Saves are one aggregate each (ARCH-23) and repeatable.
+// kept as it is (assignment.Reextract). Extracted assignments at positions a shorter answer no longer has are
+// withdrawn unless the user edited them or a delivery uses them (assignment.Superseded). Saves and deletes are one
+// aggregate each (ARCH-23) and repeatable.
 //
 // Errors: no network or no quota make the runner park the job (WAITING_FOR_NETWORK, WAITING_FOR_QUOTA, see
 // backoff.WaitStatus); missing inputs and invalid answers fail it; storage errors are retried.
@@ -127,11 +129,29 @@ func jobKey(typ job.Type, t shared.TranscriptID) string {
 	return fmt.Sprintf("%s:%s:v%d", typ, t, prompts.Version)
 }
 
-// llmKey is the idempotency key of the LLM request of a job: the same for every attempt of the job, so the Hub
-// charges a retry once (PRD section 9.2, AC-11). The job id is hashed because the key must be printable ASCII.
-func llmKey(id shared.JobID, op values.Operation) string {
-	sum := sha256.Sum256([]byte(id))
-	return fmt.Sprintf("pp:%s:v%d:%x", op, prompts.Version, sum[:16])
+// pendingKey stands in for the idempotency key until the request content it is derived from is built.
+const pendingKey = "pending"
+
+// llmKey is the idempotency key of the LLM request of a job: a digest of the job id and the whole request, so a retry
+// with the same content is replayed and charged once (PRD section 9.2, AC-11), while a retry whose content changed
+// meanwhile (lesson renamed, clock zone changed) gets a fresh key instead of IDEMPOTENCY_CONFLICT (ADR-0005(d)).
+// NUL separates the parts: the texts cannot contain it (values.NewLLMRequest).
+func llmKey(id shared.JobID, r values.LLMRequest) string {
+	h := sha256.New()
+	for _, part := range []string{string(id), string(r.Operation()), r.ModelAlias(), r.Instructions(), r.UntrustedData()} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("pp:%s:v%d:%x", r.Operation(), prompts.Version, h.Sum(nil)[:16])
+}
+
+// buildRequest builds the request of a job from the selected context and keys it with llmKey.
+func (p *PostProcessor) buildRequest(id shared.JobID, sel contextselection.Context) (values.LLMRequest, error) {
+	draft, err := prompts.Build(sel, p.modelAlias, pendingKey)
+	if err != nil {
+		return values.LLMRequest{}, err
+	}
+	return values.NewLLMRequest(draft.Operation(), draft.ModelAlias(), draft.Instructions(), draft.UntrustedData(), llmKey(id, draft))
 }
 
 // operationOf returns the LLM operation of a post-processing job type.
@@ -178,7 +198,7 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 	case err != nil:
 		return p.permanent(snap, stepContext, ErrContextRefused, err)
 	}
-	llmReq, err := prompts.Build(sel, p.modelAlias, llmKey(snap.ID(), op))
+	llmReq, err := p.buildRequest(snap.ID(), sel)
 	if err != nil {
 		return p.permanent(snap, stepContext, ErrContextRefused, err)
 	}

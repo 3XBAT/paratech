@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"paratech/desktop/internal/domain/coursework/values"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
@@ -17,21 +18,25 @@ import (
 
 // FakeHub is a local LLM Hub gateway for end-to-end tests of the desktop Hub client: it speaks the real Connect
 // contract over TLS, answers each operation with a scripted model output and, like the real Hub, replays the stored
-// result for an idempotency key it has seen (ADR-0005(d)), so a retry is charged once. It checks nothing else of the
-// Hub's rules; the Hub has its own tests.
+// result for an idempotency key it has seen (ADR-0005(d)), so a retry is charged once. A key reused with a different
+// spec is answered with ERROR_CODE_IDEMPOTENCY_CONFLICT, as the real Hub does. It checks nothing else of the Hub's
+// rules; the Hub has its own tests.
 type FakeHub struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 
 	mu       sync.Mutex
 	outputs  map[hubv1.OperationType]string
 	results  map[string]*hubv1.CompletionResult // by idempotency key
+	prints   map[string]string                  // fingerprint of the spec, by idempotency key
 	requests []*hubv1.CompleteRequest
 	auth     []string
 }
 
 // NewFakeHub returns a Hub without scripted outputs; an operation without one is answered with unavailable.
 func NewFakeHub() *FakeHub {
-	return &FakeHub{outputs: map[hubv1.OperationType]string{}, results: map[string]*hubv1.CompletionResult{}}
+	return &FakeHub{
+		outputs: map[hubv1.OperationType]string{}, results: map[string]*hubv1.CompletionResult{}, prints: map[string]string{},
+	}
 }
 
 // Answer sets the model output of operation for keys the Hub has not seen yet.
@@ -62,6 +67,14 @@ func (h *FakeHub) Complete(_ context.Context, r *connect.Request[hubv1.CompleteR
 
 	spec := r.Msg.GetSpec()
 	key := spec.GetIdempotencyKey()
+	fp, err := proto.MarshalOptions{Deterministic: true}.Marshal(spec)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if old, ok := h.prints[key]; ok && old != string(fp) {
+		return nil, idempotencyConflict()
+	}
+	h.prints[key] = string(fp)
 	if res, ok := h.results[key]; ok {
 		return connect.NewResponse(&hubv1.CompleteResponse{Result: res}), nil
 	}
@@ -76,6 +89,17 @@ func (h *FakeHub) Complete(_ context.Context, r *connect.Request[hubv1.CompleteR
 	}
 	h.results[key] = res
 	return connect.NewResponse(&hubv1.CompleteResponse{Result: res}), nil
+}
+
+// idempotencyConflict is the Hub's answer to a key reused with another spec (errors.proto).
+func idempotencyConflict() error {
+	e := connect.NewError(connect.CodeFailedPrecondition, errors.New("fake hub: idempotency key reused with another request"))
+	d, err := connect.NewErrorDetail(&hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT})
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	e.AddDetail(d)
+	return e
 }
 
 // Requests returns the requests that reached the Hub, in order.
