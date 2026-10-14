@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-build",
+    "rootDir": "src"
+  },
+  "include": [],
+  "files": ["src/bindings/settings.ts", "src/nav.ts"]
+}

@@ -1,6 +1,7 @@
 package wails
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,7 +10,12 @@ import (
 
 func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-func validOptions() Options { return Options{Name: "LA", InstanceID: "test.la", Log: discard()} }
+func validOptions() Options {
+	return Options{
+		Name: "LA", InstanceID: "test.la", Log: discard(),
+		OpenCore: func(context.Context) (Core, error) { return Core{Settings: &fakeSettings{}}, nil },
+	}
+}
 
 func TestNew(t *testing.T) {
 	tests := []struct {
@@ -21,6 +27,7 @@ func TestNew(t *testing.T) {
 		{name: "no name", edit: func(o *Options) { o.Name = "" }, wantErr: true},
 		{name: "no instance id", edit: func(o *Options) { o.InstanceID = "" }, wantErr: true},
 		{name: "no logger", edit: func(o *Options) { o.Log = nil }, wantErr: true},
+		{name: "no core opener", edit: func(o *Options) { o.OpenCore = nil }, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

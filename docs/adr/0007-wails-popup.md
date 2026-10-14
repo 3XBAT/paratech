@@ -23,8 +23,10 @@
 ## Consequences
 - Creating a window activates it once, so at startup the hidden popup may briefly take the foreground before the main window shows.
   Harmless now (the main window is shown at start); a start minimized to tray (autostart) must create the popup lazily or restore the foreground.
-- The single-instance check runs inside `Shell.Run`, and the second instance calls `os.Exit` there. Once `app.New` opens SQLite or starts
-  workers, the check must move before them (e.g. a named-mutex adapter).
+- The single-instance check runs in `Shell.Run`; the core (SQLite) is opened by the Shell option `OpenCore` after `application.New`,
+  so a second instance exits before the DB opens. Headless mode opens no core yet; future workers/headless need the core opened
+  in `app` outside the shell, or a named-mutex adapter.
+- Default data dir is `%LOCALAPPDATA%\LearningAssistant`, DB file `<DataDir>/learning-assistant.db` (to be confirmed by the owner).
 - Release builds must use `-tags production` (see `docs/refs/wails.md`).
 
 ## Check on Windows by a human (TASK-020)

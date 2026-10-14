@@ -21,3 +21,6 @@ desktop/build/bin/
 .idea/
 .vscode/
 .DS_Store
+desktop/frontend/.test-build/
+# Frontend build embedded by internal/input/wails (see assets.go)
+desktop/internal/input/wails/assets/app/

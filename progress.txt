@@ -727,3 +727,34 @@
 - Low: WaitFor не пишет last_error при входе в ожидание; ожидания разрешены для любого типа задач (сейчас ошибки возвращает только hubclient)
 - TASK-043/календарь: удалённое задание оставит экспорт/событие календаря — синхронизация должна убирать; новые таблицы со ссылкой на assignments — ON DELETE RESTRICT
 - Security note: Hub должен хранить ключи идемпотентности в пространстве тестера; ID задач — непредсказуемые (нет адаптера ID-генератора)
+
+## [TASK-021] UI: каркас React + TypeScript (Vite), Wails-биндинги, навигация и настройки
+**Дата:** 2026-10-14
+**Статус:** done
+
+### Что сделано
+- desktop/frontend: Vite 6 + React 19 + TypeScript 5.9 (только react, react-dom, vite, @vitejs/plugin-react, typescript, @types/react, @types/react-dom; package-lock.json закоммичен). Навигация состоянием React: Записи, Модели, Домашние задания, Расписание (заглушки), Настройки
+- Страница настроек: «Автоматически предлагать запись в начале занятия» (AC-02) и «Обрабатывать только от розетки» (AC-22) через src/bindings/settings.ts -> Call.ByName из /wails/runtime.js (без npm-пакета рантайма)
+- npm run test = tsc -p tsconfig.test.json + node --test (7 тестов, без тестовых библиотек)
+- Go: cases/preferences (Get/SetRecordingPromptsEnabled/SetProcessOnlyOnACPower, CAS с 3 повторами), adapters/clock (System), input/wails SettingsService (узкий интерфейс, ошибки только ErrSettingsUnavailable), Shell.Options.OpenCore вызывается после application.New (второй экземпляр выходит до открытия БД)
+- app.openCore: создаёт DataDir, открывает <DataDir>/learning-assistant.db с миграциями; config: DataDir по умолчанию %LOCALAPPDATA%\LearningAssistant
+- Встраивание: Vite собирает в internal/input/wails/assets/app (в .gitignore), //go:embed all:assets, слоёная fs (сборка, затем закоммиченная fallback-страница); dot-имена не отдаются; тест с -tags production падает без собранного UI
+- ADR-0007 Consequences обновлены (OpenCore, каталог данных)
+- Изменённые существующие тесты: input/wails shell_test.go validOptions (обязательный OpenCore, + кейс «no core opener»); spec_test.go TestAssetsServePages читает закоммиченный слой (локальная сборка затеняет index.html); config_test.go — 2 новых кейса
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), на origin/master 9b5af71
+- [x] Шаг 1: npm ci && npm run build && npm run test в desktop/frontend
+- [x] Шаг 2: go build ./desktop/... (+ GOOS=windows vet, GOOS=linux CGO_ENABLED=0 build)
+- [x] Шаг 3: SettingsPage импортирует ../bindings/settings; TestFrontendCallsBoundNames сверяет имена биндингов с Go
+- Ревью: approve (2 medium: ADR-0007, проверка релизной сборки -> исправлено). Security: найдено 0, опровергнуто 0, исправлено 0
+
+### Решения (подтвердить)
+- Каталог данных %LOCALAPPDATA%\LearningAssistant и файл БД в его корне (PRD §13.1 говорит только «приватный каталог»)
+- Headless-режим БД не открывает; будущим воркерам нужно открывать ядро в app вне shell (или named-mutex адаптер)
+
+### Заметки (follow-up)
+- Релизная сборка/упаковка: npm run build, затем go build/test -tags production (тест проверяет встроенный UI)
+- Корень артефактов filestore — подкаталог DataDir (напр. <DataDir>\artifacts), чтобы ссылка артефакта не доставала до .db
+- Low: при ошибке openCore окно не появляется, только лог — позже фатальный диалог
+- Ручная проверка владельцем на Windows: клики переключателей и вёрстка (GetSettings через рантайм проверен запуском)

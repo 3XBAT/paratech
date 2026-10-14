@@ -19,14 +19,19 @@ const (
 	EnvLogLevel = "LA_LOG_LEVEL"
 	EnvDataDir  = "LA_DATA_DIR"
 	EnvHeadless = "LA_HEADLESS"
+	// EnvLocalAppData is the Windows per-user local application data directory, the base of the default DataDir.
+	EnvLocalAppData = "LOCALAPPDATA"
 )
+
+// dataDirName is the directory of the application below EnvLocalAppData.
+const dataDirName = "LearningAssistant"
 
 // Config is the validated desktop configuration.
 type Config struct {
 	// LogLevel is one of debug, info, warn, error.
 	LogLevel string
-	// DataDir is the root of local application data. Empty means "choose the default later";
-	// when set it must be an absolute path.
+	// DataDir is the root of local application data; when set it must be an absolute path. Load defaults it to
+	// %LOCALAPPDATA%\LearningAssistant; it stays empty where that variable is unset (not Windows).
 	DataDir string
 	// Headless runs the core without the Windows UI shell (tray, windows), e.g. in tests and on other OSes.
 	Headless bool
@@ -42,6 +47,9 @@ func Default() Config {
 // For -h/--help it prints the usage to out and returns flag.ErrHelp.
 func Load(args []string, out io.Writer, getenv func(string) string) (Config, error) {
 	cfg := Default()
+	if v := getenv(EnvLocalAppData); v != "" {
+		cfg.DataDir = filepath.Join(v, dataDirName)
+	}
 	if v := getenv(EnvLogLevel); v != "" {
 		cfg.LogLevel = v
 	}
@@ -62,7 +70,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs := flag.NewFlagSet(programName, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error (env "+EnvLogLevel+")")
-	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "absolute path of the local data directory (env "+EnvDataDir+")")
+	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "absolute path of the local data directory (env "+EnvDataDir+", default below %"+EnvLocalAppData+"%)")
 	fs.BoolVar(&cfg.Headless, "headless", cfg.Headless, "run without the UI shell: no tray and no windows (env "+EnvHeadless+")")
 
 	if err := fs.Parse(args); err != nil {

@@ -59,7 +59,8 @@ func TestAssetsServePages(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
-			b, err := fs.ReadFile(assets(), tt.file)
+			// The committed layer: a local frontend build would shadow index.html in assets().
+			b, err := fs.ReadFile(mustSub(assetsDir), tt.file)
 			if err != nil {
 				t.Fatal(err)
 			}

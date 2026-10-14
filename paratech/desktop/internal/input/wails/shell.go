@@ -3,6 +3,7 @@ package wails
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -23,6 +24,14 @@ type Options struct {
 	// InstanceID identifies the application for the single-instance lock, e.g. "com.example.app".
 	InstanceID string
 	Log        *slog.Logger
+	// OpenCore opens the core (database, use cases) and returns what the pages bind to. Run calls it once, after the
+	// single-instance check: a second instance exits before it and never touches the database (ADR-0007).
+	OpenCore func(ctx context.Context) (Core, error)
+}
+
+// Core is what the pages of the main window call through the bindings.
+type Core struct {
+	Settings SettingsUseCase
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -53,6 +62,9 @@ func New(opts Options) (*Shell, error) {
 	}
 	if opts.Log == nil {
 		errs = append(errs, errors.New("wails: logger is required"))
+	}
+	if opts.OpenCore == nil {
+		errs = append(errs, errors.New("wails: core opener is required"))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
@@ -97,6 +109,23 @@ func (s *Shell) ShowMain() error {
 		return err
 	}
 	return u.showMain()
+}
+
+// bindings are the services bound to the pages; Wails needs each one as its concrete type.
+type bindings struct {
+	settings *SettingsService
+}
+
+// openBindings opens the core and builds the services bound to the pages.
+func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
+	core, err := s.opts.OpenCore(ctx)
+	if err != nil {
+		return bindings{}, fmt.Errorf("wails: open core: %w", err)
+	}
+	if core.Settings == nil {
+		return bindings{}, errors.New("wails: open core: no settings use case")
+	}
+	return bindings{settings: NewSettingsService(core.Settings, s.opts.Log)}, nil
 }
 
 func (s *Shell) markStarted() error {

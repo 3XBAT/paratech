@@ -28,6 +28,16 @@ func TestLoad(t *testing.T) {
 			env:  map[string]string{config.EnvLogLevel: "debug", config.EnvDataDir: abs},
 			want: config.Config{LogLevel: "debug", DataDir: abs},
 		},
+		{
+			name: "data dir below local app data",
+			env:  map[string]string{config.EnvLocalAppData: abs},
+			want: config.Config{LogLevel: "info", DataDir: filepath.Join(abs, "LearningAssistant")},
+		},
+		{
+			name: "explicit data dir wins over local app data",
+			env:  map[string]string{config.EnvLocalAppData: filepath.Join(abs, "local"), config.EnvDataDir: abs},
+			want: config.Config{LogLevel: "info", DataDir: abs},
+		},
 		{name: "headless", env: map[string]string{config.EnvHeadless: "true"}, want: config.Config{LogLevel: "info", Headless: true}},
 		{name: "not headless", env: map[string]string{config.EnvHeadless: "0"}, want: config.Config{LogLevel: "info"}},
 		{name: "bad headless", env: map[string]string{config.EnvHeadless: "maybe"}, wantErr: "is not a boolean"},
