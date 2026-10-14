@@ -639,3 +639,34 @@
 - Флаки: cases/jobrunner TestCancelJobThatWaits/waiting_for_the_retry один раз упал у ревьюера (RETRY_WAIT вместо CANCELLED), -count=5 зелёный; рядом с флаки TASK-029
 
 ---
+
+## [TASK-018] Scheduler: локальное расписание и событие «занятие начинается»
+**Дата:** 2026-10-14 23:00
+**Статус:** done
+
+### Что сделано
+- domain/schedule/lesson: StartAnnouncementDue/AnnounceStart — окно [start-lead, end), lead в [0, 1 ч], одна отметка на время начала (start_notified_at, уже был в схеме; ChangeContent сбрасывает при сдвиге начала); событие StartAnnounced (id, title, start, end, зона записи)
+- cases/scheduler: порты Lessons, Clock, Sleeper, Events; Tick берёт кандидатов через ListStartingBetween, решает агрегат; отметка сохраняется (CAS по версии) до публикации — at-most-once; конфликт версии пропускается; Run опрашивает (дефолт: lead 5 мин, опрос 15 с), без горутин, выход по ctx
+- Новых миграций/запросов/адаптеров нет: подходит существующий sqlite.LessonRepository. В app не подключено (нет clock-адаптера и подключения use cases) — TASK-022 или задача подключения
+- Ревью: approve, 1 medium (отложено, см. ниже), 5 low. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на 42a54a2, после rebase на fc7db52
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestRunAnnouncesExactlyOnce, TestTick (cases/scheduler)
+- [x] Шаг 3: TestRestartDuringLessonDoesNotDuplicate; desktop/tests TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart (реальный SQLite, зоны America/New_York и Europe/London в день перехода с летнего времени)
+
+### Решения (подтвердить)
+- Окно до конца занятия: приложение, запущенное посреди занятия, всё равно покажет предложение (один раз); PRD не говорит, насколько поздно — слишком поздно
+- Проверка «автопредложения включены» (AC-02) — у потребителя (TASK-022), не в планировщике; отметка ставится и при выключенных предложениях (включение посреди занятия не покажет предложение)
+- At-most-once: при падении между Save и LessonStarting или ошибке потребителя предложение потеряно для этого занятия
+
+### Заметки (follow-up)
+- Medium (ревью, отложено — нужны importplan/ADR-0004(d), вне задачи): AnnounceStart увеличивает версию урока, а версии входят в fingerprint превью импорта -> CommitImport вернёт ErrStalePreview, если окно урока открылось между превью и подтверждением. Данные целы; UI импорта должен сам перезапускать превью на ErrStalePreview, либо через architect исключить start_notified_at из проверки версии
+- Low: устаревшие комментарии schedulesync (doc.go:9, service.go:10-11, ports.go:49,112 «для планировщика»); ListStartingBetween в порту schedulesync, вероятно, не нужен
+- Low: комментарий TestAnnounceStartAcrossZones обещает DST, а использует FixedZone (реальный DST — в сценарном тесте)
+- Low: сдвиг начала идущего занятия при повторном импорте даёт второе предложение (поведение «один раз на время начала»)
+- TASK-022: Title из импортированного файла показывать как текст, не HTML; не стартовать запись без подтверждения; ошибки LessonStarting не повторяются
+- Флаки: TestSTTJobTranscribesRecording упал один раз у реализатора (attempts 2), повтор зелёный
+
+---
