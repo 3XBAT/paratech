@@ -1,0 +1,124 @@
+package contextselection
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"paratech/desktop/internal/domain/coursework/values"
+)
+
+var lessonStart = time.Date(2026, 10, 14, 10, 0, 0, 0, time.FixedZone("MSK", 3*60*60))
+
+// full returns material with every field set, so each test can see what an operation drops.
+func full() Material {
+	return Material{
+		Lesson:         Lesson{Title: "  Linear algebra  ", Start: lessonStart},
+		Transcript:     []Segment{{StartMs: 0, EndMs: 900, Text: " Hello. "}, {StartMs: 900, EndMs: 950, Text: "  "}, {StartMs: 1000, EndMs: 2000, Text: "Solve 1-5."}},
+		Summary:        "SUMMARY-TEXT",
+		Assignment:     Assignment{Title: "Exercises 1-5", Description: "From chapter 2.", Due: lessonStart.Add(48 * time.Hour)},
+		PreviousDraft:  "PREVIOUS-DRAFT",
+		StudentRequest: "make it shorter",
+	}
+}
+
+func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
+	cases := []struct {
+		op   values.Operation
+		want Context
+	}{
+		{values.OperationSummary, Context{
+			operation: values.OperationSummary, lessonTitle: "Linear algebra", transcript: "Hello.\nSolve 1-5.",
+		}},
+		{values.OperationExtractHomework, Context{
+			operation: values.OperationExtractHomework, lessonTitle: "Linear algebra", lessonStart: lessonStart,
+			transcript: "Hello.\nSolve 1-5.",
+		}},
+		{values.OperationHomeworkDraft, Context{
+			operation: values.OperationHomeworkDraft, lessonTitle: "Linear algebra", summary: "SUMMARY-TEXT",
+			assignmentTitle: "Exercises 1-5", assignmentDescription: "From chapter 2.", previousDraft: "PREVIOUS-DRAFT",
+			studentRequest: "make it shorter",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.op), func(t *testing.T) {
+			got, err := Select(tc.op, full())
+			if err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("Select =\n%+v\nwant\n%+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSelectRejects(t *testing.T) {
+	with := func(f func(*Material)) Material {
+		m := full()
+		f(&m)
+		return m
+	}
+	cases := []struct {
+		name string
+		op   values.Operation
+		m    Material
+		want error
+	}{
+		{"unknown operation", values.Operation("send_email"), full(), ErrUnknownOperation},
+		{"summary without transcript", values.OperationSummary, with(func(m *Material) { m.Transcript = nil }), ErrMissingContext},
+		{"summary with blank transcript", values.OperationSummary, with(func(m *Material) { m.Transcript = []Segment{{Text: " "}} }), ErrMissingContext},
+		{"extract without lesson start", values.OperationExtractHomework, with(func(m *Material) { m.Lesson.Start = time.Time{} }), ErrMissingContext},
+		{"draft without assignment", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment = Assignment{} }), ErrMissingContext},
+		{"segment with newline", values.OperationSummary, with(func(m *Material) { m.Transcript[0].Text = "a\nb" }), ErrInvalidMaterial},
+		{"segment invalid utf8", values.OperationExtractHomework, with(func(m *Material) { m.Transcript[0].Text = "\xff" }), ErrInvalidMaterial},
+		{"transcript too large", values.OperationSummary, with(func(m *Material) {
+			m.Transcript = []Segment{{Text: strings.Repeat("a", MaxTranscriptBytes/2)}, {Text: strings.Repeat("b", MaxTranscriptBytes/2)}}
+		}), ErrInvalidMaterial},
+		{"title with control", values.OperationSummary, with(func(m *Material) { m.Lesson.Title = "a\tb" }), ErrInvalidMaterial},
+		{"title too long", values.OperationHomeworkDraft, with(func(m *Material) { m.Lesson.Title = strings.Repeat("я", MaxTitleRunes+1) }), ErrInvalidMaterial},
+		{"assignment title with newline", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Title = "a\nb" }), ErrInvalidMaterial},
+		{"description with NUL", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Description = "a\x00b" }), ErrInvalidMaterial},
+		{"request too large", values.OperationHomeworkDraft, with(func(m *Material) { m.StudentRequest = strings.Repeat("x", MaxStudentRequestBytes+1) }), ErrInvalidMaterial},
+		{"summary invalid utf8", values.OperationHomeworkDraft, with(func(m *Material) { m.Summary = "\xff" }), ErrInvalidMaterial},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Select(tc.op, tc.m)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+			if !c.IsZero() {
+				t.Fatalf("a refused selection returned a non-zero context")
+			}
+		})
+	}
+}
+
+func TestSelectIgnoresFieldsTheOperationDropsEvenWhenInvalid(t *testing.T) {
+	m := full()
+	m.Summary = "\xff"
+	m.PreviousDraft = "\x00"
+	m.Assignment.Title = "a\nb"
+	if _, err := Select(values.OperationSummary, m); err != nil {
+		t.Fatalf("summary validated a field it does not send: %v", err)
+	}
+
+	m = full()
+	m.Transcript = []Segment{{Text: "\xff"}}
+	if _, err := Select(values.OperationHomeworkDraft, m); err != nil {
+		t.Fatalf("draft validated the transcript it does not send: %v", err)
+	}
+}
+
+func TestSelectDraftWithDescriptionOnly(t *testing.T) {
+	m := Material{Assignment: Assignment{Description: "Read chapter 3."}}
+	c, err := Select(values.OperationHomeworkDraft, m)
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if c.AssignmentDescription() != "Read chapter 3." || c.AssignmentTitle() != "" || c.Operation() != values.OperationHomeworkDraft {
+		t.Fatalf("unexpected context %+v", c)
+	}
+}
