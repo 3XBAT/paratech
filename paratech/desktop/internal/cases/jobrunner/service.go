@@ -281,7 +281,9 @@ func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 		s.mu.Lock()
 		r := s.running[id]
 		s.mu.Unlock()
-		if r != nil {
+		// A run that has ended its attempt only waits for its final save and cleanup: cancelling its context does
+		// nothing, so the stored state decides (a finished job is not cancellable, a RETRY_WAIT one is).
+		if r != nil && !r.ended.Load() {
 			return r.cancelByUser()
 		}
 
@@ -290,7 +292,7 @@ func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 			return err
 		}
 		if j.Status() == job.StatusRunning {
-			return fmt.Errorf("%w: %s is RUNNING but not run by this runner; startup recovery handles it", ErrNotCancellable, id)
+			return fmt.Errorf("%w: %s is RUNNING but not cancellable now: its attempt is ending or another process runs it; startup recovery handles the latter", ErrNotCancellable, id)
 		}
 		if err = j.Cancel(s.clock.Now()); err != nil {
 			return fmt.Errorf("%w: %w", ErrNotCancellable, err)
@@ -371,6 +373,7 @@ type run struct {
 	recovery      Recovery
 	forced        bool // started by the "Run now" override: power loss does not stop this attempt
 	cancel        context.CancelCauseFunc
+	ended         atomic.Bool // the handler has returned: cancelling the context can no longer change the outcome
 
 	mu       sync.Mutex // guards job, finished, lost and stopping: reports may come from several goroutines
 	job      *job.Job
@@ -486,6 +489,7 @@ func (s *Service) call(ctx context.Context, h Handler, r *run) (err error) {
 
 // finish applies the outcome of the attempt through the aggregate and saves it.
 func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
+	r.ended.Store(true)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.finished = true
