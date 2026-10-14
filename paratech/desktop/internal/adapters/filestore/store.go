@@ -34,6 +34,7 @@ const (
 const (
 	opOpen       = "open"
 	opSize       = "size"
+	opPath       = "path"
 	opList       = "list"
 	opDelete     = "delete"
 	opWrite      = "write"
@@ -134,6 +135,23 @@ func (s *Store) Size(ctx context.Context, ref shared.ArtifactRef) (int64, error)
 	}
 
 	return fi.Size(), nil
+}
+
+// Path returns the absolute OS path of an existing file, for a sidecar process that needs a path (the Paths port of
+// the whispercli adapter). Every component is checked for links as in Open; a missing file yields shared.ErrNotFound
+// and a directory shared.ErrConflict. The file can change after the check, so the consumer checks the path again
+// before it hands it to a process.
+func (s *Store) Path(ctx context.Context, ref shared.ArtifactRef) (string, error) {
+	rel, fi, err := s.lookup(ctx, opPath, ref, false)
+	if err != nil {
+		return "", err
+	}
+
+	if fi.IsDir() {
+		return "", isDirErr(ref)
+	}
+
+	return filepath.Join(s.root.Name(), rel), nil
 }
 
 // List returns the direct children of a directory sorted by name. Temporary files, links and entries that

@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"unicode"
+
+	"paratech/desktop/internal/domain/transcription/transcript"
 )
 
 const (
@@ -25,11 +27,11 @@ const (
 	maxOffsetMs = 24 * 60 * 60 * 1000
 
 	// TranscriptFormatVersion is the version of the transcript document written to the output artifact.
-	TranscriptFormatVersion = 1
+	TranscriptFormatVersion = transcript.DocumentFormatVersion
 )
 
-// Transcript is the document the adapter stores as the output artifact (JSON). It is the normalised, validated
-// form of the CLI result; the CLI's own JSON never leaves the adapter.
+// Transcript is the normalised, validated form of the CLI result; the CLI's own JSON never leaves the adapter. It is
+// stored as a transcript.Document, whose format the domain owns; the JSON tags mirror that format for tests.
 type Transcript struct {
 	Version  int       `json:"version"`
 	Language string    `json:"language,omitempty"`
@@ -178,13 +180,21 @@ func escapeControls(data []byte) []byte {
 	return out
 }
 
-// encodeTranscript renders the stored document.
+// encodeTranscript renders the stored document in the domain format (transcript.Document).
 func encodeTranscript(t Transcript) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(t); err != nil {
-		return nil, fmt.Errorf("%w: encode: %w", ErrOutput, err)
+	segs := make([]transcript.Segment, len(t.Segments))
+	for i, s := range t.Segments {
+		segs[i] = transcript.Segment{StartMs: s.StartMs, EndMs: s.EndMs, Text: s.Text}
 	}
-	return buf.Bytes(), nil
+
+	doc, err := transcript.NewDocument(transcript.Language(t.Language), segs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrOutput, err)
+	}
+
+	data, err := doc.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrOutput, err)
+	}
+	return data, nil
 }

@@ -42,4 +42,7 @@ var (
 
 	// ErrReservedIdentity means an imported model claims the name and version of a catalog entry.
 	ErrReservedIdentity = errors.New("name and version belong to a catalog model")
+
+	// ErrInvalidSTTRequest is returned for an STT job payload that is malformed or names no valid recording.
+	ErrInvalidSTTRequest = errors.New("invalid stt job payload")
 )

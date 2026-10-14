@@ -1,5 +1,6 @@
 // Package filestore is the file artifact adapter: it implements the ArtifactStore ports of the use cases
-// (Open, Write, List, Size, Delete) on a private data root (hard rule 5, ARCH-30..33).
+// (Open, Write, List, Size, Delete) on a private data root (hard rule 5, ARCH-30..33). Path resolves a reference to
+// the OS path of an existing file for the STT sidecar, with the same link checks.
 //
 // The root holds one directory per shared.ArtifactKind: recordings, transcripts, models, exports. Callers pass only
 // shared.ArtifactRef, never OS paths. All access goes through os.Root, so no operation can leave the root, and

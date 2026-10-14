@@ -383,3 +383,33 @@
 - Не подключено в app (вызов ForceRun из UI, настройка из settings — при подключении)
 
 ---
+
+## [TASK-029] Задача транскрибации: запись -> транскрипт, локально, с pin модели
+**Дата:** 2026-10-14 15:00
+**Статус:** done
+
+### Что сделано
+- domain/transcription/transcript: агрегат (New/Restore, имя и версия модели копируются, model_id может стать NULL после удаления модели — AC-08), формат документа транскрипта перенесён в домен (строгий ParseDocument, лимиты), событие Created; values/stt.go: тип задачи "stt", payload только recording_id
+- domain/recording: запрос TranscribableAudio() (правило «только COMPLETED с финальной дорожкой» в агрегате, ARCH-22)
+- cases/transcribe.Service.Handle: pinned модель из job, движок STTEngine, прогресс 0-90% + 95% с checkpoint "transcribed", отмена убивает процесс, потеря питания -> ErrStopped (оборачивает ErrPowerLost) -> WAITING_FOR_POWER; порт EventPublisher.TranscriptCreated; неиспользуемые порты (SettingsReader, PowerMonitor, JobEnqueuer, IDGenerator, Tx) удалены, tests/ports_test.go и settings_sqlite_test.go скорректированы (проверки версии/уведомлений сохранены через reader jobrunner)
+- adapters/sqlite: TranscriptRepository (CAS по ADR-0004(d)), sqlc-запросы; adapters/filestore: Path(ctx, ref) с проверкой ссылок по компонентам; whispercli пишет доменный transcript.Document
+- testenv: FakeSTT, RunFakeWhisper; tests: интеграция на реальных SQLite + filestore + whispercli (fake-бинарник) + jobrunner, сценарий потери питания и возобновления, тест «на пути STT нет net/*»
+- Ревью: approve (medium ARCH-22 -> исправлено; low: тест питания на реальном раннере -> добавлен, комментарий о времени Created -> добавлен). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0.
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), на финальном head
+- [x] Шаги 1-3: go test -race ./desktop/internal/...; tests/transcribe_sqlite_test.go (fake whisper-cli, модель/версия записаны); tests/stt_network_test.go
+
+### Решения (подтвердить)
+- Id транскрипта = id задачи, документ transcripts/<jobid>.json: повтор задачи не создаёт второй транскрипт (существующая строка -> валидный документ -> движок)
+- Событие о завершении — порт EventPublisher с доставкой «хотя бы раз»; реализация в app обязана дедуплицировать по transcript id (например, follow-up задача с ключом по нему)
+- Регистрация в app: Heavy: true, Recovery: RecoveryRequeue (побочных эффектов нет)
+- Возобновление только после сохранения документа: whisper-cli не умеет продолжать внутри файла, потеря питания до этого = полный повтор
+
+### Заметки (follow-up)
+- Не подключено в app: регистрация обработчика, filestore.Store как Paths для whispercli, реализация EventPublisher (уведомление PRD §15 + идемпотентная пост-обработка), вызов whispercli CleanupWork при старте
+- Постановка STT-задачи после завершения записи (recordingsession или app): payload values.NewSTTRequest, pin через modelcatalog.ResolveForJob, ключ идемпотентности вида stt:<recording>:<model>
+- Язык распознавания задаётся конфигом движка, не задачей
+- Path: окно TOCTOU между проверкой и запуском процесса (атакующий = тот же локальный пользователь) — принято как вне модели угроз
+
+---
