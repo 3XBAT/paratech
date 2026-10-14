@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -68,26 +70,47 @@ func (r *RecordingRepository) ListByStatus(ctx context.Context, statuses ...reco
 	return out, nil
 }
 
-// ListRecent returns at most limit recordings, newest first; a limit below 1 lists nothing (SQLite reads a negative
-// LIMIT as no limit).
-func (r *RecordingRepository) ListRecent(ctx context.Context, limit int) ([]*recording.Recording, error) {
-	if limit < 1 {
-		return []*recording.Recording{}, nil
+// ListActivity lists the recordings of the recordings screen: every recording in a non-terminal status plus the
+// newest maxTerminal others, newest first by creation time, then id; a maxTerminal below 1 adds no terminal
+// recording. A row that cannot be read or restored does not fail the listing: it is left out and its id goes to
+// unreadable. A recording that disappeared between the two reads is skipped. Other database errors fail the call.
+func (r *RecordingRepository) ListActivity(ctx context.Context, maxTerminal int) ([]*recording.Recording, []shared.RecordingID, error) {
+	names := []string{}
+	for _, s := range recording.UnfinishedStatuses() {
+		names = append(names, string(s))
 	}
-	rows, err := r.db.Queries(ctx).ListRecentRecordings(ctx, int64(limit))
+	active, err := json.Marshal(names)
 	if err != nil {
-		return nil, MapError(ctx, err)
+		return nil, nil, err
+	}
+	q := r.db.Queries(ctx)
+	ids, err := q.ListRecordingActivityIDs(ctx, sqlcgen.ListRecordingActivityIDsParams{
+		Active: string(active), MaxTerminal: int64(max(maxTerminal, 0)), // SQLite reads a negative LIMIT as no limit
+	})
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
 	}
 
-	out := make([]*recording.Recording, 0, len(rows))
-	for _, row := range rows {
+	recs, unreadable := make([]*recording.Recording, 0, len(ids)), []shared.RecordingID{}
+	for _, id := range ids {
+		row, err := q.GetRecording(ctx, id)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case isScanError(err):
+			unreadable = append(unreadable, shared.RecordingID(id))
+			continue
+		case err != nil:
+			return nil, nil, MapError(ctx, err)
+		}
 		rec, err := recordingFromRow(row)
 		if err != nil {
-			return nil, err
+			unreadable = append(unreadable, shared.RecordingID(id))
+			continue
 		}
-		out = append(out, rec)
+		recs = append(recs, rec)
 	}
-	return out, nil
+	return recs, unreadable, nil
 }
 
 // Delete removes the row of rec if it still has the version rec was loaded with (ADR-0004(d)).

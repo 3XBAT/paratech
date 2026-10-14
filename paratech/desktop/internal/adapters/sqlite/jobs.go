@@ -191,25 +191,43 @@ func (r *JobRepository) ListByStatus(ctx context.Context, statuses ...job.Status
 	return out, nil
 }
 
-// ListRecent returns at most limit jobs, newest first; a limit below 1 lists nothing (SQLite reads a negative LIMIT
-// as no limit).
-func (r *JobRepository) ListRecent(ctx context.Context, limit int) ([]*job.Job, error) {
-	if limit < 1 {
-		return []*job.Job{}, nil
-	}
-	rows, err := r.db.Queries(ctx).ListRecentJobs(ctx, int64(limit))
+// ListActivity lists the jobs of the jobs screen: every job in a non-terminal status (so a waiting job never falls
+// off the list) plus the newest maxTerminal others, newest first by creation time, then id; a maxTerminal below 1
+// adds no terminal job. A row that cannot be read or restored does not fail the listing: it is left out and its id
+// goes to unreadable. A job that disappeared between the two reads is skipped. Other database errors fail the call.
+func (r *JobRepository) ListActivity(ctx context.Context, maxTerminal int) ([]*job.Job, []shared.JobID, error) {
+	active, err := json.Marshal(jobStatusNames(job.ActiveStatuses()))
 	if err != nil {
-		return nil, MapError(ctx, err)
+		return nil, nil, err
 	}
-	out := make([]*job.Job, 0, len(rows))
-	for _, row := range rows {
+	q := r.db.Queries(ctx)
+	ids, err := q.ListJobActivityIDs(ctx, sqlcgen.ListJobActivityIDsParams{
+		Active: string(active), MaxTerminal: int64(max(maxTerminal, 0)), // SQLite reads a negative LIMIT as no limit
+	})
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
+	}
+
+	jobs, unreadable := make([]*job.Job, 0, len(ids)), []shared.JobID{}
+	for _, id := range ids {
+		row, err := q.GetJob(ctx, id)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case isScanError(err):
+			unreadable = append(unreadable, shared.JobID(id))
+			continue
+		case err != nil:
+			return nil, nil, MapError(ctx, err)
+		}
 		j, err := jobFromRow(row)
 		if err != nil {
-			return nil, err
+			unreadable = append(unreadable, shared.JobID(id))
+			continue
 		}
-		out = append(out, j)
+		jobs = append(jobs, j)
 	}
-	return out, nil
+	return jobs, unreadable, nil
 }
 
 // ListByStatusTolerant is ListByStatus for startup recovery: a row that cannot be read or restored does not fail the

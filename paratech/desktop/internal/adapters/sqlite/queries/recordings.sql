@@ -34,11 +34,19 @@ SELECT * FROM recordings
 WHERE status IN (sqlc.slice('statuses'))
 ORDER BY created_at, id;
 
--- The newest recordings for the recordings screen (TASK-023); the caller bounds the list.
--- name: ListRecentRecordings :many
-SELECT * FROM recordings
-ORDER BY created_at DESC, id DESC
-LIMIT sqlc.arg(max_rows);
+-- Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
+-- newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+-- active is a JSON array of status names.
+-- name: ListRecordingActivityIDs :many
+SELECT id FROM recordings
+WHERE id IS NOT NULL
+  AND (status IN (SELECT value FROM json_each(CAST(sqlc.arg(active) AS TEXT)))
+       OR id IN (SELECT id FROM recordings
+                 WHERE id IS NOT NULL
+                   AND status NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(active) AS TEXT)))
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT sqlc.arg(max_terminal)))
+ORDER BY created_at DESC, id DESC;
 
 -- name: DeleteRecording :execrows
 DELETE FROM recordings WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);

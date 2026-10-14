@@ -167,6 +167,49 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 	return err
 }
 
+const listJobActivityIDs = `-- name: ListJobActivityIDs :many
+SELECT id FROM jobs
+WHERE id IS NOT NULL
+  AND (status IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+       OR id IN (SELECT id FROM jobs
+                 WHERE id IS NOT NULL
+                   AND status NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?2))
+ORDER BY created_at DESC, id DESC
+`
+
+type ListJobActivityIDsParams struct {
+	Active      string
+	MaxTerminal int64
+}
+
+// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
+// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+// active is a JSON array of status names.
+func (q *Queries) ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listJobActivityIDs, arg.Active, arg.MaxTerminal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobIDsByStatus = `-- name: ListJobIDsByStatus :many
 SELECT id FROM jobs
 WHERE status IN (/*SLICE:statuses*/?) AND id IS NOT NULL
@@ -226,55 +269,6 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, statuses []string) ([]Jo
 		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
 	}
 	rows, err := q.db.QueryContext(ctx, query, queryParams...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Job{}
-	for rows.Next() {
-		var i Job
-		if err := rows.Scan(
-			&i.ID,
-			&i.Type,
-			&i.Status,
-			&i.IdempotencyKey,
-			&i.Payload,
-			&i.PinnedModelID,
-			&i.Attempts,
-			&i.MaxAttempts,
-			&i.NextRunAt,
-			&i.RunNow,
-			&i.ProgressPercent,
-			&i.Checkpoint,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.StartedAt,
-			&i.FinishedAt,
-			&i.Version,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRecentJobs = `-- name: ListRecentJobs :many
-SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
-ORDER BY created_at DESC, id DESC
-LIMIT ?1
-`
-
-// The newest jobs for the jobs screen (TASK-023); the caller bounds the list.
-func (q *Queries) ListRecentJobs(ctx context.Context, maxRows int64) ([]Job, error) {
-	rows, err := q.db.QueryContext(ctx, listRecentJobs, maxRows)
 	if err != nil {
 		return nil, err
 	}

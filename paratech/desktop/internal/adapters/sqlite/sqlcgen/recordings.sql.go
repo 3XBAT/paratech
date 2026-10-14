@@ -114,42 +114,39 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 	return err
 }
 
-const listRecentRecordings = `-- name: ListRecentRecordings :many
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at FROM recordings
+const listRecordingActivityIDs = `-- name: ListRecordingActivityIDs :many
+SELECT id FROM recordings
+WHERE id IS NOT NULL
+  AND (status IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+       OR id IN (SELECT id FROM recordings
+                 WHERE id IS NOT NULL
+                   AND status NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?2))
 ORDER BY created_at DESC, id DESC
-LIMIT ?1
 `
 
-// The newest recordings for the recordings screen (TASK-023); the caller bounds the list.
-func (q *Queries) ListRecentRecordings(ctx context.Context, maxRows int64) ([]Recording, error) {
-	rows, err := q.db.QueryContext(ctx, listRecentRecordings, maxRows)
+type ListRecordingActivityIDsParams struct {
+	Active      string
+	MaxTerminal int64
+}
+
+// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
+// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+// active is a JSON array of status names.
+func (q *Queries) ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listRecordingActivityIDs, arg.Active, arg.MaxTerminal)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Recording{}
+	items := []string{}
 	for rows.Next() {
-		var i Recording
-		if err := rows.Scan(
-			&i.ID,
-			&i.LessonID,
-			&i.Status,
-			&i.StartedAt,
-			&i.StoppedAt,
-			&i.HeartbeatAt,
-			&i.MaxDurationMs,
-			&i.DurationMs,
-			&i.ChunkCount,
-			&i.ChunksRef,
-			&i.AudioRef,
-			&i.FailureReason,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
