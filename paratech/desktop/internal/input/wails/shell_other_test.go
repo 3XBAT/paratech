@@ -45,4 +45,7 @@ func TestNotifyWithoutShell(t *testing.T) {
 	if err := s.Notify(context.Background(), n); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("Notify: err = %v, want ErrNotRunning", err)
 	}
+	if s.Ready() {
+		t.Fatal("Ready without a shell")
+	}
 }

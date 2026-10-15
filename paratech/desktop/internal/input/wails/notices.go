@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	// ErrNotificationsUnavailable means Windows notifications could not be set up at start (see shell_windows.go); the
+	// ErrNotificationsUnavailable means Windows notifications could not be set up at start (see toasts_windows.go); the
 	// app runs without them.
 	ErrNotificationsUnavailable = errors.New("wails: notifications are unavailable")
 	// ErrNoNotice means Notify was called without a notice.

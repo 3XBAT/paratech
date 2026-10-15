@@ -19,7 +19,8 @@ func (s *Service) jobFinished(parent context.Context, snap job.Snapshot) {
 		return
 	}
 
-	// A shutdown or a caller that gives up must not cut the call short; only the bound ends it.
+	// A shutdown or a caller that gives up must not cut the call short; only the bound ends it, so a forced Stop
+	// waits up to observerTimeout for a call in flight.
 	ctx, cancel := context.WithCancelCause(context.WithoutCancel(parent))
 	timerDone := make(chan struct{})
 	go func() {

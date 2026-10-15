@@ -30,6 +30,9 @@
 - Release builds must use `-tags production` (see `docs/refs/wails.md`).
 - Toasts (TASK-053): the notifications service writes HKCU registry keys at startup (AppUserModelId, COM activator CLSID) and
   saves categories at shutdown. A failure there is logged and the app runs without toasts; texts are fixed, never user content.
+- The notifications service pulls `git.sr.ht/~jackmordaunt/go-toast/v2` v2.0.3 as an indirect dependency (hard rule 9).
+- The `notify.Notifier` port is implemented by `input/wails` `Shell` (like `ShowPopup`): the notifications service must be
+  registered with the Wails app the shell owns.
 
 ## Check on Windows by a human (TASK-020)
 1. Start a Zoom/Telemost call and click into its chat. Open the popup from the tray menu, then switch back to the call; better, let a test

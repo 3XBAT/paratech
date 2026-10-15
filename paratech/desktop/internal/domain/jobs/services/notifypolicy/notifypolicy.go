@@ -3,8 +3,6 @@ package notifypolicy
 import (
 	"errors"
 	"fmt"
-	"strings"
-	"unicode"
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/notice"
@@ -26,16 +24,21 @@ func New(types []job.Type) (Policy, error) {
 
 	set := make(map[job.Type]bool, len(types))
 	for _, t := range types {
-		if t == "" || strings.ContainsFunc(string(t), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-			return Policy{}, fmt.Errorf("%w: blank or malformed job type %q", ErrInvalidPolicy, string(t))
+		if err := notice.ValidateType(t); err != nil {
+			return Policy{}, fmt.Errorf("%w: %w", ErrInvalidPolicy, err)
 		}
 		set[t] = true
 	}
 	return Policy{types: set}, nil
 }
 
+// Concerns reports whether a job of type t that reached status s notifies the user when the setting is on. It needs no
+// setting, so callers check it first and read the settings only when it holds. The zero Policy concerns nothing.
+func (p Policy) Concerns(t job.Type, s job.Status) bool {
+	return notice.Notifiable(s) && p.types[t]
+}
+
 // Notifies reports whether a job of type t that reached status s notifies the user; enabled is the user setting.
-// The zero Policy notifies about nothing.
 func (p Policy) Notifies(enabled bool, t job.Type, s job.Status) bool {
-	return enabled && notice.Notifiable(s) && p.types[t]
+	return enabled && p.Concerns(t, s)
 }

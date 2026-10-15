@@ -18,6 +18,18 @@ func TestFakeNotifier(t *testing.T) {
 	f := &FakeNotifier{}
 	ctx := context.Background()
 
+	if !f.Ready() {
+		t.Fatal("a new fake is not ready")
+	}
+	f.SetReady(false)
+	if f.Ready() {
+		t.Fatal("SetReady(false) left the fake ready")
+	}
+	f.SetReady(true)
+	if !f.Ready() {
+		t.Fatal("SetReady(true) left the fake not ready")
+	}
+
 	if err := f.Notify(ctx, n); err != nil {
 		t.Fatal(err)
 	}

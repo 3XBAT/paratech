@@ -46,6 +46,7 @@ type ui interface {
 	hidePopup() error
 	showMain() error
 	notify(ctx context.Context, t toast) error
+	canNotify() bool
 }
 
 // Shell owns the UI: the main window, the tray icon and the popup. Create it with New. Window commands are safe
@@ -130,6 +131,13 @@ func (s *Shell) Notify(ctx context.Context, n *notice.Notice) error {
 		return err
 	}
 	return u.notify(ctx, toastFor(n))
+}
+
+// Ready reports whether Notify can show a toast now: the shell runs and Windows notifications were set up. It is false
+// before Run, after the shell stopped and on other systems (the notify.Notifier port).
+func (s *Shell) Ready() bool {
+	u, err := s.current()
+	return err == nil && u.canNotify()
 }
 
 // bindings are the services bound to the pages; Wails needs each one as its concrete type.

@@ -74,13 +74,17 @@ func (t *toastService) ServiceShutdown() error {
 	return t.impl.ServiceShutdown()
 }
 
+// isReady reports whether the service started and did not shut down.
+func (t *toastService) isReady() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ready
+}
+
 // push shows a plain toast: no scenario (the "urgent" and "reminder" ones can break through Focus Assist), default
 // sound and duration, no schedule. Windows applies the user's notification settings to it.
 func (t *toastService) push(tt toast) error {
-	t.mu.Lock()
-	ready := t.ready
-	t.mu.Unlock()
-	if !ready {
+	if !t.isReady() {
 		return ErrNotificationsUnavailable
 	}
 

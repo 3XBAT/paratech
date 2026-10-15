@@ -296,6 +296,43 @@ func TestNotifierErrorIsReturnedAndNotRetried(t *testing.T) {
 	}
 }
 
+func TestNotReadyNotifierRecordsNothing(t *testing.T) {
+	e := newEnv(t)
+	snap := snapshot(t, "job-1", typeStt, job.StatusCompleted)
+	e.notifier.SetReady(false)
+	if err := e.svc.JobFinished(context.Background(), snap); err != nil {
+		t.Fatalf("not ready: %v", err)
+	}
+	if len(e.notifier.Calls()) != 0 || e.notices.count() != 0 {
+		t.Fatalf("not ready: %d notifier calls, %d notices; want none", len(e.notifier.Calls()), e.notices.count())
+	}
+
+	// Ready later (the shell started): the same state notifies, once.
+	e.notifier.SetReady(true)
+	for range 2 {
+		if err := e.svc.JobFinished(context.Background(), snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(e.notifier.Calls()); n != 1 || e.notices.count() != 1 {
+		t.Fatalf("ready: %d notifier calls, %d notices; want 1 and 1", n, e.notices.count())
+	}
+}
+
+// Events the policy never notifies about must not cost a settings read (most finished jobs are such).
+func TestUnconcernedEventsSkipSettings(t *testing.T) {
+	for _, snap := range []job.Snapshot{
+		snapshot(t, "job-1", typeStt, job.StatusCancelled),
+		snapshot(t, "job-2", typeMail, job.StatusCompleted),
+	} {
+		e := newEnv(t)
+		e.settings.err = errors.New("settings must not be read")
+		if err := e.svc.JobFinished(context.Background(), snap); err != nil {
+			t.Fatalf("%s %s: %v", snap.Type(), snap.Status(), err)
+		}
+	}
+}
+
 func TestStorageErrorsNotifyNothing(t *testing.T) {
 	boom := errors.New("disk")
 	t.Run("settings", func(t *testing.T) {

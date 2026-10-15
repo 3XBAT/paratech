@@ -16,6 +16,14 @@ func Statuses() []job.Status { return []job.Status{job.StatusCompleted, job.Stat
 // Notifiable reports whether reaching s notifies the user: the processing finished, successfully or not.
 func Notifiable(s job.Status) bool { return s == job.StatusCompleted || s == job.StatusFailed }
 
+// ValidateType checks that t can be stored with a notice: not blank, no spaces or control characters.
+func ValidateType(t job.Type) error {
+	if t == "" || strings.ContainsFunc(string(t), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return fmt.Errorf("%w: blank or malformed job type %q", ErrInvalidNotice, string(t))
+	}
+	return nil
+}
+
 // Notice records that the user was notified that a job reached a finished status. It never changes after New.
 type Notice struct {
 	job        shared.JobID
@@ -50,8 +58,8 @@ func (n *Notice) validate() error {
 	if err := n.job.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidNotice, err)
 	}
-	if n.typ == "" || strings.ContainsFunc(string(n.typ), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return fmt.Errorf("%w: blank or malformed job type", ErrInvalidNotice)
+	if err := ValidateType(n.typ); err != nil {
+		return err
 	}
 	if !Notifiable(n.status) {
 		return fmt.Errorf("%w: status %q is not notifiable", ErrInvalidNotice, n.status)

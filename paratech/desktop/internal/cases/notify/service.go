@@ -50,12 +50,26 @@ func New(deps Deps, cfg Config) (*Service, error) {
 // JobFinished is told that a job reached snap.Status(). It notifies the user once for that job and status when the
 // policy says so; repeated calls, also after a restart, do nothing. The notice is recorded before the notifier is
 // called, so a notifier error loses this notification instead of repeating it later; the error is returned.
+//
+// While the notifier is not ready (for example Recover at startup, before the shell runs) the event is skipped with
+// nil and nothing is recorded, so a later event for the same job and status still notifies.
 func (s *Service) JobFinished(ctx context.Context, snap job.Snapshot) error {
+	// Cancels and other job types are the common case: decide them without a settings read.
+	if !s.policy.Concerns(snap.Type(), snap.Status()) {
+		return nil
+	}
 	st, err := s.settings.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("%s: %w", opSettings, err)
 	}
 	if !s.policy.Notifies(st.NotifyOnProcessingComplete(), snap.Type(), snap.Status()) {
+		return nil
+	}
+
+	// The shell can still stop between Ready and Notify; that loses this one notification, which is accepted.
+	if !s.notifier.Ready() {
+		s.log.Info("notifier not ready, notification skipped", slog.String("job", snap.ID().String()),
+			slog.String("status", snap.Status().String()))
 		return nil
 	}
 

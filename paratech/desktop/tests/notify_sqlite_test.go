@@ -260,8 +260,17 @@ func TestJobRunnerNotifiesFinishedJobs(t *testing.T) {
 		j, err := repo.Get(context.Background(), "mail")
 		return err == nil && j.Status() == job.StatusCompleted
 	}, func() { clock.Advance(time.Second) })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	for range 5 {
+		if err := clock.AwaitSleepers(ctx, 2); err != nil { // the worker and the keeper are idle
+			t.Fatalf("runner did not go idle: %v", err)
+		}
 		clock.Advance(time.Second)
+	}
+	// Stop waits for the worker, including an observer call in flight, so every notification is in.
+	if err := runner.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
 	}
 
 	got := map[string]int{}

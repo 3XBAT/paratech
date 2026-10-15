@@ -23,6 +23,7 @@ func TestNewValidates(t *testing.T) {
 		{"no types", nil, false},
 		{"blank type", []job.Type{typeStt, ""}, false},
 		{"type with a space", []job.Type{"s t"}, false},
+		{"type with a control character", []job.Type{"stt\n"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -51,9 +52,12 @@ func TestNotifies(t *testing.T) {
 					t.Errorf("Notifies(enabled=%v, %s, %s) = %v, want %v", enabled, typ, s, got, want)
 				}
 			}
+			if got, want := p.Concerns(typ, s), typ == typeStt && notifying[s]; got != want {
+				t.Errorf("Concerns(%s, %s) = %v, want %v", typ, s, got, want)
+			}
 		}
 	}
-	if (Policy{}).Notifies(true, typeStt, job.StatusCompleted) {
+	if (Policy{}).Notifies(true, typeStt, job.StatusCompleted) || (Policy{}).Concerns(typeStt, job.StatusCompleted) {
 		t.Error("the zero policy notifies")
 	}
 }

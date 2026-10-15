@@ -29,6 +29,10 @@ type Notifier interface {
 	// Notify shows a notification about n with fixed texts for its job type and status, never user content
 	// (PRD section 15). It must honour ctx.
 	Notify(ctx context.Context, n *notice.Notice) error
+
+	// Ready reports whether a notification can be shown right now: false before the shell runs, after it stopped and
+	// when Windows notifications could not be set up (PRD section 15). It must be cheap and never block.
+	Ready() bool
 }
 
 // Clock supplies the time of a notice (ARCH-24, PRD section 15). Implemented by the clock adapter and by a fake.

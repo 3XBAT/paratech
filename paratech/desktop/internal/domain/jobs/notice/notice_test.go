@@ -31,6 +31,29 @@ func TestNotifiable(t *testing.T) {
 	}
 }
 
+func TestValidateType(t *testing.T) {
+	tests := []struct {
+		typ job.Type
+		ok  bool
+	}{
+		{"stt", true},
+		{"send_email", true},
+		{"", false},
+		{"s t", false},
+		{"stt\n", false},
+		{"stt\x00", false},
+	}
+	for _, tt := range tests {
+		err := ValidateType(tt.typ)
+		if tt.ok != (err == nil) {
+			t.Errorf("ValidateType(%q) = %v, want ok %v", tt.typ, err, tt.ok)
+		}
+		if err != nil && !errors.Is(err, ErrInvalidNotice) {
+			t.Errorf("ValidateType(%q) = %v, want ErrInvalidNotice", tt.typ, err)
+		}
+	}
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -24,7 +24,7 @@ type windowsUI struct {
 	app    *application.App
 	main   *application.WebviewWindow
 	popup  *application.WebviewWindow
-	toasts pusher
+	toasts *toastService
 }
 
 func (s *Shell) run(ctx context.Context) error {
@@ -197,3 +197,5 @@ func (u *windowsUI) showMain() error {
 }
 
 func (u *windowsUI) notify(ctx context.Context, t toast) error { return pushWithin(ctx, u.toasts, t) }
+
+func (u *windowsUI) canNotify() bool { return u.toasts.isReady() }

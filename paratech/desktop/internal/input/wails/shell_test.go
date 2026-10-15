@@ -52,8 +52,9 @@ func TestNew(t *testing.T) {
 
 // fakeUI records forwarded commands.
 type fakeUI struct {
-	calls  []string
-	toasts []toast
+	calls    []string
+	toasts   []toast
+	noToasts bool // Windows notifications failed to set up
 }
 
 func (f *fakeUI) showPopup() error { f.calls = append(f.calls, "showPopup"); return nil }
@@ -64,6 +65,8 @@ func (f *fakeUI) notify(_ context.Context, t toast) error {
 	f.toasts = append(f.toasts, t)
 	return nil
 }
+
+func (f *fakeUI) canNotify() bool { return !f.noToasts }
 
 func TestCommands(t *testing.T) {
 	s, err := New(validOptions())
@@ -145,5 +148,31 @@ func TestNotify(t *testing.T) {
 	s.setUI(nil) // stopped
 	if err := s.Notify(ctx, n); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("Notify after stop: err = %v, want ErrNotRunning", err)
+	}
+}
+
+func TestReady(t *testing.T) {
+	s, err := New(validOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Ready() {
+		t.Fatal("ready before Run")
+	}
+
+	f := &fakeUI{}
+	s.setUI(f)
+	if !s.Ready() {
+		t.Fatal("not ready while running with notifications")
+	}
+	f.noToasts = true
+	if s.Ready() {
+		t.Fatal("ready although notifications could not be set up")
+	}
+
+	f.noToasts = false
+	s.setUI(nil) // stopped
+	if s.Ready() {
+		t.Fatal("ready after stop")
 	}
 }

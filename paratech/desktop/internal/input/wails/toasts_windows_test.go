@@ -98,6 +98,9 @@ func TestToastServiceStartupFailureKeepsTheAppRunning(t *testing.T) {
 			if !strings.Contains(logs.String(), tc.log) {
 				t.Errorf("log %q does not name the cause", logs.String())
 			}
+			if (&windowsUI{toasts: ts}).canNotify() {
+				t.Fatal("can notify after a failed startup")
+			}
 			if err := ts.push(toast{id: "x", title: "y"}); !errors.Is(err, ErrNotificationsUnavailable) || len(tc.fake.sent) != 0 {
 				t.Fatalf("push after a failed startup: err = %v, sent %d", err, len(tc.fake.sent))
 			}
@@ -126,15 +129,28 @@ func TestToastServiceBindsNothing(t *testing.T) {
 func TestWindowsUINotifyUsesTheToastService(t *testing.T) {
 	f := &fakeWailsNotifier{}
 	ts := newToastService(f, discard())
+	u := &windowsUI{toasts: ts}
+	if u.canNotify() {
+		t.Fatal("can notify before the toast service started")
+	}
 	if err := ts.ServiceStartup(context.Background(), application.ServiceOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	u := &windowsUI{toasts: ts}
+	if !u.canNotify() {
+		t.Fatal("cannot notify after the toast service started")
+	}
 	tt := toast{id: "job-1-failed", title: "Обработка не удалась", body: "Подробности в приложении."}
 	if err := u.notify(context.Background(), tt); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.sent) != 1 || f.sent[0].ID != tt.id {
 		t.Fatalf("sent %+v", f.sent)
+	}
+
+	if err := ts.ServiceShutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if u.canNotify() {
+		t.Fatal("can notify after the toast service shut down")
 	}
 }
