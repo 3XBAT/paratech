@@ -1,6 +1,9 @@
 package values
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors of the transcription value objects (ARCH-18).
 var (
@@ -59,4 +62,21 @@ var (
 
 	// ErrInvalidSTTRequest is returned for an STT job payload that is malformed or names no valid recording.
 	ErrInvalidSTTRequest = errors.New("invalid stt job payload")
+
+	// ErrInvalidImportFile means the file chosen for an import is not a regular file at an absolute local path.
+	ErrInvalidImportFile = errors.New("not a regular file that can be imported")
+
+	// ErrConfirmationRequired means a model outside the catalog is imported without explicit user confirmation
+	// (AC-23).
+	ErrConfirmationRequired = errors.New("import of a model outside the catalog needs user confirmation")
+)
+
+// Narrower errors; errors.Is also matches the error they wrap.
+var (
+	// ErrImportTooLarge means a file imported outside the catalog is larger than MaxImportSizeBytes.
+	ErrImportTooLarge = fmt.Errorf("%w: import file too large", ErrInvalidSize)
+
+	// ErrConfirmationMismatch means the file to install is not the one whose SHA-256 the user confirmed
+	// (PRD section 14 case 13).
+	ErrConfirmationMismatch = fmt.Errorf("%w: file is not the one the user confirmed", ErrChecksumMismatch)
 )

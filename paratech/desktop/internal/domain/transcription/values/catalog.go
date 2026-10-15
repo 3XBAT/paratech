@@ -42,6 +42,7 @@ type CatalogEntrySpec struct {
 	SizeBytes      int64
 	SHA256         SHA256
 	SourceURL      SourceURL
+	SourcePage     SourceURL // optional: the page to open in the browser for a manual download
 	Quantization   Quantization
 	Capabilities   []Capability
 	Recommendation Recommendation
@@ -55,12 +56,14 @@ type CatalogEntry struct {
 	size           int64
 	sha256         SHA256
 	source         SourceURL
+	page           SourceURL
 	quantization   Quantization
 	capabilities   []Capability
 	recommendation Recommendation
 }
 
-// NewCatalogEntry validates every field. ID, name, version, size, SHA-256 and the source URL are required.
+// NewCatalogEntry validates every field. ID, name, version, size, SHA-256 and the source URL are required; the source
+// page is optional.
 func NewCatalogEntry(s CatalogEntrySpec) (CatalogEntry, error) {
 	if s.SourceURL.IsZero() {
 		return CatalogEntry{}, fmt.Errorf("%w: no source url", ErrInvalidSourceURL)
@@ -76,7 +79,7 @@ func NewCatalogEntry(s CatalogEntrySpec) (CatalogEntry, error) {
 
 	return CatalogEntry{
 		id: s.ID, name: s.Name, version: s.Version, size: s.SizeBytes, sha256: s.SHA256, source: s.SourceURL,
-		quantization: s.Quantization, capabilities: append([]Capability(nil), s.Capabilities...),
+		page: s.SourcePage, quantization: s.Quantization, capabilities: append([]Capability(nil), s.Capabilities...),
 		recommendation: s.Recommendation,
 	}, nil
 }
@@ -98,6 +101,16 @@ func (e CatalogEntry) SHA256() SHA256 { return e.sha256 }
 
 // SourceURL returns where the file can be downloaded.
 func (e CatalogEntry) SourceURL() SourceURL { return e.source }
+
+// SourcePage returns the page the user opens in the browser to download the file by hand (PRD section 8.1: open
+// source page); the source URL when the manifest names no page. It is data for the browser only: its host is not
+// added to the download allowlist.
+func (e CatalogEntry) SourcePage() SourceURL {
+	if e.page.IsZero() {
+		return e.source
+	}
+	return e.page
+}
 
 // Quantization returns the weight format, empty if unknown.
 func (e CatalogEntry) Quantization() Quantization { return e.quantization }
@@ -170,11 +183,11 @@ func (c Catalog) CheckImportIdentity(name ModelName, version ModelVersion) error
 //
 //	{"schema_version": 1, "models": [{"id": "base-q5_1", "name": "base", "version": "1",
 //	  "size_bytes": 59707625, "sha256": "<64 hex>", "source_url": "https://host/path/file.bin",
-//	  "quantization": "q5_1", "capabilities": ["multilingual"],
+//	  "source_page": "https://host/path", "quantization": "q5_1", "capabilities": ["multilingual"],
 //	  "recommendation": {"min_cpu_cores": 2, "min_ram_mb": 1024, "preferred": true}}],
 //	 "download_hosts": ["cdn.example.com"]}
 //
-// download_hosts is optional.
+// download_hosts and source_page are optional.
 type manifestDoc struct {
 	SchemaVersion int                `json:"schema_version"`
 	Models        []manifestEntryDoc `json:"models"`
@@ -188,6 +201,7 @@ type manifestEntryDoc struct {
 	SizeBytes      int64              `json:"size_bytes"`
 	SHA256         string             `json:"sha256"`
 	SourceURL      string             `json:"source_url"`
+	SourcePage     *string            `json:"source_page"`
 	Quantization   string             `json:"quantization"`
 	Capabilities   []string           `json:"capabilities"`
 	Recommendation *recommendationDoc `json:"recommendation"`
@@ -203,7 +217,7 @@ type recommendationDoc struct {
 // MaxCatalogBytes, exactly one JSON object, only known lowercase keys, no repeated key in any object, the expected
 // schema version, 1..MaxCatalogEntries entries that pass NewCatalogEntry, and no two entries with the same id, the
 // same name and version, or the same SHA-256. download_hosts and the hosts of the source URLs must pass
-// NewHostAllowlist.
+// NewHostAllowlist. A source_page, when present, must pass ParseSourceURL like source_url.
 func ParseCatalog(data []byte) (Catalog, error) {
 	if len(data) > MaxCatalogBytes {
 		return Catalog{}, fmt.Errorf("%w: larger than %d bytes", ErrInvalidCatalog, MaxCatalogBytes)
@@ -274,6 +288,12 @@ func (m manifestEntryDoc) entry() (CatalogEntry, error) {
 	if err != nil {
 		return CatalogEntry{}, err
 	}
+	var page SourceURL
+	if m.SourcePage != nil {
+		if page, err = ParseSourceURL(*m.SourcePage); err != nil {
+			return CatalogEntry{}, fmt.Errorf("source_page: %w", err)
+		}
+	}
 	caps := make([]Capability, len(m.Capabilities))
 	for i, c := range m.Capabilities {
 		caps[i] = Capability(c)
@@ -285,7 +305,7 @@ func (m manifestEntryDoc) entry() (CatalogEntry, error) {
 
 	return NewCatalogEntry(CatalogEntrySpec{
 		ID: CatalogID(m.ID), Name: ModelName(m.Name), Version: ModelVersion(m.Version), SizeBytes: m.SizeBytes,
-		SHA256: sum, SourceURL: src, Quantization: Quantization(m.Quantization), Capabilities: caps,
+		SHA256: sum, SourceURL: src, SourcePage: page, Quantization: Quantization(m.Quantization), Capabilities: caps,
 		Recommendation: rec,
 	})
 }

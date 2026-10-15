@@ -20,6 +20,7 @@ const (
 	opSetDefault    = "modelcatalog: set default model"
 	opDelete        = "modelcatalog: delete model"
 	opResolve       = "modelcatalog: resolve model for job"
+	opSourcePage    = "modelcatalog: model source page"
 )
 
 // conflictAttempts bounds every reload-and-retry loop: version conflicts on the settings and a default that is selected
@@ -113,7 +114,8 @@ func (s *Service) ListInstalled(ctx context.Context) ([]InstalledModel, error) {
 //
 //   - A catalog model must match its entry's size and digest, otherwise values.ErrSizeMismatch or
 //     values.ErrChecksumMismatch.
-//   - An imported model stores the computed digest; the name and version of a catalog entry yield
+//   - An imported model stores the computed digest, which must be the one the user confirmed
+//     (values.ErrConfirmationRequired, values.ErrConfirmationMismatch); the name and version of a catalog entry yield
 //     values.ErrReservedIdentity.
 //   - A second model with the same name and version yields ErrAlreadyInstalled; a file that is, contains or lies inside
 //     the file of another installed model yields sttmodel.ErrFileInUse (both wrap shared.ErrDuplicate).
@@ -134,6 +136,11 @@ func (s *Service) Register(ctx context.Context, r Registration) (InstalledModel,
 	m, err := sttmodel.New(spec, s.clock.Now())
 	if err != nil {
 		return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+	}
+	if r.CatalogID == "" {
+		if err := r.Confirmation.Verify(m.SHA256()); err != nil {
+			return InstalledModel{}, fmt.Errorf("%s: %w", opRegister, err)
+		}
 	}
 
 	// The file check and the insert share one write transaction, so two registrations cannot claim one file.
@@ -180,7 +187,7 @@ func (s *Service) registrationSpec(ctx context.Context, r Registration, size int
 		}, nil
 	}
 
-	if r.Name != "" || r.ModelVersion != "" || r.Quantization != "" || len(r.Capabilities) > 0 {
+	if r.Name != "" || r.ModelVersion != "" || r.Quantization != "" || len(r.Capabilities) > 0 || !r.Confirmation.IsZero() {
 		return sttmodel.Spec{}, fmt.Errorf("%w: a catalog model takes its identity from the catalog", ErrInvalidRegistration)
 	}
 	entry, ok := cat.Entry(r.CatalogID)
@@ -199,6 +206,17 @@ func (s *Service) registrationSpec(ctx context.Context, r Registration, size int
 		return sttmodel.Spec{}, err
 	}
 	return sttmodel.CatalogSpec(s.ids.NewSttModelID(), entry, r.File), nil
+}
+
+// SourcePage returns the page of a catalog model to open in the default browser, so the user can download the file
+// by hand and import it (PRD section 8.1: open source page). It is the manifest's https source_page, or the source
+// URL when there is none; the caller opens it, the use case never does. An unknown id yields ErrNotInCatalog.
+func (s *Service) SourcePage(ctx context.Context, id values.CatalogID) (values.SourceURL, error) {
+	entry, err := s.catalogEntry(ctx, id)
+	if err != nil {
+		return values.SourceURL{}, fmt.Errorf("%s %s: %w", opSourcePage, id, err)
+	}
+	return entry.SourcePage(), nil
 }
 
 // SetDefault makes an installed model the default (PRD section 8, AC-07). It changes only the settings aggregate, in
@@ -374,6 +392,33 @@ func (s *Service) ResolveForJob(ctx context.Context, requested shared.SttModelID
 		return PinnedModel{}, fmt.Errorf("%s: %w", opResolve, err)
 	}
 	return pinned, nil
+}
+
+// catalogEntry loads the catalog and returns the entry with the id.
+func (s *Service) catalogEntry(ctx context.Context, id values.CatalogID) (values.CatalogEntry, error) {
+	cat, err := s.loadCatalog(ctx)
+	if err != nil {
+		return values.CatalogEntry{}, err
+	}
+	entry, ok := cat.Entry(id)
+	if !ok {
+		return values.CatalogEntry{}, fmt.Errorf("%q: %w", id, ErrNotInCatalog)
+	}
+	return entry, nil
+}
+
+// checkNotInstalled refuses a second install of a catalog entry before gigabytes are copied; Register checks again.
+func (s *Service) checkNotInstalled(ctx context.Context, id values.CatalogID) error {
+	installed, err := s.models.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range installed {
+		if m.CatalogID() == id {
+			return fmt.Errorf("%s %s: %w", m.Name(), m.ModelVersion(), ErrAlreadyInstalled)
+		}
+	}
+	return nil
 }
 
 func (s *Service) loadCatalog(ctx context.Context) (values.Catalog, error) {

@@ -149,7 +149,7 @@ func (d *Downloader) download(ctx context.Context, id values.CatalogID) (Install
 	if err != nil {
 		return InstalledModel{}, err
 	}
-	if err := d.checkNotInstalled(ctx, id); err != nil {
+	if err := d.svc.checkNotInstalled(ctx, id); err != nil {
 		return InstalledModel{}, err
 	}
 	if err := allow.Check(entry.SourceURL().String()); err != nil {
@@ -344,20 +344,6 @@ func (d *Downloader) entry(ctx context.Context, id values.CatalogID) (values.Cat
 		return values.CatalogEntry{}, values.HostAllowlist{}, fmt.Errorf("%q: %w", id, ErrNotInCatalog)
 	}
 	return entry, cat.DownloadHosts(), nil
-}
-
-// checkNotInstalled refuses a second install of the entry before gigabytes are fetched; Register checks again.
-func (d *Downloader) checkNotInstalled(ctx context.Context, id values.CatalogID) error {
-	installed, err := d.svc.models.List(ctx)
-	if err != nil {
-		return err
-	}
-	for _, m := range installed {
-		if m.CatalogID() == id {
-			return fmt.Errorf("%s %s: %w", m.Name(), m.ModelVersion(), ErrAlreadyInstalled)
-		}
-	}
-	return nil
 }
 
 // partialSize returns the bytes kept from an earlier download of the entry; none is 0.

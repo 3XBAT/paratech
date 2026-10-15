@@ -470,6 +470,16 @@ func modelRef(t *testing.T, name string) shared.ArtifactRef {
 	return ref
 }
 
+// confirm is the user's confirmation of the file with content, for an import outside the catalog.
+func confirm(t *testing.T, content []byte) values.ImportConfirmation {
+	t.Helper()
+	c, err := values.ConfirmImport(digest(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
 // install stores the file of a catalog model and registers it.
 func (e *env) install(c catalogModel) InstalledModel {
 	e.t.Helper()

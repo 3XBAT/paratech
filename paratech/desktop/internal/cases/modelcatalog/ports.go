@@ -119,6 +119,17 @@ type DiskSpace interface {
 	FreeBytes(ctx context.Context) (int64, error)
 }
 
+// ImportSource reads a model file the user picked outside the data directory, for an import (PRD sections 8 and 8.1:
+// import the downloaded file). Implemented by the localfile adapter. The file is only read: it is copied into the
+// data directory through ArtifactStore.
+type ImportSource interface {
+	// Open opens the file at the absolute OS path and returns it with its size; the caller closes it. A path that is
+	// not absolute, not on a local drive (a UNC or device path) or not a regular file yields
+	// values.ErrInvalidImportFile, a missing file shared.ErrNotFound and other failures shared.ErrStorage
+	// (PRD section 8.1).
+	Open(ctx context.Context, path string) (io.ReadCloser, int64, error)
+}
+
 // CatalogSource supplies the catalog manifest of downloadable models as raw bytes (PRD section 8.1). The use case
 // parses and validates it with values.ParseCatalog, so the source is not trusted. Implementations read an embedded or
 // locally stored manifest; fetching a manifest over the network is not part of this port.
