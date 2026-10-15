@@ -1575,3 +1575,47 @@
 - Владельцу в альфе модель по-прежнему не добавить (нет экрана TASK-030), поэтому записанная лекция не распознаётся
 
 ---
+
+## [TASK-062] Экран настроек почты и адреса Hub («Подключения»), пароль почты через Credential Manager
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- cases/connections: Get (адрес Hub, получатель, SMTP host/порт/режим TLS/логин, MailConfigured, статус пароля), SaveMail и SaveHubURL (одна загрузка, все сеттеры агрегата settings, все неверные поля сразу через InvalidFieldsError без значений, ничего не сохраняется при ошибке; CAS с 3 повторами), SetMailPassword/RemoveMailPassword через узкий порт SecretWriter (Set/Exists/Delete, без Get), CheckMail (30 с, одна проверка за раз). Слот секрета общий: TASK-039 добавит ключ Hub вторым слотом без новых типов
+- adapters/smtp: Check — та же сессия, что у Send (общая функция session: тот же dial, TLS >= 1.2, TLSMandatory/WithSSL, механизмы AUTH), затем QUIT; MAIL/RCPT/DATA нет. Классы сессии (ErrUnreachable, ErrCertificate, ErrSetupUnsupported, ErrLoginRejected, ErrServerTemporary, ErrServerRefused, ErrNoPassword, ErrStoreUnavailable, ...) поверх прежних фиксированных текстов; ответ на AUTH распознаётся по префиксу go-mail v0.8.1 «SMTP AUTH failed: ». Классы доставки Send не изменились; изменился только текст отклонённого входа («... to AUTH» вместо «... to session setup»)
+- input/wails ConnectionsService (6 методов): ответы только со статусом пароля и фиксированными русскими текстами; ошибки полей — обычный результат. app/connections.go: wiring и мост классов smtp -> результаты use case; то же хранилище wincred "mail" (smtp-password)
+- Security F1 (medium, подтверждён): Wails beta.29 пишет аргументы вызова биндинга на уровне Debug («Binding call complete:»), т.е. пароль почты попадал в лог при --log-level debug (рецепт run-alpha.md). Исправлено: Wails получает свой логгер с порогом Info (input/wails/wailslog.go), наш код пишет на уровне пользователя; регрессионные тесты
+- frontend: раздел «Подключения» (перед «Настройками»): блок Hub (адрес + место для ключа TASK-039), блок Почта, общий компонент SecretSlot (только «задан / не задан / хранилище недоступно»; поле type=password, очищается после вызова; удаление с подтверждением), «Проверить почту» (недоступна при несохранённых изменениях и во время смены пароля); логика в connectionsView.ts
+- docs: ADR-0009 (Connections), docs/refs/wails.md (логирование аргументов на Debug), docs/qa/run-alpha.md (таблица Hub/Почта, проверки в разделе 8, заметка про debug-лог, «Что изменилось»)
+- Изменённые существующие тесты: wails shell_test validOptions и settings_test TestOpenBindings (+Connections обязателен, кейс без него), TestFrontendCallsBoundNames (+connections.ts, 6 методов), app secrets_test (assertNoSecrets -> assertNoSecretsIn с минимумом строк; старый вызов по-прежнему 7), nav.test.mjs (6 разделов)
+- Ревью: approve (low/nit: точный текст отклонённого входа, оба класса в smtp-тесте, слабый порог строк, проверка во время смены пароля, формулировка doc, порядок «Что изменилось») -> исправлено 8381a35, cf64765; повторное ревью approve (только low). Security: найдено 1 (F1), опровергнуто 0, исправлено 1 (89c3405); повторный аудит исправлений: 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на cf64765 после rebase на origin/master 157607d
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (в verify.sh); npm run test (53) и npm run build
+- [x] Шаг 2: GOOS=windows go vet ./desktop/...
+- [x] Шаг 3: TestConnectionsPageKeepsThePasswordSecret (через биндинг: ответы JSON, debug-лог, файлы БД UTF-8/UTF-16, все строки), TestConnectionsPageWithoutCredentialStore (ErrUnsupported -> «unsupported», без падения), TestAppOptionsLoggerHasNoDebug, TestFloorLogger; ключ Hub — в TASK-039
+
+### Решения (подтвердить)
+- «Подключения» — отдельный пункт навигации, а не часть «Настроек»
+- «Проверить почту» проверяет сохранённые настройки (кнопка недоступна при несохранённых изменениях)
+- Вне Windows при ненастроенной почте проверка говорит «почта не настроена», а не «хранилище недоступно» (учётка проверяется раньше хранилища)
+- Сохранение без изменений всё равно делает CAS-сохранение (как preferences)
+- Debug-строки самого Wails больше не пишутся ни при каком уровне лога
+
+### Заметки (follow-up)
+- Low: во время идущей проверки можно сохранить новый пароль/настройки; результат старой проверки покажется после смены (ConnectionsPage.tsx ~145-176): блокировать сохранение на время проверки или счётчик
+- Low: результаты проверки — ошибки use case, сопоставляемые с классами адаптера в мосте app; при проверке ключа Hub (TASK-039) решить, переносить ли классы в домен
+- Nit: тексты полей в input/wails/connections.go дублируют лимиты домена (254, 65535, 2560) без теста; wailslog.go: поле min затеняет встроенную функцию; ADR-0009 «Wired since» без TASK-062 (есть отдельный пункт Connections)
+- docs/refs/go-mail.md не упоминает префикс «SMTP AUTH failed: » (только комментарий и тест)
+- Методы паролей senddelivery (SetMailPassword/MailPasswordConfigured/RemoveMailPassword) остались, страница использует connections
+- TASK-039: ключ Hub — второй SecretSlot в блоке Hub на этой странице и второй слот в cases/connections (имя api-key, хранилище "hub")
+
+### Ручная проверка владельцем на Windows (ночью не выполнялась)
+- docs/qa/run-alpha.md, раздел 8 «Подключения»: неверные значения (Hub http://example.org, получатель abc, сервер smtp://x, порт abc и 70000) — свои тексты у полей, значения остаются; верные — «Сохранено.», «Почта настроена.»
+- Пароль: «Пароль задан», поле очищено, запись paratech/mail/smtp-password в Диспетчере учётных данных -> Учётные данные Windows; пароль больше не показывается (и после перезапуска); замена и удаление с подтверждением
+- «Проверить почту» с настоящим паролем приложения — успех, нового письма во Входящих/Отправленных нет; неверный пароль — текст «отклонил логин»; 465 со STARTTLS / 587 с TLS — понятный текст за ~30 с
+- После выхода и перезапуска значения на месте; вёрстка при 100% и 150%
+- С --log-level debug пароля в run.log нет
+
+---
