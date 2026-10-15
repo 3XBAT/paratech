@@ -52,6 +52,7 @@ func startHub(t *testing.T, dbURL string) string {
 	cfg := config.Default()
 	cfg.DatabaseURL = dbURL
 	cfg.ListenAddr = freeAddr(t)
+	cfg.AnthropicAPIKey = dummyProviderKey
 	base := "http://" + cfg.ListenAddr
 
 	a, err := app.New(cfg, slog.New(slog.DiscardHandler))

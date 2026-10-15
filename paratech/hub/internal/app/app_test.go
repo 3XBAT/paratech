@@ -20,10 +20,14 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 // unreachableDB refuses connections (port 1 on the loopback) and fails fast thanks to connect_timeout.
 const unreachableDB = "postgres://hub:s3cret-marker@127.0.0.1:1/hub?sslmode=disable&connect_timeout=5"
 
+// fakeProviderKey is an obviously fake provider key; serving needs one, nothing calls the provider here.
+const fakeProviderKey = "test-key-not-real"
+
 func validConfig(listen string) config.Config {
 	cfg := config.Default()
 	cfg.ListenAddr = listen
 	cfg.DatabaseURL = unreachableDB
+	cfg.AnthropicAPIKey = fakeProviderKey
 	return cfg
 }
 
@@ -165,6 +169,7 @@ func TestNewRejectsNilOutput(t *testing.T) {
 func TestKeyCommandFailsWhenTheDatabaseIsUnreachable(t *testing.T) {
 	cfg := validConfig("localhost") // a key command does not listen, so the listen address is not checked
 	cfg.Command = config.CommandKeysList
+	cfg.AnthropicAPIKey = "" // nor needs the provider key
 
 	var out strings.Builder
 	a, err := app.New(cfg, discard(), app.WithOutput(&out))
@@ -182,5 +187,31 @@ func TestKeyCommandFailsWhenTheDatabaseIsUnreachable(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatalf("output on failure: %q", out.String())
+	}
+}
+
+// TestServeNeedsTheLLMParts: serve refuses to start without a provider key or with an allowlist the domain rejects.
+func TestServeNeedsTheLLMParts(t *testing.T) {
+	noKey := validConfig(":8080")
+	noKey.AnthropicAPIKey = ""
+	badAlias := validConfig(":8080")
+	badAlias.LLMModels = "Default=claude-sonnet-5-5:8192" // valid syntax for config, but not an alias
+	badCap := validConfig(":8080")
+	badCap.LLMModels = "default=claude-sonnet-5-5:99999999"
+	for name, c := range map[string]struct {
+		cfg  config.Config
+		want string
+	}{
+		"no provider key": {cfg: noKey, want: config.EnvAnthropicAPIKey + " is required"},
+		"bad alias":       {cfg: badAlias, want: config.EnvLLMModels},
+		"cap too large":   {cfg: badCap, want: config.EnvLLMModels},
+	} {
+		_, err := app.New(c.cfg, discard())
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want containing %q", name, err, c.want)
+		}
+		if err != nil && strings.Contains(err.Error(), fakeProviderKey) {
+			t.Errorf("%s: error leaks the provider key: %v", name, err)
+		}
 	}
 }
