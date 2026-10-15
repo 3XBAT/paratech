@@ -122,6 +122,20 @@ func TestLoadFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("recorder child mode", func(t *testing.T) {
+		got, err := config.Load([]string{"--recorder", "--data-dir", abs}, io.Discard, getenv)
+		if err != nil || !got.Recorder || got.DataDir != abs {
+			t.Fatalf("got %+v, err %v", got, err)
+		}
+	})
+
+	t.Run("recorder without a data dir", func(t *testing.T) {
+		_, err := config.Load([]string{"--recorder"}, io.Discard, getenv)
+		if err == nil || !strings.Contains(err.Error(), "needs a data dir") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
 	t.Run("invalid flag value is reported", func(t *testing.T) {
 		_, err := config.Load([]string{"--log-level", "loud"}, io.Discard, getenv)
 		if err == nil || !strings.Contains(err.Error(), "unknown log level") {
@@ -142,7 +156,7 @@ func TestLoadFlags(t *testing.T) {
 		if !errors.Is(err, flag.ErrHelp) {
 			t.Fatalf("error = %v, want flag.ErrHelp", err)
 		}
-		for _, want := range []string{"Usage of", "-log-level", "-data-dir", "-headless"} {
+		for _, want := range []string{"Usage of", "-log-level", "-data-dir", "-headless", "-recorder"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("usage %q does not contain %q", out.String(), want)
 			}

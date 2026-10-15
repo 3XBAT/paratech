@@ -58,7 +58,7 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 
 	a := &App{cfg: cfg, log: log, env: productionEnv()}
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
-	if !cfg.Headless {
+	if !cfg.Headless && !cfg.Recorder {
 		shell, err := wails.New(wails.Options{
 			Name: appName, InstanceID: instanceID, Log: log, OpenCore: a.openCore, Started: a.launchStart,
 		})
@@ -70,10 +70,14 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	return a, nil
 }
 
-// Run blocks until ctx is cancelled or, with the UI shell, until the user quits from the tray.
+// Run blocks until ctx is cancelled or, with the UI shell, until the user quits from the tray. In the recorder run
+// mode it captures audio until its stdin closes (runRecorder).
 // With the UI shell it must be called from the main goroutine (Wails owns the main OS thread). Headless it opens and
 // starts the core itself and returns an error if that fails, for example ErrHeld of the instance lock.
 func (a *App) Run(ctx context.Context) error {
+	if a.cfg.Recorder {
+		return a.runRecorder(ctx)
+	}
 	a.log.Info("desktop core started", "log_level", a.cfg.LogLevel, "headless", a.cfg.Headless)
 
 	if a.shell == nil {

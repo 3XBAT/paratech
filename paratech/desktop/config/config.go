@@ -35,6 +35,9 @@ type Config struct {
 	DataDir string
 	// Headless runs the core without the Windows UI shell (tray, windows), e.g. in tests and on other OSes.
 	Headless bool
+	// Recorder is internal: the app starts its own executable with --recorder --data-dir <dir> as the audio recorder
+	// child process (ADR-0002 (audio capture)). It has no environment variable.
+	Recorder bool
 }
 
 // Default returns the configuration used when nothing is overridden.
@@ -72,6 +75,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error (env "+EnvLogLevel+")")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "absolute path of the local data directory (env "+EnvDataDir+", default below %"+EnvLocalAppData+"%)")
 	fs.BoolVar(&cfg.Headless, "headless", cfg.Headless, "run without the UI shell: no tray and no windows (env "+EnvHeadless+")")
+	fs.BoolVar(&cfg.Recorder, "recorder", false, "internal: run as the audio recorder child of the app (needs -data-dir)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -113,6 +117,9 @@ func (c Config) Validate() error {
 	}
 	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) {
 		errs = append(errs, fmt.Errorf("data dir %q must be an absolute path", c.DataDir))
+	}
+	if c.Recorder && c.DataDir == "" {
+		errs = append(errs, errors.New("the recorder needs a data dir"))
 	}
 	return errors.Join(errs...)
 }

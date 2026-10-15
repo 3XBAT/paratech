@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/x509"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -83,6 +84,11 @@ type env struct {
 	// recorder builds the audio recorder that writes chunks through the Storage Manager.
 	recorder func(files *filestore.Store) recordingsession.Recorder
 
+	// The --recorder run mode (the audio recorder child): its stdio and the platform capture source.
+	childStdin    io.Reader
+	childStdout   io.Writer
+	captureSource audiocapture.Source
+
 	// whisperBinary is the absolute path of whisper-cli; when it cannot be used, STT jobs fail with a clear error.
 	whisperBinary string
 
@@ -111,6 +117,9 @@ func productionEnv() env {
 		jitter:          random.Jitter{},
 		power:           winpower.New(),
 		recorder:        func(*filestore.Store) recordingsession.Recorder { return audiocapture.Unavailable{} },
+		childStdin:      os.Stdin,
+		childStdout:     os.Stdout,
+		captureSource:   audiocapture.PlatformSource(),
 		whisperBinary:   whisperBinaryPath(),
 		secrets:         credentialManager,
 		generateRetries: homeworkflow.DefaultGenerateRetries,
