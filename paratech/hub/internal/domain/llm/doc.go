@@ -1,0 +1,23 @@
+// Package llm is the bounded context of the LLM calls the Hub makes on behalf of testers (PRD sections 4.2, 9.2, 13.2):
+// which models may be used and what a provider call takes and returns.
+//
+// Layout (docs/architecture.md section 3.1): llm/values holds the types that cross the Provider port (request,
+// completion, usage, stop reason, provider error); llm/services/modelallowlist is the server-side model allowlist.
+// The context has no aggregate yet.
+//
+// Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared.
+//
+// # Glossary
+//
+//   - Alias: the Hub-side model name a client sends (for example "default"); the only model name a client controls.
+//   - Provider model id: the provider's name of a model (for example "claude-sonnet-5-5"); comes only from the
+//     allowlist, never from a client.
+//   - Allowlist: the server-configured map of alias to provider model id and output cap.
+//   - Output cap: the most output tokens a call with the alias may request; a larger request is clamped silently to it
+//     (ADR-0005(b)) and the effective value is the basis of the quota reservation.
+//   - Instructions: trusted text written by the app.
+//   - Untrusted data: user data (transcript excerpts); passed to the model as data, never as instructions.
+//   - Completion: the provider's answer. Its output text is UNTRUSTED (CLAUDE.md hard rule 3, PRD section 13.3).
+//   - Usage: provider-reported tokens of a call, used to settle the reservation.
+//   - Transient / permanent: whether repeating the same call can help (ADR-0005(c)).
+package llm
