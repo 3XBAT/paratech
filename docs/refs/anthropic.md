@@ -124,10 +124,10 @@ Not stated for the API. (Only the docs site redirects: `docs.claude.com` -> `pla
 
 - Send `x-api-key`, `anthropic-version: 2023-06-01`, `content-type: application/json`. Do not send `temperature`/`top_p`/`top_k` (400 on current models unless default).
 - Parse errors by HTTP status first, then `error.type`; keep `request-id` (header) for logs. Treat unknown `error.type` / `stop_reason` / block types as possible (docs say enums grow).
-- Retry policy (our choice, from doc facts): retry 429 (only with `retry-after`), 500, 504, 529 and connection errors with backoff; do not retry 400/401/402/403/404/413 or a 429 with `enforced_spend_limit_reached`.
+- Retry policy (our choice, from doc facts): 429 is transient unless `error.details.error_code` = `enforced_spend_limit_reached`; `retry-after`, when present, says how long to wait. Also retry 500, 504, 529 and connection errors with backoff; do not retry 400/401/402/403/404/413 or a 429 with `enforced_spend_limit_reached`.
 - Billing: settle quota from `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` and `output_tokens` (nullable cache fields -> 0).
 - Text result = join of `text` blocks; `stop_reason == "max_tokens"` means truncated output; `refusal` means no usable result.
 - Non-streaming calls over ~10 minutes are discouraged; set an explicit client timeout (<= 10 min) and TCP keep-alive (Go's default `net.Dialer` already enables keep-alive — our inference).
 - **Our inference, not a doc fact:** Go's `http.Client` strips only `Authorization`/`Cookie`-like sensitive headers on cross-domain redirects; a custom `x-api-key` header is forwarded. Since the docs never mention API redirects, the client should refuse redirects (`CheckRedirect` returning `http.ErrUseLastResponse` or an error) so the key cannot leak.
 - Cap response body read size (our inference; no response size limit is documented, max output is 128K tokens).
-- Used by `hub/internal/adapters/anthropic` (TASK-034): instructions go to `system`, untrusted data to the one user text block; 8 MiB response cap; redirects refused.
+- Used by `hub/internal/adapters/anthropic` (TASK-034): instructions go to `system`, untrusted data to the one user text block; 8 MiB response cap; redirects refused; a 200 answer cut off mid-body is the transient "answer interrupted" (probably billed).
