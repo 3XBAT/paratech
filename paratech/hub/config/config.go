@@ -7,18 +7,24 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const programName = "hub"
 
 // Environment variable names read by Load.
 const (
-	EnvLogLevel   = "HUB_LOG_LEVEL"
-	EnvListenAddr = "HUB_LISTEN_ADDR"
+	EnvLogLevel        = "HUB_LOG_LEVEL"
+	EnvListenAddr      = "HUB_LISTEN_ADDR"
+	EnvDatabaseURL     = "HUB_DATABASE_URL"
+	EnvShutdownTimeout = "HUB_SHUTDOWN_TIMEOUT"
 )
+
+const maxShutdownTimeout = 5 * time.Minute
 
 // Config is the validated hub configuration.
 type Config struct {
@@ -26,11 +32,16 @@ type Config struct {
 	LogLevel string
 	// ListenAddr is the host:port the hub will listen on (host may be empty, port is required).
 	ListenAddr string
+	// DatabaseURL is the Postgres URL (postgres://user:password@host:port/db?...). It is a secret: it is read only
+	// from the environment (a flag would be visible in the process list) and never printed (see String, LogValue).
+	DatabaseURL string
+	// ShutdownTimeout bounds the graceful shutdown: in-flight requests get this long to finish.
+	ShutdownTimeout time.Duration
 }
 
-// Default returns the configuration used when nothing is overridden.
+// Default returns the configuration used when nothing is overridden. It has no DatabaseURL, which is required.
 func Default() Config {
-	return Config{LogLevel: "info", ListenAddr: ":8080"}
+	return Config{LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second}
 }
 
 // Load builds the configuration from defaults, then the environment (through getenv), then the command-line
@@ -38,11 +49,20 @@ func Default() Config {
 // For -h/--help it prints the usage to out and returns flag.ErrHelp.
 func Load(args []string, out io.Writer, getenv func(string) string) (Config, error) {
 	cfg := Default()
+	var envErrs []error
 	if v := getenv(EnvLogLevel); v != "" {
 		cfg.LogLevel = v
 	}
 	if v := getenv(EnvListenAddr); v != "" {
 		cfg.ListenAddr = v
+	}
+	cfg.DatabaseURL = getenv(EnvDatabaseURL)
+	if v := getenv(EnvShutdownTimeout); v != "" {
+		if d, err := time.ParseDuration(v); err != nil {
+			envErrs = append(envErrs, fmt.Errorf("%s %q: not a duration (want for example 15s)", EnvShutdownTimeout, v))
+		} else {
+			cfg.ShutdownTimeout = d
+		}
 	}
 
 	// Flag defaults are the environment values, so a flag wins over the environment.
@@ -50,6 +70,8 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error (env "+EnvLogLevel+")")
 	fs.StringVar(&cfg.ListenAddr, "listen", cfg.ListenAddr, "host:port to listen on (env "+EnvListenAddr+")")
+	fs.DurationVar(&cfg.ShutdownTimeout, "shutdown-timeout", cfg.ShutdownTimeout,
+		"graceful shutdown limit (env "+EnvShutdownTimeout+"); the database URL is read only from env "+EnvDatabaseURL)
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -61,7 +83,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		return Config{}, err
 	}
 
-	if err := cfg.Validate(); err != nil {
+	if err := errors.Join(append(envErrs, cfg.Validate())...); err != nil {
 		return Config{}, err
 	}
 
@@ -92,6 +114,12 @@ func (c Config) Validate() error {
 	if err := validateListenAddr(c.ListenAddr); err != nil {
 		errs = append(errs, err)
 	}
+	if err := validateDatabaseURL(c.DatabaseURL); err != nil {
+		errs = append(errs, err)
+	}
+	if c.ShutdownTimeout <= 0 || c.ShutdownTimeout > maxShutdownTimeout {
+		errs = append(errs, fmt.Errorf("shutdown timeout %s: must be above 0 and at most %s", c.ShutdownTimeout, maxShutdownTimeout))
+	}
 	return errors.Join(errs...)
 }
 
@@ -105,6 +133,51 @@ func validateListenAddr(addr string) error {
 		return fmt.Errorf("listen address %q: port must be a number in 1..65535", addr)
 	}
 	return nil
+}
+
+// validateDatabaseURL checks the shape of the URL only; connecting is the adapter's job. The messages never contain
+// the URL or the url package's error, because both may carry the password.
+func validateDatabaseURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("%s is required (postgres://user:password@host:port/database)", EnvDatabaseURL)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s: not a valid URL", EnvDatabaseURL)
+	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return fmt.Errorf("%s: scheme must be postgres or postgresql", EnvDatabaseURL)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("%s: host is required", EnvDatabaseURL)
+	}
+	if strings.Trim(u.Path, "/") == "" {
+		return fmt.Errorf("%s: database name is required", EnvDatabaseURL)
+	}
+	return nil
+}
+
+// String prints the configuration without the database URL, so that %v of a Config cannot leak the password.
+func (c Config) String() string {
+	return fmt.Sprintf("{LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s}",
+		c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout)
+}
+
+// LogValue is String for slog handlers that do not use fmt (JSON).
+func (c Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("log_level", c.LogLevel),
+		slog.String("listen_addr", c.ListenAddr),
+		slog.String("database_url", redacted(c.DatabaseURL)),
+		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
+	)
+}
+
+func redacted(secret string) string {
+	if secret == "" {
+		return "(unset)"
+	}
+	return "(redacted)"
 }
 
 // Level returns the slog level of a validated configuration.
