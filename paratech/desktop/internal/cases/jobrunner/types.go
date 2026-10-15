@@ -36,7 +36,14 @@ type Config struct {
 	// Rechecks says when a job waiting for the network or the quota is tried again; the zero value means
 	// backoff.DefaultRechecks.
 	Rechecks backoff.Rechecks
+
+	// MaxHeavy caps the jobs of Heavy types that run at the same time, so two workers never run two CPU-bound
+	// transcriptions at once (PRD section 7.4); 1..Workers, the zero value means DefaultMaxHeavy.
+	MaxHeavy int
 }
+
+// DefaultMaxHeavy is one heavy job at a time.
+const DefaultMaxHeavy = 1
 
 // DefaultConfig returns the settings for a desktop with one background class recording.
 func DefaultConfig() Config {
@@ -46,6 +53,7 @@ func DefaultConfig() Config {
 		DefaultTimeout: 30 * time.Minute,
 		Backoff:        backoff.DefaultSpec(),
 		Rechecks:       backoff.DefaultRechecks(),
+		MaxHeavy:       DefaultMaxHeavy,
 	}
 }
 
