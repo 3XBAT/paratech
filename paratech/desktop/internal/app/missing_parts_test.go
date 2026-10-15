@@ -1,7 +1,7 @@
 package app
 
 // The alpha build (TASK-061, AC 3): no whisper-cli next to the executable, no Hub or mail settings (TASK-057: the real
-// adapters with empty settings and credential stores) and no recorder.
+// adapters with empty settings and credential stores) and no recorder (a build without capture).
 // The core still opens and starts, the pages keep working, and every job ends in a state the jobs page can explain.
 
 import (
@@ -17,6 +17,7 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/audiocapture"
+	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/recordingsession"
@@ -33,13 +34,17 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// alphaEnv is productionEnv with whisper-cli missing. Only what a test cannot take from the machine is replaced: the
+// alphaEnv is productionEnv with whisper-cli missing and the recorder of a build without capture ("no recorder"), so
+// the test never starts a recorder child. Only what a test cannot take from the machine is replaced besides: the
 // power source (on a laptop on battery the STT job would wait), the credential stores (empty, as on a fresh install:
 // tests never touch the real Credential Manager) and the runner's poll interval and stop timeout.
 func alphaEnv(t *testing.T) env {
 	t.Helper()
 	e := productionEnv()
 	e.whisperBinary = filepath.Join(t.TempDir(), "whisper-cli.exe") // not installed
+	e.recorder = func(string, *filestore.Store, *slog.Logger) (recordingsession.Recorder, error) {
+		return audiocapture.Unavailable{}, nil
+	}
 	e.power = testenv.NewFakePower(true)
 	e.secrets = func(string) (secretStore, error) { return testenv.NewMemCredentials(), nil }
 	e.runner.PollInterval = 10 * time.Millisecond
