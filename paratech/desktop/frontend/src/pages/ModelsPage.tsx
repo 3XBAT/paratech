@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
+import { CollapsibleList } from "../CollapsibleList";
+import { initialListState, type ListState } from "../listView";
 import {
   modelsApi,
   type AvailableModel,
@@ -44,6 +46,7 @@ export function ModelsPage() {
   const [step, setStep] = useState<ImportStep>({ step: "idle" });
   const [dialogBusy, setDialogBusy] = useState(false);
   const [deleting, setDeleting] = useState("");
+  const [installedList, setInstalledList] = useState<ListState>(initialListState); // survives the polls
   const loading = useRef(false);
   const again = useRef(false);
   const mounted = useRef(true);
@@ -328,35 +331,41 @@ export function ModelsPage() {
       ) : view.installed.length === 0 ? (
         <p className="muted">Моделей пока нет.</p>
       ) : (
-        <table className="list">
-          <thead>
-            <tr>
-              <th>Модель</th>
-              <th>Размер</th>
-              <th>SHA-256</th>
-              <th>Установлена</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {view.installed.map((m) => (
-              <InstalledRow
-                key={m.id}
-                model={m}
-                badge={defaultBadge(m)}
-                busy={busy}
-                deleting={deleting === m.id}
-                onDefault={() => void act(`default:${m.id}`, () => api.setDefault(m.id))}
-                onAskDelete={() => setDeleting(m.id)}
-                onDelete={() => {
-                  setDeleting("");
-                  void act(`delete:${m.id}`, () => api.delete(m.id));
-                }}
-                onKeep={() => setDeleting("")}
-              />
-            ))}
-          </tbody>
-        </table>
+        <CollapsibleList
+          items={view.installed}
+          itemKey={(m) => m.id}
+          state={installedList}
+          onStateChange={setInstalledList}
+          renderContainer={(rows) => (
+            <table className="list">
+              <thead>
+                <tr>
+                  <th>Модель</th>
+                  <th>Размер</th>
+                  <th>SHA-256</th>
+                  <th>Установлена</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>{rows}</tbody>
+            </table>
+          )}
+          renderItem={(m) => (
+            <InstalledRow
+              model={m}
+              badge={defaultBadge(m)}
+              busy={busy}
+              deleting={deleting === m.id}
+              onDefault={() => void act(`default:${m.id}`, () => api.setDefault(m.id))}
+              onAskDelete={() => setDeleting(m.id)}
+              onDelete={() => {
+                setDeleting("");
+                void act(`delete:${m.id}`, () => api.delete(m.id));
+              }}
+              onKeep={() => setDeleting("")}
+            />
+          )}
+        />
       )}
 
       <h2>Каталог</h2>

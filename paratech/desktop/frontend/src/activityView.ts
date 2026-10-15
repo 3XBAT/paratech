@@ -56,6 +56,28 @@ export function jobTypeLabel(type: string): string {
   return lookup(jobTypeLabels, type);
 }
 
+// The terminal statuses of the domain (recording.IsTerminal, job.IsTerminal). Only the display grouping uses them: a
+// finished row goes to the folded list, a row the core offers an action for always stays in view.
+const finishedRecordingStatuses: ReadonlySet<string> = new Set(["COMPLETED", "FAILED"]);
+const finishedJobStatuses: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+
+export function isFinishedRecording(r: { status: string; stoppable: boolean }): boolean {
+  return !r.stoppable && finishedRecordingStatuses.has(r.status);
+}
+
+export function isFinishedJob(j: { status: string; runNowOffered: boolean }): boolean {
+  return !j.runNowOffered && finishedJobStatuses.has(j.status);
+}
+
+/** Splits a list into the rows still in progress and the finished ones, keeping the order. */
+export function splitFinished<T>(items: readonly T[], finished: (item: T) => boolean): { active: T[]; finished: T[] } {
+  const out = { active: [] as T[], finished: [] as T[] };
+  for (const item of items) {
+    (finished(item) ? out.finished : out.active).push(item);
+  }
+  return out;
+}
+
 /** Formats seconds as h:mm:ss; negative or non-finite input is "—". */
 export function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) {

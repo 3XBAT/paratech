@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { callByName } from "../bindings/runtime";
-import { scheduleApi, type ImportPreview } from "../bindings/schedule";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+// The .js extensions let the Node test runner load the compiled page (test/list.test.mjs renders PreviewView).
+import { callByName } from "../bindings/runtime.js";
+import { scheduleApi, type ImportPreview } from "../bindings/schedule.js";
+import { CollapsibleList } from "../CollapsibleList.js";
+import { allCollapsed, type ListStates, listTexts, setCollapsed, stateOf, withState } from "../listView.js";
 import {
   canApply,
   changeParts,
@@ -8,22 +11,27 @@ import {
   conflictParts,
   csvTemplate,
   errorText,
+  groupTitles,
   hasChanges,
   lessonParts,
   lineParts,
   notes,
   type Part,
+  type PreviewGroup,
+  previewGroups,
   resultText,
   rowErrorParts,
-  summaryText,
+  summaryChips,
   windowText,
-} from "../scheduleView";
+} from "../scheduleView.js";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
 // file is rendered as plain text, each piece in its own <bdi>.
 export function SchedulePage() {
   const api = useMemo(() => scheduleApi(callByName), []);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  // Kept here, by group, so choosing the file again keeps what the user folded.
+  const [lists, setLists] = useState<ListStates>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
@@ -143,7 +151,14 @@ export function SchedulePage() {
       )}
       {done && <p role="status">{done}</p>}
       {preview !== null && (
-        <PreviewView preview={preview} busy={busy} onApply={() => void apply()} onCancel={cancel} />
+        <PreviewView
+          preview={preview}
+          busy={busy}
+          lists={lists}
+          onLists={setLists}
+          onApply={() => void apply()}
+          onCancel={cancel}
+        />
       )}
 
       <h2>Формат файла</h2>
@@ -155,86 +170,88 @@ export function SchedulePage() {
   );
 }
 
-function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: () => void; onCancel: () => void }) {
+export function PreviewView(props: {
+  preview: ImportPreview;
+  busy: boolean;
+  lists: ListStates;
+  onLists: (next: ListStates) => void;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
   const p = props.preview;
-  const errors = p.errors.length > 0;
+  const groups = previewGroups(p);
+  const folded = allCollapsed(props.lists, groups);
+
+  function group<T>(
+    kind: PreviewGroup,
+    items: readonly T[],
+    parts: (item: T) => readonly Part[],
+    extra: { more?: (hidden: number) => string; warning?: boolean; before?: ReactNode; after?: ReactNode } = {},
+  ) {
+    if (!groups.includes(kind)) {
+      return null;
+    }
+    return (
+      <CollapsibleList
+        title={groupTitles[kind]}
+        items={items}
+        itemKey={(_, i) => i}
+        renderItem={(item) => (
+          <li>
+            <Text parts={parts(item)} />
+          </li>
+        )}
+        state={stateOf(props.lists, kind)}
+        onStateChange={(s) => props.onLists(withState(props.lists, kind, s))}
+        labels={{ more: extra.more }}
+        before={extra.before}
+        after={extra.after}
+        classNames={{ body: extra.warning ? "rows warning" : "rows" }}
+      />
+    );
+  }
 
   return (
     <div className="preview">
       <h2>
         Файл: <bdi>{p.fileName}</bdi>
       </h2>
+      <ul className="chips">
+        {summaryChips(p).map((c) => (
+          <li key={c.kind} className={c.kind === "errors" && c.count > 0 ? "error" : undefined}>
+            {c.text}
+          </li>
+        ))}
+      </ul>
 
-      {errors ? (
-        <>
-          <p className="error">{notes.rowErrors}</p>
-          <ul className="rows">
-            {p.errors.map((e, i) => (
-              <li key={i}>
-                <Text parts={rowErrorParts(e)} />
-              </li>
-            ))}
-          </ul>
-        </>
+      {p.errors.length > 0 ? (
+        <p className="error">{notes.rowErrors}</p>
       ) : (
         <>
           {p.window !== null && <p className="muted">{windowText(p.window)}</p>}
-          <p>{hasChanges(p) ? summaryText(p) : notes.noChanges}</p>
-
-          {p.added.length > 0 && (
-            <>
-              <h3>Добавятся ({p.added.length})</h3>
-              <ul className="rows">
-                {p.added.map((a, i) => (
-                  <li key={i}>
-                    <Text parts={lineParts(a.line, lessonParts(a))} />
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {p.changed.length > 0 && (
-            <>
-              <h3>Изменятся ({p.changed.length})</h3>
-              <ul className="rows">
-                {p.changed.map((c, i) => (
-                  <li key={i}>
-                    <Text parts={changeParts(c)} />
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {p.removed.length > 0 && (
-            <>
-              <h3>Удалятся ({p.removed.length})</h3>
-              <ul className="rows">
-                {p.removed.map((r, i) => (
-                  <li key={i}>
-                    <Text parts={lessonParts(r)} />
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {p.conflicts.length > 0 && (
-            <>
-              <h3>Пересечения ({p.conflicts.length})</h3>
-              <p className="warning">{notes.conflicts}</p>
-              <ul className="rows warning">
-                {p.conflicts.map((c, i) => (
-                  <li key={i}>
-                    <Text parts={conflictParts(c)} />
-                  </li>
-                ))}
-              </ul>
-              {p.conflictsTruncated && <p className="warning">{notes.conflictsTruncated}</p>}
-            </>
-          )}
+          {!hasChanges(p) && <p>{notes.noChanges}</p>}
         </>
       )}
 
-      <div className="actions">
+      {groups.length > 0 && (
+        <div className="actions">
+          <button type="button" onClick={() => props.onLists(setCollapsed(props.lists, groups, !folded))}>
+            {folded ? listTexts.expandAll : listTexts.collapseAll}
+          </button>
+        </div>
+      )}
+      {group("errors", p.errors, rowErrorParts, { more: () => listTexts.allErrors })}
+      {group("added", p.added, (a) => lineParts(a.line, lessonParts(a)))}
+      {group("changed", p.changed, changeParts)}
+      {group("removed", p.removed, lessonParts)}
+      {group("conflicts", p.conflicts, conflictParts, {
+        warning: true,
+        before: <p className="warning">{notes.conflicts}</p>,
+        after: p.conflictsTruncated && <p className="warning">{notes.conflictsTruncated}</p>,
+      })}
+
+      {/* Pinned to the window edge: Apply stays visible below a long preview. */}
+      <div className="actions sticky-actions">
         {canApply(p) && (
           <button type="button" disabled={props.busy} onClick={props.onApply}>
             Применить

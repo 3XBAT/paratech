@@ -19,6 +19,9 @@
     "src/connectionsView.ts",
     "src/quotaView.ts",
     "src/popup/view.ts",
-    "src/nav.ts"
+    "src/nav.ts",
+    "src/listView.ts",
+    "src/CollapsibleList.tsx",
+    "src/pages/SchedulePage.tsx"
   ]
 }
