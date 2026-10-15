@@ -562,12 +562,21 @@ func TestSettlementFailureKeepsTheHoldUntilExpiry(t *testing.T) {
 	f.assertNoText(t, "lost answer")
 }
 
-// TestStoredResultEndsWithTheRetention: after the retention the answer is never returned; the purge clears it.
-func TestStoredResultEndsWithTheRetention(t *testing.T) {
+// TestStoredResultEndsWithTheResultWindow: the answer is replayed until the result window ends (ResultPurgeInterval
+// before the retention), then never returned again; the purge clears it.
+func TestStoredResultEndsWithTheResultWindow(t *testing.T) {
 	f := newFixture(t, 100_000, answer(t, "old answer", 1, 1), answer(t, "new answer", 1, 1))
 	f.complete(t, command(alice, "job-1"))
 
-	f.clock.Advance(retention)
+	f.clock.Advance(retention - account.ResultPurgeInterval - time.Nanosecond)
+	if n, err := f.svc.PurgeResults(t.Context()); err != nil || n != 0 {
+		t.Fatalf("PurgeResults within the window = %d, %v; want 0", n, err)
+	}
+	if res := f.complete(t, command(alice, "job-1")); !res.Replayed || res.Output != "old answer" {
+		t.Fatalf("within the window = %+v", res)
+	}
+
+	f.clock.Advance(time.Nanosecond)
 	if n, err := f.svc.PurgeResults(t.Context()); err != nil || n != 1 {
 		t.Fatalf("PurgeResults = %d, %v; want 1", n, err)
 	}
@@ -576,7 +585,7 @@ func TestStoredResultEndsWithTheRetention(t *testing.T) {
 	}
 	res := f.complete(t, command(alice, "job-1"))
 	if res.Replayed || res.Output != "new answer" || len(f.provider.Calls()) != 2 {
-		t.Fatalf("after retention = %+v", res)
+		t.Fatalf("after the window = %+v", res)
 	}
 	if n, err := f.svc.PurgeResults(t.Context()); err != nil || n != 0 {
 		t.Fatalf("PurgeResults of a fresh result = %d, %v; want 0", n, err)

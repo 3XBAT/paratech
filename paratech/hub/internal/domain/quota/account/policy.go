@@ -11,6 +11,10 @@ import (
 // are released by the following commands; in practice a tester has a handful of open reservations.
 const MaxExpiredPerLoad = 100
 
+// ResultPurgeInterval is the longest gap between two purges of stored results while the Hub runs (it purges at start
+// and then this often). Policy.ResultWindow depends on it.
+const ResultPurgeInterval = 5 * time.Minute
+
 // Policy is the quota configuration of every account (ADR-0008): one non-renewing allowance per tester, applied when
 // the account is loaded, so a new limit applies to everyone at once.
 type Policy struct {
@@ -21,8 +25,9 @@ type Policy struct {
 }
 
 // NewPolicy validates the configuration: a known unit, a positive limit and positive durations, the key retention
-// not shorter than the reservation TTL. The retention counts from KeyRecord.CreatedAt; a key whose latest attempt is
-// still RESERVED stays live past it (Account.Reserve).
+// not shorter than the reservation TTL and longer than ResultPurgeInterval. The retention counts from
+// KeyRecord.CreatedAt (a gateway key lives for ResultWindow); a key whose latest attempt is still RESERVED stays live
+// past it (Account.Reserve).
 func NewPolicy(unit string, limit int64, reservationTTL, keyRetention time.Duration) (Policy, error) {
 	u, err := ParseUnit(unit)
 	if err != nil {
@@ -35,6 +40,8 @@ func NewPolicy(unit string, limit int64, reservationTTL, keyRetention time.Durat
 		return Policy{}, fmt.Errorf("%w: reservation TTL must be positive", ErrInvalidPolicy)
 	case keyRetention < reservationTTL:
 		return Policy{}, fmt.Errorf("%w: key retention must not be shorter than the reservation TTL", ErrInvalidPolicy)
+	case keyRetention <= ResultPurgeInterval:
+		return Policy{}, fmt.Errorf("%w: key retention must be longer than the result purge interval", ErrInvalidPolicy)
 	}
 	return Policy{unit: u, limit: limit, ttl: reservationTTL, retention: keyRetention}, nil
 }
@@ -48,15 +55,29 @@ func (p Policy) Limit() int64 { return p.limit }
 // ReservationTTL returns how long an unsettled reservation holds quota.
 func (p Policy) ReservationTTL() time.Duration { return p.ttl }
 
-// KeyRetention returns how long an idempotency key record lives; after that the same text is a new key.
+// KeyRetention returns how long an idempotency key record lives (a gateway key: ResultWindow); after that the same
+// text is a new key.
 func (p Policy) KeyRetention() time.Duration { return p.retention }
 
-// ResultCutoff is the newest key creation time whose stored result has outlived the retention at now: results of key
-// records created at or before it are never returned again and may be deleted (PRD section 13.2, ADR-0005(d)).
-func (p Policy) ResultCutoff(now time.Time) time.Time { return now.Add(-p.retention) }
+// ResultWindow is how long a gateway key (one with a request hash) lives: its stored result is replayed only while
+// the key is younger, then the same text is a new key. It ends ResultPurgeInterval before the key retention, so the
+// purge that follows clears the output before the retention is over (PRD section 13.2, ADR-0005(d)).
+func (p Policy) ResultWindow() time.Duration { return p.retention - ResultPurgeInterval }
+
+// ResultCutoff is the newest key creation time whose result window has ended at now: results of key records created
+// at or before it are never returned again and the purge clears them.
+func (p Policy) ResultCutoff(now time.Time) time.Time { return now.Add(-p.ResultWindow()) }
+
+// keyLife is how long k lives: the result window for a gateway key, the key retention for a ledger key.
+func (p Policy) keyLife(k *KeyRecord) time.Duration {
+	if k.Fingerprint.RequestHash != "" {
+		return p.ResultWindow()
+	}
+	return p.retention
+}
 
 func (p Policy) valid() bool {
-	return p.unit == UnitTokens && p.limit > 0 && p.ttl > 0 && p.retention >= p.ttl
+	return p.unit == UnitTokens && p.limit > 0 && p.ttl > 0 && p.retention >= p.ttl && p.retention > ResultPurgeInterval
 }
 
 // Scope tells a repository which account to build and which reservations one command needs (the aggregate is loaded

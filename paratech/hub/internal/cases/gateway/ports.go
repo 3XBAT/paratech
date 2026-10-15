@@ -26,7 +26,7 @@ type Accounts interface {
 	Modify(ctx context.Context, scope account.Scope, fn func(*account.Account) error) error
 }
 
-// Results clears stored results whose key retention has ended (PRD section 13.2). Implemented by the postgres adapter.
+// Results clears stored results whose result window has ended (PRD section 13.2). Implemented by the postgres adapter.
 type Results interface {
 	// PurgeResults clears the results of key records created at or before cutoff and returns how many it cleared.
 	PurgeResults(ctx context.Context, cutoff time.Time) (int64, error)

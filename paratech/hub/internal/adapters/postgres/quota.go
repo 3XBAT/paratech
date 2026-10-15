@@ -261,8 +261,8 @@ func (r *QuotaAccounts) save(ctx context.Context, tx pgx.Tx, scope account.Scope
 }
 
 // PurgeResults clears the stored results of every key record created at or before cutoff (account.Policy.ResultCutoff),
-// so that no model output outlives the key retention (PRD section 13.2). The key records stay, without output; it
-// returns how many results were cleared.
+// so that no model output outlives the key retention (PRD section 13.2, account.Policy.ResultWindow). The key records
+// stay, without output; it returns how many results were cleared.
 func (r *QuotaAccounts) PurgeResults(ctx context.Context, cutoff time.Time) (int64, error) {
 	if err := r.db.open(); err != nil {
 		return 0, fmt.Errorf("%s: %w", opPurgeResults, err)

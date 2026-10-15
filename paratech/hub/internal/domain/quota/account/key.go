@@ -20,10 +20,10 @@ type KeyRecord struct {
 	Result      Result
 }
 
-// stale reports whether the record has outlived the retention at now; the same text is then a new key and a stored
-// result is never returned again (Policy.ResultCutoff).
-func (k KeyRecord) stale(now time.Time, retention time.Duration) bool {
-	return !now.Before(k.CreatedAt.Add(retention))
+// stale reports whether the record has outlived life (Policy.keyLife) at now; the same text is then a new key and a
+// stored result is never returned again (Policy.ResultCutoff).
+func (k KeyRecord) stale(now time.Time, life time.Duration) bool {
+	return !now.Before(k.CreatedAt.Add(life))
 }
 
 func validateKey(k KeyRecord) error {

@@ -92,7 +92,10 @@ func TestQuotaAccountsPurgeResults(t *testing.T) {
 	startAndComplete(t, repo, owner, p, "old", resID(1), "old answer", keyT0)
 	startAndComplete(t, repo, owner, p, "new", resID(2), "new answer", keyT0.Add(time.Hour))
 
-	n, err := repo.PurgeResults(t.Context(), p.ResultCutoff(keyT0.Add(24*time.Hour)))
+	if n, err := repo.PurgeResults(t.Context(), keyT0.Add(-time.Microsecond)); err != nil || n != 0 {
+		t.Fatalf("PurgeResults before the oldest key = %d, %v; want 0", n, err)
+	}
+	n, err := repo.PurgeResults(t.Context(), p.ResultCutoff(keyT0.Add(p.ResultWindow())))
 	if err != nil || n != 1 {
 		t.Fatalf("PurgeResults = %d, %v; want 1", n, err)
 	}

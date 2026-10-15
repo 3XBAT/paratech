@@ -150,7 +150,8 @@ func (a *Account) available(committed int64) int64 {
 // latest attempt of the key: an unexpired RESERVED one or a complete SETTLED one is returned as it is (replayed is
 // true); otherwise a new reservation with id is opened. A different fingerprint is ErrIdempotencyConflict in every
 // state; an amount above the remaining quota is ErrQuotaExceeded and changes nothing about the key. A key record
-// older than the retention is a new key, unless its latest attempt is still RESERVED.
+// older than the retention (a gateway key: Policy.ResultWindow) is a new key, unless its latest attempt is still
+// RESERVED.
 func (a *Account) Reserve(req ReserveRequest, id shared.ReservationID, now time.Time) (rec ReservationRecord, replayed bool, err error) {
 	if err := a.checkCommand(now); err != nil {
 		return ReservationRecord{}, false, err
@@ -168,7 +169,7 @@ func (a *Account) Reserve(req ReserveRequest, id shared.ReservationID, now time.
 	k := a.keys[req.key]
 	// A key also stays live past its retention while its latest attempt still holds quota (expired ones were released
 	// above); otherwise a second hold could be opened for one key. Restore guarantees the latest attempt is loaded.
-	live := k != nil && (!k.stale(now, a.policy.retention) || a.reservations[k.Latest].rec.State == StateReserved)
+	live := k != nil && (!k.stale(now, a.policy.keyLife(k)) || a.reservations[k.Latest].rec.State == StateReserved)
 	if live {
 		if k.Fingerprint != req.fingerprint {
 			return ReservationRecord{}, false, ErrIdempotencyConflict
@@ -314,7 +315,7 @@ func (a *Account) Start(req ReserveRequest, id shared.ReservationID, now time.Ti
 }
 
 // Complete settles reservation id in full with u and keeps res as the result of its attempt. The result is stored
-// only while the attempt is the latest of its key and the key is within its retention; a late attempt (a newer one
+// only while the attempt is the latest of its key and the key is within its result window; a late attempt (a newer one
 // owns the key, quota.proto) is charged but its result is discarded. The key record must be loaded (Scope.Key and
 // Scope.Reservation). u must not be partial and must equal the result's usage. A repeat keeps the first result; the
 // errors are those of Settle.
@@ -330,7 +331,7 @@ func (a *Account) Complete(id shared.ReservationID, u Usage, res Result, now tim
 		return rec, err
 	}
 	k := a.keys[rec.Key]
-	if k.Latest != id || k.stale(now, a.policy.retention) || k.Result.Stored {
+	if k.Latest != id || k.stale(now, a.policy.keyLife(k)) || k.Result.Stored {
 		return rec, nil
 	}
 	k.Result = res

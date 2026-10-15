@@ -183,7 +183,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	}, nil
 }
 
-// PurgeResults clears the stored results whose key retention has ended (PRD section 13.2) and returns how many.
+// PurgeResults clears the stored results whose result window has ended (PRD section 13.2) and returns how many.
 func (s *Service) PurgeResults(ctx context.Context) (int64, error) {
 	n, err := s.results.PurgeResults(ctx, s.policy.ResultCutoff(s.clock.Now()))
 	if err != nil {

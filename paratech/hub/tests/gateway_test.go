@@ -21,6 +21,7 @@ import (
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/services/requestlimits"
 	"paratech/hub/internal/domain/llm/values"
+	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/domain/shared"
 	"paratech/hub/internal/input/connect"
 	"paratech/hub/testenv"
@@ -573,13 +574,21 @@ func TestGatewayInvalidRequestsAgainstPostgres(t *testing.T) {
 	}
 }
 
-// TestGatewayStoredResultEndsWithTheRetentionAgainstPostgres: after the retention the stored answer is never returned
-// and the purge clears it from the database.
-func TestGatewayStoredResultEndsWithTheRetentionAgainstPostgres(t *testing.T) {
+// TestGatewayStoredResultEndsWithTheResultWindowAgainstPostgres: from the end of the result window (ResultPurgeInterval
+// before the retention) the stored answer is never returned and the purge clears it from the database.
+func TestGatewayStoredResultEndsWithTheResultWindowAgainstPostgres(t *testing.T) {
 	e := newGatewayEnv(t, gatewayOptions{}, gwAnswer(t, gwOutput, 1, 1), gwAnswer(t, "a fresh answer", 1, 1))
 	e.mustComplete(t, gwSpec("job-1"))
 
-	e.clock.Advance(gwRetention)
+	e.clock.Advance(gwRetention - account.ResultPurgeInterval - time.Microsecond)
+	if n, err := e.svc.PurgeResults(t.Context()); err != nil || n != 0 {
+		t.Fatalf("PurgeResults within the window = %d, %v; want 0", n, err)
+	}
+	if res := e.mustComplete(t, gwSpec("job-1")); !res.GetReplayed() || res.GetOutput() != gwOutput {
+		t.Fatalf("within the window = %v", res)
+	}
+
+	e.clock.Advance(time.Microsecond)
 	if n, err := e.svc.PurgeResults(t.Context()); err != nil || n != 1 {
 		t.Fatalf("PurgeResults = %d, %v; want 1", n, err)
 	}
@@ -589,6 +598,6 @@ func TestGatewayStoredResultEndsWithTheRetentionAgainstPostgres(t *testing.T) {
 	}
 	res := e.mustComplete(t, gwSpec("job-1"))
 	if res.GetReplayed() || res.GetOutput() != "a fresh answer" || len(e.provider.Calls()) != 2 {
-		t.Fatalf("after retention = %v", res)
+		t.Fatalf("after the window = %v", res)
 	}
 }

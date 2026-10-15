@@ -24,6 +24,7 @@ import (
 	"paratech/hub/internal/cases/quota"
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/services/requestlimits"
+	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/input/cli"
 	"paratech/hub/internal/input/connect"
 )
@@ -36,9 +37,6 @@ const (
 	idleTimeout       = 120 * time.Second
 	maxHeaderBytes    = 64 << 10
 )
-
-// purgeInterval is how often stored results past the key retention are cleared (at start, then periodically).
-const purgeInterval = 5 * time.Minute
 
 // App is the composition root of the hub (ARCH-50): config -> Postgres adapter -> use cases -> router and HTTP
 // server, or the key-management CLI, as cfg.Command says.
@@ -196,7 +194,7 @@ func (a *App) runServer(ctx context.Context) error {
 	purged := make(chan struct{})
 	go func() {
 		defer close(purged)
-		purgeResults(purgeCtx, a.log, gatewaySvc, purgeInterval)
+		purgeResults(purgeCtx, a.log, gatewaySvc, account.ResultPurgeInterval)
 	}()
 	defer func() {
 		stopPurge()
@@ -214,8 +212,8 @@ type resultPurger interface {
 	PurgeResults(ctx context.Context) (int64, error)
 }
 
-// purgeResults clears stored results past the key retention now and then every interval until ctx ends (PRD
-// section 13.2: no model output outlives the retention).
+// purgeResults clears stored results past their result window now and then every interval until ctx ends (PRD
+// section 13.2: no model output outlives the retention while the Hub runs).
 func purgeResults(ctx context.Context, log *slog.Logger, svc resultPurger, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

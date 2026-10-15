@@ -147,7 +147,9 @@ func TestStartQuotaExceeded(t *testing.T) {
 	}
 }
 
-func TestStartReplaysNothingAfterRetention(t *testing.T) {
+// TestStartReplaysNothingAfterTheResultWindow: a gateway key lives for the result window, ResultPurgeInterval less than
+// the key retention, so the purge after the window clears the output before the retention ends.
+func TestStartReplaysNothingAfterTheResultWindow(t *testing.T) {
 	a := newAccount(t, 1000)
 	if _, _, err := start(t, a, "k", 300, hashA, rid(1), t0); err != nil {
 		t.Fatal(err)
@@ -155,11 +157,25 @@ func TestStartReplaysNothingAfterRetention(t *testing.T) {
 	if _, err := a.Complete(rid(1), usage(t, 50, false), result(t, "answer", 40, 10), t0); err != nil {
 		t.Fatal(err)
 	}
-	late := t0.Add(retention)
+	window := a.policy.ResultWindow()
+	if window != retention-ResultPurgeInterval {
+		t.Fatalf("ResultWindow = %s", window)
+	}
+
+	last := t0.Add(window - time.Nanosecond)
+	a = reload(t, a, last, "k", "")
+	if rec, res, err := start(t, a, "k", 300, hashA, rid(2), last); err != nil || !res.Stored || rec.ID != rid(1) {
+		t.Fatalf("Start just before the window ends = %+v, %v, %v", rec, res, err)
+	}
+	if !a.policy.ResultCutoff(last).Before(t0) {
+		t.Fatalf("ResultCutoff(%s) = %s, want before the key", last, a.policy.ResultCutoff(last))
+	}
+
+	late := t0.Add(window)
 	a = reload(t, a, late, "k", "")
 	rec, res, err := start(t, a, "k", 300, hashB, rid(2), late) // a new key: another request is no conflict
 	if err != nil || res.Stored || rec.ID != rid(2) {
-		t.Fatalf("Start after retention = %+v, %v, %v", rec, res, err)
+		t.Fatalf("Start after the result window = %+v, %v, %v", rec, res, err)
 	}
 	if k := a.Changes().Keys; len(k) != 1 || k[0].Result.Stored || !k[0].CreatedAt.Equal(late) {
 		t.Fatalf("renewed key = %+v", k)
@@ -273,16 +289,27 @@ func TestCompleteAfterExpiryOfTheLatestAttemptStoresTheResult(t *testing.T) {
 	}
 }
 
-func TestCompleteAfterRetentionStoresNoResult(t *testing.T) {
+func TestCompleteAfterTheResultWindowStoresNoResult(t *testing.T) {
 	a := newAccount(t, 1000)
 	if _, _, err := start(t, a, "k", 300, hashA, rid(1), t0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Complete(rid(1), usage(t, 40, false), result(t, "x", 30, 10), t0.Add(retention)); err != nil {
+	if _, err := a.Complete(rid(1), usage(t, 40, false), result(t, "x", 30, 10), t0.Add(a.policy.ResultWindow())); err != nil {
 		t.Fatal(err)
 	}
 	if a.keys["k"].Result.Stored {
-		t.Fatal("a result was stored past the retention")
+		t.Fatal("a result was stored past the result window")
+	}
+
+	b := newAccount(t, 1000)
+	if _, _, err := start(t, b, "k", 300, hashA, rid(1), t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Complete(rid(1), usage(t, 40, false), result(t, "x", 30, 10), t0.Add(b.policy.ResultWindow()-time.Nanosecond)); err != nil {
+		t.Fatal(err)
+	}
+	if !b.keys["k"].Result.Stored {
+		t.Fatal("a result was dropped within the result window")
 	}
 }
 

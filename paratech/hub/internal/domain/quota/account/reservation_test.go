@@ -223,6 +223,7 @@ func TestNewPolicy(t *testing.T) {
 		"negative limit":       {"tokens", -1, ttl, retention},
 		"zero ttl":             {"tokens", 1, 0, retention},
 		"retention below ttl":  {"tokens", 1, time.Hour, time.Hour - time.Second},
+		"retention at purge":   {"tokens", 1, time.Minute, ResultPurgeInterval},
 		"zero retention":       {"tokens", 1, ttl, 0},
 		"negative durations":   {"tokens", 1, -ttl, -retention},
 		"retention unset only": {"tokens", 1, ttl, -1},
