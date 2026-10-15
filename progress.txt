@@ -1743,7 +1743,7 @@
 - Ревью: approve (low: нулевой due, место сентинела календаря, тест падения без реального состояния; nit) -> исправлено (e66e696, 10a2501, a413e01). Security: найдено 0, опровергнуто 0, исправлено 0
 
 ### Тесты
-- [x] .github/scripts/verify.sh — см. PR (на финальном head после rebase на master с 0006 TASK-059)
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на 2e95453 после rebase на origin/master b6ba66b (TASK-059 с 0006, TASK-039)
 - [x] Шаг 1: go test -race -count=1 ./desktop/... (в verify.sh)
 - [x] Шаг 2: GOOS=windows go vet ./desktop/... (в verify.sh)
 - [x] Шаг 3: TestRepeatedCompletionMakesOneSTTJob (часть 1)
