@@ -4,6 +4,7 @@ package wails
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,10 +92,15 @@ func TestAppOptions(t *testing.T) {
 		t.Error("a second instance must bring the main window up")
 	}
 
+	// The built popup or the fallback one, whichever assets() serves: the handler must return it unchanged.
+	want, err := fs.ReadFile(assets(), strings.TrimPrefix(popupPage, "/"))
+	if err != nil || len(want) == 0 {
+		t.Fatalf("read %s: %d bytes, %v", popupPage, len(want), err)
+	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, popupPage, nil)
 	opts.Assets.Handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "/popup.js") {
-		t.Fatalf("GET %s = %d %q", popupPage, rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || rec.Body.String() != string(want) {
+		t.Fatalf("GET %s = %d %q, want the page %q", popupPage, rec.Code, rec.Body.String(), want)
 	}
 }

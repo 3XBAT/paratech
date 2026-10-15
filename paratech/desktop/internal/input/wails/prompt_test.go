@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -197,6 +198,19 @@ func TestPromptServiceOfferAdHoc(t *testing.T) {
 	NewPromptService(uc, slog.New(slog.NewTextHandler(&logs, nil))).offerAdHoc(context.Background())
 	if !slices.Equal(uc.calls, []string{"offer"}) || !strings.Contains(logs.String(), "popup not running") {
 		t.Fatalf("calls %v, log %q", uc.calls, logs.String())
+	}
+}
+
+// The popup may match the error messages, so the frontend wrapper lists each one PromptService returns.
+func TestFrontendKnowsPromptErrors(t *testing.T) {
+	src, err := os.ReadFile("../../../frontend/src/bindings/prompt.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []error{ErrInvalidID, ErrPromptGone, ErrPromptRefused, ErrActionFailed} {
+		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
+			t.Errorf("frontend/src/bindings/prompt.ts does not list the error %q", e)
+		}
 	}
 }
 
