@@ -22,7 +22,8 @@ hash, an upper-bound reservation and a deadline below the reservation TTL.
   attempt (a newer one owns the key) is charged but its result is dropped. Migration 0004 adds the columns; no request text is
   stored.
 - **Retention and purge.** A stored result is never returned once its key is past `HUB_IDEMPOTENCY_RETENTION` (same start as
-  the ledger key). `app` runs a purge at start and every 5 minutes that clears results of such keys; the rows stay without output.
+  the ledger key). `app` runs a purge at start and every 5 minutes that clears results of such keys, so output stays in the
+  database at most about 5 minutes past the retention (longer only while the Hub is down); the rows stay without output.
 - **Deadlines.** The provider call runs on `context.WithoutCancel` with `min(HUB_LLM_TIMEOUT, expires_at - now - 5s)`; settle and
   release run detached with 5 s each. Config already keeps `2 x HUB_LLM_TIMEOUT <= TTL`. A client that leaves before the call gets
   its hold released (reason `explicit`); after the call started, the call finishes, is settled and stored, and a retry replays it.
