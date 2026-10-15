@@ -11,7 +11,7 @@
 > - **STT:** local only; **cloud STT is explicitly prohibited**. whisper.cpp runs as a sidecar process. Models are chosen by the user and either downloaded in-app or imported manually (§8).
 > - **Power-aware processing:** heavy local processing runs only on AC power by default; the user can disable this restriction in settings (§7.4).
 > - **Calendars:** **Google Calendar only**. Apple Calendar API integration is dropped; events reach Apple Calendar through the user's Google account (§11.3).
-> - Recording captures **system audio only (WASAPI loopback)** in one track; microphone recording is deferred (§6.3).
+> - Recording captures the **audio of the lecture application chosen by the user** (WASAPI loopback) in one track; microphone recording is deferred (§6.3).
 > - **MVP simplifications:** no user login to our own service (Hub access via manually issued per-tester keys, §12); no hardware-specific optimization (CPU-only STT, one sidecar protocol, §4.3); no auto-update (testers install new builds manually); React for the frontend.
 
 > [!important] Core product principle
@@ -331,7 +331,7 @@ A watchdog/heartbeat records the health of the recording session. After applicat
 
 ### 6.3 Audio sources (online classes)
 
-"Recording" means capturing the audio of an online class on the student's computer. Because the MVP covers online classes only, the audio source is **system audio output (WASAPI loopback)**: everything the computer plays, i.e. the teacher's and classmates' voices from Zoom, Yandex Telemost and similar tools. The result is **one audio track**.
+"Recording" means capturing the audio of an online class on the student's computer. Because the MVP covers online classes only, the audio source is the **audio of the lecture application chosen by the user** from a menu of open applications (a browser, Zoom, Yandex Telemost, Teams and similar tools), captured through Windows audio loopback (per-application capture, with whole-computer capture only as an explicit fallback entry): the teacher's and classmates' voices. The result is **one audio track**. A browser's audio is captured as a whole (all its tabs); a muted browser tab or muted application produces no audio, which the app tells the user.
 
 Microphone recording (the student's own voice) is **not part of MVP**; it is a possible later addition as a separate track. Audio is written to disk in chunks so that a crash loses at most the latest chunk.
 
@@ -719,7 +719,7 @@ The MVP should provide a minimal notification policy rather than a full notifica
 | AC-21 | By default, heavy local processing (STT) runs only on AC power; jobs on battery wait in `WAITING_FOR_POWER` and resume automatically. | Jobs |
 | AC-22 | The user can disable the AC-power restriction in settings and can run a single waiting job immediately. | Jobs |
 | AC-23 | The user can install an STT model either by in-app download or by importing a manually downloaded file; both paths verify a checksum. | STT |
-| AC-24 | The app records system audio (loopback) from online classes into a single track. | Recording |
+| AC-24 | The app records the audio of the lecture application chosen by the user (loopback capture, whole-computer capture as a fallback) from online classes into a single track. | Recording |
 | AC-25 | Every LLM Hub request is authenticated with a per-tester API key; keys can be revoked on the Hub. | Security |
 
 ## 17. Implementation sequence
