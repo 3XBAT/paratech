@@ -38,9 +38,9 @@ func TestRecoveryMarkedAfterTheMarkingPass(t *testing.T) {
 		_, err := e.svc.Recover(testCtx(t))
 		done <- err
 	}()
-	if err := e.clock.AwaitSleepers(testCtx(t), 1); err != nil {
-		t.Fatal(err)
-	}
+	// Wait for the retry sleep itself: the timer of the failed detached save also sleeps, and an advance taken by it
+	// is lost, so the retry would sleep for good.
+	e.sleeps.awaitOnly(t, saveRetryBase)
 	if isClosed(marked) {
 		t.Fatal("marked while the mark is not stored")
 	}

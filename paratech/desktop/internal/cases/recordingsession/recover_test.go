@@ -380,9 +380,7 @@ func TestRecoverAndStartExcludeEachOther(t *testing.T) {
 		_, err := e.svc.Recover(testCtx(t))
 		done <- err
 	}()
-	if err := e.clock.AwaitSleepers(testCtx(t), 1); err != nil { // the clock stands still, so the mark is not stored
-		t.Fatal(err)
-	}
+	e.sleeps.awaitOnly(t, saveRetryBase) // the retry of the mark, not the timer of the failed save: the mark is not stored
 	if _, err := e.svc.Start(testCtx(t), StartRequest{}); !errors.Is(err, ErrRecovering) {
 		t.Fatalf("Start while Recover marks = %v", err)
 	}
