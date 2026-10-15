@@ -51,7 +51,7 @@ the desktop binary. The owner's machine is Windows 10 22H2 (19045); process loop
 | Process loopback | no (not in malgo/miniaudio) | yes | - | yes (MS sample, wasapi-rs) | as B |
 | Reliability | 0 callbacks in silence (no keep-alive); miniaudio had rerouting crash fixes | activated first try in INCLUDE and EXCLUDE; unofficial below 20348; own unsafe COM code | needs keep-alive; Win10 BT HFP gap | ready MIT code, small projects | isolates crashes of unsafe/COM code |
 | Device change | miniaudio auto rerouting, for loopback not confirmed; not tested | endpoint-independent; not tested | poll 2 s + reopen, backoff 250 ms..4 s, 5 tries; not tested with a real change | own code | as B/B' |
-| Chunks after kill | same writer pattern; kill not tested; always starts at chunk 1, so a rerun into the same dir fails on O_EXCL | valid (tested via C') | valid (tested via C') | own code | chunks 1-2 valid, 3 left `.partial`; restart continues at 4 |
+| Chunks after kill | same writer pattern; kill not tested; always starts at chunk 1: a rerun into the same dir overwrites earlier chunks (or fails on O_EXCL if a `.partial` was left) | valid (tested via C') | valid (tested via C') | own code | chunks 1-2 valid, 3 left `.partial`; restart continues at 4 |
 | CPU, 10 min | not measured | 3.6 s (~0.6 % of a core) | 10.3 s (~1.7 %, incl. keep-alive) | - | child = B (run was in `-child`) |
 | Build | `CGO_ENABLED=1` + MSYS2 mingw gcc 14.2.0, ~6 MB exe | plain `go build`, `CGO_ENABLED=0` | same | second toolchain, second exe to sign (SmartScreen, AV) | same as B |
 

@@ -1285,3 +1285,31 @@
 - Строки ключей после retention только очищаются от вывода, не удаляются (sweeper ADR-0008 по-прежнему нужен); UPDATE оставляет старые версии строк до VACUUM
 - docs/architecture.md §5 не перечисляет адаптер ratelimit; §12 по-прежнему называет reservation агрегатом
 - TASK-036 (GetRemaining) остаётся pending: обработчик уже есть с TASK-033, проверить шаг теста на HTTP-уровне и закрыть
+
+## [TASK-015] Прототипы захвата системного звука Windows и ADR с рекомендацией
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- paratech/desktop/spikes/audio-capture/ (одноразовые прототипы, продукт их не импортирует): wavchunk (закрытые WAV-чанки: .partial -> финальный заголовок -> fsync -> rename, нумерация продолжается после рестарта, os.Root), wasapi (чистый Go, COM через vtable: process loopback INCLUDE/EXCLUDE через ActivateAudioInterfaceAsync с agile completion handler, классический loopback с keep-alive и переоткрытием при смене устройства, цепочка режимов, drain при Stop), cmd/capturespike (-mode include|exclude|system|auto, -exe/-pid, -child -> дочерний --recorder, стоп закрытием stdin, kill после 25 с), malgo (CGO) — отдельный вложенный модуль, не в go.work, отклонённый кандидат (malgo v0.11.26, собран локально через MSYS2 gcc 14.2.0)
+- tests/arch_test.go: spikes/ разрешён как каталог верхнего уровня (ARCH-01 через ADR), новый запрет импорта spikes/ извне spikes/ (+ табличные кейсы)
+- docs/adr/0002-audio-capture.md: решение — INCLUDE выбранного приложения, «весь звук» только запасной пункт; чистый Go без CGO; дочерний процесс --recorder; цепочка INCLUDE -> классический loopback (неудача активации/таймаут 5 с/«здоровый, но немой» поток); что пишут диагностика TASK-058 и пикер TASK-059; ограничения и совет пользователю; Verification — 11 шагов для TASK-016
+- docs/refs/audio.md: API, версии, источники, что не подтверждено
+- Зависимостей в desktop/go.mod не добавлено; изменённые существующие тесты: только arch_test.go (расширение, ничего не ослаблено)
+
+### Тесты
+- [x] Шаг 1: GOOS=windows go vet ./desktop/spikes/audio-capture/... — ok
+- [x] Шаг 2: ADR содержит Decision, Consequences и ссылки на источники
+- [x] Шаг 3: CGO_ENABLED=0 go build ./desktop/... — ok (malgo только во вложенном модуле)
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Смоук на Windows 10 19045 без звука: process loopback INCLUDE и EXCLUDE активируются (48 кГц float32 стерео), классический loopback с keep-alive, 10-мин прогоны 20/20 чанков; taskkill /F дочернего процесса — закрытые чанки читаются, .partial отбрасывается
+
+### Заметки для следующих агентов
+- Решения (подтвердить владельцу): номер ADR 0002 взят из задачи (есть и 0002-initial-bounded-contexts.md, цитировать как «ADR-0002 (audio capture)»); PRD §6.3 и AC-24 («всё, что играет компьютер») нужно сузить до выбранного приложения — правка PRD за владельцем; текст TASK-058 называет основным EXCLUDE — по ADR основной INCLUDE; spikes/ не упомянут в docs/architecture.md (разрешение только в ADR); порог «немого» потока 15 с — предложение
+- Ревью: request changes (medium: ADR снова открывал выбор «в процессе / дочерний» — исправлено; low: потеря при kill ~170 мс, drain при Stop, запас родителя, заметка про активации; nits) -> исправлено, повторное ревью approve; low по формулировке malgo-строки исправлен координатором
+- Security: найдено 0, опровергнуто 0, исправлено 0. Риски для будущих задач: TASK-017 — права Go 0o700/0o600 на Windows не задают ACL, хранить записи в %LOCALAPPDATA% или явный DACL; дочерний процесс — os.Executable() и argv без shell, без секретов в аргументах/окружении; TASK-059 — открытие ссылок через explorer.exe только для разобранных http/https URL с подтверждением пользователя; цель по exe/PID — проверять живость, путь образа и session id (активация успешна даже для мёртвого PID); TASK-017/058 — переход на «весь звук» в auto показывать пользователю
+- TASK-017: не импортировать spikes/, копировать и укреплять; ограничить число активаций на запись или переиспользовать handler/event (каждая активация держит объекты до конца процесса); при неподтверждённом старте не делать финальный drain; Finalize принимает чанки разных форматов
+- Не проверено (TASK-016, владелец): реальный сигнал и фильтрация INCLUDE/EXCLUDE, смена устройства, BT/HFP, сон, приватность микрофона, 3 ч, Defender/SmartScreen, Windows 11; недостача 0,38 с за 10 мин в INCLUDE без объяснения
+- Low: malgo/doc.go пример C:\tmp\malgo; doc.go примеры %TEMP% работают только в cmd.exe
+
+---
