@@ -168,6 +168,7 @@ func TestCheckPreconditions(t *testing.T) {
 		account func(*Account) error
 		store   func(*testenv.MemCredentials)
 		kind    error
+		also    error // a second class the error must carry
 	}{
 		{name: "not configured", account: func(a *Account) error { *a = Account{}; return nil }, kind: ErrNotConfigured},
 		{name: "invalid account", account: func(a *Account) error { a.Host += ":25"; return nil }, kind: ErrAccountInvalid},
@@ -176,7 +177,9 @@ func TestCheckPreconditions(t *testing.T) {
 			kind: ErrNoPassword},
 		{name: "store failing", store: func(c *testenv.MemCredentials) { c.Fail(fmt.Errorf("%w: locked", shared.ErrStorage)) },
 			kind: ErrStoreUnavailable},
-		{name: "store unsupported", store: func(c *testenv.MemCredentials) { c.Fail(unsupported) }, kind: errors.ErrUnsupported},
+		// The app tells "unsupported" from "unavailable" by both classes.
+		{name: "store unsupported", store: func(c *testenv.MemCredentials) { c.Fail(unsupported) }, kind: ErrStoreUnavailable,
+			also: errors.ErrUnsupported},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,8 +193,8 @@ func TestCheckPreconditions(t *testing.T) {
 				tt.store(f.creds)
 			}
 			err := f.mailer.Check(context.Background())
-			if !errors.Is(err, tt.kind) {
-				t.Fatalf("Check = %v, want %v", err, tt.kind)
+			if !errors.Is(err, tt.kind) || (tt.also != nil && !errors.Is(err, tt.also)) {
+				t.Fatalf("Check = %v, want %v (and %v)", err, tt.kind, tt.also)
 			}
 			if f.srv.Sessions() != 0 {
 				t.Fatal("the server was contacted")

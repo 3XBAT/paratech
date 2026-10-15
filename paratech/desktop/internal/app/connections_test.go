@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,7 +125,7 @@ func TestConnectionsPageKeepsThePasswordSecret(t *testing.T) {
 
 	// A refused login and invalid input, including the password typed into the wrong fields.
 	mail.SetBehavior(testenv.SMTPBehavior{User: testMailUser, Password: "other-" + password})
-	if got := answer(page.CheckMail(ctx)).(wails.CheckResult); got.OK || got.Message == "" {
+	if got := answer(page.CheckMail(ctx)).(wails.CheckResult); got.OK || !strings.Contains(got.Message, "отклонил логин") {
 		t.Fatalf("CheckMail with a rejected login = %+v", got)
 	}
 	invalid := answer(page.SaveMailSettings(ctx, wails.MailSettingsInput{
@@ -152,8 +153,29 @@ func TestConnectionsPageKeepsThePasswordSecret(t *testing.T) {
 			t.Fatalf("a page answer contains the password: %s", raw)
 		}
 	}
-	// The settings row and the migration versions.
-	assertNoSecretsIn(t, filepath.Join(dir, dbFile), logs.String(), 2, password)
+	// Every migration version and the saved settings row.
+	dbPath := filepath.Join(dir, dbFile)
+	assertNoSecretsIn(t, dbPath, logs.String(), settingsScanFloor(t, dbPath, "teacher@school.example"), password)
+}
+
+// settingsScanFloor checks that the settings row holds the saved recipient and returns the rows a full scan must see:
+// the migration versions plus that row.
+func settingsScanFloor(t *testing.T, dbPath, recipient string) int {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	var versions, settings int
+	if err := raw.QueryRow(`SELECT count(*) FROM goose_db_version`).Scan(&versions); err != nil || versions == 0 {
+		t.Fatalf("migration versions: %d, %v", versions, err)
+	}
+	if err := raw.QueryRow(`SELECT count(*) FROM settings WHERE homework_recipient = ?`, recipient).Scan(&settings); err != nil ||
+		settings != 1 {
+		t.Fatalf("settings rows with the saved recipient: %d, %v", settings, err)
+	}
+	return versions + 1
 }
 
 // Off Windows the credential store refuses every call (wincred.ErrUnsupported): the page says so instead of failing,

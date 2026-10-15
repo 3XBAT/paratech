@@ -1,4 +1,4 @@
-// Package connections is the use case of the "Connections" section of the settings page (TASK-062): the Hub address
+// Package connections is the use case of the «Подключения» page (TASK-062, its own navigation page): the Hub address
 // and the mail account (recipient, SMTP server, port, TLS mode, login) in the settings aggregate, the mail password in
 // the credential store, and the "check mail" action, which opens a session without sending anything (PRD sections 10
 // and 12, AC-19).
