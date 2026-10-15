@@ -12,7 +12,8 @@ ALTER TABLE quota_idempotency_keys
     ADD COLUMN result_output_tokens bigint,
     ADD CONSTRAINT quota_idempotency_keys_result CHECK (
         (result_output IS NULL AND result_input_tokens IS NULL AND result_output_tokens IS NULL)
-        OR (result_output IS NOT NULL AND request_hash <> '' AND result_input_tokens >= 0 AND result_output_tokens >= 0)
+        OR (result_output IS NOT NULL AND request_hash <> '' AND result_input_tokens IS NOT NULL AND result_output_tokens IS NOT NULL
+            AND result_input_tokens >= 0 AND result_output_tokens >= 0)
     );
 
 -- The purge finds stored results by the start of their retention.
