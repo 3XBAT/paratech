@@ -249,6 +249,25 @@ func (s *stream) loop(sess *session) error {
 			}
 		}
 	}
+	return s.drainOnStop(sess)
+}
+
+// drainOnStop moves the packets still in the endpoint buffer to the sink, so the last ~100 ms are not lost.
+// The client is stopped first: no new packets arrive, so the drain is bounded by the buffer size.
+func (s *stream) drainOnStop(sess *session) error {
+	if err := call("IAudioClient::Stop", sess.client, slotClientStop); err != nil {
+		s.log.Warn("stop before final drain failed, tail not drained", "hresult", hrText(err), "error", err.Error())
+		return nil
+	}
+	got, err := s.drain(sess)
+	if isDeviceLost(err) {
+		s.log.Warn("device lost during final drain", "hresult", hrText(err))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("wasapi: final drain: %w", err)
+	}
+	s.log.Info("final drain", "frames", got)
 	return nil
 }
 

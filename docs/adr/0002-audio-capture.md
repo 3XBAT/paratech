@@ -25,15 +25,14 @@ the desktop binary. The owner's machine is Windows 10 22H2 (19045); process loop
      meter reads before or after session volume is not confirmed). Threshold:
      proposal 15 s, tuned in TASK-016/058. Reason: MeetCap #38 (zeros on Windows 11 26200).
    - EXCLUDE is not a step of this chain: when INCLUDE fails, process loopback as a whole most likely fails on that build.
-4. **Recorder child process:** capture runs in a child process of the same binary (flag `--recorder`) for crash isolation,
-   stopped by closing its stdin and killed after a grace period (spike: 10 s). It writes closed WAV chunks of 30-60 s.
-   In-process vs child is decided finally in TASK-017; the `Recorder` port (`internal/cases/recordingsession/ports.go`:
-   Start/Stop/Wait/Finalize) stays the same either way, the child is an adapter detail. TASK-059 adds the source (chosen app)
-   to `Start`.
+4. **Recorder child process** (owner decision): the product recorder runs in a child process of the same binary (flag
+   `--recorder`) for crash isolation (in-process would lose it), stopped by closing its stdin and killed after a grace period
+   (spike: 10 s). It writes closed WAV chunks of 30-60 s. The `Recorder` port (`internal/cases/recordingsession/ports.go`:
+   Start/Stop/Wait/Finalize) stays the same; the child is an adapter detail. TASK-059 adds the source (chosen app) to `Start`.
 5. **Chunk format:** `chunk-NNNNNN.wav.partial` with a placeholder header (RIFF size 0); at the end the final header is
    patched, the file fsynced, closed and renamed to `chunk-NNNNNN.wav`. A final name is always a complete WAV. A kill loses
-   the current chunk (left as `.partial`, reported by validation, skipped by `Finalize`) plus up to 64 KiB of buffered audio
-   (~85 ms at 48 kHz float32 stereo). Rotation is counted in frames; a format change closes the chunk; numbering continues
+   the current chunk (up to one chunk length), left as `.partial` (reported by validation, skipped by `Finalize`); up to
+   64 KiB (~170 ms at 48 kHz float32 stereo) of it may still be in the user-space buffer. Rotation is counted in frames; a format change closes the chunk; numbering continues
    after the highest existing chunk, so a restart never overwrites. Windows cannot fsync a directory.
 6. **Format and timeline:** process loopback has no mix format (`GetMixFormat` = `E_NOTIMPL`): request 48 kHz float32 stereo
    (accepted on 19045), fallback 44.1 kHz s16 stereo. Classic loopback uses the mix format. Duration = frames / rate, never
@@ -52,7 +51,7 @@ the desktop binary. The owner's machine is Windows 10 22H2 (19045); process loop
 | Process loopback | no (not in malgo/miniaudio) | yes | - | yes (MS sample, wasapi-rs) | as B |
 | Reliability | 0 callbacks in silence (no keep-alive); miniaudio had rerouting crash fixes | activated first try in INCLUDE and EXCLUDE; unofficial below 20348; own unsafe COM code | needs keep-alive; Win10 BT HFP gap | ready MIT code, small projects | isolates crashes of unsafe/COM code |
 | Device change | miniaudio auto rerouting, for loopback not confirmed; not tested | endpoint-independent; not tested | poll 2 s + reopen, backoff 250 ms..4 s, 5 tries; not tested with a real change | own code | as B/B' |
-| Chunks after kill | same writer pattern; kill not tested | valid (tested via C') | valid (tested via C') | own code | chunks 1-2 valid, 3 left `.partial`; restart continues at 4 |
+| Chunks after kill | same writer pattern; kill not tested; always starts at chunk 1, so a rerun into the same dir fails on O_EXCL | valid (tested via C') | valid (tested via C') | own code | chunks 1-2 valid, 3 left `.partial`; restart continues at 4 |
 | CPU, 10 min | not measured | 3.6 s (~0.6 % of a core) | 10.3 s (~1.7 %, incl. keep-alive) | - | child = B (run was in `-child`) |
 | Build | `CGO_ENABLED=1` + MSYS2 mingw gcc 14.2.0, ~6 MB exe | plain `go build`, `CGO_ENABLED=0` | same | second toolchain, second exe to sign (SmartScreen, AV) | same as B |
 
@@ -77,7 +76,7 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
 
 ## Known limits (tell the user)
 - A **muted browser tab** or muted app (speaker off in Zoom/Teams/Telemost), or the app's **mixer slider** at 0/muted, gives no
-  audio: Chromium closes the system stream on tab mute; session volume applies before the tap.
+  audio: Chromium closes the system stream on tab mute; session volume applies before the tap (forum reports, not confirmed by MS).
 - Lowering the **Windows master volume** or the headphones should be fine for INCLUDE (needs a manual check per device).
 - All tabs of a browser are one process tree: another video in the **same browser** is recorded. Per-tab isolation needs a
   browser extension (not in MVP). A video in another app or another browser is not recorded.
@@ -93,8 +92,13 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   The task text is not edited here.
 - **TASK-017 (Recorder adapter):** pure Go per Decision 2-6; may copy and harden spike code, never import `spikes/`. Explicit
   format; frame-based timeline and silence for gaps; `Finalize` accepts chunks of different formats (a mode switch changes
-  the format). `Wait` returns an error when capture ends by itself (reopen budget exhausted, child died). In-process vs child:
-  decide there; a `--recorder` run mode is placed per `docs/architecture.md` (an ADR if it does not fit).
+  the format). `Wait` returns an error when capture ends by itself (reopen budget exhausted, child died). Also:
+  - Recorder child per Decision 4; TASK-017 decides only how the `--recorder` run mode is wired (cmd -> config/app per ARCH-51;
+    an ADR if it does not fit).
+  - Drain the endpoint buffer once on Stop (after `IAudioClient::Stop`), so the last packets reach the chunk.
+  - Each process loopback activation keeps a handler, its parameters and an event alive for the process lifetime: bound
+    activation retries per recording or reuse one handler and event per stream.
+  - Keep recordings under `%LOCALAPPDATA%` (user-only ACL) or set an explicit DACL; Go mode bits (0700/0600) set no ACL on Windows.
 - **TASK-058 (diagnostics):** log at start (no audio content): Windows build, chosen mode, target exe and PID, output device
   names, stream format, every attempt with its HRESULT, each switch with its reason. Tone self-test: our own tone is not in the
   chosen app's tree, so test INCLUDE of our own PID and classic loopback; it proves the build works, not that the chosen app is

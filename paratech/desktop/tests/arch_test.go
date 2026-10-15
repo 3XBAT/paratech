@@ -10,7 +10,8 @@ package tests
 //
 // The checks are plain functions over a root directory, so TestCheckersDetectViolations can feed them
 // synthetic violating trees. The same logic lives in hub/tests/arch_test.go (duplication is intended:
-// no shared test module). Keep the two copies in sync; this copy additionally checks "no import C".
+// no shared test module). Keep the two copies in sync; this copy additionally checks "no import C" and the
+// spikes/ rule (the hub has no spikes/ on purpose).
 
 import (
 	"fmt"

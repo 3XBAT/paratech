@@ -54,7 +54,7 @@ func parseFlags(args []string, stderr io.Writer) (config, error) {
 	fs.StringVar(&c.mode, "mode", modeAuto, "include | exclude | system | auto (include, then system)")
 	fs.StringVar(&c.exe, "exe", "", "executable name of the include target, for example chrome.exe")
 	fs.Uint64Var(&pid, "pid", 0, "PID of the include target, or of the exclude target (default: this process)")
-	fs.StringVar(&c.out, "out", "", "output directory for chunk files (required, created with 0700)")
+	fs.StringVar(&c.out, "out", "", "output directory for chunk files (required; inherits the parent folder's ACL, use one under your profile such as %TEMP%)")
 	fs.DurationVar(&c.chunk, "chunk", minChunk, "chunk length, 30s..60s")
 	fs.DurationVar(&c.duration, "duration", 10*time.Second, "recording length, at most 3h")
 	fs.BoolVar(&c.child, "child", false, "record in a supervised child process (this binary with --recorder)")

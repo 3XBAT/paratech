@@ -127,6 +127,7 @@ func (o *opener) activateProcessLoopback(spec Spec, stop <-chan struct{}) (unsaf
 	for {
 		ev, err := windows.WaitForSingleObject(done, waitStepMS)
 		if err != nil {
+			// The event stays open on purpose, as on timeout: ActivateCompleted may still run and set it.
 			return nil, fmt.Errorf("wasapi: wait for activation: %w", err)
 		}
 		if ev == windows.WAIT_OBJECT_0 {

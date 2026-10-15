@@ -18,6 +18,6 @@
 // Run on Windows (from paratech/):
 //
 //	go build -o capturespike.exe ./desktop/spikes/audio-capture/cmd/capturespike
-//	capturespike.exe -mode auto -exe chrome.exe -out C:\tmp\capture -chunk 30s -duration 10m
-//	capturespike.exe -mode system -out C:\tmp\capture -duration 10s -child
+//	capturespike.exe -mode auto -exe chrome.exe -out %TEMP%\capture -chunk 30s -duration 10m
+//	capturespike.exe -mode system -out %TEMP%\capture -duration 10s -child
 package audiocapture

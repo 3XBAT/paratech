@@ -27,7 +27,7 @@ const (
 )
 
 func main() {
-	out := flag.String("out", "", "output directory (required, created with 0700)")
+	out := flag.String("out", "", "output directory (required; inherits the parent folder's ACL, use one under your profile such as %TEMP%)")
 	duration := flag.Duration("duration", 10*time.Second, "recording length, at most 3h")
 	chunk := flag.Duration("chunk", 30*time.Second, "chunk length, 1s..60s")
 	flag.Parse()

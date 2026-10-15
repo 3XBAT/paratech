@@ -25,7 +25,9 @@ const (
 	openTimeout = 15 * time.Second // whole mode chain, including process loopback activation waits
 	stopTimeout = 5 * time.Second  // capture goroutine exit after Stop
 
-	childSlack = 5 * time.Second  // the child stops itself at -duration; the parent asks after this extra time
+	// The child stops itself at -duration after its stream opened; the parent asks after this extra time, which
+	// covers the child's open and stop timeouts.
+	childSlack = openTimeout + stopTimeout + 5*time.Second
 	childGrace = 10 * time.Second // after stdin is closed, then the child is killed
 )
 
