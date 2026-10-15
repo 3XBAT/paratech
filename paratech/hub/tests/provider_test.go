@@ -187,12 +187,17 @@ func TestFakeProviderUsageAndTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	_, err = callProvider(ctx, list, fake, "default", 0, "Summarize.", "data")
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the blocked step was not played (error %v); the context ended before the call", err)
+	}
 	if !errors.Is(err, values.ErrProviderTransient) || errors.Is(err, values.ErrProviderPermanent) {
 		t.Fatalf("blocked call: error = %v, want transient", err)
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("blocked call: error = %v, want the context deadline as cause", err)
+	var pe *values.ProviderError
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &pe) || pe.Reason != "deadline exceeded" {
+		t.Fatalf("blocked call: error = %v, want a deadline exceeded error with the context deadline as cause", err)
 	}
 
 	_, err = callProvider(t.Context(), list, fake, "default", 0, "Summarize.", "data")
@@ -220,11 +225,35 @@ func TestFakeProviderCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err = fake.Complete(ctx, req)
-	if !errors.Is(err, context.Canceled) || !errors.Is(err, values.ErrProviderTransient) {
+	var pe *values.ProviderError
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, values.ErrProviderTransient) || !errors.As(err, &pe) || pe.Reason != "cancelled" {
 		t.Fatalf("error = %v, want a transient cancelled error", err)
 	}
 	if fake.Remaining() != 1 {
 		t.Fatal("a call on an ended context must not consume a step")
+	}
+}
+
+func TestFakeProviderBlockedCallCancelled(t *testing.T) {
+	entered := make(chan struct{})
+	fake := testenv.NewFakeProvider(testenv.ProviderStep{Block: true, Entered: entered})
+	req, err := values.NewRequest("m", "i", "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() {
+		<-entered
+		cancel()
+	}()
+	_, err = fake.Complete(ctx, req)
+	var pe *values.ProviderError
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, values.ErrProviderTransient) || !errors.As(err, &pe) || pe.Reason != "cancelled" {
+		t.Fatalf("error = %v, want a transient cancelled error", err)
+	}
+	if fake.Remaining() != 0 {
+		t.Fatal("the blocked call did not consume its step")
 	}
 }
 

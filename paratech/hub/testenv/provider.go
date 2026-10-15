@@ -2,6 +2,7 @@ package testenv
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"paratech/hub/internal/domain/llm/values"
@@ -13,8 +14,8 @@ type ProviderStep struct {
 	Completion values.Completion
 	// Err is returned instead of a completion.
 	Err error
-	// Block makes the call wait until its context ends and return a transient timeout error matching ctx.Err(), the
-	// way the real adapter reports a call cut short.
+	// Block makes the call wait until its context ends and return the transient error the real adapter returns when
+	// the caller ends a call: reason "cancelled" or "deadline exceeded", matching ctx.Err().
 	Block bool
 	// Entered, when not nil, is closed when the call starts this step (to synchronize with a blocked call).
 	Entered chan struct{}
@@ -85,6 +86,11 @@ func (p *FakeProvider) Remaining() int {
 	return len(p.steps)
 }
 
+// cutShort mirrors the adapter's errors for a call the caller's context ended (anthropic transportError).
 func cutShort(cause error) error {
-	return &values.ProviderError{Kind: values.KindTransient, Reason: "timeout", Cause: cause}
+	reason := "deadline exceeded"
+	if errors.Is(cause, context.Canceled) {
+		reason = "cancelled"
+	}
+	return &values.ProviderError{Kind: values.KindTransient, Reason: reason, Cause: cause}
 }
