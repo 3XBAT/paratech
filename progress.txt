@@ -1202,3 +1202,44 @@
 - Нет разреза allowlist по operation_type (proto допускает) и requestlimits; стриминг не реализован (CompleteStream)
 - Low: App.cfg — неэкспортируемое поле, печать App через %v/%+v выдала бы секреты (сейчас нигде не печатается)
 - Low: TLS-ошибки классифицируются как transient "connection failed"
+
+---
+
+## [TASK-056] Wiring ядра в internal/app: рекордер, job runner, восстановление при старте, обработчики задач
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- Новые адаптеры: clock.System.Sleep и clock.Local (часы в зоне студента для homeworkflow); adapters/random (ID из crypto/rand, Message-ID <id@learning-assistant.invalid>, Jitter); adapters/instancelock (файловая блокировка каталога данных: LockFileEx на Windows, flock на unix, ErrUnsupported на прочих); adapters/audiocapture.Unavailable (рекордер «недоступен в этой сборке», Finalize никогда не ErrNoAudio — записи ждут RECOVERY_REQUIRED)
+- internal/app: env (внешний мир, тесты подменяют поля), buildCore (SQLite, filestore <DataDir>/artifacts, whispercli с рабочим каталогом artifacts/stt-work, все use cases), registrations: stt (Heavy, RecoveryRequeue, 6 ч), summarize/extract_homework/homework_draft (requeue, 10 мин), send_email (RecoveryReconcile + Reconciler, Uncancellable, не Heavy, 2x SMTP timeout + 1 мин); MaxAttempts use cases = backoff MaxAttempts раннера; PostProcessor = transcribe Events (ключи <type>:<transcript>:v<N>); notify как Observer только с оболочкой
+- Двухфазный старт: openCore (guard каталога данных -> БД -> store -> граф, без горутин) после проверки Wails; start по новому хуку wails.Options.Started (после ApplicationStarted, тосты готовы), headless — сразу; порядок: очистки -> jobrunner.Recover -> recordingsession.Recover в фоне -> senddelivery.Recover -> Resume -> runner.Start; Close обратный (runner.Stop 15 с -> recordings.Close 15 с -> фон -> хранилище -> lock)
+- Core.Stopper/Core.Forcer подключены (recordingsession/jobrunner); ErrActionUnavailable и «Это действие пока недоступно» удалены (wails + frontend)
+- Заглушки до TASK-057 (internal/app/standins.go): LLM -> ErrNetworkUnavailable (задачи паркуются в WAITING_FOR_NETWORK без траты попыток), почта Send -> ErrRejected (не UNKNOWN), Reconcile -> ErrOutcomeUnknown, секреты почты, черновики (permanent), STT-движок без whisper-cli (permanent)
+- docs/adr/0009-desktop-core-wiring-and-lifecycle.md, ADR-0007 Consequences
+- Изменённые существующие тесты: app_test TestRunBlocksUntilCancelled (headless теперь открывает ядро -> DataDir = t.TempDir()); core_test newTestApp (тестовое окружение), TestOpenCoreListsActivity (Stopper/Forcer обязательны); wails activity_test (удалены строки «нет stopper/forcer», ErrActionUnavailable из списка), settings_test TestOpenBindings (таблица из 4 случаев), shell_test validOptions и TestNew (Stopper/Forcer, хук Started)
+- Ревью: approve (1 medium: UI-сборка ядра с notifier не покрыта тестом -> TestBuildCoreWithNotifierNotifiesFinishedJobs; low: заметки ADR, путь каталога данных в логе, errno в ошибках lock, порядок в TestStartOrder -> исправлено в 26cfdbc), повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0 (два прохода: весь diff и коммит исправлений)
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (TestStartOrder/shutdown/unwind на фейках; TestStopButtonStopsTheRecording и TestRunNowTranscribesAndEnqueuesPostProcessing на fake-рекордере и fake whisper-cli, реальный SQLite); app -count=3/-count=5 зелёные
+- [x] Шаг 2: GOOS=windows go vet ./desktop/... (и GOOS=linux CGO_ENABLED=0)
+- [x] Шаг 3: TestSecondInstanceNeverRecovers (живая RUNNING-задача первого экземпляра не тронута), TestHeldLockOpensNothing (файл БД не создан, headless Run -> ErrHeld)
+- [x] npm ci / run build / run test (17)
+
+### Решения (подтвердить)
+- Рекордер: Windows-реализации нет (TASK-017) — через порт подключён audiocapture.Unavailable на всех ОС; TASK-017 добавит recorder_windows.go
+- LLM без Hub паркует задачи в WAITING_FOR_NETWORK: UI покажет «ждёт сеть» до TASK-057
+- Таймаут STT 6 ч (до данных TASK-025); алиас модели "default" (совпадает с allowlist Hub); домен Message-ID learning-assistant.invalid
+- whisper-cli ищется рядом с exe (без флага config); непригодный бинарник/путь не роняет приложение, STT-задачи падают с понятной ошибкой
+- В UI-режиме сбой старта фоновой работы только логируется (окно и списки работают, без диалога); неудачная блокировка каталога — выход без окна
+- Headless теперь открывает и запускает ядро; без каталога данных — ошибка
+
+### Заметки (follow-up)
+- НУЖНА ЗАДАЧА: постановка STT после завершения записи (modelcatalog.ResolveForJob, ключ stt:<recording>:<model>, проверка при старте COMPLETED без stt-задачи); заглушка STT permanent — такая задача должна не блокировать ключ после установки whisper-cli; ограничение одновременных тяжёлых задач (2 воркера = 2 whisper)
+- Не подключены: scheduler, schedulesync (импорт), modelcatalog, homeworkflow.Service (proposals), части TASK-057 (DraftRepository, SMTP/Hub настройки, Credential Manager)
+- Low: Close ждёт первые чтения runner.Start (настройки/питание) до Stop — сейчас ограничены busy timeout и syscall
+- Low: один сбой jobrunner.Recover в UI-режиме выключает фоновую работу до перезапуска (лог); вариант — ограниченные повторы
+- Low: биндинги не должны писать артефакты или стартовать запись до прохода очисток и пометки записей (записано в ADR-0009, для TASK-022)
+- Low: ошибка MkdirAll каталога данных содержит путь (app.go openCore) — обернуть как bare() в instancelock
+- Nit: в lifecycle_test `<-entered` без таймаута; UI-тест строит lifecycle вручную (передача shell -> notifier проверяется только чтением)
+- Ручная проверка владельцем на Windows (UI): в логе «instance lock acquired», затем «background work started»; второй запуск выводит окно вперёд и не трогает БД
