@@ -194,7 +194,7 @@ func (w *winApps) inspect(pid uint32) (procIdentity, error) {
 		return id, nil // an exited process may have no image name any more
 	}
 	buf := make([]uint16, maxImageChars)
-	n := uint32(len(buf))
+	n := uint32(maxImageChars)
 	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
 		return procIdentity{}, fmt.Errorf("image of process %d: %w", pid, err)
 	}
@@ -286,7 +286,8 @@ func (w *winApps) uwpApp(frame windows.HWND, framePID uint32) uint32 {
 }
 
 func (w *winApps) windowLong(hwnd windows.HWND, index int32) uint32 {
-	r, _, _ := w.getWindowLongPtrW.Call(uintptr(hwnd), uintptr(index))
+	idx := uintptr(index) //nolint:gosec // a negative GWL_ index goes sign-extended, as in C
+	r, _, _ := w.getWindowLongPtrW.Call(uintptr(hwnd), idx)
 	return uint32(r) //nolint:gosec // the styles are the low 32 bits
 }
 
@@ -303,7 +304,7 @@ func (w *winApps) windowText(hwnd windows.HWND) string {
 
 func className(hwnd windows.HWND) string {
 	buf := make([]uint16, classNameChars)
-	n, err := windows.GetClassName(hwnd, &buf[0], int32(len(buf)))
+	n, err := windows.GetClassName(hwnd, &buf[0], classNameChars)
 	if err != nil || n <= 0 {
 		return ""
 	}
