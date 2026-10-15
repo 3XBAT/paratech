@@ -41,7 +41,8 @@ the desktop binary. The owner's machine is Windows 10 22H2 (19045); process loop
    ADR under ARCH-01 for throwaway prototypes only. `tests/arch_test.go` allows it and fails on any import of it from outside
    `spikes/`; it is not part of the product binary. The malgo prototype is a separate nested module
    (`spikes/audio-capture/malgo`, own `go.mod`, not in `go.work`, not built by CI), so the desktop module has no CGO
-   dependency. Delete `spikes/audio-capture/` when TASK-017 lands, or keep `capturespike` as a diagnostic tool (decide then).
+   dependency. Decided with TASK-017: keep `spikes/audio-capture/` until TASK-016 is done (the owner runs `capturespike`
+   there), then delete it.
 
 ## Candidates (spike on Windows 10 19045, nothing played)
 | | A: malgo | B: pure Go, process loopback | B': pure Go, classic loopback | C: C++/Rust helper | C': same Go binary as child |
@@ -99,6 +100,16 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   - Each process loopback activation keeps a handler, its parameters and an event alive for the process lifetime: bound
     activation retries per recording or reuse one handler and event per stream.
   - Keep recordings under `%LOCALAPPDATA%` (user-only ACL) or set an explicit DACL; Go mode bits (0700/0600) set no ACL on Windows.
+  - Done (phase A, `internal/adapters/audiocapture`): chunks go through `filestore.Create` (exclusive) + `Rename`; the
+    final track is one 16 kHz mono 16-bit WAV (windowed-sinc resampling, downmix), 12 h fit the 4 GiB WAV limit.
+  - Protocol: one JSON request line on stdin (`v`, recording, chunks, target, chunk seconds, lead silence, floor mode),
+    stdin EOF = stop; JSON events on stdout (started, attempt, switch, chunk, stats every 5 s = heartbeat, failed, stopped).
+  - Restarts: a crashed child or one silent for 30 s is restarted after 1/2/4 s, at most 3 times, with the missed time
+    as lead silence and in the mode it ended in; a reported failure is not restarted. `Wait` then returns `ErrCaptureFailed`.
+  - Default target until TASK-059: EXCLUDE of our own process tree; the WASAPI source (phase B) falls back to system.
+  - Done (phase B): the Windows WASAPI source (one process loopback activation per child, reopen budget of 5 tries per
+    incident), the process checker and the wiring; manual checks in `docs/tasks/TASK-017-recorder-manual-checks.md`.
+    Mute detection and storing a mode switch as a problem of the recording are TASK-058.
 - **TASK-058 (diagnostics):** log at start (no audio content): Windows build, chosen mode, target exe and PID, output device
   names, stream format, every attempt with its HRESULT, each switch with its reason. Tone self-test: our own tone is not in the
   chosen app's tree, so test INCLUDE of our own PID and classic loopback; it proves the build works, not that the chosen app is

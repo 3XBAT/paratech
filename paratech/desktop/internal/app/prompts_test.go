@@ -122,12 +122,14 @@ func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	}
 }
 
-// With the recorder of this build (no capture until TASK-017) the popup stays up with the "unavailable" problem, the
-// app keeps running, and the user can retry or skip.
+// With the recorder of a build without capture the popup stays up with the "unavailable" problem, the app keeps
+// running, and the user can retry or skip.
 func TestPromptStartWithoutARecorderShowsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	e, _ := testEnv(t)
-	e.recorder = func(*filestore.Store) recordingsession.Recorder { return audiocapture.Unavailable{} }
+	e.recorder = func(string, *filestore.Store, *slog.Logger) (recordingsession.Recorder, error) {
+		return audiocapture.Unavailable{}, nil
+	}
 	c, popup, b := startPromptCore(t, e, nil)
 
 	if _, err := c.prompts.OfferAdHoc(ctx); err != nil { // the tray's "Show recording popup"

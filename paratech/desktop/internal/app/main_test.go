@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -16,7 +17,13 @@ import (
 
 // TestMain lets the test binary double as the fake whisper-cli: the wired whispercli adapter starts os.Executable()
 // with whisper-cli arguments. It is the only TestMain of this directory (internal and external tests share a binary).
+// A recorder child launched from it by mistake (the production recorder starts os.Executable() --recorder) fails at
+// once instead of running the test suite.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "--recorder" {
+		fmt.Fprintln(os.Stderr, "app tests: the test binary is not a recorder child")
+		os.Exit(1)
+	}
 	if code, ok := testenv.RunFakeWhisper(os.Args[1:]); ok {
 		os.Exit(code)
 	}
@@ -56,9 +63,9 @@ func testEnv(t *testing.T) (env, *fakes) {
 		ids:    random.IDs{},
 		jitter: random.Jitter{},
 		power:  f.power,
-		recorder: func(files *filestore.Store) recordingsession.Recorder {
+		recorder: func(_ string, files *filestore.Store, _ *slog.Logger) (recordingsession.Recorder, error) {
 			f.recorder = testenv.NewFakeRecorder(files, time.Minute)
-			return f.recorder
+			return f.recorder, nil
 		},
 		whisperBinary: bin,
 		secrets: func(service string) (secretStore, error) {

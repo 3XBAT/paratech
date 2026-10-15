@@ -1499,3 +1499,36 @@
 - Кэш остатка «только для показа» на стороне десктопа — задача клиента (TASK-039)
 
 ---
+## [TASK-017] Windows-реализация Recorder по ADR-0002 (audio capture)
+**Дата:** 2026-10-15
+**Статус:** done (код и тесты на фейках; реальный звук — TASK-016, владелец)
+
+### Что сделано
+- adapters/audiocapture: чанки chunk-NNNNNN.wav.partial -> патч заголовка -> fsync -> rename в chunk-NNNNNN.wav (ротация по кадрам, 60 с; смена формата закрывает чанк; нумерация после максимального, O_EXCL); Finalize: валидация WAV (PCM 16/24/32, float32, EXTENSIBLE), битые и .partial пропускаются, ничего читаемого -> ErrNoAudio, итоговый трек 16 кГц моно 16 бит (windowed-sinc ресемплер, смешанные форматы, длительность по кадрам), потоково через атомарный Write
+- Дочерний процесс того же exe: `--recorder --data-dir <abs>` (os.Executable, без shell, пустое окружение, CREATE_NO_WINDOW); протокол JSON-строк: одна стартовая строка (строгая проверка, 4 КиБ), события started/attempt/switch/chunk/stats/failed/stopped; стоп закрытием stdin, kill после 7 с; в режиме --recorder app открывает только filestore (без lock, БД, Wails)
+- Родитель (Recorder): Start/StartTarget(target для TASK-059)/Stop/Wait/Finalize/Diagnostics(id) (для TASK-058); по умолчанию EXCLUDE дерева своего процесса -> классический loopback; супервизор перезапускает упавший/зависший (30 с без событий)/самовольно остановившийся child до 3 раз (1/2/4 с), тишина за пропуск (до 154 с, WARN при обрезке), откат в system односторонний; после бюджета Wait -> ErrCaptureFailed (use case ведёт запись в FINALIZING/FAILED/RECOVERY_REQUIRED, не паника)
+- WASAPI на чистом Go (COM через vtable, MTA на закреплённом потоке, все Release): process loopback INCLUDE/EXCLUDE (активация 5 с, не больше одной на процесс, все аргументы ActivateAudioInterfaceAsync в куче — в спайке они были на стеке, см. заметки), 48 кГц float стерео / 44.1 кГц s16; классический loopback с keep-alive, переоткрытие при смене устройства/AUDCLNT_E_DEVICE_INVALIDATED (250 мс..4 с, 5 попыток), drain при Stop; HRESULT -> типизированные ошибки; проверка живости PID для INCLUDE
+- filestore.Create (эксклюзивный файл внутри os.Root, ссылки отклоняются); config флаг --recorder; app: recorder на Windows = audiocapture.New, на прочих ОС Unavailable; testenv: ToneSource, RunFakeRecorderChild; tests/recording_capture_test.go (recordingsession + настоящий child + filestore + SQLite -> COMPLETED)
+- Тест с настоящим WASAPI только при LA_AUDIO_LIVE_TEST=1 (ночью не запускался); docs/tasks/TASK-017-recorder-manual-checks.md; ADR-0002 и ADR-0009 заметки; docs/qa/run-alpha.md
+- Изменённые существующие тесты: config_test (+2 подтеста, -recorder в usage), app main_test/prompts_test (сигнатура builder, выход TestMain на --recorder), missing_parts_test alphaEnv (Unavailable: иначе тест на Windows запускал бинарник теста как child), tests/main_test (диспетчер fake child), filestore append_test (+TestCreate). Новые t.Skip: live-тест (env) и TestPlatformSourceIsUnavailableInThisBuild на сборках с захватом
+- Ревью: request changes (blocker: TestAlphaCoreWithoutMissingPartsStaysUsable на Windows после rebase на TASK-061; medium: флак TestRecorderStartStopFinalize, Stop возвращался до 5 с после ctx; low: доки ADR-0009/0002, обрезка lead silence, дрейф часов как пропуск, самовольный stopped = чистый стоп, переиспользование PID в тесте, заметка о гонке с восстановлением; nits) -> всё исправлено, повторное ревью approve (3 nit). Security: два прохода (весь diff и исправления): найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: GOOS=windows go build/vet ./desktop/... (и GOOS=linux CGO_ENABLED=0 vet, CGO_ENABLED=0 build)
+- [x] Шаг 2: go test -race ./desktop/internal/... (audiocapture -count=5, app -count=3)
+- [x] Шаг 3: чанки и трек только через filestore (ChunkFiles/TrackFiles, проверено в tests/)
+
+### Решения (подтвердить)
+- Итоговый трек 16 кГц моно 16 бит (12 ч ~1,4 ГБ; 48 кГц float стерео превысил бы 4 ГиБ RIFF через ~3 ч); чанки остаются в исходном формате
+- По умолчанию «весь звук компьютера» = EXCLUDE своего дерева процессов -> классический loopback, пока нет пикера (TASK-059); источник передаётся через StartTarget, порт Recorder не менялся
+- Перезапуск child до 3 раз; child, сообщивший failed, не перезапускается; spikes/audio-capture/ оставлен до TASK-016, затем удалить
+
+### Заметки (follow-up)
+- Только на реальном устройстве (TASK-016/владелец, шаги в docs/tasks/TASK-017-recorder-manual-checks.md и ADR-0002 Verification): live-тест; активация с аргументами в куче; повтор 44.1 кГц на том же клиенте; смена устройства/наушники и reopens; реальный отказ активации -> system; keep-alive; child с пустым окружением активирует WASAPI; чанки каждые 60 с, трек играет, kill/перезапуск/4-й kill, kill родителя и восстановление
+- Спайк capturespike передаёт в ActivateAudioInterfaceAsync указатели на стек (возможна запись в освобождённую память) — учитывать в TASK-016
+- TASK-058: детектор «здоровый, но немой» (сейчас только счётчик тихих пакетов), запись переключения режима в problem записи, имя устройства вывода (нужно поле протокола), Diagnostics -> доменный тип порта
+- TASK-059: проверка образа и session id цели, не только живости (Low L1); PID может переиспользоваться между Alive и активацией
+- Low: при сбое WASAPI-буфера пачка пакетов может удлинить тишину до 200 мс на разрыв; maxLeadSilence считается из Default*-констант; родитель убит -> child до ~3 с закрывает чанк, быстрый рестарт может собрать трек без него (чанк остаётся на диске); на Linux SIGPIPE может убить child до закрытия чанка (не целевая ОС)
+- Low: outputFrames может переполниться только при невозможном объёме подложенных чанков; явного DACL нет (данные в %LOCALAPPDATA%)
+- Nit: порог 2,5 с в TestRecorderStopPastItsContextReturnsPromptly; «примерно за 3 с» в run-alpha.md — это худший случай

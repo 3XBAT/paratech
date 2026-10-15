@@ -1,6 +1,3 @@
-// Package audiocapture captures system audio into chunk files (PRD sections 6.2 and 6.3); it satisfies the Recorder
-// port of the recording session structurally. This build has no capture yet (the WASAPI loopback recorder comes with
-// TASK-017): Unavailable refuses every call.
 package audiocapture
 
 import (
