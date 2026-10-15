@@ -48,6 +48,9 @@ const (
 	msgTooLarge       = "smtp: attachment is larger than the limit"
 	msgChanged        = "smtp: attachment is not the confirmed content"
 	msgNotConfigured  = "smtp: mail password is not configured"
+	msgNoAccount      = "smtp: mail is not configured"
+	msgSettings       = "smtp: mail settings cannot be read"
+	msgBadAccount     = "smtp: mail settings are invalid"
 	msgStoreDown      = "smtp: credential store unavailable"
 	msgMessage        = "smtp: cannot build the message"
 	msgCancelled      = "smtp: cancelled before sending"
@@ -67,13 +70,31 @@ type SecretReader interface {
 	Get(ctx context.Context, name string) (string, error)
 }
 
-// Config is the non-secret mail account setup.
+// Account is the non-secret mail account.
+type Account struct {
+	Host     string
+	Port     int      // 0: 587 for STARTTLS, 465 for implicit TLS
+	Security Security // "": STARTTLS
+	Username string   // the login; the password is in the credential store
+	From     string   // the sender address, a plain local@domain
+}
+
+// AccountSource gives the account at send time (the local settings in the app), so a change applies to the next send
+// without a restart.
+type AccountSource interface {
+	// MailAccount returns the account; the zero Account means mail is not configured.
+	MailAccount(ctx context.Context) (Account, error)
+}
+
+// Config is the non-secret mail setup: a fixed account (Host to From), or Accounts read at every send (exactly one).
 type Config struct {
 	Host     string
 	Port     int      // 0: 587 for STARTTLS, 465 for implicit TLS
 	Security Security // "": STARTTLS
 	Username string   // the login; the password is in the credential store
 	From     string   // the sender address, a plain local@domain
+
+	Accounts AccountSource
 
 	// Timeout is the I/O deadline of the session; 0: DefaultTimeout. go-mail sets it when it dials and resets it once
 	// before the message, so it bounds the setup (connect, TLS, EHLO, AUTH) and then MAIL through the final reply
@@ -91,23 +112,32 @@ type Config struct {
 
 // Mailer sends deliveries over SMTP. Create it with New; it is safe for concurrent use.
 type Mailer struct {
-	cfg     Config
-	secrets SecretReader
+	cfg      Config
+	accounts AccountSource
+	secrets  SecretReader
 }
+
+// fixedAccount is the AccountSource of the fixed account of Config.
+type fixedAccount Account
+
+func (a fixedAccount) MailAccount(context.Context) (Account, error) { return Account(a), nil }
 
 // New checks the configuration.
 func New(cfg Config, secrets SecretReader) (*Mailer, error) {
 	if secrets == nil {
 		return nil, errors.New("smtp: no credential store")
 	}
-	if cfg.Security == "" {
-		cfg.Security = SecurityStartTLS
-	}
-	if cfg.Security != SecurityStartTLS && cfg.Security != SecurityImplicitTLS {
-		return nil, fmt.Errorf("smtp: unknown security mode %q", cfg.Security)
-	}
-	if cfg.Port == 0 {
-		cfg.Port = map[Security]int{SecurityStartTLS: portStartTLS, SecurityImplicitTLS: portImplicitTLS}[cfg.Security]
+	fixed := Account{Host: cfg.Host, Port: cfg.Port, Security: cfg.Security, Username: cfg.Username, From: cfg.From}
+	accounts := cfg.Accounts
+	switch {
+	case accounts != nil && fixed != (Account{}):
+		return nil, errors.New("smtp: both a fixed account and an account source")
+	case accounts == nil:
+		a, err := checkAccount(fixed)
+		if err != nil {
+			return nil, err
+		}
+		accounts = fixedAccount(a)
 	}
 	if cfg.CredentialName == "" {
 		cfg.CredentialName = DefaultCredentialName
@@ -122,19 +152,50 @@ func New(cfg Config, secrets SecretReader) (*Mailer, error) {
 		cfg.Body = DefaultBody
 	}
 
-	switch {
-	case cfg.Host == "" || strings.ContainsFunc(cfg.Host, func(r rune) bool { return r <= ' ' || r == ':' || r == '/' }):
-		return nil, errors.New("smtp: host must be a plain host name or IP address")
-	case cfg.Port < 1 || cfg.Port > 65535:
-		return nil, fmt.Errorf("smtp: port %d out of range", cfg.Port)
-	case cfg.Username == "" || strings.ContainsFunc(cfg.Username, isControl):
-		return nil, errors.New("smtp: username must be set, without control characters")
-	case !plainAddress(cfg.From):
-		return nil, errors.New("smtp: sender must be a plain local@domain address")
-	case cfg.Timeout < 0 || cfg.MaxAttachmentBytes < 0:
+	if cfg.Timeout < 0 || cfg.MaxAttachmentBytes < 0 {
 		return nil, errors.New("smtp: timeout and attachment limit must not be negative")
 	}
-	return &Mailer{cfg: cfg, secrets: secrets}, nil
+	return &Mailer{cfg: cfg, accounts: accounts, secrets: secrets}, nil
+}
+
+// checkAccount applies the defaults of the port and the security mode and checks the account.
+func checkAccount(a Account) (Account, error) {
+	if a.Security == "" {
+		a.Security = SecurityStartTLS
+	}
+	if a.Security != SecurityStartTLS && a.Security != SecurityImplicitTLS {
+		return Account{}, fmt.Errorf("smtp: unknown security mode %q", a.Security)
+	}
+	if a.Port == 0 {
+		a.Port = map[Security]int{SecurityStartTLS: portStartTLS, SecurityImplicitTLS: portImplicitTLS}[a.Security]
+	}
+	switch {
+	case a.Host == "" || strings.ContainsFunc(a.Host, func(r rune) bool { return r <= ' ' || r == ':' || r == '/' }):
+		return Account{}, errors.New("smtp: host must be a plain host name or IP address")
+	case a.Port < 1 || a.Port > 65535:
+		return Account{}, fmt.Errorf("smtp: port %d out of range", a.Port)
+	case a.Username == "" || strings.ContainsFunc(a.Username, isControl):
+		return Account{}, errors.New("smtp: username must be set, without control characters")
+	case !plainAddress(a.From):
+		return Account{}, errors.New("smtp: sender must be a plain local@domain address")
+	}
+	return a, nil
+}
+
+// account reads the account of one send. Nothing configured, or an account that breaks the rules, is a definite
+// refusal: nothing is handed over.
+func (m *Mailer) account(ctx context.Context) (Account, error) {
+	a, err := m.accounts.MailAccount(ctx)
+	switch {
+	case err != nil:
+		return Account{}, fail(msgSettings, delivery.ErrTransient)
+	case a == Account{}:
+		return Account{}, fail(msgNoAccount, delivery.ErrRejected)
+	}
+	if a, err = checkAccount(a); err != nil {
+		return Account{}, fail(msgBadAccount, delivery.ErrRejected)
+	}
+	return a, nil
 }
 
 func isControl(r rune) bool { return r < ' ' || r == 0x7f }
@@ -165,7 +226,11 @@ func (m *Mailer) Send(ctx context.Context, d *delivery.Delivery, attachment io.R
 		return fail(msgChanged, delivery.ErrAttachmentChanged)
 	}
 
-	msg, err := m.message(d, data)
+	acc, err := m.account(ctx)
+	if err != nil {
+		return err
+	}
+	msg, err := m.message(d, data, acc.From)
 	if err != nil {
 		return err
 	}
@@ -180,19 +245,19 @@ func (m *Mailer) Send(ctx context.Context, d *delivery.Delivery, attachment io.R
 	if ctx.Err() != nil {
 		return fail(msgCancelled, delivery.ErrTransient)
 	}
-	return m.send(ctx, msg, password)
+	return m.send(ctx, msg, acc, password)
 }
 
 // message builds the email. The recipient and the subject were validated by the aggregate; they are checked for line
 // breaks once more because a header injection here would reach a third party.
-func (m *Mailer) message(d *delivery.Delivery, data []byte) (*mail.Msg, error) {
+func (m *Mailer) message(d *delivery.Delivery, data []byte, from string) (*mail.Msg, error) {
 	inner := strings.TrimSuffix(strings.TrimPrefix(d.MessageID(), "<"), ">")
 	if !plainAddress(d.Recipient()) || strings.ContainsAny(d.Subject(), "\r\n") || strings.ContainsAny(inner, "\r\n <>") {
 		return nil, fail(msgMessage, delivery.ErrRejected)
 	}
 
 	msg := mail.NewMsg(mail.WithNoDefaultUserAgent())
-	if err := msg.From(m.cfg.From); err != nil {
+	if err := msg.From(from); err != nil {
 		return nil, fail(msgMessage, delivery.ErrRejected)
 	}
 	if err := msg.To(d.Recipient()); err != nil {
@@ -210,13 +275,13 @@ func (m *Mailer) message(d *delivery.Delivery, data []byte) (*mail.Msg, error) {
 }
 
 // send runs one SMTP session. A cancelled ctx closes the raw connection, which ends a blocked read or write at once.
-func (m *Mailer) send(ctx context.Context, msg *mail.Msg, password string) error {
+func (m *Mailer) send(ctx context.Context, msg *mail.Msg, acc Account, password string) error {
 	var (
 		mu   sync.Mutex
 		conn net.Conn
 		stop = func() bool { return true }
 	)
-	tlsConfig := &tls.Config{ServerName: m.cfg.Host, RootCAs: m.cfg.RootCAs, MinVersion: tls.VersionTLS12}
+	tlsConfig := &tls.Config{ServerName: acc.Host, RootCAs: m.cfg.RootCAs, MinVersion: tls.VersionTLS12}
 	dial := func(dctx context.Context, network, addr string) (net.Conn, error) {
 		var d net.Dialer
 		raw, err := d.DialContext(dctx, network, addr)
@@ -227,7 +292,7 @@ func (m *Mailer) send(ctx context.Context, msg *mail.Msg, password string) error
 		conn = raw
 		stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
 		mu.Unlock()
-		if m.cfg.Security == SecurityStartTLS {
+		if acc.Security == SecurityStartTLS {
 			return raw, nil
 		}
 		tc := tls.Client(raw, tlsConfig)
@@ -247,17 +312,17 @@ func (m *Mailer) send(ctx context.Context, msg *mail.Msg, password string) error
 	}()
 
 	opts := []mail.Option{
-		mail.WithPort(m.cfg.Port), mail.WithTimeout(m.cfg.Timeout), mail.WithTLSConfig(tlsConfig),
-		mail.WithDialContextFunc(dial), mail.WithUsername(m.cfg.Username), mail.WithPassword(password),
+		mail.WithPort(acc.Port), mail.WithTimeout(m.cfg.Timeout), mail.WithTLSConfig(tlsConfig),
+		mail.WithDialContextFunc(dial), mail.WithUsername(acc.Username), mail.WithPassword(password),
 		// PLAIN and LOGIN are refused by go-mail on a connection that is not TLS; the connection always is here.
 		mail.WithOpportunisticSMTPAuth(mail.SMTPAuthSCRAMSHA256, mail.SMTPAuthSCRAMSHA1, mail.SMTPAuthPlain, mail.SMTPAuthLogin),
 	}
-	if m.cfg.Security == SecurityImplicitTLS {
+	if acc.Security == SecurityImplicitTLS {
 		opts = append(opts, mail.WithSSL()) // the dialer already did the handshake; go-mail must not ask for STARTTLS
 	} else {
 		opts = append(opts, mail.WithTLSPolicy(mail.TLSMandatory))
 	}
-	client, err := mail.NewClient(m.cfg.Host, opts...)
+	client, err := mail.NewClient(acc.Host, opts...)
 	if err != nil {
 		return fail(msgSetup, delivery.ErrRejected)
 	}

@@ -5,7 +5,9 @@
 // certificate verification (Config.RootCAs only replaces the trusted roots, for tests). The password is read by the
 // adapter itself from the credential store (SecretReader, the wincred adapter in the app) at every send; it never
 // passes through the core, SQLite or logs (hard rule 4, AC-19). The recipient and the subject come from the delivery
-// aggregate, which refuses CR, LF and other control characters; go-mail encodes the headers.
+// aggregate, which refuses CR, LF and other control characters; go-mail encodes the headers. The non-secret account
+// (host, port, mode, login, sender) is read from the local settings at every send (Config.Accounts) or fixed in
+// Config; no account, or one that breaks the rules, is a definite refusal (ErrRejected), like a missing password.
 //
 // The attachment is read once, its SHA-256 and size are compared with the confirmed content of the delivery, and
 // exactly those bytes are sent (delivery.ErrAttachmentChanged otherwise).
