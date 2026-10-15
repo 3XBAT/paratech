@@ -1198,6 +1198,60 @@
                 "TASK-029"
             ],
             "status": "pending"
+        },
+        {
+            "id": "TASK-056",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Сборка] Wiring ядра в internal/app: рекордер, job runner, восстановление при старте, обработчики задач",
+            "acceptance_criteria": [
+                "internal/app собирает граф: часы, генератор id, SQLite-репозитории, filestore, Settings, jobrunner и recordingsession; рекордер берётся через порт (Windows-реализация, заглушка/fake для других ОС и тестов)",
+                "Порядок старта строго: single-instance guard -> jobrunner.Recover -> recordingsession.Recover (в фоне) -> senddelivery.Recover/Resume -> Start; порядок остановки обратный; всё покрыто тестом на fake-компонентах",
+                "Зарегистрированы обработчики задач: STT (Heavy, RecoveryRequeue), постобработка (summary + задания), отправка письма (RecoveryReconcile, не Heavy), генерация домашки; подписка STT-события -> постановка задач постобработки с идемпотентным ключом",
+                "Core.Stopper и Core.Forcer для экрана записей (TASK-023) подключены: кнопки «Стоп» и «Запустить сейчас» работают на fake-рекордере в тесте; заглушки «пока недоступно» удалены",
+                "Порядок и точки подключения записаны в docs/ (ADR или раздел архитектуры), правило ARCH о том, что wiring только в internal/app, не нарушено"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/... (в том числе тест старта/остановки с fake-рекордером и fake whisper-cli)",
+                "Шаг 2: выполнить GOOS=windows go vet ./desktop/...",
+                "Шаг 3: проверить, что при втором запуске приложения Recover не вызывается до проверки single-instance"
+            ],
+            "dependencies": [
+                "TASK-010",
+                "TASK-012",
+                "TASK-014",
+                "TASK-023",
+                "TASK-029",
+                "TASK-038",
+                "TASK-042",
+                "TASK-043",
+                "TASK-044"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-057",
+            "category": "integration",
+            "priority": "high",
+            "description": "[Сборка] Хранилище черновиков домашки в SQLite, настройки почты/Hub и секреты в internal/app",
+            "acceptance_criteria": [
+                "SQLite DraftRepository для TASK-043 и миграция (внешний ключ на assignments с ON DELETE RESTRICT, уникальные индексы, правила удаления), зеркало в docs/contracts/schema.sql; тесты на реальном SQLite",
+                "Пароль SMTP (запись smtp-password) и ключ доступа к Hub читаются из Credential Manager через узкие интерфейсы потребителей; на не-Windows хранилище остаётся недоступным (ErrUnsupported), без dev-подмены в продакшн-коде",
+                "Настройки почты (адрес получателя, SMTP host/port/логин/режим TLS) и адрес Hub читаются из Settings и применяются адаптерами; значения не содержат секретов",
+                "Вложение письма и файл экспорта домашки пишутся только в подпапку корня данных (exports/), корень артефактов filestore лежит в подпапке DataDir и не достаёт до файла БД"
+            ],
+            "test_steps": [
+                "Шаг 1: выполнить go test -race -count=1 ./desktop/...",
+                "Шаг 2: выполнить GOOS=windows go vet ./desktop/...",
+                "Шаг 3: проверить тестом, что секреты отсутствуют в SQLite и в логах (AC-19)"
+            ],
+            "dependencies": [
+                "TASK-056",
+                "TASK-043",
+                "TASK-044",
+                "TASK-037"
+            ],
+            "status": "pending"
         }
     ]
 }
