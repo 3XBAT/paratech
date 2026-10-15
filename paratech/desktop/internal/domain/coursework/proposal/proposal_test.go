@@ -189,6 +189,12 @@ func TestNewParsesValidOutput(t *testing.T) {
 		!dl.Due().Equal(time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)) || dl.Due().Location() != time.UTC {
 		t.Fatalf("deadline proposal: %+v", dl.State())
 	}
+
+	// The epoch is the earliest due that parses (Validate then rejects it as out of range).
+	epoch := mustNew(t, `{"kind":"create_deadline_event","assignment_id":"a1","title":"t","due":"1970-01-01T00:00:00Z"}`)
+	if !epoch.Due().Equal(time.Unix(0, 0)) {
+		t.Fatalf("deadline at the epoch: %+v", epoch.State())
+	}
 }
 
 // Prompt injection and schema abuse: everything that names a target, an unknown action or extra data is malformed.
@@ -231,6 +237,9 @@ func TestNewRejectsMalformedOutput(t *testing.T) {
 		{"deadline without due", `{"kind":"create_deadline_event","assignment_id":"a1","title":"t"}`},
 		{"deadline without title", `{"kind":"create_deadline_event","assignment_id":"a1","due":"2026-10-20T18:00:00Z"}`},
 		{"deadline bad due", `{"kind":"create_deadline_event","assignment_id":"a1","title":"t","due":"next friday"}`},
+		{"deadline zero due", `{"kind":"create_deadline_event","assignment_id":"a1","title":"t","due":"0001-01-01T00:00:00Z"}`},
+		{"deadline zero due in a zone", `{"kind":"create_deadline_event","assignment_id":"a1","title":"t","due":"0001-01-01T03:00:00+03:00"}`},
+		{"deadline due before the epoch", `{"kind":"create_deadline_event","assignment_id":"a1","title":"t","due":"1969-12-31T23:59:59.999Z"}`},
 		{"deadline multi-line title", `{"kind":"create_deadline_event","assignment_id":"a1","title":"a\nBCC: attacker@evil.example","due":"2026-10-20T18:00:00Z"}`},
 		{"deadline blank title", `{"kind":"create_deadline_event","assignment_id":"a1","title":"   ","due":"2026-10-20T18:00:00Z"}`},
 		{"deadline long title", `{"kind":"create_deadline_event","assignment_id":"a1","title":"` + strings.Repeat("я", MaxTitleRunes+1) + `","due":"2026-10-20T18:00:00Z"}`},
@@ -421,6 +430,7 @@ func TestRestoreRejectsInconsistentState(t *testing.T) {
 		{"bad assignment", base(outEmail, StatusValidated), func(s *State) { s.AssignmentID = "../x" }},
 		{"email with body", base(outEmail, StatusValidated), func(s *State) { s.Body = "x" }},
 		{"deadline without due", base(outDeadline, StatusValidated), func(s *State) { s.Due = time.Time{} }},
+		{"deadline due before the epoch", base(outDeadline, StatusRejected), func(s *State) { s.Due = time.Unix(-1, 0) }},
 		{"no created time", base(outEmail, StatusValidated), func(s *State) { s.CreatedAt = time.Time{} }},
 		{"updated before created", base(outEmail, StatusValidated), func(s *State) { s.UpdatedAt = s.CreatedAt.Add(-time.Second) }},
 		{"rejected without reason", base(outEmail, StatusRejected), func(s *State) { s.Reason = "" }},

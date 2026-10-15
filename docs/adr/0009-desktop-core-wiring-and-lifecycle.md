@@ -75,6 +75,14 @@ non-email types, UI mode only (headless has no notifier).
   one `wincred` store per service (`hub`, `mail`), shared by the adapter (reads) and `senddelivery` (writes). Not
   configured: LLM jobs park in WAITING_FOR_NETWORK ("hub: not configured", no attempts used), an email is
   `delivery.ErrRejected`. Drafts: `sqlite.DraftRepository`. Off Windows the stores fail with `ErrUnsupported`.
+- **Action proposals (TASK-060 part 2).** `homeworkflow.Service` (`app/proposals.go`): the model proposes, the core
+  validates, the user confirms, then the port acts. Proposals: `sqlite.ProposalRepository` (table `proposals`, version
+  CAS; no foreign key to assignments, so an unknown assignment is stored REJECTED and a deleted one makes a confirmed
+  proposal STALE). Mailer: `senddelivery.Service` (one delivery per command key, an UNKNOWN one is never resent).
+  Exporter: `filestore.Store.ExportHomework` (only `exports/<assignment>/homework.md`). Recipient: `recipientSettings`.
+  Calendar: stand-in `calendarNotConnected`, always `homeworkflow.ErrCalendarNotConnected`; the proposal stays
+  CONFIRMED.
+  Clock `e.local`, like the other `homeworkflow` services. No binding yet (TASK-045).
 - **Connections (TASK-062).** `cases/connections` (`app/connections.go`) edits the mail account and the Hub URL in the
   settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
   read back). "Check mail" = `smtp.Mailer.Check`: Send's session setup (EHLO, STARTTLS, AUTH), then QUIT, no message;
@@ -87,20 +95,22 @@ non-email types, UI mode only (headless has no notifier).
   interrupted recordings keep their chunks for a later recovery.
 - **Recorder run mode** (`--recorder --data-dir`): no instance lock (the parent holds it), no database, no UI shell,
   no jobs; only the Storage Manager on `<DataDir>/artifacts`. Events on stdout, log on stderr, stops when stdin closes.
-- **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow`, which places
-  lesson times and deadlines in the student's zone. SQLite stores Unix ms, so the zone does not affect storage.
+- **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow` (the
+  post-processing, the drafts and the proposals), which places lesson times and deadlines in the student's zone.
+  SQLite stores Unix ms, so the zone does not affect storage.
 - **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@learning-assistant.invalid>`. Jitter via `crypto/rand`.
 - **Data dir:** `learning-assistant.db`, `learning-assistant.lock`, `artifacts/` (Storage Manager root), `artifacts/stt-work/`.
 
 ## Not wired yet (follow-ups)
-- `homeworkflow.Service` and proposals (TASK-060 part 2); the calendar sync of `schedulesync` (TASK-051).
+- The calendar sync of `schedulesync` and the deadline calendar of the proposals (stand-in until TASK-051).
 - Catalog entries with verified SHA-256 in `internal/app/catalog.json`.
 - The SHA-256 pin check of the whisper-cli binary (docs/refs/whisper.md), TASK-054 or later.
 - Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
-  the Windows recorder by TASK-017; recording -> STT, `modelcatalog` and the heavy cap by TASK-060; the models page
-  by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed for an unknown machine);
-  the Hub key and the quota of the «Подключения» page by TASK-039.
-- Bindings of the drafts (TASK-045).
+  the Windows recorder by TASK-017; recording -> STT, `modelcatalog`, the heavy cap and `homeworkflow.Service` by
+  TASK-060; the models page by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed
+  for an unknown machine); the Hub key and the quota of the «Подключения» page by TASK-039.
+- Bindings of the drafts and the proposals (TASK-045). The calendar sentinel lives next to its port in `homeworkflow`,
+  so `input/wails` can match it with `errors.Is` without importing `app` (ARCH-40).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,

@@ -49,8 +49,8 @@ func (m mailSettings) MailAccount(ctx context.Context) (smtp.Account, error) {
 	}, nil
 }
 
-// recipientSettings is the homeworkflow.RecipientSource of the settings, for the proposals service once that is wired
-// (ADR-0009 "Not wired yet").
+// recipientSettings is the homeworkflow.RecipientSource of the proposals service (wireProposals): the trusted address a
+// send_homework_email proposal freezes at validation and checks again before the send.
 type recipientSettings struct{ settings settingsLoader }
 
 func (r recipientSettings) HomeworkRecipient(ctx context.Context) (proposal.Recipient, error) {

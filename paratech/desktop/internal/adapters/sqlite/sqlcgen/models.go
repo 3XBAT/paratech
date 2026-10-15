@@ -89,6 +89,26 @@ type JobNotice struct {
 	NotifiedAt int64
 }
 
+type Proposal struct {
+	ID               string
+	Kind             string
+	Status           string
+	AssignmentID     string
+	Title            string
+	Body             string
+	DueAt            sql.NullInt64
+	Reason           string
+	Recipient        string
+	AttachmentSha256 string
+	AttachmentSize   int64
+	AssignmentTitle  string
+	ConfirmedAt      sql.NullInt64
+	ExecutedAt       sql.NullInt64
+	Version          int64
+	CreatedAt        int64
+	UpdatedAt        int64
+}
+
 type Recording struct {
 	ID            string
 	LessonID      sql.NullString

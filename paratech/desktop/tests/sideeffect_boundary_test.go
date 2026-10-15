@@ -9,6 +9,7 @@ package tests
 import (
 	"context"
 	"reflect"
+	"slices"
 	"testing"
 
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -127,6 +128,40 @@ func TestPostProcessorReachesNoSideEffect(t *testing.T) {
 // writes through the Storage Manager port (ArtifactStore), which takes no model output, and only on the user's action.
 func TestDraftsReachNoSideEffect(t *testing.T) {
 	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.DraftDeps{}), 10)
+}
+
+// The shape of the ports of the proposal service (wired by TASK-060): the outside is reached only through the three
+// command ports and no port takes model output. That the commands run only after the confirmation is proven by the
+// wired tests (internal/app/proposals_test.go).
+func TestProposalServiceReachesSideEffectsOnlyThroughCommands(t *testing.T) {
+	deps := reflect.TypeOf(homeworkflow.Deps{})
+	commandPorts := map[reflect.Type]bool{
+		ifaceOf[homeworkflow.HomeworkMailer](): true, ifaceOf[homeworkflow.HomeworkExporter](): true,
+		ifaceOf[homeworkflow.DeadlineCalendar](): true,
+	}
+	found := 0
+	for i := range deps.NumField() {
+		f := deps.Field(i)
+		if f.Type.Kind() != reflect.Interface {
+			continue
+		}
+		if commandPorts[f.Type] {
+			found++
+		} else if slices.Contains(sideEffectPorts, f.Type) {
+			t.Errorf("Deps.%s is the side-effect port %s without a command", f.Name, f.Type.Name())
+		}
+		for j := range f.Type.NumMethod() {
+			m := f.Type.Method(j)
+			for k := range m.Type.NumIn() {
+				if in := m.Type.In(k); carries(in, map[reflect.Type]bool{}) {
+					t.Errorf("%s.%s parameter %d (%v) takes model output", f.Type.Name(), m.Name, k, in)
+				}
+			}
+		}
+	}
+	if found != len(commandPorts) {
+		t.Fatalf("found %d of the %d command ports in homeworkflow.Deps", found, len(commandPorts))
+	}
 }
 
 // checkNoSideEffectPorts checks that no port field of deps is a side-effect port or takes model output; min guards

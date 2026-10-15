@@ -30,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/notice"
@@ -47,6 +48,7 @@ var (
 	sqlComment  = regexp.MustCompile(`--[^\n]*`)
 	createTable = regexp.MustCompile(`(?is)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + sqlIdent + `\s*\((.*?)\n\);`)
 	statusCheck = regexp.MustCompile(`(?is)\bstatus\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*status\s+IN\s*\(([^)]*)\)`)
+	kindCheck   = regexp.MustCompile(`(?is)\bkind\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)`)
 	quotedValue = regexp.MustCompile(`'([^']*)'`)
 	columnName  = regexp.MustCompile(`^\s*` + sqlIdent)
 	// A SQL column definition of the aggregate version, see the conventions in the schema header.
@@ -134,8 +136,13 @@ func parseTables(sql string) map[string]string {
 }
 
 // statusSet returns the values of the status CHECK list of a table body.
-func statusSet(body string) []string {
-	m := statusCheck.FindStringSubmatch(body)
+func statusSet(body string) []string { return checkSet(statusCheck, body) }
+
+// kindSet is statusSet for a kind column (CHECK (kind IN (...))).
+func kindSet(body string) []string { return checkSet(kindCheck, body) }
+
+func checkSet(check *regexp.Regexp, body string) []string {
+	m := check.FindStringSubmatch(body)
 	if m == nil {
 		return nil
 	}
@@ -342,7 +349,7 @@ func TestSchemaHasRequiredTables(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
-		"homework_drafts",
+		"homework_drafts", "proposals",
 	} {
 		if _, ok := tables[name]; !ok {
 			t.Errorf("table %s is missing", name)
@@ -355,7 +362,7 @@ func TestSchemaVersionColumns(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
-		"homework_drafts",
+		"homework_drafts", "proposals",
 	} {
 		body, ok := tables[name]
 		if !ok {
@@ -403,6 +410,7 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 		{"recordings", sortedStrings(recording.Statuses())},
 		{"deliveries", sortedStrings(delivery.Statuses())},
 		{"job_notices", sortedStrings(notice.Statuses())},
+		{"proposals", sortedStrings(proposal.Statuses())},
 	}
 	for _, tc := range cases {
 		t.Run(tc.table, func(t *testing.T) {
@@ -418,6 +426,11 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 				t.Errorf("status CHECK of %s = %v, Go constants = %v", tc.table, got, tc.want)
 			}
 		})
+	}
+
+	// The proposals table also lists the kinds the parser accepts.
+	if got, want := kindSet(tables["proposals"]), sortedStrings(proposal.Kinds()); got == nil || !equalStrings(got, want) {
+		t.Errorf("kind CHECK of proposals = %v, Go constants = %v", got, want)
 	}
 }
 
@@ -570,12 +583,16 @@ CREATE TABLE IF NOT EXISTS [stored_secrets](
 CREATE TABLE clean (
     id TEXT PRIMARY KEY,
     "title" TEXT, body TEXT,
-    status TEXT NOT NULL CHECK (status IN ('a', 'b'))
+    status TEXT NOT NULL CHECK (status IN ('a', 'b')),
+    kind TEXT NOT NULL CHECK (kind IN ('y', 'x'))
 );
 `
 	tables := parseTables(sql)
 	if got := statusSet(tables["jobs"]); !equalStrings(got, []string{"A", "B"}) {
 		t.Errorf("statusSet = %v", got)
+	}
+	if got := kindSet(tables["clean"]); !equalStrings(got, []string{"x", "y"}) || kindSet(tables["jobs"]) != nil {
+		t.Errorf("kindSet = %v", got)
 	}
 	if !versionColumn.MatchString(tables["jobs"]) || versionColumn.MatchString(tables["clean"]) {
 		t.Error("versionColumn does not tell a table with a version column from one without")
