@@ -28,12 +28,13 @@ func (h hubSettings) HubURL(ctx context.Context) (string, error) {
 	return s.HubURL(), nil
 }
 
-// mailSettings is the smtp.AccountSource of the settings: the zero account while mail is not configured.
+// mailSettings is the smtp.AccountSource of the settings: the zero account while no SMTP account is configured. The
+// recipient setting is not needed: a delivery sends to the recipient frozen at confirmation.
 type mailSettings struct{ settings settingsLoader }
 
 func (m mailSettings) MailAccount(ctx context.Context) (smtp.Account, error) {
 	s, err := m.settings.Load(ctx)
-	if err != nil || !s.MailConfigured() {
+	if err != nil || !s.SMTPAccountConfigured() {
 		return smtp.Account{}, err
 	}
 	security, ok := map[settings.MailSecurity]smtp.Security{
@@ -48,7 +49,8 @@ func (m mailSettings) MailAccount(ctx context.Context) (smtp.Account, error) {
 	}, nil
 }
 
-// recipientSettings is the homeworkflow.RecipientSource of the settings (wired with the proposals service).
+// recipientSettings is the homeworkflow.RecipientSource of the settings, for the proposals service once that is wired
+// (ADR-0009 "Not wired yet").
 type recipientSettings struct{ settings settingsLoader }
 
 func (r recipientSettings) HomeworkRecipient(ctx context.Context) (proposal.Recipient, error) {

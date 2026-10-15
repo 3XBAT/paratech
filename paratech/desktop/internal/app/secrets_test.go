@@ -12,8 +12,11 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/cases/homeworkflow"
+	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -131,6 +134,23 @@ func TestUnconfiguredHubAndMailFailSafely(t *testing.T) {
 	}, nil)
 	if !strings.HasPrefix(d.LastError(), "smtp: mail is not configured") {
 		t.Fatalf("last error %q, want the fixed not-configured text", d.LastError())
+	}
+}
+
+// The Credential Manager entries are documented for testers (docs/qa/run-alpha.md: paratech/hub/api-key and
+// paratech/mail/smtp-password); renaming a service or a credential would orphan the stored secrets.
+func TestCredentialNamesArePinned(t *testing.T) {
+	for _, tc := range []struct{ what, got, want string }{
+		{"target prefix", wincred.TargetPrefix, "paratech/"},
+		{"hub service", hubSecretsService, "hub"},
+		{"mail service", mailSecretsService, "mail"},
+		{"hub api key", hubclient.DefaultCredentialName, "api-key"},
+		{"smtp password read by the adapter", smtp.DefaultCredentialName, "smtp-password"},
+		{"smtp password written by the use case", senddelivery.DefaultCredentialName, "smtp-password"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.what, tc.got, tc.want)
+		}
 	}
 }
 

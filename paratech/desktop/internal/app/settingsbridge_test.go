@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/settings/settings"
+	"paratech/desktop/testenv"
 )
 
 // fixedSettings is a settingsLoader over one aggregate.
@@ -61,6 +63,25 @@ func TestBridgesMapTheSettings(t *testing.T) {
 	}
 }
 
+// A delivery keeps the recipient frozen at confirmation: clearing the recipient setting leaves the SMTP account, so a
+// pending send still goes out; the proposals see no recipient.
+func TestClearedRecipientKeepsTheMailAccount(t *testing.T) {
+	ctx := context.Background()
+	s := mailConfigured(t, settings.MailSecurityStartTLS)
+	if err := s.SetHomeworkRecipient("", bridgeT0); err != nil {
+		t.Fatal(err)
+	}
+	src := fixedSettings{s: s}
+	acc, err := mailSettings{src}.MailAccount(ctx)
+	want := smtp.Account{Host: "smtp.example.org", Port: 2525, Security: smtp.SecurityStartTLS, Username: "student@example.org", From: "student@example.org"}
+	if err != nil || acc != want {
+		t.Fatalf("MailAccount = %+v, %v; want %+v", acc, err, want)
+	}
+	if r, err := (recipientSettings{src}).HomeworkRecipient(ctx); err != nil || !r.IsZero() {
+		t.Fatalf("HomeworkRecipient = %q, %v; want none", r.Address(), err)
+	}
+}
+
 // Not configured is the zero value for every bridge; a failed read is an error.
 func TestBridgesWithoutSettings(t *testing.T) {
 	ctx := context.Background()
@@ -97,6 +118,48 @@ func TestBridgesWithoutSettings(t *testing.T) {
 	}
 }
 
+// Every Hub URL the settings accept is one the Hub client accepts, so a stored URL never parks the jobs as refused
+// (the domain and the adapter keep their own copy of the rule).
+func TestStoredHubURLsAreHubClientURLs(t *testing.T) {
+	for _, tc := range []struct {
+		url      string
+		accepted bool // by the settings
+	}{
+		{"https://hub.example.com", true},
+		{"https://hub.example.com/", true},
+		{"https://hub.example.com:8443/api/v1", true},
+		{"HTTPS://Hub.Example.com", true},
+		{"https://hub.example.com/a%20b", true},
+		{"https://192.0.2.10", true},
+		{"https://[2001:db8::1]:443/", true},
+		{"http://localhost:8080", true},
+		{"http://LOCALHOST", true},
+		{"http://127.0.0.1:9", true},
+		{"http://127.0.0.2", true},
+		{"http://[::1]:8080/hub", true},
+		{"http://hub.example.com", false},
+		{"http://127.0.0.1.example.com", false},
+		{"https://u:p@hub.example.com", false},
+		{"https://hub.example.com/?key=x", false},
+		{"https://hub.example.com/#x", false},
+		{"https://hub.example.com/?", false},
+		{"hub.example.com", false},
+		{"//hub.example.com", false},
+		{"ftp://hub.example.com", false},
+		{"https:hub.example.com", false},
+		{"https://", false},
+	} {
+		inSettings := settings.New().SetHubURL(tc.url, bridgeT0) == nil
+		if inSettings != tc.accepted {
+			t.Errorf("%q: settings accept %v, want %v", tc.url, inSettings, tc.accepted)
+		}
+		_, err := hubclient.New(hubclient.Config{BaseURL: tc.url}, testenv.NewMemCredentials())
+		if inSettings && err != nil {
+			t.Errorf("%q: accepted by the settings, refused by the Hub client: %v", tc.url, err)
+		}
+	}
+}
+
 // Every address the settings accept is a recipient a proposal accepts, so a stored recipient never breaks the
 // proposal pipeline (the two contexts keep their own copy of the rule, ARCH-11).
 func TestStoredRecipientsAreProposalRecipients(t *testing.T) {
@@ -104,6 +167,7 @@ func TestStoredRecipientsAreProposalRecipients(t *testing.T) {
 		"teacher@school.example", "a.b+c@d-e.example", "x@y.z", "teacher@localhost", "t@school.example.",
 		"T <t@school.example>", "a@b.example,c@d.example", "\"t\"@school.example", "t@[127.0.0.1]", "t@school..example",
 		"учитель@school.example", "t@school.example\r\n", strings.Repeat("a", 250) + "@b.cd",
+		"a.b.c@school.example", ".a@b.example", "a.@b.example", "a..b@b.example", "@b.example", "a@.b.example",
 	} {
 		s := settings.New()
 		inSettings := s.SetHomeworkRecipient(addr, bridgeT0) == nil
