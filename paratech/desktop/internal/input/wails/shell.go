@@ -40,7 +40,8 @@ type Core struct {
 	Activity ActivityUseCase
 	Stopper  RecordingStopper
 	Forcer   JobForcer
-	Prompt   PromptUseCase // the recording popup; the tray's "Show recording popup" offers an ad-hoc prompt
+	Prompt   PromptUseCase         // the recording popup; the tray's "Show recording popup" offers an ad-hoc prompt
+	Schedule ScheduleImportUseCase // the schedule import page; the shell shows its open dialog
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -50,6 +51,7 @@ type ui interface {
 	showMain() error
 	notify(ctx context.Context, t toast) error
 	canNotify() bool
+	pickScheduleFile() (string, error)
 }
 
 // Shell owns the UI: the main window, the tray icon and the popup. Create it with New. Window commands are safe
@@ -149,6 +151,7 @@ type bindings struct {
 	settings *SettingsService
 	activity *ActivityService
 	prompt   *PromptService
+	schedule *ScheduleImportService
 }
 
 // openBindings opens the core and builds the services bound to the pages.
@@ -172,11 +175,24 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Prompt == nil {
 		return bindings{}, errors.New("wails: open core: no recording prompt use case")
 	}
+	if core.Schedule == nil {
+		return bindings{}, errors.New("wails: open core: no schedule import use case")
+	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
 		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
 		prompt:   NewPromptService(core.Prompt, s.opts.Log),
+		schedule: NewScheduleImportService(core.Schedule, pickerFunc(s.pickScheduleFile), s.opts.Log),
 	}, nil
+}
+
+// pickScheduleFile shows the open dialog of the schedule import over the main window; "" when the user cancels.
+func (s *Shell) pickScheduleFile(context.Context) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickScheduleFile()
 }
 
 func (s *Shell) markStarted() error {

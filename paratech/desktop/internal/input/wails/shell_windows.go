@@ -43,6 +43,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.settings))
 	app.RegisterService(application.NewService(b.activity))
 	app.RegisterService(application.NewService(b.prompt))
+	app.RegisterService(application.NewService(b.schedule))
 	toasts := newToastService(notifications.New(), s.opts.Log)
 	app.RegisterService(application.NewService(toasts))
 
