@@ -41,7 +41,6 @@ export const securityOptions: readonly { value: MailSecurity; label: string }[] 
 
 export const texts = {
   hubPlaceholder: "https://…",
-  hubKeyLater: "Ключ доступа к Hub вводится отдельно (появится позже).",
   portHint: "Пусто или 0 — по умолчанию: 587 для STARTTLS, 465 для TLS.",
   mailConfigured: "Почта настроена.",
   mailNotConfigured: "Почта не настроена: нужны адрес получателя, SMTP-сервер и логин (адрес почты).",
@@ -121,7 +120,7 @@ export function mailConfiguredText(configured: boolean): string {
   return configured ? texts.mailConfigured : texts.mailNotConfigured;
 }
 
-/** The texts of one secret slot (the mail password here, the Hub key in TASK-039). */
+/** The texts of one secret slot (the mail password, the Hub key). */
 export interface SecretLabels {
   title: string;
   status: Readonly<Record<SecretStatus, string>>;
@@ -147,6 +146,23 @@ export const mailPasswordLabels: SecretLabels = {
   replaceHint: "Новый пароль заменит сохранённый.",
   remove: "Удалить пароль",
   confirmRemove: "Удалить сохранённый пароль почты? Письма не будут отправляться, пока не зададите новый.",
+  confirmYes: "Удалить",
+  confirmNo: "Отмена",
+};
+
+export const hubKeyLabels: SecretLabels = {
+  title: "Ключ доступа к Hub",
+  status: {
+    set: "Ключ задан",
+    unset: "Ключ не задан",
+    unsupported: "Хранилище ключей недоступно в этой системе",
+    unavailable: "Хранилище ключей не ответило",
+  },
+  input: "Новый ключ",
+  save: "Сохранить ключ",
+  replaceHint: "Новый ключ заменит сохранённый.",
+  remove: "Удалить ключ",
+  confirmRemove: "Удалить сохранённый ключ Hub? Конспекты и поиск ДЗ будут ждать, пока не зададите новый.",
   confirmYes: "Удалить",
   confirmNo: "Отмена",
 };
