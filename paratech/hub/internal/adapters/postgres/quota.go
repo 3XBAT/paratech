@@ -55,6 +55,8 @@ func (r *QuotaAccounts) Modify(ctx context.Context, scope account.Scope, fn func
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
 
+	// READ COMMITTED on purpose: after the FOR UPDATE wait every later statement takes a fresh snapshot and sees what the
+	// previous command committed; REPEATABLE READ would keep the snapshot from before the wait.
 	tx, err := r.db.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return r.db.queryError(ctx, opModifyQuota, err)

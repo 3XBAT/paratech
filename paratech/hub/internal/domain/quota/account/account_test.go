@@ -347,6 +347,44 @@ func TestReserveRetention(t *testing.T) {
 	}
 }
 
+// TestReserveRetentionKeepsReservedLatest checks that a key stays live past its retention while its latest attempt
+// is RESERVED and unexpired: the same fingerprint replays it, another one conflicts, and no second hold is opened.
+func TestReserveRetentionKeepsReservedLatest(t *testing.T) {
+	a := newAccount(t, 1000)
+	reserve(t, a, "k", 100, rid(1), t0)
+	if _, err := a.Release(rid(1), ReasonFailed, t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	opened := t0.Add(retention - ttl/2)
+	a = reload(t, a, opened, "k", "")
+	second := reserve(t, a, "k", 100, rid(2), opened)
+
+	now := t0.Add(retention) // the key record is past its retention, attempt 2 holds until opened+ttl
+	a = reload(t, a, now, "k", "")
+	before := a.Snapshot(now)
+	if _, _, err := a.Reserve(request(t, "k", 200), rid(3), now); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("different fingerprint: err = %v, want ErrIdempotencyConflict", err)
+	}
+	got, replayed, err := a.Reserve(request(t, "k", 100), rid(3), now)
+	if err != nil || !replayed || got != second {
+		t.Fatalf("same fingerprint: %+v replayed %v, %v; want replay of %+v", got, replayed, err, second)
+	}
+	if ch := a.Changes(); len(ch.Created) != 0 || len(ch.Keys) != 0 || len(ch.Movements) != 0 || a.Snapshot(now) != before {
+		t.Fatalf("a replay past retention changed something: %+v", ch)
+	}
+
+	// Once attempt 2 expires the stale key is a new key again.
+	now = opened.Add(ttl)
+	a = reload(t, a, now, "k", "")
+	got, replayed, err = a.Reserve(request(t, "k", 200), rid(3), now)
+	if err != nil || replayed || got.ID != rid(3) || got.Attempt != 3 {
+		t.Fatalf("after attempt 2 expired: %+v %v %v", got, replayed, err)
+	}
+	if k := a.Changes().Keys[0]; !k.CreatedAt.Equal(now) || k.Fingerprint.Amount != 200 {
+		t.Fatalf("renewed key record = %+v", k)
+	}
+}
+
 // TestReserveRetentionWithExceeded checks that a stale key record survives a QUOTA_EXCEEDED renewal attempt.
 func TestReserveRetentionWithExceeded(t *testing.T) {
 	a := newAccount(t, 100)
@@ -586,6 +624,8 @@ func TestRelease(t *testing.T) {
 		assertTotals(t, a, 100, 0)
 	})
 
+	// Intentional (quota.proto): Release of a RELEASED reservation is a no-op, so the reason stays expired and a late
+	// Settle still charges the work the provider did.
 	t.Run("overdue is released by expiry first", func(t *testing.T) {
 		a := newAccount(t, 1000)
 		reserve(t, a, "k", 300, rid(1), t0)

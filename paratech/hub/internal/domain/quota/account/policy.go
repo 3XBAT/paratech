@@ -20,8 +20,9 @@ type Policy struct {
 	retention time.Duration
 }
 
-// NewPolicy validates the configuration: a known unit, a positive limit and positive durations; a key record must
-// live at least as long as a reservation, so that a live reservation always has its key.
+// NewPolicy validates the configuration: a known unit, a positive limit and positive durations, the key retention
+// not shorter than the reservation TTL. The retention counts from KeyRecord.CreatedAt; a key whose latest attempt is
+// still RESERVED stays live past it (Account.Reserve).
 func NewPolicy(unit string, limit int64, reservationTTL, keyRetention time.Duration) (Policy, error) {
 	u, err := ParseUnit(unit)
 	if err != nil {

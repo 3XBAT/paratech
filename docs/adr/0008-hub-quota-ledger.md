@@ -19,7 +19,8 @@ reservation, which ADR-0005(h) left open as "one aggregate or an exception to AR
   aggregate emits one ledger movement per change of the totals (reserve, settle, release, expire, with held/used deltas).
 - **Partial load.** A command loads the totals plus only what it needs: the overdue RESERVED reservations (at most 100,
   oldest first), the key record with its latest attempt, or the addressed reservation. Every query is scoped by API key,
-  so another tester's reservation is `not found`.
+  so another tester's reservation is `not found`. Overdue holds beyond the 100 still count as held until later commands
+  release them, so remaining is under-reported and Reserve may refuse (errs toward denying); the sweeper fixes this.
 - **Transactions.** One use-case call is one Postgres transaction: `INSERT ... ON CONFLICT DO NOTHING` of the account row,
   `SELECT ... FOR UPDATE` on it (serializes all commands of one tester), load, run the aggregate, write reservations, key
   record, ledger rows and totals. Any error rolls everything back, so QUOTA_EXCEEDED stores nothing. CHECK, UNIQUE
@@ -31,14 +32,23 @@ reservation, which ADR-0005(h) left open as "one aggregate or an exception to AR
   request (provider call plus settlement).
 - **Retention.** `HUB_IDEMPOTENCY_RETENTION` (default 24h, 1h..24h) counts from when the key's fingerprint was recorded. After
   it the same text is a new key with a fresh fingerprint; attempt numbers keep counting and old reservations stay in the
-  ledger, never replayed. The fingerprint is operation, model alias and amount: no request text.
+  ledger, never replayed. A key stays live past the retention while its latest attempt is RESERVED. The fingerprint is
+  operation, model alias and amount: no request text. ADR-0005(d) "live at most 24h" is read as: not used after the
+  retention; rows are kept without request text until a sweeper deletes them.
 - **Exposure.** Only `GetRemaining` is served (caller = authenticated API key). Reserve, Settle and Release stay internal: the
   router answers 404, the handler embeds the unimplemented ones. The proto is not split.
 
 ## Consequences
 - The gateway task calls the ledger in-process. ARCH-20 forbids importing `cases/quota`, so `cases/gateway` declares its
   own port of the same shape; the same Postgres adapter and the same aggregate serve both.
-- `docs/architecture.md` section 12 still lists `reservation` as an aggregate; read it as an entity of `account`.
+- `docs/architecture.md` section 12 still lists `reservation` as an aggregate; read it as an entity of `account` (to be
+  updated in a separate docs change).
+- For the gateway task (TASK-035):
+  - the Reserve fingerprint has no request-text hash; per ADR-0005(d) the gateway's key record compares a hash of the
+    request text, so the same key with another text is IDEMPOTENCY_CONFLICT before any stored result is replayed;
+  - reserve at least the maximum possible charge (input tokens + clamped `max_output_tokens`), and keep the request
+    timeout plus settlement below `HUB_QUOTA_RESERVATION_TTL`; otherwise usage above the hold or after expiry may go
+    uncharged.
 - Follow-ups: a sweeper for overdue holds and stale key records (rows older than the retention are only overwritten, not
   deleted); a DB guard that keeps `quota_ledger` append-only; Connect error mapping for Reserve/Settle/Release (ADR-0005(c))
   when they get a transport; a config change that lowers the limit below usage shows remaining 0 but keeps the charges.

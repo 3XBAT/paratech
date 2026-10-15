@@ -146,7 +146,7 @@ func (a *Account) available(committed int64) int64 {
 // latest attempt of the key: an unexpired RESERVED one or a complete SETTLED one is returned as it is (replayed is
 // true); otherwise a new reservation with id is opened. A different fingerprint is ErrIdempotencyConflict in every
 // state; an amount above the remaining quota is ErrQuotaExceeded and changes nothing about the key. A key record
-// older than the retention is a new key.
+// older than the retention is a new key, unless its latest attempt is still RESERVED.
 func (a *Account) Reserve(req ReserveRequest, id shared.ReservationID, now time.Time) (rec ReservationRecord, replayed bool, err error) {
 	if err := a.checkCommand(now); err != nil {
 		return ReservationRecord{}, false, err
@@ -162,7 +162,9 @@ func (a *Account) Reserve(req ReserveRequest, id shared.ReservationID, now time.
 	}
 
 	k := a.keys[req.key]
-	live := k != nil && !k.stale(now, a.policy.retention)
+	// A key also stays live past its retention while its latest attempt still holds quota (expired ones were released
+	// above); otherwise a second hold could be opened for one key. Restore guarantees the latest attempt is loaded.
+	live := k != nil && (!k.stale(now, a.policy.retention) || a.reservations[k.Latest].rec.State == StateReserved)
 	if live {
 		if k.Fingerprint != req.fingerprint {
 			return ReservationRecord{}, false, ErrIdempotencyConflict

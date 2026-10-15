@@ -448,6 +448,39 @@ func TestQuotaKeyReplayAgainstPostgres(t *testing.T) {
 	e.assertConsistent(t, owner)
 }
 
+// TestQuotaKeyLivePastRetentionAgainstPostgres: a key whose latest attempt is still RESERVED stays live after its
+// retention ends, so one key never gets a second hold.
+func TestQuotaKeyLivePastRetentionAgainstPostgres(t *testing.T) {
+	e := newQuotaEnv(t, 1000)
+	owner := e.tester(t)
+	const retention = 24 * time.Hour
+
+	first := e.reserve(t, owner, "k", 100)
+	if _, err := e.release(owner, first.Reservation.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Advance(retention - quotaTTL/2)
+	second := e.reserve(t, owner, "k", 100)
+	if second.Replayed || second.Reservation.ID == first.Reservation.ID {
+		t.Fatalf("attempt 2 = %+v, want a new attempt", second)
+	}
+
+	e.clock.Advance(quotaTTL / 2) // the key record is past its retention, attempt 2 is not expired
+	if _, err := e.svc.Reserve(t.Context(), reserveCmd(owner, "k", 200)); !errors.Is(err, account.ErrIdempotencyConflict) {
+		t.Fatalf("another amount past retention: err = %v, want ErrIdempotencyConflict", err)
+	}
+	replay := e.reserve(t, owner, "k", 100)
+	if !replay.Replayed || replay.Reservation.ID != second.Reservation.ID {
+		t.Fatalf("same amount past retention = %+v, want a replay of %s", replay, second.Reservation.ID)
+	}
+	if used, held := e.assertConsistent(t, owner); used != 0 || held != 100 {
+		t.Fatalf("used %d held %d, want one hold of 100", used, held)
+	}
+	if n := e.rowCount(t, "quota_reservations", owner); n != 2 {
+		t.Fatalf("%d reservations stored, want 2", n)
+	}
+}
+
 // TestQuotaExpiryAgainstPostgres: an overdue reservation is released lazily, a late Settle still charges, and
 // GetRemaining ignores overdue holds without writing.
 func TestQuotaExpiryAgainstPostgres(t *testing.T) {
