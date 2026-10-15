@@ -37,10 +37,13 @@ var (
 
 	// ErrAlreadyCapturing means a capture of the recording runs already.
 	ErrAlreadyCapturing = errors.New("audiocapture: the recording is already capturing")
+
+	// ErrProcessCheck means it could not be told whether a process runs.
+	ErrProcessCheck = errors.New("audiocapture: cannot check the process")
 )
 
 // ProcessChecker tells whether a process runs: process loopback activates even for a dead PID (ADR-0002), so an
-// INCLUDE target is checked first. The Windows implementation comes with the WASAPI source.
+// INCLUDE target is checked first. PlatformProcesses is the implementation of this OS.
 type ProcessChecker interface {
 	Alive(pid uint32) (bool, error)
 }

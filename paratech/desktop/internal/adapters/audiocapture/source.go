@@ -123,10 +123,3 @@ type Stream interface {
 	// Close releases the device and every resource of the stream; Read must have returned.
 	Close() error
 }
-
-// unavailableSource is the Source of a build without capture.
-type unavailableSource struct{}
-
-func (unavailableSource) Open(context.Context, Target, Observer) (Stream, error) {
-	return nil, ErrUnavailable
-}

@@ -367,6 +367,9 @@ func TestChildReportsAnUnavailableCapture(t *testing.T) {
 }
 
 func TestPlatformSourceIsUnavailableInThisBuild(t *testing.T) {
+	if audiocapture.Supported() {
+		t.Skip("this build captures; opening its source would touch the audio devices (see TestLiveCapture)")
+	}
 	_, err := audiocapture.PlatformSource().Open(context.Background(), audiocapture.Target{Mode: audiocapture.ModeSystem}, nil)
 	if !errors.Is(err, audiocapture.ErrUnavailable) {
 		t.Fatalf("Open = %v, want ErrUnavailable", err)

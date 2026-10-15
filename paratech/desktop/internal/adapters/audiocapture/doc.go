@@ -11,6 +11,7 @@
 // complete); a final name is always a complete WAV. Finalize converts the readable chunks, whatever their formats,
 // into one 16 kHz mono 16-bit WAV track; the duration is counted in frames, never by the wall clock.
 //
-// The platform Source (WASAPI on Windows) is behind PlatformSource; this build has none yet, and Unavailable is the
-// recorder of a build without capture.
+// The platform Source is PlatformSource: on 64-bit Windows pure-Go WASAPI (COM through vtables, no CGO) with process
+// loopback of the target and classic loopback of the default output device as the one-way fallback; elsewhere none
+// (Supported is false), and Unavailable is the recorder of such a build.
 package audiocapture
