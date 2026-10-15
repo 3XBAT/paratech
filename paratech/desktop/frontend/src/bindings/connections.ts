@@ -1,5 +1,5 @@
 // "Подключения" bindings: calls into the Go core (internal/input/wails/connections.go). The page never talks to the
-// Hub or the mail server itself, and no reply carries a secret: the mail password is only a status.
+// Hub or the mail server itself, and no reply carries a secret: the mail password and the Hub key are only statuses.
 
 import type { CallByName } from "./settings";
 
@@ -8,9 +8,36 @@ export type MailSecurity = "starttls" | "tls";
 /** Where a secret stands; "unsupported" means there is no secret store in this system. */
 export type SecretStatus = "set" | "unset" | "unsupported" | "unavailable";
 
+/** Result of the last quota refresh in this run; "unchecked" before the first. */
+export type QuotaStatus = "unchecked" | "current" | "notConfigured" | "noKey" | "keyRejected" | "offline" | "failed";
+
+/** The last snapshot of the Hub; times are RFC 3339. */
+export interface QuotaValues {
+  unit: string;
+  remaining: number;
+  reserved: number;
+  limit: number;
+  /** "" when the quota does not renew. */
+  periodEnd: string;
+  /** When the Hub gave these values ("last updated"). */
+  fetchedAt: string;
+}
+
+/** The remaining quota: a cache of this run, the Hub decides. */
+export interface Quota {
+  status: QuotaStatus;
+  /** The values are from an earlier refresh: the last one failed. */
+  stale: boolean;
+  /** "" before the first refresh. */
+  checkedAt: string;
+  values: QuotaValues | null;
+}
+
 /** The section as the Go binding returns it. */
 export interface Connections {
   hubUrl: string;
+  hubKey: SecretStatus;
+  quota: Quota;
   recipient: string;
   smtpHost: string;
   /** 0: the default port of the mode. */
@@ -54,6 +81,13 @@ export interface CheckResult {
   message: string;
 }
 
+/** The answer to a quota refresh: a fixed text and the quota shown afterwards. */
+export interface QuotaResult {
+  ok: boolean;
+  message: string;
+  quota: Quota;
+}
+
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {
   get: "paratech/desktop/internal/input/wails.ConnectionsService.GetConnections",
@@ -62,6 +96,9 @@ export const methods = {
   setMailPassword: "paratech/desktop/internal/input/wails.ConnectionsService.SetMailPassword",
   removeMailPassword: "paratech/desktop/internal/input/wails.ConnectionsService.RemoveMailPassword",
   checkMail: "paratech/desktop/internal/input/wails.ConnectionsService.CheckMail",
+  setHubKey: "paratech/desktop/internal/input/wails.ConnectionsService.SetHubKey",
+  removeHubKey: "paratech/desktop/internal/input/wails.ConnectionsService.RemoveHubKey",
+  refreshQuota: "paratech/desktop/internal/input/wails.ConnectionsService.RefreshQuota",
 } as const;
 
 /** The only error text the binding rejects with (ErrConnectionsUnavailable). */
@@ -70,6 +107,10 @@ export const errorMessages = {
 } as const;
 
 export const secretStatuses: readonly SecretStatus[] = ["set", "unset", "unsupported", "unavailable"];
+
+export const quotaStatuses: readonly QuotaStatus[] = [
+  "unchecked", "current", "notConfigured", "noKey", "keyRejected", "offline", "failed",
+];
 
 function record(raw: unknown, what: string): Record<string, unknown> {
   if (typeof raw !== "object" || raw === null) {
@@ -102,6 +143,46 @@ function secretStatus(r: Record<string, unknown>, key: string, what: string): Se
   return v as SecretStatus;
 }
 
+function amount(r: Record<string, unknown>, key: string, what: string): number {
+  const v = r[key];
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) {
+    throw new Error(`${what}: ${key} is not an amount`);
+  }
+  return v;
+}
+
+function parseQuotaValues(raw: unknown): QuotaValues | null {
+  if (raw === null) {
+    return null;
+  }
+  const w = "quota values";
+  const r = record(raw, w);
+  return {
+    unit: str(r, "unit", w),
+    remaining: amount(r, "remaining", w),
+    reserved: amount(r, "reserved", w),
+    limit: amount(r, "limit", w),
+    periodEnd: str(r, "periodEnd", w),
+    fetchedAt: str(r, "fetchedAt", w),
+  };
+}
+
+/** Checks the shape of the quota. */
+export function parseQuota(raw: unknown): Quota {
+  const w = "quota";
+  const r = record(raw, w);
+  const status = r.status;
+  if (!quotaStatuses.includes(status as QuotaStatus)) {
+    throw new Error(`${w}: status is not a quota status`);
+  }
+  return {
+    status: status as QuotaStatus,
+    stale: bool(r, "stale", w),
+    checkedAt: str(r, "checkedAt", w),
+    values: parseQuotaValues(r.values),
+  };
+}
+
 /** Checks the shape of the section; a malformed reply is an error, not a default. */
 export function parseConnections(raw: unknown): Connections {
   const w = "connections";
@@ -116,6 +197,8 @@ export function parseConnections(raw: unknown): Connections {
   }
   return {
     hubUrl: str(r, "hubUrl", w),
+    hubKey: secretStatus(r, "hubKey", w),
+    quota: parseQuota(r.quota),
     recipient: str(r, "recipient", w),
     smtpHost: str(r, "smtpHost", w),
     smtpPort: port,
@@ -162,6 +245,13 @@ export function parseCheckResult(raw: unknown): CheckResult {
   return { ok: bool(r, "ok", w), message: str(r, "message", w) };
 }
 
+/** Checks the shape of a quota refresh answer. */
+export function parseQuotaResult(raw: unknown): QuotaResult {
+  const w = "quota result";
+  const r = record(raw, w);
+  return { ok: bool(r, "ok", w), message: str(r, "message", w), quota: parseQuota(r.quota) };
+}
+
 export interface ConnectionsApi {
   get(): Promise<Connections>;
   saveMailSettings(input: MailSettingsInput): Promise<SaveResult>;
@@ -171,6 +261,11 @@ export interface ConnectionsApi {
   removeMailPassword(): Promise<SecretResult>;
   /** Connects and logs in without sending a message. */
   checkMail(): Promise<CheckResult>;
+  /** Stores or replaces the Hub API key; it is never read back. */
+  setHubKey(key: string): Promise<SecretResult>;
+  removeHubKey(): Promise<SecretResult>;
+  /** Asks the Hub for the remaining quota. */
+  refreshQuota(): Promise<QuotaResult>;
 }
 
 /** Builds the API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -182,5 +277,8 @@ export function connectionsApi(call: CallByName): ConnectionsApi {
     setMailPassword: async (password) => parseSecretResult(await call(methods.setMailPassword, password)),
     removeMailPassword: async () => parseSecretResult(await call(methods.removeMailPassword)),
     checkMail: async () => parseCheckResult(await call(methods.checkMail)),
+    setHubKey: async (key) => parseSecretResult(await call(methods.setHubKey, key)),
+    removeHubKey: async () => parseSecretResult(await call(methods.removeHubKey)),
+    refreshQuota: async () => parseQuotaResult(await call(methods.refreshQuota)),
   };
 }

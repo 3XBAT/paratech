@@ -111,13 +111,21 @@ type fixture struct {
 	repo    *fakeRepo
 	store   *testenv.MemCredentials
 	checker *fakeChecker
+	hub     *testenv.MemCredentials
+	quota   *fakeQuota
+	clock   *testenv.FakeClock
 	svc     *Service
 }
 
 func newFixture(t *testing.T, cfg Config) *fixture {
 	t.Helper()
-	f := &fixture{repo: &fakeRepo{}, store: testenv.NewMemCredentials(), checker: &fakeChecker{}}
-	svc, err := New(Deps{Settings: f.repo, Clock: testenv.NewFakeClock(start), MailSecret: f.store, MailCheck: f.checker}, cfg)
+	f := &fixture{
+		repo: &fakeRepo{}, store: testenv.NewMemCredentials(), checker: &fakeChecker{}, hub: testenv.NewMemCredentials(),
+		quota: &fakeQuota{}, clock: testenv.NewFakeClock(start),
+	}
+	svc, err := New(Deps{
+		Settings: f.repo, Clock: f.clock, MailSecret: f.store, MailCheck: f.checker, HubSecret: f.hub, Quota: f.quota,
+	}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +137,7 @@ func TestNewValidates(t *testing.T) {
 	valid := func() Deps {
 		return Deps{
 			Settings: &fakeRepo{}, Clock: testenv.NewFakeClock(start), MailSecret: testenv.NewMemCredentials(),
-			MailCheck: &fakeChecker{},
+			MailCheck: &fakeChecker{}, HubSecret: testenv.NewMemCredentials(), Quota: &fakeQuota{},
 		}
 	}
 	tests := []struct {
@@ -143,6 +151,9 @@ func TestNewValidates(t *testing.T) {
 		{"no mail secret store", func(d *Deps, _ *Config) { d.MailSecret = nil }, false},
 		{"no mail checker", func(d *Deps, _ *Config) { d.MailCheck = nil }, false},
 		{"negative check timeout", func(_ *Deps, c *Config) { c.CheckTimeout = -time.Second }, false},
+		{"no hub secret store", func(d *Deps, _ *Config) { d.HubSecret = nil }, false},
+		{"no quota source", func(d *Deps, _ *Config) { d.Quota = nil }, false},
+		{"negative refresh timeout", func(_ *Deps, c *Config) { c.RefreshTimeout = -time.Second }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,7 +172,7 @@ func TestGetReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := View{SMTPSecurity: settings.DefaultMailSecurity, MailPassword: SecretUnset}
+	want := View{SMTPSecurity: settings.DefaultMailSecurity, MailPassword: SecretUnset, HubKey: SecretUnset}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
 	}
@@ -179,6 +190,7 @@ func TestSaveMailStoresEveryField(t *testing.T) {
 	want := View{
 		HomeworkRecipient: "teacher@school.example", SMTPHost: "smtp.example.org", SMTPPort: 465,
 		SMTPSecurity: settings.MailSecurityTLS, SMTPLogin: "student@example.org", MailConfigured: true, MailPassword: SecretUnset,
+		HubKey: SecretUnset,
 	}
 	if got != want {
 		t.Fatalf("SaveMail = %+v, want %+v", got, want)
@@ -197,7 +209,7 @@ func TestSaveMailStoresEveryField(t *testing.T) {
 
 	// Empty values remove the account.
 	got, err = f.svc.SaveMail(context.Background(), MailInput{Security: settings.MailSecurityStartTLS})
-	if err != nil || got != (View{SMTPSecurity: settings.MailSecurityStartTLS, MailPassword: SecretUnset}) {
+	if err != nil || got != (View{SMTPSecurity: settings.MailSecurityStartTLS, MailPassword: SecretUnset, HubKey: SecretUnset}) {
 		t.Fatalf("SaveMail with empty values = %+v, %v", got, err)
 	}
 }
@@ -385,6 +397,7 @@ func TestCredentialStoreFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, err := New(Deps{
 				Settings: &fakeRepo{}, Clock: testenv.NewFakeClock(start), MailSecret: tt.store, MailCheck: &fakeChecker{},
+				HubSecret: testenv.NewMemCredentials(), Quota: &fakeQuota{},
 			}, Config{})
 			if err != nil {
 				t.Fatal(err)

@@ -12,6 +12,7 @@ import {
   failureText,
   fieldErrorText,
   hubFields,
+  hubKeyLabels,
   mailConfiguredText,
   mailFields,
   mailFormDirty,
@@ -25,12 +26,20 @@ import {
   type FieldCode,
   type MailForm,
 } from "../connectionsView";
+import {
+  quotaControls,
+  quotaDisplay,
+  quotaRefreshable,
+  quotaTexts,
+  type QuotaMessage,
+} from "../quotaView";
 import { SecretSlot, type SecretMessage } from "./SecretSlot";
 
 const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 
-// "Подключения": the Hub address, the mail account, the mail password and the mail check. The page only shows and
-// forwards the values; validation and the secret store are in the Go core (ARCH-44).
+// "Подключения": the Hub address, the Hub key and the remaining quota, the mail account, the mail password and the
+// mail check. The page only shows and forwards the values; validation, the secret store and the quota are in the Go
+// core (ARCH-44).
 export function ConnectionsPage() {
   const api = useMemo(() => connectionsApi(callByName), []);
   const [saved, setSaved] = useState<Connections | null>(null);
@@ -41,6 +50,12 @@ export function ConnectionsPage() {
   const [hubBusy, setHubBusy] = useState(false);
   const [hubErrors, setHubErrors] = useState<FieldError[]>([]);
   const [hubDone, setHubDone] = useState("");
+
+  const [hubKeyBusy, setHubKeyBusy] = useState(false);
+  const [hubKeyMessage, setHubKeyMessage] = useState<SecretMessage | null>(null);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [quotaMessage, setQuotaMessage] = useState<QuotaMessage | null>(null);
 
   const [mail, setMail] = useState<MailForm | null>(null);
   const [mailBusy, setMailBusy] = useState(false);
@@ -55,23 +70,6 @@ export function ConnectionsPage() {
 
   // A double click must not start a second call before the disabled button renders.
   const running = useRef(new Set<string>());
-
-  useEffect(() => {
-    mounted.current = true;
-    api.get().then(
-      (c) => {
-        if (mounted.current) {
-          setSaved(c);
-          setHubUrl(c.hubUrl);
-          setMail(mailFormFrom(c));
-        }
-      },
-      () => mounted.current && setLoadError(failureText("load")),
-    );
-    return () => {
-      mounted.current = false;
-    };
-  }, [api]);
 
   async function once(key: string, setBusy: (b: boolean) => void, action: () => Promise<void>) {
     if (running.current.has(key)) {
@@ -103,6 +101,10 @@ export function ConnectionsPage() {
           setSaved(c);
           setHubUrl(c.hubUrl);
           setHubDone(texts.saved);
+          setQuotaMessage(null); // an answer of the old address would mislead
+          if (quotaRefreshable(c)) {
+            void refreshQuota();
+          }
         } else {
           setHubErrors(r.errors); // the typed value stays for correction
         }
@@ -160,6 +162,85 @@ export function ConnectionsPage() {
     });
   }
 
+  // The key goes straight from the slot to the call. The re-read and the refresh run after the change returns, so the
+  // slot clears its field without waiting for the Hub.
+  async function changeHubKey(action: "store" | "remove", call: () => Promise<SecretResult>) {
+    await once("hubKey", setHubKeyBusy, async () => {
+      setHubKeyMessage(null);
+      try {
+        const r = await call();
+        if (mounted.current) {
+          setSaved((s) => (s === null ? s : { ...s, hubKey: r.status }));
+          setHubKeyMessage({ text: r.message, ok: secretOutcomeOk(action, r.status) });
+          setQuotaMessage(null); // the answer belonged to the old key
+        }
+      } catch {
+        if (mounted.current) {
+          setHubKeyMessage({ text: failureText("save"), ok: false });
+        }
+      }
+    });
+    void reloadHub();
+  }
+
+  // Reads the key status and the quota again (the core forgets the quota when the key changes) and asks for the
+  // quota of a usable key.
+  async function reloadHub() {
+    try {
+      const c = await api.get();
+      if (!mounted.current) {
+        return;
+      }
+      setSaved((s) => (s === null ? s : { ...s, hubKey: c.hubKey, quota: c.quota }));
+      if (quotaRefreshable(c)) {
+        void refreshQuota();
+      }
+    } catch {
+      if (mounted.current) {
+        setQuotaMessage({ text: failureText("load"), ok: false });
+      }
+    }
+  }
+
+  // Asks the core for the quota; the reply carries the fixed text and the quota to show, stale or not.
+  const refreshQuota = () =>
+    once("quota", setRefreshing, async () => {
+      setQuotaMessage(null);
+      try {
+        const r = await api.refreshQuota();
+        if (mounted.current) {
+          setSaved((s) => (s === null ? s : { ...s, quota: r.quota }));
+          setQuotaMessage({ text: r.message, ok: r.ok });
+        }
+      } catch {
+        if (mounted.current) {
+          setQuotaMessage({ text: quotaTexts.refreshFailed, ok: false });
+        }
+      }
+    });
+
+  // On open: read the section, then ask once for the quota when an address and a key are set.
+  useEffect(() => {
+    mounted.current = true;
+    api.get().then(
+      (c) => {
+        if (mounted.current) {
+          setSaved(c);
+          setHubUrl(c.hubUrl);
+          setMail(mailFormFrom(c));
+          if (quotaRefreshable(c)) {
+            void refreshQuota();
+          }
+        }
+      },
+      () => mounted.current && setLoadError(failureText("load")),
+    );
+    return () => {
+      mounted.current = false;
+    };
+  }, [api]); // refreshQuota uses only refs, state setters and api
+
+
   const runCheck = () =>
     once("check", setChecking, async () => {
       setCheck(null);
@@ -192,6 +273,8 @@ export function ConnectionsPage() {
 
   const dirty = mailFormDirty(mail, saved);
   const checkState = checkControls({ dirty, checking, saving: mailBusy, secretBusy });
+  const quota = quotaDisplay(saved.quota, saved, quotaMessage);
+  const quotaState = quotaControls({ refreshing, keyBusy: hubKeyBusy, hubBusy });
 
   return (
     <section>
@@ -220,7 +303,45 @@ export function ConnectionsPage() {
           </button>
         </div>
         {hubDone && <p role="status">{hubDone}</p>}
-        <p className="muted">{texts.hubKeyLater}</p>
+
+        <SecretSlot
+          nested
+          labels={hubKeyLabels}
+          status={saved.hubKey}
+          busy={hubKeyBusy}
+          message={hubKeyMessage}
+          onStore={(value) => changeHubKey("store", () => api.setHubKey(value))}
+          onRemove={() => changeHubKey("remove", () => api.removeHubKey())}
+        />
+
+        <h3>{quotaTexts.title}</h3>
+        {quota.amounts.length > 0 && (
+          <table className="list">
+            <tbody>
+              {quota.amounts.map((a) => (
+                <tr key={a.label}>
+                  <th scope="row">{a.label}</th>
+                  <td>{a.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {quota.updated && <p>{quota.updated}</p>}
+        {quota.stale && <p className="warning">{quota.stale}</p>}
+        {quota.renews && <p className="muted">{quota.renews}</p>}
+        {quota.note && <p className="muted">{quota.note}</p>}
+        {quota.checked && <p className="muted">{quota.checked}</p>}
+        {quota.lines.map((l, i) => (
+          <p key={i} className={l.tone} role={l.tone === "error" ? "alert" : l.tone === "ok" ? "status" : undefined}>
+            {l.text}
+          </p>
+        ))}
+        <div className="actions">
+          <button type="button" disabled={quotaState.disabled} onClick={() => void refreshQuota()}>
+            {quotaState.label}
+          </button>
+        </div>
       </div>
 
       <div className="block">
