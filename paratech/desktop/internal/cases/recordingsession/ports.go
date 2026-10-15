@@ -112,6 +112,16 @@ type ArtifactStore interface {
 	Delete(ctx context.Context, ref shared.ArtifactRef) error
 }
 
+// CompletionListener is told that a recording was stored COMPLETED with its final track, so that the app enqueues its
+// transcription (PRD sections 6.2 and 7.1). The app wires the transcription use case to it.
+type CompletionListener interface {
+	// RecordingCompleted is called after the COMPLETED state was saved: at the end of a stop, of the hard cap, of a
+	// capture that ended by itself and of the startup recovery (PRD section 6.2). A crash between the save and the call
+	// loses the call; the app's startup sweep enqueues what was missed, so delivery is at least once and the
+	// implementation must be idempotent by id. An error is only logged: the recording stays COMPLETED.
+	RecordingCompleted(ctx context.Context, id shared.RecordingID) error
+}
+
 // SettingsReader gives read access to the user settings, for example whether automatic recording prompts
 // are enabled (PRD sections 6.1 and 15, AC-02). Implemented by the sqlite adapter.
 type SettingsReader interface {

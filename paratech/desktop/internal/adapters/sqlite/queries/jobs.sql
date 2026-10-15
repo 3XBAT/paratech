@@ -65,6 +65,15 @@ WHERE status = 'QUEUED'
 ORDER BY next_run_at, created_at, id
 LIMIT 1;
 
+-- Whether a job of the type has an idempotency key that starts with the prefix, in any status (TASK-060: one automatic
+-- STT job per recording). substr and length both count characters, so the comparison is exact for any text.
+-- name: HasJobKeyPrefix :one
+SELECT EXISTS (
+    SELECT 1 FROM jobs
+    WHERE type = sqlc.arg(type)
+      AND substr(idempotency_key, 1, length(CAST(sqlc.arg(prefix) AS TEXT))) = CAST(sqlc.arg(prefix) AS TEXT)
+) AS found;
+
 -- name: ListJobsByStatus :many
 SELECT * FROM jobs
 WHERE status IN (sqlc.slice('statuses'))

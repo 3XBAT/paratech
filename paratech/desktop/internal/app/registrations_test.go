@@ -7,19 +7,21 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
-	"paratech/desktop/internal/domain/jobs/services/backoff"
-	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/domain/transcription/values"
 	"paratech/desktop/internal/input/wails"
 	"paratech/desktop/testenv"
 )
@@ -47,7 +49,17 @@ var (
 	_ settingsLoader                        = (*sqlite.SettingsRepository)(nil)
 	_ secretStore                           = (*wincred.Store)(nil)
 	_ secretStore                           = (*testenv.MemCredentials)(nil)
-	_ transcribe.STTEngine                  = sttNotConfigured{}
+	_ recordingsession.CompletionListener   = (*transcribe.Enqueuer)(nil)
+	_ transcribe.JobEnqueuer                = (*sqlite.JobRepository)(nil)
+	_ transcribe.PendingRecordings          = (*sqlite.RecordingRepository)(nil)
+	_ transcribe.ModelResolver              = modelResolver{}
+	_ transcribe.IDGenerator                = idSource(nil)
+	_ transcribe.Tx                         = (*sqlite.DB)(nil)
+	_ modelcatalog.IDGenerator              = idSource(nil)
+	_ modelcatalog.CatalogSource            = embeddedCatalog{}
+	_ modelcatalog.ModelSource              = (*httpdownload.Client)(nil)
+	_ modelcatalog.ImportSource             = (*localfile.Reader)(nil)
+	_ modelcatalog.DiskSpace                = (*filestore.Store)(nil)
 	_ recordingsession.IDGenerator          = idSource(nil)
 	_ homeworkflow.IDGenerator              = idSource(nil)
 	_ senddelivery.IDGenerator              = idSource(nil)
@@ -151,10 +163,42 @@ func TestProductionEnvUsesTheRunnerAttemptCap(t *testing.T) {
 	}
 }
 
-// The STT stand-in fails at once, without a retry.
-func TestSTTStandInFailsPermanently(t *testing.T) {
-	err := sttNotConfigured{}.Transcribe(context.Background(), shared.ArtifactRef{}, shared.ArtifactRef{}, shared.ArtifactRef{}, nil)
-	if !errors.Is(err, errNotConfigured) || !errors.Is(err, backoff.ErrPermanent) {
-		t.Fatalf("err = %v, want a permanent errNotConfigured", err)
+// Without a speech recognition engine the stt type is not registered (its jobs wait QUEUED); the others are.
+func TestRegistrationsWithoutAnEngine(t *testing.T) {
+	h := handlersForTest()
+	h.stt = nil
+	var got []job.Type
+	for _, r := range registrations(h) {
+		got = append(got, r.Type)
+	}
+	want := []job.Type{
+		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("registered types %v, want %v", got, want)
+	}
+}
+
+// The embedded catalog is a valid manifest without models, and every call returns its own copy.
+func TestEmbeddedCatalogIsEmpty(t *testing.T) {
+	data, err := (embeddedCatalog{}).Manifest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := values.ParseCatalog(data)
+	if err != nil {
+		t.Fatalf("ParseCatalog = %v", err)
+	}
+	if n := len(cat.Entries()); n != 0 {
+		t.Fatalf("%d catalog entries, want none until their SHA-256 is verified", n)
+	}
+	if hosts := cat.DownloadHosts().Hosts(); len(hosts) != 0 {
+		t.Fatalf("download hosts %v, want none", hosts)
+	}
+	data[0] = 'x'
+	if again, err := (embeddedCatalog{}).Manifest(context.Background()); err != nil || again[0] != '{' {
+		t.Fatalf("a changed copy leaked into the next call: %q, %v", again, err)
 	}
 }

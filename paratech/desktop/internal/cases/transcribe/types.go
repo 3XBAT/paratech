@@ -33,3 +33,21 @@ type Deps struct {
 	Clock       Clock
 	Log         *slog.Logger
 }
+
+// EnqueueDeps are the ports the Enqueuer needs. Log is optional.
+type EnqueueDeps struct {
+	Recordings RecordingReader
+	Pending    PendingRecordings
+	Models     ModelResolver
+	Jobs       JobEnqueuer
+	IDs        IDGenerator
+	Tx         Tx
+	Clock      Clock
+	Log        *slog.Logger
+
+	// MaxAttempts caps the attempts of an STT job (the runner's backoff cap); 0 means backoff.DefaultSpec's.
+	MaxAttempts int
+}
+
+// sweepPage bounds the recordings the startup sweep holds in memory at once.
+const sweepPage = 100

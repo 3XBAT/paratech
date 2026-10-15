@@ -187,11 +187,12 @@ func (c Catalog) CheckImportIdentity(name ModelName, version ModelVersion) error
 //	  "recommendation": {"min_cpu_cores": 2, "min_ram_mb": 1024, "preferred": true}}],
 //	 "download_hosts": ["cdn.example.com"]}
 //
-// download_hosts and source_page are optional.
+// download_hosts and source_page are optional. models is required; "models": [] is a catalog without downloadable
+// models. Models is a pointer so that a missing or null list is told apart from an empty one.
 type manifestDoc struct {
-	SchemaVersion int                `json:"schema_version"`
-	Models        []manifestEntryDoc `json:"models"`
-	DownloadHosts []string           `json:"download_hosts"`
+	SchemaVersion int                 `json:"schema_version"`
+	Models        *[]manifestEntryDoc `json:"models"`
+	DownloadHosts []string            `json:"download_hosts"`
 }
 
 type manifestEntryDoc struct {
@@ -215,9 +216,10 @@ type recommendationDoc struct {
 
 // ParseCatalog parses and validates a manifest (PRD section 8.1). It is strict: valid UTF-8 of at most
 // MaxCatalogBytes, exactly one JSON object, only known lowercase keys, no repeated key in any object, the expected
-// schema version, 1..MaxCatalogEntries entries that pass NewCatalogEntry, and no two entries with the same id, the
-// same name and version, or the same SHA-256. download_hosts and the hosts of the source URLs must pass
-// NewHostAllowlist. A source_page, when present, must pass ParseSourceURL like source_url.
+// schema version, a models list of 0..MaxCatalogEntries entries that pass NewCatalogEntry, and no two entries with the
+// same id, the same name and version, or the same SHA-256. An explicit empty list is a valid catalog without
+// downloadable models (no SHA-256 is verified yet); a missing or null list is refused. download_hosts and the hosts of
+// the source URLs must pass NewHostAllowlist. A source_page, when present, must pass ParseSourceURL like source_url.
 func ParseCatalog(data []byte) (Catalog, error) {
 	if len(data) > MaxCatalogBytes {
 		return Catalog{}, fmt.Errorf("%w: larger than %d bytes", ErrInvalidCatalog, MaxCatalogBytes)
@@ -238,8 +240,12 @@ func ParseCatalog(data []byte) (Catalog, error) {
 	if doc.SchemaVersion != CatalogSchemaVersion {
 		return Catalog{}, fmt.Errorf("%w: schema version %d, want %d", ErrInvalidCatalog, doc.SchemaVersion, CatalogSchemaVersion)
 	}
-	if len(doc.Models) == 0 || len(doc.Models) > MaxCatalogEntries {
-		return Catalog{}, fmt.Errorf("%w: %d models, want 1..%d", ErrInvalidCatalog, len(doc.Models), MaxCatalogEntries)
+	if doc.Models == nil {
+		return Catalog{}, fmt.Errorf("%w: no models list", ErrInvalidCatalog)
+	}
+	models := *doc.Models
+	if len(models) > MaxCatalogEntries {
+		return Catalog{}, fmt.Errorf("%w: %d models, want at most %d", ErrInvalidCatalog, len(models), MaxCatalogEntries)
 	}
 
 	hosts, err := NewHostAllowlist(doc.DownloadHosts)
@@ -247,12 +253,12 @@ func ParseCatalog(data []byte) (Catalog, error) {
 		return Catalog{}, fmt.Errorf("%w: download_hosts: %w", ErrInvalidCatalog, err)
 	}
 
-	entries := make([]CatalogEntry, 0, len(doc.Models))
-	sourceHosts := make([]string, 0, len(doc.Models))
+	entries := make([]CatalogEntry, 0, len(models))
+	sourceHosts := make([]string, 0, len(models))
 	ids := map[CatalogID]bool{}
 	identities := map[[2]string]bool{}
 	sums := map[SHA256]bool{}
-	for i, m := range doc.Models {
+	for i, m := range models {
 		e, err := m.entry()
 		if err != nil {
 			return Catalog{}, fmt.Errorf("%w: model %d: %w", ErrInvalidCatalog, i, err)

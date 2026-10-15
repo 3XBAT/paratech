@@ -70,6 +70,7 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 	for _, line := range []string{
 		"instance lock acquired",
 		"speech recognition is not available: whisper-cli is not installed next to the executable",
+		"transcription jobs wait in the queue until whisper-cli is installed next to the executable and the app restarts",
 		"background work started",
 	} {
 		if !strings.Contains(out, line) {
@@ -114,8 +115,6 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 		attempts int
 		lastErr  string // the exact text of the error column
 	}{
-		// Fails at once instead of retrying; the startup log says why.
-		{"no whisper-cli", transcribe.JobType, job.StatusFailed, 1, transcribe.ErrTranscriptionFailed.Error()},
 		// Parked without using an attempt: it runs once a build with a Hub starts.
 		{"no hub", homeworkflow.SummarizeJobType, job.StatusWaitingForNetwork, 0, ""},
 		// A definite refusal, never an unknown outcome: nothing was handed over.
@@ -123,6 +122,10 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 			"no mail settings", senddelivery.JobType, job.StatusFailed, 1,
 			"permanent failure: senddelivery: send: smtp: mail is not configured: delivery rejected",
 		},
+		// TASK-060: the stt type is not registered without whisper-cli, so the job waits QUEUED with its key unused
+		// (it runs after whisper-cli is installed and the app restarts) instead of failing. Last: by now the runner
+		// has settled the other jobs, so it had every chance to claim this one.
+		{"no whisper-cli", transcribe.JobType, job.StatusQueued, 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

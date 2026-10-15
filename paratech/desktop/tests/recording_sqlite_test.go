@@ -35,6 +35,11 @@ var (
 
 var recT0 = time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 
+// ignoredCompletions is the completion listener of these scenarios: they do not enqueue transcriptions.
+type ignoredCompletions struct{}
+
+func (ignoredCompletions) RecordingCompleted(context.Context, shared.RecordingID) error { return nil }
+
 type recIDs struct {
 	mu sync.Mutex
 	n  int
@@ -83,7 +88,7 @@ func newRecordingEnvWith(t *testing.T, dir string, cfg recordingsession.Config) 
 	e.rec = testenv.NewFakeRecorder(store, time.Minute)
 	e.svc, err = recordingsession.New(recordingsession.Deps{
 		Recordings: e.repo, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: e.rec, Artifacts: store, Tx: db,
-		Clock: e.clock, Sleeper: e.clock, IDs: &recIDs{},
+		Clock: e.clock, Sleeper: e.clock, IDs: &recIDs{}, Completions: ignoredCompletions{},
 	}, cfg)
 	if err != nil {
 		t.Fatal(err)

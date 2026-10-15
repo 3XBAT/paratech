@@ -60,7 +60,8 @@ const (
 // Power-aware processing (PRD section 7.4, AC-21, AC-22) follows powerpolicy: on battery with the setting on, Heavy
 // jobs are not claimed and due QUEUED ones are parked in WAITING_FOR_POWER; when AC power returns or the setting is
 // turned off they go back to QUEUED. Light jobs are never affected, and ForceRun starts one job regardless. The power
-// source comes from PowerMonitor events, the setting is re-read every poll interval.
+// source comes from PowerMonitor events, the setting is re-read every poll interval. At most Config.MaxHeavy Heavy
+// jobs run at once; meanwhile the other workers take only light jobs.
 //
 // An error that no handler classified counts as transient, so it stops at the attempt cap (AC-10).
 // The runner is the only writer of a claimed job (ADR-0004); a version conflict on Save means someone else changed
@@ -94,6 +95,8 @@ type Service struct {
 	wg       sync.WaitGroup
 
 	powerPolicy powerpolicy.Policy // set by Start, read-only afterwards
+	lightOnly   job.ClaimFilter    // set by Start: the light types only; zero when every type is heavy
+	heavySlots  chan struct{}      // one token per heavy job that may run now (Config.MaxHeavy)
 	enforceMu   sync.Mutex         // serialises the power policy runs of the keeper and of power events
 	subscribed  atomic.Bool        // power events arrive; otherwise the keeper polls the monitor
 
@@ -114,6 +117,12 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	case cfg.DefaultTimeout <= 0:
 		return nil, fmt.Errorf("%w: default timeout %v", ErrInvalidConfig, cfg.DefaultTimeout)
 	}
+	if cfg.MaxHeavy == 0 {
+		cfg.MaxHeavy = DefaultMaxHeavy
+	}
+	if cfg.MaxHeavy < 1 || cfg.MaxHeavy > cfg.Workers {
+		return nil, fmt.Errorf("%w: %d heavy jobs at once with %d workers", ErrInvalidConfig, cfg.MaxHeavy, cfg.Workers)
+	}
 	if cfg.Rechecks == (backoff.Rechecks{}) {
 		cfg.Rechecks = backoff.DefaultRechecks()
 	}
@@ -133,7 +142,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 		observer: deps.Observer, log: log,
 		cfg: cfg, policy: policy,
 		handlers: map[job.Type]Registration{}, running: map[shared.JobID]*run{},
-		stopped: make(chan struct{}),
+		stopped: make(chan struct{}), heavySlots: make(chan struct{}, cfg.MaxHeavy),
 	}
 	s.loopCtx, s.stopLoop = context.WithCancel(context.Background())
 	s.runCtx, s.stopRuns = context.WithCancelCause(context.Background())
@@ -218,21 +227,30 @@ func (s *Service) begin(ctx context.Context) error {
 	if len(s.handlers) == 0 {
 		return ErrNoHandlers
 	}
-	var types, heavy []job.Type
+	var types, heavy, light []job.Type
 	for t, reg := range s.handlers {
 		types = append(types, t)
 		if reg.Heavy {
 			heavy = append(heavy, t)
+		} else {
+			light = append(light, t)
 		}
 	}
 	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
 	sort.Slice(heavy, func(i, j int) bool { return heavy[i] < heavy[j] })
+	sort.Slice(light, func(i, j int) bool { return light[i] < light[j] })
 	policy, err := powerpolicy.New(types, heavy)
 	if err != nil {
 		return err
 	}
+	var lightOnly job.ClaimFilter
+	if len(light) > 0 {
+		if lightOnly, err = job.NewClaimFilter(light, nil, true); err != nil {
+			return err
+		}
+	}
 
-	s.powerPolicy, s.started = policy, true
+	s.powerPolicy, s.lightOnly, s.started = policy, lightOnly, true
 	s.unwatch = context.AfterFunc(ctx, func() {
 		s.stopLoop()
 		s.stopRuns(errShutdown)
@@ -373,17 +391,51 @@ func (s *Service) promoteDue(ctx context.Context) error {
 }
 
 // step claims one due job and runs it to the end. worked is false when nothing was eligible.
+//
+// A heavy slot is reserved before the claim, so two workers cannot both take the last one; without a free slot only
+// light types are claimed. The slot is kept until the attempt has ended (execute returns after the final save, and
+// a handler panic is caught inside it), and given back at once when the claim brought a light job or nothing.
 func (s *Service) step() (worked bool, err error) {
 	cond := s.conditions()
-	j, ok, err := s.jobs.Claim(s.loopCtx, s.clock.Now(), s.powerPolicy.Filter(cond))
+	filter := s.powerPolicy.Filter(cond)
+	slot := s.reserveHeavy()
+	defer func() {
+		if slot {
+			s.releaseHeavy()
+		}
+	}()
+	if !slot {
+		if s.lightOnly.IsZero() {
+			return false, nil
+		}
+		filter = s.lightOnly
+	}
+
+	j, ok, err := s.jobs.Claim(s.loopCtx, s.clock.Now(), filter)
 	if err != nil || !ok {
 		return false, err
+	}
+	if slot && s.powerPolicy.ClassOf(j.Type()) != powerpolicy.ClassHeavy {
+		s.releaseHeavy()
+		slot = false
 	}
 	// forced uses cond from before the claim: a Run-now job claimed on AC is not forced and stops at a checkpoint if
 	// power drops later (PRD 7.4); only a start that needed the override is protected (AC-22).
 	s.execute(j, s.powerPolicy.StartedByOverride(j.Type(), cond))
 	return true, nil
 }
+
+// reserveHeavy takes a heavy slot if one is free.
+func (s *Service) reserveHeavy() bool {
+	select {
+	case s.heavySlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) releaseHeavy() { <-s.heavySlots }
 
 // run is one attempt of a claimed job.
 type run struct {

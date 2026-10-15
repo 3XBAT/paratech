@@ -225,7 +225,7 @@ func (e *recordingEnv) trackSleeps(cfg recordingsession.Config) *recSleepLog {
 	sleeps := &recSleepLog{clock: e.clock, inFlight: map[time.Duration]int{}}
 	svc, err := recordingsession.New(recordingsession.Deps{
 		Recordings: e.repo, Transcripts: sqlite.NewRecordingTranscripts(e.db), Recorder: e.rec, Artifacts: e.store,
-		Tx: e.db, Clock: e.clock, Sleeper: sleeps, IDs: &recIDs{},
+		Tx: e.db, Clock: e.clock, Sleeper: sleeps, IDs: &recIDs{}, Completions: ignoredCompletions{},
 	}, cfg)
 	if err != nil {
 		e.t.Fatal(err)

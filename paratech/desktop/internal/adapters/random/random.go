@@ -38,6 +38,9 @@ func (IDs) NewProposalID() proposal.ID { return proposal.ID(token()) }
 // NewLessonID returns a fresh lesson identifier.
 func (IDs) NewLessonID() shared.LessonID { return shared.LessonID(token()) }
 
+// NewSttModelID returns a fresh identifier of an installed speech recognition model.
+func (IDs) NewSttModelID() shared.SttModelID { return shared.SttModelID(token()) }
+
 // NewDeliveryID returns a fresh delivery identifier.
 func (IDs) NewDeliveryID() shared.DeliveryID { return shared.DeliveryID(token()) }
 

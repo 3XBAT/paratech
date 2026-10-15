@@ -113,6 +113,25 @@ func (r *RecordingRepository) ListActivity(ctx context.Context, maxTerminal int)
 	return recs, unreadable, nil
 }
 
+// ListUntranscribed returns, in id order, up to limit ids greater than after of COMPLETED recordings with a final
+// track and no transcript; a limit below 1 returns none.
+func (r *RecordingRepository) ListUntranscribed(ctx context.Context, after shared.RecordingID, limit int) ([]shared.RecordingID, error) {
+	if limit < 1 {
+		return []shared.RecordingID{}, nil // SQLite reads a negative LIMIT as no limit
+	}
+	ids, err := r.db.Queries(ctx).ListUntranscribedRecordingIDs(ctx, sqlcgen.ListUntranscribedRecordingIDsParams{
+		After: string(after), Status: string(recording.StatusCompleted), MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, MapError(ctx, err)
+	}
+	out := make([]shared.RecordingID, len(ids))
+	for i, id := range ids {
+		out[i] = shared.RecordingID(id)
+	}
+	return out, nil
+}
+
 // Delete removes the row of rec if it still has the version rec was loaded with (ADR-0004(d)).
 func (r *RecordingRepository) Delete(ctx context.Context, rec *recording.Recording) error {
 	return r.db.Do(ctx, func(ctx context.Context) error {

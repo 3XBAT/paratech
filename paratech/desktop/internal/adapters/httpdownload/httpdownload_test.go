@@ -300,6 +300,27 @@ func TestFetchRefusesSourceOutsideAllowlist(t *testing.T) {
 	}
 }
 
+// TestFetchEmptyAllowlistAllowsNothing: the allowlist of a catalog without entries (and the zero value) allows no
+// host, so nothing is requested.
+func TestFetchEmptyAllowlistAllowsNothing(t *testing.T) {
+	s := newServer(t, nil)
+	cat, err := values.ParseCatalog([]byte(`{"schema_version": 1, "models": []}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, allow := range map[string]values.HostAllowlist{
+		"empty catalog": cat.DownloadHosts(), "empty list": allowlist(t), "zero value": {},
+	} {
+		_, _, err := testClient(s).Fetch(context.Background(), s.src(t, "/m.bin"), 0, allow)
+		if !errors.Is(err, values.ErrHostNotAllowed) {
+			t.Fatalf("%s: Fetch = %v, want ErrHostNotAllowed", name, err)
+		}
+	}
+	if n := s.hits.Load(); n != 0 {
+		t.Fatalf("server got %d requests", n)
+	}
+}
+
 func TestDefaultTransportRefusesLocalAddresses(t *testing.T) {
 	s := newServer(t, nil)
 	_, _, err := New().Fetch(context.Background(), s.src(t, "/m.bin"), 0, allowlist(t, s.host()))

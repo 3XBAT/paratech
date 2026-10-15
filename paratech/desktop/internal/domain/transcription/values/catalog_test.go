@@ -121,7 +121,10 @@ func TestParseCatalogRejects(t *testing.T) {
 		{"wrong schema version", `{"schema_version": 2, "models": [` + entryJSON(nil) + `]}`, nil},
 		{"fractional schema version", `{"schema_version": 1.5, "models": [` + entryJSON(nil) + `]}`, nil},
 		{"no models", `{"schema_version": 1}`, nil},
-		{"empty models", manifest(), nil},
+		{"null models", `{"schema_version": 1, "models": null}`, nil},
+		{"no models with hosts", `{"schema_version": 1, "download_hosts": ["huggingface.co"]}`, nil},
+		{"empty models, bad host", `{"schema_version": 1, "models": [], "download_hosts": ["bad host"]}`, ErrInvalidHost},
+		{"empty models, wrong schema version", `{"schema_version": 2, "models": []}`, nil},
 		{"models not an array", `{"schema_version": 1, "models": {}}`, nil},
 		{"unknown top-level key", `{"schema_version": 1, "extra": 1, "models": [` + entryJSON(nil) + `]}`, nil},
 		{"unknown entry key", manifest(entryJSON(map[string]string{"file_name": `"x.bin"`})), nil},
@@ -173,6 +176,39 @@ func TestParseCatalogRejects(t *testing.T) {
 				t.Fatalf("a rejected manifest produced entries: %+v", c.Entries())
 			}
 		})
+	}
+}
+
+// TestParseCatalogEmpty: an explicit empty list is a catalog without downloadable models. Nothing can be looked up,
+// imported names are free, and the download allowlist allows no host.
+func TestParseCatalogEmpty(t *testing.T) {
+	cases := []struct{ name, input string }{
+		{"empty list", manifest()},
+		{"empty list with spaces", `{"schema_version": 1, "models": [ ]}`},
+		{"empty list with download hosts", `{"schema_version": 1, "models": [], "download_hosts": ["huggingface.co"]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := ParseCatalog([]byte(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := len(c.Entries()); n != 0 {
+				t.Fatalf("%d entries, want 0", n)
+			}
+			if e, ok := c.Entry("base-q5_1"); ok {
+				t.Fatalf("Entry found %+v", e)
+			}
+			if err := c.CheckImportIdentity("base", "1"); err != nil {
+				t.Fatalf("CheckImportIdentity = %v", err)
+			}
+			if err := c.DownloadHosts().Check("https://example.com/a.bin"); !errors.Is(err, ErrHostNotAllowed) {
+				t.Fatalf("Check(example.com) = %v, want ErrHostNotAllowed", err)
+			}
+		})
+	}
+	if c, _ := ParseCatalog([]byte(manifest())); len(c.DownloadHosts().Hosts()) != 0 {
+		t.Fatalf("hosts of an empty catalog = %v, want none", c.DownloadHosts().Hosts())
 	}
 }
 

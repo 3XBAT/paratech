@@ -57,6 +57,9 @@ type Querier interface {
 	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
 	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).
 	GetTranscript(ctx context.Context, id string) (Transcript, error)
+	// Whether a job of the type has an idempotency key that starts with the prefix, in any status (TASK-060: one automatic
+	// STT job per recording). substr and length both count characters, so the comparison is exact for any text.
+	HasJobKeyPrefix(ctx context.Context, arg HasJobKeyPrefixParams) (bool, error)
 	// A never-stored assignment (version 0) is inserted with version 1.
 	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
 	// A never-stored delivery (version 0) is inserted with version 1.
@@ -111,6 +114,9 @@ type Querier interface {
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
 	ListTranscriptRefsByRecording(ctx context.Context, recordingID string) ([]string, error)
+	// Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
+	// startup sweep that enqueues their transcription). Ids only: the caller loads each one and its aggregate decides.
+	ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.

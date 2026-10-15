@@ -37,10 +37,7 @@ func buildPromptCore(t *testing.T, e env) (*core, *lifecycle, *testenv.FakePopup
 		_ = c.close()
 		t.Fatal(err)
 	}
-	life := &lifecycle{
-		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, cleanups: c.cleanups,
-		loops: c.loops(), closers: []closer{{name: "storage", close: c.close}}, stopTimeout: e.stopTimeout,
-	}
+	life := c.newLifecycle(log, e.stopTimeout, closer{name: "storage", close: c.close})
 	t.Cleanup(func() { // before TempDir removal: Windows cannot delete open files
 		if err := life.shutdown(); err != nil {
 			t.Error(err)

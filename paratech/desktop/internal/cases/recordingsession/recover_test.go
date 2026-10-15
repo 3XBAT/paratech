@@ -22,9 +22,10 @@ func (e *env) restart() *env {
 	n := &env{t: e.t, clock: e.clock, sleeps: newSleepLog(e.clock), repo: e.repo, tr: e.tr, tx: e.tx, files: e.files}
 	n.rec = testenv.NewFakeRecorder(n.files, chunkLen)
 	n.hooks = &hookRecorder{FakeRecorder: n.rec}
+	n.done = &completions{repo: n.repo}
 	svc, err := New(Deps{
 		Recordings: n.repo, Transcripts: n.tr, Recorder: n.hooks, Artifacts: n.files, Tx: n.tx,
-		Clock: n.clock, Sleeper: n.sleeps, IDs: &seqIDs{n: 100},
+		Clock: n.clock, Sleeper: n.sleeps, IDs: &seqIDs{n: 100}, Completions: n.done,
 	}, DefaultConfig())
 	if err != nil {
 		e.t.Fatal(err)

@@ -39,6 +39,7 @@ type env struct {
 	files  *testenv.MemArtifacts
 	rec    *testenv.FakeRecorder
 	hooks  *hookRecorder // what the service sees: rec with extra failures
+	done   *completions  // the completion listener
 	svc    *Service
 }
 
@@ -54,9 +55,10 @@ func newEnv(t *testing.T, cfg Config) *env {
 	e.sleeps = newSleepLog(e.clock)
 	e.rec = testenv.NewFakeRecorder(e.files, chunkLen)
 	e.hooks = &hookRecorder{FakeRecorder: e.rec}
+	e.done = &completions{repo: e.repo}
 	svc, err := New(Deps{
 		Recordings: e.repo, Transcripts: e.tr, Recorder: e.hooks, Artifacts: e.files, Tx: e.tx,
-		Clock: e.clock, Sleeper: e.sleeps, IDs: &seqIDs{},
+		Clock: e.clock, Sleeper: e.sleeps, IDs: &seqIDs{}, Completions: e.done,
 	}, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +183,7 @@ func TestNewValidates(t *testing.T) {
 	ok := Deps{
 		Recordings: newMemRepo(), Transcripts: newMemTranscripts(), Recorder: testenv.NewFakeRecorder(testenv.NewMemArtifacts(), chunkLen),
 		Artifacts: testenv.NewMemArtifacts(), Tx: &fakeTx{}, Clock: testenv.NewFakeClock(t0), Sleeper: testenv.NewFakeClock(t0),
-		IDs: &seqIDs{},
+		IDs: &seqIDs{}, Completions: &completions{repo: newMemRepo()},
 	}
 	cases := []struct {
 		name string
@@ -196,6 +198,7 @@ func TestNewValidates(t *testing.T) {
 		{"no clock", func(d Deps) Deps { d.Clock = nil; return d }, nil},
 		{"no sleeper", func(d Deps) Deps { d.Sleeper = nil; return d }, nil},
 		{"no ids", func(d Deps) Deps { d.IDs = nil; return d }, nil},
+		{"no completion listener", func(d Deps) Deps { d.Completions = nil; return d }, nil},
 		{"zero cap", nil, func(c Config) Config { c.MaxDuration = 0; return c }},
 		{"cap too long", nil, func(c Config) Config { c.MaxDuration = 13 * time.Hour; return c }},
 		{"no extension", nil, func(c Config) Config { c.TrackExtension = ""; return c }},

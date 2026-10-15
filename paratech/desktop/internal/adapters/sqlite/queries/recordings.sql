@@ -48,6 +48,18 @@ WHERE id IS NOT NULL
                  LIMIT sqlc.arg(max_terminal)))
 ORDER BY created_at DESC, id DESC;
 
+-- Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
+-- startup sweep that enqueues their transcription). Ids only: the caller loads each one and its aggregate decides.
+-- name: ListUntranscribedRecordingIDs :many
+SELECT r.id FROM recordings r
+WHERE r.id IS NOT NULL
+  AND r.id > sqlc.arg(after)
+  AND r.status = sqlc.arg(status)
+  AND r.audio_ref IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.recording_id = r.id)
+ORDER BY r.id
+LIMIT sqlc.arg(max_rows);
+
 -- name: DeleteRecording :execrows
 DELETE FROM recordings WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 

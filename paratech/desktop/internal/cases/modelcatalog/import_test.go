@@ -330,6 +330,39 @@ func TestImportCustomWithConfirmation(t *testing.T) {
 	e.requireClosed()
 }
 
+// TestEmptyCatalog: with a catalog without entries (TASK-060) nothing is listed and no catalog import is possible,
+// but a confirmed file outside the catalog installs.
+func TestEmptyCatalog(t *testing.T) {
+	e := newImportEnv(t)
+	e.w.manifest = []byte(`{"schema_version": 1, "models": []}`)
+	ctx := context.Background()
+
+	available, err := e.svc.ListAvailable(ctx, values.Machine{})
+	if err != nil || len(available) != 0 {
+		t.Fatalf("ListAvailable = %+v, %v; want none", available, err)
+	}
+	if _, err := e.svc.SourcePage(ctx, values.CatalogID(catBase.id)); !errors.Is(err, ErrNotInCatalog) {
+		t.Fatalf("SourcePage = %v, want ErrNotInCatalog", err)
+	}
+	e.src.put(pickedPath, catBase.content())
+	if _, err := e.im.ImportCatalog(ctx, values.CatalogID(catBase.id), pickedPath); !errors.Is(err, ErrNotInCatalog) {
+		t.Fatalf("ImportCatalog = %v, want ErrNotInCatalog", err)
+	}
+	e.requireClean()
+
+	confirmed, err := values.ConfirmImport(catBase.sum())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := e.im.ImportCustom(ctx, CustomImport{Path: pickedPath, Name: "base", ModelVersion: "1", Confirmation: confirmed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.CatalogID != "" || m.SHA256 != catBase.sum() {
+		t.Fatalf("ImportCustom = %+v", m)
+	}
+}
+
 // TestImportCustomRejects is test step 3 of TASK-028: no confirmation, a confirmation of other bytes and other rule
 // breaks install nothing and leave no copy.
 func TestImportCustomRejects(t *testing.T) {

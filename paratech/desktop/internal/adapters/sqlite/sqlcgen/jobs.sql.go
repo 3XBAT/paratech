@@ -113,6 +113,28 @@ func (q *Queries) GetJobIDByKey(ctx context.Context, idempotencyKey string) (str
 	return id, err
 }
 
+const hasJobKeyPrefix = `-- name: HasJobKeyPrefix :one
+SELECT EXISTS (
+    SELECT 1 FROM jobs
+    WHERE type = ?1
+      AND substr(idempotency_key, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT)
+) AS found
+`
+
+type HasJobKeyPrefixParams struct {
+	Type   string
+	Prefix string
+}
+
+// Whether a job of the type has an idempotency key that starts with the prefix, in any status (TASK-060: one automatic
+// STT job per recording). substr and length both count characters, so the comparison is exact for any text.
+func (q *Queries) HasJobKeyPrefix(ctx context.Context, arg HasJobKeyPrefixParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasJobKeyPrefix, arg.Type, arg.Prefix)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
 const insertJob = `-- name: InsertJob :exec
 INSERT INTO jobs (id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at,
                   run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version,

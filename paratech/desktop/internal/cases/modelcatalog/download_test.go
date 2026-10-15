@@ -592,6 +592,25 @@ func TestDownloadRefusals(t *testing.T) {
 		}
 	})
 
+	// A build whose catalog has no entries (TASK-060) offers nothing: every id is unknown, no request is made and
+	// nothing is stored.
+	t.Run("empty catalog", func(t *testing.T) {
+		e := newDownloadEnv(t)
+		e.w.manifest = []byte(`{"schema_version": 1, "models": []}`)
+		for _, id := range []values.CatalogID{values.CatalogID(catBase.id), "nope"} {
+			if _, err := e.dl.Download(context.Background(), id); !errors.Is(err, ErrNotInCatalog) {
+				t.Fatalf("Download(%s) = %v, want ErrNotInCatalog", id, err)
+			}
+			if _, err := e.dl.Preflight(context.Background(), id); !errors.Is(err, ErrNotInCatalog) {
+				t.Fatalf("Preflight(%s) = %v, want ErrNotInCatalog", id, err)
+			}
+		}
+		if n := len(e.src.offsets()); n != 0 {
+			t.Fatalf("%d requests with an empty catalog", n)
+		}
+		e.requireNotInstalled()
+	})
+
 	t.Run("installed meanwhile", func(t *testing.T) {
 		e := newDownloadEnv(t)
 		e.src.onFetch = func(int) { e.install(catBase) }
