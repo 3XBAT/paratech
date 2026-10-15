@@ -64,8 +64,8 @@ func TestURLFromSettingsAppliesWithoutRestart(t *testing.T) {
 	}
 }
 
-// Not configured (no URL, no key) parks the job in WAITING_FOR_NETWORK with a fixed text and sends nothing; an
-// unreadable setting is a transient error, a stored URL that breaks the rule is permanent.
+// Not configured (no URL, a refused stored URL, no key) parks the job in WAITING_FOR_NETWORK with a fixed text and
+// sends nothing, so the job key stays usable once the user fixes the setting; an unreadable setting is transient.
 func TestNotConfiguredParks(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -84,9 +84,12 @@ func TestNotConfiguredParks(t *testing.T) {
 		{"settings unreadable", func(_ *testing.T, u *urlSetting, _ *testenv.MemCredentials) {
 			u.set("", errors.New("database is busy"))
 		}, []error{ErrSettings}, backoff.ClassTransient, false},
-		{"stored url breaks the rule", func(_ *testing.T, u *urlSetting, _ *testenv.MemCredentials) {
+		{"stored url without https", func(_ *testing.T, u *urlSetting, _ *testenv.MemCredentials) {
 			u.set("http://hub.example.com", nil)
-		}, []error{ErrInvalidConfig}, backoff.ClassPermanent, false},
+		}, []error{ErrNotConfigured, ErrInvalidConfig, shared.ErrNetworkUnavailable}, backoff.ClassTransient, true},
+		{"stored url with credentials", func(_ *testing.T, u *urlSetting, _ *testenv.MemCredentials) {
+			u.set("https://user:pass@hub.example.com", nil)
+		}, []error{ErrNotConfigured, ErrInvalidConfig, shared.ErrNetworkUnavailable}, backoff.ClassTransient, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,6 +117,24 @@ func TestNotConfiguredParks(t *testing.T) {
 				t.Fatalf("hub saw %d requests, want none", len(reqs))
 			}
 		})
+	}
+}
+
+// A refused stored URL fixed by the user applies to the next call of the same request.
+func TestFixedStoredURLApplies(t *testing.T) {
+	urls := &urlSetting{}
+	c, _, f := newSettingsClient(t, urls)
+	good, _ := urls.HubURL(t.Context())
+	urls.set("http://hub.example.com", nil)
+	if _, err := c.Complete(t.Context(), request(t)); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("refused url: %v, want ErrNotConfigured", err)
+	}
+	urls.set(good, nil)
+	if _, err := c.Complete(t.Context(), request(t)); err != nil {
+		t.Fatalf("fixed url: %v", err)
+	}
+	if reqs, _ := f.calls(); len(reqs) != 1 {
+		t.Fatalf("hub saw %d requests, want 1", len(reqs))
 	}
 }
 

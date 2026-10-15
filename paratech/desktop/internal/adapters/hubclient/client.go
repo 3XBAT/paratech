@@ -186,8 +186,9 @@ func operationType(op values.Operation) (hubv1.OperationType, bool) {
 	return hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED, false
 }
 
-// baseURL reads the Hub URL for one call. No URL parks the job (notConfigured) instead of failing it, so its key stays
-// usable once the user sets one.
+// baseURL reads the Hub URL for one call. No URL, or a stored URL the client refuses, parks the job (notConfigured)
+// instead of failing it, so its key stays usable once the user fixes the setting. A refused Config.BaseURL never
+// gets here: New refuses it.
 func (c *Client) baseURL(ctx context.Context) (string, error) {
 	raw, err := c.urls.HubURL(ctx)
 	switch {
@@ -202,7 +203,7 @@ func (c *Client) baseURL(ctx context.Context) (string, error) {
 	}
 	base, err := checkBaseURL(opComplete, raw)
 	if err != nil {
-		return "", permanent(opComplete, ErrInvalidConfig)
+		return "", notConfigured(ErrInvalidConfig)
 	}
 	return base, nil
 }

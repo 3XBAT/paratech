@@ -15,14 +15,16 @@ import (
 // Reasons of a failed call (ARCH-32). A returned error is an *Error that matches exactly one of them (ErrNotConfigured
 // also its reason), or shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is.
 var (
-	// ErrInvalidConfig is returned by New for an unusable configuration.
+	// ErrInvalidConfig is returned by New for an unusable configuration. A call matches it with ErrNotConfigured when
+	// the URL source gives a URL the client refuses.
 	ErrInvalidConfig = errors.New("hubclient: invalid configuration")
 
 	// ErrInvalidRequest means the request is the zero value or names an operation the contract does not know.
 	ErrInvalidRequest = errors.New("invalid request")
 
-	// ErrNotConfigured means the Hub URL or the API key is not set. The error also matches the reason (ErrNoURL or
-	// ErrMissingAPIKey) and shared.ErrNetworkUnavailable, so the job waits in WAITING_FOR_NETWORK instead of failing.
+	// ErrNotConfigured means the Hub URL or the API key is not set, or the stored URL is refused. The error also
+	// matches the reason (ErrNoURL, ErrMissingAPIKey or ErrInvalidConfig) and shared.ErrNetworkUnavailable, so the job
+	// waits in WAITING_FOR_NETWORK instead of failing.
 	ErrNotConfigured = errors.New("not configured")
 
 	// ErrNoURL means no Hub URL is set in the settings.
@@ -105,7 +107,7 @@ func permanent(op string, reason error) *Error {
 	return &Error{op: op, reason: reason, class: backoff.ErrPermanent}
 }
 
-// notConfigured is the fixed "hub: not configured" of a missing URL or key. It waits like a network failure: the job
+// notConfigured is the fixed "hub: not configured" of a missing or refused URL or a missing key. It waits like a network failure: the job
 // parks without using attempts and runs once the user configures the Hub, while a permanent failure would block the
 // job keys of the post-processing for ever.
 func notConfigured(why error) *Error {
