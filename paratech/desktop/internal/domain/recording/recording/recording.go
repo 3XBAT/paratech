@@ -403,6 +403,133 @@ func (r *Recording) RequireRecovery(now time.Time, problem string) error {
 	return nil
 }
 
+// MarkInterrupted is the startup decision for an unfinished recording that no session of this process captures or
+// finalizes (PRD section 6.2 watchdog, section 14 case 1, AC-05). The app runs as one instance and the recovery runs
+// before the first recording of a process, so such a recording was cut off by the end of an earlier process and its
+// heartbeat is stale by definition:
+//   - STARTING: the capture never ran; the recording is FAILED with problem.
+//   - RECORDING: its session died; it is RECOVERY_REQUIRED with problem, and the capture counts as ended at the last
+//     heartbeat.
+//   - STOPPING, FINALIZING, RECOVERY_REQUIRED: unchanged; AwaitsAssembly holds and the recovery assembles the chunks.
+func (r *Recording) MarkInterrupted(now time.Time, problem string) error {
+	switch r.status {
+	case StatusStarting:
+		return r.Fail(now, problem)
+	case StatusRecording:
+		stopped := r.heartbeatAt
+		if stopped.IsZero() {
+			stopped = now
+		}
+		if err := r.RequireRecovery(now, problem); err != nil {
+			return err
+		}
+		r.stoppedAt = stopped
+		return nil
+	case StatusStopping, StatusFinalizing, StatusRecoveryRequired:
+		return nil
+	}
+	return fmt.Errorf("%w: interruption of a %s recording", ErrInvalidTransition, r.status)
+}
+
+// AwaitsAssembly reports whether the recovery after a restart is to assemble the chunks: the session ended while the
+// recording was being stopped or finalized, or it is RECOVERY_REQUIRED.
+func (r *Recording) AwaitsAssembly() bool {
+	switch r.status {
+	case StatusStopping, StatusFinalizing, StatusRecoveryRequired:
+		return true
+	}
+	return false
+}
+
+func (r *Recording) checkAwaitsAssembly() error {
+	if !r.AwaitsAssembly() {
+		return fmt.Errorf("%w: recovery of a %s recording", ErrInvalidTransition, r.status)
+	}
+	return nil
+}
+
+// CompleteRecovery finishes a recording that AwaitsAssembly with the track the recovery assembled: it moves through
+// FINALIZING to COMPLETED, with the same rules for the track and the duration as Complete. The note of an earlier
+// DeferRecovery is dropped and the reason the recording had before it stays (for a former RECORDING, why its session
+// ended). Nothing changes on an error.
+func (r *Recording) CompleteRecovery(now time.Time, audio shared.ArtifactRef, duration time.Duration) error {
+	if err := r.checkAwaitsAssembly(); err != nil {
+		return err
+	}
+	if !r.ownsTrack(audio) {
+		return fmt.Errorf("%w: final track %q of recording %s", ErrInvalidRecording, audio, r.id)
+	}
+	if duration <= 0 {
+		return fmt.Errorf("%w: duration %v", ErrInvalidRecording, duration)
+	}
+	reason := r.reasonBeforeDeferral()
+	if r.status != StatusFinalizing {
+		if err := r.move(StatusFinalizing, now); err != nil {
+			return err
+		}
+	}
+	if err := r.Complete(now, audio, duration); err != nil {
+		return err
+	}
+	r.problem = reason
+	return nil
+}
+
+// FailRecovery moves a recording that AwaitsAssembly to FAILED because its chunks hold no readable audio. A STOPPING
+// recording passes through FINALIZING, as the table requires. The chunk files are not touched.
+func (r *Recording) FailRecovery(now time.Time, problem string) error {
+	if _, err := problemText(problem); err != nil {
+		return err
+	}
+	if err := r.checkAwaitsAssembly(); err != nil {
+		return err
+	}
+	if r.status == StatusStopping {
+		if err := r.move(StatusFinalizing, now); err != nil {
+			return err
+		}
+	}
+	return r.Fail(now, problem)
+}
+
+// pendingMark starts the note of DeferRecovery in the problem text. The schema has no column for the note, so the
+// aggregate keeps it in the problem after the earlier reason and finds it again by this mark.
+const pendingMark = "assembly pending: "
+
+// DeferRecovery keeps a recording that AwaitsAssembly in its status after an assembly that failed for a reason that
+// may pass (a locked file, a busy disk): the next recovery tries again. The problem becomes the earlier reason (without
+// the note of an earlier deferral) followed by note; CompleteRecovery restores the reason. A reason near
+// MaxProblemBytes leaves no room for the note, and the reason wins.
+func (r *Recording) DeferRecovery(now time.Time, note string) error {
+	text, err := problemText(note)
+	if err != nil {
+		return err
+	}
+	if err := r.checkAwaitsAssembly(); err != nil {
+		return err
+	}
+	text = pendingMark + text
+	if reason := r.reasonBeforeDeferral(); reason != "" {
+		text = reason + "; " + text
+	}
+	if text, err = problemText(text); err != nil {
+		return err
+	}
+	r.problem, r.updatedAt = text, now
+	return nil
+}
+
+// reasonBeforeDeferral returns the problem without the note that DeferRecovery appended.
+func (r *Recording) reasonBeforeDeferral() string {
+	if strings.HasPrefix(r.problem, pendingMark) {
+		return ""
+	}
+	if reason, _, ok := strings.Cut(r.problem, "; "+pendingMark); ok {
+		return reason
+	}
+	return r.problem
+}
+
 // TranscribableAudio returns the final track to transcribe; ok is false unless the recording is COMPLETED with a
 // final track: only such a recording can be transcribed.
 func (r *Recording) TranscribableAudio() (audio shared.ArtifactRef, ok bool) {

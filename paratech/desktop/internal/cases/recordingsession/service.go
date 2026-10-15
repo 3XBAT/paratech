@@ -15,10 +15,11 @@ import (
 
 // Operation names used in errors.
 const (
-	opStart  = "start recording"
-	opStop   = "stop recording"
-	opGet    = "get recording"
-	opDelete = "delete recording"
+	opStart   = "start recording"
+	opStop    = "stop recording"
+	opGet     = "get recording"
+	opDelete  = "delete recording"
+	opRecover = "recover recordings"
 )
 
 // Problem texts stored on a recording; an error text may follow after a colon.
@@ -53,9 +54,9 @@ const detachedTimeout = 10 * time.Second
 // One recording is in progress at a time. Its session owns the aggregate from Start until a final status: it is the
 // only writer, so a version conflict means someone else changed the recording, and the session then stops capturing
 // and writing. An intermediate save that fails otherwise is logged and the session goes on: the next save carries
-// the full state, and a recording whose last save never succeeded is found by the recovery after a restart
-// (TASK-014). The periodic Heartbeat of TASK-014 must be written by this same session goroutine (a ticker case of
-// the follow loop), never by a second writer, which would make the saves fail with version conflicts.
+// the full state, and a recording whose last save never succeeded is found by Recover after a restart. The heartbeat
+// of a running capture is written by the same session goroutine (a case of the follow loop), never by a second
+// writer, which would make the saves fail with version conflicts.
 type Service struct {
 	recordings  RecordingRepository
 	transcripts RecordingTranscripts
@@ -67,16 +68,18 @@ type Service struct {
 	ids         IDGenerator
 	log         *slog.Logger
 
-	policy   limits.Policy
-	trackExt string
+	policy    limits.Policy
+	trackExt  string
+	heartbeat time.Duration
 
 	life     context.Context // parent of the session work; ends on a forced Close
 	shutdown context.CancelFunc
 
-	mu     sync.Mutex
-	active *session
-	closed bool
-	wg     sync.WaitGroup // one per session, from the reservation in Start until it ends
+	mu       sync.Mutex
+	active   *session
+	recovery *recoveryRun // the running Recover; nil if none
+	closed   bool
+	wg       sync.WaitGroup // one per session, from the reservation in Start until it ends, and one per Recover
 }
 
 // New validates the configuration and builds the Service.
@@ -94,6 +97,9 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	if err := recording.ValidateTrackExtension(cfg.TrackExtension); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
+	if cfg.HeartbeatInterval <= 0 {
+		return nil, fmt.Errorf("%w: heartbeat interval %v", ErrInvalidConfig, cfg.HeartbeatInterval)
+	}
 
 	log := deps.Log
 	if log == nil {
@@ -103,7 +109,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	s := &Service{
 		recordings: deps.Recordings, transcripts: deps.Transcripts, recorder: deps.Recorder, artifacts: deps.Artifacts,
 		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, log: log,
-		policy: policy, trackExt: cfg.TrackExtension,
+		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval,
 	}
 	s.life, s.shutdown = context.WithCancel(context.Background())
 	return s, nil
@@ -222,6 +228,9 @@ func (s *Service) reserve(rec *recording.Recording) (*session, error) {
 	if s.closed {
 		return nil, ErrClosed
 	}
+	if s.recovery != nil && s.recovery.marking {
+		return nil, ErrRecovering
+	}
 
 	inProgress := 0
 	if s.active != nil {
@@ -286,27 +295,41 @@ func (s *Service) run(sess *session, rec *recording.Recording) {
 	bg.Go(func() { ended <- s.recorder.Wait(watchCtx, rec.ID()) })
 
 	deadline := rec.Deadline()
+	beat := make(chan struct{}, 1)
 	arm := func() <-chan struct{} {
 		reached := make(chan struct{})
-		bg.Go(func() { s.awaitDeadline(watchCtx, deadline, reached) })
+		bg.Go(func() { s.watch(watchCtx, deadline, reached, beat) })
 		return reached
 	}
 
-	err := s.follow(ctx, sess, rec, ended, arm)
+	err := s.follow(ctx, sess, rec, ended, beat, arm)
 	stopWatching()
 	bg.Wait()
 	s.finish(sess, rec, err)
 }
 
-// awaitDeadline closes reached once the clock shows the deadline.
-func (s *Service) awaitDeadline(ctx context.Context, deadline time.Time, reached chan<- struct{}) {
+// watch closes reached once the clock shows the deadline and until then offers a tick on beat every heartbeat
+// interval. A tick the session has not taken yet is not doubled. One sleeper serves both, so the session waits on a
+// single timer.
+func (s *Service) watch(ctx context.Context, deadline time.Time, reached chan<- struct{}, beat chan<- struct{}) {
+	next := s.clock.Now().Add(s.heartbeat)
 	for {
-		left := deadline.Sub(s.clock.Now())
-		if left <= 0 {
+		now := s.clock.Now()
+		if !now.Before(deadline) {
 			close(reached)
 			return
 		}
-		if s.sleeper.Sleep(ctx, left) != nil {
+		switch {
+		case !now.Before(next):
+			select {
+			case beat <- struct{}{}:
+			default:
+			}
+			next = now.Add(s.heartbeat)
+		case next.Sub(now) > s.heartbeat:
+			next = now.Add(s.heartbeat) // the wall clock went back
+		}
+		if s.sleeper.Sleep(ctx, min(deadline.Sub(now), next.Sub(now))) != nil {
 			return
 		}
 	}
@@ -314,10 +337,24 @@ func (s *Service) awaitDeadline(ctx context.Context, deadline time.Time, reached
 
 // follow waits for what ends the capture and finalizes the recording. It returns nil when the recording reached a
 // final status that was saved, otherwise why not.
-func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Recording, ended <-chan error, arm func() <-chan struct{}) error {
+func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Recording, ended <-chan error,
+	beat <-chan struct{}, arm func() <-chan struct{}) error {
 	atLimit := arm()
 	for {
 		select {
+		case <-beat:
+			if sess.stopRequested() {
+				continue // the pending stop goes first
+			}
+			if err := rec.Heartbeat(s.clock.Now()); err != nil {
+				s.haltCapture(ctx, rec.ID())
+				return err
+			}
+			if err := s.persist(ctx, sess, rec); err != nil {
+				s.haltCapture(ctx, rec.ID())
+				return fmt.Errorf("%w: %w", ErrAbandoned, err)
+			}
+
 		case <-sess.stopCh:
 			if err := rec.Stop(s.clock.Now()); err != nil {
 				s.haltCapture(ctx, rec.ID())
@@ -472,12 +509,13 @@ func (s *Service) assemble(ctx context.Context, sess *session, rec *recording.Re
 	return s.persistFinal(ctx, sess, rec)
 }
 
-// finalizeTrack runs Recorder.Finalize up to attempts times with a doubling delay; a shutdown is not retried.
+// finalizeTrack runs Recorder.Finalize up to attempts times with a doubling delay; a shutdown and missing audio are
+// not retried.
 func (s *Service) finalizeTrack(ctx context.Context, id shared.RecordingID, chunks, track shared.ArtifactRef, attempts int) (time.Duration, error) {
 	delay := finalizeRetryBase
 	for attempt := 1; ; attempt++ {
 		d, err := s.recorder.Finalize(ctx, chunks, track)
-		if err == nil || ctx.Err() != nil || attempt >= attempts {
+		if err == nil || ctx.Err() != nil || attempt >= attempts || errors.Is(err, recording.ErrNoAudio) {
 			return d, err
 		}
 
@@ -617,13 +655,18 @@ func (s *Service) Active() (Info, bool) {
 
 // Delete removes a finished recording with its files and transcripts (PRD section 13.1) in the order of ADR-0004(a):
 // the aggregate decides first, the files go next, then both rows in one transaction where the aggregate is asked
-// again. A failure after the files were removed is repaired by repeating the request.
+// again. A failure after the files were removed is repaired by repeating the request. A recording that the running
+// Recover has not finished yet is refused with ErrRecovering, before the files and again in the transaction, so the
+// recovery cannot write a track for a deleted row.
 func (s *Service) Delete(ctx context.Context, id shared.RecordingID) error {
 	rec, err := s.recordings.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", opDelete, id, err)
 	}
 	if err := rec.CheckDeletable(); err != nil {
+		return fmt.Errorf("%s %s: %w", opDelete, id, err)
+	}
+	if err := s.checkNotRecovering(id); err != nil {
 		return fmt.Errorf("%s %s: %w", opDelete, id, err)
 	}
 
@@ -653,6 +696,9 @@ func (s *Service) Delete(ctx context.Context, id shared.RecordingID) error {
 		if err := cur.CheckDeletable(); err != nil {
 			return err
 		}
+		if err := s.checkNotRecovering(id); err != nil {
+			return err
+		}
 		if err := s.transcripts.DeleteByRecording(ctx, id); err != nil {
 			return err
 		}
@@ -666,7 +712,7 @@ func (s *Service) Delete(ctx context.Context, id shared.RecordingID) error {
 
 // Close refuses new recordings and stops the one in progress like a user stop, so that it is finalized. If ctx ends
 // first, the session is abandoned (its state stays for the recovery after a restart), Close still waits for it to
-// return and reports ctx's error. It is safe to call more than once.
+// return and reports ctx's error. A running Recover is waited for the same way. It is safe to call more than once.
 func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true

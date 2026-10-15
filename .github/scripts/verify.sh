@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Rebase the current branch on origin/master and run every check of a task. Run from anywhere in the repo.
 # Needs: Go 1.26.9+ (auto toolchain), golangci-lint v2 first on PATH, python, sqlc via `go run` (network on first use).
-# Generated sqlcgen conflicts during the rebase are resolved with our side and regenerated afterwards.
+# Generated sqlcgen conflicts during the rebase are resolved with our side and regenerated afterwards;
+# progress.txt merges as a union (.gitattributes); any other conflict stops with REBASE_UNRESOLVED.
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 export GIT_TERMINAL_PROMPT=0 GIT_EDITOR=true
@@ -16,7 +17,11 @@ git rebase origin/master >/dev/null 2>&1
 for _ in $(seq 12); do
   U=$(git diff --name-only --diff-filter=U)
   [ -z "$U" ] && break
-  for f in $U; do git checkout --theirs "$f" >/dev/null 2>&1 && git add "$f"; done
+  # Only generated sqlc code is resolved automatically (regenerated below); any other conflict stops the run.
+  for f in $U; do
+    case "$f" in */sqlcgen/*) git checkout --theirs "$f" >/dev/null 2>&1 && git add "$f" ;; esac
+  done
+  [ -n "$(git diff --name-only --diff-filter=U)" ] && break
   git rebase --continue >/dev/null 2>&1
 done
 if [ -n "$STASHED" ]; then

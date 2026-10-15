@@ -90,9 +90,12 @@ type Recorder interface {
 	// recording to FAILED or RECOVERY_REQUIRED (PRD section 6.2). Cancelling ctx stops waiting, not capturing.
 	Wait(ctx context.Context, id shared.RecordingID) error
 
-	// Finalize assembles the readable chunks in the directory chunks into the single file output and returns
-	// its duration (PRD section 6.2: FINALIZING, recovery after a restart). It is idempotent and does not
-	// need a running capture.
+	// Finalize assembles the readable chunks in the directory chunks, in name order, into the single file output and
+	// returns its duration (PRD section 6.2: FINALIZING, recovery after a restart). A chunk that cannot be read as
+	// audio, typically the last one cut short by a crash (PRD section 6.3), is skipped and left on disk. Without a
+	// readable chunk (none at all, or only broken ones) it returns an error wrapping recording.ErrNoAudio, after which
+	// the recording fails without retries; any other error counts as transient. It is idempotent (output is
+	// overwritten) and does not need a running capture.
 	Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (time.Duration, error)
 }
 

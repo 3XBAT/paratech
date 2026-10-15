@@ -796,6 +796,40 @@
 - Nit: временная проверка 10 с в TestManyDatesInOneEvent не ловит квадратичный регресс (работу ограничивает лимит)
 - ПРОЦЕСС (важно): .github/scripts/verify.sh делает `git stash -u` / `git stash pop`, а stash общий для всех worktree. В чистом дереве pop забирает чужой stash: в этой задаче verify.sh из paratech-team2 вытащил stash ветки ralph/20261014-task-044 (go.mod/go.sum с go-mail); он возвращён в stash с пометкой. Финальные проверки шли копией verify.sh без шагов stash/rebase (ветка уже на origin/master). verify.sh нужно поправить (stash только при наличии изменений, или pop по своему ref)
 
+---
+
+## [TASK-014] Watchdog и восстановление прерванных записей после перезапуска
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/recording: MarkInterrupted (STARTING->FAILED, RECORDING->RECOVERY_REQUIRED с stoppedAt = последний heartbeat, STOPPING/FINALIZING/RECOVERY_REQUIRED без изменений), AwaitsAssembly, CompleteRecovery, FailRecovery, DeferRecovery (заметка «assembly pending: ...» внутри problem, CompleteRecovery её снимает); sentinel recording.ErrNoAudio (нет читаемых чанков, без повторов)
+- cases/recordingsession: Config.HeartbeatInterval (по умолчанию 15 с); heartbeat пишет та же горутина сессии (тик от единственного таймера watch на Sleeper); Service.Recover(ctx) в два прохода: пометка всех незавершённых записей (Start отклоняется ErrRecovering), затем сборка только этих ID (Start разрешён); Delete отклоняет записи, ожидающие сборки (до удаления файлов и внутри Tx.Do); контракт Recorder.Finalize: битый чанк пропускается и остаётся на диске, ни одного читаемого -> ErrNoAudio -> FAILED, прочие ошибки -> запись остаётся (RECOVERY_REQUIRED/STOPPING/FINALIZING) и повторяется при следующем старте
+- testenv: FakeRecorder пишет чанки с заголовком (FCH1 + длина), FeedTruncated, EncodeChunk/ChunkPayload
+- Изменённые существующие тесты: tests/recording_sqlite_test.go (чтение чанков через ChunkPayload, newRecordingEnvWith); service_test.go newEnv (heartbeat 24 ч в тестах не про heartbeat, +2 кейса валидации); fakes_test.go (listErr); TestRecoverAndStartExcludeEachOther переписан под двухпроходный Recover
+- Ревью: approve (2 medium: устаревший текст problem после отложенного восстановления; Start заблокирован на всё восстановление -> исправлено), повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0 (две проверки)
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), после rebase на origin/master 567e3f5
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestRecoveryAfterACrashDuringTheCapture (SQLite + filestore, 3 чанка, RECOVERY_REQUIRED во время сборки, затем COMPLETED), TestRecoverAfterACrashDuringTheCapture
+- [x] Шаг 3: TestRecoveryDropsABrokenLastChunk, TestRecoverEveryStatus
+
+### Решения (подтвердить)
+- Порога «старости» heartbeat нет: приложение одноэкземплярное, поэтому любая незавершённая запись, не принадлежащая сессии этого процесса, считается прерванной (Recover вызывать один раз при старте до первого Start)
+- STOPPING/FINALIZING, которые не удалось собрать, остаются в своём статусе с текстом проблемы (в таблице PRD нет перехода в RECOVERY_REQUIRED); удалить их нельзя до успешного восстановления
+- Восстановленная RECORDING завершается COMPLETED с problem «the app stopped while the recording was in progress»
+- Каждое восстановление сохраняет пометку даже без смены статуса (повышает версию, проверка владения)
+
+### Заметки (follow-up)
+- В internal/app Recover не подключён: вызвать при старте после single-instance guard, в фоне (чтобы Start работал во время сборки)
+- TASK-017 (реальный рекордер): обнаруживать обрезанный WAV-чанк (заголовок vs размер файла) и пропускать; Finalize должен быть безопасен параллельно со Start/Stop/Finalize другой записи (Low: дописать в контракт порта Recorder)
+- Low: DeferRecovery при причине длиной MaxProblemBytes-20..-1 обрезает маркер посередине, CompleteRecovery оставит обрывок (recording.go ~503-520)
+- Low: окно между ListByStatus и заполнением pending в Recover: Delete уже RECOVERY_REQUIRED записи может пройти; держать s.mu или отклонять Delete при marking
+- Low: ARCH-22 пограничный — выбор Fail/Defer по ошибке сборки в use case (как в assemble TASK-013)
+- Тексты problem содержат текст ошибок (возможны пути): не отправлять в Hub
+- Ручные проверки владельцем на Windows (с TASK-017): убить процесс во время записи -> при старте COMPLETED, трек играет, потеряно не больше последнего чанка; убить во время записи чанка -> битый чанк пропущен; убить во время финализации -> трек дособран; заблокировать файлы чанков -> RECOVERY_REQUIRED с текстом, следующий старт собирает; нагрузка heartbeat 15 с за 3 ч незаметна
+
 ## [TASK-023] UI: экран записей и задач (статусы, причина ожидания, «Запустить сейчас»)
 **Дата:** 2026-10-15
 **Статус:** done
