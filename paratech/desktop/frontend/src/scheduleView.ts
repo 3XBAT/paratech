@@ -1,10 +1,11 @@
 // Display mapping for the schedule import page: texts and formats only. Whether a preview can be applied is decided by
 // the Go core (canCommit); the page only refuses to offer Apply when the reply contradicts it (ARCH-44).
-// Every text built here comes from an untrusted file: the page renders it as plain text, never as HTML.
+// Text from the file is untrusted: the page renders it as plain text, never as HTML, each piece isolated (Part).
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
 import {
   errorMessages,
+  type ImportChange,
   type ImportConflict,
   type ImportPreview,
   type ImportResult,
@@ -23,11 +24,31 @@ export function hasChanges(p: ImportPreview): boolean {
   return p.added.length + p.changed.length + p.removed.length > 0;
 }
 
+/**
+ * A piece of display text. `file` marks text from the file (titles, zones, row error fields and reasons): the page
+ * renders it in its own <bdi>, so a bidi control character in it (U+202E) cannot reorder the rest of the line.
+ */
+export interface Part {
+  text: string;
+  file: boolean;
+}
+
+const fixed = (text: string): Part => ({ text, file: false });
+const fromFile = (text: string): Part => ({ text, file: true });
+
+/** The text of parts as one string. */
+export function plain(parts: readonly Part[]): string {
+  return parts.map((p) => p.text).join("");
+}
+
 /** "строка 3, колонка start: причина"; a problem of the whole file has no line. */
-export function rowErrorText(e: ImportRowError): string {
-  const where = e.line > 0 ? `строка ${e.line}` : "файл";
-  const column = e.field !== "" ? `, колонка ${e.field}` : "";
-  return `${where}${column}: ${e.reason}`;
+export function rowErrorParts(e: ImportRowError): Part[] {
+  const parts = [fixed(e.line > 0 ? `строка ${e.line}` : "файл")];
+  if (e.field !== "") {
+    parts.push(fixed(", колонка "), fromFile(e.field));
+  }
+  parts.push(fixed(": "), fromFile(e.reason));
+  return parts;
 }
 
 /** "14.10.2026 09:00–10:30"; the end keeps its date when it is another day. */
@@ -41,19 +62,28 @@ export function timeRange(start: string, end: string): string {
 }
 
 /** "Матанализ, 14.10.2026 09:00–10:30 (Europe/Moscow)". */
-export function lessonText(l: LessonText): string {
-  return `${l.title}, ${timeRange(l.start, l.end)} (${l.zone})`;
+export function lessonParts(l: LessonText): Part[] {
+  return [fromFile(l.title), fixed(`, ${timeRange(l.start, l.end)} (`), fromFile(l.zone), fixed(")")];
 }
 
 /** "строка 2: Матанализ, ..."; a removed lesson (line 0) has no line. */
-export function lineText(line: number, text: string): string {
-  return line > 0 ? `строка ${line}: ${text}` : text;
+export function lineParts(line: number, parts: readonly Part[]): Part[] {
+  return line > 0 ? [fixed(`строка ${line}: `), ...parts] : [...parts];
 }
 
-export function conflictText(c: ImportConflict): string {
-  const other =
-    c.withLine > 0 ? `со строкой ${c.withLine}: ${lessonText(c.with)}` : `с занятием в расписании: ${lessonText(c.with)}`;
-  return `строка ${c.line}: ${lessonText(c.lesson)} — пересекается ${other}`;
+/** "строка 3: <before> → <after>". */
+export function changeParts(c: ImportChange): Part[] {
+  return lineParts(c.line, [...lessonParts(c.before), fixed(" → "), ...lessonParts(c.after)]);
+}
+
+export function conflictParts(c: ImportConflict): Part[] {
+  const other = c.withLine > 0 ? `со строкой ${c.withLine}: ` : "с занятием в расписании: ";
+  return [
+    fixed(`строка ${c.line}: `),
+    ...lessonParts(c.lesson),
+    fixed(` — пересекается ${other}`),
+    ...lessonParts(c.with),
+  ];
 }
 
 /** "Добавится: 2, изменится: 1, удалится: 0, без изменений: 5." */
@@ -73,11 +103,11 @@ export function resultText(r: ImportResult): string {
 }
 
 export const notes = {
-  formats: "Поддерживаются файлы ICS, CSV и XLSX до 2 МБ. Сначала показываются изменения; расписание меняется только после «Применить».",
+  formats: "Поддерживаются файлы ICS, CSV и XLSX до 2 МиБ. Сначала показываются изменения; расписание меняется только после «Применить».",
   allDay: "События на весь день в ICS пропускаются: они не импортируются.",
   uid:
     "CSV и XLSX: первая строка — заголовок с колонками title, date (ГГГГ-ММ-ДД), start и end (ЧЧ:ММ), timezone " +
-    "(например Europe/Moscow) и uid. Без uid изменение названия или времени занятия выглядит как «удалено + добавлено».",
+    "(например Europe/Moscow) и uid. Без uid изменение названия, даты или начала занятия выглядит как «удалено + добавлено».",
   noNotifications: "Уведомления об импорте не показываются.",
   rowErrors: "Ничего не будет записано: исправьте ошибки в файле и выберите его снова.",
   noChanges: "Изменений нет: расписание уже совпадает с файлом.",
@@ -94,7 +124,7 @@ export const csvTemplate = [
 const errorTexts: Readonly<Record<string, string>> = {
   [errorMessages.busy]: "Окно выбора файла уже открыто.",
   [errorMessages.unsupportedFile]: "Можно импортировать только файлы .ics, .csv и .xlsx.",
-  [errorMessages.fileTooLarge]: "Файл слишком большой: не более 2 МБ.",
+  [errorMessages.fileTooLarge]: "Файл слишком большой: не более 2 МиБ.",
   [errorMessages.fileUnreadable]: "Не удалось прочитать файл.",
   [errorMessages.notSchedule]:
     "Файл не удалось прочитать как расписание: проверьте формат, кодировку UTF-8 и строку заголовка.",

@@ -3,22 +3,24 @@ import { callByName } from "../bindings/runtime";
 import { scheduleApi, type ImportPreview } from "../bindings/schedule";
 import {
   canApply,
+  changeParts,
   commitErrorText,
-  conflictText,
+  conflictParts,
   csvTemplate,
   errorText,
   hasChanges,
-  lessonText,
-  lineText,
+  lessonParts,
+  lineParts,
   notes,
+  type Part,
   resultText,
-  rowErrorText,
+  rowErrorParts,
   summaryText,
   windowText,
 } from "../scheduleView";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
-// file is rendered as plain text.
+// file is rendered as plain text, each piece in its own <bdi>.
 export function SchedulePage() {
   const api = useMemo(() => scheduleApi(callByName), []);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -27,13 +29,30 @@ export function SchedulePage() {
   const [done, setDone] = useState("");
   const mounted = useRef(true);
   const running = useRef(false); // a double click must not start a second request before busy renders
+  // The id of the shown preview, discarded in the core when the page closes. An id the core has dropped already (after
+  // a commit or an error) is ignored there.
+  const selection = useRef("");
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      discardSelection();
     };
   }, []);
+
+  function show(p: ImportPreview) {
+    selection.current = p.selectionId;
+    setPreview(p);
+  }
+
+  function discardSelection() {
+    const id = selection.current;
+    selection.current = "";
+    if (id !== "") {
+      void api.discard(id).catch(() => undefined); // nothing to report: the preview is gone either way
+    }
+  }
 
   async function run(action: () => Promise<void>) {
     if (running.current) {
@@ -42,6 +61,7 @@ export function SchedulePage() {
     running.current = true;
     setBusy(true);
     setError("");
+    setDone("");
     try {
       await action();
     } finally {
@@ -56,11 +76,14 @@ export function SchedulePage() {
     run(async () => {
       try {
         const p = await api.chooseFile();
-        if (!mounted.current || p.cancelled) {
+        if (p.cancelled) {
           return; // a closed dialog keeps the current preview
         }
-        setPreview(p);
-        setDone("");
+        if (!mounted.current) {
+          void api.discard(p.selectionId).catch(() => undefined); // the page closed while the dialog was open
+          return;
+        }
+        show(p);
       } catch (err) {
         if (mounted.current) {
           setPreview(null);
@@ -94,9 +117,7 @@ export function SchedulePage() {
   };
 
   const cancel = () => {
-    if (preview !== null) {
-      void api.discard(preview.selectionId).catch(() => undefined); // nothing to report: the preview is gone either way
-    }
+    discardSelection();
     setPreview(null);
     setError("");
   };
@@ -136,14 +157,18 @@ function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: ()
 
   return (
     <div className="preview">
-      <h2>Файл: {p.fileName}</h2>
+      <h2>
+        Файл: <bdi>{p.fileName}</bdi>
+      </h2>
 
       {errors ? (
         <>
           <p className="error">{notes.rowErrors}</p>
           <ul className="rows">
             {p.errors.map((e, i) => (
-              <li key={i}>{rowErrorText(e)}</li>
+              <li key={i}>
+                <Text parts={rowErrorParts(e)} />
+              </li>
             ))}
           </ul>
         </>
@@ -157,7 +182,9 @@ function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: ()
               <h3>Добавятся ({p.added.length})</h3>
               <ul className="rows">
                 {p.added.map((a, i) => (
-                  <li key={i}>{lineText(a.line, lessonText(a))}</li>
+                  <li key={i}>
+                    <Text parts={lineParts(a.line, lessonParts(a))} />
+                  </li>
                 ))}
               </ul>
             </>
@@ -167,7 +194,9 @@ function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: ()
               <h3>Изменятся ({p.changed.length})</h3>
               <ul className="rows">
                 {p.changed.map((c, i) => (
-                  <li key={i}>{lineText(c.line, `${lessonText(c.before)} → ${lessonText(c.after)}`)}</li>
+                  <li key={i}>
+                    <Text parts={changeParts(c)} />
+                  </li>
                 ))}
               </ul>
             </>
@@ -177,7 +206,9 @@ function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: ()
               <h3>Удалятся ({p.removed.length})</h3>
               <ul className="rows">
                 {p.removed.map((r, i) => (
-                  <li key={i}>{lessonText(r)}</li>
+                  <li key={i}>
+                    <Text parts={lessonParts(r)} />
+                  </li>
                 ))}
               </ul>
             </>
@@ -188,7 +219,9 @@ function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: ()
               <p className="warning">{notes.conflicts}</p>
               <ul className="rows warning">
                 {p.conflicts.map((c, i) => (
-                  <li key={i}>{conflictText(c)}</li>
+                  <li key={i}>
+                    <Text parts={conflictParts(c)} />
+                  </li>
                 ))}
               </ul>
               {p.conflictsTruncated && <p className="warning">{notes.conflictsTruncated}</p>}
@@ -208,5 +241,14 @@ function PreviewView(props: { preview: ImportPreview; busy: boolean; onApply: ()
         </button>
       </div>
     </div>
+  );
+}
+
+// Text renders parts as plain text; a piece from the file goes into its own <bdi>, isolated from the rest of the line.
+function Text(props: { parts: readonly Part[] }) {
+  return (
+    <>
+      {props.parts.map((p, i) => (p.file ? <bdi key={i}>{p.text}</bdi> : <span key={i}>{p.text}</span>))}
+    </>
   );
 }

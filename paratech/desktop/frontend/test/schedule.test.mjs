@@ -5,20 +5,25 @@ import { readFileSync } from "node:fs";
 import { errorMessages, methods, parsePreview, parseResult, scheduleApi } from "../.test-build/bindings/schedule.js";
 import {
   canApply,
+  changeParts,
   commitErrorText,
-  conflictText,
+  conflictParts,
   csvTemplate,
   errorText,
   hasChanges,
-  lessonText,
-  lineText,
+  lessonParts,
+  lineParts,
   notes,
+  plain,
   resultText,
-  rowErrorText,
+  rowErrorParts,
   summaryText,
   timeRange,
   windowText,
 } from "../.test-build/scheduleView.js";
+
+// The pieces of parts that come from the file, which the page isolates in <bdi>.
+const fromFile = (parts) => parts.filter((p) => p.file).map((p) => p.text);
 
 const math = { title: "Математика <b>", start: "14.10.2026 09:00", end: "14.10.2026 10:30", zone: "Europe/Moscow" };
 const lab = { title: "Лаба", start: "14.10.2026 10:00", end: "14.10.2026 11:30", zone: "Europe/Moscow" };
@@ -88,28 +93,55 @@ test("Apply is offered only after a preview the core accepts", () => {
 });
 
 test("row errors name the line and the column", () => {
-  assert.equal(rowErrorText({ line: 3, field: "start", reason: "not a time" }), "строка 3, колонка start: not a time");
-  assert.equal(rowErrorText({ line: 4, field: "", reason: "end is not after start" }), "строка 4: end is not after start");
-  assert.equal(rowErrorText({ line: 0, field: "", reason: "the file contains no lessons" }), "файл: the file contains no lessons");
+  const withField = rowErrorParts({ line: 3, field: "start", reason: "not a time" });
+  assert.equal(plain(withField), "строка 3, колонка start: not a time");
+  assert.deepEqual(fromFile(withField), ["start", "not a time"]);
+  assert.equal(plain(rowErrorParts({ line: 4, field: "", reason: "end is not after start" })), "строка 4: end is not after start");
+  assert.equal(
+    plain(rowErrorParts({ line: 0, field: "", reason: "the file contains no lessons" })),
+    "файл: the file contains no lessons",
+  );
 });
 
 test("lessons, changes and conflicts are plain text", () => {
   assert.equal(timeRange(math.start, math.end), "14.10.2026 09:00–10:30");
   assert.equal(timeRange("14.10.2026 23:00", "15.10.2026 00:30"), "14.10.2026 23:00 – 15.10.2026 00:30");
-  assert.equal(lessonText(math), "Математика <b>, 14.10.2026 09:00–10:30 (Europe/Moscow)");
-  assert.equal(lineText(2, "x"), "строка 2: x");
-  assert.equal(lineText(0, "x"), "x");
+  assert.equal(plain(lessonParts(math)), "Математика <b>, 14.10.2026 09:00–10:30 (Europe/Moscow)");
+  assert.equal(plain(lineParts(2, lessonParts(lab))), "строка 2: Лаба, 14.10.2026 10:00–11:30 (Europe/Moscow)");
+  assert.equal(plain(lineParts(0, lessonParts(lab))), "Лаба, 14.10.2026 10:00–11:30 (Europe/Moscow)");
   assert.equal(
-    conflictText(preview.conflicts[0]),
+    plain(changeParts(preview.changed[0])),
+    "строка 3: Математика <b>, 14.10.2026 09:00–10:30 (Europe/Moscow) → Лаба, 14.10.2026 10:00–11:30 (Europe/Moscow)",
+  );
+  assert.equal(
+    plain(conflictParts(preview.conflicts[0])),
     "строка 2: Математика <b>, 14.10.2026 09:00–10:30 (Europe/Moscow) — пересекается со строкой 6: " +
       "Лаба, 14.10.2026 10:00–11:30 (Europe/Moscow)",
   );
-  assert.match(conflictText(preview.conflicts[1]), /пересекается с занятием в расписании: Математика <b>/);
+  assert.match(plain(conflictParts(preview.conflicts[1])), /пересекается с занятием в расписании: Математика <b>/);
   assert.equal(summaryText(preview), "Добавится: 1, изменится: 1, удалится: 1, без изменений: 2.");
   assert.equal(hasChanges(preview), true);
   assert.equal(hasChanges({ ...preview, added: [], changed: [], removed: [] }), false);
   assert.match(windowText({ from: "a", to: "b" }), /с a до b; удаляются только занятия внутри этого периода/);
   assert.equal(resultText({ added: 1, changed: 2, removed: 3 }), "Расписание обновлено: добавлено 1, изменено 2, удалено 3.");
+});
+
+test("file text is isolated piece by piece: a bidi override cannot reorder the line", () => {
+  const rlo = "\u202E"; // RIGHT-TO-LEFT OVERRIDE
+  const evil = { ...math, title: `a${rlo}b`, zone: `Z${rlo}` };
+  assert.deepEqual(fromFile(lessonParts(evil)), [evil.title, evil.zone]);
+  assert.deepEqual(fromFile(changeParts({ line: 1, before: evil, after: lab })), [evil.title, evil.zone, lab.title, lab.zone]);
+  assert.deepEqual(fromFile(conflictParts({ line: 1, lesson: evil, withLine: 2, with: lab })), [
+    evil.title, evil.zone, lab.title, lab.zone,
+  ]);
+  for (const parts of [lessonParts(evil), conflictParts({ line: 1, lesson: evil, withLine: 2, with: lab })]) {
+    for (const p of parts.filter((p) => !p.file)) {
+      assert.ok(!p.text.includes(rlo), `fixed text ${JSON.stringify(p.text)} holds file text`);
+    }
+  }
+  const page = readFileSync(new URL("../src/pages/SchedulePage.tsx", import.meta.url), "utf8");
+  assert.match(page, /p\.file \? <bdi key=\{i\}>\{p\.text\}<\/bdi>/);
+  assert.match(page, /<bdi>\{p\.fileName\}<\/bdi>/);
 });
 
 test("errors of the core map to Russian text, unknown ones to a generic text", () => {
@@ -129,7 +161,9 @@ test("the page states the owner's decisions and the template", () => {
   assert.equal(csvTemplate.split("\n")[1].split(",").length, 6);
   assert.match(notes.allDay, /весь день/);
   assert.match(notes.uid, /uid/);
-  assert.match(notes.uid, /удалено \+ добавлено/);
+  assert.match(notes.uid, /Без uid изменение названия, даты или начала занятия выглядит как «удалено \+ добавлено»/);
+  assert.match(notes.formats, /до 2 МиБ\./);
+  assert.equal(errorText(errorMessages.fileTooLarge), "Файл слишком большой: не более 2 МиБ.");
   assert.match(notes.noNotifications, /Уведомления/);
 });
 
