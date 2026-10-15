@@ -5,8 +5,9 @@
 // The Service (service.go, TASK-013) starts and stops recordings (AC-03), follows the capture through the Recorder,
 // finalizes at the hard cap (AC-04) or when the capture ends by itself, writes the heartbeat of the running capture,
 // and deletes finished recordings with their transcripts (ADR-0004(a)). Recover (recover.go, TASK-014) finishes the
-// recordings an earlier run left unfinished (AC-05). Not here yet: the "lesson started" popup scenario (TASK-022) and
-// the UI action that offers a recording kept for recovery to the user.
+// recordings an earlier run left unfinished (AC-05); RecoveryMarked tells when its marking pass is over, so the
+// recording prompt (cases/recordingprompt) starts nothing before it. Not here yet: the UI action that offers a recording
+// kept for recovery to the user.
 //
 // Rules that apply: ARCH-20..27. The state machine of a recording lives in the recording aggregate, not here.
 package recordingsession

@@ -36,6 +36,10 @@ func TestUnavailableRefusesEverything(t *testing.T) {
 			if !errors.Is(err, ErrUnavailable) {
 				t.Fatalf("err = %v, want ErrUnavailable", err)
 			}
+			// The recording prompt tells "no recorder in this build" from other failures by the domain error.
+			if !errors.Is(err, recording.ErrCaptureUnavailable) {
+				t.Fatalf("err = %v, want it to wrap recording.ErrCaptureUnavailable", err)
+			}
 			// ErrNoAudio would fail the recording for good; without a recorder its chunks must wait instead.
 			if errors.Is(err, recording.ErrNoAudio) {
 				t.Fatal("the unavailable recorder must not report missing audio")

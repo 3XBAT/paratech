@@ -17,7 +17,9 @@ import (
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
+	"paratech/desktop/internal/cases/scheduler"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/input/wails"
@@ -39,6 +41,10 @@ type core struct {
 	runner     *jobrunner.Service
 	recordings *recordingsession.Service
 	deliveries *senddelivery.Service
+
+	// UI mode only (wirePrompts): nil headless.
+	scheduler *scheduler.Service
+	prompts   *recordingprompt.Service
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup

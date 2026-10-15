@@ -5,6 +5,10 @@
 // module builds and tests without CGO or a WebView. The pages call use cases only through the bound services
 // (settings.go; ARCH-40..44), which the shell registers after the single-instance check.
 //
+// The popup shows the current recording prompt (prompt.go, PromptService): Shell.ShowPopup/HidePopup are the Popup port
+// of cases/recordingprompt, ShowPopup emits PromptShownEvent for the page, and the tray's "Show recording popup" asks
+// the core for an ad-hoc prompt.
+//
 // Shell.Notify is the notifier of finished processing (PRD section 15): Windows toasts with fixed texts (notices.go)
 // through the Wails notifications service, wrapped so that a failed setup never stops the app (toasts_windows.go).
 package wails

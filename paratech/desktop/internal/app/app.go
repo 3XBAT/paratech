@@ -180,9 +180,15 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if err != nil {
 		return wails.Core{}, errors.Join(err, lock.Release())
 	}
+	if a.shell != nil {
+		if err := c.wirePrompts(a.env, a.shell, a.log); err != nil {
+			return wails.Core{}, errors.Join(err, c.close(), lock.Release())
+		}
+	}
 	a.core = c
 	a.life = &lifecycle{
 		log: a.log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, cleanups: c.cleanups,
+		loops:       c.loops(),
 		closers:     []closer{{name: "storage", close: c.close}, {name: "instance lock", close: lock.Release}},
 		stopTimeout: a.env.stopTimeout,
 	}

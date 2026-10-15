@@ -108,6 +108,16 @@ func (s *Service) Recover(ctx context.Context) ([]Info, error) {
 	return infos, nil
 }
 
+// RecoveryMarked returns a channel that is closed once the first Recover has stored its decisions on the interrupted
+// recordings, or has ended without getting that far (for example the list failed), or the service is closed (Start
+// then fails with ErrClosed). From then on Start is not refused with ErrRecovering by that Recover. It stays open until
+// a Recover runs: the app calls Recover once at startup, after the startup cleanups, so a caller that waits for it
+// never starts a recording before both (ADR-0009).
+func (s *Service) RecoveryMarked() <-chan struct{} { return s.marked }
+
+// markingDone closes the RecoveryMarked channel; s.mu is held.
+func (s *Service) markingDone() { s.markedOnce.Do(func() { close(s.marked) }) }
+
 func (s *Service) beginRecovery() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,6 +148,7 @@ func (s *Service) endMarking(assemble []*recording.Recording) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recovery.marking = false
+	s.markingDone()
 	clear(s.recovery.pending)
 	for _, rec := range assemble {
 		s.recovery.pending[rec.ID()] = struct{}{}
@@ -154,6 +165,7 @@ func (s *Service) recovered(id shared.RecordingID) {
 func (s *Service) endRecovery() {
 	s.mu.Lock()
 	s.recovery = nil
+	s.markingDone()
 	s.mu.Unlock()
 	s.wg.Done()
 }

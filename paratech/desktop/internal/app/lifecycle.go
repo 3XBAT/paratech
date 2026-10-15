@@ -29,6 +29,12 @@ type (
 	}
 )
 
+// loop is a background loop that runs until its context ends.
+type loop struct {
+	name string
+	run  func(ctx context.Context) error
+}
+
 // closer releases one resource at the end of the shutdown.
 type closer struct {
 	name  string
@@ -43,19 +49,24 @@ type lifecycle struct {
 	recordings  recordingLife
 	deliveries  deliveryLife
 	cleanups    []cleanup
+	loops       []loop   // started last, stopped first
 	closers     []closer // released last, in this order
 	stopTimeout time.Duration
 
 	bg sync.WaitGroup // the background recording recovery
+
+	stopLoops context.CancelFunc // set when the loops started
+	looping   sync.WaitGroup
 
 	stopOnce sync.Once
 	stopErr  error
 }
 
 // start runs the startup in this order: the cleanups of a crashed run, the job recovery, the recording recovery in the
-// background (assembling long recordings must not hold up the jobs), the delivery recovery and resumption, then the
-// workers. A failed job recovery or worker start stops what started and returns the error; the other steps only log.
-// Cancelling ctx stops the startup, never the started work: shutdown stops that.
+// background (assembling long recordings must not hold up the jobs), the delivery recovery and resumption, the
+// workers, then the loops (scheduler and recording prompt; the prompt starts no recording before the recovery marked
+// the interrupted ones). A failed job recovery or worker start stops what started and returns the error; the other
+// steps only log. Cancelling ctx stops the startup, never the started work: shutdown stops that.
 func (l *lifecycle) start(ctx context.Context) error {
 	for _, c := range l.cleanups {
 		n, err := c.run(ctx)
@@ -110,8 +121,45 @@ func (l *lifecycle) start(ctx context.Context) error {
 		l.unwind()
 		return fmt.Errorf("app: start the job runner: %w", err)
 	}
+	l.startLoops()
 	l.log.Info("background work started")
 	return nil
+}
+
+// startLoops runs each loop on its own goroutine until stopWork.
+func (l *lifecycle) startLoops() {
+	if len(l.loops) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	l.stopLoops = cancel
+	for _, lp := range l.loops {
+		l.looping.Go(func() {
+			if err := lp.run(ctx); err != nil && ctx.Err() == nil {
+				l.log.Error("background loop ended", "loop", lp.name, "err", err)
+			}
+		})
+	}
+}
+
+// endLoops cancels the loops and waits for them within stopTimeout: a loop may hang in a window command when the UI
+// shell is already gone, and that must not block the shutdown.
+func (l *lifecycle) endLoops() error {
+	if l.stopLoops == nil {
+		return nil
+	}
+	l.stopLoops()
+	done := make(chan struct{})
+	go func() {
+		l.looping.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(l.stopTimeout):
+		return errors.New("app: background loops did not stop in time")
+	}
 }
 
 // unwind stops what start launched after a failed step; the storage stays open for the UI until shutdown.
@@ -121,9 +169,11 @@ func (l *lifecycle) unwind() {
 	}
 }
 
-// stopWork stops the job runner, then the recording session, each within stopTimeout, and waits for the background
-// recovery. Both stops are safe to repeat and before a start.
+// stopWork stops the loops, the job runner, then the recording session, each within stopTimeout, and waits for the
+// background recovery. The stops are safe to repeat and before a start.
 func (l *lifecycle) stopWork() error {
+	loopErr := l.endLoops()
+
 	ctx, cancel := context.WithTimeout(context.Background(), l.stopTimeout)
 	runErr := l.runner.Stop(ctx)
 	cancel()
@@ -134,6 +184,9 @@ func (l *lifecycle) stopWork() error {
 
 	l.bg.Wait()
 	var errs []error
+	if loopErr != nil {
+		errs = append(errs, loopErr)
+	}
 	if runErr != nil {
 		errs = append(errs, fmt.Errorf("app: stop the job runner: %w", runErr))
 	}

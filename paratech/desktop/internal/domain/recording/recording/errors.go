@@ -19,4 +19,8 @@ var (
 	// ErrNoAudio means the chunk directory of a recording holds no readable audio: no chunk at all, or only chunks
 	// that cannot be read. It is returned by the Recorder adapters, so the recording fails instead of being retried.
 	ErrNoAudio = errors.New("recording has no readable audio")
+
+	// ErrCaptureUnavailable means system audio cannot be captured at all in this build, so a start fails at once and
+	// a retry does not help. Recorder adapters wrap it, so a use case can tell it apart without importing them.
+	ErrCaptureUnavailable = errors.New("system audio capture is not available")
 )
