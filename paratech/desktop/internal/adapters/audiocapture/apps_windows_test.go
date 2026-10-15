@@ -3,6 +3,8 @@
 package audiocapture
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"unsafe"
@@ -51,6 +53,48 @@ func TestAppsProcsExist(t *testing.T) {
 		if err := p.Find(); err != nil {
 			t.Errorf("%s: %v", p.Name, err)
 		}
+	}
+}
+
+// imageName starts small and grows the buffer only while Windows reports it too small, up to the longest path.
+func TestImageName(t *testing.T) {
+	denied := windows.ERROR_ACCESS_DENIED
+	tests := []struct {
+		name  string
+		chars uint32 // the length of the name; 0: query fails with err
+		err   error
+		want  string
+		sizes []uint32
+	}{
+		{"short", 20, nil, strings.Repeat("a", 20), []uint32{1024}},
+		{"long", 5000, nil, strings.Repeat("a", 5000), []uint32{1024, 4096, 16384}},
+		{"longest", maxImageChars - 1, nil, strings.Repeat("a", maxImageChars-1), []uint32{1024, 4096, 16384, 32768}},
+		{"too long", maxImageChars + 1, windows.ERROR_INSUFFICIENT_BUFFER, "", []uint32{1024, 4096, 16384, 32768}},
+		{"other error", 0, denied, "", []uint32{1024}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var sizes []uint32
+			got, err := imageName(func(buf *uint16, n *uint32) error {
+				sizes = append(sizes, *n)
+				switch {
+				case tt.chars == 0:
+					return denied
+				case tt.chars >= *n: // no room for the terminating NUL
+					return windows.ERROR_INSUFFICIENT_BUFFER
+				}
+				out := unsafe.Slice(buf, *n)
+				for i := range tt.chars {
+					out[i] = 'a'
+				}
+				out[tt.chars], *n = 0, tt.chars
+				return nil
+			})
+			if got != tt.want || !errors.Is(err, tt.err) || !slices.Equal(sizes, tt.sizes) {
+				t.Fatalf("imageName = %d chars, %v; buffers %v; want %d chars, %v; buffers %v",
+					len(got), err, sizes, len(tt.want), tt.err, tt.sizes)
+			}
+		})
 	}
 }
 

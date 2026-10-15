@@ -267,10 +267,14 @@ func markSessions(t tree, apps []candidate, sessions []sessionInfo) {
 	}
 }
 
-// cleanTitle turns a window title into one bounded line.
+// cleanTitle turns a window title into one bounded line. Format characters (bidi overrides, zero-width ones) are
+// dropped, so a window cannot make its name look like another one.
 func cleanTitle(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == utf8.RuneError {
+		switch {
+		case unicode.Is(unicode.Cf, r):
+			return -1
+		case unicode.IsControl(r) || r == utf8.RuneError:
 			return ' '
 		}
 		return r
@@ -314,7 +318,7 @@ type Apps struct {
 	gate     chan struct{} // one platform call at a time; held until a timed-out call ends
 
 	mu    sync.Mutex
-	icons map[string][]byte // by executable path; nil: no icon
+	icons map[string][]byte // by executable path; only icons read, so a failed read is tried again by a later List
 }
 
 // PlatformApps returns the apps of this OS: on 64-bit Windows the visible windows and audio sessions; elsewhere every
@@ -332,8 +336,8 @@ func newApps(p appPlatform, log *slog.Logger) *Apps {
 
 // List returns the apps with a visible window in this Windows session except this app, one per executable, topmost
 // first. Playing and Muted come from the audio sessions; without them (Windows refused) the apps are still listed.
-// Icons are cached per executable; an icon that cannot be read is nil, and one not read within iconBudget is nil
-// until a later List reads it.
+// Icons are cached per executable; an icon that cannot be read, or is not read within iconBudget, is nil until a
+// later List reads it.
 func (a *Apps) List(ctx context.Context) ([]values.AudioApp, error) {
 	return bounded(ctx, a, opList, func() ([]values.AudioApp, error) {
 		began := a.now()
@@ -421,6 +425,9 @@ func (a *Apps) iconOf(pid uint32, read bool) []byte {
 		return icon
 	}
 	icon = a.platform.icon(id.image)
+	if icon == nil {
+		return nil
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.icons) >= maxIconCache {
@@ -439,6 +446,9 @@ func bounded[T any](ctx context.Context, a *Apps, op string, f func() (T, error)
 		err error
 	}
 	var zero T
+	if err := ctx.Err(); err != nil { // select picks at random when the gate is free too
+		return zero, fmt.Errorf("%w: %s: %w", ErrAppList, op, err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
 	select {

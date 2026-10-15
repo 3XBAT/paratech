@@ -203,6 +203,9 @@ func TestCleanTitle(t *testing.T) {
 		{"  Lecture  ", "Lecture"},
 		{"a\nb\tc\x00d", "a b c d"},
 		{"bad \xff byte", "bad   byte"},
+		{"Zoom\u202egnp.exe", "Zoomgnp.exe"}, // a right-to-left override would show it reversed
+		{"Lec\u200bture\u2066 \ufeff", "Lecture"},
+		{"\u00adMeet", "Meet"},
 		{long, strings.Repeat("я", maxTitleBytes/2)},
 		{"x" + long, "x" + strings.Repeat("я", (maxTitleBytes-1)/2)},
 	}
@@ -326,8 +329,8 @@ func TestAppsList(t *testing.T) {
 			}
 		}
 	}
-	if p.iconCalls[`C:\Chrome\chrome.exe`] != 1 || p.iconCalls[`C:\Zoom\Zoom.exe`] != 1 {
-		t.Fatalf("icon reads = %v, want one per executable (a missing icon is cached too)", p.iconCalls)
+	if p.iconCalls[`C:\Chrome\chrome.exe`] != 1 || p.iconCalls[`C:\Zoom\Zoom.exe`] != 2 {
+		t.Fatalf("icon reads = %v, want one per icon read and one per List for a missing icon", p.iconCalls)
 	}
 	if !slices.Equal(p.sessionsOn, []bool{true, true}) {
 		t.Fatalf("snapshots = %v, want the sessions read", p.sessionsOn)
@@ -355,6 +358,20 @@ func TestAppsListIconBudget(t *testing.T) {
 	a.now = time.Now
 	if got, _ := a.List(context.Background()); string(got[0].IconPNG) != "chrome-png" {
 		t.Fatal("a later List does not read the icon")
+	}
+}
+
+// An icon that could not be read is not cached: a later List reads it again.
+func TestAppsListRetriesAMissingIcon(t *testing.T) {
+	p := newFakePlatform()
+	p.icons = map[string][]byte{}
+	a := newApps(p, nil)
+	if got, err := a.List(context.Background()); err != nil || got[0].IconPNG != nil {
+		t.Fatalf("List = %+v, %v; want no icon yet", got, err)
+	}
+	p.set(func(f *fakePlatform) { f.icons[`C:\Chrome\chrome.exe`] = []byte("chrome-png") })
+	if got, _ := a.List(context.Background()); string(got[0].IconPNG) != "chrome-png" {
+		t.Fatal("a later List does not read the icon again")
 	}
 }
 
@@ -404,8 +421,17 @@ func TestAppsListFailures(t *testing.T) {
 	t.Run("cancelled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if _, err := newApps(newFakePlatform(), nil).List(ctx); !errors.Is(err, ErrAppList) || !errors.Is(err, context.Canceled) {
-			t.Fatalf("List = %v", err)
+		p := newFakePlatform()
+		a := newApps(p, nil)
+		for range 20 { // with a free gate a select alone would start the call about half the time
+			if _, err := a.List(ctx); !errors.Is(err, ErrAppList) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("List = %v", err)
+			}
+		}
+		var n int
+		p.set(func(f *fakePlatform) { n = len(f.sessionsOn) })
+		if n != 0 {
+			t.Fatalf("%d snapshots for a cancelled context, want none", n)
 		}
 	})
 }

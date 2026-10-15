@@ -36,6 +36,7 @@ const (
 
 	maxDevices     = 16
 	maxTitleChars  = 512
+	imageChars     = 1024  // the first try; most paths fit
 	maxImageChars  = 32768 // the longest Windows path
 	uwpFrameClass  = "ApplicationFrameWindow"
 	classNameChars = 64
@@ -193,16 +194,33 @@ func (w *winApps) inspect(pid uint32) (procIdentity, error) {
 	if !id.alive {
 		return id, nil // an exited process may have no image name any more
 	}
-	buf := make([]uint16, maxImageChars)
-	n := uint32(maxImageChars)
-	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+	image, err := imageName(func(buf *uint16, n *uint32) error { return windows.QueryFullProcessImageName(h, 0, buf, n) })
+	if err != nil {
 		return procIdentity{}, fmt.Errorf("image of process %d: %w", pid, err)
 	}
-	id.image = windows.UTF16ToString(buf[:n])
+	id.image = image
 	if err := windows.ProcessIdToSessionId(pid, &id.session); err != nil {
 		return procIdentity{}, fmt.Errorf("session of process %d: %w", pid, err)
 	}
 	return id, nil
+}
+
+// imageName calls query with a buffer of imageChars characters, and with larger ones up to maxImageChars while
+// Windows reports it too small.
+func imageName(query func(buf *uint16, n *uint32) error) (string, error) {
+	for size := uint32(imageChars); ; size = min(size*4, maxImageChars) {
+		buf := make([]uint16, size)
+		n := size
+		err := query(&buf[0], &n)
+		switch {
+		case err == nil && n <= size:
+			return windows.UTF16ToString(buf[:n]), nil
+		case err == nil:
+			return "", errors.New("the image name is longer than its buffer")
+		case !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) || size >= maxImageChars:
+			return "", err
+		}
+	}
 }
 
 // windowEnum collects the windows of one EnumWindows run.
