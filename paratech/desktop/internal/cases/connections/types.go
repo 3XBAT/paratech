@@ -4,13 +4,16 @@ import (
 	"log/slog"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/settings/settings"
 )
 
 // Defaults of Config.
 const (
 	DefaultMailSecretName = "smtp-password" // the entry the smtp adapter reads (smtp.DefaultCredentialName)
+	DefaultHubSecretName  = "api-key"       // the entry the Hub client reads (hubclient.DefaultCredentialName)
 	DefaultCheckTimeout   = 30 * time.Second
+	DefaultRefreshTimeout = 30 * time.Second
 )
 
 // Deps are the ports the Service needs. Log is optional.
@@ -19,6 +22,8 @@ type Deps struct {
 	Clock      Clock
 	MailSecret SecretWriter // the store the smtp adapter reads the password from
 	MailCheck  MailChecker
+	HubSecret  SecretWriter // the store the Hub client reads the API key from
+	Quota      QuotaSource
 	Log        *slog.Logger
 }
 
@@ -26,6 +31,8 @@ type Deps struct {
 type Config struct {
 	MailSecretName string        // entry of the SMTP password; "": DefaultMailSecretName
 	CheckTimeout   time.Duration // bound of one mail check; 0: DefaultCheckTimeout
+	HubSecretName  string        // entry of the Hub API key; "": DefaultHubSecretName
+	RefreshTimeout time.Duration // bound of one quota refresh; 0: DefaultRefreshTimeout
 }
 
 // SecretStatus is what the page may know about a secret: whether it is stored, never the value.
@@ -42,6 +49,8 @@ const (
 // View is the "Connections" section as the page shows it. It never holds a secret. Empty strings are "not set".
 type View struct {
 	HubURL string
+	HubKey SecretStatus
+	Quota  values.QuotaReading // the last refresh in this run; the Hub is the authority
 
 	HomeworkRecipient string
 	SMTPHost          string

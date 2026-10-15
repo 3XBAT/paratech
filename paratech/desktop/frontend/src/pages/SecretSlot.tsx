@@ -8,12 +8,14 @@ export interface SecretMessage {
 }
 
 // A write-only secret: the page shows only its status. The typed value lives in this component's state until the
-// call returns and goes nowhere else (no other state, no log, no error text). Reused for the Hub key (TASK-039).
+// call returns and goes nowhere else (no other state, no log, no error text). Used for the mail password and the Hub
+// key; nested renders it as a part of the enclosing block.
 export function SecretSlot(props: {
   labels: SecretLabels;
   status: SecretStatus;
   busy: boolean;
   message: SecretMessage | null;
+  nested?: boolean;
   onStore: (value: string) => Promise<void>;
   onRemove: () => Promise<void>;
 }) {
@@ -37,8 +39,8 @@ export function SecretSlot(props: {
   }
 
   return (
-    <div className="block">
-      <h2>{labels.title}</h2>
+    <div className={props.nested ? undefined : "block"}>
+      {props.nested ? <h3>{labels.title}</h3> : <h2>{labels.title}</h2>}
       <p className={status === "unsupported" || status === "unavailable" ? "warning" : ""}>
         {secretStatusLabel(labels, status)}
       </p>

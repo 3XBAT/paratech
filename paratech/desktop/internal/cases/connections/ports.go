@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/settings/settings"
 )
 
@@ -41,4 +42,13 @@ type MailChecker interface {
 	// CheckMail returns nil when the connection and the login work, otherwise one of the check errors of this package
 	// (ErrMailNotConfigured ... ErrMailRefused) or an unclassified error.
 	CheckMail(ctx context.Context) error
+}
+
+// QuotaSource reads the tester's remaining quota from the Hub (PRD section 9.2, AC-12). Implemented by the Hub client
+// through a bridge in the app, with the URL from the settings and the key from the hub credential store.
+type QuotaSource interface {
+	// Remaining returns the Hub's snapshot, otherwise one of the quota results of this package (ErrHubNotConfigured
+	// ... ErrHubRefused, ErrSecretsUnsupported, ErrSecretsUnavailable) or an unclassified error. Errors never contain
+	// the key.
+	Remaining(ctx context.Context) (values.QuotaSnapshot, error)
 }

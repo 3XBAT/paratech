@@ -12,6 +12,9 @@
 //     key never goes to another host. No URL, a refused stored URL or no key is "hub: not configured", which waits
 //     like a network failure.
 //
+// GetRemaining reads the tester's quota (QuotaService.GetRemaining, AC-12) with the same URL, key, limits and error
+// classes, for the «Подключения» page; the answer is shown, never used to decide (the Hub decides at Reserve).
+//
 // Retries live in the job runner, not here: an error is classified (backoff.Transient or backoff.Permanent, see
 // errors.go) and the runner retries with its bounded exponential backoff, like every other handler (TASK-009). One
 // call is one attempt bounded by Config.RequestTimeout. shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded tell

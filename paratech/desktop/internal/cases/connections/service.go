@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -24,9 +26,13 @@ const (
 	opDropMailSecret = "connections: remove mail password"
 	opMailStatus     = "connections: mail password status"
 	opCheckMail      = "connections: check mail"
+	opSetHubKey      = "connections: set hub api key"
+	opDropHubKey     = "connections: remove hub api key"
+	opHubKeyStatus   = "connections: hub api key status"
+	opRefreshQuota   = "connections: refresh quota"
 )
 
-// secretSlot is one secret of the section: its store and its entry. TASK-039 adds the Hub key as a second slot.
+// secretSlot is one secret of the section: its store and its entry.
 type secretSlot struct {
 	store SecretWriter
 	name  string
@@ -39,25 +45,39 @@ type Service struct {
 	clock    Clock
 	mail     secretSlot
 	check    MailChecker
+	hub      secretSlot
+	quota    QuotaSource
 	log      *slog.Logger
 
-	checkTimeout time.Duration
-	checking     atomic.Bool // one mail check at a time
+	checkTimeout   time.Duration
+	checking       atomic.Bool // one mail check at a time
+	refreshTimeout time.Duration
+	refreshing     atomic.Bool // one quota refresh at a time
+
+	mu      sync.Mutex
+	reading values.QuotaReading // in memory only: shown, never used to decide
+	account uint64              // changes with the Hub key or address; a refresh of an older one is discarded
 }
 
 // New checks the ports and the configuration.
 func New(d Deps, cfg Config) (*Service, error) {
-	if d.Settings == nil || d.Clock == nil || d.MailSecret == nil || d.MailCheck == nil {
+	if d.Settings == nil || d.Clock == nil || d.MailSecret == nil || d.MailCheck == nil || d.HubSecret == nil || d.Quota == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
 	}
 	if cfg.MailSecretName == "" {
 		cfg.MailSecretName = DefaultMailSecretName
 	}
+	if cfg.HubSecretName == "" {
+		cfg.HubSecretName = DefaultHubSecretName
+	}
 	if cfg.CheckTimeout == 0 {
 		cfg.CheckTimeout = DefaultCheckTimeout
 	}
-	if cfg.CheckTimeout < 0 {
-		return nil, fmt.Errorf("%w: negative check timeout", ErrInvalidConfig)
+	if cfg.RefreshTimeout == 0 {
+		cfg.RefreshTimeout = DefaultRefreshTimeout
+	}
+	if cfg.CheckTimeout < 0 || cfg.RefreshTimeout < 0 {
+		return nil, fmt.Errorf("%w: negative timeout", ErrInvalidConfig)
 	}
 	log := d.Log
 	if log == nil {
@@ -65,11 +85,13 @@ func New(d Deps, cfg Config) (*Service, error) {
 	}
 	return &Service{
 		settings: d.Settings, clock: d.Clock, mail: secretSlot{store: d.MailSecret, name: cfg.MailSecretName},
-		check: d.MailCheck, log: log, checkTimeout: cfg.CheckTimeout,
+		check: d.MailCheck, hub: secretSlot{store: d.HubSecret, name: cfg.HubSecretName}, quota: d.Quota, log: log,
+		checkTimeout: cfg.CheckTimeout, refreshTimeout: cfg.RefreshTimeout,
 	}, nil
 }
 
-// Get returns the section: the stored settings (the defaults while nothing is stored) and whether the password is set.
+// Get returns the section: the stored settings (the defaults while nothing is stored), whether the password and the
+// Hub key are set, and the quota of the last refresh. It does not call the Hub.
 func (s *Service) Get(ctx context.Context) (View, error) {
 	st, err := s.settings.Load(ctx)
 	if err != nil {
@@ -92,11 +114,20 @@ func (s *Service) SaveMail(ctx context.Context, in MailInput) (View, error) {
 	})
 }
 
-// SaveHubURL sets the Hub address; empty removes it. A refused address is an *InvalidFieldsError.
+// SaveHubURL sets the Hub address; empty removes it. A refused address is an *InvalidFieldsError. A new address
+// forgets the quota shown: it was the answer of another Hub.
 func (s *Service) SaveHubURL(ctx context.Context, url string) (View, error) {
-	return s.change(ctx, opSaveHubURL, func(st *settings.Settings, now time.Time) []Field {
-		return refused(check(FieldHubURL, st.SetHubURL(url, now)))
+	var moved bool
+	v, err := s.change(ctx, opSaveHubURL, func(st *settings.Settings, now time.Time) []Field {
+		before := st.HubURL()
+		bad := refused(check(FieldHubURL, st.SetHubURL(url, now)))
+		moved = st.HubURL() != before
+		return bad
 	})
+	if err == nil && moved {
+		v.Quota = s.forgetQuota()
+	}
+	return v, err
 }
 
 // SetMailPassword stores or replaces the SMTP password in the credential store, never in SQLite (hard rule 4). It
@@ -108,6 +139,103 @@ func (s *Service) SetMailPassword(ctx context.Context, password string) (SecretS
 // RemoveMailPassword deletes the stored SMTP password; a missing one is not an error.
 func (s *Service) RemoveMailPassword(ctx context.Context) (SecretStatus, error) {
 	return s.removeSecret(ctx, opDropMailSecret, s.mail)
+}
+
+// SetHubKey stores or replaces the Hub API key in the credential store, never in SQLite (hard rule 4; PRD section
+// 12). The key must be sendable (values.ParseHubAPIKey: surrounding blanks of a paste are dropped); otherwise nothing
+// changes and the error is ErrInvalidSecret. It returns the status after the call, never the key, and forgets the
+// quota shown, which belonged to the old key.
+func (s *Service) SetHubKey(ctx context.Context, key string) (SecretStatus, error) {
+	parsed, err := values.ParseHubAPIKey(key)
+	if err != nil {
+		return s.status(ctx, opSetHubKey, s.hub), fmt.Errorf("%s: %w", opSetHubKey, ErrInvalidSecret)
+	}
+	defer s.forgetQuota()
+	return s.setSecret(ctx, opSetHubKey, s.hub, parsed)
+}
+
+// RemoveHubKey deletes the stored Hub API key; a missing one is not an error. The quota shown is forgotten.
+func (s *Service) RemoveHubKey(ctx context.Context) (SecretStatus, error) {
+	defer s.forgetQuota()
+	return s.removeSecret(ctx, opDropHubKey, s.hub)
+}
+
+// RefreshQuota asks the Hub for the remaining quota (AC-12) and returns what the page shows afterwards. The error is
+// nil on success, ErrQuotaBusy while another refresh runs, ErrQuotaSuperseded when the key or the address changed
+// meanwhile (the answer is discarded), a quota result of this package, or an unclassified failure. A done ctx changes
+// nothing. The last snapshot is kept in memory only, as values.QuotaReading decides.
+func (s *Service) RefreshQuota(ctx context.Context) (values.QuotaReading, error) {
+	if !s.refreshing.CompareAndSwap(false, true) {
+		return s.quotaReading(), ErrQuotaBusy
+	}
+	defer s.refreshing.Store(false)
+	if err := ctx.Err(); err != nil {
+		return s.quotaReading(), fmt.Errorf("%s: %w", opRefreshQuota, err)
+	}
+
+	account := s.quotaAccount()
+	rctx, cancel := context.WithTimeout(ctx, s.refreshTimeout)
+	snap, err := s.quota.Remaining(rctx)
+	cancel()
+	if err != nil && ctx.Err() != nil {
+		return s.quotaReading(), fmt.Errorf("%s: %w", opRefreshQuota, ctx.Err())
+	}
+	outcome, result := quotaResult(err)
+	now := s.clock.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.account != account {
+		return s.reading, ErrQuotaSuperseded
+	}
+	if outcome == values.QuotaCurrent {
+		next, err := s.reading.Read(snap, now)
+		if err == nil {
+			s.reading = next
+			return s.reading, nil
+		}
+		outcome, result = values.QuotaFailed, fmt.Errorf("%s: %w", opRefreshQuota, err)
+	}
+	s.reading = s.reading.Failed(outcome, now)
+	return s.reading, result
+}
+
+// quotaResult classifies an answer of the QuotaSource. The bound of the refresh counts as a Hub that did not answer.
+func quotaResult(err error) (values.QuotaOutcome, error) {
+	if err == nil {
+		return values.QuotaCurrent, nil
+	}
+	for _, known := range quotaResults {
+		if errors.Is(err, known.err) {
+			return known.outcome, err
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return values.QuotaUnreachable, fmt.Errorf("%w: %w", ErrHubUnreachable, err)
+	}
+	return values.QuotaFailed, fmt.Errorf("%s: %w", opRefreshQuota, err)
+}
+
+func (s *Service) quotaReading() values.QuotaReading {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reading
+}
+
+func (s *Service) quotaAccount() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.account
+}
+
+// forgetQuota drops the shown quota when the key or the address changes, and makes a refresh still running for the
+// old one discard its answer.
+func (s *Service) forgetQuota() values.QuotaReading {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.account++
+	s.reading = values.QuotaReading{}
+	return s.reading
 }
 
 // CheckMail opens a session with the mail server as a send does and closes it without a message. It returns nil on
@@ -176,6 +304,8 @@ func refused(checks ...fieldCheck) []Field {
 func (s *Service) view(ctx context.Context, st *settings.Settings) View {
 	return View{
 		HubURL:            st.HubURL(),
+		HubKey:            s.status(ctx, opHubKeyStatus, s.hub),
+		Quota:             s.quotaReading(),
 		HomeworkRecipient: st.HomeworkRecipient(),
 		SMTPHost:          st.SMTPHost(),
 		SMTPPort:          st.SMTPPort(),

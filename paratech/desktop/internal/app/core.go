@@ -235,7 +235,7 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
 	}
-	if err := c.wireConnections(e, settings, mailSecrets, mailer, log); err != nil {
+	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
 	}
 	return c.wireSchedule(e)

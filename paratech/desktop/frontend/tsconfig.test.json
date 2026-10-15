@@ -17,6 +17,7 @@
     "src/scheduleView.ts",
     "src/modelsView.ts",
     "src/connectionsView.ts",
+    "src/quotaView.ts",
     "src/popup/view.ts",
     "src/nav.ts"
   ]

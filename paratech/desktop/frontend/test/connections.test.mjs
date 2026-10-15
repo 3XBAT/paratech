@@ -7,8 +7,11 @@ import {
   methods,
   parseCheckResult,
   parseConnections,
+  parseQuota,
+  parseQuotaResult,
   parseSaveResult,
   parseSecretResult,
+  quotaStatuses,
   secretStatuses,
 } from "../.test-build/bindings/connections.js";
 import {
@@ -16,6 +19,7 @@ import {
   failureText,
   fieldErrorText,
   hubFields,
+  hubKeyLabels,
   mailConfiguredText,
   mailFields,
   mailFormDirty,
@@ -33,12 +37,19 @@ import {
 } from "../.test-build/connectionsView.js";
 
 // Mirrors the JSON of internal/input/wails/connections.go (TestConnectionsJSONNames).
-const stored = {
-  hubUrl: "https://hub.example.org", recipient: "t@school.example", smtpHost: "smtp.example.org", smtpPort: 465,
-  smtpSecurity: "tls", smtpLogin: "s@example.org", mailConfigured: true, mailPassword: "set",
+const values = {
+  unit: "tokens", remaining: 90000, reserved: 1500, limit: 100000, periodEnd: "2026-11-01T00:00:00Z",
+  fetchedAt: "2026-10-15T10:00:00Z",
 };
-const fresh = { ...stored, hubUrl: "", recipient: "", smtpHost: "", smtpPort: 0, smtpSecurity: "starttls", smtpLogin: "",
-  mailConfigured: false, mailPassword: "unset" };
+const current = { status: "current", stale: false, checkedAt: "2026-10-15T10:00:00Z", values };
+const unchecked = { status: "unchecked", stale: false, checkedAt: "", values: null };
+const stored = {
+  hubUrl: "https://hub.example.org", hubKey: "set", quota: current, recipient: "t@school.example",
+  smtpHost: "smtp.example.org", smtpPort: 465, smtpSecurity: "tls", smtpLogin: "s@example.org", mailConfigured: true,
+  mailPassword: "set",
+};
+const fresh = { ...stored, hubUrl: "", hubKey: "unset", quota: unchecked, recipient: "", smtpHost: "", smtpPort: 0,
+  smtpSecurity: "starttls", smtpLogin: "", mailConfigured: false, mailPassword: "unset" };
 
 function fakeCall(reply) {
   const calls = [];
@@ -54,7 +65,8 @@ const src = (file) => readFileSync(new URL(file, import.meta.url), "utf8");
 test("the api calls the bound Go methods with the arguments", async () => {
   const p = "paratech/desktop/internal/input/wails.ConnectionsService.";
   assert.deepEqual(Object.values(methods).sort(), [
-    "CheckMail", "GetConnections", "RemoveMailPassword", "SaveHubURL", "SaveMailSettings", "SetMailPassword",
+    "CheckMail", "GetConnections", "RefreshQuota", "RemoveHubKey", "RemoveMailPassword", "SaveHubURL", "SaveMailSettings",
+    "SetHubKey", "SetMailPassword",
   ].map((m) => p + m));
 
   const { call, calls } = fakeCall(stored);
@@ -71,11 +83,20 @@ test("the api calls the bound Go methods with the arguments", async () => {
   await connectionsApi(secret.call).removeMailPassword();
   const check = fakeCall({ ok: true, message: "m" });
   assert.deepEqual(await connectionsApi(check.call).checkMail(), { ok: true, message: "m" });
+  const key = fakeCall({ status: "set", message: "m" });
+  assert.deepEqual(await connectionsApi(key.call).setHubKey("hk_1"), { status: "set", message: "m" });
+  await connectionsApi(key.call).removeHubKey();
+  const refresh = fakeCall({ ok: false, message: "m", quota: { ...current, status: "offline", stale: true } });
+  assert.deepEqual(await connectionsApi(refresh.call).refreshQuota(), {
+    ok: false, message: "m", quota: { ...current, status: "offline", stale: true },
+  });
 
   assert.deepEqual(calls, [[p + "GetConnections"]]);
   assert.deepEqual(saved.calls, [[p + "SaveMailSettings", input], [p + "SaveHubURL", "https://hub.example.org"]]);
   assert.deepEqual(secret.calls, [[p + "SetMailPassword", "pw"], [p + "RemoveMailPassword"]]);
   assert.deepEqual(check.calls, [[p + "CheckMail"]]);
+  assert.deepEqual(key.calls, [[p + "SetHubKey", "hk_1"], [p + "RemoveHubKey"]]);
+  assert.deepEqual(refresh.calls, [[p + "RefreshQuota"]]);
 });
 
 test("a failing call rejects", async () => {
@@ -84,12 +105,19 @@ test("a failing call rejects", async () => {
   });
   await assert.rejects(api.get(), /unavailable/);
   await assert.rejects(api.setMailPassword("pw"), /unavailable/);
+  await assert.rejects(api.setHubKey("hk_1"), /unavailable/);
+  await assert.rejects(api.refreshQuota(), /unavailable/);
 });
 
 test("replies are parsed strictly; extra fields are dropped", () => {
   assert.deepEqual(parseConnections({ ...stored, password: "x" }), stored);
+  assert.deepEqual(parseConnections({ ...stored, apiKey: "x", quota: { ...current, key: "x", values: { ...values, key: "x" } } }),
+    stored);
+  assert.deepEqual(parseConnections(fresh), fresh);
   for (const raw of [
     null, "x", {},
+    { ...stored, hubKey: "hk_secret" },
+    { ...stored, hubKey: undefined },
     { ...stored, smtpPort: "465" },
     { ...stored, smtpPort: -1 },
     { ...stored, smtpPort: 1.5 },
@@ -117,6 +145,50 @@ test("replies are parsed strictly; extra fields are dropped", () => {
   assert.throws(() => parseSecretResult({ status: "secret", message: "m" }), /secret result/);
   assert.deepEqual(parseCheckResult({ ok: false, message: "m" }), { ok: false, message: "m" });
   assert.throws(() => parseCheckResult({ ok: 1, message: "m" }), /check result/);
+});
+
+test("a malformed quota is refused, in the section and in a refresh answer", () => {
+  assert.deepEqual(quotaStatuses, ["unchecked", "current", "notConfigured", "noKey", "keyRejected", "offline", "failed"]);
+  for (const status of quotaStatuses) {
+    assert.equal(parseQuota({ ...unchecked, status }).status, status);
+  }
+  assert.deepEqual(parseQuota({ ...current, values: { ...values, periodEnd: "" } }).values.periodEnd, "");
+  // Amounts up to 2^53 - 1 are exact in JavaScript.
+  assert.equal(parseQuota({ ...current, values: { ...values, limit: Number.MAX_SAFE_INTEGER } }).values.limit,
+    Number.MAX_SAFE_INTEGER);
+  for (const raw of [
+    undefined, null, "current", {},
+    { ...current, status: "fine" },
+    { ...current, status: "toString" },
+    { ...current, stale: "no" },
+    { ...current, checkedAt: null },
+    { ...current, values: undefined },
+    { ...current, values: "90000" },
+    { ...current, values: { ...values, unit: 1 } },
+    { ...current, values: { ...values, remaining: -1 } },
+    { ...current, values: { ...values, remaining: 1.5 } },
+    { ...current, values: { ...values, remaining: "90000" } },
+    { ...current, values: { ...values, reserved: null } },
+    { ...current, values: { ...values, limit: Number.MAX_SAFE_INTEGER + 1 } },
+    { ...current, values: { ...values, limit: Infinity } },
+    { ...current, values: { ...values, fetchedAt: undefined } },
+    { ...current, values: { ...values, periodEnd: 0 } },
+  ]) {
+    assert.throws(() => parseQuota(raw), /quota/);
+    assert.throws(() => parseConnections({ ...stored, quota: raw }), /quota/);
+    assert.throws(() => parseQuotaResult({ ok: true, message: "m", quota: raw }), /quota/);
+  }
+
+  const refreshed = { ok: true, message: "Остаток обновлён.", quota: current };
+  assert.deepEqual(parseQuotaResult({ ...refreshed, apiKey: "x" }), refreshed);
+  for (const raw of [
+    null, {},
+    { ...refreshed, ok: "true" },
+    { ...refreshed, message: null },
+    { ok: true, message: "m" },
+  ]) {
+    assert.throws(() => parseQuotaResult(raw), /quota/);
+  }
 });
 
 test("the form maps from the stored values and back; port 0 is empty", () => {
@@ -197,6 +269,11 @@ test("every secret status has its label", () => {
     "Пароль задан", "Пароль не задан", "Хранилище паролей недоступно в этой системе", "Хранилище паролей не ответило",
   ]);
   assert.equal(secretStatusLabel(mailPasswordLabels, "toString"), "Хранилище паролей не ответило");
+  assert.deepEqual(secretStatuses.map((s) => secretStatusLabel(hubKeyLabels, s)), [
+    "Ключ задан", "Ключ не задан", "Хранилище ключей недоступно в этой системе", "Хранилище ключей не ответило",
+  ]);
+  assert.equal(hubKeyLabels.input, "Новый ключ");
+  assert.match(hubKeyLabels.confirmRemove, /^Удалить сохранённый ключ Hub\?/);
   assert.equal(mailConfiguredText(true), "Почта настроена.");
   assert.match(mailConfiguredText(false), /^Почта не настроена/);
 });
@@ -244,9 +321,9 @@ test("rejected calls show fixed Russian texts", () => {
   assert.equal(failureText("check"), "Не удалось проверить почту.");
 });
 
-test("the page renders text only and keeps the password write-only", () => {
+test("the page renders text only and keeps the password and the Hub key write-only", () => {
   for (const file of ["../src/pages/ConnectionsPage.tsx", "../src/pages/SecretSlot.tsx", "../src/connectionsView.ts",
-    "../src/bindings/connections.ts"]) {
+    "../src/quotaView.ts", "../src/bindings/connections.ts"]) {
     const s = src(file);
     for (const banned of ["dangerouslySetInnerHTML", "innerHTML", "console.", "localStorage", "sessionStorage", "href="]) {
       assert.ok(!s.includes(banned), `${file} uses ${banned}`);
@@ -261,4 +338,12 @@ test("the page renders text only and keeps the password write-only", () => {
   const page = src("../src/pages/ConnectionsPage.tsx");
   assert.ok(!/useState[^;]*[Pp]assword/.test(page), "the page keeps the password in its state");
   assert.match(page, /onStore=\{\(value\) => changeSecret\("store", \(\) => api\.setMailPassword\(value\)\)\}/);
+  // The Hub key uses the same slot and goes the same way; the page has no state of its own for it.
+  assert.ok(!/useState[^;]*[Kk]ey/.test(page), "the page keeps the Hub key in its state");
+  assert.match(page, /onStore=\{\(value\) => changeHubKey\("store", \(\) => api\.setHubKey\(value\)\)\}/);
+  assert.equal([...page.matchAll(/<SecretSlot\b/g)].length, 2);
+  assert.equal([...page.matchAll(/api\.setHubKey\(/g)].length, 1);
+  // The re-read and the refresh after a key change are not awaited inside the change: the slot clears the field as
+  // soon as the store answers.
+  assert.match(page, /\}\);\s*void reloadHub\(\);\s*\}/);
 });
