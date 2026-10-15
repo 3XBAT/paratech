@@ -488,6 +488,11 @@ func (c Config) String() string {
 		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels)
 }
 
+// GoString is String for %#v, which otherwise prints every field, secrets included.
+func (c Config) GoString() string {
+	return "config.Config" + c.String()
+}
+
 // LogValue is String for slog handlers that do not use fmt (JSON).
 func (c Config) LogValue() slog.Value {
 	return slog.GroupValue(

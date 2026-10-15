@@ -172,9 +172,14 @@ func TestConfigDoesNotPrintTheAnthropicKey(t *testing.T) {
 	var logged bytes.Buffer
 	slog.New(slog.NewJSONHandler(&logged, nil)).Info("cfg", "cfg", cfg)
 	slog.New(slog.NewTextHandler(&logged, nil)).Info("cfg", "cfg", cfg)
-	for _, out := range []string{fmt.Sprint(cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%v", &cfg), logged.String()} {
+	for _, out := range []string{
+		fmt.Sprint(cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%v", &cfg), fmt.Sprintf("%#v", cfg), fmt.Sprintf("%#v", &cfg), logged.String(),
+	} {
 		if strings.Contains(out, fakeKey) {
 			t.Errorf("output leaks the provider key: %s", out)
+		}
+		if strings.Contains(out, "s3cret-marker") {
+			t.Errorf("output leaks the database password: %s", out)
 		}
 		if !strings.Contains(out, "AnthropicAPIKey:(redacted)") && !strings.Contains(out, `"anthropic_api_key":"(redacted)"`) {
 			t.Errorf("output %s does not mark the provider key as redacted", out)
