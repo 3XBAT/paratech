@@ -70,8 +70,8 @@ func (r Revision) Job() shared.JobID { return r.job }
 // CreatedAt returns when the version was added.
 func (r Revision) CreatedAt() time.Time { return r.createdAt }
 
-// Markdown renders the version as the exported homework file: the title as a heading, then the body.
-func (r Revision) Markdown() string { return "# " + r.title + "\n\n" + r.body + "\n" }
+// Markdown renders the version as the exported homework file (values.HomeworkMarkdown, the format of every export).
+func (r Revision) Markdown() string { return values.HomeworkMarkdown(r.title, r.body) }
 
 // validate checks a version and normalises its texts; the result is what the draft stores.
 func (r Revision) validate() (Revision, error) {

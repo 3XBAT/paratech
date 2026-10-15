@@ -57,6 +57,9 @@ func (k Kind) NeedsRecipient() bool { return k == KindSendHomework }
 // NeedsAttachment reports whether the kind is checked against the content of the export file.
 func (k Kind) NeedsAttachment() bool { return k == KindSendHomework }
 
+// NeedsAssignmentTitle reports whether the kind takes the stored title of the assignment (the heading of an export).
+func (k Kind) NeedsAssignmentTitle() bool { return k == KindExportHomework }
+
 // RejectReason tells why a proposal was rejected at validation or went stale before execution. The set is closed and
 // written by the core, never by the model.
 type RejectReason string
@@ -92,7 +95,8 @@ type Recipient struct {
 const maxAddressLen = 254
 
 // NewRecipient validates a plain address "local@domain": no display name, no whitespace or control characters and
-// none of the characters that would let it become several addresses or a header (< > ( ) , ; : " [ ] \).
+// none of the characters that would let it become several addresses or a header (< > ( ) , ; : " [ ] \). Both parts
+// are dot-atoms (no leading, trailing or double dot), as net/mail requires.
 func NewRecipient(address string) (Recipient, error) {
 	if len(address) < 3 || len(address) > maxAddressLen {
 		return Recipient{}, fmt.Errorf("%w: length must be 3-%d", ErrInvalidRecipient, maxAddressLen)
@@ -103,14 +107,21 @@ func NewRecipient(address string) (Recipient, error) {
 		return Recipient{}, fmt.Errorf("%w: forbidden character", ErrInvalidRecipient)
 	}
 	local, domain, ok := strings.Cut(address, "@")
-	if !ok || local == "" || strings.Contains(domain, "@") {
-		return Recipient{}, fmt.Errorf("%w: want exactly one @ after a non-empty local part", ErrInvalidRecipient)
+	if !ok || strings.Contains(domain, "@") {
+		return Recipient{}, fmt.Errorf("%w: want exactly one @", ErrInvalidRecipient)
 	}
-	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") ||
-		strings.Contains(domain, "..") {
+	if !dotAtom(local) {
+		return Recipient{}, fmt.Errorf("%w: malformed local part", ErrInvalidRecipient)
+	}
+	if !strings.Contains(domain, ".") || !dotAtom(domain) {
 		return Recipient{}, fmt.Errorf("%w: malformed domain", ErrInvalidRecipient)
 	}
 	return Recipient{address: address}, nil
+}
+
+// dotAtom reports whether s is non-empty and has no leading, trailing or double dot.
+func dotAtom(s string) bool {
+	return s != "" && !strings.HasPrefix(s, ".") && !strings.HasSuffix(s, ".") && !strings.Contains(s, "..")
 }
 
 // Address returns the email address.
@@ -146,9 +157,10 @@ func (d Digest) IsZero() bool { return d == Digest{} }
 
 // Facts is the trusted local state a proposal is validated and, before execution, re-checked against. The use case
 // reads it from local ports (the assignment repository, the settings, the Storage Manager), only what the kind needs
-// (Kind.NeedsRecipient, Kind.NeedsAttachment); nothing in it comes from the model.
+// (Kind.NeedsRecipient, Kind.NeedsAttachment, Kind.NeedsAssignmentTitle); nothing in it comes from the model.
 type Facts struct {
 	AssignmentExists bool      // the referenced assignment is in the local database
+	AssignmentTitle  string    // its stored title, when it exists
 	Recipient        Recipient // the configured homework recipient; zero if none
 	Attachment       Digest    // the content of ExportRef of the assignment; zero if the file does not exist
 }

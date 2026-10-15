@@ -342,6 +342,7 @@ func TestSchemaHasRequiredTables(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
+		"homework_drafts",
 	} {
 		if _, ok := tables[name]; !ok {
 			t.Errorf("table %s is missing", name)
@@ -354,6 +355,7 @@ func TestSchemaVersionColumns(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
+		"homework_drafts",
 	} {
 		body, ok := tables[name]
 		if !ok {

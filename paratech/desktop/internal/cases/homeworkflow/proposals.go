@@ -61,9 +61,10 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Facts, error) {
 	var f proposal.Facts
 
-	switch _, err := s.assignments.Get(ctx, p.AssignmentID()); {
+	switch a, err := s.assignments.Get(ctx, p.AssignmentID()); {
 	case err == nil:
 		f.AssignmentExists = true
+		f.AssignmentTitle = a.Details().Title() // the export heading comes from the stored assignment, not the model
 	case !errors.Is(err, shared.ErrNotFound):
 		return f, err
 	}

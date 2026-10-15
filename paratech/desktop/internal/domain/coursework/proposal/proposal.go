@@ -36,13 +36,14 @@ type Proposal struct {
 	due        time.Time
 
 	// Set by the core.
-	reason      RejectReason
-	recipient   Recipient // the trusted recipient frozen at validation; email proposals only
-	attachment  Digest    // the export content pinned at validation; email proposals only
-	createdAt   time.Time
-	updatedAt   time.Time
-	confirmedAt time.Time
-	executedAt  time.Time
+	reason          RejectReason
+	recipient       Recipient // the trusted recipient frozen at validation; email proposals only
+	attachment      Digest    // the export content pinned at validation; email proposals only
+	assignmentTitle string    // the heading of the export file, frozen at validation; export proposals only
+	createdAt       time.Time
+	updatedAt       time.Time
+	confirmedAt     time.Time
+	executedAt      time.Time
 }
 
 // wire is the only shape the model may answer with. Unknown fields are rejected by the decoder; pointers tell a
@@ -187,6 +188,7 @@ type State struct {
 	// The pinned attachment (Digest); empty and 0 when none.
 	AttachmentSHA256 string
 	AttachmentSize   int64
+	AssignmentTitle  string // export proposals once validated; else empty
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	ConfirmedAt      time.Time
@@ -256,6 +258,10 @@ func Restore(s State) (*Proposal, error) {
 	if wantAttachment := p.kind.NeedsAttachment() && past[s.Status]; wantAttachment == attachment.IsZero() {
 		return bad("a pinned attachment exists exactly for a validated email proposal")
 	}
+	if wantTitle := p.kind.NeedsAssignmentTitle() && past[s.Status]; wantTitle != (s.AssignmentTitle != "") ||
+		(wantTitle && !validTitle(s.AssignmentTitle)) {
+		return bad("an assignment title exists exactly for a validated export proposal")
+	}
 	confirmed := s.Status == StatusConfirmed || s.Status == StatusExecuted || s.Status == StatusStale
 	if confirmed == s.ConfirmedAt.IsZero() || (s.Status == StatusExecuted) == s.ExecutedAt.IsZero() {
 		return bad("confirmation and execution times do not match the status")
@@ -267,6 +273,7 @@ func Restore(s State) (*Proposal, error) {
 	p.reason = s.Reason
 	p.recipient = recipient
 	p.attachment = attachment
+	p.assignmentTitle = strings.TrimSpace(s.AssignmentTitle)
 	p.createdAt, p.updatedAt = s.CreatedAt, s.UpdatedAt
 	p.confirmedAt, p.executedAt = s.ConfirmedAt, s.ExecutedAt
 	return p, nil
@@ -279,7 +286,7 @@ func (p *Proposal) State() State {
 	return State{
 		Version: p.version, ID: p.id, Kind: p.kind, Status: p.status, AssignmentID: p.assignment,
 		Title: p.title, Body: p.body, Due: p.due, Reason: p.reason, Recipient: p.recipient.Address(),
-		AttachmentSHA256: p.attachment.SHA256(), AttachmentSize: p.attachment.Size(),
+		AttachmentSHA256: p.attachment.SHA256(), AttachmentSize: p.attachment.Size(), AssignmentTitle: p.assignmentTitle,
 		CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt, ExecutedAt: p.executedAt,
 	}
 }
@@ -303,10 +310,17 @@ func (p *Proposal) move(to Status, now time.Time) error {
 //   - send_homework_email: a recipient is configured and the export of the assignment exists; the recipient and the
 //     digest of the export are frozen into the proposal, so the user confirms exactly the address and the content
 //     that will be sent;
+//   - export_homework: the stored title of the assignment is frozen into the proposal as the heading of the file (the
+//     model may not send one);
 //   - create_deadline_event: the due time is not in the past and at most MaxDueAhead ahead.
+//
+// Facts of an existing assignment without a valid title, for an export, are an error of the caller.
 func (p *Proposal) Validate(f Facts, now time.Time) error {
 	if p.status != StatusProposed {
 		return fmt.Errorf("%w: validate in %s", ErrInvalidTransition, p.status)
+	}
+	if p.kind.NeedsAssignmentTitle() && f.AssignmentExists && !validTitle(f.AssignmentTitle) {
+		return fmt.Errorf("%w: the facts lack the assignment title", ErrInvalidProposal)
 	}
 
 	reason := p.check(f, now)
@@ -326,6 +340,9 @@ func (p *Proposal) Validate(f Facts, now time.Time) error {
 	}
 	if p.kind.NeedsAttachment() {
 		p.attachment = f.Attachment
+	}
+	if p.kind.NeedsAssignmentTitle() {
+		p.assignmentTitle = strings.TrimSpace(f.AssignmentTitle)
 	}
 	return nil
 }
@@ -434,6 +451,9 @@ func (p *Proposal) Recipient() Recipient { return p.recipient }
 
 // AttachmentDigest returns the export content pinned at validation (send_homework_email only).
 func (p *Proposal) AttachmentDigest() Digest { return p.attachment }
+
+// AssignmentTitle returns the trusted heading of the export file, frozen at validation (export_homework only).
+func (p *Proposal) AssignmentTitle() string { return p.assignmentTitle }
 
 // CreatedAt returns when the proposal was parsed.
 func (p *Proposal) CreatedAt() time.Time { return p.createdAt }

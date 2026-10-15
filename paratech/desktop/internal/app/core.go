@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/whispercli"
 	"paratech/desktop/internal/cases/activity"
@@ -41,6 +43,7 @@ type core struct {
 	runner     *jobrunner.Service
 	recordings *recordingsession.Service
 	deliveries *senddelivery.Service
+	drafts     *homeworkflow.Drafts // no binding yet (TASK-045)
 
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
@@ -91,18 +94,37 @@ func (c *core) wire(root string, e env, notifier notify.Notifier, log *slog.Logg
 	assignments := sqlite.NewAssignmentRepository(db)
 	maxAttempts := e.runner.Backoff.MaxAttempts
 
+	// One credential store per service, given to its adapter (which reads) and to the use case (which writes).
+	hubSecrets, err := e.secrets(hubSecretsService)
+	if err != nil {
+		return fmt.Errorf("app: hub credentials: %w", err)
+	}
+	mailSecrets, err := e.secrets(mailSecretsService)
+	if err != nil {
+		return fmt.Errorf("app: mail credentials: %w", err)
+	}
+	// The Hub URL and the mail account are read from the settings at every call; empty means not configured.
+	llm, err := hubclient.New(hubclient.Config{URLs: hubSettings{settings}, HTTPClient: e.hubHTTP}, hubSecrets)
+	if err != nil {
+		return fmt.Errorf("app: hub client: %w", err)
+	}
+	mailer, err := smtp.New(smtp.Config{Accounts: mailSettings{settings}, RootCAs: e.mailRoots}, mailSecrets)
+	if err != nil {
+		return fmt.Errorf("app: mail: %w", err)
+	}
+
 	post, err := homeworkflow.NewPostProcessor(homeworkflow.PostProcessDeps{
-		LLM: e.llm, Transcripts: transcripts, Recordings: recordings, Lessons: lessons, Artifacts: store,
+		LLM: llm, Transcripts: transcripts, Recordings: recordings, Lessons: lessons, Artifacts: store,
 		Summaries: summaries, Assignments: assignments, Jobs: jobs, Clock: e.local, IDs: e.ids, Log: log,
 		ModelAlias: modelAlias, MaxAttempts: maxAttempts,
 	})
 	if err != nil {
 		return fmt.Errorf("app: post-processing: %w", err)
 	}
-	drafts, err := homeworkflow.NewDrafts(homeworkflow.DraftDeps{
-		LLM: e.llm, Assignments: assignments, Drafts: e.drafts, Summaries: summaries, Lessons: lessons, Artifacts: store,
-		Jobs: jobs, JobReader: jobs, Clock: e.local, IDs: e.ids, Tx: db, Log: log,
-		ModelAlias: modelAlias, MaxAttempts: maxAttempts,
+	c.drafts, err = homeworkflow.NewDrafts(homeworkflow.DraftDeps{
+		LLM: llm, Assignments: assignments, Drafts: sqlite.NewDraftRepository(db), Summaries: summaries, Lessons: lessons,
+		Artifacts: store, Jobs: jobs, JobReader: jobs, Clock: e.local, IDs: e.ids, Tx: db, Log: log,
+		ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
 	})
 	if err != nil {
 		return fmt.Errorf("app: homework drafts: %w", err)
@@ -119,8 +141,8 @@ func (c *core) wire(root string, e env, notifier notify.Notifier, log *slog.Logg
 	}
 
 	c.deliveries, err = senddelivery.New(senddelivery.Deps{
-		Deliveries: sqlite.NewDeliveryRepository(db), Artifacts: store, Email: e.email, Jobs: jobs,
-		Credentials: e.mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
+		Deliveries: sqlite.NewDeliveryRepository(db), Artifacts: store, Email: mailer, Jobs: jobs,
+		Credentials: mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
 	}, senddelivery.Config{MaxAttempts: maxAttempts})
 	if err != nil {
 		return fmt.Errorf("app: email delivery: %w", err)
@@ -144,7 +166,7 @@ func (c *core) wire(root string, e env, notifier notify.Notifier, log *slog.Logg
 	if err != nil {
 		return fmt.Errorf("app: job runner: %w", err)
 	}
-	for _, r := range registrations(jobHandlers{stt: stt, postProcess: post, drafts: drafts, delivery: c.deliveries}) {
+	for _, r := range registrations(jobHandlers{stt: stt, postProcess: post, drafts: c.drafts, delivery: c.deliveries}) {
 		if err := c.runner.Register(r); err != nil {
 			return fmt.Errorf("app: register %s jobs: %w", r.Type, err)
 		}

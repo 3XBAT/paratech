@@ -3,7 +3,7 @@ package tests
 // Scenario tests of the homework drafts (TASK-043, PRD sections 10 and 14 case 5, AC-13) on the real stack: SQLite, the
 // file store, the job runner and the homeworkflow use cases. The assignment comes from the post-processing of a
 // transcript, as in the app. Only the outside world is fake: the clock, the STT engine and the LLM (testenv.FakeLLM).
-// The draft repository is the in-memory testenv.MemDrafts until the sqlite one exists.
+// The draft repository is the sqlite one (TASK-057).
 
 import (
 	"context"
@@ -53,7 +53,7 @@ func newDraftsEnv(t *testing.T, llm *testenv.FakeLLM, register bool) (*ppEnv, *h
 	t.Helper()
 	e := newPPEnv(t, llm)
 	drafts, err := homeworkflow.NewDrafts(homeworkflow.DraftDeps{
-		LLM: llm, Assignments: e.assignments, Drafts: testenv.NewMemDrafts(), Summaries: e.summaries,
+		LLM: llm, Assignments: e.assignments, Drafts: sqlite.NewDraftRepository(e.db), Summaries: e.summaries,
 		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, JobReader: e.jobs, Clock: e.clock,
 		IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
 	})

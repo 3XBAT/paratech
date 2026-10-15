@@ -19,13 +19,13 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deliveries", "job_notices", "jobs", "recordings", "schedule_entries", "settings", "stt_models", "summaries",
-	"transcripts",
+	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "job_notices", "jobs", "recordings",
+	"schedule_entries", "settings", "stt_models", "summaries", "transcripts",
 }
 
 // unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version
-// column (ADR-0004(d)).
-var unversionedTables = map[string]bool{"job_notices": true}
+// column (ADR-0004(d)). Draft versions are append-only rows below homework_drafts, which carries the version.
+var unversionedTables = map[string]bool{"job_notices": true, "homework_draft_revisions": true}
 
 func tableNames(t *testing.T, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -75,8 +75,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 4 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 4", first, err)
+	if err != nil || first != 5 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 5", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")

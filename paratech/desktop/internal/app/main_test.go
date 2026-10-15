@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -26,17 +27,23 @@ func TestMain(m *testing.M) {
 type fakes struct {
 	power    *testenv.FakePower
 	recorder *testenv.FakeRecorder // set when openCore builds the recording session
+
+	// secrets are the credential stores by service: tests never touch the real Credential Manager.
+	secrets map[string]*testenv.MemCredentials
 }
 
 // testEnv is the outside world of the core in tests: the real clock (the wiring runs on real goroutines), fake power
-// on AC, the fake recorder, the test binary as whisper-cli and a fast single-worker runner.
+// on AC, the fake recorder, the test binary as whisper-cli, in-memory credential stores (empty: the Hub and mail are
+// not configured) and a fast single-worker runner.
 func testEnv(t *testing.T) (env, *fakes) {
 	t.Helper()
 	bin, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakes{power: testenv.NewFakePower(true)}
+	f := &fakes{power: testenv.NewFakePower(true), secrets: map[string]*testenv.MemCredentials{
+		hubSecretsService: testenv.NewMemCredentials(), mailSecretsService: testenv.NewMemCredentials(),
+	}}
 
 	runner := jobrunner.DefaultConfig()
 	runner.Workers = 1
@@ -54,12 +61,15 @@ func testEnv(t *testing.T) (env, *fakes) {
 			return f.recorder
 		},
 		whisperBinary: bin,
-		llm:           hubNotConfigured{},
-		email:         mailNotConfigured{},
-		mailSecrets:   mailSecretsNotConfigured{},
-		drafts:        draftsNotConfigured{},
-		runner:        runner,
-		recordings:    recordingsession.DefaultConfig(),
-		stopTimeout:   5 * time.Second,
+		secrets: func(service string) (secretStore, error) {
+			s, ok := f.secrets[service]
+			if !ok {
+				return nil, fmt.Errorf("no test credential store for %q", service)
+			}
+			return s, nil
+		},
+		runner:      runner,
+		recordings:  recordingsession.DefaultConfig(),
+		stopTimeout: 5 * time.Second,
 	}, f
 }

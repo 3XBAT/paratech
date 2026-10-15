@@ -160,6 +160,8 @@ func TestNewDraftsValidates(t *testing.T) {
 		{"alias is a URL", func(d *DraftDeps) { d.ModelAlias = "https://api.example.com" }},
 		{"no alias", func(d *DraftDeps) { d.ModelAlias = "" }},
 		{"negative attempts", func(d *DraftDeps) { d.MaxAttempts = -1 }},
+		{"negative generate retries", func(d *DraftDeps) { d.GenerateRetries = -1 }},
+		{"too many generate retries", func(d *DraftDeps) { d.GenerateRetries = MaxGenerateRetries + 1 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,8 +174,31 @@ func TestNewDraftsValidates(t *testing.T) {
 	}
 	d := e.draftDeps(e.llm)
 	d.MaxAttempts = 0
-	if s, err := NewDrafts(d); err != nil || s.maxAttempts != DefaultPostProcessAttempts {
-		t.Fatalf("default attempts: %v", err)
+	if s, err := NewDrafts(d); err != nil || s.maxAttempts != DefaultPostProcessAttempts ||
+		s.generateRetries != DefaultGenerateRetries {
+		t.Fatalf("defaults: %v", err)
+	}
+}
+
+// The retry bound comes from the configuration (the owner's test setups use small numbers).
+func TestGenerateRetriesFollowTheConfiguration(t *testing.T) {
+	e := newDraftEnv(t)
+	d := e.draftDeps(e.llm)
+	d.GenerateRetries = 2
+	svc, err := NewDrafts(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := range 3 {
+		res, err := svc.Generate(ctx, "a1", "")
+		if err != nil || !res.Created {
+			t.Fatalf("try %d: %+v, %v", i, res, err)
+		}
+		e.settle(res.JobID, job.StatusFailed)
+	}
+	if _, err := svc.Generate(ctx, "a1", ""); !errors.Is(err, ErrGenerateRetries) || e.jobCount() != 3 {
+		t.Fatalf("Generate = %v with %d jobs, want ErrGenerateRetries after 3", err, e.jobCount())
 	}
 }
 
@@ -342,7 +367,7 @@ func TestDraftJobKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k := draftJobKey(long, generateRetries); len(k) > job.MaxKeyBytes {
+	if k := draftJobKey(long, MaxGenerateRetries); len(k) > job.MaxKeyBytes {
 		t.Fatalf("key of %d bytes exceeds the job limit", len(k))
 	}
 }
@@ -499,7 +524,7 @@ func TestGenerateReturnsAnActiveOrCompletedJob(t *testing.T) {
 func TestGenerateRetriesAreBounded(t *testing.T) {
 	e := newDraftEnv(t)
 	ctx := context.Background()
-	for i := range generateRetries + 1 {
+	for i := range DefaultGenerateRetries + 1 {
 		res, err := e.svc.Generate(ctx, "a1", "")
 		if err != nil || !res.Created {
 			t.Fatalf("try %d: %+v, %v", i, res, err)
@@ -509,8 +534,8 @@ func TestGenerateRetriesAreBounded(t *testing.T) {
 	if _, err := e.svc.Generate(ctx, "a1", ""); !errors.Is(err, ErrGenerateRetries) {
 		t.Fatalf("Generate = %v, want ErrGenerateRetries", err)
 	}
-	if n := e.jobCount(); n != generateRetries+1 {
-		t.Fatalf("jobs = %d, want %d", n, generateRetries+1)
+	if n := e.jobCount(); n != DefaultGenerateRetries+1 {
+		t.Fatalf("jobs = %d, want %d", n, DefaultGenerateRetries+1)
 	}
 	if res, err := e.svc.Generate(ctx, "a1", "other"); err != nil || !res.Created {
 		t.Fatalf("other instructions: %+v, %v", res, err)

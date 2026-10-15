@@ -372,3 +372,42 @@ func TestSettingsPersistAcrossRestarts(t *testing.T) {
 		})
 	}
 }
+
+// The mail and Hub setup survives a save and a reload, and a tampered row is refused by the aggregate instead of
+// sending the API key to another host.
+func TestSettingsMailAndHubRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, nil)
+	r := NewSettingsRepository(db)
+
+	s := loadSettings(t, r)
+	mustChange(t, s.SetHomeworkRecipient("teacher@school.example", settingsT0))
+	mustChange(t, s.SetSMTPHost("smtp.example.org", settingsT0))
+	mustChange(t, s.SetSMTPPort(465, settingsT0))
+	mustChange(t, s.SetSMTPSecurity(settings.MailSecurityTLS, settingsT0))
+	mustChange(t, s.SetSMTPLogin("student@example.org", settingsT0))
+	mustChange(t, s.SetHubURL("https://hub.example.com", settingsT0))
+	saveSettings(t, r, s)
+
+	got := loadSettings(t, r)
+	if got.HomeworkRecipient() != "teacher@school.example" || got.SMTPHost() != "smtp.example.org" || got.SMTPPort() != 465 ||
+		got.SMTPSecurity() != settings.MailSecurityTLS || got.SMTPLogin() != "student@example.org" ||
+		got.HubURL() != "https://hub.example.com" || !got.MailConfigured() {
+		t.Fatalf("reloaded mail and hub settings differ: %+v", got)
+	}
+
+	mustChange(t, got.SetHubURL("", settingsT0.Add(time.Minute)))
+	saveSettings(t, r, got)
+	if again := loadSettings(t, r); again.HubURL() != "" || again.SMTPHost() != "smtp.example.org" {
+		t.Fatalf("after clearing the hub url: %q, %q", again.HubURL(), again.SMTPHost())
+	}
+
+	mustExec(t, db, "UPDATE settings SET hub_url = 'http://evil.example.com'")
+	if _, err := r.Load(ctx); !errors.Is(err, settings.ErrInvalidSettings) {
+		t.Fatalf("Load of a tampered hub url = %v, want ErrInvalidSettings", err)
+	}
+	mustExec(t, db, "UPDATE settings SET hub_url = ''")
+	if _, err := db.sql.ExecContext(ctx, "UPDATE settings SET smtp_security = 'none'"); !errors.Is(MapError(ctx, err), ErrConstraint) {
+		t.Fatalf("plaintext smtp security = %v, want a constraint violation", err)
+	}
+}

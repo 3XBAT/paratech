@@ -307,8 +307,11 @@ func TestNewValidatesConfig(t *testing.T) {
 			if (err == nil) != tt.ok {
 				t.Fatalf("New = %v, want ok %v", err, tt.ok)
 			}
-			if tt.ok && m.cfg.Port != tt.port {
-				t.Fatalf("port %d, want %d", m.cfg.Port, tt.port)
+			if !tt.ok {
+				return
+			}
+			if a, err := m.accounts.MailAccount(context.Background()); err != nil || a.Port != tt.port {
+				t.Fatalf("port %d (%v), want %d", a.Port, err, tt.port)
 			}
 		})
 	}

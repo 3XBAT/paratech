@@ -65,11 +65,12 @@ type Drafts struct {
 	tx          Tx
 	log         *slog.Logger
 
-	modelAlias  string
-	maxAttempts int
+	modelAlias      string
+	maxAttempts     int
+	generateRetries int
 }
 
-// NewDrafts checks the ports and the model alias.
+// NewDrafts checks the ports, the model alias and the limits.
 func NewDrafts(d DraftDeps) (*Drafts, error) {
 	if d.LLM == nil || d.Assignments == nil || d.Drafts == nil || d.Summaries == nil || d.Lessons == nil ||
 		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
@@ -82,13 +83,19 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 	if d.MaxAttempts < 0 {
 		return nil, fmt.Errorf("%w: max attempts %d", ErrInvalidConfig, d.MaxAttempts)
 	}
+	if d.GenerateRetries < 0 || d.GenerateRetries > MaxGenerateRetries {
+		return nil, fmt.Errorf("%w: generate retries %d, want 0-%d", ErrInvalidConfig, d.GenerateRetries, MaxGenerateRetries)
+	}
 	s := &Drafts{
 		llm: d.LLM, assignments: d.Assignments, drafts: d.Drafts, summaries: d.Summaries, lessons: d.Lessons,
 		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, clock: d.Clock, ids: d.IDs, tx: d.Tx, log: d.Log,
-		modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts,
+		modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts, generateRetries: d.GenerateRetries,
 	}
 	if s.maxAttempts == 0 {
 		s.maxAttempts = DefaultPostProcessAttempts
+	}
+	if s.generateRetries == 0 {
+		s.generateRetries = DefaultGenerateRetries
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -101,8 +108,8 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 // when the job completes. An equivalent generation whose job is still active or completed returns that job with
 // Created false (PRD section 14 case 5 forbids concurrent equivalent jobs). If that job failed or was cancelled, the
 // student retries: Generate enqueues the same request under the next round of the key (":r1", ":r2", ...), so
-// concurrent clicks after a failure still race for one key and make one job; after generateRetries rounds it returns
-// ErrGenerateRetries. Two generations from the same base with different instructions are two jobs: the one that
+// concurrent clicks after a failure still race for one key and make one job; after DraftDeps.GenerateRetries rounds
+// it returns ErrGenerateRetries. Two generations from the same base with different instructions are two jobs: the one that
 // finishes second fails with ErrDraftChanged, although the student edited nothing (the base moved on).
 // Errors: a missing assignment wraps shared.ErrNotFound, bad instructions values.ErrInvalidDraftRequest, a full
 // draft homeworkdraft.ErrFull; nothing is created then.
@@ -123,7 +130,7 @@ func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instructio
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
 
-	for round := 0; round <= generateRetries; round++ {
+	for round := 0; round <= s.generateRetries; round++ {
 		j, err := job.New(job.Spec{
 			ID: s.ids.NewJobID(), Type: HomeworkDraftJobType, Key: draftJobKey(req, round), Payload: req.Payload(),
 			MaxAttempts: s.maxAttempts,

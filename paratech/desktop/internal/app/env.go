@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/x509"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +14,7 @@ import (
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/instancelock"
 	"paratech/desktop/internal/adapters/random"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/winpower"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
@@ -47,6 +50,19 @@ type idSource interface {
 	NewMessageID() string
 }
 
+// secretStore is a credential store of one service: what senddelivery.CredentialStore writes and what the adapter of
+// that service reads (hubclient.Credentials, smtp.SecretReader).
+type secretStore interface {
+	senddelivery.CredentialStore
+	Get(ctx context.Context, name string) (string, error)
+}
+
+// Credential Manager services of the core (wincred.New): one store per service.
+const (
+	hubSecretsService  = "hub"
+	mailSecretsService = "mail"
+)
+
 // instanceLock is a held single-instance guard.
 type instanceLock interface {
 	Release() error
@@ -70,36 +86,48 @@ type env struct {
 	// whisperBinary is the absolute path of whisper-cli; when it cannot be used, STT jobs fail with a clear error.
 	whisperBinary string
 
-	// Not configured in this build (TASK-057): stand-ins with safe error classes.
-	llm         homeworkflow.LLMClient
-	email       senddelivery.EmailAdapter
-	mailSecrets senddelivery.CredentialStore
-	drafts      homeworkflow.DraftRepository
+	// secrets opens the credential store of a service; tests use testenv.MemCredentials, never Credential Manager.
+	secrets func(service string) (secretStore, error)
 
-	runner      jobrunner.Config
-	recordings  recordingsession.Config
-	stopTimeout time.Duration
+	// hubHTTP replaces the transport of the Hub client (tests: the fake Hub's certificate); nil in production.
+	hubHTTP *http.Client
+	// mailRoots replaces the system roots for the SMTP server certificate (tests); nil in production.
+	mailRoots *x509.CertPool
+
+	runner jobrunner.Config
+	// generateRetries bounds the restarts of one draft generation (homeworkflow.DraftDeps.GenerateRetries); 0: default.
+	generateRetries int
+	recordings      recordingsession.Config
+	stopTimeout     time.Duration
 }
 
 // productionEnv is the outside world of the real application.
 func productionEnv() env {
 	return env{
-		lock:          acquireLock,
-		clock:         clock.System{},
-		local:         clock.Local{},
-		ids:           random.IDs{},
-		jitter:        random.Jitter{},
-		power:         winpower.New(),
-		recorder:      func(*filestore.Store) recordingsession.Recorder { return audiocapture.Unavailable{} },
-		whisperBinary: whisperBinaryPath(),
-		llm:           hubNotConfigured{},
-		email:         mailNotConfigured{},
-		mailSecrets:   mailSecretsNotConfigured{},
-		drafts:        draftsNotConfigured{},
-		runner:        jobrunner.DefaultConfig(),
-		recordings:    recordingsession.DefaultConfig(),
-		stopTimeout:   defaultStopTimeout,
+		lock:            acquireLock,
+		clock:           clock.System{},
+		local:           clock.Local{},
+		ids:             random.IDs{},
+		jitter:          random.Jitter{},
+		power:           winpower.New(),
+		recorder:        func(*filestore.Store) recordingsession.Recorder { return audiocapture.Unavailable{} },
+		whisperBinary:   whisperBinaryPath(),
+		secrets:         credentialManager,
+		generateRetries: homeworkflow.DefaultGenerateRetries,
+		runner:          jobrunner.DefaultConfig(),
+		recordings:      recordingsession.DefaultConfig(),
+		stopTimeout:     defaultStopTimeout,
 	}
+}
+
+// credentialManager is the Windows Credential Manager store of a service. Off Windows every call fails with
+// wincred.ErrUnsupported: there is no weaker fallback.
+func credentialManager(service string) (secretStore, error) {
+	s, err := wincred.New(service)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // acquireLock is the file lock of the data directory.
