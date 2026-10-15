@@ -22,6 +22,9 @@ const (
 	MaxDueAhead    = 2 * 365 * 24 * time.Hour // a deadline further ahead is treated as a model error
 )
 
+// unixEpoch is the earliest due New accepts.
+var unixEpoch = time.Unix(0, 0).UTC()
+
 // Proposal is one action the LLM proposed. Fields change only through the methods below.
 type Proposal struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
@@ -61,7 +64,8 @@ type wire struct {
 //
 //   - send_homework_email: assignment_id;
 //   - export_homework: assignment_id, body (non-empty text, at most MaxBodyBytes);
-//   - create_deadline_event: assignment_id, title (one line, at most MaxTitleRunes), due (RFC 3339).
+//   - create_deadline_event: assignment_id, title (one line, at most MaxTitleRunes), due (RFC 3339, not before
+//     1970-01-01 UTC).
 //
 // Any failure wraps ErrMalformed. Error messages name fields, never their content.
 func New(id ID, out values.UntrustedOutput, now time.Time) (*Proposal, error) {
@@ -152,6 +156,10 @@ func (p *Proposal) fill(w wire) error {
 		due, err := time.Parse(time.RFC3339, *w.Due)
 		if err != nil {
 			return malformed("due is not an RFC 3339 time")
+		}
+		// A zero due would be stored as "no due" and the row could not be restored; no deadline predates the epoch.
+		if due.Before(unixEpoch) {
+			return malformed("due is before %s", unixEpoch.Format(time.DateOnly))
 		}
 		p.due = due.UTC()
 	}

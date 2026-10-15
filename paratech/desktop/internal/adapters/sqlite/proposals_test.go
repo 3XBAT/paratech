@@ -231,18 +231,20 @@ func TestProposalSaveConflicts(t *testing.T) {
 func TestProposalRowsAreChecked(t *testing.T) {
 	ctx := context.Background()
 	const insert = `INSERT INTO proposals (id, kind, status, assignment_id, reason, recipient, attachment_sha256,
-		confirmed_at, executed_at, version, created_at, updated_at) VALUES `
+		confirmed_at, executed_at, due_at, version, created_at, updated_at) VALUES `
 	refused := []struct{ name, values string }{
-		{"unknown kind", `('p1', 'send_email', 'VALIDATED', 'a1', '', '', '', NULL, NULL, 1, 0, 0)`},
-		{"unknown status", `('p1', 'export_homework', 'DONE', 'a1', '', '', '', NULL, NULL, 1, 0, 0)`},
-		{"no assignment", `('p1', 'export_homework', 'VALIDATED', '', '', '', '', NULL, NULL, 1, 0, 0)`},
-		{"empty id", `('', 'export_homework', 'VALIDATED', 'a1', '', '', '', NULL, NULL, 1, 0, 0)`},
-		{"rejected without a reason", `('p1', 'export_homework', 'REJECTED', 'a1', '', '', '', NULL, NULL, 1, 0, 0)`},
-		{"validated with a reason", `('p1', 'export_homework', 'VALIDATED', 'a1', 'unknown_assignment', '', '', NULL, NULL, 1, 0, 0)`},
-		{"confirmed without the time", `('p1', 'export_homework', 'CONFIRMED', 'a1', '', '', '', NULL, NULL, 1, 0, 0)`},
-		{"validated with a confirmation", `('p1', 'export_homework', 'VALIDATED', 'a1', '', '', '', 5, NULL, 1, 0, 0)`},
-		{"executed without the time", `('p1', 'export_homework', 'EXECUTED', 'a1', '', '', '', 5, NULL, 1, 0, 0)`},
-		{"short digest", `('p1', 'send_homework_email', 'VALIDATED', 'a1', '', 'a@b.cd', 'abc', NULL, NULL, 1, 0, 0)`},
+		{"unknown kind", `('p1', 'send_email', 'VALIDATED', 'a1', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"unknown status", `('p1', 'export_homework', 'DONE', 'a1', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"no assignment", `('p1', 'export_homework', 'VALIDATED', '', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"empty id", `('', 'export_homework', 'VALIDATED', 'a1', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"rejected without a reason", `('p1', 'export_homework', 'REJECTED', 'a1', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"validated with a reason", `('p1', 'export_homework', 'VALIDATED', 'a1', 'unknown_assignment', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"confirmed without the time", `('p1', 'export_homework', 'CONFIRMED', 'a1', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"validated with a confirmation", `('p1', 'export_homework', 'VALIDATED', 'a1', '', '', '', 5, NULL, NULL, 1, 0, 0)`},
+		{"executed without the time", `('p1', 'export_homework', 'EXECUTED', 'a1', '', '', '', 5, NULL, NULL, 1, 0, 0)`},
+		{"short digest", `('p1', 'send_homework_email', 'VALIDATED', 'a1', '', 'a@b.cd', 'abc', NULL, NULL, NULL, 1, 0, 0)`},
+		{"deadline without a due", `('p1', 'create_deadline_event', 'PROPOSED', 'a1', '', '', '', NULL, NULL, NULL, 1, 0, 0)`},
+		{"export with a due", `('p1', 'export_homework', 'PROPOSED', 'a1', '', '', '', NULL, NULL, 5, 1, 0, 0)`},
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {

@@ -33,6 +33,7 @@ CREATE TABLE proposals (
     version           INTEGER NOT NULL DEFAULT 0,            -- optimistic concurrency (ADR-0004)
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
+    CHECK ((due_at IS NOT NULL) = (kind = 'create_deadline_event')),
     CHECK ((reason <> '') = (status IN ('REJECTED', 'STALE'))),
     CHECK ((confirmed_at IS NOT NULL) = (status IN ('CONFIRMED', 'EXECUTED', 'STALE'))),
     CHECK ((executed_at IS NOT NULL) = (status = 'EXECUTED'))
