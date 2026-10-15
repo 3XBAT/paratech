@@ -147,13 +147,15 @@ function Invoke-Smoke([string]$Exe, [string]$Dir) {
 }
 
 $goExe = Find-Tool 'go' 'Install Go (see go.work for the version) and open a new terminal.'
-# npm.cmd first: the npm.ps1 shim would depend on the execution policy.
-$npmHint = 'Install Node.js 22 with npm and open a new terminal.'
-if ($null -ne (Get-Command 'npm.cmd' -CommandType Application -ErrorAction SilentlyContinue)) {
-    $npmExe = Find-Tool 'npm.cmd' $npmHint
-} else {
-    $npmExe = Find-Tool 'npm' $npmHint
+# npm.cmd first, then npm.exe (Volta-style shims): the extensionless npm next to them is a sh script that
+# & cannot run, and npm.ps1 depends on the execution policy. So only runnable Windows files are accepted.
+$npmCmd = @('npm.cmd', 'npm.exe') | ForEach-Object {
+    Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue
+} | Where-Object { @('.exe', '.cmd', '.bat') -contains $_.Extension } | Select-Object -First 1
+if ($null -eq $npmCmd) {
+    throw "'npm' was not found on PATH. Install Node.js 22 with npm and open a new terminal. This script installs nothing."
 }
+$npmExe = $npmCmd.Source
 
 if ($OutDir -eq '') {
     $OutDir = Join-Path $moduleRoot 'dist\alpha'

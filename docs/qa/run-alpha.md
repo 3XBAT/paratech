@@ -22,7 +22,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alp
 `-ExecutionPolicy Bypass` действует только на этот запуск, политика системы не меняется.
 
 Что делает скрипт:
-1. Проверяет, что `go` и npm (сначала `npm.cmd`, иначе `npm`) есть в PATH (если нет — понятная ошибка, ничего не ставит).
+1. Проверяет, что `go` и npm (сначала `npm.cmd`, иначе `npm.exe`) есть в PATH (если нет — понятная ошибка, ничего не ставит).
 2. `npm ci` и `npm run build` в `paratech\desktop\frontend` (интерфейс — главное окно и попап — встраивается в exe).
 3. `go build -tags production -trimpath` с `CGO_ENABLED=0`, `GOOS=windows`, `GOARCH=amd64`. Переменные ставятся только на время сборки, потом возвращаются прежние значения.
 4. Через `go version -m` проверяет, что exe собран с `-tags=production` и `CGO_ENABLED=0`.
@@ -74,7 +74,7 @@ cmd /c ".\paratech\dist\alpha\learning-assistant.exe --log-level debug 2> .\para
 
 Только в режиме с окном (по `docs/refs/wails.md` и коду Wails, при подготовке не запускалось):
 - кэш WebView2 в `%AppData%\learning-assistant.exe` (папка по имени exe);
-- служба уведомлений при старте пишет в реестр ключи `HKCU\Software\Classes\AppUserModelId\Learning Assistant` и `HKCU\Software\Classes\CLSID\<GUID>` (нужны, чтобы работали уведомления Windows), при выходе — `HKCU\SOFTWARE\Learning Assistant\NotificationCategories`. Данных пользователя там нет.
+- служба уведомлений при старте пишет в реестр ключи `HKCU\Software\Classes\AppUserModelId\Learning Assistant` и `HKCU\Software\Classes\CLSID\<GUID>` (нужны, чтобы работали уведомления Windows), при выходе — `HKCU\SOFTWARE\Learning Assistant\NotificationCategories`. Данных приложения (записей, настроек) там нет.
 
 Сброс: выйти из приложения (`Quit`), переименовать или удалить папку `%LOCALAPPDATA%\LearningAssistant`; при следующем запуске создастся пустая. Для опытов удобнее сразу `--data-dir` с одноразовой папкой.
 По желанию можно удалить и папку `%AppData%\learning-assistant.exe`; ключи реестра выше для сброса трогать не нужно: оставить их безвредно (запуск с окном создаёт их снова). Убирать их имеет смысл только при полном удалении приложения, и это необязательно.
@@ -111,7 +111,11 @@ level=INFO msg="recording prompt skipped" prompt=prompt-1
 
 - Скачать `whisper-bin-x64.zip` из релиза whisper.cpp с тегом `b5454` (это v1.9.5): https://github.com/ggml-org/whisper.cpp/releases/tag/b5454 ,
   SHA-256 `6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb` (он же в `docs/refs/whisper.md`).
-- Перед распаковкой проверить архив в PowerShell в папке, куда он скачан: `Get-FileHash .\whisper-bin-x64.zip -Algorithm SHA256`. Значение `Hash` должно совпасть с SHA-256 выше (регистр букв не важен). Если не совпадает — не распаковывать и не запускать, архив удалить и скачать заново со страницы релиза.
+- Перед распаковкой проверить архив в PowerShell в папке, куда он скачан:
+  ```powershell
+  (Get-FileHash .\whisper-bin-x64.zip -Algorithm SHA256).Hash -eq '6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb'
+  ```
+  `True` — архив тот самый (`-eq` не смотрит на регистр букв). `False` — не распаковывать и не запускать, архив удалить и скачать заново со страницы релиза.
 - Из папки `Release\` архива положить рядом с `learning-assistant.exe`: `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll` и все `ggml-cpu-*.dll`. Повторная сборка заменяет только exe, эти файлы остаются.
 - Что это даёт сейчас: пропадает предупреждение `speech recognition is not available ...`, и только **[проверено с подставным `whisper-cli.exe`: при старте приложение лишь проверяет, что файл есть, и не запускает его]**.
   Распознавать пока нечего: в этой сборке никто не создаёт задачи распознавания (TASK-060), экрана моделей нет (TASK-030, раздел «Модели» — заглушка).
