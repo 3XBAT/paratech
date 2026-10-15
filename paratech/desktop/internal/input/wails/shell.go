@@ -34,7 +34,7 @@ type Options struct {
 	Started func()
 }
 
-// Core is what the pages and the tray call through the bindings. Every field is required.
+// Core is what the pages and the tray call through the bindings. Every interface field is required.
 type Core struct {
 	Settings SettingsUseCase
 	Activity ActivityUseCase
@@ -43,6 +43,13 @@ type Core struct {
 	Prompt   PromptUseCase         // the recording popup; the tray's "Show recording popup" offers an ad-hoc prompt
 	Schedule ScheduleImportUseCase // the schedule import page; the shell shows its open dialog
 	Files    ScheduleFileReader    // reads the file chosen for the schedule import
+
+	// The models page; the shell shows its open dialog.
+	Models      ModelCatalogUseCase
+	Downloads   ModelDownloads
+	Imports     ModelImports
+	Links       LinkOpener
+	SpeechReady bool // whisper-cli was found at start
 
 	Connections ConnectionsUseCase // the mail and Hub section of the settings page
 }
@@ -55,6 +62,7 @@ type ui interface {
 	notify(ctx context.Context, t toast) error
 	canNotify() bool
 	pickScheduleFile() (string, error)
+	pickModelFile() (string, error)
 }
 
 // Shell owns the UI: the main window, the tray icon and the popup. Create it with New. Window commands are safe
@@ -155,6 +163,7 @@ type bindings struct {
 	activity *ActivityService
 	prompt   *PromptService
 	schedule *ScheduleImportService
+	models   *ModelsService
 
 	connections *ConnectionsService
 }
@@ -186,6 +195,9 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Files == nil {
 		return bindings{}, errors.New("wails: open core: no schedule file reader")
 	}
+	if core.Models == nil || core.Downloads == nil || core.Imports == nil || core.Links == nil {
+		return bindings{}, errors.New("wails: open core: no model manager")
+	}
 	if core.Connections == nil {
 		return bindings{}, errors.New("wails: open core: no connections use case")
 	}
@@ -194,6 +206,10 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
 		prompt:   NewPromptService(core.Prompt, s.opts.Log),
 		schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
+		models: NewModelsService(ModelsDeps{
+			Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links,
+			Picker: modelPickerFunc(s.pickModelFile), SpeechReady: core.SpeechReady,
+		}, s.opts.Log),
 
 		connections: NewConnectionsService(core.Connections, s.opts.Log),
 	}, nil
@@ -206,6 +222,15 @@ func (s *Shell) pickScheduleFile(context.Context) (string, error) {
 		return "", err
 	}
 	return u.pickScheduleFile()
+}
+
+// pickModelFile shows the open dialog of the model import over the main window; "" when the user cancels.
+func (s *Shell) pickModelFile(context.Context) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickModelFile()
 }
 
 func (s *Shell) markStarted() error {

@@ -110,7 +110,8 @@ func TestOpenBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := s.openBindings(context.Background())
-	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil || b.schedule == nil || b.connections == nil {
+	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil || b.schedule == nil || b.models == nil ||
+		b.connections == nil {
 		t.Fatalf("openBindings = %+v, %v", b, err)
 	}
 
@@ -133,16 +134,17 @@ func TestOpenBindings(t *testing.T) {
 		{name: "recording prompt use case", edit: func(c *Core) { c.Prompt = nil }},
 		{name: "schedule import use case", edit: func(c *Core) { c.Schedule = nil }},
 		{name: "schedule file reader", edit: func(c *Core) { c.Files = nil }},
+		{name: "model catalog", edit: func(c *Core) { c.Models = nil }},
+		{name: "model downloads", edit: func(c *Core) { c.Downloads = nil }},
+		{name: "model imports", edit: func(c *Core) { c.Imports = nil }},
+		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
 			opts := validOptions()
 			opts.OpenCore = func(context.Context) (Core, error) {
-				c := Core{
-					Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
-					Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(), Connections: &fakeConnections{},
-				}
+				c := validCore()
 				tt.edit(&c)
 				return c, nil
 			}
@@ -167,6 +169,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 5},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
+		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 6},
 	}
 	for _, tt := range tests {

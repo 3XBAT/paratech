@@ -11,9 +11,11 @@
     "src/bindings/activity.ts",
     "src/bindings/prompt.ts",
     "src/bindings/schedule.ts",
+    "src/bindings/models.ts",
     "src/bindings/connections.ts",
     "src/activityView.ts",
     "src/scheduleView.ts",
+    "src/modelsView.ts",
     "src/connectionsView.ts",
     "src/popup/view.ts",
     "src/nav.ts"

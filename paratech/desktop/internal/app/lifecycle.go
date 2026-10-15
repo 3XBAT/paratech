@@ -67,8 +67,12 @@ type lifecycle struct {
 	stopErr  error
 }
 
-// newLifecycle is the lifecycle of an opened core; the closers are released last, in order.
+// newLifecycle is the lifecycle of an opened core; the closers are released last, in order, after the work of the
+// model manager stopped (it writes through the storage).
 func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers ...closer) *lifecycle {
+	if c.manager != nil {
+		closers = append([]closer{{name: "model manager", close: c.manager.close}}, closers...)
+	}
 	return &lifecycle{
 		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, transcriptions: c.transcriptions,
 		cleanups: c.cleanups, loops: c.loops(), closers: closers, stopTimeout: stopTimeout,

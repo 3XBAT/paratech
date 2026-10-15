@@ -1,4 +1,4 @@
-// Sections of the main window. Models and Homework are placeholders filled by later tasks.
+// Sections of the main window. Homework is a placeholder filled by a later task.
 
 export type PageId = "recordings" | "models" | "homework" | "schedule" | "connections" | "settings";
 

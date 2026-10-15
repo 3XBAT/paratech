@@ -17,12 +17,17 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 func validOptions() Options {
 	return Options{
 		Name: "LA", InstanceID: "test.la", Log: discard(),
-		OpenCore: func(context.Context) (Core, error) {
-			return Core{
-				Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
-				Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(), Connections: &fakeConnections{},
-			}, nil
-		},
+		OpenCore: func(context.Context) (Core, error) { return validCore(), nil },
+	}
+}
+
+// validCore has every part the bindings need.
+func validCore() Core {
+	return Core{
+		Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
+		Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
+		Models: &fakeCatalog{}, Downloads: &fakeDownloads{}, Imports: &fakeImports{}, Links: &fakeLinks{},
+		Connections: &fakeConnections{},
 	}
 }
 
@@ -77,6 +82,11 @@ func (f *fakeUI) pickScheduleFile() (string, error) {
 	return "", nil
 }
 
+func (f *fakeUI) pickModelFile() (string, error) {
+	f.calls = append(f.calls, "pickModelFile")
+	return "", nil
+}
+
 func TestCommands(t *testing.T) {
 	s, err := New(validOptions())
 	if err != nil {
@@ -90,6 +100,7 @@ func TestCommands(t *testing.T) {
 		{"hidePopup", s.HidePopup},
 		{"showMain", s.ShowMain},
 		{"pickScheduleFile", func() error { _, err := s.pickScheduleFile(context.Background()); return err }},
+		{"pickModelFile", func() error { _, err := s.pickModelFile(context.Background()); return err }},
 	}
 
 	for _, c := range commands {
