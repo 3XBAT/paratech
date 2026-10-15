@@ -1397,7 +1397,6 @@
 ---
 
 ## [TASK-049] UI: экран импорта расписания (выбор файла, превью, подтверждение)
-## [TASK-036] Hub: GetRemaining — остаток квоты для клиента
 **Дата:** 2026-10-15
 **Статус:** done
 
@@ -1473,6 +1472,14 @@
 - delivery.NewAttachment принимает любой вид артефакта; можно ограничить exports/ в агрегате delivery
 - Тест env_other_test (!windows) только компилируется на этой машине (выполняется в CI ubuntu)
 - Нет теста, что assertNoSecrets сам ловит утечку
+
+---
+
+## [TASK-036] Hub: GetRemaining — остаток квоты для клиента
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
 - Обработчик, use case, журнал и документация контракта уже были с TASK-033/035 (input/connect/quota.go, cases/quota GetRemaining, common.proto QuotaSnapshot: «UI может кэшировать, авторитет — следующий Reserve»); по сверке AC все критерии выполнены, кода не добавлялось
 - Добавлен только тест шага 2 на HTTP-уровне: hub/tests/quota_test.go TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres — публичный Connect-обработчик с auth и реальным API-ключом на Postgres: 1000 -> reserve 400 (600/400) -> settle 150 (850/0) -> reserve 300 (550/300) -> release (850/0); чтение ничего не пишет; второй тестер видит свою нетронутую квоту и счёт ему не создаётся
 - Изменённых существующих тестов нет
