@@ -1655,3 +1655,40 @@
 - docs/qa/run-alpha.md, раздел 8 «Модели»: диалог с фильтром *.bin, «Отмена» молча; показанный SHA-256 = Get-FileHash; подтверждение ставит модель (размер верный); подмена файла между показом и подтверждением и повторный импорт отклоняются; «Сделать по умолчанию»; удаление (и отказ, пока задача использует модель); после импорта ждущая запись распознаётся без перезапуска (с whisper-cli); «Открыть страницу моделей whisper.cpp» открывает браузер; уход со страницы во время хеширования/подтверждения; вёрстка при 100% и 150%
 
 ---
+## [TASK-039] Экран ключа доступа к Hub и отображение остатка квоты
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/coursework/values: правило ключа Hub (печатный ASCII 1..2560, ParseHubAPIKey обрезает пробелы вставки, ошибка без значения), QuotaSnapshot/QuotaAmount (неотрицательные, одна единица, remaining <= limit) и QuotaReading (состояния current/offline/failed/keyRejected/notConfigured/noKey, stale, время получения)
+- adapters/hubclient: GetRemaining (unary QuotaService.GetRemaining): тот же путь URL/ключа, Bearer, таймаут, без редиректов, ответ <= 64 КиБ, та же mapCallError/mapDetail; некорректный снимок -> ErrBadResponse
+- cases/connections: второй слот секрета (api-key в хранилище wincred "hub", то же, что читает hubclient; тест сверяет имена), SetHubKey/RemoveHubKey (только статус), RefreshQuota: одна за раз, 30 с, кэш в памяти только для показа; смена ключа/адреса забывает значение, устаревший ответ отбрасывается (ErrQuotaSuperseded)
+- input/wails: SetHubKey, RemoveHubKey, RefreshQuota, hubKey и quota в GetConnections (статусы, числа, RFC 3339, фиксированные тексты; ключ никогда); app: мост ошибок hubclient -> connections, тот же клиент Hub из core.go
+- frontend: второй SecretSlot в блоке Hub, блок «Остаток квоты» (осталось/лимит/зарезервировано, «Обновлено», «Устарело», пометка «копия для показа», «Обновить»), логика в quotaView.ts; docs/qa/run-alpha.md, ADR-0009 (Connections)
+- Изменённые существующие тесты: cases/connections service_test (новые Deps/View поля, +3 случая TestNewValidates), wails connections_test (фейк +3 метода, JSON-имена, скрытие ошибок для ключа), settings_test TestFrontendCallsBoundNames (6 -> 9 методов), frontend connections.test.mjs (фикстуры hubKey/quota, 9 методов, строгий разбор, проверки исходника страницы); ничего не ослаблено
+- Ревью: approve (2 low, 4 nit). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) после rebase на 51e7401
+- [x] Шаг 1: npm run build (и npm run test: 76/76)
+- [x] Шаг 2: ключ не возвращается в UI: TestConnectionsPageKeepsTheHubKeySecret (ответы биндингов JSON, debug-лог, файлы БД UTF-8/UTF-16, строки), TestConnectionsHubWithoutCredentialStore, тесты исходника страницы; TestAppOptionsLoggerHasNoDebug, TestFloorLogger зелёные
+
+### Решения (подтвердить)
+- Кэш остатка только в памяти (без SQLite и миграции): после перезапуска значение появляется после первого обновления
+- Отклонённый ключ, нет адреса, нет ключа: значения не показываются (даже устаревшие); сеть/недоступность/таймаут: последнее значение с пометкой «устарело» и его временем
+- Страница сама обновляет остаток при открытии и после сохранения ключа/адреса, если адрес и ключ заданы (одно обращение к Hub на открытие)
+- Испорченный ключ в хранилище (записан не приложением) показывается как «Hub не принял ключ»
+
+### Заметки (follow-up)
+- Low: автообновление после сохранения ключа/адреса пропускается, если идёт обновление (once("quota")); старое вернётся superseded и пользователь жмёт «Обновить» вручную (ConnectionsPage.tsx ~167-215): повторить один раз после завершения
+- Low (ARCH-12/3.2): правило ключа и QuotaSnapshot/QuotaReading лежат в coursework/values по прецеденту LLMRequest; архитектору решить про контекст Hub/доступа в карте контекстов desktop
+- Nit: quotaView.ts дублирует текст keyRejected из Go и выводит «настроено» из hubUrl/hubKey; app/connections.go: комментарий к ErrMalformedAPIKey -> ErrHubKeyRejected; лишняя пустая строка в ConnectionsPage.tsx ~242
+- Гонка (security, не находка): обновление читает URL, затем ключ — новый ключ может уйти на прежний (выбранный пользователем) адрес; так же ведёт себя Complete
+- periodEnd в MVP пуст (невозобновляемая квота, ADR-0008), UI обрабатывает оба случая
+
+### Ручная проверка владельцем на Windows (ночью не выполнялась)
+- docs/qa/run-alpha.md, раздел 8: ввести ключ Hub (выдать на Hub: hub keys create) -> «Ключ задан», поле очищено, запись paratech/hub/api-key в Диспетчере учётных данных; ключ не показывается и после перезапуска
+- «Обновить» показывает остаток/лимит/резерв и время; Hub остановлен -> устаревшее значение со временем; неверный/отозванный ключ -> текст про ключ; без адреса -> указание на поле
+- С --log-level debug ключа в run.log нет
+
+---
