@@ -78,4 +78,15 @@ go run ./hub/cmd/hub keys list                        # ids, labels, status; nev
 go run ./hub/cmd/hub keys revoke -id <id>             # rejected from the next request on
 ```
 
+## Hub quota
+Each tester (API key) has one allowance that does not renew; clients read it with `QuotaService.GetRemaining`. Reserve, Settle
+and Release are Hub-internal (ADR-0005(f), ADR-0008). Settings (env or flag):
+
+| Env | Flag | Default | Rule |
+|---|---|---|---|
+| `HUB_QUOTA_UNIT` | `-quota-unit` | `tokens` | only `tokens` |
+| `HUB_QUOTA_LIMIT` | `-quota-limit` | `1000000` | > 0; a new value applies to every tester at once |
+| `HUB_QUOTA_RESERVATION_TTL` | `-quota-reservation-ttl` | `10m` | 1m..1h, longer than the longest gateway request |
+| `HUB_IDEMPOTENCY_RETENTION` | `-idempotency-retention` | `24h` | 1h..24h |
+
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.

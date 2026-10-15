@@ -20,6 +20,24 @@ func (id APIKeyID) Validate() error {
 	return nil
 }
 
+// reservationIDLen is the length of a reservation id: 16 random bytes in lowercase hex.
+const reservationIDLen = 32
+
+// ReservationID identifies one quota reservation (one attempt of an idempotency key, ADR-0005(d)). It is random, so
+// it reveals nothing about other reservations; it is not a secret.
+type ReservationID string
+
+// String returns the identifier as a plain string.
+func (id ReservationID) String() string { return string(id) }
+
+// Validate reports whether the identifier has the issued shape: exactly 32 lowercase hex characters.
+func (id ReservationID) Validate() error {
+	if len(id) != reservationIDLen || !isLowerHex(string(id)) {
+		return fmt.Errorf("%w: reservation id must be %d lowercase hex characters", ErrInvalidID, reservationIDLen)
+	}
+	return nil
+}
+
 // isLowerHex reports whether s is non-empty and consists only of 0-9 and a-f.
 func isLowerHex(s string) bool {
 	if s == "" {
