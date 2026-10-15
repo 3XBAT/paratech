@@ -1,4 +1,4 @@
-/* The window is 360x180 DIP (internal/input/wails/spec.go): everything must fit without scrollbars. */
+/* The window is 360x300 DIP (internal/input/wails/spec.go): everything must fit without scrollbars. */
 html, body, #root { height: 100%; margin: 0; }
 body { font: 13px/1.35 "Segoe UI", sans-serif; background: #fff; color: #222; overflow: hidden; user-select: none; cursor: default; }
 .popup { box-sizing: border-box; height: 100%; padding: 10px 14px; border: 1px solid #c8c8c8; display: flex; flex-direction: column; gap: 4px; }
@@ -14,3 +14,23 @@ button:hover:enabled { background: #e6e6e6; }
 button.primary { background: #0067c0; border-color: #0067c0; color: #fff; }
 button.primary:hover:enabled { background: #005aa8; }
 button:disabled { opacity: 0.6; cursor: default; }
+
+/* Source picker: one compact row; the list opens over the rest of the popup and scrolls inside itself. */
+.picker { position: relative; flex: none; }
+.source { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 3px 6px; text-align: left; }
+.source.chosen { background: #fff; }
+.source .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.icon { flex: none; width: 18px; height: 18px; object-fit: contain; }
+.letter { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; background: #dde3ea; color: #34495e; font-size: 11px; font-weight: 600; }
+.letter.whole { font-size: 8px; }
+.mark { flex: none; font-size: 11px; border-radius: 3px; padding: 0 4px; }
+.mark.playing { background: #dff3e4; color: #1b6e32; }
+.mark.muted, .mark.gone { background: #fde8e8; color: #9b1c1c; }
+.caret { flex: none; color: #555; }
+.backdrop { position: fixed; inset: 0; z-index: 1; }
+.list { position: absolute; z-index: 2; left: 0; right: 0; top: 100%; max-height: 190px; overflow-y: auto; margin: 2px 0 0; padding: 2px; list-style: none; background: #fff; border: 1px solid #b8b8b8; border-radius: 4px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); }
+.list .source { border-color: transparent; background: #fff; }
+.list .source:hover { background: #e8f0fa; }
+.list .source.current { background: #dbe8f7; }
+.warning { color: #8a4b00; font-size: 12px; }
+.advice { color: #666; font-size: 11px; line-height: 1.3; }

@@ -165,7 +165,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 	}{
 		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 4},
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
-		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 4},
+		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 5},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 6},
 	}

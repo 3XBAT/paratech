@@ -36,7 +36,7 @@
   registered with the Wails app the shell owns.
 - TASK-022: `Shell` also implements the `recordingprompt.Popup` port (`ShowPopup`/`HidePopup`); `ShowPopup` emits the
   Wails event `recordingprompt:shown` and the page reads `PromptService.Current`. Tray "Show recording popup" asks the
-  core for an ad-hoc prompt. The popup page becomes the React app's second entry (TASK-022 frontend); size 360x180.
+  core for an ad-hoc prompt. The popup page becomes the React app's second entry (TASK-022 frontend); size 360x180, 360x300 since TASK-059 (source picker).
   The `Popup` port takes no ctx: Wails window commands cannot be cancelled; the shutdown bounds them (`endLoops`).
 
 ## Check on Windows by a human (TASK-020)

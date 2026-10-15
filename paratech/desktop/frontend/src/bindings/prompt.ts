@@ -16,14 +16,40 @@ export interface PromptView {
   end: string;
   /** OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED or WITHDRAWN. */
   state: string;
-  /** Why the last start failed: "", "unavailable", "in_progress", "recovering" or "failed". */
+  /** Why the last start failed: "", "unavailable", "in_progress", "recovering", "source_gone" or "failed". */
   problem: string;
   canSnooze: boolean;
+}
+
+/** An app the popup may record from. */
+export interface SourceApp {
+  /** Executable name, for example "chrome.exe": the value Start takes. */
+  app: string;
+  /** Window title: untrusted text, render as plain text only. May be empty. */
+  title: string;
+  playing: boolean;
+  /** Muted in the Windows volume mixer: the recording would be silent. */
+  muted: boolean;
+  /** A browser records all its tabs. */
+  browser: boolean;
+  /** "" or a "data:image/png;base64," URL; use only as an <img> source. */
+  icon: string;
+}
+
+/** What the source picker offers. App names are exe names; "" is the whole computer. */
+export interface SourcesView {
+  apps: SourceApp[];
+  selected: string;
+  /** The app recorded last time, even when it is not open now. */
+  remembered: string;
+  /** The apps could not be listed: only the whole computer is offered. */
+  listError: boolean;
 }
 
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {
   current: "paratech/desktop/internal/input/wails.PromptService.Current",
+  sources: "paratech/desktop/internal/input/wails.PromptService.Sources",
   start: "paratech/desktop/internal/input/wails.PromptService.Start",
   snooze: "paratech/desktop/internal/input/wails.PromptService.Snooze",
   skip: "paratech/desktop/internal/input/wails.PromptService.Skip",
@@ -38,7 +64,11 @@ export const errorMessages = {
   gone: "the prompt is no longer current",
   refused: "the action is not possible now",
   actionFailed: "the action failed",
+  invalidSource: "invalid source",
 } as const;
+
+/** The only icon form the page shows. */
+export const iconPrefix = "data:image/png;base64,";
 
 function str(r: Record<string, unknown>, key: string): string {
   const v = r[key];
@@ -46,6 +76,58 @@ function str(r: Record<string, unknown>, key: string): string {
     throw new Error(`prompt: ${key} is not a string`);
   }
   return v;
+}
+
+function bool(r: Record<string, unknown>, key: string): boolean {
+  const v = r[key];
+  if (typeof v !== "boolean") {
+    throw new Error(`prompt: ${key} is not a boolean`);
+  }
+  return v;
+}
+
+function record(raw: unknown, what: string): Record<string, unknown> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(`prompt: ${what} is not an object`);
+  }
+  return raw as Record<string, unknown>;
+}
+
+// Base64 alphabet only, so the URL cannot carry anything but the image data.
+const base64Data = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function parseSourceApp(raw: unknown): SourceApp {
+  const r = record(raw, "source");
+  const app = str(r, "app");
+  if (app === "") {
+    throw new Error("prompt: source app is empty");
+  }
+  const icon = str(r, "icon");
+  if (icon !== "" && !(icon.startsWith(iconPrefix) && base64Data.test(icon.slice(iconPrefix.length)))) {
+    throw new Error("prompt: source icon is not a PNG data URL");
+  }
+  return {
+    app,
+    title: str(r, "title"),
+    playing: bool(r, "playing"),
+    muted: bool(r, "muted"),
+    browser: bool(r, "browser"),
+    icon,
+  };
+}
+
+/** Checks the shape of the picker reply; a malformed reply (or icon) is an error, not a default. */
+export function parseSourcesView(raw: unknown): SourcesView {
+  const r = record(raw, "reply");
+  if (!Array.isArray(r.apps)) {
+    throw new Error("prompt: apps is not a list");
+  }
+  return {
+    apps: r.apps.map(parseSourceApp),
+    selected: str(r, "selected"),
+    remembered: str(r, "remembered"),
+    listError: bool(r, "listError"),
+  };
 }
 
 /** Checks the shape of a prompt; a malformed reply is an error, not a default. */
@@ -76,7 +158,9 @@ export function parsePromptView(raw: unknown): PromptView {
 export interface PromptApi {
   /** The prompt that runs now, or null. */
   current(): Promise<PromptView | null>;
-  start(id: string): Promise<PromptView>;
+  sources(): Promise<SourcesView>;
+  /** Starts recording from app (an exe name; "" = the whole computer). */
+  start(id: string, app: string): Promise<PromptView>;
   snooze(id: string): Promise<PromptView>;
   skip(id: string): Promise<PromptView>;
 }
@@ -88,7 +172,8 @@ export function promptApi(call: CallByName): PromptApi {
       const raw = await call(methods.current);
       return raw === null || raw === undefined ? null : parsePromptView(raw);
     },
-    start: async (id) => parsePromptView(await call(methods.start, id)),
+    sources: async () => parseSourcesView(await call(methods.sources)),
+    start: async (id, app) => parsePromptView(await call(methods.start, id, app)),
     snooze: async (id) => parsePromptView(await call(methods.snooze, id)),
     skip: async (id) => parsePromptView(await call(methods.skip, id)),
   };

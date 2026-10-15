@@ -22,21 +22,31 @@ import (
 
 // fakePrompt is the recording prompt use case behind the binding.
 type fakePrompt struct {
-	view   recordingprompt.View
-	has    bool
-	err    error
-	calls  []string
-	gotIDs []prompt.ID
+	view       recordingprompt.View
+	has        bool
+	err        error
+	calls      []string
+	gotIDs     []prompt.ID
+	gotSources []values.Source
+
+	sources    recordingprompt.Sources
+	sourcesErr error
 }
 
 func (f *fakePrompt) Current() (recordingprompt.View, bool) { return f.view, f.has }
+
+func (f *fakePrompt) Sources(context.Context) (recordingprompt.Sources, error) {
+	f.calls = append(f.calls, "sources")
+	return f.sources, f.sourcesErr
+}
 
 func (f *fakePrompt) OfferAdHoc(context.Context) (recordingprompt.View, error) {
 	f.calls = append(f.calls, "offer")
 	return f.view, f.err
 }
 
-func (f *fakePrompt) Start(_ context.Context, id prompt.ID, _ values.Source) (recordingprompt.View, error) {
+func (f *fakePrompt) Start(_ context.Context, id prompt.ID, source values.Source) (recordingprompt.View, error) {
+	f.gotSources = append(f.gotSources, source)
 	return f.record("start", id)
 }
 
@@ -179,7 +189,7 @@ func TestPromptServiceActions(t *testing.T) {
 			uc := &fakePrompt{view: view, err: tt.err}
 			s := NewPromptService(uc, slog.New(slog.NewTextHandler(&logs, nil)))
 			calls := map[string]func() (PromptView, error){
-				"start":  func() (PromptView, error) { return s.Start(ctx, "prompt-1") },
+				"start":  func() (PromptView, error) { return s.Start(ctx, "prompt-1", "") },
 				"snooze": func() (PromptView, error) { return s.Snooze(ctx, "prompt-1") },
 				"skip":   func() (PromptView, error) { return s.Skip(ctx, "prompt-1") },
 			}
@@ -209,7 +219,7 @@ func TestPromptServiceRefusesInvalidIDs(t *testing.T) {
 	uc := &fakePrompt{}
 	s := NewPromptService(uc, discard())
 	for _, id := range []string{"", "../x", "a b", strings.Repeat("p", 65)} {
-		if _, err := s.Start(context.Background(), id); !errors.Is(err, ErrInvalidID) {
+		if _, err := s.Start(context.Background(), id, ""); !errors.Is(err, ErrInvalidID) {
 			t.Errorf("Start(%q) = %v, want ErrInvalidID", id, err)
 		}
 	}
@@ -234,21 +244,21 @@ func TestFrontendKnowsPromptErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range []error{ErrInvalidID, ErrPromptGone, ErrPromptRefused, ErrActionFailed} {
+	for _, e := range []error{ErrInvalidID, ErrPromptGone, ErrPromptRefused, ErrActionFailed, ErrInvalidSource} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/prompt.ts does not list the error %q", e)
 		}
 	}
 }
 
-// Every exported method is callable from the page: keep the set to the four the popup uses.
+// Every exported method is callable from the page: keep the set to the five the popup uses.
 func TestPromptServiceMethodSet(t *testing.T) {
 	typ := reflect.TypeFor[*PromptService]()
 	var got []string
 	for i := range typ.NumMethod() {
 		got = append(got, typ.Method(i).Name)
 	}
-	if want := []string{"Current", "Skip", "Snooze", "Start"}; !slices.Equal(got, want) {
+	if want := []string{"Current", "Skip", "Snooze", "Sources", "Start"}; !slices.Equal(got, want) {
 		t.Fatalf("exported methods %v, want %v", got, want)
 	}
 }

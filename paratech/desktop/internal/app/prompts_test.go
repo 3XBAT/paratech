@@ -66,7 +66,7 @@ func startFromPopup(t *testing.T, b *wails.PromptService, id string) wails.Promp
 	var v wails.PromptView
 	testenv.Eventually(t, "a start past the recovery", func() bool {
 		var err error
-		if v, err = b.Start(context.Background(), id); err != nil {
+		if v, err = b.Start(context.Background(), id, ""); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		return v.Problem != "recovering"
@@ -177,7 +177,7 @@ func TestPromptStartAfterAFailedStartFails(t *testing.T) {
 	if cur == nil || !popup.Visible() {
 		t.Fatalf("current prompt %+v, popup visible %v", cur, popup.Visible())
 	}
-	v, err := b.Start(ctx, cur.ID)
+	v, err := b.Start(ctx, cur.ID, "")
 	if err != nil || v.State != string(prompt.StateOffered) || v.Problem != "failed" {
 		t.Fatalf("Start = %+v, %v; want OFFERED with the failed problem", v, err)
 	}

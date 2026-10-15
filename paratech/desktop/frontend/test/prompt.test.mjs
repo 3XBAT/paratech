@@ -18,7 +18,7 @@ import {
 
 // Mirror domain/recording/prompt and internal/input/wails/prompt.go.
 const states = ["OFFERED", "STARTING", "STARTED", "SNOOZED", "SKIPPED", "EXPIRED", "WITHDRAWN"];
-const problems = ["unavailable", "in_progress", "recovering", "failed"];
+const problems = ["unavailable", "in_progress", "recovering", "source_gone", "failed"];
 
 const lesson = {
   id: "p1", kind: "lesson", title: "Матанализ <b>", start: "10:00", end: "11:30",
@@ -39,16 +39,18 @@ test("the api calls the bound Go methods with the prompt id", async () => {
   const { call, calls } = fakeCall(lesson);
   const api = promptApi(call);
   assert.deepEqual(await api.current(), lesson);
-  assert.deepEqual(await api.start("p1"), lesson);
+  assert.deepEqual(await api.start("p1", "zoom.exe"), lesson);
+  await api.start("p1", "");
   await api.snooze("p1");
   await api.skip("p1");
   assert.deepEqual(calls, [
     ["paratech/desktop/internal/input/wails.PromptService.Current"],
-    ["paratech/desktop/internal/input/wails.PromptService.Start", "p1"],
+    ["paratech/desktop/internal/input/wails.PromptService.Start", "p1", "zoom.exe"],
+    ["paratech/desktop/internal/input/wails.PromptService.Start", "p1", ""],
     ["paratech/desktop/internal/input/wails.PromptService.Snooze", "p1"],
     ["paratech/desktop/internal/input/wails.PromptService.Skip", "p1"],
   ]);
-  assert.equal(Object.keys(methods).length, 4);
+  assert.equal(Object.keys(methods).length, 5);
   assert.equal(shownEvent, "recordingprompt:shown");
 });
 
@@ -62,7 +64,7 @@ test("a malformed prompt is an error", async () => {
     assert.throws(() => parsePromptView(bad), undefined, JSON.stringify(bad));
   }
   const { title: _t, ...noTitle } = lesson;
-  await assert.rejects(promptApi(fakeCall(noTitle).call).start("p1"));
+  await assert.rejects(promptApi(fakeCall(noTitle).call).start("p1", ""));
 });
 
 test("every problem code has its own text, an unknown one the generic failure", () => {
@@ -171,6 +173,7 @@ test("binding errors get fixed Russian texts; raw text is never shown", () => {
   assert.equal(actionErrorText({ message: errorMessages.refused }), "Это действие сейчас недоступно.");
   assert.equal(actionErrorText(errorMessages.invalidId), "Неверный идентификатор предложения.");
   assert.equal(actionErrorText(new Error(errorMessages.actionFailed)), "Не удалось выполнить действие.");
+  assert.equal(actionErrorText(new Error(errorMessages.invalidSource)), "Этот источник звука нельзя выбрать.");
   assert.equal(actionErrorText(new Error("C:\\secret\\path failed")), "Не удалось выполнить действие.");
   assert.equal(actionErrorText(undefined), "Не удалось выполнить действие.");
 });

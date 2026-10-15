@@ -34,7 +34,9 @@ function act(method) {
   }
   busy = true;
   render(current, "");
-  Call.ByName(service + method, current.id)
+  // The fallback has no source picker: Start records the whole computer ("").
+  const args = method === "Start" ? [current.id, ""] : [current.id];
+  Call.ByName(service + method, ...args)
     .then((view) => {
       busy = false;
       render(view, "");
