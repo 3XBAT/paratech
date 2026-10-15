@@ -9,16 +9,22 @@ import (
 	"io"
 	"net"
 	"net/textproto"
+	"strings"
 
 	"github.com/wneessen/go-mail"
 
 	"paratech/desktop/internal/domain/delivery/delivery"
 )
 
+// goMailAuthFailed starts the error go-mail v0.8.1 returns when the AUTH exchange fails (Client.auth in client.go):
+// DialToSMTPClientWithContext returns it unwrapped, so the prefix tells a reply to AUTH from a reply to EHLO or
+// STARTTLS. TestCheckClassifiesTheSetup pins it.
+const goMailAuthFailed = "SMTP AUTH failed: "
+
 // classifySetup classifies a failure of the session setup (connect, EHLO, STARTTLS, AUTH). Nothing of the message was
 // sent yet, so it is never ErrOutcomeUnknown: the network and 4xx replies are transient, everything else (5xx such as
 // a failed login, an untrusted certificate, a server without STARTTLS or a usable AUTH mechanism) is a configuration
-// problem that retrying does not fix.
+// problem that retrying does not fix. The session class (ErrUnreachable ... ErrServerRefused) is added for Check.
 func classifySetup(err error) error {
 	var (
 		certErr     *tls.CertificateVerificationError
@@ -30,14 +36,30 @@ func classifySetup(err error) error {
 	)
 	switch {
 	case errors.As(err, &certErr), errors.As(err, &unknownAuth), errors.As(err, &hostErr), errors.As(err, &invalidErr):
-		return fail(msgCertificate, delivery.ErrRejected)
+		return withKind(fail(msgCertificate, delivery.ErrRejected), ErrCertificate)
 	case errors.As(err, &reply):
-		return replyClass("session setup", reply.Code, delivery.ErrRejected)
+		return setupReply(reply.Code, strings.HasPrefix(err.Error(), goMailAuthFailed))
 	case errors.As(err, &netErr), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF),
 		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return fail(msgConnect, delivery.ErrTransient)
+		return withKind(fail(msgConnect, delivery.ErrTransient), ErrUnreachable)
 	}
-	return fail(msgSetup, delivery.ErrRejected)
+	return withKind(fail(msgSetup, delivery.ErrRejected), ErrSetupUnsupported)
+}
+
+// setupReply classifies a reply code of the session setup; auth is whether it answered AUTH.
+func setupReply(code int, auth bool) error {
+	step := "session setup"
+	if auth {
+		step = "AUTH"
+	}
+	err := replyClass(step, code, delivery.ErrRejected)
+	switch {
+	case code >= 400 && code < 500:
+		return withKind(err, ErrServerTemporary)
+	case auth && code >= 500 && code < 600:
+		return withKind(err, ErrLoginRejected)
+	}
+	return withKind(err, ErrServerRefused)
 }
 
 // classifySend classifies a failure of SendWithSMTPClient by the step that failed (mail.SendError.Reason). The

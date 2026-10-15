@@ -25,4 +25,8 @@
 //
 // Reconcile cannot look a message up over SMTP and always returns delivery.ErrOutcomeUnknown (best effort; the user
 // resolves an UNKNOWN delivery).
+//
+// Check ("check mail" on the settings page) runs the same session setup as Send (one shared function: account,
+// password, TLS, EHLO, AUTH) and then QUIT, with no MAIL, RCPT or DATA. Every setup error also carries a session class
+// (ErrNotConfigured ... ErrServerRefused) for errors.Is; the texts stay the fixed ones above.
 package smtp
