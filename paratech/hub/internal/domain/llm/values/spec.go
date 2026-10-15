@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"strconv"
 )
 
 // Format limits of a completion spec (ADR-0005(b), gateway.proto CompletionSpec). They mirror the desktop core.
@@ -100,18 +101,16 @@ func (s Spec) PayloadBytes() int64 { return int64(len(s.instructions)) + int64(l
 const fingerprintDomain = "paratech.hub.v1.CompletionSpec/1"
 
 // Fingerprint is the hex SHA-256 of an unambiguous encoding of the spec without its key: operation, alias,
-// instructions, data (each with its length as 8 bytes big-endian) and the requested max output tokens. The key is
+// instructions, data and the requested max output tokens in decimal, each preceded by its length as 8 bytes
+// big-endian. The key is
 // left out because it is what the fingerprint is stored under. Two specs have the same fingerprint only if every
 // field but the key is equal; the texts themselves are never stored (ADR-0005(d)).
 func (s Spec) Fingerprint() string {
 	h := sha256.New()
 	writeField(h, fingerprintDomain)
-	for _, f := range []string{string(s.operation), s.alias, s.instructions, s.data} {
+	for _, f := range []string{string(s.operation), s.alias, s.instructions, s.data, strconv.FormatInt(s.maxOutput, 10)} {
 		writeField(h, f)
 	}
-	var n [8]byte
-	binary.BigEndian.PutUint64(n[:], uint64(s.maxOutput)) // never negative (NewSpec)
-	h.Write(n[:])
 	return hex.EncodeToString(h.Sum(nil))
 }
 
