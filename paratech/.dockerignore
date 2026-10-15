@@ -1,0 +1,8 @@
+# Build context of hub/Dockerfile is paratech/; only the hub and shared modules are sent to the daemon.
+*
+!hub/
+!shared/
+**/.env
+**/.env.*
+**/*.exe
+**/*.test
