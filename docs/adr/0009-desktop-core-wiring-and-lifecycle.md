@@ -1,7 +1,7 @@
 # ADR-0009: Desktop core wiring and lifecycle
 
 - **Status:** Accepted
-- **Source:** TASK-056; builds on ADR-0007 (Wails shell)
+- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060; builds on ADR-0007 (Wails shell)
 
 ## Context
 The use cases existed, but nothing built them: no job ran, no recording recovered, the page's Stop / Run now were stubs.
@@ -21,9 +21,10 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
   deleted; the OS drops the lock when the process dies. A held lock -> `openCore` fails with `instancelock.ErrHeld`.
 - **Start order:** startup cleanups (filestore temp files, whisper-cli work dirs; errors only logged) ->
   `jobrunner.Recover` -> `recordingsession.Recover` in the background (long assemblies must not delay jobs) ->
-  `senddelivery.Recover` -> `senddelivery.Resume` -> `runner.Start` -> loops (UI mode: `scheduler.Run`,
-  `recordingprompt.Run`). No binding may write artifacts or start a recording before `start` has run the cleanups and
-  the recording recovery has marked interrupted recordings (TASK-022 binding). TASK-022 closes it with
+  `senddelivery.Recover` -> `senddelivery.Resume` -> transcription sweep (`transcribe.Enqueuer.EnqueuePending`, TASK-060;
+  errors only logged) -> `runner.Start` -> loops (UI mode: `scheduler.Run`, `recordingprompt.Run`). No binding may
+  write artifacts or start a recording before `start` has run the cleanups and the recording recovery has marked
+  interrupted recordings (TASK-022 binding). TASK-022 closes it with
   `recordingsession.RecoveryMarked()`: closed when the first `Recover` ends its marking pass (or fails before it), or
   by `recordings.Close` (a failed start: Start then fails, not "recovering" forever); the prompt refuses Start until
   then ("recordings are being recovered, try again shortly").
@@ -35,7 +36,7 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 
 | Job type | Heavy | Recovery | Timeout | Why |
 |---|---|---|---|---|
-| `stt` | yes | requeue | 6 h | CPU-only, no side effects; long recordings on slow laptops |
+| `stt` | yes | requeue | 6 h | CPU-only, no side effects; long recordings on slow laptops. Registered only when whisper-cli is usable |
 | `summarize`, `extract_homework` | no | requeue | 10 min (5 x hub request timeout) | wait on the Hub; idempotent by key |
 | `homework_draft` | no | requeue | 10 min | same |
 | `send_email` | no | reconcile, uncancellable | 2 x SMTP timeout + 1 min | external side effect (hard rule 7) |
@@ -44,13 +45,28 @@ Use-case `MaxAttempts` = the runner's backoff `MaxAttempts`. The STT completion 
 enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<prompts version>`. Notifications cover the four
 non-email types, UI mode only (headless has no notifier).
 
+- **Recording -> STT (TASK-060).** `recordingsession` calls its `CompletionListener` after a recording is saved COMPLETED
+  with a track (stop, hard cap, capture ended, startup recovery); the app passes `transcribe.Enqueuer`. In one `Tx.Do` it
+  pins the model (`modelcatalog.ResolveForJob` through a bridge) and enqueues key `stt:<recording id>:<model id>`. A
+  recording that has any STT job gets none (no second job when the default model changed). No model: no job, a WARN
+  line. A crash between the save and the call loses the call; the startup sweep (COMPLETED, track, no transcript)
+  catches up, so delivery is at least once.
+- **No whisper-cli (TASK-060).** The `stt` type is registered only with a usable engine. Otherwise STT jobs stay QUEUED
+  (the runner claims and recovers only registered types), and the same job runs after the install and a restart. The
+  permanent STT stand-in of TASK-056 is gone.
+- **Heavy cap (TASK-060).** `jobrunner.Config.MaxHeavy` (default 1): a worker reserves a heavy slot before the claim and
+  frees it after the attempt; without a free slot it claims only light types. So 2 workers never run 2 whisper-cli.
+- **Models (TASK-060).** `modelcatalog.Service`, `Downloader` (`httpdownload`, `filestore` free space) and `Importer`
+  (`localfile`) are on the core for TASK-030 (no bindings yet). `values.ParseCatalog` refuses a manifest without entries and
+  no ggml model has a verified SHA-256, so the catalog source is a stand-in: catalog list, download and import fail with
+  "model catalog: not configured in this build"; installed models, the default and the job pin work.
+
 - **Hub, mail, drafts (TASK-057).** `hubclient` and `smtp` read the Hub URL and the mail account from the settings at
   every call (bridges in `internal/app/settingsbridge.go`, mapping only); the API key and the SMTP password come from
   one `wincred` store per service (`hub`, `mail`), shared by the adapter (reads) and `senddelivery` (writes). Not
   configured: LLM jobs park in WAITING_FOR_NETWORK ("hub: not configured", no attempts used), an email is
   `delivery.ErrRejected`. Drafts: `sqlite.DraftRepository`. Off Windows the stores fail with `ErrUnsupported`.
-- **Stand-ins** (`internal/app/standins.go`): STT engine -> permanent, used when `whisper-cli(.exe)` next to the
-  executable is missing or refused (logged at startup).
+- **Stand-ins** (`internal/app/standins.go`): the model catalog (above).
 - **Recorder (TASK-017).** Windows: `audiocapture.Recorder`, which runs this executable as the recorder child
   (ADR-0002). Other OSes: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`, so
   interrupted recordings keep their chunks for a later recovery.
@@ -62,12 +78,14 @@ non-email types, UI mode only (headless has no notifier).
 - **Data dir:** `learning-assistant.db`, `learning-assistant.lock`, `artifacts/` (Storage Manager root), `artifacts/stt-work/`.
 
 ## Not wired yet (follow-ups)
-- Enqueueing STT when a recording completes (model pin, key, startup sweep): no STT job is created in production yet.
-  The STT stand-in fails jobs permanently, so a job keyed `stt:<recording>:<model>` that failed while whisper-cli was
-  missing would block transcription after the install is fixed: that task must handle it (e.g. a parking class or a new key round).
-- `modelcatalog`, `homeworkflow.Service`, proposals and the calendar sync of `schedulesync`.
-- Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049; the
-  Windows recorder by TASK-017.
+- `homeworkflow.Service` and proposals (TASK-060 part 2); the calendar sync of `schedulesync` (TASK-051).
+- A model catalog manifest with verified SHA-256 (or an empty catalog accepted by the domain): owner decision.
+- The SHA-256 pin check of the whisper-cli binary (docs/refs/whisper.md), TASK-054 or later.
+- A model installed while the app runs gets its waiting recordings enqueued only at the next start (TASK-030 can call
+  the sweep after an install).
+- Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
+  the Windows recorder by TASK-017;
+  recording -> STT, `modelcatalog` and the heavy cap by TASK-060.
 - Settings UI for mail and Hub, bindings of the drafts (TASK-045) and of the Hub key (TASK-039).
 
 ## Consequences
