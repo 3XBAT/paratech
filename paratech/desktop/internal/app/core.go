@@ -15,6 +15,7 @@ import (
 	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/whispercli"
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -52,10 +53,11 @@ type core struct {
 	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
 	transcriptions *transcribe.Enqueuer
 
-	// The model manager of the models screen; no binding yet (TASK-030).
+	// The model manager of the models page; manager is what the page binds to and owns its background work.
 	models    *modelcatalog.Service
 	downloads *modelcatalog.Downloader
 	imports   *modelcatalog.Importer
+	manager   *modelManager
 
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
@@ -155,7 +157,8 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 
 	// Without a usable engine the stt type stays unregistered and STT jobs wait QUEUED (see registrations).
 	handlers := jobHandlers{postProcess: post, drafts: c.drafts}
-	if engine := c.sttEngine(root, e.whisperBinary, log); engine != nil {
+	engine := c.sttEngine(root, e.whisperBinary, log)
+	if engine != nil {
 		// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
 		stt, err := transcribe.New(transcribe.Deps{
 			Engine: engine, Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db),
@@ -221,8 +224,17 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 		return fmt.Errorf("app: activity: %w", err)
 	}
 
-	c.cleanups = append(c.cleanups, cleanup{name: "artifact temporary files", run: store.CleanupTemp})
-	c.ui = wails.Core{Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner}
+	// A model installed while the app runs gets the waiting recordings enqueued at once; whisper-cli is still found
+	// only at start, so without it their jobs wait QUEUED until a restart (the page says so: SpeechReady).
+	c.manager = newModelManager(c, c.transcriptions, log, e.stopTimeout)
+
+	// The model manager writes artifacts only after the temporary files of a crashed run are gone.
+	c.cleanups = append(c.cleanups, cleanup{name: "artifact temporary files", run: store.CleanupTemp},
+		cleanup{name: "model manager writes allowed", run: c.manager.markReady})
+	c.ui = wails.Core{
+		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
+		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
+	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, log); err != nil {
 		return err
 	}

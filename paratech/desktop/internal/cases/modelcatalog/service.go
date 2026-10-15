@@ -20,6 +20,7 @@ const (
 	opSetDefault    = "modelcatalog: set default model"
 	opDelete        = "modelcatalog: delete model"
 	opResolve       = "modelcatalog: resolve model for job"
+	opCurrentModel  = "modelcatalog: current model"
 	opSourcePage    = "modelcatalog: model source page"
 )
 
@@ -373,25 +374,41 @@ func (s *Service) clearDefault(ctx context.Context, id shared.SttModelID) error 
 func (s *Service) ResolveForJob(ctx context.Context, requested shared.SttModelID) (PinnedModel, error) {
 	var pinned PinnedModel
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
-		st, err := s.settings.Load(ctx)
-		if err != nil {
-			return err
-		}
-		installed, err := s.models.List(ctx)
-		if err != nil {
-			return err
-		}
-		m, err := s.sel.Resolve(requested, st.DefaultSttModel(), installed)
-		if err != nil {
-			return err
-		}
-		pinned = PinnedModel{ID: m.ID(), Name: m.Name(), ModelVersion: m.ModelVersion()}
-		return nil
+		var err error
+		pinned, err = s.resolve(ctx, requested)
+		return err
 	})
 	if err != nil {
 		return PinnedModel{}, fmt.Errorf("%s: %w", opResolve, err)
 	}
 	return pinned, nil
+}
+
+// CurrentModel returns the model a new STT job would pin, for display. It opens no transaction, so it does not take
+// the write lock, and may be momentarily stale against a concurrent SetDefault or Delete; jobs use ResolveForJob.
+func (s *Service) CurrentModel(ctx context.Context) (PinnedModel, error) {
+	pinned, err := s.resolve(ctx, "")
+	if err != nil {
+		return PinnedModel{}, fmt.Errorf("%s: %w", opCurrentModel, err)
+	}
+	return pinned, nil
+}
+
+// resolve loads the settings and the installed models and asks the selector.
+func (s *Service) resolve(ctx context.Context, requested shared.SttModelID) (PinnedModel, error) {
+	st, err := s.settings.Load(ctx)
+	if err != nil {
+		return PinnedModel{}, err
+	}
+	installed, err := s.models.List(ctx)
+	if err != nil {
+		return PinnedModel{}, err
+	}
+	m, err := s.sel.Resolve(requested, st.DefaultSttModel(), installed)
+	if err != nil {
+		return PinnedModel{}, err
+	}
+	return PinnedModel{ID: m.ID(), Name: m.Name(), ModelVersion: m.ModelVersion()}, nil
 }
 
 // catalogEntry loads the catalog and returns the entry with the id.

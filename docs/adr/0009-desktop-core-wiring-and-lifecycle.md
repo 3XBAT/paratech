@@ -1,7 +1,7 @@
 # ADR-0009: Desktop core wiring and lifecycle
 
 - **Status:** Accepted
-- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060; builds on ADR-0007 (Wails shell)
+- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030; builds on ADR-0007 (Wails shell)
 
 ## Context
 The use cases existed, but nothing built them: no job ran, no recording recovered, the page's Stop / Run now were stubs.
@@ -12,8 +12,9 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
   (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer, Prompt,
-  Schedule, Files, Connections}` (all required; `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049,
-  `Connections` since TASK-062). `start` runs
+  Schedule, Files, Models, Downloads, Imports, Links, SpeechReady, Connections}` (interfaces required; `Prompt` since
+  TASK-022, `Schedule` and `Files` since TASK-049, the model fields since TASK-030, `Connections` since TASK-062).
+  `start` runs
   once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine; headless right after
   `openCore` inside `Run` (headless now opens the core; no data dir is an error).
 - **Single instance.** UI: Wails' named mutex first (a second UI instance hands off to the window and exits before
@@ -57,10 +58,17 @@ non-email types, UI mode only (headless has no notifier).
   permanent STT stand-in of TASK-056 is gone.
 - **Heavy cap (TASK-060).** `jobrunner.Config.MaxHeavy` (default 1): a worker reserves a heavy slot before the claim and
   frees it after the attempt; without a free slot it claims only light types. So 2 workers never run 2 whisper-cli.
-- **Models (TASK-060).** `modelcatalog.Service`, `Downloader` (`httpdownload`, `filestore` free space) and `Importer`
-  (`localfile`) are on the core for TASK-030 (no bindings yet). The catalog is an embedded manifest with `"models": []`
-  (`internal/app/catalog.json`; the domain accepts an explicit empty list): no ggml model has a verified SHA-256 yet,
-  so the catalog list is empty and download has nothing to offer. Manual import, the default and the job pin work.
+- **Models (TASK-060, TASK-030).** `modelcatalog.Service`, `Downloader` (`httpdownload`, `filestore` free space) and
+  `Importer` (`localfile`) sit behind `app.modelManager`, which the models page binds to. It owns one background
+  download at a time (cancelled at shutdown, partial bytes kept), lets writes start only after the startup cleanups,
+  and after every install and every default change runs `EnqueuePending` in the background (passes never overlap;
+  errors only WARN), so waiting recordings get their STT job without a restart. The first model needs no default
+  (`Resolve` takes the only installed one); with several and no default the jobs wait for SetDefault. whisper-cli is
+  still found only at start (`SpeechReady`). Shutdown stops the manager before the storage (a closer, 15 s).
+  Source pages open through `adapters/weblink`: `%WINDIR%\explorer.exe <url>` after a strict link check, no shell.
+  The catalog is an embedded manifest with `"models": []` (`internal/app/catalog.json`; the domain accepts an explicit
+  empty list): no ggml model has a verified SHA-256 yet, so the catalog list is empty and download has nothing to
+  offer. Manual import, the default and the job pin work.
 
 - **Hub, mail, drafts (TASK-057).** `hubclient` and `smtp` read the Hub URL and the mail account from the settings at
   every call (bridges in `internal/app/settingsbridge.go`, mapping only); the API key and the SMTP password come from
@@ -85,15 +93,15 @@ non-email types, UI mode only (headless has no notifier).
 - `homeworkflow.Service` and proposals (TASK-060 part 2); the calendar sync of `schedulesync` (TASK-051).
 - Catalog entries with verified SHA-256 in `internal/app/catalog.json`.
 - The SHA-256 pin check of the whisper-cli binary (docs/refs/whisper.md), TASK-054 or later.
-- A model installed while the app runs gets its waiting recordings enqueued only at the next start (TASK-030 can call
-  the sweep after an install).
 - Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
-  the Windows recorder by TASK-017; recording -> STT, `modelcatalog` and the heavy cap by TASK-060.
+  the Windows recorder by TASK-017; recording -> STT, `modelcatalog` and the heavy cap by TASK-060; the models page
+  by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed for an unknown machine).
 - Bindings of the drafts (TASK-045) and of the Hub key (TASK-039; a second secret slot in `cases/connections`).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,
-  `audiocapture`) import only domain and std (`instancelock` and `audiocapture` also `x/sys/windows`).
+  `audiocapture`, `weblink`) import only domain and std (`instancelock`, `audiocapture` and `weblink` also
+  `x/sys/windows`).
 - `userfile` (TASK-049, std only) reads the file chosen for the schedule import, so the binding does no file access.
 - The page's "not available yet" error is gone; Stop / Run now always reach the use cases.
 - Open owner decisions: STT timeout 6 h; model alias `default`; Message-ID domain `learning-assistant.invalid`; LLM jobs
