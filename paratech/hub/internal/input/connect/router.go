@@ -30,9 +30,7 @@ type ReadinessProbe interface {
 	Ping(ctx context.Context) error
 }
 
-// Deps are what the router serves. A nil service is served by the generated Unimplemented handler, which answers
-// every RPC with CodeUnimplemented, until the gateway and quota tasks provide real ones. Auth is required: every RPC
-// passes the API-key interceptor (AC-25), so no handler can be mounted without it.
+// Deps are what the router serves; Auth is required (AC-25), a nil service answers CodeUnimplemented.
 type Deps struct {
 	Log       *slog.Logger
 	Readiness ReadinessProbe
@@ -59,12 +57,15 @@ func NewRouter(d Deps) (http.Handler, error) {
 
 	opts := []connectrpc.HandlerOption{
 		connectrpc.WithReadMaxBytes(maxRequestBytes),
-		connectrpc.WithInterceptors(authInterceptor{auth: d.Auth, log: d.Log}),
+		connectrpc.WithInterceptors(requireIdentity{log: d.Log}),
+	}
+	authenticated := func(next http.Handler) http.Handler {
+		return requireAPIKey{auth: d.Auth, log: d.Log, errs: connectrpc.NewErrorWriter(opts...), next: next}
 	}
 	path, h := hubv1connect.NewGatewayServiceHandler(d.Gateway, opts...)
-	r.Mount(path, h)
+	r.Mount(path, authenticated(h))
 	path, h = hubv1connect.NewQuotaServiceHandler(d.Quota, opts...)
-	r.Mount(path, publicQuota(h))
+	r.Mount(path, publicQuota(authenticated(h))) // internal RPCs answer 404 before authentication
 
 	return r, nil
 }
