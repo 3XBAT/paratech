@@ -106,6 +106,9 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   - Restarts: a crashed child or one silent for 30 s is restarted after 1/2/4 s, at most 3 times, with the missed time
     as lead silence and in the mode it ended in; a reported failure is not restarted. `Wait` then returns `ErrCaptureFailed`.
   - Default target until TASK-059: EXCLUDE of our own process tree; the WASAPI source (phase B) falls back to system.
+  - Done (phase B): the Windows WASAPI source (one process loopback activation per child, reopen budget of 5 tries per
+    incident), the process checker and the wiring; manual checks in `docs/tasks/TASK-017-recorder-manual-checks.md`.
+    Mute detection and storing a mode switch as a problem of the recording are TASK-058.
 - **TASK-058 (diagnostics):** log at start (no audio content): Windows build, chosen mode, target exe and PID, output device
   names, stream format, every attempt with its HRESULT, each switch with its reason. Tone self-test: our own tone is not in the
   chosen app's tree, so test INCLUDE of our own PID and classic loopback; it proves the build works, not that the chosen app is
