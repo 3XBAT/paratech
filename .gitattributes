@@ -4,3 +4,5 @@
 *.png binary
 *.ico binary
 *.sh text eol=lf
+# progress.txt is an append-only log: parallel branches keep both entries instead of conflicting.
+progress.txt merge=union
