@@ -1,6 +1,7 @@
 // Package account is the quota aggregate of one tester (PRD section 9.2, AC-11): the used and held totals, the
-// reservations (entities of the aggregate) and the idempotency keys that address them. Every change of the totals
-// produces a ledger Movement. The limit comes from the Policy, not from storage.
+// reservations (entities of the aggregate) and the idempotency keys that address them, with the stored result of a
+// completed gateway attempt (Start, Complete). Every change of the totals produces a ledger Movement. The limit comes
+// from the Policy, not from storage.
 //
 // Totals: used is what was charged, held what RESERVED reservations hold. remaining = max(0, limit - used - held).
 // used + held never overflows int64: a hold is at most the remaining quota, and a charge above the hold at most
@@ -108,6 +109,9 @@ func Restore(owner shared.APIKeyID, p Policy, used, held int64, rs []Reservation
 		if !ok || latest.rec.Key != k.Key || latest.rec.Attempt != k.Attempts || latest.rec.Amount != k.Fingerprint.Amount {
 			return nil, fmt.Errorf("%w: key record does not match its latest reservation", ErrInvalidRecord)
 		}
+		if err := validateResult(k, latest.rec); err != nil {
+			return nil, err
+		}
 		a.keys[k.Key] = &k // a per-iteration copy (Go 1.22 loop semantics)
 	}
 	return a, nil
@@ -199,7 +203,7 @@ func (a *Account) Reserve(req ReserveRequest, id shared.ReservationID, now time.
 	a.movements = append(a.movements, Movement{Kind: MovementReserve, Reservation: id, HeldDelta: amount, At: now})
 
 	if live {
-		k.Attempts, k.Latest = attempt, id
+		k.Attempts, k.Latest, k.Result = attempt, id, Result{}
 	} else {
 		a.keys[req.key] = &KeyRecord{Key: req.key, Fingerprint: req.fingerprint, CreatedAt: now, Attempts: attempt, Latest: id}
 	}
@@ -283,6 +287,55 @@ func (a *Account) Release(id shared.ReservationID, reason ReleaseReason, now tim
 	a.markUpdated(id)
 	a.movements = append(a.movements, Movement{Kind: MovementRelease, Reservation: id, HeldDelta: -r.rec.Amount, At: now})
 	return r.rec, nil
+}
+
+// Start begins a gateway call with req's key (gateway.proto, key life cycle), deciding by the latest attempt like
+// Reserve: a new attempt opens reservation id and returns it with no result; a COMPLETED latest attempt returns its
+// reservation and its stored result (Result.Stored), so nothing is held or charged again; a RUNNING one (RESERVED and
+// not expired) is ErrAttemptRunning. req must carry a request hash, so a different request is ErrIdempotencyConflict
+// before anything is replayed. The other errors are those of Reserve. A COMPLETED attempt without its result (not
+// written by the gateway) is ErrResultMissing.
+func (a *Account) Start(req ReserveRequest, id shared.ReservationID, now time.Time) (ReservationRecord, Result, error) {
+	if req.fingerprint.RequestHash == "" {
+		return ReservationRecord{}, Result{}, fmt.Errorf("%w: a gateway call needs a request hash", ErrInvalidArgument)
+	}
+	rec, replayed, err := a.Reserve(req, id, now)
+	if err != nil || !replayed {
+		return rec, Result{}, err
+	}
+	if rec.State == StateReserved {
+		return rec, Result{}, ErrAttemptRunning
+	}
+	res := a.keys[req.key].Result
+	if !res.Stored {
+		return rec, Result{}, ErrResultMissing
+	}
+	return rec, res, nil
+}
+
+// Complete settles reservation id in full with u and keeps res as the result of its attempt. The result is stored
+// only while the attempt is the latest of its key and the key is within its retention; a late attempt (a newer one
+// owns the key, quota.proto) is charged but its result is discarded. The key record must be loaded (Scope.Key and
+// Scope.Reservation). u must not be partial and must equal the result's usage. A repeat keeps the first result; the
+// errors are those of Settle.
+func (a *Account) Complete(id shared.ReservationID, u Usage, res Result, now time.Time) (ReservationRecord, error) {
+	if u.partial || res.validate() != nil || !res.Stored || res.Total() != u.actual {
+		return ReservationRecord{}, fmt.Errorf("%w: a complete settlement needs a result with the same usage", ErrInvalidArgument)
+	}
+	if r, ok := a.reservations[id]; ok && a.keys[r.rec.Key] == nil {
+		return ReservationRecord{}, fmt.Errorf("%w: the key record of the reservation is not loaded", ErrInvalidArgument)
+	}
+	rec, err := a.Settle(id, u, now)
+	if err != nil {
+		return rec, err
+	}
+	k := a.keys[rec.Key]
+	if k.Latest != id || k.stale(now, a.policy.retention) || k.Result.Stored {
+		return rec, nil
+	}
+	k.Result = res
+	a.keyWrites = append(a.keyWrites, k.Key)
+	return rec, nil
 }
 
 // Changes returns what the commands since Restore changed, for the repository.

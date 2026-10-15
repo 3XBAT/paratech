@@ -51,6 +51,10 @@ func (p Policy) ReservationTTL() time.Duration { return p.ttl }
 // KeyRetention returns how long an idempotency key record lives; after that the same text is a new key.
 func (p Policy) KeyRetention() time.Duration { return p.retention }
 
+// ResultCutoff is the newest key creation time whose stored result has outlived the retention at now: results of key
+// records created at or before it are never returned again and may be deleted (PRD section 13.2, ADR-0005(d)).
+func (p Policy) ResultCutoff(now time.Time) time.Time { return now.Add(-p.retention) }
+
 func (p Policy) valid() bool {
 	return p.unit == UnitTokens && p.limit > 0 && p.ttl > 0 && p.retention >= p.ttl
 }
