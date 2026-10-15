@@ -10,6 +10,10 @@ var (
 
 	// ErrUnsupportedKind means a stored proposal has a kind this use case cannot execute.
 	ErrUnsupportedKind = errors.New("unsupported proposal kind")
+
+	// ErrGenerateRetries is returned by Drafts.Generate when the same generation (assignment, base version and
+	// instructions) already failed or was cancelled too many times; other instructions or an edit start a new one.
+	ErrGenerateRetries = errors.New("homework draft: the same generation failed too many times")
 )
 
 // Errors of the post-processing jobs (PostProcessor). They are stored as the job's last error and shown in the UI, so

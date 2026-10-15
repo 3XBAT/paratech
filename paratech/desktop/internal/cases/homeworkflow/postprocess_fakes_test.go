@@ -46,6 +46,7 @@ type ppStore struct {
 	beforeDelete   func()                       // run once before the next assignment delete, without the lock
 	inUse          map[shared.AssignmentID]bool // assignments a delivery references
 	readErr        error                        // returned by every transcript Get when set
+	jobGetErr      error                        // returned by every job Get when set
 	seq            int
 }
 
@@ -230,6 +231,21 @@ func (r ppJobs) Enqueue(_ context.Context, j *job.Job) (shared.JobID, bool, erro
 	return j.ID(), true, nil
 }
 
+// Get returns the stored job itself, so a test moves it through its statuses with the job methods.
+func (r ppJobs) Get(_ context.Context, id shared.JobID) (*job.Job, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.jobGetErr != nil {
+		return nil, r.s.jobGetErr
+	}
+	for _, j := range r.s.jobs {
+		if j.ID() == id {
+			return j, nil
+		}
+	}
+	return nil, fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+}
+
 type ppIDs struct{ s *ppStore }
 
 func (g ppIDs) next(prefix string) string {
@@ -379,6 +395,7 @@ var (
 	_ SummaryRepository    = ppSummaries{}
 	_ AssignmentRepository = ppAssignments{}
 	_ JobEnqueuer          = ppJobs{}
+	_ JobReader            = ppJobs{}
 	_ IDGenerator          = ppIDs{}
 	_ LLMClient            = (*testenv.FakeLLM)(nil)
 )

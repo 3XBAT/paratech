@@ -132,6 +132,7 @@ type DraftDeps struct {
 	Lessons     LessonReader
 	Artifacts   ArtifactStore
 	Jobs        JobEnqueuer
+	JobReader   JobReader
 	Clock       Clock
 	IDs         IDGenerator
 	Tx          Tx
@@ -144,8 +145,13 @@ type DraftDeps struct {
 	MaxAttempts int
 }
 
+// generateRetries bounds how often Generate starts the same generation again after its job failed or was cancelled;
+// then it returns ErrGenerateRetries.
+const generateRetries = 20
+
 // GenerateResult is the generation job Generate started or found. Created is false when an equivalent generation
-// (same assignment, base version and instructions) already had a job, for example after a double click.
+// (same assignment, base version and instructions) already had a live or completed job, for example after a double
+// click.
 type GenerateResult struct {
 	JobID   shared.JobID
 	Created bool

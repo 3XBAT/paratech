@@ -54,8 +54,8 @@ func newDraftsEnv(t *testing.T, llm *testenv.FakeLLM, register bool) (*ppEnv, *h
 	e := newPPEnv(t, llm)
 	drafts, err := homeworkflow.NewDrafts(homeworkflow.DraftDeps{
 		LLM: llm, Assignments: e.assignments, Drafts: testenv.NewMemDrafts(), Summaries: e.summaries,
-		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, Clock: e.clock, IDs: &draftIDs{},
-		Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
+		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, JobReader: e.jobs, Clock: e.clock,
+		IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -168,6 +168,43 @@ func TestDraftGenerateEditRegenerateExport(t *testing.T) {
 	}
 	if string(content) != "# Chapter 4\n\nDeltas, with the Volga as the example.\n" {
 		t.Fatalf("export file = %q", content)
+	}
+}
+
+// AC-13 (iterative refinement): a generation that FAILED on an invalid model answer can be retried with the same
+// input; the retry is a new job in the database and its version is stored.
+func TestDraftRetryAfterAnInvalidAnswer(t *testing.T) {
+	llm := testenv.NewFakeLLM()
+	llm.Answer(values.OperationSummary, ppSummary)
+	llm.Answer(values.OperationExtractHomework, ppExtract)
+	llm.Answer(values.OperationHomeworkDraft, "Sure! Here is your homework about deltas.")
+	e, drafts := newDraftsEnv(t, llm, true)
+	ctx := context.Background()
+	a := firstAssignment(e)
+
+	first, err := drafts.Generate(ctx, a, "Use simple words")
+	if err != nil || !first.Created {
+		t.Fatalf("Generate: %+v, %v", first, err)
+	}
+	failed := waitJob(e, first.JobID, job.StatusFailed)
+	if !strings.HasSuffix(failed.LastError(), homeworkflow.ErrDraftInvalidAnswer.Error()) {
+		t.Fatalf("last error = %q", failed.LastError())
+	}
+
+	llm.Answer(values.OperationHomeworkDraft, `{"title":"Chapter 4","body":"Deltas are where rivers meet the sea."}`)
+	retry, err := drafts.Generate(ctx, a, "Use simple words")
+	if err != nil || !retry.Created || retry.JobID == first.JobID || retry.Base != first.Base {
+		t.Fatalf("retry: %+v, %v (first %+v)", retry, err, first)
+	}
+	waitJob(e, retry.JobID, job.StatusCompleted)
+
+	list, err := drafts.DraftVersions(ctx, a)
+	if err != nil || len(list) != 1 || list[0].Body != "Deltas are where rivers meet the sea." {
+		t.Fatalf("versions = %+v, %v", list, err)
+	}
+	if reqs := llm.RequestsFor(values.OperationHomeworkDraft); len(reqs) != 2 ||
+		reqs[0].IdempotencyKey() == reqs[1].IdempotencyKey() {
+		t.Fatalf("draft requests = %d, want 2 with distinct keys", len(reqs))
 	}
 }
 

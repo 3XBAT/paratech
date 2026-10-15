@@ -43,7 +43,8 @@ const (
 // Every version is kept (domain/coursework/homeworkdraft). A generation runs as a job that starts from the latest
 // version, its base. Its idempotency key is derived from the assignment, the base, the instructions and the prompts
 // version, so a double click on Generate finds the job of the first click (PRD section 14 case 5); once the job added
-// its version the base has moved on and the next Generate is a new job. A job adds its answer only while its base is
+// its version the base has moved on and the next Generate is a new job, and after a failed or cancelled job the same
+// request runs again under the next round of the key. A job adds its answer only while its base is
 // still the latest version: if the student edited the draft meanwhile, the answer is dropped and the job fails with
 // ErrDraftChanged, so a generation never becomes the latest version over a user edit.
 //
@@ -58,6 +59,7 @@ type Drafts struct {
 	lessons     LessonReader
 	artifacts   ArtifactStore
 	jobs        JobEnqueuer
+	jobReader   JobReader
 	clock       Clock
 	ids         IDGenerator
 	tx          Tx
@@ -70,7 +72,7 @@ type Drafts struct {
 // NewDrafts checks the ports and the model alias.
 func NewDrafts(d DraftDeps) (*Drafts, error) {
 	if d.LLM == nil || d.Assignments == nil || d.Drafts == nil || d.Summaries == nil || d.Lessons == nil ||
-		d.Artifacts == nil || d.Jobs == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
+		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
 		return nil, fmt.Errorf("%w: every draft port is required", ErrInvalidConfig)
 	}
 	// The alias rules belong to the request value; a throwaway request checks them once, at wiring time.
@@ -82,7 +84,7 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 	}
 	s := &Drafts{
 		llm: d.LLM, assignments: d.Assignments, drafts: d.Drafts, summaries: d.Summaries, lessons: d.Lessons,
-		artifacts: d.Artifacts, jobs: d.Jobs, clock: d.Clock, ids: d.IDs, tx: d.Tx, log: d.Log,
+		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, clock: d.Clock, ids: d.IDs, tx: d.Tx, log: d.Log,
 		modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts,
 	}
 	if s.maxAttempts == 0 {
@@ -96,7 +98,12 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 
 // Generate starts the generation of a new draft version of assignment a from its latest version, with the student's
 // additional instructions (may be empty; PRD section 10 steps 2, 4 and 5). It returns the job; the version appears
-// when the job completes. An equivalent generation that already has a job returns that job with Created false.
+// when the job completes. An equivalent generation whose job is still active or completed returns that job with
+// Created false (PRD section 14 case 5 forbids concurrent equivalent jobs). If that job failed or was cancelled, the
+// student retries: Generate enqueues the same request under the next round of the key (":r1", ":r2", ...), so
+// concurrent clicks after a failure still race for one key and make one job; after generateRetries rounds it returns
+// ErrGenerateRetries. Two generations from the same base with different instructions are two jobs: the one that
+// finishes second fails with ErrDraftChanged, although the student edited nothing (the base moved on).
 // Errors: a missing assignment wraps shared.ErrNotFound, bad instructions values.ErrInvalidDraftRequest, a full
 // draft homeworkdraft.ErrFull; nothing is created then.
 func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instruction string) (GenerateResult, error) {
@@ -116,24 +123,48 @@ func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instructio
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
 
-	j, err := job.New(job.Spec{
-		ID: s.ids.NewJobID(), Type: HomeworkDraftJobType, Key: draftJobKey(req), Payload: req.Payload(), MaxAttempts: s.maxAttempts,
-	}, s.clock.Now())
-	if err != nil {
-		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+	for round := 0; round <= generateRetries; round++ {
+		j, err := job.New(job.Spec{
+			ID: s.ids.NewJobID(), Type: HomeworkDraftJobType, Key: draftJobKey(req, round), Payload: req.Payload(),
+			MaxAttempts: s.maxAttempts,
+		}, s.clock.Now())
+		if err != nil {
+			return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+		}
+		id, created, err := s.jobs.Enqueue(ctx, j)
+		if err != nil {
+			return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+		}
+		if created {
+			return GenerateResult{JobID: id, Created: true, Base: base}, nil
+		}
+		existing, err := s.jobReader.Get(ctx, id)
+		if err != nil {
+			return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+		}
+		if !endedWithoutResult(existing.Status()) {
+			return GenerateResult{JobID: id, Created: false, Base: base}, nil
+		}
 	}
-	id, created, err := s.jobs.Enqueue(ctx, j)
-	if err != nil {
-		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
-	}
-	return GenerateResult{JobID: id, Created: created, Base: base}, nil
+	return GenerateResult{}, fmt.Errorf("%s %s: %w", opGenerate, a, ErrGenerateRetries)
+}
+
+// endedWithoutResult reports whether a generation job is over without adding a version (FAILED or CANCELLED), so
+// the same request may run again; an active job is still running and a COMPLETED one moved the base.
+func endedWithoutResult(st job.Status) bool {
+	return st.IsTerminal() && st != job.StatusCompleted
 }
 
 // draftJobKey is the idempotency key of a generation: equivalent requests (same assignment, base version, cleaned
-// instructions and prompts version) share it. The instructions enter as a digest, so the key stays short.
-func draftJobKey(r values.DraftRequest) string {
+// instructions and prompts version) share it. The instructions enter as a digest, so the key stays short. Round 0
+// is the first try; round n > 0 is the n-th retry after a failed or cancelled job (Generate).
+func draftJobKey(r values.DraftRequest, round int) string {
 	sum := sha256.Sum256([]byte(r.Instruction()))
-	return fmt.Sprintf("%s:%s:b%d:v%d:%x", HomeworkDraftJobType, r.Assignment(), r.Base(), prompts.Version, sum[:8])
+	key := fmt.Sprintf("%s:%s:b%d:v%d:%x", HomeworkDraftJobType, r.Assignment(), r.Base(), prompts.Version, sum[:8])
+	if round > 0 {
+		key += fmt.Sprintf(":r%d", round)
+	}
+	return key
 }
 
 // EditDraft stores what the student wrote as a new version (PRD section 10 step 3). e.Base is the version the student
@@ -169,8 +200,12 @@ func (s *Drafts) EditDraft(ctx context.Context, e DraftEdit) (DraftVersionView, 
 	return view, nil
 }
 
-// DraftVersions returns the versions of the draft of assignment a in order; none is an empty list.
+// DraftVersions returns the versions of the draft of assignment a in order; none is an empty list. A missing
+// assignment wraps shared.ErrNotFound.
 func (s *Drafts) DraftVersions(ctx context.Context, a shared.AssignmentID) ([]DraftVersionView, error) {
+	if _, err := s.assignments.Get(ctx, a); err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opDraftVersions, a, err)
+	}
 	d, err := s.load(ctx, a)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opDraftVersions, a, err)
@@ -183,7 +218,8 @@ func (s *Drafts) DraftVersions(ctx context.Context, a shared.AssignmentID) ([]Dr
 	return out, nil
 }
 
-// DraftVersion returns version n of the draft of assignment a; a missing one wraps shared.ErrNotFound.
+// DraftVersion returns version n of the draft of assignment a; a missing assignment, draft or version wraps
+// shared.ErrNotFound.
 func (s *Drafts) DraftVersion(ctx context.Context, a shared.AssignmentID, n int) (DraftVersionView, error) {
 	d, r, err := s.revision(ctx, a, n)
 	if err != nil {
@@ -195,7 +231,8 @@ func (s *Drafts) DraftVersion(ctx context.Context, a shared.AssignmentID, n int)
 // ExportDraft writes version n of the draft of assignment a to the export file of the assignment (PRD section 10
 // step 6), atomically through the Storage Manager, replacing an earlier export. Only the student's explicit action
 // calls it: the model chooses neither the version nor the path. A send that was confirmed for the earlier file content
-// becomes STALE (proposal.Recheck). A missing draft or version wraps shared.ErrNotFound.
+// becomes STALE (proposal.Recheck). A missing assignment, draft or version wraps shared.ErrNotFound and nothing is
+// written.
 func (s *Drafts) ExportDraft(ctx context.Context, a shared.AssignmentID, n int) (DraftExport, error) {
 	_, r, err := s.revision(ctx, a, n)
 	if err != nil {
@@ -211,8 +248,11 @@ func (s *Drafts) ExportDraft(ctx context.Context, a shared.AssignmentID, n int) 
 	return DraftExport{Version: r.Number(), File: ref}, nil
 }
 
-// revision loads version n of the stored draft of a.
+// revision loads version n of the stored draft of a; the draft of a deleted assignment is not served.
 func (s *Drafts) revision(ctx context.Context, a shared.AssignmentID, n int) (*homeworkdraft.Draft, homeworkdraft.Revision, error) {
+	if _, err := s.assignments.Get(ctx, a); err != nil {
+		return nil, homeworkdraft.Revision{}, err
+	}
 	d, err := s.drafts.Get(ctx, a)
 	if err != nil {
 		return nil, homeworkdraft.Revision{}, err
@@ -348,7 +388,8 @@ func (s *Drafts) store(ctx context.Context, snap job.Snapshot, a shared.Assignme
 		case !added:
 			return nil
 		}
-		if last = s.drafts.Save(ctx, d); last == nil || !errors.Is(last, shared.ErrConflict) {
+		// Only a stale version is worth a reload; another conflict (a missing assignment row) would repeat.
+		if last = s.drafts.Save(ctx, d); !errors.Is(last, shared.ErrVersionConflict) {
 			break
 		}
 	}

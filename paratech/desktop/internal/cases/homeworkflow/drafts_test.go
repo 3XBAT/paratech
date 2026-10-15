@@ -58,8 +58,8 @@ func newDraftEnv(t *testing.T) *draftEnv {
 func (e *draftEnv) draftDeps(llm LLMClient) DraftDeps {
 	return DraftDeps{
 		LLM: llm, Assignments: ppAssignments{e.ppStore}, Drafts: e.drafts, Summaries: ppSummaries{e.ppStore},
-		Lessons: ppLessons{e.ppStore}, Artifacts: e.files, Jobs: ppJobs{e.ppStore}, Clock: e.clock, IDs: ppIDs{e.ppStore},
-		Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
+		Lessons: ppLessons{e.ppStore}, Artifacts: e.files, Jobs: ppJobs{e.ppStore}, JobReader: ppJobs{e.ppStore},
+		Clock: e.clock, IDs: ppIDs{e.ppStore}, Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
 	}
 }
 
@@ -153,6 +153,7 @@ func TestNewDraftsValidates(t *testing.T) {
 		{"no lessons", func(d *DraftDeps) { d.Lessons = nil }},
 		{"no artifacts", func(d *DraftDeps) { d.Artifacts = nil }},
 		{"no jobs", func(d *DraftDeps) { d.Jobs = nil }},
+		{"no job reader", func(d *DraftDeps) { d.JobReader = nil }},
 		{"no clock", func(d *DraftDeps) { d.Clock = nil }},
 		{"no ids", func(d *DraftDeps) { d.IDs = nil }},
 		{"no tx", func(d *DraftDeps) { d.Tx = nil }},
@@ -311,11 +312,18 @@ func TestDraftJobKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return draftJobKey(r)
+		return draftJobKey(r, 0)
 	}
 	ref := key("a1", 2, "shorter")
-	if !strings.HasPrefix(ref, fmt.Sprintf("homework_draft:a1:b2:v%d:", prompts.Version)) {
+	if !strings.HasPrefix(ref, fmt.Sprintf("homework_draft:a1:b2:v%d:", prompts.Version)) || strings.Contains(ref, ":r") {
 		t.Fatalf("key = %s", ref)
+	}
+	r, err := values.NewDraftRequest("a1", 2, "shorter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := draftJobKey(r, 3); got != ref+":r3" {
+		t.Fatalf("round 3 key = %s, want %s:r3", got, ref)
 	}
 	if key("a1", 2, " shorter\n") != ref {
 		t.Fatal("trimmed instructions changed the key")
@@ -330,9 +338,199 @@ func TestDraftJobKey(t *testing.T) {
 			t.Errorf("another %s gives the same key", name)
 		}
 	}
-	long := key(shared.AssignmentID(strings.Repeat("x", 128)), 99, strings.Repeat("y", values.MaxInstructionBytes))
-	if len(long) > job.MaxKeyBytes {
-		t.Fatalf("key of %d bytes exceeds the job limit", len(long))
+	long, err := values.NewDraftRequest(shared.AssignmentID(strings.Repeat("x", 128)), 99, strings.Repeat("y", values.MaxInstructionBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := draftJobKey(long, generateRetries); len(k) > job.MaxKeyBytes {
+		t.Fatalf("key of %d bytes exceeds the job limit", len(k))
+	}
+}
+
+// settle moves stored job id to status to as the job runner would.
+func (e *draftEnv) settle(id shared.JobID, to job.Status) {
+	e.t.Helper()
+	j := e.job(id)
+	now := e.clock.Now()
+	var err error
+	switch to {
+	case job.StatusQueued:
+	case job.StatusCancelled:
+		err = j.Cancel(now)
+	default:
+		if err = j.Claim(now); err != nil {
+			break
+		}
+		switch to {
+		case job.StatusRunning:
+		case job.StatusCompleted:
+			err = j.Complete(now)
+		case job.StatusFailed:
+			err = j.Fail(now, ErrDraftInvalidAnswer.Error())
+		case job.StatusRetryWait:
+			err = j.Retry(now, now.Add(time.Minute), ErrDraftLLM.Error())
+		default:
+			err = j.WaitFor(to, now)
+		}
+	}
+	if err != nil {
+		e.t.Fatalf("job %s to %s: %v", id, to, err)
+	}
+	if j.Status() != to {
+		e.t.Fatalf("job %s is %s, want %s", id, j.Status(), to)
+	}
+}
+
+// AC-13 (iterative refinement): after a generation failed or was cancelled the student can retry the same input, and
+// each retry is a new job under the next round of the key.
+func TestGenerateAfterAFailedOrCancelledJobStartsAgain(t *testing.T) {
+	for _, end := range []job.Status{job.StatusFailed, job.StatusCancelled} {
+		t.Run(string(end), func(t *testing.T) {
+			e := newDraftEnv(t)
+			ctx := context.Background()
+			e.llm.Answer(values.OperationHomeworkDraft, "Sure! Here is your homework.")
+
+			first, err := e.generate("shorter")
+			if end == job.StatusFailed && !errors.Is(err, ErrDraftInvalidAnswer) {
+				t.Fatalf("first run: %v, want ErrDraftInvalidAnswer", err)
+			}
+			e.settle(first.JobID, end)
+
+			retry, err := e.svc.Generate(ctx, "a1", "shorter")
+			if err != nil || !retry.Created || retry.JobID == first.JobID || retry.Base != first.Base {
+				t.Fatalf("retry: %+v, %v (first %+v)", retry, err, first)
+			}
+			if k := e.job(retry.JobID).Key(); k != e.job(first.JobID).Key()+":r1" {
+				t.Fatalf("retry key = %s", k)
+			}
+			again, err := e.svc.Generate(ctx, "a1", "shorter")
+			if err != nil || again.Created || again.JobID != retry.JobID {
+				t.Fatalf("click on the queued retry: %+v, %v", again, err)
+			}
+
+			// The retry runs with a fresh LLM key, so the Hub does not return the stored invalid answer again.
+			e.llm.Answer(values.OperationHomeworkDraft, answer("T", "Body."))
+			if err := e.run(retry.JobID); err != nil {
+				t.Fatal(err)
+			}
+			if list := e.versions(); len(list) != 1 || list[0].Body != "Body." {
+				t.Fatalf("versions = %+v", list)
+			}
+			if e.jobCount() != 2 {
+				t.Fatalf("jobs = %d, want 2", e.jobCount())
+			}
+			reqs := e.llm.RequestsFor(values.OperationHomeworkDraft)
+			if len(reqs) != 2 || reqs[0].IdempotencyKey() == reqs[1].IdempotencyKey() {
+				t.Fatalf("LLM requests = %d, want 2 with distinct keys", len(reqs))
+			}
+		})
+	}
+}
+
+// PRD section 14 case 5: concurrent clicks after a failure still make one job.
+func TestConcurrentRetryAfterAFailureMakesOneJob(t *testing.T) {
+	e := newDraftEnv(t)
+	ctx := context.Background()
+	first, err := e.svc.Generate(ctx, "a1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.settle(first.JobID, job.StatusFailed)
+
+	const clicks = 8
+	results := make([]GenerateResult, clicks)
+	errs := make([]error, clicks)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range clicks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results[i], errs[i] = e.svc.Generate(ctx, "a1", "")
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	created := 0
+	for i := range clicks {
+		if errs[i] != nil {
+			t.Fatalf("click %d: %v", i, errs[i])
+		}
+		if results[i].JobID != results[0].JobID || results[i].JobID == first.JobID {
+			t.Fatalf("click %d got job %s, click 0 got %s, the failed one is %s", i, results[i].JobID, results[0].JobID, first.JobID)
+		}
+		if results[i].Created {
+			created++
+		}
+	}
+	if created != 1 || e.jobCount() != 2 {
+		t.Fatalf("created = %d, jobs = %d; want 1 and 2", created, e.jobCount())
+	}
+}
+
+// A job that is still active, or completed, is the answer to the click: no second job.
+func TestGenerateReturnsAnActiveOrCompletedJob(t *testing.T) {
+	for _, st := range []job.Status{
+		job.StatusQueued, job.StatusRunning, job.StatusRetryWait, job.StatusWaitingForNetwork, job.StatusWaitingForQuota,
+		job.StatusWaitingForPower, job.StatusCompleted,
+	} {
+		t.Run(string(st), func(t *testing.T) {
+			e := newDraftEnv(t)
+			ctx := context.Background()
+			first, err := e.svc.Generate(ctx, "a1", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.settle(first.JobID, st)
+			again, err := e.svc.Generate(ctx, "a1", "")
+			if err != nil || again.Created || again.JobID != first.JobID {
+				t.Fatalf("Generate = %+v, %v; want job %s unchanged", again, err, first.JobID)
+			}
+			if e.job(first.JobID).Status() != st || e.jobCount() != 1 {
+				t.Fatalf("job is %s, jobs = %d", e.job(first.JobID).Status(), e.jobCount())
+			}
+		})
+	}
+}
+
+// The retries of one request are bounded; another input is a new generation.
+func TestGenerateRetriesAreBounded(t *testing.T) {
+	e := newDraftEnv(t)
+	ctx := context.Background()
+	for i := range generateRetries + 1 {
+		res, err := e.svc.Generate(ctx, "a1", "")
+		if err != nil || !res.Created {
+			t.Fatalf("try %d: %+v, %v", i, res, err)
+		}
+		e.settle(res.JobID, job.StatusFailed)
+	}
+	if _, err := e.svc.Generate(ctx, "a1", ""); !errors.Is(err, ErrGenerateRetries) {
+		t.Fatalf("Generate = %v, want ErrGenerateRetries", err)
+	}
+	if n := e.jobCount(); n != generateRetries+1 {
+		t.Fatalf("jobs = %d, want %d", n, generateRetries+1)
+	}
+	if res, err := e.svc.Generate(ctx, "a1", "other"); err != nil || !res.Created {
+		t.Fatalf("other instructions: %+v, %v", res, err)
+	}
+}
+
+func TestGenerateJobReadFailure(t *testing.T) {
+	e := newDraftEnv(t)
+	ctx := context.Background()
+	if _, err := e.svc.Generate(ctx, "a1", ""); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	e.jobGetErr = shared.ErrStorageBusy
+	e.mu.Unlock()
+	if _, err := e.svc.Generate(ctx, "a1", ""); !errors.Is(err, shared.ErrStorageBusy) {
+		t.Fatalf("Generate = %v, want the read error", err)
+	}
+	if e.jobCount() != 1 {
+		t.Fatalf("jobs = %d, want 1", e.jobCount())
 	}
 }
 
@@ -616,6 +814,18 @@ func TestDraftStorageFailures(t *testing.T) {
 			t.Fatalf("versions = %d, want 1", n)
 		}
 	})
+	t.Run("another conflict is not reloaded", func(t *testing.T) {
+		e := newDraftEnv(t)
+		e.llm.Answer(values.OperationHomeworkDraft, answer("T", "B"))
+		e.drafts.FailNextSave(fmt.Errorf("foreign key: %w", shared.ErrConflict))
+		_, err := e.generate("")
+		if !errors.Is(err, ErrDraftStorage) || !errors.Is(err, shared.ErrConflict) {
+			t.Fatalf("err = %v, want ErrDraftStorage with the conflict", err)
+		}
+		if e.drafts.Saves() != 0 {
+			t.Fatalf("saves = %d, want 0: only a version conflict reloads and saves again", e.drafts.Saves())
+		}
+	})
 	t.Run("a write failure is retried", func(t *testing.T) {
 		e := newDraftEnv(t)
 		e.llm.Answer(values.OperationHomeworkDraft, answer("T", "B"))
@@ -799,6 +1009,32 @@ func TestExportDraftWritesTheExportFile(t *testing.T) {
 	e.files.FailWrites(shared.ErrStorageFull)
 	if _, err := e.svc.ExportDraft(ctx, "a1", 2); !errors.Is(err, shared.ErrStorageFull) {
 		t.Fatalf("full disk: %v", err)
+	}
+}
+
+// The draft of a deleted assignment is neither shown nor exported.
+func TestDraftOfADeletedAssignment(t *testing.T) {
+	ctx := context.Background()
+	e := newDraftEnv(t)
+	if _, err := e.svc.EditDraft(ctx, DraftEdit{Assignment: "a1", Base: 0, Title: "T", Body: "Text."}); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	delete(e.assignments, "a1")
+	e.mu.Unlock()
+
+	files := len(e.files.Paths())
+	if _, err := e.svc.ExportDraft(ctx, "a1", 1); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("ExportDraft = %v, want ErrNotFound", err)
+	}
+	if n := len(e.files.Paths()); n != files {
+		t.Fatalf("files = %d, want %d: nothing is written", n, files)
+	}
+	if _, err := e.svc.DraftVersions(ctx, "a1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("DraftVersions = %v, want ErrNotFound", err)
+	}
+	if _, err := e.svc.DraftVersion(ctx, "a1", 1); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("DraftVersion = %v, want ErrNotFound", err)
 	}
 }
 
