@@ -520,7 +520,9 @@ func TestCompleteAnswerInterrupted(t *testing.T) {
 			srv, _ := partial(t, cut)
 			timeout := time.Minute
 			if !cut {
-				timeout = 500 * time.Millisecond // long enough for the headers, short enough for the test
+				// The handler stalls until the client goes away, so the timeout always fires mid-body; 2s leaves
+				// room for the headers on a slow -race runner.
+				timeout = 2 * time.Second
 			}
 			_, err := newClient(t, srv.URL, timeout).Complete(t.Context(), newRequest(t, "x"))
 			pe := providerError(t, err)
@@ -539,9 +541,14 @@ func TestCompleteCallerEndsTheCallMidBody(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		srv, sent := partial(t, false)
 		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 		go func() {
-			<-sent
-			cancel()
+			// ctx.Done covers a request that fails before the handler runs, so the goroutine always exits.
+			select {
+			case <-sent:
+				cancel()
+			case <-ctx.Done():
+			}
 		}()
 		_, err := newClient(t, srv.URL, time.Minute).Complete(ctx, newRequest(t, "x"))
 		pe := providerError(t, err)
