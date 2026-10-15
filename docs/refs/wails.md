@@ -44,8 +44,17 @@ Source: https://github.com/wailsapp/wails/tree/v3.0.0-beta.29/v3 · API: https:/
   `wails-app-<UniqueID>-sim` (`single_instance_windows.go`); the second instance sends args and working dir to the first and calls
   `os.Exit(ExitCode)` **inside `application.New`**.
 - Autostart: `app.Autostart.Enable/Disable/IsEnabled` writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`autostart_windows.go`).
-- Notifications: `pkg/services/notifications` (toast via `git.sr.ht/~jackmordaunt/go-toast/v2`); registers an AppUserModelID and COM activator
-  in `HKCU\Software\Classes` (`notifications_windows.go`).
+- Notifications: `pkg/services/notifications` (toast via `git.sr.ht/~jackmordaunt/go-toast/v2` v2.0.3, indirect); used since TASK-053.
+  - `notifications.New()` is a process singleton. Its service startup writes `HKCU\Software\Classes\AppUserModelId\<app name>`
+    (`CustomActivator` GUID) and `HKCU\Software\Classes\CLSID\<GUID>\LocalServer32` = `"<exe>" %1`, and registers a COM class factory;
+    shutdown writes `HKCU\SOFTWARE\<app name>\NotificationCategories` (`notifications_windows.go`).
+  - A service whose `ServiceStartup` returns an error aborts `App.Run` (`application.go`, `startupService`), so the shell wraps it
+    (`toasts_windows.go`): a failure is logged and the app runs without toasts.
+  - Each send saves the app icon as a PNG in `%TEMP%`; when the COM push fails it falls back to PowerShell (temp `.ps1`, `-ExecutionPolicy Bypass`).
+  - Toast XML: duration `short`; a scenario only from `InterruptionLevel` (`timeSensitive` = reminder, `critical` = urgent, which can
+    break through Focus Assist). The shell sets none, so Windows applies the per-app switch and Focus Assist / Do Not Disturb.
+    There is no API to read those settings (`CheckNotificationAuthorization` is always true on Windows).
+  - Not checked: clicking a toast after the app exited starts the exe through the CLSID with activation arguments.
 
 ## Frontend runtime
 - `/wails/runtime.js` is an ES module served by the app: `import { Window } from "/wails/runtime.js"; Window.Hide()`.
