@@ -6,13 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"paratech/desktop/config"
-	"paratech/desktop/internal/adapters/clock"
-	"paratech/desktop/internal/adapters/sqlite"
-	"paratech/desktop/internal/cases/activity"
-	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -22,17 +18,15 @@ const (
 	instanceID = "paratech.learning-assistant.desktop"
 )
 
-// dbFile is the SQLite database below the data directory.
-const dbFile = "learning-assistant.db"
-
 // App is the composition root of the desktop core (ARCH-50).
 type App struct {
 	cfg config.Config
 	log *slog.Logger
+	env env
 	// shell is nil in headless mode.
 	shell *wails.Shell
-	// db is opened by openCore; nil until then.
-	db *sqlite.DB
+	// core is opened by openCore; nil until then.
+	core *core
 }
 
 // New validates the configuration and builds the application. It starts no goroutines and opens no windows.
@@ -44,7 +38,7 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	a := &App{cfg: cfg, log: log}
+	a := &App{cfg: cfg, log: log, env: productionEnv()}
 	if !cfg.Headless {
 		shell, err := wails.New(wails.Options{Name: appName, InstanceID: instanceID, Log: log, OpenCore: a.openCore})
 		if err != nil {
@@ -73,10 +67,10 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
-// openCore opens the database and builds the use cases the UI binds to. The shell calls it once from Run, after
-// the single-instance check (ADR-0007); Close releases what it opened.
+// openCore opens the database and the Storage Manager and builds the use cases the UI binds to. The shell calls it once
+// from Run, after the single-instance check (ADR-0007); Close releases what it opened.
 func (a *App) openCore(ctx context.Context) (wails.Core, error) {
-	if a.db != nil {
+	if a.core != nil {
 		return wails.Core{}, errors.New("app: core is already open")
 	}
 	if a.cfg.DataDir == "" {
@@ -86,29 +80,25 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if err := os.MkdirAll(a.cfg.DataDir, 0o700); err != nil {
 		return wails.Core{}, fmt.Errorf("app: create data directory: %w", err)
 	}
-	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(a.cfg.DataDir, dbFile), Migrate: true, Logger: a.log})
-	if err != nil {
-		return wails.Core{}, fmt.Errorf("app: open database: %w", err)
-	}
-	a.db = db
 
-	prefs, err := preferences.New(sqlite.NewSettingsRepository(db), clock.System{})
-	if err != nil {
-		return wails.Core{}, fmt.Errorf("app: preferences: %w", err)
+	// Toasts need the shell; a headless core tells nobody about finished jobs.
+	var notifier notify.Notifier
+	if a.shell != nil {
+		notifier = a.shell
 	}
-	history, err := activity.New(sqlite.NewRecordingRepository(db), sqlite.NewJobRepository(db), a.log)
+	c, err := buildCore(ctx, a.cfg.DataDir, a.env, notifier, a.log)
 	if err != nil {
-		return wails.Core{}, fmt.Errorf("app: activity: %w", err)
+		return wails.Core{}, err
 	}
-	// No Stopper or Forcer yet: the app does not build the recorder or the job runner (later tasks wire them).
-	return wails.Core{Settings: prefs, Activity: history}, nil
+	a.core = c
+	return c.ui, nil
 }
 
 // Close releases resources in reverse order of creation. It must stay safe to call more than once.
 func (a *App) Close() error {
 	// The UI shell is torn down by Wails when Run returns.
-	if a.db == nil {
+	if a.core == nil {
 		return nil
 	}
-	return a.db.Close() // safe to repeat
+	return a.core.close() // safe to repeat
 }

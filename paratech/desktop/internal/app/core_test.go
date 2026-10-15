@@ -15,14 +15,24 @@ import (
 
 func newTestApp(t *testing.T, dataDir string) *App {
 	t.Helper()
+	a, _ := newTestAppWith(t, dataDir)
+	return a
+}
+
+// newTestAppWith is a headless app on the test environment, closed when the test ends.
+func newTestAppWith(t *testing.T, dataDir string) (*App, *fakes) {
+	t.Helper()
 	cfg := config.Default()
+	cfg.Headless = true
 	cfg.DataDir = dataDir
 	a, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	var f *fakes
+	a.env, f = testEnv(t)
 	t.Cleanup(func() { _ = a.Close() }) // before TempDir removal: Windows cannot delete open files
-	return a
+	return a, f
 }
 
 // The settings page path end to end without a window: the core the shell binds to stores toggles in SQLite, and
@@ -63,7 +73,8 @@ func TestOpenCoreStoresSettings(t *testing.T) {
 	}
 }
 
-// The recordings and jobs page reads SQLite through the core; the actions are not wired yet.
+// The recordings and jobs page reads SQLite through the core, and its actions reach the recording session and the
+// job runner.
 func TestOpenCoreListsActivity(t *testing.T) {
 	ctx := context.Background()
 	a := newTestApp(t, t.TempDir())
@@ -71,15 +82,18 @@ func TestOpenCoreListsActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if core.Activity == nil || core.Stopper != nil || core.Forcer != nil {
-		t.Fatalf("core = %+v: want the activity use case and no actions", core)
+	if core.Activity == nil || core.Stopper == nil || core.Forcer == nil {
+		t.Fatalf("core = %+v: want the activity use case and both actions", core)
+	}
+	if core.Stopper != a.core.recordings || core.Forcer != a.core.runner {
+		t.Fatal("the actions must be the recording session and the job runner")
 	}
 
 	j, err := job.New(job.Spec{ID: "j1", Type: "stt", Key: "stt:r1", MaxAttempts: 3}, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := sqlite.NewJobRepository(a.db).Enqueue(ctx, j); err != nil {
+	if _, _, err := sqlite.NewJobRepository(a.core.db).Enqueue(ctx, j); err != nil {
 		t.Fatal(err)
 	}
 	jobs, err := core.Activity.ListJobs(ctx)
