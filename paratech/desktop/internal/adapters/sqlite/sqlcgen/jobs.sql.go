@@ -167,6 +167,49 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 	return err
 }
 
+const listJobActivityIDs = `-- name: ListJobActivityIDs :many
+SELECT id FROM jobs
+WHERE id IS NOT NULL
+  AND (status IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+       OR id IN (SELECT id FROM jobs
+                 WHERE id IS NOT NULL
+                   AND status NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?2))
+ORDER BY created_at DESC, id DESC
+`
+
+type ListJobActivityIDsParams struct {
+	Active      string
+	MaxTerminal int64
+}
+
+// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
+// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+// active is a JSON array of status names.
+func (q *Queries) ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listJobActivityIDs, arg.Active, arg.MaxTerminal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobIDsByStatus = `-- name: ListJobIDsByStatus :many
 SELECT id FROM jobs
 WHERE status IN (/*SLICE:statuses*/?) AND id IS NOT NULL

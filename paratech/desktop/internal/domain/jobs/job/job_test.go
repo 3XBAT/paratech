@@ -67,3 +67,15 @@ func TestActiveStatuses(t *testing.T) {
 		}
 	}
 }
+
+// Only a job held by the power policy offers "Run now" (PRD section 7.4, AC-22); the other waits end by themselves.
+func TestStatusOffersRunNow(t *testing.T) {
+	want := map[Status]bool{StatusWaitingForPower: true}
+	for _, s := range append(Statuses(), Status("BOGUS")) {
+		t.Run(s.String(), func(t *testing.T) {
+			if got := s.OffersRunNow(); got != want[s] {
+				t.Fatalf("OffersRunNow() = %v, want %v", got, want[s])
+			}
+		})
+	}
+}

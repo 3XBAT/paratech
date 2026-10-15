@@ -13,7 +13,9 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 func validOptions() Options {
 	return Options{
 		Name: "LA", InstanceID: "test.la", Log: discard(),
-		OpenCore: func(context.Context) (Core, error) { return Core{Settings: &fakeSettings{}}, nil },
+		OpenCore: func(context.Context) (Core, error) {
+			return Core{Settings: &fakeSettings{}, Activity: &fakeActivity{}}, nil
+		},
 	}
 }
 

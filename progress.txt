@@ -830,6 +830,7 @@
 - Тексты problem содержат текст ошибок (возможны пути): не отправлять в Hub
 - Ручные проверки владельцем на Windows (с TASK-017): убить процесс во время записи -> при старте COMPLETED, трек играет, потеряно не больше последнего чанка; убить во время записи чанка -> битый чанк пропущен; убить во время финализации -> трек дособран; заблокировать файлы чанков -> RECOVERY_REQUIRED с текстом, следующий старт собирает; нагрузка heartbeat 15 с за 3 ч незаметна
 
+## [TASK-023] UI: экран записей и задач (статусы, причина ожидания, «Запустить сейчас»)
 ---
 
 ## [TASK-044] Отправка домашки: SMTP-адаптер, подтверждение, запись доставки, сверка при неизвестном исходе
@@ -837,6 +838,38 @@
 **Статус:** done
 
 ### Что сделано
+- domain/jobs/job: Status.OffersRunNow() (только WAITING_FOR_POWER); другое поведение задач не менялось
+- sqlite: ListJobActivityIDs / ListRecordingActivityIDs — все незавершённые строки (статусы из job.ActiveStatuses() / recording.UnfinishedStatuses()) + 100 последних завершённых, новые сверху; строки читаются по одной, нечитаемые пропускаются и возвращаются их id
+- cases/activity: списки для экрана (DTO, Stoppable из recording.CanTransition(..., STOPPING), Waiting, RunNowOffered); нечитаемые id логируются при изменении набора
+- input/wails ActivityService: ListRecordings, ListJobs, StopRecording(id), RunJobNow(id); ошибки странице — фиксированные тексты, причины в лог; id проверяются shared.*ID.Validate
+- app.openCore: activity подключён; Stopper/Forcer = nil (рекордер и job runner в app ещё не собираются) -> кнопки отвечают «Это действие пока недоступно.»
+- frontend: RecordingsPage (Записи, Задачи), activityView.ts (подписи статусов, причины WAITING_FOR_POWER/NETWORK/QUOTA, длительность, время идущей записи), bindings/activity.ts; опрос раз в 3 с без наложения, списки грузятся независимо (allSettled)
+- Изменённые существующие тесты: settings_test.go TestFrontendCallsBoundNames — таблица (settings.ts + activity.ts); shell_test.go validOptions — Activity обязателен; TestOpenBindings — проверка activity и кейс без него
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1-2: npm ci && npm run build && npm run test (16 тестов)
+- [x] Шаг 3: activity.test.mjs — отдельная непустая причина для каждого WAITING_*; список WAITING_* сверен с доменом
+- Ревью: approve (3 medium: нечитаемая строка, ожидающая задача за пределом 100, Promise.all -> исправлено; повторное ревью approve). Security: найдено 0, опровергнуто 0, исправлено 0 (две проверки: весь diff и коммиты исправлений)
+
+### Решения (подтвердить)
+- Экран: все незавершённые + 100 последних завершённых записей/задач
+- last_error задачи и problem записи показываются пользователю как есть (текстом, без HTML) — могут содержать локальные пути/stderr
+- Кнопка «Остановить» только для RECORDING (STARTING не предлагается: домен разрешает STOPPING только из RECORDING)
+
+### Ручная проверка владельцем на Windows
+- Идущая запись: «Идёт запись», растущее время, «Остановить» -> «Остановка…» -> «Завершена» с h:mm:ss (после подключения рекордера)
+- На батарее с «Обрабатывать только от розетки»: задача «Ждёт питания от сети» и «Запустить сейчас»; кнопка исчезает после запуска (после подключения job runner)
+- Тексты ошибок по-русски (напр. стоп записи прошлого сеанса -> «Запись не идёт в этом сеансе.»); если видна общая фраза — рантайм Wails оборачивает ошибку иначе
+- Автообновление ~3 с, переключение разделов без ошибок; вёрстка таблиц, перенос длинных ошибок, пустые/загрузочные состояния
+
+### Заметки (follow-up)
+- НУЖНА ЗАДАЧА (владелец): собрать в app recordingsession.Service и jobrunner.Service и передать как wails.Core.Stopper / Core.Forcer; до этого кнопки не работают, а списки пусты (AC-22 «Run now» покрыт частично)
+- Low: адаптер сам берёт набор незавершённых статусов из домена (в modelcatalog его передаёт use case) — можно передавать через порт
+- Low: при недоступном ядре одинаковая ошибка показывается в обеих секциях
+- Low: recordings.go повторяет цикл статусов вместо хелпера; комментарий recording.UnfinishedStatuses говорит только о восстановлении
+- Low: нет индекса по created_at (опрос раз в 3 с сканирует таблицы; для MVP ок); коммит 4c913f7 сам по себе не собирается (собирается с 18af6fa)
+- ПРОЦЕСС: старый verify.sh (база ветки до PR #34) снова вытащил в дерево team2 чужой stash coordinator #1 (go.mod/go.sum с go-mail, TASK-044); вернуть его в stash не дали права; изменения сохранены патчем в scratchpad супервизора и не закоммичены
 - domain/delivery/delivery: полный агрегат. Переходы: PENDING -> SENDING|FAILED, SENDING -> SENT|PENDING|FAILED|UNKNOWN, UNKNOWN -> SENT|PENDING. Методы MarkSent и SendAgain (UNKNOWN), Interrupted (SENDING -> UNKNOWN), RecordFinalResult (последняя попытка: retry -> FAILED «attempts exhausted»). Предикаты Sendable, InFlight, OutcomeUnknown. Поле round (раунд отправки) растёт только при SendAgain
 - cases/senddelivery: Service. SendHomework принимает только proposal.EmailCommand (граница TASK-040, AC-14). Handle задачи send_email, Reconcile для jobrunner (RecoveryReconcile), Recover (SENDING -> UNKNOWN), Resume (поставить задачи PENDING), ReconcileDelivery, MarkSent, SendAgain. *Service реализует homeworkflow.HomeworkMailer без моста
 - adapters/smtp: go-mail v0.8.1 (назван в задаче и PRD 4.3). Только TLS (STARTTLS обязателен или неявный TLS), TLS не ниже 1.2, без skip-verify; RootCAs нужен только для тестов. Ошибки классифицируются по фазе: сбой при записи тела письма или нет ответа на финальную точку -> UNKNOWN; до DATA -> transient/rejected. Тексты ошибок фиксированные, показывают только код ответа. Вложение читается один раз, Digest сверяется на отправляемых байтах. Reconcile всегда возвращает ErrOutcomeUnknown

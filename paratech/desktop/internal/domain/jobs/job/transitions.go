@@ -49,3 +49,7 @@ func (s Status) IsWaiting() bool {
 	}
 	return false
 }
+
+// OffersRunNow reports whether the user is offered "Run now" for a job in s: only while the power policy holds it
+// (PRD section 7.4, AC-22). ForceRun also accepts QUEUED, but there the job is not held, so nothing is offered.
+func (s Status) OffersRunNow() bool { return s == StatusWaitingForPower }
