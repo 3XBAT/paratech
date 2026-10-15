@@ -80,6 +80,9 @@ type Service struct {
 	recovery *recoveryRun // the running Recover; nil if none
 	closed   bool
 	wg       sync.WaitGroup // one per session, from the reservation in Start until it ends, and one per Recover
+
+	marked     chan struct{} // closed when the first Recover has passed its marking pass (RecoveryMarked)
+	markedOnce sync.Once
 }
 
 // New validates the configuration and builds the Service.
@@ -109,7 +112,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	s := &Service{
 		recordings: deps.Recordings, transcripts: deps.Transcripts, recorder: deps.Recorder, artifacts: deps.Artifacts,
 		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, log: log,
-		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval,
+		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval, marked: make(chan struct{}),
 	}
 	s.life, s.shutdown = context.WithCancel(context.Background())
 	return s, nil
