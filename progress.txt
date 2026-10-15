@@ -1432,3 +1432,43 @@
 - Шаги из docs/qa/run-alpha.md, раздел 8 «Импорт расписания»: диалог поверх окна с фильтром ICS/CSV/XLSX, «Отмена» молча; превью, ошибки строк без «Применить», применение и повторный импорт без изменений; <b>x</b> буквально; ICS с периодом; ярлык .lnk и сетевой путь ведут себя разумно; вёрстка длинных списков при 100% и 150%
 - После применения занятия через 3-5 мин — попап по расписанию (AC-01: фокус не крадётся)
 - Уход со страницы во время превью и во время «Применить» (коммит проходит)
+
+---
+
+## [TASK-057] Хранилище черновиков в SQLite, настройки почты/Hub и секреты в internal/app
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- Миграция 0005_drafts_and_mail_settings.sql (зеркало в docs/contracts/schema.sql): homework_drafts (PK assignment_id, FK assignments ON DELETE RESTRICT, version), homework_draft_revisions (PK (assignment_id, number), FK на черновик ON DELETE CASCADE, UNIQUE nullable job_id без FK на jobs, CHECK как в домене); в settings: homework_recipient, smtp_host, smtp_port, smtp_security (starttls|tls), smtp_username, hub_url (пусто = не задано)
+- sqlite DraftRepository: Get одним JOIN, Save = CAS версии + вставка только новых версий в той же транзакции; удаление задания с черновиком -> assignment.ErrInUse
+- Агрегат settings: поля почты и Hub с проверкой (адрес dot-atom как proposal.NewRecipient, хост по меткам, Hub URL https или http на loopback как hubclient; Restore проверяет всё); SMTPAccountConfigured (хост + логин-адрес), MailConfigured (+ получатель)
+- hubclient: URL из настроек на каждый вызов; нет URL/ключа или сохранённый URL отвергнут -> "hub: not configured", паркуется как ErrNetworkUnavailable (ключи задач не блокируются); неверный ключ от Hub — permanent
+- smtp: учётка (хост/порт/режим/логин, From = логин) из настроек на каждую отправку; не настроено -> ErrRejected, без UNKNOWN
+- app: заглушки Hub, почты, секретов почты и черновиков заменены: wincred.New("hub") (paratech/hub/api-key) и wincred.New("mail") (paratech/mail/smtp-password) — одно хранилище и адаптеру (Get), и senddelivery.CredentialStore; вне Windows ErrUnsupported без подмены; settingsbridge.go (только отображение); осталась только заглушка STT (TASK-060)
+- Один рендерер экспорта values.HomeworkMarkdown(title, body): Revision.Markdown и ExportCommand.Content; для export_homework заголовок — заголовок задания из Facts.AssignmentTitle, замораживается при Validate (модель заголовок не присылает)
+- DraftDeps.GenerateRetries (0 -> 20, максимум 1000) из env app — число повторов генерации настраиваемое (решение владельца: числа повторов/квот только для тестов)
+- Тесты: sqlite drafts (CAS, только добавление, ErrInUse, каскад, CHECK), AC-4 TestExportsStayBelowTheArtifactRoot, AC-19 TestSecretsReachNeitherTheDatabaseNorTheLog (fake TLS Hub с Bearer, fake SMTP с логином по TLS, скан файлов БД UTF-8/UTF-16, всех строк всех таблиц и debug-лога), TestUnconfiguredHubAndMailFailSafely, согласованность правил URL/адресов между settings, proposal, hubclient, smtp; закреплены имена записей Credential Manager
+- docs/adr/0009 (заглушки/не подключено), docs/qa/run-alpha.md (таблица и «Что изменилось»)
+- Изменённые существующие тесты: sqlite migrate_test (версия 5, новые таблицы), errors_test (SmtpSecurity в ручных параметрах — CHECK), hubclient client_test (нет ключа -> transient/парковка), smtp_test (порт через источник учётки), proposal_test (заголовок в фактах, ожидаемый markdown, Restore, dot-atom), homeworkflow fakes/proposals/drafts_test (задание с заголовком, markdown, GenerateRetries), app main_test/registrations_test/missing_parts_test (хранилища в памяти вместо заглушек, реальные тексты), tests/drafts_sqlite_test (sqlite вместо MemDrafts), tests/schema_test (homework_drafts)
+- Ревью: approve (только low/nit: отвергнутый сохранённый URL — permanent, адреса не dot-atom, очистка получателя ломала подтверждённую отправку, комментарий recipientSettings, нет теста имён хранилищ, checkHost) -> все исправлены (9c0f83f, 81c3c37, 76ed6f8). Security: найдено 0, опровергнуто 0, исправлено 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (в verify.sh)
+- [x] Шаг 2: GOOS=windows go vet ./desktop/...
+- [x] Шаг 3: TestSecretsReachNeitherTheDatabaseNorTheLog, TestSMTPPasswordNeverReachesTheDatabase, страж AC-19 из TASK-037
+
+### Решения (подтвердить)
+- Нет адреса Hub или ключа -> задачи ждут сети (как заглушка TASK-056), неверный ключ от Hub — постоянная ошибка (заблокирует ключи summarize/extract этого транскрипта после исправления ключа — вопрос владельцу)
+- Отправитель = логин SMTP; провайдер с логином не-адресом не настраивается (отдельного поля From нет)
+- «exports/ корня данных» = <DataDir>/artifacts/exports (корень filestore = DataDir/artifacts, БД рядом, не внутри)
+- GenerateRetries настраивается в env app (не флагом/переменной окружения)
+- Plain http к Hub разрешён только на loopback (для локального Hub при разработке)
+
+### Заметки (follow-up)
+- НЕТ UI: ввести адрес Hub, настройки почты и пароль SMTP негде (экран ключа Hub — TASK-039; экрана настроек почты нет в плане — нужна задача); методов preferences/биндингов для них нет; биндинги черновиков — TASK-045
+- recipientSettings (homeworkflow.RecipientSource) готов, но homeworkflow.Service (предложения) не подключён
+- delivery.NewAttachment принимает любой вид артефакта; можно ограничить exports/ в агрегате delivery
+- Тест env_other_test (!windows) только компилируется на этой машине (выполняется в CI ubuntu)
+- Нет теста, что assertNoSecrets сам ловит утечку
