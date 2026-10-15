@@ -19,8 +19,8 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "job_notices", "jobs", "recordings",
-	"schedule_entries", "settings", "stt_models", "summaries", "transcripts",
+	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "job_notices", "jobs", "proposals",
+	"recordings", "schedule_entries", "settings", "stt_models", "summaries", "transcripts",
 }
 
 // unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version

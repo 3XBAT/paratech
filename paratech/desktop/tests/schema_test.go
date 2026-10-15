@@ -30,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/notice"
@@ -342,7 +343,7 @@ func TestSchemaHasRequiredTables(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
-		"homework_drafts",
+		"homework_drafts", "proposals",
 	} {
 		if _, ok := tables[name]; !ok {
 			t.Errorf("table %s is missing", name)
@@ -355,7 +356,7 @@ func TestSchemaVersionColumns(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
-		"homework_drafts",
+		"homework_drafts", "proposals",
 	} {
 		body, ok := tables[name]
 		if !ok {
@@ -403,6 +404,7 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 		{"recordings", sortedStrings(recording.Statuses())},
 		{"deliveries", sortedStrings(delivery.Statuses())},
 		{"job_notices", sortedStrings(notice.Statuses())},
+		{"proposals", sortedStrings(proposal.Statuses())},
 	}
 	for _, tc := range cases {
 		t.Run(tc.table, func(t *testing.T) {

@@ -42,6 +42,8 @@ type Querier interface {
 	// Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
 	// delete of ADR-0004(e): removing a lesson sets deleted_at, only PurgeDeletedLesson deletes a row.
 	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
+	// Action proposals of the LLM (PRD section 13.3) with the optimistic-concurrency protocol of ADR-0004(d).
+	GetProposal(ctx context.Context, id string) (Proposal, error)
 	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
 	// store the result.
 	GetRecording(ctx context.Context, id string) (Recording, error)
@@ -74,6 +76,8 @@ type Querier interface {
 	InsertJobNotice(ctx context.Context, arg InsertJobNoticeParams) (int64, error)
 	// A never-stored lesson (version 0) is inserted with version 1.
 	InsertLesson(ctx context.Context, arg InsertLessonParams) error
+	// A never-stored proposal (version 0) is inserted with version 1.
+	InsertProposal(ctx context.Context, arg InsertProposalParams) error
 	// A never-stored recording (version 0) is inserted with version 1.
 	InsertRecording(ctx context.Context, arg InsertRecordingParams) error
 	// A never-stored settings aggregate (version 0) is inserted with version 1. A second insert violates the primary key,
@@ -136,6 +140,9 @@ type Querier interface {
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int64, error)
+	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due) and the creation
+	// time never change after the parse, so they are not written again.
+	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
 	// never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
