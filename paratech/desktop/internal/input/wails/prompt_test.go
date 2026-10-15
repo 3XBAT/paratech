@@ -17,6 +17,7 @@ import (
 
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/domain/recording/prompt"
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // fakePrompt is the recording prompt use case behind the binding.
@@ -35,7 +36,7 @@ func (f *fakePrompt) OfferAdHoc(context.Context) (recordingprompt.View, error) {
 	return f.view, f.err
 }
 
-func (f *fakePrompt) Start(_ context.Context, id prompt.ID) (recordingprompt.View, error) {
+func (f *fakePrompt) Start(_ context.Context, id prompt.ID, _ values.Source) (recordingprompt.View, error) {
 	return f.record("start", id)
 }
 
@@ -137,7 +138,7 @@ func TestPromptZoneWithoutGoRoot(t *testing.T) {
 func TestPromptProblemCodes(t *testing.T) {
 	want := map[prompt.Problem]string{
 		prompt.ProblemUnavailable: "unavailable", prompt.ProblemInProgress: "in_progress",
-		prompt.ProblemRecovering: "recovering", prompt.ProblemFailed: "failed",
+		prompt.ProblemRecovering: "recovering", prompt.ProblemFailed: "failed", prompt.ProblemSourceGone: "source_gone",
 	}
 	for _, p := range prompt.Problems() {
 		if got := problemCode(p); got != want[p] || got == "" {

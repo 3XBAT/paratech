@@ -17,11 +17,12 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/scheduler"
 	"paratech/desktop/internal/domain/recording/prompt"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
 
-var _ recordingprompt.SettingsReader = (*sqlite.SettingsRepository)(nil)
+var _ recordingprompt.SettingsStore = (*sqlite.SettingsRepository)(nil)
 
 // London lesson of dstSchedule: 09:00-10:30 UTC on 2026-10-25.
 var londonStart = time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
@@ -30,14 +31,16 @@ var londonStart = time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
 type startedLessons struct {
 	mu      sync.Mutex
 	lessons []shared.LessonID
+	sources []values.Source
 }
 
 func (s *startedLessons) Ready() bool { return true }
 
-func (s *startedLessons) StartRecording(_ context.Context, l shared.LessonID) (shared.RecordingID, error) {
+func (s *startedLessons) StartRecording(_ context.Context, l shared.LessonID, source values.Source) (shared.RecordingID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lessons = append(s.lessons, l)
+	s.sources = append(s.sources, source)
 	return "rec-1", nil
 }
 
@@ -53,6 +56,7 @@ type promptScenario struct {
 	popup      *testenv.FakePopup
 	prefs      *preferences.Service
 	prompts    *recordingprompt.Service
+	apps       *testenv.FakeAudioApps
 	recordings *startedLessons
 	sched      *scheduler.Service
 }
@@ -69,9 +73,11 @@ func newPromptScenario(t *testing.T) *promptScenario {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc := &promptScenario{t: t, clock: clock, popup: &testenv.FakePopup{}, prefs: prefs, recordings: &startedLessons{}}
+	sc := &promptScenario{
+		t: t, clock: clock, popup: &testenv.FakePopup{}, prefs: prefs, apps: &testenv.FakeAudioApps{}, recordings: &startedLessons{},
+	}
 	sc.prompts, err = recordingprompt.New(recordingprompt.Deps{
-		Settings: settings, Popup: sc.popup, Recordings: sc.recordings, Clock: clock, Sleeper: clock,
+		Settings: settings, Apps: sc.apps, Popup: sc.popup, Recordings: sc.recordings, Clock: clock, Sleeper: clock,
 	}, recordingprompt.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +121,7 @@ func TestLessonPromptFollowsTheStoredSetting(t *testing.T) {
 		if !ok || !sc.popup.Visible() || v.Lesson.Title != "English" || v.Lesson.TimeZone != "Europe/London" {
 			t.Fatalf("current %+v, %v, visible %v", v, ok, sc.popup.Visible())
 		}
-		got, err := sc.prompts.Start(context.Background(), v.ID)
+		got, err := sc.prompts.Start(context.Background(), v.ID, values.WholeComputer())
 		if err != nil || got.State != prompt.StateStarted || sc.popup.Visible() {
 			t.Fatalf("Start = %+v, %v, visible %v", got, err, sc.popup.Visible())
 		}
@@ -173,5 +179,37 @@ func TestIgnoredLessonPromptExpiresOnSQLite(t *testing.T) {
 	sc.tickAt(londonStart.Add(90 * time.Minute))
 	if sc.popup.Visible() {
 		t.Fatal("the popup must hide at the lesson end")
+	}
+}
+
+// The source picked for a recording is remembered in SQLite by its executable name (TASK-059): the next picker
+// preselects it while the app is open, and keeps it remembered while it is not.
+func TestPickedSourceIsRememberedOnSQLite(t *testing.T) {
+	sc := newPromptScenario(t)
+	ctx := context.Background()
+	sc.apps.Set(values.AudioApp{App: "zoom.exe", Title: "Zoom Meeting", PID: 300}, values.AudioApp{App: "chrome.exe", PID: 200, Playing: true})
+
+	src, err := sc.prompts.Sources(ctx)
+	if err != nil || !src.Selected.IsWholeComputer() || len(src.Apps) != 2 || src.Apps[0].App != "chrome.exe" {
+		t.Fatalf("first Sources = %+v, %v; want the playing app first and the whole computer selected", src, err)
+	}
+	zoom, err := values.SourceOf("zoom.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := sc.prompts.OfferAdHoc(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.prompts.Start(ctx, v.ID, zoom); err != nil {
+		t.Fatal(err)
+	}
+
+	if src, err = sc.prompts.Sources(ctx); err != nil || src.Selected != zoom || src.Remembered != "zoom.exe" {
+		t.Fatalf("Sources after the start = %+v, %v; want zoom preselected", src, err)
+	}
+	sc.apps.Set(values.AudioApp{App: "chrome.exe", PID: 200})
+	if src, err = sc.prompts.Sources(ctx); err != nil || !src.Selected.IsWholeComputer() || src.Remembered != "zoom.exe" {
+		t.Fatalf("Sources without zoom = %+v, %v; want the whole computer selected and zoom still remembered", src, err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/testenv"
 )
@@ -33,14 +34,15 @@ func TestMain(m *testing.M) {
 // fakes are the parts of the outside world a test drives.
 type fakes struct {
 	power    *testenv.FakePower
-	recorder *testenv.FakeRecorder // set when openCore builds the recording session
+	recorder *testenv.FakeRecorder  // set when openCore builds the recording session
+	apps     *testenv.FakeAudioApps // the open apps of the source picker
 
 	// secrets are the credential stores by service: tests never touch the real Credential Manager.
 	secrets map[string]*testenv.MemCredentials
 }
 
 // testEnv is the outside world of the core in tests: the real clock (the wiring runs on real goroutines), fake power
-// on AC, the fake recorder, the test binary as whisper-cli, in-memory credential stores (empty: the Hub and mail are
+// on AC, the fake recorder and open apps, the test binary as whisper-cli, in-memory credential stores (empty: the Hub and mail are
 // not configured) and a fast single-worker runner.
 func testEnv(t *testing.T) (env, *fakes) {
 	t.Helper()
@@ -48,7 +50,7 @@ func testEnv(t *testing.T) (env, *fakes) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakes{power: testenv.NewFakePower(true), secrets: map[string]*testenv.MemCredentials{
+	f := &fakes{power: testenv.NewFakePower(true), apps: &testenv.FakeAudioApps{}, secrets: map[string]*testenv.MemCredentials{
 		hubSecretsService: testenv.NewMemCredentials(), mailSecretsService: testenv.NewMemCredentials(),
 	}}
 
@@ -67,6 +69,7 @@ func testEnv(t *testing.T) (env, *fakes) {
 			f.recorder = testenv.NewFakeRecorder(files, time.Minute)
 			return f.recorder, nil
 		},
+		apps:          func(*slog.Logger) recordingprompt.AudioApps { return f.apps },
 		whisperBinary: bin,
 		secrets: func(service string) (secretStore, error) {
 			s, ok := f.secrets[service]

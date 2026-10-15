@@ -9,6 +9,7 @@ import (
 
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/domain/recording/prompt"
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // PromptShownEvent is the Wails event emitted each time the shell shows the popup; the popup page then reads
@@ -31,6 +32,7 @@ const (
 	problemInProgress  = "in_progress"
 	problemRecovering  = "recovering"
 	problemFailed      = "failed"
+	problemSourceGone  = "source_gone"
 )
 
 // timeOfDay is the layout of the lesson times on the popup.
@@ -40,7 +42,7 @@ const timeOfDay = "15:04"
 type PromptUseCase interface {
 	Current() (recordingprompt.View, bool)
 	OfferAdHoc(ctx context.Context) (recordingprompt.View, error)
-	Start(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
+	Start(ctx context.Context, id prompt.ID, source values.Source) (recordingprompt.View, error)
 	Snooze(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
 	Skip(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
 }
@@ -55,7 +57,8 @@ type PromptView struct {
 	End   string `json:"end"`
 	// State is OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED or WITHDRAWN.
 	State string `json:"state"`
-	// Problem says why the last start failed: "", "unavailable", "in_progress", "recovering" or "failed".
+	// Problem says why the last start failed: "", "unavailable", "in_progress", "recovering", "source_gone" (the chosen
+	// app does not run) or "failed".
 	Problem   string `json:"problem"`
 	CanSnooze bool   `json:"canSnooze"`
 }
@@ -84,7 +87,9 @@ func (s *PromptService) Current() *PromptView {
 
 // Start starts the recording the prompt offers. A failed start is not an error: the view carries its problem.
 func (s *PromptService) Start(ctx context.Context, id string) (PromptView, error) {
-	return s.act("start recording", id, func(pid prompt.ID) (recordingprompt.View, error) { return s.uc.Start(ctx, pid) })
+	return s.act("start recording", id, func(pid prompt.ID) (recordingprompt.View, error) {
+		return s.uc.Start(ctx, pid, values.WholeComputer())
+	})
 }
 
 // Snooze hides the prompt for five minutes; only when the view offers it (canSnooze).
@@ -146,6 +151,8 @@ func problemCode(p prompt.Problem) string {
 		return problemRecovering
 	case prompt.ProblemFailed:
 		return problemFailed
+	case prompt.ProblemSourceGone:
+		return problemSourceGone
 	}
 	return ""
 }

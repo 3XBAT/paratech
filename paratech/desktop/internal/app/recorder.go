@@ -8,12 +8,14 @@ import (
 
 	"paratech/desktop/internal/adapters/audiocapture"
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 )
 
 // platformRecorder is the audio recorder of this build: on Windows the recorder child of this executable
-// (--recorder --data-dir dataDir) that writes chunks through the Storage Manager on <dataDir>/artifacts; elsewhere
-// none (the product targets Windows only). It starts nothing.
+// (--recorder --data-dir dataDir) that writes chunks through the Storage Manager on <dataDir>/artifacts, finding the
+// chosen app with its own platform apps (so the source picker never delays its checks); elsewhere none (the product
+// targets Windows only). It starts nothing.
 func platformRecorder(dataDir string, files *filestore.Store, log *slog.Logger) (recordingsession.Recorder, error) {
 	if !audiocapture.Supported() {
 		return audiocapture.Unavailable{}, nil
@@ -23,13 +25,18 @@ func platformRecorder(dataDir string, files *filestore.Store, log *slog.Logger) 
 		return nil, err
 	}
 	rec, err := audiocapture.New(audiocapture.Deps{
-		Files: files, Launcher: launcher, Processes: audiocapture.PlatformProcesses(), Log: log,
+		Files: files, Launcher: launcher, Processes: audiocapture.PlatformProcesses(), Apps: audiocapture.PlatformApps(log),
+		Log: log,
 	}, audiocapture.DefaultConfig())
 	if err != nil {
 		return nil, err
 	}
 	return rec, nil
 }
+
+// platformApps lists the open apps of this OS for the source picker: windows and audio sessions on Windows; elsewhere
+// every call fails, so the picker offers the whole computer only.
+func platformApps(log *slog.Logger) recordingprompt.AudioApps { return audiocapture.PlatformApps(log) }
 
 // runRecorder is the --recorder run mode: the audio recorder child that the app starts from its own executable
 // (ADR-0002 (audio capture)). It opens only the Storage Manager on <DataDir>/artifacts: no instance lock (the parent
