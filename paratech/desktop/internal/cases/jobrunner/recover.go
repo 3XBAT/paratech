@@ -129,6 +129,7 @@ func (s *Service) recoverJob(ctx context.Context, j *job.Job, regs map[job.Type]
 	}
 	s.log.Info("stale job recovered", slog.String("job", id.String()), slog.String("type", string(typ)),
 		slog.String("outcome", outcome), slog.String("status", j.Status().String()))
+	s.jobFinished(ctx, j.Snapshot())
 }
 
 // applyRecovery moves the stale job through the aggregate according to the policy of its type.

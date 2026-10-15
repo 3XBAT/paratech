@@ -127,6 +127,17 @@ type Reconciler interface {
 	Reconcile(ctx context.Context, snap job.Snapshot) (next job.Status, reason string, err error)
 }
 
+// Observer hears about jobs that finished, for the "processing complete" notification (PRD section 15). Implemented by
+// the notify use case, structurally like Handler (ARCH-20).
+type Observer interface {
+	// JobFinished is called after a terminal status (COMPLETED, FAILED or CANCELLED) of the job was saved: by the
+	// worker that ran it, by Cancel of a job that was not running and by Recover (PRD sections 7.2 and 15). snap is the
+	// job as saved. The call is not durable: a crash right after the save loses it, and nothing guarantees it is made
+	// only once, so the receiver deduplicates by job and status. ctx ends after a fixed bound; an error or a panic is
+	// logged and never changes the job.
+	JobFinished(ctx context.Context, snap job.Snapshot) error
+}
+
 // PowerMonitor reports the power source of the computer (PRD sections 4.3 and 7.4, AC-21). Implemented by a Windows
 // adapter (TASK-011) and by a fake elsewhere.
 type PowerMonitor interface {
