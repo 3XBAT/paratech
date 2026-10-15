@@ -331,6 +331,55 @@ func TestRecorderKeepsTheTargetWhenUnsure(t *testing.T) {
 	}
 }
 
+// restartedFinder is an app that restarted right after the recording found it: the first Find returns zoom1, every
+// later one zoom2. Only the recorder calls it, so the test goroutine shares no lock with the supervisor.
+type restartedFinder struct {
+	mu    sync.Mutex
+	finds int
+}
+
+func (f *restartedFinder) Find(context.Context, shared.AppName) (audiocapture.ProcessIdentity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.finds++
+	if f.finds == 1 {
+		return zoom1, nil
+	}
+	return zoom2, nil
+}
+
+func (f *restartedFinder) Same(_ context.Context, id audiocapture.ProcessIdentity) (bool, error) {
+	return id == zoom2, nil
+}
+
+// A re-bind right after Start returned does not race with Start's log of the app. No logger and no diagnostics
+// read until the re-bind is done: a shared lock would order the accesses and hide the race from -race.
+func TestRecorderRebindRightAfterStart(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	dataDir := t.TempDir()
+	store := audiocapture.NewTestStore(filepath.Join(dataDir, "artifacts"))
+	launcher := &helperLauncher{dataDir: dataDir, scenarios: []string{testenv.RecorderTone}}
+	cfg := rebindConfig()
+	cfg.RebindInterval = time.Millisecond
+	rec, err := audiocapture.New(audiocapture.Deps{Files: store, Launcher: launcher, Apps: &restartedFinder{}}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &recorderEnv{rec: rec, launcher: launcher, store: store, chunks: ref(t, "rec1"), track: ref(t, "rec1.wav")}
+
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, zoomSource(t)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second) // the re-bind happens meanwhile; polling would take a lock
+	e.waitDiag(t, "zoom2 is captured", func(d audiocapture.Diagnostics) bool { return d.Rebinds == 1 && d.Target.PID == 301 })
+	if err := stop(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.waitEnded(t); err != nil {
+		t.Fatalf("Wait = %v", err)
+	}
+}
+
 func TestRecorderRefusesAnAppThatDoesNotRun(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e, _ := newAppEnv(t, rebindConfig(), newFakeFinder(), testenv.RecorderTone)

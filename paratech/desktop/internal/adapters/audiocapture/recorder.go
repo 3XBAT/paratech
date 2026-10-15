@@ -200,7 +200,7 @@ func (r *Recorder) start(ctx context.Context, c *capture) error {
 	case err := <-c.started:
 		if err == nil {
 			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("target", string(target.Mode)),
-				slog.String("app", c.app().String()), slog.Uint64("target_pid", uint64(target.PID)))
+				slog.String("app", c.app.String()), slog.Uint64("target_pid", uint64(target.PID)))
 			return nil
 		}
 		<-c.done

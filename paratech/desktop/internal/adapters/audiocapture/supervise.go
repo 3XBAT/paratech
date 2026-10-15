@@ -58,8 +58,9 @@ type binding struct {
 type capture struct {
 	id     shared.RecordingID
 	chunks shared.ArtifactRef
-	target Target   // changed by the supervisor on a re-bind
-	bind   *binding // nil unless the capture follows an app
+	app    shared.AppName // the app the capture follows; empty for none. Never changes, so any goroutine may read it
+	target Target         // changed by the supervisor on a re-bind
+	bind   *binding       // nil unless the capture follows an app
 
 	ctx    context.Context // ends with a stop, an abort or the end: bounds the checks of the app
 	cancel context.CancelFunc
@@ -86,21 +87,16 @@ func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target,
 		stopCh: make(chan struct{}), abortCh: make(chan struct{}),
 		diag: Diagnostics{Target: target},
 	}
-	c.diag.App = c.app()
+	if bind != nil {
+		c.app = bind.proc.App
+	}
+	c.diag.App = c.app
 	return c
 }
 
 func (c *capture) requestStop() { c.stopOnce.Do(func() { close(c.stopCh) }); c.cancel() }
 func (c *capture) abort()       { c.abortOnce.Do(func() { close(c.abortCh) }); c.cancel() }
 func (c *capture) release()     { c.cancel() }
-
-// app is the app the capture follows; empty for none.
-func (c *capture) app() shared.AppName {
-	if c.bind == nil {
-		return ""
-	}
-	return c.bind.proc.App
-}
 
 func (c *capture) stopping() bool {
 	select {
@@ -313,7 +309,7 @@ func (r *Recorder) mayRebind(c *capture) bool {
 	if !c.bind.capLogged {
 		c.bind.capLogged = true
 		r.log.Warn("the app restarted too often; the capture waits without following it",
-			slog.String("recording", c.id.String()), slog.String("app", c.app().String()), slog.Int("rebinds", c.bind.rebinds))
+			slog.String("recording", c.id.String()), slog.String("app", c.app.String()), slog.Int("rebinds", c.bind.rebinds))
 	}
 	return false
 }
@@ -325,7 +321,7 @@ func (r *Recorder) markGone(c *capture) {
 	}
 	c.bind.waiting = true
 	r.log.Info("capture target exited; waiting for the app", slog.String("recording", c.id.String()),
-		slog.String("app", c.app().String()), slog.Uint64("pid", uint64(c.bind.proc.PID)))
+		slog.String("app", c.app.String()), slog.Uint64("pid", uint64(c.bind.proc.PID)))
 	c.update(func(d *Diagnostics) { d.WaitingForApp = true })
 }
 
@@ -364,7 +360,7 @@ func (r *Recorder) rebind(c *capture, next ProcessIdentity) {
 	c.bind.rebinds++
 	c.target = Target{Mode: ModeInclude, PID: next.PID}
 	r.log.Info("capture target re-bound by exe name", slog.String("recording", c.id.String()),
-		slog.String("app", next.App.String()), slog.Uint64("old_pid", uint64(old.PID)), slog.Uint64("new_pid", uint64(next.PID)))
+		slog.String("app", c.app.String()), slog.Uint64("old_pid", uint64(old.PID)), slog.Uint64("new_pid", uint64(next.PID)))
 	target, rebinds := c.target, c.bind.rebinds
 	c.update(func(d *Diagnostics) { d.Target, d.WaitingForApp, d.Rebinds = target, false, rebinds })
 }
