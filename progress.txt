@@ -1016,3 +1016,40 @@
 - Не подключено в app/input/UI: Wails-биндинг открывает URL только как URL (не shell), ImportConfirmation строится только из действия пользователя по digest из Inspect
 - Low: падение между Write и Register оставляет файл-сироту в models/ (та же дыра у Downloader) — нужна чистка при старте
 - Low: ImportConfirmation/CheckImport* лежат в values без агрегата (допустимо)
+
+---
+
+## [TASK-032] Аутентификация Hub по API-ключам тестеров
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/access/apikey: агрегат Key (active -> revoked таблицей переходов, Revoke(now), Verify с subtle.ConstantTimeCompare; для неизвестного id VerifyMissing делает ту же работу), Credential (формат pthub_<16 hex id>_<64 hex secret>, строгий разбор до обращения к БД, String/GoString скрывают ключ), Label (1-32 [a-z0-9_-], псевдоним); shared.APIKeyID
+- Хранится только SHA-256 секрета (32 байта случайности из crypto/rand через порт Random); миграция hub/pkg/migrations/0002_api_keys.sql с CHECK
+- cases/keys (issue/revoke/list) и cases/keyauth (authenticate); adapters/postgres APIKeys (условный UPDATE ... WHERE revoked_at IS NULL — из двух отзывов сохраняется один), adapters/clock, adapters/random
+- input/connect: HTTP-middleware requireAPIKey проверяет "Authorization: Bearer" ДО чтения тела и пишет ошибку через connect.NewErrorWriter (Connect/gRPC/gRPC-Web одинаково); интерцептор requireIdentity — вторая проверка, без identity отказывает. NewRouter без Auth не собирается; TODO из TASK-031 закрыт. Порядок: publicQuota (Reserve/Settle/Release -> 404) до аутентификации
+- Любой отказ (нет заголовка, неверная схема, мусор, неизвестный, отозванный, неверный секрет) — один и тот же unauthenticated + ErrorDetail INVALID_API_KEY, retryable=false; сбой/таймаут (3s) хранилища — unavailable без детали; в лог (Info) только процедура и причина, без ключа, id и хеша
+- input/cli + config: `hub keys create -label L | revoke -id ID | list`; разбор только в config (ARCH-52), main.go не менялся (ADR-0003); ключ печатается один раз в stdout; команды сначала применяют миграции
+- paratech/README.md: раздел «Hub API keys»
+- Изменённые существующие тесты: postgres_test.go (версии миграций берутся из встроенных файлов + закреплены 1 и 2), router_test.go (аутентификатор и ключ в запросах, проверка 404 с ключом и без), tests/server_test.go (GetRemaining без ключа теперь unauthenticated), domain/shared TestIsLowerHex -> TestLowerHex (функция стала неэкспортируемой)
+- Ревью: approve (1 medium: тело unary-запроса читалось до аутентификации; low: таймаут поиска ключа, Issued в slog JSON, отказы на Debug; nit) -> исправлено в bbbc565, 968daa9, повторное ревью approve. Security: найдено 0 (оба прохода, включая исправления), опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), на голове 968daa9
+- [x] Шаг 1: HUB_TEST_DATABASE_URL (docker compose, проект task032) go test -race -count=1 ./hub/... — DB-тесты реально выполнены (TestAPIKeys*, TestAPIKeyLifecycleAgainstPostgres, TestServerAgainstPostgres), схем не осталось, compose down -v
+- [x] Шаг 2: `hub keys create` -> GetRemaining с ключом 501 unimplemented (прошёл аутентификацию), без ключа и с неверным 401 INVALID_API_KEY; Reserve -> 404
+- [x] Шаг 3: `hub keys revoke` при работающем сервере -> следующий запрос 401 INVALID_API_KEY; list показывает revoked
+- [x] Шаг 4: ни ключа, ни секрета нет в строках api_keys и в полном pg_dump; в логе hub нет ни секрета, ни id
+
+### Решения (подтвердить)
+- Формат ключа pthub_<id>_<secret>, несолёный SHA-256 (секрет 256 бит случайный, bcrypt не нужен); десктоп считает ключ непрозрачным
+- `hub keys ...` применяет ожидающие миграции перед командой; повторный revoke — не ошибка (печатает прежнее время)
+- Неизвестный путь Gateway без ключа -> 401 (раньше 404)
+
+### Заметки (follow-up)
+- Low: поиск ключа ограничен 3s, клиентский Connect-Timeout-Ms/grpc-timeout на middleware не действует (ограничено authTimeout)
+- Low: уже открытый стрим продолжается после отзыва ключа до своего конца
+- Нет last_used_at и ограничения частоты неудачных попыток (rate limit — задача Gateway TASK-035, анонимный трафик она не покроет)
+- Существующее: postgres.redact заменяет все вхождения пароля — короткий пароль портит текст ошибок
+- "gracefully stopped" в stderr после CLI-команд (main.go)
+- isLowerHex продублирован в domain/shared и apikey (сознательно, чтобы не экспортировать helper)
