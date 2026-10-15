@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -199,10 +200,12 @@ func TestJobRunnerNotifiesFinishedJobs(t *testing.T) {
 	clock := testenv.NewFakeClock(notifyT0)
 	notifier := &testenv.FakeNotifier{}
 	repo := sqlite.NewJobRepository(db)
+	cfg := runnerConfig(1)
+	gate := newPollGate(clock, cfg.PollInterval)
 
 	runner, err := jobrunner.New(jobrunner.Deps{
-		Jobs: repo, Clock: clock, Sleeper: clock, Observer: newNotifyService(t, db, clock, notifier),
-	}, runnerConfig(1))
+		Jobs: repo, Clock: clock, Sleeper: gate, Observer: newNotifyService(t, db, clock, notifier),
+	}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,20 +256,34 @@ func TestJobRunnerNotifiesFinishedJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testenv.Eventually(t, "three notifications", func() bool { return len(notifier.Calls()) >= 3 },
-		func() { clock.Advance(time.Second) })
-	// The mail job is done too, and a few more polls change nothing.
-	testenv.Eventually(t, "the mail job", func() bool {
-		j, err := repo.Get(context.Background(), "mail")
-		return err == nil && j.Status() == job.StatusCompleted
-	}, func() { clock.Advance(time.Second) })
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// The deadline only turns a hang into a failure; the steps are counted in polls.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	for range 5 {
-		if err := clock.AwaitSleepers(ctx, 2); err != nil { // the worker and the keeper are idle
+	tick := func() {
+		t.Helper()
+		if err := gate.tick(ctx, 2); err != nil { // the worker and the keeper
 			t.Fatalf("runner did not go idle: %v", err)
 		}
-		clock.Advance(time.Second)
+	}
+	allFinished := func() bool {
+		for _, id := range []shared.JobID{"ok", "bad", "flaky", "mail"} {
+			j, err := repo.Get(context.Background(), id)
+			if err != nil || !j.Status().IsTerminal() {
+				return false
+			}
+		}
+		return true
+	}
+	// The flaky job needs its backoff (5 s) to elapse; 60 polls are far more than enough.
+	for step := 0; !allFinished(); step++ {
+		if step == 60 {
+			t.Fatal("jobs not finished after 60 polls")
+		}
+		tick()
+	}
+	// A few more polls change nothing.
+	for range 5 {
+		tick()
 	}
 	// Stop waits for the worker, including an observer call in flight, so every notification is in.
 	if err := runner.Stop(ctx); err != nil {
@@ -280,5 +297,71 @@ func TestJobRunnerNotifiesFinishedJobs(t *testing.T) {
 	want := map[string]int{"ok COMPLETED": 1, "bad FAILED": 1, "flaky COMPLETED": 1}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("notifications = %v, want %v", got, want)
+	}
+}
+
+// pollGate is a runner Sleeper that moves the fake clock only while the runner is idle. A poll sleep (the worker or
+// the keeper waiting for the next poll) waits for tick; any other sleep (the attempt and observer bounds) goes to the
+// clock. Advancing the clock in real time instead lets the 5 s observer bound expire during a slow SQLite call under
+// -race, which cancels the call and loses its notification.
+type pollGate struct {
+	clock *testenv.FakeClock
+	poll  time.Duration
+
+	mu      sync.Mutex
+	waiting map[chan struct{}]struct{}
+	changed chan struct{} // closed and replaced whenever a poll sleep starts
+}
+
+func newPollGate(clock *testenv.FakeClock, poll time.Duration) *pollGate {
+	return &pollGate{clock: clock, poll: poll, waiting: map[chan struct{}]struct{}{}, changed: make(chan struct{})}
+}
+
+func (g *pollGate) Sleep(ctx context.Context, d time.Duration) error {
+	if d != g.poll {
+		return g.clock.Sleep(ctx, d)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	wake := make(chan struct{})
+	g.mu.Lock()
+	g.waiting[wake] = struct{}{}
+	close(g.changed)
+	g.changed = make(chan struct{})
+	g.mu.Unlock()
+
+	select {
+	case <-wake:
+		return nil
+	case <-ctx.Done():
+		g.mu.Lock()
+		delete(g.waiting, wake)
+		g.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+// tick waits until n goroutines sleep for a poll, then advances the clock by one poll interval and wakes them. With
+// every runner goroutine in a poll sleep, no attempt or observer call is in flight, so no bound sees the clock move.
+func (g *pollGate) tick(ctx context.Context, n int) error {
+	for {
+		g.mu.Lock()
+		if len(g.waiting) >= n {
+			g.clock.Advance(g.poll)
+			for wake := range g.waiting {
+				close(wake)
+				delete(g.waiting, wake)
+			}
+			g.mu.Unlock()
+			return nil
+		}
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
