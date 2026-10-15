@@ -114,35 +114,53 @@ func (f *fakeDeliveries) Resume(context.Context) error {
 	return nil
 }
 
+// fakeTranscriptions is the startup sweep of the transcription queue.
+type fakeTranscriptions struct {
+	ev  *events
+	err error
+}
+
+func (f *fakeTranscriptions) EnqueuePending(context.Context) (int, error) {
+	f.ev.add("transcriptions.EnqueuePending")
+	return 0, f.err
+}
+
 type lifeFakes struct {
-	ev         *events
-	runner     *fakeRunner
-	recordings *fakeRecordings
-	deliveries *fakeDeliveries
-	life       *lifecycle
+	ev             *events
+	runner         *fakeRunner
+	recordings     *fakeRecordings
+	deliveries     *fakeDeliveries
+	transcriptions *fakeTranscriptions
+	life           *lifecycle
 }
 
 func newLifeFakes() *lifeFakes {
 	ev := &events{}
-	f := &lifeFakes{ev: ev, runner: &fakeRunner{ev: ev}, recordings: newFakeRecordings(ev), deliveries: &fakeDeliveries{ev: ev}}
+	f := &lifeFakes{
+		ev: ev, runner: &fakeRunner{ev: ev}, recordings: newFakeRecordings(ev), deliveries: &fakeDeliveries{ev: ev},
+		transcriptions: &fakeTranscriptions{ev: ev},
+	}
 	step := func(name string, err error) cleanup {
 		return cleanup{name: name, run: func(context.Context) (int, error) { ev.add(name); return 1, err }}
 	}
 	release := func(name string) closer { return closer{name: name, close: func() error { ev.add(name); return nil }} }
 	f.life = &lifecycle{
 		log: slog.New(slog.NewTextHandler(io.Discard, nil)), runner: f.runner, recordings: f.recordings, deliveries: f.deliveries,
-		cleanups:    []cleanup{step("cleanup work", nil), step("cleanup temp", errors.New("disk busy"))},
-		closers:     []closer{release("close storage"), release("release lock")},
-		stopTimeout: time.Second,
+		transcriptions: f.transcriptions,
+		cleanups:       []cleanup{step("cleanup work", nil), step("cleanup temp", errors.New("disk busy"))},
+		closers:        []closer{release("close storage"), release("release lock")},
+		stopTimeout:    time.Second,
 	}
 	return f
 }
 
-// The start order of TASK-056; the recording recovery runs in the background and does not hold up the workers.
+// The start order of TASK-056 and TASK-060 (the transcription sweep after the recoveries, before the workers); the
+// recording recovery runs in the background and does not hold up the workers.
 func TestStartOrder(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	f := newLifeFakes()
-	f.deliveries.recoverErr = errors.New("database busy") // logged, the start goes on
+	f.deliveries.recoverErr = errors.New("database busy")     // logged, the start goes on
+	f.transcriptions.err = errors.New("recording unreadable") // the same
 	f.deliveries.launched = f.recordings.entered
 
 	if err := f.life.start(context.Background()); err != nil {
@@ -151,7 +169,10 @@ func TestStartOrder(t *testing.T) {
 	<-f.recordings.entered
 
 	got := f.ev.all()
-	want := []string{"cleanup work", "cleanup temp", "runner.Recover", "deliveries.Recover", "deliveries.Resume", "runner.Start"}
+	want := []string{
+		"cleanup work", "cleanup temp", "runner.Recover", "deliveries.Recover", "deliveries.Resume",
+		"transcriptions.EnqueuePending", "runner.Start",
+	}
 	without := slices.DeleteFunc(slices.Clone(got), func(s string) bool { return s == "recordings.Recover" })
 	if !slices.Equal(without, want) {
 		t.Fatalf("start order %v, want %v (plus the recording recovery after the job recovery)", got, want)
@@ -223,7 +244,7 @@ func TestStartUnwinds(t *testing.T) {
 			name:  "worker start fails",
 			setup: func(f *lifeFakes) { f.runner.startErr = boom },
 			want: []string{"cleanup work", "cleanup temp", "runner.Recover", "deliveries.Recover", "deliveries.Resume",
-				"runner.Start", "runner.Stop", "recordings.Close", "recordings.Recover returned"},
+				"transcriptions.EnqueuePending", "runner.Start", "runner.Stop", "recordings.Close", "recordings.Recover returned"},
 		},
 	}
 	for _, tt := range tests {

@@ -56,7 +56,8 @@ const detachedTimeout = 10 * time.Second
 // and writing. An intermediate save that fails otherwise is logged and the session goes on: the next save carries
 // the full state, and a recording whose last save never succeeded is found by Recover after a restart. The heartbeat
 // of a running capture is written by the same session goroutine (a case of the follow loop), never by a second
-// writer, which would make the saves fail with version conflicts.
+// writer, which would make the saves fail with version conflicts. A recording saved COMPLETED with a final track, by a
+// session or by Recover, is handed to the CompletionListener.
 type Service struct {
 	recordings  RecordingRepository
 	transcripts RecordingTranscripts
@@ -66,6 +67,7 @@ type Service struct {
 	clock       Clock
 	sleeper     Sleeper
 	ids         IDGenerator
+	completions CompletionListener
 	log         *slog.Logger
 
 	policy    limits.Policy
@@ -88,7 +90,7 @@ type Service struct {
 // New validates the configuration and builds the Service.
 func New(deps Deps, cfg Config) (*Service, error) {
 	if deps.Recordings == nil || deps.Transcripts == nil || deps.Recorder == nil || deps.Artifacts == nil ||
-		deps.Tx == nil || deps.Clock == nil || deps.Sleeper == nil || deps.IDs == nil {
+		deps.Tx == nil || deps.Clock == nil || deps.Sleeper == nil || deps.IDs == nil || deps.Completions == nil {
 		return nil, fmt.Errorf("%w: every port except the logger is required", ErrInvalidConfig)
 	}
 
@@ -111,7 +113,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 
 	s := &Service{
 		recordings: deps.Recordings, transcripts: deps.Transcripts, recorder: deps.Recorder, artifacts: deps.Artifacts,
-		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, log: log,
+		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, completions: deps.Completions, log: log,
 		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval, marked: make(chan struct{}),
 	}
 	s.life, s.shutdown = context.WithCancel(context.Background())
@@ -509,7 +511,26 @@ func (s *Service) assemble(ctx context.Context, sess *session, rec *recording.Re
 			return err
 		}
 	}
-	return s.persistFinal(ctx, sess, rec)
+	if err := s.persistFinal(ctx, sess, rec); err != nil {
+		return err
+	}
+	s.announceCompleted(ctx, rec)
+	return nil
+}
+
+// announceCompleted tells the listener about a saved recording that can be transcribed (the aggregate decides). It
+// runs detached, so a shutdown does not cut the listener's transaction in half; its error is only logged.
+func (s *Service) announceCompleted(ctx context.Context, rec *recording.Recording) {
+	if _, ok := rec.TranscribableAudio(); !ok {
+		return
+	}
+	dctx, release := s.detached(ctx)
+	defer release()
+
+	if err := s.completions.RecordingCompleted(dctx, rec.ID()); err != nil {
+		s.log.Warn("handing over the completed recording failed; the next start tries again",
+			slog.String("recording", rec.ID().String()), slog.Any("error", err))
+	}
 }
 
 // finalizeTrack runs Recorder.Finalize up to attempts times with a doubling delay; a shutdown and missing audio are

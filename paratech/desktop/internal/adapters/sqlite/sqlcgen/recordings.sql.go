@@ -240,6 +240,48 @@ func (q *Queries) ListTranscriptRefsByRecording(ctx context.Context, recordingID
 	return items, nil
 }
 
+const listUntranscribedRecordingIDs = `-- name: ListUntranscribedRecordingIDs :many
+SELECT r.id FROM recordings r
+WHERE r.id IS NOT NULL
+  AND r.id > ?1
+  AND r.status = ?2
+  AND r.audio_ref IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.recording_id = r.id)
+ORDER BY r.id
+LIMIT ?3
+`
+
+type ListUntranscribedRecordingIDsParams struct {
+	After   string
+	Status  string
+	MaxRows int64
+}
+
+// Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
+// startup sweep that enqueues their transcription). Ids only: the caller loads each one and its aggregate decides.
+func (q *Queries) ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listUntranscribedRecordingIDs, arg.After, arg.Status, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateRecording = `-- name: UpdateRecording :execrows
 UPDATE recordings
 SET status         = ?1,

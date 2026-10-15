@@ -49,6 +49,7 @@ type idSource interface {
 	NewAssignmentID() shared.AssignmentID
 	NewProposalID() proposal.ID
 	NewDeliveryID() shared.DeliveryID
+	NewSttModelID() shared.SttModelID
 	NewMessageID() string
 }
 
@@ -90,7 +91,8 @@ type env struct {
 	childStdout   io.Writer
 	captureSource audiocapture.Source
 
-	// whisperBinary is the absolute path of whisper-cli; when it cannot be used, STT jobs fail with a clear error.
+	// whisperBinary is the absolute path of whisper-cli; when it cannot be used, the stt job type is not registered and
+	// STT jobs wait QUEUED for a start with a usable binary.
 	whisperBinary string
 
 	// secrets opens the credential store of a service; tests use testenv.MemCredentials, never Credential Manager.

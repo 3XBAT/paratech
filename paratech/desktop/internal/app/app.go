@@ -190,12 +190,8 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 		}
 	}
 	a.core = c
-	a.life = &lifecycle{
-		log: a.log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, cleanups: c.cleanups,
-		loops:       c.loops(),
-		closers:     []closer{{name: "storage", close: c.close}, {name: "instance lock", close: lock.Release}},
-		stopTimeout: a.env.stopTimeout,
-	}
+	a.life = c.newLifecycle(a.log, a.env.stopTimeout,
+		closer{name: "storage", close: c.close}, closer{name: "instance lock", close: lock.Release})
 	return c.ui, nil
 }
 

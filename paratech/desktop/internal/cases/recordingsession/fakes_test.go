@@ -266,3 +266,38 @@ func (s *seqIDs) NewRecordingID() shared.RecordingID {
 	s.n++
 	return shared.RecordingID(fmt.Sprintf("rec-%d", s.n))
 }
+
+// completions is a CompletionListener that records each call with the status stored at that moment and returns err.
+type completions struct {
+	repo *memRepo
+
+	mu    sync.Mutex
+	calls []completion
+	err   error
+}
+
+// completion is one RecordingCompleted call.
+type completion struct {
+	id     shared.RecordingID
+	stored recording.Status // the stored status when the listener was called
+}
+
+func (c *completions) RecordingCompleted(_ context.Context, id shared.RecordingID) error {
+	st := c.repo.statusOf(id)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, completion{id: id, stored: st})
+	return c.err
+}
+
+func (c *completions) failWith(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.err = err
+}
+
+func (c *completions) all() []completion {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]completion(nil), c.calls...)
+}

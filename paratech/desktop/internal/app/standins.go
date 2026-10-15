@@ -1,25 +1,23 @@
 package app
 
 // Stand-ins for the ports that this build cannot configure. Each one fails with a fixed text that wraps
-// errNotConfigured and with the error class that keeps the jobs safe.
+// errNotConfigured.
 
 import (
 	"context"
 	"errors"
 	"fmt"
-
-	"paratech/desktop/internal/domain/jobs/services/backoff"
-	"paratech/desktop/internal/domain/shared"
 )
 
 // errNotConfigured marks a call into a part of the core that this build does not configure.
 var errNotConfigured = errors.New("not configured in this build")
 
-// sttNotConfigured is the speech recognition engine of a build whose whisper-cli cannot be used (missing next to the
-// executable, or refused by the adapter's checks; the log says why). An STT job fails at once instead of burning CPU
-// on retries.
-type sttNotConfigured struct{}
+// catalogNotConfigured is the model catalog manifest of a build without one: there is no verified SHA-256 of any
+// downloadable model yet (hard rule 9), and values.ParseCatalog refuses a manifest without entries. Listing the
+// catalog, downloading and importing fail with this error; the installed models, the default and the pin of an STT
+// job (ResolveForJob) do not read the catalog and work.
+type catalogNotConfigured struct{}
 
-func (sttNotConfigured) Transcribe(context.Context, shared.ArtifactRef, shared.ArtifactRef, shared.ArtifactRef, func(int)) error {
-	return backoff.Permanent(fmt.Errorf("speech recognition: %w", errNotConfigured))
+func (catalogNotConfigured) Manifest(context.Context) ([]byte, error) {
+	return nil, fmt.Errorf("model catalog: %w", errNotConfigured)
 }

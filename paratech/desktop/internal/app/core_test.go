@@ -112,11 +112,10 @@ func TestOpenCoreListsActivity(t *testing.T) {
 }
 
 // The UI-mode core: with a notifier, the job runner reports finished jobs to the notification use case. An STT job
-// fails at once without whisper-cli, and the user is notified exactly once.
+// whose pinned model is not installed fails at once, and the user is notified exactly once.
 func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
 	ctx := context.Background()
 	e, _ := testEnv(t)
-	e.whisperBinary = "" // sttNotConfigured: a permanent failure
 	notifier := &testenv.FakeNotifier{}
 	log := slog.New(slog.DiscardHandler)
 
@@ -124,10 +123,7 @@ func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	life := &lifecycle{
-		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, cleanups: c.cleanups,
-		closers: []closer{{name: "storage", close: c.close}}, stopTimeout: e.stopTimeout,
-	}
+	life := c.newLifecycle(log, e.stopTimeout, closer{name: "storage", close: c.close})
 	t.Cleanup(func() { // before TempDir removal: Windows cannot delete open files
 		if err := life.shutdown(); err != nil {
 			t.Error(err)
@@ -138,9 +134,8 @@ func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
 	}
 
 	a := &App{core: c} // the helpers read only the core
-	model := installModel(t, a, "m1", testenv.WhisperOK)
 	rec := completedRecording(t, a, "rec-1")
-	enqueueSTT(t, a, "job-stt", rec, model)
+	enqueueSTT(t, a, "job-stt", rec, "m-gone") // a permanent failure: the model was removed
 
 	jobs := sqlite.NewJobRepository(c.db)
 	var failed *job.Job
@@ -152,9 +147,8 @@ func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
 		failed = j
 		return j.Status() == job.StatusFailed
 	}, nil)
-	// The engine step, without a retry: the permanent stand-in, not a missing input.
-	if failed.LastError() != transcribe.ErrTranscriptionFailed.Error() || failed.Attempts() != 1 {
-		t.Fatalf("job error %q after %d attempts, want the stand-in engine on the first attempt", failed.LastError(),
+	if failed.LastError() != "permanent failure: "+transcribe.ErrModelNotInstalled.Error() || failed.Attempts() != 1 {
+		t.Fatalf("job error %q after %d attempts, want the missing model on the first attempt", failed.LastError(),
 			failed.Attempts())
 	}
 	testenv.Eventually(t, "the user is notified", func() bool { return len(notifier.Calls()) > 0 }, nil)

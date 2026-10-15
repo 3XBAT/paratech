@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
@@ -76,4 +77,50 @@ type EventPublisher interface {
 type Clock interface {
 	// Now returns the current time (PRD section 8: transcript timestamps).
 	Now() time.Time
+}
+
+// ModelResolver picks the model a new STT job pins (PRD section 8, AC-08). The app bridges it to the model catalog.
+type ModelResolver interface {
+	// ResolveForJob returns the installed model to pin: requested if set, otherwise the default, otherwise the only
+	// installed model (PRD section 8). It is called inside the Tx.Do that enqueues the job, so that no removal slips in
+	// between. Nothing installed wraps modelselection.ErrModelNotInstalled; several models without a default wrap
+	// modelselection.ErrNoDefaultModel.
+	ResolveForJob(ctx context.Context, requested shared.SttModelID) (shared.SttModelID, error)
+}
+
+// JobEnqueuer creates the STT job of a completed recording (PRD sections 7.1 and 7.3). Implemented by the sqlite
+// adapter.
+type JobEnqueuer interface {
+	// Enqueue stores a new job. If a job with the same idempotency key exists, nothing is created and the ID of the
+	// existing job is returned with created == false (PRD section 7.3, section 14 case 5).
+	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
+
+	// HasKeyPrefix reports whether a job of type typ in any status has an idempotency key that starts with prefix
+	// (PRD section 7.3), for example any STT job of one recording whatever model it pins.
+	HasKeyPrefix(ctx context.Context, typ job.Type, prefix string) (bool, error)
+}
+
+// PendingRecordings finds the recordings that the startup sweep hands to the enqueue again (PRD sections 6.2 and
+// 7.1). Implemented by the sqlite adapter.
+type PendingRecordings interface {
+	// ListUntranscribed returns, in id order, up to limit ids greater than after of COMPLETED recordings with a final
+	// track and no transcript (PRD section 8). Paging by after keeps the memory bounded.
+	ListUntranscribed(ctx context.Context, after shared.RecordingID, limit int) ([]shared.RecordingID, error)
+}
+
+// IDGenerator supplies identifiers (ARCH-24; the domain never generates them; PRD section 7.3). Implemented by an
+// adapter and by a deterministic fake in tests.
+type IDGenerator interface {
+	// NewJobID returns a fresh job identifier (PRD section 7.3).
+	NewJobID() shared.JobID
+}
+
+// Tx is the unit-of-work port (ARCH-23; PRD sections 5.1 and 7.3: durable state changes). The enqueue reads the
+// recording, picks the model and stores the job in one Tx.Do, so a model removal cannot slip between the choice and
+// the pin (PRD section 14 case 11). Implemented by the sqlite adapter.
+type Tx interface {
+	// Do runs fn in one write transaction and commits if fn returns nil, otherwise it rolls back and returns the
+	// error (PRD section 7.3). Repositories called with the context passed to fn take part in the transaction; a Do
+	// called with that context joins it. fn performs no external I/O.
+	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }

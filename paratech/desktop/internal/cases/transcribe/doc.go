@@ -6,6 +6,10 @@
 // external side effect and every attempt is idempotent (see Service). It publishes transcript.Created through
 // EventPublisher; notifications and post-processing are the app's, not this package's.
 //
+// Enqueuer creates the STT job of a completed recording (the completion listener of the recording session) with the
+// model pinned and the key "stt:<recording id>:<model id>", and its EnqueuePending is the startup sweep for
+// completions a crash lost.
+//
 // Rules that apply: ARCH-20..27. Raw audio never leaves the machine: no port of this package talks to the network,
 // and tests/stt_network_test.go checks that no package on the STT path imports a network package.
 package transcribe

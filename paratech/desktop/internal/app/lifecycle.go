@@ -27,6 +27,9 @@ type (
 		Recover(ctx context.Context) (int, error)
 		Resume(ctx context.Context) error
 	}
+	transcriptionLife interface {
+		EnqueuePending(ctx context.Context) (int, error)
+	}
 )
 
 // loop is a background loop that runs until its context ends.
@@ -44,14 +47,16 @@ type closer struct {
 // lifecycle starts the background work of an opened core and stops it again. It runs only after the single-instance
 // guard is held (openCore), so a RUNNING job or an unfinished recording it finds belongs to no live process.
 type lifecycle struct {
-	log         *slog.Logger
-	runner      runnerLife
-	recordings  recordingLife
-	deliveries  deliveryLife
-	cleanups    []cleanup
-	loops       []loop   // started last, stopped first
-	closers     []closer // released last, in this order
-	stopTimeout time.Duration
+	log        *slog.Logger
+	runner     runnerLife
+	recordings recordingLife
+	deliveries deliveryLife
+	// transcriptions enqueues what a crash between a COMPLETED save and its listener call lost.
+	transcriptions transcriptionLife
+	cleanups       []cleanup
+	loops          []loop   // started last, stopped first
+	closers        []closer // released last, in this order
+	stopTimeout    time.Duration
 
 	bg sync.WaitGroup // the background recording recovery
 
@@ -62,11 +67,20 @@ type lifecycle struct {
 	stopErr  error
 }
 
+// newLifecycle is the lifecycle of an opened core; the closers are released last, in order.
+func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers ...closer) *lifecycle {
+	return &lifecycle{
+		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, transcriptions: c.transcriptions,
+		cleanups: c.cleanups, loops: c.loops(), closers: closers, stopTimeout: stopTimeout,
+	}
+}
+
 // start runs the startup in this order: the cleanups of a crashed run, the job recovery, the recording recovery in the
-// background (assembling long recordings must not hold up the jobs), the delivery recovery and resumption, the
-// workers, then the loops (scheduler and recording prompt; the prompt starts no recording before the recovery marked
-// the interrupted ones). A failed job recovery or worker start stops what started and returns the error; the other
-// steps only log. Cancelling ctx stops the startup, never the started work: shutdown stops that.
+// background (assembling long recordings must not hold up the jobs), the delivery recovery and resumption, the sweep
+// of completed recordings without a transcription job, the workers, then the loops (scheduler and recording prompt;
+// the prompt starts no recording before the recovery marked the interrupted ones). A failed job recovery or worker
+// start stops what started and returns the error; the other steps only log. Cancelling ctx stops the startup, never
+// the started work: shutdown stops that.
 func (l *lifecycle) start(ctx context.Context) error {
 	for _, c := range l.cleanups {
 		n, err := c.run(ctx)
@@ -110,6 +124,12 @@ func (l *lifecycle) start(ctx context.Context) error {
 	}
 	if err := l.deliveries.Resume(ctx); err != nil {
 		l.log.Error("resuming email deliveries failed", "err", err)
+	}
+	// Idempotent by the job key, so racing the recording recovery's own completions creates nothing twice.
+	if n, err := l.transcriptions.EnqueuePending(ctx); err != nil {
+		l.log.Error("enqueueing the transcription of completed recordings failed", "enqueued", n, "err", err)
+	} else if n > 0 {
+		l.log.Info("transcription jobs enqueued for completed recordings", "jobs", n)
 	}
 
 	if err := ctx.Err(); err != nil {

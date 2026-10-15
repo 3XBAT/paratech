@@ -61,6 +61,16 @@ func (r *JobRepository) Enqueue(ctx context.Context, j *job.Job) (shared.JobID, 
 	return id, created, nil
 }
 
+// HasKeyPrefix reports whether a job of type typ in any status has an idempotency key that starts with prefix; an
+// empty prefix matches every job of the type.
+func (r *JobRepository) HasKeyPrefix(ctx context.Context, typ job.Type, prefix string) (bool, error) {
+	found, err := r.db.Queries(ctx).HasJobKeyPrefix(ctx, sqlcgen.HasJobKeyPrefixParams{Type: string(typ), Prefix: prefix})
+	if err != nil {
+		return false, MapError(ctx, err)
+	}
+	return found, nil
+}
+
 // Get loads a job by id.
 func (r *JobRepository) Get(ctx context.Context, id shared.JobID) (*job.Job, error) {
 	row, err := r.db.Queries(ctx).GetJob(ctx, string(id))

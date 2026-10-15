@@ -30,7 +30,7 @@ const modelAlias = "default"
 
 // jobHandlers are the use cases that run jobs.
 type jobHandlers struct {
-	stt         jobrunner.Handler
+	stt         jobrunner.Handler // nil without a usable speech recognition engine
 	postProcess jobrunner.Handler // summarize and extract_homework
 	drafts      jobrunner.Handler
 	delivery    deliveryJobs
@@ -42,24 +42,31 @@ type deliveryJobs interface {
 	jobrunner.Reconciler
 }
 
-// registrations binds every job type to its handler and policies (PRD sections 7.2-7.4, hard rule 7).
+// registrations binds every job type to its handler and policies (PRD sections 7.2-7.4, hard rule 7). Without a
+// speech recognition engine the stt type is left out: the runner claims and recovers only registered types, so STT
+// jobs wait QUEUED (their keys stay usable) until a start with whisper-cli registers it.
 func registrations(h jobHandlers) []jobrunner.Registration {
 	llm := func(t job.Type, handler jobrunner.Handler) jobrunner.Registration {
 		// Light: they wait on the Hub, not the CPU. Requeue: the LLM call is idempotent by its key.
 		return jobrunner.Registration{Type: t, Handler: handler, Recovery: jobrunner.RecoveryRequeue, Timeout: llmJobTimeout}
 	}
-	return []jobrunner.Registration{
+	var regs []jobrunner.Registration
+	if h.stt != nil {
 		// Local CPU work without side effects: waits for AC power and is rerun after an interruption.
-		{Type: transcribe.JobType, Handler: h.stt, Heavy: true, Recovery: jobrunner.RecoveryRequeue, Timeout: sttTimeout},
+		regs = append(regs, jobrunner.Registration{
+			Type: transcribe.JobType, Handler: h.stt, Heavy: true, Recovery: jobrunner.RecoveryRequeue, Timeout: sttTimeout,
+		})
+	}
+	return append(regs,
 		llm(homeworkflow.SummarizeJobType, h.postProcess),
 		llm(homeworkflow.ExtractHomeworkJobType, h.postProcess),
 		llm(homeworkflow.HomeworkDraftJobType, h.drafts),
 		// An external side effect: never Heavy (a flapping power source must not loop it), never rerun blindly.
-		{
+		jobrunner.Registration{
 			Type: senddelivery.JobType, Handler: h.delivery, Reconciler: h.delivery, Recovery: jobrunner.RecoveryReconcile,
 			Uncancellable: true, Timeout: sendEmailTimeout,
 		},
-	}
+	)
 }
 
 // notifyTypes are the job types whose finish the user is told about (PRD section 15); email delivery has its own UI.

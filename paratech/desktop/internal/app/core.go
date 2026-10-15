@@ -10,13 +10,16 @@ import (
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/whispercli"
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/recordingprompt"
@@ -24,6 +27,7 @@ import (
 	"paratech/desktop/internal/cases/scheduler"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -44,6 +48,14 @@ type core struct {
 	recordings *recordingsession.Service
 	deliveries *senddelivery.Service
 	drafts     *homeworkflow.Drafts // no binding yet (TASK-045)
+
+	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
+	transcriptions *transcribe.Enqueuer
+
+	// The model manager of the models screen; no binding yet (TASK-030).
+	models    *modelcatalog.Service
+	downloads *modelcatalog.Downloader
+	imports   *modelcatalog.Importer
 
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
@@ -130,14 +142,29 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 		return fmt.Errorf("app: homework drafts: %w", err)
 	}
 
-	engine := c.sttEngine(root, e.whisperBinary, log)
-	// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
-	stt, err := transcribe.New(transcribe.Deps{
-		Engine: engine, Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db),
-		Artifacts: store, Events: post, Clock: e.clock, Log: log,
+	if err := c.wireModels(e); err != nil {
+		return err
+	}
+	c.transcriptions, err = transcribe.NewEnqueuer(transcribe.EnqueueDeps{
+		Recordings: recordings, Pending: recordings, Models: modelResolver{models: c.models}, Jobs: jobs, IDs: e.ids,
+		Tx: db, Clock: e.clock, Log: log, MaxAttempts: maxAttempts,
 	})
 	if err != nil {
-		return fmt.Errorf("app: transcription: %w", err)
+		return fmt.Errorf("app: transcription queue: %w", err)
+	}
+
+	// Without a usable engine the stt type stays unregistered and STT jobs wait QUEUED (see registrations).
+	handlers := jobHandlers{postProcess: post, drafts: c.drafts}
+	if engine := c.sttEngine(root, e.whisperBinary, log); engine != nil {
+		// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
+		stt, err := transcribe.New(transcribe.Deps{
+			Engine: engine, Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db),
+			Artifacts: store, Events: post, Clock: e.clock, Log: log,
+		})
+		if err != nil {
+			return fmt.Errorf("app: transcription: %w", err)
+		}
+		handlers.stt = stt
 	}
 
 	c.deliveries, err = senddelivery.New(senddelivery.Deps{
@@ -147,6 +174,7 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 	if err != nil {
 		return fmt.Errorf("app: email delivery: %w", err)
 	}
+	handlers.delivery = c.deliveries
 
 	var observer jobrunner.Observer
 	if notifier != nil {
@@ -166,7 +194,7 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 	if err != nil {
 		return fmt.Errorf("app: job runner: %w", err)
 	}
-	for _, r := range registrations(jobHandlers{stt: stt, postProcess: post, drafts: c.drafts, delivery: c.deliveries}) {
+	for _, r := range registrations(handlers) {
 		if err := c.runner.Register(r); err != nil {
 			return fmt.Errorf("app: register %s jobs: %w", r.Type, err)
 		}
@@ -178,7 +206,7 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 	}
 	c.recordings, err = recordingsession.New(recordingsession.Deps{
 		Recordings: recordings, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: recorder,
-		Artifacts: store, Tx: db, Clock: e.clock, Sleeper: e.clock, IDs: e.ids, Log: log,
+		Artifacts: store, Tx: db, Clock: e.clock, Sleeper: e.clock, IDs: e.ids, Completions: c.transcriptions, Log: log,
 	}, e.recordings)
 	if err != nil {
 		return fmt.Errorf("app: recordings: %w", err)
@@ -198,25 +226,68 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 	return c.wireSchedule(e)
 }
 
-// sttEngine is whisper-cli below the artifact root. A binary that is missing or refused by the adapter's checks does
-// not stop the app (settings and lists stay usable): STT jobs fail with a clear error instead, and the log says why.
+// sttEngine is whisper-cli below the artifact root, or nil when the binary is missing or refused by the adapter's
+// checks. That does not stop the app (settings and lists stay usable): the log says why, and STT jobs wait in the
+// queue until a start finds a usable binary.
 func (c *core) sttEngine(root, binary string, log *slog.Logger) transcribe.STTEngine {
-	if binary == "" {
-		log.Warn("speech recognition is not available: whisper-cli path unknown")
-		return sttNotConfigured{}
-	}
-	if _, err := os.Stat(binary); errors.Is(err, fs.ErrNotExist) {
-		log.Warn("speech recognition is not available: whisper-cli is not installed next to the executable")
-		return sttNotConfigured{}
-	}
-	engine, err := whispercli.New(whispercli.Config{Binary: binary, DataRoot: root, WorkDir: filepath.Join(root, sttWorkDir)},
-		c.store, c.store)
-	if err != nil {
-		log.Error("speech recognition is not available", "err", err)
-		return sttNotConfigured{}
+	engine, err := c.whisper(root, binary, log)
+	if engine == nil {
+		if err != nil {
+			log.Error("speech recognition is not available", "err", err)
+		}
+		log.Warn("transcription jobs wait in the queue until whisper-cli is installed next to the executable and the app restarts")
+		return nil
 	}
 	c.cleanups = append(c.cleanups, cleanup{name: "speech recognition work directories", run: engine.CleanupWork})
 	return engine
+}
+
+// whisper builds the whispercli adapter; nil and no error when there is no binary (logged here).
+func (c *core) whisper(root, binary string, log *slog.Logger) (*whispercli.Engine, error) {
+	if binary == "" {
+		log.Warn("speech recognition is not available: whisper-cli path unknown")
+		return nil, nil
+	}
+	if _, err := os.Stat(binary); errors.Is(err, fs.ErrNotExist) {
+		log.Warn("speech recognition is not available: whisper-cli is not installed next to the executable")
+		return nil, nil
+	}
+	return whispercli.New(whispercli.Config{Binary: binary, DataRoot: root, WorkDir: filepath.Join(root, sttWorkDir)},
+		c.store, c.store)
+}
+
+// wireModels builds the model manager (PRD section 8): the installed models, the default, the pin of an STT job, the
+// download of a catalog model and the import of a file the user picked. This build has no catalog
+// (catalogNotConfigured).
+func (c *core) wireModels(e env) error {
+	var err error
+	c.models, err = modelcatalog.New(modelcatalog.Deps{
+		Models: sqlite.NewModelRepository(c.db), Pins: sqlite.NewModelPins(c.db), Settings: sqlite.NewSettingsRepository(c.db),
+		Files: c.store, Catalog: catalogNotConfigured{}, Clock: e.clock, IDs: e.ids, Tx: c.db,
+	})
+	if err != nil {
+		return fmt.Errorf("app: model catalog: %w", err)
+	}
+	c.downloads, err = modelcatalog.NewDownloader(c.models, modelcatalog.DownloadDeps{Source: httpdownload.New(), Space: c.store})
+	if err != nil {
+		return fmt.Errorf("app: model download: %w", err)
+	}
+	c.imports, err = modelcatalog.NewImporter(c.models, modelcatalog.ImportDeps{Source: localfile.New(), Space: c.store})
+	if err != nil {
+		return fmt.Errorf("app: model import: %w", err)
+	}
+	return nil
+}
+
+// modelResolver is the model port of the transcription queue over the model catalog; mapping only.
+type modelResolver struct {
+	models *modelcatalog.Service
+}
+
+// ResolveForJob returns the id of the model an STT job pins.
+func (r modelResolver) ResolveForJob(ctx context.Context, requested shared.SttModelID) (shared.SttModelID, error) {
+	m, err := r.models.ResolveForJob(ctx, requested)
+	return m.ID, err
 }
 
 // close releases the storage in reverse order of opening. It is safe to call more than once.

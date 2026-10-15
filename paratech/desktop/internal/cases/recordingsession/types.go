@@ -19,6 +19,7 @@ type Deps struct {
 	Clock       Clock
 	Sleeper     Sleeper
 	IDs         IDGenerator
+	Completions CompletionListener
 	Log         *slog.Logger // optional: nil discards
 }
 

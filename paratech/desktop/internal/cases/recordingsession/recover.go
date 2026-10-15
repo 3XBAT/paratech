@@ -234,5 +234,9 @@ func (s *Service) assembleRecovered(ctx context.Context, rec *recording.Recordin
 	if err != nil {
 		return err
 	}
-	return s.saveRetrying(ctx, rec)
+	if err := s.saveRetrying(ctx, rec); err != nil {
+		return err
+	}
+	s.announceCompleted(ctx, rec)
+	return nil
 }
