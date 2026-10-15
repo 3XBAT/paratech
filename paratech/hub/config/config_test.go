@@ -37,7 +37,8 @@ func TestLoad(t *testing.T) {
 			name: "defaults",
 			env:  withDB(nil),
 			want: config.Config{LogLevel: "info", ListenAddr: ":8080", DatabaseURL: devURL, ShutdownTimeout: 15 * time.Second,
-				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour},
+				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+				AnthropicBaseURL: "https://api.anthropic.com", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192"},
 		},
 		{
 			name: "overrides",
@@ -45,7 +46,8 @@ func TestLoad(t *testing.T) {
 				config.EnvLogLevel: "debug", config.EnvListenAddr: "127.0.0.1:9000", config.EnvShutdownTimeout: "3s",
 			}),
 			want: config.Config{LogLevel: "debug", ListenAddr: "127.0.0.1:9000", DatabaseURL: devURL, ShutdownTimeout: 3 * time.Second,
-				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour},
+				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+				AnthropicBaseURL: "https://api.anthropic.com", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192"},
 		},
 		{name: "bad level", env: withDB(map[string]string{config.EnvLogLevel: "loud"}), wantErr: "unknown log level"},
 		{name: "no port", env: withDB(map[string]string{config.EnvListenAddr: "localhost"}), wantErr: "listen address"},
@@ -310,7 +312,7 @@ func TestLoadQuota(t *testing.T) {
 		{
 			name: "environment",
 			env: map[string]string{config.EnvQuotaUnit: "tokens", config.EnvQuotaLimit: "5000",
-				config.EnvQuotaReservationTTL: "1m", config.EnvIdempotencyRetention: "1h"},
+				config.EnvQuotaReservationTTL: "1m", config.EnvIdempotencyRetention: "1h", config.EnvLLMTimeout: "30s"},
 			want: func(c config.Config) bool {
 				return c.QuotaLimit == 5000 && c.QuotaReservationTTL == time.Minute && c.IdempotencyRetention == time.Hour
 			},
@@ -324,8 +326,9 @@ func TestLoadQuota(t *testing.T) {
 		},
 		{
 			name: "flags win",
-			args: []string{"--quota-limit", "42", "--quota-reservation-ttl", "5m", "--idempotency-retention", "2h", "--quota-unit", "tokens"},
-			env:  map[string]string{config.EnvQuotaLimit: "7", config.EnvQuotaReservationTTL: "30m"},
+			args: []string{"--quota-limit", "42", "--quota-reservation-ttl", "5m", "--idempotency-retention", "2h", "--quota-unit", "tokens",
+				"--llm-timeout", "2m"},
+			env: map[string]string{config.EnvQuotaLimit: "7", config.EnvQuotaReservationTTL: "30m"},
 			want: func(c config.Config) bool {
 				return c.QuotaLimit == 42 && c.QuotaReservationTTL == 5*time.Minute && c.IdempotencyRetention == 2*time.Hour
 			},
