@@ -20,7 +20,7 @@ const (
 
 // SettingsRepository stores the settings singleton (the modelcatalog.SettingsRepository port; its Load also serves the
 // SettingsReader ports of recordingsession, jobrunner and transcribe, and the mail and Hub setup the app reads for the
-// smtp and hubclient adapters). No column holds a secret (hard rule 4). Defaults and validation stay in
+// smtp and hubclient adapters; with Save it is the SettingsStore of recordingprompt, which remembers the source). No column holds a secret (hard rule 4). Defaults and validation stay in
 // settings.Settings: the repository only converts between the row and the aggregate.
 type SettingsRepository struct{ db *DB }
 
@@ -82,6 +82,7 @@ func settingsFromRow(row sqlcgen.Setting) (*settings.Settings, error) {
 		SMTPSecurity:               settings.MailSecurity(row.SmtpSecurity),
 		SMTPLogin:                  row.SmtpUsername,
 		HubURL:                     row.HubUrl,
+		RecordingSource:            shared.AppName(row.RecordingSourceApp),
 		UpdatedAt:                  settingsFromMs(row.UpdatedAt),
 	})
 }
@@ -98,6 +99,7 @@ func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
 		SmtpSecurity:               string(s.SMTPSecurity()),
 		SmtpUsername:               s.SMTPLogin(),
 		HubUrl:                     s.HubURL(),
+		RecordingSourceApp:         s.RecordingSource().String(),
 		UpdatedAt:                  settingsMs(s.UpdatedAt()),
 	}
 }
@@ -115,6 +117,7 @@ func settingsUpdateParams(s *settings.Settings) sqlcgen.UpdateSettingsParams {
 		SmtpSecurity:               p.SmtpSecurity,
 		SmtpUsername:               p.SmtpUsername,
 		HubUrl:                     p.HubUrl,
+		RecordingSourceApp:         p.RecordingSourceApp,
 		UpdatedAt:                  p.UpdatedAt,
 		ExpectedVersion:            s.Version(),
 	}

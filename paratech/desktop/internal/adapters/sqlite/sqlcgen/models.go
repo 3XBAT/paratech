@@ -138,6 +138,7 @@ type Setting struct {
 	SmtpSecurity               string
 	SmtpUsername               string
 	HubUrl                     string
+	RecordingSourceApp         string
 }
 
 type SttModel struct {
