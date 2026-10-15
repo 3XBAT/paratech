@@ -160,9 +160,9 @@ func TestAPIKeyLifecycleAgainstPostgres(t *testing.T) {
 
 	base := startHub(t, dbURL)
 
-	// With the key the call gets past authentication to the (not yet implemented) handlers.
-	if err := getRemaining(t, base, key); connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
-		t.Fatalf("GetRemaining with the key = %v, want unimplemented", err)
+	// With the key the call gets past authentication to the handlers (GetRemaining is implemented since TASK-033).
+	if err := getRemaining(t, base, key); err != nil {
+		t.Fatalf("GetRemaining with the key = %v, want the snapshot", err)
 	}
 	if err := completeStream(t, base, key); connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
 		t.Fatalf("CompleteStream with the key = %v, want unimplemented", err)

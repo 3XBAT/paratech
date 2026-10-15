@@ -18,6 +18,7 @@ import (
 	"paratech/hub/internal/adapters/random"
 	"paratech/hub/internal/cases/keyauth"
 	"paratech/hub/internal/cases/keys"
+	"paratech/hub/internal/cases/quota"
 	"paratech/hub/internal/input/cli"
 	"paratech/hub/internal/input/connect"
 )
@@ -104,7 +105,20 @@ func (a *App) runServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	handler, err := connect.NewRouter(connect.Deps{Log: a.log, Readiness: db, Auth: auth})
+	quotaSvc, err := quota.New(db.QuotaAccounts(), clock.System{}, random.Source{}, quota.Config{
+		Unit:           a.cfg.QuotaUnit,
+		Limit:          a.cfg.QuotaLimit,
+		ReservationTTL: a.cfg.QuotaReservationTTL,
+		KeyRetention:   a.cfg.IdempotencyRetention,
+	})
+	if err != nil {
+		return err
+	}
+	quotaHandler, err := connect.NewQuota(quotaSvc, a.log)
+	if err != nil {
+		return err
+	}
+	handler, err := connect.NewRouter(connect.Deps{Log: a.log, Readiness: db, Auth: auth, Quota: quotaHandler})
 	if err != nil {
 		return err
 	}

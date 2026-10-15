@@ -36,14 +36,16 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults",
 			env:  withDB(nil),
-			want: config.Config{LogLevel: "info", ListenAddr: ":8080", DatabaseURL: devURL, ShutdownTimeout: 15 * time.Second},
+			want: config.Config{LogLevel: "info", ListenAddr: ":8080", DatabaseURL: devURL, ShutdownTimeout: 15 * time.Second,
+				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour},
 		},
 		{
 			name: "overrides",
 			env: withDB(map[string]string{
 				config.EnvLogLevel: "debug", config.EnvListenAddr: "127.0.0.1:9000", config.EnvShutdownTimeout: "3s",
 			}),
-			want: config.Config{LogLevel: "debug", ListenAddr: "127.0.0.1:9000", DatabaseURL: devURL, ShutdownTimeout: 3 * time.Second},
+			want: config.Config{LogLevel: "debug", ListenAddr: "127.0.0.1:9000", DatabaseURL: devURL, ShutdownTimeout: 3 * time.Second,
+				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour},
 		},
 		{name: "bad level", env: withDB(map[string]string{config.EnvLogLevel: "loud"}), wantErr: "unknown log level"},
 		{name: "no port", env: withDB(map[string]string{config.EnvListenAddr: "localhost"}), wantErr: "listen address"},
@@ -287,6 +289,103 @@ func TestCommandString(t *testing.T) {
 	} {
 		if got := c.String(); got != want {
 			t.Errorf("String(%d) = %q, want %q", int(c), got, want)
+		}
+	}
+}
+
+func TestLoadQuota(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		want    func(config.Config) bool
+		wantErr string
+	}{
+		{
+			name: "defaults",
+			want: func(c config.Config) bool {
+				return c.QuotaUnit == "tokens" && c.QuotaLimit == 1_000_000 && c.QuotaReservationTTL == 10*time.Minute && c.IdempotencyRetention == 24*time.Hour
+			},
+		},
+		{
+			name: "environment",
+			env: map[string]string{config.EnvQuotaUnit: "tokens", config.EnvQuotaLimit: "5000",
+				config.EnvQuotaReservationTTL: "1m", config.EnvIdempotencyRetention: "1h"},
+			want: func(c config.Config) bool {
+				return c.QuotaLimit == 5000 && c.QuotaReservationTTL == time.Minute && c.IdempotencyRetention == time.Hour
+			},
+		},
+		{
+			name: "upper bounds",
+			env:  map[string]string{config.EnvQuotaReservationTTL: "1h", config.EnvIdempotencyRetention: "24h"},
+			want: func(c config.Config) bool {
+				return c.QuotaReservationTTL == time.Hour && c.IdempotencyRetention == 24*time.Hour
+			},
+		},
+		{
+			name: "flags win",
+			args: []string{"--quota-limit", "42", "--quota-reservation-ttl", "5m", "--idempotency-retention", "2h", "--quota-unit", "tokens"},
+			env:  map[string]string{config.EnvQuotaLimit: "7", config.EnvQuotaReservationTTL: "30m"},
+			want: func(c config.Config) bool {
+				return c.QuotaLimit == 42 && c.QuotaReservationTTL == 5*time.Minute && c.IdempotencyRetention == 2*time.Hour
+			},
+		},
+		{name: "unit", env: map[string]string{config.EnvQuotaUnit: "credits"}, wantErr: "only tokens"},
+		{name: "unit case", env: map[string]string{config.EnvQuotaUnit: "TOKENS"}, wantErr: "only tokens"},
+		{name: "limit not a number", env: map[string]string{config.EnvQuotaLimit: "1e6"}, wantErr: "not an integer"},
+		{name: "limit overflow", env: map[string]string{config.EnvQuotaLimit: "9223372036854775808"}, wantErr: "not an integer"},
+		{name: "limit zero", env: map[string]string{config.EnvQuotaLimit: "0"}, wantErr: "quota limit 0"},
+		{name: "limit negative flag", args: []string{"--quota-limit", "-1"}, wantErr: "quota limit -1"},
+		{name: "ttl not a duration", env: map[string]string{config.EnvQuotaReservationTTL: "soon"}, wantErr: config.EnvQuotaReservationTTL},
+		{name: "ttl too short", env: map[string]string{config.EnvQuotaReservationTTL: "59s"}, wantErr: "reservation TTL"},
+		{name: "ttl too long", env: map[string]string{config.EnvQuotaReservationTTL: "61m"}, wantErr: "reservation TTL"},
+		{name: "retention not a duration", env: map[string]string{config.EnvIdempotencyRetention: "day"}, wantErr: config.EnvIdempotencyRetention},
+		{name: "retention too short", env: map[string]string{config.EnvIdempotencyRetention: "59m"}, wantErr: "idempotency retention"},
+		{name: "retention too long", env: map[string]string{config.EnvIdempotencyRetention: "25h"}, wantErr: "idempotency retention"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := withDB(tt.env)
+			got, err := config.Load(tt.args, io.Discard, func(k string) string { return env[k] })
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tt.want(got) {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
+}
+
+func TestQuotaSettingsAreCheckedOnlyForServe(t *testing.T) {
+	env := withDB(map[string]string{config.EnvQuotaLimit: "0", config.EnvQuotaReservationTTL: "2h"})
+	if _, err := config.Load([]string{"keys", "list"}, io.Discard, func(k string) string { return env[k] }); err != nil {
+		t.Fatalf("keys list with bad quota bounds: %v", err)
+	}
+	_, err := config.Load(nil, io.Discard, func(k string) string { return env[k] })
+	for _, want := range []string{"quota limit", "reservation TTL"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("serve: error = %v, want containing %q", err, want)
+		}
+	}
+}
+
+func TestConfigPrintsQuotaSettings(t *testing.T) {
+	cfg, err := config.Load(nil, io.Discard, func(k string) string { return withDB(nil)[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	slog.New(slog.NewJSONHandler(&logged, nil)).Info("cfg", "cfg", cfg)
+	for _, out := range []string{cfg.String(), logged.String()} {
+		if !strings.Contains(out, "1000000") || !strings.Contains(out, "tokens") {
+			t.Errorf("output lacks the quota settings: %s", out)
 		}
 	}
 }

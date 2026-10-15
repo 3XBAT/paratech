@@ -22,9 +22,24 @@ const (
 	EnvListenAddr      = "HUB_LISTEN_ADDR"
 	EnvDatabaseURL     = "HUB_DATABASE_URL"
 	EnvShutdownTimeout = "HUB_SHUTDOWN_TIMEOUT"
+
+	EnvQuotaUnit            = "HUB_QUOTA_UNIT"
+	EnvQuotaLimit           = "HUB_QUOTA_LIMIT"
+	EnvQuotaReservationTTL  = "HUB_QUOTA_RESERVATION_TTL"
+	EnvIdempotencyRetention = "HUB_IDEMPOTENCY_RETENTION"
 )
 
 const maxShutdownTimeout = 5 * time.Minute
+
+// Quota bounds (ADR-0008). The reservation TTL must exceed the longest gateway request (provider call plus
+// settlement); the key retention is at most 24 hours (ADR-0005(d)).
+const (
+	QuotaUnitTokens         = "tokens"
+	minReservationTTL       = time.Minute
+	maxReservationTTL       = time.Hour
+	minIdempotencyRetention = time.Hour
+	maxIdempotencyRetention = 24 * time.Hour
+)
 
 // Command selects what the binary does. The zero value is CommandServe.
 type Command int
@@ -70,11 +85,22 @@ type Config struct {
 	DatabaseURL string
 	// ShutdownTimeout bounds the graceful shutdown: in-flight requests get this long to finish.
 	ShutdownTimeout time.Duration
+	// QuotaUnit is the quota unit; only "tokens" for now (PRD section 19, decision 4; ADR-0008).
+	QuotaUnit string
+	// QuotaLimit is the allowance of every tester in QuotaUnit. It does not renew; a new value applies to everyone.
+	QuotaLimit int64
+	// QuotaReservationTTL is how long an unsettled reservation holds quota before the Hub releases it.
+	QuotaReservationTTL time.Duration
+	// IdempotencyRetention is how long the record of an idempotency key lives; after that the same key is new.
+	IdempotencyRetention time.Duration
 }
 
 // Default returns the configuration used when nothing is overridden. It has no DatabaseURL, which is required.
 func Default() Config {
-	return Config{LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second}
+	return Config{
+		LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second,
+		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+	}
 }
 
 // Load builds the configuration from defaults, then the environment (through getenv), then the command-line
@@ -98,6 +124,28 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 			cfg.ShutdownTimeout = d
 		}
 	}
+	if v := getenv(EnvQuotaUnit); v != "" {
+		cfg.QuotaUnit = v
+	}
+	if v := getenv(EnvQuotaLimit); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err != nil {
+			envErrs = append(envErrs, fmt.Errorf("%s %q: not an integer", EnvQuotaLimit, v))
+		} else {
+			cfg.QuotaLimit = n
+		}
+	}
+	for _, d := range []struct {
+		env string
+		dst *time.Duration
+	}{{EnvQuotaReservationTTL, &cfg.QuotaReservationTTL}, {EnvIdempotencyRetention, &cfg.IdempotencyRetention}} {
+		if v := getenv(d.env); v != "" {
+			if parsed, err := time.ParseDuration(v); err != nil {
+				envErrs = append(envErrs, fmt.Errorf("%s %q: not a duration (want for example 10m)", d.env, v))
+			} else {
+				*d.dst = parsed
+			}
+		}
+	}
 
 	// Flag defaults are the environment values, so a flag wins over the environment.
 	fs := flag.NewFlagSet(programName, flag.ContinueOnError)
@@ -106,6 +154,12 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.StringVar(&cfg.ListenAddr, "listen", cfg.ListenAddr, "host:port to listen on (env "+EnvListenAddr+")")
 	fs.DurationVar(&cfg.ShutdownTimeout, "shutdown-timeout", cfg.ShutdownTimeout,
 		"graceful shutdown limit (env "+EnvShutdownTimeout+"); the database URL is read only from env "+EnvDatabaseURL)
+	fs.StringVar(&cfg.QuotaUnit, "quota-unit", cfg.QuotaUnit, "quota unit, only "+QuotaUnitTokens+" (env "+EnvQuotaUnit+")")
+	fs.Int64Var(&cfg.QuotaLimit, "quota-limit", cfg.QuotaLimit, "quota of every tester in the quota unit, does not renew (env "+EnvQuotaLimit+")")
+	fs.DurationVar(&cfg.QuotaReservationTTL, "quota-reservation-ttl", cfg.QuotaReservationTTL,
+		"how long an unsettled reservation holds quota, 1m..1h, above the longest gateway request (env "+EnvQuotaReservationTTL+")")
+	fs.DurationVar(&cfg.IdempotencyRetention, "idempotency-retention", cfg.IdempotencyRetention,
+		"how long an idempotency key is remembered, 1h..24h (env "+EnvIdempotencyRetention+")")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -188,8 +242,8 @@ func MustLoad(args []string, out io.Writer, getenv func(string) string) Config {
 }
 
 // Validate reports every problem found, so a misconfigured start fails once with a complete message. The key
-// commands do not listen, so the listen address and shutdown timeout are checked only for serve; the label and id
-// are checked for presence here and for their exact rules by the domain.
+// commands do not serve, so the listen address, shutdown timeout and quota settings are checked only for serve; the
+// label and id are checked for presence here and for their exact rules by the domain.
 func (c Config) Validate() error {
 	var errs []error
 	if _, err := ParseLevel(c.LogLevel); err != nil {
@@ -207,6 +261,7 @@ func (c Config) Validate() error {
 		if c.ShutdownTimeout <= 0 || c.ShutdownTimeout > maxShutdownTimeout {
 			errs = append(errs, fmt.Errorf("shutdown timeout %s: must be above 0 and at most %s", c.ShutdownTimeout, maxShutdownTimeout))
 		}
+		errs = append(errs, c.validateQuota()...)
 	case CommandKeysCreate:
 		if c.KeyLabel == "" {
 			errs = append(errs, errors.New("keys create: -label is required"))
@@ -220,6 +275,25 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("unknown command %s", c.Command))
 	}
 	return errors.Join(errs...)
+}
+
+// validateQuota checks the quota settings, which only the server uses.
+func (c Config) validateQuota() []error {
+	var errs []error
+	if c.QuotaUnit != QuotaUnitTokens {
+		errs = append(errs, fmt.Errorf("quota unit %q: only %s is supported", c.QuotaUnit, QuotaUnitTokens))
+	}
+	if c.QuotaLimit <= 0 {
+		errs = append(errs, fmt.Errorf("quota limit %d: must be above 0", c.QuotaLimit))
+	}
+	if c.QuotaReservationTTL < minReservationTTL || c.QuotaReservationTTL > maxReservationTTL {
+		errs = append(errs, fmt.Errorf("quota reservation TTL %s: must be within %s..%s", c.QuotaReservationTTL, minReservationTTL, maxReservationTTL))
+	}
+	if c.IdempotencyRetention < minIdempotencyRetention || c.IdempotencyRetention > maxIdempotencyRetention {
+		errs = append(errs, fmt.Errorf("idempotency retention %s: must be within %s..%s",
+			c.IdempotencyRetention, minIdempotencyRetention, maxIdempotencyRetention))
+	}
+	return errs
 }
 
 func validateListenAddr(addr string) error {
@@ -258,8 +332,10 @@ func validateDatabaseURL(raw string) error {
 
 // String prints the configuration without the database URL, so that %v of a Config cannot leak the password.
 func (c Config) String() string {
-	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s}",
-		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout)
+	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
+		"QuotaReservationTTL:%s IdempotencyRetention:%s}",
+		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
+		c.QuotaReservationTTL, c.IdempotencyRetention)
 }
 
 // LogValue is String for slog handlers that do not use fmt (JSON).
@@ -270,6 +346,10 @@ func (c Config) LogValue() slog.Value {
 		slog.String("listen_addr", c.ListenAddr),
 		slog.String("database_url", redacted(c.DatabaseURL)),
 		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
+		slog.String("quota_unit", c.QuotaUnit),
+		slog.Int64("quota_limit", c.QuotaLimit),
+		slog.Duration("quota_reservation_ttl", c.QuotaReservationTTL),
+		slog.Duration("idempotency_retention", c.IdempotencyRetention),
 	)
 }
 
