@@ -1,16 +1,21 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/testenv"
 )
 
 func newTestApp(t *testing.T, dataDir string) *App {
@@ -104,6 +109,99 @@ func TestOpenCoreListsActivity(t *testing.T) {
 	if err != nil || len(recs) != 0 {
 		t.Fatalf("ListRecordings = %+v, %v; want none", recs, err)
 	}
+}
+
+// The UI-mode core: with a notifier, the job runner reports finished jobs to the notification use case. An STT job
+// fails at once without whisper-cli, and the user is notified exactly once.
+func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
+	ctx := context.Background()
+	e, _ := testEnv(t)
+	e.whisperBinary = "" // sttNotConfigured: a permanent failure
+	notifier := &testenv.FakeNotifier{}
+	log := slog.New(slog.DiscardHandler)
+
+	c, err := buildCore(ctx, t.TempDir(), e, notifier, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	life := &lifecycle{
+		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, cleanups: c.cleanups,
+		closers: []closer{{name: "storage", close: c.close}}, stopTimeout: e.stopTimeout,
+	}
+	t.Cleanup(func() { // before TempDir removal: Windows cannot delete open files
+		if err := life.shutdown(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := life.start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &App{core: c} // the helpers read only the core
+	model := installModel(t, a, "m1", testenv.WhisperOK)
+	rec := completedRecording(t, a, "rec-1")
+	enqueueSTT(t, a, "job-stt", rec, model)
+
+	jobs := sqlite.NewJobRepository(c.db)
+	var failed *job.Job
+	testenv.Eventually(t, "the STT job fails", func() bool {
+		j, err := jobs.Get(ctx, "job-stt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		failed = j
+		return j.Status() == job.StatusFailed
+	}, nil)
+	// The engine step, without a retry: the permanent stand-in, not a missing input.
+	if failed.LastError() != transcribe.ErrTranscriptionFailed.Error() || failed.Attempts() != 1 {
+		t.Fatalf("job error %q after %d attempts, want the stand-in engine on the first attempt", failed.LastError(),
+			failed.Attempts())
+	}
+	testenv.Eventually(t, "the user is notified", func() bool { return len(notifier.Calls()) > 0 }, nil)
+
+	// After the stop no later event can add a call.
+	if err := life.shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	calls := notifier.Calls()
+	if len(calls) != 1 || calls[0].Job() != "job-stt" || calls[0].Type() != transcribe.JobType ||
+		calls[0].Status() != job.StatusFailed {
+		t.Fatalf("notifications %+v, want one for the failed STT job", calls)
+	}
+}
+
+// The log never names the data directory: it lies below the user's profile, and logs go into the support bundle.
+func TestLogOmitsTheDataDir(t *testing.T) {
+	const marker = "data-dir-marker"
+	var buf syncBuffer
+	a, _ := newTestAppWith(t, filepath.Join(t.TempDir(), marker))
+	a.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	startCore(t, a)
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); out == "" || strings.Contains(out, marker) {
+		t.Fatalf("log names the data directory or is empty:\n%s", out)
+	}
+}
+
+// syncBuffer is a log sink for the background workers.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestOpenCoreNeedsDataDir(t *testing.T) {

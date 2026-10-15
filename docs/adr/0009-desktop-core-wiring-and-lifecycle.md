@@ -20,7 +20,8 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
   deleted; the OS drops the lock when the process dies. A held lock -> `openCore` fails with `instancelock.ErrHeld`.
 - **Start order:** startup cleanups (filestore temp files, whisper-cli work dirs; errors only logged) ->
   `jobrunner.Recover` -> `recordingsession.Recover` in the background (long assemblies must not delay jobs) ->
-  `senddelivery.Recover` -> `senddelivery.Resume` -> `runner.Start`.
+  `senddelivery.Recover` -> `senddelivery.Resume` -> `runner.Start`. No binding may write artifacts or start a recording
+  before `start` has run the cleanups and the recording recovery has marked interrupted recordings (TASK-022 binding).
 - **Stop order** (`Close`, idempotent, safe without start): cancel and wait for the startup -> `runner.Stop` (15 s) ->
   `recordings.Close` (15 s) -> wait for the background recovery -> filestore, database -> instance lock.
 - **Failures.** `openCore` unwinds what it opened. A failed `jobrunner.Recover` or `runner.Start` stops the started work;
@@ -50,6 +51,8 @@ non-email types, UI mode only (headless has no notifier).
 
 ## Not wired yet (follow-ups)
 - Enqueueing STT when a recording completes (model pin, key, startup sweep): no STT job is created in production yet.
+  The STT stand-in fails jobs permanently, so a job keyed `stt:<recording>:<model>` that failed while whisper-cli was
+  missing would block transcription after the install is fixed: that task must handle it (e.g. a parking class or a new key round).
 - `scheduler`, `schedulesync`, `modelcatalog`, `homeworkflow.Service` and proposals.
 - TASK-057: hub client and SMTP config, Credential Manager reads, drafts repository. TASK-017: the WASAPI recorder.
 

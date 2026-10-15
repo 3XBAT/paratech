@@ -168,7 +168,8 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if err != nil {
 		return wails.Core{}, fmt.Errorf("app: single-instance guard: %w", err)
 	}
-	a.log.Info("instance lock acquired", "data_dir", a.cfg.DataDir)
+	// No path: it lies below the user's profile, and logs go into the support bundle.
+	a.log.Info("instance lock acquired")
 
 	// Toasts need the shell; a headless core tells nobody about finished jobs.
 	var notifier notify.Notifier

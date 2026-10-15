@@ -92,9 +92,19 @@ func (f *fakeRecordings) Close(context.Context) error {
 type fakeDeliveries struct {
 	ev         *events
 	recoverErr error
+	// launched, when set, is waited for (bounded) by Recover: the recording recovery runs in a goroutine, so only a
+	// wait makes "launched before" observable without a race.
+	launched <-chan struct{}
 }
 
 func (f *fakeDeliveries) Recover(context.Context) (int, error) {
+	if f.launched != nil {
+		select {
+		case <-f.launched:
+		case <-time.After(5 * time.Second):
+			f.ev.add("recording recovery not launched")
+		}
+	}
 	f.ev.add("deliveries.Recover")
 	return 0, f.recoverErr
 }
@@ -133,6 +143,7 @@ func TestStartOrder(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	f := newLifeFakes()
 	f.deliveries.recoverErr = errors.New("database busy") // logged, the start goes on
+	f.deliveries.launched = f.recordings.entered
 
 	if err := f.life.start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -147,6 +158,9 @@ func TestStartOrder(t *testing.T) {
 	}
 	if f.ev.index(t, "recordings.Recover") < f.ev.index(t, "runner.Recover") {
 		t.Fatalf("the recording recovery ran before the job recovery: %v", got)
+	}
+	if f.ev.index(t, "recordings.Recover") > f.ev.index(t, "deliveries.Recover") {
+		t.Fatalf("the recording recovery was launched after the delivery recovery: %v", got)
 	}
 	if slices.Contains(got, "recordings.Recover returned") {
 		t.Fatal("the recording recovery must still be running: the fake blocks until Close")

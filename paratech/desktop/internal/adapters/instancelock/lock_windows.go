@@ -23,7 +23,8 @@ func lockFile(f *os.File) error {
 	case errors.Is(err, windows.ERROR_LOCK_VIOLATION):
 		return ErrHeld
 	}
-	return fmt.Errorf("instancelock: lock: %w", shared.ErrStorage)
+	// The errno carries no path; it tells why the lock failed.
+	return fmt.Errorf("instancelock: lock: %w: %w", shared.ErrStorage, err)
 }
 
 func unlockFile(f *os.File) error {

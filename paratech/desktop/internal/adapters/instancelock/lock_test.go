@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -92,6 +93,23 @@ func TestAcquireRejects(t *testing.T) {
 				t.Fatalf("Acquire = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+// A lock failure other than "held" keeps the OS error code for diagnosis, still as a storage error.
+func TestLockFailureKeepsTheErrno(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = lockFile(f) // a closed file has an invalid handle
+	var errno syscall.Errno
+	if !errors.Is(err, shared.ErrStorage) || !errors.As(err, &errno) {
+		t.Fatalf("lockFile on a closed file = %v, want shared.ErrStorage wrapping the errno", err)
 	}
 }
 
