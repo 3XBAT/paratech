@@ -54,7 +54,7 @@ func TestRecordingWithTheRecorderChild(t *testing.T) {
 	repo := sqlite.NewRecordingRepository(db)
 	svc, err := recordingsession.New(recordingsession.Deps{
 		Recordings: repo, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: rec, Artifacts: store, Tx: db,
-		Clock: testenv.NewFakeClock(recT0), Sleeper: testenv.NewFakeClock(recT0), IDs: &recIDs{},
+		Clock: testenv.NewFakeClock(recT0), Sleeper: testenv.NewFakeClock(recT0), IDs: &recIDs{}, Completions: ignoredCompletions{},
 	}, recordingsession.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
