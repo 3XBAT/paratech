@@ -23,8 +23,9 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
   `senddelivery.Recover` -> `senddelivery.Resume` -> `runner.Start` -> loops (UI mode: `scheduler.Run`,
   `recordingprompt.Run`). No binding may write artifacts or start a recording before `start` has run the cleanups and
   the recording recovery has marked interrupted recordings (TASK-022 binding). TASK-022 closes it with
-  `recordingsession.RecoveryMarked()`: closed when the first `Recover` ends its marking pass (or fails before it); the
-  prompt refuses Start until then ("recordings are being recovered, try again shortly").
+  `recordingsession.RecoveryMarked()`: closed when the first `Recover` ends its marking pass (or fails before it), or
+  by `recordings.Close` (a failed start: Start then fails, not "recovering" forever); the prompt refuses Start until
+  then ("recordings are being recovered, try again shortly").
 - **Stop order** (`Close`, idempotent, safe without start): cancel and wait for the startup -> cancel and wait for the
   loops (15 s; a window command may hang once the shell is gone) -> `runner.Stop` (15 s) ->
   `recordings.Close` (15 s) -> wait for the background recovery -> filestore, database -> instance lock.

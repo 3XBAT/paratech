@@ -181,6 +181,10 @@ func (u *windowsUI) showPopup() error {
 		u.popup.SetPosition(x, y)
 	}
 
+	// Emitted while still hidden so the page starts re-reading the prompt before it appears; the hidden WebView still
+	// runs script. Delivery and the page's call are asynchronous, so this narrows the stale frame, it cannot rule it out.
+	u.app.Event.Emit(PromptShownEvent)
+
 	// Wails shows windows with SW_SHOW, which activates even a WS_EX_NOACTIVATE window (checked on Windows 10).
 	// Making it visible with SW_SHOWNOACTIVATE first turns that SW_SHOW into a no-op for activation; Wails' Show is
 	// still needed because it also makes the WebView visible.
@@ -190,7 +194,6 @@ func (u *windowsUI) showPopup() error {
 		}
 	})
 	u.popup.Show()
-	u.app.Event.Emit(PromptShownEvent)
 	return nil
 }
 

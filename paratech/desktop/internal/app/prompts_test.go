@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -23,12 +24,11 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// startPromptCore builds the core as UI mode does, with popup as the window, and starts it like the Started hook.
-func startPromptCore(t *testing.T, e env, beforeStart func(c *core)) (*core, *testenv.FakePopup, *wails.PromptService) {
+// buildPromptCore builds the core as UI mode does, with a fake popup as the window, and its lifecycle (not started).
+func buildPromptCore(t *testing.T, e env) (*core, *lifecycle, *testenv.FakePopup, *wails.PromptService) {
 	t.Helper()
-	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
-	c, err := buildCore(ctx, t.TempDir(), e, nil, log)
+	c, err := buildCore(context.Background(), t.TempDir(), e, nil, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,13 +46,20 @@ func startPromptCore(t *testing.T, e env, beforeStart func(c *core)) (*core, *te
 			t.Error(err)
 		}
 	})
+	return c, life, popup, wails.NewPromptService(c.ui.Prompt, log)
+}
+
+// startPromptCore builds the UI-mode core and starts it like the Started hook.
+func startPromptCore(t *testing.T, e env, beforeStart func(c *core)) (*core, *testenv.FakePopup, *wails.PromptService) {
+	t.Helper()
+	c, life, popup, b := buildPromptCore(t, e)
 	if beforeStart != nil {
 		beforeStart(c)
 	}
-	if err := life.start(ctx); err != nil {
+	if err := life.start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return c, popup, wails.NewPromptService(c.ui.Prompt, log)
+	return c, popup, b
 }
 
 // startFromPopup clicks "Start recording" until the startup recovery has marked the interrupted recordings (a short
@@ -150,6 +157,33 @@ func TestPromptStartWithoutARecorderShowsUnavailable(t *testing.T) {
 
 	if v, err := b.Skip(ctx, cur.ID); err != nil || v.State != string(prompt.StateSkipped) || popup.Visible() {
 		t.Fatalf("Skip = %+v, %v, visible %v", v, err, popup.Visible())
+	}
+}
+
+// A start that fails before the recording recovery runs closes the recordings: the window stays (UI mode) and
+// "Start recording" fails at once instead of answering "recovering" for good.
+func TestPromptStartAfterAFailedStartFails(t *testing.T) {
+	ctx := context.Background()
+	e, _ := testEnv(t)
+	c, life, popup, b := buildPromptCore(t, e)
+	life.runner = &fakeRunner{ev: &events{}, recoverErr: errors.New("database busy")}
+	if err := life.start(ctx); err == nil {
+		t.Fatal("start must fail")
+	}
+
+	if _, err := c.prompts.OfferAdHoc(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cur := b.Current()
+	if cur == nil || !popup.Visible() {
+		t.Fatalf("current prompt %+v, popup visible %v", cur, popup.Visible())
+	}
+	v, err := b.Start(ctx, cur.ID)
+	if err != nil || v.State != string(prompt.StateOffered) || v.Problem != "failed" {
+		t.Fatalf("Start = %+v, %v; want OFFERED with the failed problem", v, err)
+	}
+	if _, ok := c.recordings.Active(); ok {
+		t.Fatal("no recording may be in progress")
 	}
 }
 

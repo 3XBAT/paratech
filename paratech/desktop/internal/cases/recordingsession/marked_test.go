@@ -59,6 +59,21 @@ func TestRecoveryMarkedAfterTheMarkingPass(t *testing.T) {
 	}
 }
 
+// Close ends the wait when no Recover ran (a failed app start): the waiter's Start then fails with ErrClosed instead of
+// waiting for good.
+func TestRecoveryMarkedAfterClose(t *testing.T) {
+	e := newEnv(t, DefaultConfig())
+	if err := e.svc.Close(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !isClosed(e.svc.RecoveryMarked()) {
+		t.Fatal("not marked after Close")
+	}
+	if _, err := e.svc.Start(testCtx(t), StartRequest{}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Start = %v, want ErrClosed", err)
+	}
+}
+
 // A Recover that fails before the marks also ends the wait: a busy database must not block recording for good.
 func TestRecoveryMarkedAfterAFailedRecover(t *testing.T) {
 	e := newEnv(t, DefaultConfig())

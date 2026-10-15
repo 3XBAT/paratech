@@ -109,9 +109,10 @@ func (s *Service) Recover(ctx context.Context) ([]Info, error) {
 }
 
 // RecoveryMarked returns a channel that is closed once the first Recover has stored its decisions on the interrupted
-// recordings, or has ended without getting that far (for example the list failed). From then on Start is not refused
-// with ErrRecovering by that Recover. It stays open until a Recover runs: the app calls Recover once at startup, after
-// the startup cleanups, so a caller that waits for it never starts a recording before both (ADR-0009).
+// recordings, or has ended without getting that far (for example the list failed), or the service is closed (Start
+// then fails with ErrClosed). From then on Start is not refused with ErrRecovering by that Recover. It stays open until
+// a Recover runs: the app calls Recover once at startup, after the startup cleanups, so a caller that waits for it
+// never starts a recording before both (ADR-0009).
 func (s *Service) RecoveryMarked() <-chan struct{} { return s.marked }
 
 // markingDone closes the RecoveryMarked channel; s.mu is held.

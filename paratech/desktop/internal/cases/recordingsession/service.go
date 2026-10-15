@@ -719,6 +719,7 @@ func (s *Service) Delete(ctx context.Context, id shared.RecordingID) error {
 func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true
+	s.markingDone() // a Recover that never ran must not keep a waiter waiting: Start now fails with ErrClosed
 	sess := s.active
 	s.mu.Unlock()
 

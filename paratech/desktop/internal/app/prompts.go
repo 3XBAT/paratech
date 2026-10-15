@@ -18,7 +18,8 @@ type promptRecordings struct {
 }
 
 // Ready is true once the startup recovery has marked the interrupted recordings. The lifecycle calls Recover only
-// after the startup cleanups, so this also means the cleanups ran (ADR-0009).
+// after the startup cleanups, so this also means the cleanups ran (ADR-0009). It is also true once the session is
+// closed (a failed start or the shutdown), so a start fails instead of waiting for a recovery that never comes.
 func (p promptRecordings) Ready() bool {
 	select {
 	case <-p.session.RecoveryMarked():

@@ -39,7 +39,9 @@ type Service struct {
 
 	mu      sync.Mutex
 	current *prompt.Prompt // nil when no prompt runs; a prompt is dropped when it ends
-	seq     uint64         // the last prompt ID; prompts live in memory only, so a sequence is unique enough
+	// seq is the last prompt ID. Deliberately not the ID port (ARCH-24): a prompt ID is an in-memory handle of this
+	// process, never stored, and a deterministic sequence is unique enough.
+	seq uint64
 }
 
 // New validates the configuration and builds the Service. It starts nothing; call Run.

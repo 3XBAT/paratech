@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+	_ "time/tzdata" // Windows has no zone database for time.LoadLocation; the binary carries its own
 
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/domain/recording/prompt"

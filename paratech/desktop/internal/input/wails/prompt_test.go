@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-	_ "time/tzdata" // the zone test must not depend on the zone files of the machine
 
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/domain/recording/prompt"
@@ -104,6 +104,32 @@ func TestPromptServiceCurrent(t *testing.T) {
 				t.Fatalf("JSON =\n%s\nwant\n%s", raw, tt.want)
 			}
 		})
+	}
+}
+
+// zoneChildEnv marks the child process of TestPromptZoneWithoutGoRoot.
+const zoneChildEnv = "WAILS_TEST_ZONE_CHILD"
+
+// The installed app has no Go tree: on Windows (no system zone database) only the zone data embedded by prompt.go can
+// load the lesson's zone. The child runs this test with an empty GOROOT and no ZONEINFO.
+func TestPromptZoneWithoutGoRoot(t *testing.T) {
+	if os.Getenv(zoneChildEnv) == "1" {
+		if got := zoneOf("Europe/Moscow"); got.String() != "Europe/Moscow" {
+			t.Fatalf("zoneOf(Europe/Moscow) = %s without GOROOT's zone files", got)
+		}
+		return
+	}
+
+	env := []string{zoneChildEnv + "=1", "GOROOT=" + t.TempDir()}
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); !strings.EqualFold(k, "GOROOT") && !strings.EqualFold(k, "ZONEINFO") {
+			env = append(env, kv)
+		}
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPromptZoneWithoutGoRoot$", "-test.count=1")
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
 	}
 }
 
