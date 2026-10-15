@@ -119,6 +119,7 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   owner. Remember by exe, not PID; re-find after the app restarts (OBS: every 3 s) and record silence meanwhile; activation
   succeeds for a dead PID, so check liveness. Exclude our own process. Open links via `explorer.exe` so the browser is not in
   our tree. Show the mute advice and the "same browser" hint.
+  Done: popup picker (marks, 3 s refresh, advice), remembered by exe, re-bind by exe while recording; checks: `docs/qa/run-alpha.md`.
 - **CI:** builds `CGO_ENABLED=0`; runners have no audio device, so live audio checks stay manual (TASK-016, compat matrix).
 
 ## Verification (TASK-016, owner, Windows 10 19045)
