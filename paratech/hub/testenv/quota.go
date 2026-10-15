@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/domain/shared"
@@ -88,6 +89,37 @@ func (s *QuotaStore) Read(_ context.Context, scope account.Scope) (*account.Acco
 		return account.New(scope.Owner, scope.Policy)
 	}
 	return load(rows, scope, false)
+}
+
+// PurgeResults clears the stored results of key records created at or before cutoff, like the Postgres adapter.
+func (s *QuotaStore) PurgeResults(_ context.Context, cutoff time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Err != nil {
+		return 0, s.Err
+	}
+	var n int64
+	for _, rows := range s.accounts {
+		for key, k := range rows.keys {
+			if k.Result.Stored && !k.CreatedAt.After(cutoff) {
+				k.Result = account.Result{}
+				rows.keys[key] = k
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+// Key returns the stored record of key of owner.
+func (s *QuotaStore) Key(owner shared.APIKeyID, key account.IdempotencyKey) (account.KeyRecord, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rows := s.accounts[owner]; rows != nil {
+		k, ok := rows.keys[key]
+		return k, ok
+	}
+	return account.KeyRecord{}, false
 }
 
 // Ledger returns the stored movements of owner, oldest first.

@@ -18,6 +18,9 @@ import (
 	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
 )
 
+// dummyProviderKey is an obviously fake provider key: serving needs one, these tests never call the provider.
+const dummyProviderKey = "test-key-not-real"
+
 // freeAddr returns a loopback address that was free a moment ago. The tiny race with other processes is accepted:
 // a collision fails the test with a clear listen error.
 func freeAddr(t *testing.T) string {
@@ -54,6 +57,7 @@ func TestServerAgainstPostgres(t *testing.T) {
 	cfg := config.Default()
 	cfg.DatabaseURL = testenv.PostgresURL(t)
 	cfg.ListenAddr = freeAddr(t)
+	cfg.AnthropicAPIKey = dummyProviderKey
 	base := "http://" + cfg.ListenAddr
 
 	a, err := app.New(cfg, slog.New(slog.DiscardHandler))

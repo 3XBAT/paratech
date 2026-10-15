@@ -80,11 +80,31 @@ func ParseIdempotencyKey(s string) (IdempotencyKey, error) {
 }
 
 // Fingerprint is what an idempotency key was first used with. A Reserve with the same key and another fingerprint
-// is a conflict. It holds no request text.
+// is a conflict. It holds no request text: RequestHash is the gateway's hash of the whole request (empty for a plain
+// Reserve), opaque to this context.
 type Fingerprint struct {
-	Operation Operation
-	Alias     ModelAlias
-	Amount    int64
+	Operation   Operation
+	Alias       ModelAlias
+	Amount      int64
+	RequestHash RequestHash
+}
+
+// RequestHash is a lower-case hex SHA-256 of a gateway request (64 characters), or empty when there is none.
+type RequestHash string
+
+const requestHashLen = 64
+
+// ParseRequestHash accepts 64 lower-case hex characters. The error never quotes the value.
+func ParseRequestHash(s string) (RequestHash, error) {
+	if len(s) != requestHashLen {
+		return "", fmt.Errorf("%w: request hash must be %d lower-case hex characters", ErrInvalidArgument, requestHashLen)
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", fmt.Errorf("%w: request hash must be %d lower-case hex characters", ErrInvalidArgument, requestHashLen)
+		}
+	}
+	return RequestHash(s), nil
 }
 
 // ReserveRequest is a validated Reserve: the key, its fingerprint and the unit of the amount.
@@ -117,6 +137,16 @@ func NewReserveRequest(key, operation, alias, unit string, amount int64) (Reserv
 		return ReserveRequest{}, fmt.Errorf("%w: amount must be positive", ErrInvalidArgument)
 	}
 	return ReserveRequest{key: k, fingerprint: Fingerprint{Operation: op, Alias: a, Amount: amount}, unit: u}, nil
+}
+
+// WithRequestHash returns the request with the gateway's request hash in its fingerprint (see Account.Start).
+func (r ReserveRequest) WithRequestHash(hash string) (ReserveRequest, error) {
+	h, err := ParseRequestHash(hash)
+	if err != nil {
+		return ReserveRequest{}, err
+	}
+	r.fingerprint.RequestHash = h
+	return r, nil
 }
 
 // Key returns the idempotency key of the request.

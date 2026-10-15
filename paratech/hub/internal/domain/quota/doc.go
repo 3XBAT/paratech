@@ -14,6 +14,10 @@
 //   - Settlement: closing a reservation against the actual usage reported by the provider.
 //   - Release: returning a reservation whole on cancellation, failure or expiry.
 //   - Idempotency key: a client-supplied key, namespaced per tester, that prevents double charging for a repeated
-//     request; its fingerprint (operation, model alias, amount) detects reuse with another request.
+//     request; its fingerprint (operation, model alias, amount and, for the gateway, a hash of the whole request)
+//     detects reuse with another request.
+//   - Attempt: one reserve -> execute -> settle/release run of a key; it owns one reservation.
+//   - Stored result: the answer of a completed gateway attempt, kept on the key record for replay until the result window
+//     ends (Policy.ResultWindow). Model output, untrusted and opaque here.
 //   - Ledger: the append-only list of movements (reserve, settle, release, expire) of an account.
 package quota

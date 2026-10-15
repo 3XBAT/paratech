@@ -95,11 +95,23 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
-| `HUB_ANTHROPIC_API_KEY` | none (env only) | empty = provider not configured | secret, never printed |
+| `HUB_ANTHROPIC_API_KEY` | none (env only) | none | required to serve (the `keys` commands do not need it); secret, never printed |
 | `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
 | `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
-| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax only, the exact alias, model id and cap rules apply when the allowlist is built (TASK-035 wiring) |
+| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
+
+## Hub LLM gateway
+`GatewayService.Complete` (ADR-0010): rate limit per API key, validation (1 MiB payload), reservation of the most the call may
+cost (request bytes + 1024 + the clamped output cap), provider call, then settle the reported usage and store the answer for
+replay, or release. A retry with the same idempotency key replays the stored answer (`replayed=true`); another request with the
+key is `IDEMPOTENCY_CONFLICT`. A gateway key lives 5 minutes less than `HUB_IDEMPOTENCY_RETENTION`; the purge (at start and
+every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` is not implemented yet. Settings (env or flag):
+
+| Env | Flag | Default | Rule |
+|---|---|---|---|
+| `HUB_RATE_LIMIT_PER_MINUTE` | `-rate-limit-per-minute` | `30` | 1..6000 calls a minute per API key, on average |
+| `HUB_RATE_LIMIT_BURST` | `-rate-limit-burst` | `10` | 1..1000 calls per API key at once |
 
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.
