@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/cases/connections"
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/settings/settings"
 )
 
@@ -22,9 +23,13 @@ type fakeConnections struct {
 	secretErr error
 	checkErr  error
 
+	reading  values.QuotaReading
+	quotaErr error
+
 	mail      connections.MailInput
 	hubURL    string
 	passwords []string
+	keys      []string
 }
 
 func (f *fakeConnections) Get(context.Context) (connections.View, error) { return f.view, f.err }
@@ -50,16 +55,31 @@ func (f *fakeConnections) RemoveMailPassword(context.Context) (connections.Secre
 
 func (f *fakeConnections) CheckMail(context.Context) error { return f.checkErr }
 
+func (f *fakeConnections) SetHubKey(_ context.Context, key string) (connections.SecretStatus, error) {
+	f.keys = append(f.keys, key)
+	return f.status, f.secretErr
+}
+
+func (f *fakeConnections) RemoveHubKey(context.Context) (connections.SecretStatus, error) {
+	return f.status, f.secretErr
+}
+
+func (f *fakeConnections) RefreshQuota(context.Context) (values.QuotaReading, error) {
+	return f.reading, f.quotaErr
+}
+
 func TestConnectionsJSONNames(t *testing.T) {
 	c := connectionsJSON(connections.View{
 		HubURL: "https://hub.example.org", HomeworkRecipient: "t@school.example", SMTPHost: "smtp.example.org", SMTPPort: 465,
 		SMTPSecurity: settings.MailSecurityTLS, SMTPLogin: "s@example.org", MailConfigured: true, MailPassword: connections.SecretSet,
+		HubKey: connections.SecretUnset,
 	})
 	raw, err := json.Marshal(SaveResult{Saved: true, Connections: &c, Errors: []FieldError{{Field: "smtpPort", Message: "m"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"saved":true,"connections":{"hubUrl":"https://hub.example.org","recipient":"t@school.example",` +
+	want := `{"saved":true,"connections":{"hubUrl":"https://hub.example.org","hubKey":"unset",` +
+		`"quota":{"status":"unchecked","stale":false,"checkedAt":"","values":null},"recipient":"t@school.example",` +
 		`"smtpHost":"smtp.example.org","smtpPort":465,"smtpSecurity":"tls","smtpLogin":"s@example.org",` +
 		`"mailConfigured":true,"mailPassword":"set"},"errors":[{"field":"smtpPort","message":"m"}]}`
 	if string(raw) != want {
@@ -74,6 +94,10 @@ func TestConnectionsJSONNames(t *testing.T) {
 			`{"recipient":"r","smtpHost":"h","smtpPort":1,"smtpSecurity":"starttls","smtpLogin":"l"}`},
 		{SecretResult{Status: "unset", Message: "m"}, `{"status":"unset","message":"m"}`},
 		{CheckResult{OK: true, Message: "m"}, `{"ok":true,"message":"m"}`},
+		{QuotaResult{OK: true, Message: "m", Quota: Quota{Status: "current", CheckedAt: "t", Values: &QuotaValues{
+			Unit: "tokens", Remaining: 1, Reserved: 2, Limit: 3, PeriodEnd: "p", FetchedAt: "f",
+		}}}, `{"ok":true,"message":"m","quota":{"status":"current","stale":false,"checkedAt":"t","values":{"unit":"tokens",` +
+			`"remaining":1,"reserved":2,"limit":3,"periodEnd":"p","fetchedAt":"f"}}}`},
 	} {
 		raw, err := json.Marshal(tt.v)
 		if err != nil || string(raw) != tt.want {
@@ -216,7 +240,9 @@ func TestConnectionsHideErrorDetails(t *testing.T) {
 		"RemoveMailPassword": func() (any, error) {
 			return s.RemoveMailPassword(ctx)
 		},
-		"CheckMail": func() (any, error) { return s.CheckMail(ctx) },
+		"CheckMail":    func() (any, error) { return s.CheckMail(ctx) },
+		"SetHubKey":    func() (any, error) { return s.SetHubKey(ctx, password) },
+		"RemoveHubKey": func() (any, error) { return s.RemoveHubKey(ctx) },
 	}
 	for name, call := range calls {
 		res, err := call()
