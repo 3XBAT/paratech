@@ -17,12 +17,11 @@ import (
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
-	"paratech/desktop/internal/domain/coursework/values"
-	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/input/wails"
+	"paratech/desktop/testenv"
 )
 
 // The adapters and use cases fit the ports they are wired to, including those TASK-057 wires.
@@ -41,8 +40,13 @@ var (
 	_ recordingsession.ArtifactStore        = (*filestore.Store)(nil)
 	_ wails.RecordingStopper                = (*recordingsession.Service)(nil)
 	_ wails.JobForcer                       = (*jobrunner.Service)(nil)
-	_ homeworkflow.DraftRepository          = draftsNotConfigured{}
-	_ senddelivery.CredentialStore          = mailSecretsNotConfigured{}
+	_ homeworkflow.DraftRepository          = (*sqlite.DraftRepository)(nil)
+	_ hubclient.URLSource                   = hubSettings{}
+	_ smtp.AccountSource                    = mailSettings{}
+	_ homeworkflow.RecipientSource          = recipientSettings{}
+	_ settingsLoader                        = (*sqlite.SettingsRepository)(nil)
+	_ secretStore                           = (*wincred.Store)(nil)
+	_ secretStore                           = (*testenv.MemCredentials)(nil)
 	_ transcribe.STTEngine                  = sttNotConfigured{}
 	_ recordingsession.IDGenerator          = idSource(nil)
 	_ homeworkflow.IDGenerator              = idSource(nil)
@@ -147,49 +151,10 @@ func TestProductionEnvUsesTheRunnerAttemptCap(t *testing.T) {
 	}
 }
 
-// The stand-ins fail with the classes that keep the jobs safe until TASK-057 configures the real adapters.
-func TestStandInsFailSafely(t *testing.T) {
-	ctx := context.Background()
-	_, llmErr := hubNotConfigured{}.Complete(ctx, values.LLMRequest{})
-	sendErr := mailNotConfigured{}.Send(ctx, nil, nil)
-	accepted, reconcileErr := mailNotConfigured{}.Reconcile(ctx, nil)
-	_, getErr := draftsNotConfigured{}.Get(ctx, "a1")
-	saveErr := draftsNotConfigured{}.Save(ctx, nil)
-	sttErr := sttNotConfigured{}.Transcribe(ctx, shared.ArtifactRef{}, shared.ArtifactRef{}, shared.ArtifactRef{}, nil)
-	_, existsErr := mailSecretsNotConfigured{}.Exists(ctx, "smtp-password")
-
-	tests := []struct {
-		name string
-		err  error
-		want []error
-	}{
-		{"llm waits for the network", llmErr, []error{shared.ErrNetworkUnavailable}},
-		{"send is a definite refusal", sendErr, []error{delivery.ErrRejected}},
-		{"reconcile stays unknown", reconcileErr, []error{delivery.ErrOutcomeUnknown}},
-		{"drafts get", getErr, []error{backoff.ErrPermanent}},
-		{"drafts save", saveErr, []error{backoff.ErrPermanent}},
-		{"stt", sttErr, []error{backoff.ErrPermanent}},
-		{"mail secrets", existsErr, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !errors.Is(tt.err, errNotConfigured) {
-				t.Fatalf("err = %v, want errNotConfigured", tt.err)
-			}
-			for _, w := range tt.want {
-				if !errors.Is(tt.err, w) {
-					t.Fatalf("err = %v, want %v", tt.err, w)
-				}
-			}
-		})
-	}
-	if accepted {
-		t.Error("Reconcile must not claim the message was accepted")
-	}
-	if got := delivery.OutcomeOf(sendErr); got != delivery.OutcomeOf(delivery.ErrRejected) {
-		t.Errorf("outcome of the send error = %v, want the rejected outcome", got)
-	}
-	if got, ok := backoff.WaitStatus(llmErr); !ok || got != job.StatusWaitingForNetwork {
-		t.Errorf("wait status of the hub error = %v, %v; want WAITING_FOR_NETWORK", got, ok)
+// The STT stand-in fails at once, without a retry.
+func TestSTTStandInFailsPermanently(t *testing.T) {
+	err := sttNotConfigured{}.Transcribe(context.Background(), shared.ArtifactRef{}, shared.ArtifactRef{}, shared.ArtifactRef{}, nil)
+	if !errors.Is(err, errNotConfigured) || !errors.Is(err, backoff.ErrPermanent) {
+		t.Fatalf("err = %v, want a permanent errNotConfigured", err)
 	}
 }

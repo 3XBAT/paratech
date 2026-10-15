@@ -7,7 +7,7 @@
 The use cases existed, but nothing built them: no job ran, no recording recovered, the page's Stop / Run now were stubs.
 Constraints from earlier tasks: wiring only in `internal/app` (ARCH-50); recovery must run while no other process can own
 a RUNNING job or an unfinished recording; Wails' single-instance check runs inside `Shell.Run`, and the shell is not ready
-(no toasts) until `ApplicationStarted`; the hub client, SMTP config, Credential Manager reads and drafts store come with TASK-057.
+(no toasts) until `ApplicationStarted`.
 
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
@@ -44,12 +44,14 @@ Use-case `MaxAttempts` = the runner's backoff `MaxAttempts`. The STT completion 
 enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<prompts version>`. Notifications cover the four
 non-email types, UI mode only (headless has no notifier).
 
-- **Stand-ins until TASK-057 / TASK-017** (`internal/app/standins.go`, all wrap "not configured in this build"):
-  LLM client -> `shared.ErrNetworkUnavailable` (jobs park in WAITING_FOR_NETWORK without attempts; keys stay usable);
-  mail `Send` -> `delivery.ErrRejected`, `Reconcile` -> `delivery.ErrOutcomeUnknown`; mail secrets -> plain error;
-  drafts store -> permanent; STT engine -> permanent, used when `whisper-cli(.exe)` next to the executable is missing or
-  refused (logged at startup). Recorder: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`,
-  so interrupted recordings keep their chunks for a later recovery.
+- **Hub, mail, drafts (TASK-057).** `hubclient` and `smtp` read the Hub URL and the mail account from the settings at
+  every call (bridges in `internal/app/settingsbridge.go`, mapping only); the API key and the SMTP password come from
+  one `wincred` store per service (`hub`, `mail`), shared by the adapter (reads) and `senddelivery` (writes). Not
+  configured: LLM jobs park in WAITING_FOR_NETWORK ("hub: not configured", no attempts used), an email is
+  `delivery.ErrRejected`. Drafts: `sqlite.DraftRepository`. Off Windows the stores fail with `ErrUnsupported`.
+- **Stand-ins** (`internal/app/standins.go`): STT engine -> permanent, used when `whisper-cli(.exe)` next to the
+  executable is missing or refused (logged at startup). Recorder: `audiocapture.Unavailable`, every call fails; its
+  `Finalize` is not `ErrNoAudio`, so interrupted recordings keep their chunks for a later recovery.
 - **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow`, which places
   lesson times and deadlines in the student's zone. SQLite stores Unix ms, so the zone does not affect storage.
 - **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@learning-assistant.invalid>`. Jitter via `crypto/rand`.
@@ -61,7 +63,7 @@ non-email types, UI mode only (headless has no notifier).
   missing would block transcription after the install is fixed: that task must handle it (e.g. a parking class or a new key round).
 - `modelcatalog`, `homeworkflow.Service`, proposals and the calendar sync of `schedulesync`.
 - Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049.
-- TASK-057: hub client and SMTP config, Credential Manager reads, drafts repository. TASK-017: the WASAPI recorder.
+- Settings UI for mail and Hub, bindings of the drafts (TASK-045) and of the Hub key (TASK-039). TASK-017: the WASAPI recorder.
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,
