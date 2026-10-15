@@ -19,7 +19,7 @@ const (
 	maxResponseBytes    = 8 << 20
 	maxErrorBodyBytes   = 64 << 10
 	maxRetryAfter       = 10 * time.Minute
-	emptyDataText       = "(no data)" // the API rejects an empty text block
+	emptyDataText       = "(no data)" // the API rejects an empty or whitespace-only text block
 	spendLimitCode      = "enforced_spend_limit_reached"
 	contentTypeJSON     = "application/json"
 	responseTypeMessage = "message"
@@ -65,7 +65,7 @@ type wireBlock struct {
 // data is never in the instruction slot. No sampling parameters: current models reject non-default values.
 func newWireRequest(req values.Request) wireRequest {
 	data := req.Data()
-	if data == "" {
+	if strings.TrimSpace(data) == "" {
 		data = emptyDataText
 	}
 	return wireRequest{

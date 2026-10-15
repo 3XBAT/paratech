@@ -201,6 +201,21 @@ func TestCompleteSendsTheRequest(t *testing.T) {
 }
 
 func TestCompleteSendsAPlaceholderForEmptyData(t *testing.T) {
+	for name, data := range map[string]string{"empty": "", "space": " ", "whitespace": " \n\t\r\n "} {
+		t.Run(name, func(t *testing.T) {
+			if got := sentText(t, data); strings.TrimSpace(got) == "" {
+				t.Fatalf("data %q was sent as the text block %q", data, got)
+			}
+		})
+	}
+	if got := sentText(t, " x "); got != " x " {
+		t.Fatalf("data with text was sent as %q", got)
+	}
+}
+
+// sentText returns the text of the user block that Complete sends for data.
+func sentText(t *testing.T, data string) string {
+	t.Helper()
 	var text string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -217,12 +232,10 @@ func TestCompleteSendsAPlaceholderForEmptyData(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	if _, err := newClient(t, srv.URL, time.Minute).Complete(t.Context(), newRequest(t, "")); err != nil {
+	if _, err := newClient(t, srv.URL, time.Minute).Complete(t.Context(), newRequest(t, data)); err != nil {
 		t.Fatal(err)
 	}
-	if text == "" {
-		t.Fatal("empty data was sent as an empty text block")
-	}
+	return text
 }
 
 func TestCompleteUsageWithNullCacheFields(t *testing.T) {
