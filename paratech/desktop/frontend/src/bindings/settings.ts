@@ -10,6 +10,8 @@ export interface Settings {
   recordingPromptsEnabled: boolean;
   /** AC-22: heavy processing only on AC power. */
   processOnlyOnAcPower: boolean;
+  /** PRD §15: show a Windows notification when processing of a lesson finishes. */
+  notifyOnProcessingComplete: boolean;
 }
 
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
@@ -17,6 +19,7 @@ export const methods = {
   get: "paratech/desktop/internal/input/wails.SettingsService.GetSettings",
   setRecordingPromptsEnabled: "paratech/desktop/internal/input/wails.SettingsService.SetRecordingPromptsEnabled",
   setProcessOnlyOnAcPower: "paratech/desktop/internal/input/wails.SettingsService.SetProcessOnlyOnACPower",
+  setNotifyOnProcessingComplete: "paratech/desktop/internal/input/wails.SettingsService.SetNotifyOnProcessingComplete",
 } as const;
 
 /** Checks the shape of a reply; a malformed reply is an error, not a default. */
@@ -25,16 +28,25 @@ export function parseSettings(raw: unknown): Settings {
     throw new Error("settings: reply is not an object");
   }
   const r = raw as Record<string, unknown>;
-  if (typeof r.recordingPromptsEnabled !== "boolean" || typeof r.processOnlyOnAcPower !== "boolean") {
+  if (
+    typeof r.recordingPromptsEnabled !== "boolean" ||
+    typeof r.processOnlyOnAcPower !== "boolean" ||
+    typeof r.notifyOnProcessingComplete !== "boolean"
+  ) {
     throw new Error("settings: reply has no toggles");
   }
-  return { recordingPromptsEnabled: r.recordingPromptsEnabled, processOnlyOnAcPower: r.processOnlyOnAcPower };
+  return {
+    recordingPromptsEnabled: r.recordingPromptsEnabled,
+    processOnlyOnAcPower: r.processOnlyOnAcPower,
+    notifyOnProcessingComplete: r.notifyOnProcessingComplete,
+  };
 }
 
 export interface SettingsApi {
   get(): Promise<Settings>;
   setRecordingPromptsEnabled(enabled: boolean): Promise<Settings>;
   setProcessOnlyOnAcPower(enabled: boolean): Promise<Settings>;
+  setNotifyOnProcessingComplete(enabled: boolean): Promise<Settings>;
 }
 
 /** Builds the settings API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -44,5 +56,7 @@ export function settingsApi(call: CallByName): SettingsApi {
     setRecordingPromptsEnabled: async (enabled) =>
       parseSettings(await call(methods.setRecordingPromptsEnabled, enabled)),
     setProcessOnlyOnAcPower: async (enabled) => parseSettings(await call(methods.setProcessOnlyOnAcPower, enabled)),
+    setNotifyOnProcessingComplete: async (enabled) =>
+      parseSettings(await call(methods.setNotifyOnProcessingComplete, enabled)),
   };
 }

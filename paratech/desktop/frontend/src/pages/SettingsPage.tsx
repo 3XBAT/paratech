@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { callByName } from "../bindings/runtime";
-import { settingsApi, type Settings } from "../bindings/settings";
+import { settingsApi, type Settings, type SettingsApi } from "../bindings/settings";
 
 type Toggle = keyof Settings;
 
 const labels: Record<Toggle, string> = {
   recordingPromptsEnabled: "Автоматически предлагать запись в начале занятия",
   processOnlyOnAcPower: "Обрабатывать только от розетки",
+  notifyOnProcessingComplete: "Уведомлять о завершении обработки",
+};
+
+const setters: Record<Toggle, Exclude<keyof SettingsApi, "get">> = {
+  recordingPromptsEnabled: "setRecordingPromptsEnabled",
+  processOnlyOnAcPower: "setProcessOnlyOnAcPower",
+  notifyOnProcessingComplete: "setNotifyOnProcessingComplete",
 };
 
 // The page only shows and forwards the values; defaults and rules live in the Go core (ARCH-44).
@@ -31,11 +38,7 @@ export function SettingsPage() {
     setSaving(true);
     setError("");
     try {
-      const saved =
-        toggle === "recordingPromptsEnabled"
-          ? await api.setRecordingPromptsEnabled(enabled)
-          : await api.setProcessOnlyOnAcPower(enabled);
-      setSettings(saved);
+      setSettings(await api[setters[toggle]](enabled));
     } catch {
       setError("Не удалось сохранить настройки.");
     } finally {

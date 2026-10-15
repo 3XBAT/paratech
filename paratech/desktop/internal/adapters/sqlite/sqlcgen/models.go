@@ -65,6 +65,13 @@ type Job struct {
 	UpdatedAt       int64
 }
 
+type JobNotice struct {
+	JobID      string
+	Status     string
+	JobType    string
+	NotifiedAt int64
+}
+
 type Recording struct {
 	ID            string
 	LessonID      sql.NullString

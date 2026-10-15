@@ -6,6 +6,10 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
+
+	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/jobs/notice"
 )
 
 func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -47,11 +51,22 @@ func TestNew(t *testing.T) {
 }
 
 // fakeUI records forwarded commands.
-type fakeUI struct{ calls []string }
+type fakeUI struct {
+	calls    []string
+	toasts   []toast
+	noToasts bool // Windows notifications failed to set up
+}
 
 func (f *fakeUI) showPopup() error { f.calls = append(f.calls, "showPopup"); return nil }
 func (f *fakeUI) hidePopup() error { f.calls = append(f.calls, "hidePopup"); return nil }
 func (f *fakeUI) showMain() error  { f.calls = append(f.calls, "showMain"); return nil }
+
+func (f *fakeUI) notify(_ context.Context, t toast) error {
+	f.toasts = append(f.toasts, t)
+	return nil
+}
+
+func (f *fakeUI) canNotify() bool { return !f.noToasts }
 
 func TestCommands(t *testing.T) {
 	s, err := New(validOptions())
@@ -100,5 +115,64 @@ func TestMarkStartedOnce(t *testing.T) {
 	}
 	if err := s.markStarted(); !errors.Is(err, ErrAlreadyStarted) {
 		t.Fatalf("second start: err = %v, want ErrAlreadyStarted", err)
+	}
+}
+
+func TestNotify(t *testing.T) {
+	ctx := context.Background()
+	s, err := New(validOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := notice.New("job-7", "stt", job.StatusCompleted, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Notify(ctx, n); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("Notify before Run: err = %v, want ErrNotRunning", err)
+	}
+
+	f := &fakeUI{}
+	s.setUI(f)
+	if err := s.Notify(ctx, nil); !errors.Is(err, ErrNoNotice) {
+		t.Fatalf("Notify(nil): err = %v, want ErrNoNotice", err)
+	}
+	if err := s.Notify(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.toasts) != 1 || f.toasts[0] != toastFor(n) {
+		t.Fatalf("toasts = %+v, want the toast of the notice", f.toasts)
+	}
+
+	s.setUI(nil) // stopped
+	if err := s.Notify(ctx, n); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("Notify after stop: err = %v, want ErrNotRunning", err)
+	}
+}
+
+func TestReady(t *testing.T) {
+	s, err := New(validOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Ready() {
+		t.Fatal("ready before Run")
+	}
+
+	f := &fakeUI{}
+	s.setUI(f)
+	if !s.Ready() {
+		t.Fatal("not ready while running with notifications")
+	}
+	f.noToasts = true
+	if s.Ready() {
+		t.Fatal("ready although notifications could not be set up")
+	}
+
+	f.noToasts = false
+	s.setUI(nil) // stopped
+	if s.Ready() {
+		t.Fatal("ready after stop")
 	}
 }

@@ -21,6 +21,9 @@ type Deps struct {
 	// power source is unknown, which counts as AC power; without settings the default "only on AC power" applies.
 	Power    PowerMonitor
 	Settings SettingsReader
+
+	// Observer is told about every finished job (PRD section 15); optional: nil means nobody is told.
+	Observer Observer
 }
 
 // Config tunes the worker pool.

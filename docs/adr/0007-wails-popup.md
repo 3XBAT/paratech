@@ -17,7 +17,7 @@
 | Tray | Icon appears (Wails default until an app icon exists). Menu and click handlers are wired but were not clicked by the scripts. |
 | Single instance | Works: Wails `SingleInstance` (named mutex). A second launch exits with code 0 within ~70 ms; the first one gets a callback that shows its main window (not observed visually). |
 | Graceful stop | Works: Ctrl+Break (Go maps it to `os.Interrupt` like Ctrl+C) cancels the context, the shell quits and `main` logs "gracefully stopped". |
-| Notifications | Feasible: Wails `services/notifications` (toast). Not used yet: it writes registry keys; decide with the notification policy (PRD §15). |
+| Notifications | Wails `services/notifications` (toast); used for the notification policy (PRD §15) since TASK-053, see Consequences. |
 | Autostart | Feasible: `app.Autostart.Enable` (HKCU `Run` key). Not enabled: it must be a user setting. |
 
 ## Consequences
@@ -28,6 +28,11 @@
   in `app` outside the shell, or a named-mutex adapter.
 - Default data dir is `%LOCALAPPDATA%\LearningAssistant`, DB file `<DataDir>/learning-assistant.db` (to be confirmed by the owner).
 - Release builds must use `-tags production` (see `docs/refs/wails.md`).
+- Toasts (TASK-053): the notifications service writes HKCU registry keys at startup (AppUserModelId, COM activator CLSID) and
+  saves categories at shutdown. A failure there is logged and the app runs without toasts; texts are fixed, never user content.
+- The notifications service pulls `git.sr.ht/~jackmordaunt/go-toast/v2` v2.0.3 as an indirect dependency (hard rule 9).
+- The `notify.Notifier` port is implemented by `input/wails` `Shell` (like `ShowPopup`): the notifications service must be
+  registered with the Wails app the shell owns.
 
 ## Check on Windows by a human (TASK-020)
 1. Start a Zoom/Telemost call and click into its chat. Open the popup from the tray menu, then switch back to the call; better, let a test
