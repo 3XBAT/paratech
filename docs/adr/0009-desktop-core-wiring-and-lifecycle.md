@@ -11,8 +11,8 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
-  (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer}` (all
-  required now). `start` runs once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine;
+  (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer, Prompt,
+  Schedule, Files}` (all required; `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049). `start` runs once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine;
   headless right after `openCore` inside `Run` (headless now opens the core; no data dir is an error).
 - **Single instance.** UI: Wails' named mutex first (a second UI instance hands off to the window and exits before
   `OpenCore`). Then, for every mode, a file lock `<DataDir>/learning-assistant.lock` taken before the database:
@@ -58,13 +58,14 @@ non-email types, UI mode only (headless has no notifier).
 - Enqueueing STT when a recording completes (model pin, key, startup sweep): no STT job is created in production yet.
   The STT stand-in fails jobs permanently, so a job keyed `stt:<recording>:<model>` that failed while whisper-cli was
   missing would block transcription after the install is fixed: that task must handle it (e.g. a parking class or a new key round).
-- `modelcatalog`, `homeworkflow.Service`, proposals and the calendar sync of `schedulesync` (`scheduler`: TASK-022, UI mode only;
-  the `schedulesync` import is wired for the schedule page by TASK-049).
+- `modelcatalog`, `homeworkflow.Service`, proposals and the calendar sync of `schedulesync`.
+- Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049.
 - TASK-057: hub client and SMTP config, Credential Manager reads, drafts repository. TASK-017: the WASAPI recorder.
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,
   `audiocapture`) import only domain and std (`instancelock` also `x/sys/windows`).
+- `userfile` (TASK-049, std only) reads the file chosen for the schedule import, so the binding does no file access.
 - The page's "not available yet" error is gone; Stop / Run now always reach the use cases.
 - Open owner decisions: STT timeout 6 h; model alias `default`; Message-ID domain `learning-assistant.invalid`; LLM jobs
   show "waiting for network" while the Hub is not configured; UI mode shows no error dialog when the start fails.

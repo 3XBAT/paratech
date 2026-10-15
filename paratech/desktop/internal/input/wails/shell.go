@@ -42,6 +42,7 @@ type Core struct {
 	Forcer   JobForcer
 	Prompt   PromptUseCase         // the recording popup; the tray's "Show recording popup" offers an ad-hoc prompt
 	Schedule ScheduleImportUseCase // the schedule import page; the shell shows its open dialog
+	Files    ScheduleFileReader    // reads the file chosen for the schedule import
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -178,11 +179,14 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Schedule == nil {
 		return bindings{}, errors.New("wails: open core: no schedule import use case")
 	}
+	if core.Files == nil {
+		return bindings{}, errors.New("wails: open core: no schedule file reader")
+	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
 		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
 		prompt:   NewPromptService(core.Prompt, s.opts.Log),
-		schedule: NewScheduleImportService(core.Schedule, pickerFunc(s.pickScheduleFile), s.opts.Log),
+		schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
 	}, nil
 }
 

@@ -9,8 +9,9 @@ const (
 	scheduleFilterPattern = "*.ics;*.csv;*.xlsx"
 )
 
-// dialogCancelled is the text of the error the Wails file dialog returns when the user cancels (ErrorCancelled of
-// wails/v3 internal/go-common-file-dialog/cfd); the package is internal, so errors.Is cannot match it.
+// dialogCancelled is the text of the error the Wails file dialog returns when the user cancels (wails v3.0.0-beta.29,
+// cfd.ErrorCancelled in internal/go-common-file-dialog/cfd); the package is internal, so errors.Is cannot match it.
+// Re-check it on a Wails upgrade (docs/refs/wails.md).
 const dialogCancelled = "cancelled by user"
 
 // pickScheduleFile shows the native open dialog, modal to the main window. Wails shows it on the main thread and the

@@ -132,6 +132,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "job forcer", edit: func(c *Core) { c.Forcer = nil }},
 		{name: "recording prompt use case", edit: func(c *Core) { c.Prompt = nil }},
 		{name: "schedule import use case", edit: func(c *Core) { c.Schedule = nil }},
+		{name: "schedule file reader", edit: func(c *Core) { c.Files = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
@@ -139,7 +140,7 @@ func TestOpenBindings(t *testing.T) {
 			opts.OpenCore = func(context.Context) (Core, error) {
 				c := Core{
 					Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
-					Prompt: &fakePrompt{}, Schedule: &fakeSchedule{},
+					Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
 				}
 				tt.edit(&c)
 				return c, nil

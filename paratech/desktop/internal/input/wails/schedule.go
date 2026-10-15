@@ -3,10 +3,7 @@ package wails
 import (
 	"context"
 	"errors"
-	"io"
-	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,12 +38,16 @@ const (
 	windowTimeLayout = "02.01.2006 15:04 UTC"
 )
 
-var errTooLarge = errors.New("larger than the limit")
-
 // ScheduleImportUseCase is the import part of the schedule use case (ARCH-42).
 type ScheduleImportUseCase interface {
 	PreviewImport(ctx context.Context, req schedulesync.ImportRequest) (schedulesync.Preview, error)
 	CommitImport(ctx context.Context, req schedulesync.CommitRequest) (schedulesync.CommitResult, error)
+}
+
+// ScheduleFileReader reads the file the user chose: a regular file only, and at most maxBytes+1 bytes, so a file over
+// the limit is seen without reading it whole. Its errors must not contain the path (the app wires adapters/userfile).
+type ScheduleFileReader interface {
+	ReadFile(ctx context.Context, path string, maxBytes int64) ([]byte, error)
 }
 
 // FilePicker shows the native open dialog for a schedule file. It returns the chosen path, or "" when the user
@@ -143,6 +144,7 @@ type selection struct {
 // commit or a discard ends it.
 type ScheduleImportService struct {
 	uc     ScheduleImportUseCase
+	files  ScheduleFileReader
 	picker FilePicker
 	log    *slog.Logger
 
@@ -153,12 +155,15 @@ type ScheduleImportService struct {
 }
 
 // NewScheduleImportService returns the binding of the schedule page.
-func NewScheduleImportService(uc ScheduleImportUseCase, picker FilePicker, log *slog.Logger) *ScheduleImportService {
-	return &ScheduleImportService{uc: uc, picker: picker, log: log}
+func NewScheduleImportService(
+	uc ScheduleImportUseCase, files ScheduleFileReader, picker FilePicker, log *slog.Logger,
+) *ScheduleImportService {
+	return &ScheduleImportService{uc: uc, files: files, picker: picker, log: log}
 }
 
 // ChooseFile shows the open dialog, reads the chosen file and returns its preview (PRD section 11.2). Nothing is
-// written. A cancelled dialog is a result with cancelled set and keeps the current selection.
+// written. A cancelled dialog is a result with cancelled set and keeps the current selection; any error drops it, as
+// the page drops its preview then.
 func (s *ScheduleImportService) ChooseFile(ctx context.Context) (ImportPreview, error) {
 	if !s.beginChoose() {
 		return ImportPreview{}, ErrImportBusy
@@ -167,6 +172,7 @@ func (s *ScheduleImportService) ChooseFile(ctx context.Context) (ImportPreview, 
 
 	path, err := s.picker.PickScheduleFile(ctx)
 	if err != nil {
+		s.setPending(nil)
 		s.log.Error("ui: choose schedule file", "err", err)
 		return ImportPreview{}, ErrImportFailed
 	}
@@ -179,9 +185,13 @@ func (s *ScheduleImportService) ChooseFile(ctx context.Context) (ImportPreview, 
 	if !ok {
 		return ImportPreview{}, ErrUnsupportedFile
 	}
-	data, err := readScheduleFile(path)
+	data, err := s.files.ReadFile(ctx, path, MaxScheduleFileBytes)
 	if err != nil {
-		return ImportPreview{}, s.readError(err)
+		s.log.Error("ui: read schedule file", "err", err)
+		return ImportPreview{}, ErrFileUnreadable
+	}
+	if len(data) > MaxScheduleFileBytes {
+		return ImportPreview{}, ErrFileTooLarge
 	}
 
 	p, err := s.uc.PreviewImport(ctx, schedulesync.ImportRequest{Source: src, Data: data})
@@ -266,20 +276,6 @@ func (s *ScheduleImportService) take(id string) *selection {
 	return sel
 }
 
-func (s *ScheduleImportService) readError(err error) error {
-	if errors.Is(err, errTooLarge) {
-		return ErrFileTooLarge
-	}
-	// A path error names the file; log only the operation and the system error.
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
-		s.log.Error("ui: read schedule file", "op", pe.Op, "err", pe.Err)
-	} else {
-		s.log.Error("ui: read schedule file", "err", err)
-	}
-	return ErrFileUnreadable
-}
-
 func (s *ScheduleImportService) importError(op string, src importplan.Source, err error) error {
 	switch {
 	case errors.Is(err, schedulesync.ErrStalePreview):
@@ -309,35 +305,6 @@ func sourceOf(path string) (importplan.Source, bool) {
 		return importplan.SourceXLSX, true
 	}
 	return "", false
-}
-
-// readScheduleFile reads a regular file of at most MaxScheduleFileBytes; it never reads more than one byte past the
-// limit, so a huge file costs nothing.
-func readScheduleFile(path string) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // the path the user chose in the open dialog, read only
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	if info.Size() > MaxScheduleFileBytes {
-		return nil, errTooLarge
-	}
-	data, err := io.ReadAll(io.LimitReader(f, MaxScheduleFileBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > MaxScheduleFileBytes {
-		return nil, errTooLarge
-	}
-	return data, nil
 }
 
 func previewView(name string, src importplan.Source, p schedulesync.Preview) ImportPreview {

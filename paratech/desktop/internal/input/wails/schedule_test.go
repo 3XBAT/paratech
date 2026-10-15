@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +50,30 @@ func (f *fakeSchedule) counts() (previews, commits int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.previews), len(f.commits)
+}
+
+// fileReader is the reader of the chosen file: it reads the test's file at most maxBytes+1 bytes, like
+// adapters/userfile (tested there with missing files and directories), or fails with err. It counts the reads.
+type fileReader struct {
+	err   error
+	reads atomic.Int32
+	limit atomic.Int64
+}
+
+func disk() *fileReader { return &fileReader{} }
+
+func (f *fileReader) ReadFile(_ context.Context, path string, maxBytes int64) ([]byte, error) {
+	f.reads.Add(1)
+	f.limit.Store(maxBytes)
+	if f.err != nil {
+		return nil, f.err
+	}
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fh.Close() }()
+	return io.ReadAll(io.LimitReader(fh, maxBytes+1))
 }
 
 // fixedPicker "chooses" path; an empty path is a cancelled dialog.
@@ -102,7 +128,7 @@ func TestScheduleChooseFileShowsThePreview(t *testing.T) {
 	ctx := context.Background()
 	path := writeFile(t, "Lessons.CSV", []byte(fileContent))
 	uc := &fakeSchedule{preview: fullPreview(t)}
-	s := NewScheduleImportService(uc, fixedPicker(path), discard())
+	s := NewScheduleImportService(uc, disk(), fixedPicker(path), discard())
 
 	got, err := s.ChooseFile(ctx)
 	if err != nil {
@@ -143,7 +169,7 @@ func TestSchedulePreviewOfICSHasTheWindow(t *testing.T) {
 	p.Plan.Window = importplan.Window{From: from, To: from.Add(366 * 24 * time.Hour)}
 	uc := &fakeSchedule{preview: p}
 
-	got, err := NewScheduleImportService(uc, fixedPicker(path), discard()).ChooseFile(context.Background())
+	got, err := NewScheduleImportService(uc, disk(), fixedPicker(path), discard()).ChooseFile(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,23 +199,23 @@ func TestScheduleSourceFromExtension(t *testing.T) {
 
 func TestScheduleChooseFileRefusals(t *testing.T) {
 	big := writeFile(t, "big.csv", bytes.Repeat([]byte("a"), MaxScheduleFileBytes+1))
-	missing := filepath.Join(t.TempDir(), "secret-folder", "gone.csv")
-	dir := filepath.Join(t.TempDir(), "folder.csv")
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	// Never read: the extension is refused first.
 	unknown := filepath.Join(t.TempDir(), "secret-folder", "lessons.txt")
+	unreadable := filepath.Join(t.TempDir(), "secret-folder", "lessons.csv")
 
 	tests := []struct {
 		name   string
 		picker FilePicker
+		err    error // of the reader
 		want   error
+		reads  int32
 	}{
-		{name: "larger than the limit", picker: fixedPicker(big), want: ErrFileTooLarge},
+		{name: "larger than the limit", picker: fixedPicker(big), want: ErrFileTooLarge, reads: 1},
 		{name: "unknown extension", picker: fixedPicker(unknown), want: ErrUnsupportedFile},
-		{name: "missing file", picker: fixedPicker(missing), want: ErrFileUnreadable},
-		{name: "a directory", picker: fixedPicker(dir), want: ErrFileUnreadable},
+		{
+			name: "unreadable", picker: fixedPicker(unreadable), want: ErrFileUnreadable, reads: 1,
+			err: errors.New("userfile: the file cannot be read: open: Access is denied."),
+		},
 		{
 			name:   "dialog failure",
 			picker: pickerFunc(func(context.Context) (string, error) { return "", errors.New("no dialog") }),
@@ -200,16 +226,19 @@ func TestScheduleChooseFileRefusals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			uc := &fakeSchedule{preview: fullPreview(t)}
-			_, err := NewScheduleImportService(uc, tt.picker, slog.New(slog.NewTextHandler(&logs, nil))).ChooseFile(context.Background())
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("err = %v, want %v", err, tt.want)
+			files := &fileReader{err: tt.err}
+			_, err := NewScheduleImportService(uc, files, tt.picker, slog.New(slog.NewTextHandler(&logs, nil))).ChooseFile(context.Background())
+			if !errors.Is(err, tt.want) || err.Error() != tt.want.Error() {
+				t.Fatalf("err = %v, want exactly %v", err, tt.want)
 			}
 			if p, _ := uc.counts(); p != 0 {
 				t.Fatal("the use case was called")
 			}
-			if strings.Contains(err.Error(), "secret-folder") || strings.Contains(logs.String(), "secret-folder") ||
-				strings.Contains(logs.String(), "folder.csv") {
-				t.Fatalf("the path leaked: err %q, logs %q", err, logs.String())
+			if got := files.reads.Load(); got != tt.reads {
+				t.Fatalf("the file was read %d times, want %d", got, tt.reads)
+			}
+			if strings.Contains(logs.String(), "secret-folder") {
+				t.Fatalf("the path leaked: logs %q", logs.String())
 			}
 		})
 	}
@@ -218,9 +247,13 @@ func TestScheduleChooseFileRefusals(t *testing.T) {
 func TestScheduleReadsAFileAtTheLimit(t *testing.T) {
 	data := bytes.Repeat([]byte("a"), MaxScheduleFileBytes)
 	uc := &fakeSchedule{preview: fullPreview(t)}
-	s := NewScheduleImportService(uc, fixedPicker(writeFile(t, "full.csv", data)), discard())
+	files := disk()
+	s := NewScheduleImportService(uc, files, fixedPicker(writeFile(t, "full.csv", data)), discard())
 	if _, err := s.ChooseFile(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if files.limit.Load() != MaxScheduleFileBytes {
+		t.Fatalf("read limit %d, want %d", files.limit.Load(), MaxScheduleFileBytes)
 	}
 	if len(uc.previews[0].Data) != MaxScheduleFileBytes {
 		t.Fatalf("read %d bytes, want %d", len(uc.previews[0].Data), MaxScheduleFileBytes)
@@ -229,7 +262,7 @@ func TestScheduleReadsAFileAtTheLimit(t *testing.T) {
 
 func TestScheduleCommitRefusedWithoutAPreview(t *testing.T) {
 	uc := &fakeSchedule{preview: fullPreview(t)}
-	s := NewScheduleImportService(uc, fixedPicker(""), discard())
+	s := NewScheduleImportService(uc, disk(), fixedPicker(""), discard())
 	for _, id := range []string{"", "1", "anything"} {
 		if _, err := s.Commit(context.Background(), id); !errors.Is(err, ErrNoPreview) {
 			t.Errorf("Commit(%q) = %v, want ErrNoPreview", id, err)
@@ -244,7 +277,7 @@ func TestScheduleCommitPassesTheSameBytesAndToken(t *testing.T) {
 	ctx := context.Background()
 	path := writeFile(t, "lessons.csv", []byte(fileContent))
 	uc := &fakeSchedule{preview: fullPreview(t), result: schedulesync.CommitResult{Added: 1, Changed: 1, Removed: 1}}
-	s := NewScheduleImportService(uc, fixedPicker(path), discard())
+	s := NewScheduleImportService(uc, disk(), fixedPicker(path), discard())
 
 	first, err := s.ChooseFile(ctx)
 	if err != nil {
@@ -297,7 +330,7 @@ func TestScheduleNothingToCommit(t *testing.T) {
 	for name, p := range map[string]schedulesync.Preview{"row errors": withErrors, "no changes": unchanged, "no token": tokenless} {
 		t.Run(name, func(t *testing.T) {
 			uc := &fakeSchedule{preview: p}
-			s := NewScheduleImportService(uc, fixedPicker(writeFile(t, "a.csv", []byte(fileContent))), discard())
+			s := NewScheduleImportService(uc, disk(), fixedPicker(writeFile(t, "a.csv", []byte(fileContent))), discard())
 			got, err := s.ChooseFile(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -339,7 +372,7 @@ func TestScheduleCommitErrors(t *testing.T) {
 			ctx := context.Background()
 			var logs bytes.Buffer
 			uc := &fakeSchedule{preview: fullPreview(t), commitErr: tt.err}
-			s := NewScheduleImportService(uc, fixedPicker(writeFile(t, "a.csv", []byte(fileContent))),
+			s := NewScheduleImportService(uc, disk(), fixedPicker(writeFile(t, "a.csv", []byte(fileContent))),
 				slog.New(slog.NewTextHandler(&logs, nil)))
 			p, err := s.ChooseFile(ctx)
 			if err != nil {
@@ -377,7 +410,7 @@ func TestSchedulePreviewErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			uc := &fakeSchedule{previewErr: tt.err}
-			s := NewScheduleImportService(uc, fixedPicker(writeFile(t, "a.xlsx", []byte("PK"))), slog.New(slog.NewTextHandler(&logs, nil)))
+			s := NewScheduleImportService(uc, disk(), fixedPicker(writeFile(t, "a.xlsx", []byte("PK"))), slog.New(slog.NewTextHandler(&logs, nil)))
 			_, err := s.ChooseFile(context.Background())
 			if !errors.Is(err, tt.want) || err.Error() != tt.want.Error() {
 				t.Fatalf("err = %v, want exactly %v", err, tt.want)
@@ -398,7 +431,7 @@ func TestScheduleCancelKeepsTheSelection(t *testing.T) {
 	var choose string
 	picker := pickerFunc(func(context.Context) (string, error) { return choose, nil })
 	uc := &fakeSchedule{preview: fullPreview(t)}
-	s := NewScheduleImportService(uc, picker, discard())
+	s := NewScheduleImportService(uc, disk(), picker, discard())
 
 	choose = path
 	p, err := s.ChooseFile(ctx)
@@ -416,29 +449,43 @@ func TestScheduleCancelKeepsTheSelection(t *testing.T) {
 }
 
 func TestScheduleAFailedChoiceDropsTheSelection(t *testing.T) {
-	ctx := context.Background()
 	good := writeFile(t, "a.csv", []byte(fileContent))
-	choose := good
-	picker := pickerFunc(func(context.Context) (string, error) { return choose, nil })
-	s := NewScheduleImportService(&fakeSchedule{preview: fullPreview(t)}, picker, discard())
+	tests := []struct {
+		name string
+		path string
+		err  error // of the dialog
+		want error
+	}{
+		{name: "unsupported file", path: "lessons.pdf", want: ErrUnsupportedFile},
+		{name: "dialog failure", err: errors.New("no dialog"), want: ErrImportFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			choose, fail := good, error(nil)
+			picker := pickerFunc(func(context.Context) (string, error) { return choose, fail })
+			s := NewScheduleImportService(&fakeSchedule{preview: fullPreview(t)}, disk(), picker, discard())
 
-	p, err := s.ChooseFile(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	choose = "lessons.pdf"
-	if _, err := s.ChooseFile(ctx); !errors.Is(err, ErrUnsupportedFile) {
-		t.Fatalf("err = %v", err)
-	}
-	if _, err := s.Commit(ctx, p.SelectionID); !errors.Is(err, ErrNoPreview) {
-		t.Fatalf("the replaced selection is still committable: %v", err)
+			p, err := s.ChooseFile(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			choose, fail = tt.path, tt.err
+			if _, err := s.ChooseFile(ctx); !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+			// The page drops its preview on any error, so the core drops the selection too.
+			if _, err := s.Commit(ctx, p.SelectionID); !errors.Is(err, ErrNoPreview) {
+				t.Fatalf("the replaced selection is still committable: %v", err)
+			}
+		})
 	}
 }
 
 func TestScheduleDiscard(t *testing.T) {
 	ctx := context.Background()
 	uc := &fakeSchedule{preview: fullPreview(t)}
-	s := NewScheduleImportService(uc, fixedPicker(writeFile(t, "a.csv", []byte(fileContent))), discard())
+	s := NewScheduleImportService(uc, disk(), fixedPicker(writeFile(t, "a.csv", []byte(fileContent))), discard())
 	p, err := s.ChooseFile(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -461,7 +508,7 @@ func TestScheduleOneDialogAtATime(t *testing.T) {
 		<-release
 		return "", nil
 	})
-	s := NewScheduleImportService(&fakeSchedule{}, picker, discard())
+	s := NewScheduleImportService(&fakeSchedule{}, disk(), picker, discard())
 
 	done := make(chan error)
 	go func() {
@@ -483,7 +530,7 @@ func TestScheduleConcurrentUse(t *testing.T) {
 	ctx := context.Background()
 	path := writeFile(t, "a.csv", []byte(fileContent))
 	uc := &fakeSchedule{preview: fullPreview(t)}
-	s := NewScheduleImportService(uc, fixedPicker(path), discard())
+	s := NewScheduleImportService(uc, disk(), fixedPicker(path), discard())
 	p, err := s.ChooseFile(ctx)
 	if err != nil {
 		t.Fatal(err)

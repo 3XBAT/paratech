@@ -56,6 +56,11 @@ Source: https://github.com/wailsapp/wails/tree/v3.0.0-beta.29/v3 · API: https:/
     There is no API to read those settings (`CheckNotificationAuthorization` is always true on Windows).
   - Not checked: clicking a toast after the app exited starts the exe through the CLSID with activation arguments.
 
+## File dialog
+- A cancelled `Dialog.OpenFile()` returns `cfd.ErrorCancelled` ("cancelled by user"); `cfd` is internal, so the shell matches the text
+  (`schedulepicker_windows.go`). Re-check it on a Wails upgrade.
+- In beta.29 a real dialog failure also comes back as "cancelled by user": `hresultToError` compares a `uintptr` with `< 0`, which is never true.
+
 ## Frontend runtime
 - `/wails/runtime.js` is an ES module served by the app: `import { Window } from "/wails/runtime.js"; Window.Hide()`.
 - WebView requests go to `http://wails.localhost/` through WebView2 request interception; no TCP port is opened (`transport_http.go`).

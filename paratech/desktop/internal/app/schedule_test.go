@@ -34,7 +34,7 @@ func TestScheduleImportThroughThePageBinding(t *testing.T) {
 	if err := os.WriteFile(path, []byte(csv), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	page := wails.NewScheduleImportService(c.ui.Schedule, pathPicker(path), log)
+	page := wails.NewScheduleImportService(c.ui.Schedule, c.ui.Files, pathPicker(path), log)
 
 	p, err := page.ChooseFile(ctx)
 	if err != nil {
