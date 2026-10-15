@@ -474,6 +474,82 @@ func TestCompleteConnectionFailureIsTransient(t *testing.T) {
 	}
 }
 
+// partial starts a server that sends the headers of a 200 answer and half a body, then either cuts the connection
+// (cut) or stalls until the client goes away. sent receives one value per request once the half body is flushed.
+func partial(t *testing.T, cut bool) (*httptest.Server, <-chan struct{}) {
+	t.Helper()
+	sent := make(chan struct{}, 8)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, okJSON[:len(okJSON)/2])
+		_ = http.NewResponseController(w).Flush()
+		sent <- struct{}{}
+		if cut {
+			panic(http.ErrAbortHandler) // drops the connection without a log line
+		}
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+	return srv, sent
+}
+
+func TestCompleteAnswerInterrupted(t *testing.T) {
+	for name, cut := range map[string]bool{"connection cut": true, "client timeout mid-body": false} {
+		t.Run(name, func(t *testing.T) {
+			srv, _ := partial(t, cut)
+			timeout := time.Minute
+			if !cut {
+				timeout = 500 * time.Millisecond // long enough for the headers, short enough for the test
+			}
+			_, err := newClient(t, srv.URL, timeout).Complete(t.Context(), newRequest(t, "x"))
+			pe := providerError(t, err)
+			wantKind(t, err, values.KindTransient)
+			if pe.Reason != "answer interrupted" || pe.Status != 0 || pe.Cause != nil {
+				t.Fatalf("got %+v", pe)
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("an interrupted answer must not look like the caller's context: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompleteCallerEndsTheCallMidBody(t *testing.T) {
+	t.Run("cancel", func(t *testing.T) {
+		srv, sent := partial(t, false)
+		ctx, cancel := context.WithCancel(t.Context())
+		go func() {
+			<-sent
+			cancel()
+		}()
+		_, err := newClient(t, srv.URL, time.Minute).Complete(ctx, newRequest(t, "x"))
+		pe := providerError(t, err)
+		wantKind(t, err, values.KindTransient)
+		if !errors.Is(err, context.Canceled) || pe.Reason != "cancelled" {
+			t.Fatalf("got %+v, want a cancelled error", pe)
+		}
+	})
+	t.Run("deadline", func(t *testing.T) {
+		srv, _ := partial(t, false)
+		ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+		defer cancel()
+		_, err := newClient(t, srv.URL, time.Minute).Complete(ctx, newRequest(t, "x"))
+		pe := providerError(t, err)
+		wantKind(t, err, values.KindTransient)
+		if !errors.Is(err, context.DeadlineExceeded) || pe.Reason != "deadline exceeded" {
+			t.Fatalf("got %+v, want a deadline error", pe)
+		}
+	})
+}
+
 func TestCompleteRejectsAnUnbuiltRequest(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))

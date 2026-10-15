@@ -106,7 +106,8 @@ func (c Client) LogValue() slog.Value {
 
 // Complete sends one Messages API call. The deadline is the earlier of ctx and the client timeout. A failure is a
 // *values.ProviderError (see the gateway's Provider port): the client's own timeout and network failures are
-// transient without a cause; when ctx ended the call the error is transient and also matches ctx.Err().
+// transient without a cause, and so is a 200 answer cut off mid-body ("answer interrupted", probably billed); when
+// ctx ended the call the error is transient and also matches ctx.Err().
 func (c *Client) Complete(ctx context.Context, req values.Request) (values.Completion, error) {
 	if req.Model() == "" || req.Instructions() == "" || req.MaxOutput() <= 0 {
 		return values.Completion{}, fail(permanent("invalid request"))
@@ -139,7 +140,7 @@ func (c *Client) Complete(ctx context.Context, req values.Request) (values.Compl
 	}
 	completion, perr := readCompletion(resp)
 	if errors.Is(perr, errRead) {
-		return values.Completion{}, fail(transportError(ctx, callCtx))
+		return values.Completion{}, fail(interruptedError(ctx, callCtx))
 	}
 	if perr != nil {
 		return values.Completion{}, fail(perr)
@@ -163,6 +164,15 @@ func transportError(ctx, callCtx context.Context) *values.ProviderError {
 	default:
 		return &values.ProviderError{Kind: values.KindTransient, Reason: "connection failed"}
 	}
+}
+
+// interruptedError classifies a 200 answer whose body broke off (connection cut, client timeout mid-body). The
+// provider has probably billed the call, so it gets its own reason; when ctx ended the call, ctx wins as above.
+func interruptedError(ctx, callCtx context.Context) *values.ProviderError {
+	if ctx.Err() != nil {
+		return transportError(ctx, callCtx)
+	}
+	return &values.ProviderError{Kind: values.KindTransient, Reason: "answer interrupted"}
 }
 
 func permanent(reason string) *values.ProviderError {

@@ -25,7 +25,7 @@ const (
 	responseTypeMessage = "message"
 )
 
-// errRead marks a failure while reading the body of a 200 answer; Complete classifies it like a transport failure.
+// errRead marks a failure while reading the body of a 200 answer; Complete reports it as an interrupted answer.
 var errRead = errors.New("reading the response failed")
 
 // knownErrorTypes are the error.type values of docs/refs/anthropic.md; any other value is reported as unknown.
