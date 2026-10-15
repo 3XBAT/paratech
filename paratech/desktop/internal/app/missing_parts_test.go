@@ -1,6 +1,7 @@
 package app
 
-// The alpha build (TASK-061, AC 3): no whisper-cli next to the executable, no Hub, no mail settings and no recorder.
+// The alpha build (TASK-061, AC 3): no whisper-cli next to the executable, no Hub or mail settings (TASK-057: the real
+// adapters with empty settings and credential stores) and no recorder.
 // The core still opens and starts, the pages keep working, and every job ends in a state the jobs page can explain.
 
 import (
@@ -33,12 +34,14 @@ import (
 )
 
 // alphaEnv is productionEnv with whisper-cli missing. Only what a test cannot take from the machine is replaced: the
-// power source (on a laptop on battery the STT job would wait) and the runner's poll interval and stop timeout.
+// power source (on a laptop on battery the STT job would wait), the credential stores (empty, as on a fresh install:
+// tests never touch the real Credential Manager) and the runner's poll interval and stop timeout.
 func alphaEnv(t *testing.T) env {
 	t.Helper()
 	e := productionEnv()
 	e.whisperBinary = filepath.Join(t.TempDir(), "whisper-cli.exe") // not installed
 	e.power = testenv.NewFakePower(true)
+	e.secrets = func(string) (secretStore, error) { return testenv.NewMemCredentials(), nil }
 	e.runner.PollInterval = 10 * time.Millisecond
 	e.stopTimeout = 5 * time.Second
 	return e
@@ -95,8 +98,8 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 	tr := storeTranscript(t, a, "tr-1", completedRecording(t, a, "rec-llm"), model)
 	enqueueSummary(t, a, "job-summary", tr)
 	sendHomework(t, a, tr)
-	if _, err := a.core.deliveries.MailPasswordConfigured(ctx); !errors.Is(err, errNotConfigured) {
-		t.Errorf("MailPasswordConfigured = %v, want the not-configured error", err)
+	if ok, err := a.core.deliveries.MailPasswordConfigured(ctx); err != nil || ok {
+		t.Errorf("MailPasswordConfigured = %v, %v; want no password on a fresh install", ok, err)
 	}
 
 	tests := []struct {
@@ -113,7 +116,7 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 		// A definite refusal, never an unknown outcome: nothing was handed over.
 		{
 			"no mail settings", senddelivery.JobType, job.StatusFailed, 1,
-			"permanent failure: senddelivery: send: email: not configured in this build: delivery rejected",
+			"permanent failure: senddelivery: send: smtp: mail is not configured: delivery rejected",
 		},
 	}
 	for _, tt := range tests {
