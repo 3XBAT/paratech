@@ -213,8 +213,8 @@ func (r *Recorder) supervise(c *capture) {
 		// The new child starts with the time the chunks miss as silence, in the mode the last one ended in.
 		lead = req.LeadSilence + r.now().Sub(out.runStart) - out.closedAudio
 		lead = min(max(lead, 0), maxLeadSilence).Truncate(time.Millisecond)
-		if out.mode != "" {
-			floor = out.mode
+		if out.mode == ModeSystem && c.target.Mode != ModeSystem {
+			floor = ModeSystem // the fallback is one-way within a recording
 		}
 		c.update(func(d *Diagnostics) { d.Restarts = restarts; d.Failure = shortText(out.reason) })
 	}

@@ -250,12 +250,12 @@ func ToneFrames(f audiocapture.Format, freq, amp float64, start int64, frames in
 			case f.Float:
 				out = le.AppendUint32(out, math.Float32bits(float32(v)))
 			case f.BitsPerSample == 16:
-				out = le.AppendUint16(out, uint16(int16(math.Round(v*math.MaxInt16))))
+				out = le.AppendUint16(out, uint16(int16(math.Round(v*math.MaxInt16)))) //nolint:gosec // two's complement bits of a sample in range
 			case f.BitsPerSample == 24:
 				x := int32(math.Round(v * (1<<23 - 1)))
-				out = append(out, byte(x), byte(x>>8), byte(x>>16))
+				out = append(out, byte(x), byte(x>>8), byte(x>>16)) //nolint:gosec // the three low bytes of a 24-bit sample
 			default:
-				out = le.AppendUint32(out, uint32(int32(math.Round(v*math.MaxInt32))))
+				out = le.AppendUint32(out, uint32(int32(math.Round(v*math.MaxInt32)))) //nolint:gosec // two's complement bits of a sample in range
 			}
 		}
 	}
