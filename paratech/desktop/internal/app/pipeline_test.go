@@ -5,16 +5,22 @@ package app
 // recorder, the power source, whisper-cli (the test binary, TestMain) and the Hub (testenv.FakeHub over TLS) (ARCH-61).
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/sqlite"
@@ -81,9 +87,12 @@ func (u *uiCore) start(t *testing.T) {
 	}
 }
 
+// pipelineAudio is what the fake recorder captures; the fake recorder's track is exactly these bytes.
+var pipelineAudio = []byte("audio of the lesson")
+
 // pipelineEnv is the test environment with the fake Hub configured: its URL in the settings (stored by
 // configureHub) and the tester key in the in-memory credential store.
-func pipelineEnv(t *testing.T) (env, *fakes, string) {
+func pipelineEnv(t *testing.T) (env, *fakes, *testenv.FakeHub, string) {
 	t.Helper()
 	hub := testenv.NewFakeHub()
 	hub.Answer(cvalues.OperationSummary, pipelineSummary)
@@ -95,7 +104,7 @@ func pipelineEnv(t *testing.T) (env, *fakes, string) {
 	if err := f.secrets[hubSecretsService].Set(context.Background(), hubclient.DefaultCredentialName, testHubKey); err != nil {
 		t.Fatal(err)
 	}
-	return e, f, hubURL
+	return e, f, hub, hubURL
 }
 
 // configureHub stores the Hub URL as the settings page will.
@@ -117,14 +126,18 @@ func configureHub(t *testing.T, c *core, now time.Time, url string) {
 // AC 4, test step 3: lesson -> scheduler -> popup -> recording -> stop -> COMPLETED -> STT job (fake whisper-cli) ->
 // summarize and extract_homework (fake Hub) -> one summary and the assignments in SQLite. After a restart (Recover
 // and the startup sweep run) and a repeated completion event nothing is duplicated and no job changes.
+// TASK-055 (end-to-end test, criterion 1) adds: every status a job or the recording was stored with, the track in the
+// Storage Manager (AC-03), the transcript pinned to the model (AC-08), no audio in the Hub requests (AC-06) and no
+// second Hub charge after the restart (AC-11).
 func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	e, f, hubURL := pipelineEnv(t)
+	e, f, hub, hubURL := pipelineEnv(t)
 
 	// The lesson starts within the scheduler's lead; the clock is the real one because the core runs on goroutines.
 	start := time.Now().Add(2 * time.Minute)
 	u := openUICore(t, dir, e)
+	logStatuses(t, dir) // before anything is stored
 	l, err := lesson.New(lesson.Spec{ID: "lesson-1", Content: lesson.Content{
 		Title: "English", Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow",
 	}}, time.Now())
@@ -155,7 +168,7 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	if !ok || info.LessonID != "lesson-1" {
 		t.Fatalf("active recording %+v, %v; want one for the lesson", info, ok)
 	}
-	if _, err := f.recorder.Feed(ctx, info.ID, []byte("audio of the lesson")); err != nil {
+	if _, err := f.recorder.Feed(ctx, info.ID, pipelineAudio); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,6 +176,7 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	if err := pageBindings(u.c.ui).StopRecording(ctx, string(info.ID)); err != nil {
 		t.Fatalf("StopRecording: %v", err)
 	}
+	checkRecordingTrack(t, u.c, info.ID) // TASK-055: the stored recording and its track (AC-03)
 	jobs := sqlite.NewJobRepository(u.c.db)
 	stt := onlyJob(t, jobs, transcribe.JobType)
 	if want := fmt.Sprintf("stt:%s:%s", info.ID, model); stt.Key() != want || stt.PinnedModelID() != model {
@@ -190,6 +204,25 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 		}
 	}
 
+	// TASK-055: what the sampled chains above can miss, from the statuses SQLite committed.
+	exact := []string{string(job.StatusQueued), string(job.StatusRunning), string(job.StatusCompleted)}
+	statuses := loggedStatuses(t, dir)
+	for _, j := range before.jobs {
+		if got := statuses["job:"+string(j.id)]; !slices.Equal(got, exact) {
+			t.Fatalf("%s job was stored as %v, want exactly %v", j.typ, got, exact)
+		}
+	}
+	// The recording went the whole user-stop path of PRD section 6.2.
+	wantRec := []string{
+		string(recording.StatusStarting), string(recording.StatusRecording), string(recording.StatusStopping),
+		string(recording.StatusFinalizing), string(recording.StatusCompleted),
+	}
+	if got := statuses["recording:"+string(info.ID)]; !slices.Equal(got, wantRec) {
+		t.Fatalf("the recording was stored as %v, want exactly %v", got, wantRec)
+	}
+	checkTranscriptPin(t, u.c, tr, info.ID, model)
+	checkHubSawNoAudio(t, hub)
+
 	// Restart on the same data directory: the recoveries and the sweep run, then the completion arrives again.
 	if err := u.life.shutdown(); err != nil {
 		t.Fatal(err)
@@ -206,6 +239,143 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	if !after.equal(before) {
 		t.Fatalf("after the restart and a repeated event:\n%+v\nwant unchanged:\n%+v", after, before)
 	}
+	// TASK-055: no status was stored again and the Hub was neither asked nor charged again (AC-11).
+	if got := loggedStatuses(t, dir); !maps.EqualFunc(got, statuses, slices.Equal) {
+		t.Fatalf("statuses after the restart %v, want unchanged %v", got, statuses)
+	}
+	if n, charged := len(hub.Requests()), hub.Charged(); n != 2 || charged != 2 {
+		t.Fatalf("the Hub got %d requests and charged %d keys, want 2 and 2", n, charged)
+	}
+}
+
+// checkRecordingTrack checks that the recording id is stored COMPLETED with one final track in the Storage Manager,
+// and that the track holds the captured audio.
+func checkRecordingTrack(t *testing.T, c *core, id shared.RecordingID) {
+	t.Helper()
+	ctx := context.Background()
+	rec, err := sqlite.NewRecordingRepository(c.db).Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track, ok := rec.TranscribableAudio()
+	if rec.Status() != recording.StatusCompleted || !ok || rec.Problem() != "" {
+		t.Fatalf("recording %s %s track %q problem %q, want COMPLETED with a track", id, rec.Status(), track, rec.Problem())
+	}
+	r, err := c.store.Open(ctx, track)
+	if err != nil {
+		t.Fatalf("open the track %q: %v", track, err)
+	}
+	defer func() { _ = r.Close() }()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, pipelineAudio) {
+		t.Fatalf("the track holds %q, want the captured audio %q", data, pipelineAudio)
+	}
+}
+
+// checkTranscriptPin checks that the transcript tr of the recording rec names the exact model it was made with
+// (AC-08): the model id and the name and version copied from the installed model.
+func checkTranscriptPin(t *testing.T, c *core, tr shared.TranscriptID, rec shared.RecordingID, model shared.SttModelID) {
+	t.Helper()
+	ctx := context.Background()
+	got, err := sqlite.NewTranscriptRepository(c.db).Get(ctx, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := c.models.ListInstalled(ctx)
+	if err != nil || len(installed) != 1 || installed[0].ID != model {
+		t.Fatalf("installed models %+v, %v; want only %s", installed, err, model)
+	}
+	m := installed[0]
+	if got.RecordingID() != rec || got.ModelID() != model || got.ModelName() != m.Name || got.ModelVersion() != m.ModelVersion {
+		t.Fatalf("transcript of %s by %s %s %s, want of %s by %s %s %s",
+			got.RecordingID(), got.ModelID(), got.ModelName(), got.ModelVersion(), rec, model, m.Name, m.ModelVersion)
+	}
+}
+
+// checkHubSawNoAudio checks AC-06 on the wire: each of the two post-processing requests carried the transcript text
+// and the tester key, and no request carried a byte sequence of the captured audio.
+func checkHubSawNoAudio(t *testing.T, hub *testenv.FakeHub) {
+	t.Helper()
+	reqs, auth := hub.Requests(), hub.Authorizations()
+	if len(reqs) != 2 || len(auth) != 2 {
+		t.Fatalf("the Hub got %d requests (%d authorized), want 2", len(reqs), len(auth))
+	}
+	for i, r := range reqs {
+		raw, err := proto.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, pipelineAudio) {
+			t.Fatalf("request %d (%s) carries the recorded audio", i, r.GetSpec().GetOperationType())
+		}
+		if !strings.Contains(r.GetSpec().GetUntrustedData(), testenv.WhisperOKSegments[1]) {
+			t.Fatalf("request %d (%s) does not carry the transcript text", i, r.GetSpec().GetOperationType())
+		}
+		if auth[i] != "Bearer "+testHubKey {
+			t.Fatalf("request %d is not authorized with the tester key", i)
+		}
+	}
+}
+
+// statusLogTable is the test's own table in the database of a wired core: one row per stored status of a job or a
+// recording, in commit order.
+const statusLogTable = "test_status_log"
+
+// logStatuses adds triggers to the database of dataDir (already migrated) that record every status a job or a
+// recording is stored with. A trigger writes in the transaction of the change, so a rolled-back change leaves no row
+// and an unchanged status (progress, heartbeat) leaves none either. Only this test adds them; the core never reads
+// the table.
+func logStatuses(t *testing.T, dataDir string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", filepath.Join(dataDir, dbFile)+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	stmts := []string{`CREATE TABLE ` + statusLogTable +
+		` (seq INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT NOT NULL, status TEXT NOT NULL)`}
+	for _, tbl := range []struct{ name, subject string }{{"jobs", "job:"}, {"recordings", "recording:"}} {
+		insert := `INSERT INTO ` + statusLogTable + ` (subject, status) VALUES ('` + tbl.subject + `' || NEW.id, NEW.status);`
+		stmts = append(stmts,
+			`CREATE TRIGGER test_`+tbl.name+`_insert AFTER INSERT ON `+tbl.name+` BEGIN `+insert+` END`,
+			`CREATE TRIGGER test_`+tbl.name+`_update AFTER UPDATE OF status ON `+tbl.name+
+				` WHEN OLD.status IS NOT NEW.status BEGIN `+insert+` END`)
+	}
+	for _, s := range stmts {
+		if _, err := raw.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+}
+
+// loggedStatuses reads the statuses logStatuses recorded, by subject ("job:<id>", "recording:<id>"), in order.
+func loggedStatuses(t *testing.T, dataDir string) map[string][]string {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dataDir, dbFile))+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	rows, err := raw.Query(`SELECT subject, status FROM ` + statusLogTable + ` ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	got := map[string][]string{}
+	for rows.Next() {
+		var subject, status string
+		if err := rows.Scan(&subject, &status); err != nil {
+			t.Fatal(err)
+		}
+		got[subject] = append(got[subject], status)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return got
 }
 
 // Test step 3 on the real SQLite: a repeated completion event, also concurrent ones and the startup sweep, makes one
