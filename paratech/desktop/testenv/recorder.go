@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -24,7 +25,8 @@ type ArtifactFiles interface {
 }
 
 // FakeRecorder is a Recorder whose audio source is the test: Feed writes the next chunk of a running capture through
-// the Storage Manager as <dir>/chunk-NNNN, and Finalize concatenates the chunks into the output file.
+// the Storage Manager as <dir>/chunk-NNNN (format of EncodeChunk), and Finalize concatenates the payloads of the
+// readable chunks into the output file.
 type FakeRecorder struct {
 	files ArtifactFiles
 	chunk time.Duration // audio length of one chunk, for the duration that Finalize reports
@@ -144,9 +146,20 @@ func (f *FakeRecorder) Start(ctx context.Context, id shared.RecordingID, dir sha
 	return nil
 }
 
-// Feed writes data as the next chunk of the running capture of id. A failed write ends the capture with that error,
-// as a real recorder that cannot write must stop.
+// Feed writes data as the next chunk of the running capture of id, in the format of EncodeChunk. A failed write ends
+// the capture with that error, as a real recorder that cannot write must stop.
 func (f *FakeRecorder) Feed(ctx context.Context, id shared.RecordingID, data []byte) (shared.ArtifactRef, error) {
+	return f.feed(ctx, id, EncodeChunk(data))
+}
+
+// FeedTruncated writes data as the next chunk of the running capture of id but cuts the file short, as a crash in the
+// middle of a write leaves the last chunk; Finalize skips such a chunk.
+func (f *FakeRecorder) FeedTruncated(ctx context.Context, id shared.RecordingID, data []byte) (shared.ArtifactRef, error) {
+	content := EncodeChunk(data)
+	return f.feed(ctx, id, content[:len(content)-1])
+}
+
+func (f *FakeRecorder) feed(ctx context.Context, id shared.RecordingID, content []byte) (shared.ArtifactRef, error) {
 	f.mu.Lock()
 	c := f.captures[id]
 	if c == nil || !c.running {
@@ -160,7 +173,7 @@ func (f *FakeRecorder) Feed(ctx context.Context, id shared.RecordingID, data []b
 		return shared.ArtifactRef{}, err
 	}
 
-	if err := f.files.Write(ctx, ref, bytes.NewReader(data)); err != nil {
+	if err := f.files.Write(ctx, ref, bytes.NewReader(content)); err != nil {
 		f.End(id, err)
 		return shared.ArtifactRef{}, err
 	}
@@ -214,7 +227,9 @@ func (f *FakeRecorder) Wait(ctx context.Context, id shared.RecordingID) error {
 	}
 }
 
-// Finalize concatenates the chunks of dir into output; the duration is one chunk length per chunk.
+// Finalize concatenates the payloads of the readable chunks of dir into output, in name order, and skips the chunks
+// that are not complete (Recorder contract). The duration is one chunk length per readable chunk. Without a readable
+// chunk it returns an error wrapping recording.ErrNoAudio and writes nothing.
 func (f *FakeRecorder) Finalize(ctx context.Context, dir, output shared.ArtifactRef) (time.Duration, error) {
 	f.mu.Lock()
 	f.finalizes++
@@ -231,26 +246,35 @@ func (f *FakeRecorder) Finalize(ctx context.Context, dir, output shared.Artifact
 	if err != nil && !errors.Is(err, shared.ErrNotFound) {
 		return 0, err
 	}
-	if len(chunks) == 0 {
-		return 0, errors.New("fake recorder: no audio chunks")
-	}
 
 	var track bytes.Buffer
+	readable := 0
 	for _, ref := range chunks {
-		r, err := f.files.Open(ctx, ref)
+		content, err := f.read(ctx, ref)
 		if err != nil {
 			return 0, err
 		}
-		_, err = io.Copy(&track, r)
-		_ = r.Close()
-		if err != nil {
-			return 0, err
+		if payload, ok := ChunkPayload(content); ok {
+			track.Write(payload)
+			readable++
 		}
+	}
+	if readable == 0 {
+		return 0, fmt.Errorf("fake recorder: %w in %s", recording.ErrNoAudio, dir)
 	}
 	if err := f.files.Write(ctx, output, &track); err != nil {
 		return 0, err
 	}
-	return time.Duration(len(chunks)) * f.chunk, nil
+	return time.Duration(readable) * f.chunk, nil
+}
+
+func (f *FakeRecorder) read(ctx context.Context, ref shared.ArtifactRef) ([]byte, error) {
+	r, err := f.files.Open(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.Close() }()
+	return io.ReadAll(r)
 }
 
 // Running reports whether the capture of id runs.

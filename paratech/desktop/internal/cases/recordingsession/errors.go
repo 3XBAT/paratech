@@ -2,14 +2,18 @@ package recordingsession
 
 import "errors"
 
-// Errors of the recording session (ARCH-18). A refused start because another recording is in progress is
-// limits.ErrRecordingInProgress.
+// Errors of the recording session (ARCH-18). A refused start, or a refused Recover, because a recording is in progress
+// is limits.ErrRecordingInProgress.
 var (
 	// ErrInvalidConfig is returned by New for missing ports or unusable settings.
 	ErrInvalidConfig = errors.New("invalid recording session configuration")
 
-	// ErrClosed is returned by Start after Close.
+	// ErrClosed is returned by Start and Recover after Close.
 	ErrClosed = errors.New("recording service is closed")
+
+	// ErrRecovering is returned by Recover while another Recover runs, by Start while Recover marks the interrupted
+	// recordings, and by Delete of a recording that the running Recover has not finished yet.
+	ErrRecovering = errors.New("interrupted recordings are being recovered")
 
 	// ErrStartFailed means the capture could not start; the recording is FAILED.
 	ErrStartFailed = errors.New("recording could not start")

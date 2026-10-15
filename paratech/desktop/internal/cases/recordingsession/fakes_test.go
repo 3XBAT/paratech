@@ -29,6 +29,7 @@ type memRepo struct {
 	history   []recording.Status // statuses of successful saves, in order
 	failSaves []error            // errors returned by the next saves, one each
 	saves     int                // Save calls, failed ones included
+	listErr   error              // returned by ListByStatus when set
 }
 
 func newMemRepo() *memRepo { return &memRepo{rows: map[shared.RecordingID]recording.State{}} }
@@ -80,6 +81,9 @@ func (m *memRepo) Save(_ context.Context, r *recording.Recording) error {
 func (m *memRepo) ListByStatus(_ context.Context, statuses ...recording.Status) ([]*recording.Recording, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	var out []*recording.Recording
 	for _, st := range m.rows {
 		for _, s := range statuses {
