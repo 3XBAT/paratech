@@ -77,10 +77,11 @@ type SummaryRepository interface {
 // DraftRepository stores the draft history of each assignment (PRD section 10, AC-13). Implemented by the sqlite
 // adapter (a later task); an in-memory fake serves tests.
 type DraftRepository interface {
-	// Get loads the draft of an assignment. It returns an error wrapping shared.ErrNotFound if there is none.
+	// Get loads the draft of an assignment (PRD section 10). It returns an error wrapping shared.ErrNotFound if there
+	// is none.
 	Get(ctx context.Context, a shared.AssignmentID) (*homeworkdraft.Draft, error)
 
-	// Save inserts or updates a draft with all its versions. It is the version compare-and-swap of ADR-0004(d), like
+	// Save inserts or updates a draft with all its versions (PRD section 10: draft versions are kept). It is the version compare-and-swap of ADR-0004(d), like
 	// AssignmentRepository.Save: Version() == 0 is INSERTed (an existing draft of the assignment yields
 	// shared.ErrVersionConflict), a stale version yields shared.ErrVersionConflict and nothing is written. Versions
 	// are append-only, so an adapter may write only the ones it has not stored yet.
