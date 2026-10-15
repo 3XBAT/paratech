@@ -4,5 +4,6 @@
 // The router is the public, API-key listener. Every RPC passes the API-key middleware (auth.go): a missing,
 // malformed, unknown, revoked or wrong key gets one and the same unauthenticated error with ERROR_CODE_INVALID_API_KEY,
 // and handlers find the caller with APIKeyFrom. The probes are not authenticated. Of QuotaService only GetRemaining
-// is reachable here; Reserve, Settle and Release are Hub-internal (ADR-0005(f)) and answer 404 as if they did not exist.
+// is reachable here (quota.go, the caller's own quota); Reserve, Settle and Release are Hub-internal (ADR-0005(f),
+// ADR-0008) and answer 404 as if they did not exist.
 package connect
