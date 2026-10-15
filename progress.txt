@@ -1355,3 +1355,41 @@
 - Вёрстка при 100% и 150% масштабе: без прокрутки, кнопки помещаются, длинная ошибка — не больше 2 строк
 - С занятием, начинающимся в ближайшие 5 мин: попап появляется; при выключенной «Автоматически предлагать запись» — нет; «Отложить на 5 мин» возвращает; в конце занятия скрывается сам; название вида <b>x</b> показано буквально; время в зоне занятия
 - Quit из трея завершает процесс за ~15 с и сразу после показа попапа; в логе нет названий занятий
+
+## [TASK-061] Запускаемая alpha-сборка для владельца: скрипт сборки и инструкция
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- paratech/desktop/build-alpha.ps1 (ASCII, PowerShell 5.1, StrictMode): проверка go и npm (npm.cmd, затем npm.exe; ничего не ставит), npm ci + npm run build (главное окно и попап), go build -tags production -trimpath с CGO_ENABLED=0 GOOS=windows GOARCH=amd64 (переменные возвращаются в finally), проверка go version -m; результат paratech\dist\alpha\learning-assistant.exe (игнорируется git), -OutDir; -Smoke: headless на paratech\dist\alpha\smoke-data, ждёт «instance lock acquired» и «background work started», останов жёсткий (Stop-Process: из PowerShell нельзя послать Ctrl+Break отдельной группе)
+- internal/app/missing_parts_test.go: TestAlphaCoreWithoutMissingPartsStaysUsable — productionEnv (настоящие заглушки Hub/почты/черновиков и audiocapture.Unavailable), whisper-cli отсутствует: старт без ERROR, предупреждение в логе, настройки и списки работают; stt -> FAILED «stt job: transcription failed», summarize -> WAITING_FOR_NETWORK без попыток, send_email (через proposal Validate/Confirm) -> FAILED delivery rejected; старт записи -> FAILED с причиной
+- docs/qa/run-alpha.md (по-русски, для владельца): сборка, запуск, журнал (cmd /c ... 2> файл), флаги, данные и сброс (включая кэш WebView2 и ключи HKCU уведомлений), строки успешного старта, whisper-cli (b5454, проверка SHA-256 однострочником), что работает и что заглушка, «что потыкать» по экранам, трею и попапу TASK-022, известные проблемы, раздел «Что изменилось». Пометки [проверено]/[тест]/[владельцу]
+- Продуктовый код не менялся; существующие тесты не менялись; зависимостей нет
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), повторно на итоговой голове перед push
+- [x] Шаг 1: build-alpha.ps1 -Smoke (координатор сам) — exe 26.4 МБ, в логе «instance lock acquired», «background work started», без ERROR; второй экземпляр на той же папке — код 1 «the data directory is used by another instance»; мягкий останов (scratch-программа, CREATE_NEW_PROCESS_GROUP + CTRL_BREAK) — «desktop core stopping», «gracefully stopped», код 0
+- [x] Шаг 2: GOOS=windows go vet ./desktop/..., go test -race -count=1 ./desktop/... (в verify.sh); go test -tags production ./desktop/internal/input/wails/ после сборки фронтенда
+- [x] Шаг 3: git status --porcelain пуст после скрипта; процессов learning-assistant.exe не осталось
+- Режим с окном не запускался (ночной режим: служба уведомлений Wails пишет ключи HKCU) — пункты [владельцу] в инструкции
+
+### ПОСТОЯННОЕ ПРАВИЛО для всех следующих задач
+- Каждая задача, которая меняет поведение, видимое пользователю (экраны, трей, попап, тексты, лог старта, что работает/заглушка), обновляет docs/qa/run-alpha.md: запись в разделе «Что изменилось» (дата, TASK, что изменилось) и затронутые разделы (таблица «Что работает», «Что потыкать», строки лога). Ревьюер проверяет это как часть AC.
+
+### Решения (подтвердить)
+- Инструкция на русском (владелец не разработчик этой части), строки лога и команды дословно
+- exe консольный (лог виден в консоли); окно без консоли (-H windowsgui) — решение TASK-054
+- Смоук останавливает процесс жёстко; мягкий останов проверен отдельно
+- Выход по умолчанию paratech\dist\alpha (игнорируется), примеры других папок — внутри профиля
+
+### Заметки (follow-up)
+- Ревью: changes requested (medium: в инструкции «фокус остаётся в чате» после меню трея — меню трея Wails само берёт фокус, SetForegroundWindow в popupmenu_windows.go; low: TASK-017 vs TASK-059, проверка хеша, папки в корне диска, кэш WebView2/реестр, Stop-Process без SilentlyContinue, правило в progress.txt; nit: порядок строк лога, ~45 с остановки, npm.exe) -> исправлено 7ea3e3f, повторное ревью approve (low: fallback npm мог взять sh-скрипт, хеш однострочником, формулировка) -> исправлено 4b475b5
+- Security: найдено 2 (low: нет шага проверки SHA-256 архива whisper; примеры папок в корне диска), опровергнуто 2 (skeptic: только docs, вне модели угроз), обе всё равно исправлены в инструкции; принято 0
+- Low (skeptic): docs/refs/whisper.md говорит «приложение пинит релиз по SHA-256 zip», но код этого не проверяет — проверить хеш whisper-cli/zip в TASK-054 (инсталлятор) или TASK-060 до первого запуска
+- STT-задача без whisper-cli показывает только «stt job: transcription failed», причина лишь в логе старта — дать понятный текст в TASK-060
+- В activityView.ts нет русских названий для send_email и homework_draft (показывается сырой тип)
+- Настройки сохраняются, но в альфе ни на что видимое не влияют (нет задач и занятий)
+- Попап по расписанию владельцу не проверить, пока нет импорта (TASK-049) / wiring schedulesync (TASK-060)
+- Записи TASK-015 и TASK-022 в progress.txt перемешались при слиянии: под заголовком TASK-015 пусто, под заголовком TASK-022 сначала текст TASK-015 (spikes, ADR-0002), после «---» — текст TASK-022 без заголовка; не исправлялось (append-only)
+
+---
