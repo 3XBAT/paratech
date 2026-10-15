@@ -27,6 +27,21 @@ const (
 	EnvQuotaLimit           = "HUB_QUOTA_LIMIT"
 	EnvQuotaReservationTTL  = "HUB_QUOTA_RESERVATION_TTL"
 	EnvIdempotencyRetention = "HUB_IDEMPOTENCY_RETENTION"
+
+	EnvAnthropicAPIKey  = "HUB_ANTHROPIC_API_KEY"
+	EnvAnthropicBaseURL = "HUB_ANTHROPIC_BASE_URL"
+	EnvLLMTimeout       = "HUB_LLM_TIMEOUT"
+	EnvLLMModels        = "HUB_LLM_MODELS"
+)
+
+// LLM provider defaults and bounds. The timeout stays at most 10 minutes (the provider discourages longer
+// non-streaming calls) and twice the timeout must fit in the reservation TTL, so the call and its settlement finish
+// before the reservation expires.
+const (
+	DefaultAnthropicBaseURL = "https://api.anthropic.com"
+	DefaultLLMModels        = "default=claude-sonnet-5-5:8192"
+	minLLMTimeout           = 10 * time.Second
+	maxLLMTimeout           = 10 * time.Minute
 )
 
 const maxShutdownTimeout = 5 * time.Minute
@@ -93,6 +108,24 @@ type Config struct {
 	QuotaReservationTTL time.Duration
 	// IdempotencyRetention is how long the record of an idempotency key lives; after that the same key is new.
 	IdempotencyRetention time.Duration
+	// AnthropicAPIKey is the LLM provider key. It is a secret: read only from the environment and never printed.
+	// Empty means the provider is not configured.
+	AnthropicAPIKey string
+	// AnthropicBaseURL is the provider API base URL: https, or http to a loopback host for local testing.
+	AnthropicBaseURL string
+	// LLMTimeout bounds one provider call.
+	LLMTimeout time.Duration
+	// LLMModels is the model allowlist, "alias=model-id:max_output_tokens[,...]" (see Models). Kept as text so that
+	// Config stays comparable.
+	LLMModels string
+}
+
+// Model is one allowlist entry of LLMModels. Its alias and id rules are checked by the domain when the allowlist is
+// built; config checks the syntax, the cap and duplicate aliases.
+type Model struct {
+	Alias     string
+	ID        string
+	MaxOutput int64
 }
 
 // Default returns the configuration used when nothing is overridden. It has no DatabaseURL, which is required.
@@ -100,6 +133,7 @@ func Default() Config {
 	return Config{
 		LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second,
 		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+		AnthropicBaseURL: DefaultAnthropicBaseURL, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels,
 	}
 }
 
@@ -134,10 +168,20 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 			cfg.QuotaLimit = n
 		}
 	}
+	cfg.AnthropicAPIKey = getenv(EnvAnthropicAPIKey)
+	if v := getenv(EnvAnthropicBaseURL); v != "" {
+		cfg.AnthropicBaseURL = v
+	}
+	if v := getenv(EnvLLMModels); v != "" {
+		cfg.LLMModels = v
+	}
 	for _, d := range []struct {
 		env string
 		dst *time.Duration
-	}{{EnvQuotaReservationTTL, &cfg.QuotaReservationTTL}, {EnvIdempotencyRetention, &cfg.IdempotencyRetention}} {
+	}{
+		{EnvQuotaReservationTTL, &cfg.QuotaReservationTTL}, {EnvIdempotencyRetention, &cfg.IdempotencyRetention},
+		{EnvLLMTimeout, &cfg.LLMTimeout},
+	} {
 		if v := getenv(d.env); v != "" {
 			if parsed, err := time.ParseDuration(v); err != nil {
 				envErrs = append(envErrs, fmt.Errorf("%s %q: not a duration (want for example 10m)", d.env, v))
@@ -160,6 +204,12 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		"how long an unsettled reservation holds quota, 1m..1h, above the longest gateway request (env "+EnvQuotaReservationTTL+")")
 	fs.DurationVar(&cfg.IdempotencyRetention, "idempotency-retention", cfg.IdempotencyRetention,
 		"how long an idempotency key is remembered, 1h..24h (env "+EnvIdempotencyRetention+")")
+	fs.StringVar(&cfg.AnthropicBaseURL, "anthropic-base-url", cfg.AnthropicBaseURL,
+		"LLM provider API base URL, https or http to loopback (env "+EnvAnthropicBaseURL+"); the key is read only from env "+EnvAnthropicAPIKey)
+	fs.DurationVar(&cfg.LLMTimeout, "llm-timeout", cfg.LLMTimeout,
+		"limit of one provider call, 10s..10m, at most half the reservation TTL (env "+EnvLLMTimeout+")")
+	fs.StringVar(&cfg.LLMModels, "llm-models", cfg.LLMModels,
+		"model allowlist alias=model-id:max_output_tokens[,...] (env "+EnvLLMModels+")")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -242,7 +292,7 @@ func MustLoad(args []string, out io.Writer, getenv func(string) string) Config {
 }
 
 // Validate reports every problem found, so a misconfigured start fails once with a complete message. The key
-// commands do not serve, so the listen address, shutdown timeout and quota settings are checked only for serve; the
+// commands do not serve, so the listen address, shutdown timeout, quota and LLM settings are checked only for serve; the
 // label and id are checked for presence here and for their exact rules by the domain.
 func (c Config) Validate() error {
 	var errs []error
@@ -262,6 +312,7 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("shutdown timeout %s: must be above 0 and at most %s", c.ShutdownTimeout, maxShutdownTimeout))
 		}
 		errs = append(errs, c.validateQuota()...)
+		errs = append(errs, c.validateLLM()...)
 	case CommandKeysCreate:
 		if c.KeyLabel == "" {
 			errs = append(errs, errors.New("keys create: -label is required"))
@@ -294,6 +345,104 @@ func (c Config) validateQuota() []error {
 			c.IdempotencyRetention, minIdempotencyRetention, maxIdempotencyRetention))
 	}
 	return errs
+}
+
+// validateLLM checks the provider settings, which only the server uses. Messages never contain the key.
+func (c Config) validateLLM() []error {
+	var errs []error
+	if c.AnthropicAPIKey != "" && !printableASCII(c.AnthropicAPIKey) {
+		errs = append(errs, fmt.Errorf("%s: must be printable ASCII without spaces", EnvAnthropicAPIKey))
+	}
+	if err := validateBaseURL(c.AnthropicBaseURL); err != nil {
+		errs = append(errs, err)
+	}
+	if c.LLMTimeout < minLLMTimeout || c.LLMTimeout > maxLLMTimeout {
+		errs = append(errs, fmt.Errorf("LLM timeout %s: must be within %s..%s", c.LLMTimeout, minLLMTimeout, maxLLMTimeout))
+	} else if 2*c.LLMTimeout > c.QuotaReservationTTL {
+		errs = append(errs, fmt.Errorf("LLM timeout %s: must be at most half the quota reservation TTL %s, so a call and its settlement finish before the reservation expires",
+			c.LLMTimeout, c.QuotaReservationTTL))
+	}
+	if _, err := ParseModels(c.LLMModels); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
+// validateBaseURL accepts an https URL, or http to a loopback host (local fake provider), without user info, path,
+// query or fragment. The adapter appends the fixed API path.
+func validateBaseURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.Opaque != "" {
+		return fmt.Errorf("%s: must be an absolute URL such as %s", EnvAnthropicBaseURL, DefaultAnthropicBaseURL)
+	}
+	if u.Scheme != "https" && (u.Scheme != "http" || !isLoopback(u.Hostname())) {
+		return fmt.Errorf("%s: scheme must be https (http only to a loopback host)", EnvAnthropicBaseURL)
+	}
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return fmt.Errorf("%s: must not contain user info, a path, a query or a fragment", EnvAnthropicBaseURL)
+	}
+	return nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// ParseModels parses an allowlist "alias=model-id:max_output_tokens[,alias=model-id:max_output_tokens...]". Alias and
+// id must be printable ASCII without spaces; the cap must be an integer above 0; aliases must be unique.
+func ParseModels(spec string) ([]Model, error) {
+	if strings.TrimSpace(spec) == "" {
+		return nil, fmt.Errorf("%s: at least one model is required", EnvLLMModels)
+	}
+	var models []Model
+	seen := map[string]bool{}
+	for i, entry := range strings.Split(spec, ",") {
+		entry = strings.TrimSpace(entry)
+		alias, rest, ok := strings.Cut(entry, "=")
+		colon := strings.LastIndex(rest, ":")
+		if !ok || colon < 0 {
+			return nil, fmt.Errorf("%s entry %d: want alias=model-id:max_output_tokens", EnvLLMModels, i+1)
+		}
+		id, capText := rest[:colon], rest[colon+1:]
+		if !printableASCII(alias) || !printableASCII(id) {
+			return nil, fmt.Errorf("%s entry %d: alias and model id must be non-empty printable ASCII without spaces", EnvLLMModels, i+1)
+		}
+		maxOutput, err := strconv.ParseInt(capText, 10, 64)
+		if err != nil || maxOutput <= 0 {
+			return nil, fmt.Errorf("%s entry %d: max output tokens must be an integer above 0", EnvLLMModels, i+1)
+		}
+		if seen[alias] {
+			return nil, fmt.Errorf("%s entry %d: duplicate alias %q", EnvLLMModels, i+1, alias)
+		}
+		seen[alias] = true
+		models = append(models, Model{Alias: alias, ID: id, MaxOutput: maxOutput})
+	}
+	return models, nil
+}
+
+// Models returns the parsed allowlist of a validated configuration (nil if LLMModels is invalid).
+func (c Config) Models() []Model {
+	models, err := ParseModels(c.LLMModels)
+	if err != nil {
+		return nil
+	}
+	return models
+}
+
+func printableASCII(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func validateListenAddr(addr string) error {
@@ -330,12 +479,13 @@ func validateDatabaseURL(raw string) error {
 	return nil
 }
 
-// String prints the configuration without the database URL, so that %v of a Config cannot leak the password.
+// String prints the configuration without the database URL and the provider key, so that %v of a Config cannot leak
+// them.
 func (c Config) String() string {
 	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
-		"QuotaReservationTTL:%s IdempotencyRetention:%s}",
+		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s LLMTimeout:%s LLMModels:%s}",
 		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
-		c.QuotaReservationTTL, c.IdempotencyRetention)
+		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels)
 }
 
 // LogValue is String for slog handlers that do not use fmt (JSON).
@@ -350,7 +500,19 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("quota_limit", c.QuotaLimit),
 		slog.Duration("quota_reservation_ttl", c.QuotaReservationTTL),
 		slog.Duration("idempotency_retention", c.IdempotencyRetention),
+		slog.String("anthropic_api_key", redacted(c.AnthropicAPIKey)),
+		slog.String("anthropic_base_url", printableURL(c.AnthropicBaseURL)),
+		slog.Duration("llm_timeout", c.LLMTimeout),
+		slog.String("llm_models", c.LLMModels),
 	)
+}
+
+// printableURL hides a base URL that could carry credentials (user info) or cannot be parsed.
+func printableURL(raw string) string {
+	if u, err := url.Parse(raw); err != nil || u.User != nil {
+		return "(invalid)"
+	}
+	return raw
 }
 
 func redacted(secret string) string {
