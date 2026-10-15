@@ -120,7 +120,19 @@ func TestCarriesDetectsNestedModelOutput(t *testing.T) {
 // The post-processing of a transcript (TASK-042) only stores data: none of its ports is a side-effect port, and no
 // port it calls takes model output, so the answer of the model reaches the database only as validated aggregate values.
 func TestPostProcessorReachesNoSideEffect(t *testing.T) {
-	deps := reflect.TypeOf(homeworkflow.PostProcessDeps{})
+	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.PostProcessDeps{}), 10)
+}
+
+// The homework drafts (TASK-043) have no side-effect port either: a generated draft is stored as a version. Exporting
+// writes through the Storage Manager port (ArtifactStore), which takes no model output, and only on the user's action.
+func TestDraftsReachNoSideEffect(t *testing.T) {
+	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.DraftDeps{}), 10)
+}
+
+// checkNoSideEffectPorts checks that no port field of deps is a side-effect port or takes model output; min guards
+// against a walker that misses the fields.
+func checkNoSideEffectPorts(t *testing.T, deps reflect.Type, minPorts int) {
+	t.Helper()
 	ports := 0
 	for i := range deps.NumField() {
 		f := deps.Field(i)
@@ -130,7 +142,7 @@ func TestPostProcessorReachesNoSideEffect(t *testing.T) {
 		ports++
 		for _, se := range sideEffectPorts {
 			if f.Type == se {
-				t.Errorf("PostProcessDeps.%s is the side-effect port %s (hard rule 3)", f.Name, se.Name())
+				t.Errorf("%s.%s is the side-effect port %s (hard rule 3)", deps.Name(), f.Name, se.Name())
 			}
 		}
 		for j := range f.Type.NumMethod() {
@@ -142,7 +154,7 @@ func TestPostProcessorReachesNoSideEffect(t *testing.T) {
 			}
 		}
 	}
-	if ports < 10 {
-		t.Fatalf("checked %d ports of PostProcessDeps, the walker missed some", ports)
+	if ports < minPorts {
+		t.Fatalf("checked %d ports of %s, the walker missed some", ports, deps.Name())
 	}
 }
