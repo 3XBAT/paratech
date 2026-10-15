@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"paratech/hub/internal/domain/llm/values"
 )
@@ -19,14 +20,18 @@ type ProviderStep struct {
 	Block bool
 	// Entered, when not nil, is closed when the call starts this step (to synchronize with a blocked call).
 	Entered chan struct{}
+	// Wait, when not nil, holds the call until Wait is closed (then the step is played) or its context ends (then it
+	// fails like Block). It models a slow provider that finishes on its own.
+	Wait chan struct{}
 }
 
 // FakeProvider is a scripted provider for the gateway's Provider port. Each call takes the next step; a call without
 // a step left fails with a permanent error. Calls are recorded. Safe for concurrent use.
 type FakeProvider struct {
-	mu    sync.Mutex
-	steps []ProviderStep
-	calls []values.Request
+	mu      sync.Mutex
+	steps   []ProviderStep
+	calls   []values.Request
+	budgets []time.Duration
 }
 
 // NewFakeProvider returns a provider that answers with steps in order.
@@ -46,6 +51,11 @@ func (p *FakeProvider) Push(steps ...ProviderStep) {
 func (p *FakeProvider) Complete(ctx context.Context, req values.Request) (values.Completion, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, req)
+	budget := time.Duration(-1)
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = time.Until(deadline)
+	}
+	p.budgets = append(p.budgets, budget)
 	if err := ctx.Err(); err != nil {
 		p.mu.Unlock()
 		return values.Completion{}, cutShort(err)
@@ -60,6 +70,13 @@ func (p *FakeProvider) Complete(ctx context.Context, req values.Request) (values
 
 	if step.Entered != nil {
 		close(step.Entered)
+	}
+	if step.Wait != nil {
+		select {
+		case <-step.Wait:
+		case <-ctx.Done():
+			return values.Completion{}, cutShort(ctx.Err())
+		}
 	}
 	switch {
 	case step.Block:
@@ -77,6 +94,13 @@ func (p *FakeProvider) Calls() []values.Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]values.Request(nil), p.calls...)
+}
+
+// Budgets returns, per recorded call, how long its context had left when the call started (-1: no deadline).
+func (p *FakeProvider) Budgets() []time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]time.Duration(nil), p.budgets...)
 }
 
 // Remaining returns the number of steps not played yet.

@@ -90,6 +90,10 @@ func (c Completion) Usage() Usage { return c.usage }
 // Stop says why the model stopped.
 func (c Completion) Stop() StopReason { return c.stop }
 
+// Refused reports whether the provider declined to answer (StopRefusal). The output is not usable, so the gateway
+// treats it as a permanent provider failure (errors.proto: a refusal is not retryable).
+func (c Completion) Refused() bool { return c.stop == StopRefusal }
+
 // String prints the completion without the output text (only its size).
 func (c Completion) String() string {
 	return fmt.Sprintf("{Output:(%d bytes) InputTokens:%d OutputTokens:%d Stop:%s}", len(c.output), c.usage.input, c.usage.output, c.stop)
