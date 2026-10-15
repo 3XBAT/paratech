@@ -79,6 +79,9 @@ non-email types, UI mode only (headless has no notifier).
   settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
   read back). "Check mail" = `smtp.Mailer.Check`: Send's session setup (EHLO, STARTTLS, AUTH), then QUIT, no message;
   the bridge maps the adapter's session classes to the use case's results. Off Windows the page shows "unsupported".
+  TASK-039: the Hub key is the second slot (`hub` store, `api-key`, checked by `values.ParseHubAPIKey`). "Refresh"
+  reads `hubclient.GetRemaining` on the core's client (bridge `hubQuota`); the last snapshot lives in memory only:
+  stale after a failure, dropped for a missing address or key or a rejected key, forgotten when either changes.
 - **Recorder (TASK-017).** Windows: `audiocapture.Recorder`, which runs this executable as the recorder child
   (ADR-0002). Other OSes: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`, so
   interrupted recordings keep their chunks for a later recovery.
@@ -95,8 +98,9 @@ non-email types, UI mode only (headless has no notifier).
 - The SHA-256 pin check of the whisper-cli binary (docs/refs/whisper.md), TASK-054 or later.
 - Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
   the Windows recorder by TASK-017; recording -> STT, `modelcatalog` and the heavy cap by TASK-060; the models page
-  by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed for an unknown machine).
-- Bindings of the drafts (TASK-045) and of the Hub key (TASK-039; a second secret slot in `cases/connections`).
+  by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed for an unknown machine);
+  the Hub key and the quota of the «Подключения» page by TASK-039.
+- Bindings of the drafts (TASK-045).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,
