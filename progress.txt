@@ -1163,3 +1163,42 @@
 - Low (архитектура): input/wails Shell реализует исходящий порт Notifier (записано в ADR-0007); альтернатива — adapters/wailstoast, передаваемый в оболочку через Options
 - Nit: документация порта Notifier.Ready называет реализацию (лучше описывать роль); комментарий «worker and keeper are idle» в tests/notify_sqlite_test.go:266 не гарантирован (таймер наблюдателя тоже спит на fake clock) — безвредно
 - Wails при каждом показе пишет иконку PNG в %TEMP%, запасной путь go-toast — временный .ps1 (поведение библиотеки); любые будущие тексты тостов с пользовательским содержимым требуют экранирования и для XML, и для PowerShell
+
+---
+
+## [TASK-034] Адаптер LLM-провайдера Hub: порт Provider, Anthropic, allowlist моделей, fake
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/llm (новый контекст): values — Request (id модели из allowlist, instructions, untrusted data, max output; UTF-8 без NUL, String без текста), Completion (Output — НЕДОВЕРЕННЫЙ, Usage, StopReason: End/MaxTokens/Sequence/Refusal/ContextWindow/Other), Usage (input = input + cache creation + cache read, output; int64), ProviderError (Kind transient/permanent, Status, Type только из известных, RetryAfter; errors.Is ErrProviderTransient/ErrProviderPermanent)
+- domain/llm/services/modelallowlist: alias -> id модели + cap; Resolve: 0 -> cap, больше cap -> cap молча (ADR-0005(b)), неизвестный alias -> ErrModelNotAllowed; правила alias/id/cap, без дублей
+- cases/gateway/ports.go: только порт Provider (потребитель — шлюз TASK-035, ARCH-21)
+- adapters/anthropic: std net/http, POST {base}/v1/messages, x-api-key, anthropic-version 2023-06-01; system = instructions, один user text = untrusted data (пустые/пробельные -> "(no data)"); без temperature; редиректы запрещены (x-api-key не уходит на чужой хост); таймаут вызова; классификация: 408/429/5xx/529/сеть/таймаут — transient, 429 enforced_spend_limit_reached, 3xx, прочие 4xx, битый/большой (8 МиБ) ответ — permanent; retry-after (до 10m); "answer interrupted" — тело 200 не дочитано; отмена/дедлайн вызывающего -> errors.Is(context.*); ключ, тело ответа, error.message и тексты в ошибки не попадают
+- config: HUB_ANTHROPIC_API_KEY (только env, скрыт в String/GoString/LogValue; пока необязателен), HUB_ANTHROPIC_BASE_URL (https, http только loopback), HUB_LLM_TIMEOUT (5m, 10s..10m, 2 x timeout <= HUB_QUOTA_RESERVATION_TTL), HUB_LLM_MODELS (default=claude-sonnet-5-5:8192; config проверяет синтаксис); Config.GoString (раньше %#v печатал DatabaseURL)
+- testenv/provider.go (FakeProvider: очередь шагов, запись вызовов, режим Block -> transient при отмене/дедлайне); tests/provider_test.go (allowlist + настоящий адаптер против httptest)
+- docs/refs/anthropic.md (официальная документация platform.claude.com, 2026-10-15: заголовки, тело, usage, ошибки, модели); paratech/README.md раздел «Hub LLM provider»
+- Зависимостей не добавлено
+- Изменённые существующие тесты: config_test TestLoad (новые значения по умолчанию в want), TestLoadQuota "environment" (+HUB_LLM_TIMEOUT=30s, т.к. TTL 1m) и "flags win" (+--llm-timeout 2m, т.к. TTL 5m) — следствие правила 2 x timeout <= TTL
+- nolint: config.go EnvAnthropicAPIKey — gosec G101 ложное срабатывание на имени переменной (с причиной)
+- Ревью: request changes (medium: Config без GoString; medium: отклонение от AC/PRD — net/http вместо anthropic-sdk-go, записано ниже; low: заметка о 429 в refs, "answer interrupted", зависание теста, синтаксическая проверка allowlist в config, нет разреза по operation; nits) -> исправлено e2c8d61..c54f2fd (до rebase), повторное ревью approve. Security: найдено 1 (low, %#v Config), опровергнуто 1 (недостижимо), укреплено всё равно; повторный проход по исправлениям — 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: go test -race -count=1 ./hub/... (DB-тесты без HUB_TEST_DATABASE_URL пропускаются — задача БД не трогает)
+- [x] Шаг 2: TestResolveRejectsModelsOutsideTheAllowlist, TestProviderNonAllowedModelNeverReachesTheProvider (сервер не получил ни одного запроса)
+- [x] Шаг 3: TestFakeProviderUsageAndTimeout, TestCompleteTimeoutIsTransient, TestCompleteUsageWithNullCacheFields
+- Реальных сетевых вызовов и настоящего ключа нет
+
+### Решения (подтвердить)
+- net/http вместо anthropic-sdk-go (AC и PRD §4.3 называют SDK): без новой зависимости, предпочтение супервизора; при желании владельца — ADR и переход на SDK
+- Модель по умолчанию default=claude-sonnet-5-5 с cap 8192 (id проверен по docs/refs/anthropic.md); текущие модели думают по умолчанию, thinking входит в output_tokens и в cap
+- Ответ 200 с refusal/max_tokens — успешный Completion с usage; решает шлюз
+- Собственный таймаут адаптера — transient "timeout" без context.DeadlineExceeded (отличие «провайдер медленный» от «клиент ушёл»)
+- Ретраев внутри адаптера нет
+
+### Заметки (follow-up)
+- TASK-035: собрать allowlist в app.New через modelallowlist.New из config.Models() и падать при старте (config проверяет только синтаксис); требовать HUB_ANTHROPIC_API_KEY для serve; Complete на контексте, отвязанном от клиента (ADR-0005(e)); 401/403 провайдера -> PROVIDER_ERROR, не INVALID_API_KEY; ретраи с RetryAfter в пределах TTL; не логировать Completion.Output и тексты запроса; "answer interrupted" и сетевой сбой после отправки — провайдер мог списать (разрыв принят ADR-0005(e))
+- Нет разреза allowlist по operation_type (proto допускает) и requestlimits; стриминг не реализован (CompleteStream)
+- Low: App.cfg — неэкспортируемое поле, печать App через %v/%+v выдала бы секреты (сейчас нигде не печатается)
+- Low: TLS-ошибки классифицируются как transient "connection failed"
