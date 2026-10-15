@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/delivery/delivery"
+	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/testenv"
 )
 
@@ -98,6 +99,43 @@ func TestAccountProblemsSendNothing(t *testing.T) {
 			}
 			assertClean(t, err)
 		})
+	}
+}
+
+// Every address the settings accept, as the recipient or as the sender (the login), passes the address check of the
+// adapter, so a stored setting never makes a confirmed email fail here.
+func TestSettingsAddressesArePlainAddresses(t *testing.T) {
+	now := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		addr     string
+		accepted bool // by the settings
+	}{
+		{"teacher@school.example", true},
+		{"a.b+hw@mail.school-1.example", true},
+		{"x@y.z", true},
+		{"a!#$%&'*+-/=?^_`{|}~b@school.example", true},
+		{"a.b.c@d.e.example", true},
+		{".a@b.example", false},
+		{"a.@b.example", false},
+		{"a..b@b.example", false},
+		{"a@b..example", false},
+		{"a@.b.example", false},
+		{"a@b.example.", false},
+		{"@b.example", false},
+		{"\"a b\"@b.example", false},
+		{"a@[127.0.0.1]", false},
+		{"T <t@b.example>", false},
+		{"a@b.example,c@d.example", false},
+	} {
+		s := settings.New()
+		recipient := s.SetHomeworkRecipient(tc.addr, now) == nil
+		sender := s.SetSMTPLogin(tc.addr, now) == nil && s.MailSender() == tc.addr
+		if recipient != tc.accepted || sender != tc.accepted {
+			t.Errorf("%q: settings accept it as recipient %v, as sender %v; want %v", tc.addr, recipient, sender, tc.accepted)
+		}
+		if (recipient || sender) && !plainAddress(tc.addr) {
+			t.Errorf("%q: accepted by the settings, refused by the adapter", tc.addr)
+		}
 	}
 }
 

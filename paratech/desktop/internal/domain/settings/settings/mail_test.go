@@ -49,6 +49,15 @@ func TestMailSetters(t *testing.T) {
 		}, defaults, true},
 		{"recipient without a dotted domain", func(s *Settings) error { return s.SetHomeworkRecipient("t@localhost", t1) }, defaults, true},
 		{"non-ASCII recipient", func(s *Settings) error { return s.SetHomeworkRecipient("учитель@school.example", t1) }, defaults, true},
+		{"recipient with inner dots", func(s *Settings) error { return s.SetHomeworkRecipient("a.b.c@school.example", t1) },
+			mailSnap{recipient: "a.b.c@school.example", security: MailSecurityStartTLS, updatedAt: t1}, false},
+		{"local part with a leading dot", func(s *Settings) error { return s.SetHomeworkRecipient(".a@school.example", t1) }, defaults, true},
+		{"local part with a trailing dot", func(s *Settings) error { return s.SetHomeworkRecipient("a.@school.example", t1) }, defaults, true},
+		{"local part with a double dot", func(s *Settings) error { return s.SetHomeworkRecipient("a..b@school.example", t1) }, defaults, true},
+		{"empty local part", func(s *Settings) error { return s.SetHomeworkRecipient("@school.example", t1) }, defaults, true},
+		{"domain with a double dot", func(s *Settings) error { return s.SetHomeworkRecipient("a@school..example", t1) }, defaults, true},
+		{"login with a double dot is no sender", func(s *Settings) error { return s.SetSMTPLogin("stu..dent@example.org", t1) },
+			mailSnap{login: "stu..dent@example.org", security: MailSecurityStartTLS, updatedAt: t1}, false},
 		{"host", func(s *Settings) error { return s.SetSMTPHost("smtp.example.org", t1) },
 			mailSnap{host: "smtp.example.org", security: MailSecurityStartTLS, updatedAt: t1}, false},
 		{"ipv4 host", func(s *Settings) error { return s.SetSMTPHost("127.0.0.1", t1) },
@@ -56,6 +65,24 @@ func TestMailSetters(t *testing.T) {
 		{"host with port", func(s *Settings) error { return s.SetSMTPHost("smtp.example.org:25", t1) }, defaults, true},
 		{"host with scheme", func(s *Settings) error { return s.SetSMTPHost("smtps://smtp.example.org", t1) }, defaults, true},
 		{"host with a space", func(s *Settings) error { return s.SetSMTPHost("smtp example.org", t1) }, defaults, true},
+		{"single-label host", func(s *Settings) error { return s.SetSMTPHost("mailhost", t1) },
+			mailSnap{host: "mailhost", security: MailSecurityStartTLS, updatedAt: t1}, false},
+		{"host with inner hyphens", func(s *Settings) error { return s.SetSMTPHost("smtp-1.my-school.example", t1) },
+			mailSnap{host: "smtp-1.my-school.example", security: MailSecurityStartTLS, updatedAt: t1}, false},
+		{"63-character label", func(s *Settings) error { return s.SetSMTPHost(strings.Repeat("a", 63)+".example", t1) },
+			mailSnap{host: strings.Repeat("a", 63) + ".example", security: MailSecurityStartTLS, updatedAt: t1}, false},
+		{"64-character label", func(s *Settings) error { return s.SetSMTPHost(strings.Repeat("a", 64)+".example", t1) }, defaults, true},
+		{"host with a trailing dot", func(s *Settings) error { return s.SetSMTPHost("smtp.example.org.", t1) }, defaults, true},
+		{"host with a leading dot", func(s *Settings) error { return s.SetSMTPHost(".smtp.example.org", t1) }, defaults, true},
+		{"host with an empty label", func(s *Settings) error { return s.SetSMTPHost("smtp..example.org", t1) }, defaults, true},
+		{"host with a leading hyphen", func(s *Settings) error { return s.SetSMTPHost("-smtp.example.org", t1) }, defaults, true},
+		{"label with a leading hyphen", func(s *Settings) error { return s.SetSMTPHost("smtp.-example.org", t1) }, defaults, true},
+		{"host with a trailing hyphen", func(s *Settings) error { return s.SetSMTPHost("smtp.example.org-", t1) }, defaults, true},
+		{"label with a trailing hyphen", func(s *Settings) error { return s.SetSMTPHost("smtp-.example.org", t1) }, defaults, true},
+		{"host with an underscore", func(s *Settings) error { return s.SetSMTPHost("smtp_1.example.org", t1) }, defaults, true},
+		{"host too long", func(s *Settings) error {
+			return s.SetSMTPHost(strings.Repeat(strings.Repeat("a", 60)+".", 5)+"example", t1) // 312 characters
+		}, defaults, true},
 		{"port", func(s *Settings) error { return s.SetSMTPPort(2525, t1) },
 			mailSnap{port: 2525, security: MailSecurityStartTLS, updatedAt: t1}, false},
 		{"port out of range", func(s *Settings) error { return s.SetSMTPPort(70000, t1) }, defaults, true},
@@ -119,12 +146,14 @@ func TestMailConfigured(t *testing.T) {
 		name   string
 		change func(*Settings) error
 		want   bool
+		// account: an email can be sent without a recipient setting (a delivery keeps its own).
+		account bool
 	}{
-		{"server, recipient and an address login", nil, true},
-		{"no server", func(s *Settings) error { return s.SetSMTPHost("", t1) }, false},
-		{"no recipient", func(s *Settings) error { return s.SetHomeworkRecipient("", t1) }, false},
-		{"no login", func(s *Settings) error { return s.SetSMTPLogin("", t1) }, false},
-		{"login is not an address: no sender", func(s *Settings) error { return s.SetSMTPLogin("student", t1) }, false},
+		{"server, recipient and an address login", nil, true, true},
+		{"no server", func(s *Settings) error { return s.SetSMTPHost("", t1) }, false, false},
+		{"no recipient", func(s *Settings) error { return s.SetHomeworkRecipient("", t1) }, false, true},
+		{"no login", func(s *Settings) error { return s.SetSMTPLogin("", t1) }, false, false},
+		{"login is not an address: no sender", func(s *Settings) error { return s.SetSMTPLogin("student", t1) }, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,6 +166,9 @@ func TestMailConfigured(t *testing.T) {
 			}
 			if s.MailConfigured() != tc.want {
 				t.Fatalf("MailConfigured = %v, want %v", s.MailConfigured(), tc.want)
+			}
+			if s.SMTPAccountConfigured() != tc.account {
+				t.Fatalf("SMTPAccountConfigured = %v, want %v", s.SMTPAccountConfigured(), tc.account)
 			}
 		})
 	}

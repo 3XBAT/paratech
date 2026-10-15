@@ -33,8 +33,9 @@ const (
 )
 
 // checkAddress accepts a plain address "local@domain": printable ASCII without spaces, no display name and none of
-// the characters that would make it several addresses or a header (< > ( ) , ; : " [ ] \). It is the rule of the
-// homework recipient of the proposals (coursework), so every stored address is one a proposal accepts.
+// the characters that would make it several addresses or a header (< > ( ) , ; : " [ ] \). Both parts are dot-atoms
+// (no leading, trailing or double dot), as net/mail requires. It is the rule of the homework recipient of the
+// proposals (coursework), so every stored address is one a proposal accepts.
 func checkAddress(s string) error {
 	if len(s) < 3 || len(s) > maxAddressLen {
 		return fmt.Errorf("%w: address length must be 3-%d", ErrInvalidSettings, maxAddressLen)
@@ -45,31 +46,51 @@ func checkAddress(s string) error {
 		return fmt.Errorf("%w: address has a forbidden character", ErrInvalidSettings)
 	}
 	local, domain, ok := strings.Cut(s, "@")
-	if !ok || local == "" || strings.Contains(domain, "@") {
-		return fmt.Errorf("%w: address needs exactly one @ after a non-empty local part", ErrInvalidSettings)
+	if !ok || strings.Contains(domain, "@") {
+		return fmt.Errorf("%w: address needs exactly one @", ErrInvalidSettings)
 	}
-	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") ||
-		strings.Contains(domain, "..") {
+	if !dotAtom(local) {
+		return fmt.Errorf("%w: address has a malformed local part", ErrInvalidSettings)
+	}
+	if !strings.Contains(domain, ".") || !dotAtom(domain) {
 		return fmt.Errorf("%w: address has a malformed domain", ErrInvalidSettings)
 	}
 	return nil
 }
 
+// dotAtom reports whether s is non-empty and has no leading, trailing or double dot.
+func dotAtom(s string) bool {
+	return s != "" && !strings.HasPrefix(s, ".") && !strings.HasSuffix(s, ".") && !strings.Contains(s, "..")
+}
+
 func isAddress(s string) bool { return checkAddress(s) == nil }
 
-// checkHost accepts a plain host name or IPv4 address: ASCII letters, digits, dots and hyphens. No port, scheme or
-// path: the port and the security mode are separate settings.
+// Bounds of a host name label (RFC 1035).
+const maxLabelLen = 63
+
+// checkHost accepts a plain host name or IPv4 address: dot-separated labels of 1-63 ASCII letters, digits and
+// hyphens, none starting or ending with a hyphen, and no trailing dot. No port, scheme or path: the port and the
+// security mode are separate settings.
 func checkHost(s string) error {
-	if s == "" || len(s) > maxHostLen || strings.HasPrefix(s, ".") || strings.HasPrefix(s, "-") ||
-		strings.ContainsFunc(s, notHostChar) {
-		return fmt.Errorf("%w: smtp host must be a plain host name of 1-%d letters, digits, dots and hyphens", ErrInvalidSettings, maxHostLen)
+	ok := s != "" && len(s) <= maxHostLen
+	for label := range strings.SplitSeq(s, ".") {
+		ok = ok && hostLabel(label)
+	}
+	if !ok {
+		return fmt.Errorf("%w: smtp host must be a plain host name of 1-%d characters: dot-separated labels of 1-%d letters, digits and inner hyphens",
+			ErrInvalidSettings, maxHostLen, maxLabelLen)
 	}
 	return nil
 }
 
-func notHostChar(r rune) bool {
-	isHostChar := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-'
-	return !isHostChar
+func hostLabel(l string) bool {
+	return l != "" && len(l) <= maxLabelLen && !strings.HasPrefix(l, "-") && !strings.HasSuffix(l, "-") &&
+		!strings.ContainsFunc(l, notLabelChar)
+}
+
+func notLabelChar(r rune) bool {
+	isLabelChar := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-'
+	return !isLabelChar
 }
 
 // checkLogin accepts 1 to maxLoginLen characters without control characters.

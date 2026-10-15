@@ -171,7 +171,14 @@ func (s *Settings) MailSender() string {
 // MailConfigured reports whether homework can be emailed: a server, a recipient and a login that is an address
 // (it is also the sender) are set. Whether the password is stored is up to the credential store.
 func (s *Settings) MailConfigured() bool {
-	return s.smtpHost != "" && s.homeworkRecipient != "" && s.MailSender() != ""
+	return s.SMTPAccountConfigured() && s.homeworkRecipient != ""
+}
+
+// SMTPAccountConfigured reports whether an email can be sent at all: a server and a login that is an address. The
+// recipient is not needed: a delivery keeps the recipient frozen at confirmation, so clearing the setting later does
+// not break a pending send.
+func (s *Settings) SMTPAccountConfigured() bool {
+	return s.smtpHost != "" && s.MailSender() != ""
 }
 
 // SetHomeworkRecipient sets the address homework is emailed to (PRD section 10); empty removes it. Only a plain

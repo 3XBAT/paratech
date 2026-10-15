@@ -95,7 +95,8 @@ type Recipient struct {
 const maxAddressLen = 254
 
 // NewRecipient validates a plain address "local@domain": no display name, no whitespace or control characters and
-// none of the characters that would let it become several addresses or a header (< > ( ) , ; : " [ ] \).
+// none of the characters that would let it become several addresses or a header (< > ( ) , ; : " [ ] \). Both parts
+// are dot-atoms (no leading, trailing or double dot), as net/mail requires.
 func NewRecipient(address string) (Recipient, error) {
 	if len(address) < 3 || len(address) > maxAddressLen {
 		return Recipient{}, fmt.Errorf("%w: length must be 3-%d", ErrInvalidRecipient, maxAddressLen)
@@ -106,14 +107,21 @@ func NewRecipient(address string) (Recipient, error) {
 		return Recipient{}, fmt.Errorf("%w: forbidden character", ErrInvalidRecipient)
 	}
 	local, domain, ok := strings.Cut(address, "@")
-	if !ok || local == "" || strings.Contains(domain, "@") {
-		return Recipient{}, fmt.Errorf("%w: want exactly one @ after a non-empty local part", ErrInvalidRecipient)
+	if !ok || strings.Contains(domain, "@") {
+		return Recipient{}, fmt.Errorf("%w: want exactly one @", ErrInvalidRecipient)
 	}
-	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") ||
-		strings.Contains(domain, "..") {
+	if !dotAtom(local) {
+		return Recipient{}, fmt.Errorf("%w: malformed local part", ErrInvalidRecipient)
+	}
+	if !strings.Contains(domain, ".") || !dotAtom(domain) {
 		return Recipient{}, fmt.Errorf("%w: malformed domain", ErrInvalidRecipient)
 	}
 	return Recipient{address: address}, nil
+}
+
+// dotAtom reports whether s is non-empty and has no leading, trailing or double dot.
+func dotAtom(s string) bool {
+	return s != "" && !strings.HasPrefix(s, ".") && !strings.HasSuffix(s, ".") && !strings.Contains(s, "..")
 }
 
 // Address returns the email address.
