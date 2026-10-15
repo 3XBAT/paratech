@@ -1397,6 +1397,7 @@
 ---
 
 ## [TASK-049] UI: экран импорта расписания (выбор файла, превью, подтверждение)
+## [TASK-036] Hub: GetRemaining — остаток квоты для клиента
 **Дата:** 2026-10-15
 **Статус:** done
 
@@ -1472,3 +1473,22 @@
 - delivery.NewAttachment принимает любой вид артефакта; можно ограничить exports/ в агрегате delivery
 - Тест env_other_test (!windows) только компилируется на этой машине (выполняется в CI ubuntu)
 - Нет теста, что assertNoSecrets сам ловит утечку
+- Обработчик, use case, журнал и документация контракта уже были с TASK-033/035 (input/connect/quota.go, cases/quota GetRemaining, common.proto QuotaSnapshot: «UI может кэшировать, авторитет — следующий Reserve»); по сверке AC все критерии выполнены, кода не добавлялось
+- Добавлен только тест шага 2 на HTTP-уровне: hub/tests/quota_test.go TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres — публичный Connect-обработчик с auth и реальным API-ключом на Postgres: 1000 -> reserve 400 (600/400) -> settle 150 (850/0) -> reserve 300 (550/300) -> release (850/0); чтение ничего не пишет; второй тестер видит свою нетронутую квоту и счёт ему не создаётся
+- Изменённых существующих тестов нет
+- Ревью: approve (low: «чтение ничего не пишет» сравнивает только число строк; nit: дублирование выдачи ключа/запроса, константа лимита). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: HUB_TEST_DATABASE_URL (docker compose, проект task036) go test -race -count=1 ./hub/... (шире ./hub/internal/...: новый тест в ./hub/tests) — DB-тесты реально выполнены (139 PASS, 0 SKIP), схем не осталось, compose down -v
+- [x] Шаг 2: TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres (также TestQuotaSettleAndReleaseAgainstPostgres, TestGatewaySettlesTheActualUsage/ProviderFailureReleasesAgainstPostgres)
+
+### Решения (подтвердить)
+- «Период квоты» (AC-12) в MVP — невозобновляемый лимит, period_ends_at не задан (ADR-0008); возобновляемый период — отдельная задача, если нужен
+
+### Заметки (follow-up)
+- Low: в новом тесте сравнить ещё used/held quota_accounts до и после повторных чтений (ловит UPDATE, не только INSERT)
+- Nit: helper remainingFor(t, apiKey) и tester с ключом вместо повторной выдачи ключа в тесте; const limit
+- Кэш остатка «только для показа» на стороне десктопа — задача клиента (TASK-039)
+
+---
