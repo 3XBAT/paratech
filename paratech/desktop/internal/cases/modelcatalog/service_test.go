@@ -96,7 +96,9 @@ func TestListAvailableIgnoresImportedModels(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 
-	if _, err := e.svc.Register(ctx, Registration{Name: "base", ModelVersion: "2", File: e.putFile("own.bin", 5)}); err != nil {
+	if _, err := e.svc.Register(ctx, Registration{
+		Name: "base", ModelVersion: "2", File: e.putFile("own.bin", 5), Confirmation: confirm(t, make([]byte, 5)),
+	}); err != nil {
 		t.Fatalf("import with a catalog name and another version: %v", err)
 	}
 	e.seed("legacy", "tiny", modelRef(t, "legacy.bin")) // a row with the identity of tiny, not from the catalog
@@ -199,6 +201,19 @@ func TestRegisterRejects(t *testing.T) {
 		{"empty file", func(e *env) Registration {
 			return Registration{Name: "own", ModelVersion: "1", File: e.putFile("own.bin", 0)}
 		}, sttmodel.ErrInvalidModel},
+		{"imported model without confirmation", func(e *env) Registration {
+			return Registration{Name: "own", ModelVersion: "1", File: e.putFile("own.bin", 5)}
+		}, values.ErrConfirmationRequired},
+		{"imported model confirmed for another file", func(e *env) Registration {
+			return Registration{
+				Name: "own", ModelVersion: "1", File: e.putFile("own.bin", 5), Confirmation: confirm(e.t, make([]byte, 6)),
+			}
+		}, values.ErrConfirmationMismatch},
+		{"catalog model with a confirmation", func(e *env) Registration {
+			return Registration{
+				CatalogID: "base-q5_1", File: e.putBytes("b.bin", catBase.content()), Confirmation: confirm(e.t, catBase.content()),
+			}
+		}, ErrInvalidRegistration},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -242,7 +257,7 @@ func TestRegisterImportedAndDuplicates(t *testing.T) {
 	content := []byte("own model weights")
 	own := Registration{
 		Name: "own", ModelVersion: "2", Quantization: "f16", Capabilities: []values.Capability{"en"},
-		File: e.putBytes("own.bin", content),
+		File: e.putBytes("own.bin", content), Confirmation: confirm(t, content),
 	}
 
 	got, err := e.svc.Register(ctx, own)
@@ -286,6 +301,7 @@ func TestRegisterRefusesAFileInUse(t *testing.T) {
 
 			_, err := e.svc.Register(context.Background(), Registration{
 				Name: "own", ModelVersion: "1", File: e.putBytes(tc.file, catBase.content()),
+				Confirmation: confirm(t, catBase.content()),
 			})
 			if !errors.Is(err, sttmodel.ErrFileInUse) || !errors.Is(err, shared.ErrDuplicate) {
 				t.Fatalf("Register = %v, want sttmodel.ErrFileInUse", err)

@@ -46,8 +46,9 @@ type InstalledModel struct {
 // flows call Register after they wrote the file below models/.
 //
 // A catalog model names only CatalogID and File: identity, size and capabilities come from the catalog entry, and the
-// file must match the entry's size and digest. An imported model (empty CatalogID, after explicit user confirmation,
-// AC-23) names its identity itself. Size and SHA-256 are always taken from the stored file by Register.
+// file must match the entry's size and digest. An imported model (empty CatalogID) names its identity itself and
+// carries the user's confirmation of the digest it was shown (AC-23). Size and SHA-256 are always taken from the
+// stored file by Register.
 type Registration struct {
 	CatalogID values.CatalogID
 	File      shared.ArtifactRef
@@ -57,6 +58,7 @@ type Registration struct {
 	ModelVersion values.ModelVersion
 	Quantization values.Quantization
 	Capabilities []values.Capability
+	Confirmation values.ImportConfirmation
 }
 
 // PinnedModel is the exact model an STT job pins (AC-08).
@@ -101,4 +103,27 @@ type DownloadPlan struct {
 	RequiredBytes  int64 // free space the download needs, margin included
 	AvailableBytes int64 // free space on the disk of the data directory
 	Enough         bool  // AvailableBytes >= RequiredBytes
+}
+
+// ImportDeps are the ports an Importer needs on top of the Service; all are required.
+type ImportDeps struct {
+	Source ImportSource
+	Space  DiskSpace
+}
+
+// ImportPreview is what the user is shown before confirming the import of a model outside the catalog (AC-23).
+type ImportPreview struct {
+	SizeBytes int64
+	SHA256    values.SHA256
+}
+
+// CustomImport is the import of a model file outside the catalog (PRD section 8, AC-23). Path is the OS path of the
+// file the user picked; Confirmation carries the SHA-256 of the ImportPreview the user confirmed.
+type CustomImport struct {
+	Path         string
+	Name         values.ModelName
+	ModelVersion values.ModelVersion
+	Quantization values.Quantization
+	Capabilities []values.Capability
+	Confirmation values.ImportConfirmation
 }

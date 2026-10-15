@@ -190,8 +190,12 @@ func TestModelManagerScenario(t *testing.T) {
 
 	e := openCatalogEnv(t, dir, clock, ids)
 	tiny, base := e.installCatalog(fileTiny), e.installCatalog(fileBase)
+	ownConfirmed, err := values.ConfirmImport(fileOwn.sum())
+	if err != nil {
+		t.Fatal(err)
+	}
 	own, err := e.svc.Register(ctx, modelcatalog.Registration{
-		Name: "own", ModelVersion: "1", File: e.store(fileOwn),
+		Name: "own", ModelVersion: "1", File: e.store(fileOwn), Confirmation: ownConfirmed,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -315,8 +319,14 @@ func TestModelManagerRegisterVerifiesTheFile(t *testing.T) {
 		{mustModelRef(t, fileBase), false},
 		{upper, true},
 	}
+	baseConfirmed, err := values.ConfirmImport(fileBase.sum())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range cases {
-		_, err := e.svc.Register(ctx, modelcatalog.Registration{Name: "own", ModelVersion: "1", File: tc.ref})
+		_, err := e.svc.Register(ctx, modelcatalog.Registration{
+			Name: "own", ModelVersion: "1", File: tc.ref, Confirmation: baseConfirmed,
+		})
 		missing := tc.mayBeMissing && errors.Is(err, shared.ErrNotFound)
 		if !errors.Is(err, sttmodel.ErrFileInUse) && !missing {
 			t.Fatalf("register %s again: %v, want sttmodel.ErrFileInUse", tc.ref, err)

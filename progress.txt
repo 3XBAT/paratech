@@ -989,3 +989,30 @@
 - Low: причина "source uid longer than 512 bytes" учитывает префикс "xlsx:id:" — фактический лимит uid 504 байта; заменить на "uid too long"
 - Low: память при 16 МиБ мелких <si> (общих строк) ~x10 в куче; при необходимости считать <si> в предпроверке
 - Low: повторяющиеся/убывающие <row r> в вручную собранном файле сдвигают номера строк (задокументировано); chartsheet первым листом -> ошибка заголовка
+
+## [TASK-028] Ручной путь: открыть страницу источника модели и импортировать скачанный файл
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- Домен: необязательное поле манифеста source_page (только https, через ParseSourceURL; хост в allowlist скачивания не добавляется); CatalogEntry.SourcePage() — source_page или source_url; values.ImportConfirmation (подтверждение привязано к показанному SHA-256), CheckImportSize (лимит MaxImportSizeBytes 8 ГиБ), CheckImportSpace
+- cases/modelcatalog: Service.SourcePage (только возвращает URL, браузер не открывает); Importer: ImportCatalog (размер до копирования, SHA-256 из манифеста по копии), Inspect (размер и SHA-256 для показа), ImportCustom (без подтверждения отказ до открытия файла; копия ставится только с подтверждённым digest). Копия через ArtifactStore под сгенерированным именем, при любой ошибке удаляется; exactReader ловит рост/усечение файла. Register для модели вне каталога требует подтверждение
+- adapters/localfile (ImportSource): Clean, абсолютный путь, без NUL; на Windows только диск X: (UNC, \?\, \.\, \??\ отклоняются), filepath.IsLocal (имена устройств, ADS); только обычные файлы, проверка подмены после open (id файла читается сразу после stat). G304 закрыт без nolint
+- Изменённые существующие тесты: service_test.go (Register импортированной модели передаёт Confirmation; TestRegisterRejects +3 отказа), tests/modelcatalog_sqlite_test.go (два Register с подтверждением); checkNotInstalled перенесён с Downloader на Service
+- Ревью: approve, 1 medium (ARCH-22, отложен, см. ниже) + low 2-5 исправлены в ff37fa9, повторное ревью approve. Security: найдено 0, опровергать нечего
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0, vulncheck)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestImportCatalogRejects/wrong_checksum, TestModelImportRejectsTamperedFile
+- [x] Шаг 3: TestImportCustomRejects/no_confirmation, TestImportCustomWithConfirmation, TestModelImportCustomNeedsConfirmation, TestModelImportCustomRefusesSwappedFile
+
+### Решения (подтвердить)
+- Подтверждение модели вне каталога = SHA-256, показанный Inspect; файл не держится между шагами, подмена после показа отклоняется
+- Сетевой (подключённый) диск и ссылка на UNC, выбранные пользователем, не отклоняются (проверяется только текст пути; GetDriveType потребовал бы x/sys/windows)
+
+### Заметки (follow-up)
+- Medium ARCH-22 (отложен): правило «импортированная модель только с подтверждением» проверяется в Service.Register (service.go, ветка CatalogID == ""), а не в sttmodel.New. Перенос меняет контракт агрегата и фикстуры чужих тестов (cases/transcribe/fakes_test.go, modelselection_test.go, tests/transcribe|postprocess_sqlite_test.go) — отдельной задачей; заодно вынести в домен дублирующие проверки checkNotInstalled/checkIdentityFree
+- Не подключено в app/input/UI: Wails-биндинг открывает URL только как URL (не shell), ImportConfirmation строится только из действия пользователя по digest из Inspect
+- Low: падение между Write и Register оставляет файл-сироту в models/ (та же дыра у Downloader) — нужна чистка при старте
+- Low: ImportConfirmation/CheckImport* лежат в values без агрегата (допустимо)
