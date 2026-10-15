@@ -178,8 +178,15 @@ func configureMailAndHub(t *testing.T, a *App, hubURL, smtpHost string, smtpPort
 }
 
 // assertNoSecrets scans every byte of the database files (with a write-ahead log or journal), every value of every
-// row and the log for each secret, in UTF-8 and UTF-16.
+// row and the log for each secret, in UTF-8 and UTF-16. At least the settings, the assignment, the draft and its
+// version, the delivery and two jobs must have been scanned.
 func assertNoSecrets(t *testing.T, dbPath, log string, secrets ...string) {
+	t.Helper()
+	assertNoSecretsIn(t, dbPath, log, 7, secrets...)
+}
+
+// assertNoSecretsIn is assertNoSecrets with the least number of rows the scan must have seen.
+func assertNoSecretsIn(t *testing.T, dbPath, log string, minRows int, secrets ...string) {
 	t.Helper()
 	files, err := filepath.Glob(dbPath + "*")
 	if err != nil || len(files) == 0 {
@@ -258,8 +265,7 @@ func assertNoSecrets(t *testing.T, dbPath, log string, secrets ...string) {
 			t.Fatal(err)
 		}
 	}
-	// At least the settings, the assignment, the draft and its version, the delivery and two jobs.
-	if scanned < 7 {
+	if scanned < minRows {
 		t.Fatalf("scanned only %d rows", scanned)
 	}
 }
