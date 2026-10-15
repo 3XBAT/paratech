@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -25,7 +26,8 @@ func TestUnavailableRefusesEverything(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"start", func() error { return r.Start(ctx, "r1", chunks) }},
+		{"start", func() error { return r.Start(ctx, "r1", chunks, values.WholeComputer()) }},
+		{"start an app", func() error { return r.Start(ctx, "r1", chunks, appSource(t, "zoom.exe")) }},
 		{"stop", func() error { return r.Stop(ctx, "r1") }},
 		{"wait", func() error { return r.Wait(ctx, "r1") }},
 		{"finalize", func() error { _, err := r.Finalize(ctx, chunks, track); return err }},
@@ -46,4 +48,13 @@ func TestUnavailableRefusesEverything(t *testing.T) {
 			}
 		})
 	}
+}
+
+func appSource(t *testing.T, app shared.AppName) values.Source {
+	t.Helper()
+	s, err := values.SourceOf(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

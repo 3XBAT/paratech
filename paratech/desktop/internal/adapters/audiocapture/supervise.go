@@ -1,6 +1,7 @@
 package audiocapture
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,10 @@ type Diagnostics struct {
 	Restarts     int
 	Failure      string // why the capture or the last child ended unexpectedly
 	InvalidLines int    // malformed or oversized event lines of the children
+
+	App           shared.AppName // the chosen app; empty for the whole computer and StartTarget
+	WaitingForApp bool           // the app's process exited and no new instance is captured yet
+	Rebinds       int            // new instances of the app captured
 }
 
 // Stats are the counters a child reports.
@@ -41,11 +46,23 @@ type Stats struct {
 	Reopens       uint64
 }
 
+// binding is the app a capture follows across restarts of the app (TASK-059). Only the supervisor uses it.
+type binding struct {
+	proc      ProcessIdentity // the process the target names now
+	waiting   bool            // proc exited and no new instance is captured yet
+	rebinds   int
+	capLogged bool
+}
+
 // capture is one recording's capture: its supervisor goroutine and the children it runs one after another.
 type capture struct {
 	id     shared.RecordingID
 	chunks shared.ArtifactRef
-	target Target
+	target Target   // changed by the supervisor on a re-bind
+	bind   *binding // nil unless the capture follows an app
+
+	ctx    context.Context // ends with a stop, an abort or the end: bounds the checks of the app
+	cancel context.CancelFunc
 
 	started chan error    // the outcome of the first child's start; buffered
 	done    chan struct{} // closed when no goroutine or process of the capture is left
@@ -61,17 +78,29 @@ type capture struct {
 	diag    Diagnostics
 }
 
-func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target) *capture {
-	return &capture{
-		id: id, chunks: chunks, target: target,
+func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target, bind *binding) *capture {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &capture{
+		id: id, chunks: chunks, target: target, bind: bind, ctx: ctx, cancel: cancel,
 		started: make(chan error, 1), done: make(chan struct{}),
 		stopCh: make(chan struct{}), abortCh: make(chan struct{}),
 		diag: Diagnostics{Target: target},
 	}
+	c.diag.App = c.app()
+	return c
 }
 
-func (c *capture) requestStop() { c.stopOnce.Do(func() { close(c.stopCh) }) }
-func (c *capture) abort()       { c.abortOnce.Do(func() { close(c.abortCh) }) }
+func (c *capture) requestStop() { c.stopOnce.Do(func() { close(c.stopCh) }); c.cancel() }
+func (c *capture) abort()       { c.abortOnce.Do(func() { close(c.abortCh) }); c.cancel() }
+func (c *capture) release()     { c.cancel() }
+
+// app is the app the capture follows; empty for none.
+func (c *capture) app() shared.AppName {
+	if c.bind == nil {
+		return ""
+	}
+	return c.bind.proc.App
+}
 
 func (c *capture) stopping() bool {
 	select {
@@ -166,11 +195,14 @@ type runOutcome struct {
 	runStart    time.Time     // when the capture of the child began (or the child was launched)
 	closedAudio time.Duration // audio in the chunks the child closed
 	stopErr     error
+	gone        bool             // the app's process exited while the child ran
+	rebind      *ProcessIdentity // a new instance of the app: the child was stopped to capture it
 }
 
 // supervise runs the children of a capture until it is stopped, fails or runs out of restarts.
 func (r *Recorder) supervise(c *capture) {
 	defer close(c.done)
+	defer c.release()
 	var (
 		lead     time.Duration
 		floor    Mode
@@ -192,26 +224,47 @@ func (r *Recorder) supervise(c *capture) {
 			r.retire(c)
 			return
 		}
-		if out.kind == endStopped { // nobody asked: the capture must go on
-			out.kind, out.reason = endCrashed, "the recorder child stopped without a stop request"
+		next := out.rebind
+		if next == nil && r.lostApp(c, out, floor) {
+			// The app exited: the end of its child is no crash and uses no restart; the capture waits for the app.
+			found, ok := r.waitForApp(c)
+			if !ok {
+				c.end(nil, nil)
+				r.retire(c)
+				return
+			}
+			next = &found
 		}
-		switch {
-		case out.kind == endFailed:
-			r.fail(c, fmt.Errorf("%w: %s", ErrCaptureFailed, out.reason))
-			return
-		case restarts >= r.cfg.MaxRestarts:
-			r.fail(c, fmt.Errorf("%w: %s; no restart left after %d", ErrCaptureFailed, out.reason, restarts))
-			return
-		}
+		if next != nil {
+			r.rebind(c, *next)
+			if c.stopping() {
+				c.end(nil, nil)
+				r.retire(c)
+				return
+			}
+		} else {
+			if out.kind == endStopped { // nobody asked: the capture must go on
+				out.kind, out.reason = endCrashed, "the recorder child stopped without a stop request"
+			}
+			switch {
+			case out.kind == endFailed:
+				r.fail(c, fmt.Errorf("%w: %s", ErrCaptureFailed, out.reason))
+				return
+			case restarts >= r.cfg.MaxRestarts:
+				r.fail(c, fmt.Errorf("%w: %s; no restart left after %d", ErrCaptureFailed, out.reason, restarts))
+				return
+			}
 
-		restarts++
-		delay := r.cfg.RestartBackoff << (restarts - 1)
-		r.log.Warn("restarting the recorder child", slog.String("recording", c.id.String()),
-			slog.Int("restart", restarts), slog.Duration("delay", delay), slog.String("reason", shortText(out.reason)))
-		if !c.wait(r.after(delay)) || c.stopping() { // both may be ready together
-			c.end(nil, nil)
-			r.retire(c)
-			return
+			restarts++
+			delay := r.cfg.RestartBackoff << (restarts - 1)
+			r.log.Warn("restarting the recorder child", slog.String("recording", c.id.String()),
+				slog.Int("restart", restarts), slog.Duration("delay", delay), slog.String("reason", shortText(out.reason)))
+			if !c.wait(r.after(delay)) || c.stopping() { // both may be ready together
+				c.end(nil, nil)
+				r.retire(c)
+				return
+			}
+			c.update(func(d *Diagnostics) { d.Restarts = restarts; d.Failure = shortText(out.reason) })
 		}
 
 		// The new child starts with the time the chunks miss as silence, in the mode the last one ended in.
@@ -224,8 +277,96 @@ func (r *Recorder) supervise(c *capture) {
 		if out.mode == ModeSystem && c.target.Mode != ModeSystem {
 			floor = ModeSystem // the fallback is one-way within a recording
 		}
-		c.update(func(d *Diagnostics) { d.Restarts = restarts; d.Failure = shortText(out.reason) })
 	}
+}
+
+// probe is one check of the app of a capture.
+type probe struct {
+	gone bool             // the process the target names is gone
+	next *ProcessIdentity // a new instance of the app, when looked for and found
+}
+
+// probeApp checks proc unless it is known to be gone, and then looks for a new instance of its app if find is true.
+// It may run on its own goroutine: it uses only its arguments.
+func (r *Recorder) probeApp(ctx context.Context, proc ProcessIdentity, gone, find bool) probe {
+	if !gone {
+		same, err := r.deps.Apps.Same(ctx, proc)
+		if err != nil || same { // an unknown answer keeps the capture as it is
+			return probe{}
+		}
+	}
+	p := probe{gone: true}
+	if find {
+		if next, err := r.deps.Apps.Find(ctx, proc.App); err == nil {
+			p.next = &next
+		}
+	}
+	return p
+}
+
+// mayRebind reports whether the capture may still follow a new instance of its app; past the cap it logs once and
+// the capture keeps waiting.
+func (r *Recorder) mayRebind(c *capture) bool {
+	if c.bind.rebinds < r.cfg.MaxRebinds {
+		return true
+	}
+	if !c.bind.capLogged {
+		c.bind.capLogged = true
+		r.log.Warn("the app restarted too often; the capture waits without following it",
+			slog.String("recording", c.id.String()), slog.String("app", c.app().String()), slog.Int("rebinds", c.bind.rebinds))
+	}
+	return false
+}
+
+// markGone records that the process of the app exited; it logs once per exit.
+func (r *Recorder) markGone(c *capture) {
+	if c.bind.waiting {
+		return
+	}
+	c.bind.waiting = true
+	r.log.Info("capture target exited; waiting for the app", slog.String("recording", c.id.String()),
+		slog.String("app", c.app().String()), slog.Uint64("pid", uint64(c.bind.proc.PID)))
+	c.update(func(d *Diagnostics) { d.WaitingForApp = true })
+}
+
+// lostApp reports whether the child of an app capture ended because the app's process is gone. A capture that fell
+// back to system mode records everything anyway and is restarted as usual.
+func (r *Recorder) lostApp(c *capture, out runOutcome, floor Mode) bool {
+	if c.bind == nil || floor == ModeSystem || out.mode == ModeSystem {
+		return false
+	}
+	if !r.probeApp(c.ctx, c.bind.proc, out.gone, false).gone {
+		return false
+	}
+	r.markGone(c)
+	return true
+}
+
+// waitForApp looks for a new instance of the app every RebindInterval until one appears (ok) or the capture stops.
+func (r *Recorder) waitForApp(c *capture) (ProcessIdentity, bool) {
+	for {
+		if !c.wait(r.after(r.cfg.RebindInterval)) || c.stopping() {
+			return ProcessIdentity{}, false
+		}
+		if !r.mayRebind(c) {
+			continue
+		}
+		if p := r.probeApp(c.ctx, c.bind.proc, true, true); p.next != nil {
+			return *p.next, true
+		}
+	}
+}
+
+// rebind makes next the target of the capture: the next child captures it.
+func (r *Recorder) rebind(c *capture, next ProcessIdentity) {
+	old := c.bind.proc
+	c.bind.proc, c.bind.waiting = next, false
+	c.bind.rebinds++
+	c.target = Target{Mode: ModeInclude, PID: next.PID}
+	r.log.Info("capture target re-bound by exe name", slog.String("recording", c.id.String()),
+		slog.String("app", next.App.String()), slog.Uint64("old_pid", uint64(old.PID)), slog.Uint64("new_pid", uint64(next.PID)))
+	target, rebinds := c.target, c.bind.rebinds
+	c.update(func(d *Diagnostics) { d.Target, d.WaitingForApp, d.Rebinds = target, false, rebinds })
 }
 
 // restartLead is the lead silence of a restarted child for the audio the chunks missed, capped at maxLeadSilence.
@@ -307,7 +448,38 @@ func (r *Recorder) runChild(c *capture, req Request, first bool) runOutcome {
 		grace   <-chan time.Time
 		stopCh  = c.stopCh
 		abortCh = c.abortCh
+
+		// The watcher of an app capture: one probe at a time on its own goroutine, so the events keep flowing.
+		watch   <-chan time.Time
+		probes  = make(chan probe, 1)
+		probing bool
 	)
+	if c.bind != nil && req.Floor != ModeSystem {
+		watch = r.after(r.cfg.RebindInterval)
+	}
+	closeStdin := func() {
+		stopCh = nil
+		_ = p.Stdin().Close()
+		if grace == nil {
+			grace = r.after(r.cfg.StopGrace)
+		}
+	}
+	applyProbe := func(pr probe) {
+		if pr.gone {
+			out.gone = true
+			r.markGone(c)
+		}
+		switch {
+		case pr.next != nil && out.rebind == nil:
+			out.rebind = pr.next
+			if stopCh != nil {
+				log.Info("stopping the recorder child to capture the new instance of the app")
+				closeStdin()
+			}
+		case pr.gone:
+			r.mayRebind(c) // logs the cap once
+		}
+	}
 	for {
 		select {
 		case ev, ok := <-events:
@@ -331,10 +503,25 @@ func (r *Recorder) runChild(c *capture, req Request, first bool) runOutcome {
 			}
 
 		case <-stopCh:
-			stopCh = nil
-			_ = p.Stdin().Close()
-			if grace == nil {
-				grace = r.after(r.cfg.StopGrace)
+			closeStdin()
+
+		case <-watch:
+			watch = nil
+			switch {
+			case stopCh == nil || out.rebind != nil || out.mode == ModeSystem: // stopping, or no app to follow any more
+			case !out.started:
+				watch = r.after(r.cfg.RebindInterval)
+			default:
+				probing = true
+				proc, gone, find := c.bind.proc, out.gone, c.bind.rebinds < r.cfg.MaxRebinds
+				go func() { probes <- r.probeApp(c.ctx, proc, gone, find) }()
+			}
+
+		case pr := <-probes:
+			probing = false
+			applyProbe(pr)
+			if stopCh != nil && out.rebind == nil {
+				watch = r.after(r.cfg.RebindInterval)
 			}
 
 		case <-grace:
@@ -353,6 +540,10 @@ func (r *Recorder) runChild(c *capture, req Request, first bool) runOutcome {
 			kill(fmt.Sprintf("no event for %v", r.cfg.HangTimeout))
 
 		case code := <-exited:
+			if probing { // bounded by the timeout of the app checks; ended at once by a stop
+				stopCh = nil // the child is gone: nothing to stop
+				applyProbe(<-probes)
+			}
 			r.classify(&out, final, hung, code)
 			c.update(func(d *Diagnostics) { d.Running = false })
 			log.Info("recorder child exited", slog.Int("code", code), slog.String("end", out.reason))

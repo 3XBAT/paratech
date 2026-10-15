@@ -15,6 +15,7 @@ import (
 
 	"paratech/desktop/internal/adapters/audiocapture"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -130,10 +131,10 @@ func TestRecorderStartStopFinalize(t *testing.T) {
 	e := newRecorderEnv(t, testConfig(), testenv.RecorderTone)
 	ctx := context.Background()
 
-	if err := e.rec.Start(ctx, "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(ctx, "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.rec.Start(ctx, "rec1", e.chunks); !errors.Is(err, audiocapture.ErrAlreadyCapturing) {
+	if err := e.rec.Start(ctx, "rec1", e.chunks, values.WholeComputer()); !errors.Is(err, audiocapture.ErrAlreadyCapturing) {
 		t.Fatalf("a second Start = %v, want ErrAlreadyCapturing", err)
 	}
 	// Audio past the first chunk, so the stop closes a second one.
@@ -175,7 +176,7 @@ func TestRecorderCancelledStartKillsTheChild(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := e.rec.Start(ctx, "rec1", e.chunks); !errors.Is(err, context.DeadlineExceeded) {
+	if err := e.rec.Start(ctx, "rec1", e.chunks, values.WholeComputer()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Start = %v, want the context error", err)
 	}
 	if _, ok := e.rec.Diagnostics("rec1"); ok {
@@ -183,7 +184,7 @@ func TestRecorderCancelledStartKillsTheChild(t *testing.T) {
 	}
 	// The recording can start again.
 	e.launcher.scenarios = []string{testenv.RecorderTone}
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	if err := stop(t, e); err != nil {
@@ -196,7 +197,7 @@ func TestRecorderStartTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.StartTimeout = 1500 * time.Millisecond
 	e := newRecorderEnv(t, cfg, testenv.RecorderSlowStart)
-	err := e.rec.Start(context.Background(), "rec1", e.chunks)
+	err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer())
 	if err == nil || !strings.Contains(err.Error(), "did not start within") {
 		t.Fatalf("Start = %v, want the start timeout", err)
 	}
@@ -206,14 +207,14 @@ func TestRecorderStartFailures(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	t.Run("unavailable in this build", func(t *testing.T) {
 		e := newRecorderEnv(t, testConfig(), testenv.RecorderUnavailable)
-		err := e.rec.Start(context.Background(), "rec1", e.chunks)
+		err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer())
 		if !errors.Is(err, audiocapture.ErrUnavailable) || !errors.Is(err, recording.ErrCaptureUnavailable) {
 			t.Fatalf("Start = %v, want ErrUnavailable", err)
 		}
 	})
 	t.Run("the child cannot run", func(t *testing.T) {
 		e := newRecorderEnv(t, testConfig(), "no-such-scenario")
-		err := e.rec.Start(context.Background(), "rec1", e.chunks)
+		err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer())
 		if err == nil || errors.Is(err, recording.ErrCaptureUnavailable) {
 			t.Fatalf("Start = %v, want an ordinary failure", err)
 		}
@@ -224,7 +225,7 @@ func TestRecorderStartFailures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := rec.Start(context.Background(), "rec1", ref(t, "rec1")); err == nil || errors.Is(err, recording.ErrCaptureUnavailable) {
+		if err := rec.Start(context.Background(), "rec1", ref(t, "rec1"), values.WholeComputer()); err == nil || errors.Is(err, recording.ErrCaptureUnavailable) {
 			t.Fatalf("Start = %v, want an ordinary failure", err)
 		}
 	})
@@ -295,7 +296,7 @@ func TestRecorderIncludesAChosenApp(t *testing.T) {
 func TestRecorderRestartsACrashedChild(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newRecorderEnv(t, testConfig(), testenv.RecorderCrash, testenv.RecorderTone)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	e.waitDiag(t, "the first chunk closes", func(d audiocapture.Diagnostics) bool { return d.Chunks >= 1 })
@@ -332,7 +333,7 @@ func TestRecorderGivesUpAfterTheRestartBudget(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxRestarts = 2
 	e := newRecorderEnv(t, cfg, testenv.RecorderCrash)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	err := e.waitEnded(t)
@@ -354,7 +355,7 @@ func TestRecorderGivesUpAfterTheRestartBudget(t *testing.T) {
 func TestRecorderReportsACaptureThatEndedByItself(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newRecorderEnv(t, testConfig(), testenv.RecorderFail)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	err := e.waitEnded(t)
@@ -374,7 +375,7 @@ func TestRecorderRestartsAHungChild(t *testing.T) {
 	cfg := testConfig()
 	cfg.HangTimeout = 2 * time.Second
 	e := newRecorderEnv(t, cfg, testenv.RecorderHang, testenv.RecorderTone)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	e.waitDiag(t, "the hung child is replaced", func(d audiocapture.Diagnostics) bool { return d.Restarts == 1 && d.Running })
@@ -391,7 +392,7 @@ func TestRecorderKillsAChildThatDoesNotStop(t *testing.T) {
 	cfg := testConfig()
 	cfg.StopGrace = 500 * time.Millisecond
 	e := newRecorderEnv(t, cfg, testenv.RecorderDeaf)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	err := stop(t, e)
@@ -409,7 +410,7 @@ func TestRecorderKillsAChildThatDoesNotStop(t *testing.T) {
 func TestRecorderStopPastItsContextKills(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newRecorderEnv(t, testConfig(), testenv.RecorderDeaf)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -481,7 +482,7 @@ func TestRecorderStopPastItsContextReturnsPromptly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rec.Start(context.Background(), "rec1", ref(t, "rec1")); err != nil {
+	if err := rec.Start(context.Background(), "rec1", ref(t, "rec1"), values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -506,7 +507,7 @@ func TestRecorderStopPastItsContextReturnsPromptly(t *testing.T) {
 func TestRecorderRestartsAChildThatStoppedByItself(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newRecorderEnv(t, testConfig(), testenv.RecorderQuit, testenv.RecorderTone)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	e.waitDiag(t, "the child is restarted", func(d audiocapture.Diagnostics) bool { return d.Restarts == 1 && d.Running })
@@ -528,7 +529,7 @@ func TestRecorderKeepsAFallenBackRecordingInSystemMode(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	crashing := testenv.RecorderFallback + "," + testenv.RecorderCrash
 	e := newRecorderEnv(t, testConfig(), crashing, testenv.RecorderFallback)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	e.waitDiag(t, "the restarted child runs", func(d audiocapture.Diagnostics) bool { return d.Restarts == 1 && d.Running })
@@ -553,7 +554,7 @@ func TestRecorderKeepsAFallenBackRecordingInSystemMode(t *testing.T) {
 func TestRecorderIgnoresBadLines(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newRecorderEnv(t, testConfig(), testenv.RecorderNoisy)
-	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	if err := stop(t, e); err != nil {
@@ -574,6 +575,8 @@ func TestNewValidatesTheConfig(t *testing.T) {
 		func(c *audiocapture.Config) { c.HangTimeout = 0 },
 		func(c *audiocapture.Config) { c.RestartBackoff = 0 },
 		func(c *audiocapture.Config) { c.MaxRestarts = -1 },
+		func(c *audiocapture.Config) { c.RebindInterval = 0 },
+		func(c *audiocapture.Config) { c.MaxRebinds = -1 },
 	}
 	for i, change := range bad {
 		cfg := audiocapture.DefaultConfig()

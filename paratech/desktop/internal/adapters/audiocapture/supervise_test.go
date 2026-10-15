@@ -43,7 +43,7 @@ func TestRestartLead(t *testing.T) {
 func TestRetireListsARecordingOnce(t *testing.T) {
 	r := &Recorder{captures: map[shared.RecordingID]*capture{}}
 	end := func(id shared.RecordingID) {
-		c := newCapture(id, shared.ArtifactRef{}, Target{Mode: ModeSystem})
+		c := newCapture(id, shared.ArtifactRef{}, Target{Mode: ModeSystem}, nil)
 		c.end(nil, nil)
 		r.captures[id] = c
 		r.retire(c)

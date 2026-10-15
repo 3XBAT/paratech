@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -21,6 +22,8 @@ const (
 	DefaultHangTimeout    = 30 * time.Second // six missed heartbeats of the child
 	DefaultRestartBackoff = time.Second      // doubled per restart: 1 s, 2 s, 4 s
 	DefaultMaxRestarts    = 3
+	DefaultRebindInterval = 3 * time.Second // as OBS looks for a lost window again
+	DefaultMaxRebinds     = 20
 
 	// keptCaptures is how many ended captures stay for Wait and Diagnostics.
 	keptCaptures = 8
@@ -49,6 +52,17 @@ type ProcessChecker interface {
 	Alive(pid uint32) (bool, error)
 }
 
+// AppFinder finds the process to capture for a chosen app and tells whether it still runs (TASK-059). *Apps is the
+// implementation.
+type AppFinder interface {
+	// Find returns the process of app, checked right before (it runs, it is app, it is in this Windows session); an
+	// app that does not run yields an error wrapping recording.ErrSourceNotRunning.
+	Find(ctx context.Context, app shared.AppName) (ProcessIdentity, error)
+
+	// Same reports whether id still names the same running process.
+	Same(ctx context.Context, id ProcessIdentity) (bool, error)
+}
+
 // Config tunes the Recorder; DefaultConfig gives the production values.
 type Config struct {
 	ChunkSeconds   int           // chunk length, 30..60
@@ -58,14 +72,17 @@ type Config struct {
 	RestartBackoff time.Duration // delay before the first restart, doubled for each next one
 	MaxRestarts    int           // restarts per recording after crashes or hangs
 	OwnPID         uint32        // excluded by the default target; 0 means this process
+	RebindInterval time.Duration // how often a capture of an app checks its process, or looks for a new one
+	MaxRebinds     int           // captures of a new instance of the app per recording
 }
 
-// DefaultConfig returns 60 s chunks, a 15 s start timeout, a 7 s stop grace, a 30 s hang timeout and three restarts
-// after 1, 2 and 4 s.
+// DefaultConfig returns 60 s chunks, a 15 s start timeout, a 7 s stop grace, a 30 s hang timeout, three restarts
+// after 1, 2 and 4 s, and a check of the captured app every 3 s with up to 20 re-binds.
 func DefaultConfig() Config {
 	return Config{
 		ChunkSeconds: DefaultChunkSeconds, StartTimeout: DefaultStartTimeout, StopGrace: DefaultStopGrace,
 		HangTimeout: DefaultHangTimeout, RestartBackoff: DefaultRestartBackoff, MaxRestarts: DefaultMaxRestarts,
+		RebindInterval: DefaultRebindInterval, MaxRebinds: DefaultMaxRebinds,
 	}
 }
 
@@ -73,7 +90,8 @@ func DefaultConfig() Config {
 type Deps struct {
 	Files     TrackFiles     // Finalize reads the chunks and writes the track through it
 	Launcher  Launcher       // starts the recorder child
-	Processes ProcessChecker // checks INCLUDE targets; nil refuses them
+	Processes ProcessChecker // checks the INCLUDE targets of StartTarget; nil refuses them
+	Apps      AppFinder      // finds the app of a Start; nil refuses apps
 	Log       *slog.Logger
 }
 
@@ -100,10 +118,11 @@ func New(deps Deps, cfg Config) (*Recorder, error) {
 		return nil, errors.New("audiocapture: files and launcher are required")
 	case cfg.ChunkSeconds < minChunkSeconds || cfg.ChunkSeconds > maxChunkSeconds:
 		return nil, fmt.Errorf("audiocapture: chunk seconds %d outside %d..%d", cfg.ChunkSeconds, minChunkSeconds, maxChunkSeconds)
-	case cfg.StartTimeout <= 0 || cfg.StopGrace <= 0 || cfg.HangTimeout <= 0 || cfg.RestartBackoff <= 0:
+	case cfg.StartTimeout <= 0 || cfg.StopGrace <= 0 || cfg.HangTimeout <= 0 || cfg.RestartBackoff <= 0 ||
+		cfg.RebindInterval <= 0:
 		return nil, errors.New("audiocapture: timeouts must be positive")
-	case cfg.MaxRestarts < 0:
-		return nil, errors.New("audiocapture: max restarts must not be negative")
+	case cfg.MaxRestarts < 0 || cfg.MaxRebinds < 0:
+		return nil, errors.New("audiocapture: max restarts and re-binds must not be negative")
 	}
 	if cfg.OwnPID == 0 {
 		cfg.OwnPID = uint32(os.Getpid()) //nolint:gosec // PIDs fit in 32 bits on every supported OS
@@ -118,10 +137,32 @@ func New(deps Deps, cfg Config) (*Recorder, error) {
 	}, nil
 }
 
-// Start captures the whole computer except this app's own process tree (process loopback EXCLUDE, falling back to
-// classic loopback inside the child) until TASK-059 lets the user pick the lecture app.
-func (r *Recorder) Start(ctx context.Context, id shared.RecordingID, chunks shared.ArtifactRef) error {
-	return r.StartTarget(ctx, id, chunks, Target{Mode: ModeExclude, PID: r.cfg.OwnPID})
+// Start captures source into chunks (ADR-0002 Decision 1). The whole computer is everything except this app's own
+// process tree (process loopback EXCLUDE). An app is process loopback INCLUDE of the process tree Deps.Apps finds
+// for it; one that does not run fails with an error wrapping recording.ErrSourceNotRunning. The process of an app is
+// checked every RebindInterval: when it exits, the capture waits for the app and then captures its new instance (a
+// re-bind), with silence for the time between. Both modes fall back to classic loopback in the child; see StartTarget.
+func (r *Recorder) Start(ctx context.Context, id shared.RecordingID, chunks shared.ArtifactRef, source values.Source) error {
+	if source.IsWholeComputer() {
+		return r.StartTarget(ctx, id, chunks, Target{Mode: ModeExclude, PID: r.cfg.OwnPID})
+	}
+
+	app := source.App()
+	if err := checkChunks(id, chunks); err != nil {
+		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, err)
+	}
+	if r.deps.Apps == nil {
+		return fmt.Errorf("audiocapture: %s %s: %w: this build cannot find %s", opStartCapture, id, ErrInvalidTarget, app)
+	}
+	proc, err := r.deps.Apps.Find(ctx, app)
+	if err != nil {
+		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, err)
+	}
+	target := Target{Mode: ModeInclude, PID: proc.PID}
+	if err := target.Validate(); err != nil {
+		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, err)
+	}
+	return r.start(ctx, newCapture(id, chunks, target, &binding{proc: proc}))
 }
 
 // StartTarget starts the capture of target into chunks and returns once the child reports a running capture. A
@@ -131,14 +172,20 @@ func (r *Recorder) StartTarget(ctx context.Context, id shared.RecordingID, chunk
 	if err := r.checkStart(id, chunks, target); err != nil {
 		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, err)
 	}
+	return r.start(ctx, newCapture(id, chunks, target, nil))
+}
+
+func (r *Recorder) start(ctx context.Context, c *capture) error {
+	id, target := c.id, c.target
 	if err := ctx.Err(); err != nil {
+		c.release()
 		return err
 	}
 
-	c := newCapture(id, chunks, target)
 	r.mu.Lock()
 	if old := r.captures[id]; old != nil && !old.isEnded() {
 		r.mu.Unlock()
+		c.release()
 		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, ErrAlreadyCapturing)
 	}
 	r.captures[id] = c
@@ -152,7 +199,8 @@ func (r *Recorder) StartTarget(ctx context.Context, id shared.RecordingID, chunk
 	select {
 	case err := <-c.started:
 		if err == nil {
-			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("target", string(target.Mode)))
+			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("target", string(target.Mode)),
+				slog.String("app", c.app().String()), slog.Uint64("target_pid", uint64(target.PID)))
 			return nil
 		}
 		<-c.done
@@ -166,12 +214,19 @@ func (r *Recorder) StartTarget(ctx context.Context, id shared.RecordingID, chunk
 	}
 }
 
-func (r *Recorder) checkStart(id shared.RecordingID, chunks shared.ArtifactRef, target Target) error {
+func checkChunks(id shared.RecordingID, chunks shared.ArtifactRef) error {
 	if err := id.Validate(); err != nil {
 		return err
 	}
 	if chunks.IsZero() || chunks.Kind() != shared.ArtifactRecordings {
 		return fmt.Errorf("%w: chunks must be a recordings directory", shared.ErrInvalidArtifactRef)
+	}
+	return nil
+}
+
+func (r *Recorder) checkStart(id shared.RecordingID, chunks shared.ArtifactRef, target Target) error {
+	if err := checkChunks(id, chunks); err != nil {
+		return err
 	}
 	if err := target.Validate(); err != nil {
 		return err

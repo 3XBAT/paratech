@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -18,7 +19,7 @@ var ErrUnavailable = fmt.Errorf("audiocapture: %w in this build", recording.ErrC
 type Unavailable struct{}
 
 // Start refuses to capture.
-func (Unavailable) Start(context.Context, shared.RecordingID, shared.ArtifactRef) error {
+func (Unavailable) Start(context.Context, shared.RecordingID, shared.ArtifactRef, values.Source) error {
 	return ErrUnavailable
 }
 
