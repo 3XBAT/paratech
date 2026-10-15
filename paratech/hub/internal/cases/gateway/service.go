@@ -37,8 +37,8 @@ const (
 	outcomeFailed      = "failed"
 )
 
-// ledgerTimeout bounds each Settle or Release, which run on a context detached from the client. It matches the bound
-// of one quota transaction in the postgres adapter.
+// ledgerTimeout bounds each Start, Settle or Release, which run on a context detached from the client. It matches the
+// bound of one quota transaction in the postgres adapter.
 const ledgerTimeout = 5 * time.Second
 
 // Service runs the gateway scenario (gateway.proto, PRD section 9.2): rate limit, validate, reserve, call the provider
@@ -221,8 +221,9 @@ func (s *Service) validate(cmd Command) (call, error) {
 	return call{owner: cmd.Owner, spec: spec, reserve: reserve, request: request}, nil
 }
 
-// start opens a new attempt or finds the stored result of the latest one, in one transaction on the client's
-// context: nothing has been spent yet, so a client that leaves simply ends it.
+// start opens a new attempt or finds the stored result of the latest one, in one transaction on a context detached
+// from the client with its own bound: a cancel during COMMIT could leave a committed hold that the caller never
+// learns about and never releases. Complete checks the client's context right after it.
 func (s *Service) start(ctx context.Context, c call) (account.ReservationRecord, account.Result, Snapshot, error) {
 	id, err := s.newID()
 	if err != nil {
@@ -234,7 +235,9 @@ func (s *Service) start(ctx context.Context, c call) (account.ReservationRecord,
 		stored account.Result
 		quota  Snapshot
 	)
-	err = s.accounts.Modify(ctx, s.scope(c, now, ""), func(a *account.Account) error {
+	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerTimeout)
+	defer cancel()
+	err = s.accounts.Modify(startCtx, s.scope(c, now, ""), func(a *account.Account) error {
 		r, res, err := a.Start(c.reserve, id, now)
 		if errors.Is(err, account.ErrQuotaExceeded) {
 			return &QuotaExceededError{Quota: snapshotOf(a.Snapshot(now))}

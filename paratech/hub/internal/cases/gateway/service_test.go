@@ -451,6 +451,55 @@ func TestClientGoneBeforeTheProviderCallReleases(t *testing.T) {
 	}
 }
 
+// cancelDuringCommit commits the first Modify, then cancels the client and reports the context error of the context
+// it was given, as a driver does when the client cancels during COMMIT after the commit landed.
+type cancelDuringCommit struct {
+	*testenv.QuotaStore
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (c *cancelDuringCommit) Modify(ctx context.Context, scope account.Scope, fn func(*account.Account) error) error {
+	err := c.QuotaStore.Modify(ctx, scope, fn)
+	first := false
+	c.once.Do(func() { first = true; c.cancel() })
+	if err == nil && first {
+		return ctx.Err()
+	}
+	return err
+}
+
+// TestClientGoneDuringTheStartCommit: a committed hold is released, not left RESERVED until its TTL.
+func TestClientGoneDuringTheStartCommit(t *testing.T) {
+	models, err := modelallowlist.New([]modelallowlist.Entry{{Alias: "default", Model: "claude-test-model", MaxOutput: modelCap}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	store := testenv.NewQuotaStore()
+	provider := testenv.NewFakeProvider(answer(t, "never", 1, 1))
+	svc, err := gateway.New(gateway.Deps{
+		Accounts: &cancelDuringCommit{QuotaStore: store, cancel: cancel}, Results: store, Provider: provider,
+		Limiter: &testenv.FakeLimiter{}, Clock: testenv.NewFakeClock(t0), Random: testenv.Random{}, Models: models,
+		Log: slog.New(slog.DiscardHandler),
+	}, config(100_000))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Complete(ctx, command(alice, "job-1")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	rs := store.Reservations(alice)
+	if len(rs) != 1 || rs[0].State != account.StateReleased || rs[0].Reason != account.ReasonExplicit || len(provider.Calls()) != 0 {
+		t.Fatalf("reservations %+v, provider calls %d", rs, len(provider.Calls()))
+	}
+	if used, held := store.Totals(alice); used != 0 || held != 0 {
+		t.Fatalf("used %d held %d", used, held)
+	}
+}
+
 // TestClientGoneDuringTheCall: the call finishes on the detached context, is settled and stored; a retry replays it.
 func TestClientGoneDuringTheCall(t *testing.T) {
 	wait, entered := make(chan struct{}), make(chan struct{})
