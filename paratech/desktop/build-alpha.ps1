@@ -128,7 +128,8 @@ function Invoke-Smoke([string]$Exe, [string]$Dir) {
         # Never leave the process running. Headless it has no window to close and PowerShell cannot send it
         # Ctrl+Break alone, so the stop is hard; the throwaway database and the instance lock survive that.
         if ($null -ne $proc -and -not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force
+            # It may exit right after the check; that must not fail the script.
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             $null = $proc.WaitForExit(10000)
         }
     }
@@ -146,7 +147,13 @@ function Invoke-Smoke([string]$Exe, [string]$Dir) {
 }
 
 $goExe = Find-Tool 'go' 'Install Go (see go.work for the version) and open a new terminal.'
-$npmExe = Find-Tool 'npm.cmd' 'Install Node.js 22 with npm and open a new terminal.'
+# npm.cmd first: the npm.ps1 shim would depend on the execution policy.
+$npmHint = 'Install Node.js 22 with npm and open a new terminal.'
+if ($null -ne (Get-Command 'npm.cmd' -CommandType Application -ErrorAction SilentlyContinue)) {
+    $npmExe = Find-Tool 'npm.cmd' $npmHint
+} else {
+    $npmExe = Find-Tool 'npm' $npmHint
+}
 
 if ($OutDir -eq '') {
     $OutDir = Join-Path $moduleRoot 'dist\alpha'
