@@ -21,17 +21,22 @@ hash, an upper-bound reservation and a deadline below the reservation TTL.
   settle transaction, so one aggregate per transaction still holds (ARCH-23). Output is opaque bytes to the quota context. A late
   attempt (a newer one owns the key) is charged but its result is dropped. Migration 0004 adds the columns; no request text is
   stored.
-- **Retention and purge.** A stored result is never returned once its key is past `HUB_IDEMPOTENCY_RETENTION` (same start as
-  the ledger key). `app` runs a purge at start and every 5 minutes that clears results of such keys, so output stays in the
-  database at most about 5 minutes past the retention (longer only while the Hub is down); the rows stay without output.
-- **Deadlines.** The provider call runs on `context.WithoutCancel` with `min(HUB_LLM_TIMEOUT, expires_at - now - 5s)`; settle and
-  release run detached with 5 s each. Config already keeps `2 x HUB_LLM_TIMEOUT <= TTL`. A client that leaves before the call gets
-  its hold released (reason `explicit`); after the call started, the call finishes, is settled and stored, and a retry replays it.
+- **Retention and purge.** A gateway key lives for the result window, `HUB_IDEMPOTENCY_RETENTION` minus the 5-minute purge
+  interval (`account.Policy.ResultWindow`): its result is replayed only within it, then the key starts afresh. `app` purges at
+  start and every 5 minutes the results of keys past the window, so output is gone by the retention while the Hub runs; the
+  rows stay without output. Plain ledger keys keep the full retention. The purge is a retention cleanup outside the
+  aggregates (one bulk UPDATE across accounts, no account lock), like the planned sweeper: it only clears data the aggregate
+  never returns again, so it is not an ARCH-23 exception for business changes.
+- **Deadlines.** Start, settle and release run detached from the client with 5 s each (a cancel during COMMIT must not leave
+  an unknown hold). The provider call runs on `context.WithoutCancel` with `min(HUB_LLM_TIMEOUT, expires_at - now - 5s)`.
+  Config already keeps `2 x HUB_LLM_TIMEOUT <= TTL`. A client that leaves before the call gets its hold released (reason
+  `explicit`); after the call started, the call finishes, is settled and stored, and a retry replays it.
 - **No retries in the Hub.** The desktop job queue retries with backoff; `retry_after` passes the provider's wait on.
 - **Rate limit** per API key: GCRA token bucket (`requestlimits.Rate`, std only), state in `adapters/ratelimit` (in memory, idle
   states dropped). `HUB_RATE_LIMIT_PER_MINUTE` (30) and `HUB_RATE_LIMIT_BURST` (10). Over the limit: RATE_LIMITED, retryable.
 - **Errors** (`input/connect/gateway.go`, ADR-0005(c)): fixed client texts only. Provider 401/403 is PROVIDER_ERROR (permanent),
-  never INVALID_API_KEY; a refusal is PROVIDER_ERROR (permanent); settle failures and anything unknown are `internal`.
+  never INVALID_API_KEY; a refusal is PROVIDER_ERROR (permanent, decided by `values.Completion.Failure`); settle failures and
+  anything unknown are `internal`.
 - **Logs:** one line per call (outcome, operation, alias, reservation, token counts, duration); never texts, output or keys.
 - `CompleteStream` stays unimplemented: the provider port has no streaming yet.
 
@@ -41,6 +46,12 @@ hash, an upper-bound reservation and a deadline below the reservation TTL.
 - If the settle transaction fails, the hold expires uncharged at `expires_at`; the retry is `aborted` until then.
 - Rate limit state is per process and lost on restart; anonymous traffic is stopped by auth, not by this limit.
 - Changing a model cap between attempts changes the reserved amount, so a retry of the same request conflicts.
+- While the Hub is down nothing purges: output can stay past the retention until the next start.
+- A Hub shutdown or crash during a provider call (default `HUB_SHUTDOWN_TIMEOUT` 15 s < `HUB_LLM_TIMEOUT`) leaves the attempt
+  RESERVED: it is not settled (the provider may bill) and retries of the key get `aborted` until the hold expires (TTL).
+- Refusals are released, not charged (open owner question: charge them as partial usage?).
+- The HTTP server `ReadTimeout` (60 s) may cancel the request context of a long unary call. Harmless for `Complete` (provider
+  call and settle are detached); to revisit before `CompleteStream`.
 
 ## Consequences
 - Follow-ups: streaming (`CompleteStream`, partial settle); a per-key limit of concurrent calls; a sweeper that deletes stale key
