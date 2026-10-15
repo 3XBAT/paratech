@@ -12,8 +12,8 @@ import (
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
 )
 
-// Reasons of a failed call (ARCH-32). A returned error is an *Error that matches exactly one of them, or
-// shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is.
+// Reasons of a failed call (ARCH-32). A returned error is an *Error that matches exactly one of them (ErrNotConfigured
+// also its reason), or shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is.
 var (
 	// ErrInvalidConfig is returned by New for an unusable configuration.
 	ErrInvalidConfig = errors.New("hubclient: invalid configuration")
@@ -21,8 +21,18 @@ var (
 	// ErrInvalidRequest means the request is the zero value or names an operation the contract does not know.
 	ErrInvalidRequest = errors.New("invalid request")
 
+	// ErrNotConfigured means the Hub URL or the API key is not set. The error also matches the reason (ErrNoURL or
+	// ErrMissingAPIKey) and shared.ErrNetworkUnavailable, so the job waits in WAITING_FOR_NETWORK instead of failing.
+	ErrNotConfigured = errors.New("not configured")
+
+	// ErrNoURL means no Hub URL is set in the settings.
+	ErrNoURL = errors.New("hub url is not configured")
+
 	// ErrMissingAPIKey means no Hub API key is stored; the user must enter one (PRD section 12).
 	ErrMissingAPIKey = errors.New("hub api key is not configured")
+
+	// ErrSettings means the Hub URL could not be read from the settings.
+	ErrSettings = errors.New("hub settings cannot be read")
 
 	// ErrMalformedAPIKey means the stored key cannot be sent in a header (empty, too long, spaces or control
 	// characters).
@@ -67,18 +77,20 @@ const maxRetryAfter = time.Hour
 type Error struct {
 	op         string
 	reason     error
-	class      error // backoff.ErrTransient, backoff.ErrPermanent or nil
+	extra      []error // further sentinels for errors.Is, not part of the text
+	class      error   // backoff.ErrTransient, backoff.ErrPermanent or nil
 	retryAfter time.Duration
 }
 
 func (e *Error) Error() string { return e.op + ": " + e.reason.Error() }
 
-// Unwrap exposes the reason and the class to errors.Is.
+// Unwrap exposes the reason, the extra sentinels and the class to errors.Is.
 func (e *Error) Unwrap() []error {
-	if e.class == nil {
-		return []error{e.reason}
+	out := append([]error{e.reason}, e.extra...)
+	if e.class != nil {
+		out = append(out, e.class)
 	}
-	return []error{e.reason, e.class}
+	return out
 }
 
 // RetryAfter is the wait the Hub asked for, or 0. A use case can read it through errors.As with an anonymous
@@ -91,6 +103,13 @@ func transient(op string, reason error) *Error {
 
 func permanent(op string, reason error) *Error {
 	return &Error{op: op, reason: reason, class: backoff.ErrPermanent}
+}
+
+// notConfigured is the fixed "hub: not configured" of a missing URL or key. It waits like a network failure: the job
+// parks without using attempts and runs once the user configures the Hub, while a permanent failure would block the
+// job keys of the post-processing for ever.
+func notConfigured(why error) *Error {
+	return &Error{op: "hub", reason: ErrNotConfigured, extra: []error{why, shared.ErrNetworkUnavailable}, class: backoff.ErrTransient}
 }
 
 // quotaExceeded carries no class marker: the job waits for quota, not for a backoff delay. Unmarked errors are

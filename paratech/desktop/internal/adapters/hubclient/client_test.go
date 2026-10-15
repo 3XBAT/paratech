@@ -351,11 +351,12 @@ func TestAPIKeyProblemsSendNothing(t *testing.T) {
 		class  backoff.Class
 		noText string
 	}{
+		// Not configured parks the job (TASK-057): a permanent failure would block its key after the key is entered.
 		{"missing key", func(t *testing.T, m *testenv.MemCredentials) {
 			if err := m.Delete(t.Context(), DefaultCredentialName); err != nil {
 				t.Fatal(err)
 			}
-		}, ErrMissingAPIKey, backoff.ClassPermanent, ""},
+		}, ErrMissingAPIKey, backoff.ClassTransient, ""},
 		{"key with a line break", func(t *testing.T, m *testenv.MemCredentials) {
 			if err := m.Set(t.Context(), DefaultCredentialName, "abc\r\nX-Evil: 1"); err != nil {
 				t.Fatal(err)

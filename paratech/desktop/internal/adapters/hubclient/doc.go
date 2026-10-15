@@ -7,8 +7,9 @@
 //     the client never invents one per attempt, so a retry is not charged twice (AC-11).
 //   - The per-tester API key is read from the credential store on every call and sent only as
 //     "Authorization: Bearer <key>" (common.proto). A Go string cannot be wiped; the copy lives for one call.
-//   - The Hub URL comes from configuration only: https, or plain http to a loopback host for local tests. Redirects
-//     are not followed, so the key never goes to another host.
+//   - The Hub URL comes from the local settings (Config.URLs, read on every call, so a change needs no restart) or a
+//     fixed Config.BaseURL: https, or plain http to a loopback host for local tests. Redirects are not followed, so the
+//     key never goes to another host. No URL or no key is "hub: not configured", which waits like a network failure.
 //
 // Retries live in the job runner, not here: an error is classified (backoff.Transient or backoff.Permanent, see
 // errors.go) and the runner retries with its bounded exponential backoff, like every other handler (TASK-009). One
