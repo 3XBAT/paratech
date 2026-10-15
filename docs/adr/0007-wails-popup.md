@@ -34,6 +34,9 @@
 - The notifications service pulls `git.sr.ht/~jackmordaunt/go-toast/v2` v2.0.3 as an indirect dependency (hard rule 9).
 - The `notify.Notifier` port is implemented by `input/wails` `Shell` (like `ShowPopup`): the notifications service must be
   registered with the Wails app the shell owns.
+- TASK-022: `Shell` also implements the `recordingprompt.Popup` port (`ShowPopup`/`HidePopup`); `ShowPopup` emits the
+  Wails event `recordingprompt:shown` and the page reads `PromptService.Current`. Tray "Show recording popup" asks the
+  core for an ad-hoc prompt. The popup page becomes the React app's second entry (TASK-022 frontend); size 360x180.
 
 ## Check on Windows by a human (TASK-020)
 1. Start a Zoom/Telemost call and click into its chat. Open the popup from the tray menu, then switch back to the call; better, let a test
