@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/domain/recording/prompt"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
@@ -464,7 +465,6 @@ func TestAppsFind(t *testing.T) {
 		{"another session", "zoom.exe", func(f *fakePlatform) {
 			f.ids[300] = procIdentity{alive: true, image: `C:\Zoom\Zoom.exe`, session: 2, created: 300}
 		}, ProcessIdentity{}, "another Windows session"},
-		{"cannot be checked", "zoom.exe", func(f *fakePlatform) { f.inspectErr = errors.New("access denied") }, ProcessIdentity{}, "cannot be checked"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -484,13 +484,27 @@ func TestAppsFind(t *testing.T) {
 			}
 		})
 	}
-	t.Run("list failure", func(t *testing.T) {
-		p := newFakePlatform()
-		p.snapErr = errors.New("denied")
-		if _, err := newApps(p, nil).Find(context.Background(), "zoom.exe"); !errors.Is(err, ErrAppList) || errors.Is(err, recording.ErrSourceNotRunning) {
-			t.Fatalf("Find = %v, want ErrAppList", err)
-		}
-	})
+	// A failure to look is no "app not running": the app may well run, so the popup says "failed", not "source_gone".
+	failures := []struct {
+		name   string
+		change func(f *fakePlatform)
+	}{
+		{"list failure", func(f *fakePlatform) { f.snapErr = errors.New("denied") }},
+		{"the process cannot be checked", func(f *fakePlatform) { f.inspectErr = errors.New("access denied") }},
+	}
+	for _, tt := range failures {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newFakePlatform()
+			tt.change(p)
+			_, err := newApps(p, nil).Find(context.Background(), "zoom.exe")
+			if !errors.Is(err, ErrAppList) || errors.Is(err, recording.ErrSourceNotRunning) {
+				t.Fatalf("Find = %v, want ErrAppList", err)
+			}
+			if got := prompt.ProblemOf(err); got != prompt.ProblemFailed {
+				t.Fatalf("problem = %q, want %q", got, prompt.ProblemFailed)
+			}
+		})
+	}
 }
 
 func TestAppsSame(t *testing.T) {

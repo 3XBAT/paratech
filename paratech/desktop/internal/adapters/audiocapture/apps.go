@@ -357,8 +357,8 @@ func (a *Apps) List(ctx context.Context) ([]values.AudioApp, error) {
 
 // Find returns the process to capture for app: the root of the process tree of its topmost visible window in this
 // Windows session, outside this app's tree, checked right before it is returned (it runs, its executable is app, its
-// session is ours). An app that does not run yields an error wrapping ErrAppNotRunning. The process may still exit
-// right after; the Recorder watches it (Same).
+// session is ours). An app that does not run yields an error wrapping ErrAppNotRunning; a failure to look or to check
+// the process wraps ErrAppList. The process may still exit right after; the Recorder watches it (Same).
 func (a *Apps) Find(ctx context.Context, app shared.AppName) (ProcessIdentity, error) {
 	if err := app.Validate(); err != nil {
 		return ProcessIdentity{}, fmt.Errorf("%w: %w", ErrAppNotRunning, err)
@@ -380,7 +380,7 @@ func (a *Apps) Find(ctx context.Context, app shared.AppName) (ProcessIdentity, e
 		}
 		id, err := a.platform.inspect(root.pid)
 		if err != nil {
-			return ProcessIdentity{}, fmt.Errorf("%w: %s: process %d cannot be checked: %w", ErrAppNotRunning, app, root.pid, err)
+			return ProcessIdentity{}, fmt.Errorf("%w: %s: process %d cannot be checked: %w", ErrAppList, app, root.pid, err)
 		}
 		switch {
 		case !id.alive:
