@@ -1,9 +1,10 @@
 // Package llm is the bounded context of the LLM calls the Hub makes on behalf of testers (PRD sections 4.2, 9.2, 13.2):
 // which models may be used and what a provider call takes and returns.
 //
-// Layout (docs/architecture.md section 3.1): llm/values holds the types that cross the Provider port (request,
-// completion, usage, stop reason, provider error); llm/services/modelallowlist is the server-side model allowlist.
-// The context has no aggregate yet.
+// Layout (docs/architecture.md section 3.1): llm/values holds the client's completion spec and the types that cross
+// the Provider port (request, completion, usage, stop reason, provider error); llm/services/modelallowlist is the
+// server-side model allowlist; llm/services/requestlimits bounds one call (reserved amount, per-tester rate). The
+// context has no aggregate yet.
 //
 // Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared.
 //
@@ -15,6 +16,8 @@
 //   - Allowlist: the server-configured map of alias to provider model id and output cap.
 //   - Output cap: the most output tokens a call with the alias may request; a larger request is clamped silently to it
 //     (ADR-0005(b)) and the effective value is the basis of the quota reservation.
+//   - Spec: one completion request of a client (CompletionSpec): key, operation, alias, texts, requested output cap.
+//   - Fingerprint: SHA-256 of a spec without its key; the only form in which the Hub keeps the request text.
 //   - Instructions: trusted text written by the app.
 //   - Untrusted data: user data (transcript excerpts); passed to the model as data, never as instructions.
 //   - Completion: the provider's answer. Its output text is UNTRUSTED (CLAUDE.md hard rule 3, PRD section 13.3).
