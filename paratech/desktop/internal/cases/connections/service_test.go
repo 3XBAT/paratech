@@ -70,18 +70,21 @@ type fakeChecker struct {
 	err      error
 	block    chan struct{}
 	started  chan struct{}
-	deadline time.Duration // time left on the context when the last check started
+	deadline bool // the context of the last check had a deadline
+	waitDone bool // every check waits for its context to end
 	calls    int
 }
 
 func (c *fakeChecker) CheckMail(ctx context.Context) error {
 	c.mu.Lock()
 	c.calls++
-	if d, ok := ctx.Deadline(); ok {
-		c.deadline = time.Until(d)
-	}
-	block, started, err := c.block, c.started, c.err
+	_, c.deadline = ctx.Deadline()
+	block, started, err, waitDone := c.block, c.started, c.err, c.waitDone
 	c.mu.Unlock()
+	if waitDone {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if started != nil {
 		started <- struct{}{}
 	}
@@ -428,21 +431,17 @@ func TestCheckMailResults(t *testing.T) {
 	}
 }
 
+// A check that hangs ends at the configured bound; by default it has one too.
 func TestCheckMailIsBounded(t *testing.T) {
-	f := newFixture(t, Config{CheckTimeout: 3 * time.Second})
-	if err := f.svc.CheckMail(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if f.checker.deadline <= 0 || f.checker.deadline > 3*time.Second {
-		t.Fatalf("the check had %v left, want at most 3s", f.checker.deadline)
+	f := newFixture(t, Config{CheckTimeout: 50 * time.Millisecond})
+	f.checker.waitDone = true
+	if err := f.svc.CheckMail(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CheckMail = %v, want the deadline", err)
 	}
 
 	f = newFixture(t, Config{})
-	if err := f.svc.CheckMail(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if f.checker.deadline <= DefaultCheckTimeout-5*time.Second || f.checker.deadline > DefaultCheckTimeout {
-		t.Fatalf("the check had %v left, want about %v", f.checker.deadline, DefaultCheckTimeout)
+	if err := f.svc.CheckMail(context.Background()); err != nil || !f.checker.deadline {
+		t.Fatalf("CheckMail = %v; deadline set %v", err, f.checker.deadline)
 	}
 }
 

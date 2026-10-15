@@ -23,23 +23,23 @@ const (
 
 // Operation names of the log.
 const (
-	opGetConnections   = "ui: get connections"
-	opSaveMail         = "ui: save mail settings"
-	opSaveHubURL       = "ui: save hub url"
-	opSetMailPassword  = "ui: set mail password"
-	opDropMailPassword = "ui: remove mail password"
-	opCheckMail        = "ui: check mail"
+	opGetConnections = "ui: get connections"
+	opSaveMail       = "ui: save mail settings"
+	opSaveHubURL     = "ui: save hub url"
+	opMailStore      = "ui: set mail password"
+	opMailRemove     = "ui: remove mail password"
+	opCheckMail      = "ui: check mail"
 )
 
 // Fixed texts of the page (Russian UI).
 const (
-	msgFieldInvalid     = "Недопустимое значение."
-	msgPasswordSaved    = "Пароль сохранён в Диспетчере учётных данных Windows."
-	msgPasswordRemoved  = "Пароль удалён."
-	msgPasswordInvalid  = "Пароль не может быть пустым или длиннее 2560 байт."
-	msgSecretsNoSupport = "Диспетчер учётных данных Windows недоступен в этой системе: пароль хранить негде."
-	msgSecretsDown      = "Диспетчер учётных данных Windows не ответил. Попробуйте ещё раз."
-	msgCheckOK          = "Соединение и вход прошли успешно. Письмо не отправлялось."
+	msgFieldInvalid = "Недопустимое значение."
+	msgMailStored   = "Пароль сохранён в Диспетчере учётных данных Windows."
+	msgMailRemoved  = "Пароль удалён."
+	msgMailRefused  = "Пароль не может быть пустым или длиннее 2560 байт."
+	msgStoreMissing = "Диспетчер учётных данных Windows недоступен в этой системе: пароль хранить негде."
+	msgStoreDown    = "Диспетчер учётных данных Windows не ответил. Попробуйте ещё раз."
+	msgCheckOK      = "Соединение и вход прошли успешно. Письмо не отправлялось."
 )
 
 // fieldMessages explain the rule of each field of the settings aggregate.
@@ -166,13 +166,13 @@ func (s *ConnectionsService) SaveHubURL(ctx context.Context, url string) (SaveRe
 // SetMailPassword stores or replaces the mail password in Credential Manager. It is never returned or logged.
 func (s *ConnectionsService) SetMailPassword(ctx context.Context, password string) (SecretResult, error) {
 	status, err := s.uc.SetMailPassword(ctx, password)
-	return s.secret(opSetMailPassword, status, err, msgPasswordSaved)
+	return s.secret(opMailStore, status, err, msgMailStored)
 }
 
 // RemoveMailPassword deletes the stored mail password.
 func (s *ConnectionsService) RemoveMailPassword(ctx context.Context) (SecretResult, error) {
 	status, err := s.uc.RemoveMailPassword(ctx)
-	return s.secret(opDropMailPassword, status, err, msgPasswordRemoved)
+	return s.secret(opMailRemove, status, err, msgMailRemoved)
 }
 
 // CheckMail connects and logs in to the mail server without sending a message.
@@ -218,12 +218,12 @@ func (s *ConnectionsService) secret(op string, status connections.SecretStatus, 
 	case err == nil:
 		out.Message = done
 	case errors.Is(err, connections.ErrInvalidSecret):
-		out.Message = msgPasswordInvalid
+		out.Message = msgMailRefused
 	case errors.Is(err, connections.ErrSecretsUnsupported):
-		out.Message = msgSecretsNoSupport
+		out.Message = msgStoreMissing
 	case errors.Is(err, connections.ErrSecretsUnavailable):
 		s.log.Warn(op, "err", err)
-		out.Message = msgSecretsDown
+		out.Message = msgStoreDown
 	default:
 		s.log.Error(op, "err", err)
 		return SecretResult{}, ErrConnectionsUnavailable

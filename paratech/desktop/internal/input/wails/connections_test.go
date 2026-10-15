@@ -152,13 +152,13 @@ func TestPasswordResults(t *testing.T) {
 		err    error
 		want   SecretResult
 	}{
-		{"saved", connections.SecretSet, nil, SecretResult{Status: "set", Message: msgPasswordSaved}},
+		{"saved", connections.SecretSet, nil, SecretResult{Status: "set", Message: msgMailStored}},
 		{"invalid", connections.SecretUnset, fmt.Errorf("op: %w", connections.ErrInvalidSecret),
-			SecretResult{Status: "unset", Message: msgPasswordInvalid}},
+			SecretResult{Status: "unset", Message: msgMailRefused}},
 		{"unsupported", connections.SecretUnsupported, fmt.Errorf("op: %w", connections.ErrSecretsUnsupported),
-			SecretResult{Status: "unsupported", Message: msgSecretsNoSupport}},
+			SecretResult{Status: "unsupported", Message: msgStoreMissing}},
 		{"unavailable", connections.SecretUnavailable, fmt.Errorf("op: %w: locked", connections.ErrSecretsUnavailable),
-			SecretResult{Status: "unavailable", Message: msgSecretsDown}},
+			SecretResult{Status: "unavailable", Message: msgStoreDown}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -171,7 +171,7 @@ func TestPasswordResults(t *testing.T) {
 	}
 
 	s := NewConnectionsService(&fakeConnections{status: connections.SecretUnset}, discard())
-	if got, err := s.RemoveMailPassword(context.Background()); err != nil || got != (SecretResult{Status: "unset", Message: msgPasswordRemoved}) {
+	if got, err := s.RemoveMailPassword(context.Background()); err != nil || got != (SecretResult{Status: "unset", Message: msgMailRemoved}) {
 		t.Fatalf("RemoveMailPassword = %+v, %v", got, err)
 	}
 }
