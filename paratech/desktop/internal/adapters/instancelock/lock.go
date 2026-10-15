@@ -41,7 +41,7 @@ func Acquire(dir string) (*Lock, error) {
 		return nil, errors.New("instancelock: the directory must be an absolute path")
 	}
 
-	f, err := os.OpenFile(filepath.Clean(filepath.Join(dir, FileName)), os.O_RDWR|os.O_CREATE, filePerm)
+	f, err := os.OpenFile(filepath.Join(dir, FileName), os.O_RDWR|os.O_CREATE, filePerm) //nolint:gosec // the app's own data directory and a fixed name
 	if err != nil {
 		return nil, fmt.Errorf("instancelock: open the lock file: %w: %w", shared.ErrStorage, bare(err))
 	}

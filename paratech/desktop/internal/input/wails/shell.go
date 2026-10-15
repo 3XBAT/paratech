@@ -29,6 +29,9 @@ type Options struct {
 	// OpenCore opens the core (database, use cases) and returns what the pages bind to. Run calls it once, after the
 	// single-instance check: a second instance exits before it and never touches the database (ADR-0007).
 	OpenCore func(ctx context.Context) (Core, error)
+	// Started, if set, is called once when the application runs (Wails' ApplicationStarted), on a Wails goroutine:
+	// it must return at once, so the app starts its background work there without blocking the UI.
+	Started func()
 }
 
 // Core is what the pages of the main window call through the bindings.

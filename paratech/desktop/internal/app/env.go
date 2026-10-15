@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/adapters/audiocapture"
 	"paratech/desktop/internal/adapters/clock"
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/instancelock"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/adapters/winpower"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -45,9 +46,17 @@ type idSource interface {
 	NewMessageID() string
 }
 
+// instanceLock is a held single-instance guard.
+type instanceLock interface {
+	Release() error
+}
+
 // env is the outside world of the core and its tuning. productionEnv fills it; tests of this package replace fields
 // before openCore.
 type env struct {
+	// lock takes the single-instance guard of the data directory; it fails at once when another instance holds it.
+	lock func(dataDir string) (instanceLock, error)
+
 	clock  timeSource
 	local  localTime // homeworkflow only: its Clock port names the student's zone
 	ids    idSource
@@ -74,6 +83,7 @@ type env struct {
 // productionEnv is the outside world of the real application.
 func productionEnv() env {
 	return env{
+		lock:          acquireLock,
 		clock:         clock.System{},
 		local:         clock.Local{},
 		ids:           random.IDs{},
@@ -89,6 +99,15 @@ func productionEnv() env {
 		recordings:    recordingsession.DefaultConfig(),
 		stopTimeout:   defaultStopTimeout,
 	}
+}
+
+// acquireLock is the file lock of the data directory.
+func acquireLock(dataDir string) (instanceLock, error) {
+	l, err := instancelock.Acquire(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 // whisperBinaryPath is whisper-cli next to the executable; empty when the executable cannot be found.

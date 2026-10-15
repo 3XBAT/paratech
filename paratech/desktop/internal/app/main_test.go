@@ -43,6 +43,7 @@ func testEnv(t *testing.T) (env, *fakes) {
 	runner.PollInterval = 10 * time.Millisecond
 
 	return env{
+		lock:   acquireLock,
 		clock:  clock.System{},
 		local:  clock.Local{},
 		ids:    random.IDs{},

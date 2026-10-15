@@ -46,10 +46,13 @@ func TestNew(t *testing.T) {
 }
 
 func TestRunBlocksUntilCancelled(t *testing.T) {
-	a, err := app.New(headless(), discard())
+	cfg := headless()
+	cfg.DataDir = t.TempDir() // headless Run opens and starts the core
+	a, err := app.New(cfg, discard())
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = a.Close() }) // before TempDir removal: Windows cannot delete open files
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
@@ -67,6 +70,21 @@ func TestRunBlocksUntilCancelled(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+func TestRunHeadlessNeedsDataDir(t *testing.T) {
+	a, err := app.New(headless(), discard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.Run(ctx); err == nil || ctx.Err() != nil {
+		t.Fatalf("Run without a data directory = %v, want an error at once", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
