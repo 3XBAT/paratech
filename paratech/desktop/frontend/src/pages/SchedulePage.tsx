@@ -85,6 +85,7 @@ export function SchedulePage() {
         }
         show(p);
       } catch (err) {
+        discardSelection(); // the preview goes away with the error
         if (mounted.current) {
           setPreview(null);
           setError(errorText(err));
@@ -98,6 +99,9 @@ export function SchedulePage() {
       return;
     }
     return run(async () => {
+      // The core drops the selection after any commit outcome. Forget it now, or closing the page mid-commit would send
+      // a discard that can reach the core first and cancel the commit.
+      selection.current = "";
       try {
         const r = await api.commit(p.selectionId);
         if (mounted.current) {

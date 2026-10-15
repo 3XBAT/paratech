@@ -162,8 +162,8 @@ func NewScheduleImportService(
 }
 
 // ChooseFile shows the open dialog, reads the chosen file and returns its preview (PRD section 11.2). Nothing is
-// written. A cancelled dialog is a result with cancelled set and keeps the current selection; any error drops it, as
-// the page drops its preview then.
+// written. A cancelled dialog is a result with cancelled set and keeps the current selection; any error after the
+// dialog opens drops it, as the page drops its preview then.
 func (s *ScheduleImportService) ChooseFile(ctx context.Context) (ImportPreview, error) {
 	if !s.beginChoose() {
 		return ImportPreview{}, ErrImportBusy

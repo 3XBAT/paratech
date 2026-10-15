@@ -12,8 +12,9 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
   (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer, Prompt,
-  Schedule, Files}` (all required; `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049). `start` runs once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine;
-  headless right after `openCore` inside `Run` (headless now opens the core; no data dir is an error).
+  Schedule, Files}` (all required; `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049). `start` runs
+  once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine; headless right after
+  `openCore` inside `Run` (headless now opens the core; no data dir is an error).
 - **Single instance.** UI: Wails' named mutex first (a second UI instance hands off to the window and exits before
   `OpenCore`). Then, for every mode, a file lock `<DataDir>/learning-assistant.lock` taken before the database:
   `LockFileEx` exclusive, fail-immediately on Windows; `flock` on Unix; other systems `ErrUnsupported`. The file is never
