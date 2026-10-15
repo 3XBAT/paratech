@@ -2,6 +2,7 @@ import { useState } from "react";
 import { defaultPage, pageById, pages, type PageId } from "./nav";
 import { Placeholder } from "./pages/Placeholder";
 import { RecordingsPage } from "./pages/RecordingsPage";
+import { SchedulePage } from "./pages/SchedulePage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 export function App() {
@@ -28,6 +29,8 @@ export function App() {
           <SettingsPage />
         ) : page.id === "recordings" ? (
           <RecordingsPage />
+        ) : page.id === "schedule" ? (
+          <SchedulePage />
         ) : (
           <Placeholder title={page.label} />
         )}

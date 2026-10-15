@@ -10,7 +10,9 @@
     "src/bindings/settings.ts",
     "src/bindings/activity.ts",
     "src/bindings/prompt.ts",
+    "src/bindings/schedule.ts",
     "src/activityView.ts",
+    "src/scheduleView.ts",
     "src/popup/view.ts",
     "src/nav.ts"
   ]
