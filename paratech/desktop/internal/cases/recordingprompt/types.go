@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/recording/prompt"
+	"paratech/desktop/internal/domain/recording/values"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // DefaultPollInterval is how often Run looks at the current prompt: a snoozed prompt comes back and an expired one
@@ -13,7 +15,8 @@ const DefaultPollInterval = 5 * time.Second
 
 // Deps are the ports the Service needs. All are required except Log.
 type Deps struct {
-	Settings   SettingsReader
+	Settings   SettingsStore
+	Apps       AudioApps
 	Popup      Popup
 	Recordings Recordings
 	Clock      Clock
@@ -37,6 +40,16 @@ type View struct {
 	State     prompt.State
 	Problem   prompt.Problem // why the last start failed
 	CanSnooze bool
+}
+
+// Sources is what the source picker offers (TASK-059).
+type Sources struct {
+	Apps []values.AudioApp // playing apps first, then by title (values.SortAudioApps)
+	// Selected is the source to preselect: the remembered app when it is open, else the whole computer.
+	Selected values.Source
+	// Remembered is the app recorded last time, even when it is not open now, so the picker can select it as soon as
+	// it appears; empty for the whole computer.
+	Remembered shared.AppName
 }
 
 func viewOf(p *prompt.Prompt, now time.Time) View {

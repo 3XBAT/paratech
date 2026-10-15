@@ -1,6 +1,7 @@
 // Package recording is the bounded context of capturing the audio of an online class (PRD sections 6.1 to 6.3).
 // Aggregates: domain/recording/recording, domain/recording/prompt (the offer to record). Domain services:
-// domain/recording/services/limits (hard cap, one recording at a time).
+// domain/recording/services/limits (hard cap, one recording at a time). Values: domain/recording/values (the
+// recording source and the source picker).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //
@@ -23,4 +24,6 @@
 //     ad hoc (asked for by the user). States OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED, WITHDRAWN.
 //   - Snooze: hide a lesson prompt for a fixed delay and offer it again, only while the lesson still runs.
 //   - Expiry: a lesson prompt that nobody acted on ends when its lesson ends.
+//   - Source: what a recording captures: one app (by executable name, with its process tree) or the whole computer
+//     except this app (the fallback). The picker lists the open apps; the choice is remembered per app.
 package recording

@@ -13,5 +13,8 @@
 // prompt again when it is due, unless prompts were turned off meanwhile, and hides a lesson prompt when the lesson
 // ends. No toasts: the popup is the only notification of this flow.
 //
+// Sources is the source picker of the popup (TASK-059): the open apps from the AudioApps port and the source to
+// preselect. Start records the source the user picked and, once it runs, remembers it in the settings by app name.
+//
 // Rules that apply: ARCH-20..27. The prompt's states and rules live in the domain/recording/prompt aggregate.
 package recordingprompt

@@ -108,6 +108,8 @@ func (s *wasapiSource) activateProcessLoopback(target Target, cancel <-chan stru
 	if err != nil {
 		return nil, fmt.Errorf("%w: CreateEvent: %v", ErrDevice, err)
 	}
+	// No AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK anywhere: the default pre-volume tap keeps the Windows volume
+	// and speaker mute out of the recording (ADR-0002 Known limits).
 	a := &activation{
 		handler: completionHandler{vtbl: newHandlerVtbl(), done: done},
 		params:  activationParams{activationType: activationTypeProcessLoopback, targetProcessID: target.PID, processLoopbackMode: mode},

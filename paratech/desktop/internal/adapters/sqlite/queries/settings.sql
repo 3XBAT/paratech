@@ -4,7 +4,7 @@
 -- name: GetSettings :one
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
        default_stt_model_id, version, updated_at, homework_recipient, smtp_host, smtp_port, smtp_security,
-       smtp_username, hub_url
+       smtp_username, hub_url, recording_source_app
 FROM settings
 WHERE id = 1;
 
@@ -13,11 +13,11 @@ WHERE id = 1;
 -- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
                       default_stt_model_id, homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username,
-                      hub_url, version, updated_at)
+                      hub_url, recording_source_app, version, updated_at)
 VALUES (1, sqlc.arg(recording_prompts_enabled), sqlc.arg(process_only_on_ac_power),
         sqlc.arg(notify_on_processing_complete), sqlc.arg(default_stt_model_id), sqlc.arg(homework_recipient),
         sqlc.arg(smtp_host), sqlc.arg(smtp_port), sqlc.arg(smtp_security), sqlc.arg(smtp_username), sqlc.arg(hub_url),
-        1, sqlc.arg(updated_at));
+        sqlc.arg(recording_source_app), 1, sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 -- with VersionCAS to shared.ErrVersionConflict.
@@ -33,6 +33,7 @@ SET recording_prompts_enabled     = sqlc.arg(recording_prompts_enabled),
     smtp_security                 = sqlc.arg(smtp_security),
     smtp_username                 = sqlc.arg(smtp_username),
     hub_url                       = sqlc.arg(hub_url),
+    recording_source_app          = sqlc.arg(recording_source_app),
     version                       = version + 1,
     updated_at                    = sqlc.arg(updated_at)
 WHERE id = 1 AND version = sqlc.arg(expected_version);

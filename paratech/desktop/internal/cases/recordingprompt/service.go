@@ -2,12 +2,14 @@ package recordingprompt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
 
 	"paratech/desktop/internal/domain/recording/prompt"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -21,11 +23,18 @@ const (
 	opSkip           = "skip"
 	opTick           = "check prompt"
 	opSettings       = "read settings"
+	opSources        = "list sources"
+	opRemember       = "remember the source"
 )
+
+// rememberAttempts bounds the saves of the remembered source: a version conflict (the settings page saved meanwhile)
+// reloads once.
+const rememberAttempts = 2
 
 // Service offers recordings through the popup (PRD section 6.1).
 type Service struct {
-	settings   SettingsReader
+	settings   SettingsStore
+	apps       AudioApps
 	popup      Popup
 	recordings Recordings
 	clock      Clock
@@ -47,8 +56,9 @@ type Service struct {
 // New validates the configuration and builds the Service. It starts nothing; call Run.
 func New(deps Deps, cfg Config) (*Service, error) {
 	switch {
-	case deps.Settings == nil || deps.Popup == nil || deps.Recordings == nil || deps.Clock == nil || deps.Sleeper == nil:
-		return nil, fmt.Errorf("%w: settings, popup, recordings, clock and sleeper are required", ErrInvalidConfig)
+	case deps.Settings == nil || deps.Apps == nil || deps.Popup == nil || deps.Recordings == nil || deps.Clock == nil ||
+		deps.Sleeper == nil:
+		return nil, fmt.Errorf("%w: settings, apps, popup, recordings, clock and sleeper are required", ErrInvalidConfig)
 	case cfg.PollInterval <= 0:
 		return nil, fmt.Errorf("%w: poll interval %v", ErrInvalidConfig, cfg.PollInterval)
 	}
@@ -58,7 +68,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
-		settings: deps.Settings, popup: deps.Popup, recordings: deps.Recordings, clock: deps.Clock, sleeper: deps.Sleeper,
+		settings: deps.Settings, apps: deps.Apps, popup: deps.Popup, recordings: deps.Recordings, clock: deps.Clock, sleeper: deps.Sleeper,
 		log: log, cfg: cfg,
 	}, nil
 }
@@ -128,11 +138,31 @@ func (s *Service) Current() (View, bool) {
 	return viewOf(s.current, s.clock.Now()), true
 }
 
-// Start starts the recording that prompt id offers. On success the popup hides and the main window stays as it is.
-// A failed start keeps the prompt on offer with its problem and returns its View with an error wrapping
-// ErrStartFailed; until the recordings are ready the problem is prompt.ProblemRecovering. One start runs at a time
-// (prompt.ErrInvalidTransition), and an ID that is not current yields ErrNoPrompt.
-func (s *Service) Start(ctx context.Context, id prompt.ID) (View, error) {
+// Sources lists what the popup offers to record (TASK-059): the open apps, sorted, and the source to preselect. When
+// the apps cannot be listed it returns an error together with Sources that hold only the remembered app, so the
+// popup can still offer the whole computer. A failed settings read is logged and treated as nothing remembered.
+func (s *Service) Sources(ctx context.Context) (Sources, error) {
+	var remembered shared.AppName
+	if st, err := s.settings.Load(ctx); err != nil {
+		s.log.Warn("the remembered recording source could not be read", slog.Any("error", err))
+	} else {
+		remembered = st.RecordingSource()
+	}
+
+	apps, err := s.apps.List(ctx)
+	if err != nil {
+		return Sources{Selected: values.WholeComputer(), Remembered: remembered}, fmt.Errorf("%s: %w", opSources, err)
+	}
+	values.SortAudioApps(apps)
+	return Sources{Apps: apps, Selected: values.Preselect(remembered, apps), Remembered: remembered}, nil
+}
+
+// Start starts the recording of source that prompt id offers. On success the popup hides, the main window stays as
+// it is and source is remembered for the next prompt (a failure to remember is only logged). A failed start keeps
+// the prompt on offer with its problem and returns its View with an error wrapping ErrStartFailed; until the
+// recordings are ready the problem is prompt.ProblemRecovering. One start runs at a time (prompt.ErrInvalidTransition),
+// and an ID that is not current yields ErrNoPrompt.
+func (s *Service) Start(ctx context.Context, id prompt.ID, source values.Source) (View, error) {
 	s.mu.Lock()
 	p, err := s.lookup(id)
 	if err == nil {
@@ -148,7 +178,7 @@ func (s *Service) Start(ctx context.Context, id prompt.ID) (View, error) {
 	var rec shared.RecordingID
 	startErr, problem := ErrNotReady, prompt.ProblemRecovering
 	if s.recordings.Ready() {
-		rec, startErr = s.recordings.StartRecording(ctx, lessonID)
+		rec, startErr = s.recordings.StartRecording(ctx, lessonID, source)
 		problem = prompt.ProblemOf(startErr)
 	}
 
@@ -174,9 +204,42 @@ func (s *Service) Start(ctx context.Context, id prompt.ID) (View, error) {
 		return view, fmt.Errorf("%s %s: %w: %w", opStart, id, ErrStartFailed, startErr)
 	}
 
-	s.log.Info("recording started from the prompt", slog.String("prompt", id.String()), slog.String("recording", rec.String()))
+	s.log.Info("recording started from the prompt", slog.String("prompt", id.String()), slog.String("recording", rec.String()),
+		slog.String("source", source.String()))
 	s.renderLogged(opStart)
+	s.remember(ctx, source)
 	return view, nil
+}
+
+// remember stores source as the one to preselect next time; a version conflict reloads once. Failures are logged:
+// the recording runs either way.
+func (s *Service) remember(ctx context.Context, source values.Source) {
+	var err error
+	for range rememberAttempts {
+		if err = s.saveSource(ctx, source); !errors.Is(err, shared.ErrVersionConflict) {
+			break
+		}
+	}
+	if err != nil {
+		s.log.Warn("the recording source was not remembered", slog.String("source", source.String()), slog.Any("error", err))
+	}
+}
+
+func (s *Service) saveSource(ctx context.Context, source values.Source) error {
+	st, err := s.settings.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("%s: %w", opRemember, err)
+	}
+	if st.RecordingSource() == source.App() {
+		return nil
+	}
+	if err := st.SetRecordingSource(source.App(), s.clock.Now()); err != nil {
+		return fmt.Errorf("%s: %w", opRemember, err)
+	}
+	if err := s.settings.Save(ctx, st); err != nil {
+		return fmt.Errorf("%s: %w", opRemember, err)
+	}
+	return nil
 }
 
 // Snooze hides prompt id for prompt.SnoozeDelay. Only a lesson prompt whose lesson still runs then can be snoozed

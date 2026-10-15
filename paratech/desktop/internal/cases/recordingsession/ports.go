@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -76,11 +77,16 @@ type RecordingTranscripts interface {
 // Every method must return soon after its ctx ends: the use case bounds the shutdown steps (Stop) with a timeout and
 // cancels Wait and Finalize on a forced Close, and Close waits for them to return.
 type Recorder interface {
-	// Start begins capturing for the recording id and writes chunk files into the directory chunks
+	// Start begins capturing source for the recording id and writes chunk files into the directory chunks
 	// (PRD section 6.3: chunked writes, a crash loses at most the latest chunk). It returns once capture runs.
 	// ctx bounds only the start: cancelling it aborts a start in progress (the user stopped meanwhile), never a
 	// capture that already runs.
-	Start(ctx context.Context, id shared.RecordingID, chunks shared.ArtifactRef) error
+	//
+	// The whole computer is everything it plays except this app (ADR-0002 Decision 1). An app is process loopback of
+	// its process tree (PRD section 6.3, TASK-059): when the app restarts during the recording, its new instance is
+	// found again by the executable name and the capture goes on, with silence for the time between. If the app does
+	// not run at the start, Start fails with an error wrapping recording.ErrSourceNotRunning.
+	Start(ctx context.Context, id shared.RecordingID, chunks shared.ArtifactRef, source values.Source) error
 
 	// Stop ends the capture of id and flushes the last chunk (PRD section 6.2: STOPPING).
 	Stop(ctx context.Context, id shared.RecordingID) error

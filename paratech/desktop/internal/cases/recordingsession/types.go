@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/services/limits"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -41,6 +42,7 @@ func DefaultConfig() Config {
 // StartRequest is what the popup or the UI asks for.
 type StartRequest struct {
 	LessonID shared.LessonID // optional: empty for an ad-hoc recording
+	Source   values.Source   // what to capture; the zero value is the whole computer
 }
 
 // Info is the state of a recording as the UI shows it.

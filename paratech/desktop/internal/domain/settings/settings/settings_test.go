@@ -204,3 +204,33 @@ func TestChangeKeepsVersion(t *testing.T) {
 		t.Fatalf("Version() = %d after Persisted(5)", s.Version())
 	}
 }
+
+// TASK-059: the picker remembers an app by its executable name; empty is the whole computer.
+func TestRecordingSource(t *testing.T) {
+	s := New()
+	if s.RecordingSource() != "" {
+		t.Fatalf("default source %q, want the whole computer", s.RecordingSource())
+	}
+	if err := s.SetRecordingSource("zoom.exe", t1); err != nil || s.RecordingSource() != "zoom.exe" || !s.UpdatedAt().Equal(t1) {
+		t.Fatalf("SetRecordingSource = %v, source %q, updated %v", err, s.RecordingSource(), s.UpdatedAt())
+	}
+	for _, bad := range []shared.AppName{"Zoom.exe", `c:\zoom.exe`, "zoom", "zo\x00om.exe"} {
+		if err := s.SetRecordingSource(bad, t1); !errors.Is(err, ErrInvalidSettings) || s.RecordingSource() != "zoom.exe" {
+			t.Errorf("SetRecordingSource(%q) = %v, source %q", bad, err, s.RecordingSource())
+		}
+	}
+	if err := s.SetRecordingSource("zoom.exe", time.Time{}); !errors.Is(err, ErrInvalidSettings) {
+		t.Errorf("no change time: %v", err)
+	}
+	if err := s.SetRecordingSource("", t1.Add(time.Minute)); err != nil || s.RecordingSource() != "" {
+		t.Fatalf("back to the whole computer: %v, %q", err, s.RecordingSource())
+	}
+
+	got, err := Restore(State{Version: 2, RecordingSource: "chrome.exe"})
+	if err != nil || got.RecordingSource() != "chrome.exe" {
+		t.Fatalf("Restore = %v, %v", got, err)
+	}
+	if _, err := Restore(State{Version: 2, RecordingSource: "../chrome.exe"}); !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Restore of a tampered source = %v", err)
+	}
+}

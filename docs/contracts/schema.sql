@@ -340,3 +340,7 @@ ALTER TABLE settings ADD COLUMN smtp_port INTEGER NOT NULL DEFAULT 0 CHECK (smtp
 ALTER TABLE settings ADD COLUMN smtp_security TEXT NOT NULL DEFAULT 'starttls' CHECK (smtp_security IN ('starttls', 'tls'));
 ALTER TABLE settings ADD COLUMN smtp_username TEXT NOT NULL DEFAULT '';
 ALTER TABLE settings ADD COLUMN hub_url TEXT NOT NULL DEFAULT '';
+
+-- settings: the executable name of the app the user last recorded ("chrome.exe"), preselected next time; empty: the
+-- whole computer. An app name, never a process ID: it is remembered across restarts of the app.
+ALTER TABLE settings ADD COLUMN recording_source_app TEXT NOT NULL DEFAULT '' CHECK (length(recording_source_app) <= 255);

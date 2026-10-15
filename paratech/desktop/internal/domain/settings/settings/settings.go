@@ -33,6 +33,10 @@ type Settings struct {
 	smtpLogin         string
 	hubURL            string
 
+	// recordingSource is the app the user last recorded (TASK-059), preselected in the source picker; empty: the
+	// whole computer. An app name, never a process (it is remembered across restarts).
+	recordingSource shared.AppName
+
 	updatedAt time.Time // zero: never changed by the user
 }
 
@@ -59,6 +63,7 @@ type State struct {
 	SMTPSecurity               MailSecurity      // empty: DefaultMailSecurity
 	SMTPLogin                  string            // empty: none
 	HubURL                     string            // empty: none
+	RecordingSource            shared.AppName    // empty: the whole computer
 	UpdatedAt                  time.Time         // zero: stored defaults that the user never changed
 }
 
@@ -75,6 +80,11 @@ func Restore(s State) (*Settings, error) {
 	// A tampered row must not send the API key or the password somewhere the setters would refuse.
 	if err := checkMail(s); err != nil {
 		return nil, err
+	}
+	if !s.RecordingSource.IsZero() {
+		if err := s.RecordingSource.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: recording source: %w", ErrInvalidSettings, err)
+		}
 	}
 	security := s.SMTPSecurity
 	if security == "" {
@@ -93,6 +103,7 @@ func Restore(s State) (*Settings, error) {
 		smtpSecurity:               security,
 		smtpLogin:                  s.SMTPLogin,
 		hubURL:                     s.HubURL,
+		recordingSource:            s.RecordingSource,
 		updatedAt:                  s.UpdatedAt,
 	}, nil
 }
@@ -240,6 +251,21 @@ func (s *Settings) SetHubURL(raw string, now time.Time) error {
 		}
 	}
 	return change(s, &s.hubURL, raw, now)
+}
+
+// RecordingSource returns the app the user last recorded, preselected in the source picker; empty means the whole
+// computer (TASK-059).
+func (s *Settings) RecordingSource() shared.AppName { return s.recordingSource }
+
+// SetRecordingSource remembers app as the source of the next recordings; empty means the whole computer. Only a
+// normalized executable name is accepted (shared.AppName).
+func (s *Settings) SetRecordingSource(app shared.AppName, now time.Time) error {
+	if !app.IsZero() {
+		if err := app.Validate(); err != nil {
+			return fmt.Errorf("%w: recording source: %w", ErrInvalidSettings, err)
+		}
+	}
+	return change(s, &s.recordingSource, app, now)
 }
 
 // change sets one field. Setting the current value is a no-op, so repeating a request does not move UpdatedAt.

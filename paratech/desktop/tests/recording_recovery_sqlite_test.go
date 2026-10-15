@@ -14,6 +14,7 @@ import (
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -32,7 +33,7 @@ func (e *recordingEnv) crashDuringCapture(id shared.RecordingID, chunks func(id 
 		func() error { return e.repo.Save(ctx, rec) },
 		func() error { return rec.Heartbeat(recT0.Add(30 * time.Second)) },
 		func() error { return e.repo.Save(ctx, rec) },
-		func() error { return e.rec.Start(ctx, id, rec.ChunksDir()) },
+		func() error { return e.rec.Start(ctx, id, rec.ChunksDir(), values.WholeComputer()) },
 	} {
 		if err := step(); err != nil {
 			e.t.Fatal(err)

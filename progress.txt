@@ -1620,6 +1620,42 @@
 
 ---
 
+## [TASK-059] Выбор источника записи: меню открытых приложений, запись только звука выбранной лекции
+**Дата:** 2026-10-15
+**Статус:** done (код и тесты на фейках; реальный звук и вид попапа — владелец, TASK-016)
+
+### Что сделано
+- domain: shared.AppName (имя exe, нижний регистр, межконтекстный ID); recording/values: Source (весь компьютер | приложение), AudioApp, IsBrowser, сортировка и предвыбор; recording.ErrSourceNotRunning, prompt.ProblemSourceGone; settings: RecordingSource/SetRecordingSource; миграция 0006 (settings.recording_source_app, CHECK длины) + sqlc
+- cases: recordingsession StartRequest.Source и Recorder.Start(..., source); recordingprompt: порты AudioApps и SettingsStore (Load/Save), Sources(ctx) (приложения, Selected, Remembered), Start(ctx, id, source) запоминает источник после успешного старта (сбой сохранения — Warn)
+- audiocapture: Apps (EnumWindows как OBS: видимые, без tool/child, ApplicationFrameHost -> дочернее окно, без своего дерева процессов и чужих сессий, по одному на exe, корень дерева того же exe; «звучит»/«выключен в микшере» по аудиосессиям с подъёмом по родителям и проверкой времени создания; иконки 32x32 PNG с кэшем и бюджетом 1 с; InternalGetWindowText; таймаут 2 с, лимиты); Find/Same (живость, имя образа, session id, время создания); Recorder: приложение -> INCLUDE найденного PID, нет процесса -> ErrSourceNotRunning; наблюдатель каждые 3 с: процесс ушёл -> Info «waiting for the app», новый экземпляр -> перезапуск child на новом PID, Info «re-bound by exe name» (не тратит бюджет рестартов, максимум 20); Diagnostics: App, WaitingForApp, Rebinds; post-volume loopback не запрашивается
+- input/wails: PromptService.Sources и Start(id, app) ("" = весь компьютер, ErrInvalidSource «invalid source»), иконка только PNG-сигнатура <= 16 КиБ как data URL, код проблемы source_gone; попап 360x300 (ADR-0007); запасной popup.js передаёт ""
+- frontend: выпадающий список источников (иконка или буква, «звучит», «звук выключен в микшере», «приложение закрыто»), обновление каждые 3 с без наложения (пауза при открытом списке), предвыбор (явный выбор пользователя > запомненное при появлении > selected), подсказки (общий совет про громкость всегда; браузер — все вкладки; mute в микшере; ошибка списка), область текста прокручивается в крайнем случае, кнопки всегда видны; CSP попапа img-src 'self' data:
+- docs: run-alpha.md (чек-лист владельца для пикера и ручные проверки звука), ADR-0002 (статус пикера, ограничение про разрыв дольше 154 с), ADR-0007 (размер попапа)
+- Изменённые существующие тесты (только сигнатуры и счётчики, ничего не ослаблено): audiocapture recorder_test/supervise_test/audiocapture_test (новый Start, +2 случая валидации конфигурации), sqlite migrate_test (версия 5 -> 6), testenv recorder/chunks tests, app main_test (fake список приложений) и prompts_test, input/wails prompt_test (Sources, Start с app, source_gone, ErrInvalidSource) и settings_test (4 -> 5 методов), tests/recordingprompt_sqlite_test (SettingsStore, +TestPickedSourceIsRememberedOnSQLite) и recording_recovery_sqlite_test, frontend prompt.test.mjs (source_gone, start(id, app)); TestAppsList (2 чтения иконки без кэша неудачи), TestAppsFind (строка «нельзя проверить» -> ErrAppList)
+- Ревью: approve (medium: кнопки попапа могли обрезаться; low: гонка лога старта, GetWindowTextW на своих окнах, ErrAppNotRunning при сбое проверки, строка про разрыв > 154 с; nits: Cf в заголовках, ctx до gate, кэш nil-иконок, буфер имени образа) -> всё исправлено, повторное ревью approve. Security: два прохода (весь diff и исправления): найдено 0, опровергнуто 0, исправлено 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на финальной голове после rebase на master (TASK-060, TASK-062, #66)
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (в verify.sh); audiocapture -count=3
+- [x] Шаг 2: GOOS=windows go vet ./desktop/... (и GOOS=linux CGO_ENABLED=0)
+- [~] Шаг 3: ручные проверки записаны в docs/qa/run-alpha.md, а не в docs/qa/compat-matrix.md — матрицы ещё нет (её создаёт TASK-058); перенести туда в TASK-058
+- [x] npm run build / npm run test (63)
+- [x] Live-тест перечисления (LA_AUDIO_LIVE_TEST=1, только exe и счётчики) на Windows 10 19045: 4 приложения, у всех иконка и заголовок, Find/Same ок; звук не играл — «звучит» не проверено
+
+### Решения (подтвердить)
+- Запоминается последний успешно запущенный источник (exe), один на все занятия, не по занятию; при отсутствии запомненного приложения в списке предвыбран «весь звук компьютера», а запомненное выбирается, как только появится
+- Приложение закрыто во время записи: запись идёт дальше (тишина), ждём тот же exe; на «весь звук» сами не переключаемся
+- Захват, откатившийся на classic loopback, приложение больше не отслеживает (и так пишет всё)
+- Совет про громкость показывается всегда; при двух и более предупреждениях/ошибке сворачивается в строку с подсказкой
+- Обновление списка ставится на паузу, пока список открыт (чтобы пункты не прыгали под курсором)
+
+### Заметки (follow-up)
+- TASK-058: перенести ручные проверки пикера и звука из run-alpha.md в compat-matrix.md; «здоровый, но немой» детектор (заглушённая вкладка не определяется — только совет)
+- Открытие ссылок из приложения (когда появится): только через explorer.exe и только разобранные http/https URL, иначе браузер попадёт в наше дерево процессов (исключён из списка и из EXCLUDE)
+- Low (ревью): domain/recording/values хранит и политики SortAudioApps/Preselect (место — services/), значения используются только портами; PID в AudioApp нужен только адаптеру
+- Low: если child завершился, пока приложение закрыто, разрыв дольше ~154 с укорачивает дорожку (Warn); можно держать «немой» child
+- Nit: exe без иконки читается на каждом обновлении (бюджет 1 с ограничивает); TestRecorderRebindRightAfterStart спит 2 с; run-alpha п.1 «без прокрутки» vs прокрутка как крайняя мера
+- Только владелец: вид попапа 360x300 при 100%/150%, клики по списку не крадут фокус (AC-01), реальная «звучит», UWP-приложения, перезапуск приложения во время записи, громкость 0/mute/микшер/заглушённая вкладка, Zoom/Teams/Телемост
 ## [TASK-030] UI: экран Model Manager (каталог, скачивание, импорт, модель по умолчанию, удаление, прогресс)
 **Дата:** 2026-10-15
 **Статус:** done

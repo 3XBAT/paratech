@@ -16,18 +16,19 @@ const (
 	ProblemUnavailable Problem = "unavailable" // this build cannot capture audio
 	ProblemInProgress  Problem = "in_progress" // another recording is in progress
 	ProblemRecovering  Problem = "recovering"  // interrupted recordings are being recovered; try again shortly
+	ProblemSourceGone  Problem = "source_gone" // the app chosen as the source is not running
 	ProblemFailed      Problem = "failed"      // any other failure
 )
 
 // Problems returns every problem kind except ProblemNone.
 func Problems() []Problem {
-	return []Problem{ProblemUnavailable, ProblemInProgress, ProblemRecovering, ProblemFailed}
+	return []Problem{ProblemUnavailable, ProblemInProgress, ProblemRecovering, ProblemSourceGone, ProblemFailed}
 }
 
 // Valid reports whether p is a known kind other than ProblemNone.
 func (p Problem) Valid() bool {
 	switch p {
-	case ProblemUnavailable, ProblemInProgress, ProblemRecovering, ProblemFailed:
+	case ProblemUnavailable, ProblemInProgress, ProblemRecovering, ProblemSourceGone, ProblemFailed:
 		return true
 	}
 	return false
@@ -36,8 +37,8 @@ func (p Problem) Valid() bool {
 // String returns the problem code.
 func (p Problem) String() string { return string(p) }
 
-// ProblemOf classifies why a recording did not start: no capture in this build, another recording in progress, or
-// anything else. A nil error has no problem.
+// ProblemOf classifies why a recording did not start: no capture in this build, another recording in progress, the
+// chosen app not running, or anything else. A nil error has no problem.
 func ProblemOf(err error) Problem {
 	switch {
 	case err == nil:
@@ -46,6 +47,8 @@ func ProblemOf(err error) Problem {
 		return ProblemUnavailable
 	case errors.Is(err, limits.ErrRecordingInProgress):
 		return ProblemInProgress
+	case errors.Is(err, recording.ErrSourceNotRunning):
+		return ProblemSourceGone
 	}
 	return ProblemFailed
 }

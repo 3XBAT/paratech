@@ -20,6 +20,7 @@ import (
 	"paratech/desktop/internal/adapters/winpower"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/domain/coursework/proposal"
@@ -85,6 +86,8 @@ type env struct {
 
 	// recorder builds the audio recorder that writes chunks through the Storage Manager below dataDir.
 	recorder func(dataDir string, files *filestore.Store, log *slog.Logger) (recordingsession.Recorder, error)
+	// apps lists the open apps for the source picker of the recording prompt; tests use a fake, never real windows.
+	apps func(log *slog.Logger) recordingprompt.AudioApps
 
 	// The --recorder run mode (the audio recorder child): its stdio and the platform capture source.
 	childStdin    io.Reader
@@ -120,6 +123,7 @@ func productionEnv() env {
 		jitter:          random.Jitter{},
 		power:           winpower.New(),
 		recorder:        platformRecorder,
+		apps:            platformApps,
 		childStdin:      os.Stdin,
 		childStdout:     os.Stdout,
 		captureSource:   audiocapture.PlatformSource(),

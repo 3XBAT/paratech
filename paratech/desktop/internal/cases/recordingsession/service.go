@@ -10,6 +10,7 @@ import (
 
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/services/limits"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -166,10 +167,10 @@ func (ss *session) snapshot() (Info, error) {
 	return ss.info, ss.err
 }
 
-// Start creates a recording and starts the capture into recordings/<id>. It returns once the capture runs; the
-// session then goes on until Stop, the hard cap or the end of the capture. Only one recording is in progress at a
-// time (limits.ErrRecordingInProgress). A failed or aborted start leaves a FAILED recording and returns its Info
-// with ErrStartFailed or ErrStartAborted.
+// Start creates a recording and starts the capture of req.Source into recordings/<id>. It returns once the capture
+// runs; the session then goes on until Stop, the hard cap or the end of the capture. Only one recording is in
+// progress at a time (limits.ErrRecordingInProgress). A failed or aborted start leaves a FAILED recording and returns
+// its Info with ErrStartFailed or ErrStartAborted; a chosen app that does not run wraps recording.ErrSourceNotRunning.
 func (s *Service) Start(ctx context.Context, req StartRequest) (Info, error) {
 	rec, err := recording.New(recording.Spec{
 		ID: s.ids.NewRecordingID(), LessonID: req.LessonID, MaxDuration: s.policy.MaxDuration(),
@@ -189,7 +190,7 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (Info, error) {
 	}
 
 	// From here the capture may run, so the state is saved even if the caller gives up (detached saves).
-	if serr := s.startCapture(ctx, sess, rec); serr != nil {
+	if serr := s.startCapture(ctx, sess, rec, req.Source); serr != nil {
 		aborted := ctx.Err() != nil || s.life.Err() != nil || sess.stopRequested()
 		problem, kind := problemStartFailed+": "+serr.Error(), ErrStartFailed
 		if aborted {
@@ -268,7 +269,7 @@ func (s *Service) finish(sess *session, rec *recording.Recording, err error) {
 }
 
 // startCapture runs Recorder.Start under a context that a stop, the caller or a forced shutdown cancels.
-func (s *Service) startCapture(ctx context.Context, sess *session, rec *recording.Recording) error {
+func (s *Service) startCapture(ctx context.Context, sess *session, rec *recording.Recording, source values.Source) error {
 	startCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	unlink := context.AfterFunc(s.life, func() { cancel(errShutdown) })
@@ -282,7 +283,7 @@ func (s *Service) startCapture(ctx context.Context, sess *session, rec *recordin
 		cancel(errStopRequested)
 	}
 
-	err := s.recorder.Start(startCtx, rec.ID(), rec.ChunksDir())
+	err := s.recorder.Start(startCtx, rec.ID(), rec.ChunksDir(), source)
 
 	sess.mu.Lock()
 	sess.cancelStart = nil

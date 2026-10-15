@@ -9,6 +9,7 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/scheduler"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -29,9 +30,9 @@ func (p promptRecordings) Ready() bool {
 	}
 }
 
-// StartRecording starts a recording for the lesson, or without one.
-func (p promptRecordings) StartRecording(ctx context.Context, lesson shared.LessonID) (shared.RecordingID, error) {
-	info, err := p.session.Start(ctx, recordingsession.StartRequest{LessonID: lesson})
+// StartRecording starts a recording of source for the lesson, or without one.
+func (p promptRecordings) StartRecording(ctx context.Context, lesson shared.LessonID, source values.Source) (shared.RecordingID, error) {
+	info, err := p.session.Start(ctx, recordingsession.StartRequest{LessonID: lesson, Source: source})
 	return info.ID, err
 }
 
@@ -39,8 +40,8 @@ func (p promptRecordings) StartRecording(ctx context.Context, lesson shared.Less
 // popup, and a scheduler there would mark the announcements as made without showing anything.
 func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger) error {
 	prompts, err := recordingprompt.New(recordingprompt.Deps{
-		Settings: sqlite.NewSettingsRepository(c.db), Popup: popup, Recordings: promptRecordings{session: c.recordings},
-		Clock: e.clock, Sleeper: e.clock, Log: log,
+		Settings: sqlite.NewSettingsRepository(c.db), Apps: e.apps(log), Popup: popup,
+		Recordings: promptRecordings{session: c.recordings}, Clock: e.clock, Sleeper: e.clock, Log: log,
 	}, recordingprompt.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("app: recording prompt: %w", err)

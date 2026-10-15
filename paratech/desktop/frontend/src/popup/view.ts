@@ -2,7 +2,7 @@
 // possible is decided by the Go core ("canSnooze"), never here (ARCH-44).
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
-import { errorMessages, type PromptView } from "../bindings/prompt.js";
+import { errorMessages, type PromptView, type SourcesView } from "../bindings/prompt.js";
 
 /** An action the popup calls on the core. */
 export type Action = "start" | "snooze" | "skip";
@@ -30,6 +30,7 @@ export const problemTexts: Readonly<Record<string, string>> = {
   unavailable: "Запись пока недоступна в этой сборке.",
   in_progress: "Уже идёт другая запись. Остановите её на странице «Записи».",
   recovering: "Восстанавливаются прерванные записи. Повторите через минуту.",
+  source_gone: "Выбранное приложение не запущено. Откройте его или выберите другое.",
   failed: "Не удалось начать запись.",
 };
 
@@ -113,6 +114,7 @@ const actionErrors: Readonly<Record<string, string>> = {
   [errorMessages.refused]: "Это действие сейчас недоступно.",
   [errorMessages.invalidId]: "Неверный идентификатор предложения.",
   [errorMessages.actionFailed]: "Не удалось выполнить действие.",
+  [errorMessages.invalidSource]: "Этот источник звука нельзя выбрать.",
 };
 
 const genericActionError = "Не удалось выполнить действие.";
@@ -128,4 +130,234 @@ export function actionErrorText(err: unknown): string {
     msg = (err as { message: string }).message;
   }
   return Object.hasOwn(actionErrors, msg) ? actionErrors[msg] : genericActionError;
+}
+
+// Source picker (TASK-059). Names and titles of apps are untrusted: the page renders them as text only.
+
+export const wholeComputerName = "Весь звук компьютера";
+
+/** Placeholder of the whole-computer entry in place of an icon. */
+export const wholeComputerBadge = "ПК";
+
+export const sourceMarks = {
+  playing: "звучит",
+  muted: "звук выключен в микшере",
+  gone: "приложение закрыто",
+} as const;
+
+export const adviceTexts = {
+  always:
+    "Чтобы не слышать лекцию, убавьте громкость Windows или наушников. Не выключайте звук на вкладке, в приложении встречи или в микшере: тогда запись будет пустой.",
+  browser: "Записывается звук всего браузера, со всех вкладок. Другие видео включайте в другом браузере или приложении.",
+  muted: "Звук этого приложения выключен в микшере Windows: запись будет пустой. Включите его и убавьте общую громкость.",
+  listError: "Список приложений недоступен, можно записать весь звук компьютера.",
+} as const;
+
+/** How often the open apps are listed again while the prompt is on offer. */
+export const refreshMs = 3000;
+
+/** The source the popup will record: an exe name, "" for the whole computer. */
+export interface Selection {
+  app: string;
+  /** The user picked it: refreshes never change it. */
+  explicit: boolean;
+}
+
+export const initialSelection: Selection = { app: "", explicit: false };
+
+/** The user's own choice. */
+export function chooseSource(app: string): Selection {
+  return { app, explicit: true };
+}
+
+/**
+ * The selection after a new picker reply. The user's choice wins; otherwise the remembered app is taken as soon as
+ * it is listed, an app taken before is kept (it may only be restarting), and else the core's preselection.
+ */
+export function nextSelection(prev: Selection, sources: SourcesView): Selection {
+  if (prev.explicit) {
+    return prev;
+  }
+  if (sources.remembered !== "" && sources.apps.some((a) => a.app === sources.remembered)) {
+    return { app: sources.remembered, explicit: false };
+  }
+  if (prev.app !== "") {
+    return prev;
+  }
+  return { app: sources.selected, explicit: false };
+}
+
+/** One entry of the picker. */
+export interface SourceOption {
+  /** Exe name; "" for the whole computer. */
+  app: string;
+  /** What the entry shows: the window title, else the exe name. */
+  name: string;
+  /** Hover text: the title with the exe name. */
+  hint: string;
+  /** Validated PNG data URL or "". */
+  icon: string;
+  /** Shown in place of a missing icon. */
+  letter: string;
+  playing: boolean;
+  muted: boolean;
+  browser: boolean;
+  /** The chosen app is not in the list any more. */
+  gone: boolean;
+}
+
+const wholeComputer: SourceOption = {
+  app: "", name: wholeComputerName, hint: wholeComputerName, icon: "", letter: wholeComputerBadge,
+  playing: false, muted: false, browser: false, gone: false,
+};
+
+function firstLetter(name: string): string {
+  const first = Array.from(name.trim())[0] ?? "?";
+  return first.toUpperCase();
+}
+
+/** The entries of the picker: the whole computer first, then the apps in the core's order. */
+export function sourceOptions(sources: SourcesView | null): SourceOption[] {
+  const apps = sources?.apps ?? [];
+  return [
+    wholeComputer,
+    ...apps.map((a): SourceOption => {
+      const title = a.title.trim();
+      const name = title || a.app;
+      return {
+        app: a.app, name, hint: title ? `${title} (${a.app})` : a.app, icon: a.icon, letter: firstLetter(name),
+        playing: a.playing, muted: a.muted, browser: a.browser, gone: false,
+      };
+    }),
+  ];
+}
+
+/** What the picker shows. */
+export interface PickerModel {
+  options: SourceOption[];
+  chosen: SourceOption;
+  /** Warnings about the chosen source, most important first. */
+  warnings: string[];
+  /** The small general advice, always shown. */
+  advice: string;
+}
+
+/** Maps the last picker reply (null: not loaded yet) and the selection to what the picker shows. */
+export function pickerModel(sources: SourcesView | null, selection: Selection): PickerModel {
+  const options = sourceOptions(sources);
+  let chosen = options.find((o) => o.app === selection.app);
+  if (chosen === undefined) {
+    // A chosen app that has closed stays chosen; the start then reports source_gone. Without a list nothing is known.
+    const known = sources !== null && !sources.listError;
+    chosen = { ...wholeComputer, app: selection.app, name: selection.app, hint: selection.app,
+      letter: firstLetter(selection.app), gone: known };
+  }
+
+  const warnings: string[] = [];
+  if (chosen.muted) {
+    warnings.push(adviceTexts.muted);
+  }
+  if (chosen.browser) {
+    warnings.push(adviceTexts.browser);
+  }
+  if (sources?.listError) {
+    warnings.push(adviceTexts.listError);
+  }
+  return { options, chosen, warnings, advice: adviceTexts.always };
+}
+
+/**
+ * Whether the general advice shrinks to one line (full text on hover), so the buttons stay in the 300 px popup.
+ * Only when two or more other messages are shown: next to one warning (the browser one included) or an error alone
+ * it stays in full, since it carries the muted-tab advice.
+ */
+export function collapseAdvice(warnings: readonly string[], error: string): boolean {
+  return warnings.length + (error !== "" ? 1 : 0) >= 2;
+}
+
+/**
+ * Whether the open apps are listed again: only while the page is visible with a prompt on offer and no action runs.
+ * Also not while the list is open, so entries do not move under the pointer.
+ */
+export function shouldRefresh(view: PromptView | null, visible: boolean, pending: Action | null, listOpen: boolean): boolean {
+  return visible && !listOpen && view !== null && view.state === "OFFERED" && pending === null;
+}
+
+/** Timers the poller uses; the browser's in the page, fakes in tests. */
+export interface Timers {
+  set(fn: () => void, ms: number): unknown;
+  clear(handle: unknown): void;
+}
+
+/**
+ * SourcesPoller lists the apps every refreshMs while active. A load never overlaps another: the next one is planned
+ * only after the previous one has settled.
+ */
+export class SourcesPoller {
+  private active = false;
+  private busy = false;
+  /** refreshNow came during a load: load again right after it. */
+  private again = false;
+  private handle: unknown = undefined;
+
+  constructor(
+    private readonly load: () => Promise<void>,
+    private readonly timers: Timers,
+    private readonly ms = refreshMs,
+  ) {}
+
+  /** Turns polling on (loading at once) or off. */
+  setActive(on: boolean): void {
+    if (on === this.active) {
+      return;
+    }
+    this.active = on;
+    if (on) {
+      this.tick();
+    } else {
+      this.again = false;
+      this.cancel();
+    }
+  }
+
+  /** Loads now when active (the popup was shown again or the prompt changed); a load in flight is not doubled. */
+  refreshNow(): void {
+    if (this.active) {
+      this.tick();
+    }
+  }
+
+  private cancel(): void {
+    if (this.handle !== undefined) {
+      this.timers.clear(this.handle);
+      this.handle = undefined;
+    }
+  }
+
+  private tick(): void {
+    this.cancel();
+    if (!this.active) {
+      return;
+    }
+    if (this.busy) {
+      this.again = true;
+      return;
+    }
+    this.busy = true;
+    this.load()
+      .catch(() => undefined)
+      .finally(() => {
+        this.busy = false;
+        const again = this.again;
+        this.again = false;
+        if (!this.active) {
+          return;
+        }
+        if (again) {
+          this.tick();
+        } else if (this.handle === undefined) {
+          this.handle = this.timers.set(() => this.tick(), this.ms);
+        }
+      });
+  }
 }

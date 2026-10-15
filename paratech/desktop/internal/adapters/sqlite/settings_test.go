@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -409,5 +410,54 @@ func TestSettingsMailAndHubRoundTrip(t *testing.T) {
 	mustExec(t, db, "UPDATE settings SET hub_url = ''")
 	if _, err := db.sql.ExecContext(ctx, "UPDATE settings SET smtp_security = 'none'"); !errors.Is(MapError(ctx, err), ErrConstraint) {
 		t.Fatalf("plaintext smtp security = %v, want a constraint violation", err)
+	}
+}
+
+// TASK-059: the remembered recording source survives a save, a restart and a stale writer, and a tampered or
+// oversized row is refused.
+func TestSettingsRecordingSourceRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "settings.db")
+
+	reopenSettings(t, path, func(r *SettingsRepository) {
+		s := loadSettings(t, r)
+		if s.RecordingSource() != "" {
+			t.Fatalf("fresh database source %q, want the whole computer", s.RecordingSource())
+		}
+		mustChange(t, s.SetRecordingSource("zoom.exe", settingsT0))
+		saveSettings(t, r, s)
+	})
+	reopenSettings(t, path, func(r *SettingsRepository) {
+		s := loadSettings(t, r)
+		if s.RecordingSource() != "zoom.exe" || s.Version() != 1 {
+			t.Fatalf("after reopen: source %q, version %d", s.RecordingSource(), s.Version())
+		}
+
+		// Another writer (the settings page) saves first: the stale save of the source is a version conflict.
+		other := loadSettings(t, r)
+		mustChange(t, other.SetNotifyOnProcessingComplete(false, settingsT0.Add(time.Minute)))
+		saveSettings(t, r, other)
+		mustChange(t, s.SetRecordingSource("chrome.exe", settingsT0.Add(2*time.Minute)))
+		if err := r.Save(ctx, s); !errors.Is(err, shared.ErrVersionConflict) {
+			t.Fatalf("stale Save = %v, want ErrVersionConflict", err)
+		}
+		fresh := loadSettings(t, r)
+		mustChange(t, fresh.SetRecordingSource("chrome.exe", settingsT0.Add(2*time.Minute)))
+		saveSettings(t, r, fresh)
+		if got := loadSettings(t, r); got.RecordingSource() != "chrome.exe" || got.NotifyOnProcessingComplete() {
+			t.Fatalf("after the retry: source %q, notify %v", got.RecordingSource(), got.NotifyOnProcessingComplete())
+		}
+	})
+
+	db := openTest(t, nil)
+	r := NewSettingsRepository(db)
+	saveSettings(t, r, settings.New())
+	mustExec(t, db, `UPDATE settings SET recording_source_app = '..\evil.exe'`)
+	if _, err := r.Load(ctx); !errors.Is(err, settings.ErrInvalidSettings) {
+		t.Fatalf("Load of a tampered source = %v, want ErrInvalidSettings", err)
+	}
+	long := strings.Repeat("a", 252) + ".exe"
+	if _, err := db.sql.ExecContext(ctx, "UPDATE settings SET recording_source_app = ?", long); !errors.Is(MapError(ctx, err), ErrConstraint) {
+		t.Fatalf("a 256-byte source = %v, want a constraint violation", err)
 	}
 }
