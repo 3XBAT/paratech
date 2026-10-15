@@ -32,6 +32,9 @@ const (
 	EnvAnthropicBaseURL = "HUB_ANTHROPIC_BASE_URL"
 	EnvLLMTimeout       = "HUB_LLM_TIMEOUT"
 	EnvLLMModels        = "HUB_LLM_MODELS"
+
+	EnvRateLimitPerMinute = "HUB_RATE_LIMIT_PER_MINUTE"
+	EnvRateLimitBurst     = "HUB_RATE_LIMIT_BURST"
 )
 
 // LLM provider defaults and bounds. The timeout stays at most 10 minutes (the provider discourages longer
@@ -45,6 +48,12 @@ const (
 )
 
 const maxShutdownTimeout = 5 * time.Minute
+
+// Rate limit bounds of the gateway, per tester (they mirror requestlimits.NewRate, which config may not import).
+const (
+	maxRateLimitPerMinute = 6000
+	maxRateLimitBurst     = 1000
+)
 
 // Quota bounds (ADR-0008). The reservation TTL must exceed the longest gateway request (provider call plus
 // settlement); the key retention is at most 24 hours (ADR-0005(d)).
@@ -109,7 +118,7 @@ type Config struct {
 	// IdempotencyRetention is how long the record of an idempotency key lives; after that the same key is new.
 	IdempotencyRetention time.Duration
 	// AnthropicAPIKey is the LLM provider key. It is a secret: read only from the environment and never printed.
-	// Empty means the provider is not configured.
+	// Required to serve: app.New refuses to build the server without it; the key commands do not need it.
 	AnthropicAPIKey string
 	// AnthropicBaseURL is the provider API base URL: https, or http to a loopback host for local testing.
 	AnthropicBaseURL string
@@ -118,6 +127,10 @@ type Config struct {
 	// LLMModels is the model allowlist, "alias=model-id:max_output_tokens[,...]" (see Models). Kept as text so that
 	// Config stays comparable.
 	LLMModels string
+	// RateLimitPerMinute is the average number of Complete calls a minute one API key may make.
+	RateLimitPerMinute int
+	// RateLimitBurst is how many calls one API key may make at once.
+	RateLimitBurst int
 }
 
 // Model is one allowlist entry of LLMModels. Its alias and id rules are checked by the domain when the allowlist is
@@ -134,6 +147,7 @@ func Default() Config {
 		LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second,
 		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
 		AnthropicBaseURL: DefaultAnthropicBaseURL, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels,
+		RateLimitPerMinute: 30, RateLimitBurst: 10,
 	}
 }
 
@@ -166,6 +180,18 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 			envErrs = append(envErrs, fmt.Errorf("%s %q: not an integer", EnvQuotaLimit, v))
 		} else {
 			cfg.QuotaLimit = n
+		}
+	}
+	for _, n := range []struct {
+		env string
+		dst *int
+	}{{EnvRateLimitPerMinute, &cfg.RateLimitPerMinute}, {EnvRateLimitBurst, &cfg.RateLimitBurst}} {
+		if v := getenv(n.env); v != "" {
+			if parsed, err := strconv.Atoi(v); err != nil {
+				envErrs = append(envErrs, fmt.Errorf("%s %q: not an integer", n.env, v))
+			} else {
+				*n.dst = parsed
+			}
 		}
 	}
 	cfg.AnthropicAPIKey = getenv(EnvAnthropicAPIKey)
@@ -210,6 +236,10 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		"limit of one provider call, 10s..10m, at most half the reservation TTL (env "+EnvLLMTimeout+")")
 	fs.StringVar(&cfg.LLMModels, "llm-models", cfg.LLMModels,
 		"model allowlist alias=model-id:max_output_tokens[,...] (env "+EnvLLMModels+")")
+	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute,
+		"average Complete calls a minute per API key, 1..6000 (env "+EnvRateLimitPerMinute+")")
+	fs.IntVar(&cfg.RateLimitBurst, "rate-limit-burst", cfg.RateLimitBurst,
+		"Complete calls per API key at once, 1..1000 (env "+EnvRateLimitBurst+")")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -292,7 +322,7 @@ func MustLoad(args []string, out io.Writer, getenv func(string) string) Config {
 }
 
 // Validate reports every problem found, so a misconfigured start fails once with a complete message. The key
-// commands do not serve, so the listen address, shutdown timeout, quota and LLM settings are checked only for serve; the
+// commands do not serve, so the listen address, shutdown timeout, quota, LLM and rate settings are checked only for serve; the
 // label and id are checked for presence here and for their exact rules by the domain.
 func (c Config) Validate() error {
 	var errs []error
@@ -313,6 +343,12 @@ func (c Config) Validate() error {
 		}
 		errs = append(errs, c.validateQuota()...)
 		errs = append(errs, c.validateLLM()...)
+		if c.RateLimitPerMinute < 1 || c.RateLimitPerMinute > maxRateLimitPerMinute {
+			errs = append(errs, fmt.Errorf("rate limit per minute %d: must be within 1..%d", c.RateLimitPerMinute, maxRateLimitPerMinute))
+		}
+		if c.RateLimitBurst < 1 || c.RateLimitBurst > maxRateLimitBurst {
+			errs = append(errs, fmt.Errorf("rate limit burst %d: must be within 1..%d", c.RateLimitBurst, maxRateLimitBurst))
+		}
 	case CommandKeysCreate:
 		if c.KeyLabel == "" {
 			errs = append(errs, errors.New("keys create: -label is required"))
@@ -483,9 +519,11 @@ func validateDatabaseURL(raw string) error {
 // them.
 func (c Config) String() string {
 	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
-		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s LLMTimeout:%s LLMModels:%s}",
+		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s LLMTimeout:%s LLMModels:%s "+
+		"RateLimitPerMinute:%d RateLimitBurst:%d}",
 		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
-		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels)
+		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels,
+		c.RateLimitPerMinute, c.RateLimitBurst)
 }
 
 // GoString is String for %#v, which otherwise prints every field, secrets included.
@@ -509,6 +547,8 @@ func (c Config) LogValue() slog.Value {
 		slog.String("anthropic_base_url", printableURL(c.AnthropicBaseURL)),
 		slog.Duration("llm_timeout", c.LLMTimeout),
 		slog.String("llm_models", c.LLMModels),
+		slog.Int("rate_limit_per_minute", c.RateLimitPerMinute),
+		slog.Int("rate_limit_burst", c.RateLimitBurst),
 	)
 }
 

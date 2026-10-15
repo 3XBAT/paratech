@@ -13,12 +13,18 @@ import (
 	"time"
 
 	"paratech/hub/config"
+	"paratech/hub/internal/adapters/anthropic"
 	"paratech/hub/internal/adapters/clock"
 	"paratech/hub/internal/adapters/postgres"
 	"paratech/hub/internal/adapters/random"
+	"paratech/hub/internal/adapters/ratelimit"
+	"paratech/hub/internal/cases/gateway"
 	"paratech/hub/internal/cases/keyauth"
 	"paratech/hub/internal/cases/keys"
 	"paratech/hub/internal/cases/quota"
+	"paratech/hub/internal/domain/llm/services/modelallowlist"
+	"paratech/hub/internal/domain/llm/services/requestlimits"
+	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/input/cli"
 	"paratech/hub/internal/input/connect"
 )
@@ -39,10 +45,20 @@ type App struct {
 	log *slog.Logger
 	out io.Writer // where the CLI prints its results, stdout by default
 
+	llm *llmParts // built by New for serve only
+
 	mu      sync.Mutex
 	started bool
 	closed  bool
 	db      *postgres.DB
+}
+
+// llmParts are the gateway's outbound parts that need no database: built and checked at New, so a bad allowlist or a
+// missing provider key fails the start before anything is opened.
+type llmParts struct {
+	models   *modelallowlist.List
+	provider *anthropic.Client
+	limiter  *ratelimit.Limiter
 }
 
 // Option changes a default of New.
@@ -54,7 +70,8 @@ func WithOutput(w io.Writer) Option {
 	return func(a *App) { a.out = w }
 }
 
-// New validates the configuration and builds the application. It starts no goroutines and opens nothing.
+// New validates the configuration and builds the application. It starts no goroutines and opens nothing. To serve
+// it also needs the provider key and a valid model allowlist.
 func New(cfg config.Config, log *slog.Logger, opts ...Option) (*App, error) {
 	if log == nil {
 		return nil, errors.New("app: logger is required")
@@ -69,7 +86,43 @@ func New(cfg config.Config, log *slog.Logger, opts ...Option) (*App, error) {
 	if a.out == nil {
 		return nil, errors.New("app: output is required")
 	}
+	if cfg.Command == config.CommandServe {
+		parts, err := newLLMParts(cfg)
+		if err != nil {
+			return nil, err
+		}
+		a.llm = parts
+	}
 	return a, nil
+}
+
+// newLLMParts builds the allowlist (the domain rules of alias, model id and cap), the provider client and the rate
+// limiter. Error messages never contain the provider key.
+func newLLMParts(cfg config.Config) (*llmParts, error) {
+	if cfg.AnthropicAPIKey == "" {
+		return nil, fmt.Errorf("app: %s is required to serve", config.EnvAnthropicAPIKey)
+	}
+	var entries []modelallowlist.Entry
+	for _, m := range cfg.Models() {
+		entries = append(entries, modelallowlist.Entry{Alias: m.Alias, Model: m.ID, MaxOutput: m.MaxOutput})
+	}
+	models, err := modelallowlist.New(entries)
+	if err != nil {
+		return nil, fmt.Errorf("app: %s: %w", config.EnvLLMModels, err)
+	}
+	provider, err := anthropic.New(anthropic.Options{APIKey: cfg.AnthropicAPIKey, BaseURL: cfg.AnthropicBaseURL, Timeout: cfg.LLMTimeout})
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
+	rate, err := requestlimits.NewRate(cfg.RateLimitPerMinute, cfg.RateLimitBurst)
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
+	limiter, err := ratelimit.New(rate)
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
+	return &llmParts{models: models, provider: provider, limiter: limiter}, nil
 }
 
 // Run executes cfg.Command: it serves until ctx is cancelled, or runs one key command and returns. Run may be called
@@ -118,15 +171,66 @@ func (a *App) runServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	handler, err := connect.NewRouter(connect.Deps{Log: a.log, Readiness: db, Auth: auth, Quota: quotaHandler})
+	gatewaySvc, err := gateway.New(gateway.Deps{
+		Accounts: db.QuotaAccounts(), Results: db.QuotaAccounts(), Provider: a.llm.provider, Limiter: a.llm.limiter,
+		Clock: clock.System{}, Random: random.Source{}, Models: a.llm.models, Log: a.log,
+	}, gateway.Config{
+		Unit: a.cfg.QuotaUnit, Limit: a.cfg.QuotaLimit, ReservationTTL: a.cfg.QuotaReservationTTL,
+		KeyRetention: a.cfg.IdempotencyRetention, CallTimeout: a.cfg.LLMTimeout,
+	})
 	if err != nil {
 		return err
 	}
+	gatewayHandler, err := connect.NewGateway(gatewaySvc, a.log)
+	if err != nil {
+		return err
+	}
+	handler, err := connect.NewRouter(connect.Deps{Log: a.log, Readiness: db, Auth: auth, Gateway: gatewayHandler, Quota: quotaHandler})
+	if err != nil {
+		return err
+	}
+
+	purgeCtx, stopPurge := context.WithCancel(ctx)
+	purged := make(chan struct{})
+	go func() {
+		defer close(purged)
+		purgeResults(purgeCtx, a.log, gatewaySvc, account.ResultPurgeInterval)
+	}()
+	defer func() {
+		stopPurge()
+		<-purged
+	}()
 
 	a.log.Info("hub started", "log_level", a.cfg.LogLevel, "listen_addr", ln.Addr().String())
 	err = serve(ctx, a.log, newServer(handler, a.log), ln, a.cfg.ShutdownTimeout)
 	a.log.Info("hub stopped")
 	return err
+}
+
+// resultPurger is what the purge loop needs from the gateway use case.
+type resultPurger interface {
+	PurgeResults(ctx context.Context) (int64, error)
+}
+
+// purgeResults clears stored results past their result window now and then every interval until ctx ends (PRD
+// section 13.2: no model output outlives the retention while the Hub runs).
+func purgeResults(ctx context.Context, log *slog.Logger, svc resultPurger, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		n, err := svc.PurgeResults(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			log.WarnContext(ctx, "purge of stored results failed", "err", err)
+		case n > 0:
+			log.InfoContext(ctx, "stored results purged", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // runKeys runs one key command (PRD section 12) against the migrated database.

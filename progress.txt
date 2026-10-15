@@ -1202,3 +1202,52 @@
 - Нет разреза allowlist по operation_type (proto допускает) и requestlimits; стриминг не реализован (CompleteStream)
 - Low: App.cfg — неэкспортируемое поле, печать App через %v/%+v выдала бы секреты (сейчас нигде не печатается)
 - Low: TLS-ошибки классифицируются как transient "connection failed"
+
+---
+
+## [TASK-035] LLM Gateway Hub: валидация, лимиты, reserve -> provider -> settle/release
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- GatewayService.Complete: auth -> rate limit -> валидация -> Start (одна транзакция) -> провайдер -> Complete (settle + сохранённый результат в одной транзакции) или Release; ограниченный по частоте или невалидный вызов ничего не пишет в журнал
+- domain/llm/values/spec.go (NewSpec: ключ, операция, alias, непустые instructions, UTF-8 без NUL, <= 1 МиБ; Fingerprint = SHA-256 полей с длинами, без ключа); domain/llm/services/requestlimits (резерв = байты текстов + 1024 + урезанный max_output — верхняя граница без токенизатора; GCRA-лимит частоты); Completion.Failure (отказ модели = постоянная ошибка провайдера)
+- domain/quota/account: RequestHash в отпечатке ключа, Result (вывод + usage) в записи ключа, Start/Complete; конфликт до любого повтора; RESERVED -> aborted; SETTLED-complete -> повтор; поздняя попытка списывается без результата; ключ шлюза живёт «окно результата» = retention - 5 мин (обычный ключ ledger — полный retention)
+- Миграция 0004_gateway_results.sql (request_hash, result_* bytea/токены, CHECK «всё или ничего», индекс для очистки); postgres PurgeResults; app чистит при старте и каждые 5 мин — вывод удаляется к концу retention, пока Hub работает
+- cases/gateway: свои порты Accounts/Results/RateLimiter/Clock/Random (ARCH-20, не импортирует cases/quota); провайдер на context.WithoutCancel с дедлайном min(HUB_LLM_TIMEOUT, expires_at - now - 5s); start/settle/release отвязаны от клиента (5 s); без ретраев внутри Hub
+- adapters/ratelimit (в памяти, только аутентифицированные ключи, простаивающие удаляются); config HUB_RATE_LIMIT_PER_MINUTE (30), HUB_RATE_LIMIT_BURST (10)
+- input/connect/gateway.go: ErrorDetail по ADR-0005(c): RATE_LIMITED/QUOTA_EXCEEDED -> resource_exhausted (retry_after / снимок квоты), PROVIDER_ERROR -> unavailable (401/403 провайдера и отказы — постоянные, не INVALID_API_KEY), IDEMPOTENCY_CONFLICT -> failed_precondition, идущая попытка -> aborted, валидация -> invalid_argument, прочее -> internal; фиксированные тексты; невалидный UTF-8 вывода заменяется U+FFFD; CompleteStream остаётся Unimplemented; Reserve/Settle/Release по-прежнему 404
+- app.New (serve): обязателен HUB_ANTHROPIC_API_KEY, allowlist из config.Models() через modelallowlist.New — ошибка при старте; команды keys ключа провайдера не требуют
+- Логи: одна строка на вызов (outcome, операция, alias, reservation, токены, длительность), без текстов, вывода и ключей
+- ADR-0010 (docs/adr/0010-hub-llm-gateway.md; 0009 занят TASK-056), paratech/README.md
+- go.mod: google.golang.org/protobuf из indirect в direct (та же версия; durationpb для retry_after). Новых зависимостей нет
+- Изменённые существующие тесты: config_test TestLoad (новые значения по умолчанию), postgres_test (закреплена миграция 4), app_test/tests/server_test/tests/keys_test (фиктивный ключ провайдера — serve его требует; TestKeyCommandFailsWhenTheDatabaseIsUnreachable очищает ключ), values_test TestNewCompletion (+Refused/Failure), reservation_test TestNewPolicy (+retention <= интервала очистки)
+- Ревью: approve (medium: номер ADR совпадал с веткой TASK-056; low: отмена клиента во время COMMIT Start оставляла резерв, вывод жил до retention + 5 мин, очистка вне агрегата не описана, разрыв при остановке; nit: решение об отказе в use case) -> исправлено 817e0b9..6096a73, повторное ревью approve (только low/nit). Security: два прохода (весь diff и исправления): найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: HUB_TEST_DATABASE_URL (docker compose, проект task035) go test -race -count=1 ./hub/... — DB-тесты реально выполнены (138 PASS, 0 SKIP), схем не осталось, compose down -v
+- [x] Шаг 2: TestGatewaySettlesTheActualUsageAgainstPostgres, TestCompleteSettlesTheActualUsage
+- [x] Шаг 3: TestGatewayProviderFailureReleasesAgainstPostgres, TestProviderFailureReleasesTheHold
+- [x] Шаг 4: TestGatewayReplayAgainstPostgres, TestCompleteReplaysTheStoredResult
+- [x] Также на Postgres: конфликт ключа (до/после завершения, во время выполнения), 12 параллельных одинаковых вызовов -> один вызов провайдера и одно списание, отмена до вызова (release) и во время (settle, повтор), rate limit без резерва, QUOTA_EXCEEDED без вызова провайдера, окно результата + очистка, нет текстов в строках БД и логах
+- [x] Смоук бинарника: без HUB_ANTHROPIC_API_KEY — exit 1; с фиктивным ключом и мёртвым loopback-провайдером: без ключа 401, Complete 503 PROVIDER_ERROR retryable, released/failed в журнале, остаток не изменился, Reserve/Settle/Release 404, маркер текста и ключ в логе — 0
+- Реальной сети и настоящего ключа провайдера нет
+
+### Решения (подтвердить)
+- Отказ модели (refusal) освобождает резерв и не списывается (как и сбой провайдера после генерации, ADR-0005(e)); вопрос владельцу: списывать ли отказы как partial
+- Резерв по байтам (1 МиБ запроса ~ весь лимит по умолчанию 1 000 000 токенов); списывается фактический usage
+- Ретраев внутри Hub нет (повторяет очередь задач десктопа)
+- Ключ провайдера проверяется в app.New, а не в config.Validate
+- Ключ шлюза живёт retention - 5 мин (окно результата), чтобы вывод не хранился дольше retention
+
+### Заметки (follow-up)
+- CompleteStream (включая partial settle при отмене); перед ним проверить ReadTimeout 60s HTTP-сервера (может отменять контекст длинных запросов)
+- Остановка/падение Hub во время вызова провайдера (HUB_SHUTDOWN_TIMEOUT 15s < HUB_LLM_TIMEOUT): попытка остаётся RESERVED, ключ aborted до TTL; вариант — ждать незавершённые вызовы до закрытия БД
+- Low (ревью): формулировка ADR-0010 «вывод удалён к концу retention» неточна на время выполнения очистки (до 30 s) и +5 мин после неудачной очистки; во время простоя Hub не чистится
+- Low (ревью): нет теста для ключа шлюза «последняя попытка RESERVED после окна остаётся живой» (путь общий с обычным ключом, покрыт TestReserveRetentionKeepsReservedLatest)
+- Nit: попытка, начатая поздно в окне, может завершиться после окна — списывается, результат не сохраняется, повтор платит снова; ранний ctx.Err() до start сэкономил бы запись в журнал для уже ушедшего клиента; ResultPurgeInterval — константа домена (можно сделать частью Policy)
+- Нет лимита одновременных вызовов провайдера на ключ; состояние rate limit в памяти процесса (теряется при рестарте); неудачные попытки аутентификации не ограничены
+- Строки ключей после retention только очищаются от вывода, не удаляются (sweeper ADR-0008 по-прежнему нужен); UPDATE оставляет старые версии строк до VACUUM
+- docs/architecture.md §5 не перечисляет адаптер ratelimit; §12 по-прежнему называет reservation агрегатом
+- TASK-036 (GetRemaining) остаётся pending: обработчик уже есть с TASK-033, проверить шаг теста на HTTP-уровне и закрыть

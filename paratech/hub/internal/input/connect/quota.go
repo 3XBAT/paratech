@@ -63,14 +63,19 @@ func (q *Quota) GetRemaining(ctx context.Context, _ *connectrpc.Request[hubv1.Ge
 	return connectrpc.NewResponse(&hubv1.GetRemainingResponse{Quota: snapshot}), nil
 }
 
-// snapshotToProto maps a snapshot; the quota does not renew in MVP, so period_ends_at stays unset.
+// snapshotToProto maps a snapshot of the quota use case.
 func snapshotToProto(s quota.Snapshot) (*hubv1.QuotaSnapshot, error) {
-	unit, err := unitToProto(s.Unit)
+	return quotaToProto(s.Unit, s.Remaining, s.Reserved, s.Limit)
+}
+
+// quotaToProto maps a snapshot of any use case; the quota does not renew in MVP, so period_ends_at stays unset.
+func quotaToProto(unitName string, remaining, reserved, limit int64) (*hubv1.QuotaSnapshot, error) {
+	unit, err := unitToProto(unitName)
 	if err != nil {
 		return nil, err
 	}
 	amount := func(v int64) *hubv1.QuotaAmount { return &hubv1.QuotaAmount{Unit: unit, Value: v} }
-	return &hubv1.QuotaSnapshot{Remaining: amount(s.Remaining), Reserved: amount(s.Reserved), Limit: amount(s.Limit)}, nil
+	return &hubv1.QuotaSnapshot{Remaining: amount(remaining), Reserved: amount(reserved), Limit: amount(limit)}, nil
 }
 
 func unitToProto(u string) (hubv1.QuotaUnit, error) {

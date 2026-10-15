@@ -123,8 +123,8 @@ func embeddedVersions(t *testing.T) []int64 {
 		out = append(out, v)
 	}
 	// Pinned, so a broken embed (no files) cannot make the comparisons below pass vacuously.
-	if len(out) == 0 || !slices.Contains(out, 1) || !slices.Contains(out, 2) || !slices.Contains(out, 3) {
-		t.Fatalf("embedded migration versions = %v, want at least 1, 2 and 3", out)
+	if len(out) == 0 || !slices.Contains(out, 1) || !slices.Contains(out, 2) || !slices.Contains(out, 3) || !slices.Contains(out, 4) {
+		t.Fatalf("embedded migration versions = %v, want at least 1 to 4", out)
 	}
 	return out
 }
