@@ -45,7 +45,8 @@ func mustDigest(t *testing.T, sha string, size int64) Digest {
 
 func goodFacts(t *testing.T) Facts {
 	return Facts{
-		AssignmentExists: true, Recipient: mustRecipient(t, "teacher@school.example"), Attachment: mustDigest(t, shaA, 11),
+		AssignmentExists: true, AssignmentTitle: "Algebra", Recipient: mustRecipient(t, "teacher@school.example"),
+		Attachment: mustDigest(t, shaA, 11),
 	}
 }
 
@@ -281,7 +282,7 @@ func TestValidate(t *testing.T) {
 		{"deadline unknown assignment", outDeadline, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
 		{"email no recipient", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, t0, StatusRejected, ReasonNoRecipient},
 		{"email no artifact", outEmail, func(f *Facts) { f.Attachment = Digest{} }, t0, StatusRejected, ReasonNoArtifact},
-		{"export needs no artifact or recipient", outExport, func(f *Facts) { *f = Facts{AssignmentExists: true} }, t0, StatusValidated, ""},
+		{"export needs no artifact or recipient", outExport, func(f *Facts) { *f = Facts{AssignmentExists: true, AssignmentTitle: "Algebra"} }, t0, StatusValidated, ""},
 		{"deadline in the past", outDeadline, nil, t0.AddDate(0, 0, 7), StatusRejected, ReasonDueOutOfRange},
 		{"deadline too far ahead", outDeadline, nil, t0.Add(-MaxDueAhead - 7*24*time.Hour), StatusRejected, ReasonDueOutOfRange},
 	}
@@ -304,6 +305,10 @@ func TestValidate(t *testing.T) {
 			}
 			if pinned != (p.AttachmentDigest() == f.Attachment && !p.AttachmentDigest().IsZero()) {
 				t.Fatalf("attachment = %+v", p.AttachmentDigest())
+			}
+			titled := p.Kind() == KindExportHomework && tc.status == StatusValidated
+			if titled != (p.AssignmentTitle() == f.AssignmentTitle) {
+				t.Fatalf("assignment title = %q", p.AssignmentTitle())
 			}
 		})
 	}
@@ -364,8 +369,9 @@ func TestCommandContents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The draft export's format: the trusted assignment title as the heading, then the model's body.
 	if export.IdempotencyKey() != "proposal:p1" || export.AssignmentID() != "a1" || export.Target() != ref ||
-		!strings.HasPrefix(export.Content(), "1. Solve") {
+		export.Content() != "# Algebra\n\n1. Solve 3x = 9.\n2. Explain.\n" {
 		t.Fatalf("export command: %+v", export)
 	}
 
@@ -432,6 +438,10 @@ func TestRestoreRejectsInconsistentState(t *testing.T) {
 		{"confirmed email with bad digest", base(outEmail, StatusConfirmed), func(s *State) { s.AttachmentSHA256 = "ABC" }},
 		{"confirmed email with negative size", base(outEmail, StatusConfirmed), func(s *State) { s.AttachmentSize = -1 }},
 		{"export with attachment", base(outExport, StatusConfirmed), func(s *State) { s.AttachmentSHA256 = shaA }},
+		{"confirmed export without assignment title", base(outExport, StatusConfirmed), func(s *State) { s.AssignmentTitle = "" }},
+		{"confirmed export with a multi-line title", base(outExport, StatusConfirmed), func(s *State) { s.AssignmentTitle = "a\nb" }},
+		{"proposed export with assignment title", base(outExport, StatusProposed), func(s *State) { s.AssignmentTitle = "Algebra" }},
+		{"email with assignment title", base(outEmail, StatusConfirmed), func(s *State) { s.AssignmentTitle = "Algebra" }},
 		{"proposed email with attachment", base(outEmail, StatusProposed), func(s *State) { s.AttachmentSHA256 = shaA }},
 		{"stale without reason", base(outEmail, StatusStale), func(s *State) { s.Reason = "" }},
 		{"stale with a validation reason", base(outEmail, StatusStale), func(s *State) { s.Reason = ReasonDueOutOfRange }},
@@ -548,6 +558,20 @@ func TestKindNeeds(t *testing.T) {
 		want := k == KindSendHomework
 		if k.NeedsRecipient() != want || k.NeedsAttachment() != want {
 			t.Errorf("%s: NeedsRecipient %v, NeedsAttachment %v, want %v", k, k.NeedsRecipient(), k.NeedsAttachment(), want)
+		}
+		if k.NeedsAssignmentTitle() != (k == KindExportHomework) {
+			t.Errorf("%s: NeedsAssignmentTitle %v", k, k.NeedsAssignmentTitle())
+		}
+	}
+}
+
+// An export of an existing assignment needs its title in the facts: without it Validate refuses and changes nothing.
+func TestValidateExportNeedsTheAssignmentTitle(t *testing.T) {
+	for _, title := range []string{"", "  ", "a\nb"} {
+		p := mustNew(t, outExport)
+		if err := p.Validate(Facts{AssignmentExists: true, AssignmentTitle: title}, t0); !errors.Is(err, ErrInvalidProposal) ||
+			p.Status() != StatusProposed {
+			t.Fatalf("title %q: err = %v, status %s", title, err, p.Status())
 		}
 	}
 }

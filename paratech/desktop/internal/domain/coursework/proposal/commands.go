@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -74,7 +75,10 @@ func (p *Proposal) ExportCommand() (ExportCommand, error) {
 	if err != nil {
 		return ExportCommand{}, err
 	}
-	return ExportCommand{key: p.idempotencyKey(), assignment: p.assignment, target: ref, content: p.body}, nil
+	return ExportCommand{
+		key: p.idempotencyKey(), assignment: p.assignment, target: ref,
+		content: values.HomeworkMarkdown(p.assignmentTitle, p.body),
+	}, nil
 }
 
 // CalendarCommand returns the command of a CONFIRMED create_deadline_event proposal.
@@ -115,7 +119,8 @@ func (c ExportCommand) AssignmentID() shared.AssignmentID { return c.assignment 
 // Target returns the export file, derived by the core.
 func (c ExportCommand) Target() shared.ArtifactRef { return c.target }
 
-// Content returns the homework text to write.
+// Content returns the file to write: the trusted assignment title as the heading and the model's body
+// (values.HomeworkMarkdown, the format of the draft export too).
 func (c ExportCommand) Content() string { return c.content }
 
 // IsZero reports whether c is the zero value, which no adapter may act on.

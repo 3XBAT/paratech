@@ -9,7 +9,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// MemDrafts is an in-memory draft repository (homeworkflow.DraftRepository) until the sqlite one exists. Drafts are
+// MemDrafts is an in-memory draft repository (homeworkflow.DraftRepository) for use case tests. Drafts are
 // kept as State and rebuilt with Restore, as an adapter does, and Save is the version compare-and-swap of
 // ADR-0004(d).
 type MemDrafts struct {

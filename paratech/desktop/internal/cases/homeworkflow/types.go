@@ -143,11 +143,17 @@ type DraftDeps struct {
 
 	// MaxAttempts of each generation job; 0 means DefaultPostProcessAttempts.
 	MaxAttempts int
+
+	// GenerateRetries bounds how often Generate starts the same generation again after its job failed or was
+	// cancelled, then it returns ErrGenerateRetries; 0 means DefaultGenerateRetries, at most MaxGenerateRetries.
+	GenerateRetries int
 }
 
-// generateRetries bounds how often Generate starts the same generation again after its job failed or was cancelled;
-// then it returns ErrGenerateRetries.
-const generateRetries = 20
+// Bounds of DraftDeps.GenerateRetries. The maximum keeps the round suffix of the job key short.
+const (
+	DefaultGenerateRetries = 20
+	MaxGenerateRetries     = 1000
+)
 
 // GenerateResult is the generation job Generate started or found. Created is false when an equivalent generation
 // (same assignment, base version and instructions) already had a live or completed job, for example after a double

@@ -327,7 +327,8 @@ func TestConfirmedProposalExecutesOnce(t *testing.T) {
 				t.Fatalf("email command %+v", mail[0])
 			}
 		case proposal.KindExportHomework:
-			if exp[0].Target() != ref || exp[0].Content() != "1. Solve 3x = 9." {
+			// One format with the draft export: the stored assignment title as the heading, then the body.
+			if exp[0].Target() != ref || exp[0].Content() != values.HomeworkMarkdown(fakeAssignmentTitle, "1. Solve 3x = 9.") {
 				t.Fatalf("export command %+v", exp[0])
 			}
 		case proposal.KindDeadlineEvent:

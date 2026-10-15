@@ -57,6 +57,9 @@ func (k Kind) NeedsRecipient() bool { return k == KindSendHomework }
 // NeedsAttachment reports whether the kind is checked against the content of the export file.
 func (k Kind) NeedsAttachment() bool { return k == KindSendHomework }
 
+// NeedsAssignmentTitle reports whether the kind takes the stored title of the assignment (the heading of an export).
+func (k Kind) NeedsAssignmentTitle() bool { return k == KindExportHomework }
+
 // RejectReason tells why a proposal was rejected at validation or went stale before execution. The set is closed and
 // written by the core, never by the model.
 type RejectReason string
@@ -146,9 +149,10 @@ func (d Digest) IsZero() bool { return d == Digest{} }
 
 // Facts is the trusted local state a proposal is validated and, before execution, re-checked against. The use case
 // reads it from local ports (the assignment repository, the settings, the Storage Manager), only what the kind needs
-// (Kind.NeedsRecipient, Kind.NeedsAttachment); nothing in it comes from the model.
+// (Kind.NeedsRecipient, Kind.NeedsAttachment, Kind.NeedsAssignmentTitle); nothing in it comes from the model.
 type Facts struct {
 	AssignmentExists bool      // the referenced assignment is in the local database
+	AssignmentTitle  string    // its stored title, when it exists
 	Recipient        Recipient // the configured homework recipient; zero if none
 	Attachment       Digest    // the content of ExportRef of the assignment; zero if the file does not exist
 }

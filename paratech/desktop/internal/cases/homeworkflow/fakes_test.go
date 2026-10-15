@@ -72,9 +72,12 @@ func (r proposalRepo) Save(ctx context.Context, p *proposal.Proposal) error {
 	return nil
 }
 
-// AssignmentRepository. Only existence matters to the proposal pipeline; the aggregate is a skeleton until TASK-042.
+// AssignmentRepository. The proposal pipeline reads only existence and the title (the heading of an export).
 
 type assignmentRepo struct{ s *store }
+
+// fakeAssignmentTitle is the stored title of every assignment of the fake.
+const fakeAssignmentTitle = "Algebra"
 
 func (r assignmentRepo) Get(ctx context.Context, id shared.AssignmentID) (*assignment.Assignment, error) {
 	r.s.mu.Lock()
@@ -82,7 +85,9 @@ func (r assignmentRepo) Get(ctx context.Context, id shared.AssignmentID) (*assig
 	if !r.s.assignments[id] {
 		return nil, fmt.Errorf("assignment %s: %w", id, shared.ErrNotFound)
 	}
-	return new(assignment.Assignment), nil
+	return assignment.Restore(assignment.State{
+		Version: 1, ID: id, SourceIndex: -1, Title: fakeAssignmentTitle, CreatedAt: t0, UpdatedAt: t0,
+	})
 }
 
 func (r assignmentRepo) GetBySource(context.Context, shared.TranscriptID, int) (*assignment.Assignment, error) {
