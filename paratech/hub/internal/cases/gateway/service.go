@@ -156,8 +156,8 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	completion, err := s.provider.Complete(callCtx, c.request)
 	cancel()
-	if err == nil && completion.Refused() {
-		err = &values.ProviderError{Kind: values.KindPermanent, Reason: "refused"}
+	if err == nil {
+		err = completion.Failure()
 	}
 	if err != nil {
 		// Also after an answer cut off mid-body: the provider may have billed it, the tester is not charged

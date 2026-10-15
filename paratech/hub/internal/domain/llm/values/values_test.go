@@ -93,8 +93,16 @@ func TestNewCompletion(t *testing.T) {
 	if c.Refused() {
 		t.Fatal("a max_tokens answer is not a refusal")
 	}
-	if r, err := NewCompletion("", u, StopRefusal); err != nil || !r.Refused() {
+	if c.Failure() != nil {
+		t.Fatal("a max_tokens answer is not a failure")
+	}
+	r, err := NewCompletion("", u, StopRefusal)
+	if err != nil || !r.Refused() {
 		t.Fatalf("refusal: %v, %v", r, err)
+	}
+	var pe *ProviderError
+	if f := r.Failure(); !errors.As(f, &pe) || pe.Kind != KindPermanent || !errors.Is(f, ErrProviderPermanent) {
+		t.Fatalf("refusal failure = %v, want a permanent ProviderError", f)
 	}
 	if _, err := NewCompletion("", u, StopReason(200)); !errors.Is(err, ErrInvalidCompletion) {
 		t.Fatalf("error = %v, want ErrInvalidCompletion", err)

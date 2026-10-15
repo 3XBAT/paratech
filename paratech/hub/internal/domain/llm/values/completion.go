@@ -90,9 +90,17 @@ func (c Completion) Usage() Usage { return c.usage }
 // Stop says why the model stopped.
 func (c Completion) Stop() StopReason { return c.stop }
 
-// Refused reports whether the provider declined to answer (StopRefusal). The output is not usable, so the gateway
-// treats it as a permanent provider failure (errors.proto: a refusal is not retryable).
+// Refused reports whether the provider declined to answer (StopRefusal). The output is not usable.
 func (c Completion) Refused() bool { return c.stop == StopRefusal }
+
+// Failure is the provider failure this completion stands for, nil when it is an answer. A refusal is a permanent
+// *ProviderError (errors.proto: a refusal is not retryable), so it is released like any failed call.
+func (c Completion) Failure() error {
+	if c.Refused() {
+		return &ProviderError{Kind: KindPermanent, Reason: "refused"}
+	}
+	return nil
+}
 
 // String prints the completion without the output text (only its size).
 func (c Completion) String() string {
