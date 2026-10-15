@@ -3,6 +3,7 @@ package recordingsession
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/services/limits"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -892,5 +894,42 @@ func TestGetAndActive(t *testing.T) {
 	}
 	if _, err := e.svc.Get(testCtx(t), "missing"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("Get missing = %v", err)
+	}
+}
+
+// TASK-059: the chosen source reaches the recorder; an app that does not run fails the start with a recording that
+// says why, and the whole computer stays the default.
+func TestStartCapturesTheChosenSource(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	e := newEnv(t, DefaultConfig())
+	zoom, err := values.SourceOf("zoom.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := e.svc.Start(testCtx(t), StartRequest{Source: zoom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := e.rec.Source(info.ID); !ok || got != zoom {
+		t.Fatalf("recorder source %v, %v; want %v", got, ok, zoom)
+	}
+	if _, err := e.svc.Stop(testCtx(t), info.ID); err != nil && !errors.Is(err, ErrAbandoned) {
+		t.Fatal(err)
+	}
+
+	e.rec.FailStart(fmt.Errorf("audiocapture: %w: zoom.exe", recording.ErrSourceNotRunning))
+	failed, err := e.svc.Start(testCtx(t), StartRequest{Source: zoom})
+	if !errors.Is(err, ErrStartFailed) || !errors.Is(err, recording.ErrSourceNotRunning) || failed.Status != recording.StatusFailed {
+		t.Fatalf("Start of a closed app = %+v, %v", failed, err)
+	}
+	if r := e.stored(failed.ID); !strings.Contains(r.Problem(), "not running") {
+		t.Fatalf("problem %q", r.Problem())
+	}
+
+	e.rec.FailStart(nil)
+	whole := e.start()
+	if got, ok := e.rec.Source(whole.ID); !ok || !got.IsWholeComputer() {
+		t.Fatalf("default source %v, %v; want the whole computer", got, ok)
 	}
 }

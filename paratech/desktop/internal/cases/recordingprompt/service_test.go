@@ -11,13 +11,14 @@ import (
 	"paratech/desktop/internal/domain/recording/prompt"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/services/limits"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
 
 func TestNew(t *testing.T) {
 	e := newEnv(t)
-	full := Deps{Settings: e.settings, Popup: e.popup, Recordings: e.recordings, Clock: e.clock, Sleeper: e.clock}
+	full := Deps{Settings: e.settings, Apps: e.apps, Popup: e.popup, Recordings: e.recordings, Clock: e.clock, Sleeper: e.clock}
 	tests := []struct {
 		name string
 		edit func(*Deps, *Config)
@@ -25,6 +26,7 @@ func TestNew(t *testing.T) {
 	}{
 		{name: "ok", edit: func(*Deps, *Config) {}, ok: true},
 		{name: "no settings", edit: func(d *Deps, _ *Config) { d.Settings = nil }},
+		{name: "no apps", edit: func(d *Deps, _ *Config) { d.Apps = nil }},
 		{name: "no popup", edit: func(d *Deps, _ *Config) { d.Popup = nil }},
 		{name: "no recordings", edit: func(d *Deps, _ *Config) { d.Recordings = nil }},
 		{name: "no clock", edit: func(d *Deps, _ *Config) { d.Clock = nil }},
@@ -118,7 +120,7 @@ func TestStartRecordsTheLessonAndHides(t *testing.T) {
 	e := newEnv(t)
 	v := e.offer("lesson-1")
 
-	got, err := e.svc.Start(context.Background(), v.ID)
+	got, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +136,7 @@ func TestStartRecordsTheLessonAndHides(t *testing.T) {
 	if _, ok := e.svc.Current(); ok {
 		t.Fatal("the prompt is over after a start")
 	}
-	if _, err := e.svc.Start(context.Background(), v.ID); !errors.Is(err, ErrNoPrompt) {
+	if _, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer()); !errors.Is(err, ErrNoPrompt) {
 		t.Fatalf("a second click on the same popup: %v", err)
 	}
 }
@@ -149,6 +151,7 @@ func TestFailedStartKeepsThePopup(t *testing.T) {
 	}{
 		{"recorder unavailable in this build", true, fmt.Errorf("start: %w", recording.ErrCaptureUnavailable), prompt.ProblemUnavailable},
 		{"another recording in progress", true, fmt.Errorf("start: %w: r0", limits.ErrRecordingInProgress), prompt.ProblemInProgress},
+		{"the chosen app is closed", true, fmt.Errorf("start: %w: zoom.exe", recording.ErrSourceNotRunning), prompt.ProblemSourceGone},
 		{"generic failure", true, errors.New("device busy"), prompt.ProblemFailed},
 		{"recordings not ready", false, nil, prompt.ProblemRecovering},
 	}
@@ -158,7 +161,7 @@ func TestFailedStartKeepsThePopup(t *testing.T) {
 			v := e.offer("lesson-1")
 			e.recordings.set(tt.ready, tt.err)
 
-			got, err := e.svc.Start(context.Background(), v.ID)
+			got, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer())
 			if !errors.Is(err, ErrStartFailed) {
 				t.Fatalf("Start = %v, want ErrStartFailed", err)
 			}
@@ -176,7 +179,7 @@ func TestFailedStartKeepsThePopup(t *testing.T) {
 			}
 
 			e.recordings.set(true, nil)
-			if got, err := e.svc.Start(context.Background(), v.ID); err != nil || got.State != prompt.StateStarted {
+			if got, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer()); err != nil || got.State != prompt.StateStarted {
 				t.Fatalf("retry = %+v, %v", got, err)
 			}
 		})
@@ -194,7 +197,7 @@ func TestStaleIDIsRefused(t *testing.T) {
 
 	ctx := context.Background()
 	actions := map[string]func(prompt.ID) (View, error){
-		"start":  func(id prompt.ID) (View, error) { return e.svc.Start(ctx, id) },
+		"start":  func(id prompt.ID) (View, error) { return e.svc.Start(ctx, id, values.WholeComputer()) },
 		"snooze": func(id prompt.ID) (View, error) { return e.svc.Snooze(ctx, id) },
 		"skip":   func(id prompt.ID) (View, error) { return e.svc.Skip(ctx, id) },
 	}
@@ -223,7 +226,7 @@ func TestOneStartAtATime(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.svc.Start(context.Background(), v.ID)
+		_, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer())
 		done <- err
 	}()
 	<-entered
@@ -232,7 +235,7 @@ func TestOneStartAtATime(t *testing.T) {
 		t.Fatalf("current %+v, want STARTING without snooze", cur)
 	}
 	for name, act := range map[string]func() error{
-		"start":  func() error { _, err := e.svc.Start(context.Background(), v.ID); return err },
+		"start":  func() error { _, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer()); return err },
 		"snooze": func() error { _, err := e.svc.Snooze(context.Background(), v.ID); return err },
 		"skip":   func() error { _, err := e.svc.Skip(context.Background(), v.ID); return err },
 	} {
@@ -268,7 +271,7 @@ func TestNewLessonDuringAStart(t *testing.T) {
 
 	done := make(chan View, 1)
 	go func() {
-		v, err := e.svc.Start(context.Background(), old.ID)
+		v, err := e.svc.Start(context.Background(), old.ID, values.WholeComputer())
 		if err != nil {
 			t.Error(err)
 		}
@@ -445,7 +448,7 @@ func TestAdHocIgnoresTheSetting(t *testing.T) {
 	if err := e.svc.Tick(ctx); err != nil || !e.popup.Visible() {
 		t.Fatalf("Tick = %v, visible %v: an ad-hoc prompt does not expire", err, e.popup.Visible())
 	}
-	if got, err := e.svc.Start(ctx, v.ID); err != nil || got.State != prompt.StateStarted {
+	if got, err := e.svc.Start(ctx, v.ID, values.WholeComputer()); err != nil || got.State != prompt.StateStarted {
 		t.Fatalf("Start = %+v, %v", got, err)
 	}
 	if !slices.Equal(e.recordings.started(), []shared.LessonID{""}) {
@@ -496,4 +499,162 @@ func TestRunShowsTheSnoozedPromptAgain(t *testing.T) {
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run = %v, want context.Canceled", err)
 	}
+}
+
+func mustSource(t *testing.T, app shared.AppName) values.Source {
+	t.Helper()
+	s, err := values.SourceOf(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func appNames(apps []values.AudioApp) []shared.AppName {
+	out := make([]shared.AppName, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, a.App)
+	}
+	return out
+}
+
+// TASK-059: the picker lists the apps that play first and preselects the remembered app when it is open.
+func TestSourcesSortsAndPreselects(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		remembered shared.AppName
+		selected   values.Source
+	}{
+		{name: "remembered app is open", remembered: "zoom.exe", selected: mustSource(t, "zoom.exe")},
+		{name: "remembered app is closed", remembered: "ms-teams.exe", selected: values.WholeComputer()},
+		{name: "whole computer remembered", remembered: "", selected: values.WholeComputer()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.settings.source = tt.remembered
+			e.apps.set(nil,
+				values.AudioApp{App: "zoom.exe", Title: "Zoom Meeting", PID: 10},
+				values.AudioApp{App: "chrome.exe", Title: "Lecture - YouTube", PID: 20, Playing: true},
+				values.AudioApp{App: "notepad.exe", Title: "Notes", PID: 30},
+			)
+			got, err := e.svc.Sources(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []shared.AppName{"chrome.exe", "notepad.exe", "zoom.exe"}; !slices.Equal(appNames(got.Apps), want) {
+				t.Fatalf("apps %v, want %v", appNames(got.Apps), want)
+			}
+			if got.Selected != tt.selected || got.Remembered != tt.remembered {
+				t.Fatalf("selected %v, remembered %q; want %v, %q", got.Selected, got.Remembered, tt.selected, tt.remembered)
+			}
+		})
+	}
+}
+
+// When the apps cannot be listed the popup still offers the whole computer; a settings error only loses the
+// remembered app.
+func TestSourcesFailures(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("enumeration timed out")
+
+	e := newEnv(t)
+	e.settings.source = "zoom.exe"
+	e.apps.set(boom)
+	got, err := e.svc.Sources(ctx)
+	if !errors.Is(err, boom) || len(got.Apps) != 0 || !got.Selected.IsWholeComputer() || got.Remembered != "zoom.exe" {
+		t.Fatalf("Sources = %+v, %v; want the error, the whole computer and the remembered app", got, err)
+	}
+
+	e = newEnv(t)
+	e.settings.fail(errors.New("database locked"))
+	e.apps.set(nil, values.AudioApp{App: "zoom.exe", Title: "Zoom"})
+	got, err = e.svc.Sources(ctx)
+	if err != nil || len(got.Apps) != 1 || !got.Selected.IsWholeComputer() || got.Remembered != "" {
+		t.Fatalf("Sources with a settings error = %+v, %v", got, err)
+	}
+}
+
+// TASK-059: a started recording remembers its source (by app, not by process) for the next prompt; a failed start
+// does not, and a failure to remember never fails the start.
+func TestStartRemembersTheSource(t *testing.T) {
+	ctx := context.Background()
+	zoom := mustSource(t, "zoom.exe")
+
+	t.Run("remembered after the start", func(t *testing.T) {
+		e := newEnv(t)
+		v := e.offer("lesson-1")
+		if _, err := e.svc.Start(ctx, v.ID, zoom); err != nil {
+			t.Fatal(err)
+		}
+		if src := e.recordings.sources; len(src) != 1 || src[0] != zoom {
+			t.Fatalf("recordings got %v, want %v", src, zoom)
+		}
+		if app, saves := e.settings.remembered(); app != "zoom.exe" || saves != 1 {
+			t.Fatalf("remembered %q after %d saves", app, saves)
+		}
+
+		// The same source again: nothing to save.
+		v = e.offer("lesson-2")
+		if _, err := e.svc.Start(ctx, v.ID, zoom); err != nil {
+			t.Fatal(err)
+		}
+		if _, saves := e.settings.remembered(); saves != 1 {
+			t.Fatalf("%d saves, want no second save of the same source", saves)
+		}
+
+		// The whole computer is remembered too.
+		v = e.offer("lesson-3")
+		if _, err := e.svc.Start(ctx, v.ID, values.WholeComputer()); err != nil {
+			t.Fatal(err)
+		}
+		if app, _ := e.settings.remembered(); app != "" {
+			t.Fatalf("remembered %q, want the whole computer", app)
+		}
+	})
+
+	t.Run("a version conflict reloads once", func(t *testing.T) {
+		e := newEnv(t)
+		e.settings.conflicts = 1
+		v := e.offer("lesson-1")
+		if _, err := e.svc.Start(ctx, v.ID, zoom); err != nil {
+			t.Fatal(err)
+		}
+		if app, saves := e.settings.remembered(); app != "zoom.exe" || saves != 2 {
+			t.Fatalf("remembered %q after %d saves, want zoom.exe after the retry", app, saves)
+		}
+	})
+
+	t.Run("a failure to remember keeps the start", func(t *testing.T) {
+		e := newEnv(t)
+		e.settings.conflicts = rememberAttempts
+		v := e.offer("lesson-1")
+		got, err := e.svc.Start(ctx, v.ID, zoom)
+		if err != nil || got.State != prompt.StateStarted {
+			t.Fatalf("Start = %+v, %v", got, err)
+		}
+		if app, saves := e.settings.remembered(); app != "" || saves != rememberAttempts {
+			t.Fatalf("remembered %q after %d saves", app, saves)
+		}
+
+		e.settings.saveErr = errors.New("disk full")
+		v = e.offer("lesson-2")
+		if got, err := e.svc.Start(ctx, v.ID, zoom); err != nil || got.State != prompt.StateStarted {
+			t.Fatalf("Start = %+v, %v", got, err)
+		}
+	})
+
+	t.Run("a failed start remembers nothing", func(t *testing.T) {
+		e := newEnv(t)
+		e.recordings.set(true, fmt.Errorf("start: %w", recording.ErrSourceNotRunning))
+		v := e.offer("lesson-1")
+		got, err := e.svc.Start(ctx, v.ID, zoom)
+		if !errors.Is(err, ErrStartFailed) || got.Problem != prompt.ProblemSourceGone {
+			t.Fatalf("Start = %+v, %v", got, err)
+		}
+		if app, saves := e.settings.remembered(); app != "" || saves != 0 {
+			t.Fatalf("remembered %q after %d saves", app, saves)
+		}
+	})
 }

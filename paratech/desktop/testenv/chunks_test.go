@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 func TestChunkPayload(t *testing.T) {
@@ -45,7 +46,7 @@ func TestFakeRecorderSkipsBrokenChunks(t *testing.T) {
 	f := NewFakeRecorder(m, time.Minute)
 	dir, out := ref(t, "recordings/r1"), ref(t, "recordings/r1.wav")
 
-	if err := f.Start(ctx, "r1", dir); err != nil {
+	if err := f.Start(ctx, "r1", dir, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.FeedTruncated(ctx, "r1", []byte("x")); err != nil {

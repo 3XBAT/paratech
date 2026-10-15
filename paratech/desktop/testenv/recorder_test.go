@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -90,10 +91,10 @@ func TestFakeRecorderCaptureAndFinalize(t *testing.T) {
 	if _, err := f.Feed(ctx, "r1", []byte("a")); !errors.Is(err, ErrNotCapturing) {
 		t.Fatalf("Feed before Start = %v", err)
 	}
-	if err := f.Start(ctx, "r1", dir); err != nil {
+	if err := f.Start(ctx, "r1", dir, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Start(ctx, "r1", dir); err == nil {
+	if err := f.Start(ctx, "r1", dir, values.WholeComputer()); err == nil {
 		t.Fatal("a second Start of a running capture succeeded")
 	}
 	for _, c := range []string{"a", "b"} {
@@ -134,12 +135,12 @@ func TestFakeRecorderFailures(t *testing.T) {
 	boom := errors.New("boom")
 
 	f.FailStart(boom)
-	if err := f.Start(ctx, "r1", ref(t, "recordings/r1")); !errors.Is(err, boom) {
+	if err := f.Start(ctx, "r1", ref(t, "recordings/r1"), values.WholeComputer()); !errors.Is(err, boom) {
 		t.Fatalf("Start = %v", err)
 	}
 	f.FailStart(nil)
 
-	if err := f.Start(ctx, "r1", ref(t, "recordings/r1")); err != nil {
+	if err := f.Start(ctx, "r1", ref(t, "recordings/r1"), values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	m.FailWrites(shared.ErrStorageFull)
@@ -150,7 +151,7 @@ func TestFakeRecorderFailures(t *testing.T) {
 		t.Fatalf("Wait after a failed write = %v", err)
 	}
 
-	if err := f.Start(ctx, "r2", ref(t, "recordings/r2")); err != nil {
+	if err := f.Start(ctx, "r2", ref(t, "recordings/r2"), values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
 	f.End("r2", nil)
@@ -170,7 +171,7 @@ func TestFakeRecorderHolds(t *testing.T) {
 	entered, release := f.HoldStart()
 
 	done := make(chan error, 1)
-	go func() { done <- f.Start(context.Background(), "r1", ref(t, "recordings/r1")) }()
+	go func() { done <- f.Start(context.Background(), "r1", ref(t, "recordings/r1"), values.WholeComputer()) }()
 	<-entered
 	release()
 	release() // idempotent
@@ -192,5 +193,22 @@ func TestFakeRecorderHolds(t *testing.T) {
 	}
 	if err := f.Stop(context.Background(), "r1"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFakeRecorderKeepsTheSource(t *testing.T) {
+	f := NewFakeRecorder(NewMemArtifacts(), time.Minute)
+	if _, ok := f.Source("r1"); ok {
+		t.Fatal("a source before any start")
+	}
+	zoom, err := values.SourceOf("zoom.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Start(context.Background(), "r1", ref(t, "recordings/r1"), zoom); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := f.Source("r1"); !ok || got != zoom {
+		t.Fatalf("Source = %v, %v; want %v", got, ok, zoom)
 	}
 }

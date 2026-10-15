@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -45,6 +46,7 @@ type FakeRecorder struct {
 
 type fakeCapture struct {
 	dir     shared.ArtifactRef
+	source  values.Source
 	next    int
 	running bool
 	ended   chan struct{}
@@ -115,8 +117,8 @@ func (f *FakeRecorder) set(change func()) {
 	change()
 }
 
-// Start begins a capture into dir.
-func (f *FakeRecorder) Start(ctx context.Context, id shared.RecordingID, dir shared.ArtifactRef) error {
+// Start begins a capture of source into dir; Source tells which source it was.
+func (f *FakeRecorder) Start(ctx context.Context, id shared.RecordingID, dir shared.ArtifactRef, source values.Source) error {
 	f.mu.Lock()
 	f.starts++
 	err, h := f.startErr, f.startHold
@@ -136,7 +138,7 @@ func (f *FakeRecorder) Start(ctx context.Context, id shared.RecordingID, dir sha
 		f.mu.Unlock()
 		return fmt.Errorf("fake recorder: %s is already capturing", id)
 	}
-	f.captures[id] = &fakeCapture{dir: dir, next: 1, running: true, ended: make(chan struct{})}
+	f.captures[id] = &fakeCapture{dir: dir, source: source, next: 1, running: true, ended: make(chan struct{})}
 	hook := f.onStarted
 	f.mu.Unlock()
 
@@ -283,6 +285,17 @@ func (f *FakeRecorder) Running(id shared.RecordingID) bool {
 	defer f.mu.Unlock()
 	c := f.captures[id]
 	return c != nil && c.running
+}
+
+// Source returns the source of the last capture of id; ok is false when id was never started.
+func (f *FakeRecorder) Source(id shared.RecordingID) (source values.Source, ok bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.captures[id]
+	if c == nil {
+		return values.Source{}, false
+	}
+	return c.source, true
 }
 
 // Starts returns how many times Start was called.
