@@ -103,7 +103,7 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
 
 ## Hub LLM gateway
-`GatewayService.Complete` (ADR-0009): rate limit per API key, validation (1 MiB payload), reservation of the most the call may
+`GatewayService.Complete` (ADR-0010): rate limit per API key, validation (1 MiB payload), reservation of the most the call may
 cost (request bytes + 1024 + the clamped output cap), provider call, then settle the reported usage and store the answer for
 replay, or release. A retry with the same idempotency key replays the stored answer (`replayed=true`); another request with the
 key is `IDEMPOTENCY_CONFLICT`. Stored answers are cleared once the key is past `HUB_IDEMPOTENCY_RETENTION` (purge at start and

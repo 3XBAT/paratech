@@ -36,7 +36,7 @@ type Completer interface {
 }
 
 // Gateway serves GatewayService.Complete. CompleteStream stays unimplemented: the provider port has no streaming yet
-// (ADR-0009).
+// (ADR-0010).
 type Gateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 	svc Completer

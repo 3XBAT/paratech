@@ -1,4 +1,4 @@
--- LLM gateway key records (TASK-035, ADR-0009). A key used by the gateway records a SHA-256 of the whole request
+-- LLM gateway key records (TASK-035, ADR-0010). A key used by the gateway records a SHA-256 of the whole request
 -- (request_hash; the request text itself is never stored), and the answer of its latest attempt once that attempt
 -- completed, so that a retry with the same key replays it. The answer is model output: it is kept as bytes (provider
 -- text may hold NUL) and cleared by the Hub's purge when the key's retention (HUB_IDEMPOTENCY_RETENTION, counted from

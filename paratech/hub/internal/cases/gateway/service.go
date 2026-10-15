@@ -161,7 +161,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	}
 	if err != nil {
 		// Also after an answer cut off mid-body: the provider may have billed it, the tester is not charged
-		// (accepted gap, ADR-0005(e), ADR-0009).
+		// (accepted gap, ADR-0005(e), ADR-0010).
 		s.release(ctx, c, rec.ID, account.ReasonFailed)
 		failure := providerFailure(err)
 		logCall(outcomeProvider, append(attrs, "transient", failure.Transient, "err", err)...)

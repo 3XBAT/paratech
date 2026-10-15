@@ -1,4 +1,4 @@
-# ADR-0009: Hub LLM gateway
+# ADR-0010: Hub LLM gateway
 
 - **Status:** Accepted
 - **Source:** TASK-035; builds on ADR-0005 (contract) and ADR-0008 (quota ledger)
