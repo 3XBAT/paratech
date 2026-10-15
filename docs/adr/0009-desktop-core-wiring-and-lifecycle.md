@@ -80,7 +80,8 @@ non-email types, UI mode only (headless has no notifier).
   CAS; no foreign key to assignments, so an unknown assignment is stored REJECTED and a deleted one makes a confirmed
   proposal STALE). Mailer: `senddelivery.Service` (one delivery per command key, an UNKNOWN one is never resent).
   Exporter: `filestore.Store.ExportHomework` (only `exports/<assignment>/homework.md`). Recipient: `recipientSettings`.
-  Calendar: stand-in `calendarNotConnected`, always `app.ErrCalendarNotConnected`; the proposal stays CONFIRMED.
+  Calendar: stand-in `calendarNotConnected`, always `homeworkflow.ErrCalendarNotConnected`; the proposal stays
+  CONFIRMED.
   Clock `e.local`, like the other `homeworkflow` services. No binding yet (TASK-045).
 - **Connections (TASK-062).** `cases/connections` (`app/connections.go`) edits the mail account and the Hub URL in the
   settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
@@ -95,7 +96,8 @@ non-email types, UI mode only (headless has no notifier).
 - **Recorder run mode** (`--recorder --data-dir`): no instance lock (the parent holds it), no database, no UI shell,
   no jobs; only the Storage Manager on `<DataDir>/artifacts`. Events on stdout, log on stderr, stops when stdin closes.
 - **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow` (the
-  post-processing, the drafts and the proposals), which places lesson times and deadlines in the student's zone. SQLite stores Unix ms, so the zone does not affect storage.
+  post-processing, the drafts and the proposals), which places lesson times and deadlines in the student's zone.
+  SQLite stores Unix ms, so the zone does not affect storage.
 - **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@learning-assistant.invalid>`. Jitter via `crypto/rand`.
 - **Data dir:** `learning-assistant.db`, `learning-assistant.lock`, `artifacts/` (Storage Manager root), `artifacts/stt-work/`.
 
@@ -107,8 +109,8 @@ non-email types, UI mode only (headless has no notifier).
   the Windows recorder by TASK-017; recording -> STT, `modelcatalog`, the heavy cap and `homeworkflow.Service` by
   TASK-060; the models page by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed
   for an unknown machine); the Hub key and the quota of the «Подключения» page by TASK-039.
-- Bindings of the drafts and the proposals (TASK-045). `input/wails` cannot import `app` (ARCH-40), so TASK-045 maps
-  `ErrCalendarNotConnected` in app.
+- Bindings of the drafts and the proposals (TASK-045). The calendar sentinel lives next to its port in `homeworkflow`,
+  so `input/wails` can match it with `errors.Is` without importing `app` (ARCH-40).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,

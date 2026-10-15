@@ -11,6 +11,10 @@ var (
 	// ErrUnsupportedKind means a stored proposal has a kind this use case cannot execute.
 	ErrUnsupportedKind = errors.New("unsupported proposal kind")
 
+	// ErrCalendarNotConnected is returned by a DeadlineCalendar that is not connected yet; the proposal stays
+	// CONFIRMED and can be executed once it is.
+	ErrCalendarNotConnected = errors.New("calendar not connected")
+
 	// ErrGenerateRetries is returned by Drafts.Generate when the same generation (assignment, base version and
 	// instructions) already failed or was cancelled too many times; other instructions or an edit start a new one.
 	ErrGenerateRetries = errors.New("homework draft: the same generation failed too many times")

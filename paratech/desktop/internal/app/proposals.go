@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"paratech/desktop/internal/adapters/sqlite"
@@ -10,15 +9,12 @@ import (
 	"paratech/desktop/internal/domain/coursework/proposal"
 )
 
-// ErrCalendarNotConnected is the answer of the deadline calendar until Google Calendar is wired (TASK-051): a
-// confirmed create_deadline_event proposal stays CONFIRMED and can be executed once the calendar is connected.
-var ErrCalendarNotConnected = errors.New("calendar not connected")
-
-// calendarNotConnected is the homeworkflow.DeadlineCalendar stand-in: it never acts and never reports a success.
+// calendarNotConnected is the homeworkflow.DeadlineCalendar stand-in until Google Calendar is wired (TASK-051): it
+// never acts and never reports a success, so a confirmed create_deadline_event proposal stays CONFIRMED.
 type calendarNotConnected struct{}
 
 func (calendarNotConnected) UpsertDeadline(_ context.Context, cmd proposal.CalendarCommand) error {
-	return fmt.Errorf("app: deadline of %s: %w", cmd.AssignmentID(), ErrCalendarNotConnected)
+	return fmt.Errorf("app: deadline of %s: %w", cmd.AssignmentID(), homeworkflow.ErrCalendarNotConnected)
 }
 
 // wireProposals builds the action proposal pipeline (PRD section 13.3): the model proposes, the core validates against

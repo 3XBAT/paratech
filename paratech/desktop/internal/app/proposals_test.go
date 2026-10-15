@@ -21,6 +21,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/delivery/delivery"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/testenv"
 )
 
@@ -196,19 +197,16 @@ func TestWiredSendProposalCreatesOneDelivery(t *testing.T) {
 	check("after a repeated Execute")
 }
 
-// Hard rule 7 on the wired core: the app stopped after the delivery was created but before the proposal was marked
-// EXECUTED, and the delivery outcome became UNKNOWN. Executing again (also after a restart) finds the delivery by the
-// command's key: no second delivery, no new job, and the UNKNOWN delivery is not sent again.
-func TestWiredSendRepeatAfterACrashSendsNothingMore(t *testing.T) {
+// sendThenCrash confirms a send proposal and lets its first Execute reach the mailer: the delivery and its job exist,
+// the proposal is still CONFIRMED. Then the process dies.
+func sendThenCrash(t *testing.T, a *App) proposal.ID {
+	t.Helper()
 	ctx := context.Background()
-	a, dir := proposalCore(t, teacher)
 	exportHomework(t, a)
-
 	v := propose(t, a, answerSend)
 	if _, err := a.core.proposals.Confirm(ctx, v.ID); err != nil {
 		t.Fatal(err)
 	}
-	// The first Execute reached the mailer, then the process died.
 	p, err := sqlite.NewProposalRepository(a.core.db).Get(ctx, v.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -220,34 +218,138 @@ func TestWiredSendRepeatAfterACrashSendsNothingMore(t *testing.T) {
 	if err := a.core.deliveries.SendHomework(ctx, cmd); err != nil {
 		t.Fatal(err)
 	}
-	raw := rawDB(t, dir)
-	if _, err := raw.Exec("UPDATE deliveries SET status = 'UNKNOWN', attempts = 1, version = version + 1"); err != nil {
+	return v.ID
+}
+
+// crashDuringTheSend plants what a crash in the middle of the SMTP call leaves: the delivery SENDING with its first
+// attempt and its send job RUNNING, both through the repositories and the domain transitions the job takes.
+func crashDuringTheSend(t *testing.T, a *App) {
+	t.Helper()
+	ctx := context.Background()
+	deliveries := sqlite.NewDeliveryRepository(a.core.db)
+	pending, err := deliveries.ListByStatus(ctx, delivery.StatusPending)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("PENDING deliveries = %d, %v; want 1", len(pending), err)
+	}
+	if err := pending[0].StartSending(time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	if err := deliveries.Save(ctx, pending[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	filter, err := job.NewClaimFilter([]job.Type{senddelivery.JobType}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := sqlite.NewJobRepository(a.core.db).Claim(ctx, time.Now().Add(time.Minute), filter); err != nil || !ok {
+		t.Fatalf("Claim of the send job = %v, %v", ok, err)
+	}
+}
+
+// Hard rule 7 on the wired core: the app stopped after the delivery was created but before the proposal was marked
+// EXECUTED, and the delivery outcome is UNKNOWN. Executing again after a restart finds the delivery by the command's
+// key: no second delivery, no new job, and the UNKNOWN delivery is not sent again.
+func TestWiredSendRepeatAfterACrashSendsNothingMore(t *testing.T) {
+	cases := []struct {
+		name  string
+		crash func(t *testing.T, a *App, dataDir string)
+		job   string // how the job of the first round ends
+	}{
+		// The real crash state: the startup recovery reconciles the RUNNING job, which turns the SENDING delivery
+		// UNKNOWN and, as SMTP cannot tell whether the message was accepted, fails the job.
+		{"crash during the send", func(t *testing.T, a *App, _ string) { crashDuringTheSend(t, a) }, "FAILED"},
+		// An UNKNOWN delivery whose job is still QUEUED: the job finds it not sendable and ends without a send.
+		{"unknown with a queued job", func(t *testing.T, _ *App, dataDir string) {
+			_, err := rawDB(t, dataDir).Exec("UPDATE deliveries SET status = 'UNKNOWN', attempts = 1, version = version + 1")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}, "COMPLETED"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			a, dir := proposalCore(t, teacher)
+			id := sendThenCrash(t, a)
+			tc.crash(t, a, dir)
+			if err := a.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			// The restart runs the recoveries, Resume and the job runner.
+			b := newTestApp(t, dir)
+			startCore(t, b)
+			if got, err := b.core.proposals.Get(ctx, id); err != nil || got.Status != proposal.StatusConfirmed {
+				t.Fatalf("proposal after the restart = %+v, %v; want CONFIRMED", got, err)
+			}
+			if got, err := b.core.proposals.Execute(ctx, id); err != nil || got.Status != proposal.StatusExecuted {
+				t.Fatalf("Execute after the restart = %+v, %v; want EXECUTED", got, err)
+			}
+
+			raw := rawDB(t, dir)
+			testenv.Eventually(t, "the send_email job ends "+tc.job, func() bool {
+				return count(t, raw, "SELECT count(*) FROM jobs WHERE status = ?", tc.job) == 1
+			}, nil)
+			unknown, err := b.core.deliveries.List(ctx, delivery.StatusUnknown)
+			if err != nil || len(unknown) != 1 || unknown[0].Attempts != 1 {
+				t.Fatalf("UNKNOWN deliveries = %+v, %v; want the one, unresolved, with its one attempt", unknown, err)
+			}
+			if d, j, _ := sideEffects(t, dir); d != 1 || j != 1 {
+				t.Fatalf("%d deliveries, %d jobs; want 1 and 1", d, j)
+			}
+		})
+	}
+}
+
+// TASK-040 follow-up: after a crash left the delivery UNKNOWN, the export file changed. Executing the confirmed send
+// again finds the pinned content gone: the proposal goes STALE before any port, no new delivery or job appears, and
+// the UNKNOWN delivery is still waiting for the user.
+func TestWiredSendAfterACrashAndAChangedExportGoesStale(t *testing.T) {
+	ctx := context.Background()
+	a, dir := proposalCore(t, teacher)
+	id := sendThenCrash(t, a)
+	crashDuringTheSend(t, a)
 	if err := a.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	// The restart runs the recoveries, Resume and the job runner.
 	b := newTestApp(t, dir)
 	startCore(t, b)
-	if got, err := b.core.proposals.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusConfirmed {
-		t.Fatalf("proposal after the restart = %+v, %v; want CONFIRMED", got, err)
-	}
-	if got, err := b.core.proposals.Execute(ctx, v.ID); err != nil || got.Status != proposal.StatusExecuted {
-		t.Fatalf("Execute after the restart = %+v, %v; want EXECUTED", got, err)
+	changed := propose(t, b, `{"kind":"export_homework","assignment_id":"a1","body":"Exercises 6-9 instead."}`)
+	if v := confirmAndExecute(t, b, changed.ID); v.Status != proposal.StatusExecuted {
+		t.Fatalf("second export %s, want EXECUTED", v.Status)
 	}
 
-	// The job of the first round ends without sending: an UNKNOWN delivery is never sent from a job.
-	testenv.Eventually(t, "the send_email job ends", func() bool {
-		return count(t, raw, "SELECT count(*) FROM jobs WHERE status = 'COMPLETED'") == 1
-	}, nil)
+	if _, err := b.core.proposals.Execute(ctx, id); !errors.Is(err, proposal.ErrStale) {
+		t.Fatalf("Execute = %v, want ErrStale", err)
+	}
+	if got, err := b.core.proposals.Get(ctx, id); err != nil || got.Status != proposal.StatusStale ||
+		got.Reason != proposal.ReasonArtifactChanged {
+		t.Fatalf("proposal = %+v, %v; want STALE artifact_changed", got, err)
+	}
 	unknown, err := b.core.deliveries.List(ctx, delivery.StatusUnknown)
 	if err != nil || len(unknown) != 1 || unknown[0].Attempts != 1 {
 		t.Fatalf("UNKNOWN deliveries = %+v, %v; want the one, unresolved, with its one attempt", unknown, err)
 	}
-	if d, j, _ := sideEffects(t, dir); d != 1 || j != 1 {
-		t.Fatalf("%d deliveries, %d jobs; want 1 and 1", d, j)
+	if d, j, f := sideEffects(t, dir); d != 1 || j != 1 || f != 1 {
+		t.Fatalf("%d deliveries, %d jobs, %d files; want 1, 1 and 1", d, j, f)
+	}
+}
+
+// A deadline answer whose due is the zero time (or before the epoch) is malformed: nothing is stored, so no later Get
+// can fail on a row that cannot be restored.
+func TestWiredZeroDueIsMalformed(t *testing.T) {
+	ctx := context.Background()
+	a, dir := proposalCore(t, "")
+	for _, due := range []string{"0001-01-01T00:00:00Z", "1969-07-20T20:17:00Z"} {
+		answer := `{"kind":"create_deadline_event","assignment_id":"a1","title":"Rivers","due":"` + due + `"}`
+		if v, err := a.core.proposals.Propose(ctx, values.NewUntrustedOutput(answer)); !errors.Is(err, proposal.ErrMalformed) {
+			t.Errorf("Propose(due %s) = %+v, %v; want ErrMalformed", due, v, err)
+		}
+	}
+	if n := count(t, rawDB(t, dir), "SELECT count(*) FROM proposals"); n != 0 {
+		t.Fatalf("%d proposals stored", n)
 	}
 }
 
@@ -285,7 +387,7 @@ func TestWiredUnconfirmedProposalsReachNoPort(t *testing.T) {
 					}
 				}
 				_, err = a.core.proposals.Execute(ctx, v.ID)
-				if !errors.Is(err, proposal.ErrNotConfirmed) || errors.Is(err, ErrCalendarNotConnected) {
+				if !errors.Is(err, proposal.ErrNotConfirmed) || errors.Is(err, homeworkflow.ErrCalendarNotConnected) {
 					t.Fatalf("Execute = %v, want ErrNotConfirmed before any port", err)
 				}
 				if decline {
@@ -396,7 +498,7 @@ func TestWiredDeadlineProposalWaitsForTheCalendar(t *testing.T) {
 	}
 
 	for i := range 2 {
-		if _, err := a.core.proposals.Execute(ctx, v.ID); !errors.Is(err, ErrCalendarNotConnected) {
+		if _, err := a.core.proposals.Execute(ctx, v.ID); !errors.Is(err, homeworkflow.ErrCalendarNotConnected) {
 			t.Fatalf("Execute #%d = %v, want ErrCalendarNotConnected", i+1, err)
 		}
 		if got, err := a.core.proposals.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusConfirmed {
@@ -410,7 +512,7 @@ func TestWiredDeadlineProposalWaitsForTheCalendar(t *testing.T) {
 
 func TestCalendarStandInNeverSucceeds(t *testing.T) {
 	for _, cmd := range []proposal.CalendarCommand{{}, confirmedDeadline(t)} {
-		if err := (calendarNotConnected{}).UpsertDeadline(context.Background(), cmd); !errors.Is(err, ErrCalendarNotConnected) {
+		if err := (calendarNotConnected{}).UpsertDeadline(context.Background(), cmd); !errors.Is(err, homeworkflow.ErrCalendarNotConnected) {
 			t.Fatalf("UpsertDeadline = %v, want ErrCalendarNotConnected", err)
 		}
 	}
