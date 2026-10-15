@@ -24,8 +24,9 @@
 - Creating a window activates it once, so at startup the hidden popup may briefly take the foreground before the main window shows.
   Harmless now (the main window is shown at start); a start minimized to tray (autostart) must create the popup lazily or restore the foreground.
 - The single-instance check runs in `Shell.Run`; the core (SQLite) is opened by the Shell option `OpenCore` after `application.New`,
-  so a second instance exits before the DB opens. Headless mode opens no core yet; future workers/headless need the core opened
-  in `app` outside the shell, or a named-mutex adapter.
+  so a second instance exits before the DB opens. Since TASK-056 (ADR-0009) headless mode opens and starts the core too, and
+  `openCore` takes a data-dir file lock before the DB in every mode; background work starts from the `Options.Started` hook
+  (`ApplicationStarted`), when the shell is ready.
 - Default data dir is `%LOCALAPPDATA%\LearningAssistant`, DB file `<DataDir>/learning-assistant.db` (to be confirmed by the owner).
 - Release builds must use `-tags production` (see `docs/refs/wails.md`).
 - Toasts (TASK-053): the notifications service writes HKCU registry keys at startup (AppUserModelId, COM activator CLSID) and
