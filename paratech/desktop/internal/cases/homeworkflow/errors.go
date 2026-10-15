@@ -10,6 +10,10 @@ var (
 
 	// ErrUnsupportedKind means a stored proposal has a kind this use case cannot execute.
 	ErrUnsupportedKind = errors.New("unsupported proposal kind")
+
+	// ErrGenerateRetries is returned by Drafts.Generate when the same generation (assignment, base version and
+	// instructions) already failed or was cancelled too many times; other instructions or an edit start a new one.
+	ErrGenerateRetries = errors.New("homework draft: the same generation failed too many times")
 )
 
 // Errors of the post-processing jobs (PostProcessor). They are stored as the job's last error and shown in the UI, so
@@ -50,6 +54,39 @@ var (
 
 	// ErrEnqueue means the post-processing jobs of a transcript could not be created; the caller retries.
 	ErrEnqueue = errors.New("post-processing: jobs could not be created")
+)
+
+// Errors of the homework_draft job (Drafts.Handle). They are stored as the job's last error and shown in the UI, so
+// like the post-processing errors they are fixed texts; the cause goes to the log only. The other Drafts methods
+// return domain errors (homeworkdraft.ErrStaleBase, values.ErrInvalidDraftRequest, shared.ErrNotFound, ...) wrapped.
+var (
+	// ErrDraftPayload means the job payload is not a valid draft request or the job is not a draft job. Permanent.
+	ErrDraftPayload = errors.New("homework draft: invalid job")
+
+	// ErrDraftAssignmentGone means the assignment of the draft no longer exists. Permanent.
+	ErrDraftAssignmentGone = errors.New("homework draft: the assignment no longer exists")
+
+	// ErrDraftChanged means the draft got a new version (a user edit or another generation) after the job was
+	// started; the answer is not added. Permanent: generating again starts from the new version.
+	ErrDraftChanged = errors.New("homework draft: the draft changed during the generation")
+
+	// ErrDraftFull means the draft has the maximum number of versions. Permanent.
+	ErrDraftFull = errors.New("homework draft: the draft has the maximum number of versions")
+
+	// ErrDraftContextRefused means the assignment context cannot be sent: too large or not valid text. Permanent.
+	ErrDraftContextRefused = errors.New("homework draft: the assignment context cannot be sent")
+
+	// ErrDraftLLM means the LLM call failed. As for ErrLLM, the cause decides between waiting, failing and retrying.
+	ErrDraftLLM = errors.New("homework draft: the LLM call failed")
+
+	// ErrDraftInvalidAnswer means the model answer is not a valid draft; nothing is added. Permanent.
+	ErrDraftInvalidAnswer = errors.New("homework draft: the LLM answer does not match the schema")
+
+	// ErrDraftStorage means reading or writing local state failed. Retried unless the cause is permanent.
+	ErrDraftStorage = errors.New("homework draft: local storage failed")
+
+	// ErrDraftStopped means the job runner asked the handler to stop (the job was cancelled or changed elsewhere).
+	ErrDraftStopped = errors.New("homework draft: stopped")
 )
 
 // jobError has a fixed message and keeps the cause for errors.Is without putting its text into the message.

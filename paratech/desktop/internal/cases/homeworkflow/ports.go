@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/homeworkdraft"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
@@ -71,6 +72,21 @@ type SummaryRepository interface {
 	// Save inserts or updates a summary (PRD section 9). It is the version compare-and-swap of ADR-0004(d), like
 	// AssignmentRepository.Save: an insert of an existing id or a stale version yields shared.ErrVersionConflict.
 	Save(ctx context.Context, s *summary.Summary) error
+}
+
+// DraftRepository stores the draft history of each assignment (PRD section 10, AC-13). Implemented by the sqlite
+// adapter (a later task); an in-memory fake serves tests.
+type DraftRepository interface {
+	// Get loads the draft of an assignment (PRD section 10). It returns an error wrapping shared.ErrNotFound if there
+	// is none.
+	Get(ctx context.Context, a shared.AssignmentID) (*homeworkdraft.Draft, error)
+
+	// Save inserts or updates a draft with all its versions (PRD section 10: draft versions are kept). It is the
+	// version compare-and-swap of ADR-0004(d), like AssignmentRepository.Save: Version() == 0 is INSERTed (an
+	// existing draft of the assignment yields shared.ErrVersionConflict), a stale version yields
+	// shared.ErrVersionConflict and nothing is written. Versions are append-only, so an adapter may write only the
+	// ones it has not stored yet.
+	Save(ctx context.Context, d *homeworkdraft.Draft) error
 }
 
 // RecordingReader gives read access to the recording a transcript was made from, for the lesson it belongs to and its
@@ -167,6 +183,14 @@ type JobEnqueuer interface {
 	// existing job is returned with created == false, which guards against a duplicate Generate click
 	// (PRD section 7.3, section 14 case 5).
 	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
+}
+
+// JobReader gives read access to a job of this workflow, so that a Generate whose idempotency key belongs to a job
+// that failed or was cancelled can start the generation again (PRD sections 7.2, 10 and 14 case 5). Implemented by
+// the sqlite adapter.
+type JobReader interface {
+	// Get loads a job (PRD section 7.2). It returns an error wrapping shared.ErrNotFound if there is none.
+	Get(ctx context.Context, id shared.JobID) (*job.Job, error)
 }
 
 // Clock supplies the current time (ARCH-24; PRD section 10). Implemented by the clock adapter and by a controllable fake in tests.

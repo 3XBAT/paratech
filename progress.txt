@@ -1020,6 +1020,7 @@
 ---
 
 ## [TASK-032] Аутентификация Hub по API-ключам тестеров
+## [TASK-043] Генерация домашнего задания: черновик, правка, доп. инструкции, перегенерация, экспорт
 **Дата:** 2026-10-15
 **Статус:** done
 
@@ -1053,3 +1054,31 @@
 - Существующее: postgres.redact заменяет все вхождения пароля — короткий пароль портит текст ошибок
 - "gracefully stopped" в stderr после CLI-команд (main.go)
 - isLowerHex продублирован в domain/shared и apikey (сознательно, чтобы не экспортировать helper)
+- domain/coursework/homeworkdraft: агрегат Draft (история черновика одного задания) с сущностями Revision: версии 1..n только добавляются, источник generated|edited, title <= 200 рун, body <= 16000 рун, у сгенерированной — инструкция, prompts.Version и job; не более 100 версий; правка и генерация называют базовую версию, устаревшая база -> ErrStaleBase; одна версия на задачу (повтор задачи ничего не добавляет)
+- domain/coursework/values/draft.go: тип задачи homework_draft, payload DraftRequest {assignment_id, base, instruction}, CleanInstruction (UTF-8, без управляющих, <= 4 КиБ)
+- cases/homeworkflow/drafts.go: отдельная структура Drafts (DraftDeps), Service/New не менялись. Generate ставит задачу с ключом homework_draft:<assignment>:b<base>:v<prompts>:<sha256(instr)[:8]>; дубль клика -> та же задача; после FAILED/CANCELLED — следующий раунд ключа (:r1..:r20, затем ErrGenerateRetries), параллельные клики после сбоя -> одна задача. Handle: contextselection + prompts.Build + LLMClient + ParseDraft; невалидный ответ -> постоянная ошибка без версии; квота/сеть -> ожидание как в пост-обработке; если студент правил во время генерации -> ErrDraftChanged, правка не теряется. EditDraft, DraftVersions, DraftVersion, ExportDraft (пишет "# title\n\nbody\n" в proposal.ExportRef через ArtifactStore.Write — тот же файл, что прикладывает отправка)
+- Порты: DraftRepository (Get, Save с CAS), JobReader (Get; sqlite JobRepository подходит как есть)
+- postprocess.go: buildRequest/warnStep общие для обоих обработчиков, поведение то же
+- testenv/drafts.go (MemDrafts); tests/drafts_sqlite_test.go (реальный SQLite, filestore, job runner)
+- Изменённые существующие тесты: sideeffect_boundary_test — проверка вынесена в общий хелпер (то же поведение) + TestDraftsReachNoSideEffect; save_contract_test — строка DraftRepository.Save; limits_test — новые строки и TestDraftLimitsFitTheContext; postprocess_fakes_test — у фейка ppJobs добавлен Get (для порта JobReader)
+- Ревью: changes requested (medium: повторный Generate после FAILED/CANCELLED возвращал мёртвую задачу; low: перезагрузка на любой ErrConflict; nit: чтение/экспорт удалённого задания, длинная строка) -> исправлено в 8312dcc, повторное ревью approve. Security: два прохода (весь diff и коммит исправлений): найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestDraftGenerateEditRegenerateExport (SQLite), TestGenerateEditRegenerateKeepsVersions — 3 версии (generated, edited, generated с инструкцией), инструкция в UntrustedData
+- [x] Шаг 3: TestConcurrentGenerateMakesOneJob (6 кликов, реальный SQLite), TestDoubleGenerateMakesOneJob, TestConcurrentRetryAfterAFailureMakesOneJob
+- [x] Шаг 4: TestDraftGenerateEditRegenerateExport — файл exports/<id>/homework.md на диске (filestore)
+
+### Решения (подтвердить)
+- Генерация поверх правки студента не добавляется (ErrDraftChanged); параллельная генерация с другой инструкцией от той же базы тоже проигрывает с ErrDraftChanged
+- Инструкция студента хранится в payload задачи (не секрет)
+- Экспорт — явное действие пользователя без proposal; формат "# title\n\nbody\n". Предложение export_homework (TASK-040) пишет в тот же файл только тело модели — два писателя, два формата; решить: оставить один путь или общий рендерер
+- До 21 платного вызова Hub на один ввод (assignment, base, instruction) при повторяющихся сбоях
+
+### Заметки (follow-up)
+- НУЖНА ЗАДАЧА: sqlite DraftRepository + миграция (таблицы черновика/версий, FK на assignments ON DELETE RESTRICT -> assignment.ErrInUse в AssignmentRepository.Delete, уникальный (assignment, number), уникальный nullable job_id, Save вставляет только новые версии в той же CAS-транзакции, удаление по PRD §13.1); до неё только MemDrafts
+- Подключение в app: регистрация homework_draft (light, requeue), model alias, ID-генератор, JobReader = sqlite JobRepository; Wails-биндинги и UI (TASK-045); ErrGenerateRetries показать понятным текстом
+- Удалённое повторной обработкой задание оставляет черновик и файл экспорта
+- Low: Get грузит всю историю (до ~6.4 МБ в худшем случае), комментарий «stays cheap» преувеличивает; позже запрос только последней версии
+- Nit: endedWithoutResult можно перенести в job.Status; минимум портов в TestDraftsReachNoSideEffect поднять до 11; badControl продублирован в values/draft.go и homeworkdraft/revision.go; правки студента не отсекают bidi/теги (только его собственный текст)

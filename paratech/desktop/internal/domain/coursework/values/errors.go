@@ -12,4 +12,7 @@ var (
 
 	// ErrInvalidPostProcessRequest is returned for a post-processing job payload that is not a valid request.
 	ErrInvalidPostProcessRequest = errors.New("invalid post-processing request")
+
+	// ErrInvalidDraftRequest is returned for a homework_draft job payload or instruction that is not valid.
+	ErrInvalidDraftRequest = errors.New("invalid homework draft request")
 )

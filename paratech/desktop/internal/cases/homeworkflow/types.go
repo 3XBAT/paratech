@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/homeworkdraft"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -18,6 +19,11 @@ const (
 	SummarizeJobType       = job.Type(values.SummarizeJobType)
 	ExtractHomeworkJobType = job.Type(values.ExtractHomeworkJobType)
 )
+
+// HomeworkDraftJobType is the job type of a draft generation (Drafts). The app registers it like the post-processing
+// types: light, with the requeue recovery policy (the LLM call is idempotent by its key and a version is added at most
+// once per job).
+const HomeworkDraftJobType = job.Type(values.HomeworkDraftJobType)
 
 // DefaultPostProcessAttempts bounds the attempts of a post-processing job when PostProcessDeps.MaxAttempts is 0.
 // Waiting for the network or the quota does not use attempts.
@@ -115,4 +121,75 @@ func assignmentViewOf(a *assignment.Assignment) AssignmentView {
 		ID: a.ID(), LessonID: a.LessonID(), Title: d.Title(), Description: d.Description(), Due: d.Due(),
 		UserEdited: a.UserEdited(), Version: a.Version(), UpdatedAt: a.UpdatedAt(),
 	}
+}
+
+// DraftDeps are the ports and settings of Drafts. Log is optional.
+type DraftDeps struct {
+	LLM         LLMClient
+	Assignments AssignmentRepository
+	Drafts      DraftRepository
+	Summaries   SummaryRepository
+	Lessons     LessonReader
+	Artifacts   ArtifactStore
+	Jobs        JobEnqueuer
+	JobReader   JobReader
+	Clock       Clock
+	IDs         IDGenerator
+	Tx          Tx
+	Log         *slog.Logger
+
+	// ModelAlias is the Hub model alias of the requests, from the app configuration (values.NewLLMRequest rules).
+	ModelAlias string
+
+	// MaxAttempts of each generation job; 0 means DefaultPostProcessAttempts.
+	MaxAttempts int
+}
+
+// generateRetries bounds how often Generate starts the same generation again after its job failed or was cancelled;
+// then it returns ErrGenerateRetries.
+const generateRetries = 20
+
+// GenerateResult is the generation job Generate started or found. Created is false when an equivalent generation
+// (same assignment, base version and instructions) already had a live or completed job, for example after a double
+// click.
+type GenerateResult struct {
+	JobID   shared.JobID
+	Created bool
+	Base    int // the draft version the generation starts from; 0: no draft yet
+}
+
+// DraftEdit is what the student wrote for a draft (PRD section 10 step 3). Base is the version shown while editing.
+type DraftEdit struct {
+	Assignment shared.AssignmentID
+	Base       int
+	Title      string
+	Body       string
+}
+
+// DraftVersionView is a draft version as the UI shows it. Title, Body and Instruction may be model or student text:
+// show them as data.
+type DraftVersionView struct {
+	Assignment    shared.AssignmentID
+	Number        int
+	Origin        homeworkdraft.Origin
+	Title         string
+	Body          string
+	Instruction   string // generated versions: the instructions used
+	PromptVersion int    // generated versions only
+	Latest        bool
+	CreatedAt     time.Time
+}
+
+func draftVersionViewOf(d *homeworkdraft.Draft, r homeworkdraft.Revision) DraftVersionView {
+	return DraftVersionView{
+		Assignment: d.Assignment(), Number: r.Number(), Origin: r.Origin(), Title: r.Title(), Body: r.Body(),
+		Instruction: r.Instruction(), PromptVersion: r.PromptVersion(), Latest: r.Number() == d.LatestNumber(),
+		CreatedAt: r.CreatedAt(),
+	}
+}
+
+// DraftExport tells which version was exported to which file.
+type DraftExport struct {
+	Version int
+	File    shared.ArtifactRef // proposal.ExportRef of the assignment, the file a send attaches
 }

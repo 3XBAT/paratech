@@ -56,6 +56,7 @@ var storingMethods = []struct {
 	{ifaceOf[homeworkflow.AssignmentRepository](), "Save", 1, false},
 	{ifaceOf[homeworkflow.ProposalRepository](), "Save", 1, false},
 	{ifaceOf[homeworkflow.SummaryRepository](), "Save", 1, false},
+	{ifaceOf[homeworkflow.DraftRepository](), "Save", 1, false},
 	{ifaceOf[senddelivery.DeliveryRepository](), "Save", 1, false},
 }
 
