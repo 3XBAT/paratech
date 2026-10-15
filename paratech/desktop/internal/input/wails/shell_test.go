@@ -18,7 +18,7 @@ func validOptions() Options {
 	return Options{
 		Name: "LA", InstanceID: "test.la", Log: discard(),
 		OpenCore: func(context.Context) (Core, error) {
-			return Core{Settings: &fakeSettings{}, Activity: &fakeActivity{}}, nil
+			return Core{Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{}}, nil
 		},
 	}
 }
@@ -34,6 +34,7 @@ func TestNew(t *testing.T) {
 		{name: "no instance id", edit: func(o *Options) { o.InstanceID = "" }, wantErr: true},
 		{name: "no logger", edit: func(o *Options) { o.Log = nil }, wantErr: true},
 		{name: "no core opener", edit: func(o *Options) { o.OpenCore = nil }, wantErr: true},
+		{name: "started hook", edit: func(o *Options) { o.Started = func() {} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

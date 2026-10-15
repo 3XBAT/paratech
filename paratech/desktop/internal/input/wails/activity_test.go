@@ -63,7 +63,7 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 			Duration: 59*time.Minute + 1500*time.Millisecond, HasDuration: true, Problem: "limit reached",
 		},
 	}}
-	got, err := NewActivityService(uc, nil, nil, discard()).ListRecordings(context.Background())
+	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, discard()).ListRecordings(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestActivityServiceListsJobs(t *testing.T) {
 		LastError: "net", CreatedAt: at, UpdatedAt: at.Add(time.Minute), NextRunAt: at.Add(2 * time.Minute),
 		RunNowOffered: true,
 	}}}
-	got, err := NewActivityService(uc, nil, nil, discard()).ListJobs(context.Background())
+	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, discard()).ListJobs(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestActivityServiceListsJobs(t *testing.T) {
 
 // An empty history is an empty list on the page, not null.
 func TestActivityServiceEmptyListsAreArrays(t *testing.T) {
-	s := NewActivityService(&fakeActivity{}, nil, nil, discard())
+	s := NewActivityService(&fakeActivity{}, &fakeStopper{}, &fakeForcer{}, discard())
 	recs, err := s.ListRecordings(context.Background())
 	if b, _ := json.Marshal(recs); err != nil || string(b) != "[]" {
 		t.Errorf("ListRecordings = %s, %v", b, err)
@@ -119,7 +119,7 @@ func TestActivityServiceEmptyListsAreArrays(t *testing.T) {
 func TestActivityServiceHidesListErrors(t *testing.T) {
 	var logs bytes.Buffer
 	secret := errors.New(`open C:\Users\student\db: locked`)
-	s := NewActivityService(&fakeActivity{err: secret}, nil, nil, slog.New(slog.NewTextHandler(&logs, nil)))
+	s := NewActivityService(&fakeActivity{err: secret}, &fakeStopper{}, &fakeForcer{}, slog.New(slog.NewTextHandler(&logs, nil)))
 
 	if _, err := s.ListRecordings(context.Background()); !errors.Is(err, ErrActivityUnavailable) || strings.Contains(err.Error(), "student") {
 		t.Errorf("ListRecordings err = %v", err)
@@ -159,22 +159,16 @@ func TestActivityServiceStopRecording(t *testing.T) {
 		{name: "not running here", id: "r1", stopper: &fakeStopper{err: fmt.Errorf("stop r1: %w", recordingsession.ErrNotRunning)}, want: ErrRecordingNotRunning},
 		{name: "unknown", id: "r1", stopper: &fakeStopper{err: fmt.Errorf("stop r1: %w", shared.ErrNotFound)}, want: ErrItemNotFound},
 		{name: "other failure", id: "r1", stopper: &fakeStopper{err: secret}, want: ErrActionFailed},
-		{name: "no stopper", id: "r1", want: ErrActionUnavailable},
 		{name: "empty id", id: "", stopper: &fakeStopper{}, want: ErrInvalidID},
 		{name: "long id", id: strings.Repeat("a", 129), stopper: &fakeStopper{}, want: ErrInvalidID},
 		{name: "path id", id: `..\db`, stopper: &fakeStopper{}, want: ErrInvalidID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var stopper RecordingStopper
-			if tt.stopper != nil {
-				stopper = tt.stopper
-			}
-			s := NewActivityService(&fakeActivity{}, stopper, nil, slog.New(slog.NewTextHandler(&logs, nil)))
+			s := NewActivityService(&fakeActivity{}, tt.stopper, &fakeForcer{}, slog.New(slog.NewTextHandler(&logs, nil)))
 			checkActionError(t, s.StopRecording(context.Background(), tt.id), tt.want)
 
 			switch {
-			case tt.stopper == nil:
 			case errors.Is(tt.want, ErrInvalidID) && tt.stopper.got != "":
 				t.Fatalf("an invalid id reached the stopper: %q", tt.stopper.got)
 			case !errors.Is(tt.want, ErrInvalidID) && tt.stopper.got != shared.RecordingID(tt.id):
@@ -198,22 +192,16 @@ func TestActivityServiceRunJobNow(t *testing.T) {
 		{name: "not waiting for power", id: "j1", forcer: &fakeForcer{err: fmt.Errorf("%w: RUNNING", jobrunner.ErrCannotRunNow)}, want: ErrCannotRunNow},
 		{name: "unknown", id: "j1", forcer: &fakeForcer{err: shared.ErrNotFound}, want: ErrItemNotFound},
 		{name: "other failure", id: "j1", forcer: &fakeForcer{err: errors.New("database is locked")}, want: ErrActionFailed},
-		{name: "no forcer", id: "j1", want: ErrActionUnavailable},
 		{name: "empty id", id: "", forcer: &fakeForcer{}, want: ErrInvalidID},
 		{name: "long id", id: strings.Repeat("j", 129), forcer: &fakeForcer{}, want: ErrInvalidID},
 		{name: "control character", id: "j\n1", forcer: &fakeForcer{}, want: ErrInvalidID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var forcer JobForcer
-			if tt.forcer != nil {
-				forcer = tt.forcer
-			}
-			s := NewActivityService(&fakeActivity{}, nil, forcer, discard())
+			s := NewActivityService(&fakeActivity{}, &fakeStopper{}, tt.forcer, discard())
 			checkActionError(t, s.RunJobNow(context.Background(), tt.id), tt.want)
 
 			switch {
-			case tt.forcer == nil:
 			case errors.Is(tt.want, ErrInvalidID) && tt.forcer.got != "":
 				t.Fatalf("an invalid id reached the forcer: %q", tt.forcer.got)
 			case !errors.Is(tt.want, ErrInvalidID) && tt.forcer.got != shared.JobID(tt.id):
@@ -230,8 +218,7 @@ func TestFrontendKnowsActivityErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range []error{
-		ErrActivityUnavailable, ErrInvalidID, ErrActionUnavailable, ErrItemNotFound, ErrRecordingNotRunning,
-		ErrCannotRunNow, ErrActionFailed,
+		ErrActivityUnavailable, ErrInvalidID, ErrItemNotFound, ErrRecordingNotRunning, ErrCannotRunNow, ErrActionFailed,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/activity.ts does not list the error %q", e)

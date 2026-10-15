@@ -101,7 +101,6 @@ export function formatTime(rfc3339: string): string {
 const actionErrors: Readonly<Record<string, string>> = {
   [errorMessages.unavailable]: "Записи и задачи сейчас недоступны.",
   [errorMessages.invalidId]: "Неверный идентификатор.",
-  [errorMessages.actionUnavailable]: "Это действие пока недоступно.",
   [errorMessages.notFound]: "Не найдено. Обновите список.",
   [errorMessages.recordingNotRunning]: "Запись не идёт в этом сеансе.",
   [errorMessages.cannotRunNow]: "Эту задачу сейчас нельзя запустить.",

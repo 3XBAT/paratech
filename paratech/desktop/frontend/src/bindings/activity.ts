@@ -46,7 +46,6 @@ export const methods = {
 export const errorMessages = {
   unavailable: "recordings and jobs are unavailable",
   invalidId: "invalid id",
-  actionUnavailable: "this action is not available yet",
   notFound: "not found",
   recordingNotRunning: "the recording is not running in this session",
   cannotRunNow: "the job cannot be run now",

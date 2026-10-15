@@ -61,7 +61,12 @@ func (s *Shell) run(ctx context.Context) error {
 	started := make(chan struct{})
 	var once sync.Once
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		once.Do(func() { close(started) })
+		once.Do(func() {
+			close(started)
+			if s.opts.Started != nil {
+				s.opts.Started()
+			}
+		})
 	})
 
 	// Quit is a no-op until the platform app exists, so a cancellation waits for the start event.

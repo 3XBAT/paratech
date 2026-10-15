@@ -29,15 +29,17 @@ type Options struct {
 	// OpenCore opens the core (database, use cases) and returns what the pages bind to. Run calls it once, after the
 	// single-instance check: a second instance exits before it and never touches the database (ADR-0007).
 	OpenCore func(ctx context.Context) (Core, error)
+	// Started, if set, is called once when the application runs (Wails' ApplicationStarted), on a Wails goroutine:
+	// it must return at once, so the app starts its background work there without blocking the UI.
+	Started func()
 }
 
-// Core is what the pages of the main window call through the bindings.
+// Core is what the pages of the main window call through the bindings. Every field is required.
 type Core struct {
 	Settings SettingsUseCase
 	Activity ActivityUseCase
-	// Stopper and Forcer are optional: without them the page lists but cannot act (ErrActionUnavailable).
-	Stopper RecordingStopper
-	Forcer  JobForcer
+	Stopper  RecordingStopper
+	Forcer   JobForcer
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -157,6 +159,12 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	}
 	if core.Activity == nil {
 		return bindings{}, errors.New("wails: open core: no activity use case")
+	}
+	if core.Stopper == nil {
+		return bindings{}, errors.New("wails: open core: no recording stopper")
+	}
+	if core.Forcer == nil {
+		return bindings{}, errors.New("wails: open core: no job forcer")
 	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
