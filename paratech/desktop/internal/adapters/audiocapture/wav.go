@@ -171,14 +171,27 @@ func readHeader(r io.Reader, size int64) (chunkInfo, error) {
 
 // parseFmt decodes a fmt chunk body: WAVEFORMATEX or WAVEFORMATEXTENSIBLE with integer PCM or IEEE float samples.
 func parseFmt(b []byte) (Format, error) {
+	f, err := decodeWaveFormat(b)
+	if err != nil {
+		return Format{}, fmt.Errorf("%w: %w", errNotAudio, err)
+	}
+	return f, nil
+}
+
+// decodeWaveFormat decodes a WAVEFORMATEX (the first 16 bytes suffice for PCM and float) or a WAVEFORMATEXTENSIBLE,
+// as found in a WAV fmt chunk and in WASAPI. Its errors wrap ErrInvalidFormat.
+func decodeWaveFormat(b []byte) (Format, error) {
 	le := binary.LittleEndian
+	if len(b) < 16 {
+		return Format{}, fmt.Errorf("%w: WAVEFORMATEX of %d bytes", ErrInvalidFormat, len(b))
+	}
 	tag := uint32(le.Uint16(b[0:2]))
 	if tag == tagExtensible {
 		if len(b) < extensibleFmtLen || int(le.Uint16(b[16:18])) < extensibleFmtLen-18 {
-			return Format{}, fmt.Errorf("%w: short WAVEFORMATEXTENSIBLE", errNotAudio)
+			return Format{}, fmt.Errorf("%w: short WAVEFORMATEXTENSIBLE", ErrInvalidFormat)
 		}
 		if !bytes.Equal(b[28:40], subFormatTail()) {
-			return Format{}, fmt.Errorf("%w: unknown sub-format", errNotAudio)
+			return Format{}, fmt.Errorf("%w: unknown sub-format", ErrInvalidFormat)
 		}
 		tag = le.Uint32(b[24:28])
 	}
@@ -193,13 +206,13 @@ func parseFmt(b []byte) (Format, error) {
 	case tagFloat:
 		f.Float = true
 	default:
-		return Format{}, fmt.Errorf("%w: format tag 0x%04x", errNotAudio, tag)
+		return Format{}, fmt.Errorf("%w: format tag 0x%04x", ErrInvalidFormat, tag)
 	}
 	if err := f.Validate(); err != nil {
-		return Format{}, fmt.Errorf("%w: %w", errNotAudio, err)
+		return Format{}, err
 	}
 	if int(le.Uint16(b[12:14])) != f.BlockAlign() || le.Uint32(b[8:12]) != f.ByteRate() {
-		return Format{}, fmt.Errorf("%w: inconsistent block align or byte rate", errNotAudio)
+		return Format{}, fmt.Errorf("%w: inconsistent block align or byte rate", ErrInvalidFormat)
 	}
 	return f, nil
 }
