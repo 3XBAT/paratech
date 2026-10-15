@@ -4,6 +4,8 @@
 # Generated sqlcgen conflicts during the rebase are resolved with our side and regenerated afterwards;
 # progress.txt merges as a union (.gitattributes); any other conflict stops with REBASE_UNRESOLVED.
 set -u
+# The repository is the one that contains this script, not the caller's directory (parallel worktrees!).
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 cd "$(git rev-parse --show-toplevel)" || exit 1
 export GIT_TERMINAL_PROMPT=0 GIT_EDITOR=true
 
