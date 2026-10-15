@@ -57,7 +57,7 @@ func TestDecodeRequestRejects(t *testing.T) {
 		{"short chunks", `{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"exclude","pid":7},"chunk_seconds":29,"lead_silence_ms":0}`},
 		{"long chunks", `{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"exclude","pid":7},"chunk_seconds":61,"lead_silence_ms":0}`},
 		{"negative lead", `{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"exclude","pid":7},"chunk_seconds":60,"lead_silence_ms":-1}`},
-		{"long lead", `{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"exclude","pid":7},"chunk_seconds":60,"lead_silence_ms":60001}`},
+		{"long lead", `{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"exclude","pid":7},"chunk_seconds":60,"lead_silence_ms":154001}`},
 		{"huge lead", `{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"exclude","pid":7},"chunk_seconds":60,"lead_silence_ms":9223372036854775807}`},
 		{"floor of another mode", `{"v":1,` + base + `,"floor":"include"}`},
 	}

@@ -24,8 +24,12 @@ const (
 
 	minChunkSeconds = 30
 	maxChunkSeconds = 60
-	maxLeadSilence  = 60 * time.Second
 )
+
+// maxLeadSilence bounds the lead silence of a restart. It covers the worst case of the defaults: a lost open chunk,
+// the previous lead not yet closed in a chunk, a hang until the kill and the longest backoff (154 s).
+const maxLeadSilence = 2*maxChunkSeconds*time.Second + DefaultHangTimeout +
+	DefaultRestartBackoff<<(DefaultMaxRestarts-1)
 
 // Event types written by the child.
 const (

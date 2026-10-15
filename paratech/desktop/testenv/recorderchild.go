@@ -40,6 +40,8 @@ const (
 	RecorderFallback = "fallback"
 	// RecorderNoisy writes two bad lines to stdout first.
 	RecorderNoisy = "noisy"
+	// RecorderQuit stops by itself after 100 packets and reports "stopped", as if its stdin had closed.
+	RecorderQuit = "quit"
 )
 
 // RecorderCrashPackets is when RecorderCrash exits: 40 s of audio, one closed chunk and one partial.
@@ -52,11 +54,16 @@ func FakeRecorderFormat() audiocapture.Format {
 
 // RunFakeRecorderChild lets a test binary double as the recorder child: call it first in TestMain and exit with its
 // code when ok is true. It is recognised by the production command line (--recorder --data-dir <dir>) together with
-// EnvFakeRecorder; the chunks go through a filestore on <dir>/artifacts, as in the app.
+// EnvFakeRecorder; the chunks go through a filestore on <dir>/artifacts, as in the app. A --recorder command line
+// without a scenario (the production recorder launched by mistake) exits with 1 at once instead of running the tests.
 func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, ok bool) {
-	scenario := getenv(EnvFakeRecorder)
-	if scenario == "" || len(args) != 3 || args[0] != "--recorder" || args[1] != "--data-dir" {
+	if len(args) == 0 || args[0] != "--recorder" {
 		return 0, false
+	}
+	scenario := getenv(EnvFakeRecorder)
+	if scenario == "" || len(args) != 3 || args[1] != "--data-dir" {
+		fmt.Fprintln(os.Stderr, "fake recorder: no scenario; the test binary is not a recorder child")
+		return 1, true
 	}
 	store, err := filestore.New(filepath.Join(args[2], "artifacts"))
 	if err != nil {
@@ -67,8 +74,16 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 
 	src := &ToneSource{Format: FakeRecorderFormat(), PacketFrames: 800, Interval: 2 * time.Millisecond}
 	var stdin io.Reader = os.Stdin
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	for _, flag := range strings.Split(scenario, ",") {
 		switch flag {
+		case RecorderQuit:
+			src.OnPacket = func(n int) {
+				if n == 100 {
+					cancel()
+				}
+			}
 		case RecorderTone:
 		case RecorderCrash:
 			src.OnPacket = func(n int) {
@@ -99,7 +114,7 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	cfg := audiocapture.ChildConfig{StatsInterval: 50 * time.Millisecond}
-	return audiocapture.RunChild(context.Background(), stdin, os.Stdout, src, store, log, cfg), true
+	return audiocapture.RunChild(ctx, stdin, os.Stdout, src, store, log, cfg), true
 }
 
 // hangAfterStart reads the request, reports a start and then freezes.

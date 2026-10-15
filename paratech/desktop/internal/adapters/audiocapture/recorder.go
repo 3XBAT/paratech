@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,15 +17,15 @@ import (
 const (
 	DefaultChunkSeconds   = 60
 	DefaultStartTimeout   = 15 * time.Second // the 5 s activation timeout of process loopback plus the fallback
-	DefaultStopGrace      = 10 * time.Second
+	DefaultStopGrace      = 7 * time.Second  // below the 10 s the recording session gives a stop, kill included
 	DefaultHangTimeout    = 30 * time.Second // six missed heartbeats of the child
 	DefaultRestartBackoff = time.Second      // doubled per restart: 1 s, 2 s, 4 s
 	DefaultMaxRestarts    = 3
 
 	// keptCaptures is how many ended captures stay for Wait and Diagnostics.
 	keptCaptures = 8
-	// killWait bounds the wait for a killed child to be reaped when the caller gave up.
-	killWait = 5 * time.Second
+	// killWait bounds how long Stop past its context waits for the killed child; the supervisor reaps it anyway.
+	killWait = time.Second
 )
 
 var (
@@ -59,7 +60,7 @@ type Config struct {
 	OwnPID         uint32        // excluded by the default target; 0 means this process
 }
 
-// DefaultConfig returns 60 s chunks, a 15 s start timeout, a 10 s stop grace, a 30 s hang timeout and three restarts
+// DefaultConfig returns 60 s chunks, a 15 s start timeout, a 7 s stop grace, a 30 s hang timeout and three restarts
 // after 1, 2 and 4 s.
 func DefaultConfig() Config {
 	return Config{
@@ -193,7 +194,8 @@ func (r *Recorder) checkStart(id shared.RecordingID, chunks shared.ArtifactRef, 
 
 // Stop closes the child's stdin and waits for it to stop, up to the grace period, then kills it; the child is always
 // reaped. It returns nil after a clean stop and also when the capture had ended already. If ctx ends first the child
-// is killed and ctx's error returned.
+// is killed and ctx's error returned within killWait; the supervisor reaps the child afterwards and Wait reports the
+// end.
 func (r *Recorder) Stop(ctx context.Context, id shared.RecordingID) error {
 	c := r.lookup(id)
 	if c == nil {
@@ -270,7 +272,8 @@ func (r *Recorder) retire(c *capture) {
 	if r.captures[c.id] != c {
 		return
 	}
-	r.ended = append(r.ended, c.id)
+	// A recording captured again is listed once, as its latest end.
+	r.ended = append(slices.DeleteFunc(r.ended, func(id shared.RecordingID) bool { return id == c.id }), c.id)
 	for len(r.ended) > keptCaptures {
 		old := r.ended[0]
 		r.ended = r.ended[1:]

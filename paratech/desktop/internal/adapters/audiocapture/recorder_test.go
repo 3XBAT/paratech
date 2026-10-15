@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -135,7 +136,10 @@ func TestRecorderStartStopFinalize(t *testing.T) {
 	if err := e.rec.Start(ctx, "rec1", e.chunks); !errors.Is(err, audiocapture.ErrAlreadyCapturing) {
 		t.Fatalf("a second Start = %v, want ErrAlreadyCapturing", err)
 	}
-	e.waitDiag(t, "a chunk closes", func(d audiocapture.Diagnostics) bool { return d.Chunks >= 1 })
+	// Audio past the first chunk, so the stop closes a second one.
+	e.waitDiag(t, "the second chunk has audio", func(d audiocapture.Diagnostics) bool {
+		return d.Chunks >= 1 && d.Stats.Frames > 30*int64(testenv.FakeRecorderFormat().SampleRate)
+	})
 	if err := stop(t, e); err != nil {
 		t.Fatalf("Stop = %v", err)
 	}
@@ -415,6 +419,108 @@ func TestRecorderStopPastItsContextKills(t *testing.T) {
 	}
 	if err := e.waitEnded(t); err != nil {
 		t.Fatalf("Wait = %v", err)
+	}
+}
+
+// slowKillLauncher starts in-process children that report a start, ignore their closed stdin and exit only killDelay
+// after a kill (a child Windows is slow to end).
+type slowKillLauncher struct{ killDelay time.Duration }
+
+func (l slowKillLauncher) Launch() (audiocapture.Process, error) {
+	p := &slowKillProcess{killDelay: l.killDelay, exited: make(chan struct{})}
+	var inR *io.PipeReader
+	inR, p.inW = io.Pipe()
+	p.outR, p.outW = io.Pipe()
+	p.errR, p.errW = io.Pipe()
+	go func() { _, _ = io.Copy(io.Discard, inR) }() // the request, then EOF is ignored
+	go func() {
+		_, _ = p.outW.Write([]byte(`{"type":"started","mode":"exclude","format":{"rate":8000,"channels":1,"bits":16}}` + "\n"))
+	}()
+	return p, nil
+}
+
+type slowKillProcess struct {
+	killDelay  time.Duration
+	inW        *io.PipeWriter
+	outR, errR *io.PipeReader
+	outW, errW *io.PipeWriter
+	killOnce   sync.Once
+	exited     chan struct{}
+}
+
+func (p *slowKillProcess) Stdin() io.WriteCloser { return p.inW }
+func (p *slowKillProcess) Stdout() io.Reader     { return p.outR }
+func (p *slowKillProcess) Stderr() io.Reader     { return p.errR }
+func (p *slowKillProcess) PID() int              { return 1234 }
+
+func (p *slowKillProcess) Kill() error {
+	p.killOnce.Do(func() {
+		time.AfterFunc(p.killDelay, func() {
+			_ = p.outW.Close()
+			_ = p.errW.Close()
+			close(p.exited)
+		})
+	})
+	return nil
+}
+
+func (p *slowKillProcess) Wait() (int, error) {
+	<-p.exited
+	return 1, nil
+}
+
+// The recording session gives a stop 10 s: Stop past its context returns soon even when the killed child lingers,
+// and the child is reaped afterwards.
+func TestRecorderStopPastItsContextReturnsPromptly(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	if audiocapture.DefaultStopGrace >= 10*time.Second {
+		t.Fatalf("the default stop grace %v leaves no time for the kill", audiocapture.DefaultStopGrace)
+	}
+	rec, err := audiocapture.New(audiocapture.Deps{Files: audiocapture.NewTestStore(t.TempDir()),
+		Launcher: slowKillLauncher{killDelay: 4 * time.Second}}, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rec.Start(context.Background(), "rec1", ref(t, "rec1")); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	if err := rec.Stop(ctx, "rec1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop = %v, want the context error", err)
+	}
+	if took := time.Since(began); took > 2500*time.Millisecond {
+		t.Fatalf("Stop returned %v after its context ended", took-200*time.Millisecond)
+	}
+
+	wctx, wcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer wcancel()
+	if err := rec.Wait(wctx, "rec1"); err != nil {
+		t.Fatalf("Wait = %v, want the end of the stop once the child is reaped", err)
+	}
+}
+
+// A child that reports a stop nobody asked for is restarted like a crashed one.
+func TestRecorderRestartsAChildThatStoppedByItself(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	e := newRecorderEnv(t, testConfig(), testenv.RecorderQuit, testenv.RecorderTone)
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks); err != nil {
+		t.Fatal(err)
+	}
+	e.waitDiag(t, "the child is restarted", func(d audiocapture.Diagnostics) bool { return d.Restarts == 1 && d.Running })
+	if d := e.diag(t); !strings.Contains(d.Failure, "stopped without a stop request") {
+		t.Fatalf("failure = %q", d.Failure)
+	}
+	if err := stop(t, e); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.waitEnded(t); err != nil {
+		t.Fatalf("Wait = %v", err)
+	}
+	if e.launcher.count() != 2 {
+		t.Fatalf("%d children launched, want 2", e.launcher.count())
 	}
 }
 

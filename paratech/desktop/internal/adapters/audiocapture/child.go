@@ -105,10 +105,11 @@ type child struct {
 	frames          atomic.Int64
 	stream          atomic.Value // Stream, once open
 
-	w       *chunkWriter
-	t0      time.Time     // when the stream opened
-	audio   time.Duration // audio written since t0, without the lead silence
-	started bool          // the first packet arrived
+	w *chunkWriter
+	// last is when the previous packet arrived. Gaps are measured from it, not from the stream start, so the drift
+	// of the device clock over hours is never taken for a gap.
+	last    time.Time
+	started bool // the first packet arrived
 }
 
 func (c *child) run(ctx context.Context, stop <-chan struct{}, src Source, files ChunkFiles) int {
@@ -148,7 +149,6 @@ func (c *child) run(ctx context.Context, stop <-chan struct{}, src Source, files
 		return ChildExitFailed
 	}
 	c.stream.Store(stream)
-	c.t0 = c.cfg.Now()
 
 	info := stream.Info()
 	c.out.emit(event{Type: evStarted, Mode: string(info.Mode), Format: toWireFormat(info.Format), Build: shortText(info.Build)})
@@ -230,7 +230,8 @@ func (c *child) write(p Packet) error {
 		return err
 	}
 	rate := p.Format.SampleRate
-	dur := durationOf(int64(p.Frames), rate)
+	now, prev := c.cfg.Now(), c.last
+	c.last = now
 
 	var fill int64
 	switch {
@@ -238,10 +239,10 @@ func (c *child) write(p Packet) error {
 		c.started = true
 		fill = framesFor(c.req.LeadSilence, rate)
 	case p.Discontinuity:
-		if gap := c.cfg.Now().Sub(c.t0) - c.audio - dur; gap >= minGap {
+		// The packet ends about when it arrives; the previous one ended at prev.
+		if gap := now.Sub(prev) - durationOf(int64(p.Frames), rate); gap >= minGap {
 			gap = min(gap, c.cfg.MaxGap)
 			fill = framesFor(gap, rate)
-			c.audio += durationOf(fill, rate)
 			c.log.Info("filling a capture gap with silence", slog.Duration("gap", gap))
 		}
 	}
@@ -261,7 +262,6 @@ func (c *child) write(p Packet) error {
 	}
 	c.packets.Add(1)
 	c.frames.Add(fill + int64(p.Frames))
-	c.audio += dur
 	return nil
 }
 

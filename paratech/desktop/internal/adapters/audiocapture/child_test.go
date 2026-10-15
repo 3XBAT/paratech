@@ -231,32 +231,59 @@ type fakeNow struct {
 func (f *fakeNow) now() time.Time          { return f.base.Add(time.Duration(f.off.Load())) }
 func (f *fakeNow) advance(d time.Duration) { f.off.Add(int64(d)) }
 
+// Packets of 100 ms arrive every step of the clock; the last one is a discontinuity after an extra pause.
 func TestChildFillsAGapWithSilence(t *testing.T) {
-	clock := &fakeNow{base: time.Now()}
-	src := &testenv.ToneSource{Format: s16, PacketFrames: 800, Limit: 5, DiscontinuityAt: 5, SilentAt: 3,
-		OnPacket: func(n int) {
-			if n == 5 {
-				clock.advance(10 * time.Second) // the device was gone for a while
+	tests := []struct {
+		name    string
+		step    time.Duration
+		packets int
+		pause   time.Duration
+		fill    int // silence frames before the last packet
+	}{
+		{"the device was gone", 100 * time.Millisecond, 5, 10 * time.Second, 80000},
+		{"a pause longer than the cap", 100 * time.Millisecond, 5, 2 * time.Minute, 60 * 8000},
+		{"jitter is no gap", 100 * time.Millisecond, 5, 50 * time.Millisecond, 0},
+		// A device clock 1 % slow: 200 ms behind after 20 s, which is no gap at the next discontinuity.
+		{"clock drift is no gap", 101 * time.Millisecond, 200, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := &fakeNow{base: time.Now()}
+			src := &testenv.ToneSource{Format: s16, PacketFrames: 800, Limit: tt.packets, DiscontinuityAt: tt.packets,
+				SilentAt: 3, OnPacket: func(n int) {
+					clock.advance(tt.step)
+					if n == tt.packets {
+						clock.advance(tt.pause)
+					}
+				}}
+			run := startChild(t, context.Background(), src, request(t),
+				audiocapture.ChildConfig{Now: clock.now, StatsInterval: 10 * time.Millisecond})
+			want := tt.packets*800 + tt.fill
+			run.waitFrames(t, want)
+			_ = run.stdin.Close()
+			if code := run.exit(t); code != 0 {
+				t.Fatalf("exit code %d", code)
 			}
-		}}
-	run := startChild(t, context.Background(), src, request(t), audiocapture.ChildConfig{Now: clock.now, StatsInterval: 10 * time.Millisecond})
-	run.waitFrames(t, 5*800+76000)
-	_ = run.stdin.Close()
-	if code := run.exit(t); code != 0 {
-		t.Fatalf("exit code %d", code)
-	}
 
-	// 0.4 s of audio, then the packet ending at 10 s: 9.5 s of silence before it.
-	_, frames, data := chunk(t, run.store, "chunk-000001.wav")
-	if frames != 5*800+76000 {
-		t.Fatalf("frames = %d, want %d", frames, 5*800+76000)
-	}
-	silence := data[4*1600 : 4*1600+76000*2]
-	if bytes.ContainsFunc(silence, func(r rune) bool { return r != 0 }) {
-		t.Fatal("the gap is not silence")
-	}
-	if bytes.ContainsFunc(data[2*1600:3*1600], func(r rune) bool { return r != 0 }) {
-		t.Fatal("a silent packet was not written as zeros")
+			var data []byte
+			for _, name := range run.store.Names(t, ref(t, "rec1")) {
+				_, _, d := chunk(t, run.store, name)
+				data = append(data, d...)
+			}
+			if len(data) != want*2 {
+				t.Fatalf("%d frames, want %d", len(data)/2, want)
+			}
+			before := (tt.packets - 1) * 1600
+			if bytes.ContainsFunc(data[before:before+tt.fill*2], func(r rune) bool { return r != 0 }) {
+				t.Fatal("the gap is not silence")
+			}
+			if !bytes.Equal(data[before+tt.fill*2:], testenv.ToneFrames(s16, 1000, 0.5, int64(tt.packets-1)*800, 800)) {
+				t.Fatal("the last packet does not follow the gap")
+			}
+			if bytes.ContainsFunc(data[2*1600:3*1600], func(r rune) bool { return r != 0 }) {
+				t.Fatal("a silent packet was not written as zeros")
+			}
+		})
 	}
 }
 

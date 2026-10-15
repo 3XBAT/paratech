@@ -187,11 +187,15 @@ func (r *Recorder) supervise(c *capture) {
 			return
 		}
 
-		switch {
-		case out.kind == endStopped || c.stopping(): // a failure during the stop still counts as the stop
+		if c.stopping() { // a failure during the stop still counts as the stop
 			c.end(nil, out.stopErr)
 			r.retire(c)
 			return
+		}
+		if out.kind == endStopped { // nobody asked: the capture must go on
+			out.kind, out.reason = endCrashed, "the recorder child stopped without a stop request"
+		}
+		switch {
 		case out.kind == endFailed:
 			r.fail(c, fmt.Errorf("%w: %s", ErrCaptureFailed, out.reason))
 			return
@@ -204,20 +208,32 @@ func (r *Recorder) supervise(c *capture) {
 		delay := r.cfg.RestartBackoff << (restarts - 1)
 		r.log.Warn("restarting the recorder child", slog.String("recording", c.id.String()),
 			slog.Int("restart", restarts), slog.Duration("delay", delay), slog.String("reason", shortText(out.reason)))
-		if !c.wait(r.after(delay)) {
+		if !c.wait(r.after(delay)) || c.stopping() { // both may be ready together
 			c.end(nil, nil)
 			r.retire(c)
 			return
 		}
 
 		// The new child starts with the time the chunks miss as silence, in the mode the last one ended in.
-		lead = req.LeadSilence + r.now().Sub(out.runStart) - out.closedAudio
-		lead = min(max(lead, 0), maxLeadSilence).Truncate(time.Millisecond)
+		missed := req.LeadSilence + r.now().Sub(out.runStart) - out.closedAudio
+		var capped bool
+		if lead, capped = restartLead(missed); capped {
+			r.log.Warn("the restart misses more audio than the lead silence covers; the track is shorter",
+				slog.String("recording", c.id.String()), slog.Duration("missed", missed), slog.Duration("lead_silence", lead))
+		}
 		if out.mode == ModeSystem && c.target.Mode != ModeSystem {
 			floor = ModeSystem // the fallback is one-way within a recording
 		}
 		c.update(func(d *Diagnostics) { d.Restarts = restarts; d.Failure = shortText(out.reason) })
 	}
+}
+
+// restartLead is the lead silence of a restarted child for the audio the chunks missed, capped at maxLeadSilence.
+func restartLead(missed time.Duration) (lead time.Duration, capped bool) {
+	if missed > maxLeadSilence {
+		return maxLeadSilence, true
+	}
+	return max(missed, 0).Truncate(time.Millisecond), false
 }
 
 func (r *Recorder) fail(c *capture, err error) {

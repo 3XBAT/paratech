@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"golang.org/x/sys/windows"
+
 	"paratech/desktop/internal/adapters/audiocapture"
 )
 
-// exitedPID starts a process (this test binary running no test) and reaps it, so its PID names no live process.
+// exitedPID starts a process (this test binary running no test) and reaps it, so its PID names no live process. A
+// handle stays open until the test ends, so Windows cannot reuse the PID meanwhile.
 func exitedPID(t *testing.T) uint32 {
 	t.Helper()
 	exe, err := os.Executable()
@@ -21,10 +24,19 @@ func exitedPID(t *testing.T) uint32 {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe, "-test.run=^$")
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
 		t.Fatalf("helper process: %v", err)
 	}
-	return uint32(cmd.Process.Pid)
+	pid := uint32(cmd.Process.Pid)
+	h, openErr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("helper process: %v", err)
+	}
+	if openErr != nil {
+		t.Fatalf("open the helper process: %v", openErr)
+	}
+	t.Cleanup(func() { _ = windows.CloseHandle(h) })
+	return pid
 }
 
 func TestPlatformProcessesTellsRunningFromExited(t *testing.T) {
