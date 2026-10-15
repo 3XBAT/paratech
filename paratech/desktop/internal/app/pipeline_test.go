@@ -135,9 +135,8 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	configureHub(t, u.c, time.Now(), hubURL)
-	// A model installed as a file and made the default through the wired model manager; the catalog of this build is
-	// empty, so it cannot come from an import (catalogNotConfigured).
-	model := installModel(t, u.app, "m1", testenv.WhisperOK)
+	// A model imported and made the default through the wired model manager, as the models screen will do.
+	model := importModel(t, u.c, "base", testenv.WhisperOK)
 	if err := u.c.models.SetDefault(ctx, model); err != nil {
 		t.Fatal(err)
 	}

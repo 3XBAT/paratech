@@ -257,13 +257,13 @@ func (c *core) whisper(root, binary string, log *slog.Logger) (*whispercli.Engin
 }
 
 // wireModels builds the model manager (PRD section 8): the installed models, the default, the pin of an STT job, the
-// download of a catalog model and the import of a file the user picked. This build has no catalog
-// (catalogNotConfigured).
+// download of a catalog model and the import of a file the user picked. The catalog is the embedded manifest, which
+// lists no model yet (embeddedCatalog).
 func (c *core) wireModels(e env) error {
 	var err error
 	c.models, err = modelcatalog.New(modelcatalog.Deps{
 		Models: sqlite.NewModelRepository(c.db), Pins: sqlite.NewModelPins(c.db), Settings: sqlite.NewSettingsRepository(c.db),
-		Files: c.store, Catalog: catalogNotConfigured{}, Clock: e.clock, IDs: e.ids, Tx: c.db,
+		Files: c.store, Catalog: embeddedCatalog{}, Clock: e.clock, IDs: e.ids, Tx: c.db,
 	})
 	if err != nil {
 		return fmt.Errorf("app: model catalog: %w", err)
