@@ -25,8 +25,11 @@ func TestLiveApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	playing, icons := 0, 0
+	playing, icons, titled := 0, 0, 0
 	for _, a := range list {
+		if a.Title != "" {
+			titled++
+		}
 		if a.Playing {
 			playing++
 		}
@@ -43,5 +46,5 @@ func TestLiveApps(t *testing.T) {
 		}
 		t.Logf("%s: pid %d, playing %v, muted %v, icon %d bytes", a.App, a.PID, a.Playing, a.Muted, len(a.IconPNG))
 	}
-	t.Logf("%d apps, %d playing, %d with an icon", len(list), playing, icons)
+	t.Logf("%d apps, %d playing, %d with an icon, %d with a title", len(list), playing, icons, titled)
 }

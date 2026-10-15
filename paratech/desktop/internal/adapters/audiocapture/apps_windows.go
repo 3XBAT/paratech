@@ -68,7 +68,7 @@ func platformApps() appPlatform {
 		com:                newComProcs(),
 		enumWindowsCB:      windows.NewCallback(enumWindowsProc),
 		enumChildCB:        windows.NewCallback(enumChildProc),
-		getWindowTextW:     user32.NewProc("GetWindowTextW"),
+		getWindowText:      user32.NewProc("InternalGetWindowText"),
 		getWindowLongPtrW:  user32.NewProc("GetWindowLongPtrW"),
 		getIconInfo:        user32.NewProc("GetIconInfo"),
 		destroyIcon:        user32.NewProc("DestroyIcon"),
@@ -86,7 +86,7 @@ func platformApps() appPlatform {
 type winApps struct {
 	com                          *comProcs
 	enumWindowsCB, enumChildCB   uintptr
-	getWindowTextW               *windows.LazyProc
+	getWindowText                *windows.LazyProc
 	getWindowLongPtrW            *windows.LazyProc
 	getIconInfo, destroyIcon     *windows.LazyProc
 	extractIconExW               *windows.LazyProc
@@ -113,7 +113,7 @@ func (w *winApps) snapshot(sessions bool) (snapshot, error) {
 		return snapshot{}, err
 	}
 	s.procs = procs
-	if s.windows, err = w.windows(); err != nil {
+	if s.windows, err = w.windows(s.self); err != nil {
 		return snapshot{}, err
 	}
 	if sessions {
@@ -208,6 +208,7 @@ func (w *winApps) inspect(pid uint32) (procIdentity, error) {
 // windowEnum collects the windows of one EnumWindows run.
 type windowEnum struct {
 	w    *winApps
+	self uint32 // this process: its windows are skipped before they are read
 	out  []windowInfo
 	full bool
 }
@@ -233,8 +234,8 @@ func enumChildProc(hwnd, param uintptr) uintptr {
 	return 1
 }
 
-func (w *winApps) windows() ([]windowInfo, error) {
-	e := &windowEnum{w: w}
+func (w *winApps) windows(self uint32) ([]windowInfo, error) {
+	e := &windowEnum{w: w, self: self}
 	w.enum = e
 	defer func() { w.enum = nil }()
 	if err := windows.EnumWindows(w.enumWindowsCB, unsafe.Pointer(e)); err != nil && !e.full { //nolint:gosec // G103: the callback state, kept reachable by w.enum
@@ -267,6 +268,9 @@ func (e *windowEnum) add(hwnd windows.HWND) uintptr {
 	if className(hwnd) == uwpFrameClass {
 		pid = e.w.uwpApp(hwnd, pid)
 	}
+	if pid == e.self { // never listed; and a busy UI thread of ours must not stall the enumeration
+		return 1
+	}
 	info.owner, info.title = pid, e.w.windowText(hwnd)
 	e.out = append(e.out, info)
 	return 1
@@ -291,11 +295,11 @@ func (w *winApps) windowLong(hwnd windows.HWND, index int32) uint32 {
 	return uint32(r) //nolint:gosec // the styles are the low 32 bits
 }
 
-// windowText reads the title. For a window of another process Windows returns the stored caption without sending
-// it a message, so a hung app cannot block this.
+// windowText reads the stored title with InternalGetWindowText, which sends the window no message (GetWindowText
+// sends WM_GETTEXT to windows of this process), so a hung window cannot block this.
 func (w *winApps) windowText(hwnd windows.HWND) string {
 	buf := make([]uint16, maxTitleChars)
-	n, _, _ := w.getWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf))) //nolint:gosec // G103: output buffer
+	n, _, _ := w.getWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf))) //nolint:gosec // G103: output buffer
 	if n == 0 || n > uintptr(len(buf)) {
 		return ""
 	}

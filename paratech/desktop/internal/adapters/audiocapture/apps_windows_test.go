@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // The Go mirrors of the icon structures have the 64-bit ABI layout.
@@ -31,6 +33,23 @@ func TestIconStructLayout(t *testing.T) {
 	for _, tt := range tests {
 		if tt.got != tt.want {
 			t.Errorf("%s = %d, want %d", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+// Every Windows function the enumeration looks up by name exists: a wrong name would only show as empty titles or
+// no icons.
+func TestAppsProcsExist(t *testing.T) {
+	w, ok := platformApps().(*winApps)
+	if !ok {
+		t.Fatal("platformApps is not the Windows implementation")
+	}
+	for _, p := range []*windows.LazyProc{
+		w.getWindowText, w.getWindowLongPtrW, w.getIconInfo, w.destroyIcon, w.extractIconExW, w.getObjectW,
+		w.getDIBits, w.createCompatibleDC, w.deleteDC, w.deleteObject,
+	} {
+		if err := p.Find(); err != nil {
+			t.Errorf("%s: %v", p.Name, err)
 		}
 	}
 }
