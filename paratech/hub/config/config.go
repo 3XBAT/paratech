@@ -28,7 +28,7 @@ const (
 	EnvQuotaReservationTTL  = "HUB_QUOTA_RESERVATION_TTL"
 	EnvIdempotencyRetention = "HUB_IDEMPOTENCY_RETENTION"
 
-	EnvAnthropicAPIKey  = "HUB_ANTHROPIC_API_KEY"
+	EnvAnthropicAPIKey  = "HUB_ANTHROPIC_API_KEY" //nolint:gosec // G101: the name of the variable, not a credential
 	EnvAnthropicBaseURL = "HUB_ANTHROPIC_BASE_URL"
 	EnvLLMTimeout       = "HUB_LLM_TIMEOUT"
 	EnvLLMModels        = "HUB_LLM_MODELS"
