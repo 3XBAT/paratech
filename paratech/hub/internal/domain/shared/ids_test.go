@@ -17,6 +17,18 @@ func TestAPIKeyIDValidate(t *testing.T) {
 	}
 }
 
+func TestReservationIDValidate(t *testing.T) {
+	if err := ReservationID("0123456789abcdef0123456789abcdef").Validate(); err != nil {
+		t.Fatalf("valid id: %v", err)
+	}
+	for _, bad := range []string{"", "0123456789abcdef", "0123456789abcdef0123456789abcde", "0123456789abcdef0123456789abcdef0",
+		"0123456789ABCDEF0123456789abcdef", "0123456789abcdef0123456789abcdeg"} {
+		if err := ReservationID(bad).Validate(); !errors.Is(err, ErrInvalidID) {
+			t.Errorf("Validate(%q) = %v, want ErrInvalidID", bad, err)
+		}
+	}
+}
+
 func TestLowerHex(t *testing.T) {
 	for s, want := range map[string]bool{"": false, "0af9": true, "0AF9": false, "x": false, "a-b": false} {
 		if got := isLowerHex(s); got != want {
