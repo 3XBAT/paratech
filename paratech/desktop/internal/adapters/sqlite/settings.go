@@ -19,7 +19,8 @@ const (
 )
 
 // SettingsRepository stores the settings singleton (the modelcatalog.SettingsRepository port; its Load also serves the
-// SettingsReader ports of recordingsession, jobrunner and transcribe). Defaults and validation stay in
+// SettingsReader ports of recordingsession, jobrunner and transcribe, and the mail and Hub setup the app reads for the
+// smtp and hubclient adapters). No column holds a secret (hard rule 4). Defaults and validation stay in
 // settings.Settings: the repository only converts between the row and the aggregate.
 type SettingsRepository struct{ db *DB }
 
@@ -75,6 +76,12 @@ func settingsFromRow(row sqlcgen.Setting) (*settings.Settings, error) {
 		ProcessOnlyOnACPower:       row.ProcessOnlyOnAcPower != 0,
 		NotifyOnProcessingComplete: row.NotifyOnProcessingComplete != 0,
 		DefaultSttModel:            shared.SttModelID(row.DefaultSttModelID.String),
+		HomeworkRecipient:          row.HomeworkRecipient,
+		SMTPHost:                   row.SmtpHost,
+		SMTPPort:                   int(row.SmtpPort),
+		SMTPSecurity:               settings.MailSecurity(row.SmtpSecurity),
+		SMTPLogin:                  row.SmtpUsername,
+		HubURL:                     row.HubUrl,
 		UpdatedAt:                  settingsFromMs(row.UpdatedAt),
 	})
 }
@@ -85,6 +92,12 @@ func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
 		ProcessOnlyOnAcPower:       settingsBool(s.ProcessOnlyOnACPower()),
 		NotifyOnProcessingComplete: settingsBool(s.NotifyOnProcessingComplete()),
 		DefaultSttModelID:          settingsModel(s.DefaultSttModel()),
+		HomeworkRecipient:          s.HomeworkRecipient(),
+		SmtpHost:                   s.SMTPHost(),
+		SmtpPort:                   int64(s.SMTPPort()),
+		SmtpSecurity:               string(s.SMTPSecurity()),
+		SmtpUsername:               s.SMTPLogin(),
+		HubUrl:                     s.HubURL(),
 		UpdatedAt:                  settingsMs(s.UpdatedAt()),
 	}
 }
@@ -96,6 +109,12 @@ func settingsUpdateParams(s *settings.Settings) sqlcgen.UpdateSettingsParams {
 		ProcessOnlyOnAcPower:       p.ProcessOnlyOnAcPower,
 		NotifyOnProcessingComplete: p.NotifyOnProcessingComplete,
 		DefaultSttModelID:          p.DefaultSttModelID,
+		HomeworkRecipient:          p.HomeworkRecipient,
+		SmtpHost:                   p.SmtpHost,
+		SmtpPort:                   p.SmtpPort,
+		SmtpSecurity:               p.SmtpSecurity,
+		SmtpUsername:               p.SmtpUsername,
+		HubUrl:                     p.HubUrl,
 		UpdatedAt:                  p.UpdatedAt,
 		ExpectedVersion:            s.Version(),
 	}

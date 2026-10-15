@@ -13,7 +13,8 @@ import (
 const getSettings = `-- name: GetSettings :one
 
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
-       default_stt_model_id, version, updated_at
+       default_stt_model_id, version, updated_at, homework_recipient, smtp_host, smtp_port, smtp_security,
+       smtp_username, hub_url
 FROM settings
 WHERE id = 1
 `
@@ -31,15 +32,24 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.DefaultSttModelID,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.HomeworkRecipient,
+		&i.SmtpHost,
+		&i.SmtpPort,
+		&i.SmtpSecurity,
+		&i.SmtpUsername,
+		&i.HubUrl,
 	)
 	return i, err
 }
 
 const insertSettings = `-- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
-                      default_stt_model_id, version, updated_at)
+                      default_stt_model_id, homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username,
+                      hub_url, version, updated_at)
 VALUES (1, ?1, ?2,
-        ?3, ?4, 1, ?5)
+        ?3, ?4, ?5,
+        ?6, ?7, ?8, ?9, ?10,
+        1, ?11)
 `
 
 type InsertSettingsParams struct {
@@ -47,6 +57,12 @@ type InsertSettingsParams struct {
 	ProcessOnlyOnAcPower       int64
 	NotifyOnProcessingComplete int64
 	DefaultSttModelID          sql.NullString
+	HomeworkRecipient          string
+	SmtpHost                   string
+	SmtpPort                   int64
+	SmtpSecurity               string
+	SmtpUsername               string
+	HubUrl                     string
 	UpdatedAt                  int64
 }
 
@@ -58,6 +74,12 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 		arg.ProcessOnlyOnAcPower,
 		arg.NotifyOnProcessingComplete,
 		arg.DefaultSttModelID,
+		arg.HomeworkRecipient,
+		arg.SmtpHost,
+		arg.SmtpPort,
+		arg.SmtpSecurity,
+		arg.SmtpUsername,
+		arg.HubUrl,
 		arg.UpdatedAt,
 	)
 	return err
@@ -69,9 +91,15 @@ SET recording_prompts_enabled     = ?1,
     process_only_on_ac_power      = ?2,
     notify_on_processing_complete = ?3,
     default_stt_model_id          = ?4,
+    homework_recipient            = ?5,
+    smtp_host                     = ?6,
+    smtp_port                     = ?7,
+    smtp_security                 = ?8,
+    smtp_username                 = ?9,
+    hub_url                       = ?10,
     version                       = version + 1,
-    updated_at                    = ?5
-WHERE id = 1 AND version = ?6
+    updated_at                    = ?11
+WHERE id = 1 AND version = ?12
 `
 
 type UpdateSettingsParams struct {
@@ -79,6 +107,12 @@ type UpdateSettingsParams struct {
 	ProcessOnlyOnAcPower       int64
 	NotifyOnProcessingComplete int64
 	DefaultSttModelID          sql.NullString
+	HomeworkRecipient          string
+	SmtpHost                   string
+	SmtpPort                   int64
+	SmtpSecurity               string
+	SmtpUsername               string
+	HubUrl                     string
 	UpdatedAt                  int64
 	ExpectedVersion            int64
 }
@@ -91,6 +125,12 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.ProcessOnlyOnAcPower,
 		arg.NotifyOnProcessingComplete,
 		arg.DefaultSttModelID,
+		arg.HomeworkRecipient,
+		arg.SmtpHost,
+		arg.SmtpPort,
+		arg.SmtpSecurity,
+		arg.SmtpUsername,
+		arg.HubUrl,
 		arg.UpdatedAt,
 		arg.ExpectedVersion,
 	)

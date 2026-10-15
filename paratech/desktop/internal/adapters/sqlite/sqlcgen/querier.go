@@ -29,6 +29,11 @@ type Querier interface {
 	// ADR-0004(d). The idempotency key and the Message-ID are UNIQUE: a second delivery under the same key is refused.
 	GetDelivery(ctx context.Context, id string) (Delivery, error)
 	GetDeliveryByIdempotencyKey(ctx context.Context, idempotencyKey string) (Delivery, error)
+	// Homework drafts (PRD section 10): the root row carries the version of the optimistic-concurrency protocol of
+	// ADR-0004(d), the versions of a draft are append-only rows of homework_draft_revisions.
+	// The draft with its versions in one statement, so that a concurrent save cannot pair the version of the root with the
+	// versions of another state. A root is never stored without a version, so no row means no draft.
+	GetDraft(ctx context.Context, assignmentID string) ([]GetDraftRow, error)
 	// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
@@ -56,6 +61,9 @@ type Querier interface {
 	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
 	// A never-stored delivery (version 0) is inserted with version 1.
 	InsertDelivery(ctx context.Context, arg InsertDeliveryParams) error
+	// A never-stored draft (version 0) is inserted with version 1.
+	InsertDraft(ctx context.Context, assignmentID string) error
+	InsertDraftRevision(ctx context.Context, arg InsertDraftRevisionParams) error
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
 	// Notices of finished processing (PRD section 15, TASK-053): one row per job and status, never updated.
@@ -77,6 +85,8 @@ type Querier interface {
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
+	// The number of the latest stored version, 0 when none; the repository inserts only the versions above it.
+	LatestDraftRevision(ctx context.Context, assignmentID string) (int64, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
@@ -114,6 +124,8 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. What the user confirmed (recipient, subject, attachment, Message-ID, key,
 	// confirmation time) never changes after the insert, so only the progress of the delivery is written.
 	UpdateDelivery(ctx context.Context, arg UpdateDeliveryParams) (int64, error)
+	// Compare-and-swap on the loaded version.
+	UpdateDraftVersion(ctx context.Context, arg UpdateDraftVersionParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.

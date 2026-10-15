@@ -2,6 +2,7 @@ package settings
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"paratech/desktop/internal/domain/shared"
@@ -22,7 +23,17 @@ type Settings struct {
 	processOnlyOnACPower       bool
 	notifyOnProcessingComplete bool
 	defaultSttModel            shared.SttModelID // empty: no default selected (reference by ID, ARCH-13)
-	updatedAt                  time.Time         // zero: never changed by the user
+
+	// Mail and Hub setup (PRD sections 10 and 12). None of it is a secret: the SMTP password and the Hub API key live
+	// in the credential store (hard rule 4). Empty means not set.
+	homeworkRecipient string
+	smtpHost          string
+	smtpPort          int // 0: the default port of the security mode
+	smtpSecurity      MailSecurity
+	smtpLogin         string
+	hubURL            string
+
+	updatedAt time.Time // zero: never changed by the user
 }
 
 // New returns the defaults of a fresh installation, never stored (Version() == 0).
@@ -31,6 +42,7 @@ func New() *Settings {
 		recordingPromptsEnabled:    DefaultRecordingPromptsEnabled,
 		processOnlyOnACPower:       DefaultProcessOnlyOnACPower,
 		notifyOnProcessingComplete: DefaultNotifyOnProcessingComplete,
+		smtpSecurity:               DefaultMailSecurity,
 	}
 }
 
@@ -41,6 +53,12 @@ type State struct {
 	ProcessOnlyOnACPower       bool
 	NotifyOnProcessingComplete bool
 	DefaultSttModel            shared.SttModelID // empty: none selected
+	HomeworkRecipient          string            // empty: none
+	SMTPHost                   string            // empty: none
+	SMTPPort                   int               // 0: the default of the mode
+	SMTPSecurity               MailSecurity      // empty: DefaultMailSecurity
+	SMTPLogin                  string            // empty: none
+	HubURL                     string            // empty: none
 	UpdatedAt                  time.Time         // zero: stored defaults that the user never changed
 }
 
@@ -54,6 +72,14 @@ func Restore(s State) (*Settings, error) {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidSettings, err)
 		}
 	}
+	// A tampered row must not send the API key or the password somewhere the setters would refuse.
+	if err := checkMail(s); err != nil {
+		return nil, err
+	}
+	security := s.SMTPSecurity
+	if security == "" {
+		security = DefaultMailSecurity
+	}
 
 	return &Settings{
 		version:                    s.Version,
@@ -61,6 +87,12 @@ func Restore(s State) (*Settings, error) {
 		processOnlyOnACPower:       s.ProcessOnlyOnACPower,
 		notifyOnProcessingComplete: s.NotifyOnProcessingComplete,
 		defaultSttModel:            s.DefaultSttModel,
+		homeworkRecipient:          s.HomeworkRecipient,
+		smtpHost:                   s.SMTPHost,
+		smtpPort:                   s.SMTPPort,
+		smtpSecurity:               security,
+		smtpLogin:                  s.SMTPLogin,
+		hubURL:                     s.HubURL,
 		updatedAt:                  s.UpdatedAt,
 	}, nil
 }
@@ -107,6 +139,100 @@ func (s *Settings) SelectDefaultSttModel(id shared.SttModelID, now time.Time) er
 // ClearDefaultSttModel removes the default model, for example before that model is removed (ADR-0004(g)).
 func (s *Settings) ClearDefaultSttModel(now time.Time) error {
 	return change(s, &s.defaultSttModel, "", now)
+}
+
+// HomeworkRecipient returns the address homework is emailed to (PRD section 10); empty when none is set.
+func (s *Settings) HomeworkRecipient() string { return s.homeworkRecipient }
+
+// SMTPHost returns the host name of the SMTP server; empty when none is set.
+func (s *Settings) SMTPHost() string { return s.smtpHost }
+
+// SMTPPort returns the SMTP port; 0 means the default port of SMTPSecurity.
+func (s *Settings) SMTPPort() int { return s.smtpPort }
+
+// SMTPSecurity returns how the SMTP connection is encrypted.
+func (s *Settings) SMTPSecurity() MailSecurity { return s.smtpSecurity }
+
+// SMTPLogin returns the SMTP user name; empty when none is set. The password is in the credential store.
+func (s *Settings) SMTPLogin() string { return s.smtpLogin }
+
+// HubURL returns the base URL of the LLM Hub (PRD section 12); empty when none is set.
+func (s *Settings) HubURL() string { return s.hubURL }
+
+// MailSender returns the From address of the homework email: the login, when it is a plain address. Empty otherwise,
+// and then mail is not configured (MailConfigured).
+func (s *Settings) MailSender() string {
+	if isAddress(s.smtpLogin) {
+		return s.smtpLogin
+	}
+	return ""
+}
+
+// MailConfigured reports whether homework can be emailed: a server, a recipient and a login that is an address
+// (it is also the sender) are set. Whether the password is stored is up to the credential store.
+func (s *Settings) MailConfigured() bool {
+	return s.smtpHost != "" && s.homeworkRecipient != "" && s.MailSender() != ""
+}
+
+// SetHomeworkRecipient sets the address homework is emailed to (PRD section 10); empty removes it. Only a plain
+// address is accepted.
+func (s *Settings) SetHomeworkRecipient(address string, now time.Time) error {
+	address = strings.TrimSpace(address)
+	if address != "" {
+		if err := checkAddress(address); err != nil {
+			return err
+		}
+	}
+	return change(s, &s.homeworkRecipient, address, now)
+}
+
+// SetSMTPHost sets the SMTP server, a plain host name or IPv4 address; empty removes it.
+func (s *Settings) SetSMTPHost(host string, now time.Time) error {
+	host = strings.TrimSpace(host)
+	if host != "" {
+		if err := checkHost(host); err != nil {
+			return err
+		}
+	}
+	return change(s, &s.smtpHost, host, now)
+}
+
+// SetSMTPPort sets the SMTP port, 1-65535, or 0 for the default port of the security mode.
+func (s *Settings) SetSMTPPort(port int, now time.Time) error {
+	if err := checkPort(port); err != nil {
+		return err
+	}
+	return change(s, &s.smtpPort, port, now)
+}
+
+// SetSMTPSecurity sets how the SMTP connection is encrypted.
+func (s *Settings) SetSMTPSecurity(m MailSecurity, now time.Time) error {
+	if !m.Valid() {
+		return fmt.Errorf("%w: unknown smtp security %q", ErrInvalidSettings, m)
+	}
+	return change(s, &s.smtpSecurity, m, now)
+}
+
+// SetSMTPLogin sets the SMTP user name; empty removes it. Mail is configured only when it is a plain address.
+func (s *Settings) SetSMTPLogin(login string, now time.Time) error {
+	login = strings.TrimSpace(login)
+	if login != "" {
+		if err := checkLogin(login); err != nil {
+			return err
+		}
+	}
+	return change(s, &s.smtpLogin, login, now)
+}
+
+// SetHubURL sets the base URL of the LLM Hub: https, or http to a loopback host; empty removes it.
+func (s *Settings) SetHubURL(raw string, now time.Time) error {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		if err := checkHubURL(raw); err != nil {
+			return err
+		}
+	}
+	return change(s, &s.hubURL, raw, now)
 }
 
 // change sets one field. Setting the current value is a no-op, so repeating a request does not move UpdatedAt.

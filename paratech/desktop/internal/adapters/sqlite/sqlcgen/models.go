@@ -44,6 +44,23 @@ type Delivery struct {
 	SendRound        int64
 }
 
+type HomeworkDraft struct {
+	AssignmentID string
+	Version      int64
+}
+
+type HomeworkDraftRevision struct {
+	AssignmentID  string
+	Number        int64
+	Origin        string
+	Title         string
+	Body          string
+	Instruction   string
+	PromptVersion sql.NullInt64
+	JobID         sql.NullString
+	CreatedAt     int64
+}
+
 type Job struct {
 	ID              string
 	Type            string
@@ -115,6 +132,12 @@ type Setting struct {
 	DefaultSttModelID          sql.NullString
 	Version                    int64
 	UpdatedAt                  int64
+	HomeworkRecipient          string
+	SmtpHost                   string
+	SmtpPort                   int64
+	SmtpSecurity               string
+	SmtpUsername               string
+	HubUrl                     string
 }
 
 type SttModel struct {
