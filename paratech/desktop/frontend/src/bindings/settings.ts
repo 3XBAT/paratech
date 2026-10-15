@@ -17,6 +17,7 @@ export const methods = {
   get: "paratech/desktop/internal/input/wails.SettingsService.GetSettings",
   setRecordingPromptsEnabled: "paratech/desktop/internal/input/wails.SettingsService.SetRecordingPromptsEnabled",
   setProcessOnlyOnAcPower: "paratech/desktop/internal/input/wails.SettingsService.SetProcessOnlyOnACPower",
+  setNotifyOnProcessingComplete: "paratech/desktop/internal/input/wails.SettingsService.SetNotifyOnProcessingComplete",
 } as const;
 
 /** Checks the shape of a reply; a malformed reply is an error, not a default. */

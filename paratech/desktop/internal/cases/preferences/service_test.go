@@ -76,7 +76,10 @@ func TestGetReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Toggles{RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower}
+	want := Toggles{
+		RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower,
+		NotifyOnProcessingComplete: settings.DefaultNotifyOnProcessingComplete,
+	}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
 	}
@@ -99,8 +102,16 @@ func TestSetToggles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got.RecordingPromptsEnabled || got.ProcessOnlyOnACPower || !got.NotifyOnProcessingComplete {
+		t.Fatalf("after AC off: %+v", got)
+	}
+
+	got, err = s.SetNotifyOnProcessingComplete(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got != (Toggles{}) {
-		t.Fatalf("after AC off: %+v, want both off", got)
+		t.Fatalf("after notifications off: %+v, want all off", got)
 	}
 	if !repo.stored.UpdatedAt.Equal(start) {
 		t.Errorf("updated at = %v, want the clock time", repo.stored.UpdatedAt)
@@ -153,5 +164,29 @@ func TestLoadErrorIsReturned(t *testing.T) {
 	}
 	if _, err := s.SetProcessOnlyOnACPower(context.Background(), true); !errors.Is(err, boom) {
 		t.Errorf("Set: err = %v", err)
+	}
+}
+
+func TestSetNotifyOnProcessingComplete(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	s := newService(t, repo)
+
+	for _, on := range []bool{false, true, false} {
+		got, err := s.SetNotifyOnProcessingComplete(ctx, on)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.NotifyOnProcessingComplete != on || repo.stored.NotifyOnProcessingComplete != on {
+			t.Fatalf("set %v: toggles %+v, stored %+v", on, got, repo.stored)
+		}
+		if !got.RecordingPromptsEnabled || !got.ProcessOnlyOnACPower {
+			t.Fatalf("set %v changed other toggles: %+v", on, got)
+		}
+	}
+
+	repo.conflicts = conflictAttempts - 1
+	if got, err := s.SetNotifyOnProcessingComplete(ctx, true); err != nil || !got.NotifyOnProcessingComplete {
+		t.Fatalf("after %d conflicts: %+v, %v", conflictAttempts-1, got, err)
 	}
 }

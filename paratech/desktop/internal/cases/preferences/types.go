@@ -6,4 +6,6 @@ type Toggles struct {
 	RecordingPromptsEnabled bool
 	// ProcessOnlyOnACPower: heavy local jobs wait for AC power (AC-21, AC-22).
 	ProcessOnlyOnACPower bool
+	// NotifyOnProcessingComplete: finished processing shows a Windows notification (PRD section 15).
+	NotifyOnProcessingComplete bool
 }
