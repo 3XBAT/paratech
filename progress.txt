@@ -1116,3 +1116,50 @@
 - docs/architecture.md §12 всё ещё называет reservation агрегатом — отдельная правка документации (ADR-0008 говорит читать как сущность account)
 - Low: при >100 просроченных резервах у одного тестера остаток занижен до следующих команд (в сторону отказа); нужен sweeper просроченных резервов и устаревших ключей; нет защиты БД append-only для quota_ledger
 - Nit: в tests/quota_test.go константа retention продублирована с newQuotaEnv
+
+---
+
+## [TASK-053] Политика уведомлений: включение/выключение, без спама по одному состоянию
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/jobs/notice: агрегат «пользователь уведомлён о задаче в статусе» (id задачи + статус, только COMPLETED/FAILED, ValidateType); domain/jobs/services/notifypolicy (Concerns: статус и тип из настроенного набора; Notifies: + настройка включена)
+- Миграция 0004_job_notices.sql (job_id FK jobs ON DELETE CASCADE, status CHECK, job_type, notified_at, PK (job_id, status), без version — нет Save-порта); зеркало в docs/contracts/schema.sql; sqlite NoticeRepository.Record (INSERT ... ON CONFLICT DO NOTHING -> first)
+- cases/notify.Service.JobFinished: Concerns -> настройки -> Notifier.Ready -> запись notice -> Notify (запись до показа: не больше одного раза, также после перезапуска); не готов (оболочка не запущена, тосты не поднялись) -> ничего не пишется
+- jobrunner: необязательный порт Observer (JobFinished после сохранения терминального статуса: finish, Cancel не бегущей задачи, Recover); ошибки и паники только в лог, ограничение 5 с
+- input/wails: Shell.Notify/Ready; toastService — обёртка над Wails services/notifications (сбой старта не роняет приложение, тосты выключаются); фиксированные русские тексты по (тип, статус) без пользовательского содержимого (тест на синтаксис XML/PowerShell); вне Windows Ready = false
+- Настройка: preferences.SetNotifyOnProcessingComplete, SettingsService.SetNotifyOnProcessingComplete, переключатель «Уведомлять о завершении обработки» на странице настроек
+- Зависимость: git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect (тянет Wails services/notifications, названо в ADR-0007)
+- docs/refs/wails.md (уведомления), ADR-0007 Consequences (ключи HKCU при старте, go-toast, Notifier реализует Shell)
+- Изменённые существующие тесты: migrate_test (job_notices в contractTables, версия 3 -> 4, unversionedTables для job_notices без version); tests/schema_test (проверка CHECK статусов job_notices); preferences service_test (дефолт notify, TestSetToggles с новым шагом); input/wails settings_test (новый метод, 3 -> 4 имени биндингов, TestSettingsJSONNames); shell_test (fakeUI: notify/canNotify, TestNotify, TestReady); frontend test/settings.test.mjs (поле notifyOnProcessingComplete в ответах, новые случаи)
+- Ревью: approve (1 medium: уведомление терялось, пока оболочка не запущена -> Ready до записи; low: настройки читались до проверки типа -> Concerns; ожидание наблюдателя при принудительной остановке -> задокументировано; nits) -> исправлено в 2ae2498, повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0 (два прохода: весь diff и коммит исправлений)
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0, vulncheck)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestThreeIdenticalEventsNotifyOnce (cases/notify), TestNotificationIsSentOnceAcrossRestart и TestJobRunnerNotifiesFinishedJobs (tests/, реальный SQLite)
+- [x] Шаг 3: TestDisabledNotificationsNeverCallTheNotifier, TestDisabledNotificationsReachNoNotifier (через настоящий preferences)
+- npm run build / npm run test (17)
+
+### Решения (подтвердить)
+- Уведомляют COMPLETED и FAILED задач stt, summarize, extract_homework, homework_draft (send_email нет — у доставки свой экран). На одно занятие может прийти до 3-4 тостов (по одному на шаг) — владелец: нужно ли «одно уведомление на занятие»
+- Не больше одного раза: notice пишется до показа; сбой показа или остановка оболочки между Ready и Notify теряют это уведомление (не повторяется)
+- При выключенной настройке ничего не записывается: включение позже покажет уведомление только для новых событий
+- «Настройки Windows» (AC 3): обычный тост без сценария urgent/reminder и без расписания — Windows сама применяет выключатель приложения и Фокусировку внимания; API чтения этих настроек у библиотеки нет
+- Сервис уведомлений регистрируется в оболочке при каждом старте и пишет ключи HKCU (AppUserModelId, CLSID LocalServer32), хотя до подключения в app тосты не отправляются
+
+### Ручная проверка владельцем на Windows (после подключения notify и jobrunner в app)
+- Завершённая задача stt -> один тост «Транскрипт готов» в правом нижнем углу и в Центре уведомлений; повторный запуск приложения не показывает его снова
+- Выключить «Уведомлять о завершении обработки» -> тостов нет; включить -> снова есть для новых задач
+- Windows: Параметры -> Уведомления -> выключить для приложения -> тостов нет, приложение работает; Фокусировка внимания (только приоритет/будильники) -> тост не всплывает, лежит в Центре уведомлений
+- Клик по тосту при работающем приложении ничего не ломает; клик по тосту после выхода из приложения (COM запускает exe с аргументами) — проверить, что приложение стартует, а не падает на разборе флагов config.MustLoad
+- Ключи HKCU\Software\Classes\AppUserModelId\<имя> и CLSID\<guid>\LocalServer32 указывают на текущий exe
+
+### Заметки (follow-up)
+- Подключение в app: notify.New(Deps{Settings: sqlite settings, Notices: sqlite NoticeRepository, Notifier: wails Shell, Clock}, Config{Types: stt, summarize, extract_homework, homework_draft}) и jobrunner.Deps.Observer = notify.Service; оболочка должна быть запущена до Recover/Start, иначе уведомления о задачах, завершённых при старте, пропускаются (Ready = false)
+- Возможно, config.MustLoad отклоняет аргументы COM-активации тоста (см. docs/refs/wails.md «Not checked»)
+- Low (ревью): принудительный Stop ждёт текущий вызов наблюдателя до 5 с (Recover последовательно до N x 5 с); вариант — контекст от runCtx
+- Low (архитектура): input/wails Shell реализует исходящий порт Notifier (записано в ADR-0007); альтернатива — adapters/wailstoast, передаваемый в оболочку через Options
+- Nit: документация порта Notifier.Ready называет реализацию (лучше описывать роль); комментарий «worker and keeper are idle» в tests/notify_sqlite_test.go:266 не гарантирован (таймер наблюдателя тоже спит на fake clock) — безвредно
+- Wails при каждом показе пишет иконку PNG в %TEMP%, запасной путь go-toast — временный .ps1 (поведение библиотеки); любые будущие тексты тостов с пользовательским содержимым требуют экранирования и для XML, и для PowerShell
