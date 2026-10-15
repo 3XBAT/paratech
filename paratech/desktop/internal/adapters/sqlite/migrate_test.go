@@ -19,8 +19,13 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deliveries", "jobs", "recordings", "schedule_entries", "settings", "stt_models", "summaries", "transcripts",
+	"assignments", "deliveries", "job_notices", "jobs", "recordings", "schedule_entries", "settings", "stt_models", "summaries",
+	"transcripts",
 }
+
+// unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version
+// column (ADR-0004(d)).
+var unversionedTables = map[string]bool{"job_notices": true}
 
 func tableNames(t *testing.T, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -51,8 +56,11 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 	if got := tableNames(t, db.sql); !reflect.DeepEqual(got, contractTables) {
 		t.Fatalf("tables = %v, want %v", got, contractTables)
 	}
-	// Every table carries the aggregate version of ADR-0004(d).
+	// Every table with a Save port carries the aggregate version of ADR-0004(d).
 	for _, table := range contractTables {
+		if unversionedTables[table] {
+			continue
+		}
 		var found int64
 		err := db.sql.QueryRowContext(context.Background(),
 			"SELECT count(*) FROM pragma_table_info(?) WHERE name = 'version' AND type = 'INTEGER' AND \"notnull\" = 1 AND dflt_value = '0'",
@@ -67,8 +75,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 3 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 3", first, err)
+	if err != nil || first != 4 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 4", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
