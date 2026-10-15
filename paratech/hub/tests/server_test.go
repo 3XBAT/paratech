@@ -89,10 +89,11 @@ func TestServerAgainstPostgres(t *testing.T) {
 		t.Fatalf("readyz = %d, %v; want 200", code, err)
 	}
 
+	// Without an API key the Connect routes answer, and reject the call (the key flow is in keys_test.go).
 	q := hubv1connect.NewQuotaServiceClient(http.DefaultClient, base)
 	_, err = q.GetRemaining(t.Context(), connectrpc.NewRequest(&hubv1.GetRemainingRequest{}))
-	if connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
-		t.Fatalf("GetRemaining error = %v, want unimplemented", err)
+	if connectrpc.CodeOf(err) != connectrpc.CodeUnauthenticated {
+		t.Fatalf("GetRemaining error = %v, want unauthenticated", err)
 	}
 
 	cancel()

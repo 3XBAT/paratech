@@ -31,20 +31,20 @@ type ReadinessProbe interface {
 }
 
 // Deps are what the router serves. A nil service is served by the generated Unimplemented handler, which answers
-// every RPC with CodeUnimplemented, until the gateway and quota tasks provide real ones.
-//
-// TODO(TASK-032): every RPC must pass the API-key interceptor before real handlers are mounted.
+// every RPC with CodeUnimplemented, until the gateway and quota tasks provide real ones. Auth is required: every RPC
+// passes the API-key interceptor (AC-25), so no handler can be mounted without it.
 type Deps struct {
 	Log       *slog.Logger
 	Readiness ReadinessProbe
+	Auth      Authenticator
 	Gateway   hubv1connect.GatewayServiceHandler
 	Quota     hubv1connect.QuotaServiceHandler
 }
 
 // NewRouter builds the HTTP handler of the public listener.
 func NewRouter(d Deps) (http.Handler, error) {
-	if d.Log == nil || d.Readiness == nil {
-		return nil, errors.New("connect: logger and readiness probe are required")
+	if d.Log == nil || d.Readiness == nil || d.Auth == nil {
+		return nil, errors.New("connect: logger, readiness probe and authenticator are required")
 	}
 	if d.Gateway == nil {
 		d.Gateway = hubv1connect.UnimplementedGatewayServiceHandler{}
@@ -57,7 +57,10 @@ func NewRouter(d Deps) (http.Handler, error) {
 	r.Get(PathHealthz, healthz)
 	r.Get(PathReadyz, readyz(d.Log, d.Readiness))
 
-	opts := []connectrpc.HandlerOption{connectrpc.WithReadMaxBytes(maxRequestBytes)}
+	opts := []connectrpc.HandlerOption{
+		connectrpc.WithReadMaxBytes(maxRequestBytes),
+		connectrpc.WithInterceptors(authInterceptor{auth: d.Auth, log: d.Log}),
+	}
 	path, h := hubv1connect.NewGatewayServiceHandler(d.Gateway, opts...)
 	r.Mount(path, h)
 	path, h = hubv1connect.NewQuotaServiceHandler(d.Quota, opts...)

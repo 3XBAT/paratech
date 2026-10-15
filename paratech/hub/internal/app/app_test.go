@@ -155,3 +155,32 @@ func TestCloseIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+func TestNewRejectsNilOutput(t *testing.T) {
+	if _, err := app.New(validConfig(":8080"), discard(), app.WithOutput(nil)); err == nil {
+		t.Fatal("no error for a nil output")
+	}
+}
+
+func TestKeyCommandFailsWhenTheDatabaseIsUnreachable(t *testing.T) {
+	cfg := validConfig("localhost") // a key command does not listen, so the listen address is not checked
+	cfg.Command = config.CommandKeysList
+
+	var out strings.Builder
+	a, err := app.New(cfg, discard(), app.WithOutput(&out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	err = run(t, a)
+	if !errors.Is(err, postgres.ErrUnavailable) {
+		t.Fatalf("Run = %v, want ErrUnavailable", err)
+	}
+	if strings.Contains(err.Error(), "s3cret-marker") {
+		t.Fatalf("error leaks the password: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("output on failure: %q", out.String())
+	}
+}
