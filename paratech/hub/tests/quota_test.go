@@ -599,3 +599,76 @@ func TestGetRemainingOverHTTPAgainstPostgres(t *testing.T) {
 		}
 	}
 }
+
+// TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres is TASK-036 test step 2: the public GetRemaining shows
+// the remaining quota decrease by the actual usage after Settle and restored after Release, per tester, without writing.
+func TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres(t *testing.T) {
+	e := newGatewayEnv(t, gatewayOptions{limit: 1000})
+	// Reserve, Settle and Release are Hub-internal, so they go through the use case; every snapshot is read over HTTP.
+	expect := func(step string, q *hubv1.QuotaSnapshot, remaining, reserved int64) {
+		t.Helper()
+		tokens := hubv1.QuotaUnit_QUOTA_UNIT_TOKENS
+		if q.GetRemaining().GetValue() != remaining || q.GetReserved().GetValue() != reserved || q.GetLimit().GetValue() != 1000 ||
+			q.GetRemaining().GetUnit() != tokens || q.GetReserved().GetUnit() != tokens || q.GetLimit().GetUnit() != tokens || q.GetPeriodEndsAt() != nil {
+			t.Fatalf("%s: snapshot = %v, want remaining %d reserved %d of 1000 tokens", step, q, remaining, reserved)
+		}
+	}
+
+	expect("initial", e.remaining(t), 1000, 0)
+	a := e.reserve(t, e.owner, "a", 400)
+	expect("after reserve", e.remaining(t), 600, 400)
+	if _, err := e.settle(e.owner, a.Reservation.ID, 150, false); err != nil {
+		t.Fatal(err)
+	}
+	expect("after settle", e.remaining(t), 850, 0)
+
+	b := e.reserve(t, e.owner, "b", 300)
+	expect("after second reserve", e.remaining(t), 550, 300)
+	if _, err := e.release(e.owner, b.Reservation.ID); err != nil {
+		t.Fatal(err)
+	}
+	expect("after release", e.remaining(t), 850, 0)
+
+	// Reading writes nothing.
+	tables := []string{"quota_accounts", "quota_reservations", "quota_idempotency_keys", "quota_ledger"}
+	rows := map[string]int{}
+	for _, table := range tables {
+		rows[table] = e.rowCount(t, table, e.owner)
+	}
+	for range 2 {
+		expect("repeated read", e.remaining(t), 850, 0)
+	}
+	for table, n := range rows {
+		if got := e.rowCount(t, table, e.owner); got != n {
+			t.Errorf("%s: %d rows after GetRemaining, want %d", table, got, n)
+		}
+	}
+	if used, held := e.assertConsistent(t, e.owner); used != 150 || held != 0 {
+		t.Fatalf("used %d held %d", used, held)
+	}
+	if k := e.ledgerKinds(t, e.owner); k["reserve"] != 2 || k["settle"] != 1 || k["release"] != 1 || len(k) != 3 {
+		t.Fatalf("ledger = %v", k)
+	}
+
+	// Another tester on the same server sees its own untouched quota, and reading it creates no account.
+	keySvc, err := keys.New(e.db.APIKeys(), e.clock, testenv.Random{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := keySvc.Issue(t.Context(), "other-tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := connectrpc.NewRequest(&hubv1.GetRemainingRequest{})
+	req.Header().Set("Authorization", "Bearer "+other.Key)
+	resp, err := e.quotas.GetRemaining(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect("other tester", resp.Msg.GetQuota(), 1000, 0)
+	for _, table := range tables {
+		if n := e.rowCount(t, table, shared.APIKeyID(other.ID)); n != 0 {
+			t.Errorf("%s: %d rows for the other tester after GetRemaining, want 0", table, n)
+		}
+	}
+}
