@@ -130,3 +130,4 @@ Not stated for the API. (Only the docs site redirects: `docs.claude.com` -> `pla
 - Non-streaming calls over ~10 minutes are discouraged; set an explicit client timeout (<= 10 min) and TCP keep-alive (Go's default `net.Dialer` already enables keep-alive — our inference).
 - **Our inference, not a doc fact:** Go's `http.Client` strips only `Authorization`/`Cookie`-like sensitive headers on cross-domain redirects; a custom `x-api-key` header is forwarded. Since the docs never mention API redirects, the client should refuse redirects (`CheckRedirect` returning `http.ErrUseLastResponse` or an error) so the key cannot leak.
 - Cap response body read size (our inference; no response size limit is documented, max output is 128K tokens).
+- Used by `hub/internal/adapters/anthropic` (TASK-034): instructions go to `system`, untrusted data to the one user text block; 8 MiB response cap; redirects refused.

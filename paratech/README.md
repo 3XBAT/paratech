@@ -89,4 +89,17 @@ and Release are Hub-internal (ADR-0005(f), ADR-0008). Settings (env or flag):
 | `HUB_QUOTA_RESERVATION_TTL` | `-quota-reservation-ttl` | `10m` | 1m..1h, longer than the longest gateway request |
 | `HUB_IDEMPOTENCY_RETENTION` | `-idempotency-retention` | `24h` | 1h..24h |
 
+## Hub LLM provider
+The Hub calls the Anthropic Messages API (non-streaming, std `net/http`). Clients send only a model alias; the Hub resolves it
+through its allowlist and never takes a model id or URL from a client. Settings (env or flag):
+
+| Env | Flag | Default | Rule |
+|---|---|---|---|
+| `HUB_ANTHROPIC_API_KEY` | none (env only) | empty = provider not configured | secret, never printed |
+| `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
+| `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
+| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192` | `alias=model-id:max_output_tokens[,...]` |
+
+A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
+
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.
