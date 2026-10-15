@@ -34,12 +34,13 @@ type Options struct {
 	Started func()
 }
 
-// Core is what the pages of the main window call through the bindings. Every field is required.
+// Core is what the pages and the tray call through the bindings. Every field is required.
 type Core struct {
 	Settings SettingsUseCase
 	Activity ActivityUseCase
 	Stopper  RecordingStopper
 	Forcer   JobForcer
+	Prompt   PromptUseCase // the recording popup; the tray's "Show recording popup" offers an ad-hoc prompt
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -94,7 +95,8 @@ func (s *Shell) Run(ctx context.Context) error {
 	return s.run(ctx)
 }
 
-// ShowPopup shows the recording popup without activating it.
+// ShowPopup shows the recording popup without activating it and emits PromptShownEvent, so the page reads the current
+// prompt. It is the Popup port of the recording prompt.
 func (s *Shell) ShowPopup() error {
 	u, err := s.current()
 	if err != nil {
@@ -146,6 +148,7 @@ func (s *Shell) Ready() bool {
 type bindings struct {
 	settings *SettingsService
 	activity *ActivityService
+	prompt   *PromptService
 }
 
 // openBindings opens the core and builds the services bound to the pages.
@@ -166,9 +169,13 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Forcer == nil {
 		return bindings{}, errors.New("wails: open core: no job forcer")
 	}
+	if core.Prompt == nil {
+		return bindings{}, errors.New("wails: open core: no recording prompt use case")
+	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
 		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
+		prompt:   NewPromptService(core.Prompt, s.opts.Log),
 	}, nil
 }
 

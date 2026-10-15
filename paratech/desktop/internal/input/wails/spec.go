@@ -9,7 +9,7 @@ const (
 // Popup geometry in device-independent pixels.
 const (
 	popupWidth  = 360
-	popupHeight = 130
+	popupHeight = 180 // title, lesson time, three buttons and an error line
 	popupMargin = 16
 )
 

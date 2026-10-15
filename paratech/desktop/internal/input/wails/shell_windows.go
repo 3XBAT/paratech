@@ -42,6 +42,7 @@ func (s *Shell) run(ctx context.Context) error {
 	}
 	app.RegisterService(application.NewService(b.settings))
 	app.RegisterService(application.NewService(b.activity))
+	app.RegisterService(application.NewService(b.prompt))
 	toasts := newToastService(notifications.New(), s.opts.Log)
 	app.RegisterService(application.NewService(toasts))
 
@@ -56,7 +57,8 @@ func (s *Shell) run(ctx context.Context) error {
 		}
 	})
 
-	newTray(app, u, s.opts.Name)
+	// Menu handlers run on goroutines, so the offer may show the popup synchronously.
+	newTray(app, u, s.opts.Name, func() { b.prompt.offerAdHoc(context.Background()) })
 
 	started := make(chan struct{})
 	var once sync.Once
@@ -158,10 +160,11 @@ func popupExStyle(spec windowSpec) int {
 	return style
 }
 
-func newTray(app *application.App, u *windowsUI, name string) {
+// newTray adds the tray icon; "Show recording popup" calls offer, which goes through the core like a lesson prompt.
+func newTray(app *application.App, u *windowsUI, name string, offer func()) {
 	menu := application.NewMenu()
 	menu.Add(menuOpen).OnClick(func(*application.Context) { _ = u.showMain() })
-	menu.Add(menuShowPopup).OnClick(func(*application.Context) { _ = u.showPopup() })
+	menu.Add(menuShowPopup).OnClick(func(*application.Context) { offer() })
 	menu.AddSeparator()
 	menu.Add(menuQuit).OnClick(func(*application.Context) { app.Quit() })
 
@@ -187,6 +190,7 @@ func (u *windowsUI) showPopup() error {
 		}
 	})
 	u.popup.Show()
+	u.app.Event.Emit(PromptShownEvent)
 	return nil
 }
 
