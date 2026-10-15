@@ -61,12 +61,15 @@ func isAddress(s string) bool { return checkAddress(s) == nil }
 // path: the port and the security mode are separate settings.
 func checkHost(s string) error {
 	if s == "" || len(s) > maxHostLen || strings.HasPrefix(s, ".") || strings.HasPrefix(s, "-") ||
-		strings.ContainsFunc(s, func(r rune) bool {
-			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-')
-		}) {
+		strings.ContainsFunc(s, notHostChar) {
 		return fmt.Errorf("%w: smtp host must be a plain host name of 1-%d letters, digits, dots and hyphens", ErrInvalidSettings, maxHostLen)
 	}
 	return nil
+}
+
+func notHostChar(r rune) bool {
+	isHostChar := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-'
+	return !isHostChar
 }
 
 // checkLogin accepts 1 to maxLoginLen characters without control characters.
