@@ -3,12 +3,16 @@ package postgres
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"paratech/hub/pkg/migrations"
 	"paratech/hub/testenv"
 )
 
@@ -102,6 +106,25 @@ func appliedVersions(t *testing.T, db *DB) []int64 {
 	return out
 }
 
+// embeddedVersions returns the versions of the embedded migration files (NNNN_name.sql), in order.
+func embeddedVersions(t *testing.T) []int64 {
+	t.Helper()
+	entries, err := fs.ReadDir(migrations.FS(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []int64
+	for _, e := range entries {
+		prefix, _, _ := strings.Cut(e.Name(), "_")
+		v, err := strconv.ParseInt(prefix, 10, 64)
+		if err != nil {
+			t.Fatalf("%s: %v", e.Name(), err)
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
 func TestMigrateIsIdempotent(t *testing.T) {
 	db := openTestDB(t, testenv.PostgresURL(t))
 
@@ -110,8 +133,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 			t.Fatalf("Migrate #%d: %v", i+1, err)
 		}
 	}
-	if got := appliedVersions(t, db); len(got) != 1 || got[0] != 1 {
-		t.Fatalf("applied versions = %v, want [1]", got)
+	if got, want := appliedVersions(t, db), embeddedVersions(t); !slices.Equal(got, want) {
+		t.Fatalf("applied versions = %v, want %v", got, want)
 	}
 
 	// The version table lives in the test's own schema, not in public.
@@ -147,8 +170,8 @@ func TestConcurrentMigrateAppliesOnce(t *testing.T) {
 			t.Errorf("Migrate #%d: %v", i+1, err)
 		}
 	}
-	if got := appliedVersions(t, dbs[0]); len(got) != 1 || got[0] != 1 {
-		t.Fatalf("applied versions = %v, want [1] exactly once", got)
+	if got, want := appliedVersions(t, dbs[0]), embeddedVersions(t); !slices.Equal(got, want) {
+		t.Fatalf("applied versions = %v, want %v exactly once", got, want)
 	}
 }
 
