@@ -25,9 +25,6 @@ const (
 	DefaultCredentialName = "api-key"
 	DefaultRequestTimeout = 2 * time.Minute
 
-	// maxAPIKeyLen is the wincred blob limit; a longer value cannot be a key the app stored.
-	maxAPIKeyLen = 5 * 512
-
 	// maxResponseBytes bounds one answer: 1 MiB of output is far above any operation, plus envelope headroom.
 	maxResponseBytes = 2 << 20
 
@@ -41,8 +38,9 @@ const (
 
 // Operation names used in error messages.
 const (
-	opNew      = "hubclient: new"
-	opComplete = "hubclient: complete"
+	opNew       = "hubclient: new"
+	opComplete  = "hubclient: complete"
+	opRemaining = "hubclient: get remaining"
 )
 
 // Credentials is the part of the secret store the client needs (adapters/wincred.Store, testenv.MemCredentials).
@@ -130,11 +128,11 @@ func (c *Client) Complete(ctx context.Context, req values.LLMRequest) (values.LL
 	if err != nil {
 		return values.LLMResult{}, err
 	}
-	base, err := c.baseURL(ctx)
+	base, err := c.baseURL(ctx, opComplete)
 	if err != nil {
 		return values.LLMResult{}, err
 	}
-	key, err := c.apiKey(ctx)
+	key, err := c.apiKey(ctx, opComplete)
 	if err != nil {
 		return values.LLMResult{}, err
 	}
@@ -189,19 +187,19 @@ func operationType(op values.Operation) (hubv1.OperationType, bool) {
 // baseURL reads the Hub URL for one call. No URL, or a stored URL the client refuses, parks the job (notConfigured)
 // instead of failing it, so its key stays usable once the user fixes the setting. A refused Config.BaseURL never
 // gets here: New refuses it.
-func (c *Client) baseURL(ctx context.Context) (string, error) {
+func (c *Client) baseURL(ctx context.Context, op string) (string, error) {
 	raw, err := c.urls.HubURL(ctx)
 	switch {
 	case err == nil:
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return "", fmt.Errorf("%s: %w", opComplete, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	default:
-		return "", transient(opComplete, ErrSettings)
+		return "", transient(op, ErrSettings)
 	}
 	if raw == "" {
 		return "", notConfigured(ErrNoURL)
 	}
-	base, err := checkBaseURL(opComplete, raw)
+	base, err := checkBaseURL(op, raw)
 	if err != nil {
 		return "", notConfigured(ErrInvalidConfig)
 	}
@@ -210,37 +208,25 @@ func (c *Client) baseURL(ctx context.Context) (string, error) {
 
 // apiKey reads the key for one call. The store's errors carry no secret (wincred contract), so they are wrapped.
 // A missing key parks the job like a missing URL.
-func (c *Client) apiKey(ctx context.Context) (string, error) {
+func (c *Client) apiKey(ctx context.Context, op string) (string, error) {
 	key, err := c.creds.Get(ctx, c.credName)
 	switch {
 	case err == nil:
 	case errors.Is(err, shared.ErrNotFound):
 		return "", notConfigured(ErrMissingAPIKey)
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return "", fmt.Errorf("%s: %w", opComplete, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	case errors.Is(err, errors.ErrUnsupported), errors.Is(err, shared.ErrInvalidID):
-		return "", permanent(opComplete, fmt.Errorf("%w: %w", ErrCredentials, err))
+		return "", permanent(op, fmt.Errorf("%w: %w", ErrCredentials, err))
 	default:
-		return "", transient(opComplete, fmt.Errorf("%w: %w", ErrCredentials, err))
+		return "", transient(op, fmt.Errorf("%w: %w", ErrCredentials, err))
 	}
 
-	if !validAPIKey(key) {
-		return "", permanent(opComplete, ErrMalformedAPIKey)
+	// The same rule the page applies when the key is entered (values.ParseHubAPIKey), so the header cannot be split.
+	if !values.ValidHubAPIKey(key) {
+		return "", permanent(op, ErrMalformedAPIKey)
 	}
 	return key, nil
-}
-
-// validAPIKey accepts 1..maxAPIKeyLen printable ASCII characters without spaces, so the header cannot be split.
-func validAPIKey(key string) bool {
-	if key == "" || len(key) > maxAPIKeyLen {
-		return false
-	}
-	for i := 0; i < len(key); i++ {
-		if key[i] < 0x21 || key[i] > 0x7e {
-			return false
-		}
-	}
-	return true
 }
 
 // resultOf converts the answer; the output stays untrusted (hard rule 3).
