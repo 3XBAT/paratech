@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -81,8 +82,8 @@ type env struct {
 	jitter jobrunner.Jitter
 	power  jobrunner.PowerMonitor
 
-	// recorder builds the audio recorder that writes chunks through the Storage Manager.
-	recorder func(files *filestore.Store) recordingsession.Recorder
+	// recorder builds the audio recorder that writes chunks through the Storage Manager below dataDir.
+	recorder func(dataDir string, files *filestore.Store, log *slog.Logger) (recordingsession.Recorder, error)
 
 	// The --recorder run mode (the audio recorder child): its stdio and the platform capture source.
 	childStdin    io.Reader
@@ -116,7 +117,7 @@ func productionEnv() env {
 		ids:             random.IDs{},
 		jitter:          random.Jitter{},
 		power:           winpower.New(),
-		recorder:        func(*filestore.Store) recordingsession.Recorder { return audiocapture.Unavailable{} },
+		recorder:        platformRecorder,
 		childStdin:      os.Stdin,
 		childStdout:     os.Stdout,
 		captureSource:   audiocapture.PlatformSource(),

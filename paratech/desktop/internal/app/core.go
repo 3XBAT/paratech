@@ -76,15 +76,15 @@ func buildCore(ctx context.Context, dataDir string, e env, notifier notify.Notif
 	}
 
 	c := &core{db: db, store: store}
-	if err := c.wire(root, e, notifier, log); err != nil {
+	if err := c.wire(dataDir, e, notifier, log); err != nil {
 		return nil, errors.Join(err, c.close())
 	}
 	return c, nil
 }
 
 // wire builds the use cases on the opened storage.
-func (c *core) wire(root string, e env, notifier notify.Notifier, log *slog.Logger) error {
-	db, store := c.db, c.store
+func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.Logger) error {
+	db, store, root := c.db, c.store, filepath.Join(dataDir, artifactsDir)
 	jobs := sqlite.NewJobRepository(db)
 	settings := sqlite.NewSettingsRepository(db)
 	recordings := sqlite.NewRecordingRepository(db)
@@ -172,8 +172,12 @@ func (c *core) wire(root string, e env, notifier notify.Notifier, log *slog.Logg
 		}
 	}
 
+	recorder, err := e.recorder(dataDir, store, log)
+	if err != nil {
+		return fmt.Errorf("app: audio recorder: %w", err)
+	}
 	c.recordings, err = recordingsession.New(recordingsession.Deps{
-		Recordings: recordings, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: e.recorder(store),
+		Recordings: recordings, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: recorder,
 		Artifacts: store, Tx: db, Clock: e.clock, Sleeper: e.clock, IDs: e.ids, Log: log,
 	}, e.recordings)
 	if err != nil {

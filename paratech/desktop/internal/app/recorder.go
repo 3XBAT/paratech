@@ -3,11 +3,33 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/audiocapture"
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/cases/recordingsession"
 )
+
+// platformRecorder is the audio recorder of this build: on Windows the recorder child of this executable
+// (--recorder --data-dir dataDir) that writes chunks through the Storage Manager on <dataDir>/artifacts; elsewhere
+// none (the product targets Windows only). It starts nothing.
+func platformRecorder(dataDir string, files *filestore.Store, log *slog.Logger) (recordingsession.Recorder, error) {
+	if !audiocapture.Supported() {
+		return audiocapture.Unavailable{}, nil
+	}
+	launcher, err := audiocapture.ChildLauncher(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := audiocapture.New(audiocapture.Deps{
+		Files: files, Launcher: launcher, Processes: audiocapture.PlatformProcesses(), Log: log,
+	}, audiocapture.DefaultConfig())
+	if err != nil {
+		return nil, err
+	}
+	return rec, nil
+}
 
 // runRecorder is the --recorder run mode: the audio recorder child that the app starts from its own executable
 // (ADR-0002 (audio capture)). It opens only the Storage Manager on <DataDir>/artifacts: no instance lock (the parent

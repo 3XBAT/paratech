@@ -14,6 +14,7 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/audiocapture"
+	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/testenv"
 )
 
@@ -90,7 +91,13 @@ func TestRecorderModeCapturesIntoTheArtifactStore(t *testing.T) {
 }
 
 func TestRecorderModeFailsWithoutCapture(t *testing.T) {
-	a, stdin, out := recorderApp(t, t.TempDir(), audiocapture.PlatformSource())
+	// The platform source of a build without capture; where the build captures, a stand-in that fails the same way,
+	// so the test never touches the audio devices.
+	src := audiocapture.PlatformSource()
+	if audiocapture.Supported() {
+		src = &testenv.ToneSource{OpenErr: audiocapture.ErrUnavailable}
+	}
+	a, stdin, out := recorderApp(t, t.TempDir(), src)
 	go func() {
 		_, _ = stdin.Write([]byte(`{"v":1,"recording":"rec1","chunks":"recordings/rec1","target":{"mode":"system","pid":0},"chunk_seconds":30,"lead_silence_ms":0}` + "\n"))
 	}()
@@ -99,5 +106,36 @@ func TestRecorderModeFailsWithoutCapture(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"unavailable":true`) {
 		t.Fatalf("events = %s", out.String())
+	}
+}
+
+// The production recorder of this build: the recorder child on Windows, Unavailable elsewhere. Building it starts no
+// child.
+func TestPlatformRecorder(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := filestore.New(filepath.Join(dataDir, artifactsDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	rec, err := productionEnv().recorder(dataDir, store, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch rec.(type) {
+	case *audiocapture.Recorder:
+		if !audiocapture.Supported() {
+			t.Fatal("a build without capture got the recorder child")
+		}
+	case audiocapture.Unavailable:
+		if audiocapture.Supported() {
+			t.Fatal("a build with capture got the unavailable recorder")
+		}
+	default:
+		t.Fatalf("recorder %T", rec)
+	}
+	if _, err := productionEnv().recorder("relative", store, slog.New(slog.DiscardHandler)); audiocapture.Supported() && err == nil {
+		t.Fatal("the recorder child needs an absolute data directory")
 	}
 }

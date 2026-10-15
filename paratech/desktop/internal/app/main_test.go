@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -56,9 +57,9 @@ func testEnv(t *testing.T) (env, *fakes) {
 		ids:    random.IDs{},
 		jitter: random.Jitter{},
 		power:  f.power,
-		recorder: func(files *filestore.Store) recordingsession.Recorder {
+		recorder: func(_ string, files *filestore.Store, _ *slog.Logger) (recordingsession.Recorder, error) {
 			f.recorder = testenv.NewFakeRecorder(files, time.Minute)
-			return f.recorder
+			return f.recorder, nil
 		},
 		whisperBinary: bin,
 		secrets: func(service string) (secretStore, error) {
