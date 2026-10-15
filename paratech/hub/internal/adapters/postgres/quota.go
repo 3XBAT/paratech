@@ -152,6 +152,9 @@ func (r *QuotaAccounts) load(ctx context.Context, q querier, op string, scope ac
 			return nil, r.db.queryError(ctx, op, err)
 		default:
 			latest, err := r.reservation(ctx, q, op, owner, k.Latest)
+			if errors.Is(err, shared.ErrNotFound) { // the foreign key forbids it; never report it as the caller's not-found
+				return nil, fmt.Errorf("%s: %w", op, &Error{Kind: ErrCorrupt, Detail: "key record without its latest reservation"})
+			}
 			if err != nil {
 				return nil, err
 			}
