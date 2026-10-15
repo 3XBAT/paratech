@@ -151,3 +151,82 @@ func TestFreeBytes(t *testing.T) {
 		t.Fatalf("FreeBytes with a cancelled context = %v", err)
 	}
 }
+
+func TestCreate(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	partial := ref(t, shared.ArtifactRecordings, "r1/chunk-000001.wav.partial")
+
+	f, err := s.Create(ctx, partial)
+	if err != nil {
+		t.Fatalf("Create in a new directory = %v", err)
+	}
+	if _, err := f.Write([]byte("head")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte("HEAD"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, s, partial); got != "HEAD" {
+		t.Fatalf("content = %q, want HEAD", got)
+	}
+
+	// The recorder's chunk names are references that List shows.
+	listed, err := s.List(ctx, ref(t, shared.ArtifactRecordings, "r1"))
+	if err != nil || len(listed) != 1 || listed[0] != partial {
+		t.Fatalf("List = %v, %v; want the partial chunk", listed, err)
+	}
+
+	put(t, s, ref(t, shared.ArtifactRecordings, "file"), "x")
+	tests := []struct {
+		name string
+		ref  shared.ArtifactRef
+		want error
+	}{
+		{"existing file", partial, shared.ErrConflict},
+		{"existing directory", ref(t, shared.ArtifactRecordings, "r1"), shared.ErrConflict},
+		{"below a file", ref(t, shared.ArtifactRecordings, "file/x"), shared.ErrConflict},
+		{"zero reference", shared.ArtifactRef{}, shared.ErrInvalidArtifactRef},
+		{"temporary prefix", ref(t, shared.ArtifactRecordings, "r1/"+tmpPrefix+"x"), shared.ErrInvalidArtifactRef},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := s.Create(ctx, tc.ref)
+			if f != nil {
+				_ = f.Close()
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Create = %v, want %v", err, tc.want)
+			}
+		})
+	}
+	if got := read(t, s, partial); got != "HEAD" {
+		t.Fatalf("a refused Create changed the file: %q", got)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.Create(cctx, ref(t, shared.ArtifactRecordings, "r1/y")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Create with a cancelled context = %v", err)
+	}
+}
+
+func TestCreateRefusesLinks(t *testing.T) {
+	s, root := newStore(t)
+	outside := t.TempDir()
+	makeDirLink(t, filepath.Join(root, "recordings", "link"), outside)
+
+	f, err := s.Create(context.Background(), ref(t, shared.ArtifactRecordings, "link/chunk-000001.wav.partial"))
+	if f != nil {
+		_ = f.Close()
+	}
+	if !errors.Is(err, shared.ErrInvalidArtifactRef) {
+		t.Fatalf("Create through a link = %v, want ErrInvalidArtifactRef", err)
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Fatalf("files appeared outside the root: %v, %v", entries, err)
+	}
+}

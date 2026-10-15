@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -14,9 +15,50 @@ import (
 // Operation names of the partial-file operations.
 const (
 	opAppend    = "append"
+	opCreate    = "create"
 	opRename    = "rename"
 	opFreeSpace = "free space"
 )
+
+// Create makes a new empty file for writing, creating its directory, and returns it open; the caller writes, syncs
+// and closes it. It is exclusive: an existing entry is shared.ErrConflict, so a file is never overwritten. It is not
+// atomic, on purpose: the audio recorder grows a chunk under a temporary name and renames it when complete (Rename).
+// Links are refused as everywhere.
+func (s *Store) Create(ctx context.Context, ref shared.ArtifactRef) (*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	parts, err := locate(ref)
+	if err != nil {
+		return nil, err
+	}
+
+	fi, err := s.inspect(parts, false)
+	switch {
+	case errors.Is(err, errNotDir):
+		return nil, fmt.Errorf("%w: a parent of %s is a file", shared.ErrConflict, ref)
+	case err != nil:
+		return nil, mapErr(opCreate, ref, err)
+	case fi != nil:
+		return nil, fmt.Errorf("%w: %s exists", shared.ErrConflict, ref)
+	}
+
+	rel := filepath.Join(parts...)
+	if err := s.root.MkdirAll(filepath.Dir(rel), dirPerm); err != nil {
+		return nil, writeErr(ref, err)
+	}
+
+	// O_EXCL also covers a file (or a link) that appeared after the inspection.
+	f, err := s.root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
+	switch {
+	case errors.Is(err, fs.ErrExist):
+		return nil, fmt.Errorf("%w: %s exists", shared.ErrConflict, ref)
+	case err != nil:
+		return nil, writeErr(ref, err)
+	}
+	return f, nil
+}
 
 // Append adds the content to the end of a file, creating it (and its directory) if needed, and flushes it to disk.
 // It is not atomic, on purpose: it grows a partial download, and the bytes written before a failure stay, so the

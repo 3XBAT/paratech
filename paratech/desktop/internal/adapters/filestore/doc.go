@@ -6,7 +6,9 @@
 // shared.ArtifactRef, never OS paths. All access goes through os.Root, so no operation can leave the root, and
 // any link (symlink or Windows junction) on the way is refused, even one that stays inside.
 //
-// Write is atomic: a temporary file in the target directory, fsync, rename. Names with the temporary prefix are
+// Write is atomic: a temporary file in the target directory, fsync, rename. Create (exclusive, returns the open file)
+// and Rename let a writer grow a file under its own temporary name, as the audio recorder does with its chunks
+// (chunk-NNNNNN.wav.partial -> chunk-NNNNNN.wav). Names with the temporary prefix are
 // reserved: they are rejected as references and hidden from List. Call CleanupTemp once at startup, before any
 // Write, to remove leftovers of a crashed write. On Windows, close readers of a file before overwriting it.
 //
