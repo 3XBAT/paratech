@@ -1727,4 +1727,36 @@
 - «Обновить» показывает остаток/лимит/резерв и время; Hub остановлен -> устаревшее значение со временем; неверный/отозванный ключ -> текст про ключ; без адреса -> указание на поле
 - С --log-level debug ключа в run.log нет
 
+## [TASK-060] Цепочка «запись завершена -> распознавание -> постобработка» и wiring — ЧАСТЬ 2
+**Дата:** 2026-10-16
+**Статус:** done (часть 1 — PR #64)
+
+### Что сделано
+- Миграция 0007_proposals.sql (зеркало в docs/contracts/schema.sql): таблица proposals = proposal.State; CHECK вида/статуса/длин, reason только у REJECTED/STALE, confirmed_at/executed_at по статусу, due_at только у create_deadline_event; без FK на assignments (REJECTED с неизвестным заданием хранится, удалённое задание даёт STALE через Recheck, EXECUTED остаётся записью)
+- sqlite ProposalRepository (sqlc): Get -> ErrNotFound; Save = CAS ADR-0004(d) (вставка версии 1, существующий id/устаревшая версия/удалённая строка -> ErrVersionConflict, без повторной вставки); UPDATE не переписывает поля модели
+- filestore (*Store).ExportHomework: нулевая команда отклоняется, цель только proposal.ExportRef(задание) -> <DataDir>/artifacts/exports/<assignment>/homework.md атомарно; рендерер один (values.HomeworkMarkdown)
+- app: core.proposals = homeworkflow.Service (Clock e.local как у drafts/post, IDs e.ids, Tx db); почта = senddelivery.Service (SendHomework идемпотентен по ключу proposal:<id>, UNKNOWN не отправляется повторно); получатель = recipientSettings; календарь = заглушка, всегда homeworkflow.ErrCalendarNotConnected (предложение остаётся CONFIRMED)
+- Домен: due раньше 1970-01-01 UTC (и нулевой) — ErrMalformed (иначе строка сохранялась, а Get падал)
+- Тесты: sqlite proposals_test, filestore export_test, app proposals_test (экспорт, отправка, повтор, падение во время отправки SENDING+RUNNING -> UNKNOWN без повторной отправки, UNKNOWN + изменённый файл -> STALE, неподтверждённые/отклонённые, инъекции, календарь, перезапуск, нулевой due), tests/proposals_sqlite_test, sideeffect_boundary (TestProposalServiceReachesSideEffectsOnlyThroughCommands), schema_test (proposals, kind/status CHECK против домена)
+- ADR-0009 (раздел предложений, заглушка календаря, Clocks), docs/qa/run-alpha.md (таблица раздела 7, «Что изменилось»)
+- Изменённые существующие тесты: sqlite migrate_test (версия 7, таблица proposals), tests/schema_test (proposals, kindSet/checkSet), app registrations_test (+4 проверки портов), exports_test (только комментарий)
+- Ревью: approve (low: нулевой due, место сентинела календаря, тест падения без реального состояния; nit) -> исправлено (e66e696, 10a2501, a413e01). Security: найдено 0, опровергнуто 0, исправлено 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — см. PR (на финальном head после rebase на master с 0006 TASK-059)
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (в verify.sh)
+- [x] Шаг 2: GOOS=windows go vet ./desktop/... (в verify.sh)
+- [x] Шаг 3: TestRepeatedCompletionMakesOneSTTJob (часть 1)
+
+### Решения (подтвердить)
+- Номер миграции 0007: TestFS требует подряд идущих версий, PR должен сливаться после #68 (0006_recording_source)
+- Таблица proposals без FK на assignments
+- Сентинел календаря в homeworkflow (input/wails сможет errors.Is без импорта app)
+
+### Заметки (follow-up)
+- Propose никто не вызывает: LLM-задачи не создают предложений, UI подтверждения нет (TASK-045) — путь подключён, но в альфе недостижим
+- Повторный Execute при FAILED доставке ничего не создаёт и помечает EXECUTED (повтор — через SendAgain доставки)
+- Nit: заголовок queries/proposals.sql sqlc приклеивает к GetProposal (как во всех файлах запросов); нет индекса proposals.assignment_id (нужен для списка TASK-045); due_at в мс
+- Ветка проверки цели в ExportHomework недостижима (вторая линия защиты)
+
 ---
