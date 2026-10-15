@@ -191,7 +191,7 @@ export function ConnectionsPage() {
   }
 
   const dirty = mailFormDirty(mail, saved);
-  const checkState = checkControls({ dirty, checking, saving: mailBusy });
+  const checkState = checkControls({ dirty, checking, saving: mailBusy, secretBusy });
 
   return (
     <section>

@@ -186,10 +186,18 @@ export interface CheckControls {
   hint: string;
 }
 
-/** The check uses the stored settings, so it waits for unsaved changes and for a save or check in flight. */
-export function checkControls(state: { dirty: boolean; checking: boolean; saving: boolean }): CheckControls {
+/**
+ * The check uses the stored settings and password, so it waits for unsaved changes, for a save or check in flight and
+ * for a password change in flight.
+ */
+export function checkControls(state: {
+  dirty: boolean;
+  checking: boolean;
+  saving: boolean;
+  secretBusy: boolean;
+}): CheckControls {
   return {
-    disabled: state.dirty || state.checking || state.saving,
+    disabled: state.dirty || state.checking || state.saving || state.secretBusy,
     hint: state.dirty ? texts.checkSaveFirst : "",
   };
 }

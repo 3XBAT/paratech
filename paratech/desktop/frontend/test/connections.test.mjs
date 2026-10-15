@@ -226,12 +226,15 @@ test("secret buttons: nothing without a store, remove only for a stored secret",
 });
 
 test("the mail check waits for unsaved changes and for calls in flight", () => {
-  assert.deepEqual(checkControls({ dirty: false, checking: false, saving: false }), { disabled: false, hint: "" });
-  assert.deepEqual(checkControls({ dirty: true, checking: false, saving: false }), {
+  const idle = { dirty: false, checking: false, saving: false, secretBusy: false };
+  assert.deepEqual(checkControls(idle), { disabled: false, hint: "" });
+  assert.deepEqual(checkControls({ ...idle, dirty: true }), {
     disabled: true, hint: "Сначала сохраните изменения: проверяются сохранённые настройки.",
   });
-  assert.equal(checkControls({ dirty: false, checking: true, saving: false }).disabled, true);
-  assert.equal(checkControls({ dirty: false, checking: false, saving: true }).disabled, true);
+  assert.equal(checkControls({ ...idle, checking: true }).disabled, true);
+  assert.equal(checkControls({ ...idle, saving: true }).disabled, true);
+  // A password being stored or removed: the check would race it and log in with the old one.
+  assert.deepEqual(checkControls({ ...idle, secretBusy: true }), { disabled: true, hint: "" });
   assert.equal(texts.checkNoSend, "Письмо не отправляется: только соединение и вход.");
 });
 
