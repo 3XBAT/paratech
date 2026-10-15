@@ -888,3 +888,39 @@
 - TASK-042 follow-up (отправленное задание при повторной обработке сопоставляется по позиции) не сделан. Отправленный контент не меняется (вложение закреплено digest), но title/due задания могут перезаписаться
 - go-mail шлёт имя машины в EHLO (мелочь для приватности); Service.digest хеширует файл без лимита (лимит есть только в адаптере)
 - ADR-0004(c) можно обновить итоговой таблицей статусов
+
+## [TASK-031] Каркас сервера Hub
+**Дата:** 2026-10-15 10:10
+**Статус:** done
+
+### Что сделано
+- Разблокировано: Docker Desktop установлен, статус возвращён в pending и задача выполнена
+- hub/internal/input/connect: chi-роутер, Connect-обработчики из shared (пока Unimplemented), лимит сообщения 1 МиБ + 64 КиБ; публично доступен только QuotaService.GetRemaining (Reserve/Settle/Release -> 404, ADR-0005(f)); /healthz всегда 200, /readyz 200/503 без деталей (порт ReadinessProbe объявлен в input)
+- hub/internal/adapters/postgres: pgxpool, Ping, миграции goose под advisory lock, типизированные ошибки без пароля
+- hub/pkg/migrations: встроенные миграции, 0001_init.sql — пустая базовая (ARCH-04/ADR-0006 важнее текста задачи «hub/migrations»)
+- config: HUB_DATABASE_URL (обязателен, только env, скрыт в String/LogValue и в ошибках), HUB_SHUTDOWN_TIMEOUT (по умолчанию 15s)
+- app: сначала слушает порт, потом БД и миграции, graceful shutdown с таймаутом; Close идемпотентен
+- hub/docker-compose.yml (postgres:17-alpine, mem_limit 512m, shared_buffers 64MB, 127.0.0.1:55432, пароль hub-dev-only только для dev), профиль hub; hub/Dockerfile (GOWORK=off, distroless nonroot), paratech/.dockerignore
+- Тесты БД: testenv.PostgresURL пропускает без HUB_TEST_DATABASE_URL, иначе отдельная схема hubtest_<hex> на тест
+- Зависимости: chi v5.5.0, pgx v5.11.0, goose v3.28.0, connect v1.21.0 (ADR-0001, PRD §4.3)
+- Ревью: approve (только low). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0.
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), head bfefc58
+- [x] Шаг 1: go vet/build ./hub/...
+- [x] Шаг 2: docker compose up -d postgres + HUB_TEST_DATABASE_URL: go test -race ./hub/... — DB-тесты реально выполнены (PASS), схем не осталось, compose down -v
+- [x] Шаг 3: hub запущен, /healthz 200, /readyz 200 (503 после остановки Postgres)
+- Docker-образ hub не собирался (без загрузки больших образов); проверен только docker compose config и сборка с GOWORK=off
+
+### Решения (подтвердить)
+- Внутренние RPC квоты отфильтрованы по пути на публичном роутере; чище — отдельный QuotaLedgerService (follow-up ADR-0005) до TASK-033
+- verify.sh и CI не задают HUB_TEST_DATABASE_URL: DB-тесты Hub в CI пропускаются (менять CI — отдельная задача)
+- TLS: PRD §13.2 требует TLS; решить в задаче деплоя/ADR, завершает ли его Hub или обратный прокси
+
+### Заметки (follow-up)
+- TASK-032 обязан обернуть оба Connect-обработчика интерцептором ключей (TODO в router.go) до появления реальных обработчиков
+- Low: во время Open/Migrate порт уже слушается, /healthz висит; SIGTERM во время Open/Migrate даёт код выхода 1; невалидный HUB_SHUTDOWN_TIMEOUT в env — ошибка даже при флаге; после таймаута shutdown pgxpool.Close может ждать зависший обработчик; базовые образы Dockerfile по тегу, не по digest
+- Нет защиты от БД, мигрированной более новой версией (аналог ErrSchemaTooNew в desktop)
+- ARCH-41: readiness-порт в input без use case — можно уточнить формулировку в docs/architecture.md §6
+
+---
