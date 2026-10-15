@@ -1287,6 +1287,9 @@
 - TASK-036 (GetRemaining) остаётся pending: обработчик уже есть с TASK-033, проверить шаг теста на HTTP-уровне и закрыть
 
 ## [TASK-015] Прототипы захвата системного звука Windows и ADR с рекомендацией
+---
+
+## [TASK-022] Сценарий «занятие началось»: попап с кнопкой «Начать запись»
 **Дата:** 2026-10-15
 **Статус:** done
 
@@ -1313,3 +1316,42 @@
 - Low: malgo/doc.go пример C:\tmp\malgo; doc.go примеры %TEMP% работают только в cmd.exe
 
 ---
+- domain/recording/prompt: агрегат «предложение записи» (в памяти, не хранится), таблица переходов OFFERED -> STARTING/SNOOZED/SKIPPED/EXPIRED, STARTING -> STARTED или обратно в OFFERED с проблемой, SNOOZED -> OFFERED/SKIPPED/EXPIRED/WITHDRAWN; отложить только для занятия и только если now+5 мин раньше конца; истечение в конце занятия; типизированные проблемы (unavailable, in_progress, recovering, failed), ProblemOf по доменным sentinel; recording.ErrCaptureUnavailable, audiocapture.ErrUnavailable его оборачивает
+- cases/recordingprompt: LessonStarting (реализует scheduler.Events: настройка выключена -> событие отбрасывается, ShowPopup не вызывается), OfferAdHoc, Current, Start, Snooze, Skip, Tick/Run (опрос 5 с на Sleeper); одно предложение, новое занятие заменяет; устаревший id отклоняется; двойной Start отклоняется; отложенное при выключенных предложениях не возвращается (WITHDRAWN); название занятия не пишется в лог
+- recordingsession.RecoveryMarked(): закрывается после прохода пометки первого Recover (или его раннего выхода, или Close); до этого Start из попапа -> «recovering» (ADR-0009: запись не стартует до очисток и пометки)
+- input/wails: PromptService (Current/Start/Snooze/Skip, фиксированные тексты ошибок, время "15:04" в зоне занятия, time/tzdata встроен), событие "recordingprompt:shown" (до показа окна), пункт трея «Show recording popup» -> разовое предложение без занятия (без настройки, без отложить, без истечения); попап 360x180
+- app: в UI-режиме scheduler (sqlite LessonRepository, DefaultConfig) + recordingprompt, циклы стартуют после runner.Start и останавливаются первыми с ограничением stopTimeout; headless не собирает ни то, ни другое; мост promptRecordings без логики
+- frontend: попап на React — второй вход Vite (popup.html -> assets/app), src/popup (view.ts чистое отображение), bindings/prompt.ts; закоммиченный assets/popup.html|js — запасной вариант без npm (Start/Skip, textContent)
+- ADR-0007 и ADR-0009: короткие строки (порт Popup у Shell, без ctx; разовое предложение из трея; готовность записи)
+- Изменённые существующие тесты: shell_test validOptions (обязательный Core.Prompt); settings_test TestOpenBindings (+ случай без prompt) и строка prompt.ts в TestFrontendCallsBoundNames; audiocapture_test (+ errors.Is ErrCaptureUnavailable); shell_windows_test TestAppOptions (сравнение с тем, что отдаёт assets(), т.к. собранный попап грузит /assets/popup-<hash>.js); assets_production_test (нужен и собранный popup.html)
+- Ревью: changes requested (medium: время занятия в UTC на Windows без Go — time/tzdata не линковался; low: комментарий к id prompt-N (ARCH-24), строка ADR про порт без ctx, «recovering» навсегда после сбоя старта; nit: событие до показа) -> исправлено в ce3a69a, повторное ревью approve. Security: два прохода (весь diff и коммит исправлений): найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/... (в составе ./desktop/...)
+- [x] Шаг 2: TestLessonStartingFollowsThePromptsSetting (fake-окно), TestLessonPromptFollowsTheStoredSetting (tests/, реальный SQLite, импорт CSV, scheduler)
+- [x] Шаг 3: TestStartRecordsTheLessonAndHides, TestScheduledLessonPromptStartsARecording (app, реальный SQLite, fake-рекордер -> RECORDING)
+- [x] TestPromptStartWithoutARecorderShowsUnavailable (audiocapture.Unavailable -> «unavailable», приложение работает), TestPromptZoneWithoutGoRoot
+- [x] npm ci / run build / run test (30)
+
+### Решения (подтвердить)
+- «Отложить» — фиксированно 5 мин, пока занятие не кончилось и предложения включены; «Пропустить» — занятие больше не предлагается; без действия попап сам скрывается в конце занятия
+- Одно предложение за раз; новое занятие заменяет текущее (даже во время запуска); разовое предложение из трея заменяет отложенное (это занятие больше не вернётся)
+- Пункт трея «Show recording popup» = запись без занятия (иначе проверить попап без UI импорта расписания нельзя)
+- Успешный старт прячет попап, главное окно не показывается; неудачный — попап остаётся с текстом причины
+- Scheduler и попап только в UI-режиме; если старт фоновой работы в UI упал — предложений нет до перезапуска
+- Каждая неудачная попытка старта оставляет FAILED-запись (поведение recordingsession); с текущим Unavailable — по строке на клик
+
+### Заметки (follow-up)
+- Low: сбой чтения настроек в LessonStarting теряет предложение этого занятия (отметка scheduler уже сохранена)
+- Low: при показе попапа может мелькнуть старый текст (событие и Current() асинхронны); полностью — очистка вида на hide во frontend
+- Nit (ревью): TestPromptZoneWithoutGoRoot — шаблон -test.run зашит строкой (переименование сделает проверку пустой); на Linux тест не страж (системные зоны)
+- TASK-017/059: ошибки старта рекордера сопоставляются через recording.ErrCaptureUnavailable / limits.ErrRecordingInProgress; выбор источника — TASK-059
+- Нет UI импорта расписания: попап по расписанию пока можно увидеть только с занятием, добавленным иначе
+
+### Ручная проверка владельцем на Windows
+- Трей «Show recording popup»: попап справа внизу 360x180, фокус активного приложения (звонок, чат) не теряется, главное окно не выходит вперёд; заголовок «Запись без занятия», кнопки «Начать запись» и «Пропустить»
+- «Начать запись» в этой сборке: «Запуск…», затем «Запись пока недоступна в этой сборке.», приложение работает; «Пропустить» прячет
+- Вёрстка при 100% и 150% масштабе: без прокрутки, кнопки помещаются, длинная ошибка — не больше 2 строк
+- С занятием, начинающимся в ближайшие 5 мин: попап появляется; при выключенной «Автоматически предлагать запись» — нет; «Отложить на 5 мин» возвращает; в конце занятия скрывается сам; название вида <b>x</b> показано буквально; время в зоне занятия
+- Quit из трея завершает процесс за ~15 с и сразу после показа попапа; в логе нет названий занятий
