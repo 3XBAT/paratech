@@ -92,7 +92,7 @@ const (
 	QuotaNotConfigured                     // no usable Hub address
 	QuotaNoKey                             // no Hub API key is stored
 	QuotaKeyRejected                       // the Hub refused the key (invalid or revoked), or the stored key cannot be sent
-	QuotaUnreachable                       // the Hub was not reached or did not answer in time
+	QuotaUnreachable                       // the Hub was not reached, did not answer in time or is unavailable
 	QuotaFailed                            // any other failure
 )
 
