@@ -5,6 +5,7 @@ import { parseSourcesView, promptApi } from "../.test-build/bindings/prompt.js";
 import {
   adviceTexts,
   chooseSource,
+  collapseAdvice,
   initialSelection,
   nextSelection,
   pickerModel,
@@ -128,6 +129,23 @@ test("advice: the general one always; browser, muted and list error only when th
   assert.deepEqual(failed.warnings, [adviceTexts.listError]);
   assert.deepEqual(failed.options.map((o) => o.app), [""]);
   assert.equal(new Set(Object.values(adviceTexts)).size, 4);
+});
+
+test("the general advice collapses only next to two or more other messages", () => {
+  const error = problemText("in_progress");
+  assert.equal(collapseAdvice([], ""), false);
+  assert.equal(collapseAdvice([adviceTexts.browser], ""), false);
+  assert.equal(collapseAdvice([adviceTexts.muted], ""), false);
+  assert.equal(collapseAdvice([], error), false);
+  assert.equal(collapseAdvice([adviceTexts.browser], error), true);
+  assert.equal(collapseAdvice([adviceTexts.listError], error), true);
+  assert.equal(collapseAdvice([adviceTexts.muted, adviceTexts.browser], ""), true);
+  assert.equal(collapseAdvice([adviceTexts.muted, adviceTexts.browser], error), true);
+
+  // The worst case of the review: a browser muted in the mixer; the advice text itself stays verbatim.
+  const m = pickerModel(reply({ apps: [{ ...chrome, muted: true }] }), chooseSource("chrome.exe"));
+  assert.equal(collapseAdvice(m.warnings, error), true);
+  assert.equal(m.advice, adviceTexts.always);
 });
 
 test("the list refreshes only while visible, on offer, idle and closed", () => {

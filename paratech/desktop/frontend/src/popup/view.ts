@@ -267,6 +267,15 @@ export function pickerModel(sources: SourcesView | null, selection: Selection): 
 }
 
 /**
+ * Whether the general advice shrinks to one line (full text on hover), so the buttons stay in the 300 px popup.
+ * Only when two or more other messages are shown: next to one warning (the browser one included) or an error alone
+ * it stays in full, since it carries the muted-tab advice.
+ */
+export function collapseAdvice(warnings: readonly string[], error: string): boolean {
+  return warnings.length + (error !== "" ? 1 : 0) >= 2;
+}
+
+/**
  * Whether the open apps are listed again: only while the page is visible with a prompt on offer and no action runs.
  * Also not while the list is open, so entries do not move under the pointer.
  */

@@ -5,6 +5,7 @@ import {
   actionErrorText,
   buttonLabels,
   chooseSource,
+  collapseAdvice,
   initialSelection,
   loadErrorText,
   nextSelection,
@@ -170,6 +171,7 @@ export function Popup() {
   }
 
   const errorLine = error || m.problem;
+  const collapsed = collapseAdvice(showPicker ? picker.warnings : [], errorLine);
   return (
     <div className="popup">
       <div className="head">
@@ -219,16 +221,25 @@ export function Popup() {
           )}
         </div>
       )}
-      {showPicker &&
-        picker.warnings.map((w) => (
-          <div key={w} className="warning">
-            {w}
-          </div>
-        ))}
-      {showPicker && <div className="advice">{picker.advice}</div>}
-      {errorLine !== "" && (
-        <div className="error" role="alert">
-          {errorLine}
+      {(showPicker || errorLine !== "") && (
+        // Shrinks and, as a last resort, scrolls so that the buttons are never cut off.
+        <div className="texts">
+          {showPicker &&
+            picker.warnings.map((w) => (
+              <div key={w} className="warning" title={w}>
+                {w}
+              </div>
+            ))}
+          {showPicker && (
+            <div className={collapsed ? "advice collapsed" : "advice"} title={collapsed ? picker.advice : undefined}>
+              {picker.advice}
+            </div>
+          )}
+          {errorLine !== "" && (
+            <div className="error" role="alert" title={errorLine}>
+              {errorLine}
+            </div>
+          )}
         </div>
       )}
       <div className="buttons">
