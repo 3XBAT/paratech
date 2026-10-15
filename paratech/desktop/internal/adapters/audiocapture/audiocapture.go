@@ -5,14 +5,15 @@ package audiocapture
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"time"
 
+	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/shared"
 )
 
-// ErrUnavailable means this build cannot capture or assemble audio.
-var ErrUnavailable = errors.New("audiocapture: system audio recorder is not available in this build")
+// ErrUnavailable means this build cannot capture or assemble audio. It wraps recording.ErrCaptureUnavailable.
+var ErrUnavailable = fmt.Errorf("audiocapture: %w in this build", recording.ErrCaptureUnavailable)
 
 // Unavailable is the recorder of a build without audio capture. Starting a recording fails, and an interrupted
 // recording is not assembled: Finalize returns a transient error (never recording.ErrNoAudio), so the recording keeps

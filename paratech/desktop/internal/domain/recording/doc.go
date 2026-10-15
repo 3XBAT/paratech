@@ -1,6 +1,6 @@
-// Package recording is the bounded context of capturing the audio of an online class (PRD sections 6.2 and 6.3).
-// Aggregates: domain/recording/recording. Domain services: domain/recording/services/limits (hard cap, one
-// recording at a time).
+// Package recording is the bounded context of capturing the audio of an online class (PRD sections 6.1 to 6.3).
+// Aggregates: domain/recording/recording, domain/recording/prompt (the offer to record). Domain services:
+// domain/recording/services/limits (hard cap, one recording at a time).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //
@@ -19,4 +19,8 @@
 //   - Hard cap: the maximum recording duration (about 3 hours); at the cap the recording is finalized.
 //   - Heartbeat: a periodic liveness mark of an active recording; a stale heartbeat after restart means a crash.
 //   - Recovery: assembling the readable chunks of an interrupted recording into the final file.
+//   - Prompt: one offer to record, shown in the non-modal popup: for a lesson that is starting (from the schedule) or
+//     ad hoc (asked for by the user). States OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED, WITHDRAWN.
+//   - Snooze: hide a lesson prompt for a fixed delay and offer it again, only while the lesson still runs.
+//   - Expiry: a lesson prompt that nobody acted on ends when its lesson ends.
 package recording
