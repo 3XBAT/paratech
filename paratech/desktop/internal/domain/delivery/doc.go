@@ -15,7 +15,7 @@
 //
 //   - Delivery: a record of one attempt to send an artifact to a recipient; there is no separate Submission entity (PRD section 10).
 //   - Confirmation: the explicit user approval without which a delivery cannot exist (AC-14).
-//   - Status: PENDING, SENDING, SENT, FAILED, UNKNOWN (see the delivery package for the origin of the set).
+//   - Status: PENDING, SENDING, SENT, FAILED, UNKNOWN (see the delivery package for the transitions).
 //   - UNKNOWN: the outcome is ambiguous (timeout after the provider may have accepted the mail); it is reconciled, never blindly retried (hard rule 7, AC-15).
 //   - Reconciliation: finding out whether an UNKNOWN delivery was actually accepted, by its Message-ID.
 //   - Idempotency key: makes creating and sending the same delivery safe to repeat.

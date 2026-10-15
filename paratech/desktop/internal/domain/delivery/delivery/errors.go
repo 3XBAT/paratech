@@ -17,4 +17,24 @@ var (
 	// ErrTransient means the message was definitely not accepted and a later retry may succeed,
 	// for example a connection refused before any data was sent (PRD sections 7.3 and 10).
 	ErrTransient = errors.New("delivery failed transiently")
+
+	// ErrAttachmentChanged means the attachment is not the content the user confirmed (its SHA-256 or size
+	// differs). Nothing was sent; the delivery fails, the user confirms the new content in a new proposal.
+	ErrAttachmentChanged = errors.New("attachment differs from the confirmed content")
+
+	// ErrAttemptsExhausted means the job of the delivery used up its attempts without handing the message over;
+	// the delivery fails (FailUnsent), nothing was sent.
+	ErrAttemptsExhausted = errors.New("attempts exhausted")
+)
+
+// Errors of the aggregate.
+var (
+	// ErrInvalidDelivery is returned by New and Restore for data that breaks an invariant.
+	ErrInvalidDelivery = errors.New("invalid delivery")
+
+	// ErrInvalidTransition is returned for a status change the transition table does not allow.
+	ErrInvalidTransition = errors.New("invalid delivery transition")
+
+	// ErrInvalidPayload is returned for a delivery job payload that is not exactly {"delivery_id": "<id>"}.
+	ErrInvalidPayload = errors.New("invalid delivery job payload")
 )

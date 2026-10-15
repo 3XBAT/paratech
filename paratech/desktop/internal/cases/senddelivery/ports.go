@@ -18,8 +18,10 @@ import (
 // that CredentialStore writes (the app wires both to the wincred adapter). They never pass through the core and are
 // never stored in SQLite (hard rule 4, ARCH-34).
 //
-// Outcome errors are the sentinels of the delivery package: delivery.ErrOutcomeUnknown, delivery.ErrRejected and
-// delivery.ErrTransient. Anything else is treated as transient only if the adapter can prove nothing was handed over.
+// Outcome errors are the sentinels of the delivery package: delivery.ErrOutcomeUnknown, delivery.ErrRejected,
+// delivery.ErrTransient and delivery.ErrAttachmentChanged. An unclassified error is treated as UNKNOWN
+// (delivery.OutcomeOf), so the adapter returns ErrTransient only when it can prove nothing was handed over. Error texts
+// are short and fixed: they are stored and logged, so they carry no credentials and no server reply text.
 type EmailAdapter interface {
 	// Send delivers the email described by d with the attachment content. The Message-ID of d (generated before
 	// sending through IDGenerator.NewMessageID) is used so that the message can be found later (PRD section 10,
@@ -28,7 +30,9 @@ type EmailAdapter interface {
 	// delivery.ErrTransient means definitely not accepted and the delivery returns SENDING to PENDING for a later
 	// attempt; delivery.ErrRejected is permanent (FAILED); an ambiguous result, such as a timeout after the message
 	// may have been accepted, is delivery.ErrOutcomeUnknown (UNKNOWN) and must not be retried before Reconcile
-	// (PRD section 14 case 7, AC-15).
+	// (PRD section 14 case 7, AC-15). The adapter reads the attachment once, checks its SHA-256 and size against
+	// d.Attachment() and sends exactly those bytes; on a mismatch it sends nothing and returns
+	// delivery.ErrAttachmentChanged (the file changed after the user confirmed it).
 	Send(ctx context.Context, d *delivery.Delivery, attachment io.Reader) error
 
 	// Reconcile tries to find out whether the message of d was accepted by the provider, by its Message-ID. It is
