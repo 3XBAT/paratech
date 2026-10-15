@@ -32,9 +32,10 @@ reservation, which ADR-0005(h) left open as "one aggregate or an exception to AR
   request (provider call plus settlement).
 - **Retention.** `HUB_IDEMPOTENCY_RETENTION` (default 24h, 1h..24h) counts from when the key's fingerprint was recorded. After
   it the same text is a new key with a fresh fingerprint; attempt numbers keep counting and old reservations stay in the
-  ledger, never replayed. A key stays live past the retention while its latest attempt is RESERVED. The fingerprint is
-  operation, model alias and amount: no request text. ADR-0005(d) "live at most 24h" is read as: not used after the
-  retention; rows are kept without request text until a sweeper deletes them.
+  ledger, never replayed. A key whose latest attempt is still RESERVED and unexpired stays live past the retention (at
+  most retention + TTL), so one key never holds twice. The fingerprint is operation, model alias and amount: no request
+  text. ADR-0005(d) "live at most 24h" is read as: not used after the retention except for that case; rows are kept
+  without request text until a sweeper deletes them.
 - **Exposure.** Only `GetRemaining` is served (caller = authenticated API key). Reserve, Settle and Release stay internal: the
   router answers 404, the handler embeds the unimplemented ones. The proto is not split.
 
@@ -48,7 +49,9 @@ reservation, which ADR-0005(h) left open as "one aggregate or an exception to AR
     request text, so the same key with another text is IDEMPOTENCY_CONFLICT before any stored result is replayed;
   - reserve at least the maximum possible charge (input tokens + clamped `max_output_tokens`), and keep the request
     timeout plus settlement below `HUB_QUOTA_RESERVATION_TTL`; otherwise usage above the hold or after expiry may go
-    uncharged.
+    uncharged;
+  - anchor the gateway key record (stored result) to the same retention start as the ledger key, or handle a ledger replay
+    of a SETTLED reservation whose result is already gone.
 - Follow-ups: a sweeper for overdue holds and stale key records (rows older than the retention are only overwritten, not
   deleted); a DB guard that keeps `quota_ledger` append-only; Connect error mapping for Reserve/Settle/Release (ADR-0005(c))
   when they get a transport; a config change that lowers the limit below usage shows remaining 0 but keeps the charges.
