@@ -888,3 +888,36 @@
 - TASK-042 follow-up (отправленное задание при повторной обработке сопоставляется по позиции) не сделан. Отправленный контент не меняется (вложение закреплено digest), но title/due задания могут перезаписаться
 - go-mail шлёт имя машины в EHLO (мелочь для приватности); Service.digest хеширует файл без лимита (лимит есть только в адаптере)
 - ADR-0004(c) можно обновить итоговой таблицей статусов
+
+---
+
+## [TASK-048] Парсер XLSX
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- adapters/xlsxschedule на github.com/xuri/excelize/v2 v2.11.0 (назван в PRD §4.3; без CGO; косвенные: richardlehane/mscfb, msoleps, tiendc/go-deepcopy, xuri/efp, xuri/nfp, golang.org/x/crypto, x/net, x/text): те же колонки, ключи и правила, что у CSV (сопоставление продублировано — адаптеры не импортируют друг друга); реализует schedulesync.ScheduleParser под importplan.SourceXLSX; сценарий tests/schedule_import_xlsx_sqlite_test.go
+- Ошибки строк: Field — имя колонки как в CSV, буква колонки в начале Reason ("column C: ...")
+- Домен: lesson.ValidateTitle / ValidateSpan выделены из Content.Validate (поведение то же), парсер вызывает их по ячейкам, чтобы ошибка называла колонку
+- Лимиты: 2 МиБ файл; предпроверка zip до excelize (сигнатура PK — шифрованные/OLE отклоняются, ≤1000 записей, ≤16 МиБ распакованного, каждая запись читается до конца, XML-части well-formed и UTF-8); UnzipSizeLimit = UnzipXMLSizeLimit = 16 МиБ (нет временных файлов); итератор Rows до importplan.MaxRows; паники excelize перехватываются; содержимое ячеек в ошибки не попадает
+- Формулы не вычисляются (RawCellValue): берётся сохранённое значение, без него — пустая ячейка; только первый видимый лист; даты-числа 1900/1904, время — доля суток, целые минуты
+- Формат: docs/refs/schedule-xlsx.md
+- Изменённые существующие тесты: нет
+- Ревью: request changes (1 medium: ошибки названия/длительности/uid без колонки; low: формат Field, дрейф номеров строк, комментарий к safely; nit: t="d"/bool, chartsheet, косвенные зависимости) -> исправлено в 9562544, повторное ревью approve. Security: найдено 0 (оба прохода), опровергать нечего
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0, vulncheck)
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
+- [x] Шаг 2: TestScheduleImportXLSXMatchesCSV (разбор, превью на SQLite, сохранённые занятия), TestScheduleImportXLSXRowErrorsMatchCSV, TestScheduleImportXLSXReimport
+
+### Решения (подтвердить)
+- Только первый видимый лист; заголовок — первая непустая строка; пустые строки пропускаются (в CSV пустая строка — ошибка)
+- Формула без сохранённого значения — пустая ячейка (ошибка строки); формулы не вычисляются никогда
+- RowError.Field — голое имя колонки, буква в Reason (до TASK-049 UI)
+
+### Заметки (follow-up)
+- csvschedule: те же проверки названия/длительности/uid по колонкам (сейчас ошибка без Field); комментарий порта ScheduleParser в schedulesync/ports.go упоминает только CSV/ICS; docs/refs/README.md не перечисляет schedule-xlsx.md
+- Подключение парсеров в app/input — как для CSV/ICS
+- Low: причина "source uid longer than 512 bytes" учитывает префикс "xlsx:id:" — фактический лимит uid 504 байта; заменить на "uid too long"
+- Low: память при 16 МиБ мелких <si> (общих строк) ~x10 в куче; при необходимости считать <si> в предпроверке
+- Low: повторяющиеся/убывающие <row r> в вручную собранном файле сдвигают номера строк (задокументировано); chartsheet первым листом -> ошибка заголовка
