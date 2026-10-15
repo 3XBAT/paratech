@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { defaultPage, pageById, pages, type PageId } from "./nav";
 import { Placeholder } from "./pages/Placeholder";
+import { RecordingsPage } from "./pages/RecordingsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 export function App() {
@@ -23,7 +24,13 @@ export function App() {
         ))}
       </nav>
       <main className="content">
-        {page.id === "settings" ? <SettingsPage /> : <Placeholder title={page.label} />}
+        {page.id === "settings" ? (
+          <SettingsPage />
+        ) : page.id === "recordings" ? (
+          <RecordingsPage />
+        ) : (
+          <Placeholder title={page.label} />
+        )}
       </main>
     </div>
   );

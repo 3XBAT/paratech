@@ -39,6 +39,7 @@ func (s *Shell) run(ctx context.Context) error {
 		return err
 	}
 	app.RegisterService(application.NewService(b.settings))
+	app.RegisterService(application.NewService(b.activity))
 
 	u := &windowsUI{app: app}
 	var offs []func()

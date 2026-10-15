@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/clock"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/input/wails"
 )
@@ -95,7 +96,12 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if err != nil {
 		return wails.Core{}, fmt.Errorf("app: preferences: %w", err)
 	}
-	return wails.Core{Settings: prefs}, nil
+	history, err := activity.New(sqlite.NewRecordingRepository(db), sqlite.NewJobRepository(db), a.log)
+	if err != nil {
+		return wails.Core{}, fmt.Errorf("app: activity: %w", err)
+	}
+	// No Stopper or Forcer yet: the app does not build the recorder or the job runner (later tasks wire them).
+	return wails.Core{Settings: prefs, Activity: history}, nil
 }
 
 // Close releases resources in reverse order of creation. It must stay safe to call more than once.

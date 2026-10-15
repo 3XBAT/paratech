@@ -1,4 +1,4 @@
-// Sections of the main window. Pages other than Settings are placeholders filled by later tasks.
+// Sections of the main window. Pages other than Recordings and Settings are placeholders filled by later tasks.
 
 export type PageId = "recordings" | "models" | "homework" | "schedule" | "settings";
 

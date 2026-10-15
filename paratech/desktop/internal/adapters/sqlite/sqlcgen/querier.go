@@ -77,6 +77,10 @@ type Querier interface {
 	LessonExists(ctx context.Context, id string) (bool, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
 	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
+	// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
+	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+	// active is a JSON array of status names.
+	ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error)
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
@@ -85,6 +89,10 @@ type Querier interface {
 	ListLessonsPendingCalendarSync(ctx context.Context, maxRows int64) ([]ScheduleEntry, error)
 	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
+	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
+	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+	// active is a JSON array of status names.
+	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).

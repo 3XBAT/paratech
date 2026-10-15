@@ -6,5 +6,5 @@
     "rootDir": "src"
   },
   "include": [],
-  "files": ["src/bindings/settings.ts", "src/nav.ts"]
+  "files": ["src/bindings/settings.ts", "src/bindings/activity.ts", "src/activityView.ts", "src/nav.ts"]
 }

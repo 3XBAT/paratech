@@ -83,7 +83,7 @@ func TestOpenBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := s.openBindings(context.Background())
-	if err != nil || b.settings == nil {
+	if err != nil || b.settings == nil || b.activity == nil {
 		t.Fatalf("openBindings = %+v, %v", b, err)
 	}
 
@@ -100,24 +100,42 @@ func TestOpenBindings(t *testing.T) {
 	if _, err := s.openBindings(context.Background()); err == nil {
 		t.Error("a core without the settings use case must fail")
 	}
+
+	opts.OpenCore = func(context.Context) (Core, error) { return Core{Settings: &fakeSettings{}}, nil }
+	s, _ = New(opts)
+	if _, err := s.openBindings(context.Background()); err == nil {
+		t.Error("a core without the activity use case must fail")
+	}
 }
 
-// TestFrontendCallsBoundNames keeps the method names in the frontend wrapper equal to what Wails binds: the package
+// TestFrontendCallsBoundNames keeps the method names in the frontend wrappers equal to what Wails binds: the package
 // path, the type name and the method name (bindings.go in Wails v3). The page calls them by name, so a rename on
 // either side would only fail at run time.
 func TestFrontendCallsBoundNames(t *testing.T) {
-	src, err := os.ReadFile("../../../frontend/src/bindings/settings.ts")
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		file    string
+		typ     reflect.Type
+		methods int
+	}{
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 3},
+		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
 	}
-	typ := reflect.TypeFor[*SettingsService]()
-	if typ.NumMethod() != 3 {
-		t.Errorf("SettingsService has %d exported methods, want 3: every exported method is callable from the page", typ.NumMethod())
-	}
-	for i := range typ.NumMethod() {
-		name := typ.Elem().PkgPath() + "." + typ.Elem().Name() + "." + typ.Method(i).Name
-		if !strings.Contains(string(src), `"`+name+`"`) {
-			t.Errorf("frontend/src/bindings/settings.ts does not call %q", name)
-		}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			src, err := os.ReadFile("../../../frontend/src/bindings/" + tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.typ.NumMethod() != tt.methods {
+				t.Errorf("%s has %d exported methods, want %d: every exported method is callable from the page",
+					tt.typ.Elem().Name(), tt.typ.NumMethod(), tt.methods)
+			}
+			for i := range tt.typ.NumMethod() {
+				name := tt.typ.Elem().PkgPath() + "." + tt.typ.Elem().Name() + "." + tt.typ.Method(i).Name
+				if !strings.Contains(string(src), `"`+name+`"`) {
+					t.Errorf("frontend/src/bindings/%s does not call %q", tt.file, name)
+				}
+			}
+		})
 	}
 }

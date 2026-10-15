@@ -65,6 +65,54 @@ func TestContentValidate(t *testing.T) {
 	}
 }
 
+func TestValidateTitle(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		valid bool
+	}{
+		{"plain", "Math", true},
+		{"at limit", strings.Repeat("a", MaxTitleBytes), true},
+		{"empty", "", false},
+		{"blank", " \t", false},
+		{"too long", strings.Repeat("a", MaxTitleBytes+1), false},
+		{"line break", "Math\n2", false},
+		{"invalid utf-8", "Math\xff", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTitle(tt.title)
+			if tt.valid != (err == nil) || (err != nil && !errors.Is(err, ErrInvalidLesson)) {
+				t.Fatalf("ValidateTitle() = %v, want valid %v", err, tt.valid)
+			}
+		})
+	}
+}
+
+func TestValidateSpan(t *testing.T) {
+	tests := []struct {
+		name       string
+		start, end time.Time
+		valid      bool
+	}{
+		{"an hour", t0, t0.Add(time.Hour), true},
+		{"exactly the limit", t0, t0.Add(MaxDuration), true},
+		{"over the limit", t0, t0.Add(MaxDuration + time.Minute), false},
+		{"end equals start", t0, t0, false},
+		{"end before start", t0, t0.Add(-time.Minute), false},
+		{"zero start", time.Time{}, t0, false},
+		{"zero end", t0, time.Time{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSpan(tt.start, tt.end)
+			if tt.valid != (err == nil) || (err != nil && !errors.Is(err, ErrInvalidLesson)) {
+				t.Fatalf("ValidateSpan() = %v, want valid %v", err, tt.valid)
+			}
+		})
+	}
+}
+
 func TestContentEqualAndOverlaps(t *testing.T) {
 	a := content("Math", t0, time.Hour)
 	moscow := time.FixedZone("MSK", 3*3600)

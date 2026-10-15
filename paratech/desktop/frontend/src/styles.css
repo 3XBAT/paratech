@@ -9,3 +9,9 @@ h1 { font-size: 1.4rem; margin: 0 0 16px; }
 .toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .muted { color: #666; }
 .error { color: #b00020; }
+h2 { font-size: 1.15rem; margin: 24px 0 12px; }
+.list { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+.list th, .list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+.list th { font-weight: 600; color: #555; }
+.list .problem { color: #8a4b00; white-space: pre-wrap; word-break: break-word; }
+.list .waiting { color: #8a4b00; }
