@@ -601,6 +601,49 @@ func TestResolveForJob(t *testing.T) {
 	}
 }
 
+func TestCurrentModel(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(e *env) shared.SttModelID // returns the expected model
+		wantErr error
+	}{
+		{name: "nothing installed", setup: func(*env) shared.SttModelID { return "" },
+			wantErr: modelselection.ErrModelNotInstalled},
+		{name: "one model, no default", setup: func(e *env) shared.SttModelID { return e.install(catBase).ID }},
+		{name: "two models, no default", setup: func(e *env) shared.SttModelID {
+			e.install(catBase)
+			e.install(catTiny)
+			return ""
+		}, wantErr: modelselection.ErrNoDefaultModel},
+		{name: "two models with default", setup: func(e *env) shared.SttModelID {
+			e.install(catBase)
+			tiny := e.install(catTiny)
+			if err := e.svc.SetDefault(context.Background(), tiny.ID); err != nil {
+				e.t.Fatal(err)
+			}
+			return tiny.ID
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			want := tt.setup(e)
+			e.beforeEachTx(func() { t.Error("CurrentModel opened a transaction") })
+
+			got, err := e.svc.CurrentModel(context.Background())
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got.ID != want {
+				t.Fatalf("CurrentModel = %+v, %v; want %s", got, err, want)
+			}
+		})
+	}
+}
+
 // TestConcurrentDeleteSelectAndPin races removals, default selections and job pins on one model. Whatever the
 // interleaving: a removed model is neither the default nor pinned by an unfinished job, a pinned model is never
 // removed, an installed model keeps its file, and every call returns one of the documented outcomes.
