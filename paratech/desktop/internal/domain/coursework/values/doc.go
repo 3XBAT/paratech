@@ -5,5 +5,6 @@
 // LLMRequest is validated at construction; the model answer is typed as UntrustedOutput (hard rule 3) so it
 // cannot reach a plain string parameter by accident. The prompts, the answer schemas and the
 // answer parsers of each operation live in domain/coursework/services/prompts. It also holds the job types and the
-// job payload of the post-processing of a transcript (PostProcessRequest).
+// job payload of the post-processing of a transcript (PostProcessRequest) and of a homework draft generation
+// (DraftRequest).
 package values
