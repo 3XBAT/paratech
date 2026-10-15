@@ -15,19 +15,26 @@ import (
 
 // Operation names used in error messages.
 const (
-	opModifyQuota = "modify quota account"
-	opReadQuota   = "read quota account"
+	opModifyQuota  = "modify quota account"
+	opReadQuota    = "read quota account"
+	opPurgeResults = "purge stored results"
 )
 
 // quotaTimeout bounds one quota transaction, lock wait included, so a hanging database fails the command instead of
 // hanging it.
 const quotaTimeout = 5 * time.Second
 
+// purgeTimeout bounds one purge of stored results.
+const purgeTimeout = 30 * time.Second
+
 // pgForeignKeyViolation is the SQLSTATE of a foreign key violation.
 const pgForeignKeyViolation = "23503"
 
 const reservationColumns = "id, idempotency_key, attempt, amount, state, release_reason, charged, actual, partial, " +
 	"created_at, expires_at, closed_at"
+
+const idempotencyKeyColumns = "idempotency_key, operation_type, model_alias, amount, created_at, attempts, latest_reservation_id, " +
+	"request_hash, result_output, result_input_tokens, result_output_tokens"
 
 // querier is what loading needs from a transaction.
 type querier interface {
@@ -145,9 +152,8 @@ func (r *QuotaAccounts) load(ctx context.Context, q querier, op string, scope ac
 
 	var keys []account.KeyRecord
 	if targets && scope.Key != "" {
-		k, err := scanKeyRecord(q.QueryRow(ctx, "SELECT idempotency_key, operation_type, model_alias, amount, created_at, "+
-			"attempts, latest_reservation_id FROM quota_idempotency_keys WHERE api_key_id = $1 AND idempotency_key = $2",
-			owner, string(scope.Key)))
+		k, err := scanKeyRecord(q.QueryRow(ctx, "SELECT "+idempotencyKeyColumns+" FROM quota_idempotency_keys "+
+			"WHERE api_key_id = $1 AND idempotency_key = $2", owner, string(scope.Key)))
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
@@ -225,13 +231,16 @@ func (r *QuotaAccounts) save(ctx context.Context, tx pgx.Tx, scope account.Scope
 		}
 	}
 	for _, k := range ch.Keys {
-		_, err := tx.Exec(ctx, "INSERT INTO quota_idempotency_keys (api_key_id, idempotency_key, operation_type, model_alias, "+
-			"amount, created_at, attempts, latest_reservation_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "+
+		output, in, out := resultColumns(k.Result)
+		_, err := tx.Exec(ctx, "INSERT INTO quota_idempotency_keys (api_key_id, "+idempotencyKeyColumns+") "+
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "+
 			"ON CONFLICT (api_key_id, idempotency_key) DO UPDATE SET operation_type = EXCLUDED.operation_type, "+
 			"model_alias = EXCLUDED.model_alias, amount = EXCLUDED.amount, created_at = EXCLUDED.created_at, "+
-			"attempts = EXCLUDED.attempts, latest_reservation_id = EXCLUDED.latest_reservation_id",
+			"attempts = EXCLUDED.attempts, latest_reservation_id = EXCLUDED.latest_reservation_id, "+
+			"request_hash = EXCLUDED.request_hash, result_output = EXCLUDED.result_output, "+
+			"result_input_tokens = EXCLUDED.result_input_tokens, result_output_tokens = EXCLUDED.result_output_tokens",
 			owner, string(k.Key), string(k.Fingerprint.Operation), string(k.Fingerprint.Alias), k.Fingerprint.Amount,
-			k.CreatedAt, k.Attempts, k.Latest.String())
+			k.CreatedAt, k.Attempts, k.Latest.String(), string(k.Fingerprint.RequestHash), output, in, out)
 		if err != nil {
 			return r.writeError(ctx, err)
 		}
@@ -249,6 +258,24 @@ func (r *QuotaAccounts) save(ctx context.Context, tx pgx.Tx, scope account.Scope
 		return r.writeError(ctx, err)
 	}
 	return nil
+}
+
+// PurgeResults clears the stored results of every key record created at or before cutoff (account.Policy.ResultCutoff),
+// so that no model output outlives the key retention (PRD section 13.2). The key records stay, without output; it
+// returns how many results were cleared.
+func (r *QuotaAccounts) PurgeResults(ctx context.Context, cutoff time.Time) (int64, error) {
+	if err := r.db.open(); err != nil {
+		return 0, fmt.Errorf("%s: %w", opPurgeResults, err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, purgeTimeout)
+	defer cancel()
+
+	tag, err := r.db.pool.Exec(ctx, "UPDATE quota_idempotency_keys SET result_output = NULL, result_input_tokens = NULL, "+
+		"result_output_tokens = NULL WHERE result_output IS NOT NULL AND created_at <= $1", cutoff)
+	if err != nil {
+		return 0, r.db.queryError(ctx, opPurgeResults, err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // writeError translates a failed write: a missing API key is shared.ErrNotFound, a duplicate shared.ErrAlreadyExists.
@@ -288,16 +315,31 @@ func scanReservation(row pgx.Row) (account.ReservationRecord, error) {
 
 func scanKeyRecord(row pgx.Row) (account.KeyRecord, error) {
 	var (
-		k                      account.KeyRecord
-		key, op, alias, latest string
-		createdAt              time.Time
+		k                            account.KeyRecord
+		key, op, alias, latest, hash string
+		createdAt                    time.Time
+		output                       []byte
+		in, out                      *int64
 	)
-	if err := row.Scan(&key, &op, &alias, &k.Fingerprint.Amount, &createdAt, &k.Attempts, &latest); err != nil {
+	if err := row.Scan(&key, &op, &alias, &k.Fingerprint.Amount, &createdAt, &k.Attempts, &latest, &hash, &output, &in, &out); err != nil {
 		return account.KeyRecord{}, err
 	}
 	k.Key, k.Latest, k.CreatedAt = account.IdempotencyKey(key), shared.ReservationID(latest), createdAt.UTC()
 	k.Fingerprint.Operation, k.Fingerprint.Alias = account.Operation(op), account.ModelAlias(alias)
+	k.Fingerprint.RequestHash = account.RequestHash(hash)
+	if output != nil && in != nil && out != nil { // the CHECK keeps the three columns set or unset together
+		k.Result = account.Result{Stored: true, Output: string(output), InputTokens: *in, OutputTokens: *out}
+	}
 	return k, nil
+}
+
+// resultColumns maps a stored result to its columns; no result is three NULLs.
+func resultColumns(r account.Result) (output []byte, in, out *int64) {
+	if !r.Stored {
+		return nil, nil, nil
+	}
+	// A non-nil empty slice, so that an empty answer is stored as '' and not as NULL.
+	return append([]byte{}, r.Output...), &r.InputTokens, &r.OutputTokens
 }
 
 func nullTime(t time.Time) *time.Time {
