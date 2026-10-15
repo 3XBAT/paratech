@@ -1,15 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
-  <title>Lesson is starting</title>
+  <title>Запись занятия</title>
   <link rel="stylesheet" href="/popup.css">
   <script type="module" src="/popup.js"></script>
 </head>
 <body>
-  <p class="title">A lesson is starting</p>
-  <p>Recording suggestions will appear here.</p>
-  <button id="dismiss" type="button">Dismiss</button>
+  <!-- Fallback popup: shown only when the binary was built without the frontend (see assets.go). -->
+  <p id="heading" class="title">Запись</p>
+  <p id="details" class="details"></p>
+  <p id="message" class="error"></p>
+  <div class="buttons">
+    <button id="start" type="button" hidden>Начать запись</button>
+    <button id="skip" type="button" hidden>Пропустить</button>
+    <button id="close" type="button">Закрыть</button>
+  </div>
 </body>
 </html>

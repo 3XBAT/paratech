@@ -1,0 +1,16 @@
+/* The window is 360x180 DIP (internal/input/wails/spec.go): everything must fit without scrollbars. */
+html, body, #root { height: 100%; margin: 0; }
+body { font: 13px/1.35 "Segoe UI", sans-serif; background: #fff; color: #222; overflow: hidden; user-select: none; cursor: default; }
+.popup { box-sizing: border-box; height: 100%; padding: 10px 14px; border: 1px solid #c8c8c8; display: flex; flex-direction: column; gap: 4px; }
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.heading { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.time { flex: none; color: #555; white-space: nowrap; }
+.title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note { color: #555; }
+.error { color: #b00020; font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.buttons { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+button { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid #b8b8b8; border-radius: 4px; background: #f3f3f3; color: inherit; white-space: nowrap; cursor: pointer; }
+button:hover:enabled { background: #e6e6e6; }
+button.primary { background: #0067c0; border-color: #0067c0; color: #fff; }
+button.primary:hover:enabled { background: #005aa8; }
+button:disabled { opacity: 0.6; cursor: default; }

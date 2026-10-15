@@ -13,11 +13,11 @@ const (
 	popupPage = "/popup.html"
 )
 
-// Embedded pages. assets/ holds the committed pages: the recording popup and a fallback main page. The React app
-// (desktop/frontend) is built by `npm run build` into assets/app/, which git ignores. go:embed cannot reach outside
-// this directory and CI builds Go without npm, so a build without the frontend still compiles and shows the
-// fallback page. Release builds run `npm run build`, then build and test with -tags production: a production-only
-// test fails when the built app is missing.
+// Embedded pages. assets/ holds the committed fallback pages: a main page and a minimal recording popup. The React
+// app (desktop/frontend, two pages: index.html and popup.html) is built by `npm run build` into assets/app/, which
+// git ignores. go:embed cannot reach outside this directory and CI builds Go without npm, so a build without the
+// frontend still compiles and shows the fallback pages. Release builds run `npm run build`, then build and test with
+// -tags production: a production-only test fails when a built page is missing.
 const (
 	assetsDir = "assets"
 	appDir    = "assets/app"
@@ -32,7 +32,7 @@ const (
 var assetFiles embed.FS
 
 // assets returns the pages at the root of the file system, the layout the Wails asset server expects: the built
-// React app first, then the committed pages (popup, fallback main page).
+// React app first, then the committed fallback pages.
 func assets() fs.FS {
 	return layered{mustSub(appDir), mustSub(assetsDir)}
 }
