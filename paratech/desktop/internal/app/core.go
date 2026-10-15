@@ -48,7 +48,8 @@ type core struct {
 	runner     *jobrunner.Service
 	recordings *recordingsession.Service
 	deliveries *senddelivery.Service
-	drafts     *homeworkflow.Drafts // no binding yet (TASK-045)
+	drafts     *homeworkflow.Drafts  // no binding yet (TASK-045)
+	proposals  *homeworkflow.Service // no binding yet (TASK-045)
 
 	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
 	transcriptions *transcribe.Enqueuer
@@ -178,6 +179,9 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 		return fmt.Errorf("app: email delivery: %w", err)
 	}
 	handlers.delivery = c.deliveries
+	if err := c.wireProposals(e, settings); err != nil {
+		return err
+	}
 
 	var observer jobrunner.Observer
 	if notifier != nil {

@@ -46,6 +46,10 @@ var (
 	_ hubclient.URLSource                   = hubSettings{}
 	_ smtp.AccountSource                    = mailSettings{}
 	_ homeworkflow.RecipientSource          = recipientSettings{}
+	_ homeworkflow.ProposalRepository       = (*sqlite.ProposalRepository)(nil)
+	_ homeworkflow.HomeworkMailer           = (*senddelivery.Service)(nil)
+	_ homeworkflow.HomeworkExporter         = (*filestore.Store)(nil)
+	_ homeworkflow.DeadlineCalendar         = calendarNotConnected{}
 	_ settingsLoader                        = (*sqlite.SettingsRepository)(nil)
 	_ secretStore                           = (*wincred.Store)(nil)
 	_ secretStore                           = (*testenv.MemCredentials)(nil)

@@ -35,7 +35,7 @@ func insertAssignment(t *testing.T, dataDir string, id shared.AssignmentID, titl
 }
 
 // confirmedEmail is the command of a send_homework_email proposal of a that the user validated and confirmed, with the
-// recipient and the export content pinned (the proposals service does this; it is not wired yet).
+// recipient and the export content pinned, as the proposals service does (proposals_test.go runs the service itself).
 func confirmedEmail(t *testing.T, a *App, id shared.AssignmentID, recipient string) proposal.EmailCommand {
 	t.Helper()
 	ctx := context.Background()
