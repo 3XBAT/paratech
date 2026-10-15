@@ -145,9 +145,10 @@ func llmKey(id shared.JobID, r values.LLMRequest) string {
 	return fmt.Sprintf("pp:%s:v%d:%x", r.Operation(), prompts.Version, h.Sum(nil)[:16])
 }
 
-// buildRequest builds the request of a job from the selected context and keys it with llmKey.
-func (p *PostProcessor) buildRequest(id shared.JobID, sel contextselection.Context) (values.LLMRequest, error) {
-	draft, err := prompts.Build(sel, p.modelAlias, pendingKey)
+// buildRequest builds the request of a job from the selected context and keys it with llmKey. The draft generation
+// (Drafts) uses it too.
+func buildRequest(modelAlias string, id shared.JobID, sel contextselection.Context) (values.LLMRequest, error) {
+	draft, err := prompts.Build(sel, modelAlias, pendingKey)
 	if err != nil {
 		return values.LLMRequest{}, err
 	}
@@ -198,7 +199,7 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 	case err != nil:
 		return p.permanent(snap, stepContext, ErrContextRefused, err)
 	}
-	llmReq, err := p.buildRequest(snap.ID(), sel)
+	llmReq, err := buildRequest(p.modelAlias, snap.ID(), sel)
 	if err != nil {
 		return p.permanent(snap, stepContext, ErrContextRefused, err)
 	}
@@ -481,6 +482,11 @@ func (p *PostProcessor) retry(snap job.Snapshot, step string, msg, cause error) 
 }
 
 func (p *PostProcessor) warn(snap job.Snapshot, step string, msg, cause error) {
+	warnStep(p.log, "post-processing step failed", snap, step, msg, cause)
+}
+
+// warnStep logs a failed step of a job handler: the fixed error and, separately, its cause.
+func warnStep(log *slog.Logger, what string, snap job.Snapshot, step string, msg, cause error) {
 	attrs := []any{
 		slog.String("job", snap.ID().String()), slog.String("type", string(snap.Type())), slog.String("step", step),
 		slog.String("error", msg.Error()),
@@ -488,5 +494,5 @@ func (p *PostProcessor) warn(snap job.Snapshot, step string, msg, cause error) {
 	if cause != nil {
 		attrs = append(attrs, slog.Any("cause", cause))
 	}
-	p.log.Warn("post-processing step failed", attrs...)
+	log.Warn(what, attrs...)
 }

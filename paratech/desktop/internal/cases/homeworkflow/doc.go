@@ -5,11 +5,16 @@
 // validates it against local state, Confirm records the user's approval, Execute hands a command of a confirmed
 // proposal to the email, export or calendar port. TASK-042 adds the post-processing of a transcript (PostProcessor in
 // postprocess.go: the summarize and extract_homework jobs, enqueued on the STT completion event) and the user's edits of
-// the extracted assignments and deadlines (Service.EditAssignment), which reprocessing never overwrites. Drafts
-// (TASK-043, with the draft repository and the homeworkdraft aggregate) extend the Service.
+// the extracted assignments and deadlines (Service.EditAssignment), which reprocessing never overwrites. TASK-043 adds
+// the homework drafts (Drafts in drafts.go): Generate enqueues a homework_draft job (one per assignment, base version
+// and instructions, so a double click makes one job), the job adds the model's draft as a new version unless the
+// student changed the draft meanwhile, EditDraft adds the student's version, and ExportDraft writes a chosen version
+// to the export file of the assignment.
 //
-// The PostProcessor has no side-effect port at all: summaries, assignments and deadlines are local data. Putting a
-// deadline into the calendar or sending homework goes through an action proposal and the user's confirmation.
+// The PostProcessor and the draft job have no side-effect port at all: summaries, assignments, deadlines and draft
+// versions are local data. Exporting a draft is an explicit user action on a version the user picked, to a file the
+// core derives; putting a deadline into the calendar or sending homework goes through an action proposal and the
+// user's confirmation.
 //
 // Rules that apply: ARCH-20..27. LLM output is untrusted (hard rule 3): the LLM proposes, the core validates against
 // trusted local state, the user confirms, and only then does an adapter act. The side-effect ports accept only commands
