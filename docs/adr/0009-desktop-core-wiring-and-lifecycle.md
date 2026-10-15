@@ -50,8 +50,12 @@ non-email types, UI mode only (headless has no notifier).
   configured: LLM jobs park in WAITING_FOR_NETWORK ("hub: not configured", no attempts used), an email is
   `delivery.ErrRejected`. Drafts: `sqlite.DraftRepository`. Off Windows the stores fail with `ErrUnsupported`.
 - **Stand-ins** (`internal/app/standins.go`): STT engine -> permanent, used when `whisper-cli(.exe)` next to the
-  executable is missing or refused (logged at startup). Recorder: `audiocapture.Unavailable`, every call fails; its
-  `Finalize` is not `ErrNoAudio`, so interrupted recordings keep their chunks for a later recovery.
+  executable is missing or refused (logged at startup).
+- **Recorder (TASK-017).** Windows: `audiocapture.Recorder`, which runs this executable as the recorder child
+  (ADR-0002). Other OSes: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`, so
+  interrupted recordings keep their chunks for a later recovery.
+- **Recorder run mode** (`--recorder --data-dir`): no instance lock (the parent holds it), no database, no UI shell,
+  no jobs; only the Storage Manager on `<DataDir>/artifacts`. Events on stdout, log on stderr, stops when stdin closes.
 - **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow`, which places
   lesson times and deadlines in the student's zone. SQLite stores Unix ms, so the zone does not affect storage.
 - **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@learning-assistant.invalid>`. Jitter via `crypto/rand`.
@@ -62,12 +66,13 @@ non-email types, UI mode only (headless has no notifier).
   The STT stand-in fails jobs permanently, so a job keyed `stt:<recording>:<model>` that failed while whisper-cli was
   missing would block transcription after the install is fixed: that task must handle it (e.g. a parking class or a new key round).
 - `modelcatalog`, `homeworkflow.Service`, proposals and the calendar sync of `schedulesync`.
-- Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049.
-- Settings UI for mail and Hub, bindings of the drafts (TASK-045) and of the Hub key (TASK-039). TASK-017: the WASAPI recorder.
+- Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049; the
+  Windows recorder by TASK-017.
+- Settings UI for mail and Hub, bindings of the drafts (TASK-045) and of the Hub key (TASK-039).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,
-  `audiocapture`) import only domain and std (`instancelock` also `x/sys/windows`).
+  `audiocapture`) import only domain and std (`instancelock` and `audiocapture` also `x/sys/windows`).
 - `userfile` (TASK-049, std only) reads the file chosen for the schedule import, so the binding does no file access.
 - The page's "not available yet" error is gone; Stop / Run now always reach the use cases.
 - Open owner decisions: STT timeout 6 h; model alias `default`; Message-ID domain `learning-assistant.invalid`; LLM jobs

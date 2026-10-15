@@ -23,7 +23,7 @@ Chunks: `%LOCALAPPDATA%\LearningAssistant\artifacts\recordings\<id>\`. Play some
 | 3 | Stop it in the main window | `recordings\<id>.wav`, 16 kHz mono, plays, length = recording time |
 | 4 | Start, then `taskkill /F /PID <child pid>` | log `restarting the recorder child`; numbering continues; the gap is silence in the track |
 | 5 | Kill the child 4 times | after the 4th the recording ends with a reason (COMPLETED with a problem or FAILED), no crash |
-| 6 | Start, then kill `la.exe` (parent) | the child exits within ~1 s; closed chunks are valid; the next start recovers the recording |
+| 6 | Start, then kill `la.exe` (parent) | the child closes its last chunk and exits within ~3 s; closed chunks are valid; the next start recovers the recording (a restart within those ~3 s may build the track without the last chunk; it stays on disk) |
 | 7 | During a recording change the default output device, unplug headphones | it keeps writing; in mode `system` the log shows reopens > 0 (process loopback should follow the device by itself: not confirmed) |
 
 Mode `system` is used only when process loopback fails (log `capture mode switched`); the UI cannot choose it yet (TASK-058/059).

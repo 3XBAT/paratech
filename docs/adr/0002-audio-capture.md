@@ -41,7 +41,8 @@ the desktop binary. The owner's machine is Windows 10 22H2 (19045); process loop
    ADR under ARCH-01 for throwaway prototypes only. `tests/arch_test.go` allows it and fails on any import of it from outside
    `spikes/`; it is not part of the product binary. The malgo prototype is a separate nested module
    (`spikes/audio-capture/malgo`, own `go.mod`, not in `go.work`, not built by CI), so the desktop module has no CGO
-   dependency. Delete `spikes/audio-capture/` when TASK-017 lands, or keep `capturespike` as a diagnostic tool (decide then).
+   dependency. Decided with TASK-017: keep `spikes/audio-capture/` until TASK-016 is done (the owner runs `capturespike`
+   there), then delete it.
 
 ## Candidates (spike on Windows 10 19045, nothing played)
 | | A: malgo | B: pure Go, process loopback | B': pure Go, classic loopback | C: C++/Rust helper | C': same Go binary as child |
