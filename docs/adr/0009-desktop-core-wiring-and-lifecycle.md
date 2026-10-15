@@ -57,16 +57,15 @@ non-email types, UI mode only (headless has no notifier).
 - **Heavy cap (TASK-060).** `jobrunner.Config.MaxHeavy` (default 1): a worker reserves a heavy slot before the claim and
   frees it after the attempt; without a free slot it claims only light types. So 2 workers never run 2 whisper-cli.
 - **Models (TASK-060).** `modelcatalog.Service`, `Downloader` (`httpdownload`, `filestore` free space) and `Importer`
-  (`localfile`) are on the core for TASK-030 (no bindings yet). `values.ParseCatalog` refuses a manifest without entries and
-  no ggml model has a verified SHA-256, so the catalog source is a stand-in: catalog list, download and import fail with
-  "model catalog: not configured in this build"; installed models, the default and the job pin work.
+  (`localfile`) are on the core for TASK-030 (no bindings yet). The catalog is an embedded manifest with `"models": []`
+  (`internal/app/catalog.json`; the domain accepts an explicit empty list): no ggml model has a verified SHA-256 yet,
+  so the catalog list is empty and download has nothing to offer. Manual import, the default and the job pin work.
 
 - **Hub, mail, drafts (TASK-057).** `hubclient` and `smtp` read the Hub URL and the mail account from the settings at
   every call (bridges in `internal/app/settingsbridge.go`, mapping only); the API key and the SMTP password come from
   one `wincred` store per service (`hub`, `mail`), shared by the adapter (reads) and `senddelivery` (writes). Not
   configured: LLM jobs park in WAITING_FOR_NETWORK ("hub: not configured", no attempts used), an email is
   `delivery.ErrRejected`. Drafts: `sqlite.DraftRepository`. Off Windows the stores fail with `ErrUnsupported`.
-- **Stand-ins** (`internal/app/standins.go`): the model catalog (above).
 - **Recorder (TASK-017).** Windows: `audiocapture.Recorder`, which runs this executable as the recorder child
   (ADR-0002). Other OSes: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`, so
   interrupted recordings keep their chunks for a later recovery.
@@ -79,13 +78,12 @@ non-email types, UI mode only (headless has no notifier).
 
 ## Not wired yet (follow-ups)
 - `homeworkflow.Service` and proposals (TASK-060 part 2); the calendar sync of `schedulesync` (TASK-051).
-- A model catalog manifest with verified SHA-256 (or an empty catalog accepted by the domain): owner decision.
+- Catalog entries with verified SHA-256 in `internal/app/catalog.json`.
 - The SHA-256 pin check of the whisper-cli binary (docs/refs/whisper.md), TASK-054 or later.
 - A model installed while the app runs gets its waiting recordings enqueued only at the next start (TASK-030 can call
   the sweep after an install).
 - Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
-  the Windows recorder by TASK-017;
-  recording -> STT, `modelcatalog` and the heavy cap by TASK-060.
+  the Windows recorder by TASK-017; recording -> STT, `modelcatalog` and the heavy cap by TASK-060.
 - Settings UI for mail and Hub, bindings of the drafts (TASK-045) and of the Hub key (TASK-039).
 
 ## Consequences
