@@ -212,6 +212,9 @@ func decodeEvent(line []byte) (event, error) {
 	}
 	switch e.Type {
 	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped:
+		for _, s := range []*string{&e.Mode, &e.Build, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason} {
+			*s = shortText(*s) // the texts reach logs and the diagnostics screen
+		}
 		return e, nil
 	}
 	return event{}, fmt.Errorf("%w: unknown event %q", ErrProtocol, shortText(e.Type))

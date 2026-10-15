@@ -99,6 +99,13 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   - Each process loopback activation keeps a handler, its parameters and an event alive for the process lifetime: bound
     activation retries per recording or reuse one handler and event per stream.
   - Keep recordings under `%LOCALAPPDATA%` (user-only ACL) or set an explicit DACL; Go mode bits (0700/0600) set no ACL on Windows.
+  - Done (phase A, `internal/adapters/audiocapture`): chunks go through `filestore.Create` (exclusive) + `Rename`; the
+    final track is one 16 kHz mono 16-bit WAV (windowed-sinc resampling, downmix), 12 h fit the 4 GiB WAV limit.
+  - Protocol: one JSON request line on stdin (`v`, recording, chunks, target, chunk seconds, lead silence, floor mode),
+    stdin EOF = stop; JSON events on stdout (started, attempt, switch, chunk, stats every 5 s = heartbeat, failed, stopped).
+  - Restarts: a crashed child or one silent for 30 s is restarted after 1/2/4 s, at most 3 times, with the missed time
+    as lead silence and in the mode it ended in; a reported failure is not restarted. `Wait` then returns `ErrCaptureFailed`.
+  - Default target until TASK-059: EXCLUDE of our own process tree; the WASAPI source (phase B) falls back to system.
 - **TASK-058 (diagnostics):** log at start (no audio content): Windows build, chosen mode, target exe and PID, output device
   names, stream format, every attempt with its HRESULT, each switch with its reason. Tone self-test: our own tone is not in the
   chosen app's tree, so test INCLUDE of our own PID and classic loopback; it proves the build works, not that the chosen app is
