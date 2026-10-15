@@ -27,7 +27,7 @@ func newServer(t *testing.T, probe connect.ReadinessProbe, log *slog.Logger) *ht
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	h, err := connect.NewRouter(connect.Deps{Log: log, Readiness: probe})
+	h, err := connect.NewRouter(connect.Deps{Log: log, Readiness: probe, Auth: acceptAll{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +54,17 @@ func get(t *testing.T, url string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-func postJSON(t *testing.T, url, body string) int {
+// postJSON posts body; a non-empty authorization is sent as the Authorization header.
+func postJSON(t *testing.T, url, body, authorization string) int {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -70,11 +74,14 @@ func postJSON(t *testing.T, url, body string) int {
 }
 
 func TestNewRouterRequiresDeps(t *testing.T) {
-	if _, err := connect.NewRouter(connect.Deps{Readiness: fakeProbe{}}); err == nil {
+	if _, err := connect.NewRouter(connect.Deps{Readiness: fakeProbe{}, Auth: acceptAll{}}); err == nil {
 		t.Error("no error without a logger")
 	}
-	if _, err := connect.NewRouter(connect.Deps{Log: slog.New(slog.DiscardHandler)}); err == nil {
+	if _, err := connect.NewRouter(connect.Deps{Log: slog.New(slog.DiscardHandler), Auth: acceptAll{}}); err == nil {
 		t.Error("no error without a readiness probe")
+	}
+	if _, err := connect.NewRouter(connect.Deps{Log: slog.New(slog.DiscardHandler), Readiness: fakeProbe{}}); err == nil {
+		t.Error("no error without an authenticator")
 	}
 }
 
@@ -112,19 +119,19 @@ func TestConnectRoutes(t *testing.T) {
 
 	t.Run("public RPCs answer unimplemented", func(t *testing.T) {
 		gw := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
-		_, err := gw.Complete(t.Context(), connectrpc.NewRequest(&hubv1.CompleteRequest{}))
+		_, err := gw.Complete(t.Context(), withKey(connectrpc.NewRequest(&hubv1.CompleteRequest{}), anyKey))
 		if connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
 			t.Fatalf("Complete error = %v, want unimplemented", err)
 		}
 
 		q := hubv1connect.NewQuotaServiceClient(srv.Client(), srv.URL)
-		_, err = q.GetRemaining(t.Context(), connectrpc.NewRequest(&hubv1.GetRemainingRequest{}))
+		_, err = q.GetRemaining(t.Context(), withKey(connectrpc.NewRequest(&hubv1.GetRemainingRequest{}), anyKey))
 		if connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
 			t.Fatalf("GetRemaining error = %v, want unimplemented", err)
 		}
 
 		// The handler, not the router, answered: Connect maps unimplemented to HTTP 501, a missing route is 404.
-		if code := postJSON(t, srv.URL+hubv1connect.QuotaServiceGetRemainingProcedure, "{}"); code != http.StatusNotImplemented {
+		if code := postJSON(t, srv.URL+hubv1connect.QuotaServiceGetRemainingProcedure, "{}", "Bearer "+anyKey); code != http.StatusNotImplemented {
 			t.Fatalf("GetRemaining HTTP status = %d, want 501", code)
 		}
 	})
@@ -135,8 +142,11 @@ func TestConnectRoutes(t *testing.T) {
 			hubv1connect.QuotaServiceSettleProcedure,
 			hubv1connect.QuotaServiceReleaseProcedure,
 		} {
-			if code := postJSON(t, srv.URL+p, "{}"); code != http.StatusNotFound {
-				t.Errorf("%s: HTTP status = %d, want 404", p, code)
+			// Not routed with or without a key: the 404 comes before authentication.
+			for _, authorization := range []string{"", "Bearer " + anyKey} {
+				if code := postJSON(t, srv.URL+p, "{}", authorization); code != http.StatusNotFound {
+					t.Errorf("%s (authorization %t): HTTP status = %d, want 404", p, authorization != "", code)
+				}
 			}
 		}
 	})
@@ -145,7 +155,7 @@ func TestConnectRoutes(t *testing.T) {
 		gw := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
 		complete := func(dataBytes int) error {
 			spec := &hubv1.CompletionSpec{Instructions: "x", UntrustedData: strings.Repeat("a", dataBytes)}
-			_, err := gw.Complete(t.Context(), connectrpc.NewRequest(&hubv1.CompleteRequest{Spec: spec}))
+			_, err := gw.Complete(t.Context(), withKey(connectrpc.NewRequest(&hubv1.CompleteRequest{Spec: spec}), anyKey))
 			return err
 		}
 

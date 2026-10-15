@@ -192,3 +192,101 @@ func TestLoadFlags(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadCommands(t *testing.T) {
+	// The key commands do not listen: a bad listen address or shutdown timeout in the environment does not stop them.
+	env := withDB(map[string]string{config.EnvListenAddr: "localhost", config.EnvShutdownTimeout: "1h"})
+	getenv := func(k string) string { return env[k] }
+
+	tests := []struct {
+		name    string
+		args    []string
+		want    config.Command
+		label   string
+		id      string
+		wantErr string
+	}{
+		{name: "create", args: []string{"keys", "create", "-label", "tester-07"}, want: config.CommandKeysCreate, label: "tester-07"},
+		{name: "create after global flags", args: []string{"--log-level", "debug", "keys", "create", "--label=t1"}, want: config.CommandKeysCreate, label: "t1"},
+		{name: "revoke", args: []string{"keys", "revoke", "-id", "0123456789abcdef"}, want: config.CommandKeysRevoke, id: "0123456789abcdef"},
+		{name: "list", args: []string{"keys", "list"}, want: config.CommandKeysList},
+		{name: "create without label", args: []string{"keys", "create"}, wantErr: "-label is required"},
+		{name: "revoke without id", args: []string{"keys", "revoke"}, wantErr: "-id is required"},
+		{name: "keys without subcommand", args: []string{"keys"}, wantErr: "want a subcommand"},
+		{name: "unknown subcommand", args: []string{"keys", "delete"}, wantErr: "unknown subcommand"},
+		{name: "unknown command", args: []string{"serve-all"}, wantErr: "unknown command"},
+		{name: "extra argument", args: []string{"keys", "list", "now"}, wantErr: "unexpected argument"},
+		{name: "flag of another subcommand", args: []string{"keys", "list", "-label", "x"}, wantErr: "flag provided but not defined"},
+		{name: "global flag after the command", args: []string{"keys", "list", "--log-level", "debug"}, wantErr: "flag provided but not defined"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := config.Load(tt.args, io.Discard, getenv)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Command != tt.want || got.KeyLabel != tt.label || got.KeyID != tt.id {
+				t.Fatalf("got %+v (label %q, id %q)", got, got.KeyLabel, got.KeyID)
+			}
+		})
+	}
+
+	t.Run("serve still checks the listen address", func(t *testing.T) {
+		if _, err := config.Load(nil, io.Discard, getenv); err == nil || !strings.Contains(err.Error(), "listen address") {
+			t.Fatalf("error = %v, want a listen address error", err)
+		}
+	})
+
+	t.Run("key commands need the database URL", func(t *testing.T) {
+		_, err := config.Load([]string{"keys", "list"}, io.Discard, func(string) string { return "" })
+		if err == nil || !strings.Contains(err.Error(), config.EnvDatabaseURL+" is required") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("unknown command value", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.DatabaseURL = devURL
+		cfg.Command = config.Command(99)
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "unknown command") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestCommandHelp(t *testing.T) {
+	getenv := func(k string) string { return withDB(nil)[k] }
+	for _, args := range [][]string{{"keys", "--help"}, {"keys", "create", "-h"}, {"keys", "revoke", "--help"}} {
+		var out bytes.Buffer
+		_, err := config.Load(args, &out, getenv)
+		if !errors.Is(err, flag.ErrHelp) {
+			t.Fatalf("%v: error = %v, want flag.ErrHelp", args, err)
+		}
+		if !strings.Contains(out.String(), "Usage of hub keys") {
+			t.Errorf("%v: usage %q", args, out.String())
+		}
+	}
+
+	var out bytes.Buffer
+	_, _ = config.Load([]string{"keys", "create", "-h"}, &out, getenv)
+	if !strings.Contains(out.String(), "-label") {
+		t.Errorf("create usage does not describe -label: %q", out.String())
+	}
+}
+
+func TestCommandString(t *testing.T) {
+	for c, want := range map[config.Command]string{
+		config.CommandServe: "serve", config.CommandKeysCreate: "keys create", config.CommandKeysRevoke: "keys revoke",
+		config.CommandKeysList: "keys list", config.Command(99): "Command(99)",
+	} {
+		if got := c.String(); got != want {
+			t.Errorf("String(%d) = %q, want %q", int(c), got, want)
+		}
+	}
+}

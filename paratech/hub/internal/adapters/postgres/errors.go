@@ -21,6 +21,12 @@ var (
 
 	// ErrClosed means the DB was closed.
 	ErrClosed = errors.New("database is closed")
+
+	// ErrQuery means a query or statement failed.
+	ErrQuery = errors.New("database query failed")
+
+	// ErrCorrupt means a stored row does not form a valid domain object.
+	ErrCorrupt = errors.New("stored row is invalid")
 )
 
 // Error is a translated database error. errors.Is matches Kind; the driver error is deliberately not in the chain so

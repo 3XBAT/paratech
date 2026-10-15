@@ -68,4 +68,14 @@ git diff --stat desktop/internal/adapters/sqlite/sqlcgen   # commit the result
 
 The first run downloads and compiles sqlc and takes a few minutes; later runs use the Go build cache.
 
+## Hub API keys
+Every Hub RPC needs a per-tester key in `Authorization: Bearer <key>`; the Hub stores only a SHA-256 of the secret. Manage keys with the hub
+binary (needs `HUB_DATABASE_URL`, applies pending migrations first):
+
+```bash
+go run ./hub/cmd/hub keys create -label tester-07     # prints the key ONCE to stdout; it cannot be shown again
+go run ./hub/cmd/hub keys list                        # ids, labels, status; never secrets
+go run ./hub/cmd/hub keys revoke -id <id>             # rejected from the next request on
+```
+
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.

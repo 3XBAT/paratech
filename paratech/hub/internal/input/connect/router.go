@@ -30,21 +30,19 @@ type ReadinessProbe interface {
 	Ping(ctx context.Context) error
 }
 
-// Deps are what the router serves. A nil service is served by the generated Unimplemented handler, which answers
-// every RPC with CodeUnimplemented, until the gateway and quota tasks provide real ones.
-//
-// TODO(TASK-032): every RPC must pass the API-key interceptor before real handlers are mounted.
+// Deps are what the router serves; Auth is required (AC-25), a nil service answers CodeUnimplemented.
 type Deps struct {
 	Log       *slog.Logger
 	Readiness ReadinessProbe
+	Auth      Authenticator
 	Gateway   hubv1connect.GatewayServiceHandler
 	Quota     hubv1connect.QuotaServiceHandler
 }
 
 // NewRouter builds the HTTP handler of the public listener.
 func NewRouter(d Deps) (http.Handler, error) {
-	if d.Log == nil || d.Readiness == nil {
-		return nil, errors.New("connect: logger and readiness probe are required")
+	if d.Log == nil || d.Readiness == nil || d.Auth == nil {
+		return nil, errors.New("connect: logger, readiness probe and authenticator are required")
 	}
 	if d.Gateway == nil {
 		d.Gateway = hubv1connect.UnimplementedGatewayServiceHandler{}
@@ -57,11 +55,17 @@ func NewRouter(d Deps) (http.Handler, error) {
 	r.Get(PathHealthz, healthz)
 	r.Get(PathReadyz, readyz(d.Log, d.Readiness))
 
-	opts := []connectrpc.HandlerOption{connectrpc.WithReadMaxBytes(maxRequestBytes)}
+	opts := []connectrpc.HandlerOption{
+		connectrpc.WithReadMaxBytes(maxRequestBytes),
+		connectrpc.WithInterceptors(requireIdentity{log: d.Log}),
+	}
+	authenticated := func(next http.Handler) http.Handler {
+		return requireAPIKey{auth: d.Auth, log: d.Log, errs: connectrpc.NewErrorWriter(opts...), next: next}
+	}
 	path, h := hubv1connect.NewGatewayServiceHandler(d.Gateway, opts...)
-	r.Mount(path, h)
+	r.Mount(path, authenticated(h))
 	path, h = hubv1connect.NewQuotaServiceHandler(d.Quota, opts...)
-	r.Mount(path, publicQuota(h))
+	r.Mount(path, publicQuota(authenticated(h))) // internal RPCs answer 404 before authentication
 
 	return r, nil
 }
