@@ -83,6 +83,8 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   browser extension (not in MVP). A video in another app or another browser is not recorded.
 - Ducking during a call may lower the lecture. Bluetooth HFP on Windows 10 matters only for the classic fallback.
   DRM content is not delivered.
+- If the chosen app is closed and its recorder child ends while waiting for it, a gap longer than the lead-silence cap
+  (~154 s) shortens the track timeline (logged as Warn).
 - User advice text: "To stop hearing the lecture, turn down the Windows or headphone volume. Do not mute the tab, the app or
   its slider in the volume mixer."
 
