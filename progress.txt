@@ -1082,3 +1082,37 @@
 - Удалённое повторной обработкой задание оставляет черновик и файл экспорта
 - Low: Get грузит всю историю (до ~6.4 МБ в худшем случае), комментарий «stays cheap» преувеличивает; позже запрос только последней версии
 - Nit: endedWithoutResult можно перенести в job.Status; минимум портов в TestDraftsReachNoSideEffect поднять до 11; badControl продублирован в values/draft.go и homeworkdraft/revision.go; правки студента не отсекают bidi/теги (только его собственный текст)
+
+---
+
+## [TASK-033] Квоты Hub: reserve/settle/release с идемпотентностью и журналом
+**Дата:** 2026-10-15
+**Статус:** done
+
+### Что сделано
+- domain/quota/account: один агрегат (счёт API-ключа + резервы и записи ключей идемпотентности как сущности) — ADR-0005(h) решён без исключения из ARCH-23; таблица переходов RESERVED -> SETTLED | RELEASED(explicit/failed/expired), RELEASED(expired) -> SETTLED один раз; каждое движение даёт запись журнала; shared.ReservationID (crypto/rand через порт Random)
+- Правила Reserve по quota.proto: отпечаток (operation, alias, amount), конфликт в любом состоянии, повтор RESERVED/SETTLED-complete, новая попытка после partial/RELEASED/истечения, QUOTA_EXCEEDED ничего не пишет; Settle = min(actual, max(hold, доступное)), повтор с теми же (actual, partial) — тот же результат, иначе конфликт; Settle после явного Release -> ErrReleased, после истечения — списывает; Release на SETTLED ничего не меняет
+- cases/quota (Reserve, Settle, Release, GetRemaining); adapters/postgres/quota.go: одна транзакция READ COMMITTED на вызов, INSERT ON CONFLICT + SELECT FOR UPDATE строки счёта (сериализует все команды тестера), частичная загрузка, все запросы по api_key_id, таймаут 5s; миграция hub/pkg/migrations/0003_quota.sql (quota_accounts, quota_reservations, quota_idempotency_keys, quota_ledger; CHECK, UNIQUE (api_key_id, key, attempt), составные FK (reservation_id, api_key_id))
+- config: HUB_QUOTA_UNIT (только tokens), HUB_QUOTA_LIMIT (1000000, общий лимит на тестера, не обновляется), HUB_QUOTA_RESERVATION_TTL (10m, 1m..1h), HUB_IDEMPOTENCY_RETENTION (24h, 1h..24h) + флаги; ADR-0008; paratech/README.md раздел «Hub quota»
+- input/connect: публичный GetRemaining (владелец только из аутентифицированного ключа); Reserve/Settle/Release внутренние — роутер 404, обработчик Unimplemented
+- Изменённые существующие тесты: config_test TestLoad (новые значения по умолчанию в want), postgres_test (закреплены версии миграций 1-3), tests/keys_test (GetRemaining с ключом теперь успешен, раньше unimplemented)
+- Ревью: request changes (medium: устаревший по retention ключ с ещё RESERVED последней попыткой открывал второй резерв и принимал другой отпечаток) -> исправлено в 2884849 (ключ живой, пока последняя попытка RESERVED; регрессионный тест падал до исправления), повторное ревью approve. Security: найдено 2 (low), опровергнуто 2, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0)
+- [x] Шаг 1: HUB_TEST_DATABASE_URL (docker compose, проект task033) go test -race -count=1 ./hub/... — DB-тесты реально выполнены (117 PASS, 0 SKIP), схем не осталось, compose down -v
+- [x] Шаг 2: TestQuotaConcurrentReserveSameKeyAgainstPostgres/2_callers и /16_callers (один reservation_id, held = amount, одна запись reserve в журнале)
+- [x] Шаг 3: TestQuotaReserveOverRemainingAgainstPostgres (QUOTA_EXCEEDED, снимок не изменился, строк не добавлено)
+- [x] Шаг 4: TestQuotaSettleAndReleaseAgainstPostgres; также TestQuotaConcurrentReserveDifferentKeysAgainstPostgres, TestQuotaConcurrentSettleAndReleaseAgainstPostgres, TestQuotaKeyReplay/Expiry/TenantIsolation/KeyLivePastRetentionAgainstPostgres
+- [x] Смоук: GetRemaining с ключом 200 (remaining=limit=1000000 TOKENS), без ключа 401, Reserve/Settle/Release 404
+
+### Решения (подтвердить)
+- Лимит один на всех тестеров из конфига, без периода (period_ends_at не задан); пер-тестерные лимиты/пополнение — позже
+- Ключ идемпотентности после retention — новый ключ, кроме случая, когда последняя попытка ещё RESERVED (живёт не дольше retention + TTL); строки не удаляются до появления sweeper
+- Обработчик GetRemaining сделан здесь (пересечение с TASK-036, она остаётся pending: проверить её шаг «остаток уменьшается после settle и восстанавливается после release» на HTTP-уровне и закрыть)
+
+### Заметки (follow-up)
+- TASK-035 (gateway): хранить хеш всего CompletionSpec в записи ключа и проверять до Reserve/выдачи сохранённого результата (отпечаток ledger без текста); резервировать верхнюю границу (input + max_output_tokens) и передавать её провайдеру; таймаут запроса + settle меньше HUB_QUOTA_RESERVATION_TTL (дедлайн из TTL); settle на отвязанном контексте, partial для оборванных; привязать retention записи ключа шлюза к старту ledger-ключа; маппинг ошибок Reserve/Settle/Release в Connect по ADR-0005(c); cases/gateway объявляет свой порт (ARCH-20)
+- docs/architecture.md §12 всё ещё называет reservation агрегатом — отдельная правка документации (ADR-0008 говорит читать как сущность account)
+- Low: при >100 просроченных резервах у одного тестера остаток занижен до следующих команд (в сторону отказа); нужен sweeper просроченных резервов и устаревших ключей; нет защиты БД append-only для quota_ledger
+- Nit: в tests/quota_test.go константа retention продублирована с newQuotaEnv
