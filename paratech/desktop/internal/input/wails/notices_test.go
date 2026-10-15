@@ -24,6 +24,9 @@ func TestNoticeTexts(t *testing.T) {
 	for _, s := range notice.Statuses() {
 		title, body := noticeText("unknown_type", s)
 		fallback[s] = [2]string{title, body}
+		if title == "" || strings.ContainsAny(title+body, "$`\"'@<>&") {
+			t.Errorf("fallback %s: %q %q is empty or has characters XML or PowerShell would interpret", s, title, body)
+		}
 	}
 	if fallback[job.StatusCompleted] == fallback[job.StatusFailed] {
 		t.Fatal("the fallback does not tell success from failure")
@@ -35,6 +38,9 @@ func TestNoticeTexts(t *testing.T) {
 			title, body := noticeText(typ, s)
 			if title == "" || body == "" {
 				t.Errorf("%s %s: empty text", typ, s)
+			}
+			if strings.ContainsAny(title+body, "$`\"'@<>&") {
+				t.Errorf("%s %s: %q %q has characters that XML or the PowerShell fallback would interpret", typ, s, title, body)
 			}
 			if !strings.ContainsFunc(title, func(r rune) bool { return unicode.Is(unicode.Cyrillic, r) }) {
 				t.Errorf("%s %s: title %q is not Russian", typ, s, title)

@@ -20,7 +20,9 @@ var (
 )
 
 // toast is one notification as the shell shows it: fixed texts only, never user content such as lesson titles, error
-// messages or model output, because toasts may show on a locked screen and model output is untrusted.
+// messages or model output, because toasts may show on a locked screen and model output is untrusted. Also, the
+// PowerShell fallback of the toast library pastes the toast XML unescaped into a script (a "@ here-string where $
+// expands), so the texts must stay fixed and free of PowerShell syntax; TestNoticeTexts checks it.
 type toast struct {
 	id    string
 	title string
