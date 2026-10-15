@@ -23,4 +23,8 @@ var (
 	// ErrCaptureUnavailable means system audio cannot be captured at all in this build, so a start fails at once and
 	// a retry does not help. Recorder adapters wrap it, so a use case can tell it apart without importing them.
 	ErrCaptureUnavailable = errors.New("system audio capture is not available")
+
+	// ErrSourceNotRunning means the app chosen as the recording source does not run, so its audio cannot be captured.
+	// Recorder adapters wrap it.
+	ErrSourceNotRunning = errors.New("the chosen app is not running")
 )

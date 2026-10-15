@@ -351,6 +351,7 @@ func TestProblemOf(t *testing.T) {
 		{"no error", nil, ProblemNone},
 		{"no capture in this build", fmt.Errorf("start: %w", recording.ErrCaptureUnavailable), ProblemUnavailable},
 		{"another recording", fmt.Errorf("start: %w: r1", limits.ErrRecordingInProgress), ProblemInProgress},
+		{"the chosen app is closed", fmt.Errorf("start: %w: zoom.exe", recording.ErrSourceNotRunning), ProblemSourceGone},
 		{"anything else", errors.New("disk full"), ProblemFailed},
 	}
 	for _, tt := range tests {

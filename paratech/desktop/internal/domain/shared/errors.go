@@ -30,6 +30,9 @@ var (
 	// ErrInvalidID is returned by identifier Validate methods.
 	ErrInvalidID = errors.New("invalid identifier")
 
+	// ErrInvalidAppName is returned by AppName.Validate and ParseAppName.
+	ErrInvalidAppName = errors.New("invalid app name")
+
 	// ErrInvalidArtifactRef is returned for artifact references that are malformed or try to leave
 	// the artifact root (the reference convention is defined by TASK-006).
 	ErrInvalidArtifactRef = errors.New("invalid artifact reference")
