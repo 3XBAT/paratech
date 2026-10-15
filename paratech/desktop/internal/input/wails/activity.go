@@ -17,7 +17,6 @@ import (
 var (
 	ErrActivityUnavailable = errors.New("recordings and jobs are unavailable")
 	ErrInvalidID           = errors.New("invalid id")
-	ErrActionUnavailable   = errors.New("this action is not available yet")
 	ErrItemNotFound        = errors.New("not found")
 	ErrRecordingNotRunning = errors.New("the recording is not running in this session")
 	ErrCannotRunNow        = errors.New("the job cannot be run now")
@@ -70,8 +69,7 @@ type JobItem struct {
 	RunNowOffered   bool   `json:"runNowOffered"`
 }
 
-// ActivityService is bound to the UI like SettingsService ("<package path>.ActivityService.<Method>"). The stopper
-// and the forcer may be nil while the app does not build them; their actions then fail with ErrActionUnavailable.
+// ActivityService is bound to the UI like SettingsService ("<package path>.ActivityService.<Method>").
 type ActivityService struct {
 	uc      ActivityUseCase
 	stopper RecordingStopper
@@ -79,7 +77,8 @@ type ActivityService struct {
 	log     *slog.Logger
 }
 
-// NewActivityService returns the binding of the recordings and jobs page.
+// NewActivityService returns the binding of the recordings and jobs page. All arguments are required; openBindings
+// checks the core before calling it.
 func NewActivityService(uc ActivityUseCase, stopper RecordingStopper, forcer JobForcer, log *slog.Logger) *ActivityService {
 	return &ActivityService{uc: uc, stopper: stopper, forcer: forcer, log: log}
 }
@@ -128,9 +127,6 @@ func (s *ActivityService) StopRecording(ctx context.Context, id string) error {
 	if rid.Validate() != nil {
 		return ErrInvalidID
 	}
-	if s.stopper == nil {
-		return ErrActionUnavailable
-	}
 	_, err := s.stopper.Stop(ctx, rid)
 	if errors.Is(err, recordingsession.ErrNotRunning) {
 		return ErrRecordingNotRunning
@@ -143,9 +139,6 @@ func (s *ActivityService) RunJobNow(ctx context.Context, id string) error {
 	jid := shared.JobID(id)
 	if jid.Validate() != nil {
 		return ErrInvalidID
-	}
-	if s.forcer == nil {
-		return ErrActionUnavailable
 	}
 	err := s.forcer.ForceRun(ctx, jid)
 	if errors.Is(err, jobrunner.ErrCannotRunNow) {

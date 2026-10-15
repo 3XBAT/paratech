@@ -122,16 +122,28 @@ func TestOpenBindings(t *testing.T) {
 		t.Errorf("failing opener: err = %v", err)
 	}
 
-	opts.OpenCore = func(context.Context) (Core, error) { return Core{}, nil }
-	s, _ = New(opts)
-	if _, err := s.openBindings(context.Background()); err == nil {
-		t.Error("a core without the settings use case must fail")
+	incomplete := []struct {
+		name string
+		edit func(*Core)
+	}{
+		{name: "settings use case", edit: func(c *Core) { c.Settings = nil }},
+		{name: "activity use case", edit: func(c *Core) { c.Activity = nil }},
+		{name: "recording stopper", edit: func(c *Core) { c.Stopper = nil }},
+		{name: "job forcer", edit: func(c *Core) { c.Forcer = nil }},
 	}
-
-	opts.OpenCore = func(context.Context) (Core, error) { return Core{Settings: &fakeSettings{}}, nil }
-	s, _ = New(opts)
-	if _, err := s.openBindings(context.Background()); err == nil {
-		t.Error("a core without the activity use case must fail")
+	for _, tt := range incomplete {
+		t.Run("missing "+tt.name, func(t *testing.T) {
+			opts := validOptions()
+			opts.OpenCore = func(context.Context) (Core, error) {
+				c := Core{Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{}}
+				tt.edit(&c)
+				return c, nil
+			}
+			s, _ := New(opts)
+			if _, err := s.openBindings(context.Background()); err == nil {
+				t.Errorf("a core without the %s must fail", tt.name)
+			}
+		})
 	}
 }
 

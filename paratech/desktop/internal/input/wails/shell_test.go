@@ -18,7 +18,7 @@ func validOptions() Options {
 	return Options{
 		Name: "LA", InstanceID: "test.la", Log: discard(),
 		OpenCore: func(context.Context) (Core, error) {
-			return Core{Settings: &fakeSettings{}, Activity: &fakeActivity{}}, nil
+			return Core{Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{}}, nil
 		},
 	}
 }
