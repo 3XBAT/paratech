@@ -798,34 +798,59 @@
 
 ---
 
-## [TASK-014] Watchdog и восстановление прерванных записей после перезапуска
+## [TASK-044] Отправка домашки: SMTP-адаптер, подтверждение, запись доставки, сверка при неизвестном исходе
 **Дата:** 2026-10-15
 **Статус:** done
 
 ### Что сделано
-- domain/recording: MarkInterrupted (STARTING->FAILED, RECORDING->RECOVERY_REQUIRED с stoppedAt = последний heartbeat, STOPPING/FINALIZING/RECOVERY_REQUIRED без изменений), AwaitsAssembly, CompleteRecovery, FailRecovery, DeferRecovery (заметка «assembly pending: ...» внутри problem, CompleteRecovery её снимает); sentinel recording.ErrNoAudio (нет читаемых чанков, без повторов)
-- cases/recordingsession: Config.HeartbeatInterval (по умолчанию 15 с); heartbeat пишет та же горутина сессии (тик от единственного таймера watch на Sleeper); Service.Recover(ctx) в два прохода: пометка всех незавершённых записей (Start отклоняется ErrRecovering), затем сборка только этих ID (Start разрешён); Delete отклоняет записи, ожидающие сборки (до удаления файлов и внутри Tx.Do); контракт Recorder.Finalize: битый чанк пропускается и остаётся на диске, ни одного читаемого -> ErrNoAudio -> FAILED, прочие ошибки -> запись остаётся (RECOVERY_REQUIRED/STOPPING/FINALIZING) и повторяется при следующем старте
-- testenv: FakeRecorder пишет чанки с заголовком (FCH1 + длина), FeedTruncated, EncodeChunk/ChunkPayload
-- Изменённые существующие тесты: tests/recording_sqlite_test.go (чтение чанков через ChunkPayload, newRecordingEnvWith); service_test.go newEnv (heartbeat 24 ч в тестах не про heartbeat, +2 кейса валидации); fakes_test.go (listErr); TestRecoverAndStartExcludeEachOther переписан под двухпроходный Recover
-- Ревью: approve (2 medium: устаревший текст problem после отложенного восстановления; Start заблокирован на всё восстановление -> исправлено), повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0 (две проверки)
+- domain/delivery/delivery: полный агрегат. Переходы: PENDING -> SENDING|FAILED, SENDING -> SENT|PENDING|FAILED|UNKNOWN, UNKNOWN -> SENT|PENDING. Методы MarkSent и SendAgain (UNKNOWN), Interrupted (SENDING -> UNKNOWN), RecordFinalResult (последняя попытка: retry -> FAILED «attempts exhausted»). Предикаты Sendable, InFlight, OutcomeUnknown. Поле round (раунд отправки) растёт только при SendAgain
+- cases/senddelivery: Service. SendHomework принимает только proposal.EmailCommand (граница TASK-040, AC-14). Handle задачи send_email, Reconcile для jobrunner (RecoveryReconcile), Recover (SENDING -> UNKNOWN), Resume (поставить задачи PENDING), ReconcileDelivery, MarkSent, SendAgain. *Service реализует homeworkflow.HomeworkMailer без моста
+- adapters/smtp: go-mail v0.8.1 (назван в задаче и PRD 4.3). Только TLS (STARTTLS обязателен или неявный TLS), TLS не ниже 1.2, без skip-verify; RootCAs нужен только для тестов. Ошибки классифицируются по фазе: сбой при записи тела письма или нет ответа на финальную точку -> UNKNOWN; до DATA -> transient/rejected. Тексты ошибок фиксированные, показывают только код ответа. Вложение читается один раз, Digest сверяется на отправляемых байтах. Reconcile всегда возвращает ErrOutcomeUnknown
+- adapters/sqlite: DeliveryRepository (CAS версии, ErrDuplicate по ключу идемпотентности). Миграция 0003_delivery_attachment.sql: attachment_sha256, attachment_size, send_round; зеркало в docs/contracts/schema.sql
+- testenv/smtp.go: fake SMTP-сервер на 127.0.0.1 (самоподписанный сертификат, STARTTLS/TLS, AUTH, сценарии «зависнуть/оборвать» после DATA, обрыв на RCPT/DATA/теле); docs/refs/go-mail.md
+- Вне перечня файлов: proposal.EmailCommand.ConfirmedAt() (иначе confirmed_at доставки пришлось бы выдумывать)
+- Изменённые существующие тесты:
+  - sqlite migrate_test: версия схемы 2 -> 3
+  - proposal_test: проверка ConfirmedAt
+  - тесты delivery_test перенесены в status_test.go
+  - TestReconcileInterruptedJob, случай «не принято»: старая задача теперь FAILED (superseded), а не QUEUED; её заменяет задача нового раунда
+- Ревью: changes requested, 2 medium:
+  - ключ задачи по attempts плодил задачи -> ключ по раунду;
+  - PENDING навсегда после исчерпания попыток -> FAILED.
+  Оба исправлены; повторное ревью approve; low-medium (контекст notHandedOver) тоже исправлен
+- Security: два прохода (весь diff и коммиты исправлений). Найдено 0, опровергнуто 0, исправлено 0
 
 ### Тесты
-- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0), после rebase на origin/master 567e3f5
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на финальном head после rebase на 567e3f5
 - [x] Шаг 1: go test -race -count=1 ./desktop/internal/...
-- [x] Шаг 2: TestRecoveryAfterACrashDuringTheCapture (SQLite + filestore, 3 чанка, RECOVERY_REQUIRED во время сборки, затем COMPLETED), TestRecoverAfterACrashDuringTheCapture
-- [x] Шаг 3: TestRecoveryDropsABrokenLastChunk, TestRecoverEveryStatus
+- [x] Шаг 2: TestSendingWithoutConfirmationIsImpossible, TestSendHomeworkNeedsAConfirmedCommand, TestNewRequiresConfirmation
+- [x] Шаг 3: TestTimeoutAfterAcceptanceIsUnknownAndNotResent, TestCrashDuringSendIsReconciledNotResent (tests/), TestTimeoutAfterTheMessageIsUnknown, TestConnectionDrops (адаптер)
+- [x] Шаг 4: TestSMTPPasswordNeverReachesTheDatabase (сырые файлы БД в UTF-8/UTF-16 и все строки всех таблиц, также после неудачного входа)
 
 ### Решения (подтвердить)
-- Порога «старости» heartbeat нет: приложение одноэкземплярное, поэтому любая незавершённая запись, не принадлежащая сессии этого процесса, считается прерванной (Recover вызывать один раз при старте до первого Start)
-- STOPPING/FINALIZING, которые не удалось собрать, остаются в своём статусе с текстом проблемы (в таблице PRD нет перехода в RECOVERY_REQUIRED); удалить их нельзя до успешного восстановления
-- Восстановленная RECORDING завершается COMPLETED с problem «the app stopped while the recording was in progress»
-- Каждое восстановление сохраняет пометку даже без смены статуса (повышает версию, проверка владения)
+- Учётные данные:
+  - одна запись Credential Manager «smtp-password», в ней только пароль;
+  - логин, хост, порт, отправитель и режим TLS — не секретная конфигурация;
+  - пароль читает адаптер через SecretReader.Get; ядро его обратно не получает.
+- Таблица статусов (ADR-0004(c) просит подтверждения в PRD). Обычный SMTP письмо не находит, поэтому UNKNOWN всегда разрешается вручную: MarkSent или SendAgain (пользователь принимает риск дубля). Нужна ли сверка через папку «Отправленные» по IMAP — решение владельца
+- Одна незавершённая доставка на задание: при PENDING/SENDING/UNKNOWN новая доставка отклоняется (ErrUnresolvedDelivery), чтобы изменённый файл не обошёл сверку
+- 4xx после финальной точки считается «точно не принято» (повтор), по RFC 5321
+- Тема и текст письма фиксированные («Homework» / «Homework attached.»), текст модели в письмо не попадает
 
 ### Заметки (follow-up)
-- В internal/app Recover не подключён: вызвать при старте после single-instance guard, в фоне (чтобы Start работал во время сборки)
-- TASK-017 (реальный рекордер): обнаруживать обрезанный WAV-чанк (заголовок vs размер файла) и пропускать; Finalize должен быть безопасен параллельно со Start/Stop/Finalize другой записи (Low: дописать в контракт порта Recorder)
-- Low: DeferRecovery при причине длиной MaxProblemBytes-20..-1 обрезает маркер посередине, CompleteRecovery оставит обрывок (recording.go ~503-520)
-- Low: окно между ListByStatus и заполнением pending в Recover: Delete уже RECOVERY_REQUIRED записи может пройти; держать s.mu или отклонять Delete при marking
-- Low: ARCH-22 пограничный — выбор Fail/Defer по ошибке сборки в use case (как в assemble TASK-013)
-- Тексты problem содержат текст ошибок (возможны пути): не отправлять в Hub
-- Ручные проверки владельцем на Windows (с TASK-017): убить процесс во время записи -> при старте COMPLETED, трек играет, потеряно не больше последнего чанка; убить во время записи чанка -> битый чанк пропущен; убить во время финализации -> трек дособран; заблокировать файлы чанков -> RECOVERY_REQUIRED с текстом, следующий старт собирает; нагрузка heartbeat 15 с за 3 ч незаметна
+- В app не подключено:
+  - регистрация send_email (RecoveryReconcile, Uncancellable);
+  - порядок старта: jobrunner.Recover -> senddelivery.Recover -> Resume -> Start;
+  - конфиг SMTP;
+  - общий wincred-store для use case и адаптера;
+  - production NewMessageID;
+  - Timeout задачи не меньше 2x SMTP Timeout;
+  - Config.MaxAttempts не больше MaxAttempts backoff раннера (дефолты сверяет тест TestDefaultMaxAttemptsFitsTheRunner).
+- Нет UI настроек почты и действий UNKNOWN; нет действия «точно не отправлено»
+- Low: если на последней попытке БД недоступна, доставка остаётся PENDING без живой задачи. Resume находит ключ и задачу не ставит. Лечится проверкой статуса задачи, когда Enqueue вернул created=false (нужен порт статуса задачи)
+- Low: Handle и reconcilePending сравнивают попытки с s.maxAttempts сервиса, а не с MaxAttempts самой задачи (job.Snapshot их не отдаёт)
+- Low: устаревшая дублирующая задача завершается COMPLETED, хотя доставка UNKNOWN/FAILED; UI не должен показывать статус задачи как статус доставки
+- Low: EmailAdapter получает изменяемый *delivery.Delivery (по ARCH-26 допустимо; строже был бы read-only view)
+- TASK-042 follow-up (отправленное задание при повторной обработке сопоставляется по позиции) не сделан. Отправленный контент не меняется (вложение закреплено digest), но title/due задания могут перезаписаться
+- go-mail шлёт имя машины в EHLO (мелочь для приватности); Service.digest хеширует файл без лимита (лимит есть только в адаптере)
+- ADR-0004(c) можно обновить итоговой таблицей статусов
