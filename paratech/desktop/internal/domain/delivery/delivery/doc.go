@@ -1,11 +1,21 @@
-// Package delivery is the aggregate of one attempt to send an artifact to a recipient by email
-// (PRD sections 10 and 14, AC-14, AC-15, hard rule 7).
+// Package delivery is the aggregate of sending an artifact to a recipient by email (PRD sections 10 and 14, AC-14,
+// AC-15, hard rule 7).
 //
-// TASK-003 skeleton: only the identity, the status enumeration and the outcome errors of the email port
-// exist so that use case ports can name the types. The status machine (including UNKNOWN and
-// reconciliation), recipient, subject, artifact, Message-ID, the idempotency key and the New/Restore
-// factories arrive with TASK-044.
+// A delivery holds the recipient, the subject, the attachment with the content the user confirmed (SHA-256 and size),
+// the Message-ID generated before the first attempt, the idempotency key and the confirmation time; New refuses a
+// delivery without a confirmation (AC-14).
 //
-// The PRD names only the UNKNOWN outcome (sections 10, 14 and 16); the other statuses are derived from the
-// flow of section 10 and need confirmation, see Status.
+// Status machine (transitions.go, ADR-0004(c)):
+//
+//	PENDING -> SENDING | FAILED
+//	SENDING -> SENT | PENDING | FAILED | UNKNOWN
+//	UNKNOWN -> SENT | PENDING
+//
+// SENT and FAILED are terminal. SENDING is saved before the message is handed to the provider; the result of the
+// attempt is classified by OutcomeOf, and anything that does not prove "not accepted" becomes UNKNOWN. A SENDING
+// delivery left by a crash becomes UNKNOWN (Interrupted). UNKNOWN is never sent again by itself: reconciliation or the
+// user resolves it with MarkSent ("mark as sent") or SendAgain ("send again").
+//
+// Each send round has one job (JobKey); only SendAgain starts a new round. On the last attempt of the job a retry
+// outcome ends FAILED (RecordFinalResult), so a delivery never stays PENDING without a job to send it.
 package delivery

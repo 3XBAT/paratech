@@ -25,6 +25,10 @@ type Querier interface {
 	// reprocessed (TASK-042).
 	GetAssignment(ctx context.Context, id string) (Assignment, error)
 	GetAssignmentBySource(ctx context.Context, arg GetAssignmentBySourceParams) (Assignment, error)
+	// Deliveries, the attempts to email an artifact (PRD section 10, AC-15), with the optimistic-concurrency protocol of
+	// ADR-0004(d). The idempotency key and the Message-ID are UNIQUE: a second delivery under the same key is refused.
+	GetDelivery(ctx context.Context, id string) (Delivery, error)
+	GetDeliveryByIdempotencyKey(ctx context.Context, idempotencyKey string) (Delivery, error)
 	// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
@@ -49,6 +53,8 @@ type Querier interface {
 	GetTranscript(ctx context.Context, id string) (Transcript, error)
 	// A never-stored assignment (version 0) is inserted with version 1.
 	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
+	// A never-stored delivery (version 0) is inserted with version 1.
+	InsertDelivery(ctx context.Context, arg InsertDeliveryParams) error
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
 	// A never-stored lesson (version 0) is inserted with version 1.
@@ -70,6 +76,7 @@ type Querier interface {
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
+	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
 	// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names.
@@ -100,6 +107,9 @@ type Querier interface {
 	UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (int64, error)
 	// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
 	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)
+	// Compare-and-swap on the loaded version. What the user confirmed (recipient, subject, attachment, Message-ID, key,
+	// confirmation time) never changes after the insert, so only the progress of the delivery is written.
+	UpdateDelivery(ctx context.Context, arg UpdateDeliveryParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.
