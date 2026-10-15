@@ -5,11 +5,13 @@ package tests
 //   - no time.Now / math/rand in domain and cases (ARCH-15, ARCH-24);
 //   - no import "C" in the desktop module (CLAUDE.md hard rule 1);
 //   - the directory layout of section 2 (ARCH-01) and the rules for pkg/ (ARCH-04);
+//   - throwaway prototypes in spikes/ are imported by nothing outside spikes/ (audio-capture ADR of TASK-015);
 //   - no organization files (docs, tasks, prompts, ...) inside the code directory paratech/.
 //
 // The checks are plain functions over a root directory, so TestCheckersDetectViolations can feed them
 // synthetic violating trees. The same logic lives in hub/tests/arch_test.go (duplication is intended:
-// no shared test module). Keep the two copies in sync; this copy additionally checks "no import C".
+// no shared test module). Keep the two copies in sync; this copy additionally checks "no import C" and the
+// spikes/ rule (the hub has no spikes/ on purpose).
 
 import (
 	"fmt"
@@ -45,6 +47,7 @@ const (
 	layerCmd      layer = "cmd"
 	layerTestenv  layer = "testenv"
 	layerTests    layer = "tests"
+	layerSpikes   layer = "spikes"  // throwaway prototypes (audio-capture ADR of TASK-015), never imported by the product
 	layerUnknown  layer = "unknown" // internal/<something not in section 2>, reported by checkLayout
 )
 
@@ -91,6 +94,8 @@ func classify(rel string) pkgRef {
 		return pkgRef{layerTestenv, ""}
 	case "tests":
 		return pkgRef{layerTests, ""}
+	case "spikes":
+		return pkgRef{layerSpikes, unit(1)}
 	}
 	return pkgRef{layerRoot, ""}
 }
@@ -139,6 +144,11 @@ func importViolation(modPath string, src pkgRef, isTest bool, imp string) (rule,
 		return "", ""
 	case kindOther:
 		return "section-9", "a service must not import a sibling service module"
+	}
+
+	// ARCH-01 (audio-capture ADR of TASK-015): spikes are throwaway; only other spike code may import them.
+	if kind == kindOwn && dst.layer == layerSpikes && src.layer != layerSpikes {
+		return "ARCH-01", fmt.Sprintf("the %s layer must not import spikes/ (throwaway prototypes)", src.layer)
 	}
 
 	// ARCH-04: pkg imports only std (and its own tree for external tests); only adapters and app (and tests) import pkg.
@@ -401,8 +411,9 @@ func checkNoCgo(root string) ([]string, error) {
 var internalLayers = map[string]bool{"domain": true, "cases": true, "adapters": true, "input": true, "app": true, "metrics": true}
 
 // topLevelDirs are the directories of the module root that may contain Go packages (section 2). Directories without
-// Go files (a frontend, build assets) are not checked.
-var topLevelDirs = map[string]bool{"cmd": true, "config": true, "internal": true, "pkg": true, "testenv": true, "tests": true}
+// Go files (a frontend, build assets) are not checked. spikes/ holds throwaway prototypes and is allowed by the
+// audio-capture ADR of TASK-015 (docs/adr/0002-audio-capture.md); the import check keeps the product independent of it.
+var topLevelDirs = map[string]bool{"cmd": true, "config": true, "internal": true, "pkg": true, "testenv": true, "tests": true, "spikes": true}
 
 // checkLayout verifies the directory layout of docs/architecture.md section 2 (ARCH-01):
 // every layer has a doc.go, cmd/<binary>/main.go exists, internal/ has no unknown top-level directory,
@@ -640,6 +651,7 @@ func TestImportMatrix(t *testing.T) {
 		{name: "pkg std only", file: "pkg/migrations/migrations.go", imps: []string{"embed", "io/fs"}},
 		{name: "pkg external test imports its package", file: "pkg/migrations/migrations_test.go", imps: []string{m + "/pkg/migrations"}},
 		{name: "tests unrestricted", file: "tests/flow_test.go", imps: []string{m + "/internal/adapters/sqlite", m + "/internal/cases/run"}},
+		{name: "spike imports another spike package", file: "spikes/audio-capture/cmd/capturespike/main.go", imps: []string{m + "/spikes/audio-capture/wavchunk", "golang.org/x/sys/windows"}},
 
 		// violations
 		{name: "domain imports adapters", file: "internal/domain/jobs/job/job.go", imps: []string{m + "/internal/adapters/sqlite"}, want: "ARCH-10"},
@@ -682,6 +694,11 @@ func TestImportMatrix(t *testing.T) {
 		{name: "config imports pkg", file: "config/config.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
 		{name: "metrics imports pkg", file: "internal/metrics/metrics.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
 		{name: "sibling service", file: "internal/app/app.go", imps: []string{"paratech/hub/internal/domain/quota"}, want: "section-9"},
+		{name: "adapter imports a spike", file: "internal/adapters/audio/capture.go", imps: []string{m + "/spikes/audio-capture/wasapi"}, want: "ARCH-01"},
+		{name: "app imports a spike", file: "internal/app/app.go", imps: []string{m + "/spikes/audio-capture/wavchunk"}, want: "ARCH-01"},
+		{name: "cmd imports a spike", file: "cmd/desktop/main.go", imps: []string{m + "/spikes/audio-capture"}, want: "ARCH-01"},
+		{name: "tests import a spike", file: "tests/flow_test.go", imps: []string{m + "/spikes/audio-capture/wavchunk"}, want: "ARCH-01"},
+		{name: "root imports a spike", file: "doc.go", imps: []string{m + "/spikes/audio-capture/wavchunk"}, want: "ARCH-01"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
