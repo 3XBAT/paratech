@@ -2,10 +2,10 @@
 // (PRD sections 8 and 8.1). It implements modelcatalog.ImportSource (ARCH-30..33).
 //
 // The path is untrusted input: it is cleaned and must be absolute and free of NUL bytes; on Windows it must be on a
-// drive letter (no UNC, device or namespace paths, no reserved device names or streams), so opening it never contacts
-// a remote host. Only regular files are opened (no directories, devices or pipes); a symbolic link is followed, since
-// the user picked it. The file is opened read-only and checked again after the open, so a path swapped for another
-// file in between is refused. Errors are values.ErrInvalidImportFile, shared.ErrNotFound or shared.ErrStorage
+// drive letter, so UNC, device and namespace paths, reserved device names and streams are refused. A mapped network
+// drive and a symbolic link or junction the user picked are followed, even to a remote target. Only regular files
+// are opened (no directories, devices or pipes). The file is opened read-only and checked again after the open, so a
+// path swapped for another file in between is refused. Errors are values.ErrInvalidImportFile, shared.ErrNotFound or shared.ErrStorage
 // (narrowed to shared.ErrStoragePermission when access is denied); the OS path never appears in messages.
 package localfile
 
@@ -25,6 +25,9 @@ import (
 
 // ErrStorage is a read failure of the picked file that has no domain meaning. It wraps shared.ErrStorage.
 var ErrStorage = fmt.Errorf("import file %w", shared.ErrStorage)
+
+// testHookAfterStat, when set by a test, runs between the first stat and the open, to swap the file.
+var testHookAfterStat func(path string)
 
 // Reader opens picked files. The zero value is ready to use.
 type Reader struct{}
@@ -52,6 +55,15 @@ func (*Reader) Open(ctx context.Context, path string) (io.ReadCloser, int64, err
 	}
 	if !before.Mode().IsRegular() {
 		return nil, 0, fmt.Errorf("%w: %s", values.ErrInvalidImportFile, kind(before))
+	}
+	// On Windows os.Stat does not read the file id; os.SameFile reads it lazily by reopening the path. Read it now, or
+	// the check after the open would compare the open file with whatever is at the path then. It fails only when the
+	// id cannot be read.
+	if !os.SameFile(before, before) {
+		return nil, 0, fmt.Errorf("%w: the file cannot be identified", values.ErrInvalidImportFile)
+	}
+	if testHookAfterStat != nil {
+		testHookAfterStat(clean)
 	}
 
 	// Any local file the user picked is legitimate; checkPath refused everything else.

@@ -108,6 +108,33 @@ func TestOpenCleansPath(t *testing.T) {
 	}
 }
 
+// TestOpenRefusesFileSwappedBeforeOpen: a file replaced between the stat and the open is refused. On Windows it
+// fails when the file id of the stat is read only at the comparison, from the path.
+func TestOpenRefusesFileSwappedBeforeOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model.bin")
+	other := filepath.Join(dir, "other.bin")
+	for p, content := range map[string]string{path: "shown weights", other: "other weights"} {
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	testHookAfterStat = func(string) {
+		if err := os.Rename(other, path); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { testHookAfterStat = nil })
+
+	rc, _, err := New().Open(context.Background(), path)
+	if rc != nil {
+		_ = rc.Close()
+	}
+	if !errors.Is(err, values.ErrInvalidImportFile) {
+		t.Fatalf("Open = %v, want values.ErrInvalidImportFile", err)
+	}
+}
+
 func TestOpenHonorsCancellation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "model.bin")
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {

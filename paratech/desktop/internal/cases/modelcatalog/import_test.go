@@ -362,7 +362,7 @@ func TestImportCustomRejects(t *testing.T) {
 			}
 			e.src.put(pickedPath, swapped)
 			return CustomImport{Path: pickedPath, Name: "own", ModelVersion: "1", Confirmation: confirmed}
-		}, values.ErrChecksumMismatch, false},
+		}, values.ErrConfirmationMismatch, false},
 		{"catalog identity", func(e *importEnv) CustomImport {
 			e.src.put(pickedPath, catBase.content())
 			return CustomImport{Path: pickedPath, Name: "base", ModelVersion: "1", Confirmation: confirm(e.t, catBase.content())}
@@ -409,22 +409,53 @@ func TestImportCustomRejects(t *testing.T) {
 	}
 }
 
-func TestImportCustomDuplicateRemovesCopy(t *testing.T) {
-	e := newImportEnv(t)
-	ctx := context.Background()
+// TestImportCustomDuplicate: an installed name and version is refused before the file is opened; one installed while
+// the file is copied is refused by Register, and the copy is deleted.
+func TestImportCustomDuplicate(t *testing.T) {
 	content := []byte("own model weights")
-	e.src.put(pickedPath, content)
-	req := CustomImport{Path: pickedPath, Name: "own", ModelVersion: "1", Confirmation: confirm(t, content)}
 
-	if _, err := e.im.ImportCustom(ctx, req); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.im.ImportCustom(ctx, req); !errors.Is(err, ErrAlreadyInstalled) {
-		t.Fatalf("second import: %v, want ErrAlreadyInstalled", err)
-	}
-	if files := e.storedFiles(); len(files) != 1 {
-		t.Fatalf("stored files = %v, want only the first copy", files)
-	}
+	t.Run("installed before", func(t *testing.T) {
+		e := newImportEnv(t)
+		ctx := context.Background()
+		e.src.put(pickedPath, content)
+		req := CustomImport{Path: pickedPath, Name: "own", ModelVersion: "1", Confirmation: confirm(t, content)}
+		if _, err := e.im.ImportCustom(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		opensBefore, _ := e.src.counts()
+
+		if _, err := e.im.ImportCustom(ctx, req); !errors.Is(err, ErrAlreadyInstalled) {
+			t.Fatalf("second import: %v, want ErrAlreadyInstalled", err)
+		}
+		if opens, _ := e.src.counts(); opens != opensBefore {
+			t.Fatal("the file was opened, want a refusal before")
+		}
+		if files := e.storedFiles(); len(files) != 1 {
+			t.Fatalf("stored files = %v, want only the first copy", files)
+		}
+	})
+
+	t.Run("installed during the copy", func(t *testing.T) {
+		e := newImportEnv(t)
+		e.src.put(pickedPath, content)
+		var once sync.Once
+		e.src.onRead = func() { once.Do(func() { e.seed("other", "own", modelRef(t, "other.bin")) }) }
+
+		_, err := e.im.ImportCustom(context.Background(), CustomImport{
+			Path: pickedPath, Name: "own", ModelVersion: "1", Confirmation: confirm(t, content),
+		})
+		if !errors.Is(err, ErrAlreadyInstalled) {
+			t.Fatalf("ImportCustom = %v, want ErrAlreadyInstalled", err)
+		}
+		if files := e.storedFiles(); len(files) != 0 {
+			t.Fatalf("stored files = %v, want the copy deleted", files)
+		}
+		installed, err := e.svc.ListInstalled(context.Background())
+		if err != nil || len(installed) != 1 || installed[0].ID != "other" {
+			t.Fatalf("ListInstalled = %+v, %v; want only the model installed during the copy", installed, err)
+		}
+		e.requireClosed()
+	})
 }
 
 func TestInspectRejects(t *testing.T) {

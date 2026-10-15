@@ -13,6 +13,8 @@ import (
 // checkLocal accepts only a cleaned path on a drive letter. A UNC path (\\server\share) makes Windows contact the
 // host over SMB and send the user's NTLM credentials; device and namespace paths (\\.\, \\?\, \??\) reach devices
 // and volumes. Reserved device names (NUL, COM1, CONIN$) and alternate data streams (file:stream) are refused too.
+// The path text alone is checked: a mapped network drive, a subst letter or a link to a UNC target is followed, since
+// the user picked it.
 func checkLocal(clean string) error {
 	vol := filepath.VolumeName(clean)
 	if !isDriveLetter(vol) {

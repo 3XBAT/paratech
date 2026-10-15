@@ -125,6 +125,7 @@ func (im *Importer) inspect(ctx context.Context, path string) (ImportPreview, er
 // ImportCustom installs a model file outside the catalog (PRD section 8, AC-23).
 //
 //   - Without a confirmation it is values.ErrConfirmationRequired before the file is opened.
+//   - The name and version of an installed model are ErrAlreadyInstalled before the file is opened.
 //   - The name and version of a catalog entry are values.ErrReservedIdentity, a file larger than
 //     values.MaxImportSizeBytes values.ErrImportTooLarge, too little free disk space a *values.InsufficientSpaceError.
 //   - A copy whose SHA-256 is not the confirmed one is values.ErrConfirmationMismatch (also
@@ -152,6 +153,9 @@ func (im *Importer) importCustom(ctx context.Context, req CustomImport) (Install
 		return InstalledModel{}, err
 	}
 	if err := cat.CheckImportIdentity(req.Name, req.ModelVersion); err != nil {
+		return InstalledModel{}, err
+	}
+	if err := im.svc.checkIdentityFree(ctx, req.Name, req.ModelVersion); err != nil {
 		return InstalledModel{}, err
 	}
 

@@ -421,6 +421,21 @@ func (s *Service) checkNotInstalled(ctx context.Context, id values.CatalogID) er
 	return nil
 }
 
+// checkIdentityFree refuses an import under the name and version of an installed model before gigabytes are copied;
+// Register checks again.
+func (s *Service) checkIdentityFree(ctx context.Context, name values.ModelName, version values.ModelVersion) error {
+	installed, err := s.models.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range installed {
+		if m.Name() == name && m.ModelVersion() == version {
+			return fmt.Errorf("%s %s: %w", name, version, ErrAlreadyInstalled)
+		}
+	}
+	return nil
+}
+
 func (s *Service) loadCatalog(ctx context.Context) (values.Catalog, error) {
 	data, err := s.catalog.Manifest(ctx)
 	if err != nil {
