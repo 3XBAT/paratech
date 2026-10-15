@@ -169,7 +169,7 @@ func (c *core) wire(root string, e env, notifier notify.Notifier, log *slog.Logg
 
 	c.cleanups = append(c.cleanups, cleanup{name: "artifact temporary files", run: store.CleanupTemp})
 	c.ui = wails.Core{Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner}
-	return nil
+	return c.wireSchedule(e)
 }
 
 // sttEngine is whisper-cli below the artifact root. A binary that is missing or refused by the adapter's checks does

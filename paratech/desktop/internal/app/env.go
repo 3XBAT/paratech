@@ -40,6 +40,7 @@ type localTime interface {
 type idSource interface {
 	NewRecordingID() shared.RecordingID
 	NewJobID() shared.JobID
+	NewLessonID() shared.LessonID
 	NewAssignmentID() shared.AssignmentID
 	NewProposalID() proposal.ID
 	NewDeliveryID() shared.DeliveryID

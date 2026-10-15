@@ -58,7 +58,8 @@ non-email types, UI mode only (headless has no notifier).
 - Enqueueing STT when a recording completes (model pin, key, startup sweep): no STT job is created in production yet.
   The STT stand-in fails jobs permanently, so a job keyed `stt:<recording>:<model>` that failed while whisper-cli was
   missing would block transcription after the install is fixed: that task must handle it (e.g. a parking class or a new key round).
-- `schedulesync`, `modelcatalog`, `homeworkflow.Service` and proposals (`scheduler`: TASK-022, UI mode only).
+- `modelcatalog`, `homeworkflow.Service`, proposals and the calendar sync of `schedulesync` (`scheduler`: TASK-022, UI mode only;
+  the `schedulesync` import is wired for the schedule page by TASK-049).
 - TASK-057: hub client and SMTP config, Credential Manager reads, drafts repository. TASK-017: the WASAPI recorder.
 
 ## Consequences
