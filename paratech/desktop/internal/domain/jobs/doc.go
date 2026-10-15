@@ -21,4 +21,6 @@
 //   - Attempt: one execution try of a job; a transient failure leads to RETRY_WAIT with backoff.
 //   - Idempotency key: a stable key that makes a job with external side effects safe to repeat.
 //   - Startup recovery: a stale RUNNING job is moved back to QUEUED when the application starts.
+//   - Notice: the user was notified that a job reached a finished status (COMPLETED or FAILED); at most one per job and
+//     status (PRD section 15, aggregate domain/jobs/notice, policy domain/jobs/services/notifypolicy).
 package jobs
