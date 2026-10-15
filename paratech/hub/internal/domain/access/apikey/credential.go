@@ -57,7 +57,7 @@ func ParseCredential(raw string) (Credential, error) {
 		return Credential{}, ErrMalformed
 	}
 	id, secret := rest[:idLen], rest[idLen+1:]
-	if rest[idLen] != separator || !shared.IsLowerHex(id) || !shared.IsLowerHex(secret) {
+	if rest[idLen] != separator || shared.APIKeyID(id).Validate() != nil || !isLowerHex(secret) {
 		return Credential{}, ErrMalformed
 	}
 	return Credential{id: shared.APIKeyID(id), secret: secret}, nil
@@ -89,6 +89,19 @@ func (c Credential) hash() [sha256.Size]byte {
 func allZero(b []byte) bool {
 	for _, x := range b {
 		if x != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// isLowerHex reports whether s is non-empty and consists only of 0-9 and a-f.
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}

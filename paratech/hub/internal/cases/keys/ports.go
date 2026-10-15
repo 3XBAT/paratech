@@ -16,9 +16,8 @@ type KeyRepository interface {
 	// Get loads a key; a missing one is shared.ErrNotFound.
 	Get(ctx context.Context, id shared.APIKeyID) (*apikey.Key, error)
 
-	// SaveRevocation stores the revocation of a revoked key only if the stored key is still active, so that two
-	// concurrent revocations record one time; the loser gets apikey.ErrAlreadyRevoked, a missing key
-	// shared.ErrNotFound.
+	// SaveRevocation records a revocation only over an active stored key: a lost race is apikey.ErrAlreadyRevoked,
+	// a missing key shared.ErrNotFound.
 	SaveRevocation(ctx context.Context, k *apikey.Key) error
 
 	// List returns every key ordered by creation time.

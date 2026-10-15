@@ -14,14 +14,14 @@ func (id APIKeyID) String() string { return string(id) }
 
 // Validate reports whether the identifier has the issued shape: exactly 16 lowercase hex characters.
 func (id APIKeyID) Validate() error {
-	if len(id) != apiKeyIDLen || !IsLowerHex(string(id)) {
+	if len(id) != apiKeyIDLen || !isLowerHex(string(id)) {
 		return fmt.Errorf("%w: API key id must be %d lowercase hex characters", ErrInvalidID, apiKeyIDLen)
 	}
 	return nil
 }
 
-// IsLowerHex reports whether s is non-empty and consists only of 0-9 and a-f.
-func IsLowerHex(s string) bool {
+// isLowerHex reports whether s is non-empty and consists only of 0-9 and a-f.
+func isLowerHex(s string) bool {
 	if s == "" {
 		return false
 	}

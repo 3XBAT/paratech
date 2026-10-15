@@ -17,10 +17,10 @@ func TestAPIKeyIDValidate(t *testing.T) {
 	}
 }
 
-func TestIsLowerHex(t *testing.T) {
+func TestLowerHex(t *testing.T) {
 	for s, want := range map[string]bool{"": false, "0af9": true, "0AF9": false, "x": false, "a-b": false} {
-		if got := IsLowerHex(s); got != want {
-			t.Errorf("IsLowerHex(%q) = %v, want %v", s, got, want)
+		if got := isLowerHex(s); got != want {
+			t.Errorf("isLowerHex(%q) = %v, want %v", s, got, want)
 		}
 	}
 }

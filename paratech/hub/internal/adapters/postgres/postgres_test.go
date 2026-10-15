@@ -122,7 +122,15 @@ func embeddedVersions(t *testing.T) []int64 {
 		}
 		out = append(out, v)
 	}
+	// Pinned, so a broken embed (no files) cannot make the comparisons below pass vacuously.
+	if len(out) == 0 || !slices.Contains(out, 1) || !slices.Contains(out, 2) {
+		t.Fatalf("embedded migration versions = %v, want at least 1 and 2", out)
+	}
 	return out
+}
+
+func TestEmbeddedVersions(t *testing.T) {
+	embeddedVersions(t) // runs the pin without a database
 }
 
 func TestMigrateIsIdempotent(t *testing.T) {

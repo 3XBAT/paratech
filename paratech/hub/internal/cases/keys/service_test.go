@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -277,5 +278,23 @@ func TestList(t *testing.T) {
 	f.store.Err = errors.New("db down")
 	if _, err := f.svc.List(t.Context()); err == nil {
 		t.Fatal("List succeeded with a failing store")
+	}
+}
+
+func TestIssuedHidesTheKeyFromSlog(t *testing.T) {
+	got, err := newFixture(t).svc.Issue(t.Context(), "tester-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	for _, h := range []slog.Handler{slog.NewJSONHandler(&logged, nil), slog.NewTextHandler(&logged, nil)} {
+		slog.New(h).Info("issued", "key", got)
+	}
+	secret := got.Key[len(apikey.Prefix)+1+len(got.ID)+1:]
+	if strings.Contains(logged.String(), secret) {
+		t.Fatalf("slog prints the secret: %s", logged.String())
+	}
+	if !strings.Contains(logged.String(), got.ID) || !strings.Contains(logged.String(), "tester-01") {
+		t.Fatalf("slog output lacks the id or label: %s", logged.String())
 	}
 }
