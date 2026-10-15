@@ -223,6 +223,9 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 
 	c.cleanups = append(c.cleanups, cleanup{name: "artifact temporary files", run: store.CleanupTemp})
 	c.ui = wails.Core{Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner}
+	if err := c.wireConnections(e, settings, mailSecrets, mailer, log); err != nil {
+		return err
+	}
 	return c.wireSchedule(e)
 }
 

@@ -12,7 +12,8 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
   (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer, Prompt,
-  Schedule, Files}` (all required; `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049). `start` runs
+  Schedule, Files, Connections}` (all required; `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049,
+  `Connections` since TASK-062). `start` runs
   once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine; headless right after
   `openCore` inside `Run` (headless now opens the core; no data dir is an error).
 - **Single instance.** UI: Wails' named mutex first (a second UI instance hands off to the window and exits before
@@ -66,6 +67,10 @@ non-email types, UI mode only (headless has no notifier).
   one `wincred` store per service (`hub`, `mail`), shared by the adapter (reads) and `senddelivery` (writes). Not
   configured: LLM jobs park in WAITING_FOR_NETWORK ("hub: not configured", no attempts used), an email is
   `delivery.ErrRejected`. Drafts: `sqlite.DraftRepository`. Off Windows the stores fail with `ErrUnsupported`.
+- **Connections (TASK-062).** `cases/connections` (`app/connections.go`) edits the mail account and the Hub URL in the
+  settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
+  read back). "Check mail" = `smtp.Mailer.Check`: Send's session setup (EHLO, STARTTLS, AUTH), then QUIT, no message;
+  the bridge maps the adapter's session classes to the use case's results. Off Windows the page shows "unsupported".
 - **Recorder (TASK-017).** Windows: `audiocapture.Recorder`, which runs this executable as the recorder child
   (ADR-0002). Other OSes: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`, so
   interrupted recordings keep their chunks for a later recovery.
@@ -84,7 +89,7 @@ non-email types, UI mode only (headless has no notifier).
   the sweep after an install).
 - Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
   the Windows recorder by TASK-017; recording -> STT, `modelcatalog` and the heavy cap by TASK-060.
-- Settings UI for mail and Hub, bindings of the drafts (TASK-045) and of the Hub key (TASK-039).
+- Bindings of the drafts (TASK-045) and of the Hub key (TASK-039; a second secret slot in `cases/connections`).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,

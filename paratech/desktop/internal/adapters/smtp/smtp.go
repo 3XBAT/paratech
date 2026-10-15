@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/wneessen/go-mail"
+	gosmtp "github.com/wneessen/go-mail/smtp"
 
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/shared"
@@ -63,6 +64,33 @@ const (
 	msgAmbiguous      = "smtp: unclear result; the message may have been accepted"
 	msgReconcile      = "smtp: cannot look a message up over SMTP"
 )
+
+// Classes of a failed session setup and of its preconditions, for errors.Is next to the delivery outcome class. They do
+// not change the fixed texts; Check's caller tells the user which one it was.
+var (
+	ErrNotConfigured       = errors.New("smtp: account not configured")    // no account in the settings
+	ErrAccountInvalid      = errors.New("smtp: account invalid")           // the account breaks the adapter's rules
+	ErrSettingsUnavailable = errors.New("smtp: settings unavailable")      // the account could not be read
+	ErrNoPassword          = errors.New("smtp: no password stored")        // nothing under the credential name
+	ErrStoreUnavailable    = errors.New("smtp: credential store failed")   // also errors.ErrUnsupported off Windows
+	ErrUnreachable         = errors.New("smtp: server unreachable")        // network, timeout, cancellation
+	ErrCertificate         = errors.New("smtp: certificate not trusted")   // TLS verification failed
+	ErrSetupUnsupported    = errors.New("smtp: TLS or login not offered")  // no STARTTLS, no usable AUTH, TLS failure
+	ErrLoginRejected       = errors.New("smtp: login rejected")            // a 5xx reply to AUTH
+	ErrServerTemporary     = errors.New("smtp: server temporarily failed") // a 4xx reply during the setup
+	ErrServerRefused       = errors.New("smtp: server refused")            // another reply during the setup
+)
+
+// classed adds session classes to an error without changing its text.
+type classed struct {
+	err   error
+	kinds []error
+}
+
+func (e *classed) Error() string   { return e.err.Error() }
+func (e *classed) Unwrap() []error { return append([]error{e.err}, e.kinds...) }
+
+func withKind(err error, kinds ...error) error { return &classed{err: err, kinds: kinds} }
 
 // SecretReader is the narrow access of the adapter to the credential store (the wincred adapter in the app).
 type SecretReader interface {
@@ -188,14 +216,28 @@ func (m *Mailer) account(ctx context.Context) (Account, error) {
 	a, err := m.accounts.MailAccount(ctx)
 	switch {
 	case err != nil:
-		return Account{}, fail(msgSettings, delivery.ErrTransient)
+		return Account{}, withKind(fail(msgSettings, delivery.ErrTransient), ErrSettingsUnavailable)
 	case a == Account{}:
-		return Account{}, fail(msgNoAccount, delivery.ErrRejected)
+		return Account{}, withKind(fail(msgNoAccount, delivery.ErrRejected), ErrNotConfigured)
 	}
 	if a, err = checkAccount(a); err != nil {
-		return Account{}, fail(msgBadAccount, delivery.ErrRejected)
+		return Account{}, withKind(fail(msgBadAccount, delivery.ErrRejected), ErrAccountInvalid)
 	}
 	return a, nil
+}
+
+// password reads the SMTP password of one session. A missing one is a definite refusal; a failing store is transient.
+func (m *Mailer) password(ctx context.Context) (string, error) {
+	password, err := m.secrets.Get(ctx, m.cfg.CredentialName)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return "", withKind(fail(msgNotConfigured, delivery.ErrRejected), ErrNoPassword)
+	case errors.Is(err, errors.ErrUnsupported):
+		return "", withKind(fail(msgStoreDown, delivery.ErrTransient), ErrStoreUnavailable, errors.ErrUnsupported)
+	case err != nil:
+		return "", withKind(fail(msgStoreDown, delivery.ErrTransient), ErrStoreUnavailable)
+	}
+	return password, nil
 }
 
 func isControl(r rune) bool { return r < ' ' || r == 0x7f }
@@ -235,17 +277,45 @@ func (m *Mailer) Send(ctx context.Context, d *delivery.Delivery, attachment io.R
 		return err
 	}
 
-	password, err := m.secrets.Get(ctx, m.cfg.CredentialName)
-	switch {
-	case errors.Is(err, shared.ErrNotFound):
-		return fail(msgNotConfigured, delivery.ErrRejected)
-	case err != nil:
-		return fail(msgStoreDown, delivery.ErrTransient)
+	password, err := m.password(ctx)
+	if err != nil {
+		return err
 	}
 	if ctx.Err() != nil {
 		return fail(msgCancelled, delivery.ErrTransient)
 	}
-	return m.send(ctx, msg, acc, password)
+	return m.session(ctx, acc, password, func(client *mail.Client, sc *gosmtp.Client) error {
+		err := client.SendWithSMTPClient(sc, msg)
+		delivered := msg.IsDelivered()
+		_ = client.CloseWithSMTPClient(sc)
+		if delivered {
+			// Accepted with 250 after the message; a failure of the RSET or QUIT that follow does not change that.
+			return nil
+		}
+		return classifySend(err)
+	})
+}
+
+// Check tests the account without sending anything: it opens the session exactly as Send does (the account from the
+// settings, the password from the store, the same TLS and authentication) and ends it with QUIT right after AUTH. No
+// MAIL, RCPT or DATA is sent. Errors have Send's fixed texts; errors.Is with the session classes (ErrNotConfigured ...
+// ErrServerRefused) tells what failed.
+func (m *Mailer) Check(ctx context.Context) error {
+	acc, err := m.account(ctx)
+	if err != nil {
+		return err
+	}
+	password, err := m.password(ctx)
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return fail(msgCancelled, delivery.ErrTransient)
+	}
+	return m.session(ctx, acc, password, func(client *mail.Client, sc *gosmtp.Client) error {
+		_ = client.CloseWithSMTPClient(sc) // the login worked; a lost QUIT does not change that
+		return nil
+	})
 }
 
 // message builds the email. The recipient and the subject were validated by the aggregate; they are checked for line
@@ -274,8 +344,10 @@ func (m *Mailer) message(d *delivery.Delivery, data []byte, from string) (*mail.
 	return msg, nil
 }
 
-// send runs one SMTP session. A cancelled ctx closes the raw connection, which ends a blocked read or write at once.
-func (m *Mailer) send(ctx context.Context, msg *mail.Msg, acc Account, password string) error {
+// session opens one SMTP session (connect, TLS, EHLO, AUTH), hands it to use and releases the connection afterwards.
+// Send and Check share it, so a check proves exactly the setup a send uses. A cancelled ctx closes the raw connection,
+// which ends a blocked read or write at once.
+func (m *Mailer) session(ctx context.Context, acc Account, password string, use func(*mail.Client, *gosmtp.Client) error) error {
 	var (
 		mu   sync.Mutex
 		conn net.Conn
@@ -324,21 +396,14 @@ func (m *Mailer) send(ctx context.Context, msg *mail.Msg, acc Account, password 
 	}
 	client, err := mail.NewClient(acc.Host, opts...)
 	if err != nil {
-		return fail(msgSetup, delivery.ErrRejected)
+		return withKind(fail(msgSetup, delivery.ErrRejected), ErrSetupUnsupported)
 	}
 
 	sc, err := client.DialToSMTPClientWithContext(ctx)
 	if err != nil {
 		return classifySetup(err)
 	}
-	err = client.SendWithSMTPClient(sc, msg)
-	if msg.IsDelivered() {
-		// Accepted with 250 after the message; a failure of the RSET or QUIT that follow does not change that.
-		_ = client.CloseWithSMTPClient(sc)
-		return nil
-	}
-	_ = client.CloseWithSMTPClient(sc)
-	return classifySend(err)
+	return use(client, sc)
 }
 
 // Reconcile cannot find out over SMTP whether a message was accepted, so it always answers delivery.ErrOutcomeUnknown

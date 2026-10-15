@@ -19,6 +19,8 @@ Source: https://github.com/wailsapp/wails/tree/v3.0.0-beta.29/v3 · API: https:/
 - Many failures call `os.Exit(1)` inside Wails (`handleFatalError`), e.g. a window that cannot create WebView2.
 - `Windows.DisableQuitOnLastWindowClosed: true` keeps a tray app alive when windows are closed or hidden.
 - WebView2 data defaults to `%AppData%\<exe name>` (`internal/webview2/pkg/edge/chromium.go`); override with `Windows.WebviewUserDataPath`.
+- `Options.Logger` gets every binding call with its JSON args and result at Debug (`messageprocessor_call.go`), so the shell gives Wails
+  a logger with an Info floor (`input/wails/wailslog.go`): the mail password goes through a binding.
 
 ## Windows (`webview_window_options.go`, `webview_window_windows.go`)
 - `WebviewWindowOptions`: `Frameless`, `AlwaysOnTop` (adds `WS_EX_TOPMOST`), `Hidden` (created without `WS_VISIBLE`), `DisableResize`,

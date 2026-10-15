@@ -13,6 +13,10 @@
 // (schedulepicker_windows.go), the binding reads the file through Core.Files and keeps it until the commit, so the page
 // never sends a path.
 //
+// The «Подключения» page (mail account, Hub address, mail password, "check mail") calls
+// ConnectionsService (connections.go): field errors and check results are answers with fixed Russian texts; the
+// password only goes in, the page sees its status.
+//
 // Shell.Notify is the notifier of finished processing (PRD section 15): Windows toasts with fixed texts (notices.go)
 // through the Wails notifications service, wrapped so that a failed setup never stops the app (toasts_windows.go).
 package wails

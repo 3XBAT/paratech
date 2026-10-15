@@ -60,13 +60,14 @@ type SMTPBehavior struct {
 
 	User, Password string // the accepted login; a different one is answered with 535
 
-	AuthReply  string // reply to AUTH, overriding the login check
-	MailReply  string // reply to MAIL FROM
-	RcptReply  string // reply to RCPT TO
-	DataReply  string // reply to DATA (354 by default)
-	FinalReply string // reply after the message (250 by default)
-	AfterData  AfterData
-	Drop       Drop
+	StartTLSReply string // reply to STARTTLS instead of the upgrade
+	AuthReply     string // reply to AUTH, overriding the login check
+	MailReply     string // reply to MAIL FROM
+	RcptReply     string // reply to RCPT TO
+	DataReply     string // reply to DATA (354 by default)
+	FinalReply    string // reply after the message (250 by default)
+	AfterData     AfterData
+	Drop          Drop
 }
 
 // SMTPLogin is one AUTH attempt the fake server saw.
@@ -88,6 +89,7 @@ type FakeSMTP struct {
 	behavior SMTPBehavior
 	messages [][]byte
 	logins   []SMTPLogin
+	commands []string
 	sessions int
 	conns    map[net.Conn]bool
 
@@ -144,6 +146,14 @@ func (f *FakeSMTP) Logins() []SMTPLogin {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]SMTPLogin(nil), f.logins...)
+}
+
+// Commands returns the verbs of every command the server received, in order and upper-cased (for example "EHLO",
+// "STARTTLS", "AUTH", "QUIT"); never their arguments, which carry credentials and addresses.
+func (f *FakeSMTP) Commands() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.commands...)
 }
 
 // Sessions returns how many connections were accepted.
@@ -245,8 +255,12 @@ func (f *FakeSMTP) session(c net.Conn) {
 			return
 		}
 		verb, arg, _ := strings.Cut(line, " ")
+		verb = strings.ToUpper(verb)
+		f.mu.Lock()
+		f.commands = append(f.commands, verb)
+		f.mu.Unlock()
 		b := f.script()
-		switch strings.ToUpper(verb) {
+		switch verb {
 		case "EHLO":
 			err = f.ehlo(s, b)
 		case "HELO":
@@ -254,6 +268,10 @@ func (f *FakeSMTP) session(c net.Conn) {
 		case "STARTTLS":
 			if b.NoSTARTTLS || s.secure {
 				err = s.reply("502 5.5.1 not offered")
+				break
+			}
+			if b.StartTLSReply != "" {
+				err = s.reply(b.StartTLSReply)
 				break
 			}
 			if err = s.reply("220 2.0.0 ready"); err == nil {

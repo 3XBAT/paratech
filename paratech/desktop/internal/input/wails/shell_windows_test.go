@@ -4,7 +4,9 @@ package wails
 
 import (
 	"context"
+	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,5 +104,22 @@ func TestAppOptions(t *testing.T) {
 	opts.Assets.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != string(want) {
 		t.Fatalf("GET %s = %d %q, want the page %q", popupPage, rec.Code, rec.Body.String(), want)
+	}
+}
+
+// Wails logs binding call arguments at Debug; with a debug-level process logger they would carry the mail password.
+func TestAppOptionsLoggerHasNoDebug(t *testing.T) {
+	o := validOptions()
+	o.Log = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	opts := appOptions(o, func() {})
+
+	if !o.Log.Enabled(context.Background(), slog.LevelDebug) {
+		t.Fatal("the process logger must keep the user's debug level")
+	}
+	if opts.Logger == nil || opts.Logger.Enabled(context.Background(), slog.LevelDebug) {
+		t.Error("the Wails logger must not have Debug enabled")
+	}
+	if !opts.Logger.Enabled(context.Background(), slog.LevelInfo) {
+		t.Error("the Wails logger must keep Info")
 	}
 }

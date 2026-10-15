@@ -44,6 +44,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.activity))
 	app.RegisterService(application.NewService(b.prompt))
 	app.RegisterService(application.NewService(b.schedule))
+	app.RegisterService(application.NewService(b.connections))
 	toasts := newToastService(notifications.New(), s.opts.Log)
 	app.RegisterService(application.NewService(toasts))
 
@@ -95,8 +96,9 @@ func (s *Shell) run(ctx context.Context) error {
 
 func appOptions(opts Options, onSecondInstance func()) application.Options {
 	return application.Options{
-		Name:   opts.Name,
-		Logger: opts.Log,
+		Name: opts.Name,
+		// Wails logs binding call arguments (the mail password among them) at Debug, so it never gets Debug.
+		Logger: floorLogger(opts.Log, wailsLogLevel),
 		// The asset server logs every request at info level; the pages are embedded, so the noise has no value.
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets()), DisableLogging: true},
 		// main.go owns signals through its context; the Wails handler would quit behind its back.

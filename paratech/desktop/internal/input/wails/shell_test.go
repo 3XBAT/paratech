@@ -20,7 +20,7 @@ func validOptions() Options {
 		OpenCore: func(context.Context) (Core, error) {
 			return Core{
 				Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
-				Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
+				Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(), Connections: &fakeConnections{},
 			}, nil
 		},
 	}
