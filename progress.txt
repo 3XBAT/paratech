@@ -1532,3 +1532,46 @@
 - Low: при сбое WASAPI-буфера пачка пакетов может удлинить тишину до 200 мс на разрыв; maxLeadSilence считается из Default*-констант; родитель убит -> child до ~3 с закрывает чанк, быстрый рестарт может собрать трек без него (чанк остаётся на диске); на Linux SIGPIPE может убить child до закрытия чанка (не целевая ОС)
 - Low: outputFrames может переполниться только при невозможном объёме подложенных чанков; явного DACL нет (данные в %LOCALAPPDATA%)
 - Nit: порог 2,5 с в TestRecorderStopPastItsContextReturnsPromptly; «примерно за 3 с» в run-alpha.md — это худший случай
+
+## [TASK-060] Цепочка «запись завершена -> распознавание -> постобработка» и wiring — ЧАСТЬ 1
+**Дата:** 2026-10-15
+**Статус:** pending (часть 1 из 2; остаётся часть 2, см. ниже)
+
+### Что сделано
+- recordingsession: обязательный порт CompletionListener.RecordingCompleted — вызывается после сохранения COMPLETED (Stop, лимит, сам закончившийся захват, Recover), только при TranscribableAudio(); на отвязанном ctx 10 с, ошибка только WARN; доставка «хотя бы раз»
+- cases/transcribe.Enqueuer (свои порты ModelResolver, JobEnqueuer, PendingRecordings, IDGenerator, Tx): в одном Tx.Do — запись, TranscribableAudio, HasKeyPrefix("stt:<rec>:"), modelcatalog.ResolveForJob через мост app, job с pin модели и ключом stt:<recording>:<model>; любая существующая stt-задача записи (любая модель/статус) блокирует новую (иначе смена модели по умолчанию дала бы второй транскрипт и дубли заданий); без модели — задачи нет, WARN «transcription waits: no speech recognition model installed»
+- Стартовый проход EnqueuePending (страницы по 100, sqlc ListUntranscribedRecordingIDs; HasJobKeyPrefix через substr, не LIKE) после senddelivery.Resume и до runner.Start; ошибки только в лог
+- Без whisper-cli тип stt не регистрируется: задачи ждут QUEUED (0 попыток) и выполняются после установки и перезапуска — ключ не блокируется; постоянная заглушка sttNotConfigured удалена; WARN «transcription jobs wait in the queue until whisper-cli is installed ...»
+- jobrunner Config.MaxHeavy (по умолчанию 1, 1..Workers): слот резервируется до claim, без слота — claim только лёгких типов; освобождение defer после execute
+- modelcatalog в app: Service, Downloader (httpdownload, filestore FreeBytes), Importer (localfile) на core для TASK-030 (биндингов нет); каталог — встроенный пустой app/catalog.json; домен ParseCatalog принимает явный "models": [] (решение координатора: проверенных SHA-256 моделей ggml нет, выдумывать нельзя), отсутствующий/null список отклоняется; пустой allowlist ничего не пускает (тесты)
+- Тесты: app/pipeline_test.go (занятие в SQLite -> планировщик -> попап -> Start -> Stop -> одна stt-задача -> fake whisper-cli -> fake Hub -> один summary и задания; перезапуск, повтор события и прохода — без дублей, версии не меняются), TestRepeatedCompletionMakesOneSTTJob (шаг 3), TestSTTJobWaitsForWhisperCLI, TestFailedRecordingGetsNoSTTJob, TestWiredModelManager; jobrunner heavy_test; recordingsession completion_test; transcribe enqueue_test; sqlite untranscribed_test
+- AC2 уже закрыт TASK-022: TestScheduledLessonPromptStartsARecording (app), TestLessonPromptFollowsTheStoredSetting (tests)
+- ADR-0009 (порядок старта, регистрация stt, лимит тяжёлых, запись -> STT, модели, не подключено), docs/qa/run-alpha.md («Что изменилось», таблица, разделы 5-6)
+- Изменённые существующие тесты: recordingsession service/recover/fakes (обязательный слушатель), tests/recording_sqlite, recording_recovery_sqlite, recording_capture (ignoredCompletions), random_test (+stt model id), app registrations_test (тест заглушки STT заменён TestRegistrationsWithoutAnEngine), lifecycle_test (шаг прохода в TestStartOrder/TestStartUnwinds), core_test (постоянная ошибка теперь от неустановленной модели), prompts_test (newLifecycle), missing_parts_test (stt QUEUED вместо FAILED), catalog_test (пустой список теперь допустим)
+- Ревью: approve (только low/nit). Security: найдено 0, опровергнуто 0, исправлено 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на a0e4d69 после rebase на origin/master b3fafe8 (TASK-017)
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (в verify.sh)
+- [x] Шаг 2: GOOS=windows go vet ./desktop/... (в verify.sh)
+- [x] Шаг 3: TestRepeatedCompletionMakesOneSTTJob, TestRepeatedCompletionCreatesOneJob
+
+### ОСТАЛОСЬ (часть 2, задача остаётся pending)
+- homeworkflow.Service с границей предложений (TASK-040): таблица proposals + sqlite ProposalRepository (миграция), адаптер HomeworkExporter (exports/), заглушка DeadlineCalendar до TASK-051, мост HomeworkMailer -> senddelivery.SendHomework, RecipientSource = recipientSettings (TASK-057); тест на подключённом ядре; дополнить ADR-0009 и run-alpha
+
+### Решения (подтвердить владельцу)
+- Пустой встроенный каталог моделей; домен принимает "models": []; реальные записи с проверенным SHA-256 — follow-up
+- Любая stt-задача записи (в т.ч. FAILED/CANCELLED) блокирует автоматическую новую; «распознать заново» требует ручного пути (в PRD нет)
+- Без whisper-cli задачи распознавания ждут в очереди без текста причины (причина только в логе)
+
+### Заметки (follow-up)
+- Low: RUNNING stt-задача после падения приложения, если затем whisper-cli нет, остаётся RUNNING (unregistered) до возвращения whisper-cli — дописать в ADR/run-alpha или requeue незарегистрированных RUNNING типов без побочных эффектов
+- Low: в UI нет причины ожидания STT («ждёт whisper-cli») — TASK-030/058
+- Low: «Запустить сейчас» для stt ждёт свободный тяжёлый слот (MaxHeavy=1) — не задокументировано в ADR
+- Low: EnqueuePending при outcomeNoModel возвращает created, nil и теряет предыдущую ошибку (transcribe/enqueue.go:110-111)
+- Nit: ключ "stt:"+128+":"+128 > job.MaxKeyBytes 256 (реальные id 26 символов); "models": [] с download_hosts принимается (без эффекта); HasJobKeyPrefix не использует индекс; HasKeyPrefix с пустым префиксом = «всё» (вызывающих с пустым нет)
+- Модель, установленная во время работы, ставит ожидающие записи только при следующем старте (TASK-030 может вызвать EnqueuePending после установки)
+- Проверка SHA-256 whisper-cli (docs/refs/whisper.md) не реализована — не в AC; TASK-054 или отдельная задача
+- Владельцу в альфе модель по-прежнему не добавить (нет экрана TASK-030), поэтому записанная лекция не распознаётся
+
+---
