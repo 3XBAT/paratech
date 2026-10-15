@@ -48,6 +48,7 @@ var (
 	sqlComment  = regexp.MustCompile(`--[^\n]*`)
 	createTable = regexp.MustCompile(`(?is)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + sqlIdent + `\s*\((.*?)\n\);`)
 	statusCheck = regexp.MustCompile(`(?is)\bstatus\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*status\s+IN\s*\(([^)]*)\)`)
+	kindCheck   = regexp.MustCompile(`(?is)\bkind\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)`)
 	quotedValue = regexp.MustCompile(`'([^']*)'`)
 	columnName  = regexp.MustCompile(`^\s*` + sqlIdent)
 	// A SQL column definition of the aggregate version, see the conventions in the schema header.
@@ -135,8 +136,13 @@ func parseTables(sql string) map[string]string {
 }
 
 // statusSet returns the values of the status CHECK list of a table body.
-func statusSet(body string) []string {
-	m := statusCheck.FindStringSubmatch(body)
+func statusSet(body string) []string { return checkSet(statusCheck, body) }
+
+// kindSet is statusSet for a kind column (CHECK (kind IN (...))).
+func kindSet(body string) []string { return checkSet(kindCheck, body) }
+
+func checkSet(check *regexp.Regexp, body string) []string {
+	m := check.FindStringSubmatch(body)
 	if m == nil {
 		return nil
 	}
@@ -421,6 +427,11 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 			}
 		})
 	}
+
+	// The proposals table also lists the kinds the parser accepts.
+	if got, want := kindSet(tables["proposals"]), sortedStrings(proposal.Kinds()); got == nil || !equalStrings(got, want) {
+		t.Errorf("kind CHECK of proposals = %v, Go constants = %v", got, want)
+	}
 }
 
 func TestSchemaStatesMatchPRD(t *testing.T) {
@@ -572,12 +583,16 @@ CREATE TABLE IF NOT EXISTS [stored_secrets](
 CREATE TABLE clean (
     id TEXT PRIMARY KEY,
     "title" TEXT, body TEXT,
-    status TEXT NOT NULL CHECK (status IN ('a', 'b'))
+    status TEXT NOT NULL CHECK (status IN ('a', 'b')),
+    kind TEXT NOT NULL CHECK (kind IN ('y', 'x'))
 );
 `
 	tables := parseTables(sql)
 	if got := statusSet(tables["jobs"]); !equalStrings(got, []string{"A", "B"}) {
 		t.Errorf("statusSet = %v", got)
+	}
+	if got := kindSet(tables["clean"]); !equalStrings(got, []string{"x", "y"}) || kindSet(tables["jobs"]) != nil {
+		t.Errorf("kindSet = %v", got)
 	}
 	if !versionColumn.MatchString(tables["jobs"]) || versionColumn.MatchString(tables["clean"]) {
 		t.Error("versionColumn does not tell a table with a version column from one without")

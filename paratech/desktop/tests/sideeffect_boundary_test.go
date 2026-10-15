@@ -130,8 +130,9 @@ func TestDraftsReachNoSideEffect(t *testing.T) {
 	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.DraftDeps{}), 10)
 }
 
-// The proposal service (wired by TASK-060) reaches the outside only through the three command ports; none of its ports
-// takes model output, so Propose can only store a validated proposal.
+// The shape of the ports of the proposal service (wired by TASK-060): the outside is reached only through the three
+// command ports and no port takes model output. That the commands run only after the confirmation is proven by the
+// wired tests (internal/app/proposals_test.go).
 func TestProposalServiceReachesSideEffectsOnlyThroughCommands(t *testing.T) {
 	deps := reflect.TypeOf(homeworkflow.Deps{})
 	commandPorts := map[reflect.Type]bool{

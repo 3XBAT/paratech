@@ -28,6 +28,7 @@ func (s *Store) ExportHomework(ctx context.Context, cmd proposal.ExportCommand) 
 	if err != nil {
 		return fmt.Errorf("%s: %w", opExport, err)
 	}
+	// A second line of defence: a valid ExportCommand cannot carry another target.
 	if cmd.Target() != want {
 		return fmt.Errorf("%s: %w: %s is not the export file of %s", opExport, shared.ErrInvalidArtifactRef,
 			cmd.Target(), cmd.AssignmentID())
