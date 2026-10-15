@@ -110,7 +110,7 @@ func TestOpenBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := s.openBindings(context.Background())
-	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil {
+	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil || b.schedule == nil {
 		t.Fatalf("openBindings = %+v, %v", b, err)
 	}
 
@@ -131,6 +131,8 @@ func TestOpenBindings(t *testing.T) {
 		{name: "recording stopper", edit: func(c *Core) { c.Stopper = nil }},
 		{name: "job forcer", edit: func(c *Core) { c.Forcer = nil }},
 		{name: "recording prompt use case", edit: func(c *Core) { c.Prompt = nil }},
+		{name: "schedule import use case", edit: func(c *Core) { c.Schedule = nil }},
+		{name: "schedule file reader", edit: func(c *Core) { c.Files = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
@@ -138,7 +140,7 @@ func TestOpenBindings(t *testing.T) {
 			opts.OpenCore = func(context.Context) (Core, error) {
 				c := Core{
 					Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
-					Prompt: &fakePrompt{},
+					Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
 				}
 				tt.edit(&c)
 				return c, nil
@@ -163,6 +165,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 4},
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 4},
+		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

@@ -9,6 +9,10 @@
 // of cases/recordingprompt, ShowPopup emits PromptShownEvent for the page, and the tray's "Show recording popup" asks
 // the core for an ad-hoc prompt.
 //
+// The schedule page imports a file through ScheduleImportService (schedule.go): the shell shows the open dialog
+// (schedulepicker_windows.go), the binding reads the file through Core.Files and keeps it until the commit, so the page
+// never sends a path.
+//
 // Shell.Notify is the notifier of finished processing (PRD section 15): Windows toasts with fixed texts (notices.go)
 // through the Wails notifications service, wrapped so that a failed setup never stops the app (toasts_windows.go).
 package wails

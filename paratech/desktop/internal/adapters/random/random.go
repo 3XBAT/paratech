@@ -35,6 +35,9 @@ func (IDs) NewAssignmentID() shared.AssignmentID { return shared.AssignmentID(to
 // NewProposalID returns a fresh action proposal identifier.
 func (IDs) NewProposalID() proposal.ID { return proposal.ID(token()) }
 
+// NewLessonID returns a fresh lesson identifier.
+func (IDs) NewLessonID() shared.LessonID { return shared.LessonID(token()) }
+
 // NewDeliveryID returns a fresh delivery identifier.
 func (IDs) NewDeliveryID() shared.DeliveryID { return shared.DeliveryID(token()) }
 

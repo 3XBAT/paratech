@@ -20,7 +20,7 @@ func validOptions() Options {
 		OpenCore: func(context.Context) (Core, error) {
 			return Core{
 				Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
-				Prompt: &fakePrompt{},
+				Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
 			}, nil
 		},
 	}
@@ -72,6 +72,11 @@ func (f *fakeUI) notify(_ context.Context, t toast) error {
 
 func (f *fakeUI) canNotify() bool { return !f.noToasts }
 
+func (f *fakeUI) pickScheduleFile() (string, error) {
+	f.calls = append(f.calls, "pickScheduleFile")
+	return "", nil
+}
+
 func TestCommands(t *testing.T) {
 	s, err := New(validOptions())
 	if err != nil {
@@ -84,6 +89,7 @@ func TestCommands(t *testing.T) {
 		{"showPopup", s.ShowPopup},
 		{"hidePopup", s.HidePopup},
 		{"showMain", s.ShowMain},
+		{"pickScheduleFile", func() error { _, err := s.pickScheduleFile(context.Background()); return err }},
 	}
 
 	for _, c := range commands {
