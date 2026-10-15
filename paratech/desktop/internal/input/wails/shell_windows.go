@@ -8,6 +8,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
@@ -20,9 +21,10 @@ const (
 
 // windowsUI is the running Wails application.
 type windowsUI struct {
-	app   *application.App
-	main  *application.WebviewWindow
-	popup *application.WebviewWindow
+	app    *application.App
+	main   *application.WebviewWindow
+	popup  *application.WebviewWindow
+	toasts pusher
 }
 
 func (s *Shell) run(ctx context.Context) error {
@@ -40,8 +42,10 @@ func (s *Shell) run(ctx context.Context) error {
 	}
 	app.RegisterService(application.NewService(b.settings))
 	app.RegisterService(application.NewService(b.activity))
+	toasts := newToastService(notifications.New(), s.opts.Log)
+	app.RegisterService(application.NewService(toasts))
 
-	u := &windowsUI{app: app}
+	u := &windowsUI{app: app, toasts: toasts}
 	var offs []func()
 	u.main, offs = newWindow(app, mainWindowSpec(s.opts.Name), offs)
 	u.popup, offs = newWindow(app, popupWindowSpec(s.opts.Name), offs)
@@ -191,3 +195,5 @@ func (u *windowsUI) showMain() error {
 	u.main.Focus()
 	return nil
 }
+
+func (u *windowsUI) notify(ctx context.Context, t toast) error { return pushWithin(ctx, u.toasts, t) }
