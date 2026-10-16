@@ -3,14 +3,16 @@ package app
 import (
 	"context"
 	"slices"
-	"strings"
 	"testing"
 
 	"paratech/desktop/internal/domain/transcription/values"
 )
 
-// catalogSourcePrefix pins the downloads to one ggerganov/whisper.cpp commit (docs/refs/whisper.md).
-const catalogSourcePrefix = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-"
+// The downloads and their pages are pinned to one ggerganov/whisper.cpp commit (docs/refs/whisper.md).
+const (
+	catalogSourcePrefix = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-"
+	catalogPagePrefix   = "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-"
+)
 
 // embeddedEntries parses the embedded manifest the way the model manager does.
 func embeddedEntries(t *testing.T) values.Catalog {
@@ -63,9 +65,9 @@ func TestEmbeddedCatalog(t *testing.T) {
 		switch {
 		case e.ID() != w.id || string(e.Name()) != string(w.id) || e.Version() != "1":
 			t.Errorf("entry %d = %s %s %s, want %s", i, e.ID(), e.Name(), e.Version(), w.id)
-		case !strings.HasPrefix(src, catalogSourcePrefix) || src != catalogSourcePrefix+string(w.id)+".bin":
+		case src != catalogSourcePrefix+string(w.id)+".bin":
 			t.Errorf("%s: source %s, want %s<id>.bin", w.id, src, catalogSourcePrefix)
-		case e.SourcePage().String() != "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-"+string(w.id)+".bin":
+		case e.SourcePage().String() != catalogPagePrefix+string(w.id)+".bin":
 			t.Errorf("%s: source page %s", w.id, e.SourcePage())
 		case e.SHA256() != w.sum || e.SizeBytes() != w.size:
 			t.Errorf("%s: sha256 %s size %d, want %s %d", w.id, e.SHA256(), e.SizeBytes(), w.sum, w.size)

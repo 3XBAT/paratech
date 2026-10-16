@@ -26,9 +26,3 @@ func (t ModelTier) Validate() error {
 
 // String returns the tier.
 func (t ModelTier) String() string { return string(t) }
-
-// Capabilities that describe the languages of a whisper.cpp model.
-const (
-	CapabilityMultilingual Capability = "multilingual"
-	CapabilityEnglish      Capability = "en" // a language code, as for any language a model is limited to
-)

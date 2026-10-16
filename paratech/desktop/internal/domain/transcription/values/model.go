@@ -80,6 +80,12 @@ func (q Quantization) String() string { return string(q) }
 // Capability labels what a model can do, for example "multilingual" or a language code (PRD section 8).
 type Capability string
 
+// Capabilities that describe the languages of a whisper.cpp model.
+const (
+	CapabilityMultilingual Capability = "multilingual"
+	CapabilityEnglish      Capability = "en" // a language code, as for any language a model is limited to
+)
+
 // Validate reports whether the label is lowercase ASCII letters, digits, '_' and '-', starting with a letter or digit.
 func (c Capability) Validate() error {
 	if c == "" || len(c) > MaxCapabilityLen {

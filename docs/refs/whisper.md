@@ -43,6 +43,7 @@ The embedded catalog `desktop/internal/app/catalog.json`. Sizes and SHA-256 (`lf
 https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main on **2026-10-16**, repository commit
 `5359861c739e955e79d9a303bcbc70fb988958b1`; a `HEAD` of each resolve URL returned the same `X-Linked-ETag` and `X-Linked-Size`.
 `source_url` is pinned to that commit: `https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/<file>`.
+`source_page` is pinned to the same commit: `https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/<file>`.
 Download of `ggml-base-q5_1.bin` through the app checked on Windows with `LA_MODEL_DOWNLOAD_LIVE_TEST=1`
 (`app/catalog_live_windows_test.go`).
 
