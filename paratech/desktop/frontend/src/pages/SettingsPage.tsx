@@ -7,13 +7,11 @@ type Toggle = keyof Settings;
 const labels: Record<Toggle, string> = {
   recordingPromptsEnabled: "Автоматически предлагать запись в начале занятия",
   processOnlyOnAcPower: "Обрабатывать только от розетки",
-  notifyOnProcessingComplete: "Уведомлять о завершении обработки",
 };
 
 const setters: Record<Toggle, Exclude<keyof SettingsApi, "get">> = {
   recordingPromptsEnabled: "setRecordingPromptsEnabled",
   processOnlyOnAcPower: "setProcessOnlyOnAcPower",
-  notifyOnProcessingComplete: "setNotifyOnProcessingComplete",
 };
 
 // The page only shows and forwards the values; defaults and rules live in the Go core (ARCH-44).
