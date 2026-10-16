@@ -58,7 +58,9 @@ Source: https://github.com/wailsapp/wails/tree/v3.0.0-beta.29/v3 · API: https:/
   Title, Filename, Filters: []application.FileFilter{{DisplayName, Pattern}}, CanCreateDirectories, Window})
   .PromptForSingleSelection()` (`dialogs.go`, `dialog_manager.go`). `SaveFileDialogStruct` has no `SetTitle`: the title
   only goes through the options. `Directory` "" lets Windows pick the folder. The first filter becomes the default
-  extension (`dialogs_windows.go`); IFileSaveDialog asks before overwriting. Cancel is the same "cancelled by user".
+  extension (`dialogs_windows.go`), passed with its dot (".zip") although `SetDefaultExtension` wants none: what
+  Windows does with a typed name without extension is not checked (the proposed name already ends in .zip).
+  IFileSaveDialog asks before overwriting. Cancel is the same "cancelled by user".
 
 ## Frontend runtime
 - `/wails/runtime.js` is an ES module served by the app: `import { Window } from "/wails/runtime.js"; Window.Hide()`.
