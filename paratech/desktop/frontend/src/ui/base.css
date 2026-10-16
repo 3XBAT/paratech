@@ -82,25 +82,9 @@ h3 {
   color: var(--muted);
 }
 
-/* Long names end with an ellipsis; the full text goes into title. */
-.ellipsis {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 /* Paths and file names may break anywhere; never used in the navigation or on buttons. */
 .breakable {
   overflow-wrap: anywhere;
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 /* Icons (src/ui/Icon.tsx). */

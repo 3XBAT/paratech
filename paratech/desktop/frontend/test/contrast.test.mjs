@@ -78,6 +78,17 @@ test("text and controls have enough contrast in both themes", () => {
     check(theme, "on-prim", "prim", 4.5);
     for (const chip of ["rec", "run", "wait", "net", "ok", "neu"]) {
       check(theme, `${chip}-t`, `${chip}-b`, 4.5);
+      check(theme, "text", `${chip}-b`, 4.5); // banners: plain text on the tint
+    }
+    // Hovered ghost buttons, the segmented control and the week dividers are on --panel-2.
+    for (const fg of ["muted", "accent"]) {
+      check(theme, fg, "panel-2", 4.5);
+    }
+    // Error and warning texts outside a chip (danger buttons, problems, field errors, «Может работать медленно»).
+    for (const fg of ["rec-t", "wait-t"]) {
+      for (const surface of ["raised", "panel"]) {
+        check(theme, fg, surface, 4.5);
+      }
     }
   }
 });
