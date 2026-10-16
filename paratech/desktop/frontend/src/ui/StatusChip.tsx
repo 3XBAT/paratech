@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Icon, type IconName } from "./Icon";
+import { Icon, type IconName } from "./Icon.js";
 
 export type ChipKind = "rec" | "run" | "wait" | "net" | "ok" | "fail" | "neutral";
 

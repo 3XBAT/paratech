@@ -1,5 +1,6 @@
 // Small presentational controls of the design system (docs/design/brief.md section 4). They hold no data or decisions:
-// the pages pass what the core reports and get the user's input back.
+// the pages pass what the core reports and get the user's input back. The .js extensions let the Node test runner load
+// the compiled modules (test/list.test.mjs renders the schedule preview); TypeScript and Vite map them to the .tsx files.
 import {
   type InputHTMLAttributes,
   type ReactNode,
@@ -8,7 +9,7 @@ import {
   useId,
   useRef,
 } from "react";
-import { Icon, type IconName } from "./Icon";
+import { Icon, type IconName } from "./Icon.js";
 
 export interface SegmentedOption<T extends string> {
   value: T;

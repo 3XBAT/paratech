@@ -62,6 +62,39 @@ html, body, #root { height: 100%; }
 .clist-card .clist-toggle:hover { color: var(--text); text-decoration: none; }
 .clist-card .clist-footer { margin: 6px 0 0; }
 
+/* Расписание: import preview with count tiles, week dividers and the pinned Apply. */
+.result { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; }
+.result .i { width: 16px; height: 16px; margin-top: 2px; color: var(--ok-t); }
+.import-preview { margin-top: 8px; }
+.import-preview .group-title { margin-top: 8px; }
+.import-preview .clist-card .clist-header { margin-top: 14px; }
+.clist-body.lst { margin: 0; padding: 0; list-style: none; }
+.ln { display: grid; grid-template-columns: 190px minmax(0, 1fr) minmax(0, 160px) 80px; gap: 0 12px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.ln:last-child, .ln-text:last-child, .diff:last-child { border-bottom: 0; }
+.ln-when { color: var(--muted); font-size: var(--fs-small); }
+.ln-title, .ln-zone { min-width: 0; overflow-wrap: anywhere; }
+.ln-line { text-align: right; }
+/* The divider spans the whole line above the first lesson of a week. */
+.wk { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; margin: -6px -16px 6px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: var(--fs-label); font-weight: 600; }
+.wk::after { content: ""; order: 1; flex: 1; height: 5px; background: repeating-linear-gradient(90deg, var(--control) 0 1px, transparent 1px 8px); opacity: .35; }
+.wk .n { order: 2; }
+.ln-text { padding: 7px 16px; border-bottom: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.g-errors .ln-text { color: var(--rec-t); }
+.diff { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.diff .ln-line { text-align: left; }
+.diff del { color: var(--muted); }
+.diff ins { color: var(--run-t); font-weight: 600; text-decoration: none; }
+.diff-arrow { color: var(--muted); }
+.preview-group .clist-footer { margin: 6px 0 0; }
+/* Keeps Apply and Cancel at the bottom edge of the window while a long preview scrolls. */
+.sticky-actions { position: sticky; bottom: 0; z-index: 2; margin: 16px -24px 0; padding: 12px 24px; border-top: 1px solid var(--line); background: var(--panel); }
+@container app (max-width: 880px) {
+  .ln { grid-template-columns: minmax(0, 1fr) 70px; }
+  .ln-when, .ln-zone { grid-column: 1 / -1; }
+  .diff { grid-template-columns: minmax(0, 1fr); }
+  .diff-arrow { display: none; }
+}
+
 /* Older page styles: Connections, Models and Settings until they move to the shared components. */
 h1 { margin: 0 0 16px; }
 h2 { margin: 24px 0 12px; }
@@ -72,12 +105,9 @@ p { margin: 0 0 8px; }
 .list { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
 .list th, .list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .list th { font-weight: 600; color: var(--muted); }
-.list .problem { color: var(--wait-t); white-space: pre-wrap; word-break: break-word; }
-.list .waiting { color: var(--wait-t); }
 .actions { display: flex; gap: 8px; margin: 12px 0; }
-.rows { margin: 0 0 8px; padding-left: 20px; white-space: pre-wrap; word-break: break-word; }
 .warning { color: var(--wait-t); }
-.template { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-ctl); padding: 8px; white-space: pre; overflow-x: auto; }
+.template { margin: 0 0 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-ctl); padding: 8px; white-space: pre; overflow-x: auto; }
 /* A checksum is a code to compare, so it keeps a monospace face. */
 .sha { font-family: Consolas, "Courier New", monospace; user-select: all; word-break: break-all; }
 .badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--r-chip); background: var(--neu-b); color: var(--neu-t); font-size: var(--fs-small); }
@@ -101,7 +131,5 @@ p { margin: 0 0 8px; }
 .clist-count { font-weight: normal; color: var(--muted); }
 .clist-body { margin: 0 0 8px; padding-left: 20px; }
 .clist-footer { margin: 0 0 12px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
-.chips li { padding: 2px 8px; border: 1px solid var(--line); border-radius: var(--r-chip); background: var(--panel-2); }
-/* Keeps Apply and Cancel at the bottom edge of the window while a long preview scrolls. */
-.sticky-actions { position: sticky; bottom: 0; margin: 0; padding: 8px 0; background: var(--panel); border-top: 1px solid var(--line); }
+.clist-more:not(.btn) { padding: 4px 10px; border: 0; border-radius: var(--r-ctl); background: none; color: var(--accent); font-weight: 500; cursor: pointer; }
+.clist-more:not(.btn):hover { background: var(--panel-2); }

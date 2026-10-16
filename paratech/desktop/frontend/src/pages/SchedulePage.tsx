@@ -1,12 +1,12 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled page (test/list.test.mjs renders PreviewView).
 import { callByName } from "../bindings/runtime.js";
-import { scheduleApi, type ImportPreview } from "../bindings/schedule.js";
+import { scheduleApi, type ImportPreview, type LessonText } from "../bindings/schedule.js";
 import { CollapsibleList } from "../CollapsibleList.js";
 import { allCollapsed, type ListStates, listTexts, setCollapsed, stateOf, withState } from "../listView.js";
 import {
+  applyLabel,
   canApply,
-  changeParts,
   commitErrorText,
   conflictParts,
   csvTemplate,
@@ -14,7 +14,6 @@ import {
   groupTitles,
   hasChanges,
   lessonParts,
-  lineParts,
   notes,
   type Part,
   type PreviewGroup,
@@ -22,8 +21,13 @@ import {
   resultText,
   rowErrorParts,
   summaryChips,
+  timeRange,
+  weekHeaders,
   windowText,
 } from "../scheduleView.js";
+import { Button } from "../ui/Button.js";
+import { Banner, CountTiles } from "../ui/controls.js";
+import { Icon } from "../ui/Icon.js";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
 // file is rendered as plain text, each piece in its own <bdi>.
@@ -135,21 +139,28 @@ export function SchedulePage() {
   };
 
   return (
-    <section>
-      <h1>Расписание</h1>
+    <section className="page">
+      <div className="head">
+        <h1>Расписание</h1>
+      </div>
       <p className="muted">{notes.formats}</p>
       <div className="actions">
-        <button type="button" disabled={busy} onClick={() => void choose()}>
+        <Button variant={preview === null ? "primary" : "secondary"} icon="up" disabled={busy} onClick={() => void choose()}>
           Выбрать файл…
-        </button>
+        </Button>
       </div>
 
       {error && (
-        <p className="error" role="alert">
+        <Banner kind="fail" role="alert">
           {error}
+        </Banner>
+      )}
+      {done && (
+        <p className="result" role="status">
+          <Icon name="ok" />
+          {done}
         </p>
       )}
-      {done && <p role="status">{done}</p>}
       {preview !== null && (
         <PreviewView
           preview={preview}
@@ -161,7 +172,7 @@ export function SchedulePage() {
         />
       )}
 
-      <h2>Формат файла</h2>
+      <h2 className="group-title">Формат файла</h2>
       <p className="muted">{notes.allDay}</p>
       <p className="muted">{notes.uid}</p>
       <pre className="template">{csvTemplate}</pre>
@@ -185,8 +196,8 @@ export function PreviewView(props: {
   function group<T>(
     kind: PreviewGroup,
     items: readonly T[],
-    parts: (item: T) => readonly Part[],
-    extra: { more?: (hidden: number) => string; warning?: boolean; before?: ReactNode; after?: ReactNode } = {},
+    renderRow: (item: T, index: number) => ReactNode,
+    extra: { more?: (hidden: number) => string; before?: ReactNode; after?: ReactNode } = {},
   ) {
     if (!groups.includes(kind)) {
       return null;
@@ -196,36 +207,69 @@ export function PreviewView(props: {
         title={groupTitles[kind]}
         items={items}
         itemKey={(_, i) => i}
-        renderItem={(item) => (
-          <li>
-            <Text parts={parts(item)} />
-          </li>
-        )}
+        renderItem={renderRow}
         state={stateOf(props.lists, kind)}
         onStateChange={(s) => props.onLists(withState(props.lists, kind, s))}
         labels={{ more: extra.more }}
         before={extra.before}
         after={extra.after}
-        classNames={{ body: extra.warning ? "rows warning" : "rows" }}
+        className={`clist-card preview-group g-${kind}`}
+        classNames={{ body: "card lst", button: "btn ghost" }}
       />
     );
   }
 
+  // A lesson line: the time, the title and the zone from the file (each in its own <bdi>), the file line.
+  function lessons(items: readonly (LessonText & { line: number })[]) {
+    const weeks = weekHeaders(items);
+    return (l: LessonText & { line: number }, i: number) => {
+      const w = weeks[i];
+      return (
+        <li className="ln">
+          {w && (
+            <span className="wk">
+              <span>{w.label}</span>
+              <span className="n num">{w.countText}</span>
+            </span>
+          )}
+          <span className="ln-when num">{timeRange(l.start, l.end)}</span>
+          <span className="ln-title">
+            <Text parts={[{ text: l.title, file: true }]} />
+          </span>
+          <span className="ln-zone small muted">
+            <Text parts={[{ text: l.zone, file: true }]} />
+          </span>
+          <span className="ln-line small muted num">{l.line > 0 ? `строка ${l.line}` : ""}</span>
+        </li>
+      );
+    };
+  }
+
+  const plainRow = (parts: readonly Part[]) => (
+    <li className="ln-text">
+      <Text parts={parts} />
+    </li>
+  );
+
   return (
-    <div className="preview">
-      <h2>
+    <div className="import-preview">
+      <h2 className="group-title">
         Файл: <bdi>{p.fileName}</bdi>
       </h2>
-      <ul className="chips">
-        {summaryChips(p).map((c) => (
-          <li key={c.kind} className={c.kind === "errors" && c.count > 0 ? "error" : undefined}>
-            {c.text}
-          </li>
-        ))}
-      </ul>
+      <CountTiles
+        label="Итог проверки файла"
+        tiles={summaryChips(p).map((c) => ({
+          key: c.kind,
+          label: c.label,
+          count: c.count,
+          className: c.kind === "errors" ? (c.count > 0 ? "bad" : "zero") : undefined,
+        }))}
+      />
 
       {p.errors.length > 0 ? (
-        <p className="error">{notes.rowErrors}</p>
+        <Banner kind="fail">
+          <p>{notes.rowErrors}</p>
+        </Banner>
       ) : (
         <>
           {p.window !== null && <p className="muted">{windowText(p.window)}</p>}
@@ -235,31 +279,45 @@ export function PreviewView(props: {
 
       {groups.length > 0 && (
         <div className="actions">
-          <button type="button" onClick={() => props.onLists(setCollapsed(props.lists, groups, !folded))}>
+          <Button variant="ghost" onClick={() => props.onLists(setCollapsed(props.lists, groups, !folded))}>
             {folded ? listTexts.expandAll : listTexts.collapseAll}
-          </button>
+          </Button>
         </div>
       )}
-      {group("errors", p.errors, rowErrorParts, { more: () => listTexts.allErrors })}
-      {group("added", p.added, (a) => lineParts(a.line, lessonParts(a)))}
-      {group("changed", p.changed, changeParts)}
-      {group("removed", p.removed, lessonParts)}
-      {group("conflicts", p.conflicts, conflictParts, {
-        warning: true,
-        before: <p className="warning">{notes.conflicts}</p>,
+      {group("errors", p.errors, (e) => plainRow(rowErrorParts(e)), { more: () => listTexts.allErrors })}
+      {group("added", p.added, lessons(p.added))}
+      {group("changed", p.changed, (c) => (
+        <li className="diff">
+          <span className="ln-line small muted num">{c.line > 0 ? `строка ${c.line}` : ""}</span>
+          <del>
+            <Text parts={lessonParts(c.before)} />
+          </del>
+          <span className="diff-arrow">→</span>
+          <ins>
+            <Text parts={lessonParts(c.after)} />
+          </ins>
+        </li>
+      ))}
+      {group("removed", p.removed, lessons(p.removed))}
+      {group("conflicts", p.conflicts, (c) => plainRow(conflictParts(c)), {
+        before: (
+          <Banner kind="wait">
+            <p>{notes.conflicts}</p>
+          </Banner>
+        ),
         after: p.conflictsTruncated && <p className="warning">{notes.conflictsTruncated}</p>,
       })}
 
       {/* Pinned to the window edge: Apply stays visible below a long preview. */}
       <div className="actions sticky-actions">
         {canApply(p) && (
-          <button type="button" disabled={props.busy} onClick={props.onApply}>
-            Применить
-          </button>
+          <Button variant="primary" disabled={props.busy} onClick={props.onApply}>
+            {applyLabel(p)}
+          </Button>
         )}
-        <button type="button" disabled={props.busy} onClick={props.onCancel}>
+        <Button disabled={props.busy} onClick={props.onCancel}>
           Отмена
-        </button>
+        </Button>
       </div>
     </div>
   );

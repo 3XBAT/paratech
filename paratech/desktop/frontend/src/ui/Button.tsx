@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type ReactNode, useId } from "react";
-import { Icon, type IconName } from "./Icon";
+import { Icon, type IconName } from "./Icon.js";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 

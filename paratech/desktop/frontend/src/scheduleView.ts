@@ -13,6 +13,7 @@ import {
   type ImportWindow,
   type LessonText,
 } from "./bindings/schedule.js";
+import { plural } from "./plural.js";
 
 /** Whether the page offers "Применить": only for a received preview the core accepts, without row errors. */
 export function canApply(p: ImportPreview | null): boolean {
@@ -96,13 +97,20 @@ export function summaryText(p: ImportPreview): string {
 
 export interface SummaryChip {
   kind: "added" | "changed" | "removed" | "unchanged" | "errors";
+  /** "Добавится: 2"; label and count are the same split in two. */
   text: string;
+  label: string;
   count: number;
 }
 
 /** The counters above the preview. */
 export function summaryChips(p: ImportPreview): SummaryChip[] {
-  const chip = (kind: SummaryChip["kind"], label: string, count: number) => ({ kind, text: `${label}: ${count}`, count });
+  const chip = (kind: SummaryChip["kind"], label: string, count: number) => ({
+    kind,
+    text: `${label}: ${count}`,
+    label,
+    count,
+  });
   return [
     chip("added", "Добавится", p.added.length),
     chip("changed", "Изменится", p.changed.length),
@@ -135,6 +143,59 @@ export function previewGroups(p: ImportPreview): PreviewGroup[] {
     ["conflicts", p.conflicts.length],
   ];
   return sizes.filter(([, n]) => n > 0).map(([g]) => g);
+}
+
+/** "Применить 153 изменения": the button names what it does; plain "Применить" when nothing changes. */
+export function applyLabel(p: ImportPreview): string {
+  const n = p.added.length + p.changed.length + p.removed.length;
+  return n === 0 ? "Применить" : `Применить ${n} ${plural(n, "изменение", "изменения", "изменений")}`;
+}
+
+/** A divider above the first lesson of a Monday–Sunday week: "12.10–18.10" and the lessons in a row in it. */
+export interface WeekHeader {
+  label: string;
+  count: number;
+  countText: string;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// The week of a "ДД.ММ.ГГГГ ЧЧ:ММ" start, keyed by its Monday; null when the date does not parse.
+function weekOf(start: string): { key: string; label: string } | null {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})/.exec(start);
+  if (m === null) {
+    return null;
+  }
+  const [day, month, year] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCDate() !== day || d.getUTCMonth() !== month - 1) {
+    return null;
+  }
+  const monday = new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000);
+  const sunday = new Date(monday.getTime() + 6 * 86_400_000);
+  const dm = (x: Date) => `${pad2(x.getUTCDate())}.${pad2(x.getUTCMonth() + 1)}`;
+  return { key: monday.toISOString().slice(0, 10), label: `${dm(monday)}–${dm(sunday)}` };
+}
+
+/**
+ * For each lesson, the divider to show above it: at the start of every run of lessons in one week, null elsewhere.
+ * The list keeps the core's order; an unparsable date gets no divider.
+ */
+export function weekHeaders(lessons: readonly { start: string }[]): (WeekHeader | null)[] {
+  const weeks = lessons.map((l) => weekOf(l.start));
+  const out: (WeekHeader | null)[] = weeks.map(() => null);
+  for (let i = 0; i < weeks.length; i++) {
+    const w = weeks[i];
+    if (w === null || (i > 0 && weeks[i - 1]?.key === w.key)) {
+      continue;
+    }
+    let n = 1;
+    while (i + n < weeks.length && weeks[i + n]?.key === w.key) {
+      n++;
+    }
+    out[i] = { label: w.label, count: n, countText: `${n} ${plural(n, "занятие", "занятия", "занятий")}` };
+  }
+  return out;
 }
 
 export function windowText(w: ImportWindow): string {
