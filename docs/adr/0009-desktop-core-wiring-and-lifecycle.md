@@ -1,7 +1,7 @@
 # ADR-0009: Desktop core wiring and lifecycle
 
 - **Status:** Accepted
-- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030, TASK-065; builds on ADR-0007 (Wails shell)
+- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030, TASK-065, TASK-058; builds on ADR-0007 (Wails shell)
 
 ## Context
 The use cases existed, but nothing built them: no job ran, no recording recovered, the page's Stop / Run now were stubs.
@@ -101,12 +101,22 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   (ADR-0002). Other OSes: `audiocapture.Unavailable`, every call fails; its `Finalize` is not `ErrNoAudio`, so
   interrupted recordings keep their chunks for a later recovery.
 - **Recorder run mode** (`--recorder --data-dir`): no instance lock (the parent holds it), no database, no UI shell,
-  no jobs; only the Storage Manager on `<DataDir>/artifacts`. Events on stdout, log on stderr, stops when stdin closes.
+  no log file, no jobs; only the Storage Manager on `<DataDir>/artifacts`. Events on stdout, log on stderr, stops when
+  stdin closes. A self-test request (TASK-058) plays the tone of `audiocapture.PlatformTone` and writes nothing.
+- **Log file (TASK-058).** `app.New` wraps the logger of `main` in `logfile.Tee` (main.go unchanged); everything logs
+  through it, the Wails logger behind its Info floor too. `openCore` attaches `<DataDir>/logs/desktop.log` (5 MiB,
+  `desktop.1.log`, `desktop.2.log`) right after the instance lock, so a second instance never writes it; a file that
+  cannot be opened is a Warn on stderr. `Close` detaches and closes it after the storage.
+- **Diagnostics page (TASK-058).** `input/wails.DiagnosticsService`: `CheckSound` (`cases/soundcheck`: the recorder's
+  `CheckSound`, refused while a recording runs, verdict for the remembered source) and `SaveSupportBundle`
+  (`cases/supportbundle`: native save dialog, then `zipfile` writes about.json, settings.json, capture.json and
+  `logs/` with the profile directory as `%USERPROFILE%`; `sysinfo` reads the versions). Nothing is uploaded.
 - **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow` (the
   post-processing, the drafts and the proposals), which places lesson times and deadlines in the student's zone.
   SQLite stores Unix ms, so the zone does not affect storage.
 - **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@learning-assistant.invalid>`. Jitter via `crypto/rand`.
-- **Data dir:** `learning-assistant.db`, `learning-assistant.lock`, `artifacts/` (Storage Manager root), `artifacts/stt-work/`.
+- **Data dir:** `learning-assistant.db`, `learning-assistant.lock`, `artifacts/` (Storage Manager root), `artifacts/stt-work/`,
+  `logs/`.
 
 ## Not wired yet (follow-ups)
 - The calendar sync of `schedulesync` and the deadline calendar of the proposals (stand-in until TASK-051).
@@ -124,6 +134,7 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   `audiocapture`, `weblink`) import only domain and std (`instancelock`, `audiocapture` and `weblink` also
   `x/sys/windows`).
 - `userfile` (TASK-049, std only) reads the file chosen for the schedule import, so the binding does no file access.
+- TASK-058 adapters: `logfile`, `zipfile` (std only), `sysinfo` (std, `x/sys/windows` and its `registry`, read only).
 - The page's "not available yet" error is gone; Stop / Run now always reach the use cases.
 - Open owner decisions: STT timeout 6 h; model alias `default`; Message-ID domain `learning-assistant.invalid`; LLM jobs
   show "waiting for network" while the Hub is not configured; UI mode shows no error dialog when the start fails.

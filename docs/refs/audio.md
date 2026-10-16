@@ -34,6 +34,8 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
 | IID_IActivateAudioInterfaceCompletionHandler | 41D949AB-9862-444A-80F6-C261334DA5EB |
 | IID_IPropertyStore (propsys.h) | 886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99 |
 | PKEY_Device_FriendlyName (functiondiscoverykeys_devpkey.h) | {A45C254E-DF1C-4EFD-8020-67D146A850E0}, pid 14 |
+| PKEY_Device_EnumeratorName (functiondiscoverykeys_devpkey.h) | {A45C254E-DF1C-4EFD-8020-67D146A850E0}, pid 24 |
+| PKEY_AudioEndpoint_FormFactor (mmdeviceapi.h; VT_UI4 EndpointFormFactor: Headphones 3, Headset 5, Handset 6) | {1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E}, pid 0 |
 | IID_IAudioMeterInformation (Windows SDK endpointvolume.h; mingw only declares it) | C02216F6-8C67-4B5B-9D00-D008E73E0064 |
 
 | Interface | Slots used (0-2 = IUnknown) |
@@ -44,7 +46,7 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
 | IAudioMeterInformation | GetPeakValue 3 |
 | IAudioClient | Initialize 3, GetBufferSize 4, GetCurrentPadding 6, GetMixFormat 8, Start 10, Stop 11, SetEventHandle 13, GetService 14 |
 | IAudioCaptureClient | GetBuffer 3, ReleaseBuffer 4, GetNextPacketSize 5 |
-| IAudioRenderClient | GetBuffer 3, ReleaseBuffer 4 |
+| IAudioRenderClient | GetBuffer 3 (also returns the buffer for the self-test tone), ReleaseBuffer 4 |
 | IActivateAudioInterfaceAsyncOperation | GetActivateResult 3 |
 
 | Constant | Value |
@@ -54,7 +56,7 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
 | AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY / SILENT | 0x1 / 0x2 |
 | AUDCLNT_SHAREMODE_SHARED, eRender, eConsole | 0, 0, 0 |
 | CLSCTX_ALL | 0x17 |
-| VT_BLOB | 65 |
+| VT_BLOB / VT_UI4 / VT_LPWSTR | 65 / 19 / 31 |
 
 ## Classic loopback (`AUDCLNT_STREAMFLAGS_LOOPBACK`)
 - Capture stream opened on a **render** endpoint, shared mode only, format = endpoint mix format [MS] (Loopback Recording; OBS does
@@ -162,6 +164,14 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
   confirmed (post would only make EXCLUDE switch less often).
 - Device name: `IMMDevice::OpenPropertyStore(STGM_READ)` → `GetValue(PKEY_Device_FriendlyName)`; localized
   ("Динамики (Realtek(R) Audio)" on the owner's machine). User hardware names, fine to log.
+- "Check sound" tone: a plain render client on the default endpoint (shared, mix format, no flags, 200 ms buffer),
+  topped up every 10 ms with a 1 kHz sine; the same COM calls as the keep-alive, with data instead of SILENT.
+- **Bluetooth hands-free hint:** form factor Headset or Handset (`PKEY_AudioEndpoint_FormFactor`) and an enumerator
+  name starting with `BTH` (`PKEY_Device_EnumeratorName`; Windows 10 HFP endpoints are expected under `BTHHFENUM`,
+  A2DP under `BTHENUM` with form factor Headphones). Source: the PKEY and enum values are in the mingw-w64 headers;
+  that the endpoint property store has the enumerator name and these values for HFP is **not confirmed** (no MS
+  page found, not checked with a headset). Without the name the hint never fires; it is a hint, not a cause on its
+  own (silence on such an endpoint becomes "hands_free").
 - Windows version: `RtlGetVersion` for the numbers; `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` ProductName,
   DisplayVersion, UBR read only. ProductName says "Windows 10" on Windows 11; build ≥ 22000 (not Server) = Windows 11.
 

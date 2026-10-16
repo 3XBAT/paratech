@@ -125,6 +125,12 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   `values.CaptureDiagnostics`); the session stores a fallback as the problem of the recording (fixed text) on the next
   heartbeat or before the stop. Not confirmed: whether the session meter reads before or after the session volume
   (mute and volume 0 are checked too).
+  Done (part B, "Check sound"): a recorder child with a self-test request plays 1 kHz at -12 dBFS for 1.5 s on the
+  default output (shared mode, mix format) and captures it with INCLUDE of its own PID and with classic loopback; a
+  Goertzel filter (100 ms blocks, 30 % of the energy at 1 kHz, 3 blocks in a row) decides. 10 s timeout, then the
+  child is killed; refused while a recording captures. Verdict: an app = the INCLUDE result, the whole computer = either.
+  Limits: the tone plays aloud; it is our process, not the chosen app (a muted tab is not found); classic loopback may
+  hear other sounds too; the Bluetooth hands-free hint is not confirmed (`docs/refs/audio.md`).
 - **TASK-059 (picker):** list built from top-level windows grouped by exe (as OBS), audio-session state as a "playing now"
   badge (sessions appear only after the first sound); target = tree root PID; Chromium session PIDs walked up to the window
   owner. Remember by exe, not PID; re-find after the app restarts (OBS: every 3 s) and record silence meanwhile; activation

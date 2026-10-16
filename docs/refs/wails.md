@@ -54,6 +54,11 @@ Source: https://github.com/wailsapp/wails/tree/v3.0.0-beta.29/v3 · API: https:/
 - A cancelled `Dialog.OpenFile()` returns `cfd.ErrorCancelled` ("cancelled by user"); `cfd` is internal, so the shell matches the text
   (`schedulepicker_windows.go`). Re-check it on a Wails upgrade.
 - In beta.29 a real dialog failure also comes back as "cancelled by user": `hresultToError` compares a `uintptr` with `< 0`, which is never true.
+- Save dialog (TASK-058, `savepicker_windows.go`): `app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
+  Title, Filename, Filters: []application.FileFilter{{DisplayName, Pattern}}, CanCreateDirectories, Window})
+  .PromptForSingleSelection()` (`dialogs.go`, `dialog_manager.go`). `SaveFileDialogStruct` has no `SetTitle`: the title
+  only goes through the options. `Directory` "" lets Windows pick the folder. The first filter becomes the default
+  extension (`dialogs_windows.go`); IFileSaveDialog asks before overwriting. Cancel is the same "cancelled by user".
 
 ## Frontend runtime
 - `/wails/runtime.js` is an ES module served by the app: `import { Window } from "/wails/runtime.js"; Window.Hide()`.

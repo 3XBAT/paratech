@@ -15,5 +15,10 @@
 // loopback of the target and classic loopback of the default output device as the one-way fallback (after an
 // activation failure, a failed stream, or a healthy-but-mute stream: mute.go); elsewhere none (Supported is false),
 // and Unavailable is the recorder of such a build. Recorder.Diagnostics reports the capture (TASK-058) as the domain
-// values.CaptureDiagnostics: modes, attempts with HRESULTs, switches with causes, Windows version, output device.
+// values.CaptureDiagnostics: modes, attempts with HRESULTs, switches with causes, Windows version, output device;
+// RecentCaptures lists them for the support bundle.
+//
+// Recorder.CheckSound is "Check sound" (selftest.go): a child with a self-test request plays a tone through the
+// TonePlayer (PlatformTone) and captures it with process loopback INCLUDE of its own process and with classic
+// loopback; a Goertzel filter tells whether each heard it.
 package audiocapture
