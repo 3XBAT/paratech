@@ -4,7 +4,8 @@
 //
 // The URL is re-serialized from the parsed values.SourceURL and checked right before the start: https, a plain host,
 // and a path of unreserved ASCII characters only. Anything that explorer.exe or Windows could read as a switch, a
-// separator, a quote or an environment variable is refused.
+// separator, a quote or an environment variable is refused. OpenAuthPage is the same launcher for an OAuth
+// authorization page, whose query is checked byte by byte instead (unreserved characters, '=', '&', "%XX").
 package weblink
 
 import (
@@ -24,8 +25,12 @@ var (
 	ErrRefused = errors.New("weblink: the link is not a plain https page")
 )
 
-// maxLinkLen bounds the argument; far below the command-line limit of Windows.
-const maxLinkLen = 1024
+// maxLinkLen bounds the argument; far below the command-line limit of Windows. maxAuthLinkLen bounds an
+// authorization page with its query.
+const (
+	maxLinkLen     = 1024
+	maxAuthLinkLen = 2048
+)
 
 const httpsPrefix = "https://"
 
@@ -43,6 +48,53 @@ func (o *Opener) OpenLink(ctx context.Context, u values.SourceURL) error {
 		return err
 	}
 	return start(ctx, arg)
+}
+
+// OpenAuthPage opens an OAuth authorization page (TASK-050: Google sign-in in the system browser). The URL is checked
+// as is, never rebuilt: https, a plain host, a path as for OpenLink and a non-empty query of unreserved characters,
+// '=', '&' and percent escapes of two hex digits only. It returns like OpenLink.
+func (o *Opener) OpenAuthPage(ctx context.Context, rawURL string) error {
+	if err := checkAuthLink(rawURL); err != nil {
+		return err
+	}
+	return start(ctx, rawURL)
+}
+
+// checkAuthLink accepts "https://<host><path>?<query>" where the part before '?' passes checkLink and the query is
+// unreserved characters, '=', '&' and "%XX" escapes. It refuses '+', ',', ';', quotes, spaces, '^', '!', '<', '>',
+// '|', '`', a bare '%', a fragment and everything else.
+func checkAuthLink(s string) error {
+	if len(s) > maxAuthLinkLen {
+		return fmt.Errorf("%w: longer than %d bytes", ErrRefused, maxAuthLinkLen)
+	}
+	base, query, ok := strings.Cut(s, "?")
+	if !ok || query == "" {
+		return fmt.Errorf("%w: an authorization page needs a query", ErrRefused)
+	}
+	if err := checkLink(base); err != nil {
+		return err
+	}
+	for i := 0; i < len(query); i++ {
+		c := query[i]
+		switch {
+		case c == '%':
+			if i+2 >= len(query) || !isHex(query[i+1]) || !isHex(query[i+2]) {
+				return fmt.Errorf("%w: the query has a bad escape", ErrRefused)
+			}
+			i += 2
+		case c == '=' || c == '&' || (pathByte(c) && c != '/'):
+		default:
+			return fmt.Errorf("%w: the query has a character that is not allowed", ErrRefused)
+		}
+	}
+	if _, err := url.Parse(s); err != nil {
+		return fmt.Errorf("%w: not a URL", ErrRefused)
+	}
+	return nil
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 // linkArg re-serializes u and returns it when it passes the check.
