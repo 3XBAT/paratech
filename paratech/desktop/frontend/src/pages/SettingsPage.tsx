@@ -13,7 +13,7 @@ const labels: Record<Toggle, string> = {
 
 const hints: Record<Toggle, string> = {
   recordingPromptsEnabled: "Перед началом пары появится окно с кнопкой «Начать запись».",
-  processOnlyOnAcPower: "На батарее расшифровка и конспекты ждут подключения питания и начнутся сами.",
+  processOnlyOnAcPower: "На батарее расшифровка ждёт подключения питания и начнётся сама.",
 };
 
 const setters: Record<Toggle, Exclude<keyof SettingsApi, "get">> = {
@@ -27,8 +27,8 @@ const themeOptions: readonly { value: ThemeChoice; label: string }[] = [
   { value: "dark", label: "Тёмная" },
 ];
 
-// The page only shows and forwards the values; defaults and rules live in the Go core (ARCH-44). The theme is a
-// choice of this window alone, kept in the webview's storage (ADR-0012), so it needs no binding.
+// The page only shows and forwards the values; defaults and rules live in the Go core (ARCH-44). The theme is kept in
+// the webview's storage (ADR-0012), so it needs no binding; the popup reads it from there and follows a change.
 export function SettingsPage() {
   const api = useMemo(() => settingsApi(callByName), []);
   const [settings, setSettings] = useState<Settings | null>(null);

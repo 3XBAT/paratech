@@ -90,6 +90,7 @@ export function Toggle(props: {
   hint?: ReactNode;
 }) {
   const id = useId();
+  const hintId = useId();
   return (
     <div className="set">
       <label htmlFor={id}>{props.label}</label>
@@ -100,9 +101,14 @@ export function Toggle(props: {
         className="switch"
         checked={props.checked}
         disabled={props.disabled}
+        aria-describedby={props.hint ? hintId : undefined}
         onChange={(e) => props.onChange(e.target.checked)}
       />
-      {props.hint && <span className="small muted">{props.hint}</span>}
+      {props.hint && (
+        <span id={hintId} className="small muted">
+          {props.hint}
+        </span>
+      )}
     </div>
   );
 }

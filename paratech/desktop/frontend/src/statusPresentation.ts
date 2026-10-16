@@ -61,7 +61,7 @@ const jobLooks: Readonly<Record<string, Look>> = {
 const runningLabels: Readonly<Record<string, string>> = {
   stt: "Расшифровка",
   summarize: "Пишется конспект",
-  extract_homework: "Поиск домашнего задания",
+  extract_homework: "Ищется задание",
 };
 
 const runningHints: Readonly<Record<string, string>> = {

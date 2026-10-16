@@ -12,7 +12,7 @@ export const recordingStatusLabels: Readonly<Record<string, string>> = {
   FINALIZING: "Сохраняется",
   COMPLETED: "Завершена",
   FAILED: "Ошибка",
-  RECOVERY_REQUIRED: "Нужно восстановить",
+  RECOVERY_REQUIRED: "Восстановится при запуске",
 };
 
 /** Labels of the job statuses (domain/jobs/job). A waiting status is shown as its reason. */
