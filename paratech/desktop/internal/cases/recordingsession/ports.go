@@ -96,11 +96,11 @@ type Recorder interface {
 	// recording to FAILED or RECOVERY_REQUIRED (PRD section 6.2). Cancelling ctx stops waiting, not capturing.
 	Wait(ctx context.Context, id shared.RecordingID) error
 
-	// Diagnostics returns what the capture of id does (TASK-058): the mode asked for and the mode it runs in, the
-	// switches of the fallback chain with their causes (ADR-0002 Decision 3), the Windows version and the output
-	// device. It returns at once (a snapshot in memory; ctx is for the port contract) and ok is false for a recording
-	// the recorder does not know (never started here, or forgotten long after its end). The session reads it on every
-	// heartbeat and before it ends the capture, and stores a fallback as the problem of the recording.
+	// Diagnostics returns what the capture of id does (PRD section 6.3, TASK-058): the mode asked for and the mode it
+	// runs in, the switches of the fallback chain with their causes (ADR-0002 Decision 3), the Windows version and the
+	// output device. It returns at once (a snapshot in memory; ctx is for the port contract) and ok is false for a
+	// recording the recorder does not know (never started here, or forgotten long after its end). The session reads it
+	// on every heartbeat and before it ends the capture, and stores a fallback as the problem of the recording.
 	Diagnostics(ctx context.Context, id shared.RecordingID) (d values.CaptureDiagnostics, ok bool)
 
 	// Finalize assembles the readable chunks in the directory chunks, in name order, into the single file output and
