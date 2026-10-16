@@ -231,7 +231,8 @@ func (c *Client) once(ctx context.Context, op string, r request, target string, 
 		reasons = append(reasons, e.Reason)
 	}
 	// A rate limit is never an accepted answer: a 403 "slow down" must not read as "no access".
-	if !(status == http.StatusForbidden && hasRateLimitReason(reasons)) && slices.Contains(r.accept, status) {
+	rateLimited := status == http.StatusForbidden && hasRateLimitReason(reasons)
+	if !rateLimited && slices.Contains(r.accept, status) {
 		return status, nil
 	}
 	return 0, statusError(op, status, reasons, parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()))

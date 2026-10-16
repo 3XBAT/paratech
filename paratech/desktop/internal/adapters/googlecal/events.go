@@ -177,7 +177,7 @@ func summary(text, fallback string) string {
 	for _, r := range text {
 		switch {
 		case isBidiControl(r):
-		case unicode.IsControl(r), r == ' ', r == ' ':
+		case unicode.IsControl(r), r == '\u2028', r == '\u2029':
 			b.WriteRune(' ')
 		default:
 			b.WriteRune(r)
@@ -196,6 +196,6 @@ func summary(text, fallback string) string {
 // isBidiControl reports the bidirectional formatting characters: LRM, RLM, ALM, the embeddings and overrides and
 // the isolates.
 func isBidiControl(r rune) bool {
-	return r == '‎' || r == '‏' || r == '؜' || (r >= '‪' && r <= '‮') ||
-		(r >= '⁦' && r <= '⁩')
+	return r == '\u200E' || r == '\u200F' || r == '\u061C' || (r >= '\u202A' && r <= '\u202E') ||
+		(r >= '\u2066' && r <= '\u2069')
 }

@@ -15,12 +15,12 @@ func TestSummary(t *testing.T) {
 		{"plain", "Алгебра", "Алгебра"},
 		{"trimmed and collapsed", "  Алгебра \t  7 ", "Алгебра 7"},
 		{"line breaks", "a\r\nb\nc", "a b c"},
-		{"line and paragraph separators", "a b c", "a b c"},
+		{"line and paragraph separators", "a\u2028b\u2029c", "a b c"},
 		{"C1 control", "a\u0085b\u009bc", "a b c"},
-		{"bidi override", "abc‮exe.txt", "abcexe.txt"},
-		{"bidi marks and isolates", "‎a‏؜b⁦c⁧d⁨e⁩‪‫‬‭", "abcde"},
+		{"bidi override", "abc\u202Eexe.txt", "abcexe.txt"},
+		{"bidi marks and isolates", "\u200Ea\u200F\u061Cb\u2066c\u2067d\u2068e\u2069\u202A\u202B\u202C\u202D", "abcde"},
 		{"invalid utf-8", "a\xffb", "ab"},
-		{"only controls", "‮ \n\t", "fallback"},
+		{"only controls", "\u202E\u2028\n\t", "fallback"},
 		{"empty", "", "fallback"},
 		{"long", strings.Repeat("я", maxSummaryRunes+50), strings.Repeat("я", maxSummaryRunes)},
 		{"cut before a space", strings.Repeat("я", maxSummaryRunes-1) + " b", strings.Repeat("я", maxSummaryRunes-1)},

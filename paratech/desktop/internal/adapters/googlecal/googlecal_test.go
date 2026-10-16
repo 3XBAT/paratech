@@ -585,7 +585,7 @@ func TestInvalidRequests(t *testing.T) {
 func TestSanitizedTitle(t *testing.T) {
 	r := newRig(t)
 	cal := r.calendar(t)
-	if err := r.c.UpsertLesson(context.Background(), cal, newLesson(t, "l1", "Алгебра‮  урок⁦ 7 ")); err != nil {
+	if err := r.c.UpsertLesson(context.Background(), cal, newLesson(t, "l1", "Алгебра\u202E\u2028 урок\u2066 7 ")); err != nil {
 		t.Fatal(err)
 	}
 	if e, _ := r.api.Event(cal, googlecal.LessonEventID("l1")); e.Summary != "Алгебра урок 7" {
