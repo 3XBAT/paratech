@@ -13,9 +13,7 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/sqlite"
-	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
-	"paratech/desktop/testenv"
 )
 
 func newTestApp(t *testing.T, dataDir string) *App {
@@ -108,59 +106,6 @@ func TestOpenCoreListsActivity(t *testing.T) {
 	recs, err := core.Activity.ListRecordings(ctx)
 	if err != nil || len(recs) != 0 {
 		t.Fatalf("ListRecordings = %+v, %v; want none", recs, err)
-	}
-}
-
-// The UI-mode core: with a notifier, the job runner reports finished jobs to the notification use case. An STT job
-// whose pinned model is not installed fails at once, and the user is notified exactly once.
-func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
-	ctx := context.Background()
-	e, _ := testEnv(t)
-	notifier := &testenv.FakeNotifier{}
-	log := slog.New(slog.DiscardHandler)
-
-	c, err := buildCore(ctx, t.TempDir(), e, notifier, log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	life := c.newLifecycle(log, e.stopTimeout, closer{name: "storage", close: c.close})
-	t.Cleanup(func() { // before TempDir removal: Windows cannot delete open files
-		if err := life.shutdown(); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := life.start(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	a := &App{core: c} // the helpers read only the core
-	rec := completedRecording(t, a, "rec-1")
-	enqueueSTT(t, a, "job-stt", rec, "m-gone") // a permanent failure: the model was removed
-
-	jobs := sqlite.NewJobRepository(c.db)
-	var failed *job.Job
-	testenv.Eventually(t, "the STT job fails", func() bool {
-		j, err := jobs.Get(ctx, "job-stt")
-		if err != nil {
-			t.Fatal(err)
-		}
-		failed = j
-		return j.Status() == job.StatusFailed
-	}, nil)
-	if failed.LastError() != "permanent failure: "+transcribe.ErrModelNotInstalled.Error() || failed.Attempts() != 1 {
-		t.Fatalf("job error %q after %d attempts, want the missing model on the first attempt", failed.LastError(),
-			failed.Attempts())
-	}
-	testenv.Eventually(t, "the user is notified", func() bool { return len(notifier.Calls()) > 0 }, nil)
-
-	// After the stop no later event can add a call.
-	if err := life.shutdown(); err != nil {
-		t.Fatal(err)
-	}
-	calls := notifier.Calls()
-	if len(calls) != 1 || calls[0].Job() != "job-stt" || calls[0].Type() != transcribe.JobType ||
-		calls[0].Status() != job.StatusFailed {
-		t.Fatalf("notifications %+v, want one for the failed STT job", calls)
 	}
 }
 

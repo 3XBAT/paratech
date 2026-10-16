@@ -16,7 +16,6 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/modelcatalog"
-	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
@@ -36,9 +35,6 @@ var (
 	_ transcribe.EventPublisher             = (*homeworkflow.PostProcessor)(nil)
 	_ jobrunner.Handler                     = (*homeworkflow.Drafts)(nil)
 	_ deliveryJobs                          = (*senddelivery.Service)(nil)
-	_ jobrunner.Observer                    = (*notify.Service)(nil)
-	_ notify.Notifier                       = (*wails.Shell)(nil)
-	_ notify.NoticeRepository               = (*sqlite.NoticeRepository)(nil)
 	_ recordingsession.ArtifactStore        = (*filestore.Store)(nil)
 	_ wails.RecordingStopper                = (*recordingsession.Service)(nil)
 	_ wails.JobForcer                       = (*jobrunner.Service)(nil)
@@ -127,13 +123,16 @@ func TestRegistrationPolicies(t *testing.T) {
 	}
 }
 
-// Every job type has a handler, and the notified types are the registered ones except email delivery.
+// Every job type has a handler.
 func TestRegisteredTypes(t *testing.T) {
 	var got []job.Type
 	for _, r := range registrations(handlersForTest()) {
 		got = append(got, r.Type)
 	}
-	want := append(notifyTypes(), senddelivery.JobType)
+	want := []job.Type{
+		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
+		homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+	}
 	slices.Sort(got)
 	slices.Sort(want)
 	if !slices.Equal(got, want) {

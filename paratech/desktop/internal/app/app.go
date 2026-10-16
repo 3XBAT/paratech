@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"paratech/desktop/config"
-	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -175,12 +174,7 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	// No path: it lies below the user's profile, and logs go into the support bundle.
 	a.log.Info("instance lock acquired")
 
-	// Toasts need the shell; a headless core tells nobody about finished jobs.
-	var notifier notify.Notifier
-	if a.shell != nil {
-		notifier = a.shell
-	}
-	c, err := buildCore(ctx, a.cfg.DataDir, a.env, notifier, a.log)
+	c, err := buildCore(ctx, a.cfg.DataDir, a.env, a.log)
 	if err != nil {
 		return wails.Core{}, errors.Join(err, lock.Release())
 	}

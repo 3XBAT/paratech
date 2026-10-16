@@ -49,5 +49,4 @@ var (
 	errFinished  = errors.New("handler returned")
 
 	errReconcileTimeout = errors.New("reconciler timed out")
-	errObserverTimeout  = errors.New("observer timed out")
 )
