@@ -1820,3 +1820,35 @@
 - docs/qa/windows-checklist.md целиком, на Windows 10 и Windows 11
 
 ---
+
+## [TASK-065] Только уведомление «урок начался»: убраны тосты о завершении обработки, PRD §15
+**Дата:** 2026-10-16
+**Статус:** done
+
+### Что сделано
+- Решение владельца (2026-10-15): единственное уведомление MVP — попап начала занятия; ход обработки виден в «Записях и задачах». Путь TASK-053 удалён целиком (не оставлен неиспользуемым): cases/notify, domain/jobs/notice, domain/jobs/services/notifypolicy, порт jobrunner.Observer и его вызовы (finish, Cancel, Recover), sqlite NoticeRepository и queries/notices.sql (sqlcgen перегенерирован), testenv FakeNotifier, input/wails notices.go и toasts_windows.go, Shell.Notify/Ready, проводка notifier в app (buildCore без параметра notifier, notifyTypes)
+- Оболочка не регистрирует службу Wails services/notifications -> ключи HKCU AppUserModelId/CLSID/NotificationCategories больше не пишутся; ключи от старых сборок безвредны (run-alpha.md)
+- Настройка notifyOnProcessingComplete удалена из домена, preferences, sqlite, биндинга SettingsService и JSON; флажок «Уведомлять о завершении обработки» убран со страницы настроек (frontend)
+- Миграция 0008_drop_completion_notices.sql: DROP TABLE job_notices, ALTER TABLE settings DROP COLUMN notify_on_processing_complete; Down восстанавливает оба (колонка в конце таблицы, запросы называют колонки); 0001..0007 не тронуты; docs/contracts/schema.sql без них
+- go.mod/go.sum: удалён косвенный git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 (go mod tidy), ничего не добавлено
+- Документы: PRD §15 (изменение по решению владельца), ADR-0009 (решение «No completion notifications»), ADR-0007, docs/refs/wails.md, docs/qa/run-alpha.md, docs/qa/windows-checklist.md (вместо пункта «Расхождение» — проверка, что тостов нет)
+- Удалённые тесты (вместе с кодом): cases/notify, notice, notifypolicy, jobrunner observe_test (7 тестов Observer), sqlite notices_test, testenv notifier_test, tests/notify_sqlite_test.go, wails notices_test и toasts_windows_test, TestNotify/TestReady/TestNotifyWithoutShell, TestBuildCoreWithNotifierNotifiesFinishedJobs, TestSetNotifyOnProcessingComplete, случаи «выключить уведомления» в тестах настроек
+- Изменённые существующие тесты: sqlite settings_test (другой писатель и конфликты версий через SetProcessOnlyOnACPower), domain settings_test (нулевое время через SetRecordingPromptsEnabled), migrate_test (версия 8, без job_notices), errors_test (параметры sqlc), wails settings_test (3 метода, JSON без поля), shell_test (fakeUI без notify), фейки настроек в connections/modelcatalog/recordingprompt, tests/schema_test и settings_sqlite_test, app registrations_test (явный список типов), frontend settings.test.mjs (форма ответа из двух полей, новые случаи для processOnlyOnAcPower)
+- Новые тесты: TestMigrationToVersion8DropsCompletionNotices, TestNoCompletionToasts (статический: нет импорта notifications/go-toast, go.mod без go-toast), TestFinishedJobsShowNothing (UI-сборка ядра: FAILED и COMPLETED задачи stt, summarize, extract_homework -> попап не показан)
+- Ревью: approve (medium: регрессионный тест только статический -> TestFinishedJobsShowNothing; low: «в реестр ничего не пишет» -> «ключей уведомлений»; low: коммиты 2804ae7..2810621 по отдельности не собирают биндинги фронтенда — принято; nits: черновик ДЗ в PRD §15, заголовок schema.sql) -> исправлено 77b084e, 502931a; повторное ревью approve. Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на финальной голове
+- [x] Шаг 1: go test -race -count=1 ./desktop/... и npm run test (94)
+- [x] Шаг 2: GOOS=windows go vet ./desktop/... (и GOOS=linux CGO_ENABLED=0)
+- [x] Шаг 3: TestFinishedJobsShowNothing, TestNoCompletionToasts
+
+### Решения (подтвердить)
+- Удалено целиком, а не оставлено выключенным: меньше кода и зависимостей; вернуть тосты — новая задача и ADR
+- Down миграции 0008 возвращает колонку со значением по умолчанию 1 (прежнее значение пользователя теряется)
+
+### Заметки (follow-up)
+- Ручная проверка владельцем на Windows: в «Настройках» два флажка; после распознавания и конспекта тостов нет; попап начала занятия работает как раньше
+- Low: TestFinishedJobsShowNothing не покрывает homework_draft и упавшую задачу Hub (наблюдателя больше нет, все типы завершаются одинаково)
+
+---

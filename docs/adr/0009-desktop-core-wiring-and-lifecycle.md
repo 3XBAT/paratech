@@ -50,8 +50,9 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   popup; the user follows processing on the «Записи и задачи» page. The TASK-053 path is removed, not kept unused:
   `cases/notify`, `domain/jobs/notice`, `notifypolicy`, the job runner `Observer`, the Wails toasts and the setting
   toggle. Migration 0008 drops `job_notices` and `settings.notify_on_processing_complete` (applied migrations stay
-  unchanged). The shell registers no Wails notifications service, so it writes no notification keys under HKCU; keys left by older builds
-  are harmless. `tests/no_completion_toasts_test.go` fails if the notifications package or go-toast comes back.
+  unchanged). The shell registers no Wails notifications service, so it writes no notification keys under HKCU; keys
+  left by older builds are harmless. `tests/no_completion_toasts_test.go` fails if the notifications package or
+  go-toast comes back; `TestFinishedJobsShowNothing` (app) checks that finished jobs show nothing.
 
 - **Recording -> STT (TASK-060).** `recordingsession` calls its `CompletionListener` after a recording is saved COMPLETED
   with a track (stop, hard cap, capture ended, startup recovery); the app passes `transcribe.Enqueuer`. In one `Tx.Do` it
