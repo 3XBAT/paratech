@@ -4,6 +4,7 @@
 -- written from this file. This is a draft of the contract, not a migration: it has no goose annotations.
 -- Architecture: docs/architecture.md (aggregates map to tables, ARCH-13 references are plain id columns).
 -- Source of requirements: docs/prd/learning-assistant-prd-v0.4.md.
+-- job_notices (0004) and settings.notify_on_processing_complete were dropped by migration 0008 (TASK-065).
 --
 -- Conventions
 --   * SQLite dialect, pure Go driver modernc.org/sqlite. The adapter enables PRAGMA foreign_keys = ON,

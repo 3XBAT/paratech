@@ -688,7 +688,7 @@ Prompt-injection defenses should include structured outputs, strict tool boundar
 The MVP should provide a minimal notification policy rather than a full notification-rule engine.
 
 - The only MVP notification is the "lesson started" recording prompt (§6.1); it can be enabled/disabled.
-- Finished or failed processing (transcription, summary, homework extraction) shows no notification; the user follows the progress in the main window (owner decision 2026-10-15, TASK-065).
+- Finished or failed processing (transcription, summary, homework extraction, homework draft) shows no notification; the user follows the progress in the main window (owner decision 2026-10-15, TASK-065).
 - Do not spam the user with repeated prompts for the same lesson.
 
 ## 16. Core acceptance criteria

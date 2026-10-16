@@ -76,7 +76,7 @@ cmd /c ".\paratech\dist\alpha\learning-assistant.exe --log-level debug 2> .\para
 
 Только в режиме с окном (по `docs/refs/wails.md` и коду Wails, при подготовке не запускалось):
 - кэш WebView2 в `%AppData%\learning-assistant.exe` (папка по имени exe);
-- в реестр приложение ничего не пишет (с TASK-065: уведомлений Windows нет). Сборки до TASK-065 оставили ключи `HKCU\Software\Classes\AppUserModelId\Learning Assistant`, `HKCU\Software\Classes\CLSID\<GUID>` и `HKCU\SOFTWARE\Learning Assistant\NotificationCategories`; данных приложения там нет, оставить их безвредно.
+- ключей уведомлений Windows в реестре приложение больше не пишет (TASK-065). Сборки до TASK-065 оставили ключи `HKCU\Software\Classes\AppUserModelId\Learning Assistant`, `HKCU\Software\Classes\CLSID\<GUID>` и `HKCU\SOFTWARE\Learning Assistant\NotificationCategories`; данных приложения там нет, оставить их безвредно.
 
 Сброс: выйти из приложения (`Quit`), переименовать или удалить папку `%LOCALAPPDATA%\LearningAssistant`; при следующем запуске создастся пустая. Для опытов удобнее сразу `--data-dir` с одноразовой папкой.
 По желанию можно удалить и папку `%AppData%\learning-assistant.exe`; старые ключи реестра выше для сброса трогать не нужно.
