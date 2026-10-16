@@ -160,8 +160,10 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
   `IAudioSessionControl` for `IAudioMeterInformation` (as NAudio does). `GetPeakValue` gives 0..1. The meter IID is not in
   the mingw-w64 headers; a one-off check on 19045 (2026-10-16, nothing played or captured) got both meters with it. A wrong IID would only give E_NOINTERFACE: no sound shown, no switch.
 - Whether the session meter reads before or after the session volume/mute: not confirmed; the detector also requires
-  `ISimpleAudioVolume` not muted and volume > 0. Whether the endpoint meter is pre or post endpoint volume: not
-  confirmed (post would only make EXCLUDE switch less often).
+  `ISimpleAudioVolume` not muted and volume > 0, and a peak above 1e-4 (-80 dBFS).
+- The healthy-but-mute detector reads only session meters, for EXCLUDE those outside our own process tree. The endpoint
+  meter is not used: it read above zero with nothing playing (TASK-058 review, 2026-10-16), and it also shows our own
+  tree and the device's processing, which EXCLUDE does not capture.
 - Device name: `IMMDevice::OpenPropertyStore(STGM_READ)` → `GetValue(PKEY_Device_FriendlyName)`; localized
   ("Динамики (Realtek(R) Audio)" on the owner's machine). User hardware names, fine to log.
 - "Check sound" tone: a plain render client on the default endpoint (shared, mix format, no flags, 200 ms buffer),

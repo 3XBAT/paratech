@@ -119,16 +119,18 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   Done (part A): the child reports the Windows version (RtlGetVersion + registry ProductName/DisplayVersion/UBR, build
   ≥ 22000 = Windows 11), the output device name (every attempt and reopen), the format and the switch cause; the parent
   logs "capture started" with all of it. Healthy-but-mute detector in the child (`mute.go`): process loopback, only
-  zeros/SILENT packets, meters show sound (INCLUDE: an active, unmuted session of the target tree with peak > 0;
-  EXCLUDE: the default endpoint peak) for `SourceConfig.MuteThreshold` (default 15 s) → classic loopback. A muted
-  tab/app shows no sound, so it never switches. The `Recorder` port got `Diagnostics` (domain
+  zeros/SILENT packets, session meters show sound (an active, unmuted session with peak > 1e-4: of the target tree
+  for INCLUDE, outside our own tree for EXCLUDE; the endpoint meter is not used, it read above zero in silence) for
+  `SourceConfig.MuteThreshold` (default 15 s; 5 s without expected sound start the count again) → classic loopback. A
+  muted tab/app shows no sound, so it never switches. The `Recorder` port got `Diagnostics` (domain
   `values.CaptureDiagnostics`); the session stores a fallback as the problem of the recording (fixed text) on the next
   heartbeat or before the stop. Not confirmed: whether the session meter reads before or after the session volume
   (mute and volume 0 are checked too).
   Done (part B, "Check sound"): a recorder child with a self-test request plays 1 kHz at -12 dBFS for 1.5 s on the
   default output (shared mode, mix format) and captures it with INCLUDE of its own PID and with classic loopback; a
-  Goertzel filter (100 ms blocks, 30 % of the energy at 1 kHz, 3 blocks in a row) decides. 10 s timeout, then the
-  child is killed; refused while a recording captures. Verdict: an app = the INCLUDE result, the whole computer = either.
+  Goertzel filter (100 ms blocks, 30 % of the energy at 1 kHz, 3 blocks in a row) decides. 14.3 s timeout (the child's
+  9.3 s budget plus 5 s), then the child is killed; refused while a recording captures, stopped when one starts.
+  Verdict: an app = the INCLUDE result, the whole computer = either.
   Limits: the tone plays aloud; it is our process, not the chosen app (a muted tab is not found); classic loopback may
   hear other sounds too; the Bluetooth hands-free hint is not confirmed (`docs/refs/audio.md`).
   Manual status: `docs/qa/compat-matrix.md` (Windows builds × modes × scenarios, tester steps for the alpha exe). The
