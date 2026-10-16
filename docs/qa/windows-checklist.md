@@ -55,9 +55,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`).
 Вручную (§8, пункт 9):
 - [ ] Видео с речью в Chrome. В попапе выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях» «Идёт запись», время растёт.
-- [ ] Через 2 мин «Остановить»: «Останавливается» (может мелькнуть), «Сохраняется», затем «Завершена».
+- [ ] Через 2 мин «Остановить»: «Останавливается» (может мелькнуть), «Сохраняется», затем «Завершена»: запись переходит в группу «Завершённые (N)» под записями в работе.
 - [ ] `%LOCALAPPDATA%\la-qa\artifacts\recordings\<id>.wav` играет, слышна речь, длина как у записи.
-- [ ] `Quit` и запуск: запись в списке «Завершена», файл на месте.
+- [ ] `Quit` и запуск: запись в группе «Завершённые», «Завершена», файл на месте.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -77,7 +77,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 - [ ] Запись идёт не меньше 2 мин.
 - [ ] Диспетчер задач → «Подробности» (включить колонку «Командная строка»): завершить `learning-assistant.exe` **без** `--recorder`.
 - [ ] Через ~3 с второй процесс (с `--recorder`) пропадает сам.
-- [ ] Запуск: в логе `found an interrupted recording` и `recording recovery finished recordings=1`; запись «Завершена» с причиной «the app stopped while the recording was in progress»; `<id>.wav` играет, потеряно не больше последней минуты.
+- [ ] Запуск: в логе `found an interrupted recording` и `recording recovery finished recordings=1`; запись в группе «Завершённые», «Завершена» с причиной «the app stopped while the recording was in progress»; `<id>.wav` играет, потеряно не больше последней минуты.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -114,7 +114,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Вручную:
 - [ ] Модель по умолчанию `ggml-small.bin`, запись 5–10 мин, «Остановить».
 - [ ] Пока «Распознавание речи» «Выполняется», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
-- [ ] Запуск: в логе `startup recovery finished requeued=1`; задача снова «Выполняется», затем «Готово»; задача распознавания этой записи одна, не две.
+- [ ] Запуск: в логе `startup recovery finished requeued=1`; задача снова «Выполняется», затем «Готово»; задача распознавания этой записи одна, не две (законченные задачи — в группе «Завершённые» под «Задачами»).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -168,8 +168,10 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestScheduleImportPreviewShowsChangesAndConflicts`, `TestScheduleImportErrorInRow3LeavesScheduleUnchanged` (`desktop/tests/schedule_import_sqlite_test.go`); `TestScheduleImportThroughThePageBinding` (`desktop/internal/app/schedule_test.go`); `TestScheduleCommitRefusedWithoutAPreview` (`desktop/internal/input/wails/schedule_test.go`); `TestScheduleImportICSWeeklyEventWithinImportDates` (`desktop/tests/schedule_import_ics_sqlite_test.go`); `TestScheduleImportXLSXMatchesCSV` (`desktop/tests/schedule_import_xlsx_sqlite_test.go`).
 Вручную (§8 «Импорт расписания»):
-- [ ] CSV: превью «Добавится: 1, изменится: 0, удалится: 0, без изменений: 0.» до записи; «Применить» → «Расписание обновлено: …».
+- [ ] CSV: до записи в превью счётчики «Добавится: 1», «Изменится: 0», «Удалится: 0», «Без изменений: 0», «Ошибки: 0»; «Применить» → «Расписание обновлено: …».
 - [ ] Файл с датой `2026-13-40`: ошибка строки, кнопки «Применить» нет. Снова выбрать исправный файл: «Изменений нет…» — расписание не тронуто.
+- [ ] Поменять в файле только время конца и выбрать снова: счётчик «Изменится: 1», в группе «Изменятся» до → после.
+- [ ] (по желанию) Большое расписание (сотни занятий): в группах первые 8 строк и «Показать ещё N», «Применить» и «Отмена» видны внизу без прокрутки (подробнее §8 «Импорт расписания»).
 - [ ] ICS (экспорт из Google Calendar) и XLSX (тот же CSV, сохранённый в Excel): превью есть, «Применить» работает.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
