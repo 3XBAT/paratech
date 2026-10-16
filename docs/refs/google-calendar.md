@@ -111,3 +111,57 @@ All facts below fetched 2026-10-16 from the official pages; "updated" is the dat
 8. Sign in from the app; on the "Google hasn't verified this app" screen choose Advanced > Go to … (unsafe).
 9. To revoke: «Выйти» in the app, or myaccount.google.com/linkedapps > the app > Remove access.
 - In Testing the sign-in lasts 7 days; then the app asks to sign in again.
+
+## Calendar API v3 (TASK-051)
+**WebFetch was not available in the TASK-051 session**: no page below was fetched, so every fact is **not verified**.
+They are the behavior the adapter (`adapters/googlecal`) expects; the adapter is written so that a wrong expectation
+fails safe (no duplicate events, no access outside the app's calendar). Verify against the pages before the pilot and
+replace "not verified" with the page date.
+
+### Sources (to fetch)
+| Page | Updated |
+|---|---|
+| [calendars.insert](https://developers.google.com/workspace/calendar/api/v3/reference/calendars/insert) | not fetched |
+| [calendars.get](https://developers.google.com/workspace/calendar/api/v3/reference/calendars/get) | not fetched |
+| [calendarList.list](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/list) | not fetched |
+| [events.insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert) | not fetched |
+| [events.update](https://developers.google.com/workspace/calendar/api/v3/reference/events/update) | not fetched |
+| [events.get](https://developers.google.com/workspace/calendar/api/v3/reference/events/get) | not fetched |
+| [events.delete](https://developers.google.com/workspace/calendar/api/v3/reference/events/delete) | not fetched |
+| [Events resource](https://developers.google.com/workspace/calendar/api/v3/reference/events) | not fetched |
+| [Handle API errors](https://developers.google.com/workspace/calendar/api/guides/errors) | not fetched |
+
+### Expected facts (all not verified)
+- Base URL `https://www.googleapis.com/calendar/v3`; JSON bodies; `Authorization: Bearer <access token>`.
+- `POST /calendars` (insert): body `summary` (required), `description`, `timeZone` (optional). The answer carries the
+  Google-assigned `id` (e.g. `…@group.calendar.google.com`); the client cannot choose it.
+- `GET /calendars/{calendarId}`: 404 when the calendar does not exist or is not visible to the token.
+- `GET /users/me/calendarList` (list): `maxResults` (max 250), `pageToken`/`nextPageToken`, `showHidden`; entries carry
+  `id`, `summary`, `description`, `accessRole`. Whether it is allowed with `calendar.app.created` only: **not verified**.
+  The adapter treats a refusal (403 other than a rate limit) as "lookup not possible" and creates the calendar.
+- Event `id` chosen by the client (events.insert): characters of base32hex (lowercase `a-v`, digits `0-9`, RFC 2938
+  §3.1.2), length 5..1024, unique per calendar. Insert of an existing id (also of a deleted, i.e. cancelled, event)
+  answers **409** (reason `duplicate`).
+- `PUT /calendars/{calendarId}/events/{eventId}` (update) replaces the whole event; 404 when no event has this id.
+  Whether an update with `status: confirmed` restores a cancelled event: **not verified** (the adapter relies on it after
+  a 409; if it fails, the call returns a transient error and never inserts a second event).
+- `GET /calendars/{calendarId}/events/{eventId}`: a deleted event may be returned with `status: cancelled`.
+- `DELETE /calendars/{calendarId}/events/{eventId}`: 204; **410** (reason `deleted`) when already deleted, 404 when unknown.
+- Events resource: `summary`, `description`, `start`/`end` as `{dateTime (RFC 3339), timeZone (IANA)}`, `status`
+  (`confirmed`, `tentative`, `cancelled`), `extendedProperties.private` (string map, visible only to the app; size limits
+  not verified, the adapter keeps keys and values short).
+- Errors (JSON `error.code`, `error.errors[].reason`): 400 bad request; 401 invalid credentials (refresh the access token);
+  403 `rateLimitExceeded`/`userRateLimitExceeded`/`quotaExceeded`/`dailyLimitExceeded` (retry with exponential backoff),
+  403 `forbidden`/`insufficientPermissions` (not retried); 404 not found; 409 duplicate; 410 deleted; 412 precondition
+  failed (ETag; the adapter sends no `If-Match`); 429 too many requests (backoff, `Retry-After` may be set);
+  500/502/503/504 (backoff).
+- Authorization scopes of calendars.insert/get and events.*: expected to include `calendar.app.created` (scope meaning in
+  section 1: "Make secondary Google calendars, and see, create, change, and delete events on them").
+
+### Adapter decisions resting on the facts above
+- Event id = lowercase base32hex (no padding) of SHA-256 of `lesson:<lesson id>` or `deadline:<assignment id>`: 52
+  characters, deterministic, so no event id is stored (ADR-0004(e)).
+- Upsert = PUT; 404 → insert with the id; 409 on insert → PUT once more. A retry after a lost answer therefore updates the
+  event it created and never makes a second one (PRD section 14 case 8).
+- Delete: 404 and 410 are success.
+- Deadline event: start = due, end = due + 15 minutes, `timeZone: UTC` (a zero-length event is not verified to be valid).
