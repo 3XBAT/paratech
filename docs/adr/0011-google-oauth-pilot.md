@@ -57,6 +57,9 @@
 - **Job** `calendar_sync`: requeue on recovery (idempotent), not Heavy, 30 min. At most one job waits to start; a request
   while one runs makes the next one. Requested after an import that changed lessons, after sign-in, at start (if
   signed in) and by «Синхронизировать». Not signed in / sign-in expired = job completes without writing, the page says so.
+  A job that starts while a run is in progress ends at once; the running one requests the next job.
+- **Stuck lessons**: a lesson Google refuses (400, bad request) or keeps taken/deleted is skipped and stays pending;
+  the rest is written and the job fails (retried if a skip may pass). 20 skips in a row, or any other error, end the run.
 - **Sign-out keeps the binding**: the same account gets its calendar back; another account cannot see it, so a fresh
   calendar is made and everything is rewritten.
 - **Deadlines** only through a confirmed proposal (hard rule 3); the sync job writes lessons only. A recreated calendar

@@ -71,6 +71,41 @@ func TestLessonCalendarErrorMapping(t *testing.T) {
 	}
 }
 
+// The write of one lesson gets schedulesync.ErrLessonRejected for the reasons of that event only, keeping its class;
+// failures of the calendar, the sign-in or the network do not.
+func TestLessonWriteErrorMapping(t *testing.T) {
+	tests := []struct {
+		reason   error
+		class    func(error) error
+		rejected bool
+	}{
+		{googlecal.ErrInvalidRequest, backoff.Permanent, true},
+		{googlecal.ErrRejected, backoff.Permanent, true},
+		{googlecal.ErrConflict, backoff.Transient, true},
+		{googlecal.ErrNotRestored, backoff.Transient, true},
+		{googlecal.ErrForbidden, backoff.Permanent, false},
+		{googlecal.ErrNotFound, backoff.Permanent, false},
+		{googlecal.ErrUnauthorized, backoff.Permanent, false},
+		{googlecal.ErrForeignCalendar, backoff.Transient, false},
+		{googlecal.ErrRateLimited, backoff.Transient, false},
+		{googlecal.ErrUnavailable, backoff.Transient, false},
+		{googlecal.ErrNetwork, backoff.Transient, false},
+		{googlecal.ErrCredentials, backoff.Transient, false},
+		{googlecal.ErrNotSignedIn, backoff.Permanent, false},
+	}
+	for _, tt := range tests {
+		from := tt.class(fmt.Errorf("googlecal: upsert lesson: %w", tt.reason))
+		err := lessonWriteError(from)
+		if errors.Is(err, schedulesync.ErrLessonRejected) != tt.rejected || !errors.Is(err, from) ||
+			backoff.Classify(err) != backoff.Classify(from) {
+			t.Errorf("lessonWriteError(%v) = %v, want rejected %v", tt.reason, err, tt.rejected)
+		}
+	}
+	if err := lessonWriteError(nil); err != nil {
+		t.Fatalf("lessonWriteError(nil) = %v", err)
+	}
+}
+
 // calendarJobs returns the calendar sync jobs of the core.
 func calendarJobs(t *testing.T, a *App) []*job.Job {
 	t.Helper()

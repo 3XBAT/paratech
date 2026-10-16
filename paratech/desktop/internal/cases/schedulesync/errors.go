@@ -31,9 +31,14 @@ var (
 	// ErrCalendarNotConnected.
 	ErrCalendarSignInExpired = fmt.Errorf("%w: google sign-in expired", ErrCalendarNotConnected)
 
-	// ErrLessonsRefused means the calendar refused some lessons for good in one sync run; the others were written and
-	// the refused ones stay pending.
-	ErrLessonsRefused = errors.New("calendar refused some lessons")
+	// ErrLessonRejected means the calendar did not take the write of one lesson for a reason of that lesson only (a
+	// refused or malformed event, an event id Google keeps taken or deleted). The CalendarAdapter returns an error
+	// wrapping it with its retry class; the sync skips the lesson and goes on with the others.
+	ErrLessonRejected = errors.New("calendar rejected the lesson")
+
+	// ErrLessonsSkipped means a sync run skipped some lessons (ErrLessonRejected, ErrLessonBusy); the others were
+	// written and the skipped ones stay pending.
+	ErrLessonsSkipped = errors.New("calendar sync skipped some lessons")
 
 	// ErrLessonBusy means a lesson kept changing while the sync recorded its calendar state; the job tries again.
 	ErrLessonBusy = errors.New("lesson changed during calendar sync")

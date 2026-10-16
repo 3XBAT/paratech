@@ -95,11 +95,27 @@ func (l lessonCalendar) ConfirmCalendar(ctx context.Context, calendarID string) 
 }
 
 func (l lessonCalendar) UpsertLesson(ctx context.Context, calendarID string, ls *lesson.Lesson) error {
-	return lessonCalendarError(l.c.UpsertLesson(ctx, calendarID, ls))
+	return lessonWriteError(l.c.UpsertLesson(ctx, calendarID, ls))
 }
 
 func (l lessonCalendar) DeleteEvent(ctx context.Context, calendarID string, id shared.LessonID) error {
-	return lessonCalendarError(l.c.DeleteEvent(ctx, calendarID, id))
+	return lessonWriteError(l.c.DeleteEvent(ctx, calendarID, id))
+}
+
+// lessonWriteError is lessonCalendarError for the write of one lesson: the adapter reasons that concern only that
+// event (a bad request, a 4xx refusal of it, an id Google keeps taken or deleted) also get
+// schedulesync.ErrLessonRejected, so the sync skips the lesson and goes on. A 403 or 404 means the calendar itself
+// (access or the calendar gone) and ends the run.
+func lessonWriteError(err error) error {
+	err = lessonCalendarError(err)
+	switch {
+	case errors.Is(err, schedulesync.ErrCalendarNotConnected):
+		return err
+	case errors.Is(err, googlecal.ErrInvalidRequest), errors.Is(err, googlecal.ErrRejected),
+		errors.Is(err, googlecal.ErrConflict), errors.Is(err, googlecal.ErrNotRestored):
+		return fmt.Errorf("%w: %w", schedulesync.ErrLessonRejected, err)
+	}
+	return err
 }
 
 // lessonCalendarError adds the sentinel of the use case to the adapter's sign-in classes; the adapter error stays

@@ -89,13 +89,15 @@ type ScheduleParser interface {
 // Errors: without a Google sign-in every method returns an error wrapping ErrCalendarNotConnected, and
 // ErrCalendarSignInExpired when Google no longer accepts the stored one (the app maps the adapter's classes). Other
 // errors are marked backoff.ErrTransient or backoff.ErrPermanent; one wrapping shared.ErrNetworkUnavailable means
-// Google cannot be reached. Error texts are fixed: no title, token or Google answer.
+// Google cannot be reached. An UpsertLesson or DeleteEvent error that concerns only that lesson wraps
+// ErrLessonRejected (keeping its class): the sync skips the lesson. Any other error ends the run. Error texts are
+// fixed: no title, token or Google answer.
 type CalendarAdapter interface {
 	// EnsureCalendar returns the ID of the dedicated "Learning Assistant" calendar and creates it if it does not
 	// exist. It is idempotent (PRD section 11.3). fresh is true when the calendar is new to this installation (just
-	// created, found again at Google, or replacing a calendar that is gone): none of the events the core thinks are
-	// written may be in it, so the core marks every live lesson pending and then calls ConfirmCalendar. fresh stays
-	// true on every call until then, so a crash in between loses nothing.
+	// created, or replacing a calendar that is gone): none of the events the core thinks are written may be in it, so
+	// the core marks every live lesson pending and then calls ConfirmCalendar. fresh stays true on every call until
+	// then, so a crash in between loses nothing.
 	EnsureCalendar(ctx context.Context) (calendarID string, fresh bool, err error)
 
 	// ConfirmCalendar records that the core has marked every lesson for a rewrite into calendarID (PRD section 11.3),

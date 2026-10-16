@@ -24,9 +24,10 @@ type lessonStore struct {
 	mu       sync.Mutex
 	rows     map[shared.LessonID]lesson.State
 	applies  int
-	applyErr error // returned by the next ApplyChanges when set
-	saveErr  error // returned by the next Save when set, nothing stored
-	purgeErr error // returned by the next PurgeDeleted when set, nothing removed
+	applyErr error                    // returned by the next ApplyChanges when set
+	saveErr  error                    // returned by the next Save when set, nothing stored
+	purgeErr error                    // returned by the next PurgeDeleted when set, nothing removed
+	busy     map[shared.LessonID]bool // every Save of the lesson is a version conflict, as if it kept changing
 	saves    int
 	purges   int
 
@@ -82,6 +83,9 @@ func (s *lessonStore) Save(ctx context.Context, l *lesson.Lesson) error {
 	if err := s.saveErr; err != nil {
 		s.saveErr = nil
 		return err
+	}
+	if s.busy[l.ID()] {
+		return shared.ErrVersionConflict
 	}
 	return s.write([]*lesson.Lesson{l})
 }

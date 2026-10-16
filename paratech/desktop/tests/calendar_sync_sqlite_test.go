@@ -80,7 +80,7 @@ func classifyFakeAuth(err error) googlecal.AuthFailure {
 	return googlecal.AuthNone
 }
 
-// calendarPort maps the adapter's sign-in classes to the use case's sentinels, like the app's bridge.
+// calendarPort maps the adapter's sign-in and lesson-only classes to the use case's sentinels, like the app's bridge.
 type calendarPort struct{ c *googlecal.Client }
 
 func calendarPortError(err error) error {
@@ -89,6 +89,18 @@ func calendarPortError(err error) error {
 		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarSignInExpired, err)
 	case errors.Is(err, googlecal.ErrNotSignedIn):
 		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarNotConnected, err)
+	}
+	return err
+}
+
+func lessonPortError(err error) error {
+	err = calendarPortError(err)
+	switch {
+	case errors.Is(err, schedulesync.ErrCalendarNotConnected):
+		return err
+	case errors.Is(err, googlecal.ErrInvalidRequest), errors.Is(err, googlecal.ErrRejected),
+		errors.Is(err, googlecal.ErrConflict), errors.Is(err, googlecal.ErrNotRestored):
+		return fmt.Errorf("%w: %w", schedulesync.ErrLessonRejected, err)
 	}
 	return err
 }
@@ -103,11 +115,11 @@ func (p calendarPort) ConfirmCalendar(ctx context.Context, id string) error {
 }
 
 func (p calendarPort) UpsertLesson(ctx context.Context, id string, l *lesson.Lesson) error {
-	return calendarPortError(p.c.UpsertLesson(ctx, id, l))
+	return lessonPortError(p.c.UpsertLesson(ctx, id, l))
 }
 
 func (p calendarPort) DeleteEvent(ctx context.Context, id string, lessonID shared.LessonID) error {
-	return calendarPortError(p.c.DeleteEvent(ctx, id, lessonID))
+	return lessonPortError(p.c.DeleteEvent(ctx, id, lessonID))
 }
 
 type calIDs struct {

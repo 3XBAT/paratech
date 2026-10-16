@@ -578,30 +578,183 @@ func TestSyncFailureClasses(t *testing.T) {
 	}
 }
 
-// A lesson the calendar refuses for good does not block the others; the job then fails with a fixed reason, and a run
-// whose writes keep being refused stops early.
-func TestSyncRefusedLessons(t *testing.T) {
+// rejected is a failure of one lesson only, as the app bridge returns it.
+func rejected(transient bool) error {
+	err := fmt.Errorf("fake: 400: %w", ErrLessonRejected)
+	if transient {
+		return backoff.Transient(err)
+	}
+	return backoff.Permanent(err)
+}
+
+// seedN seeds n lessons l00, l01, ... in start order and returns their ids.
+func (e *syncEnv) seedN(t *testing.T, n int) []shared.LessonID {
+	t.Helper()
+	ids := make([]shared.LessonID, n)
+	for i := range n {
+		ids[i] = shared.LessonID(fmt.Sprintf("l%03d", i))
+		e.seed(t, string(ids[i]), content("Lesson", t0.Add(time.Duration(i)*time.Minute)))
+	}
+	return ids
+}
+
+// A lesson stuck first in the order does not block the lessons after it: they are written, it stays pending, and the
+// job fails transiently when the skip may pass on a retry, permanently otherwise.
+func TestSyncSkipsAStuckLesson(t *testing.T) {
+	tests := []struct {
+		name      string
+		stick     func(e *syncEnv)
+		reason    error
+		permanent bool
+	}{
+		{"refused for good", func(e *syncEnv) { e.cal.refuse["l000"] = rejected(false) }, ErrLessonRejected, true},
+		{"kept deleted at google", func(e *syncEnv) { e.cal.refuse["l000"] = rejected(true) }, ErrLessonRejected, false},
+		{"keeps changing", func(e *syncEnv) { e.store.busy = map[shared.LessonID]bool{"l000": true} }, ErrLessonBusy, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			ids := e.seedN(t, 3)
+			tt.stick(e)
+
+			err := e.handle(t)
+			if !errors.Is(err, ErrLessonsSkipped) || !errors.Is(err, tt.reason) ||
+				(backoff.Classify(err) == backoff.ClassPermanent) != tt.permanent {
+				t.Fatalf("Handle = %v, want ErrLessonsSkipped with %v, permanent %v", err, tt.reason, tt.permanent)
+			}
+			if wait, ok := backoff.WaitStatus(err); ok {
+				t.Fatalf("the job waits for %s", wait)
+			}
+			if got := e.pending(t); !slices.Equal(got, ids[:1]) {
+				t.Fatalf("pending %v, want only the stuck lesson", got)
+			}
+			for _, id := range ids[1:] {
+				if e.store.snapshot()[id].CalendarSyncedRevision != 1 || e.cal.current()[id] != 1 {
+					t.Fatalf("%s not written", id)
+				}
+			}
+			if st, _ := e.sync.Status(context.Background()); st.LastOutcome != OutcomeFailed {
+				t.Fatalf("outcome %q", st.LastOutcome)
+			}
+		})
+	}
+}
+
+// Skips of both classes make the job transient, so the runner retries; once only permanent ones are left it fails.
+func TestSyncSkipClassOfTheJob(t *testing.T) {
 	e := newSyncEnv(t)
-	for i := range 4 {
-		e.seed(t, fmt.Sprintf("l%d", i), content("Lesson", at(i)))
-	}
-	e.cal.refuse["l0"] = backoff.Permanent(errors.New("fake: 400"))
+	ids := e.seedN(t, 3)
+	e.cal.refuse[ids[0]] = rejected(false)
+	e.cal.refuse[ids[1]] = rejected(true)
+
 	err := e.handle(t)
-	if !errors.Is(err, ErrLessonsRefused) || backoff.Classify(err) != backoff.ClassPermanent {
-		t.Fatalf("Handle = %v, want ErrLessonsRefused", err)
+	if !errors.Is(err, ErrLessonsSkipped) || backoff.Classify(err) != backoff.ClassTransient {
+		t.Fatalf("Handle = %v, want a transient ErrLessonsSkipped", err)
 	}
-	if got := e.pending(t); !slices.Equal(got, []shared.LessonID{"l0"}) || len(e.cal.current()) != 3 {
-		t.Fatalf("pending %v, events %v", got, e.cal.current())
+	e.cal.mu.Lock()
+	delete(e.cal.refuse, ids[1])
+	e.cal.mu.Unlock()
+	err = e.handle(t)
+	if !errors.Is(err, ErrLessonsSkipped) || backoff.Classify(err) != backoff.ClassPermanent {
+		t.Fatalf("retry = %v, want a permanent ErrLessonsSkipped", err)
+	}
+	if got := e.pending(t); !slices.Equal(got, ids[:1]) || e.cal.upserted[ids[2]] != 1 {
+		t.Fatalf("pending %v, upserts of the good lesson %d", got, e.cal.upserted[ids[2]])
+	}
+}
+
+// More stuck lessons at the head than the old stop (5) still let the later ones through, run after run.
+func TestSyncStuckHeadDoesNotBlockTheRest(t *testing.T) {
+	e := newSyncEnv(t)
+	ids := e.seedN(t, 9)
+	for _, id := range ids[:6] {
+		e.cal.refuse[id] = rejected(false)
+	}
+	for run := range 2 {
+		if err := e.handle(t); !errors.Is(err, ErrLessonsSkipped) || backoff.Classify(err) != backoff.ClassPermanent {
+			t.Fatalf("run %d: Handle = %v", run, err)
+		}
+		if got := e.pending(t); !slices.Equal(got, ids[:6]) {
+			t.Fatalf("run %d: pending %v", run, got)
+		}
+	}
+	for _, id := range ids[6:] {
+		if e.cal.upserted[id] != 1 {
+			t.Fatalf("%s upserted %d times", id, e.cal.upserted[id])
+		}
+	}
+}
+
+// A run stops after maxSkippedInARow skips in a row; a written lesson resets the count.
+func TestSyncStopsAfterSkipsInARow(t *testing.T) {
+	e := newSyncEnv(t)
+	for _, id := range e.seedN(t, maxSkippedInARow+3) {
+		e.cal.refuse[id] = rejected(false)
+	}
+	if err := e.handle(t); !errors.Is(err, ErrLessonsSkipped) || e.cal.count("upsert") != maxSkippedInARow {
+		t.Fatalf("Handle = %v after %d upserts, want a stop after %d", err, e.cal.count("upsert"), maxSkippedInARow)
 	}
 
+	// Two rows of maxSkippedInARow-1 skips, each followed by a good lesson: nothing stops.
 	e = newSyncEnv(t)
-	for i := range maxRefusedPerRun + 3 {
-		id := fmt.Sprintf("l%02d", i)
-		e.seed(t, id, content("Lesson", at(i)))
-		e.cal.refuse[shared.LessonID(id)] = backoff.Permanent(errors.New("fake: 403"))
+	ids := e.seedN(t, 2*maxSkippedInARow)
+	var good []shared.LessonID
+	for i, id := range ids {
+		if i%maxSkippedInARow == maxSkippedInARow-1 {
+			good = append(good, id)
+			continue
+		}
+		e.cal.refuse[id] = rejected(false)
 	}
-	if err := e.handle(t); !errors.Is(err, ErrLessonsRefused) || e.cal.count("upsert") != maxRefusedPerRun {
-		t.Fatalf("Handle = %v after %d upserts, want a stop after %d", err, e.cal.count("upsert"), maxRefusedPerRun)
+	if err := e.handle(t); !errors.Is(err, ErrLessonsSkipped) || e.cal.count("upsert") != len(ids) {
+		t.Fatalf("Handle = %v after %d upserts, want %d", err, e.cal.count("upsert"), len(ids))
+	}
+	for _, id := range good {
+		if e.cal.current()[id] != 1 {
+			t.Fatalf("%s not written", id)
+		}
+	}
+}
+
+// A failure that is not of one lesson (refused for the whole calendar, rate limit, sign-in) ends the run at once.
+func TestSyncStopsOnFailuresOfTheCalendar(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"refused", backoff.Permanent(errors.New("fake: 403 forbidden"))},
+		{"rate limited", backoff.Transient(errors.New("fake: 429"))},
+		{"sign-in expired, marked rejected", backoff.Permanent(fmt.Errorf("%w: %w", ErrLessonRejected, ErrCalendarSignInExpired))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			ids := e.seedN(t, 3)
+			e.cal.refuse[ids[0]] = tt.err
+			err := e.handle(t)
+			if errors.Is(err, ErrLessonsSkipped) || e.cal.count("upsert") != 1 || len(e.pending(t)) != 3 {
+				t.Fatalf("Handle = %v after %d upserts, pending %v", err, e.cal.count("upsert"), e.pending(t))
+			}
+		})
+	}
+}
+
+// Skipped lessons stay pending, so later pages read past them; every lesson is tried once and the run ends.
+func TestSyncPagesPastSkippedLessons(t *testing.T) {
+	e := newSyncEnv(t)
+	ids := e.seedN(t, 2*syncBatch+10)
+	var stuck []shared.LessonID
+	for i, id := range ids {
+		if i%2 == 0 {
+			e.cal.refuse[id] = rejected(false)
+			stuck = append(stuck, id)
+		}
+	}
+	if err := e.handle(t); !errors.Is(err, ErrLessonsSkipped) {
+		t.Fatalf("Handle = %v", err)
+	}
+	if got := e.pending(t); !slices.Equal(got, stuck) || e.cal.count("upsert") != len(ids) {
+		t.Fatalf("pending %d of %d, upserts %d", len(got), len(stuck), e.cal.count("upsert"))
 	}
 }
 
@@ -648,12 +801,9 @@ func TestSyncCancelled(t *testing.T) {
 	}
 }
 
-// Runs of one process never overlap: a second job waits until the first one ends.
-func TestSyncRunsDoNotOverlap(t *testing.T) {
-	e := newSyncEnv(t)
-	e.seed(t, "a", content("Math", at(0)))
-	release := make(chan struct{})
-	entered := make(chan struct{})
+// blockFirstUpsert makes the first upsert wait for release; entered is closed when it waits.
+func (e *syncEnv) blockFirstUpsert() (entered, release chan struct{}) {
+	entered, release = make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	e.cal.onUpsert = func(*lesson.Lesson) {
 		once.Do(func() {
@@ -661,6 +811,15 @@ func TestSyncRunsDoNotOverlap(t *testing.T) {
 			<-release
 		})
 	}
+	return entered, release
+}
+
+// Runs of one process never overlap, and a job that starts during a run does not hold a worker: it ends at once, and
+// the running one requests the next job when it ends.
+func TestSyncOverlappingJobEndsAtOnce(t *testing.T) {
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	entered, release := e.blockFirstUpsert()
 	first := make(chan error, 1)
 	go func() { first <- e.handle(t) }()
 	<-entered
@@ -669,21 +828,52 @@ func TestSyncRunsDoNotOverlap(t *testing.T) {
 	go func() { second <- e.handle(t) }()
 	select {
 	case err := <-second:
-		t.Fatalf("the second run did not wait: %v", err)
-	case <-time.After(50 * time.Millisecond):
+		if err != nil {
+			t.Fatalf("second Handle = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second job waits for the first run")
 	}
-	if e.cal.count("ensure") != 1 {
-		t.Fatalf("ensures %d while the first run holds", e.cal.count("ensure"))
+	if e.cal.count("ensure") != 1 || len(e.jobs.all()) != 0 {
+		t.Fatalf("ensures %d, jobs %d while the first run holds", e.cal.count("ensure"), len(e.jobs.all()))
 	}
+
 	close(release)
 	if err := <-first; err != nil {
 		t.Fatal(err)
 	}
-	if err := <-second; err != nil {
-		t.Fatal(err)
+	jobs := e.jobs.all()
+	if len(jobs) != 1 || jobs[0].Type() != CalendarSyncJobType || jobs[0].Status() != job.StatusQueued {
+		t.Fatalf("follow-up jobs = %v", jobs)
 	}
-	if e.cal.upserted["a"] != 1 {
-		t.Fatalf("upserts %d", e.cal.upserted["a"])
+
+	// The follow-up runs alone and asks for nothing more.
+	e.mustSync(t)
+	if e.cal.upserted["a"] != 1 || len(e.jobs.all()) != 1 {
+		t.Fatalf("upserts %d, jobs %d", e.cal.upserted["a"], len(e.jobs.all()))
+	}
+}
+
+// The follow-up for a job that started during the run is requested also when the run is cancelled.
+func TestSyncFollowUpAfterACancelledRun(t *testing.T) {
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	entered, release := e.blockFirstUpsert()
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() { first <- e.sync.Handle(ctx, syncSnapshot(t, CalendarSyncJobType), nil) }()
+	<-entered
+
+	if err := e.handle(t); err != nil {
+		t.Fatalf("second Handle = %v", err)
+	}
+	cancel()
+	close(release)
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first Handle = %v", err)
+	}
+	if jobs := e.jobs.all(); len(jobs) != 1 || jobs[0].Status() != job.StatusQueued {
+		t.Fatalf("follow-up jobs = %v", jobs)
 	}
 }
 

@@ -28,8 +28,9 @@ const (
 	// maxLessonsPerRun bounds the lessons one job writes; with more pending it asks for a follow-up job, so one attempt
 	// stays well inside its timeout.
 	maxLessonsPerRun = 1000
-	// maxRefusedPerRun stops a run whose writes keep being refused: that is no longer one bad lesson.
-	maxRefusedPerRun = 5
+	// maxSkippedInARow stops a run whose writes fail one lesson after another: that is no longer a few bad lessons.
+	// A few stuck lessons at the head of the order must not reach it, or they would stop every run before the rest.
+	maxSkippedInARow = 20
 	// saveRetries bounds the reloads of a lesson that changed while the sync recorded its calendar state.
 	saveRetries = 3
 
@@ -52,7 +53,12 @@ const (
 // Jobs: RequestSync creates a job only when no sync job waits to start (QUEUED or any waiting status), so at most one
 // is queued; a request while a job runs creates the next one, which runs after it and sees what the running one may
 // have missed. The key is "calendar_sync:<job id>": job keys are unique for ever (the store keeps finished jobs), so a
-// fixed key would make every later request a no-op. Runs of this process never overlap.
+// fixed key would make every later request a no-op. Runs of this process never overlap: a job that starts while a
+// run is in progress ends at once, and the running one requests the next job when it ends.
+//
+// A lesson whose write fails for a reason of its own (ErrLessonRejected, ErrLessonBusy) is skipped for the rest of
+// the run; the job then fails with ErrLessonsSkipped, transient when a skip may pass on a retry. Any other failure
+// ends the run at once.
 type CalendarSync struct {
 	lessons     LessonRepository
 	calendar    CalendarAdapter
@@ -64,9 +70,9 @@ type CalendarSync struct {
 	log         *slog.Logger
 	maxAttempts int
 
-	running chan struct{} // holds one token while a run is in progress
-
 	mu      sync.Mutex
+	busy    bool // a run is in progress
+	rerun   bool // a job started during that run
 	outcome SyncOutcome
 	ranAt   time.Time
 }
@@ -82,7 +88,7 @@ func NewCalendarSync(d CalendarDeps) (*CalendarSync, error) {
 	}
 	c := &CalendarSync{
 		lessons: d.Lessons, calendar: d.Calendar, account: d.Account, jobs: d.Jobs, clock: d.Clock, ids: d.IDs, tx: d.Tx,
-		log: d.Log, maxAttempts: d.MaxAttempts, running: make(chan struct{}, 1),
+		log: d.Log, maxAttempts: d.MaxAttempts,
 	}
 	if c.maxAttempts == 0 {
 		c.maxAttempts = backoff.DefaultSpec().MaxAttempts
@@ -152,29 +158,32 @@ func notStarted() []job.Status {
 // Handle runs one sync job (jobrunner.Handler). Without a sign-in, or with one Google no longer accepts, the job ends
 // successfully without writing and the status says so. A transient failure is returned for a retry with backoff (one
 // that wraps shared.ErrNetworkUnavailable waits for the network), a permanent one fails the job; the texts are fixed.
+// A job that starts while a run is in progress ends at once without holding a runner worker.
 func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(context.Context, job.Progress) error) error {
 	if snap.Type() != CalendarSyncJobType {
 		return backoff.Permanent(fmt.Errorf("%s: %w", opSync, ErrUnknownJobType))
 	}
-	select {
-	case c.running <- struct{}{}:
-	case <-ctx.Done():
-		return fmt.Errorf("%s: %w", opSync, ctx.Err())
+	if !c.begin() {
+		c.log.Info(opSync, "skipped", "a run is in progress and requests the next job")
+		return nil
 	}
-	defer func() { <-c.running }()
 
 	st, err := c.run(ctx)
+	if c.end() {
+		// Not lost on a cancel either: the request came from another job.
+		c.followUp(context.WithoutCancel(ctx))
+	}
 	if ctx.Err() != nil {
 		return fmt.Errorf("%s: %w", opSync, ctx.Err()) // cancelled or stopped: the runner decides, nothing to report
+	}
+	if st.more {
+		c.followUp(ctx)
 	}
 	outcome := outcomeOf(err)
 	c.record(outcome)
 	switch outcome {
 	case OutcomeOK:
 		c.log.Info(opSync, "written", st.written, "deleted", st.deleted, "fresh", st.fresh)
-		if st.more {
-			c.followUp(ctx)
-		}
 		return nil
 	case OutcomeNotSignedIn, OutcomeSignInExpired:
 		c.log.Info(opSync, "outcome", string(outcome))
@@ -184,7 +193,29 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 	return fmt.Errorf("%s: %w", opSync, err)
 }
 
-// followUp asks for the next job when the run stopped at its bound with lessons still pending.
+// begin claims the run of this process. When one is in progress it reports false and that run requests the next job.
+func (c *CalendarSync) begin() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.busy {
+		c.rerun = true
+		return false
+	}
+	c.busy = true
+	return true
+}
+
+// end releases the run and reports whether a job started meanwhile.
+func (c *CalendarSync) end() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rerun := c.rerun
+	c.busy, c.rerun = false, false
+	return rerun
+}
+
+// followUp asks for the next job: a job started during the run, or the run stopped at its bound with lessons still
+// pending.
 func (c *CalendarSync) followUp(ctx context.Context) {
 	if _, err := c.RequestSync(ctx); err != nil && !errors.Is(err, ErrCalendarNotConnected) {
 		c.log.Warn(opSync, "follow-up", "not requested", "err", err)
@@ -234,37 +265,36 @@ func (c *CalendarSync) run(ctx context.Context) (runStats, error) {
 		}
 	}
 
-	refused := map[shared.LessonID]bool{}
-	var firstRefusal error
+	// Every page holds at least one lesson not tried yet, or the loop ends; maxLessonsPerRun bounds the rest.
+	var sk skips
+	inARow := 0
 	for processed := 0; ; {
-		// Refused lessons stay pending; read past them.
-		batch, err := c.lessons.ListPendingCalendarSync(ctx, len(refused)+syncBatch)
+		// Skipped lessons stay pending; read past them.
+		batch, err := c.lessons.ListPendingCalendarSync(ctx, len(sk.ids)+syncBatch)
 		if err != nil {
 			return st, err
 		}
 		todo := 0
 		for _, l := range batch {
-			if refused[l.ID()] {
+			if sk.ids[l.ID()] {
 				continue
 			}
 			if processed >= maxLessonsPerRun {
 				st.more = true
-				return st, nil
+				return st, sk.err()
 			}
 			todo++
 			processed++
 			err := c.syncOne(ctx, calendarID, l, &st)
 			switch {
 			case err == nil:
-			case ctx.Err() != nil, errors.Is(err, ErrCalendarNotConnected), backoff.Classify(err) != backoff.ClassPermanent:
+				inARow = 0
+			case ctx.Err() != nil, !lessonOnly(err):
 				return st, err
 			default:
-				refused[l.ID()] = true
-				if firstRefusal == nil {
-					firstRefusal = err
-				}
-				if len(refused) >= maxRefusedPerRun {
-					return st, refusedError(len(refused), firstRefusal)
+				sk.add(l.ID(), err)
+				if inARow++; inARow >= maxSkippedInARow {
+					return st, sk.err()
 				}
 			}
 		}
@@ -272,14 +302,45 @@ func (c *CalendarSync) run(ctx context.Context) (runStats, error) {
 			break
 		}
 	}
-	if firstRefusal != nil {
-		return st, refusedError(len(refused), firstRefusal)
-	}
-	return st, nil
+	return st, sk.err()
 }
 
-func refusedError(n int, first error) error {
-	return backoff.Permanent(fmt.Errorf("%d: %w: %w", n, ErrLessonsRefused, first))
+// lessonOnly reports whether err concerns only the lesson being synced, so the run goes on with the others.
+func lessonOnly(err error) bool {
+	return !errors.Is(err, ErrCalendarNotConnected) && (errors.Is(err, ErrLessonRejected) ||
+		errors.Is(err, ErrLessonBusy) || errors.Is(err, lesson.ErrInvalidLesson))
+}
+
+// skips are the lessons a run skipped and the reasons the job reports.
+type skips struct {
+	ids            map[shared.LessonID]bool
+	first          error
+	firstTransient error
+}
+
+func (s *skips) add(id shared.LessonID, err error) {
+	if s.ids == nil {
+		s.ids = map[shared.LessonID]bool{}
+	}
+	s.ids[id] = true
+	if s.first == nil {
+		s.first = err
+	}
+	if s.firstTransient == nil && backoff.Classify(err) == backoff.ClassTransient {
+		s.firstTransient = err
+	}
+}
+
+// err is nil without skips. With one that may pass on a retry it is transient, so the runner tries the job again;
+// otherwise permanent. The wrapped reason is of that class: a permanent one inside would make any wrapper permanent.
+func (s *skips) err() error {
+	switch {
+	case len(s.ids) == 0:
+		return nil
+	case s.firstTransient != nil:
+		return backoff.Transient(fmt.Errorf("%d: %w: %w", len(s.ids), ErrLessonsSkipped, s.firstTransient))
+	}
+	return backoff.Permanent(fmt.Errorf("%d: %w: %w", len(s.ids), ErrLessonsSkipped, s.first))
 }
 
 // syncOne writes one pending lesson: a deleted one loses its event and then its row, a live one is upserted and then
