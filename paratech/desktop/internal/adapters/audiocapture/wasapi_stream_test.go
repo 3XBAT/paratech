@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // The tests drive the stream logic of the WASAPI source through fake endpoints: no COM, no audio device.
@@ -22,6 +24,7 @@ var (
 type fakeStep struct {
 	packets int           // packets pending after the wait
 	silent  bool          // they are flagged silent
+	sound   bool          // their data is not all zeros
 	disc    bool          // they are flagged as a discontinuity
 	readErr error         // read fails after the packets
 	changed bool          // the default output device changed
@@ -35,8 +38,12 @@ type fakeEndpoint struct {
 	f     Format
 	note  string
 	steps []fakeStep
-	idle  int // packets per wait after the steps
-	tail  int // packets left in the buffer when stopped (the final drain)
+	idle  int           // packets per wait after the steps
+	tail  int           // packets left in the buffer when stopped (the final drain)
+	name  string        // the output device
+	plays bool          // the meters show sound on the target
+	sound bool          // idle packets carry sound (not all zeros)
+	tick  time.Duration // the fake clock moves on by this per wait
 
 	cur     fakeStep
 	pending int
@@ -52,10 +59,10 @@ func (e *fakeEndpoint) wait(time.Duration) error {
 	if len(e.steps) > 0 {
 		e.cur, e.steps = e.steps[0], e.steps[1:]
 	} else {
-		e.cur = fakeStep{packets: e.idle}
+		e.cur = fakeStep{packets: e.idle, sound: e.sound}
 	}
 	e.pending = e.cur.packets
-	e.w.advance(e.cur.advance)
+	e.w.advance(e.cur.advance + e.tick)
 	time.Sleep(time.Millisecond) // no busy loop while nothing is pending
 	return nil
 }
@@ -72,6 +79,9 @@ func (e *fakeEndpoint) read() (rawPacket, bool, error) {
 		p := rawPacket{frames: 480, silent: e.cur.silent, discontinuity: e.cur.disc}
 		if !p.silent {
 			p.data = make([]byte, 480*e.f.BlockAlign())
+			if e.cur.sound {
+				p.data[len(p.data)-1] = 0x3f
+			}
 		}
 		return p, true, nil
 	}
@@ -96,6 +106,15 @@ func (e *fakeEndpoint) stop() error {
 
 func (e *fakeEndpoint) close() { e.closed++ }
 
+func (e *fakeEndpoint) device() string { return e.name }
+
+func (e *fakeEndpoint) playing() bool {
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	e.w.meterReads++
+	return e.plays
+}
+
 // openResult is the outcome of one open of a mode: an endpoint or an error.
 type openResult struct {
 	ep  *fakeEndpoint
@@ -113,6 +132,8 @@ type fakeWorld struct {
 	blockOpen  bool // open waits for the cancel
 	blockSleep bool // sleep waits for the cancel
 	threadErr  error
+	muteAfter  time.Duration // the threshold of the mute detector; 0 = off
+	meterReads int
 }
 
 func newWorld(results map[Mode][]openResult) *fakeWorld {
@@ -193,9 +214,11 @@ func (w *fakeWorld) deps() streamDeps {
 			body()
 			return nil
 		},
-		build: "10.0.19045", now: w.clock, sleep: w.sleep,
+		windows: testWindows, now: w.clock, sleep: w.sleep, muteAfter: w.muteAfter,
 	}
 }
+
+var testWindows = values.WindowsVersion{Product: "Windows 10 Pro", DisplayVersion: "22H2", Major: 10, Build: 19045, UBR: 6456}
 
 func (w *fakeWorld) snapshot() (opened []Mode, sleeps []time.Duration) {
 	w.mu.Lock()
@@ -291,7 +314,7 @@ func TestWASAPIStreamRunsAndDrainsOnStop(t *testing.T) {
 	w := newWorld(map[Mode][]openResult{ModeInclude: {{ep: ep}}})
 	s, obs := openTest(t, w, Target{Mode: ModeInclude, PID: 42})
 
-	if got := s.Info(); got != (StreamInfo{Mode: ModeInclude, Format: fmt48f, Build: "10.0.19045"}) {
+	if got := s.Info(); got != (StreamInfo{Mode: ModeInclude, Format: fmt48f, Windows: testWindows}) {
 		t.Fatalf("Info = %+v", got)
 	}
 	for _, p := range readN(t, s, 5) {
@@ -669,5 +692,143 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// readUntil reads until cond holds for a packet (true) or the fake clock passed limit (false); the clock must move.
+func readUntil(t *testing.T, s Stream, w *fakeWorld, limit time.Time, cond func(Packet) bool) bool {
+	t.Helper()
+	for range 10000 {
+		if !w.clock().Before(limit) {
+			return false
+		}
+		if cond(readN(t, s, 1)[0]) {
+			return true
+		}
+	}
+	t.Fatal("the fake clock does not move")
+	return false
+}
+
+func (w *fakeWorld) meterCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.meterReads
+}
+
+// The healthy-but-mute detector (ADR-0002 Decision 3) on fake endpoints: only a process loopback stream that delivers
+// zeros while its meters show sound falls back, after the threshold; a muted target or a stream with sound stays.
+func TestWASAPIStreamFallsBackWhenHealthyButMute(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    Target
+		plays     bool
+		sound     bool
+		muteAfter time.Duration
+		silentFlg bool // the packets are flagged silent instead of carrying zeros
+		wantSw    bool
+		who       string
+	}{
+		{name: "include: zeros while the app plays", target: Target{Mode: ModeInclude, PID: 42}, plays: true,
+			muteAfter: 15 * time.Second, wantSw: true, who: "the app"},
+		{name: "include: silent flags while the app plays", target: Target{Mode: ModeInclude, PID: 42}, plays: true,
+			silentFlg: true, muteAfter: 15 * time.Second, wantSw: true, who: "the app"},
+		{name: "exclude: zeros while other apps play", target: Target{Mode: ModeExclude, PID: 7}, plays: true,
+			muteAfter: 15 * time.Second, wantSw: true, who: "other apps"},
+		{name: "include: a muted app is not expected to play", target: Target{Mode: ModeInclude, PID: 42},
+			muteAfter: 15 * time.Second},
+		{name: "include: sound is captured", target: Target{Mode: ModeInclude, PID: 42}, plays: true, sound: true,
+			muteAfter: 15 * time.Second},
+		{name: "the detector is off", target: Target{Mode: ModeInclude, PID: 42}, plays: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proc := &fakeEndpoint{f: fmt48f, idle: 1, sound: tt.sound, plays: tt.plays, tick: 100 * time.Millisecond,
+				name: "Speakers (Realtek(R) Audio)"}
+			if tt.silentFlg {
+				proc.idle, proc.steps = 0, slices.Repeat([]fakeStep{{packets: 1, silent: true}}, 400)
+			}
+			sys := &fakeEndpoint{f: fmt44s, idle: 1, name: "Speakers (Realtek(R) Audio)", tick: 100 * time.Millisecond}
+			w := newWorld(map[Mode][]openResult{tt.target.Mode: {{ep: proc}}, ModeSystem: {{ep: sys}}})
+			w.muteAfter = tt.muteAfter
+			start := w.clock()
+			s, obs := openTest(t, w, tt.target)
+
+			switched := readUntil(t, s, w, start.Add(40*time.Second), func(p Packet) bool { return p.Format == fmt44s })
+			_, switches := obs.reports()
+			if !tt.wantSw {
+				if switched || len(switches) != 0 || s.Info().Mode != tt.target.Mode || proc.closed != 0 {
+					t.Fatalf("switched %v, switches %+v, info %+v", switched, switches, s.Info())
+				}
+				if n := w.meterCount(); tt.muteAfter == 0 && n != 0 {
+					t.Fatalf("the meters were read %d times with the detector off", n)
+				}
+				return
+			}
+
+			if !switched || len(switches) != 1 {
+				t.Fatalf("switched %v, switches %+v", switched, switches)
+			}
+			sw := switches[0]
+			if sw.From != tt.target.Mode || sw.To != ModeSystem || sw.Cause != values.SwitchHealthyButMute ||
+				!strings.Contains(sw.Reason, "only zeros for 15s while "+tt.who+" played") {
+				t.Fatalf("switch %+v", sw)
+			}
+			// The threshold is measured on the stream clock: 15 s of readings, the first one after 1 s.
+			if took := w.clock().Sub(start); took < 15*time.Second || took > 20*time.Second {
+				t.Fatalf("switched after %v", took)
+			}
+			if s.Info().Mode != ModeSystem || s.Reopens() != 0 || proc.closed != 1 || proc.stopped != 0 {
+				t.Fatalf("info %+v, reopens %d, process endpoint closed %d stopped %d", s.Info(), s.Reopens(), proc.closed, proc.stopped)
+			}
+			if opened, _ := w.snapshot(); !slices.Equal(opened, []Mode{tt.target.Mode, ModeSystem}) {
+				t.Fatalf("opened %v", opened)
+			}
+			attempts, _ := obs.reports()
+			if len(attempts) != 2 || !attempts[1].OK || attempts[1].Mode != ModeSystem || attempts[1].Device != "Speakers (Realtek(R) Audio)" {
+				t.Fatalf("attempts %+v", attempts)
+			}
+
+			// One-way: classic loopback has no detector, even while it hears nothing.
+			reads := w.meterCount()
+			readUntil(t, s, w, w.clock().Add(30*time.Second), func(Packet) bool { return false })
+			if _, again := obs.reports(); len(again) != 1 || w.meterCount() != reads {
+				t.Fatalf("switches %+v, meter reads %d -> %d", again, reads, w.meterCount())
+			}
+		})
+	}
+}
+
+// The ok attempt and the stream info carry the output device name.
+func TestWASAPIStreamReportsTheOutputDevice(t *testing.T) {
+	first := &fakeEndpoint{f: fmt48f, name: "Speakers", steps: []fakeStep{{packets: 1}, {changed: true}}}
+	second := &fakeEndpoint{f: fmt48f, name: "Headphones", idle: 1}
+	w := newWorld(map[Mode][]openResult{ModeSystem: {{ep: first}, {ep: second}}})
+	s, obs := openTest(t, w, Target{Mode: ModeSystem})
+	if s.Info().Device != "Speakers" {
+		t.Fatalf("info %+v", s.Info())
+	}
+	readN(t, s, 3)
+	attempts, _ := obs.reports()
+	if len(attempts) != 2 || attempts[0].Device != "Speakers" || attempts[1].Device != "Headphones" || s.Info().Device != "Headphones" {
+		t.Fatalf("attempts %+v, info %+v", attempts, s.Info())
+	}
+}
+
+// The cause of every switch is set: activation failed and stream failed (healthy but mute: above).
+func TestWASAPIStreamSwitchCauses(t *testing.T) {
+	w := newWorld(map[Mode][]openResult{ModeInclude: {{err: ErrActivationTimeout}}, ModeSystem: {{ep: &fakeEndpoint{f: fmt44s, idle: 1}}}})
+	_, obs := openTest(t, w, Target{Mode: ModeInclude, PID: 42})
+	if _, sw := obs.reports(); len(sw) != 1 || sw[0].Cause != values.SwitchActivationFailed || !sw[0].IsFallback() {
+		t.Fatalf("switches %+v", sw)
+	}
+
+	lost := hrError("IAudioCaptureClient::GetBuffer", hrDeviceInvalidated)
+	proc := &fakeEndpoint{f: fmt48f, steps: []fakeStep{{packets: 1, readErr: lost}}}
+	w2 := newWorld(map[Mode][]openResult{ModeInclude: {{ep: proc}}, ModeSystem: {{ep: &fakeEndpoint{f: fmt44s, idle: 1}}}})
+	s2, obs2 := openTest(t, w2, Target{Mode: ModeInclude, PID: 42})
+	readN(t, s2, 2)
+	if _, sw := obs2.reports(); len(sw) != 1 || sw[0].Cause != values.SwitchStreamFailed {
+		t.Fatalf("switches %+v", sw)
 	}
 }

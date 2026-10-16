@@ -12,11 +12,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // Line protocol between the app and its recorder child: one JSON object per line. The parent writes exactly one
-// start request to the child's stdin and then closes stdin to stop it; the child writes events to stdout.
+// request to the child's stdin, a capture or a self-test, and then closes stdin to stop it; the child writes events to
+// stdout.
 const (
 	protocolVersion = 1
 	maxLineBytes    = 4096
@@ -33,14 +35,19 @@ const maxLeadSilence = 2*maxChunkSeconds*time.Second + DefaultHangTimeout +
 
 // Event types written by the child.
 const (
-	evStarted = "started" // the capture runs: mode, format, Windows build
+	evStarted = "started" // the capture runs: mode, format, Windows version, output device
 	evAttempt = "attempt" // one activation try
 	evSwitch  = "switch"  // a mode change of the running capture
 	evChunk   = "chunk"   // a chunk was closed: number, frames, rate
 	evStats   = "stats"   // counters; also the heartbeat
 	evFailed  = "failed"  // the capture ended by itself or could not start: reason
-	evStopped = "stopped" // clean stop after stdin closed: frames written
+	evStopped = "stopped" // clean stop after stdin closed: frames written; also the end of a self-test
+
+	evSelfTest = "selftest" // the result of one mode of the self-test: mode, cause, output device
 )
+
+// kindSelfTest is the request kind of the "Check sound" self-test (TASK-058); a capture request has no kind.
+const kindSelfTest = "selftest"
 
 // ErrProtocol means a protocol line is malformed.
 var ErrProtocol = errors.New("audiocapture: recorder protocol error")
@@ -99,6 +106,7 @@ type wireTarget struct {
 
 type wireRequest struct {
 	V             int        `json:"v"`
+	Kind          string     `json:"kind,omitempty"`
 	Recording     string     `json:"recording"`
 	Chunks        string     `json:"chunks"`
 	Target        wireTarget `json:"target"`
@@ -123,16 +131,50 @@ func encodeRequest(r Request) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-// decodeRequest parses and validates a request line strictly: unknown fields, trailing data and other versions are
-// rejected.
+// encodeSelfTest returns the self-test request line, newline included.
+func encodeSelfTest() []byte {
+	b, _ := json.Marshal(struct {
+		V    int    `json:"v"`
+		Kind string `json:"kind"`
+	}{V: protocolVersion, Kind: kindSelfTest})
+	return append(b, '\n')
+}
+
+// decodeRequest parses and validates a capture request line strictly: unknown fields, trailing data, other versions
+// and a self-test are rejected.
 func decodeRequest(line []byte) (Request, error) {
+	r, selfTest, err := decodeChildRequest(line)
+	if err == nil && selfTest {
+		err = fmt.Errorf("%w: a self-test is not a capture", ErrProtocol)
+	}
+	return r, err
+}
+
+// decodeChildRequest parses either request strictly; selfTest reports the self-test, which takes no other field.
+func decodeChildRequest(line []byte) (r Request, selfTest bool, err error) {
 	var w wireRequest
 	if err := decodeStrict(line, &w); err != nil {
-		return Request{}, err
+		return Request{}, false, err
 	}
 	if w.V != protocolVersion {
-		return Request{}, fmt.Errorf("%w: version %d, want %d", ErrProtocol, w.V, protocolVersion)
+		return Request{}, false, fmt.Errorf("%w: version %d, want %d", ErrProtocol, w.V, protocolVersion)
 	}
+	switch w.Kind {
+	case "":
+	case kindSelfTest:
+		if w != (wireRequest{V: w.V, Kind: w.Kind}) {
+			return Request{}, false, fmt.Errorf("%w: a self-test takes no capture fields", ErrProtocol)
+		}
+		return Request{}, true, nil
+	default:
+		return Request{}, false, fmt.Errorf("%w: unknown request kind %q", ErrProtocol, shortText(w.Kind))
+	}
+	r, err = w.request()
+	return r, false, err
+}
+
+// request turns a capture request into its validated form.
+func (w wireRequest) request() (Request, error) {
 	if w.LeadSilenceMS < 0 || w.LeadSilenceMS > maxLeadSilence.Milliseconds() {
 		return Request{}, fmt.Errorf("%w: lead silence %d ms", ErrProtocol, w.LeadSilenceMS)
 	}
@@ -173,9 +215,10 @@ type wireFormat struct {
 type event struct {
 	Type string `json:"type"`
 
-	Mode   string      `json:"mode,omitempty"`   // started, attempt
-	Format *wireFormat `json:"format,omitempty"` // started
-	Build  string      `json:"build,omitempty"`  // started
+	Mode    string       `json:"mode,omitempty"`    // started, attempt
+	Format  *wireFormat  `json:"format,omitempty"`  // started
+	Windows *wireWindows `json:"windows,omitempty"` // started
+	Device  string       `json:"device,omitempty"`  // started, attempt: the output device name
 
 	OK      bool   `json:"ok,omitempty"`      // attempt
 	HResult string `json:"hresult,omitempty"` // attempt
@@ -183,6 +226,7 @@ type event struct {
 
 	From   string `json:"from,omitempty"`   // switch
 	To     string `json:"to,omitempty"`     // switch
+	Cause  string `json:"cause,omitempty"`  // switch: a values.SwitchCause; selftest: a values.SoundCause
 	Reason string `json:"reason,omitempty"` // switch, failed
 
 	N      int    `json:"n,omitempty"`      // chunk
@@ -192,6 +236,8 @@ type event struct {
 	Packets       uint64 `json:"packets,omitempty"`        // stats
 	SilentPackets uint64 `json:"silent_packets,omitempty"` // stats
 	Reopens       uint64 `json:"reopens,omitempty"`        // stats
+
+	HandsFree bool `json:"hands_free,omitempty"` // selftest: the output device looks like a Bluetooth hands-free endpoint
 
 	// Unavailable marks a failure because this build has no capture (recording.ErrCaptureUnavailable).
 	Unavailable bool `json:"unavailable,omitempty"`
@@ -208,6 +254,31 @@ func (w *wireFormat) format() Format {
 	return Format{SampleRate: w.Rate, Channels: w.Channels, BitsPerSample: w.Bits, Float: w.Float}
 }
 
+// wireWindows is the Windows version in a started event.
+type wireWindows struct {
+	Product string `json:"product,omitempty"`
+	Display string `json:"display,omitempty"`
+	Major   uint32 `json:"major"`
+	Minor   uint32 `json:"minor"`
+	Build   uint32 `json:"build"`
+	UBR     uint32 `json:"ubr,omitempty"`
+}
+
+func toWireWindows(v values.WindowsVersion) *wireWindows {
+	if v.IsZero() {
+		return nil
+	}
+	return &wireWindows{Product: v.Product, Display: v.DisplayVersion, Major: v.Major, Minor: v.Minor, Build: v.Build, UBR: v.UBR}
+}
+
+func (w *wireWindows) version() values.WindowsVersion {
+	if w == nil {
+		return values.WindowsVersion{}
+	}
+	return values.WindowsVersion{Product: w.Product, DisplayVersion: w.Display, Major: w.Major, Minor: w.Minor,
+		Build: w.Build, UBR: w.UBR}
+}
+
 // decodeEvent parses an event line strictly.
 func decodeEvent(line []byte) (event, error) {
 	var e event
@@ -215,13 +286,38 @@ func decodeEvent(line []byte) (event, error) {
 		return event{}, err
 	}
 	switch e.Type {
-	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped:
-		for _, s := range []*string{&e.Mode, &e.Build, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason} {
+	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped, evSelfTest:
+		if err := checkCause(e); err != nil {
+			return event{}, err
+		}
+		texts := []*string{&e.Mode, &e.Device, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason}
+		if e.Windows != nil {
+			texts = append(texts, &e.Windows.Product, &e.Windows.Display)
+		}
+		for _, s := range texts {
 			*s = shortText(*s) // the texts reach logs and the diagnostics screen
 		}
 		return e, nil
 	}
 	return event{}, fmt.Errorf("%w: unknown event %q", ErrProtocol, shortText(e.Type))
+}
+
+// checkCause accepts only the causes of the event's type: a switch cause, a sound cause of a self-test, none
+// elsewhere.
+func checkCause(e event) error {
+	var ok bool
+	switch e.Type {
+	case evSwitch:
+		ok = e.Cause == "" || values.SwitchCause(e.Cause).Valid()
+	case evSelfTest:
+		ok = values.SoundCause(e.Cause).Valid() && values.CaptureMode(e.Mode).Valid()
+	default:
+		ok = e.Cause == ""
+	}
+	if !ok {
+		return fmt.Errorf("%w: unexpected cause %q of a %s event", ErrProtocol, shortText(e.Cause), e.Type)
+	}
+	return nil
 }
 
 // lineReader reads newline-terminated lines of at most max bytes. A longer line is skipped and reported as

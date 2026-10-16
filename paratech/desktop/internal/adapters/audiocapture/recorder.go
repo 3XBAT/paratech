@@ -74,15 +74,18 @@ type Config struct {
 	OwnPID         uint32        // excluded by the default target; 0 means this process
 	RebindInterval time.Duration // how often a capture of an app checks its process, or looks for a new one
 	MaxRebinds     int           // captures of a new instance of the app per recording
+	// SelfTestTimeout bounds a sound check (CheckSound) before its child is killed; 0 takes DefaultSelfTestTimeout.
+	SelfTestTimeout time.Duration
 }
 
 // DefaultConfig returns 60 s chunks, a 15 s start timeout, a 7 s stop grace, a 30 s hang timeout, three restarts
-// after 1, 2 and 4 s, and a check of the captured app every 3 s with up to 20 re-binds.
+// after 1, 2 and 4 s, a check of the captured app every 3 s with up to 20 re-binds, and a sound check of at most
+// DefaultSelfTestTimeout.
 func DefaultConfig() Config {
 	return Config{
 		ChunkSeconds: DefaultChunkSeconds, StartTimeout: DefaultStartTimeout, StopGrace: DefaultStopGrace,
 		HangTimeout: DefaultHangTimeout, RestartBackoff: DefaultRestartBackoff, MaxRestarts: DefaultMaxRestarts,
-		RebindInterval: DefaultRebindInterval, MaxRebinds: DefaultMaxRebinds,
+		RebindInterval: DefaultRebindInterval, MaxRebinds: DefaultMaxRebinds, SelfTestTimeout: DefaultSelfTestTimeout,
 	}
 }
 
@@ -109,6 +112,9 @@ type Recorder struct {
 	mu       sync.Mutex
 	captures map[shared.RecordingID]*capture
 	ended    []shared.RecordingID // ended captures, oldest first
+	check    *runningCheck        // the running sound check; nil when none
+
+	checking sync.Mutex // held by the running sound check
 }
 
 // New validates the configuration and builds the Recorder. It starts nothing.
@@ -123,6 +129,11 @@ func New(deps Deps, cfg Config) (*Recorder, error) {
 		return nil, errors.New("audiocapture: timeouts must be positive")
 	case cfg.MaxRestarts < 0 || cfg.MaxRebinds < 0:
 		return nil, errors.New("audiocapture: max restarts and re-binds must not be negative")
+	case cfg.SelfTestTimeout < 0:
+		return nil, errors.New("audiocapture: the sound check timeout must not be negative")
+	}
+	if cfg.SelfTestTimeout == 0 {
+		cfg.SelfTestTimeout = DefaultSelfTestTimeout
 	}
 	if cfg.OwnPID == 0 {
 		cfg.OwnPID = uint32(os.Getpid()) //nolint:gosec // PIDs fit in 32 bits on every supported OS
@@ -189,7 +200,10 @@ func (r *Recorder) start(ctx context.Context, c *capture) error {
 		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, ErrAlreadyCapturing)
 	}
 	r.captures[id] = c
+	check := r.check
 	r.mu.Unlock()
+	// From here a new sound check answers busy; one that runs is stopped before the child starts.
+	r.stopCheck(check)
 
 	startCtx, cancel := context.WithTimeoutCause(ctx, r.cfg.StartTimeout,
 		fmt.Errorf("the recorder did not start within %v", r.cfg.StartTimeout))
@@ -199,8 +213,13 @@ func (r *Recorder) start(ctx context.Context, c *capture) error {
 	select {
 	case err := <-c.started:
 		if err == nil {
-			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("target", string(target.Mode)),
-				slog.String("app", c.app.String()), slog.Uint64("target_pid", uint64(target.PID)))
+			// The started event of the first child is applied before it is signalled, so the snapshot has it.
+			d := c.snapshot()
+			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("windows", d.Windows.String()),
+				slog.String("build", d.Windows.BuildString()), slog.String("target", string(target.Mode)),
+				slog.String("mode", string(d.Mode)), slog.String("app", c.app.String()),
+				slog.Uint64("target_pid", uint64(target.PID)), slog.String("device", d.Device),
+				slog.String("format", d.Format.String()))
 			return nil
 		}
 		<-c.done
@@ -295,14 +314,40 @@ func (r *Recorder) Finalize(ctx context.Context, chunks, output shared.ArtifactR
 	return assemble(ctx, r.deps.Files, chunks, output, r.log)
 }
 
-// Diagnostics returns a snapshot of the capture of id (TASK-058). ok is false for an unknown recording; ended
-// captures stay readable for a while.
-func (r *Recorder) Diagnostics(id shared.RecordingID) (d Diagnostics, ok bool) {
+// Diagnostics returns a snapshot of the capture of id (TASK-058) at once: ctx is not used. ok is false for an unknown
+// recording; ended captures stay readable for a while (the latest keptCaptures).
+func (r *Recorder) Diagnostics(_ context.Context, id shared.RecordingID) (d values.CaptureDiagnostics, ok bool) {
 	c := r.lookup(id)
 	if c == nil {
 		return Diagnostics{}, false
 	}
 	return c.snapshot(), true
+}
+
+// RecentCaptures returns the diagnostics of the captures the recorder still knows (TASK-058, the support bundle): the
+// ended ones it keeps, oldest end first, then the running ones. ctx is not used.
+func (r *Recorder) RecentCaptures(context.Context) []values.CaptureDiagnostics {
+	r.mu.Lock()
+	var caps []*capture
+	seen := map[*capture]bool{}
+	for _, id := range r.ended {
+		if c := r.captures[id]; c != nil && c.isEnded() && !seen[c] {
+			seen[c] = true
+			caps = append(caps, c)
+		}
+	}
+	for _, c := range r.captures {
+		if !seen[c] && !c.isEnded() {
+			caps = append(caps, c)
+		}
+	}
+	r.mu.Unlock()
+
+	out := make([]values.CaptureDiagnostics, 0, len(caps))
+	for _, c := range caps {
+		out = append(out, c.snapshot())
+	}
+	return out
 }
 
 func (r *Recorder) lookup(id shared.RecordingID) *capture {

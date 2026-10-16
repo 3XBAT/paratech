@@ -77,7 +77,7 @@ type ActivityService struct {
 	log     *slog.Logger
 }
 
-// NewActivityService returns the binding of the recordings and jobs page. All arguments are required; openBindings
+// NewActivityService returns the binding of the recordings and jobs page. All arguments are required; OpenServices
 // checks the core before calling it.
 func NewActivityService(uc ActivityUseCase, stopper RecordingStopper, forcer JobForcer, log *slog.Logger) *ActivityService {
 	return &ActivityService{uc: uc, stopper: stopper, forcer: forcer, log: log}

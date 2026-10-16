@@ -42,15 +42,19 @@ type FakeRecorder struct {
 	onStarted    func(id shared.RecordingID)
 	starts       int
 	finalizes    int
+	sound        values.SoundCheck
+	soundErr     error
+	soundChecks  int
 }
 
 type fakeCapture struct {
-	dir     shared.ArtifactRef
-	source  values.Source
-	next    int
-	running bool
-	ended   chan struct{}
-	err     error
+	dir      shared.ArtifactRef
+	source   values.Source
+	next     int
+	running  bool
+	ended    chan struct{}
+	err      error
+	switches []values.CaptureSwitch
 }
 
 // NewFakeRecorder returns a recorder that writes through files; each chunk stands for chunk of audio.
@@ -277,6 +281,90 @@ func (f *FakeRecorder) read(ctx context.Context, ref shared.ArtifactRef) ([]byte
 	}
 	defer func() { _ = r.Close() }()
 	return io.ReadAll(r)
+}
+
+// SwitchMode makes the capture of id report sw, as the recorder child does when process loopback fails to activate,
+// fails while running or is healthy but mute (ADR-0002 Decision 3): Diagnostics then show the switch and its mode.
+// The capture goes on.
+func (f *FakeRecorder) SwitchMode(id shared.RecordingID, sw values.CaptureSwitch) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.captures[id]
+	if c == nil || !c.running {
+		return fmt.Errorf("%w: %s", ErrNotCapturing, id)
+	}
+	c.switches = append(c.switches, sw)
+	return nil
+}
+
+// Diagnostics returns what the capture of id reports: include for an app, exclude for the whole computer, system
+// after a switch; ok is false when id was never started.
+func (f *FakeRecorder) Diagnostics(_ context.Context, id shared.RecordingID) (values.CaptureDiagnostics, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.captures[id]
+	if c == nil {
+		return values.CaptureDiagnostics{}, false
+	}
+	target := values.CaptureExclude
+	if !c.source.IsWholeComputer() {
+		target = values.CaptureInclude
+	}
+	d := values.CaptureDiagnostics{
+		Running: c.running, TargetMode: target, App: c.source.App(), Mode: target, Windows: ToneWindows(), Device: ToneDevice,
+		Switches: append([]values.CaptureSwitch(nil), c.switches...),
+	}
+	if n := len(c.switches); n > 0 {
+		d.Mode = c.switches[n-1].To
+	}
+	return d, true
+}
+
+// SetSoundCheck makes later CheckSound calls answer check and err; by default both modes hear the tone.
+func (f *FakeRecorder) SetSoundCheck(check values.SoundCheck, err error) {
+	f.set(func() { f.sound, f.soundErr = check, err })
+}
+
+// CheckSound answers the sound check as SetSoundCheck says; Busy while a capture runs, as the real recorder.
+func (f *FakeRecorder) CheckSound(context.Context) (values.SoundCheck, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.soundChecks++
+	for _, c := range f.captures {
+		if c.running {
+			return values.SoundCheck{Busy: true}, nil
+		}
+	}
+	if f.sound.Modes == nil && f.soundErr == nil {
+		return values.SoundCheck{Device: ToneDevice, Modes: []values.ModeCheck{
+			{Mode: values.CaptureInclude, Cause: values.SoundOK}, {Mode: values.CaptureSystem, Cause: values.SoundOK},
+		}}, nil
+	}
+	return f.sound, f.soundErr
+}
+
+// SoundChecks returns how many times CheckSound was called.
+func (f *FakeRecorder) SoundChecks() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.soundChecks
+}
+
+// RecentCaptures returns the diagnostics of every capture, in no particular order.
+func (f *FakeRecorder) RecentCaptures(ctx context.Context) []values.CaptureDiagnostics {
+	f.mu.Lock()
+	ids := make([]shared.RecordingID, 0, len(f.captures))
+	for id := range f.captures {
+		ids = append(ids, id)
+	}
+	f.mu.Unlock()
+	out := make([]values.CaptureDiagnostics, 0, len(ids))
+	for _, id := range ids {
+		if d, ok := f.Diagnostics(ctx, id); ok {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // Running reports whether the capture of id runs.

@@ -51,6 +51,9 @@ type Core struct {
 
 	Connections ConnectionsUseCase // the mail and Hub section of the settings page
 	Google      GoogleUseCase      // the Google section of the same page
+
+	Sound  SoundCheckUseCase    // "Проверить звук" of the diagnostics page
+	Bundle SupportBundleUseCase // "Сохранить пакет для поддержки"; the shell shows its save dialog
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -60,6 +63,7 @@ type ui interface {
 	showMain() error
 	pickScheduleFile() (string, error)
 	pickModelFile() (string, error)
+	pickBundleFile(name string) (string, error)
 }
 
 // Shell owns the UI: the main window, the tray icon and the popup. Create it with New. Window commands are safe
@@ -133,68 +137,79 @@ func (s *Shell) ShowMain() error {
 	return u.showMain()
 }
 
-// bindings are the services bound to the pages; Wails needs each one as its concrete type.
-type bindings struct {
-	settings *SettingsService
-	activity *ActivityService
-	prompt   *PromptService
-	schedule *ScheduleImportService
-	models   *ModelsService
+// Services are the services bound to the pages; Wails needs each one as its concrete type.
+type Services struct {
+	Settings *SettingsService
+	Activity *ActivityService
+	Prompt   *PromptService
+	Schedule *ScheduleImportService
+	Models   *ModelsService
 
-	connections *ConnectionsService
-	google      *GoogleService
+	Connections *ConnectionsService
+	Google      *GoogleService
+	Diagnostics *DiagnosticsService
 }
 
-// openBindings opens the core and builds the services bound to the pages.
-func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
+// OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
+// once; the tests of the app call it to check the wiring without a window.
+func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	core, err := s.opts.OpenCore(ctx)
 	if err != nil {
-		return bindings{}, fmt.Errorf("wails: open core: %w", err)
+		return Services{}, fmt.Errorf("wails: open core: %w", err)
 	}
 	if core.Settings == nil {
-		return bindings{}, errors.New("wails: open core: no settings use case")
+		return Services{}, errors.New("wails: open core: no settings use case")
 	}
 	if core.Activity == nil {
-		return bindings{}, errors.New("wails: open core: no activity use case")
+		return Services{}, errors.New("wails: open core: no activity use case")
 	}
 	if core.Stopper == nil {
-		return bindings{}, errors.New("wails: open core: no recording stopper")
+		return Services{}, errors.New("wails: open core: no recording stopper")
 	}
 	if core.Forcer == nil {
-		return bindings{}, errors.New("wails: open core: no job forcer")
+		return Services{}, errors.New("wails: open core: no job forcer")
 	}
 	if core.Prompt == nil {
-		return bindings{}, errors.New("wails: open core: no recording prompt use case")
+		return Services{}, errors.New("wails: open core: no recording prompt use case")
 	}
 	if core.Schedule == nil {
-		return bindings{}, errors.New("wails: open core: no schedule import use case")
+		return Services{}, errors.New("wails: open core: no schedule import use case")
 	}
 	if core.Files == nil {
-		return bindings{}, errors.New("wails: open core: no schedule file reader")
+		return Services{}, errors.New("wails: open core: no schedule file reader")
 	}
 	if core.Models == nil || core.Downloads == nil || core.Imports == nil || core.Links == nil {
-		return bindings{}, errors.New("wails: open core: no model manager")
+		return Services{}, errors.New("wails: open core: no model manager")
 	}
 	if core.Connections == nil {
-		return bindings{}, errors.New("wails: open core: no connections use case")
+		return Services{}, errors.New("wails: open core: no connections use case")
 	}
 	if core.Google == nil {
-		return bindings{}, errors.New("wails: open core: no google sign-in use case")
+		return Services{}, errors.New("wails: open core: no google sign-in use case")
 	}
-	return bindings{
-		settings: NewSettingsService(core.Settings, s.opts.Log),
-		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
-		prompt:   NewPromptService(core.Prompt, s.opts.Log),
-		schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
-		models: NewModelsService(ModelsDeps{
+	if core.Sound == nil || core.Bundle == nil {
+		return Services{}, errors.New("wails: open core: no diagnostics use cases")
+	}
+	return Services{
+		Settings: NewSettingsService(core.Settings, s.opts.Log),
+		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
+		Prompt:   NewPromptService(core.Prompt, s.opts.Log),
+		Schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
+		Models: NewModelsService(ModelsDeps{
 			Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links,
 			Picker: modelPickerFunc(s.pickModelFile), SpeechReady: core.SpeechReady,
 		}, s.opts.Log),
 
-		connections: NewConnectionsService(core.Connections, s.opts.Log),
-		google:      NewGoogleService(core.Google, s.opts.Log),
+		Connections: NewConnectionsService(core.Connections, s.opts.Log),
+		Google:      NewGoogleService(core.Google, s.opts.Log),
+		Diagnostics: NewDiagnosticsService(DiagnosticsDeps{
+			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
+		}, s.opts.Log),
 	}, nil
 }
+
+// WailsLogger is the logger Wails gets: Options.Log behind the Info floor, as Wails logs binding arguments at Debug.
+func (s *Shell) WailsLogger() *slog.Logger { return wailsLogger(s.opts.Log) }
 
 // pickScheduleFile shows the open dialog of the schedule import over the main window; "" when the user cancels.
 func (s *Shell) pickScheduleFile(context.Context) (string, error) {
@@ -212,6 +227,15 @@ func (s *Shell) pickModelFile(context.Context) (string, error) {
 		return "", err
 	}
 	return u.pickModelFile()
+}
+
+// pickBundleFile shows the save dialog of the support bundle over the main window; "" when the user cancels.
+func (s *Shell) pickBundleFile(_ context.Context, name string) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickBundleFile(name)
 }
 
 func (s *Shell) markStarted() error {

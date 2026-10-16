@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/adapters/audiocapture"
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // ErrToneDeviceLost is the error of a ToneSource stream that fails by itself (FailAfter).
@@ -19,11 +20,12 @@ var ErrToneDeviceLost = errors.New("fake source: device lost")
 // the script of every stream it opens; set them before the first Open. No real audio device is touched.
 type ToneSource struct {
 	Format       audiocapture.Format
-	Freq         float64       // default 1000 Hz
-	Amplitude    float64       // default 0.5
-	PacketFrames int           // default 10 ms
-	Interval     time.Duration // real time between packets; 0 = as fast as they are read
-	Build        string        // reported Windows build; default "10.0.19045"
+	Freq         float64               // default 1000 Hz
+	Amplitude    float64               // default 0.5
+	PacketFrames int                   // default 10 ms
+	Interval     time.Duration         // real time between packets; 0 = as fast as they are read
+	Windows      values.WindowsVersion // reported Windows; default ToneWindows()
+	Device       string                // reported output device; default ToneDevice
 
 	// FallbackTo, when set and the target is another mode, reports a failed attempt of the target and runs in this
 	// mode (process loopback failing on an old build).
@@ -34,6 +36,7 @@ type ToneSource struct {
 	SwitchAfter  int                 // after this many packets the stream switches to SwitchFormat and SwitchMode
 	SwitchFormat audiocapture.Format // format after the switch
 	SwitchMode   audiocapture.Mode   // mode after the switch (reported through the observer)
+	SwitchCause  values.SwitchCause  // cause of the switch; default healthy but mute
 
 	DiscontinuityAt int       // the packet with this number (from 1) is flagged as a discontinuity
 	SilentAt        int       // the packet with this number is flagged silent
@@ -42,6 +45,9 @@ type ToneSource struct {
 	Limit           int       // after this many packets Read waits for Stop (a quiet stream)
 	Drain           int       // packets still delivered after Stop, before io.EOF
 	OnPacket        func(int) // called with the number of each packet before Read returns it
+	// Gate, when set, lets the tone through only while it reports true; the other packets carry zeros (a FakeTone's
+	// Playing makes the source hear the self-test tone only while it plays).
+	Gate func() bool
 
 	mu     sync.Mutex
 	opened []audiocapture.Target
@@ -80,9 +86,11 @@ func (s *ToneSource) Open(ctx context.Context, target audiocapture.Target, obs a
 	mode := target.Mode
 	if s.FallbackTo != "" && s.FallbackTo != target.Mode {
 		obs.Attempt(audiocapture.Attempt{Mode: target.Mode, HResult: "0x80070005", Error: "activation refused"})
+		obs.Switch(audiocapture.Switch{From: target.Mode, To: s.FallbackTo, Cause: values.SwitchActivationFailed,
+			Reason: "activation failed: activation refused"})
 		mode = s.FallbackTo
 	}
-	obs.Attempt(audiocapture.Attempt{Mode: mode, OK: true})
+	obs.Attempt(audiocapture.Attempt{Mode: mode, OK: true, Device: s.device()})
 
 	st := &toneStream{src: s, obs: obs, mode: mode, format: s.Format, stopCh: make(chan struct{})}
 	st.frames = s.PacketFrames
@@ -111,11 +119,11 @@ type toneStream struct {
 func (st *toneStream) Info() audiocapture.StreamInfo {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	build := st.src.Build
-	if build == "" {
-		build = "10.0.19045"
+	win := st.src.Windows
+	if win.IsZero() {
+		win = ToneWindows()
 	}
-	return audiocapture.StreamInfo{Mode: st.mode, Format: st.format, Build: build}
+	return audiocapture.StreamInfo{Mode: st.mode, Format: st.format, Windows: win, Device: st.src.device()}
 }
 
 func (st *toneStream) Reopens() uint64 { return 0 }
@@ -204,8 +212,12 @@ func (st *toneStream) next() audiocapture.Packet {
 		if s.SwitchFormat.SampleRate != 0 {
 			st.frames = int(s.SwitchFormat.SampleRate / 100)
 		}
+		cause := s.SwitchCause
+		if cause == "" {
+			cause = values.SwitchHealthyButMute
+		}
 		st.mu.Unlock()
-		st.obs.Switch(audiocapture.Switch{From: from, To: st.mode, Reason: "healthy but mute"})
+		st.obs.Switch(audiocapture.Switch{From: from, To: st.mode, Cause: cause, Reason: "healthy but mute: only zeros for 15s"})
 		st.mu.Lock()
 	}
 	st.n++
@@ -222,7 +234,102 @@ func (st *toneStream) next() audiocapture.Packet {
 		return p
 	}
 	p.Data = ToneFrames(f, s.freq(), s.amplitude(), pos, frames)
+	if s.Gate != nil && !s.Gate() {
+		p.Data = make([]byte, len(p.Data))
+	}
 	return p
+}
+
+// FakeTone is a fake audiocapture.TonePlayer: Play marks the tone as playing for its duration and plays nothing.
+// Set its fields before the first call.
+type FakeTone struct {
+	Device    string // reported output device; default ToneDevice
+	HandsFree bool   // the output device is a Bluetooth hands-free endpoint
+	NoDevice  bool   // there is no output device
+	PlayErr   error  // Play fails with it
+
+	mu      sync.Mutex
+	asked   bool
+	playing bool
+	plays   int
+}
+
+// Output describes the fake output device.
+func (f *FakeTone) Output() (audiocapture.OutputDevice, error) {
+	f.mu.Lock()
+	f.asked = true
+	f.mu.Unlock()
+	if f.NoDevice {
+		return audiocapture.OutputDevice{}, audiocapture.ErrNoDevice
+	}
+	name := f.Device
+	if name == "" {
+		name = ToneDevice
+	}
+	return audiocapture.OutputDevice{Name: name, HandsFree: f.HandsFree}, nil
+}
+
+// Play is "playing" for t.Duration, or until ctx ends.
+func (f *FakeTone) Play(ctx context.Context, t audiocapture.Tone) error {
+	if f.PlayErr != nil {
+		return f.PlayErr
+	}
+	f.setPlaying(true)
+	defer f.setPlaying(false)
+	timer := time.NewTimer(t.Duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (f *FakeTone) setPlaying(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.playing = on
+	if on {
+		f.plays++
+	}
+}
+
+// Playing reports whether the tone plays now.
+func (f *FakeTone) Playing() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.playing
+}
+
+// Audible is the Gate of a ToneSource that serves both a capture and a self-test: always true until a self-test
+// asked for the output device, then true only while the tone plays.
+func (f *FakeTone) Audible() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.asked || f.playing
+}
+
+// Plays returns how often Play started.
+func (f *FakeTone) Plays() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.plays
+}
+
+// ToneDevice is the output device a ToneSource reports by default.
+const ToneDevice = "Speakers (Fake Audio)"
+
+// ToneWindows is the Windows a ToneSource reports by default: the owner's Windows 10 22H2.
+func ToneWindows() values.WindowsVersion {
+	return values.WindowsVersion{Product: "Windows 10 Pro", DisplayVersion: "22H2", Major: 10, Build: 19045, UBR: 6456}
+}
+
+func (s *ToneSource) device() string {
+	if s.Device == "" {
+		return ToneDevice
+	}
+	return s.Device
 }
 
 func (s *ToneSource) freq() float64 {

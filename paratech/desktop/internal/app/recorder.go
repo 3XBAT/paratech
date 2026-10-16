@@ -10,6 +10,8 @@ import (
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
+	"paratech/desktop/internal/cases/soundcheck"
+	"paratech/desktop/internal/cases/supportbundle"
 )
 
 // platformRecorder is the audio recorder of this build: on Windows the recorder child of this executable
@@ -34,14 +36,48 @@ func platformRecorder(dataDir string, files *filestore.Store, log *slog.Logger) 
 	return rec, nil
 }
 
+// The recorder of Windows serves the sound check and the support bundle; soundChecker and captureHistory would
+// otherwise fall back silently when its methods change.
+var (
+	_ soundcheck.SoundChecker      = (*audiocapture.Recorder)(nil)
+	_ supportbundle.CaptureHistory = (*audiocapture.Recorder)(nil)
+)
+
+// soundChecker is the "Check sound" of the recorder: the recorder child of this build, none for a recorder without one
+// (it answers unsupported).
+func soundChecker(rec recordingsession.Recorder) soundcheck.SoundChecker {
+	if c, ok := rec.(soundcheck.SoundChecker); ok {
+		return c
+	}
+	return audiocapture.Unavailable{}
+}
+
+// captureHistory is the recent capture diagnostics of the recorder for the support bundle; nil for a recorder that
+// keeps none.
+func captureHistory(rec recordingsession.Recorder) supportbundle.CaptureHistory {
+	if h, ok := rec.(supportbundle.CaptureHistory); ok {
+		return h
+	}
+	return nil
+}
+
+// recordingActivity tells the sound check whether a recording is in progress.
+type recordingActivity struct{ recordings *recordingsession.Service }
+
+func (r recordingActivity) Recording() bool {
+	_, ok := r.recordings.Active()
+	return ok
+}
+
 // platformApps lists the open apps of this OS for the source picker: windows and audio sessions on Windows; elsewhere
 // every call fails, so the picker offers the whole computer only.
 func platformApps(log *slog.Logger) recordingprompt.AudioApps { return audiocapture.PlatformApps(log) }
 
 // runRecorder is the --recorder run mode: the audio recorder child that the app starts from its own executable
 // (ADR-0002 (audio capture)). It opens only the Storage Manager on <DataDir>/artifacts: no instance lock (the parent
-// holds it), no database, no UI shell and no jobs. It captures until stdin closes; stdout carries only the protocol
-// events, the log goes to stderr. Any exit code but 0 is an error; the parent reads the outcome from the events.
+// holds it), no database, no UI shell, no log file and no jobs. It captures until stdin closes, or runs the sound
+// check of a self-test request; stdout carries only the protocol events, the log goes to stderr. Any exit code but 0
+// is an error; the parent reads the outcome from the events.
 func (a *App) runRecorder(ctx context.Context) error {
 	store, err := filestore.New(filepath.Join(a.cfg.DataDir, artifactsDir))
 	if err != nil {
@@ -50,7 +86,7 @@ func (a *App) runRecorder(ctx context.Context) error {
 	defer func() { _ = store.Close() }()
 
 	code := audiocapture.RunChild(ctx, a.env.childStdin, a.env.childStdout, a.env.captureSource, store, a.log,
-		audiocapture.ChildConfig{})
+		audiocapture.ChildConfig{Tone: a.env.tone})
 	if code != audiocapture.ChildExitOK {
 		return fmt.Errorf("app: recorder: exit code %d", code)
 	}

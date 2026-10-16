@@ -135,12 +135,15 @@ type activationParams struct {
 type comProcs struct {
 	procCoCreateInstance            *windows.LazyProc
 	procActivateAudioInterfaceAsync *windows.LazyProc
+	procPropVariantClear            *windows.LazyProc
 }
 
 func newComProcs() *comProcs {
+	ole32 := windows.NewLazySystemDLL("ole32.dll")
 	return &comProcs{
-		procCoCreateInstance:            windows.NewLazySystemDLL("ole32.dll").NewProc("CoCreateInstance"),
+		procCoCreateInstance:            ole32.NewProc("CoCreateInstance"),
 		procActivateAudioInterfaceAsync: windows.NewLazySystemDLL("mmdevapi.dll").NewProc("ActivateAudioInterfaceAsync"),
+		procPropVariantClear:            ole32.NewProc("PropVariantClear"),
 	}
 }
 

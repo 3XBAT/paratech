@@ -62,3 +62,33 @@ func TestFloorLoggerKeepsHigherBaseLevel(t *testing.T) {
 		t.Errorf("the user's level must still apply above the floor: %q", out)
 	}
 }
+
+// The page services of the shell log to Options.Log, and the Wails logger is Options.Log behind the Info floor.
+func TestShellLoggers(t *testing.T) {
+	const secret = "s3cret-binding-arg"
+	var buf bytes.Buffer
+	opts := validOptions()
+	opts.Log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	s, err := New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := s.OpenServices(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Not running: the save dialog fails and the service logs it.
+	if got, err := svc.Diagnostics.SaveSupportBundle(context.Background()); err != nil || got.Status != bundleFailed {
+		t.Fatalf("SaveSupportBundle = %+v, %v", got, err)
+	}
+	s.WailsLogger().Debug("Binding call complete:", "args", `["`+secret+`"]`)
+	s.WailsLogger().Info("wails info")
+
+	out := buf.String()
+	if !strings.Contains(out, opPickBundle) || !strings.Contains(out, "wails info") {
+		t.Fatalf("log %q lacks the service or the Wails record", out)
+	}
+	if strings.Contains(out, secret) {
+		t.Fatalf("the Wails Debug record passed the floor: %q", out)
+	}
+}

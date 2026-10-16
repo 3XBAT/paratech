@@ -2,10 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { defaultPage, pageById, pages } from "../.test-build/nav.js";
 
-test("navigation has the six sections in order", () => {
+test("navigation has the seven sections in order", () => {
   assert.deepEqual(
     pages.map((p) => p.label),
-    ["Записи", "Модели", "Домашние задания", "Расписание", "Подключения", "Настройки"],
+    ["Записи", "Модели", "Домашние задания", "Расписание", "Подключения", "Настройки", "Диагностика"],
   );
   assert.equal(new Set(pages.map((p) => p.id)).size, pages.length);
 });

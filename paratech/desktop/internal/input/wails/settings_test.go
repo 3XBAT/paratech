@@ -94,17 +94,17 @@ func TestOpenBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.openBindings(context.Background())
-	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil || b.schedule == nil || b.models == nil ||
-		b.connections == nil {
-		t.Fatalf("openBindings = %+v, %v", b, err)
+	b, err := s.OpenServices(context.Background())
+	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Schedule == nil || b.Models == nil ||
+		b.Connections == nil || b.Diagnostics == nil {
+		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
 
 	boom := errors.New("no disk")
 	opts := validOptions()
 	opts.OpenCore = func(context.Context) (Core, error) { return Core{}, boom }
 	s, _ = New(opts)
-	if _, err := s.openBindings(context.Background()); !errors.Is(err, boom) {
+	if _, err := s.OpenServices(context.Background()); !errors.Is(err, boom) {
 		t.Errorf("failing opener: err = %v", err)
 	}
 
@@ -125,6 +125,8 @@ func TestOpenBindings(t *testing.T) {
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
 		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
+		{name: "sound check use case", edit: func(c *Core) { c.Sound = nil }},
+		{name: "support bundle use case", edit: func(c *Core) { c.Bundle = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
@@ -135,7 +137,7 @@ func TestOpenBindings(t *testing.T) {
 				return c, nil
 			}
 			s, _ := New(opts)
-			if _, err := s.openBindings(context.Background()); err == nil {
+			if _, err := s.OpenServices(context.Background()); err == nil {
 				t.Errorf("a core without the %s must fail", tt.name)
 			}
 		})
@@ -158,6 +160,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 9},
 		{file: "google.ts", typ: reflect.TypeFor[*GoogleService](), methods: 6},
+		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

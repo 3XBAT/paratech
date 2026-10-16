@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,13 @@ type ChildConfig struct {
 	MaxGap time.Duration
 	// Now is the monotonic clock that measures gaps; time.Now by default.
 	Now func() time.Time
+
+	// Tone plays the tone of a self-test request ("Check sound"); nil fails the self-test.
+	Tone TonePlayer
+	// OwnPID is the process whose tree the self-test captures with process loopback INCLUDE; 0 means this process.
+	OwnPID uint32
+	// SelfTest tunes the self-test; zero fields take the defaults.
+	SelfTest SelfTestTiming
 }
 
 func (c ChildConfig) withDefaults() ChildConfig {
@@ -56,6 +64,10 @@ func (c ChildConfig) withDefaults() ChildConfig {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
+	if c.OwnPID == 0 {
+		c.OwnPID = uint32(os.Getpid()) //nolint:gosec // PIDs fit in 32 bits on every supported OS
+	}
+	c.SelfTest = c.SelfTest.withDefaults()
 	return c
 }
 
@@ -63,7 +75,8 @@ func (c ChildConfig) withDefaults() ChildConfig {
 // from stdin, captures from src into closed chunks written through files, reports events on stdout and returns the
 // exit code. It stops when stdin closes or ctx ends: the stream is stopped and drained, the last chunk closed, and
 // "stopped" reported. A capture that ends by itself closes its chunks too and reports "failed". The goroutine that
-// watches stdin ends when stdin reaches EOF.
+// watches stdin ends when stdin reaches EOF. A self-test request plays the tone of cfg.Tone and captures it from src
+// instead (selfTest); it writes no file.
 func RunChild(ctx context.Context, stdin io.Reader, stdout io.Writer, src Source, files ChunkFiles, log *slog.Logger,
 	cfg ChildConfig) int {
 	if log == nil {
@@ -76,9 +89,12 @@ func RunChild(ctx context.Context, stdin io.Reader, stdout io.Writer, src Source
 	if err == nil && oversized {
 		err = fmt.Errorf("%w: request longer than %d bytes", ErrProtocol, maxLineBytes)
 	}
-	var req Request
+	var (
+		req      Request
+		selfTest bool
+	)
 	if err == nil {
-		req, err = decodeRequest(line)
+		req, selfTest, err = decodeChildRequest(line)
 	}
 	if err != nil {
 		c.out.emit(event{Type: evFailed, Reason: shortText("bad request: " + err.Error())})
@@ -91,6 +107,9 @@ func RunChild(ctx context.Context, stdin io.Reader, stdout io.Writer, src Source
 		_, _ = io.Copy(io.Discard, stdin) // nothing is expected after the request; EOF is the stop
 		close(stop)
 	}()
+	if selfTest {
+		return c.selfTest(ctx, stop, src)
+	}
 	return c.run(ctx, stop, src, files)
 }
 
@@ -151,8 +170,11 @@ func (c *child) run(ctx context.Context, stop <-chan struct{}, src Source, files
 	c.stream.Store(stream)
 
 	info := stream.Info()
-	c.out.emit(event{Type: evStarted, Mode: string(info.Mode), Format: toWireFormat(info.Format), Build: shortText(info.Build)})
-	c.log.Info("capture started", slog.String("mode", string(info.Mode)), slog.String("format", info.Format.String()))
+	info.Windows.Product, info.Windows.DisplayVersion = shortText(info.Windows.Product), shortText(info.Windows.DisplayVersion)
+	c.out.emit(event{Type: evStarted, Mode: string(info.Mode), Format: toWireFormat(info.Format),
+		Windows: toWireWindows(info.Windows), Device: shortText(info.Device)})
+	c.log.Info("capture started", slog.String("mode", string(info.Mode)), slog.String("format", info.Format.String()),
+		slog.String("device", shortText(info.Device)))
 
 	failure := c.capture(runCtx, stream)
 
@@ -292,11 +314,12 @@ func (c *child) emitStats() {
 type childObserver struct{ out *eventWriter }
 
 func (o *childObserver) Attempt(a Attempt) {
-	o.out.emit(event{Type: evAttempt, Mode: string(a.Mode), OK: a.OK, HResult: shortText(a.HResult), Error: shortText(a.Error)})
+	o.out.emit(event{Type: evAttempt, Mode: string(a.Mode), OK: a.OK, HResult: shortText(a.HResult), Error: shortText(a.Error),
+		Device: shortText(a.Device)})
 }
 
 func (o *childObserver) Switch(s Switch) {
-	o.out.emit(event{Type: evSwitch, From: string(s.From), To: string(s.To), Reason: shortText(s.Reason)})
+	o.out.emit(event{Type: evSwitch, From: string(s.From), To: string(s.To), Cause: string(s.Cause), Reason: shortText(s.Reason)})
 }
 
 // eventWriter writes event lines; it is safe for concurrent use. A failed write (the parent is gone) is dropped:

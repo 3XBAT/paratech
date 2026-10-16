@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/adapters/audiocapture"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -169,8 +170,12 @@ func TestChildStopsWhenStdinCloses(t *testing.T) {
 
 	started := run.out.find(t, "started")
 	stopped := run.out.find(t, "stopped")
-	if len(started) != 1 || started[0]["mode"] != "exclude" || started[0]["build"] != "10.0.19045" {
+	if len(started) != 1 || started[0]["mode"] != "exclude" || started[0]["device"] != testenv.ToneDevice {
 		t.Fatalf("started = %v", started)
+	}
+	if win, ok := started[0]["windows"].(map[string]any); !ok || win["build"] != float64(19045) || win["product"] != "Windows 10 Pro" ||
+		win["display"] != "22H2" || win["ubr"] != float64(6456) {
+		t.Fatalf("started = %v, want the Windows version", started)
 	}
 	if len(stopped) != 1 || stopped[0]["frames"] != float64(452*800) {
 		t.Fatalf("stopped = %v", stopped)
@@ -299,7 +304,7 @@ func TestChildFormatSwitchClosesTheChunk(t *testing.T) {
 	}
 
 	sw := run.out.find(t, "switch")[0]
-	if sw["from"] != "exclude" || sw["to"] != "system" {
+	if sw["from"] != "exclude" || sw["to"] != "system" || sw["cause"] != string(values.SwitchHealthyButMute) {
 		t.Fatalf("switch = %v", sw)
 	}
 	if f, frames, _ := chunk(t, run.store, "chunk-000001.wav"); f != s16 || frames != 8000 {
@@ -397,7 +402,7 @@ func TestPlatformSourceIsUnavailableInThisBuild(t *testing.T) {
 	if audiocapture.Supported() {
 		t.Skip("this build captures; opening its source would touch the audio devices (see TestLiveCapture)")
 	}
-	_, err := audiocapture.PlatformSource().Open(context.Background(), audiocapture.Target{Mode: audiocapture.ModeSystem}, nil)
+	_, err := audiocapture.PlatformSource(audiocapture.DefaultSourceConfig()).Open(context.Background(), audiocapture.Target{Mode: audiocapture.ModeSystem}, nil)
 	if !errors.Is(err, audiocapture.ErrUnavailable) {
 		t.Fatalf("Open = %v, want ErrUnavailable", err)
 	}

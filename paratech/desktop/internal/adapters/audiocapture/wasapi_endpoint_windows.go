@@ -27,6 +27,8 @@ type comEndpoint struct {
 	fmt       Format
 	maxFrames uint32 // a packet longer than one second is refused (the endpoint buffer is 200 ms)
 	note      string
+	name      string       // friendly name of the output device
+	meter     *targetMeter // process loopback only: the meters of the healthy-but-mute detector
 
 	// Classic loopback only.
 	enum     unsafe.Pointer // polls the default output device
@@ -46,6 +48,8 @@ func (e *comEndpoint) close() {
 
 func (e *comEndpoint) format() Format  { return e.fmt }
 func (e *comEndpoint) warning() string { return e.note }
+func (e *comEndpoint) device() string  { return e.name }
+func (e *comEndpoint) playing() bool   { return e.meter != nil && e.meter.playing() }
 
 func (e *comEndpoint) wait(step time.Duration) error {
 	if _, err := windows.WaitForSingleObject(e.event, uint32(step/time.Millisecond)); err != nil { //nolint:gosec // step is waitStep, 100 ms
@@ -154,6 +158,7 @@ func (s *wasapiSource) openClassic(e *comEndpoint) error {
 	if e.deviceID, err = deviceID(dev); err != nil {
 		return err
 	}
+	e.name = s.procs.deviceName(dev)
 
 	client, err := activateAudioClient(dev)
 	if err != nil {
@@ -202,11 +207,26 @@ func (s *wasapiSource) openProcess(e *comEndpoint, target Target, cancel <-chan 
 		runtime.KeepAlive(wfx)
 		if err == nil {
 			e.fmt = f
+			s.openMeter(e, target)
 			return nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", f, err))
 	}
 	return errors.Join(errs...)
+}
+
+// openMeter gives a process loopback endpoint the name of the default output device and the meters of the
+// healthy-but-mute detector. Neither is needed to capture: a failure only leaves the warning of the attempt, and the
+// detector then never switches.
+func (s *wasapiSource) openMeter(e *comEndpoint, target Target) {
+	enum, err := s.procs.createDeviceEnumerator()
+	if err != nil {
+		e.note = "the meters of the mute detection are not available: " + err.Error()
+		return
+	}
+	e.push(func() { release(enum) })
+	e.name = s.procs.defaultDeviceName(enum)
+	e.meter = &targetMeter{enum: enum, target: target}
 }
 
 // startCapture attaches the event, gets the capture client and starts the stream.

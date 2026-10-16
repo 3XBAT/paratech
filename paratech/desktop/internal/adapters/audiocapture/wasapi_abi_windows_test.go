@@ -34,6 +34,10 @@ func TestCOMStructLayout(t *testing.T) {
 		{"sizeof(GUID)", unsafe.Sizeof(windows.GUID{}), 16},
 		{"handler vtable pointer", unsafe.Offsetof(a.handler.vtbl), 0},
 		{"handler vtable: IUnknown + ActivateCompleted", unsafe.Sizeof(handlerVtbl{}), 4 * unsafe.Sizeof(uintptr(0))},
+		{"sizeof(PROPERTYKEY)", unsafe.Sizeof(propertyKey{}), 20},
+		{"PROPERTYKEY.pid", unsafe.Offsetof(propertyKey{}.pid), 16},
+		{"sizeof(PROPVARIANT) read back", unsafe.Sizeof(propVariantValue{}), 24},
+		{"PROPVARIANT.pwszVal", unsafe.Offsetof(propVariantValue{}.val), 8},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {
@@ -60,6 +64,12 @@ func TestCOMGUIDs(t *testing.T) {
 		{"IID_IUnknown", iidIUnknown(), "{00000000-0000-0000-C000-000000000046}"},
 		{"IID_IAgileObject", iidIAgileObject(), "{94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90}"},
 		{"IID_IActivateAudioInterfaceCompletionHandler", iidICompletionHandler(), "{41D949AB-9862-444A-80F6-C261334DA5EB}"},
+		{"IID_IAudioMeterInformation", iidIAudioMeterInformation(), "{C02216F6-8C67-4B5B-9D00-D008E73E0064}"},
+		{"IID_IPropertyStore", iidIPropertyStore(), "{886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99}"},
+		{"PKEY_Device_FriendlyName", pkeyDeviceFriendlyName().fmtid, "{A45C254E-DF1C-4EFD-8020-67D146A850E0}"},
+	}
+	if pkeyDeviceFriendlyName().pid != 14 {
+		t.Error("PKEY_Device_FriendlyName pid differs from functiondiscoverykeys_devpkey.h")
 	}
 	for _, tt := range tests {
 		if got := strings.ToUpper(tt.got.String()); got != tt.want {
@@ -77,7 +87,7 @@ func TestCompletionHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = windows.CloseHandle(done) }()
-	src := PlatformSource().(*wasapiSource)
+	src := PlatformSource(DefaultSourceConfig()).(*wasapiSource)
 	a := &activation{handler: completionHandler{vtbl: newHandlerVtbl(), done: done}}
 	a.handler.refs.Store(1)
 	src.keep(a)
@@ -117,15 +127,21 @@ func TestCompletionHandler(t *testing.T) {
 	}
 }
 
-func TestWindowsBuild(t *testing.T) {
-	if b := windowsBuild(); !strings.HasPrefix(b, "10.0.") || strings.Count(b, ".") != 2 {
-		t.Fatalf("windowsBuild = %q, want 10.0.<build>", b)
+// The version of this machine is read without a capture: RtlGetVersion and the registry, nothing is written.
+func TestWindowsVersion(t *testing.T) {
+	v := windowsVersion()
+	if v.Major != 10 || v.Build < 10240 || !strings.HasPrefix(v.BuildString(), "10.0.") || !strings.HasPrefix(v.Name(), "Windows") {
+		t.Fatalf("windowsVersion = %+v (%s), want Windows 10 or 11", v, v)
 	}
+	if v.IsWindows11() && strings.HasPrefix(v.Product, "Windows 10") && !strings.HasPrefix(v.Name(), "Windows 11") {
+		t.Fatalf("Windows 11 detection: %+v, %q", v, v.Name())
+	}
+	t.Logf("windows %s", v)
 }
 
 // The second process loopback activation of a process is refused before Windows is called.
 func TestSourceRefusesASecondActivation(t *testing.T) {
-	s := PlatformSource().(*wasapiSource)
+	s := PlatformSource(DefaultSourceConfig()).(*wasapiSource)
 	s.budget.used.Store(maxProcessActivations) // as if the first activation had run
 	if _, err := s.activateProcessLoopback(Target{Mode: ModeExclude, PID: 1}, nil); !errors.Is(err, ErrActivationLimit) {
 		t.Fatalf("activation = %v, want ErrActivationLimit", err)

@@ -14,10 +14,13 @@ import (
 	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/localfile"
+	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/adapters/sysinfo"
 	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/whispercli"
+	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -28,6 +31,8 @@ import (
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/scheduler"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/cases/soundcheck"
+	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/input/wails"
@@ -40,6 +45,7 @@ const (
 	dbFile       = "learning-assistant.db"
 	artifactsDir = "artifacts"
 	sttWorkDir   = "stt-work"
+	logsDir      = "logs" // the log files of the logfile adapter, read back by the support bundle
 )
 
 // core is the opened core: the resources to release and the services the lifecycle starts and stops.
@@ -213,6 +219,18 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		return fmt.Errorf("app: recordings: %w", err)
 	}
 
+	sound, err := soundcheck.New(soundChecker(recorder), settings, recordingActivity{c.recordings}, log)
+	if err != nil {
+		return fmt.Errorf("app: sound check: %w", err)
+	}
+	bundle, err := supportbundle.New(supportbundle.Deps{
+		Archive: zipfile.New(), Logs: logfile.Dir{Path: filepath.Join(dataDir, logsDir)}, System: sysinfo.New(),
+		Settings: settings, Captures: captureHistory(recorder), Clock: e.local, Log: log,
+	}, supportbundle.Config{})
+	if err != nil {
+		return fmt.Errorf("app: support bundle: %w", err)
+	}
+
 	prefs, err := preferences.New(settings, e.clock)
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
@@ -232,6 +250,7 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
+		Sound: sound, Bundle: bundle,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

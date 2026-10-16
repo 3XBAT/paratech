@@ -333,19 +333,24 @@ func className(hwnd windows.HWND) string {
 	return windows.UTF16ToString(buf[:n])
 }
 
-// sessions reads the audio sessions of every active output device; one that cannot be read is skipped. It runs on
-// a COM thread.
+// sessions reads the audio sessions of every active output device. It runs on a COM thread.
 func (w *winApps) sessions() ([]sessionInfo, error) {
 	enum, err := w.com.createDeviceEnumerator()
 	if err != nil {
 		return nil, err
 	}
 	defer release(enum)
+	return renderSessions(enum)
+}
 
+// renderSessions reads the audio sessions of every active output device of enum; one that cannot be read is skipped.
+// It runs on a COM thread: the picker's and the capture thread of the mute detector.
+func renderSessions(enum unsafe.Pointer) ([]sessionInfo, error) {
 	var coll unsafe.Pointer
 	r, _, _ := syscall.SyscallN(method(enum, slotEnumEnumAudioEndpoints), uintptr(enum), eRender, deviceStateActive,
 		uintptr(unsafe.Pointer(&coll))) //nolint:gosec // G103: COM out-parameter
-	if coll, err = checkOut("IMMDeviceEnumerator::EnumAudioEndpoints", hr(r), coll); err != nil {
+	coll, err := checkOut("IMMDeviceEnumerator::EnumAudioEndpoints", hr(r), coll)
+	if err != nil {
 		return nil, err
 	}
 	defer release(coll)
@@ -437,5 +442,6 @@ func sessionOf(ctl unsafe.Pointer) (sessionInfo, bool) {
 		}
 		release(vol)
 	}
+	s.peak, s.peakOK = sessionPeak(ctl)
 	return s, true
 }

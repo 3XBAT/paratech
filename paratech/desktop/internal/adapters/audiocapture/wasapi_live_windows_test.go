@@ -49,7 +49,7 @@ func TestLiveCapture(t *testing.T) {
 		t.Skip("set LA_AUDIO_LIVE_TEST=1 to run against the real audio devices")
 	}
 	testenv.NoGoroutineLeaks(t)
-	src := audiocapture.PlatformSource() // one source: the process has one process loopback activation
+	src := audiocapture.PlatformSource(audiocapture.DefaultSourceConfig()) // one source: the process has one process loopback activation
 
 	tests := []struct {
 		target audiocapture.Target
@@ -72,8 +72,11 @@ func TestLiveCapture(t *testing.T) {
 			}
 			info := st.Info()
 			t.Logf("info %+v, %s", info, obs)
-			if info.Mode != tt.target.Mode || !strings.HasPrefix(info.Build, "10.0.") {
+			if info.Mode != tt.target.Mode || !strings.HasPrefix(info.Windows.BuildString(), "10.0.") {
 				t.Errorf("Info = %+v, want mode %s on Windows 10/11", info, tt.target.Mode)
+			}
+			if info.Device == "" {
+				t.Error("no name of the output device")
 			}
 			if err := info.Format.Validate(); err != nil || (tt.want != nil && info.Format != *tt.want) {
 				t.Errorf("format %v (%v), want %v", info.Format, err, tt.want)

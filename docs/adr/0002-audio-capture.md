@@ -116,12 +116,31 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   names, stream format, every attempt with its HRESULT, each switch with its reason. Tone self-test: our own tone is not in the
   chosen app's tree, so test INCLUDE of our own PID and classic loopback; it proves the build works, not that the chosen app is
   audible. Report "healthy but mute" and BT HFP as user-readable causes.
+  Done (part A): the child reports the Windows version (RtlGetVersion + registry ProductName/DisplayVersion/UBR, build
+  ≥ 22000 = Windows 11), the output device name (every attempt and reopen), the format and the switch cause; the parent
+  logs "capture started" with all of it. Healthy-but-mute detector in the child (`mute.go`): process loopback, only
+  zeros/SILENT packets, session meters show sound (an active, unmuted session with peak > 1e-4: of the target tree
+  for INCLUDE, outside our own tree for EXCLUDE; the endpoint meter is not used, it read above zero in silence) for
+  `SourceConfig.MuteThreshold` (default 15 s; 5 s without expected sound start the count again) → classic loopback. A
+  muted tab/app shows no sound, so it never switches. The `Recorder` port got `Diagnostics` (domain
+  `values.CaptureDiagnostics`); the session stores a fallback as the problem of the recording (fixed text) on the next
+  heartbeat or before the stop. Not confirmed: whether the session meter reads before or after the session volume
+  (mute and volume 0 are checked too).
+  Done (part B, "Check sound"): a recorder child with a self-test request plays 1 kHz at -12 dBFS for 1.5 s on the
+  default output (shared mode, mix format) and captures it with INCLUDE of its own PID and with classic loopback; a
+  Goertzel filter (100 ms blocks, 30 % of the energy at 1 kHz, 3 blocks in a row) decides. 14.3 s timeout (the child's
+  9.3 s budget plus 5 s), then the child is killed; refused while a recording captures, stopped when one starts.
+  Verdict: an app = the INCLUDE result, the whole computer = either.
+  Limits: the tone plays aloud; it is our process, not the chosen app (a muted tab is not found); classic loopback may
+  hear other sounds too; the Bluetooth hands-free hint is not confirmed (`docs/refs/audio.md`).
+  Manual status: `docs/qa/compat-matrix.md` (Windows builds × modes × scenarios, tester steps for the alpha exe). The
+  Verification table below stays the TASK-016 script (capturespike); the matrix tracks what is checked.
 - **TASK-059 (picker):** list built from top-level windows grouped by exe (as OBS), audio-session state as a "playing now"
   badge (sessions appear only after the first sound); target = tree root PID; Chromium session PIDs walked up to the window
   owner. Remember by exe, not PID; re-find after the app restarts (OBS: every 3 s) and record silence meanwhile; activation
   succeeds for a dead PID, so check liveness. Exclude our own process. Open links via `explorer.exe` so the browser is not in
   our tree. Show the mute advice and the "same browser" hint.
-  Done: popup picker (marks, 3 s refresh, advice), remembered by exe, re-bind by exe while recording; checks: `docs/qa/run-alpha.md`.
+  Done: popup picker (marks, 3 s refresh, advice), remembered by exe, re-bind by exe while recording; checks: `docs/qa/compat-matrix.md` (moved from `docs/qa/run-alpha.md` in TASK-058).
 - **CI:** builds `CGO_ENABLED=0`; runners have no audio device, so live audio checks stay manual (TASK-016, compat matrix).
 
 ## Verification (TASK-016, owner, Windows 10 19045)

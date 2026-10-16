@@ -34,17 +34,18 @@ func (s *Shell) run(ctx context.Context) error {
 	app := application.New(appOptions(s.opts, func() { _ = s.ShowMain() }))
 
 	// Only the first instance gets here, so a second launch never opens the database (ADR-0007).
-	b, err := s.openBindings(ctx)
+	b, err := s.OpenServices(ctx)
 	if err != nil {
 		return err
 	}
-	app.RegisterService(application.NewService(b.settings))
-	app.RegisterService(application.NewService(b.activity))
-	app.RegisterService(application.NewService(b.prompt))
-	app.RegisterService(application.NewService(b.schedule))
-	app.RegisterService(application.NewService(b.models))
-	app.RegisterService(application.NewService(b.connections))
-	app.RegisterService(application.NewService(b.google))
+	app.RegisterService(application.NewService(b.Settings))
+	app.RegisterService(application.NewService(b.Activity))
+	app.RegisterService(application.NewService(b.Prompt))
+	app.RegisterService(application.NewService(b.Schedule))
+	app.RegisterService(application.NewService(b.Models))
+	app.RegisterService(application.NewService(b.Connections))
+	app.RegisterService(application.NewService(b.Google))
+	app.RegisterService(application.NewService(b.Diagnostics))
 
 	u := &windowsUI{app: app}
 	var offs []func()
@@ -58,7 +59,7 @@ func (s *Shell) run(ctx context.Context) error {
 	})
 
 	// Menu handlers run on goroutines, so the offer may show the popup synchronously.
-	newTray(app, u, s.opts.Name, func() { b.prompt.offerAdHoc(context.Background()) })
+	newTray(app, u, s.opts.Name, func() { b.Prompt.offerAdHoc(context.Background()) })
 
 	started := make(chan struct{})
 	var once sync.Once
@@ -96,7 +97,7 @@ func appOptions(opts Options, onSecondInstance func()) application.Options {
 	return application.Options{
 		Name: opts.Name,
 		// Wails logs binding call arguments (the mail password among them) at Debug, so it never gets Debug.
-		Logger: floorLogger(opts.Log, wailsLogLevel),
+		Logger: wailsLogger(opts.Log),
 		// The asset server logs every request at info level; the pages are embedded, so the noise has no value.
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets()), DisableLogging: true},
 		// main.go owns signals through its context; the Wails handler would quit behind its back.

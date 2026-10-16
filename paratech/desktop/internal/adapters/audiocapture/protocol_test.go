@@ -134,3 +134,33 @@ func TestShortText(t *testing.T) {
 		t.Fatalf("truncated text %q (%d bytes) is not a valid prefix", got, len(got))
 	}
 }
+
+// The diagnostics fields of the events (TASK-058): Windows, device, switch cause; texts are bounded, causes known.
+func TestDecodeDiagnosticsEvents(t *testing.T) {
+	long := strings.Repeat("я", 400)
+	e, err := decodeEvent([]byte(`{"type":"started","mode":"include","format":{"rate":48000,"channels":2,"bits":32,"float":true},` +
+		`"windows":{"product":"Windows 10 Pro","display":"22H2","major":10,"minor":0,"build":19045,"ubr":6456},"device":"` + long + `"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := e.Windows.version(); v.String() != "Windows 10 Pro 22H2 (10.0.19045.6456)" || len(e.Device) > maxTextBytes+3 {
+		t.Fatalf("started = %+v, windows %s", e, v)
+	}
+	if v := (*wireWindows)(nil).version(); !v.IsZero() || toWireWindows(v) != nil {
+		t.Fatal("no Windows version is sent as none")
+	}
+
+	e, err = decodeEvent([]byte(`{"type":"switch","from":"include","to":"system","cause":"healthy_but_mute","reason":"only zeros"}`))
+	if err != nil || e.Cause != "healthy_but_mute" {
+		t.Fatalf("switch = %+v, %v", e, err)
+	}
+	for _, bad := range []string{
+		`{"type":"switch","from":"include","to":"system","cause":"boom"}`,
+		`{"type":"started","windows":{"major":10,"x":1}}`,
+		`{"type":"started","build":"10.0.19045"}`,
+	} {
+		if _, err := decodeEvent([]byte(bad)); !errors.Is(err, ErrProtocol) {
+			t.Errorf("decodeEvent(%s) = %v, want ErrProtocol", bad, err)
+		}
+	}
+}
