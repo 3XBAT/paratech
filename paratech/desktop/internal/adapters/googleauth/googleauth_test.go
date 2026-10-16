@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -350,6 +351,54 @@ func TestSignInCancelled(t *testing.T) {
 	assertClosed(t, r.redirectHost(t))
 }
 
+// slowTokens holds token requests until a fixed time, giving up when the request's ctx ends first.
+type slowTokens struct {
+	base      http.RoundTripper
+	tokenPath string
+	until     time.Time
+}
+
+func (s *slowTokens) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Path == s.tokenPath {
+		timer := time.NewTimer(time.Until(s.until))
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-req.Context().Done():
+			if req.Body != nil {
+				_ = req.Body.Close()
+			}
+			return nil, req.Context().Err()
+		}
+	}
+	return s.base.RoundTrip(req)
+}
+
+// The sign-in timeout bounds only the wait for the redirect: a code that came in time is exchanged even when the
+// exchange ends after the timeout.
+func TestSignInExchangesAfterTheTimeout(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	const timeout = 300 * time.Millisecond
+	tokens := &slowTokens{base: &http.Transport{DisableKeepAlives: true}}
+	r := newRig(t, WithSignInTimeout(timeout), WithHTTPClient(&http.Client{Transport: tokens, Timeout: 5 * time.Second}))
+	u, err := url.Parse(r.google.TokenURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.tokenPath = u.Path
+	tokens.until = time.Now().Add(timeout + 200*time.Millisecond) // set before SignIn starts its timer
+
+	if err := r.a.SignIn(context.Background()); err != nil {
+		t.Fatalf("SignIn = %v", err)
+	}
+	if time.Now().Before(tokens.until) {
+		t.Fatal("the exchange was not held past the sign-in timeout")
+	}
+	if live := r.google.LiveRefreshTokens(); len(live) != 1 || r.stored(t, RefreshTokenName) != live[0] {
+		t.Fatal("the refresh token was not stored")
+	}
+}
+
 // Without a usable client nothing is opened.
 func TestSignInNeedsAClient(t *testing.T) {
 	tests := []struct {
@@ -517,6 +566,55 @@ func TestHTTPClientSendsTheAccessToken(t *testing.T) {
 	}
 	if _, err := r.a.HTTPClient().Get(api.URL); !errors.Is(err, ErrNotSignedIn) {
 		t.Fatalf("Get after sign-out = %v, want ErrNotSignedIn", err)
+	}
+}
+
+// The bearer client follows redirects on the same host only: the token must not reach another host.
+func TestHTTPClientRefusesForeignRedirects(t *testing.T) {
+	r := signedIn(t)
+	var foreignHits atomic.Int32
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { foreignHits.Add(1) }))
+	t.Cleanup(foreign.Close)
+	var auth atomic.Value // the Authorization header the same-host target got
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/same":
+			http.Redirect(w, req, "/target", http.StatusFound)
+		case "/foreign":
+			http.Redirect(w, req, foreign.URL+"/target", http.StatusFound)
+		case "/loop":
+			http.Redirect(w, req, "/loop", http.StatusFound)
+		case "/target":
+			auth.Store(req.Header.Get("Authorization"))
+		}
+	}))
+	t.Cleanup(api.Close)
+
+	tests := []struct {
+		path string
+		want error
+	}{
+		{path: "/same"},
+		{path: "/foreign", want: errForeignRedirect},
+		{path: "/loop", want: errTooManyRedirects},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			auth.Store("")
+			resp, err := r.a.HTTPClient().Get(api.URL + tt.path)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if !errors.Is(err, tt.want) || (tt.want == nil) != (err == nil) {
+				t.Fatalf("Get = %v, want %v", err, tt.want)
+			}
+			if got, _ := auth.Load().(string); tt.want == nil && !strings.HasPrefix(got, "Bearer ") {
+				t.Fatalf("the same-host target got Authorization %q", got)
+			}
+		})
+	}
+	if n := foreignHits.Load(); n != 0 {
+		t.Fatalf("the foreign host got %d requests", n)
 	}
 }
 

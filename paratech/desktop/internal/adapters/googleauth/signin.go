@@ -42,17 +42,19 @@ const (
 // browser to open Google's consent page with a PKCE challenge and a random state, waits for the one redirect that
 // carries that state, exchanges the code with the verifier and keeps the tokens if Google granted exactly
 // calendar.app.created. Redirects with another state are answered 400 and ignored, so another local process cannot
-// end the sign-in. It ends with ErrTimeout after the sign-in timeout and with the ctx error when ctx is done; the
-// listener is closed before it returns. A new sign-in replaces the stored refresh token.
+// end the sign-in. It ends with ErrTimeout when no redirect comes within the sign-in timeout and with the ctx error
+// when ctx is done; the listener is closed before it returns. A new sign-in replaces the stored refresh token.
 func (a *Authorizer) SignIn(ctx context.Context) error {
 	c, err := a.readClient(ctx)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeoutCause(ctx, a.signInTimeout, ErrTimeout)
-	defer cancel()
 
-	cfg, code, verifier, err := a.authorize(ctx, c)
+	// Only the wait for the browser is bounded: a code Google issued at the last second is still exchanged, within
+	// the HTTP client's timeout.
+	waitCtx, cancel := context.WithTimeoutCause(ctx, a.signInTimeout, ErrTimeout)
+	cfg, code, verifier, err := a.authorize(waitCtx, c)
+	cancel()
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@
 //
 // The OAuth client is the user's own Google Cloud "Desktop" client: its id and secret are entered on the
 // «Подключения» page and kept in the credential store, never in the binary (Google documents the secret of an
-// installed app as not confidential; the token endpoint still expects it). The only scope is
+// installed app as not confidential; the app always sends the secret the user entered). The only scope is
 // values.GoogleCalendarScope; a token response that grants anything else is revoked.
 //
 // The refresh token lives only in the credential store (AC-19, hard rule 4); the access token only in memory. Codes,
@@ -43,7 +43,7 @@ const (
 
 // Defaults of the options.
 const (
-	// DefaultSignInTimeout bounds the whole sign-in: the user has this long to finish in the browser.
+	// DefaultSignInTimeout bounds the wait for the redirect: the user has this long to finish in the browser.
 	DefaultSignInTimeout = 5 * time.Minute
 	// DefaultHTTPTimeout bounds one call to the token or revocation endpoint.
 	DefaultHTTPTimeout = 30 * time.Second

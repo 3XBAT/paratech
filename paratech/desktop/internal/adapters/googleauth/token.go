@@ -18,6 +18,15 @@ import (
 // maxRevokeBody bounds what is read of a revocation answer.
 const maxRevokeBody = 64 << 10
 
+// maxRedirects is the limit of net/http's default redirect policy, which a custom CheckRedirect replaces.
+const maxRedirects = 10
+
+// Redirect refusals of HTTPClient.
+var (
+	errForeignRedirect  = errors.New("googleauth: redirect to another host refused")
+	errTooManyRedirects = errors.New("googleauth: too many redirects")
+)
+
 // Token returns a valid access token for the Calendar API (TASK-051). It reuses the cached one and otherwise
 // refreshes it with the stored refresh token; a rotated refresh token from Google replaces the stored one. When
 // Google rejects the refresh token (invalid_grant) it is removed and the error is ErrReauthRequired. The returned
@@ -64,13 +73,26 @@ func (a *Authorizer) Token(ctx context.Context) (*oauth2.Token, error) {
 }
 
 // HTTPClient returns a client that sends every request with "Authorization: Bearer <access token>" from Token,
-// refreshed as needed, through the transport of the adapter's HTTP client.
+// refreshed as needed, through the transport of the adapter's HTTP client. It follows redirects only on the same
+// scheme and host: the transport adds the header to every hop, so a redirect elsewhere would get the token.
 func (a *Authorizer) HTTPClient() *http.Client {
 	base := a.http.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return &http.Client{Transport: &bearer{a: a, base: base}, Timeout: a.http.Timeout}
+	return &http.Client{Transport: &bearer{a: a, base: base}, Timeout: a.http.Timeout, CheckRedirect: sameHostOnly}
+}
+
+// sameHostOnly is the redirect policy of HTTPClient.
+func sameHostOnly(req *http.Request, via []*http.Request) error {
+	first := via[0].URL
+	switch {
+	case req.URL.Scheme != first.Scheme || req.URL.Host != first.Host:
+		return errForeignRedirect
+	case len(via) >= maxRedirects:
+		return errTooManyRedirects
+	}
+	return nil
 }
 
 // bearer is the RoundTripper of HTTPClient. The refresh uses the request's context.
@@ -94,7 +116,7 @@ func (b *bearer) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // SignOut asks Google to revoke the grant and always removes the stored refresh token and the cached access token,
 // even when the revocation fails (then the error is ErrRevokeFailed: the user can revoke the access at
-// https://myaccount.google.com/permissions). Without a stored token it only clears. The client id and secret stay.
+// https://myaccount.google.com/linkedapps). Without a stored token it only clears. The client id and secret stay.
 func (a *Authorizer) SignOut(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
