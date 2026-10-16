@@ -9,6 +9,8 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -90,8 +92,9 @@ func (u *uiCore) start(t *testing.T) {
 	}
 }
 
-// pipelineAudio is what the fake recorder captures; the fake recorder's track is exactly these bytes.
-var pipelineAudio = []byte("audio of the lesson")
+// pipelineAudio is what the fake recorder captures; the fake recorder's track is exactly these bytes. Binary (NUL,
+// 0xFF, non-UTF-8), as real audio is, so a text-only path could not carry it unchanged.
+const pipelineAudio = "RIFF\x00\x01\xfe\xffWAVE\x00\xffaudio of the lesson\x80\x00\x7f\xff"
 
 // pipelineEnv is the test environment with the fake Hub configured: its URL in the settings (stored by
 // configureHub) and the tester key in the in-memory credential store.
@@ -171,7 +174,7 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	if !ok || info.LessonID != "lesson-1" {
 		t.Fatalf("active recording %+v, %v; want one for the lesson", info, ok)
 	}
-	if _, err := f.recorder.Feed(ctx, info.ID, pipelineAudio); err != nil {
+	if _, err := f.recorder.Feed(ctx, info.ID, []byte(pipelineAudio)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -233,6 +236,8 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	}
 	again := openUICore(t, dir, e)
 	again.start(t)
+	// The recording recovery runs in the background; once it ended it can store no status after the comparison below.
+	again.life.bg.Wait()
 	if err := again.c.transcriptions.RecordingCompleted(ctx, info.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -274,52 +279,97 @@ func checkRecordingTrack(t *testing.T, c *core, id shared.RecordingID) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(data, pipelineAudio) {
+	if !bytes.Equal(data, []byte(pipelineAudio)) {
 		t.Fatalf("the track holds %q, want the captured audio %q", data, pipelineAudio)
 	}
 }
 
 // checkTranscriptPin checks that the transcript tr of the recording rec names the exact model it was made with
-// (AC-08): the model id and the name and version copied from the installed model.
+// (AC-08): the model id and the name "base" and version "1" the test imported it with (importModel).
 func checkTranscriptPin(t *testing.T, c *core, tr shared.TranscriptID, rec shared.RecordingID, model shared.SttModelID) {
 	t.Helper()
-	ctx := context.Background()
-	got, err := sqlite.NewTranscriptRepository(c.db).Get(ctx, tr)
+	got, err := sqlite.NewTranscriptRepository(c.db).Get(context.Background(), tr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, err := c.models.ListInstalled(ctx)
-	if err != nil || len(installed) != 1 || installed[0].ID != model {
-		t.Fatalf("installed models %+v, %v; want only %s", installed, err, model)
-	}
-	m := installed[0]
-	if got.RecordingID() != rec || got.ModelID() != model || got.ModelName() != m.Name || got.ModelVersion() != m.ModelVersion {
-		t.Fatalf("transcript of %s by %s %s %s, want of %s by %s %s %s",
-			got.RecordingID(), got.ModelID(), got.ModelName(), got.ModelVersion(), rec, model, m.Name, m.ModelVersion)
+	if got.RecordingID() != rec || got.ModelID() != model || got.ModelName() != "base" || got.ModelVersion() != "1" {
+		t.Fatalf("transcript of %s by %s %s %s, want of %s by %s base 1",
+			got.RecordingID(), got.ModelID(), got.ModelName(), got.ModelVersion(), rec, model)
 	}
 }
 
 // checkHubSawNoAudio checks AC-06 on the wire: each of the two post-processing requests carried the transcript text
-// and the tester key, and no request carried a byte sequence of the captured audio.
+// and the tester key, and no marshalled request contained the captured audio raw, as hex or as base64 (audioForms).
 func checkHubSawNoAudio(t *testing.T, hub *testenv.FakeHub) {
 	t.Helper()
 	reqs, auth := hub.Requests(), hub.Authorizations()
 	if len(reqs) != 2 || len(auth) != 2 {
 		t.Fatalf("the Hub got %d requests (%d authorized), want 2", len(reqs), len(auth))
 	}
+	forms := audioForms([]byte(pipelineAudio))
 	for i, r := range reqs {
 		raw, err := proto.Marshal(r)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Contains(raw, pipelineAudio) {
-			t.Fatalf("request %d (%s) carries the recorded audio", i, r.GetSpec().GetOperationType())
+		for _, form := range forms {
+			if bytes.Contains(raw, form) {
+				t.Fatalf("request %d (%s) carries the recorded audio as %q", i, r.GetSpec().GetOperationType(), form)
+			}
 		}
 		if !strings.Contains(r.GetSpec().GetUntrustedData(), testenv.WhisperOKSegments[1]) {
 			t.Fatalf("request %d (%s) does not carry the transcript text", i, r.GetSpec().GetOperationType())
 		}
 		if auth[i] != "Bearer "+testHubKey {
 			t.Fatalf("request %d is not authorized with the tester key", i)
+		}
+	}
+}
+
+// audioForms returns the audio as it is, as lower- and upper-case hex, and as base64 in the standard and URL
+// alphabets. Inside a longer encoded stream the audio can start at any of three byte offsets of a base64 group, so
+// for each offset k only the whole groups of audio[k:] are taken: they are encoded the same whatever surrounds them,
+// with or without padding (the Raw encodings differ only in the padding).
+func audioForms(audio []byte) [][]byte {
+	h := hex.EncodeToString(audio)
+	forms := [][]byte{audio, []byte(h), []byte(strings.ToUpper(h))}
+	for k := range 3 {
+		whole := audio[k:]
+		whole = whole[:len(whole)/3*3]
+		for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding} {
+			forms = append(forms, []byte(enc.EncodeToString(whole)))
+		}
+	}
+	return forms
+}
+
+// audioForms finds the audio wherever an encoder would put it: hex or base64 of a longer message, at any offset.
+func TestAudioFormsFindEncodedAudio(t *testing.T) {
+	audio := []byte(pipelineAudio)
+	found := func(wire []byte) bool {
+		return slices.ContainsFunc(audioForms(audio), func(f []byte) bool { return bytes.Contains(wire, f) })
+	}
+	for pad := range 4 {
+		msg := append(append(bytes.Repeat([]byte{'p'}, pad), audio...), "tail"...)
+		for name, wire := range map[string]string{
+			"raw":           string(msg),
+			"hex":           hex.EncodeToString(msg),
+			"HEX":           strings.ToUpper(hex.EncodeToString(msg)),
+			"base64":        base64.StdEncoding.EncodeToString(msg),
+			"raw base64":    base64.RawStdEncoding.EncodeToString(msg),
+			"url base64":    base64.URLEncoding.EncodeToString(msg),
+			"raw url64":     base64.RawURLEncoding.EncodeToString(msg),
+			"base64 suffix": base64.StdEncoding.EncodeToString(append(bytes.Repeat([]byte{'p'}, pad), audio...)),
+		} {
+			if !found([]byte(wire)) {
+				t.Errorf("offset %d, %s: the audio is not found in %q", pad, name, wire)
+			}
+		}
+	}
+	// A short form would match unrelated bytes, an empty one anything.
+	for _, f := range audioForms(audio) {
+		if len(f) < 16 {
+			t.Errorf("audio form %q is too short to mean the audio", f)
 		}
 	}
 }
