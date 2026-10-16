@@ -2,12 +2,16 @@
 // Go settings aggregate (ARCH-44); here only what the page needs to show and send them.
 
 import type {
+  CheckResult,
   Connections,
   FieldError,
   MailSecurity,
   MailSettingsInput,
   SecretStatus,
 } from "./bindings/connections";
+import type { GoogleState } from "./bindings/google";
+import type { IconName } from "./ui/Icon.js";
+import type { ChipKind } from "./ui/StatusChip.js";
 
 /** The mail form as typed. There is no password here: the secret slot keeps it apart. */
 export interface MailForm {
@@ -248,3 +252,124 @@ export function checkControls(state: {
 export function failureText(action: "load" | "save" | "check"): string {
   return action === "load" ? texts.loadFailed : action === "save" ? texts.saveFailed : texts.checkFailed;
 }
+
+/** A section of the page: a card on the overview, its own page when opened. */
+export type ConnSection = "hub" | "mail" | "google" | "apple";
+
+/** The chip of an overview card. */
+export interface CardStatus {
+  kind: ChipKind;
+  icon: IconName | null;
+  text: string;
+}
+
+export const overviewTexts = {
+  lead: "Сервер обработки, почта и Google Календарь",
+  title: "Подключения",
+  back: "Назад",
+  hubTitle: "Сервер обработки",
+  hubDesc: "Адрес, ключ доступа и лимит обработки",
+  mailTitle: "Почта",
+  mailDesc: "Отправка домашних заданий письмом",
+  googleDesc: "Вход и синхронизация расписания",
+} as const;
+
+const status = (kind: ChipKind, text: string): CardStatus => ({
+  kind,
+  icon: kind === "ok" ? "ok" : kind === "fail" || kind === "wait" || kind === "net" ? "warn" : kind === "run" ? "clock" : null,
+  text,
+});
+
+const loading = status("neutral", "Загрузка…");
+const loadFailed = status("fail", "Не загрузилось");
+
+/**
+ * The card of the Hub from what the page already has: the address, the key status and the quota of the last refresh
+ * (the page asks for it on open). "Подключено" only after the Hub answered with the quota.
+ */
+export function hubCardStatus(s: { saved: Connections | null; loadFailed: boolean; refreshing: boolean }): CardStatus {
+  const c = s.saved;
+  if (c === null) {
+    return s.loadFailed ? loadFailed : loading;
+  }
+  if (c.hubUrl === "") {
+    return status("wait", "Не настроено");
+  }
+  if (c.hubKey === "unset") {
+    return status("wait", "Нет ключа");
+  }
+  if (c.hubKey !== "set") {
+    return status("fail", "Ключ недоступен");
+  }
+  if (s.refreshing) {
+    return status("run", "Проверяем…");
+  }
+  switch (c.quota.status) {
+    case "current":
+      return status("ok", "Подключено");
+    case "unchecked":
+      return status("neutral", "Не проверено");
+    case "notConfigured":
+      return status("wait", "Не настроено");
+    case "noKey":
+      return status("wait", "Нет ключа");
+    case "keyRejected":
+      return status("fail", "Ключ не принят");
+    case "offline":
+      return status("net", "Нет связи");
+    default:
+      return status("fail", "Ошибка проверки");
+  }
+}
+
+/** The card of the mail: the saved settings, the password status and the check made on this page, if any. */
+export function mailCardStatus(s: { saved: Connections | null; loadFailed: boolean; check: CheckResult | null }): CardStatus {
+  const c = s.saved;
+  if (c === null) {
+    return s.loadFailed ? loadFailed : loading;
+  }
+  if (!c.mailConfigured) {
+    return status("wait", "Не настроено");
+  }
+  if (c.mailPassword === "unset") {
+    return status("wait", "Нет пароля");
+  }
+  if (c.mailPassword !== "set") {
+    return status("fail", "Пароль недоступен");
+  }
+  if (s.check !== null) {
+    return s.check.ok ? status("ok", "Проверено") : status("fail", "Проверка не прошла");
+  }
+  // Without a check nothing says the server accepts the login.
+  return status("ok", "Настроено");
+}
+
+/** The card of Google from GoogleStatus: the client, the account and a sign-in waiting for the browser. */
+export function googleCardStatus(s: { state: GoogleState | null; loadFailed: boolean }): CardStatus {
+  const g = s.state;
+  if (g === null) {
+    return s.loadFailed ? status("fail", "Не удалось проверить") : loading;
+  }
+  if (g.signingIn) {
+    return status("run", "Ожидание входа");
+  }
+  if (g.client === "unset") {
+    return status("wait", "Не настроено");
+  }
+  if (g.client !== "set") {
+    return status("fail", "Недоступно");
+  }
+  switch (g.account) {
+    case "signedIn":
+      return status("ok", "Подключено");
+    case "signedOut":
+      return status("wait", "Вход не выполнен");
+    case "unsupported":
+      return status("fail", "Недоступно");
+    default:
+      return status("fail", "Не удалось проверить");
+  }
+}
+
+/** The Apple card is a help screen: there is nothing to connect, so its chip only says what it is. */
+export const appleCardStatus: CardStatus = status("neutral", "Инструкция");

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   connectionsApi,
   type CheckResult,
@@ -8,21 +8,28 @@ import {
 } from "../bindings/connections";
 import { callByName } from "../bindings/runtime";
 import {
+  appleCardStatus,
   checkControls,
   failureText,
   fieldErrorText,
+  googleCardStatus,
+  hubCardStatus,
   hubFields,
   hubKeyLabels,
   mailConfiguredText,
   mailFields,
   mailFormDirty,
   mailFormFrom,
+  mailCardStatus,
   mailInputFrom,
   mailPasswordLabels,
   otherErrorTexts,
+  overviewTexts,
   secretOutcomeOk,
   securityOptions,
   texts,
+  type CardStatus,
+  type ConnSection,
   type FieldCode,
   type MailForm,
 } from "../connectionsView";
@@ -36,23 +43,27 @@ import {
 } from "../quotaView";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
+import { StatusChip } from "../ui/StatusChip";
 import { helpTexts } from "../appleHelpView";
+import { googleTexts } from "../googleView";
 import { AppleCalendarHelpPage } from "./AppleCalendarHelpPage";
 import { GoogleBlock } from "./GoogleBlock";
 import { SecretSlot, type SecretMessage } from "./SecretSlot";
+import { useGoogleStatus } from "./useGoogleStatus";
 
 const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 
-// "Подключения": the Hub address, the Hub key and the remaining quota, the mail account, the mail password and the
-// mail check, the Google sign-in (GoogleBlock) and the entry to the Apple Calendar help, in cards
-// (docs/design/concept-final.html). The page only shows and forwards the values; validation, the secret store and the
-// quota are in the Go core (ARCH-44).
+// "Подключения": an overview of section cards with a status each; a card opens its section in place of the overview:
+// the Hub address, key and quota; the mail account, password and check; the Google sign-in (GoogleBlock); the Apple
+// Calendar help (docs/design/concept-final.html). The sections are not in the rail. The page only shows and forwards
+// the values; validation, the secret store and the quota are in the Go core (ARCH-44).
 export function ConnectionsPage() {
   const api = useMemo(() => connectionsApi(callByName), []);
-  // The help screen replaces the page instead of being a section of the rail; "returned" puts the focus back on the
-  // button that opened it.
-  const [help, setHelp] = useState<"closed" | "open" | "returned">("closed");
-  const helpEntry = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState<ConnSection | null>(null);
+  // "Назад" puts the focus back on the card that opened the section.
+  const returnTo = useRef<ConnSection | null>(null);
+  const cards = useRef<Partial<Record<ConnSection, HTMLButtonElement | null>>>({});
+  const google = useGoogleStatus(open === null);
   const [saved, setSaved] = useState<Connections | null>(null);
   const [loadError, setLoadError] = useState("");
   const mounted = useRef(true);
@@ -252,11 +263,16 @@ export function ConnectionsPage() {
   }, [api]); // refreshQuota uses only refs, state setters and api
 
   useEffect(() => {
-    if (help === "returned") {
-      helpEntry.current?.querySelector("button")?.focus();
+    if (open === null && returnTo.current !== null) {
+      cards.current[returnTo.current]?.focus();
+      returnTo.current = null;
     }
-  }, [help]);
+  }, [open]);
 
+  const back = () => {
+    returnTo.current = open;
+    setOpen(null);
+  };
 
   const runCheck = () =>
     once("check", setChecking, async () => {
@@ -273,16 +289,68 @@ export function ConnectionsPage() {
       }
     });
 
-  if (help === "open") {
-    return <AppleCalendarHelpPage onBack={() => setHelp("returned")} />;
+  if (open === "apple") {
+    return <AppleCalendarHelpPage onBack={back} />;
   }
 
-  if (saved === null || mail === null) {
+  if (open === "google") {
+    return (
+      <SectionPage title={googleTexts.title} onBack={back}>
+        <GoogleBlock />
+      </SectionPage>
+    );
+  }
+
+  if (open === null) {
+    const loadFailed = loadError !== "";
+    const cardProps = (id: ConnSection) => ({
+      onOpen: () => setOpen(id),
+      buttonRef: (el: HTMLButtonElement | null) => {
+        cards.current[id] = el;
+      },
+    });
     return (
       <section className="page">
         <div className="head">
-          <h1>Подключения</h1>
+          <div>
+            <span className="label">{overviewTexts.lead}</span>
+            <h1>{overviewTexts.title}</h1>
+          </div>
         </div>
+        <div className="conn-cards">
+          <SectionCard
+            {...cardProps("hub")}
+            title={overviewTexts.hubTitle}
+            desc={overviewTexts.hubDesc}
+            status={hubCardStatus({ saved, loadFailed, refreshing })}
+          />
+          <SectionCard
+            {...cardProps("mail")}
+            title={overviewTexts.mailTitle}
+            desc={overviewTexts.mailDesc}
+            status={mailCardStatus({ saved, loadFailed, check })}
+          />
+          <SectionCard
+            {...cardProps("google")}
+            title={googleTexts.title}
+            desc={overviewTexts.googleDesc}
+            status={googleCardStatus(google)}
+          />
+          <SectionCard
+            {...cardProps("apple")}
+            title={helpTexts.entryTitle}
+            desc={helpTexts.entryButton}
+            status={appleCardStatus}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  const title = open === "hub" ? overviewTexts.hubTitle : overviewTexts.mailTitle;
+  if (saved === null || mail === null) {
+    return (
+      <SectionPage title={title} onBack={back}>
         {loadError ? (
           <ResultLine kind="fail" role="alert">
             {loadError}
@@ -290,7 +358,7 @@ export function ConnectionsPage() {
         ) : (
           <p className="muted">{texts.loading}</p>
         )}
-      </section>
+      </SectionPage>
     );
   }
 
@@ -300,18 +368,10 @@ export function ConnectionsPage() {
   const quotaState = quotaControls({ refreshing, keyBusy: hubKeyBusy, hubBusy });
   const used = quotaUsedPercent(saved.quota);
 
-  return (
-    <section className="page">
-      <div className="head">
-        <div>
-          <span className="label">Сервер обработки, почта и Google Календарь</span>
-          <h1>Подключения</h1>
-        </div>
-      </div>
-
-      <div className="grid2">
+  if (open === "hub") {
+    return (
+      <SectionPage title={title} onBack={back}>
         <Card className="box" label="Сервер обработки">
-          <h2>Сервер обработки</h2>
           <span className="small muted box-desc">
             Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.
           </span>
@@ -395,106 +455,144 @@ export function ConnectionsPage() {
             </Button>
           </div>
         </Card>
+      </SectionPage>
+    );
+  }
 
-        <Card className="box" label="Почта">
-          <h2>Почта</h2>
-          {saved.mailConfigured ? (
-            <span className="small muted box-desc">{mailConfiguredText(true)}</span>
-          ) : (
-            <ResultLine kind="wait">{mailConfiguredText(false)}</ResultLine>
-          )}
-          {mailFields.map((f) => (
-            <Field
-              key={f.code}
-              label={f.label}
-              hint={f.code === "smtpPort" ? texts.portHint : undefined}
-              error={fieldErrorText(mailErrors, f.code)}
-            >
-              {(id) =>
-                f.code === "smtpSecurity" ? (
-                  <Select
-                    id={id}
-                    value={mail.smtpSecurity}
-                    disabled={mailBusy}
-                    onChange={(e) =>
-                      setMail({ ...mail, smtpSecurity: e.target.value === "tls" ? "tls" : "starttls" })
-                    }
-                  >
-                    {securityOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
-                ) : (
-                  <Input
-                    id={id}
-                    type="text"
-                    inputMode={f.code === "smtpPort" ? "numeric" : f.code === "smtpHost" ? "url" : "email"}
-                    spellCheck={false}
-                    autoComplete="off"
-                    value={mail[f.code]}
-                    disabled={mailBusy}
-                    onChange={(e) => setMail({ ...mail, [f.code]: e.target.value })}
-                  />
-                )
-              }
-            </Field>
-          ))}
-          <Errors texts={otherErrorTexts(mailErrors, mailCodes)} />
-          <div className="acts start">
-            <Button disabled={mailBusy} onClick={() => void saveMail()}>
-              Сохранить
-            </Button>
-          </div>
-          {mailDone && !dirty && (
-            <ResultLine kind="ok" role="status">
-              {mailDone}
-            </ResultLine>
-          )}
+  return (
+    <SectionPage title={title} onBack={back}>
+      <Card className="box" label="Почта">
+        {saved.mailConfigured ? (
+          <span className="small muted box-desc">{mailConfiguredText(true)}</span>
+        ) : (
+          <ResultLine kind="wait">{mailConfiguredText(false)}</ResultLine>
+        )}
+        {mailFields.map((f) => (
+          <Field
+            key={f.code}
+            label={f.label}
+            hint={f.code === "smtpPort" ? texts.portHint : undefined}
+            error={fieldErrorText(mailErrors, f.code)}
+          >
+            {(id) =>
+              f.code === "smtpSecurity" ? (
+                <Select
+                  id={id}
+                  value={mail.smtpSecurity}
+                  disabled={mailBusy}
+                  onChange={(e) =>
+                    setMail({ ...mail, smtpSecurity: e.target.value === "tls" ? "tls" : "starttls" })
+                  }
+                >
+                  {securityOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  id={id}
+                  type="text"
+                  inputMode={f.code === "smtpPort" ? "numeric" : f.code === "smtpHost" ? "url" : "email"}
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={mail[f.code]}
+                  disabled={mailBusy}
+                  onChange={(e) => setMail({ ...mail, [f.code]: e.target.value })}
+                />
+              )
+            }
+          </Field>
+        ))}
+        <Errors texts={otherErrorTexts(mailErrors, mailCodes)} />
+        <div className="acts start">
+          <Button disabled={mailBusy} onClick={() => void saveMail()}>
+            Сохранить
+          </Button>
+        </div>
+        {mailDone && !dirty && (
+          <ResultLine kind="ok" role="status">
+            {mailDone}
+          </ResultLine>
+        )}
 
-          <hr className="sep" />
-          <SecretSlot
-            nested
-            labels={mailPasswordLabels}
-            status={saved.mailPassword}
-            busy={secretBusy}
-            message={secretMessage}
-            onStore={(value) => changeSecret("store", () => api.setMailPassword(value))}
-            onRemove={() => changeSecret("remove", () => api.removeMailPassword())}
-          />
+        <hr className="sep" />
+        <SecretSlot
+          nested
+          labels={mailPasswordLabels}
+          status={saved.mailPassword}
+          busy={secretBusy}
+          message={secretMessage}
+          onStore={(value) => changeSecret("store", () => api.setMailPassword(value))}
+          onRemove={() => changeSecret("remove", () => api.removeMailPassword())}
+        />
 
-          <hr className="sep" />
-          <h3>Проверка почты</h3>
-          <p className="small muted">{texts.checkNoSend}</p>
-          <div className="acts start">
-            <Button
-              disabled={checkState.disabled}
-              disabledReason={checkState.hint}
-              busy={checking}
-              busyLabel={texts.checking}
-              onClick={() => void runCheck()}
-            >
-              Проверить почту
-            </Button>
-          </div>
-          {check !== null && (
-            <ResultLine kind={check.ok ? "ok" : "fail"} role={check.ok ? "status" : "alert"}>
-              {check.message}
-            </ResultLine>
-          )}
-        </Card>
+        <hr className="sep" />
+        <h3>Проверка почты</h3>
+        <p className="small muted">{texts.checkNoSend}</p>
+        <div className="acts start">
+          <Button
+            disabled={checkState.disabled}
+            disabledReason={checkState.hint}
+            busy={checking}
+            busyLabel={texts.checking}
+            onClick={() => void runCheck()}
+          >
+            Проверить почту
+          </Button>
+        </div>
+        {check !== null && (
+          <ResultLine kind={check.ok ? "ok" : "fail"} role={check.ok ? "status" : "alert"}>
+            {check.message}
+          </ResultLine>
+        )}
+      </Card>
+    </SectionPage>
+  );
+}
 
-        <GoogleBlock />
+// A card of the overview is a real button: Tab reaches it, Enter and Space open the section. The status sits next to
+// the title.
+function SectionCard(props: {
+  title: string;
+  desc: string;
+  status: CardStatus;
+  onOpen: () => void;
+  buttonRef: (el: HTMLButtonElement | null) => void;
+}) {
+  return (
+    <button type="button" className="card box conn-card" ref={props.buttonRef} onClick={props.onOpen}>
+      <span className="conn-card-head">
+        <span className="conn-card-title">{props.title}</span>
+        <StatusChip kind={props.status.kind} icon={props.status.icon}>
+          {props.status.text}
+        </StatusChip>
+      </span>
+      <span className="small muted">{props.desc}</span>
+    </button>
+  );
+}
 
-        <Card className="box" label={helpTexts.entryTitle}>
-          <h2>{helpTexts.entryTitle}</h2>
-          <span className="small muted box-desc">{helpTexts.entryText}</span>
-          <div ref={helpEntry} className="acts start">
-            <Button onClick={() => setHelp("open")}>{helpTexts.entryButton}</Button>
-          </div>
-        </Card>
+// A section opened from a card: the title, «Назад» and the section's card. Focus moves to the title so a screen reader
+// announces the new page and Tab starts from its top.
+function SectionPage(props: { title: string; onBack: () => void; children: ReactNode }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
+  return (
+    <section className="page conn-page">
+      <div className="head">
+        <div>
+          <span className="label">{overviewTexts.title}</span>
+          <h1 ref={heading} tabIndex={-1}>
+            {props.title}
+          </h1>
+        </div>
+        <Button onClick={props.onBack}>{overviewTexts.back}</Button>
       </div>
+      {props.children}
     </section>
   );
 }

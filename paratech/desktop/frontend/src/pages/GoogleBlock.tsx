@@ -33,7 +33,7 @@ function accountChip(status: string): ChipKind {
   return statusWarns(status) ? "fail" : status === "signedIn" ? "ok" : "neutral";
 }
 
-// «Google Календарь» on "Подключения": the client id and secret, the sign-in in the system browser, the sign-out and the calendar sync (CalendarSync).
+// «Google Календарь» section of "Подключения": the client id and secret, the sign-in in the system browser, the sign-out and the calendar sync (CalendarSync).
 // The client id and secret are write-only: typed values live in this component's state until the save call returns and
 // go nowhere else. The core keeps them and the token in Credential Manager (ARCH-44).
 export function GoogleBlock() {
@@ -138,12 +138,8 @@ export function GoogleBlock() {
     }
   }
 
-  const header = (
-    <>
-      <h2>{googleTexts.title}</h2>
-      <span className="small muted box-desc">{googleTexts.hint}</span>
-    </>
-  );
+  // The title is the heading of the section page that holds the block.
+  const header = <span className="small muted box-desc">{googleTexts.hint}</span>;
 
   if (state === null) {
     return (

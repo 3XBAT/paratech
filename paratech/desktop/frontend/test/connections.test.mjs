@@ -36,6 +36,11 @@ import {
   secretStatusNote,
   securityOptions,
   texts,
+  appleCardStatus,
+  googleCardStatus,
+  hubCardStatus,
+  mailCardStatus,
+  overviewTexts,
 } from "../.test-build/connectionsView.js";
 
 // Mirrors the JSON of internal/input/wails/connections.go (TestConnectionsJSONNames).
@@ -364,4 +369,88 @@ test("the page renders text only and keeps the password and the Hub key write-on
   // The re-read and the refresh after a key change are not awaited inside the change: the slot clears the field as
   // soon as the store answers.
   assert.match(page, /\}\);\s*void reloadHub\(\);\s*\}/);
+});
+
+// TASK-068: the overview cards. Each status comes from what the page already holds; the kind picks the chip colour.
+const chip = (s) => [s.kind, s.text];
+
+test("the Hub card says what is missing before it says connected", () => {
+  const hub = (saved, more = {}) => chip(hubCardStatus({ saved, loadFailed: false, refreshing: false, ...more }));
+  assert.deepEqual(hub(null), ["neutral", "Загрузка…"]);
+  assert.deepEqual(hub(null, { loadFailed: true }), ["fail", "Не загрузилось"]);
+  assert.deepEqual(hub(fresh), ["wait", "Не настроено"]);
+  assert.deepEqual(hub({ ...stored, hubKey: "unset" }), ["wait", "Нет ключа"]);
+  assert.deepEqual(hub({ ...stored, hubKey: "unsupported" }), ["fail", "Ключ недоступен"]);
+  assert.deepEqual(hub({ ...stored, hubKey: "unavailable" }), ["fail", "Ключ недоступен"]);
+  assert.deepEqual(hub(stored, { refreshing: true }), ["run", "Проверяем…"]);
+  assert.deepEqual(hub(stored), ["ok", "Подключено"]);
+  const q = (status) => hub({ ...stored, quota: { ...current, status } });
+  assert.deepEqual(q("unchecked"), ["neutral", "Не проверено"]);
+  assert.deepEqual(q("notConfigured"), ["wait", "Не настроено"]);
+  assert.deepEqual(q("noKey"), ["wait", "Нет ключа"]);
+  assert.deepEqual(q("keyRejected"), ["fail", "Ключ не принят"]);
+  assert.deepEqual(q("offline"), ["net", "Нет связи"]);
+  assert.deepEqual(q("failed"), ["fail", "Ошибка проверки"]);
+  assert.deepEqual(q("newerStatus"), ["fail", "Ошибка проверки"]);
+});
+
+test("the mail card follows the settings, the password and a check made on the page", () => {
+  const mail = (saved, check = null) => chip(mailCardStatus({ saved, loadFailed: false, check }));
+  assert.deepEqual(mail(null), ["neutral", "Загрузка…"]);
+  assert.deepEqual(chip(mailCardStatus({ saved: null, loadFailed: true, check: null })), ["fail", "Не загрузилось"]);
+  assert.deepEqual(mail(fresh), ["wait", "Не настроено"]);
+  assert.deepEqual(mail({ ...stored, mailPassword: "unset" }), ["wait", "Нет пароля"]);
+  assert.deepEqual(mail({ ...stored, mailPassword: "unavailable" }), ["fail", "Пароль недоступен"]);
+  assert.deepEqual(mail(stored), ["ok", "Настроено"]);
+  assert.deepEqual(mail(stored, { ok: true, message: "" }), ["ok", "Проверено"]);
+  assert.deepEqual(mail(stored, { ok: false, message: "" }), ["fail", "Проверка не прошла"]);
+});
+
+test("the Google card reads the client, the account and a waiting sign-in", () => {
+  const g = (state, loadFailed = false) => chip(googleCardStatus({ state, loadFailed }));
+  const ready = { client: "set", account: "signedIn", signingIn: false };
+  assert.deepEqual(g(null), ["neutral", "Загрузка…"]);
+  assert.deepEqual(g(null, true), ["fail", "Не удалось проверить"]);
+  assert.deepEqual(g(ready), ["ok", "Подключено"]);
+  assert.deepEqual(g({ ...ready, account: "signedOut" }), ["wait", "Вход не выполнен"]);
+  assert.deepEqual(g({ ...ready, account: "signedOut", signingIn: true }), ["run", "Ожидание входа"]);
+  assert.deepEqual(g({ client: "unset", account: "signedOut", signingIn: false }), ["wait", "Не настроено"]);
+  assert.deepEqual(g({ ...ready, client: "unsupported" }), ["fail", "Недоступно"]);
+  assert.deepEqual(g({ ...ready, account: "unavailable" }), ["fail", "Не удалось проверить"]);
+  assert.deepEqual(chip(appleCardStatus), ["neutral", "Инструкция"]);
+});
+
+test("every card chip pairs its colour with a word and an icon where it warns", () => {
+  const all = [
+    appleCardStatus,
+    ...["current", "offline", "keyRejected", "unchecked"].map((status) =>
+      hubCardStatus({ saved: { ...stored, quota: { ...current, status } }, loadFailed: false, refreshing: false })),
+    hubCardStatus({ saved: stored, loadFailed: false, refreshing: true }),
+    mailCardStatus({ saved: fresh, loadFailed: false, check: null }),
+  ];
+  for (const s of all) {
+    assert.ok(s.text.length > 0 && s.text.length <= 20, s.text);
+    assert.equal(s.icon === null, s.kind === "neutral", s.text);
+  }
+  for (const d of [overviewTexts.hubDesc, overviewTexts.mailDesc, overviewTexts.googleDesc]) {
+    assert.ok(d.length <= 40, `${d}: one line in a card`);
+  }
+});
+
+test("the overview opens each section in place and returns the focus to its card", () => {
+  const page = src("../src/pages/ConnectionsPage.tsx");
+  // Four cards, each a real button (Tab, Enter and Space come with it).
+  assert.equal([...page.matchAll(/<SectionCard\s/g)].length, 4);
+  assert.match(page, /<button type="button" className="card box conn-card"/);
+  for (const id of ["hub", "mail", "google", "apple"]) {
+    assert.ok(page.includes(`{...cardProps("${id}")}`), id);
+  }
+  assert.match(page, /cards\.current\[returnTo\.current\]\?\.focus\(\)/);
+  assert.match(page, /<Button onClick=\{props\.onBack\}>\{overviewTexts\.back\}<\/Button>/);
+  assert.equal(overviewTexts.back, "Назад");
+  // The overview reads the Google status only; nothing on it signs in, syncs or refreshes.
+  const hook = src("../src/pages/useGoogleStatus.ts");
+  assert.deepEqual([...hook.matchAll(/api\.(\w+)\(/g)].map((m) => m[1]), ["status", "status"]);
+  // The sections stay off the rail.
+  assert.ok(!src("../src/nav.ts").includes("hub"));
 });
