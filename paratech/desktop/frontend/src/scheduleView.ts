@@ -94,6 +94,49 @@ export function summaryText(p: ImportPreview): string {
   );
 }
 
+export interface SummaryChip {
+  kind: "added" | "changed" | "removed" | "unchanged" | "errors";
+  text: string;
+  count: number;
+}
+
+/** The counters above the preview. */
+export function summaryChips(p: ImportPreview): SummaryChip[] {
+  const chip = (kind: SummaryChip["kind"], label: string, count: number) => ({ kind, text: `${label}: ${count}`, count });
+  return [
+    chip("added", "Добавится", p.added.length),
+    chip("changed", "Изменится", p.changed.length),
+    chip("removed", "Удалится", p.removed.length),
+    chip("unchanged", "Без изменений", p.unchangedCount),
+    chip("errors", "Ошибки", p.errors.length),
+  ];
+}
+
+/** A collapsible group of the preview; the page keeps the collapse state by this key, not by preview. */
+export type PreviewGroup = "errors" | "added" | "changed" | "removed" | "conflicts";
+
+export const groupTitles: Readonly<Record<PreviewGroup, string>> = {
+  errors: "Ошибки в строках",
+  added: "Добавятся",
+  changed: "Изменятся",
+  removed: "Удалятся",
+  conflicts: "Пересечения",
+};
+
+/** The groups the preview shows: only the row errors when there are any, otherwise the non-empty changes. */
+export function previewGroups(p: ImportPreview): PreviewGroup[] {
+  if (p.errors.length > 0) {
+    return ["errors"];
+  }
+  const sizes: [PreviewGroup, number][] = [
+    ["added", p.added.length],
+    ["changed", p.changed.length],
+    ["removed", p.removed.length],
+    ["conflicts", p.conflicts.length],
+  ];
+  return sizes.filter(([, n]) => n > 0).map(([g]) => g);
+}
+
 export function windowText(w: ImportWindow): string {
   return `Импортируются занятия с ${w.from} до ${w.to}; удаляются только занятия внутри этого периода.`;
 }
