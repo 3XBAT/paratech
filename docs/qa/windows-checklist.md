@@ -306,6 +306,20 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
+## Страница входа Google и ссылка paratech:// (TASK-066)
+
+Автотесты: `TestCallbackPages`, `TestPagesAreSelfContained` (`desktop/internal/adapters/googleauth/pages_test.go`); `TestLoadIgnoresASchemeLaunch` (`desktop/config`); `TestEnsure`, `TestEnsureInTheRegistry` (`desktop/internal/adapters/urlscheme`); `TestGoogleSignInShowsTheMainWindow`, `TestAppOptions` (`desktop/internal/input/wails`). Решение — ADR-0013.
+Вручную (run-alpha.md §10, шаг 3):
+- [ ] После входа страница в браузере оформлена (карточка, значок, кнопка «Открыть Paratech»); в тёмной теме Windows — тёмная, в светлой — светлая. Отказ в доступе — «Доступ не разрешён», с подсказкой.
+- [ ] После входа главное окно приложения само выходит вперёд (или хотя бы мигает на панели задач — отметить, что именно).
+- [ ] «Открыть Paratech» (окно приложения свёрнуто или скрыто в трей): окно выходит вперёд, попап и запись не появляются.
+- [ ] `reg query HKCU\Software\Classes\paratech\shell\open\command`: `"<путь к learning-assistant.exe>" "%1"`, путь — запущенного exe.
+- [ ] `explorer.exe paratech://open` при запущенном приложении: окно выходит вперёд, второго значка в трее нет. То же с `explorer.exe "paratech://open/../x --data-dir=C:\evil"`: ничего, кроме окна.
+- [ ] Приложение закрыто (`Quit`): `explorer.exe paratech://open` запускает его обычным образом.
+- [ ] Удалить ключ (`reg delete HKCU\Software\Classes\paratech /f`) и запустить приложение: ключ снова на месте.
+
+Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
+
 ## Инсталлятор (TASK-054)
 
 Сборка — [run-alpha.md](run-alpha.md) §11, подробности — `docs/refs/packaging.md`. Всё здесь — вручную, автотестов нет.
@@ -325,6 +339,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 - [ ] Удалить ещё раз с ответом «Да»: нет `%LOCALAPPDATA%\LearningAssistant` (вместе с `logs\`) и `%AppData%\learning-assistant.exe`.
 - [ ] Записи `paratech/...` в Диспетчере учётных данных остаются (`cmdkey /list | findstr paratech`); удалить вручную, если не нужны (перед этим «Выйти» в «Подключения» → «Google Календарь»).
 - [ ] Свой файл, положенный в папку установки, после удаления остаётся вместе с папкой.
+- [ ] После установки `HKCU\Software\Classes\paratech` указывает на установленный exe (`"…\learning-assistant.exe" "%1"`); после удаления ключа нет.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
