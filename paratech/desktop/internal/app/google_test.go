@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/cases/googlesignin"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/schedule/values"
 	"paratech/desktop/internal/input/wails"
 	"paratech/desktop/testenv"
@@ -72,6 +73,11 @@ func TestGooglePageKeepsTokensSecret(t *testing.T) {
 	if got := act(page.GoogleSignIn(ctx)); !got.OK || got.State.Account != "signedIn" || got.State.SigningIn {
 		t.Fatalf("GoogleSignIn = %+v", got)
 	}
+	// The sign-in asks for a calendar sync (TASK-051): its run refreshes the access token once and finds no Calendar
+	// API (a closed port), so the job waits for the network. Waiting here keeps the counts below exact.
+	if st := waitCalendarJobs(t, a, 1); st[0] != job.StatusWaitingForNetwork {
+		t.Fatalf("calendar sync after the sign-in: %v", st)
+	}
 
 	store := f.secrets[googleSecretsService]
 	live := g.LiveRefreshTokens()
@@ -84,7 +90,8 @@ func TestGooglePageKeepsTokensSecret(t *testing.T) {
 		t.Fatal("the client id was not stored trimmed")
 	}
 	auth, forms := g.AuthRequests(), g.TokenRequests()
-	if len(auth) != 1 || len(forms) != 1 || forms[0].Get("code_verifier") == "" || auth[0].Get("scope") != values.GoogleCalendarScope {
+	if len(auth) != 1 || len(forms) != 2 || forms[0].Get("code_verifier") == "" || forms[1].Get("grant_type") != "refresh_token" ||
+		auth[0].Get("scope") != values.GoogleCalendarScope {
 		t.Fatalf("authorizations %d, exchanges %d", len(auth), len(forms))
 	}
 

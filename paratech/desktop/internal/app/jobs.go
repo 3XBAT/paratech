@@ -7,6 +7,7 @@ import (
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -23,6 +24,10 @@ const (
 	// sendEmailTimeout is above twice the SMTP session timeout: the smtp adapter's deadline covers the session setup
 	// and then the transaction separately. A configured smtp.Config.Timeout must keep this rule.
 	sendEmailTimeout = 2*smtp.DefaultTimeout + time.Minute
+
+	// calendarSyncTimeout covers one run of up to 1000 lessons with a few Calendar API requests each; a stuck run is
+	// retried, and every write is idempotent.
+	calendarSyncTimeout = 30 * time.Minute
 )
 
 // modelAlias is the Hub model alias of every LLM request.
@@ -34,6 +39,7 @@ type jobHandlers struct {
 	postProcess jobrunner.Handler // summarize and extract_homework
 	drafts      jobrunner.Handler
 	delivery    deliveryJobs
+	calendar    jobrunner.Handler // the calendar sync of the schedule
 }
 
 // deliveryJobs runs and reconciles the email delivery job.
@@ -65,6 +71,12 @@ func registrations(h jobHandlers) []jobrunner.Registration {
 		jobrunner.Registration{
 			Type: senddelivery.JobType, Handler: h.delivery, Reconciler: h.delivery, Recovery: jobrunner.RecoveryReconcile,
 			Uncancellable: true, Timeout: sendEmailTimeout,
+		},
+		// An external side effect, but idempotent: upserts and deletes by stable event ids (PRD section 14 case 8), so
+		// an interrupted run is requeued and writes again. Never Heavy: it waits on Google, not the CPU.
+		jobrunner.Registration{
+			Type: schedulesync.CalendarSyncJobType, Handler: h.calendar, Recovery: jobrunner.RecoveryRequeue,
+			Timeout: calendarSyncTimeout,
 		},
 	)
 }

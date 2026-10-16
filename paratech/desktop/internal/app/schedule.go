@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 
 	"paratech/desktop/internal/adapters/csvschedule"
 	"paratech/desktop/internal/adapters/icsschedule"
@@ -13,8 +14,8 @@ import (
 )
 
 // wireSchedule builds the schedule import of the schedule page (PRD section 11.2) on the local schedule, and the reader
-// of the file the user chooses. The calendar synchronization is not wired yet (TASK-051).
-func (c *core) wireSchedule(e env) error {
+// of the file the user chooses. A commit that changed the schedule asks the calendar sync for a run (wireCalendar).
+func (c *core) wireSchedule(e env, log *slog.Logger) error {
 	// The ICS import dates follow the same clock as the use case, so a preview and its commit agree on them.
 	ics, err := icsschedule.New(e.clock)
 	if err != nil {
@@ -27,7 +28,7 @@ func (c *core) wireSchedule(e env) error {
 			importplan.SourceICS:  ics,
 			importplan.SourceXLSX: xlsxschedule.New(),
 		},
-		Clock: e.clock, IDs: e.ids, Tx: c.db,
+		Clock: e.clock, IDs: e.ids, Tx: c.db, Sync: c.calendarSync, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: schedule import: %w", err)

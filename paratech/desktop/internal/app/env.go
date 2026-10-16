@@ -15,6 +15,7 @@ import (
 	"paratech/desktop/internal/adapters/clock"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/instancelock"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/random"
@@ -123,6 +124,9 @@ type env struct {
 	authPages googleauth.Browser
 	// googleOAuth replaces the Google endpoints and timeouts (tests: a fake OAuth server); nil in production.
 	googleOAuth []googleauth.Option
+	// googleCalendar replaces the Calendar API base URL (tests: a fake Calendar API); nil in production, so the base
+	// URL is never taken from settings or user input.
+	googleCalendar []googlecal.Option
 
 	runner jobrunner.Config
 	// generateRetries bounds the restarts of one draft generation (homeworkflow.DraftDeps.GenerateRetries); 0: default.

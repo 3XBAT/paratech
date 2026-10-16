@@ -53,10 +53,12 @@ type lifecycle struct {
 	deliveries deliveryLife
 	// transcriptions enqueues what a crash between a COMPLETED save and its listener call lost.
 	transcriptions transcriptionLife
-	cleanups       []cleanup
-	loops          []loop   // started last, stopped first
-	closers        []closer // released last, in this order
-	stopTimeout    time.Duration
+	// calendar asks for a calendar sync when signed in (nil: none); it only logs.
+	calendar    func(ctx context.Context)
+	cleanups    []cleanup
+	loops       []loop   // started last, stopped first
+	closers     []closer // released last, in this order
+	stopTimeout time.Duration
 
 	bg sync.WaitGroup // the background recording recovery
 
@@ -82,13 +84,15 @@ func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers
 	}
 	return &lifecycle{
 		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, transcriptions: c.transcriptions,
+		calendar: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "start") },
 		cleanups: c.cleanups, loops: c.loops(), closers: closers, stopTimeout: stopTimeout,
 	}
 }
 
 // start runs the startup in this order: the cleanups of a crashed run, the job recovery, the recording recovery in the
 // background (assembling long recordings must not hold up the jobs), the delivery recovery and resumption, the sweep
-// of completed recordings without a transcription job, the workers, then the loops (scheduler and recording prompt;
+// of completed recordings without a transcription job, the calendar sync request, the workers, then the loops
+// (scheduler and recording prompt;
 // the prompt starts no recording before the recovery marked the interrupted ones). A failed job recovery or worker
 // start stops what started and returns the error; the other steps only log. Cancelling ctx stops the startup, never
 // the started work: shutdown stops that.
@@ -141,6 +145,10 @@ func (l *lifecycle) start(ctx context.Context) error {
 		l.log.Error("enqueueing the transcription of completed recordings failed", "enqueued", n, "err", err)
 	} else if n > 0 {
 		l.log.Info("transcription jobs enqueued for completed recordings", "jobs", n)
+	}
+	// After the job recovery: a requeued sync job covers the request, so no second one is made.
+	if l.calendar != nil {
+		l.calendar(ctx)
 	}
 
 	if err := ctx.Err(); err != nil {

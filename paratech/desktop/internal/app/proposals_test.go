@@ -9,12 +9,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/senddelivery"
@@ -486,8 +488,8 @@ func TestWiredPromptInjectionReachesNoPort(t *testing.T) {
 	})
 }
 
-// create_deadline_event: a confirmed proposal meets the calendar stand-in, which answers "not connected"; the proposal
-// stays CONFIRMED and nothing else happens.
+// create_deadline_event without a Google sign-in: the Calendar adapter answers "not signed in", the bridge makes it
+// "not connected"; the proposal stays CONFIRMED and nothing else happens.
 func TestWiredDeadlineProposalWaitsForTheCalendar(t *testing.T) {
 	ctx := context.Background()
 	a, dir := proposalCore(t, "")
@@ -510,11 +512,32 @@ func TestWiredDeadlineProposalWaitsForTheCalendar(t *testing.T) {
 	}
 }
 
-func TestCalendarStandInNeverSucceeds(t *testing.T) {
-	for _, cmd := range []proposal.CalendarCommand{{}, confirmedDeadline(t)} {
-		if err := (calendarNotConnected{}).UpsertDeadline(context.Background(), cmd); !errors.Is(err, homeworkflow.ErrCalendarNotConnected) {
-			t.Fatalf("UpsertDeadline = %v, want ErrCalendarNotConnected", err)
-		}
+// fakeDeadlines answers UpsertDeadline with err.
+type fakeDeadlines struct{ err error }
+
+func (f fakeDeadlines) UpsertDeadline(context.Context, proposal.CalendarCommand) error { return f.err }
+
+// The deadline bridge turns the adapter's "not signed in" (also "sign in again") into ErrCalendarNotConnected and keeps
+// every other error and its class.
+func TestDeadlineCalendarMapsNotSignedIn(t *testing.T) {
+	unavailable := errors.New("googlecal: upsert deadline: google calendar unavailable")
+	tests := []struct {
+		name         string
+		from         error
+		notConnected bool
+	}{
+		{"written", nil, false},
+		{"not signed in", fmt.Errorf("op: %w", googlecal.ErrNotSignedIn), true},
+		{"sign in again", fmt.Errorf("op: %w: %w", googlecal.ErrReauthRequired, googlecal.ErrNotSignedIn), true},
+		{"unavailable", unavailable, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := deadlineCalendar{fakeDeadlines{tt.from}}.UpsertDeadline(context.Background(), confirmedDeadline(t))
+			if errors.Is(err, homeworkflow.ErrCalendarNotConnected) != tt.notConnected || !errors.Is(err, tt.from) {
+				t.Fatalf("UpsertDeadline = %v, want not connected %v wrapping %v", err, tt.notConnected, tt.from)
+			}
+		})
 	}
 }
 
