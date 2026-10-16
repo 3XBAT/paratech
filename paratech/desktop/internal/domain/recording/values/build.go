@@ -12,6 +12,3 @@ type AppBuild struct {
 	GoVersion    string
 	OS           string
 }
-
-// IsZero reports whether nothing is known.
-func (b AppBuild) IsZero() bool { return b == AppBuild{} }

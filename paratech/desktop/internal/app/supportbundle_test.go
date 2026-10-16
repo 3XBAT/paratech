@@ -33,9 +33,10 @@ func (p bundlePicker) PickBundleFile(context.Context, string) (string, error) { 
 
 // Test of TASK-058 AC-4 (hard rule 4; extends the guards of TASK-057, TASK-062 and TASK-039): with the app, its log
 // tee and the page services as New and the UI shell build them at --log-level debug, the SMTP password and the Hub key
-// go through the bindings of the Connections page (and the Wails logger's Debug lines of those calls), the popup
-// binding lists a window title and starts a recording, a lesson title, a transcript and a homework text are stored. The support bundle saved through its binding then holds none of them in any entry (raw
-// and decoded, UTF-8 and UTF-16LE/BE), no audio or database file and no entry name that leaves its folder.
+// go through the bindings of the Connections page and into synthetic Debug lines of WailsLogger(), the popup binding
+// lists a window title and starts a recording, a lesson title, a transcript and a homework text are stored. The
+// support bundle saved through its binding then holds none of them in any entry (raw and decoded, UTF-8 and
+// UTF-16LE/BE), no audio or database file and no entry name that leaves its folder.
 func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 	ctx := context.Background()
 	const (

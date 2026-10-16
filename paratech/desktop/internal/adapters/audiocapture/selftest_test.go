@@ -3,8 +3,11 @@ package audiocapture_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -294,7 +297,21 @@ func TestRecorderCheckSoundRefusedWhileCapturing(t *testing.T) {
 // recording; the check answers busy.
 func TestRecorderStartStopsTheSoundCheck(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
-	e := checkEnv(t, 60*time.Second, testenv.RecorderHang, testenv.RecorderTone) // the check's child never answers
+	dataDir := t.TempDir()
+	logs := &logBuffer{}
+	// The check's child never answers.
+	inner := &helperLauncher{dataDir: dataDir, scenarios: []string{testenv.RecorderHang, testenv.RecorderTone}}
+	launcher := &stopOrderLauncher{helperLauncher: inner, logs: logs}
+	cfg := testConfig()
+	cfg.SelfTestTimeout = 60 * time.Second
+	store := audiocapture.NewTestStore(filepath.Join(dataDir, "artifacts"))
+	rec, err := audiocapture.New(audiocapture.Deps{Files: store, Launcher: launcher, Processes: alive{77: true},
+		Log: slog.New(slog.NewTextHandler(logs, nil))}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &recorderEnv{rec: rec, launcher: inner, store: store, chunks: ref(t, "rec1"), track: ref(t, "rec1.wav")}
+
 	type answer struct {
 		check values.SoundCheck
 		err   error
@@ -314,15 +331,39 @@ func TestRecorderStartStopsTheSoundCheck(t *testing.T) {
 		if a.err != nil || !a.check.Busy || len(a.check.Modes) != 0 {
 			t.Fatalf("CheckSound stopped by a recording = %+v, %v; want busy", a.check, a.err)
 		}
-	default:
-		t.Fatal("the check still ran when the recording had started")
+	case <-time.After(30 * time.Second):
+		t.Fatal("the check still runs after the recording started")
 	}
-	if e.launcher.count() != 2 {
-		t.Fatalf("%d launches, want the check and the recording", e.launcher.count())
+	if got := launcher.stoppedAt(); !slices.Equal(got, []bool{false, true}) {
+		t.Fatalf("check stopped at each launch = %v, want [false true]: the check ends before the recording's child starts\n%s",
+			got, logs)
 	}
 	if err := stop(t, e); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// stopOrderLauncher notes at each launch whether the sound check has already logged its stop by a recording.
+type stopOrderLauncher struct {
+	*helperLauncher
+	logs *logBuffer
+
+	mu      sync.Mutex
+	stopped []bool
+}
+
+func (l *stopOrderLauncher) Launch() (audiocapture.Process, error) {
+	stopped := l.logs.count("sound check stopped: a recording started") > 0
+	l.mu.Lock()
+	l.stopped = append(l.stopped, stopped)
+	l.mu.Unlock()
+	return l.helperLauncher.Launch()
+}
+
+func (l *stopOrderLauncher) stoppedAt() []bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.stopped)
 }
 
 func TestUnavailableCheckSound(t *testing.T) {
