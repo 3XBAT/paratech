@@ -854,6 +854,26 @@ func TestSyncOverlappingJobEndsAtOnce(t *testing.T) {
 	}
 }
 
+// A run that panics releases its claim: the next job runs.
+func TestSyncPanicReleasesTheRun(t *testing.T) {
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	var once sync.Once
+	e.cal.onUpsert = func(*lesson.Lesson) { once.Do(func() { panic("fake: handler bug") }) }
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("no panic")
+			}
+		}()
+		_ = e.handle(t)
+	}()
+	e.mustSync(t)
+	if e.cal.count("ensure") != 2 || len(e.pending(t)) != 0 {
+		t.Fatalf("ensures %d, pending %v", e.cal.count("ensure"), e.pending(t))
+	}
+}
+
 // The follow-up for a job that started during the run is requested also when the run is cancelled.
 func TestSyncFollowUpAfterACancelledRun(t *testing.T) {
 	e := newSyncEnv(t)

@@ -168,8 +168,8 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 		return nil
 	}
 
-	st, err := c.run(ctx)
-	if c.end() {
+	st, rerun, err := c.runClaimed(ctx)
+	if rerun {
 		// Not lost on a cancel either: the request came from another job.
 		c.followUp(context.WithoutCancel(ctx))
 	}
@@ -203,6 +203,13 @@ func (c *CalendarSync) begin() bool {
 	}
 	c.busy = true
 	return true
+}
+
+// runClaimed is run after a successful begin; the claim is released also on a panic.
+func (c *CalendarSync) runClaimed(ctx context.Context) (st runStats, rerun bool, err error) {
+	defer func() { rerun = c.end() }()
+	st, err = c.run(ctx)
+	return st, false, err
 }
 
 // end releases the run and reports whether a job started meanwhile.
