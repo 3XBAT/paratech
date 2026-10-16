@@ -171,6 +171,42 @@ func TestEachLogNewestFirstWithinTheBound(t *testing.T) {
 	}
 }
 
+// A tail that starts inside a line drops that line: its cut end may hold the end of a profile path that the bundle's
+// %USERPROFILE% replacement would no longer find.
+func TestEachLogKeepsWholeLines(t *testing.T) {
+	first := `level=INFO msg=a path="C:\\Users\\student\\Downloads\\m.bin"` + "\n"
+	second := "level=INFO msg=b\n"
+	tests := []struct {
+		name  string
+		limit int64
+		want  string
+	}{
+		{"the cut falls inside the first line", int64(len(second) + 20), second},
+		{"the cut falls on a line start", int64(len(second)), second},
+		{"the whole file fits", int64(len(first + second)), first + second},
+		{"one line longer than the limit", 5, ""},
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "desktop.log"), []byte(first+second), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			err := Dir{Path: dir}.EachLog(context.Background(), tt.limit, func(_ string, data []byte) error {
+				got += string(data)
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("EachLog(%d) = %q, want %q", tt.limit, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTee(t *testing.T) {
 	var console bytes.Buffer
 	tee := NewTee(slog.NewTextHandler(&console, &slog.HandlerOptions{Level: slog.LevelInfo}))

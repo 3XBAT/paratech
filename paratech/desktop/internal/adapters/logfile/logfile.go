@@ -6,6 +6,7 @@
 package logfile
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -204,7 +205,8 @@ func (d Dir) EachLog(ctx context.Context, maxBytes int64, fn func(name string, d
 	return nil
 }
 
-// readTail reads at most max bytes from the end of a regular file.
+// readTail reads at most limit bytes from the end of a regular file, whole lines only: a cut first line could hold
+// the cut end of a path that the bundle's %USERPROFILE% replacement no longer finds.
 func readTail(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path) //nolint:gosec // G304: a fixed name in the app's log directory
 	if err != nil {
@@ -218,16 +220,28 @@ func readTail(path string, limit int64) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%w: %s: not a regular file", ErrLogFile, opRead)
 	}
-	if off := info.Size() - limit; off > 0 {
-		if _, err := f.Seek(off, io.SeekStart); err != nil {
+	off := info.Size() - limit
+	if off <= 0 {
+		data, err := io.ReadAll(io.LimitReader(f, limit))
+		if err != nil {
 			return nil, fail(opRead, err)
 		}
+		return data, nil
 	}
-	data, err := io.ReadAll(io.LimitReader(f, limit))
+
+	// One byte before the tail too: when it is a newline, the tail starts with a whole line.
+	if _, err := f.Seek(off-1, io.SeekStart); err != nil {
+		return nil, fail(opRead, err)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, fail(opRead, err)
 	}
-	return data, nil
+	i := bytes.IndexByte(data, '\n')
+	if i < 0 {
+		return nil, nil // one line longer than the limit
+	}
+	return data[i+1:], nil
 }
 
 // pathFreeError is ErrLogFile with the operation and the bare system error, which stays reachable for errors.Is.
