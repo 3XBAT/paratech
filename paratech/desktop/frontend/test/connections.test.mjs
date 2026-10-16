@@ -29,9 +29,11 @@ import {
   notAPort,
   otherErrorTexts,
   parsePort,
+  secretChipLabel,
   secretControls,
   secretOutcomeOk,
   secretStatusLabel,
+  secretStatusNote,
   securityOptions,
   texts,
 } from "../.test-build/connectionsView.js";
@@ -276,6 +278,22 @@ test("every secret status has its label", () => {
   assert.match(hubKeyLabels.confirmTitle, /^Удалить сохранённый ключ доступа\?/);
   assert.equal(mailConfiguredText(true), "Почта настроена.");
   assert.match(mailConfiguredText(false), /^Почта не настроена/);
+});
+
+test("a secret chip has one to three words; a short one comes with the full label", () => {
+  for (const labels of [mailPasswordLabels, hubKeyLabels]) {
+    for (const s of [...secretStatuses, "toString"]) {
+      const chip = secretChipLabel(labels, s);
+      assert.ok(chip.split(" ").length <= 3, chip);
+      const note = secretStatusNote(labels, s);
+      // Either the chip is the label or the label is shown next to it: the full text is never lost.
+      assert.equal(note === "" ? chip : note, secretStatusLabel(labels, s));
+    }
+  }
+  assert.deepEqual(secretStatuses.map((s) => secretChipLabel(mailPasswordLabels, s)), [
+    "Пароль задан", "Пароль не задан", "Недоступно", "Не ответило",
+  ]);
+  assert.equal(secretChipLabel(hubKeyLabels, "toString"), "Не ответило");
 });
 
 test("secret buttons: nothing without a store, remove only for a stored secret", () => {

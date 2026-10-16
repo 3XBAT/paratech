@@ -11,7 +11,11 @@ import {
   parseGoogleState,
 } from "../.test-build/bindings/google.js";
 import {
+  accountChipText,
+  accountStatusNote,
   accountStatusText,
+  clientChipText,
+  clientStatusNote,
   clientStatusText,
   googleControls,
   googleTexts,
@@ -84,6 +88,21 @@ test("replies are parsed strictly; extra fields are dropped", () => {
   assert.deepEqual(parseGoogleResult({ ...result(signedIn, { ok: false }), token: "x" }), result(signedIn, { ok: false }));
   for (const raw of [null, {}, result(ready, { ok: "true" }), result(ready, { message: null }), { ok: true, message: "m" }]) {
     assert.throws(() => parseGoogleResult(raw), /google (result|state)/);
+  }
+});
+
+test("a status chip has one to three words; a warning one comes with the full text", () => {
+  assert.deepEqual(clientStatuses.map(clientChipText), ["Задан", "Не задан", "Недоступно", "Не ответил"]);
+  assert.deepEqual(accountStatuses.map(accountChipText), ["Выполнен", "Не выполнен", "Недоступен", "Не удалось проверить"]);
+  assert.equal(clientChipText("toString"), "Не ответил");
+  assert.equal(accountChipText("constructor"), "Не удалось проверить");
+  for (const s of [...clientStatuses, "toString"]) {
+    assert.ok(clientChipText(s).split(" ").length <= 3);
+    assert.equal(clientStatusNote(s), s === "set" || s === "unset" ? "" : clientStatusText(s));
+  }
+  for (const s of [...accountStatuses, "constructor"]) {
+    assert.ok(accountChipText(s).split(" ").length <= 3);
+    assert.equal(accountStatusNote(s), s === "signedIn" || s === "signedOut" ? "" : accountStatusText(s));
   }
 });
 

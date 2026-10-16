@@ -57,6 +57,40 @@ export function accountStatusText(status: string): string {
   return Object.hasOwn(accountTexts, status) ? accountTexts[status as GoogleAccountStatus] : accountTexts.unavailable;
 }
 
+// The chips under the «Клиент Google» and «Вход» headings: one to three words. A status that is not a normal one also
+// shows its full text next to the chip (clientStatusNote, accountStatusNote).
+const clientChips: Readonly<Record<GoogleClientStatus, string>> = {
+  set: "Задан",
+  unset: "Не задан",
+  unsupported: "Недоступно",
+  unavailable: "Не ответил",
+};
+
+const accountChips: Readonly<Record<GoogleAccountStatus, string>> = {
+  signedIn: "Выполнен",
+  signedOut: "Не выполнен",
+  unsupported: "Недоступен",
+  unavailable: "Не удалось проверить",
+};
+
+export function clientChipText(status: string): string {
+  return Object.hasOwn(clientChips, status) ? clientChips[status as GoogleClientStatus] : clientChips.unavailable;
+}
+
+export function accountChipText(status: string): string {
+  return Object.hasOwn(accountChips, status) ? accountChips[status as GoogleAccountStatus] : accountChips.unavailable;
+}
+
+/** The full text next to the chip of a client status that is not "set/unset"; "" otherwise. */
+export function clientStatusNote(status: string): string {
+  return status === "set" || status === "unset" ? "" : clientStatusText(status);
+}
+
+/** The full text next to the chip of an account status that is not "signedIn/signedOut"; "" otherwise. */
+export function accountStatusNote(status: string): string {
+  return status === "signedIn" || status === "signedOut" ? "" : accountStatusText(status);
+}
+
 /** A status that is not a normal "set/unset" is shown as a warning. */
 export function statusWarns(status: string): boolean {
   return status === "unsupported" || status === "unavailable";

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SecretStatus } from "../bindings/connections";
-import { secretControls, secretStatusLabel, secretStoreCaption, type SecretLabels } from "../connectionsView";
+import { secretChipLabel, secretControls, secretStatusNote, secretStoreCaption, type SecretLabels } from "../connectionsView";
 import { Button } from "../ui/Button";
 import { Dialog, Field, Input, ResultLine } from "../ui/controls";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
@@ -31,6 +31,7 @@ export function SecretSlot(props: {
   // An unknown status from a newer core reads as "не ответило", like its label.
   const kind = Object.hasOwn(chipKinds, status) ? chipKinds[status] : "fail";
   const storeWorks = status === "set" || status === "unset";
+  const note = secretStatusNote(labels, status);
 
   async function store() {
     try {
@@ -46,12 +47,13 @@ export function SecretSlot(props: {
   }
 
   return (
-    <div className={props.nested ? "secret-slot" : "secret-slot card box"}>
+    <div className={props.nested ? undefined : "card box"}>
       {props.nested ? <h3>{labels.title}</h3> : <h2>{labels.title}</h2>}
       <div className="secret">
         <StatusChip kind={kind} icon="key">
-          {secretStatusLabel(labels, status)}
+          {secretChipLabel(labels, status)}
         </StatusChip>
+        {note !== "" && <span className="small muted">{note}</span>}
       </div>
       {storeWorks && <p className="small muted">{secretStoreCaption}</p>}
       <Field label={labels.input} hint={c.removeShown ? labels.replaceHint : undefined}>

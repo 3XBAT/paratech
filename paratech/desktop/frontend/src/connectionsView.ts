@@ -179,6 +179,22 @@ export function secretStatusLabel(labels: SecretLabels, status: string): string 
   return Object.hasOwn(labels.status, status) ? labels.status[status as SecretStatus] : labels.status.unavailable;
 }
 
+/**
+ * The chip of a status (one to three words): the label of a stored or missing secret, a short word otherwise. Such a
+ * word comes with the full label next to it (secretStatusNote).
+ */
+export function secretChipLabel(labels: SecretLabels, status: string): string {
+  if (status === "set" || status === "unset") {
+    return labels.status[status];
+  }
+  return status === "unsupported" ? "Недоступно" : "Не ответило";
+}
+
+/** The full status shown next to a short chip; "" when the chip is the label. */
+export function secretStatusNote(labels: SecretLabels, status: string): string {
+  return status === "set" || status === "unset" ? "" : secretStatusLabel(labels, status);
+}
+
 export interface SecretControls {
   inputDisabled: boolean;
   saveDisabled: boolean;

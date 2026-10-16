@@ -53,7 +53,8 @@
   white-space: nowrap;
 }
 .chip .i { width: 14px; height: 14px; stroke-width: 2; }
-.chip-text { overflow: hidden; text-overflow: ellipsis; }
+/* Chips carry one to three words; a longer one wraps rather than being cut. */
+.chip-text { min-width: 0; white-space: normal; overflow-wrap: normal; }
 .s-rec { --c: var(--rec-t); --b: var(--rec-b); }
 .s-run { --c: var(--run-t); --b: var(--run-b); }
 .s-wait { --c: var(--wait-t); --b: var(--wait-b); }

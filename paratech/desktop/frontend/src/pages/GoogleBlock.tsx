@@ -3,8 +3,10 @@ import { googleApi, type GoogleResult, type GoogleState } from "../bindings/goog
 import { callByName } from "../bindings/runtime";
 import { secretStoreCaption } from "../connectionsView";
 import {
-  accountStatusText,
-  clientStatusText,
+  accountChipText,
+  accountStatusNote,
+  clientChipText,
+  clientStatusNote,
   googleControls,
   googleTexts,
   pollStatus,
@@ -166,8 +168,9 @@ export function GoogleBlock() {
       <h3>{googleTexts.clientTitle}</h3>
       <div className="secret">
         <StatusChip kind={clientChip(state.client)} icon="key">
-          {clientStatusText(state.client)}
+          {clientChipText(state.client)}
         </StatusChip>
+        {clientStatusNote(state.client) !== "" && <span className="small muted">{clientStatusNote(state.client)}</span>}
       </div>
       {(state.client === "set" || state.client === "unset") && <p className="small muted">{secretStoreCaption}</p>}
       <Field label={googleTexts.clientId}>
@@ -228,8 +231,9 @@ export function GoogleBlock() {
       <h3>{googleTexts.accountTitle}</h3>
       <div className="secret">
         <StatusChip kind={accountChip(state.account)} icon="cal">
-          {accountStatusText(state.account)}
+          {accountChipText(state.account)}
         </StatusChip>
+        {accountStatusNote(state.account) !== "" && <span className="small muted">{accountStatusNote(state.account)}</span>}
       </div>
       {c.signingIn ? (
         <>
