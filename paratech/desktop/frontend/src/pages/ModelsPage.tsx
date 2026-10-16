@@ -365,7 +365,7 @@ export function ModelsPage() {
           className="clist-card"
           classNames={{ button: "btn ghost" }}
           renderContainer={(rows) => (
-            <div className="card" role="list" aria-label="Установленные модели">
+            <div className="card mrows" role="list" aria-label="Установленные модели">
               {rows}
             </div>
           )}
@@ -412,7 +412,7 @@ export function ModelsPage() {
         ) : (
           <>
             {!view.machineKnown && <p className="muted">{texts.machineUnknown}</p>}
-            <div className="card" role="list" aria-label="Каталог моделей">
+            <div className="card mrows" role="list" aria-label="Каталог моделей">
               {view.available.map((m) => (
                 <CatalogRow
                   key={m.catalogId}
