@@ -266,7 +266,7 @@ type ModelsService struct {
 	pending  *modelSelection
 }
 
-// NewModelsService returns the binding of the models page; openBindings checks the deps before calling it.
+// NewModelsService returns the binding of the models page; OpenServices checks the deps before calling it.
 func NewModelsService(deps ModelsDeps, log *slog.Logger) *ModelsService {
 	return &ModelsService{deps: deps, log: log}
 }

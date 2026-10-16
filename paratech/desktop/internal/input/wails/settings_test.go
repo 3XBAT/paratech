@@ -94,17 +94,17 @@ func TestOpenBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.openBindings(context.Background())
-	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil || b.schedule == nil || b.models == nil ||
-		b.connections == nil || b.diagnostics == nil {
-		t.Fatalf("openBindings = %+v, %v", b, err)
+	b, err := s.OpenServices(context.Background())
+	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Schedule == nil || b.Models == nil ||
+		b.Connections == nil || b.Diagnostics == nil {
+		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
 
 	boom := errors.New("no disk")
 	opts := validOptions()
 	opts.OpenCore = func(context.Context) (Core, error) { return Core{}, boom }
 	s, _ = New(opts)
-	if _, err := s.openBindings(context.Background()); !errors.Is(err, boom) {
+	if _, err := s.OpenServices(context.Background()); !errors.Is(err, boom) {
 		t.Errorf("failing opener: err = %v", err)
 	}
 
@@ -137,7 +137,7 @@ func TestOpenBindings(t *testing.T) {
 				return c, nil
 			}
 			s, _ := New(opts)
-			if _, err := s.openBindings(context.Background()); err == nil {
+			if _, err := s.OpenServices(context.Background()); err == nil {
 				t.Errorf("a core without the %s must fail", tt.name)
 			}
 		})

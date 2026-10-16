@@ -9,6 +9,9 @@ import (
 // which include the mail password passed to SetMailPassword.
 const wailsLogLevel = slog.LevelInfo
 
+// wailsLogger is log behind the floor of wailsLogLevel: the logger Wails gets.
+func wailsLogger(log *slog.Logger) *slog.Logger { return floorLogger(log, wailsLogLevel) }
+
 // levelFloor drops records below min whatever the wrapped handler accepts.
 type levelFloor struct {
 	min  slog.Level

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,7 +18,6 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
@@ -31,10 +31,10 @@ type bundlePicker string
 
 func (p bundlePicker) PickBundleFile(context.Context, string) (string, error) { return string(p), nil }
 
-// Test of TASK-058 AC-4 (hard rule 4; extends the guards of TASK-057, TASK-062 and TASK-039): with the core as the app
-// builds it and a Debug log teed into the log file, the SMTP password and the Hub key go through the bindings of the
-// Connections page, the popup binding lists a window title and starts a recording, a lesson title, a transcript and a
-// homework text are stored. The support bundle saved through its binding then holds none of them in any entry (raw
+// Test of TASK-058 AC-4 (hard rule 4; extends the guards of TASK-057, TASK-062 and TASK-039): with the app, its log
+// tee and the page services as New and the UI shell build them at --log-level debug, the SMTP password and the Hub key
+// go through the bindings of the Connections page (and the Wails logger's Debug lines of those calls), the popup
+// binding lists a window title and starts a recording, a lesson title, a transcript and a homework text are stored. The support bundle saved through its binding then holds none of them in any entry (raw
 // and decoded, UTF-8 and UTF-16LE/BE), no audio or database file and no entry name that leaves its folder.
 func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 	ctx := context.Background()
@@ -53,18 +53,19 @@ func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 	hub.SetRemaining(600, 400, 1000)
 	hubURL, hubHTTP := testenv.StartFakeHub(t, hub)
 
+	// The app, its tee and the page services as New and the UI shell build them, at --log-level debug.
 	dir := t.TempDir()
-	a, f := newTestAppWith(t, dir)
-	a.env.mailRoots, a.env.hubHTTP, a.env.logFile = mail.RootCAs(), hubHTTP, openLogFile
-	var console syncBuffer
-	a.tee = logfile.NewTee(slog.NewTextHandler(&console, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	a.log = slog.New(a.tee)
+	a, f, console := uiTeeApp(t, dir, slog.LevelDebug)
+	a.env.mailRoots, a.env.hubHTTP = mail.RootCAs(), hubHTTP
 	f.power.Set(false) // heavy jobs wait: the test is about what the bundle takes, not the pipeline
 	f.apps.Set(values.AudioApp{App: "chrome.exe", Title: window, PID: 4242, Playing: true})
-	core := startCore(t, a)
+	svc := startUICore(t, a)
 
-	// The secrets go in through the bindings of the Connections page.
-	conn := wails.NewConnectionsService(core.Connections, a.log)
+	// The secrets go in through the bindings of the Connections page; Wails would log each call at Debug.
+	conn := svc.Connections
+	wailsLog := a.shell.WailsLogger()
+	wailsLog.Debug("Binding call complete:", "method", "SetMailPassword", "args", `["`+password+`"]`)
+	wailsLog.Debug("Binding call complete:", "method", "SetHubKey", "args", `["`+hubKey+`"]`)
 	must(t)(conn.SetMailPassword(ctx, password))
 	must(t)(conn.SaveMailSettings(ctx, wails.MailSettingsInput{
 		Recipient: "teacher@school.example", SMTPHost: mail.Host(), SMTPPort: mail.Port(), SMTPSecurity: "starttls",
@@ -79,13 +80,11 @@ func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 		t.Fatalf("RefreshQuota = %+v, %v", got, err)
 	}
 
-	// The popup binding shows the window title and starts a recording that completes with a track.
-	if err := a.core.wirePrompts(a.env, &testenv.FakePopup{}, a.log); err != nil {
-		t.Fatal(err)
-	}
-	popup := wails.NewPromptService(a.core.ui.Prompt, a.log)
-	if _, err := a.core.prompts.OfferAdHoc(ctx); err != nil {
-		t.Fatal(err)
+	// The popup binding shows the window title and starts a recording that completes with a track. The shell does
+	// not run, so the popup window itself cannot follow.
+	popup := svc.Prompt
+	if _, err := a.core.prompts.OfferAdHoc(ctx); !errors.Is(err, wails.ErrNotRunning) {
+		t.Fatalf("OfferAdHoc = %v, want the shell not running", err)
 	}
 	if src, err := popup.Sources(ctx); err != nil || len(src.Apps) != 1 || src.Apps[0].Title != window {
 		t.Fatalf("Sources = %+v, %v", src, err)
@@ -123,10 +122,15 @@ func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 	insertAssignment(t, dir, "a1", homework)
 	a.log.Debug("debug line of the test", "note", "a debug record reaches the file")
 
-	// The bundle, through its binding.
+	// The bundle, through its binding. The save dialog of the shell's service needs the running shell (it fails and
+	// logs that), so the page that saves gets a test dialog.
+	if got, err := svc.Diagnostics.SaveSupportBundle(ctx); err != nil || got.Status != "failed" {
+		t.Fatalf("SaveSupportBundle without the shell = %+v, %v", got, err)
+	}
 	bundle := filepath.Join(t.TempDir(), "support.zip")
-	page := wails.NewDiagnosticsService(wails.DiagnosticsDeps{Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePicker(bundle)},
-		a.log)
+	page := wails.NewDiagnosticsService(wails.DiagnosticsDeps{
+		Sound: a.core.ui.Sound, Bundle: a.core.ui.Bundle, Picker: bundlePicker(bundle),
+	}, a.log)
 	if got, err := page.SaveSupportBundle(ctx); err != nil || got.Status != "saved" || got.Name != "support.zip" {
 		t.Fatalf("SaveSupportBundle = %+v, %v", got, err)
 	}
@@ -142,7 +146,7 @@ func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 	}
 	logText := entry(t, bundle, "logs/desktop.log")
 	if !strings.Contains(logText, "instance lock acquired") || !strings.Contains(logText, "debug line of the test") ||
-		!strings.Contains(logText, "recording finished") {
+		!strings.Contains(logText, "recording finished") || !strings.Contains(logText, "ui: choose where to save the support bundle") {
 		t.Fatalf("the log of the bundle is not the app's log:\n%s", logText)
 	}
 	if capture := entry(t, bundle, "capture.json"); !strings.Contains(capture, `"device": "`+testenv.ToneDevice+`"`) {
@@ -171,6 +175,24 @@ func TestSupportBundleHoldsNoSecrets(t *testing.T) {
 	if _, found := scanBundle(t, planted, samples); len(found) == 0 {
 		t.Fatal("the scan missed an entry name that leaves the folder")
 	}
+}
+
+// startUICore opens the core through the shell, as Run does, and starts the background work; it returns the services
+// the shell binds to the pages.
+func startUICore(t *testing.T, a *App) wails.Services {
+	t.Helper()
+	svc, err := a.shell.OpenServices(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	life, ok := a.claimStart(false)
+	if !ok {
+		t.Fatal("no lifecycle to start")
+	}
+	if err := life.start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return svc
 }
 
 func must(t *testing.T) func(any, error) {

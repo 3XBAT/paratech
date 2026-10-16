@@ -65,7 +65,7 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
 	if !cfg.Headless && !cfg.Recorder {
 		shell, err := wails.New(wails.Options{
-			Name: appName, InstanceID: instanceID, Log: log, OpenCore: a.openCore, Started: a.launchStart,
+			Name: appName, InstanceID: instanceID, Log: a.log, OpenCore: a.openCore, Started: a.launchStart,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("app: ui shell: %w", err)
