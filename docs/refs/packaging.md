@@ -15,7 +15,8 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 ## Version
 `desktop/VERSION` holds `X.Y.Z`; `-Version` overrides it. If HEAD has a `vX.Y.Z` tag it must equal the version, else the script fails
 (the mismatch path was not run locally). The version goes into the installer name, its file version (`VIProductVersion X.Y.Z.0`) and
-`DisplayVersion` in "Apps & features". The exe itself has no version yet (follow-up).
+`DisplayVersion` in "Apps & features". The exe does not get VERSION: its build info has module version `(devel)` and the git revision
+(`internal/adapters/sysinfo`, shown in `about.json` of the support bundle). Injecting VERSION into the exe is a follow-up.
 
 ## Build
 - `build-release.ps1` calls `build-alpha.ps1 -OutDir paratech\dist\release\<version>\app`: `npm ci`, `npm run build`,
@@ -26,8 +27,8 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
   if present, `GOAMD64=v1` (testers have older CPUs). A `GOAMD64` set by `go env -w` is caught here.
 - The plan prints the short HEAD commit and whether the tree is dirty; a `vX.Y.Z` tag on a dirty tree gives a WARNING (not an error).
 - The exe is a console program, like the alpha: started from the Start menu it opens a console with the log, and closing that console ends the app.
-  Wails builds with `-ldflags "-H windowsgui"` (Taskfile above), but the app logs only to stderr, so without a console the log would be lost.
-  Follow-up: a log file in the data folder, then `-H windowsgui`.
+  Since TASK-058 the log is also in `%LOCALAPPDATA%\LearningAssistant\logs\desktop.log`, so `-H windowsgui` (as in the Wails Taskfile above) is possible;
+  not done here: it changes `build-alpha.ps1` and needs a check that the `--recorder` child and the smoke run still work (follow-up, owner decision).
 
 ## WebView2
 - The installer embeds `MicrosoftEdgeWebview2Setup.exe` from the module (`internal/commands/webview2/`, embedded by `internal/commands/generate_webview2.go`;
@@ -66,8 +67,8 @@ if it cannot delete the exe.
 ## Uninstall and user data
 - Deletes only its files (names above), `uninstall.exe`, the shortcut and the HKCU key, then `RMDir` **without** `/r` (the Wails template uses `/r`;
   a chosen folder may hold other files).
-- Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (recordings, transcripts, models, exports, the database
-  with the settings; the same list as the uninstaller message: `learning-assistant.db` and `artifacts\` of `internal/app/core.go`, no log files) and the
+- Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (recordings, transcripts, models, exports, logs, the database
+  with the settings; the same list as the uninstaller message: `learning-assistant.db`, `artifacts\` and `logs\` of `internal/app/core.go`) and the
   WebView2 folder `%AppData%\learning-assistant.exe` (`internal/webview2/pkg/edge/chromium.go`). A `--data-dir` / `LA_DATA_DIR` folder is not touched.
 - Credential Manager keeps `paratech/hub/api-key`, `paratech/mail/smtp-password`, `paratech/google/client-id`, `.../client-secret`, `.../refresh-token`.
   Before uninstalling, "Выйти" in "Google Календарь" revokes Google access. Then remove the entries by hand: Control Panel → Credential Manager →
