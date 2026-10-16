@@ -119,7 +119,7 @@ export function parseBundleResult(raw: unknown): BundleResult {
 }
 
 export interface DiagnosticsApi {
-  /** Plays a short tone on the default output device and checks that it is recorded (up to ~10 s). */
+  /** Plays a short tone on the default output device and checks that it is recorded (up to 15 s). */
   checkSound(): Promise<SoundCheck>;
   /** Asks where to save in the native dialog and writes the bundle there; nothing is sent anywhere. */
   saveSupportBundle(): Promise<BundleResult>;

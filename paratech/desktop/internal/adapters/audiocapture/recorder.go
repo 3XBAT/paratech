@@ -79,7 +79,8 @@ type Config struct {
 }
 
 // DefaultConfig returns 60 s chunks, a 15 s start timeout, a 7 s stop grace, a 30 s hang timeout, three restarts
-// after 1, 2 and 4 s, a check of the captured app every 3 s with up to 20 re-binds, and a 10 s sound check.
+// after 1, 2 and 4 s, a check of the captured app every 3 s with up to 20 re-binds, and a sound check of at most
+// DefaultSelfTestTimeout.
 func DefaultConfig() Config {
 	return Config{
 		ChunkSeconds: DefaultChunkSeconds, StartTimeout: DefaultStartTimeout, StopGrace: DefaultStopGrace,
@@ -111,6 +112,7 @@ type Recorder struct {
 	mu       sync.Mutex
 	captures map[shared.RecordingID]*capture
 	ended    []shared.RecordingID // ended captures, oldest first
+	check    *runningCheck        // the running sound check; nil when none
 
 	checking sync.Mutex // held by the running sound check
 }
@@ -198,7 +200,10 @@ func (r *Recorder) start(ctx context.Context, c *capture) error {
 		return fmt.Errorf("audiocapture: %s %s: %w", opStartCapture, id, ErrAlreadyCapturing)
 	}
 	r.captures[id] = c
+	check := r.check
 	r.mu.Unlock()
+	// From here a new sound check answers busy; one that runs is stopped before the child starts.
+	r.stopCheck(check)
 
 	startCtx, cancel := context.WithTimeoutCause(ctx, r.cfg.StartTimeout,
 		fmt.Errorf("the recorder did not start within %v", r.cfg.StartTimeout))

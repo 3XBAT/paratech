@@ -6,7 +6,24 @@ import (
 	"math"
 	"math/rand/v2"
 	"testing"
+	"time"
 )
+
+// The parent's timeout covers the child's own budget with a margin for its start, and stays within the 15 s the
+// diagnostics page promises.
+func TestSelfTestTimeoutCoversTheChild(t *testing.T) {
+	b := SelfTestTiming{}.withDefaults()
+	child := b.Open + b.Lead + b.Tone + b.Tail
+	if DefaultSelfTestTimeout < child+selfTestMargin || selfTestMargin < 3*time.Second {
+		t.Fatalf("timeout %v for a child budget of %v: want at least the budget and a margin of 3 s", DefaultSelfTestTimeout, child)
+	}
+	if DefaultSelfTestTimeout > 15*time.Second {
+		t.Fatalf("timeout %v: the page says the check takes up to 15 s", DefaultSelfTestTimeout)
+	}
+	if DefaultConfig().SelfTestTimeout != DefaultSelfTestTimeout {
+		t.Fatal("DefaultConfig must use DefaultSelfTestTimeout")
+	}
+}
 
 // detect feeds samples to a fresh detector in packets of 10 ms and reports whether it heard the tone.
 func detect(rate uint32, samples []float32) bool {

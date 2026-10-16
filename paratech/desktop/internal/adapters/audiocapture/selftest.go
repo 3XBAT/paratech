@@ -35,9 +35,22 @@ const (
 	// toneBlocksNeeded is how many blocks in a row must carry the tone (300 ms).
 	toneBlocksNeeded = 3
 
-	// DefaultSelfTestTimeout bounds a whole self-test: the child start, the 5 s process loopback activation with its
-	// fallback, the tone and the drain. The child is killed after it.
-	DefaultSelfTestTimeout = 10 * time.Second
+	// Defaults of SelfTestTiming: the budget of the child.
+	defaultSelfTestTone = 1500 * time.Millisecond
+	defaultSelfTestLead = 300 * time.Millisecond
+	defaultSelfTestTail = 500 * time.Millisecond
+	defaultSelfTestOpen = 7 * time.Second // the 5 s activation of process loopback and the classic fallback
+
+	// selfTestMargin covers what the child's budget does not: the process start, the drain and the report.
+	selfTestMargin = 5 * time.Second
+
+	// DefaultSelfTestTimeout bounds a whole self-test in the parent: the child's budget (opening the captures, the
+	// lead, the tone and the tail: 9.3 s) and the margin, 14.3 s. The child is killed after it.
+	DefaultSelfTestTimeout = defaultSelfTestOpen + defaultSelfTestLead + defaultSelfTestTone + defaultSelfTestTail +
+		selfTestMargin
+
+	// checkStopWait bounds how long a recording start waits for a stopped sound check to end.
+	checkStopWait = 2 * time.Second
 
 	// opCheckSound names the self-test in errors.
 	opCheckSound = "check sound"
@@ -45,6 +58,9 @@ const (
 
 // ErrSelfTestRunning means another self-test runs; one runs at a time.
 var ErrSelfTestRunning = errors.New("audiocapture: a sound check is already running")
+
+// errRecordingStarted stops a running sound check: a recording starts, and the tone must not get into it.
+var errRecordingStarted = errors.New("a recording started")
 
 // Tone is a sine to play.
 type Tone struct {
@@ -80,16 +96,16 @@ type SelfTestTiming struct {
 
 func (t SelfTestTiming) withDefaults() SelfTestTiming {
 	if t.Tone <= 0 {
-		t.Tone = 1500 * time.Millisecond
+		t.Tone = defaultSelfTestTone
 	}
 	if t.Lead <= 0 {
-		t.Lead = 300 * time.Millisecond
+		t.Lead = defaultSelfTestLead
 	}
 	if t.Tail <= 0 {
-		t.Tail = 500 * time.Millisecond
+		t.Tail = defaultSelfTestTail
 	}
 	if t.Open <= 0 {
-		t.Open = 7 * time.Second
+		t.Open = defaultSelfTestOpen
 	}
 	return t
 }
@@ -400,22 +416,33 @@ func handsFreeEndpoint(formFactor uint32, formFactorOK bool, enumerator string) 
 }
 
 // CheckSound runs the self-test in a recorder child (the --recorder run mode with a self-test request) and returns
-// what each mode heard. While a capture of a recording runs it refuses (Busy): the tone would disturb the lecture. One
-// check runs at a time (ErrSelfTestRunning); the child is killed after Config.SelfTestTimeout. A build without capture
-// fails with ErrUnavailable through the child's answer (unsupported).
+// what each mode heard. While a capture of a recording runs it refuses (Busy): the tone would disturb the lecture; a
+// recording that starts meanwhile stops the check, which then answers Busy too. One check runs at a time
+// (ErrSelfTestRunning); the child is killed after Config.SelfTestTimeout. A build without capture fails with
+// ErrUnavailable through the child's answer (unsupported).
 func (r *Recorder) CheckSound(ctx context.Context) (values.SoundCheck, error) {
-	if r.capturing() {
-		return values.SoundCheck{Busy: true}, nil
-	}
 	if !r.checking.TryLock() {
 		return values.SoundCheck{}, ErrSelfTestRunning
 	}
 	defer r.checking.Unlock()
 
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	running := &runningCheck{stop: stop, done: make(chan struct{})}
+	defer close(running.done)
+	if !r.beginCheck(running) {
+		return values.SoundCheck{Busy: true}, nil
+	}
+	defer r.endCheck(running)
+
 	ctx, cancel := context.WithTimeoutCause(ctx, r.cfg.SelfTestTimeout,
 		fmt.Errorf("the sound check did not finish within %v", r.cfg.SelfTestTimeout))
 	defer cancel()
 	check, err := r.runSelfTest(ctx)
+	if errors.Is(context.Cause(ctx), errRecordingStarted) {
+		r.log.Info("sound check stopped: a recording started")
+		return values.SoundCheck{Busy: true}, nil
+	}
 	if err != nil {
 		return values.SoundCheck{}, fmt.Errorf("audiocapture: %s: %w", opCheckSound, err)
 	}
@@ -426,16 +453,45 @@ func (r *Recorder) CheckSound(ctx context.Context) (values.SoundCheck, error) {
 	return check, nil
 }
 
-// capturing reports whether a capture of a recording runs.
-func (r *Recorder) capturing() bool {
+// runningCheck is the sound check that runs, for a recording start to stop.
+type runningCheck struct {
+	stop context.CancelCauseFunc
+	done chan struct{} // closed when CheckSound returns, its child reaped
+}
+
+// beginCheck registers c unless a capture of a recording runs.
+func (r *Recorder) beginCheck(c *runningCheck) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, c := range r.captures {
-		if !c.isEnded() {
-			return true
+	for _, cp := range r.captures {
+		if !cp.isEnded() {
+			return false
 		}
 	}
-	return false
+	r.check = c
+	return true
+}
+
+func (r *Recorder) endCheck(c *runningCheck) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.check == c {
+		r.check = nil
+	}
+}
+
+// stopCheck stops the running sound check c, if any, and waits a little for it to end, so its tone stays out of the
+// recording that starts. The check's child is killed at once; a check that still has not ended is left behind.
+func (r *Recorder) stopCheck(c *runningCheck) {
+	if c == nil {
+		return
+	}
+	c.stop(errRecordingStarted)
+	select {
+	case <-c.done:
+	case <-r.after(checkStopWait):
+		r.log.Warn("the sound check did not stop in time; the recording starts anyway")
+	}
 }
 
 // runSelfTest runs one self-test child until it has exited and is reaped.

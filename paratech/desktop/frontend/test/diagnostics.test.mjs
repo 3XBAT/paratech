@@ -168,6 +168,8 @@ test("the explanations say what is checked and what the bundle holds", () => {
   assert.match(texts.soundScope, /не что слышно выбранное приложение/);
   assert.match(texts.bundleExplain, /без паролей, ключей, аудио, расшифровок и текстов уроков/);
   assert.match(texts.bundleLocal, /никуда не отправляется/);
+  // DefaultSelfTestTimeout of internal/adapters/audiocapture/selftest.go is at most 15 s.
+  assert.equal(texts.checkTakes, "Проверка занимает до 15 секунд.");
 });
 
 test("the page renders text only and never handles a path", () => {

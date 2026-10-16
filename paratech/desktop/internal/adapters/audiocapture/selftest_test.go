@@ -290,6 +290,41 @@ func TestRecorderCheckSoundRefusedWhileCapturing(t *testing.T) {
 	}
 }
 
+// A recording that starts during a check stops it before its own child starts, so the tone stays out of the
+// recording; the check answers busy.
+func TestRecorderStartStopsTheSoundCheck(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	e := checkEnv(t, 60*time.Second, testenv.RecorderHang, testenv.RecorderTone) // the check's child never answers
+	type answer struct {
+		check values.SoundCheck
+		err   error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		check, err := e.rec.CheckSound(context.Background())
+		done <- answer{check, err}
+	}()
+	testenv.Eventually(t, "the check's child is launched", func() bool { return e.launcher.count() == 1 }, nil)
+
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, values.WholeComputer()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case a := <-done:
+		if a.err != nil || !a.check.Busy || len(a.check.Modes) != 0 {
+			t.Fatalf("CheckSound stopped by a recording = %+v, %v; want busy", a.check, a.err)
+		}
+	default:
+		t.Fatal("the check still ran when the recording had started")
+	}
+	if e.launcher.count() != 2 {
+		t.Fatalf("%d launches, want the check and the recording", e.launcher.count())
+	}
+	if err := stop(t, e); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUnavailableCheckSound(t *testing.T) {
 	if _, err := (audiocapture.Unavailable{}).CheckSound(context.Background()); !errors.Is(err, audiocapture.ErrUnavailable) {
 		t.Fatalf("CheckSound = %v", err)
