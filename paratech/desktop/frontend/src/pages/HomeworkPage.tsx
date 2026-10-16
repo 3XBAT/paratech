@@ -142,7 +142,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           itemKey={(a) => a.id}
           renderItem={row}
           renderContainer={(rows) => (
-            <div className="card" role="list">
+            <div className="card rows" role="list">
               {rows}
             </div>
           )}
@@ -608,7 +608,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         <>
           <h2 className="group-title">Версии</h2>
           {dirty && <p className="small muted">Чтобы открыть другую версию, сохраните или отмените правку.</p>}
-          <div className="card" role="list">
+          <div className="card rows" role="list">
             {versions.map((v) => (
               <Row
                 key={v.number}
@@ -651,7 +651,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       ) : deliveries.length === 0 ? (
         <p className="muted">Писем по этому заданию ещё не было.</p>
       ) : (
-        <div className="card" role="list">
+        <div className="card rows" role="list">
           {deliveries.map((d) => {
             const v = deliveryView(d);
             return (
