@@ -29,7 +29,7 @@ const (
 	// CalendarIDName is the entry of the app calendar in the google credential store ("paratech/google/calendar-id").
 	CalendarIDName = "calendar-id"
 
-	// maxResponseBytes bounds one answer; a calendar list page of 250 entries stays far below.
+	// maxResponseBytes bounds one answer; a calendar or an event is a few kilobytes.
 	maxResponseBytes = 4 << 20
 	// maxRequestBytes bounds one request body; events are a few hundred bytes.
 	maxRequestBytes = 64 << 10

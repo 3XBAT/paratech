@@ -30,11 +30,16 @@ const (
 
 	// maxSummaryRunes caps an event title; longer titles are cut.
 	maxSummaryRunes = 200
-	// deadlineLength is the length of a deadline event: it starts at the due time. A zero-length event is not
-	// verified to be accepted (docs/refs/google-calendar.md).
+	// deadlineLength is the length of a deadline event: it starts at the due time. The docs do not state that a
+	// zero-length event is accepted (docs/refs/google-calendar.md).
 	deadlineLength = 15 * time.Minute
 
 	statusConfirmed = "confirmed"
+	statusCancelled = "cancelled"
+
+	// Limits of extendedProperties.private: Google drops a longer key and cuts a longer value without an error.
+	maxPropertyKey   = 44
+	maxPropertyValue = 1024
 )
 
 // eventIDEncoding is base32hex in lower case without padding: exactly the characters Google allows (a-v, 0-9).
@@ -63,6 +68,16 @@ type extendedProperties struct {
 	Private map[string]string `json:"private"`
 }
 
+// fits reports whether every private property stays within Google's limits (bytes, so at most as many characters).
+func (p extendedProperties) fits() bool {
+	for k, v := range p.Private {
+		if len(k) > maxPropertyKey || len(v) > maxPropertyValue {
+			return false
+		}
+	}
+	return true
+}
+
 // event is the part of an Events resource the adapter writes.
 type event struct {
 	ID                 string             `json:"id,omitempty"`
@@ -72,6 +87,11 @@ type event struct {
 	End                eventTime          `json:"end"`
 	Status             string             `json:"status"`
 	ExtendedProperties extendedProperties `json:"extendedProperties"`
+}
+
+// writtenEvent is the part of the answer to an update the adapter checks.
+type writtenEvent struct {
+	Status string `json:"status"`
 }
 
 // UpsertLesson writes the event of a live lesson into the app calendar (schedulesync.CalendarAdapter).
@@ -98,7 +118,8 @@ func (c *Client) UpsertLesson(ctx context.Context, calendarID string, l *lesson.
 	return c.upsert(ctx, opUpsertLesson, calendarID, LessonEventID(l.ID()), e)
 }
 
-// DeleteEvent removes the event of a lesson (schedulesync.CalendarAdapter); a missing or deleted event is success.
+// DeleteEvent removes the event of a lesson (schedulesync.CalendarAdapter); any 2xx, a missing (404) or an already
+// deleted (410) event is success.
 func (c *Client) DeleteEvent(ctx context.Context, calendarID string, id shared.LessonID) error {
 	if id.Validate() != nil {
 		return permanent(opDeleteEvent, ErrInvalidRequest)
@@ -138,11 +159,14 @@ func (c *Client) UpsertDeadline(ctx context.Context, cmd proposal.CalendarComman
 	return c.upsert(ctx, opUpsertDeadline, b.ID, DeadlineEventID(cmd.AssignmentID()), e)
 }
 
-// upsert writes e under eventID: update; 404 or 410 → insert with the id; 409 (taken, also by a deleted event) →
-// update once more, which restores a cancelled event. A lost answer is safe to retry: the next try updates.
+// upsert writes e under eventID: update; 404 or 410 → insert with the id; 409 (taken, maybe by a deleted event) →
+// update once more. A lost answer is safe to retry: the next try updates.
 func (c *Client) upsert(ctx context.Context, op, calendarID, eventID string, e event) error {
+	if !e.ExtendedProperties.fits() {
+		return permanent(op, ErrInvalidRequest)
+	}
 	path := calendarPath(calendarID, "events", eventID)
-	status, err := c.do(ctx, op, request{method: http.MethodPut, path: path, body: e, accept: []int{404, 410}})
+	status, err := c.update(ctx, op, path, e)
 	if err != nil || status < 300 {
 		return err
 	}
@@ -156,7 +180,7 @@ func (c *Client) upsert(ctx context.Context, op, calendarID, eventID string, e e
 		return err
 	}
 
-	status, err = c.do(ctx, op, request{method: http.MethodPut, path: path, body: e, accept: []int{404, 410}})
+	status, err = c.update(ctx, op, path, e)
 	if err != nil {
 		return err
 	}
@@ -164,6 +188,17 @@ func (c *Client) upsert(ctx context.Context, op, calendarID, eventID string, e e
 		return transient(op, ErrConflict) // taken but not updatable: a race, or Google keeps a deleted id
 	}
 	return nil
+}
+
+// update replaces the event at path; 404 and 410 are returned as statuses. Restoring a deleted event by an update is
+// not documented, so an answer that is still cancelled fails: the item stays pending instead of synced and invisible.
+func (c *Client) update(ctx context.Context, op, path string, e event) (int, error) {
+	var got writtenEvent
+	status, err := c.do(ctx, op, request{method: http.MethodPut, path: path, body: e, out: &got, accept: []int{404, 410}})
+	if err == nil && status < 300 && got.Status == statusCancelled {
+		return 0, transient(op, ErrNotRestored)
+	}
+	return status, err
 }
 
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }

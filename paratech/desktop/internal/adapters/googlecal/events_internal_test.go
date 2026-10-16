@@ -38,6 +38,25 @@ func TestSummary(t *testing.T) {
 	}
 }
 
+func TestPrivatePropertiesFit(t *testing.T) {
+	tests := []struct {
+		name  string
+		props map[string]string
+		want  bool
+	}{
+		{"none", nil, true},
+		{"at the limits", map[string]string{strings.Repeat("k", maxPropertyKey): strings.Repeat("v", maxPropertyValue)}, true},
+		{"long key", map[string]string{strings.Repeat("k", maxPropertyKey+1): "v"}, false},
+		{"long value", map[string]string{"k": strings.Repeat("v", maxPropertyValue+1)}, false},
+		{"multibyte value counted in bytes", map[string]string{"k": strings.Repeat("я", maxPropertyValue/2+1)}, false},
+	}
+	for _, tt := range tests {
+		if got := (extendedProperties{Private: tt.props}).fits(); got != tt.want {
+			t.Errorf("%s: fits = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestParseRetryAfter(t *testing.T) {
 	now := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
 	tests := []struct {

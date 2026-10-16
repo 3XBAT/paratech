@@ -3,6 +3,7 @@ package googlecal_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -161,9 +162,14 @@ func newLesson(t *testing.T, id shared.LessonID, title string) *lesson.Lesson {
 
 func deadline(t *testing.T, assignment, title string) proposal.CalendarCommand {
 	t.Helper()
+	return deadlineOf(t, "p1", assignment, title)
+}
+
+func deadlineOf(t *testing.T, id proposal.ID, assignment, title string) proposal.CalendarCommand {
+	t.Helper()
 	out := `{"kind":"create_deadline_event","assignment_id":"` + assignment + `","title":"` + title +
 		`","due":"2026-10-21T18:00:00Z"}`
-	p, err := proposal.New("p1", values.NewUntrustedOutput(out), t0)
+	p, err := proposal.New(id, values.NewUntrustedOutput(out), t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +272,31 @@ func TestDeleteEvent(t *testing.T) {
 	}
 }
 
-// A deleted event (by the app or by the user in Google) is restored by the next upsert, under the same id.
+// The docs state an empty body for events.delete, not the status: any 2xx is success.
+func TestDeleteEventAcceptsAny2xx(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusAccepted, http.StatusNoContent} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method != http.MethodDelete {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(status)
+			}))
+			t.Cleanup(srv.Close)
+			r := newRig(t, googlecal.WithBaseURL(srv.URL+"/calendar/v3"))
+			if err := r.store.Set(context.Background(), googlecal.CalendarIDName, `{"id":"cal1"}`); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.c.DeleteEvent(context.Background(), "cal1", "l1"); err != nil {
+				t.Fatalf("DeleteEvent with %d: %v", status, err)
+			}
+		})
+	}
+}
+
+// A deleted event (by the app or by the user in Google) is restored by the next upsert, under the same id, when
+// Google restores it on an update (the fake's default; the docs do not state it).
 func TestUpsertRestoresADeletedEvent(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -295,7 +325,96 @@ func TestUpsertRestoresADeletedEvent(t *testing.T) {
 	}
 }
 
-// Another writer inserts the same id between the update and the insert: the 409 is followed by an update.
+// If Google keeps a deleted event cancelled on an update, the upsert fails transiently: the lesson stays pending and
+// no second event is made.
+func TestUpsertOfAnEventGoogleKeepsDeleted(t *testing.T) {
+	tests := []struct {
+		name   string
+		delete func(r *rig, cal string)
+	}{
+		{"deleted by the app", func(r *rig, cal string) { _ = r.c.DeleteEvent(context.Background(), cal, "l1") }},
+		{"deleted by the user", func(r *rig, cal string) { r.api.CancelEvent(cal, googlecal.LessonEventID("l1")) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newRig(t)
+			cal := r.calendar(t)
+			l := newLesson(t, "l1", "Алгебра")
+			if err := r.c.UpsertLesson(context.Background(), cal, l); err != nil {
+				t.Fatal(err)
+			}
+			tt.delete(r, cal)
+			r.api.KeepCancelledOnUpdate(true)
+
+			err := r.c.UpsertLesson(context.Background(), cal, l)
+			assertClass(t, err, googlecal.ErrNotRestored, backoff.ErrTransient)
+			if err.Error() != "googlecal: upsert lesson: google calendar kept the event deleted" {
+				t.Fatalf("error text %q", err)
+			}
+			if e, ok := r.api.Event(cal, googlecal.LessonEventID("l1")); !ok || e.Status != testenv.FakeEventCancelled {
+				t.Fatalf("event %+v", e)
+			}
+			if n := r.requests(http.MethodPost, "/events"); n != 1 {
+				t.Fatalf("%d inserts, want 1", n)
+			}
+		})
+	}
+
+	// A deadline goes through the same update.
+	r := newRig(t)
+	cmd := deadline(t, "a1", "t")
+	if err := r.c.UpsertDeadline(context.Background(), cmd); err != nil {
+		t.Fatal(err)
+	}
+	cal := r.api.Calendars()[0].ID
+	r.api.CancelEvent(cal, googlecal.DeadlineEventID("a1"))
+	r.api.KeepCancelledOnUpdate(true)
+	assertClass(t, r.c.UpsertDeadline(context.Background(), cmd), googlecal.ErrNotRestored, backoff.ErrTransient)
+}
+
+// Every private property stays within Google's limits (key <= 44, value <= 1024), also for the longest ids, so none
+// is dropped or cut silently.
+func TestPrivatePropertiesFitGoogleLimits(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	cal := r.calendar(t)
+	longLesson := shared.LessonID(strings.Repeat("l", 128))
+	l := newLesson(t, longLesson, "Алгебра")
+	for range 3 { // a revision above 1
+		content := l.Content()
+		content.Title += "!"
+		if _, err := l.ChangeContent(content, t0.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.c.UpsertLesson(ctx, cal, l); err != nil {
+		t.Fatal(err)
+	}
+	longAssignment, longProposal := strings.Repeat("a", 128), proposal.ID(strings.Repeat("p", 128))
+	cmd := deadlineOf(t, longProposal, longAssignment, "t")
+	if err := r.c.UpsertDeadline(ctx, cmd); err != nil {
+		t.Fatal(err)
+	}
+
+	lessonEvent, _ := r.api.Event(cal, googlecal.LessonEventID(longLesson))
+	deadlineEvent, _ := r.api.Event(cal, googlecal.DeadlineEventID(shared.AssignmentID(longAssignment)))
+	want := []map[string]string{
+		{"app": "paratech", "kind": "lesson", "lessonId": string(longLesson), "revision": "4"},
+		{"app": "paratech", "kind": "deadline", "assignmentId": longAssignment, "proposalKey": cmd.IdempotencyKey()},
+	}
+	for i, got := range []map[string]string{lessonEvent.Private, deadlineEvent.Private} {
+		if len(got) != len(want[i]) {
+			t.Fatalf("private %v, want %v", got, want[i])
+		}
+		for k, v := range want[i] {
+			if len(k) > 44 || len(v) > 1024 || got[k] != v {
+				t.Fatalf("private %q = %q, want %q within the limits", k, got[k], v)
+			}
+		}
+	}
+}
+
+// Another writer inserts the same id between the update and the insert// Another writer inserts the same id between the update and the insert: the 409 is followed by an update.
 func TestUpsertAfterAConflictingInsert(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
@@ -414,41 +533,89 @@ func TestEnsureCalendarReplacesAGoneCalendar(t *testing.T) {
 	if cals := r.api.Calendars(); len(cals) != 1 || cals[0].ID != id {
 		t.Fatalf("calendars %+v", cals)
 	}
+	if r.requests(http.MethodGet, "/calendars/"+old) != 1 || r.requests(http.MethodGet, "/calendarList/"+old) != 1 {
+		t.Fatalf("requests %+v, want calendars.get and calendarList.get", r.api.Requests())
+	}
 }
 
-// After a sign-out (ForgetCalendar) the next sign-in finds the same calendar at Google: no second calendar, fresh.
-func TestEnsureCalendarFindsItsCalendarAgain(t *testing.T) {
+// The stored calendar is gone only when calendars.get and calendarList.get both answer 404, 410 or 403; one spurious
+// answer, a disagreement or a rate limit fails transiently and creates nothing.
+func TestEnsureCalendarGoneNeedsBothChecks(t *testing.T) {
+	tests := []struct {
+		name    string
+		faults  []testenv.CalendarFault // for the next GETs: calendars.get, then calendarList.get
+		gone    bool
+		reason  error
+		listGet int // calendarList.get requests
+	}{
+		{"spurious 404", []testenv.CalendarFault{testenv.FaultNotFound}, false, googlecal.ErrUnavailable, 1},
+		{"unexplained 403", []testenv.CalendarFault{testenv.FaultForbidden}, false, googlecal.ErrUnavailable, 1},
+		{"403 and 404: another account", []testenv.CalendarFault{testenv.FaultForbidden, testenv.FaultNotFound}, true, nil, 1},
+		{"404 and 404", []testenv.CalendarFault{testenv.FaultNotFound, testenv.FaultNotFound}, true, nil, 1},
+		{"404, then the list check rate-limited", []testenv.CalendarFault{testenv.FaultNotFound, testenv.FaultUserRateLimit},
+			false, googlecal.ErrRateLimited, 1},
+		{"404, then the list check fails", []testenv.CalendarFault{testenv.FaultNotFound, testenv.FaultServerError},
+			false, googlecal.ErrUnavailable, 1},
+		{"quota on calendars.get", []testenv.CalendarFault{testenv.FaultQuotaExceeded}, false, googlecal.ErrRateLimited, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newRig(t)
+			old := r.calendar(t)
+			for _, f := range tt.faults {
+				r.api.FailNext(f, http.MethodGet)
+			}
+			id, fresh, err := r.c.EnsureCalendar(context.Background())
+			if n := r.requests(http.MethodGet, "/calendarList/"+old); n != tt.listGet {
+				t.Fatalf("%d calendarList.get requests, want %d", n, tt.listGet)
+			}
+			if !tt.gone {
+				assertClass(t, err, tt.reason, backoff.ErrTransient)
+				if n := r.requests(http.MethodPost, "/calendars"); n != 1 {
+					t.Fatalf("%d calendar inserts, want 1", n)
+				}
+				if again, _, err := r.c.EnsureCalendar(context.Background()); err != nil || again != old {
+					t.Fatalf("next EnsureCalendar = %q, %v, want %q", again, err, old)
+				}
+				return
+			}
+			if err != nil || id == old || !fresh {
+				t.Fatalf("EnsureCalendar = %q, %v, %v", id, fresh, err)
+			}
+			if stored, _ := r.store.Get(context.Background(), googlecal.CalendarIDName); !strings.Contains(stored, id) {
+				t.Fatalf("stored %q, want %q", stored, id)
+			}
+		})
+	}
+}
+
+// ForgetCalendar drops the binding: the next EnsureCalendar creates a new calendar and never writes the old one.
+func TestForgetCalendar(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	r.api.AddCalendar(googlecal.CalendarSummary, "the user's own calendar with the same name")
-	id := r.calendar(t)
-	for range 3 {
-		r.api.AddCalendar("Другой", "")
-	}
-	r.api.ListPageSize(2)
+	old := r.calendar(t)
 	if err := r.c.ForgetCalendar(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.store.Get(ctx, googlecal.CalendarIDName); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("the calendar id is still stored: %v", err)
 	}
-
-	again, fresh, err := r.c.EnsureCalendar(ctx)
-	if err != nil || again != id || !fresh {
-		t.Fatalf("EnsureCalendar = %q, %v, %v, want %q fresh", again, fresh, err, id)
+	id, fresh, err := r.c.EnsureCalendar(ctx)
+	if err != nil || id == old || !fresh {
+		t.Fatalf("EnsureCalendar = %q, %v, %v", id, fresh, err)
 	}
-	if n := r.requests(http.MethodPost, "/calendars"); n != 1 {
-		t.Fatalf("%d calendar inserts, want 1", n)
+	if err := r.c.UpsertLesson(ctx, old, newLesson(t, "l1", "Алгебра")); !errors.Is(err, googlecal.ErrForeignCalendar) {
+		t.Fatalf("UpsertLesson into the old calendar = %v", err)
 	}
 }
 
-// When the list is refused (scope, not verified) or the stored entry is unreadable, a calendar is created.
-func TestEnsureCalendarCreatesWithoutALookup(t *testing.T) {
+// A missing, unreadable or foreign stored entry is no binding: a calendar is created.
+func TestEnsureCalendarWithoutAUsableStoredEntry(t *testing.T) {
 	tests := []struct {
 		name  string
 		setup func(t *testing.T, r *rig)
 	}{
-		{"list refused", func(t *testing.T, r *rig) { r.api.RefuseCalendarList(true) }},
+		{"nothing stored", func(t *testing.T, r *rig) {}},
 		{"garbage stored", func(t *testing.T, r *rig) {
 			if err := r.store.Set(context.Background(), googlecal.CalendarIDName, "not json"); err != nil {
 				t.Fatal(err)
@@ -476,7 +643,8 @@ func TestEnsureCalendarCreatesWithoutALookup(t *testing.T) {
 	}
 }
 
-// The calendar insert reaches Google but its answer is lost: the retry finds that calendar instead of a second one.
+// The calendar insert reaches Google but its answer is lost (the accepted crash window): the retry creates a second
+// calendar, and the first one stays empty.
 func TestLostCalendarInsertAnswer(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
@@ -488,9 +656,14 @@ func TestLostCalendarInsertAnswer(t *testing.T) {
 	if err != nil || !fresh {
 		t.Fatalf("retry = %q, %v, %v", id, fresh, err)
 	}
-	if cals := r.api.Calendars(); len(cals) != 1 || cals[0].ID != id {
+	if err := r.c.UpsertLesson(ctx, id, newLesson(t, "l1", "Алгебра")); err != nil {
+		t.Fatal(err)
+	}
+	cals := r.api.Calendars()
+	if len(cals) != 2 || cals[1].ID != id || len(r.api.Events(cals[0].ID)) != 0 {
 		t.Fatalf("calendars %+v", cals)
 	}
+	assertOnlyOwnWrites(t, r, id)
 }
 
 // Two parallel callers (the sync job and a deadline) create one calendar.
@@ -676,9 +849,10 @@ func TestStatusClasses(t *testing.T) {
 		{testenv.FaultServerError, googlecal.ErrUnavailable, backoff.ErrTransient, 0},
 		{testenv.FaultBadRequest, googlecal.ErrRejected, backoff.ErrPermanent, 0},
 		{testenv.FaultForbidden, googlecal.ErrForbidden, backoff.ErrPermanent, 0},
+		{testenv.FaultQuotaExceeded, googlecal.ErrRateLimited, backoff.ErrTransient, 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.reason.Error(), func(t *testing.T) {
+		t.Run(fmt.Sprint(tt.fault), func(t *testing.T) {
 			r := newRig(t)
 			cal := r.calendar(t)
 			r.api.FailNext(tt.fault, http.MethodPut)

@@ -3,16 +3,18 @@
 // schedulesync.CalendarAdapter and homeworkflow.DeadlineCalendar structurally.
 //
 //   - Only one calendar is ever written: the secondary calendar «Learning Assistant» the app created itself (scope
-//     calendar.app.created). Its id lives in the google credential store (CalendarIDName), next to the OAuth client.
-//     Nothing is read back into the core: local data is the system of record.
+//     calendar.app.created). Its id lives in the google credential store (CalendarIDName), next to the OAuth client,
+//     and is the only binding: the scope does not allow calendarList.list. Nothing is read back into the core: local
+//     data is the system of record.
 //   - Event ids are derived from the lesson or assignment id (LessonEventID, DeadlineEventID), so no event id is
 //     stored (ADR-0004(e)) and a repeated upsert updates the same event: PUT, then insert with the id on 404, then
-//     PUT again on 409. A retry after a lost answer never makes a second event (hard rule 7).
+//     PUT again on 409. A retry after a lost answer never makes a second event (hard rule 7). An update whose answer
+//     is still cancelled is not reported as written (ErrNotRestored).
 //   - Requests go only to the base URL (https://www.googleapis.com/calendar/v3), with the bearer client of
 //     adapters/googleauth (wired in app; this package does not import it), no redirects, a timeout per request and
 //     bounded answers. A 401 drops the cached access token and is retried once.
 //   - Errors are *Error values matching a reason sentinel and backoff.ErrTransient or backoff.ErrPermanent (ARCH-32).
 //     Their texts are fixed: never a token, a title, a calendar id or a Google answer.
 //
-// Facts about the Calendar API and which of them are not verified: docs/refs/google-calendar.md.
+// Facts about the Calendar API, and which of them the docs do not state: docs/refs/google-calendar.md.
 package googlecal

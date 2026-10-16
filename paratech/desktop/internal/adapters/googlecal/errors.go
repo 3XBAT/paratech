@@ -52,11 +52,15 @@ var (
 	// ErrConflict means the event id stays taken: an insert answered 409 and the update after it did not succeed.
 	ErrConflict = errors.New("google calendar event id conflict")
 
+	// ErrNotRestored means an update succeeded but the event is still cancelled: Google does not document that an
+	// update restores a deleted event, so the write is not reported as done.
+	ErrNotRestored = errors.New("google calendar kept the event deleted")
+
 	// ErrRejected means Google refused the request as malformed (400 and other 4xx).
 	ErrRejected = errors.New("google calendar rejected the request")
 
-	// ErrUnavailable means Google answered with a server error, or the access token could not be refreshed for a
-	// reason that may pass.
+	// ErrUnavailable means Google answered with a server error or with checks that disagree, or the access token
+	// could not be refreshed for a reason that may pass.
 	ErrUnavailable = errors.New("google calendar unavailable")
 
 	// ErrTimeout means one request did not finish within the request timeout.
@@ -107,7 +111,9 @@ func permanent(op string, reason error, extra ...error) *Error {
 	return &Error{op: op, reason: reason, extra: extra, class: backoff.ErrPermanent}
 }
 
-// rateLimitReasons are the 403 reasons Google documents as "retry with backoff" (docs/refs/google-calendar.md).
+// rateLimitReasons are the 403 reasons treated as "slow down" (docs/refs/google-calendar.md): the errors guide advises a
+// backoff for the rate limits; quotaExceeded has no advice and dailyLimitExceeded is not listed, both are kept
+// transient. The adapter never repeats them itself: the job runner's exponential backoff spaces the retries.
 var rateLimitReasons = map[string]bool{
 	"rateLimitExceeded": true, "userRateLimitExceeded": true, "quotaExceeded": true, "dailyLimitExceeded": true,
 }

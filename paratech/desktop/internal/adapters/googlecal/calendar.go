@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -15,7 +14,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// The app calendar. It is found again at Google by the summary and the marker in the description.
+// The app calendar.
 const (
 	CalendarSummary     = "Learning Assistant"
 	calendarMarker      = "[paratech-calendar-v1]"
@@ -23,9 +22,6 @@ const (
 
 	// maxCalendarIDBytes bounds a calendar id read from Google or the store.
 	maxCalendarIDBytes = 1024
-	// listPageSize and maxListPages bound the lookup in calendarList.
-	listPageSize = 250
-	maxListPages = 20
 )
 
 // binding is the stored calendar of this installation. Fresh stays true until the core confirms that it marked every
@@ -35,28 +31,21 @@ type binding struct {
 	Fresh bool   `json:"fresh"`
 }
 
-// calendarResource is the part of a Calendar or CalendarListEntry resource the adapter reads or sends.
+// calendarResource is the part of a Calendar resource the adapter reads or sends.
 type calendarResource struct {
 	ID          string `json:"id,omitempty"`
 	Summary     string `json:"summary"`
 	Description string `json:"description"`
-	AccessRole  string `json:"accessRole,omitempty"`
 }
 
-type calendarList struct {
-	Items         []calendarResource `json:"items"`
-	NextPageToken string             `json:"nextPageToken"`
-}
-
-// EnsureCalendar returns the app calendar, creating it when needed (schedulesync.CalendarAdapter). The stored calendar
-// is checked with calendars.get; when it is gone (404, 410, or 403 for a calendar this sign-in cannot see, e.g. another
-// Google account) the adapter looks for an app calendar in calendarList and otherwise creates one. fresh is true for a
+// EnsureCalendar returns the app calendar, creating it when needed (schedulesync.CalendarAdapter). The calendar id in
+// the credential store is the only binding: calendarList.list is not allowed with calendar.app.created, so the adapter
+// cannot look a calendar up. The stored calendar is replaced only when it is gone (see gone). fresh is true for a
 // calendar new to this installation and stays true until ConfirmCalendar.
 //
 // Crash window: Google creates the calendar before its id is stored. If the app stops in between (or the answer is
-// lost), the next call finds that calendar in calendarList by its summary and marker and reuses it. If Google refuses
-// the list for the scope (not verified, docs/refs/google-calendar.md), a second, empty calendar is created; the first
-// one stays unused and is never written.
+// lost), the next call creates another calendar; the first one stays empty and is never written (the user can delete
+// it). Accepted: finding it again would need a wider scope.
 func (c *Client) EnsureCalendar(ctx context.Context) (calendarID string, fresh bool, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -78,8 +67,9 @@ func (c *Client) ConfirmCalendar(ctx context.Context, calendarID string) error {
 	return c.save(ctx, opConfirm, binding{ID: b.ID})
 }
 
-// ForgetCalendar removes the stored calendar id (at sign-out). The calendar at Google stays: a later sign-in finds it
-// again, or creates a new one for another account.
+// ForgetCalendar removes the stored calendar id. The calendar at Google stays, and the next EnsureCalendar creates a new
+// one. A sign-out need not call it: with the id kept, the same account gets its calendar back and another account's
+// sign-in finds it gone.
 func (c *Client) ForgetCalendar(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -96,23 +86,18 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 		return binding{}, err
 	}
 	if ok {
-		live, err := c.exists(ctx, op, b.ID)
+		gone, err := c.gone(ctx, op, b.ID)
 		if err != nil {
 			return binding{}, err
 		}
-		if live {
+		if !gone {
 			return b, nil
 		}
 	}
 
-	id, err := c.lookup(ctx, op)
+	id, err := c.create(ctx, op)
 	if err != nil {
 		return binding{}, err
-	}
-	if id == "" {
-		if id, err = c.create(ctx, op); err != nil {
-			return binding{}, err
-		}
 	}
 	b = binding{ID: id, Fresh: true}
 	if err := c.save(ctx, op, b); err != nil {
@@ -121,7 +106,7 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 	return b, nil
 }
 
-// load reads the stored binding; a missing or unreadable entry is no binding (the lookup finds the calendar again).
+// load reads the stored binding; a missing or unreadable entry is no binding.
 func (c *Client) load(ctx context.Context, op string) (binding, bool, error) {
 	raw, err := c.store.Get(ctx, CalendarIDName)
 	switch {
@@ -152,49 +137,27 @@ func (c *Client) save(ctx context.Context, op string, b binding) error {
 	return nil
 }
 
-// exists reports whether the stored calendar is still there for this sign-in.
-func (c *Client) exists(ctx context.Context, op, id string) (bool, error) {
-	status, err := c.do(ctx, op, request{method: http.MethodGet, path: calendarPath(id), accept: []int{404, 410, 403}})
-	if err != nil {
+// gone reports whether the stored calendar is gone for this sign-in: calendars.get AND calendarList.get both answer
+// 404, 410 or 403, so one spurious 404 (the errors guide advises a backoff for it) never makes a second calendar. A
+// 403 that is not a rate limit (those are errors) counts too: the stored calendar of another Google account may answer
+// it. Alone it could mean anything, so it needs the other check to agree; a sign-in that may not use calendars at all
+// is refused by calendars.insert as well. When the checks disagree the call fails transiently and nothing is created.
+func (c *Client) gone(ctx context.Context, op, id string) (bool, error) {
+	absent := []int{http.StatusNotFound, http.StatusGone, http.StatusForbidden}
+	status, err := c.do(ctx, op, request{method: http.MethodGet, path: calendarPath(id), accept: absent})
+	if err != nil || status < 300 {
 		return false, err
 	}
-	return status == http.StatusOK, nil
-}
-
-// lookup finds an app calendar in calendarList: owned, summary CalendarSummary, the marker in the description. Of
-// several, the smallest id wins, so every run picks the same one. "" when there is none or the list is refused.
-func (c *Client) lookup(ctx context.Context, op string) (string, error) {
-	var found []string
-	token := ""
-	for range maxListPages {
-		q := url.Values{"maxResults": {fmt.Sprint(listPageSize)}, "showHidden": {"true"}}
-		if token != "" {
-			q.Set("pageToken", token)
-		}
-		var page calendarList
-		status, err := c.do(ctx, op, request{
-			method: http.MethodGet, path: "/users/me/calendarList", query: q, out: &page, accept: []int{403},
-		})
-		if err != nil {
-			return "", err
-		}
-		if status == http.StatusForbidden {
-			return "", nil // the scope does not allow the list: create
-		}
-		for _, e := range page.Items {
-			if e.AccessRole == "owner" && e.Summary == CalendarSummary && strings.Contains(e.Description, calendarMarker) &&
-				validCalendarID(e.ID) {
-				found = append(found, e.ID)
-			}
-		}
-		if token = page.NextPageToken; token == "" {
-			break
-		}
+	status, err = c.do(ctx, op, request{
+		method: http.MethodGet, path: "/users/me/calendarList/" + url.PathEscape(id), accept: absent,
+	})
+	switch {
+	case err != nil:
+		return false, err
+	case status < 300:
+		return false, transient(op, ErrUnavailable)
 	}
-	if len(found) == 0 {
-		return "", nil
-	}
-	return slices.Min(found), nil
+	return true, nil
 }
 
 func (c *Client) create(ctx context.Context, op string) (string, error) {

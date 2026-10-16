@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // FakeCalendarAccessToken is the bearer token a FakeGoogleCalendar accepts by default.
@@ -23,11 +23,11 @@ const fakeCalendarAPIPath = "/calendar/v3"
 
 // Limits of the fake, like the documented limits of the Calendar API (docs/refs/google-calendar.md).
 const (
-	fakeCalendarMaxBody     = 1 << 20
-	fakeEventIDMin          = 5
-	fakeEventIDMax          = 1024
-	fakeCalendarListMax     = 250
-	fakeCalendarListDefault = 100
+	fakeCalendarMaxBody  = 1 << 20
+	fakeEventIDMin       = 5
+	fakeEventIDMax       = 1024
+	fakePropertyKeyMax   = 44
+	fakePropertyValueMax = 1024
 )
 
 // Event statuses of the Calendar API.
@@ -48,6 +48,10 @@ const (
 	FaultUserRateLimit
 	// FaultForbidden answers 403 forbidden.
 	FaultForbidden
+	// FaultQuotaExceeded answers 403 quotaExceeded.
+	FaultQuotaExceeded
+	// FaultNotFound answers 404 notFound, as a spurious answer for a resource that exists.
+	FaultNotFound
 	// FaultServerError answers 500 backendError.
 	FaultServerError
 	// FaultBadRequest answers 400 invalid.
@@ -85,19 +89,20 @@ type FakeCalendarRequest struct {
 }
 
 // FakeGoogleCalendar is a local Calendar API v3 server for the googlecal tests (TASK-051). It implements the subset the
-// adapter uses with the rules of docs/refs/google-calendar.md: calendars insert/get, calendarList list, events
+// adapter uses with the rules of docs/refs/google-calendar.md: calendars insert/get, calendarList get, events
 // insert/get/update/delete; client event ids of base32hex characters a-v0-9 and length 5..1024, unique per calendar;
-// insert of an existing id answers 409 also when the event is deleted; update restores a cancelled event; delete of a
-// deleted event answers 410. A token with calendar.app.created sees only the calendars the app created: every other
-// calendar id ("primary" included) answers 404. It checks the bearer token and records every request.
+// private properties with a key over 44 characters dropped and a value over 1024 cut, silently. Behavior the docs do
+// not state is the fake's choice: insert of an existing id answers 409 also when the event is deleted; update restores
+// a cancelled event unless KeepCancelledOnUpdate; delete answers 204, and 410 for a deleted event. A token with
+// calendar.app.created sees only the calendars the app created: every other calendar id ("primary" included) answers
+// 404. It checks the bearer token and records every request.
 type FakeGoogleCalendar struct {
 	srv *httptest.Server
 
-	mu         sync.Mutex
-	accept     func(token string) bool
-	refuseList bool
-	pageSize   int
-	faults     []fakeCalendarFault
+	mu            sync.Mutex
+	accept        func(token string) bool
+	keepCancelled bool
+	faults        []fakeCalendarFault
 
 	seq       int
 	calendars map[string]*fakeCalendar
@@ -137,12 +142,11 @@ func (f *FakeGoogleCalendar) AcceptTokens(accept func(token string) bool) {
 	f.set(func() { f.accept = accept })
 }
 
-// RefuseCalendarList makes calendarList.list answer 403 insufficientPermissions, as it would if the scope does not
-// allow it (not verified, docs/refs/google-calendar.md).
-func (f *FakeGoogleCalendar) RefuseCalendarList(refuse bool) { f.set(func() { f.refuseList = refuse }) }
-
-// ListPageSize caps the entries of one calendarList page below the request's maxResults; 0 removes the cap.
-func (f *FakeGoogleCalendar) ListPageSize(n int) { f.set(func() { f.pageSize = n }) }
+// KeepCancelledOnUpdate makes an update of a cancelled event apply the body but leave the event cancelled, as Google
+// might: the docs do not state that an update restores a deleted event.
+func (f *FakeGoogleCalendar) KeepCancelledOnUpdate(keep bool) {
+	f.set(func() { f.keepCancelled = keep })
+}
 
 // FailNext queues a fault for the next request with the method ("" for any). Faults apply in order.
 func (f *FakeGoogleCalendar) FailNext(fault CalendarFault, method string) {
@@ -289,7 +293,7 @@ func (f *FakeGoogleCalendar) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f.mu.Lock()
-	a := f.route(r.Method, segments, r.URL.Query(), payload)
+	a := f.route(r.Method, segments, payload)
 	f.mu.Unlock()
 
 	if fault == FaultDropAfterWrite {
@@ -320,6 +324,10 @@ func calFaultAnswer(fault CalendarFault) (fakeAnswer, bool) {
 		return fakeAnswer{status: http.StatusForbidden, reason: "userRateLimitExceeded"}, true
 	case FaultForbidden:
 		return fakeAnswer{status: http.StatusForbidden, reason: "forbidden"}, true
+	case FaultQuotaExceeded:
+		return fakeAnswer{status: http.StatusForbidden, reason: "quotaExceeded"}, true
+	case FaultNotFound:
+		return fakeAnswer{status: http.StatusNotFound, reason: "notFound"}, true
 	case FaultServerError:
 		return fakeAnswer{status: http.StatusInternalServerError, reason: "backendError"}, true
 	case FaultBadRequest:
@@ -346,12 +354,12 @@ func fakeSegments(r *http.Request) ([]string, bool) {
 }
 
 // route runs one request with f.mu held.
-func (f *FakeGoogleCalendar) route(method string, seg []string, query url.Values, payload map[string]any) fakeAnswer {
+func (f *FakeGoogleCalendar) route(method string, seg []string, payload map[string]any) fakeAnswer {
 	switch {
 	case len(seg) == 1 && seg[0] == "calendars" && method == http.MethodPost:
 		return f.insertCalendar(payload)
-	case len(seg) == 3 && seg[0] == "users" && seg[1] == "me" && seg[2] == "calendarList" && method == http.MethodGet:
-		return f.listCalendars(query)
+	case len(seg) == 4 && seg[0] == "users" && seg[1] == "me" && seg[2] == "calendarList" && method == http.MethodGet:
+		return f.calendarListEntry(seg[3])
 	case len(seg) >= 2 && seg[0] == "calendars":
 		c := f.calendars[seg[1]]
 		if c == nil || c.deleted {
@@ -366,7 +374,7 @@ func (f *FakeGoogleCalendar) route(method string, seg []string, query url.Values
 		case len(seg) == 3 && seg[2] == "events" && method == http.MethodPost:
 			return calInsertEvent(c, payload)
 		case len(seg) == 4 && seg[2] == "events":
-			return calEventRequest(c, method, seg[3], payload)
+			return calEventRequest(c, method, seg[3], payload, f.keepCancelled)
 		}
 	}
 	return fakeAnswer{status: http.StatusNotFound, reason: "notFound"}
@@ -381,47 +389,18 @@ func (f *FakeGoogleCalendar) insertCalendar(p map[string]any) fakeAnswer {
 	return fakeAnswer{status: http.StatusOK, body: calJSON(f.calendars[id].info)}
 }
 
-func (f *FakeGoogleCalendar) listCalendars(q url.Values) fakeAnswer {
-	if f.refuseList {
-		return fakeAnswer{status: http.StatusForbidden, reason: "insufficientPermissions"}
-	}
-	size := fakeCalendarListDefault
-	if v := q.Get("maxResults"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return fakeAnswer{status: http.StatusBadRequest, reason: "invalid"}
+// calendarListEntry is calendarList.get: the entry of a live calendar the app created, else 404.
+func (f *FakeGoogleCalendar) calendarListEntry(id string) fakeAnswer {
+	c := f.calendars[id]
+	if c == nil || c.deleted {
+		if c == nil {
+			f.foreign++
 		}
-		size = min(n, fakeCalendarListMax)
+		return fakeAnswer{status: http.StatusNotFound, reason: "notFound"}
 	}
-	if f.pageSize > 0 {
-		size = min(size, f.pageSize)
-	}
-	var live []FakeCalendarInfo
-	for _, id := range f.order {
-		if c := f.calendars[id]; !c.deleted {
-			live = append(live, c.info)
-		}
-	}
-	start := 0
-	if tok := q.Get("pageToken"); tok != "" {
-		n, err := strconv.Atoi(tok)
-		if err != nil || n < 0 || n > len(live) {
-			return fakeAnswer{status: http.StatusBadRequest, reason: "invalid"}
-		}
-		start = n
-	}
-	end := min(start+size, len(live))
-	items := []any{}
-	for _, info := range live[start:end] {
-		entry := calJSON(info)
-		entry["accessRole"] = "owner"
-		items = append(items, entry)
-	}
-	body := map[string]any{"kind": "calendar#calendarList", "items": items}
-	if end < len(live) {
-		body["nextPageToken"] = strconv.Itoa(end)
-	}
-	return fakeAnswer{status: http.StatusOK, body: body}
+	entry := calJSON(c.info)
+	entry["kind"], entry["accessRole"] = "calendar#calendarListEntry", "owner"
+	return fakeAnswer{status: http.StatusOK, body: entry}
 }
 
 func calInsertEvent(c *fakeCalendar, p map[string]any) fakeAnswer {
@@ -442,7 +421,7 @@ func calInsertEvent(c *fakeCalendar, p map[string]any) fakeAnswer {
 	return fakeAnswer{status: http.StatusOK, body: calEventJSON(e)}
 }
 
-func calEventRequest(c *fakeCalendar, method, id string, p map[string]any) fakeAnswer {
+func calEventRequest(c *fakeCalendar, method, id string, p map[string]any, keepCancelled bool) fakeAnswer {
 	e := c.events[id]
 	if e == nil {
 		return fakeAnswer{status: http.StatusNotFound, reason: "notFound"}
@@ -455,7 +434,10 @@ func calEventRequest(c *fakeCalendar, method, id string, p map[string]any) fakeA
 		if !ok {
 			return fakeAnswer{status: http.StatusBadRequest, reason: "invalid"}
 		}
-		c.events[id] = next // a confirmed status restores a cancelled event
+		if keepCancelled && e.Status == FakeEventCancelled {
+			next.Status = FakeEventCancelled
+		}
+		c.events[id] = next
 		return fakeAnswer{status: http.StatusOK, body: calEventJSON(next)}
 	case http.MethodDelete:
 		if e.Status == FakeEventCancelled {
@@ -487,6 +469,12 @@ func calEventFrom(id string, p map[string]any) (*FakeCalendarEvent, bool) {
 				s, ok := v.(string)
 				if !ok {
 					return nil, false
+				}
+				if utf8.RuneCountInString(k) > fakePropertyKeyMax {
+					continue
+				}
+				if r := []rune(s); len(r) > fakePropertyValueMax {
+					s = string(r[:fakePropertyValueMax])
 				}
 				e.Private[k] = s
 			}

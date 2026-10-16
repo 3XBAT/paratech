@@ -187,42 +187,71 @@ func TestFakeCalendarAccess(t *testing.T) {
 	}
 }
 
-func TestFakeCalendarList(t *testing.T) {
+// calendarList.get knows only the live calendars the app created.
+func TestFakeCalendarListEntry(t *testing.T) {
 	c := newCalClient(t)
-	var ids []string
-	for range 3 {
-		ids = append(ids, c.newCalendar())
-	}
-	c.f.DeleteCalendar(ids[1])
-	ids = append(ids[:1], ids[2:]...)
-	c.f.ListPageSize(1)
+	cal := c.newCalendar()
+	gone := c.newCalendar()
+	c.f.DeleteCalendar(gone)
 
-	var got []string
-	token := ""
-	for range 5 {
-		c.query = url.Values{"maxResults": {"250"}}
-		if token != "" {
-			c.query.Set("pageToken", token)
+	tests := []struct {
+		name   string
+		id     string
+		status int
+	}{
+		{"own calendar", cal, 200},
+		{"deleted calendar", gone, 404},
+		{"primary", "primary", 404},
+	}
+	for _, tt := range tests {
+		status, _, body := c.do(http.MethodGet, nil, "users", "me", "calendarList", tt.id)
+		if status != tt.status {
+			t.Fatalf("%s: status %d, want %d", tt.name, status, tt.status)
 		}
-		status, _, body := c.do(http.MethodGet, nil, "users", "me", "calendarList")
-		if status != 200 {
-			t.Fatalf("list = %d", status)
-		}
-		for _, item := range body["items"].([]any) {
-			got = append(got, item.(map[string]any)["id"].(string))
-		}
-		token, _ = body["nextPageToken"].(string)
-		if token == "" {
-			break
+		if status == 200 && (body["id"] != cal || body["accessRole"] != "owner") {
+			t.Fatalf("%s: entry %v", tt.name, body)
 		}
 	}
-	if strings.Join(got, ",") != strings.Join(ids, ",") {
-		t.Fatalf("listed %v, want %v", got, ids)
+	if n := c.f.ForeignRequests(); n != 1 {
+		t.Fatalf("foreign requests %d, want 1", n)
 	}
+}
 
-	c.f.RefuseCalendarList(true)
-	if status, reason, _ := c.do(http.MethodGet, nil, "users", "me", "calendarList"); status != 403 || reason != "insufficientPermissions" {
-		t.Fatalf("refused list = %d %q", status, reason)
+// KeepCancelledOnUpdate: an update of a cancelled event applies the body and leaves it cancelled.
+func TestFakeCalendarKeepCancelledOnUpdate(t *testing.T) {
+	c := newCalClient(t)
+	cal := c.newCalendar()
+	if status, _, _ := c.do(http.MethodPost, calEvent(calEventID, "A"), "calendars", cal, "events"); status != 200 {
+		t.Fatal(status)
+	}
+	c.f.CancelEvent(cal, calEventID)
+	c.f.KeepCancelledOnUpdate(true)
+	status, _, body := c.do(http.MethodPut, calEvent("", "B"), "calendars", cal, "events", calEventID)
+	if status != 200 || body["status"] != FakeEventCancelled || body["summary"] != "B" {
+		t.Fatalf("update = %d %v", status, body)
+	}
+	c.f.KeepCancelledOnUpdate(false)
+	if status, _, body := c.do(http.MethodPut, calEvent("", "C"), "calendars", cal, "events", calEventID); status != 200 ||
+		body["status"] != FakeEventConfirmed {
+		t.Fatalf("update = %d %v", status, body)
+	}
+}
+
+// Private properties over Google's limits are dropped (key) or cut (value) without an error.
+func TestFakeCalendarPrivatePropertyLimits(t *testing.T) {
+	c := newCalClient(t)
+	cal := c.newCalendar()
+	e := calEvent(calEventID, "A")
+	e["extendedProperties"] = map[string]any{"private": map[string]string{
+		strings.Repeat("k", 44): "fits", strings.Repeat("k", 45): "dropped", "long": strings.Repeat("я", 1025),
+	}}
+	if status, _, _ := c.do(http.MethodPost, e, "calendars", cal, "events"); status != 200 {
+		t.Fatal(status)
+	}
+	got, _ := c.f.Event(cal, calEventID)
+	if len(got.Private) != 2 || got.Private[strings.Repeat("k", 44)] != "fits" ||
+		got.Private["long"] != strings.Repeat("я", 1024) {
+		t.Fatalf("private %v", got.Private)
 	}
 }
 
@@ -236,6 +265,8 @@ func TestFakeCalendarFaults(t *testing.T) {
 		{FaultRateLimited, 429, "rateLimitExceeded"},
 		{FaultUserRateLimit, 403, "userRateLimitExceeded"},
 		{FaultForbidden, 403, "forbidden"},
+		{FaultQuotaExceeded, 403, "quotaExceeded"},
+		{FaultNotFound, 404, "notFound"},
 		{FaultServerError, 500, "backendError"},
 		{FaultBadRequest, 400, "invalid"},
 	}
