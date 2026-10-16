@@ -66,9 +66,9 @@ type endpoint interface {
 	// process loopback (which is bound to no device); "" when it could not be read.
 	device() string
 
-	// playing reports whether the Windows meters show sound on the capture target now: for INCLUDE an active,
-	// unmuted audio session of the target's process tree with a peak above zero, for EXCLUDE the default output
-	// device. It is false for classic loopback and whenever a meter cannot be read, so a doubt never switches.
+	// playing reports whether the Windows meters show sound on the capture target now: an active, unmuted audio
+	// session with a peak above the floor, of the target's process tree for INCLUDE, outside our own tree for EXCLUDE.
+	// It is false for classic loopback and whenever a meter cannot be read, so a doubt never switches.
 	playing() bool
 
 	// stop stops the client before the final drain (IAudioClient::Stop).

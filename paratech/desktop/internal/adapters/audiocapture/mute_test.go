@@ -32,6 +32,11 @@ func TestMuteDetector(t *testing.T) {
 		}
 		return out
 	}
+	// 3 s of expected sound, then 6 s without, ten times: 30 s expected in all, never 15 s in a row.
+	var bursts []muteStep
+	for range 10 {
+		bursts = join(bursts, repeat(3, reading(time.Second, true)), repeat(6, reading(time.Second, false)))
+	}
 	tests := []struct {
 		name  string
 		steps []muteStep
@@ -41,8 +46,11 @@ func TestMuteDetector(t *testing.T) {
 		{"a muted app (the meters show nothing) never trips", repeat(120, reading(time.Second, false)), -1},
 		{"sound resets the count", join(repeat(10, reading(time.Second, true)), []muteStep{{sound: true}},
 			repeat(14, reading(time.Second, true)), repeat(2, reading(time.Second, true))), 25},
-		{"pauses of the meter do not reset the count", join(repeat(7, reading(time.Second, true)),
-			repeat(5, reading(time.Second, false)), repeat(10, reading(time.Second, true))), 19},
+		{"short pauses of the meter keep the count", join(repeat(7, reading(time.Second, true)),
+			repeat(2, reading(time.Second, false)), repeat(10, reading(time.Second, true))), 16},
+		{"a pause of the reset gap starts the count again", join(repeat(7, reading(time.Second, true)),
+			repeat(5, reading(time.Second, false)), repeat(20, reading(time.Second, true))), 26},
+		{"bursts separated by quiet never add up", bursts, -1},
 		{"a stalled loop counts two intervals at most", join([]muteStep{reading(time.Minute, true)},
 			repeat(20, reading(time.Second, true))), 13},
 		{"the clock going back counts nothing", join([]muteStep{reading(-time.Hour, true)},
@@ -115,6 +123,7 @@ func TestAudibleInTree(t *testing.T) {
 		{"another app plays", 100, []sessionInfo{playing(200)}, false},
 		{"nothing plays", 100, nil, false},
 		{"peak zero", 100, []sessionInfo{with(playing(101), func(s *sessionInfo) { s.peak = 0 })}, false},
+		{"peak under the floor", 100, []sessionInfo{with(playing(101), func(s *sessionInfo) { s.peak = 5e-5 })}, false},
 		{"no peak meter", 100, []sessionInfo{with(playing(101), func(s *sessionInfo) { s.peakOK = false })}, false},
 		{"muted in the mixer", 100, []sessionInfo{with(playing(101), func(s *sessionInfo) { s.muted = true })}, false},
 		{"mixer slider at 0", 100, []sessionInfo{with(playing(101), func(s *sessionInfo) { s.volume = 0 })}, false},
@@ -134,6 +143,65 @@ func TestAudibleInTree(t *testing.T) {
 			}
 			if tt.want && !anyAudible(tt.sessions) {
 				t.Fatal("anyAudible must hold when a session of the tree is audible")
+			}
+		})
+	}
+}
+
+// What the meters must show for each process loopback mode, and that the detector then switches only when they show
+// sound the mode captures: EXCLUDE (the whole computer) expects only sessions outside our own tree.
+func TestAudioExpected(t *testing.T) {
+	// 500 our app -> 501 its recorder child (the self-test tone), 502 its WebView2; 100 chrome -> 101 its audio
+	// service; 300 explorer.
+	procs := []procInfo{
+		{pid: 300, parent: 4, exe: "explorer.exe", created: 5},
+		{pid: 500, parent: 300, exe: "paratech.exe", created: 20},
+		{pid: 501, parent: 500, exe: "paratech.exe", created: 21},
+		{pid: 502, parent: 500, exe: "msedgewebview2.exe", created: 22},
+		{pid: 100, parent: 300, exe: "chrome.exe", created: 10},
+		{pid: 101, parent: 100, exe: "chrome.exe", created: 11},
+	}
+	playing := func(pid uint32) sessionInfo {
+		return sessionInfo{pid: pid, state: sessionActive, peak: 0.3, peakOK: true, volume: 1, volumeOK: true}
+	}
+	quietly := func(pid uint32) sessionInfo { s := playing(pid); s.peak = 5e-5; return s }
+	system := func(pid uint32) sessionInfo { s := playing(pid); s.system = true; return s }
+	whole := Target{Mode: ModeExclude, PID: 500}
+	chrome := Target{Mode: ModeInclude, PID: 100}
+	tests := []struct {
+		name     string
+		target   Target
+		sessions []sessionInfo
+		want     bool
+	}{
+		{"exclude: another app plays", whole, []sessionInfo{playing(101)}, true},
+		{"exclude: only our own tree plays", whole, []sessionInfo{playing(501), playing(502), playing(500)}, false},
+		// The endpoint meter may read above zero here; no session the mode captures plays.
+		{"exclude: nothing audible outside our tree", whole, []sessionInfo{quietly(101), system(300), playing(501)}, false},
+		{"exclude: no sessions", whole, nil, false},
+		{"exclude: a process unknown to the snapshot", whole, []sessionInfo{playing(999)}, true},
+		{"include: the target plays", chrome, []sessionInfo{playing(101)}, true},
+		{"include: only our own tree plays", chrome, []sessionInfo{playing(501)}, false},
+	}
+	tr := newTree(procs)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := audioExpected(tt.target, tr, tt.sessions)
+			if got != tt.want {
+				t.Fatalf("audioExpected = %v, want %v", got, tt.want)
+			}
+			// 30 s of zeros with these meters: the detector switches only when sound was expected.
+			now := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
+			d := newMuteDetector(DefaultMuteThreshold, meterInterval, now)
+			switched := false
+			for range 30 {
+				now = now.Add(time.Second)
+				if d.due(now) && d.sample(now, got) {
+					switched = true
+				}
+			}
+			if switched != tt.want {
+				t.Fatalf("switched = %v after 30 s of zeros, want %v", switched, tt.want)
 			}
 		})
 	}

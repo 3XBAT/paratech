@@ -195,40 +195,16 @@ func sessionPeak(ctl unsafe.Pointer) (float32, bool) {
 	return peakOf(meter)
 }
 
-// endpointPlaying reports a peak above zero on the default output device.
-func endpointPlaying(enum unsafe.Pointer) bool {
-	dev, err := defaultRenderEndpoint(enum)
-	if err != nil {
-		return false
-	}
-	defer release(dev)
-
-	iid := iidIAudioMeterInformation()
-	var meter unsafe.Pointer
-	r, _, _ := syscall.SyscallN(method(dev, slotDeviceActivate), uintptr(dev),
-		uintptr(unsafe.Pointer(&iid)), clsctxAll, 0, uintptr(unsafe.Pointer(&meter))) //nolint:gosec // G103: COM parameters
-	if meter, err = checkOut("IMMDevice::Activate(IAudioMeterInformation)", hr(r), meter); err != nil {
-		return false
-	}
-	defer release(meter)
-	peak, ok := peakOf(meter)
-	return ok && peak > 0
-}
-
 // targetMeter tells whether the target of a process loopback capture plays sound (playing of the endpoint seam).
 type targetMeter struct {
 	enum   unsafe.Pointer // IMMDeviceEnumerator; released by the endpoint
 	target Target
 }
 
-// playing reads the meters once. INCLUDE: an audible session (active, peak above zero, not muted or at volume 0 in
-// the mixer) whose process is in the target's tree, on any active output device, as process loopback captures every
-// device. EXCLUDE: the default output device has a peak; nothing of ours renders while process loopback runs (the
-// keep-alive exists only in classic loopback).
+// playing reads the meters once: an audible session (active, peak above the floor, not muted or at volume 0 in the
+// mixer) that the mode captures, on any active output device, as process loopback captures every device. INCLUDE:
+// a session of the target's tree; EXCLUDE: one outside our own tree (audioExpected).
 func (m *targetMeter) playing() bool {
-	if m.target.Mode == ModeExclude {
-		return endpointPlaying(m.enum)
-	}
 	sessions, err := renderSessions(m.enum)
 	if err != nil || !anyAudible(sessions) {
 		return false // the process snapshot is taken only when some session plays
@@ -237,5 +213,5 @@ func (m *targetMeter) playing() bool {
 	if err != nil {
 		return false
 	}
-	return audibleInTree(newTree(procs), m.target.PID, sessions)
+	return audioExpected(m.target, newTree(procs), sessions)
 }
