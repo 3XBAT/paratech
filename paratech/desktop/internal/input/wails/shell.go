@@ -49,8 +49,9 @@ type Core struct {
 	Links       LinkOpener // also opens the pages of the help screens
 	SpeechReady bool       // whisper-cli was found at start
 
-	Connections ConnectionsUseCase // the mail and Hub section of the settings page
-	Google      GoogleUseCase      // the Google section of the same page
+	Connections ConnectionsUseCase  // the mail and Hub section of the settings page
+	Google      GoogleUseCase       // the Google section of the same page
+	Calendar    CalendarSyncUseCase // the calendar synchronization of the Google section
 
 	Sound  SoundCheckUseCase    // "Проверить звук" of the diagnostics page
 	Bundle SupportBundleUseCase // "Сохранить пакет для поддержки"; the shell shows its save dialog
@@ -147,6 +148,7 @@ type Services struct {
 
 	Connections *ConnectionsService
 	Google      *GoogleService
+	Calendar    *GoogleCalendarService
 	Diagnostics *DiagnosticsService
 	Help        *HelpService
 }
@@ -188,6 +190,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Google == nil {
 		return Services{}, errors.New("wails: open core: no google sign-in use case")
 	}
+	if core.Calendar == nil {
+		return Services{}, errors.New("wails: open core: no calendar sync use case")
+	}
 	if core.Sound == nil || core.Bundle == nil {
 		return Services{}, errors.New("wails: open core: no diagnostics use cases")
 	}
@@ -203,6 +208,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 
 		Connections: NewConnectionsService(core.Connections, s.opts.Log),
 		Google:      NewGoogleService(core.Google, s.opts.Log),
+		Calendar:    NewGoogleCalendarService(core.Calendar, s.opts.Log),
 		Diagnostics: NewDiagnosticsService(DiagnosticsDeps{
 			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
 		}, s.opts.Log),

@@ -187,6 +187,38 @@ func TestWiredCalendarSync(t *testing.T) {
 	if len(withDeadline) != 2 || len(cal.Calendars()) != 1 || cal.ForeignRequests() != 0 {
 		t.Fatalf("events %+v, calendars %d, foreign requests %d", withDeadline, len(cal.Calendars()), cal.ForeignRequests())
 	}
+
+	// «Синхронизировать» on the page binding; nothing is pending, so nothing is written.
+	calPage := wails.NewGoogleCalendarService(core.Calendar, a.log)
+	if res, _ := calPage.GoogleCalendarSync(ctx); !res.OK || res.Message != "Синхронизация запущена." {
+		t.Fatalf("GoogleCalendarSync = %+v", res)
+	}
+	if st := waitCalendarJobs(t, a, 3); st[2] != job.StatusCompleted {
+		t.Fatalf("sync on request: %v", st)
+	}
+	st, _ := calPage.GoogleCalendarStatus(ctx)
+	if !st.SignedIn || st.State != "idle" || st.Pending != 0 || st.LastOutcome != "ok" || st.LastSyncedAt == "" ||
+		st.Message != "Календарь «Learning Assistant» синхронизирован." {
+		t.Fatalf("GoogleCalendarStatus = %+v", st)
+	}
+
+	// Sign-out keeps the calendar binding: «Синхронизировать» asks to sign in, and the same account signing in again
+	// gets its calendar back, no second one.
+	if got, _ := page.GoogleSignOut(ctx); !got.OK {
+		t.Fatalf("GoogleSignOut = %+v", got)
+	}
+	if res, _ := calPage.GoogleCalendarSync(ctx); res.OK || res.Message != "Сначала войдите в Google." || len(calendarJobs(t, a)) != 3 {
+		t.Fatalf("GoogleCalendarSync after the sign-out = %+v", res)
+	}
+	if got, _ := page.GoogleSignIn(ctx); !got.OK {
+		t.Fatalf("GoogleSignIn again = %+v", got)
+	}
+	if st := waitCalendarJobs(t, a, 4); st[3] != job.StatusCompleted {
+		t.Fatalf("sync after the second sign-in: %v", st)
+	}
+	if got := cal.Calendars(); len(got) != 1 || got[0].ID != cals[0].ID || len(cal.Events(cals[0].ID)) != 2 {
+		t.Fatalf("calendars after the second sign-in = %+v", got)
+	}
 }
 
 // At start a calendar sync is requested only when signed in.

@@ -125,6 +125,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
 		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
+		{name: "calendar sync use case", edit: func(c *Core) { c.Calendar = nil }},
 		{name: "sound check use case", edit: func(c *Core) { c.Sound = nil }},
 		{name: "support bundle use case", edit: func(c *Core) { c.Bundle = nil }},
 	}
