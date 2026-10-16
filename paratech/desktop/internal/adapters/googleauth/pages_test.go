@@ -90,7 +90,7 @@ func TestPagesAreSelfContained(t *testing.T) {
 		page string
 		want []string
 	}{
-		{name: "done", page: pageDone, want: []string{"<h1>Вход выполнен</h1>"}},
+		{name: "done", page: pageDone, want: []string{"<h1>Вход выполнен</h1>", "Google ответил.", "результат входа показан там"}},
 		{name: "denied", page: pageDenied, want: []string{"<h1>Доступ не разрешён</h1>", "Вы не разрешили доступ", "«Войти через Google»"}},
 		{name: "failed", page: pageFailed, want: []string{"<h1>Вход не выполнен</h1>", "истекло время ожидания", "«Войти через Google»"}},
 	}

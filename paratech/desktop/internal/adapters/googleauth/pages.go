@@ -14,7 +14,7 @@ const (
 	pageDone = pageHead + `<title>Paratech: вход выполнен</title></head><body><main class="card">` +
 		`<div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>` +
 		`<h1>Вход выполнен</h1>` +
-		`<p>Google подтвердил вход. Можно закрыть эту вкладку и вернуться в приложение.</p>` +
+		`<p>Google ответил. Можно закрыть эту вкладку и вернуться в приложение — результат входа показан там.</p>` +
 		pageButton + `</main></body></html>`
 
 	pageDenied = pageHead + `<title>Paratech: доступ не разрешён</title></head><body><main class="card deny">` +
