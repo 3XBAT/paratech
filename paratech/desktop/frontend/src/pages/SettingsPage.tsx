@@ -14,7 +14,6 @@ const labels: Record<Toggle, string> = {
 const hints: Record<Toggle, string> = {
   recordingPromptsEnabled: "Перед началом пары появится окно с кнопкой «Начать запись».",
   processOnlyOnAcPower: "На батарее расшифровка и конспекты ждут подключения питания и начнутся сами.",
-  notifyOnProcessingComplete: "Уведомление Windows, когда обработка занятия закончится.",
 };
 
 const setters: Record<Toggle, Exclude<keyof SettingsApi, "get">> = {
