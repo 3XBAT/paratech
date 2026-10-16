@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
 import { Button } from "../ui/Button";
 import { Banner } from "../ui/controls";
@@ -8,7 +8,7 @@ import {
   actionErrorText,
   buttonLabels,
   chooseSource,
-  collapseAdvice,
+  HeightFitter,
   initialSelection,
   loadErrorText,
   nextSelection,
@@ -17,6 +17,8 @@ import {
   shouldRefresh,
   sourceMarks,
   SourcesPoller,
+  textsLayout,
+  wantedHeight,
   type Action,
   type ButtonId,
   type Selection,
@@ -86,12 +88,41 @@ export function Popup() {
 
   const poller = useMemo(() => new SourcesPoller(loadSources, browserTimers), [loadSources]);
 
+  // Window growth for a start error: the natural content height is measured after every render and sent to the core.
+  const fitter = useMemo(() => {
+    const win = popupWindowApi(callByName);
+    return new HeightFitter((h) => win.fit(h));
+  }, []);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const growsRef = useRef(false);
+  const measure = useCallback(() => {
+    const el = popupRef.current;
+    let natural = 0;
+    if (el !== null && growsRef.current) {
+      // Laid out at its natural height for one synchronous read; the browser paints only the restored style.
+      const prev = el.style.height;
+      el.style.height = "auto";
+      natural = el.getBoundingClientRect().height;
+      el.style.height = prev;
+    }
+    fitter.request(wantedHeight(natural, growsRef.current));
+  }, [fitter]);
+
+  useEffect(() => {
+    // Text scale or DPI changes and late fonts change the height without a render.
+    window.addEventListener("resize", measure);
+    void document.fonts?.ready.then(measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
+
   useEffect(() => {
     let alive = true;
     let off: (() => void) | undefined;
     onEvent(shownEvent, () => {
-      // The core has just shown the window, whatever the page's visibility state says yet.
+      // The core has just shown the window, whatever the page's visibility state says yet. It also reset its size.
       setVisible(true);
+      fitter.forget();
+      measure();
       void reload(true);
       poller.refreshNow();
     }).then(
@@ -113,7 +144,7 @@ export function Popup() {
       document.removeEventListener("visibilitychange", onVisibility);
       poller.setActive(false);
     };
-  }, [reload, poller]);
+  }, [reload, poller, fitter, measure]);
 
   // A new prompt starts with a fresh picker: no choice carries over from the previous offer.
   useEffect(() => {
@@ -133,6 +164,13 @@ export function Popup() {
   const picker = pickerModel(sources, selection);
   const showPicker = m.buttons.includes("start");
   const listShown = listOpen && showPicker && !m.disabled;
+  const errorLine = error || m.problem;
+  const layout = textsLayout(showPicker ? picker.warnings : [], errorLine);
+
+  useLayoutEffect(() => {
+    growsRef.current = layout.grows;
+    measure();
+  });
 
   async function act(action: Action) {
     if (view === null || pending !== null) {
@@ -173,10 +211,8 @@ export function Popup() {
     return null;
   }
 
-  const errorLine = error || m.problem;
-  const collapsed = collapseAdvice(showPicker ? picker.warnings : [], errorLine);
   return (
-    <div className="popup">
+    <div className="popup" ref={popupRef}>
       <IconSprite />
       <div className={showPicker ? "p-top live" : "p-top"}>
         {showPicker && <span className="dot" aria-hidden="true" />}
@@ -225,23 +261,27 @@ export function Popup() {
         </div>
       )}
       {(showPicker || errorLine !== "") && (
-        // Shrinks and, as a last resort, scrolls so that the buttons are never cut off.
+        // With an error the window grows to show it in full; past its max height (or without an error) this area
+        // shrinks and, as a last resort, scrolls so that the buttons are never cut off.
         <div className="texts">
           {errorLine !== "" && (
             <Banner kind="fail" role="alert">
-              <span className="clamp" title={errorLine}>
+              <span className={layout.clamp ? "clamp" : undefined} title={layout.clamp ? errorLine : undefined}>
                 {errorLine}
               </span>
             </Banner>
           )}
           {showPicker &&
             picker.warnings.map((w) => (
-              <p key={w} className="warning" title={w}>
+              <p key={w} className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? w : undefined}>
                 {w}
               </p>
             ))}
           {showPicker && (
-            <p className={collapsed ? "advice collapsed" : "advice"} title={collapsed ? picker.advice : undefined}>
+            <p
+              className={layout.collapsed ? "advice collapsed" : "advice"}
+              title={layout.collapsed ? picker.advice : undefined}
+            >
               {picker.advice}
             </p>
           )}

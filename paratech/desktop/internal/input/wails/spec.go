@@ -11,6 +11,8 @@ const (
 	popupWidth  = 360
 	popupHeight = 300 // title, lesson time, source picker, advice lines, an error line and three buttons
 	popupMargin = 16
+	// popupMaxHeight bounds the growth for a start error; beyond it the page scrolls its text area.
+	popupMaxHeight = 440
 )
 
 // rect is a screen rectangle in device-independent pixels.
@@ -74,4 +76,18 @@ func popupOrigin(work rect, w, h, margin int) (x, y int) {
 	x = max(work.X+work.Width-w-margin, work.X)
 	y = max(work.Y+work.Height-h-margin, work.Y)
 	return x, y
+}
+
+// popupFitHeight is the popup height for content that needs want: at least popupHeight, at most popupMaxHeight and the
+// work area minus both margins. A work area too small for even popupHeight keeps popupHeight, as before the growth.
+func popupFitHeight(want int, work rect, margin int) int {
+	limit := min(popupMaxHeight, work.Height-2*margin)
+	return max(popupHeight, min(want, limit))
+}
+
+// popupBounds is where a popup of content height want goes: fitted, in the bottom-right corner of the work area.
+func popupBounds(work rect, want, margin int) rect {
+	h := popupFitHeight(want, work, margin)
+	x, y := popupOrigin(work, popupWidth, h, margin)
+	return rect{X: x, Y: y, Width: popupWidth, Height: h}
 }

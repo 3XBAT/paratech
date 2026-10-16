@@ -275,6 +275,85 @@ export function collapseAdvice(warnings: readonly string[], error: string): bool
   return warnings.length + (error !== "" ? 1 : 0) >= 2;
 }
 
+// Window growth for a start error (owner's decision 2026-10-16): the error popup grows in height to show its texts in
+// full; the normal popup keeps 360x300. The Go shell clamps the height (popupMaxHeight, the work area).
+
+/** The normal popup height in DIP (popupHeight in internal/input/wails/spec.go). */
+export const popupBaseHeight = 300;
+
+/** Added to the measured height, so DIP rounding at 125 % or 150 % does not leave a 1 px scroll. */
+export const fitSlack = 2;
+
+/** How the text area is laid out. */
+export interface TextsLayout {
+  /** The window may grow to show the texts in full: only while an error is shown. */
+  grows: boolean;
+  /** Error and warnings are cut at 3 lines (full text on hover). */
+  clamp: boolean;
+  /** The general advice shrinks to one line (see collapseAdvice). */
+  collapsed: boolean;
+}
+
+/** Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold. */
+export function textsLayout(warnings: readonly string[], error: string): TextsLayout {
+  const grows = error !== "";
+  return { grows, clamp: !grows, collapsed: !grows && collapseAdvice(warnings, error) };
+}
+
+/**
+ * The window height the page asks for, from the natural height of its content (CSS px = DIP). The normal size unless
+ * the window grows and the content needs more.
+ */
+export function wantedHeight(natural: number, grows: boolean): number {
+  if (!grows || !Number.isFinite(natural) || natural <= popupBaseHeight) {
+    return popupBaseHeight;
+  }
+  return Math.ceil(natural) + fitSlack;
+}
+
+/**
+ * HeightFitter sends the wanted window height to the core only when it changes. Calls never overlap: a height wanted
+ * during a call is sent after it, and only the newest one.
+ */
+export class HeightFitter {
+  /** The height last sent; undefined when the window size is unknown (shown again, or a call failed). */
+  private sent: number | undefined = popupBaseHeight;
+  private busy = false;
+  private waiting: number | undefined = undefined;
+
+  constructor(private readonly fit: (height: number) => Promise<unknown>) {}
+
+  /** Asks for height unless the window was already asked for it. */
+  request(height: number): void {
+    if (this.busy) {
+      this.waiting = height;
+      return;
+    }
+    if (height === this.sent) {
+      return;
+    }
+    this.busy = true;
+    this.sent = height;
+    this.fit(height)
+      .catch(() => {
+        this.sent = undefined;
+      })
+      .finally(() => {
+        this.busy = false;
+        const next = this.waiting;
+        this.waiting = undefined;
+        if (next !== undefined) {
+          this.request(next);
+        }
+      });
+  }
+
+  /** The shell has reset the window (it was shown again): the next request is sent even if it repeats. */
+  forget(): void {
+    this.sent = undefined;
+  }
+}
+
 /**
  * Whether the open apps are listed again: only while the page is visible with a prompt on offer and no action runs.
  * Also not while the list is open, so entries do not move under the pointer.

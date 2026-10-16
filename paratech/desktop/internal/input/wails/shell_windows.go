@@ -41,6 +41,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Settings))
 	app.RegisterService(application.NewService(b.Activity))
 	app.RegisterService(application.NewService(b.Prompt))
+	app.RegisterService(application.NewService(b.Popup))
 	app.RegisterService(application.NewService(b.Schedule))
 	app.RegisterService(application.NewService(b.Models))
 	app.RegisterService(application.NewService(b.Connections))
@@ -180,11 +181,8 @@ func newTray(app *application.App, u *windowsUI, name string, offer func()) {
 }
 
 func (u *windowsUI) showPopup() error {
-	if scr := u.app.Screen.GetPrimary(); scr != nil {
-		wa := scr.WorkArea
-		x, y := popupOrigin(rect{X: wa.X, Y: wa.Y, Width: wa.Width, Height: wa.Height}, popupWidth, popupHeight, popupMargin)
-		u.popup.SetPosition(x, y)
-	}
+	// Every offer starts at the normal size; the page asks to grow again if its content needs it.
+	u.placePopup(popupHeight)
 
 	// Emitted while still hidden so the page starts re-reading the prompt before it appears; the hidden WebView still
 	// runs script. Delivery and the page's call are asynchronous, so this narrows the stale frame, it cannot rule it out.
@@ -200,6 +198,24 @@ func (u *windowsUI) showPopup() error {
 	})
 	u.popup.Show()
 	return nil
+}
+
+func (u *windowsUI) fitPopup(height int) (int, error) {
+	return u.placePopup(height), nil
+}
+
+// placePopup sizes the popup for content height want and puts it in the bottom-right corner of the primary work
+// area, in one move. Wails' SetBounds uses SWP_NOACTIVATE, so this never takes focus. It returns the height set.
+func (u *windowsUI) placePopup(want int) int {
+	scr := u.app.Screen.GetPrimary()
+	if scr == nil {
+		u.popup.SetSize(popupWidth, popupHeight)
+		return popupHeight
+	}
+	wa := scr.WorkArea
+	b := popupBounds(rect{X: wa.X, Y: wa.Y, Width: wa.Width, Height: wa.Height}, want, popupMargin)
+	u.popup.SetBounds(application.Rect{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height})
+	return b.Height
 }
 
 func (u *windowsUI) hidePopup() error {

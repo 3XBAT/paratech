@@ -70,3 +70,53 @@ func TestAssetsServePages(t *testing.T) {
 		})
 	}
 }
+
+func TestPopupFitHeight(t *testing.T) {
+	fullHD := rect{0, 0, 1920, 1040}
+	tests := []struct {
+		name string
+		want int
+		work rect
+		got  int
+	}{
+		{name: "fits the normal size", want: 250, work: fullHD, got: popupHeight},
+		{name: "exactly normal", want: popupHeight, work: fullHD, got: popupHeight},
+		{name: "grows for an error", want: 372, work: fullHD, got: 372},
+		{name: "capped at the max", want: 900, work: fullHD, got: popupMaxHeight},
+		{name: "zero or negative is normal", want: -5, work: fullHD, got: popupHeight},
+		{name: "small work area caps below the max", want: 900, work: rect{0, 0, 1280, 400}, got: 400 - 2*popupMargin},
+		{name: "tiny work area keeps the normal size", want: 900, work: rect{0, 0, 800, 200}, got: popupHeight},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := popupFitHeight(tt.want, tt.work, popupMargin); got != tt.got {
+				t.Fatalf("popupFitHeight(%d) = %d, want %d", tt.want, got, tt.got)
+			}
+		})
+	}
+}
+
+func TestPopupBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		work rect
+		want int
+		got  rect
+	}{
+		{name: "normal", work: rect{0, 0, 1920, 1040}, want: 0, got: rect{1544, 724, popupWidth, popupHeight}},
+		{name: "grown keeps the bottom edge", work: rect{0, 0, 1920, 1040}, want: 400, got: rect{1544, 624, popupWidth, 400}},
+		{name: "150 % of full HD", work: rect{0, 0, 1280, 693}, want: 1000, got: rect{904, 237, popupWidth, popupMaxHeight}},
+		{name: "secondary area with offset", work: rect{-1280, 40, 1280, 984}, want: 380, got: rect{-376, 628, popupWidth, 380}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := popupBounds(tt.work, tt.want, popupMargin)
+			if b != tt.got {
+				t.Fatalf("popupBounds = %+v, want %+v", b, tt.got)
+			}
+			if b.X < tt.work.X || b.Y < tt.work.Y || b.X+b.Width > tt.work.X+tt.work.Width || b.Y+b.Height > tt.work.Y+tt.work.Height {
+				t.Fatalf("popupBounds = %+v leaves the work area %+v", b, tt.work)
+			}
+		})
+	}
+}

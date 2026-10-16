@@ -64,6 +64,11 @@ func (f *fakeUI) showPopup() error { f.calls = append(f.calls, "showPopup"); ret
 func (f *fakeUI) hidePopup() error { f.calls = append(f.calls, "hidePopup"); return nil }
 func (f *fakeUI) showMain() error  { f.calls = append(f.calls, "showMain"); return nil }
 
+func (f *fakeUI) fitPopup(height int) (int, error) {
+	f.calls = append(f.calls, "fitPopup")
+	return height, nil
+}
+
 func (f *fakeUI) pickScheduleFile() (string, error) {
 	f.calls = append(f.calls, "pickScheduleFile")
 	return "", nil
@@ -91,6 +96,7 @@ func TestCommands(t *testing.T) {
 		{"showPopup", s.ShowPopup},
 		{"hidePopup", s.HidePopup},
 		{"showMain", s.ShowMain},
+		{"fitPopup", func() error { _, err := s.fitPopup(360); return err }},
 		{"pickScheduleFile", func() error { _, err := s.pickScheduleFile(context.Background()); return err }},
 		{"pickModelFile", func() error { _, err := s.pickModelFile(context.Background()); return err }},
 		{"pickBundleFile", func() error { _, err := s.pickBundleFile(context.Background(), "b.zip"); return err }},

@@ -95,7 +95,7 @@ func TestOpenBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := s.OpenServices(context.Background())
-	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Schedule == nil || b.Models == nil ||
+	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Popup == nil || b.Schedule == nil || b.Models == nil ||
 		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil {
 		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
@@ -160,6 +160,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 3},
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 5},
+		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 9},

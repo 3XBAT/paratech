@@ -178,3 +178,26 @@ export function promptApi(call: CallByName): PromptApi {
     skip: async (id) => parsePromptView(await call(methods.skip, id)),
   };
 }
+
+/** Bound method of the popup window (internal/input/wails/popupwindow.go); checked by a Go test like `methods`. */
+export const windowMethods = {
+  fit: "paratech/desktop/internal/input/wails.PopupWindowService.Fit",
+} as const;
+
+export interface PopupWindowApi {
+  /** Asks for a window with this content height (DIP); resolves to the height the window got. */
+  fit(height: number): Promise<number>;
+}
+
+/** Builds the popup window API over a call function. */
+export function popupWindowApi(call: CallByName): PopupWindowApi {
+  return {
+    fit: async (height) => {
+      const got = await call(windowMethods.fit, Math.round(height));
+      if (typeof got !== "number" || !Number.isFinite(got)) {
+        throw new Error("popup: fit reply is not a number");
+      }
+      return got;
+    },
+  };
+}

@@ -1,6 +1,7 @@
 /* The lesson window, 360x300 DIP (internal/input/wails/spec.go). Needs only tokens.css and fonts.css: the few base and
-   component rules it uses are repeated here, so the popup does not load the main window's styles. The buttons never
-   shrink: only the text area does, and it scrolls as a last resort (larger Windows text) instead of pushing them out. */
+   component rules it uses are repeated here, so the popup does not load the main window's styles. With a start error
+   the window grows in height to show the texts in full (Popup.tsx measures them). The buttons never shrink: only the
+   text area does, and it scrolls as a last resort (larger Windows text, max height) instead of pushing them out. */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body {
@@ -60,7 +61,7 @@ h1, p, ul { margin: 0; }
 .note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--rec-t) 30%, transparent); border-radius: var(--r-ctl); background: var(--rec-b); font-size: var(--fs-small); line-height: 17px; }
 .note > .i { width: 16px; height: 16px; margin-top: 1px; color: var(--rec-t); }
 .note > div { min-width: 0; }
-.clamp, .warning { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .warning { color: var(--wait-t); font-size: var(--fs-label); line-height: var(--lh-label); }
 .advice { color: var(--muted); font-size: var(--fs-nav); line-height: 15px; }
 .advice.collapsed { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
