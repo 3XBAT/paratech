@@ -128,7 +128,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestGatewayReplayAgainstPostgres`, `TestGatewayConcurrentIdenticalCallsAgainstPostgres` (`hub/tests/gateway_test.go`); `TestQuotaKeyReplayAgainstPostgres` (`hub/tests/quota_test.go`); `TestRetrySendsSameIdempotencyKey` (`desktop/internal/adapters/hubclient/client_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, после перезапуска Hub не списывает снова).
 Вручную:
-- [ ] «Подключения» → «Лимит обработки» → «Обновить», записать «Осталось».
+- [ ] «Подключения» → карточка «Сервер обработки» → «Лимит обработки» → «Обновить», записать «Осталось».
 - [ ] Обработать одно занятие (AC-06, с интернетом). Когда у «Конспект» «Конспект готов», а у «Поиск домашнего задания» «Готово», — «Обновить»: остаток уменьшился.
 - [ ] `Quit`, запуск, «Обновить»: остаток тот же.
 - [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующий «Конспект» — «Минуты обработки закончились».
@@ -139,7 +139,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres` (`hub/tests/quota_test.go`); `TestRefreshQuotaResults` (`desktop/internal/cases/connections/hub_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`).
 Вручную (§8 «Подключения», пункты про ключ и «Лимит обработки»):
-- [ ] С адресом и ключом «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
+- [ ] С адресом и ключом («Подключения» → карточка «Сервер обработки») «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
 - [ ] Hub остановлен, «Обновить»: цифры прежние, «Устарело: …».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -165,7 +165,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 - [ ] «Отправить по почте…» → окно «Отправить домашнее задание?»: «Черновик» «Версия N» (открытая версия), «Кому» (адрес из «Подключений»), «Тема», «Вложение» `homework.md` с размером; фокус на «Отмена».
 - [ ] «Отмена» → «Отправка отменена: письмо не отправлено.», в «Письмах» ничего нового, в ящике получателя письма нет. То же с Esc.
 - [ ] Ещё раз, «Отправить» (двойной щелчок): одно письмо; в «Письмах» «Ждёт отправки» или «Отправляется», затем «Отправлено <время>»; письмо с вложением пришло один раз.
-- [ ] Стереть адрес получателя в «Подключениях», «Отправить по почте…»: окна нет, текст «Не указан адрес получателя…».
+- [ ] Стереть адрес получателя («Подключения» → карточка «Почта»), «Отправить по почте…»: окна нет, текст «Не указан адрес получателя…».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -173,7 +173,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestTimeoutAfterAcceptanceIsUnknownAndNotResent`, `TestCrashDuringSendIsReconciledNotResent` (`desktop/tests/delivery_smtp_test.go`); `TestWiredSendRepeatAfterACrashSendsNothingMore` (`desktop/internal/app/proposals_test.go`); `TestCheckOpensASessionWithoutAMessage` (`desktop/internal/adapters/smtp/check_test.go`).
 Вручную сейчас (§8 «Подключения», почта):
-- [ ] Настроить почту и пароль. «Проверить почту»: «Соединение и вход прошли успешно. Письмо не отправлялось.»; во «Входящих» и «Отправленных» нового письма нет.
+- [ ] «Подключения» → карточка «Почта»: настроить почту и пароль. «Проверить почту»: «Соединение и вход прошли успешно. Письмо не отправлялось.»; во «Входящих» и «Отправленных» нового письма нет.
 - [ ] Неверный пароль: «Сервер отклонил логин или пароль…».
 
 Отправка (§8 «Домашние задания»; автотест страницы `TestHomeworkPageResolvesAnUnknownOutcome`, `desktop/internal/app/homework_test.go`):
@@ -204,7 +204,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 - [ ] После «Синхронизировать» есть отдельный календарь «Learning Assistant» с занятиями; основной и другие календари не изменились.
 - [ ] Повторная синхронизация не создаёт дублей; изменённое занятие обновляет то же событие; удалённое — пропадает.
 - [ ] Выход и вход тем же аккаунтом — календарь «Learning Assistant» один.
-Apple (TASK-052), можно проверить сейчас: «Подключения» → «Как увидеть события в Apple Calendar» открывает экран-инструкцию; пароля Apple ID приложение не просит; общедоступным календарь не делает (способ 3 помечен «Не рекомендуется»); ссылки открываются только в браузере по умолчанию (`docs/qa/run-alpha.md`, раздел 8). Автотест экрана — `desktop/frontend/test/help.test.mjs`.
+Apple (TASK-052), можно проверить сейчас: «Подключения» → карточка «Календарь на iPhone, iPad и Mac» открывает экран-инструкцию «Как увидеть события в Apple Calendar»; пароля Apple ID приложение не просит; общедоступным календарь не делает (способ 3 помечен «Не рекомендуется»); ссылки открываются только в браузере по умолчанию (`docs/qa/run-alpha.md`, раздел 8). Автотест экрана — `desktop/frontend/test/help.test.mjs`.
 
 ## AC-18. Ответ LLM сам не может отправить письмо, записать файл или изменить календарь
 
@@ -216,9 +216,9 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Автотесты: `TestSchemaHasNoSecretColumns`, `TestPersistedStructsHaveNoSecretFields` (`desktop/tests/schema_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestCredentialNamesArePinned` (`desktop/internal/app/secrets_test.go`); `TestSMTPPasswordNeverReachesTheDatabase` (`desktop/tests/delivery_smtp_test.go`); `TestConnectionsPageKeepsThePasswordSecret` (`desktop/internal/app/connections_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`); `TestAppOptionsLoggerHasNoDebug` (`desktop/internal/input/wails/shell_windows_test.go`); `TestRealCredentialManager` (`desktop/internal/adapters/wincred/wincred_windows_test.go`, настоящий Credential Manager).
 Вручную:
 - [ ] Только одноразовые секреты: отдельный пароль приложения почты и QA-ключ Hub (`hub keys create -label qa-secrets`). После проверки удалить этот пароль приложения в настройках почты и `hub keys revoke -id <id>`.
-- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»).
+- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»: карточки «Почта» и «Сервер обработки»).
 - [ ] Панель управления → Диспетчер учётных данных → Учётные данные Windows: есть `paratech/mail/smtp-password` и `paratech/hub/api-key` (или `cmdkey /list | findstr paratech`).
-- [ ] «Подключения» после перезапуска показывают только «Пароль задан» и «Ключ задан».
+- [ ] После перезапуска страницы «Подключения» → «Почта» и «Подключения» → «Сервер обработки» показывают только «Пароль задан» и «Ключ задан».
 - [ ] `Quit`. В новом окне PowerShell отключить историю, ввести кусок пароля (8+ символов) по запросу `Read-Host` (не в командной строке) — пусто; затем то же для куска ключа:
   ```powershell
   Set-PSReadLineOption -HistorySaveStyle SaveNothing
@@ -288,7 +288,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestAPIKeyLifecycleAgainstPostgres` (`hub/tests/keys_test.go`); `TestAPIKeyProblemsSendNothing` (`desktop/internal/adapters/hubclient/client_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog` (`desktop/internal/app/secrets_test.go`, запрос к Hub с ключом в заголовке).
 Вручную (команды Hub — из `paratech/`, README «Hub API keys»):
-- [ ] `hub keys create -label qa-<имя>`, ключ в «Подключения», «Обновить»: цифры есть.
+- [ ] `hub keys create -label qa-<имя>`, ключ в «Подключения» → карточка «Сервер обработки», «Обновить»: цифры есть.
 - [ ] `hub keys revoke -id <id>`, «Обновить»: «Hub не принял ключ: он неверный или отозван. Введите действующий ключ.», цифр нет. Новое занятие: «Конспект» — «Ошибка».
 - [ ] Новый ключ, ввести: «Обновить» снова показывает цифры.
 
@@ -321,7 +321,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 - [ ] Есть «Learning Assistant» с версией; «Удалить» запускает удаление без UAC. При запущенном приложении — просьба закрыть его.
 - [ ] Вопрос «Удалить и ваши данные?», ответ «Нет» (по умолчанию): папки установки и ярлыка нет, `%LOCALAPPDATA%\LearningAssistant` осталась. Поставить снова — данные на месте.
 - [ ] Удалить ещё раз с ответом «Да»: нет `%LOCALAPPDATA%\LearningAssistant` (вместе с `logs\`) и `%AppData%\learning-assistant.exe`.
-- [ ] Записи `paratech/...` в Диспетчере учётных данных остаются (`cmdkey /list | findstr paratech`); удалить вручную, если не нужны (перед этим «Выйти» в «Google Календарь»).
+- [ ] Записи `paratech/...` в Диспетчере учётных данных остаются (`cmdkey /list | findstr paratech`); удалить вручную, если не нужны (перед этим «Выйти» в «Подключения» → «Google Календарь»).
 - [ ] Свой файл, положенный в папку установки, после удаления остаётся вместе с папкой.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
