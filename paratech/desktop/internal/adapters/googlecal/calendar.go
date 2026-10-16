@@ -95,6 +95,11 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 		}
 	}
 
+	// Write the old entry back first: a store that cannot keep the new id fails here, before Google creates a
+	// calendar nobody could find again (one per attempt otherwise).
+	if err := c.save(ctx, op, b); err != nil {
+		return binding{}, err
+	}
 	id, err := c.create(ctx, op)
 	if err != nil {
 		return binding{}, err

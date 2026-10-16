@@ -999,6 +999,49 @@ func TestCredentialStoreFailure(t *testing.T) {
 	}
 }
 
+// readOnlyStore reads but cannot write, like a credential store that refuses new entries.
+type readOnlyStore struct{ *testenv.MemCredentials }
+
+func (readOnlyStore) Set(context.Context, string, string) error { return shared.ErrStorage }
+
+// A store that cannot keep the calendar id fails before calendars.insert: repeated attempts leave no calendars behind
+// at Google, with nothing stored and with a stored calendar that is gone.
+func TestUnwritableStoreCreatesNoCalendar(t *testing.T) {
+	const gone = `{"id":"gone@group.calendar.google.com"}`
+	for _, stored := range []string{"", gone} {
+		t.Run(fmt.Sprintf("stored %q", stored), func(t *testing.T) {
+			ctx := context.Background()
+			api := testenv.StartFakeGoogleCalendar(t)
+			tr := &http.Transport{}
+			t.Cleanup(tr.CloseIdleConnections)
+			mem := testenv.NewMemCredentials()
+			if stored != "" {
+				if err := mem.Set(ctx, googlecal.CalendarIDName, stored); err != nil {
+					t.Fatal(err)
+				}
+			}
+			auth := &fakeAuth{transport: tr, token: testenv.FakeCalendarAccessToken}
+			c, err := googlecal.New(auth, readOnlyStore{mem}, classify, googlecal.WithBaseURL(api.BaseURL()))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for range 3 {
+				_, _, err := c.EnsureCalendar(ctx)
+				assertClass(t, err, googlecal.ErrCredentials, backoff.ErrTransient)
+			}
+			if cals := api.Calendars(); len(cals) != 0 {
+				t.Fatalf("calendars %+v", cals)
+			}
+			for _, q := range api.Requests() {
+				if q.Method == http.MethodPost {
+					t.Fatalf("request %s %s", q.Method, q.Path)
+				}
+			}
+		})
+	}
+}
+
 // Every request goes to the configured base URL; the production default is the Calendar API itself.
 func TestRequestsStayOnTheBaseURL(t *testing.T) {
 	if googlecal.DefaultBaseURL != "https://www.googleapis.com/calendar/v3" {
