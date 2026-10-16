@@ -188,6 +188,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .input:focus-visible{outline-offset:0;border-color:var(--accent)}
 .pair{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:10px}
 .secret{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:34px}
+.flabel{display:flex;align-items:center;gap:8px}.fstate{box-shadow:none;border:0;display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--c)}.fstate .i{width:14px;height:14px}
 .result{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px}
 .result .i{width:16px;height:16px;margin-top:2px}
 .meter{display:grid;gap:6px;margin:6px 0 12px}
@@ -226,6 +227,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .app::after{content:"";width:9px;height:6px;border-radius:2px;background:#fff}
 .app.tg{background:#2AABEE}
 .popup .tip{flex:1;margin:0;font-size:12.5px;color:var(--muted);overflow:auto}
+.popup.grows{height:auto;min-height:300px}.popup.grows .tip{flex:none;overflow:visible}.popup.grows .pbtns{margin-top:auto}
 .pbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pbtns .primary{grid-column:1/-1;min-height:38px}
 .popup .note{margin:0;padding:8px 10px;font-size:12.5px}
@@ -382,7 +384,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
             <div class="box">
               <h3>Сервер обработки</h3><span class="m">Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.</span>
               <div class="field"><label for="hub">Адрес сервера</label><input class="input" id="hub" value="https://hub.uchebnyi-pomoshnik.ru"></div>
-              <div class="field"><label>Ключ доступа</label><div class="secret"><span class="chip s-ok"><svg class="i"><use href="#i-key"/></svg>Задан</span><button class="btn">Заменить</button><button class="btn ghost">Удалить</button></div></div>
+              <div class="field"><div class="flabel"><label>Ключ доступа</label><span class="fstate s-ok"><svg class="i"><use href="#i-key"/></svg>задан</span></div><div class="secret"><button class="btn">Заменить</button><button class="btn ghost">Удалить</button></div></div>
               <div class="meter"><div style="display:flex;justify-content:space-between;gap:12px"><span class="lbl">Обработка в этом месяце</span><span class="m num">осталось 42 из 60 мин · до 1 октября</span></div><div class="prog" role="progressbar" aria-label="Израсходовано минут обработки" aria-valuenow="18" aria-valuemin="0" aria-valuemax="60"><b style="--p:30%"></b></div></div>
               <button class="btn">Проверить связь</button>
               <div class="result" role="status"><svg class="i" style="color:var(--ok-t)"><use href="#i-ok"/></svg><span>Связь есть, ключ принят.</span></div>
@@ -391,7 +393,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
               <h3>Почта для отправки домашних заданий</h3><span class="m">Письмо уходит только после вашего подтверждения.</span>
               <div class="field"><label for="smtp">Сервер исходящей почты</label><div class="pair"><input class="input" id="smtp" value="smtp.yandex.ru"><input class="input num" aria-label="Порт" value="465"></div></div>
               <div class="field"><label for="login">Логин</label><input class="input" id="login" value="student@example.ru"></div>
-              <div class="field"><label>Пароль приложения</label><div class="secret"><span class="chip s-wait"><svg class="i"><use href="#i-key"/></svg>Не задан</span><button class="btn">Задать пароль</button></div><span class="m">Хранится в диспетчере учётных данных Windows, а не в файлах приложения.</span></div>
+              <div class="field"><div class="flabel"><label>Пароль приложения</label><span class="fstate s-wait"><svg class="i"><use href="#i-key"/></svg>не задан</span></div><div class="secret"><button class="btn">Задать пароль</button></div><span class="m">Хранится в диспетчере учётных данных Windows, а не в файлах приложения.</span></div>
               <button class="btn"><svg class="i"><use href="#i-mail"/></svg>Проверить почту</button>
               <div class="result" role="status" style="color:var(--rec-t)"><svg class="i"><use href="#i-warn"/></svg><span>Не удалось войти: пароль приложения не задан. Создайте его в настройках Яндекс ID и вставьте сюда.</span></div>
             </div>
@@ -438,7 +440,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
     </div>
   </div>
 
-  <p class="lbl section-label">2 · Окно «урок начался» (360×300): предложение записи и ошибка запуска</p>
+  <p class="lbl section-label">2 · Окно «урок начался» (360×300; при ошибке вырастает по высоте под текст): предложение записи и ошибка запуска</p>
   <div class="duo">
     <section class="popup" aria-label="Начинается занятие">
       <div class="p-top"><span class="dot"></span>Начинается занятие<span class="sp"></span><span class="m num">10:40–12:10</span></div>
@@ -447,7 +449,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
       <p class="tip">Записывается только звук Zoom — уведомления и музыка из других программ не попадут. Микрофон не записывается.</p>
       <div class="pbtns"><button class="btn primary"><svg class="i"><use href="#i-rec"/></svg>Начать запись <span class="hint-key">Enter</span></button><button class="btn">Через 5 минут</button><button class="btn ghost">Пропустить</button></div>
     </section>
-    <section class="popup" aria-label="Запись не началась">
+    <section class="popup grows" aria-label="Запись не началась">
       <div class="p-top"><svg class="i" style="width:15px;height:15px"><use href="#i-warn"/></svg>Запись не началась<span class="sp"></span><span class="m num">10:41</span></div>
       <h3>Математический анализ, лекция</h3>
       <label class="src"><span class="app tg" aria-hidden="true"></span><select aria-label="Откуда записывать звук"><option>Telegram</option><option>Zoom</option><option>Весь звук компьютера</option></select><svg class="i"><use href="#i-chev"/></svg></label>
