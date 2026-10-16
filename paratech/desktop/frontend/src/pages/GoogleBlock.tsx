@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { googleApi, type GoogleResult, type GoogleState } from "../bindings/google";
 import { callByName } from "../bindings/runtime";
+import { secretStoreCaption } from "../connectionsView";
 import {
   accountStatusText,
   clientStatusText,
@@ -11,10 +12,22 @@ import {
   statusWarns,
   type GoogleAction,
 } from "../googleView";
+import { Button } from "../ui/Button";
+import { Card, Dialog, Field, Input, ResultLine } from "../ui/controls";
+import { StatusChip, type ChipKind } from "../ui/StatusChip";
 
 interface Message {
   text: string;
   ok: boolean;
+}
+
+// The chip of a status; a warning status (no store, no answer) reads as a failure, like the secret slots.
+function clientChip(status: string): ChipKind {
+  return statusWarns(status) ? "fail" : status === "set" ? "ok" : "wait";
+}
+
+function accountChip(status: string): ChipKind {
+  return statusWarns(status) ? "fail" : status === "signedIn" ? "ok" : "neutral";
 }
 
 // «Google Календарь» on "Подключения": the client id and secret, the sign-in in the system browser and the sign-out.
@@ -22,8 +35,6 @@ interface Message {
 // go nowhere else. The core keeps them and the token in Credential Manager (ARCH-44).
 export function GoogleBlock() {
   const api = useMemo(() => googleApi(callByName), []);
-  const idField = useId();
-  const secretField = useId();
   const [state, setState] = useState<GoogleState | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [clientId, setClientId] = useState("");
@@ -127,111 +138,142 @@ export function GoogleBlock() {
   const header = (
     <>
       <h2>{googleTexts.title}</h2>
-      <p className="muted">{googleTexts.hint}</p>
+      <span className="small muted box-desc">{googleTexts.hint}</span>
     </>
   );
 
   if (state === null) {
     return (
-      <div className="block">
+      <Card className="box" label={googleTexts.title}>
         {header}
         {loadFailed ? (
-          <p className="error" role="alert">
+          <ResultLine kind="fail" role="alert">
             {googleTexts.loadFailed}
-          </p>
+          </ResultLine>
         ) : (
           <p className="muted">{googleTexts.loading}</p>
         )}
-      </div>
+      </Card>
     );
   }
 
   const c = googleControls({ state, action, typedId: clientId !== "", typedSecret: secret !== "" });
 
   return (
-    <div className="block">
+    <Card className="box" label={googleTexts.title}>
       {header}
-      <p className={statusWarns(state.client) ? "warning" : ""}>{clientStatusText(state.client)}</p>
-      <p className={statusWarns(state.account) ? "warning" : ""}>{accountStatusText(state.account)}</p>
 
-      <div className="field">
-        <label htmlFor={idField}>{googleTexts.clientId}</label>
-        <input
-          id={idField}
-          type="text"
-          spellCheck={false}
-          autoComplete="off"
-          value={clientId}
-          disabled={c.inputsDisabled}
-          onChange={(e) => setClientId(e.target.value)}
-        />
+      <h3>{googleTexts.clientTitle}</h3>
+      <div className="secret">
+        <StatusChip kind={clientChip(state.client)} icon="key">
+          {clientStatusText(state.client)}
+        </StatusChip>
       </div>
-      <div className="field">
-        <label htmlFor={secretField}>{googleTexts.clientSecret}</label>
-        <input
-          id={secretField}
-          type="password"
-          autoComplete="new-password"
-          spellCheck={false}
-          value={secret}
-          disabled={c.inputsDisabled}
-          onChange={(e) => setSecret(e.target.value)}
-        />
-        {c.removeShown && <span className="muted">{googleTexts.replaceHint}</span>}
-      </div>
-      <div className="actions">
-        <button type="button" disabled={c.saveDisabled} onClick={() => void save()}>
-          {action === "save" ? googleTexts.saving : googleTexts.save}
-        </button>
-        {c.removeShown && !confirming && (
-          <button type="button" disabled={c.removeDisabled} onClick={() => setConfirming(true)}>
+      {(state.client === "set" || state.client === "unset") && <p className="small muted">{secretStoreCaption}</p>}
+      <Field label={googleTexts.clientId}>
+        {(id) => (
+          <Input
+            id={id}
+            type="text"
+            spellCheck={false}
+            autoComplete="off"
+            value={clientId}
+            disabled={c.inputsDisabled}
+            onChange={(e) => setClientId(e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label={googleTexts.clientSecret} hint={c.removeShown ? googleTexts.replaceHint : undefined}>
+        {(id) => (
+          <Input
+            id={id}
+            type="password"
+            autoComplete="new-password"
+            spellCheck={false}
+            value={secret}
+            disabled={c.inputsDisabled}
+            onChange={(e) => setSecret(e.target.value)}
+          />
+        )}
+      </Field>
+      <div className="acts start">
+        <Button
+          disabled={c.saveDisabled}
+          busy={action === "save"}
+          busyLabel={googleTexts.saving}
+          onClick={() => void save()}
+        >
+          {googleTexts.save}
+        </Button>
+        {c.removeShown && (
+          <Button variant="danger" disabled={c.removeDisabled} onClick={() => setConfirming(true)}>
             {googleTexts.remove}
-          </button>
+          </Button>
         )}
       </div>
-      {c.removeShown && confirming && (
-        <div className="confirm">
-          <p>{googleTexts.confirmRemove}</p>
-          <div className="actions">
-            <button type="button" disabled={c.removeDisabled} onClick={() => void run("remove", () => api.clearClient())}>
-              {googleTexts.confirmYes}
-            </button>
-            <button type="button" onClick={() => setConfirming(false)}>
-              {googleTexts.confirmNo}
-            </button>
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={c.removeShown && confirming}
+        title={googleTexts.confirmRemove}
+        confirmLabel={googleTexts.confirmYes}
+        cancelLabel={googleTexts.confirmNo}
+        confirmDisabled={c.removeDisabled}
+        danger
+        onConfirm={() => void run("remove", () => api.clearClient())}
+        onCancel={() => setConfirming(false)}
+      >
+        {googleTexts.confirmRemoveNote}
+      </Dialog>
 
+      <hr className="sep" />
+      <h3>{googleTexts.accountTitle}</h3>
+      <div className="secret">
+        <StatusChip kind={accountChip(state.account)} icon="cal">
+          {accountStatusText(state.account)}
+        </StatusChip>
+      </div>
       {c.signingIn ? (
         <>
-          <p role="status">{googleTexts.waiting}</p>
-          <div className="actions">
-            <button type="button" disabled={cancelling} onClick={() => void cancel()}>
+          <div className="secret" role="status">
+            <StatusChip kind="run" icon="clock">
+              {googleTexts.waiting}
+            </StatusChip>
+          </div>
+          <div className="acts start">
+            <Button disabled={cancelling} onClick={() => void cancel()}>
               {googleTexts.cancel}
-            </button>
+            </Button>
           </div>
         </>
       ) : (
-        <div className="actions">
+        <div className="acts start">
           {c.signInShown && (
-            <button type="button" disabled={c.signInDisabled} onClick={() => void run("signIn", () => api.signIn())}>
+            <Button
+              variant="primary"
+              disabled={c.signInDisabled}
+              disabledReason={state.client === "unset" ? googleTexts.signInNeedsClient : undefined}
+              onClick={() => void run("signIn", () => api.signIn())}
+            >
               {googleTexts.signIn}
-            </button>
+            </Button>
           )}
           {c.signOutShown && (
-            <button type="button" disabled={c.signOutDisabled} onClick={() => void run("signOut", () => api.signOut())}>
-              {action === "signOut" ? googleTexts.signingOut : googleTexts.signOut}
-            </button>
+            <Button
+              disabled={c.signOutDisabled}
+              busy={action === "signOut"}
+              busyLabel={googleTexts.signingOut}
+              onClick={() => void run("signOut", () => api.signOut())}
+            >
+              {googleTexts.signOut}
+            </Button>
           )}
         </div>
       )}
 
       {message !== null && (
-        <p className={message.ok ? "ok" : "error"} role={message.ok ? "status" : "alert"}>
+        <ResultLine kind={message.ok ? "ok" : "fail"} role={message.ok ? "status" : "alert"}>
           {message.text}
-        </p>
+        </ResultLine>
       )}
-    </div>
+    </Card>
   );
 }

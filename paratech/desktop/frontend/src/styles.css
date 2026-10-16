@@ -55,7 +55,7 @@ html, body, #root { height: 100%; }
 .statusbar .r { margin-left: auto; }
 .statusbar .i { width: 14px; height: 14px; }
 
-/* Подключения: two form cards side by side, one column in a narrow window. */
+/* Подключения: form cards two in a row, one column in a narrow window. */
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .grid2 > .card + .card { margin-top: 0; }
 .sep { margin: 16px 0 14px; border: 0; border-top: 1px solid var(--line); }

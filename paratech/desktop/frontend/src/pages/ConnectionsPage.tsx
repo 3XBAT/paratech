@@ -42,7 +42,7 @@ import { SecretSlot, type SecretMessage } from "./SecretSlot";
 const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 
 // "Подключения": the Hub address, the Hub key and the remaining quota, the mail account, the mail password and the
-// mail check, in two cards (docs/design/concept-final.html), and the Google sign-in (GoogleBlock). The page only shows
+// mail check and the Google sign-in (GoogleBlock), in cards (docs/design/concept-final.html). The page only shows
 // and forwards the values; validation, the secret store and the quota are in the Go core (ARCH-44).
 export function ConnectionsPage() {
   const api = useMemo(() => connectionsApi(callByName), []);
@@ -287,7 +287,7 @@ export function ConnectionsPage() {
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">Сервер обработки и почта</span>
+          <span className="label">Сервер обработки, почта и Google Календарь</span>
           <h1>Подключения</h1>
         </div>
       </div>
@@ -467,9 +467,9 @@ export function ConnectionsPage() {
             </ResultLine>
           )}
         </Card>
-      </div>
 
-      <GoogleBlock />
+        <GoogleBlock />
+      </div>
     </section>
   );
 }

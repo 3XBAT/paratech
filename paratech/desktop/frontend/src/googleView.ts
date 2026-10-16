@@ -11,6 +11,8 @@ export const googleTexts = {
   hint:
     "Идентификатор и секрет берутся из своего клиента типа «Desktop app» в Google Cloud Console " +
     "(как его создать — в инструкции к альфа-сборке, раздел «Google Календарь: вход»).",
+  clientTitle: "Клиент Google",
+  accountTitle: "Вход",
   clientId: "Идентификатор клиента (client ID)",
   clientSecret: "Секрет клиента (client secret)",
   replaceHint: "Новые идентификатор и секрет заменят сохранённые.",
@@ -18,9 +20,11 @@ export const googleTexts = {
   saving: "Сохраняем…",
   remove: "Удалить клиент",
   confirmRemove: "Удалить сохранённые идентификатор и секрет клиента Google?",
-  confirmYes: "Удалить",
+  confirmRemoveNote: "Чтобы снова войти через Google, клиент придётся сохранить заново.",
+  confirmYes: "Удалить клиент",
   confirmNo: "Отмена",
   signIn: "Войти через Google",
+  signInNeedsClient: "Сначала сохраните идентификатор и секрет клиента.",
   waiting: "Ожидание входа в браузере…",
   cancel: "Отменить",
   signOut: "Выйти",
