@@ -57,8 +57,8 @@ type core struct {
 	runner     *jobrunner.Service
 	recordings *recordingsession.Service
 	deliveries *senddelivery.Service
-	drafts     *homeworkflow.Drafts  // no binding yet (TASK-045)
-	proposals  *homeworkflow.Service // no binding yet (TASK-045)
+	drafts     *homeworkflow.Drafts
+	proposals  *homeworkflow.Service
 
 	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
 	transcriptions *transcribe.Enqueuer
@@ -265,6 +265,7 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
 		Sound: sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
+		Homework: wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

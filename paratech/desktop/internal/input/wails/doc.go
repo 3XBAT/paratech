@@ -22,4 +22,8 @@
 // The «Диагностика» page calls DiagnosticsService (diagnostics.go): "Проверить звук" answers a verdict with a fixed
 // text; "Сохранить пакет для поддержки" shows the save dialog (savepicker_windows.go), so the path never comes from
 // the page, and answers only the base name of the file.
+//
+// The homework page calls HomeworkService (homework.go): drafts, generation, export, and the send confirmation.
+// PrepareSend only builds the dialog (a validated send proposal, no side effect); ConfirmSend, the dialog's button, is
+// the only binding that leads to an email (AC-14). Deliveries carry the actions the delivery aggregate allows.
 package wails

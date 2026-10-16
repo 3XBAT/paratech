@@ -79,8 +79,8 @@ type DeliveryRepository interface {
 // result, AC-15). Implemented by the sqlite adapter. It is a port of its own so that the fakes of DeliveryRepository
 // stay small.
 type DeliveryHistory interface {
-	// ListByAssignment returns at most limit deliveries of assignment a, newest first (by creation time; PRD section
-	// 10); none is an empty list. limit is at least 1.
+	// ListByAssignment returns at most limit deliveries of assignment a, newest first by creation time (PRD section 10);
+	// none is an empty list. limit is at least 1.
 	ListByAssignment(ctx context.Context, a shared.AssignmentID, limit int) ([]*delivery.Delivery, error)
 }
 

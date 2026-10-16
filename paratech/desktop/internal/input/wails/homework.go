@@ -1,0 +1,578 @@
+package wails
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"path"
+
+	"paratech/desktop/internal/cases/homeworkflow"
+	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/domain/coursework/homeworkdraft"
+	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/delivery/delivery"
+	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/shared"
+)
+
+// homeworkError is an error of the homework page: a fixed Russian text the page shows as it is (like modelError).
+type homeworkError string
+
+func (e homeworkError) Error() string { return string(e) }
+
+// Errors of the homework page (frontend/src/bindings/homework.ts lists them). Causes are logged, never shown: they
+// may name local paths or database details.
+const (
+	ErrHomeworkUnavailable   = homeworkError("Не удалось выполнить действие. Попробуйте ещё раз.")
+	ErrHomeworkInvalidID     = homeworkError("Неверный идентификатор.")
+	ErrHomeworkNotFound      = homeworkError("Задание не найдено: обновите список.")
+	ErrDraftVersionNotFound  = homeworkError("Такой версии черновика нет: обновите страницу.")
+	ErrDraftStale            = homeworkError("Черновик изменился: появилась новая версия. Обновите страницу и повторите.")
+	ErrDraftInvalid          = homeworkError("Заголовок: одна строка до 200 символов, текст: до 16000 символов; оба не пустые.")
+	ErrDraftFull             = homeworkError("У черновика уже 100 версий: больше добавить нельзя.")
+	ErrInstructionInvalid    = homeworkError("Инструкция слишком длинная (больше 4 КБ) или содержит недопустимые символы.")
+	ErrGenerateRetries       = homeworkError("Эта генерация уже много раз не удалась. Измените инструкцию или текст черновика.")
+	ErrGenerationNotFound    = homeworkError("Генерация не найдена: обновите страницу.")
+	ErrSendNotFound          = homeworkError("Отправка не найдена: подготовьте её ещё раз.")
+	ErrSendCannotConfirm     = homeworkError("Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.")
+	ErrSendAlreadyDecided    = homeworkError("Эта отправка уже подтверждена или отменена.")
+	ErrSendStale             = homeworkError("Файл или адрес получателя изменились после подтверждения. Проверьте и подтвердите ещё раз.")
+	ErrSendUnresolved        = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.")
+	ErrDeliveryNotFound      = homeworkError("Письмо не найдено: обновите список.")
+	ErrDeliveryActionInvalid = homeworkError("Это действие для письма уже недоступно: обновите список.")
+)
+
+// Send preparation statuses as the page reads them.
+const (
+	sendReady    = "ready"    // the dialog shows recipient, subject and attachment and offers the confirmation
+	sendRejected = "rejected" // the dialog shows Message and offers no confirmation
+)
+
+// Generation states as the page reads them.
+const (
+	genGenerating     = "generating"
+	genWaitingNetwork = "waitingNetwork"
+	genWaitingQuota   = "waitingQuota"
+	genFailed         = "failed"
+	genDone           = "done"
+)
+
+// Fixed texts of the homework page (Russian UI).
+const (
+	msgUnknownOutcome = "Письмо отправлено, но подтверждение не получено: проверьте сами или отправьте ещё раз под свою ответственность"
+
+	msgWaitingNetwork   = "Нет связи с сервером обработки: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама."
+	msgWaitingQuota     = "Минуты обработки закончились. Генерация продолжится, когда они пополнятся."
+	msgGenerationFailed = "Не удалось подготовить черновик. Попробуйте ещё раз."
+	msgGenerationCancel = "Генерация отменена."
+
+	msgRejectedDefault = "Отправить нельзя: подготовьте отправку ещё раз."
+)
+
+// generationMessages explain a failed generation by the error its job ended with.
+var generationMessages = []struct {
+	err error
+	msg string
+}{
+	{homeworkflow.ErrDraftChanged, "Черновик изменился во время генерации. Сгенерируйте ещё раз."},
+	{homeworkflow.ErrDraftFull, string(ErrDraftFull)},
+	{homeworkflow.ErrDraftAssignmentGone, "Задание удалено."},
+	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: черновик не подготовить."},
+	{homeworkflow.ErrDraftInvalidAnswer, "Сервер обработки ответил в неверном виде. Попробуйте ещё раз."},
+}
+
+// rejectMessages explain why a send cannot be confirmed.
+var rejectMessages = map[proposal.RejectReason]string{
+	proposal.ReasonNoRecipient:       "Не указан адрес получателя: задайте его в разделе «Подключения».",
+	proposal.ReasonNoArtifact:        "Нет сохранённого файла с заданием: сначала сохраните черновик в файл.",
+	proposal.ReasonUnknownAssignment: "Задание не найдено: обновите список.",
+}
+
+// Operation names of the log.
+const (
+	opListAssignments = "ui: list assignments"
+	opOpenAssignment  = "ui: open assignment"
+	opDraftVersion    = "ui: get draft version"
+	opGenerate        = "ui: generate draft"
+	opGeneration      = "ui: get draft generation"
+	opEditDraft       = "ui: edit draft"
+	opExportDraft     = "ui: export draft"
+	opPrepareSend     = "ui: prepare send"
+	opConfirmSend     = "ui: confirm send"
+	opCancelSend      = "ui: cancel send"
+	opDeliveries      = "ui: list deliveries"
+	opMarkSent        = "ui: mark delivery as sent"
+	opSendAgain       = "ui: send delivery again"
+)
+
+// HomeworkProposals is the part of homeworkflow.Service the page uses (ARCH-42): the assignments and the send
+// proposal. Confirm and Execute are called only by ConfirmSend, on the user's click in the confirmation dialog.
+type HomeworkProposals interface {
+	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
+	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
+	ProposeSend(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
+	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+	Confirm(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+	Execute(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+}
+
+// HomeworkDrafts is the part of homeworkflow.Drafts the page uses (ARCH-42).
+type HomeworkDrafts interface {
+	DraftVersions(ctx context.Context, a shared.AssignmentID) ([]homeworkflow.DraftVersionView, error)
+	DraftVersion(ctx context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftVersionView, error)
+	GenerateFrom(ctx context.Context, a shared.AssignmentID, base int, instruction string) (homeworkflow.GenerateResult, error)
+	Generation(ctx context.Context, id shared.JobID) (homeworkflow.GenerationView, error)
+	EditDraft(ctx context.Context, e homeworkflow.DraftEdit) (homeworkflow.DraftVersionView, error)
+	ExportDraft(ctx context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftExport, error)
+}
+
+// HomeworkDeliveries is the part of senddelivery.Service the page uses (ARCH-42): the deliveries of an assignment and
+// the user's resolution of an unknown outcome.
+type HomeworkDeliveries interface {
+	ListForAssignment(ctx context.Context, a shared.AssignmentID) ([]senddelivery.View, error)
+	Subject() string
+	MarkSent(ctx context.Context, id shared.DeliveryID) (senddelivery.View, error)
+	SendAgain(ctx context.Context, id shared.DeliveryID) (senddelivery.View, error)
+}
+
+// HomeworkCore is what the homework page binds to; every field is required.
+type HomeworkCore struct {
+	Proposals  HomeworkProposals
+	Drafts     HomeworkDrafts
+	Deliveries HomeworkDeliveries
+}
+
+func (c HomeworkCore) complete() bool {
+	return c.Proposals != nil && c.Drafts != nil && c.Deliveries != nil
+}
+
+// AssignmentItem is the JSON form of an assignment. Title and description may be model text: the page shows them
+// as text only. Times are RFC 3339 in UTC, "" when unset.
+type AssignmentItem struct {
+	ID          string `json:"id"`
+	LessonID    string `json:"lessonId"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Due         string `json:"due"`
+	UserEdited  bool   `json:"userEdited"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+// VersionItem is one draft version in the history list.
+type VersionItem struct {
+	Number      int    `json:"number"`
+	Source      string `json:"source"` // "generated" or "edited"
+	Instruction string `json:"instruction"`
+	Latest      bool   `json:"latest"`
+	CreatedAt   string `json:"createdAt"`
+}
+
+// VersionText is one draft version with its text. Title, body and instruction are model or student text: the page
+// shows them as text only, never as HTML.
+type VersionText struct {
+	Number      int    `json:"number"`
+	Source      string `json:"source"`
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	Instruction string `json:"instruction"`
+	Latest      bool   `json:"latest"`
+	CreatedAt   string `json:"createdAt"`
+}
+
+// AssignmentDetail is an opened assignment: its versions in order and the text of the latest one (null: no draft).
+type AssignmentDetail struct {
+	Assignment AssignmentItem `json:"assignment"`
+	Versions   []VersionItem  `json:"versions"`
+	Latest     *VersionText   `json:"latest"`
+}
+
+// GenerateStarted answers Generate: the job to follow with GenerationStatus.
+type GenerateStarted struct {
+	JobID string `json:"jobId"`
+	Base  int    `json:"base"`
+}
+
+// GenerationStatus is the state of a generation: "generating", "waitingNetwork", "waitingQuota", "failed" or "done",
+// with a fixed text for the waiting and failed states.
+type GenerationStatus struct {
+	State   string `json:"state"`
+	Message string `json:"message"`
+}
+
+// ExportResult answers ExportDraft: the version written and the name of the file a send attaches.
+type ExportResult struct {
+	Version  int    `json:"version"`
+	FileName string `json:"fileName"`
+}
+
+// SendPreparation is the content of the confirmation dialog. Status "ready": the dialog shows recipient, subject and
+// attachment and the user may confirm ProposalID; "rejected": it shows Message (Reason is the core's code).
+type SendPreparation struct {
+	ProposalID     string `json:"proposalId"`
+	Status         string `json:"status"`
+	Reason         string `json:"reason"`
+	Message        string `json:"message"`
+	Recipient      string `json:"recipient"`
+	Subject        string `json:"subject"`
+	AttachmentName string `json:"attachmentName"`
+	AttachmentSize int64  `json:"attachmentSize"`
+}
+
+// DeliveryItem is the JSON form of a delivery (AC-15). Status is the core's code (PENDING, SENDING, SENT, FAILED,
+// UNKNOWN); CanMarkSent and CanSendAgain come from the delivery aggregate; Notice explains an unknown outcome.
+type DeliveryItem struct {
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Recipient    string `json:"recipient"`
+	Subject      string `json:"subject"`
+	Attempts     int    `json:"attempts"`
+	LastError    string `json:"lastError"`
+	ConfirmedAt  string `json:"confirmedAt"`
+	SentAt       string `json:"sentAt"`
+	CreatedAt    string `json:"createdAt"`
+	CanMarkSent  bool   `json:"canMarkSent"`
+	CanSendAgain bool   `json:"canSendAgain"`
+	Notice       string `json:"notice"`
+}
+
+// HomeworkService is bound to the UI: every exported method is callable from the page by its full name
+// "<package path>.HomeworkService.<Method>". Keep the method set to what the page may call. Only ConfirmSend leads
+// to an email, and only for a proposal the user saw in the dialog; SendAgain resends an unknown one on the user's
+// decision.
+type HomeworkService struct {
+	proposals  HomeworkProposals
+	drafts     HomeworkDrafts
+	deliveries HomeworkDeliveries
+	log        *slog.Logger
+}
+
+// NewHomeworkService returns the binding of the homework page; OpenServices checks the core before calling it.
+func NewHomeworkService(c HomeworkCore, log *slog.Logger) *HomeworkService {
+	return &HomeworkService{proposals: c.Proposals, drafts: c.Drafts, deliveries: c.Deliveries, log: log}
+}
+
+// ListAssignments returns the newest assignments, newest first.
+func (s *HomeworkService) ListAssignments(ctx context.Context) ([]AssignmentItem, error) {
+	as, err := s.proposals.ListAssignments(ctx)
+	if err != nil {
+		s.log.Error(opListAssignments, "err", err)
+		return nil, ErrHomeworkUnavailable
+	}
+	out := make([]AssignmentItem, 0, len(as))
+	for _, a := range as {
+		out = append(out, assignmentItem(a))
+	}
+	return out, nil
+}
+
+// OpenAssignment returns an assignment with its draft versions and the text of the latest version.
+func (s *HomeworkService) OpenAssignment(ctx context.Context, id string) (AssignmentDetail, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return AssignmentDetail{}, err
+	}
+	a, err := s.proposals.Assignment(ctx, aid)
+	if err != nil {
+		return AssignmentDetail{}, s.fail(opOpenAssignment, err, ErrHomeworkNotFound)
+	}
+	versions, err := s.drafts.DraftVersions(ctx, aid)
+	if err != nil {
+		return AssignmentDetail{}, s.fail(opOpenAssignment, err, ErrHomeworkNotFound)
+	}
+	out := AssignmentDetail{Assignment: assignmentItem(a), Versions: make([]VersionItem, 0, len(versions))}
+	for _, v := range versions {
+		out.Versions = append(out.Versions, VersionItem{
+			Number: v.Number, Source: string(v.Origin), Instruction: v.Instruction, Latest: v.Latest,
+			CreatedAt: rfc3339(v.CreatedAt),
+		})
+		if v.Latest {
+			t := versionText(v)
+			out.Latest = &t
+		}
+	}
+	return out, nil
+}
+
+// DraftVersion returns version n of the draft of assignment id.
+func (s *HomeworkService) DraftVersion(ctx context.Context, id string, n int) (VersionText, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return VersionText{}, err
+	}
+	if n < 1 {
+		return VersionText{}, ErrDraftVersionNotFound
+	}
+	v, err := s.drafts.DraftVersion(ctx, aid, n)
+	if err != nil {
+		return VersionText{}, s.fail(opDraftVersion, err, ErrDraftVersionNotFound)
+	}
+	return versionText(v), nil
+}
+
+// Generate starts a new draft version from version base (0: no draft yet), the one the page shows, with the
+// student's additional instructions (may be empty).
+func (s *HomeworkService) Generate(ctx context.Context, id string, base int, instruction string) (GenerateStarted, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return GenerateStarted{}, err
+	}
+	res, err := s.drafts.GenerateFrom(ctx, aid, base, instruction)
+	switch {
+	case err == nil:
+		return GenerateStarted{JobID: string(res.JobID), Base: res.Base}, nil
+	case errors.Is(err, homeworkdraft.ErrStaleBase):
+		return GenerateStarted{}, ErrDraftStale
+	case errors.Is(err, values.ErrInvalidDraftRequest):
+		return GenerateStarted{}, ErrInstructionInvalid
+	case errors.Is(err, homeworkdraft.ErrFull):
+		return GenerateStarted{}, ErrDraftFull
+	case errors.Is(err, homeworkflow.ErrGenerateRetries):
+		s.log.Info(opGenerate, "result", homeworkflow.ErrGenerateRetries)
+		return GenerateStarted{}, ErrGenerateRetries
+	}
+	return GenerateStarted{}, s.fail(opGenerate, err, ErrHomeworkNotFound)
+}
+
+// GenerationStatus returns the state of the generation job Generate started.
+func (s *HomeworkService) GenerationStatus(ctx context.Context, jobID string) (GenerationStatus, error) {
+	jid := shared.JobID(jobID)
+	if jid.Validate() != nil {
+		return GenerationStatus{}, ErrHomeworkInvalidID
+	}
+	v, err := s.drafts.Generation(ctx, jid)
+	if err != nil {
+		return GenerationStatus{}, s.fail(opGeneration, err, ErrGenerationNotFound)
+	}
+	switch v.Status {
+	case job.StatusCompleted:
+		return GenerationStatus{State: genDone}, nil
+	case job.StatusWaitingForNetwork:
+		return GenerationStatus{State: genWaitingNetwork, Message: msgWaitingNetwork}, nil
+	case job.StatusWaitingForQuota:
+		return GenerationStatus{State: genWaitingQuota, Message: msgWaitingQuota}, nil
+	case job.StatusCancelled:
+		return GenerationStatus{State: genFailed, Message: msgGenerationCancel}, nil
+	case job.StatusFailed:
+		for _, m := range generationMessages {
+			if errors.Is(v.Failure, m.err) {
+				return GenerationStatus{State: genFailed, Message: m.msg}, nil
+			}
+		}
+		return GenerationStatus{State: genFailed, Message: msgGenerationFailed}, nil
+	}
+	return GenerationStatus{State: genGenerating}, nil
+}
+
+// EditDraft stores what the student wrote over version base as a new version and returns the latest version.
+func (s *HomeworkService) EditDraft(ctx context.Context, id string, base int, title, body string) (VersionText, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return VersionText{}, err
+	}
+	v, err := s.drafts.EditDraft(ctx, homeworkflow.DraftEdit{Assignment: aid, Base: base, Title: title, Body: body})
+	switch {
+	case err == nil:
+		return versionText(v), nil
+	case errors.Is(err, homeworkdraft.ErrStaleBase):
+		return VersionText{}, ErrDraftStale
+	case errors.Is(err, homeworkdraft.ErrInvalidContent):
+		return VersionText{}, ErrDraftInvalid
+	case errors.Is(err, homeworkdraft.ErrFull):
+		return VersionText{}, ErrDraftFull
+	}
+	return VersionText{}, s.fail(opEditDraft, err, ErrHomeworkNotFound)
+}
+
+// ExportDraft writes version n to the file a send attaches, replacing an earlier export.
+func (s *HomeworkService) ExportDraft(ctx context.Context, id string, n int) (ExportResult, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return ExportResult{}, err
+	}
+	if n < 1 {
+		return ExportResult{}, ErrDraftVersionNotFound
+	}
+	res, err := s.drafts.ExportDraft(ctx, aid, n)
+	if err != nil {
+		return ExportResult{}, s.fail(opExportDraft, err, ErrDraftVersionNotFound)
+	}
+	return ExportResult{Version: res.Version, FileName: path.Base(res.File.Path())}, nil
+}
+
+// PrepareSend checks a send of the exported homework against the trusted local state and returns the content of the
+// confirmation dialog. Nothing is sent: only ConfirmSend sends.
+func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPreparation, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return SendPreparation{}, err
+	}
+	v, err := s.proposals.ProposeSend(ctx, aid)
+	if err != nil {
+		return SendPreparation{}, s.fail(opPrepareSend, err, ErrHomeworkNotFound)
+	}
+	out := SendPreparation{ProposalID: string(v.ID), Reason: string(v.Reason)}
+	if v.Status != proposal.StatusValidated {
+		out.Status, out.Message = sendRejected, msgRejectedDefault
+		if msg, ok := rejectMessages[v.Reason]; ok {
+			out.Message = msg
+		}
+		s.log.Info(opPrepareSend, "result", v.Status, "reason", v.Reason)
+		return out, nil
+	}
+	out.Status = sendReady
+	out.Recipient, out.Subject = v.Recipient, s.deliveries.Subject()
+	out.AttachmentName, out.AttachmentSize = v.AttachmentName, v.AttachmentSize
+	return out, nil
+}
+
+// ConfirmSend is the user's click on «Отправить» in the confirmation dialog (AC-14): it confirms the send proposal
+// the dialog showed and executes it, which creates the delivery. It is the only binding that leads to an email.
+func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID string) error {
+	pid, err := s.sendProposal(ctx, opConfirmSend, proposalID)
+	if err != nil {
+		return err
+	}
+	if _, err := s.proposals.Confirm(ctx, pid); err != nil {
+		if errors.Is(err, proposal.ErrInvalidTransition) {
+			s.log.Info(opConfirmSend, "result", err)
+			return ErrSendCannotConfirm
+		}
+		return s.fail(opConfirmSend, err, ErrSendNotFound)
+	}
+	_, err = s.proposals.Execute(ctx, pid)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, proposal.ErrStale):
+		s.log.Info(opConfirmSend, "result", err)
+		return ErrSendStale
+	case errors.Is(err, senddelivery.ErrUnresolvedDelivery):
+		s.log.Info(opConfirmSend, "result", err)
+		return ErrSendUnresolved
+	}
+	return s.fail(opConfirmSend, err, ErrSendNotFound)
+}
+
+// CancelSend is «Отмена» in the confirmation dialog: the proposal is declined and can never be sent.
+func (s *HomeworkService) CancelSend(ctx context.Context, proposalID string) error {
+	pid, err := s.sendProposal(ctx, opCancelSend, proposalID)
+	if err != nil {
+		return err
+	}
+	if _, err := s.proposals.Decline(ctx, pid); err != nil {
+		if errors.Is(err, proposal.ErrInvalidTransition) {
+			return ErrSendAlreadyDecided
+		}
+		return s.fail(opCancelSend, err, ErrSendNotFound)
+	}
+	return nil
+}
+
+// sendProposal checks that id names a send proposal: the dialog's buttons act on nothing else.
+func (s *HomeworkService) sendProposal(ctx context.Context, op, id string) (proposal.ID, error) {
+	pid := proposal.ID(id)
+	if pid.Validate() != nil {
+		return "", ErrHomeworkInvalidID
+	}
+	v, err := s.proposals.Get(ctx, pid)
+	if err != nil {
+		return "", s.fail(op, err, ErrSendNotFound)
+	}
+	if v.Kind != proposal.KindSendHomework {
+		s.log.Warn(op, "result", "not a send proposal", "kind", v.Kind)
+		return "", ErrSendNotFound
+	}
+	return pid, nil
+}
+
+// Deliveries returns the emails of assignment id, newest first.
+func (s *HomeworkService) Deliveries(ctx context.Context, id string) ([]DeliveryItem, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return nil, err
+	}
+	vs, err := s.deliveries.ListForAssignment(ctx, aid)
+	if err != nil {
+		s.log.Error(opDeliveries, "err", err)
+		return nil, ErrHomeworkUnavailable
+	}
+	out := make([]DeliveryItem, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, deliveryItem(v))
+	}
+	return out, nil
+}
+
+// MarkSent records that the student found an email with an unknown outcome in the mailbox.
+func (s *HomeworkService) MarkSent(ctx context.Context, deliveryID string) (DeliveryItem, error) {
+	return s.resolve(ctx, opMarkSent, deliveryID, s.deliveries.MarkSent)
+}
+
+// SendAgain sends an email with an unknown outcome again; the page calls it only from its own confirmation dialog,
+// because the teacher may get the email twice.
+func (s *HomeworkService) SendAgain(ctx context.Context, deliveryID string) (DeliveryItem, error) {
+	return s.resolve(ctx, opSendAgain, deliveryID, s.deliveries.SendAgain)
+}
+
+func (s *HomeworkService) resolve(ctx context.Context, op, id string,
+	apply func(context.Context, shared.DeliveryID) (senddelivery.View, error)) (DeliveryItem, error) {
+	did := shared.DeliveryID(id)
+	if did.Validate() != nil {
+		return DeliveryItem{}, ErrHomeworkInvalidID
+	}
+	v, err := apply(ctx, did)
+	if errors.Is(err, delivery.ErrInvalidTransition) {
+		s.log.Info(op, "result", err)
+		return DeliveryItem{}, ErrDeliveryActionInvalid
+	}
+	if err != nil {
+		return DeliveryItem{}, s.fail(op, err, ErrDeliveryNotFound)
+	}
+	return deliveryItem(v), nil
+}
+
+// fail maps a missing item to notFound and anything else to ErrHomeworkUnavailable; the cause goes to the log.
+func (s *HomeworkService) fail(op string, err, notFound error) error {
+	if errors.Is(err, shared.ErrNotFound) {
+		s.log.Info(op, "result", "not found")
+		return notFound
+	}
+	s.log.Error(op, "err", err)
+	return ErrHomeworkUnavailable
+}
+
+func assignmentID(id string) (shared.AssignmentID, error) {
+	aid := shared.AssignmentID(id)
+	if aid.Validate() != nil {
+		return "", ErrHomeworkInvalidID
+	}
+	return aid, nil
+}
+
+func assignmentItem(a homeworkflow.AssignmentView) AssignmentItem {
+	return AssignmentItem{
+		ID: string(a.ID), LessonID: string(a.LessonID), Title: a.Title, Description: a.Description, Due: rfc3339(a.Due),
+		UserEdited: a.UserEdited, UpdatedAt: rfc3339(a.UpdatedAt),
+	}
+}
+
+func versionText(v homeworkflow.DraftVersionView) VersionText {
+	return VersionText{
+		Number: v.Number, Source: string(v.Origin), Title: v.Title, Body: v.Body, Instruction: v.Instruction,
+		Latest: v.Latest, CreatedAt: rfc3339(v.CreatedAt),
+	}
+}
+
+func deliveryItem(v senddelivery.View) DeliveryItem {
+	out := DeliveryItem{
+		ID: string(v.ID), Status: string(v.Status), Recipient: v.Recipient, Subject: v.Subject, Attempts: v.Attempts,
+		LastError: v.LastError, ConfirmedAt: rfc3339(v.ConfirmedAt), SentAt: rfc3339(v.SentAt),
+		CreatedAt: rfc3339(v.CreatedAt), CanMarkSent: v.CanMarkSent, CanSendAgain: v.CanSendAgain,
+	}
+	if v.OutcomeUnknown {
+		out.Notice = msgUnknownOutcome
+	}
+	return out
+}

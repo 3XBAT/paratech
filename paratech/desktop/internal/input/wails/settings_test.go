@@ -96,7 +96,7 @@ func TestOpenBindings(t *testing.T) {
 	}
 	b, err := s.OpenServices(context.Background())
 	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Schedule == nil || b.Models == nil ||
-		b.Connections == nil || b.Diagnostics == nil {
+		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil {
 		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
 
@@ -128,6 +128,9 @@ func TestOpenBindings(t *testing.T) {
 		{name: "calendar sync use case", edit: func(c *Core) { c.Calendar = nil }},
 		{name: "sound check use case", edit: func(c *Core) { c.Sound = nil }},
 		{name: "support bundle use case", edit: func(c *Core) { c.Bundle = nil }},
+		{name: "homework proposals", edit: func(c *Core) { c.Homework.Proposals = nil }},
+		{name: "homework drafts", edit: func(c *Core) { c.Homework.Drafts = nil }},
+		{name: "homework deliveries", edit: func(c *Core) { c.Homework.Deliveries = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
@@ -164,6 +167,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "calendar.ts", typ: reflect.TypeFor[*GoogleCalendarService](), methods: 2},
 		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 2},
 		{file: "help.ts", typ: reflect.TypeFor[*HelpService](), methods: 1},
+		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 13},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
