@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +14,9 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/testenv"
 )
 
 func newTestApp(t *testing.T, dataDir string) *App {
@@ -106,6 +109,55 @@ func TestOpenCoreListsActivity(t *testing.T) {
 	recs, err := core.Activity.ListRecordings(ctx)
 	if err != nil || len(recs) != 0 {
 		t.Fatalf("ListRecordings = %+v, %v; want none", recs, err)
+	}
+}
+
+// TASK-065, test step 3 (ADR-0009 "No completion notifications"): on the wired UI-mode core processing jobs that fail
+// (an STT job pinned to a removed model) and complete (an STT job and its Hub follow-ups) reach no user-visible surface.
+// The popup is the only one the shell gives the core; it is never shown or hidden.
+func TestFinishedJobsShowNothing(t *testing.T) {
+	ctx := context.Background()
+	e, _, _, hubURL := pipelineEnv(t)
+	u := openUICore(t, t.TempDir(), e)
+	configureHub(t, u.c, time.Now(), hubURL)
+	u.start(t)
+	// Stored after the start, so the startup sweep enqueues no STT job of its own for the recordings.
+	model := installModel(t, u.app, "m1", testenv.WhisperOK)
+	enqueueSTT(t, u.app, "job-fails", completedRecording(t, u.app, "rec-1"), "m-gone")
+	enqueueSTT(t, u.app, "job-completes", completedRecording(t, u.app, "rec-2"), model)
+
+	jobs := sqlite.NewJobRepository(u.c.db)
+	want := map[job.Type]job.Status{
+		homeworkflow.SummarizeJobType: job.StatusCompleted, homeworkflow.ExtractHomeworkJobType: job.StatusCompleted,
+	}
+	var all []*job.Job
+	testenv.Eventually(t, "every job ends", func() bool {
+		var err error
+		if all, _, err = jobs.ListActivity(ctx, 100); err != nil {
+			t.Fatal(err)
+		}
+		return len(all) == 4 && !slices.ContainsFunc(all, func(j *job.Job) bool { return !j.Status().IsTerminal() })
+	}, nil)
+	// After the stop no later event can reach the popup.
+	if err := u.life.shutdown(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, j := range all {
+		status, ok := want[j.Type()]
+		switch {
+		case j.ID() == "job-fails":
+			status, ok = job.StatusFailed, true
+		case j.ID() == "job-completes":
+			status, ok = job.StatusCompleted, true
+		}
+		if !ok || j.Status() != status {
+			t.Errorf("job %s (%s) ended %s, want %s", j.ID(), j.Type(), j.Status(), status)
+		}
+	}
+	if shows, hides := u.popup.Shows(), u.popup.Hides(); shows != 0 || hides != 0 || u.prompt.Current() != nil {
+		t.Fatalf("the popup got %d shows and %d hides, prompt %+v; want nothing user-visible", shows, hides,
+			u.prompt.Current())
 	}
 }
 
