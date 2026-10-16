@@ -8,10 +8,10 @@ import { SchedulePage } from "./pages/SchedulePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { Icon, IconSprite } from "./ui/Icon";
 
-function PageView(props: { id: PageId }) {
+function PageView(props: { id: PageId; onOpen: (id: PageId) => void }) {
   switch (props.id) {
     case "recordings":
-      return <RecordingsPage />;
+      return <RecordingsPage onOpenSchedule={() => props.onOpen("schedule")} />;
     case "schedule":
       return <SchedulePage />;
     case "connections":
@@ -49,7 +49,7 @@ export function App() {
       <main className="sheet">
         {/* A new key per section replays the entry animation. */}
         <div key={current} className="screen">
-          <PageView id={current} />
+          <PageView id={current} onOpen={setCurrent} />
         </div>
       </main>
     </div>

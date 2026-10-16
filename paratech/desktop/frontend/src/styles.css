@@ -30,7 +30,7 @@ html, body, #root { height: 100%; }
 .rail .i { width: 20px; height: 20px; }
 .rail .low { margin-top: auto; }
 .sheet { min-width: 0; min-height: 0; overflow: auto; padding: 20px 24px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); border-top-left-radius: var(--r-card); background: var(--panel); }
-.screen { animation: screen-in var(--t-mid) var(--ease); }
+.screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
 @container app (max-width: 880px) {
   .row { grid-template-columns: minmax(0, 1fr); }
@@ -41,6 +41,26 @@ html, body, #root { height: 100%; }
 @media (forced-colors: active) {
   .rail button[aria-current="page"] { outline: 2px solid Highlight; }
 }
+
+/* Page parts shared by the sections on the new components. */
+.page { display: flex; flex: 1; flex-direction: column; }
+.page h1 { margin: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.page .group-title { margin: 20px 0 10px; font-size: var(--fs-h3); line-height: var(--lh-h3); letter-spacing: -0.01em; }
+.head + .group-title, .head + .note + .group-title { margin-top: 0; }
+.row-problem { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.statusbar { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: auto -24px -20px; padding: 8px 24px; border-top: 1px solid var(--line); font-size: var(--fs-small); color: var(--muted); }
+.page > .gap { flex: none; height: 24px; }
+.statusbar span { display: inline-flex; align-items: center; gap: 7px; }
+.statusbar .r { margin-left: auto; }
+.statusbar .i { width: 14px; height: 14px; }
+
+/* CollapsibleList as a folded card: the header toggles the group, the footer shows the rest. */
+.clist-card { margin-top: 12px; }
+.clist-card .clist-header { margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); }
+.clist-card .clist-toggle { color: var(--muted); font-weight: 600; }
+.clist-card .clist-toggle:hover { color: var(--text); text-decoration: none; }
+.clist-card .clist-footer { margin: 6px 0 0; }
 
 /* Older page styles: Connections, Models and Settings until they move to the shared components. */
 h1 { margin: 0 0 16px; }

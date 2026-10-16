@@ -33,8 +33,8 @@ export function Segmented<T extends string>(props: {
   );
 }
 
-/** A thin progress bar; the number is always repeated as text next to it. */
-export function Progress(props: { value: number; label: string; thick?: boolean; text?: ReactNode }) {
+/** A thin progress bar; the number is repeated as text next to it, or by the caller nearby (text={false}). */
+export function Progress(props: { value: number; label: string; thick?: boolean; text?: ReactNode | false }) {
   const v = Math.min(100, Math.max(0, Number.isFinite(props.value) ? props.value : 0));
   return (
     <div className="progress-wrap">
@@ -48,7 +48,7 @@ export function Progress(props: { value: number; label: string; thick?: boolean;
       >
         <b style={{ width: `${v}%` }} />
       </div>
-      <span className="small muted num">{props.text ?? `${v} %`}</span>
+      {props.text !== false && <span className="small muted num">{props.text ?? `${v} %`}</span>}
     </div>
   );
 }

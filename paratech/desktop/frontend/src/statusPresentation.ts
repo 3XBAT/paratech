@@ -3,6 +3,7 @@
 
 // The .js extensions let the Node test runner load the compiled module; TypeScript and Vite map them to the .ts files.
 import { jobStatusLabel, recordingDurationText, recordingStatusLabel } from "./activityView.js";
+import { plural } from "./plural.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -110,4 +111,10 @@ export function jobStatusView(j: { type: string; status: string; waiting: boolea
 /** A running job with a known share done shows a progress bar. */
 export function showsProgress(j: { status: string; progressPercent: number }): boolean {
   return j.status === "RUNNING" && j.progressPercent > 0;
+}
+
+/** "В очереди 2 задачи" for the status line; "" when nothing is queued. */
+export function queueText(jobs: readonly { status: string }[]): string {
+  const n = jobs.filter((j) => j.status === "QUEUED").length;
+  return n === 0 ? "" : `В очереди ${n} ${plural(n, "задача", "задачи", "задач")}`;
 }

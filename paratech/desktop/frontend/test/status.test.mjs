@@ -1,7 +1,8 @@
 // Status chips (src/statusPresentation.ts). Runs on the modules compiled by `npm run test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jobStatusView, recordingStatusView, showsProgress } from "../.test-build/statusPresentation.js";
+import { jobStatusView, queueText, recordingStatusView, showsProgress } from "../.test-build/statusPresentation.js";
+import { plural } from "../.test-build/plural.js";
 
 const recordingStatuses = ["STARTING", "RECORDING", "STOPPING", "FINALIZING", "COMPLETED", "FAILED", "RECOVERY_REQUIRED"];
 const jobStatuses = [
@@ -56,4 +57,14 @@ test("a running recording shows its time; unknown statuses are shown as is", () 
   assert.deepEqual(jobStatusView(job("NEW")), { kind: "neutral", icon: null, hint: "", label: "NEW", value: "" });
   assert.equal(jobStatusView(job("WAITING_FOR_X", { waiting: true })).kind, "wait", "the core says it waits");
   assert.equal(jobStatusView(job("toString")).label, "toString");
+});
+
+test("Russian plurals and the queue line", () => {
+  const forms = (n) => plural(n, "задача", "задачи", "задач");
+  assert.deepEqual([0, 1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111].map(forms), [
+    "задач", "задача", "задачи", "задачи", "задач", "задач", "задач", "задач", "задача", "задачи", "задач", "задача", "задач",
+  ]);
+  assert.equal(queueText([]), "");
+  assert.equal(queueText([{ status: "RUNNING" }]), "");
+  assert.equal(queueText([{ status: "QUEUED" }, { status: "QUEUED" }, { status: "FAILED" }]), "В очереди 2 задачи");
 });
