@@ -63,6 +63,11 @@ export function initTheme(): ThemeChoice {
   return choice;
 }
 
+/** The saved choice, for the theme switch in Settings. */
+export function currentTheme(): ThemeChoice {
+  return readTheme(browserStore());
+}
+
 /** Applies and saves a new choice (the theme switch in Settings). */
 export function setTheme(choice: ThemeChoice): void {
   applyTheme(document.documentElement, choice);

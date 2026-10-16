@@ -88,6 +88,10 @@ html, body, #root { height: 100%; }
   .mrow > .acts { justify-content: start; }
 }
 
+/* Настройки: one card of switch lines and the theme. */
+.settings { max-width: 720px; padding-top: 4px; padding-bottom: 4px; }
+.settings > p { margin: 8px 0; }
+
 /* CollapsibleList as a folded card: the header toggles the group, the footer shows the rest. */
 .clist-card { margin-top: 12px; }
 .clist-card .clist-header { margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); }
