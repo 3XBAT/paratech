@@ -38,6 +38,9 @@ AllowSkipFiles off
 !define PRODUCT_EXE "learning-assistant.exe"
 !define PRODUCT_PUBLISHER "paratech"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant"
+; paratech: links («Открыть Paratech» on the Google sign-in page) for this user only; the app repairs the same values
+; at start (desktop/internal/adapters/urlscheme, ADR-0013).
+!define URL_SCHEME_KEY "Software\Classes\paratech"
 ; Fixed paths of the app, not of the install folder: config.dataDirName and the Wails WebView2 default
 ; (%AppData%\<exe name>, internal/webview2/pkg/edge/chromium.go). A --data-dir elsewhere is not touched.
 !define DATA_DIR "$LOCALAPPDATA\LearningAssistant"
@@ -199,6 +202,12 @@ Section "Install"
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
+
+  ; Recreated, so no stale subkey (another command, a DelegateExecute) stays. Both the exe path and the link are quoted.
+  DeleteRegKey HKCU "${URL_SCHEME_KEY}"
+  WriteRegStr HKCU "${URL_SCHEME_KEY}" "" "URL:Paratech"
+  WriteRegStr HKCU "${URL_SCHEME_KEY}" "URL Protocol" ""
+  WriteRegStr HKCU "${URL_SCHEME_KEY}\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
 SectionEnd
 
 Function un.onInit
@@ -230,6 +239,7 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}.lnk"
   DeleteRegKey HKCU "${UNINST_KEY}"
+  DeleteRegKey HKCU "${URL_SCHEME_KEY}"
 
   ; Default and silent answer: keep the data.
   MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "${MSG_DELETE_DATA}" /SD IDNO IDNO keep_data
