@@ -17,16 +17,16 @@ var settingsT0 = time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 
 // settingsView is every value of the aggregate, so tests compare the whole state at once.
 type settingsView struct {
-	version                 int64
-	prompts, acOnly, notify bool
-	model                   shared.SttModelID
-	updatedAt               time.Time
+	version         int64
+	prompts, acOnly bool
+	model           shared.SttModelID
+	updatedAt       time.Time
 }
 
 func viewOf(s *settings.Settings) settingsView {
 	return settingsView{
 		version: s.Version(), prompts: s.RecordingPromptsEnabled(), acOnly: s.ProcessOnlyOnACPower(),
-		notify: s.NotifyOnProcessingComplete(), model: s.DefaultSttModel(), updatedAt: s.UpdatedAt(),
+		model: s.DefaultSttModel(), updatedAt: s.UpdatedAt(),
 	}
 }
 
@@ -58,7 +58,7 @@ func TestSettingsLoadDefaultsOnEmptyDatabase(t *testing.T) {
 	r := NewSettingsRepository(db)
 
 	got := viewOf(loadSettings(t, r))
-	want := settingsView{prompts: true, acOnly: true, notify: true}
+	want := settingsView{prompts: true, acOnly: true}
 	if got != want {
 		t.Fatalf("Load on an empty database = %+v, want the defaults %+v", got, want)
 	}
@@ -81,30 +81,30 @@ func TestSettingsSave(t *testing.T) {
 		{
 			name:   "first save stores the defaults with version 1",
 			change: func(*settings.Settings) error { return nil },
-			want:   settingsView{version: 1, prompts: true, acOnly: true, notify: true},
+			want:   settingsView{version: 1, prompts: true, acOnly: true},
 		},
 		{
 			name:   "first save of a change",
-			change: func(s *settings.Settings) error { return s.SetNotifyOnProcessingComplete(false, t1) },
-			want:   settingsView{version: 1, prompts: true, acOnly: true, updatedAt: t1},
+			change: func(s *settings.Settings) error { return s.SetProcessOnlyOnACPower(false, t1) },
+			want:   settingsView{version: 1, prompts: true, updatedAt: t1},
 		},
 		{
 			name:   "update of a stored row",
 			seed:   true,
 			change: func(s *settings.Settings) error { return s.SetRecordingPromptsEnabled(false, t1) },
-			want:   settingsView{version: 2, acOnly: true, notify: true, updatedAt: t1},
+			want:   settingsView{version: 2, acOnly: true, updatedAt: t1},
 		},
 		{
 			name:   "installed default model",
 			seed:   true,
 			change: func(s *settings.Settings) error { return s.SelectDefaultSttModel("m1", t1) },
-			want:   settingsView{version: 2, prompts: true, acOnly: true, notify: true, model: "m1", updatedAt: t1},
+			want:   settingsView{version: 2, prompts: true, acOnly: true, model: "m1", updatedAt: t1},
 		},
 		{
 			name:    "default model that is not installed is a conflict",
 			seed:    true,
 			change:  func(s *settings.Settings) error { return s.SelectDefaultSttModel("missing", t1) },
-			want:    settingsView{version: 1, prompts: true, acOnly: true, notify: true},
+			want:    settingsView{version: 1, prompts: true, acOnly: true},
 			wantErr: shared.ErrConflict,
 		},
 	}
@@ -170,7 +170,7 @@ func TestSettingsStaleSaveIsVersionConflict(t *testing.T) {
 				first, second := loadSettings(t, r), loadSettings(t, r)
 				mustChange(t, first.SetRecordingPromptsEnabled(false, settingsT0))
 				saveSettings(t, r, first)
-				mustChange(t, second.SetNotifyOnProcessingComplete(false, settingsT0))
+				mustChange(t, second.SetProcessOnlyOnACPower(false, settingsT0))
 				return second
 			},
 		},
@@ -179,7 +179,7 @@ func TestSettingsStaleSaveIsVersionConflict(t *testing.T) {
 			setup: func(t *testing.T, r *SettingsRepository) *settings.Settings {
 				first, second := loadSettings(t, r), loadSettings(t, r)
 				saveSettings(t, r, first)
-				mustChange(t, second.SetNotifyOnProcessingComplete(false, settingsT0))
+				mustChange(t, second.SetProcessOnlyOnACPower(false, settingsT0))
 				return second
 			},
 		},
@@ -267,7 +267,7 @@ func TestSettingsSaveRolledBackWithTheOuterTransaction(t *testing.T) {
 		t.Fatalf("Do = %v, want the abort error", err)
 	}
 
-	if got := viewOf(loadSettings(t, r)); got != (settingsView{prompts: true, acOnly: true, notify: true}) {
+	if got := viewOf(loadSettings(t, r)); got != (settingsView{prompts: true, acOnly: true}) {
 		t.Fatalf("a rolled-back Save is visible: %+v", got)
 	}
 }
@@ -327,32 +327,27 @@ func TestSettingsPersistAcrossRestarts(t *testing.T) {
 		{
 			name:   "AC-02: disable recording prompts",
 			change: func(s *settings.Settings, now time.Time) error { return s.SetRecordingPromptsEnabled(false, now) },
-			want:   settingsView{acOnly: true, notify: true},
+			want:   settingsView{acOnly: true},
 		},
 		{
 			name:   "AC-22: disable the AC-power restriction",
 			change: func(s *settings.Settings, now time.Time) error { return s.SetProcessOnlyOnACPower(false, now) },
-			want:   settingsView{notify: true},
+			want:   settingsView{},
 		},
 		{
 			name:   "AC-02: re-enable recording prompts",
 			change: func(s *settings.Settings, now time.Time) error { return s.SetRecordingPromptsEnabled(true, now) },
-			want:   settingsView{prompts: true, notify: true},
+			want:   settingsView{prompts: true},
 		},
 		{
 			name:   "AC-22: re-enable the AC-power restriction",
 			change: func(s *settings.Settings, now time.Time) error { return s.SetProcessOnlyOnACPower(true, now) },
-			want:   settingsView{prompts: true, acOnly: true, notify: true},
-		},
-		{
-			name:   "disable notifications",
-			change: func(s *settings.Settings, now time.Time) error { return s.SetNotifyOnProcessingComplete(false, now) },
 			want:   settingsView{prompts: true, acOnly: true},
 		},
 	}
 
 	reopenSettings(t, path, func(r *SettingsRepository) {
-		if got := viewOf(loadSettings(t, r)); got != (settingsView{prompts: true, acOnly: true, notify: true}) {
+		if got := viewOf(loadSettings(t, r)); got != (settingsView{prompts: true, acOnly: true}) {
 			t.Fatalf("fresh database = %+v, want the defaults", got)
 		}
 	})
@@ -435,7 +430,7 @@ func TestSettingsRecordingSourceRoundTrip(t *testing.T) {
 
 		// Another writer (the settings page) saves first: the stale save of the source is a version conflict.
 		other := loadSettings(t, r)
-		mustChange(t, other.SetNotifyOnProcessingComplete(false, settingsT0.Add(time.Minute)))
+		mustChange(t, other.SetProcessOnlyOnACPower(false, settingsT0.Add(time.Minute)))
 		saveSettings(t, r, other)
 		mustChange(t, s.SetRecordingSource("chrome.exe", settingsT0.Add(2*time.Minute)))
 		if err := r.Save(ctx, s); !errors.Is(err, shared.ErrVersionConflict) {
@@ -444,8 +439,8 @@ func TestSettingsRecordingSourceRoundTrip(t *testing.T) {
 		fresh := loadSettings(t, r)
 		mustChange(t, fresh.SetRecordingSource("chrome.exe", settingsT0.Add(2*time.Minute)))
 		saveSettings(t, r, fresh)
-		if got := loadSettings(t, r); got.RecordingSource() != "chrome.exe" || got.NotifyOnProcessingComplete() {
-			t.Fatalf("after the retry: source %q, notify %v", got.RecordingSource(), got.NotifyOnProcessingComplete())
+		if got := loadSettings(t, r); got.RecordingSource() != "chrome.exe" || got.ProcessOnlyOnACPower() {
+			t.Fatalf("after the retry: source %q, AC only %v", got.RecordingSource(), got.ProcessOnlyOnACPower())
 		}
 	})
 

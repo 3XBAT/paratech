@@ -23,7 +23,6 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/modelcatalog"
-	"paratech/desktop/internal/cases/notify"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
@@ -82,9 +81,9 @@ type cleanup struct {
 	run  func(ctx context.Context) (int, error)
 }
 
-// buildCore opens the database and the Storage Manager below dataDir and builds every use case. notifier may be nil
-// (headless: nobody is told about finished jobs). It starts no goroutines; on an error it closes what it opened.
-func buildCore(ctx context.Context, dataDir string, e env, notifier notify.Notifier, log *slog.Logger) (*core, error) {
+// buildCore opens the database and the Storage Manager below dataDir and builds every use case. It starts no
+// goroutines; on an error it closes what it opened.
+func buildCore(ctx context.Context, dataDir string, e env, log *slog.Logger) (*core, error) {
 	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dataDir, dbFile), Migrate: true, Logger: log})
 	if err != nil {
 		return nil, fmt.Errorf("app: open database: %w", err)
@@ -97,14 +96,14 @@ func buildCore(ctx context.Context, dataDir string, e env, notifier notify.Notif
 	}
 
 	c := &core{db: db, store: store}
-	if err := c.wire(dataDir, e, notifier, log); err != nil {
+	if err := c.wire(dataDir, e, log); err != nil {
 		return nil, errors.Join(err, c.close())
 	}
 	return c, nil
 }
 
 // wire builds the use cases on the opened storage.
-func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.Logger) error {
+func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	db, store, root := c.db, c.store, filepath.Join(dataDir, artifactsDir)
 	jobs := sqlite.NewJobRepository(db)
 	settings := sqlite.NewSettingsRepository(db)
@@ -189,20 +188,9 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 		return err
 	}
 
-	var observer jobrunner.Observer
-	if notifier != nil {
-		n, err := notify.New(notify.Deps{
-			Settings: settings, Notices: sqlite.NewNoticeRepository(db), Notifier: notifier, Clock: e.clock, Log: log,
-		}, notify.Config{Types: notifyTypes()})
-		if err != nil {
-			return fmt.Errorf("app: notifications: %w", err)
-		}
-		observer = n
-	}
-
 	c.runner, err = jobrunner.New(jobrunner.Deps{
 		Jobs: jobs, Clock: e.clock, Sleeper: e.clock, Jitter: e.jitter, Log: log,
-		Power: e.power, Settings: settings, Observer: observer,
+		Power: e.power, Settings: settings,
 	}, e.runner)
 	if err != nil {
 		return fmt.Errorf("app: job runner: %w", err)

@@ -270,12 +270,11 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 ## Уведомления (PRD §15; к AC-01 и AC-02)
 
-Решение владельца: уведомлять только о том, что занятие началось (это попап), без спама.
+Решение владельца (PRD §15, TASK-065): единственное уведомление — попап о начале занятия, без спама.
 Автотесты: `TestRunAnnouncesExactlyOnce`, `TestRestartDuringLessonDoesNotDuplicate` (`desktop/internal/cases/scheduler/service_test.go`); `TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart` (`desktop/tests/scheduler_sqlite_test.go`).
 Вручную:
 - [ ] Попап «Начинается занятие» — один раз на занятие; после «Пропустить» и после перезапуска во время того же занятия не появляется снова.
-- [ ] Расхождение с решением: сборка ещё показывает тосты Windows о завершении обработки (TASK-053: «Транскрипт готов», «Конспект готов», «Поиск заданий завершён»; автотесты `TestThreeIdenticalEventsNotifyOnce` в `desktop/internal/cases/notify/service_test.go`, `TestNotificationIsSentOnceAcrossRestart` и `TestDisabledNotificationsReachNoNotifier` в `desktop/tests/notify_sqlite_test.go`). Пока они есть: каждый — один раз, после перезапуска не повторяется; снять «Уведомлять о завершении обработки» — тостов нет. Отметить, нужно ли их убрать.
-- [ ] Параметры Windows → Уведомления: выключить для приложения — тостов нет, приложение работает.
+- [ ] Тостов Windows о завершении обработки нет (TASK-065): после распознавания, конспекта и поиска ДЗ в углу экрана и в Центре уведомлений от приложения ничего; ход виден в «Записях». В «Настройках» два флажка, «Уведомлять о завершении обработки» нет. Автотест `TestNoCompletionToasts` (`desktop/tests/no_completion_toasts_test.go`).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 

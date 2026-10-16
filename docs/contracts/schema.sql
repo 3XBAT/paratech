@@ -4,6 +4,7 @@
 -- written from this file. This is a draft of the contract, not a migration: it has no goose annotations.
 -- Architecture: docs/architecture.md (aggregates map to tables, ARCH-13 references are plain id columns).
 -- Source of requirements: docs/prd/learning-assistant-prd-v0.4.md.
+-- job_notices (0004) and settings.notify_on_processing_complete were dropped by migration 0008 (TASK-065).
 --
 -- Conventions
 --   * SQLite dialect, pure Go driver modernc.org/sqlite. The adapter enables PRAGMA foreign_keys = ON,
@@ -27,7 +28,7 @@
 --     versioned aggregate OWNS as state (settings.default_stt_model_id) is ON DELETE RESTRICT: the use case clears it
 --     through the aggregate first. Adapters map a foreign key violation to an error wrapping shared.ErrConflict.
 --   * Status columns carry a CHECK that lists exactly the Go constants of the aggregate (job.Statuses,
---     recording.Statuses, delivery.Statuses, notice.Statuses, proposal.Statuses). desktop/tests/schema_test.go keeps
+--     recording.Statuses, delivery.Statuses, proposal.Statuses). desktop/tests/schema_test.go keeps
 --     both in sync.
 --   * NO SECRETS, TOKENS OR PASSWORDS IN THIS SCHEMA (hard rule 4, PRD section 12, AC-19, ARCH-34). Refresh
 --     tokens, the Hub API key and mail credentials live in Windows Credential Manager. Do not add columns for them.
@@ -238,7 +239,7 @@ CREATE INDEX idx_deliveries_status ON deliveries (status);
 CREATE INDEX idx_deliveries_assignment ON deliveries (assignment_id);
 
 -- ---------------------------------------------------------------------------------------------------------------
--- settings: the one row of typed user settings (PRD sections 6.1, 7.4, 8, 15; AC-02, AC-07, AC-22).
+-- settings: the one row of typed user settings (PRD sections 6.1, 7.4, 8; AC-02, AC-07, AC-22).
 -- Aggregate settings/settings. DEFAULTs mirror the PRD defaults; the domain owns the defaults (TASK-007).
 -- Adding a setting is a migration with a new typed column. Never store secrets here (hard rule 4).
 -- ---------------------------------------------------------------------------------------------------------------
@@ -246,7 +247,6 @@ CREATE TABLE settings (
     id                            INTEGER PRIMARY KEY CHECK (id = 1),
     recording_prompts_enabled     INTEGER NOT NULL DEFAULT 1 CHECK (recording_prompts_enabled IN (0, 1)),     -- AC-02
     process_only_on_ac_power      INTEGER NOT NULL DEFAULT 1 CHECK (process_only_on_ac_power IN (0, 1)),      -- AC-21, AC-22
-    notify_on_processing_complete INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_processing_complete IN (0, 1)), -- section 15
     default_stt_model_id          TEXT    REFERENCES stt_models (id) ON DELETE RESTRICT,                      -- AC-07; the use case clears it via the settings aggregate before removing a model (ADR-0004)
     version                       INTEGER NOT NULL DEFAULT 0,                                                  -- optimistic concurrency (ADR-0004)
     updated_at                    INTEGER NOT NULL
@@ -287,21 +287,6 @@ ALTER TABLE deliveries ADD COLUMN attachment_size INTEGER NOT NULL DEFAULT 0 CHE
 -- deliveries: the send round, 0 for the first job of a delivery and one more for every "send again" (UNKNOWN to
 -- PENDING). The job idempotency key is per round, so retries, repeats and restarts never add a second job.
 ALTER TABLE deliveries ADD COLUMN send_round INTEGER NOT NULL DEFAULT 0 CHECK (send_round >= 0);
-
--- ---------------------------------------------------------------------------------------------------------------
--- job_notices: the user was notified that a job reached a finished status (PRD section 15). Aggregate jobs/notice.
--- One row per job and status, written BEFORE the notification is shown, so repeated events and restarts never notify
--- twice (at most once: a crash between the two loses that notification). Rows never change, so there is no Save
--- port and no version column (ADR-0004(d)). Status values = notice.Statuses. Nothing but the job type is copied: the
--- texts shown are fixed per type, never user content.
--- ---------------------------------------------------------------------------------------------------------------
-CREATE TABLE job_notices (
-    job_id      TEXT    NOT NULL REFERENCES jobs (id) ON DELETE CASCADE, -- a notice means nothing without its job
-    status      TEXT    NOT NULL CHECK (status IN ('COMPLETED', 'FAILED')),
-    job_type    TEXT    NOT NULL CHECK (length(job_type) > 0),
-    notified_at INTEGER NOT NULL,
-    PRIMARY KEY (job_id, status)
-);
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- homework_drafts: the draft history of one assignment (PRD section 10; AC-13). Aggregate coursework/homeworkdraft;

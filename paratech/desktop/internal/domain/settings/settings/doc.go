@@ -1,8 +1,8 @@
-// Package settings is the aggregate of the application settings (PRD sections 6.1, 7.4 and 15,
+// Package settings is the aggregate of the application settings (PRD sections 6.1 and 7.4,
 // AC-02, AC-07, AC-22).
 //
 // The aggregate is a singleton. New returns the defaults of a fresh installation (recording prompts on, process
-// only on AC power on, notifications on, no default STT model) with version 0; a repository returns them from Load
+// only on AC power on, no default STT model) with version 0; a repository returns them from Load
 // while nothing is stored, and the first Save stores them (ADR-0004(d)). Restore rebuilds a stored row. Values change
 // only through the Set/Select/Clear methods, which take the change time from the caller (ARCH-15).
 //

@@ -1,4 +1,4 @@
-// Package settings is the bounded context of user-adjustable application settings (PRD sections 6.1, 7.4 and 15).
+// Package settings is the bounded context of user-adjustable application settings (PRD sections 6.1 and 7.4).
 // Aggregates: domain/settings/settings.
 //
 // Layout of a context (docs/architecture.md section 3.1):
@@ -15,7 +15,6 @@
 //   - Settings: the single set of typed user settings of the installation (single user, no accounts in MVP).
 //   - Recording prompts: the global switch for the automatic "lesson is starting" popup (AC-02).
 //   - Process only on AC power: the switch that keeps heavy local jobs (STT) off the battery (AC-21, AC-22).
-//   - Notify on processing complete: whether finishing a processing job notifies the user (PRD section 15).
 //   - Default STT model: the installed model used when a job does not pin another one (AC-07).
 //
 // Settings never hold secrets or tokens (hard rule 4).

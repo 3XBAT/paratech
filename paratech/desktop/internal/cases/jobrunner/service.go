@@ -73,7 +73,6 @@ type Service struct {
 	jitter   Jitter
 	power    PowerMonitor
 	settings SettingsReader
-	observer Observer
 	log      *slog.Logger
 
 	cfg    Config
@@ -139,7 +138,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	}
 	s := &Service{
 		jobs: deps.Jobs, clock: deps.Clock, sleeper: deps.Sleeper, jitter: deps.Jitter, power: deps.Power, settings: deps.Settings,
-		observer: deps.Observer, log: log,
+		log: log,
 		cfg: cfg, policy: policy,
 		handlers: map[job.Type]Registration{}, running: map[shared.JobID]*run{},
 		stopped: make(chan struct{}), heavySlots: make(chan struct{}, cfg.MaxHeavy),
@@ -328,9 +327,6 @@ func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 			return fmt.Errorf("%w: %w", ErrNotCancellable, err)
 		}
 		if err = s.jobs.Save(ctx, j); !errors.Is(err, shared.ErrVersionConflict) {
-			if err == nil {
-				s.jobFinished(ctx, j.Snapshot())
-			}
 			return err
 		}
 	}
@@ -562,13 +558,6 @@ func (s *Service) call(ctx context.Context, h Handler, r *run) (err error) {
 // finish applies the outcome of the attempt through the aggregate and saves it.
 func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 	r.ended.Store(true)
-	// Set when a terminal status was saved; the observer runs after r.mu is released (deferred calls run in reverse).
-	var finished *job.Snapshot
-	defer func() {
-		if finished != nil {
-			s.jobFinished(s.runCtx, *finished)
-		}
-	}()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.finished = true
@@ -601,10 +590,6 @@ func (s *Service) finish(r *run, herr, cause error, timeout time.Duration) {
 	case err == nil:
 		s.log.Info("job attempt finished", slog.String("job", id), slog.String("type", string(j.Type())),
 			slog.Int("attempt", attempt), slog.String("outcome", outcome), slog.String("status", j.Status().String()))
-		if j.Status().IsTerminal() {
-			snap := j.Snapshot()
-			finished = &snap
-		}
 	case errors.Is(err, shared.ErrConflict) || errors.Is(err, shared.ErrNotFound):
 		s.log.Info("job was changed elsewhere, outcome dropped", slog.String("job", id), slog.String("outcome", outcomeDropped))
 	default:

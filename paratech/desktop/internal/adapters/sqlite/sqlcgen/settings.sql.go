@@ -12,9 +12,8 @@ import (
 
 const getSettings = `-- name: GetSettings :one
 
-SELECT id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
-       default_stt_model_id, version, updated_at, homework_recipient, smtp_host, smtp_port, smtp_security,
-       smtp_username, hub_url, recording_source_app
+SELECT id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id, version, updated_at,
+       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app
 FROM settings
 WHERE id = 1
 `
@@ -28,7 +27,6 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.ID,
 		&i.RecordingPromptsEnabled,
 		&i.ProcessOnlyOnAcPower,
-		&i.NotifyOnProcessingComplete,
 		&i.DefaultSttModelID,
 		&i.Version,
 		&i.UpdatedAt,
@@ -44,28 +42,26 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 }
 
 const insertSettings = `-- name: InsertSettings :exec
-INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, notify_on_processing_complete,
-                      default_stt_model_id, homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username,
-                      hub_url, recording_source_app, version, updated_at)
-VALUES (1, ?1, ?2,
-        ?3, ?4, ?5,
-        ?6, ?7, ?8, ?9, ?10,
-        ?11, 1, ?12)
+INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id,
+                      homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url,
+                      recording_source_app, version, updated_at)
+VALUES (1, ?1, ?2, ?3,
+        ?4, ?5, ?6, ?7,
+        ?8, ?9, ?10, 1, ?11)
 `
 
 type InsertSettingsParams struct {
-	RecordingPromptsEnabled    int64
-	ProcessOnlyOnAcPower       int64
-	NotifyOnProcessingComplete int64
-	DefaultSttModelID          sql.NullString
-	HomeworkRecipient          string
-	SmtpHost                   string
-	SmtpPort                   int64
-	SmtpSecurity               string
-	SmtpUsername               string
-	HubUrl                     string
-	RecordingSourceApp         string
-	UpdatedAt                  int64
+	RecordingPromptsEnabled int64
+	ProcessOnlyOnAcPower    int64
+	DefaultSttModelID       sql.NullString
+	HomeworkRecipient       string
+	SmtpHost                string
+	SmtpPort                int64
+	SmtpSecurity            string
+	SmtpUsername            string
+	HubUrl                  string
+	RecordingSourceApp      string
+	UpdatedAt               int64
 }
 
 // A never-stored settings aggregate (version 0) is inserted with version 1. A second insert violates the primary key,
@@ -74,7 +70,6 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 	_, err := q.db.ExecContext(ctx, insertSettings,
 		arg.RecordingPromptsEnabled,
 		arg.ProcessOnlyOnAcPower,
-		arg.NotifyOnProcessingComplete,
 		arg.DefaultSttModelID,
 		arg.HomeworkRecipient,
 		arg.SmtpHost,
@@ -90,36 +85,34 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 
 const updateSettings = `-- name: UpdateSettings :execrows
 UPDATE settings
-SET recording_prompts_enabled     = ?1,
-    process_only_on_ac_power      = ?2,
-    notify_on_processing_complete = ?3,
-    default_stt_model_id          = ?4,
-    homework_recipient            = ?5,
-    smtp_host                     = ?6,
-    smtp_port                     = ?7,
-    smtp_security                 = ?8,
-    smtp_username                 = ?9,
-    hub_url                       = ?10,
-    recording_source_app          = ?11,
-    version                       = version + 1,
-    updated_at                    = ?12
-WHERE id = 1 AND version = ?13
+SET recording_prompts_enabled = ?1,
+    process_only_on_ac_power  = ?2,
+    default_stt_model_id      = ?3,
+    homework_recipient        = ?4,
+    smtp_host                 = ?5,
+    smtp_port                 = ?6,
+    smtp_security             = ?7,
+    smtp_username             = ?8,
+    hub_url                   = ?9,
+    recording_source_app      = ?10,
+    version                   = version + 1,
+    updated_at                = ?11
+WHERE id = 1 AND version = ?12
 `
 
 type UpdateSettingsParams struct {
-	RecordingPromptsEnabled    int64
-	ProcessOnlyOnAcPower       int64
-	NotifyOnProcessingComplete int64
-	DefaultSttModelID          sql.NullString
-	HomeworkRecipient          string
-	SmtpHost                   string
-	SmtpPort                   int64
-	SmtpSecurity               string
-	SmtpUsername               string
-	HubUrl                     string
-	RecordingSourceApp         string
-	UpdatedAt                  int64
-	ExpectedVersion            int64
+	RecordingPromptsEnabled int64
+	ProcessOnlyOnAcPower    int64
+	DefaultSttModelID       sql.NullString
+	HomeworkRecipient       string
+	SmtpHost                string
+	SmtpPort                int64
+	SmtpSecurity            string
+	SmtpUsername            string
+	HubUrl                  string
+	RecordingSourceApp      string
+	UpdatedAt               int64
+	ExpectedVersion         int64
 }
 
 // Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
@@ -128,7 +121,6 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 	result, err := q.db.ExecContext(ctx, updateSettings,
 		arg.RecordingPromptsEnabled,
 		arg.ProcessOnlyOnAcPower,
-		arg.NotifyOnProcessingComplete,
 		arg.DefaultSttModelID,
 		arg.HomeworkRecipient,
 		arg.SmtpHost,

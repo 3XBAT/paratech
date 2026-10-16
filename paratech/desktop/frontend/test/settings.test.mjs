@@ -13,7 +13,7 @@ function fakeCall(reply) {
 }
 
 test("get calls the bound Go method and returns the toggles", async () => {
-  const reply = { recordingPromptsEnabled: true, processOnlyOnAcPower: false, notifyOnProcessingComplete: true };
+  const reply = { recordingPromptsEnabled: true, processOnlyOnAcPower: false };
   const { call, calls } = fakeCall(reply);
   const got = await settingsApi(call).get();
   assert.deepEqual(got, reply);
@@ -21,28 +21,15 @@ test("get calls the bound Go method and returns the toggles", async () => {
 });
 
 test("setters pass the value and return the stored toggles", async () => {
-  const reply = { recordingPromptsEnabled: false, processOnlyOnAcPower: false, notifyOnProcessingComplete: false };
+  const reply = { recordingPromptsEnabled: false, processOnlyOnAcPower: false };
   const { call, calls } = fakeCall(reply);
   const api = settingsApi(call);
   assert.deepEqual(await api.setRecordingPromptsEnabled(false), reply);
-  await api.setProcessOnlyOnAcPower(false);
-  assert.deepEqual(await api.setNotifyOnProcessingComplete(false), reply);
+  assert.deepEqual(await api.setProcessOnlyOnAcPower(false), reply);
   assert.deepEqual(calls, [
     [methods.setRecordingPromptsEnabled, false],
     [methods.setProcessOnlyOnAcPower, false],
-    [methods.setNotifyOnProcessingComplete, false],
   ]);
-});
-
-test("the notification setter calls the bound Go method with the value", async () => {
-  const { call, calls } = fakeCall({
-    recordingPromptsEnabled: true,
-    processOnlyOnAcPower: true,
-    notifyOnProcessingComplete: true,
-  });
-  const got = await settingsApi(call).setNotifyOnProcessingComplete(true);
-  assert.equal(got.notifyOnProcessingComplete, true);
-  assert.deepEqual(calls, [["paratech/desktop/internal/input/wails.SettingsService.SetNotifyOnProcessingComplete", true]]);
 });
 
 test("a malformed reply is an error", () => {
@@ -50,11 +37,9 @@ test("a malformed reply is an error", () => {
     null,
     "x",
     {},
-    { recordingPromptsEnabled: "yes", processOnlyOnAcPower: true, notifyOnProcessingComplete: true },
-    // Without the notification toggle (an older core) the reply is malformed too.
-    { recordingPromptsEnabled: true, processOnlyOnAcPower: true },
-    { recordingPromptsEnabled: true, processOnlyOnAcPower: true, notifyOnProcessingComplete: "true" },
-    { recordingPromptsEnabled: true, processOnlyOnAcPower: true, notifyOnProcessingComplete: null },
+    { recordingPromptsEnabled: "yes", processOnlyOnAcPower: true },
+    { recordingPromptsEnabled: true },
+    { recordingPromptsEnabled: true, processOnlyOnAcPower: null },
   ]) {
     assert.throws(() => parseSettings(raw), /settings/);
   }
@@ -64,10 +49,11 @@ test("extra fields of a reply are dropped", () => {
   const got = parseSettings({
     recordingPromptsEnabled: true,
     processOnlyOnAcPower: true,
+    // The setting removed in TASK-065: a reply that still carries it is not shown as a toggle.
     notifyOnProcessingComplete: false,
     token: "x",
   });
-  assert.deepEqual(got, { recordingPromptsEnabled: true, processOnlyOnAcPower: true, notifyOnProcessingComplete: false });
+  assert.deepEqual(got, { recordingPromptsEnabled: true, processOnlyOnAcPower: true });
 });
 
 test("a failing call rejects", async () => {

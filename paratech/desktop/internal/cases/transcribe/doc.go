@@ -4,7 +4,7 @@
 //
 // The app registers Service with the job runner as a Heavy type with the requeue recovery policy: the job has no
 // external side effect and every attempt is idempotent (see Service). It publishes transcript.Created through
-// EventPublisher; notifications and post-processing are the app's, not this package's.
+// EventPublisher; post-processing is the app's, not this package's.
 //
 // Enqueuer creates the STT job of a completed recording (the completion listener of the recording session) with the
 // model pinned and the key "stt:<recording id>:<model id>", and its EnqueuePending is the startup sweep for

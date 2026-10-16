@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-
-	"paratech/desktop/internal/domain/jobs/notice"
 )
 
 var (
@@ -60,8 +58,6 @@ type ui interface {
 	showPopup() error
 	hidePopup() error
 	showMain() error
-	notify(ctx context.Context, t toast) error
-	canNotify() bool
 	pickScheduleFile() (string, error)
 	pickModelFile() (string, error)
 }
@@ -135,27 +131,6 @@ func (s *Shell) ShowMain() error {
 		return err
 	}
 	return u.showMain()
-}
-
-// Notify shows a Windows notification about a finished job (PRD section 15) with fixed texts for its type and
-// status; it is the notify.Notifier port. Windows applies the user's notification settings (the per-app switch,
-// Focus Assist / Do Not Disturb). It returns when ctx ends even if Windows is still busy with the toast.
-func (s *Shell) Notify(ctx context.Context, n *notice.Notice) error {
-	if n == nil {
-		return ErrNoNotice
-	}
-	u, err := s.current()
-	if err != nil {
-		return err
-	}
-	return u.notify(ctx, toastFor(n))
-}
-
-// Ready reports whether Notify can show a toast now: the shell runs and Windows notifications were set up. It is false
-// before Run, after the shell stopped and on other systems (the notify.Notifier port).
-func (s *Shell) Ready() bool {
-	u, err := s.current()
-	return err == nil && u.canNotify()
 }
 
 // bindings are the services bound to the pages; Wails needs each one as its concrete type.

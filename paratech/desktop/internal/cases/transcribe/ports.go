@@ -63,8 +63,8 @@ type ArtifactStore interface {
 	Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error)
 }
 
-// EventPublisher hands the facts of this use case to the app, which raises the "processing complete" notification
-// and schedules post-processing (PRD sections 7.1 and 15). The app wires it; this use case does neither itself.
+// EventPublisher hands the facts of this use case to the app, which schedules post-processing (PRD section 7.1). The
+// app wires it; this use case does not do it itself.
 type EventPublisher interface {
 	// TranscriptCreated is called after the transcript is stored and before the STT job completes (PRD section 7.3).
 	// Delivery is at least once: a rerun of the job after a crash or a failed call publishes the same event again, so

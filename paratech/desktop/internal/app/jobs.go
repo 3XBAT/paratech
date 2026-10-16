@@ -68,10 +68,3 @@ func registrations(h jobHandlers) []jobrunner.Registration {
 		},
 	)
 }
-
-// notifyTypes are the job types whose finish the user is told about (PRD section 15); email delivery has its own UI.
-func notifyTypes() []job.Type {
-	return []job.Type{
-		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType,
-	}
-}

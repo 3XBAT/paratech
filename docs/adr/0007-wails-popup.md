@@ -17,7 +17,7 @@
 | Tray | Icon appears (Wails default until an app icon exists). Menu and click handlers are wired but were not clicked by the scripts. |
 | Single instance | Works: Wails `SingleInstance` (named mutex). A second launch exits with code 0 within ~70 ms; the first one gets a callback that shows its main window (not observed visually). |
 | Graceful stop | Works: Ctrl+Break (Go maps it to `os.Interrupt` like Ctrl+C) cancels the context, the shell quits and `main` logs "gracefully stopped". |
-| Notifications | Wails `services/notifications` (toast); used for the notification policy (PRD §15) since TASK-053, see Consequences. |
+| Notifications | Wails `services/notifications` (toast); not used: removed by TASK-065, owner decision; see ADR-0009. |
 | Autostart | Feasible: `app.Autostart.Enable` (HKCU `Run` key). Not enabled: it must be a user setting. |
 
 ## Consequences
@@ -29,11 +29,7 @@
   (`ApplicationStarted`), when the shell is ready.
 - Default data dir is `%LOCALAPPDATA%\LearningAssistant`, DB file `<DataDir>/learning-assistant.db` (to be confirmed by the owner).
 - Release builds must use `-tags production` (see `docs/refs/wails.md`).
-- Toasts (TASK-053): the notifications service writes HKCU registry keys at startup (AppUserModelId, COM activator CLSID) and
-  saves categories at shutdown. A failure there is logged and the app runs without toasts; texts are fixed, never user content.
-- The notifications service pulls `git.sr.ht/~jackmordaunt/go-toast/v2` v2.0.3 as an indirect dependency (hard rule 9).
-- The `notify.Notifier` port is implemented by `input/wails` `Shell` (like `ShowPopup`): the notifications service must be
-  registered with the Wails app the shell owns.
+- Toasts of TASK-053: removed by TASK-065, owner decision; see ADR-0009.
 - TASK-022: `Shell` also implements the `recordingprompt.Popup` port (`ShowPopup`/`HidePopup`); `ShowPopup` emits the
   Wails event `recordingprompt:shown` and the page reads `PromptService.Current`. Tray "Show recording popup" asks the
   core for an ad-hoc prompt. The popup page becomes the React app's second entry (TASK-022 frontend); size 360x180, 360x300 since TASK-059 (source picker).

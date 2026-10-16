@@ -253,8 +253,7 @@ func (f fakeSettings) Save(ctx context.Context, s *settings.Settings) error {
 	next := s.Version() + 1
 	f.w.settings = settings.State{
 		Version: next, RecordingPromptsEnabled: s.RecordingPromptsEnabled(), ProcessOnlyOnACPower: s.ProcessOnlyOnACPower(),
-		NotifyOnProcessingComplete: s.NotifyOnProcessingComplete(), DefaultSttModel: s.DefaultSttModel(),
-		UpdatedAt: s.UpdatedAt(),
+		DefaultSttModel: s.DefaultSttModel(), UpdatedAt: s.UpdatedAt(),
 	}
 	s.Persisted(next)
 	return nil
