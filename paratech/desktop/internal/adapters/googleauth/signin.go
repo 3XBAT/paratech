@@ -30,14 +30,6 @@ const (
 // oauthDenied is the error of the redirect when the user refuses the consent screen.
 const oauthDenied = "access_denied"
 
-// Fixed answer pages of the redirect (Russian UI). They never echo anything of the request.
-const (
-	pageDone = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Learning Assistant</title></head>` +
-		`<body><p>Вход выполнен, вернитесь в приложение.</p></body></html>`
-	pageFailed = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Learning Assistant</title></head>` +
-		`<body><p>Вход не выполнен. Вернитесь в приложение.</p></body></html>`
-)
-
 // SignIn runs the browser sign-in and stores the refresh token: it opens a loopback listener on 127.0.0.1, asks the
 // browser to open Google's consent page with a PKCE challenge and a random state, waits for the one redirect that
 // carries that state, exchanges the code with the verifier and keeps the tokens if Google granted exactly
@@ -221,11 +213,14 @@ func (c *callback) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.result <- res
 
-	if res.err != "" {
+	switch res.err {
+	case "":
+		writePage(w, http.StatusOK, pageDone)
+	case oauthDenied:
+		writePage(w, http.StatusOK, pageDenied)
+	default:
 		writePage(w, http.StatusOK, pageFailed)
-		return
 	}
-	writePage(w, http.StatusOK, pageDone)
 }
 
 // writePage answers with a fixed page that the browser neither caches, sniffs, frames nor refers from.
@@ -235,7 +230,7 @@ func writePage(w http.ResponseWriter, status int, page string) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("Content-Security-Policy", "default-src 'none'")
+	h.Set("Content-Security-Policy", pagePolicy)
 	h.Set("X-Frame-Options", "DENY")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, page)

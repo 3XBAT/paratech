@@ -181,6 +181,10 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	closeLog := a.openLogFile()
 	// No path: it lies below the user's profile, and logs go into the support bundle.
 	a.log.Info("instance lock acquired")
+	if a.shell != nil {
+		// Only the instance with the UI: the links bring its window forward, and a second instance never gets here.
+		ensureURLScheme(a.env.scheme, os.Executable, a.log)
+	}
 
 	c, err := buildCore(ctx, a.cfg.DataDir, a.env, a.log)
 	if err != nil {

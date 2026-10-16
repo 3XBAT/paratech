@@ -45,7 +45,7 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 - Per user, no admin and no UAC: `RequestExecutionLevel user`, `SetShellVarContext current`.
 - Folder `%LOCALAPPDATA%\Programs\LearningAssistant` (can be changed on the folder page; an upgrade reuses `InstallLocation`).
 - Files: `learning-assistant.exe`, `uninstall.exe`; with `-WhisperDir` also `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-cpu-*.dll`.
-- Start menu `Learning Assistant.lnk`; no desktop shortcut, autostart or file associations. Uninstall entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant`.
+- Start menu `Learning Assistant.lnk`; no desktop shortcut, autostart or file associations; registers the per-user `paratech:` URL scheme (`HKCU\Software\Classes\paratech`, ADR-0013). Uninstall entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant`.
 - Windows 10+ and x64 only (Wails `wails.checkArchitecture`). NSIS default icon (an app icon is a follow-up).
 - Upgrade = run the new installer over the old one; data is not touched.
 - **No auto-update**: nothing checks or downloads updates (PRD §4.3).
@@ -65,7 +65,7 @@ Installer and uninstaller check the Wails single-instance mutex `wails-app-parat
 if it cannot delete the exe.
 
 ## Uninstall and user data
-- Deletes only its files (names above), `uninstall.exe`, the shortcut and the HKCU key, then `RMDir` **without** `/r` (the Wails template uses `/r`;
+- Deletes only its files (names above), `uninstall.exe`, the shortcut, the HKCU uninstall key and `HKCU\Software\Classes\paratech`, then `RMDir` **without** `/r` (the Wails template uses `/r`;
   a chosen folder may hold other files).
 - Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (recordings, transcripts, models, exports, logs, the database
   with the settings; the same list as the uninstaller message: `learning-assistant.db`, `artifacts\` and `logs\` of `internal/app/core.go`) and the

@@ -90,6 +90,13 @@ type GoogleResult struct {
 type GoogleService struct {
 	uc  GoogleUseCase
 	log *slog.Logger
+	// window is brought forward after a successful sign-in, from behind the browser; nil: none.
+	window MainWindow
+}
+
+// MainWindow shows the main window and brings it to the front (Shell.ShowMain).
+type MainWindow interface {
+	ShowMain() error
 }
 
 // NewGoogleService returns the binding of the Google section.
@@ -117,6 +124,12 @@ func (s *GoogleService) ClearGoogleClient(ctx context.Context) (GoogleResult, er
 // GoogleSignIn opens Google's consent page in the system browser and returns when the sign-in ends.
 func (s *GoogleService) GoogleSignIn(ctx context.Context) (GoogleResult, error) {
 	err := s.uc.SignIn(ctx)
+	if err == nil && s.window != nil {
+		// The user's own action, so taking the focus is wanted here (unlike the lesson popup, AC-01).
+		if werr := s.window.ShowMain(); werr != nil {
+			s.log.Warn(opGoogleSignIn+": the main window was not brought forward", "err", werr)
+		}
+	}
 	return s.answer(ctx, opGoogleSignIn, nil, err, msgGoogleSignedIn), nil
 }
 

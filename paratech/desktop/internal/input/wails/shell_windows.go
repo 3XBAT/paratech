@@ -9,6 +9,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/w32"
+	"golang.org/x/sys/windows"
 )
 
 // Tray menu labels.
@@ -29,6 +30,11 @@ func (s *Shell) run(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return nil // stopped before the UI appeared: nothing to show or tear down
 	}
+
+	// A second instance exits inside application.New after notifying the first one, so it must hand its foreground
+	// right on before that: Windows lets only the foreground process (here the browser's child that opened a paratech:
+	// link) give the first instance's SetForegroundWindow a chance; otherwise the window only flashes in the taskbar.
+	allowForegroundHandOff()
 
 	// The single-instance callback runs after New returns; it reads u under the shell lock through ShowMain.
 	app := application.New(appOptions(s.opts, func() { _ = s.ShowMain() }))
@@ -110,11 +116,22 @@ func appOptions(opts Options, onSecondInstance func()) application.Options {
 		Windows: application.WindowsOptions{DisableQuitOnLastWindowClosed: true},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: opts.InstanceID,
+			// The data of the second launch (its arguments, a paratech: link among them) is ignored: a second launch
+			// only brings the main window forward (ADR-0013).
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				onSecondInstance()
 			},
 		},
 	}
+}
+
+// asfwAny is ASFW_ANY of AllowSetForegroundWindow.
+const asfwAny = ^uint32(0)
+
+// allowForegroundHandOff lets another process take the foreground until the next user input, if this process may set it
+// at all; otherwise the call fails and changes nothing. Best effort: the result is ignored.
+func allowForegroundHandOff() {
+	_, _, _ = windows.NewLazySystemDLL("user32.dll").NewProc("AllowSetForegroundWindow").Call(uintptr(asfwAny))
 }
 
 // newWindow creates a window (it appears when the app runs) and returns it with the hooks to remove on shutdown.

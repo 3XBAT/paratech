@@ -19,6 +19,7 @@ import (
 	"paratech/desktop/internal/adapters/instancelock"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/random"
+	"paratech/desktop/internal/adapters/urlscheme"
 	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/winpower"
@@ -128,6 +129,9 @@ type env struct {
 	// URL is never taken from settings or user input.
 	googleCalendar []googlecal.Option
 
+	// scheme keeps the paratech: link registration in UI mode; nil in tests, so no test writes the registry.
+	scheme schemeRegistrar
+
 	runner jobrunner.Config
 	// generateRetries bounds the restarts of one draft generation (homeworkflow.DraftDeps.GenerateRetries); 0: default.
 	generateRetries int
@@ -154,6 +158,7 @@ func productionEnv() env {
 		whisperBinary:   whisperBinaryPath(),
 		secrets:         credentialManager,
 		authPages:       weblink.New(),
+		scheme:          urlscheme.New(),
 		generateRetries: homeworkflow.DefaultGenerateRetries,
 		runner:          jobrunner.DefaultConfig(),
 		recordings:      recordingsession.DefaultConfig(),
