@@ -16,6 +16,7 @@ import {
   confirmation,
   confirmStep,
   defaultBadge,
+  downloadChip,
   downloadOf,
   downloadText,
   errorText,
@@ -23,11 +24,16 @@ import {
   installedText,
   keepsSelection,
   modelTitle,
+  progressPercent,
   shortSha,
   sizeText,
   statusNotes,
   texts,
 } from "../modelsView";
+import { Button } from "../ui/Button";
+import { Banner, Card, Dialog, Field, Input, Progress, ResultLine } from "../ui/controls";
+import type { IconName } from "../ui/Icon";
+import { StatusChip, type ChipKind } from "../ui/StatusChip";
 
 const pollMs = 2000;
 
@@ -249,83 +255,103 @@ export function ModelsPage() {
 
   const openHome = () => void act("home", () => api.openModelsHomePage());
 
+  const deletingModel = view?.installed.find((m) => m.id === deleting) ?? null;
+
   return (
-    <section>
-      <h1>Модели</h1>
+    <section className="page">
+      <div className="head">
+        <div>
+          <span className="label">Распознавание речи работает без интернета</span>
+          <h1>Модели речи</h1>
+        </div>
+        <div className="acts">
+          <Button variant="ghost" disabled={busy.has("home")} onClick={openHome}>
+            Открыть страницу моделей whisper.cpp
+          </Button>
+          <Button icon="up" disabled={dialogBusy} onClick={() => void choose()}>
+            Импортировать файл модели…
+          </Button>
+        </div>
+      </div>
       <p className="muted">Распознавание речи идёт только на этом компьютере. Модель — файл whisper.cpp (.bin).</p>
 
       {view !== null &&
-        statusNotes(view).map((n, i) => (
-          <p key={i} className={n.warning ? "warning" : "muted"}>
-            {n.text}
-          </p>
-        ))}
-
-      <div className="actions">
-        <button type="button" disabled={dialogBusy} onClick={() => void choose()}>
-          Импортировать файл модели…
-        </button>
-        <button type="button" disabled={busy.has("home")} onClick={openHome}>
-          Открыть страницу моделей whisper.cpp
-        </button>
-      </div>
+        statusNotes(view).map((n, i) =>
+          n.warning ? (
+            <Banner key={i} kind="wait">
+              <p>{n.text}</p>
+            </Banner>
+          ) : (
+            <p key={i} className="muted">
+              {n.text}
+            </p>
+          ),
+        )}
 
       {error && (
-        <p className="error" role="alert">
+        <Banner kind="fail" role="alert">
           {error}
-        </p>
+        </Banner>
       )}
-      {done && <p role="status">{done}</p>}
+      {done && (
+        <ResultLine kind="ok" role="status">
+          {done}
+        </ResultLine>
+      )}
 
       {step.step === "choosing" && <p className="muted">{texts.choosing}</p>}
       {step.step === "installing" && <p className="muted">{texts.installing}</p>}
       {step.step === "confirm" && (
-        <div className="preview">
-          <h2>
+        <Card className="box preview" label="Импорт файла модели">
+          <h2 className="breakable">
             Файл: <bdi>{step.selection.fileName}</bdi>
           </h2>
-          <p>Размер: {sizeText(step.selection.sizeBytes)}</p>
-          <p>
-            SHA-256:{" "}
+          <p className="small muted num">Размер: {sizeText(step.selection.sizeBytes)}</p>
+          <p className="sha-line">
+            <span className="small muted">SHA-256: </span>
             <code className="sha">
               <bdi>{step.selection.sha256}</bdi>
             </code>
           </p>
-          <p className="warning">{texts.compareSha}</p>
-          <label className="field">
-            Название
-            <input value={step.name} disabled={dialogBusy} onChange={(e) => edit("name", e.target.value)} />
-          </label>
-          <label className="field">
-            Версия
-            <input value={step.version} disabled={dialogBusy} onChange={(e) => edit("version", e.target.value)} />
-          </label>
-          <label className="field">
-            Квантизация (можно оставить пустой)
-            <input
-              value={step.quantization}
-              disabled={dialogBusy}
-              onChange={(e) => edit("quantization", e.target.value)}
-            />
-          </label>
-          <div className="actions">
-            <button type="button" disabled={dialogBusy || !canConfirm(step)} onClick={() => void confirm()}>
+          <Banner kind="wait">
+            <p>{texts.compareSha}</p>
+          </Banner>
+          <Field label="Название">
+            {(id) => <Input id={id} value={step.name} disabled={dialogBusy} onChange={(e) => edit("name", e.target.value)} />}
+          </Field>
+          <Field label="Версия">
+            {(id) => (
+              <Input id={id} value={step.version} disabled={dialogBusy} onChange={(e) => edit("version", e.target.value)} />
+            )}
+          </Field>
+          <Field label="Квантизация (можно оставить пустой)">
+            {(id) => (
+              <Input
+                id={id}
+                value={step.quantization}
+                disabled={dialogBusy}
+                onChange={(e) => edit("quantization", e.target.value)}
+              />
+            )}
+          </Field>
+          <div className="acts start">
+            <Button variant="primary" disabled={dialogBusy || !canConfirm(step)} onClick={() => void confirm()}>
               SHA-256 совпадает, установить
-            </button>
-            <button type="button" disabled={dialogBusy} onClick={cancelImport}>
+            </Button>
+            <Button disabled={dialogBusy} onClick={cancelImport}>
               Отмена
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
       {loadError && (
-        <p className="error" role="alert">
+        <Banner kind="fail" role="alert">
           {loadError}
-        </p>
+        </Banner>
       )}
 
-      <h2>Установленные</h2>
+      <h2 className="group-title">Установленные</h2>
       {view === null ? (
         !loadError && <p className="muted">Загрузка…</p>
       ) : view.installed.length === 0 ? (
@@ -336,138 +362,134 @@ export function ModelsPage() {
           itemKey={(m) => m.id}
           state={installedList}
           onStateChange={setInstalledList}
+          className="clist-card"
+          classNames={{ button: "btn ghost" }}
           renderContainer={(rows) => (
-            <table className="list">
-              <thead>
-                <tr>
-                  <th>Модель</th>
-                  <th>Размер</th>
-                  <th>SHA-256</th>
-                  <th>Установлена</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>{rows}</tbody>
-            </table>
+            <div className="card" role="list" aria-label="Установленные модели">
+              {rows}
+            </div>
           )}
           renderItem={(m) => (
             <InstalledRow
               model={m}
               badge={defaultBadge(m)}
               busy={busy}
-              deleting={deleting === m.id}
               onDefault={() => void act(`default:${m.id}`, () => api.setDefault(m.id))}
               onAskDelete={() => setDeleting(m.id)}
-              onDelete={() => {
-                setDeleting("");
-                void act(`delete:${m.id}`, () => api.delete(m.id));
-              }}
-              onKeep={() => setDeleting("")}
             />
           )}
         />
       )}
+      <Dialog
+        open={deletingModel !== null}
+        title={texts.deleteTitle}
+        confirmLabel="Удалить модель"
+        cancelLabel="Отмена"
+        danger
+        onConfirm={() => {
+          const id = deleting;
+          setDeleting("");
+          void act(`delete:${id}`, () => api.delete(id));
+        }}
+        onCancel={() => setDeleting("")}
+      >
+        {deletingModel !== null && (
+          <p>
+            <bdi className="breakable">{modelTitle(deletingModel)}</bdi>. {texts.deleteConfirm}
+          </p>
+        )}
+      </Dialog>
 
-      <h2>Каталог</h2>
+      <h2 className="group-title">Каталог</h2>
       {view !== null &&
         (view.available.length === 0 ? (
           <>
             <p className="muted">{texts.emptyCatalog}</p>
-            <p className="muted">
+            <p className="muted breakable">
               Страница моделей: <bdi>{view.modelsHomePage}</bdi>
             </p>
           </>
         ) : (
           <>
             {!view.machineKnown && <p className="muted">{texts.machineUnknown}</p>}
-            <table className="list">
-              <thead>
-                <tr>
-                  <th>Модель</th>
-                  <th>Размер</th>
-                  <th>Требования</th>
-                  <th>Состояние</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {view.available.map((m) => (
-                  <CatalogRow
-                    key={m.catalogId}
-                    model={m}
-                    download={view.download}
-                    busy={busy}
-                    dialogBusy={dialogBusy}
-                    onDownload={() => void download(m)}
-                    onCancel={() => void act(`cancel:${m.catalogId}`, () => api.cancelDownload())}
-                    onDiscard={() => void act(`discard:${m.catalogId}`, () => api.discardPartial(m.catalogId))}
-                    onImport={() => void importCatalog(m)}
-                    onSource={() => void act(`source:${m.catalogId}`, () => api.openSourcePage(m.catalogId))}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <div className="card" role="list" aria-label="Каталог моделей">
+              {view.available.map((m) => (
+                <CatalogRow
+                  key={m.catalogId}
+                  model={m}
+                  download={view.download}
+                  busy={busy}
+                  dialogBusy={dialogBusy}
+                  onDownload={() => void download(m)}
+                  onCancel={() => void act(`cancel:${m.catalogId}`, () => api.cancelDownload())}
+                  onDiscard={() => void act(`discard:${m.catalogId}`, () => api.discardPartial(m.catalogId))}
+                  onImport={() => void importCatalog(m)}
+                  onSource={() => void act(`source:${m.catalogId}`, () => api.openSourcePage(m.catalogId))}
+                />
+              ))}
+            </div>
           </>
         ))}
+      <div className="gap" />
     </section>
   );
 }
+
+const badgeKinds: Readonly<Record<string, { kind: ChipKind; icon: IconName }>> = {
+  "По умолчанию": { kind: "ok", icon: "ok" },
+  Используется: { kind: "run", icon: "wave" },
+};
 
 function InstalledRow(props: {
   model: InstalledModel;
   badge: string;
   busy: ReadonlySet<string>;
-  deleting: boolean;
   onDefault: () => void;
   onAskDelete: () => void;
-  onDelete: () => void;
-  onKeep: () => void;
 }) {
   const m = props.model;
   const deleteBusy = props.busy.has(`delete:${m.id}`);
+  const chip = Object.hasOwn(badgeKinds, props.badge) ? badgeKinds[props.badge] : null;
   return (
-    <tr>
-      <td>
-        <bdi>{modelTitle(m)}</bdi>
-        {props.badge && <span className="badge">{props.badge}</span>}
-      </td>
-      <td>{sizeText(m.sizeBytes)}</td>
-      <td>
-        <details>
-          <summary>
-            <code>{shortSha(m.sha256)}</code>
+    <div className="mrow" role="listitem">
+      <div className="row-main">
+        <p className="t">
+          <bdi>{modelTitle(m)}</bdi>
+        </p>
+        <span className="small muted num">
+          {sizeText(m.sizeBytes)} · установлена {formatTime(m.installedAt)}
+        </span>
+        <details className="sha-details">
+          <summary className="small muted">
+            SHA-256 <code>{shortSha(m.sha256)}</code>
           </summary>
           <code className="sha">
             <bdi>{m.sha256}</bdi>
           </code>
         </details>
-      </td>
-      <td>{formatTime(m.installedAt)}</td>
-      <td>
-        {props.deleting ? (
-          <div className="row-actions">
-            <span>{texts.deleteConfirm}</span>
-            <button type="button" onClick={props.onDelete}>
-              Да, удалить
-            </button>
-            <button type="button" onClick={props.onKeep}>
-              Отмена
-            </button>
-          </div>
+      </div>
+      <div className="st">
+        {chip !== null ? (
+          <StatusChip kind={chip.kind} icon={chip.icon}>
+            {props.badge}
+          </StatusChip>
         ) : (
-          <div className="row-actions">
-            {!m.isDefault && (
-              <button type="button" disabled={props.busy.has(`default:${m.id}`)} onClick={props.onDefault}>
-                Сделать по умолчанию
-              </button>
-            )}
-            <button type="button" disabled={deleteBusy} onClick={props.onAskDelete}>
-              {deleteBusy ? "Удаление…" : "Удалить"}
-            </button>
-          </div>
+          <StatusChip kind="neutral" icon="ok">
+            Установлена
+          </StatusChip>
         )}
-      </td>
-    </tr>
+      </div>
+      <div className="acts">
+        {!m.isDefault && (
+          <Button variant="ghost" disabled={props.busy.has(`default:${m.id}`)} onClick={props.onDefault}>
+            Сделать по умолчанию
+          </Button>
+        )}
+        <Button variant="danger" busy={deleteBusy} busyLabel="Удаление…" disabled={deleteBusy} onClick={props.onAskDelete}>
+          Удалить
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -485,51 +507,74 @@ function CatalogRow(props: {
   const m = props.model;
   const a = catalogActions(m, props.download);
   const d = downloadOf(m, props.download);
+  const chip = d !== null ? downloadChip(d) : null;
   const key = (op: string) => props.busy.has(`${op}:${m.catalogId}`);
   return (
-    <tr>
-      <td>
-        <bdi>{modelTitle(m)}</bdi>
-        {m.recommended && <span className="badge">Рекомендуется</span>}
-        {m.installed && <span className="badge">Установлена</span>}
-        {m.likelySlow && <div className="warning">{texts.likelySlow}</div>}
-      </td>
-      <td>{sizeText(m.sizeBytes)}</td>
-      <td>
-        от {m.minCpuCores} ядер, {sizeText(m.minRamMb * 1024 * 1024)} памяти
-      </td>
-      <td className={d !== null && (d.phase === "failed" || d.phase === "cancelled") ? "problem" : ""}>
-        {d !== null && downloadText(d)}
-      </td>
-      <td>
-        <div className="row-actions">
-          {a.download && (
-            <button type="button" disabled={key("download")} onClick={props.onDownload}>
-              Скачать
-            </button>
+    <div className="mrow" role="listitem">
+      <div className="row-main">
+        <p className="t">
+          <bdi>{modelTitle(m)}</bdi>
+        </p>
+        <span className="small muted num">
+          {sizeText(m.sizeBytes)} · от {m.minCpuCores} ядер, {sizeText(m.minRamMb * 1024 * 1024)} памяти
+        </span>
+        {m.likelySlow && <span className="small slow">{texts.likelySlow}</span>}
+      </div>
+      <div className="st">
+        <span className="chips">
+          {m.recommended && (
+            <StatusChip kind="net" icon="ok">
+              Рекомендуется
+            </StatusChip>
           )}
-          {a.cancel && (
-            <button type="button" disabled={key("cancel")} onClick={props.onCancel}>
-              Остановить скачивание
-            </button>
+          {m.installed && (
+            <StatusChip kind="neutral" icon="ok">
+              Установлена
+            </StatusChip>
           )}
-          {a.discardPartial && (
-            <button type="button" disabled={key("discard")} onClick={props.onDiscard}>
-              Удалить недокачанный файл
-            </button>
+          {chip !== null && (
+            <StatusChip kind={chip.kind} icon={chip.icon}>
+              {chip.label}
+            </StatusChip>
           )}
-          {a.openSource && (
-            <button type="button" disabled={key("source")} onClick={props.onSource}>
-              Открыть страницу источника
-            </button>
-          )}
-          {a.importFile && (
-            <button type="button" disabled={props.dialogBusy} onClick={props.onImport}>
-              Импортировать скачанный файл
-            </button>
-          )}
-        </div>
-      </td>
-    </tr>
+          {!m.installed && chip === null && <StatusChip kind="neutral">Не установлена</StatusChip>}
+        </span>
+        {d !== null && d.phase === "downloading" && d.totalBytes > 0 && (
+          <Progress value={progressPercent(d)} label={`Скачивание ${modelTitle(m)}`} text={false} />
+        )}
+        {d !== null && (
+          <span className={d.phase === "failed" || d.phase === "cancelled" ? "small problem" : "small muted num"}>
+            {downloadText(d)}
+          </span>
+        )}
+      </div>
+      <div className="acts">
+        {a.download && (
+          <Button icon="down" disabled={key("download")} onClick={props.onDownload}>
+            Скачать
+          </Button>
+        )}
+        {a.cancel && (
+          <Button disabled={key("cancel")} onClick={props.onCancel}>
+            Остановить скачивание
+          </Button>
+        )}
+        {a.discardPartial && (
+          <Button variant="danger" disabled={key("discard")} onClick={props.onDiscard}>
+            Удалить недокачанный файл
+          </Button>
+        )}
+        {a.openSource && (
+          <Button variant="ghost" disabled={key("source")} onClick={props.onSource}>
+            Открыть страницу источника
+          </Button>
+        )}
+        {a.importFile && (
+          <Button disabled={props.dialogBusy} onClick={props.onImport}>
+            Импортировать скачанный файл
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }

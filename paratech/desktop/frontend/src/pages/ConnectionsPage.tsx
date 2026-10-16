@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   connectionsApi,
   type CheckResult,
@@ -31,16 +31,19 @@ import {
   quotaDisplay,
   quotaRefreshable,
   quotaTexts,
+  quotaUsedPercent,
   type QuotaMessage,
 } from "../quotaView";
+import { Button } from "../ui/Button";
+import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import { GoogleBlock } from "./GoogleBlock";
 import { SecretSlot, type SecretMessage } from "./SecretSlot";
 
 const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 
 // "Подключения": the Hub address, the Hub key and the remaining quota, the mail account, the mail password and the
-// mail check, the Google sign-in (GoogleBlock). The page only shows and forwards the values; validation, the secret
-// store and the quota are in the Go core (ARCH-44).
+// mail check and the Google sign-in (GoogleBlock), in cards (docs/design/concept-final.html). The page only shows
+// and forwards the values; validation, the secret store and the quota are in the Go core (ARCH-44).
 export function ConnectionsPage() {
   const api = useMemo(() => connectionsApi(callByName), []);
   const [saved, setSaved] = useState<Connections | null>(null);
@@ -259,12 +262,14 @@ export function ConnectionsPage() {
 
   if (saved === null || mail === null) {
     return (
-      <section>
-        <h1>Подключения</h1>
+      <section className="page">
+        <div className="head">
+          <h1>Подключения</h1>
+        </div>
         {loadError ? (
-          <p className="error" role="alert">
+          <ResultLine kind="fail" role="alert">
             {loadError}
-          </p>
+          </ResultLine>
         ) : (
           <p className="muted">{texts.loading}</p>
         )}
@@ -276,99 +281,136 @@ export function ConnectionsPage() {
   const checkState = checkControls({ dirty, checking, saving: mailBusy, secretBusy });
   const quota = quotaDisplay(saved.quota, saved, quotaMessage);
   const quotaState = quotaControls({ refreshing, keyBusy: hubKeyBusy, hubBusy });
+  const used = quotaUsedPercent(saved.quota);
 
   return (
-    <section>
-      <h1>Подключения</h1>
-
-      <div className="block">
-        <h2>Hub</h2>
-        <Field label="Адрес Hub" error={fieldErrorText(hubErrors, "hubUrl")}>
-          {(id) => (
-            <input
-              id={id}
-              type="text"
-              inputMode="url"
-              spellCheck={false}
-              placeholder={texts.hubPlaceholder}
-              value={hubUrl}
-              disabled={hubBusy}
-              onChange={(e) => setHubUrl(e.target.value)}
-            />
-          )}
-        </Field>
-        <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
-        <div className="actions">
-          <button type="button" disabled={hubBusy} onClick={() => void saveHub()}>
-            Сохранить
-          </button>
-        </div>
-        {hubDone && <p role="status">{hubDone}</p>}
-
-        <SecretSlot
-          nested
-          labels={hubKeyLabels}
-          status={saved.hubKey}
-          busy={hubKeyBusy}
-          message={hubKeyMessage}
-          onStore={(value) => changeHubKey("store", () => api.setHubKey(value))}
-          onRemove={() => changeHubKey("remove", () => api.removeHubKey())}
-        />
-
-        <h3>{quotaTexts.title}</h3>
-        {quota.amounts.length > 0 && (
-          <table className="list">
-            <tbody>
-              {quota.amounts.map((a) => (
-                <tr key={a.label}>
-                  <th scope="row">{a.label}</th>
-                  <td>{a.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {quota.updated && <p>{quota.updated}</p>}
-        {quota.stale && <p className="warning">{quota.stale}</p>}
-        {quota.renews && <p className="muted">{quota.renews}</p>}
-        {quota.note && <p className="muted">{quota.note}</p>}
-        {quota.checked && <p className="muted">{quota.checked}</p>}
-        {quota.lines.map((l, i) => (
-          <p key={i} className={l.tone} role={l.tone === "error" ? "alert" : l.tone === "ok" ? "status" : undefined}>
-            {l.text}
-          </p>
-        ))}
-        <div className="actions">
-          <button type="button" disabled={quotaState.disabled} onClick={() => void refreshQuota()}>
-            {quotaState.label}
-          </button>
+    <section className="page">
+      <div className="head">
+        <div>
+          <span className="label">Сервер обработки, почта и Google Календарь</span>
+          <h1>Подключения</h1>
         </div>
       </div>
 
-      <div className="block">
-        <h2>Почта</h2>
-        <p className={saved.mailConfigured ? "" : "warning"}>{mailConfiguredText(saved.mailConfigured)}</p>
-        {mailFields.map((f) => (
-          <Field key={f.code} label={f.label} error={fieldErrorText(mailErrors, f.code)}>
-            {(id) =>
-              f.code === "smtpSecurity" ? (
-                <select
-                  id={id}
-                  value={mail.smtpSecurity}
-                  disabled={mailBusy}
-                  onChange={(e) =>
-                    setMail({ ...mail, smtpSecurity: e.target.value === "tls" ? "tls" : "starttls" })
-                  }
-                >
-                  {securityOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <>
-                  <input
+      <div className="grid2">
+        <Card className="box" label="Сервер обработки">
+          <h2>Сервер обработки</h2>
+          <span className="small muted box-desc">
+            Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.
+          </span>
+          <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
+            {(id) => (
+              <Input
+                id={id}
+                type="text"
+                inputMode="url"
+                spellCheck={false}
+                placeholder={texts.hubPlaceholder}
+                value={hubUrl}
+                disabled={hubBusy}
+                onChange={(e) => setHubUrl(e.target.value)}
+              />
+            )}
+          </Field>
+          <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
+          <div className="acts start">
+            <Button disabled={hubBusy} onClick={() => void saveHub()}>
+              Сохранить
+            </Button>
+          </div>
+          {hubDone && (
+            <ResultLine kind="ok" role="status">
+              {hubDone}
+            </ResultLine>
+          )}
+
+          <hr className="sep" />
+          <SecretSlot
+            nested
+            labels={hubKeyLabels}
+            status={saved.hubKey}
+            busy={hubKeyBusy}
+            message={hubKeyMessage}
+            onStore={(value) => changeHubKey("store", () => api.setHubKey(value))}
+            onRemove={() => changeHubKey("remove", () => api.removeHubKey())}
+          />
+
+          <hr className="sep" />
+          <h3>{quotaTexts.title}</h3>
+          {used !== null && (
+            <div className="meter">
+              <Progress value={used} label={quotaTexts.used} thick text={`${quotaTexts.used} ${used} %`} />
+            </div>
+          )}
+          {quota.amounts.length > 0 && (
+            <dl className="amounts">
+              {quota.amounts.map((a) => (
+                <div key={a.label}>
+                  <dt className="small muted">{a.label}</dt>
+                  <dd className="num">{a.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {quota.updated && <p className="small">{quota.updated}</p>}
+          {quota.stale && <ResultLine kind="wait">{quota.stale}</ResultLine>}
+          {quota.renews && <p className="small muted">{quota.renews}</p>}
+          {quota.note && <p className="small muted">{quota.note}</p>}
+          {quota.checked && <p className="small muted">{quota.checked}</p>}
+          {quota.lines.map((l, i) =>
+            l.tone === "muted" ? (
+              <p key={i} className="small muted">
+                {l.text}
+              </p>
+            ) : (
+              <ResultLine
+                key={i}
+                kind={l.tone === "ok" ? "ok" : l.tone === "error" ? "fail" : "wait"}
+                role={l.tone === "error" ? "alert" : l.tone === "ok" ? "status" : undefined}
+              >
+                {l.text}
+              </ResultLine>
+            ),
+          )}
+          <div className="acts start">
+            <Button disabled={quotaState.disabled} onClick={() => void refreshQuota()}>
+              {quotaState.label}
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="box" label="Почта">
+          <h2>Почта</h2>
+          {saved.mailConfigured ? (
+            <span className="small muted box-desc">{mailConfiguredText(true)}</span>
+          ) : (
+            <ResultLine kind="wait">{mailConfiguredText(false)}</ResultLine>
+          )}
+          {mailFields.map((f) => (
+            <Field
+              key={f.code}
+              label={f.label}
+              hint={f.code === "smtpPort" ? texts.portHint : undefined}
+              error={fieldErrorText(mailErrors, f.code)}
+            >
+              {(id) =>
+                f.code === "smtpSecurity" ? (
+                  <Select
+                    id={id}
+                    value={mail.smtpSecurity}
+                    disabled={mailBusy}
+                    onChange={(e) =>
+                      setMail({ ...mail, smtpSecurity: e.target.value === "tls" ? "tls" : "starttls" })
+                    }
+                  >
+                    {securityOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
                     id={id}
                     type="text"
                     inputMode={f.code === "smtpPort" ? "numeric" : f.code === "smtpHost" ? "url" : "email"}
@@ -378,59 +420,57 @@ export function ConnectionsPage() {
                     disabled={mailBusy}
                     onChange={(e) => setMail({ ...mail, [f.code]: e.target.value })}
                   />
-                  {f.code === "smtpPort" && <span className="muted">{texts.portHint}</span>}
-                </>
-              )
-            }
-          </Field>
-        ))}
-        <Errors texts={otherErrorTexts(mailErrors, mailCodes)} />
-        <div className="actions">
-          <button type="button" disabled={mailBusy} onClick={() => void saveMail()}>
-            Сохранить
-          </button>
-        </div>
-        {mailDone && !dirty && <p role="status">{mailDone}</p>}
+                )
+              }
+            </Field>
+          ))}
+          <Errors texts={otherErrorTexts(mailErrors, mailCodes)} />
+          <div className="acts start">
+            <Button disabled={mailBusy} onClick={() => void saveMail()}>
+              Сохранить
+            </Button>
+          </div>
+          {mailDone && !dirty && (
+            <ResultLine kind="ok" role="status">
+              {mailDone}
+            </ResultLine>
+          )}
+
+          <hr className="sep" />
+          <SecretSlot
+            nested
+            labels={mailPasswordLabels}
+            status={saved.mailPassword}
+            busy={secretBusy}
+            message={secretMessage}
+            onStore={(value) => changeSecret("store", () => api.setMailPassword(value))}
+            onRemove={() => changeSecret("remove", () => api.removeMailPassword())}
+          />
+
+          <hr className="sep" />
+          <h3>Проверка почты</h3>
+          <p className="small muted">{texts.checkNoSend}</p>
+          <div className="acts start">
+            <Button
+              disabled={checkState.disabled}
+              disabledReason={checkState.hint}
+              busy={checking}
+              busyLabel={texts.checking}
+              onClick={() => void runCheck()}
+            >
+              Проверить почту
+            </Button>
+          </div>
+          {check !== null && (
+            <ResultLine kind={check.ok ? "ok" : "fail"} role={check.ok ? "status" : "alert"}>
+              {check.message}
+            </ResultLine>
+          )}
+        </Card>
+
+        <GoogleBlock />
       </div>
-
-      <SecretSlot
-        labels={mailPasswordLabels}
-        status={saved.mailPassword}
-        busy={secretBusy}
-        message={secretMessage}
-        onStore={(value) => changeSecret("store", () => api.setMailPassword(value))}
-        onRemove={() => changeSecret("remove", () => api.removeMailPassword())}
-      />
-
-      <div className="block">
-        <h2>Проверка почты</h2>
-        <div className="actions">
-          <button type="button" disabled={checkState.disabled} onClick={() => void runCheck()}>
-            {checking ? texts.checking : "Проверить почту"}
-          </button>
-        </div>
-        {checkState.hint && <p className="warning">{checkState.hint}</p>}
-        <p className="muted">{texts.checkNoSend}</p>
-        {check !== null && (
-          <p className={check.ok ? "ok" : "error"} role={check.ok ? "status" : "alert"}>
-            {check.message}
-          </p>
-        )}
-      </div>
-
-      <GoogleBlock />
     </section>
-  );
-}
-
-function Field(props: { label: string; error: string; children: (id: string) => ReactNode }) {
-  const id = useId();
-  return (
-    <div className="field">
-      <label htmlFor={id}>{props.label}</label>
-      {props.children(id)}
-      {props.error && <span className="error">{props.error}</span>}
-    </div>
   );
 }
 
@@ -438,9 +478,9 @@ function Errors(props: { texts: readonly string[] }) {
   return (
     <>
       {props.texts.map((t, i) => (
-        <p key={i} className="error" role="alert">
+        <ResultLine key={i} kind="fail" role="alert">
           {t}
-        </p>
+        </ResultLine>
       ))}
     </>
   );

@@ -117,8 +117,8 @@ test("the check result shows the verdict, the device, the hint and every mode", 
       { text: "Устройство вывода: Динамики (Realtek Audio)", tone: "muted" },
     ],
     modes: [
-      { label: "Захват приложения", text: "работает", ok: true },
-      { label: "Весь звук компьютера (классический)", text: "сигнал не слышен", ok: false },
+      { label: "Захват приложения", text: "Работает", ok: true },
+      { label: "Весь звук компьютера (классический)", text: "Сигнал не слышен.", ok: false },
     ],
   });
 
@@ -138,7 +138,7 @@ test("the check result shows the verdict, the device, the hint and every mode", 
   }
   // An unknown cause is not shown raw.
   assert.equal(causeText("toString"), causeText("failed"));
-  assert.equal(causeText("<b>x</b>"), "не удалось проверить");
+  assert.equal(causeText("<b>x</b>"), "Не удалось проверить.");
 });
 
 test("the bundle result: the name when saved, a neutral line when cancelled", () => {

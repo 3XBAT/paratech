@@ -1,0 +1,172 @@
+/* Shared components (docs/design/brief.md section 4). Needs tokens.css and base.css. */
+
+/* Button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 1px solid var(--control);
+  border-radius: var(--r-ctl);
+  background: var(--raised);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--t-fast) var(--ease), border-color var(--t-fast);
+}
+.btn:hover:enabled { background: var(--panel-2); }
+.btn:active:enabled { transform: translateY(1px); }
+.btn.primary { background: var(--prim); border-color: var(--prim); color: var(--on-prim); }
+.btn.primary:hover:enabled { background: var(--prim); opacity: .9; }
+.btn.ghost { border-color: transparent; background: none; color: var(--accent); }
+.btn.ghost:hover:enabled { background: var(--panel-2); }
+.btn.danger { color: var(--rec-t); border-color: color-mix(in srgb, var(--rec) 55%, var(--control)); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-labels { display: inline-grid; }
+.btn-labels > * { grid-area: 1 / 1; }
+.btn-labels > .btn-off { visibility: hidden; }
+.btn-with-reason { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+
+/* Segmented */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-seg); background: var(--panel-2); }
+.seg button { min-height: 28px; padding: 4px 12px; border: 0; border-radius: var(--r-ctl); background: none; color: var(--muted); font-weight: 500; white-space: nowrap; cursor: pointer; }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: var(--sh-1); }
+
+/* Status chip («Тетрадь» style): tint, a border of the text colour, icon and word. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+  border-radius: var(--r-chip);
+  background: var(--b);
+  color: var(--c);
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.chip .i { width: 14px; height: 14px; stroke-width: 2; }
+/* Chips carry one to three words; a longer one wraps rather than being cut. */
+.chip-text { min-width: 0; white-space: normal; overflow-wrap: normal; }
+.s-rec { --c: var(--rec-t); --b: var(--rec-b); }
+.s-run { --c: var(--run-t); --b: var(--run-b); }
+.s-wait { --c: var(--wait-t); --b: var(--wait-b); }
+.s-net { --c: var(--net-t); --b: var(--net-b); }
+.s-ok { --c: var(--ok-t); --b: var(--ok-b); }
+.s-fail { --c: var(--rec-t); --b: var(--rec-b); }
+.s-neutral { --c: var(--neu-t); --b: var(--neu-b); }
+.chip.s-net, .chip.s-fail { border-style: dashed; }
+/* A double ring, like the «Тетрадь» stamp. */
+.chip.s-ok { box-shadow: inset 0 0 0 2px var(--b), inset 0 0 0 3px color-mix(in srgb, var(--c) 40%, transparent); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--rec); animation: breath var(--t-breath) ease-in-out infinite; }
+@keyframes breath { 50% { opacity: .35; } }
+
+/* Progress */
+.progress-wrap { display: flex; align-items: center; gap: 10px; }
+.prog { flex: 1; max-width: 260px; height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
+.prog.thick { max-width: none; height: 6px; }
+.prog b { display: block; height: 100%; border-radius: 2px; background: var(--accent-fill); transition: width var(--t-mid); }
+
+/* Field, input, select */
+.ui-field { display: grid; gap: 4px; margin-bottom: 12px; }
+.ui-field label { font-size: var(--fs-small); font-weight: 500; }
+.field-error { display: inline-flex; align-items: flex-start; gap: 6px; color: var(--rec-t); }
+.field-error .i { width: 14px; height: 14px; margin-top: 2px; }
+.input { width: 100%; min-height: 34px; padding: 6px 10px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--panel); }
+.input:focus-visible { outline-offset: 0; border-color: var(--accent); }
+.sel {
+  min-height: 32px;
+  padding: 4px 30px 4px 10px;
+  border: 1px solid var(--control);
+  border-radius: var(--r-ctl);
+  appearance: none;
+  /* The arrow is drawn with gradients: a data: URL would be blocked by the page CSP. */
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 15px) 14px / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 10px) 14px / 5px 5px no-repeat,
+    var(--raised);
+}
+
+/* Toggle (checkbox role=switch) in a settings line */
+.set { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.set:last-child { border-bottom: 0; }
+.set > .small { grid-column: 1; }
+.switch { position: relative; width: 38px; height: 22px; margin: 0; border: 1px solid var(--control); border-radius: 11px; background: var(--panel-2); appearance: none; cursor: pointer; transition: background var(--t-fast); }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform var(--t-fast) var(--ease), background var(--t-fast); }
+.switch:checked { border-color: var(--prim); background: var(--prim); }
+.switch:checked::after { transform: translateX(16px); background: var(--on-prim); }
+.switch:disabled { opacity: .6; cursor: not-allowed; }
+
+/* Banner: tinted note with the icon in the status colour and plain text. */
+.note { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: var(--r-ctl); background: var(--b); color: var(--text); }
+.note > .i { margin-top: 1px; color: var(--c); }
+.note p { margin: 0; }
+
+/* Result line under a button */
+.result { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; }
+.result > .i { width: 16px; height: 16px; margin-top: 2px; color: var(--c, var(--ok-t)); }
+.result.s-wait, .result.s-fail { color: var(--c); }
+.result > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Card and list row; a form card (.box) has padding and lets dialogs and focus rings out. */
+.card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); }
+.card + .card { margin-top: 12px; }
+.card.box { overflow: visible; padding: 16px 18px; }
+.box h2 { margin: 0; font-size: var(--fs-h3); line-height: var(--lh-h3); letter-spacing: -0.01em; }
+.box h3 { margin: 0 0 6px; font-size: var(--fs-body); line-height: var(--lh-body); }
+.box-desc { display: block; margin: 2px 0 14px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 320px) minmax(120px, auto); gap: 4px 18px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row .t { margin: 0; font-weight: 600; }
+.row-main { min-width: 0; }
+.st { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 6px; }
+.acts.start { justify-content: start; }
+
+/* Empty state */
+.empty { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 32px; align-items: center; padding: 36px 40px 40px; }
+.empty h2 { margin: 2px 0 6px; font-size: var(--fs-h1); line-height: var(--lh-h1); }
+.empty-text { max-width: 52ch; margin: 0 0 16px; color: var(--muted); }
+.empty-frame { fill: var(--raised); stroke: var(--line); }
+.empty-axis { stroke: var(--line); stroke-dasharray: 2 6; }
+.empty-wave { fill: none; stroke: var(--accent-fill); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.empty-dot { fill: var(--rec); opacity: .6; }
+
+/* Count tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; }
+.tile { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--raised); }
+.tile b { font-size: var(--fs-count); line-height: var(--lh-count); font-weight: 600; letter-spacing: -0.02em; }
+.tile.zero b { color: var(--ok-t); }
+.tile.bad b { color: var(--rec-t); }
+
+/* Dialog */
+.dialog { max-width: 440px; padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--r-win); background: var(--panel); color: var(--text); box-shadow: var(--sh-win); }
+.dialog::backdrop { background: rgba(20, 20, 24, .35); }
+.dialog-body { margin: 8px 0 18px; color: var(--muted); }
+
+@media (forced-colors: active) {
+  .chip, .btn, .tile, .switch, .seg button[aria-pressed="true"], .note { border: 1px solid CanvasText; }
+  /* The switch knob, the progress fill and the recording dot are backgrounds, which forced colours drop: keep them
+     and draw them in system colours, so on and off still differ. */
+  .switch, .prog, .dot { forced-color-adjust: none; }
+  .switch { background: Canvas; }
+  .switch::after { background: CanvasText; }
+  .switch:checked { border-color: Highlight; background: Highlight; }
+  .switch:checked::after { background: HighlightText; }
+  .switch:disabled { border-color: GrayText; opacity: 1; }
+  .switch:disabled::after { background: GrayText; }
+  .switch:checked:disabled { background: GrayText; }
+  .switch:checked:disabled::after { background: Canvas; }
+  .prog { outline: 1px solid CanvasText; background: Canvas; }
+  .prog b { background: Highlight; }
+  .dot { background: CanvasText; }
+  /* The select arrow is a gradient, dropped too: the native one comes back. */
+  .sel { appearance: auto; }
+}

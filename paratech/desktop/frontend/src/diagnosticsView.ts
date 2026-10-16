@@ -13,6 +13,7 @@ export interface Line {
 
 export const texts = {
   title: "Диагностика",
+  lead: "Проверка звука и пакет для поддержки",
   soundTitle: "Проверка звука",
   soundExplain:
     "Приложение проигрывает короткий сигнал через устройство вывода по умолчанию и проверяет, что его удаётся " +
@@ -25,7 +26,8 @@ export const texts = {
   checkFailed: "Не удалось проверить звук.",
   devicePrefix: "Устройство вывода: ",
   modesTitle: "Способы записи",
-  modeWorks: "работает",
+  modeWorks: "Работает",
+  modeFailed: "Не работает",
   bundleTitle: "Пакет для поддержки",
   bundleExplain:
     "Zip-архив с журналами, версиями Windows и приложения и настройками — без паролей, ключей, аудио, " +
@@ -42,14 +44,14 @@ export const modeLabels: Readonly<Record<SoundModeName, string>> = {
   system: "Весь звук компьютера (классический)",
 };
 
-/** Short causes of a failed mode; an unknown cause reads as a failed check rather than as raw text. */
+/** Why a mode failed, shown under its label; an unknown cause reads as a failed check rather than as raw text. */
 const causeTexts: Readonly<Record<string, string>> = {
-  no_device: "нет устройства вывода",
-  silence: "сигнал не слышен",
-  unsupported: "не поддерживается в этой системе",
-  hands_free: "гарнитура в режиме разговора",
-  busy: "недоступно во время записи",
-  failed: "не удалось проверить",
+  no_device: "Нет устройства вывода.",
+  silence: "Сигнал не слышен.",
+  unsupported: "Не поддерживается в этой системе.",
+  hands_free: "Гарнитура в режиме разговора.",
+  busy: "Недоступно во время записи.",
+  failed: "Не удалось проверить.",
 };
 
 export function causeText(cause: string): string {

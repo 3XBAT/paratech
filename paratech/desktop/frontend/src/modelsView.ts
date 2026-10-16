@@ -64,6 +64,24 @@ export function downloadText(d: ModelDownload): string {
   }
 }
 
+/** The chip of a download phase; null without a download or after it installed (the row says «Установлена»). */
+export function downloadChip(
+  d: ModelDownload,
+): { kind: "run" | "fail" | "neutral"; icon: "down" | "clock" | "warn" | "x"; label: string } | null {
+  switch (d.phase) {
+    case "downloading":
+      return { kind: "run", icon: "down", label: "Скачивается" };
+    case "verifying":
+      return { kind: "run", icon: "clock", label: "Проверяется" };
+    case "failed":
+      return { kind: "fail", icon: "warn", label: "Не скачана" };
+    case "cancelled":
+      return { kind: "neutral", icon: "x", label: "Остановлено" };
+    default:
+      return null;
+  }
+}
+
 /** Buttons of a catalog row. One download runs at a time, so another running download disables "Скачать". */
 export interface CatalogActions {
   download: boolean;
@@ -129,7 +147,8 @@ export const texts = {
     "Устанавливайте, только если они совпадают.",
   choosing: "Выбор файла… После выбора считается SHA-256: для файла 0,5–1,5 ГБ это несколько секунд.",
   installing: "Установка: файл копируется в папку приложения и проверяется ещё раз…",
-  deleteConfirm: "Удалить модель? Её файл будет удалён из папки приложения.",
+  deleteTitle: "Удалить модель?",
+  deleteConfirm: "Её файл будет удалён из папки приложения.",
 } as const;
 
 /** The notes above the lists, warnings first. */

@@ -1,0 +1,147 @@
+/* Design tokens (docs/design/brief.md section 3). The single source of the palette: test/contrast.test.mjs parses this
+   file, so keep one declaration per line. Light is the default; dark comes from the system or from data-theme. */
+:root {
+  /* The only place the UI font is named: swapping to Inter or Onest changes this line and src/ui/fonts.css. */
+  --font: "Golos Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+
+  --bg: #EDEDEA;
+  --panel: #FAFAF8;
+  --raised: #FFFFFF;
+  --panel-2: #F2F2EF;
+  --line: #E2E2DD;
+  --control: #7A7D83;
+  --text: #1A1B1E;
+  --muted: #5A5D64;
+  --accent: #A6541E; /* brief: #A9561F, 4.43:1 on --bg; darkened to reach 4.5:1 there */
+  --accent-fill: #C26A2E;
+  --prim: #1F2023;
+  --on-prim: #FAFAF8;
+  --rec: #B23A30;
+  --rec-t: #9C3027;
+  --rec-b: #F7E5E2;
+  --run-t: #8A4716;
+  --run-b: #F5E9DE;
+  --wait-t: #735000;
+  --wait-b: #F4ECD4;
+  --net-t: #2B5788;
+  --net-b: #E3EBF4;
+  --ok-t: #2C6644;
+  --ok-b: #E1EEE5;
+  --neu-t: #4E5158;
+  --neu-b: #EEEEEB;
+  --sh-1: 0 1px 2px rgba(20, 20, 24, .06);
+  --sh-win: 0 1px 2px rgba(20, 20, 24, .05), 0 18px 44px -22px rgba(20, 20, 24, .28);
+  color-scheme: light;
+
+  /* Type scale, base 14px: size / line height. */
+  --fs-display: 28px;
+  --lh-display: 32px;
+  --fs-h1: 22px;
+  --lh-h1: 28px;
+  --fs-h2: 18px;
+  --lh-h2: 24px;
+  --fs-h3: 15px;
+  --lh-h3: 22px;
+  --fs-body: 14px;
+  --lh-body: 21px;
+  --fs-small: 12.5px;
+  --lh-small: 18px;
+  --fs-label: 12px;
+  --lh-label: 16px;
+  --fs-nav: 11.5px;
+  --lh-nav: 14px;
+  --fs-count: 24px;
+  --lh-count: 26px;
+  --fs-timer: 15px;
+  --lh-timer: 20px;
+
+  /* Spacing, step 4. */
+  --sp-2: 2px;
+  --sp-4: 4px;
+  --sp-6: 6px;
+  --sp-8: 8px;
+  --sp-12: 12px;
+  --sp-14: 14px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-32: 32px;
+  --sp-40: 40px;
+
+  --r-chip: 6px;
+  --r-ctl: 8px;
+  --r-seg: 10px;
+  --r-card: 12px;
+  --r-win: 14px;
+
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: 120ms;
+  --t-mid: 220ms;
+  --t-row: 180ms;
+  --t-breath: 2.4s;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131416;
+    --panel: #1B1C1F;
+    --raised: #202124;
+    --panel-2: #26272B;
+    --line: #2C2E32;
+    --control: #70747C;
+    --text: #ECEBE7;
+    --muted: #9EA1A8;
+    --accent: #DE9A68;
+    --accent-fill: #D08A57;
+    --prim: #E6E4DF;
+    --on-prim: #16171A;
+    --rec: #E8766B;
+    --rec-t: #F0958B;
+    --rec-b: #3A2422;
+    --run-t: #E8AC7C;
+    --run-b: #33281F;
+    --wait-t: #DFC07A;
+    --wait-b: #312B1C;
+    --net-t: #98BBE4;
+    --net-b: #1E2937;
+    --ok-t: #8FCDA7;
+    --ok-b: #1C2F25;
+    --neu-t: #B4B7BD;
+    --neu-b: #2A2B2F;
+    --sh-1: 0 1px 2px rgba(0, 0, 0, .35);
+    --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
+    color-scheme: dark;
+  }
+}
+
+/* The same values as the block above (the contrast test checks that they match). */
+:root[data-theme="dark"] {
+  --bg: #131416;
+  --panel: #1B1C1F;
+  --raised: #202124;
+  --panel-2: #26272B;
+  --line: #2C2E32;
+  --control: #70747C;
+  --text: #ECEBE7;
+  --muted: #9EA1A8;
+  --accent: #DE9A68;
+  --accent-fill: #D08A57;
+  --prim: #E6E4DF;
+  --on-prim: #16171A;
+  --rec: #E8766B;
+  --rec-t: #F0958B;
+  --rec-b: #3A2422;
+  --run-t: #E8AC7C;
+  --run-b: #33281F;
+  --wait-t: #DFC07A;
+  --wait-b: #312B1C;
+  --net-t: #98BBE4;
+  --net-b: #1E2937;
+  --ok-t: #8FCDA7;
+  --ok-b: #1C2F25;
+  --neu-t: #B4B7BD;
+  --neu-b: #2A2B2F;
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .35);
+  --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
+  color-scheme: dark;
+}

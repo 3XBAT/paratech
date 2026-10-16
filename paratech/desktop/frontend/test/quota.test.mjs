@@ -8,6 +8,7 @@ import {
   quotaDisplay,
   quotaRefreshable,
   quotaTexts,
+  quotaUsedPercent,
   unitLabel,
 } from "../.test-build/quotaView.js";
 
@@ -57,10 +58,10 @@ test("a current quota: remaining, limit and reserved, the time and the cache not
   ]);
   assert.equal(d.updated, "Обновлено: " + localTime(values.fetchedAt));
   assert.equal(d.stale, "");
-  assert.equal(d.renews, "Квота обновится: " + localTime(values.periodEnd));
+  assert.equal(d.renews, "Лимит обновится: " + localTime(values.periodEnd));
   assert.equal(d.note, quotaTexts.note);
   assert.match(d.note, /копия для показа/);
-  assert.match(d.note, /Hub решает/);
+  assert.match(d.note, /сервер обработки решает/);
   assert.equal(d.checked, "");
   assert.deepEqual(d.lines, [{ text: goText.ok, tone: "ok" }]);
 
@@ -83,7 +84,7 @@ test("Hub offline: the old value marked stale with its time, and the Go text", (
   assert.equal(d.checked, "Последняя попытка: " + localTime("2026-10-15T11:00:00Z"));
   assert.deepEqual(d.lines, [{ text: goText.offline, tone: "error" }]);
   // Without the answer (page opened again): a text of the status.
-  assert.deepEqual(texts(quotaDisplay(offline, ready, null)), ["Hub не ответил при последнем обновлении."]);
+  assert.deepEqual(texts(quotaDisplay(offline, ready, null)), ["Сервер обработки не ответил при последнем обновлении."]);
   // Offline before any value: no numbers, no stale mark.
   const none = quotaDisplay({ ...offline, stale: false, values: null }, ready, { text: goText.offline, ok: false });
   assert.deepEqual(none.amounts, []);
@@ -129,10 +130,10 @@ test("no address: points to the Hub address field", () => {
   // The Go text already points to the field above.
   assert.deepEqual(texts(quotaDisplay(notConfigured, noUrl, { text: goText.notConfigured, ok: false })),
     [goText.notConfigured]);
-  assert.match(texts(quotaDisplay(notConfigured, noUrl, null))[0], /в поле «Адрес Hub» выше/);
+  assert.match(texts(quotaDisplay(notConfigured, noUrl, null))[0], /в поле «Адрес сервера» выше/);
   // Not asked yet (the address was removed): the pointer, no "нажмите «Обновить»".
   assert.deepEqual(texts(quotaDisplay(unchecked, noUrl, null)), [quotaTexts.urlPointer]);
-  assert.match(quotaTexts.urlPointer, /«Адрес Hub» выше/);
+  assert.match(quotaTexts.urlPointer, /«Адрес сервера» выше/);
 });
 
 test("no key: points to the key slot", () => {
@@ -140,7 +141,7 @@ test("no key: points to the key slot", () => {
   const keyless = { hubUrl: "https://hub.example.org", hubKey: "unset" };
   assert.deepEqual(texts(quotaDisplay(noKey, keyless, { text: goText.noKey, ok: false })),
     [goText.noKey, quotaTexts.keyPointer]);
-  assert.deepEqual(texts(quotaDisplay(noKey, keyless, null)), ["Ключ доступа к Hub не задан.", quotaTexts.keyPointer]);
+  assert.deepEqual(texts(quotaDisplay(noKey, keyless, null)), ["Ключ доступа не задан.", quotaTexts.keyPointer]);
   assert.match(quotaTexts.keyPointer, /«Новый ключ» выше/);
   // Not asked yet (the key was removed).
   assert.deepEqual(texts(quotaDisplay(unchecked, keyless, null)), [quotaTexts.keyPointer]);
@@ -176,4 +177,13 @@ test("«Обновить» waits for a refresh and for a change of the key or th
   assert.deepEqual(quotaControls({ ...idle, refreshing: true }), { disabled: true, label: "Обновляем…" });
   assert.equal(quotaControls({ ...idle, keyBusy: true }).disabled, true);
   assert.equal(quotaControls({ ...idle, hubBusy: true }).disabled, true);
+});
+
+test("the bar shows the used share of the limit; no bar without values or a limit", () => {
+  assert.equal(quotaUsedPercent(current), 38);
+  assert.equal(quotaUsedPercent({ ...current, values: { ...values, remaining: values.limit } }), 0);
+  assert.equal(quotaUsedPercent({ ...current, values: { ...values, remaining: 0 } }), 100);
+  assert.equal(quotaUsedPercent({ ...current, values: { ...values, remaining: values.limit * 2 } }), 0);
+  assert.equal(quotaUsedPercent({ ...current, values: { ...values, limit: 0 } }), null);
+  assert.equal(quotaUsedPercent(unchecked), null);
 });

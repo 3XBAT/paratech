@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { errorMessages, methods, parsePreview, parseResult, scheduleApi } from "../.test-build/bindings/schedule.js";
 import {
+  applyLabel,
   canApply,
   changeParts,
   commitErrorText,
@@ -18,7 +19,9 @@ import {
   resultText,
   rowErrorParts,
   summaryText,
+  summaryChips,
   timeRange,
+  weekHeaders,
   windowText,
 } from "../.test-build/scheduleView.js";
 
@@ -174,4 +177,29 @@ test("file text is never rendered as HTML", () => {
       assert.ok(!src.includes(banned), `${file} uses ${banned}`);
     }
   }
+});
+
+test("Apply names the number of changes; tiles split the counters", () => {
+  assert.equal(applyLabel(preview), "Применить 3 изменения");
+  assert.equal(applyLabel({ ...preview, changed: [], removed: [] }), "Применить 1 изменение");
+  assert.equal(applyLabel({ ...preview, added: Array(150).fill(preview.added[0]) }), "Применить 152 изменения");
+  assert.equal(applyLabel({ ...preview, added: Array(9).fill(preview.added[0]), removed: [] }), "Применить 10 изменений");
+  assert.equal(applyLabel({ ...preview, added: [], changed: [], removed: [] }), "Применить");
+  assert.deepEqual(summaryChips(preview).map((c) => [c.label, c.count]), [
+    ["Добавится", 1], ["Изменится", 1], ["Удалится", 1], ["Без изменений", 2], ["Ошибки", 0],
+  ]);
+});
+
+test("week dividers start every run of lessons in one Monday–Sunday week", () => {
+  const at = (start) => ({ start });
+  const h = weekHeaders([
+    at("31.08.2026 10:40"), at("06.09.2026 09:00"), at("07.09.2026 09:00"), at("bad"), at("08.09.2026 09:00"),
+    at("31.12.2026 09:00"), at("01.01.2027 09:00"), at("31.02.2026 09:00"),
+  ]);
+  assert.deepEqual(h.map((x) => x && [x.label, x.countText]), [
+    ["31.08–06.09", "2 занятия"], null, ["07.09–13.09", "1 занятие"], null, ["07.09–13.09", "1 занятие"],
+    ["28.12–03.01", "2 занятия"], null, null,
+  ]);
+  assert.deepEqual(weekHeaders([]), []);
+  assert.equal(weekHeaders(Array(5).fill(at("14.10.2026 09:00")))[0].countText, "5 занятий");
 });

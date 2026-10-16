@@ -18,7 +18,7 @@ export const headings = {
 
 export const buttonLabels: Readonly<Record<ButtonId, string>> = {
   start: "Начать запись",
-  snooze: "Отложить на 5 мин",
+  snooze: "Через 5 минут",
   skip: "Пропустить",
   close: "Закрыть",
 };
@@ -28,7 +28,7 @@ export const startingLabel = "Запуск…";
 /** Texts of the start problems (domain/recording/prompt Problem). */
 export const problemTexts: Readonly<Record<string, string>> = {
   unavailable: "Запись пока недоступна в этой сборке.",
-  in_progress: "Уже идёт другая запись. Остановите её на странице «Записи».",
+  in_progress: "Уже идёт другая запись — её можно остановить в «Записях и задачах».",
   recovering: "Восстанавливаются прерванные записи. Повторите через минуту.",
   source_gone: "Выбранное приложение не запущено. Откройте его или выберите другое.",
   failed: "Не удалось начать запись.",

@@ -11,6 +11,8 @@ export const googleTexts = {
   hint:
     "Идентификатор и секрет берутся из своего клиента типа «Desktop app» в Google Cloud Console " +
     "(как его создать — в инструкции к альфа-сборке, раздел «Google Календарь: вход»).",
+  clientTitle: "Клиент Google",
+  accountTitle: "Вход",
   clientId: "Идентификатор клиента (client ID)",
   clientSecret: "Секрет клиента (client secret)",
   replaceHint: "Новые идентификатор и секрет заменят сохранённые.",
@@ -18,9 +20,11 @@ export const googleTexts = {
   saving: "Сохраняем…",
   remove: "Удалить клиент",
   confirmRemove: "Удалить сохранённые идентификатор и секрет клиента Google?",
-  confirmYes: "Удалить",
+  confirmRemoveNote: "Чтобы снова войти через Google, клиент придётся сохранить заново.",
+  confirmYes: "Удалить клиент",
   confirmNo: "Отмена",
   signIn: "Войти через Google",
+  signInNeedsClient: "Сначала сохраните идентификатор и секрет клиента.",
   waiting: "Ожидание входа в браузере…",
   cancel: "Отменить",
   signOut: "Выйти",
@@ -51,6 +55,40 @@ export function clientStatusText(status: string): string {
 
 export function accountStatusText(status: string): string {
   return Object.hasOwn(accountTexts, status) ? accountTexts[status as GoogleAccountStatus] : accountTexts.unavailable;
+}
+
+// The chips under the «Клиент Google» and «Вход» headings: one to three words. A status that is not a normal one also
+// shows its full text next to the chip (clientStatusNote, accountStatusNote).
+const clientChips: Readonly<Record<GoogleClientStatus, string>> = {
+  set: "Задан",
+  unset: "Не задан",
+  unsupported: "Недоступно",
+  unavailable: "Не ответил",
+};
+
+const accountChips: Readonly<Record<GoogleAccountStatus, string>> = {
+  signedIn: "Выполнен",
+  signedOut: "Не выполнен",
+  unsupported: "Недоступен",
+  unavailable: "Не удалось проверить",
+};
+
+export function clientChipText(status: string): string {
+  return Object.hasOwn(clientChips, status) ? clientChips[status as GoogleClientStatus] : clientChips.unavailable;
+}
+
+export function accountChipText(status: string): string {
+  return Object.hasOwn(accountChips, status) ? accountChips[status as GoogleAccountStatus] : accountChips.unavailable;
+}
+
+/** The full text next to the chip of a client status that is not "set/unset"; "" otherwise. */
+export function clientStatusNote(status: string): string {
+  return status === "set" || status === "unset" ? "" : clientStatusText(status);
+}
+
+/** The full text next to the chip of an account status that is not "signedIn/signedOut"; "" otherwise. */
+export function accountStatusNote(status: string): string {
+  return status === "signedIn" || status === "signedOut" ? "" : accountStatusText(status);
 }
 
 /** A status that is not a normal "set/unset" is shown as a warning. */

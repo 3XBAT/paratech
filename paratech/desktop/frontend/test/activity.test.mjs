@@ -39,9 +39,9 @@ test("every waiting status has its own non-empty reason", () => {
     assert.ok(reason.trim() !== "" && reason !== waitingStatuses[i], waitingStatuses[i]);
   }
   assert.equal(new Set(reasons).size, reasons.length);
-  assert.equal(jobStatusLabel("WAITING_FOR_POWER"), "Ждёт питания от сети");
-  assert.equal(jobStatusLabel("WAITING_FOR_NETWORK"), "Ждёт подключения к сети");
-  assert.equal(jobStatusLabel("WAITING_FOR_QUOTA"), "Квота исчерпана — ждёт пополнения");
+  assert.equal(jobStatusLabel("WAITING_FOR_POWER"), "Ждёт зарядку");
+  assert.equal(jobStatusLabel("WAITING_FOR_NETWORK"), "Ждёт интернет");
+  assert.equal(jobStatusLabel("WAITING_FOR_QUOTA"), "Минуты обработки закончились");
 });
 
 test("every status has a distinct Russian label and unknown ones are shown raw", () => {
