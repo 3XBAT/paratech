@@ -69,5 +69,5 @@
   does not get old deadlines back.
 - **No read-back** from Google (AC-20): edits in Google Calendar are overwritten by the next write of that lesson.
 - **Accepted crash window:** the calendar is created at Google before its id is stored; a crash in between leaves an
-  extra empty calendar the user can delete. The stored entry is written once before the insert, so a credential store
-  that cannot be written fails without creating calendars.
+  extra empty calendar the user can delete. After an id that could not be stored, the next insert waits until the
+  credential store takes a write again: one extra calendar per failure, not one per attempt.

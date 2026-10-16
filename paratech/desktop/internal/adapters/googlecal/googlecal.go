@@ -84,6 +84,8 @@ type Client struct {
 
 	// mu serializes the calendar binding: two parallel EnsureCalendar calls must not create two calendars.
 	mu sync.Mutex
+	// unsaved: the id of a created calendar could not be stored; held under mu.
+	unsaved bool
 }
 
 // New returns a Client over the authorization, the google credential store and the classifier of token source errors.

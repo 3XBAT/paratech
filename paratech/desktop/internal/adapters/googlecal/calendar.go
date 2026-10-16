@@ -95,10 +95,13 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 		}
 	}
 
-	// Write the old entry back first: a store that cannot keep the new id fails here, before Google creates a
-	// calendar nobody could find again (one per attempt otherwise).
-	if err := c.save(ctx, op, b); err != nil {
-		return binding{}, err
+	// After a calendar whose id could not be stored, the store must take a write (the old entry back) before Google
+	// creates another one nobody could find again: one orphan per failure, not one per attempt.
+	if c.unsaved {
+		if err := c.save(ctx, op, b); err != nil {
+			return binding{}, err
+		}
+		c.unsaved = false
 	}
 	id, err := c.create(ctx, op)
 	if err != nil {
@@ -106,6 +109,7 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 	}
 	b = binding{ID: id, Fresh: true}
 	if err := c.save(ctx, op, b); err != nil {
+		c.unsaved = true
 		return binding{}, err
 	}
 	return b, nil

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -999,14 +1000,22 @@ func TestCredentialStoreFailure(t *testing.T) {
 	}
 }
 
-// readOnlyStore reads but cannot write, like a credential store that refuses new entries.
-type readOnlyStore struct{ *testenv.MemCredentials }
+// readOnlyStore reads but, while readOnly is set, cannot write: a credential store that refuses new entries.
+type readOnlyStore struct {
+	*testenv.MemCredentials
+	readOnly atomic.Bool
+}
 
-func (readOnlyStore) Set(context.Context, string, string) error { return shared.ErrStorage }
+func (s *readOnlyStore) Set(ctx context.Context, name, value string) error {
+	if s.readOnly.Load() {
+		return shared.ErrStorage
+	}
+	return s.MemCredentials.Set(ctx, name, value)
+}
 
-// A store that cannot keep the calendar id fails before calendars.insert: repeated attempts leave no calendars behind
-// at Google, with nothing stored and with a stored calendar that is gone.
-func TestUnwritableStoreCreatesNoCalendar(t *testing.T) {
+// A calendar whose id cannot be stored is the only one created while the store stays unwritable: later attempts
+// fail before calendars.insert. Once the store takes writes again, one more calendar is created and kept.
+func TestUnwritableStoreCreatesOneCalendar(t *testing.T) {
 	const gone = `{"id":"gone@group.calendar.google.com"}`
 	for _, stored := range []string{"", gone} {
 		t.Run(fmt.Sprintf("stored %q", stored), func(t *testing.T) {
@@ -1014,14 +1023,15 @@ func TestUnwritableStoreCreatesNoCalendar(t *testing.T) {
 			api := testenv.StartFakeGoogleCalendar(t)
 			tr := &http.Transport{}
 			t.Cleanup(tr.CloseIdleConnections)
-			mem := testenv.NewMemCredentials()
+			store := &readOnlyStore{MemCredentials: testenv.NewMemCredentials()}
 			if stored != "" {
-				if err := mem.Set(ctx, googlecal.CalendarIDName, stored); err != nil {
+				if err := store.Set(ctx, googlecal.CalendarIDName, stored); err != nil {
 					t.Fatal(err)
 				}
 			}
+			store.readOnly.Store(true)
 			auth := &fakeAuth{transport: tr, token: testenv.FakeCalendarAccessToken}
-			c, err := googlecal.New(auth, readOnlyStore{mem}, classify, googlecal.WithBaseURL(api.BaseURL()))
+			c, err := googlecal.New(auth, store, classify, googlecal.WithBaseURL(api.BaseURL()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1030,13 +1040,20 @@ func TestUnwritableStoreCreatesNoCalendar(t *testing.T) {
 				_, _, err := c.EnsureCalendar(ctx)
 				assertClass(t, err, googlecal.ErrCredentials, backoff.ErrTransient)
 			}
-			if cals := api.Calendars(); len(cals) != 0 {
+			if cals := api.Calendars(); len(cals) != 1 {
+				t.Fatalf("calendars %+v, want the one whose id was not stored", cals)
+			}
+
+			store.readOnly.Store(false)
+			id, fresh, err := c.EnsureCalendar(ctx)
+			if err != nil || !fresh {
+				t.Fatalf("EnsureCalendar with a writable store = %q, %v, %v", id, fresh, err)
+			}
+			if cals := api.Calendars(); len(cals) != 2 || cals[1].ID != id {
 				t.Fatalf("calendars %+v", cals)
 			}
-			for _, q := range api.Requests() {
-				if q.Method == http.MethodPost {
-					t.Fatalf("request %s %s", q.Method, q.Path)
-				}
+			if again, _, err := c.EnsureCalendar(ctx); err != nil || again != id || len(api.Calendars()) != 2 {
+				t.Fatalf("next EnsureCalendar = %q, %v", again, err)
 			}
 		})
 	}
