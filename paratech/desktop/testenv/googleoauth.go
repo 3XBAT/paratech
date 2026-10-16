@@ -169,7 +169,7 @@ func (f *FakeGoogleOAuth) authorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid_client", http.StatusUnauthorized) // Google shows an error page, no redirect
 		return
 	case err != nil || redirect.Scheme != "http" || redirect.Hostname() != "127.0.0.1" || redirect.Port() == "" ||
-		redirect.Path != "/" || redirect.RawQuery != "":
+		redirect.Path != "" || redirect.RawQuery != "" || redirect.User != nil || redirect.Fragment != "":
 		http.Error(w, "redirect_uri_mismatch", http.StatusBadRequest)
 		return
 	case q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") == "" ||

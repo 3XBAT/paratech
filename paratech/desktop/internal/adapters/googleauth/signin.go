@@ -77,7 +77,8 @@ func (a *Authorizer) authorize(ctx context.Context, c client) (*oauth2.Config, s
 		return nil, "", "", err
 	}
 	verifier := oauth2.GenerateVerifier()
-	cfg := a.config(c, "http://"+host+"/")
+	// No path, as in Google's loopback examples; the browser then requests "/".
+	cfg := a.config(c, "http://"+host)
 
 	cb := &callback{state: state, host: host, result: make(chan redirectResult, 1)}
 	srv := &http.Server{

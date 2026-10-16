@@ -85,7 +85,7 @@ func TestCheckLinkRefuses(t *testing.T) {
 // googleAuthPage has the shape of the URL x/oauth2 builds for the Google sign-in (url.Values.Encode, sorted keys).
 const googleAuthPage = "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline" +
 	"&client_id=123-fake.apps.googleusercontent.com&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" +
-	"&code_challenge_method=S256&prompt=consent&redirect_uri=http%3A%2F%2F127.0.0.1%3A53682%2F&response_type=code" +
+	"&code_challenge_method=S256&prompt=consent&redirect_uri=http%3A%2F%2F127.0.0.1%3A53682&response_type=code" +
 	"&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.app.created&state=Zm9v_YmFy-YmF6"
 
 func TestCheckAuthLink(t *testing.T) {

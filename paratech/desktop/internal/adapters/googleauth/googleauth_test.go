@@ -117,7 +117,7 @@ func TestSignInStoresTheRefreshTokenOnly(t *testing.T) {
 	}
 	q := auth[0]
 	redirect, err := url.Parse(q.Get("redirect_uri"))
-	if err != nil || redirect.Scheme != "http" || redirect.Hostname() != "127.0.0.1" || redirect.Path != "/" {
+	if err != nil || redirect.Scheme != "http" || redirect.Hostname() != "127.0.0.1" || redirect.Path != "" {
 		t.Fatalf("redirect_uri %q is not the loopback address", q.Get("redirect_uri"))
 	}
 	for key, want := range map[string]string{
@@ -211,7 +211,7 @@ func TestSignInIgnoresForeignRedirects(t *testing.T) {
 		send(http.MethodGet, redirect+"?code=forged&state="+state+"&state="+state, "")
 		send(http.MethodGet, redirect+"?state="+state, "")
 		send(http.MethodGet, redirect+"?code=forged&error=x&state="+state, "")
-		send(http.MethodGet, redirect+"x?code=forged&state="+state, "")
+		send(http.MethodGet, redirect+"/x?code=forged&state="+state, "")
 		send(http.MethodPost, redirect+"?code=forged&state="+state, "")
 		send(http.MethodGet, redirect+"?code=forged&state="+state, "evil.example:"+u.Port())
 	})
