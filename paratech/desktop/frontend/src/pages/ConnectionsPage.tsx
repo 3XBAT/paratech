@@ -33,13 +33,14 @@ import {
   quotaTexts,
   type QuotaMessage,
 } from "../quotaView";
+import { GoogleBlock } from "./GoogleBlock";
 import { SecretSlot, type SecretMessage } from "./SecretSlot";
 
 const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 
 // "Подключения": the Hub address, the Hub key and the remaining quota, the mail account, the mail password and the
-// mail check. The page only shows and forwards the values; validation, the secret store and the quota are in the Go
-// core (ARCH-44).
+// mail check, the Google sign-in (GoogleBlock). The page only shows and forwards the values; validation, the secret
+// store and the quota are in the Go core (ARCH-44).
 export function ConnectionsPage() {
   const api = useMemo(() => connectionsApi(callByName), []);
   const [saved, setSaved] = useState<Connections | null>(null);
@@ -416,6 +417,8 @@ export function ConnectionsPage() {
           </p>
         )}
       </div>
+
+      <GoogleBlock />
     </section>
   );
 }
