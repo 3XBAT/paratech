@@ -77,7 +77,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.BoolVar(&cfg.Headless, "headless", cfg.Headless, "run without the UI shell: no tray and no windows (env "+EnvHeadless+")")
 	fs.BoolVar(&cfg.Recorder, "recorder", false, "internal: run as the audio recorder child of the app (needs -data-dir)")
 
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(withoutSchemeLaunch(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = fmt.Fprintln(out, "Usage of "+programName+":")
 			fs.SetOutput(out)
@@ -92,6 +92,22 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	}
 
 	return cfg, nil
+}
+
+// schemePrefix starts the argument Windows passes when a paratech: link opens the app ("<exe>" "%1"; ADR-0013).
+const schemePrefix = "paratech:"
+
+// withoutSchemeLaunch drops every argument of a launch by a paratech: link: such a launch only brings the window
+// forward, so nothing in it may set a flag. All of them go, not just the link: "%1" is quoted, but a link with a '"'
+// would still split into more arguments under the Windows command-line rules (`paratech:x" --data-dir "C:\evil`
+// becomes paratech:x, --data-dir, C:\evil).
+func withoutSchemeLaunch(args []string) []string {
+	for _, a := range args {
+		if len(a) >= len(schemePrefix) && strings.EqualFold(a[:len(schemePrefix)], schemePrefix) {
+			return nil
+		}
+	}
+	return args
 }
 
 // MustLoad is Load for the program entry point: it exits instead of returning an error

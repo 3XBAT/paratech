@@ -163,3 +163,51 @@ func TestLoadFlags(t *testing.T) {
 		}
 	})
 }
+
+// A launch by a paratech: link (ADR-0013) parses no flag at all: the link and whatever follows it are ignored, so the
+// app starts with the environment and the defaults.
+func TestLoadIgnoresASchemeLaunch(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "data")
+	evil := filepath.Join(t.TempDir(), "evil")
+	getenv := func(k string) string { return map[string]string{config.EnvDataDir: abs}[k] }
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "open", args: []string{"paratech://open"}},
+		{name: "upper case", args: []string{"PARATECH://open"}},
+		{name: "path and query", args: []string{`paratech://open/../x?--data-dir=C:\evil`}},
+		{name: "flag in the link", args: []string{"paratech:--headless"}},
+		{name: "flags after a link split at a quote", args: []string{"paratech://x", "--data-dir", evil, "--headless"}},
+		{name: "flags before the link", args: []string{"--data-dir", evil, "paratech://open"}},
+		{name: "help after the link", args: []string{"paratech://open", "--help"}},
+		{name: "unknown flag after the link", args: []string{"paratech:", "--nope"}},
+		{name: "recorder", args: []string{"paratech://open", "--recorder"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := config.Load(tt.args, io.Discard, getenv)
+			if err != nil {
+				t.Fatalf("Load(%q) = %v", tt.args, err)
+			}
+			if want := (config.Config{LogLevel: "info", DataDir: abs}); got != want {
+				t.Fatalf("Load(%q) = %+v, want %+v", tt.args, got, want)
+			}
+		})
+	}
+}
+
+// Arguments that only look like the scheme are still parsed.
+func TestLoadParsesOtherArguments(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "data")
+	for _, args := range [][]string{{"--headless", "paratec"}, {"--headless", "x-paratech://open"}} {
+		got, err := config.Load(args, io.Discard, func(string) string { return "" })
+		if err != nil || !got.Headless {
+			t.Fatalf("Load(%q) = %+v, %v", args, got, err)
+		}
+	}
+	got, err := config.Load([]string{"--data-dir", abs, "--headless"}, io.Discard, func(string) string { return "" })
+	if err != nil || got.DataDir != abs || !got.Headless {
+		t.Fatalf("Load = %+v, %v", got, err)
+	}
+}
