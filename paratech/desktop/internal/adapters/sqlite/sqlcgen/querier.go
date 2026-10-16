@@ -38,7 +38,6 @@ type Querier interface {
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error)
-	GetJobNotice(ctx context.Context, arg GetJobNoticeParams) (JobNotice, error)
 	// Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
 	// delete of ADR-0004(e): removing a lesson sets deleted_at, only PurgeDeletedLesson deletes a row.
 	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
@@ -71,9 +70,6 @@ type Querier interface {
 	InsertDraftRevision(ctx context.Context, arg InsertDraftRevisionParams) error
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
-	// Notices of finished processing (PRD section 15, TASK-053): one row per job and status, never updated.
-	// An existing notice for the same job and status is kept: zero rows affected means the user was already notified.
-	InsertJobNotice(ctx context.Context, arg InsertJobNoticeParams) (int64, error)
 	// A never-stored lesson (version 0) is inserted with version 1.
 	InsertLesson(ctx context.Context, arg InsertLessonParams) error
 	// A never-stored proposal (version 0) is inserted with version 1.

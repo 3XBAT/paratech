@@ -64,7 +64,7 @@ type uiCore struct {
 func openUICore(t *testing.T, dataDir string, e env) *uiCore {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
-	c, err := buildCore(context.Background(), dataDir, e, nil, log)
+	c, err := buildCore(context.Background(), dataDir, e, log)
 	if err != nil {
 		t.Fatal(err)
 	}

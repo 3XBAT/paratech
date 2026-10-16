@@ -82,13 +82,6 @@ type Job struct {
 	UpdatedAt       int64
 }
 
-type JobNotice struct {
-	JobID      string
-	Status     string
-	JobType    string
-	NotifiedAt int64
-}
-
 type Proposal struct {
 	ID               string
 	Kind             string
@@ -145,20 +138,19 @@ type ScheduleEntry struct {
 }
 
 type Setting struct {
-	ID                         int64
-	RecordingPromptsEnabled    int64
-	ProcessOnlyOnAcPower       int64
-	NotifyOnProcessingComplete int64
-	DefaultSttModelID          sql.NullString
-	Version                    int64
-	UpdatedAt                  int64
-	HomeworkRecipient          string
-	SmtpHost                   string
-	SmtpPort                   int64
-	SmtpSecurity               string
-	SmtpUsername               string
-	HubUrl                     string
-	RecordingSourceApp         string
+	ID                      int64
+	RecordingPromptsEnabled int64
+	ProcessOnlyOnAcPower    int64
+	DefaultSttModelID       sql.NullString
+	Version                 int64
+	UpdatedAt               int64
+	HomeworkRecipient       string
+	SmtpHost                string
+	SmtpPort                int64
+	SmtpSecurity            string
+	SmtpUsername            string
+	HubUrl                  string
+	RecordingSourceApp      string
 }
 
 type SttModel struct {

@@ -15,21 +15,21 @@ var (
 
 // snapshot is every observable value, so tests compare the whole aggregate at once.
 type snapshot struct {
-	version                 int64
-	prompts, acOnly, notify bool
-	model                   shared.SttModelID
-	updatedAt               time.Time
+	version         int64
+	prompts, acOnly bool
+	model           shared.SttModelID
+	updatedAt       time.Time
 }
 
 func snap(s *Settings) snapshot {
 	return snapshot{
 		version: s.Version(), prompts: s.RecordingPromptsEnabled(), acOnly: s.ProcessOnlyOnACPower(),
-		notify: s.NotifyOnProcessingComplete(), model: s.DefaultSttModel(), updatedAt: s.UpdatedAt(),
+		model: s.DefaultSttModel(), updatedAt: s.UpdatedAt(),
 	}
 }
 
 func TestNewHasDefaults(t *testing.T) {
-	want := snapshot{prompts: true, acOnly: true, notify: true}
+	want := snapshot{prompts: true, acOnly: true}
 	if got := snap(New()); got != want {
 		t.Fatalf("New() = %+v, want %+v", got, want)
 	}
@@ -37,7 +37,7 @@ func TestNewHasDefaults(t *testing.T) {
 
 func TestRestore(t *testing.T) {
 	valid := State{
-		Version: 3, RecordingPromptsEnabled: false, ProcessOnlyOnACPower: false, NotifyOnProcessingComplete: true,
+		Version: 3, RecordingPromptsEnabled: false, ProcessOnlyOnACPower: false,
 		DefaultSttModel: "model-1", UpdatedAt: t0,
 	}
 
@@ -47,15 +47,15 @@ func TestRestore(t *testing.T) {
 		want    snapshot
 		wantErr error
 	}{
-		{name: "valid", want: snapshot{version: 3, notify: true, model: "model-1", updatedAt: t0}},
+		{name: "valid", want: snapshot{version: 3, model: "model-1", updatedAt: t0}},
 		{
 			name: "stored defaults never changed",
 			mutate: func(s *State) {
-				*s = State{Version: 1, RecordingPromptsEnabled: true, ProcessOnlyOnACPower: true, NotifyOnProcessingComplete: true}
+				*s = State{Version: 1, RecordingPromptsEnabled: true, ProcessOnlyOnACPower: true}
 			},
-			want: snapshot{version: 1, prompts: true, acOnly: true, notify: true},
+			want: snapshot{version: 1, prompts: true, acOnly: true},
 		},
-		{name: "no default model", mutate: func(s *State) { s.DefaultSttModel = "" }, want: snapshot{version: 3, notify: true, updatedAt: t0}},
+		{name: "no default model", mutate: func(s *State) { s.DefaultSttModel = "" }, want: snapshot{version: 3, updatedAt: t0}},
 		{name: "version 0", mutate: func(s *State) { s.Version = 0 }, wantErr: ErrInvalidSettings},
 		{name: "negative version", mutate: func(s *State) { s.Version = -1 }, wantErr: ErrInvalidSettings},
 		{name: "malformed model id", mutate: func(s *State) { s.DefaultSttModel = "a/b" }, wantErr: ErrInvalidSettings},
@@ -85,7 +85,7 @@ func TestRestore(t *testing.T) {
 }
 
 func TestChanges(t *testing.T) {
-	defaults := snapshot{prompts: true, acOnly: true, notify: true}
+	defaults := snapshot{prompts: true, acOnly: true}
 
 	tests := []struct {
 		name    string
@@ -96,7 +96,7 @@ func TestChanges(t *testing.T) {
 		{
 			name:  "AC-02: disable recording prompts",
 			apply: func(s *Settings) error { return s.SetRecordingPromptsEnabled(false, t1) },
-			want:  snapshot{acOnly: true, notify: true, updatedAt: t1},
+			want:  snapshot{acOnly: true, updatedAt: t1},
 		},
 		{
 			name: "AC-02: re-enable recording prompts",
@@ -106,22 +106,17 @@ func TestChanges(t *testing.T) {
 				}
 				return s.SetRecordingPromptsEnabled(true, t1)
 			},
-			want: snapshot{prompts: true, acOnly: true, notify: true, updatedAt: t1},
+			want: snapshot{prompts: true, acOnly: true, updatedAt: t1},
 		},
 		{
 			name:  "AC-22: disable the AC-power restriction",
 			apply: func(s *Settings) error { return s.SetProcessOnlyOnACPower(false, t1) },
-			want:  snapshot{prompts: true, notify: true, updatedAt: t1},
-		},
-		{
-			name:  "disable notifications",
-			apply: func(s *Settings) error { return s.SetNotifyOnProcessingComplete(false, t1) },
-			want:  snapshot{prompts: true, acOnly: true, updatedAt: t1},
+			want:  snapshot{prompts: true, updatedAt: t1},
 		},
 		{
 			name:  "select default model",
 			apply: func(s *Settings) error { return s.SelectDefaultSttModel("model-1", t1) },
-			want:  snapshot{prompts: true, acOnly: true, notify: true, model: "model-1", updatedAt: t1},
+			want:  snapshot{prompts: true, acOnly: true, model: "model-1", updatedAt: t1},
 		},
 		{
 			name: "clear default model",
@@ -131,7 +126,7 @@ func TestChanges(t *testing.T) {
 				}
 				return s.ClearDefaultSttModel(t1)
 			},
-			want: snapshot{prompts: true, acOnly: true, notify: true, updatedAt: t1},
+			want: snapshot{prompts: true, acOnly: true, updatedAt: t1},
 		},
 		{
 			name:  "setting the current value is a no-op",
@@ -151,7 +146,7 @@ func TestChanges(t *testing.T) {
 		},
 		{
 			name:    "missing change time with the current value",
-			apply:   func(s *Settings) error { return s.SetNotifyOnProcessingComplete(true, time.Time{}) },
+			apply:   func(s *Settings) error { return s.SetRecordingPromptsEnabled(true, time.Time{}) },
 			want:    defaults,
 			wantErr: ErrInvalidSettings,
 		},

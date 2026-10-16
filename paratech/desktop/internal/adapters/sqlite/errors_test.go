@@ -16,11 +16,10 @@ import (
 
 func insertParams(updatedAt int64) sqlcgen.InsertSettingsParams {
 	return sqlcgen.InsertSettingsParams{
-		RecordingPromptsEnabled:    1,
-		ProcessOnlyOnAcPower:       1,
-		NotifyOnProcessingComplete: 1,
-		SmtpSecurity:               "starttls", // explicit params skip the column default, and the CHECK refuses ""
-		UpdatedAt:                  updatedAt,
+		RecordingPromptsEnabled: 1,
+		ProcessOnlyOnAcPower:    1,
+		SmtpSecurity:            "starttls", // explicit params skip the column default, and the CHECK refuses ""
+		UpdatedAt:               updatedAt,
 	}
 }
 
@@ -224,7 +223,7 @@ func TestSettingsVersionCAS(t *testing.T) {
 
 	update := func(expected, updatedAt int64) error {
 		rows, err := q.UpdateSettings(ctx, sqlcgen.UpdateSettingsParams{
-			RecordingPromptsEnabled: 0, ProcessOnlyOnAcPower: 1, NotifyOnProcessingComplete: 1, SmtpSecurity: "starttls",
+			RecordingPromptsEnabled: 0, ProcessOnlyOnAcPower: 1, SmtpSecurity: "starttls",
 			UpdatedAt: updatedAt, ExpectedVersion: expected,
 		})
 		return VersionCAS(ctx, rows, err)

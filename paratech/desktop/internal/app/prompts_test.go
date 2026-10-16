@@ -28,7 +28,7 @@ import (
 func buildPromptCore(t *testing.T, e env) (*core, *lifecycle, *testenv.FakePopup, *wails.PromptService) {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
-	c, err := buildCore(context.Background(), t.TempDir(), e, nil, log)
+	c, err := buildCore(context.Background(), t.TempDir(), e, log)
 	if err != nil {
 		t.Fatal(err)
 	}

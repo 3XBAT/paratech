@@ -17,14 +17,12 @@ type SettingsUseCase interface {
 	Get(ctx context.Context) (preferences.Toggles, error)
 	SetRecordingPromptsEnabled(ctx context.Context, enabled bool) (preferences.Toggles, error)
 	SetProcessOnlyOnACPower(ctx context.Context, enabled bool) (preferences.Toggles, error)
-	SetNotifyOnProcessingComplete(ctx context.Context, enabled bool) (preferences.Toggles, error)
 }
 
 // Settings is the JSON form of the toggles on the settings page.
 type Settings struct {
-	RecordingPromptsEnabled    bool `json:"recordingPromptsEnabled"`
-	ProcessOnlyOnACPower       bool `json:"processOnlyOnAcPower"`
-	NotifyOnProcessingComplete bool `json:"notifyOnProcessingComplete"`
+	RecordingPromptsEnabled bool `json:"recordingPromptsEnabled"`
+	ProcessOnlyOnACPower    bool `json:"processOnlyOnAcPower"`
 }
 
 // SettingsService is bound to the UI: every exported method is callable from the page by its full name
@@ -58,19 +56,10 @@ func (s *SettingsService) SetProcessOnlyOnACPower(ctx context.Context, enabled b
 	return s.reply("set process only on AC power", t, err)
 }
 
-// SetNotifyOnProcessingComplete turns the notification about finished processing on or off (PRD section 15).
-func (s *SettingsService) SetNotifyOnProcessingComplete(ctx context.Context, enabled bool) (Settings, error) {
-	t, err := s.uc.SetNotifyOnProcessingComplete(ctx, enabled)
-	return s.reply("set notify on processing complete", t, err)
-}
-
 func (s *SettingsService) reply(op string, t preferences.Toggles, err error) (Settings, error) {
 	if err != nil {
 		s.log.Error("ui: "+op, "err", err)
 		return Settings{}, ErrSettingsUnavailable
 	}
-	return Settings{
-		RecordingPromptsEnabled: t.RecordingPromptsEnabled, ProcessOnlyOnACPower: t.ProcessOnlyOnACPower,
-		NotifyOnProcessingComplete: t.NotifyOnProcessingComplete,
-	}, nil
+	return Settings{RecordingPromptsEnabled: t.RecordingPromptsEnabled, ProcessOnlyOnACPower: t.ProcessOnlyOnACPower}, nil
 }

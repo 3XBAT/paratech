@@ -23,7 +23,7 @@ func TestScheduleImportThroughThePageBinding(t *testing.T) {
 	ctx := context.Background()
 	e, _ := testEnv(t)
 	log := slog.New(slog.DiscardHandler)
-	c, err := buildCore(ctx, t.TempDir(), e, nil, log)
+	c, err := buildCore(ctx, t.TempDir(), e, log)
 	if err != nil {
 		t.Fatal(err)
 	}

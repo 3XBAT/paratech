@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/sqlite"
-	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/testenv"
 )
@@ -111,56 +112,52 @@ func TestOpenCoreListsActivity(t *testing.T) {
 	}
 }
 
-// The UI-mode core: with a notifier, the job runner reports finished jobs to the notification use case. An STT job
-// whose pinned model is not installed fails at once, and the user is notified exactly once.
-func TestBuildCoreWithNotifierNotifiesFinishedJobs(t *testing.T) {
+// TASK-065, test step 3 (ADR-0009 "No completion notifications"): on the wired UI-mode core processing jobs that fail
+// (an STT job pinned to a removed model) and complete (an STT job and its Hub follow-ups) reach no user-visible surface.
+// The popup is the only one the shell gives the core; it is never shown or hidden.
+func TestFinishedJobsShowNothing(t *testing.T) {
 	ctx := context.Background()
-	e, _ := testEnv(t)
-	notifier := &testenv.FakeNotifier{}
-	log := slog.New(slog.DiscardHandler)
+	e, _, _, hubURL := pipelineEnv(t)
+	u := openUICore(t, t.TempDir(), e)
+	configureHub(t, u.c, time.Now(), hubURL)
+	u.start(t)
+	// Stored after the start, so the startup sweep enqueues no STT job of its own for the recordings.
+	model := installModel(t, u.app, "m1", testenv.WhisperOK)
+	enqueueSTT(t, u.app, "job-fails", completedRecording(t, u.app, "rec-1"), "m-gone")
+	enqueueSTT(t, u.app, "job-completes", completedRecording(t, u.app, "rec-2"), model)
 
-	c, err := buildCore(ctx, t.TempDir(), e, notifier, log)
-	if err != nil {
-		t.Fatal(err)
+	jobs := sqlite.NewJobRepository(u.c.db)
+	want := map[job.Type]job.Status{
+		homeworkflow.SummarizeJobType: job.StatusCompleted, homeworkflow.ExtractHomeworkJobType: job.StatusCompleted,
 	}
-	life := c.newLifecycle(log, e.stopTimeout, closer{name: "storage", close: c.close})
-	t.Cleanup(func() { // before TempDir removal: Windows cannot delete open files
-		if err := life.shutdown(); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := life.start(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	a := &App{core: c} // the helpers read only the core
-	rec := completedRecording(t, a, "rec-1")
-	enqueueSTT(t, a, "job-stt", rec, "m-gone") // a permanent failure: the model was removed
-
-	jobs := sqlite.NewJobRepository(c.db)
-	var failed *job.Job
-	testenv.Eventually(t, "the STT job fails", func() bool {
-		j, err := jobs.Get(ctx, "job-stt")
-		if err != nil {
+	var all []*job.Job
+	testenv.Eventually(t, "every job ends", func() bool {
+		var err error
+		if all, _, err = jobs.ListActivity(ctx, 100); err != nil {
 			t.Fatal(err)
 		}
-		failed = j
-		return j.Status() == job.StatusFailed
+		return len(all) == 4 && !slices.ContainsFunc(all, func(j *job.Job) bool { return !j.Status().IsTerminal() })
 	}, nil)
-	if failed.LastError() != "permanent failure: "+transcribe.ErrModelNotInstalled.Error() || failed.Attempts() != 1 {
-		t.Fatalf("job error %q after %d attempts, want the missing model on the first attempt", failed.LastError(),
-			failed.Attempts())
-	}
-	testenv.Eventually(t, "the user is notified", func() bool { return len(notifier.Calls()) > 0 }, nil)
-
-	// After the stop no later event can add a call.
-	if err := life.shutdown(); err != nil {
+	// After the stop no later event can reach the popup.
+	if err := u.life.shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	calls := notifier.Calls()
-	if len(calls) != 1 || calls[0].Job() != "job-stt" || calls[0].Type() != transcribe.JobType ||
-		calls[0].Status() != job.StatusFailed {
-		t.Fatalf("notifications %+v, want one for the failed STT job", calls)
+
+	for _, j := range all {
+		status, ok := want[j.Type()]
+		switch {
+		case j.ID() == "job-fails":
+			status, ok = job.StatusFailed, true
+		case j.ID() == "job-completes":
+			status, ok = job.StatusCompleted, true
+		}
+		if !ok || j.Status() != status {
+			t.Errorf("job %s (%s) ended %s, want %s", j.ID(), j.Type(), j.Status(), status)
+		}
+	}
+	if shows, hides := u.popup.Shows(), u.popup.Hides(); shows != 0 || hides != 0 || u.prompt.Current() != nil {
+		t.Fatalf("the popup got %d shows and %d hides, prompt %+v; want nothing user-visible", shows, hides,
+			u.prompt.Current())
 	}
 }
 

@@ -38,14 +38,6 @@ func (f *fakeSettings) SetProcessOnlyOnACPower(_ context.Context, on bool) (pref
 	return f.t, nil
 }
 
-func (f *fakeSettings) SetNotifyOnProcessingComplete(_ context.Context, on bool) (preferences.Toggles, error) {
-	if f.err != nil {
-		return preferences.Toggles{}, f.err
-	}
-	f.t.NotifyOnProcessingComplete = on
-	return f.t, nil
-}
-
 func TestSettingsServiceMapsToggles(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeSettings{t: preferences.Toggles{RecordingPromptsEnabled: true, ProcessOnlyOnACPower: true}}
@@ -63,18 +55,14 @@ func TestSettingsServiceMapsToggles(t *testing.T) {
 	if err != nil || got != (Settings{}) {
 		t.Fatalf("SetProcessOnlyOnACPower(false) = %+v, %v", got, err)
 	}
-	got, err = s.SetNotifyOnProcessingComplete(ctx, true)
-	if err != nil || got != (Settings{NotifyOnProcessingComplete: true}) {
-		t.Fatalf("SetNotifyOnProcessingComplete(true) = %+v, %v", got, err)
-	}
 }
 
 func TestSettingsJSONNames(t *testing.T) {
-	raw, err := json.Marshal(Settings{RecordingPromptsEnabled: true, ProcessOnlyOnACPower: true, NotifyOnProcessingComplete: true})
+	raw, err := json.Marshal(Settings{RecordingPromptsEnabled: true, ProcessOnlyOnACPower: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true,"notifyOnProcessingComplete":true}`
+	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s, want %s (frontend/src/bindings/settings.ts reads these names)", raw, want)
 	}
@@ -89,9 +77,6 @@ func TestSettingsServiceHidesErrorDetails(t *testing.T) {
 		"GetSettings":                func() (Settings, error) { return s.GetSettings(context.Background()) },
 		"SetRecordingPromptsEnabled": func() (Settings, error) { return s.SetRecordingPromptsEnabled(context.Background(), true) },
 		"SetProcessOnlyOnACPower":    func() (Settings, error) { return s.SetProcessOnlyOnACPower(context.Background(), true) },
-		"SetNotifyOnProcessingComplete": func() (Settings, error) {
-			return s.SetNotifyOnProcessingComplete(context.Background(), true)
-		},
 	}
 	for name, call := range calls {
 		_, err := call()
@@ -165,7 +150,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		typ     reflect.Type
 		methods int
 	}{
-		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 4},
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 3},
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 5},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},

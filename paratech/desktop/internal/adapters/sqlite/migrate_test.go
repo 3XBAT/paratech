@@ -19,13 +19,13 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "job_notices", "jobs", "proposals",
-	"recordings", "schedule_entries", "settings", "stt_models", "summaries", "transcripts",
+	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "proposals", "recordings",
+	"schedule_entries", "settings", "stt_models", "summaries", "transcripts",
 }
 
 // unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version
 // column (ADR-0004(d)). Draft versions are append-only rows below homework_drafts, which carries the version.
-var unversionedTables = map[string]bool{"job_notices": true, "homework_draft_revisions": true}
+var unversionedTables = map[string]bool{"homework_draft_revisions": true}
 
 func tableNames(t *testing.T, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -75,8 +75,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 7 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 7", first, err)
+	if err != nil || first != 8 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 8", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -164,6 +164,69 @@ func TestMigrateDownAndUpAgain(t *testing.T) {
 	}
 	if got := tableNames(t, db.sql); !reflect.DeepEqual(got, contractTables) {
 		t.Fatalf("tables after up again = %v", got)
+	}
+}
+
+// Version 8 drops the notices of finished processing (TASK-065) from a database of version 7 that holds them, keeps
+// the other settings, and goes back down to 7.
+func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 7); err != nil {
+		t.Fatalf("up to 7: %v", err)
+	}
+	mustExec(t, db, `INSERT INTO jobs (id, type, status, idempotency_key, max_attempts, next_run_at, created_at, updated_at, finished_at)
+		VALUES ('j1', 'stt', 'COMPLETED', 'key-1', 3, 0, 0, 0, 0)`)
+	mustExec(t, db, `INSERT INTO job_notices (job_id, status, job_type, notified_at) VALUES ('j1', 'COMPLETED', 'stt', 5)`)
+	mustExec(t, db, `INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power,
+		notify_on_processing_complete, hub_url, recording_source_app, version, updated_at)
+		VALUES (1, 0, 1, 0, 'https://hub.example', 'zoom.exe', 4, 9)`)
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to 8: %v", err)
+	}
+	if v, err := db.SchemaVersion(ctx); err != nil || v != 8 {
+		t.Fatalf("SchemaVersion = %d, %v; want 8", v, err)
+	}
+	const (
+		noticesTable = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'job_notices'"
+		notifyColumn = "SELECT count(*) FROM pragma_table_info('settings') WHERE name = 'notify_on_processing_complete'"
+	)
+	if n := scanInt(t, db.sql, noticesTable); n != 0 {
+		t.Fatal("job_notices still exists at version 8")
+	}
+	if n := scanInt(t, db.sql, notifyColumn); n != 0 {
+		t.Fatal("settings.notify_on_processing_complete still exists at version 8")
+	}
+	got, err := NewSettingsRepository(db).Load(ctx)
+	if err != nil {
+		t.Fatalf("Load of a version 7 row: %v", err)
+	}
+	if got.RecordingPromptsEnabled() || !got.ProcessOnlyOnACPower() || got.HubURL() != "https://hub.example" ||
+		got.RecordingSource() != "zoom.exe" || got.Version() != 4 {
+		t.Fatalf("settings after the migration: prompts %v, AC only %v, hub %q, source %q, version %d",
+			got.RecordingPromptsEnabled(), got.ProcessOnlyOnACPower(), got.HubURL(), got.RecordingSource(), got.Version())
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE id = 'j1'"); n != 1 {
+		t.Fatalf("jobs rows = %d, want the job kept", n)
+	}
+
+	if _, err := p.DownTo(ctx, 7); err != nil {
+		t.Fatalf("down to 7: %v", err)
+	}
+	if scanInt(t, db.sql, noticesTable) != 1 || scanInt(t, db.sql, notifyColumn) != 1 {
+		t.Fatal("down to 7 did not restore job_notices and the setting")
+	}
+	if n := scanInt(t, db.sql, "SELECT notify_on_processing_complete FROM settings WHERE id = 1"); n != 1 {
+		t.Fatalf("restored setting = %d, want the default 1", n)
+	}
+	mustExec(t, db, `INSERT INTO job_notices (job_id, status, job_type, notified_at) VALUES ('j1', 'FAILED', 'stt', 6)`)
+	if _, err := db.sql.ExecContext(ctx, "UPDATE settings SET notify_on_processing_complete = 2"); !errors.Is(MapError(ctx, err), ErrConstraint) {
+		t.Fatalf("restored CHECK: err = %v, want ErrConstraint", err)
 	}
 }
 
