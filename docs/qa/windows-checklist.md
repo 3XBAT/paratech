@@ -179,7 +179,8 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 ## AC-17. Google Calendar только через адаптер и только календарь приложения; Apple Calendar API нет
 
 Автотесты: `TestCalendarStandInNeverSucceeds`, `TestWiredDeadlineProposalWaitsForTheCalendar` (`desktop/internal/app/proposals_test.go`) — сейчас вместо календаря заглушка.
-Вручную: пока не проверить: TASK-050 (вход в Google), TASK-051 (календарь), TASK-052 (Apple). Когда появится: Google просит доступ только к календарям, созданным приложением; создан отдельный календарь «Learning Assistant»; основной календарь не изменён; для Apple — только инструкция, пароль Apple не нужен.
+Вручную: пока не проверить: TASK-050 (вход в Google), TASK-051 (календарь). Когда появится: Google просит доступ только к календарям, созданным приложением; создан отдельный календарь «Learning Assistant»; основной календарь не изменён.
+Apple (TASK-052), можно проверить сейчас: «Подключения» → «Как увидеть события в Apple Calendar» открывает экран-инструкцию; пароля Apple ID приложение не просит; общедоступным календарь не делает (способ 3 помечен «Не рекомендуется»); ссылки открываются только в браузере по умолчанию (`docs/qa/run-alpha.md`, раздел 8). Автотест экрана — `desktop/frontend/test/help.test.mjs`.
 
 ## AC-18. Ответ LLM сам не может отправить письмо, записать файл или изменить календарь
 
@@ -320,7 +321,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 | AC-14 | Отправка только с подтверждением | `TestSendingWithoutConfirmationIsImpossible`, `TestWiredUnconfirmedProposalsReachNoPort` | AC-14 | автотест; вручную пока не проверить: TASK-045 |
 | AC-15 | Результат отправки, неясный исход не повторяется | `TestTimeoutAfterAcceptanceIsUnknownAndNotResent`, `TestWiredSendRepeatAfterACrashSendsNothingMore` | AC-15 | автотест + вручную («Проверить почту»); отправка пока не проверить: TASK-045 |
 | AC-16 | Импорт расписания с превью | `TestScheduleImportPreviewShowsChangesAndConflicts`, `TestScheduleImportThroughThePageBinding` | AC-16 | автотест + вручную |
-| AC-17 | Google Calendar через адаптер, без Apple API | `TestCalendarStandInNeverSucceeds` (заглушка) | AC-17 | пока не проверить: TASK-050, TASK-051, TASK-052 |
+| AC-17 | Google Calendar через адаптер, без Apple API | `TestCalendarStandInNeverSucceeds` (заглушка), `help.test.mjs` | AC-17 | Apple: вручную (экран-инструкция); Google пока не проверить: TASK-050, TASK-051 |
 | AC-18 | LLM не вызывает побочные эффекты | `TestPromptInjectionDoesNotCallEmailAdapter`, `TestSideEffectPortsNeverTakeModelOutput` | не нужно сейчас | автотест |
 | AC-19 | Секреты не в базе открытым текстом | `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestSchemaHasNoSecretColumns` | AC-19 | автотест + вручную |
 | AC-20 | Локальные данные главные | `TestLessonToAssignmentsThroughTheWiredCore` | AC-20 | автотест + вручную (без интернета); календарь пока не проверить: TASK-051 |
