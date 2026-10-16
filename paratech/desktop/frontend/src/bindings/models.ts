@@ -40,6 +40,9 @@ export interface AvailableModel {
   installed: boolean;
   installedId: string;
   hasSourcePage: boolean;
+  /** "fast", "balanced", "accurate", "max" or "" (none); the page turns it into a label and a CPU speed. */
+  tier: string;
+  englishOnly: boolean;
 }
 
 /** The current or last download; phase "" means none yet. */
@@ -216,6 +219,8 @@ export function parseAvailable(raw: unknown): AvailableModel {
     installed: bool(r, "installed", w),
     installedId: str(r, "installedId", w),
     hasSourcePage: bool(r, "hasSourcePage", w),
+    tier: str(r, "tier", w),
+    englishOnly: bool(r, "englishOnly", w),
   };
 }
 

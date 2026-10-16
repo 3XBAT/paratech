@@ -306,8 +306,8 @@ func (c *core) whisper(root, binary string, log *slog.Logger) (*whispercli.Engin
 }
 
 // wireModels builds the model manager (PRD section 8): the installed models, the default, the pin of an STT job, the
-// download of a catalog model and the import of a file the user picked. The catalog is the embedded manifest, which
-// lists no model yet (embeddedCatalog).
+// download of a catalog model and the import of a file the user picked. The catalog is the embedded manifest of the
+// recommended whisper.cpp models (embeddedCatalog).
 func (c *core) wireModels(e env) error {
 	var err error
 	c.models, err = modelcatalog.New(modelcatalog.Deps{

@@ -13,6 +13,7 @@ import {
 import {
   canConfirm,
   catalogActions,
+  catalogLabels,
   confirmation,
   confirmStep,
   defaultBadge,
@@ -41,7 +42,7 @@ const installed = {
 const available = {
   catalogId: "base-q5_1", name: "base", version: "1", sizeBytes: 59707625, quantization: "q5_1",
   capabilities: ["multilingual"], minCpuCores: 2, minRamMb: 1024, recommended: false, likelySlow: false,
-  installed: false, installedId: "", hasSourcePage: true,
+  installed: false, installedId: "", hasSourcePage: true, tier: "fast", englishOnly: false,
 };
 const noDownload = { catalogId: "", phase: "", doneBytes: 0, totalBytes: 0, running: false, error: "" };
 const view = {
@@ -112,6 +113,9 @@ test("replies are parsed strictly", () => {
     { ...view, installed: [{ ...installed, capabilities: [1] }] },
     { ...view, needsDefault: undefined }, { ...view, needsDefault: "true" },
     { ...view, installed: [{ ...installed, inUse: undefined }] }, { ...view, installed: [{ ...installed, inUse: 1 }] },
+    { ...view, available: [{ ...available, tier: undefined }] }, { ...view, available: [{ ...available, tier: 1 }] },
+    { ...view, available: [{ ...available, englishOnly: undefined }] },
+    { ...view, available: [{ ...available, englishOnly: "false" }] },
   ]) {
     assert.throws(() => parseView(bad), undefined, JSON.stringify(bad));
   }
@@ -173,7 +177,7 @@ test("the notes say why recordings are not transcribed", () => {
   const none = { ...installed, isDefault: false, inUse: false };
   const two = { ...view, installed: [none, { ...none, id: "m-2" }], needsDefault: true };
   assert.deepEqual(statusNotes(two).map((n) => n.text), [texts.needDefault]);
-  assert.match(texts.machineUnknown, /самая лёгкая/);
+  assert.match(texts.machineUnknown, /не определено/);
 
   assert.equal(defaultBadge(installed), "По умолчанию");
   assert.equal(defaultBadge({ ...installed, inUse: false }), "По умолчанию");
@@ -260,4 +264,35 @@ test("a download phase has its chip; none without a download or once installed",
   assert.equal(downloadChip({ ...d, phase: "cancelled", running: false }).kind, "neutral");
   assert.equal(downloadChip({ ...d, phase: "installed", running: false }), null);
   assert.equal(downloadChip(noDownload), null);
+});
+
+test("catalog entries get Russian labels and a qualitative CPU speed", () => {
+  const mb = 1024 * 1024;
+  const at = (over) => catalogLabels({ ...available, ...over });
+
+  assert.deepEqual(at({ tier: "balanced", recommended: true, sizeBytes: 190 * mb }), {
+    label: "Рекомендуется для русского", speed: "Скорость на CPU: средняя", warning: "",
+  });
+  assert.deepEqual(at({ tier: "fast" }), { label: "Быстрее, но менее точная", speed: "Скорость на CPU: высокая", warning: "" });
+  assert.deepEqual(at({ tier: "accurate" }), { label: "Точнее, но медленнее", speed: "Скорость на CPU: низкая", warning: "" });
+  assert.deepEqual(at({ tier: "balanced" }), { label: "", speed: "Скорость на CPU: средняя", warning: "" });
+
+  const max = at({ tier: "max", sizeBytes: 574 * mb });
+  assert.equal(max.label, "Самая точная, но очень медленная на обычном компьютере");
+  assert.equal(max.speed, "Скорость на CPU: очень низкая");
+  assert.match(max.warning, /574 МБ/, "the warning names the size");
+  assert.match(max.warning, /CPU/, "and the CPU speed");
+  assert.notEqual(at({ tier: "max", recommended: true }).warning, "", "a recommended max model still warns");
+
+  // English-only wins over the tier and over recommended.
+  for (const tier of ["fast", "balanced", "accurate", "max", ""]) {
+    assert.equal(at({ tier, englishOnly: true }).label, "Только английский", tier);
+    assert.equal(at({ tier, englishOnly: true, recommended: true }).label, "Только английский", tier);
+  }
+  assert.equal(at({ tier: "balanced", englishOnly: true }).speed, "Скорость на CPU: средняя");
+
+  // No tier or an unknown one: no label and no speed line.
+  assert.deepEqual(at({ tier: "" }), { label: "", speed: "", warning: "" });
+  assert.deepEqual(at({ tier: "toString" }), { label: "", speed: "", warning: "" });
+  assert.equal(at({ tier: "", recommended: true }).label, "Рекомендуется для русского");
 });
