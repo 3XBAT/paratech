@@ -12,3 +12,7 @@ func (platformKeys) value(string, string) (string, bool, error) {
 }
 
 func (platformKeys) setValue(string, string, string) error { return errors.ErrUnsupported }
+
+func (platformKeys) has(string, string) (bool, error) { return false, errors.ErrUnsupported }
+
+func (platformKeys) deleteKey(string) error { return errors.ErrUnsupported }

@@ -33,6 +33,24 @@ func (platformKeys) value(path, name string) (string, bool, error) {
 	return v, true, nil
 }
 
+func (platformKeys) has(path, name string) (bool, error) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, path, registry.QUERY_VALUE)
+	if errors.Is(err, registry.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = k.Close() }()
+
+	// A nil buffer only asks for the type and size.
+	_, _, err = k.GetValue(name, nil)
+	if errors.Is(err, registry.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (platformKeys) setValue(path, name, v string) error {
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, path, registry.SET_VALUE)
 	if err != nil {
@@ -40,4 +58,11 @@ func (platformKeys) setValue(path, name, v string) error {
 	}
 	defer func() { _ = k.Close() }()
 	return k.SetStringValue(name, v)
+}
+
+func (platformKeys) deleteKey(path string) error {
+	if err := registry.DeleteKey(registry.CURRENT_USER, path); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	return nil
 }
