@@ -291,7 +291,8 @@ func (s *Drafts) DraftVersion(ctx context.Context, a shared.AssignmentID, n int)
 // step 6), atomically through the Storage Manager, replacing an earlier export. Only the student's explicit action
 // calls it: the model chooses neither the version nor the path. A send that was confirmed for the earlier file content
 // becomes STALE (proposal.Recheck). While an email of the assignment is unresolved (its attachment is this file),
-// nothing is written and the error wraps ErrExportLocked. A missing assignment, draft or version wraps
+// nothing is written and the error wraps ErrExportLocked. This check is not atomic with a concurrent send; the SMTP
+// adapter's attachment digest check (delivery.ErrAttachmentChanged) is the backstop. A missing assignment, draft or version wraps
 // shared.ErrNotFound and nothing is written.
 func (s *Drafts) ExportDraft(ctx context.Context, a shared.AssignmentID, n int) (DraftExport, error) {
 	_, r, err := s.revision(ctx, a, n)

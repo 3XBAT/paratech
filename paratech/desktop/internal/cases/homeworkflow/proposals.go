@@ -164,11 +164,9 @@ func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID) (ProposalView
 		if p.Kind() != proposal.KindSendHomework {
 			return fmt.Errorf("%w: %s", ErrNotASend, p.Kind())
 		}
-		if st := p.Status(); st == proposal.StatusConfirmed || st == proposal.StatusExecuted {
-			return nil // confirmed by an earlier click: Execute repeats or returns the result
-		}
-		if err := p.Confirm(s.clock.Now()); err != nil {
-			return err
+		changed, err := p.ConfirmOnce(s.clock.Now())
+		if err != nil || !changed {
+			return err // unchanged: confirmed by an earlier click, Execute repeats or returns the result
 		}
 		return s.proposals.Save(ctx, p)
 	})

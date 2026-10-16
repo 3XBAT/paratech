@@ -415,6 +415,18 @@ func (p *Proposal) Confirm(now time.Time) error {
 	return nil
 }
 
+// ConfirmOnce is Confirm for a repeated user click: a proposal that is already CONFIRMED or EXECUTED stays as it is
+// and changed is false; any other status behaves as Confirm.
+func (p *Proposal) ConfirmOnce(now time.Time) (changed bool, err error) {
+	if p.status == StatusConfirmed || p.status == StatusExecuted {
+		return false, nil
+	}
+	if err := p.Confirm(now); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Decline records that the user refused a VALIDATED proposal; it is never executed.
 func (p *Proposal) Decline(now time.Time) error { return p.move(StatusDeclined, now) }
 
