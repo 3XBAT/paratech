@@ -84,6 +84,7 @@ export function HelpView(props: {
           <h1 ref={title} tabIndex={-1}>
             {helpTexts.title}
           </h1>
+          <p className="small muted">{helpTexts.entryText}</p>
         </div>
         <Button onClick={props.onBack}>{helpTexts.back}</Button>
       </div>

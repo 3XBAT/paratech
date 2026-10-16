@@ -182,6 +182,12 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .box{background:var(--raised);border:1px solid var(--line);border-radius:var(--r-card);padding:16px 18px}
 .box h3{margin-bottom:2px}
 .box>.m{display:block;margin-bottom:14px}
+.conn-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:14px}
+.conn-card{display:flex;flex-direction:column;gap:6px;width:100%;font:inherit;color:var(--text);text-align:left;cursor:pointer}
+.conn-card:hover{border-color:var(--control)}
+.conn-card>.m{margin-bottom:0}
+.conn-card .ch{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px}
+.conn-card .ct{font-size:15px;font-weight:600;letter-spacing:-.01em}
 .field{display:grid;gap:4px;margin-bottom:12px}
 .field label{font-size:12.5px;font-weight:500}
 .input{min-height:34px;padding:6px 10px;border-radius:var(--r-ctl);border:1px solid var(--control);background:var(--panel);width:100%}
@@ -377,26 +383,38 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
           <div class="foot"><span class="m" role="status">Пока ничего не сохранено.</span><span class="acts"><button class="btn">Выбрать другой файл</button><button class="btn primary">Применить 153 изменения</button></span></div>
         </section>
 
-        <!-- Подключения -->
+        <!-- Подключения: an overview of equal cards; a card opens its section page, «Назад» returns to the card -->
         <section class="screen" data-screen="conn" aria-label="Подключения" hidden>
-          <div class="head"><div><span class="lbl">Сервер обработки и почта</span><h2>Подключения</h2></div></div>
-          <div class="grid2">
-            <div class="box">
-              <h3>Сервер обработки</h3><span class="m">Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.</span>
-              <div class="field"><label for="hub">Адрес сервера</label><input class="input" id="hub" value="https://hub.uchebnyi-pomoshnik.ru"></div>
-              <div class="field"><div class="flabel"><label>Ключ доступа</label><span class="fstate s-ok"><svg class="i"><use href="#i-key"/></svg>задан</span></div><div class="secret"><button class="btn">Заменить</button><button class="btn ghost">Удалить</button></div></div>
-              <div class="meter"><div style="display:flex;justify-content:space-between;gap:12px"><span class="lbl">Обработка в этом месяце</span><span class="m num">осталось 42 из 60 мин · до 1 октября</span></div><div class="prog" role="progressbar" aria-label="Израсходовано минут обработки" aria-valuenow="18" aria-valuemin="0" aria-valuemax="60"><b style="--p:30%"></b></div></div>
-              <button class="btn">Проверить связь</button>
-              <div class="result" role="status"><svg class="i" style="color:var(--ok-t)"><use href="#i-ok"/></svg><span>Связь есть, ключ принят.</span></div>
-            </div>
-            <div class="box">
-              <h3>Почта для отправки домашних заданий</h3><span class="m">Письмо уходит только после вашего подтверждения.</span>
-              <div class="field"><label for="smtp">Сервер исходящей почты</label><div class="pair"><input class="input" id="smtp" value="smtp.yandex.ru"><input class="input num" aria-label="Порт" value="465"></div></div>
-              <div class="field"><label for="login">Логин</label><input class="input" id="login" value="student@example.ru"></div>
-              <div class="field"><div class="flabel"><label>Пароль приложения</label><span class="fstate s-wait"><svg class="i"><use href="#i-key"/></svg>не задан</span></div><div class="secret"><button class="btn">Задать пароль</button></div><span class="m">Хранится в диспетчере учётных данных Windows, а не в файлах приложения.</span></div>
-              <button class="btn"><svg class="i"><use href="#i-mail"/></svg>Проверить почту</button>
-              <div class="result" role="status" style="color:var(--rec-t)"><svg class="i"><use href="#i-warn"/></svg><span>Не удалось войти: пароль приложения не задан. Создайте его в настройках Яндекс ID и вставьте сюда.</span></div>
-            </div>
+          <div class="head"><div><span class="lbl">Сервер обработки, почта и Google Календарь</span><h2>Подключения</h2></div></div>
+          <div class="conn-cards">
+            <button type="button" class="box conn-card" data-open="conn-hub"><span class="ch"><span class="ct">Сервер обработки</span><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Подключено</span></span><span class="m">Адрес, ключ доступа и лимит обработки</span></button>
+            <button type="button" class="box conn-card" data-open="conn-mail"><span class="ch"><span class="ct">Почта</span><span class="chip s-wait"><svg class="i"><use href="#i-warn"/></svg>Нет пароля</span></span><span class="m">Отправка домашних заданий письмом</span></button>
+            <button type="button" class="box conn-card"><span class="ch"><span class="ct">Google Календарь</span><span class="chip s-wait"><svg class="i"><use href="#i-warn"/></svg>Вход не выполнен</span></span><span class="m">Вход и синхронизация расписания</span></button>
+            <button type="button" class="box conn-card"><span class="ch"><span class="ct">Календарь на iPhone, iPad и Mac</span><span class="chip s-neu">Инструкция</span></span><span class="m">Как увидеть события в Apple Calendar</span></button>
+          </div>
+          <div class="gap"></div>
+        </section>
+        <section class="screen" data-screen="conn-hub" aria-label="Сервер обработки" hidden>
+          <div class="head"><div><span class="lbl">Подключения</span><h2>Сервер обработки</h2></div><button class="btn" data-open="conn">Назад</button></div>
+          <div class="box">
+            <span class="m">Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.</span>
+            <div class="field"><label for="hub">Адрес сервера</label><input class="input" id="hub" value="https://hub.uchebnyi-pomoshnik.ru"></div>
+            <div class="field"><div class="flabel"><label>Ключ доступа</label><span class="fstate s-ok"><svg class="i"><use href="#i-key"/></svg>задан</span></div><div class="secret"><button class="btn">Заменить</button><button class="btn ghost">Удалить</button></div></div>
+            <div class="meter"><div style="display:flex;justify-content:space-between;gap:12px"><span class="lbl">Обработка в этом месяце</span><span class="m num">осталось 42 из 60 мин · до 1 октября</span></div><div class="prog" role="progressbar" aria-label="Израсходовано минут обработки" aria-valuenow="18" aria-valuemin="0" aria-valuemax="60"><b style="--p:30%"></b></div></div>
+            <button class="btn">Проверить связь</button>
+            <div class="result" role="status"><svg class="i" style="color:var(--ok-t)"><use href="#i-ok"/></svg><span>Связь есть, ключ принят.</span></div>
+          </div>
+          <div class="gap"></div>
+        </section>
+        <section class="screen" data-screen="conn-mail" aria-label="Почта" hidden>
+          <div class="head"><div><span class="lbl">Подключения</span><h2>Почта</h2></div><button class="btn" data-open="conn">Назад</button></div>
+          <div class="box">
+            <span class="m">Письмо уходит только после вашего подтверждения.</span>
+            <div class="field"><label for="smtp">Сервер исходящей почты</label><div class="pair"><input class="input" id="smtp" value="smtp.yandex.ru"><input class="input num" aria-label="Порт" value="465"></div></div>
+            <div class="field"><label for="login">Логин</label><input class="input" id="login" value="student@example.ru"></div>
+            <div class="field"><div class="flabel"><label>Пароль приложения</label><span class="fstate s-wait"><svg class="i"><use href="#i-key"/></svg>не задан</span></div><div class="secret"><button class="btn">Задать пароль</button></div><span class="m">Хранится в диспетчере учётных данных Windows, а не в файлах приложения.</span></div>
+            <button class="btn"><svg class="i"><use href="#i-mail"/></svg>Проверить почту</button>
+            <div class="result" role="status" style="color:var(--rec-t)"><svg class="i"><use href="#i-warn"/></svg><span>Не удалось войти: пароль приложения не задан. Создайте его в настройках Яндекс ID и вставьте сюда.</span></div>
           </div>
           <div class="gap"></div>
         </section>
@@ -491,6 +509,13 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
   navs.forEach(function(b){b.addEventListener("click",function(){
     navs.forEach(function(x){if(x===b)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current")});
     screens.forEach(function(s){s.hidden=s.dataset.screen!==b.dataset.s});
+  })});
+  // Подключения: a card opens its section page; «Назад» shows the overview again with the focus on that card.
+  var connFrom=null;
+  document.querySelectorAll("[data-open]").forEach(function(b){b.addEventListener("click",function(){
+    var to=b.dataset.open;
+    screens.forEach(function(s){s.hidden=s.dataset.screen!==to});
+    if(to==="conn"){if(connFrom)connFrom.focus()}else connFrom=b;
   })});
 
   var subj=["Матанализ","Линейная алгебра","История России","Программирование на Python","Английский язык","Физика","Дискретная математика"],
