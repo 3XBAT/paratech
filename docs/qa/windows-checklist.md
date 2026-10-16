@@ -262,7 +262,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 ## AC-23. Модель ставится скачиванием в приложении или импортом файла, оба пути проверяют SHA-256
 
-Автотесты: `TestModelImportRejectsTamperedFile` (`desktop/tests/modelimport_sqlite_test.go`); `TestModelsPageRefusesASwappedFile`, `TestModelsPageDownloadOfAnUnknownModel`, `TestEmbeddedCatalog` (`desktop/internal/app/catalog_test.go`), живой `TestLiveCatalogDownload` (`LA_MODEL_DOWNLOAD_LIVE_TEST=1`, `catalog_live_windows_test.go`) (`desktop/internal/app/modelspage_test.go`); `TestModelDownloadResumesAfterDrop`, `TestModelDownloadRejectsTamperedFile` (`desktop/tests/modeldownload_sqlite_test.go`).
+Автотесты: `TestModelImportRejectsTamperedFile` (`desktop/tests/modelimport_sqlite_test.go`); `TestModelsPageRefusesASwappedFile`, `TestModelsPageDownloadOfAnUnknownModel` (`desktop/internal/app/modelspage_test.go`); `TestEmbeddedCatalog` (`desktop/internal/app/catalog_test.go`); живой `TestLiveCatalogDownload` (`LA_MODEL_DOWNLOAD_LIVE_TEST=1`, `desktop/internal/app/catalog_live_windows_test.go`); `TestModelDownloadResumesAfterDrop`, `TestModelDownloadRejectsTamperedFile` (`desktop/tests/modeldownload_sqlite_test.go`).
 Вручную — импорт (§6 и §8 «Модели речи»):
 - [ ] SHA-256, который показывает приложение, равен `(Get-FileHash .\ggml-base.bin -Algorithm SHA256).Hash` и строке «SHA256» на странице файла на Hugging Face; затем «SHA-256 совпадает, установить».
 - [ ] Заменить файл другим с тем же именем между показом SHA-256 и подтверждением: «Файл изменился после проверки…», модель не установлена.
