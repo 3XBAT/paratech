@@ -20,6 +20,8 @@ const (
 	opSendHomework = "senddelivery: send homework"
 	opGet          = "senddelivery: get"
 	opList         = "senddelivery: list"
+	opListOf       = "senddelivery: list deliveries of an assignment"
+	opUnresolved   = "senddelivery: find unresolved deliveries"
 	opMarkSent     = "senddelivery: mark as sent"
 	opSendAgain    = "senddelivery: send again"
 	opReconcile    = "senddelivery: reconcile"
@@ -41,6 +43,7 @@ const (
 // sent again until it is resolved (hard rule 7).
 type Service struct {
 	deliveries  DeliveryRepository
+	history     DeliveryHistory
 	artifacts   ArtifactStore
 	email       EmailAdapter
 	jobs        JobEnqueuer
@@ -57,13 +60,13 @@ type Service struct {
 
 // New checks the ports and the settings.
 func New(d Deps, cfg Config) (*Service, error) {
-	if d.Deliveries == nil || d.Artifacts == nil || d.Email == nil || d.Jobs == nil || d.Credentials == nil ||
-		d.Clock == nil || d.IDs == nil || d.Tx == nil {
+	if d.Deliveries == nil || d.History == nil || d.Artifacts == nil || d.Email == nil || d.Jobs == nil ||
+		d.Credentials == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
 	}
 	s := &Service{
-		deliveries: d.Deliveries, artifacts: d.Artifacts, email: d.Email, jobs: d.Jobs, credentials: d.Credentials,
-		clock: d.Clock, ids: d.IDs, tx: d.Tx, log: d.Log,
+		deliveries: d.Deliveries, history: d.History, artifacts: d.Artifacts, email: d.Email, jobs: d.Jobs,
+		credentials: d.Credentials, clock: d.Clock, ids: d.IDs, tx: d.Tx, log: d.Log,
 		subject: cfg.Subject, credentialName: cfg.CredentialName, maxAttempts: cfg.MaxAttempts,
 	}
 	if s.subject == "" {
@@ -187,6 +190,22 @@ func unresolvedStatuses() []delivery.Status {
 	return out
 }
 
+// HasUnresolved reports whether assignment a has a delivery that blocks a new one (PENDING, SENDING or UNKNOWN). It
+// satisfies homeworkflow.UnresolvedDeliveries structurally: the export file of a is the attachment of such a delivery,
+// so the drafts must not overwrite it (hard rule 7).
+func (s *Service) HasUnresolved(ctx context.Context, a shared.AssignmentID) (bool, error) {
+	unresolved, err := s.deliveries.ListByStatus(ctx, unresolvedStatuses()...)
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opUnresolved, a, err)
+	}
+	for _, d := range unresolved {
+		if d.Blocks(a) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ensureJob enqueues the job of the current send round of a PENDING delivery and returns its id: the key is per round,
 // so a repeat or a restart creates nothing and returns the job that exists, in whatever state. Deliveries in other
 // statuses need no job (empty id).
@@ -229,6 +248,23 @@ func (s *Service) List(ctx context.Context, statuses ...delivery.Status) ([]View
 	}
 	return out, nil
 }
+
+// ListForAssignment returns the deliveries of assignment a, newest first, at most MaxListedDeliveries (PRD section 10:
+// the stored delivery result, AC-15). None is an empty list.
+func (s *Service) ListForAssignment(ctx context.Context, a shared.AssignmentID) ([]View, error) {
+	ds, err := s.history.ListByAssignment(ctx, a, MaxListedDeliveries)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opListOf, a, err)
+	}
+	out := make([]View, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, viewOf(d))
+	}
+	return out, nil
+}
+
+// Subject returns the subject of a homework email, for the confirmation dialog: the core sets it, never the model.
+func (s *Service) Subject() string { return s.subject }
 
 // MarkSent records the user's decision that an UNKNOWN delivery was sent, after checking the mailbox
 // (UNKNOWN -> SENT). Any other status yields delivery.ErrInvalidTransition.

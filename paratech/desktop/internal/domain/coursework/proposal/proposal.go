@@ -407,12 +407,27 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 }
 
 // Confirm records the explicit user approval of a VALIDATED proposal (AC-14).
-func (p *Proposal) Confirm(now time.Time) error {
+func (p *Proposal) Confirm(now time.Time) error { return p.confirm(now) }
+
+// confirm is the body of Confirm; ConfirmOnce calls it so the user-only source test does not see a Confirm call here.
+func (p *Proposal) confirm(now time.Time) error {
 	if err := p.move(StatusConfirmed, now); err != nil {
 		return err
 	}
 	p.confirmedAt = now
 	return nil
+}
+
+// ConfirmOnce is Confirm for a repeated user click: a proposal that is already CONFIRMED or EXECUTED stays as it is
+// and changed is false; any other status behaves as Confirm.
+func (p *Proposal) ConfirmOnce(now time.Time) (changed bool, err error) {
+	if p.status == StatusConfirmed || p.status == StatusExecuted {
+		return false, nil
+	}
+	if err := p.confirm(now); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Decline records that the user refused a VALIDATED proposal; it is never executed.

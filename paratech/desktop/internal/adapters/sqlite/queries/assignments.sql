@@ -11,6 +11,10 @@ SELECT * FROM assignments WHERE transcript_id = sqlc.arg(transcript_id) AND sour
 -- name: ListAssignmentsByTranscript :many
 SELECT * FROM assignments WHERE transcript_id = sqlc.arg(transcript_id) ORDER BY source_index, id;
 
+-- The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
+-- name: ListRecentAssignments :many
+SELECT * FROM assignments ORDER BY created_at DESC, source_index, id LIMIT sqlc.arg(max_rows);
+
 -- A never-stored assignment (version 0) is inserted with version 1.
 -- name: InsertAssignment :exec
 INSERT INTO assignments (id, lesson_id, transcript_id, title, description, due_at, user_edited, source_index,

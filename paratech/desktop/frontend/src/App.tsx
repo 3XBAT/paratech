@@ -2,6 +2,7 @@ import { useState } from "react";
 import { bottomGroupStart, defaultPage, type PageId, pages } from "./nav";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
+import { HomeworkPage } from "./pages/HomeworkPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { RecordingsPage } from "./pages/RecordingsPage";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -12,6 +13,8 @@ function PageView(props: { id: PageId; onOpen: (id: PageId) => void }) {
   switch (props.id) {
     case "recordings":
       return <RecordingsPage onOpenSchedule={() => props.onOpen("schedule")} />;
+    case "homework":
+      return <HomeworkPage />;
     case "schedule":
       return <SchedulePage />;
     case "connections":

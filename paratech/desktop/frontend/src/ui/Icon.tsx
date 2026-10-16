@@ -21,6 +21,8 @@ export type IconName =
   | "down"
   | "lock"
   | "key"
+  | "doc"
+  | "mail"
   | "x";
 
 /** Rendered once per window, before any Icon. */
@@ -90,6 +92,14 @@ export function IconSprite() {
       <symbol id="i-lock" viewBox="0 0 24 24">
         <rect x="5" y="10.5" width="14" height="10" rx="2" />
         <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24">
+        <path d="M6.5 3.5h7.5l3.5 3.5v13.5h-11z" />
+        <path d="M13.5 3.5V7.5h4M9.5 12h5M9.5 15.5h5" />
+      </symbol>
+      <symbol id="i-mail" viewBox="0 0 24 24">
+        <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+        <path d="M4.5 7.5l7.5 5.5 7.5-5.5" />
       </symbol>
       <symbol id="i-x" viewBox="0 0 24 24">
         <path d="M6 6l12 12M18 6L6 18" />

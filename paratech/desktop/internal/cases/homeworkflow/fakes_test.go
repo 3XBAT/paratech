@@ -172,8 +172,8 @@ func newEnv(t *testing.T) *env {
 		mailer: &testenv.FakeMailer{}, exporter: &testenv.FakeExporter{}, calendar: &testenv.FakeCalendar{},
 	}
 	svc, err := New(Deps{
-		Proposals: proposalRepo{e.store}, Assignments: assignmentRepo{e.store}, Artifacts: e.files,
-		Recipients: recipients{e.store}, Mailer: e.mailer, Exporter: e.exporter, Calendar: e.calendar,
+		Proposals: proposalRepo{e.store}, Assignments: assignmentRepo{e.store}, AssignmentList: assignmentList{e.store},
+		Artifacts: e.files, Recipients: recipients{e.store}, Mailer: e.mailer, Exporter: e.exporter, Calendar: e.calendar,
 		Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
 	})
 	if err != nil {

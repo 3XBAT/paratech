@@ -112,6 +112,23 @@ html, body, #root { height: 100%; }
 .help-list li + li { margin-top: 4px; }
 .help-back { margin-top: 16px; }
 
+/* Домашние задания: the assignment, the draft editor, the versions and the emails. Model text wraps anywhere. */
+.hw .row .t, .hw-title, .hw-desc, .hw-quote { overflow-wrap: anywhere; }
+.hw-back { margin: -6px 0 6px -14px; }
+.hw-desc { margin: 0 0 14px; white-space: pre-wrap; }
+.hw .card.box { margin-bottom: 14px; }
+.hw .card.box + .card.box { margin-top: 0; }
+.hw-text { min-height: 220px; resize: vertical; }
+.hw-instr { min-height: 64px; resize: vertical; }
+.hw-note { margin: 10px 0 0; }
+.hw .box .acts + .result { margin-top: 10px; }
+.hw-gen { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 12px; }
+.hw-quote { display: block; white-space: pre-wrap; }
+.hw-send { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 0 0 12px; color: var(--text); }
+.hw-send dt { color: var(--muted); }
+.hw-send dd { margin: 0; overflow-wrap: anywhere; }
+.hw .dialog-body p { margin: 0 0 10px; }
+
 /* Настройки: one card of switch lines and the theme. */
 .settings { max-width: 720px; padding-top: 4px; padding-bottom: 4px; }
 .settings > p { margin: 8px 0; }

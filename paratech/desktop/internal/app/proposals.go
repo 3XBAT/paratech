@@ -14,8 +14,9 @@ import (
 // deadline, hard rule 3). It needs c.deliveries and c.calendar.
 func (c *core) wireProposals(e env, settings settingsLoader) error {
 	var err error
+	assignments := sqlite.NewAssignmentRepository(c.db)
 	c.proposals, err = homeworkflow.New(homeworkflow.Deps{
-		Proposals: sqlite.NewProposalRepository(c.db), Assignments: sqlite.NewAssignmentRepository(c.db),
+		Proposals: sqlite.NewProposalRepository(c.db), Assignments: assignments, AssignmentList: assignments,
 		Artifacts: c.store, Recipients: recipientSettings{settings}, Mailer: c.deliveries, Exporter: c.store,
 		Calendar: deadlineCalendar{c.calendar}, Clock: e.local, IDs: e.ids, Tx: c.db,
 	})

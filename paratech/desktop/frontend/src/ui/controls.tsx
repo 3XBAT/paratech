@@ -149,7 +149,7 @@ export function Card(props:{ children: ReactNode; className?: string; label?: st
   );
 }
 
-/** One line of a list: title and meta, status, actions; one column in a narrow window. */
+/** One line of a list: title and meta, status, actions; one column in a narrow window. Put rows in a `.card.rows` list: the list owns the columns. */
 export function Row(props: { title: ReactNode; meta?: ReactNode; status?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="row" role="listitem">

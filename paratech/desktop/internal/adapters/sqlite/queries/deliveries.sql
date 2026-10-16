@@ -12,6 +12,13 @@ SELECT * FROM deliveries
 WHERE status IN (sqlc.slice('statuses'))
 ORDER BY created_at, id;
 
+-- The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
+-- name: ListDeliveriesByAssignment :many
+SELECT * FROM deliveries
+WHERE assignment_id = sqlc.arg(assignment_id)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(max_rows);
+
 -- A never-stored delivery (version 0) is inserted with version 1.
 -- name: InsertDelivery :exec
 INSERT INTO deliveries (id, assignment_id, recipient, subject, artifact_ref, attachment_sha256, attachment_size,

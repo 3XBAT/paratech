@@ -92,7 +92,16 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   Exporter: `filestore.Store.ExportHomework` (only `exports/<assignment>/homework.md`). Recipient: `recipientSettings`.
   Calendar: `googlecal` through `deadlineCalendar` (TASK-051); not signed in = `homeworkflow.ErrCalendarNotConnected`,
   the proposal stays CONFIRMED.
-  Clock `e.local`, like the other `homeworkflow` services. No binding yet (TASK-045).
+  Clock `e.local`, like the other `homeworkflow` services.
+- **Homework page (TASK-045).** `wails.Core.Homework` = proposals, drafts and deliveries (`input/wails.HomeworkService`).
+  `PrepareSend` = `homeworkflow.Service.ProposeSend` (the user's send goes through `Propose`: VALIDATED with recipient
+  and attachment frozen, or REJECTED); `ConfirmSend` = `homeworkflow.Service.ConfirmSend` (`Confirm` then `Execute`;
+  safe to repeat: same command key), the only binding that sends. `ExportDraft` is refused while an email of the
+  assignment is unresolved (`senddelivery.Service.HasUnresolved`): the file is its attachment. Lists:
+  `sqlite.AssignmentRepository.ListRecent` (200) and `sqlite.DeliveryRepository.ListByAssignment` (50).
+  `tests/userconfirmation_test.go`: the names `Confirm`, `Execute`, `ConfirmSend`, `MarkSent`, `SendAgain` appear in
+  production code only in `input/wails/homework.go` and in the use case files that implement them
+  (`homeworkflow/proposals.go`, `senddelivery/service.go`, `senddelivery/job.go`).
 - **Connections (TASK-062).** `cases/connections` (`app/connections.go`) edits the mail account and the Hub URL in the
   settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
   read back). "Check mail" = `smtp.Mailer.Check`: Send's session setup (EHLO, STARTTLS, AUTH), then QUIT, no message;
@@ -128,9 +137,10 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   requested at start, after the transcription sweep, when signed in); `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
   the Windows recorder by TASK-017; recording -> STT, `modelcatalog`, the heavy cap and `homeworkflow.Service` by
   TASK-060; the models page by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed
-  for an unknown machine); the Hub key and the quota of the «Подключения» page by TASK-039.
-- Bindings of the drafts and the proposals (TASK-045). The calendar sentinel lives next to its port in `homeworkflow`,
-  so `input/wails` can match it with `errors.Is` without importing `app` (ARCH-40).
+  for an unknown machine); the Hub key and the quota of the «Подключения» page by TASK-039; the bindings of the
+  drafts, the proposals and the deliveries (homework page) by TASK-045.
+- The calendar sentinel lives next to its port in `homeworkflow`, so `input/wails` can match it with `errors.Is`
+  without importing `app` (ARCH-40).
 
 ## Consequences
 - ARCH-50 holds: only `internal/app` imports cases and adapters together; the new adapters (`random`, `instancelock`,

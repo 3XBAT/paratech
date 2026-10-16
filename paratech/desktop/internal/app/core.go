@@ -57,8 +57,8 @@ type core struct {
 	runner     *jobrunner.Service
 	recordings *recordingsession.Service
 	deliveries *senddelivery.Service
-	drafts     *homeworkflow.Drafts  // no binding yet (TASK-045)
-	proposals  *homeworkflow.Service // no binding yet (TASK-045)
+	drafts     *homeworkflow.Drafts
+	proposals  *homeworkflow.Service
 
 	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
 	transcriptions *transcribe.Enqueuer
@@ -152,10 +152,20 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("app: post-processing: %w", err)
 	}
+
+	deliveries := sqlite.NewDeliveryRepository(db)
+	c.deliveries, err = senddelivery.New(senddelivery.Deps{
+		Deliveries: deliveries, History: deliveries, Artifacts: store, Email: mailer, Jobs: jobs,
+		Credentials: mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
+	}, senddelivery.Config{MaxAttempts: maxAttempts})
+	if err != nil {
+		return fmt.Errorf("app: email delivery: %w", err)
+	}
+	// The deliveries lock the export file of an assignment while one of its emails is unresolved.
 	c.drafts, err = homeworkflow.NewDrafts(homeworkflow.DraftDeps{
 		LLM: llm, Assignments: assignments, Drafts: sqlite.NewDraftRepository(db), Summaries: summaries, Lessons: lessons,
-		Artifacts: store, Jobs: jobs, JobReader: jobs, Clock: e.local, IDs: e.ids, Tx: db, Log: log,
-		ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
+		Artifacts: store, Jobs: jobs, JobReader: jobs, Deliveries: c.deliveries, Clock: e.local, IDs: e.ids, Tx: db,
+		Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
 	})
 	if err != nil {
 		return fmt.Errorf("app: homework drafts: %w", err)
@@ -187,13 +197,6 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		handlers.stt = stt
 	}
 
-	c.deliveries, err = senddelivery.New(senddelivery.Deps{
-		Deliveries: sqlite.NewDeliveryRepository(db), Artifacts: store, Email: mailer, Jobs: jobs,
-		Credentials: mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
-	}, senddelivery.Config{MaxAttempts: maxAttempts})
-	if err != nil {
-		return fmt.Errorf("app: email delivery: %w", err)
-	}
 	handlers.delivery = c.deliveries
 	// Before the proposals (the deadline calendar) and the runner (the calendar sync handler).
 	if err := c.wireGoogle(e, log); err != nil {
@@ -264,6 +267,7 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
 		Sound: sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
+		Homework: wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

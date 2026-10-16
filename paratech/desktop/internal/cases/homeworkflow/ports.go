@@ -63,6 +63,14 @@ type AssignmentRepository interface {
 	Save(ctx context.Context, a *assignment.Assignment) error
 }
 
+// AssignmentList lists the stored assignments for the homework screen (PRD section 10 step 1: select an assignment).
+// Implemented by the sqlite adapter. It is a port of its own so that the fakes of AssignmentRepository stay small.
+type AssignmentList interface {
+	// ListRecent returns at most limit assignments, newest first (by creation time; PRD section 10); none is an empty
+	// list. limit is at least 1.
+	ListRecent(ctx context.Context, limit int) ([]*assignment.Assignment, error)
+}
+
 // SummaryRepository stores the summaries of transcripts in the local database (PRD sections 5.3 and 9).
 // Implemented by the sqlite adapter.
 type SummaryRepository interface {
@@ -155,6 +163,15 @@ type DeadlineCalendar interface {
 	// UpsertDeadline creates or updates the event of cmd.AssignmentID with a stable event id (PRD section 11.3:
 	// idempotent upserts).
 	UpsertDeadline(ctx context.Context, cmd proposal.CalendarCommand) error
+}
+
+// UnresolvedDeliveries tells whether an email of an assignment may still go out or may have gone out unseen, so that
+// Drafts.ExportDraft does not overwrite the file that email attaches (PRD section 10, AC-15, hard rule 7).
+// Implemented by senddelivery.Service.
+type UnresolvedDeliveries interface {
+	// HasUnresolved reports whether assignment a has a delivery in PENDING, SENDING or UNKNOWN (PRD section 10). An
+	// error means the deliveries could not be read.
+	HasUnresolved(ctx context.Context, a shared.AssignmentID) (bool, error)
 }
 
 // TranscriptReader gives read access to the transcript that a post-processing job works on (PRD sections 8 and 9.1).

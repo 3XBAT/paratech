@@ -47,6 +47,13 @@ func (g *draftIDs) NewAssignmentID() shared.AssignmentID {
 func (g *draftIDs) NewJobID() shared.JobID     { return shared.JobID(g.next("draft-job")) }
 func (g *draftIDs) NewProposalID() proposal.ID { return proposal.ID(g.next("draft-prop")) }
 
+// noDeliveries is the UnresolvedDeliveries of a stack without email: nothing locks the export file.
+type noDeliveries struct{}
+
+func (noDeliveries) HasUnresolved(context.Context, shared.AssignmentID) (bool, error) {
+	return false, nil
+}
+
 // newDraftsEnv is the post-processing stack of newPPEnv with the draft use case; register adds its job handler to the
 // runner (before start).
 func newDraftsEnv(t *testing.T, llm *testenv.FakeLLM, register bool) (*ppEnv, *homeworkflow.Drafts) {
@@ -54,8 +61,8 @@ func newDraftsEnv(t *testing.T, llm *testenv.FakeLLM, register bool) (*ppEnv, *h
 	e := newPPEnv(t, llm)
 	drafts, err := homeworkflow.NewDrafts(homeworkflow.DraftDeps{
 		LLM: llm, Assignments: e.assignments, Drafts: sqlite.NewDraftRepository(e.db), Summaries: e.summaries,
-		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, JobReader: e.jobs, Clock: e.clock,
-		IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
+		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, JobReader: e.jobs,
+		Deliveries: noDeliveries{}, Clock: e.clock, IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
 	})
 	if err != nil {
 		t.Fatal(err)

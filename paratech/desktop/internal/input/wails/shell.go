@@ -55,6 +55,8 @@ type Core struct {
 
 	Sound  SoundCheckUseCase    // "Проверить звук" of the diagnostics page
 	Bundle SupportBundleUseCase // "Сохранить пакет для поддержки"; the shell shows its save dialog
+
+	Homework HomeworkCore // the homework page: drafts, the send confirmation and the deliveries
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -151,6 +153,7 @@ type Services struct {
 	Calendar    *GoogleCalendarService
 	Diagnostics *DiagnosticsService
 	Help        *HelpService
+	Homework    *HomeworkService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -196,6 +199,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Sound == nil || core.Bundle == nil {
 		return Services{}, errors.New("wails: open core: no diagnostics use cases")
 	}
+	if !core.Homework.complete() {
+		return Services{}, errors.New("wails: open core: no homework use cases")
+	}
 	return Services{
 		Settings: NewSettingsService(core.Settings, s.opts.Log),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
@@ -212,7 +218,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Diagnostics: NewDiagnosticsService(DiagnosticsDeps{
 			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
 		}, s.opts.Log),
-		Help: NewHelpService(core.Links, s.opts.Log),
+		Help:     NewHelpService(core.Links, s.opts.Log),
+		Homework: NewHomeworkService(core.Homework, s.opts.Log),
 	}, nil
 }
 

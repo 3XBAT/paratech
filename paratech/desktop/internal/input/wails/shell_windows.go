@@ -48,6 +48,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Calendar))
 	app.RegisterService(application.NewService(b.Diagnostics))
 	app.RegisterService(application.NewService(b.Help))
+	app.RegisterService(application.NewService(b.Homework))
 
 	u := &windowsUI{app: app}
 	var offs []func()

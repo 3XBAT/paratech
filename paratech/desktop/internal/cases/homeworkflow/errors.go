@@ -18,6 +18,13 @@ var (
 	// ErrGenerateRetries is returned by Drafts.Generate when the same generation (assignment, base version and
 	// instructions) already failed or was cancelled too many times; other instructions or an edit start a new one.
 	ErrGenerateRetries = errors.New("homework draft: the same generation failed too many times")
+
+	// ErrNotASend is returned by Service.ConfirmSend for a proposal that is not a send_homework_email one.
+	ErrNotASend = errors.New("homework workflow: not a send proposal")
+
+	// ErrExportLocked is returned by Drafts.ExportDraft while an email of the assignment is unresolved (PENDING,
+	// SENDING or UNKNOWN): the export file is its attachment, and overwriting it would fail or change that email.
+	ErrExportLocked = errors.New("homework draft: the export file is the attachment of an unresolved email")
 )
 
 // Errors of the post-processing jobs (PostProcessor). They are stored as the job's last error and shown in the UI, so

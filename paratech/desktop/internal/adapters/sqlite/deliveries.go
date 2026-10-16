@@ -15,6 +15,7 @@ const (
 	opGetDelivery      = "sqlite: get delivery"
 	opGetDeliveryByKey = "sqlite: get delivery by idempotency key"
 	opListDeliveries   = "sqlite: list deliveries"
+	opListDeliveriesOf = "sqlite: list deliveries of an assignment"
 	opSaveDelivery     = "sqlite: save delivery"
 )
 
@@ -57,6 +58,29 @@ func (r *DeliveryRepository) ListByStatus(ctx context.Context, statuses ...deliv
 	rows, err := r.db.Queries(ctx).ListDeliveriesByStatus(ctx, names)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListDeliveries, MapError(ctx, err))
+	}
+	out := make([]*delivery.Delivery, 0, len(rows))
+	for _, row := range rows {
+		d, err := deliveryFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// ListByAssignment returns at most limit deliveries of assignment a, newest first (the senddelivery.DeliveryHistory
+// port); none is an empty list. limit must be at least 1.
+func (r *DeliveryRepository) ListByAssignment(ctx context.Context, a shared.AssignmentID, limit int) ([]*delivery.Delivery, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%s: limit %d, want at least 1", opListDeliveriesOf, limit)
+	}
+	rows, err := r.db.Queries(ctx).ListDeliveriesByAssignment(ctx, sqlcgen.ListDeliveriesByAssignmentParams{
+		AssignmentID: string(a), MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opListDeliveriesOf, a, MapError(ctx, err))
 	}
 	out := make([]*delivery.Delivery, 0, len(rows))
 	for _, row := range rows {

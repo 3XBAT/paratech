@@ -27,13 +27,34 @@ import (
 // summary of t1 and an in-memory draft repository.
 type draftEnv struct {
 	*ppEnv
-	drafts *testenv.MemDrafts
-	svc    *Drafts
+	drafts     *testenv.MemDrafts
+	deliveries *unresolvedDeliveries
+	svc        *Drafts
+}
+
+// unresolvedDeliveries is the UnresolvedDeliveries fake: the assignments with an unresolved email, and an error.
+type unresolvedDeliveries struct {
+	mu  sync.Mutex
+	set map[shared.AssignmentID]bool
+	err error
+}
+
+func (u *unresolvedDeliveries) HasUnresolved(_ context.Context, a shared.AssignmentID) (bool, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.set[a], u.err
+}
+
+func (u *unresolvedDeliveries) mark(a shared.AssignmentID, unresolved bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.set[a] = unresolved
 }
 
 func newDraftEnv(t *testing.T) *draftEnv {
 	t.Helper()
-	e := &draftEnv{ppEnv: newPPEnv(t), drafts: testenv.NewMemDrafts()}
+	e := &draftEnv{ppEnv: newPPEnv(t), drafts: testenv.NewMemDrafts(),
+		deliveries: &unresolvedDeliveries{set: map[shared.AssignmentID]bool{}}}
 	svc, err := NewDrafts(e.draftDeps(e.llm))
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +80,7 @@ func (e *draftEnv) draftDeps(llm LLMClient) DraftDeps {
 	return DraftDeps{
 		LLM: llm, Assignments: ppAssignments{e.ppStore}, Drafts: e.drafts, Summaries: ppSummaries{e.ppStore},
 		Lessons: ppLessons{e.ppStore}, Artifacts: e.files, Jobs: ppJobs{e.ppStore}, JobReader: ppJobs{e.ppStore},
-		Clock: e.clock, IDs: ppIDs{e.ppStore}, Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
+		Deliveries: e.deliveries, Clock: e.clock, IDs: ppIDs{e.ppStore}, Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
 	}
 }
 
@@ -154,6 +175,7 @@ func TestNewDraftsValidates(t *testing.T) {
 		{"no artifacts", func(d *DraftDeps) { d.Artifacts = nil }},
 		{"no jobs", func(d *DraftDeps) { d.Jobs = nil }},
 		{"no job reader", func(d *DraftDeps) { d.JobReader = nil }},
+		{"no deliveries", func(d *DraftDeps) { d.Deliveries = nil }},
 		{"no clock", func(d *DraftDeps) { d.Clock = nil }},
 		{"no ids", func(d *DraftDeps) { d.IDs = nil }},
 		{"no tx", func(d *DraftDeps) { d.Tx = nil }},
@@ -1034,6 +1056,70 @@ func TestExportDraftWritesTheExportFile(t *testing.T) {
 	e.files.FailWrites(shared.ErrStorageFull)
 	if _, err := e.svc.ExportDraft(ctx, "a1", 2); !errors.Is(err, shared.ErrStorageFull) {
 		t.Fatalf("full disk: %v", err)
+	}
+}
+
+// Hard rule 7: while an email of the assignment is unresolved (PENDING, SENDING, UNKNOWN), its attachment is the export
+// file; exporting would fail or change that email, so nothing is written. Once it is resolved the export works again.
+func TestExportDraftIsLockedByAnUnresolvedEmail(t *testing.T) {
+	ctx := context.Background()
+	e := newDraftEnv(t)
+	for i, body := range []string{"Sent text.", "New text."} {
+		if _, err := e.svc.EditDraft(ctx, DraftEdit{Assignment: "a1", Base: i, Title: "Chapter 4", Body: body}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.svc.ExportDraft(ctx, "a1", 1); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := proposal.ExportRef("a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		t.Helper()
+		rc, err := e.files.Open(ctx, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rc.Close() }()
+		b, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	sent := read()
+
+	tests := []struct {
+		name       string
+		unresolved bool
+		err        error
+		want       error
+	}{
+		{name: "unresolved email", unresolved: true, want: ErrExportLocked},
+		{name: "deliveries unreadable", err: errDiskFull, want: errDiskFull},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e.deliveries.mark("a1", tt.unresolved)
+			e.deliveries.err = tt.err
+			if _, err := e.svc.ExportDraft(ctx, "a1", 2); !errors.Is(err, tt.want) {
+				t.Fatalf("ExportDraft = %v, want %v", err, tt.want)
+			}
+			if got := read(); got != sent {
+				t.Fatalf("export file = %q, want the attachment of the email unchanged", got)
+			}
+		})
+	}
+
+	e.deliveries.mark("a1", false)
+	e.deliveries.err = nil
+	if _, err := e.svc.ExportDraft(ctx, "a1", 2); err != nil {
+		t.Fatalf("ExportDraft after the email was resolved = %v", err)
+	}
+	if got := read(); got != "# Chapter 4\n\nNew text.\n" {
+		t.Fatalf("export file = %q", got)
 	}
 }
 

@@ -299,8 +299,8 @@ func newEnvWith(t *testing.T, cfg Config) *env {
 		creds: testenv.NewMemCredentials(), clock: testenv.NewFakeClock(t0),
 	}
 	svc, err := New(Deps{
-		Deliveries: e.st, Artifacts: e.files, Email: e.email, Jobs: e.st, Credentials: e.creds, Clock: e.clock,
-		IDs: e.st, Tx: e.st,
+		Deliveries: e.st, History: history{e.st}, Artifacts: e.files, Email: e.email, Jobs: e.st, Credentials: e.creds,
+		Clock: e.clock, IDs: e.st, Tx: e.st,
 	}, cfg)
 	if err != nil {
 		t.Fatal(err)

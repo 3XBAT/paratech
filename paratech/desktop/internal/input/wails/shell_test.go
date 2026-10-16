@@ -25,6 +25,7 @@ func validCore() Core {
 		Models: &fakeCatalog{}, Downloads: &fakeDownloads{}, Imports: &fakeImports{}, Links: &fakeLinks{},
 		Connections: &fakeConnections{}, Google: &fakeGoogle{}, Calendar: &fakeCalendarSync{},
 		Sound: &fakeSound{}, Bundle: &fakeBundle{},
+		Homework: validHomework(),
 	}
 }
 

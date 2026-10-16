@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,11 +17,13 @@ import (
 
 // Operation names, used in error messages.
 const (
-	opPropose = "homeworkflow: propose action"
-	opGet     = "homeworkflow: get proposal"
-	opConfirm = "homeworkflow: confirm proposal"
-	opDecline = "homeworkflow: decline proposal"
-	opExecute = "homeworkflow: execute proposal"
+	opPropose     = "homeworkflow: propose action"
+	opProposeSend = "homeworkflow: propose sending"
+	opGet         = "homeworkflow: get proposal"
+	opConfirm     = "homeworkflow: confirm proposal"
+	opDecline     = "homeworkflow: decline proposal"
+	opExecute     = "homeworkflow: execute proposal"
+	opConfirmSend = "homeworkflow: confirm sending"
 )
 
 // The pipeline of PRD section 13.3 (AC-14, AC-18):
@@ -54,6 +57,28 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
 	return viewOf(p), nil
+}
+
+// sendRequest is the canonical send_homework_email object: the only field the wire allows for the kind.
+type sendRequest struct {
+	Kind         proposal.Kind `json:"kind"`
+	AssignmentID string        `json:"assignment_id"`
+}
+
+// ProposeSend is the user's request to email the exported homework of assignment a (PRD section 10 step 7). It takes
+// exactly the Propose path, so the same strict parse and the same validation against trusted state apply as to a model
+// proposal: the result is VALIDATED with the recipient and the export content frozen, for the confirmation dialog, or
+// REJECTED with a reason (unknown assignment, no recipient, nothing exported). No side effect happens here.
+func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID) (ProposalView, error) {
+	if err := a.Validate(); err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
+	}
+	raw, err := json.Marshal(sendRequest{Kind: proposal.KindSendHomework, AssignmentID: a.String()})
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
+	}
+	// Wrapped as untrusted on purpose: the request then passes the one parser every proposal passes.
+	return s.Propose(ctx, values.NewUntrustedOutput(string(raw)))
 }
 
 // facts reads the trusted local state a proposal is checked against, only what its kind needs. It runs outside a
@@ -123,6 +148,32 @@ func (s *Service) Get(ctx context.Context, id proposal.ID) (ProposalView, error)
 // nothing derived from model output does.
 func (s *Service) Confirm(ctx context.Context, id proposal.ID) (ProposalView, error) {
 	return s.change(ctx, opConfirm, id, (*proposal.Proposal).Confirm)
+}
+
+// ConfirmSend is the user's click on the confirmation of a send_homework_email proposal: Confirm, then Execute
+// (AC-14). Repeating it with the same proposal is safe (hard rule 7): a CONFIRMED proposal whose Execute failed, maybe
+// after the delivery was saved, is executed again under the same idempotency key, so no second email is created, and
+// an EXECUTED one is returned as it is. Another kind yields ErrNotASend before any change; other statuses yield the
+// error of proposal.Confirm (proposal.ErrInvalidTransition).
+func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID) (ProposalView, error) {
+	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		p, err := s.proposals.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if p.Kind() != proposal.KindSendHomework {
+			return fmt.Errorf("%w: %s", ErrNotASend, p.Kind())
+		}
+		changed, err := p.ConfirmOnce(s.clock.Now())
+		if err != nil || !changed {
+			return err // unchanged: confirmed by an earlier click, Execute repeats or returns the result
+		}
+		return s.proposals.Save(ctx, p)
+	})
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmSend, err)
+	}
+	return s.Execute(ctx, id)
 }
 
 // Decline records that the user refused a VALIDATED proposal; it can never be executed afterwards.

@@ -172,6 +172,44 @@ func TestTransitionNeedsTime(t *testing.T) {
 	}
 }
 
+func TestConfirmOnce(t *testing.T) {
+	tests := []struct {
+		from        Status
+		changed     bool
+		wantErr     error
+		want        Status
+		confirmedAt time.Time // expected after the call
+	}{
+		{StatusProposed, false, ErrInvalidTransition, StatusProposed, time.Time{}},
+		{StatusValidated, true, nil, StatusConfirmed, t0.Add(time.Hour)},
+		{StatusRejected, false, ErrInvalidTransition, StatusRejected, time.Time{}},
+		{StatusConfirmed, false, nil, StatusConfirmed, t0.Add(time.Minute)},
+		{StatusDeclined, false, ErrInvalidTransition, StatusDeclined, time.Time{}},
+		{StatusExecuted, false, nil, StatusExecuted, t0.Add(time.Minute)},
+		{StatusStale, false, ErrInvalidTransition, StatusStale, t0.Add(time.Minute)},
+	}
+	if len(tests) != len(Statuses()) {
+		t.Fatalf("table covers %d statuses, Statuses() %d", len(tests), len(Statuses()))
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.from), func(t *testing.T) {
+			p := inStatus(t, outEmail, tt.from)
+			before := p.State()
+
+			changed, err := p.ConfirmOnce(t0.Add(time.Hour))
+			if changed != tt.changed || !errors.Is(err, tt.wantErr) || (tt.wantErr == nil) != (err == nil) {
+				t.Fatalf("ConfirmOnce = %v, %v; want %v, %v", changed, err, tt.changed, tt.wantErr)
+			}
+			if p.Status() != tt.want || !p.ConfirmedAt().Equal(tt.confirmedAt) {
+				t.Fatalf("status = %s, confirmedAt = %v; want %s, %v", p.Status(), p.ConfirmedAt(), tt.want, tt.confirmedAt)
+			}
+			if !changed && p.State() != before {
+				t.Fatal("an unchanged proposal was modified")
+			}
+		})
+	}
+}
+
 func TestNewParsesValidOutput(t *testing.T) {
 	email := mustNew(t, outEmail)
 	if email.Kind() != KindSendHomework || email.AssignmentID() != "a1" || email.Status() != StatusProposed ||

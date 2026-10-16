@@ -128,6 +128,61 @@ func (q *Queries) InsertDelivery(ctx context.Context, arg InsertDeliveryParams) 
 	return err
 }
 
+const listDeliveriesByAssignment = `-- name: ListDeliveriesByAssignment :many
+SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries
+WHERE assignment_id = ?1
+ORDER BY created_at DESC, id DESC
+LIMIT ?2
+`
+
+type ListDeliveriesByAssignmentParams struct {
+	AssignmentID string
+	MaxRows      int64
+}
+
+// The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
+func (q *Queries) ListDeliveriesByAssignment(ctx context.Context, arg ListDeliveriesByAssignmentParams) ([]Delivery, error) {
+	rows, err := q.db.QueryContext(ctx, listDeliveriesByAssignment, arg.AssignmentID, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Delivery{}
+	for rows.Next() {
+		var i Delivery
+		if err := rows.Scan(
+			&i.ID,
+			&i.AssignmentID,
+			&i.Recipient,
+			&i.Subject,
+			&i.ArtifactRef,
+			&i.MessageID,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.LastError,
+			&i.ConfirmedAt,
+			&i.SentAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AttachmentSha256,
+			&i.AttachmentSize,
+			&i.SendRound,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeliveriesByStatus = `-- name: ListDeliveriesByStatus :many
 SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries
 WHERE status IN (/*SLICE:statuses*/?)

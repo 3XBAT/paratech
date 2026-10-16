@@ -8,6 +8,7 @@ import "fmt"
 type Service struct {
 	proposals   ProposalRepository
 	assignments AssignmentRepository
+	list        AssignmentList
 	artifacts   ArtifactStore
 	recipients  RecipientSource
 	mailer      HomeworkMailer
@@ -20,13 +21,15 @@ type Service struct {
 
 // New builds the Service.
 func New(d Deps) (*Service, error) {
-	if d.Proposals == nil || d.Assignments == nil || d.Artifacts == nil || d.Recipients == nil || d.Mailer == nil ||
-		d.Exporter == nil || d.Calendar == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
+	if d.Proposals == nil || d.Assignments == nil || d.AssignmentList == nil || d.Artifacts == nil ||
+		d.Recipients == nil || d.Mailer == nil || d.Exporter == nil || d.Calendar == nil || d.Clock == nil ||
+		d.IDs == nil || d.Tx == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
 	}
 
 	return &Service{
-		proposals: d.Proposals, assignments: d.Assignments, artifacts: d.Artifacts, recipients: d.Recipients,
-		mailer: d.Mailer, exporter: d.Exporter, calendar: d.Calendar, clock: d.Clock, ids: d.IDs, tx: d.Tx,
+		proposals: d.Proposals, assignments: d.Assignments, list: d.AssignmentList, artifacts: d.Artifacts,
+		recipients: d.Recipients, mailer: d.Mailer, exporter: d.Exporter, calendar: d.Calendar, clock: d.Clock,
+		ids: d.IDs, tx: d.Tx,
 	}, nil
 }

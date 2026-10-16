@@ -166,6 +166,47 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 	return items, nil
 }
 
+const listRecentAssignments = `-- name: ListRecentAssignments :many
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version FROM assignments ORDER BY created_at DESC, source_index, id LIMIT ?1
+`
+
+// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
+func (q *Queries) ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentAssignments, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Assignment{}
+	for rows.Next() {
+		var i Assignment
+		if err := rows.Scan(
+			&i.ID,
+			&i.LessonID,
+			&i.TranscriptID,
+			&i.Title,
+			&i.Description,
+			&i.DueAt,
+			&i.UserEdited,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SourceIndex,
+			&i.PromptVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateAssignment = `-- name: UpdateAssignment :execrows
 UPDATE assignments
 SET title          = ?1,

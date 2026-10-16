@@ -53,7 +53,8 @@ func newProposalsEnv(t *testing.T) *proposalsEnv {
 		t.Fatal(err)
 	}
 	e.svc, err = homeworkflow.New(homeworkflow.Deps{
-		Proposals: sqlite.NewProposalRepository(e.db), Assignments: e.assignments, Artifacts: e.store,
+		Proposals: sqlite.NewProposalRepository(e.db), Assignments: e.assignments, AssignmentList: e.assignments,
+		Artifacts:  e.store,
 		Recipients: fixedRecipient{r}, Mailer: e.mailer, Exporter: e.store, Calendar: e.calendar, Clock: e.clock,
 		IDs: &postIDs{}, Tx: e.db,
 	})
