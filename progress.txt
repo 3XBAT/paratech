@@ -1818,5 +1818,41 @@
 
 ### Ручная проверка владельцем на Windows (ночью не выполнялась)
 - docs/qa/windows-checklist.md целиком, на Windows 10 и Windows 11
+## [TASK-050] Авторизация Google: Authorization Code + PKCE, loopback-redirect, токены в CredentialStore
+**Дата:** 2026-10-16
+**Статус:** done (живой вход в настоящий Google — проверка владельцем, docs/qa/run-alpha.md раздел 10)
+
+### Что сделано
+- domain/schedule/values: правила client id (…apps.googleusercontent.com), client secret, проверка выданных scope (ровно calendar.app.created)
+- adapters/googleauth (golang.org/x/oauth2 v0.37.0, без x/oauth2/google): PKCE S256, state 32 байта crypto/rand (сравнение constant-time), loopback tcp4 127.0.0.1:0 без пути, проверка Host, только GET /, одноразовый приём, поддельные запросы игнорируются, таймаут 5 мин на ожидание редиректа (обмен кода уже вне таймаута), фиксированная страница ответа; refresh-токен только в Credential Manager (paratech/google/refresh-token), access-токен только в памяти; ротация refresh-токена; invalid_grant удаляет сохранённый токен (ErrReauthRequired); HTTPClient() для TASK-051 (только same-host редиректы); выход = revoke (token в теле) + локальное удаление даже при сбое revoke
+- client id и client secret вводит пользователь в «Подключения», хранятся в Credential Manager (paratech/google/client-id, client-secret); в репозитории и бинарнике их нет; миграции SQLite нет
+- adapters/weblink.OpenAuthPage: https + query только из unreserved, '=', '&', '%XX'; тот же explorer.exe из GetWindowsDirectory, без shell
+- cases/googlesignin (SetClient/ClearClient/Status/SignIn/CancelSignIn/SignOut; один вход за раз; смена клиента запрещена при входе), input/wails GoogleService (6 методов), app wiring + отмена ожидания входа при закрытии
+- UI: блок «Google Календарь» на «Подключения» (pages/GoogleBlock.tsx, googleView.ts, bindings/google.ts), минимальный стиль
+- testenv.FakeGoogleOAuth (auth/token/revoke, режимы ошибок) и FakeBrowser
+- ADR-0011 (в задаче «ADR 0004», номер занят): Testing + тест-пользователи для пилота, 7 дней жизни refresh-токена, верификация позже; docs/refs/google-calendar.md (источники Google с датами страниц); run-alpha раздел 10 (шаги владельца)
+- Изменённые существующие тесты: input/wails shell_test.go validCore и settings_test.go (строка missing google, строка google.ts в TestFrontendCallsBoundNames), app/main_test.go testEnv (google store, fake browser, эндпоинты на 127.0.0.1:1), app/secrets_test.go (имена google), app/env_other_test.go; ничего не ослаблено
+- Ревью: approve (3 low, 3 nit) -> исправлены low 1 (обмен кода вне таймаута) и nits 4-5, плюс same-host редиректы bearer-клиента (68c79fe). Security: найдено 0, опровергнуто 0, исправлено 0, принято 0
+
+### Тесты
+- [x] Шаг 1: go test -race -count=1 ./desktop/internal/... (через heavy.sh, исполнитель; и в verify.sh)
+- [x] Шаг 2: TestSignInStoresTheRefreshTokenOnly (S256(verifier)==challenge, токен в MemCredentials), TestGooglePageKeepsTokensSecret (ответы, debug-лог, файлы и строки БД)
+- [x] Шаг 3: ADR-0011 со ссылками на developers.google.com / support.google.com
+- [x] npm run build / test (92/92)
+
+### Решения (подтвердить)
+- Номер ADR 0011 вместо 0004 (занят)
+- Client id тоже в Credential Manager (не в settings): без миграции, вся конфигурация Google в одном месте
+- client_secret всегда отправляется (Google пишет «Optional», работа Desktop-клиента без него не проверена)
+- invalid_grant удаляет refresh-токен (статус «не выполнен вход»)
+- Правила клиента Google в domain/schedule/values (календарная проекция расписания), без нового контекста
+
+### Заметки (follow-up)
+- Low (ARCH-22): правила «клиент не меняется при входе» и «клиент задан, если есть оба значения» в use case; при желании — чистые функции в domain/schedule/values
+- Low: повторный SignIn при уже выполненном входе заменяет refresh-токен без отзыва старого (UI скрывает «Войти»; лимит Google 100 токенов на аккаунт/клиент)
+- Nit: Parse* возвращают string, не VO
+- TASK-051: нет ForgetAccessToken после 401 Calendar API; вызывать только фиксированные https://www.googleapis.com URL
+- UI: при отмене «Вход отменён.» показывается дважды (зелёным, затем красным)
+- Ручная проверка владельцем на Windows: explorer.exe передаёт URL с query браузеру целиком; реальный вход с Desktop-клиентом; запись paratech/google/refresh-token; выход и myaccount.google.com/linkedapps
 
 ---
