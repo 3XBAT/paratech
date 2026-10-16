@@ -224,7 +224,7 @@ func catalogEntry(t *testing.T, page string) values.CatalogEntry {
 	e, err := values.NewCatalogEntry(values.CatalogEntrySpec{
 		ID: "base-q5_1", Name: "base", Version: "1", SizeBytes: 59707625, SHA256: shownSum, SourceURL: src,
 		SourcePage: pageURL, Quantization: "q5_1", Capabilities: []values.Capability{"multilingual"},
-		Recommendation: values.Recommendation{MinCPUCores: 2, MinRAMMB: 1024, Preferred: true},
+		Recommendation: values.Recommendation{MinCPUCores: 2, MinRAMMB: 1024, Preferred: true}, Tier: values.TierFast,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestModelsListShowsInstalledAndAvailable(t *testing.T) {
 		Available: []AvailableModelItem{{
 			CatalogID: "base-q5_1", Name: "base", Version: "1", SizeBytes: 59707625, Quantization: "q5_1",
 			Capabilities: []string{"multilingual"}, MinCPUCores: 2, MinRAMMB: 1024, Recommended: true, LikelySlow: true,
-			Installed: true, InstalledID: "m-1", HasSourcePage: true,
+			Installed: true, InstalledID: "m-1", HasSourcePage: true, Tier: "fast",
 		}},
 		SpeechReady:    true,
 		Download:       ModelDownload{CatalogID: "base-q5_1", Phase: "downloading", DoneBytes: 5, TotalBytes: 9, Running: true},
@@ -358,7 +358,7 @@ func TestModelsJSONNames(t *testing.T) {
 	}{
 		{ModelsView{}, "available,download,installed,machineKnown,modelsHomePage,needsDefault,speechReady"},
 		{InstalledModelItem{}, "capabilities,catalogId,fromCatalog,id,inUse,installedAt,isDefault,name,quantization,sha256,sizeBytes,version"},
-		{AvailableModelItem{}, "capabilities,catalogId,hasSourcePage,installed,installedId,likelySlow,minCpuCores,minRamMb,name,quantization,recommended,sizeBytes,version"},
+		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,hasSourcePage,installed,installedId,likelySlow,minCpuCores,minRamMb,name,quantization,recommended,sizeBytes,tier,version"},
 		{ModelDownload{}, "catalogId,doneBytes,error,phase,running,totalBytes"},
 		{DownloadPlanView{}, "availableBytes,catalogId,enough,haveBytes,requiredBytes,totalBytes,warning"},
 		{ModelFileSelection{}, "cancelled,fileName,selectionId,sha256,sizeBytes,suggestedName,suggestedQuantization,suggestedVersion"},
@@ -873,5 +873,54 @@ func TestSizeText(t *testing.T) {
 		if got := sizeText(tt.n); got != tt.want {
 			t.Errorf("sizeText(%d) = %q, want %q", tt.n, got, tt.want)
 		}
+	}
+}
+
+// The page gets the tier and whether a model knows English only, under fixed JSON names (TASK-067).
+func TestModelsListTierAndLanguage(t *testing.T) {
+	src, err := values.ParseSourceURL("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name        string
+		tier        values.ModelTier
+		caps        []values.Capability
+		wantTier    string
+		wantEnglish bool
+	}{
+		{"english only", values.TierFast, []values.Capability{values.CapabilityEnglish}, "fast", true},
+		{"multilingual", values.TierMax, []values.Capability{values.CapabilityMultilingual}, "max", false},
+		{"no tier, no capabilities", values.TierNone, nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := values.NewCatalogEntry(values.CatalogEntrySpec{
+				ID: "base.en-q5_1", Name: "base.en-q5_1", Version: "1", SizeBytes: 59721011, SHA256: shownSum,
+				SourceURL: src, Capabilities: tc.caps, Tier: tc.tier,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := newModelFixture(t)
+			f.catalog.available = []modelcatalog.AvailableModel{{Entry: e}}
+			f.catalog.resolveErr = modelselection.ErrModelNotInstalled
+
+			view, err := f.s.List(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a := view.Available[0]; a.Tier != tc.wantTier || a.EnglishOnly != tc.wantEnglish {
+				t.Fatalf("item %+v, want tier %q englishOnly %v", a, tc.wantTier, tc.wantEnglish)
+			}
+			raw, err := json.Marshal(view.Available[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf(`"tier":%q,"englishOnly":%v`, tc.wantTier, tc.wantEnglish)
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("JSON %s, want %s", raw, want)
+			}
+		})
 	}
 }

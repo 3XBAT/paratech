@@ -22,7 +22,6 @@ import (
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
-	"paratech/desktop/internal/domain/transcription/values"
 	"paratech/desktop/internal/input/wails"
 	"paratech/desktop/testenv"
 )
@@ -193,27 +192,5 @@ func TestRegistrationsWithoutAnEngine(t *testing.T) {
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("registered types %v, want %v", got, want)
-	}
-}
-
-// The embedded catalog is a valid manifest without models, and every call returns its own copy.
-func TestEmbeddedCatalogIsEmpty(t *testing.T) {
-	data, err := (embeddedCatalog{}).Manifest(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cat, err := values.ParseCatalog(data)
-	if err != nil {
-		t.Fatalf("ParseCatalog = %v", err)
-	}
-	if n := len(cat.Entries()); n != 0 {
-		t.Fatalf("%d catalog entries, want none until their SHA-256 is verified", n)
-	}
-	if hosts := cat.DownloadHosts().Hosts(); len(hosts) != 0 {
-		t.Fatalf("download hosts %v, want none", hosts)
-	}
-	data[0] = 'x'
-	if again, err := (embeddedCatalog{}).Manifest(context.Background()); err != nil || again[0] != '{' {
-		t.Fatalf("a changed copy leaked into the next call: %q, %v", again, err)
 	}
 }

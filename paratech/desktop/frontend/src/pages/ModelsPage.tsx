@@ -13,6 +13,7 @@ import { callByName } from "../bindings/runtime";
 import {
   canConfirm,
   catalogActions,
+  catalogLabels,
   confirmation,
   confirmStep,
   defaultBadge,
@@ -265,9 +266,6 @@ export function ModelsPage() {
           <h1>Модели речи</h1>
         </div>
         <div className="acts">
-          <Button variant="ghost" disabled={busy.has("home")} onClick={openHome}>
-            Открыть страницу моделей whisper.cpp
-          </Button>
           <Button icon="up" disabled={dialogBusy} onClick={() => void choose()}>
             Импортировать файл модели…
           </Button>
@@ -400,19 +398,14 @@ export function ModelsPage() {
         )}
       </Dialog>
 
-      <h2 className="group-title">Каталог</h2>
+      <h2 className="group-title">Рекомендуемые модели</h2>
       {view !== null &&
         (view.available.length === 0 ? (
-          <>
-            <p className="muted">{texts.emptyCatalog}</p>
-            <p className="muted breakable">
-              Страница моделей: <bdi>{view.modelsHomePage}</bdi>
-            </p>
-          </>
+          <p className="muted">{texts.emptyCatalog}</p>
         ) : (
           <>
             {!view.machineKnown && <p className="muted">{texts.machineUnknown}</p>}
-            <div className="card mrows" role="list" aria-label="Каталог моделей">
+            <div className="card mrows" role="list" aria-label="Рекомендуемые модели">
               {view.available.map((m) => (
                 <CatalogRow
                   key={m.catalogId}
@@ -430,6 +423,14 @@ export function ModelsPage() {
             </div>
           </>
         ))}
+
+      <h2 className="group-title">Другие модели</h2>
+      <p className="muted">{texts.otherModels}</p>
+      <div className="acts start">
+        <Button variant="ghost" disabled={busy.has("home")} onClick={openHome}>
+          Открыть страницу моделей на Hugging Face
+        </Button>
+      </div>
       <div className="gap" />
     </section>
   );
@@ -509,24 +510,22 @@ function CatalogRow(props: {
   const d = downloadOf(m, props.download);
   const chip = d !== null ? downloadChip(d) : null;
   const key = (op: string) => props.busy.has(`${op}:${m.catalogId}`);
+  const l = catalogLabels(m);
   return (
     <div className="mrow" role="listitem">
       <div className="row-main">
-        <p className="t">
-          <bdi>{modelTitle(m)}</bdi>
-        </p>
+        <p className="t">{l.label !== "" ? l.label : <bdi>{modelTitle(m)}</bdi>}</p>
         <span className="small muted num">
-          {sizeText(m.sizeBytes)} · от {m.minCpuCores} ядер, {sizeText(m.minRamMb * 1024 * 1024)} памяти
+          {sizeText(m.sizeBytes)}
+          {l.speed !== "" && ` · ${l.speed}`}
+          {" · "}
+          <bdi>{m.catalogId}</bdi>
         </span>
+        {l.warning !== "" && <span className="small slow">{l.warning}</span>}
         {m.likelySlow && <span className="small slow">{texts.likelySlow}</span>}
       </div>
       <div className="st">
         <span className="chips">
-          {m.recommended && (
-            <StatusChip kind="net" icon="ok">
-              Рекомендуется
-            </StatusChip>
-          )}
           {m.installed && (
             <StatusChip kind="neutral" icon="ok">
               Установлена
@@ -550,7 +549,7 @@ function CatalogRow(props: {
       </div>
       <div className="acts">
         {a.download && (
-          <Button icon="down" disabled={key("download")} onClick={props.onDownload}>
+          <Button variant="primary" icon="down" disabled={key("download")} onClick={props.onDownload}>
             Скачать
           </Button>
         )}
@@ -570,7 +569,7 @@ function CatalogRow(props: {
           </Button>
         )}
         {a.importFile && (
-          <Button disabled={props.dialogBusy} onClick={props.onImport}>
+          <Button variant="ghost" disabled={props.dialogBusy} onClick={props.onImport}>
             Импортировать скачанный файл
           </Button>
         )}

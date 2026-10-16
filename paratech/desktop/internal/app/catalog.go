@@ -15,10 +15,10 @@ const catalogFile = "catalog.json"
 //go:embed catalog.json
 var catalogFiles embed.FS
 
-// embeddedCatalog is the catalog source of the model manager (PRD section 8.1). The manifest lists no model yet: no
-// SHA-256 of a ggml model is verified, so the catalog is empty, download has nothing to offer and a model is
-// installed by manual import only. Adding entries with verified digests to catalog.json is a follow-up. The use case
-// parses and validates the bytes, so this is configuration data only.
+// embeddedCatalog is the catalog source of the model manager (PRD section 8.1): the recommended whisper.cpp models
+// with the sizes and SHA-256 of the official Hugging Face metadata, pinned to one repository commit
+// (docs/refs/whisper.md, "Model catalog"). The use case parses and validates the bytes, so this is configuration data
+// only.
 type embeddedCatalog struct{}
 
 // Manifest returns a fresh copy of the embedded manifest.

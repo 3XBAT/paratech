@@ -104,6 +104,46 @@ export function catalogActions(m: AvailableModel, d: ModelDownload): CatalogActi
   };
 }
 
+/**
+ * The Russian description of a catalog entry: the main label (may be empty), the CPU speed line (empty without a tier)
+ * and a warning for the largest model. Speeds are qualitative: the machine is not measured.
+ */
+export interface CatalogLabels {
+  label: string;
+  speed: string;
+  warning: string;
+}
+
+const tierLabels: Readonly<Record<string, string>> = {
+  fast: "Быстрее, но менее точная",
+  accurate: "Точнее, но медленнее",
+  max: "Самая точная, но очень медленная на обычном компьютере",
+};
+
+const tierSpeeds: Readonly<Record<string, string>> = {
+  fast: "высокая",
+  balanced: "средняя",
+  accurate: "низкая",
+  max: "очень низкая",
+};
+
+export function catalogLabels(m: AvailableModel): CatalogLabels {
+  let label = "";
+  if (m.englishOnly) {
+    label = "Только английский";
+  } else if (m.recommended) {
+    label = "Рекомендуется для русского";
+  } else if (Object.hasOwn(tierLabels, m.tier)) {
+    label = tierLabels[m.tier];
+  }
+  const speed = Object.hasOwn(tierSpeeds, m.tier) ? `Скорость на CPU: ${tierSpeeds[m.tier]}` : "";
+  const warning =
+    m.tier === "max"
+      ? `Большой файл (${sizeText(m.sizeBytes)}) и очень медленное распознавание на CPU: урок будет распознаваться заметно дольше, чем с другими моделями.`
+      : "";
+  return { label, speed, warning };
+}
+
 /** "base 1, q5_1": name, version and quantization when there is one. */
 export function modelTitle(m: { name: string; version: string; quantization: string }): string {
   return m.quantization !== "" ? `${m.name} ${m.version}, ${m.quantization}` : `${m.name} ${m.version}`;
@@ -135,12 +175,11 @@ export const texts = {
   noModels: "Модель не установлена: записи не распознаются, пока вы не импортируете модель.",
   afterImport: "После установки модели ожидающие записи начнут распознаваться без перезапуска.",
   needDefault: "Установлено несколько моделей, но ни одна не выбрана по умолчанию: распознавание ждёт выбора.",
-  emptyCatalog:
-    "Каталог моделей пока пуст: скачать в приложении нечего. Скачайте файл модели (.bin) со страницы моделей " +
-    "whisper.cpp в браузере и импортируйте его, например ggml-small.bin (около 466 МБ).",
-  machineUnknown:
-    "Оборудование компьютера не определено: рекомендуется самая лёгкая подходящая модель, предупреждения о медленной " +
-    "работе не показываются.",
+  emptyCatalog: "Список рекомендуемых моделей пуст. Модель можно установить из файла (см. «Другие модели»).",
+  machineUnknown: "Оборудование компьютера не определено: скорость на CPU указана примерно, для обычного компьютера.",
+  otherModels:
+    "Другие модели whisper.cpp лежат на Hugging Face. Скачайте файл .bin в браузере и установите его кнопкой " +
+    "«Импортировать файл модели…».",
   likelySlow: "Может работать медленно на этом компьютере.",
   compareSha:
     "Сравните SHA-256 с указанной на официальной странице модели (Hugging Face: страница файла, строка «SHA256»). " +

@@ -262,12 +262,14 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 ## AC-23. Модель ставится скачиванием в приложении или импортом файла, оба пути проверяют SHA-256
 
-Автотесты: `TestModelImportRejectsTamperedFile` (`desktop/tests/modelimport_sqlite_test.go`); `TestModelsPageRefusesASwappedFile`, `TestModelsPageDownloadOfTheEmptyCatalog` (`desktop/internal/app/modelspage_test.go`); `TestModelDownloadResumesAfterDrop`, `TestModelDownloadRejectsTamperedFile` (`desktop/tests/modeldownload_sqlite_test.go`).
+Автотесты: `TestModelImportRejectsTamperedFile` (`desktop/tests/modelimport_sqlite_test.go`); `TestModelsPageRefusesASwappedFile`, `TestModelsPageDownloadOfAnUnknownModel` (`desktop/internal/app/modelspage_test.go`); `TestEmbeddedCatalog` (`desktop/internal/app/catalog_test.go`); живой `TestLiveCatalogDownload` (`LA_MODEL_DOWNLOAD_LIVE_TEST=1`, `desktop/internal/app/catalog_live_windows_test.go`); `TestModelDownloadResumesAfterDrop`, `TestModelDownloadRejectsTamperedFile` (`desktop/tests/modeldownload_sqlite_test.go`).
 Вручную — импорт (§6 и §8 «Модели речи»):
 - [ ] SHA-256, который показывает приложение, равен `(Get-FileHash .\ggml-base.bin -Algorithm SHA256).Hash` и строке «SHA256» на странице файла на Hugging Face; затем «SHA-256 совпадает, установить».
 - [ ] Заменить файл другим с тем же именем между показом SHA-256 и подтверждением: «Файл изменился после проверки…», модель не установлена.
 
-Скачивание: пока не проверить — каталог пустой (нет моделей с проверенным SHA-256; отдельной задачи нет, follow-up TASK-060). Когда появится: «Скачать», прогресс, обрыв сети и докачка, предупреждение о месте на диске.
+Вручную — скачивание (TASK-067; живой тест скачал base и сверил SHA-256 на Windows 10):
+- [ ] «Рекомендуемые модели»: подписи на русском, размер, скорость на CPU; «Скачать» у base — прогресс, модель в «Установленных».
+- [ ] Обрыв сети во время скачивания и повтор «Скачать» — докачка; «Остановить скачивание» и «Удалить недокачанный файл»; предупреждение о месте на диске.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 

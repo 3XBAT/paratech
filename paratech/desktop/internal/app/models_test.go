@@ -13,8 +13,9 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// The wired model manager (AC 3, TASK-060): the embedded catalog lists no model and offers no download, a file the
-// user picked is installed by the manual import, and the default and the pin of an STT job go through the core.
+// The wired model manager (AC 3, TASK-060, TASK-067): the embedded catalog lists its models, none installed, and
+// plans their download; a file the user picked is installed by the manual import, and the default and the pin of an
+// STT job go through the core. Nothing is downloaded here (no network).
 func TestWiredModelManager(t *testing.T) {
 	ctx := context.Background()
 	a, _ := newTestAppWith(t, t.TempDir())
@@ -26,14 +27,23 @@ func TestWiredModelManager(t *testing.T) {
 		t.Fatal("the model manager is not wired")
 	}
 
-	if list, err := c.models.ListAvailable(ctx, values.Machine{}); err != nil || len(list) != 0 {
-		t.Fatalf("ListAvailable = %+v, %v; want the empty catalog of this build", list, err)
+	list, err := c.models.ListAvailable(ctx, values.Machine{})
+	if err != nil || len(list) == 0 {
+		t.Fatalf("ListAvailable = %+v, %v; want the embedded catalog", list, err)
 	}
-	// Refused as an unknown catalog id before any request: the empty catalog allows no download host either.
-	if _, err := c.downloads.Preflight(ctx, "base-q5_1"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
+	for _, m := range list {
+		if m.InstalledID != "" {
+			t.Fatalf("catalog model %s is installed in a fresh data directory", m.Entry.ID())
+		}
+	}
+	if plan, err := c.downloads.Preflight(ctx, "base-q5_1"); err != nil || plan.TotalBytes != 59707625 || plan.HaveBytes != 0 {
+		t.Fatalf("Preflight(base-q5_1) = %+v, %v; want the catalog size, nothing downloaded", plan, err)
+	}
+	// Refused as an unknown catalog id before any request.
+	if _, err := c.downloads.Preflight(ctx, "tiny-q5_1"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
 		t.Fatalf("Preflight = %v, want ErrNotInCatalog", err)
 	}
-	if _, err := c.downloads.Download(ctx, "base-q5_1"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
+	if _, err := c.downloads.Download(ctx, "tiny-q5_1"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
 		t.Fatalf("Download = %v, want ErrNotInCatalog", err)
 	}
 	if list, err := c.models.ListInstalled(ctx); err != nil || len(list) != 0 {
@@ -55,11 +65,11 @@ func TestWiredModelManager(t *testing.T) {
 	if got, err := resolver.ResolveForJob(ctx, second); err != nil || got != second {
 		t.Fatalf("ResolveForJob(%q) = %q, %v", second, got, err)
 	}
-	list, err := c.models.ListInstalled(ctx)
-	if err != nil || len(list) != 2 {
-		t.Fatalf("ListInstalled = %+v, %v", list, err)
+	installed, err := c.models.ListInstalled(ctx)
+	if err != nil || len(installed) != 2 {
+		t.Fatalf("ListInstalled = %+v, %v", installed, err)
 	}
-	for _, m := range list {
+	for _, m := range installed {
 		if m.IsDefault != (m.ID == first) || m.CatalogID != "" {
 			t.Fatalf("installed %+v: only %q is the default, neither comes from the catalog", m, first)
 		}
