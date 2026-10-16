@@ -62,6 +62,9 @@
   the rest is written and the job fails (retried if a skip may pass). 20 skips in a row, or any other error, end the run.
 - **Sign-out keeps the binding**: the same account gets its calendar back; another account cannot see it, so a fresh
   calendar is made and everything is rewritten.
+- **Known limitation:** one binding per installation, not per account. Accounts A → B → A: back in A the binding is B's
+  calendar, so A gets a second calendar while its first one keeps the old events (duplicates the user sees; delete the
+  old calendar by hand). The same after a change of the OAuth client: calendars of the old client are invisible to it.
 - **Deadlines** only through a confirmed proposal (hard rule 3); the sync job writes lessons only. A recreated calendar
   does not get old deadlines back.
 - **No read-back** from Google (AC-20): edits in Google Calendar are overwritten by the next write of that lesson.

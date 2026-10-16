@@ -180,14 +180,18 @@ calendar, no item marked synced when it is not).
   characters, deterministic, so no event id is stored (ADR-0004(e)).
 - Upsert = PUT; 404/410 → insert with the id; 409 → PUT once more. A retry after a lost answer updates the event it
   created and never makes a second one (PRD section 14 case 8). A 2xx PUT whose answer is still `cancelled` is an
-  error (`ErrNotRestored`, transient): the item stays pending, never "synced" with an invisible event.
+  error (`ErrNotRestored`, transient): the item stays pending, never "synced" with an invisible event; the sync skips
+  only that lesson.
 - Calendar binding: the stored id only. It is replaced only when calendars.get AND calendarList.get both answer 404, 410
   or 403 (not a rate limit), so one spurious 404 never makes a second calendar; a 403 alone (another account's
   calendar, or anything) needs the other check to agree. Crash window: created at Google, app dies before the id is
   stored → the next run creates another, empty calendar (accepted, the user can delete it; no wider scope).
 - Delete: any 2xx, 404 and 410 are success.
-- Private properties: at most 4 per event, keys of at most 12 characters, values of at most 137 bytes (ids are at most
-  128); the adapter refuses a write that would exceed the limits instead of letting Google drop or cut it.
+- Private properties: the adapter writes 4 per event, keys of at most 12 characters, values of at most 137 bytes (ids
+  are at most 128). `fits()` checks only Google's per-property limits: key at most 44 bytes, value at most 1024 bytes
+  (bytes, so never more characters than allowed); a write over them is refused (`ErrInvalidRequest`, permanent)
+  instead of letting Google drop or cut it. The 300-property and 32 kB limits are not checked: 4 small properties
+  cannot reach them.
 - 403 rate-limit and quota reasons (`quotaExceeded`, `dailyLimitExceeded` included) are transient, never "no access" and
   never "calendar gone". The adapter does not retry them itself; the job runner's exponential backoff (5 s doubling to
   5 min, 5 attempts) spaces the retries. `Retry-After` is exposed through `RetryAfter()`; the runner does not read it
