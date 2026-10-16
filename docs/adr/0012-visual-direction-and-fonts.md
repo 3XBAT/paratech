@@ -9,6 +9,7 @@ The UI had no design system. The owner chose the concept «Эфир», calm vers
 
 ## Decision
 - Direction: «Эфир», calm version, as in `docs/design/`. Tokens live in one file, `src/ui/tokens.css`.
+- The light `--accent` is `#A6541E` instead of the brief's `#A9561F`: `#A9561F` gives 4.43:1 on `--bg`, below 4.5.
 - Font: `@fontsource-variable/golos-text` **5.3.0** (OFL-1.1), bundled with the app; only the `cyrillic` and `latin`
   subsets, own `@font-face` in `src/ui/fonts.css`. No network fonts. The family is set in one CSS variable (`--font`).
   Inter and Onest (both OFL-1.1) are recorded alternatives, not dependencies: switching means a new package and that variable.
