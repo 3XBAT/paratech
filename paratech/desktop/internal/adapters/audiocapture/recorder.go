@@ -199,8 +199,13 @@ func (r *Recorder) start(ctx context.Context, c *capture) error {
 	select {
 	case err := <-c.started:
 		if err == nil {
-			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("target", string(target.Mode)),
-				slog.String("app", c.app.String()), slog.Uint64("target_pid", uint64(target.PID)))
+			// The started event of the first child is applied before it is signalled, so the snapshot has it.
+			d := c.snapshot()
+			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("windows", d.Windows.String()),
+				slog.String("build", d.Windows.BuildString()), slog.String("target", string(target.Mode)),
+				slog.String("mode", string(d.Mode)), slog.String("app", c.app.String()),
+				slog.Uint64("target_pid", uint64(target.PID)), slog.String("device", d.Device),
+				slog.String("format", d.Format.String()))
 			return nil
 		}
 		<-c.done
@@ -295,9 +300,9 @@ func (r *Recorder) Finalize(ctx context.Context, chunks, output shared.ArtifactR
 	return assemble(ctx, r.deps.Files, chunks, output, r.log)
 }
 
-// Diagnostics returns a snapshot of the capture of id (TASK-058). ok is false for an unknown recording; ended
-// captures stay readable for a while.
-func (r *Recorder) Diagnostics(id shared.RecordingID) (d Diagnostics, ok bool) {
+// Diagnostics returns a snapshot of the capture of id (TASK-058) at once: ctx is not used. ok is false for an unknown
+// recording; ended captures stay readable for a while (the latest keptCaptures).
+func (r *Recorder) Diagnostics(_ context.Context, id shared.RecordingID) (d values.CaptureDiagnostics, ok bool) {
 	c := r.lookup(id)
 	if c == nil {
 		return Diagnostics{}, false

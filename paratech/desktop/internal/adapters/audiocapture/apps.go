@@ -94,6 +94,8 @@ type sessionInfo struct {
 	muted    bool
 	volume   float32
 	volumeOK bool
+	peak     float32 // peak meter of the last processing period, 0..1
+	peakOK   bool
 }
 
 // snapshot is the raw state the platform reads in one go.

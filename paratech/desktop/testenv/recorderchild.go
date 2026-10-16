@@ -36,8 +36,12 @@ const (
 	RecorderSlowStart = "slowstart"
 	// RecorderUnavailable has no capture in this build.
 	RecorderUnavailable = "unavailable"
-	// RecorderFallback fails process loopback and records in system mode.
+	// RecorderFallback fails the process loopback activation and records in system mode (a switch with the cause
+	// activation_failed).
 	RecorderFallback = "fallback"
+	// RecorderMute records process loopback and switches to system mode after RecorderMutePackets packets, as the
+	// healthy-but-mute detector does (a switch with the cause healthy_but_mute and a new format).
+	RecorderMute = "mute"
 	// RecorderNoisy writes two bad lines to stdout first.
 	RecorderNoisy = "noisy"
 	// RecorderQuit stops by itself after 100 packets and reports "stopped", as if its stdin had closed.
@@ -46,6 +50,9 @@ const (
 
 // RecorderCrashPackets is when RecorderCrash exits: 40 s of audio, one closed chunk and one partial.
 const RecorderCrashPackets = 400
+
+// RecorderMutePackets is when RecorderMute switches: 5 s of audio.
+const RecorderMutePackets = 50
 
 // FakeRecorderFormat is the format of the fake recorder child.
 func FakeRecorderFormat() audiocapture.Format {
@@ -103,6 +110,9 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 			src.OpenErr = audiocapture.ErrUnavailable
 		case RecorderFallback:
 			src.FallbackTo = audiocapture.ModeSystem
+		case RecorderMute:
+			src.SwitchAfter, src.SwitchMode = RecorderMutePackets, audiocapture.ModeSystem
+			src.SwitchFormat = audiocapture.Format{SampleRate: 16000, Channels: 1, BitsPerSample: 16}
 		case RecorderNoisy:
 			fmt.Println("not an event")
 			fmt.Println(strings.Repeat("x", 5000))
@@ -122,7 +132,7 @@ func hangAfterStart() int {
 	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
 		return 1
 	}
-	fmt.Println(`{"type":"started","mode":"exclude","format":{"rate":8000,"channels":1,"bits":16},"build":"10.0.19045"}`)
+	fmt.Println(`{"type":"started","mode":"exclude","format":{"rate":8000,"channels":1,"bits":16},"windows":{"major":10,"minor":0,"build":19045}}`)
 	for {
 		time.Sleep(time.Hour) // a sleeping process, not a deadlock the runtime would end
 	}

@@ -151,8 +151,11 @@ func (c *child) run(ctx context.Context, stop <-chan struct{}, src Source, files
 	c.stream.Store(stream)
 
 	info := stream.Info()
-	c.out.emit(event{Type: evStarted, Mode: string(info.Mode), Format: toWireFormat(info.Format), Build: shortText(info.Build)})
-	c.log.Info("capture started", slog.String("mode", string(info.Mode)), slog.String("format", info.Format.String()))
+	info.Windows.Product, info.Windows.DisplayVersion = shortText(info.Windows.Product), shortText(info.Windows.DisplayVersion)
+	c.out.emit(event{Type: evStarted, Mode: string(info.Mode), Format: toWireFormat(info.Format),
+		Windows: toWireWindows(info.Windows), Device: shortText(info.Device)})
+	c.log.Info("capture started", slog.String("mode", string(info.Mode)), slog.String("format", info.Format.String()),
+		slog.String("device", shortText(info.Device)))
 
 	failure := c.capture(runCtx, stream)
 
@@ -292,11 +295,12 @@ func (c *child) emitStats() {
 type childObserver struct{ out *eventWriter }
 
 func (o *childObserver) Attempt(a Attempt) {
-	o.out.emit(event{Type: evAttempt, Mode: string(a.Mode), OK: a.OK, HResult: shortText(a.HResult), Error: shortText(a.Error)})
+	o.out.emit(event{Type: evAttempt, Mode: string(a.Mode), OK: a.OK, HResult: shortText(a.HResult), Error: shortText(a.Error),
+		Device: shortText(a.Device)})
 }
 
 func (o *childObserver) Switch(s Switch) {
-	o.out.emit(event{Type: evSwitch, From: string(s.From), To: string(s.To), Reason: shortText(s.Reason)})
+	o.out.emit(event{Type: evSwitch, From: string(s.From), To: string(s.To), Cause: string(s.Cause), Reason: shortText(s.Reason)})
 }
 
 // eventWriter writes event lines; it is safe for concurrent use. A failed write (the parent is gone) is dropped:

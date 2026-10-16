@@ -141,7 +141,7 @@ func TestRecorderRebindsARestartedApp(t *testing.T) {
 	if err := e.rec.Start(context.Background(), "rec1", e.chunks, zoomSource(t)); err != nil {
 		t.Fatal(err)
 	}
-	if d := e.diag(t); d.Target != (audiocapture.Target{Mode: audiocapture.ModeInclude, PID: 300}) || d.App != "zoom.exe" {
+	if d := e.diag(t); d.TargetMode != audiocapture.ModeInclude || d.TargetPID != 300 || d.App != "zoom.exe" {
 		t.Fatalf("diagnostics = %+v, want INCLUDE of zoom's process", d)
 	}
 	e.waitDiag(t, "the first chunk closes", func(d audiocapture.Diagnostics) bool { return d.Chunks >= 1 })
@@ -150,7 +150,7 @@ func TestRecorderRebindsARestartedApp(t *testing.T) {
 	e.waitDiag(t, "the capture waits for zoom", func(d audiocapture.Diagnostics) bool { return d.WaitingForApp })
 	finder.set(zoom2)
 	e.waitDiag(t, "the new instance is captured", func(d audiocapture.Diagnostics) bool {
-		return d.Rebinds == 1 && d.Running && !d.WaitingForApp && d.Target.PID == 301
+		return d.Rebinds == 1 && d.Running && !d.WaitingForApp && d.TargetPID == 301
 	})
 	chunks := e.diag(t).Chunks
 	e.waitDiag(t, "the new child closes a chunk", func(d audiocapture.Diagnostics) bool { return d.Chunks > chunks })
@@ -249,7 +249,7 @@ func TestRecorderWaitsWithoutAChild(t *testing.T) {
 		if err := e.waitEnded(t); err != nil {
 			t.Fatalf("Wait = %v", err)
 		}
-		if d := e.diag(t); d.Restarts != 0 || d.Target.PID != 301 {
+		if d := e.diag(t); d.Restarts != 0 || d.TargetPID != 301 {
 			t.Fatalf("diagnostics = %+v", d)
 		}
 	})
@@ -287,7 +287,7 @@ func TestRecorderCapsTheRebinds(t *testing.T) {
 	finder.set(zoom3)
 	e.waitDiag(t, "the capture waits again", func(d audiocapture.Diagnostics) bool { return d.WaitingForApp })
 	time.Sleep(5 * cfg.RebindInterval)
-	if d := e.diag(t); d.Rebinds != 1 || d.Target.PID != 301 || !d.WaitingForApp {
+	if d := e.diag(t); d.Rebinds != 1 || d.TargetPID != 301 || !d.WaitingForApp {
 		t.Fatalf("diagnostics = %+v, want no second re-bind", d)
 	}
 	if err := stop(t, e); err != nil {
@@ -371,7 +371,7 @@ func TestRecorderRebindRightAfterStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(2 * time.Second) // the re-bind happens meanwhile; polling would take a lock
-	e.waitDiag(t, "zoom2 is captured", func(d audiocapture.Diagnostics) bool { return d.Rebinds == 1 && d.Target.PID == 301 })
+	e.waitDiag(t, "zoom2 is captured", func(d audiocapture.Diagnostics) bool { return d.Rebinds == 1 && d.TargetPID == 301 })
 	if err := stop(t, e); err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestRecorderRefusesAnAppThatDoesNotRun(t *testing.T) {
 	if !errors.Is(err, recording.ErrSourceNotRunning) || !errors.Is(err, audiocapture.ErrAppNotRunning) {
 		t.Fatalf("Start = %v, want ErrSourceNotRunning", err)
 	}
-	if _, ok := e.rec.Diagnostics("rec1"); ok || e.launcher.count() != 0 {
+	if _, ok := e.rec.Diagnostics(context.Background(), "rec1"); ok || e.launcher.count() != 0 {
 		t.Fatal("a start of an app that does not run left a capture or launched a child")
 	}
 

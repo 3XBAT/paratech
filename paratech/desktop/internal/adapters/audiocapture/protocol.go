@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -33,7 +34,7 @@ const maxLeadSilence = 2*maxChunkSeconds*time.Second + DefaultHangTimeout +
 
 // Event types written by the child.
 const (
-	evStarted = "started" // the capture runs: mode, format, Windows build
+	evStarted = "started" // the capture runs: mode, format, Windows version, output device
 	evAttempt = "attempt" // one activation try
 	evSwitch  = "switch"  // a mode change of the running capture
 	evChunk   = "chunk"   // a chunk was closed: number, frames, rate
@@ -173,9 +174,10 @@ type wireFormat struct {
 type event struct {
 	Type string `json:"type"`
 
-	Mode   string      `json:"mode,omitempty"`   // started, attempt
-	Format *wireFormat `json:"format,omitempty"` // started
-	Build  string      `json:"build,omitempty"`  // started
+	Mode    string       `json:"mode,omitempty"`    // started, attempt
+	Format  *wireFormat  `json:"format,omitempty"`  // started
+	Windows *wireWindows `json:"windows,omitempty"` // started
+	Device  string       `json:"device,omitempty"`  // started, attempt: the output device name
 
 	OK      bool   `json:"ok,omitempty"`      // attempt
 	HResult string `json:"hresult,omitempty"` // attempt
@@ -183,6 +185,7 @@ type event struct {
 
 	From   string `json:"from,omitempty"`   // switch
 	To     string `json:"to,omitempty"`     // switch
+	Cause  string `json:"cause,omitempty"`  // switch: a values.SwitchCause
 	Reason string `json:"reason,omitempty"` // switch, failed
 
 	N      int    `json:"n,omitempty"`      // chunk
@@ -208,6 +211,31 @@ func (w *wireFormat) format() Format {
 	return Format{SampleRate: w.Rate, Channels: w.Channels, BitsPerSample: w.Bits, Float: w.Float}
 }
 
+// wireWindows is the Windows version in a started event.
+type wireWindows struct {
+	Product string `json:"product,omitempty"`
+	Display string `json:"display,omitempty"`
+	Major   uint32 `json:"major"`
+	Minor   uint32 `json:"minor"`
+	Build   uint32 `json:"build"`
+	UBR     uint32 `json:"ubr,omitempty"`
+}
+
+func toWireWindows(v values.WindowsVersion) *wireWindows {
+	if v.IsZero() {
+		return nil
+	}
+	return &wireWindows{Product: v.Product, Display: v.DisplayVersion, Major: v.Major, Minor: v.Minor, Build: v.Build, UBR: v.UBR}
+}
+
+func (w *wireWindows) version() values.WindowsVersion {
+	if w == nil {
+		return values.WindowsVersion{}
+	}
+	return values.WindowsVersion{Product: w.Product, DisplayVersion: w.Display, Major: w.Major, Minor: w.Minor,
+		Build: w.Build, UBR: w.UBR}
+}
+
 // decodeEvent parses an event line strictly.
 func decodeEvent(line []byte) (event, error) {
 	var e event
@@ -216,7 +244,14 @@ func decodeEvent(line []byte) (event, error) {
 	}
 	switch e.Type {
 	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped:
-		for _, s := range []*string{&e.Mode, &e.Build, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason} {
+		if e.Cause != "" && !values.SwitchCause(e.Cause).Valid() {
+			return event{}, fmt.Errorf("%w: unknown switch cause %q", ErrProtocol, shortText(e.Cause))
+		}
+		texts := []*string{&e.Mode, &e.Device, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason}
+		if e.Windows != nil {
+			texts = append(texts, &e.Windows.Product, &e.Windows.Display)
+		}
+		for _, s := range texts {
 			*s = shortText(*s) // the texts reach logs and the diagnostics screen
 		}
 		return e, nil

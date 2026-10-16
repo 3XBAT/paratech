@@ -134,7 +134,7 @@ func productionEnv() env {
 		apps:            platformApps,
 		childStdin:      os.Stdin,
 		childStdout:     os.Stdout,
-		captureSource:   audiocapture.PlatformSource(),
+		captureSource:   audiocapture.PlatformSource(audiocapture.DefaultSourceConfig()),
 		whisperBinary:   whisperBinaryPath(),
 		secrets:         credentialManager,
 		authPages:       weblink.New(),

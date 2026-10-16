@@ -346,12 +346,14 @@ func (s *Service) watch(ctx context.Context, deadline time.Time, reached chan<- 
 func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Recording, ended <-chan error,
 	beat <-chan struct{}, arm func() <-chan struct{}) error {
 	atLimit := arm()
+	var noted bool // the capture fallback is on the recording
 	for {
 		select {
 		case <-beat:
 			if sess.stopRequested() {
 				continue // the pending stop goes first
 			}
+			s.noteFallback(ctx, rec, &noted) // saved with the heartbeat
 			if err := rec.Heartbeat(s.clock.Now()); err != nil {
 				s.haltCapture(ctx, rec.ID())
 				return err
@@ -362,6 +364,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 			}
 
 		case <-sess.stopCh:
+			s.noteFallback(ctx, rec, &noted) // a fallback since the last heartbeat
 			if err := rec.Stop(s.clock.Now()); err != nil {
 				s.haltCapture(ctx, rec.ID())
 				return err
@@ -382,6 +385,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 			return s.assemble(ctx, sess, rec)
 
 		case <-atLimit:
+			s.noteFallback(ctx, rec, &noted)
 			err := rec.ReachLimit(s.clock.Now())
 			if errors.Is(err, recording.ErrLimitNotReached) {
 				atLimit = arm() // the wall clock went back; wait again
@@ -411,6 +415,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 				problem += ": " + cerr.Error()
 			}
 			s.log.Warn("capture ended by itself", slog.String("recording", rec.ID().String()), slog.Any("error", cerr))
+			s.noteFallback(ctx, rec, &noted) // the recorder keeps the diagnostics of an ended capture
 			if err := rec.Interrupt(s.clock.Now(), problem); err != nil {
 				return err
 			}
@@ -424,6 +429,31 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 			return ErrAbandoned
 		}
 	}
+}
+
+// noteFallback puts on a RECORDING the note of a capture that fell back to classic loopback (ADR-0002 Decision 3),
+// once per recording: the fallback is one-way. The caller saves the recording with its next change. A note the
+// aggregate refuses is logged and not tried again.
+func (s *Service) noteFallback(ctx context.Context, rec *recording.Recording, noted *bool) {
+	if *noted {
+		return
+	}
+	d, ok := s.recorder.Diagnostics(ctx, rec.ID())
+	if !ok {
+		return
+	}
+	sw, ok := d.Fallback()
+	if !ok {
+		return
+	}
+	*noted = true
+	if err := rec.NoteCaptureFallback(s.clock.Now(), sw); err != nil {
+		s.log.Warn("the capture fallback could not be noted on the recording", slog.String("recording", rec.ID().String()),
+			slog.Any("error", err))
+		return
+	}
+	s.log.Info("capture fell back to the system output; noted on the recording", slog.String("recording", rec.ID().String()),
+		slog.String("from", string(sw.From)), slog.String("cause", string(sw.Cause)))
 }
 
 // detached returns a context that keeps the values of ctx but not its cancellation and ends after detachedTimeout

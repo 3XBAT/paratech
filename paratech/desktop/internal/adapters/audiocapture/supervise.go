@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -18,33 +19,12 @@ const (
 	maxStderrLineLen = 1024 // longer stderr lines are skipped
 )
 
-// Diagnostics is a snapshot of one capture for the diagnostics screen (TASK-058). It holds no audio content.
-type Diagnostics struct {
-	Running      bool
-	Target       Target
-	Mode         Mode   // the mode the capture runs in now (after a fallback: system)
-	Format       Format // the format of the running stream
-	Build        string // Windows build reported by the child
-	Attempts     []Attempt
-	Switches     []Switch
-	Chunks       int // closed chunks
-	Stats        Stats
-	Restarts     int
-	Failure      string // why the capture or the last child ended unexpectedly
-	InvalidLines int    // malformed or oversized event lines of the children
-
-	App           shared.AppName // the chosen app; empty for the whole computer and StartTarget
-	WaitingForApp bool           // the app's process exited and no new instance is captured yet
-	Rebinds       int            // new instances of the app captured
-}
+// Diagnostics is a snapshot of one capture (TASK-058): the domain value the Recorder port returns. It holds no audio
+// content and no window titles.
+type Diagnostics = values.CaptureDiagnostics
 
 // Stats are the counters a child reports.
-type Stats struct {
-	Packets       uint64
-	SilentPackets uint64
-	Frames        int64
-	Reopens       uint64
-}
+type Stats = values.CaptureStats
 
 // binding is the app a capture follows across restarts of the app (TASK-059). Only the supervisor uses it.
 type binding struct {
@@ -85,7 +65,7 @@ func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target,
 		id: id, chunks: chunks, target: target, bind: bind, ctx: ctx, cancel: cancel,
 		started: make(chan error, 1), done: make(chan struct{}),
 		stopCh: make(chan struct{}), abortCh: make(chan struct{}),
-		diag: Diagnostics{Target: target},
+		diag: Diagnostics{TargetMode: target.Mode, TargetPID: target.PID},
 	}
 	if bind != nil {
 		c.app = bind.proc.App
@@ -362,7 +342,9 @@ func (r *Recorder) rebind(c *capture, next ProcessIdentity) {
 	r.log.Info("capture target re-bound by exe name", slog.String("recording", c.id.String()),
 		slog.String("app", c.app.String()), slog.Uint64("old_pid", uint64(old.PID)), slog.Uint64("new_pid", uint64(next.PID)))
 	target, rebinds := c.target, c.bind.rebinds
-	c.update(func(d *Diagnostics) { d.Target, d.WaitingForApp, d.Rebinds = target, false, rebinds })
+	c.update(func(d *Diagnostics) {
+		d.TargetMode, d.TargetPID, d.WaitingForApp, d.Rebinds = target.Mode, target.PID, false, rebinds
+	})
 }
 
 // restartLead is the lead silence of a restarted child for the audio the chunks missed, capped at maxLeadSilence.
@@ -567,22 +549,35 @@ func (r *Recorder) apply(c *capture, ev event, out *runOutcome, log *slog.Logger
 	switch ev.Type {
 	case evStarted:
 		out.mode, out.runStart = Mode(ev.Mode), r.now()
-		log.Info("capture running", slog.String("mode", ev.Mode), slog.String("format", ev.Format.format().String()),
-			slog.String("windows", ev.Build))
+		win, format := ev.Windows.version(), ev.Format.format().Stream()
+		log.Info("capture running", slog.String("mode", ev.Mode), slog.String("format", format.String()),
+			slog.String("windows", win.String()), slog.String("device", ev.Device))
 		c.update(func(d *Diagnostics) {
-			d.Running, d.Mode, d.Format, d.Build = true, Mode(ev.Mode), ev.Format.format(), ev.Build
+			d.Running, d.Mode, d.Format, d.Windows, d.Device = true, Mode(ev.Mode), format, win, ev.Device
 		})
 	case evAttempt:
-		a := Attempt{Mode: Mode(ev.Mode), OK: ev.OK, HResult: ev.HResult, Error: ev.Error}
-		log.Info("capture attempt", slog.String("mode", ev.Mode), slog.Bool("ok", ev.OK), slog.String("hresult", ev.HResult),
-			slog.String("error", ev.Error))
-		c.update(func(d *Diagnostics) { d.Attempts = appendBounded(d.Attempts, a) })
+		a := Attempt{Mode: Mode(ev.Mode), OK: ev.OK, HResult: ev.HResult, Error: ev.Error, Device: ev.Device}
+		attrs := []any{slog.String("mode", ev.Mode), slog.Bool("ok", ev.OK), slog.String("hresult", ev.HResult),
+			slog.String("error", ev.Error), slog.String("device", ev.Device)}
+		if ev.OK {
+			log.Info("capture attempt", attrs...)
+		} else {
+			log.Warn("capture attempt failed", attrs...)
+		}
+		c.update(func(d *Diagnostics) {
+			d.Attempts = appendBounded(d.Attempts, a)
+			if a.OK && a.Device != "" { // an open that succeeded runs now: a reopen on another device included
+				d.Device = a.Device
+			}
+		})
 	case evSwitch:
 		out.mode = Mode(ev.To)
-		log.Warn("capture mode switched", slog.String("from", ev.From), slog.String("to", ev.To), slog.String("reason", ev.Reason))
+		sw := Switch{From: Mode(ev.From), To: Mode(ev.To), Cause: values.SwitchCause(ev.Cause), Reason: ev.Reason}
+		log.Warn("capture mode switched", slog.String("from", ev.From), slog.String("to", ev.To),
+			slog.String("cause", ev.Cause), slog.String("reason", ev.Reason))
 		c.update(func(d *Diagnostics) {
-			d.Mode = Mode(ev.To)
-			d.Switches = appendBounded(d.Switches, Switch{From: Mode(ev.From), To: Mode(ev.To), Reason: ev.Reason})
+			d.Mode = sw.To
+			d.Switches = appendBounded(d.Switches, sw)
 		})
 	case evChunk:
 		out.closedAudio += durationOf(ev.Frames, ev.Rate)

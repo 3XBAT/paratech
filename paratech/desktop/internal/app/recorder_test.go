@@ -93,7 +93,7 @@ func TestRecorderModeCapturesIntoTheArtifactStore(t *testing.T) {
 func TestRecorderModeFailsWithoutCapture(t *testing.T) {
 	// The platform source of a build without capture; where the build captures, a stand-in that fails the same way,
 	// so the test never touches the audio devices.
-	src := audiocapture.PlatformSource()
+	src := audiocapture.PlatformSource(audiocapture.DefaultSourceConfig())
 	if audiocapture.Supported() {
 		src = &testenv.ToneSource{OpenErr: audiocapture.ErrUnavailable}
 	}

@@ -4,21 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
+	"paratech/desktop/internal/domain/recording/values"
 )
 
-// Mode selects what a capture records (ADR-0002 Decision 1).
-type Mode string
+// Mode selects what a capture records (ADR-0002 Decision 1): the domain capture mode.
+type Mode = values.CaptureMode
 
 // Capture modes.
 const (
 	// ModeInclude is process loopback of a process tree: the lecture app the user picked.
-	ModeInclude Mode = "include"
+	ModeInclude = values.CaptureInclude
 
 	// ModeExclude is process loopback of everything except a process tree (our own app): the whole computer.
-	ModeExclude Mode = "exclude"
+	ModeExclude = values.CaptureExclude
 
 	// ModeSystem is classic loopback of the default output device: the fallback of both process loopback modes.
-	ModeSystem Mode = "system"
+	ModeSystem = values.CaptureSystem
 )
 
 // ErrInvalidTarget means a capture target cannot be used as given.
@@ -57,6 +60,28 @@ type Source interface {
 	Open(ctx context.Context, target Target, obs Observer) (Stream, error)
 }
 
+// SourceConfig tunes the platform Source (PlatformSource); DefaultSourceConfig gives the production values.
+type SourceConfig struct {
+	// MuteThreshold is how long a process loopback stream may deliver only zeros while the Windows meters show sound on
+	// its target before it falls back to classic loopback (healthy but mute, ADR-0002 Decision 3). Zero takes
+	// DefaultMuteThreshold; a negative value turns the detector off.
+	MuteThreshold time.Duration
+}
+
+// DefaultSourceConfig returns the 15 s threshold of the healthy-but-mute detector.
+func DefaultSourceConfig() SourceConfig { return SourceConfig{MuteThreshold: DefaultMuteThreshold} }
+
+// muteAfter is the threshold the stream uses; 0 means off.
+func (c SourceConfig) muteAfter() time.Duration {
+	switch {
+	case c.MuteThreshold < 0:
+		return 0
+	case c.MuteThreshold == 0:
+		return DefaultMuteThreshold
+	}
+	return c.MuteThreshold
+}
+
 // Observer receives what a Source does, for the diagnostics (TASK-058). Its methods are safe for concurrent use.
 type Observer interface {
 	// Attempt reports one activation try (ok or failed with its HRESULT).
@@ -67,25 +92,18 @@ type Observer interface {
 	Switch(s Switch)
 }
 
-// Attempt is one activation try of a capture mode.
-type Attempt struct {
-	Mode    Mode
-	OK      bool
-	HResult string // hex, for example "0x88890004"; empty when not a COM error
-	Error   string // short text, no audio content
-}
+// Attempt is one activation try of a capture mode (the domain value): its HRESULT on a failure, the output device.
+type Attempt = values.CaptureAttempt
 
-// Switch is a mode change of a running capture.
-type Switch struct {
-	From, To Mode
-	Reason   string
-}
+// Switch is a mode change of a running capture (the domain value), with its cause.
+type Switch = values.CaptureSwitch
 
 // StreamInfo describes a running stream.
 type StreamInfo struct {
-	Mode   Mode
-	Format Format
-	Build  string // Windows build, for example "10.0.19045"
+	Mode    Mode
+	Format  Format
+	Windows values.WindowsVersion // the Windows the stream runs on
+	Device  string                // friendly name of the default output device; "" when unknown
 }
 
 // Packet is a piece of captured audio in Format.

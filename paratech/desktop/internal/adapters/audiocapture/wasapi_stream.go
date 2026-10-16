@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // The WASAPI stream logic: the fallback chain, the reopen policy and the hand-over of packets to Read. It runs
@@ -60,6 +62,15 @@ type endpoint interface {
 	// output device.
 	service(now time.Time) (changed bool, err error)
 
+	// device is the friendly name of the output device: the captured one for classic loopback, the default one for
+	// process loopback (which is bound to no device); "" when it could not be read.
+	device() string
+
+	// playing reports whether the Windows meters show sound on the capture target now: for INCLUDE an active,
+	// unmuted audio session of the target's process tree with a peak above zero, for EXCLUDE the default output
+	// device. It is false for classic loopback and whenever a meter cannot be read, so a doubt never switches.
+	playing() bool
+
 	// stop stops the client before the final drain (IAudioClient::Stop).
 	stop() error
 
@@ -84,8 +95,11 @@ type streamDeps struct {
 	// did not run then).
 	thread func(body func()) error
 
-	build string
-	now   func() time.Time
+	windows values.WindowsVersion
+	now     func() time.Time
+
+	// muteAfter is the threshold of the healthy-but-mute detector of process loopback; 0 turns it off.
+	muteAfter time.Duration
 
 	// sleep waits d and reports false if cancel closed first.
 	sleep func(d time.Duration, cancel <-chan struct{}) bool
@@ -139,9 +153,10 @@ type wasapiStream struct {
 	done      chan struct{}
 
 	// Capture goroutine only.
-	discontinuity bool      // the next packet follows a gap (reopen or switch)
-	tries         int       // reopen tries used in the current incident
-	lastOpen      time.Time // when the stream was last reopened or switched
+	discontinuity bool          // the next packet follows a gap (reopen or switch)
+	tries         int           // reopen tries used in the current incident
+	lastOpen      time.Time     // when the stream was last reopened or switched
+	mute          *muteDetector // nil unless a process loopback stream runs with the detector on
 }
 
 // openStream starts the capture goroutine and returns once target, or the classic loopback fallback, runs. It
@@ -154,7 +169,7 @@ func openStream(ctx context.Context, deps streamDeps, target Target, obs Observe
 		obs = nopObserver{}
 	}
 	s := &wasapiStream{
-		deps: deps, obs: obs, info: StreamInfo{Build: deps.build},
+		deps: deps, obs: obs, info: StreamInfo{Windows: deps.windows},
 		packets: make(chan Packet, packetQueue),
 		stopCh:  make(chan struct{}), closing: make(chan struct{}), done: make(chan struct{}),
 	}
@@ -205,7 +220,8 @@ func (s *wasapiStream) openFirst(target Target) (endpoint, Mode, error) {
 		return nil, "", err
 	}
 
-	s.obs.Switch(Switch{From: target.Mode, To: ModeSystem, Reason: "activation failed: " + errorText(err)})
+	s.obs.Switch(Switch{From: target.Mode, To: ModeSystem, Cause: values.SwitchActivationFailed,
+		Reason: "activation failed: " + errorText(err)})
 	ep, serr := s.attempt(Target{Mode: ModeSystem})
 	if serr != nil {
 		if errors.Is(serr, errStopped) {
@@ -226,16 +242,17 @@ func (s *wasapiStream) attempt(t Target) (endpoint, error) {
 	if err != nil {
 		a.HResult, a.Error = hresultText(err), err.Error()
 	} else {
-		a.Error = ep.warning()
+		a.Error, a.Device = ep.warning(), ep.device()
 	}
 	s.obs.Attempt(a)
 	return ep, err
 }
 
 // loop moves packets to Read until a stop (then it drains the endpoint once and returns nil) or a failure that
-// cannot be recovered. A lost or changed device is reopened in classic loopback; a failed process loopback stream
-// switches to classic loopback.
+// cannot be recovered. A lost or changed device is reopened in classic loopback; a process loopback stream that
+// fails or is healthy but mute switches to classic loopback.
 func (s *wasapiStream) loop(ep endpoint, mode Mode) error {
+	s.watchMute(mode)
 	for {
 		if s.stopping() {
 			s.finish(ep)
@@ -254,11 +271,21 @@ func (s *wasapiStream) loop(ep endpoint, mode Mode) error {
 			ep.close()
 			return nil
 		}
+		var sw *Switch
 		if err == nil && !changed {
-			continue
+			if sw = s.checkMute(ep, mode); sw == nil {
+				continue
+			}
 		}
 
 		ep.close()
+		if mode != ModeSystem {
+			s.mute = nil
+			if sw == nil {
+				sw = &Switch{From: mode, To: ModeSystem, Cause: values.SwitchStreamFailed, Reason: "stream failed: " + errorText(err)}
+			}
+			s.obs.Switch(*sw)
+		}
 		next, rerr := s.recover(mode, err)
 		if errors.Is(rerr, errStopped) {
 			return nil // nothing was started, so there is nothing to drain
@@ -268,6 +295,27 @@ func (s *wasapiStream) loop(ep endpoint, mode Mode) error {
 		}
 		ep, mode = next, ModeSystem
 	}
+}
+
+// watchMute starts the healthy-but-mute detector for a process loopback stream when it is on.
+func (s *wasapiStream) watchMute(mode Mode) {
+	if mode.IsProcessLoopback() && s.deps.muteAfter > 0 {
+		s.mute = newMuteDetector(s.deps.muteAfter, meterInterval, s.deps.now())
+	}
+}
+
+// checkMute reads the meters when the detector wants a reading and returns the switch when the stream is mute.
+func (s *wasapiStream) checkMute(ep endpoint, mode Mode) *Switch {
+	now := s.deps.now()
+	if s.mute == nil || !s.mute.due(now) || !s.mute.sample(now, ep.playing()) {
+		return nil
+	}
+	who := "the app"
+	if mode == ModeExclude {
+		who = "other apps"
+	}
+	return &Switch{From: mode, To: ModeSystem, Cause: values.SwitchHealthyButMute,
+		Reason: fmt.Sprintf("healthy but mute: only zeros for %v while %s played", s.deps.muteAfter, who)}
 }
 
 // finish stops the client and drains its buffer once, so the last packets reach the chunk. ep was started (only
@@ -290,6 +338,9 @@ func (s *wasapiStream) drain(ep endpoint) error {
 		pkt := Packet{Format: ep.format(), Frames: p.frames, Data: p.data, Silent: p.silent,
 			Discontinuity: p.discontinuity || s.discontinuity}
 		s.discontinuity = false
+		if s.mute != nil && !p.silent && !silentData(p.data) {
+			s.mute.heard(s.deps.now())
+		}
 		select {
 		case s.packets <- pkt:
 		case <-s.closing:
@@ -299,15 +350,13 @@ func (s *wasapiStream) drain(ep endpoint) error {
 	return nil
 }
 
-// recover opens classic loopback after the stream of mode failed with cause (nil: the default device changed). The
-// tries of one incident are bounded by reopenBackoff; a stream that fails again within stableAfter of its reopen
-// continues the incident, so a flapping device cannot loop forever.
+// recover opens classic loopback after the stream of mode ended with cause (nil: the default device changed, or a
+// process loopback stream was mute); a switch from process loopback is reported before. The tries of one incident
+// are bounded by reopenBackoff; a stream that fails again within stableAfter of its reopen continues the incident, so
+// a flapping device cannot loop forever.
 func (s *wasapiStream) recover(mode Mode, cause error) (endpoint, error) {
 	if s.lastOpen.IsZero() || s.deps.now().Sub(s.lastOpen) >= stableAfter {
 		s.tries = 0
-	}
-	if mode != ModeSystem {
-		s.obs.Switch(Switch{From: mode, To: ModeSystem, Reason: "stream failed: " + errorText(cause)})
 	}
 
 	backoff := reopenBackoff()
@@ -341,7 +390,7 @@ func (s *wasapiStream) recover(mode Mode, cause error) (endpoint, error) {
 func (s *wasapiStream) setEndpoint(ep endpoint, mode Mode) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.info.Mode, s.info.Format = mode, ep.format()
+	s.info.Mode, s.info.Format, s.info.Device = mode, ep.format(), ep.device()
 }
 
 func (s *wasapiStream) stopping() bool {

@@ -88,7 +88,7 @@ func newRecorderEnv(t *testing.T, cfg audiocapture.Config, scenarios ...string) 
 
 func (e *recorderEnv) diag(t *testing.T) audiocapture.Diagnostics {
 	t.Helper()
-	d, ok := e.rec.Diagnostics("rec1")
+	d, ok := e.rec.Diagnostics(context.Background(), "rec1")
 	if !ok {
 		t.Fatal("no diagnostics")
 	}
@@ -158,12 +158,12 @@ func TestRecorderStartStopFinalize(t *testing.T) {
 	}
 
 	diag := e.diag(t)
-	if diag.Running || diag.Mode != audiocapture.ModeExclude || diag.Build != "10.0.19045" || diag.Restarts != 0 ||
-		diag.Format != testenv.FakeRecorderFormat() || diag.Stats.Packets == 0 || len(diag.Attempts) != 1 || !diag.Attempts[0].OK {
+	if diag.Running || diag.Mode != audiocapture.ModeExclude || diag.Windows != testenv.ToneWindows() || diag.Device != testenv.ToneDevice || diag.Restarts != 0 ||
+		diag.Format != testenv.FakeRecorderFormat().Stream() || diag.Stats.Packets == 0 || len(diag.Attempts) != 1 || !diag.Attempts[0].OK {
 		t.Fatalf("diagnostics = %+v", diag)
 	}
-	if diag.Target != (audiocapture.Target{Mode: audiocapture.ModeExclude, PID: uint32(os.Getpid())}) {
-		t.Fatalf("default target = %+v, want EXCLUDE of this process", diag.Target)
+	if diag.TargetMode != audiocapture.ModeExclude || diag.TargetPID != uint32(os.Getpid()) {
+		t.Fatalf("default target = %s %d, want EXCLUDE of this process", diag.TargetMode, diag.TargetPID)
 	}
 	if diag.Chunks != len(names) {
 		t.Fatalf("diagnostics count %d chunks, the directory has %v", diag.Chunks, names)
@@ -179,7 +179,7 @@ func TestRecorderCancelledStartKillsTheChild(t *testing.T) {
 	if err := e.rec.Start(ctx, "rec1", e.chunks, values.WholeComputer()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Start = %v, want the context error", err)
 	}
-	if _, ok := e.rec.Diagnostics("rec1"); ok {
+	if _, ok := e.rec.Diagnostics(context.Background(), "rec1"); ok {
 		t.Fatal("a failed start must leave no capture behind")
 	}
 	// The recording can start again.

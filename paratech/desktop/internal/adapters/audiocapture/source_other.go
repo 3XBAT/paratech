@@ -5,7 +5,7 @@ package audiocapture
 import "context"
 
 // PlatformSource returns the capture source of this OS: none outside 64-bit Windows.
-func PlatformSource() Source { return unavailableSource{} }
+func PlatformSource(SourceConfig) Source { return unavailableSource{} }
 
 // Supported reports whether this build captures audio.
 func Supported() bool { return false }

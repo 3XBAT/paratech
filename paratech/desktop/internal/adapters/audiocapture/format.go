@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // Supported stream formats: what WASAPI shared mode delivers in practice (ADR-0002 Decision 6) with a margin.
@@ -46,12 +48,11 @@ func (f Format) BlockAlign() int { return int(f.Channels) * int(f.BitsPerSample)
 // ByteRate is the number of bytes per second.
 func (f Format) ByteRate() uint32 { return f.SampleRate * uint32(f.BlockAlign()) } //nolint:gosec // BlockAlign <= 32 after Validate
 
-func (f Format) String() string {
-	kind := "PCM"
-	if f.Float {
-		kind = "float"
-	}
-	return fmt.Sprintf("%d Hz, %d ch, %d-bit %s", f.SampleRate, f.Channels, f.BitsPerSample, kind)
+func (f Format) String() string { return f.Stream().String() }
+
+// Stream is the format as the domain describes it, for the diagnostics.
+func (f Format) Stream() values.StreamFormat {
+	return values.StreamFormat{SampleRate: f.SampleRate, Channels: f.Channels, BitsPerSample: f.BitsPerSample, Float: f.Float}
 }
 
 // framesFor converts a duration to a frame count of rate, rounding down; the product cannot overflow for durations

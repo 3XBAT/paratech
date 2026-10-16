@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -205,7 +206,7 @@ func (r *Recording) ChunksDir() shared.ArtifactRef { return r.chunksDir }
 func (r *Recording) Audio() shared.ArtifactRef { return r.audio }
 
 // Problem returns a short text about what went wrong, empty if nothing did. A COMPLETED recording keeps the
-// reason why its capture ended early.
+// reason why its capture ended early and the note of a capture fallback (NoteCaptureFallback).
 func (r *Recording) Problem() string { return r.problem }
 
 // StartedAt returns when the capture began (the creation time while STARTING).
@@ -297,6 +298,39 @@ func (r *Recording) Heartbeat(now time.Time) error {
 	return nil
 }
 
+// NoteCaptureFallback records on a RECORDING that its capture fell back from process loopback to classic loopback
+// (ADR-0002 Decision 3): the fixed note of sw becomes the problem and the recording goes on. The note stays when the
+// recording is stopped and completes; an interruption or a lost session puts its own reason first and keeps the note
+// after it; a failure replaces it. Noting the same switch again changes nothing.
+func (r *Recording) NoteCaptureFallback(now time.Time, sw values.CaptureSwitch) error {
+	if r.status != StatusRecording {
+		return fmt.Errorf("%w: capture note on a %s recording", ErrInvalidTransition, r.status)
+	}
+	if !sw.IsFallback() {
+		return fmt.Errorf("%w: switch from %q to %q is no fallback", ErrInvalidRecording, sw.From, sw.To)
+	}
+	text, err := problemText(sw.Note())
+	if err != nil {
+		return err
+	}
+	if text != r.problem {
+		r.problem, r.updatedAt = text, now
+	}
+	return nil
+}
+
+// withNote is reason followed by the capture note a RECORDING keeps as its problem, bounded; the reason wins.
+func (r *Recording) withNote(reason string) string {
+	if r.problem == "" || r.problem == reason {
+		return reason
+	}
+	text, err := problemText(reason + "; " + r.problem)
+	if err != nil {
+		return reason
+	}
+	return text
+}
+
 // Stop moves a RECORDING to STOPPING at the user's request.
 func (r *Recording) Stop(now time.Time) error {
 	if err := r.move(StatusStopping, now); err != nil {
@@ -335,7 +369,7 @@ func (r *Recording) Interrupt(now time.Time, problem string) error {
 	if err := r.move(StatusFinalizing, now); err != nil {
 		return err
 	}
-	r.stoppedAt, r.problem = now, text
+	r.stoppedAt, r.problem = now, r.withNote(text)
 	return nil
 }
 
@@ -399,7 +433,7 @@ func (r *Recording) RequireRecovery(now time.Time, problem string) error {
 	if err := r.move(StatusRecoveryRequired, now); err != nil {
 		return err
 	}
-	r.problem = text
+	r.problem = r.withNote(text)
 	return nil
 }
 
