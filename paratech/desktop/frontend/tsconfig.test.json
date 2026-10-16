@@ -27,6 +27,7 @@
     "src/listView.ts",
     "src/CollapsibleList.tsx",
     "src/pages/SchedulePage.tsx",
-    "src/ui/theme.ts"
+    "src/ui/theme.ts",
+    "src/statusPresentation.ts"
   ]
 }

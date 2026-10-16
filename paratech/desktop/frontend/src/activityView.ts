@@ -12,7 +12,7 @@ export const recordingStatusLabels: Readonly<Record<string, string>> = {
   FINALIZING: "Сохраняется",
   COMPLETED: "Завершена",
   FAILED: "Ошибка",
-  RECOVERY_REQUIRED: "Требует восстановления",
+  RECOVERY_REQUIRED: "Нужно восстановить",
 };
 
 /** Labels of the job statuses (domain/jobs/job). A waiting status is shown as its reason. */
@@ -23,9 +23,9 @@ export const jobStatusLabels: Readonly<Record<string, string>> = {
   RETRY_WAIT: "Ждёт повторной попытки",
   CANCELLED: "Отменена",
   FAILED: "Ошибка",
-  WAITING_FOR_NETWORK: "Ждёт подключения к сети",
-  WAITING_FOR_QUOTA: "Квота исчерпана — ждёт пополнения",
-  WAITING_FOR_POWER: "Ждёт питания от сети",
+  WAITING_FOR_NETWORK: "Ждёт интернет",
+  WAITING_FOR_QUOTA: "Минуты обработки закончились",
+  WAITING_FOR_POWER: "Ждёт зарядку",
 };
 
 /** The waiting statuses that must each have their own reason text (AC of TASK-023). */
