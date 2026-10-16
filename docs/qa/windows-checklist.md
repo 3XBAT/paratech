@@ -34,7 +34,8 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 - [ ] Ожидаемо: в течение ~15 с справа внизу появляется «Начинается занятие» с названием и временем; текст продолжает идти в Блокнот/чат, главное окно вперёд не выходит.
 - [ ] То же поверх развёрнутого на весь экран звонка или видео: попап виден поверх.
 - [ ] Щелчок по попапу может забрать фокус — это допустимо (ADR-0007). Щёлкнуть снова в чат: печать идёт в чат.
-- [ ] Граница 20 с: занятие через 2 мин, «Применить», `Quit`. Запустить приложение через ~5 с после начала занятия — попап есть. Новое занятие, запуск через 1 мин после начала — попапа нет (решение владельца: опоздавшее окно не догоняется).
+- [ ] Поздний запуск. Попап приходит с 5 мин до начала и до 20 с после начала (`scheduler.DefaultLead`, `lesson.StartLateGrace`) и показывается один раз. Занятие через 7–8 мин, «Применить» и сразу `Quit`, не позже чем через 1 мин (иначе попап придёт за 5 мин до начала и после перезапуска уже не появится). Запустить приложение через ~5 с после начала занятия: попап в течение 20 с от начала.
+- [ ] То же с новым занятием (другой `uid`), но запустить через 1 мин после начала (позже 20 с): попапа нет (решение владельца: опоздавшее занятие не предлагается).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -44,7 +45,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Вручную:
 - [ ] «Настройки»: снять «Автоматически предлагать запись в начале занятия». Занятие через 3 мин: попапа нет.
 - [ ] Включить флажок, занятие с другим `uid` через 3 мин: попап есть.
-- [ ] Попап занятия, «Отложить на 5 мин», выключить флажок: попап не возвращается; включить снова — это занятие больше не предлагается (решение владельца).
+- [ ] Попап занятия, «Отложить на 5 мин», выключить флажок, подождать 5 мин: попап не возвращается; включить снова — это занятие больше не предлагается (решение владельца).
 - [ ] `Quit` и запуск: флажок в том же положении.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -54,7 +55,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`).
 Вручную (§8, пункт 9):
 - [ ] Видео с речью в Chrome. В попапе выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях» «Идёт запись», время растёт.
-- [ ] Через 2 мин «Остановить»: «Сохраняется», затем «Завершена».
+- [ ] Через 2 мин «Остановить»: «Останавливается» (может мелькнуть), «Сохраняется», затем «Завершена».
 - [ ] `%LOCALAPPDATA%\la-qa\artifacts\recordings\<id>.wav` играет, слышна речь, длина как у записи.
 - [ ] `Quit` и запуск: запись в списке «Завершена», файл на месте.
 
@@ -82,12 +83,12 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 ## AC-06. Распознавание речи локальное, звук не уходит в Hub и в облако
 
-Автотесты: `TestSTTPathHasNoNetworkImports` (`desktop/tests/stt_network_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, в запросах к Hub нет байтов записи, есть только текст); `TestTranscriptToStructuresThroughFakeHub` (`desktop/tests/postprocess_sqlite_test.go`).
+Автотесты: `TestSTTPathHasNoNetworkImports` (`desktop/tests/stt_network_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, в запросах к Hub нет байтов записи ни как есть, ни в hex или base64; есть текст транскрипта); `TestTranscriptToStructuresThroughFakeHub` (`desktop/tests/postprocess_sqlite_test.go`).
 Вручную (нужны whisper-cli и модель, §6; это же TASK-025):
-- [ ] Записать 1–2 мин речи (AC-03). До «Остановить» выключить интернет (режим «в самолёте» или отключить Wi-Fi и кабель).
+- [ ] Записать 1–2 мин речи (AC-03). До «Остановить» выключить интернет (режим «в самолёте» или отключить Wi-Fi и кабель); если Hub запущен на этом компьютере — вместо отключения интернета остановить Hub.
 - [ ] «Остановить»: «Распознавание речи» → «Выполняется» → «Готово» без интернета.
-- [ ] `artifacts\transcripts\<id>.json` открыть в Блокноте: текст похож на сказанное.
-- [ ] «Конспект» и «Поиск домашнего задания» — «Ждёт подключения к сети». Включить интернет: примерно через минуту они «Готово».
+- [ ] Самый новый файл в `artifacts\transcripts` открыть в Блокноте: текст похож на сказанное.
+- [ ] «Конспект» и «Поиск домашнего задания» — «Ждёт подключения к сети». Включить интернет (или запустить Hub): примерно через минуту они «Готово».
 - [ ] Записать для TASK-025: длина записи, время распознавания, модель.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -187,13 +188,17 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestSchemaHasNoSecretColumns`, `TestPersistedStructsHaveNoSecretFields` (`desktop/tests/schema_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestCredentialNamesArePinned` (`desktop/internal/app/secrets_test.go`); `TestSMTPPasswordNeverReachesTheDatabase` (`desktop/tests/delivery_smtp_test.go`); `TestConnectionsPageKeepsThePasswordSecret` (`desktop/internal/app/connections_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`); `TestAppOptionsLoggerHasNoDebug` (`desktop/internal/input/wails/shell_windows_test.go`); `TestRealCredentialManager` (`desktop/internal/adapters/wincred/wincred_windows_test.go`, настоящий Credential Manager).
 Вручную:
-- [ ] Запуск с `--log-level debug` (Подготовка). Ввести пароль почты и ключ Hub (§8 «Подключения»).
+- [ ] Только одноразовые секреты: отдельный пароль приложения почты и QA-ключ Hub (`hub keys create -label qa-secrets`). После проверки удалить этот пароль приложения в настройках почты и `hub keys revoke -id <id>`.
+- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»).
 - [ ] Панель управления → Диспетчер учётных данных → Учётные данные Windows: есть `paratech/mail/smtp-password` и `paratech/hub/api-key` (или `cmdkey /list | findstr paratech`).
 - [ ] «Подключения» после перезапуска показывают только «Пароль задан» и «Ключ задан».
-- [ ] `Quit`. В PowerShell для куска пароля (8+ символов), затем для куска ключа — пусто:
+- [ ] `Quit`. В новом окне PowerShell отключить историю, ввести кусок пароля (8+ символов) по запросу `Read-Host` (не в командной строке) — пусто; затем то же для куска ключа:
   ```powershell
-  Select-String -Path "$env:LOCALAPPDATA\la-qa\learning-assistant.db*", "$env:LOCALAPPDATA\la-qa.log" -SimpleMatch -Pattern '<кусок>'
+  Set-PSReadLineOption -HistorySaveStyle SaveNothing
+  $p = Read-Host "кусок"
+  Select-String -Path "$env:LOCALAPPDATA\la-qa\learning-assistant.db*", "$env:LOCALAPPDATA\la-qa.log" -SimpleMatch -Pattern $p
   ```
+  После проверки закрыть окно.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -264,10 +269,10 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 ## Уведомления (PRD §15; к AC-01 и AC-02)
 
 Решение владельца: уведомлять только о том, что занятие началось (это попап), без спама.
-Автотесты: `TestThreeIdenticalEventsNotifyOnce` (`desktop/internal/cases/notify/service_test.go`); `TestNotificationIsSentOnceAcrossRestart`, `TestDisabledNotificationsReachNoNotifier` (`desktop/tests/notify_sqlite_test.go`).
+Автотесты: `TestRunAnnouncesExactlyOnce`, `TestRestartDuringLessonDoesNotDuplicate` (`desktop/internal/cases/scheduler/service_test.go`); `TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart` (`desktop/tests/scheduler_sqlite_test.go`).
 Вручную:
 - [ ] Попап «Начинается занятие» — один раз на занятие; после «Пропустить» и после перезапуска во время того же занятия не появляется снова.
-- [ ] Расхождение с решением: сборка ещё показывает тосты Windows о завершении обработки (TASK-053: «Транскрипт готов», «Конспект готов», «Поиск заданий завершён»). Пока они есть: каждый — один раз, после перезапуска не повторяется; снять «Уведомлять о завершении обработки» — тостов нет. Отметить, нужно ли их убрать.
+- [ ] Расхождение с решением: сборка ещё показывает тосты Windows о завершении обработки (TASK-053: «Транскрипт готов», «Конспект готов», «Поиск заданий завершён»; автотесты `TestThreeIdenticalEventsNotifyOnce` в `desktop/internal/cases/notify/service_test.go`, `TestNotificationIsSentOnceAcrossRestart` и `TestDisabledNotificationsReachNoNotifier` в `desktop/tests/notify_sqlite_test.go`). Пока они есть: каждый — один раз, после перезапуска не повторяется; снять «Уведомлять о завершении обработки» — тостов нет. Отметить, нужно ли их убрать.
 - [ ] Параметры Windows → Уведомления: выключить для приложения — тостов нет, приложение работает.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -295,7 +300,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 | AC-17 | Google Calendar через адаптер, без Apple API | `TestCalendarStandInNeverSucceeds` (заглушка) | AC-17 | пока не проверить: TASK-050, TASK-051, TASK-052 |
 | AC-18 | LLM не вызывает побочные эффекты | `TestPromptInjectionDoesNotCallEmailAdapter`, `TestSideEffectPortsNeverTakeModelOutput` | не нужно сейчас | автотест |
 | AC-19 | Секреты не в базе открытым текстом | `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestSchemaHasNoSecretColumns` | AC-19 | автотест + вручную |
-| AC-20 | Локальные данные главные | `TestLessonToAssignmentsThroughTheWiredCore` | AC-20 | вручную (без интернета); календарь пока не проверить: TASK-051 |
+| AC-20 | Локальные данные главные | `TestLessonToAssignmentsThroughTheWiredCore` | AC-20 | автотест + вручную (без интернета); календарь пока не проверить: TASK-051 |
 | AC-21 | Распознавание только от розетки | `TestHeavyJobWaitsOnBatteryAndRunsWhenACReturns`, `TestSTTJobPowerLossWaitsAndResumes` | AC-21 | автотест + вручную (ноутбук) |
 | AC-22 | Выключить ограничение, «Запустить сейчас» | `TestSettingOffRunsHeavyJobsOnBattery`, `TestForceRunStartsOneJobOnBattery` | AC-22 | автотест + вручную (ноутбук) |
 | AC-23 | Скачивание или импорт с SHA-256 | `TestModelImportRejectsTamperedFile`, `TestModelDownloadRejectsTamperedFile` | AC-23 | импорт: автотест + вручную; скачивание: автотест, вручную пока не проверить (каталог пуст) |
