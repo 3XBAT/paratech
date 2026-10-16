@@ -170,8 +170,9 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
   name starting with `BTH` (`PKEY_Device_EnumeratorName`; Windows 10 HFP endpoints are expected under `BTHHFENUM`,
   A2DP under `BTHENUM` with form factor Headphones). Source: the PKEY and enum values are in the mingw-w64 headers;
   that the endpoint property store has the enumerator name and these values for HFP is **not confirmed** (no MS
-  page found, not checked with a headset). Without the name the hint never fires; it is a hint, not a cause on its
-  own (silence on such an endpoint becomes "hands_free").
+  page found, not checked with a headset; an endpoint may report the software-device enumerator `SWD` instead). Without
+  a `BTH` name the hint never fires; it is a hint, not a cause on its own (silence on such an endpoint becomes
+  "hands_free").
 - Windows version: `RtlGetVersion` for the numbers; `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` ProductName,
   DisplayVersion, UBR read only. ProductName says "Windows 10" on Windows 11; build ≥ 22000 (not Server) = Windows 11.
 
