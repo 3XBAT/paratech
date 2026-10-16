@@ -101,7 +101,7 @@ test("the fitter resends after the window was shown again or a call failed", asy
 
   f.forget();
   f.request(400);
-  assert.equal(calls.length, 2, "the shell reset the size on show");
+  assert.equal(calls.length, 2, "the shell reset the size on show: growth is asked again");
   calls[1].reject(new Error("the action failed"));
   await settle();
 
@@ -112,5 +112,5 @@ test("the fitter resends after the window was shown again or a call failed", asy
 
   f.forget();
   f.request(popupBaseHeight);
-  assert.equal(calls.length, 4, "after a show even the base height is sent");
+  assert.equal(calls.length, 3, "after a show the base height is what the window has: nothing is sent");
 });

@@ -316,7 +316,7 @@ export function wantedHeight(natural: number, grows: boolean): number {
  * during a call is sent after it, and only the newest one.
  */
 export class HeightFitter {
-  /** The height last sent; undefined when the window size is unknown (shown again, or a call failed). */
+  /** The height last sent; undefined when the window size is unknown (a call failed). */
   private sent: number | undefined = popupBaseHeight;
   private busy = false;
   private waiting: number | undefined = undefined;
@@ -348,9 +348,9 @@ export class HeightFitter {
       });
   }
 
-  /** The shell has reset the window (it was shown again): the next request is sent even if it repeats. */
+  /** The shell has reset the window to the base height (it was shown again). */
   forget(): void {
-    this.sent = undefined;
+    this.sent = popupBaseHeight;
   }
 }
 

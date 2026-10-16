@@ -119,10 +119,10 @@ export function Popup() {
     let alive = true;
     let off: (() => void) | undefined;
     onEvent(shownEvent, () => {
-      // The core has just shown the window, whatever the page's visibility state says yet. It also reset its size.
+      // The core has just shown the window, whatever the page's visibility state says yet. It also reset its size;
+      // the render after the reload measures the new content (the DOM still shows the previous offer here).
       setVisible(true);
       fitter.forget();
-      measure();
       void reload(true);
       poller.refreshNow();
     }).then(
@@ -144,7 +144,7 @@ export function Popup() {
       document.removeEventListener("visibilitychange", onVisibility);
       poller.setActive(false);
     };
-  }, [reload, poller, fitter, measure]);
+  }, [reload, poller, fitter]);
 
   // A new prompt starts with a fresh picker: no choice carries over from the previous offer.
   useEffect(() => {
