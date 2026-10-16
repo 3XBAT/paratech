@@ -34,31 +34,35 @@ export interface QuotaDisplay {
 }
 
 export const quotaTexts = {
-  title: "Остаток квоты",
+  title: "Лимит обработки",
   refresh: "Обновить",
   refreshing: "Обновляем…",
   remaining: "Осталось",
   limit: "Лимит",
   reserved: "Зарезервировано идущими запросами",
+  used: "Израсходовано",
   updated: "Обновлено: ",
   stale: "Устарело: последнее обновление не удалось, показано значение на это время.",
-  renews: "Квота обновится: ",
-  note: "Это копия для показа. Хватит ли квоты, Hub решает сам при каждом запросе.",
+  renews: "Лимит обновится: ",
+  note: "Это копия для показа. Хватит ли лимита, сервер обработки решает сам при каждом запросе.",
   checked: "Последняя попытка: ",
   notRequested: "Остаток ещё не запрашивался: нажмите «Обновить».",
-  urlPointer: "Адрес Hub не задан: укажите его в поле «Адрес Hub» выше и сохраните.",
+  urlPointer: "Адрес сервера обработки не задан: укажите его в поле «Адрес сервера» выше и сохраните.",
   keyPointer: "Введите ключ в поле «Новый ключ» выше и сохраните его.",
-  refreshFailed: "Не удалось получить остаток квоты.",
+  refreshFailed: "Не удалось получить остаток лимита.",
 } as const;
 
 /** What a status says when there is no answer of a refresh on this page (the page was opened after it). */
 const statusTexts: Readonly<Record<QuotaStatus, QuotaLine | null>> = {
   unchecked: null,
   current: null,
-  notConfigured: { text: "Адрес Hub не задан или не подходит: укажите его в поле «Адрес Hub» выше.", tone: "warning" },
-  noKey: { text: "Ключ доступа к Hub не задан.", tone: "warning" },
-  keyRejected: { text: "Hub не принял ключ: он неверный или отозван. Введите действующий ключ.", tone: "error" },
-  offline: { text: "Hub не ответил при последнем обновлении.", tone: "warning" },
+  notConfigured: {
+    text: "Адрес сервера обработки не задан или не подходит: укажите его в поле «Адрес сервера» выше.",
+    tone: "warning",
+  },
+  noKey: { text: "Ключ доступа не задан.", tone: "warning" },
+  keyRejected: { text: "Сервер обработки не принял ключ: он неверный или отозван. Введите действующий ключ.", tone: "error" },
+  offline: { text: "Сервер обработки не ответил при последнем обновлении.", tone: "warning" },
   failed: { text: "Последнее обновление не удалось.", tone: "error" },
 };
 
@@ -131,6 +135,15 @@ export function quotaDisplay(
     checked: q.checkedAt !== "" && (v === null || q.stale) ? quotaTexts.checked + localTime(q.checkedAt) : "",
     lines,
   };
+}
+
+/** The used share of the limit in whole percent for the bar; null without values or a limit. */
+export function quotaUsedPercent(q: Quota): number | null {
+  const v = q.values;
+  if (v === null || v.limit <= 0) {
+    return null;
+  }
+  return Math.min(100, Math.max(0, Math.round(((v.limit - v.remaining) * 100) / v.limit)));
 }
 
 /** "Обновить" waits for a refresh in flight and for a change of the key or the address (it would be superseded). */

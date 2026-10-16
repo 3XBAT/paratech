@@ -6,20 +6,23 @@ import {
   formatTime,
   isFinishedJob,
   isFinishedRecording,
-  jobStatusLabel,
   jobTypeLabel,
   loadErrorText,
   recordingDurationText,
-  recordingStatusLabel,
   splitFinished,
 } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
+import { jobStatusView, queueText, recordingStatusView, showsProgress, type StatusView } from "../statusPresentation";
+import { Button } from "../ui/Button";
+import { Banner, EmptyState, Progress, Row } from "../ui/controls";
+import { Icon } from "../ui/Icon";
+import { StatusChip } from "../ui/StatusChip";
 
 const pollMs = 3000;
 
 // The page shows what the Go core reports; the Stop and Run now buttons appear only when the core offers them (ARCH-44).
-export function RecordingsPage() {
+export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void }) {
   const api = useMemo(() => activityApi(callByName), []);
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
@@ -106,123 +109,133 @@ export function RecordingsPage() {
   const rec = splitFinished(recordings ?? [], isFinishedRecording);
   const jb = splitFinished(jobs ?? [], isFinishedJob);
 
-  const recordingsTable = (rows: ReactNode) => (
-    <table className="list">
-      <thead>
-        <tr>
-          <th>Начало</th>
-          <th>Статус</th>
-          <th>Длительность</th>
-          <th>Примечание</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>{rows}</tbody>
-    </table>
+  // The rows of one list, in a card; CollapsibleList puts the finished ones into the same kind of card.
+  const card = (rows: ReactNode) => (
+    <div className="card" role="list">
+      {rows}
+    </div>
   );
 
-  const recordingRow = (r: RecordingItem) => (
-    <tr key={r.id}>
-      <td>{formatTime(r.startedAt)}</td>
-      <td>{recordingStatusLabel(r.status)}</td>
-      <td>{recordingDurationText(r, now)}</td>
-      <td className="problem">{r.problem}</td>
-      <td>
-        {r.stoppable && (
-          <button
-            type="button"
-            disabled={busy.has(`stop:${r.id}`)}
-            onClick={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
-          >
-            {busy.has(`stop:${r.id}`) ? "Остановка…" : "Остановить"}
-          </button>
-        )}
-      </td>
-    </tr>
-  );
+  const recordingRow = (r: RecordingItem) => {
+    const v = recordingStatusView(r, now);
+    const stopping = busy.has(`stop:${r.id}`);
+    return (
+      <Row
+        key={r.id}
+        title={<span className="num">{formatTime(r.startedAt)}</span>}
+        meta={v.value === "" && <span className="num">Длительность {recordingDurationText(r, now)}</span>}
+        status={<StatusLine view={v} problem={r.problem} />}
+        actions={
+          r.stoppable && (
+            <Button
+              variant="danger"
+              icon="stop"
+              busy={stopping}
+              busyLabel="Остановка…"
+              disabled={stopping}
+              onClick={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
+            >
+              Остановить
+            </Button>
+          )
+        }
+      />
+    );
+  };
 
-  const jobsTable = (rows: ReactNode) => (
-    <table className="list">
-      <thead>
-        <tr>
-          <th>Задача</th>
-          <th>Статус</th>
-          <th>Попытки</th>
-          <th>Обновлена</th>
-          <th>Ошибка</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>{rows}</tbody>
-    </table>
-  );
+  const jobRow = (j: JobItem) => {
+    const v = jobStatusView(j);
+    const starting = busy.has(`run:${j.id}`);
+    return (
+      <Row
+        key={j.id}
+        title={jobTypeLabel(j.type)}
+        meta={
+          <span className="num">
+            Обновлена {formatTime(j.updatedAt)} · попыток: {j.attempts} из {j.maxAttempts}
+          </span>
+        }
+        status={
+          <StatusLine view={v} problem={j.lastError}>
+            {showsProgress(j) && <Progress value={j.progressPercent} label={v.label} text={false} />}
+          </StatusLine>
+        }
+        actions={
+          j.runNowOffered && (
+            <Button
+              icon="play"
+              busy={starting}
+              busyLabel="Запуск…"
+              disabled={starting}
+              onClick={() => void act(`run:${j.id}`, () => api.runJobNow(j.id))}
+            >
+              Запустить сейчас
+            </Button>
+          )
+        }
+      />
+    );
+  };
 
-  const jobRow = (j: JobItem) => (
-    <tr key={j.id}>
-      <td>{jobTypeLabel(j.type)}</td>
-      <td className={j.waiting ? "waiting" : ""}>
-        {jobStatusLabel(j.status)}
-        {j.status === "RUNNING" && j.progressPercent > 0 && ` (${j.progressPercent}%)`}
-      </td>
-      <td>
-        {j.attempts}/{j.maxAttempts}
-      </td>
-      <td>{formatTime(j.updatedAt)}</td>
-      <td className="problem">{j.lastError}</td>
-      <td>
-        {j.runNowOffered && (
-          <button
-            type="button"
-            disabled={busy.has(`run:${j.id}`)}
-            onClick={() => void act(`run:${j.id}`, () => api.runJobNow(j.id))}
-          >
-            {busy.has(`run:${j.id}`) ? "Запуск…" : "Запустить сейчас"}
-          </button>
-        )}
-      </td>
-    </tr>
-  );
+  const queue = queueText(jobs ?? []);
 
   return (
-    <section>
-      <h1>Записи</h1>
+    <section className="page">
+      <div className="head">
+        <h1>Записи и задачи</h1>
+      </div>
       {actionError && (
-        <p className="error" role="alert">
+        <Banner kind="fail" role="alert">
           {actionError}
-        </p>
+        </Banner>
       )}
 
       {recordingsError && (
-        <p className="error" role="alert">
+        <Banner kind="fail" role="alert">
           {recordingsError}
-        </p>
+        </Banner>
       )}
       {recordings === null ? (
         !recordingsError && <p className="muted">Загрузка…</p>
       ) : recordings.length === 0 ? (
-        <p className="muted">Записей пока нет.</p>
+        <EmptyState
+          label="Записей пока нет"
+          title="Здесь появятся записи пар"
+          actions={
+            onOpenSchedule && (
+              <Button variant="primary" icon="up" onClick={onOpenSchedule}>
+                Импортировать расписание
+              </Button>
+            )
+          }
+        >
+          Импортируйте расписание — перед каждой парой появится окно с кнопкой «Начать запись».
+        </EmptyState>
       ) : (
         <>
-          {rec.active.length > 0 && recordingsTable(rec.active.map(recordingRow))}
+          <h2 className="group-title">Записи</h2>
+          {rec.active.length > 0 && card(rec.active.map(recordingRow))}
           {rec.finished.length > 0 && (
             <CollapsibleList
               title="Завершённые"
               items={rec.finished}
               itemKey={(r) => r.id}
               renderItem={recordingRow}
-              renderContainer={recordingsTable}
+              renderContainer={card}
               state={stateOf(lists, "recordings")}
               onStateChange={(s) => setLists((l) => withState(l, "recordings", s))}
+              className="clist-card"
+              classNames={{ button: "btn ghost" }}
             />
           )}
         </>
       )}
 
-      <h2>Задачи</h2>
+      <h2 className="group-title">Задачи</h2>
       {jobsError && (
-        <p className="error" role="alert">
+        <Banner kind="fail" role="alert">
           {jobsError}
-        </p>
+        </Banner>
       )}
       {jobs === null ? (
         !jobsError && <p className="muted">Загрузка…</p>
@@ -230,20 +243,47 @@ export function RecordingsPage() {
         <p className="muted">Задач пока нет.</p>
       ) : (
         <>
-          {jb.active.length > 0 && jobsTable(jb.active.map(jobRow))}
+          {jb.active.length > 0 && card(jb.active.map(jobRow))}
           {jb.finished.length > 0 && (
             <CollapsibleList
               title="Завершённые"
               items={jb.finished}
               itemKey={(j) => j.id}
               renderItem={jobRow}
-              renderContainer={jobsTable}
+              renderContainer={card}
               state={stateOf(lists, "jobs")}
               onStateChange={(s) => setLists((l) => withState(l, "jobs", s))}
+              className="clist-card"
+              classNames={{ button: "btn ghost" }}
             />
           )}
         </>
       )}
+
+      <div className="gap" />
+      <div className="statusbar">
+        {queue && <span className="num">{queue}</span>}
+        <span className="r">
+          <Icon name="lock" />
+          Звук обрабатывается только на этом компьютере
+        </span>
+      </div>
     </section>
+  );
+}
+
+// The chip, its hint and the core's note about the row (a problem or the last error).
+function StatusLine(props: { view: StatusView; problem: string; children?: ReactNode }) {
+  const v = props.view;
+  return (
+    <>
+      <StatusChip kind={v.kind} icon={v.icon}>
+        {v.label}
+        {v.value !== "" && <span className="num"> · {v.value}</span>}
+      </StatusChip>
+      {props.children}
+      {v.hint !== "" && <span className="small muted">{v.hint}</span>}
+      {props.problem !== "" && <span className="small row-problem">{props.problem}</span>}
+    </>
   );
 }

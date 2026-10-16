@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
+import { Button } from "../ui/Button";
+import { Banner } from "../ui/controls";
+import { Icon, IconSprite } from "../ui/Icon";
 import {
   actionErrorText,
   buttonLabels,
@@ -174,16 +177,18 @@ export function Popup() {
   const collapsed = collapseAdvice(showPicker ? picker.warnings : [], errorLine);
   return (
     <div className="popup">
-      <div className="head">
+      <IconSprite />
+      <div className={showPicker ? "p-top live" : "p-top"}>
+        {showPicker && <span className="dot" aria-hidden="true" />}
         <span className="heading">{m.heading}</span>
-        {m.time !== "" && <span className="time">{m.time}</span>}
+        {m.time !== "" && <span className="time num">{m.time}</span>}
       </div>
       {m.title !== "" && (
-        <div className="title" title={m.title}>
+        <h1 className="title" title={m.title}>
           {m.title}
-        </div>
+        </h1>
       )}
-      {m.note !== "" && <div className="note">{m.note}</div>}
+      {m.note !== "" && <p className="p-note">{m.note}</p>}
       {showPicker && (
         <div className="picker">
           <button
@@ -196,9 +201,7 @@ export function Popup() {
             onClick={() => setListOpen((open) => !open)}
           >
             <SourceRow option={picker.chosen} />
-            <span className="caret" aria-hidden="true">
-              ▾
-            </span>
+            <Icon name="chev" className="caret" />
           </button>
           {listShown && (
             <>
@@ -224,35 +227,38 @@ export function Popup() {
       {(showPicker || errorLine !== "") && (
         // Shrinks and, as a last resort, scrolls so that the buttons are never cut off.
         <div className="texts">
+          {errorLine !== "" && (
+            <Banner kind="fail" role="alert">
+              <span className="clamp" title={errorLine}>
+                {errorLine}
+              </span>
+            </Banner>
+          )}
           {showPicker &&
             picker.warnings.map((w) => (
-              <div key={w} className="warning" title={w}>
+              <p key={w} className="warning" title={w}>
                 {w}
-              </div>
+              </p>
             ))}
           {showPicker && (
-            <div className={collapsed ? "advice collapsed" : "advice"} title={collapsed ? picker.advice : undefined}>
+            <p className={collapsed ? "advice collapsed" : "advice"} title={collapsed ? picker.advice : undefined}>
               {picker.advice}
-            </div>
-          )}
-          {errorLine !== "" && (
-            <div className="error" role="alert" title={errorLine}>
-              {errorLine}
-            </div>
+            </p>
           )}
         </div>
       )}
-      <div className="buttons">
+      <div className="pbtns">
         {m.buttons.map((id) => (
-          <button
+          <Button
             key={id}
-            type="button"
-            className={id === "start" ? "primary" : ""}
+            variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
+            icon={id === "start" ? "rec" : undefined}
+            className={id === "start" || id === "close" ? "wide" : undefined}
             disabled={m.disabled}
             onClick={() => click(id)}
           >
             {id === "start" ? m.startLabel : buttonLabels[id]}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

@@ -15,7 +15,7 @@
   cmd /c ".\paratech\dist\alpha\learning-assistant.exe --data-dir %LOCALAPPDATA%\la-qa --log-level debug 2> %LOCALAPPDATA%\la-qa.log"
   ```
   Папка данных — `%LOCALAPPDATA%\la-qa`, лог — `%LOCALAPPDATA%\la-qa.log` (открывать после выхода).
-- [ ] whisper-cli рядом с exe и модель `ggml-base.bin` (быстрая) или `ggml-small.bin` (точнее, медленнее), импорт в «Модели» (§6).
+- [ ] whisper-cli рядом с exe и модель `ggml-base.bin` (быстрая) или `ggml-small.bin` (точнее, медленнее), импорт в «Модели речи» (§6).
 - [ ] Hub: адрес и ключ. Ключ выдаётся на Hub: `go run ./hub/cmd/hub keys create -label <имя>` из `paratech/` (`paratech/README.md`, «Hub API keys»), запомнить id ключа (`hub keys list`).
 - [ ] Почта: ящик с паролем приложения (Яндекс, Gmail).
 - [ ] Звук: видео с речью в Chrome, второе видео в Edge; для AC-24 — Zoom, Teams или Телемост.
@@ -44,9 +44,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestLessonStartingFollowsThePromptsSetting` (`desktop/internal/cases/recordingprompt/service_test.go`); `TestLessonPromptFollowsTheStoredSetting` (`desktop/tests/recordingprompt_sqlite_test.go`); `TestPromptsTurnedOffDuringLessonStaySilent` (`desktop/internal/cases/scheduler/service_test.go`); `TestOpenCoreStoresSettings` (`desktop/internal/app/core_test.go`).
 Вручную:
 - [ ] «Настройки»: снять «Автоматически предлагать запись в начале занятия». Занятие через 3 мин: попапа нет.
-- [ ] Включить флажок, занятие с другим `uid` через 3 мин: попап есть.
-- [ ] Попап занятия, «Отложить на 5 мин», выключить флажок, подождать 5 мин: попап не возвращается; включить снова — это занятие больше не предлагается (решение владельца).
-- [ ] `Quit` и запуск: флажок в том же положении.
+- [ ] Включить переключатель, занятие с другим `uid` через 3 мин: попап есть.
+- [ ] Попап занятия, «Через 5 минут», выключить переключатель, подождать 5 мин: попап не возвращается; включить снова — это занятие больше не предлагается (решение владельца).
+- [ ] `Quit` и запуск: переключатель в том же положении.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -54,7 +54,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`).
 Вручную (§8, пункт 9):
-- [ ] Видео с речью в Chrome. В попапе выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях» «Идёт запись», время растёт.
+- [ ] Видео с речью в Chrome. В попапе выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях и задачах» «Идёт запись», время растёт.
 - [ ] Через 2 мин «Остановить»: «Останавливается» (может мелькнуть), «Сохраняется», затем «Завершена»: запись переходит в группу «Завершённые (N)» под записями в работе.
 - [ ] `%LOCALAPPDATA%\la-qa\artifacts\recordings\<id>.wav` играет, слышна речь, длина как у записи.
 - [ ] `Quit` и запуск: запись в группе «Завершённые», «Завершена», файл на месте.
@@ -86,9 +86,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestSTTPathHasNoNetworkImports` (`desktop/tests/stt_network_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, в запросах к Hub нет байтов записи ни как есть, ни в hex или base64; есть текст транскрипта); `TestTranscriptToStructuresThroughFakeHub` (`desktop/tests/postprocess_sqlite_test.go`).
 Вручную (нужны whisper-cli и модель, §6; это же TASK-025):
 - [ ] Записать 1–2 мин речи (AC-03). До «Остановить» выключить интернет (режим «в самолёте» или отключить Wi-Fi и кабель); если Hub запущен на этом компьютере — ещё и остановить Hub.
-- [ ] «Остановить»: «Распознавание речи» → «Выполняется» → «Готово» без интернета.
+- [ ] «Остановить»: «Распознавание речи» → «Расшифровка» → «Готово» без интернета.
 - [ ] Самый новый файл в `artifacts\transcripts` открыть в Блокноте: текст похож на сказанное.
-- [ ] «Конспект» и «Поиск домашнего задания» — «Ждёт подключения к сети». Включить интернет (и запустить Hub, если он локальный): примерно через минуту они «Готово».
+- [ ] «Конспект» и «Поиск домашнего задания» — «Ждёт интернет». Включить интернет (и запустить Hub, если он локальный): примерно через минуту у «Конспект» — «Конспект готов», у «Поиск домашнего задания» — «Готово».
 - [ ] Записать для TASK-025: длина записи, время распознавания, модель.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -96,7 +96,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 ## AC-07. Можно поставить несколько моделей и выбрать модель по умолчанию
 
 Автотесты: `TestWiredModelManager` (`desktop/internal/app/models_test.go`); `TestModelManagerScenario` (`desktop/tests/modelcatalog_sqlite_test.go`); `TestModelsPageInstallsWithoutRestart` (`desktop/internal/app/modelspage_test.go`).
-Вручную (§8 «Модели»):
+Вручную (§8 «Модели речи»):
 - [ ] Импортировать `ggml-base.bin` и `ggml-small.bin`: обе в «Установленных».
 - [ ] «Сделать по умолчанию» у второй: метка «По умолчанию» переходит к ней.
 - [ ] «Удалить» модель, пока её задача распознавания не закончена: «Модель нельзя удалить: её использует незавершённая задача распознавания». После «Готово» удаление проходит.
@@ -113,31 +113,31 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestJobRunnerQueueSurvivesARestart` (`desktop/tests/jobrunner_sqlite_test.go`); `TestStartupRecoveryAfterACrash` (`desktop/tests/jobrecovery_sqlite_test.go`); `TestSTTJobWaitsForWhisperCLI`, `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, перезапуск без дублей).
 Вручную:
 - [ ] Модель по умолчанию `ggml-small.bin`, запись 5–10 мин, «Остановить».
-- [ ] Пока «Распознавание речи» «Выполняется», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
-- [ ] Запуск: в логе `startup recovery finished requeued=1`; задача снова «Выполняется», затем «Готово»; задача распознавания этой записи одна, не две (законченные задачи — в группе «Завершённые» под «Задачами»).
+- [ ] Пока у «Распознавание речи» «Расшифровка», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
+- [ ] Запуск: в логе `startup recovery finished requeued=1`; задача снова «Расшифровка», затем «Готово»; задача распознавания этой записи одна, не две (законченные задачи — в группе «Завершённые» под «Задачами»).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-10. Временные сбои повторяются с ограниченной паузой, задачи не идут вечно
 
 Автотесты: `TestJobRunnerRetriesThenCompletes`, `TestJobRunnerFailsAfterTheAttemptCap` (`desktop/tests/jobrunner_sqlite_test.go`); `TestAttemptsAreBounded` (`desktop/internal/cases/jobrunner/service_test.go`); `TestProductionEnvUsesTheRunnerAttemptCap` (`desktop/internal/app/registrations_test.go`).
-Вручную: не нужно (временный сбой по заказу не устроить). Нет сети — это не сбой, а ожидание «Ждёт подключения к сети» без траты попыток (AC-06).
+Вручную: не нужно (временный сбой по заказу не устроить). Нет сети — это не сбой, а ожидание «Ждёт интернет» без траты попыток (AC-06).
 
 ## AC-11. Квота LLM считается на Hub, повтор запроса не списывается дважды
 
 Автотесты: `TestGatewayReplayAgainstPostgres`, `TestGatewayConcurrentIdenticalCallsAgainstPostgres` (`hub/tests/gateway_test.go`); `TestQuotaKeyReplayAgainstPostgres` (`hub/tests/quota_test.go`); `TestRetrySendsSameIdempotencyKey` (`desktop/internal/adapters/hubclient/client_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, после перезапуска Hub не списывает снова).
 Вручную:
-- [ ] «Подключения» → «Остаток квоты» → «Обновить», записать «Осталось».
-- [ ] Обработать одно занятие (AC-06, с интернетом). После «Готово» у «Конспект» и «Поиск домашнего задания» — «Обновить»: остаток уменьшился.
+- [ ] «Подключения» → «Лимит обработки» → «Обновить», записать «Осталось».
+- [ ] Обработать одно занятие (AC-06, с интернетом). Когда у «Конспект» «Конспект готов», а у «Поиск домашнего задания» «Готово», — «Обновить»: остаток уменьшился.
 - [ ] `Quit`, запуск, «Обновить»: остаток тот же.
-- [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующий «Конспект» — «Квота исчерпана — ждёт пополнения».
+- [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующий «Конспект» — «Минуты обработки закончились».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-12. Пользователь видит остаток квоты
 
 Автотесты: `TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres` (`hub/tests/quota_test.go`); `TestRefreshQuotaResults` (`desktop/internal/cases/connections/hub_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`).
-Вручную (§8 «Подключения», пункты про ключ и «Остаток квоты»):
+Вручную (§8 «Подключения», пункты про ключ и «Лимит обработки»):
 - [ ] С адресом и ключом «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
 - [ ] Hub остановлен, «Обновить»: цифры прежние, «Устарело: …».
 
@@ -146,7 +146,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 ## AC-13. Домашку можно сгенерировать, поправить и доработать до отправки
 
 Автотесты: `TestDraftGenerateEditRegenerateExport` (`desktop/tests/drafts_sqlite_test.go`); `TestGenerateEditRegenerateKeepsVersions` (`desktop/internal/cases/homeworkflow/drafts_test.go`).
-Вручную: пока не проверить: TASK-045 (раздел «Домашние задания» показывает «Раздел появится в следующих версиях.»). Когда появится: сгенерировать черновик, поправить текст, дать доп. инструкцию, перегенерировать — правка не теряется; экспорт пишет `artifacts\exports\<id задания>\homework.md`.
+Вручную: пока не проверить: TASK-045 (раздела «Домашние задания» в навигации нет: поиск домашнего задания виден задачей в «Записях и задачах»). Когда появится: сгенерировать черновик, поправить текст, дать доп. инструкцию, перегенерировать — правка не теряется; экспорт пишет `artifacts\exports\<id задания>\homework.md`.
 
 ## AC-14. Отправка домашки только после явного подтверждения
 
@@ -208,7 +208,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, весь путь на локальной базе); `TestCalendarStandInNeverSucceeds` (`desktop/internal/app/proposals_test.go`).
 Вручную:
-- [ ] Без интернета: приложение запускается; «Записи», «Модели», «Настройки», импорт расписания, попап по расписанию, запись и распознавание работают.
+- [ ] Без интернета: приложение запускается; «Записи и задачи», «Модели речи», «Настройки», импорт расписания, попап по расписанию, запись и распознавание работают.
 - [ ] Пока не проверить: TASK-051. Когда появится: удалить или изменить событие в Google Calendar — занятие в приложении не меняется, следующая синхронизация возвращает событие.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -217,9 +217,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestHeavyJobWaitsOnBatteryAndRunsWhenACReturns`, `TestPowerLostMidRunStopsAtTheNextCheckpoint` (`desktop/internal/cases/jobrunner/power_test.go`); `TestPowerAwareProcessingOnSQLite` (`desktop/tests/jobpower_sqlite_test.go`); `TestSTTJobPowerLossWaitsAndResumes` (`desktop/tests/transcribe_sqlite_test.go`); `TestReadACPowerReal` (`desktop/internal/adapters/winpower/winpower_windows_test.go`, настоящее питание).
 Вручную (ноутбук; «Обрабатывать только от розетки» включено — так по умолчанию):
-- [ ] Отключить зарядку. Записать 1 мин, «Остановить»: «Распознавание речи» — «Ждёт питания от сети», есть «Запустить сейчас».
-- [ ] Подключить зарядку: за ~5–10 с «Выполняется», затем «Готово».
-- [ ] Запись 5–10 мин, распознавание от сети; во время «Выполняется» отключить зарядку: в течение минуты «Ждёт питания от сети», `whisper-cli.exe` нет в `tasklist`. Подключить: распознавание начинается заново и доходит до «Готово».
+- [ ] Отключить зарядку. Записать 1 мин, «Остановить»: «Распознавание речи» — «Ждёт зарядку», есть «Запустить сейчас».
+- [ ] Подключить зарядку: за ~5–10 с «Расшифровка», затем «Готово».
+- [ ] Запись 5–10 мин, распознавание от сети; во время «Расшифровка» отключить зарядку: в течение минуты «Ждёт зарядку», `whisper-cli.exe` нет в `tasklist`. Подключить: распознавание начинается заново и доходит до «Готово».
 - [ ] «Конспект» и «Поиск домашнего задания» на батарее не ждут.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -228,16 +228,16 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestSettingOffRunsHeavyJobsOnBattery`, `TestForceRunStartsOneJobOnBattery` (`desktop/internal/cases/jobrunner/power_test.go`); `TestActivityServiceRunJobNow` (`desktop/internal/input/wails/activity_test.go`); `TestRunNowTranscribesAndEnqueuesPostProcessing` (`desktop/internal/app/wiring_test.go`).
 Вручную (ноутбук, на батарее, две ждущие задачи распознавания):
-- [ ] «Запустить сейчас» у одной: «Запуск…», «Выполняется», «Готово», кнопка пропала; вторая ждёт дальше.
-- [ ] Снять «Обрабатывать только от розетки»: вторая через несколько секунд «Выполняется»; новая запись распознаётся сразу.
-- [ ] Вернуть флажок.
+- [ ] «Запустить сейчас» у одной: «Запуск…», «Расшифровка», «Готово», кнопка пропала; вторая ждёт дальше.
+- [ ] Снять «Обрабатывать только от розетки»: вторая через несколько секунд «Расшифровка»; новая запись распознаётся сразу.
+- [ ] Вернуть переключатель.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-23. Модель ставится скачиванием в приложении или импортом файла, оба пути проверяют SHA-256
 
 Автотесты: `TestModelImportRejectsTamperedFile` (`desktop/tests/modelimport_sqlite_test.go`); `TestModelsPageRefusesASwappedFile`, `TestModelsPageDownloadOfTheEmptyCatalog` (`desktop/internal/app/modelspage_test.go`); `TestModelDownloadResumesAfterDrop`, `TestModelDownloadRejectsTamperedFile` (`desktop/tests/modeldownload_sqlite_test.go`).
-Вручную — импорт (§6 и §8 «Модели»):
+Вручную — импорт (§6 и §8 «Модели речи»):
 - [ ] SHA-256, который показывает приложение, равен `(Get-FileHash .\ggml-base.bin -Algorithm SHA256).Hash` и строке «SHA256» на странице файла на Hugging Face; затем «SHA-256 совпадает, установить».
 - [ ] Заменить файл другим с тем же именем между показом SHA-256 и подтверждением: «Файл изменился после проверки…», модель не установлена.
 
@@ -274,7 +274,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestRunAnnouncesExactlyOnce`, `TestRestartDuringLessonDoesNotDuplicate` (`desktop/internal/cases/scheduler/service_test.go`); `TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart` (`desktop/tests/scheduler_sqlite_test.go`).
 Вручную:
 - [ ] Попап «Начинается занятие» — один раз на занятие; после «Пропустить» и после перезапуска во время того же занятия не появляется снова.
-- [ ] Тостов Windows о завершении обработки нет (TASK-065): после распознавания, конспекта и поиска ДЗ в углу экрана и в Центре уведомлений от приложения ничего; ход виден в «Записях». В «Настройках» два флажка, «Уведомлять о завершении обработки» нет. Автотест `TestNoCompletionToasts` (`desktop/tests/no_completion_toasts_test.go`).
+- [ ] Тостов Windows о завершении обработки нет (TASK-065): после распознавания, конспекта и поиска ДЗ в углу экрана и в Центре уведомлений от приложения ничего; ход виден в «Записях и задачах». В «Настройках» два переключателя, «Уведомлять о завершении обработки» нет. Автотест `TestNoCompletionToasts` (`desktop/tests/no_completion_toasts_test.go`).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 

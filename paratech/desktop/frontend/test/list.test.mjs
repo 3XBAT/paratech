@@ -142,7 +142,7 @@ test("the preview shows counters, groups and the pinned Apply", () => {
   assert.match(markup, />Показать ещё 4992</);
   assert.match(markup, />Показать ещё 1</);
   assert.match(markup, />Свернуть всё</);
-  assert.match(markup, /class="actions sticky-actions"><button type="button">Применить</);
+  assert.match(markup, /class="actions sticky-actions"><button type="button" class="btn primary">Применить 5009 изменений</);
 
   const closed = page(big, { added: folded, removed: folded });
   assert.equal(count(closed, "<li"), 5, "only the chips");
@@ -156,7 +156,7 @@ test("row errors fold the same way, with «Показать все ошибки�
   assert.deepEqual(previewGroups(p), ["errors"]);
   const markup = page(p);
   assert.equal(count(markup, "<li"), 5 + 8);
-  assert.match(markup, /<li class="error">Ошибки: 5000<\/li>/);
+  assert.match(markup, /<li class="tile bad"><span class="label">Ошибки<\/span><b class="num">5000<\/b><\/li>/);
   assert.match(markup, />Показать все ошибки</);
   assert.ok(!markup.includes("Применить"));
   assert.equal(count(page(p, { errors: all }), "<li"), 5 + 5000);

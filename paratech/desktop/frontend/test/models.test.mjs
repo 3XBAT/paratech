@@ -16,6 +16,7 @@ import {
   confirmation,
   confirmStep,
   defaultBadge,
+  downloadChip,
   downloadOf,
   downloadText,
   errorText,
@@ -249,4 +250,14 @@ test("file and catalog text is plain text, isolated in <bdi>", () => {
       assert.ok(!src.includes(banned), `${file} uses ${banned}`);
     }
   }
+});
+
+test("a download phase has its chip; none without a download or once installed", () => {
+  const d = { catalogId: "base-q5_1", phase: "downloading", doneBytes: 1, totalBytes: 2, running: true, error: "" };
+  assert.deepEqual(downloadChip(d), { kind: "run", icon: "down", label: "Скачивается" });
+  assert.equal(downloadChip({ ...d, phase: "verifying" }).label, "Проверяется");
+  assert.equal(downloadChip({ ...d, phase: "failed", running: false }).kind, "fail");
+  assert.equal(downloadChip({ ...d, phase: "cancelled", running: false }).kind, "neutral");
+  assert.equal(downloadChip({ ...d, phase: "installed", running: false }), null);
+  assert.equal(downloadChip(noDownload), null);
 });

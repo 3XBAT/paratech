@@ -11,7 +11,11 @@ import {
   texts,
   type Line,
   type SoundDisplay,
+  type Tone,
 } from "../diagnosticsView";
+import { Button } from "../ui/Button";
+import { Card, ResultLine, type ResultKind } from "../ui/controls";
+import { StatusChip } from "../ui/StatusChip";
 
 // "Диагностика": the sound check and the support bundle. Both run in the Go core; the page shows the fixed texts it
 // gets back (ARCH-44).
@@ -85,64 +89,89 @@ export function DiagnosticsPage() {
   const save = bundleButton(saving);
 
   return (
-    <section>
-      <h1>{texts.title}</h1>
-
-      <div className="block">
-        <h2>{texts.soundTitle}</h2>
-        <p>{texts.soundExplain}</p>
-        <p className="muted">{texts.soundScope}</p>
-        <div className="actions">
-          <button type="button" disabled={check.disabled} onClick={() => void runCheck()}>
-            {check.label}
-          </button>
+    <section className="page">
+      <div className="head">
+        <div>
+          <span className="label">{texts.lead}</span>
+          <h1>{texts.title}</h1>
         </div>
-        {checking && <p className="muted">{texts.checkTakes}</p>}
-        {sound !== null && (
-          <>
-            <Lines lines={sound.lines} />
-            {sound.modes.length > 0 && (
-              <>
-                <h3>{texts.modesTitle}</h3>
-                <table className="list">
-                  <tbody>
-                    {sound.modes.map((m) => (
-                      <tr key={m.label}>
-                        <th scope="row">{m.label}</th>
-                        <td className={m.ok ? "ok" : "error"}>{m.text}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </>
-        )}
       </div>
 
-      <div className="block">
-        <h2>{texts.bundleTitle}</h2>
-        <p>{texts.bundleExplain}</p>
-        <p className="muted">{texts.bundleLocal}</p>
-        <div className="actions">
-          <button type="button" disabled={save.disabled} onClick={() => void saveBundle()}>
-            {save.label}
-          </button>
-        </div>
-        <Lines lines={bundle} />
+      <div className="grid2">
+        <Card className="box diag" label={texts.soundTitle}>
+          <h2>{texts.soundTitle}</h2>
+          <span className="small muted box-desc">{texts.soundExplain}</span>
+          <p className="small muted">{texts.soundScope}</p>
+          <div className="acts start">
+            <Button disabled={check.disabled} onClick={() => void runCheck()}>
+              {check.label}
+            </Button>
+          </div>
+          {checking && <p className="small muted diag-wait">{texts.checkTakes}</p>}
+          {sound !== null && (
+            <div className="diag-result">
+              <Lines lines={sound.lines} />
+              {sound.modes.length > 0 && (
+                <>
+                  <h3>{texts.modesTitle}</h3>
+                  <ul className="modes">
+                    {sound.modes.map((m) => (
+                      <li key={m.label}>
+                        <span>{m.label}</span>
+                        <StatusChip kind={m.ok ? "ok" : "fail"} icon={m.ok ? "ok" : "warn"}>
+                          {m.ok ? texts.modeWorks : texts.modeFailed}
+                        </StatusChip>
+                        {!m.ok && <span className="small muted mode-cause">{m.text}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+        </Card>
+
+        <Card className="box diag" label={texts.bundleTitle}>
+          <h2>{texts.bundleTitle}</h2>
+          <span className="small muted box-desc">{texts.bundleExplain}</span>
+          <p className="small muted">{texts.bundleLocal}</p>
+          <div className="acts start">
+            <Button disabled={save.disabled} onClick={() => void saveBundle()}>
+              {save.label}
+            </Button>
+          </div>
+          {bundle.length > 0 && (
+            <div className="diag-result">
+              <Lines lines={bundle} />
+            </div>
+          )}
+        </Card>
       </div>
     </section>
   );
 }
 
+const resultKinds: Readonly<Record<Exclude<Tone, "muted">, ResultKind>> = { ok: "ok", warning: "wait", error: "fail" };
+
+// A verdict is a result line with an icon; a muted line (the device, the note of a saved bundle) is small text.
 function Lines(props: { lines: readonly Line[] }) {
   return (
     <>
-      {props.lines.map((l, i) => (
-        <p key={i} className={l.tone} role={l.tone === "error" ? "alert" : l.tone === "ok" ? "status" : undefined}>
-          {l.text}
-        </p>
-      ))}
+      {props.lines.map((l, i) =>
+        l.tone === "muted" ? (
+          <p key={i} className="small muted diag-note">
+            {l.text}
+          </p>
+        ) : (
+          <ResultLine
+            key={i}
+            kind={resultKinds[l.tone]}
+            role={l.tone === "error" ? "alert" : l.tone === "ok" ? "status" : undefined}
+          >
+            {l.text}
+          </ResultLine>
+        ),
+      )}
     </>
   );
 }
