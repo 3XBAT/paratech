@@ -1,21 +1,28 @@
-// Sections of the main window. Homework is a placeholder filled by a later task.
+// Sections of the main window, in the order of the side rail (docs/design/concept-final.html). Homework is shown in
+// «Записи и задачи», not in a section of its own.
 
-export type PageId = "recordings" | "models" | "homework" | "schedule" | "connections" | "settings" | "diagnostics";
+// The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .tsx file.
+import type { IconName } from "./ui/Icon.js";
+
+export type PageId = "recordings" | "schedule" | "connections" | "models" | "diagnostics" | "settings";
 
 export interface Page {
   id: PageId;
   label: string;
+  icon: IconName;
 }
 
 export const pages: readonly Page[] = [
-  { id: "recordings", label: "Записи" },
-  { id: "models", label: "Модели" },
-  { id: "homework", label: "Домашние задания" },
-  { id: "schedule", label: "Расписание" },
-  { id: "connections", label: "Подключения" },
-  { id: "settings", label: "Настройки" },
-  { id: "diagnostics", label: "Диагностика" },
+  { id: "recordings", label: "Записи и задачи", icon: "rec" },
+  { id: "schedule", label: "Расписание", icon: "cal" },
+  { id: "connections", label: "Подключения", icon: "link" },
+  { id: "models", label: "Модели речи", icon: "model" },
+  { id: "diagnostics", label: "Диагностика", icon: "wave" },
+  { id: "settings", label: "Настройки", icon: "set" },
 ];
+
+/** The first section of the group pinned to the bottom of the rail. */
+export const bottomGroupStart: PageId = "diagnostics";
 
 export const defaultPage: PageId = "recordings";
 

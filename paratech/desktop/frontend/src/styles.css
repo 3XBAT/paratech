@@ -1,9 +1,48 @@
-.layout { display: flex; min-height: 100vh; }
-.nav { display: flex; flex-direction: column; width: 200px; padding: 12px 8px; background: var(--bg); border-right: 1px solid var(--line); }
-.nav button { text-align: left; padding: 8px 12px; margin-bottom: 2px; border: 0; border-radius: var(--r-ctl); background: none; cursor: pointer; }
-.nav button:hover { background: var(--panel-2); }
-.nav button.active { background: var(--panel); font-weight: 600; }
-.content { flex: 1; padding: 20px 24px; background: var(--panel); }
+/* App shell: a side rail on the window background, the section on a sheet (docs/design/brief.md section 5). */
+html, body, #root { height: 100%; }
+.shell { container: app / inline-size; display: grid; grid-template-columns: 108px minmax(0, 1fr); height: 100%; padding-top: 8px; }
+.rail { display: flex; flex-direction: column; gap: 2px; min-height: 0; padding: 4px 8px 12px; overflow-y: auto; }
+.rail button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 2px 8px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-nav);
+  line-height: var(--lh-nav);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  text-align: center;
+  /* Labels wrap only between words («Записи и задачи»), never inside one. */
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  cursor: pointer;
+}
+.rail button:hover { background: var(--panel-2); color: var(--text); }
+.rail button[aria-current="page"] { background: var(--panel); color: var(--text); box-shadow: var(--sh-1); }
+.rail button[aria-current="page"]::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
+.rail .i { width: 20px; height: 20px; }
+.rail .low { margin-top: auto; }
+.sheet { min-width: 0; min-height: 0; overflow: auto; padding: 20px 24px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); border-top-left-radius: var(--r-card); background: var(--panel); }
+.screen { animation: screen-in var(--t-mid) var(--ease); }
+@keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
+@container app (max-width: 880px) {
+  .row { grid-template-columns: minmax(0, 1fr); }
+  .row .acts { justify-content: start; }
+  .empty { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (forced-colors: active) {
+  .rail button[aria-current="page"] { outline: 2px solid Highlight; }
+}
+
+/* Older page styles: Connections, Models and Settings until they move to the shared components. */
 h1 { margin: 0 0 16px; }
 h2 { margin: 24px 0 12px; }
 h3 { margin: 16px 0 8px; }
@@ -33,9 +72,9 @@ p { margin: 0 0 8px; }
 .ok { color: var(--ok-t); }
 .confirm { border-left: 3px solid var(--rec); padding-left: 12px; }
 /* Buttons of the pages not yet on the shared components look like a secondary Button. */
-.content button:not([class]) { min-height: 32px; padding: 5px 14px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); font-weight: 500; cursor: pointer; }
-.content button:not([class]):hover:enabled { background: var(--panel-2); }
-.content button:not([class]):disabled { opacity: .5; cursor: not-allowed; }
+.sheet button:not([class]) { min-height: 32px; padding: 5px 14px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); font-weight: 500; cursor: pointer; }
+.sheet button:not([class]):hover:enabled { background: var(--panel-2); }
+.sheet button:not([class]):disabled { opacity: .5; cursor: not-allowed; }
 /* CollapsibleList: the header is a plain-looking button that folds the group. */
 .clist-toggle { padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
 .clist-toggle:hover { text-decoration: underline; }
