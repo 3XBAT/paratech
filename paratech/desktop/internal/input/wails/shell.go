@@ -46,8 +46,8 @@ type Core struct {
 	Models      ModelCatalogUseCase
 	Downloads   ModelDownloads
 	Imports     ModelImports
-	Links       LinkOpener
-	SpeechReady bool // whisper-cli was found at start
+	Links       LinkOpener // also opens the pages of the help screens
+	SpeechReady bool       // whisper-cli was found at start
 
 	Connections ConnectionsUseCase // the mail and Hub section of the settings page
 	Google      GoogleUseCase      // the Google section of the same page
@@ -148,6 +148,7 @@ type Services struct {
 	Connections *ConnectionsService
 	Google      *GoogleService
 	Diagnostics *DiagnosticsService
+	Help        *HelpService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -205,6 +206,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Diagnostics: NewDiagnosticsService(DiagnosticsDeps{
 			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
 		}, s.opts.Log),
+		Help: NewHelpService(core.Links, s.opts.Log),
 	}, nil
 }
 
