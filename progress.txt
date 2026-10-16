@@ -1931,6 +1931,39 @@
 - Только владелец: live-тесты LA_AUDIO_LIVE_TEST=1 (тон, enumeration), реальный диалог сохранения и расширение .zip, все строки compat-matrix.md
 
 ---
+
+## [TASK-054] Инсталлятор Windows (NSIS, без прав администратора) и скрипт релизной сборки
+**Дата:** 2026-10-16
+**Статус:** done
+
+### Что сделано
+- paratech/desktop/build-release.ps1: версия из paratech/desktop/VERSION (0.1.0) или -Version (X.Y.Z, части <= 65535), сверка с тегом vX.Y.Z на HEAD, коммит и «DIRTY» в плане; -Help/--help, -DryRun/--dry-run/-WhatIf работают без NSIS; makensis ищется первым (PATH, Program Files (x86)\NSIS, Program Files\NSIS), без него — понятная ошибка с подсказкой до любой сборки
+- Сборка через build-alpha.ps1 -OutDir (не изменён) в dist\release\<ver>\app; на время сборки очищены FRONTEND_DEVSERVER_URL, GOFLAGS, GOAMD64, GOEXPERIMENT, GOWORK; проверка go version -m готового exe (-tags=production, CGO_ENABLED=0, GOAMD64 только v1) и для -SkipAppBuild
+- -WhisperDir: whisper-cli.exe, whisper.dll, ggml.dll, ggml-base.dll, ggml-cpu-*.dll в установщик (старые из staging удаляются), печать SHA-256; без него — копировать вручную в папку установки
+- paratech/desktop/build/windows/nsis/project.nsi (по шаблонам Wails beta.29, MIT): per-user, RequestExecutionLevel user, $LOCALAPPDATA\Programs\LearningAssistant, ярлык в меню Пуск, запись удаления в HKCU, проверка мьютекса wails-app-paratech.learning-assistant.desktop-sim; WebView2 bootstrapper из кэша модуля Wails (проверка подписи Microsoft), запускается только если runtime нет; деинсталлятор удаляет только свои файлы, RMDir без /r; данные (%LOCALAPPDATA%\LearningAssistant и %APPDATA%\learning-assistant.exe) — только по ответу «Да», по умолчанию и в /S сохраняются; записи Credential Manager остаются (документировано)
+- Документы: docs/refs/packaging.md (новый), docs/refs/wails.md (ссылка), docs/qa/run-alpha.md (раздел 11), docs/qa/windows-checklist.md (раздел «Инсталлятор»)
+- Ревью: approve; low L1 (-SkipAppBuild без проверки exe), L2 (GOAMD64 и др. в окружении), L4 (грязное дерево при теге), nits N1..N5 -> исправлено 8538e1e; после rebase на TASK-058 тексты о логах и версии обновлены eb3a926. Повторное ревью не запускалось (только low/nit)
+- Security: найдено 3 (low), опровергнуто 3 (с заметками), исправлено 0: L1 удаление whisper-файлов по маске в выбранной папке, L2 общая папка установки (DLL planting), L3 секреты остаются в Credential Manager
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на eb3a926
+- [x] Шаг 1: GOOS=windows go build ./desktop/... (исполнитель, через heavy.sh) и сборка в verify.sh
+- [x] Шаг 2: -Help, --help, -DryRun, --dry-run, -WhatIf — exit 0; плохая версия, --foo, реальный запуск без NSIS — exit 1 с сообщением, сборка не начинается
+- [ ] Шаг 3: реальная сборка makensis, установка и удаление — владелец (docs/refs/packaging.md, windows-checklist.md «Инсталлятор»); project.nsi ни разу не компилировался
+
+### Решения (подтвердить)
+- makensis вызывается напрямую по адаптированным шаблонам Wails, без CLI wails3 (не установлен; PRD §4.3 «NSIS installer produced by Wails»)
+- Релизный exe остаётся консольным (как alpha): из меню Пуск открывается консоль, её закрытие завершает приложение. После TASK-058 есть файл лога, -H windowsgui возможен — решение владельца/следующая задача
+- Значок — стандартный NSIS; бинарники в репозиторий не добавлены
+
+### Заметки (follow-up)
+- Владельцу: первая сборка makensis (NSIS 3.x), исправить ошибки компиляции project.nsi, проверить русские тексты и чек-лист
+- Версия из VERSION в exe (-ldflags -X / VERSIONINFO .syso); сейчас exe сообщает (devel) и vcs.revision (about.json пакета поддержки)
+- Значок приложения (ресурс exe и MUI_ICON); подпись деинсталлятора (!uninstfinalize) и шаг подписи в скрипте
+- Low (ревью L3, ADR-0009): закрепить SHA-256 whisper-файлов (-WhisperZip со сверкой хэша из docs/refs/whisper.md)
+- Low (security L2): предупреждать, если папка установки вне $LOCALAPPDATA/$PROFILE, или убрать страницу выбора папки
+- Low (security L3): действие «забыть все секреты» (отзыв Google, удаление paratech/*), вызываемое деинсталлятором при «Да»
+- [not verified]: нужен ли VC++ Redistributable для whisper.cpp b5454 (пункт в windows-checklist.md); установка WebView2 bootstrapper без прав администратора
 ## [TASK-064] Дизайн-система и редизайн приложения (направление «Эфир», спокойная версия)
 **Дата:** 2026-10-16
 **Статус:** done (автотесты; визуальная проверка — владелец на Windows)

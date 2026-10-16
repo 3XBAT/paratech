@@ -9,6 +9,7 @@ Source: https://github.com/wailsapp/wails/tree/v3.0.0-beta.29/v3 · API: https:/
   (GTK/WebKit, Cocoa), so the project imports Wails only from `*_windows.go` files.
 - Without `-tags production` the asset server proxies to `FRONTEND_DEVSERVER_URL` if that env var is set (`internal/assetserver/build_dev.go`)
   and the debug runtime is used. Release builds must use `-tags production`.
+- Installer (NSIS, adapted Wails templates, WebView2 bootstrapper from the module): `docs/refs/packaging.md`.
 
 ## Lifecycle (`pkg/application/application.go`)
 - `init()` in `init_desktop.go` calls `runtime.LockOSThread()`: `application.New` and `App.Run` must run on the **main goroutine**.
