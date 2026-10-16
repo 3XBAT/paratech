@@ -37,6 +37,32 @@ Used by `desktop/internal/adapters/whispercli` (TASK-024). Re-verify everything 
   (`src=https://huggingface.co/ggerganov/whisper.cpp`, `pfx=resolve/main/ggml`). Checksums: take the SHA-256 shown on the Hugging Face
   file page and record it in the catalog; verify after download (PRD section 8.1).
 
+## Model catalog (TASK-067)
+
+The embedded catalog `desktop/internal/app/catalog.json`. Sizes and SHA-256 (`lfs.size`, `lfs.oid`) from the Hugging Face API
+https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main on **2026-10-16**, repository commit
+`5359861c739e955e79d9a303bcbc70fb988958b1`; a `HEAD` of each resolve URL returned the same `X-Linked-ETag` and `X-Linked-Size`.
+`source_url` is pinned to that commit: `https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/<file>`.
+Download of `ggml-base-q5_1.bin` through the app checked on Windows with `LA_MODEL_DOWNLOAD_LIVE_TEST=1`
+(`app/catalog_live_windows_test.go`).
+
+| File | Bytes | SHA-256 | Tier |
+|---|---|---|---|
+| `ggml-small-q5_1.bin` (preferred) | 190085487 | `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb` | balanced |
+| `ggml-base-q5_1.bin` | 59707625 | `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898` | fast |
+| `ggml-medium-q5_0.bin` | 539212467 | `19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f` | accurate |
+| `ggml-large-v3-turbo-q5_0.bin` | 574041195 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` | max |
+| `ggml-base.en-q5_1.bin` (English) | 59721011 | `4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f` | fast |
+| `ggml-small.en-q5_1.bin` (English) | 190098681 | `bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30` | balanced |
+
+**Download hosts.** `huggingface.co` answers `302` to a CDN; the allowlist matches exact hosts, so `download_hosts` lists
+`us.aws.cdn.hf.co` (seen on 2026-10-16), `cas-bridge.xethub.hf.co`, `transfer.xethub.hf.co`, `cdn-lfs.hf.co`, `cdn-lfs-us-1.hf.co`,
+`cdn-lfs-eu-1.hf.co`. Not `cas-bridge-direct.xethub.hf.co`: it resolves to a private address. A redirect to a new CDN host fails the
+download with "Источник модели ответил не так, как ожидалось" (`values.ErrHostNotAllowed`); then add the host after checking it
+(`curl -sI <resolve URL>` shows the `Location`) and run the live test.
+
+**Refresh.** Take `lfs.oid`/`lfs.size` from the API above for a new commit, update `source_url`, the table and `app/catalog_test.go`.
+
 ## Command line used by the adapter
 
 ```

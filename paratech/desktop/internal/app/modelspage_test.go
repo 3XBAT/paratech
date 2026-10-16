@@ -95,9 +95,13 @@ func TestModelsPageInstallsWithoutRestart(t *testing.T) {
 	jobs := sqlite.NewJobRepository(a.core.db)
 
 	view, err := page.List(ctx)
-	if err != nil || len(view.Installed) != 0 || len(view.Available) != 0 || !view.SpeechReady || view.MachineKnown ||
+	if err != nil || len(view.Installed) != 0 || len(view.Available) == 0 || !view.SpeechReady || view.MachineKnown ||
 		view.NeedsDefault {
-		t.Fatalf("List = %+v, %v; want nothing installed, the empty catalog, whisper-cli found", view, err)
+		t.Fatalf("List = %+v, %v; want nothing installed, the embedded catalog, whisper-cli found", view, err)
+	}
+	if a := view.Available[0]; a.CatalogID != "small-q5_1" || !a.Recommended || a.Tier != "balanced" || a.EnglishOnly ||
+		a.Installed || !a.HasSourcePage {
+		t.Fatalf("first catalog model %+v, want small-q5_1 recommended, balanced, multilingual, not installed", a)
 	}
 
 	// Completed while no model was installed: the startup sweep already ran and found no model.
@@ -192,17 +196,17 @@ func TestModelsPageRefusesASwappedFile(t *testing.T) {
 	}
 }
 
-// The download runs on the manager's goroutine and the page polls its state; the empty catalog of this build has
-// nothing to download, which the page shows as a text.
-func TestModelsPageDownloadOfTheEmptyCatalog(t *testing.T) {
+// The download runs on the manager's goroutine and the page polls its state; a model the embedded catalog does not
+// list is not downloaded, which the page shows as a text.
+func TestModelsPageDownloadOfAnUnknownModel(t *testing.T) {
 	ctx := context.Background()
 	a, _ := newTestAppWith(t, t.TempDir())
 	page := modelsPage(startCore(t, a), &modelPicker{})
 
-	if _, err := page.PreflightDownload(ctx, "base-q5_1"); !errors.Is(err, wails.ErrModelNotInCatalog) {
+	if _, err := page.PreflightDownload(ctx, "tiny-q5_1"); !errors.Is(err, wails.ErrModelNotInCatalog) {
 		t.Fatalf("PreflightDownload = %v, want ErrModelNotInCatalog", err)
 	}
-	if err := page.StartDownload(ctx, "base-q5_1"); err != nil {
+	if err := page.StartDownload(ctx, "tiny-q5_1"); err != nil {
 		t.Fatal(err)
 	}
 	var view wails.ModelsView
@@ -211,10 +215,10 @@ func TestModelsPageDownloadOfTheEmptyCatalog(t *testing.T) {
 		view, err = page.List(ctx)
 		return err == nil && !view.Download.Running
 	}, nil)
-	if d := view.Download; d.CatalogID != "base-q5_1" || d.Phase != "failed" || d.Error != string(wails.ErrModelNotInCatalog) {
+	if d := view.Download; d.CatalogID != "tiny-q5_1" || d.Phase != "failed" || d.Error != string(wails.ErrModelNotInCatalog) {
 		t.Fatalf("download %+v, want failed: not in the catalog", d)
 	}
-	if err := page.OpenSourcePage(ctx, "base-q5_1"); !errors.Is(err, wails.ErrModelNotInCatalog) {
+	if err := page.OpenSourcePage(ctx, "tiny-q5_1"); !errors.Is(err, wails.ErrModelNotInCatalog) {
 		t.Fatalf("OpenSourcePage = %v, want ErrModelNotInCatalog", err)
 	}
 }

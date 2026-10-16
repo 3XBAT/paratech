@@ -1,1 +1,127 @@
-{"schema_version": 1, "models": []}
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "id": "small-q5_1",
+      "name": "small-q5_1",
+      "version": "1",
+      "size_bytes": 190085487,
+      "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-small-q5_1.bin",
+      "quantization": "q5_1",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 2048,
+        "preferred": true
+      },
+      "tier": "balanced"
+    },
+    {
+      "id": "base-q5_1",
+      "name": "base-q5_1",
+      "version": "1",
+      "size_bytes": 59707625,
+      "sha256": "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-base-q5_1.bin",
+      "quantization": "q5_1",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast"
+    },
+    {
+      "id": "medium-q5_0",
+      "name": "medium-q5_0",
+      "version": "1",
+      "size_bytes": 539212467,
+      "sha256": "19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium-q5_0.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-medium-q5_0.bin",
+      "quantization": "q5_0",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 3072,
+        "preferred": false
+      },
+      "tier": "accurate"
+    },
+    {
+      "id": "large-v3-turbo-q5_0",
+      "name": "large-v3-turbo-q5_0",
+      "version": "1",
+      "size_bytes": 574041195,
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v3-turbo-q5_0.bin",
+      "quantization": "q5_0",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 8,
+        "min_ram_mb": 4096,
+        "preferred": false
+      },
+      "tier": "max"
+    },
+    {
+      "id": "base.en-q5_1",
+      "name": "base.en-q5_1",
+      "version": "1",
+      "size_bytes": 59721011,
+      "sha256": "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-base.en-q5_1.bin",
+      "quantization": "q5_1",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast"
+    },
+    {
+      "id": "small.en-q5_1",
+      "name": "small.en-q5_1",
+      "version": "1",
+      "size_bytes": 190098681,
+      "sha256": "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-small.en-q5_1.bin",
+      "quantization": "q5_1",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 2048,
+        "preferred": false
+      },
+      "tier": "balanced"
+    }
+  ],
+  "download_hosts": [
+    "us.aws.cdn.hf.co",
+    "cas-bridge.xethub.hf.co",
+    "transfer.xethub.hf.co",
+    "cdn-lfs.hf.co",
+    "cdn-lfs-us-1.hf.co",
+    "cdn-lfs-eu-1.hf.co"
+  ]
+}
