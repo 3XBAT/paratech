@@ -2119,3 +2119,31 @@
 ### Заметки (follow-up)
 - Low: при возврате к обзору карточка Google до ответа GoogleStatus показывает прежний статус (например «Подключено» сразу после выхода); можно сбрасывать в «Загрузка…», но будет мигание
 - Nit: help.test.mjs ищет "help" текстом в nav.ts (хрупко, как было исправлено в connections.test.mjs)
+## [TASK-067] Каталог рекомендованных моделей whisper с проверенными SHA-256 и скачиванием в приложении
+**Дата:** 2026-10-16 15:30
+**Статус:** done
+
+### Что сделано
+- app/catalog.json: шесть моделей ggerganov/whisper.cpp (q5): small-q5_1 (рекомендуемая), base-q5_1, medium-q5_0, large-v3-turbo-q5_0, base.en-q5_1, small.en-q5_1. SHA-256 и размеры — из официального API Hugging Face (lfs.oid, lfs.size; tree/main, коммит 5359861c739e955e79d9a303bcbc70fb988958b1), сверены с X-Linked-ETag; source_url и source_page закреплены на этом коммите; источник и дата — docs/refs/whisper.md
+- download_hosts: точные хосты CDN Hugging Face (us.aws.cdn.hf.co, cas-bridge.xethub.hf.co, transfer.xethub.hf.co, cdn-lfs.hf.co, cdn-lfs-us-1.hf.co, cdn-lfs-eu-1.hf.co); cas-bridge-direct не включён (частный IP)
+- Новое необязательное поле манифеста tier (fast/balanced/accurate/max) — values.ModelTier через ParseCatalog с тестами; capability "en" — только английский; в AvailableModelItem поля tier и englishOnly
+- «Модели речи»: «Рекомендуемые модели» с подписями «Рекомендуется для русского», «Быстрее, но менее точная», «Точнее, но медленнее», «Только английский», «Самая точная, но очень медленная…» (с предупреждением о размере), размер и «Скорость на CPU: высокая/средняя/низкая/очень низкая», основная кнопка «Скачать»; Hugging Face — вторичный раздел «Другие модели»; импорт сохранён
+- Живой тест TestLiveCatalogDownload (Windows, LA_MODEL_DOWNLOAD_LIVE_TEST=1): base-q5_1 скачана через проводку приложения, SHA-256 совпал (запущен имплементером и координатором)
+- QA-документы (run-alpha.md §6/§8, windows-checklist.md AC-23) обновлены
+
+### Тесты
+- [x] .github/scripts/verify.sh (через heavy.sh) на b57ee89 — ALL_GREEN
+- [x] Шаг 1: каталог парсится, все записи валидны, URL только https://huggingface.co/ggerganov/whisper.cpp/resolve/<коммит>/ (TestEmbeddedCatalog, TestEmbeddedCatalogDownloadHosts)
+- [x] Шаг 2: npm run test — 167/167, npm run build — ок
+- [x] Шаг 3: скачивание base-q5_1 на Windows 10 живым тестом через use case приложения; [владельцу] посмотреть экран
+
+### Решения (подтвердить)
+- Квантованные q5-файлы (меньше и быстрее на CPU); turbo включена с предупреждением
+- Имя модели каталога = имя файла (small-q5_1 и т. п.), чтобы не резервировать «base»/«small» для импорта
+- Скорость на CPU — качественная (без цифр), до измерений RTF (PRD §8.1)
+- Рекомендуемая только small: на слабой машине у неё будет и метка «Может работать медленно»
+
+### Заметки (follow-up)
+- Low: если Hugging Face сменит CDN-хост, скачивание упадёт на редиректе — обновить download_hosts (docs/refs/whisper.md)
+- Low: заголовок строки — подпись, техническое имя только мелким текстом; base.en и small.en оба «Только английский» — посмотреть владельцу
+- Nit: у установленной каталожной модели заголовок «small-q5_1 1, q5_1» (квантование дважды)
