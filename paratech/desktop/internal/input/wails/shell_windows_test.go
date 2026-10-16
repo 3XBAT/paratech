@@ -77,8 +77,8 @@ func TestPopupExStyle(t *testing.T) {
 }
 
 func TestAppOptions(t *testing.T) {
-	called := false
-	opts := appOptions(validOptions(), func() { called = true })
+	called := 0
+	opts := appOptions(validOptions(), func() { called++ })
 
 	if !opts.DisableDefaultSignalHandler {
 		t.Error("the Wails signal handler must be disabled: main owns signals")
@@ -90,8 +90,13 @@ func TestAppOptions(t *testing.T) {
 		t.Fatalf("single instance = %+v", opts.SingleInstance)
 	}
 	opts.SingleInstance.OnSecondInstanceLaunch(application.SecondInstanceData{})
-	if !called {
-		t.Error("a second instance must bring the main window up")
+	// A launch by a paratech: link (ADR-0013) does the same and nothing else, whatever its arguments say.
+	opts.SingleInstance.OnSecondInstanceLaunch(application.SecondInstanceData{
+		Args:       []string{`C:\LA\Paratech.exe`, `paratech://open/../x" --data-dir "C:\evil`, "--recorder"},
+		WorkingDir: `C:\evil`, AdditionalData: map[string]string{"action": "record"},
+	})
+	if called != 2 {
+		t.Errorf("a second instance must bring the main window up, once per launch: %d calls", called)
 	}
 
 	// The built popup or the fallback one, whichever assets() serves: the handler must return it unchanged.

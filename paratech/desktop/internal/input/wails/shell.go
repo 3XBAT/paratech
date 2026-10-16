@@ -213,6 +213,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if !core.Homework.complete() {
 		return Services{}, errors.New("wails: open core: no homework use cases")
 	}
+	google := NewGoogleService(core.Google, s.opts.Log)
+	google.window = s
 	return Services{
 		Settings: NewSettingsService(core.Settings, s.opts.Log),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
@@ -225,7 +227,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		}, s.opts.Log),
 
 		Connections: NewConnectionsService(core.Connections, s.opts.Log),
-		Google:      NewGoogleService(core.Google, s.opts.Log),
+		Google:      google,
 		Calendar:    NewGoogleCalendarService(core.Calendar, s.opts.Log),
 		Diagnostics: NewDiagnosticsService(DiagnosticsDeps{
 			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),

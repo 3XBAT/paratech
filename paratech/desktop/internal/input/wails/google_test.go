@@ -145,3 +145,68 @@ func TestGoogleClientSecretStaysSecret(t *testing.T) {
 		t.Fatal("the log contains the secret")
 	}
 }
+
+// fakeWindow counts the times the main window was brought forward.
+type fakeWindow struct {
+	shown int
+	err   error
+}
+
+func (f *fakeWindow) ShowMain() error { f.shown++; return f.err }
+
+// A successful sign-in brings the main window forward from behind the browser; a failed one leaves it alone, and a
+// window that cannot be shown does not change the answer.
+func TestGoogleSignInShowsTheMainWindow(t *testing.T) {
+	tests := []struct {
+		name      string
+		signInErr error
+		windowErr error
+		wantShown int
+		wantOK    bool
+		wantLog   string
+	}{
+		{name: "signed in", wantShown: 1, wantOK: true},
+		{name: "window not shown", windowErr: ErrNotRunning, wantShown: 1, wantOK: true, wantLog: "the main window was not brought forward"},
+		{name: "denied", signInErr: googlesignin.ErrAccessDenied},
+		{name: "timeout", signInErr: googlesignin.ErrSignInTimeout},
+		{name: "cancelled", signInErr: googlesignin.ErrSignInCancelled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			s := NewGoogleService(&fakeGoogle{err: tt.signInErr}, slog.New(slog.NewTextHandler(&logs, nil)))
+			w := &fakeWindow{err: tt.windowErr}
+			s.window = w
+			got, err := s.GoogleSignIn(context.Background())
+			if err != nil || got.OK != tt.wantOK {
+				t.Fatalf("GoogleSignIn = %+v, %v", got, err)
+			}
+			if w.shown != tt.wantShown {
+				t.Fatalf("main window shown %d times, want %d", w.shown, tt.wantShown)
+			}
+			if !strings.Contains(logs.String(), tt.wantLog) {
+				t.Fatalf("logs %q, want %q", logs.String(), tt.wantLog)
+			}
+		})
+	}
+}
+
+// The Google binding of OpenServices brings the shell's main window forward.
+func TestOpenServicesBindsGoogleToTheMainWindow(t *testing.T) {
+	s, err := New(validOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.OpenServices(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeUI{}
+	s.setUI(f)
+	if got, _ := b.Google.GoogleSignIn(t.Context()); !got.OK {
+		t.Fatalf("GoogleSignIn = %+v", got)
+	}
+	if !slices.Equal(f.calls, []string{"showMain"}) {
+		t.Fatalf("forwarded calls = %v, want [showMain]", f.calls)
+	}
+}
