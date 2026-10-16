@@ -111,7 +111,7 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
 
   // The rows of one list, in a card; CollapsibleList puts the finished ones into the same kind of card.
   const card = (rows: ReactNode) => (
-    <div className="card" role="list">
+    <div className="card rows" role="list">
       {rows}
     </div>
   );

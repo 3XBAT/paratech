@@ -33,7 +33,7 @@ html, body, #root { height: 100%; }
 .screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
 @container app (max-width: 880px) {
-  .row { grid-template-columns: minmax(0, 1fr); }
+  .row, .rows { grid-template-columns: minmax(0, 1fr); }
   .row .acts { justify-content: start; }
   .empty { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -73,6 +73,8 @@ html, body, #root { height: 100%; }
 /* Модели речи: rows with the model, the status and the actions. */
 .mrow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 300px) fit-content(280px); gap: 4px 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .mrow:last-child { border-bottom: 0; }
+.mrows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 300px) fit-content(280px); }
+.mrows > .mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .mrow .t { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .mrow .row-main { display: flex; flex-direction: column; gap: 2px; }
 .mrow .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -84,7 +86,7 @@ html, body, #root { height: 100%; }
 .preview h2 { margin-bottom: 4px; }
 .preview .ui-field { max-width: 360px; }
 @container app (max-width: 880px) {
-  .mrow { grid-template-columns: minmax(0, 1fr); }
+  .mrow, .mrows { grid-template-columns: minmax(0, 1fr); }
   .mrow > .acts { justify-content: start; }
 }
 
