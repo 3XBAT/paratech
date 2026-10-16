@@ -63,6 +63,7 @@ type Core struct {
 type ui interface {
 	showPopup() error
 	hidePopup() error
+	fitPopup(height int) (int, error)
 	showMain() error
 	pickScheduleFile() (string, error)
 	pickModelFile() (string, error)
@@ -131,6 +132,15 @@ func (s *Shell) HidePopup() error {
 	return u.hidePopup()
 }
 
+// fitPopup resizes the popup for its content height and returns the height it got.
+func (s *Shell) fitPopup(height int) (int, error) {
+	u, err := s.current()
+	if err != nil {
+		return 0, err
+	}
+	return u.fitPopup(height)
+}
+
 // ShowMain shows the main window and brings it to the front.
 func (s *Shell) ShowMain() error {
 	u, err := s.current()
@@ -145,6 +155,7 @@ type Services struct {
 	Settings *SettingsService
 	Activity *ActivityService
 	Prompt   *PromptService
+	Popup    *PopupWindowService
 	Schedule *ScheduleImportService
 	Models   *ModelsService
 
@@ -206,6 +217,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Settings: NewSettingsService(core.Settings, s.opts.Log),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
 		Prompt:   NewPromptService(core.Prompt, s.opts.Log),
+		Popup:    NewPopupWindowService(popupFitterFunc(s.fitPopup), s.opts.Log),
 		Schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
 		Models: NewModelsService(ModelsDeps{
 			Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links,
