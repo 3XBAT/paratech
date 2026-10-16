@@ -15,6 +15,9 @@ type TestStore = dirStore
 // NewTestStore returns a TestStore on root, laid out like the filestore adapter (<root>/<kind>/<path>).
 func NewTestStore(root string) *TestStore { return &dirStore{root: root} }
 
+// Root is the directory of the store.
+func (d *dirStore) Root() string { return d.root }
+
 // Names lists the file names in dir.
 func (d *dirStore) Names(t *testing.T, dir shared.ArtifactRef) []string { return d.names(t, dir) }
 

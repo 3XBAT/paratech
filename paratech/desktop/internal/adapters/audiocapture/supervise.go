@@ -596,6 +596,12 @@ func (r *Recorder) apply(c *capture, ev event, out *runOutcome, log *slog.Logger
 
 // readEvents parses the child's stdout until EOF. Bad lines are counted, logged briefly and ignored.
 func (r *Recorder) readEvents(c *capture, stdout io.Reader, events chan<- event, log *slog.Logger) {
+	scanEvents(stdout, events, log, func() { c.update(func(d *Diagnostics) { d.InvalidLines++ }) })
+}
+
+// scanEvents parses a child's stdout until EOF and sends the events. Bad lines are logged briefly, reported to bad
+// (when not nil) and ignored.
+func scanEvents(stdout io.Reader, events chan<- event, log *slog.Logger, bad func()) {
 	lines := newLineReader(stdout, maxLineBytes)
 	for {
 		line, oversized, err := lines.next()
@@ -610,7 +616,9 @@ func (r *Recorder) readEvents(c *capture, stdout io.Reader, events chan<- event,
 			ev, err = decodeEvent(line)
 		}
 		if oversized || err != nil {
-			c.update(func(d *Diagnostics) { d.InvalidLines++ })
+			if bad != nil {
+				bad()
+			}
 			why := "oversized line"
 			if err != nil {
 				why = err.Error()

@@ -9,9 +9,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// The Windows side of the diagnostics (TASK-058): the friendly name of an output device (IPropertyStore) and the
-// audio meters the healthy-but-mute detector reads (IAudioMeterInformation). Everything runs on the capture thread and
-// releases every interface it gets.
+// The Windows side of the diagnostics (TASK-058): the friendly name, form factor and enumerator of an output device
+// (IPropertyStore) and the audio meters the healthy-but-mute detector reads (IAudioMeterInformation). Everything runs
+// on a COM thread and releases every interface it gets.
 
 // iidIAudioMeterInformation is from the Windows SDK endpointvolume.h; mingw-w64 only declares the interface, so the
 // value is not checked against a header here (docs/refs/audio.md). A wrong value would only make every QueryInterface
@@ -37,6 +37,7 @@ func pkeyDeviceFriendlyName() propertyKey {
 // IAudioMeterInformation, the Windows SDK endpointvolume.h.
 const (
 	stgmRead  = 0  // STGM_READ
+	vtUI4     = 19 // VT_UI4
 	vtLPWStr  = 31 // VT_LPWSTR
 	maxNameCh = 512
 
@@ -60,37 +61,99 @@ type propVariantValue struct {
 	val2                            uintptr
 }
 
+// pkeyAudioEndpointFormFactor is PKEY_AudioEndpoint_FormFactor from the mingw-w64 mmdeviceapi.h: a VT_UI4
+// EndpointFormFactor.
+func pkeyAudioEndpointFormFactor() propertyKey {
+	return propertyKey{
+		fmtid: windows.GUID{Data1: 0x1da5d803, Data2: 0xd492, Data3: 0x4edd, Data4: [8]byte{0x8c, 0x23, 0xe0, 0xc0, 0xff, 0xee, 0x7f, 0x0e}},
+		pid:   0,
+	}
+}
+
+// pkeyDeviceEnumeratorName is PKEY_Device_EnumeratorName from the mingw-w64 functiondiscoverykeys_devpkey.h: VT_LPWSTR.
+func pkeyDeviceEnumeratorName() propertyKey {
+	return propertyKey{
+		fmtid: windows.GUID{Data1: 0xa45c254e, Data2: 0xdf1c, Data3: 0x4efd, Data4: [8]byte{0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}},
+		pid:   24,
+	}
+}
+
 // deviceName is the friendly name of an endpoint ("Speakers (Realtek(R) Audio)"), "" when it cannot be read. It is a
 // name of the user's hardware, fine to log.
 func (p *comProcs) deviceName(dev unsafe.Pointer) string {
+	var name string
+	p.withStore(dev, func(store unsafe.Pointer) { name = p.stringProp(store, pkeyDeviceFriendlyName()) })
+	return name
+}
+
+// endpointProps are the properties of an endpoint the sound check reports.
+type endpointProps struct {
+	name         string
+	enumerator   string // "BTHENUM", "BTHHFENUM", "USB", "HDAUDIO"...; "" when unknown
+	formFactor   uint32
+	formFactorOK bool
+}
+
+func (p *comProcs) endpointProps(dev unsafe.Pointer) endpointProps {
+	var out endpointProps
+	p.withStore(dev, func(store unsafe.Pointer) {
+		out.name = p.stringProp(store, pkeyDeviceFriendlyName())
+		out.enumerator = p.stringProp(store, pkeyDeviceEnumeratorName())
+		out.formFactor, out.formFactorOK = p.uint32Prop(store, pkeyAudioEndpointFormFactor())
+	})
+	return out
+}
+
+// withStore runs f with the read-only property store of dev; nothing runs when it cannot be opened.
+func (p *comProcs) withStore(dev unsafe.Pointer, f func(store unsafe.Pointer)) {
 	if err := p.procPropVariantClear.Find(); err != nil {
-		return ""
+		return
 	}
 	var store unsafe.Pointer
 	r, _, _ := syscall.SyscallN(method(dev, slotDeviceOpenPropertyStore), uintptr(dev), stgmRead,
 		uintptr(unsafe.Pointer(&store))) //nolint:gosec // G103: COM out-parameter
 	store, err := checkOut("IMMDevice::OpenPropertyStore", hr(r), store)
 	if err != nil {
-		return ""
+		return
 	}
 	defer release(store)
+	f(store)
+}
 
-	key := pkeyDeviceFriendlyName()
-	var pv propVariantValue
-	r, _, _ = syscall.SyscallN(method(store, slotStoreGetValue), uintptr(store),
-		uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(&pv))) //nolint:gosec // G103: COM parameters
+// property reads key into pv and returns the cleanup that frees what Windows allocated; ok is false on a failure.
+func (p *comProcs) property(store unsafe.Pointer, key propertyKey, pv *propVariantValue) (clear func(), ok bool) {
+	r, _, _ := syscall.SyscallN(method(store, slotStoreGetValue), uintptr(store),
+		uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(pv))) //nolint:gosec // G103: COM parameters
 	if hr(r).failed() {
+		return func() {}, false
+	}
+	return func() { _, _, _ = syscall.SyscallN(p.procPropVariantClear.Addr(), uintptr(unsafe.Pointer(pv))) }, true //nolint:gosec // G103: frees the value Windows allocated
+}
+
+// stringProp reads a VT_LPWSTR property, bounded and without control characters; "" when it is missing or another type.
+func (p *comProcs) stringProp(store unsafe.Pointer, key propertyKey) string {
+	var pv propVariantValue
+	clear, ok := p.property(store, key, &pv)
+	defer clear()
+	if !ok || pv.vt != vtLPWStr || pv.val == 0 {
 		return ""
 	}
-	defer func() { _, _, _ = syscall.SyscallN(p.procPropVariantClear.Addr(), uintptr(unsafe.Pointer(&pv))) }() //nolint:gosec // G103: frees the value Windows allocated
-	if pv.vt != vtLPWStr || pv.val == 0 {
-		return ""
-	}
-	name, ok := utf16At(fromUintptr(pv.val), maxNameCh)
+	s, ok := utf16At(fromUintptr(pv.val), maxNameCh)
 	if !ok {
 		return ""
 	}
-	return shortText(name)
+	return shortText(s)
+}
+
+// uint32Prop reads a VT_UI4 property: the first four bytes of the value union.
+func (p *comProcs) uint32Prop(store unsafe.Pointer, key propertyKey) (uint32, bool) {
+	var pv propVariantValue
+	clear, ok := p.property(store, key, &pv)
+	defer clear()
+	if !ok || pv.vt != vtUI4 {
+		return 0, false
+	}
+	return uint32(pv.val), true //nolint:gosec // ulVal is the low 32 bits of the union on little-endian Windows
 }
 
 // utf16At reads a NUL-terminated UTF-16 string of at most limit characters; ok is false when it is longer.

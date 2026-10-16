@@ -17,7 +17,8 @@ import (
 )
 
 // Line protocol between the app and its recorder child: one JSON object per line. The parent writes exactly one
-// start request to the child's stdin and then closes stdin to stop it; the child writes events to stdout.
+// request to the child's stdin, a capture or a self-test, and then closes stdin to stop it; the child writes events to
+// stdout.
 const (
 	protocolVersion = 1
 	maxLineBytes    = 4096
@@ -40,8 +41,13 @@ const (
 	evChunk   = "chunk"   // a chunk was closed: number, frames, rate
 	evStats   = "stats"   // counters; also the heartbeat
 	evFailed  = "failed"  // the capture ended by itself or could not start: reason
-	evStopped = "stopped" // clean stop after stdin closed: frames written
+	evStopped = "stopped" // clean stop after stdin closed: frames written; also the end of a self-test
+
+	evSelfTest = "selftest" // the result of one mode of the self-test: mode, cause, output device
 )
+
+// kindSelfTest is the request kind of the "Check sound" self-test (TASK-058); a capture request has no kind.
+const kindSelfTest = "selftest"
 
 // ErrProtocol means a protocol line is malformed.
 var ErrProtocol = errors.New("audiocapture: recorder protocol error")
@@ -100,6 +106,7 @@ type wireTarget struct {
 
 type wireRequest struct {
 	V             int        `json:"v"`
+	Kind          string     `json:"kind,omitempty"`
 	Recording     string     `json:"recording"`
 	Chunks        string     `json:"chunks"`
 	Target        wireTarget `json:"target"`
@@ -124,16 +131,50 @@ func encodeRequest(r Request) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-// decodeRequest parses and validates a request line strictly: unknown fields, trailing data and other versions are
-// rejected.
+// encodeSelfTest returns the self-test request line, newline included.
+func encodeSelfTest() []byte {
+	b, _ := json.Marshal(struct {
+		V    int    `json:"v"`
+		Kind string `json:"kind"`
+	}{V: protocolVersion, Kind: kindSelfTest})
+	return append(b, '\n')
+}
+
+// decodeRequest parses and validates a capture request line strictly: unknown fields, trailing data, other versions
+// and a self-test are rejected.
 func decodeRequest(line []byte) (Request, error) {
+	r, selfTest, err := decodeChildRequest(line)
+	if err == nil && selfTest {
+		err = fmt.Errorf("%w: a self-test is not a capture", ErrProtocol)
+	}
+	return r, err
+}
+
+// decodeChildRequest parses either request strictly; selfTest reports the self-test, which takes no other field.
+func decodeChildRequest(line []byte) (r Request, selfTest bool, err error) {
 	var w wireRequest
 	if err := decodeStrict(line, &w); err != nil {
-		return Request{}, err
+		return Request{}, false, err
 	}
 	if w.V != protocolVersion {
-		return Request{}, fmt.Errorf("%w: version %d, want %d", ErrProtocol, w.V, protocolVersion)
+		return Request{}, false, fmt.Errorf("%w: version %d, want %d", ErrProtocol, w.V, protocolVersion)
 	}
+	switch w.Kind {
+	case "":
+	case kindSelfTest:
+		if w != (wireRequest{V: w.V, Kind: w.Kind}) {
+			return Request{}, false, fmt.Errorf("%w: a self-test takes no capture fields", ErrProtocol)
+		}
+		return Request{}, true, nil
+	default:
+		return Request{}, false, fmt.Errorf("%w: unknown request kind %q", ErrProtocol, shortText(w.Kind))
+	}
+	r, err = w.request()
+	return r, false, err
+}
+
+// request turns a capture request into its validated form.
+func (w wireRequest) request() (Request, error) {
 	if w.LeadSilenceMS < 0 || w.LeadSilenceMS > maxLeadSilence.Milliseconds() {
 		return Request{}, fmt.Errorf("%w: lead silence %d ms", ErrProtocol, w.LeadSilenceMS)
 	}
@@ -185,7 +226,7 @@ type event struct {
 
 	From   string `json:"from,omitempty"`   // switch
 	To     string `json:"to,omitempty"`     // switch
-	Cause  string `json:"cause,omitempty"`  // switch: a values.SwitchCause
+	Cause  string `json:"cause,omitempty"`  // switch: a values.SwitchCause; selftest: a values.SoundCause
 	Reason string `json:"reason,omitempty"` // switch, failed
 
 	N      int    `json:"n,omitempty"`      // chunk
@@ -195,6 +236,8 @@ type event struct {
 	Packets       uint64 `json:"packets,omitempty"`        // stats
 	SilentPackets uint64 `json:"silent_packets,omitempty"` // stats
 	Reopens       uint64 `json:"reopens,omitempty"`        // stats
+
+	HandsFree bool `json:"hands_free,omitempty"` // selftest: the output device looks like a Bluetooth hands-free endpoint
 
 	// Unavailable marks a failure because this build has no capture (recording.ErrCaptureUnavailable).
 	Unavailable bool `json:"unavailable,omitempty"`
@@ -243,9 +286,9 @@ func decodeEvent(line []byte) (event, error) {
 		return event{}, err
 	}
 	switch e.Type {
-	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped:
-		if e.Cause != "" && !values.SwitchCause(e.Cause).Valid() {
-			return event{}, fmt.Errorf("%w: unknown switch cause %q", ErrProtocol, shortText(e.Cause))
+	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped, evSelfTest:
+		if err := checkCause(e); err != nil {
+			return event{}, err
 		}
 		texts := []*string{&e.Mode, &e.Device, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason}
 		if e.Windows != nil {
@@ -257,6 +300,24 @@ func decodeEvent(line []byte) (event, error) {
 		return e, nil
 	}
 	return event{}, fmt.Errorf("%w: unknown event %q", ErrProtocol, shortText(e.Type))
+}
+
+// checkCause accepts only the causes of the event's type: a switch cause, a sound cause of a self-test, none
+// elsewhere.
+func checkCause(e event) error {
+	var ok bool
+	switch e.Type {
+	case evSwitch:
+		ok = e.Cause == "" || values.SwitchCause(e.Cause).Valid()
+	case evSelfTest:
+		ok = values.SoundCause(e.Cause).Valid() && values.CaptureMode(e.Mode).Valid()
+	default:
+		ok = e.Cause == ""
+	}
+	if !ok {
+		return fmt.Errorf("%w: unexpected cause %q of a %s event", ErrProtocol, shortText(e.Cause), e.Type)
+	}
+	return nil
 }
 
 // lineReader reads newline-terminated lines of at most max bytes. A longer line is skipped and reported as

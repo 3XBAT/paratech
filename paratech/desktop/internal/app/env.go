@@ -96,6 +96,7 @@ type env struct {
 	childStdin    io.Reader
 	childStdout   io.Writer
 	captureSource audiocapture.Source
+	tone          audiocapture.TonePlayer // plays the tone of a sound check request
 
 	// whisperBinary is the absolute path of whisper-cli; when it cannot be used, the stt job type is not registered and
 	// STT jobs wait QUEUED for a start with a usable binary.
@@ -135,6 +136,7 @@ func productionEnv() env {
 		childStdin:      os.Stdin,
 		childStdout:     os.Stdout,
 		captureSource:   audiocapture.PlatformSource(audiocapture.DefaultSourceConfig()),
+		tone:            audiocapture.PlatformTone(),
 		whisperBinary:   whisperBinaryPath(),
 		secrets:         credentialManager,
 		authPages:       weblink.New(),

@@ -46,7 +46,23 @@ const (
 	RecorderNoisy = "noisy"
 	// RecorderQuit stops by itself after 100 packets and reports "stopped", as if its stdin had closed.
 	RecorderQuit = "quit"
+
+	// The self-test ("Check sound") answers a self-test request with a FakeTone: by default both modes hear the tone.
+	// RecorderFallback makes process loopback unsupported, RecorderUnavailable both, RecorderHang never answers.
+	//
+	// RecorderSilent: the captures never hear the tone.
+	RecorderSilent = "silent"
+	// RecorderNoDevice: there is no output device.
+	RecorderNoDevice = "nodevice"
+	// RecorderHandsFree: the output device is a Bluetooth hands-free endpoint.
+	RecorderHandsFree = "handsfree"
 )
+
+// FakeSelfTestTiming is the short self-test of the fake recorder child and of the in-process child tests.
+func FakeSelfTestTiming() audiocapture.SelfTestTiming {
+	return audiocapture.SelfTestTiming{Tone: 300 * time.Millisecond, Lead: 50 * time.Millisecond, Tail: 100 * time.Millisecond,
+		Open: 5 * time.Second}
+}
 
 // RecorderCrashPackets is when RecorderCrash exits: 40 s of audio, one closed chunk and one partial.
 const RecorderCrashPackets = 400
@@ -79,7 +95,8 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 	}
 	defer func() { _ = store.Close() }()
 
-	src := &ToneSource{Format: FakeRecorderFormat(), PacketFrames: 800, Interval: 2 * time.Millisecond}
+	tone := &FakeTone{}
+	src := &ToneSource{Format: FakeRecorderFormat(), PacketFrames: 800, Interval: 2 * time.Millisecond, Gate: tone.Audible}
 	var stdin io.Reader = os.Stdin
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,6 +130,12 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 		case RecorderMute:
 			src.SwitchAfter, src.SwitchMode = RecorderMutePackets, audiocapture.ModeSystem
 			src.SwitchFormat = audiocapture.Format{SampleRate: 16000, Channels: 1, BitsPerSample: 16}
+		case RecorderSilent:
+			src.Gate = func() bool { return false }
+		case RecorderNoDevice:
+			tone.NoDevice = true
+		case RecorderHandsFree:
+			tone.HandsFree = true
 		case RecorderNoisy:
 			fmt.Println("not an event")
 			fmt.Println(strings.Repeat("x", 5000))
@@ -123,7 +146,7 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	cfg := audiocapture.ChildConfig{StatsInterval: 50 * time.Millisecond}
+	cfg := audiocapture.ChildConfig{StatsInterval: 50 * time.Millisecond, Tone: tone, SelfTest: FakeSelfTestTiming()}
 	return audiocapture.RunChild(ctx, stdin, os.Stdout, src, store, log, cfg), true
 }
 

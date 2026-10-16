@@ -51,6 +51,8 @@ type Core struct {
 
 	Connections ConnectionsUseCase // the mail and Hub section of the settings page
 	Google      GoogleUseCase      // the Google section of the same page
+
+	Sound SoundCheckUseCase // "Проверить звук" of the diagnostics page
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -143,6 +145,7 @@ type bindings struct {
 
 	connections *ConnectionsService
 	google      *GoogleService
+	diagnostics *DiagnosticsService
 }
 
 // openBindings opens the core and builds the services bound to the pages.
@@ -181,6 +184,9 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Google == nil {
 		return bindings{}, errors.New("wails: open core: no google sign-in use case")
 	}
+	if core.Sound == nil {
+		return bindings{}, errors.New("wails: open core: no sound check use case")
+	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
 		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
@@ -193,6 +199,7 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 
 		connections: NewConnectionsService(core.Connections, s.opts.Log),
 		google:      NewGoogleService(core.Google, s.opts.Log),
+		diagnostics: NewDiagnosticsService(core.Sound, s.opts.Log),
 	}, nil
 }
 

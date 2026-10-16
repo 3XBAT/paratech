@@ -28,6 +28,7 @@ import (
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/scheduler"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/input/wails"
@@ -213,6 +214,11 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		return fmt.Errorf("app: recordings: %w", err)
 	}
 
+	sound, err := soundcheck.New(soundChecker(recorder), settings, recordingActivity{c.recordings}, log)
+	if err != nil {
+		return fmt.Errorf("app: sound check: %w", err)
+	}
+
 	prefs, err := preferences.New(settings, e.clock)
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
@@ -232,6 +238,7 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
+		Sound: sound,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

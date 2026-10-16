@@ -96,7 +96,7 @@ func TestOpenBindings(t *testing.T) {
 	}
 	b, err := s.openBindings(context.Background())
 	if err != nil || b.settings == nil || b.activity == nil || b.prompt == nil || b.schedule == nil || b.models == nil ||
-		b.connections == nil {
+		b.connections == nil || b.diagnostics == nil {
 		t.Fatalf("openBindings = %+v, %v", b, err)
 	}
 
@@ -125,6 +125,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
 		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
+		{name: "sound check use case", edit: func(c *Core) { c.Sound = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {

@@ -74,15 +74,17 @@ type Config struct {
 	OwnPID         uint32        // excluded by the default target; 0 means this process
 	RebindInterval time.Duration // how often a capture of an app checks its process, or looks for a new one
 	MaxRebinds     int           // captures of a new instance of the app per recording
+	// SelfTestTimeout bounds a sound check (CheckSound) before its child is killed; 0 takes DefaultSelfTestTimeout.
+	SelfTestTimeout time.Duration
 }
 
 // DefaultConfig returns 60 s chunks, a 15 s start timeout, a 7 s stop grace, a 30 s hang timeout, three restarts
-// after 1, 2 and 4 s, and a check of the captured app every 3 s with up to 20 re-binds.
+// after 1, 2 and 4 s, a check of the captured app every 3 s with up to 20 re-binds, and a 10 s sound check.
 func DefaultConfig() Config {
 	return Config{
 		ChunkSeconds: DefaultChunkSeconds, StartTimeout: DefaultStartTimeout, StopGrace: DefaultStopGrace,
 		HangTimeout: DefaultHangTimeout, RestartBackoff: DefaultRestartBackoff, MaxRestarts: DefaultMaxRestarts,
-		RebindInterval: DefaultRebindInterval, MaxRebinds: DefaultMaxRebinds,
+		RebindInterval: DefaultRebindInterval, MaxRebinds: DefaultMaxRebinds, SelfTestTimeout: DefaultSelfTestTimeout,
 	}
 }
 
@@ -109,6 +111,8 @@ type Recorder struct {
 	mu       sync.Mutex
 	captures map[shared.RecordingID]*capture
 	ended    []shared.RecordingID // ended captures, oldest first
+
+	checking sync.Mutex // held by the running sound check
 }
 
 // New validates the configuration and builds the Recorder. It starts nothing.
@@ -123,6 +127,11 @@ func New(deps Deps, cfg Config) (*Recorder, error) {
 		return nil, errors.New("audiocapture: timeouts must be positive")
 	case cfg.MaxRestarts < 0 || cfg.MaxRebinds < 0:
 		return nil, errors.New("audiocapture: max restarts and re-binds must not be negative")
+	case cfg.SelfTestTimeout < 0:
+		return nil, errors.New("audiocapture: the sound check timeout must not be negative")
+	}
+	if cfg.SelfTestTimeout == 0 {
+		cfg.SelfTestTimeout = DefaultSelfTestTimeout
 	}
 	if cfg.OwnPID == 0 {
 		cfg.OwnPID = uint32(os.Getpid()) //nolint:gosec // PIDs fit in 32 bits on every supported OS
