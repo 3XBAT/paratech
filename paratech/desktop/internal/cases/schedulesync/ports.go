@@ -87,8 +87,15 @@ type ScheduleParser interface {
 // satisfies Google's event ID rules). Nothing is stored in SQLite for it, so the core never keeps an external ID.
 type CalendarAdapter interface {
 	// EnsureCalendar returns the ID of the dedicated "Learning Assistant" calendar and creates it if it does not
-	// exist. It is idempotent (PRD section 11.3).
-	EnsureCalendar(ctx context.Context) (calendarID string, err error)
+	// exist. It is idempotent (PRD section 11.3). fresh is true when the calendar is new to this installation (just
+	// created, found again at Google, or replacing a calendar that is gone): none of the events the core thinks are
+	// written may be in it, so the core marks every live lesson pending and then calls ConfirmCalendar. fresh stays
+	// true on every call until then, so a crash in between loses nothing.
+	EnsureCalendar(ctx context.Context) (calendarID string, fresh bool, err error)
+
+	// ConfirmCalendar records that the core has marked every lesson for a rewrite into calendarID (PRD section 11.3),
+	// so EnsureCalendar reports fresh == false from now on. A calendarID that is no longer the current one is ignored.
+	ConfirmCalendar(ctx context.Context, calendarID string) error
 
 	// UpsertLesson creates or updates the event of a lesson in the calendar calendarID. Because the event ID is
 	// derived from the lesson ID, repeating the call updates the same event and never creates a duplicate
