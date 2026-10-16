@@ -8,6 +8,7 @@ import server from "react-dom/server";
 import { errorMessages, generationStates, homeworkApi, methods } from "../.test-build/bindings/homework.js";
 import {
   assignmentDeliveryView,
+  blockedByEmail,
   deliveriesInFlight,
   deliveryLooks,
   deliveryView,
@@ -16,6 +17,8 @@ import {
   generationGoesOn,
   generationView,
   isStale,
+  regenerateBlockedReason,
+  sendRetryable,
   sizeText,
   versionTitle,
 } from "../.test-build/homeworkView.js";
@@ -146,6 +149,30 @@ test("errors: the core's fixed texts as they are, anything else generic", () => 
   assert.equal(isStale(new Error(errorMessages.draftInvalid)), false);
 });
 
+test("only an incomplete send is retried; a refused one is not", () => {
+  assert.equal(sendRetryable(new Error(errorMessages.sendIncomplete)), true);
+  assert.equal(sendRetryable(errorMessages.sendIncomplete), true);
+  for (const key of ["sendStale", "sendUnresolved", "sendCannotConfirm", "sendAlreadyDecided", "sendNotFound", "unavailable"]) {
+    assert.equal(sendRetryable(new Error(errorMessages[key])), false, key);
+  }
+  assert.equal(sendRetryable(null), false);
+});
+
+test("a locked export or an unresolved earlier email reloads the emails", () => {
+  assert.equal(blockedByEmail(new Error(errorMessages.exportLocked)), true);
+  assert.equal(blockedByEmail(new Error(errorMessages.sendUnresolved)), true);
+  assert.equal(blockedByEmail(new Error(errorMessages.sendIncomplete)), false);
+  assert.equal(blockedByEmail(new Error(errorMessages.versionNotFound)), false);
+  assert.equal(errorText(new Error(errorMessages.exportLocked)), errorMessages.exportLocked, "shown as it is");
+});
+
+test("regenerate is off with a reason while an edit is unsaved or an older version is shown", () => {
+  assert.equal(regenerateBlockedReason(false, false), undefined);
+  assert.match(regenerateBlockedReason(false, true), /сохраните/);
+  assert.match(regenerateBlockedReason(true, false), /из последней/);
+  assert.match(regenerateBlockedReason(true, true), /сохраните/);
+});
+
 test("the bindings call the bound Go methods with the page's arguments", async () => {
   const calls = [];
   const replies = {
@@ -185,13 +212,14 @@ function noCallApi() {
   return { api, calls };
 }
 
-test("the send dialog shows recipient, subject and attachment as text and sends nothing by itself", () => {
+test("the send dialog shows the version, recipient, subject and attachment as text and sends nothing by itself", () => {
   const { api, calls } = noCallApi();
   const prep = {
     proposalId: "p1", status: "ready", reason: "", message: "", recipient: "<b>t</b>@example.org",
     subject: "ДЗ <i>1</i>", attachmentName: "homework <script>.md", attachmentSize: 12800,
   };
-  const html = renderToStaticMarkup(h(SendDialog, { api, prep, onClose: () => undefined }));
+  const html = renderToStaticMarkup(h(SendDialog, { api, prep, version: 3, onClose: () => undefined }));
+  assert.match(html, /Версия 3</);
   assert.match(html, /Кому/);
   assert.match(html, /&lt;b&gt;t&lt;\/b&gt;@example.org/);
   assert.match(html, /ДЗ &lt;i&gt;1&lt;\/i&gt;/);
@@ -294,6 +322,24 @@ for (const [binding, component, handler, nextComponent] of [
     assert.equal(count(dialogs, `onConfirm={() => void ${name}()}`), 1, `${name} is the dialog's confirm handler`);
   });
 }
+
+test("a retry repeats the same send; a refused export opens no send dialog", () => {
+  const dialogs = code("pages/HomeworkDialogs.tsx");
+  assert.equal(count(dialogs, ".prepareSend("), 0, "the dialog never prepares a new send");
+  assert.equal(count(dialogs, ".confirmSend(props.prep.proposalId)"), 1, "confirmSend takes the dialog's own send");
+  assert.match(dialogs, /retry \? "Повторить" : "Отправить"/);
+
+  const page = code("pages/HomeworkPage.tsx");
+  const body = functionBody(page, "const startSend = () =>");
+  const start = page.slice(body.start, body.end);
+  const exp = start.indexOf("await api.exportDraft(");
+  const prep = start.indexOf("await api.prepareSend(");
+  assert.ok(exp >= 0 && prep > exp, "the export comes first and its failure stops the send");
+  assert.ok(!start.includes("try {"), "no export failure is swallowed");
+  assert.ok(!start.slice(0, prep).includes(".catch("), "no export failure is swallowed");
+  assert.ok(start.indexOf("setSendOpen(") > prep, "the dialog opens only after both");
+  assert.match(start, /version: exported\.version/, "the dialog shows the exported version");
+});
 
 test("the homework page renders model text as plain text only", () => {
   for (const rel of sourceFiles()) {

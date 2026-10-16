@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled dialogs (test/homework.test.mjs renders them).
 import type { DeliveryItem, HomeworkApi, SendPreparation } from "../bindings/homework.js";
-import { errorText, sizeText } from "../homeworkView.js";
+import { errorText, sendRetryable, sizeText } from "../homeworkView.js";
 import { Dialog, ResultLine } from "../ui/controls.js";
 
 // The two dialogs that lead to an email. Each one has a single call site of its binding, in its confirm button handler
@@ -12,31 +12,44 @@ import { Dialog, ResultLine } from "../ui/controls.js";
 export type SendResult = "sent" | "cancelled" | "failed";
 
 /**
- * Asks to send the prepared homework: recipient, subject and attachment, «Отправить» and «Отмена». Any way of closing
- * it other than «Отправить» cancels the send in the core.
+ * Asks to send the prepared homework: the draft version, recipient, subject and attachment, «Отправить» and «Отмена».
+ * Any way of closing it other than «Отправить» cancels the send in the core. version is the one exportDraft wrote to
+ * the attached file.
  */
-export function SendDialog(props: { api: HomeworkApi; prep: SendPreparation; onClose: (result: SendResult) => void }) {
+export function SendDialog(props: {
+  api: HomeworkApi;
+  prep: SendPreparation;
+  version: number;
+  onClose: (result: SendResult) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [tried, setTried] = useState(false);
+  const [retry, setRetry] = useState(false);
   const [error, setError] = useState("");
   // Synchronous guards: a double click comes before the re-render that disables the button.
   const running = useRef(false);
   const confirmed = useRef(false);
+  const retryable = useRef(false);
 
-  // The only call site of confirmSend (AC-14). One try per dialog: after a failure the send is prepared again.
+  // The only call site of confirmSend (AC-14). One try per dialog, except after sendIncomplete: the core says
+  // repeating the same proposal sends no second email, so «Повторить» calls it again with the same proposalId.
   async function onConfirmSend() {
-    if (running.current || confirmed.current) {
+    if (running.current || (confirmed.current && !retryable.current)) {
       return;
     }
     running.current = true;
     confirmed.current = true;
+    retryable.current = false;
     setTried(true);
+    setRetry(false);
     setBusy(true);
     setError("");
     try {
       await props.api.confirmSend(props.prep.proposalId);
       props.onClose("sent");
     } catch (err) {
+      retryable.current = sendRetryable(err);
+      setRetry(retryable.current);
       setError(errorText(err));
     } finally {
       running.current = false;
@@ -63,13 +76,15 @@ export function SendDialog(props: { api: HomeworkApi; prep: SendPreparation; onC
     <Dialog
       open
       title="Отправить домашнее задание?"
-      confirmLabel={busy ? "Отправка…" : "Отправить"}
+      confirmLabel={busy ? "Отправка…" : retry ? "Повторить" : "Отправить"}
       cancelLabel={tried ? "Закрыть" : "Отмена"}
-      confirmDisabled={busy || tried}
+      confirmDisabled={busy || (tried && !retry)}
       onConfirm={() => void onConfirmSend()}
       onCancel={() => void onCancelSend()}
     >
       <dl className="hw-send">
+        <dt>Черновик</dt>
+        <dd className="num">Версия {props.version}</dd>
         <dt>Кому</dt>
         <dd>
           <bdi>{props.prep.recipient}</bdi>

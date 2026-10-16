@@ -164,6 +164,31 @@ export function isStale(err: unknown): boolean {
   return errorMessage(err) === errorMessages.draftStale;
 }
 
+/** After sendIncomplete the dialog offers «Повторить» with the same send: the core sends no second email. */
+export function sendRetryable(err: unknown): boolean {
+  return errorMessage(err) === errorMessages.sendIncomplete;
+}
+
+/** The call was refused because of an unresolved email: the page reloads the emails so the student sees it. */
+export function blockedByEmail(err: unknown): boolean {
+  const msg = errorMessage(err);
+  return msg === errorMessages.exportLocked || msg === errorMessages.sendUnresolved;
+}
+
+/**
+ * Why «Сгенерировать заново» is off, undefined when it is on. A new version always continues the latest one, so it is
+ * off while an older version is shown: the student picks «К последней версии» or «Взять этот текст» first.
+ */
+export function regenerateBlockedReason(olderShown: boolean, dirty: boolean): string | undefined {
+  if (dirty) {
+    return "Сначала сохраните или отмените правку.";
+  }
+  if (olderShown) {
+    return "Новая версия делается из последней: откройте её или возьмите этот текст.";
+  }
+  return undefined;
+}
+
 // Wails rejects a call with an Error-like object carrying the Go error text.
 function errorMessage(err: unknown): string {
   if (typeof err === "string") {

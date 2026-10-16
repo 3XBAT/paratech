@@ -14,6 +14,7 @@ import {
 import { callByName } from "../bindings/runtime";
 import {
   assignmentDeliveryView,
+  blockedByEmail,
   type ChipView,
   deliveriesInFlight,
   deliveryPollMs,
@@ -24,6 +25,7 @@ import {
   generationPollMs,
   generationView,
   isStale,
+  regenerateBlockedReason,
   versionTitle,
 } from "../homeworkView";
 import { initialListState, type ListState } from "../listView";
@@ -161,6 +163,12 @@ interface Message {
   at: "draft" | "mail";
 }
 
+/** The open send dialog: the core's preparation and the version written to the attached file. */
+interface SendOpen {
+  prep: SendPreparation;
+  version: number;
+}
+
 interface Generation {
   jobId: string;
   status: GenerationStatus;
@@ -180,7 +188,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [deliveriesError, setDeliveriesError] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
-  const [sendPrep, setSendPrep] = useState<SendPreparation | null>(null);
+  const [sendOpen, setSendOpen] = useState<SendOpen | null>(null);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
   const mounted = useRef(true);
   const acting = useRef(false); // one action at a time; a double click must not start a second one
@@ -323,6 +331,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           // Unsaved text stays in the fields, now over the new latest version.
           await reload(dirty).catch(() => undefined);
         }
+        if (blockedByEmail(err)) {
+          void loadDeliveries();
+        }
       }
     } finally {
       acting.current = false;
@@ -337,8 +348,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const dirty = isLatest && (title !== shown.title || body !== shown.body);
   const generating = gen !== null && generationGoesOn(gen.status.state);
   const readOnly = !isLatest || generating;
-  const idle = busy === "" && sendPrep === null && sendAgain === null;
+  const idle = busy === "" && sendOpen === null && sendAgain === null;
   const savedReason = dirty ? "Сначала сохраните или отмените правку." : undefined;
+  const regenerateReason = regenerateBlockedReason(shown !== null && !isLatest, dirty);
 
   const save = () =>
     act("save", async () => {
@@ -360,7 +372,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
 
   const generate = () =>
     act("generate", async () => {
-      // A new version always starts from the latest one.
+      // A new version always starts from the latest one; the button is off while an older one is shown.
       const g = await api.generate(id, latest?.number ?? 0, instruction);
       setGen({ jobId: g.jobId, status: { state: "generating", message: "" } });
     });
@@ -389,13 +401,14 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       setMessage({ kind: "ok", text: `Версия ${r.version} сохранена в файл «${r.fileName}».`, at: "draft" });
     });
 
-  // The shown version goes to the file the email attaches; the core then checks the send and fills the dialog.
+  // The shown version goes to the file the email attaches; the core then checks the send and fills the dialog. A
+  // refused export (exportLocked: an earlier email is unresolved) throws here, so no send is prepared.
   const startSend = () =>
     act("send", async () => {
       if (shown === null) {
         return;
       }
-      await api.exportDraft(id, shown.number);
+      const exported = await api.exportDraft(id, shown.number);
       const prep = await api.prepareSend(id);
       if (!mounted.current) {
         if (prep.status === "ready") {
@@ -405,7 +418,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       }
       if (prep.status === "ready") {
         pendingSend.current = prep.proposalId;
-        setSendPrep(prep);
+        setSendOpen({ prep, version: exported.version });
       } else {
         setMessage({ kind: "fail", text: prep.message, at: "draft" });
       }
@@ -413,7 +426,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
 
   const sendClosed = (result: SendResult) => {
     pendingSend.current = "";
-    setSendPrep(null);
+    setSendOpen(null);
     // After a failed confirmation the dialog has shown the reason; the list of emails tells the rest.
     if (result === "sent") {
       setMessage({ kind: "ok", text: "Письмо отправляется: его состояние — в списке «Письма» ниже.", at: "draft" });
@@ -576,8 +589,8 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
             variant={latest === null ? "primary" : "secondary"}
             busy={generating || busy === "generate"}
             busyLabel="Генерация…"
-            disabled={!idle || generating || dirty}
-            disabledReason={savedReason}
+            disabled={!idle || generating || regenerateReason !== undefined}
+            disabledReason={regenerateReason}
             onClick={generate}
           >
             {latest === null ? "Сгенерировать черновик" : "Сгенерировать заново"}
@@ -678,7 +691,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         </div>
       )}
 
-      {sendPrep && <SendDialog api={api} prep={sendPrep} onClose={sendClosed} />}
+      {sendOpen && <SendDialog api={api} prep={sendOpen.prep} version={sendOpen.version} onClose={sendClosed} />}
       {sendAgain && <SendAgainDialog api={api} delivery={sendAgain} onClose={sendAgainClosed} />}
     </section>
   );
