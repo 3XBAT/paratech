@@ -131,12 +131,14 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   child is killed; refused while a recording captures. Verdict: an app = the INCLUDE result, the whole computer = either.
   Limits: the tone plays aloud; it is our process, not the chosen app (a muted tab is not found); classic loopback may
   hear other sounds too; the Bluetooth hands-free hint is not confirmed (`docs/refs/audio.md`).
+  Manual status: `docs/qa/compat-matrix.md` (Windows builds × modes × scenarios, tester steps for the alpha exe). The
+  Verification table below stays the TASK-016 script (capturespike); the matrix tracks what is checked.
 - **TASK-059 (picker):** list built from top-level windows grouped by exe (as OBS), audio-session state as a "playing now"
   badge (sessions appear only after the first sound); target = tree root PID; Chromium session PIDs walked up to the window
   owner. Remember by exe, not PID; re-find after the app restarts (OBS: every 3 s) and record silence meanwhile; activation
   succeeds for a dead PID, so check liveness. Exclude our own process. Open links via `explorer.exe` so the browser is not in
   our tree. Show the mute advice and the "same browser" hint.
-  Done: popup picker (marks, 3 s refresh, advice), remembered by exe, re-bind by exe while recording; checks: `docs/qa/run-alpha.md`.
+  Done: popup picker (marks, 3 s refresh, advice), remembered by exe, re-bind by exe while recording; checks: `docs/qa/compat-matrix.md` (moved from `docs/qa/run-alpha.md` in TASK-058).
 - **CI:** builds `CGO_ENABLED=0`; runners have no audio device, so live audio checks stay manual (TASK-016, compat matrix).
 
 ## Verification (TASK-016, owner, Windows 10 19045)
