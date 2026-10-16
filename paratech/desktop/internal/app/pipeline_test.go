@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,6 +27,8 @@ import (
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/proposal"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/prompt"
@@ -127,8 +130,8 @@ func configureHub(t *testing.T, c *core, now time.Time, url string) {
 // summarize and extract_homework (fake Hub) -> one summary and the assignments in SQLite. After a restart (Recover
 // and the startup sweep run) and a repeated completion event nothing is duplicated and no job changes.
 // TASK-055 (end-to-end test, criterion 1) adds: every status a job or the recording was stored with, the track in the
-// Storage Manager (AC-03), the transcript pinned to the model (AC-08), no audio in the Hub requests (AC-06) and no
-// second Hub charge after the restart (AC-11).
+// Storage Manager (AC-03), the transcript pinned to the model (AC-08), no audio in the Hub requests (AC-06), the
+// homework export of an extracted assignment and no second Hub charge after the restart (AC-11).
 func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -222,6 +225,7 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	}
 	checkTranscriptPin(t, u.c, tr, info.ID, model)
 	checkHubSawNoAudio(t, hub)
+	exportExtractedHomework(t, u, tr)
 
 	// Restart on the same data directory: the recoveries and the sweep run, then the completion arrives again.
 	if err := u.life.shutdown(); err != nil {
@@ -317,6 +321,35 @@ func checkHubSawNoAudio(t *testing.T, hub *testenv.FakeHub) {
 		if auth[i] != "Bearer "+testHubKey {
 			t.Fatalf("request %d is not authorized with the tester key", i)
 		}
+	}
+}
+
+// exportExtractedHomework continues on the running core from an assignment the pipeline extracted: a confirmed
+// export proposal writes its homework file under that assignment's title (the proposal paths themselves are tested in
+// proposals_test.go).
+func exportExtractedHomework(t *testing.T, u *uiCore, tr shared.TranscriptID) {
+	t.Helper()
+	asg, err := sqlite.NewAssignmentRepository(u.c.db).ListByTranscript(context.Background(), tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(asg, func(a *assignment.Assignment) bool { return a.Details().Title() == "Exercise 5" })
+	if i < 0 {
+		t.Fatal("the pipeline extracted no assignment \"Exercise 5\"")
+	}
+	id := asg[i].ID()
+	answer := fmt.Sprintf(`{"kind":"export_homework","assignment_id":%q,"body":"Page 12, all exercises."}`, id)
+	v := propose(t, u.app, answer)
+	if v.Status != proposal.StatusValidated {
+		t.Fatalf("proposal %s (%s), want VALIDATED", v.Status, v.Reason)
+	}
+	if v = confirmAndExecute(t, u.app, v.ID); v.Status != proposal.StatusExecuted {
+		t.Fatalf("after Execute %s, want EXECUTED", v.Status)
+	}
+	file := filepath.Join(u.dir, artifactsDir, "exports", string(id), "homework.md")
+	want := cvalues.HomeworkMarkdown("Exercise 5", "Page 12, all exercises.")
+	if data, err := os.ReadFile(file); err != nil || string(data) != want {
+		t.Fatalf("export file = %q, %v; want %q", data, err, want)
 	}
 }
 
