@@ -237,7 +237,16 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	again := openUICore(t, dir, e)
 	again.start(t)
 	// The recording recovery runs in the background; once it ended it can store no status after the comparison below.
-	again.life.bg.Wait()
+	recovered := make(chan struct{})
+	go func() {
+		again.life.bg.Wait()
+		close(recovered)
+	}()
+	select {
+	case <-recovered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the background recording recovery did not finish within 10s after the restart")
+	}
 	if err := again.c.transcriptions.RecordingCompleted(ctx, info.ID); err != nil {
 		t.Fatal(err)
 	}
