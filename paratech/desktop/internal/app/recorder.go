@@ -36,6 +36,13 @@ func platformRecorder(dataDir string, files *filestore.Store, log *slog.Logger) 
 	return rec, nil
 }
 
+// The recorder of Windows serves the sound check and the support bundle; soundChecker and captureHistory would
+// otherwise fall back silently when its methods change.
+var (
+	_ soundcheck.SoundChecker      = (*audiocapture.Recorder)(nil)
+	_ supportbundle.CaptureHistory = (*audiocapture.Recorder)(nil)
+)
+
 // soundChecker is the "Check sound" of the recorder: the recorder child of this build, none for a recorder without one
 // (it answers unsupported).
 func soundChecker(rec recordingsession.Recorder) soundcheck.SoundChecker {

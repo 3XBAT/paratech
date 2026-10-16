@@ -96,26 +96,10 @@ func putJSON(put func(string, []byte) error, name string, v any) error {
 
 func (s *Service) about(ctx context.Context, now time.Time) about {
 	out := about{Created: now.Format(time.RFC3339)}
-	if b, ok := s.deps.System.Build(); ok && b != nil {
-		out.App = appBuild{Module: b.Main.Path, Version: b.Main.Version, Go: b.GoVersion}
-		var goos, goarch string
-		for _, kv := range b.Settings {
-			switch kv.Key {
-			case "vcs.revision":
-				out.App.Revision = kv.Value
-			case "vcs.time":
-				out.App.RevisionTime = kv.Value
-			case "vcs.modified":
-				out.App.Modified = kv.Value == "true"
-			case "GOOS":
-				goos = kv.Value
-			case "GOARCH":
-				goarch = kv.Value
-			}
-		}
-		if goos != "" {
-			out.App.OS = goos + "/" + goarch
-		}
+	b := s.deps.System.Build()
+	out.App = appBuild{
+		Module: b.Module, Version: b.Version, Revision: b.Revision, RevisionTime: b.RevisionTime, Modified: b.Modified,
+		Go: b.GoVersion, OS: b.OS,
 	}
 	w := s.deps.System.Windows(ctx)
 	out.Windows = windowsInfo{Name: w.Name(), DisplayVersion: w.DisplayVersion, Build: w.BuildString(), Windows11: w.IsWindows11()}

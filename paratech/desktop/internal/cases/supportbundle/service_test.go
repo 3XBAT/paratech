@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -57,12 +56,11 @@ func (fakeSystem) Windows(context.Context) values.WindowsVersion {
 	return values.WindowsVersion{Product: "Windows 10 Pro", DisplayVersion: "23H2", Major: 10, Build: 22631, UBR: 4317}
 }
 
-func (fakeSystem) Build() (*debug.BuildInfo, bool) {
-	return &debug.BuildInfo{GoVersion: "go1.26.0", Main: debug.Module{Path: "paratech/desktop", Version: "(devel)"},
-		Settings: []debug.BuildSetting{
-			{Key: "vcs.revision", Value: "abc123"}, {Key: "vcs.time", Value: "2026-10-15T21:00:00Z"},
-			{Key: "vcs.modified", Value: "true"}, {Key: "GOOS", Value: "windows"}, {Key: "GOARCH", Value: "amd64"},
-		}}, true
+func (fakeSystem) Build() values.AppBuild {
+	return values.AppBuild{
+		Module: "paratech/desktop", Version: "(devel)", Revision: "abc123", RevisionTime: "2026-10-15T21:00:00Z",
+		Modified: true, GoVersion: "go1.26.0", OS: "windows/amd64",
+	}
 }
 
 func (s fakeSystem) ProfileDir() string { return s.profile }

@@ -2,7 +2,6 @@ package supportbundle
 
 import (
 	"context"
-	"runtime/debug"
 	"time"
 
 	"paratech/desktop/internal/domain/recording/values"
@@ -24,7 +23,7 @@ type LogFiles interface {
 // adapter).
 type SystemInfo interface {
 	Windows(ctx context.Context) values.WindowsVersion
-	Build() (*debug.BuildInfo, bool)
+	Build() values.AppBuild // zero when the executable carries none
 	ProfileDir() string
 }
 
