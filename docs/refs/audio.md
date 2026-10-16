@@ -21,7 +21,7 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
 - Calls: `syscall.SyscallN(vtbl[slot], this, args...)`; IUnknown takes slots 0-2, then methods in header order. 64-bit only:
   `IAudioClient::Initialize` takes two `REFERENCE_TIME` (int64) arguments that a 32-bit call would split.
 - Audio-session interfaces (`IAudioSessionManager2`, `IAudioSessionControl2`, `IAudioMeterInformation`, `audiopolicy.h`)
-  were NOT used by the spike: TASK-059 takes their GUIDs and slots from the headers itself.
+  were NOT used by the spike: TASK-059 takes their GUIDs and slots from the headers itself; the meter: see "Meters".
 
 | GUID | Value |
 |---|---|
@@ -32,11 +32,16 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
 | IID_IAudioRenderClient | F294ACFC-3146-4483-A7BF-ADDCA7C260E2 |
 | IID_IAgileObject | 94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90 |
 | IID_IActivateAudioInterfaceCompletionHandler | 41D949AB-9862-444A-80F6-C261334DA5EB |
+| IID_IPropertyStore (propsys.h) | 886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99 |
+| PKEY_Device_FriendlyName (functiondiscoverykeys_devpkey.h) | {A45C254E-DF1C-4EFD-8020-67D146A850E0}, pid 14 |
+| IID_IAudioMeterInformation (Windows SDK endpointvolume.h; mingw only declares it) | C02216F6-8C67-4B5B-9D00-D008E73E0064 |
 
 | Interface | Slots used (0-2 = IUnknown) |
 |---|---|
 | IMMDeviceEnumerator | GetDefaultAudioEndpoint 4 |
-| IMMDevice | Activate 3, GetId 5 |
+| IMMDevice | Activate 3, OpenPropertyStore 4, GetId 5 |
+| IPropertyStore | GetValue 5 (PROPVARIANT VT_LPWSTR = 31, freed by ole32 `PropVariantClear`; STGM_READ = 0) |
+| IAudioMeterInformation | GetPeakValue 3 |
 | IAudioClient | Initialize 3, GetBufferSize 4, GetCurrentPadding 6, GetMixFormat 8, Start 10, Stop 11, SetEventHandle 13, GetService 14 |
 | IAudioCaptureClient | GetBuffer 3, ReleaseBuffer 4, GetNextPacketSize 5 |
 | IAudioRenderClient | GetBuffer 3, ReleaseBuffer 4 |
@@ -147,6 +152,18 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
   because PIDs are reused (https://devblogs.microsoft.com/oldnewthing/20150403-00/?p=44313).
 - [spike] `TreeRoot` picks, for an exe name, the same-name process whose parent has another name, most descendants, then lowest
   PID. Heuristic only; the product starts from windows.
+
+## Meters and device names (TASK-058)
+- Endpoint meter: `IMMDevice::Activate(IID_IAudioMeterInformation)`; session meter: `QueryInterface` of
+  `IAudioSessionControl` for `IAudioMeterInformation` (as NAudio does). `GetPeakValue` gives 0..1. The meter IID is not in
+  the mingw-w64 headers; a one-off check on 19045 (2026-10-16, nothing played or captured) got both meters with it. A wrong IID would only give E_NOINTERFACE: no sound shown, no switch.
+- Whether the session meter reads before or after the session volume/mute: not confirmed; the detector also requires
+  `ISimpleAudioVolume` not muted and volume > 0. Whether the endpoint meter is pre or post endpoint volume: not
+  confirmed (post would only make EXCLUDE switch less often).
+- Device name: `IMMDevice::OpenPropertyStore(STGM_READ)` → `GetValue(PKEY_Device_FriendlyName)`; localized
+  ("Динамики (Realtek(R) Audio)" on the owner's machine). User hardware names, fine to log.
+- Windows version: `RtlGetVersion` for the numbers; `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` ProductName,
+  DisplayVersion, UBR read only. ProductName says "Windows 10" on Windows 11; build ≥ 22000 (not Server) = Windows 11.
 
 ## Volume, mute, ducking (where the tap is)
 - Loopback default is tapped **before** endpoint volume/mute; `AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK` (via

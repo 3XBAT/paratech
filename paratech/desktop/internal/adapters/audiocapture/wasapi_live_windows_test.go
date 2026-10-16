@@ -75,6 +75,9 @@ func TestLiveCapture(t *testing.T) {
 			if info.Mode != tt.target.Mode || !strings.HasPrefix(info.Windows.BuildString(), "10.0.") {
 				t.Errorf("Info = %+v, want mode %s on Windows 10/11", info, tt.target.Mode)
 			}
+			if info.Device == "" {
+				t.Error("no name of the output device")
+			}
 			if err := info.Format.Validate(); err != nil || (tt.want != nil && info.Format != *tt.want) {
 				t.Errorf("format %v (%v), want %v", info.Format, err, tt.want)
 			}

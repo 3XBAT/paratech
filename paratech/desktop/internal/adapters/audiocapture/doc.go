@@ -12,6 +12,8 @@
 // into one 16 kHz mono 16-bit WAV track; the duration is counted in frames, never by the wall clock.
 //
 // The platform Source is PlatformSource: on 64-bit Windows pure-Go WASAPI (COM through vtables, no CGO) with process
-// loopback of the target and classic loopback of the default output device as the one-way fallback; elsewhere none
-// (Supported is false), and Unavailable is the recorder of such a build.
+// loopback of the target and classic loopback of the default output device as the one-way fallback (after an
+// activation failure, a failed stream, or a healthy-but-mute stream: mute.go); elsewhere none (Supported is false),
+// and Unavailable is the recorder of such a build. Recorder.Diagnostics reports the capture (TASK-058) as the domain
+// values.CaptureDiagnostics: modes, attempts with HRESULTs, switches with causes, Windows version, output device.
 package audiocapture
