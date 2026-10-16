@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -53,6 +54,10 @@ func startShortcut(ctx context.Context, rawURL string) error {
 		return err
 	}
 	dir := os.TempDir()
+	// explorer.exe reads ',' and ';' as switch separators; a hand-set %TEMP% with them is refused.
+	if strings.ContainsAny(dir, ",;\"") {
+		return fmt.Errorf("%w: the temporary directory path has ',', ';' or a quote", ErrRefused)
+	}
 	sweepShortcuts(dir, time.Now())
 
 	f, err := os.CreateTemp(dir, shortcutPrefix+"*.url")
