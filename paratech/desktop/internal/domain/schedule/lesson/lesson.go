@@ -151,6 +151,38 @@ func (l *Lesson) CalendarPending() bool {
 	return l.Deleted() || l.syncedRevision == 0 || l.syncedRevision < l.contentRevision
 }
 
+// MarkCalendarSynced records that content revision revision was written to the calendar at at (ADR-0004(e)). The
+// revision is the one the writer read before the write, so it lies in [1, ContentRevision]; a lesson changed since
+// then stays pending. An older revision than the one already recorded is ignored: a slow writer must not move the
+// projection back. A deleted lesson is refused: it stays pending until its event is deleted and the row purged.
+func (l *Lesson) MarkCalendarSynced(revision int64, at time.Time) error {
+	switch {
+	case l.Deleted():
+		return ErrDeleted
+	case at.IsZero():
+		return fmt.Errorf("%w: no calendar write time", ErrInvalidLesson)
+	case revision < 1 || revision > l.contentRevision:
+		return fmt.Errorf("%w: calendar revision %d of content revision %d", ErrInvalidLesson, revision, l.contentRevision)
+	case revision < l.syncedRevision:
+		return nil
+	}
+
+	l.syncedRevision = revision
+	l.syncedAt = at
+	return nil
+}
+
+// ForgetCalendarProjection marks the lesson as never written to the calendar, so it becomes pending: the calendar it
+// was written to is gone or new (a fresh calendar holds none of the events). It reports whether anything changed.
+func (l *Lesson) ForgetCalendarProjection() bool {
+	if l.syncedRevision == 0 && l.syncedAt.IsZero() {
+		return false
+	}
+	l.syncedRevision = 0
+	l.syncedAt = time.Time{}
+	return true
+}
+
 // ID returns the lesson identifier.
 func (l *Lesson) ID() shared.LessonID { return l.id }
 
