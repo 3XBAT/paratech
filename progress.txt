@@ -1888,3 +1888,46 @@
 - Low: TestFinishedJobsShowNothing не покрывает homework_draft и упавшую задачу Hub (наблюдателя больше нет, все типы завершаются одинаково)
 
 ---
+
+## [TASK-058] Диагностика захвата звука и совместимость Windows 10/11: самопроверка, откат режима, пакет для поддержки
+**Дата:** 2026-10-16
+**Статус:** done (код и тесты на фейках; реальный звук, BT, сон, Windows 11 — владелец по docs/qa/compat-matrix.md)
+
+### Что сделано
+- domain/recording/values: CaptureMode (include/exclude/system), CaptureSwitch (причины activation_failed/healthy_but_mute/stream_failed, Note — фиксированный текст), CaptureDiagnostics, StreamFormat, WindowsVersion (Windows 11 по сборке >= 22000), SoundCheck/SoundCause/Verdict, AppBuild; recording.NoteCaptureFallback (только в RECORDING, идемпотентно, сохраняется до COMPLETED, при Interrupt/RequireRecovery «причина; примечание», Fail заменяет)
+- recordingsession: порт Recorder.Diagnostics(ctx, id); переход на classic loopback записывается в problem записи на heartbeat/перед стопом/лимитом/концом захвата
+- audiocapture: строка Info «capture started» (windows, build, target, mode, app, target_pid, device, format), попытки с HRESULT и device, переключения Warn с cause/reason; протокол: windows, device, cause (строгая проверка); детектор «здоровый, но немой» в child (только process loopback): нули/SILENT дольше 15 с (SourceConfig, предложение ADR-0002) при звучащей сессии — INCLUDE: сессия в дереве цели, EXCLUDE: сессия вне нашего дерева; порог пика 1e-4, сброс после 5 с без ожидаемого звука; заглушённая вкладка/микшер не переключают
+- «Проверить звук»: запрос selftest в child (тон через устройство по умолчанию, захват INCLUDE своего PID и classic loopback, Гёрцель), причины ok/no_device/silence/unsupported/hands_free/busy/failed; отказ во время записи, старт записи останавливает проверку; таймаут 14,3 с от бюджета child; cases/soundcheck; live-тест только при LA_AUDIO_LIVE_TEST=1 (не запускался)
+- Лог-файл <DataDir>/logs/desktop.log (adapters/logfile: ротация 5 МиБ, 2 старых файла, tee в app после instance lock, не в --recorder; Wails через порог Info, теперь тоже в файл)
+- Пакет для поддержки: cases/supportbundle (about.json, settings.json по allowlist settings.SupportSummary — адреса ***@domain, Hub только scheme://host:port; capture.json; logs/ до 8 МиБ, профиль -> %USERPROFILE%, хвост с целой строки), adapters/zipfile (temp + rename, проверка имён), adapters/sysinfo; только по кнопке, путь только из нативного диалога сохранения
+- input/wails DiagnosticsService (CheckSound, SaveSupportBundle), savepicker_windows.go; Shell.Services/OpenServices/WailsLogger (экспорт для теста реального wiring)
+- frontend: раздел «Диагностика» (последний): «Проверить звук» (вердикт, устройство, строки по режимам), «Сохранить пакет для поддержки…»; bindings/diagnostics.ts со строгим разбором
+- docs: docs/qa/compat-matrix.md (сборки 19045/1904x/22631/26100/26200/26H2+ × режимы П/К/С × 46 сценариев с шагами и строками лога; статусы, журнал; «не проверено (без звука)» для замеров TASK-015/059/058); run-alpha.md (чек-листы пикера перенесены в матрицу, раздел «Диагностика», лог-файл, «Что изменилось»); ADR-0002, ADR-0009, docs/refs/audio.md, docs/refs/wails.md
+- Изменённые существующие тесты (ничего не ослаблено): audiocapture wasapi_stream/recorder/rebind/child/abi/live/export_test (доменные типы, device/windows вместо build), TestMuteDetector (короткие паузы сохраняют счёт, 5 с — сброс; старый случай описывал ошибку), app recorder_test, testenv recorderchild/tonesource, input/wails shell_test/settings_test (Sound/Bundle обязательны, pickBundleFile, OpenServices), frontend nav.test (7 разделов), settings support_test (без удалённого TASK-065 переключателя)
+- Ревью: request changes (high: UI-логгер мимо файла; high: ложное переключение «весь звук» по пику устройства; medium: тексты матрицы/run-alpha; low: тон мог попасть в начатую запись, таймаут 10 с, type assertions, *debug.BuildInfo через порт; nit: обрезанная первая строка хвоста) -> исправлено, повторное ревью approve (low: флак-риск TestRecorderStartStopsTheSoundCheck -> исправлено; nit: место AppBuild, комментарий). Security: два прохода (весь diff и исправления): найдено 0, опровергнуто 0, исправлено 0
+- Rebase на master дважды (TASK-060 ч.2, TASK-039, TASK-065, TASK-050): конфликты в input/wails shell*/settings_test/doc.go, tsconfig.test.json, run-alpha.md — сохранены обе стороны (Google + Diagnostics), из SupportSummary убран удалённый TASK-065 переключатель
+
+### Тесты
+- [x] .github/scripts/verify.sh — ALL_GREEN (golangci-lint v2.14.0) на финальной голове после rebase на origin/master
+- [x] Шаг 1: go test -race -count=1 ./desktop/... (TestRecorderModeChoice, fallback_test, TestRecordingNotesTheFallbackOfTheRecorderChild, TestSupportBundleHoldsNoSecrets — UTF-8/UTF-16LE/BE, негативные контроли, через реальное wiring UI)
+- [x] Шаг 2: GOOS=windows go vet ./desktop/... (и GOOS=linux CGO_ENABLED=0)
+- [x] Шаг 3: compat-matrix.md — таблица «что нельзя автоматизировать» и шаги для тестера
+- [x] npm run test / npm run build
+
+### Решения (подтвердить)
+- Порог «немого» потока 15 с, сброс 5 с, порог пика 1e-4 — предложения, подстроить по TASK-016/матрице
+- «Проверить звук» всегда проверяет оба способа (INCLUDE своего тона и classic); для «весь звук» EXCLUDE отдельно не проверяется (тон в нашем дереве исключён) — доказывает работу сборки, не слышимость выбранного приложения
+- Во время записи проверка отказывает («busy»); старт записи прерывает идущую проверку
+- В пакете нет статуса «пароль/ключ заданы» (проверка требует чтения секрета); имена устройств остаются (могут содержать имя пользователя — сказано в run-alpha)
+- Раздел «Диагностика» — отдельный последний пункт навигации
+
+### Заметки (follow-up)
+- Не подтверждено: определение BT HFP по PKEY_Device_EnumeratorName (может быть SWD) — только подсказка; метры сессий до/после громкости сессии; IID IAudioMeterInformation проверен разовым запуском
+- Nit (ревью): AppBuild лежит в domain/recording/values (рядом с WindowsVersion); при росте диагностики — контекст domain/diagnostics (архитектор)
+- Low (security): ошибка сети Hub может содержать полный URL Hub в логе; 8.3-пути профиля не заменяются (мест таких нет)
+- В EXCLUDE сессия с PID вне снимка считается ожидаемым звуком (безвредно: нужно 15 с подряд)
+- run-alpha п.8 попап: описание 360x180 без списка источников устарело (TASK-059 — 360x300)
+- Причина ожидания STT в UI (follow-up TASK-060) не сделана
+- Только владелец: live-тесты LA_AUDIO_LIVE_TEST=1 (тон, enumeration), реальный диалог сохранения и расширение .zip, все строки compat-matrix.md
+
+---
