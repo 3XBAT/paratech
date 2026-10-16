@@ -16,6 +16,7 @@ const (
 	opGetAssignment         = "sqlite: get assignment"
 	opGetAssignmentBySource = "sqlite: get assignment by source"
 	opListAssignmentsBySrc  = "sqlite: list assignments of a transcript"
+	opListRecentAssignments = "sqlite: list recent assignments"
 	opSaveAssignment        = "sqlite: save assignment"
 	opDeleteAssignment      = "sqlite: delete assignment"
 )
@@ -60,6 +61,27 @@ func (r *AssignmentRepository) ListByTranscript(ctx context.Context, t shared.Tr
 	rows, err := r.db.Queries(ctx).ListAssignmentsByTranscript(ctx, jobNullString(string(t)))
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opListAssignmentsBySrc, t, MapError(ctx, err))
+	}
+	out := make([]*assignment.Assignment, 0, len(rows))
+	for _, row := range rows {
+		a, err := assignmentFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// ListRecent returns at most limit assignments, newest first (the homeworkflow.AssignmentList port); none is an empty
+// list. limit must be at least 1.
+func (r *AssignmentRepository) ListRecent(ctx context.Context, limit int) ([]*assignment.Assignment, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%s: limit %d, want at least 1", opListRecentAssignments, limit)
+	}
+	rows, err := r.db.Queries(ctx).ListRecentAssignments(ctx, int64(limit))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListRecentAssignments, MapError(ctx, err))
 	}
 	out := make([]*assignment.Assignment, 0, len(rows))
 	for _, row := range rows {

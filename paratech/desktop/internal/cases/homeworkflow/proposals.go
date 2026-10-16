@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,11 +17,12 @@ import (
 
 // Operation names, used in error messages.
 const (
-	opPropose = "homeworkflow: propose action"
-	opGet     = "homeworkflow: get proposal"
-	opConfirm = "homeworkflow: confirm proposal"
-	opDecline = "homeworkflow: decline proposal"
-	opExecute = "homeworkflow: execute proposal"
+	opPropose     = "homeworkflow: propose action"
+	opProposeSend = "homeworkflow: propose sending"
+	opGet         = "homeworkflow: get proposal"
+	opConfirm     = "homeworkflow: confirm proposal"
+	opDecline     = "homeworkflow: decline proposal"
+	opExecute     = "homeworkflow: execute proposal"
 )
 
 // The pipeline of PRD section 13.3 (AC-14, AC-18):
@@ -54,6 +56,28 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
 	return viewOf(p), nil
+}
+
+// sendRequest is the canonical send_homework_email object: the only field the wire allows for the kind.
+type sendRequest struct {
+	Kind         proposal.Kind `json:"kind"`
+	AssignmentID string        `json:"assignment_id"`
+}
+
+// ProposeSend is the user's request to email the exported homework of assignment a (PRD section 10 step 7). It takes
+// exactly the Propose path, so the same strict parse and the same validation against trusted state apply as to a model
+// proposal: the result is VALIDATED with the recipient and the export content frozen, for the confirmation dialog, or
+// REJECTED with a reason (unknown assignment, no recipient, nothing exported). No side effect happens here.
+func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID) (ProposalView, error) {
+	if err := a.Validate(); err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
+	}
+	raw, err := json.Marshal(sendRequest{Kind: proposal.KindSendHomework, AssignmentID: a.String()})
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
+	}
+	// Wrapped as untrusted on purpose: the request then passes the one parser every proposal passes.
+	return s.Propose(ctx, values.NewUntrustedOutput(string(raw)))
 }
 
 // facts reads the trusted local state a proposal is checked against, only what its kind needs. It runs outside a

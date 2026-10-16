@@ -75,6 +75,15 @@ type DeliveryRepository interface {
 	ListByStatus(ctx context.Context, statuses ...delivery.Status) ([]*delivery.Delivery, error)
 }
 
+// DeliveryHistory lists the deliveries of one assignment for the homework screen (PRD section 10: the stored delivery
+// result, AC-15). Implemented by the sqlite adapter. It is a port of its own so that the fakes of DeliveryRepository
+// stay small.
+type DeliveryHistory interface {
+	// ListByAssignment returns at most limit deliveries of assignment a, newest first (by creation time; PRD section
+	// 10); none is an empty list. limit is at least 1.
+	ListByAssignment(ctx context.Context, a shared.AssignmentID, limit int) ([]*delivery.Delivery, error)
+}
+
 // ArtifactStore is the access of this use case to the exported file that is attached. All file access goes through
 // the Storage Manager (PRD sections 4.1 and 5.2, hard rule 5). Implemented by the filestore adapter.
 type ArtifactStore interface {

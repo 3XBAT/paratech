@@ -18,7 +18,10 @@ import (
 
 func TestNewChecksPortsAndConfig(t *testing.T) {
 	e := newEnv(t)
-	full := Deps{Deliveries: e.st, Artifacts: e.files, Email: e.email, Jobs: e.st, Credentials: e.creds, Clock: e.clock, IDs: e.st, Tx: e.st}
+	full := Deps{
+		Deliveries: e.st, History: history{e.st}, Artifacts: e.files, Email: e.email, Jobs: e.st, Credentials: e.creds,
+		Clock: e.clock, IDs: e.st, Tx: e.st,
+	}
 	tests := []struct {
 		name string
 		deps func() Deps
@@ -27,6 +30,7 @@ func TestNewChecksPortsAndConfig(t *testing.T) {
 	}{
 		{"complete", func() Deps { return full }, Config{}, true},
 		{"no email", func() Deps { d := full; d.Email = nil; return d }, Config{}, false},
+		{"no history", func() Deps { d := full; d.History = nil; return d }, Config{}, false},
 		{"no credentials", func() Deps { d := full; d.Credentials = nil; return d }, Config{}, false},
 		{"negative attempts", func() Deps { return full }, Config{MaxAttempts: -1}, false},
 	}

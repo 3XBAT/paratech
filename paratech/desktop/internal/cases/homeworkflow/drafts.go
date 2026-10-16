@@ -23,6 +23,7 @@ import (
 // Operation names, used in error messages.
 const (
 	opGenerate      = "homeworkflow: generate draft"
+	opGeneration    = "homeworkflow: get draft generation"
 	opEditDraft     = "homeworkflow: edit draft"
 	opDraftVersions = "homeworkflow: list draft versions"
 	opDraftVersion  = "homeworkflow: get draft version"
@@ -114,6 +115,23 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 // Errors: a missing assignment wraps shared.ErrNotFound, bad instructions values.ErrInvalidDraftRequest, a full
 // draft homeworkdraft.ErrFull; nothing is created then.
 func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instruction string) (GenerateResult, error) {
+	return s.generate(ctx, a, latestBase, instruction)
+}
+
+// GenerateFrom is Generate for the version the student sees: if base is not the latest version any more (a generation
+// finished or an edit was saved meanwhile), nothing is created and the error wraps homeworkdraft.ErrStaleBase, so the
+// screen reloads instead of generating from a version the student has not seen.
+func (s *Drafts) GenerateFrom(ctx context.Context, a shared.AssignmentID, base int, instruction string) (GenerateResult, error) {
+	if base < 0 {
+		return GenerateResult{}, fmt.Errorf("%s: %w: base %d", opGenerate, homeworkdraft.ErrStaleBase, base)
+	}
+	return s.generate(ctx, a, base, instruction)
+}
+
+// latestBase asks generate to start from the latest version, whatever it is.
+const latestBase = -1
+
+func (s *Drafts) generate(ctx context.Context, a shared.AssignmentID, base int, instruction string) (GenerateResult, error) {
 	if _, err := s.assignments.Get(ctx, a); err != nil {
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
@@ -121,7 +139,9 @@ func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instructio
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
-	base := d.LatestNumber()
+	if base == latestBase {
+		base = d.LatestNumber()
+	}
 	if err := d.CanAppend(base); err != nil {
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
@@ -160,6 +180,35 @@ func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instructio
 // the same request may run again; an active job is still running and a COMPLETED one moved the base.
 func endedWithoutResult(st job.Status) bool {
 	return st.IsTerminal() && st != job.StatusCompleted
+}
+
+// draftFailures are the fixed errors a generation job can end with (Handle). The job keeps only the text of its last
+// error, which ends with one of them: the runner may prefix it ("attempts exhausted: ...").
+var draftFailures = []error{
+	ErrDraftChanged, ErrDraftFull, ErrDraftAssignmentGone, ErrDraftContextRefused, ErrDraftInvalidAnswer,
+	ErrDraftPayload, ErrDraftLLM, ErrDraftStorage, ErrDraftStopped,
+}
+
+// Generation returns the state of the generation job id that Generate returned, for the screen to follow (PRD section
+// 10 step 2). A missing job or a job of another type wraps shared.ErrNotFound.
+func (s *Drafts) Generation(ctx context.Context, id shared.JobID) (GenerationView, error) {
+	j, err := s.jobReader.Get(ctx, id)
+	if err != nil {
+		return GenerationView{}, fmt.Errorf("%s %s: %w", opGeneration, id, err)
+	}
+	if j.Type() != HomeworkDraftJobType {
+		return GenerationView{}, fmt.Errorf("%s %s: not a draft job: %w", opGeneration, id, shared.ErrNotFound)
+	}
+	v := GenerationView{JobID: j.ID(), Status: j.Status()}
+	if j.Status() == job.StatusFailed {
+		for _, e := range draftFailures {
+			if strings.HasSuffix(j.LastError(), e.Error()) {
+				v.Failure = e
+				break
+			}
+		}
+	}
+	return v, nil
 }
 
 // draftJobKey is the idempotency key of a generation: equivalent requests (same assignment, base version, cleaned

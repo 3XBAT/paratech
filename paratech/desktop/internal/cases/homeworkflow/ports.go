@@ -63,6 +63,14 @@ type AssignmentRepository interface {
 	Save(ctx context.Context, a *assignment.Assignment) error
 }
 
+// AssignmentList lists the stored assignments for the homework screen (PRD section 10 step 1: select an assignment).
+// Implemented by the sqlite adapter. It is a port of its own so that the fakes of AssignmentRepository stay small.
+type AssignmentList interface {
+	// ListRecent returns at most limit assignments, newest first (by creation time; PRD section 10); none is an empty
+	// list. limit is at least 1.
+	ListRecent(ctx context.Context, limit int) ([]*assignment.Assignment, error)
+}
+
 // SummaryRepository stores the summaries of transcripts in the local database (PRD sections 5.3 and 9).
 // Implemented by the sqlite adapter.
 type SummaryRepository interface {

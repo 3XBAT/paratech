@@ -2,6 +2,7 @@ package homeworkflow
 
 import (
 	"log/slog"
+	"path"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
@@ -29,6 +30,9 @@ const HomeworkDraftJobType = job.Type(values.HomeworkDraftJobType)
 // Waiting for the network or the quota does not use attempts.
 const DefaultPostProcessAttempts = 5
 
+// MaxListedAssignments bounds the assignment list of the homework screen (Service.ListAssignments).
+const MaxListedAssignments = 200
+
 // saveAttempts bounds the reload-and-decide-again loop of one save that keeps meeting conflicts.
 const saveAttempts = 3
 
@@ -37,16 +41,17 @@ const answeredPercent = 50
 
 // Deps are the ports the Service needs; all are required.
 type Deps struct {
-	Proposals   ProposalRepository
-	Assignments AssignmentRepository
-	Artifacts   ArtifactStore
-	Recipients  RecipientSource
-	Mailer      HomeworkMailer
-	Exporter    HomeworkExporter
-	Calendar    DeadlineCalendar
-	Clock       Clock
-	IDs         IDGenerator
-	Tx          Tx
+	Proposals      ProposalRepository
+	Assignments    AssignmentRepository
+	AssignmentList AssignmentList
+	Artifacts      ArtifactStore
+	Recipients     RecipientSource
+	Mailer         HomeworkMailer
+	Exporter       HomeworkExporter
+	Calendar       DeadlineCalendar
+	Clock          Clock
+	IDs            IDGenerator
+	Tx             Tx
 }
 
 // ProposalView is a proposal as the confirmation dialog shows it (PRD section 13.3, AC-14): what will happen, to which
@@ -63,14 +68,26 @@ type ProposalView struct {
 	Recipient    string // the trusted address for send_homework_email, set once validated
 	CreatedAt    time.Time
 	ConfirmedAt  time.Time
+
+	// The attachment of send_homework_email pinned at validation: the file name of proposal.ExportRef and the size of
+	// the pinned content. Empty and 0 while nothing is pinned.
+	AttachmentName string
+	AttachmentSize int64
 }
 
 func viewOf(p *proposal.Proposal) ProposalView {
-	return ProposalView{
+	v := ProposalView{
 		ID: p.ID(), Kind: p.Kind(), Status: p.Status(), Reason: p.Reason(), AssignmentID: p.AssignmentID(),
 		Title: p.Title(), Body: p.Body(), Due: p.Due(), Recipient: p.Recipient().Address(),
 		CreatedAt: p.CreatedAt(), ConfirmedAt: p.ConfirmedAt(),
 	}
+	if d := p.AttachmentDigest(); !d.IsZero() {
+		// The ref of a stored proposal's assignment is valid: the id was checked when it was parsed.
+		if ref, err := proposal.ExportRef(p.AssignmentID()); err == nil {
+			v.AttachmentName, v.AttachmentSize = path.Base(ref.Path()), d.Size()
+		}
+	}
+	return v
 }
 
 // PostProcessDeps are the ports and settings of the PostProcessor. Log is optional.
@@ -192,6 +209,14 @@ func draftVersionViewOf(d *homeworkdraft.Draft, r homeworkdraft.Revision) DraftV
 		Instruction: r.Instruction(), PromptVersion: r.PromptVersion(), Latest: r.Number() == d.LatestNumber(),
 		CreatedAt: r.CreatedAt(),
 	}
+}
+
+// GenerationView is the state of a generation job for the homework screen (Drafts.Generation).
+type GenerationView struct {
+	JobID  shared.JobID
+	Status job.Status
+	// Failure is the ErrDraft* error a FAILED job ended with (errors.Is); nil for other statuses or an unknown cause.
+	Failure error
 }
 
 // DraftExport tells which version was exported to which file.

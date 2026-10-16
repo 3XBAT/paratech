@@ -187,8 +187,9 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		handlers.stt = stt
 	}
 
+	deliveries := sqlite.NewDeliveryRepository(db)
 	c.deliveries, err = senddelivery.New(senddelivery.Deps{
-		Deliveries: sqlite.NewDeliveryRepository(db), Artifacts: store, Email: mailer, Jobs: jobs,
+		Deliveries: deliveries, History: deliveries, Artifacts: store, Email: mailer, Jobs: jobs,
 		Credentials: mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
 	}, senddelivery.Config{MaxAttempts: maxAttempts})
 	if err != nil {

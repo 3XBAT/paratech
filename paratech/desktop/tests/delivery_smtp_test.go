@@ -154,7 +154,7 @@ func (e *deliveryEnv) open(smtpTimeout time.Duration) {
 		e.t.Fatal(err)
 	}
 	e.svc, err = senddelivery.New(senddelivery.Deps{
-		Deliveries: e.dlv, Artifacts: flakyFiles{Store: e.files, fail: &e.filesFail}, Email: mailer, Jobs: e.jobs, Credentials: e.creds, Clock: e.clock,
+		Deliveries: e.dlv, History: e.dlv, Artifacts: flakyFiles{Store: e.files, fail: &e.filesFail}, Email: mailer, Jobs: e.jobs, Credentials: e.creds, Clock: e.clock,
 		IDs: e.ids, Tx: e.db,
 	}, senddelivery.Config{})
 	if err != nil {

@@ -8,6 +8,8 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
+const opListAssignments = "homeworkflow: list assignments"
+
 // Assignment returns an assignment for the UI (PRD section 10). A missing one wraps shared.ErrNotFound.
 func (s *Service) Assignment(ctx context.Context, id shared.AssignmentID) (AssignmentView, error) {
 	a, err := s.assignments.Get(ctx, id)
@@ -15,6 +17,20 @@ func (s *Service) Assignment(ctx context.Context, id shared.AssignmentID) (Assig
 		return AssignmentView{}, err
 	}
 	return assignmentViewOf(a), nil
+}
+
+// ListAssignments returns the newest assignments for the homework screen, at most MaxListedAssignments (PRD section
+// 10 step 1). None is an empty list.
+func (s *Service) ListAssignments(ctx context.Context) ([]AssignmentView, error) {
+	as, err := s.list.ListRecent(ctx, MaxListedAssignments)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListAssignments, err)
+	}
+	out := make([]AssignmentView, 0, len(as))
+	for _, a := range as {
+		out = append(out, assignmentViewOf(a))
+	}
+	return out, nil
 }
 
 // EditAssignment stores what the user entered for an extracted assignment and its deadline (PRD section 10, AC-13).

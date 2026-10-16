@@ -93,6 +93,8 @@ type Querier interface {
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
+	// The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
+	ListDeliveriesByAssignment(ctx context.Context, arg ListDeliveriesByAssignmentParams) ([]Delivery, error)
 	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
 	// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
@@ -106,6 +108,8 @@ type Querier interface {
 	ListLessonsPendingCalendarSync(ctx context.Context, maxRows int64) ([]ScheduleEntry, error)
 	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
+	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
+	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names.
