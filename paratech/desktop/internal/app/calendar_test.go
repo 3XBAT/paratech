@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -215,6 +216,10 @@ func TestWiredCalendarSync(t *testing.T) {
 	insertAssignment(t, dir, "a1", homeworkTitle)
 	due := time.Now().Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	confirmAndExecute(t, a, propose(t, a, `{"kind":"create_deadline_event","assignment_id":"a1","title":"Rivers","due":"`+due+`"}`).ID)
+	executed := cal.Events(cals[0].ID)
+	if len(executed) != 2 || !slices.ContainsFunc(executed, func(e testenv.FakeCalendarEvent) bool { return e.Summary == "Rivers" }) {
+		t.Fatalf("events after the executed proposal = %+v", executed)
+	}
 	if err := (deadlineCalendar{a.core.calendar}).UpsertDeadline(ctx, confirmedDeadline(t)); err != nil {
 		t.Fatal(err)
 	}
