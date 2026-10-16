@@ -45,3 +45,22 @@
 - The Desktop client belongs to the owner's project; Google deletes a client after 6 months without token requests or
   changes ([Manage OAuth Clients](https://support.google.com/cloud/answer/15549257)).
 - Open: whether Google's token endpoint accepts a Desktop client without `client_secret` (docs say "Optional"); we always send it.
+
+## Calendar (TASK-051)
+- **Binding.** The id of the app calendar «Learning Assistant» and a `fresh` flag live in Credential Manager
+  (`paratech/google/calendar-id`, JSON `{id, fresh}`); no SQLite migration. `calendarList.list` is not allowed with
+  `calendar.app.created`, so the stored id is the only binding.
+- **Gone** only when `calendars.get` AND `calendarList.get` both answer 404/410/403 (not a rate limit). Then a new
+  calendar is created with `fresh: true`; the sync marks every lesson unwritten, rewrites all, then clears `fresh`.
+- **Event ids** = base32hex(SHA-256(`lesson:<id>` or `deadline:<assignment id>`)), nothing stored. Upsert = PUT, on 404/410
+  insert with the id, on 409 PUT again; delete: 2xx/404/410 = done. A retry after a lost answer updates the same event.
+- **Job** `calendar_sync`: requeue on recovery (idempotent), not Heavy, 30 min. At most one job waits to start; a request
+  while one runs makes the next one. Requested after an import that changed lessons, after sign-in, at start (if
+  signed in) and by «Синхронизировать». Not signed in / sign-in expired = job completes without writing, the page says so.
+- **Sign-out keeps the binding**: the same account gets its calendar back; another account cannot see it, so a fresh
+  calendar is made and everything is rewritten.
+- **Deadlines** only through a confirmed proposal (hard rule 3); the sync job writes lessons only. A recreated calendar
+  does not get old deadlines back.
+- **No read-back** from Google (AC-20): edits in Google Calendar are overwritten by the next write of that lesson.
+- **Accepted crash window:** the calendar is created at Google before its id is stored; a crash in between leaves an
+  extra empty calendar the user can delete.

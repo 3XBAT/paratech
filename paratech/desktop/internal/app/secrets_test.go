@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/adapters/googleauth"
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
@@ -152,6 +153,7 @@ func TestCredentialNamesArePinned(t *testing.T) {
 		{"google client id", googleauth.ClientIDName, "client-id"},
 		{"google client secret", googleauth.ClientSecretName, "client-secret"},
 		{"google refresh token", googleauth.RefreshTokenName, "refresh-token"},
+		{"google calendar id", googlecal.CalendarIDName, "calendar-id"},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", tc.what, tc.got, tc.want)
