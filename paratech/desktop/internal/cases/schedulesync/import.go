@@ -31,8 +31,10 @@ func (s *Service) PreviewImport(ctx context.Context, req ImportRequest) (Preview
 
 // CommitImport writes a confirmed preview in one transaction (PRD sections 11.2 and 14 case 9, AC-16). The plan is
 // rebuilt from the same bytes against the schedule as it is now; if it has errors (ErrInvalidImport) or is not the
-// confirmed one (ErrStalePreview), nothing is written. The calendar sync job is not enqueued yet (TASK-051): the
-// written lessons are pending by state and the job finds them.
+// confirmed one (ErrStalePreview), nothing is written. After a commit that changed the schedule it asks for a calendar
+// synchronization, outside the transaction (ADR-0004(a)). That request cannot fail the committed import: a failure is
+// logged, and the written lessons stay pending by state, so the next request (another import, the next start, a sign-in
+// or «Синхронизировать») picks them up.
 func (s *Service) CommitImport(ctx context.Context, req CommitRequest) (CommitResult, error) {
 	if req.ConfirmToken == "" {
 		return CommitResult{}, ErrNotConfirmed
@@ -76,7 +78,24 @@ func (s *Service) CommitImport(ctx context.Context, req CommitRequest) (CommitRe
 	if err != nil {
 		return CommitResult{}, err
 	}
+	if res != (CommitResult{}) {
+		s.requestSync(ctx)
+	}
 	return res, nil
+}
+
+// requestSync asks for a calendar synchronization after a commit; without a sign-in there is nothing to do.
+func (s *Service) requestSync(ctx context.Context) {
+	if s.sync == nil {
+		return
+	}
+	_, err := s.sync.RequestSync(ctx)
+	switch {
+	case errors.Is(err, ErrCalendarNotConnected):
+		s.log.Debug("schedulesync: calendar not connected, no sync after the import")
+	case err != nil:
+		s.log.Warn("schedulesync: calendar sync not requested after the import; the lessons stay pending", "err", err)
+	}
 }
 
 func (s *Service) parse(ctx context.Context, src importplan.Source, data []byte) (importplan.Parsed, error) {

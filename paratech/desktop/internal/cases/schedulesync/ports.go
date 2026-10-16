@@ -85,6 +85,11 @@ type ScheduleParser interface {
 //
 // Event identity: the adapter derives the event ID deterministically from the lesson ID (a stable encoding that
 // satisfies Google's event ID rules). Nothing is stored in SQLite for it, so the core never keeps an external ID.
+//
+// Errors: without a Google sign-in every method returns an error wrapping ErrCalendarNotConnected, and
+// ErrCalendarSignInExpired when Google no longer accepts the stored one (the app maps the adapter's classes). Other
+// errors are marked backoff.ErrTransient or backoff.ErrPermanent; one wrapping shared.ErrNetworkUnavailable means
+// Google cannot be reached. Error texts are fixed: no title, token or Google answer.
 type CalendarAdapter interface {
 	// EnsureCalendar returns the ID of the dedicated "Learning Assistant" calendar and creates it if it does not
 	// exist. It is idempotent (PRD section 11.3). fresh is true when the calendar is new to this installation (just
@@ -115,12 +120,24 @@ type JobEnqueuer interface {
 	// Enqueue stores a new job. If a job with the same idempotency key exists, nothing is created and the ID of the
 	// existing job is returned with created == false (PRD section 7.3, hard rule 7).
 	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
+
+	// ListByStatus returns the jobs in any of the given statuses, so that a request finds the sync job that has not
+	// started yet (PRD section 14 case 5: no duplicate equivalent jobs).
+	ListByStatus(ctx context.Context, statuses ...job.Status) ([]*job.Job, error)
 }
 
-// Clock supplies the current time (ARCH-24), for the scheduler (PRD section 6.1). Implemented by the clock adapter
-// and by a controllable fake in tests.
+// CalendarAccount tells whether a Google sign-in is stored (PRD section 12; googlesignin through a bridge in the app).
+// It never reveals a token.
+type CalendarAccount interface {
+	// SignedIn reports whether a sign-in is stored (PRD section 12); an error means the credential store could not
+	// answer.
+	SignedIn(ctx context.Context) (bool, error)
+}
+
+// Clock supplies the current time (ARCH-24): import times and calendar write times (PRD sections 11.2 and 11.3).
+// Implemented by the clock adapter and by a controllable fake in tests.
 type Clock interface {
-	// Now returns the current time (PRD section 6.1: lesson is starting).
+	// Now returns the current time (PRD sections 11.2 and 11.3).
 	Now() time.Time
 }
 

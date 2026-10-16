@@ -25,6 +25,10 @@ type lessonStore struct {
 	rows     map[shared.LessonID]lesson.State
 	applies  int
 	applyErr error // returned by the next ApplyChanges when set
+	saveErr  error // returned by the next Save when set, nothing stored
+	purgeErr error // returned by the next PurgeDeleted when set, nothing removed
+	saves    int
+	purges   int
 
 	txMu sync.Mutex
 }
@@ -69,7 +73,17 @@ func (s *lessonStore) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson
 }
 
 func (s *lessonStore) Save(ctx context.Context, l *lesson.Lesson) error {
-	return s.ApplyChanges(ctx, []*lesson.Lesson{l}, nil)
+	if ctx.Value(txKey{}) == nil {
+		s.t.Error("Save outside Tx.Do")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saves++
+	if err := s.saveErr; err != nil {
+		s.saveErr = nil
+		return err
+	}
+	return s.write([]*lesson.Lesson{l})
 }
 
 func (s *lessonStore) ApplyChanges(ctx context.Context, upserts, deleted []*lesson.Lesson) error {
@@ -83,7 +97,11 @@ func (s *lessonStore) ApplyChanges(ctx context.Context, upserts, deleted []*less
 		s.applyErr = nil
 		return err
 	}
-	all := append(append([]*lesson.Lesson(nil), upserts...), deleted...)
+	return s.write(append(append([]*lesson.Lesson(nil), upserts...), deleted...))
+}
+
+// write stores the lessons all or nothing with the version compare-and-swap; s.mu is held.
+func (s *lessonStore) write(all []*lesson.Lesson) error {
 	for _, l := range all {
 		st, ok := s.rows[l.ID()]
 		if (l.Version() == 0 && ok) || (l.Version() > 0 && (!ok || st.Version != l.Version())) {
@@ -121,12 +139,60 @@ func (s *lessonStore) ListStartingBetween(context.Context, time.Time, time.Time)
 	return nil, errors.New("not used")
 }
 
-func (s *lessonStore) ListPendingCalendarSync(context.Context, int) ([]*lesson.Lesson, error) {
-	return nil, errors.New("not used")
+// ListPendingCalendarSync applies the rule of the sqlite query (lesson.CalendarPending), ordered by start and id.
+func (s *lessonStore) ListPendingCalendarSync(_ context.Context, limit int) ([]*lesson.Lesson, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*lesson.Lesson
+	for _, st := range s.rows {
+		l, err := lesson.Restore(st)
+		if err != nil {
+			return nil, err
+		}
+		if l.CalendarPending() {
+			out = append(out, l)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].Content().Start, out[j].Content().Start
+		return a.Before(b) || a.Equal(b) && out[i].ID() < out[j].ID()
+	})
+	return out[:min(limit, len(out))], nil
 }
 
-func (s *lessonStore) PurgeDeleted(context.Context, shared.LessonID) error {
-	return errors.New("not used")
+func (s *lessonStore) PurgeDeleted(ctx context.Context, id shared.LessonID) error {
+	if ctx.Value(txKey{}) == nil {
+		s.t.Error("PurgeDeleted outside Tx.Do")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.purgeErr; err != nil {
+		s.purgeErr = nil
+		return err
+	}
+	st, ok := s.rows[id]
+	switch {
+	case !ok:
+		return nil
+	case st.DeletedAt.IsZero():
+		return fmt.Errorf("purge of live lesson %s: %w", id, shared.ErrConflict)
+	}
+	s.purges++
+	delete(s.rows, id)
+	return nil
+}
+
+// mutate changes a stored lesson behind the back of a reader, as another writer would.
+func (s *lessonStore) mutate(id shared.LessonID, change func(*lesson.Lesson)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.rows[id]
+	l, err := lesson.Restore(st)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	change(l)
+	s.rows[id] = stateOf(l, st.Version+1)
 }
 
 func (s *lessonStore) Do(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -157,14 +223,17 @@ func (p *fakeParser) Parse(_ context.Context, data []byte) (importplan.Parsed, e
 	return parsed, nil
 }
 
-type seqIDs struct{ n int }
+type seqIDs struct{ n, jobs int }
 
 func (g *seqIDs) NewLessonID() shared.LessonID {
 	g.n++
 	return shared.LessonID(fmt.Sprintf("lesson-%d", g.n))
 }
 
-func (g *seqIDs) NewJobID() shared.JobID { return "job" }
+func (g *seqIDs) NewJobID() shared.JobID {
+	g.jobs++
+	return shared.JobID(fmt.Sprintf("job-%d", g.jobs))
+}
 
 var (
 	_ LessonRepository = (*lessonStore)(nil)
