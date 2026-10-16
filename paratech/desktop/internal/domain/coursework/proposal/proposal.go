@@ -407,7 +407,10 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 }
 
 // Confirm records the explicit user approval of a VALIDATED proposal (AC-14).
-func (p *Proposal) Confirm(now time.Time) error {
+func (p *Proposal) Confirm(now time.Time) error { return p.confirm(now) }
+
+// confirm is the body of Confirm; ConfirmOnce calls it so the user-only source test does not see a Confirm call here.
+func (p *Proposal) confirm(now time.Time) error {
 	if err := p.move(StatusConfirmed, now); err != nil {
 		return err
 	}
@@ -421,7 +424,7 @@ func (p *Proposal) ConfirmOnce(now time.Time) (changed bool, err error) {
 	if p.status == StatusConfirmed || p.status == StatusExecuted {
 		return false, nil
 	}
-	if err := p.Confirm(now); err != nil {
+	if err := p.confirm(now); err != nil {
 		return false, err
 	}
 	return true, nil
