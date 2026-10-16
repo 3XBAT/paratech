@@ -18,4 +18,7 @@ func TestOpenLinkIsUnsupported(t *testing.T) {
 	if err := New().OpenLink(context.Background(), u); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("OpenLink = %v, want ErrUnsupported", err)
 	}
+	if err := New().OpenAuthPage(context.Background(), googleAuthPage); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("OpenAuthPage = %v, want ErrUnsupported", err)
+	}
 }

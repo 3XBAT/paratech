@@ -15,5 +15,6 @@
 //
 // The «Подключения» page (mail account, Hub address, mail password, "check mail") calls
 // ConnectionsService (connections.go): field errors and check results are answers with fixed Russian texts; the
-// password only goes in, the page sees its status.
+// password only goes in, the page sees its status. Its Google section calls GoogleService (google.go): the client id
+// and secret only go in, GoogleSignIn waits for the browser sign-in and GoogleCancelSignIn ends it.
 package wails

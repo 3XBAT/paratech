@@ -82,6 +82,57 @@ func TestCheckLinkRefuses(t *testing.T) {
 	}
 }
 
+// googleAuthPage has the shape of the URL x/oauth2 builds for the Google sign-in (url.Values.Encode, sorted keys).
+const googleAuthPage = "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline" +
+	"&client_id=123-fake.apps.googleusercontent.com&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" +
+	"&code_challenge_method=S256&prompt=consent&redirect_uri=http%3A%2F%2F127.0.0.1%3A53682&response_type=code" +
+	"&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.app.created&state=Zm9v_YmFy-YmF6"
+
+func TestCheckAuthLink(t *testing.T) {
+	allowed := []string{
+		googleAuthPage,
+		"https://example.com/auth?a=1",
+		"https://example.com/auth?a=%7e&b=%7E&c=-._~",
+		"https://example.com/auth?" + strings.Repeat("a", maxAuthLinkLen-len("https://example.com/auth?")),
+	}
+	for _, s := range allowed {
+		if err := checkAuthLink(s); err != nil {
+			t.Errorf("checkAuthLink(%q) = %v, want nil", s, err)
+		}
+	}
+
+	refused := []string{
+		"", "https://example.com/auth", "https://example.com/auth?", "http://example.com/auth?a=1",
+		"HTTPS://example.com/auth?a=1", "https://Example.com/auth?a=1", "https://example.com:8443/auth?a=1",
+		"https://user@example.com/auth?a=1", "https://localhost/auth?a=1", "https://[::1]/auth?a=1",
+		"https://example.com/?a=1", "https://example.com/a/../auth?a=1", "https://example.com//auth?a=1",
+		"https://example.com/auth?a=1#frag", "https://example.com/auth?a=1?b", "https://example.com/auth?a=1+2",
+		"https://example.com/auth?a=1,2", "https://example.com/auth?a=1;2", `https://example.com/auth?a="1"`,
+		"https://example.com/auth?a='1'", "https://example.com/auth?a=1 2", "https://example.com/auth?a=1\t",
+		"https://example.com/auth?a=^1", "https://example.com/auth?a=!1", "https://example.com/auth?a=<1>",
+		"https://example.com/auth?a=1|2", "https://example.com/auth?a=`1`", "https://example.com/auth?a=%USERPROFILE%",
+		"https://example.com/auth?a=%", "https://example.com/auth?a=%2", "https://example.com/auth?a=%zz",
+		"https://example.com/auth?a=1/2", "https://example.com/auth?a=\\1", "https://example.com/auth?a=1\x00",
+		"https://example.com/auth?a=é", "https://example.com/auth?a=(1)", "https://example.com/auth?a=$1",
+		"https://example.com/auth?a=*", "https://example.com/auth?a=@", "https://example.com/auth?a=1\r\n",
+		"https://example.com/auth?" + strings.Repeat("a", maxAuthLinkLen),
+	}
+	for _, s := range refused {
+		if err := checkAuthLink(s); !errors.Is(err, ErrRefused) {
+			t.Errorf("checkAuthLink(%q) = %v, want ErrRefused", s, err)
+		}
+	}
+}
+
+// A refused authorization page never reaches the launcher, on every system.
+func TestOpenAuthPageRefusesBeforeTheStart(t *testing.T) {
+	for _, s := range []string{"", "https://example.com/auth?a=1,2", "https://example.com/auth"} {
+		if err := New().OpenAuthPage(context.Background(), s); !errors.Is(err, ErrRefused) {
+			t.Fatalf("OpenAuthPage(%q) = %v, want ErrRefused", s, err)
+		}
+	}
+}
+
 // A refused link never reaches the launcher, on every system.
 func TestOpenLinkRefusesBeforeTheStart(t *testing.T) {
 	if err := New().OpenLink(context.Background(), values.SourceURL{}); !errors.Is(err, ErrRefused) {

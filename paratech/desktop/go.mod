@@ -9,6 +9,7 @@ require (
 	github.com/wailsapp/wails/v3 v3.0.0-beta.29
 	github.com/wneessen/go-mail v0.8.1
 	github.com/xuri/excelize/v2 v2.11.0
+	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0
 	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.60.1

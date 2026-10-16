@@ -44,6 +44,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.schedule))
 	app.RegisterService(application.NewService(b.models))
 	app.RegisterService(application.NewService(b.connections))
+	app.RegisterService(application.NewService(b.google))
 
 	u := &windowsUI{app: app}
 	var offs []func()

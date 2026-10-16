@@ -50,6 +50,7 @@ type Core struct {
 	SpeechReady bool // whisper-cli was found at start
 
 	Connections ConnectionsUseCase // the mail and Hub section of the settings page
+	Google      GoogleUseCase      // the Google section of the same page
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -141,6 +142,7 @@ type bindings struct {
 	models   *ModelsService
 
 	connections *ConnectionsService
+	google      *GoogleService
 }
 
 // openBindings opens the core and builds the services bound to the pages.
@@ -176,6 +178,9 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Connections == nil {
 		return bindings{}, errors.New("wails: open core: no connections use case")
 	}
+	if core.Google == nil {
+		return bindings{}, errors.New("wails: open core: no google sign-in use case")
+	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
 		activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
@@ -187,6 +192,7 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 		}, s.opts.Log),
 
 		connections: NewConnectionsService(core.Connections, s.opts.Log),
+		google:      NewGoogleService(core.Google, s.opts.Log),
 	}, nil
 }
 

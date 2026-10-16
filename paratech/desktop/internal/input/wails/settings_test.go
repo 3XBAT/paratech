@@ -124,6 +124,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "model imports", edit: func(c *Core) { c.Imports = nil }},
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
+		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
@@ -156,6 +157,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 9},
+		{file: "google.ts", typ: reflect.TypeFor[*GoogleService](), methods: 6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

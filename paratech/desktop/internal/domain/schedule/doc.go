@@ -21,4 +21,6 @@
 //   - Start announcement: the "lesson is starting" event that offers the recording prompt, raised once per start
 //     time, from the lead time before the start until a short grace (lesson.StartLateGrace) after it.
 //   - Calendar projection: the copy of a lesson in the app-created Google calendar; an external view, never the source of truth.
+//   - Google client: the user's own OAuth client (client id and secret) the app signs in to Google with; the only
+//     scope is calendar.app.created (domain/schedule/values).
 package schedule
