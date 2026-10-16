@@ -43,13 +43,18 @@ func TestRecorderModeAnswersTheSoundCheck(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("recordings %v, %v", entries, err)
 	}
+	// The child never opens the log file: only the instance that holds the lock writes it.
+	if _, err := os.Stat(filepath.Join(dataDir, logsDir)); !os.IsNotExist(err) {
+		t.Fatalf("the recorder mode created the logs directory: %v", err)
+	}
 }
 
 // "Проверить звук" through the core: the answer of the recorder for the remembered source, busy while it captures.
 func TestSoundCheckThroughTheCore(t *testing.T) {
 	ctx := context.Background()
 	a, f := newTestAppWith(t, t.TempDir())
-	page := wails.NewDiagnosticsService(startCore(t, a).Sound, a.log)
+	core := startCore(t, a)
+	page := wails.NewDiagnosticsService(wails.DiagnosticsDeps{Sound: core.Sound, Bundle: core.Bundle}, a.log)
 
 	got, err := page.CheckSound(ctx)
 	if err != nil || got.Verdict != "ok" || got.Device != testenv.ToneDevice || len(got.Modes) != 2 {

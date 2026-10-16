@@ -4,13 +4,29 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/domain/recording/values"
 )
 
 // Operation names of the log.
-const opCheckSound = "ui: check sound"
+const (
+	opCheckSound = "ui: check sound"
+	opSaveBundle = "ui: save support bundle"
+	opPickBundle = "ui: choose where to save the support bundle"
+)
+
+// Statuses and fixed texts of "Сохранить пакет для поддержки".
+const (
+	bundleSaved     = "saved"
+	bundleCancelled = "cancelled"
+	bundleFailed    = "failed"
+
+	msgBundleSaved     = "Пакет для поддержки сохранён. Приложение ничего не отправляет: передайте файл разработчикам сами."
+	msgBundleCancelled = "Сохранение отменено."
+	msgBundleFailed    = "Не удалось сохранить пакет для поддержки. Выберите другую папку и попробуйте ещё раз."
+)
 
 // Fixed texts of "Проверить звук" (Russian UI), one per verdict.
 var soundMessages = map[values.SoundCause]string{
@@ -52,22 +68,76 @@ type SoundMode struct {
 	Cause string `json:"cause"`
 }
 
+// SupportBundleUseCase is the use case of "Сохранить пакет для поддержки" (ARCH-42).
+type SupportBundleUseCase interface {
+	SuggestedName() string
+	Create(ctx context.Context, path string) error
+}
+
+// BundleFilePicker shows the native save dialog of the support bundle with name proposed. It returns the chosen
+// path, or "" when the user cancels; the path never comes from the page.
+type BundleFilePicker interface {
+	PickBundleFile(ctx context.Context, name string) (string, error)
+}
+
+// bundlePickerFunc adapts a function to BundleFilePicker.
+type bundlePickerFunc func(ctx context.Context, name string) (string, error)
+
+// PickBundleFile implements BundleFilePicker.
+func (f bundlePickerFunc) PickBundleFile(ctx context.Context, name string) (string, error) {
+	return f(ctx, name)
+}
+
+// BundleResult answers "Сохранить пакет для поддержки": Status "saved", "cancelled" or "failed", a fixed text, and
+// the base name of the saved file ("" unless saved).
+type BundleResult struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Name    string `json:"name"`
+}
+
+// DiagnosticsDeps are the parts of the diagnostics page; all are required.
+type DiagnosticsDeps struct {
+	Sound  SoundCheckUseCase
+	Bundle SupportBundleUseCase
+	Picker BundleFilePicker
+}
+
 // DiagnosticsService is bound to the UI (the «Диагностика» page): every exported method is callable from the page by
 // its full name "<package path>.DiagnosticsService.<Method>". Keep the method set to what the page may call.
 type DiagnosticsService struct {
-	sound SoundCheckUseCase
-	log   *slog.Logger
+	deps DiagnosticsDeps
+	log  *slog.Logger
 }
 
 // NewDiagnosticsService returns the binding of the diagnostics page.
-func NewDiagnosticsService(sound SoundCheckUseCase, log *slog.Logger) *DiagnosticsService {
-	return &DiagnosticsService{sound: sound, log: log}
+func NewDiagnosticsService(deps DiagnosticsDeps, log *slog.Logger) *DiagnosticsService {
+	return &DiagnosticsService{deps: deps, log: log}
+}
+
+// SaveSupportBundle asks where to save the support bundle in the native save dialog and writes it there. Only this
+// explicit action creates a bundle, and it is never uploaded. Neither the path nor an error text reaches the page;
+// the page gets the base name of the file.
+func (s *DiagnosticsService) SaveSupportBundle(ctx context.Context) (BundleResult, error) {
+	path, err := s.deps.Picker.PickBundleFile(ctx, s.deps.Bundle.SuggestedName())
+	switch {
+	case err != nil:
+		s.log.Warn(opPickBundle, "err", err)
+		return BundleResult{Status: bundleFailed, Message: msgBundleFailed}, nil
+	case path == "":
+		return BundleResult{Status: bundleCancelled, Message: msgBundleCancelled}, nil
+	}
+	if err := s.deps.Bundle.Create(ctx, path); err != nil {
+		s.log.Error(opSaveBundle, "err", err) // the adapters' errors carry no path
+		return BundleResult{Status: bundleFailed, Message: msgBundleFailed}, nil
+	}
+	return BundleResult{Status: bundleSaved, Message: msgBundleSaved, Name: filepath.Base(path)}, nil
 }
 
 // CheckSound plays a short tone on the default output device and tells whether the capture hears it. A failure is a
 // normal answer with a fixed text; no error text reaches the page.
 func (s *DiagnosticsService) CheckSound(ctx context.Context) (SoundCheck, error) {
-	r, err := s.sound.Check(ctx)
+	r, err := s.deps.Sound.Check(ctx)
 	switch {
 	case errors.Is(err, soundcheck.ErrBusy):
 		return SoundCheck{Verdict: string(values.SoundBusy), Message: msgCheckRunning, Modes: []SoundMode{}}, nil

@@ -350,6 +350,23 @@ func (f *FakeRecorder) SoundChecks() int {
 	return f.soundChecks
 }
 
+// RecentCaptures returns the diagnostics of every capture, in no particular order.
+func (f *FakeRecorder) RecentCaptures(ctx context.Context) []values.CaptureDiagnostics {
+	f.mu.Lock()
+	ids := make([]shared.RecordingID, 0, len(f.captures))
+	for id := range f.captures {
+		ids = append(ids, id)
+	}
+	f.mu.Unlock()
+	out := make([]values.CaptureDiagnostics, 0, len(ids))
+	for _, id := range ids {
+		if d, ok := f.Diagnostics(ctx, id); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // Running reports whether the capture of id runs.
 func (f *FakeRecorder) Running(id shared.RecordingID) bool {
 	f.mu.Lock()

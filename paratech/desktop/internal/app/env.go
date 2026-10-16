@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/instancelock"
+	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/wincred"
@@ -70,6 +71,12 @@ const (
 	googleSecretsService = "google"
 )
 
+// logSink is an open log file.
+type logSink interface {
+	io.Writer
+	Close() error
+}
+
 // instanceLock is a held single-instance guard.
 type instanceLock interface {
 	Release() error
@@ -80,6 +87,8 @@ type instanceLock interface {
 type env struct {
 	// lock takes the single-instance guard of the data directory; it fails at once when another instance holds it.
 	lock func(dataDir string) (instanceLock, error)
+	// logFile opens the log file in dir after the lock is held; nil keeps the log on the console only.
+	logFile func(dir string) (logSink, error)
 
 	clock  timeSource
 	local  localTime // homeworkflow only: its Clock port names the student's zone
@@ -126,6 +135,7 @@ type env struct {
 func productionEnv() env {
 	return env{
 		lock:            acquireLock,
+		logFile:         openLogFile,
 		clock:           clock.System{},
 		local:           clock.Local{},
 		ids:             random.IDs{},
@@ -155,6 +165,15 @@ func credentialManager(service string) (secretStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// openLogFile is the size-rotated log file of the logfile adapter (5 MiB, two old files).
+func openLogFile(dir string) (logSink, error) {
+	f, err := logfile.Open(dir, logfile.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 // acquireLock is the file lock of the data directory.

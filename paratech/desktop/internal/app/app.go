@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"paratech/desktop/config"
+	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -27,6 +29,8 @@ const (
 type App struct {
 	cfg config.Config
 	log *slog.Logger
+	// tee is the handler of log: the logger of main, and the log file once openCore holds the instance lock.
+	tee *logfile.Tee
 	env env
 	// shell is nil in headless mode.
 	shell *wails.Shell
@@ -55,7 +59,9 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	a := &App{cfg: cfg, log: log, env: productionEnv()}
+	// Everything logs through the tee, the Wails logger behind its Info floor too, so the file gets what stderr gets.
+	tee := logfile.NewTee(log.Handler())
+	a := &App{cfg: cfg, log: slog.New(tee), tee: tee, env: productionEnv()}
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
 	if !cfg.Headless && !cfg.Recorder {
 		shell, err := wails.New(wails.Options{
@@ -171,22 +177,44 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	if err != nil {
 		return wails.Core{}, fmt.Errorf("app: single-instance guard: %w", err)
 	}
+	// Only the instance that holds the lock writes the log file; a second one must not mix into it.
+	closeLog := a.openLogFile()
 	// No path: it lies below the user's profile, and logs go into the support bundle.
 	a.log.Info("instance lock acquired")
 
 	c, err := buildCore(ctx, a.cfg.DataDir, a.env, a.log)
 	if err != nil {
-		return wails.Core{}, errors.Join(err, lock.Release())
+		return wails.Core{}, errors.Join(err, closeLog(), lock.Release())
 	}
 	if a.shell != nil {
 		if err := c.wirePrompts(a.env, a.shell, a.log); err != nil {
-			return wails.Core{}, errors.Join(err, c.close(), lock.Release())
+			return wails.Core{}, errors.Join(err, c.close(), closeLog(), lock.Release())
 		}
 	}
 	a.core = c
 	a.life = c.newLifecycle(a.log, a.env.stopTimeout,
-		closer{name: "storage", close: c.close}, closer{name: "instance lock", close: lock.Release})
+		closer{name: "storage", close: c.close}, closer{name: "log file", close: closeLog},
+		closer{name: "instance lock", close: lock.Release})
 	return c.ui, nil
+}
+
+// openLogFile opens <DataDir>/logs/desktop.log and attaches it to the logger; it returns what detaches and closes it.
+// A file that cannot be opened is a warning on the console, never a failed start.
+func (a *App) openLogFile() func() error {
+	none := func() error { return nil }
+	if a.env.logFile == nil || a.tee == nil {
+		return none
+	}
+	f, err := a.env.logFile(filepath.Join(a.cfg.DataDir, logsDir))
+	if err != nil {
+		a.log.Warn("the log file cannot be opened; logging to the console only", "err", err)
+		return none
+	}
+	a.tee.Attach(f)
+	return func() error {
+		a.tee.Detach()
+		return f.Close()
+	}
 }
 
 // Close stops a running startup, then the background work, and releases the storage and the instance lock, in

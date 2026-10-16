@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/soundcheck"
+	"paratech/desktop/internal/cases/supportbundle"
 )
 
 // platformRecorder is the audio recorder of this build: on Windows the recorder child of this executable
@@ -42,6 +43,15 @@ func soundChecker(rec recordingsession.Recorder) soundcheck.SoundChecker {
 		return c
 	}
 	return audiocapture.Unavailable{}
+}
+
+// captureHistory is the recent capture diagnostics of the recorder for the support bundle; nil for a recorder that
+// keeps none.
+func captureHistory(rec recordingsession.Recorder) supportbundle.CaptureHistory {
+	if h, ok := rec.(supportbundle.CaptureHistory); ok {
+		return h
+	}
+	return nil
 }
 
 // recordingActivity tells the sound check whether a recording is in progress.

@@ -319,6 +319,32 @@ func (r *Recorder) Diagnostics(_ context.Context, id shared.RecordingID) (d valu
 	return c.snapshot(), true
 }
 
+// RecentCaptures returns the diagnostics of the captures the recorder still knows (TASK-058, the support bundle): the
+// ended ones it keeps, oldest end first, then the running ones. ctx is not used.
+func (r *Recorder) RecentCaptures(context.Context) []values.CaptureDiagnostics {
+	r.mu.Lock()
+	var caps []*capture
+	seen := map[*capture]bool{}
+	for _, id := range r.ended {
+		if c := r.captures[id]; c != nil && c.isEnded() && !seen[c] {
+			seen[c] = true
+			caps = append(caps, c)
+		}
+	}
+	for _, c := range r.captures {
+		if !seen[c] && !c.isEnded() {
+			caps = append(caps, c)
+		}
+	}
+	r.mu.Unlock()
+
+	out := make([]values.CaptureDiagnostics, 0, len(caps))
+	for _, c := range caps {
+		out = append(out, c.snapshot())
+	}
+	return out
+}
+
 func (r *Recorder) lookup(id shared.RecordingID) *capture {
 	r.mu.Lock()
 	defer r.mu.Unlock()

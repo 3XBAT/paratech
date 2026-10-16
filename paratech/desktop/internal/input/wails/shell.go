@@ -52,7 +52,8 @@ type Core struct {
 	Connections ConnectionsUseCase // the mail and Hub section of the settings page
 	Google      GoogleUseCase      // the Google section of the same page
 
-	Sound SoundCheckUseCase // "Проверить звук" of the diagnostics page
+	Sound  SoundCheckUseCase    // "Проверить звук" of the diagnostics page
+	Bundle SupportBundleUseCase // "Сохранить пакет для поддержки"; the shell shows its save dialog
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -62,6 +63,7 @@ type ui interface {
 	showMain() error
 	pickScheduleFile() (string, error)
 	pickModelFile() (string, error)
+	pickBundleFile(name string) (string, error)
 }
 
 // Shell owns the UI: the main window, the tray icon and the popup. Create it with New. Window commands are safe
@@ -184,8 +186,8 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 	if core.Google == nil {
 		return bindings{}, errors.New("wails: open core: no google sign-in use case")
 	}
-	if core.Sound == nil {
-		return bindings{}, errors.New("wails: open core: no sound check use case")
+	if core.Sound == nil || core.Bundle == nil {
+		return bindings{}, errors.New("wails: open core: no diagnostics use cases")
 	}
 	return bindings{
 		settings: NewSettingsService(core.Settings, s.opts.Log),
@@ -199,7 +201,9 @@ func (s *Shell) openBindings(ctx context.Context) (bindings, error) {
 
 		connections: NewConnectionsService(core.Connections, s.opts.Log),
 		google:      NewGoogleService(core.Google, s.opts.Log),
-		diagnostics: NewDiagnosticsService(core.Sound, s.opts.Log),
+		diagnostics: NewDiagnosticsService(DiagnosticsDeps{
+			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
+		}, s.opts.Log),
 	}, nil
 }
 
@@ -219,6 +223,15 @@ func (s *Shell) pickModelFile(context.Context) (string, error) {
 		return "", err
 	}
 	return u.pickModelFile()
+}
+
+// pickBundleFile shows the save dialog of the support bundle over the main window; "" when the user cancels.
+func (s *Shell) pickBundleFile(_ context.Context, name string) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickBundleFile(name)
 }
 
 func (s *Shell) markStarted() error {
