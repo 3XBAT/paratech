@@ -21,15 +21,18 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 - `build-release.ps1` calls `build-alpha.ps1 -OutDir paratech\dist\release\<version>\app`: `npm ci`, `npm run build`,
   `go build -tags production -trimpath`, `CGO_ENABLED=0`, windows/amd64, then the `go version -m` check.
 - `-tags production` makes Wails ignore `FRONTEND_DEVSERVER_URL` (`internal/assetserver/build_dev.go` is the non-production file); the script
-  also clears it and `GOFLAGS` for the build.
+  also clears it, `GOFLAGS`, `GOAMD64`, `GOEXPERIMENT` and `GOWORK` for the build (an unset `GOWORK` still finds `paratech\go.work`).
+- After the build and with `-SkipAppBuild` the script runs `go version -m` on the staged exe: it needs `-tags=production`, `CGO_ENABLED=0` and,
+  if present, `GOAMD64=v1` (testers have older CPUs). A `GOAMD64` set by `go env -w` is caught here.
+- The plan prints the short HEAD commit and whether the tree is dirty; a `vX.Y.Z` tag on a dirty tree gives a WARNING (not an error).
 - The exe is a console program, like the alpha: started from the Start menu it opens a console with the log, and closing that console ends the app.
   Wails builds with `-ldflags "-H windowsgui"` (Taskfile above), but the app logs only to stderr, so without a console the log would be lost.
   Follow-up: a log file in the data folder, then `-H windowsgui`.
 
 ## WebView2
 - The installer embeds `MicrosoftEdgeWebview2Setup.exe` from the module (`internal/commands/webview2/`, embedded by `internal/commands/generate_webview2.go`;
-  1 793 816 bytes, file version 1.3.143.57, valid Authenticode signature of Microsoft Corporation, checked locally). The module is verified by `go.sum`;
-  the script also requires the Microsoft signature. Nothing is downloaded by the script.
+  1 793 816 bytes, file version 1.3.143.57, valid Authenticode signature of Microsoft Corporation, checked locally). `go.sum` is checked only when
+  the module is downloaded, not when it is read from the cache later; at build time the guard is the required Microsoft signature. Nothing is downloaded by the script.
 - At install it checks the `pv` value of `{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` under `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients`
   and `HKCU\Software\Microsoft\EdgeUpdate\Clients` (Wails macro `wails.webview2runtime`). On this Windows 10 the HKLM value is present (155.0.4283.45):
   Windows 10/11 normally have the Evergreen runtime.
@@ -49,7 +52,10 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 ## whisper-cli
 whisper-cli is looked up next to the exe (`internal/app/env.go`). Without `-WhisperDir` the installer has none: copy the files from the `Release\`
 folder of `whisper-bin-x64.zip` (b5454; verify the zip SHA-256 first, `docs/qa/run-alpha.md` §6) into the install folder and restart the app.
-With `-WhisperDir` the script prints the SHA-256 of every copied file; it does not pin them (follow-up, ADR-0009).
+With `-WhisperDir` the script first removes whisper files left in the staging folder (no stale `ggml-cpu-*.dll`), then prints the SHA-256 of every
+copied file; it does not pin them (follow-up, ADR-0009).
+Whether the b5454 binaries need the VC++ Redistributable (`VCRUNTIME140.dll`, `MSVCP140.dll`) is **[not verified]**; the installer does not
+ship it. Check on a clean Windows (`docs/qa/windows-checklist.md`, "Инсталлятор").
 
 ## Running app
 Installer and uninstaller check the Wails single-instance mutex `wails-app-paratech.learning-assistant.desktop-sim`
@@ -60,7 +66,8 @@ if it cannot delete the exe.
 ## Uninstall and user data
 - Deletes only its files (names above), `uninstall.exe`, the shortcut and the HKCU key, then `RMDir` **without** `/r` (the Wails template uses `/r`;
   a chosen folder may hold other files).
-- Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (database, recordings, transcripts, models, exports) and the
+- Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (recordings, transcripts, models, exports, the database
+  with the settings; the same list as the uninstaller message: `learning-assistant.db` and `artifacts\` of `internal/app/core.go`, no log files) and the
   WebView2 folder `%AppData%\learning-assistant.exe` (`internal/webview2/pkg/edge/chromium.go`). A `--data-dir` / `LA_DATA_DIR` folder is not touched.
 - Credential Manager keeps `paratech/hub/api-key`, `paratech/mail/smtp-password`, `paratech/google/client-id`, `.../client-secret`, `.../refresh-token`.
   Before uninstalling, "Выйти" in "Google Календарь" revokes Google access. Then remove the entries by hand: Control Panel → Credential Manager →
