@@ -160,6 +160,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 9},
 		{file: "google.ts", typ: reflect.TypeFor[*GoogleService](), methods: 6},
+		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

@@ -1,6 +1,6 @@
 // Sections of the main window. Homework is a placeholder filled by a later task.
 
-export type PageId = "recordings" | "models" | "homework" | "schedule" | "connections" | "settings";
+export type PageId = "recordings" | "models" | "homework" | "schedule" | "connections" | "settings" | "diagnostics";
 
 export interface Page {
   id: PageId;
@@ -14,6 +14,7 @@ export const pages: readonly Page[] = [
   { id: "schedule", label: "Расписание" },
   { id: "connections", label: "Подключения" },
   { id: "settings", label: "Настройки" },
+  { id: "diagnostics", label: "Диагностика" },
 ];
 
 export const defaultPage: PageId = "recordings";
