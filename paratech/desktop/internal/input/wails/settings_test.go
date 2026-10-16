@@ -139,6 +139,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "model imports", edit: func(c *Core) { c.Imports = nil }},
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
+		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
