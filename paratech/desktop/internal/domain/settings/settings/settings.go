@@ -8,21 +8,19 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Defaults of a fresh installation (PRD sections 6.1, 7.4 and 15).
+// Defaults of a fresh installation (PRD sections 6.1 and 7.4).
 const (
-	DefaultRecordingPromptsEnabled    = true // AC-02: prompts are on until the user turns them off
-	DefaultProcessOnlyOnACPower       = true // AC-21: heavy jobs wait for AC power by default
-	DefaultNotifyOnProcessingComplete = true // PRD section 15
+	DefaultRecordingPromptsEnabled = true // AC-02: prompts are on until the user turns them off
+	DefaultProcessOnlyOnACPower    = true // AC-21: heavy jobs wait for AC power by default
 )
 
-// Settings is the typed set of user settings of the installation (PRD sections 6.1, 7.4 and 15). It is a singleton:
+// Settings is the typed set of user settings of the installation (PRD sections 6.1 and 7.4). It is a singleton:
 // there is exactly one per installation.
 type Settings struct {
-	version                    int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
-	recordingPromptsEnabled    bool
-	processOnlyOnACPower       bool
-	notifyOnProcessingComplete bool
-	defaultSttModel            shared.SttModelID // empty: no default selected (reference by ID, ARCH-13)
+	version                 int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
+	recordingPromptsEnabled bool
+	processOnlyOnACPower    bool
+	defaultSttModel         shared.SttModelID // empty: no default selected (reference by ID, ARCH-13)
 
 	// Mail and Hub setup (PRD sections 10 and 12). None of it is a secret: the SMTP password and the Hub API key live
 	// in the credential store (hard rule 4). Empty means not set.
@@ -43,28 +41,26 @@ type Settings struct {
 // New returns the defaults of a fresh installation, never stored (Version() == 0).
 func New() *Settings {
 	return &Settings{
-		recordingPromptsEnabled:    DefaultRecordingPromptsEnabled,
-		processOnlyOnACPower:       DefaultProcessOnlyOnACPower,
-		notifyOnProcessingComplete: DefaultNotifyOnProcessingComplete,
-		smtpSecurity:               DefaultMailSecurity,
+		recordingPromptsEnabled: DefaultRecordingPromptsEnabled,
+		processOnlyOnACPower:    DefaultProcessOnlyOnACPower,
+		smtpSecurity:            DefaultMailSecurity,
 	}
 }
 
 // State is the stored form of the settings, for Restore.
 type State struct {
-	Version                    int64
-	RecordingPromptsEnabled    bool
-	ProcessOnlyOnACPower       bool
-	NotifyOnProcessingComplete bool
-	DefaultSttModel            shared.SttModelID // empty: none selected
-	HomeworkRecipient          string            // empty: none
-	SMTPHost                   string            // empty: none
-	SMTPPort                   int               // 0: the default of the mode
-	SMTPSecurity               MailSecurity      // empty: DefaultMailSecurity
-	SMTPLogin                  string            // empty: none
-	HubURL                     string            // empty: none
-	RecordingSource            shared.AppName    // empty: the whole computer
-	UpdatedAt                  time.Time         // zero: stored defaults that the user never changed
+	Version                 int64
+	RecordingPromptsEnabled bool
+	ProcessOnlyOnACPower    bool
+	DefaultSttModel         shared.SttModelID // empty: none selected
+	HomeworkRecipient       string            // empty: none
+	SMTPHost                string            // empty: none
+	SMTPPort                int               // 0: the default of the mode
+	SMTPSecurity            MailSecurity      // empty: DefaultMailSecurity
+	SMTPLogin               string            // empty: none
+	HubURL                  string            // empty: none
+	RecordingSource         shared.AppName    // empty: the whole computer
+	UpdatedAt               time.Time         // zero: stored defaults that the user never changed
 }
 
 // Restore rebuilds stored settings without side effects; it only checks that the state is consistent.
@@ -92,19 +88,18 @@ func Restore(s State) (*Settings, error) {
 	}
 
 	return &Settings{
-		version:                    s.Version,
-		recordingPromptsEnabled:    s.RecordingPromptsEnabled,
-		processOnlyOnACPower:       s.ProcessOnlyOnACPower,
-		notifyOnProcessingComplete: s.NotifyOnProcessingComplete,
-		defaultSttModel:            s.DefaultSttModel,
-		homeworkRecipient:          s.HomeworkRecipient,
-		smtpHost:                   s.SMTPHost,
-		smtpPort:                   s.SMTPPort,
-		smtpSecurity:               security,
-		smtpLogin:                  s.SMTPLogin,
-		hubURL:                     s.HubURL,
-		recordingSource:            s.RecordingSource,
-		updatedAt:                  s.UpdatedAt,
+		version:                 s.Version,
+		recordingPromptsEnabled: s.RecordingPromptsEnabled,
+		processOnlyOnACPower:    s.ProcessOnlyOnACPower,
+		defaultSttModel:         s.DefaultSttModel,
+		homeworkRecipient:       s.HomeworkRecipient,
+		smtpHost:                s.SMTPHost,
+		smtpPort:                s.SMTPPort,
+		smtpSecurity:            security,
+		smtpLogin:               s.SMTPLogin,
+		hubURL:                  s.HubURL,
+		recordingSource:         s.RecordingSource,
+		updatedAt:               s.UpdatedAt,
 	}, nil
 }
 
@@ -113,9 +108,6 @@ func (s *Settings) RecordingPromptsEnabled() bool { return s.recordingPromptsEna
 
 // ProcessOnlyOnACPower reports whether heavy local jobs wait for AC power (PRD section 7.4, AC-21, AC-22).
 func (s *Settings) ProcessOnlyOnACPower() bool { return s.processOnlyOnACPower }
-
-// NotifyOnProcessingComplete reports whether finished processing notifies the user (PRD section 15).
-func (s *Settings) NotifyOnProcessingComplete() bool { return s.notifyOnProcessingComplete }
 
 // DefaultSttModel returns the selected default STT model, or the empty ID if none is selected (AC-07).
 func (s *Settings) DefaultSttModel() shared.SttModelID { return s.defaultSttModel }
@@ -131,11 +123,6 @@ func (s *Settings) SetRecordingPromptsEnabled(enabled bool, now time.Time) error
 // SetProcessOnlyOnACPower turns the AC-power restriction of heavy jobs on or off (PRD section 7.4, AC-22).
 func (s *Settings) SetProcessOnlyOnACPower(enabled bool, now time.Time) error {
 	return change(s, &s.processOnlyOnACPower, enabled, now)
-}
-
-// SetNotifyOnProcessingComplete turns the notification about finished processing on or off (PRD section 15).
-func (s *Settings) SetNotifyOnProcessingComplete(enabled bool, now time.Time) error {
-	return change(s, &s.notifyOnProcessingComplete, enabled, now)
 }
 
 // SelectDefaultSttModel makes an installed model the default (PRD section 8, AC-07). Whether the model is installed is

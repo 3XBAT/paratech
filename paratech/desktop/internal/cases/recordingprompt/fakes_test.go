@@ -44,7 +44,7 @@ func (f *fakeSettings) Load(context.Context) (*settings.Settings, error) {
 	}
 	return settings.Restore(settings.State{
 		Version: f.version + 1, RecordingPromptsEnabled: !f.off, ProcessOnlyOnACPower: true,
-		NotifyOnProcessingComplete: true, RecordingSource: f.source,
+		RecordingSource: f.source,
 	})
 }
 

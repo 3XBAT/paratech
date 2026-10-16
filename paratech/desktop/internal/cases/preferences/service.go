@@ -53,14 +53,6 @@ func (s *Service) SetProcessOnlyOnACPower(ctx context.Context, enabled bool) (To
 	})
 }
 
-// SetNotifyOnProcessingComplete turns the notification about finished processing on or off (PRD section 15) and
-// returns the stored toggles.
-func (s *Service) SetNotifyOnProcessingComplete(ctx context.Context, enabled bool) (Toggles, error) {
-	return s.change(ctx, "set notify on processing complete", func(st *settings.Settings, now time.Time) error {
-		return st.SetNotifyOnProcessingComplete(enabled, now)
-	})
-}
-
 // change reloads the settings and applies fn again while the save meets a stale version (ADR-0004(d)).
 func (s *Service) change(ctx context.Context, op string, fn func(*settings.Settings, time.Time) error) (Toggles, error) {
 	var err error
@@ -95,7 +87,5 @@ func toggles(st *settings.Settings) Toggles {
 	return Toggles{
 		RecordingPromptsEnabled: st.RecordingPromptsEnabled(),
 		ProcessOnlyOnACPower:    st.ProcessOnlyOnACPower(),
-
-		NotifyOnProcessingComplete: st.NotifyOnProcessingComplete(),
 	}
 }

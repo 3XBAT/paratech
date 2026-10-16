@@ -48,17 +48,16 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 	}
 	r.saves++
 	r.stored = settings.State{
-		Version:                    s.Version() + 1,
-		RecordingPromptsEnabled:    s.RecordingPromptsEnabled(),
-		ProcessOnlyOnACPower:       s.ProcessOnlyOnACPower(),
-		NotifyOnProcessingComplete: s.NotifyOnProcessingComplete(),
-		HomeworkRecipient:          s.HomeworkRecipient(),
-		SMTPHost:                   s.SMTPHost(),
-		SMTPPort:                   s.SMTPPort(),
-		SMTPSecurity:               s.SMTPSecurity(),
-		SMTPLogin:                  s.SMTPLogin(),
-		HubURL:                     s.HubURL(),
-		UpdatedAt:                  s.UpdatedAt(),
+		Version:                 s.Version() + 1,
+		RecordingPromptsEnabled: s.RecordingPromptsEnabled(),
+		ProcessOnlyOnACPower:    s.ProcessOnlyOnACPower(),
+		HomeworkRecipient:       s.HomeworkRecipient(),
+		SMTPHost:                s.SMTPHost(),
+		SMTPPort:                s.SMTPPort(),
+		SMTPSecurity:            s.SMTPSecurity(),
+		SMTPLogin:               s.SMTPLogin(),
+		HubURL:                  s.HubURL(),
+		UpdatedAt:               s.UpdatedAt(),
 	}
 	s.Persisted(r.stored.Version)
 	return nil

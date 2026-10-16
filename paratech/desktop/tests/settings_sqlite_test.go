@@ -51,9 +51,9 @@ func TestSettingsThroughPortsSurviveRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !s.RecordingPromptsEnabled() || !s.ProcessOnlyOnACPower() || !s.NotifyOnProcessingComplete() || s.Version() != 0 {
-			t.Fatalf("empty database: prompts=%v acOnly=%v notify=%v version=%d, want the defaults with version 0",
-				s.RecordingPromptsEnabled(), s.ProcessOnlyOnACPower(), s.NotifyOnProcessingComplete(), s.Version())
+		if !s.RecordingPromptsEnabled() || !s.ProcessOnlyOnACPower() || s.Version() != 0 {
+			t.Fatalf("empty database: prompts=%v acOnly=%v version=%d, want the defaults with version 0",
+				s.RecordingPromptsEnabled(), s.ProcessOnlyOnACPower(), s.Version())
 		}
 
 		if err := s.SetRecordingPromptsEnabled(false, now); err != nil {
@@ -80,7 +80,7 @@ func TestSettingsThroughPortsSurviveRestart(t *testing.T) {
 			t.Errorf("jobrunner reader: acOnly=%v err=%v, want the restriction off (AC-22)", s != nil && s.ProcessOnlyOnACPower(), err)
 		}
 
-		if err == nil && (s.Version() != 1 || !s.NotifyOnProcessingComplete()) {
+		if err == nil && s.Version() != 1 {
 			t.Errorf("jobrunner reader: got %+v; want the stored row with version 1", s)
 		}
 	})

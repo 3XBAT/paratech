@@ -71,55 +71,52 @@ func (r *SettingsRepository) Save(ctx context.Context, s *settings.Settings) err
 
 func settingsFromRow(row sqlcgen.Setting) (*settings.Settings, error) {
 	return settings.Restore(settings.State{
-		Version:                    row.Version,
-		RecordingPromptsEnabled:    row.RecordingPromptsEnabled != 0,
-		ProcessOnlyOnACPower:       row.ProcessOnlyOnAcPower != 0,
-		NotifyOnProcessingComplete: row.NotifyOnProcessingComplete != 0,
-		DefaultSttModel:            shared.SttModelID(row.DefaultSttModelID.String),
-		HomeworkRecipient:          row.HomeworkRecipient,
-		SMTPHost:                   row.SmtpHost,
-		SMTPPort:                   int(row.SmtpPort),
-		SMTPSecurity:               settings.MailSecurity(row.SmtpSecurity),
-		SMTPLogin:                  row.SmtpUsername,
-		HubURL:                     row.HubUrl,
-		RecordingSource:            shared.AppName(row.RecordingSourceApp),
-		UpdatedAt:                  settingsFromMs(row.UpdatedAt),
+		Version:                 row.Version,
+		RecordingPromptsEnabled: row.RecordingPromptsEnabled != 0,
+		ProcessOnlyOnACPower:    row.ProcessOnlyOnAcPower != 0,
+		DefaultSttModel:         shared.SttModelID(row.DefaultSttModelID.String),
+		HomeworkRecipient:       row.HomeworkRecipient,
+		SMTPHost:                row.SmtpHost,
+		SMTPPort:                int(row.SmtpPort),
+		SMTPSecurity:            settings.MailSecurity(row.SmtpSecurity),
+		SMTPLogin:               row.SmtpUsername,
+		HubURL:                  row.HubUrl,
+		RecordingSource:         shared.AppName(row.RecordingSourceApp),
+		UpdatedAt:               settingsFromMs(row.UpdatedAt),
 	})
 }
 
 func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
 	return sqlcgen.InsertSettingsParams{
-		RecordingPromptsEnabled:    settingsBool(s.RecordingPromptsEnabled()),
-		ProcessOnlyOnAcPower:       settingsBool(s.ProcessOnlyOnACPower()),
-		NotifyOnProcessingComplete: settingsBool(s.NotifyOnProcessingComplete()),
-		DefaultSttModelID:          settingsModel(s.DefaultSttModel()),
-		HomeworkRecipient:          s.HomeworkRecipient(),
-		SmtpHost:                   s.SMTPHost(),
-		SmtpPort:                   int64(s.SMTPPort()),
-		SmtpSecurity:               string(s.SMTPSecurity()),
-		SmtpUsername:               s.SMTPLogin(),
-		HubUrl:                     s.HubURL(),
-		RecordingSourceApp:         s.RecordingSource().String(),
-		UpdatedAt:                  settingsMs(s.UpdatedAt()),
+		RecordingPromptsEnabled: settingsBool(s.RecordingPromptsEnabled()),
+		ProcessOnlyOnAcPower:    settingsBool(s.ProcessOnlyOnACPower()),
+		DefaultSttModelID:       settingsModel(s.DefaultSttModel()),
+		HomeworkRecipient:       s.HomeworkRecipient(),
+		SmtpHost:                s.SMTPHost(),
+		SmtpPort:                int64(s.SMTPPort()),
+		SmtpSecurity:            string(s.SMTPSecurity()),
+		SmtpUsername:            s.SMTPLogin(),
+		HubUrl:                  s.HubURL(),
+		RecordingSourceApp:      s.RecordingSource().String(),
+		UpdatedAt:               settingsMs(s.UpdatedAt()),
 	}
 }
 
 func settingsUpdateParams(s *settings.Settings) sqlcgen.UpdateSettingsParams {
 	p := settingsInsertParams(s)
 	return sqlcgen.UpdateSettingsParams{
-		RecordingPromptsEnabled:    p.RecordingPromptsEnabled,
-		ProcessOnlyOnAcPower:       p.ProcessOnlyOnAcPower,
-		NotifyOnProcessingComplete: p.NotifyOnProcessingComplete,
-		DefaultSttModelID:          p.DefaultSttModelID,
-		HomeworkRecipient:          p.HomeworkRecipient,
-		SmtpHost:                   p.SmtpHost,
-		SmtpPort:                   p.SmtpPort,
-		SmtpSecurity:               p.SmtpSecurity,
-		SmtpUsername:               p.SmtpUsername,
-		HubUrl:                     p.HubUrl,
-		RecordingSourceApp:         p.RecordingSourceApp,
-		UpdatedAt:                  p.UpdatedAt,
-		ExpectedVersion:            s.Version(),
+		RecordingPromptsEnabled: p.RecordingPromptsEnabled,
+		ProcessOnlyOnAcPower:    p.ProcessOnlyOnAcPower,
+		DefaultSttModelID:       p.DefaultSttModelID,
+		HomeworkRecipient:       p.HomeworkRecipient,
+		SmtpHost:                p.SmtpHost,
+		SmtpPort:                p.SmtpPort,
+		SmtpSecurity:            p.SmtpSecurity,
+		SmtpUsername:            p.SmtpUsername,
+		HubUrl:                  p.HubUrl,
+		RecordingSourceApp:      p.RecordingSourceApp,
+		UpdatedAt:               p.UpdatedAt,
+		ExpectedVersion:         s.Version(),
 	}
 }
 
