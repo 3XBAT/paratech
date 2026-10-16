@@ -10,7 +10,7 @@ export const helpPageKeys = [
   "apple-mac-calendar-accounts",
   "apple-mac-subscribe",
   "google-apple-sync",
-  "google-secret-ical",
+  "google-ical-address",
   "google-syncselect",
 ] as const;
 

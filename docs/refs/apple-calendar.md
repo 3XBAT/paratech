@@ -94,7 +94,7 @@ All query-less, fetched 2026-10-16. Google pages without `?hl=` showed English t
 | apple-mac-calendar-accounts | https://support.apple.com/ru-ru/guide/calendar/icl4308d6701/mac | Добавление учетной записи в Календаре на Mac |
 | apple-mac-subscribe | https://support.apple.com/ru-ru/guide/calendar/icl1022/16.0/mac/26 | Подписка на календарь на Mac |
 | google-apple-sync | https://support.google.com/calendar/answer/99358 | Google Календарь в Календаре Apple |
-| google-secret-ical | https://support.google.com/calendar/answer/37648 | Закрытый адрес календаря в формате iCal |
+| google-ical-address | https://support.google.com/calendar/answer/37648 | Закрытый адрес календаря в формате iCal |
 
 ## Not verified
 - Apple iPhone/iPad guide pages (A2 and all iPhone/iPad guide pages): the fetched text is cut off in the navigation before the

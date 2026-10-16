@@ -154,7 +154,7 @@ export const helpOptions: readonly HelpOption[] = [
           "В разделе «Настройки моих календарей» выберите календарь приложения.",
           "Откройте «Интеграция календаря» и скопируйте «Закрытый адрес в формате iCal».",
         ],
-        links: [{ key: "google-secret-ical", caption: "Закрытый адрес календаря в формате iCal" }],
+        links: [{ key: "google-ical-address", caption: "Закрытый адрес календаря в формате iCal" }],
       },
       {
         id: "b-mac",

@@ -28,7 +28,7 @@ func HelpPageURLs() map[string]string {
 		"apple-mac-calendar-accounts": "https://support.apple.com/ru-ru/guide/calendar/icl4308d6701/mac",
 		"apple-mac-subscribe":         "https://support.apple.com/ru-ru/guide/calendar/icl1022/16.0/mac/26",
 		"google-apple-sync":           "https://support.google.com/calendar/answer/99358",
-		"google-secret-ical":          "https://support.google.com/calendar/answer/37648",
+		"google-ical-address":         "https://support.google.com/calendar/answer/37648",
 		"google-syncselect":           "https://www.google.com/calendar/syncselect",
 	}
 }
