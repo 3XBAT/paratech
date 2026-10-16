@@ -11,6 +11,8 @@ export function useGoogleStatus(active: boolean): { state: GoogleState | null; l
   const [state, setState] = useState<GoogleState | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const mounted = useRef(true);
+  // Only the latest request may set the state: a slow reply of an older one must not overwrite a newer answer.
+  const seq = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -23,14 +25,21 @@ export function useGoogleStatus(active: boolean): { state: GoogleState | null; l
     if (!active) {
       return;
     }
+    const n = ++seq.current;
+    setLoadFailed(false);
     api.status().then(
       (s) => {
-        if (mounted.current) {
+        if (mounted.current && n === seq.current) {
           setState(s);
-          setLoadFailed(false);
         }
       },
-      () => mounted.current && setLoadFailed(true),
+      () => {
+        // The old state may be out of date (the Google page may have changed it): show the failure instead.
+        if (mounted.current && n === seq.current) {
+          setState(null);
+          setLoadFailed(true);
+        }
+      },
     );
   }, [active, api]);
 
@@ -40,8 +49,9 @@ export function useGoogleStatus(active: boolean): { state: GoogleState | null; l
       return;
     }
     const timer = setInterval(() => {
+      const n = ++seq.current;
       api.status().then(
-        (s) => mounted.current && setState(s),
+        (s) => mounted.current && n === seq.current && setState(s),
         () => {}, // the next tick tries again
       );
     }, statusPollMs);

@@ -56,13 +56,21 @@ const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 // "Подключения": an overview of section cards with a status each; a card opens its section in place of the overview:
 // the Hub address, key and quota; the mail account, password and check; the Google sign-in (GoogleBlock); the Apple
 // Calendar help (docs/design/concept-final.html). The sections are not in the rail. The page only shows and forwards
-// the values; validation, the secret store and the quota are in the Go core (ARCH-44).
-export function ConnectionsPage() {
+// the values; validation, the secret store and the quota are in the Go core (ARCH-44). A new visit (a click on
+// «Подключения» in the rail) brings the overview back.
+export function ConnectionsPage(props: { visit?: number }) {
   const api = useMemo(() => connectionsApi(callByName), []);
   const [open, setOpen] = useState<ConnSection | null>(null);
   // "Назад" puts the focus back on the card that opened the section.
   const returnTo = useRef<ConnSection | null>(null);
   const cards = useRef<Partial<Record<ConnSection, HTMLButtonElement | null>>>({});
+  const cardRefs = useMemo(() => {
+    const ref = (id: ConnSection) => (el: HTMLButtonElement | null) => {
+      cards.current[id] = el;
+    };
+    return { hub: ref("hub"), mail: ref("mail"), google: ref("google"), apple: ref("apple") };
+  }, []);
+  const firstVisit = useRef(props.visit);
   const google = useGoogleStatus(open === null);
   const [saved, setSaved] = useState<Connections | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -269,6 +277,12 @@ export function ConnectionsPage() {
     }
   }, [open]);
 
+  useEffect(() => {
+    if (props.visit !== firstVisit.current) {
+      setOpen(null);
+    }
+  }, [props.visit]);
+
   const back = () => {
     returnTo.current = open;
     setOpen(null);
@@ -305,9 +319,7 @@ export function ConnectionsPage() {
     const loadFailed = loadError !== "";
     const cardProps = (id: ConnSection) => ({
       onOpen: () => setOpen(id),
-      buttonRef: (el: HTMLButtonElement | null) => {
-        cards.current[id] = el;
-      },
+      buttonRef: cardRefs[id],
     });
     return (
       <section className="page">
@@ -413,7 +425,7 @@ export function ConnectionsPage() {
           />
 
           <hr className="sep" />
-          <h3>{quotaTexts.title}</h3>
+          <h2>{quotaTexts.title}</h2>
           {used !== null && (
             <div className="meter">
               <Progress value={used} label={quotaTexts.used} thick text={`${quotaTexts.used} ${used} %`} />
@@ -529,7 +541,7 @@ export function ConnectionsPage() {
         />
 
         <hr className="sep" />
-        <h3>Проверка почты</h3>
+        <h2>Проверка почты</h2>
         <p className="small muted">{texts.checkNoSend}</p>
         <div className="acts start">
           <Button

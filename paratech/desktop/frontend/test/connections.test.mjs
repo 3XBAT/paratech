@@ -2,6 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createElement as h } from "react";
+import server from "react-dom/server";
+import { helpTexts } from "../.test-build/appleHelpView.js";
+import { pages } from "../.test-build/nav.js";
+import { HelpView } from "../.test-build/pages/AppleCalendarHelpPage.js";
 import {
   connectionsApi,
   methods,
@@ -401,7 +406,8 @@ test("the mail card follows the settings, the password and a check made on the p
   assert.deepEqual(mail(fresh), ["wait", "Не настроено"]);
   assert.deepEqual(mail({ ...stored, mailPassword: "unset" }), ["wait", "Нет пароля"]);
   assert.deepEqual(mail({ ...stored, mailPassword: "unavailable" }), ["fail", "Пароль недоступен"]);
-  assert.deepEqual(mail(stored), ["ok", "Настроено"]);
+  // Saved but not checked: no green until «Проверить почту» passes.
+  assert.deepEqual(mail(stored), ["neutral", "Настроено"]);
   assert.deepEqual(mail(stored, { ok: true, message: "" }), ["ok", "Проверено"]);
   assert.deepEqual(mail(stored, { ok: false, message: "" }), ["fail", "Проверка не прошла"]);
 });
@@ -452,5 +458,17 @@ test("the overview opens each section in place and returns the focus to its card
   const hook = src("../src/pages/useGoogleStatus.ts");
   assert.deepEqual([...hook.matchAll(/api\.(\w+)\(/g)].map((m) => m[1]), ["status", "status"]);
   // The sections stay off the rail.
-  assert.ok(!src("../src/nav.ts").includes("hub"));
+  assert.deepEqual(
+    pages.map((p) => p.id).filter((id) => ["hub", "mail", "google", "apple"].includes(id)),
+    [],
+  );
+  assert.ok(pages.some((p) => p.id === "connections"));
+  // A click on «Подключения» in the rail while a section is open brings the overview back.
+  assert.match(src("../src/App.tsx"), /<ConnectionsPage visit=\{props\.visit\} \/>/);
+  assert.match(page, /if \(props\.visit !== firstVisit\.current\) \{\s*setOpen\(null\);/);
+});
+
+test("the Apple help page keeps the entry text as its lead", () => {
+  const markup = server.renderToStaticMarkup(h(HelpView, { failure: null, onOpen: () => {}, onBack: () => {} }));
+  assert.ok(markup.includes(helpTexts.entryText), helpTexts.entryText);
 });

@@ -340,8 +340,8 @@ export function mailCardStatus(s: { saved: Connections | null; loadFailed: boole
   if (s.check !== null) {
     return s.check.ok ? status("ok", "Проверено") : status("fail", "Проверка не прошла");
   }
-  // Without a check nothing says the server accepts the login.
-  return status("ok", "Настроено");
+  // Without a check nothing says the server accepts the login, so no green.
+  return status("neutral", "Настроено");
 }
 
 /** The card of Google from GoogleStatus: the client, the account and a sign-in waiting for the browser. */
