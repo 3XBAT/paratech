@@ -72,7 +72,7 @@ test("every problem code has its own text, an unknown one the generic failure", 
   const texts = problems.map(problemText);
   assert.equal(new Set(texts).size, texts.length);
   assert.equal(problemText("unavailable"), "Запись пока недоступна в этой сборке.");
-  assert.equal(problemText("in_progress"), "Уже идёт другая запись. Остановите её на странице «Записи».");
+  assert.equal(problemText("in_progress"), "Уже идёт другая запись — её можно остановить в «Записях и задачах».");
   assert.equal(problemText("recovering"), "Восстанавливаются прерванные записи. Повторите через минуту.");
   assert.equal(problemText("failed"), "Не удалось начать запись.");
   assert.equal(problemText(""), "");
@@ -92,7 +92,7 @@ test("an offered lesson shows title, time and its buttons; snooze only when the 
   assert.deepEqual(popupModel({ ...lesson, canSnooze: false }, null).buttons, ["start", "skip"]);
   assert.deepEqual(
     [buttonLabels.start, buttonLabels.snooze, buttonLabels.skip],
-    ["Начать запись", "Отложить на 5 мин", "Пропустить"],
+    ["Начать запись", "Через 5 минут", "Пропустить"],
   );
 });
 

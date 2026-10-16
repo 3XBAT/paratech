@@ -1,7 +1,15 @@
 // Theme choice (src/ui/theme.ts). Runs on the modules compiled by `npm run test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyTheme, parseTheme, readTheme, themeChoices, themeKey, writeTheme } from "../.test-build/ui/theme.js";
+import {
+  applyTheme,
+  parseTheme,
+  readTheme,
+  themeChoices,
+  themeFromStorageEvent,
+  themeKey,
+  writeTheme,
+} from "../.test-build/ui/theme.js";
 
 function memory(initial = {}) {
   const data = new Map(Object.entries(initial));
@@ -49,4 +57,13 @@ test("a forced theme sets data-theme, the system theme removes it", () => {
   assert.equal(r.attrs.get("data-theme"), "light");
   applyTheme(r, "system");
   assert.equal(r.attrs.has("data-theme"), false);
+});
+
+test("a change of the theme in another window reaches this one; other keys are ignored", () => {
+  assert.equal(themeFromStorageEvent({ key: themeKey, newValue: "dark" }), "dark");
+  assert.equal(themeFromStorageEvent({ key: themeKey, newValue: "light" }), "light");
+  assert.equal(themeFromStorageEvent({ key: themeKey, newValue: null }), "system");
+  assert.equal(themeFromStorageEvent({ key: themeKey, newValue: "neon" }), "system");
+  assert.equal(themeFromStorageEvent({ key: null, newValue: null }), "system", "storage cleared");
+  assert.equal(themeFromStorageEvent({ key: "other", newValue: "dark" }), null);
 });

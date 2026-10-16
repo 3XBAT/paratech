@@ -63,6 +63,29 @@ export function initTheme(): ThemeChoice {
   return choice;
 }
 
+/**
+ * The choice a storage event of another window carries, or null when the event is about something else. A cleared
+ * storage (key null) means the system theme.
+ */
+export function themeFromStorageEvent(e: { key: string | null; newValue: string | null }): ThemeChoice | null {
+  if (e.key === null) {
+    return "system";
+  }
+  return e.key === themeKey ? parseTheme(e.newValue) : null;
+}
+
+/** Applies a choice made in another window (Settings) to this one; returns the function that stops listening. */
+export function followTheme(): () => void {
+  const onStorage = (e: StorageEvent) => {
+    const choice = themeFromStorageEvent(e);
+    if (choice !== null) {
+      applyTheme(document.documentElement, choice);
+    }
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
+
 /** The saved choice, for the theme switch in Settings. */
 export function currentTheme(): ThemeChoice {
   return readTheme(browserStore());

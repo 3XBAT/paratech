@@ -1,41 +1,87 @@
-/* The window is 360x300 DIP (internal/input/wails/spec.go). The buttons never shrink: only the text area does,
-   and it scrolls as a last resort (larger Windows text) instead of pushing the buttons out. */
+/* The lesson window, 360x300 DIP (internal/input/wails/spec.go). Needs only tokens.css and fonts.css: the few base and
+   component rules it uses are repeated here, so the popup does not load the main window's styles. The buttons never
+   shrink: only the text area does, and it scrolls as a last resort (larger Windows text) instead of pushing them out. */
+*, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { font: 13px/1.35 "Segoe UI", sans-serif; background: #fff; color: #222; overflow: hidden; user-select: none; cursor: default; }
-.popup { box-sizing: border-box; height: 100%; padding: 10px 14px; border: 1px solid #c8c8c8; display: flex; flex-direction: column; gap: 4px; }
-.head, .title, .note { flex: none; }
-.head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.heading { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.time { flex: none; color: #555; white-space: nowrap; }
-.title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.note { color: #555; }
-.error { color: #b00020; font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.texts { flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
-.texts > * { flex: none; }
-.buttons { flex: none; margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; }
-button { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid #b8b8b8; border-radius: 4px; background: #f3f3f3; color: inherit; white-space: nowrap; cursor: pointer; }
-button:hover:enabled { background: #e6e6e6; }
-button.primary { background: #0067c0; border-color: #0067c0; color: #fff; }
-button.primary:hover:enabled { background: #005aa8; }
-button:disabled { opacity: 0.6; cursor: default; }
+body {
+  overflow: hidden;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+button { font: inherit; color: inherit; }
+h1, p, ul { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.i { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Source picker: one compact row; the list opens over the rest of the popup and scrolls inside itself. */
-.picker { position: relative; flex: none; }
-.source { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 3px 6px; text-align: left; }
-.source.chosen { background: #fff; }
+.popup { display: flex; flex-direction: column; gap: 5px; height: 100%; padding: 10px 14px; border: 1px solid var(--line); }
+.p-top, .title, .p-note, .picker, .pbtns { flex: none; }
+
+/* Top line: dot, heading, time. */
+.p-top { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: var(--fs-small); line-height: 16px; font-weight: 600; }
+.p-top.live { color: var(--rec-t); }
+.heading { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.time { flex: none; color: var(--muted); font-weight: 500; white-space: nowrap; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--rec); animation: breath var(--t-breath) ease-in-out infinite; }
+@keyframes breath { 50% { opacity: .35; } }
+
+/* The lesson title: one line, the full text in the title attribute. */
+.title { overflow: hidden; font-size: var(--fs-h2); line-height: var(--lh-h2); font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; text-overflow: ellipsis; }
+.p-note { color: var(--muted); }
+
+/* Source picker: one row like a select with its own arrow; the list opens over the rest and scrolls inside itself. */
+.picker { position: relative; }
+.source { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 32px; padding: 3px 10px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); text-align: left; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.source:disabled { opacity: .5; cursor: not-allowed; }
 .source .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.icon { flex: none; width: 18px; height: 18px; object-fit: contain; }
-.letter { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; background: #dde3ea; color: #34495e; font-size: 11px; font-weight: 600; }
+.icon { flex: none; width: 20px; height: 20px; object-fit: contain; }
+.letter { display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--neu-b); color: var(--neu-t); font-size: 11.5px; font-weight: 600; }
 .letter.whole { font-size: 8px; }
-.mark { flex: none; font-size: 11px; border-radius: 3px; padding: 0 4px; }
-.mark.playing { background: #dff3e4; color: #1b6e32; }
-.mark.muted, .mark.gone { background: #fde8e8; color: #9b1c1c; }
-.caret { flex: none; color: #555; }
+.mark { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: var(--r-chip); font-size: 11.5px; font-weight: 600; line-height: 16px; }
+.mark.playing { background: var(--ok-b); color: var(--ok-t); }
+.mark.muted, .mark.gone { background: var(--rec-b); color: var(--rec-t); border-style: dashed; }
+.caret { width: 16px; height: 16px; color: var(--muted); }
 .backdrop { position: fixed; inset: 0; z-index: 1; }
-.list { position: absolute; z-index: 2; left: 0; right: 0; top: 100%; max-height: 190px; overflow-y: auto; margin: 2px 0 0; padding: 2px; list-style: none; background: #fff; border: 1px solid #b8b8b8; border-radius: 4px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); }
-.list .source { border-color: transparent; background: #fff; }
-.list .source:hover { background: #e8f0fa; }
-.list .source.current { background: #dbe8f7; }
-.warning { color: #8a4b00; font-size: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.advice { color: #666; font-size: 11px; line-height: 1.3; }
-.advice.collapsed { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list { position: absolute; z-index: 2; top: 100%; right: 0; left: 0; max-height: 190px; margin-top: 2px; padding: 2px; overflow-y: auto; list-style: none; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); box-shadow: var(--sh-win); }
+.list .source { border-color: transparent; }
+.list .source:hover { background: var(--panel-2); }
+.list .source.current { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent-fill); }
+
+/* Error banner, warnings and the general advice. */
+.texts { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+.texts > * { flex: none; }
+.note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--rec-t) 30%, transparent); border-radius: var(--r-ctl); background: var(--rec-b); font-size: var(--fs-small); line-height: 17px; }
+.note > .i { width: 16px; height: 16px; margin-top: 1px; color: var(--rec-t); }
+.note > div { min-width: 0; }
+.clamp, .warning { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.warning { color: var(--wait-t); font-size: var(--fs-label); line-height: var(--lh-label); }
+.advice { color: var(--muted); font-size: var(--fs-nav); line-height: 15px; }
+.advice.collapsed { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* Buttons: «Начать запись» across the width, the others below it. */
+.pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: auto; }
+.pbtns .wide, .pbtns > .btn:nth-child(2):last-child { grid-column: 1 / -1; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 28px; padding: 3px 12px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast), transform var(--t-fast) var(--ease); }
+.btn:hover:enabled { background: var(--panel-2); }
+.btn:active:enabled { transform: translateY(1px); }
+.btn.primary { min-height: 38px; border-color: var(--prim); background: var(--prim); color: var(--on-prim); }
+.btn.primary:hover:enabled { background: var(--prim); opacity: .9; }
+.btn.ghost { border-color: transparent; background: none; color: var(--accent); }
+.btn.ghost:hover:enabled { background: var(--panel-2); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+/* Windows high contrast: system colours replace the palette; borders keep the shapes. */
+@media (forced-colors: active) {
+  :focus-visible { outline-color: Highlight; }
+  .btn, .source, .note, .mark { border: 1px solid CanvasText; }
+}
