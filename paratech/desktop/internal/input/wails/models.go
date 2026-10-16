@@ -17,8 +17,8 @@ import (
 	"paratech/desktop/internal/domain/transcription/values"
 )
 
-// ModelsHomePage is the official page of the whisper.cpp models (docs/refs/whisper.md), the way to a model while the
-// catalog lists none. It is opened like a catalog source page, never taken from the page.
+// ModelsHomePage is the official page of the whisper.cpp models (docs/refs/whisper.md), the way to a model the catalog
+// does not list. It is opened like a catalog source page, never taken from the page.
 const ModelsHomePage = "https://huggingface.co/ggerganov/whisper.cpp"
 
 // modelFileExt is the extension of a whisper.cpp ggml model file.
@@ -163,7 +163,8 @@ type InstalledModelItem struct {
 	InUse        bool     `json:"inUse"`
 }
 
-// AvailableModelItem is the JSON form of a catalog entry.
+// AvailableModelItem is the JSON form of a catalog entry. Tier is "fast", "balanced", "accurate", "max" or "" (none);
+// EnglishOnly marks a model that recognizes English only.
 type AvailableModelItem struct {
 	CatalogID     string   `json:"catalogId"`
 	Name          string   `json:"name"`
@@ -178,6 +179,8 @@ type AvailableModelItem struct {
 	Installed     bool     `json:"installed"`
 	InstalledID   string   `json:"installedId"`
 	HasSourcePage bool     `json:"hasSourcePage"`
+	Tier          string   `json:"tier"`
+	EnglishOnly   bool     `json:"englishOnly"`
 }
 
 // ModelDownload is the JSON form of the download state. Phase is "" (none yet), "downloading", "verifying",
@@ -308,7 +311,8 @@ func (s *ModelsService) List(ctx context.Context) (ModelsView, error) {
 			Quantization: string(e.Quantization()), Capabilities: capabilityTexts(e.Capabilities()),
 			MinCPUCores: e.Recommendation().MinCPUCores, MinRAMMB: e.Recommendation().MinRAMMB,
 			Recommended: a.Recommended, LikelySlow: a.LikelySlow, Installed: a.InstalledID != "",
-			InstalledID: string(a.InstalledID), HasSourcePage: !e.SourcePage().IsZero(),
+			InstalledID: string(a.InstalledID), HasSourcePage: !e.SourcePage().IsZero(), Tier: string(e.Tier()),
+			EnglishOnly: e.EnglishOnly(),
 		})
 	}
 	return view, nil

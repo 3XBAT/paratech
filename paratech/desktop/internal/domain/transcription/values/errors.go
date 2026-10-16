@@ -28,6 +28,9 @@ var (
 	// ErrInvalidCapability is returned for a capability label outside the allowed charset or length.
 	ErrInvalidCapability = errors.New("invalid capability")
 
+	// ErrInvalidModelTier is returned for a model tier that is not one of the known tiers.
+	ErrInvalidModelTier = errors.New("invalid model tier")
+
 	// ErrInvalidSize is returned for a model size that is not positive or above MaxModelSizeBytes.
 	ErrInvalidSize = errors.New("invalid model size")
 

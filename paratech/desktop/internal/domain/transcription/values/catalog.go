@@ -46,6 +46,7 @@ type CatalogEntrySpec struct {
 	Quantization   Quantization
 	Capabilities   []Capability
 	Recommendation Recommendation
+	Tier           ModelTier // optional
 }
 
 // CatalogEntry is one downloadable model of the catalog manifest (PRD section 8.1). It is immutable.
@@ -60,10 +61,11 @@ type CatalogEntry struct {
 	quantization   Quantization
 	capabilities   []Capability
 	recommendation Recommendation
+	tier           ModelTier
 }
 
 // NewCatalogEntry validates every field. ID, name, version, size, SHA-256 and the source URL are required; the source
-// page is optional.
+// page and the tier are optional.
 func NewCatalogEntry(s CatalogEntrySpec) (CatalogEntry, error) {
 	if s.SourceURL.IsZero() {
 		return CatalogEntry{}, fmt.Errorf("%w: no source url", ErrInvalidSourceURL)
@@ -71,6 +73,7 @@ func NewCatalogEntry(s CatalogEntrySpec) (CatalogEntry, error) {
 	for _, err := range []error{
 		s.ID.Validate(), s.Name.Validate(), s.Version.Validate(), ValidateSize(s.SizeBytes), s.SHA256.Validate(),
 		s.Quantization.Validate(), ValidateCapabilities(s.Capabilities), s.Recommendation.validate(),
+		s.Tier.Validate(),
 	} {
 		if err != nil {
 			return CatalogEntry{}, err
@@ -80,7 +83,7 @@ func NewCatalogEntry(s CatalogEntrySpec) (CatalogEntry, error) {
 	return CatalogEntry{
 		id: s.ID, name: s.Name, version: s.Version, size: s.SizeBytes, sha256: s.SHA256, source: s.SourceURL,
 		page: s.SourcePage, quantization: s.Quantization, capabilities: append([]Capability(nil), s.Capabilities...),
-		recommendation: s.Recommendation,
+		recommendation: s.Recommendation, tier: s.Tier,
 	}, nil
 }
 
@@ -122,6 +125,20 @@ func (e CatalogEntry) Capabilities() []Capability {
 
 // Recommendation returns the hardware the model is meant for.
 func (e CatalogEntry) Recommendation() Recommendation { return e.recommendation }
+
+// Tier returns the speed and accuracy class, TierNone if the manifest names none.
+func (e CatalogEntry) Tier() ModelTier { return e.tier }
+
+// EnglishOnly reports whether the model recognizes English only: it has the English capability and not the
+// multilingual one.
+func (e CatalogEntry) EnglishOnly() bool {
+	var en, multi bool
+	for _, c := range e.capabilities {
+		en = en || c == CapabilityEnglish
+		multi = multi || c == CapabilityMultilingual
+	}
+	return en && !multi
+}
 
 // Verify reports whether a file with the given digest and size is this model (PRD section 8.1: a file that does not
 // match is rejected and not installed).
@@ -184,10 +201,10 @@ func (c Catalog) CheckImportIdentity(name ModelName, version ModelVersion) error
 //	{"schema_version": 1, "models": [{"id": "base-q5_1", "name": "base", "version": "1",
 //	  "size_bytes": 59707625, "sha256": "<64 hex>", "source_url": "https://host/path/file.bin",
 //	  "source_page": "https://host/path", "quantization": "q5_1", "capabilities": ["multilingual"],
-//	  "recommendation": {"min_cpu_cores": 2, "min_ram_mb": 1024, "preferred": true}}],
+//	  "recommendation": {"min_cpu_cores": 2, "min_ram_mb": 1024, "preferred": true}, "tier": "fast"}],
 //	 "download_hosts": ["cdn.example.com"]}
 //
-// download_hosts and source_page are optional. models is required; "models": [] is a catalog without downloadable
+// download_hosts, source_page and tier are optional. models is required; "models": [] is a catalog without downloadable
 // models. Models is a pointer so that a missing or null list is told apart from an empty one.
 type manifestDoc struct {
 	SchemaVersion int                 `json:"schema_version"`
@@ -206,6 +223,7 @@ type manifestEntryDoc struct {
 	Quantization   string             `json:"quantization"`
 	Capabilities   []string           `json:"capabilities"`
 	Recommendation *recommendationDoc `json:"recommendation"`
+	Tier           string             `json:"tier"`
 }
 
 type recommendationDoc struct {
@@ -218,8 +236,9 @@ type recommendationDoc struct {
 // MaxCatalogBytes, exactly one JSON object, only known lowercase keys, no repeated key in any object, the expected
 // schema version, a models list of 0..MaxCatalogEntries entries that pass NewCatalogEntry, and no two entries with the
 // same id, the same name and version, or the same SHA-256. An explicit empty list is a valid catalog without
-// downloadable models (no SHA-256 is verified yet); a missing or null list is refused. download_hosts and the hosts of
-// the source URLs must pass NewHostAllowlist. A source_page, when present, must pass ParseSourceURL like source_url.
+// downloadable models; a missing or null list is refused. download_hosts and the hosts of the source URLs must pass
+// NewHostAllowlist. A source_page, when present, must pass ParseSourceURL like source_url. A tier, when present, must
+// be one of the ModelTier constants in lowercase.
 func ParseCatalog(data []byte) (Catalog, error) {
 	if len(data) > MaxCatalogBytes {
 		return Catalog{}, fmt.Errorf("%w: larger than %d bytes", ErrInvalidCatalog, MaxCatalogBytes)
@@ -312,7 +331,7 @@ func (m manifestEntryDoc) entry() (CatalogEntry, error) {
 	return NewCatalogEntry(CatalogEntrySpec{
 		ID: CatalogID(m.ID), Name: ModelName(m.Name), Version: ModelVersion(m.Version), SizeBytes: m.SizeBytes,
 		SHA256: sum, SourceURL: src, SourcePage: page, Quantization: Quantization(m.Quantization), Capabilities: caps,
-		Recommendation: rec,
+		Recommendation: rec, Tier: ModelTier(m.Tier),
 	})
 }
 

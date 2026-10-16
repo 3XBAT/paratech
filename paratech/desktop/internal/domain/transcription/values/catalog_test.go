@@ -266,6 +266,8 @@ func TestNewCatalogEntry(t *testing.T) {
 		{"non-canonical sha256", func(s *CatalogEntrySpec) { s.SHA256 = SHA256(strings.ToUpper(sumA)) }, ErrInvalidSHA256},
 		{"bad id", func(s *CatalogEntrySpec) { s.ID = "a/b" }, ErrInvalidCatalogID},
 		{"no size", func(s *CatalogEntrySpec) { s.SizeBytes = 0 }, ErrInvalidSize},
+		{"tier", func(s *CatalogEntrySpec) { s.Tier = TierMax }, nil},
+		{"bad tier", func(s *CatalogEntrySpec) { s.Tier = "huge" }, ErrInvalidModelTier},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -334,6 +336,89 @@ func TestCatalogCheckImportIdentity(t *testing.T) {
 		err := c.CheckImportIdentity(tc.model, tc.version)
 		if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
 			t.Errorf("%s: CheckImportIdentity = %v, want %v", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestParseCatalogTier(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string // raw JSON of "tier", "-" leaves it out
+		want  ModelTier
+		bad   bool
+	}{
+		{"missing", "-", TierNone, false},
+		{"empty", `""`, TierNone, false},
+		{"null", `null`, TierNone, false},
+		{"fast", `"fast"`, TierFast, false},
+		{"balanced", `"balanced"`, TierBalanced, false},
+		{"accurate", `"accurate"`, TierAccurate, false},
+		{"max", `"max"`, TierMax, false},
+		{"unknown value", `"slow"`, "", true},
+		{"wrong case", `"Fast"`, "", true},
+		{"padded", `" fast"`, "", true},
+		{"number", `1`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := map[string]string{}
+			if tc.field != "-" {
+				fields["tier"] = tc.field
+			}
+			c, err := ParseCatalog([]byte(manifest(entryJSON(fields))))
+			if tc.bad {
+				if !errors.Is(err, ErrInvalidCatalog) {
+					t.Fatalf("ParseCatalog = %v, want ErrInvalidCatalog", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.Entries()[0].Tier(); got != tc.want {
+				t.Fatalf("Tier = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	_, err := ParseCatalog([]byte(manifest(entryJSON(map[string]string{"tier": `"slow"`}))))
+	if !errors.Is(err, ErrInvalidModelTier) {
+		t.Fatalf("unknown tier: %v, want ErrInvalidModelTier", err)
+	}
+}
+
+func TestModelTierValidate(t *testing.T) {
+	for _, tier := range []ModelTier{TierNone, TierFast, TierBalanced, TierAccurate, TierMax} {
+		if err := tier.Validate(); err != nil {
+			t.Errorf("%q: %v", tier, err)
+		}
+	}
+	for _, tier := range []ModelTier{"MAX", "fastest", "fast ", "-"} {
+		if err := tier.Validate(); !errors.Is(err, ErrInvalidModelTier) {
+			t.Errorf("%q: %v, want ErrInvalidModelTier", tier, err)
+		}
+	}
+}
+
+func TestCatalogEntryEnglishOnly(t *testing.T) {
+	cases := []struct {
+		name string
+		caps string
+		want bool
+	}{
+		{"multilingual", `["multilingual"]`, false},
+		{"english", `["en"]`, true},
+		{"english and multilingual", `["en", "multilingual"]`, false},
+		{"other language", `["ru"]`, false},
+		{"none", `[]`, false},
+	}
+	for _, tc := range cases {
+		c, err := ParseCatalog([]byte(manifest(entryJSON(map[string]string{"capabilities": tc.caps}))))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := c.Entries()[0].EnglishOnly(); got != tc.want {
+			t.Errorf("%s: EnglishOnly = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
