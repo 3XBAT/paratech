@@ -273,7 +273,7 @@ test("every secret status has its label", () => {
     "Ключ задан", "Ключ не задан", "Хранилище ключей недоступно в этой системе", "Хранилище ключей не ответило",
   ]);
   assert.equal(hubKeyLabels.input, "Новый ключ");
-  assert.match(hubKeyLabels.confirmRemove, /^Удалить сохранённый ключ Hub\?/);
+  assert.match(hubKeyLabels.confirmTitle, /^Удалить сохранённый ключ доступа\?/);
   assert.equal(mailConfiguredText(true), "Почта настроена.");
   assert.match(mailConfiguredText(false), /^Почта не настроена/);
 });

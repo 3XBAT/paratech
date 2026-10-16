@@ -17,7 +17,9 @@ export type IconName =
   | "clock"
   | "chev"
   | "up"
+  | "down"
   | "lock"
+  | "key"
   | "x";
 
 /** Rendered once per window, before any Icon. */
@@ -73,6 +75,13 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-up" viewBox="0 0 24 24">
         <path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v4h14v-4" />
+      </symbol>
+      <symbol id="i-down" viewBox="0 0 24 24">
+        <path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14" />
+      </symbol>
+      <symbol id="i-key" viewBox="0 0 24 24">
+        <circle cx="8" cy="15" r="4" />
+        <path d="M11 12l8-8M16 7l2 2M14 9l2 2" />
       </symbol>
       <symbol id="i-lock" viewBox="0 0 24 24">
         <rect x="5" y="10.5" width="14" height="10" rx="2" />

@@ -125,7 +125,21 @@ export function Banner(props: { kind: BannerKind; role?: "status" | "alert"; chi
   );
 }
 
-export function Card(props: { children: ReactNode; className?: string; label?: string }) {
+export type ResultKind = "ok" | "wait" | "fail";
+
+const resultIcons: Readonly<Record<ResultKind, IconName>> = { ok: "ok", wait: "warn", fail: "warn" };
+
+/** The outcome of an action: a line with an icon under its button, instead of a toast. */
+export function ResultLine(props: { kind: ResultKind; role?: "status" | "alert"; children: ReactNode }) {
+  return (
+    <p className={`result s-${props.kind}`} role={props.role}>
+      <Icon name={resultIcons[props.kind]} />
+      <span>{props.children}</span>
+    </p>
+  );
+}
+
+export function Card(props:{ children: ReactNode; className?: string; label?: string }) {
   return (
     <div className={props.className ? `card ${props.className}` : "card"} role={props.label ? "group" : undefined} aria-label={props.label}>
       {props.children}
@@ -192,6 +206,7 @@ export function Dialog(props: {
   confirmLabel: string;
   cancelLabel: string;
   danger?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -228,7 +243,12 @@ export function Dialog(props: {
         <button ref={safe} type="button" className="btn" onClick={props.onCancel}>
           {props.cancelLabel}
         </button>
-        <button type="button" className={props.danger ? "btn danger" : "btn primary"} onClick={props.onConfirm}>
+        <button
+          type="button"
+          className={props.danger ? "btn danger" : "btn primary"}
+          disabled={props.confirmDisabled}
+          onClick={props.onConfirm}
+        >
           {props.confirmLabel}
         </button>
       </div>

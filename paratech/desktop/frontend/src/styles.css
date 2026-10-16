@@ -55,6 +55,20 @@ html, body, #root { height: 100%; }
 .statusbar .r { margin-left: auto; }
 .statusbar .i { width: 14px; height: 14px; }
 
+/* Подключения: two form cards side by side, one column in a narrow window. */
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.sep { margin: 16px 0 14px; border: 0; border-top: 1px solid var(--line); }
+.secret { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 6px; }
+.box p.small { margin: 0 0 6px; }
+.box .acts { margin-bottom: 2px; }
+.box .acts + .result { margin-top: 10px; }
+.meter { margin: 4px 0 10px; }
+.amounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px 14px; margin: 0 0 8px; }
+.amounts dd { margin: 0; font-weight: 600; }
+@container app (max-width: 880px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* CollapsibleList as a folded card: the header toggles the group, the footer shows the rest. */
 .clist-card { margin-top: 12px; }
 .clist-card .clist-header { margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); }
@@ -63,8 +77,6 @@ html, body, #root { height: 100%; }
 .clist-card .clist-footer { margin: 6px 0 0; }
 
 /* Расписание: import preview with count tiles, week dividers and the pinned Apply. */
-.result { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; }
-.result .i { width: 16px; height: 16px; margin-top: 2px; color: var(--ok-t); }
 .import-preview { margin-top: 8px; }
 .import-preview .group-title { margin-top: 8px; }
 .import-preview .clist-card .clist-header { margin-top: 14px; }

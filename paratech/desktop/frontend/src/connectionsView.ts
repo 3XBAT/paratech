@@ -128,10 +128,15 @@ export interface SecretLabels {
   save: string;
   replaceHint: string;
   remove: string;
+  /** The question of the confirmation dialog. */
+  confirmTitle: string;
   confirmRemove: string;
   confirmYes: string;
   confirmNo: string;
 }
+
+/** Under a slot whose store answers: both secrets are kept in Windows Credential Manager by the core. */
+export const secretStoreCaption = "Хранится в диспетчере учётных данных Windows, а не в файлах приложения.";
 
 export const mailPasswordLabels: SecretLabels = {
   title: "Пароль почты",
@@ -145,13 +150,14 @@ export const mailPasswordLabels: SecretLabels = {
   save: "Сохранить пароль",
   replaceHint: "Новый пароль заменит сохранённый.",
   remove: "Удалить пароль",
-  confirmRemove: "Удалить сохранённый пароль почты? Письма не будут отправляться, пока не зададите новый.",
-  confirmYes: "Удалить",
+  confirmTitle: "Удалить сохранённый пароль почты?",
+  confirmRemove: "Письма не будут отправляться, пока не зададите новый.",
+  confirmYes: "Удалить пароль",
   confirmNo: "Отмена",
 };
 
 export const hubKeyLabels: SecretLabels = {
-  title: "Ключ доступа к Hub",
+  title: "Ключ доступа",
   status: {
     set: "Ключ задан",
     unset: "Ключ не задан",
@@ -162,8 +168,9 @@ export const hubKeyLabels: SecretLabels = {
   save: "Сохранить ключ",
   replaceHint: "Новый ключ заменит сохранённый.",
   remove: "Удалить ключ",
-  confirmRemove: "Удалить сохранённый ключ Hub? Конспекты и поиск ДЗ будут ждать, пока не зададите новый.",
-  confirmYes: "Удалить",
+  confirmTitle: "Удалить сохранённый ключ доступа?",
+  confirmRemove: "Конспекты и поиск домашних заданий будут ждать, пока не зададите новый.",
+  confirmYes: "Удалить ключ",
   confirmNo: "Отмена",
 };
 
