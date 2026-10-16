@@ -12,7 +12,7 @@ import (
 // built off Windows, so no app test ever touches the real Credential Manager.
 func TestProductionSecretsHaveNoFallbackOffWindows(t *testing.T) {
 	ctx := context.Background()
-	for _, service := range []string{hubSecretsService, mailSecretsService} {
+	for _, service := range []string{hubSecretsService, mailSecretsService, googleSecretsService} {
 		store, err := productionEnv().secrets(service)
 		if err != nil {
 			t.Fatalf("%s: %v", service, err)

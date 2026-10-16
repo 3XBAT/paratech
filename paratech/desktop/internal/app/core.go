@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/localfile"
@@ -18,6 +19,7 @@ import (
 	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/whispercli"
 	"paratech/desktop/internal/cases/activity"
+	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/modelcatalog"
@@ -59,6 +61,10 @@ type core struct {
 	downloads *modelcatalog.Downloader
 	imports   *modelcatalog.Importer
 	manager   *modelManager
+
+	// Google authorization (wireGoogle): the adapter the Calendar sync will use (TASK-051) and the page's use case.
+	google       *googleauth.Authorizer
+	googleSignIn *googlesignin.Service
 
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
@@ -240,6 +246,9 @@ func (c *core) wire(dataDir string, e env, notifier notify.Notifier, log *slog.L
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
+		return err
+	}
+	if err := c.wireGoogle(e, log); err != nil {
 		return err
 	}
 	return c.wireSchedule(e)

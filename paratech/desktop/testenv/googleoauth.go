@@ -51,6 +51,7 @@ type FakeGoogleOAuth struct {
 	codes   map[string]fakeGoogleGrant
 	refresh map[string]bool // live refresh tokens
 	access  map[string]bool // live access tokens
+	issued  []string        // every code and token ever issued
 
 	authRequests  []url.Values
 	tokenRequests []url.Values
@@ -140,6 +141,27 @@ func (f *FakeGoogleOAuth) LiveRefreshTokens() []string {
 	return out
 }
 
+// Issued returns every value the app must keep out of the database and the log: the codes, access and refresh
+// tokens the fake issued, the states and challenges of the authorizations and the verifiers of the exchanges.
+func (f *FakeGoogleOAuth) Issued() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := append([]string(nil), f.issued...)
+	for _, q := range f.authRequests {
+		out = append(out, q.Get("state"), q.Get("code_challenge"))
+	}
+	for _, form := range f.tokenRequests {
+		out = append(out, form.Get("code_verifier"))
+	}
+	var nonEmpty []string
+	for _, s := range out {
+		if s != "" {
+			nonEmpty = append(nonEmpty, s)
+		}
+	}
+	return nonEmpty
+}
+
 // IsLiveAccessToken reports whether the access token was issued and not revoked.
 func (f *FakeGoogleOAuth) IsLiveAccessToken(token string) bool {
 	f.mu.Lock()
@@ -185,6 +207,7 @@ func (f *FakeGoogleOAuth) authorize(w http.ResponseWriter, r *http.Request) {
 		f.seq++
 		code := fmt.Sprintf("fake-code-%d", f.seq)
 		f.codes[code] = fakeGoogleGrant{challenge: q.Get("code_challenge"), redirect: q.Get("redirect_uri")}
+		f.issued = append(f.issued, code)
 		back.Set("code", code)
 		back.Set("scope", q.Get("scope"))
 	}
@@ -261,6 +284,7 @@ func (f *FakeGoogleOAuth) newRefreshToken() string {
 	f.seq++
 	t := fmt.Sprintf("fake-refresh-%d", f.seq)
 	f.refresh[t] = true
+	f.issued = append(f.issued, t)
 	return t
 }
 
@@ -269,6 +293,7 @@ func (f *FakeGoogleOAuth) issue(w http.ResponseWriter, refresh string) {
 	f.seq++
 	access := fmt.Sprintf("fake-access-%d", f.seq)
 	f.access[access] = true
+	f.issued = append(f.issued, access)
 	body := map[string]any{
 		"access_token": access, "expires_in": f.expiresIn, "scope": f.scope, "token_type": "Bearer",
 	}

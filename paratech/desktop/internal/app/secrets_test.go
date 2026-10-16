@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
@@ -147,6 +148,10 @@ func TestCredentialNamesArePinned(t *testing.T) {
 		{"hub api key", hubclient.DefaultCredentialName, "api-key"},
 		{"smtp password read by the adapter", smtp.DefaultCredentialName, "smtp-password"},
 		{"smtp password written by the use case", senddelivery.DefaultCredentialName, "smtp-password"},
+		{"google service", googleSecretsService, "google"},
+		{"google client id", googleauth.ClientIDName, "client-id"},
+		{"google client secret", googleauth.ClientSecretName, "client-secret"},
+		{"google refresh token", googleauth.RefreshTokenName, "refresh-token"},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", tc.what, tc.got, tc.want)

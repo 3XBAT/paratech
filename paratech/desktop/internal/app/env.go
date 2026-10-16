@@ -14,8 +14,10 @@ import (
 	"paratech/desktop/internal/adapters/audiocapture"
 	"paratech/desktop/internal/adapters/clock"
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/instancelock"
 	"paratech/desktop/internal/adapters/random"
+	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/winpower"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -63,8 +65,9 @@ type secretStore interface {
 
 // Credential Manager services of the core (wincred.New): one store per service.
 const (
-	hubSecretsService  = "hub"
-	mailSecretsService = "mail"
+	hubSecretsService    = "hub"
+	mailSecretsService   = "mail"
+	googleSecretsService = "google"
 )
 
 // instanceLock is a held single-instance guard.
@@ -106,6 +109,11 @@ type env struct {
 	// mailRoots replaces the system roots for the SMTP server certificate (tests); nil in production.
 	mailRoots *x509.CertPool
 
+	// authPages opens Google's consent page (weblink in production, a fake browser in tests).
+	authPages googleauth.Browser
+	// googleOAuth replaces the Google endpoints and timeouts (tests: a fake OAuth server); nil in production.
+	googleOAuth []googleauth.Option
+
 	runner jobrunner.Config
 	// generateRetries bounds the restarts of one draft generation (homeworkflow.DraftDeps.GenerateRetries); 0: default.
 	generateRetries int
@@ -129,6 +137,7 @@ func productionEnv() env {
 		captureSource:   audiocapture.PlatformSource(),
 		whisperBinary:   whisperBinaryPath(),
 		secrets:         credentialManager,
+		authPages:       weblink.New(),
 		generateRetries: homeworkflow.DefaultGenerateRetries,
 		runner:          jobrunner.DefaultConfig(),
 		recordings:      recordingsession.DefaultConfig(),

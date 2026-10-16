@@ -68,8 +68,15 @@ type lifecycle struct {
 }
 
 // newLifecycle is the lifecycle of an opened core; the closers are released last, in order, after the work of the
-// model manager stopped (it writes through the storage).
+// model manager stopped (it writes through the storage) and a waiting Google sign-in was cancelled.
 func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers ...closer) *lifecycle {
+	if c.googleSignIn != nil {
+		// A sign-in waiting for the browser would keep its loopback listener until the sign-in timeout.
+		closers = append([]closer{{name: "google sign-in", close: func() error {
+			c.googleSignIn.CancelSignIn()
+			return nil
+		}}}, closers...)
+	}
 	if c.manager != nil {
 		closers = append([]closer{{name: "model manager", close: c.manager.close}}, closers...)
 	}

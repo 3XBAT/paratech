@@ -9,6 +9,7 @@ import (
 
 	"paratech/desktop/internal/adapters/clock"
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingprompt"
@@ -39,6 +40,10 @@ type fakes struct {
 
 	// secrets are the credential stores by service: tests never touch the real Credential Manager.
 	secrets map[string]*testenv.MemCredentials
+
+	// browser opens Google's consent page; the Google endpoints point to a closed local port unless a test sets
+	// env.googleOAuth to a fake server, so no test reaches Google.
+	browser *testenv.FakeBrowser
 }
 
 // testEnv is the outside world of the core in tests: the real clock (the wiring runs on real goroutines), fake power
@@ -52,7 +57,9 @@ func testEnv(t *testing.T) (env, *fakes) {
 	}
 	f := &fakes{power: testenv.NewFakePower(true), apps: &testenv.FakeAudioApps{}, secrets: map[string]*testenv.MemCredentials{
 		hubSecretsService: testenv.NewMemCredentials(), mailSecretsService: testenv.NewMemCredentials(),
-	}}
+		googleSecretsService: testenv.NewMemCredentials(),
+	}, browser: testenv.NewFakeBrowser()}
+	const nowhere = "http://127.0.0.1:1"
 
 	runner := jobrunner.DefaultConfig()
 	runner.Workers = 1
@@ -78,6 +85,8 @@ func testEnv(t *testing.T) (env, *fakes) {
 			}
 			return s, nil
 		},
+		authPages:   f.browser,
+		googleOAuth: []googleauth.Option{googleauth.WithEndpoints(nowhere+"/auth", nowhere+"/token", nowhere+"/revoke")},
 		runner:      runner,
 		recordings:  recordingsession.DefaultConfig(),
 		stopTimeout: 5 * time.Second,
