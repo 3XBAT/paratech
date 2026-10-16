@@ -88,6 +88,19 @@ html, body, #root { height: 100%; }
   .mrow > .acts { justify-content: start; }
 }
 
+/* Диагностика: the sound check and the support bundle, two cards like Подключения. */
+.diag .box-desc { margin-bottom: 6px; }
+.diag .acts { margin-top: 10px; }
+.box p.diag-wait { margin: 10px 0 0; }
+.diag-result { margin-top: 12px; }
+.diag-result .result { margin-bottom: 6px; }
+.box p.diag-note { overflow-wrap: anywhere; }
+.diag h3 { margin: 12px 0 2px; }
+.modes { margin: 0; padding: 0; list-style: none; }
+.modes li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.modes li:last-child { border-bottom: 0; }
+.mode-cause { grid-column: 1 / -1; }
+
 /* Настройки: one card of switch lines and the theme. */
 .settings { max-width: 720px; padding-top: 4px; padding-bottom: 4px; }
 .settings > p { margin: 8px 0; }

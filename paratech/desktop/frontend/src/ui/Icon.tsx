@@ -7,6 +7,7 @@ export type IconName =
   | "link"
   | "model"
   | "set"
+  | "diag"
   | "stop"
   | "play"
   | "plug"
@@ -44,6 +45,9 @@ export function IconSprite() {
         <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
         <circle cx="16" cy="7" r="2" />
         <circle cx="10" cy="17" r="2" />
+      </symbol>
+      <symbol id="i-diag" viewBox="0 0 24 24">
+        <path d="M4 16a8 8 0 0 1 16 0M12 16l3.6-4.2M12 8v1.6M6.3 10.3l1.1 1.1M17.7 10.3l-1.1 1.1" />
       </symbol>
       <symbol id="i-stop" viewBox="0 0 24 24">
         <rect x="7" y="7" width="10" height="10" rx="1.5" />

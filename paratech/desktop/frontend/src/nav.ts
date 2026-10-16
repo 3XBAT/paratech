@@ -17,7 +17,7 @@ export const pages: readonly Page[] = [
   { id: "schedule", label: "Расписание", icon: "cal" },
   { id: "connections", label: "Подключения", icon: "link" },
   { id: "models", label: "Модели речи", icon: "model" },
-  { id: "diagnostics", label: "Диагностика", icon: "wave" },
+  { id: "diagnostics", label: "Диагностика", icon: "diag" },
   { id: "settings", label: "Настройки", icon: "set" },
 ];
 
