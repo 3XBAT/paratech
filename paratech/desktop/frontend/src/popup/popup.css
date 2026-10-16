@@ -84,4 +84,6 @@ h1, p, ul { margin: 0; }
 @media (forced-colors: active) {
   :focus-visible { outline-color: Highlight; }
   .btn, .source, .note, .mark { border: 1px solid CanvasText; }
+  /* The dot is a background, which forced colours drop. */
+  .dot { forced-color-adjust: none; background: CanvasText; }
 }

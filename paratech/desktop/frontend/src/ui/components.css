@@ -153,5 +153,20 @@
 
 @media (forced-colors: active) {
   .chip, .btn, .tile, .switch, .seg button[aria-pressed="true"], .note { border: 1px solid CanvasText; }
+  /* The switch knob, the progress fill and the recording dot are backgrounds, which forced colours drop: keep them
+     and draw them in system colours, so on and off still differ. */
+  .switch, .prog, .dot { forced-color-adjust: none; }
+  .switch { background: Canvas; }
+  .switch::after { background: CanvasText; }
+  .switch:checked { border-color: Highlight; background: Highlight; }
+  .switch:checked::after { background: HighlightText; }
+  .switch:disabled { border-color: GrayText; opacity: 1; }
+  .switch:disabled::after { background: GrayText; }
+  .switch:checked:disabled { background: GrayText; }
+  .switch:checked:disabled::after { background: Canvas; }
+  .prog { outline: 1px solid CanvasText; background: Canvas; }
   .prog b { background: Highlight; }
+  .dot { background: CanvasText; }
+  /* The select arrow is a gradient, dropped too: the native one comes back. */
+  .sel { appearance: auto; }
 }
