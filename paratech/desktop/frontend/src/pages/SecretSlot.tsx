@@ -48,7 +48,7 @@ export function SecretSlot(props: {
 
   return (
     <div className={props.nested ? undefined : "card box"}>
-      <h2>{labels.title}</h2>
+      <h2 className="sub">{labels.title}</h2>
       <div className="secret">
         <StatusChip kind={kind} icon="key">
           {secretChipLabel(labels, status)}

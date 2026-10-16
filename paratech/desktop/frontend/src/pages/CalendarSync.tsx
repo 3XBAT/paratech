@@ -90,7 +90,7 @@ export function CalendarSync(props: { account: string }) {
   return (
     <>
       <hr className="sep" />
-      <h2>{calendarTexts.title}</h2>
+      <h2 className="sub">{calendarTexts.title}</h2>
       <p className="small" role="status">
         {v.message}
       </p>

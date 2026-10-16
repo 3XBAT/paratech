@@ -425,7 +425,7 @@ export function ConnectionsPage(props: { visit?: number }) {
           />
 
           <hr className="sep" />
-          <h2>{quotaTexts.title}</h2>
+          <h2 className="sub">{quotaTexts.title}</h2>
           {used !== null && (
             <div className="meter">
               <Progress value={used} label={quotaTexts.used} thick text={`${quotaTexts.used} ${used} %`} />
@@ -541,7 +541,7 @@ export function ConnectionsPage(props: { visit?: number }) {
         />
 
         <hr className="sep" />
-        <h2>Проверка почты</h2>
+        <h2 className="sub">Проверка почты</h2>
         <p className="small muted">{texts.checkNoSend}</p>
         <div className="acts start">
           <Button

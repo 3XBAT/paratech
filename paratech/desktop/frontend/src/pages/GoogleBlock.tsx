@@ -162,7 +162,7 @@ export function GoogleBlock() {
     <Card className="box" label={googleTexts.title}>
       {header}
 
-      <h2>{googleTexts.clientTitle}</h2>
+      <h2 className="sub">{googleTexts.clientTitle}</h2>
       <div className="secret">
         <StatusChip kind={clientChip(state.client)} icon="key">
           {clientChipText(state.client)}
@@ -225,7 +225,7 @@ export function GoogleBlock() {
       </Dialog>
 
       <hr className="sep" />
-      <h2>{googleTexts.accountTitle}</h2>
+      <h2 className="sub">{googleTexts.accountTitle}</h2>
       <div className="secret">
         <StatusChip kind={accountChip(state.account)} icon="cal">
           {accountChipText(state.account)}

@@ -472,3 +472,12 @@ test("the Apple help page keeps the entry text as its lead", () => {
   const markup = server.renderToStaticMarkup(h(HelpView, { failure: null, onOpen: () => {}, onBack: () => {} }));
   assert.ok(markup.includes(helpTexts.entryText), helpTexts.entryText);
 });
+
+test("section heading rule is scoped to h2.sub so dialog titles keep their size", () => {
+  const css = src("../src/styles.css");
+  assert.match(css, /\.conn-page \.box h2\.sub \{/);
+  assert.doesNotMatch(css, /\.conn-page \.box h2 \{/);
+  for (const file of ["ConnectionsPage.tsx", "GoogleBlock.tsx", "CalendarSync.tsx", "SecretSlot.tsx"]) {
+    assert.match(src(`../src/pages/${file}`), /<h2 className="sub">/, file);
+  }
+});
