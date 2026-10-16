@@ -32,9 +32,9 @@ func (a *Authorizer) Token(ctx context.Context) (*oauth2.Token, error) {
 	refresh, err := a.creds.Get(ctx, RefreshTokenName)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil, fmt.Errorf("%s: %w", opToken, ErrNotSignedIn)
+		return nil, fmt.Errorf("%s: %w", opAccess, ErrNotSignedIn)
 	case err != nil:
-		return nil, fmt.Errorf("%s: %w: %w", opToken, ErrCredentials, err)
+		return nil, fmt.Errorf("%s: %w: %w", opAccess, ErrCredentials, err)
 	}
 	c, err := a.readClient(ctx)
 	if err != nil {
@@ -46,18 +46,18 @@ func (a *Authorizer) Token(ctx context.Context) (*oauth2.Token, error) {
 		if code, ok := oauthCode(err); ok && code == "invalid_grant" && ctx.Err() == nil {
 			a.cached = nil
 			if derr := a.creds.Delete(context.WithoutCancel(ctx), RefreshTokenName); derr != nil {
-				return nil, fmt.Errorf("%s: %w; %w: %w", opToken, ErrReauthRequired, ErrCredentials, derr)
+				return nil, fmt.Errorf("%s: %w; %w: %w", opAccess, ErrReauthRequired, ErrCredentials, derr)
 			}
-			return nil, fmt.Errorf("%s: %w", opToken, ErrReauthRequired)
+			return nil, fmt.Errorf("%s: %w", opAccess, ErrReauthRequired)
 		}
-		return nil, tokenError(ctx, opToken, err)
+		return nil, tokenError(ctx, opAccess, err)
 	}
 
 	a.cached = accessOnly(tok)
 	if tok.RefreshToken != "" && tok.RefreshToken != refresh {
 		if err := a.creds.Set(context.WithoutCancel(ctx), RefreshTokenName, tok.RefreshToken); err != nil {
 			// The old token may be retired already; the next refresh will say ErrReauthRequired.
-			return nil, fmt.Errorf("%s: store the rotated refresh token: %w: %w", opToken, ErrCredentials, err)
+			return nil, fmt.Errorf("%s: store the rotated refresh token: %w: %w", opAccess, ErrCredentials, err)
 		}
 	}
 	return accessOnly(tok), nil

@@ -30,7 +30,7 @@ import (
 // Google endpoints of an installed (Desktop) client; see docs/refs/google-calendar.md.
 const (
 	AuthURL   = "https://accounts.google.com/o/oauth2/v2/auth"
-	TokenURL  = "https://oauth2.googleapis.com/token"
+	TokenURL  = "https://oauth2.googleapis.com/token" //nolint:gosec // G101: a public endpoint, not a credential
 	RevokeURL = "https://oauth2.googleapis.com/revoke"
 )
 
@@ -52,7 +52,7 @@ const (
 // Operation names, for error texts.
 const (
 	opSignIn  = "googleauth: sign in"
-	opToken   = "googleauth: access token"
+	opAccess  = "googleauth: access token"
 	opSignOut = "googleauth: sign out"
 	opClient  = "googleauth: client"
 )

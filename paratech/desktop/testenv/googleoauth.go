@@ -20,7 +20,7 @@ import (
 // Obviously fake values of the Google OAuth client a FakeGoogleOAuth accepts.
 const (
 	FakeGoogleClientID     = "123-fake.apps.googleusercontent.com"
-	FakeGoogleClientSecret = "GOCSPX-fake-client-secret"
+	FakeGoogleClientSecret = "GOCSPX-fake-client-secret" //nolint:gosec // G101: an obviously fake test value
 )
 
 // Paths of the fake endpoints.
@@ -212,7 +212,8 @@ func (f *FakeGoogleOAuth) authorize(w http.ResponseWriter, r *http.Request) {
 		back.Set("scope", q.Get("scope"))
 	}
 	redirect.RawQuery = back.Encode()
-	http.Redirect(w, r, redirect.String(), http.StatusFound)
+	// G710: like Google, the fake redirects only to the loopback redirect_uri checked above.
+	http.Redirect(w, r, redirect.String(), http.StatusFound) //nolint:gosec // see above
 }
 
 // token is the token endpoint of a Desktop client: the client id and secret in the form (AuthStyleInParams).
