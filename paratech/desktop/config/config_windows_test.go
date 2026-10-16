@@ -18,7 +18,11 @@ func TestSchemeLinkWithAQuoteSplits(t *testing.T) {
 	const line = `"C:\Program Files\Paratech\Paratech.exe" "paratech://x" --data-dir "C:\evil" --headless`
 	// shell32's parser; Go's own one for os.Args follows the same rules here. The few bytes it allocates are not freed.
 	var argc int32
-	argv, err := syscall.CommandLineToArgv(syscall.StringToUTF16Ptr(line), &argc)
+	cmd, err := syscall.UTF16PtrFromString(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv, err := syscall.CommandLineToArgv(cmd, &argc)
 	if err != nil {
 		t.Fatal(err)
 	}
