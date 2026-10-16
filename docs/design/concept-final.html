@@ -1,0 +1,517 @@
+<!doctype html>
+<!--
+  FINAL CONCEPT — «Эфир», спокойная версия (Calm On Air)
+  Base: concept 2 «Эфир» — side rail navigation, current-recording strip, schedule import screen with
+  count tiles, week dividers and a collapsible list. Made more restrained and grown-up:
+  - palette: the same hues (copper accent, red recording, amber, blue, green) desaturated and darkened;
+    warm-neutral greys instead of black/aluminium; primary buttons are neutral (ink on paper / paper on ink),
+    colour is reserved for meaning (recording, statuses, progress, focus);
+  - no gadget props: no glow, no keycaps, no LED meters, no uppercase panel lettering;
+  - status chips in the style of concept 1 «Тетрадь»: small tinted label with a thin border, icon + word,
+    dashed outline for "waits for network" and "failed", double ring for "done";
+  - typography in the spirit of the reference app «Собес Тех» (sobes.tech uses Inter + Geist Mono, neutral
+    greys, tight negative tracking on headings): Golos Text by default (Cyrillic-first neo-grotesque, OFL,
+    @fontsource-variable/golos-text) with tabular figures for timers — no monospace font at all.
+    The font switch at the top lets the owner compare Golos Text / Inter / Onest (all OFL, full Cyrillic).
+  Motion: 120–220 ms fades and slides, a slow opacity "breath" on the recording dot, list rows fade in on
+  expand; everything off with prefers-reduced-motion.
+  Tone: neutral and friendly, never first person (Russian past tense is gendered: «сделал/сделала»).
+  Every waiting state says what it waits for and that it continues by itself.
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эфир — финальный концепт</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400..700&family=Inter:wght@400..700&family=Onest:wght@400..700&display=swap">
+<style>
+:root{
+  --bg:#EDEDEA;--panel:#FAFAF8;--raised:#FFFFFF;--panel-2:#F2F2EF;--line:#E2E2DD;--control:#7A7D83;
+  --text:#1A1B1E;--muted:#5A5D64;--accent:#A9561F;--accent-fill:#C26A2E;--prim:#1F2023;--on-prim:#FAFAF8;--rec:#B23A30;
+  --rec-t:#9C3027;--rec-b:#F7E5E2;--run-t:#8A4716;--run-b:#F5E9DE;--wait-t:#735000;--wait-b:#F4ECD4;
+  --net-t:#2B5788;--net-b:#E3EBF4;--ok-t:#2C6644;--ok-b:#E1EEE5;--neu-t:#4E5158;--neu-b:#EEEEEB;
+  --sh-1:0 1px 2px rgba(20,20,24,.06);--sh-win:0 1px 2px rgba(20,20,24,.05),0 18px 44px -22px rgba(20,20,24,.28);
+  --f-ui:"Golos Text","Segoe UI Variable Text","Segoe UI",sans-serif;
+  --r-chip:6px;--r-ctl:8px;--r-card:12px;--r-win:14px;
+  --ease:cubic-bezier(.2,.7,.2,1);--t-fast:120ms;--t-mid:220ms;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#131416;--panel:#1B1C1F;--raised:#202124;--panel-2:#26272B;--line:#2C2E32;--control:#70747C;
+  --text:#ECEBE7;--muted:#9EA1A8;--accent:#DE9A68;--accent-fill:#D08A57;--prim:#E6E4DF;--on-prim:#16171A;--rec:#E8766B;
+  --rec-t:#F0958B;--rec-b:#3A2422;--run-t:#E8AC7C;--run-b:#33281F;--wait-t:#DFC07A;--wait-b:#312B1C;
+  --net-t:#98BBE4;--net-b:#1E2937;--ok-t:#8FCDA7;--ok-b:#1C2F25;--neu-t:#B4B7BD;--neu-b:#2A2B2F;
+  --sh-1:0 1px 2px rgba(0,0,0,.35);--sh-win:0 1px 2px rgba(0,0,0,.4),0 22px 48px -24px rgba(0,0,0,.85);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#131416;--panel:#1B1C1F;--raised:#202124;--panel-2:#26272B;--line:#2C2E32;--control:#70747C;
+  --text:#ECEBE7;--muted:#9EA1A8;--accent:#DE9A68;--accent-fill:#D08A57;--prim:#E6E4DF;--on-prim:#16171A;--rec:#E8766B;
+  --rec-t:#F0958B;--rec-b:#3A2422;--run-t:#E8AC7C;--run-b:#33281F;--wait-t:#DFC07A;--wait-b:#312B1C;
+  --net-t:#98BBE4;--net-b:#1E2937;--ok-t:#8FCDA7;--ok-b:#1C2F25;--neu-t:#B4B7BD;--neu-b:#2A2B2F;
+  --sh-1:0 1px 2px rgba(0,0,0,.35);--sh-win:0 1px 2px rgba(0,0,0,.4),0 22px 48px -24px rgba(0,0,0,.85);color-scheme:dark}
+:root[data-font="inter"]{--f-ui:Inter,"Segoe UI Variable Text","Segoe UI",sans-serif}
+:root[data-font="onest"]{--f-ui:Onest,"Segoe UI Variable Text","Segoe UI",sans-serif}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--f-ui);-webkit-font-smoothing:antialiased}
+.i{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.m{font-size:12.5px;color:var(--muted)}
+.lbl{font-size:12px;font-weight:500;color:var(--muted)}
+h2{font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.02em;margin:2px 0 0}
+h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
+
+/* board */
+.board{max-width:1180px;margin:0 auto;padding:28px 16px 64px}
+.board-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px 24px;align-items:end;margin-bottom:22px}
+.board-head h1{font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.03em;margin:0}
+.board-head p{margin:6px 0 0;color:var(--muted);max-width:66ch}
+.ctrls{display:grid;gap:8px;justify-items:end}
+.section-label{margin:40px 0 12px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:32px;padding:5px 14px;border-radius:var(--r-ctl);border:1px solid var(--control);background:var(--raised);
+  font-weight:500;cursor:pointer;white-space:nowrap;transition:background var(--t-fast),transform var(--t-fast) var(--ease),border-color var(--t-fast)}
+.btn:hover{background:var(--panel-2)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--prim);border-color:var(--prim);color:var(--on-prim)}
+.btn.primary:hover{opacity:.9}
+.btn.ghost{border-color:transparent;background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--panel-2)}
+.btn.danger{color:var(--rec-t);border-color:color-mix(in srgb,var(--rec) 55%,var(--control))}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.hint-key{font-size:11px;font-weight:500;opacity:.65;border:1px solid currentColor;border-radius:4px;padding:0 4px;line-height:16px}
+
+/* segmented control (filters, theme, font) */
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:calc(var(--r-ctl) + 2px);background:var(--panel-2);border:1px solid var(--line)}
+.seg button{border:0;background:none;border-radius:var(--r-ctl);padding:4px 12px;min-height:28px;cursor:pointer;color:var(--muted);font-weight:500;white-space:nowrap}
+.seg button:hover{color:var(--text)}
+.seg button[aria-pressed="true"]{background:var(--raised);color:var(--text);box-shadow:var(--sh-1)}
+
+/* status chips — «Тетрадь» style in the calm palette */
+.chip{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:2px 9px 2px 7px;border-radius:var(--r-chip);font-size:12.5px;font-weight:600;line-height:18px;white-space:nowrap;
+  color:var(--c);background:var(--b);border:1px solid color-mix(in srgb,var(--c) 40%,transparent)}
+.chip .i{width:14px;height:14px;stroke-width:2}
+.s-rec{--c:var(--rec-t);--b:var(--rec-b)}.s-run{--c:var(--run-t);--b:var(--run-b)}.s-wait{--c:var(--wait-t);--b:var(--wait-b)}
+.s-net{--c:var(--net-t);--b:var(--net-b);border-style:dashed}.s-ok{--c:var(--ok-t);--b:var(--ok-b);box-shadow:inset 0 0 0 2px var(--b),inset 0 0 0 3px color-mix(in srgb,var(--c) 40%,transparent)}
+.s-fail{--c:var(--rec-t);--b:var(--rec-b);border-style:dashed}.s-neu{--c:var(--neu-t);--b:var(--neu-b)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--rec);flex:none;animation:breath 2.4s ease-in-out infinite}
+@keyframes breath{50%{opacity:.35}}
+
+/* window */
+.win{container-type:inline-size;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-win);box-shadow:var(--sh-win);overflow:hidden}
+.titlebar{height:32px;display:flex;align-items:center;padding-left:14px;font-size:12px;color:var(--muted)}
+.titlebar .sp{flex:1}.wc{width:46px;height:32px;display:grid;place-items:center}.wc .i{width:12px;height:12px;stroke-width:1.3}
+.strip{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 8px;padding:7px 8px 7px 14px;border-radius:var(--r-ctl);background:var(--panel);border:1px solid var(--line)}
+.strip .who{display:inline-flex;align-items:center;gap:8px;color:var(--rec-t);font-weight:600;font-size:13px}
+.strip .t{font-weight:600}
+.strip .sp{flex:1}
+.strip .timer{font-size:15px;font-weight:600}
+.shell{display:grid;grid-template-columns:108px minmax(0,1fr);min-height:600px;padding-top:8px}
+.rail{display:flex;flex-direction:column;gap:2px;padding:4px 8px 12px}
+.rail button{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;padding:9px 2px 8px;border:0;border-radius:var(--r-ctl);background:none;color:var(--muted);font-size:11.5px;line-height:1.2;font-weight:500;cursor:pointer;text-align:center;overflow-wrap:normal;word-break:normal;hyphens:manual;letter-spacing:-.005em}
+.rail button:hover{color:var(--text);background:var(--panel-2)}
+.rail button[aria-current="page"]{color:var(--text);background:var(--panel);box-shadow:var(--sh-1)}
+.rail button[aria-current="page"]::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:var(--accent-fill)}
+.rail .i{width:20px;height:20px}
+.rail .badge{position:absolute;top:5px;right:24px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--rec-b);color:var(--rec-t);font-size:10.5px;font-weight:700;line-height:17px}
+.rail .low{margin-top:auto}
+.main{background:var(--panel);border-top-left-radius:var(--r-card);border-top:1px solid var(--line);border-left:1px solid var(--line);padding:20px 24px 0;display:flex;flex-direction:column;min-width:0}
+.screen{display:flex;flex-direction:column;flex:1;animation:fade var(--t-mid) var(--ease)}
+.screen[hidden]{display:none}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}}
+.head{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:end;margin-bottom:16px}
+
+/* list rows */
+.card{background:var(--raised);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.card+.card{margin-top:12px}
+.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,320px) minmax(120px,auto);gap:4px 18px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .t{font-weight:600;margin:0}
+.st{display:flex;flex-direction:column;gap:5px;min-width:0}
+.acts{display:flex;gap:6px;justify-content:end;flex-wrap:wrap;align-items:center}
+.prog{height:4px;border-radius:2px;background:var(--panel-2);overflow:hidden;max-width:260px}
+.prog b{display:block;height:100%;width:var(--p);background:var(--accent-fill);border-radius:2px;transition:width var(--t-mid)}
+.statusbar{display:flex;flex-wrap:wrap;gap:6px 20px;margin:auto -24px 0;padding:8px 24px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.statusbar span{display:inline-flex;gap:7px;align-items:center}
+.statusbar .r{margin-left:auto}
+.statusbar .i{width:14px;height:14px}
+.gap{height:16px;flex:none}
+
+/* banners */
+.note{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:var(--r-ctl);background:var(--b);margin-bottom:14px;border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+.note .i{color:var(--c);margin-top:1px}
+.note p{margin:0}
+
+/* schedule (from «Эфир») */
+.steps{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 14px;padding:0;list-style:none;font-size:13px}
+.steps li{display:flex;gap:8px;align-items:center;color:var(--muted)}
+.steps .on{color:var(--text);font-weight:600}
+.steps .d{width:7px;height:7px;border-radius:50%;border:1.5px solid var(--control)}
+.steps .done .d{background:var(--ok-t);border-color:var(--ok-t)}
+.steps .on .d{background:var(--accent-fill);border-color:var(--accent-fill)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:14px}
+.tile{display:flex;flex-direction:column;gap:4px;padding:10px 14px;border-radius:var(--r-ctl);background:var(--raised);border:1px solid var(--line);cursor:pointer;text-align:left;transition:border-color var(--t-fast)}
+.tile b{font-size:24px;line-height:1.1;font-weight:600;letter-spacing:-.02em}
+.tile:hover{border-color:var(--control)}
+.tile[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.tile.zero b{color:var(--ok-t)}
+.tile[disabled]{cursor:default}
+.wk{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:12px;padding:7px 16px;background:var(--panel-2);border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--muted)}
+.wk::after{content:"";order:1;flex:1;height:5px;background:repeating-linear-gradient(90deg,var(--control) 0 1px,transparent 1px 8px);opacity:.35}
+.wk .n{order:2}
+.lst{list-style:none;margin:0;padding:0}
+.ln{display:grid;grid-template-columns:34px 52px 96px minmax(0,1fr) 80px;gap:12px;align-items:center;padding:6px 16px;border-bottom:1px solid var(--line);font-size:13.5px}
+.ln .dt{color:var(--muted);font-size:12.5px}
+.ln .k{font-size:12.5px;color:var(--muted)}
+.ln .add{font-size:12px;font-weight:600;color:var(--ok-t);text-align:right}
+.ln.in{animation:fade 180ms var(--ease) both}
+.diff{display:grid;grid-template-columns:minmax(0,1.2fr) 120px minmax(0,1fr);gap:12px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--line)}
+.diff:last-child{border-bottom:0}
+.diff del{color:var(--muted)}
+.diff ins{text-decoration:none;font-weight:600;color:var(--run-t)}
+.scroll{max-height:380px;overflow:auto;scroll-padding-top:36px}
+.more{display:flex;align-items:center;gap:12px;padding:8px 12px;border-top:1px solid var(--line)}
+.foot{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:14px 0 18px}
+
+/* forms (connections, settings) */
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+.box{background:var(--raised);border:1px solid var(--line);border-radius:var(--r-card);padding:16px 18px}
+.box h3{margin-bottom:2px}
+.box>.m{display:block;margin-bottom:14px}
+.field{display:grid;gap:4px;margin-bottom:12px}
+.field label{font-size:12.5px;font-weight:500}
+.input{min-height:34px;padding:6px 10px;border-radius:var(--r-ctl);border:1px solid var(--control);background:var(--panel);width:100%}
+.input:focus-visible{outline-offset:0;border-color:var(--accent)}
+.pair{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:10px}
+.secret{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:34px}
+.result{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px}
+.result .i{width:16px;height:16px;margin-top:2px}
+.meter{display:grid;gap:6px;margin:6px 0 12px}
+.meter .prog{max-width:none;height:6px}
+.set{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 24px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.set:last-child{border-bottom:0}
+.set .m{grid-column:1}
+.switch{appearance:none;width:38px;height:22px;border-radius:11px;background:var(--panel-2);border:1px solid var(--control);position:relative;cursor:pointer;margin:0;transition:background var(--t-fast)}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:transform var(--t-fast) var(--ease),background var(--t-fast)}
+.switch:checked{background:var(--prim);border-color:var(--prim)}
+.switch:checked::after{transform:translateX(16px);background:var(--on-prim)}
+.switch:disabled{opacity:.6;cursor:not-allowed}
+.sel{min-height:32px;padding:4px 30px 4px 10px;border-radius:var(--r-ctl);border:1px solid var(--control);background:var(--raised);appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 15px) 14px,calc(100% - 10px) 14px;background-size:5px 5px;background-repeat:no-repeat}
+.group{font-size:12px;font-weight:600;color:var(--muted);margin:18px 0 0}
+
+/* models */
+.mrow{display:grid;grid-template-columns:28px minmax(0,1fr) minmax(220px,300px) auto;gap:4px 16px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.mrow:last-child{border-bottom:0}
+.radio{appearance:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--control);margin:0;cursor:pointer;display:grid;place-items:center}
+.radio:checked{border-color:var(--prim)}
+.radio:checked::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--prim)}
+.radio:disabled{opacity:.4;cursor:not-allowed}
+
+/* popup */
+.duo{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.popup{width:360px;height:300px;flex:none;display:flex;flex-direction:column;gap:8px;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-win);box-shadow:var(--sh-win)}
+.p-top{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--rec-t)}
+.p-top .sp{flex:1}
+.p-top .m{font-weight:500}
+.popup h3{font-size:18px;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src{display:flex;align-items:center;gap:10px;padding:5px 10px;border-radius:var(--r-ctl);border:1px solid var(--control);background:var(--raised)}
+.src select{flex:1;min-width:0;border:0;background:transparent;appearance:none;padding:4px 0;font-weight:500}
+.app{width:20px;height:20px;border-radius:5px;background:#2D8CFF;display:grid;place-items:center;flex:none}
+.app::after{content:"";width:9px;height:6px;border-radius:2px;background:#fff}
+.app.tg{background:#2AABEE}
+.popup .tip{flex:1;margin:0;font-size:12.5px;color:var(--muted);overflow:auto}
+.pbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.pbtns .primary{grid-column:1/-1;min-height:38px}
+.popup .note{margin:0;padding:8px 10px;font-size:12.5px}
+
+/* empty */
+.empty{display:grid;grid-template-columns:260px minmax(0,1fr);gap:32px;align-items:center;padding:36px 40px 40px;background:var(--panel)}
+.empty h2{margin-bottom:6px}
+.empty p{margin:0 0 16px;color:var(--muted);max-width:52ch}
+
+@container (max-width:880px){
+  .row{grid-template-columns:minmax(0,1fr)}.acts{justify-content:start}
+  .mrow{grid-template-columns:28px minmax(0,1fr)}.mrow>.st,.mrow>.acts{grid-column:2}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid2{grid-template-columns:1fr}
+  .ln{grid-template-columns:34px 52px minmax(0,1fr) 70px}.ln .tm{display:none}
+  .empty{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@media (forced-colors:active){.chip,.btn,.tile,.switch,.radio{border:1px solid CanvasText}.rail button[aria-current="page"]{outline:2px solid Highlight}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-rec" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-model" viewBox="0 0 24 24"><path d="M4 12h.01M8 8v8M12 4.5v15M16 8.5v7M20 12h.01"/></symbol>
+  <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></symbol>
+  <symbol id="i-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.3M19 12.5a10 10 0 0 0-3.3-2M12 20h.01"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3zM12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2l2-5 3 10 3-14 3 12 2-3h3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v4h14v-4"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2 2M14 9l2 2"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></symbol>
+  <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+</svg>
+
+<div class="board">
+  <header class="board-head">
+    <div>
+      <h1>«Эфир» — финальная версия</h1>
+      <p>Боковая навигация и экран расписания из «Эфира», статусы-ярлыки из «Тетради», спокойная палитра и шрифт в духе «Собес Тех». Цвет — только там, где он что-то значит: запись, статусы, прогресс и фокус. Разделы в окне переключаются.</p>
+    </div>
+    <div class="ctrls">
+      <div class="seg" role="group" aria-label="Тема" id="theme">
+        <button type="button" data-v="auto" aria-pressed="true">Как в системе</button><button type="button" data-v="light" aria-pressed="false">Светлая</button><button type="button" data-v="dark" aria-pressed="false">Тёмная</button>
+      </div>
+      <div class="seg" role="group" aria-label="Шрифт для сравнения" id="font">
+        <button type="button" data-v="golos" aria-pressed="true">Golos Text</button><button type="button" data-v="inter" aria-pressed="false">Inter</button><button type="button" data-v="onest" aria-pressed="false">Onest</button>
+      </div>
+    </div>
+  </header>
+
+  <p class="lbl section-label">1 · Главное окно (1100×700; минимум 800×560)</p>
+  <div class="win">
+    <div class="titlebar"><span>Учебный помощник</span><span class="sp"></span><span class="wc"><svg class="i"><use href="#i-min"/></svg></span><span class="wc"><svg class="i"><use href="#i-max"/></svg></span><span class="wc"><svg class="i"><use href="#i-x"/></svg></span></div>
+    <div class="strip" role="region" aria-label="Текущая запись">
+      <span class="who"><span class="dot"></span>Запись</span>
+      <span><span class="t">Матанализ, лекция</span> <span class="m">· звук из Zoom · до конца пары 48 мин</span></span>
+      <span class="sp"></span>
+      <span class="timer num" aria-label="Длительность записи">00:42:17</span>
+      <button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button>
+    </div>
+    <div class="shell">
+      <nav class="rail" aria-label="Разделы" id="nav">
+        <button type="button" data-s="rec" aria-current="page"><svg class="i"><use href="#i-rec"/></svg>Записи и задачи<span class="badge num">1</span></button>
+        <button type="button" data-s="sched"><svg class="i"><use href="#i-cal"/></svg>Расписание</button>
+        <button type="button" data-s="conn"><svg class="i"><use href="#i-link"/></svg>Подключения</button>
+        <button type="button" data-s="models"><svg class="i"><use href="#i-model"/></svg>Модели речи</button>
+        <button type="button" data-s="settings" class="low"><svg class="i"><use href="#i-set"/></svg>Настройки</button>
+      </nav>
+      <main class="main">
+
+        <!-- Записи и задачи -->
+        <section class="screen" data-screen="rec" aria-label="Записи и задачи">
+          <div class="head"><div><span class="lbl">Четверг, 17 сентября</span><h2>Записи и задачи</h2></div>
+            <div class="seg" role="group" aria-label="Показать"><button aria-pressed="true">Все <span class="num">6</span></button><button aria-pressed="false">В работе <span class="num">2</span></button><button aria-pressed="false">Ждут <span class="num">2</span></button><button aria-pressed="false">Ошибки <span class="num">1</span></button></div></div>
+          <div class="card" role="list">
+            <div class="row" role="listitem"><div><p class="t">Матанализ, лекция</p><span class="m">Сегодня, 10:40–12:10 · Zoom</span></div>
+              <div class="st"><span class="chip s-rec"><span class="dot"></span>Идёт запись · <span class="num">00:42:17</span></span><span class="m">Окно можно закрыть — запись продолжится.</span></div>
+              <div class="acts"><button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button></div></div>
+            <div class="row" role="listitem"><div><p class="t">Физика, семинар</p><span class="m">Вчера, 14:00–15:30 · 1 ч 27 мин</span></div>
+              <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-wave"/></svg>Расшифровка · <span class="num">64 %</span></span>
+                <div class="prog" role="progressbar" aria-label="Расшифровка" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100"><b style="--p:64%"></b></div><span class="m num">Осталось около 6 минут</span></div>
+              <div class="acts"></div></div>
+            <div class="row" role="listitem"><div><p class="t">История России, лекция</p><span class="m">Вчера, 12:20–13:50 · конспект</span></div>
+              <div class="st"><span class="chip s-wait"><svg class="i"><use href="#i-plug"/></svg>Ждёт зарядку</span><span class="m">Ноутбук на батарее, конспект отложен. Начнётся сам после подключения питания.</span></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button></div></div>
+            <div class="row" role="listitem"><div><p class="t">Английский язык, семинар</p><span class="m">Вчера, 10:40–12:10 · поиск домашнего задания</span></div>
+              <div class="st"><span class="chip s-net"><svg class="i"><use href="#i-off"/></svg>Ждёт интернет</span><span class="m">Продолжится само, как только появится сеть.</span></div>
+              <div class="acts"></div></div>
+            <div class="row" role="listitem"><div><p class="t">Программирование на Python</p><span class="m">Пн, 14 сентября · 1 ч 30 мин</span></div>
+              <div class="st"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span><span class="m">2 задания · ближайшее до пт, 18 сентября</span></div>
+              <div class="acts"><button class="btn ghost">Открыть</button></div></div>
+            <div class="row" role="listitem"><div><p class="t">Линейная алгебра, семинар</p><span class="m">Пн, 14 сентября · 58 мин</span></div>
+              <div class="st"><span class="chip s-fail"><svg class="i"><use href="#i-warn"/></svg>Не распознано</span><span class="m">В записи почти нет звука. Возможно, выбрано не то приложение.</span></div>
+              <div class="acts"><button class="btn ghost">Проверить звук</button><button class="btn">Повторить</button></div></div>
+          </div>
+          <div class="gap"></div>
+          <div class="statusbar" role="status"><span>В очереди 1 задача</span><span>Следующая пара — Физика, 14:00</span><span>Модель речи: small</span><span class="r"><svg class="i"><use href="#i-lock"/></svg>Звук обрабатывается только на этом компьютере</span></div>
+        </section>
+
+        <!-- Расписание -->
+        <section class="screen" data-screen="sched" aria-label="Расписание" hidden>
+          <div class="head"><div><span class="lbl">raspisanie_osen_2026.xlsx · 165 строк</span><h2>Импорт расписания</h2></div></div>
+          <ol class="steps"><li class="done"><span class="d"></span>Файл прочитан</li><li class="on"><span class="d"></span>Проверка изменений</li><li><span class="d"></span>Применение</li></ol>
+          <div class="tiles" role="group" aria-label="Фильтр изменений">
+            <button class="tile" aria-pressed="true"><span class="lbl">Добавится</span><b class="num">150</b></button>
+            <button class="tile" aria-pressed="false"><span class="lbl">Изменится</span><b class="num">3</b></button>
+            <button class="tile" aria-pressed="false"><span class="lbl">Без изменений</span><b class="num">12</b></button>
+            <button class="tile zero" aria-pressed="false" disabled><span class="lbl">Ошибки</span><b class="num">0</b></button>
+          </div>
+          <div class="note s-wait"><svg class="i"><use href="#i-warn"/></svg><p>Три занятия в файле отличаются от сохранённых — они показаны полностью. 150 новых свёрнуты: их можно не просматривать.</p></div>
+          <div class="card">
+            <div class="wk" style="position:static"><span>Изменится</span><span class="n num">3</span></div>
+            <div class="diff"><span><strong>Физика, практика</strong> <span class="m">· чт, 3 сентября</span></span><span class="lbl">Место</span><span><del>ауд. 214</del> → <ins>онлайн, Zoom</ins></span></div>
+            <div class="diff"><span><strong>Английский язык, семинар</strong> <span class="m">· ср, 9 сентября</span></span><span class="lbl">Время</span><span class="num"><del>10:40</del> → <ins>11:00</ins></span></div>
+            <div class="diff"><span><strong>История России, лекция</strong> <span class="m">· пн, 14 сентября</span></span><span class="lbl">Преподаватель</span><span><del>Петров А. В.</del> → <ins>Смирнова Е. Н.</ins></span></div>
+          </div>
+          <div class="card">
+            <div class="scroll" id="sched">
+              <ul class="lst" id="lst" aria-label="Добавится: 150 занятий">
+                <li class="wk"><span>Неделя 1 · 31.08–06.09</span><span class="n num">10 занятий</span></li>
+                <li class="ln"><span class="dt">пн</span><span class="dt num">31.08</span><span class="dt num tm">10:40–12:10</span><span>Матанализ <span class="k">· лекция</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">пн</span><span class="dt num">31.08</span><span class="dt num tm">12:20–13:50</span><span>Линейная алгебра <span class="k">· семинар</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">вт</span><span class="dt num">01.09</span><span class="dt num tm">10:40–12:10</span><span>История России <span class="k">· практика</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">вт</span><span class="dt num">01.09</span><span class="dt num tm">12:20–13:50</span><span>Программирование на Python <span class="k">· лекция</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">ср</span><span class="dt num">02.09</span><span class="dt num tm">10:40–12:10</span><span>Английский язык <span class="k">· семинар</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">ср</span><span class="dt num">02.09</span><span class="dt num tm">12:20–13:50</span><span>Физика <span class="k">· практика</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">чт</span><span class="dt num">03.09</span><span class="dt num tm">10:40–12:10</span><span>Дискретная математика <span class="k">· лекция</span></span><span class="add">+ новое</span></li>
+                <li class="ln"><span class="dt">чт</span><span class="dt num">03.09</span><span class="dt num tm">12:20–13:50</span><span>Матанализ <span class="k">· семинар</span></span><span class="add">+ новое</span></li>
+              </ul>
+            </div>
+            <div class="more"><button class="btn ghost" id="more" aria-controls="lst" aria-expanded="false"><svg class="i"><use href="#i-chev"/></svg><span>Показать ещё 142</span></button><span class="m">по неделям, до 13 декабря</span></div>
+          </div>
+          <div class="foot"><span class="m" role="status">Пока ничего не сохранено.</span><span class="acts"><button class="btn">Выбрать другой файл</button><button class="btn primary">Применить 153 изменения</button></span></div>
+        </section>
+
+        <!-- Подключения -->
+        <section class="screen" data-screen="conn" aria-label="Подключения" hidden>
+          <div class="head"><div><span class="lbl">Сервер обработки и почта</span><h2>Подключения</h2></div></div>
+          <div class="grid2">
+            <div class="box">
+              <h3>Сервер обработки</h3><span class="m">Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.</span>
+              <div class="field"><label for="hub">Адрес сервера</label><input class="input" id="hub" value="https://hub.uchebnyi-pomoshnik.ru"></div>
+              <div class="field"><label>Ключ доступа</label><div class="secret"><span class="chip s-ok"><svg class="i"><use href="#i-key"/></svg>Задан</span><button class="btn">Заменить</button><button class="btn ghost">Удалить</button></div></div>
+              <div class="meter"><div style="display:flex;justify-content:space-between;gap:12px"><span class="lbl">Обработка в этом месяце</span><span class="m num">осталось 42 из 60 мин · до 1 октября</span></div><div class="prog" role="progressbar" aria-label="Израсходовано минут обработки" aria-valuenow="18" aria-valuemin="0" aria-valuemax="60"><b style="--p:30%"></b></div></div>
+              <button class="btn">Проверить связь</button>
+              <div class="result" role="status"><svg class="i" style="color:var(--ok-t)"><use href="#i-ok"/></svg><span>Связь есть, ключ принят.</span></div>
+            </div>
+            <div class="box">
+              <h3>Почта для отправки домашних заданий</h3><span class="m">Письмо уходит только после вашего подтверждения.</span>
+              <div class="field"><label for="smtp">Сервер исходящей почты</label><div class="pair"><input class="input" id="smtp" value="smtp.yandex.ru"><input class="input num" aria-label="Порт" value="465"></div></div>
+              <div class="field"><label for="login">Логин</label><input class="input" id="login" value="student@example.ru"></div>
+              <div class="field"><label>Пароль приложения</label><div class="secret"><span class="chip s-wait"><svg class="i"><use href="#i-key"/></svg>Не задан</span><button class="btn">Задать пароль</button></div><span class="m">Хранится в диспетчере учётных данных Windows, а не в файлах приложения.</span></div>
+              <button class="btn"><svg class="i"><use href="#i-mail"/></svg>Проверить почту</button>
+              <div class="result" role="status" style="color:var(--rec-t)"><svg class="i"><use href="#i-warn"/></svg><span>Не удалось войти: пароль приложения не задан. Создайте его в настройках Яндекс ID и вставьте сюда.</span></div>
+            </div>
+          </div>
+          <div class="gap"></div>
+        </section>
+
+        <!-- Модели -->
+        <section class="screen" data-screen="models" aria-label="Модели речи" hidden>
+          <div class="head"><div><span class="lbl">Распознавание речи работает без интернета</span><h2>Модели речи</h2></div>
+            <span class="acts"><button class="btn ghost">Страница моделей</button><button class="btn"><svg class="i"><use href="#i-up"/></svg>Импортировать файл…</button></span></div>
+          <div class="note s-net"><svg class="i"><use href="#i-wave"/></svg><p>Чем больше модель, тем точнее текст, но тем дольше расшифровка. Для ноутбука без видеокарты подходит <strong>small</strong>.</p></div>
+          <div class="card" role="radiogroup" aria-label="Модель по умолчанию">
+            <div class="mrow"><input type="radio" class="radio" name="mdl" checked aria-label="small по умолчанию"><div><p class="t" style="margin:0;font-weight:600">small</p><span class="m num">466 МБ · около 0,4× длительности записи</span></div>
+              <div class="st"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Используется по умолчанию</span></div><div class="acts"><button class="btn ghost">Удалить</button></div></div>
+            <div class="mrow"><input type="radio" class="radio" name="mdl" aria-label="base"><div><p class="t" style="margin:0;font-weight:600">base</p><span class="m num">142 МБ · быстрее, но с ошибками</span></div>
+              <div class="st"><span class="chip s-neu"><svg class="i"><use href="#i-ok"/></svg>Установлена</span></div><div class="acts"><button class="btn ghost">Удалить</button></div></div>
+            <div class="mrow"><input type="radio" class="radio" name="mdl" disabled aria-label="medium, скачивается"><div><p class="t" style="margin:0;font-weight:600">medium</p><span class="m num">1,5 ГБ · точнее, примерно вдвое медленнее small</span></div>
+              <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-down"/></svg>Скачивается · <span class="num">37 %</span></span><div class="prog" role="progressbar" aria-label="Скачивание medium" aria-valuenow="37" aria-valuemin="0" aria-valuemax="100"><b style="--p:37%"></b></div><span class="m num">540 из 1 460 МБ · около 3 минут</span></div>
+              <div class="acts"><button class="btn">Отменить</button></div></div>
+            <div class="mrow"><input type="radio" class="radio" name="mdl" disabled aria-label="large-v3, не установлена"><div><p class="t" style="margin:0;font-weight:600">large-v3</p><span class="m num">3,1 ГБ · медленная на ноутбуке</span></div>
+              <div class="st"><span class="chip s-neu">Не установлена</span></div><div class="acts"><button class="btn"><svg class="i"><use href="#i-down"/></svg>Скачать</button></div></div>
+          </div>
+          <div class="gap"></div>
+        </section>
+
+        <!-- Настройки -->
+        <section class="screen" data-screen="settings" aria-label="Настройки" hidden>
+          <div class="head"><div><span class="lbl">Изменения сохраняются сразу</span><h2>Настройки</h2></div></div>
+          <div class="box">
+            <p class="group" style="margin-top:0">Запись</p>
+            <div class="set"><label for="t1">Предлагать запись перед парами</label><input type="checkbox" role="switch" class="switch" id="t1" checked><span class="m">Окно с кнопкой «Начать запись» появится за минуту до начала.</span></div>
+            <div class="set"><label for="t2">За сколько минут предлагать</label><select class="sel" id="t2"><option>За 1 минуту</option><option>За 3 минуты</option><option>В момент начала</option></select></div>
+            <div class="set"><label for="t3">Тяжёлые задачи — только от сети</label><input type="checkbox" role="switch" class="switch" id="t3" checked><span class="m">На батарее расшифровка ждёт зарядку, чтобы ноутбук не разрядился к концу пары.</span></div>
+            <p class="group">Приложение</p>
+            <div class="set"><label for="t4">Запускать вместе с Windows</label><input type="checkbox" role="switch" class="switch" id="t4"></div>
+            <div class="set"><label for="t5">Тема</label><select class="sel" id="t5"><option>Как в системе</option><option>Светлая</option><option>Тёмная</option></select></div>
+            <p class="group">Домашние задания</p>
+            <div class="set"><label for="t6">Спрашивать перед отправкой письма</label><input type="checkbox" role="switch" class="switch" id="t6" checked disabled><span class="m">Выключить нельзя: письмо с домашним заданием уходит только после вашего подтверждения.</span></div>
+          </div>
+          <div class="gap"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <p class="lbl section-label">2 · Окно «урок начался» (360×300): предложение записи и ошибка запуска</p>
+  <div class="duo">
+    <section class="popup" aria-label="Начинается занятие">
+      <div class="p-top"><span class="dot"></span>Начинается занятие<span class="sp"></span><span class="m num">10:40–12:10</span></div>
+      <h3>Математический анализ, лекция</h3>
+      <label class="src"><span class="app" aria-hidden="true"></span><select aria-label="Откуда записывать звук"><option>Zoom</option><option>Telegram</option><option>Google Chrome</option><option>Весь звук компьютера</option></select><span class="chip s-ok" style="padding:0 7px">звук идёт</span><svg class="i"><use href="#i-chev"/></svg></label>
+      <p class="tip">Записывается только звук Zoom — уведомления и музыка из других программ не попадут. Микрофон не записывается.</p>
+      <div class="pbtns"><button class="btn primary"><svg class="i"><use href="#i-rec"/></svg>Начать запись <span class="hint-key">Enter</span></button><button class="btn">Через 5 минут</button><button class="btn ghost">Пропустить</button></div>
+    </section>
+    <section class="popup" aria-label="Запись не началась">
+      <div class="p-top"><svg class="i" style="width:15px;height:15px"><use href="#i-warn"/></svg>Запись не началась<span class="sp"></span><span class="m num">10:41</span></div>
+      <h3>Математический анализ, лекция</h3>
+      <label class="src"><span class="app tg" aria-hidden="true"></span><select aria-label="Откуда записывать звук"><option>Telegram</option><option>Zoom</option><option>Весь звук компьютера</option></select><svg class="i"><use href="#i-chev"/></svg></label>
+      <div class="note s-fail"><svg class="i"><use href="#i-warn"/></svg><p>Telegram не запущен. Откройте его или выберите другое приложение.</p></div>
+      <p class="tip">Пара в браузере? Выберите Google Chrome.</p>
+      <div class="pbtns"><button class="btn primary">Попробовать снова</button><button class="btn">Через 5 минут</button><button class="btn ghost">Пропустить</button></div>
+    </section>
+  </div>
+
+  <p class="lbl section-label">3 · Пустое состояние — первый запуск</p>
+  <div class="win"><div class="empty">
+    <svg viewBox="0 0 260 120" width="260" height="120" aria-hidden="true">
+      <rect x=".5" y=".5" width="259" height="119" rx="12" fill="var(--raised)" stroke="var(--line)"/>
+      <path d="M20 60h220" stroke="var(--line)" stroke-dasharray="2 6"/>
+      <path d="M20 60h96l6-5 6 10 6-5h106" fill="none" stroke="var(--accent-fill)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="226" cy="24" r="4" fill="var(--rec)" opacity=".6"/>
+    </svg>
+    <div><span class="lbl">Записей пока нет</span><h2>Здесь появятся записи пар</h2>
+      <p>Импортируйте расписание — перед каждой парой появится окно с кнопкой «Начать запись». Без расписания тоже можно: запись запускается вручную.</p>
+      <div class="acts" style="justify-content:start"><button class="btn primary"><svg class="i"><use href="#i-up"/></svg>Импортировать расписание</button><button class="btn">Записать без расписания</button></div></div>
+  </div></div>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  function seg(id,attr,key,def){
+    var bs=document.querySelectorAll("#"+id+" button");
+    function set(v){if(v===def)root.removeAttribute(attr);else root.setAttribute(attr,v);
+      bs.forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.v===v))});
+      try{localStorage.setItem(key,v)}catch(e){}}
+    bs.forEach(function(b){b.addEventListener("click",function(){set(b.dataset.v)})});
+    try{var s=localStorage.getItem(key);if(s)set(s)}catch(e){}
+  }
+  seg("theme","data-theme","cf-theme","auto");
+  seg("font","data-font","cf-font","golos");
+
+  var navs=document.querySelectorAll("#nav button"),screens=document.querySelectorAll(".screen");
+  navs.forEach(function(b){b.addEventListener("click",function(){
+    navs.forEach(function(x){if(x===b)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current")});
+    screens.forEach(function(s){s.hidden=s.dataset.screen!==b.dataset.s});
+  })});
+
+  var subj=["Матанализ","Линейная алгебра","История России","Программирование на Python","Английский язык","Физика","Дискретная математика"],
+      kind=["лекция","семинар","практика"],wd=["пн","вт","ср","чт","пт"],TOTAL=150,FIRST=8,
+      d0=new Date(2026,7,31),lst=document.getElementById("lst"),more=document.getElementById("more"),extra=[];
+  function p2(n){return(n<10?"0":"")+n}
+  function dm(n){var d=new Date(d0);d.setDate(d.getDate()+n);return p2(d.getDate())+"."+p2(d.getMonth()+1)}
+  function el(cls,html){var li=document.createElement("li");li.className=cls;li.innerHTML=html;return li}
+  function build(){
+    for(var i=FIRST;i<TOTAL;i++){
+      var w=Math.floor(i/10),k=i%10,dd=Math.floor(k/2);
+      if(k===0)extra.push(el("wk","<span>Неделя "+(w+1)+" · "+dm(w*7)+"–"+dm(w*7+6)+"</span><span class=\"n num\">10 занятий</span>"));
+      extra.push(el("ln in","<span class=\"dt\">"+wd[dd]+"</span><span class=\"dt num\">"+dm(w*7+dd)+"</span><span class=\"dt num tm\">"+(k%2?"12:20–13:50":"10:40–12:10")+"</span><span>"+subj[(w*3+k)%7]+" <span class=\"k\">· "+kind[k%3]+"</span></span><span class=\"add\">+ новое</span>"));
+    }
+  }
+  more.addEventListener("click",function(){
+    var open=more.getAttribute("aria-expanded")==="true";
+    if(!extra.length)build();
+    extra.forEach(function(li){open?li.remove():lst.appendChild(li)});
+    more.setAttribute("aria-expanded",String(!open));
+    more.querySelector("span").textContent=open?"Показать ещё "+(TOTAL-FIRST):"Свернуть";
+    more.querySelector("svg").style.transform=open?"":"rotate(180deg)";
+    if(open){document.getElementById("sched").scrollTop=0;more.focus()}
+  });
+})();
+</script>
+</body>
+</html>
