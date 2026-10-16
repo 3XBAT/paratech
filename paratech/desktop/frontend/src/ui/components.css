@@ -103,12 +103,6 @@
 .switch:checked::after { transform: translateX(16px); background: var(--on-prim); }
 .switch:disabled { opacity: .6; cursor: not-allowed; }
 
-/* Radio */
-.radio { display: grid; place-items: center; width: 18px; height: 18px; margin: 0; border: 1.5px solid var(--control); border-radius: 50%; appearance: none; cursor: pointer; }
-.radio:checked { border-color: var(--prim); }
-.radio:checked::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--prim); }
-.radio:disabled { opacity: .4; cursor: not-allowed; }
-
 /* Banner: tinted note with the icon in the status colour and plain text. */
 .note { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: var(--r-ctl); background: var(--b); color: var(--text); }
 .note > .i { margin-top: 1px; color: var(--c); }
@@ -157,6 +151,6 @@
 .dialog-body { margin: 8px 0 18px; color: var(--muted); }
 
 @media (forced-colors: active) {
-  .chip, .btn, .tile, .switch, .radio, .seg button[aria-pressed="true"], .note { border: 1px solid CanvasText; }
+  .chip, .btn, .tile, .switch, .seg button[aria-pressed="true"], .note { border: 1px solid CanvasText; }
   .prog b { background: Highlight; }
 }

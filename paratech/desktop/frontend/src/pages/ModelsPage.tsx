@@ -31,7 +31,7 @@ import {
   texts,
 } from "../modelsView";
 import { Button } from "../ui/Button";
-import { Banner, Card, Dialog, Field, Input, Progress, Radio, ResultLine } from "../ui/controls";
+import { Banner, Card, Dialog, Field, Input, Progress, ResultLine } from "../ui/controls";
 import type { IconName } from "../ui/Icon";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
 
@@ -365,7 +365,7 @@ export function ModelsPage() {
           className="clist-card"
           classNames={{ button: "btn ghost" }}
           renderContainer={(rows) => (
-            <div className="card" role="radiogroup" aria-label="Модель по умолчанию">
+            <div className="card" role="list" aria-label="Установленные модели">
               {rows}
             </div>
           )}
@@ -451,14 +451,7 @@ function InstalledRow(props: {
   const deleteBusy = props.busy.has(`delete:${m.id}`);
   const chip = Object.hasOwn(badgeKinds, props.badge) ? badgeKinds[props.badge] : null;
   return (
-    <div className="mrow">
-      <Radio
-        name="default-model"
-        checked={m.isDefault}
-        disabled={props.busy.has(`default:${m.id}`)}
-        aria-label={`${modelTitle(m)}: по умолчанию`}
-        onChange={props.onDefault}
-      />
+    <div className="mrow" role="listitem">
       <div className="row-main">
         <p className="t">
           <bdi>{modelTitle(m)}</bdi>
@@ -487,6 +480,11 @@ function InstalledRow(props: {
         )}
       </div>
       <div className="acts">
+        {!m.isDefault && (
+          <Button variant="ghost" disabled={props.busy.has(`default:${m.id}`)} onClick={props.onDefault}>
+            Сделать по умолчанию
+          </Button>
+        )}
         <Button variant="danger" busy={deleteBusy} busyLabel="Удаление…" disabled={deleteBusy} onClick={props.onAskDelete}>
           Удалить
         </Button>
@@ -513,8 +511,6 @@ function CatalogRow(props: {
   const key = (op: string) => props.busy.has(`${op}:${m.catalogId}`);
   return (
     <div className="mrow" role="listitem">
-      {/* Only an installed model can be the default; the catalog shows that as a disabled choice. */}
-      {m.installed ? <span /> : <Radio disabled aria-label={`${modelTitle(m)}: не установлена`} />}
       <div className="row-main">
         <p className="t">
           <bdi>{modelTitle(m)}</bdi>

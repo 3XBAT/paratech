@@ -107,10 +107,6 @@ export function Toggle(props: {
   );
 }
 
-export function Radio(props: Omit<InputHTMLAttributes<HTMLInputElement>, "className" | "type">) {
-  return <input type="radio" className="radio" {...props} />;
-}
-
 export type BannerKind = "wait" | "net" | "fail";
 
 const bannerIcons: Readonly<Record<BannerKind, IconName>> = { wait: "warn", net: "wave", fail: "warn" };
