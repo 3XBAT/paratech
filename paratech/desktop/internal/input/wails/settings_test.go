@@ -125,6 +125,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
 		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
+		{name: "calendar sync use case", edit: func(c *Core) { c.Calendar = nil }},
 		{name: "sound check use case", edit: func(c *Core) { c.Sound = nil }},
 		{name: "support bundle use case", edit: func(c *Core) { c.Bundle = nil }},
 	}
@@ -160,6 +161,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},
 		{file: "connections.ts", typ: reflect.TypeFor[*ConnectionsService](), methods: 9},
 		{file: "google.ts", typ: reflect.TypeFor[*GoogleService](), methods: 6},
+		{file: "calendar.ts", typ: reflect.TypeFor[*GoogleCalendarService](), methods: 2},
 		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 2},
 		{file: "help.ts", typ: reflect.TypeFor[*HelpService](), methods: 1},
 	}

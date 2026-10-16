@@ -111,3 +111,97 @@ All facts below fetched 2026-10-16 from the official pages; "updated" is the dat
 8. Sign in from the app; on the "Google hasn't verified this app" screen choose Advanced > Go to … (unsafe).
 9. To revoke: «Выйти» in the app, or myaccount.google.com/linkedapps > the app > Remove access.
 - In Testing the sign-in lasts 7 days; then the app asks to sign in again.
+
+## Calendar API v3 (TASK-051)
+Fetched 2026-10-16 (base `https://developers.google.com/workspace/calendar/api/`). "Not stated" = the docs do not say it;
+the adapter (`adapters/googlecal`) then picks the behavior that fails safe (no duplicate events, nothing outside the app
+calendar, no item marked synced when it is not).
+
+### Sources
+| Page | Updated |
+|---|---|
+| [calendars.insert](https://developers.google.com/workspace/calendar/api/v3/reference/calendars/insert) | 2025-10-28 |
+| [calendars.get](https://developers.google.com/workspace/calendar/api/v3/reference/calendars/get) | 2026-05-12 |
+| [Calendars resource](https://developers.google.com/workspace/calendar/api/v3/reference/calendars) | 2026-07-01 |
+| [calendarList.list](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/list) | 2026-07-29 |
+| [calendarList.get](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/get) | 2026-05-12 |
+| [CalendarList resource](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList) | 2026-07-29 |
+| [events.insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert) | 2026-07-07 |
+| [events.update](https://developers.google.com/workspace/calendar/api/v3/reference/events/update) | 2026-07-07 |
+| [events.get](https://developers.google.com/workspace/calendar/api/v3/reference/events/get) | 2026-05-12 |
+| [events.delete](https://developers.google.com/workspace/calendar/api/v3/reference/events/delete) | 2026-05-12 |
+| [events.patch](https://developers.google.com/workspace/calendar/api/v3/reference/events/patch) | 2026-07-01 |
+| [events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list) | 2026-07-29 |
+| [Events resource](https://developers.google.com/workspace/calendar/api/v3/reference/events) | 2026-07-07 |
+| [Handle API errors](https://developers.google.com/workspace/calendar/api/guides/errors) | 2026-09-11 |
+| [Extended properties](https://developers.google.com/workspace/calendar/api/guides/extended-properties) | 2026-09-11 |
+| [Create events](https://developers.google.com/workspace/calendar/api/guides/create-events) | 2026-09-11 |
+| [Choose scopes](https://developers.google.com/workspace/calendar/api/auth) | 2026-09-03 |
+
+### Facts
+- Base URL `https://www.googleapis.com/calendar/v3`: verified (all reference pages).
+- Scope `calendar.app.created` is allowed for calendars.insert/get, calendarList.get and events
+  insert/update/get/delete/patch/list: verified (each method page). **calendarList.list is NOT allowed** (only
+  `calendar.readonly`, `calendar`, `calendar.calendarlist`, `calendar.calendarlist.readonly`): verified. So the app
+  cannot look its calendar up; the id it stored is the only binding.
+- calendars.insert: only `summary` required; `description`, `timeZone` optional: verified. That Google assigns the id:
+  not stated (the docs only say "call calendarList.list() to retrieve IDs").
+- calendars.get for a missing calendar: not stated per method; the errors guide has a generic 404 `notFound` and advises
+  exponential backoff for it. calendarList.get: same.
+- Event `id` chosen by the client: lowercase `a-v` and `0-9` (base32hex), length 5..1024, unique per calendar;
+  "collisions may not be detected at creation time": verified (events.insert, Events resource). The Create events guide
+  recommends client ids to avoid duplicates when a call failed after it succeeded on the backend: verified.
+- Insert of an existing id: 409 `duplicate` "The requested identifier already exists": verified (errors guide, generic).
+  Insert with the id of a deleted (cancelled) event gives 409: not stated.
+- events.update (PUT) "always updates the entire event resource"; `start`/`end` required: verified. PUT on an unknown id
+  gives 404: not stated (generic 404). PUT with `status: confirmed` restores a cancelled event: not stated; the Events
+  resource only says cancelled events on the organizer's calendar keep their details "so that they can be restored
+  (undeleted)" and "will eventually disappear".
+- events.get "always returns" cancelled events: verified (Events resource).
+- events.delete returns an empty body: verified; the status (204) is not stated. 410 `deleted` = already deleted, no
+  action needed: verified (errors guide).
+- `start`/`end` = `{dateTime (RFC 3339), timeZone (IANA)}`: "A time zone offset is required unless a time zone is
+  explicitly specified in timeZone"; end is exclusive: verified. A `Z` dateTime with `timeZone: UTC` is therefore valid.
+  A zero-length timed event: not stated.
+- `status`: `confirmed`, `tentative`, `cancelled` ("The event is cancelled (deleted)."): verified.
+- `extendedProperties.private`: private to the copy of the event on this calendar (not private to the app); key at most
+  44 characters (a longer key is dropped silently), value at most 1024 characters (cut silently), at most 300
+  properties and 32 kB per event: verified (Extended properties guide).
+- `summary`/`description` length limits: not stated ("Can contain HTML. Optional.").
+- Errors (errors guide; body `error.code`, `error.errors[].reason`): 400 do not retry; 401 `authError` refresh the
+  token, else sign in again; 403 `rateLimitExceeded`/`userRateLimitExceeded` exponential backoff (`rateLimitExceeded` may
+  also come as 429); 403 `quotaExceeded` = usage limits, no retry advice; 403 `forbiddenForNonOrganizer` listed;
+  `dailyLimitExceeded`, `forbidden`, `insufficientPermissions` not listed; 409 `duplicate` (409 `conflict` only in
+  batches); 412 `conditionNotMet` (ETag; the adapter sends no `If-Match`); 429 backoff, `Retry-After` not stated; 500
+  `backendError` backoff; 502/503/504 not listed: all verified as quoted.
+
+### Adapter decisions
+- Event id = lowercase base32hex (no padding) of SHA-256 of `lesson:<lesson id>` or `deadline:<assignment id>`: 52
+  characters, deterministic, so no event id is stored (ADR-0004(e)).
+- Upsert = PUT; 404/410 → insert with the id; 409 → PUT once more. A retry after a lost answer updates the event it
+  created and never makes a second one (PRD section 14 case 8). A 2xx PUT whose answer is still `cancelled` is an
+  error (`ErrNotRestored`, transient): the item stays pending, never "synced" with an invisible event; the sync skips
+  only that lesson.
+- Calendar binding: the stored id only. It is replaced only when calendars.get AND calendarList.get both answer 404, 410
+  or 403 (not a rate limit), so one spurious 404 never makes a second calendar; a 403 alone (another account's
+  calendar, or anything) needs the other check to agree. Crash window: created at Google, app dies before the id is
+  stored → the next run creates another, empty calendar (accepted, the user can delete it; no wider scope).
+- Delete: any 2xx, 404 and 410 are success.
+- Private properties: the adapter writes 4 per event, keys of at most 12 characters, values of at most 137 bytes (ids
+  are at most 128). `fits()` checks only Google's per-property limits: key at most 44 bytes, value at most 1024 bytes
+  (bytes, so never more characters than allowed); a write over them is refused (`ErrInvalidRequest`, permanent)
+  instead of letting Google drop or cut it. The 300-property and 32 kB limits are not checked: 4 small properties
+  cannot reach them.
+- 403 rate-limit and quota reasons (`quotaExceeded`, `dailyLimitExceeded` included) are transient, never "no access" and
+  never "calendar gone". The adapter does not retry them itself; the job runner's exponential backoff (5 s doubling to
+  5 min, 5 attempts) spaces the retries. `Retry-After` is exposed through `RetryAfter()`; the runner does not read it
+  today.
+- Deadline event: start = due, end = due + 15 minutes, `timeZone: UTC` (zero length is not stated).
+
+### Проверить владельцу на живом Google
+- Does PUT with `status: confirmed` restore an event deleted in Google Calendar (and one the app deleted)? If not,
+  the lesson stays pending with `ErrNotRestored`.
+- Does insert with the id of a deleted event answer 409 (the adapter then PUTs), or something else?
+- What do calendars.get and calendarList.get answer for the stored calendar after it is deleted, and after signing in
+  with another account (404 or 403)?
+- Zero-length events are not used, nothing to check there.

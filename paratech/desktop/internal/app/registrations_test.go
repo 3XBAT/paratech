@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/adapters/filestore"
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/localfile"
@@ -17,6 +18,7 @@ import (
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/recordingsession"
+	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -45,7 +47,10 @@ var (
 	_ homeworkflow.ProposalRepository       = (*sqlite.ProposalRepository)(nil)
 	_ homeworkflow.HomeworkMailer           = (*senddelivery.Service)(nil)
 	_ homeworkflow.HomeworkExporter         = (*filestore.Store)(nil)
-	_ homeworkflow.DeadlineCalendar         = calendarNotConnected{}
+	_ schedulesync.JobEnqueuer              = (*sqlite.JobRepository)(nil)
+	_ schedulesync.LessonRepository         = (*sqlite.LessonRepository)(nil)
+	_ schedulesync.IDGenerator              = idSource(nil)
+	_ googlecal.Store                       = secretStore(nil)
 	_ settingsLoader                        = (*sqlite.SettingsRepository)(nil)
 	_ secretStore                           = (*wincred.Store)(nil)
 	_ secretStore                           = (*testenv.MemCredentials)(nil)
@@ -73,6 +78,7 @@ func handlersForTest() jobHandlers {
 	var s *senddelivery.Service
 	return jobHandlers{
 		stt: &transcribe.Service{}, postProcess: &homeworkflow.PostProcessor{}, drafts: &homeworkflow.Drafts{}, delivery: s,
+		calendar: &schedulesync.CalendarSync{},
 	}
 }
 
@@ -102,6 +108,8 @@ func TestRegistrationPolicies(t *testing.T) {
 		{typ: homeworkflow.HomeworkDraftJobType, recovery: jobrunner.RecoveryRequeue},
 		// Hard rule 7: the side effect is never Heavy, never requeued blindly and not cancelled mid-send.
 		{typ: senddelivery.JobType, recovery: jobrunner.RecoveryReconcile, reconciler: true, uncancellable: true},
+		// Idempotent writes by stable event ids: requeued after an interruption, never Heavy.
+		{typ: schedulesync.CalendarSyncJobType, recovery: jobrunner.RecoveryRequeue},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.typ), func(t *testing.T) {
@@ -115,6 +123,9 @@ func TestRegistrationPolicies(t *testing.T) {
 
 	if got := registrationOf(t, regs, senddelivery.JobType).Timeout; got < 2*smtp.DefaultTimeout {
 		t.Errorf("send_email timeout %v, want at least twice the SMTP timeout %v", got, smtp.DefaultTimeout)
+	}
+	if got := registrationOf(t, regs, schedulesync.CalendarSyncJobType).Timeout; got < 10*googlecal.DefaultRequestTimeout {
+		t.Errorf("calendar_sync timeout %v, want room for many Calendar API requests", got)
 	}
 	for _, typ := range []job.Type{homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType} {
 		if got := registrationOf(t, regs, typ).Timeout; got < 2*hubclient.DefaultRequestTimeout {
@@ -131,7 +142,7 @@ func TestRegisteredTypes(t *testing.T) {
 	}
 	want := []job.Type{
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
-		homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+		homeworkflow.HomeworkDraftJobType, senddelivery.JobType, schedulesync.CalendarSyncJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -176,6 +187,7 @@ func TestRegistrationsWithoutAnEngine(t *testing.T) {
 	}
 	want := []job.Type{
 		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+		schedulesync.CalendarSyncJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)

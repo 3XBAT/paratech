@@ -178,8 +178,12 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 ## AC-17. Google Calendar только через адаптер и только календарь приложения; Apple Calendar API нет
 
-Автотесты: `TestCalendarStandInNeverSucceeds`, `TestWiredDeadlineProposalWaitsForTheCalendar` (`desktop/internal/app/proposals_test.go`) — сейчас вместо календаря заглушка.
-Вручную: пока не проверить: TASK-050 (вход в Google), TASK-051 (календарь). Когда появится: Google просит доступ только к календарям, созданным приложением; создан отдельный календарь «Learning Assistant»; основной календарь не изменён.
+Автотесты: `TestWiredCalendarSync` (`desktop/internal/app/calendar_test.go`); `TestCalendarSyncTwiceGivesTheSameEvents`, `TestCalendarSyncChangedLessonUpdatesTheEvent`, `TestCalendarSyncRewritesIntoAFreshCalendar` (`desktop/tests/calendar_sync_sqlite_test.go`, ни одного запроса к чужому календарю); `TestDeadlineCalendarMapsNotSignedIn`, `TestWiredDeadlineProposalWaitsForTheCalendar` (`desktop/internal/app/proposals_test.go`).
+Вручную (run-alpha.md §10, шаги 3 и 7–13):
+- [ ] При входе Google просит доступ только к календарям, созданным приложением.
+- [ ] После «Синхронизировать» есть отдельный календарь «Learning Assistant» с занятиями; основной и другие календари не изменились.
+- [ ] Повторная синхронизация не создаёт дублей; изменённое занятие обновляет то же событие; удалённое — пропадает.
+- [ ] Выход и вход тем же аккаунтом — календарь «Learning Assistant» один.
 Apple (TASK-052), можно проверить сейчас: «Подключения» → «Как увидеть события в Apple Calendar» открывает экран-инструкцию; пароля Apple ID приложение не просит; общедоступным календарь не делает (способ 3 помечен «Не рекомендуется»); ссылки открываются только в браузере по умолчанию (`docs/qa/run-alpha.md`, раздел 8). Автотест экрана — `desktop/frontend/test/help.test.mjs`.
 
 ## AC-18. Ответ LLM сам не может отправить письмо, записать файл или изменить календарь
@@ -207,10 +211,11 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 ## AC-20. Главные данные — локальные, внешний календарь только показывает
 
-Автотесты: `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, весь путь на локальной базе); `TestCalendarStandInNeverSucceeds` (`desktop/internal/app/proposals_test.go`).
+Автотесты: `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, весь путь на локальной базе); `TestCalendarSyncWaitsForTheSignIn`, `TestCalendarSyncRunsAsAJobWithRetries` (`desktop/tests/calendar_sync_sqlite_test.go`: синхронизация — задача с повторами, без входа занятия ждут).
 Вручную:
 - [ ] Без интернета: приложение запускается; «Записи и задачи», «Модели речи», «Настройки», импорт расписания, попап по расписанию, запись и распознавание работают.
-- [ ] Пока не проверить: TASK-051. Когда появится: удалить или изменить событие в Google Calendar — занятие в приложении не меняется, следующая синхронизация возвращает событие.
+- [ ] Изменить или удалить событие занятия в Google Calendar: занятие в приложении не меняется; после правки занятия в файле и импорта событие перезаписано (run-alpha.md §10, шаг 14).
+- [ ] Удалить календарь «Learning Assistant» в Google: следующая синхронизация создаёт новый со всеми занятиями (§10, шаг 13).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -321,10 +326,10 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 | AC-14 | Отправка только с подтверждением | `TestSendingWithoutConfirmationIsImpossible`, `TestWiredUnconfirmedProposalsReachNoPort` | AC-14 | автотест; вручную пока не проверить: TASK-045 |
 | AC-15 | Результат отправки, неясный исход не повторяется | `TestTimeoutAfterAcceptanceIsUnknownAndNotResent`, `TestWiredSendRepeatAfterACrashSendsNothingMore` | AC-15 | автотест + вручную («Проверить почту»); отправка пока не проверить: TASK-045 |
 | AC-16 | Импорт расписания с превью | `TestScheduleImportPreviewShowsChangesAndConflicts`, `TestScheduleImportThroughThePageBinding` | AC-16 | автотест + вручную |
-| AC-17 | Google Calendar через адаптер, без Apple API | `TestCalendarStandInNeverSucceeds` (заглушка), `help.test.mjs` | AC-17 | Apple: вручную (экран-инструкция); Google пока не проверить: TASK-050, TASK-051 |
+| AC-17 | Google Calendar через адаптер, без Apple API | `TestWiredCalendarSync`, `TestCalendarSyncTwiceGivesTheSameEvents`, `help.test.mjs` | AC-17 | автотест + вручную (run-alpha.md §10); Apple: вручную (экран-инструкция) |
 | AC-18 | LLM не вызывает побочные эффекты | `TestPromptInjectionDoesNotCallEmailAdapter`, `TestSideEffectPortsNeverTakeModelOutput` | не нужно сейчас | автотест |
 | AC-19 | Секреты не в базе открытым текстом | `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestSchemaHasNoSecretColumns` | AC-19 | автотест + вручную |
-| AC-20 | Локальные данные главные | `TestLessonToAssignmentsThroughTheWiredCore` | AC-20 | автотест + вручную (без интернета); календарь пока не проверить: TASK-051 |
+| AC-20 | Локальные данные главные | `TestLessonToAssignmentsThroughTheWiredCore`, `TestCalendarSyncRunsAsAJobWithRetries` | AC-20 | автотест + вручную (без интернета; правка события в Google) |
 | AC-21 | Распознавание только от розетки | `TestHeavyJobWaitsOnBatteryAndRunsWhenACReturns`, `TestSTTJobPowerLossWaitsAndResumes` | AC-21 | автотест + вручную (ноутбук) |
 | AC-22 | Выключить ограничение, «Запустить сейчас» | `TestSettingOffRunsHeavyJobsOnBattery`, `TestForceRunStartsOneJobOnBattery` | AC-22 | автотест + вручную (ноутбук) |
 | AC-23 | Скачивание или импорт с SHA-256 | `TestModelImportRejectsTamperedFile`, `TestModelDownloadRejectsTamperedFile` | AC-23 | импорт: автотест + вручную; скачивание: автотест, вручную пока не проверить (каталог пуст) |

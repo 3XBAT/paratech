@@ -6,8 +6,13 @@
 // preview with domain/schedule/services/importplan; it stores nothing. CommitImport needs the confirm token of that
 // preview: it parses the same bytes again, rebuilds the plan against the current schedule inside one transaction and
 // writes it with one LessonRepository.ApplyChanges only if the plan is unchanged (same fingerprint) and has no errors.
-// The scheduler (TASK-018) and the calendar sync job (TASK-051, enqueued after a commit) are added later. The local
-// schedule stays the system of record; nothing is read back from the calendar.
+// After a commit that changed the schedule it asks CalendarSync for a run, outside the transaction.
+//
+// Calendar (TASK-051, calendar.go): CalendarSync is the handler of the calendar_sync job. It writes the pending lessons
+// into the app calendar through the CalendarAdapter with stable event ids and idempotent upserts, deletes the events
+// of deleted lessons and then purges them, and rewrites everything into a fresh calendar. The local schedule stays the
+// system of record; nothing is read back from the calendar. Deadlines reach the calendar only through confirmed
+// proposals (homeworkflow), never through this job.
 //
 // Rules that apply: ARCH-20..27. File parsers are adapters (one per format) behind the ScheduleParser port.
 package schedulesync

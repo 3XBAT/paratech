@@ -1,6 +1,9 @@
 package schedulesync
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors of the schedule use case (ARCH-18). Domain and port errors are returned wrapped, not translated.
 var (
@@ -19,4 +22,27 @@ var (
 	// ErrStalePreview means the plan differs from the confirmed preview (the file or the schedule changed meanwhile);
 	// nothing was written and the user previews again.
 	ErrStalePreview = errors.New("schedule import preview is out of date")
+
+	// ErrCalendarNotConnected means there is no Google sign-in for the calendar: RequestSync refuses, and the
+	// CalendarAdapter returns an error wrapping it (the app maps the adapter's class). A sync job ends without writing.
+	ErrCalendarNotConnected = errors.New("calendar not connected")
+
+	// ErrCalendarSignInExpired means Google no longer accepts the stored sign-in: the user signs in again. It wraps
+	// ErrCalendarNotConnected.
+	ErrCalendarSignInExpired = fmt.Errorf("%w: google sign-in expired", ErrCalendarNotConnected)
+
+	// ErrLessonRejected means the calendar did not take the write of one lesson for a reason of that lesson only (a
+	// refused or malformed event, an event id Google keeps taken or deleted). The CalendarAdapter returns an error
+	// wrapping it with its retry class; the sync skips the lesson and goes on with the others.
+	ErrLessonRejected = errors.New("calendar rejected the lesson")
+
+	// ErrLessonsSkipped means a sync run skipped some lessons (ErrLessonRejected, ErrLessonBusy); the others were
+	// written and the skipped ones stay pending.
+	ErrLessonsSkipped = errors.New("calendar sync skipped some lessons")
+
+	// ErrLessonBusy means a lesson kept changing while the sync recorded its calendar state; the job tries again.
+	ErrLessonBusy = errors.New("lesson changed during calendar sync")
+
+	// ErrUnknownJobType means a job of another type reached the calendar sync handler.
+	ErrUnknownJobType = errors.New("not a calendar sync job")
 )

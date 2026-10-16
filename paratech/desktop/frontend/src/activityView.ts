@@ -35,6 +35,7 @@ export const jobTypeLabels: Readonly<Record<string, string>> = {
   stt: "Распознавание речи",
   summarize: "Конспект",
   extract_homework: "Поиск домашнего задания",
+  calendar_sync: "Синхронизация календаря",
 };
 
 function lookup(labels: Readonly<Record<string, string>>, key: string): string {

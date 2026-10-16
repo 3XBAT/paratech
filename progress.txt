@@ -2023,3 +2023,38 @@
 - Подтвердить путь на iPhone (iOS 18+/26) и подписку на iPhone по странице Apple, когда она станет читаемой
 
 ---
+## [TASK-051] Google Calendar синхронизация: отдельный календарь приложения, идемпотентный upsert, задача синхронизации
+**Дата:** 2026-10-16
+**Статус:** done (автотесты с подставными серверами Google; проверка на живом Google — владелец, run-alpha.md §10)
+
+### Что сделано
+- adapters/googlecal (net/http + encoding/json, без новых зависимостей): свой календарь «Learning Assistant», стабильные id событий, идемпотентные insert/PUT/delete, «календарь пропал» — только после двух проверок; id календаря хранится в Credential Manager (`paratech/google/calendar-id`), без миграции; googleauth.ForgetAccessToken; testenv.FakeGoogleCalendar
+- domain lesson: MarkCalendarSynced, ForgetCalendarProjection; cases/schedulesync: задача `calendar_sync` в job store с retry, запросы синхронизации (не больше одной ждущей), статус; импорт просит синхронизацию
+- app: проводка, синхронизация после импорта, входа, при старте (если выполнен вход) и по «Синхронизировать»; мост дедлайнов (подтверждённый дедлайн — событие 15 минут в календаре приложения)
+- wails: GoogleCalendarService; frontend: блок состояния синхронизации и кнопка «Синхронизировать» в «Google Календарь»
+- Документы: ADR-0011 (раздел календаря), ADR-0009 (calendar_sync), docs/refs/google-calendar.md, run-alpha.md §10 шаги 7–17, windows-checklist AC-17/AC-20
+- Ревью: 2 medium исправлены (застрявшее занятие блокировало остальные — теперь пропускается; перекрывающиеся задачи синхронизации занимали воркер — теперь вторая сразу завершается и просит повтор), плюс запись id до calendars.insert, снятие захвата при панике. Повторное ревью исправлений: approve. Security: находок нет
+- При перебазировании на TASK-052 объединены конфликты в run-alpha.md, windows-checklist.md (строки AC-17 — Google и Apple вместе) и frontend/tsconfig.test.json
+
+### Тесты
+- [x] .github/scripts/verify.sh (через heavy.sh) на 148ca6d — ALL_GREEN
+- [x] Шаг 2: TestCalendarSyncTwiceGivesTheSameEvents (повтор — те же события)
+- [x] Шаг 3: TestCalendarSyncChangedLessonUpdatesTheEvent (изменение — то же событие обновлено)
+
+### Решения (подтвердить)
+- Выход из Google сохраняет привязку к календарю (calendar-id не удаляется)
+- Синхронизация останавливается после 20 застрявших занятий подряд
+- События дедлайнов — 15 минут
+- Смена аккаунта A→B→A может дать дубли календаря — известное ограничение (ADR-0011)
+- Падение сразу после создания календаря в Google может оставить один пустой «Learning Assistant»
+
+### Заметки (follow-up)
+- Low (повторное ревью): 20+ отклонённых навсегда занятий в начале порядка блокируют остальные навсегда (calendar.go maxSkippedInARow) — считать подряд только до первой записи или не останавливаться на ErrLessonRejected
+- Low: паника прогона теряет повтор, запрошенный перекрывшей задачей (runClaimed — вызывать followUp в defer при recover)
+- Low: при временной ошибке и st.more ненадолго ждут две задачи calendar_sync (вторая — пустая); запрашивать повтор только при не временном исходе или поправить текст ADR
+- Nit: tests/calendar_sync_sqlite_test.go lessonPortError дублирует app.lessonWriteError — ссылка-комментарий или общий помощник
+- Nit: googlecal/calendar.go пишет пустую привязку как пробную запись перед calendars.insert — пояснить комментарием (сообщение коммита «no placeholder entry» неточно)
+- Ниты 8 и 9 первого ревью отложены прежним координатором; их текст в состоянии ветки не сохранён
+- Проверить на живом Google: восстановление удалённого события PUT-ом, 409 при вставке с id удалённого, ответы calendars.get/calendarList.get про удалённый календарь (run-alpha.md §10)
+
+---

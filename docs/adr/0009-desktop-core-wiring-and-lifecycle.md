@@ -1,7 +1,7 @@
 # ADR-0009: Desktop core wiring and lifecycle
 
 - **Status:** Accepted
-- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030, TASK-065, TASK-058; builds on ADR-0007 (Wails shell)
+- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030, TASK-065, TASK-058, TASK-051; builds on ADR-0007 (Wails shell)
 
 ## Context
 The use cases existed, but nothing built them: no job ran, no recording recovered, the page's Stop / Run now were stubs.
@@ -12,8 +12,9 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
   (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer, Prompt,
-  Schedule, Files, Models, Downloads, Imports, Links, SpeechReady, Connections}` (interfaces required; `Prompt` since
-  TASK-022, `Schedule` and `Files` since TASK-049, the model fields since TASK-030, `Connections` since TASK-062).
+  Schedule, Files, Models, Downloads, Imports, Links, SpeechReady, Connections, Google, Calendar}` (interfaces required;
+  `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049, the model fields since TASK-030, `Connections` since
+  TASK-062, `Google` since TASK-050, `Calendar` since TASK-051).
   `start` runs
   once: UI mode from `Options.Started` (Wails' `ApplicationStarted`) in an app goroutine; headless right after
   `openCore` inside `Run` (headless now opens the core; no data dir is an error).
@@ -24,7 +25,8 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 - **Start order:** startup cleanups (filestore temp files, whisper-cli work dirs; errors only logged) ->
   `jobrunner.Recover` -> `recordingsession.Recover` in the background (long assemblies must not delay jobs) ->
   `senddelivery.Recover` -> `senddelivery.Resume` -> transcription sweep (`transcribe.Enqueuer.EnqueuePending`, TASK-060;
-  errors only logged) -> `runner.Start` -> loops (UI mode: `scheduler.Run`, `recordingprompt.Run`). No binding may
+  errors only logged) -> calendar sync request (when signed in, TASK-051; only logs) -> `runner.Start` -> loops
+  (UI mode: `scheduler.Run`, `recordingprompt.Run`). No binding may
   write artifacts or start a recording before `start` has run the cleanups and the recording recovery has marked
   interrupted recordings (TASK-022 binding). TASK-022 closes it with
   `recordingsession.RecoveryMarked()`: closed when the first `Recover` ends its marking pass (or fails before it), or
@@ -42,6 +44,7 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 | `summarize`, `extract_homework` | no | requeue | 10 min (5 x hub request timeout) | wait on the Hub; idempotent by key |
 | `homework_draft` | no | requeue | 10 min | same |
 | `send_email` | no | reconcile, uncancellable | 2 x SMTP timeout + 1 min | external side effect (hard rule 7) |
+| `calendar_sync` | no | requeue | 30 min | external, but idempotent upserts by stable event ids (TASK-051, ADR-0011) |
 
 Use-case `MaxAttempts` = the runner's backoff `MaxAttempts`. The STT completion event goes to the post-processor, which
 enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<prompts version>`.
@@ -87,8 +90,8 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   CAS; no foreign key to assignments, so an unknown assignment is stored REJECTED and a deleted one makes a confirmed
   proposal STALE). Mailer: `senddelivery.Service` (one delivery per command key, an UNKNOWN one is never resent).
   Exporter: `filestore.Store.ExportHomework` (only `exports/<assignment>/homework.md`). Recipient: `recipientSettings`.
-  Calendar: stand-in `calendarNotConnected`, always `homeworkflow.ErrCalendarNotConnected`; the proposal stays
-  CONFIRMED.
+  Calendar: `googlecal` through `deadlineCalendar` (TASK-051); not signed in = `homeworkflow.ErrCalendarNotConnected`,
+  the proposal stays CONFIRMED.
   Clock `e.local`, like the other `homeworkflow` services. No binding yet (TASK-045).
 - **Connections (TASK-062).** `cases/connections` (`app/connections.go`) edits the mail account and the Hub URL in the
   settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
@@ -119,10 +122,10 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   `logs/`.
 
 ## Not wired yet (follow-ups)
-- The calendar sync of `schedulesync` and the deadline calendar of the proposals (stand-in until TASK-051).
 - Catalog entries with verified SHA-256 in `internal/app/catalog.json`.
 - The SHA-256 pin check of the whisper-cli binary (docs/refs/whisper.md), TASK-054 or later.
-- Wired since: `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
+- Wired since: the calendar sync of `schedulesync` and the deadline calendar (`googlecal`) by TASK-051 (a sync is also
+  requested at start, after the transcription sweep, when signed in); `scheduler` by TASK-022 (UI mode only); the `schedulesync` import for the schedule page by TASK-049;
   the Windows recorder by TASK-017; recording -> STT, `modelcatalog`, the heavy cap and `homeworkflow.Service` by
   TASK-060; the models page by TASK-030 (hardware detection for the recommendation is not wired: the catalog is listed
   for an unknown machine); the Hub key and the quota of the «Подключения» page by TASK-039.

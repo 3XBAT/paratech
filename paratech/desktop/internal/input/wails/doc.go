@@ -16,7 +16,8 @@
 // The «Подключения» page (mail account, Hub address, mail password, "check mail") calls
 // ConnectionsService (connections.go): field errors and check results are answers with fixed Russian texts; the
 // password only goes in, the page sees its status. Its Google section calls GoogleService (google.go): the client id
-// and secret only go in, GoogleSignIn waits for the browser sign-in and GoogleCancelSignIn ends it.
+// and secret only go in, GoogleSignIn waits for the browser sign-in and GoogleCancelSignIn ends it. The calendar
+// synchronization of the same section calls GoogleCalendarService (calendar.go): its state and «Синхронизировать».
 //
 // The «Диагностика» page calls DiagnosticsService (diagnostics.go): "Проверить звук" answers a verdict with a fixed
 // text; "Сохранить пакет для поддержки" shows the save dialog (savepicker_windows.go), so the path never comes from

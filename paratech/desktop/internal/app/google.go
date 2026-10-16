@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"paratech/desktop/internal/adapters/googleauth"
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/domain/schedule/values"
 )
@@ -19,8 +20,13 @@ var (
 
 // wireGoogle builds the Google section of the «Подключения» page (TASK-050): the googleauth adapter on the google
 // credential store (it reads the client and keeps the refresh token there) and the browser, and the googlesignin use
-// case on the same store (writes and existence only), which reaches the adapter through the bridge below.
-// c.google is what the Calendar adapter will authorize with (TASK-051: Authorizer.HTTPClient).
+// case on the same store (writes and existence only), which reaches the adapter through the bridge below. A successful
+// sign-in asks for a calendar sync. The Calendar adapter (TASK-051) authorizes with c.google and keeps the id of the
+// app calendar in the same store; its base URL is the adapter's default, only tests replace it.
+//
+// Sign-out keeps the calendar id: the same account signing in again gets its calendar back (no second one), and
+// another account cannot see it (calendars.get and calendarList.get both refuse), so the adapter makes a fresh
+// calendar and the sync rewrites every lesson into it.
 func (c *core) wireGoogle(e env, log *slog.Logger) error {
 	secrets, err := e.secrets(googleSecretsService)
 	if err != nil {
@@ -30,7 +36,13 @@ func (c *core) wireGoogle(e env, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("app: google authorization: %w", err)
 	}
-	c.googleSignIn, err = googlesignin.New(googlesignin.Deps{Secrets: secrets, Auth: googleSignIn{c.google}, Log: log},
+	c.calendar, err = googlecal.New(c.google, secrets, classifyGoogleAuth, e.googleCalendar...)
+	if err != nil {
+		return fmt.Errorf("app: google calendar: %w", err)
+	}
+	// The hook reads c.calendarSync when it runs: the sync is built after the sign-in it depends on.
+	bridge := googleSignIn{auth: c.google, signedIn: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "sign-in") }}
+	c.googleSignIn, err = googlesignin.New(googlesignin.Deps{Secrets: secrets, Auth: bridge, Log: log},
 		googlesignin.Config{
 			ClientIDName: googleauth.ClientIDName, ClientSecretName: googleauth.ClientSecretName,
 			RefreshTokenName: googleauth.RefreshTokenName,
@@ -38,7 +50,6 @@ func (c *core) wireGoogle(e env, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("app: google sign-in: %w", err)
 	}
-	c.ui.Google = c.googleSignIn
 	return nil
 }
 
@@ -48,11 +59,23 @@ type googleAuthorizer interface {
 	SignOut(ctx context.Context) error
 }
 
-// googleSignIn is the googlesignin.Authorizer of the googleauth adapter: mapping only. The adapter's texts are fixed
-// and carry no token, code or secret, so the cause stays wrapped.
-type googleSignIn struct{ auth googleAuthorizer }
+// googleSignIn is the googlesignin.Authorizer of the googleauth adapter: mapping only, plus signedIn after a successful
+// sign-in (nil: nothing). The adapter's texts are fixed and carry no token, code or secret, so the cause stays wrapped.
+type googleSignIn struct {
+	auth     googleAuthorizer
+	signedIn func(ctx context.Context)
+}
 
-func (g googleSignIn) SignIn(ctx context.Context) error  { return googleResult(g.auth.SignIn(ctx)) }
+func (g googleSignIn) SignIn(ctx context.Context) error {
+	if err := g.auth.SignIn(ctx); err != nil {
+		return googleResult(err)
+	}
+	if g.signedIn != nil {
+		g.signedIn(ctx)
+	}
+	return nil
+}
+
 func (g googleSignIn) SignOut(ctx context.Context) error { return googleResult(g.auth.SignOut(ctx)) }
 
 // googleResult maps the adapter's classes to the results of the use case. Store failures come first: after a failed

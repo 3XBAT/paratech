@@ -45,3 +45,29 @@
 - The Desktop client belongs to the owner's project; Google deletes a client after 6 months without token requests or
   changes ([Manage OAuth Clients](https://support.google.com/cloud/answer/15549257)).
 - Open: whether Google's token endpoint accepts a Desktop client without `client_secret` (docs say "Optional"); we always send it.
+
+## Calendar (TASK-051)
+- **Binding.** The id of the app calendar «Learning Assistant» and a `fresh` flag live in Credential Manager
+  (`paratech/google/calendar-id`, JSON `{id, fresh}`); no SQLite migration. `calendarList.list` is not allowed with
+  `calendar.app.created`, so the stored id is the only binding.
+- **Gone** only when `calendars.get` AND `calendarList.get` both answer 404/410/403 (not a rate limit). Then a new
+  calendar is created with `fresh: true`; the sync marks every lesson unwritten, rewrites all, then clears `fresh`.
+- **Event ids** = base32hex(SHA-256(`lesson:<id>` or `deadline:<assignment id>`)), nothing stored. Upsert = PUT, on 404/410
+  insert with the id, on 409 PUT again; delete: 2xx/404/410 = done. A retry after a lost answer updates the same event.
+- **Job** `calendar_sync`: requeue on recovery (idempotent), not Heavy, 30 min. At most one job waits to start; a request
+  while one runs makes the next one. Requested after an import that changed lessons, after sign-in, at start (if
+  signed in) and by «Синхронизировать». Not signed in / sign-in expired = job completes without writing, the page says so.
+  A job that starts while a run is in progress ends at once; the running one requests the next job.
+- **Stuck lessons**: a lesson Google refuses (400, bad request) or keeps taken/deleted is skipped and stays pending;
+  the rest is written and the job fails (retried if a skip may pass). 20 skips in a row, or any other error, end the run.
+- **Sign-out keeps the binding**: the same account gets its calendar back; another account cannot see it, so a fresh
+  calendar is made and everything is rewritten.
+- **Known limitation:** one binding per installation, not per account. Accounts A → B → A: back in A the binding is B's
+  calendar, so A gets a second calendar while its first one keeps the old events (duplicates the user sees; delete the
+  old calendar by hand). The same after a change of the OAuth client: calendars of the old client are invisible to it.
+- **Deadlines** only through a confirmed proposal (hard rule 3); the sync job writes lessons only. A recreated calendar
+  does not get old deadlines back.
+- **No read-back** from Google (AC-20): edits in Google Calendar are overwritten by the next write of that lesson.
+- **Accepted crash window:** the calendar is created at Google before its id is stored; a crash in between leaves an
+  extra empty calendar the user can delete. After an id that could not be stored, the next insert waits until the
+  credential store takes a write again: one extra calendar per failure, not one per attempt.

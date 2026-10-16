@@ -11,6 +11,7 @@ import (
 
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/localfile"
@@ -30,6 +31,7 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/scheduler"
+	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/cases/supportbundle"
@@ -67,9 +69,12 @@ type core struct {
 	imports   *modelcatalog.Importer
 	manager   *modelManager
 
-	// Google authorization (wireGoogle): the adapter the Calendar sync will use (TASK-051) and the page's use case.
+	// Google (wireGoogle, wireCalendar): the authorization, the page's sign-in use case, the Calendar adapter and the
+	// calendar sync of the schedule (TASK-051).
 	google       *googleauth.Authorizer
 	googleSignIn *googlesignin.Service
+	calendar     *googlecal.Client
+	calendarSync *schedulesync.CalendarSync
 
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
@@ -190,6 +195,14 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		return fmt.Errorf("app: email delivery: %w", err)
 	}
 	handlers.delivery = c.deliveries
+	// Before the proposals (the deadline calendar) and the runner (the calendar sync handler).
+	if err := c.wireGoogle(e, log); err != nil {
+		return err
+	}
+	if err := c.wireCalendar(e, jobs, lessons, log, maxAttempts); err != nil {
+		return err
+	}
+	handlers.calendar = c.calendarSync
 	if err := c.wireProposals(e, settings); err != nil {
 		return err
 	}
@@ -250,15 +263,12 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
-		Sound: sound, Bundle: bundle,
+		Sound: sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
 	}
-	if err := c.wireGoogle(e, log); err != nil {
-		return err
-	}
-	return c.wireSchedule(e)
+	return c.wireSchedule(e, log)
 }
 
 // sttEngine is whisper-cli below the artifact root, or nil when the binary is missing or refused by the adapter's

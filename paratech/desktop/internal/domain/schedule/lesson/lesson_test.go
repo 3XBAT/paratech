@@ -372,3 +372,99 @@ func TestCalendarPending(t *testing.T) {
 		t.Error("a synced lesson is not pending after a content change")
 	}
 }
+
+func TestMarkCalendarSynced(t *testing.T) {
+	t1 := t0.Add(time.Hour)
+	tests := []struct {
+		name       string
+		mutate     func(*State)
+		revision   int64
+		at         time.Time
+		wantErr    error
+		wantSynced int64
+		wantAt     time.Time
+		pending    bool
+	}{
+		{name: "current revision again updates the time", revision: 2, at: t1, wantSynced: 2, wantAt: t1},
+		{name: "never synced", mutate: func(s *State) { s.CalendarSyncedRevision, s.CalendarSyncedAt = 0, time.Time{} },
+			revision: 2, at: t1, wantSynced: 2, wantAt: t1},
+		{name: "older than the content stays pending", mutate: func(s *State) { s.ContentRevision = 3 },
+			revision: 2, at: t1, wantSynced: 2, wantAt: t1, pending: true},
+		{name: "older than the synced one is ignored", mutate: func(s *State) { s.ContentRevision, s.CalendarSyncedRevision = 3, 3 },
+			revision: 2, at: t1, wantSynced: 3, wantAt: t0},
+		{name: "revision 0", revision: 0, at: t1, wantErr: ErrInvalidLesson, wantSynced: 2, wantAt: t0},
+		{name: "ahead of the content", revision: 3, at: t1, wantErr: ErrInvalidLesson, wantSynced: 2, wantAt: t0},
+		{name: "no time", revision: 2, wantErr: ErrInvalidLesson, wantSynced: 2, wantAt: t0},
+		{name: "deleted", mutate: func(s *State) { s.DeletedAt = t0 }, revision: 2, at: t1, wantErr: ErrDeleted,
+			wantSynced: 2, wantAt: t0, pending: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := validState()
+			if tt.mutate != nil {
+				tt.mutate(&s)
+			}
+			l, err := Restore(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = l.MarkCalendarSynced(tt.revision, tt.at)
+			if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("MarkCalendarSynced = %v, want %v", err, tt.wantErr)
+			}
+			if l.CalendarSyncedRevision() != tt.wantSynced || !l.CalendarSyncedAt().Equal(tt.wantAt) ||
+				l.CalendarPending() != tt.pending {
+				t.Fatalf("synced %d at %v, pending %v; want %d at %v, pending %v", l.CalendarSyncedRevision(),
+					l.CalendarSyncedAt(), l.CalendarPending(), tt.wantSynced, tt.wantAt, tt.pending)
+			}
+			if !l.UpdatedAt().Equal(s.UpdatedAt) || l.ContentRevision() != s.ContentRevision || l.Version() != s.Version {
+				t.Fatal("marking the calendar changed the content, the update time or the version")
+			}
+		})
+	}
+}
+
+func TestForgetCalendarProjection(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*State)
+		changed bool
+	}{
+		{name: "synced", changed: true},
+		{name: "written at an older revision", mutate: func(s *State) { s.ContentRevision = 3 }, changed: true},
+		{name: "never synced", mutate: func(s *State) { s.CalendarSyncedRevision, s.CalendarSyncedAt = 0, time.Time{} }},
+		{name: "deleted", mutate: func(s *State) { s.DeletedAt = t0 }, changed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := validState()
+			if tt.mutate != nil {
+				tt.mutate(&s)
+			}
+			l, err := Restore(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := l.ForgetCalendarProjection(); got != tt.changed {
+				t.Fatalf("ForgetCalendarProjection = %v, want %v", got, tt.changed)
+			}
+			if l.CalendarSyncedRevision() != 0 || !l.CalendarSyncedAt().IsZero() || !l.CalendarPending() {
+				t.Fatalf("synced %d at %v, pending %v; want never written", l.CalendarSyncedRevision(),
+					l.CalendarSyncedAt(), l.CalendarPending())
+			}
+			if l.ForgetCalendarProjection() {
+				t.Fatal("a second ForgetCalendarProjection reports a change")
+			}
+		})
+	}
+
+	// A forgotten lesson is written again from the start.
+	l, err := Restore(validState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.ForgetCalendarProjection()
+	if err := l.MarkCalendarSynced(2, t0.Add(time.Hour)); err != nil || l.CalendarPending() {
+		t.Fatalf("MarkCalendarSynced after forget = %v, pending %v", err, l.CalendarPending())
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/adapters/clock"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
+	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingprompt"
@@ -41,8 +42,8 @@ type fakes struct {
 	// secrets are the credential stores by service: tests never touch the real Credential Manager.
 	secrets map[string]*testenv.MemCredentials
 
-	// browser opens Google's consent page; the Google endpoints point to a closed local port unless a test sets
-	// env.googleOAuth to a fake server, so no test reaches Google.
+	// browser opens Google's consent page; the Google endpoints and the Calendar API point to a closed local port
+	// unless a test sets env.googleOAuth or env.googleCalendar to a fake server, so no test reaches Google.
 	browser *testenv.FakeBrowser
 }
 
@@ -85,10 +86,11 @@ func testEnv(t *testing.T) (env, *fakes) {
 			}
 			return s, nil
 		},
-		authPages:   f.browser,
-		googleOAuth: []googleauth.Option{googleauth.WithEndpoints(nowhere+"/auth", nowhere+"/token", nowhere+"/revoke")},
-		runner:      runner,
-		recordings:  recordingsession.DefaultConfig(),
-		stopTimeout: 5 * time.Second,
+		authPages:      f.browser,
+		googleOAuth:    []googleauth.Option{googleauth.WithEndpoints(nowhere+"/auth", nowhere+"/token", nowhere+"/revoke")},
+		googleCalendar: []googlecal.Option{googlecal.WithBaseURL(nowhere + "/calendar/v3")},
+		runner:         runner,
+		recordings:     recordingsession.DefaultConfig(),
+		stopTimeout:    5 * time.Second,
 	}, f
 }
