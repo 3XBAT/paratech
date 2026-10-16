@@ -152,10 +152,20 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("app: post-processing: %w", err)
 	}
+
+	deliveries := sqlite.NewDeliveryRepository(db)
+	c.deliveries, err = senddelivery.New(senddelivery.Deps{
+		Deliveries: deliveries, History: deliveries, Artifacts: store, Email: mailer, Jobs: jobs,
+		Credentials: mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
+	}, senddelivery.Config{MaxAttempts: maxAttempts})
+	if err != nil {
+		return fmt.Errorf("app: email delivery: %w", err)
+	}
+	// The deliveries lock the export file of an assignment while one of its emails is unresolved.
 	c.drafts, err = homeworkflow.NewDrafts(homeworkflow.DraftDeps{
 		LLM: llm, Assignments: assignments, Drafts: sqlite.NewDraftRepository(db), Summaries: summaries, Lessons: lessons,
-		Artifacts: store, Jobs: jobs, JobReader: jobs, Clock: e.local, IDs: e.ids, Tx: db, Log: log,
-		ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
+		Artifacts: store, Jobs: jobs, JobReader: jobs, Deliveries: c.deliveries, Clock: e.local, IDs: e.ids, Tx: db,
+		Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
 	})
 	if err != nil {
 		return fmt.Errorf("app: homework drafts: %w", err)
@@ -187,14 +197,6 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 		handlers.stt = stt
 	}
 
-	deliveries := sqlite.NewDeliveryRepository(db)
-	c.deliveries, err = senddelivery.New(senddelivery.Deps{
-		Deliveries: deliveries, History: deliveries, Artifacts: store, Email: mailer, Jobs: jobs,
-		Credentials: mailSecrets, Clock: e.clock, IDs: e.ids, Tx: db, Log: log,
-	}, senddelivery.Config{MaxAttempts: maxAttempts})
-	if err != nil {
-		return fmt.Errorf("app: email delivery: %w", err)
-	}
 	handlers.delivery = c.deliveries
 	// Before the proposals (the deadline calendar) and the runner (the calendar sync handler).
 	if err := c.wireGoogle(e, log); err != nil {

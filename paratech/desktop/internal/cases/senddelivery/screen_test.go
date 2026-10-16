@@ -134,6 +134,39 @@ func TestViewOffersTheResolutionOfAnUnknownOutcome(t *testing.T) {
 	}
 }
 
+// HasUnresolved locks the export file of an assignment while one of its emails may still go out or may have gone out
+// unseen (PENDING, SENDING, UNKNOWN); SENT and FAILED do not lock, and other assignments are not affected.
+func TestHasUnresolved(t *testing.T) {
+	tests := []struct {
+		name   string
+		result error // the outcome of the first attempt; nil: no attempt
+		run    bool
+		want   bool
+	}{
+		{name: "pending", want: true},
+		{name: "sent", run: true},
+		{name: "failed", run: true, result: delivery.ErrRejected},
+		{name: "unknown", run: true, result: delivery.ErrOutcomeUnknown, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			e := newEnv(t)
+			_, snap := e.created(t)
+			if tt.run {
+				e.email.result = func(context.Context, *delivery.Delivery) error { return tt.result }
+				_ = e.svc.Handle(ctx, snap, noReport)
+			}
+			if got, err := e.svc.HasUnresolved(ctx, "a1"); err != nil || got != tt.want {
+				t.Fatalf("HasUnresolved(a1) = %v, %v; want %v", got, err, tt.want)
+			}
+			if got, err := e.svc.HasUnresolved(ctx, "a2"); err != nil || got {
+				t.Fatalf("HasUnresolved(a2) = %v, %v; want false", got, err)
+			}
+		})
+	}
+}
+
 func TestSubject(t *testing.T) {
 	if got := newEnv(t).svc.Subject(); got != DefaultSubject {
 		t.Errorf("default subject = %q", got)

@@ -23,6 +23,7 @@ const (
 	opConfirm     = "homeworkflow: confirm proposal"
 	opDecline     = "homeworkflow: decline proposal"
 	opExecute     = "homeworkflow: execute proposal"
+	opConfirmSend = "homeworkflow: confirm sending"
 )
 
 // The pipeline of PRD section 13.3 (AC-14, AC-18):
@@ -147,6 +148,34 @@ func (s *Service) Get(ctx context.Context, id proposal.ID) (ProposalView, error)
 // nothing derived from model output does.
 func (s *Service) Confirm(ctx context.Context, id proposal.ID) (ProposalView, error) {
 	return s.change(ctx, opConfirm, id, (*proposal.Proposal).Confirm)
+}
+
+// ConfirmSend is the user's click on the confirmation of a send_homework_email proposal: Confirm, then Execute
+// (AC-14). Repeating it with the same proposal is safe (hard rule 7): a CONFIRMED proposal whose Execute failed, maybe
+// after the delivery was saved, is executed again under the same idempotency key, so no second email is created, and
+// an EXECUTED one is returned as it is. Another kind yields ErrNotASend before any change; other statuses yield the
+// error of proposal.Confirm (proposal.ErrInvalidTransition).
+func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID) (ProposalView, error) {
+	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		p, err := s.proposals.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if p.Kind() != proposal.KindSendHomework {
+			return fmt.Errorf("%w: %s", ErrNotASend, p.Kind())
+		}
+		if st := p.Status(); st == proposal.StatusConfirmed || st == proposal.StatusExecuted {
+			return nil // confirmed by an earlier click: Execute repeats or returns the result
+		}
+		if err := p.Confirm(s.clock.Now()); err != nil {
+			return err
+		}
+		return s.proposals.Save(ctx, p)
+	})
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmSend, err)
+	}
+	return s.Execute(ctx, id)
 }
 
 // Decline records that the user refused a VALIDATED proposal; it can never be executed afterwards.

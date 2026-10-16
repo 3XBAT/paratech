@@ -165,6 +165,15 @@ type DeadlineCalendar interface {
 	UpsertDeadline(ctx context.Context, cmd proposal.CalendarCommand) error
 }
 
+// UnresolvedDeliveries tells whether an email of an assignment may still go out or may have gone out unseen, so that
+// Drafts.ExportDraft does not overwrite the file that email attaches (PRD section 10, AC-15, hard rule 7).
+// Implemented by senddelivery.Service.
+type UnresolvedDeliveries interface {
+	// HasUnresolved reports whether assignment a has a delivery in PENDING, SENDING or UNKNOWN (PRD section 10). An
+	// error means the deliveries could not be read.
+	HasUnresolved(ctx context.Context, a shared.AssignmentID) (bool, error)
+}
+
 // TranscriptReader gives read access to the transcript that a post-processing job works on (PRD sections 8 and 9.1).
 // Implemented by the sqlite adapter.
 type TranscriptReader interface {

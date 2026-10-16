@@ -21,6 +21,7 @@ const (
 	opGet          = "senddelivery: get"
 	opList         = "senddelivery: list"
 	opListOf       = "senddelivery: list deliveries of an assignment"
+	opUnresolved   = "senddelivery: find unresolved deliveries"
 	opMarkSent     = "senddelivery: mark as sent"
 	opSendAgain    = "senddelivery: send again"
 	opReconcile    = "senddelivery: reconcile"
@@ -187,6 +188,22 @@ func unresolvedStatuses() []delivery.Status {
 		}
 	}
 	return out
+}
+
+// HasUnresolved reports whether assignment a has a delivery that blocks a new one (PENDING, SENDING or UNKNOWN). It
+// satisfies homeworkflow.UnresolvedDeliveries structurally: the export file of a is the attachment of such a delivery,
+// so the drafts must not overwrite it (hard rule 7).
+func (s *Service) HasUnresolved(ctx context.Context, a shared.AssignmentID) (bool, error) {
+	unresolved, err := s.deliveries.ListByStatus(ctx, unresolvedStatuses()...)
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opUnresolved, a, err)
+	}
+	for _, d := range unresolved {
+		if d.Blocks(a) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ensureJob enqueues the job of the current send round of a PENDING delivery and returns its id: the key is per round,

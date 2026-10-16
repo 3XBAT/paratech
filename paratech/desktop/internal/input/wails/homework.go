@@ -39,6 +39,8 @@ const (
 	ErrSendAlreadyDecided    = homeworkError("Эта отправка уже подтверждена или отменена.")
 	ErrSendStale             = homeworkError("Файл или адрес получателя изменились после подтверждения. Проверьте и подтвердите ещё раз.")
 	ErrSendUnresolved        = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.")
+	ErrSendIncomplete        = homeworkError("Не удалось завершить отправку. Повторите — второе письмо не уйдёт — или проверьте список писем ниже.")
+	ErrExportLocked          = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.")
 	ErrDeliveryNotFound      = homeworkError("Письмо не найдено: обновите список.")
 	ErrDeliveryActionInvalid = homeworkError("Это действие для письма уже недоступно: обновите список.")
 )
@@ -63,7 +65,7 @@ const (
 	msgUnknownOutcome = "Письмо отправлено, но подтверждение не получено: проверьте сами или отправьте ещё раз под свою ответственность"
 
 	msgWaitingNetwork   = "Нет связи с сервером обработки: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама."
-	msgWaitingQuota     = "Минуты обработки закончились. Генерация продолжится, когда они пополнятся."
+	msgWaitingQuota     = "Лимит обработки исчерпан. Генерация продолжится, когда лимит обновится."
 	msgGenerationFailed = "Не удалось подготовить черновик. Попробуйте ещё раз."
 	msgGenerationCancel = "Генерация отменена."
 
@@ -107,14 +109,13 @@ const (
 )
 
 // HomeworkProposals is the part of homeworkflow.Service the page uses (ARCH-42): the assignments and the send
-// proposal. Confirm and Execute are called only by ConfirmSend, on the user's click in the confirmation dialog.
+// proposal. ConfirmSend is called only by the binding of the same name, on the user's click in the confirmation dialog.
 type HomeworkProposals interface {
 	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
-	Confirm(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
-	Execute(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+	ConfirmSend(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 }
 
@@ -385,7 +386,8 @@ func (s *HomeworkService) EditDraft(ctx context.Context, id string, base int, ti
 	return VersionText{}, s.fail(opEditDraft, err, ErrHomeworkNotFound)
 }
 
-// ExportDraft writes version n to the file a send attaches, replacing an earlier export.
+// ExportDraft writes version n to the file a send attaches, replacing an earlier export. While an email of the
+// assignment is unresolved, nothing is written (ErrExportLocked).
 func (s *HomeworkService) ExportDraft(ctx context.Context, id string, n int) (ExportResult, error) {
 	aid, err := assignmentID(id)
 	if err != nil {
@@ -395,6 +397,10 @@ func (s *HomeworkService) ExportDraft(ctx context.Context, id string, n int) (Ex
 		return ExportResult{}, ErrDraftVersionNotFound
 	}
 	res, err := s.drafts.ExportDraft(ctx, aid, n)
+	if errors.Is(err, homeworkflow.ErrExportLocked) {
+		s.log.Info(opExportDraft, "result", homeworkflow.ErrExportLocked)
+		return ExportResult{}, ErrExportLocked
+	}
 	if err != nil {
 		return ExportResult{}, s.fail(opExportDraft, err, ErrDraftVersionNotFound)
 	}
@@ -427,24 +433,27 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPrepa
 	return out, nil
 }
 
-// ConfirmSend is the user's click on «Отправить» in the confirmation dialog (AC-14): it confirms the send proposal
-// the dialog showed and executes it, which creates the delivery. It is the only binding that leads to an email.
+// ConfirmSend is the user's click on «Отправить» in the confirmation dialog (AC-14): the use case confirms the send
+// proposal the dialog showed and executes it, which creates the delivery. It is the only binding that leads to an
+// email. Repeating it with the same proposal after a failure creates no second email (ErrSendIncomplete says so).
 func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID string) error {
-	pid, err := s.sendProposal(ctx, opConfirmSend, proposalID)
-	if err != nil {
-		return err
+	pid := proposal.ID(proposalID)
+	if pid.Validate() != nil {
+		return ErrHomeworkInvalidID
 	}
-	if _, err := s.proposals.Confirm(ctx, pid); err != nil {
-		if errors.Is(err, proposal.ErrInvalidTransition) {
-			s.log.Info(opConfirmSend, "result", err)
-			return ErrSendCannotConfirm
-		}
-		return s.fail(opConfirmSend, err, ErrSendNotFound)
-	}
-	_, err = s.proposals.Execute(ctx, pid)
+	_, err := s.proposals.ConfirmSend(ctx, pid)
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, homeworkflow.ErrNotASend):
+		s.log.Warn(opConfirmSend, "result", err)
+		return ErrSendNotFound
+	case errors.Is(err, shared.ErrNotFound):
+		s.log.Info(opConfirmSend, "result", "not found")
+		return ErrSendNotFound
+	case errors.Is(err, proposal.ErrInvalidTransition):
+		s.log.Info(opConfirmSend, "result", err)
+		return ErrSendCannotConfirm
 	case errors.Is(err, proposal.ErrStale):
 		s.log.Info(opConfirmSend, "result", err)
 		return ErrSendStale
@@ -452,7 +461,8 @@ func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID string) er
 		s.log.Info(opConfirmSend, "result", err)
 		return ErrSendUnresolved
 	}
-	return s.fail(opConfirmSend, err, ErrSendNotFound)
+	s.log.Error(opConfirmSend, "err", err)
+	return ErrSendIncomplete
 }
 
 // CancelSend is «Отмена» in the confirmation dialog: the proposal is declined and can never be sent.

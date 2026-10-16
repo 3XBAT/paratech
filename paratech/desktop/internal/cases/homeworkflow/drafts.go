@@ -61,6 +61,7 @@ type Drafts struct {
 	artifacts   ArtifactStore
 	jobs        JobEnqueuer
 	jobReader   JobReader
+	deliveries  UnresolvedDeliveries
 	clock       Clock
 	ids         IDGenerator
 	tx          Tx
@@ -74,7 +75,8 @@ type Drafts struct {
 // NewDrafts checks the ports, the model alias and the limits.
 func NewDrafts(d DraftDeps) (*Drafts, error) {
 	if d.LLM == nil || d.Assignments == nil || d.Drafts == nil || d.Summaries == nil || d.Lessons == nil ||
-		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
+		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Deliveries == nil || d.Clock == nil || d.IDs == nil ||
+		d.Tx == nil {
 		return nil, fmt.Errorf("%w: every draft port is required", ErrInvalidConfig)
 	}
 	// The alias rules belong to the request value; a throwaway request checks them once, at wiring time.
@@ -89,7 +91,8 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 	}
 	s := &Drafts{
 		llm: d.LLM, assignments: d.Assignments, drafts: d.Drafts, summaries: d.Summaries, lessons: d.Lessons,
-		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, clock: d.Clock, ids: d.IDs, tx: d.Tx, log: d.Log,
+		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, deliveries: d.Deliveries, clock: d.Clock, ids: d.IDs,
+		tx: d.Tx, log: d.Log,
 		modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts, generateRetries: d.GenerateRetries,
 	}
 	if s.maxAttempts == 0 {
@@ -287,12 +290,20 @@ func (s *Drafts) DraftVersion(ctx context.Context, a shared.AssignmentID, n int)
 // ExportDraft writes version n of the draft of assignment a to the export file of the assignment (PRD section 10
 // step 6), atomically through the Storage Manager, replacing an earlier export. Only the student's explicit action
 // calls it: the model chooses neither the version nor the path. A send that was confirmed for the earlier file content
-// becomes STALE (proposal.Recheck). A missing assignment, draft or version wraps shared.ErrNotFound and nothing is
-// written.
+// becomes STALE (proposal.Recheck). While an email of the assignment is unresolved (its attachment is this file),
+// nothing is written and the error wraps ErrExportLocked. A missing assignment, draft or version wraps
+// shared.ErrNotFound and nothing is written.
 func (s *Drafts) ExportDraft(ctx context.Context, a shared.AssignmentID, n int) (DraftExport, error) {
 	_, r, err := s.revision(ctx, a, n)
 	if err != nil {
 		return DraftExport{}, fmt.Errorf("%s %s: %w", opExportDraft, a, err)
+	}
+	locked, err := s.deliveries.HasUnresolved(ctx, a)
+	if err != nil {
+		return DraftExport{}, fmt.Errorf("%s %s: %w", opExportDraft, a, err)
+	}
+	if locked {
+		return DraftExport{}, fmt.Errorf("%s %s: %w", opExportDraft, a, ErrExportLocked)
 	}
 	ref, err := proposal.ExportRef(a)
 	if err != nil {

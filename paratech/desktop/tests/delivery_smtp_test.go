@@ -319,7 +319,7 @@ func TestSendingWithoutConfirmationIsImpossible(t *testing.T) {
 	}
 
 	// The only exported way into the service that creates a delivery takes a proposal command; everything else
-	// works on an existing delivery, a job, statuses or the password, or lists the deliveries of an assignment.
+	// works on an existing delivery, a job, statuses or the password, or reads the deliveries of an assignment.
 	allowed := map[reflect.Type]bool{
 		reflect.TypeOf(proposal.EmailCommand{}): true, reflect.TypeOf(shared.DeliveryID("")): true,
 		reflect.TypeOf(job.Snapshot{}): true, reflect.TypeOf([]delivery.Status{}): true, reflect.TypeOf(""): true,
@@ -329,7 +329,8 @@ func TestSendingWithoutConfirmationIsImpossible(t *testing.T) {
 	for i := range svcType.NumMethod() {
 		m := svcType.Method(i)
 		for j := 2; j < m.Type.NumIn(); j++ { // 0: receiver, 1: context
-			if m.Name == "ListForAssignment" && m.Type.In(j) == reflect.TypeOf(shared.AssignmentID("")) {
+			if (m.Name == "ListForAssignment" || m.Name == "HasUnresolved") &&
+				m.Type.In(j) == reflect.TypeOf(shared.AssignmentID("")) {
 				continue // only reads
 			}
 			if !allowed[m.Type.In(j)] {

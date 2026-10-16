@@ -49,8 +49,7 @@ func (c *hwCalls) list() []string {
 type fakeHWProposals struct {
 	log        *hwCalls
 	err        error
-	confirmErr error
-	executeErr error
+	confirmErr error // returned by ConfirmSend
 	declineErr error
 	proposal   homeworkflow.ProposalView // returned by ProposeSend and Get
 	list       []homeworkflow.AssignmentView
@@ -76,14 +75,9 @@ func (f *fakeHWProposals) Get(context.Context, proposal.ID) (homeworkflow.Propos
 	return f.proposal, f.err
 }
 
-func (f *fakeHWProposals) Confirm(context.Context, proposal.ID) (homeworkflow.ProposalView, error) {
-	f.log.add("Confirm")
+func (f *fakeHWProposals) ConfirmSend(context.Context, proposal.ID) (homeworkflow.ProposalView, error) {
+	f.log.add("ConfirmSend")
 	return f.proposal, cmpErr(f.confirmErr, f.err)
-}
-
-func (f *fakeHWProposals) Execute(context.Context, proposal.ID) (homeworkflow.ProposalView, error) {
-	f.log.add("Execute")
-	return f.proposal, cmpErr(f.executeErr, f.err)
 }
 
 func (f *fakeHWProposals) Decline(context.Context, proposal.ID) (homeworkflow.ProposalView, error) {
@@ -106,6 +100,7 @@ type fakeHWDrafts struct {
 	err        error
 	versions   []homeworkflow.DraftVersionView
 	generation homeworkflow.GenerationView
+	exportErr  error // returned by ExportDraft
 	gotBase    int
 	gotEdit    homeworkflow.DraftEdit
 }
@@ -140,6 +135,9 @@ func (f *fakeHWDrafts) EditDraft(_ context.Context, e homeworkflow.DraftEdit) (h
 
 func (f *fakeHWDrafts) ExportDraft(_ context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftExport, error) {
 	f.log.add("ExportDraft")
+	if f.exportErr != nil {
+		return homeworkflow.DraftExport{}, f.exportErr
+	}
 	ref, err := proposal.ExportRef(a)
 	if err != nil {
 		return homeworkflow.DraftExport{}, err
@@ -286,9 +284,13 @@ func TestHomeworkHidesCauses(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newHWEnv()
 			e.proposals.err, e.drafts.err, e.deliveries.err = cause, cause, cause
+			want := ErrHomeworkUnavailable
+			if c.name == "ConfirmSend" {
+				want = ErrSendIncomplete // a send may have been saved: the text says repeating is safe
+			}
 			err := c.call(e.svc, "x1")
-			if !errors.Is(err, ErrHomeworkUnavailable) || strings.Contains(err.Error(), "student") {
-				t.Fatalf("err = %v, want ErrHomeworkUnavailable", err)
+			if !errors.Is(err, want) || strings.Contains(err.Error(), "student") {
+				t.Fatalf("err = %v, want %v", err, want)
 			}
 			if !strings.Contains(e.logs.String(), "locked") {
 				t.Fatalf("the cause is not logged: %q", e.logs.String())
@@ -297,7 +299,7 @@ func TestHomeworkHidesCauses(t *testing.T) {
 	}
 }
 
-// AC-14: only ConfirmSend confirms and executes; no other binding reaches Confirm or Execute, and only SendAgain resends.
+// AC-14: only ConfirmSend reaches the use case's ConfirmSend, and only SendAgain resends.
 func TestOnlyConfirmSendExecutes(t *testing.T) {
 	for _, c := range everyHomeworkCall {
 		e := newHWEnv()
@@ -305,15 +307,14 @@ func TestOnlyConfirmSendExecutes(t *testing.T) {
 		if err := c.call(e.svc, "x1"); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		confirmed, executed := e.called("Confirm"), e.called("Execute")
 		if c.name == "ConfirmSend" {
-			if got := e.calls.list(); !slices.Equal(got, []string{"Get", "Confirm", "Execute"}) {
-				t.Fatalf("ConfirmSend calls = %v, want Get, Confirm, Execute", got)
+			if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend"}) {
+				t.Fatalf("ConfirmSend calls = %v, want only the use case's ConfirmSend", got)
 			}
 			continue
 		}
-		if confirmed || executed {
-			t.Errorf("%s called Confirm/Execute: %v", c.name, e.calls.list())
+		if e.called("ConfirmSend") {
+			t.Errorf("%s called ConfirmSend: %v", c.name, e.calls.list())
 		}
 		if c.name != "SendAgain" && e.called("SendAgain") {
 			t.Errorf("%s called SendAgain", c.name)
@@ -323,25 +324,24 @@ func TestOnlyConfirmSendExecutes(t *testing.T) {
 
 func TestConfirmSendErrors(t *testing.T) {
 	tests := []struct {
-		name  string
-		edit  func(e *hwEnv)
-		want  error
-		calls []string
+		name string
+		edit func(e *hwEnv)
+		want error
 	}{
 		{name: "rejected proposal", edit: func(e *hwEnv) {
-			e.proposals.proposal.Status = proposal.StatusRejected
 			e.proposals.confirmErr = fmt.Errorf("confirm: %w", proposal.ErrInvalidTransition)
-		}, want: ErrSendCannotConfirm, calls: []string{"Get", "Confirm"}},
-		{name: "not a send proposal", edit: func(e *hwEnv) { e.proposals.proposal.Kind = proposal.KindExportHomework },
-			want: ErrSendNotFound, calls: []string{"Get"}},
+		}, want: ErrSendCannotConfirm},
+		{name: "not a send proposal", edit: func(e *hwEnv) {
+			e.proposals.confirmErr = fmt.Errorf("confirm: %w: export_homework", homeworkflow.ErrNotASend)
+		}, want: ErrSendNotFound},
 		{name: "unknown proposal", edit: func(e *hwEnv) { e.proposals.err = fmt.Errorf("get: %w", shared.ErrNotFound) },
-			want: ErrSendNotFound, calls: []string{"Get"}},
+			want: ErrSendNotFound},
 		{name: "stale after the confirmation", edit: func(e *hwEnv) {
-			e.proposals.executeErr = fmt.Errorf("execute: %w: homework_artifact_changed", proposal.ErrStale)
-		}, want: ErrSendStale, calls: []string{"Get", "Confirm", "Execute"}},
+			e.proposals.confirmErr = fmt.Errorf("execute: %w: homework_artifact_changed", proposal.ErrStale)
+		}, want: ErrSendStale},
 		{name: "unresolved earlier delivery", edit: func(e *hwEnv) {
-			e.proposals.executeErr = fmt.Errorf("send: %w", senddelivery.ErrUnresolvedDelivery)
-		}, want: ErrSendUnresolved, calls: []string{"Get", "Confirm", "Execute"}},
+			e.proposals.confirmErr = fmt.Errorf("send: %w", senddelivery.ErrUnresolvedDelivery)
+		}, want: ErrSendUnresolved},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -350,10 +350,32 @@ func TestConfirmSendErrors(t *testing.T) {
 			if err := e.svc.ConfirmSend(context.Background(), "p1"); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
-			if got := e.calls.list(); !slices.Equal(got, tt.calls) {
-				t.Fatalf("calls = %v, want %v", got, tt.calls)
+			if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend"}) {
+				t.Fatalf("calls = %v, want only ConfirmSend", got)
 			}
 		})
+	}
+}
+
+// Hard rule 7: when the execution fails (for example after the delivery was saved), the page may repeat ConfirmSend
+// with the same proposal; the use case executes it again under the same key.
+func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
+	e := newHWEnv()
+	e.proposals.confirmErr = errors.New("execute: mark executed: database is locked")
+	err := e.svc.ConfirmSend(context.Background(), "p1")
+	if !errors.Is(err, ErrSendIncomplete) || strings.Contains(err.Error(), "locked") {
+		t.Fatalf("failed ConfirmSend = %v, want ErrSendIncomplete", err)
+	}
+	if !strings.Contains(ErrSendIncomplete.Error(), "второе письмо не уйдёт") {
+		t.Fatalf("the text must say that repeating is safe: %q", ErrSendIncomplete)
+	}
+
+	e.proposals.confirmErr = nil
+	if err := e.svc.ConfirmSend(context.Background(), "p1"); err != nil {
+		t.Fatalf("repeated ConfirmSend = %v", err)
+	}
+	if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend", "ConfirmSend"}) {
+		t.Fatalf("calls = %v, want the same use case call twice", got)
 	}
 }
 
@@ -583,6 +605,10 @@ func TestExportDraft(t *testing.T) {
 	if _, err := e.svc.ExportDraft(context.Background(), "a1", 9); !errors.Is(err, ErrDraftVersionNotFound) {
 		t.Errorf("missing version = %v", err)
 	}
+	e.drafts.exportErr = fmt.Errorf("export: %w", homeworkflow.ErrExportLocked)
+	if _, err := e.svc.ExportDraft(context.Background(), "a1", 2); !errors.Is(err, ErrExportLocked) {
+		t.Errorf("export during an unresolved email = %v, want ErrExportLocked", err)
+	}
 }
 
 // The page reads these names (frontend/src/bindings/homework.ts).
@@ -621,8 +647,8 @@ func TestFrontendKnowsHomeworkErrors(t *testing.T) {
 	for _, e := range []error{
 		ErrHomeworkUnavailable, ErrHomeworkInvalidID, ErrHomeworkNotFound, ErrDraftVersionNotFound, ErrDraftStale,
 		ErrDraftInvalid, ErrDraftFull, ErrInstructionInvalid, ErrGenerateRetries, ErrGenerationNotFound, ErrSendNotFound,
-		ErrSendCannotConfirm, ErrSendAlreadyDecided, ErrSendStale, ErrSendUnresolved, ErrDeliveryNotFound,
-		ErrDeliveryActionInvalid,
+		ErrSendCannotConfirm, ErrSendAlreadyDecided, ErrSendStale, ErrSendUnresolved, ErrSendIncomplete, ErrExportLocked,
+		ErrDeliveryNotFound, ErrDeliveryActionInvalid,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/homework.ts does not list the error %q", e)

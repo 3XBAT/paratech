@@ -140,6 +140,11 @@ export const errorMessages = {
   sendStale: "Файл или адрес получателя изменились после подтверждения. Проверьте и подтвердите ещё раз.",
   sendUnresolved:
     "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
+  /** confirmSend failed; repeating it with the same proposalId is safe: no second email. */
+  sendIncomplete: "Не удалось завершить отправку. Повторите — второе письмо не уйдёт — или проверьте список писем ниже.",
+  /** exportDraft refused: an earlier email of the assignment is unresolved; nothing was written. */
+  exportLocked:
+    "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.",
   deliveryNotFound: "Письмо не найдено: обновите список.",
   deliveryActionInvalid: "Это действие для письма уже недоступно: обновите список.",
 } as const;

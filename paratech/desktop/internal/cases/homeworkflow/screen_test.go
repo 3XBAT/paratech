@@ -230,6 +230,137 @@ func TestProposeSendThenConfirm(t *testing.T) {
 	})
 }
 
+// ConfirmSend is the dialog's confirmation: Confirm, then Execute. Repeating it after a failure executes the same
+// proposal again under the same idempotency key (hard rule 7), and an executed one calls nothing more.
+func TestConfirmSend(t *testing.T) {
+	ctx := context.Background()
+	errMail := errors.New("mail adapter down")
+
+	tests := []struct {
+		name string
+		// fail makes the first ConfirmSend fail and returns the function that heals it.
+		fail func(e *env, id proposal.ID) func()
+		// calls is the number of mailer calls after the second ConfirmSend.
+		calls int
+	}{
+		{name: "first click succeeds", calls: 1},
+		{name: "the mailer failed", calls: 2, fail: func(e *env, _ proposal.ID) func() {
+			e.mailer.Fail(errMail)
+			return func() { e.mailer.Fail(nil) }
+		}},
+		// The delivery was saved, then marking the proposal EXECUTED failed.
+		{name: "marking executed failed", calls: 2, fail: func(e *env, id proposal.ID) func() {
+			if _, err := e.svc.Confirm(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			e.mu.Lock()
+			e.saveErr = errDiskFull
+			e.mu.Unlock()
+			return func() {
+				e.mu.Lock()
+				e.saveErr = nil
+				e.mu.Unlock()
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t).withHomework(t)
+			v, err := e.svc.ProposeSend(ctx, "a1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.fail != nil {
+				heal := tt.fail(e, v.ID)
+				if _, err := e.svc.ConfirmSend(ctx, v.ID); err == nil {
+					t.Fatal("ConfirmSend succeeded, want the injected failure")
+				}
+				if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusConfirmed {
+					t.Fatalf("after the failure: %+v, %v; want CONFIRMED", got, err)
+				}
+				heal()
+			}
+			got, err := e.svc.ConfirmSend(ctx, v.ID)
+			if err != nil || got.Status != proposal.StatusExecuted {
+				t.Fatalf("ConfirmSend = %+v, %v; want EXECUTED", got, err)
+			}
+
+			// Executed: a further click calls nothing.
+			if again, err := e.svc.ConfirmSend(ctx, v.ID); err != nil || again.Status != proposal.StatusExecuted {
+				t.Fatalf("ConfirmSend of an executed send = %+v, %v", again, err)
+			}
+			calls := e.mailer.Calls()
+			if len(calls) != tt.calls || e.sideEffects() != tt.calls {
+				t.Fatalf("mailer calls = %d, side effects = %d; want %d", len(calls), e.sideEffects(), tt.calls)
+			}
+			for _, c := range calls {
+				if c.IdempotencyKey() != calls[0].IdempotencyKey() {
+					t.Fatalf("keys %q and %q: a repeat must reuse the key", calls[0].IdempotencyKey(), c.IdempotencyKey())
+				}
+			}
+		})
+	}
+}
+
+// ConfirmSend acts only on a send proposal the user may still confirm; nothing changes and no port is called otherwise.
+func TestConfirmSendRefuses(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, e *env) proposal.ID
+		want   error
+		status proposal.Status
+	}{
+		{name: "an export proposal", want: ErrNotASend, status: proposal.StatusValidated,
+			setup: func(t *testing.T, e *env) proposal.ID {
+				v, err := e.svc.Propose(ctx, values.NewUntrustedOutput(`{"kind":"export_homework","assignment_id":"a1","body":"x"}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return v.ID
+			}},
+		{name: "rejected", want: proposal.ErrInvalidTransition, status: proposal.StatusRejected,
+			setup: func(t *testing.T, e *env) proposal.ID {
+				e.recipient = ""
+				v, err := e.svc.ProposeSend(ctx, "a1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return v.ID
+			}},
+		{name: "declined", want: proposal.ErrInvalidTransition, status: proposal.StatusDeclined,
+			setup: func(t *testing.T, e *env) proposal.ID {
+				v, err := e.svc.ProposeSend(ctx, "a1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.svc.Decline(ctx, v.ID); err != nil {
+					t.Fatal(err)
+				}
+				return v.ID
+			}},
+		{name: "unknown", want: shared.ErrNotFound,
+			setup: func(*testing.T, *env) proposal.ID { return "p404" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t).withHomework(t)
+			id := tt.setup(t, e)
+			if _, err := e.svc.ConfirmSend(ctx, id); !errors.Is(err, tt.want) {
+				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
+			}
+			if tt.status != "" {
+				if got, err := e.svc.Get(ctx, id); err != nil || got.Status != tt.status {
+					t.Fatalf("proposal = %+v, %v; want %s", got, err, tt.status)
+				}
+			}
+			if n := e.sideEffects(); n != 0 {
+				t.Fatalf("side effects = %d, want none", n)
+			}
+		})
+	}
+}
+
 // The screen follows a generation job: its status, and for a failed job the fixed error it ended with, also when
 // the runner prefixed the text.
 func TestGeneration(t *testing.T) {

@@ -95,9 +95,13 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   Clock `e.local`, like the other `homeworkflow` services.
 - **Homework page (TASK-045).** `wails.Core.Homework` = proposals, drafts and deliveries (`input/wails.HomeworkService`).
   `PrepareSend` = `homeworkflow.Service.ProposeSend` (the user's send goes through `Propose`: VALIDATED with recipient
-  and attachment frozen, or REJECTED); `ConfirmSend` = `Confirm` then `Execute`, the only binding that sends. Lists:
+  and attachment frozen, or REJECTED); `ConfirmSend` = `homeworkflow.Service.ConfirmSend` (`Confirm` then `Execute`;
+  safe to repeat: same command key), the only binding that sends. `ExportDraft` is refused while an email of the
+  assignment is unresolved (`senddelivery.Service.HasUnresolved`): the file is its attachment. Lists:
   `sqlite.AssignmentRepository.ListRecent` (200) and `sqlite.DeliveryRepository.ListByAssignment` (50).
-  `tests/userconfirmation_test.go`: `Confirm`, `Execute`, `MarkSent`, `SendAgain` are called only from `input/wails`.
+  `tests/userconfirmation_test.go`: the names `Confirm`, `Execute`, `ConfirmSend`, `MarkSent`, `SendAgain` appear in
+  production code only in `input/wails/homework.go` and in the use case files that implement them
+  (`homeworkflow/proposals.go`, `senddelivery/service.go`, `senddelivery/job.go`).
 - **Connections (TASK-062).** `cases/connections` (`app/connections.go`) edits the mail account and the Hub URL in the
   settings and writes the SMTP password into the same `mail` store (`smtp-password`; set/exists/delete only, never
   read back). "Check mail" = `smtp.Mailer.Check`: Send's session setup (EHLO, STARTTLS, AUTH), then QUIT, no message;

@@ -150,6 +150,7 @@ type DraftDeps struct {
 	Artifacts   ArtifactStore
 	Jobs        JobEnqueuer
 	JobReader   JobReader
+	Deliveries  UnresolvedDeliveries
 	Clock       Clock
 	IDs         IDGenerator
 	Tx          Tx
