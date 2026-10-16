@@ -23,6 +23,8 @@
   ([Verification requirements](https://support.google.com/cloud/answer/13464321)).
 - **Flow** ([native-app guide](https://developers.google.com/identity/protocols/oauth2/native-app)):
   - System browser via `explorer.exe` (`adapters/weblink`), no embedded web view.
+    explorer.exe opens a folder for any URL with a query, so the authorization URL goes through a temporary `.url`
+    file in %TEMP% that explorer.exe opens (removed after a minute); the browser stays out of our process tree (ADR-0002).
   - Authorization Code + PKCE `S256` + random `state`, checked on return.
   - Loopback redirect `http://127.0.0.1:<ephemeral port>` without a path; single-use listener, closed after one callback or a timeout.
   - Scope: only `https://www.googleapis.com/auth/calendar.app.created`.

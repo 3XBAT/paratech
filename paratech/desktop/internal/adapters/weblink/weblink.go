@@ -6,6 +6,9 @@
 // and a path of unreserved ASCII characters only. Anything that explorer.exe or Windows could read as a switch, a
 // separator, a quote or an environment variable is refused. OpenAuthPage is the same launcher for an OAuth
 // authorization page, whose query is checked byte by byte instead (unreserved characters, '=', '&', "%XX").
+// explorer.exe opens a folder instead of the browser for any URL with a query, so an authorization page is written to
+// a temporary Internet Shortcut (.url) file and explorer.exe opens that file. explorer.exe stays the launcher in both
+// cases so the browser is not started in our process tree (ADR-0002: whole-computer capture excludes our tree).
 package weblink
 
 import (
@@ -57,7 +60,7 @@ func (o *Opener) OpenAuthPage(ctx context.Context, rawURL string) error {
 	if err := checkAuthLink(rawURL); err != nil {
 		return err
 	}
-	return start(ctx, rawURL)
+	return startShortcut(ctx, rawURL)
 }
 
 // checkAuthLink accepts "https://<host><path>?<query>" where the part before '?' passes checkLink and the query is
