@@ -36,16 +36,23 @@ import {
 } from "../quotaView";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
+import { helpTexts } from "../appleHelpView";
+import { AppleCalendarHelpPage } from "./AppleCalendarHelpPage";
 import { GoogleBlock } from "./GoogleBlock";
 import { SecretSlot, type SecretMessage } from "./SecretSlot";
 
 const mailCodes: readonly FieldCode[] = mailFields.map((f) => f.code);
 
 // "Подключения": the Hub address, the Hub key and the remaining quota, the mail account, the mail password and the
-// mail check and the Google sign-in (GoogleBlock), in cards (docs/design/concept-final.html). The page only shows
-// and forwards the values; validation, the secret store and the quota are in the Go core (ARCH-44).
+// mail check, the Google sign-in (GoogleBlock) and the entry to the Apple Calendar help, in cards
+// (docs/design/concept-final.html). The page only shows and forwards the values; validation, the secret store and the
+// quota are in the Go core (ARCH-44).
 export function ConnectionsPage() {
   const api = useMemo(() => connectionsApi(callByName), []);
+  // The help screen replaces the page instead of being a section of the rail; "returned" puts the focus back on the
+  // button that opened it.
+  const [help, setHelp] = useState<"closed" | "open" | "returned">("closed");
+  const helpEntry = useRef<HTMLDivElement>(null);
   const [saved, setSaved] = useState<Connections | null>(null);
   const [loadError, setLoadError] = useState("");
   const mounted = useRef(true);
@@ -244,6 +251,12 @@ export function ConnectionsPage() {
     };
   }, [api]); // refreshQuota uses only refs, state setters and api
 
+  useEffect(() => {
+    if (help === "returned") {
+      helpEntry.current?.querySelector("button")?.focus();
+    }
+  }, [help]);
+
 
   const runCheck = () =>
     once("check", setChecking, async () => {
@@ -259,6 +272,10 @@ export function ConnectionsPage() {
         }
       }
     });
+
+  if (help === "open") {
+    return <AppleCalendarHelpPage onBack={() => setHelp("returned")} />;
+  }
 
   if (saved === null || mail === null) {
     return (
@@ -469,6 +486,14 @@ export function ConnectionsPage() {
         </Card>
 
         <GoogleBlock />
+
+        <Card className="box" label={helpTexts.entryTitle}>
+          <h2>{helpTexts.entryTitle}</h2>
+          <span className="small muted box-desc">{helpTexts.entryText}</span>
+          <div ref={helpEntry} className="acts start">
+            <Button onClick={() => setHelp("open")}>{helpTexts.entryButton}</Button>
+          </div>
+        </Card>
       </div>
     </section>
   );
