@@ -1,13 +1,13 @@
 # ADR-0009: Desktop core wiring and lifecycle
 
 - **Status:** Accepted
-- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030; builds on ADR-0007 (Wails shell)
+- **Source:** TASK-056, extended by TASK-022, TASK-049, TASK-057, TASK-060, TASK-030, TASK-065; builds on ADR-0007 (Wails shell)
 
 ## Context
 The use cases existed, but nothing built them: no job ran, no recording recovered, the page's Stop / Run now were stubs.
 Constraints from earlier tasks: wiring only in `internal/app` (ARCH-50); recovery must run while no other process can own
 a RUNNING job or an unfinished recording; Wails' single-instance check runs inside `Shell.Run`, and the shell is not ready
-(no toasts) until `ApplicationStarted`.
+(no windows) until `ApplicationStarted`.
 
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
@@ -44,8 +44,14 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 | `send_email` | no | reconcile, uncancellable | 2 x SMTP timeout + 1 min | external side effect (hard rule 7) |
 
 Use-case `MaxAttempts` = the runner's backoff `MaxAttempts`. The STT completion event goes to the post-processor, which
-enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<prompts version>`. Notifications cover the four
-non-email types, UI mode only (headless has no notifier).
+enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<prompts version>`.
+
+- **No completion notifications (TASK-065, owner decision 2026-10-15).** The only notification is the lesson-started
+  popup; the user follows processing on the «Записи и задачи» page. The TASK-053 path is removed, not kept unused:
+  `cases/notify`, `domain/jobs/notice`, `notifypolicy`, the job runner `Observer`, the Wails toasts and the setting
+  toggle. Migration 0008 drops `job_notices` and `settings.notify_on_processing_complete` (applied migrations stay
+  unchanged). The shell registers no Wails notifications service, so it writes no HKCU keys; keys left by older builds
+  are harmless. `tests/no_completion_toasts_test.go` fails if the notifications package or go-toast comes back.
 
 - **Recording -> STT (TASK-060).** `recordingsession` calls its `CompletionListener` after a recording is saved COMPLETED
   with a track (stop, hard cap, capture ended, startup recovery); the app passes `transcribe.Enqueuer`. In one `Tx.Do` it
