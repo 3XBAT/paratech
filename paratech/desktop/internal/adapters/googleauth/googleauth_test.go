@@ -535,6 +535,58 @@ func TestTokenFailuresKeepTheRefreshToken(t *testing.T) {
 	}
 }
 
+// ForgetAccessToken makes the next Token refresh; the refresh token stays stored.
+func TestForgetAccessToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		forget   bool
+		requests int // token requests after the sign-in and two Token calls
+	}{
+		{name: "cached token is reused", forget: false, requests: 1},
+		{name: "forgotten token is refreshed", forget: true, requests: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := signedIn(t)
+			refresh := r.stored(t, RefreshTokenName)
+			first, err := r.a.Token(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.forget {
+				r.a.ForgetAccessToken()
+			}
+			second, err := r.a.Token(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			forms := r.google.TokenRequests()
+			if len(forms) != tt.requests {
+				t.Fatalf("token requests %d, want %d", len(forms), tt.requests)
+			}
+			if tt.forget && (forms[len(forms)-1].Get("grant_type") != "refresh_token" || second.AccessToken == first.AccessToken) {
+				t.Fatal("the forgotten access token was not refreshed")
+			}
+			if !tt.forget && second.AccessToken != first.AccessToken {
+				t.Fatal("the cached access token was not reused")
+			}
+			if r.stored(t, RefreshTokenName) != refresh {
+				t.Fatal("the refresh token changed")
+			}
+		})
+	}
+}
+
+// Forgetting without a sign-in is harmless.
+func TestForgetAccessTokenNotSignedIn(t *testing.T) {
+	r := newRig(t)
+	r.a.ForgetAccessToken()
+	if _, err := r.a.Token(context.Background()); !errors.Is(err, ErrNotSignedIn) {
+		t.Fatalf("Token = %v, want ErrNotSignedIn", err)
+	}
+}
+
 func TestTokenNotSignedIn(t *testing.T) {
 	r := newRig(t)
 	if _, err := r.a.Token(context.Background()); !errors.Is(err, ErrNotSignedIn) {

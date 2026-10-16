@@ -72,6 +72,14 @@ func (a *Authorizer) Token(ctx context.Context) (*oauth2.Token, error) {
 	return accessOnly(tok), nil
 }
 
+// ForgetAccessToken drops the cached access token; the stored refresh token stays, so the next request refreshes.
+// The Calendar adapter calls it after a 401: Google may revoke an access token before its expiry.
+func (a *Authorizer) ForgetAccessToken() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cached = nil
+}
+
 // HTTPClient returns a client that sends every request with "Authorization: Bearer <access token>" from Token,
 // refreshed as needed, through the transport of the adapter's HTTP client. It follows redirects only on the same
 // scheme and host: the transport adds the header to every hop, so a redirect elsewhere would get the token.
