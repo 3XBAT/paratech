@@ -1,0 +1,70 @@
+// Theme choice of the UI: "system" follows Windows, "light"/"dark" force one. Kept in the webview's localStorage
+// (ADR-0012); tokens.css reacts to data-theme on <html>.
+
+export type ThemeChoice = "system" | "light" | "dark";
+
+export const themeKey = "ui.theme";
+export const themeChoices: readonly ThemeChoice[] = ["system", "light", "dark"];
+
+interface Store {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+interface Root {
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
+/** A stored value as a choice; anything unknown is "system". */
+export function parseTheme(value: unknown): ThemeChoice {
+  return value === "light" || value === "dark" ? value : "system";
+}
+
+/** The saved choice; "system" when nothing is saved or the storage is not available. */
+export function readTheme(store: Store | null): ThemeChoice {
+  try {
+    return parseTheme(store?.getItem(themeKey));
+  } catch {
+    return "system";
+  }
+}
+
+/** Saves the choice; a storage that refuses it (quota, policy) only loses the choice. */
+export function writeTheme(store: Store | null, choice: ThemeChoice): void {
+  try {
+    store?.setItem(themeKey, choice);
+  } catch {
+    // Nothing to report: the theme still applies until the window closes.
+  }
+}
+
+/** Sets data-theme for a forced theme and removes it for "system". */
+export function applyTheme(root: Root, choice: ThemeChoice): void {
+  if (choice === "system") {
+    root.removeAttribute("data-theme");
+  } else {
+    root.setAttribute("data-theme", choice);
+  }
+}
+
+function browserStore(): Store | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Applies the saved choice to <html>; called before the first render, so the page never flashes the other theme. */
+export function initTheme(): ThemeChoice {
+  const choice = readTheme(browserStore());
+  applyTheme(document.documentElement, choice);
+  return choice;
+}
+
+/** Applies and saves a new choice (the theme switch in Settings). */
+export function setTheme(choice: ThemeChoice): void {
+  applyTheme(document.documentElement, choice);
+  writeTheme(browserStore(), choice);
+}

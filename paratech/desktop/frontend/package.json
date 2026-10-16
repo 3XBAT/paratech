@@ -8,6 +8,7 @@
     "test": "tsc -p tsconfig.test.json && node --test \"test/*.test.mjs\""
   },
   "dependencies": {
+    "@fontsource-variable/golos-text": "5.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
