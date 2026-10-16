@@ -17,6 +17,7 @@ import {
 import { Button } from "../ui/Button";
 import { Card, Dialog, Field, Input, ResultLine } from "../ui/controls";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
+import { CalendarSync } from "./CalendarSync";
 
 interface Message {
   text: string;
@@ -32,7 +33,7 @@ function accountChip(status: string): ChipKind {
   return statusWarns(status) ? "fail" : status === "signedIn" ? "ok" : "neutral";
 }
 
-// «Google Календарь» on "Подключения": the client id and secret, the sign-in in the system browser and the sign-out.
+// «Google Календарь» on "Подключения": the client id and secret, the sign-in in the system browser, the sign-out and the calendar sync (CalendarSync).
 // The client id and secret are write-only: typed values live in this component's state until the save call returns and
 // go nowhere else. The core keeps them and the token in Credential Manager (ARCH-44).
 export function GoogleBlock() {
@@ -278,6 +279,8 @@ export function GoogleBlock() {
           {message.text}
         </ResultLine>
       )}
+
+      <CalendarSync account={state.account} />
     </Card>
   );
 }

@@ -54,6 +54,7 @@ test("every status has a distinct Russian label and unknown ones are shown raw",
   assert.equal(recordingStatusLabel("PAUSED"), "PAUSED");
   assert.equal(jobStatusLabel("toString"), "toString");
   assert.equal(jobTypeLabel("stt"), "Распознавание речи");
+  assert.equal(jobTypeLabel("calendar_sync"), "Синхронизация календаря");
   assert.equal(jobTypeLabel("send_email"), "send_email");
 });
 
