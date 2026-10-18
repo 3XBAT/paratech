@@ -16,12 +16,3 @@ type unavailableSource struct{}
 func (unavailableSource) Open(context.Context, Target, Observer) (Stream, error) {
 	return nil, ErrUnavailable
 }
-
-// PlatformTone returns the tone player of this OS: none outside 64-bit Windows.
-func PlatformTone() TonePlayer { return unavailableTone{} }
-
-// unavailableTone is the TonePlayer of a build without capture.
-type unavailableTone struct{}
-
-func (unavailableTone) Output() (OutputDevice, error)    { return OutputDevice{}, ErrUnavailable }
-func (unavailableTone) Play(context.Context, Tone) error { return ErrUnavailable }

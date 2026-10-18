@@ -45,8 +45,7 @@ type ToneSource struct {
 	Limit           int       // after this many packets Read waits for Stop (a quiet stream)
 	Drain           int       // packets still delivered after Stop, before io.EOF
 	OnPacket        func(int) // called with the number of each packet before Read returns it
-	// Gate, when set, lets the tone through only while it reports true; the other packets carry zeros (a FakeTone's
-	// Playing makes the source hear the self-test tone only while it plays).
+	// Gate, when set, lets the tone through only while it reports true; the other packets carry zeros.
 	Gate func() bool
 
 	mu     sync.Mutex
@@ -238,83 +237,6 @@ func (st *toneStream) next() audiocapture.Packet {
 		p.Data = make([]byte, len(p.Data))
 	}
 	return p
-}
-
-// FakeTone is a fake audiocapture.TonePlayer: Play marks the tone as playing for its duration and plays nothing.
-// Set its fields before the first call.
-type FakeTone struct {
-	Device    string // reported output device; default ToneDevice
-	HandsFree bool   // the output device is a Bluetooth hands-free endpoint
-	NoDevice  bool   // there is no output device
-	PlayErr   error  // Play fails with it
-
-	mu      sync.Mutex
-	asked   bool
-	playing bool
-	plays   int
-}
-
-// Output describes the fake output device.
-func (f *FakeTone) Output() (audiocapture.OutputDevice, error) {
-	f.mu.Lock()
-	f.asked = true
-	f.mu.Unlock()
-	if f.NoDevice {
-		return audiocapture.OutputDevice{}, audiocapture.ErrNoDevice
-	}
-	name := f.Device
-	if name == "" {
-		name = ToneDevice
-	}
-	return audiocapture.OutputDevice{Name: name, HandsFree: f.HandsFree}, nil
-}
-
-// Play is "playing" for t.Duration, or until ctx ends.
-func (f *FakeTone) Play(ctx context.Context, t audiocapture.Tone) error {
-	if f.PlayErr != nil {
-		return f.PlayErr
-	}
-	f.setPlaying(true)
-	defer f.setPlaying(false)
-	timer := time.NewTimer(t.Duration)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (f *FakeTone) setPlaying(on bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.playing = on
-	if on {
-		f.plays++
-	}
-}
-
-// Playing reports whether the tone plays now.
-func (f *FakeTone) Playing() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.playing
-}
-
-// Audible is the Gate of a ToneSource that serves both a capture and a self-test: always true until a self-test
-// asked for the output device, then true only while the tone plays.
-func (f *FakeTone) Audible() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return !f.asked || f.playing
-}
-
-// Plays returns how often Play started.
-func (f *FakeTone) Plays() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.plays
 }
 
 // ToneDevice is the output device a ToneSource reports by default.
