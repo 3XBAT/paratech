@@ -106,7 +106,6 @@ type env struct {
 	childStdin    io.Reader
 	childStdout   io.Writer
 	captureSource audiocapture.Source
-	tone          audiocapture.TonePlayer // plays the tone of a sound check request
 
 	// speech is the speech recognition component: its manifest, the folder of the executable and the install source;
 	// tests use a manifest of the test binary and a fake server. Without a verified set STT jobs wait QUEUED.
@@ -154,7 +153,6 @@ func productionEnv() env {
 		childStdin:      os.Stdin,
 		childStdout:     os.Stdout,
 		captureSource:   audiocapture.PlatformSource(audiocapture.DefaultSourceConfig()),
-		tone:            audiocapture.PlatformTone(),
 		speech:          speechEnv{manifest: embeddedSpeechManifest(), bundledDir: executableDir(), source: httpdownload.New()},
 		secrets:         credentialManager,
 		authPages:       weblink.New(),

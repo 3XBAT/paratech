@@ -81,6 +81,9 @@ type core struct {
 	calendar     *googlecal.Client
 	calendarSync *schedulesync.CalendarSync
 
+	// sound is "Проверить звук"; its running check ends with the lifecycle.
+	sound *soundcheck.Service
+
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
 	prompts   *recordingprompt.Service
@@ -236,7 +239,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: recordings: %w", err)
 	}
 
-	sound, err := soundcheck.New(soundChecker(recorder), settings, recordingActivity{c.recordings}, log)
+	c.sound, err = soundcheck.New(soundcheck.Deps{
+		Checker: levelChecker(recorder), Settings: settings, Recordings: recordingActivity{c.recordings}, Clock: e.clock,
+		Log: log,
+	}, soundcheck.Config{})
 	if err != nil {
 		return fmt.Errorf("app: sound check: %w", err)
 	}
@@ -267,7 +273,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech,
-		Sound: sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
+		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework: wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {

@@ -34,9 +34,9 @@ func (Unavailable) Diagnostics(context.Context, shared.RecordingID) (values.Capt
 	return values.CaptureDiagnostics{}, false
 }
 
-// CheckSound cannot play or capture anything.
-func (Unavailable) CheckSound(context.Context) (values.SoundCheck, error) {
-	return values.SoundCheck{}, ErrUnavailable
+// CheckLevels cannot capture anything.
+func (Unavailable) CheckLevels(context.Context, values.Source, time.Duration, func(values.SoundLevel)) (values.SoundCause, error) {
+	return "", ErrUnavailable
 }
 
 // Finalize cannot assemble the chunks; the recording stays for a later recovery.

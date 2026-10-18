@@ -8,28 +8,36 @@ import {
   methods,
   parseBundleResult,
   parseSoundCheck,
-  soundModes,
+  soundStates,
   soundVerdicts,
 } from "../.test-build/bindings/diagnostics.js";
 import {
   bundleButton,
   bundleFailedLines,
   bundleLines,
-  causeText,
   checkButton,
-  modeLabels,
+  heardMarkPercent,
+  levelFloorDb,
+  levelPercent,
+  pollMs,
+  pollSoundCheck,
+  remainingText,
   soundDisplay,
   soundFailedDisplay,
   texts,
 } from "../.test-build/diagnosticsView.js";
 
 // Mirrors the JSON of internal/input/wails/diagnostics.go (diagnostics_test.go).
-const checked = {
-  verdict: "ok", message: "Звук записывается: проверочный сигнал слышен.", device: "Динамики (Realtek Audio)",
-  handsFree: false, hint: "",
-  modes: [{ mode: "include", ok: true, cause: "ok" }, { mode: "system", ok: false, cause: "silence" }],
+const running = {
+  state: "running", level: 0.123, peak: 0.5, heard: true, elapsedMs: 4200, remainingMs: 10800, durationMs: 15000,
+  verdict: "", message: "Звук слышен.", hints: [], source: "zoom.exe", wholeComputer: false,
 };
-const busy = { verdict: "busy", message: "Проверка звука уже идёт.", device: "", handsFree: false, hint: "", modes: [] };
+const silence = {
+  ...running, state: "done", level: 0, peak: 0.001, heard: false, elapsedMs: 15000, remainingMs: 0, verdict: "silence",
+  message: "Звук не слышен.", hints: ["Проверьте микшер."], source: "Весь звук компьютера", wholeComputer: true,
+};
+const idle = { ...running, state: "idle", level: 0, peak: 0, heard: false, elapsedMs: 0, remainingMs: 15000, message: "",
+  source: "" };
 const saved = { status: "saved", message: "Пакет для поддержки сохранён.", name: "la-support-20261016.zip" };
 
 function fakeCall(reply) {
@@ -45,15 +53,19 @@ const src = (file) => readFileSync(new URL(file, import.meta.url), "utf8");
 
 test("the api calls the bound Go methods without arguments", async () => {
   const p = "paratech/desktop/internal/input/wails.DiagnosticsService.";
-  assert.deepEqual(Object.values(methods).sort(), ["CheckSound", "SaveSupportBundle"].map((m) => p + m));
+  assert.deepEqual(Object.values(methods).sort(),
+    ["SaveSupportBundle", "SoundCheckStatus", "StartSoundCheck", "StopSoundCheck"].map((m) => p + m));
 
-  const sound = fakeCall(checked);
-  assert.deepEqual(await diagnosticsApi(sound.call).checkSound(), checked);
+  const sound = fakeCall(running);
+  const api = diagnosticsApi(sound.call);
+  assert.deepEqual(await api.startSoundCheck(), running);
+  assert.deepEqual(await api.soundCheckStatus(), running);
+  assert.deepEqual(await api.stopSoundCheck(), running);
   const bundle = fakeCall(saved);
   assert.deepEqual(await diagnosticsApi(bundle.call).saveSupportBundle(), saved);
 
   // The page never passes a path: the core asks for it in its own dialog.
-  assert.deepEqual(sound.calls, [[p + "CheckSound"]]);
+  assert.deepEqual(sound.calls, [[p + "StartSoundCheck"], [p + "SoundCheckStatus"], [p + "StopSoundCheck"]]);
   assert.deepEqual(bundle.calls, [[p + "SaveSupportBundle"]]);
 });
 
@@ -61,34 +73,42 @@ test("a failing call rejects", async () => {
   const api = diagnosticsApi(async () => {
     throw new Error("boom");
   });
-  await assert.rejects(api.checkSound(), /boom/);
+  await assert.rejects(api.startSoundCheck(), /boom/);
+  await assert.rejects(api.soundCheckStatus(), /boom/);
+  await assert.rejects(api.stopSoundCheck(), /boom/);
   await assert.rejects(api.saveSupportBundle(), /boom/);
 });
 
 test("sound check replies are parsed strictly; extra fields are dropped", () => {
-  assert.deepEqual(soundVerdicts, ["ok", "no_device", "silence", "unsupported", "hands_free", "busy", "failed"]);
-  assert.deepEqual(soundModes, ["include", "system"]);
-  for (const verdict of soundVerdicts) {
-    assert.equal(parseSoundCheck({ ...checked, verdict }).verdict, verdict);
+  assert.deepEqual(soundStates, ["idle", "running", "done"]);
+  assert.deepEqual(soundVerdicts, ["", "ok", "silence", "not_running", "no_device", "unsupported", "busy", "failed"]);
+  for (const verdict of soundVerdicts.filter((v) => v !== "")) {
+    assert.equal(parseSoundCheck({ ...silence, verdict }).verdict, verdict);
   }
-  assert.deepEqual(parseSoundCheck({ ...checked, path: "C:\\x", modes: [{ ...checked.modes[0], extra: 1 }] }).modes,
-    [checked.modes[0]]);
-  assert.deepEqual(parseSoundCheck({ ...busy, modes: null }).modes, []);
+  assert.deepEqual(parseSoundCheck({ ...running, path: "C:\\x" }), running);
+  assert.deepEqual(parseSoundCheck({ ...silence, hints: null }).hints, []);
+  assert.deepEqual(parseSoundCheck(idle), idle);
   for (const raw of [
     null, "ok", {},
-    { ...checked, verdict: "fine" },
-    { ...checked, verdict: "toString" },
-    { ...checked, message: null },
-    { ...checked, device: undefined },
-    { ...checked, handsFree: "no" },
-    { ...checked, hint: 0 },
-    { ...checked, modes: "include" },
-    { ...checked, modes: [null] },
-    { ...checked, modes: [{ mode: "exclude", ok: true, cause: "ok" }] },
-    { ...checked, modes: [{ mode: "include", ok: "true", cause: "ok" }] },
-    { ...checked, modes: [{ mode: "include", ok: true }] },
+    { ...running, state: "paused" },
+    { ...running, verdict: "ok" },
+    { ...silence, verdict: "" },
+    { ...silence, verdict: "toString" },
+    { ...running, level: 1.5 },
+    { ...running, level: -0.1 },
+    { ...running, peak: "0.5" },
+    { ...running, level: Number.NaN },
+    { ...running, elapsedMs: -1 },
+    { ...running, remainingMs: 1.5 },
+    { ...running, durationMs: undefined },
+    { ...running, heard: "yes" },
+    { ...running, message: null },
+    { ...running, hints: "x" },
+    { ...running, hints: [1] },
+    { ...running, source: undefined },
+    { ...running, wholeComputer: 0 },
   ]) {
-    assert.throws(() => parseSoundCheck(raw), /sound/);
+    assert.throws(() => parseSoundCheck(raw), /sound check/);
   }
 });
 
@@ -110,35 +130,157 @@ test("bundle replies are parsed strictly: only a saved bundle has a name", () =>
   }
 });
 
-test("the check result shows the verdict, the device, the hint and every mode", () => {
-  assert.deepEqual(soundDisplay(checked), {
-    lines: [
-      { text: "Звук записывается: проверочный сигнал слышен.", tone: "ok" },
-      { text: "Устройство вывода: Динамики (Realtek Audio)", tone: "muted" },
-    ],
-    modes: [
-      { label: "Захват приложения", text: "Работает", ok: true },
-      { label: "Весь звук компьютера (классический)", text: "Сигнал не слышен.", ok: false },
-    ],
+test("a running check shows the source, the level, the seconds left and the core's message", () => {
+  assert.deepEqual(soundDisplay(running), {
+    phase: "running", running: true, percent: levelPercent(0.123), heard: true, source: "Источник: zoom.exe",
+    prompt: "", remaining: "Осталось 11 с", lines: [{ text: "Звук слышен.", tone: "ok" }],
   });
+  const quiet = soundDisplay({ ...running, heard: false, level: 0, message: "Включите звук." });
+  assert.equal(quiet.percent, 0);
+  assert.equal(quiet.heard, false);
+  assert.equal(quiet.prompt, "Включите звук.", "the hint is the core's text");
+  assert.deepEqual(quiet.lines, [], "nothing but the hint until sound is heard");
+  assert.equal(soundDisplay({ ...running, message: "Слышно." }).lines[0].text, "Слышно.", "no text of its own");
+  assert.ok(!("playSomething" in texts) && !("heard" in texts), "the running texts come only from the core");
+  const whole = soundDisplay({ ...running, source: "Весь звук компьютера", wholeComputer: true });
+  assert.equal(whole.source, "Источник: Весь звук компьютера");
+});
 
-  const headset = { ...checked, verdict: "silence", message: "Не слышен.", hint: "Гарнитура.", handsFree: true };
-  assert.deepEqual(soundDisplay(headset).lines, [
-    { text: "Не слышен.", tone: "error" },
-    { text: "Устройство вывода: Динамики (Realtek Audio)", tone: "muted" },
-    { text: "Гарнитура.", tone: "warning" },
-  ]);
-  // Busy is a wait, not a fault; no device and no modes means one line.
-  assert.deepEqual(soundDisplay(busy), { lines: [{ text: "Проверка звука уже идёт.", tone: "warning" }], modes: [] });
-  assert.deepEqual(soundFailedDisplay(), { lines: [{ text: "Не удалось проверить звук.", tone: "error" }], modes: [] });
-
-  assert.deepEqual(modeLabels, { include: "Захват приложения", system: "Весь звук компьютера (классический)" });
-  for (const cause of ["no_device", "silence", "unsupported", "hands_free", "busy", "failed"]) {
-    assert.notEqual(causeText(cause), "", cause);
+test("a finished check shows the verdict and the hints of the core; other verdicts show its message", () => {
+  assert.deepEqual(soundDisplay(silence), {
+    phase: "done", running: false, percent: 0, heard: false, source: "Источник: Весь звук компьютера", prompt: "",
+    remaining: "", lines: [{ text: "Звук не слышен.", tone: "error" }, { text: "Проверьте микшер.", tone: "muted" }],
+  });
+  assert.deepEqual(soundDisplay({ ...silence, verdict: "ok", message: "Звук слышен.", hints: [] }).lines,
+    [{ text: "Звук слышен.", tone: "ok" }]);
+  assert.equal(soundDisplay({ ...silence, verdict: "busy" }).lines[0].tone, "warning");
+  for (const verdict of ["not_running", "no_device", "unsupported", "failed"]) {
+    const d = soundDisplay({ ...silence, verdict, message: "m-" + verdict, hints: ["h"] });
+    assert.deepEqual(d.lines, [{ text: "m-" + verdict, tone: "error" }, { text: "h", tone: "muted" }]);
   }
-  // An unknown cause is not shown raw.
-  assert.equal(causeText("toString"), causeText("failed"));
-  assert.equal(causeText("<b>x</b>"), "Не удалось проверить.");
+  assert.deepEqual(soundDisplay(idle),
+    { phase: "idle", running: false, percent: 0, heard: false, source: "", prompt: "", remaining: "", lines: [] });
+  assert.deepEqual(soundFailedDisplay(), {
+    phase: "failed", running: false, percent: 0, heard: false, source: "", prompt: "", remaining: "",
+    lines: [{ text: "Не удалось проверить звук.", tone: "error" }],
+  });
+});
+
+test("the level is shown on a dB scale from -60 dBFS, so quiet sound is visible", () => {
+  assert.equal(levelFloorDb, -60);
+  assert.equal(levelPercent(0), 0);
+  assert.equal(levelPercent(0.001), 0); // -60 dBFS, the smallest level the core sends
+  assert.equal(levelPercent(0.002), 10);
+  assert.equal(levelPercent(0.01), 33); // -40 dBFS, the threshold of the core
+  assert.equal(levelPercent(0.1), 67);
+  assert.equal(levelPercent(0.5), 90);
+  assert.equal(levelPercent(1), 100);
+  assert.equal(levelPercent(2), 100);
+  assert.equal(levelPercent(-1), 0);
+  assert.equal(levelPercent(Number.NaN), 0);
+  assert.ok(levelPercent(0.02) > 2 * 0.02 * 100, "a quiet level is wider than its linear value");
+  for (let l = 0.001; l < 1; l *= 1.5) {
+    assert.ok(levelPercent(l * 1.5) >= levelPercent(l), "the bar grows with the level");
+  }
+  assert.equal(heardMarkPercent, 33);
+});
+
+test("the seconds left are whole and rounded up; at 0 a running check is finishing", () => {
+  assert.equal(remainingText(15000), "Осталось 15 с");
+  assert.equal(remainingText(10800), "Осталось 11 с");
+  assert.equal(remainingText(1), "Осталось 1 с");
+  assert.equal(remainingText(0), "Завершаем…");
+  assert.equal(remainingText(-5), "Завершаем…");
+  // The capture starts after the countdown, so the core may still run at 0 left.
+  assert.equal(soundDisplay({ ...running, elapsedMs: 15000, remainingMs: 0 }).remaining, "Завершаем…");
+});
+
+// Fake timers: run() fires the one pending timer. Reads are answered by the test, so an overlap would be visible.
+function fakeTimers() {
+  const pending = new Map();
+  let next = 1;
+  return {
+    timers: {
+      set(fn, ms) {
+        assert.equal(ms, pollMs);
+        pending.set(next, fn);
+        return next++;
+      },
+      clear(h) {
+        pending.delete(h);
+      },
+    },
+    pending,
+    run() {
+      assert.equal(pending.size, 1, "exactly one timer is pending");
+      const [h, fn] = [...pending][0];
+      pending.delete(h);
+      fn();
+    },
+  };
+}
+
+function deferredReads() {
+  const waiting = [];
+  const read = () => new Promise((resolve, reject) => waiting.push({ resolve, reject }));
+  return { read, waiting };
+}
+
+const flush = () => new Promise((r) => setImmediate(r));
+
+test("polling reads one at a time and ends when the check is done", async () => {
+  const t = fakeTimers();
+  const r = deferredReads();
+  const states = [];
+  let fails = 0;
+  pollSoundCheck(r.read, (s) => states.push(s.state), () => fails++, t.timers);
+
+  t.run();
+  assert.equal(r.waiting.length, 1);
+  assert.equal(t.pending.size, 0, "no next read before the answer");
+  r.waiting[0].resolve(running);
+  await flush();
+  assert.equal(t.pending.size, 1);
+
+  t.run();
+  r.waiting[1].resolve(silence);
+  await flush();
+  assert.deepEqual(states, ["running", "done"]);
+  assert.equal(t.pending.size, 0, "done ends the polling");
+  assert.equal(fails, 0);
+});
+
+test("a failed read shows the failure once and ends the polling", async () => {
+  const t = fakeTimers();
+  const r = deferredReads();
+  const states = [];
+  let fails = 0;
+  pollSoundCheck(r.read, (s) => states.push(s.state), () => fails++, t.timers);
+  t.run();
+  r.waiting[0].reject(new Error("boom"));
+  await flush();
+  assert.equal(fails, 1);
+  assert.deepEqual(states, []);
+  assert.equal(t.pending.size, 0);
+});
+
+test("stop clears the timer and drops an answer that is on the way", async () => {
+  const t = fakeTimers();
+  const stop = pollSoundCheck(async () => running, () => assert.fail("no state after stop"), () => assert.fail(),
+    t.timers);
+  stop();
+  assert.equal(t.pending.size, 0);
+
+  const t2 = fakeTimers();
+  const r = deferredReads();
+  let calls = 0;
+  const stop2 = pollSoundCheck(r.read, () => calls++, () => calls++, t2.timers);
+  t2.run();
+  stop2();
+  r.waiting[0].resolve(running);
+  await flush();
+  assert.equal(calls, 0);
+  assert.equal(t2.pending.size, 0, "nothing is scheduled after stop");
 });
 
 test("the bundle result: the name when saved, a neutral line when cancelled", () => {
@@ -155,21 +297,22 @@ test("the bundle result: the name when saved, a neutral line when cancelled", ()
   assert.deepEqual(bundleFailedLines(), [{ text: "Не удалось сохранить пакет для поддержки.", tone: "error" }]);
 });
 
-test("buttons are disabled while their call runs", () => {
-  assert.deepEqual(checkButton(false), { label: "Проверить звук", disabled: false });
-  assert.deepEqual(checkButton(true), { label: "Проверяем…", disabled: true });
+test("the sound button starts or stops; buttons are disabled while their call runs", () => {
+  assert.deepEqual(checkButton(false, false), { label: "Проверить звук", disabled: false });
+  assert.deepEqual(checkButton(true, false), { label: "Остановить", disabled: false });
+  assert.deepEqual(checkButton(false, true), { label: "Проверить звук", disabled: true });
   assert.deepEqual(bundleButton(false), { label: "Сохранить пакет для поддержки…", disabled: false });
   assert.deepEqual(bundleButton(true), { label: "Сохраняем…", disabled: true });
+  // 10 reads a second, as fast as the core reports levels at most (20 a second).
+  assert.equal(pollMs, 100);
 });
 
-test("the explanations say what is checked and what the bundle holds", () => {
-  assert.match(texts.soundExplain, /устройство вывода по умолчанию/);
-  assert.match(texts.soundExplain, /Тихая громкость/);
-  assert.match(texts.soundScope, /не что слышно выбранное приложение/);
+test("the explanations say what is checked and what the bundle holds; nothing speaks of a tone", () => {
+  assert.match(texts.soundExplain, /Ничего не проигрывается/);
+  const all = Object.values(texts).join(" ");
+  assert.ok(!/тон|сигнал|режим/i.test(all), "a text still speaks of the old tone check");
   assert.match(texts.bundleExplain, /без паролей, ключей, аудио, расшифровок и текстов уроков/);
   assert.match(texts.bundleLocal, /никуда не отправляется/);
-  // DefaultSelfTestTimeout of internal/adapters/audiocapture/selftest.go is at most 15 s.
-  assert.equal(texts.checkTakes, "Проверка занимает до 15 секунд.");
 });
 
 test("the page renders text only and never handles a path", () => {
@@ -180,7 +323,26 @@ test("the page renders text only and never handles a path", () => {
     }
   }
   const page = src("../src/pages/DiagnosticsPage.tsx");
-  assert.match(page, /api\.checkSound\(\)/);
+  assert.match(page, /api\.startSoundCheck\(\)/);
+  assert.match(page, /api\.soundCheckStatus\(\)/);
+  assert.match(page, /api\.stopSoundCheck\(\)/);
   assert.match(page, /api\.saveSupportBundle\(\)/);
   assert.ok(!/<input\b/.test(page), "the page asks for a path itself");
+});
+
+test("the level bar is an accessible meter and leaving the page stops a running check", () => {
+  const page = src("../src/pages/DiagnosticsPage.tsx");
+  assert.match(page, /role="meter"/);
+  assert.match(page, /aria-valuenow=\{s\.percent\}/);
+  assert.match(page, /aria-label=\{texts\.levelLabel\}/);
+  assert.match(page, /pollSoundCheck\(/);
+  assert.ok(!/setInterval/.test(page), "polling with an interval can overlap calls");
+  // The cleanup of the mount effect stops the poller and a running check.
+  assert.match(page, /return \(\) => \{\s*mounted\.current = false;\s*halt\(\);[\s\S]*?api\.stopSoundCheck\(\)/);
+
+  const css = src("../src/styles.css");
+  for (const gone of [".diag-wait", ".mode-cause", ".modes"]) {
+    assert.ok(!css.includes(gone), `styles.css still has ${gone}`);
+  }
+  assert.match(css, /\.level b \{[^}]*transition: width 80ms/);
 });

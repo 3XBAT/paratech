@@ -36,17 +36,17 @@ func platformRecorder(dataDir string, files *filestore.Store, log *slog.Logger) 
 	return rec, nil
 }
 
-// The recorder of Windows serves the sound check and the support bundle; soundChecker and captureHistory would
+// The recorder of Windows serves the sound check and the support bundle; levelChecker and captureHistory would
 // otherwise fall back silently when its methods change.
 var (
-	_ soundcheck.SoundChecker      = (*audiocapture.Recorder)(nil)
+	_ soundcheck.LevelChecker      = (*audiocapture.Recorder)(nil)
 	_ supportbundle.CaptureHistory = (*audiocapture.Recorder)(nil)
 )
 
-// soundChecker is the "Check sound" of the recorder: the recorder child of this build, none for a recorder without one
+// levelChecker is the "Check sound" of the recorder: the recorder child of this build, none for a recorder without one
 // (it answers unsupported).
-func soundChecker(rec recordingsession.Recorder) soundcheck.SoundChecker {
-	if c, ok := rec.(soundcheck.SoundChecker); ok {
+func levelChecker(rec recordingsession.Recorder) soundcheck.LevelChecker {
+	if c, ok := rec.(soundcheck.LevelChecker); ok {
 		return c
 	}
 	return audiocapture.Unavailable{}
@@ -75,9 +75,9 @@ func platformApps(log *slog.Logger) recordingprompt.AudioApps { return audiocapt
 
 // runRecorder is the --recorder run mode: the audio recorder child that the app starts from its own executable
 // (ADR-0002 (audio capture)). It opens only the Storage Manager on <DataDir>/artifacts: no instance lock (the parent
-// holds it), no database, no UI shell, no log file and no jobs. It captures until stdin closes, or runs the sound
-// check of a self-test request; stdout carries only the protocol events, the log goes to stderr. Any exit code but 0
-// is an error; the parent reads the outcome from the events.
+// holds it), no database, no UI shell, no log file and no jobs. It captures until stdin closes, or reports the levels
+// of a level check request (writing nothing); stdout carries only the protocol events, the log goes to stderr. Any
+// exit code but 0 is an error; the parent reads the outcome from the events.
 func (a *App) runRecorder(ctx context.Context) error {
 	store, err := filestore.New(filepath.Join(a.cfg.DataDir, artifactsDir))
 	if err != nil {
@@ -86,7 +86,7 @@ func (a *App) runRecorder(ctx context.Context) error {
 	defer func() { _ = store.Close() }()
 
 	code := audiocapture.RunChild(ctx, a.env.childStdin, a.env.childStdout, a.env.captureSource, store, a.log,
-		audiocapture.ChildConfig{Tone: a.env.tone})
+		audiocapture.ChildConfig{})
 	if code != audiocapture.ChildExitOK {
 		return fmt.Errorf("app: recorder: exit code %d", code)
 	}

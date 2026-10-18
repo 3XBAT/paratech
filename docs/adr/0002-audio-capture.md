@@ -113,9 +113,8 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
     incident), the process checker and the wiring; manual checks in `docs/tasks/TASK-017-recorder-manual-checks.md`.
     Mute detection and storing a mode switch as a problem of the recording are TASK-058.
 - **TASK-058 (diagnostics):** log at start (no audio content): Windows build, chosen mode, target exe and PID, output device
-  names, stream format, every attempt with its HRESULT, each switch with its reason. Tone self-test: our own tone is not in the
-  chosen app's tree, so test INCLUDE of our own PID and classic loopback; it proves the build works, not that the chosen app is
-  audible. Report "healthy but mute" and BT HFP as user-readable causes.
+  names, stream format, every attempt with its HRESULT, each switch with its reason. Report "healthy but mute" as a
+  user-readable cause. ("Check sound": see TASK-075 below.)
   Done (part A): the child reports the Windows version (RtlGetVersion + registry ProductName/DisplayVersion/UBR, build
   ≥ 22000 = Windows 11), the output device name (every attempt and reopen), the format and the switch cause; the parent
   logs "capture started" with all of it. Healthy-but-mute detector in the child (`mute.go`): process loopback, only
@@ -126,13 +125,14 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   `values.CaptureDiagnostics`); the session stores a fallback as the problem of the recording (fixed text) on the next
   heartbeat or before the stop. Not confirmed: whether the session meter reads before or after the session volume
   (mute and volume 0 are checked too).
-  Done (part B, "Check sound"): a recorder child with a self-test request plays 1 kHz at -12 dBFS for 1.5 s on the
-  default output (shared mode, mix format) and captures it with INCLUDE of its own PID and with classic loopback; a
-  Goertzel filter (100 ms blocks, 30 % of the energy at 1 kHz, 3 blocks in a row) decides. 14.3 s timeout (the child's
-  9.3 s budget plus 5 s), then the child is killed; refused while a recording captures, stopped when one starts.
-  Verdict: an app = the INCLUDE result, the whole computer = either.
-  Limits: the tone plays aloud; it is our process, not the chosen app (a muted tab is not found); classic loopback may
-  hear other sounds too; the Bluetooth hands-free hint is not confirmed (`docs/refs/audio.md`).
+  Part B ("Check sound", a tone self-test) was replaced by TASK-075.
+- **TASK-075 ("Check sound" = level meter):** no tone. A recorder child with a `levelcheck` request (target, duration
+  ≤ 60 s) opens one capture of the target a recording would use (the remembered app: INCLUDE of the tree `Deps.Apps`
+  finds; the whole computer: EXCLUDE of our PID; the usual fallback to classic loopback) and emits the peak of each
+  50 ms window (≤ 20 events/s). Nothing is written. The child stops itself after the duration; the parent kills it
+  5 s later at the latest, on Stop, on shutdown or when a recording starts; refused while one captures. The page polls
+  a 15 s session (`cases/soundcheck`); "heard" = peak ≥ 0.01 (-40 dBFS) at any time, else silence with hints.
+  Limits: it shows what the chosen source plays now, so the user must play something; a mixer-muted app is silence.
   Manual status: `docs/qa/compat-matrix.md` (Windows builds × modes × scenarios, tester steps for the alpha exe). The
   Verification table below stays the TASK-016 script (capturespike); the matrix tracks what is checked.
 - **TASK-059 (picker):** list built from top-level windows grouped by exe (as OBS), audio-session state as a "playing now"

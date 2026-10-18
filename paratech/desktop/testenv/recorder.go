@@ -42,8 +42,11 @@ type FakeRecorder struct {
 	onStarted    func(id shared.RecordingID)
 	starts       int
 	finalizes    int
-	sound        values.SoundCheck
-	soundErr     error
+	levels       []values.SoundLevel
+	levelsSet    bool
+	levelEnd     values.SoundCause
+	levelErr     error
+	levelHold    *hold // when set, CheckLevels waits at it after reporting the levels
 	soundChecks  int
 }
 
@@ -320,30 +323,51 @@ func (f *FakeRecorder) Diagnostics(_ context.Context, id shared.RecordingID) (va
 	return d, true
 }
 
-// SetSoundCheck makes later CheckSound calls answer check and err; by default both modes hear the tone.
-func (f *FakeRecorder) SetSoundCheck(check values.SoundCheck, err error) {
-	f.set(func() { f.sound, f.soundErr = check, err })
+// SetLevels makes later CheckLevels calls report levels in order and then answer end and err. By default they
+// report one level of 0.5 and end ok.
+func (f *FakeRecorder) SetLevels(levels []values.SoundLevel, end values.SoundCause, err error) {
+	f.set(func() {
+		f.levels, f.levelsSet, f.levelEnd, f.levelErr = append([]values.SoundLevel(nil), levels...), true, end, err
+	})
 }
 
-// CheckSound answers the sound check as SetSoundCheck says; Busy while a capture runs, as the real recorder.
-func (f *FakeRecorder) CheckSound(context.Context) (values.SoundCheck, error) {
+// HoldLevels makes later CheckLevels calls wait after their levels until release is called or their context ends
+// (then they return its cause, as the real recorder does). entered is closed when the first one waits.
+func (f *FakeRecorder) HoldLevels() (entered <-chan struct{}, release func()) {
+	h := newHold()
+	f.set(func() { f.levelHold = h })
+	return h.entered, h.release
+}
+
+// CheckLevels answers the sound check as SetLevels says; SoundBusy while a capture runs, as the real recorder.
+func (f *FakeRecorder) CheckLevels(ctx context.Context, _ values.Source, _ time.Duration,
+	report func(values.SoundLevel)) (values.SoundCause, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.soundChecks++
 	for _, c := range f.captures {
 		if c.running {
-			return values.SoundCheck{Busy: true}, nil
+			f.mu.Unlock()
+			return values.SoundBusy, nil
 		}
 	}
-	if f.sound.Modes == nil && f.soundErr == nil {
-		return values.SoundCheck{Device: ToneDevice, Modes: []values.ModeCheck{
-			{Mode: values.CaptureInclude, Cause: values.SoundOK}, {Mode: values.CaptureSystem, Cause: values.SoundOK},
-		}}, nil
+	levels, end, err, h := []values.SoundLevel{0.5}, values.SoundOK, error(nil), f.levelHold
+	if f.levelsSet {
+		levels, end, err = f.levels, f.levelEnd, f.levelErr
 	}
-	return f.sound, f.soundErr
+	f.mu.Unlock()
+
+	for _, l := range levels {
+		if report != nil {
+			report(l)
+		}
+	}
+	if err := h.wait(ctx); err != nil {
+		return "", err
+	}
+	return end, err
 }
 
-// SoundChecks returns how many times CheckSound was called.
+// SoundChecks returns how many times CheckLevels was called.
 func (f *FakeRecorder) SoundChecks() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
