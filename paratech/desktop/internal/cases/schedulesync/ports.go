@@ -128,8 +128,8 @@ type JobEnqueuer interface {
 	ListByStatus(ctx context.Context, statuses ...job.Status) ([]*job.Job, error)
 
 	// LastFinished returns the job of the type that finished last (COMPLETED, FAILED or CANCELLED), by its last
-	// change; found is false when none did. The status shows the last sync run from it, also after a restart (PRD
-	// section 11.3, TASK-074).
+	// change; found is false when none did. The status shows the last sync run from it, also after a restart
+	// (PRD section 11.3, TASK-074).
 	LastFinished(ctx context.Context, typ job.Type) (j *job.Job, found bool, err error)
 }
 
