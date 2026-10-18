@@ -36,14 +36,23 @@ const (
 	msgCalendarRetrying      = "Google временно недоступен: синхронизация повторится автоматически."
 	msgCalendarSignIn        = "Войдите в Google, чтобы занятия появились в календаре «Learning Assistant»."
 	msgCalendarSignInAgain   = "Вход в Google истёк: войдите снова, чтобы продолжить синхронизацию."
+	msgCalendarNoAccess      = "Нет доступа к Google Календарю: войдите снова и разрешите доступ к календарю."
 	msgCalendarFailed        = "Последняя синхронизация не удалась. Нажмите «Синхронизировать», чтобы повторить."
 	msgCalendarPending       = "Ждут синхронизации занятий: %d."
 	msgCalendarPendingMore   = "Ждут синхронизации занятий: больше %d."
 	msgCalendarSynced        = "Календарь «Learning Assistant» синхронизирован."
+	msgCalendarRetry         = "Нажмите «Синхронизировать», чтобы повторить."
 	msgCalendarSyncStarted   = "Синхронизация запущена."
 	msgCalendarSyncScheduled = "Синхронизация уже запланирована."
 	msgCalendarSignInFirst   = "Сначала войдите в Google."
 	msgCalendarSyncFailed    = "Не удалось запустить синхронизацию."
+
+	// Result of the last finished sync, shown after «Последняя синхронизация: <date, time>».
+	msgLastRunOK            = "Успешно."
+	msgLastRunSignInExpired = "Ошибка: вход в Google истёк."
+	msgLastRunNotSignedIn   = "Не выполнена: нет входа в Google."
+	msgLastRunNoAccess      = "Ошибка: нет доступа к Google Календарю."
+	msgLastRunFailed        = "Ошибка: синхронизация не удалась."
 )
 
 // CalendarSyncUseCase is the calendar synchronization of the Google section (ARCH-42).
@@ -60,9 +69,21 @@ type CalendarSyncState struct {
 	LastSyncedAt string `json:"lastSyncedAt"` // RFC 3339 UTC of the last lesson written; "" if none
 	// State is "idle", "queued", "running", "retrying", "waitingForNetwork" or "unavailable".
 	State string `json:"state"`
-	// LastOutcome is the last run since the app started: "", "ok", "notSignedIn", "signInExpired" or "failed".
+	// LastOutcome is the last run since the app started: "", "ok", "notSignedIn", "signInExpired", "noAccess" or
+	// "failed".
 	LastOutcome string `json:"lastOutcome"`
-	Message     string `json:"message"` // one fixed line that sums the state up
+	// Attention is what the user must do, decided by the use case: "" (nothing), "signIn" (sign in again) or
+	// "noAccess" (sign in again and allow the calendar).
+	Attention string `json:"attention"`
+	Message   string `json:"message"` // one fixed line that sums the state up
+
+	// The last finished sync job, also of an earlier start of the app (TASK-074). LastRunAt is its end in RFC 3339
+	// UTC, "" if none finished; LastRunOutcome takes the values of LastOutcome ("" when the record cannot tell the
+	// result); LastRunText is a fixed line of the result, "" if none.
+	LastRunAt       string `json:"lastRunAt"`
+	LastRunAttempts int    `json:"lastRunAttempts"`
+	LastRunOutcome  string `json:"lastRunOutcome"`
+	LastRunText     string `json:"lastRunText"`
 }
 
 // CalendarSyncResult answers «Синхронизировать»: OK, a fixed text and the state afterwards.
@@ -116,10 +137,15 @@ func (s *GoogleCalendarService) state(ctx context.Context) CalendarSyncState {
 	}
 	out := CalendarSyncState{
 		SignedIn: st.SignedIn, Pending: st.Pending, PendingMore: st.PendingMore, State: calendarJobState(st.Job),
-		LastOutcome: string(st.LastOutcome),
+		LastOutcome: string(st.LastOutcome), Attention: string(st.Attention),
 	}
 	if !st.LastWrittenAt.IsZero() {
 		out.LastSyncedAt = st.LastWrittenAt.UTC().Format(time.RFC3339)
+	}
+	if !st.LastRun.At.IsZero() {
+		out.LastRunAt = st.LastRun.At.UTC().Format(time.RFC3339)
+		out.LastRunAttempts = st.LastRun.Attempts
+		out.LastRunOutcome, out.LastRunText = string(st.LastRun.Outcome), lastRunText(st.LastRun.Outcome)
 	}
 	out.Message = calendarMessage(out)
 	return out
@@ -139,7 +165,27 @@ func calendarJobState(s job.Status) string {
 	return calendarQueued // QUEUED, or waiting for power or quota: it runs later by itself
 }
 
+func lastRunText(o schedulesync.SyncOutcome) string {
+	switch o {
+	case schedulesync.OutcomeOK:
+		return msgLastRunOK
+	case schedulesync.OutcomeSignInExpired:
+		return msgLastRunSignInExpired
+	case schedulesync.OutcomeNotSignedIn:
+		return msgLastRunNotSignedIn
+	case schedulesync.OutcomeNoAccess:
+		return msgLastRunNoAccess
+	case schedulesync.OutcomeNone:
+		return "" // the record cannot tell how the run ended
+	}
+	return msgLastRunFailed
+}
+
 func calendarMessage(st CalendarSyncState) string {
+	// A generic failure the last-run line already shows is not repeated here.
+	shown := st.LastRunOutcome == string(schedulesync.OutcomeFailed) ||
+		st.LastRunOutcome == string(schedulesync.OutcomeNoAccess) ||
+		st.LastRunOutcome == string(schedulesync.OutcomeSignInExpired)
 	switch {
 	case st.State == calendarRunning:
 		return msgCalendarRunning
@@ -149,16 +195,20 @@ func calendarMessage(st CalendarSyncState) string {
 		return msgCalendarRetrying
 	case st.State == calendarQueued:
 		return msgCalendarQueued
-	case !st.SignedIn && st.LastOutcome == string(schedulesync.OutcomeSignInExpired):
+	case st.Attention == string(schedulesync.AttentionSignIn):
 		return msgCalendarSignInAgain
 	case !st.SignedIn:
 		return msgCalendarSignIn
-	case st.LastOutcome == string(schedulesync.OutcomeFailed):
+	case st.Attention == string(schedulesync.AttentionNoAccess): // never "synchronized" without access
+		return msgCalendarNoAccess
+	case st.LastOutcome == string(schedulesync.OutcomeFailed) && !shown:
 		return msgCalendarFailed
 	case st.PendingMore:
 		return fmt.Sprintf(msgCalendarPendingMore, st.Pending)
 	case st.Pending > 0:
 		return fmt.Sprintf(msgCalendarPending, st.Pending)
+	case shown: // never "synchronized" next to a failed last run
+		return msgCalendarRetry
 	}
 	return msgCalendarSynced
 }

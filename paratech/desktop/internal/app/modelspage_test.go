@@ -75,7 +75,7 @@ func importThroughPage(t *testing.T, page *wails.ModelsService, picker *modelPic
 // sttJobsOf returns the STT jobs of the recording.
 func sttJobsOf(t *testing.T, jobs *sqlite.JobRepository, rec string) []*job.Job {
 	t.Helper()
-	all, _, err := jobs.ListActivity(context.Background(), 100)
+	all, _, err := jobs.ListActivity(context.Background(), 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -36,6 +37,10 @@ const (
 
 	// MaxPendingShown caps the pending count of Status.
 	MaxPendingShown = 999
+
+	// maxSkippedJobs bounds the skipped jobs Status leaves out of the last run; a skip happens only while a run is in
+	// progress, so the newest few are enough.
+	maxSkippedJobs = 16
 )
 
 // CalendarSync is the controlled one-way synchronization of the local schedule into the app calendar (PRD sections
@@ -75,6 +80,12 @@ type CalendarSync struct {
 	rerun   bool // a job started during that run
 	outcome SyncOutcome
 	ranAt   time.Time
+	// forgotten: a sign-in came after that run, so its outcome no longer asks anything of the user.
+	forgotten bool
+	// The job of the last run and how it ended; kept after a sign-in, so its record is not read as a success.
+	outcomeJob   shared.JobID
+	outcomeOfJob SyncOutcome
+	skippedJobs  []shared.JobID // ended at once while a run was in progress, newest last
 }
 
 // NewCalendarSync checks the ports.
@@ -163,7 +174,7 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 	if snap.Type() != CalendarSyncJobType {
 		return backoff.Permanent(fmt.Errorf("%s: %w", opSync, ErrUnknownJobType))
 	}
-	if !c.begin() {
+	if !c.begin(snap.ID()) {
 		c.log.Info(opSync, "skipped", "a run is in progress and requests the next job")
 		return nil
 	}
@@ -180,7 +191,7 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 		c.followUp(ctx)
 	}
 	outcome := outcomeOf(err)
-	c.record(outcome)
+	c.record(snap.ID(), outcome)
 	switch outcome {
 	case OutcomeOK:
 		c.log.Info(opSync, "written", st.written, "deleted", st.deleted, "fresh", st.fresh)
@@ -193,12 +204,17 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 	return fmt.Errorf("%s: %w", opSync, err)
 }
 
-// begin claims the run of this process. When one is in progress it reports false and that run requests the next job.
-func (c *CalendarSync) begin() bool {
+// begin claims the run of this process for job id. When one is in progress it reports false and that run requests the
+// next job; the job completes without a run, so Status does not take it for the last run.
+func (c *CalendarSync) begin(id shared.JobID) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.busy {
 		c.rerun = true
+		c.skippedJobs = append(c.skippedJobs, id)
+		if n := len(c.skippedJobs); n > maxSkippedJobs {
+			c.skippedJobs = slices.Clone(c.skippedJobs[n-maxSkippedJobs:])
+		}
 		return false
 	}
 	c.busy = true
@@ -237,15 +253,26 @@ func outcomeOf(err error) SyncOutcome {
 		return OutcomeSignInExpired
 	case errors.Is(err, ErrCalendarNotConnected):
 		return OutcomeNotSignedIn
+	case errors.Is(err, ErrCalendarNoAccess):
+		return OutcomeNoAccess
 	}
 	return OutcomeFailed
 }
 
-func (c *CalendarSync) record(outcome SyncOutcome) {
+func (c *CalendarSync) record(id shared.JobID, outcome SyncOutcome) {
 	at := c.clock.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.outcome, c.ranAt = outcome, at
+	c.outcome, c.ranAt, c.forgotten = outcome, at, false
+	c.outcomeJob, c.outcomeOfJob = id, outcome
+}
+
+// ForgetOutcome is called after a successful Google sign-in: the outcome of the last run no longer asks the user to
+// sign in or allow the calendar; the next run tells. How that run's job ended stays known for its last-run line.
+func (c *CalendarSync) ForgetOutcome() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.outcome, c.ranAt, c.forgotten = OutcomeNone, time.Time{}, true
 }
 
 // runStats counts what one run did.
@@ -477,8 +504,49 @@ func (c *CalendarSync) Status(ctx context.Context) (CalendarStatus, error) {
 	}
 	c.mu.Lock()
 	st.LastOutcome, st.LastRunAt = c.outcome, c.ranAt
+	forgotten, outcomeJob, outcomeOfJob := c.forgotten, c.outcomeJob, c.outcomeOfJob
+	skipped := slices.Clone(c.skippedJobs)
 	c.mu.Unlock()
+
+	// The last run is extra information: a row that cannot be read must not hide the rest of the status. A skipped
+	// job completed without running, so it is not a run.
+	last, found, err := c.jobs.LastFinished(ctx, CalendarSyncJobType, skipped)
+	switch {
+	case err != nil:
+		c.log.Warn(opStatus, "last run", "unreadable", "err", err)
+	case found:
+		st.LastRun = LastRun{At: last.UpdatedAt(), Attempts: last.Attempts(), Outcome: OutcomeFailed}
+		switch {
+		case last.ID() == outcomeJob && outcomeOfJob != OutcomeNone:
+			st.LastRun.Outcome = outcomeOfJob
+		case last.Status() == job.StatusCompleted && !signedIn:
+			// A run without a valid sign-in completes too; the record cannot tell it from a success.
+			st.LastRun.Outcome = OutcomeNone
+		case last.Status() == job.StatusCompleted:
+			st.LastRun.Outcome = OutcomeOK
+		}
+	}
+
+	// The run of this process, else the last finished job: after a restart the failure still shows. After a sign-in
+	// neither asks anything until the next run ends.
+	current := st.LastOutcome
+	if current == OutcomeNone && !forgotten {
+		current = st.LastRun.Outcome
+	}
+	st.Attention = attentionOf(signedIn, current)
 	return st, nil
+}
+
+// attentionOf is what the user must do about the current outcome: sign in again only while signed out (otherwise a
+// sign-in replaced the expired one), allow the calendar only while signed in.
+func attentionOf(signedIn bool, current SyncOutcome) Attention {
+	switch {
+	case !signedIn && current == OutcomeSignInExpired:
+		return AttentionSignIn
+	case signedIn && current == OutcomeNoAccess:
+		return AttentionNoAccess
+	}
+	return AttentionNone
 }
 
 // jobRank orders the statuses of unfinished sync jobs for Status: what runs now matters most, then why one waits.

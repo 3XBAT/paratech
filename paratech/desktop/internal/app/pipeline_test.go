@@ -552,7 +552,7 @@ func onlyJob(t *testing.T, jobs *sqlite.JobRepository, typ job.Type) *job.Job {
 	t.Helper()
 	var found []*job.Job
 	testenv.Eventually(t, "a job of type "+string(typ), func() bool {
-		all, _, err := jobs.ListActivity(context.Background(), 100)
+		all, _, err := jobs.ListActivity(context.Background(), 100, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -629,7 +629,7 @@ func (s stored) equal(o stored) bool {
 func pipelineState(t *testing.T, u *uiCore, tr shared.TranscriptID) stored {
 	t.Helper()
 	ctx := context.Background()
-	all, unreadable, err := sqlite.NewJobRepository(u.c.db).ListActivity(ctx, 100)
+	all, unreadable, err := sqlite.NewJobRepository(u.c.db).ListActivity(ctx, 100, nil)
 	if err != nil || len(unreadable) != 0 {
 		t.Fatalf("ListActivity: %v, unreadable %v", err, unreadable)
 	}
@@ -691,7 +691,7 @@ func TestFailedRecordingGetsNoSTTJob(t *testing.T) {
 	if n, err := a.core.transcriptions.EnqueuePending(ctx); err != nil || n != 0 {
 		t.Fatalf("EnqueuePending = %d, %v; want nothing", n, err)
 	}
-	if all, _, err := sqlite.NewJobRepository(a.core.db).ListActivity(ctx, 10); err != nil || len(all) != 0 {
+	if all, _, err := sqlite.NewJobRepository(a.core.db).ListActivity(ctx, 10, nil); err != nil || len(all) != 0 {
 		t.Fatalf("jobs %v, %v; want none", all, err)
 	}
 }

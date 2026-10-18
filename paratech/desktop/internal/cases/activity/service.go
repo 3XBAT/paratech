@@ -20,6 +20,7 @@ const ListLimit = 100
 type Service struct {
 	recordings RecordingHistory
 	jobs       JobHistory
+	hidden     []job.Type
 	log        *slog.Logger
 
 	// The screen polls every few seconds; the unreadable ids are logged only when they change, not on every poll.
@@ -28,15 +29,16 @@ type Service struct {
 	lastBadJobs       []shared.JobID
 }
 
-// New builds the Service. log may be nil: skipped rows are then not reported.
-func New(recordings RecordingHistory, jobs JobHistory, log *slog.Logger) (*Service, error) {
+// New builds the Service. log may be nil: skipped rows are then not reported. hidden are the job types of background
+// service work that involves no user, such as the calendar sync (TASK-074): the jobs screen leaves them out.
+func New(recordings RecordingHistory, jobs JobHistory, log *slog.Logger, hidden ...job.Type) (*Service, error) {
 	if recordings == nil || jobs == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
 	}
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Service{recordings: recordings, jobs: jobs, log: log}, nil
+	return &Service{recordings: recordings, jobs: jobs, hidden: slices.Clone(hidden), log: log}, nil
 }
 
 // ListRecordings returns every unfinished recording plus the newest finished ones (at most ListLimit), newest first.
@@ -61,10 +63,10 @@ func (s *Service) ListRecordings(ctx context.Context) ([]Recording, error) {
 	return out, nil
 }
 
-// ListJobs returns every unfinished job plus the newest finished ones (at most ListLimit), newest first. An
-// unreadable row is logged and left out, so it does not hide the others.
+// ListJobs returns every unfinished job plus the newest finished ones (at most ListLimit), newest first, without the
+// hidden types. An unreadable row is logged and left out, so it does not hide the others.
 func (s *Service) ListJobs(ctx context.Context) ([]Job, error) {
-	jobs, unreadable, err := s.jobs.ListActivity(ctx, ListLimit)
+	jobs, unreadable, err := s.jobs.ListActivity(ctx, ListLimit, slices.Clone(s.hidden))
 	if err != nil {
 		return nil, fmt.Errorf("activity: list jobs: %w", err)
 	}

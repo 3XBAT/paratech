@@ -163,6 +163,27 @@ type fakeJobs struct {
 	mu      sync.Mutex
 	jobs    []*job.Job
 	listErr error
+	lastErr error
+}
+
+// LastFinished is the terminal job of the type with the latest change, then the greatest id, as the store orders.
+func (f *fakeJobs) LastFinished(_ context.Context, typ job.Type, except []shared.JobID) (*job.Job, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.lastErr != nil {
+		return nil, false, f.lastErr
+	}
+	var last *job.Job
+	for _, j := range f.jobs {
+		if j.Type() != typ || !j.Status().IsTerminal() || slices.Contains(except, j.ID()) {
+			continue
+		}
+		if last == nil || j.UpdatedAt().After(last.UpdatedAt()) ||
+			(j.UpdatedAt().Equal(last.UpdatedAt()) && j.ID() > last.ID()) {
+			last = j
+		}
+	}
+	return last, last != nil, nil
 }
 
 func (f *fakeJobs) Enqueue(_ context.Context, j *job.Job) (shared.JobID, bool, error) {
@@ -536,6 +557,42 @@ func TestSyncNotSignedIn(t *testing.T) {
 	e.cal.failNext("upsert", backoff.Permanent(ErrCalendarSignInExpired))
 	if err := e.handle(t); err != nil || e.cal.count("upsert") != 1 || len(e.pending(t)) != 2 {
 		t.Fatalf("Handle = %v, upserts %d, pending %v", err, e.cal.count("upsert"), e.pending(t))
+	}
+}
+
+// Google refusing access to the calendar ends the run and fails the job with its own outcome, so the page asks the user
+// to sign in again and allow the calendar (TASK-074 criterion 3). The class of the adapter error is kept.
+func TestSyncNoAccess(t *testing.T) {
+	noAccess := func(class func(error) error) error {
+		return class(fmt.Errorf("x: %w: fake 403", ErrCalendarNoAccess))
+	}
+	tests := []struct {
+		name      string
+		op        string
+		err       error
+		permanent bool
+	}{
+		{"ensure refused", "ensure", noAccess(backoff.Permanent), true},
+		{"upsert refused", "upsert", noAccess(backoff.Permanent), true},
+		{"transient stays transient", "ensure", noAccess(backoff.Transient), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.seed(t, "a", content("Math", at(0)))
+			e.seed(t, "b", content("Physics", at(1)))
+			e.cal.failNext(tt.op, tt.err)
+			err := e.handle(t)
+			if !errors.Is(err, ErrCalendarNoAccess) || (backoff.Classify(err) == backoff.ClassPermanent) != tt.permanent {
+				t.Fatalf("Handle = %v, want no access, permanent %v", err, tt.permanent)
+			}
+			if e.cal.count("upsert") > 1 || len(e.pending(t)) != 2 {
+				t.Fatalf("upserts %d, pending %v: the run went on", e.cal.count("upsert"), e.pending(t))
+			}
+			if st, _ := e.sync.Status(context.Background()); st.LastOutcome != OutcomeNoAccess {
+				t.Fatalf("outcome %q", st.LastOutcome)
+			}
+		})
 	}
 }
 
@@ -1026,6 +1083,341 @@ func TestCalendarStatus(t *testing.T) {
 	e.account.set(false, errors.New("fake: store down"))
 	if _, err := e.sync.Status(ctx); err == nil {
 		t.Fatal("Status with a failing store succeeded")
+	}
+}
+
+// finishedSyncJob is a stored sync job that ended in status at finished after attempts attempts.
+func finishedSyncJob(t *testing.T, id string, status job.Status, attempts int, finished time.Time) *job.Job {
+	t.Helper()
+	j, err := job.New(job.Spec{ID: shared.JobID(id), Type: CalendarSyncJobType, Key: "calendar_sync:" + id, MaxAttempts: 5}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range attempts - 1 {
+		if err := j.Claim(t0); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.Retry(t0, t0, "fake: transient"); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.Requeue(t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status == job.StatusCancelled {
+		err = j.Cancel(finished)
+	} else if err = j.Claim(t0); err == nil {
+		if status == job.StatusCompleted {
+			err = j.Complete(finished)
+		} else {
+			err = j.Fail(finished, "schedulesync: calendar sync: fake")
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
+}
+
+// The last run comes from the stored jobs, so it survives a restart: the newest finished job, its attempts and how
+// it ended (TASK-074).
+func TestCalendarStatusLastRunFromStoredJobs(t *testing.T) {
+	later := t0.Add(time.Hour)
+	tests := []struct {
+		name string
+		jobs []*job.Job
+		want LastRun
+	}{
+		{name: "no finished job"},
+		{
+			name: "completed after retries",
+			jobs: []*job.Job{finishedSyncJob(t, "a", job.StatusCompleted, 3, later)},
+			want: LastRun{At: later, Attempts: 3, Outcome: OutcomeOK},
+		},
+		{
+			name: "failed in an earlier process",
+			jobs: []*job.Job{finishedSyncJob(t, "a", job.StatusFailed, 5, later)},
+			want: LastRun{At: later, Attempts: 5, Outcome: OutcomeFailed},
+		},
+		{
+			name: "cancelled counts as failed",
+			jobs: []*job.Job{finishedSyncJob(t, "a", job.StatusCancelled, 1, later)},
+			want: LastRun{At: later, Attempts: 0, Outcome: OutcomeFailed},
+		},
+		{
+			name: "the newest finished one",
+			jobs: []*job.Job{
+				finishedSyncJob(t, "a", job.StatusFailed, 1, t0.Add(time.Minute)),
+				finishedSyncJob(t, "b", job.StatusCompleted, 1, later),
+				finishedSyncJob(t, "c", job.StatusFailed, 2, t0.Add(2*time.Minute)),
+			},
+			want: LastRun{At: later, Attempts: 1, Outcome: OutcomeOK},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.jobs.jobs = tt.jobs
+			// An unfinished job and a job of another type do not count.
+			running, err := job.New(job.Spec{ID: "z-run", Type: CalendarSyncJobType, Key: "calendar_sync:z", MaxAttempts: 5}, t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := running.Claim(t0.Add(2 * time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			other, err := job.New(job.Spec{ID: "z-stt", Type: "stt", Key: "stt:z", MaxAttempts: 5}, t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := other.Cancel(t0.Add(2 * time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			e.jobs.jobs = append(e.jobs.jobs, running, other)
+
+			st, err := e.sync.Status(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.LastRun != tt.want {
+				t.Fatalf("LastRun = %+v, want %+v", st.LastRun, tt.want)
+			}
+		})
+	}
+}
+
+// A COMPLETED record of an earlier process is a success only while signed in: a run whose sign-in had expired
+// completes too, so signed out the outcome stays unknown; the time and attempts still show (TASK-074 criterion 3).
+func TestCalendarStatusLastRunRecordOnlyAndSignIn(t *testing.T) {
+	later := t0.Add(time.Hour)
+	tests := []struct {
+		name     string
+		status   job.Status
+		signedIn bool
+		want     SyncOutcome
+	}{
+		{"completed, signed in", job.StatusCompleted, true, OutcomeOK},
+		{"completed, signed out", job.StatusCompleted, false, OutcomeNone},
+		{"failed, signed out", job.StatusFailed, false, OutcomeFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.account.set(tt.signedIn, nil)
+			e.jobs.jobs = []*job.Job{finishedSyncJob(t, "a", tt.status, 2, later)}
+			st, err := e.sync.Status(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := LastRun{At: later, Attempts: 2, Outcome: tt.want}
+			if st.LastRun != want {
+				t.Fatalf("LastRun = %+v, want %+v", st.LastRun, want)
+			}
+		})
+	}
+}
+
+// A run of this process keeps the outcome it recorded for its job: a sign-in that expired completes the job but is not
+// a success (TASK-074 criterion 3). Another job that finished later is read from its record.
+func TestCalendarStatusLastRunOfThisProcess(t *testing.T) {
+	ctx := context.Background()
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	e.cal.failNext("ensure", backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarSignInExpired)))
+	if err := e.handle(t); err != nil {
+		t.Fatalf("Handle = %v", err)
+	}
+	// The runner completes the job; the fake store gets it as the runner would leave it.
+	e.jobs.jobs = append(e.jobs.jobs, finishedSyncJob(t, "sync-job", job.StatusCompleted, 1, t0.Add(time.Minute)))
+
+	st, err := e.sync.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := LastRun{At: t0.Add(time.Minute), Attempts: 1, Outcome: OutcomeSignInExpired}
+	if st.LastRun != want {
+		t.Fatalf("LastRun = %+v, want %+v", st.LastRun, want)
+	}
+
+	e.jobs.jobs = append(e.jobs.jobs, finishedSyncJob(t, "sync-later", job.StatusCompleted, 2, t0.Add(time.Hour)))
+	if st, _ := e.sync.Status(ctx); st.LastRun != (LastRun{At: t0.Add(time.Hour), Attempts: 2, Outcome: OutcomeOK}) {
+		t.Fatalf("LastRun = %+v, want the later job", st.LastRun)
+	}
+}
+
+// A failure to read the last run leaves it out; the rest of the status is still shown.
+func TestCalendarStatusWithoutTheLastRun(t *testing.T) {
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	e.jobs.lastErr = errors.New("fake: unreadable row")
+	st, err := e.sync.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.LastRun != (LastRun{}) || !st.SignedIn || st.Pending != 1 {
+		t.Fatalf("Status = %+v", st)
+	}
+}
+
+// A job that starts while a run is in progress completes at once without a run: it is never the last run, so while
+// the real run waits for a retry the page does not report a success from it (TASK-074).
+func TestCalendarStatusSkippedJobIsNotTheLastRun(t *testing.T) {
+	ctx := context.Background()
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	e.seed(t, "b", content("Physics", at(1)))
+	e.jobs.jobs = []*job.Job{finishedSyncJob(t, "earlier", job.StatusFailed, 2, t0.Add(time.Minute))}
+	entered, release := e.blockFirstUpsert()
+	first := make(chan error, 1)
+	go func() { first <- e.handle(t) }()
+	<-entered
+
+	skipped, err := job.New(job.Spec{ID: "skipped", Type: CalendarSyncJobType, Key: "calendar_sync:skipped", MaxAttempts: 5}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sync.Handle(ctx, skipped.Snapshot(), nil); err != nil {
+		t.Fatalf("skipped Handle = %v", err)
+	}
+	// The runner completes the skipped job: it is the newest finished one.
+	e.jobs.mu.Lock()
+	e.jobs.jobs = append(e.jobs.jobs, finishedSyncJob(t, "skipped", job.StatusCompleted, 1, t0.Add(time.Hour)))
+	e.jobs.mu.Unlock()
+
+	// The real run fails on the next lesson and its job waits for a retry.
+	e.cal.failNext("upsert", backoff.Transient(errors.New("fake: google down")))
+	close(release)
+	if err := <-first; backoff.Classify(err) != backoff.ClassTransient {
+		t.Fatalf("first Handle = %v, want a transient failure", err)
+	}
+
+	st, err := e.sync.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := LastRun{At: t0.Add(time.Minute), Attempts: 2, Outcome: OutcomeFailed}
+	if st.LastRun != want || st.LastOutcome != OutcomeFailed {
+		t.Fatalf("LastRun = %+v, outcome %q; want %+v from the earlier job", st.LastRun, st.LastOutcome, want)
+	}
+}
+
+// The skipped jobs left out of the last run stay bounded: the newest ones are kept.
+func TestSyncRemembersTheNewestSkippedJobs(t *testing.T) {
+	e := newSyncEnv(t)
+	e.sync.busy = true
+	for i := range maxSkippedJobs + 4 {
+		if e.sync.begin(shared.JobID(fmt.Sprintf("skip-%02d", i))) {
+			t.Fatal("begin claimed a busy run")
+		}
+	}
+	got := e.sync.skippedJobs
+	if len(got) != maxSkippedJobs || got[0] != "skip-04" || got[len(got)-1] != shared.JobID(fmt.Sprintf("skip-%02d", maxSkippedJobs+3)) {
+		t.Fatalf("skipped jobs = %v", got)
+	}
+}
+
+// Attention says what the user must do: sign in again only while signed out after an expired sign-in, allow the
+// calendar only while signed in after Google refused it; never sign in while signed in (TASK-074).
+func TestCalendarStatusAttention(t *testing.T) {
+	expired := backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarSignInExpired))
+	noAccess := backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarNoAccess))
+	failed := backoff.Permanent(errors.New("fake: broken"))
+	tests := []struct {
+		name     string
+		ensure   error // nil: the run succeeds
+		signedIn bool  // when the status is read
+		want     Attention
+	}{
+		{"expired, signed out", expired, false, AttentionSignIn},
+		{"expired, signed in again", expired, true, AttentionNone},
+		{"no access, signed in", noAccess, true, AttentionNoAccess},
+		{"no access, signed out", noAccess, false, AttentionNone},
+		{"failed", failed, true, AttentionNone},
+		{"ok", nil, true, AttentionNone},
+		{"ok, signed out", nil, false, AttentionNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.seed(t, "a", content("Math", at(0)))
+			if tt.ensure != nil {
+				e.cal.failNext("ensure", tt.ensure)
+			}
+			_ = e.handle(t)
+			e.account.set(tt.signedIn, nil)
+			st, err := e.sync.Status(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Attention != tt.want {
+				t.Fatalf("Attention = %q, want %q (outcome %q)", st.Attention, tt.want, st.LastOutcome)
+			}
+		})
+	}
+}
+
+// Without a run of this process the last finished job decides; its record alone never asks for an action.
+func TestCalendarStatusAttentionFromTheRecord(t *testing.T) {
+	for _, signedIn := range []bool{false, true} {
+		for _, status := range []job.Status{job.StatusCompleted, job.StatusFailed} {
+			e := newSyncEnv(t)
+			e.account.set(signedIn, nil)
+			e.jobs.jobs = []*job.Job{finishedSyncJob(t, "a", status, 1, t0)}
+			if st, err := e.sync.Status(context.Background()); err != nil || st.Attention != AttentionNone {
+				t.Fatalf("signed in %v, %s: Attention = %q, err %v", signedIn, status, st.Attention, err)
+			}
+		}
+	}
+}
+
+// After a sign-in the outcome of the earlier run asks nothing until the next run ends, also through the record of
+// its job; the last-run line keeps how that job really ended, so a COMPLETED expired run is not read as a success.
+func TestCalendarStatusForgetOutcomeAfterSignIn(t *testing.T) {
+	tests := []struct {
+		name         string
+		ensure       error
+		status       job.Status // how the runner leaves the job
+		signedOut    bool       // signed out before the sign-in
+		attention    Attention  // before the sign-in
+		outcomeOfJob SyncOutcome
+	}{
+		{"no access", backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarNoAccess)), job.StatusFailed, false,
+			AttentionNoAccess, OutcomeNoAccess},
+		{"expired", backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarSignInExpired)), job.StatusCompleted, true,
+			AttentionSignIn, OutcomeSignInExpired},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			e := newSyncEnv(t)
+			e.seed(t, "a", content("Math", at(0)))
+			e.cal.failNext("ensure", tt.ensure)
+			_ = e.handle(t)
+			e.jobs.jobs = append(e.jobs.jobs, finishedSyncJob(t, "sync-job", tt.status, 1, t0.Add(time.Minute)))
+			e.account.set(!tt.signedOut, nil)
+			if st, _ := e.sync.Status(ctx); st.Attention != tt.attention {
+				t.Fatalf("before the sign-in: Attention = %q, want %q", st.Attention, tt.attention)
+			}
+
+			e.account.set(true, nil)
+			e.sync.ForgetOutcome()
+			st, err := e.sync.Status(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := LastRun{At: t0.Add(time.Minute), Attempts: 1, Outcome: tt.outcomeOfJob}
+			if st.Attention != AttentionNone || st.LastOutcome != OutcomeNone || st.LastRun != want {
+				t.Fatalf("after the sign-in: Attention %q, outcome %q, LastRun %+v; want none, none, %+v",
+					st.Attention, st.LastOutcome, st.LastRun, want)
+			}
+
+			// The next run tells again.
+			e.cal.failNext("ensure", backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarNoAccess)))
+			_ = e.handle(t)
+			if st, _ := e.sync.Status(ctx); st.Attention != AttentionNoAccess || st.LastOutcome != OutcomeNoAccess {
+				t.Fatalf("after the next run: Attention %q, outcome %q", st.Attention, st.LastOutcome)
+			}
+		})
 	}
 }
 
