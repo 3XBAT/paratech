@@ -1,31 +1,33 @@
-// "Диагностика" bindings: calls into the Go core (internal/input/wails/diagnostics.go). The core plays the tone, picks
-// the file in its own save dialog and writes the bundle; the page never sees a path, only the base name of the file.
+// "Диагностика" bindings: calls into the Go core (internal/input/wails/diagnostics.go). The core captures the sound
+// for the check (nothing is played or recorded), picks the file in its own save dialog and writes the bundle; the page
+// never sees a path, only the base name of the file.
 
 import type { CallByName } from "./settings";
 
-/** "ok" or the cause the check found. */
-export type SoundVerdict = "ok" | "no_device" | "silence" | "unsupported" | "hands_free" | "busy" | "failed";
+/** The state of the last sound check. */
+export type SoundState = "idle" | "running" | "done";
 
-/** The capture modes the check tries: the capture of an app and the classic capture of the output device. */
-export type SoundModeName = "include" | "system";
+/** The verdict of a finished check; "" while none is finished. */
+export type SoundVerdict = "" | "ok" | "silence" | "not_running" | "no_device" | "unsupported" | "busy" | "failed";
 
-/** The result of one capture mode; cause is "ok" or a verdict. */
-export interface SoundMode {
-  mode: SoundModeName;
-  ok: boolean;
-  cause: string;
-}
-
-/** The answer of "Проверить звук". message and hint are fixed texts of the core; device is a hardware name. */
+/**
+ * The state of "Проверить звук". level is the latest level and peak the loudest, both 0..1; heard tells that sound
+ * was heard. message and hints are fixed texts of the core; source is the display name of what is checked (an
+ * executable name of an app is untrusted: render it as text).
+ */
 export interface SoundCheck {
+  state: SoundState;
+  level: number;
+  peak: number;
+  heard: boolean;
+  elapsedMs: number;
+  remainingMs: number;
+  durationMs: number;
   verdict: SoundVerdict;
   message: string;
-  /** "" when unknown. */
-  device: string;
-  handsFree: boolean;
-  /** "" when there is nothing to add. */
-  hint: string;
-  modes: SoundMode[];
+  hints: string[];
+  source: string;
+  wholeComputer: boolean;
 }
 
 export type BundleStatus = "saved" | "cancelled" | "failed";
@@ -39,15 +41,17 @@ export interface BundleResult {
 
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {
-  checkSound: "paratech/desktop/internal/input/wails.DiagnosticsService.CheckSound",
+  startSoundCheck: "paratech/desktop/internal/input/wails.DiagnosticsService.StartSoundCheck",
+  soundCheckStatus: "paratech/desktop/internal/input/wails.DiagnosticsService.SoundCheckStatus",
+  stopSoundCheck: "paratech/desktop/internal/input/wails.DiagnosticsService.StopSoundCheck",
   saveSupportBundle: "paratech/desktop/internal/input/wails.DiagnosticsService.SaveSupportBundle",
 } as const;
 
-export const soundVerdicts: readonly SoundVerdict[] = [
-  "ok", "no_device", "silence", "unsupported", "hands_free", "busy", "failed",
-];
+export const soundStates: readonly SoundState[] = ["idle", "running", "done"];
 
-export const soundModes: readonly SoundModeName[] = ["include", "system"];
+export const soundVerdicts: readonly SoundVerdict[] = [
+  "", "ok", "silence", "not_running", "no_device", "unsupported", "busy", "failed",
+];
 
 export const bundleStatuses: readonly BundleStatus[] = ["saved", "cancelled", "failed"];
 
@@ -82,27 +86,48 @@ function oneOf<T extends string>(r: Record<string, unknown>, key: string, allowe
   return v as T;
 }
 
-function parseSoundMode(raw: unknown): SoundMode {
-  const w = "sound mode";
-  const r = record(raw, w);
-  return { mode: oneOf(r, "mode", soundModes, w), ok: bool(r, "ok", w), cause: str(r, "cause", w) };
+function fraction(r: Record<string, unknown>, key: string, what: string): number {
+  const v = r[key];
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1) {
+    throw new Error(`${what}: ${key} is not a level`);
+  }
+  return v;
 }
 
-/** Checks the shape of a sound check answer; a malformed reply is an error, not a default. */
+function millis(r: Record<string, unknown>, key: string, what: string): number {
+  const v = r[key];
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) {
+    throw new Error(`${what}: ${key} is not a duration`);
+  }
+  return v;
+}
+
+/** Checks the shape of a sound check reply; a malformed reply is an error, not a default. */
 export function parseSoundCheck(raw: unknown): SoundCheck {
   const w = "sound check";
   const r = record(raw, w);
-  const modes = r.modes ?? []; // Go sends [], a null list is accepted as empty
-  if (!Array.isArray(modes)) {
-    throw new Error(`${w}: modes is not a list`);
+  const state = oneOf(r, "state", soundStates, w);
+  const verdict = oneOf(r, "verdict", soundVerdicts, w);
+  if ((state === "done") !== (verdict !== "")) {
+    throw new Error(`${w}: verdict does not match the state`);
+  }
+  const hints = r.hints ?? []; // Go sends [], a null list is accepted as empty
+  if (!Array.isArray(hints) || !hints.every((h) => typeof h === "string")) {
+    throw new Error(`${w}: hints is not a list of texts`);
   }
   return {
-    verdict: oneOf(r, "verdict", soundVerdicts, w),
+    state,
+    level: fraction(r, "level", w),
+    peak: fraction(r, "peak", w),
+    heard: bool(r, "heard", w),
+    elapsedMs: millis(r, "elapsedMs", w),
+    remainingMs: millis(r, "remainingMs", w),
+    durationMs: millis(r, "durationMs", w),
+    verdict,
     message: str(r, "message", w),
-    device: str(r, "device", w),
-    handsFree: bool(r, "handsFree", w),
-    hint: str(r, "hint", w),
-    modes: modes.map(parseSoundMode),
+    hints: hints as string[],
+    source: str(r, "source", w),
+    wholeComputer: bool(r, "wholeComputer", w),
   };
 }
 
@@ -119,8 +144,12 @@ export function parseBundleResult(raw: unknown): BundleResult {
 }
 
 export interface DiagnosticsApi {
-  /** Plays a short tone on the default output device and checks that it is recorded (up to 15 s). */
-  checkSound(): Promise<SoundCheck>;
+  /** Starts the sound check (about 15 s): nothing is played, the chosen source is listened to; a running one is returned. */
+  startSoundCheck(): Promise<SoundCheck>;
+  /** The state of the last check; poll it while the check runs. */
+  soundCheckStatus(): Promise<SoundCheck>;
+  /** Ends a running check early. */
+  stopSoundCheck(): Promise<SoundCheck>;
   /** Asks where to save in the native dialog and writes the bundle there; nothing is sent anywhere. */
   saveSupportBundle(): Promise<BundleResult>;
 }
@@ -128,7 +157,9 @@ export interface DiagnosticsApi {
 /** Builds the API over a call function (the Wails runtime in the app, a fake in tests). */
 export function diagnosticsApi(call: CallByName): DiagnosticsApi {
   return {
-    checkSound: async () => parseSoundCheck(await call(methods.checkSound)),
+    startSoundCheck: async () => parseSoundCheck(await call(methods.startSoundCheck)),
+    soundCheckStatus: async () => parseSoundCheck(await call(methods.soundCheckStatus)),
+    stopSoundCheck: async () => parseSoundCheck(await call(methods.stopSoundCheck)),
     saveSupportBundle: async () => parseBundleResult(await call(methods.saveSupportBundle)),
   };
 }

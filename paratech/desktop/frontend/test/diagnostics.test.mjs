@@ -8,28 +8,31 @@ import {
   methods,
   parseBundleResult,
   parseSoundCheck,
-  soundModes,
+  soundStates,
   soundVerdicts,
 } from "../.test-build/bindings/diagnostics.js";
 import {
   bundleButton,
   bundleFailedLines,
   bundleLines,
-  causeText,
   checkButton,
-  modeLabels,
+  pollMs,
   soundDisplay,
   soundFailedDisplay,
   texts,
 } from "../.test-build/diagnosticsView.js";
 
 // Mirrors the JSON of internal/input/wails/diagnostics.go (diagnostics_test.go).
-const checked = {
-  verdict: "ok", message: "Звук записывается: проверочный сигнал слышен.", device: "Динамики (Realtek Audio)",
-  handsFree: false, hint: "",
-  modes: [{ mode: "include", ok: true, cause: "ok" }, { mode: "system", ok: false, cause: "silence" }],
+const running = {
+  state: "running", level: 0.123, peak: 0.5, heard: true, elapsedMs: 4200, remainingMs: 10800, durationMs: 15000,
+  verdict: "", message: "Звук слышен.", hints: [], source: "zoom.exe", wholeComputer: false,
 };
-const busy = { verdict: "busy", message: "Проверка звука уже идёт.", device: "", handsFree: false, hint: "", modes: [] };
+const silence = {
+  ...running, state: "done", level: 0, peak: 0.001, heard: false, elapsedMs: 15000, remainingMs: 0, verdict: "silence",
+  message: "Звук не слышен.", hints: ["Проверьте микшер."], source: "Весь звук компьютера", wholeComputer: true,
+};
+const idle = { ...running, state: "idle", level: 0, peak: 0, heard: false, elapsedMs: 0, remainingMs: 15000, message: "",
+  source: "" };
 const saved = { status: "saved", message: "Пакет для поддержки сохранён.", name: "la-support-20261016.zip" };
 
 function fakeCall(reply) {
@@ -45,15 +48,19 @@ const src = (file) => readFileSync(new URL(file, import.meta.url), "utf8");
 
 test("the api calls the bound Go methods without arguments", async () => {
   const p = "paratech/desktop/internal/input/wails.DiagnosticsService.";
-  assert.deepEqual(Object.values(methods).sort(), ["CheckSound", "SaveSupportBundle"].map((m) => p + m));
+  assert.deepEqual(Object.values(methods).sort(),
+    ["SaveSupportBundle", "SoundCheckStatus", "StartSoundCheck", "StopSoundCheck"].map((m) => p + m));
 
-  const sound = fakeCall(checked);
-  assert.deepEqual(await diagnosticsApi(sound.call).checkSound(), checked);
+  const sound = fakeCall(running);
+  const api = diagnosticsApi(sound.call);
+  assert.deepEqual(await api.startSoundCheck(), running);
+  assert.deepEqual(await api.soundCheckStatus(), running);
+  assert.deepEqual(await api.stopSoundCheck(), running);
   const bundle = fakeCall(saved);
   assert.deepEqual(await diagnosticsApi(bundle.call).saveSupportBundle(), saved);
 
   // The page never passes a path: the core asks for it in its own dialog.
-  assert.deepEqual(sound.calls, [[p + "CheckSound"]]);
+  assert.deepEqual(sound.calls, [[p + "StartSoundCheck"], [p + "SoundCheckStatus"], [p + "StopSoundCheck"]]);
   assert.deepEqual(bundle.calls, [[p + "SaveSupportBundle"]]);
 });
 
@@ -61,34 +68,42 @@ test("a failing call rejects", async () => {
   const api = diagnosticsApi(async () => {
     throw new Error("boom");
   });
-  await assert.rejects(api.checkSound(), /boom/);
+  await assert.rejects(api.startSoundCheck(), /boom/);
+  await assert.rejects(api.soundCheckStatus(), /boom/);
+  await assert.rejects(api.stopSoundCheck(), /boom/);
   await assert.rejects(api.saveSupportBundle(), /boom/);
 });
 
 test("sound check replies are parsed strictly; extra fields are dropped", () => {
-  assert.deepEqual(soundVerdicts, ["ok", "no_device", "silence", "unsupported", "hands_free", "busy", "failed"]);
-  assert.deepEqual(soundModes, ["include", "system"]);
-  for (const verdict of soundVerdicts) {
-    assert.equal(parseSoundCheck({ ...checked, verdict }).verdict, verdict);
+  assert.deepEqual(soundStates, ["idle", "running", "done"]);
+  assert.deepEqual(soundVerdicts, ["", "ok", "silence", "not_running", "no_device", "unsupported", "busy", "failed"]);
+  for (const verdict of soundVerdicts.filter((v) => v !== "")) {
+    assert.equal(parseSoundCheck({ ...silence, verdict }).verdict, verdict);
   }
-  assert.deepEqual(parseSoundCheck({ ...checked, path: "C:\\x", modes: [{ ...checked.modes[0], extra: 1 }] }).modes,
-    [checked.modes[0]]);
-  assert.deepEqual(parseSoundCheck({ ...busy, modes: null }).modes, []);
+  assert.deepEqual(parseSoundCheck({ ...running, path: "C:\\x" }), running);
+  assert.deepEqual(parseSoundCheck({ ...silence, hints: null }).hints, []);
+  assert.deepEqual(parseSoundCheck(idle), idle);
   for (const raw of [
     null, "ok", {},
-    { ...checked, verdict: "fine" },
-    { ...checked, verdict: "toString" },
-    { ...checked, message: null },
-    { ...checked, device: undefined },
-    { ...checked, handsFree: "no" },
-    { ...checked, hint: 0 },
-    { ...checked, modes: "include" },
-    { ...checked, modes: [null] },
-    { ...checked, modes: [{ mode: "exclude", ok: true, cause: "ok" }] },
-    { ...checked, modes: [{ mode: "include", ok: "true", cause: "ok" }] },
-    { ...checked, modes: [{ mode: "include", ok: true }] },
+    { ...running, state: "paused" },
+    { ...running, verdict: "ok" },
+    { ...silence, verdict: "" },
+    { ...silence, verdict: "toString" },
+    { ...running, level: 1.5 },
+    { ...running, level: -0.1 },
+    { ...running, peak: "0.5" },
+    { ...running, level: Number.NaN },
+    { ...running, elapsedMs: -1 },
+    { ...running, remainingMs: 1.5 },
+    { ...running, durationMs: undefined },
+    { ...running, heard: "yes" },
+    { ...running, message: null },
+    { ...running, hints: "x" },
+    { ...running, hints: [1] },
+    { ...running, source: undefined },
+    { ...running, wholeComputer: 0 },
   ]) {
-    assert.throws(() => parseSoundCheck(raw), /sound/);
+    assert.throws(() => parseSoundCheck(raw), /sound check/);
   }
 });
 
@@ -110,35 +125,21 @@ test("bundle replies are parsed strictly: only a saved bundle has a name", () =>
   }
 });
 
-test("the check result shows the verdict, the device, the hint and every mode", () => {
-  assert.deepEqual(soundDisplay(checked), {
-    lines: [
-      { text: "Звук записывается: проверочный сигнал слышен.", tone: "ok" },
-      { text: "Устройство вывода: Динамики (Realtek Audio)", tone: "muted" },
-    ],
-    modes: [
-      { label: "Захват приложения", text: "Работает", ok: true },
-      { label: "Весь звук компьютера (классический)", text: "Сигнал не слышен.", ok: false },
-    ],
+test("a check shows the source, the level while it runs, then the verdict and its hints", () => {
+  assert.deepEqual(soundDisplay(running), {
+    running: true, level: 0.123, source: "Источник: zoom.exe", lines: [{ text: "Звук слышен.", tone: "ok" }],
   });
-
-  const headset = { ...checked, verdict: "silence", message: "Не слышен.", hint: "Гарнитура.", handsFree: true };
-  assert.deepEqual(soundDisplay(headset).lines, [
-    { text: "Не слышен.", tone: "error" },
-    { text: "Устройство вывода: Динамики (Realtek Audio)", tone: "muted" },
-    { text: "Гарнитура.", tone: "warning" },
-  ]);
-  // Busy is a wait, not a fault; no device and no modes means one line.
-  assert.deepEqual(soundDisplay(busy), { lines: [{ text: "Проверка звука уже идёт.", tone: "warning" }], modes: [] });
-  assert.deepEqual(soundFailedDisplay(), { lines: [{ text: "Не удалось проверить звук.", tone: "error" }], modes: [] });
-
-  assert.deepEqual(modeLabels, { include: "Захват приложения", system: "Весь звук компьютера (классический)" });
-  for (const cause of ["no_device", "silence", "unsupported", "hands_free", "busy", "failed"]) {
-    assert.notEqual(causeText(cause), "", cause);
-  }
-  // An unknown cause is not shown raw.
-  assert.equal(causeText("toString"), causeText("failed"));
-  assert.equal(causeText("<b>x</b>"), "Не удалось проверить.");
+  assert.deepEqual(soundDisplay({ ...running, heard: false, message: "Включите звук." }).lines,
+    [{ text: "Включите звук.", tone: "muted" }]);
+  assert.deepEqual(soundDisplay(silence), {
+    running: false, level: 0, source: "Источник: Весь звук компьютера",
+    lines: [{ text: "Звук не слышен.", tone: "error" }, { text: "Проверьте микшер.", tone: "muted" }],
+  });
+  assert.equal(soundDisplay({ ...silence, verdict: "ok", message: "Звук слышен.", hints: [] }).lines[0].tone, "ok");
+  assert.equal(soundDisplay({ ...silence, verdict: "busy" }).lines[0].tone, "warning");
+  assert.deepEqual(soundDisplay(idle), { running: false, level: 0, source: "", lines: [] });
+  assert.deepEqual(soundFailedDisplay(),
+    { running: false, level: 0, source: "", lines: [{ text: "Не удалось проверить звук.", tone: "error" }] });
 });
 
 test("the bundle result: the name when saved, a neutral line when cancelled", () => {
@@ -155,21 +156,20 @@ test("the bundle result: the name when saved, a neutral line when cancelled", ()
   assert.deepEqual(bundleFailedLines(), [{ text: "Не удалось сохранить пакет для поддержки.", tone: "error" }]);
 });
 
-test("buttons are disabled while their call runs", () => {
-  assert.deepEqual(checkButton(false), { label: "Проверить звук", disabled: false });
-  assert.deepEqual(checkButton(true), { label: "Проверяем…", disabled: true });
+test("the sound button starts or stops; buttons are disabled while their call runs", () => {
+  assert.deepEqual(checkButton(false, false), { label: "Проверить звук", disabled: false });
+  assert.deepEqual(checkButton(true, false), { label: "Остановить проверку", disabled: false });
+  assert.deepEqual(checkButton(false, true), { label: "Проверить звук", disabled: true });
   assert.deepEqual(bundleButton(false), { label: "Сохранить пакет для поддержки…", disabled: false });
   assert.deepEqual(bundleButton(true), { label: "Сохраняем…", disabled: true });
+  // 10 reads a second, as fast as the core reports levels at most (20 a second).
+  assert.equal(pollMs, 100);
 });
 
 test("the explanations say what is checked and what the bundle holds", () => {
-  assert.match(texts.soundExplain, /устройство вывода по умолчанию/);
-  assert.match(texts.soundExplain, /Тихая громкость/);
-  assert.match(texts.soundScope, /не что слышно выбранное приложение/);
+  assert.match(texts.soundExplain, /Ничего не проигрывается/);
   assert.match(texts.bundleExplain, /без паролей, ключей, аудио, расшифровок и текстов уроков/);
   assert.match(texts.bundleLocal, /никуда не отправляется/);
-  // DefaultSelfTestTimeout of internal/adapters/audiocapture/selftest.go is at most 15 s.
-  assert.equal(texts.checkTakes, "Проверка занимает до 15 секунд.");
 });
 
 test("the page renders text only and never handles a path", () => {
@@ -180,7 +180,9 @@ test("the page renders text only and never handles a path", () => {
     }
   }
   const page = src("../src/pages/DiagnosticsPage.tsx");
-  assert.match(page, /api\.checkSound\(\)/);
+  assert.match(page, /api\.startSoundCheck\(\)/);
+  assert.match(page, /api\.soundCheckStatus\(\)/);
+  assert.match(page, /api\.stopSoundCheck\(\)/);
   assert.match(page, /api\.saveSupportBundle\(\)/);
   assert.ok(!/<input\b/.test(page), "the page asks for a path itself");
 });

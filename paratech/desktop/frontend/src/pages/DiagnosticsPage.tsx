@@ -6,6 +6,7 @@ import {
   bundleFailedLines,
   bundleLines,
   checkButton,
+  pollMs,
   soundDisplay,
   soundFailedDisplay,
   texts,
@@ -15,7 +16,6 @@ import {
 } from "../diagnosticsView";
 import { Button } from "../ui/Button";
 import { Card, ResultLine, type ResultKind } from "../ui/controls";
-import { StatusChip } from "../ui/StatusChip";
 
 // "Диагностика": the sound check and the support bundle. Both run in the Go core; the page shows the fixed texts it
 // gets back (ARCH-44).
@@ -23,7 +23,7 @@ export function DiagnosticsPage() {
   const api = useMemo(() => diagnosticsApi(callByName), []);
   const mounted = useRef(true);
 
-  const [checking, setChecking] = useState(false);
+  const [calling, setCalling] = useState(false);
   const [sound, setSound] = useState<SoundDisplay | null>(null);
 
   const [saving, setSaving] = useState(false);
@@ -55,11 +55,26 @@ export function DiagnosticsPage() {
     }
   }
 
-  const runCheck = () =>
-    once("sound", setChecking, async () => {
-      setSound(null);
+  const checking = sound?.running ?? false;
+
+  // While the check runs, its state is read again every pollMs; leaving the page stops the polling only.
+  useEffect(() => {
+    if (!checking) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      api.soundCheckStatus().then(
+        (r) => mounted.current && setSound(soundDisplay(r)),
+        () => mounted.current && setSound(soundFailedDisplay()),
+      );
+    }, pollMs);
+    return () => clearTimeout(timer);
+  }, [api, checking, sound]);
+
+  const toggleCheck = () =>
+    once("sound", setCalling, async () => {
       try {
-        const r = await api.checkSound();
+        const r = checking ? await api.stopSoundCheck() : await api.startSoundCheck();
         if (mounted.current) {
           setSound(soundDisplay(r));
         }
@@ -85,7 +100,7 @@ export function DiagnosticsPage() {
       }
     });
 
-  const check = checkButton(checking);
+  const check = checkButton(checking, calling);
   const save = bundleButton(saving);
 
   return (
@@ -101,32 +116,16 @@ export function DiagnosticsPage() {
         <Card className="box diag" label={texts.soundTitle}>
           <h2>{texts.soundTitle}</h2>
           <span className="small muted box-desc">{texts.soundExplain}</span>
-          <p className="small muted">{texts.soundScope}</p>
           <div className="acts start">
-            <Button disabled={check.disabled} onClick={() => void runCheck()}>
+            <Button disabled={check.disabled} onClick={() => void toggleCheck()}>
               {check.label}
             </Button>
           </div>
-          {checking && <p className="small muted diag-wait">{texts.checkTakes}</p>}
           {sound !== null && (
             <div className="diag-result">
+              {sound.source !== "" && <p className="small muted diag-note">{sound.source}</p>}
+              {sound.running && <progress max={1} value={sound.level} aria-label={texts.levelLabel} />}
               <Lines lines={sound.lines} />
-              {sound.modes.length > 0 && (
-                <>
-                  <h3>{texts.modesTitle}</h3>
-                  <ul className="modes">
-                    {sound.modes.map((m) => (
-                      <li key={m.label}>
-                        <span>{m.label}</span>
-                        <StatusChip kind={m.ok ? "ok" : "fail"} icon={m.ok ? "ok" : "warn"}>
-                          {m.ok ? texts.modeWorks : texts.modeFailed}
-                        </StatusChip>
-                        {!m.ok && <span className="small muted mode-cause">{m.text}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
             </div>
           )}
         </Card>
