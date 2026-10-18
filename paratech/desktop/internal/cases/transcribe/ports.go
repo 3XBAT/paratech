@@ -31,13 +31,14 @@ type STTEngine interface {
 }
 
 // LiveParts stores what the engine recognised so far, so the transcript viewer shows it while the engine runs and
-// after a restart (TASK-079). Implemented by the sqlite adapter.
+// after a restart (PRD sections 7.3 and 8; TASK-079). Implemented by the sqlite adapter.
 type LiveParts interface {
 	// SaveParts stores the parts of the recording in one transaction, replacing a stored part with the same number
-	// (a rerun of the engine numbers from 0 again).
+	// (PRD section 7.3: a rerun of the engine numbers from 0 again).
 	SaveParts(ctx context.Context, rec shared.RecordingID, parts []transcript.Part) error
 
-	// DeleteParts removes every part of the recording; none is not an error.
+	// DeleteParts removes every part of the recording once its transcript is stored (PRD section 8); none is not an
+	// error.
 	DeleteParts(ctx context.Context, rec shared.RecordingID) error
 }
 
