@@ -12,6 +12,8 @@ import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, EmptyState, Progress, Row } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
+import { useOpenTranscript } from "../openTranscript";
+import { rowOffersTranscript } from "../transcriptView";
 import { RecordingRow, StatusLine } from "./RecordingRow";
 
 const pollMs = 3000;
@@ -20,6 +22,7 @@ const pollMs = 3000;
 // Stop, Run now and link buttons appear only when the core offers them (ARCH-44).
 export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) {
   const api = useMemo(() => activityApi(callByName), []);
+  const openTranscript = useOpenTranscript();
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
   const [recordingsError, setRecordingsError] = useState("");
@@ -122,6 +125,13 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
       onStop={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
       onRunNow={(jobId) => void act(`run:${jobId}`, () => api.runJobNow(jobId))}
       onOpen={(page) => onOpen?.(page)}
+      extraActions={
+        rowOffersTranscript(r) && (
+          <Button variant="ghost" icon="doc" onClick={() => openTranscript(r.id)}>
+            Открыть расшифровку
+          </Button>
+        )
+      }
     />
   );
 

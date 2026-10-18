@@ -42,6 +42,26 @@ export function canOpenTranscript(st: TranscriptStatus): boolean {
   return isLive(st.state) || st.state === "done" || st.segments > 0;
 }
 
+/**
+ * Whether a row of «Записи и задачи» offers «Открыть расшифровку», from the chain the list already has (no call per
+ * row). The recording is saved and recognition is queued, running or past (also when the summary or the homework
+ * waits or failed); hidden while recording or saving and for a failed recording. A failed recognition keeps the
+ * button: the parts recognised before the failure are kept.
+ */
+export function rowOffersTranscript(r: Pick<RecordingItem, "stage" | "errorCode">): boolean {
+  switch (r.stage) {
+    case "queued":
+    case "transcribing":
+    case "summarizing":
+    case "done":
+      return true;
+    case "failed":
+      return r.errorCode !== "recordingFailed" && r.errorCode !== "";
+    default:
+      return false;
+  }
+}
+
 /** The recordings of a lesson, newest first as the core lists them. */
 export function lessonRecordings(recordings: readonly RecordingItem[], lessonId: string): RecordingItem[] {
   return lessonId === "" ? [] : recordings.filter((r) => r.lessonId === lessonId);

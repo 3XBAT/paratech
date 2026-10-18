@@ -28,6 +28,7 @@ import {
   paragraphs,
   partialNote,
   playSeconds,
+  rowOffersTranscript,
   saveResultText,
   searchParagraphs,
   searchQuery,
@@ -316,6 +317,22 @@ test("the transcript opens over the current section and goes back to it", () => 
   assert.equal(initialRoute.transcript, "");
 });
 
+test("a recording row offers the transcript from its chain once recognition is queued, running or past", () => {
+  // Mirrors the chain stages and error codes of internal/cases/activity/types.go.
+  for (const stage of ["queued", "transcribing", "summarizing", "done"]) {
+    assert.ok(rowOffersTranscript({ stage, errorCode: "" }), stage);
+  }
+  // The summary or the homework failed or waits for the Hub: the local transcript stays reachable.
+  for (const errorCode of ["transcriptionFailed", "summaryFailed", "homeworkFailed"]) {
+    assert.ok(rowOffersTranscript({ stage: "failed", errorCode }), errorCode);
+  }
+  assert.ok(!rowOffersTranscript({ stage: "recording", errorCode: "" }));
+  assert.ok(!rowOffersTranscript({ stage: "saving", errorCode: "" }));
+  assert.ok(!rowOffersTranscript({ stage: "failed", errorCode: "recordingFailed" }));
+  assert.ok(!rowOffersTranscript({ stage: "failed", errorCode: "" }));
+  assert.ok(!rowOffersTranscript({ stage: "unknown", errorCode: "" }));
+});
+
 // Source guards: read the TypeScript sources, not the build.
 const src = (rel) =>
   readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8")
@@ -342,4 +359,11 @@ test("the viewer renders text only, plays only on a click and polls without over
   // The selection copy reads the page's selection, the full copy goes through the core.
   assert.match(page, /api\.copyText\(text\)/);
   assert.match(page, /api\.copyAll\(id, withTimestamps\)/);
+});
+
+test("the recordings page decides the row's transcript action from the list, without a call per row", () => {
+  const page = src("pages/RecordingsPage.tsx");
+  assert.match(page, /extraActions=\{\s*rowOffersTranscript\(r\) &&/);
+  assert.match(page, /onClick=\{\(\) => openTranscript\(r\.id\)\}/);
+  assert.ok(!page.includes("transcriptApi"), "no transcript status call per row");
 });
