@@ -88,6 +88,9 @@ type Querier interface {
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
+	// The newest job of the type in one of the statuses (a JSON array of status names), by its last change (TASK-074:
+	// the last finished calendar sync).
+	LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error)
 	// The number of the latest stored version, 0 when none; the repository inserts only the versions above it.
 	LatestDraftRevision(ctx context.Context, assignmentID string) (int64, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
@@ -98,7 +101,8 @@ type Querier interface {
 	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
 	// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
-	// active is a JSON array of status names.
+	// active is a JSON array of status names, hidden_types a JSON array of job types left out of both parts (TASK-074),
+	// so hidden finished jobs never use up max_terminal.
 	ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error)
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.

@@ -125,7 +125,7 @@ func TestJobListActivity(t *testing.T) {
 
 	for _, tt := range activityCases {
 		t.Run(tt.name, func(t *testing.T) {
-			got, unreadable, err := repo.ListActivity(ctx, tt.maxTerminal)
+			got, unreadable, err := repo.ListActivity(ctx, tt.maxTerminal, nil)
 			if err != nil || len(unreadable) != 0 {
 				t.Fatalf("ListActivity: unreadable = %v, err = %v", unreadable, err)
 			}
@@ -148,7 +148,7 @@ func TestJobListActivityCoversEveryStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, _, err := repo.ListActivity(ctx, 0)
+	got, _, err := repo.ListActivity(ctx, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestJobListActivityRoundTrip(t *testing.T) {
 	if _, _, err := repo.Enqueue(ctx, stored); err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := repo.ListActivity(ctx, 1)
+	got, _, err := repo.ListActivity(ctx, 1, nil)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("ListActivity(1) = %d jobs, %v", len(got), err)
 	}
@@ -186,7 +186,7 @@ func TestJobListActivitySkipsUnreadableRows(t *testing.T) {
 	mustExec(t, db, "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'b-pin'")
 	mustExec(t, db, "UPDATE jobs SET next_run_at = 'not a number' WHERE id = 'c-scan'")
 
-	got, unreadable, err := repo.ListActivity(context.Background(), 10)
+	got, unreadable, err := repo.ListActivity(context.Background(), 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,143 @@ func TestJobListActivitySkipsUnreadableRows(t *testing.T) {
 func TestJobListActivityFailsOnQueryError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := NewJobRepository(openTest(t, nil)).ListActivity(ctx, 10); !errors.Is(err, context.Canceled) {
+	if _, _, err := NewJobRepository(openTest(t, nil)).ListActivity(ctx, 10, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+// Hidden types are left out of the unfinished and the finished part, and their finished jobs never use up the bound
+// (TASK-074: a hundred finished syncs must not push the real jobs out of the list).
+func TestJobListActivityLeavesOutHiddenTypes(t *testing.T) {
+	repo, ctx := NewJobRepository(openTest(t, nil)), context.Background()
+	add := func(id, typ string, at time.Time, finished bool) {
+		t.Helper()
+		j, err := job.New(jobSpec(id, typ), at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished {
+			if err := j.Cancel(at); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, _, err := repo.Enqueue(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("stt-done", "stt", jobT0, true)
+	add("send-done", "send_email", jobT0.Add(time.Minute), true)
+	for i := range 5 { // newer than every real job
+		add(fmt.Sprintf("sync-done-%d", i), "calendar_sync", jobT0.Add(time.Hour+time.Duration(i)*time.Minute), true)
+	}
+	add("sync-queued", "calendar_sync", jobT0.Add(2*time.Hour), false)
+	add("stt-queued", "stt", jobT0.Add(-time.Hour), false)
+
+	tests := []struct {
+		name        string
+		maxTerminal int
+		hidden      []job.Type
+		want        string
+	}{
+		{name: "hidden sync, bound of two", maxTerminal: 2, hidden: []job.Type{"calendar_sync"}, want: "[send-done stt-done stt-queued]"},
+		{name: "hidden sync, bound of one", maxTerminal: 1, hidden: []job.Type{"calendar_sync"}, want: "[send-done stt-queued]"},
+		{name: "two hidden types", maxTerminal: 10, hidden: []job.Type{"calendar_sync", "send_email"}, want: "[stt-done stt-queued]"},
+		{name: "nothing hidden", maxTerminal: 2, want: "[sync-queued sync-done-4 sync-done-3 stt-queued]"},
+		{name: "empty list hides nothing", maxTerminal: 1, hidden: []job.Type{}, want: "[sync-queued sync-done-4 stt-queued]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, unreadable, err := repo.ListActivity(ctx, tt.maxTerminal, tt.hidden)
+			if err != nil || len(unreadable) != 0 {
+				t.Fatalf("ListActivity: unreadable = %v, err = %v", unreadable, err)
+			}
+			ids := make([]shared.JobID, 0, len(got))
+			for _, j := range got {
+				ids = append(ids, j.ID())
+			}
+			if fmt.Sprint(ids) != tt.want {
+				t.Fatalf("ListActivity(%d, %v) = %v, want %v", tt.maxTerminal, tt.hidden, ids, tt.want)
+			}
+		})
+	}
+}
+
+// LastFinished is the finished job of the type changed last; unfinished jobs and other types do not count.
+func TestJobLastFinished(t *testing.T) {
+	repo, ctx := NewJobRepository(openTest(t, nil)), context.Background()
+	if j, found, err := repo.LastFinished(ctx, "calendar_sync"); err != nil || found || j != nil {
+		t.Fatalf("empty store: LastFinished = %v, %v, %v", j, found, err)
+	}
+
+	// Created in one order, finished in another: the last change decides.
+	done := newTestJob(t, jobSpec("a-done", "calendar_sync"))
+	failed := newTestJob(t, jobSpec("b-failed", "calendar_sync"))
+	for _, step := range []error{
+		done.Claim(jobT0), done.Complete(jobT0.Add(2 * time.Minute)),
+		failed.Claim(jobT0), failed.Fail(jobT0.Add(time.Minute), "boom"),
+	} {
+		if step != nil {
+			t.Fatal(step)
+		}
+	}
+	running := newTestJob(t, jobSpec("c-running", "calendar_sync"))
+	if err := running.Claim(jobT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	other := newTestJob(t, jobSpec("d-stt", "stt"))
+	if err := other.Cancel(jobT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range []*job.Job{done, failed, running, other} {
+		if _, _, err := repo.Enqueue(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	j, found, err := repo.LastFinished(ctx, "calendar_sync")
+	if err != nil || !found {
+		t.Fatalf("LastFinished = %v, %v", found, err)
+	}
+	requireSameJob(t, j, done)
+
+	// A later failure becomes the last one.
+	failed2 := newTestJob(t, jobSpec("e-failed", "calendar_sync"))
+	if err := failed2.Claim(jobT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := failed2.Fail(jobT0.Add(3*time.Minute), "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.Enqueue(ctx, failed2); err != nil {
+		t.Fatal(err)
+	}
+	if j, _, err := repo.LastFinished(ctx, "calendar_sync"); err != nil || j.ID() != "e-failed" || j.Attempts() != 1 {
+		t.Fatalf("LastFinished = %v, %v; want e-failed after 1 attempt", j, err)
+	}
+
+	if j, found, err := repo.LastFinished(ctx, "stt"); err != nil || !found || j.ID() != "d-stt" {
+		t.Fatalf("LastFinished(stt) = %v, %v, %v", j, found, err)
+	}
+}
+
+func TestJobLastFinishedErrors(t *testing.T) {
+	db := openTest(t, nil)
+	repo := NewJobRepository(db)
+	j := newTestJob(t, jobSpec("bad", "calendar_sync"))
+	if err := j.Cancel(jobT0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.Enqueue(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'bad'")
+	if _, _, err := repo.LastFinished(context.Background(), "calendar_sync"); err == nil {
+		t.Fatal("LastFinished of an unreadable row succeeded")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := repo.LastFinished(ctx, "calendar_sync"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

@@ -252,7 +252,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
 	}
-	history, err := activity.New(recordings, jobs, log)
+	history, err := activity.New(recordings, jobs, log, hiddenJobTypes()...)
 	if err != nil {
 		return fmt.Errorf("app: activity: %w", err)
 	}

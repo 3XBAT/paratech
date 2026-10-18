@@ -112,7 +112,7 @@ func TestRunNowTranscribesAndEnqueuesPostProcessing(t *testing.T) {
 				j.Attempts(), keys)
 		}
 	}
-	all, _, err := jobs.ListActivity(ctx, 10)
+	all, _, err := jobs.ListActivity(ctx, 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -133,7 +133,7 @@ func TestFinishedJobsShowNothing(t *testing.T) {
 	var all []*job.Job
 	testenv.Eventually(t, "every job ends", func() bool {
 		var err error
-		if all, _, err = jobs.ListActivity(ctx, 100); err != nil {
+		if all, _, err = jobs.ListActivity(ctx, 100, nil); err != nil {
 			t.Fatal(err)
 		}
 		return len(all) == 4 && !slices.ContainsFunc(all, func(j *job.Job) bool { return !j.Status().IsTerminal() })

@@ -189,28 +189,74 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 	return err
 }
 
+const lastJobOfTypeByStatus = `-- name: LastJobOfTypeByStatus :one
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+WHERE type = ?1
+  AND id IS NOT NULL
+  AND status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+ORDER BY updated_at DESC, id DESC
+LIMIT 1
+`
+
+type LastJobOfTypeByStatusParams struct {
+	Type     string
+	Statuses string
+}
+
+// The newest job of the type in one of the statuses (a JSON array of status names), by its last change (TASK-074:
+// the last finished calendar sync).
+func (q *Queries) LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error) {
+	row := q.db.QueryRowContext(ctx, lastJobOfTypeByStatus, arg.Type, arg.Statuses)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.IdempotencyKey,
+		&i.Payload,
+		&i.PinnedModelID,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextRunAt,
+		&i.RunNow,
+		&i.ProgressPercent,
+		&i.Checkpoint,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listJobActivityIDs = `-- name: ListJobActivityIDs :many
 SELECT id FROM jobs
 WHERE id IS NOT NULL
-  AND (status IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND type NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND (status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
        OR id IN (SELECT id FROM jobs
                  WHERE id IS NOT NULL
-                   AND status NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+                   AND type NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+                   AND status NOT IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
                  ORDER BY created_at DESC, id DESC
-                 LIMIT ?2))
+                 LIMIT ?3))
 ORDER BY created_at DESC, id DESC
 `
 
 type ListJobActivityIDsParams struct {
+	HiddenTypes string
 	Active      string
 	MaxTerminal int64
 }
 
 // Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 // newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
-// active is a JSON array of status names.
+// active is a JSON array of status names, hidden_types a JSON array of job types left out of both parts (TASK-074),
+// so hidden finished jobs never use up max_terminal.
 func (q *Queries) ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listJobActivityIDs, arg.Active, arg.MaxTerminal)
+	rows, err := q.db.QueryContext(ctx, listJobActivityIDs, arg.HiddenTypes, arg.Active, arg.MaxTerminal)
 	if err != nil {
 		return nil, err
 	}
