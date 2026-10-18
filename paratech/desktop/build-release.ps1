@@ -6,12 +6,15 @@ Builds the Windows installer of the Learning Assistant desktop app (NSIS, per-us
 Reads the version from desktop\VERSION (X.Y.Z; -Version overrides it). If HEAD has a vX.Y.Z git tag, it must match.
 Then it finds makensis (NSIS 3.x) before anything else, builds the app with build-alpha.ps1 into
 paratech\dist\release\<version>\app (FRONTEND_DEVSERVER_URL, GOFLAGS, GOAMD64, GOEXPERIMENT and GOWORK cleared for
-the build), checks the exe with `go version -m`, optionally adds the whisper-cli files, and runs makensis on
-desktop\build\windows\nsis\project.nsi. The plan shows the HEAD commit and whether the tree is dirty. The installer is
+the build), checks the exe with `go version -m` and runs makensis on desktop\build\windows\nsis\project.nsi.
+build-alpha.ps1 also puts the speech recognition component (whisper-cli.exe and its DLLs, pinned in
+desktop\internal\app\speechcomponent.json) into the staging folder: the official archive is downloaded into
+paratech\dist\cache\speech-component, checked (size, SHA-256) before it is opened, and only the pinned files are
+unpacked and checked. The installer always contains them. The plan shows the HEAD commit and whether the tree is dirty. The installer is
 paratech\dist\release\learning-assistant-<version>-windows-amd64-setup.exe (ignored by git).
 
 The WebView2 bootstrapper (MicrosoftEdgeWebview2Setup.exe) is taken from the Wails module in the Go module cache
-(the file `wails3 generate webview2bootstrapper` writes); the script downloads nothing itself.
+(the file `wails3 generate webview2bootstrapper` writes); the whisper.cpp archive is the only download.
 Needs Go, Node.js/npm and NSIS 3.x; installs nothing and needs no admin rights. Environment variables are set only
 for the build and restored afterwards. No auto-update. See docs/refs/packaging.md.
 
@@ -21,13 +24,16 @@ GNU-style --help and --dry-run work too; any other unknown argument is an error.
 Version X.Y.Z to build instead of the one in desktop\VERSION.
 
 .PARAMETER WhisperDir
-Folder with whisper-cli.exe, whisper.dll, ggml.dll, ggml-base.dll and ggml-cpu-*.dll (the Release folder of
-whisper-bin-x64.zip, docs/qa/run-alpha.md section 6). Whisper files already staged are removed first. Without it the
-installer has no whisper files.
+Offline: the unpacked Release folder of the pinned whisper.cpp archive instead of the download. Every file must have
+the pinned size and SHA-256. Whisper files already staged are removed first.
+
+.PARAMETER WhisperZip
+Offline: a local copy of the pinned whisper.cpp archive instead of the download (same checks as the download).
 
 .PARAMETER SkipAppBuild
 Reuse the app already staged in paratech\dist\release\<version>\app by an earlier run (for example after signing
 learning-assistant.exe there) instead of building it again. Its `go version -m` must still show a release build.
+The speech component is staged again (build-alpha.ps1 -ComponentOnly).
 
 .PARAMETER DryRun
 Print the plan (version, paths, tools found, commands, installer contents) and exit 0 without building.
@@ -43,12 +49,13 @@ Not set by name: takes the GNU-style --help and --dry-run; anything else is an e
 powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -DryRun
 
 .EXAMPLE
-powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -WhisperDir $env:USERPROFILE\Downloads\whisper-bin-x64\Release
+powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -WhisperZip $env:USERPROFILE\Downloads\whisper-bin-x64.zip
 #>
 [CmdletBinding(PositionalBinding = $false, SupportsShouldProcess = $true)]
 param(
     [string]$Version = '',
     [string]$WhisperDir = '',
+    [string]$WhisperZip = '',
     [switch]$SkipAppBuild,
     [switch]$DryRun,
     [switch]$Help,
@@ -69,8 +76,9 @@ $nsiFile = Join-Path $desktopDir 'build\windows\nsis\project.nsi'
 $releaseRoot = Join-Path $moduleRoot 'dist\release'
 $wailsModule = 'github.com/wailsapp/wails/v3'
 $bootstrapperRel = 'internal\commands\webview2\MicrosoftEdgeWebview2Setup.exe'
-$whisperFixed = @('whisper-cli.exe', 'whisper.dll', 'ggml.dll', 'ggml-base.dll')
-$whisperCpuPattern = 'ggml-cpu-*.dll'
+# The pinned speech component; build-alpha.ps1 fetches and checks it, this script only lists it.
+$speechManifestPath = Join-Path $desktopDir 'internal\app\speechcomponent.json'
+$speechCacheRoot = Join-Path $moduleRoot 'dist\cache\speech-component'
 $nsisHint = 'Install NSIS 3.x from https://nsis.sourceforge.io/Download (makensis is looked up on PATH, then in ' +
     'Program Files (x86)\NSIS and Program Files\NSIS) and open a new terminal. This script installs nothing.'
 # A release must never take the UI from a dev server (the production tag ignores it as well) or pick up build
@@ -78,7 +86,6 @@ $nsisHint = 'Install NSIS 3.x from https://nsis.sourceforge.io/Download (makensi
 # finds paratech\go.work. build-alpha.ps1 sets CGO_ENABLED, GOOS and GOARCH itself.
 $buildEnv = @{ FRONTEND_DEVSERVER_URL = $null; GOFLAGS = $null; GOAMD64 = $null; GOEXPERIMENT = $null; GOWORK = $null }
 $buildEnvNames = 'FRONTEND_DEVSERVER_URL, GOFLAGS, GOAMD64, GOEXPERIMENT and GOWORK'
-$whisperStale = $whisperFixed + @($whisperCpuPattern)
 
 function Write-Step([string]$Message) {
     Write-Host "==> $Message"
@@ -176,27 +183,6 @@ function Resolve-FullPath([string]$Path) {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
-# Returns the whisper files of a folder; fails if one is missing.
-function Get-WhisperFiles([string]$Dir) {
-    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) {
-        throw "Whisper folder '$Dir' does not exist."
-    }
-    $files = @()
-    foreach ($name in $whisperFixed) {
-        $path = Join-Path $Dir $name
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "'$name' is missing in '$Dir'. Take the Release folder of whisper-bin-x64.zip (docs/qa/run-alpha.md section 6)."
-        }
-        $files += $path
-    }
-    $cpu = @(Get-ChildItem -LiteralPath $Dir -Filter $whisperCpuPattern -File | Sort-Object Name)
-    if ($cpu.Count -eq 0) {
-        throw "No $whisperCpuPattern in '$Dir'. Take the Release folder of whisper-bin-x64.zip (docs/qa/run-alpha.md section 6)."
-    }
-    $files += @($cpu | ForEach-Object { $_.FullName })
-    return $files
-}
-
 # The bootstrapper embedded in the Wails module (internal/commands/generate_webview2.go). go.sum is checked only
 # when the module is downloaded, not when it is read from the cache later; the Authenticode check is the guard at
 # build time.
@@ -272,20 +258,6 @@ function Get-ReleaseExeProblems([string]$GoExe, [string]$Exe) {
     return $problems
 }
 
-# Removes whisper files left in the staging folder by an earlier run, so a smaller set of ggml-cpu-*.dll from
-# -WhisperDir does not get packed together with stale ones.
-function Remove-StagedWhisper([string]$Dir) {
-    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) {
-        return
-    }
-    foreach ($pattern in $whisperStale) {
-        Get-ChildItem -LiteralPath $Dir -Filter $pattern -File | ForEach-Object {
-            Write-Host "    removing the staged $($_.Name)"
-            Remove-Item -LiteralPath $_.FullName -Force
-        }
-    }
-}
-
 # --- arguments ---------------------------------------------------------------------------------------------------
 
 $showHelp = $Help.IsPresent
@@ -294,7 +266,7 @@ foreach ($arg in $ExtraArgs) {
     switch ($arg) {
         '--help' { $showHelp = $true }
         '--dry-run' { $dry = $true }
-        default { throw "Unknown argument '$arg'. Valid: -Version X.Y.Z, -WhisperDir <folder>, -SkipAppBuild, -DryRun (--dry-run, -WhatIf), -Help (--help)." }
+        default { throw "Unknown argument '$arg'. Valid: -Version X.Y.Z, -WhisperZip <archive>, -WhisperDir <folder>, -SkipAppBuild, -DryRun (--dry-run, -WhatIf), -Help (--help)." }
     }
 }
 if ($showHelp) {
@@ -383,14 +355,39 @@ $bootstrapperSigned = $false
 if ($null -ne $bootstrapper) {
     $bootstrapperSigned = Test-MicrosoftSignature $bootstrapper
 }
-$whisperFiles = @()
-if ($WhisperDir -ne '') {
+$speech = [System.IO.File]::ReadAllText($speechManifestPath) | ConvertFrom-Json
+$speechNames = @($speech.files | ForEach-Object { [string]$_.name })
+# Passed on to build-alpha.ps1, which checks every file against the manifest.
+$speechArgs = @{}
+if ($WhisperZip -ne '' -and $WhisperDir -ne '') {
+    throw 'Pass either -WhisperZip or -WhisperDir, not both.'
+}
+if ($WhisperZip -ne '') {
+    $WhisperZip = Resolve-FullPath $WhisperZip
+    if (-not (Test-Path -LiteralPath $WhisperZip -PathType Leaf)) {
+        throw "-WhisperZip '$WhisperZip' does not exist."
+    }
+    $speechArgs['WhisperZip'] = $WhisperZip
+    $speechSource = "$WhisperZip (-WhisperZip; size and SHA-256 checked)"
+} elseif ($WhisperDir -ne '') {
     $WhisperDir = Resolve-FullPath $WhisperDir
     # The stale files of the staging folder are removed before the copy.
     if ($WhisperDir.TrimEnd('\') -ieq $appDir) {
-        throw "-WhisperDir must not be the staging folder '$appDir'; pass the Release folder of whisper-bin-x64.zip."
+        throw "-WhisperDir must not be the staging folder '$appDir'; pass the Release folder of the pinned archive."
     }
-    $whisperFiles = @(Get-WhisperFiles $WhisperDir)
+    if (-not (Test-Path -LiteralPath $WhisperDir -PathType Container)) {
+        throw "-WhisperDir '$WhisperDir' does not exist."
+    }
+    $speechArgs['WhisperDir'] = $WhisperDir
+    $speechSource = "$WhisperDir (-WhisperDir; every file checked)"
+} else {
+    $leaf = (New-Object System.Uri ([string]$speech.source_url)).Segments[-1]
+    $cached = Join-Path (Join-Path $speechCacheRoot $speech.version) $leaf
+    $cacheState = 'not cached yet: downloaded'
+    if (Test-Path -LiteralPath $cached -PathType Leaf) {
+        $cacheState = 'cached, reused if size and SHA-256 match'
+    }
+    $speechSource = "$($speech.source_url) ($cacheState; $cached)"
 }
 
 # --- plan --------------------------------------------------------------------------------------------------------
@@ -437,40 +434,27 @@ Write-Host "  makensis:     $makensisText"
 Write-Host "  go:           $(Format-Found $goExe 'install Go (see go.work) and open a new terminal')"
 Write-Host "  npm:          $(Format-Found $npmExe 'install Node.js 22 with npm and open a new terminal')"
 Write-Host "  WebView2:     $bootstrapperText"
+Write-Host "  speech:       whisper.cpp $($speech.version) from $speechSource"
 Write-Host "  staging:      $appDir"
 Write-Host "  installer:    $installer"
-# Whisper files the installer will get: copied from -WhisperDir, or (with -SkipAppBuild) already staged.
-$plannedWhisper = @($whisperFiles | ForEach-Object { Split-Path -Leaf $_ })
-if ($plannedWhisper.Count -eq 0 -and $SkipAppBuild -and (Test-Path -LiteralPath (Join-Path $appDir 'whisper-cli.exe') -PathType Leaf)) {
-    $plannedWhisper = @(Get-WhisperFiles $appDir | ForEach-Object { Split-Path -Leaf $_ })
-}
-$whisperDefine = ''
-if ($plannedWhisper.Count -gt 0) {
-    $whisperDefine = ' -DWITH_WHISPER'
-}
 
 Write-Host '  steps:'
 if ($SkipAppBuild) {
     Write-Host "    - reuse $appDir\$exeName (-SkipAppBuild)"
+    Write-Host "    - go version -m $appDir\$exeName   (must show -tags=production, CGO_ENABLED=0, GOAMD64 v1 if set)"
+    Write-Host "    - $alphaScript -OutDir $appDir -ComponentOnly"
+    Write-Host '      = remove the staged whisper files, put the checked speech component there'
 } else {
     Write-Host "    - remove $appDir"
     Write-Host "    - $alphaScript -OutDir $appDir   ($buildEnvNames cleared)"
-    Write-Host '      = npm ci, npm run build, go build -tags production -trimpath (CGO_ENABLED=0, windows/amd64)'
+    Write-Host '      = speech component (fetch, check, unpack), npm ci, npm run build,'
+    Write-Host '        go build -tags production -trimpath (CGO_ENABLED=0, windows/amd64)'
+    Write-Host "    - go version -m $appDir\$exeName   (must show -tags=production, CGO_ENABLED=0, GOAMD64 v1 if set)"
 }
-Write-Host "    - go version -m $appDir\$exeName   (must show -tags=production, CGO_ENABLED=0, GOAMD64 v1 if set)"
-if ($whisperFiles.Count -gt 0) {
-    Write-Host "    - remove the staged whisper files ($($whisperStale -join ', ')) from $appDir"
-    Write-Host "    - copy the whisper files from $WhisperDir"
-}
-Write-Host "    - $(if ($null -ne $makensis) { $makensis } else { 'makensis' }) $($nsisArgs -join ' ')$whisperDefine $nsiFile"
+Write-Host "    - $(if ($null -ne $makensis) { $makensis } else { 'makensis' }) $($nsisArgs -join ' ') $nsiFile"
 Write-Host '  installer contents:'
 Write-Host "    $exeName, uninstall.exe (written at install)"
-foreach ($name in $plannedWhisper) {
-    Write-Host "    $name"
-}
-if ($plannedWhisper.Count -eq 0) {
-    Write-Host '    (no whisper files: copy them into the install folder later, docs/refs/packaging.md)'
-}
+Write-Host "    speech component: $($speechNames -join ', ')"
 Write-Host '    MicrosoftEdgeWebview2Setup.exe (temporary; runs only when the WebView2 Runtime is missing)'
 
 if ($dry) {
@@ -511,7 +495,7 @@ if ($SkipAppBuild) {
     Write-Step 'Building the app with build-alpha.ps1'
     $saved = Set-Env $buildEnv
     try {
-        & $alphaScript -OutDir $appDir
+        & $alphaScript -OutDir $appDir @speechArgs
     } finally {
         Restore-Env $saved
     }
@@ -524,23 +508,15 @@ if ($exeProblems.Count -gt 0) {
     throw "'$appDir\$exeName' is not a release build: $($exeProblems -join '; '). Run without -SkipAppBuild to build it again."
 }
 
-if ($whisperFiles.Count -gt 0) {
-    Write-Step "Removing stale whisper files from $appDir"
-    Remove-StagedWhisper $appDir
-    Write-Step "Copying whisper files from $WhisperDir"
-    foreach ($file in $whisperFiles) {
-        Copy-Item -LiteralPath $file -Destination $appDir -Force
-        $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
-        Write-Host "    $(Split-Path -Leaf $file)  SHA-256 $hash"
-    }
+if ($SkipAppBuild) {
+    # Staged again: the folder may hold files of an earlier run that are not the pinned set.
+    & $alphaScript -OutDir $appDir -ComponentOnly @speechArgs
 }
-$withWhisper = Test-Path -LiteralPath (Join-Path $appDir 'whisper-cli.exe') -PathType Leaf
-if ($withWhisper) {
-    # A staged whisper-cli.exe must come with all its DLLs (the NSIS script lists them).
-    $null = Get-WhisperFiles $appDir
-    $nsisArgs += '-DWITH_WHISPER'
-} else {
-    Write-Host '    the installer has no whisper-cli: copy it with its DLLs into the install folder (docs/refs/packaging.md)'
+# build-alpha.ps1 checked the hashes; project.nsi lists the same names.
+foreach ($name in $speechNames) {
+    if (-not (Test-Path -LiteralPath (Join-Path $appDir $name) -PathType Leaf)) {
+        throw "'$appDir\$name' of the speech component is missing after build-alpha.ps1."
+    }
 }
 
 Write-Step "makensis: $installer"
