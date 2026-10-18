@@ -167,6 +167,14 @@ export function installedMenu(m: InstalledModel, entry: AvailableModel | null): 
 }
 
 /**
+ * Whether the «⋯» menu is shown: only while it is open and has items. A menu whose items went away closes, so it does
+ * not come back open (and keeps no outside-click listener) when they return.
+ */
+export function menuShown(open: boolean, count: number): boolean {
+  return open && count > 0;
+}
+
+/**
  * A key pressed in an open menu of count items, the focused one at index: the index to focus, "close" (Escape: close
  * and focus the «⋯» button), "leave" (Tab: close and let the focus move on) or null when the menu ignores the key.
  */
@@ -452,8 +460,8 @@ export const texts = {
   /** The tooltip of the «Q5» suffix. */
   q5Hint: "уменьшенная: меньше и быстрее, точность чуть ниже",
   multilingual: "Русский и другие языки",
-  /** The language in the muted line of a row. */
-  languages: "русский и другие языки",
+  /** The language in the muted line of a row; short, so the longest line fits one line in the default window. */
+  languages: "русский и др. языки",
   englishOnly: "Только английский",
   recommended: "Рекомендуется для русского",
   heavy: "Тяжёлая модель: распознавание будет долгим",

@@ -86,10 +86,12 @@ html, body, #root { height: 100%; }
 
 /* Модели речи: one row per model (.card.rows pattern): name and size with one muted line, the status, one button and
    the «⋯» menu, in aligned columns. */
-.mrows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 180px) fit-content(140px) 32px; overflow: visible; }
+/* The status column fits the widest chip («По умолчанию», ~125px) and no more, so the name keeps the room for one muted
+   line (~500px for «Large v3 · Нагрузка 5 из 5 · точность самая высокая · русский и др. языки») at 1024px. */
+.mrows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 130px) fit-content(140px) 32px; overflow: visible; }
 /* The card lets the «⋯» menu out, so a heading on top keeps the rounded corners itself. */
 .mrows > .mgroup-title:first-child { border-radius: calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0; }
-.mrow { display: grid; gap: 4px 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.mrow { display: grid; gap: 4px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .mrow:last-child { border-bottom: 0; }
 .mrows > .mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .mrow .t { margin: 0; font-weight: 600; }
@@ -111,8 +113,12 @@ html, body, #root { height: 100%; }
 .mtag { align-self: center; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-chip); color: var(--accent); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; white-space: nowrap; }
 .mrow .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Line 2: the load scale and the rest, separated by dots; line 3: the warning of a heavy model. */
-.mline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; }
-.mline > * + *::before { content: "·"; margin-right: 6px; }
+.mline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; margin: 0; }
+/* A part never breaks inside, so a too narrow line wraps between the parts only. */
+.mline > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mline > .slow { white-space: normal; }
+/* The dot is decoration: the empty alternative text keeps it out of the screen reader. */
+.mline > * + *::before { content: "·" / ""; margin-right: 5px; }
 .mwarn { margin: 0; }
 .mload { display: inline-flex; align-items: center; gap: 8px; }
 .mload-bar { display: inline-flex; gap: 3px; }
@@ -133,8 +139,9 @@ html, body, #root { height: 100%; }
 .preview { margin-bottom: 8px; }
 .preview h2 { margin-bottom: 4px; }
 .preview .ui-field { max-width: 360px; }
-/* Narrow: the model on top, then the status, the button and the menu on one line. */
-@container app (max-width: 640px) {
+/* Narrow (the 800×560 window): the model across the row, then the status, the button and the menu on a second line,
+   still in columns shared by every row. */
+@container app (max-width: 880px) {
   .mrows { grid-template-columns: minmax(0, 1fr) auto 32px; }
   .mrow > .row-main { grid-column: 1 / -1; }
 }

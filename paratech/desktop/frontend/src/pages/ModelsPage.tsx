@@ -41,6 +41,7 @@ import {
   loadText,
   type MenuItem,
   menuKey,
+  menuShown,
   type MenuOp,
   type ModelRow,
   progressPercent,
@@ -652,12 +653,20 @@ function RowMenu(props: {
   const button = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const label = `${texts.more}: ${props.name}`;
+  const count = props.items.length;
+  const shown = menuShown(open, count);
 
   const enabled = () =>
     Array.from(wrap.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
 
   useEffect(() => {
-    if (!open) {
+    if (count === 0) {
+      setOpen(false);
+    }
+  }, [count]);
+
+  useEffect(() => {
+    if (!shown) {
       return;
     }
     enabled()[0]?.focus();
@@ -668,9 +677,9 @@ function RowMenu(props: {
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
+  }, [shown]);
 
-  if (props.items.length === 0) {
+  if (count === 0) {
     return <div className="mmenu" />;
   }
 
@@ -710,13 +719,13 @@ function RowMenu(props: {
         aria-label={label}
         title={texts.more}
         aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
+        aria-expanded={shown}
+        aria-controls={shown ? menuId : undefined}
         onClick={() => setOpen((o) => !o)}
       >
         ⋯
       </button>
-      {open && (
+      {shown && (
         <div className="mmenu-list" id={menuId} role="menu" aria-label={label}>
           {props.items.map((i) => (
             <button
@@ -757,6 +766,7 @@ function CatalogRow(props: {
   const a = catalogActions(m, props.download);
   const action = catalogAction(m, props.download);
   const d = downloadOf(m, props.download);
+  const reasonId = useId();
   const chip = d !== null ? downloadChip(d) : null;
   const key = (op: string) => props.busy.has(`${op}:${m.catalogId}`);
   const r = catalogRow(m);
@@ -814,10 +824,16 @@ function CatalogRow(props: {
             icon="down"
             disabled={!a.download || key("download")}
             title={a.download ? undefined : texts.oneDownload}
+            aria-describedby={a.download ? undefined : reasonId}
             onClick={props.onDownload}
           >
             Скачать
           </Button>
+        )}
+        {action === "download" && !a.download && (
+          <span id={reasonId} className="vh">
+            {texts.oneDownload}
+          </span>
         )}
       </div>
       <RowMenu name={fullName(r)} items={items} onPick={(op) => pick[op]()} />

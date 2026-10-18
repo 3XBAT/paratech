@@ -27,6 +27,7 @@ import {
   loadHint,
   loadLevels,
   menuKey,
+  menuShown,
   progressText,
   reducedSuffix,
   pinnedByDownload,
@@ -367,7 +368,7 @@ test("a catalog row: «Q5» in the name, only two tags, one muted line, the id o
   }
 
   // The muted line: accuracy and language; an English-only model has its language as the tag.
-  assert.deepEqual(at({ family: "small" }).details, ["точность хорошая", "русский и другие языки"]);
+  assert.deepEqual(at({ family: "small" }).details, ["точность хорошая", "русский и др. языки"]);
   assert.deepEqual(at({ family: "small", englishOnly: true }).details, ["точность хорошая"]);
   const accuracy = {
     tiny: "низкая", base: "средняя", small: "хорошая", medium: "высокая", "large-v3-turbo": "высокая",
@@ -377,7 +378,7 @@ test("a catalog row: «Q5» in the name, only two tags, one muted line, the id o
     assert.equal(accuracyText(family), `точность ${word}`, family);
   }
   assert.equal(accuracyText(""), "");
-  assert.deepEqual(at({ family: "" }).details, ["русский и другие языки"]);
+  assert.deepEqual(at({ family: "" }).details, ["русский и др. языки"]);
 
   // No «Полная»/«Уменьшенная» and no quantization or id in the visible text; the id is the tooltip.
   for (const [catalogId, quantization, reduced] of [["base-q5_1", "q5_1", true], ["medium-q5_0", "q5_0", true], ["small-f16", "f16", false]]) {
@@ -446,6 +447,21 @@ test("the «⋯» menu has the secondary actions; Escape closes it, arrows move,
   assert.equal(menuKey("Enter", 0, 3), null, "Enter clicks the focused item");
 });
 
+test("the «⋯» menu is shown only while open and with items, so it never comes back open by itself", () => {
+  assert.equal(menuShown(true, 2), true);
+  assert.equal(menuShown(false, 2), false);
+  assert.equal(menuShown(true, 0), false, "the items went away while it was open");
+  assert.equal(menuShown(false, 0), false);
+});
+
+test("a disabled «Скачать» says why to a screen reader too, without visible text", () => {
+  const page = readFileSync(new URL("../src/pages/ModelsPage.tsx", import.meta.url), "utf8");
+  const row = page.slice(page.indexOf("function CatalogRow("));
+  assert.match(row, /aria-describedby=\{a\.download \? undefined : reasonId\}/);
+  assert.match(row, /<span id=\{reasonId\} className="vh">\s*\{texts\.oneDownload\}\s*<\/span>/);
+  assert.ok(!row.includes("disabledReason"), "no visible reason line under the button");
+});
+
 test("an installed model has the catalog row format; an imported one its own name, no load scale", () => {
   const catalog = [
     { ...available, catalogId: "small-q5_1", family: "small", quantization: "q5_1", reduced: true, load: 2, recommended: true },
@@ -456,7 +472,7 @@ test("an installed model has the catalog row format; an imported one its own nam
   const r = installedRow(small, catalog);
   assert.deepEqual([r.name, r.suffix, r.size, r.load], ["Small", "Q5", "190 МБ", 2]);
   assert.deepEqual(r.tags, ["Рекомендуется для русского"]);
-  assert.deepEqual(r.details, ["точность хорошая", "русский и другие языки"]);
+  assert.deepEqual(r.details, ["точность хорошая", "русский и др. языки"]);
   assert.match(r.tip, /^small-q5_1\nSHA-256: a{64}$/);
   assert.equal(installedName(small, catalog), "Small Q5", "no quantization repeated in the title");
   assert.equal(installedText(small, catalog), "Модель установлена: Small Q5.");
@@ -472,7 +488,7 @@ test("an installed model has the catalog row format; an imported one its own nam
   assert.deepEqual([o.name, o.suffix, o.load, o.tags.length, o.warning], ["my-model", "", 0, 0, ""]);
   assert.deepEqual(o.details, ["версия 2", "квантизация q5_0"]);
   assert.deepEqual(installedRow({ ...own, quantization: "", capabilities: ["multilingual"] }, catalog).details, [
-    "версия 2", "русский и другие языки",
+    "версия 2", "русский и др. языки",
   ]);
   assert.equal(installedName(own, catalog), "my-model 2, q5_0");
   assert.equal(installedText(own), "Модель установлена: my-model 2, q5_0.");
@@ -500,7 +516,11 @@ test("the page: one action button, the «⋯» menu, the id only as a tooltip, t
   assert.match(page, /<span className="mq" title=\{texts\.q5Hint\}>/);
   assert.match(page, /<span className="vh">, \{texts\.q5Hint\}<\/span>/, "the hint for screen readers too");
   assert.match(page, /aria-haspopup="menu"/);
-  assert.match(page, /aria-expanded=\{open\}/);
+  assert.match(page, /aria-expanded=\{shown\}/);
+  assert.match(page, /const shown = menuShown\(open, count\);/);
+  assert.match(page, /if \(count === 0\) \{\s*setOpen\(false\);\s*\}\s*\}, \[count\]\);/, "a menu whose items went away closes");
+  assert.match(page, /\{shown && \(\s*<div className="mmenu-list"/, "the list only while shown");
+  assert.match(page, /if \(!shown\) \{\s*return;\s*\}[^]*?\}, \[shown\]\);/, "the outside listener only while shown");
   assert.match(page, /aria-label=\{label\}/);
   assert.match(page, /role="menuitem"/);
   assert.match(page, /menuKey\(e\.key,/);
@@ -582,7 +602,11 @@ test("the load scale is not colour only and the filters are native selects", () 
   assert.match(page, /<span className="msize muted num">\{r\.size\}<\/span>/, "the size is as large as the name (AC6)");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.mname-text \{[^}]*text-overflow: ellipsis/, "a long name ends with an ellipsis");
-  assert.match(css, /\.mrows \{[^}]*grid-template-columns: minmax\(0, 1fr\) /, "aligned columns, the name shrinks first");
+  assert.match(css, /\.mrows \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(110px, 130px\) /, "aligned columns, a narrow status, the name shrinks first");
+  assert.match(css, /@container app \(max-width: 880px\) \{\s*\.mrows \{ grid-template-columns: minmax\(0, 1fr\) auto 32px; \}\s*\.mrow > \.row-main \{ grid-column: 1 \/ -1; \}/,
+    "at 800 px the model spans the row, the status and the actions go below in shared columns");
+  assert.match(css, /\.mline > \* \{[^}]*white-space: nowrap/, "a part of the muted line never breaks inside");
+  assert.match(css, /\.mline > \* \+ \*::before \{ content: "·" \/ "";/, "the dots are not read aloud");
   assert.match(page, /catalogGroups\(v\.available, lang, load, v\.download\)/, "the download row is never filtered out");
 });
 
