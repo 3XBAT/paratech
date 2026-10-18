@@ -160,12 +160,13 @@ func (s *Service) parkAndRelease(ctx context.Context, cond powerpolicy.Condition
 	}
 
 	now := s.clock.Now()
+	policy := s.classes.Load().policy
 	for _, j := range jobs {
 		var outcome string
 		switch {
-		case s.powerPolicy.Park(j, cond, now):
+		case policy.Park(j, cond, now):
 			outcome, err = outcomeParked, j.WaitFor(job.StatusWaitingForPower, now)
-		case s.powerPolicy.Release(j, cond):
+		case policy.Release(j, cond):
 			outcome, err = outcomeReleased, j.Requeue(now)
 		default:
 			continue
@@ -190,5 +191,5 @@ func (s *Service) parkAndRelease(ctx context.Context, cond powerpolicy.Condition
 
 // mustWaitForPower reports whether the running attempt of r must stop at this checkpoint.
 func (s *Service) mustWaitForPower(r *run) bool {
-	return s.powerPolicy.Decide(r.typ, s.conditions(), r.forced) == powerpolicy.Wait
+	return s.classes.Load().policy.Decide(r.typ, s.conditions(), r.forced) == powerpolicy.Wait
 }

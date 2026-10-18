@@ -43,7 +43,8 @@ const (
 )
 
 // Service runs persistent jobs on a pool of workers (PRD section 7). Handlers are registered per job type before
-// Start. A worker claims a due job, runs its handler under a timeout and moves the job through the aggregate:
+// Start (or later with Activate). A worker claims a due job, runs its handler under a timeout and moves the job through
+// the aggregate:
 //
 //   - success: COMPLETED;
 //   - permanent error, or no attempt left: FAILED;
@@ -93,11 +94,12 @@ type Service struct {
 	unwatch  func() bool
 	wg       sync.WaitGroup
 
-	powerPolicy powerpolicy.Policy // set by Start, read-only afterwards
-	lightOnly   job.ClaimFilter    // set by Start: the light types only; zero when every type is heavy
-	heavySlots  chan struct{}      // one token per heavy job that may run now (Config.MaxHeavy)
-	enforceMu   sync.Mutex         // serialises the power policy runs of the keeper and of power events
-	subscribed  atomic.Bool        // power events arrive; otherwise the keeper polls the monitor
+	classes    atomic.Pointer[classes] // set by Start, replaced by Activate; never nil
+	wake       context.Context         // guarded by mu: ends when Activate wakes the idle loops
+	wakeUp     context.CancelFunc      // guarded by mu
+	heavySlots chan struct{}           // one token per heavy job that may run now (Config.MaxHeavy)
+	enforceMu  sync.Mutex              // serialises the power policy runs of the keeper and of power events
+	subscribed atomic.Bool             // power events arrive; otherwise the keeper polls the monitor
 
 	condMu          sync.Mutex
 	cond            powerpolicy.Conditions
@@ -145,11 +147,78 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	}
 	s.loopCtx, s.stopLoop = context.WithCancel(context.Background())
 	s.runCtx, s.stopRuns = context.WithCancelCause(context.Background())
+	s.wake, s.wakeUp = context.WithCancel(s.loopCtx)
+	s.classes.Store(&classes{})
 	return s, nil
 }
 
-// Register binds a handler to a job type. It must be called before Start, once per type.
+// classes is what the claim loop and the power policy know about the registered types. It is replaced as a whole and
+// never changed, so a reader always sees one consistent set.
+type classes struct {
+	policy    powerpolicy.Policy
+	lightOnly job.ClaimFilter // the light types only; zero when every type is heavy
+}
+
+// buildClasses derives the classes from the registrations.
+func buildClasses(handlers map[job.Type]Registration) (*classes, error) {
+	var types, heavy, light []job.Type
+	for t, reg := range handlers {
+		types = append(types, t)
+		if reg.Heavy {
+			heavy = append(heavy, t)
+		} else {
+			light = append(light, t)
+		}
+	}
+	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+	sort.Slice(heavy, func(i, j int) bool { return heavy[i] < heavy[j] })
+	sort.Slice(light, func(i, j int) bool { return light[i] < light[j] })
+	policy, err := powerpolicy.New(types, heavy)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &classes{policy: policy}
+	if len(light) > 0 {
+		if c.lightOnly, err = job.NewClaimFilter(light, nil, true); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
+}
+
+// wakeContext is the context the idle loops sleep on: it ends with the loop or at the next wakeLocked.
+func (s *Service) wakeContext() context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wake
+}
+
+// wakeLocked ends the sleep of the idle workers and of the keeper. The caller holds mu.
+func (s *Service) wakeLocked() {
+	s.wakeUp()
+	s.wake, s.wakeUp = context.WithCancel(s.loopCtx)
+}
+
+// Register binds a handler to a job type. It must be called before Start, once per type; after Start use Activate.
 func (s *Service) Register(r Registration) error {
+	if err := r.validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.started {
+		return ErrAlreadyStarted
+	}
+	if _, dup := s.handlers[r.Type]; dup {
+		return errDuplicate(r.Type)
+	}
+	s.handlers[r.Type] = r
+	return nil
+}
+
+// validate checks a registration on its own.
+func (r Registration) validate() error {
 	if r.Handler == nil || r.Timeout < 0 {
 		return fmt.Errorf("%w: handler for %q needs a handler and a non-negative timeout", ErrInvalidConfig, r.Type)
 	}
@@ -162,16 +231,11 @@ func (s *Service) Register(r Registration) error {
 	if _, err := job.NewClaimFilter([]job.Type{r.Type}, nil, true); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.started {
-		return ErrAlreadyStarted
-	}
-	if _, dup := s.handlers[r.Type]; dup {
-		return fmt.Errorf("%w: handler for %q is already registered", ErrInvalidConfig, r.Type)
-	}
-	s.handlers[r.Type] = r
 	return nil
+}
+
+func errDuplicate(t job.Type) error {
+	return fmt.Errorf("%w: %w: handler for %q", ErrInvalidConfig, ErrAlreadyRegistered, t)
 }
 
 // Start launches the workers; it waits for a running Recover. It first reads the setting and the power source, so it
@@ -226,30 +290,13 @@ func (s *Service) begin(ctx context.Context) error {
 	if len(s.handlers) == 0 {
 		return ErrNoHandlers
 	}
-	var types, heavy, light []job.Type
-	for t, reg := range s.handlers {
-		types = append(types, t)
-		if reg.Heavy {
-			heavy = append(heavy, t)
-		} else {
-			light = append(light, t)
-		}
-	}
-	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
-	sort.Slice(heavy, func(i, j int) bool { return heavy[i] < heavy[j] })
-	sort.Slice(light, func(i, j int) bool { return light[i] < light[j] })
-	policy, err := powerpolicy.New(types, heavy)
+	c, err := buildClasses(s.handlers)
 	if err != nil {
 		return err
 	}
-	var lightOnly job.ClaimFilter
-	if len(light) > 0 {
-		if lightOnly, err = job.NewClaimFilter(light, nil, true); err != nil {
-			return err
-		}
-	}
 
-	s.powerPolicy, s.lightOnly, s.started = policy, lightOnly, true
+	s.classes.Store(c)
+	s.started = true
 	s.unwatch = context.AfterFunc(ctx, func() {
 		s.stopLoop()
 		s.stopRuns(errShutdown)
@@ -337,12 +384,14 @@ func (s *Service) Cancel(ctx context.Context, id shared.JobID) error {
 func (s *Service) worker() {
 	defer s.wg.Done()
 	for s.loopCtx.Err() == nil {
+		// Taken before the claim: an Activate after this point ends the sleep, so its type is never missed.
+		wake := s.wakeContext()
 		worked, err := s.step()
 		if err != nil && s.loopCtx.Err() == nil {
 			s.log.Error("job claim failed", slog.Any("error", err))
 		}
 		if !worked || err != nil {
-			_ = s.sleeper.Sleep(s.loopCtx, s.cfg.PollInterval)
+			_ = s.sleeper.Sleep(wake, s.cfg.PollInterval)
 		}
 	}
 }
@@ -352,11 +401,12 @@ func (s *Service) worker() {
 func (s *Service) keeper() {
 	defer s.wg.Done()
 	for s.loopCtx.Err() == nil {
+		wake := s.wakeContext()
 		if err := s.promoteDue(s.loopCtx); err != nil && s.loopCtx.Err() == nil {
 			s.log.Error("promoting due retries failed", slog.Any("error", err))
 		}
 		s.enforcePower(s.loopCtx)
-		_ = s.sleeper.Sleep(s.loopCtx, s.cfg.PollInterval)
+		_ = s.sleeper.Sleep(wake, s.cfg.PollInterval)
 	}
 }
 
@@ -393,7 +443,8 @@ func (s *Service) promoteDue(ctx context.Context) error {
 // a handler panic is caught inside it), and given back at once when the claim brought a light job or nothing.
 func (s *Service) step() (worked bool, err error) {
 	cond := s.conditions()
-	filter := s.powerPolicy.Filter(cond)
+	c := s.classes.Load()
+	filter := c.policy.Filter(cond)
 	slot := s.reserveHeavy()
 	defer func() {
 		if slot {
@@ -401,23 +452,23 @@ func (s *Service) step() (worked bool, err error) {
 		}
 	}()
 	if !slot {
-		if s.lightOnly.IsZero() {
+		if c.lightOnly.IsZero() {
 			return false, nil
 		}
-		filter = s.lightOnly
+		filter = c.lightOnly
 	}
 
 	j, ok, err := s.jobs.Claim(s.loopCtx, s.clock.Now(), filter)
 	if err != nil || !ok {
 		return false, err
 	}
-	if slot && s.powerPolicy.ClassOf(j.Type()) != powerpolicy.ClassHeavy {
+	if slot && c.policy.ClassOf(j.Type()) != powerpolicy.ClassHeavy {
 		s.releaseHeavy()
 		slot = false
 	}
 	// forced uses cond from before the claim: a Run-now job claimed on AC is not forced and stops at a checkpoint if
 	// power drops later (PRD 7.4); only a start that needed the override is protected (AC-22).
-	s.execute(j, s.powerPolicy.StartedByOverride(j.Type(), cond))
+	s.execute(j, c.policy.StartedByOverride(j.Type(), cond))
 	return true, nil
 }
 

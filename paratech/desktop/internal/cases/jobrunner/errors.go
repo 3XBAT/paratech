@@ -18,7 +18,10 @@ var (
 	// ErrAlreadyStarted is returned by Start called twice, and by Register called after Start.
 	ErrAlreadyStarted = errors.New("job runner already started")
 
-	// ErrStopped is returned by Start after Stop.
+	// ErrAlreadyRegistered is returned (with ErrInvalidConfig) by Register and Activate for a type that has a handler.
+	ErrAlreadyRegistered = errors.New("job type already registered")
+
+	// ErrStopped is returned by Start and Activate after Stop.
 	ErrStopped = errors.New("job runner stopped")
 
 	// ErrNotCancellable means the job cannot be cancelled now: it is finished, or it runs a handler that is not
