@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"path/filepath"
+	"strings"
 
 	"paratech/desktop/internal/cases/transcriptview"
 	"paratech/desktop/internal/domain/shared"
@@ -276,7 +276,7 @@ func (s *TranscriptService) SaveAs(ctx context.Context, recordingID, format stri
 		s.log.Error(opTranscriptSave, "err", err) // the adapters' errors carry neither the path nor the text
 		return TranscriptSaveResult{Status: transcriptFailed, Message: msgTranscriptFailed}, nil
 	}
-	return TranscriptSaveResult{Status: transcriptSaved, Message: msgTranscriptSaved, Name: filepath.Base(path)}, nil
+	return TranscriptSaveResult{Status: transcriptSaved, Message: msgTranscriptSaved, Name: baseName(path)}, nil
 }
 
 // fail maps a use case error to the page's text and logs the cause.
@@ -320,4 +320,13 @@ func transcriptRecordingID(id string) (shared.RecordingID, error) {
 		return "", ErrTranscriptInvalidID
 	}
 	return rid, nil
+}
+
+// baseName is the file name of a Windows path the save dialog returned; it splits on both separators so the
+// result does not depend on the OS the code runs on (CI also runs on Linux).
+func baseName(path string) string {
+	if i := strings.LastIndexAny(path, `\/`); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
