@@ -205,10 +205,29 @@ stall whisper-cli); it must be goroutine-safe.
 Other stderr content: system info, model loading logs, `main: processing '<audio path>' ...`, `output_json: saving output to '<path>'`,
 timings, and error messages (`error: ...`), all with full paths: the adapter redacts the data root and binary directory.
 
-### Stdout
+### Stdout (live segments, TASK-079)
 
-Each new segment is printed as `[00:00:00.000 --> 00:00:05.000]  text` (also with `-np`). It carries the transcript text, so the adapter
-discards stdout.
+`whisper_print_segment_callback` (cli.cpp, set as `new_segment_callback` unless `--print-realtime`) prints every new
+segment as soon as it is decoded, then `fflush(stdout)`:
+
+```
+
+[00:00:00.000 --> 00:00:05.000]   Recognised text.
+```
+
+Format: `printf("[%s --> %s]  ", to_timestamp(t0), to_timestamp(t1))`, then the segment text as is (it starts with a
+space), then `\n`; a single `\n` before the first segment. `to_timestamp` is `%02d:%02d:%02d%s%03d` (hours, minutes,
+seconds, `.`, milliseconds; t is in 10 ms units, the same values as `offsets` of the JSON). Both format strings are in
+the official `whisper-cli.exe` of b5454 (the pinned SHA-256 of `speechcomponent.json`; checked with `grep -a` on the binary, 2026-10-18). The text bytes are UTF-8
+from the model (never the ANSI code page); on Windows the C runtime writes `\r\n`. `-np` does not turn it off.
+
+The adapter reads stdout only when the caller passes a segment callback (the STT job stores the live transcript),
+otherwise stdout goes to the null device. The parser keeps one line of at most 16 KiB + 64 bytes; it accepts only
+lines matching `^\[hh:mm:ss.mmm --> hh:mm:ss.mmm\](text)$` (2–3 hour digits), clamps times like the JSON (start not
+before the previous start, end not before start, at most 24 h), turns invalid UTF-8 into U+FFFD and control characters
+into spaces, trims, drops empty texts and everything else. Segments go to the callback on their own goroutine through a
+bounded queue (4096 segments, 8 MiB; beyond that they are dropped), so a slow callback never blocks the pipe. The text
+is the transcript itself: it never reaches logs or errors. The JSON result stays the source of truth.
 
 ### JSON (`-oj`, file `<of>.json`)
 
