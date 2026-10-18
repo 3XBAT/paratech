@@ -33,6 +33,9 @@ type Config struct {
 	// DataDir is the root of local application data; when set it must be an absolute path. Load defaults it to
 	// %LOCALAPPDATA%\LearningAssistant; it stays empty where that variable is unset (not Windows).
 	DataDir string
+	// DefaultDataDir is %LOCALAPPDATA%\LearningAssistant, whatever DataDir is; empty where that variable is unset. Only
+	// the default data dir uses the default Credential Manager names (ADR-0014).
+	DefaultDataDir string
 	// Headless runs the core without the Windows UI shell (tray, windows), e.g. in tests and on other OSes.
 	Headless bool
 	// Recorder is internal: the app starts its own executable with --recorder --data-dir <dir> as the audio recorder
@@ -51,7 +54,8 @@ func Default() Config {
 func Load(args []string, out io.Writer, getenv func(string) string) (Config, error) {
 	cfg := Default()
 	if v := getenv(EnvLocalAppData); v != "" {
-		cfg.DataDir = filepath.Join(v, dataDirName)
+		cfg.DefaultDataDir = filepath.Join(v, dataDirName)
+		cfg.DataDir = cfg.DefaultDataDir
 	}
 	if v := getenv(EnvLogLevel); v != "" {
 		cfg.LogLevel = v

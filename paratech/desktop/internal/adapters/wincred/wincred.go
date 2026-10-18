@@ -1,7 +1,8 @@
 // Package wincred keeps secrets (mail credentials, the Hub API key, Google refresh tokens) in Windows Credential
 // Manager (PRD sections 4.3 and 12, AC-19, ARCH-34). Secrets never go to SQLite, files or logs (hard rule 4).
 //
-// A Store serves one service and writes generic credentials named "paratech/<service>/<name>". Its method set is
+// A Store serves one service of one profile and writes generic credentials named "paratech/<service>/<name>" in the
+// default profile and "paratech-<profile>/<service>/<name>" in any other (ADR-0014, see ProfileFor). Its method set is
 // the union of the consumer ports: Set, Exists and Delete satisfy senddelivery.CredentialStore; Get is for the
 // adapters that read their own secret (smtp, hubclient, Google OAuth), which declare their own narrow interface.
 //
@@ -21,8 +22,12 @@ import (
 )
 
 const (
-	// TargetPrefix starts every target name written by the app.
+	// TargetPrefix starts every target name of the default profile.
 	TargetPrefix = "paratech/"
+
+	// profileTargetPrefix starts the target names of an isolated profile: "paratech-<profile>/". The '-' where the
+	// default names have '/' keeps the two sets apart, and the fixed profile length keeps profiles apart.
+	profileTargetPrefix = "paratech-"
 
 	// MaxSecretBytes is CRED_MAX_CREDENTIAL_BLOB_SIZE (5*512); longer secrets are rejected, never truncated.
 	MaxSecretBytes = 5 * 512
@@ -63,16 +68,33 @@ type Store struct {
 	sys    backend
 }
 
-// New returns the store of service, for example "mail", "hub" or "google".
+// New returns the store of service in the default profile, for example "mail", "hub" or "google".
 func New(service string) (*Store, error) {
-	return newStore(service, newBackend())
+	return NewInProfile(service, DefaultProfile)
+}
+
+// NewInProfile returns the store of service in profile (ProfileFor).
+func NewInProfile(service string, profile Profile) (*Store, error) {
+	return newProfileStore(service, profile, newBackend())
 }
 
 func newStore(service string, sys backend) (*Store, error) {
+	return newProfileStore(service, DefaultProfile, sys)
+}
+
+func newProfileStore(service string, profile Profile, sys backend) (*Store, error) {
 	if !validIdent(service, MaxServiceLen) {
 		return nil, fmt.Errorf("%w: service", ErrInvalidName)
 	}
-	return &Store{prefix: TargetPrefix + service + "/", sys: sys}, nil
+	if err := CheckProfile(profile); err != nil {
+		return nil, err
+	}
+
+	prefix := TargetPrefix
+	if profile != DefaultProfile {
+		prefix = profileTargetPrefix + string(profile) + "/"
+	}
+	return &Store{prefix: prefix + service + "/", sys: sys}, nil
 }
 
 // Set stores or replaces the secret under name.
