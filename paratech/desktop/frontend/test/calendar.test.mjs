@@ -222,7 +222,9 @@ test("the sync part renders text only, polls with a cleanup and is part of the G
   assert.match(part, /role="alert"/, "an error the user must fix is announced");
   const hook = src("../src/pages/useGoogleStatus.ts");
   assert.match(hook, /calendarApi\(callByName\)/, "the overview card reads the calendar attention");
-  assert.match(hook, /\[active, account, cal\]/, "the calendar is read again after a sign-in or a sign-out");
+  assert.match(hook, /\[active, account, signingIn, cal\]/,
+    "the calendar is read again after a sign-in or a sign-out, and when a sign-in ends");
+  assert.match(hook, /const signingIn = state\?\.signingIn \?\? false;/);
   assert.doesNotMatch(hook, /\.sync\(/, "the overview never starts a sync");
   assert.equal((hook.match(/return \(\) => clearInterval\(timer\)/g) ?? []).length, 2);
   assert.match(src("../src/pages/GoogleBlock.tsx"), /<CalendarSync account=\{state\.account\} \/>/);

@@ -54,8 +54,10 @@ export function useGoogleStatus(active: boolean): {
   }, [active, api]);
 
   // Read on each show and after a sign-in or a sign-out, which change what the calendar asks of the user. Before the
-  // account is known the card has nothing to show it on.
+  // account is known the card has nothing to show it on. A poll may see the account signed in before the sign-in
+  // clears the old calendar attention, so the end of a sign-in reads it again too.
   const account = state?.account ?? "";
+  const signingIn = state?.signingIn ?? false;
   useEffect(() => {
     if (!active || account === "") {
       return;
@@ -66,7 +68,7 @@ export function useGoogleStatus(active: boolean): {
       // Without the calendar state the card shows the sign-in alone.
       () => mounted.current && c === calSeq.current && setCalendar(null),
     );
-  }, [active, account, cal]);
+  }, [active, account, signingIn, cal]);
 
   const poll = active && pollStatus(state, null);
   useEffect(() => {
