@@ -15,6 +15,12 @@ import {
 /** How often a running recognition is asked for again. */
 export const pollMs = 2000;
 
+/** How often a recording without recognition yet is asked for again: the job may be enqueued later. */
+export const idlePollMs = 5000;
+
+/** The longest wait between retries after failed calls. */
+export const maxErrorPollMs = 30000;
+
 /** Segments per call; the core caps a page at 1000. */
 export const pageSize = 1000;
 
@@ -75,9 +81,22 @@ export function morePages(loaded: Loaded, page: TranscriptPage): number | null {
   return page.segments.length > 0 && loaded.segments.length < page.total ? loaded.segments.length : null;
 }
 
-/** Whether to ask again after this status; the page also stops when it goes away. */
-export function shouldPoll(st: TranscriptStatus | null): boolean {
-  return st !== null && isLive(st.state);
+/**
+ * The wait before the next status, or null to stop: errors is the number of failed ticks in a row (0 after a good
+ * one), last the latest status. A failed call is retried with a doubling wait, so a transient error (the DB busy right
+ * after a restart) never stops the viewer. Only "done" and "failed" stop; the page also stops when it goes away.
+ */
+export function nextPollMs(last: TranscriptStatus | null, errors: number): number | null {
+  if (errors > 0) {
+    return Math.min(maxErrorPollMs, pollMs * 2 ** Math.min(errors - 1, 10));
+  }
+  if (last === null) {
+    return pollMs;
+  }
+  if (last.state === "done" || last.state === "failed") {
+    return null;
+  }
+  return isLive(last.state) ? pollMs : idlePollMs;
 }
 
 /** The head of the viewer: the core's message, the progress and what to say while there is no text. */

@@ -18,8 +18,12 @@ import {
   matchCountText,
   maxParagraphChars,
   morePages,
+  idlePollMs,
+  maxErrorPollMs,
   nextFetch,
+  nextPollMs,
   pageSize,
+  pollMs,
   paragraphPieces,
   paragraphs,
   partialNote,
@@ -27,7 +31,6 @@ import {
   saveResultText,
   searchParagraphs,
   searchQuery,
-  shouldPoll,
   statusView,
   stepMatch,
 } from "../.test-build/transcriptView.js";
@@ -124,15 +127,30 @@ test("the action is offered for a queued, running or finished recognition, or on
   assert.deepEqual(lessonRecordings([{ id: "m", lessonId: "" }], ""), []);
 });
 
-test("polling goes on only while the recognition is queued or running", () => {
+test("polling stops only when the recognition is done or failed", () => {
   assert.ok(isLive("waiting") && isLive("recognising"));
   assert.ok(!isLive("done") && !isLive("failed") && !isLive("none"));
-  assert.ok(shouldPoll(status({ state: "recognising", final: false })));
-  assert.ok(shouldPoll(status({ state: "waiting", segments: 0, final: false })));
-  for (const state of ["done", "failed", "none"]) {
-    assert.ok(!shouldPoll(status({ state })), state);
+  assert.equal(nextPollMs(status({ state: "recognising", final: false }), 0), pollMs);
+  assert.equal(nextPollMs(status({ state: "waiting", segments: 0, final: false }), 0), pollMs);
+  // A viewer opened before the recognition job is enqueued keeps asking, slower.
+  assert.equal(nextPollMs(status({ state: "none", segments: 0, final: false }), 0), idlePollMs);
+  assert.ok(idlePollMs > pollMs);
+  for (const state of ["done", "failed"]) {
+    assert.equal(nextPollMs(status({ state }), 0), null, state);
   }
-  assert.ok(!shouldPoll(null), "a failed first status stops");
+});
+
+test("a failed call is retried with a growing wait, never given up", () => {
+  // The first status failed: nothing is known yet, the viewer still retries.
+  assert.equal(nextPollMs(null, 1), pollMs);
+  assert.equal(nextPollMs(null, 2), pollMs * 2);
+  assert.equal(nextPollMs(null, 3), pollMs * 4);
+  assert.equal(nextPollMs(null, 100), maxErrorPollMs);
+  // An error while fetching the pages of a finished transcript is retried too, so the text is completed.
+  assert.equal(nextPollMs(status({ state: "done" }), 1), pollMs);
+  assert.equal(nextPollMs(status({ state: "none", segments: 0 }), 1), pollMs);
+  // After a good tick the wait is the state's again.
+  assert.equal(nextPollMs(status({ state: "recognising", final: false }), 0), pollMs);
 });
 
 test("new segments are fetched from the current count, never all again", () => {

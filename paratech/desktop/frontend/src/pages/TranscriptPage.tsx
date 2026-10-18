@@ -11,6 +11,7 @@ import {
   matchCountText,
   morePages,
   nextFetch,
+  nextPollMs,
   noAudioHint,
   noSelectionHint,
   pageSize,
@@ -19,11 +20,9 @@ import {
   paragraphs,
   playFailedText,
   playSeconds,
-  pollMs,
   saveResultText,
   searchParagraphs,
   searchQuery,
-  shouldPoll,
   statusView,
   stepMatch,
 } from "../transcriptView";
@@ -46,6 +45,7 @@ export function TranscriptPage(props: { recordingId: string; onBack: () => void 
     let timer: ReturnType<typeof setTimeout> | undefined;
     let doc = emptyLoaded;
     let last: TranscriptStatus | null = null;
+    let errors = 0;
 
     const tick = async () => {
       try {
@@ -81,14 +81,17 @@ export function TranscriptPage(props: { recordingId: string; onBack: () => void 
           setLoaded(doc);
           from = morePages(doc, page);
         }
+        errors = 0;
       } catch (err) {
         if (stopped) {
           return;
         }
+        errors++;
         setError(errorText(err));
       }
-      if (!stopped && shouldPoll(last)) {
-        timer = setTimeout(() => void tick(), pollMs);
+      const wait = stopped ? null : nextPollMs(last, errors);
+      if (wait !== null) {
+        timer = setTimeout(() => void tick(), wait);
       }
     };
     void tick();
