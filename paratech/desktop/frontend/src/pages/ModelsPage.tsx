@@ -808,8 +808,14 @@ function CatalogRow(props: {
             Удалить
           </Button>
         )}
-        {action === "download" && a.download && (
-          <Button variant="primary" icon="down" disabled={key("download")} onClick={props.onDownload}>
+        {action === "download" && (
+          <Button
+            variant="primary"
+            icon="down"
+            disabled={!a.download || key("download")}
+            title={a.download ? undefined : texts.oneDownload}
+            onClick={props.onDownload}
+          >
             Скачать
           </Button>
         )}

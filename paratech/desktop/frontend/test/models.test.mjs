@@ -404,6 +404,8 @@ test("one action per catalog row: «Скачать», «Отменить» while
   assert.equal(catalogAction(available, failed), "download", "a stopped download resumes with «Скачать»");
   assert.equal(catalogAction({ ...available, installed: true, installedId: "m-1" }, noDownload), "delete");
   assert.equal(catalogAction({ ...available, catalogId: "small" }, running), "download", "another model");
+  assert.equal(catalogActions({ ...available, catalogId: "small" }, running).download, false, "shown disabled");
+  assert.match(texts.oneDownload, /только одна/);
 
   assert.equal(progressText(running), "50% · 1 Б из 2 Б");
   assert.equal(progressText({ ...running, totalBytes: 0 }), downloadText({ ...running, totalBytes: 0 }));
