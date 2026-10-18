@@ -1,11 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type JobItem, type RecordingItem } from "../bindings/activity";
 import { callByName } from "../bindings/runtime";
-import { actionErrorText, formatTime, isFinishedJob, jobTypeLabel, loadErrorText, splitFinished } from "../activityView";
+import { actionErrorText, formatTime, jobTypeLabel, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
 import type { PageId } from "../nav";
-import { anyRecording, isFinishedRow, queueLine } from "../recordingRowView";
+import { anyRecording, type FinishedEntry, finishedKey, pageGroups, queueLine } from "../recordingRowView";
 import { jobStatusView, showsProgress } from "../statusPresentation";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
@@ -101,11 +101,9 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
   // The elapsed time of a running recording ticks every second from startedAt, independent of the 3 s poll.
   const now = useNow(anyRecording(recordings ?? []));
 
-  // Finished rows go to the one folded group; rows in progress (and those with Stop or Run now) always stay in view.
-  const rec = splitFinished(recordings ?? [], isFinishedRow);
-  // The jobs left in this list (homework drafts, emails) are shown only while unfinished: their results are on
-  // «Домашние задания», and the page keeps a single «Завершённые» group.
-  const otherJobs = (jobs ?? []).filter((j) => !isFinishedJob(j));
+  // Finished recordings and other jobs share the one folded group; rows in progress (and those with Stop or Run now)
+  // always stay in view.
+  const groups = pageGroups(recordings ?? [], jobs ?? []);
 
   // The rows of one list, in a card; CollapsibleList puts the finished ones into the same kind of card.
   const card = (rows: ReactNode) => (
@@ -161,6 +159,8 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
     );
   };
 
+  const finishedRow = (e: FinishedEntry) => (e.kind === "recording" ? recordingRow(e.item) : jobRow(e.item));
+
   const queue = queueLine(recordings ?? [], jobs ?? []);
 
   return (
@@ -197,23 +197,12 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
           Импортируйте расписание — в начале каждой пары появится окно с кнопкой «Начать запись».
         </EmptyState>
       ) : (
-        <>
-          <h2 className="group-title">Записи</h2>
-          {rec.active.length > 0 && card(rec.active.map(recordingRow))}
-          {rec.finished.length > 0 && (
-            <CollapsibleList
-              title="Завершённые"
-              items={rec.finished}
-              itemKey={(r) => r.id}
-              renderItem={recordingRow}
-              renderContainer={card}
-              state={stateOf(lists, "recordings")}
-              onStateChange={(s) => setLists((l) => withState(l, "recordings", s))}
-              className="clist-card"
-              classNames={{ button: "btn ghost" }}
-            />
-          )}
-        </>
+        groups.recordings.length > 0 && (
+          <>
+            <h2 className="group-title">Записи</h2>
+            {card(groups.recordings.map(recordingRow))}
+          </>
+        )
       )}
 
       {jobsError && (
@@ -221,11 +210,24 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
           {jobsError}
         </Banner>
       )}
-      {otherJobs.length > 0 && (
+      {groups.otherJobs.length > 0 && (
         <>
           <h2 className="group-title">Другие задачи</h2>
-          {card(otherJobs.map(jobRow))}
+          {card(groups.otherJobs.map(jobRow))}
         </>
+      )}
+      {groups.finished.length > 0 && (
+        <CollapsibleList
+          title="Завершённые"
+          items={groups.finished}
+          itemKey={finishedKey}
+          renderItem={finishedRow}
+          renderContainer={card}
+          state={stateOf(lists, "finished")}
+          onStateChange={(s) => setLists((l) => withState(l, "finished", s))}
+          className="clist-card"
+          classNames={{ button: "btn ghost" }}
+        />
       )}
 
       <div className="gap" />

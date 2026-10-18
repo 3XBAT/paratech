@@ -14,6 +14,8 @@ import {
   anyRecording,
   chainStatusView,
   errorTexts,
+  finishedKey,
+  pageGroups,
   queueLine,
   queueReasonHints,
   queueReasonTexts,
@@ -213,4 +215,36 @@ test("the elapsed time advances by one second per tick, not by the 3 s poll step
   }
   assert.deepEqual(values, ["0:00:00", "0:00:01", "0:00:02", "0:00:03"]);
   lateTicker.setActive(false);
+});
+
+const job = (over = {}) => ({
+  id: "j1", type: "send_email", status: "QUEUED", waiting: false, attempts: 1, maxAttempts: 3, progressPercent: 0,
+  lastError: "", createdAt: started, updatedAt: started, nextRunAt: "", runNowOffered: false, ...over,
+});
+
+// A failed email or homework draft must stay visible: it joins the recordings in the one «Завершённые» group.
+test("finished recordings and finished other jobs share one «Завершённые» group, newest first", () => {
+  const at = (min) => new Date(startMs + min * 60_000).toISOString();
+  const recordings = [
+    row({ id: "r-new", startedAt: at(30) }),
+    row({ id: "r-run", stage: "recording", status: "RECORDING", stoppable: true }),
+    row({ id: "r-old", stage: "failed", errorCode: "summaryFailed", startedAt: at(0) }),
+  ];
+  const jobs = [
+    job({ id: "j-queued" }),
+    job({ id: "j-failed", status: "FAILED", lastError: "smtp: 550", createdAt: at(10) }),
+    job({ id: "j-cancelled", type: "homework_draft", status: "CANCELLED", createdAt: at(40) }),
+    job({ id: "j-runnow", status: "FAILED", runNowOffered: true }),
+  ];
+  const g = pageGroups(recordings, jobs);
+
+  assert.deepEqual(g.recordings.map((r) => r.id), ["r-run"]);
+  assert.deepEqual(g.otherJobs.map((j) => j.id), ["j-queued", "j-runnow"], "a job with Run now stays in «Другие задачи»");
+  assert.deepEqual(g.finished.map(finishedKey), ["job:j-cancelled", "recording:r-new", "job:j-failed", "recording:r-old"]);
+  assert.equal(g.finished.find((e) => e.item.id === "j-failed").item.lastError, "smtp: 550");
+
+  // Same id in both lists still gives two keys; a bad time sorts last; empty lists give empty groups.
+  const same = pageGroups([row({ id: "x", startedAt: "" })], [job({ id: "x", status: "COMPLETED" })]);
+  assert.deepEqual(same.finished.map(finishedKey), ["job:x", "recording:x"]);
+  assert.deepEqual(pageGroups([], []), { recordings: [], otherJobs: [], finished: [] });
 });

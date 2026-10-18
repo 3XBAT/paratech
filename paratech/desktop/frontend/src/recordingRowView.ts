@@ -3,8 +3,16 @@
 // core's (ARCH-44).
 
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
-import type { ChainAction, ChainErrorCode, ChainStage, ChainStep, QueueReason, RecordingItem } from "./bindings/activity.js";
-import { formatDuration, formatTime, recordingDurationText } from "./activityView.js";
+import type {
+  ChainAction,
+  ChainErrorCode,
+  ChainStage,
+  ChainStep,
+  JobItem,
+  QueueReason,
+  RecordingItem,
+} from "./bindings/activity.js";
+import { formatDuration, formatTime, isFinishedJob, recordingDurationText, splitFinished } from "./activityView.js";
 import type { PageId } from "./nav.js";
 import { plural } from "./plural.js";
 import type { StatusView } from "./statusPresentation.js";
@@ -208,6 +216,43 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
  */
 export function isFinishedRow(r: Pick<RecordingItem, "stage" | "stoppable" | "action">): boolean {
   return !r.stoppable && r.action !== "runNow" && (r.stage === "done" || r.stage === "failed");
+}
+
+/** One row of the «Завершённые» group: a recording or one of the other jobs (homework draft, email). */
+export type FinishedEntry = { kind: "recording"; item: RecordingItem } | { kind: "job"; item: JobItem };
+
+/** What «Записи и задачи» shows: rows in progress, unfinished other jobs, and the one «Завершённые» group. */
+export interface PageGroups {
+  recordings: RecordingItem[];
+  otherJobs: JobItem[];
+  finished: FinishedEntry[];
+}
+
+// A recording sorts by its start, a job by its creation: a job made from a lesson's summary lands next to it.
+function entryTime(e: FinishedEntry): number {
+  const t = new Date(e.kind === "recording" ? e.item.startedAt : e.item.createdAt).getTime();
+  return Number.isNaN(t) ? -Infinity : t;
+}
+
+/**
+ * Splits the page into its groups. Finished recordings and finished other jobs share the one «Завершённые» group,
+ * newest first, so a failed email or homework draft keeps its error in view.
+ */
+export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly JobItem[]): PageGroups {
+  const rec = splitFinished(recordings, isFinishedRow);
+  const job = splitFinished(jobs, isFinishedJob);
+  const finished: FinishedEntry[] = [
+    ...rec.finished.map((item) => ({ kind: "recording" as const, item })),
+    ...job.finished.map((item) => ({ kind: "job" as const, item })),
+  ];
+  // Array.prototype.sort is stable: equal times keep the core's order, recordings before jobs.
+  finished.sort((a, b) => entryTime(b) - entryTime(a));
+  return { recordings: rec.active, otherJobs: job.active, finished };
+}
+
+/** The key of a «Завершённые» row; recording and job ids may not collide. */
+export function finishedKey(e: FinishedEntry): string {
+  return `${e.kind}:${e.item.id}`;
 }
 
 /** A recording is capturing: the page ticks its elapsed time every second. */

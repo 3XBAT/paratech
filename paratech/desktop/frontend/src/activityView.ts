@@ -60,8 +60,8 @@ export function jobTypeLabel(type: string): string {
   return lookup(jobTypeLabels, type);
 }
 
-// The terminal statuses of the domain (job.IsTerminal). Only the display grouping uses them: a finished job is not
-// listed, a job the core offers Run now for always stays in view. Recording rows group by their chain
+// The terminal statuses of the domain (job.IsTerminal). Only the display grouping uses them: a finished job goes to
+// «Завершённые», a job the core offers Run now for always stays in view. Recording rows group by their chain
 // (recordingRowView.isFinishedRow).
 const finishedJobStatuses: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 
