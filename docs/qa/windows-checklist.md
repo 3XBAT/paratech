@@ -15,7 +15,7 @@
   cmd /c ".\paratech\dist\alpha\learning-assistant.exe --data-dir %LOCALAPPDATA%\la-qa --log-level debug 2> %LOCALAPPDATA%\la-qa.log"
   ```
   Папка данных — `%LOCALAPPDATA%\la-qa`, лог — `%LOCALAPPDATA%\la-qa.log` (открывать после выхода).
-- [ ] whisper-cli рядом с exe и модель `ggml-base.bin` (быстрая) или `ggml-small.bin` (точнее, медленнее), импорт в «Модели речи» (§6).
+- [ ] Компонент распознавания рядом с exe (его кладёт `build-alpha.ps1`, §6) и модель `ggml-base.bin` (быстрая) или `ggml-small.bin` (точнее, медленнее), импорт в «Модели речи» (§6).
 - [ ] Hub: адрес и ключ. Ключ выдаётся на Hub: `go run ./hub/cmd/hub keys create -label <имя>` из `paratech/` (`paratech/README.md`, «Hub API keys»), запомнить id ключа (`hub keys list`).
 - [ ] Почта: ящик с паролем приложения (Яндекс, Gmail).
 - [ ] Звук: видео с речью в Chrome, второе видео в Edge; для AC-24 — Zoom, Teams или Телемост.
@@ -325,17 +325,17 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Сборка — [run-alpha.md](run-alpha.md) §11, подробности — `docs/refs/packaging.md`. Всё здесь — вручную, автотестов нет.
 Установка:
 - [ ] Запуск `learning-assistant-<версия>-windows-amd64-setup.exe`: окна UAC (запроса прав администратора) нет. SmartScreen может предупредить о неподписанном файле: «Подробнее» → «Выполнить в любом случае».
-- [ ] Папка по умолчанию `%LOCALAPPDATA%\Programs\LearningAssistant`; после установки в ней `learning-assistant.exe`, `uninstall.exe` (и whisper-cli с DLL, если собирали с `-WhisperDir`).
+- [ ] Папка по умолчанию `%LOCALAPPDATA%\Programs\LearningAssistant`; после установки в ней `learning-assistant.exe`, `uninstall.exe`, `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll` и девять `ggml-cpu-*.dll`.
 - [ ] При запущенном приложении инсталлятор просит закрыть его из трея; «Отмена» — ничего не установлено.
 - [ ] «Пуск» → «Learning Assistant»: приложение запускается (рядом консоль с логом), в логе строки успешного старта (§5); создана `%LOCALAPPDATA%\LearningAssistant` с `logs\desktop.log`.
 - [ ] «Диагностика» → «Сохранить пакет для поддержки»: в `about.json` версия `(devel)` и коммит, который напечатал `build-release.ps1` (VERSION в exe не попадает).
-- [ ] Без whisper-cli в логе два `WARN ... whisper-cli ...` (§6); положить файлы в папку установки и перезапустить — предупреждений нет.
+- [ ] В логе нет `speech recognition is not available`, есть `speech recognition engine ready`. Удалить `whisper-cli.exe` из папки установки и перезапустить: на «Моделях речи» «Компонент распознавания речи не установлен»; «Установить компонент распознавания» ставит его в `%LOCALAPPDATA%\LearningAssistant\components\speech`, запись распознаётся без перезапуска (§6).
 - [ ] На чистой Windows без VC++ Redistributable (нет `VCRUNTIME140.dll`, `MSVCP140.dll` в `System32`): whisper-cli запускается, задача распознавания выполняется (нет ошибки об отсутствующей DLL).
 - [ ] Обновление: изменить настройку, импортировать модель, `Quit`; собрать версию выше (`-Version`), поставить поверх: настройка и модель на месте, в «Приложения и возможности» новая версия.
 
 Удаление («Параметры» → «Приложения» → «Приложения и возможности»):
 - [ ] Есть «Learning Assistant» с версией; «Удалить» запускает удаление без UAC. При запущенном приложении — просьба закрыть его.
-- [ ] Вопрос «Удалить и ваши данные?», ответ «Нет» (по умолчанию): папки установки и ярлыка нет, `%LOCALAPPDATA%\LearningAssistant` осталась. Поставить снова — данные на месте.
+- [ ] Вопрос «Удалить и ваши данные?», ответ «Нет» (по умолчанию): папки установки (вместе с файлами компонента) и ярлыка нет, `%LOCALAPPDATA%\LearningAssistant` осталась. Поставить снова — данные на месте.
 - [ ] Удалить ещё раз с ответом «Да»: нет `%LOCALAPPDATA%\LearningAssistant` (вместе с `logs\`) и `%AppData%\learning-assistant.exe`.
 - [ ] Записи `paratech/...` в Диспетчере учётных данных остаются (`cmdkey /list | findstr paratech`), как и `paratech-<профиль>/...` от прогонов с `la-qa` (ADR-0014); удалить вручную, если не нужны (перед этим «Выйти» в «Подключения» → «Google Календарь»): `cmdkey /delete:LegacyGeneric:target=<имя>` (всё после `Target:` в `cmdkey /list`).
 - [ ] Свой файл, положенный в папку установки, после удаления остаётся вместе с папкой.

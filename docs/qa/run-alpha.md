@@ -9,7 +9,7 @@
 - Go 1.26.9 или новее (версия указана в `paratech/go.work`). Более старый Go сам скачает нужную версию (`GOTOOLCHAIN=auto` по умолчанию).
 - Node.js 22 с npm (как в CI).
 - WebView2 входит в Windows 10/11, ставить не нужно.
-- Права администратора не нужны. Скрипт ничего не устанавливает; из сети качаются только пакеты npm и модули Go (в их обычные кэши).
+- Права администратора не нужны. Скрипт ничего не устанавливает; из сети качаются только пакеты npm, модули Go (в их обычные кэши) и архив whisper.cpp (раздел 6).
 
 ## 2. Сборка
 
@@ -22,15 +22,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alp
 `-ExecutionPolicy Bypass` действует только на этот запуск, политика системы не меняется.
 
 Что делает скрипт:
-1. Проверяет, что `go` и npm (сначала `npm.cmd`, иначе `npm.exe`) есть в PATH (если нет — понятная ошибка, ничего не ставит).
-2. `npm ci` и `npm run build` в `paratech\desktop\frontend` (интерфейс — главное окно и попап — встраивается в exe).
-3. `go build -tags production -trimpath` с `CGO_ENABLED=0`, `GOOS=windows`, `GOARCH=amd64`. Переменные ставятся только на время сборки, потом возвращаются прежние значения.
-4. Через `go version -m` проверяет, что exe собран с `-tags=production` и `CGO_ENABLED=0`.
+1. Кладёт в папку exe компонент распознавания (`whisper-cli.exe` и его DLL, раздел 6).
+2. Проверяет, что `go` и npm (сначала `npm.cmd`, иначе `npm.exe`) есть в PATH (если нет — понятная ошибка, ничего не ставит).
+3. `npm ci` и `npm run build` в `paratech\desktop\frontend` (интерфейс — главное окно и попап — встраивается в exe).
+4. `go build -tags production -trimpath` с `CGO_ENABLED=0`, `GOOS=windows`, `GOARCH=amd64`. Переменные ставятся только на время сборки, потом возвращаются прежние значения.
+5. Через `go version -m` проверяет, что exe собран с `-tags=production` и `CGO_ENABLED=0`.
 
 Результат: `paratech\dist\alpha\learning-assistant.exe` (около 26 МБ). Папка `paratech\dist\` игнорируется git, после сборки `git status` чистый **[проверено]**.
 Другая папка: `-OutDir $env:USERPROFILE\la-alpha`. Лучше брать папку внутри профиля: в папку в корне диска (`D:\...`) могут писать другие пользователи компьютера и подменить exe.
 
 `-Smoke` (можно не указывать) — проверка без окна: exe запускается с `--headless` и папкой данных `paratech\dist\alpha\smoke-data` (не ваши реальные данные), скрипт ждёт до 60 с строк `instance lock acquired`, `secrets_profile=isolated` и `background work started`, печатает лог (он же в `paratech\dist\alpha\smoke.log`) и останавливает процесс. Ошибка, если строк нет или в логе есть `level=ERROR` **[проверено]**.
+С TASK-072 смоук до запуска сверяет 13 файлов компонента рядом с exe с закреплёнными SHA-256, ждёт ещё `speech recognition engine ready` и падает, если в логе `speech recognition is not available` **[владельцу]**.
 Остановка в смоуке жёсткая (`Stop-Process -Force`): из PowerShell нельзя послать Ctrl+Break одному процессу без окна. Для тестовой папки это безопасно: блокировку снимает Windows, база при следующем запуске восстанавливается из журнала (файлы `-wal`/`-shm`). Мягкая остановка проверена отдельно (раздел 3).
 
 ## 3. Запуск и остановка
@@ -128,25 +130,19 @@ level=INFO msg="recording finished" recording=<id> status=COMPLETED
 Прежнего `WARN ... audiocapture: system audio capture is not available` после «Начать запись» в Windows-сборке больше нет. `msg="recorder child"` — строки лога самого рекордера.
 Для выбранного приложения `target=include app=<exe>`; что значат поля — `docs/qa/compat-matrix.md`, «Подготовка». Если process loopback не открылся или даёт одни нули: `WARN msg="capture mode switched" from=exclude to=system cause=activation_failed` (или `cause=healthy_but_mute`), дальше запись идёт в режиме `system` (классический loopback). Если рекордер упал: `WARN msg="restarting the recorder child"` (до 3 раз); следующий сбой — `ERROR msg="capture ended by itself"`, запись заканчивается с причиной.
 
-## 6. whisper-cli
+## 6. Компонент распознавания (whisper-cli)
 
-- Скачать `whisper-bin-x64.zip` из релиза whisper.cpp с тегом `b5454` (это v1.9.5): https://github.com/ggml-org/whisper.cpp/releases/tag/b5454 ,
-  SHA-256 `6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb` (он же в `docs/refs/whisper.md`).
-- Перед распаковкой проверить архив в PowerShell в папке, куда он скачан:
-  ```powershell
-  (Get-FileHash .\whisper-bin-x64.zip -Algorithm SHA256).Hash -eq '6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb'
-  ```
-  `True` — архив тот самый (`-eq` не смотрит на регистр букв). `False` — не распаковывать и не запускать, архив удалить и скачать заново со страницы релиза.
-- Из папки `Release\` архива положить рядом с `learning-assistant.exe`: `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll` и все `ggml-cpu-*.dll`. Повторная сборка заменяет только exe, эти файлы остаются.
-- Что это даёт: пропадают предупреждения про whisper-cli (раздел 5) **[проверено с подставным `whisper-cli.exe` до TASK-060: при старте приложение лишь проверяет, что файл есть, и не запускает его]**, и задачи распознавания выполняются **[тест]**.
-  С TASK-060 законченная запись сама создаёт задачу распознавания. Без whisper-cli задача ждёт в очереди и выполнится после установки whisper-cli и перезапуска приложения **[тест]**.
+- Вручную ничего качать не нужно: `build-alpha.ps1` и инсталлятор кладут рядом с `learning-assistant.exe` закреплённый набор whisper.cpp `b5454` — `whisper-cli.exe` и 12 DLL. Список, размеры и SHA-256 — в `paratech/desktop/internal/app/speechcomponent.json`, описание — `docs/refs/whisper.md`, «Speech recognition component».
+- Скрипт качает официальный `whisper-bin-x64.zip` в `paratech\dist\cache\speech-component\b5454\` (следующая сборка берёт его оттуда, если размер и SHA-256 совпали), проверяет архив до распаковки и достаёт только эти 13 файлов, каждый тоже с проверкой. Из архива ничего не запускается. Старые файлы whisper в папке exe сначала удаляются **[проверено: скачивание, проверка, распаковка, `whisper-cli.exe --help`; изменённый архив отклоняется до распаковки]**.
+- Без интернета: `-WhisperZip <скачанный whisper-bin-x64.zip>` или `-WhisperDir <его папка Release>`, проверки те же **[проверено]**. `-SkipWhisper` — сборка без компонента (например, чтобы проверить кнопку установки).
+- Если компонента нет или файл повреждён, на «Моделях речи» и в «Записях и задачах» — «Компонент распознавания речи не установлен» и кнопка «Установить компонент распознавания». Приложение само качает тот же архив, проверяет SHA-256 и ставит файлы в `<папка данных>\components\speech`; распознавание включается без перезапуска, ждущие задачи выполняются (по коду; **[владельцу]**).
 - Ещё нужна модель. В разделе «Модели речи» — список всех моделей whisper.cpp — полные и уменьшенные, с нагрузкой на компьютер и фильтрами по языку и нагрузке (размеры и SHA-256 — в `docs/refs/whisper.md`, «Model catalog») **[тест]**.
   Для русских занятий на CPU брать отмеченную «Рекомендуется для русского» (small, на экране около 181 МБ); base (около 57 МБ) быстрее, но хуже распознаёт.
   «Скачать» качает файл в приложении с официального Hugging Face, показывает прогресс и проверяет SHA-256; модель появляется в «Установленных» **[проверено живым тестом LA_MODEL_DOWNLOAD_LIVE_TEST на Windows: base, SHA-256 совпал]**.
   Запись, которая ждала модель, получает задачу распознавания без перезапуска **[тест]**.
 - Раздел «Другие модели», кнопка «Открыть страницу моделей на Hugging Face», открывает в браузере https://huggingface.co/ggerganov/whisper.cpp . Скачанный там файл ставится импортом (TASK-030):
   «Импортировать файл модели…» → выбрать `.bin`; приложение показывает имя, размер и SHA-256 — сравнить со строкой «SHA256» на странице файла или с `(Get-FileHash .\<файл>.bin -Algorithm SHA256).Hash`; совпадает — «SHA-256 совпадает, установить», нет — «Отмена». Файл копируется в `artifacts\models`, исходный можно удалить **[тест]**.
-- Файл, просто положенный в `artifacts\models`, приложение не увидит. whisper-cli по-прежнему ищется только при старте: положив его рядом с exe, перезапустить приложение (на странице «Модели речи» об этом предупреждение).
+- Файл, просто положенный в `artifacts\models`, приложение не увидит. Файлы whisper, положенные рядом с exe вручную, проверяются только при старте: после этого перезапустить приложение.
 - Без модели записанная лекция не распознаётся: после «Остановить» задача не создаётся, в логе `level=WARN msg="transcription waits: no speech recognition model installed"` **[тест]**.
 
 ## 7. Что работает, а что заглушка
@@ -353,7 +349,7 @@ title,date,start,end,timezone,uid
    powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -DryRun
    ```
    Печатает версию, найденные `makensis`, `go`, `npm`, WebView2 и команды. Без NSIS — `makensis: NOT FOUND` и ссылка; без `-DryRun` скрипт тогда падает сразу, до сборки **[проверено]**.
-3. Сборка: та же команда без `-DryRun`. С whisper-cli внутри: `-WhisperDir <папка Release из whisper-bin-x64.zip>` (архив сначала проверить, раздел 6). **[владельцу]**
+3. Сборка: та же команда без `-DryRun`. Компонент распознавания скрипт кладёт в инсталлятор всегда (раздел 6); без интернета — `-WhisperZip` или `-WhisperDir`. **[владельцу]**
 4. Результат: `paratech\dist\release\learning-assistant-<версия>-windows-amd64-setup.exe` (размер и SHA-256 в конце вывода). Версия — из `paratech\desktop\VERSION`; в сам exe она не попадает: в `about.json` пакета для поддержки — `(devel)` и коммит git.
 5. Установка без прав администратора в `%LOCALAPPDATA%\Programs\LearningAssistant`, ярлык «Learning Assistant» в меню «Пуск». Данные — там же, где у альфы (раздел 4). Проверки после установки — [windows-checklist.md](windows-checklist.md), раздел «Инсталлятор».
 6. Exe в инсталляторе консольный, как и альфа: при запуске из «Пуска» рядом открывается консоль с логом, её закрытие завершает приложение. Выходить — `Quit` в трее. Лог есть и в `%LOCALAPPDATA%\LearningAssistant\logs\desktop.log`, так что сборка без консоли возможна — это следующий шаг, не в этой задаче.
