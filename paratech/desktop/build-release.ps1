@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Builds the Windows installer of the Learning Assistant desktop app (NSIS, per-user, no admin rights).
+Builds the Windows installer of the paratech desktop app (NSIS, per-user, no admin rights).
 
 .DESCRIPTION
 Reads the version from desktop\VERSION (X.Y.Z; -Version overrides it). If HEAD has a vX.Y.Z git tag, it must match.
@@ -11,7 +11,7 @@ build-alpha.ps1 also puts the speech recognition component (whisper-cli.exe and 
 desktop\internal\app\speechcomponent.json) into the staging folder: the official archive is downloaded into
 paratech\dist\cache\speech-component, checked (size, SHA-256) before it is opened, and only the pinned files are
 unpacked and checked. The installer always contains them. The plan shows the HEAD commit and whether the tree is dirty. The installer is
-paratech\dist\release\learning-assistant-<version>-windows-amd64-setup.exe (ignored by git).
+paratech\dist\release\paratech-<version>-windows-amd64-setup.exe (ignored by git).
 
 The WebView2 bootstrapper (MicrosoftEdgeWebview2Setup.exe) is taken from the Wails module in the Go module cache
 (the file `wails3 generate webview2bootstrapper` writes); the whisper.cpp archive is the only download.
@@ -32,7 +32,7 @@ Offline: a local copy of the pinned whisper.cpp archive instead of the download 
 
 .PARAMETER SkipAppBuild
 Reuse the app already staged in paratech\dist\release\<version>\app by an earlier run (for example after signing
-learning-assistant.exe there) instead of building it again. Its `go version -m` must still show a release build.
+paratech.exe there) instead of building it again. Its `go version -m` must still show a release build.
 The speech component is staged again (build-alpha.ps1 -ComponentOnly).
 
 .PARAMETER DryRun
@@ -69,10 +69,12 @@ $ErrorActionPreference = 'Stop'
 
 $desktopDir = $PSScriptRoot
 $moduleRoot = Split-Path -Parent $desktopDir
-$exeName = 'learning-assistant.exe'
+$exeName = 'paratech.exe'
 $alphaScript = Join-Path $desktopDir 'build-alpha.ps1'
 $versionFile = Join-Path $desktopDir 'VERSION'
 $nsiFile = Join-Path $desktopDir 'build\windows\nsis\project.nsi'
+# The app icon of the installer, its shortcut and "Apps & features"; the same file is embedded into the app.
+$iconFile = Join-Path $desktopDir 'build\windows\icon.ico'
 $releaseRoot = Join-Path $moduleRoot 'dist\release'
 $wailsModule = 'github.com/wailsapp/wails/v3'
 $bootstrapperRel = 'internal\commands\webview2\MicrosoftEdgeWebview2Setup.exe'
@@ -341,7 +343,7 @@ if ($null -eq $gitExe) {
 
 $stageDir = Join-Path $releaseRoot $Version
 $appDir = Join-Path $stageDir 'app'
-$installer = Join-Path $releaseRoot "learning-assistant-$Version-windows-amd64-setup.exe"
+$installer = Join-Path $releaseRoot "paratech-$Version-windows-amd64-setup.exe"
 
 $makensis = Find-Makensis
 $nsisVersion = $null
@@ -416,14 +418,14 @@ if ($null -ne $bootstrapper) {
         $bootstrapperText = "$bootstrapper (NOT a valid Microsoft signature)"
     }
 }
-$nsisArgs = @('-INPUTCHARSET', 'UTF8', "-DVERSION=$Version", "-DAPP_DIR=$appDir",
+$nsisArgs = @('-INPUTCHARSET', 'UTF8', "-DVERSION=$Version", "-DAPP_DIR=$appDir", "-DAPP_ICON=$iconFile",
     "-DWEBVIEW2_BOOTSTRAPPER=$(if ($null -ne $bootstrapper) { $bootstrapper } else { '<bootstrapper>' })",
     "-DOUT_FILE=$installer")
 
 if ($dry) {
-    Write-Host 'Learning Assistant release build: DRY RUN (nothing is built or written)'
+    Write-Host 'paratech release build: DRY RUN (nothing is built or written)'
 } else {
-    Write-Host 'Learning Assistant release build'
+    Write-Host 'paratech release build'
 }
 Write-Host "  version:      $Version (from $versionSource; $tagNote)"
 Write-Host "  commit:       $commitText"
@@ -436,6 +438,7 @@ Write-Host "  npm:          $(Format-Found $npmExe 'install Node.js 22 with npm 
 Write-Host "  WebView2:     $bootstrapperText"
 Write-Host "  speech:       whisper.cpp $($speech.version) from $speechSource"
 Write-Host "  staging:      $appDir"
+Write-Host "  icon:         $(if (Test-Path -LiteralPath $iconFile -PathType Leaf) { $iconFile } else { "MISSING - $iconFile" })"
 Write-Host "  installer:    $installer"
 
 Write-Host '  steps:'
@@ -453,7 +456,7 @@ if ($SkipAppBuild) {
 }
 Write-Host "    - $(if ($null -ne $makensis) { $makensis } else { 'makensis' }) $($nsisArgs -join ' ') $nsiFile"
 Write-Host '  installer contents:'
-Write-Host "    $exeName, uninstall.exe (written at install)"
+Write-Host "    $exeName, paratech.ico (from $iconFile), uninstall.exe (written at install)"
 Write-Host "    speech component: $($speechNames -join ', ')"
 Write-Host '    MicrosoftEdgeWebview2Setup.exe (temporary; runs only when the WebView2 Runtime is missing)'
 
@@ -517,6 +520,10 @@ foreach ($name in $speechNames) {
     if (-not (Test-Path -LiteralPath (Join-Path $appDir $name) -PathType Leaf)) {
         throw "'$appDir\$name' of the speech component is missing after build-alpha.ps1."
     }
+}
+
+if (-not (Test-Path -LiteralPath $iconFile -PathType Leaf)) {
+    throw "The app icon '$iconFile' is missing."
 }
 
 Write-Step "makensis: $installer"
