@@ -79,10 +79,10 @@ func startFromPopup(t *testing.T, b *wails.PromptService, id string) wails.Promp
 func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	ctx := context.Background()
 	e, f := testEnv(t)
-	// The popup comes at the start (DefaultLead 0, TASK-076), so the lesson starts now; the recording session runs on
-	// the real clock and the first scheduler tick falls within lesson.StartLateGrace.
-	start := time.Now()
 	c, popup, b := startPromptCore(t, e, func(c *core) {
+		// The popup comes at the start (DefaultLead 0, TASK-076). Taken just before the core starts, so the first
+		// tick falls within lesson.StartLateGrace; a future start would miss it and wait a whole poll interval.
+		start := time.Now()
 		l, err := lesson.New(lesson.Spec{ID: "lesson-1", Content: lesson.Content{
 			Title: "History", Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow",
 		}}, time.Now())
