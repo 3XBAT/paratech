@@ -67,11 +67,36 @@ func TestLevelCheckHear(t *testing.T) {
 		t.Fatal("the zero check heard something")
 	}
 	c = c.Hear(0.002).Hear(0.4).Hear(0.05)
-	if c.Level != 0.05 || c.Peak != 0.4 || !c.Heard() {
+	if c.Level != 0.4 || c.Peak != 0.4 || !c.Heard() {
 		t.Fatalf("check %+v", c)
 	}
 	if quiet := (LevelCheck{}).Hear(0.009).Hear(0); quiet.Heard() || quiet.Peak != 0.009 {
 		t.Fatalf("quiet check %+v", quiet)
+	}
+}
+
+// Level is the loudest window since it was last shown: a short peak between two reads is not lost.
+func TestLevelCheckShown(t *testing.T) {
+	tests := []struct {
+		name  string
+		check LevelCheck
+		level SoundLevel
+		peak  SoundLevel
+	}{
+		{"nothing heard", LevelCheck{}, 0, 0},
+		{"windows before a read", LevelCheck{}.Hear(0.1).Hear(0.6).Hear(0.2), 0.6, 0.6},
+		{"shown, no new window", LevelCheck{}.Hear(0.6).Shown(), 0.6, 0.6},
+		{"shown twice", LevelCheck{}.Hear(0.6).Shown().Shown(), 0.6, 0.6},
+		{"the next window replaces it", LevelCheck{}.Hear(0.6).Shown().Hear(0.05), 0.05, 0.6},
+		{"then a new maximum", LevelCheck{}.Hear(0.6).Shown().Hear(0.05).Hear(0.3).Hear(0.1), 0.3, 0.6},
+		{"silence after a read", LevelCheck{}.Hear(0.6).Shown().Hear(0), 0, 0.6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.check.Level != tt.level || tt.check.Peak != tt.peak {
+				t.Fatalf("check %+v, want level %v, peak %v", tt.check, tt.level, tt.peak)
+			}
+		})
 	}
 }
 

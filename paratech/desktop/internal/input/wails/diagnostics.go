@@ -79,10 +79,11 @@ type SoundCheckUseCase interface {
 }
 
 // SoundCheck is the state of "Проверить звук" for the page. State is "idle", "running" or "done". Level is the
-// latest level and Peak the loudest, both 0..1 (Level is 0 once done); Heard reports a level that counts as sound.
-// Verdict is set once done: "ok", "silence", "not_running", "no_device", "unsupported", "busy" or "failed". Message
-// and Hints are fixed texts; Source is the display name of what is checked: sourceWholeComputer or the executable
-// name of the app (untrusted, render as text).
+// loudest level since the previous status read and Peak the loudest of the check, both 0..1 (Level is 0 once done);
+// Heard reports a level that counts as sound. Verdict is set once done: "ok", "silence", "not_running", "no_device",
+// "unsupported", "busy" or "failed". Message and Hints are fixed texts, the only ones the page shows for a check;
+// Source is the display name of what is checked: sourceWholeComputer or the executable name of the app (untrusted,
+// render as text).
 type SoundCheck struct {
 	State         string   `json:"state"`
 	Level         float64  `json:"level"`

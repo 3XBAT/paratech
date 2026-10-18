@@ -76,17 +76,31 @@ func (c SoundCause) Valid() bool {
 	return false
 }
 
-// LevelCheck is what a sound check heard so far: the latest level and the loudest one. The zero value heard
+// LevelCheck is what a sound check heard so far: the current level and the loudest one. The zero value heard
 // nothing. It holds no audio.
 type LevelCheck struct {
-	Level SoundLevel // the latest window
-	Peak  SoundLevel // the loudest window
+	// Level is the loudest window since the level was last shown, so that a page polling slower than the windows
+	// come still sees short peaks.
+	Level SoundLevel
+	Peak  SoundLevel // the loudest window of the whole check
+
+	shown bool // Level was shown: the next window replaces it
 }
 
 // Hear adds the level of the next window.
 func (c LevelCheck) Hear(l SoundLevel) LevelCheck {
-	c.Level = l
+	if c.shown {
+		c.Level, c.shown = l, false
+	} else {
+		c.Level = max(c.Level, l)
+	}
 	c.Peak = max(c.Peak, l)
+	return c
+}
+
+// Shown marks Level as shown: it stays until the next window, which starts a new maximum.
+func (c LevelCheck) Shown() LevelCheck {
+	c.shown = true
 	return c
 }
 

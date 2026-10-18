@@ -28,6 +28,7 @@ type fakeChecker struct {
 	d       time.Duration
 	ctxErr  error
 	waiting chan struct{} // closed when a call waits at hold
+	report  func(values.SoundLevel)
 }
 
 func newHeld(levels ...values.SoundLevel) *fakeChecker {
@@ -38,7 +39,7 @@ func (f *fakeChecker) CheckLevels(ctx context.Context, source values.Source, d t
 	report func(values.SoundLevel)) (values.SoundCause, error) {
 	f.mu.Lock()
 	f.calls++
-	f.source, f.d = source, d
+	f.source, f.d, f.report = source, d, report
 	f.mu.Unlock()
 	for _, l := range f.levels {
 		report(l)
@@ -55,6 +56,14 @@ func (f *fakeChecker) CheckLevels(ctx context.Context, source values.Source, d t
 		}
 	}
 	return f.end, f.err
+}
+
+// hear reports a level from the running call, as the child does while the call waits at hold.
+func (f *fakeChecker) hear(l values.SoundLevel) {
+	f.mu.Lock()
+	report := f.report
+	f.mu.Unlock()
+	report(l)
 }
 
 func (f *fakeChecker) seen() (calls int, source values.Source, d time.Duration, ctxErr error) {
@@ -173,7 +182,8 @@ func TestCheckVerdicts(t *testing.T) {
 	}
 }
 
-// While it runs the status shows the latest level, the loudest, whether sound was heard and the time.
+// While it runs the status shows the loudest level since the previous Status, the loudest of the check, whether
+// sound was heard and the time.
 func TestStatusWhileRunning(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	c := newHeld(0.2, 0.05)
@@ -188,9 +198,17 @@ func TestStatusWhileRunning(t *testing.T) {
 	<-c.waiting
 	clock.Advance(3 * time.Second)
 	st = s.Status()
-	if st.State != StateRunning || st.Check.Level != 0.05 || st.Check.Peak != 0.2 || !st.Heard ||
+	if st.State != StateRunning || st.Check.Level != 0.2 || st.Check.Peak != 0.2 || !st.Heard ||
 		st.Elapsed != 3*time.Second || st.Verdict != "" {
 		t.Fatalf("running %+v", st)
+	}
+	if st := s.Status(); st.Check.Level != 0.2 {
+		t.Fatalf("no new window: level %v, want it kept", st.Check.Level)
+	}
+	c.hear(0.03)
+	c.hear(0.01)
+	if st := s.Status(); st.Check.Level != 0.03 || st.Check.Peak != 0.2 {
+		t.Fatalf("after a read: %+v, want the loudest new window 0.03", st.Check)
 	}
 	clock.Advance(time.Minute)
 	if st := s.Status(); st.Elapsed != DefaultDuration {
@@ -219,6 +237,84 @@ func TestStatusWhileRunning(t *testing.T) {
 	if st := waitDone(t, s); st.Verdict != values.SoundSilence || st.Heard {
 		t.Fatalf("the second check %+v", st)
 	}
+}
+
+// blockingSettings holds Load until released.
+type blockingSettings struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingSettings) Load(ctx context.Context) (*settings.Settings, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return fakeSettings{}.Load(ctx)
+}
+
+// Start reads the settings without the lock: Status answers meanwhile, and of two concurrent Starts one runs the
+// check and the other gets ErrBusy; a Close meanwhile wins.
+func TestStartLoadsTheSourceWithoutTheLock(t *testing.T) {
+	t.Run("concurrent starts", func(t *testing.T) {
+		testenv.NoGoroutineLeaks(t)
+		c := newHeld()
+		set := blockingSettings{entered: make(chan struct{}, 2), release: make(chan struct{})}
+		clock := testenv.NewFakeClock(start)
+		s, err := New(Deps{Checker: c, Settings: set, Recordings: fakeRecordings(false), Clock: clock}, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() {
+				_, err := s.Start(context.Background())
+				errs <- err
+			}()
+		}
+		<-set.entered
+		<-set.entered
+		if st := s.Status(); st.State != StateIdle {
+			t.Fatalf("status while the settings load %+v", st)
+		}
+		close(set.release)
+		got := []error{<-errs, <-errs}
+		oneRuns := got[0] == nil && errors.Is(got[1], ErrBusy) || got[1] == nil && errors.Is(got[0], ErrBusy)
+		if !oneRuns {
+			t.Fatalf("Start = %v, want one nil and one ErrBusy", got)
+		}
+		<-c.waiting
+		close(c.hold)
+		waitDone(t, s)
+		if calls, _, _, _ := c.seen(); calls != 1 {
+			t.Fatalf("%d checks started", calls)
+		}
+	})
+
+	t.Run("close meanwhile", func(t *testing.T) {
+		testenv.NoGoroutineLeaks(t)
+		c := newHeld()
+		set := blockingSettings{entered: make(chan struct{}, 1), release: make(chan struct{})}
+		s, err := New(Deps{Checker: c, Settings: set, Recordings: fakeRecordings(false),
+			Clock: testenv.NewFakeClock(start)}, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		errs := make(chan error, 1)
+		go func() {
+			_, err := s.Start(context.Background())
+			errs <- err
+		}()
+		<-set.entered
+		s.Close()
+		close(set.release)
+		if err := <-errs; !errors.Is(err, ErrClosed) {
+			t.Fatalf("Start = %v, want ErrClosed", err)
+		}
+		if calls, _, _, _ := c.seen(); calls != 0 {
+			t.Fatalf("%d checks started", calls)
+		}
+	})
 }
 
 // Stop ends the check early: ok when sound was heard, silence otherwise; the checker's ctx is cancelled.

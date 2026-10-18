@@ -89,16 +89,18 @@ func New(deps Deps, cfg Config) (*Service, error) {
 // its status at once. While a recording runs it captures nothing and the check is done with the verdict busy. A check
 // that runs already is not started again: ErrBusy with its status. After Close: ErrClosed.
 func (s *Service) Start(ctx context.Context) (Status, error) {
+	if st, err := s.startable(); err != nil {
+		return st, err
+	}
+	// The settings are read without the lock: a slow store must not block Status and Stop.
+	source := s.source(ctx)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	switch {
-	case s.closed:
-		return Status{}, ErrClosed
-	case s.cur != nil && s.cur.running:
-		return s.statusLocked(), ErrBusy
+	if st, err := s.startableLocked(); err != nil {
+		return st, err
 	}
-
-	sess := &session{source: s.source(ctx), started: s.deps.Clock.Now(), done: make(chan struct{})}
+	sess := &session{source: source, started: s.deps.Clock.Now(), done: make(chan struct{})}
 	s.cur = sess
 	if s.deps.Recordings.Recording() {
 		sess.verdict = values.SoundBusy
@@ -113,6 +115,23 @@ func (s *Service) Start(ctx context.Context) (Status, error) {
 	go s.run(ctx, sess)
 	s.log.Info("sound check started", "source", sess.source.String())
 	return s.statusLocked(), nil
+}
+
+// startable is ErrClosed after Close, ErrBusy with the status while a check runs.
+func (s *Service) startable() (Status, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startableLocked()
+}
+
+func (s *Service) startableLocked() (Status, error) {
+	switch {
+	case s.closed:
+		return Status{}, ErrClosed
+	case s.cur != nil && s.cur.running:
+		return s.statusLocked(), ErrBusy
+	}
+	return Status{}, nil
 }
 
 // run captures until the checker returns and then sets the verdict.
@@ -155,11 +174,16 @@ func (s *Service) endOf(stopped bool, end values.SoundCause, err error) values.S
 	return values.SoundFailed
 }
 
-// Status returns the last check; StateIdle when none ran.
+// Status returns the last check; StateIdle when none ran. It is the page's poll: the level it returns is the loudest
+// since the previous Status.
 func (s *Service) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.statusLocked()
+	st := s.statusLocked()
+	if s.cur != nil && s.cur.running {
+		s.cur.check = s.cur.check.Shown()
+	}
+	return st
 }
 
 func (s *Service) statusLocked() Status {
