@@ -194,19 +194,21 @@ SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, ma
 WHERE type = ?1
   AND id IS NOT NULL
   AND status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+  AND id NOT IN (SELECT value FROM json_each(CAST(?3 AS TEXT)))
 ORDER BY updated_at DESC, id DESC
 LIMIT 1
 `
 
 type LastJobOfTypeByStatusParams struct {
-	Type     string
-	Statuses string
+	Type      string
+	Statuses  string
+	ExceptIds string
 }
 
-// The newest job of the type in one of the statuses (a JSON array of status names), by its last change (TASK-074:
-// the last finished calendar sync).
+// The newest job of the type in one of the statuses (a JSON array of status names), by its last change, leaving out
+// the ids of except_ids (a JSON array) (TASK-074: the last finished calendar sync that really ran).
 func (q *Queries) LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error) {
-	row := q.db.QueryRowContext(ctx, lastJobOfTypeByStatus, arg.Type, arg.Statuses)
+	row := q.db.QueryRowContext(ctx, lastJobOfTypeByStatus, arg.Type, arg.Statuses, arg.ExceptIds)
 	var i Job
 	err := row.Scan(
 		&i.ID,

@@ -267,7 +267,7 @@ func TestJobListActivityLeavesOutHiddenTypes(t *testing.T) {
 // LastFinished is the finished job of the type changed last; unfinished jobs and other types do not count.
 func TestJobLastFinished(t *testing.T) {
 	repo, ctx := NewJobRepository(openTest(t, nil)), context.Background()
-	if j, found, err := repo.LastFinished(ctx, "calendar_sync"); err != nil || found || j != nil {
+	if j, found, err := repo.LastFinished(ctx, "calendar_sync", nil); err != nil || found || j != nil {
 		t.Fatalf("empty store: LastFinished = %v, %v, %v", j, found, err)
 	}
 
@@ -296,7 +296,7 @@ func TestJobLastFinished(t *testing.T) {
 		}
 	}
 
-	j, found, err := repo.LastFinished(ctx, "calendar_sync")
+	j, found, err := repo.LastFinished(ctx, "calendar_sync", nil)
 	if err != nil || !found {
 		t.Fatalf("LastFinished = %v, %v", found, err)
 	}
@@ -313,12 +313,22 @@ func TestJobLastFinished(t *testing.T) {
 	if _, _, err := repo.Enqueue(ctx, failed2); err != nil {
 		t.Fatal(err)
 	}
-	if j, _, err := repo.LastFinished(ctx, "calendar_sync"); err != nil || j.ID() != "e-failed" || j.Attempts() != 1 {
+	if j, _, err := repo.LastFinished(ctx, "calendar_sync", nil); err != nil || j.ID() != "e-failed" || j.Attempts() != 1 {
 		t.Fatalf("LastFinished = %v, %v; want e-failed after 1 attempt", j, err)
 	}
 
-	if j, found, err := repo.LastFinished(ctx, "stt"); err != nil || !found || j.ID() != "d-stt" {
+	if j, found, err := repo.LastFinished(ctx, "stt", nil); err != nil || !found || j.ID() != "d-stt" {
 		t.Fatalf("LastFinished(stt) = %v, %v, %v", j, found, err)
+	}
+
+	// The jobs of except are left out: the next one by its last change answers, none when all are left out.
+	if j, _, err := repo.LastFinished(ctx, "calendar_sync", []shared.JobID{"e-failed", "x-unknown"}); err != nil ||
+		j.ID() != "a-done" {
+		t.Fatalf("LastFinished except e-failed = %v, %v; want a-done", j, err)
+	}
+	all := []shared.JobID{"a-done", "b-failed", "e-failed"}
+	if j, found, err := repo.LastFinished(ctx, "calendar_sync", all); err != nil || found || j != nil {
+		t.Fatalf("LastFinished except all = %v, %v, %v", j, found, err)
 	}
 }
 
@@ -333,13 +343,13 @@ func TestJobLastFinishedErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, db, "UPDATE jobs SET pinned_model_id = 'a/b' WHERE id = 'bad'")
-	if _, _, err := repo.LastFinished(context.Background(), "calendar_sync"); err == nil {
+	if _, _, err := repo.LastFinished(context.Background(), "calendar_sync", nil); err == nil {
 		t.Fatal("LastFinished of an unreadable row succeeded")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := repo.LastFinished(ctx, "calendar_sync"); !errors.Is(err, context.Canceled) {
+	if _, _, err := repo.LastFinished(ctx, "calendar_sync", nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

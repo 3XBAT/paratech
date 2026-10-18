@@ -96,13 +96,14 @@ WHERE id IS NOT NULL
                  LIMIT sqlc.arg(max_terminal)))
 ORDER BY created_at DESC, id DESC;
 
--- The newest job of the type in one of the statuses (a JSON array of status names), by its last change (TASK-074:
--- the last finished calendar sync).
+-- The newest job of the type in one of the statuses (a JSON array of status names), by its last change, leaving out
+-- the ids of except_ids (a JSON array) (TASK-074: the last finished calendar sync that really ran).
 -- name: LastJobOfTypeByStatus :one
 SELECT * FROM jobs
 WHERE type = sqlc.arg(type)
   AND id IS NOT NULL
   AND status IN (SELECT value FROM json_each(CAST(sqlc.arg(statuses) AS TEXT)))
+  AND id NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(except_ids) AS TEXT)))
 ORDER BY updated_at DESC, id DESC
 LIMIT 1;
 

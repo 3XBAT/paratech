@@ -63,8 +63,8 @@ func TestGoogleCalendarStatusJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"signedIn":true,"pending":3,"pendingMore":false,"lastSyncedAt":"2026-10-16T06:30:00Z","state":"idle",` +
-		`"lastOutcome":"ok","message":"Ждут синхронизации занятий: 3.",` +
-		`"lastRunAt":"","lastRunOk":false,"lastRunAttempts":0,"lastRunOutcome":"","lastRunText":""}`
+		`"lastOutcome":"ok","attention":"","message":"Ждут синхронизации занятий: 3.",` +
+		`"lastRunAt":"","lastRunAttempts":0,"lastRunOutcome":"","lastRunText":""}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s\nwant   %s", raw, want)
 	}
@@ -91,14 +91,15 @@ func TestGoogleCalendarStatusLastRun(t *testing.T) {
 			st:   schedulesync.CalendarStatus{SignedIn: true, LastRun: lastRun(schedulesync.OutcomeOK, 3)},
 			want: CalendarSyncState{
 				SignedIn: true, State: "idle", Message: msgCalendarSynced, LastRunAt: "2026-10-16T06:30:00Z",
-				LastRunOK: true, LastRunAttempts: 3, LastRunOutcome: "ok", LastRunText: "Успешно.",
+				LastRunAttempts: 3, LastRunOutcome: "ok", LastRunText: "Успешно.",
 			},
 		},
 		{
 			name: "failed in an earlier start",
 			st:   schedulesync.CalendarStatus{SignedIn: true, Pending: 2, LastRun: lastRun(schedulesync.OutcomeFailed, 5)},
 			want: CalendarSyncState{
-				SignedIn: true, Pending: 2, State: "idle", Message: msgCalendarFailed, LastRunAt: "2026-10-16T06:30:00Z",
+				SignedIn: true, Pending: 2, State: "idle", Message: "Ждут синхронизации занятий: 2.",
+				LastRunAt:       "2026-10-16T06:30:00Z",
 				LastRunAttempts: 5, LastRunOutcome: "failed", LastRunText: "Ошибка: синхронизация не удалась.",
 			},
 		},
@@ -106,9 +107,10 @@ func TestGoogleCalendarStatusLastRun(t *testing.T) {
 			name: "sign-in expired",
 			st: schedulesync.CalendarStatus{
 				LastOutcome: schedulesync.OutcomeSignInExpired, LastRun: lastRun(schedulesync.OutcomeSignInExpired, 1),
+				Attention: schedulesync.AttentionSignIn,
 			},
 			want: CalendarSyncState{
-				State: "idle", LastOutcome: "signInExpired", Message: msgCalendarSignInAgain,
+				State: "idle", LastOutcome: "signInExpired", Attention: "signIn", Message: msgCalendarSignInAgain,
 				LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1, LastRunOutcome: "signInExpired",
 				LastRunText: "Ошибка: вход в Google истёк — войдите снова.",
 			},
@@ -125,20 +127,29 @@ func TestGoogleCalendarStatusLastRun(t *testing.T) {
 			name: "no access to the calendar",
 			st: schedulesync.CalendarStatus{
 				SignedIn: true, Pending: 1, LastOutcome: schedulesync.OutcomeNoAccess,
-				LastRun: lastRun(schedulesync.OutcomeNoAccess, 1),
+				LastRun: lastRun(schedulesync.OutcomeNoAccess, 1), Attention: schedulesync.AttentionNoAccess,
 			},
 			want: CalendarSyncState{
-				SignedIn: true, Pending: 1, State: "idle", LastOutcome: "noAccess",
-				Message:   "Нет доступа к Google Календарю: войдите снова и разрешите доступ к календарю.",
+				SignedIn: true, Pending: 1, State: "idle", LastOutcome: "noAccess", Attention: "noAccess",
+				Message:   "Ждут синхронизации занятий: 1.",
 				LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1, LastRunOutcome: "noAccess",
 				LastRunText: "Ошибка: нет доступа к Google Календарю — войдите снова и разрешите доступ к календарю.",
 			},
 		},
 		{
-			name: "no access in an earlier start",
+			name: "no access without a last-run line",
+			st: schedulesync.CalendarStatus{
+				SignedIn: true, LastOutcome: schedulesync.OutcomeNoAccess, Attention: schedulesync.AttentionNoAccess,
+			},
+			want: CalendarSyncState{
+				SignedIn: true, State: "idle", LastOutcome: "noAccess", Attention: "noAccess", Message: msgCalendarNoAccess,
+			},
+		},
+		{
+			name: "no access after the sign-in: only the last-run line",
 			st:   schedulesync.CalendarStatus{SignedIn: true, LastRun: lastRun(schedulesync.OutcomeNoAccess, 1)},
 			want: CalendarSyncState{
-				SignedIn: true, State: "idle", Message: msgCalendarNoAccess, LastRunAt: "2026-10-16T06:30:00Z",
+				SignedIn: true, State: "idle", Message: msgCalendarSynced, LastRunAt: "2026-10-16T06:30:00Z",
 				LastRunAttempts: 1, LastRunOutcome: "noAccess", LastRunText: msgLastRunNoAccess,
 			},
 		},
@@ -186,7 +197,17 @@ func TestGoogleCalendarStatusMessages(t *testing.T) {
 		{"many pending", schedulesync.CalendarStatus{SignedIn: true, Pending: 999, PendingMore: true}, "idle",
 			"Ждут синхронизации занятий: больше 999.", nil},
 		{"not signed in", schedulesync.CalendarStatus{Pending: 2}, "idle", msgCalendarSignIn, nil},
-		{"sign-in expired", schedulesync.CalendarStatus{LastOutcome: schedulesync.OutcomeSignInExpired}, "idle", msgCalendarSignInAgain, nil},
+		{"sign-in expired", schedulesync.CalendarStatus{
+			LastOutcome: schedulesync.OutcomeSignInExpired, Attention: schedulesync.AttentionSignIn,
+		}, "idle", msgCalendarSignInAgain, nil},
+		{"sign-in expired, no action", schedulesync.CalendarStatus{LastOutcome: schedulesync.OutcomeSignInExpired}, "idle",
+			msgCalendarSignIn, nil},
+		{"no access", schedulesync.CalendarStatus{SignedIn: true, Attention: schedulesync.AttentionNoAccess}, "idle",
+			msgCalendarNoAccess, nil},
+		{"failed, shown by the last run", schedulesync.CalendarStatus{
+			SignedIn: true, LastOutcome: schedulesync.OutcomeFailed,
+			LastRun: schedulesync.LastRun{At: time.Unix(1, 0), Outcome: schedulesync.OutcomeFailed},
+		}, "idle", msgCalendarSynced, nil},
 		{"failed", schedulesync.CalendarStatus{SignedIn: true, Pending: 1, LastOutcome: schedulesync.OutcomeFailed}, "idle",
 			msgCalendarFailed, nil},
 		{"queued", schedulesync.CalendarStatus{SignedIn: true, Job: job.StatusQueued}, "queued", msgCalendarQueued, nil},

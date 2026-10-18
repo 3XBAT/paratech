@@ -114,9 +114,25 @@ type CalendarStatus struct {
 	LastOutcome SyncOutcome
 	LastRunAt   time.Time
 
-	// LastRun is the last sync job that finished, of this process or an earlier one; zero if none did.
+	// LastRun is the last sync job that finished, of this process or an earlier one; zero if none did. A job that
+	// completed at once because a run was in progress is not a run.
 	LastRun LastRun
+
+	// Attention is what the user must do for the sync to go on; AttentionNone if nothing.
+	Attention Attention
 }
+
+// Attention is an action the calendar sync needs from the user.
+type Attention string
+
+// Attentions of Status.
+const (
+	AttentionNone Attention = ""
+	// AttentionSignIn: signed out after Google stopped accepting the sign-in; sign in again.
+	AttentionSignIn Attention = "signIn"
+	// AttentionNoAccess: signed in, but Google refused the calendar; sign in again and allow the calendar.
+	AttentionNoAccess Attention = "noAccess"
+)
 
 // LastRun is a finished sync job as the Google section shows it (TASK-074).
 type LastRun struct {
@@ -129,6 +145,3 @@ type LastRun struct {
 	// sign-in completes too, so a COMPLETED record read while signed out is OutcomeNone: not claimed as a success.
 	Outcome SyncOutcome
 }
-
-// OK reports whether the run synchronized the calendar.
-func (r LastRun) OK() bool { return r.Outcome == OutcomeOK }

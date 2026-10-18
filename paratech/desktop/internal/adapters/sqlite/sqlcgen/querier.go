@@ -88,8 +88,8 @@ type Querier interface {
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
-	// The newest job of the type in one of the statuses (a JSON array of status names), by its last change (TASK-074:
-	// the last finished calendar sync).
+	// The newest job of the type in one of the statuses (a JSON array of status names), by its last change, leaving out
+	// the ids of except_ids (a JSON array) (TASK-074: the last finished calendar sync that really ran).
 	LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error)
 	// The number of the latest stored version, 0 when none; the repository inserts only the versions above it.
 	LatestDraftRevision(ctx context.Context, assignmentID string) (int64, error)

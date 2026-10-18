@@ -246,9 +246,9 @@ func (r *JobRepository) ListActivity(ctx context.Context, maxTerminal int, hidde
 	return jobs, unreadable, nil
 }
 
-// LastFinished returns the job of type typ that finished last (COMPLETED, FAILED or CANCELLED), by its last change;
-// found is false when none did.
-func (r *JobRepository) LastFinished(ctx context.Context, typ job.Type) (*job.Job, bool, error) {
+// LastFinished returns the job of type typ that finished last (COMPLETED, FAILED or CANCELLED), by its last change,
+// leaving out the jobs of except; found is false when none did.
+func (r *JobRepository) LastFinished(ctx context.Context, typ job.Type, except []shared.JobID) (*job.Job, bool, error) {
 	var terminal []job.Status
 	for _, s := range job.Statuses() {
 		if s.IsTerminal() {
@@ -259,8 +259,16 @@ func (r *JobRepository) LastFinished(ctx context.Context, typ job.Type) (*job.Jo
 	if err != nil {
 		return nil, false, err
 	}
+	exceptIDs := make([]string, len(except))
+	for i, id := range except {
+		exceptIDs[i] = string(id)
+	}
+	exceptJSON, err := json.Marshal(exceptIDs)
+	if err != nil {
+		return nil, false, err
+	}
 	row, err := r.db.Queries(ctx).LastJobOfTypeByStatus(ctx, sqlcgen.LastJobOfTypeByStatusParams{
-		Type: string(typ), Statuses: string(statuses),
+		Type: string(typ), Statuses: string(statuses), ExceptIds: string(exceptJSON),
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil

@@ -71,13 +71,15 @@ type CalendarSyncState struct {
 	// LastOutcome is the last run since the app started: "", "ok", "notSignedIn", "signInExpired", "noAccess" or
 	// "failed".
 	LastOutcome string `json:"lastOutcome"`
-	Message     string `json:"message"` // one fixed line that sums the state up
+	// Attention is what the user must do, decided by the use case: "" (nothing), "signIn" (sign in again) or
+	// "noAccess" (sign in again and allow the calendar).
+	Attention string `json:"attention"`
+	Message   string `json:"message"` // one fixed line that sums the state up
 
 	// The last finished sync job, also of an earlier start of the app (TASK-074). LastRunAt is its end in RFC 3339
 	// UTC, "" if none finished; LastRunOutcome takes the values of LastOutcome ("" when the record cannot tell the
 	// result); LastRunText is a fixed line of the result, "" if none.
 	LastRunAt       string `json:"lastRunAt"`
-	LastRunOK       bool   `json:"lastRunOk"`
 	LastRunAttempts int    `json:"lastRunAttempts"`
 	LastRunOutcome  string `json:"lastRunOutcome"`
 	LastRunText     string `json:"lastRunText"`
@@ -134,14 +136,14 @@ func (s *GoogleCalendarService) state(ctx context.Context) CalendarSyncState {
 	}
 	out := CalendarSyncState{
 		SignedIn: st.SignedIn, Pending: st.Pending, PendingMore: st.PendingMore, State: calendarJobState(st.Job),
-		LastOutcome: string(st.LastOutcome),
+		LastOutcome: string(st.LastOutcome), Attention: string(st.Attention),
 	}
 	if !st.LastWrittenAt.IsZero() {
 		out.LastSyncedAt = st.LastWrittenAt.UTC().Format(time.RFC3339)
 	}
 	if !st.LastRun.At.IsZero() {
 		out.LastRunAt = st.LastRun.At.UTC().Format(time.RFC3339)
-		out.LastRunOK, out.LastRunAttempts = st.LastRun.OK(), st.LastRun.Attempts
+		out.LastRunAttempts = st.LastRun.Attempts
 		out.LastRunOutcome, out.LastRunText = string(st.LastRun.Outcome), lastRunText(st.LastRun.Outcome)
 	}
 	out.Message = calendarMessage(out)
@@ -179,11 +181,10 @@ func lastRunText(o schedulesync.SyncOutcome) string {
 }
 
 func calendarMessage(st CalendarSyncState) string {
-	// The run of this process, else the last finished job: after a restart the failure is still reported.
-	outcome := st.LastOutcome
-	if outcome == "" {
-		outcome = st.LastRunOutcome
-	}
+	// A failure the last-run line already shows is not repeated here.
+	shown := st.LastRunOutcome == string(schedulesync.OutcomeFailed) ||
+		st.LastRunOutcome == string(schedulesync.OutcomeNoAccess) ||
+		st.LastRunOutcome == string(schedulesync.OutcomeSignInExpired)
 	switch {
 	case st.State == calendarRunning:
 		return msgCalendarRunning
@@ -193,13 +194,13 @@ func calendarMessage(st CalendarSyncState) string {
 		return msgCalendarRetrying
 	case st.State == calendarQueued:
 		return msgCalendarQueued
-	case !st.SignedIn && outcome == string(schedulesync.OutcomeSignInExpired):
+	case st.Attention == string(schedulesync.AttentionSignIn):
 		return msgCalendarSignInAgain
 	case !st.SignedIn:
 		return msgCalendarSignIn
-	case outcome == string(schedulesync.OutcomeNoAccess):
+	case st.Attention == string(schedulesync.AttentionNoAccess) && !shown:
 		return msgCalendarNoAccess
-	case outcome == string(schedulesync.OutcomeFailed):
+	case st.LastOutcome == string(schedulesync.OutcomeFailed) && !shown:
 		return msgCalendarFailed
 	case st.PendingMore:
 		return fmt.Sprintf(msgCalendarPendingMore, st.Pending)
