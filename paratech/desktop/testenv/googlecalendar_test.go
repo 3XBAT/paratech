@@ -70,7 +70,7 @@ func (c *calClient) do(method string, body any, segments ...string) (int, string
 
 func (c *calClient) newCalendar() string {
 	c.t.Helper()
-	status, _, body := c.do(http.MethodPost, map[string]any{"summary": "Learning Assistant"}, "calendars")
+	status, _, body := c.do(http.MethodPost, map[string]any{"summary": "paratech"}, "calendars")
 	id, _ := body["id"].(string)
 	if status != http.StatusOK || id == "" {
 		c.t.Fatalf("calendars.insert = %d", status)
@@ -308,9 +308,45 @@ func TestFakeCalendarDropAfterWrite(t *testing.T) {
 	}
 }
 
+// calendars.patch changes only the fields it sends; an empty summary, a foreign or deleted calendar are refused.
+func TestFakeCalendarPatch(t *testing.T) {
+	c := newCalClient(t)
+	cal := c.f.AddCalendar("old", "old description")
+	tests := []struct {
+		name       string
+		body       map[string]any
+		id         string
+		wantStatus int
+		wantInfo   FakeCalendarInfo
+	}{
+		{"summary only", map[string]any{"summary": "new"}, cal, http.StatusOK,
+			FakeCalendarInfo{ID: cal, Summary: "new", Description: "old description"}},
+		{"both", map[string]any{"summary": "paratech", "description": "d"}, cal, http.StatusOK,
+			FakeCalendarInfo{ID: cal, Summary: "paratech", Description: "d"}},
+		{"empty summary", map[string]any{"summary": ""}, cal, http.StatusBadRequest,
+			FakeCalendarInfo{ID: cal, Summary: "paratech", Description: "d"}},
+		{"foreign calendar", map[string]any{"summary": "x"}, "primary", http.StatusNotFound,
+			FakeCalendarInfo{ID: cal, Summary: "paratech", Description: "d"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if status, _, _ := c.do(http.MethodPatch, tt.body, "calendars", tt.id); status != tt.wantStatus {
+				t.Fatalf("status %d, want %d", status, tt.wantStatus)
+			}
+			if cals := c.f.Calendars(); len(cals) != 1 || cals[0] != tt.wantInfo {
+				t.Fatalf("calendars %+v, want %+v", cals, tt.wantInfo)
+			}
+		})
+	}
+	c.f.DeleteCalendar(cal)
+	if status, _, _ := c.do(http.MethodPatch, map[string]any{"summary": "x"}, "calendars", cal); status != http.StatusNotFound {
+		t.Fatalf("patch of a deleted calendar = %d", status)
+	}
+}
+
 func TestFakeCalendarUserActions(t *testing.T) {
 	c := newCalClient(t)
-	added := c.f.AddCalendar("Learning Assistant", "marker")
+	added := c.f.AddCalendar("paratech", "marker")
 	if status, _, body := c.do(http.MethodGet, nil, "calendars", added); status != 200 || body["description"] != "marker" {
 		t.Fatalf("added calendar = %d %v", status, body)
 	}

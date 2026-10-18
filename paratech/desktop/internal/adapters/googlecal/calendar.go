@@ -16,9 +16,13 @@ import (
 
 // The app calendar.
 const (
-	CalendarSummary     = "Learning Assistant"
+	CalendarSummary     = "paratech"
 	calendarMarker      = "[paratech-calendar-v1]"
-	calendarDescription = "Расписание занятий и дедлайны из приложения Learning Assistant. " + calendarMarker
+	calendarDescription = "Расписание занятий и дедлайны из приложения paratech. " + calendarMarker
+
+	// LegacyCalendarSummary is the name the app gave its calendar before the rename (ADR-0015). A stored calendar
+	// with exactly this name is renamed; any other name is the user's choice and stays.
+	LegacyCalendarSummary = "Learning Assistant"
 
 	// maxCalendarIDBytes bounds a calendar id read from Google or the store.
 	maxCalendarIDBytes = 1024
@@ -86,11 +90,15 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 		return binding{}, err
 	}
 	if ok {
-		gone, err := c.gone(ctx, op, b.ID)
+		current, gone, err := c.gone(ctx, op, b.ID)
 		if err != nil {
 			return binding{}, err
 		}
 		if !gone {
+			if current.Summary == LegacyCalendarSummary {
+				// Best effort: a failure keeps the old name until the next call, it never fails the sync.
+				_ = c.rename(ctx, op, b.ID)
+			}
 			return b, nil
 		}
 	}
@@ -151,22 +159,34 @@ func (c *Client) save(ctx context.Context, op string, b binding) error {
 // 403 that is not a rate limit (those are errors) counts too: the stored calendar of another Google account may answer
 // it. Alone it could mean anything, so it needs the other check to agree; a sign-in that may not use calendars at all
 // is refused by calendars.insert as well. When the checks disagree the call fails transiently and nothing is created.
-func (c *Client) gone(ctx context.Context, op, id string) (bool, error) {
+// A calendar that is not gone comes back as calendars.get answered it.
+func (c *Client) gone(ctx context.Context, op, id string) (calendarResource, bool, error) {
 	absent := []int{http.StatusNotFound, http.StatusGone, http.StatusForbidden}
-	status, err := c.do(ctx, op, request{method: http.MethodGet, path: calendarPath(id), accept: absent})
+	var current calendarResource
+	status, err := c.do(ctx, op, request{method: http.MethodGet, path: calendarPath(id), out: &current, accept: absent})
 	if err != nil || status < 300 {
-		return false, err
+		return current, false, err
 	}
 	status, err = c.do(ctx, op, request{
 		method: http.MethodGet, path: "/users/me/calendarList/" + url.PathEscape(id), accept: absent,
 	})
 	switch {
 	case err != nil:
-		return false, err
+		return calendarResource{}, false, err
 	case status < 300:
-		return false, transient(op, ErrUnavailable)
+		return calendarResource{}, false, transient(op, ErrUnavailable)
 	}
-	return true, nil
+	return calendarResource{}, true, nil
+}
+
+// rename gives the stored calendar the current name and description (calendars.patch): the same calendar, so its
+// events and the binding stay.
+func (c *Client) rename(ctx context.Context, op, id string) error {
+	_, err := c.do(ctx, op, request{
+		method: http.MethodPatch, path: calendarPath(id),
+		body: calendarResource{Summary: CalendarSummary, Description: calendarDescription},
+	})
+	return err
 }
 
 func (c *Client) create(ctx context.Context, op string) (string, error) {

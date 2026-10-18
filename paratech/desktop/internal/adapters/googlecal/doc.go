@@ -2,10 +2,11 @@
 // and 14 case 8, AC-17, AC-20; TASK-051) through the Calendar API v3 with net/http and encoding/json. It satisfies
 // schedulesync.CalendarAdapter and homeworkflow.DeadlineCalendar structurally.
 //
-//   - Only one calendar is ever written: the secondary calendar «Learning Assistant» the app created itself (scope
+//   - Only one calendar is ever written: the secondary calendar «paratech» the app created itself (scope
 //     calendar.app.created). Its id lives in the google credential store (CalendarIDName), next to the OAuth client,
 //     and is the only binding: the scope does not allow calendarList.list. Nothing is read back into the core: local
-//     data is the system of record.
+//     data is the system of record. A stored calendar still named «Learning Assistant» (the name before ADR-0015) is
+//     renamed with calendars.patch; a name the user chose stays.
 //   - Event ids are derived from the lesson or assignment id (LessonEventID, DeadlineEventID), so no event id is
 //     stored (ADR-0004(e)) and a repeated upsert updates the same event: PUT, then insert with the id on 404, then
 //     PUT again on 409. A retry after a lost answer never makes a second event (hard rule 7). An update whose answer

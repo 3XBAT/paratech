@@ -23,8 +23,8 @@ const (
 	kindLesson   = "lesson"
 	kindDeadline = "deadline"
 
-	lessonDescription   = "Занятие из расписания Learning Assistant. Изменения делайте в приложении."
-	deadlineDescription = "Дедлайн из Learning Assistant. Изменения делайте в приложении."
+	lessonDescription   = "Занятие из расписания paratech. Изменения делайте в приложении."
+	deadlineDescription = "Дедлайн из paratech. Изменения делайте в приложении."
 	lessonFallback      = "Занятие"
 	deadlineFallback    = "Дедлайн"
 
