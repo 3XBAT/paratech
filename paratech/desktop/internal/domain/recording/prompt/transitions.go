@@ -5,18 +5,16 @@ type State string
 
 // Prompt states.
 const (
-	StateOffered   State = "OFFERED"   // the popup shows the offer
-	StateStarting  State = "STARTING"  // a start of the recording runs
-	StateStarted   State = "STARTED"   // the recording started
-	StateSnoozed   State = "SNOOZED"   // hidden until SnoozeDelay has passed
-	StateSkipped   State = "SKIPPED"   // the user declined
-	StateExpired   State = "EXPIRED"   // the lesson ended
-	StateWithdrawn State = "WITHDRAWN" // prompts were turned off before a snoozed prompt was due
+	StateOffered  State = "OFFERED"  // the popup shows the offer
+	StateStarting State = "STARTING" // a start of the recording runs
+	StateStarted  State = "STARTED"  // the recording started
+	StateSkipped  State = "SKIPPED"  // the user declined
+	StateExpired  State = "EXPIRED"  // the lesson ended
 )
 
 // States returns every state.
 func States() []State {
-	return []State{StateOffered, StateStarting, StateStarted, StateSnoozed, StateSkipped, StateExpired, StateWithdrawn}
+	return []State{StateOffered, StateStarting, StateStarted, StateSkipped, StateExpired}
 }
 
 // String returns the state name.
@@ -25,13 +23,11 @@ func (s State) String() string { return string(s) }
 // transitions is the state machine: from -> allowed targets. A state without targets is terminal. Every state must
 // be a key (a test compares the keys with States). STARTING -> OFFERED is a failed start.
 var transitions = map[State][]State{
-	StateOffered:   {StateStarting, StateSnoozed, StateSkipped, StateExpired},
-	StateStarting:  {StateStarted, StateOffered},
-	StateSnoozed:   {StateOffered, StateSkipped, StateExpired, StateWithdrawn},
-	StateStarted:   nil,
-	StateSkipped:   nil,
-	StateExpired:   nil,
-	StateWithdrawn: nil,
+	StateOffered:  {StateStarting, StateSkipped, StateExpired},
+	StateStarting: {StateStarted, StateOffered},
+	StateStarted:  nil,
+	StateSkipped:  nil,
+	StateExpired:  nil,
 }
 
 // CanTransition reports whether the table allows moving a prompt from one state to another.

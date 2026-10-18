@@ -57,7 +57,6 @@ type PromptUseCase interface {
 	Sources(ctx context.Context) (recordingprompt.Sources, error)
 	OfferAdHoc(ctx context.Context) (recordingprompt.View, error)
 	Start(ctx context.Context, id prompt.ID, source values.Source) (recordingprompt.View, error)
-	Snooze(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
 	Skip(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
 }
 
@@ -69,12 +68,11 @@ type PromptView struct {
 	// Start and End are "15:04" in the lesson's time zone (UTC when the zone is unknown); empty for an ad-hoc prompt.
 	Start string `json:"start"`
 	End   string `json:"end"`
-	// State is OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED or WITHDRAWN.
+	// State is OFFERED, STARTING, STARTED, SKIPPED or EXPIRED.
 	State string `json:"state"`
 	// Problem says why the last start failed: "", "unavailable", "in_progress", "recovering", "source_gone" (the chosen
 	// app does not run) or "failed".
-	Problem   string `json:"problem"`
-	CanSnooze bool   `json:"canSnooze"`
+	Problem string `json:"problem"`
 }
 
 // SourcesView is the JSON form of the source picker. App names are exe names ("" = the whole computer).
@@ -163,11 +161,6 @@ func (s *PromptService) Start(ctx context.Context, id, app string) (PromptView, 
 	})
 }
 
-// Snooze hides the prompt for five minutes; only when the view offers it (canSnooze).
-func (s *PromptService) Snooze(ctx context.Context, id string) (PromptView, error) {
-	return s.act("snooze prompt", id, func(pid prompt.ID) (recordingprompt.View, error) { return s.uc.Snooze(ctx, pid) })
-}
-
 // Skip ends the prompt and hides the popup.
 func (s *PromptService) Skip(ctx context.Context, id string) (PromptView, error) {
 	return s.act("skip prompt", id, func(pid prompt.ID) (recordingprompt.View, error) { return s.uc.Skip(ctx, pid) })
@@ -191,7 +184,7 @@ func (s *PromptService) act(op, id string, do func(prompt.ID) (recordingprompt.V
 		return promptView(v), nil
 	case errors.Is(err, recordingprompt.ErrNoPrompt):
 		return PromptView{}, ErrPromptGone
-	case errors.Is(err, prompt.ErrInvalidTransition), errors.Is(err, prompt.ErrSnoozeNotAllowed):
+	case errors.Is(err, prompt.ErrInvalidTransition):
 		return PromptView{}, ErrPromptRefused
 	}
 	s.log.Error("ui: "+op, "err", err)
@@ -199,7 +192,7 @@ func (s *PromptService) act(op, id string, do func(prompt.ID) (recordingprompt.V
 }
 
 func promptView(v recordingprompt.View) PromptView {
-	out := PromptView{ID: string(v.ID), State: string(v.State), Problem: problemCode(v.Problem), CanSnooze: v.CanSnooze}
+	out := PromptView{ID: string(v.ID), State: string(v.State), Problem: problemCode(v.Problem)}
 	switch v.Kind {
 	case prompt.KindLesson:
 		out.Kind = kindLesson

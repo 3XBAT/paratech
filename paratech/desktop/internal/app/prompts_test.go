@@ -79,7 +79,9 @@ func startFromPopup(t *testing.T, b *wails.PromptService, id string) wails.Promp
 func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	ctx := context.Background()
 	e, f := testEnv(t)
-	start := time.Now().Add(2 * time.Minute) // within the scheduler's lead; the recording session runs on the real clock
+	// The popup comes at the start (DefaultLead 0, TASK-076), so the lesson starts now; the recording session runs on
+	// the real clock and the first scheduler tick falls within lesson.StartLateGrace.
+	start := time.Now()
 	c, popup, b := startPromptCore(t, e, func(c *core) {
 		l, err := lesson.New(lesson.Spec{ID: "lesson-1", Content: lesson.Content{
 			Title: "History", Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow",
@@ -94,7 +96,7 @@ func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 
 	testenv.Eventually(t, "the scheduler shows the popup", popup.Visible, nil)
 	cur := b.Current()
-	if cur == nil || cur.Kind != "lesson" || cur.Title != "History" || cur.State != string(prompt.StateOffered) || !cur.CanSnooze {
+	if cur == nil || cur.Kind != "lesson" || cur.Title != "History" || cur.State != string(prompt.StateOffered) {
 		t.Fatalf("current prompt %+v", cur)
 	}
 

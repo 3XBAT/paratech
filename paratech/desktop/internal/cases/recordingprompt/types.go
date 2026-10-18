@@ -9,8 +9,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// DefaultPollInterval is how often Run looks at the current prompt: a snoozed prompt comes back and an expired one
-// hides at most this late.
+// DefaultPollInterval is how often Run looks at the current prompt: an expired one hides at most this late.
 const DefaultPollInterval = 5 * time.Second
 
 // Deps are the ports the Service needs. All are required except Log.
@@ -34,12 +33,11 @@ func DefaultConfig() Config { return Config{PollInterval: DefaultPollInterval} }
 
 // View is a prompt as the popup shows it.
 type View struct {
-	ID        prompt.ID
-	Kind      prompt.Kind
-	Lesson    prompt.Lesson // zero for an ad-hoc prompt; Title is untrusted text
-	State     prompt.State
-	Problem   prompt.Problem // why the last start failed
-	CanSnooze bool
+	ID      prompt.ID
+	Kind    prompt.Kind
+	Lesson  prompt.Lesson // zero for an ad-hoc prompt; Title is untrusted text
+	State   prompt.State
+	Problem prompt.Problem // why the last start failed
 }
 
 // Sources is what the source picker offers (TASK-059).
@@ -52,8 +50,6 @@ type Sources struct {
 	Remembered shared.AppName
 }
 
-func viewOf(p *prompt.Prompt, now time.Time) View {
-	return View{
-		ID: p.ID(), Kind: p.Kind(), Lesson: p.Lesson(), State: p.State(), Problem: p.Problem(), CanSnooze: p.CanSnooze(now),
-	}
+func viewOf(p *prompt.Prompt) View {
+	return View{ID: p.ID(), Kind: p.Kind(), Lesson: p.Lesson(), State: p.State(), Problem: p.Problem()}
 }

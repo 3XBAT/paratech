@@ -2,8 +2,7 @@ package recordingprompt
 
 import "errors"
 
-// Errors of the prompt scenario (ARCH-18). A refused action on the current prompt wraps prompt.ErrInvalidTransition
-// or prompt.ErrSnoozeNotAllowed.
+// Errors of the prompt scenario (ARCH-18). A refused action on the current prompt wraps prompt.ErrInvalidTransition.
 var (
 	// ErrInvalidConfig is returned by New for missing ports or an unusable poll interval.
 	ErrInvalidConfig = errors.New("invalid recording prompt configuration")

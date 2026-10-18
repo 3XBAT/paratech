@@ -50,10 +50,6 @@ func (f *fakePrompt) Start(_ context.Context, id prompt.ID, source values.Source
 	return f.record("start", id)
 }
 
-func (f *fakePrompt) Snooze(_ context.Context, id prompt.ID) (recordingprompt.View, error) {
-	return f.record("snooze", id)
-}
-
 func (f *fakePrompt) Skip(_ context.Context, id prompt.ID) (recordingprompt.View, error) {
 	return f.record("skip", id)
 }
@@ -68,7 +64,7 @@ var lessonStart = time.Date(2026, 10, 15, 6, 0, 0, 0, time.UTC) // 09:00 in Mosc
 
 func lessonView(zone string) recordingprompt.View {
 	return recordingprompt.View{
-		ID: "prompt-1", Kind: prompt.KindLesson, State: prompt.StateOffered, CanSnooze: true,
+		ID: "prompt-1", Kind: prompt.KindLesson, State: prompt.StateOffered,
 		Lesson: prompt.Lesson{
 			ID: "lesson-1", Title: "<b>History</b>", Start: lessonStart, End: lessonStart.Add(90 * time.Minute), TimeZone: zone,
 		},
@@ -86,23 +82,23 @@ func TestPromptServiceCurrent(t *testing.T) {
 		{
 			name: "lesson in its zone", uc: &fakePrompt{has: true, view: lessonView("Europe/Moscow")},
 			want: `{"id":"prompt-1","kind":"lesson","title":"\u003cb\u003eHistory\u003c/b\u003e","start":"09:00","end":"10:30",` +
-				`"state":"OFFERED","problem":"","canSnooze":true}`,
+				`"state":"OFFERED","problem":""}`,
 		},
 		{
 			name: "unknown zone falls back to UTC", uc: &fakePrompt{has: true, view: lessonView("Mars/Olympus")},
 			want: `{"id":"prompt-1","kind":"lesson","title":"\u003cb\u003eHistory\u003c/b\u003e","start":"06:00","end":"07:30",` +
-				`"state":"OFFERED","problem":"","canSnooze":true}`,
+				`"state":"OFFERED","problem":""}`,
 		},
 		{
 			name: "machine zone is never used", uc: &fakePrompt{has: true, view: lessonView("Local")},
 			want: `{"id":"prompt-1","kind":"lesson","title":"\u003cb\u003eHistory\u003c/b\u003e","start":"06:00","end":"07:30",` +
-				`"state":"OFFERED","problem":"","canSnooze":true}`,
+				`"state":"OFFERED","problem":""}`,
 		},
 		{
 			name: "ad hoc with a problem", uc: &fakePrompt{has: true, view: recordingprompt.View{
 				ID: "prompt-2", Kind: prompt.KindAdHoc, State: prompt.StateOffered, Problem: prompt.ProblemUnavailable,
 			}},
-			want: `{"id":"prompt-2","kind":"adhoc","title":"","start":"","end":"","state":"OFFERED","problem":"unavailable","canSnooze":false}`,
+			want: `{"id":"prompt-2","kind":"adhoc","title":"","start":"","end":"","state":"OFFERED","problem":"unavailable"}`,
 		},
 	}
 	for _, tt := range tests {
@@ -176,7 +172,6 @@ func TestPromptServiceActions(t *testing.T) {
 		{name: "start failed", err: fmt.Errorf("start: %w: busy", recordingprompt.ErrStartFailed), problem: "in_progress"},
 		{name: "stale prompt", err: fmt.Errorf("start: %w", recordingprompt.ErrNoPrompt), wantErr: ErrPromptGone},
 		{name: "start running", err: fmt.Errorf("start: %w", prompt.ErrInvalidTransition), wantErr: ErrPromptRefused},
-		{name: "snooze not allowed", err: fmt.Errorf("snooze: %w", prompt.ErrSnoozeNotAllowed), wantErr: ErrPromptRefused},
 		{name: "unexpected", err: errors.New(`open C:\Users\student\db: locked`), wantErr: ErrActionFailed},
 	}
 	for _, tt := range tests {
@@ -189,9 +184,8 @@ func TestPromptServiceActions(t *testing.T) {
 			uc := &fakePrompt{view: view, err: tt.err}
 			s := NewPromptService(uc, slog.New(slog.NewTextHandler(&logs, nil)))
 			calls := map[string]func() (PromptView, error){
-				"start":  func() (PromptView, error) { return s.Start(ctx, "prompt-1", "") },
-				"snooze": func() (PromptView, error) { return s.Snooze(ctx, "prompt-1") },
-				"skip":   func() (PromptView, error) { return s.Skip(ctx, "prompt-1") },
+				"start": func() (PromptView, error) { return s.Start(ctx, "prompt-1", "") },
+				"skip":  func() (PromptView, error) { return s.Skip(ctx, "prompt-1") },
 			}
 			for name, call := range calls {
 				got, err := call()
@@ -205,7 +199,7 @@ func TestPromptServiceActions(t *testing.T) {
 					t.Errorf("%s = %+v, %v", name, got, err)
 				}
 			}
-			if !slices.Equal(uc.gotIDs, []prompt.ID{"prompt-1", "prompt-1", "prompt-1"}) {
+			if !slices.Equal(uc.gotIDs, []prompt.ID{"prompt-1", "prompt-1"}) {
 				t.Errorf("ids %v", uc.gotIDs)
 			}
 			if tt.wantErr == ErrActionFailed && !strings.Contains(logs.String(), "locked") {
@@ -251,14 +245,14 @@ func TestFrontendKnowsPromptErrors(t *testing.T) {
 	}
 }
 
-// Every exported method is callable from the page: keep the set to the five the popup uses.
+// Every exported method is callable from the page: keep the set to the four the popup uses (no Snooze since TASK-076).
 func TestPromptServiceMethodSet(t *testing.T) {
 	typ := reflect.TypeFor[*PromptService]()
 	var got []string
 	for i := range typ.NumMethod() {
 		got = append(got, typ.Method(i).Name)
 	}
-	if want := []string{"Current", "Skip", "Snooze", "Sources", "Start"}; !slices.Equal(got, want) {
+	if want := []string{"Current", "Skip", "Sources", "Start"}; !slices.Equal(got, want) {
 		t.Fatalf("exported methods %v, want %v", got, want)
 	}
 }
