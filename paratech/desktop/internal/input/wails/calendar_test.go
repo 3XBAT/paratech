@@ -169,7 +169,7 @@ func TestGoogleCalendarStatusLastRun(t *testing.T) {
 			name: "no access after the sign-in: only the last-run line",
 			st:   schedulesync.CalendarStatus{SignedIn: true, LastRun: lastRun(schedulesync.OutcomeNoAccess, 1)},
 			want: CalendarSyncState{
-				SignedIn: true, State: "idle", Message: msgCalendarSynced, LastRunAt: "2026-10-16T06:30:00Z",
+				SignedIn: true, State: "idle", Message: msgCalendarRetry, LastRunAt: "2026-10-16T06:30:00Z",
 				LastRunAttempts: 1, LastRunOutcome: "noAccess", LastRunText: msgLastRunNoAccess,
 			},
 		},
@@ -186,7 +186,7 @@ func TestGoogleCalendarStatusLastRun(t *testing.T) {
 				SignedIn: true, LastOutcome: schedulesync.OutcomeOK, LastRun: lastRun(schedulesync.OutcomeFailed, 1),
 			},
 			want: CalendarSyncState{
-				SignedIn: true, State: "idle", LastOutcome: "ok", Message: msgCalendarSynced,
+				SignedIn: true, State: "idle", LastOutcome: "ok", Message: msgCalendarRetry,
 				LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1, LastRunOutcome: "failed",
 				LastRunText: "Ошибка: синхронизация не удалась.",
 			},
@@ -227,7 +227,14 @@ func TestGoogleCalendarStatusMessages(t *testing.T) {
 		{"failed, shown by the last run", schedulesync.CalendarStatus{
 			SignedIn: true, LastOutcome: schedulesync.OutcomeFailed,
 			LastRun: schedulesync.LastRun{At: time.Unix(1, 0), Outcome: schedulesync.OutcomeFailed},
-		}, "idle", msgCalendarSynced, nil},
+		}, "idle", msgCalendarRetry, nil},
+		{"failed, shown by the last run, pending", schedulesync.CalendarStatus{
+			SignedIn: true, Pending: 2, LastOutcome: schedulesync.OutcomeFailed,
+			LastRun: schedulesync.LastRun{At: time.Unix(1, 0), Outcome: schedulesync.OutcomeFailed},
+		}, "idle", "Ждут синхронизации занятий: 2.", nil},
+		{"sign-in expired, shown by the last run", schedulesync.CalendarStatus{
+			SignedIn: true, LastRun: schedulesync.LastRun{At: time.Unix(1, 0), Outcome: schedulesync.OutcomeSignInExpired},
+		}, "idle", msgCalendarRetry, nil},
 		{"failed", schedulesync.CalendarStatus{SignedIn: true, Pending: 1, LastOutcome: schedulesync.OutcomeFailed}, "idle",
 			msgCalendarFailed, nil},
 		{"queued", schedulesync.CalendarStatus{SignedIn: true, Job: job.StatusQueued}, "queued", msgCalendarQueued, nil},

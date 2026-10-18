@@ -41,6 +41,7 @@ const (
 	msgCalendarPending       = "Ждут синхронизации занятий: %d."
 	msgCalendarPendingMore   = "Ждут синхронизации занятий: больше %d."
 	msgCalendarSynced        = "Календарь «Learning Assistant» синхронизирован."
+	msgCalendarRetry         = "Нажмите «Синхронизировать», чтобы повторить."
 	msgCalendarSyncStarted   = "Синхронизация запущена."
 	msgCalendarSyncScheduled = "Синхронизация уже запланирована."
 	msgCalendarSignInFirst   = "Сначала войдите в Google."
@@ -206,6 +207,8 @@ func calendarMessage(st CalendarSyncState) string {
 		return fmt.Sprintf(msgCalendarPendingMore, st.Pending)
 	case st.Pending > 0:
 		return fmt.Sprintf(msgCalendarPending, st.Pending)
+	case shown: // never "synchronized" next to a failed last run
+		return msgCalendarRetry
 	}
 	return msgCalendarSynced
 }
