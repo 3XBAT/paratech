@@ -40,9 +40,16 @@ export interface AvailableModel {
   installed: boolean;
   installedId: string;
   hasSourcePage: boolean;
-  /** "fast", "balanced", "accurate", "max" or "" (none); the page turns it into a label and a CPU speed. */
+  /** "fast", "balanced", "accurate", "max" or "" (none); the page turns it into a short description. */
   tier: string;
   englishOnly: boolean;
+  /** The model size: "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo" or "" (none). */
+  family: string;
+  /** Load on the computer, 1..5; 0 when unknown (values.LoadOf in the core). */
+  load: number;
+  /** The core's flags: a load that gets the "demanding model" warning, and a quantized (reduced) variant. */
+  heavy: boolean;
+  reduced: boolean;
 }
 
 /** The current or last download; phase "" means none yet. */
@@ -158,6 +165,16 @@ function num(r: Record<string, unknown>, key: string, what: string): number {
   return v;
 }
 
+const maxLoad = 5;
+
+function loadLevel(r: Record<string, unknown>, what: string): number {
+  const v = num(r, "load", what);
+  if (v > maxLoad) {
+    throw new Error(`${what}: load is above ${maxLoad}`);
+  }
+  return v;
+}
+
 function bool(r: Record<string, unknown>, key: string, what: string): boolean {
   const v = r[key];
   if (typeof v !== "boolean") {
@@ -221,6 +238,10 @@ export function parseAvailable(raw: unknown): AvailableModel {
     hasSourcePage: bool(r, "hasSourcePage", w),
     tier: str(r, "tier", w),
     englishOnly: bool(r, "englishOnly", w),
+    family: str(r, "family", w),
+    load: loadLevel(r, w),
+    heavy: bool(r, "heavy", w),
+    reduced: bool(r, "reduced", w),
   };
 }
 

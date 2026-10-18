@@ -2,23 +2,44 @@
   "schema_version": 1,
   "models": [
     {
-      "id": "small-q5_1",
-      "name": "small-q5_1",
+      "id": "tiny-q5_1",
+      "name": "tiny-q5_1",
       "version": "1",
-      "size_bytes": 190085487,
-      "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
-      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
-      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
+      "size_bytes": 32152673,
+      "sha256": "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny-q5_1.bin",
       "quantization": "q5_1",
       "capabilities": [
         "multilingual"
       ],
       "recommendation": {
-        "min_cpu_cores": 4,
-        "min_ram_mb": 2048,
-        "preferred": true
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
       },
-      "tier": "balanced"
+      "tier": "fast",
+      "family": "tiny"
+    },
+    {
+      "id": "tiny-f16",
+      "name": "tiny-f16",
+      "version": "1",
+      "size_bytes": 77691713,
+      "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast",
+      "family": "tiny"
     },
     {
       "id": "base-q5_1",
@@ -37,7 +58,68 @@
         "min_ram_mb": 1024,
         "preferred": false
       },
-      "tier": "fast"
+      "tier": "fast",
+      "family": "base"
+    },
+    {
+      "id": "base-f16",
+      "name": "base-f16",
+      "version": "1",
+      "size_bytes": 147951465,
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast",
+      "family": "base"
+    },
+    {
+      "id": "small-q5_1",
+      "name": "small-q5_1",
+      "version": "1",
+      "size_bytes": 190085487,
+      "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
+      "quantization": "q5_1",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 2048,
+        "preferred": true
+      },
+      "tier": "balanced",
+      "family": "small"
+    },
+    {
+      "id": "small-f16",
+      "name": "small-f16",
+      "version": "1",
+      "size_bytes": 487601967,
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 3072,
+        "preferred": false
+      },
+      "tier": "balanced",
+      "family": "small"
     },
     {
       "id": "medium-q5_0",
@@ -56,7 +138,28 @@
         "min_ram_mb": 3072,
         "preferred": false
       },
-      "tier": "accurate"
+      "tier": "accurate",
+      "family": "medium"
+    },
+    {
+      "id": "medium-f16",
+      "name": "medium-f16",
+      "version": "1",
+      "size_bytes": 1533763059,
+      "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 8,
+        "min_ram_mb": 4096,
+        "preferred": false
+      },
+      "tier": "accurate",
+      "family": "medium"
     },
     {
       "id": "large-v3-turbo-q5_0",
@@ -75,7 +178,108 @@
         "min_ram_mb": 4096,
         "preferred": false
       },
-      "tier": "max"
+      "tier": "max",
+      "family": "large-v3-turbo"
+    },
+    {
+      "id": "large-v3-turbo-f16",
+      "name": "large-v3-turbo-f16",
+      "version": "1",
+      "size_bytes": 1624555275,
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 8,
+        "min_ram_mb": 6144,
+        "preferred": false
+      },
+      "tier": "max",
+      "family": "large-v3-turbo"
+    },
+    {
+      "id": "large-v3-q5_0",
+      "name": "large-v3-q5_0",
+      "version": "1",
+      "size_bytes": 1081140203,
+      "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-q5_0.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-q5_0.bin",
+      "quantization": "q5_0",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 8,
+        "min_ram_mb": 6144,
+        "preferred": false
+      },
+      "tier": "max",
+      "family": "large-v3"
+    },
+    {
+      "id": "large-v3-f16",
+      "name": "large-v3-f16",
+      "version": "1",
+      "size_bytes": 3095033483,
+      "sha256": "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "multilingual"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 8,
+        "min_ram_mb": 8192,
+        "preferred": false
+      },
+      "tier": "max",
+      "family": "large-v3"
+    },
+    {
+      "id": "tiny.en-q5_1",
+      "name": "tiny.en-q5_1",
+      "version": "1",
+      "size_bytes": 32166155,
+      "sha256": "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en-q5_1.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en-q5_1.bin",
+      "quantization": "q5_1",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast",
+      "family": "tiny"
+    },
+    {
+      "id": "tiny.en-f16",
+      "name": "tiny.en-f16",
+      "version": "1",
+      "size_bytes": 77704715,
+      "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast",
+      "family": "tiny"
     },
     {
       "id": "base.en-q5_1",
@@ -94,7 +298,28 @@
         "min_ram_mb": 1024,
         "preferred": false
       },
-      "tier": "fast"
+      "tier": "fast",
+      "family": "base"
+    },
+    {
+      "id": "base.en-f16",
+      "name": "base.en-f16",
+      "version": "1",
+      "size_bytes": 147964211,
+      "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 2,
+        "min_ram_mb": 1024,
+        "preferred": false
+      },
+      "tier": "fast",
+      "family": "base"
     },
     {
       "id": "small.en-q5_1",
@@ -113,7 +338,68 @@
         "min_ram_mb": 2048,
         "preferred": false
       },
-      "tier": "balanced"
+      "tier": "balanced",
+      "family": "small"
+    },
+    {
+      "id": "small.en-f16",
+      "name": "small.en-f16",
+      "version": "1",
+      "size_bytes": 487614201,
+      "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 3072,
+        "preferred": false
+      },
+      "tier": "balanced",
+      "family": "small"
+    },
+    {
+      "id": "medium.en-q5_0",
+      "name": "medium.en-q5_0",
+      "version": "1",
+      "size_bytes": 539225533,
+      "sha256": "76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.en-q5_0.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.en-q5_0.bin",
+      "quantization": "q5_0",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 4,
+        "min_ram_mb": 3072,
+        "preferred": false
+      },
+      "tier": "accurate",
+      "family": "medium"
+    },
+    {
+      "id": "medium.en-f16",
+      "name": "medium.en-f16",
+      "version": "1",
+      "size_bytes": 1533774781,
+      "sha256": "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356",
+      "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.en.bin",
+      "source_page": "https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.en.bin",
+      "quantization": "f16",
+      "capabilities": [
+        "en"
+      ],
+      "recommendation": {
+        "min_cpu_cores": 8,
+        "min_ram_mb": 4096,
+        "preferred": false
+      },
+      "tier": "accurate",
+      "family": "medium"
     }
   ],
   "download_hosts": [

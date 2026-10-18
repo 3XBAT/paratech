@@ -164,7 +164,9 @@ type InstalledModelItem struct {
 }
 
 // AvailableModelItem is the JSON form of a catalog entry. Tier is "fast", "balanced", "accurate", "max" or "" (none);
-// EnglishOnly marks a model that recognizes English only.
+// EnglishOnly marks a model that recognizes English only. Family is the model size ("tiny" … "large-v3", "" none);
+// Load is the load on the computer, 1..5, 0 when unknown (values.LoadOf); Heavy marks a load that gets the
+// "demanding model" warning, Reduced a quantized variant, so the page does not repeat these rules.
 type AvailableModelItem struct {
 	CatalogID     string   `json:"catalogId"`
 	Name          string   `json:"name"`
@@ -181,6 +183,10 @@ type AvailableModelItem struct {
 	HasSourcePage bool     `json:"hasSourcePage"`
 	Tier          string   `json:"tier"`
 	EnglishOnly   bool     `json:"englishOnly"`
+	Family        string   `json:"family"`
+	Load          int      `json:"load"`
+	Heavy         bool     `json:"heavy"`
+	Reduced       bool     `json:"reduced"`
 }
 
 // ModelDownload is the JSON form of the download state. Phase is "" (none yet), "downloading", "verifying",
@@ -312,7 +318,8 @@ func (s *ModelsService) List(ctx context.Context) (ModelsView, error) {
 			MinCPUCores: e.Recommendation().MinCPUCores, MinRAMMB: e.Recommendation().MinRAMMB,
 			Recommended: a.Recommended, LikelySlow: a.LikelySlow, Installed: a.InstalledID != "",
 			InstalledID: string(a.InstalledID), HasSourcePage: !e.SourcePage().IsZero(), Tier: string(e.Tier()),
-			EnglishOnly: e.EnglishOnly(),
+			EnglishOnly: e.EnglishOnly(), Family: string(e.Family()), Load: int(e.Load()),
+			Heavy: e.Heavy(), Reduced: e.Reduced(),
 		})
 	}
 	return view, nil

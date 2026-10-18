@@ -31,6 +31,9 @@ var (
 	// ErrInvalidModelTier is returned for a model tier that is not one of the known tiers.
 	ErrInvalidModelTier = errors.New("invalid model tier")
 
+	// ErrInvalidModelFamily is returned for a model family that is not one of the known families.
+	ErrInvalidModelFamily = errors.New("invalid model family")
+
 	// ErrInvalidSize is returned for a model size that is not positive or above MaxModelSizeBytes.
 	ErrInvalidSize = errors.New("invalid model size")
 

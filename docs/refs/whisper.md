@@ -37,24 +37,54 @@ Used by `desktop/internal/adapters/whispercli` (TASK-024). Re-verify everything 
   (`src=https://huggingface.co/ggerganov/whisper.cpp`, `pfx=resolve/main/ggml`). Checksums: take the SHA-256 shown on the Hugging Face
   file page and record it in the catalog; verify after download (PRD section 8.1).
 
-## Model catalog (TASK-067)
+## Model catalog (TASK-067, TASK-070)
 
-The embedded catalog `desktop/internal/app/catalog.json`. Sizes and SHA-256 (`lfs.size`, `lfs.oid`) from the Hugging Face API
-https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main on **2026-10-16**, repository commit
-`5359861c739e955e79d9a303bcbc70fb988958b1`; a `HEAD` of each resolve URL returned the same `X-Linked-ETag` and `X-Linked-Size`.
+The embedded catalog `desktop/internal/app/catalog.json`: every size of the official repository in the full and the
+quantized (q5) variant, and the English-only `.en` models (there is no `large-v3.en`). Sizes and SHA-256 (`lfs.size`,
+`lfs.oid`) from the Hugging Face API https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1,
+first on 2026-10-16 (TASK-067, six files) and for all 20 files on **2026-10-18**, when `main` was still commit
+`5359861c739e955e79d9a303bcbc70fb988958b1`; on both dates a `HEAD` of each resolve URL (`curl -sI`, redirect not followed)
+returned the same `X-Linked-ETag` and `X-Linked-Size`.
 `source_url` is pinned to that commit: `https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/<file>`.
 `source_page` is pinned to the same commit: `https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/<file>`.
 Download of `ggml-base-q5_1.bin` through the app checked on Windows with `LA_MODEL_DOWNLOAD_LIVE_TEST=1`
 (`app/catalog_live_windows_test.go`).
 
-| File | Bytes | SHA-256 | Tier |
-|---|---|---|---|
-| `ggml-small-q5_1.bin` (preferred) | 190085487 | `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb` | balanced |
-| `ggml-base-q5_1.bin` | 59707625 | `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898` | fast |
-| `ggml-medium-q5_0.bin` | 539212467 | `19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f` | accurate |
-| `ggml-large-v3-turbo-q5_0.bin` | 574041195 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` | max |
-| `ggml-base.en-q5_1.bin` (English) | 59721011 | `4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f` | fast |
-| `ggml-small.en-q5_1.bin` (English) | 190098681 | `bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30` | balanced |
+The full files `ggml-<family>[.en].bin` hold f16 weights; their catalog id and name are `<family>[.en]-f16`, so plain names
+like `small` stay free for imported models. The ids of the six TASK-067 entries are unchanged (installed models stay
+recognized). Order: multilingual by size (quantized before full within a family), then English the same way.
+
+| File | Id | Bytes | SHA-256 | Family | Variant | Tier | Load |
+|---|---|---|---|---|---|---|---|
+| `ggml-tiny-q5_1.bin` | `tiny-q5_1` | 32152673 | `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7` | tiny | quantized (q5_1) | fast | 1 |
+| `ggml-tiny.bin` | `tiny-f16` | 77691713 | `be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21` | tiny | full (f16) | fast | 1 |
+| `ggml-base-q5_1.bin` | `base-q5_1` | 59707625 | `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898` | base | quantized (q5_1) | fast | 1 |
+| `ggml-base.bin` | `base-f16` | 147951465 | `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe` | base | full (f16) | fast | 2 |
+| `ggml-small-q5_1.bin` (preferred) | `small-q5_1` | 190085487 | `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb` | small | quantized (q5_1) | balanced | 2 |
+| `ggml-small.bin` | `small-f16` | 487601967 | `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` | small | full (f16) | balanced | 3 |
+| `ggml-medium-q5_0.bin` | `medium-q5_0` | 539212467 | `19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f` | medium | quantized (q5_0) | accurate | 3 |
+| `ggml-medium.bin` | `medium-f16` | 1533763059 | `6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208` | medium | full (f16) | accurate | 4 |
+| `ggml-large-v3-turbo-q5_0.bin` | `large-v3-turbo-q5_0` | 574041195 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` | large-v3-turbo | quantized (q5_0) | max | 4 |
+| `ggml-large-v3-turbo.bin` | `large-v3-turbo-f16` | 1624555275 | `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69` | large-v3-turbo | full (f16) | max | 5 |
+| `ggml-large-v3-q5_0.bin` | `large-v3-q5_0` | 1081140203 | `d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1` | large-v3 | quantized (q5_0) | max | 4 |
+| `ggml-large-v3.bin` | `large-v3-f16` | 3095033483 | `64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2` | large-v3 | full (f16) | max | 5 |
+| `ggml-tiny.en-q5_1.bin` (English) | `tiny.en-q5_1` | 32166155 | `c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b` | tiny | quantized (q5_1) | fast | 1 |
+| `ggml-tiny.en.bin` (English) | `tiny.en-f16` | 77704715 | `921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f` | tiny | full (f16) | fast | 1 |
+| `ggml-base.en-q5_1.bin` (English) | `base.en-q5_1` | 59721011 | `4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f` | base | quantized (q5_1) | fast | 1 |
+| `ggml-base.en.bin` (English) | `base.en-f16` | 147964211 | `a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002` | base | full (f16) | fast | 2 |
+| `ggml-small.en-q5_1.bin` (English) | `small.en-q5_1` | 190098681 | `bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30` | small | quantized (q5_1) | balanced | 2 |
+| `ggml-small.en.bin` (English) | `small.en-f16` | 487614201 | `c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d` | small | full (f16) | balanced | 3 |
+| `ggml-medium.en-q5_0.bin` (English) | `medium.en-q5_0` | 539225533 | `76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0` | medium | quantized (q5_0) | accurate | 3 |
+| `ggml-medium.en.bin` (English) | `medium.en-f16` | 1533774781 | `cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356` | medium | full (f16) | accurate | 4 |
+
+**Load on the computer** (`values.LoadOf`, 1..5). The level of the full variant follows the parameter count: tiny (39M) 1,
+base (74M) 2, small (244M) 3, medium (769M) 4, large-v3 (1550M) 5, large-v3-turbo (809M) 5: turbo has only 4 decoder
+layers but the full large-v3 encoder, and the encoder takes most of the CPU time on long recordings. A quantized variant
+(quantization `q…`) is one step lower, at least 1: the file is 2.4–2.9 times smaller, it needs less memory and runs
+a bit faster on a CPU, with slightly lower accuracy. A model without a family has load 0 (unknown). Loads 4 and 5 are
+heavy (`ModelLoad.Heavy`): the page warns that recognition will be long on a usual processor. The core sends
+`heavy` and `reduced` (quantized, `Quantization.Reduced`) with each catalog item, so the page does not repeat the rules. The words for the levels
+are UI text and live in the frontend. The rule is qualitative until RTF is measured on real machines (PRD section 8.1).
 
 **Download hosts.** `huggingface.co` answers `302` to a CDN; the allowlist matches exact hosts, so `download_hosts` lists
 `us.aws.cdn.hf.co` (seen on 2026-10-16), `cas-bridge.xethub.hf.co`, `transfer.xethub.hf.co`, `cdn-lfs.hf.co`, `cdn-lfs-us-1.hf.co`,
@@ -62,7 +92,8 @@ Download of `ggml-base-q5_1.bin` through the app checked on Windows with `LA_MOD
 download with "Источник модели ответил не так, как ожидалось" (`values.ErrHostNotAllowed`); then add the host after checking it
 (`curl -sI <resolve URL>` shows the `Location`) and run the live test.
 
-**Refresh.** Take `lfs.oid`/`lfs.size` from the API above for a new commit, update `source_url`, the table and `app/catalog_test.go`.
+**Refresh.** Take `lfs.oid`/`lfs.size` from the API above for a new commit, update `source_url`, `source_page`, the table and
+`app/catalog_test.go`.
 
 ## Command line used by the adapter
 

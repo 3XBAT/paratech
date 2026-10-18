@@ -261,7 +261,7 @@ func TestModelsListShowsInstalledAndAvailable(t *testing.T) {
 		Available: []AvailableModelItem{{
 			CatalogID: "base-q5_1", Name: "base", Version: "1", SizeBytes: 59707625, Quantization: "q5_1",
 			Capabilities: []string{"multilingual"}, MinCPUCores: 2, MinRAMMB: 1024, Recommended: true, LikelySlow: true,
-			Installed: true, InstalledID: "m-1", HasSourcePage: true, Tier: "fast",
+			Installed: true, InstalledID: "m-1", HasSourcePage: true, Tier: "fast", Reduced: true,
 		}},
 		SpeechReady:    true,
 		Download:       ModelDownload{CatalogID: "base-q5_1", Phase: "downloading", DoneBytes: 5, TotalBytes: 9, Running: true},
@@ -358,7 +358,7 @@ func TestModelsJSONNames(t *testing.T) {
 	}{
 		{ModelsView{}, "available,download,installed,machineKnown,modelsHomePage,needsDefault,speechReady"},
 		{InstalledModelItem{}, "capabilities,catalogId,fromCatalog,id,inUse,installedAt,isDefault,name,quantization,sha256,sizeBytes,version"},
-		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,hasSourcePage,installed,installedId,likelySlow,minCpuCores,minRamMb,name,quantization,recommended,sizeBytes,tier,version"},
+		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,family,hasSourcePage,heavy,installed,installedId,likelySlow,load,minCpuCores,minRamMb,name,quantization,recommended,reduced,sizeBytes,tier,version"},
 		{ModelDownload{}, "catalogId,doneBytes,error,phase,running,totalBytes"},
 		{DownloadPlanView{}, "availableBytes,catalogId,enough,haveBytes,requiredBytes,totalBytes,warning"},
 		{ModelFileSelection{}, "cancelled,fileName,selectionId,sha256,sizeBytes,suggestedName,suggestedQuantization,suggestedVersion"},
@@ -918,6 +918,66 @@ func TestModelsListTierAndLanguage(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := fmt.Sprintf(`"tier":%q,"englishOnly":%v`, tc.wantTier, tc.wantEnglish)
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("JSON %s, want %s", raw, want)
+			}
+		})
+	}
+}
+
+// The page gets the family and the load (1..5, 0 unknown) computed by the domain rule, under fixed JSON names
+// (TASK-070).
+func TestModelsListFamilyAndLoad(t *testing.T) {
+	src, err := values.ParseSourceURL("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		family     values.ModelFamily
+		quant      values.Quantization
+		wantFamily string
+		wantLoad   int
+		heavy      bool
+		reduced    bool
+	}{
+		{"full medium", values.FamilyMedium, "f16", "medium", 4, true, false},
+		{"quantized medium", values.FamilyMedium, "q5_0", "medium", 3, false, true},
+		{"quantized small", values.FamilySmall, "q5_1", "small", 2, false, true},
+		{"quantized tiny", values.FamilyTiny, "q5_1", "tiny", 1, false, true},
+		{"quantized large-v3", values.FamilyLargeV3, "q5_0", "large-v3", 4, true, true},
+		{"full large-v3", values.FamilyLargeV3, "f16", "large-v3", 5, true, false},
+		{"no family", values.FamilyNone, "f16", "", 0, false, false},
+		{"no family quantized", values.FamilyNone, "q5_1", "", 0, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := values.NewCatalogEntry(values.CatalogEntrySpec{
+				ID: "medium-f16", Name: "medium-f16", Version: "1", SizeBytes: 1533763059, SHA256: shownSum,
+				SourceURL: src, Quantization: tc.quant, Family: tc.family,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := newModelFixture(t)
+			f.catalog.available = []modelcatalog.AvailableModel{{Entry: e}}
+			f.catalog.resolveErr = modelselection.ErrModelNotInstalled
+
+			view, err := f.s.List(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := view.Available[0]
+			if a.Family != tc.wantFamily || a.Load != tc.wantLoad || a.Heavy != tc.heavy || a.Reduced != tc.reduced {
+				t.Fatalf("item %+v, want family %q load %d heavy %v reduced %v",
+					a, tc.wantFamily, tc.wantLoad, tc.heavy, tc.reduced)
+			}
+			raw, err := json.Marshal(view.Available[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf(`"family":%q,"load":%d,"heavy":%v,"reduced":%v`,
+				tc.wantFamily, tc.wantLoad, tc.heavy, tc.reduced)
 			if !strings.Contains(string(raw), want) {
 				t.Fatalf("JSON %s, want %s", raw, want)
 			}

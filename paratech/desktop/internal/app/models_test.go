@@ -40,10 +40,10 @@ func TestWiredModelManager(t *testing.T) {
 		t.Fatalf("Preflight(base-q5_1) = %+v, %v; want the catalog size, nothing downloaded", plan, err)
 	}
 	// Refused as an unknown catalog id before any request.
-	if _, err := c.downloads.Preflight(ctx, "tiny-q5_1"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
+	if _, err := c.downloads.Preflight(ctx, "large-v2-q5_0"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
 		t.Fatalf("Preflight = %v, want ErrNotInCatalog", err)
 	}
-	if _, err := c.downloads.Download(ctx, "tiny-q5_1"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
+	if _, err := c.downloads.Download(ctx, "large-v2-q5_0"); !errors.Is(err, modelcatalog.ErrNotInCatalog) {
 		t.Fatalf("Download = %v, want ErrNotInCatalog", err)
 	}
 	if list, err := c.models.ListInstalled(ctx); err != nil || len(list) != 0 {
