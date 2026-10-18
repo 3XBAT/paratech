@@ -198,6 +198,151 @@ export function weekHeaders(lessons: readonly { start: string }[]): (WeekHeader 
   return out;
 }
 
+// A wall-clock time: a lesson start ("ДД.ММ.ГГГГ ЧЧ:ММ" in its zone) or "now" in that zone.
+interface WallTime {
+  y: number;
+  mo: number;
+  d: number;
+  h: number;
+  mi: number;
+}
+
+function parseWall(s: string): WallTime | null {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})$/.exec(s);
+  if (m === null) {
+    return null;
+  }
+  const [d, mo, y, h, mi] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCDate() !== d || date.getUTCMonth() !== mo - 1 || h > 23 || mi > 59) {
+    return null;
+  }
+  return { y, mo, d, h, mi };
+}
+
+const dayKey = (t: WallTime) => t.y * 10_000 + t.mo * 100 + t.d;
+const minuteKey = (t: WallTime) => dayKey(t) * 10_000 + t.h * 100 + t.mi;
+
+// "now" as a wall time in each zone, one formatter per zone. The zone is file text: an invalid one makes Intl throw a
+// RangeError and gives null, so such a lesson is neither muted nor highlighted.
+function zoneClock(now: Date): (zone: string) => WallTime | null {
+  const cache = new Map<string, WallTime | null>();
+  return (zone) => {
+    if (!cache.has(zone)) {
+      cache.set(zone, wallIn(now, zone));
+    }
+    return cache.get(zone) ?? null;
+  };
+}
+
+function wallIn(now: Date, zone: string): WallTime | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+    const t = { y: get("year"), mo: get("month"), d: get("day"), h: get("hour") % 24, mi: get("minute") };
+    return Object.values(t).every(Number.isFinite) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+const weekdays = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const months = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+
+function labelOf(start: string, today: WallTime | null, now: Date): string | null {
+  const s = parseWall(start);
+  if (s === null) {
+    return null;
+  }
+  if (today !== null) {
+    const tomorrow = new Date(Date.UTC(today.y, today.mo - 1, today.d + 1));
+    if (dayKey(s) === dayKey(today)) {
+      return "Сегодня";
+    }
+    if (s.y === tomorrow.getUTCFullYear() && s.mo === tomorrow.getUTCMonth() + 1 && s.d === tomorrow.getUTCDate()) {
+      return "Завтра";
+    }
+  }
+  const weekday = weekdays[new Date(Date.UTC(s.y, s.mo - 1, s.d)).getUTCDay()];
+  const year = today?.y ?? now.getFullYear();
+  return `${weekday}, ${s.d} ${months[s.mo - 1]}${s.y !== year ? ` ${s.y}` : ""}`;
+}
+
+/**
+ * The day of a lesson: «Сегодня», «Завтра» or "пт, 16 октября" (the year only when it is not the current one); null for
+ * an unparsable start. Today is taken in the lesson's zone; with an invalid zone the label is always the plain date.
+ */
+export function dayLabel(start: string, zone: string, now: Date): string | null {
+  return labelOf(start, wallIn(now, zone), now);
+}
+
+/**
+ * For each lesson, the day header to show above it: at the start of every run of lessons on one day, null elsewhere.
+ * Like weekHeaders, an unparsable start gets no header and breaks the run.
+ */
+export function dayHeaders(lessons: readonly { start: string; zone: string }[], now: Date): (string | null)[] {
+  const clock = zoneClock(now);
+  const labels = lessons.map((l) => labelOf(l.start, clock(l.zone), now));
+  const keys = lessons.map((l, i) => (labels[i] === null ? null : `${l.start.slice(0, 10)}|${labels[i]}`));
+  return labels.map((label, i) => (label !== null && (i === 0 || keys[i - 1] !== keys[i]) ? label : null));
+}
+
+/** How a lesson row looks: past ones muted, today's and the next one highlighted. */
+export interface LessonMark {
+  past: boolean;
+  today: boolean;
+  /** The first lesson in the list that has not ended yet (it may be going on now). */
+  next: boolean;
+}
+
+const noMark: LessonMark = { past: false, today: false, next: false };
+
+/**
+ * Marks for lessons in list order (the core sorts them by start). Each lesson is compared with now in its own zone; an
+ * unparsable start or an invalid zone gives no mark.
+ */
+export function lessonMarks(lessons: readonly { start: string; end: string; zone: string }[], now: Date): LessonMark[] {
+  const clock = zoneClock(now);
+  let nextFound = false;
+  return lessons.map((l) => {
+    const s = parseWall(l.start);
+    const n = clock(l.zone);
+    if (s === null || n === null) {
+      return noMark;
+    }
+    const e = parseWall(l.end) ?? s;
+    const past = minuteKey(e) <= minuteKey(n);
+    const today = !past && (dayKey(s) === dayKey(n) || minuteKey(s) <= minuteKey(n));
+    const next = !past && !nextFound;
+    nextFound ||= next;
+    return { past, today, next };
+  });
+}
+
+/** The time of a lesson under its day header: "09:00–10:30"; a full end on another day; the full range when unparsable. */
+export function lessonTime(start: string, end: string): string {
+  if (parseWall(start) === null) {
+    return timeRange(start, end);
+  }
+  const [startDate, startTime] = start.split(" ");
+  const [endDate, endTime] = end.split(" ");
+  if (endTime !== undefined && endDate === startDate) {
+    return `${startTime}–${endTime}`;
+  }
+  return `${startTime} – ${end}`;
+}
+
 export function windowText(w: ImportWindow): string {
   return `Импортируются занятия с ${w.from} до ${w.to}; удаляются только занятия внутри этого периода.`;
 }
