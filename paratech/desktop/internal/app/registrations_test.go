@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"paratech/desktop/internal/adapters/componentstore"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/httpdownload"
@@ -20,8 +21,10 @@ import (
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
+	tvalues "paratech/desktop/internal/domain/transcription/values"
 	"paratech/desktop/internal/input/wails"
 	"paratech/desktop/testenv"
 )
@@ -64,6 +67,11 @@ var (
 	_ modelcatalog.ModelSource              = (*httpdownload.Client)(nil)
 	_ modelcatalog.ImportSource             = (*localfile.Reader)(nil)
 	_ modelcatalog.DiskSpace                = (*filestore.Store)(nil)
+	_ speechcomponent.ArchiveSource         = (*httpdownload.Client)(nil)
+	_ speechcomponent.DiskSpace             = (*filestore.Store)(nil)
+	_ speechcomponent.ComponentFiles        = (*componentstore.Store)(nil)
+	_ speechcomponent.Activator             = (*speechActivator)(nil)
+	_ wails.SpeechComponentUseCase          = (*speechcomponent.Service)(nil)
 	_ recordingsession.IDGenerator          = idSource(nil)
 	_ homeworkflow.IDGenerator              = idSource(nil)
 	_ senddelivery.IDGenerator              = idSource(nil)
@@ -171,8 +179,11 @@ func TestProductionEnvUsesTheRunnerAttemptCap(t *testing.T) {
 		e.runner.Backoff.MaxAttempts < homeworkflow.DefaultPostProcessAttempts {
 		t.Fatalf("runner MaxAttempts %d is below a use case default", e.runner.Backoff.MaxAttempts)
 	}
-	if e.stopTimeout <= 0 || e.whisperBinary == "" {
-		t.Fatalf("production env: stop timeout %v, whisper %q", e.stopTimeout, e.whisperBinary)
+	if e.stopTimeout <= 0 || e.speech.bundledDir == "" || e.speech.source == nil {
+		t.Fatalf("production env: stop timeout %v, speech component %+v", e.stopTimeout, e.speech)
+	}
+	if _, err := tvalues.ParseSpeechComponent(e.speech.manifest); err != nil {
+		t.Fatalf("production env: speech component manifest: %v", err)
 	}
 }
 

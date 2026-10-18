@@ -23,6 +23,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"paratech/desktop/internal/domain/shared"
@@ -106,6 +107,9 @@ func New(dataDir, bundledDir string) (*Store, error) {
 	}
 	return &Store{root: root, bundled: bundledDir}, nil
 }
+
+// InstalledDir is the folder the in-app install writes below dataDir, for the program path of the engine.
+func InstalledDir(dataDir string) string { return filepath.Join(dataDir, componentsDir, installedDir) }
 
 // Close releases the folder handle.
 func (s *Store) Close() error { return s.root.Close() }
@@ -341,14 +345,15 @@ func (c *ctxReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// storageError prints a path-free message and matches ErrStorage and the bare OS error.
+// storageError prints a path-free message and matches ErrStorage, a narrower shared error and the bare OS error.
 type storageError struct {
 	msg   string
+	kinds []error
 	cause error
 }
 
 func (e *storageError) Error() string   { return e.msg }
-func (e *storageError) Unwrap() []error { return []error{ErrStorage, e.cause} }
+func (e *storageError) Unwrap() []error { return append(append([]error(nil), e.kinds...), e.cause) }
 
 // fail wraps an OS error without its path; a context error is returned as it is.
 func fail(op string, err error) error {
@@ -364,5 +369,9 @@ func fail(op string, err error) error {
 	case errors.As(err, &le):
 		bare = le.Err
 	}
-	return &storageError{msg: fmt.Sprintf("%v: %s: %v", ErrStorage, op, bare), cause: bare}
+	kinds := []error{ErrStorage}
+	if errors.Is(bare, fs.ErrPermission) {
+		kinds = append(kinds, shared.ErrStoragePermission)
+	}
+	return &storageError{msg: fmt.Sprintf("%v: %s: %v", ErrStorage, op, bare), kinds: kinds, cause: bare}
 }

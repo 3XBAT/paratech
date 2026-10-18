@@ -23,6 +23,7 @@ func validCore() Core {
 		Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
 		Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
 		Models: &fakeCatalog{}, Downloads: &fakeDownloads{}, Imports: &fakeImports{}, Links: &fakeLinks{},
+		Speech:      &fakeSpeech{},
 		Connections: &fakeConnections{}, Google: &fakeGoogle{}, Calendar: &fakeCalendarSync{},
 		Sound: &fakeSound{}, Bundle: &fakeBundle{},
 		Homework: validHomework(),

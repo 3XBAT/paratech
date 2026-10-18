@@ -50,6 +50,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Popup))
 	app.RegisterService(application.NewService(b.Schedule))
 	app.RegisterService(application.NewService(b.Models))
+	app.RegisterService(application.NewService(b.Speech))
 	app.RegisterService(application.NewService(b.Connections))
 	app.RegisterService(application.NewService(b.Google))
 	app.RegisterService(application.NewService(b.Calendar))

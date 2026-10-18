@@ -48,9 +48,17 @@ type deliveryJobs interface {
 	jobrunner.Reconciler
 }
 
+// sttRegistration is the stt job type: local CPU work without side effects, so it waits for AC power and is rerun
+// after an interruption. The speech activator registers it once the speech component verified (jobrunner Activate).
+func sttRegistration(h jobrunner.Handler) jobrunner.Registration {
+	return jobrunner.Registration{
+		Type: transcribe.JobType, Handler: h, Heavy: true, Recovery: jobrunner.RecoveryRequeue, Timeout: sttTimeout,
+	}
+}
+
 // registrations binds every job type to its handler and policies (PRD sections 7.2-7.4, hard rule 7). Without a
 // speech recognition engine the stt type is left out: the runner claims and recovers only registered types, so STT
-// jobs wait QUEUED (their keys stay usable) until a start with whisper-cli registers it.
+// jobs wait QUEUED (their keys stay usable) until the speech component is activated (sttRegistration).
 func registrations(h jobHandlers) []jobrunner.Registration {
 	llm := func(t job.Type, handler jobrunner.Handler) jobrunner.Registration {
 		// Light: they wait on the Hub, not the CPU. Requeue: the LLM call is idempotent by its key.
@@ -58,10 +66,7 @@ func registrations(h jobHandlers) []jobrunner.Registration {
 	}
 	var regs []jobrunner.Registration
 	if h.stt != nil {
-		// Local CPU work without side effects: waits for AC power and is rerun after an interruption.
-		regs = append(regs, jobrunner.Registration{
-			Type: transcribe.JobType, Handler: h.stt, Heavy: true, Recovery: jobrunner.RecoveryRequeue, Timeout: sttTimeout,
-		})
+		regs = append(regs, sttRegistration(h.stt))
 	}
 	return append(regs,
 		llm(homeworkflow.SummarizeJobType, h.postProcess),

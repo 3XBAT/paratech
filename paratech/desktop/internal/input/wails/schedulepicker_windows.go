@@ -9,7 +9,7 @@ const (
 	scheduleFilterPattern = "*.ics;*.csv;*.xlsx"
 
 	modelDialogTitle   = "Выбор файла модели"
-	modelFilterName    = "Модель whisper (*.bin)"
+	modelFilterName    = "Модель распознавания (*.bin)"
 	modelFilterPattern = "*.bin"
 )
 

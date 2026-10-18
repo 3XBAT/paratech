@@ -95,7 +95,7 @@ func TestOpenBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := s.OpenServices(context.Background())
-	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Popup == nil || b.Schedule == nil || b.Models == nil ||
+	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Popup == nil || b.Schedule == nil || b.Models == nil || b.Speech == nil ||
 		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil {
 		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
@@ -123,6 +123,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "model downloads", edit: func(c *Core) { c.Downloads = nil }},
 		{name: "model imports", edit: func(c *Core) { c.Imports = nil }},
 		{name: "link opener", edit: func(c *Core) { c.Links = nil }},
+		{name: "speech component use case", edit: func(c *Core) { c.Speech = nil }},
 		{name: "connections use case", edit: func(c *Core) { c.Connections = nil }},
 		{name: "google sign-in use case", edit: func(c *Core) { c.Google = nil }},
 		{name: "calendar sync use case", edit: func(c *Core) { c.Calendar = nil }},

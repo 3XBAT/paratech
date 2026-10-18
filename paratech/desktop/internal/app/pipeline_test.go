@@ -511,7 +511,7 @@ func TestSTTJobWaitsForWhisperCLI(t *testing.T) {
 	dir := t.TempDir()
 
 	a, _ := newTestAppWith(t, dir)
-	a.env.whisperBinary = filepath.Join(t.TempDir(), "whisper-cli.exe") // not installed
+	a.env.speech.bundledDir = t.TempDir() // not installed
 	startCore(t, a)
 	model := installModel(t, a, "m1", testenv.WhisperOK)
 	rec := completedRecording(t, a, "rec-1")

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/cases/modelcatalog"
+	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/services/modelselection"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
@@ -204,7 +205,8 @@ func newModelFixture(t *testing.T) *modelFixture {
 	}
 	picker := modelPickerFunc(func(context.Context) (string, error) { return f.path, f.pickErr })
 	f.s = NewModelsService(ModelsDeps{
-		Catalog: f.catalog, Downloads: f.downloads, Imports: f.imports, Links: f.links, Picker: picker, SpeechReady: true,
+		Catalog: f.catalog, Downloads: f.downloads, Imports: f.imports, Links: f.links, Picker: picker,
+		Speech: &fakeSpeech{status: speechcomponent.Status{State: speechcomponent.StateReady}},
 	}, slog.New(slog.NewTextHandler(f.logs, nil)))
 	return f
 }

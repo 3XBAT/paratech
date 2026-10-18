@@ -8,16 +8,17 @@ import (
 	"unicode/utf8"
 )
 
-// Bounds of the speech component manifest (TASK-072).
+// Bounds of the speech component manifest (TASK-072). They only stop a broken manifest; the pinned sizes are what
+// bounds a download and an unpack.
 const (
 	ComponentSchemaVersion           = 1
 	MaxComponentManifestBytes        = 64 << 10
 	MaxComponentFiles                = 64
 	MaxComponentFileNameLen          = 64
 	MaxComponentEntryPrefixLen       = 128
-	MaxComponentArchiveBytes         = 64 << 20
-	MaxComponentFileBytes      int64 = 32 << 20
-	MaxComponentTotalBytes     int64 = 128 << 20
+	MaxComponentArchiveBytes         = 512 << 20
+	MaxComponentFileBytes      int64 = 256 << 20
+	MaxComponentTotalBytes     int64 = 512 << 20
 )
 
 // ComponentFolder is a place where the speech component may be installed. The adapter maps it to a directory; the

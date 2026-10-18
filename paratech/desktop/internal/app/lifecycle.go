@@ -82,6 +82,11 @@ func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers
 	if c.manager != nil {
 		closers = append([]closer{{name: "model manager", close: c.manager.close}}, closers...)
 	}
+	if c.speech != nil {
+		// An install writes through the component folder and the storage.
+		closers = append([]closer{{name: "speech component install", close: func() error { return c.closeSpeech(stopTimeout) }}},
+			closers...)
+	}
 	return &lifecycle{
 		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, transcriptions: c.transcriptions,
 		calendar: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "start") },

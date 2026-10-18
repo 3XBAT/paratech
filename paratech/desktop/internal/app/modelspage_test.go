@@ -45,7 +45,7 @@ func (p *modelPicker) set(path string) {
 func modelsPage(core wails.Core, picker wails.ModelFilePicker) *wails.ModelsService {
 	return wails.NewModelsService(wails.ModelsDeps{
 		Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links, Picker: picker,
-		SpeechReady: core.SpeechReady,
+		Speech: core.Speech,
 	}, slog.New(slog.DiscardHandler))
 }
 

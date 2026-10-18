@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 
 	"paratech/desktop/internal/domain/transcription/values"
@@ -102,7 +103,7 @@ func selectEntries(zr *zip.Reader, spec values.SpeechComponent) (map[string]*zip
 			return nil, fmt.Errorf("%w: %s is encrypted", values.ErrInvalidComponentArchive, cf.Name())
 		case zf.Method != zip.Store && zf.Method != zip.Deflate:
 			return nil, fmt.Errorf("%w: %s uses compression method %d", values.ErrInvalidComponentArchive, cf.Name(), zf.Method)
-		case zf.UncompressedSize64 != uint64(cf.Size()):
+		case declaredSize(zf) != cf.Size():
 			return nil, fmt.Errorf("%w: %w: %s declares %d bytes, want %d", values.ErrInvalidComponentArchive,
 				values.ErrSizeMismatch, cf.Name(), zf.UncompressedSize64, cf.Size())
 		}
@@ -114,6 +115,14 @@ func selectEntries(zr *zip.Reader, spec values.SpeechComponent) (map[string]*zip
 		}
 	}
 	return out, nil
+}
+
+// declaredSize is the uncompressed size an entry declares; -1 when it does not fit an int64.
+func declaredSize(zf *zip.File) int64 {
+	if zf.UncompressedSize64 > math.MaxInt64 {
+		return -1
+	}
+	return int64(zf.UncompressedSize64)
 }
 
 // fill writes every component file into the staging folder, each under its manifest name.
