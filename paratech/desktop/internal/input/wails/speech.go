@@ -37,7 +37,7 @@ const (
 	ErrSpeechCorrupted   speechText = "Скачанный файл повреждён, попробуйте ещё раз"
 	ErrSpeechRefused     speechText = "Сервер с компонентом ответил не так, как ожидалось: попробуйте позже"
 	ErrSpeechNoAccess    speechText = "Нет доступа к папке с данными программы"
-	ErrSpeechNotStarted  speechText = "Компонент установлен, но распознавание не запустилось: перезапустите программу"
+	ErrSpeechNotStarted  speechText = "Компонент распознавания установлен, но не запустился. Перезапустите приложение; если не поможет — сохраните пакет для поддержки в разделе «Диагностика»"
 	ErrSpeechFailed      speechText = "Не удалось установить компонент распознавания речи"
 	ErrSpeechInstalling  speechText = "Компонент распознавания речи уже устанавливается"
 	ErrSpeechAlreadyWork speechText = "Распознавание речи уже работает"
@@ -47,8 +47,8 @@ const (
 //
 // State is "ready", "missing", "damaged", "installing" or "failed". Stage is set while installing: "downloading",
 // "verifying", "unpacking" or "activating"; DoneBytes and TotalBytes are the download progress. Message is the text to
-// show ("" when ready or installing). CanInstall offers the «Установить компонент распознавания» button, CanCancel
-// the cancel of a running install.
+// show ("" when ready or installing). CanInstall offers the «Установить компонент распознавания» button (not when
+// verified files failed to start), CanCancel the cancel of a running install.
 type SpeechStatusView struct {
 	State      string `json:"state"`
 	Stage      string `json:"stage"`
@@ -102,7 +102,8 @@ func speechView(st speechcomponent.Status) SpeechStatusView {
 	case speechcomponent.StateDamaged:
 		v.Message, v.CanInstall = SpeechDamaged.Error(), true
 	case speechcomponent.StateFailed:
-		v.Message, v.CanInstall = speechErrorText(st.Err), true
+		// A verified set that did not start is not fixed by downloading it again: no install button then.
+		v.Message, v.CanInstall = speechErrorText(st.Err), !errors.Is(st.Err, speechcomponent.ErrActivationFailed)
 	}
 	return v
 }

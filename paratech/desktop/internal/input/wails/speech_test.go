@@ -70,6 +70,15 @@ func TestSpeechStatusView(t *testing.T) {
 			SpeechStatusView{State: "installing", Stage: "downloading", DoneBytes: 5, TotalBytes: 9, CanCancel: true}},
 		{"failed", speechcomponent.Status{State: speechcomponent.StateFailed, Err: speechcomponent.ErrDownloadFailed},
 			SpeechStatusView{State: "failed", Message: string(ErrSpeechOffline), CanInstall: true}},
+		// A reinstall does not fix verified files that did not start, at start or right after an install.
+		{"not started", speechcomponent.Status{State: speechcomponent.StateFailed, Err: speechcomponent.ErrActivationFailed},
+			SpeechStatusView{State: "failed", Message: string(ErrSpeechNotStarted)}},
+		{"not started after an install", speechcomponent.Status{State: speechcomponent.StateFailed,
+			Err: fmt.Errorf("speechcomponent: install: %w: %w", speechcomponent.ErrActivationFailed, errors.New("engine"))},
+			SpeechStatusView{State: "failed", Message: string(ErrSpeechNotStarted)}},
+		{"not verified after an install", speechcomponent.Status{State: speechcomponent.StateFailed,
+			Err: speechcomponent.ErrNotVerified},
+			SpeechStatusView{State: "failed", Message: string(ErrSpeechCorrupted), CanInstall: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

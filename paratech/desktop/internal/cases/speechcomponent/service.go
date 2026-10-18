@@ -136,11 +136,16 @@ func (s *Service) Status() Status {
 		return Status{State: StateInstalling, Stage: s.stage, DoneBytes: s.done, TotalBytes: s.spec.ArchiveSize()}
 	case s.active:
 		return Status{State: StateReady}
+	case s.found == values.ComponentReady:
+		// Verified files that are not active: the activation failed or was cut short. This wins over a later install
+		// failure, since reinstalling does not fix an activation.
+		err := s.lastErr
+		if !errors.Is(err, ErrActivationFailed) {
+			err = ErrActivationFailed
+		}
+		return Status{State: StateFailed, Err: err}
 	case s.lastErr != nil:
 		return Status{State: StateFailed, Err: s.lastErr}
-	case s.found == values.ComponentReady:
-		// Verified files that are not active: the activation failed or was cut short.
-		return Status{State: StateFailed, Err: ErrActivationFailed}
 	case s.found == values.ComponentDamaged:
 		return Status{State: StateDamaged}
 	}

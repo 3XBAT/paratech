@@ -214,6 +214,24 @@ func TestInstallFailures(t *testing.T) {
 	}
 }
 
+// Verified files that did not start stay reported as an activation failure, even after a later install fails
+// otherwise: a reinstall does not fix them.
+func TestActivationFailureWinsOverALaterInstallFailure(t *testing.T) {
+	e := newEnv(t, func(e *env) {
+		e.files.folders[values.FolderBundled] = verifiedSet()
+		e.activator.err = errors.New("work dir not representable")
+	})
+	if st, _ := e.svc.Detect(context.Background()); st.State != StateFailed || !errors.Is(st.Err, ErrActivationFailed) {
+		t.Fatalf("after Detect: %+v", st)
+	}
+	e.source.mu.Lock()
+	e.source.err = errors.New("offline")
+	e.source.mu.Unlock()
+	if st := e.installed(); st.State != StateFailed || !errors.Is(st.Err, ErrActivationFailed) {
+		t.Fatalf("after a failed install: %+v, want ErrActivationFailed", st)
+	}
+}
+
 // A failed install can be started again.
 func TestRetryAfterAFailure(t *testing.T) {
 	e := newEnv(t, func(e *env) { e.source.err = errors.New("offline") })
