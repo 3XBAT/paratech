@@ -49,7 +49,7 @@
 - Open: whether Google's token endpoint accepts a Desktop client without `client_secret` (docs say "Optional"); we always send it.
 
 ## Calendar (TASK-051)
-- **Binding.** The id of the app calendar «Learning Assistant» and a `fresh` flag live in Credential Manager
+- **Binding.** The id of the app calendar «paratech» (named «Learning Assistant» before ADR-0015, renamed in place) and a `fresh` flag live in Credential Manager
   (`paratech/google/calendar-id`, JSON `{id, fresh}`); no SQLite migration. `calendarList.list` is not allowed with
   `calendar.app.created`, so the stored id is the only binding.
 - **Gone** only when `calendars.get` AND `calendarList.get` both answer 404/410/403 (not a rate limit). Then a new

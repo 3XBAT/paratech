@@ -21,10 +21,18 @@ const (
 	EnvHeadless = "LA_HEADLESS"
 	// EnvLocalAppData is the Windows per-user local application data directory, the base of the default DataDir.
 	EnvLocalAppData = "LOCALAPPDATA"
+	// EnvAppData is the Windows per-user roaming application data directory, the base of WebviewDataDir.
+	EnvAppData = "APPDATA"
 )
 
-// dataDirName is the directory of the application below EnvLocalAppData.
-const dataDirName = "LearningAssistant"
+// Folder names kept from before the rename to paratech (ADR-0015): the data, the Credential Manager profile (ADR-0014)
+// and the window's WebView2 state (the UI theme among it) stay where earlier versions put them.
+const (
+	// dataDirName is the directory of the application below EnvLocalAppData.
+	dataDirName = "LearningAssistant"
+	// webviewDirName is the WebView2 user data folder below EnvAppData: Wails' default for the old exe name.
+	webviewDirName = "learning-assistant.exe"
+)
 
 // Config is the validated desktop configuration.
 type Config struct {
@@ -36,6 +44,9 @@ type Config struct {
 	// DefaultDataDir is %LOCALAPPDATA%\LearningAssistant, whatever DataDir is; empty where that variable is unset. Only
 	// the default data dir uses the default Credential Manager names (ADR-0014).
 	DefaultDataDir string
+	// WebviewDataDir is the WebView2 user data folder of the windows, %APPDATA%\learning-assistant.exe; empty where
+	// that variable is unset or not absolute (Wails then uses %APPDATA%\<exe name>).
+	WebviewDataDir string
 	// Headless runs the core without the Windows UI shell (tray, windows), e.g. in tests and on other OSes.
 	Headless bool
 	// Recorder is internal: the app starts its own executable with --recorder --data-dir <dir> as the audio recorder
@@ -56,6 +67,9 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	if v := getenv(EnvLocalAppData); v != "" {
 		cfg.DefaultDataDir = filepath.Join(v, dataDirName)
 		cfg.DataDir = cfg.DefaultDataDir
+	}
+	if v := getenv(EnvAppData); v != "" && filepath.IsAbs(v) {
+		cfg.WebviewDataDir = filepath.Join(v, webviewDirName)
 	}
 	if v := getenv(EnvLogLevel); v != "" {
 		cfg.LogLevel = v

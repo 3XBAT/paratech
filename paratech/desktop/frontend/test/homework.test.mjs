@@ -103,7 +103,7 @@ test("every generation state has a chip; waiting and failed ones show the core's
     generationStates.map((state) => generationView({ state, message: "" }).label),
     ["Готовится черновик", "Ждёт интернет", "Лимит обработки исчерпан", "Черновик не готов", "Черновик готов"],
   );
-  const text = "Нет связи с сервером обработки: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
+  const text = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
   assert.equal(generationView({ state: "waitingNetwork", message: text }).hint, text);
   assert.deepEqual(
     generationStates.filter(generationGoesOn),

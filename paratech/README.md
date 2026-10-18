@@ -1,4 +1,4 @@
-# Learning Assistant (code)
+# paratech (code)
 
 Local-first Windows assistant for online classes. This repository contains only the code:
 

@@ -64,7 +64,7 @@ const (
 const (
 	msgUnknownOutcome = "Письмо отправлено, но подтверждение не получено: проверьте сами или отправьте ещё раз под свою ответственность"
 
-	msgWaitingNetwork   = "Нет связи с сервером обработки: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама."
+	msgWaitingNetwork   = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама."
 	msgWaitingQuota     = "Лимит обработки исчерпан. Генерация продолжится, когда лимит обновится."
 	msgGenerationFailed = "Не удалось подготовить черновик. Попробуйте ещё раз."
 	msgGenerationCancel = "Генерация отменена."
@@ -81,7 +81,7 @@ var generationMessages = []struct {
 	{homeworkflow.ErrDraftFull, string(ErrDraftFull)},
 	{homeworkflow.ErrDraftAssignmentGone, "Задание удалено."},
 	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: черновик не подготовить."},
-	{homeworkflow.ErrDraftInvalidAnswer, "Сервер обработки ответил в неверном виде. Попробуйте ещё раз."},
+	{homeworkflow.ErrDraftInvalidAnswer, "Сервис конспектов ответил в неверном виде. Попробуйте ещё раз."},
 }
 
 // rejectMessages explain why a send cannot be confirmed.

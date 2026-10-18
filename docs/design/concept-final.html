@@ -307,7 +307,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 
   <p class="lbl section-label">1 · Главное окно (1100×700; минимум 800×560)</p>
   <div class="win">
-    <div class="titlebar"><span>Учебный помощник</span><span class="sp"></span><span class="wc"><svg class="i"><use href="#i-min"/></svg></span><span class="wc"><svg class="i"><use href="#i-max"/></svg></span><span class="wc"><svg class="i"><use href="#i-x"/></svg></span></div>
+    <div class="titlebar"><span>paratech</span><span class="sp"></span><span class="wc"><svg class="i"><use href="#i-min"/></svg></span><span class="wc"><svg class="i"><use href="#i-max"/></svg></span><span class="wc"><svg class="i"><use href="#i-x"/></svg></span></div>
     <div class="strip" role="region" aria-label="Текущая запись">
       <span class="who"><span class="dot"></span>Запись</span>
       <span><span class="t">Матанализ, лекция</span> <span class="m">· звук из Zoom · до конца пары 48 мин</span></span>
@@ -392,20 +392,21 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 
         <!-- Подключения: an overview of equal cards; a card opens its section page, «Назад» returns to the card -->
         <section class="screen" data-screen="conn" aria-label="Подключения" hidden>
-          <div class="head"><div><span class="lbl">Сервер обработки, почта и Google Календарь</span><h2>Подключения</h2></div></div>
+          <div class="head"><div><span class="lbl">Конспекты и задания, почта и Google Календарь</span><h2>Подключения</h2></div></div>
           <div class="conn-cards">
-            <button type="button" class="box conn-card" data-open="conn-hub"><span class="ch"><span class="ct">Сервер обработки</span><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Подключено</span></span><span class="m">Адрес, ключ доступа и лимит обработки</span></button>
+            <button type="button" class="box conn-card" data-open="conn-hub"><span class="ch"><span class="ct">Конспекты и задания</span><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Подключено</span></span><span class="m">Адрес, ключ доступа и лимит обработки</span></button>
             <button type="button" class="box conn-card" data-open="conn-mail"><span class="ch"><span class="ct">Почта</span><span class="chip s-wait"><svg class="i"><use href="#i-warn"/></svg>Нет пароля</span></span><span class="m">Отправка домашних заданий письмом</span></button>
             <button type="button" class="box conn-card"><span class="ch"><span class="ct">Google Календарь</span><span class="chip s-wait"><svg class="i"><use href="#i-warn"/></svg>Вход не выполнен</span></span><span class="m">Вход и синхронизация расписания</span></button>
             <button type="button" class="box conn-card"><span class="ch"><span class="ct">Календарь на iPhone, iPad и Mac</span><span class="chip s-neu">Инструкция</span></span><span class="m">Как увидеть события в Apple Calendar</span></button>
           </div>
           <div class="gap"></div>
         </section>
-        <section class="screen" data-screen="conn-hub" aria-label="Сервер обработки" hidden>
-          <div class="head"><div><span class="lbl">Подключения</span><h2>Сервер обработки</h2></div><button class="btn" data-open="conn">Назад</button></div>
+        <section class="screen" data-screen="conn-hub" aria-label="Конспекты и задания" hidden>
+          <div class="head"><div><span class="lbl">Подключения</span><h2>Конспекты и задания</h2></div><button class="btn" data-open="conn">Назад</button></div>
           <div class="box">
+            <span class="m">Ключ доступа выдаёт автор приложения. Это не ключ Claude или ChatGPT. Распознавание речи всегда идёт на этом компьютере.</span>
             <span class="m">Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.</span>
-            <div class="field"><label for="hub">Адрес сервера</label><input class="input" id="hub" value="https://hub.uchebnyi-pomoshnik.ru"></div>
+            <div class="field"><label for="hub">Адрес сервера</label><input class="input" id="hub" value="https://hub.paratech.example"></div>
             <div class="field"><div class="flabel"><label>Ключ доступа</label><span class="fstate s-ok"><svg class="i"><use href="#i-key"/></svg>задан</span></div><div class="secret"><button class="btn">Заменить</button><button class="btn ghost">Удалить</button></div></div>
             <div class="meter"><div style="display:flex;justify-content:space-between;gap:12px"><span class="lbl">Обработка в этом месяце</span><span class="m num">осталось 42 из 60 мин · до 1 октября</span></div><div class="prog" role="progressbar" aria-label="Израсходовано минут обработки" aria-valuenow="18" aria-valuemin="0" aria-valuemax="60"><b style="--p:30%"></b></div></div>
             <button class="btn">Проверить связь</button>

@@ -89,7 +89,7 @@ type FakeCalendarRequest struct {
 }
 
 // FakeGoogleCalendar is a local Calendar API v3 server for the googlecal tests (TASK-051). It implements the subset the
-// adapter uses with the rules of docs/refs/google-calendar.md: calendars insert/get, calendarList get, events
+// adapter uses with the rules of docs/refs/google-calendar.md: calendars insert/get/patch, calendarList get, events
 // insert/get/update/delete; client event ids of base32hex characters a-v0-9 and length 5..1024, unique per calendar;
 // private properties with a key over 44 characters dropped and a value over 1024 cut, silently. Behavior the docs do
 // not state is the fake's choice: insert of an existing id answers 409 also when the event is deleted; update restores
@@ -284,7 +284,7 @@ func (f *FakeGoogleCalendar) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload map[string]any
-	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+	if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, fakeCalendarMaxBody))
 		if err := dec.Decode(&payload); err != nil {
 			writeFakeAnswer(w, fakeAnswer{status: http.StatusBadRequest, reason: "parseError"})
@@ -371,6 +371,8 @@ func (f *FakeGoogleCalendar) route(method string, seg []string, payload map[stri
 		switch {
 		case len(seg) == 2 && method == http.MethodGet:
 			return fakeAnswer{status: http.StatusOK, body: calJSON(c.info)}
+		case len(seg) == 2 && method == http.MethodPatch:
+			return patchCalendar(c, payload)
 		case len(seg) == 3 && seg[2] == "events" && method == http.MethodPost:
 			return calInsertEvent(c, payload)
 		case len(seg) == 4 && seg[2] == "events":
@@ -387,6 +389,21 @@ func (f *FakeGoogleCalendar) insertCalendar(p map[string]any) fakeAnswer {
 	}
 	id := f.newCalendar(summary, calStr(p, "description"), calStr(p, "timeZone"))
 	return fakeAnswer{status: http.StatusOK, body: calJSON(f.calendars[id].info)}
+}
+
+// patchCalendar is calendars.patch: only the fields sent change; an empty summary is refused, as on insert.
+func patchCalendar(c *fakeCalendar, p map[string]any) fakeAnswer {
+	if v, ok := p["summary"]; ok {
+		s, _ := v.(string)
+		if s == "" {
+			return fakeAnswer{status: http.StatusBadRequest, reason: "required"}
+		}
+		c.info.Summary = s
+	}
+	if v, ok := p["description"]; ok {
+		c.info.Description, _ = v.(string)
+	}
+	return fakeAnswer{status: http.StatusOK, body: calJSON(c.info)}
 }
 
 // calendarListEntry is calendarList.get: the entry of a live calendar the app created, else 404.

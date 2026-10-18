@@ -148,6 +148,10 @@ calendar, no item marked synced when it is not).
   not stated (the docs only say "call calendarList.list() to retrieve IDs").
 - calendars.get for a missing calendar: not stated per method; the errors guide has a generic 404 `notFound` and advises
   exponential backoff for it. calendarList.get: same.
+- calendars.patch (`PATCH /calendars/{calendarId}`, only the fields sent change) renames the stored calendar
+  «Learning Assistant» to «paratech» (TASK-069, ADR-0015). That `calendar.app.created` allows it for a calendar the app
+  created: **not verified** here (no access to the method page). If Google refuses it, the old name stays and the sync
+  goes on; the adapter tries again at the next sync.
 - Event `id` chosen by the client: lowercase `a-v` and `0-9` (base32hex), length 5..1024, unique per calendar;
   "collisions may not be detected at creation time": verified (events.insert, Events resource). The Create events guide
   recommends client ids to avoid duplicates when a call failed after it succeeded on the backend: verified.
@@ -205,3 +209,4 @@ calendar, no item marked synced when it is not).
 - What do calendars.get and calendarList.get answer for the stored calendar after it is deleted, and after signing in
   with another account (404 or 403)?
 - Zero-length events are not used, nothing to check there.
+- Does calendars.patch rename the old «Learning Assistant» calendar (`docs/qa/run-alpha.md` §10, step 18)?

@@ -48,8 +48,8 @@ func desktop() snapshot {
 			{pid: 500, parent: 10, exe: "unknown.exe", created: 500},
 		},
 		windows: []windowInfo{
-			win(101, "Learning Assistant"), // our WebView2
-			win(ourPID, "Learning Assistant"),
+			win(101, "paratech"), // our WebView2
+			win(ourPID, "paratech"),
 			win(201, "Lecture - Chrome"),
 			win(300, "Zoom Meeting"),
 			win(200, "Second Chrome window"),
@@ -106,7 +106,7 @@ func TestAppsOfFiltersWindows(t *testing.T) {
 		{"explorer without a title", base(win(300, ""), proc(300, 1, "explorer.exe", 300)), nil},
 		{"explorer folder window", base(win(300, "Downloads"), proc(300, 1, "explorer.exe", 300)), []string{"explorer.exe"}},
 		{"no executable name", base(win(300, "x"), proc(300, 1, "System", 300)), nil},
-		{"own window", base(win(ourPID, "Learning Assistant"), zoom), nil},
+		{"own window", base(win(ourPID, "paratech"), zoom), nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Builds the alpha of the Learning Assistant desktop app: the React UI, then the Windows binary with the UI embedded.
+Builds the alpha of the paratech desktop app: the React UI, then the Windows binary with the UI embedded.
 
 .DESCRIPTION
 Runs `npm ci` and `npm run build` in desktop/frontend, then `go build -tags production -trimpath` of
@@ -44,7 +44,10 @@ $ErrorActionPreference = 'Stop'
 $desktopDir = $PSScriptRoot
 $moduleRoot = Split-Path -Parent $desktopDir
 $frontendDir = Join-Path $desktopDir 'frontend'
-$exeName = 'learning-assistant.exe'
+$exeName = 'paratech.exe'
+# The exe name before the rename (ADR-0015): removed from the output folder, so an old build next to the new one is
+# not started by mistake (it would also take the paratech: links back).
+$legacyExeName = 'learning-assistant.exe'
 $manifestPath = Join-Path $desktopDir 'internal\app\speechcomponent.json'
 $cacheRoot = Join-Path $moduleRoot 'dist\cache\speech-component'
 # Removed from the output folder before the component is copied: also any ggml-cpu-*.dll of an older set.
@@ -476,6 +479,11 @@ try {
 
 Write-Step "Go: building $exePath (tags production, CGO_ENABLED=0, windows/amd64)"
 $null = New-Item -ItemType Directory -Force -Path $OutDir
+$legacyExe = Join-Path $OutDir $legacyExeName
+if (Test-Path -LiteralPath $legacyExe -PathType Leaf) {
+    Write-Step "Removing $legacyExe of a build before the rename"
+    Remove-Item -LiteralPath $legacyExe -Force
+}
 $saved = Set-Env @{ CGO_ENABLED = '0'; GOOS = 'windows'; GOARCH = 'amd64' }
 try {
     Invoke-Native $goExe @('-C', $moduleRoot, 'build', '-tags', 'production', '-trimpath', '-o', $exePath, './desktop/cmd/desktop')

@@ -3,6 +3,7 @@
 package wails
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"io/fs"
@@ -86,13 +87,19 @@ func TestAppOptions(t *testing.T) {
 	if !opts.Windows.DisableQuitOnLastWindowClosed {
 		t.Error("hiding the last window must not quit the tray app")
 	}
+	if opts.Windows.WebviewUserDataPath != "" {
+		t.Errorf("no WebviewDataDir must keep the Wails default, got %q", opts.Windows.WebviewUserDataPath)
+	}
+	if !bytes.Equal(opts.Icon, appIcon()) {
+		t.Error("the window icon must be the app icon")
+	}
 	if opts.SingleInstance == nil || opts.SingleInstance.UniqueID != "test.la" {
 		t.Fatalf("single instance = %+v", opts.SingleInstance)
 	}
 	opts.SingleInstance.OnSecondInstanceLaunch(application.SecondInstanceData{})
 	// A launch by a paratech: link (ADR-0013) does the same and nothing else, whatever its arguments say.
 	opts.SingleInstance.OnSecondInstanceLaunch(application.SecondInstanceData{
-		Args:       []string{`C:\LA\Paratech.exe`, `paratech://open/../x" --data-dir "C:\evil`, "--recorder"},
+		Args:       []string{`C:\LA\paratech.exe`, `paratech://open/../x" --data-dir "C:\evil`, "--recorder"},
 		WorkingDir: `C:\evil`, AdditionalData: map[string]string{"action": "record"},
 	})
 	if called != 2 {
@@ -148,5 +155,27 @@ func TestAppOptionsServeMedia(t *testing.T) {
 	media.setSource(&fakeAudio{data: []byte("RIFF")})
 	if rec := get("/media/recording/r1"); rec.Code != http.StatusOK || rec.Body.String() != "RIFF" {
 		t.Fatalf("after the core is open: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// The WebView2 folder is the one passed in, so the window keeps its state over the exe rename (ADR-0015).
+func TestAppOptionsWebviewDataDir(t *testing.T) {
+	o := validOptions()
+	o.WebviewDataDir = `C:\Users\Student\AppData\Roaming\learning-assistant.exe`
+	if got := appOptions(o, func() {}).Windows.WebviewUserDataPath; got != o.WebviewDataDir {
+		t.Fatalf("WebviewUserDataPath = %q, want %q", got, o.WebviewDataDir)
+	}
+}
+
+// Windows makes the tray (small) and window (large) icons from the embedded ICO the way Wails does.
+func TestAppIconLoadsOnWindows(t *testing.T) {
+	for name, create := range map[string]func([]byte) (w32.HICON, error){
+		"small": w32.CreateSmallHIconFromImage, "large": w32.CreateLargeHIconFromImage,
+	} {
+		icon, err := create(appIcon())
+		if err != nil || icon == 0 {
+			t.Fatalf("%s icon: %v, %v", name, icon, err)
+		}
+		w32.DestroyIcon(icon)
 	}
 }

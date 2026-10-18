@@ -85,7 +85,7 @@ func headerValues(h http.Header) []string {
 // The pages are self-contained Russian pages in the app's style: a title, an icon, the next step, the one link to the
 // app and both colour schemes, without scripts, external resources or fonts to load.
 func TestPagesAreSelfContained(t *testing.T) {
-	const button = `<a class="btn" href="paratech://open">Открыть Paratech</a>`
+	const button = `<a class="btn" href="paratech://open">Открыть paratech</a>`
 	const fallback = `<a class="lnk" href="paratech://open">Открыть paratech, если окно не появилось</a>`
 	tests := []struct {
 		name string
@@ -98,7 +98,7 @@ func TestPagesAreSelfContained(t *testing.T) {
 		{name: "failed", page: pageFailed, want: []string{"<h1>Вход не выполнен</h1>", "истекло время ожидания", "«Войти через Google»", button}},
 	}
 	common := []string{
-		`<html lang="ru">`, `<meta charset="utf-8">`, "<title>Paratech: ", "<svg ", "Можно закрыть эту вкладку и вернуться в приложение",
+		`<html lang="ru">`, `<meta charset="utf-8">`, "<title>paratech: ", "<svg ", "Можно закрыть эту вкладку и вернуться в приложение",
 		"@media (prefers-color-scheme:dark)", `"Golos Text"`, "sans-serif",
 	}
 	forbidden := []string{"<script", "javascript:", "@font-face", "@import", "url(", "src=", "http:", "https:", "data:", "<img", "<link",

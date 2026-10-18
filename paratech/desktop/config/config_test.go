@@ -51,6 +51,12 @@ func TestLoad(t *testing.T) {
 				LogLevel: "info", DataDir: abs, DefaultDataDir: filepath.Join(abs, "local", "LearningAssistant"),
 			},
 		},
+		{
+			name: "webview data dir below app data",
+			env:  map[string]string{config.EnvAppData: abs},
+			want: config.Config{LogLevel: "info", WebviewDataDir: filepath.Join(abs, "learning-assistant.exe")},
+		},
+		{name: "relative app data is ignored", env: map[string]string{config.EnvAppData: "roaming"}, want: config.Config{LogLevel: "info"}},
 		{name: "headless", env: map[string]string{config.EnvHeadless: "true"}, want: config.Config{LogLevel: "info", Headless: true}},
 		{name: "not headless", env: map[string]string{config.EnvHeadless: "0"}, want: config.Config{LogLevel: "info"}},
 		{name: "bad headless", env: map[string]string{config.EnvHeadless: "maybe"}, wantErr: "is not a boolean"},

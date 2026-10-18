@@ -17,7 +17,9 @@ import (
 
 // Identity of the desktop application for the UI shell.
 const (
-	appName    = "Learning Assistant"
+	appName = "paratech"
+	// instanceID keeps its name from before the rename (ADR-0015): the installer finds a running app by the Wails
+	// mutex derived from it, also one of an older version.
 	instanceID = "paratech.learning-assistant.desktop"
 )
 
@@ -66,7 +68,8 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
 	if !cfg.Headless && !cfg.Recorder {
 		shell, err := wails.New(wails.Options{
-			Name: appName, InstanceID: instanceID, Log: a.log, OpenCore: a.openCore, Started: a.launchStart,
+			Name: appName, InstanceID: instanceID, WebviewDataDir: a.cfg.WebviewDataDir, Log: a.log,
+			OpenCore: a.openCore, Started: a.launchStart,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("app: ui shell: %w", err)

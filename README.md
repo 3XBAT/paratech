@@ -1,6 +1,6 @@
-# Learning Assistant (paratech)
+# paratech
 
-Local-first Windows assistant for **online** classes: records system audio, transcribes locally (whisper.cpp), summarizes and extracts homework
+paratech (formerly «Learning Assistant», ADR-0015) is a local-first Windows assistant for **online** classes: records system audio, transcribes locally (whisper.cpp), summarizes and extracts homework
 via a cloud LLM Hub, syncs deadlines to Google Calendar. Requirements: `docs/prd/learning-assistant-prd-v0.4.md`.
 
 ## Repository layout

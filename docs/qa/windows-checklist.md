@@ -12,7 +12,7 @@
 - [ ] Собрать exe (§2).
 - [ ] Одноразовая папка данных и лог в файл (§3). Дальше везде эта команда запуска, из корня репозитория:
   ```powershell
-  cmd /c ".\paratech\dist\alpha\learning-assistant.exe --data-dir %LOCALAPPDATA%\la-qa --log-level debug 2> %LOCALAPPDATA%\la-qa.log"
+  cmd /c ".\paratech\dist\alpha\paratech.exe --data-dir %LOCALAPPDATA%\la-qa --log-level debug 2> %LOCALAPPDATA%\la-qa.log"
   ```
   Папка данных — `%LOCALAPPDATA%\la-qa`, лог — `%LOCALAPPDATA%\la-qa.log` (открывать после выхода).
 - [ ] Компонент распознавания рядом с exe (его кладёт `build-alpha.ps1`, §6) и модель `ggml-base.bin` (быстрая) или `ggml-small.bin` (точнее, медленнее), импорт в «Модели речи» (§6).
@@ -67,7 +67,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestHardCapFinalizes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestRecordingReachesTheCapOnDisk` (`desktop/tests/recording_sqlite_test.go`). Лимит в интерфейсе не меняется, поэтому ручная проверка долгая и необязательная.
 Вручную (по желанию, можно вместе с шагом 10 ADR-0002 «Verification»):
 - [ ] Начать запись длинного плейлиста и оставить на 3 ч 5 мин.
-- [ ] Ожидаемо: в 3:00:00 запись сама «Сохраняется» → «Завершена», файл около 3:00:00, второй `learning-assistant.exe` (рекордер) пропал из `tasklist`.
+- [ ] Ожидаемо: в 3:00:00 запись сама «Сохраняется» → «Завершена», файл около 3:00:00, второй `paratech.exe` (рекордер) пропал из `tasklist`.
 
 Итог: Windows 10 — [ ] ок [ ] нет [ ] не делали · Windows 11 — [ ] ок [ ] нет [ ] не делали
 
@@ -76,7 +76,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestRecoveryAfterACrashDuringTheCapture`, `TestRecoveryDropsABrokenLastChunk` (`desktop/tests/recording_recovery_sqlite_test.go`); `TestInterruptedRecordingSurvivesRestart` (`desktop/tests/recording_sqlite_test.go`).
 Вручную (также строка 6 таблицы в `docs/tasks/TASK-017-recorder-manual-checks.md`):
 - [ ] Запись идёт не меньше 2 мин.
-- [ ] Диспетчер задач → «Подробности» (включить колонку «Командная строка»): завершить `learning-assistant.exe` **без** `--recorder`.
+- [ ] Диспетчер задач → «Подробности» (включить колонку «Командная строка»): завершить `paratech.exe` **без** `--recorder`.
 - [ ] Через ~3 с второй процесс (с `--recorder`) пропадает сам.
 - [ ] Запуск: в логе `found an interrupted recording` и `recording recovery finished recordings=1`; запись в группе «Завершённые», «Завершена» с причиной «the app stopped while the recording was in progress»; `<id>.wav` играет, потеряно не больше последней минуты.
 
@@ -114,7 +114,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestJobRunnerQueueSurvivesARestart` (`desktop/tests/jobrunner_sqlite_test.go`); `TestStartupRecoveryAfterACrash` (`desktop/tests/jobrecovery_sqlite_test.go`); `TestSTTJobWaitsForWhisperCLI`, `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, перезапуск без дублей).
 Вручную:
 - [ ] Модель по умолчанию `ggml-small.bin`, запись 5–10 мин, «Остановить».
-- [ ] Пока у строки записи «Расшифровка», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
+- [ ] Пока у строки записи «Расшифровка», завершить главный `paratech.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
 - [ ] Запуск: в логе `startup recovery finished requeued=1`; строка снова «Расшифровка», затем дальше по цепочке; строка этой записи одна, не две (законченные записи — в группе «Завершённые»).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -128,7 +128,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestGatewayReplayAgainstPostgres`, `TestGatewayConcurrentIdenticalCallsAgainstPostgres` (`hub/tests/gateway_test.go`); `TestQuotaKeyReplayAgainstPostgres` (`hub/tests/quota_test.go`); `TestRetrySendsSameIdempotencyKey` (`desktop/internal/adapters/hubclient/client_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, после перезапуска Hub не списывает снова).
 Вручную:
-- [ ] «Подключения» → карточка «Сервер обработки» → «Лимит обработки» → «Обновить», записать «Осталось».
+- [ ] «Подключения» → карточка «Конспекты и задания» → «Лимит обработки» → «Обновить», записать «Осталось».
 - [ ] Обработать одно занятие (AC-06, с интернетом). Когда у строки записи «Конспект готов», — «Обновить»: остаток уменьшился.
 - [ ] `Quit`, запуск, «Обновить»: остаток тот же.
 - [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующая запись — «В очереди · лимит исчерпан» с кнопкой «Открыть подключения».
@@ -139,7 +139,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres` (`hub/tests/quota_test.go`); `TestRefreshQuotaResults` (`desktop/internal/cases/connections/hub_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`).
 Вручную (§8 «Подключения», пункты про ключ и «Лимит обработки»):
-- [ ] С адресом и ключом («Подключения» → карточка «Сервер обработки») «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
+- [ ] С адресом и ключом («Подключения» → карточка «Конспекты и задания») «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
 - [ ] Hub остановлен, «Обновить»: цифры прежние, «Устарело: …».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -153,7 +153,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 - [ ] «Дополнительные указания» «короче», «Сгенерировать заново» → версия 3 с этими указаниями в «Версиях»; версия 2 с правкой осталась («Открыть» показывает её текст только для чтения, «Сгенерировать заново» при этом недоступно с пояснением «Новая версия делается из последней…»).
 - [ ] У старой версии «Взять этот текст» → «Сохранить правку»: новая последняя версия с этим текстом.
 - [ ] «Сохранить в файл» → «Версия N сохранена в файл «homework.md».»; файл `artifacts\exports\<id задания>\homework.md` в папке данных, текст как в полях.
-- [ ] Без интернета «Сгенерировать заново»: «Ждёт интернет» и текст про сервер обработки; после включения сети версия появляется сама.
+- [ ] Без интернета «Сгенерировать заново»: «Ждёт интернет» и «Нет связи с сервисом конспектов…»; после включения сети версия появляется сама.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -201,9 +201,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestWiredCalendarSync` (`desktop/internal/app/calendar_test.go`); `TestCalendarSyncTwiceGivesTheSameEvents`, `TestCalendarSyncChangedLessonUpdatesTheEvent`, `TestCalendarSyncRewritesIntoAFreshCalendar` (`desktop/tests/calendar_sync_sqlite_test.go`, ни одного запроса к чужому календарю); `TestDeadlineCalendarMapsNotSignedIn`, `TestWiredDeadlineProposalWaitsForTheCalendar` (`desktop/internal/app/proposals_test.go`).
 Вручную (run-alpha.md §10, шаги 3 и 7–13):
 - [ ] При входе Google просит доступ только к календарям, созданным приложением.
-- [ ] После «Синхронизировать» есть отдельный календарь «Learning Assistant» с занятиями; основной и другие календари не изменились.
+- [ ] После «Синхронизировать» есть отдельный календарь «paratech» с занятиями; основной и другие календари не изменились.
 - [ ] Повторная синхронизация не создаёт дублей; изменённое занятие обновляет то же событие; удалённое — пропадает.
-- [ ] Выход и вход тем же аккаунтом — календарь «Learning Assistant» один.
+- [ ] Выход и вход тем же аккаунтом — календарь «paratech» один.
 - [ ] В «Записях и задачах» нет строк синхронизации календаря (и они не в счётчиках вкладок); в разделе «Google Календарь» — «Последняя синхронизация: <дата, время>», результат и «· N попытки», если попыток больше одной (TASK-074).
 - [ ] Истёкший вход, тот же запуск: на карточке обзора «Нужен вход», в разделе «Вход в Google истёк: войдите снова…»; после перезапуска — «Вход не выполнен» и раздел предлагает войти (известное ограничение).
 - [ ] Нет доступа к календарю (403): на карточке «Нет доступа», в разделе красная строка «Ошибка: нет доступа к Google Календарю.», пока не войти снова или не перезапустить; после перезапуска в разделе только «Ошибка: синхронизация не удалась.».
@@ -219,9 +219,9 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Автотесты: `TestSchemaHasNoSecretColumns`, `TestPersistedStructsHaveNoSecretFields` (`desktop/tests/schema_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestCredentialNamesArePinned` (`desktop/internal/app/secrets_test.go`); `TestSMTPPasswordNeverReachesTheDatabase` (`desktop/tests/delivery_smtp_test.go`); `TestConnectionsPageKeepsThePasswordSecret` (`desktop/internal/app/connections_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`); `TestAppOptionsLoggerHasNoDebug` (`desktop/internal/input/wails/shell_windows_test.go`); `TestRealCredentialManager` (`desktop/internal/adapters/wincred/wincred_windows_test.go`, настоящий Credential Manager).
 Вручную:
 - [ ] Только одноразовые секреты: отдельный пароль приложения почты и QA-ключ Hub (`hub keys create -label qa-secrets`). После проверки удалить этот пароль приложения в настройках почты и `hub keys revoke -id <id>`.
-- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»: карточки «Почта» и «Сервер обработки»).
+- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»: карточки «Почта» и «Конспекты и задания»).
 - [ ] Панель управления → Диспетчер учётных данных → Учётные данные Windows: есть `paratech-<профиль>/mail/smtp-password` и `paratech-<профиль>/hub/api-key` (или `cmdkey /list | findstr paratech-`). У `la-qa` свой профиль, не папки по умолчанию (ADR-0014): 16 знаков из `secrets_profile_id=` в `la-qa.log`.
-- [ ] После перезапуска страницы «Подключения» → «Почта» и «Подключения» → «Сервер обработки» показывают только «Пароль задан» и «Ключ задан».
+- [ ] После перезапуска страницы «Подключения» → «Почта» и «Подключения» → «Конспекты и задания» показывают только «Пароль задан» и «Ключ задан».
 - [ ] `Quit`. В новом окне PowerShell отключить историю, ввести кусок пароля (8+ символов) по запросу `Read-Host` (не в командной строке) — пусто; затем то же для куска ключа:
   ```powershell
   Set-PSReadLineOption -HistorySaveStyle SaveNothing
@@ -238,7 +238,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Вручную:
 - [ ] Без интернета: приложение запускается; «Записи и задачи», «Модели речи», «Настройки», импорт расписания, попап по расписанию, запись и распознавание работают.
 - [ ] Изменить или удалить событие занятия в Google Calendar: занятие в приложении не меняется; после правки занятия в файле и импорта событие перезаписано (run-alpha.md §10, шаг 14).
-- [ ] Удалить календарь «Learning Assistant» в Google: следующая синхронизация создаёт новый со всеми занятиями (§10, шаг 13).
+- [ ] Удалить календарь «paratech» в Google: следующая синхронизация создаёт новый со всеми занятиями (§10, шаг 13).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -294,7 +294,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestAPIKeyLifecycleAgainstPostgres` (`hub/tests/keys_test.go`); `TestAPIKeyProblemsSendNothing` (`desktop/internal/adapters/hubclient/client_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog` (`desktop/internal/app/secrets_test.go`, запрос к Hub с ключом в заголовке).
 Вручную (команды Hub — из `paratech/`, README «Hub API keys»):
-- [ ] `hub keys create -label qa-<имя>`, ключ в «Подключения» → карточка «Сервер обработки», «Обновить»: цифры есть.
+- [ ] `hub keys create -label qa-<имя>`, ключ в «Подключения» → карточка «Конспекты и задания», «Обновить»: цифры есть.
 - [ ] `hub keys revoke -id <id>`, «Обновить»: «Hub не принял ключ: он неверный или отозван. Введите действующий ключ.», цифр нет. Новое занятие: «Конспект» — «Ошибка».
 - [ ] Новый ключ, ввести: «Обновить» снова показывает цифры.
 
@@ -314,10 +314,10 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestCallbackPages`, `TestPagesAreSelfContained` (`desktop/internal/adapters/googleauth/pages_test.go`); `TestLoadIgnoresASchemeLaunch` (`desktop/config`); `TestEnsure`, `TestEnsureInTheRegistry` (`desktop/internal/adapters/urlscheme`); `TestGoogleSignInShowsTheMainWindow`, `TestAppOptions` (`desktop/internal/input/wails`). Решение — ADR-0013.
 Вручную (run-alpha.md §10, шаг 3):
-- [ ] После входа страница в браузере оформлена (карточка, значок, кнопка «Открыть Paratech»); в тёмной теме Windows — тёмная, в светлой — светлая. Отказ в доступе — «Доступ не разрешён», с подсказкой.
+- [ ] После входа страница в браузере оформлена (карточка, значок, кнопка «Открыть paratech»); в тёмной теме Windows — тёмная, в светлой — светлая. Отказ в доступе — «Доступ не разрешён», с подсказкой.
 - [ ] После входа главное окно приложения само выходит вперёд (или хотя бы мигает на панели задач — отметить, что именно).
-- [ ] «Открыть Paratech» (окно приложения свёрнуто или скрыто в трей): окно выходит вперёд, попап и запись не появляются.
-- [ ] `reg query HKCU\Software\Classes\paratech\shell\open\command`: `"<путь к learning-assistant.exe>" "%1"`, путь — запущенного exe.
+- [ ] «Открыть paratech» (окно приложения свёрнуто или скрыто в трей): окно выходит вперёд, попап и запись не появляются.
+- [ ] `reg query HKCU\Software\Classes\paratech\shell\open\command`: `"<путь к paratech.exe>" "%1"`, путь — запущенного exe.
 - [ ] `explorer.exe paratech://open` при запущенном приложении: окно выходит вперёд, второго значка в трее нет. То же с `explorer.exe "paratech://open/../x --data-dir=C:\evil"`: ничего, кроме окна.
 - [ ] Приложение закрыто (`Quit`): `explorer.exe paratech://open` запускает его обычным образом.
 - [ ] Удалить ключ (`reg delete HKCU\Software\Classes\paratech /f`) и запустить приложение: ключ снова на месте.
@@ -328,22 +328,25 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Сборка — [run-alpha.md](run-alpha.md) §11, подробности — `docs/refs/packaging.md`. Всё здесь — вручную, автотестов нет.
 Установка:
-- [ ] Запуск `learning-assistant-<версия>-windows-amd64-setup.exe`: окна UAC (запроса прав администратора) нет. SmartScreen может предупредить о неподписанном файле: «Подробнее» → «Выполнить в любом случае».
-- [ ] Папка по умолчанию `%LOCALAPPDATA%\Programs\LearningAssistant`; после установки в ней `learning-assistant.exe`, `uninstall.exe`, `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll` и девять `ggml-cpu-*.dll`.
+- [ ] Запуск `paratech-<версия>-windows-amd64-setup.exe`: окна UAC (запроса прав администратора) нет. SmartScreen может предупредить о неподписанном файле: «Подробнее» → «Выполнить в любом случае».
+- [ ] Папка по умолчанию `%LOCALAPPDATA%\Programs\paratech`; после установки в ней `paratech.exe`, `paratech.ico`, `uninstall.exe`, `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll` и девять `ggml-cpu-*.dll`.
 - [ ] При запущенном приложении инсталлятор просит закрыть его из трея; «Отмена» — ничего не установлено.
-- [ ] «Пуск» → «Learning Assistant»: приложение запускается (рядом консоль с логом), в логе строки успешного старта (§5); создана `%LOCALAPPDATA%\LearningAssistant` с `logs\desktop.log`.
+- [ ] Значок paratech (оранжевая волна на графите) у инсталлятора, ярлыка в «Пуске», в «Приложениях и возможностях», у окна и в трее. У самого `paratech.exe` в Проводнике — пока стандартный значок (ADR-0015).
+- [ ] «Пуск» → «paratech»: приложение запускается (рядом консоль с логом), в логе строки успешного старта (§5); создана `%LOCALAPPDATA%\LearningAssistant` с `logs\desktop.log`.
 - [ ] «Диагностика» → «Сохранить пакет для поддержки»: в `about.json` версия `(devel)` и коммит, который напечатал `build-release.ps1` (VERSION в exe не попадает).
 - [ ] В логе нет `speech recognition is not available`, есть `speech recognition engine ready`. Удалить `whisper-cli.exe` из папки установки и перезапустить: на «Моделях речи» «Компонент распознавания речи не установлен»; «Установить компонент распознавания» ставит его в `%LOCALAPPDATA%\LearningAssistant\components\speech`, запись распознаётся без перезапуска (§6).
 - [ ] На чистой Windows без VC++ Redistributable (нет `VCRUNTIME140.dll`, `MSVCP140.dll` в `System32`): whisper-cli запускается, задача распознавания выполняется (нет ошибки об отсутствующей DLL).
 - [ ] Обновление: изменить настройку, импортировать модель, `Quit`; собрать версию выше (`-Version`), поставить поверх: настройка и модель на месте, в «Приложения и возможности» новая версия.
+- [ ] Обновление версии «Learning Assistant» (до TASK-069; выбрана тёмная тема, выполнен вход Google, календарь синхронизирован): поставить paratech поверх. В `Programs\LearningAssistant` нет `learning-assistant.exe`, есть `paratech.exe`; в «Пуске» нет ярлыка «Learning Assistant», есть «paratech»; в «Приложениях и возможностях» одна запись «paratech». После запуска: записи, настройки, ключи Hub и почты, вход Google и тёмная тема на месте; `paratech://open` открывает новый exe. «Синхронизировать»: календарь «Learning Assistant» переименован в «paratech», второго нет (ADR-0015).
+- [ ] То же при запущенной старой версии: инсталлятор просит закрыть приложение и ничего не меняет до «Повтор».
 
 Удаление («Параметры» → «Приложения» → «Приложения и возможности»):
-- [ ] Есть «Learning Assistant» с версией; «Удалить» запускает удаление без UAC. При запущенном приложении — просьба закрыть его.
+- [ ] Есть «paratech» с версией; «Удалить» запускает удаление без UAC. При запущенном приложении — просьба закрыть его.
 - [ ] Вопрос «Удалить и ваши данные?», ответ «Нет» (по умолчанию): папки установки (вместе с файлами компонента) и ярлыка нет, `%LOCALAPPDATA%\LearningAssistant` осталась. Поставить снова — данные на месте.
 - [ ] Удалить ещё раз с ответом «Да»: нет `%LOCALAPPDATA%\LearningAssistant` (вместе с `logs\`) и `%AppData%\learning-assistant.exe`.
 - [ ] Записи `paratech/...` в Диспетчере учётных данных остаются (`cmdkey /list | findstr paratech`), как и `paratech-<профиль>/...` от прогонов с `la-qa` (ADR-0014); удалить вручную, если не нужны (перед этим «Выйти» в «Подключения» → «Google Календарь»): `cmdkey /delete:LegacyGeneric:target=<имя>` (всё после `Target:` в `cmdkey /list`).
 - [ ] Свой файл, положенный в папку установки, после удаления остаётся вместе с папкой.
-- [ ] После установки `HKCU\Software\Classes\paratech` указывает на установленный exe (`"…\learning-assistant.exe" "%1"`); после удаления ключа нет.
+- [ ] После установки `HKCU\Software\Classes\paratech` указывает на установленный exe (`"…\paratech.exe" "%1"`); после удаления ключа нет.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 

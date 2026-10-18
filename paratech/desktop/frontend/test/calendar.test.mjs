@@ -23,7 +23,7 @@ import {
 // Mirrors the JSON of internal/input/wails/calendar.go (TestGoogleCalendarStatusJSON).
 const synced = {
   signedIn: true, pending: 0, pendingMore: false, lastSyncedAt: "2026-10-16T06:30:00Z", state: "idle", lastOutcome: "ok",
-  attention: "", message: "Календарь «Learning Assistant» синхронизирован.",
+  attention: "", message: "Календарь «paratech» синхронизирован.",
   lastRunAt: "2026-10-16T06:31:00Z", lastRunAttempts: 1, lastRunOutcome: "ok", lastRunText: "Успешно.",
 };
 const st = (over = {}) => ({ ...synced, ...over });

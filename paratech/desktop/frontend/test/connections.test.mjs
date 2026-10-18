@@ -517,3 +517,18 @@ test("section heading rule is scoped to h2.sub so dialog titles keep their size"
     assert.match(src(`../src/pages/${file}`), /<h2 className="sub">/, file);
   }
 });
+
+test("the Hub section is «Конспекты и задания» with the key hint under its title (TASK-069)", () => {
+  assert.equal(overviewTexts.hubTitle, "Конспекты и задания");
+  assert.equal(overviewTexts.lead, "Конспекты и задания, почта и Google Календарь");
+  assert.match(overviewTexts.hubHint, /выдаёт автор приложения/);
+  assert.match(overviewTexts.hubHint, /не ключ Claude или ChatGPT/);
+  assert.match(overviewTexts.hubHint, /Распознавание речи всегда идёт на этом компьютере/);
+  const page = src("../src/pages/ConnectionsPage.tsx");
+  // The card of the section page carries the title, and the hint is its first line.
+  assert.match(
+    page,
+    /<Card className="box" label=\{overviewTexts\.hubTitle\}>\s*<span className="small muted box-desc">\{overviewTexts\.hubHint\}<\/span>/,
+  );
+  assert.ok(!/Сервер обработки|сервер(а|ом)? обработки/i.test(page + src("../src/connectionsView.ts") + src("../src/quotaView.ts")));
+});

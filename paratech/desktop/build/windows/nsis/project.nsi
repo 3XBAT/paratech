@@ -1,4 +1,4 @@
-﻿; Learning Assistant installer: per-user, no admin rights, no auto-update.
+﻿; paratech installer: per-user, no admin rights, no auto-update.
 ;
 ; Adapted from the Wails v3.0.0-beta.29 NSIS templates (MIT License, Copyright (c) 2018-Present Lea Anthony):
 ;   github.com/wailsapp/wails/v3@v3.0.0-beta.29/internal/commands/build_assets/windows/nsis/project.nsi.tmpl
@@ -8,7 +8,8 @@
 ;
 ; Built by desktop/build-release.ps1 (docs/refs/packaging.md), which passes:
 ;   VERSION                X.Y.Z
-;   APP_DIR                folder with learning-assistant.exe and the speech recognition component
+;   APP_DIR                folder with paratech.exe and the speech recognition component
+;   APP_ICON               desktop\build\windows\icon.ico (installer, shortcut and "Apps & features" icon)
 ;   WEBVIEW2_BOOTSTRAPPER  MicrosoftEdgeWebview2Setup.exe from the Wails module
 ;   OUT_FILE               installer path
 ; The texts are Russian, so the script runs makensis with -INPUTCHARSET UTF8.
@@ -29,23 +30,33 @@ AllowSkipFiles off
 !ifndef WEBVIEW2_BOOTSTRAPPER
   !error "WEBVIEW2_BOOTSTRAPPER is not defined: build with desktop/build-release.ps1"
 !endif
+!ifndef APP_ICON
+  !error "APP_ICON is not defined: build with desktop/build-release.ps1"
+!endif
 !ifndef OUT_FILE
   !error "OUT_FILE is not defined: build with desktop/build-release.ps1"
 !endif
 
-!define PRODUCT_NAME "Learning Assistant"
-!define PRODUCT_EXE "learning-assistant.exe"
+!define PRODUCT_NAME "paratech"
+!define PRODUCT_EXE "paratech.exe"
+!define PRODUCT_ICON "paratech.ico"
 !define PRODUCT_PUBLISHER "paratech"
+; Names of the versions before the rename (ADR-0015): an upgrade and the uninstaller remove them.
+!define LEGACY_EXE "learning-assistant.exe"
+!define LEGACY_SHORTCUT "Learning Assistant.lnk"
+; The key keeps its old id (ADR-0015), so an upgrade finds the old install folder (InstallLocation) and replaces the entry.
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant"
-; paratech: links («Открыть Paratech» on the Google sign-in page) for this user only; the app repairs the same values
+; paratech: links («Открыть paratech» on the Google sign-in page) for this user only; the app repairs the same values
 ; at start (desktop/internal/adapters/urlscheme, ADR-0013).
 !define URL_SCHEME_KEY "Software\Classes\paratech"
-; Fixed paths of the app, not of the install folder: config.dataDirName and the Wails WebView2 default
-; (%AppData%\<exe name>, internal/webview2/pkg/edge/chromium.go). A --data-dir elsewhere is not touched.
+; Fixed paths of the app, not of the install folder, kept from before the rename (ADR-0015): config.dataDirName and
+; config.webviewDirName (the app sets this WebView2 folder; it was the Wails default %AppData%\<exe name> for the old
+; exe). A --data-dir elsewhere is not touched.
 !define DATA_DIR "$LOCALAPPDATA\LearningAssistant"
-!define WEBVIEW_DATA_DIR "$APPDATA\${PRODUCT_EXE}"
+!define WEBVIEW_DATA_DIR "$APPDATA\learning-assistant.exe"
 ; Wails single-instance mutex: "wails-app-" + UniqueID + "-sim" (pkg/application/single_instance_windows.go),
-; UniqueID = instanceID in desktop/internal/app/app.go. Only the app with the UI shell holds it.
+; UniqueID = instanceID in desktop/internal/app/app.go, unchanged by the rename, so an old running version is found
+; too. Only the app with the UI shell holds it.
 !define APP_MUTEX "wails-app-paratech.learning-assistant.desktop-sim"
 ; Prefixed: WinCore.nsh may define SYNCHRONIZE as well.
 !define LA_SYNCHRONIZE 0x00100000
@@ -57,6 +68,7 @@ AllowSkipFiles off
 !define MSG_RUNNING "${PRODUCT_NAME} сейчас запущен.$\r$\n$\r$\nЗакройте его (правый клик по значку в трее, Quit) и повторите попытку."
 !define MSG_ABORT_RUNNING "Отменено: приложение запущено."
 !define MSG_NO_WEBVIEW2 "Не удалось установить Microsoft Edge WebView2 Runtime (нужен интернет). Без него окна приложения не откроются.$\r$\n$\r$\nУстановите его со страницы https://developer.microsoft.com/microsoft-edge/webview2/ и запустите приложение снова."
+!define MSG_LEGACY_IN_USE "Не удалось удалить ${LEGACY_EXE} прежней версии: файл занят. Закройте приложение (трей, Quit) и запустите установку снова."
 !define MSG_EXE_IN_USE "Не удалось удалить ${PRODUCT_EXE}: файл занят. Закройте приложение (трей, Quit) и запустите удаление снова."
 !define MSG_DELETE_DATA "Удалить и ваши данные?$\r$\n$\r$\n${DATA_DIR}$\r$\n(записи, транскрипты, модели, экспорты, логи, база данных с настройками)$\r$\n${WEBVIEW_DATA_DIR}$\r$\n(кэш окна приложения)$\r$\n$\r$\n«Нет» — данные останутся, следующая установка их подхватит. Ключ Hub, пароль почты и вход Google остаются в Диспетчере учётных данных Windows (записи paratech/...)."
 !define MSG_DATA_LEFT "Часть данных удалить не удалось. Закройте приложение и удалите вручную:$\r$\n${DATA_DIR}"
@@ -69,8 +81,8 @@ AllowSkipFiles off
 
 Name "${PRODUCT_NAME}"
 OutFile "${OUT_FILE}"
-InstallDir "$LOCALAPPDATA\Programs\LearningAssistant"
-; An upgrade goes into the folder of the installed version.
+InstallDir "$LOCALAPPDATA\Programs\paratech"
+; An upgrade goes into the folder of the installed version, also the LearningAssistant folder of an older one.
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
@@ -86,7 +98,8 @@ VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
 
-; No MUI_ICON: the NSIS default icon until the app has its own.
+!define MUI_ICON "${APP_ICON}"
+!define MUI_UNICON "${APP_ICON}"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXE}"
 !insertmacro MUI_PAGE_DIRECTORY
@@ -176,8 +189,20 @@ Section "Install"
 
   Call EnsureWebView2
 
+  ; An upgrade of a version before the rename (ADR-0015): the old exe and shortcut go first, so neither starts the old
+  ; app (which would also point paratech: links back at itself); if the exe is in use, nothing is changed yet.
+  Delete "$INSTDIR\${LEGACY_EXE}"
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_EXE}"
+    MessageBox MB_OK|MB_ICONEXCLAMATION "${MSG_LEGACY_IN_USE}" /SD IDOK
+    SetErrorLevel 2
+    Abort "${MSG_ABORT_RUNNING}"
+  ${EndIf}
+  Delete "$SMPROGRAMS\${LEGACY_SHORTCUT}"
+
   SetOutPath "$INSTDIR"
   File "${APP_DIR}\${PRODUCT_EXE}"
+  ; The exe has no icon resource yet (ADR-0015): the shortcut and "Apps & features" use this file.
+  File "/oname=${PRODUCT_ICON}" "${APP_ICON}"
   ; The speech recognition component: the files of desktop/internal/app/speechcomponent.json (keep both lists here in
   ; sync with it). ggml loads every ggml-cpu-*.dll next to it, so none of an older set may stay.
   Delete "$INSTDIR\ggml-cpu-*.dll"
@@ -196,12 +221,12 @@ Section "Install"
   File "${APP_DIR}\ggml-cpu-x64.dll"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}"
+  CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\${PRODUCT_ICON}" 0
 
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${PRODUCT_NAME}"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
-  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_EXE}"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_ICON}"
   WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
@@ -213,7 +238,7 @@ Section "Install"
 
   ; Recreated, so no stale subkey (another command, a DelegateExecute) stays. Both the exe path and the link are quoted.
   DeleteRegKey HKCU "${URL_SCHEME_KEY}"
-  WriteRegStr HKCU "${URL_SCHEME_KEY}" "" "URL:Paratech"
+  WriteRegStr HKCU "${URL_SCHEME_KEY}" "" "URL:paratech"
   WriteRegStr HKCU "${URL_SCHEME_KEY}" "URL Protocol" ""
   WriteRegStr HKCU "${URL_SCHEME_KEY}\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXE}" "%1"'
 SectionEnd
@@ -237,6 +262,9 @@ Section "Uninstall"
     SetErrorLevel 2
     Abort "${MSG_ABORT_RUNNING}"
   ${EndIf}
+  ; Left only if an upgrade over a version before the rename did not run.
+  Delete "$INSTDIR\${LEGACY_EXE}"
+  Delete "$INSTDIR\${PRODUCT_ICON}"
   Delete "$INSTDIR\whisper-cli.exe"
   Delete "$INSTDIR\whisper.dll"
   Delete "$INSTDIR\ggml.dll"
@@ -256,6 +284,7 @@ Section "Uninstall"
   ; Not /r (the Wails template uses /r): a folder the user chose may hold other files.
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}.lnk"
+  Delete "$SMPROGRAMS\${LEGACY_SHORTCUT}"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "${URL_SCHEME_KEY}"
 
