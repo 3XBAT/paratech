@@ -49,19 +49,26 @@ func (s *wasapiSource) Open(ctx context.Context, target Target, obs Observer) (S
 	}, target, obs)
 }
 
-// comThread runs body on a locked OS thread in the COM MTA; COM objects are created, used and released there only,
-// and CoUninitialize runs after the last release.
+// comThread runs body on a new goroutine locked to its own OS thread in the COM MTA and waits for it; COM objects
+// are created, used and released there only, and CoUninitialize runs after the last release. Never the caller's
+// thread: in the app the caller may be the main thread, which the UI library initialized as an STA, and
+// CoInitializeEx there fails with RPC_E_CHANGED_MODE.
 func comThread(body func()) error {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	done := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 
-	uninit, err := coInitialize()
-	if err != nil {
-		return err
-	}
-	defer uninit()
-	body()
-	return nil
+		uninit, err := coInitialize()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer uninit()
+		body()
+		done <- nil
+	}()
+	return <-done
 }
 
 // currentVersionKey holds the product texts of Windows; it is only read.
