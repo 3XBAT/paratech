@@ -27,7 +27,7 @@
   so a second instance exits before the DB opens. Since TASK-056 (ADR-0009) headless mode opens and starts the core too, and
   `openCore` takes a data-dir file lock before the DB in every mode; background work starts from the `Options.Started` hook
   (`ApplicationStarted`), when the shell is ready.
-- Default data dir is `%LOCALAPPDATA%\LearningAssistant`, DB file `<DataDir>/learning-assistant.db` (to be confirmed by the owner).
+- Default data dir is `%LOCALAPPDATA%\LearningAssistant`, DB file `<DataDir>/learning-assistant.db` (to be confirmed by the owner); both kept by the rename to «paratech» (ADR-0015).
 - Release builds must use `-tags production` (see `docs/refs/wails.md`).
 - Toasts of TASK-053: removed by TASK-065, owner decision; see ADR-0009.
 - TASK-022: `Shell` also implements the `recordingprompt.Popup` port (`ShowPopup`/`HidePopup`); `ShowPopup` emits the

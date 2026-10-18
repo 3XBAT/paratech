@@ -132,7 +132,7 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
 - **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow` (the
   post-processing, the drafts and the proposals), which places lesson times and deadlines in the student's zone.
   SQLite stores Unix ms, so the zone does not affect storage.
-- **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@learning-assistant.invalid>`. Jitter via `crypto/rand`.
+- **IDs.** `random.IDs`: lowercase `crypto/rand.Text()`; Message-ID `<id@paratech.invalid>` (`learning-assistant.invalid` before ADR-0015). Jitter via `crypto/rand`.
 - **Data dir:** `learning-assistant.db`, `learning-assistant.lock`, `artifacts/` (Storage Manager root), `artifacts/stt-work/`,
   `logs/`.
 
@@ -155,5 +155,5 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
 - `userfile` (TASK-049, std only) reads the file chosen for the schedule import, so the binding does no file access.
 - TASK-058 adapters: `logfile`, `zipfile` (std only), `sysinfo` (std, `x/sys/windows` and its `registry`, read only).
 - The page's "not available yet" error is gone; Stop / Run now always reach the use cases.
-- Open owner decisions: STT timeout 6 h; model alias `default`; Message-ID domain `learning-assistant.invalid`; LLM jobs
+- Open owner decisions: STT timeout 6 h; model alias `default`; Message-ID domain `paratech.invalid` (ADR-0015); LLM jobs
   show "waiting for network" while the Hub is not configured; UI mode shows no error dialog when the start fails.

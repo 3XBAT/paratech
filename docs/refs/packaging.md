@@ -2,7 +2,8 @@
 
 Tools: **NSIS 3.x** (`makensis`), templates and WebView2 bootstrapper from **Wails v3.0.0-beta.29** (`$GOMODCACHE/github.com/wailsapp/wails/v3@v3.0.0-beta.29`, below "the module").
 NSIS docs: https://nsis.sourceforge.io/Docs/ · Download: https://nsis.sourceforge.io/Download
-Files: `paratech/desktop/build-release.ps1`, `paratech/desktop/VERSION`, `paratech/desktop/build/windows/nsis/project.nsi`.
+Files: `paratech/desktop/build-release.ps1`, `paratech/desktop/VERSION`, `paratech/desktop/build/windows/nsis/project.nsi`, `paratech/desktop/build/windows/icon.ico`.
+Names: product «paratech», exe `paratech.exe` (renamed from «Learning Assistant» / `learning-assistant.exe`, ADR-0015).
 Checked on 2026-10-16 on Windows 10 22H2 **without NSIS**: the script's help, dry run and failure paths ran; everything that needs `makensis`
 (compiling, pages, texts, install, uninstall) is **[not verified]** until the owner builds it.
 
@@ -43,12 +44,15 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 
 ## Install
 - Per user, no admin and no UAC: `RequestExecutionLevel user`, `SetShellVarContext current`.
-- Folder `%LOCALAPPDATA%\Programs\LearningAssistant` (can be changed on the folder page; an upgrade reuses `InstallLocation`).
-- Files: `learning-assistant.exe`, `uninstall.exe` and always the 13 speech component files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`,
+- Folder `%LOCALAPPDATA%\Programs\paratech` (can be changed on the folder page; an upgrade reuses `InstallLocation`, so an install
+  of a version before the rename stays in `Programs\LearningAssistant`).
+- Files: `paratech.exe`, `paratech.ico`, `uninstall.exe` and always the 13 speech component files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`,
   nine `ggml-cpu-*.dll`), listed by name in `project.nsi`. Before them the installer deletes `ggml-cpu-*.dll` of an older set (ggml loads every one next to it).
-- Start menu `Learning Assistant.lnk`; no desktop shortcut, autostart or file associations; registers the per-user `paratech:` URL scheme (`HKCU\Software\Classes\paratech`, ADR-0013). Uninstall entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant`.
-- Windows 10+ and x64 only (Wails `wails.checkArchitecture`). NSIS default icon (an app icon is a follow-up).
-- Upgrade = run the new installer over the old one; data is not touched.
+- Start menu `paratech.lnk` (icon `paratech.ico`); no desktop shortcut, autostart or file associations; registers the per-user `paratech:` URL scheme (`HKCU\Software\Classes\paratech`, ADR-0013). Uninstall entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant` (old id kept, ADR-0015) with the name «paratech» and `DisplayIcon` = `paratech.ico`.
+- Windows 10+ and x64 only (Wails `wails.checkArchitecture`). Installer and uninstaller icon: `desktop/build/windows/icon.ico` (`-DAPP_ICON`).
+  The exe itself has no icon resource yet (follow-up, ADR-0015); the window and tray take the same icon embedded in the app.
+- Upgrade = run the new installer over the old one; data is not touched. Over a version before the rename it first deletes
+  `learning-assistant.exe` (in use: a message, nothing changed) and `Learning Assistant.lnk`.
 - **No auto-update**: nothing checks or downloads updates (PRD §4.3).
 
 ## Speech recognition component (whisper-cli)
@@ -70,16 +74,17 @@ ship it. Check on a clean Windows (`docs/qa/windows-checklist.md`, "Инстал
 
 ## Running app
 Installer and uninstaller check the Wails single-instance mutex `wails-app-paratech.learning-assistant.desktop-sim`
-(`pkg/application/single_instance_windows.go` + `instanceID` in `internal/app/app.go`) and ask to quit from the tray (Retry/Cancel; `/S`: exit code 2).
+(`pkg/application/single_instance_windows.go` + `instanceID` in `internal/app/app.go`; kept by the rename, so an old running version is found too) and ask to quit from the tray (Retry/Cancel; `/S`: exit code 2).
 `--headless` and `--recorder` processes do not hold it; then a locked file gives Retry/Cancel (`AllowSkipFiles off`), and the uninstaller stops
 if it cannot delete the exe.
 
 ## Uninstall and user data
-- Deletes only its files (names above, plus any `ggml-cpu-*.dll`), `uninstall.exe`, the shortcut, the HKCU uninstall key and `HKCU\Software\Classes\paratech`, then `RMDir` **without** `/r` (the Wails template uses `/r`;
+- Deletes only its files (names above, plus any `ggml-cpu-*.dll` and a leftover `learning-assistant.exe`), `uninstall.exe`, both shortcut names, the HKCU uninstall key and `HKCU\Software\Classes\paratech`, then `RMDir` **without** `/r` (the Wails template uses `/r`;
   a chosen folder may hold other files).
 - Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (recordings, transcripts, models, exports, logs, the database
   with the settings; the same list as the uninstaller message: `learning-assistant.db`, `artifacts\` and `logs\` of `internal/app/core.go`) and the
-  WebView2 folder `%AppData%\learning-assistant.exe` (`internal/webview2/pkg/edge/chromium.go`). A `--data-dir` / `LA_DATA_DIR` folder is not touched.
+  WebView2 folder `%AppData%\learning-assistant.exe` (the old Wails default `%AppData%\<exe name>`, `internal/webview2/pkg/edge/chromium.go`;
+  the app sets it explicitly since the rename, `config.WebviewDataDir`). A `--data-dir` / `LA_DATA_DIR` folder is not touched.
   A component installed by the app (`components\speech`) is user data: it stays with "Нет" and goes with "Да" (no separate step).
 - Credential Manager keeps `paratech/hub/api-key`, `paratech/mail/smtp-password`, `paratech/google/client-id`, `.../client-secret`, `.../refresh-token`.
   Before uninstalling, "Выйти" in "Google Календарь" revokes Google access. Then remove the entries by hand: Control Panel → Credential Manager →
@@ -87,7 +92,7 @@ if it cannot delete the exe.
 
 ## Code signing (optional, not in the script)
 No certificates or passwords in the repo. With your own certificate and the Windows SDK `signtool` **[not verified: no certificate here]**:
-1. `build-release.ps1` once; `signtool sign /fd SHA256 /tr <timestamp URL> /td SHA256 /f <cert.pfx> paratech\dist\release\<version>\app\learning-assistant.exe`
+1. `build-release.ps1` once; `signtool sign /fd SHA256 /tr <timestamp URL> /td SHA256 /f <cert.pfx> paratech\dist\release\<version>\app\paratech.exe`
 2. `build-release.ps1 -SkipAppBuild` (packs the signed exe), then the same `signtool sign` on the installer.
 The uninstaller stays unsigned (NSIS `!uninstfinalize` could sign it; follow-up).
 
@@ -95,6 +100,6 @@ The uninstaller stays unsigned (NSIS `!uninstfinalize` could sign it; follow-up)
 1. Install NSIS 3.x from https://nsis.sourceforge.io/Download, open a new terminal.
 2. Plan: `powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -DryRun` — makensis, go, npm and WebView2 must be found.
 3. Build: same command without `-DryRun` (downloads the whisper.cpp archive once; offline: `-WhisperZip <file>`).
-4. Result: `paratech\dist\release\learning-assistant-<version>-windows-amd64-setup.exe` (the script prints size and SHA-256).
+4. Result: `paratech\dist\release\paratech-<version>-windows-amd64-setup.exe` (the script prints size and SHA-256).
 5. Install and check: `docs/qa/windows-checklist.md`, section "Инсталлятор".
 New release: change `desktop/VERSION`, commit, optionally tag `vX.Y.Z`.

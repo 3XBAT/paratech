@@ -9,7 +9,7 @@ After the Google sign-in the browser shows the loopback answer page. The owner w
 A web page can only do that through a URL scheme registered for the app.
 
 ## Decision
-- **Per user, no admin:** `HKCU\Software\Classes\paratech`: default `URL:Paratech`, `URL Protocol` = `""`,
+- **Per user, no admin:** `HKCU\Software\Classes\paratech`: default `URL:paratech`, `URL Protocol` = `""`,
   `shell\open\command` default = `"<absolute exe path>" "%1"` (path and link both quoted). Never HKLM.
 - **Who writes it:** the installer (TASK-054) on install, deleting the key on uninstall; the app itself at every start of
   the instance with the UI (`adapters/urlscheme`, called from `app.openCore`): if a value is missing or differs, `shell` names
@@ -25,6 +25,8 @@ A web page can only do that through a URL scheme registered for the app.
 ## Consequences
 - Any web page or local program can open `paratech:` links; the worst outcome is the main window coming forward.
 - Dropping all arguments covers a link with a `"` that splits into several arguments under the Windows command-line rules.
+- Since ADR-0015 the exe is `paratech.exe`: the installer writes its path, and the start-up repair (`os.Executable`)
+  re-points an older registration of `learning-assistant.exe` at the first start of the new version.
 - A copied or `go run` binary takes the registration over at its start; the installed app takes it back at its next start.
 - Windows may refuse a background window the foreground; the launching instance calls `AllowSetForegroundWindow(ASFW_ANY)`
   before the Wails check so the first instance may come forward. Live behaviour is checked in `docs/qa/windows-checklist.md`.

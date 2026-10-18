@@ -1,4 +1,4 @@
--- Learning Assistant desktop: local SQLite schema DRAFT (TASK-003).
+-- paratech desktop: local SQLite schema DRAFT (TASK-003).
 --
 -- Consumed by TASK-005: goose migrations in desktop/pkg/migrations (ARCH-04, ADR-0006) and sqlc queries are
 -- written from this file. This is a draft of the contract, not a migration: it has no goose annotations.

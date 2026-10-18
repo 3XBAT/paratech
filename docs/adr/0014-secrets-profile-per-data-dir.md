@@ -9,7 +9,7 @@ Credential Manager is global per Windows user. A test run with a temporary `--da
 sign-in and started a calendar sync; the smoke run of `build-alpha.ps1` (`smoke-data`) could do the same.
 
 ## Decision
-- **Names.** The default data dir (`%LOCALAPPDATA%\LearningAssistant`) keeps `paratech/<service>/<name>`; no migration.
+- **Names.** The default data dir (`%LOCALAPPDATA%\LearningAssistant`, kept by the rename, ADR-0015) keeps `paratech/<service>/<name>`; no migration.
   Any other dir uses `paratech-<profile>/<service>/<name>`, profile = first 16 hex chars of SHA-256 of the normalized path.
   `-` instead of `/` and the fixed length mean no name of one profile equals or starts with a name prefix of another.
 - **Default or not** (`wincred.ProfileFor`, after the app has created and locked the dir): the default names only when
