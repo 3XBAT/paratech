@@ -7,7 +7,8 @@ import { pollStatus, statusPollMs } from "../googleView";
 
 // The Google status for the card on the «Подключения» overview: GoogleStatus and GoogleCalendarStatus, which read the
 // stored state and have no side effects. They are read again each time the overview shows (the Google page may have
-// changed them) and followed while a sign-in waits for the browser or a sync may still change its outcome.
+// changed them), the calendar also when the account changes, and followed while a sign-in waits for the browser or a
+// sync may still change its outcome.
 export function useGoogleStatus(active: boolean): {
   state: GoogleState | null;
   loadFailed: boolean;
@@ -50,13 +51,22 @@ export function useGoogleStatus(active: boolean): {
         }
       },
     );
+  }, [active, api]);
+
+  // Read on each show and after a sign-in or a sign-out, which change what the calendar asks of the user. Before the
+  // account is known the card has nothing to show it on.
+  const account = state?.account ?? "";
+  useEffect(() => {
+    if (!active || account === "") {
+      return;
+    }
     const c = ++calSeq.current;
     cal.status().then(
       (s) => mounted.current && c === calSeq.current && setCalendar(s),
       // Without the calendar state the card shows the sign-in alone.
       () => mounted.current && c === calSeq.current && setCalendar(null),
     );
-  }, [active, api, cal]);
+  }, [active, account, cal]);
 
   const poll = active && pollStatus(state, null);
   useEffect(() => {
@@ -73,7 +83,7 @@ export function useGoogleStatus(active: boolean): {
     return () => clearInterval(timer);
   }, [poll, api]);
 
-  const calPoll = active && calendarPolls(state?.account ?? "", calendar);
+  const calPoll = active && calendarPolls(account, calendar);
   useEffect(() => {
     if (!calPoll) {
       return;

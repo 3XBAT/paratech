@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  attentions,
   calendarApi,
   jobStates,
   methods,
@@ -15,17 +16,15 @@ import {
   calendarPolls,
   calendarSyncView,
   calendarTexts,
-  currentOutcome,
   lastRunResult,
   lastSyncedText,
-  outcomeNeedsUser,
 } from "../.test-build/calendarView.js";
 
 // Mirrors the JSON of internal/input/wails/calendar.go (TestGoogleCalendarStatusJSON).
 const synced = {
   signedIn: true, pending: 0, pendingMore: false, lastSyncedAt: "2026-10-16T06:30:00Z", state: "idle", lastOutcome: "ok",
-  message: "Календарь «Learning Assistant» синхронизирован.",
-  lastRunAt: "2026-10-16T06:31:00Z", lastRunOk: true, lastRunAttempts: 1, lastRunOutcome: "ok", lastRunText: "Успешно.",
+  attention: "", message: "Календарь «Learning Assistant» синхронизирован.",
+  lastRunAt: "2026-10-16T06:31:00Z", lastRunAttempts: 1, lastRunOutcome: "ok", lastRunText: "Успешно.",
 };
 const st = (over = {}) => ({ ...synced, ...over });
 const result = (state, over = {}) => ({ ok: true, message: "Синхронизация запущена.", state, ...over });
@@ -60,7 +59,13 @@ test("replies are parsed strictly; extra fields are dropped", () => {
   for (const lastRunOutcome of outcomes) {
     assert.deepEqual(parseCalendarSyncState(st({ lastRunOutcome })), st({ lastRunOutcome }));
   }
-  const never = st({ lastRunAt: "", lastRunOk: false, lastRunAttempts: 0, lastRunOutcome: "", lastRunText: "" });
+  assert.deepEqual(attentions, ["", "signIn", "noAccess"]);
+  for (const attention of attentions) {
+    assert.deepEqual(parseCalendarSyncState(st({ attention })), st({ attention }));
+  }
+  // The removed field of an older core is dropped like any extra one.
+  assert.deepEqual(parseCalendarSyncState({ ...synced, lastRunOk: true }), synced);
+  const never = st({ lastRunAt: "", lastRunAttempts: 0, lastRunOutcome: "", lastRunText: "" });
   assert.deepEqual(parseCalendarSyncState(never), never);
   assert.deepEqual(parseCalendarSyncState({ ...synced, token: "ya29.fake" }), synced);
   for (const raw of [
@@ -68,7 +73,9 @@ test("replies are parsed strictly; extra fields are dropped", () => {
     st({ signedIn: "yes" }), st({ pending: -1 }), st({ pending: 1.5 }), st({ pending: "3" }), st({ pendingMore: 0 }),
     st({ lastSyncedAt: null }), st({ state: "QUEUED" }), st({ state: "toString" }), st({ lastOutcome: "maybe" }),
     st({ lastOutcome: undefined }), st({ message: 1 }), st({ lastOutcome: "toString" }),
-    st({ lastRunAt: null }), st({ lastRunAt: undefined }), st({ lastRunOk: "true" }), st({ lastRunOk: undefined }),
+    st({ lastRunAt: null }), st({ lastRunAt: undefined }),
+    st({ attention: undefined }), st({ attention: null }), st({ attention: "SignIn" }), st({ attention: "signInExpired" }),
+    st({ attention: "toString" }), st({ attention: 0 }),
     st({ lastRunAttempts: -1 }), st({ lastRunAttempts: 1.5 }), st({ lastRunAttempts: "2" }),
     st({ lastRunAttempts: undefined }), st({ lastRunOutcome: "OK" }), st({ lastRunOutcome: undefined }),
     st({ lastRunText: 0 }), st({ lastRunText: undefined }),
@@ -107,13 +114,6 @@ test("the result of the last finished sync is Go's text, styled by its outcome",
   assert.equal(lastRunResult(st({ lastRunText: "" })), null);
   assert.equal(lastRunResult(st({ lastRunAt: "" })), null);
 
-  // This process's run is current; otherwise the last finished job (as Go's calendarMessage).
-  assert.equal(currentOutcome(st({ lastOutcome: "noAccess", lastRunOutcome: "ok" })), "noAccess");
-  assert.equal(currentOutcome(st({ lastOutcome: "", lastRunOutcome: "signInExpired" })), "signInExpired");
-  assert.equal(currentOutcome(st({ lastOutcome: "", lastRunOutcome: "" })), "");
-  for (const o of outcomes) {
-    assert.equal(outcomeNeedsUser(o), o === "signInExpired" || o === "noAccess", o);
-  }
 });
 
 test("signed in: Go's message, the time and the button, disabled while queued, running or in flight", () => {
@@ -130,10 +130,10 @@ test("signed in: Go's message, the time and the button, disabled while queued, r
     calendarSyncView({ ...base, status: st({ lastRunAttempts: 3 }) }).lastSynced, lastSyncedText(synced.lastRunAt, 3));
 
   const expired = "Ошибка: вход в Google истёк — войдите снова.";
-  const failedRun = calendarSyncView({ ...base, status: st({ lastRunOk: false, lastRunOutcome: "signInExpired", lastRunText: expired }) });
+  const failedRun = calendarSyncView({ ...base, status: st({ lastRunOutcome: "signInExpired", lastRunText: expired }) });
   assert.deepEqual(failedRun.lastRunResult, { text: expired, kind: "fail" });
-  assert.equal(failedRun.messageAlert, false, "the result line carries the error");
-  const unknown = calendarSyncView({ ...base, status: st({ lastRunOk: false, lastRunOutcome: "", lastRunText: "" }) });
+  assert.equal(failedRun.messageAlert, false, "no attention from Go: the result line carries the error");
+  const unknown = calendarSyncView({ ...base, status: st({ lastRunOutcome: "", lastRunText: "" }) });
   assert.equal(unknown.lastSynced, lastSyncedText(synced.lastRunAt));
   assert.equal(unknown.lastRunResult, null);
 
@@ -159,7 +159,22 @@ test("signed in: Go's message, the time and the button, disabled while queued, r
   assert.equal(calendarSyncView({ ...base, status: synced, loadFailed: true }).message, synced.message);
 });
 
-test("signed out: nothing, except the line after an expired sign-in", () => {
+test("signed in: the status line is an alert exactly when Go asks the user to act", () => {
+  const base = { account: "signedIn", loadFailed: false, inFlight: false };
+  for (const attention of attentions) {
+    // The outcomes do not decide it: Go already did (ARCH-44).
+    for (const lastOutcome of outcomes) {
+      const v = calendarSyncView({ ...base, status: st({ attention, lastOutcome, lastRunOutcome: lastOutcome }) });
+      assert.equal(v.messageAlert, attention !== "", `${attention}/${lastOutcome}`);
+      assert.equal(v.message, synced.message);
+      assert.equal(v.syncShown, true);
+    }
+  }
+  assert.equal(calendarSyncView({ ...base, status: null }).messageAlert, false);
+  assert.equal(calendarSyncView({ ...base, status: null, loadFailed: true }).messageAlert, false);
+});
+
+test("signed out: nothing, except Go's line when it asks to sign in again", () => {
   for (const account of ["signedOut", "unsupported", "unavailable"]) {
     const base = { account, loadFailed: false, inFlight: false };
     assert.equal(calendarSyncView({ ...base, status: null }).shown, false, account);
@@ -171,12 +186,15 @@ test("signed out: nothing, except the line after an expired sign-in", () => {
       shown: true, message: msg, messageAlert: true, lastSynced: "", lastRunResult: null, syncShown: false,
       syncDisabled: true, syncDisabledReason: "",
     };
-    const v = calendarSyncView({ ...base, status: st({ signedIn: false, lastOutcome: "signInExpired", message: msg }) });
+    const v = calendarSyncView({ ...base, status: st({ signedIn: false, attention: "signIn", message: msg }) });
     assert.deepEqual(v, want);
-    // After a restart only the last finished job knows the sign-in expired.
-    const later = st({ signedIn: false, lastOutcome: "", lastRunOutcome: "signInExpired", message: msg });
-    assert.deepEqual(calendarSyncView({ ...base, status: later }), want);
-    assert.equal(calendarSyncView({ ...base, status: st({ signedIn: false, lastOutcome: "", lastRunOutcome: "ok" }) }).shown, false);
+    // The outcomes alone do not show it: whether to ask is Go's decision.
+    for (const o of outcomes) {
+      const s = st({ signedIn: false, attention: "", lastOutcome: o, lastRunOutcome: o, message: msg });
+      assert.equal(calendarSyncView({ ...base, status: s }).shown, false, `${account}/${o}`);
+    }
+    // "noAccess" is about a signed-in account; signed out the sign-in part already asks.
+    assert.equal(calendarSyncView({ ...base, status: st({ signedIn: false, attention: "noAccess" }) }).shown, false);
   }
 });
 
@@ -203,7 +221,8 @@ test("the sync part renders text only, polls with a cleanup and is part of the G
   assert.match(part, /\[api, props\.account\]/, "the status is read again after a sign-in or a sign-out");
   assert.match(part, /role="alert"/, "an error the user must fix is announced");
   const hook = src("../src/pages/useGoogleStatus.ts");
-  assert.match(hook, /calendarApi\(callByName\)/, "the overview card reads the calendar outcome");
+  assert.match(hook, /calendarApi\(callByName\)/, "the overview card reads the calendar attention");
+  assert.match(hook, /\[active, account, cal\]/, "the calendar is read again after a sign-in or a sign-out");
   assert.doesNotMatch(hook, /\.sync\(/, "the overview never starts a sync");
   assert.equal((hook.match(/return \(\) => clearInterval\(timer\)/g) ?? []).length, 2);
   assert.match(src("../src/pages/GoogleBlock.tsx"), /<CalendarSync account=\{state\.account\} \/>/);

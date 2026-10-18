@@ -11,8 +11,6 @@ import type {
 } from "./bindings/connections";
 import type { CalendarSyncState } from "./bindings/calendar";
 import type { GoogleState } from "./bindings/google";
-// The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
-import { currentOutcome } from "./calendarView.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -348,8 +346,8 @@ export function mailCardStatus(s: { saved: Connections | null; loadFailed: boole
 }
 
 /**
- * The card of Google from GoogleStatus (the client, the account and a sign-in waiting for the browser) and, while
- * signed in, the calendar outcome Go reports: an error only the user can fix turns the card red.
+ * The card of Google from GoogleStatus (the client, the account and a sign-in waiting for the browser) and the
+ * calendar attention Go reports: what only the user can fix turns the card red.
  */
 export function googleCardStatus(s: {
   state: GoogleState | null;
@@ -369,26 +367,24 @@ export function googleCardStatus(s: {
   if (g.client !== "set") {
     return status("fail", "Недоступно");
   }
+  if (g.account === "signedIn" || g.account === "signedOut") {
+    // "signIn" comes while signed out, "noAccess" while signed in: Go decides, the card only names it.
+    switch (s.calendar?.attention) {
+      case "signIn":
+        return status("fail", "Нужен вход");
+      case "noAccess":
+        return status("fail", "Нет доступа");
+    }
+  }
   switch (g.account) {
     case "signedIn":
-      return signedInStatus(s.calendar ?? null);
+      return status("ok", "Подключено");
     case "signedOut":
       return status("wait", "Вход не выполнен");
     case "unsupported":
       return status("fail", "Недоступно");
     default:
       return status("fail", "Не удалось проверить");
-  }
-}
-
-function signedInStatus(calendar: CalendarSyncState | null): CardStatus {
-  switch (calendar === null ? "" : currentOutcome(calendar)) {
-    case "signInExpired":
-      return status("fail", "Нужен вход");
-    case "noAccess":
-      return status("fail", "Нет доступа");
-    default:
-      return status("ok", "Подключено");
   }
 }
 

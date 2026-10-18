@@ -9,6 +9,9 @@ export type CalendarSyncJobState = "idle" | "queued" | "running" | "retrying" | 
 /** How a sync run ended; "" if none (or, for the last finished job, the record cannot tell). */
 export type CalendarSyncOutcome = "" | "ok" | "notSignedIn" | "signInExpired" | "noAccess" | "failed";
 
+/** What the user must do, decided in Go: nothing, sign in again, or sign in again and allow the calendar. */
+export type CalendarAttention = "" | "signIn" | "noAccess";
+
 /** The sync state as the Go binding returns it. */
 export interface CalendarSyncState {
   signedIn: boolean;
@@ -20,11 +23,11 @@ export interface CalendarSyncState {
   state: CalendarSyncJobState;
   /** The last run since the app started. */
   lastOutcome: CalendarSyncOutcome;
+  attention: CalendarAttention;
   /** One fixed line from Go that sums the state up. */
   message: string;
   /** The last finished sync job, also of an earlier start: its end in RFC 3339 UTC, "" if none finished. */
   lastRunAt: string;
-  lastRunOk: boolean;
   lastRunAttempts: number;
   lastRunOutcome: CalendarSyncOutcome;
   /** A fixed line from Go with the result of that job; "" if none. */
@@ -49,6 +52,8 @@ export const jobStates: readonly CalendarSyncJobState[] = [
 ];
 
 export const outcomes: readonly CalendarSyncOutcome[] = ["", "ok", "notSignedIn", "signInExpired", "noAccess", "failed"];
+
+export const attentions: readonly CalendarAttention[] = ["", "signIn", "noAccess"];
 
 function record(raw: unknown, what: string): Record<string, unknown> {
   if (typeof raw !== "object" || raw === null) {
@@ -89,6 +94,9 @@ export function parseCalendarSyncState(raw: unknown): CalendarSyncState {
       throw new Error(`${w}: ${key} is not a sync outcome`);
     }
   }
+  if (!attentions.includes(r.attention as CalendarAttention)) {
+    throw new Error(`${w}: attention is not a known attention`);
+  }
   const attempts = r.lastRunAttempts;
   if (typeof attempts !== "number" || !Number.isInteger(attempts) || attempts < 0) {
     throw new Error(`${w}: lastRunAttempts is not a count`);
@@ -100,9 +108,9 @@ export function parseCalendarSyncState(raw: unknown): CalendarSyncState {
     lastSyncedAt: str(r, "lastSyncedAt", w),
     state: r.state as CalendarSyncJobState,
     lastOutcome: r.lastOutcome as CalendarSyncOutcome,
+    attention: r.attention as CalendarAttention,
     message: str(r, "message", w),
     lastRunAt: str(r, "lastRunAt", w),
-    lastRunOk: bool(r, "lastRunOk", w),
     lastRunAttempts: attempts,
     lastRunOutcome: r.lastRunOutcome as CalendarSyncOutcome,
     lastRunText: str(r, "lastRunText", w),

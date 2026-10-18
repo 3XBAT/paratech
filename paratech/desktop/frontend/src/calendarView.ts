@@ -28,7 +28,7 @@ export interface CalendarSyncView {
   shown: boolean;
   /** The status line: Go's message, or the loading/failure text before the first answer. */
   message: string;
-  /** The status line is an error the user must act on (shown as an alert). */
+  /** Go asks the user to act (attention), so the status line is an alert. */
   messageAlert: boolean;
   /** "Последняя синхронизация: <local time>" of the last finished job, with its attempts if more than one; "" if none. */
   lastSynced: string;
@@ -58,16 +58,6 @@ export function lastSyncedText(lastRunAt: string, attempts = 0): string {
   return `${calendarTexts.lastSynced} ${t}${tries}`;
 }
 
-/** The outcome that is current now: this process's run, else the last finished job (as Go's calendarMessage). */
-export function currentOutcome(status: CalendarSyncState): CalendarSyncOutcome {
-  return status.lastOutcome !== "" ? status.lastOutcome : status.lastRunOutcome;
-}
-
-/** The outcomes the sync cannot get past without the user signing in again. */
-export function outcomeNeedsUser(outcome: CalendarSyncOutcome): boolean {
-  return outcome === "signInExpired" || outcome === "noAccess";
-}
-
 const resultKinds: Readonly<Record<CalendarSyncOutcome, LastRunResult["kind"] | null>> = {
   "": null, ok: "ok", notSignedIn: "wait", signInExpired: "fail", noAccess: "fail", failed: "fail",
 };
@@ -87,7 +77,7 @@ function jobBusy(status: CalendarSyncState | null): boolean {
 
 /**
  * Signed in: the status, the last finished sync with its result and the button. Signed out: nothing, except Go's
- * "sign in again" line after an expired sign-in, so the reason the calendar stopped is visible.
+ * line when Go asks to sign in again (an expired sign-in), so the reason the calendar stopped is visible.
  */
 export function calendarSyncView(input: {
   account: string;
@@ -97,7 +87,7 @@ export function calendarSyncView(input: {
 }): CalendarSyncView {
   const { account, status, loadFailed, inFlight } = input;
   if (account !== "signedIn") {
-    if (status !== null && !status.signedIn && currentOutcome(status) === "signInExpired") {
+    if (status !== null && status.attention === "signIn") {
       return { ...hidden, shown: true, message: status.message, messageAlert: true };
     }
     return hidden;
@@ -107,8 +97,7 @@ export function calendarSyncView(input: {
   return {
     shown: true,
     message: status !== null ? status.message : loadFailed ? calendarTexts.loadFailed : calendarTexts.loading,
-    // The error of the last job is on its result line (an alert), so the status line stays a status.
-    messageAlert: false,
+    messageAlert: status !== null && status.attention !== "",
     lastSynced: status !== null ? lastSyncedText(status.lastRunAt, status.lastRunAttempts) : "",
     lastRunResult: status !== null ? lastRunResult(status) : null,
     syncShown: true,
