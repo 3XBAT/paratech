@@ -4,6 +4,7 @@ package audiocapture
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 	"time"
@@ -69,14 +70,22 @@ func comThread(body func()) error {
 			return
 		}
 		defer uninit()
-		// A panic in body goes back to the caller, whose recover (e.g. the app list) handled it before.
+		// Every exit sends once: a panic goes back to the caller, whose recover (e.g. the app list) handled it
+		// before; a Goexit in body must not leave the caller waiting.
+		completed := false
 		defer func() {
-			if r := recover(); r != nil {
+			r := recover()
+			switch {
+			case r != nil:
 				done <- result{panicked: r}
+			case !completed:
+				done <- result{err: errors.New("audiocapture: the COM thread exited early")}
+			default:
+				done <- result{}
 			}
 		}()
 		body()
-		done <- result{}
+		completed = true
 	}()
 	r := <-done
 	if r.panicked != nil {
