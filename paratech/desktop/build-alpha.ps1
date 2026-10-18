@@ -12,7 +12,7 @@ First it puts the speech recognition component (whisper-cli.exe and its DLLs) in
 is desktop\internal\app\speechcomponent.json, the manifest the app embeds. The official whisper.cpp archive is
 downloaded into paratech\dist\cache\speech-component\<version> (ignored by git; a cached archive is reused only if its
 size and SHA-256 match) and checked BEFORE it is opened; only the manifest files are unpacked, each checked again.
-Nothing from the archive is run. Whisper files already in the output folder are removed first. Offline: -WhisperZip
+Nothing from the archive is run. Whisper files already in the output folder are removed first, also with -SkipWhisper. Offline: -WhisperZip
 (a copy of the archive) or -WhisperDir (its unpacked Release folder) pass the same checks.
 
 -Smoke then checks the component next to the exe, starts the exe headless with a throwaway data directory inside the
@@ -123,8 +123,11 @@ function Read-SpeechManifest {
         $uri.Scheme -ne 'https' -or @($m.download_hosts) -notcontains $uri.Host) {
         throw "$bad has source_url '$($m.source_url)' that is not https on one of its download_hosts."
     }
+    # entry_prefix is required but may be "" (the files at the archive root), as in values.ParseSpeechComponent.
+    $prefix = $m.PSObject.Properties['entry_prefix']
     if ([string]$m.version -notmatch '^[A-Za-z0-9._-]+$' -or [string]$m.sha256 -notmatch '^[0-9a-f]{64}$' -or
-        [long]$m.size_bytes -le 0 -or [string]::IsNullOrEmpty([string]$m.entry_prefix)) {
+        [long]$m.size_bytes -le 0 -or $null -eq $prefix -or $prefix.Value -isnot [string] -or
+        ($prefix.Value -ne '' -and ($prefix.Value -cnotmatch '^([A-Za-z0-9][A-Za-z0-9._-]*/)+$' -or $prefix.Value.Contains('..')))) {
         throw "$bad has an invalid version, sha256, size_bytes or entry_prefix."
     }
     $names = @{}
@@ -442,6 +445,10 @@ if (-not $SkipWhisper) {
     $manifest = Read-SpeechManifest
     Write-Step "Speech component: whisper.cpp $($manifest.version) into $OutDir"
     Install-SpeechComponent $manifest $OutDir $WhisperDir $WhisperZip
+} else {
+    # A component left by an earlier build would hide the in-app install this build is for.
+    Write-Step "Speech component: skipped; removing whisper files of an earlier build from $OutDir"
+    Remove-StagedWhisper $OutDir
 }
 if ($ComponentOnly) {
     exit 0
