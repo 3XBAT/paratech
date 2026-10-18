@@ -1,6 +1,6 @@
 // Package scheduler is the use case that watches the local schedule and announces that a lesson is starting
-// (PRD section 6.1, AC-01): a configurable lead time before the start it publishes lesson.StartAnnounced, which the
-// recording prompt (TASK-022) consumes. The prompt window ends lesson.StartLateGrace after the start, so the poll
+// (PRD section 6.1, AC-01): a configurable lead time before the start (zero by default: at the start, owner decision
+// 2026-10-18) it publishes lesson.StartAnnounced, which the recording prompt (TASK-022) consumes. The prompt window ends lesson.StartLateGrace after the start, so the poll
 // interval must be shorter than that grace (New enforces it). Run waits PollInterval after each Tick ends, so the
 // real gap is PollInterval plus the Tick time and timer jitter. The prompt is guaranteed only while the process runs
 // and the clock is steady: sleep or hibernation across the window, or a forward clock jump over it, means no prompt

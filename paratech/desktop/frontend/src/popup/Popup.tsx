@@ -6,6 +6,7 @@ import { Banner } from "../ui/controls";
 import { Icon, IconSprite } from "../ui/Icon";
 import {
   actionErrorText,
+  buttonHints,
   buttonLabels,
   chooseSource,
   HeightFitter,
@@ -31,7 +32,7 @@ const browserTimers = {
 };
 
 // The popup shows the prompt the Go core holds and passes the clicks back; the core hides the window after
-// start, snooze and skip. No element takes focus on its own: the popup must not steal it (AC-01).
+// start and skip. No element takes focus on its own: the popup must not steal it (AC-01).
 export function Popup() {
   const api = useMemo(() => promptApi(callByName), []);
   const [view, setView] = useState<PromptView | null>(null);
@@ -295,6 +296,8 @@ export function Popup() {
             icon={id === "start" ? "rec" : undefined}
             className={id === "start" || id === "close" ? "wide" : undefined}
             disabled={m.disabled}
+            // The title is also the accessible description of the button (the label stays its name).
+            title={buttonHints[id]}
             onClick={() => click(id)}
           >
             {id === "start" ? m.startLabel : buttonLabels[id]}

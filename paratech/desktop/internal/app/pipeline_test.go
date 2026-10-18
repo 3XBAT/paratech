@@ -140,10 +140,17 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	dir := t.TempDir()
 	e, f, hub, hubURL := pipelineEnv(t)
 
-	// The lesson starts within the scheduler's lead; the clock is the real one because the core runs on goroutines.
-	start := time.Now().Add(2 * time.Minute)
 	u := openUICore(t, dir, e)
 	logStatuses(t, dir) // before anything is stored
+	configureHub(t, u.c, time.Now(), hubURL)
+	// A model imported and made the default through the wired model manager, as the models screen will do.
+	model := importModel(t, u.c, "base", testenv.WhisperOK)
+	if err := u.c.models.SetDefault(ctx, model); err != nil {
+		t.Fatal(err)
+	}
+	// The lesson starts now: the popup comes at the start (DefaultLead 0, TASK-076) and the first scheduler tick falls
+	// within lesson.StartLateGrace. The clock is the real one because the core runs on goroutines.
+	start := time.Now()
 	l, err := lesson.New(lesson.Spec{ID: "lesson-1", Content: lesson.Content{
 		Title: "English", Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow",
 	}}, time.Now())
@@ -151,12 +158,6 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := sqlite.NewLessonRepository(u.c.db).Save(ctx, l); err != nil {
-		t.Fatal(err)
-	}
-	configureHub(t, u.c, time.Now(), hubURL)
-	// A model imported and made the default through the wired model manager, as the models screen will do.
-	model := importModel(t, u.c, "base", testenv.WhisperOK)
-	if err := u.c.models.SetDefault(ctx, model); err != nil {
 		t.Fatal(err)
 	}
 	u.start(t)
@@ -208,6 +209,11 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 		if j.status != job.StatusCompleted || j.attempts != 1 {
 			t.Fatalf("job %+v, want COMPLETED after one attempt", j)
 		}
+	}
+	// TASK-076: one row for the recording, titled by the lesson, with the chain at its end.
+	rows, err := pageBindings(u.c.ui).ListRecordings(ctx)
+	if err != nil || len(rows) != 1 || rows[0].Title != "English" || rows[0].Stage != "done" {
+		t.Fatalf("recording rows %+v, %v; want one titled English with the summary ready", rows, err)
 	}
 
 	// TASK-055: what the sampled chains above can miss, from the statuses SQLite committed.

@@ -280,6 +280,95 @@ func (q *Queries) ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDs
 	return items, nil
 }
 
+const listJobIDsByPayloadRecording = `-- name: ListJobIDsByPayloadRecording :many
+SELECT CAST(json_extract(payload, '$.recording_id') AS TEXT) AS recording_id, id
+FROM jobs
+WHERE id IS NOT NULL
+  AND type IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND json_extract(payload, '$.recording_id') IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+ORDER BY created_at, id
+`
+
+type ListJobIDsByPayloadRecordingParams struct {
+	RecordingTypes string
+	Recordings     string
+}
+
+type ListJobIDsByPayloadRecordingRow struct {
+	RecordingID string
+	ID          string
+}
+
+// The jobs that process recordings (TASK-076: one row per recording with the status of its chain), ids only like
+// ListJobActivityIDs. Each id comes with its recording: jobs of recording_types whose payload names the recording
+// ("recording_id", the STT payload) and jobs of transcript_types whose payload names one of its transcripts
+// ("transcript_id", the post-processing payload). recordings and both type lists are JSON arrays.
+func (q *Queries) ListJobIDsByPayloadRecording(ctx context.Context, arg ListJobIDsByPayloadRecordingParams) ([]ListJobIDsByPayloadRecordingRow, error) {
+	rows, err := q.db.QueryContext(ctx, listJobIDsByPayloadRecording, arg.RecordingTypes, arg.Recordings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListJobIDsByPayloadRecordingRow{}
+	for rows.Next() {
+		var i ListJobIDsByPayloadRecordingRow
+		if err := rows.Scan(&i.RecordingID, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobIDsByPayloadTranscript = `-- name: ListJobIDsByPayloadTranscript :many
+SELECT t.recording_id, j.id
+FROM jobs j
+JOIN transcripts t ON t.id = json_extract(j.payload, '$.transcript_id')
+WHERE j.id IS NOT NULL
+  AND j.type IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND t.recording_id IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+ORDER BY j.created_at, j.id
+`
+
+type ListJobIDsByPayloadTranscriptParams struct {
+	TranscriptTypes string
+	Recordings      string
+}
+
+type ListJobIDsByPayloadTranscriptRow struct {
+	RecordingID string
+	ID          string
+}
+
+func (q *Queries) ListJobIDsByPayloadTranscript(ctx context.Context, arg ListJobIDsByPayloadTranscriptParams) ([]ListJobIDsByPayloadTranscriptRow, error) {
+	rows, err := q.db.QueryContext(ctx, listJobIDsByPayloadTranscript, arg.TranscriptTypes, arg.Recordings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListJobIDsByPayloadTranscriptRow{}
+	for rows.Next() {
+		var i ListJobIDsByPayloadTranscriptRow
+		if err := rows.Scan(&i.RecordingID, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobIDsByStatus = `-- name: ListJobIDsByStatus :many
 SELECT id FROM jobs
 WHERE status IN (/*SLICE:statuses*/?) AND id IS NOT NULL

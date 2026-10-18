@@ -79,8 +79,10 @@ func startFromPopup(t *testing.T, b *wails.PromptService, id string) wails.Promp
 func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	ctx := context.Background()
 	e, f := testEnv(t)
-	start := time.Now().Add(2 * time.Minute) // within the scheduler's lead; the recording session runs on the real clock
 	c, popup, b := startPromptCore(t, e, func(c *core) {
+		// The popup comes at the start (DefaultLead 0, TASK-076). Taken just before the core starts, so the first
+		// tick falls within lesson.StartLateGrace; a future start would miss it and wait a whole poll interval.
+		start := time.Now()
 		l, err := lesson.New(lesson.Spec{ID: "lesson-1", Content: lesson.Content{
 			Title: "History", Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow",
 		}}, time.Now())
@@ -94,7 +96,7 @@ func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 
 	testenv.Eventually(t, "the scheduler shows the popup", popup.Visible, nil)
 	cur := b.Current()
-	if cur == nil || cur.Kind != "lesson" || cur.Title != "History" || cur.State != string(prompt.StateOffered) || !cur.CanSnooze {
+	if cur == nil || cur.Kind != "lesson" || cur.Title != "History" || cur.State != string(prompt.StateOffered) {
 		t.Fatalf("current prompt %+v", cur)
 	}
 
@@ -116,6 +118,16 @@ func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	}
 	if !f.recorder.Running(info.ID) {
 		t.Fatal("the capture does not run")
+	}
+
+	// TASK-076: «Записи и задачи» titles the row by the lesson, not by its start time.
+	rows, err := wails.NewActivityService(c.ui.Activity, c.ui.Stopper, c.ui.Forcer, slog.New(slog.DiscardHandler)).
+		ListRecordings(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListRecordings = %+v, %v; want the one recording", rows, err)
+	}
+	if r := rows[0]; r.ID != string(info.ID) || r.LessonID != "lesson-1" || r.Title != "History" || r.Stage != "recording" {
+		t.Fatalf("row %+v, want the recording titled History in the recording stage", r)
 	}
 }
 

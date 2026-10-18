@@ -27,36 +27,36 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 ## AC-01. Попап записи не крадёт фокус и появляется не позже 20 с после начала занятия
 
-Автотесты: `TestSchedulerPromptWindowOnSQLite` (`desktop/tests/scheduler_sqlite_test.go`, окно до начала + 20 с); `TestLateAppStart`, `TestZeroLeadAnnouncesWithinTheGrace` (`desktop/internal/cases/scheduler/service_test.go`); `TestPopupExStyle` (`desktop/internal/input/wails/shell_windows_test.go`, окно без активации); `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
+Автотесты: `TestSchedulerPromptWindowOnSQLite` (`desktop/tests/scheduler_sqlite_test.go`, окно до начала + 20 с); `TestLateAppStart`, `TestZeroLeadAnnouncesWithinTheGrace`, `TestDefaultConfigAnnouncesAtTheStart` (`desktop/internal/cases/scheduler/service_test.go`); `TestPopupExStyle` (`desktop/internal/input/wails/shell_windows_test.go`, окно без активации); `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
 Вручную (также TASK-020, ADR-0007 «Check on Windows by a human»):
 - [ ] Импортировать `test.csv` с занятием через 3–4 мин (§8 «Импорт расписания»), «Применить».
 - [ ] Сразу открыть Блокнот или чат звонка и печатать не переставая.
-- [ ] Ожидаемо: в течение ~15 с справа внизу появляется «Начинается занятие» с названием и временем; текст продолжает идти в Блокнот/чат, главное окно вперёд не выходит.
+- [ ] Ожидаемо: до начала занятия попапа нет; в момент начала (не позже ~15 с) справа внизу появляется «Начинается занятие» с названием и временем и двумя кнопками: «Начать запись» и «Не записывать»; текст продолжает идти в Блокнот/чат, главное окно вперёд не выходит. Отдельного уведомления Windows нет.
 - [ ] То же поверх развёрнутого на весь экран звонка или видео: попап виден поверх.
 - [ ] Щелчок по попапу может забрать фокус — это допустимо (ADR-0007). Щёлкнуть снова в чат: печать идёт в чат.
 - [ ] Ошибка старта при 100%, 125% и 150%: окно вырастает по высоте, текст читается без прокрутки, кнопки видны, фокус не забирает.
-- [ ] Поздний запуск. Попап приходит с 5 мин до начала и до 20 с после начала (`scheduler.DefaultLead`, `lesson.StartLateGrace`) и показывается один раз. Занятие через 7–8 мин, «Применить» и сразу `Quit`, не позже чем через 1 мин (иначе попап придёт за 5 мин до начала и после перезапуска уже не появится). Запустить приложение через ~5 с после начала занятия: попап в течение 20 с от начала.
+- [ ] Поздний запуск. Попап приходит с начала занятия и до 20 с после него (`scheduler.DefaultLead` = 0, `lesson.StartLateGrace`; решение владельца 2026-10-18) и показывается один раз. Занятие через 2–3 мин, «Применить» и `Quit` до начала. Запустить приложение через ~5 с после начала занятия: попап в течение 20 с от начала.
 - [ ] То же с новым занятием (другой `uid`), но запустить через 1 мин после начала (позже 20 с): попапа нет (решение владельца: опоздавшее занятие не предлагается).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-02. Автопредложения записи можно выключить и включить
 
-Автотесты: `TestLessonStartingFollowsThePromptsSetting` (`desktop/internal/cases/recordingprompt/service_test.go`); `TestLessonPromptFollowsTheStoredSetting` (`desktop/tests/recordingprompt_sqlite_test.go`); `TestPromptsTurnedOffDuringLessonStaySilent` (`desktop/internal/cases/scheduler/service_test.go`); `TestOpenCoreStoresSettings` (`desktop/internal/app/core_test.go`).
+Автотесты: `TestLessonStartingFollowsThePromptsSetting` (`desktop/internal/cases/recordingprompt/service_test.go`); `TestLessonPromptFollowsTheStoredSetting`, `TestSkippedLessonPromptOnSQLite` (`desktop/tests/recordingprompt_sqlite_test.go`); `TestPromptsTurnedOffDuringLessonStaySilent` (`desktop/internal/cases/scheduler/service_test.go`); `TestOpenCoreStoresSettings` (`desktop/internal/app/core_test.go`).
 Вручную:
 - [ ] «Настройки»: снять «Автоматически предлагать запись в начале занятия». Занятие через 3 мин: попапа нет.
 - [ ] Включить переключатель, занятие с другим `uid` через 3 мин: попап есть.
-- [ ] Попап занятия, «Через 5 минут», выключить переключатель, подождать 5 мин: попап не возвращается; включить снова — это занятие больше не предлагается (решение владельца).
+- [ ] Попап занятия, «Не записывать»: попап скрылся и больше не появляется для этого занятия (кнопки «Через 5 минут» нет — решение владельца 2026-10-18).
 - [ ] `Quit` и запуск: переключатель в том же положении.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-03. Запись запускается и останавливается из попапа и надёжно хранится
 
-Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`).
+Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`); строка записи и статус цепочки — `TestChainOf`, `TestListRecordingsLessonTitles` (`desktop/internal/cases/activity`), `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
 Вручную (§8, пункт 9):
-- [ ] Видео с речью в Chrome. В попапе выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях и задачах» «Идёт запись», время растёт.
-- [ ] Через 2 мин «Остановить»: «Останавливается» (может мелькнуть), «Сохраняется», затем «Завершена»: запись переходит в группу «Завершённые (N)» под записями в работе.
+- [ ] Видео с речью в Chrome. Попап занятия: выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях и задачах» строка называется по занятию (не по времени), «Идёт запись», время растёт каждую секунду. Запись из трея без занятия называется «Запись <дата, время>».
+- [ ] Через 2 мин «Остановить»: одна строка на запись меняет статус по цепочке: «Сохраняется» → «Расшифровка N %» или «В очереди» с причиной → «Краткое содержание» → «Конспект готов» (или «Ошибка» с действием). Отдельных строк задач распознавания и конспекта нет; законченные записи — в одной группе «Завершённые (N)».
 - [ ] `%LOCALAPPDATA%\la-qa\artifacts\recordings\<id>.wav` играет, слышна речь, длина как у записи.
 - [ ] `Quit` и запуск: запись в группе «Завершённые», «Завершена», файл на месте.
 
@@ -87,9 +87,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestSTTPathHasNoNetworkImports` (`desktop/tests/stt_network_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, в запросах к Hub нет байтов записи ни как есть, ни в hex или base64; есть текст транскрипта); `TestTranscriptToStructuresThroughFakeHub` (`desktop/tests/postprocess_sqlite_test.go`).
 Вручную (нужны whisper-cli и модель, §6; это же TASK-025):
 - [ ] Записать 1–2 мин речи (AC-03). До «Остановить» выключить интернет (режим «в самолёте» или отключить Wi-Fi и кабель); если Hub запущен на этом компьютере — ещё и остановить Hub.
-- [ ] «Остановить»: «Распознавание речи» → «Расшифровка» → «Готово» без интернета.
+- [ ] «Остановить»: строка записи «Сохраняется» → «Расшифровка N %» → «В очереди · нет сети» (дальше краткое содержание) без интернета.
 - [ ] Самый новый файл в `artifacts\transcripts` открыть в Блокноте: текст похож на сказанное.
-- [ ] «Конспект» и «Поиск домашнего задания» — «Ждёт интернет». Включить интернет (и запустить Hub, если он локальный): примерно через минуту у «Конспект» — «Конспект готов», у «Поиск домашнего задания» — «Готово».
+- [ ] Включить интернет (и запустить Hub, если он локальный): примерно через минуту строка записи «Краткое содержание», затем «Конспект готов».
 - [ ] Записать для TASK-025: длина записи, время распознавания, модель.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -114,8 +114,8 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestJobRunnerQueueSurvivesARestart` (`desktop/tests/jobrunner_sqlite_test.go`); `TestStartupRecoveryAfterACrash` (`desktop/tests/jobrecovery_sqlite_test.go`); `TestSTTJobWaitsForWhisperCLI`, `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, перезапуск без дублей).
 Вручную:
 - [ ] Модель по умолчанию `ggml-small.bin`, запись 5–10 мин, «Остановить».
-- [ ] Пока у «Распознавание речи» «Расшифровка», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
-- [ ] Запуск: в логе `startup recovery finished requeued=1`; задача снова «Расшифровка», затем «Готово»; задача распознавания этой записи одна, не две (законченные задачи — в группе «Завершённые» под «Задачами»).
+- [ ] Пока у строки записи «Расшифровка», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
+- [ ] Запуск: в логе `startup recovery finished requeued=1`; строка снова «Расшифровка», затем дальше по цепочке; строка этой записи одна, не две (законченные записи — в группе «Завершённые»).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -129,9 +129,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestGatewayReplayAgainstPostgres`, `TestGatewayConcurrentIdenticalCallsAgainstPostgres` (`hub/tests/gateway_test.go`); `TestQuotaKeyReplayAgainstPostgres` (`hub/tests/quota_test.go`); `TestRetrySendsSameIdempotencyKey` (`desktop/internal/adapters/hubclient/client_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, после перезапуска Hub не списывает снова).
 Вручную:
 - [ ] «Подключения» → карточка «Сервер обработки» → «Лимит обработки» → «Обновить», записать «Осталось».
-- [ ] Обработать одно занятие (AC-06, с интернетом). Когда у «Конспект» «Конспект готов», а у «Поиск домашнего задания» «Готово», — «Обновить»: остаток уменьшился.
+- [ ] Обработать одно занятие (AC-06, с интернетом). Когда у строки записи «Конспект готов», — «Обновить»: остаток уменьшился.
 - [ ] `Quit`, запуск, «Обновить»: остаток тот же.
-- [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующий «Конспект» — «Минуты обработки закончились».
+- [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующая запись — «В очереди · лимит исчерпан» с кнопкой «Открыть подключения».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -246,9 +246,9 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestHeavyJobWaitsOnBatteryAndRunsWhenACReturns`, `TestPowerLostMidRunStopsAtTheNextCheckpoint` (`desktop/internal/cases/jobrunner/power_test.go`); `TestPowerAwareProcessingOnSQLite` (`desktop/tests/jobpower_sqlite_test.go`); `TestSTTJobPowerLossWaitsAndResumes` (`desktop/tests/transcribe_sqlite_test.go`); `TestReadACPowerReal` (`desktop/internal/adapters/winpower/winpower_windows_test.go`, настоящее питание).
 Вручную (ноутбук; «Обрабатывать только от розетки» включено — так по умолчанию):
-- [ ] Отключить зарядку. Записать 1 мин, «Остановить»: «Распознавание речи» — «Ждёт зарядку», есть «Запустить сейчас».
-- [ ] Подключить зарядку: за ~5–10 с «Расшифровка», затем «Готово».
-- [ ] Запись 5–10 мин, распознавание от сети; во время «Расшифровка» отключить зарядку: в течение минуты «Ждёт зарядку», `whisper-cli.exe` нет в `tasklist`. Подключить: распознавание начинается заново и доходит до «Готово».
+- [ ] Отключить зарядку. Записать 1 мин, «Остановить»: строка записи «В очереди · ждёт питания от сети», есть «Запустить сейчас».
+- [ ] Подключить зарядку: за ~5–10 с «Расшифровка», затем дальше по цепочке.
+- [ ] Запись 5–10 мин, распознавание от сети; во время «Расшифровка» отключить зарядку: в течение минуты «В очереди · ждёт питания от сети», `whisper-cli.exe` нет в `tasklist`. Подключить: распознавание начинается заново, затем «Краткое содержание».
 - [ ] «Конспект» и «Поиск домашнего задания» на батарее не ждут.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -257,7 +257,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestSettingOffRunsHeavyJobsOnBattery`, `TestForceRunStartsOneJobOnBattery` (`desktop/internal/cases/jobrunner/power_test.go`); `TestActivityServiceRunJobNow` (`desktop/internal/input/wails/activity_test.go`); `TestRunNowTranscribesAndEnqueuesPostProcessing` (`desktop/internal/app/wiring_test.go`).
 Вручную (ноутбук, на батарее, две ждущие задачи распознавания):
-- [ ] «Запустить сейчас» у одной: «Запуск…», «Расшифровка», «Готово», кнопка пропала; вторая ждёт дальше.
+- [ ] «Запустить сейчас» у одной: «Запуск…», «Расшифровка», кнопка пропала; вторая ждёт дальше.
 - [ ] Снять «Обрабатывать только от розетки»: вторая через несколько секунд «Расшифровка»; новая запись распознаётся сразу.
 - [ ] Вернуть переключатель.
 
@@ -305,7 +305,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Решение владельца (PRD §15, TASK-065): единственное уведомление — попап о начале занятия, без спама.
 Автотесты: `TestRunAnnouncesExactlyOnce`, `TestRestartDuringLessonDoesNotDuplicate` (`desktop/internal/cases/scheduler/service_test.go`); `TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart` (`desktop/tests/scheduler_sqlite_test.go`).
 Вручную:
-- [ ] Попап «Начинается занятие» — один раз на занятие; после «Пропустить» и после перезапуска во время того же занятия не появляется снова.
+- [ ] Попап «Начинается занятие» — один раз на занятие; после «Не записывать» и после перезапуска во время того же занятия не появляется снова.
 - [ ] Тостов Windows о завершении обработки нет (TASK-065): после распознавания, конспекта и поиска ДЗ в углу экрана и в Центре уведомлений от приложения ничего; ход виден в «Записях и задачах». В «Настройках» два переключателя, «Уведомлять о завершении обработки» нет. Автотест `TestNoCompletionToasts` (`desktop/tests/no_completion_toasts_test.go`).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет

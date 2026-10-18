@@ -1,29 +1,24 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type JobItem, type RecordingItem } from "../bindings/activity";
 import { callByName } from "../bindings/runtime";
-import {
-  actionErrorText,
-  formatTime,
-  isFinishedJob,
-  isFinishedRecording,
-  jobTypeLabel,
-  loadErrorText,
-  recordingDurationText,
-  splitFinished,
-} from "../activityView";
+import { actionErrorText, formatTime, jobTypeLabel, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
-import { jobStatusView, queueText, recordingStatusView, showsProgress, type StatusView } from "../statusPresentation";
+import type { PageId } from "../nav";
+import { anyRecording, type FinishedEntry, finishedKey, pageGroups, queueLine } from "../recordingRowView";
+import { jobStatusView, showsProgress } from "../statusPresentation";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, EmptyState, Progress, Row } from "../ui/controls";
 import { Icon } from "../ui/Icon";
-import { StatusChip } from "../ui/StatusChip";
+import { useNow } from "../useNow";
+import { RecordingRow, StatusLine } from "./RecordingRow";
 
 const pollMs = 3000;
 
-// The page shows what the Go core reports; the Stop and Run now buttons appear only when the core offers them (ARCH-44).
-export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void }) {
+// The page shows what the Go core reports: one row per recording with the status of its whole chain (TASK-076). The
+// Stop, Run now and link buttons appear only when the core offers them (ARCH-44).
+export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) {
   const api = useMemo(() => activityApi(callByName), []);
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
@@ -103,12 +98,12 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
     }
   }
 
-  // Read on every render; the 3 s poll re-renders, so the elapsed time of a running recording advances with it.
-  const now = Date.now();
+  // The elapsed time of a running recording ticks every second from startedAt, independent of the 3 s poll.
+  const now = useNow(anyRecording(recordings ?? []));
 
-  // Finished rows go to a folded list; rows in progress (and those with Stop or Run now) always stay in view.
-  const rec = splitFinished(recordings ?? [], isFinishedRecording);
-  const jb = splitFinished(jobs ?? [], isFinishedJob);
+  // Finished recordings and other jobs share the one folded group; rows in progress (and those with Stop or Run now)
+  // always stay in view.
+  const groups = pageGroups(recordings ?? [], jobs ?? []);
 
   // The rows of one list, in a card; CollapsibleList puts the finished ones into the same kind of card.
   const card = (rows: ReactNode) => (
@@ -117,32 +112,18 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
     </div>
   );
 
-  const recordingRow = (r: RecordingItem) => {
-    const v = recordingStatusView(r, now);
-    const stopping = busy.has(`stop:${r.id}`);
-    return (
-      <Row
-        key={r.id}
-        title={<span className="num">{formatTime(r.startedAt)}</span>}
-        meta={v.value === "" && <span className="num">Длительность {recordingDurationText(r, now)}</span>}
-        status={<StatusLine view={v} problem={r.problem} />}
-        actions={
-          r.stoppable && (
-            <Button
-              variant="danger"
-              icon="stop"
-              busy={stopping}
-              busyLabel="Остановка…"
-              disabled={stopping}
-              onClick={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
-            >
-              Остановить
-            </Button>
-          )
-        }
-      />
-    );
-  };
+  const recordingRow = (r: RecordingItem) => (
+    <RecordingRow
+      key={r.id}
+      item={r}
+      now={now}
+      stopping={busy.has(`stop:${r.id}`)}
+      starting={busy.has(`run:${r.actionJobId}`)}
+      onStop={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
+      onRunNow={(jobId) => void act(`run:${jobId}`, () => api.runJobNow(jobId))}
+      onOpen={(page) => onOpen?.(page)}
+    />
+  );
 
   const jobRow = (j: JobItem) => {
     const v = jobStatusView(j);
@@ -157,7 +138,7 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
           </span>
         }
         status={
-          <StatusLine view={v} problem={j.lastError}>
+          <StatusLine view={v} notes={j.lastError === "" ? [] : [j.lastError]}>
             {showsProgress(j) && <Progress value={j.progressPercent} label={v.label} text={false} />}
           </StatusLine>
         }
@@ -178,10 +159,12 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
     );
   };
 
-  const queue = queueText(jobs ?? []);
+  const finishedRow = (e: FinishedEntry) => (e.kind === "recording" ? recordingRow(e.item) : jobRow(e.item));
+
+  const queue = queueLine(recordings ?? [], jobs ?? []);
 
   return (
-    <section className="page">
+    <section className="page recordings">
       <div className="head">
         <h1>Записи и задачи</h1>
       </div>
@@ -204,62 +187,47 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
           label="Записей пока нет"
           title="Здесь появятся записи пар"
           actions={
-            onOpenSchedule && (
-              <Button variant="primary" icon="up" onClick={onOpenSchedule}>
+            onOpen && (
+              <Button variant="primary" icon="up" onClick={() => onOpen("schedule")}>
                 Импортировать расписание
               </Button>
             )
           }
         >
-          Импортируйте расписание — перед каждой парой появится окно с кнопкой «Начать запись».
+          Импортируйте расписание — в начале каждой пары появится окно с кнопкой «Начать запись».
         </EmptyState>
       ) : (
-        <>
-          <h2 className="group-title">Записи</h2>
-          {rec.active.length > 0 && card(rec.active.map(recordingRow))}
-          {rec.finished.length > 0 && (
-            <CollapsibleList
-              title="Завершённые"
-              items={rec.finished}
-              itemKey={(r) => r.id}
-              renderItem={recordingRow}
-              renderContainer={card}
-              state={stateOf(lists, "recordings")}
-              onStateChange={(s) => setLists((l) => withState(l, "recordings", s))}
-              className="clist-card"
-              classNames={{ button: "btn ghost" }}
-            />
-          )}
-        </>
+        groups.recordings.length > 0 && (
+          <>
+            <h2 className="group-title">Записи</h2>
+            {card(groups.recordings.map(recordingRow))}
+          </>
+        )
       )}
 
-      <h2 className="group-title">Задачи</h2>
       {jobsError && (
         <Banner kind="fail" role="alert">
           {jobsError}
         </Banner>
       )}
-      {jobs === null ? (
-        !jobsError && <p className="muted">Загрузка…</p>
-      ) : jobs.length === 0 ? (
-        <p className="muted">Задач пока нет.</p>
-      ) : (
+      {groups.otherJobs.length > 0 && (
         <>
-          {jb.active.length > 0 && card(jb.active.map(jobRow))}
-          {jb.finished.length > 0 && (
-            <CollapsibleList
-              title="Завершённые"
-              items={jb.finished}
-              itemKey={(j) => j.id}
-              renderItem={jobRow}
-              renderContainer={card}
-              state={stateOf(lists, "jobs")}
-              onStateChange={(s) => setLists((l) => withState(l, "jobs", s))}
-              className="clist-card"
-              classNames={{ button: "btn ghost" }}
-            />
-          )}
+          <h2 className="group-title">Другие задачи</h2>
+          {card(groups.otherJobs.map(jobRow))}
         </>
+      )}
+      {groups.finished.length > 0 && (
+        <CollapsibleList
+          title="Завершённые"
+          items={groups.finished}
+          itemKey={finishedKey}
+          renderItem={finishedRow}
+          renderContainer={card}
+          state={stateOf(lists, "finished")}
+          onStateChange={(s) => setLists((l) => withState(l, "finished", s))}
+          className="clist-card"
+          classNames={{ button: "btn ghost" }}
+        />
       )}
 
       <div className="gap" />
@@ -271,21 +239,5 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
         </span>
       </div>
     </section>
-  );
-}
-
-// The chip, its hint and the core's note about the row (a problem or the last error).
-function StatusLine(props: { view: StatusView; problem: string; children?: ReactNode }) {
-  const v = props.view;
-  return (
-    <>
-      <StatusChip kind={v.kind} icon={v.icon}>
-        {v.label}
-        {v.value !== "" && <span className="num"> · {v.value}</span>}
-      </StatusChip>
-      {props.children}
-      {v.hint !== "" && <span className="small muted">{v.hint}</span>}
-      {props.problem !== "" && <span className="small row-problem">{props.problem}</span>}
-    </>
   );
 }

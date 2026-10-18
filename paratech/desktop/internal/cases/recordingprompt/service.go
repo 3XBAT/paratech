@@ -19,7 +19,6 @@ const (
 	opLessonStarting = "lesson starting"
 	opOfferAdHoc     = "offer ad hoc"
 	opStart          = "start recording"
-	opSnooze         = "snooze"
 	opSkip           = "skip"
 	opTick           = "check prompt"
 	opSettings       = "read settings"
@@ -119,7 +118,7 @@ func (s *Service) OfferAdHoc(context.Context) (View, error) {
 		s.replace(p)
 		s.log.Info("ad-hoc recording prompt offered", slog.String("prompt", p.ID().String()))
 	}
-	view := viewOf(p, s.clock.Now())
+	view := viewOf(p)
 	s.mu.Unlock()
 
 	if err := s.render(); err != nil {
@@ -135,7 +134,7 @@ func (s *Service) Current() (View, bool) {
 	if s.current == nil {
 		return View{}, false
 	}
-	return viewOf(s.current, s.clock.Now()), true
+	return viewOf(s.current), true
 }
 
 // Sources lists what the popup offers to record (TASK-059): the open apps, sorted, and the source to preselect. When
@@ -192,7 +191,7 @@ func (s *Service) Start(ctx context.Context, id prompt.ID, source values.Source)
 	} else {
 		err = p.StartFailed(problem)
 	}
-	view := viewOf(p, s.clock.Now())
+	view := viewOf(p)
 	s.mu.Unlock()
 	if err != nil {
 		return view, fmt.Errorf("%s %s: %w", opStart, id, err) // unreachable: STARTING allows both
@@ -242,26 +241,6 @@ func (s *Service) saveSource(ctx context.Context, source values.Source) error {
 	return nil
 }
 
-// Snooze hides prompt id for prompt.SnoozeDelay. Only a lesson prompt whose lesson still runs then can be snoozed
-// (prompt.ErrSnoozeNotAllowed).
-func (s *Service) Snooze(_ context.Context, id prompt.ID) (View, error) {
-	s.mu.Lock()
-	p, err := s.lookup(id)
-	if err == nil {
-		err = p.Snooze(s.clock.Now())
-	}
-	if err != nil {
-		s.mu.Unlock()
-		return View{}, fmt.Errorf("%s %s: %w", opSnooze, id, err)
-	}
-	view := viewOf(p, s.clock.Now())
-	s.mu.Unlock()
-
-	s.log.Info("recording prompt snoozed", slog.String("prompt", id.String()), slog.Time("until", p.SnoozedUntil()))
-	s.renderLogged(opSnooze)
-	return view, nil
-}
-
 // Skip ends prompt id and hides the popup; its lesson is not offered again.
 func (s *Service) Skip(_ context.Context, id prompt.ID) (View, error) {
 	s.mu.Lock()
@@ -274,7 +253,7 @@ func (s *Service) Skip(_ context.Context, id prompt.ID) (View, error) {
 		return View{}, fmt.Errorf("%s %s: %w", opSkip, id, err)
 	}
 	s.current = nil
-	view := viewOf(p, s.clock.Now())
+	view := viewOf(p)
 	s.mu.Unlock()
 
 	s.log.Info("recording prompt skipped", slog.String("prompt", id.String()))
@@ -295,59 +274,23 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
-// Tick hides a lesson prompt whose lesson ended, and shows a snoozed prompt that is due again, unless prompts were
-// turned off meanwhile: then it ends without showing.
-func (s *Service) Tick(ctx context.Context) error {
+// Tick hides a lesson prompt whose lesson ended.
+func (s *Service) Tick(context.Context) error {
 	now := s.clock.Now()
 	s.mu.Lock()
 	p := s.current
-	switch {
-	case p == nil:
+	if p == nil || !p.ExpiryDue(now) {
 		s.mu.Unlock()
 		return nil
-	case p.ExpiryDue(now):
-		err := p.Expire(now)
-		s.current = nil
-		s.mu.Unlock()
-		if err != nil {
-			return fmt.Errorf("%s: %w", opTick, err) // unreachable: ExpiryDue allows it
-		}
-		s.log.Info("recording prompt expired", slog.String("prompt", p.ID().String()))
-		return s.render()
 	}
-	due := p.ReshowDue(now)
-	s.mu.Unlock()
-	if !due {
-		return nil
-	}
-
-	on, err := s.promptsEnabled(ctx)
-	if err != nil {
-		return fmt.Errorf("%s: %w", opTick, err) // still snoozed: the next tick reads again
-	}
-
-	now = s.clock.Now()
-	s.mu.Lock()
-	if s.current != p || !p.ReshowDue(now) {
-		s.mu.Unlock()
-		return nil // changed meanwhile; the next tick decides again
-	}
-	if on {
-		err = p.Reshow(now)
-	} else {
-		err = p.Withdraw()
-		s.current = nil
-	}
+	err := p.Expire(now)
+	s.current = nil
 	s.mu.Unlock()
 	if err != nil {
-		return fmt.Errorf("%s: %w", opTick, err)
+		return fmt.Errorf("%s: %w", opTick, err) // unreachable: ExpiryDue allows it
 	}
 
-	if on {
-		s.log.Info("snoozed recording prompt offered again", slog.String("prompt", p.ID().String()))
-	} else {
-		s.log.Info("recording prompts are off; snoozed prompt withdrawn", slog.String("prompt", p.ID().String()))
-	}
+	s.log.Info("recording prompt expired", slog.String("prompt", p.ID().String()))
 	return s.render()
 }
 

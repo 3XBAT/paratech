@@ -104,6 +104,12 @@ type Querier interface {
 	// active is a JSON array of status names, hidden_types a JSON array of job types left out of both parts (TASK-074),
 	// so hidden finished jobs never use up max_terminal.
 	ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error)
+	// The jobs that process recordings (TASK-076: one row per recording with the status of its chain), ids only like
+	// ListJobActivityIDs. Each id comes with its recording: jobs of recording_types whose payload names the recording
+	// ("recording_id", the STT payload) and jobs of transcript_types whose payload names one of its transcripts
+	// ("transcript_id", the post-processing payload). recordings and both type lists are JSON arrays.
+	ListJobIDsByPayloadRecording(ctx context.Context, arg ListJobIDsByPayloadRecordingParams) ([]ListJobIDsByPayloadRecordingRow, error)
+	ListJobIDsByPayloadTranscript(ctx context.Context, arg ListJobIDsByPayloadTranscriptParams) ([]ListJobIDsByPayloadTranscriptRow, error)
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)

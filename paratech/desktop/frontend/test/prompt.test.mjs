@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { errorMessages, methods, parsePromptView, promptApi, shownEvent } from "../.test-build/bindings/prompt.js";
 import {
   actionErrorText,
+  buttonHints,
   buttonLabels,
   headings,
   noPromptNote,
@@ -16,15 +17,16 @@ import {
   timeRange,
 } from "../.test-build/popup/view.js";
 
-// Mirror domain/recording/prompt and internal/input/wails/prompt.go.
-const states = ["OFFERED", "STARTING", "STARTED", "SNOOZED", "SKIPPED", "EXPIRED", "WITHDRAWN"];
+// Mirror domain/recording/prompt and internal/input/wails/prompt.go. SNOOZED and WITHDRAWN are gone with the snooze
+// (TASK-076, owner's decision 2026-10-18).
+const states = ["OFFERED", "STARTING", "STARTED", "SKIPPED", "EXPIRED"];
 const problems = ["unavailable", "in_progress", "recovering", "source_gone", "failed"];
 
 const lesson = {
   id: "p1", kind: "lesson", title: "Матанализ <b>", start: "10:00", end: "11:30",
-  state: "OFFERED", problem: "", canSnooze: true,
+  state: "OFFERED", problem: "",
 };
-const adhoc = { id: "p2", kind: "adhoc", title: "", start: "", end: "", state: "OFFERED", problem: "", canSnooze: false };
+const adhoc = { id: "p2", kind: "adhoc", title: "", start: "", end: "", state: "OFFERED", problem: "" };
 
 function fakeCall(reply) {
   const calls = [];
@@ -41,16 +43,16 @@ test("the api calls the bound Go methods with the prompt id", async () => {
   assert.deepEqual(await api.current(), lesson);
   assert.deepEqual(await api.start("p1", "zoom.exe"), lesson);
   await api.start("p1", "");
-  await api.snooze("p1");
   await api.skip("p1");
   assert.deepEqual(calls, [
     ["paratech/desktop/internal/input/wails.PromptService.Current"],
     ["paratech/desktop/internal/input/wails.PromptService.Start", "p1", "zoom.exe"],
     ["paratech/desktop/internal/input/wails.PromptService.Start", "p1", ""],
-    ["paratech/desktop/internal/input/wails.PromptService.Snooze", "p1"],
     ["paratech/desktop/internal/input/wails.PromptService.Skip", "p1"],
   ]);
-  assert.equal(Object.keys(methods).length, 5);
+  // Snooze is no longer bound (TASK-076): five methods became four.
+  assert.equal(Object.keys(methods).length, 4);
+  assert.equal("snooze" in api, false);
   assert.equal(shownEvent, "recordingprompt:shown");
 });
 
@@ -60,7 +62,7 @@ test("no current prompt is null", async () => {
 });
 
 test("a malformed prompt is an error", async () => {
-  for (const bad of ["x", 1, { ...lesson, id: 1 }, { ...lesson, kind: "other" }, { ...lesson, canSnooze: "yes" }]) {
+  for (const bad of ["x", 1, { ...lesson, id: 1 }, { ...lesson, kind: "other" }]) {
     assert.throws(() => parsePromptView(bad), undefined, JSON.stringify(bad));
   }
   const { title: _t, ...noTitle } = lesson;
@@ -79,21 +81,30 @@ test("every problem code has its own text, an unknown one the generic failure", 
   assert.equal(problemText("toString"), problemTexts.failed);
 });
 
-test("an offered lesson shows title, time and its buttons; snooze only when the core offers it", () => {
+// Since TASK-076 the popup has only «Начать запись» and «Не записывать»: the snooze button and canSnooze are gone.
+test("an offered lesson shows title, time and its two buttons", () => {
   const m = popupModel(lesson, null);
   assert.equal(m.heading, "Начинается занятие");
   assert.equal(m.title, "Матанализ <b>");
   assert.equal(m.time, "10:00–11:30");
-  assert.deepEqual(m.buttons, ["start", "snooze", "skip"]);
+  assert.deepEqual(m.buttons, ["start", "skip"]);
   assert.equal(m.startLabel, "Начать запись");
   assert.equal(m.disabled, false);
   assert.equal(m.note, "");
   assert.equal(m.problem, "");
-  assert.deepEqual(popupModel({ ...lesson, canSnooze: false }, null).buttons, ["start", "skip"]);
-  assert.deepEqual(
-    [buttonLabels.start, buttonLabels.snooze, buttonLabels.skip],
-    ["Начать запись", "Через 5 минут", "Пропустить"],
-  );
+  // A stale canSnooze from an older core changes nothing.
+  assert.deepEqual(popupModel({ ...lesson, canSnooze: true }, null).buttons, ["start", "skip"]);
+  assert.deepEqual([buttonLabels.start, buttonLabels.skip], ["Начать запись", "Не записывать"]);
+  assert.deepEqual(Object.keys(buttonLabels).sort(), ["close", "skip", "start"]);
+});
+
+test("every button has a hint that says what it does", () => {
+  assert.deepEqual(Object.keys(buttonHints).sort(), Object.keys(buttonLabels).sort());
+  assert.equal(buttonHints.start, "Записать звук этого занятия");
+  assert.equal(buttonHints.skip, "Закрыть, это занятие не записывается");
+  for (const id of Object.keys(buttonHints)) {
+    assert.notEqual(buttonHints[id], buttonLabels[id], id);
+  }
 });
 
 test("an ad-hoc prompt has its own heading and no lesson details", () => {
@@ -111,7 +122,7 @@ test("a start in progress reads Запуск… and disables every button", () =
     assert.equal(m.startLabel, startingLabel);
     assert.equal(startingLabel, "Запуск…");
     assert.equal(m.disabled, true);
-    assert.deepEqual(m.buttons, ["start", "snooze", "skip"]);
+    assert.deepEqual(m.buttons, ["start", "skip"]);
   }
   // The problem of the previous attempt is hidden while a new one runs.
   assert.equal(popupModel({ ...lesson, state: "STARTING", problem: "failed" }, null).problem, "");
@@ -128,7 +139,7 @@ test("a failed start stays on offer with the problem text", () => {
   for (const p of problems) {
     const m = popupModel({ ...lesson, problem: p }, null);
     assert.equal(m.problem, problemTexts[p]);
-    assert.deepEqual(m.buttons, ["start", "snooze", "skip"]);
+    assert.deepEqual(m.buttons, ["start", "skip"]);
     assert.equal(m.disabled, false);
   }
 });
@@ -138,7 +149,7 @@ test("every state maps to buttons; ended states only offer Закрыть with a
   for (const state of states) {
     const m = popupModel({ ...lesson, state, problem: "failed" }, null);
     if (state === "OFFERED" || state === "STARTING") {
-      assert.deepEqual(m.buttons, ["start", "snooze", "skip"], state);
+      assert.deepEqual(m.buttons, ["start", "skip"], state);
       assert.equal(m.note, "", state);
     } else {
       assert.deepEqual(m.buttons, ["close"], state);

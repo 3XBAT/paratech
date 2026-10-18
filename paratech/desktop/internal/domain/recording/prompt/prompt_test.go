@@ -43,13 +43,11 @@ func inState(t *testing.T, s State) *Prompt {
 	t.Helper()
 	p := newLessonPrompt(t)
 	steps := map[State][]func() error{
-		StateOffered:   nil,
-		StateStarting:  {p.BeginStart},
-		StateStarted:   {p.BeginStart, p.Started},
-		StateSnoozed:   {func() error { return p.Snooze(t0) }},
-		StateSkipped:   {p.Skip},
-		StateExpired:   {func() error { return p.Expire(end) }},
-		StateWithdrawn: {func() error { return p.Snooze(t0) }, p.Withdraw},
+		StateOffered:  nil,
+		StateStarting: {p.BeginStart},
+		StateStarted:  {p.BeginStart, p.Started},
+		StateSkipped:  {p.Skip},
+		StateExpired:  {func() error { return p.Expire(end) }},
 	}
 	for _, step := range steps[s] {
 		if err := step(); err != nil {
@@ -74,11 +72,8 @@ func TestTransitions(t *testing.T) {
 		{"begin start", StateStarting, []State{StateOffered}, func(p *Prompt) error { return p.BeginStart() }},
 		{"started", StateStarted, []State{StateStarting}, func(p *Prompt) error { return p.Started() }},
 		{"start failed", StateOffered, []State{StateStarting}, func(p *Prompt) error { return p.StartFailed(ProblemFailed) }},
-		{"snooze", StateSnoozed, []State{StateOffered}, func(p *Prompt) error { return p.Snooze(t0) }},
-		{"reshow", StateOffered, []State{StateSnoozed}, func(p *Prompt) error { return p.Reshow(t0.Add(SnoozeDelay)) }},
-		{"withdraw", StateWithdrawn, []State{StateSnoozed}, func(p *Prompt) error { return p.Withdraw() }},
-		{"skip", StateSkipped, []State{StateOffered, StateSnoozed}, func(p *Prompt) error { return p.Skip() }},
-		{"expire", StateExpired, []State{StateOffered, StateSnoozed}, func(p *Prompt) error { return p.Expire(end) }},
+		{"skip", StateSkipped, []State{StateOffered}, func(p *Prompt) error { return p.Skip() }},
+		{"expire", StateExpired, []State{StateOffered}, func(p *Prompt) error { return p.Expire(end) }},
 	}
 	for _, a := range actions {
 		for _, from := range States() {
@@ -121,7 +116,7 @@ func TestStateTable(t *testing.T) {
 			}
 		}
 	}
-	terminal := []State{StateStarted, StateSkipped, StateExpired, StateWithdrawn}
+	terminal := []State{StateStarted, StateSkipped, StateExpired}
 	for _, s := range States() {
 		if s.IsTerminal() != slices.Contains(terminal, s) {
 			t.Errorf("%s terminal = %v", s, s.IsTerminal())
@@ -197,71 +192,6 @@ func TestNewAdHoc(t *testing.T) {
 	}
 }
 
-// Snooze only a lesson prompt whose lesson still runs after the delay.
-func TestSnoozeRules(t *testing.T) {
-	tests := []struct {
-		name string
-		p    func(t *testing.T) *Prompt
-		at   time.Time
-		ok   bool
-	}{
-		{name: "lesson at the start", p: newLessonPrompt, at: t0, ok: true},
-		{name: "lesson ends right after the delay", p: newLessonPrompt, at: end.Add(-SnoozeDelay - time.Second), ok: true},
-		{name: "lesson ends with the delay", p: newLessonPrompt, at: end.Add(-SnoozeDelay)},
-		{name: "lesson near its end", p: newLessonPrompt, at: end.Add(-time.Minute)},
-		{name: "ad hoc", p: newAdHoc, at: t0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := tt.p(t)
-			if got := p.CanSnooze(tt.at); got != tt.ok {
-				t.Fatalf("CanSnooze = %v, want %v", got, tt.ok)
-			}
-			err := p.Snooze(tt.at)
-			if tt.ok {
-				if err != nil || p.State() != StateSnoozed || !p.SnoozedUntil().Equal(tt.at.Add(SnoozeDelay)) {
-					t.Fatalf("Snooze = %v, state %s until %v", err, p.State(), p.SnoozedUntil())
-				}
-				return
-			}
-			if !errors.Is(err, ErrSnoozeNotAllowed) || p.State() != StateOffered {
-				t.Fatalf("Snooze = %v, state %s; want ErrSnoozeNotAllowed and no change", err, p.State())
-			}
-		})
-	}
-	if p := inState(t, StateStarting); p.CanSnooze(t0) {
-		t.Fatal("a starting prompt cannot be snoozed")
-	}
-}
-
-func TestReshowTiming(t *testing.T) {
-	p := inState(t, StateSnoozed) // snoozed at t0
-	if p.ReshowDue(t0.Add(SnoozeDelay - time.Second)) {
-		t.Fatal("due before the delay")
-	}
-	if err := p.Reshow(t0.Add(SnoozeDelay - time.Second)); !errors.Is(err, ErrNotDue) || p.State() != StateSnoozed {
-		t.Fatalf("early Reshow = %v, state %s", err, p.State())
-	}
-	if !p.ReshowDue(t0.Add(SnoozeDelay)) {
-		t.Fatal("not due after the delay")
-	}
-
-	// A late poll after the lesson end expires the prompt instead of showing it.
-	if p.ReshowDue(end) {
-		t.Fatal("due after the lesson end")
-	}
-	if err := p.Reshow(end); !errors.Is(err, ErrNotDue) {
-		t.Fatalf("Reshow after the end = %v", err)
-	}
-	if !p.ExpiryDue(end) {
-		t.Fatal("a snoozed prompt must expire at the lesson end")
-	}
-
-	if err := p.Reshow(t0.Add(SnoozeDelay)); err != nil || p.State() != StateOffered || !p.SnoozedUntil().IsZero() {
-		t.Fatalf("Reshow = %v, state %s until %v", err, p.State(), p.SnoozedUntil())
-	}
-}
-
 func TestExpiry(t *testing.T) {
 	tests := []struct {
 		name string
@@ -271,7 +201,7 @@ func TestExpiry(t *testing.T) {
 	}{
 		{name: "offered before the end", p: newLessonPrompt, at: end.Add(-time.Second)},
 		{name: "offered at the end", p: newLessonPrompt, at: end, due: true},
-		{name: "snoozed after the end", p: func(t *testing.T) *Prompt { return inState(t, StateSnoozed) }, at: end.Add(time.Hour), due: true},
+		{name: "offered long after the end", p: newLessonPrompt, at: end.Add(time.Hour), due: true},
 		{name: "starting after the end", p: func(t *testing.T) *Prompt { return inState(t, StateStarting) }, at: end.Add(time.Hour)},
 		{name: "ad hoc much later", p: newAdHoc, at: end.Add(24 * time.Hour)},
 	}

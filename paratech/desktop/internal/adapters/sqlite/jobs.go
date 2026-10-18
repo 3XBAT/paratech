@@ -226,24 +226,98 @@ func (r *JobRepository) ListActivity(ctx context.Context, maxTerminal int, hidde
 
 	jobs, unreadable := make([]*job.Job, 0, len(ids)), []shared.JobID{}
 	for _, id := range ids {
-		row, err := q.GetJob(ctx, id)
+		j, readable, err := getJobTolerant(ctx, q, id)
 		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			continue
-		case isScanError(err):
-			unreadable = append(unreadable, shared.JobID(id))
-			continue
 		case err != nil:
-			return nil, nil, MapError(ctx, err)
-		}
-		j, err := jobFromRow(row)
-		if err != nil {
+			return nil, nil, err
+		case !readable:
 			unreadable = append(unreadable, shared.JobID(id))
-			continue
+		case j != nil:
+			jobs = append(jobs, j)
 		}
-		jobs = append(jobs, j)
 	}
 	return jobs, unreadable, nil
+}
+
+// ListForRecordings returns the jobs that process the recordings, by recording (TASK-076): the jobs of byRecording
+// types whose payload names the recording ("recording_id") and the jobs of byTranscript types whose payload names a
+// transcript of it ("transcript_id"), oldest first. Unreadable rows are left out and their ids returned.
+func (r *JobRepository) ListForRecordings(ctx context.Context, recs []shared.RecordingID, byRecording, byTranscript []job.Type) (
+	map[shared.RecordingID][]*job.Job, []shared.JobID, error,
+) {
+	recIDs := make([]string, len(recs))
+	for i, id := range recs {
+		recIDs[i] = string(id)
+	}
+	recList, err := json.Marshal(recIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	recTypes, err := jobTypeList(byRecording)
+	if err != nil {
+		return nil, nil, err
+	}
+	trTypes, err := jobTypeList(byTranscript)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	q := r.db.Queries(ctx)
+	direct, err := q.ListJobIDsByPayloadRecording(ctx, sqlcgen.ListJobIDsByPayloadRecordingParams{
+		RecordingTypes: recTypes, Recordings: string(recList),
+	})
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
+	}
+	viaTranscript, err := q.ListJobIDsByPayloadTranscript(ctx, sqlcgen.ListJobIDsByPayloadTranscriptParams{
+		TranscriptTypes: trTypes, Recordings: string(recList),
+	})
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
+	}
+
+	type ref struct{ rec, id string }
+	refs := make([]ref, 0, len(direct)+len(viaTranscript))
+	for _, row := range direct {
+		refs = append(refs, ref{row.RecordingID, row.ID})
+	}
+	for _, row := range viaTranscript {
+		refs = append(refs, ref{row.RecordingID, row.ID})
+	}
+
+	out, unreadable := make(map[shared.RecordingID][]*job.Job), []shared.JobID{}
+	for _, f := range refs {
+		j, readable, err := getJobTolerant(ctx, q, f.id)
+		switch {
+		case err != nil:
+			return nil, nil, err
+		case !readable:
+			unreadable = append(unreadable, shared.JobID(f.id))
+		case j != nil:
+			rec := shared.RecordingID(f.rec)
+			out[rec] = append(out[rec], j)
+		}
+	}
+	return out, unreadable, nil
+}
+
+// getJobTolerant loads one job of a list: a row gone meanwhile is (nil, true, nil), a row that cannot be read is
+// (nil, false, nil); only other failures are errors.
+func getJobTolerant(ctx context.Context, q *sqlcgen.Queries, id string) (*job.Job, bool, error) {
+	row, err := q.GetJob(ctx, id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, true, nil
+	case isScanError(err):
+		return nil, false, nil
+	case err != nil:
+		return nil, false, MapError(ctx, err)
+	}
+	j, err := jobFromRow(row)
+	if err != nil {
+		return nil, false, nil
+	}
+	return j, true, nil
 }
 
 // LastFinished returns the job of type typ that finished last (COMPLETED, FAILED or CANCELLED), by its last change,

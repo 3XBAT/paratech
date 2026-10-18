@@ -21,8 +21,7 @@
 //   - Heartbeat: a periodic liveness mark of an active recording; a stale heartbeat after restart means a crash.
 //   - Recovery: assembling the readable chunks of an interrupted recording into the final file.
 //   - Prompt: one offer to record, shown in the non-modal popup: for a lesson that is starting (from the schedule) or
-//     ad hoc (asked for by the user). States OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED, WITHDRAWN.
-//   - Snooze: hide a lesson prompt for a fixed delay and offer it again, only while the lesson still runs.
+//     ad hoc (asked for by the user). States OFFERED, STARTING, STARTED, SKIPPED, EXPIRED (no snooze).
 //   - Expiry: a lesson prompt that nobody acted on ends when its lesson ends.
 //   - Source: what a recording captures: one app (by executable name, with its process tree) or the whole computer
 //     except this app (the fallback). The picker lists the open apps; the choice is remembered per app.

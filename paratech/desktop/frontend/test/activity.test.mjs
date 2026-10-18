@@ -24,8 +24,10 @@ const jobStatuses = [
 ];
 
 const recording = {
-  id: "r1", lessonId: "l1", status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z", stoppedAt: "2026-10-15T11:00:00Z",
-  durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
+  id: "r1", lessonId: "l1", title: "История", status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
+  stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
+  stage: "queued", step: "transcription", progressPercent: 0, queueReason: "power", errorCode: "", jobError: "",
+  action: "runNow", actionJobId: "j1",
 };
 const job = {
   id: "j1", type: "stt", status: "WAITING_FOR_POWER", waiting: true, attempts: 0, maxAttempts: 3, progressPercent: 0,
@@ -55,7 +57,10 @@ test("every status has a distinct Russian label and unknown ones are shown raw",
   assert.equal(jobStatusLabel("toString"), "toString");
   assert.equal(jobTypeLabel("stt"), "Распознавание речи");
   assert.equal(jobTypeLabel("calendar_sync"), "Синхронизация календаря");
-  assert.equal(jobTypeLabel("send_email"), "send_email");
+  // TASK-076: send_email and homework_draft are the jobs the page still lists, so they have labels now.
+  assert.equal(jobTypeLabel("send_email"), "Отправка письма");
+  assert.equal(jobTypeLabel("homework_draft"), "Черновик домашнего задания");
+  assert.equal(jobTypeLabel("new_kind"), "new_kind");
 });
 
 test("duration is h:mm:ss", () => {
@@ -105,7 +110,9 @@ test("parse accepts well-formed items and drops extra fields", () => {
 });
 
 test("parse rejects malformed items", () => {
-  for (const raw of [null, "x", [], {}, { ...recording, stoppable: "yes" }, { ...recording, durationSeconds: Number.NaN }, { ...recording, id: 1 }]) {
+  for (const raw of [null, "x", [], {}, { ...recording, stoppable: "yes" }, { ...recording, durationSeconds: Number.NaN }, { ...recording, id: 1 },
+    { ...recording, title: undefined }, { ...recording, stage: "paused" }, { ...recording, queueReason: "rain" },
+    { ...recording, action: "delete" }, { ...recording, errorCode: 1 }]) {
     assert.throws(() => parseRecording(raw), /recording/);
   }
   for (const raw of [null, 5, {}, { ...job, runNowOffered: 1 }, { ...job, attempts: "0" }, { ...job, status: null }]) {

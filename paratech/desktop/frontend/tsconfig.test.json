@@ -38,6 +38,9 @@
     "src/CollapsibleList.tsx",
     "src/pages/SchedulePage.tsx",
     "src/ui/theme.ts",
-    "src/statusPresentation.ts"
+    "src/statusPresentation.ts",
+    "src/recordingRowView.ts",
+    "src/clock.ts",
+    "src/pages/RecordingRow.tsx"
   ]
 }

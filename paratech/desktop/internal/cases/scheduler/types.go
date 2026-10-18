@@ -5,10 +5,11 @@ import (
 	"time"
 )
 
-// Defaults of Config.
+// Defaults of Config. DefaultLead is zero: the popup comes at the lesson start, not before it (owner decision
+// 2026-10-18); the late-start window lesson.StartLateGrace still applies.
 const (
-	DefaultLead         = 5 * time.Minute
-	DefaultPollInterval = 15 * time.Second
+	DefaultLead         time.Duration = 0
+	DefaultPollInterval               = 15 * time.Second
 )
 
 // Deps are the ports the Service needs.

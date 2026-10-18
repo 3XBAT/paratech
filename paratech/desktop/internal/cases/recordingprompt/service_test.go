@@ -75,7 +75,7 @@ func TestLessonStartingFollowsThePromptsSetting(t *testing.T) {
 				t.Fatalf("prompts on: current %v, popup shows %d; want one shown prompt", ok, e.popup.Shows())
 			}
 			want := View{
-				ID: v.ID, Kind: prompt.KindLesson, State: prompt.StateOffered, CanSnooze: true,
+				ID: v.ID, Kind: prompt.KindLesson, State: prompt.StateOffered,
 				Lesson: prompt.Lesson{ID: "lesson-1", Title: "History <script>", Start: t0, End: lessonEnd, TimeZone: "Europe/Moscow"},
 			}
 			if v != want || v.ID.Validate() != nil {
@@ -197,9 +197,8 @@ func TestStaleIDIsRefused(t *testing.T) {
 
 	ctx := context.Background()
 	actions := map[string]func(prompt.ID) (View, error){
-		"start":  func(id prompt.ID) (View, error) { return e.svc.Start(ctx, id, values.WholeComputer()) },
-		"snooze": func(id prompt.ID) (View, error) { return e.svc.Snooze(ctx, id) },
-		"skip":   func(id prompt.ID) (View, error) { return e.svc.Skip(ctx, id) },
+		"start": func(id prompt.ID) (View, error) { return e.svc.Start(ctx, id, values.WholeComputer()) },
+		"skip":  func(id prompt.ID) (View, error) { return e.svc.Skip(ctx, id) },
 	}
 	for name, act := range actions {
 		for _, id := range []prompt.ID{old.ID, "", "prompt-999"} {
@@ -216,7 +215,7 @@ func TestStaleIDIsRefused(t *testing.T) {
 	}
 }
 
-// A double click while a start runs is refused; snooze and skip wait for the start too.
+// A double click while a start runs is refused; skip waits for the start too.
 func TestOneStartAtATime(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newEnv(t)
@@ -231,13 +230,12 @@ func TestOneStartAtATime(t *testing.T) {
 	}()
 	<-entered
 
-	if cur, _ := e.svc.Current(); cur.State != prompt.StateStarting || cur.CanSnooze {
-		t.Fatalf("current %+v, want STARTING without snooze", cur)
+	if cur, _ := e.svc.Current(); cur.State != prompt.StateStarting {
+		t.Fatalf("current %+v, want STARTING", cur)
 	}
 	for name, act := range map[string]func() error{
-		"start":  func() error { _, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer()); return err },
-		"snooze": func() error { _, err := e.svc.Snooze(context.Background(), v.ID); return err },
-		"skip":   func() error { _, err := e.svc.Skip(context.Background(), v.ID); return err },
+		"start": func() error { _, err := e.svc.Start(context.Background(), v.ID, values.WholeComputer()); return err },
+		"skip":  func() error { _, err := e.svc.Skip(context.Background(), v.ID); return err },
 	} {
 		if err := act(); !errors.Is(err, prompt.ErrInvalidTransition) {
 			t.Errorf("%s during the start = %v, want ErrInvalidTransition", name, err)
@@ -310,101 +308,6 @@ func TestSkipHides(t *testing.T) {
 	}
 }
 
-// Snooze hides the popup for the delay; it comes back when due, then expires at the lesson end.
-func TestSnoozeShowsAgainWhenDue(t *testing.T) {
-	ctx := context.Background()
-	e := newEnv(t)
-	v := e.offer("lesson-1")
-	got, err := e.svc.Snooze(ctx, v.ID)
-	if err != nil || got.State != prompt.StateSnoozed || e.popup.Visible() {
-		t.Fatalf("Snooze = %+v, %v, visible %v", got, err, e.popup.Visible())
-	}
-
-	e.clock.Advance(prompt.SnoozeDelay - time.Second)
-	if err := e.svc.Tick(ctx); err != nil || e.popup.Visible() {
-		t.Fatalf("early Tick = %v, visible %v", err, e.popup.Visible())
-	}
-	e.clock.Advance(time.Second)
-	if err := e.svc.Tick(ctx); err != nil || !e.popup.Visible() {
-		t.Fatalf("due Tick = %v, visible %v", err, e.popup.Visible())
-	}
-	if cur, ok := e.svc.Current(); !ok || cur.ID != v.ID || cur.State != prompt.StateOffered {
-		t.Fatalf("current %+v, %v", cur, ok)
-	}
-
-	e.at(lessonEnd)
-	if err := e.svc.Tick(ctx); err != nil || e.popup.Visible() {
-		t.Fatalf("Tick at the end = %v, visible %v", err, e.popup.Visible())
-	}
-	if _, ok := e.svc.Current(); ok {
-		t.Fatal("an expired prompt is over")
-	}
-}
-
-// Owner decision: a snoozed prompt must not come back once prompts were turned off.
-func TestSnoozedPromptStaysHiddenWhenPromptsTurnedOff(t *testing.T) {
-	ctx := context.Background()
-	e := newEnv(t)
-	v := e.offer("lesson-1")
-	if _, err := e.svc.Snooze(ctx, v.ID); err != nil {
-		t.Fatal(err)
-	}
-	e.settings.setPrompts(false)
-
-	e.clock.Advance(prompt.SnoozeDelay)
-	if err := e.svc.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if e.popup.Visible() || e.popup.Shows() != 1 {
-		t.Fatalf("visible %v, shows %d: the snoozed prompt came back", e.popup.Visible(), e.popup.Shows())
-	}
-	if _, ok := e.svc.Current(); ok {
-		t.Fatal("the withdrawn prompt is over")
-	}
-
-	// Turning prompts on again does not bring it back either.
-	e.settings.setPrompts(true)
-	e.clock.Advance(prompt.SnoozeDelay)
-	if err := e.svc.Tick(ctx); err != nil || e.popup.Visible() {
-		t.Fatalf("Tick = %v, visible %v", err, e.popup.Visible())
-	}
-}
-
-// A failed settings read keeps the snoozed prompt for the next tick.
-func TestReshowWaitsForTheSettings(t *testing.T) {
-	ctx := context.Background()
-	e := newEnv(t)
-	v := e.offer("lesson-1")
-	if _, err := e.svc.Snooze(ctx, v.ID); err != nil {
-		t.Fatal(err)
-	}
-	boom := errors.New("database locked")
-	e.settings.fail(boom)
-	e.clock.Advance(prompt.SnoozeDelay)
-	if err := e.svc.Tick(ctx); !errors.Is(err, boom) || e.popup.Visible() {
-		t.Fatalf("Tick = %v, visible %v", err, e.popup.Visible())
-	}
-	e.settings.fail(nil)
-	if err := e.svc.Tick(ctx); err != nil || !e.popup.Visible() {
-		t.Fatalf("Tick after the error = %v, visible %v", err, e.popup.Visible())
-	}
-}
-
-func TestSnoozeRefusedNearTheEnd(t *testing.T) {
-	e := newEnv(t)
-	v := e.offer("lesson-1")
-	e.at(lessonEnd.Add(-time.Minute))
-	if cur, _ := e.svc.Current(); cur.CanSnooze {
-		t.Fatal("snooze offered although the lesson ends first")
-	}
-	if _, err := e.svc.Snooze(context.Background(), v.ID); !errors.Is(err, prompt.ErrSnoozeNotAllowed) {
-		t.Fatalf("Snooze = %v", err)
-	}
-	if !e.popup.Visible() {
-		t.Fatal("a refused snooze must keep the popup")
-	}
-}
-
 // Ignoring the popup: it hides by itself at the lesson end.
 func TestExpiryHides(t *testing.T) {
 	ctx := context.Background()
@@ -424,7 +327,7 @@ func TestExpiryHides(t *testing.T) {
 	}
 }
 
-// The tray's ad-hoc offer ignores the prompts setting, cannot be snoozed, never expires and records without a lesson.
+// The tray's ad-hoc offer ignores the prompts setting, never expires and records without a lesson.
 func TestAdHocIgnoresTheSetting(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
@@ -434,16 +337,12 @@ func TestAdHocIgnoresTheSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Kind != prompt.KindAdHoc || v.State != prompt.StateOffered || v.CanSnooze || v.Lesson != (prompt.Lesson{}) {
+	if v.Kind != prompt.KindAdHoc || v.State != prompt.StateOffered || v.Lesson != (prompt.Lesson{}) {
 		t.Fatalf("view %+v", v)
 	}
 	if !e.popup.Visible() || e.settings.loads != 0 {
 		t.Fatalf("visible %v, settings read %d times; want shown without reading the setting", e.popup.Visible(), e.settings.loads)
 	}
-	if _, err := e.svc.Snooze(ctx, v.ID); !errors.Is(err, prompt.ErrSnoozeNotAllowed) {
-		t.Fatalf("Snooze = %v", err)
-	}
-
 	e.clock.Advance(48 * time.Hour)
 	if err := e.svc.Tick(ctx); err != nil || !e.popup.Visible() {
 		t.Fatalf("Tick = %v, visible %v: an ad-hoc prompt does not expire", err, e.popup.Visible())
@@ -466,8 +365,8 @@ func TestOfferAdHocKeepsAShownPrompt(t *testing.T) {
 		t.Fatalf("OfferAdHoc = %+v, %v, shows %d", got, err, e.popup.Shows())
 	}
 
-	// A snoozed lesson prompt is hidden: the tray offers a new ad-hoc prompt.
-	if _, err := e.svc.Snooze(ctx, v.ID); err != nil {
+	// Once the lesson prompt is skipped, the tray offers a new ad-hoc prompt.
+	if _, err := e.svc.Skip(ctx, v.ID); err != nil {
 		t.Fatal(err)
 	}
 	got, err = e.svc.OfferAdHoc(ctx)
@@ -476,21 +375,20 @@ func TestOfferAdHocKeepsAShownPrompt(t *testing.T) {
 	}
 }
 
-// Run polls on the Sleeper: a snoozed prompt comes back without anyone calling Tick, and Run ends with ctx.
-func TestRunShowsTheSnoozedPromptAgain(t *testing.T) {
+// Run polls on the Sleeper: a prompt whose lesson ended hides without anyone calling Tick, and Run ends with ctx.
+// (Before TASK-076 this test brought back a snoozed prompt; snooze is gone, expiry is the remaining poll duty.)
+func TestRunHidesTheExpiredPrompt(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newEnv(t)
-	v := e.offer("lesson-1")
-	if _, err := e.svc.Snooze(context.Background(), v.ID); err != nil {
-		t.Fatal(err)
-	}
+	e.offer("lesson-1")
+	e.at(lessonEnd.Add(-DefaultPollInterval))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- e.svc.Run(ctx) }()
 
-	testenv.Eventually(t, "the snoozed prompt is shown again", func() bool { return e.popup.Visible() }, func() {
+	testenv.Eventually(t, "the expired prompt hides", func() bool { return !e.popup.Visible() }, func() {
 		if err := e.clock.AwaitSleepers(ctx, 1); err == nil {
 			e.clock.Advance(DefaultPollInterval)
 		}

@@ -160,7 +160,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 	}{
 		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 3},
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
-		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 5},
+		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 4}, // Snooze removed in TASK-076
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},

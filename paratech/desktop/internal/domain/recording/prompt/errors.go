@@ -11,11 +11,7 @@ var (
 	// while one runs or an action on a finished prompt.
 	ErrInvalidTransition = errors.New("invalid recording prompt transition")
 
-	// ErrSnoozeNotAllowed means the prompt cannot be snoozed: it is not a lesson prompt, or the lesson ends before the
-	// prompt would be shown again.
-	ErrSnoozeNotAllowed = errors.New("recording prompt cannot be snoozed")
-
-	// ErrNotDue means a time-driven change (show again, expire) was asked for before its time.
+	// ErrNotDue means expiry was asked for before the lesson ended.
 	ErrNotDue = errors.New("recording prompt change is not due")
 
 	// ErrInvalidProblem means a failed start was reported without a known problem kind.

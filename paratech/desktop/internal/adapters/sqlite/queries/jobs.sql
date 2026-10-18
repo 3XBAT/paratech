@@ -124,3 +124,24 @@ SELECT status, COUNT(*) AS total
 FROM jobs
 GROUP BY status
 ORDER BY status;
+
+-- The jobs that process recordings (TASK-076: one row per recording with the status of its chain), ids only like
+-- ListJobActivityIDs. Each id comes with its recording: jobs of recording_types whose payload names the recording
+-- ("recording_id", the STT payload) and jobs of transcript_types whose payload names one of its transcripts
+-- ("transcript_id", the post-processing payload). recordings and both type lists are JSON arrays.
+-- name: ListJobIDsByPayloadRecording :many
+SELECT CAST(json_extract(payload, '$.recording_id') AS TEXT) AS recording_id, id
+FROM jobs
+WHERE id IS NOT NULL
+  AND type IN (SELECT value FROM json_each(CAST(sqlc.arg(recording_types) AS TEXT)))
+  AND json_extract(payload, '$.recording_id') IN (SELECT value FROM json_each(CAST(sqlc.arg(recordings) AS TEXT)))
+ORDER BY created_at, id;
+
+-- name: ListJobIDsByPayloadTranscript :many
+SELECT t.recording_id, j.id
+FROM jobs j
+JOIN transcripts t ON t.id = json_extract(j.payload, '$.transcript_id')
+WHERE j.id IS NOT NULL
+  AND j.type IN (SELECT value FROM json_each(CAST(sqlc.arg(transcript_types) AS TEXT)))
+  AND t.recording_id IN (SELECT value FROM json_each(CAST(sqlc.arg(recordings) AS TEXT)))
+ORDER BY j.created_at, j.id;

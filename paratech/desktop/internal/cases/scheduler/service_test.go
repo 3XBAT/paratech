@@ -208,6 +208,37 @@ func TestZeroLeadAnnouncesWithinTheGrace(t *testing.T) {
 	}
 }
 
+// Owner decision 2026-10-18 (TASK-076): with the default config the popup comes at the lesson start, never before
+// it, and an app started within the late grace still offers it. The other tests use their own lead on purpose.
+func TestDefaultConfigAnnouncesAtTheStart(t *testing.T) {
+	if DefaultLead != 0 {
+		t.Fatalf("DefaultLead = %v, want 0", DefaultLead)
+	}
+	store, events := newLessonStore(), &eventLog{}
+	store.add(t, "math", lessonStart, time.Hour, "UTC")
+	clock := testenv.NewFakeClock(lessonStart.Add(-10 * time.Minute))
+	s, err := New(Deps{Lessons: store, Clock: clock, Sleeper: clock, Events: events}, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for clock.Now().Before(lessonStart) {
+		if _, err := s.Tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(events.all()); n != 0 {
+			t.Fatalf("announced at %v, before the start %v", events.all()[0].AnnouncedAt, lessonStart)
+		}
+		clock.Advance(time.Second)
+	}
+	if _, err := s.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := events.all(); len(got) != 1 || !got[0].AnnouncedAt.Equal(lessonStart) {
+		t.Fatalf("events = %+v, want one at the start", got)
+	}
+}
+
 // promptGate is a consumer that applies the "prompts enabled" setting (AC-02) as TASK-022 does: a disabled prompt
 // drops the announcement.
 type promptGate struct {

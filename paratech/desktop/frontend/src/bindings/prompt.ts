@@ -1,5 +1,5 @@
-// Recording prompt bindings: calls into the Go core (internal/input/wails/prompt.go). The core owns the prompt and
-// decides what is offered ("canSnooze"); the popup only shows it.
+// Recording prompt bindings: calls into the Go core (internal/input/wails/prompt.go). The core owns the prompt; the
+// popup only shows it and offers "Start recording" and "Do not record" (no snooze since TASK-076).
 
 import type { CallByName } from "./settings";
 
@@ -14,11 +14,10 @@ export interface PromptView {
   /** "15:04" in the lesson's time zone; empty for an ad-hoc prompt. */
   start: string;
   end: string;
-  /** OFFERED, STARTING, STARTED, SNOOZED, SKIPPED, EXPIRED or WITHDRAWN. */
+  /** OFFERED, STARTING, STARTED, SKIPPED or EXPIRED. */
   state: string;
   /** Why the last start failed: "", "unavailable", "in_progress", "recovering", "source_gone" or "failed". */
   problem: string;
-  canSnooze: boolean;
 }
 
 /** An app the popup may record from. */
@@ -51,7 +50,6 @@ export const methods = {
   current: "paratech/desktop/internal/input/wails.PromptService.Current",
   sources: "paratech/desktop/internal/input/wails.PromptService.Sources",
   start: "paratech/desktop/internal/input/wails.PromptService.Start",
-  snooze: "paratech/desktop/internal/input/wails.PromptService.Snooze",
   skip: "paratech/desktop/internal/input/wails.PromptService.Skip",
 } as const;
 
@@ -140,9 +138,6 @@ export function parsePromptView(raw: unknown): PromptView {
   if (kind !== "lesson" && kind !== "adhoc") {
     throw new Error("prompt: unknown kind");
   }
-  if (typeof r.canSnooze !== "boolean") {
-    throw new Error("prompt: canSnooze is not a boolean");
-  }
   return {
     id: str(r, "id"),
     kind,
@@ -151,7 +146,6 @@ export function parsePromptView(raw: unknown): PromptView {
     end: str(r, "end"),
     state: str(r, "state"),
     problem: str(r, "problem"),
-    canSnooze: r.canSnooze,
   };
 }
 
@@ -161,7 +155,6 @@ export interface PromptApi {
   sources(): Promise<SourcesView>;
   /** Starts recording from app (an exe name; "" = the whole computer). */
   start(id: string, app: string): Promise<PromptView>;
-  snooze(id: string): Promise<PromptView>;
   skip(id: string): Promise<PromptView>;
 }
 
@@ -174,7 +167,6 @@ export function promptApi(call: CallByName): PromptApi {
     },
     sources: async () => parseSourcesView(await call(methods.sources)),
     start: async (id, app) => parsePromptView(await call(methods.start, id, app)),
-    snooze: async (id) => parsePromptView(await call(methods.snooze, id)),
     skip: async (id) => parsePromptView(await call(methods.skip, id)),
   };
 }

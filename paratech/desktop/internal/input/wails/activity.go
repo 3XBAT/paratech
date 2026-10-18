@@ -39,10 +39,14 @@ type JobForcer interface {
 	ForceRun(ctx context.Context, id shared.JobID) error
 }
 
-// RecordingItem is the JSON form of one recording. Times are RFC 3339 in UTC, empty when unknown.
+// RecordingItem is the JSON form of one recording with the status of its whole chain (TASK-076). Times are RFC 3339
+// in UTC, empty when unknown. The codes are the activity constants; the page maps them to its texts.
 type RecordingItem struct {
-	ID        string `json:"id"`
-	LessonID  string `json:"lessonId"`
+	ID       string `json:"id"`
+	LessonID string `json:"lessonId"`
+	// Title is the lesson title (imported text: render as plain text only); "" without a lesson, and the page then
+	// titles the row «Запись <дата, время>» from startedAt.
+	Title     string `json:"title"`
 	Status    string `json:"status"`
 	StartedAt string `json:"startedAt"`
 	StoppedAt string `json:"stoppedAt"`
@@ -51,6 +55,23 @@ type RecordingItem struct {
 	HasDuration     bool   `json:"hasDuration"`
 	Problem         string `json:"problem"`
 	Stoppable       bool   `json:"stoppable"`
+
+	// Stage: recording, saving, queued, transcribing, summarizing, done or failed.
+	Stage string `json:"stage"`
+	// Step of a queued or failed chain: "", "transcription" or "summary".
+	Step string `json:"step"`
+	// ProgressPercent of the transcription, 0..100.
+	ProgressPercent int `json:"progressPercent"`
+	// QueueReason of a queued chain: inLine, retry, power, network or quota.
+	QueueReason string `json:"queueReason"`
+	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed or homeworkFailed.
+	ErrorCode string `json:"errorCode"`
+	// JobError is the last error of the job the stage refers to (failed or retrying); "" otherwise.
+	JobError string `json:"jobError"`
+	// Action the row offers besides Stop: "", runNow (RunJobNow with actionJobId), openModels, openConnections or
+	// checkSound.
+	Action      string `json:"action"`
+	ActionJobID string `json:"actionJobId"`
 }
 
 // JobItem is the JSON form of one job. Times are RFC 3339 in UTC, empty when unknown.
@@ -83,7 +104,7 @@ func NewActivityService(uc ActivityUseCase, stopper RecordingStopper, forcer Job
 	return &ActivityService{uc: uc, stopper: stopper, forcer: forcer, log: log}
 }
 
-// ListRecordings returns the newest recordings, newest first.
+// ListRecordings returns the newest recordings, newest first, one row per recording with its chain status.
 func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, error) {
 	recs, err := s.uc.ListRecordings(ctx)
 	if err != nil {
@@ -92,17 +113,21 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 	}
 	out := make([]RecordingItem, 0, len(recs))
 	for _, r := range recs {
+		c := r.Chain
 		out = append(out, RecordingItem{
-			ID: string(r.ID), LessonID: string(r.LessonID), Status: string(r.Status),
+			ID: string(r.ID), LessonID: string(r.LessonID), Title: r.LessonTitle, Status: string(r.Status),
 			StartedAt: timeText(r.StartedAt), StoppedAt: timeText(r.StoppedAt),
 			DurationSeconds: int64(r.Duration.Round(time.Second) / time.Second), HasDuration: r.HasDuration,
 			Problem: r.Problem, Stoppable: r.Stoppable,
+			Stage: string(c.Stage), Step: string(c.Step), ProgressPercent: c.Percent, QueueReason: string(c.QueueReason),
+			ErrorCode: string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
 		})
 	}
 	return out, nil
 }
 
-// ListJobs returns the newest jobs, newest first.
+// ListJobs returns the newest jobs, newest first, without the service jobs and the jobs of the recording chain
+// (their recording rows show them).
 func (s *ActivityService) ListJobs(ctx context.Context) ([]JobItem, error) {
 	jobs, err := s.uc.ListJobs(ctx)
 	if err != nil {

@@ -84,7 +84,7 @@ func newPromptScenario(t *testing.T) *promptScenario {
 	}
 	sc.sched, err = scheduler.New(scheduler.Deps{
 		Lessons: sqlite.NewLessonRepository(db), Clock: clock, Sleeper: clock, Events: sc.prompts,
-	}, scheduler.Config{Lead: 10 * time.Minute, PollInterval: scheduler.DefaultPollInterval})
+	}, scheduler.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +112,16 @@ func (sc *promptScenario) setPrompts(on bool) {
 
 // Test step 2 on SQLite (AC-01, AC-02): with prompts on the lesson start shows the popup and "Start recording"
 // records that lesson; with prompts off nothing is shown, and turning them back on during the lesson does not bring
-// the prompt back (owner decision 2026-10-14).
+// the prompt back (owner decision 2026-10-14). With the default config the popup comes at the start, not before it
+// (owner decision 2026-10-18; TASK-076 moved these ticks from 10 minutes before the start to the start).
 func TestLessonPromptFollowsTheStoredSetting(t *testing.T) {
 	t.Run("prompts on", func(t *testing.T) {
 		sc := newPromptScenario(t)
-		sc.tickAt(londonStart.Add(-10 * time.Minute))
+		sc.tickAt(londonStart.Add(-time.Minute))
+		if _, ok := sc.prompts.Current(); ok || sc.popup.Shows() != 0 {
+			t.Fatal("the popup must not come before the lesson start")
+		}
+		sc.tickAt(londonStart)
 		v, ok := sc.prompts.Current()
 		if !ok || !sc.popup.Visible() || v.Lesson.Title != "English" || v.Lesson.TimeZone != "Europe/London" {
 			t.Fatalf("current %+v, %v, visible %v", v, ok, sc.popup.Visible())
@@ -133,9 +138,8 @@ func TestLessonPromptFollowsTheStoredSetting(t *testing.T) {
 	t.Run("prompts off", func(t *testing.T) {
 		sc := newPromptScenario(t)
 		sc.setPrompts(false)
-		sc.tickAt(londonStart.Add(-10 * time.Minute))
-		sc.setPrompts(true)
 		sc.tickAt(londonStart)
+		sc.setPrompts(true)
 		sc.tickAt(londonStart.Add(10 * time.Second))
 		if _, ok := sc.prompts.Current(); ok || sc.popup.Shows() != 0 {
 			t.Fatalf("prompt shown %d times although prompts were off at the start", sc.popup.Shows())
@@ -143,29 +147,24 @@ func TestLessonPromptFollowsTheStoredSetting(t *testing.T) {
 	})
 }
 
-// A snoozed prompt comes back after the delay, but not once prompts were turned off; the lesson end hides it.
-func TestSnoozedLessonPromptOnSQLite(t *testing.T) {
+// "Do not record" hides the popup for good: the lesson is not offered again, even within the late-start window.
+// (Replaces the snooze scenario of TASK-022: snooze was removed by the owner on 2026-10-18.)
+func TestSkippedLessonPromptOnSQLite(t *testing.T) {
 	sc := newPromptScenario(t)
 	sc.tickAt(londonStart)
-	v, _ := sc.prompts.Current()
-	if _, err := sc.prompts.Snooze(context.Background(), v.ID); err != nil {
+	v, ok := sc.prompts.Current()
+	if !ok {
+		t.Fatal("no prompt at the start")
+	}
+	if _, err := sc.prompts.Skip(context.Background(), v.ID); err != nil {
 		t.Fatal(err)
 	}
-	sc.tickAt(londonStart.Add(prompt.SnoozeDelay))
-	if !sc.popup.Visible() {
-		t.Fatal("the snoozed prompt must come back")
+	sc.tickAt(londonStart.Add(10 * time.Second))
+	if _, ok := sc.prompts.Current(); ok || sc.popup.Visible() || sc.popup.Shows() != 1 {
+		t.Fatalf("shows %d, visible %v: a skipped lesson must not be offered again", sc.popup.Shows(), sc.popup.Visible())
 	}
-
-	if _, err := sc.prompts.Snooze(context.Background(), v.ID); err != nil {
-		t.Fatal(err)
-	}
-	sc.setPrompts(false)
-	sc.tickAt(londonStart.Add(2 * prompt.SnoozeDelay))
-	if sc.popup.Visible() {
-		t.Fatal("a snoozed prompt must not come back once prompts are off")
-	}
-	if _, ok := sc.prompts.Current(); ok {
-		t.Fatal("the withdrawn prompt is over")
+	if len(sc.recordings.all()) != 0 {
+		t.Fatal("a skipped prompt must not record")
 	}
 }
 

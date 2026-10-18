@@ -100,14 +100,18 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 
 	// One job per missing part, seeded as the producers of this build would store them.
 	model := installModel(t, a, "m1", testenv.WhisperOK)
-	enqueueSTT(t, a, "job-stt", completedRecording(t, a, "rec-stt"), model)
-	tr := storeTranscript(t, a, "tr-1", completedRecording(t, a, "rec-llm"), model)
+	recSTT := completedRecording(t, a, "rec-stt")
+	enqueueSTT(t, a, "job-stt", recSTT, model)
+	recLLM := completedRecording(t, a, "rec-llm")
+	tr := storeTranscript(t, a, "tr-1", recLLM, model)
 	enqueueSummary(t, a, "job-summary", tr)
 	sendHomework(t, a, tr)
 	if ok, err := a.core.deliveries.MailPasswordConfigured(ctx); err != nil || ok {
 		t.Errorf("MailPasswordConfigured = %v, %v; want no password on a fresh install", ok, err)
 	}
 
+	// The jobs are read from the store: since TASK-076 the jobs page lists neither stt nor summarize jobs, the rows of
+	// their recordings show them (checked below).
 	tests := []struct {
 		name     string
 		typ      job.Type
@@ -129,19 +133,31 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got wails.JobItem
+			var got *job.Job
 			testenv.Eventually(t, string(tt.typ)+" job settles", func() bool {
-				var ok bool
-				got, ok = jobOfType(t, page, tt.typ)
-				return ok && got.Status == string(tt.status)
+				got = jobOfType(t, a, tt.typ)
+				return got != nil && got.Status() == tt.status
 			}, nil)
-			if got.Attempts != tt.attempts || got.Waiting != tt.status.IsWaiting() || got.RunNowOffered {
-				t.Errorf("job %+v: want %d attempts, waiting %v, no Run now", got, tt.attempts, tt.status.IsWaiting())
+			if got.Attempts() != tt.attempts || got.Status().OffersRunNow() {
+				t.Errorf("job %s %s: want %d attempts, no Run now", got.ID(), got.Status(), tt.attempts)
 			}
-			if got.LastError != tt.lastErr {
-				t.Errorf("error column %q, want %q", got.LastError, tt.lastErr)
+			if got.LastError() != tt.lastErr {
+				t.Errorf("error column %q, want %q", got.LastError(), tt.lastErr)
 			}
 		})
+	}
+
+	// TASK-076: each recording row shows the step its chain waits at, with the reason.
+	rows, err := page.ListRecordings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stages := map[string]string{}
+	for _, r := range rows {
+		stages[r.ID] = r.Stage + "/" + r.Step + "/" + r.QueueReason
+	}
+	if stages[string(recSTT)] != "queued/transcription/inLine" || stages[string(recLLM)] != "queued/summary/network" {
+		t.Errorf("chain stages %v: want the transcription in line and the summary waiting for the network", stages)
 	}
 
 	if err := a.Close(); err != nil {
@@ -173,19 +189,19 @@ func checkRecorderUnavailable(t *testing.T, a *App, page *wails.ActivityService)
 	}
 }
 
-// jobOfType returns the job of typ as the jobs page lists it.
-func jobOfType(t *testing.T, page *wails.ActivityService, typ job.Type) (wails.JobItem, bool) {
+// jobOfType returns the stored job of typ, or nil.
+func jobOfType(t *testing.T, a *App, typ job.Type) *job.Job {
 	t.Helper()
-	jobs, err := page.ListJobs(context.Background())
+	jobs, _, err := sqlite.NewJobRepository(a.core.db).ListActivity(context.Background(), 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, j := range jobs {
-		if j.Type == string(typ) {
-			return j, true
+		if j.Type() == typ {
+			return j
 		}
 	}
-	return wails.JobItem{}, false
+	return nil
 }
 
 // storeTranscript stores the transcript of a recording with a readable document, as a finished STT job leaves it.
