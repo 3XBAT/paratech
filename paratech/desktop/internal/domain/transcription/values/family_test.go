@@ -65,6 +65,16 @@ func TestModelLoadHeavy(t *testing.T) {
 	}
 }
 
+func TestQuantizationReduced(t *testing.T) {
+	for q, want := range map[Quantization]bool{
+		"": false, "f16": false, "f32": false, "q5_0": true, "q5_1": true, "q8_0": true, "q4_k": true,
+	} {
+		if got := q.Reduced(); got != want {
+			t.Errorf("Quantization(%q).Reduced() = %v, want %v", q, got, want)
+		}
+	}
+}
+
 func TestNewCatalogEntryFamily(t *testing.T) {
 	src, err := ParseSourceURL("https://example.com/a.bin")
 	if err != nil {
@@ -80,6 +90,17 @@ func TestNewCatalogEntryFamily(t *testing.T) {
 	}
 	if e.Family() != FamilyMedium || e.Load() != 3 {
 		t.Fatalf("family %q load %d, want medium 3", e.Family(), e.Load())
+	}
+	if e.Heavy() || !e.Reduced() {
+		t.Fatalf("heavy %v reduced %v, want false true", e.Heavy(), e.Reduced())
+	}
+
+	spec.Quantization = "f16"
+	if e, err = NewCatalogEntry(spec); err != nil {
+		t.Fatal(err)
+	}
+	if !e.Heavy() || e.Reduced() {
+		t.Fatalf("f16: heavy %v reduced %v, want true false", e.Heavy(), e.Reduced())
 	}
 
 	spec.Family = "huge"

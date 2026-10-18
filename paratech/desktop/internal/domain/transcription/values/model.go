@@ -77,6 +77,10 @@ func (q Quantization) Validate() error {
 // String returns the label.
 func (q Quantization) String() string { return string(q) }
 
+// Reduced reports whether the weights are quantized ("q5_1", "q8_0" and so on): a smaller, slightly less accurate
+// variant of the full ("f16", "f32") model.
+func (q Quantization) Reduced() bool { return strings.HasPrefix(string(q), "q") }
+
 // Capability labels what a model can do, for example "multilingual" or a language code (PRD section 8).
 type Capability string
 

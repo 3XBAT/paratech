@@ -1,9 +1,6 @@
 package values
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 // ModelFamily is the whisper model size a catalog entry belongs to, whatever its language and weight format
 // (PRD section 8.1). Empty means no family.
@@ -59,7 +56,7 @@ func LoadOf(family ModelFamily, quantization Quantization) ModelLoad {
 	if !ok {
 		return LoadUnknown
 	}
-	if strings.HasPrefix(string(quantization), "q") {
+	if quantization.Reduced() {
 		load = max(load-1, MinModelLoad)
 	}
 	return load

@@ -138,6 +138,12 @@ func (e CatalogEntry) Family() ModelFamily { return e.family }
 // contradict the rule; LoadUnknown without a family.
 func (e CatalogEntry) Load() ModelLoad { return LoadOf(e.family, e.quantization) }
 
+// Heavy reports whether the load gets the "demanding model" warning (ModelLoad.Heavy).
+func (e CatalogEntry) Heavy() bool { return e.Load().Heavy() }
+
+// Reduced reports whether the entry is a quantized variant (Quantization.Reduced).
+func (e CatalogEntry) Reduced() bool { return e.quantization.Reduced() }
+
 // EnglishOnly reports whether the model recognizes English only: it has the English capability and not the
 // multilingual one.
 func (e CatalogEntry) EnglishOnly() bool {

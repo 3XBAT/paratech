@@ -82,7 +82,8 @@ base (74M) 2, small (244M) 3, medium (769M) 4, large-v3 (1550M) 5, large-v3-turb
 layers but the full large-v3 encoder, and the encoder takes most of the CPU time on long recordings. A quantized variant
 (quantization `q…`) is one step lower, at least 1: the file is 2.4–2.9 times smaller, it needs less memory and runs
 a bit faster on a CPU, with slightly lower accuracy. A model without a family has load 0 (unknown). Loads 4 and 5 are
-heavy (`ModelLoad.Heavy`): the page warns that recognition will be long on a usual processor. The words for the levels
+heavy (`ModelLoad.Heavy`): the page warns that recognition will be long on a usual processor. The core sends
+`heavy` and `reduced` (quantized, `Quantization.Reduced`) with each catalog item, so the page does not repeat the rules. The words for the levels
 are UI text and live in the frontend. The rule is qualitative until RTF is measured on real machines (PRD section 8.1).
 
 **Download hosts.** `huggingface.co` answers `302` to a CDN; the allowlist matches exact hosts, so `download_hosts` lists
