@@ -122,9 +122,9 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 			"no mail settings", senddelivery.JobType, job.StatusFailed, 1,
 			"permanent failure: senddelivery: send: smtp: mail is not configured: delivery rejected",
 		},
-		// TASK-060: the stt type is not registered without whisper-cli, so the job waits QUEUED with its key unused
-		// (it runs after whisper-cli is installed and the app restarts) instead of failing. Last: by now the runner
-		// has settled the other jobs, so it had every chance to claim this one.
+		// TASK-060: the stt type is not registered without the speech component, so the job waits QUEUED with its key
+		// unused (installing the component activates it without a restart: TestSpeechComponentInstallsWithoutRestart)
+		// instead of failing. Last: by now the runner has settled the other jobs, so it had every chance to claim this one.
 		{"no whisper-cli", transcribe.JobType, job.StatusQueued, 0, ""},
 	}
 	for _, tt := range tests {
