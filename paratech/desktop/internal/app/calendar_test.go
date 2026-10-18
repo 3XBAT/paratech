@@ -63,7 +63,7 @@ func TestLessonCalendarErrorMapping(t *testing.T) {
 		{"unavailable", transient, false, false, false},
 		{"forbidden", forbidden, false, false, true},
 		{"token rejected", unauthorized, false, false, true},
-		{"authorization refused", authRejected, false, false, true},
+		{"authorization refused", authRejected, false, false, false},
 		{"rate limited", rateLimited, false, false, false},
 	}
 	for _, tt := range tests {
@@ -96,7 +96,7 @@ func TestLessonWriteErrorMapping(t *testing.T) {
 		{googlecal.ErrForbidden, backoff.Permanent, false, true},
 		{googlecal.ErrNotFound, backoff.Permanent, false, false},
 		{googlecal.ErrUnauthorized, backoff.Permanent, false, true},
-		{googlecal.ErrAuthRejected, backoff.Permanent, false, true},
+		{googlecal.ErrAuthRejected, backoff.Permanent, false, false},
 		{googlecal.ErrForeignCalendar, backoff.Transient, false, false},
 		{googlecal.ErrRateLimited, backoff.Transient, false, false},
 		{googlecal.ErrUnavailable, backoff.Transient, false, false},
@@ -269,6 +269,53 @@ func TestWiredCalendarSync(t *testing.T) {
 	}
 	if got := cal.Calendars(); len(got) != 1 || got[0].ID != cals[0].ID || len(cal.Events(cals[0].ID)) != 2 {
 		t.Fatalf("calendars after the second sign-in = %+v", got)
+	}
+}
+
+// Google refusing the calendar asks the user to sign in again and allow it; the next sign-in clears that at once,
+// before its own sync ends, and that sync's success replaces the last run (TASK-074).
+func TestWiredCalendarNoAccessClearedBySignIn(t *testing.T) {
+	ctx := context.Background()
+	g := testenv.StartFakeGoogleOAuth(t)
+	cal := testenv.StartFakeGoogleCalendar(t)
+	cal.AcceptTokens(g.IsLiveAccessToken)
+	a, _ := newTestAppWith(t, t.TempDir())
+	useFakeGoogle(a, g)
+	a.env.googleCalendar = []googlecal.Option{googlecal.WithBaseURL(cal.BaseURL())}
+	core := startCore(t, a)
+	page := wails.NewGoogleService(core.Google, a.log)
+	calPage := wails.NewGoogleCalendarService(core.Calendar, a.log)
+
+	importCSV(t, core, csvHeader+"Math,2026-10-20,09:00,10:30,Europe/Moscow,m1\n")
+	if got, _ := page.SetGoogleClient(ctx, testenv.FakeGoogleClientID, testenv.FakeGoogleClientSecret); !got.OK {
+		t.Fatalf("SetGoogleClient = %+v", got)
+	}
+	cal.FailNext(testenv.FaultForbidden, "")
+	if got, _ := page.GoogleSignIn(ctx); !got.OK {
+		t.Fatalf("GoogleSignIn = %+v", got)
+	}
+	if st := waitCalendarJobs(t, a, 1); st[0] != job.StatusFailed {
+		t.Fatalf("sync after the refused calendar: %v", st)
+	}
+	st, _ := calPage.GoogleCalendarStatus(ctx)
+	if st.Attention != "noAccess" || st.LastRunOutcome != "noAccess" || st.Message != "Ждут синхронизации занятий: 1." {
+		t.Fatalf("status after the refused calendar = %+v", st)
+	}
+
+	if got, _ := page.GoogleSignOut(ctx); !got.OK {
+		t.Fatalf("GoogleSignOut = %+v", got)
+	}
+	if got, _ := page.GoogleSignIn(ctx); !got.OK {
+		t.Fatalf("GoogleSignIn again = %+v", got)
+	}
+	if st, _ := calPage.GoogleCalendarStatus(ctx); st.Attention != "" {
+		t.Fatalf("status right after the sign-in = %+v", st)
+	}
+	if st := waitCalendarJobs(t, a, 2); st[1] != job.StatusCompleted {
+		t.Fatalf("sync after the sign-in: %v", st)
+	}
+	if st, _ := calPage.GoogleCalendarStatus(ctx); st.Attention != "" || st.LastRunOutcome != "ok" || st.Pending != 0 {
+		t.Fatalf("status after the sync = %+v", st)
 	}
 }
 

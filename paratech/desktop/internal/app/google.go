@@ -42,7 +42,7 @@ func (c *core) wireGoogle(e env, profile wincred.Profile, log *slog.Logger) erro
 		return fmt.Errorf("app: google calendar: %w", err)
 	}
 	// The hook reads c.calendarSync when it runs: the sync is built after the sign-in it depends on.
-	bridge := googleSignIn{auth: c.google, signedIn: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "sign-in") }}
+	bridge := googleSignIn{auth: c.google, signedIn: func(ctx context.Context) { c.calendarSignedIn(ctx, log) }}
 	c.googleSignIn, err = googlesignin.New(googlesignin.Deps{Secrets: secrets, Auth: bridge, Log: log},
 		googlesignin.Config{
 			ClientIDName: googleauth.ClientIDName, ClientSecretName: googleauth.ClientSecretName,
