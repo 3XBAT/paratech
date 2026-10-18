@@ -99,9 +99,13 @@ func TestModelsPageInstallsWithoutRestart(t *testing.T) {
 		view.NeedsDefault {
 		t.Fatalf("List = %+v, %v; want nothing installed, the embedded catalog, whisper-cli found", view, err)
 	}
-	if a := view.Available[0]; a.CatalogID != "small-q5_1" || !a.Recommended || a.Tier != "balanced" || a.EnglishOnly ||
-		a.Installed || !a.HasSourcePage {
-		t.Fatalf("first catalog model %+v, want small-q5_1 recommended, balanced, multilingual, not installed", a)
+	small := slices.IndexFunc(view.Available, func(a wails.AvailableModelItem) bool { return a.CatalogID == "small-q5_1" })
+	if small < 0 {
+		t.Fatalf("available %+v, want small-q5_1 in the catalog", view.Available)
+	}
+	if a := view.Available[small]; !a.Recommended || a.Tier != "balanced" || a.EnglishOnly || a.Installed ||
+		!a.HasSourcePage || a.Family != "small" || a.Load != 2 {
+		t.Fatalf("catalog model %+v, want small-q5_1 recommended, balanced, multilingual, load 2, not installed", a)
 	}
 
 	// Completed while no model was installed: the startup sweep already ran and found no model.
@@ -203,10 +207,10 @@ func TestModelsPageDownloadOfAnUnknownModel(t *testing.T) {
 	a, _ := newTestAppWith(t, t.TempDir())
 	page := modelsPage(startCore(t, a), &modelPicker{})
 
-	if _, err := page.PreflightDownload(ctx, "tiny-q5_1"); !errors.Is(err, wails.ErrModelNotInCatalog) {
+	if _, err := page.PreflightDownload(ctx, "large-v2-q5_0"); !errors.Is(err, wails.ErrModelNotInCatalog) {
 		t.Fatalf("PreflightDownload = %v, want ErrModelNotInCatalog", err)
 	}
-	if err := page.StartDownload(ctx, "tiny-q5_1"); err != nil {
+	if err := page.StartDownload(ctx, "large-v2-q5_0"); err != nil {
 		t.Fatal(err)
 	}
 	var view wails.ModelsView
@@ -215,10 +219,10 @@ func TestModelsPageDownloadOfAnUnknownModel(t *testing.T) {
 		view, err = page.List(ctx)
 		return err == nil && !view.Download.Running
 	}, nil)
-	if d := view.Download; d.CatalogID != "tiny-q5_1" || d.Phase != "failed" || d.Error != string(wails.ErrModelNotInCatalog) {
+	if d := view.Download; d.CatalogID != "large-v2-q5_0" || d.Phase != "failed" || d.Error != string(wails.ErrModelNotInCatalog) {
 		t.Fatalf("download %+v, want failed: not in the catalog", d)
 	}
-	if err := page.OpenSourcePage(ctx, "tiny-q5_1"); !errors.Is(err, wails.ErrModelNotInCatalog) {
+	if err := page.OpenSourcePage(ctx, "large-v2-q5_0"); !errors.Is(err, wails.ErrModelNotInCatalog) {
 		t.Fatalf("OpenSourcePage = %v, want ErrModelNotInCatalog", err)
 	}
 }
