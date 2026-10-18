@@ -426,6 +426,33 @@ test("the Google card reads the client, the account and a waiting sign-in", () =
   assert.deepEqual(chip(appleCardStatus), ["neutral", "Инструкция"]);
 });
 
+test("the Google card shows a calendar error only the user can fix", () => {
+  const ready = { client: "set", account: "signedIn", signingIn: false };
+  const cal = (lastOutcome, lastRunOutcome) => ({
+    signedIn: true, pending: 0, pendingMore: false, lastSyncedAt: "", state: "idle", lastOutcome, message: "m",
+    lastRunAt: "2026-10-16T06:31:00Z", lastRunOk: false, lastRunAttempts: 1, lastRunOutcome, lastRunText: "",
+  });
+  const g = (state, calendar) => chip(googleCardStatus({ state, loadFailed: false, calendar }));
+  assert.deepEqual(g(ready, null), ["ok", "Подключено"]);
+  assert.deepEqual(g(ready, undefined), ["ok", "Подключено"]);
+  assert.deepEqual(g(ready, cal("", "")), ["ok", "Подключено"]);
+  assert.deepEqual(g(ready, cal("signInExpired", "")), ["fail", "Нужен вход"]);
+  assert.deepEqual(g(ready, cal("", "signInExpired")), ["fail", "Нужен вход"]);
+  assert.deepEqual(g(ready, cal("noAccess", "ok")), ["fail", "Нет доступа"]);
+  assert.deepEqual(g(ready, cal("", "noAccess")), ["fail", "Нет доступа"]);
+  // This process's run is newer than the record of the last job.
+  assert.deepEqual(g(ready, cal("ok", "noAccess")), ["ok", "Подключено"]);
+  for (const o of ["ok", "notSignedIn", "failed"]) {
+    assert.deepEqual(g(ready, cal(o, o)), ["ok", "Подключено"], o);
+  }
+  // Signed out, the sign-in chip already says what to do.
+  assert.deepEqual(g({ ...ready, account: "signedOut" }, cal("signInExpired", "signInExpired")), ["wait", "Вход не выполнен"]);
+  assert.deepEqual(g({ ...ready, signingIn: true }, cal("noAccess", "")), ["run", "Ожидание входа"]);
+  for (const s of [g(ready, cal("noAccess", "")), g(ready, cal("signInExpired", ""))]) {
+    assert.ok(s[1].length <= 20, s[1]);
+  }
+});
+
 test("every card chip pairs its colour with a word and an icon where it warns", () => {
   const all = [
     appleCardStatus,

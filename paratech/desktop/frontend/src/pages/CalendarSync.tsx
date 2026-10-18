@@ -10,7 +10,8 @@ interface Message {
   ok: boolean;
 }
 
-// The calendar sync part of the «Google Календарь» block: Go's status line, the last sync time and «Синхронизировать».
+// The calendar sync part of the «Google Календарь» block: Go's status line, the last finished sync with its result and
+// «Синхронизировать».
 // It follows the account of the block: the status is read again after a sign-in or a sign-out.
 export function CalendarSync(props: { account: string }) {
   const api = useMemo(() => calendarApi(callByName), []);
@@ -91,10 +92,21 @@ export function CalendarSync(props: { account: string }) {
     <>
       <hr className="sep" />
       <h2 className="sub">{calendarTexts.title}</h2>
-      <p className="small" role="status">
-        {v.message}
-      </p>
+      {v.messageAlert ? (
+        <ResultLine kind="fail" role="alert">
+          {v.message}
+        </ResultLine>
+      ) : (
+        <p className="small" role="status">
+          {v.message}
+        </p>
+      )}
       {v.lastSynced !== "" && <p className="small muted">{v.lastSynced}</p>}
+      {v.lastRunResult !== null && (
+        <ResultLine kind={v.lastRunResult.kind} role={v.lastRunResult.kind === "fail" ? "alert" : "status"}>
+          {v.lastRunResult.text}
+        </ResultLine>
+      )}
       {v.syncShown && (
         <div className="acts start">
           <Button

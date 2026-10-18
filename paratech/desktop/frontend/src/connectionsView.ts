@@ -9,7 +9,10 @@ import type {
   MailSettingsInput,
   SecretStatus,
 } from "./bindings/connections";
+import type { CalendarSyncState } from "./bindings/calendar";
 import type { GoogleState } from "./bindings/google";
+// The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
+import { currentOutcome } from "./calendarView.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -344,8 +347,15 @@ export function mailCardStatus(s: { saved: Connections | null; loadFailed: boole
   return status("neutral", "Настроено");
 }
 
-/** The card of Google from GoogleStatus: the client, the account and a sign-in waiting for the browser. */
-export function googleCardStatus(s: { state: GoogleState | null; loadFailed: boolean }): CardStatus {
+/**
+ * The card of Google from GoogleStatus (the client, the account and a sign-in waiting for the browser) and, while
+ * signed in, the calendar outcome Go reports: an error only the user can fix turns the card red.
+ */
+export function googleCardStatus(s: {
+  state: GoogleState | null;
+  loadFailed: boolean;
+  calendar?: CalendarSyncState | null;
+}): CardStatus {
   const g = s.state;
   if (g === null) {
     return s.loadFailed ? status("fail", "Не удалось проверить") : loading;
@@ -361,13 +371,24 @@ export function googleCardStatus(s: { state: GoogleState | null; loadFailed: boo
   }
   switch (g.account) {
     case "signedIn":
-      return status("ok", "Подключено");
+      return signedInStatus(s.calendar ?? null);
     case "signedOut":
       return status("wait", "Вход не выполнен");
     case "unsupported":
       return status("fail", "Недоступно");
     default:
       return status("fail", "Не удалось проверить");
+  }
+}
+
+function signedInStatus(calendar: CalendarSyncState | null): CardStatus {
+  switch (calendar === null ? "" : currentOutcome(calendar)) {
+    case "signInExpired":
+      return status("fail", "Нужен вход");
+    case "noAccess":
+      return status("fail", "Нет доступа");
+    default:
+      return status("ok", "Подключено");
   }
 }
 
