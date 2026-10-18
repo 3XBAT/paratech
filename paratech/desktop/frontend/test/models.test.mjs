@@ -185,9 +185,11 @@ test("download progress, status and buttons follow the core's state", () => {
 test("the notes say why recordings are not transcribed", () => {
   const empty = { ...view, installed: [], available: [] };
   assert.deepEqual(statusNotes(empty).map((n) => n.text), [texts.noModels, texts.afterImport]);
-  assert.deepEqual(statusNotes({ ...empty, speechReady: false }).map((n) => n.text), [texts.speechMissing, texts.noModels]);
-  assert.match(texts.speechMissing, /whisper-cli/);
-  assert.match(texts.speechMissing, /перезапустите/);
+  // A missing speech component has its own notice with the install button (SpeechComponentNotice).
+  assert.deepEqual(statusNotes({ ...empty, speechReady: false }).map((n) => n.text), [texts.noModels]);
+  for (const t of Object.values(texts)) {
+    assert.doesNotMatch(t, /whisper-cli|\.exe|DLL|learning-assistant/);
+  }
   assert.deepEqual(statusNotes(view), []);
   const none = { ...installed, isDefault: false, inUse: false };
   const two = { ...view, installed: [none, { ...none, id: "m-2" }], needsDefault: true };

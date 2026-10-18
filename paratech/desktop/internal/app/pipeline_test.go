@@ -504,14 +504,15 @@ func TestRepeatedCompletionMakesOneSTTJob(t *testing.T) {
 	}
 }
 
-// Without whisper-cli the STT job waits QUEUED (no attempt, no error) while the runner works on other jobs; after
-// whisper-cli is installed and the app restarts, the same job (same id and key) runs to COMPLETED.
+// Without the speech component the STT job waits QUEUED (no attempt, no error) while the runner works on other jobs;
+// when the next start finds the component, the same job (same id and key) runs to COMPLETED. The in-app install
+// without a restart is TestSpeechComponentInstallsWithoutRestart.
 func TestSTTJobWaitsForWhisperCLI(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
 	a, _ := newTestAppWith(t, dir)
-	a.env.whisperBinary = filepath.Join(t.TempDir(), "whisper-cli.exe") // not installed
+	a.env.speech.bundledDir = t.TempDir() // not installed
 	startCore(t, a)
 	model := installModel(t, a, "m1", testenv.WhisperOK)
 	rec := completedRecording(t, a, "rec-1")

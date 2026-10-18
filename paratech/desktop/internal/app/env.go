@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
-	"runtime"
 	"time"
 
 	"paratech/desktop/internal/adapters/audiocapture"
@@ -16,6 +14,7 @@ import (
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"
+	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/instancelock"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/random"
@@ -109,9 +108,9 @@ type env struct {
 	captureSource audiocapture.Source
 	tone          audiocapture.TonePlayer // plays the tone of a sound check request
 
-	// whisperBinary is the absolute path of whisper-cli; when it cannot be used, the stt job type is not registered and
-	// STT jobs wait QUEUED for a start with a usable binary.
-	whisperBinary string
+	// speech is the speech recognition component: its manifest, the folder of the executable and the install source;
+	// tests use a manifest of the test binary and a fake server. Without a verified set STT jobs wait QUEUED.
+	speech speechEnv
 
 	// secrets opens the credential store of a service in the profile of the data directory (ADR-0014); tests use
 	// testenv.MemCredentials, never Credential Manager.
@@ -156,7 +155,7 @@ func productionEnv() env {
 		childStdout:     os.Stdout,
 		captureSource:   audiocapture.PlatformSource(audiocapture.DefaultSourceConfig()),
 		tone:            audiocapture.PlatformTone(),
-		whisperBinary:   whisperBinaryPath(),
+		speech:          speechEnv{manifest: embeddedSpeechManifest(), bundledDir: executableDir(), source: httpdownload.New()},
 		secrets:         credentialManager,
 		authPages:       weblink.New(),
 		scheme:          urlscheme.New(),
@@ -193,17 +192,4 @@ func acquireLock(dataDir string) (instanceLock, error) {
 		return nil, err
 	}
 	return l, nil
-}
-
-// whisperBinaryPath is whisper-cli next to the executable; empty when the executable cannot be found.
-func whisperBinaryPath() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	name := "whisper-cli"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return filepath.Join(filepath.Dir(exe), name)
 }

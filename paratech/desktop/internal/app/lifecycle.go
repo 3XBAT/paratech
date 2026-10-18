@@ -59,6 +59,9 @@ type lifecycle struct {
 	loops       []loop   // started last, stopped first
 	closers     []closer // released last, in this order
 	stopTimeout time.Duration
+	// cancelSpeech stops a running speech component install first, so its download does not write during the
+	// shutdown (nil: no component); the closer later waits for it.
+	cancelSpeech func()
 
 	bg sync.WaitGroup // the background recording recovery
 
@@ -82,10 +85,17 @@ func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers
 	if c.manager != nil {
 		closers = append([]closer{{name: "model manager", close: c.manager.close}}, closers...)
 	}
+	var cancelSpeech func()
+	if c.speech != nil {
+		// An install writes through the component folder and the storage.
+		closers = append([]closer{{name: "speech component install", close: func() error { return c.closeSpeech(stopTimeout) }}},
+			closers...)
+		cancelSpeech = c.speech.CancelInstall
+	}
 	return &lifecycle{
 		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, transcriptions: c.transcriptions,
 		calendar: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "start") },
-		cleanups: c.cleanups, loops: c.loops(), closers: closers, stopTimeout: stopTimeout,
+		cleanups: c.cleanups, loops: c.loops(), closers: closers, stopTimeout: stopTimeout, cancelSpeech: cancelSpeech,
 	}
 }
 
@@ -208,9 +218,12 @@ func (l *lifecycle) unwind() {
 	}
 }
 
-// stopWork stops the loops, the job runner, then the recording session, each within stopTimeout, and waits for the
-// background recovery. The stops are safe to repeat and before a start.
+// stopWork cancels a running speech install, stops the loops, the job runner, then the recording session, each within
+// stopTimeout, and waits for the background recovery. The stops are safe to repeat and before a start.
 func (l *lifecycle) stopWork() error {
+	if l.cancelSpeech != nil {
+		l.cancelSpeech()
+	}
 	loopErr := l.endLoops()
 
 	ctx, cancel := context.WithTimeout(context.Background(), l.stopTimeout)

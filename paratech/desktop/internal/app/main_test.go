@@ -83,8 +83,8 @@ func testEnv(t *testing.T) (env, *fakes) {
 			f.recorder = testenv.NewFakeRecorder(files, time.Minute)
 			return f.recorder, nil
 		},
-		apps:          func(*slog.Logger) recordingprompt.AudioApps { return f.apps },
-		whisperBinary: bin,
+		apps:   func(*slog.Logger) recordingprompt.AudioApps { return f.apps },
+		speech: testSpeechEnv(t, bin),
 		secrets: func(profile wincred.Profile, service string) (secretStore, error) {
 			s, ok := f.secrets[service]
 			if !ok {

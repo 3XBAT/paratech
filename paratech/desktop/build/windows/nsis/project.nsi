@@ -8,10 +8,9 @@
 ;
 ; Built by desktop/build-release.ps1 (docs/refs/packaging.md), which passes:
 ;   VERSION                X.Y.Z
-;   APP_DIR                folder with learning-assistant.exe (and the whisper files when WITH_WHISPER is set)
+;   APP_DIR                folder with learning-assistant.exe and the speech recognition component
 ;   WEBVIEW2_BOOTSTRAPPER  MicrosoftEdgeWebview2Setup.exe from the Wails module
 ;   OUT_FILE               installer path
-;   WITH_WHISPER           optional: also install whisper-cli.exe and its DLLs
 ; The texts are Russian, so the script runs makensis with -INPUTCHARSET UTF8.
 
 Unicode true
@@ -179,13 +178,22 @@ Section "Install"
 
   SetOutPath "$INSTDIR"
   File "${APP_DIR}\${PRODUCT_EXE}"
-  !ifdef WITH_WHISPER
-    File "${APP_DIR}\whisper-cli.exe"
-    File "${APP_DIR}\whisper.dll"
-    File "${APP_DIR}\ggml.dll"
-    File "${APP_DIR}\ggml-base.dll"
-    File "${APP_DIR}\ggml-cpu-*.dll"
-  !endif
+  ; The speech recognition component: the files of desktop/internal/app/speechcomponent.json (keep both lists here in
+  ; sync with it). ggml loads every ggml-cpu-*.dll next to it, so none of an older set may stay.
+  Delete "$INSTDIR\ggml-cpu-*.dll"
+  File "${APP_DIR}\whisper-cli.exe"
+  File "${APP_DIR}\whisper.dll"
+  File "${APP_DIR}\ggml.dll"
+  File "${APP_DIR}\ggml-base.dll"
+  File "${APP_DIR}\ggml-cpu-alderlake.dll"
+  File "${APP_DIR}\ggml-cpu-cannonlake.dll"
+  File "${APP_DIR}\ggml-cpu-cascadelake.dll"
+  File "${APP_DIR}\ggml-cpu-haswell.dll"
+  File "${APP_DIR}\ggml-cpu-icelake.dll"
+  File "${APP_DIR}\ggml-cpu-sandybridge.dll"
+  File "${APP_DIR}\ggml-cpu-skylakex.dll"
+  File "${APP_DIR}\ggml-cpu-sse42.dll"
+  File "${APP_DIR}\ggml-cpu-x64.dll"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}"
@@ -233,6 +241,16 @@ Section "Uninstall"
   Delete "$INSTDIR\whisper.dll"
   Delete "$INSTDIR\ggml.dll"
   Delete "$INSTDIR\ggml-base.dll"
+  Delete "$INSTDIR\ggml-cpu-alderlake.dll"
+  Delete "$INSTDIR\ggml-cpu-cannonlake.dll"
+  Delete "$INSTDIR\ggml-cpu-cascadelake.dll"
+  Delete "$INSTDIR\ggml-cpu-haswell.dll"
+  Delete "$INSTDIR\ggml-cpu-icelake.dll"
+  Delete "$INSTDIR\ggml-cpu-sandybridge.dll"
+  Delete "$INSTDIR\ggml-cpu-skylakex.dll"
+  Delete "$INSTDIR\ggml-cpu-sse42.dll"
+  Delete "$INSTDIR\ggml-cpu-x64.dll"
+  ; Leftovers of an older whisper.cpp set.
   Delete "$INSTDIR\ggml-cpu-*.dll"
   Delete "$INSTDIR\uninstall.exe"
   ; Not /r (the Wails template uses /r): a folder the user chose may hold other files.

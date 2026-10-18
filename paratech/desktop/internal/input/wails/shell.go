@@ -43,11 +43,11 @@ type Core struct {
 	Files    ScheduleFileReader    // reads the file chosen for the schedule import
 
 	// The models page; the shell shows its open dialog.
-	Models      ModelCatalogUseCase
-	Downloads   ModelDownloads
-	Imports     ModelImports
-	Links       LinkOpener // also opens the pages of the help screens
-	SpeechReady bool       // whisper-cli was found at start
+	Models    ModelCatalogUseCase
+	Downloads ModelDownloads
+	Imports   ModelImports
+	Links     LinkOpener             // also opens the pages of the help screens
+	Speech    SpeechComponentUseCase // the speech recognition component: status and install, on both pages
 
 	Connections ConnectionsUseCase  // the mail and Hub section of the settings page
 	Google      GoogleUseCase       // the Google section of the same page
@@ -158,6 +158,7 @@ type Services struct {
 	Popup    *PopupWindowService
 	Schedule *ScheduleImportService
 	Models   *ModelsService
+	Speech   *SpeechService
 
 	Connections *ConnectionsService
 	Google      *GoogleService
@@ -198,6 +199,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Models == nil || core.Downloads == nil || core.Imports == nil || core.Links == nil {
 		return Services{}, errors.New("wails: open core: no model manager")
 	}
+	if core.Speech == nil {
+		return Services{}, errors.New("wails: open core: no speech component use case")
+	}
 	if core.Connections == nil {
 		return Services{}, errors.New("wails: open core: no connections use case")
 	}
@@ -223,8 +227,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
 		Models: NewModelsService(ModelsDeps{
 			Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links,
-			Picker: modelPickerFunc(s.pickModelFile), SpeechReady: core.SpeechReady,
+			Picker: modelPickerFunc(s.pickModelFile), Speech: core.Speech,
 		}, s.opts.Log),
+		Speech: NewSpeechService(core.Speech, s.opts.Log),
 
 		Connections: NewConnectionsService(core.Connections, s.opts.Log),
 		Google:      google,

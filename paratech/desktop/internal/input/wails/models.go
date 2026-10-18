@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"paratech/desktop/internal/cases/modelcatalog"
+	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/services/modelselection"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
@@ -48,10 +49,10 @@ const (
 	ErrModelChecksum            modelError = "Контрольная сумма SHA-256 не совпадает: файл повреждён или это другой файл. Модель не установлена"
 	ErrModelFileChanged         modelError = "Файл изменился после проверки: его SHA-256 не совпадает с подтверждённой. Модель не установлена, выберите файл заново"
 	ErrModelSizeMismatch        modelError = "Размер файла не совпадает с каталогом: файл повреждён или это другой файл. Модель не установлена"
-	ErrModelFileTooLarge        modelError = "Файл больше 8 ГБ: это не модель whisper"
-	ErrModelFileEmpty           modelError = "Файл пустой: это не модель whisper"
+	ErrModelFileTooLarge        modelError = "Файл больше 8 ГБ: это не модель распознавания"
+	ErrModelFileEmpty           modelError = "Файл пустой: это не модель распознавания"
 	ErrModelFileNotRegular      modelError = "Это не обычный файл на локальном диске: выберите файл модели .bin"
-	ErrModelFileType            modelError = "Выберите файл модели whisper с расширением .bin"
+	ErrModelFileType            modelError = "Выберите файл модели распознавания с расширением .bin"
 	ErrModelFileMissing         modelError = "Файл не найден"
 	ErrModelNoAccess            modelError = "Нет доступа к файлу"
 	ErrModelChoosing            modelError = "Файл уже выбирается"
@@ -142,8 +143,8 @@ type ModelsDeps struct {
 	Imports   ModelImports
 	Links     LinkOpener
 	Picker    ModelFilePicker
-	// SpeechReady tells whether whisper-cli was found at start; without it STT jobs wait until a restart.
-	SpeechReady bool
+	// Speech tells whether speech recognition works now (SpeechService shows the details and the install).
+	Speech SpeechStatusReader
 }
 
 // InstalledModelItem is the JSON form of an installed model. InstalledAt is RFC 3339 in UTC. InUse marks the model a
@@ -302,7 +303,7 @@ func (s *ModelsService) List(ctx context.Context) (ModelsView, error) {
 
 	view := ModelsView{
 		Installed: make([]InstalledModelItem, 0, len(installed)), Available: make([]AvailableModelItem, 0, len(available)),
-		NeedsDefault: needsDefault, SpeechReady: s.deps.SpeechReady, Download: downloadView(s.deps.Downloads.DownloadState()),
+		NeedsDefault: needsDefault, SpeechReady: s.speechReady(), Download: downloadView(s.deps.Downloads.DownloadState()),
 		ModelsHomePage: ModelsHomePage,
 	}
 	for _, m := range installed {
@@ -323,6 +324,11 @@ func (s *ModelsService) List(ctx context.Context) (ModelsView, error) {
 		})
 	}
 	return view, nil
+}
+
+// speechReady reports whether speech recognition works now; it changes when the component is installed.
+func (s *ModelsService) speechReady() bool {
+	return s.deps.Speech != nil && s.deps.Speech.Status().State == speechcomponent.StateReady
 }
 
 // modelInUse asks the model selection which model a new STT job pins; the page does not repeat the rule (ARCH-44).

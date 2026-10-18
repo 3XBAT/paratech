@@ -43,6 +43,13 @@ var (
 	// ErrInvalidCatalog is returned by ParseCatalog for a manifest that is malformed or breaks a rule.
 	ErrInvalidCatalog = errors.New("invalid model catalog")
 
+	// ErrInvalidComponent is returned by ParseSpeechComponent for a manifest that is malformed or breaks a rule.
+	ErrInvalidComponent = errors.New("invalid speech component manifest")
+
+	// ErrInvalidComponentArchive means the component archive is not a zip that holds every component file once, as a
+	// plain file of the pinned size.
+	ErrInvalidComponentArchive = errors.New("invalid speech component archive")
+
 	// ErrChecksumMismatch means a file does not have the SHA-256 the catalog promises (PRD section 14 case 13).
 	ErrChecksumMismatch = errors.New("checksum mismatch")
 

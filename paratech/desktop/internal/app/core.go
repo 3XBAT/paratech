@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 
+	"paratech/desktop/internal/adapters/componentstore"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"
@@ -20,7 +19,6 @@ import (
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/sysinfo"
 	"paratech/desktop/internal/adapters/weblink"
-	"paratech/desktop/internal/adapters/whispercli"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
@@ -35,6 +33,7 @@ import (
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/soundcheck"
+	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/shared"
@@ -63,6 +62,11 @@ type core struct {
 
 	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
 	transcriptions *transcribe.Enqueuer
+
+	// The speech recognition component (TASK-072): its folder below the data directory and the use case that finds,
+	// installs and activates it.
+	components *componentstore.Store
+	speech     *speechcomponent.Service
 
 	// The model manager of the models page; manager is what the page binds to and owns its background work.
 	models    *modelcatalog.Service
@@ -111,12 +115,13 @@ func buildCore(ctx context.Context, dataDir string, profile wincred.Profile, e e
 	if err := c.wire(dataDir, profile, e, log); err != nil {
 		return nil, errors.Join(err, c.close())
 	}
+	c.detectSpeech(ctx, log)
 	return c, nil
 }
 
 // wire builds the use cases on the opened storage.
 func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Logger) error {
-	db, store, root := c.db, c.store, filepath.Join(dataDir, artifactsDir)
+	db, store := c.db, c.store
 	jobs := sqlite.NewJobRepository(db)
 	settings := sqlite.NewSettingsRepository(db)
 	recordings := sqlite.NewRecordingRepository(db)
@@ -183,21 +188,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: transcription queue: %w", err)
 	}
 
-	// Without a usable engine the stt type stays unregistered and STT jobs wait QUEUED (see registrations).
+	// The stt type is registered by the speech activator once the speech component verified (wireSpeech); until then
+	// STT jobs wait QUEUED.
 	handlers := jobHandlers{postProcess: post, drafts: c.drafts}
-	engine := c.sttEngine(root, e.whisperBinary, log)
-	if engine != nil {
-		// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
-		stt, err := transcribe.New(transcribe.Deps{
-			Engine: engine, Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db),
-			Artifacts: store, Events: post, Clock: e.clock, Log: log,
-		})
-		if err != nil {
-			return fmt.Errorf("app: transcription: %w", err)
-		}
-		handlers.stt = stt
-	}
-
 	handlers.delivery = c.deliveries
 	// Before the proposals (the deadline calendar) and the runner (the calendar sync handler).
 	if err := c.wireGoogle(e, profile, log); err != nil {
@@ -222,6 +215,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		if err := c.runner.Register(r); err != nil {
 			return fmt.Errorf("app: register %s jobs: %w", r.Type, err)
 		}
+	}
+	// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
+	if err := c.wireSpeech(dataDir, e, transcribe.Deps{
+		Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db), Artifacts: store,
+		Events: post, Clock: e.clock, Log: log,
+	}, log); err != nil {
+		return err
 	}
 
 	recorder, err := e.recorder(dataDir, store, log)
@@ -257,8 +257,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: activity: %w", err)
 	}
 
-	// A model installed while the app runs gets the waiting recordings enqueued at once; whisper-cli is still found
-	// only at start, so without it their jobs wait QUEUED until a restart (the page says so: SpeechReady).
+	// A model installed while the app runs gets the waiting recordings enqueued at once; without the speech component
+	// their jobs wait QUEUED until it is installed (the pages offer it: Speech).
 	c.manager = newModelManager(c, c.transcriptions, log, e.stopTimeout)
 
 	// The model manager writes artifacts only after the temporary files of a crashed run are gone.
@@ -266,7 +266,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		cleanup{name: "model manager writes allowed", run: c.manager.markReady})
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
-		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), SpeechReady: engine != nil,
+		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech,
 		Sound: sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework: wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 	}
@@ -274,36 +274,6 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 	return c.wireSchedule(e, log)
-}
-
-// sttEngine is whisper-cli below the artifact root, or nil when the binary is missing or refused by the adapter's
-// checks. That does not stop the app (settings and lists stay usable): the log says why, and STT jobs wait in the
-// queue until a start finds a usable binary.
-func (c *core) sttEngine(root, binary string, log *slog.Logger) transcribe.STTEngine {
-	engine, err := c.whisper(root, binary, log)
-	if engine == nil {
-		if err != nil {
-			log.Error("speech recognition is not available", "err", err)
-		}
-		log.Warn("transcription jobs wait in the queue until whisper-cli is installed next to the executable and the app restarts")
-		return nil
-	}
-	c.cleanups = append(c.cleanups, cleanup{name: "speech recognition work directories", run: engine.CleanupWork})
-	return engine
-}
-
-// whisper builds the whispercli adapter; nil and no error when there is no binary (logged here).
-func (c *core) whisper(root, binary string, log *slog.Logger) (*whispercli.Engine, error) {
-	if binary == "" {
-		log.Warn("speech recognition is not available: whisper-cli path unknown")
-		return nil, nil
-	}
-	if _, err := os.Stat(binary); errors.Is(err, fs.ErrNotExist) {
-		log.Warn("speech recognition is not available: whisper-cli is not installed next to the executable")
-		return nil, nil
-	}
-	return whispercli.New(whispercli.Config{Binary: binary, DataRoot: root, WorkDir: filepath.Join(root, sttWorkDir)},
-		c.store, c.store)
 }
 
 // wireModels builds the model manager (PRD section 8): the installed models, the default, the pin of an STT job, the
@@ -343,6 +313,10 @@ func (r modelResolver) ResolveForJob(ctx context.Context, requested shared.SttMo
 // close releases the storage in reverse order of opening. It is safe to call more than once.
 func (c *core) close() error {
 	var errs []error
+	if c.components != nil {
+		errs = append(errs, c.components.Close())
+		c.components = nil
+	}
 	if c.store != nil {
 		errs = append(errs, c.store.Close())
 		c.store = nil

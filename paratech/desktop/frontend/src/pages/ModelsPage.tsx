@@ -40,6 +40,7 @@ import {
   texts,
 } from "../modelsView";
 import { Button } from "../ui/Button";
+import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, Card, Dialog, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import type { IconName } from "../ui/Icon";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
@@ -279,8 +280,9 @@ export function ModelsPage() {
           </Button>
         </div>
       </div>
-      <p className="muted">Распознавание речи идёт только на этом компьютере. Модель — файл whisper.cpp (.bin).</p>
+      <p className="muted">Распознавание речи идёт только на этом компьютере. Модель — файл .bin.</p>
 
+      <SpeechComponentNotice onReady={() => void refresh()} />
       {view !== null &&
         statusNotes(view).map((n, i) =>
           n.warning ? (

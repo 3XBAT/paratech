@@ -21,4 +21,6 @@
 //   - Pin: an STT job fixes the exact model and version it uses (reproducibility, safe deletion).
 //   - Transcript: the text result of transcribing one recording, with the model name and version that produced it.
 //   - STT engine: the local sidecar process (whisper-cli) that does the recognition; raw audio never leaves the machine.
+//   - Speech component: the pinned files of the STT engine (the program and its libraries), shipped next to the
+//     executable or installed from the official release archive into the data directory.
 package transcription

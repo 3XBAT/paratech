@@ -33,7 +33,7 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 ## WebView2
 - The installer embeds `MicrosoftEdgeWebview2Setup.exe` from the module (`internal/commands/webview2/`, embedded by `internal/commands/generate_webview2.go`;
   1 793 816 bytes, file version 1.3.143.57, valid Authenticode signature of Microsoft Corporation, checked locally). `go.sum` is checked only when
-  the module is downloaded, not when it is read from the cache later; at build time the guard is the required Microsoft signature. Nothing is downloaded by the script.
+  the module is downloaded, not when it is read from the cache later; at build time the guard is the required Microsoft signature. The script downloads only the whisper.cpp archive (below).
 - At install it checks the `pv` value of `{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` under `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients`
   and `HKCU\Software\Microsoft\EdgeUpdate\Clients` (Wails macro `wails.webview2runtime`). On this Windows 10 the HKLM value is present (155.0.4283.45):
   Windows 10/11 normally have the Evergreen runtime.
@@ -44,17 +44,27 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 ## Install
 - Per user, no admin and no UAC: `RequestExecutionLevel user`, `SetShellVarContext current`.
 - Folder `%LOCALAPPDATA%\Programs\LearningAssistant` (can be changed on the folder page; an upgrade reuses `InstallLocation`).
-- Files: `learning-assistant.exe`, `uninstall.exe`; with `-WhisperDir` also `whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-cpu-*.dll`.
+- Files: `learning-assistant.exe`, `uninstall.exe` and always the 13 speech component files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`,
+  nine `ggml-cpu-*.dll`), listed by name in `project.nsi`. Before them the installer deletes `ggml-cpu-*.dll` of an older set (ggml loads every one next to it).
 - Start menu `Learning Assistant.lnk`; no desktop shortcut, autostart or file associations; registers the per-user `paratech:` URL scheme (`HKCU\Software\Classes\paratech`, ADR-0013). Uninstall entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant`.
 - Windows 10+ and x64 only (Wails `wails.checkArchitecture`). NSIS default icon (an app icon is a follow-up).
 - Upgrade = run the new installer over the old one; data is not touched.
 - **No auto-update**: nothing checks or downloads updates (PRD §4.3).
 
-## whisper-cli
-whisper-cli is looked up next to the exe (`internal/app/env.go`). Without `-WhisperDir` the installer has none: copy the files from the `Release\`
-folder of `whisper-bin-x64.zip` (b5454; verify the zip SHA-256 first, `docs/qa/run-alpha.md` §6) into the install folder and restart the app.
-With `-WhisperDir` the script first removes whisper files left in the staging folder (no stale `ggml-cpu-*.dll`), then prints the SHA-256 of every
-copied file; it does not pin them (follow-up, ADR-0009).
+## Speech recognition component (whisper-cli)
+Pinned in `desktop/internal/app/speechcomponent.json` (the manifest the app embeds; `docs/refs/whisper.md`, "Speech recognition component").
+`build-alpha.ps1` reads it and, before the build, puts the 13 files next to the exe; `build-release.ps1` gets them in the staging folder the same way
+(`-SkipAppBuild`: `build-alpha.ps1 -ComponentOnly`), so every installer has them.
+- Download of `source_url` with `Invoke-WebRequest` (TLS 1.2+) into `paratech\dist\cache\speech-component\<version>\` (ignored by git). A cached archive is
+  reused only if its size and SHA-256 match, else deleted and downloaded again.
+- Size and SHA-256 of the archive are checked before it is opened (mismatch: deleted, error). Only entries named exactly `<entry_prefix><name>` are unpacked,
+  each to a path built from the manifest name, bounded by its size, then checked (size, SHA-256). Missing or duplicate entry: error. Nothing from the archive runs.
+- Whisper files already in the target folder are removed first; the copied set is checked again.
+- Offline: `-WhisperZip <archive>` (same checks) or `-WhisperDir <unpacked Release folder>` (each file checked). `build-alpha.ps1 -SkipWhisper`: dev build without it.
+- Checked locally (2026-10-18): real download, checks and unpacking, `whisper-cli.exe --help` from the 13 files; a changed byte in the archive, a bad cached
+  archive, a changed or missing file in `-WhisperDir`, duplicate, missing, renamed or changed entries all fail. Packing with `makensis` **[not verified]**: no NSIS here.
+- If the files are missing or damaged later, the app offers «Установить компонент распознавания» and installs the same archive into `<data dir>\components\speech`.
+
 Whether the b5454 binaries need the VC++ Redistributable (`VCRUNTIME140.dll`, `MSVCP140.dll`) is **[not verified]**; the installer does not
 ship it. Check on a clean Windows (`docs/qa/windows-checklist.md`, "Инсталлятор").
 
@@ -65,11 +75,12 @@ Installer and uninstaller check the Wails single-instance mutex `wails-app-parat
 if it cannot delete the exe.
 
 ## Uninstall and user data
-- Deletes only its files (names above), `uninstall.exe`, the shortcut, the HKCU uninstall key and `HKCU\Software\Classes\paratech`, then `RMDir` **without** `/r` (the Wails template uses `/r`;
+- Deletes only its files (names above, plus any `ggml-cpu-*.dll`), `uninstall.exe`, the shortcut, the HKCU uninstall key and `HKCU\Software\Classes\paratech`, then `RMDir` **without** `/r` (the Wails template uses `/r`;
   a chosen folder may hold other files).
 - Asks (default and `/S`: keep) whether to delete `%LOCALAPPDATA%\LearningAssistant` (recordings, transcripts, models, exports, logs, the database
   with the settings; the same list as the uninstaller message: `learning-assistant.db`, `artifacts\` and `logs\` of `internal/app/core.go`) and the
   WebView2 folder `%AppData%\learning-assistant.exe` (`internal/webview2/pkg/edge/chromium.go`). A `--data-dir` / `LA_DATA_DIR` folder is not touched.
+  A component installed by the app (`components\speech`) is user data: it stays with "Нет" and goes with "Да" (no separate step).
 - Credential Manager keeps `paratech/hub/api-key`, `paratech/mail/smtp-password`, `paratech/google/client-id`, `.../client-secret`, `.../refresh-token`.
   Before uninstalling, "Выйти" in "Google Календарь" revokes Google access. Then remove the entries by hand: Control Panel → Credential Manager →
   Windows Credentials (`cmdkey /list | findstr paratech` lists them).
@@ -82,9 +93,8 @@ The uninstaller stays unsigned (NSIS `!uninstfinalize` could sign it; follow-up)
 
 ## Owner steps (Windows, PowerShell, repository root)
 1. Install NSIS 3.x from https://nsis.sourceforge.io/Download, open a new terminal.
-2. Optional: whisper.cpp `whisper-bin-x64.zip` (b5454), check its SHA-256, unpack.
-3. Plan: `powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -DryRun` — makensis, go, npm and WebView2 must be found.
-4. Build: same command without `-DryRun`, optionally `-WhisperDir <unpacked>\Release`.
-5. Result: `paratech\dist\release\learning-assistant-<version>-windows-amd64-setup.exe` (the script prints size and SHA-256).
-6. Install and check: `docs/qa/windows-checklist.md`, section "Инсталлятор".
+2. Plan: `powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-release.ps1 -DryRun` — makensis, go, npm and WebView2 must be found.
+3. Build: same command without `-DryRun` (downloads the whisper.cpp archive once; offline: `-WhisperZip <file>`).
+4. Result: `paratech\dist\release\learning-assistant-<version>-windows-amd64-setup.exe` (the script prints size and SHA-256).
+5. Install and check: `docs/qa/windows-checklist.md`, section "Инсталлятор".
 New release: change `desktop/VERSION`, commit, optionally tag `vX.Y.Z`.

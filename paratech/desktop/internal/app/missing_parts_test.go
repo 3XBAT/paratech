@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +41,7 @@ import (
 func alphaEnv(t *testing.T) env {
 	t.Helper()
 	e := productionEnv()
-	e.whisperBinary = filepath.Join(t.TempDir(), "whisper-cli.exe") // not installed
+	e.speech.bundledDir = t.TempDir() // nothing next to the executable, nothing installed
 	e.recorder = func(string, *filestore.Store, *slog.Logger) (recordingsession.Recorder, error) {
 		return audiocapture.Unavailable{}, nil
 	}
@@ -70,8 +69,8 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 	out := logs.String()
 	for _, line := range []string{
 		"instance lock acquired",
-		"speech recognition is not available: whisper-cli is not installed next to the executable",
-		"transcription jobs wait in the queue until whisper-cli is installed next to the executable and the app restarts",
+		"speech recognition is not available: whisper-cli and its libraries are missing or do not verify",
+		"transcription jobs wait in the queue until the speech component is installed",
 		"background work started",
 	} {
 		if !strings.Contains(out, line) {
@@ -123,9 +122,9 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 			"no mail settings", senddelivery.JobType, job.StatusFailed, 1,
 			"permanent failure: senddelivery: send: smtp: mail is not configured: delivery rejected",
 		},
-		// TASK-060: the stt type is not registered without whisper-cli, so the job waits QUEUED with its key unused
-		// (it runs after whisper-cli is installed and the app restarts) instead of failing. Last: by now the runner
-		// has settled the other jobs, so it had every chance to claim this one.
+		// TASK-060: the stt type is not registered without the speech component, so the job waits QUEUED with its key
+		// unused (installing the component activates it without a restart: TestSpeechComponentInstallsWithoutRestart)
+		// instead of failing. Last: by now the runner has settled the other jobs, so it had every chance to claim this one.
 		{"no whisper-cli", transcribe.JobType, job.StatusQueued, 0, ""},
 	}
 	for _, tt := range tests {

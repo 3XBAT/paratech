@@ -30,6 +30,29 @@ Used by `desktop/internal/adapters/whispercli` (TASK-024). Re-verify everything 
 - Pinning: the app pins the release by the zip SHA-256 above (and the build tag); the model is pinned by file + SHA-256 in the model
   catalog (PRD section 8.1, TASK-026).
 
+## Speech recognition component (TASK-072)
+
+The pinned set lives in one manifest, `desktop/internal/app/speechcomponent.json` (embedded; the build scripts read the
+same file). Fields: `schema_version` (1), `version` (build tag), `source_url`, `size_bytes` and `sha256` of the archive,
+`download_hosts`, `entry_prefix` (`Release/`), `executable` (`whisper-cli.exe`) and `files`: `name`, `size_bytes`,
+`sha256` of each of the 13 files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`, nine `ggml-cpu-*.dll`).
+Parsed by `values.ParseSpeechComponent`.
+
+- **Hosts.** `github.com` answers `302` to `release-assets.githubusercontent.com` (seen 2026-10-18);
+  `objects.githubusercontent.com` is the older redirect host. Only these, exact match.
+- **Where the app looks**, in order: (a) the folder of the executable (installer, build scripts; read only), then
+  (b) `<data dir>\components\speech` (the in-app install; always writable). A folder counts only when all 13 files are
+  regular files (no links or reparse points) with the pinned size and SHA-256; some files but no verified set is
+  "damaged". Detection hashes about 12 MB at start and after an install.
+- **In-app install** (button «Установить компонент распознавания»): download from the hosts above, size and SHA-256 of
+  the archive checked before it is opened; only the entries named exactly `Release/<file>` are unpacked, each to a path
+  built from the manifest name, bounded and hashed while written, into `components\staging-*`; only a fully verified
+  set replaces `components\speech`. Nothing from the archive runs before that. Leftovers are removed at the next start.
+  Then the engine is built from the new folder and the `stt` job type is registered at run time (no restart).
+- **Refresh.** New tag: update the manifest (archive size and digest from the GitHub asset, the 13 file sizes and
+  digests from the unpacked `Release/`), check `whisper-cli.exe --help` runs with only these files, update
+  `app/speech_test.go` (`TestEmbeddedSpeechManifest`).
+
 ## Models
 
 - Official ggml models: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-<name>.bin`

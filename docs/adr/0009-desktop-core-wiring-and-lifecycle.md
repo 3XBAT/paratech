@@ -12,7 +12,7 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 ## Decision
 - **Two phases.** `openCore` (sync, no goroutines): data dir -> instance lock -> SQLite (migrate) -> Storage Manager
   (`filestore`) -> use cases and job registrations; returns `wails.Core{Settings, Activity, Stopper, Forcer, Prompt,
-  Schedule, Files, Models, Downloads, Imports, Links, SpeechReady, Connections, Google, Calendar}` (interfaces required;
+  Schedule, Files, Models, Downloads, Imports, Links, Speech, Connections, Google, Calendar}` (interfaces required;
   `Prompt` since TASK-022, `Schedule` and `Files` since TASK-049, the model fields since TASK-030, `Connections` since
   TASK-062, `Google` since TASK-050, `Calendar` since TASK-051).
   `start` runs
@@ -40,7 +40,7 @@ a RUNNING job or an unfinished recording; Wails' single-instance check runs insi
 
 | Job type | Heavy | Recovery | Timeout | Why |
 |---|---|---|---|---|
-| `stt` | yes | requeue | 6 h | CPU-only, no side effects; long recordings on slow laptops. Registered only when whisper-cli is usable |
+| `stt` | yes | requeue | 6 h | CPU-only, no side effects; long recordings on slow laptops. Registered only when the speech component verified (at start or after the in-app install) |
 | `summarize`, `extract_homework` | no | requeue | 10 min (5 x hub request timeout) | wait on the Hub; idempotent by key |
 | `homework_draft` | no | requeue | 10 min | same |
 | `send_email` | no | reconcile, uncancellable | 2 x SMTP timeout + 1 min | external side effect (hard rule 7) |
@@ -63,9 +63,13 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   recording that has any STT job gets none (no second job when the default model changed). No model: no job, a WARN
   line. A crash between the save and the call loses the call; the startup sweep (COMPLETED, track, no transcript)
   catches up, so delivery is at least once.
-- **No whisper-cli (TASK-060).** The `stt` type is registered only with a usable engine. Otherwise STT jobs stay QUEUED
-  (the runner claims and recovers only registered types), and the same job runs after the install and a restart. The
-  permanent STT stand-in of TASK-056 is gone.
+- **No whisper-cli (TASK-060, TASK-072).** The `stt` type is registered only with a verified speech component
+  (`cases/speechcomponent`, folders and manifest in docs/refs/whisper.md). Otherwise STT jobs stay QUEUED (the runner
+  claims and recovers only registered types). The in-app install registers the type at run time with
+  `jobrunner.Service.Activate` (it first recovers stale RUNNING jobs of the type, then rebuilds the claim classes and
+  wakes the workers), so the same job runs without a restart. The permanent STT stand-in of TASK-056 is gone.
+  At start the same `Activate` (with the stt recovery and the whisper-cli work dir cleanup) runs in `openCore`, before
+  the startup cleanups and `jobrunner.Recover`.
 - **Heavy cap (TASK-060).** `jobrunner.Config.MaxHeavy` (default 1): a worker reserves a heavy slot before the claim and
   frees it after the attempt; without a free slot it claims only light types. So 2 workers never run 2 whisper-cli.
 - **Models (TASK-060, TASK-030).** `modelcatalog.Service`, `Downloader` (`httpdownload`, `filestore` free space) and
@@ -73,8 +77,8 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   download at a time (cancelled at shutdown, partial bytes kept), lets writes start only after the startup cleanups,
   and after every install and every default change runs `EnqueuePending` in the background (passes never overlap;
   errors only WARN), so waiting recordings get their STT job without a restart. The first model needs no default
-  (`Resolve` takes the only installed one); with several and no default the jobs wait for SetDefault. whisper-cli is
-  still found only at start (`SpeechReady`). Shutdown stops the manager before the storage (a closer, 15 s).
+  (`Resolve` takes the only installed one); with several and no default the jobs wait for SetDefault. The speech component
+  status is read live (`wails.Core.Speech`). Shutdown stops the manager before the storage (a closer, 15 s).
   Source pages open through `adapters/weblink`: `%WINDIR%\explorer.exe <url>` after a strict link check, no shell.
   The catalog is an embedded manifest with `"models": []` (`internal/app/catalog.json`; the domain accepts an explicit
   empty list): no ggml model has a verified SHA-256 yet, so the catalog list is empty and download has nothing to
