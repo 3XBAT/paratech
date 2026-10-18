@@ -27,3 +27,13 @@ func TestComThreadWorksFromAnSTAThread(t *testing.T) {
 		t.Fatal("body did not run")
 	}
 }
+
+func TestComThreadPanicReachesTheCaller(t *testing.T) {
+	defer func() {
+		if r := recover(); r != "boom" {
+			t.Fatalf("recover = %v, want boom", r)
+		}
+	}()
+	_ = comThread(func() { panic("boom") })
+	t.Fatal("comThread returned after a panic")
+}

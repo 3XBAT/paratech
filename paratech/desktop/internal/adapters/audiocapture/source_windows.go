@@ -54,21 +54,35 @@ func (s *wasapiSource) Open(ctx context.Context, target Target, obs Observer) (S
 // thread: in the app the caller may be the main thread, which the UI library initialized as an STA, and
 // CoInitializeEx there fails with RPC_E_CHANGED_MODE.
 func comThread(body func()) error {
-	done := make(chan error, 1)
+	type result struct {
+		err      error
+		panicked any
+	}
+	done := make(chan result, 1)
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
 		uninit, err := coInitialize()
 		if err != nil {
-			done <- err
+			done <- result{err: err}
 			return
 		}
 		defer uninit()
+		// A panic in body goes back to the caller, whose recover (e.g. the app list) handled it before.
+		defer func() {
+			if r := recover(); r != nil {
+				done <- result{panicked: r}
+			}
+		}()
 		body()
-		done <- nil
+		done <- result{}
 	}()
-	return <-done
+	r := <-done
+	if r.panicked != nil {
+		panic(r.panicked)
+	}
+	return r.err
 }
 
 // currentVersionKey holds the product texts of Windows; it is only read.
