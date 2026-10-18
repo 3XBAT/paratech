@@ -294,9 +294,6 @@ func (s *TranscriptService) fail(op string, err error) error {
 	return ErrTranscriptUnavailable
 }
 
-// audio is what the media handler plays the recordings from.
-func (s *TranscriptService) audio() AudioSource { return s.uc }
-
 func stateMessage(st transcriptview.Status) string {
 	switch st.State {
 	case transcriptview.StateWaiting:
