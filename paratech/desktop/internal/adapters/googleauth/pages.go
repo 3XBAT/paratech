@@ -12,21 +12,21 @@ const openAppURL = "paratech://open"
 // loaded, so the page makes no request at all.
 const (
 	// The success page asks the browser to open the app at once; the link is the fallback.
-	pageDone = pageHead + pageOpenApp + `<title>Paratech: вход выполнен</title></head><body><main class="card">` +
+	pageDone = pageHead + pageOpenApp + `<title>paratech: вход выполнен</title></head><body><main class="card">` +
 		`<div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>` +
 		`<h1>Вход выполнен</h1>` +
 		`<p>Google ответил. Браузер предложит открыть paratech. ` +
 		`Можно закрыть эту вкладку и вернуться в приложение — результат входа показан там.</p>` +
 		`<a class="lnk" href="` + openAppURL + `">Открыть paratech, если окно не появилось</a></main></body></html>`
 
-	pageDenied = pageHead + `<title>Paratech: доступ не разрешён</title></head><body><main class="card deny">` +
+	pageDenied = pageHead + `<title>paratech: доступ не разрешён</title></head><body><main class="card deny">` +
 		`<div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></div>` +
 		`<h1>Доступ не разрешён</h1>` +
 		`<p>Вы не разрешили доступ к Google Календарю, поэтому приложение к нему не подключено. ` +
 		`Чтобы подключить, нажмите «Войти через Google» в разделе «Подключения» ещё раз.</p>` +
 		pageButton + pageClose + `</main></body></html>`
 
-	pageFailed = pageHead + `<title>Paratech: вход не выполнен</title></head><body><main class="card fail">` +
+	pageFailed = pageHead + `<title>paratech: вход не выполнен</title></head><body><main class="card fail">` +
 		`<div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l9 16H3zM12 10v4M12 17h.01"/></svg></div>` +
 		`<h1>Вход не выполнен</h1>` +
 		`<p>Возможно, истекло время ожидания или эта вкладка осталась от прошлой попытки. ` +
@@ -36,7 +36,7 @@ const (
 
 // Shared parts of the pages.
 const (
-	pageButton = `<a class="btn" href="` + openAppURL + `">Открыть Paratech</a>`
+	pageButton = `<a class="btn" href="` + openAppURL + `">Открыть paratech</a>`
 	// Meta refresh needs no script, and the CSP fetch directives do not govern it.
 	pageOpenApp = `<meta http-equiv="refresh" content="0;url=` + openAppURL + `">`
 	pageClose   = `<p class="m">Можно закрыть эту вкладку и вернуться в приложение.</p>`

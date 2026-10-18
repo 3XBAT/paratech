@@ -15,7 +15,7 @@ import (
 
 // Tray menu labels.
 const (
-	menuOpen      = "Open Learning Assistant"
+	menuOpen      = "Open paratech"
 	menuShowPopup = "Show recording popup"
 	menuQuit      = "Quit"
 )
@@ -112,6 +112,8 @@ func (s *Shell) run(ctx context.Context) error {
 func appOptions(opts Options, onSecondInstance func()) application.Options {
 	return application.Options{
 		Name: opts.Name,
+		// The window icon: the exe has no icon resource yet (ADR-0015), so Wails takes this one.
+		Icon: appIcon(),
 		// Wails logs binding call arguments (the mail password among them) at Debug, so it never gets Debug.
 		Logger: wailsLogger(opts.Log),
 		// The asset server logs every request at info level; the pages are embedded, so the noise has no value.
@@ -119,7 +121,11 @@ func appOptions(opts Options, onSecondInstance func()) application.Options {
 		// main.go owns signals through its context; the Wails handler would quit behind its back.
 		DisableDefaultSignalHandler: true,
 		// The app lives in the tray: closing (hiding) the windows must not end it.
-		Windows: application.WindowsOptions{DisableQuitOnLastWindowClosed: true},
+		Windows: application.WindowsOptions{
+			DisableQuitOnLastWindowClosed: true,
+			// A fixed folder, so the WebView2 state (localStorage: the UI theme) survives the exe rename (ADR-0015).
+			WebviewUserDataPath: opts.WebviewDataDir,
+		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: opts.InstanceID,
 			// The data of the second launch (its arguments, a paratech: link among them) is ignored: a second launch
@@ -206,6 +212,8 @@ func newTray(app *application.App, u *windowsUI, name string, offer func()) {
 	menu.Add(menuQuit).OnClick(func(*application.Context) { app.Quit() })
 
 	tray := app.SystemTray.New()
+	// One icon for the light and the dark taskbar: Wails uses it for both when no dark one is set.
+	tray.SetIcon(appIcon())
 	tray.SetTooltip(name)
 	tray.SetMenu(menu)
 	tray.OnClick(func() { _ = u.showMain() })

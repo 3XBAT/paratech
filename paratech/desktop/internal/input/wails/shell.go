@@ -23,7 +23,9 @@ type Options struct {
 	Name string
 	// InstanceID identifies the application for the single-instance lock, e.g. "com.example.app".
 	InstanceID string
-	Log        *slog.Logger
+	// WebviewDataDir is the WebView2 user data folder; empty uses the Wails default, %APPDATA%\<exe name>.
+	WebviewDataDir string
+	Log            *slog.Logger
 	// OpenCore opens the core (database, use cases) and returns what the pages bind to. Run calls it once, after the
 	// single-instance check: a second instance exits before it and never touches the database (ADR-0007).
 	OpenCore func(ctx context.Context) (Core, error)

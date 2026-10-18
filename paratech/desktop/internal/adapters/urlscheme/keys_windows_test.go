@@ -42,7 +42,7 @@ func TestEnsureInTheRegistry(t *testing.T) {
 			t.Fatalf("%s [%s] = %q (type %d), %v; want %q", path, name, v, typ, err, want)
 		}
 	}
-	check(root, "", "URL:Paratech")
+	check(root, "", "URL:paratech")
 	check(root, "URL Protocol", "")
 	check(root+`\shell\open\command`, "", `"C:\path with space\Paratech.exe" "%1"`)
 

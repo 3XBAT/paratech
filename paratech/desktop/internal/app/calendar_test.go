@@ -249,7 +249,7 @@ func TestWiredCalendarSync(t *testing.T) {
 	}
 	st, _ := calPage.GoogleCalendarStatus(ctx)
 	if !st.SignedIn || st.State != "idle" || st.Pending != 0 || st.LastOutcome != "ok" || st.LastSyncedAt == "" ||
-		st.Message != "Календарь «Learning Assistant» синхронизирован." {
+		st.Message != "Календарь «paratech» синхронизирован." {
 		t.Fatalf("GoogleCalendarStatus = %+v", st)
 	}
 

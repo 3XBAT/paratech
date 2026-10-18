@@ -1,4 +1,4 @@
-// Command desktop is the entry point of the Learning Assistant desktop core.
+// Command desktop is the entry point of the paratech desktop core.
 // It only loads the configuration, builds the logger and a signal-aware context, and calls app (ARCH-51).
 package main
 

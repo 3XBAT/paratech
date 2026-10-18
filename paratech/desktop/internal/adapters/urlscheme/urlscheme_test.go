@@ -15,8 +15,8 @@ func TestCommand(t *testing.T) {
 		wantErr bool
 	}{
 		{exe: `C:\path with space\Paratech.exe`, want: `"C:\path with space\Paratech.exe" "%1"`},
-		{exe: `c:/Users/Иван/AppData/Local/Programs/LearningAssistant/learning-assistant.exe`,
-			want: `"c:/Users/Иван/AppData/Local/Programs/LearningAssistant/learning-assistant.exe" "%1"`},
+		{exe: `c:/Users/Иван/AppData/Local/Programs/LearningAssistant/paratech.exe`,
+			want: `"c:/Users/Иван/AppData/Local/Programs/LearningAssistant/paratech.exe" "%1"`},
 		{exe: `\\server\share\Paratech.exe`, want: `"\\server\share\Paratech.exe" "%1"`},
 		{exe: `C:\a"b\Paratech.exe`, wantErr: true},
 		{exe: `C:\x" "%1" --data-dir "C:\evil.exe`, wantErr: true},
@@ -111,7 +111,7 @@ func TestEnsure(t *testing.T) {
 		cmdKey   = classesKey + `\shell\open\command`
 	)
 	registered := map[[2]string]string{
-		{classesKey, ""}:             "URL:Paratech",
+		{classesKey, ""}:             "URL:paratech",
 		{classesKey, "URL Protocol"}: "",
 		{cmdKey, ""}:                 `"C:\path with space\Paratech.exe" "%1"`,
 	}

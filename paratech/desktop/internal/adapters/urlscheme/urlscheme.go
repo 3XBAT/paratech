@@ -21,7 +21,7 @@ const (
 	shellSubkey   = `shell`
 	openSubkey    = `shell\open`
 	commandSubkey = `shell\open\command`
-	description   = "URL:Paratech"
+	description   = "URL:paratech"
 	protocolValue = "URL Protocol"
 	delegateValue = "DelegateExecute" // a COM verb handler; Windows prefers it to the command
 )

@@ -13,7 +13,7 @@ type schemeRegistrar interface {
 	Ensure(exe string) (wrote bool, err error)
 }
 
-// ensureURLScheme points the paratech: links of «Открыть Paratech» at this executable when they are missing or point
+// ensureURLScheme points the paratech: links of «Открыть paratech» at this executable when they are missing or point
 // elsewhere. It only logs, a start never fails for it, and the path (below the user's profile) is never logged.
 func ensureURLScheme(reg schemeRegistrar, executable func() (string, error), log *slog.Logger) {
 	if reg == nil {

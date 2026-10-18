@@ -1,4 +1,4 @@
-// Command hub is the entry point of the Learning Assistant LLM Hub.
+// Command hub is the entry point of the paratech LLM Hub.
 // It only loads the configuration, builds the logger and a signal-aware context, and calls app (ARCH-51).
 package main
 

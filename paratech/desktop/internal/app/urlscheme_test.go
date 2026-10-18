@@ -26,7 +26,7 @@ func (f *fakeScheme) Ensure(exe string) (bool, error) {
 }
 
 func TestEnsureURLScheme(t *testing.T) {
-	const exe = `C:\Users\Student\AppData\Local\Programs\LearningAssistant\learning-assistant.exe`
+	const exe = `C:\Users\Student\AppData\Local\Programs\LearningAssistant\paratech.exe`
 	found := func() (string, error) { return exe, nil }
 	tests := []struct {
 		name       string
