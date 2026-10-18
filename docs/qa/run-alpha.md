@@ -93,8 +93,8 @@ cmd /c ".\paratech\dist\alpha\learning-assistant.exe --log-level debug 2> .\para
 level=INFO msg="desktop core started" log_level=info headless=true
 level=INFO msg="instance lock acquired"
 level=INFO msg="credential manager profile" secrets_profile=default
-level=WARN msg="speech recognition is not available: whisper-cli is not installed next to the executable"
-level=WARN msg="transcription jobs wait in the queue until whisper-cli is installed next to the executable and the app restarts"
+level=WARN msg="speech recognition is not available: whisper-cli and its libraries are missing or do not verify" state=missing
+level=WARN msg="transcription jobs wait in the queue until the speech component is installed"
 level=INFO msg="startup recovery finished" requeued=0 completed=0 failed=0 unregistered=0 corrupt=0 conflicts=0 errors=0
 level=INFO msg="background work started"
 level=INFO msg="recording recovery finished" recordings=0
@@ -157,7 +157,7 @@ level=INFO msg="recording finished" recording=<id> status=COMPLETED
 | Попап записи | работает (TASK-022), только с окном | из трея — «Запись без занятия» (раздел 8). По расписанию — когда занятие начинается в ближайшие 5 мин и включён переключатель «Автоматически предлагать запись в начале занятия», с кнопкой «Через 5 минут»; занятия добавляются импортом расписания (раздел 8) |
 | Планировщик занятий | подключён, только с окном (не в `--headless`) | без импортированных занятий ничего не делает |
 | Модели | работает (TASK-030): импорт файла с проверкой SHA-256, выбор по умолчанию, удаление. Скачивание рекомендованных моделей в приложении с проверкой SHA-256 (TASK-067) | раздел «Модели речи» (раздел 8); как получить модель — раздел 6 |
-| Распознавание | законченная запись создаёт задачу (TASK-060); одновременно идёт одно распознавание | без whisper-cli «Распознавание речи» ждёт «В очереди», 0 попыток, без ошибки, и выполнится после установки whisper-cli и перезапуска **[тест]**; без модели задача не создаётся (WARN в логе) **[тест]**, после импорта модели создаётся без перезапуска **[тест]** |
+| Распознавание | законченная запись создаёт задачу (TASK-060); одновременно идёт одно распознавание | без whisper-cli «Распознавание речи» ждёт «В очереди», 0 попыток, без ошибки, и начнёт выполняться без перезапуска, как только компонент установлен (кнопка «Установить компонент распознавания») **[тест]**; без модели задача не создаётся (WARN в логе) **[тест]**, после импорта модели создаётся без перезапуска **[тест]** |
 | Hub (конспект, поиск ДЗ, черновик ДЗ) | настоящий клиент Hub (TASK-057); адрес Hub и ключ вводятся в разделе «Подключения» (TASK-062, TASK-039), ключ хранится в Credential Manager (`paratech/hub/api-key`). Остаток квоты — настоящий ответ Hub (`GetRemaining`), но только для показа: копия живёт в памяти до выхода, решает Hub. Ключ выдаёт владелец вручную (`hub keys create`), выдачи ключа в приложении нет | без адреса или ключа «Конспект»: «Ждёт интернет», попытки 0; задача выполнится, когда адрес и ключ появятся, без перезапуска **[тест]**. «Поиск домашнего задания» и черновик ДЗ ждут так же **[тест для черновика]** |
 | Почта | настоящий SMTP (TASK-057); получатель, сервер, порт, режим TLS, логин и пароль вводятся в разделе «Подключения» (TASK-062), пароль хранится в Credential Manager (`paratech/mail/smtp-password`); «Проверить почту» — вход без отправки письма; домашнее задание отправляется из раздела «Домашние задания» после подтверждения (TASK-045) | без настроек задача `send_email` (без русского названия): «Ошибка», ошибка `permanent failure: senddelivery: send: smtp: mail is not configured: delivery rejected` **[тест]** |
 | Черновики ДЗ | хранятся в базе (TASK-057); раздел «Домашние задания» (TASK-045): правка, доработка с указаниями, версии, файл, отправка | «Сохранить в файл» пишет `artifacts\exports\<id задания>\homework.md` **[тест]**; раздел 8 |
