@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/domain/transcription/transcript"
 )
 
 const (
@@ -198,7 +199,13 @@ func checkDirs(root, work string) error {
 // progress, if not nil, receives increasing percentages up to 100 (100 only after the result is stored), possibly
 // skipping values. It is called on a goroutine of the adapter, so it must be safe for that; calls never overlap and
 // none happens after Transcribe returns. A slow callback never stalls the process, but Transcribe waits for it.
-func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int)) error {
+//
+// segment, if not nil, receives each segment the CLI prints on stdout while it runs, in order, with the guarantees
+// of progress (its own goroutine, no overlap, none after return). These are a live preview with the rules of the
+// result (valid UTF-8, no control characters, bounded, non-decreasing starts); the stored document is the result.
+// Without segment stdout goes to the null device.
+func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
+	segment func(transcript.Segment)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -240,7 +247,14 @@ func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.Art
 
 	sink := newStderrSink(newReporter(send, e.progressEvery, e.now))
 
-	if err := e.run(ctx, runDir, args, sink); err != nil {
+	var out *stdoutSink
+	if segment != nil {
+		pump := startSegmentPump(segment)
+		defer pump.stop()
+		out = newStdoutSink(pump.send)
+	}
+
+	if err := e.run(ctx, runDir, args, sink, out); err != nil {
 		return err
 	}
 
@@ -308,8 +322,8 @@ func (e *Engine) newRunDir() (string, error) {
 	return dir, nil
 }
 
-// run starts the process and waits for it. It returns nil only for exit code 0.
-func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *stderrSink) error {
+// run starts the process and waits for it. It returns nil only for exit code 0. out, if not nil, reads stdout.
+func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *stderrSink, out *stdoutSink) error {
 	var runCtx context.Context
 	var cancel context.CancelFunc
 	if e.cfg.Timeout > 0 {
@@ -325,7 +339,11 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 	cmd := exec.CommandContext(runCtx, e.cfg.Binary, args...) //nolint:gosec // binary and arguments are validated (args.go)
 	cmd.Dir = runDir
 	cmd.Env = append([]string{}, e.env...)
-	// Stdin and Stdout stay nil (the null device): stdout repeats the recognised text, which must not reach logs.
+	// Stdin stays nil (the null device). Stdout repeats the recognised text: it is parsed for live segments or goes
+	// to the null device, never to logs.
+	if out != nil {
+		cmd.Stdout = out
+	}
 	cmd.Stderr = sink
 	cmd.WaitDelay = waitDelay
 	setProcAttrs(cmd)
@@ -343,6 +361,9 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 
 	err := cmd.Wait()
 	sink.stop()
+	if out != nil {
+		out.stop()
+	}
 
 	if err == nil || (errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState.Success()) {
 		return nil

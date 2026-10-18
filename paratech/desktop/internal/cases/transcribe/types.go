@@ -22,7 +22,7 @@ const (
 // audio file, so this is the only safe point: a later attempt that finds the document skips the engine.
 const CheckpointTranscribed = "transcribed"
 
-// Deps are the ports the Service needs. Log is optional.
+// Deps are the ports the Service needs. Log and Live are optional.
 type Deps struct {
 	Engine      STTEngine
 	Transcripts TranscriptRepository
@@ -32,6 +32,9 @@ type Deps struct {
 	Events      EventPublisher
 	Clock       Clock
 	Log         *slog.Logger
+
+	// Live is optional: without it the segments recognised during a run are not stored (no live transcript).
+	Live LiveParts
 }
 
 // EnqueueDeps are the ports the Enqueuer needs. Log is optional.

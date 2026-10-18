@@ -28,6 +28,8 @@ const (
 	stepSave       = "save transcript"
 	stepPublish    = "publish"
 	stepCheckpoint = "checkpoint"
+	stepLiveSave   = "store live parts"
+	stepLiveDelete = "delete live parts"
 )
 
 // Service is the handler of STT jobs (PRD sections 4.3, 7 and 8): it transcribes the final audio of a COMPLETED
@@ -52,6 +54,7 @@ type Service struct {
 	artifacts   ArtifactStore
 	events      EventPublisher
 	clock       Clock
+	live        LiveParts // nil: no live transcript
 	log         *slog.Logger
 }
 
@@ -67,7 +70,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		engine: d.Engine, transcripts: d.Transcripts, recordings: d.Recordings, models: d.Models, artifacts: d.Artifacts,
-		events: d.Events, clock: d.Clock, log: log,
+		events: d.Events, clock: d.Clock, live: d.Live, log: log,
 	}, nil
 }
 
@@ -108,7 +111,7 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		return err
 	}
 
-	doc, err := s.prepareDocument(ctx, snap, audio, model.File(), docRef, report)
+	doc, err := s.prepareDocument(ctx, snap, rec.ID(), audio, model.File(), docRef, report)
 	if err != nil {
 		return err
 	}
@@ -167,14 +170,14 @@ func (s *Service) inputs(ctx context.Context, snap job.Snapshot, req values.STTR
 
 // prepareDocument returns the document of this job, running the engine unless an earlier attempt stored a valid one,
 // and reports the checkpoint.
-func (s *Service) prepareDocument(ctx context.Context, snap job.Snapshot, audio, model, docRef shared.ArtifactRef,
-	report func(context.Context, job.Progress) error) (transcript.Document, error) {
+func (s *Service) prepareDocument(ctx context.Context, snap job.Snapshot, rec shared.RecordingID,
+	audio, model, docRef shared.ArtifactRef, report func(context.Context, job.Progress) error) (transcript.Document, error) {
 	doc, err := s.readDocument(ctx, docRef)
 	switch {
 	case err == nil:
 		s.log.Info("stt job resumes after the engine run", slog.String("job", snap.ID().String()))
 	case errors.Is(err, shared.ErrNotFound), errors.Is(err, transcript.ErrInvalidDocument):
-		if err := s.runEngine(ctx, snap, audio, model, docRef, report); err != nil {
+		if err := s.runEngine(ctx, snap, rec, audio, model, docRef, report); err != nil {
 			return transcript.Document{}, err
 		}
 		if doc, err = s.readDocument(ctx, docRef); err != nil {
@@ -197,11 +200,16 @@ func (s *Service) prepareDocument(ctx context.Context, snap job.Snapshot, audio,
 	return doc, nil
 }
 
-// runEngine runs the STT engine and forwards its progress to the runner. A failed report kills the engine.
-func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, audio, model, out shared.ArtifactRef,
+// runEngine runs the STT engine and forwards its progress to the runner. A failed report kills the engine. The
+// segments recognised meanwhile are stored in batches (live).
+func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, rec shared.RecordingID, audio, model, out shared.ArtifactRef,
 	report func(context.Context, job.Progress) error) error {
 	engineCtx, kill := context.WithCancel(ctx)
 	defer kill()
+
+	live := s.newLiveWriter(snap, rec)
+	// Parts recognised before a stop or a failure stay for the viewer; the store does not depend on the job's context.
+	defer live.flush(context.WithoutCancel(ctx), true)
 
 	var mu sync.Mutex
 	var stop error
@@ -224,9 +232,10 @@ func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, audio, model
 			stop = err
 			kill()
 		}
+		live.flush(ctx, false)
 	}
 
-	err := s.engine.Transcribe(engineCtx, audio, model, out, progress)
+	err := s.engine.Transcribe(engineCtx, audio, model, out, progress, live.segment(ctx))
 
 	mu.Lock()
 	stopErr := stop
@@ -267,6 +276,7 @@ func (s *Service) finish(ctx context.Context, snap job.Snapshot, req values.STTR
 	if t.RecordingID() != req.Recording() {
 		return s.permanent(snap, stepTranscript, ErrTranscriptConflict, nil)
 	}
+	s.deleteLive(ctx, snap, t.RecordingID())
 	if err := s.events.TranscriptCreated(ctx, t.Created()); err != nil {
 		return s.retry(snap, stepPublish, ErrPublish, err)
 	}

@@ -441,9 +441,10 @@ type pacedSTT struct {
 	next    chan struct{}
 }
 
-func (p *pacedSTT) Transcribe(ctx context.Context, audio, model, out shared.ArtifactRef, progress func(percent int)) error {
+func (p *pacedSTT) Transcribe(ctx context.Context, audio, model, out shared.ArtifactRef, progress func(percent int),
+	segment func(transcript.Segment)) error {
 	if !p.paced.Load() {
-		return p.FakeSTT.Transcribe(ctx, audio, model, out, progress)
+		return p.FakeSTT.Transcribe(ctx, audio, model, out, progress, segment)
 	}
 	progress(10)
 	p.started <- struct{}{}

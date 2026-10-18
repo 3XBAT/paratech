@@ -25,6 +25,7 @@ type FakeSTT struct {
 
 	mu       sync.Mutex
 	doc      transcript.Document
+	segments []transcript.Segment
 	progress []int
 	err      error
 	block    bool
@@ -43,6 +44,13 @@ func (f *FakeSTT) SetProgress(p ...int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.progress = append([]int(nil), p...)
+}
+
+// SetSegments replaces the live segments reported before the progress (none by default).
+func (f *FakeSTT) SetSegments(s ...transcript.Segment) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.segments = append([]transcript.Segment(nil), s...)
 }
 
 // FailWith makes later calls fail with err after reporting progress; nil heals the engine.
@@ -66,13 +74,24 @@ func (f *FakeSTT) Calls() []STTCall {
 	return append([]STTCall(nil), f.calls...)
 }
 
-// Transcribe follows the STTEngine port: progress, then the document or the configured error. A cancelled context
-// stops it between reports, without output.
-func (f *FakeSTT) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int)) error {
+// Transcribe follows the STTEngine port: live segments, progress, then the document or the configured error. A
+// cancelled context stops it between reports, without output.
+func (f *FakeSTT) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
+	segment func(transcript.Segment)) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, STTCall{Audio: audio, Model: model, Output: output})
 	steps, err, block, doc := append([]int(nil), f.progress...), f.err, f.block, f.doc
+	segs := append([]transcript.Segment(nil), f.segments...)
 	f.mu.Unlock()
+
+	for _, s := range segs {
+		if ctx.Err() != nil {
+			break
+		}
+		if segment != nil {
+			segment(s)
+		}
+	}
 
 	for _, p := range steps {
 		if ctx.Err() != nil {

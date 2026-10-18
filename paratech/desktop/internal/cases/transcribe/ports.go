@@ -23,7 +23,22 @@ type STTEngine interface {
 	// increasing percentages from 0 to 100, on a goroutine of the adapter, never concurrently and never after
 	// Transcribe returns (PRD section 7.3: persistent progress). Cancelling ctx kills the process and leaves no
 	// partial output behind (PRD section 4.3). A missing input file yields shared.ErrNotFound.
-	Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int)) error
+	//
+	// segment, if not nil, is called with each segment as soon as the engine recognised it, in order, with the same
+	// guarantees as progress (TASK-079: live transcript). The segments are a preview; the document is the result.
+	Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
+		segment func(transcript.Segment)) error
+}
+
+// LiveParts stores what the engine recognised so far, so the transcript viewer shows it while the engine runs and
+// after a restart (TASK-079). Implemented by the sqlite adapter.
+type LiveParts interface {
+	// SaveParts stores the parts of the recording in one transaction, replacing a stored part with the same number
+	// (a rerun of the engine numbers from 0 again).
+	SaveParts(ctx context.Context, rec shared.RecordingID, parts []transcript.Part) error
+
+	// DeleteParts removes every part of the recording; none is not an error.
+	DeleteParts(ctx context.Context, rec shared.RecordingID) error
 }
 
 // TranscriptRepository stores the transcript aggregate in the local database (PRD sections 5.1 and 8, AC-08).
