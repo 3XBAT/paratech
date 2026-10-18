@@ -41,3 +41,42 @@ func nameProblem(s string) string {
 	}
 	return ""
 }
+
+// maxFileNameRunes bounds SafeFileName: far below the 255 UTF-16 units of NTFS, so a folder path still fits.
+const maxFileNameRunes = 120
+
+// SafeFileName turns free text (a lesson title) into a single Windows file-name segment: forbidden and control
+// characters become "_", runs of spaces collapse, the result is cut to maxFileNameRunes, trailing dots and spaces are
+// trimmed and a reserved device name gets a leading "_". It returns "" when nothing usable is left.
+func SafeFileName(s string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			r = ' '
+		case unicode.IsControl(r) || strings.ContainsRune(forbiddenNameChars, r):
+			r = '_'
+		}
+		if r == ' ' && (space || b.Len() == 0) {
+			continue
+		}
+		space = r == ' '
+		b.WriteRune(r)
+	}
+
+	out := []rune(b.String())
+	if len(out) > maxFileNameRunes {
+		out = out[:maxFileNameRunes]
+	}
+	name := strings.TrimRight(string(out), ". ")
+	if name == "" {
+		return ""
+	}
+
+	base, _, _ := strings.Cut(name, ".")
+	if reservedDeviceNames[strings.ToLower(strings.TrimRight(base, " "))] {
+		name = "_" + name
+	}
+	return name
+}

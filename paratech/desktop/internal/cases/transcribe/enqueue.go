@@ -208,7 +208,7 @@ func (e *Enqueuer) logOutcome(id shared.RecordingID, out outcome, jobID shared.J
 
 // keyPrefix is the start of the key of every STT job of the recording; ids cannot contain ':' (they are file-name
 // segments), so it names exactly one recording.
-func keyPrefix(id shared.RecordingID) string { return fmt.Sprintf("%s:%s:", JobType, id) }
+func keyPrefix(id shared.RecordingID) string { return values.STTJobKeyPrefix(id) }
 
 // jobKey is the idempotency key of the STT job of the recording pinned to the model.
 func jobKey(id shared.RecordingID, model shared.SttModelID) string {
