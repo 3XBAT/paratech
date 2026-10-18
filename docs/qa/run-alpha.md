@@ -47,7 +47,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alp
 Флаги (`--help` печатает список) **[проверено]**:
 - `--log-level debug` — подробнее (по умолчанию `info`; есть ещё `warn`, `error`). Отладочные строки самого Wails не пишутся: в них были бы аргументы вызовов, в том числе пароль почты и ключ Hub.
 - `--data-dir $env:LOCALAPPDATA\la-test` — другая папка данных, например одноразовая для опытов. Путь только абсолютный. Тоже лучше внутри профиля, а не в корне диска (`C:\temp\...`): там её могут читать и менять другие пользователи компьютера.
-  У другой папки свои секреты (ADR-0014): ключ Hub, пароль почты, клиент и вход Google вводятся в ней заново, секретов папки по умолчанию она не видит и не меняет. В Credential Manager её записи называются `paratech-<профиль>/...` (профиль — 16 знаков, строка `credential manager profile` в логе). После удаления папки они остаются; убрать их — Диспетчер учётных данных → Учётные данные Windows или `cmdkey /delete:<имя из cmdkey /list>`.
+  У другой папки свои секреты (ADR-0014): ключ Hub, пароль почты, клиент и вход Google вводятся в ней заново, секретов папки по умолчанию она не видит и не меняет. В Credential Manager её записи называются `paratech-<профиль>/...`: с другой папкой каждое имя `paratech/…` в этой инструкции читается как `paratech-<профиль>/…`. Профиль — 16 знаков, с `--log-level debug` он в строке `credential manager profile id` (`secrets_profile_id=`). После удаления папки записи остаются; убрать их — Диспетчер учётных данных → Учётные данные Windows или `cmdkey /delete:LegacyGeneric:target=paratech-<профиль>/mail/smtp-password` (имя — всё после `Target:` в `cmdkey /list`).
 - `--headless` — без окна и трея (для проверок).
 - То же через переменные `LA_LOG_LEVEL`, `LA_DATA_DIR`, `LA_HEADLESS`; флаг важнее переменной.
 - `--recorder` — служебный: так приложение само запускает рекордер (раздел 7); руками не запускать (по коду).
@@ -98,7 +98,7 @@ level=INFO msg="background work started"
 level=INFO msg="recording recovery finished" recordings=0
 ```
 
-Главное — `instance lock acquired` и `background work started`. С `--data-dir` другой папки вместо `secrets_profile=default` — `secrets_profile=isolated secrets_profile_id=<16 знаков>`. Восстановление записей идёт в фоне, поэтому последние две строки могут идти в любом порядке. Две строки `WARN ... whisper-cli ...` без whisper-cli нормальны (раздел 6); вторая из них добавлена в TASK-060 **[тест]**.
+Главное — `instance lock acquired` и `background work started`. С `--data-dir` другой папки вместо `secrets_profile=default` — `secrets_profile=isolated` (профиль — только в строке уровня DEBUG `secrets_profile_id=<16 знаков>`). В папке по умолчанию в логе должно быть `secrets_profile=default`; иначе приложение не видит её секретов (ключ Hub, почта, Google) — проверьте лог. Восстановление записей идёт в фоне, поэтому последние две строки могут идти в любом порядке. Две строки `WARN ... whisper-cli ...` без whisper-cli нормальны (раздел 6); вторая из них добавлена в TASK-060 **[тест]**.
 С окном (по коду; **[владельцу]** сверить): `headless=false`, после предупреждения про whisper-cli строка `ui shell starting`, остальное в том же порядке; между ними могут быть строки оболочки Wails.
 Планировщик и попап запускаются молча, своих строк при старте нет.
 При выходе: `desktop core stopping`, затем `gracefully stopped` **[проверено]**.
@@ -177,7 +177,7 @@ level=INFO msg="recording finished" recording=<id> status=COMPLETED
 
 ## 8. Что потыкать
 
-Всё в этом разделе — **[владельцу]**, если не помечено иначе. Для опытов: `--data-dir` с одноразовой папкой (у неё свои секреты, раздел 3).
+Всё в этом разделе — **[владельцу]**, если не помечено иначе. Для опытов: `--data-dir` с одноразовой папкой (у неё свои секреты, раздел 3). С другой папкой каждое имя записи `paratech/…` ниже читается как `paratech-<профиль>/…` (раздел 3).
 Проверка по всем критериям приёмки AC-01…AC-25 (автотесты и ручные шаги, Windows 10 и 11) — [windows-checklist.md](windows-checklist.md).
 
 Главное окно:
@@ -303,7 +303,7 @@ title,date,start,end,timezone,uid
 
 ## 10. Google Календарь: вход и синхронизация
 
-Вход и выход (TASK-050) и синхронизация занятий в отдельный календарь «Learning Assistant» (TASK-051). Всё здесь — **[владельцу]**: нужны настоящий Google и браузер. Подробности и ссылки на страницы Google — `docs/refs/google-calendar.md`, решения — ADR-0011.
+Вход и выход (TASK-050) и синхронизация занятий в отдельный календарь «Learning Assistant» (TASK-051). Всё здесь — **[владельцу]**: нужны настоящий Google и браузер. Подробности и ссылки на страницы Google — `docs/refs/google-calendar.md`, решения — ADR-0011. С `--data-dir` другой папки каждое имя записи `paratech/…` ниже читается как `paratech-<профиль>/…` (раздел 3).
 
 1. Google Cloud Console (https://console.cloud.google.com), один раз:
    - создать проект; APIs & Services → Library → Google Calendar API → Enable;
