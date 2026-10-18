@@ -30,8 +30,9 @@ $moduleRoot = Split-Path -Parent $desktopDir
 $frontendDir = Join-Path $desktopDir 'frontend'
 $exeName = 'learning-assistant.exe'
 
-# Log lines that prove a successful start (internal/app).
-$smokeLines = @('instance lock acquired', 'background work started')
+# Log lines that prove a successful start (internal/app). smoke-data is not the default data dir, so it must have its
+# own Credential Manager profile and never reach the real secrets (ADR-0014).
+$smokeLines = @('instance lock acquired', 'secrets_profile=isolated', 'background work started')
 $smokeTimeoutSeconds = 60
 
 function Write-Step([string]$Message) {

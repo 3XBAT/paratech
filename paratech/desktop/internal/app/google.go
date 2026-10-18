@@ -8,6 +8,7 @@ import (
 
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/domain/schedule/values"
 )
@@ -27,8 +28,8 @@ var (
 // Sign-out keeps the calendar id: the same account signing in again gets its calendar back (no second one), and
 // another account cannot see it (calendars.get and calendarList.get both refuse), so the adapter makes a fresh
 // calendar and the sync rewrites every lesson into it.
-func (c *core) wireGoogle(e env, log *slog.Logger) error {
-	secrets, err := e.secrets(googleSecretsService)
+func (c *core) wireGoogle(e env, profile wincred.Profile, log *slog.Logger) error {
+	secrets, err := e.secrets(profile, googleSecretsService)
 	if err != nil {
 		return fmt.Errorf("app: google credentials: %w", err)
 	}
