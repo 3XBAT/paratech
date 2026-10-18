@@ -11,6 +11,7 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/logfile"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -186,7 +187,8 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 		ensureURLScheme(a.env.scheme, os.Executable, a.log)
 	}
 
-	c, err := buildCore(ctx, a.cfg.DataDir, a.env, a.log)
+	profile := a.secretsProfile()
+	c, err := buildCore(ctx, a.cfg.DataDir, profile, a.env, a.log)
 	if err != nil {
 		return wails.Core{}, errors.Join(err, closeLog(), lock.Release())
 	}
@@ -200,6 +202,21 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 		closer{name: "storage", close: c.close}, closer{name: "log file", close: closeLog},
 		closer{name: "instance lock", close: lock.Release})
 	return c.ui, nil
+}
+
+// secretsProfile is the Credential Manager profile of the data directory, which exists by now (ADR-0014): the default
+// names only for the default data dir, so a run on another dir never reads or changes the real secrets. The info line
+// is what the smoke run of build-alpha.ps1 checks. The id hashes a predictable path with the user name in it, so like
+// the paths it is only at debug level.
+func (a *App) secretsProfile() wincred.Profile {
+	profile := wincred.ProfileFor(a.cfg.DataDir, a.cfg.DefaultDataDir)
+	if profile.Isolated() {
+		a.log.Info("credential manager profile", "secrets_profile", "isolated")
+		a.log.Debug("credential manager profile id", "secrets_profile_id", string(profile))
+	} else {
+		a.log.Info("credential manager profile", "secrets_profile", "default")
+	}
+	return profile
 }
 
 // openLogFile opens <DataDir>/logs/desktop.log and attaches it to the logger; it returns what detaches and closes it.

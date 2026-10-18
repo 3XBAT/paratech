@@ -30,7 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alp
 Результат: `paratech\dist\alpha\learning-assistant.exe` (около 26 МБ). Папка `paratech\dist\` игнорируется git, после сборки `git status` чистый **[проверено]**.
 Другая папка: `-OutDir $env:USERPROFILE\la-alpha`. Лучше брать папку внутри профиля: в папку в корне диска (`D:\...`) могут писать другие пользователи компьютера и подменить exe.
 
-`-Smoke` (можно не указывать) — проверка без окна: exe запускается с `--headless` и папкой данных `paratech\dist\alpha\smoke-data` (не ваши реальные данные), скрипт ждёт до 60 с строк `instance lock acquired` и `background work started`, печатает лог (он же в `paratech\dist\alpha\smoke.log`) и останавливает процесс. Ошибка, если строк нет или в логе есть `level=ERROR` **[проверено]**.
+`-Smoke` (можно не указывать) — проверка без окна: exe запускается с `--headless` и папкой данных `paratech\dist\alpha\smoke-data` (не ваши реальные данные), скрипт ждёт до 60 с строк `instance lock acquired`, `secrets_profile=isolated` и `background work started`, печатает лог (он же в `paratech\dist\alpha\smoke.log`) и останавливает процесс. Ошибка, если строк нет или в логе есть `level=ERROR` **[проверено]**.
 Остановка в смоуке жёсткая (`Stop-Process -Force`): из PowerShell нельзя послать Ctrl+Break одному процессу без окна. Для тестовой папки это безопасно: блокировку снимает Windows, база при следующем запуске восстанавливается из журнала (файлы `-wal`/`-shm`). Мягкая остановка проверена отдельно (раздел 3).
 
 ## 3. Запуск и остановка
@@ -47,6 +47,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alp
 Флаги (`--help` печатает список) **[проверено]**:
 - `--log-level debug` — подробнее (по умолчанию `info`; есть ещё `warn`, `error`). Отладочные строки самого Wails не пишутся: в них были бы аргументы вызовов, в том числе пароль почты и ключ Hub.
 - `--data-dir $env:LOCALAPPDATA\la-test` — другая папка данных, например одноразовая для опытов. Путь только абсолютный. Тоже лучше внутри профиля, а не в корне диска (`C:\temp\...`): там её могут читать и менять другие пользователи компьютера.
+  У другой папки свои секреты (ADR-0014): ключ Hub, пароль почты, клиент и вход Google вводятся в ней заново, секретов папки по умолчанию она не видит и не меняет. В Credential Manager её записи называются `paratech-<профиль>/...`: с другой папкой каждое имя `paratech/…` в этой инструкции читается как `paratech-<профиль>/…`. Профиль — 16 знаков, с `--log-level debug` он в строке `credential manager profile id` (`secrets_profile_id=`). После удаления папки записи остаются; убрать их — Диспетчер учётных данных → Учётные данные Windows или `cmdkey /delete:LegacyGeneric:target=paratech-<профиль>/mail/smtp-password` (имя — всё после `Target:` в `cmdkey /list`).
 - `--headless` — без окна и трея (для проверок).
 - То же через переменные `LA_LOG_LEVEL`, `LA_DATA_DIR`, `LA_HEADLESS`; флаг важнее переменной.
 - `--recorder` — служебный: так приложение само запускает рекордер (раздел 7); руками не запускать (по коду).
@@ -79,7 +80,7 @@ cmd /c ".\paratech\dist\alpha\learning-assistant.exe --log-level debug 2> .\para
 - кэш WebView2 в `%AppData%\learning-assistant.exe` (папка по имени exe);
 - ключей уведомлений Windows в реестре приложение больше не пишет (TASK-065). Сборки до TASK-065 оставили ключи `HKCU\Software\Classes\AppUserModelId\Learning Assistant`, `HKCU\Software\Classes\CLSID\<GUID>` и `HKCU\SOFTWARE\Learning Assistant\NotificationCategories`; данных приложения там нет, оставить их безвредно.
 
-Сброс: выйти из приложения (`Quit`), переименовать или удалить папку `%LOCALAPPDATA%\LearningAssistant`; при следующем запуске создастся пустая. Для опытов удобнее сразу `--data-dir` с одноразовой папкой.
+Сброс: выйти из приложения (`Quit`), переименовать или удалить папку `%LOCALAPPDATA%\LearningAssistant`; при следующем запуске создастся пустая. Для опытов удобнее сразу `--data-dir` с одноразовой папкой. Секреты в Credential Manager при удалении папки не удаляются (раздел 3).
 По желанию можно удалить и папку `%AppData%\learning-assistant.exe`; старые ключи реестра выше для сброса трогать не нужно.
 
 ## 5. Как выглядит успешный старт
@@ -89,6 +90,7 @@ cmd /c ".\paratech\dist\alpha\learning-assistant.exe --log-level debug 2> .\para
 ```
 level=INFO msg="desktop core started" log_level=info headless=true
 level=INFO msg="instance lock acquired"
+level=INFO msg="credential manager profile" secrets_profile=default
 level=WARN msg="speech recognition is not available: whisper-cli is not installed next to the executable"
 level=WARN msg="transcription jobs wait in the queue until whisper-cli is installed next to the executable and the app restarts"
 level=INFO msg="startup recovery finished" requeued=0 completed=0 failed=0 unregistered=0 corrupt=0 conflicts=0 errors=0
@@ -96,7 +98,7 @@ level=INFO msg="background work started"
 level=INFO msg="recording recovery finished" recordings=0
 ```
 
-Главное — `instance lock acquired` и `background work started`. Восстановление записей идёт в фоне, поэтому последние две строки могут идти в любом порядке. Две строки `WARN ... whisper-cli ...` без whisper-cli нормальны (раздел 6); вторая из них добавлена в TASK-060 **[тест]**.
+Главное — `instance lock acquired` и `background work started`. С `--data-dir` другой папки вместо `secrets_profile=default` — `secrets_profile=isolated` (профиль — только в строке уровня DEBUG `secrets_profile_id=<16 знаков>`). В папке по умолчанию в логе должно быть `secrets_profile=default`; иначе приложение не видит её секретов (ключ Hub, почта, Google) — проверьте лог. Восстановление записей идёт в фоне, поэтому последние две строки могут идти в любом порядке. Две строки `WARN ... whisper-cli ...` без whisper-cli нормальны (раздел 6); вторая из них добавлена в TASK-060 **[тест]**.
 С окном (по коду; **[владельцу]** сверить): `headless=false`, после предупреждения про whisper-cli строка `ui shell starting`, остальное в том же порядке; между ними могут быть строки оболочки Wails.
 Планировщик и попап запускаются молча, своих строк при старте нет.
 При выходе: `desktop core stopping`, затем `gracefully stopped` **[проверено]**.
@@ -175,7 +177,7 @@ level=INFO msg="recording finished" recording=<id> status=COMPLETED
 
 ## 8. Что потыкать
 
-Всё в этом разделе — **[владельцу]**, если не помечено иначе. Для опытов: `--data-dir` с одноразовой папкой.
+Всё в этом разделе — **[владельцу]**, если не помечено иначе. Для опытов: `--data-dir` с одноразовой папкой (у неё свои секреты, раздел 3). С другой папкой каждое имя записи `paratech/…` ниже читается как `paratech-<профиль>/…` (раздел 3).
 Проверка по всем критериям приёмки AC-01…AC-25 (автотесты и ручные шаги, Windows 10 и 11) — [windows-checklist.md](windows-checklist.md).
 
 Главное окно:
@@ -301,14 +303,14 @@ title,date,start,end,timezone,uid
 
 ## 10. Google Календарь: вход и синхронизация
 
-Вход и выход (TASK-050) и синхронизация занятий в отдельный календарь «Learning Assistant» (TASK-051). Всё здесь — **[владельцу]**: нужны настоящий Google и браузер. Подробности и ссылки на страницы Google — `docs/refs/google-calendar.md`, решения — ADR-0011.
+Вход и выход (TASK-050) и синхронизация занятий в отдельный календарь «Learning Assistant» (TASK-051). Всё здесь — **[владельцу]**: нужны настоящий Google и браузер. Подробности и ссылки на страницы Google — `docs/refs/google-calendar.md`, решения — ADR-0011. С `--data-dir` другой папки каждое имя записи `paratech/…` ниже читается как `paratech-<профиль>/…` (раздел 3).
 
 1. Google Cloud Console (https://console.cloud.google.com), один раз:
    - создать проект; APIs & Services → Library → Google Calendar API → Enable;
    - Google Auth Platform → Branding: название приложения, почта поддержки; Audience: **External**, статус публикации остаётся **Testing**; Audience → Test users: свой Gmail (и каждого тестировщика, до 100);
    - Data Access → Add or Remove Scopes: `https://www.googleapis.com/auth/calendar.app.created` → Save;
    - Clients → Create Client → тип **Desktop app** → Create. Сразу скопировать client ID и client secret: секрет целиком показывается только один раз.
-2. Открыть «Подключения», нажать карточку «Google Календарь» (ярлык «Не настроено»): вставить идентификатор и секрет, «Сохранить»: «Клиент Google сохранён…», у «Клиент Google» ярлык «Задан», оба поля пустые. В Диспетчере учётных данных → Учётные данные Windows записи `paratech/google/client-id` и `paratech/google/client-secret`. Идентификатор и секрет не класть в репозиторий и в файлы конфигурации в нём. Идентификатор не на `.apps.googleusercontent.com` — понятный текст, идентификатор в поле остался.
+2. Открыть «Подключения», нажать карточку «Google Календарь» (ярлык «Не настроено»): вставить идентификатор и секрет, «Сохранить»: «Клиент Google сохранён…», у «Клиент Google» ярлык «Задан», оба поля пустые. В Диспетчере учётных данных → Учётные данные Windows записи `paratech/google/client-id` и `paratech/google/client-secret` (с `--data-dir` другой папки — `paratech-<профиль>/google/...`, раздел 3). Идентификатор и секрет не класть в репозиторий и в файлы конфигурации в нём. Идентификатор не на `.apps.googleusercontent.com` — понятный текст, идентификатор в поле остался.
 3. «Войти через Google»: открывается браузер по умолчанию, в приложении «Ожидание входа в браузере…» и «Отменить». Выбрать тестовый аккаунт, на экране «Google не проверил это приложение» — «Дополнительно» → перейти (небезопасно), разрешить доступ к календарю. В браузере страница в стиле приложения (светлая или тёмная, как в Windows): галочка, «Вход выполнен», «Можно закрыть эту вкладку и вернуться в приложение» и кнопка «Открыть Paratech». Главное окно приложения само выходит вперёд (Windows может вместо этого мигнуть значком на панели задач), в нём «Вход в Google выполнен…». В Диспетчере появилась запись `paratech/google/refresh-token`. «Назад»: на карточке «Google Календарь» ярлык «Подключено».
    «Открыть Paratech»: браузер может спросить, открыть ли приложение, — разрешить; окно приложения выходит вперёд, больше ничего не происходит. Ссылку регистрирует само приложение при старте (ADR-0013).
    «Отменить» во время ожидания — «Вход отменён.»; отказ в Google — в браузере «Доступ не разрешён» с подсказкой, в приложении «Вы не разрешили доступ в Google.». Другая ошибка — «Вход не выполнен» с подсказкой нажать «Войти через Google» ещё раз.
@@ -383,3 +385,4 @@ title,date,start,end,timezone,uid
 - 2026-10-16, TASK-068: «Подключения» открываются обзором из четырёх карточек («Сервер обработки», «Почта», «Google Календарь», «Календарь на iPhone, iPad и Mac») с ярлыком состояния; карточка открывает страницу раздела, «Назад» возвращает к обзору. Поля, кнопки и тексты разделов прежние (раздел 8, раздел 10).
 - 2026-10-16, TASK-045: раздел «Домашние задания» (сразу после «Записей и задач»): список заданий со сроком и состоянием письма; у задания — черновик (правка сохраняется новой версией), «Дополнительные указания» и «Сгенерировать заново», история версий, «Сохранить в файл» и «Отправить по почте…» через окно подтверждения с получателем, темой и вложением; список писем с состоянием, при неясном исходе — «Письмо дошло» или «Отправить ещё раз…» с отдельным подтверждением (раздел 8).
 - 2026-10-16, TASK-066: после входа в Google в браузере оформленная страница (успех, отказ, ошибка) с кнопкой «Открыть Paratech»; ссылки `paratech://` открывают окно приложения (регистрируются при старте и инсталлятором); после входа окно само выходит вперёд (§10, шаг 3).
+- 2026-10-18, TASK-071: у каждой папки данных свои секреты в Credential Manager: папка по умолчанию — прежние записи `paratech/...`, другая (`--data-dir`, `LA_DATA_DIR`, смоук) — `paratech-<профиль>/...` и не видит ключ Hub, почту и вход Google папки по умолчанию (раздел 3, ADR-0014).

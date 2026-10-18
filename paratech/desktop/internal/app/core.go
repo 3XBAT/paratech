@@ -21,6 +21,7 @@ import (
 	"paratech/desktop/internal/adapters/sysinfo"
 	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/whispercli"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/googlesignin"
@@ -92,9 +93,9 @@ type cleanup struct {
 	run  func(ctx context.Context) (int, error)
 }
 
-// buildCore opens the database and the Storage Manager below dataDir and builds every use case. It starts no
-// goroutines; on an error it closes what it opened.
-func buildCore(ctx context.Context, dataDir string, e env, log *slog.Logger) (*core, error) {
+// buildCore opens the database and the Storage Manager below dataDir and builds every use case, with the credential
+// stores of profile (wincred.ProfileFor). It starts no goroutines; on an error it closes what it opened.
+func buildCore(ctx context.Context, dataDir string, profile wincred.Profile, e env, log *slog.Logger) (*core, error) {
 	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dataDir, dbFile), Migrate: true, Logger: log})
 	if err != nil {
 		return nil, fmt.Errorf("app: open database: %w", err)
@@ -107,14 +108,14 @@ func buildCore(ctx context.Context, dataDir string, e env, log *slog.Logger) (*c
 	}
 
 	c := &core{db: db, store: store}
-	if err := c.wire(dataDir, e, log); err != nil {
+	if err := c.wire(dataDir, profile, e, log); err != nil {
 		return nil, errors.Join(err, c.close())
 	}
 	return c, nil
 }
 
 // wire builds the use cases on the opened storage.
-func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
+func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Logger) error {
 	db, store, root := c.db, c.store, filepath.Join(dataDir, artifactsDir)
 	jobs := sqlite.NewJobRepository(db)
 	settings := sqlite.NewSettingsRepository(db)
@@ -126,11 +127,11 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 	maxAttempts := e.runner.Backoff.MaxAttempts
 
 	// One credential store per service, given to its adapter (which reads) and to the use case (which writes).
-	hubSecrets, err := e.secrets(hubSecretsService)
+	hubSecrets, err := e.secrets(profile, hubSecretsService)
 	if err != nil {
 		return fmt.Errorf("app: hub credentials: %w", err)
 	}
-	mailSecrets, err := e.secrets(mailSecretsService)
+	mailSecrets, err := e.secrets(profile, mailSecretsService)
 	if err != nil {
 		return fmt.Errorf("app: mail credentials: %w", err)
 	}
@@ -199,7 +200,7 @@ func (c *core) wire(dataDir string, e env, log *slog.Logger) error {
 
 	handlers.delivery = c.deliveries
 	// Before the proposals (the deadline calendar) and the runner (the calendar sync handler).
-	if err := c.wireGoogle(e, log); err != nil {
+	if err := c.wireGoogle(e, profile, log); err != nil {
 		return err
 	}
 	if err := c.wireCalendar(e, jobs, lessons, log, maxAttempts); err != nil {

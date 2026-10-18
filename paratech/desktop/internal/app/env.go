@@ -66,7 +66,7 @@ type secretStore interface {
 	Get(ctx context.Context, name string) (string, error)
 }
 
-// Credential Manager services of the core (wincred.New): one store per service.
+// Credential Manager services of the core (wincred.NewInProfile): one store per service.
 const (
 	hubSecretsService    = "hub"
 	mailSecretsService   = "mail"
@@ -113,8 +113,9 @@ type env struct {
 	// STT jobs wait QUEUED for a start with a usable binary.
 	whisperBinary string
 
-	// secrets opens the credential store of a service; tests use testenv.MemCredentials, never Credential Manager.
-	secrets func(service string) (secretStore, error)
+	// secrets opens the credential store of a service in the profile of the data directory (ADR-0014); tests use
+	// testenv.MemCredentials, never Credential Manager.
+	secrets func(profile wincred.Profile, service string) (secretStore, error)
 
 	// hubHTTP replaces the transport of the Hub client (tests: the fake Hub's certificate); nil in production.
 	hubHTTP *http.Client
@@ -166,10 +167,10 @@ func productionEnv() env {
 	}
 }
 
-// credentialManager is the Windows Credential Manager store of a service. Off Windows every call fails with
-// wincred.ErrUnsupported: there is no weaker fallback.
-func credentialManager(service string) (secretStore, error) {
-	s, err := wincred.New(service)
+// credentialManager is the Windows Credential Manager store of a service in profile. Off Windows every call fails
+// with wincred.ErrUnsupported: there is no weaker fallback.
+func credentialManager(profile wincred.Profile, service string) (secretStore, error) {
+	s, err := wincred.NewInProfile(service, profile)
 	if err != nil {
 		return nil, err
 	}

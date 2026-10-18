@@ -31,12 +31,25 @@ func TestLoad(t *testing.T) {
 		{
 			name: "data dir below local app data",
 			env:  map[string]string{config.EnvLocalAppData: abs},
-			want: config.Config{LogLevel: "info", DataDir: filepath.Join(abs, "LearningAssistant")},
+			want: config.Config{
+				LogLevel: "info", DataDir: filepath.Join(abs, "LearningAssistant"),
+				DefaultDataDir: filepath.Join(abs, "LearningAssistant"),
+			},
 		},
 		{
 			name: "explicit data dir wins over local app data",
 			env:  map[string]string{config.EnvLocalAppData: filepath.Join(abs, "local"), config.EnvDataDir: abs},
-			want: config.Config{LogLevel: "info", DataDir: abs},
+			want: config.Config{
+				LogLevel: "info", DataDir: abs, DefaultDataDir: filepath.Join(abs, "local", "LearningAssistant"),
+			},
+		},
+		{
+			name: "data dir flag keeps the default data dir",
+			args: []string{"--data-dir", abs},
+			env:  map[string]string{config.EnvLocalAppData: filepath.Join(abs, "local")},
+			want: config.Config{
+				LogLevel: "info", DataDir: abs, DefaultDataDir: filepath.Join(abs, "local", "LearningAssistant"),
+			},
 		},
 		{name: "headless", env: map[string]string{config.EnvHeadless: "true"}, want: config.Config{LogLevel: "info", Headless: true}},
 		{name: "not headless", env: map[string]string{config.EnvHeadless: "0"}, want: config.Config{LogLevel: "info"}},

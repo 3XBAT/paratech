@@ -19,6 +19,7 @@ import (
 	"paratech/desktop/internal/adapters/audiocapture"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/senddelivery"
@@ -46,7 +47,7 @@ func alphaEnv(t *testing.T) env {
 		return audiocapture.Unavailable{}, nil
 	}
 	e.power = testenv.NewFakePower(true)
-	e.secrets = func(string) (secretStore, error) { return testenv.NewMemCredentials(), nil }
+	e.secrets = func(wincred.Profile, string) (secretStore, error) { return testenv.NewMemCredentials(), nil }
 	e.runner.PollInterval = 10 * time.Millisecond
 	e.stopTimeout = 5 * time.Second
 	return e

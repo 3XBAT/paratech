@@ -12,11 +12,15 @@ import (
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/random"
+	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/testenv"
 )
+
+// testProfile is the Credential Manager profile of the cores a test builds directly: the stores are fakes.
+const testProfile wincred.Profile = "0123456789abcdef"
 
 // TestMain lets the test binary double as the fake whisper-cli: the wired whispercli adapter starts os.Executable()
 // with whisper-cli arguments. It is the only TestMain of this directory (internal and external tests share a binary).
@@ -41,6 +45,8 @@ type fakes struct {
 
 	// secrets are the credential stores by service: tests never touch the real Credential Manager.
 	secrets map[string]*testenv.MemCredentials
+	// profiles are the Credential Manager profiles the core asked the stores of, by service.
+	profiles map[string]wincred.Profile
 
 	// browser opens Google's consent page; the Google endpoints and the Calendar API point to a closed local port
 	// unless a test sets env.googleOAuth or env.googleCalendar to a fake server, so no test reaches Google.
@@ -59,7 +65,7 @@ func testEnv(t *testing.T) (env, *fakes) {
 	f := &fakes{power: testenv.NewFakePower(true), apps: &testenv.FakeAudioApps{}, secrets: map[string]*testenv.MemCredentials{
 		hubSecretsService: testenv.NewMemCredentials(), mailSecretsService: testenv.NewMemCredentials(),
 		googleSecretsService: testenv.NewMemCredentials(),
-	}, browser: testenv.NewFakeBrowser()}
+	}, profiles: map[string]wincred.Profile{}, browser: testenv.NewFakeBrowser()}
 	const nowhere = "http://127.0.0.1:1"
 
 	runner := jobrunner.DefaultConfig()
@@ -79,11 +85,12 @@ func testEnv(t *testing.T) (env, *fakes) {
 		},
 		apps:          func(*slog.Logger) recordingprompt.AudioApps { return f.apps },
 		whisperBinary: bin,
-		secrets: func(service string) (secretStore, error) {
+		secrets: func(profile wincred.Profile, service string) (secretStore, error) {
 			s, ok := f.secrets[service]
 			if !ok {
 				return nil, fmt.Errorf("no test credential store for %q", service)
 			}
+			f.profiles[service] = profile
 			return s, nil
 		},
 		authPages:      f.browser,
