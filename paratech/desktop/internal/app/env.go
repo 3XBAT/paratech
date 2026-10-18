@@ -92,7 +92,7 @@ type env struct {
 	logFile func(dir string) (logSink, error)
 
 	clock  timeSource
-	local  localTime // homeworkflow only: its Clock port names the student's zone
+	local  localTime // the use cases that show the student's zone (homework, support bundle, transcript viewer)
 	ids    idSource
 	jitter jobrunner.Jitter
 	power  jobrunner.PowerMonitor

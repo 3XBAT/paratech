@@ -18,6 +18,7 @@ import (
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/sysinfo"
+	"paratech/desktop/internal/adapters/textfile"
 	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/zipfile"
@@ -36,6 +37,7 @@ import (
 	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/cases/transcriptview"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/input/wails"
 )
@@ -129,6 +131,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	settings := sqlite.NewSettingsRepository(db)
 	recordings := sqlite.NewRecordingRepository(db)
 	transcripts := sqlite.NewTranscriptRepository(db)
+	parts := sqlite.NewTranscriptParts(db) // the live transcript while the recognition runs (TASK-079)
 	lessons := sqlite.NewLessonRepository(db)
 	summaries := sqlite.NewSummaryRepository(db)
 	assignments := sqlite.NewAssignmentRepository(db)
@@ -222,7 +225,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
 	if err := c.wireSpeech(dataDir, e, transcribe.Deps{
 		Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db), Artifacts: store,
-		Events: post, Clock: e.clock, Log: log,
+		Events: post, Clock: e.clock, Log: log, Live: parts,
 	}, log); err != nil {
 		return err
 	}
@@ -262,6 +265,14 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: activity: %w", err)
 	}
+	// Local only: the viewer works while the Hub or the internet is down. Titles in the local time zone.
+	viewer, err := transcriptview.New(transcriptview.Deps{
+		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Jobs: jobs, Live: parts, Artifacts: store,
+		Writer: textfile.New(), Clock: e.local, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: transcript viewer: %w", err)
+	}
 
 	// A model installed while the app runs gets the waiting recordings enqueued at once; without the speech component
 	// their jobs wait QUEUED until it is installed (the pages offer it: Speech).
@@ -274,7 +285,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech,
 		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
-		Homework: wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
+		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
+		Transcript: viewer,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
