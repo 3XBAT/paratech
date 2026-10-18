@@ -172,6 +172,18 @@ test("lesson rows sit under week and day headers; past ones are muted, today's a
   assert.match(markup, /<li class="ln"><span class="ln-row"><span class="ln-when num">bad – bad</, "no header, the full text");
 });
 
+test("lessons to be removed are muted when past but never highlighted", () => {
+  const at = (start, end) => ({ line: 0, title: "Урок", start, end, zone: "Europe/Moscow" });
+  const markup = page(
+    preview({ removed: [at("16.10.2026 09:00", "16.10.2026 10:30"), at("16.10.2026 15:00", "16.10.2026 16:30")] }),
+    {},
+    new Date("2026-10-16T09:00:00Z"),
+  );
+  assert.match(markup, /<span class="ln-day">Сегодня<\/span><span class="ln-row is-past">/);
+  assert.match(markup, /<li class="ln"><span class="ln-row"><span class="ln-when num">15:00–16:30</);
+  assert.ok(!markup.includes("is-today") && !markup.includes("is-next"));
+});
+
 test("row errors fold the same way, with «Показать все ошибки» and no Apply", () => {
   const p = preview({ canCommit: false, errors: range(5000).map((i) => ({ line: i + 2, field: "date", reason: "bad" })) });
   assert.deepEqual(previewGroups(p), ["errors"]);

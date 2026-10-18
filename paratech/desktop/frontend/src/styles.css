@@ -193,7 +193,7 @@ html, body, #root { height: 100%; }
 .ln-day.is-today { color: var(--accent); }
 .ln-row.is-past, .ln-row.is-past .ln-when { color: var(--muted); }
 .ln-row.is-past .ln-when { font-weight: 500; }
-.ln-row.is-today { background: var(--run-b); }
+.ln-row.is-today { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .ln-row.is-next { box-shadow: inset 3px 0 0 var(--accent-fill); }
 .ln-text { padding: 7px 16px; border-bottom: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
 .g-errors .ln-text { color: var(--rec-t); }
@@ -213,6 +213,7 @@ html, body, #root { height: 100%; }
   .diff-arrow { display: none; }
 }
 @media (forced-colors: active) {
+  .ln-row.is-today { outline: 1px solid CanvasText; outline-offset: -1px; }
   .ln-row.is-next { border-left: 3px solid Highlight; }
 }
 

@@ -23,6 +23,7 @@ import {
   previewGroups,
   resultText,
   rowErrorParts,
+  showEmptyState,
   summaryChips,
   weekHeaders,
   windowText,
@@ -140,13 +141,7 @@ export function SchedulePage() {
     setError("");
   };
 
-  // The empty state carries the import button itself; otherwise the button sits in the head.
-  const empty = preview === null && error === "" && done === "";
-  const chooseButton = (
-    <Button variant={preview === null ? "primary" : "secondary"} icon="up" disabled={busy} onClick={() => void choose()}>
-      Выбрать файл…
-    </Button>
-  );
+  const empty = showEmptyState(preview, error, done);
 
   return (
     <section className="page sched">
@@ -155,7 +150,12 @@ export function SchedulePage() {
           <span className="label">Импорт из файла</span>
           <h1>Расписание</h1>
         </div>
-        {!empty && <div className="acts">{chooseButton}</div>}
+        {/* Always here, one node: keyboard focus stays on it when the empty state goes away. */}
+        <div className="acts">
+          <Button variant={preview === null ? "primary" : "secondary"} icon="up" disabled={busy} onClick={() => void choose()}>
+            Выбрать файл…
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -170,8 +170,8 @@ export function SchedulePage() {
         </p>
       )}
       {empty ? (
-        <EmptyState label="Файл ICS, CSV или XLSX" title="Загрузите расписание из файла" actions={chooseButton}>
-          {notes.formats}
+        <EmptyState label="Файл ICS, CSV или XLSX" title="Загрузите расписание из файла">
+          {`${notes.choose} ${notes.formats}`}
         </EmptyState>
       ) : (
         <p className="muted">{notes.formats}</p>
@@ -241,11 +241,11 @@ export function PreviewView(props: {
   }
 
   // A lesson line under its week divider and day header: the time, the title and the zone from the file (each in its
-  // own <bdi>), the file line. Past lessons are muted, today's and the next one highlighted.
-  function lessons(items: readonly (LessonText & { line: number })[]) {
+  // own <bdi>), the file line. Past lessons are muted; today's and the next one highlighted unless they are to be removed.
+  function lessons(items: readonly (LessonText & { line: number })[], highlight: boolean) {
     const weeks = weekHeaders(items);
     const days = dayHeaders(items, now);
-    const marks = lessonMarks(items, now);
+    const marks = lessonMarks(items, now, highlight);
     return (l: LessonText & { line: number }, i: number) => {
       const w = weeks[i];
       const d = days[i];
@@ -259,7 +259,7 @@ export function PreviewView(props: {
               <span className="n num">{w.countText}</span>
             </span>
           )}
-          {d && <span className={d === "Сегодня" ? "ln-day is-today" : "ln-day"}>{d}</span>}
+          {d && <span className={highlight && d === "Сегодня" ? "ln-day is-today" : "ln-day"}>{d}</span>}
           <span className={cls}>
             <span className="ln-when num">{lessonTime(l.start, l.end)}</span>
             <span className="ln-title">
@@ -315,7 +315,7 @@ export function PreviewView(props: {
         </div>
       )}
       {group("errors", p.errors, (e) => plainRow(rowErrorParts(e)), { more: () => listTexts.allErrors })}
-      {group("added", p.added, lessons(p.added))}
+      {group("added", p.added, lessons(p.added, true))}
       {group("changed", p.changed, (c) => (
         <li className="diff">
           <span className="ln-line small muted num">{c.line > 0 ? `строка ${c.line}` : ""}</span>
@@ -328,7 +328,7 @@ export function PreviewView(props: {
           </ins>
         </li>
       ))}
-      {group("removed", p.removed, lessons(p.removed))}
+      {group("removed", p.removed, lessons(p.removed, false))}
       {group("conflicts", p.conflicts, (c) => plainRow(conflictParts(c)), {
         before: (
           <Banner kind="wait">

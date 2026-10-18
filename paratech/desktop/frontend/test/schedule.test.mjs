@@ -22,6 +22,7 @@ import {
   plain,
   resultText,
   rowErrorParts,
+  showEmptyState,
   summaryText,
   summaryChips,
   timeRange,
@@ -224,7 +225,11 @@ test("day labels: today and tomorrow in the lesson's zone, otherwise weekday and
   assert.equal(dayLabel("01.01.2027 09:00", msk, new Date("2026-12-31T12:00:00Z")), "Завтра", "across a year");
   // An invalid zone is file text; it gets the plain date, no «Сегодня».
   assert.equal(dayLabel("16.10.2026 09:00", "Not/AZone", now), "пт, 16 октября");
-  assert.equal(dayLabel("16.10.2026 09:00", "", now), "пт, 16 октября");
+  // Like the core, an empty or "Local" zone means UTC (not the machine zone): 23:30 UTC is still 16.10 there.
+  const late = new Date("2026-10-16T23:30:00Z");
+  assert.equal(dayLabel("16.10.2026 09:00", "", late), "Сегодня");
+  assert.equal(dayLabel("16.10.2026 09:00", "Local", late), "Сегодня");
+  assert.equal(dayLabel("16.10.2026 09:00", msk, late), "пт, 16 октября", "02:30 on 17.10 in Moscow");
   for (const bad of ["bad", "31.02.2026 09:00", "16.10.2026 25:00", ""]) {
     assert.equal(dayLabel(bad, msk, now), null, bad);
   }
@@ -282,6 +287,45 @@ test("past lessons are muted, today's and the next one highlighted", () => {
     [none, none, { past: false, today: false, next: true }],
     "no mark without a zone or a start; an unparsable end counts as the start",
   );
+  // "" and "Local" mean UTC, as in the core: at 09:00 UTC a 10:00 lesson is ahead, an 08:00 one is over.
+  assert.deepEqual(lessonMarks([l("16.10.2026 08:00", "16.10.2026 08:30", ""), l("16.10.2026 10:00", "16.10.2026 11:00", "Local")], now), [
+    { past: true, today: false, next: false },
+    { past: false, today: true, next: true },
+  ]);
+});
+
+test("the next lesson is the earliest start, not the first in the file order", () => {
+  const l = (start, end, zone = "Europe/Moscow") => ({ start, end, zone });
+  const later = l("19.10.2026 09:00", "19.10.2026 10:30");
+  const sooner = l("17.10.2026 09:00", "17.10.2026 10:30");
+  assert.deepEqual(lessonMarks([later, sooner], now).map((m) => m.next), [false, true], "unsorted input");
+  assert.deepEqual(lessonMarks([sooner, later, sooner], now).map((m) => m.next), [true, false, false], "a tie: the first");
+  // `sooner` is 06:00 UTC; 12:00 in Novosibirsk is 05:00 UTC, though later in wall time.
+  const nsk = l("17.10.2026 12:00", "17.10.2026 13:00", "Asia/Novosibirsk"); // 05:00 UTC
+  assert.deepEqual(lessonMarks([sooner, nsk], now).map((m) => m.next), [false, true], "two zones: by the instant");
+  // In wall time the Moscow lesson (08:00) looks earlier, but it starts at 05:00 UTC, after 04:00 UTC in Novosibirsk.
+  const msk8 = l("17.10.2026 08:00", "17.10.2026 09:00"); // 05:00 UTC
+  const nsk11 = l("17.10.2026 11:00", "17.10.2026 12:00", "Asia/Novosibirsk"); // 04:00 UTC
+  assert.deepEqual(lessonMarks([msk8, nsk11], now).map((m) => m.next), [false, true], "wall time would pick Moscow");
+});
+
+test("lessons to be removed are only muted, never today's or the next", () => {
+  const l = (start, end) => ({ start, end, zone: "Europe/Moscow" });
+  assert.deepEqual(
+    lessonMarks([l("16.10.2026 09:00", "16.10.2026 10:30"), l("16.10.2026 15:00", "16.10.2026 16:30")], now, false),
+    [
+      { past: true, today: false, next: false },
+      { past: false, today: false, next: false },
+    ],
+  );
+});
+
+test("the empty state shows only before anything is chosen, failed or done", () => {
+  assert.equal(showEmptyState(null, "", ""), true);
+  assert.equal(showEmptyState(preview, "", ""), false, "a preview");
+  assert.equal(showEmptyState(null, "Не удалось прочитать файл.", ""), false, "an error");
+  assert.equal(showEmptyState(null, "", "Расписание обновлено: добавлено 1, изменено 0, удалено 0."), false, "a result");
+  assert.match(notes.choose, /«Выбрать файл…»/);
 });
 
 test("the row time omits the day shown in the header", () => {
