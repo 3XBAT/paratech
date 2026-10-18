@@ -156,3 +156,50 @@ func TestRealCredentialManager(t *testing.T) {
 		t.Errorf("error reveals the target name: %s", msg)
 	}
 }
+
+// TestRealCredentialManagerIsolatedProfile writes through an isolated profile under a unique test service: the entry
+// is "paratech-<profile>/<service>/<name>" and the default profile of the same service does not see it.
+func TestRealCredentialManagerIsolatedProfile(t *testing.T) {
+	ctx := context.Background()
+	const profile Profile = "0123456789abcdef"
+	service := "test-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	s, err := NewInProfile(service, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := New(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireSession(t, s.Set(ctx, "token", "isolated"))
+	t.Cleanup(func() {
+		for _, st := range []*Store{s, def} {
+			if err := st.Delete(ctx, "token"); err != nil {
+				t.Errorf("cleanup Delete: %v", err)
+			}
+		}
+	})
+
+	raw, err := winBackend{}.read("paratech-" + string(profile) + "/" + service + "/token")
+	if err != nil || string(raw) != "isolated" {
+		t.Fatalf("raw read = %q, %v", raw, err)
+	}
+	if _, err := def.Get(ctx, "token"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("default profile Get = %v, want ErrNotFound", err)
+	}
+
+	if err := def.Set(ctx, "token", "default"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Get(ctx, "token"); err != nil || got != "isolated" {
+		t.Fatalf("isolated Get after a default Set = %q, %v", got, err)
+	}
+
+	if err := s.Delete(ctx, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := def.Get(ctx, "token"); err != nil || got != "default" {
+		t.Fatalf("default Get after an isolated Delete = %q, %v", got, err)
+	}
+}
