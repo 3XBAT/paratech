@@ -68,6 +68,8 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   claims and recovers only registered types). The in-app install registers the type at run time with
   `jobrunner.Service.Activate` (it first recovers stale RUNNING jobs of the type, then rebuilds the claim classes and
   wakes the workers), so the same job runs without a restart. The permanent STT stand-in of TASK-056 is gone.
+  At start the same `Activate` (with the stt recovery and the whisper-cli work dir cleanup) runs in `openCore`, before
+  the startup cleanups and `jobrunner.Recover`.
 - **Heavy cap (TASK-060).** `jobrunner.Config.MaxHeavy` (default 1): a worker reserves a heavy slot before the claim and
   frees it after the attempt; without a free slot it claims only light types. So 2 workers never run 2 whisper-cli.
 - **Models (TASK-060, TASK-030).** `modelcatalog.Service`, `Downloader` (`httpdownload`, `filestore` free space) and
