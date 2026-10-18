@@ -48,9 +48,9 @@ const (
 
 	// Result of the last finished sync, shown after «Последняя синхронизация: <date, time>».
 	msgLastRunOK            = "Успешно."
-	msgLastRunSignInExpired = "Ошибка: вход в Google истёк — войдите снова."
+	msgLastRunSignInExpired = "Ошибка: вход в Google истёк."
 	msgLastRunNotSignedIn   = "Не выполнена: нет входа в Google."
-	msgLastRunNoAccess      = "Ошибка: нет доступа к Google Календарю — войдите снова и разрешите доступ к календарю."
+	msgLastRunNoAccess      = "Ошибка: нет доступа к Google Календарю."
 	msgLastRunFailed        = "Ошибка: синхронизация не удалась."
 )
 
@@ -181,7 +181,7 @@ func lastRunText(o schedulesync.SyncOutcome) string {
 }
 
 func calendarMessage(st CalendarSyncState) string {
-	// A failure the last-run line already shows is not repeated here.
+	// A generic failure the last-run line already shows is not repeated here.
 	shown := st.LastRunOutcome == string(schedulesync.OutcomeFailed) ||
 		st.LastRunOutcome == string(schedulesync.OutcomeNoAccess) ||
 		st.LastRunOutcome == string(schedulesync.OutcomeSignInExpired)
@@ -198,7 +198,7 @@ func calendarMessage(st CalendarSyncState) string {
 		return msgCalendarSignInAgain
 	case !st.SignedIn:
 		return msgCalendarSignIn
-	case st.Attention == string(schedulesync.AttentionNoAccess) && !shown:
+	case st.Attention == string(schedulesync.AttentionNoAccess): // never "synchronized" without access
 		return msgCalendarNoAccess
 	case st.LastOutcome == string(schedulesync.OutcomeFailed) && !shown:
 		return msgCalendarFailed

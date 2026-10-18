@@ -129,7 +129,7 @@ test("signed in: Go's message, the time and the button, disabled while queued, r
   assert.equal(
     calendarSyncView({ ...base, status: st({ lastRunAttempts: 3 }) }).lastSynced, lastSyncedText(synced.lastRunAt, 3));
 
-  const expired = "Ошибка: вход в Google истёк — войдите снова.";
+  const expired = "Ошибка: вход в Google истёк.";
   const failedRun = calendarSyncView({ ...base, status: st({ lastRunOutcome: "signInExpired", lastRunText: expired }) });
   assert.deepEqual(failedRun.lastRunResult, { text: expired, kind: "fail" });
   assert.equal(failedRun.messageAlert, false, "no attention from Go: the result line carries the error");

@@ -298,7 +298,7 @@ func TestWiredCalendarNoAccessClearedBySignIn(t *testing.T) {
 		t.Fatalf("sync after the refused calendar: %v", st)
 	}
 	st, _ := calPage.GoogleCalendarStatus(ctx)
-	if st.Attention != "noAccess" || st.LastRunOutcome != "noAccess" || st.Message != "Ждут синхронизации занятий: 1." {
+	if st.Attention != "noAccess" || st.LastRunOutcome != "noAccess" || st.Message != "Нет доступа к Google Календарю: войдите снова и разрешите доступ к календарю." {
 		t.Fatalf("status after the refused calendar = %+v", st)
 	}
 
