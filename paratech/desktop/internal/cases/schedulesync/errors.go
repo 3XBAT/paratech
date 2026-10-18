@@ -31,6 +31,11 @@ var (
 	// ErrCalendarNotConnected.
 	ErrCalendarSignInExpired = fmt.Errorf("%w: google sign-in expired", ErrCalendarNotConnected)
 
+	// ErrCalendarNoAccess means Google refused access to the calendar itself (a 403, a token it rejects, a refused
+	// authorization): the user signs in again and allows the calendar. The CalendarAdapter returns an error wrapping it
+	// with its retry class; the run ends. It is not ErrCalendarNotConnected: the job fails.
+	ErrCalendarNoAccess = errors.New("no access to the google calendar")
+
 	// ErrLessonRejected means the calendar did not take the write of one lesson for a reason of that lesson only (a
 	// refused or malformed event, an event id Google keeps taken or deleted). The CalendarAdapter returns an error
 	// wrapping it with its retry class; the sync skips the lesson and goes on with the others.

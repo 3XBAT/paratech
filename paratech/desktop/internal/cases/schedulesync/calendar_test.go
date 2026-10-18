@@ -560,6 +560,42 @@ func TestSyncNotSignedIn(t *testing.T) {
 	}
 }
 
+// Google refusing access to the calendar ends the run and fails the job with its own outcome, so the page asks the user
+// to sign in again and allow the calendar (TASK-074 criterion 3). The class of the adapter error is kept.
+func TestSyncNoAccess(t *testing.T) {
+	noAccess := func(class func(error) error) error {
+		return class(fmt.Errorf("x: %w: fake 403", ErrCalendarNoAccess))
+	}
+	tests := []struct {
+		name      string
+		op        string
+		err       error
+		permanent bool
+	}{
+		{"ensure refused", "ensure", noAccess(backoff.Permanent), true},
+		{"upsert refused", "upsert", noAccess(backoff.Permanent), true},
+		{"transient stays transient", "ensure", noAccess(backoff.Transient), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.seed(t, "a", content("Math", at(0)))
+			e.seed(t, "b", content("Physics", at(1)))
+			e.cal.failNext(tt.op, tt.err)
+			err := e.handle(t)
+			if !errors.Is(err, ErrCalendarNoAccess) || (backoff.Classify(err) == backoff.ClassPermanent) != tt.permanent {
+				t.Fatalf("Handle = %v, want no access, permanent %v", err, tt.permanent)
+			}
+			if e.cal.count("upsert") > 1 || len(e.pending(t)) != 2 {
+				t.Fatalf("upserts %d, pending %v: the run went on", e.cal.count("upsert"), e.pending(t))
+			}
+			if st, _ := e.sync.Status(context.Background()); st.LastOutcome != OutcomeNoAccess {
+				t.Fatalf("outcome %q", st.LastOutcome)
+			}
+		})
+	}
+}
+
 // Transient failures are retried by the runner (the network one waits for the network), permanent ones fail the job.
 func TestSyncFailureClasses(t *testing.T) {
 	network := fmt.Errorf("fake: %w", shared.ErrNetworkUnavailable)
@@ -1145,6 +1181,37 @@ func TestCalendarStatusLastRunFromStoredJobs(t *testing.T) {
 			}
 			if st.LastRun != tt.want || st.LastRun.OK() != (tt.want.Outcome == OutcomeOK) {
 				t.Fatalf("LastRun = %+v, want %+v", st.LastRun, tt.want)
+			}
+		})
+	}
+}
+
+// A COMPLETED record of an earlier process is a success only while signed in: a run whose sign-in had expired
+// completes too, so signed out the outcome stays unknown; the time and attempts still show (TASK-074 criterion 3).
+func TestCalendarStatusLastRunRecordOnlyAndSignIn(t *testing.T) {
+	later := t0.Add(time.Hour)
+	tests := []struct {
+		name     string
+		status   job.Status
+		signedIn bool
+		want     SyncOutcome
+	}{
+		{"completed, signed in", job.StatusCompleted, true, OutcomeOK},
+		{"completed, signed out", job.StatusCompleted, false, OutcomeNone},
+		{"failed, signed out", job.StatusFailed, false, OutcomeFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.account.set(tt.signedIn, nil)
+			e.jobs.jobs = []*job.Job{finishedSyncJob(t, "a", tt.status, 2, later)}
+			st, err := e.sync.Status(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := LastRun{At: later, Attempts: 2, Outcome: tt.want}
+			if st.LastRun != want || st.LastRun.OK() != (tt.want == OutcomeOK) {
+				t.Fatalf("LastRun = %+v, want %+v", st.LastRun, want)
 			}
 		})
 	}

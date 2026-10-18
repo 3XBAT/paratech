@@ -91,6 +91,7 @@ const (
 	OutcomeOK            SyncOutcome = "ok"
 	OutcomeNotSignedIn   SyncOutcome = "notSignedIn"
 	OutcomeSignInExpired SyncOutcome = "signInExpired"
+	OutcomeNoAccess      SyncOutcome = "noAccess"
 	OutcomeFailed        SyncOutcome = "failed"
 )
 
@@ -125,7 +126,7 @@ type LastRun struct {
 	Attempts int
 	// Outcome is how the run ended: the outcome this process recorded for the job, otherwise what the job record
 	// tells: OutcomeOK for a COMPLETED job, OutcomeFailed for a FAILED or CANCELLED one. A job that ended without a
-	// sign-in completes, so after a restart only the sign-in status tells that case apart.
+	// sign-in completes too, so a COMPLETED record read while signed out is OutcomeNone: not claimed as a success.
 	Outcome SyncOutcome
 }
 

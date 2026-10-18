@@ -238,6 +238,8 @@ func outcomeOf(err error) SyncOutcome {
 		return OutcomeSignInExpired
 	case errors.Is(err, ErrCalendarNotConnected):
 		return OutcomeNotSignedIn
+	case errors.Is(err, ErrCalendarNoAccess):
+		return OutcomeNoAccess
 	}
 	return OutcomeFailed
 }
@@ -491,6 +493,9 @@ func (c *CalendarSync) Status(ctx context.Context) (CalendarStatus, error) {
 		switch {
 		case last.ID() == outcomeJob && st.LastOutcome != OutcomeNone:
 			st.LastRun.Outcome = st.LastOutcome
+		case last.Status() == job.StatusCompleted && !signedIn:
+			// A run without a valid sign-in completes too; the record cannot tell it from a success.
+			st.LastRun.Outcome = OutcomeNone
 		case last.Status() == job.StatusCompleted:
 			st.LastRun.Outcome = OutcomeOK
 		}
