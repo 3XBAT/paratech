@@ -383,7 +383,8 @@ export function ConnectionsPage(props: { visit?: number }) {
   if (open === "hub") {
     return (
       <SectionPage title={title} onBack={back}>
-        <Card className="box" label="Сервер обработки">
+        <Card className="box" label={overviewTexts.hubTitle}>
+          <span className="small muted box-desc">{overviewTexts.hubHint}</span>
           <span className="small muted box-desc">
             Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.
           </span>

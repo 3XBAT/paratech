@@ -171,3 +171,17 @@ test("the entry on «Подключения» opens the screen and the rail stay
   assert.equal(helpTexts.entryTitle, "Календарь на iPhone, iPad и Mac");
   assert.ok(!src("../src/nav.ts").includes("help"));
 });
+
+test("no UI source names the app by its old names (TASK-069)", async () => {
+  const { readdirSync } = await import("node:fs");
+  const files = readdirSync(new URL("../src/", import.meta.url), { recursive: true })
+    .filter((f) => /\.(ts|tsx|css|html)$/.test(f))
+    .map((f) => `../src/${f.replaceAll("\\", "/")}`);
+  assert.ok(files.length > 20, "the walk found the sources");
+  for (const file of [...files, "../index.html", "../popup.html"]) {
+    const text = src(file);
+    assert.doesNotMatch(text, /learning.?assistant|Учебн\S* помощник/i, file);
+    assert.doesNotMatch(text, /Paratech/, file); // the name is lowercase; binding paths are lowercase too
+  }
+  assert.match(src("../index.html"), /<title>paratech<\/title>/);
+});

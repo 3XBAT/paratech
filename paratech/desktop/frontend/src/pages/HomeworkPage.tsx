@@ -494,7 +494,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       <Card className="box">
         <h2>Черновик</h2>
         {shown === null ? (
-          <p className="small muted box-desc">Черновика ещё нет: его подготовит сервер обработки по тексту задания.</p>
+          <p className="small muted box-desc">Черновика ещё нет: его подготовит сервис конспектов по тексту задания.</p>
         ) : (
           <>
             <span className="small muted box-desc num">

@@ -61,7 +61,7 @@ test("a current quota: remaining, limit and reserved, the time and the cache not
   assert.equal(d.renews, "Лимит обновится: " + localTime(values.periodEnd));
   assert.equal(d.note, quotaTexts.note);
   assert.match(d.note, /копия для показа/);
-  assert.match(d.note, /сервер обработки решает/);
+  assert.match(d.note, /сервис конспектов решает/);
   assert.equal(d.checked, "");
   assert.deepEqual(d.lines, [{ text: goText.ok, tone: "ok" }]);
 
@@ -84,7 +84,7 @@ test("Hub offline: the old value marked stale with its time, and the Go text", (
   assert.equal(d.checked, "Последняя попытка: " + localTime("2026-10-15T11:00:00Z"));
   assert.deepEqual(d.lines, [{ text: goText.offline, tone: "error" }]);
   // Without the answer (page opened again): a text of the status.
-  assert.deepEqual(texts(quotaDisplay(offline, ready, null)), ["Сервер обработки не ответил при последнем обновлении."]);
+  assert.deepEqual(texts(quotaDisplay(offline, ready, null)), ["Сервис конспектов не ответил при последнем обновлении."]);
   // Offline before any value: no numbers, no stale mark.
   const none = quotaDisplay({ ...offline, stale: false, values: null }, ready, { text: goText.offline, ok: false });
   assert.deepEqual(none.amounts, []);
