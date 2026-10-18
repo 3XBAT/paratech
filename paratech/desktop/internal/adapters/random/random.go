@@ -12,7 +12,7 @@ import (
 
 // messageIDDomain is the right side of generated Message-IDs: a reserved name (RFC 6761), so the machine's host name
 // never leaves it.
-const messageIDDomain = "learning-assistant.invalid"
+const messageIDDomain = "paratech.invalid"
 
 // permilleRange is the size of the Permille range 0..999.
 const permilleRange = 1000
@@ -44,7 +44,7 @@ func (IDs) NewSttModelID() shared.SttModelID { return shared.SttModelID(token())
 // NewDeliveryID returns a fresh delivery identifier.
 func (IDs) NewDeliveryID() shared.DeliveryID { return shared.DeliveryID(token()) }
 
-// NewMessageID returns a fresh RFC 5322 Message-ID "<random@learning-assistant.invalid>".
+// NewMessageID returns a fresh RFC 5322 Message-ID "<random@paratech.invalid>".
 func (IDs) NewMessageID() string { return "<" + token() + "@" + messageIDDomain + ">" }
 
 // Jitter supplies the randomness of retry delays. The zero value is ready to use.

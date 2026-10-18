@@ -136,8 +136,8 @@ func TestStderrTailANSIRoot(t *testing.T) {
 		leaks  []string
 		native bool
 	}{
-		{"cyrillic, decoded", cpCyrillic, `C:\Users\Иван Петров\AppData\Local\Paratech`, []string{"иван", "петров"}, false},
-		{"cyrillic, native and decoded", cpCyrillic, `C:\Users\Иван Петров\AppData\Local\Paratech`, []string{"иван", "петров"}, true},
+		{"cyrillic, decoded", cpCyrillic, `C:\Users\Иван Петров\AppData\Local\paratech`, []string{"иван", "петров"}, false},
+		{"cyrillic, native and decoded", cpCyrillic, `C:\Users\Иван Петров\AppData\Local\paratech`, []string{"иван", "петров"}, true},
 		{"japanese, native and decoded", cpJapanese, `C:\Users\日本\data`, []string{"日本"}, true},
 	}
 

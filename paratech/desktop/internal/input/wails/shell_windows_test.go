@@ -99,7 +99,7 @@ func TestAppOptions(t *testing.T) {
 	opts.SingleInstance.OnSecondInstanceLaunch(application.SecondInstanceData{})
 	// A launch by a paratech: link (ADR-0013) does the same and nothing else, whatever its arguments say.
 	opts.SingleInstance.OnSecondInstanceLaunch(application.SecondInstanceData{
-		Args:       []string{`C:\LA\Paratech.exe`, `paratech://open/../x" --data-dir "C:\evil`, "--recorder"},
+		Args:       []string{`C:\LA\paratech.exe`, `paratech://open/../x" --data-dir "C:\evil`, "--recorder"},
 		WorkingDir: `C:\evil`, AdditionalData: map[string]string{"action": "record"},
 	})
 	if called != 2 {

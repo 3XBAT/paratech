@@ -14,19 +14,19 @@ func TestCommand(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{exe: `C:\path with space\Paratech.exe`, want: `"C:\path with space\Paratech.exe" "%1"`},
+		{exe: `C:\path with space\paratech.exe`, want: `"C:\path with space\paratech.exe" "%1"`},
 		{exe: `c:/Users/Иван/AppData/Local/Programs/LearningAssistant/paratech.exe`,
 			want: `"c:/Users/Иван/AppData/Local/Programs/LearningAssistant/paratech.exe" "%1"`},
-		{exe: `\\server\share\Paratech.exe`, want: `"\\server\share\Paratech.exe" "%1"`},
-		{exe: `C:\a"b\Paratech.exe`, wantErr: true},
+		{exe: `\\server\share\paratech.exe`, want: `"\\server\share\paratech.exe" "%1"`},
+		{exe: `C:\a"b\paratech.exe`, wantErr: true},
 		{exe: `C:\x" "%1" --data-dir "C:\evil.exe`, wantErr: true},
-		{exe: `C:\a%1b\Paratech.exe`, wantErr: true},
-		{exe: `C:\%USERPROFILE%\Paratech.exe`, wantErr: true},
-		{exe: "C:\\a\nb\\Paratech.exe", wantErr: true},
-		{exe: `Paratech.exe`, wantErr: true},
-		{exe: `\Paratech.exe`, wantErr: true},
-		{exe: `C:Paratech.exe`, wantErr: true},
-		{exe: `1:\Paratech.exe`, wantErr: true},
+		{exe: `C:\a%1b\paratech.exe`, wantErr: true},
+		{exe: `C:\%USERPROFILE%\paratech.exe`, wantErr: true},
+		{exe: "C:\\a\nb\\paratech.exe", wantErr: true},
+		{exe: `paratech.exe`, wantErr: true},
+		{exe: `\paratech.exe`, wantErr: true},
+		{exe: `C:paratech.exe`, wantErr: true},
+		{exe: `1:\paratech.exe`, wantErr: true},
 		{exe: `\\`, wantErr: true},
 		{exe: "", wantErr: true},
 	}
@@ -104,7 +104,7 @@ func (f *fakeKeys) setValue(path, name, v string) error {
 }
 
 func TestEnsure(t *testing.T) {
-	const exe = `C:\path with space\Paratech.exe`
+	const exe = `C:\path with space\paratech.exe`
 	const (
 		shellKey = classesKey + `\shell`
 		openKey  = classesKey + `\shell\open`
@@ -113,7 +113,7 @@ func TestEnsure(t *testing.T) {
 	registered := map[[2]string]string{
 		{classesKey, ""}:             "URL:paratech",
 		{classesKey, "URL Protocol"}: "",
-		{cmdKey, ""}:                 `"C:\path with space\Paratech.exe" "%1"`,
+		{cmdKey, ""}:                 `"C:\path with space\paratech.exe" "%1"`,
 	}
 	with := func(k [2]string, v string, drop bool) map[[2]string]string {
 		m := maps.Clone(registered)
@@ -133,8 +133,8 @@ func TestEnsure(t *testing.T) {
 	}{
 		{name: "missing", start: map[[2]string]string{}, wantWrite: true},
 		{name: "correct", start: registered},
-		{name: "another exe", start: with([2]string{cmdKey, ""}, `"C:\Old\Paratech.exe" "%1"`, false), wantWrite: true},
-		{name: "unquoted command", start: with([2]string{cmdKey, ""}, `C:\path with space\Paratech.exe %1`, false), wantWrite: true},
+		{name: "another exe", start: with([2]string{cmdKey, ""}, `"C:\Old\paratech.exe" "%1"`, false), wantWrite: true},
+		{name: "unquoted command", start: with([2]string{cmdKey, ""}, `C:\path with space\paratech.exe %1`, false), wantWrite: true},
 		{name: "no command", start: with([2]string{cmdKey, ""}, "", true), wantWrite: true},
 		{name: "not a protocol", start: with([2]string{classesKey, "URL Protocol"}, "", true), wantWrite: true},
 		{name: "other description", start: with([2]string{classesKey, ""}, "URL:Other", false), wantWrite: true},
@@ -189,11 +189,11 @@ func TestEnsureFailures(t *testing.T) {
 		keys *fakeKeys
 		want error
 	}{
-		{name: "quote in the path", exe: `C:\a"b\Paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}}, want: ErrUnusablePath},
-		{name: "read fails", exe: `C:\Paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}, readErr: boom}, want: ErrRegistry},
-		{name: "write fails", exe: `C:\Paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}, setErr: boom}, want: ErrRegistry},
-		{name: "delete fails", exe: `C:\Paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}, deleteErr: boom}, want: ErrRegistry},
-		{name: "another verb blocks the delete", exe: `C:\Paratech.exe`,
+		{name: "quote in the path", exe: `C:\a"b\paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}}, want: ErrUnusablePath},
+		{name: "read fails", exe: `C:\paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}, readErr: boom}, want: ErrRegistry},
+		{name: "write fails", exe: `C:\paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}, setErr: boom}, want: ErrRegistry},
+		{name: "delete fails", exe: `C:\paratech.exe`, keys: &fakeKeys{values: map[[2]string]string{}, deleteErr: boom}, want: ErrRegistry},
+		{name: "another verb blocks the delete", exe: `C:\paratech.exe`,
 			keys: &fakeKeys{values: map[[2]string]string{}, other: map[[2]string]bool{{classesKey + `\shell\edit\command`, ""}: true}},
 			want: ErrRegistry},
 	}

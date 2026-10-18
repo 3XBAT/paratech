@@ -22,7 +22,7 @@ func TestEnsureInTheRegistry(t *testing.T) {
 		}
 	})
 	r := &Registrar{keys: platformKeys{}, root: root}
-	const exe = `C:\path with space\Paratech.exe`
+	const exe = `C:\path with space\paratech.exe`
 
 	for i, want := range []bool{true, false} {
 		wrote, err := r.Ensure(exe)
@@ -44,17 +44,17 @@ func TestEnsureInTheRegistry(t *testing.T) {
 	}
 	check(root, "", "URL:paratech")
 	check(root, "URL Protocol", "")
-	check(root+`\shell\open\command`, "", `"C:\path with space\Paratech.exe" "%1"`)
+	check(root+`\shell\open\command`, "", `"C:\path with space\paratech.exe" "%1"`)
 
 	// Another exe, then an expandable string, are repaired.
-	if wrote, err := r.Ensure(`D:\Other\Paratech.exe`); err != nil || !wrote {
+	if wrote, err := r.Ensure(`D:\Other\paratech.exe`); err != nil || !wrote {
 		t.Fatalf("Ensure for another exe = %v, %v", wrote, err)
 	}
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, root+`\shell\open\command`, registry.SET_VALUE)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = k.SetExpandStringValue("", `"C:\path with space\Paratech.exe" "%1"`)
+	err = k.SetExpandStringValue("", `"C:\path with space\paratech.exe" "%1"`)
 	_ = k.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestEnsureInTheRegistry(t *testing.T) {
 	if wrote, err := r.Ensure(exe); err != nil || !wrote {
 		t.Fatalf("Ensure over REG_EXPAND_SZ = %v, %v", wrote, err)
 	}
-	check(root+`\shell\open\command`, "", `"C:\path with space\Paratech.exe" "%1"`)
+	check(root+`\shell\open\command`, "", `"C:\path with space\paratech.exe" "%1"`)
 
 	// A stale COM handler and another default verb are dropped.
 	set := func(path, name, v string) {
@@ -85,7 +85,7 @@ func TestEnsureInTheRegistry(t *testing.T) {
 			t.Fatalf("Ensure over %s [%s] = %v, %v", stale[0], stale[1], wrote, err)
 		}
 	}
-	check(root+`\shell\open\command`, "", `"C:\path with space\Paratech.exe" "%1"`)
+	check(root+`\shell\open\command`, "", `"C:\path with space\paratech.exe" "%1"`)
 	for _, v := range [][2]string{{root + `\shell`, ""}, {root + `\shell\open\command`, "DelegateExecute"}} {
 		if ok, err := (platformKeys{}).has(v[0], v[1]); err != nil || ok {
 			t.Fatalf("%s [%s] present = %v, %v; want gone", v[0], v[1], ok, err)

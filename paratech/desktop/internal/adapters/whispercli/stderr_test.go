@@ -123,8 +123,8 @@ func TestReporterRateLimit(t *testing.T) {
 }
 
 func TestStderrTail(t *testing.T) {
-	root := `C:\Users\Ivan Petrov\AppData\Local\Paratech`
-	bin := `C:\Program Files\Paratech\bin`
+	root := `C:\Users\Ivan Petrov\AppData\Local\paratech`
+	bin := `C:\Program Files\paratech\bin`
 	redact := []redaction{{dir: root, placeholder: placeholderData}, {dir: bin, placeholder: placeholderBin}}
 
 	tests := []struct {
@@ -230,7 +230,7 @@ func decodeLossy(b []byte) string {
 
 // TestStderrTailNonASCIIRoot: the CLI prints a code page 1251 root (Windows); it must not reach the tail.
 func TestStderrTailNonASCIIRoot(t *testing.T) {
-	root := `C:\Users\Иван Петров\AppData\Local\Paratech`
+	root := `C:\Users\Иван Петров\AppData\Local\paratech`
 	slash := strings.ReplaceAll(root, `\`, "/")
 	input := "loading '" + encode1251(t, root) + `\models\m.bin'` + "\n" +
 		"bad magic in " + encode1251(t, strings.ToUpper(root)) + `\MODELS\M.BIN` + "\n" +

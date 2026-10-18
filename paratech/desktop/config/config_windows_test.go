@@ -15,7 +15,7 @@ import (
 // The command line the registered command "<exe>" "%1" makes for a link with a '"' splits into several arguments;
 // Load still ignores all of them.
 func TestSchemeLinkWithAQuoteSplits(t *testing.T) {
-	const line = `"C:\Program Files\Paratech\Paratech.exe" "paratech://x" --data-dir "C:\evil" --headless`
+	const line = `"C:\Program Files\paratech\paratech.exe" "paratech://x" --data-dir "C:\evil" --headless`
 	// shell32's parser; Go's own one for os.Args follows the same rules here. The few bytes it allocates are not freed.
 	var argc int32
 	cmd, err := syscall.UTF16PtrFromString(line)
@@ -30,7 +30,7 @@ func TestSchemeLinkWithAQuoteSplits(t *testing.T) {
 	for _, p := range argv[:argc] {
 		args = append(args, syscall.UTF16ToString(p[:]))
 	}
-	want := []string{`C:\Program Files\Paratech\Paratech.exe`, "paratech://x", "--data-dir", `C:\evil`, "--headless"}
+	want := []string{`C:\Program Files\paratech\paratech.exe`, "paratech://x", "--data-dir", `C:\evil`, "--headless"}
 	if !slices.Equal(args, want) {
 		t.Fatalf("argv %q, want %q", args, want)
 	}

@@ -59,7 +59,7 @@ func TestInspect(t *testing.T) {
 		bundled := t.TempDir()
 		writeFile(t, filepath.Join(bundled, "whisper-cli.exe"), exeData)
 		writeFile(t, filepath.Join(bundled, "whisper.dll"), dllData)
-		writeFile(t, filepath.Join(bundled, "learning-assistant.exe"), []byte("the app"))
+		writeFile(t, filepath.Join(bundled, "paratech.exe"), []byte("the app"))
 		s, _ := newStore(t, bundled)
 		found, err := s.Inspect(ctx, values.FolderBundled, spec)
 		if err != nil || len(found) != 2 || spec.Assess(found) != values.ComponentReady {
