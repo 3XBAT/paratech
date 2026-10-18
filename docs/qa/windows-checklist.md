@@ -27,36 +27,36 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 ## AC-01. Попап записи не крадёт фокус и появляется не позже 20 с после начала занятия
 
-Автотесты: `TestSchedulerPromptWindowOnSQLite` (`desktop/tests/scheduler_sqlite_test.go`, окно до начала + 20 с); `TestLateAppStart`, `TestZeroLeadAnnouncesWithinTheGrace` (`desktop/internal/cases/scheduler/service_test.go`); `TestPopupExStyle` (`desktop/internal/input/wails/shell_windows_test.go`, окно без активации); `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
+Автотесты: `TestSchedulerPromptWindowOnSQLite` (`desktop/tests/scheduler_sqlite_test.go`, окно до начала + 20 с); `TestLateAppStart`, `TestZeroLeadAnnouncesWithinTheGrace`, `TestDefaultConfigAnnouncesAtTheStart` (`desktop/internal/cases/scheduler/service_test.go`); `TestPopupExStyle` (`desktop/internal/input/wails/shell_windows_test.go`, окно без активации); `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
 Вручную (также TASK-020, ADR-0007 «Check on Windows by a human»):
 - [ ] Импортировать `test.csv` с занятием через 3–4 мин (§8 «Импорт расписания»), «Применить».
 - [ ] Сразу открыть Блокнот или чат звонка и печатать не переставая.
-- [ ] Ожидаемо: в течение ~15 с справа внизу появляется «Начинается занятие» с названием и временем; текст продолжает идти в Блокнот/чат, главное окно вперёд не выходит.
+- [ ] Ожидаемо: до начала занятия попапа нет; в момент начала (не позже ~15 с) справа внизу появляется «Начинается занятие» с названием и временем и двумя кнопками: «Начать запись» и «Не записывать»; текст продолжает идти в Блокнот/чат, главное окно вперёд не выходит. Отдельного уведомления Windows нет.
 - [ ] То же поверх развёрнутого на весь экран звонка или видео: попап виден поверх.
 - [ ] Щелчок по попапу может забрать фокус — это допустимо (ADR-0007). Щёлкнуть снова в чат: печать идёт в чат.
 - [ ] Ошибка старта при 100%, 125% и 150%: окно вырастает по высоте, текст читается без прокрутки, кнопки видны, фокус не забирает.
-- [ ] Поздний запуск. Попап приходит с 5 мин до начала и до 20 с после начала (`scheduler.DefaultLead`, `lesson.StartLateGrace`) и показывается один раз. Занятие через 7–8 мин, «Применить» и сразу `Quit`, не позже чем через 1 мин (иначе попап придёт за 5 мин до начала и после перезапуска уже не появится). Запустить приложение через ~5 с после начала занятия: попап в течение 20 с от начала.
+- [ ] Поздний запуск. Попап приходит с начала занятия и до 20 с после него (`scheduler.DefaultLead` = 0, `lesson.StartLateGrace`; решение владельца 2026-10-18) и показывается один раз. Занятие через 2–3 мин, «Применить» и `Quit` до начала. Запустить приложение через ~5 с после начала занятия: попап в течение 20 с от начала.
 - [ ] То же с новым занятием (другой `uid`), но запустить через 1 мин после начала (позже 20 с): попапа нет (решение владельца: опоздавшее занятие не предлагается).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-02. Автопредложения записи можно выключить и включить
 
-Автотесты: `TestLessonStartingFollowsThePromptsSetting` (`desktop/internal/cases/recordingprompt/service_test.go`); `TestLessonPromptFollowsTheStoredSetting` (`desktop/tests/recordingprompt_sqlite_test.go`); `TestPromptsTurnedOffDuringLessonStaySilent` (`desktop/internal/cases/scheduler/service_test.go`); `TestOpenCoreStoresSettings` (`desktop/internal/app/core_test.go`).
+Автотесты: `TestLessonStartingFollowsThePromptsSetting` (`desktop/internal/cases/recordingprompt/service_test.go`); `TestLessonPromptFollowsTheStoredSetting`, `TestSkippedLessonPromptOnSQLite` (`desktop/tests/recordingprompt_sqlite_test.go`); `TestPromptsTurnedOffDuringLessonStaySilent` (`desktop/internal/cases/scheduler/service_test.go`); `TestOpenCoreStoresSettings` (`desktop/internal/app/core_test.go`).
 Вручную:
 - [ ] «Настройки»: снять «Автоматически предлагать запись в начале занятия». Занятие через 3 мин: попапа нет.
 - [ ] Включить переключатель, занятие с другим `uid` через 3 мин: попап есть.
-- [ ] Попап занятия, «Через 5 минут», выключить переключатель, подождать 5 мин: попап не возвращается; включить снова — это занятие больше не предлагается (решение владельца).
+- [ ] Попап занятия, «Не записывать»: попап скрылся и больше не появляется для этого занятия (кнопки «Через 5 минут» нет — решение владельца 2026-10-18).
 - [ ] `Quit` и запуск: переключатель в том же положении.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
 ## AC-03. Запись запускается и останавливается из попапа и надёжно хранится
 
-Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`).
+Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`); строка записи и статус цепочки — `TestChainOf`, `TestListRecordingsLessonTitles` (`desktop/internal/cases/activity`), `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
 Вручную (§8, пункт 9):
-- [ ] Видео с речью в Chrome. В попапе выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях и задачах» «Идёт запись», время растёт.
-- [ ] Через 2 мин «Остановить»: «Останавливается» (может мелькнуть), «Сохраняется», затем «Завершена»: запись переходит в группу «Завершённые (N)» под записями в работе.
+- [ ] Видео с речью в Chrome. Попап занятия: выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях и задачах» строка называется по занятию (не по времени), «Идёт запись», время растёт каждую секунду. Запись из трея без занятия называется «Запись <дата, время>».
+- [ ] Через 2 мин «Остановить»: одна строка на запись меняет статус по цепочке: «Сохраняется» → «Расшифровка N %» или «В очереди» с причиной → «Краткое содержание» → «Конспект готов» (или «Ошибка» с действием). Отдельных строк задач распознавания и конспекта нет; законченные записи — в одной группе «Завершённые (N)».
 - [ ] `%LOCALAPPDATA%\la-qa\artifacts\recordings\<id>.wav` играет, слышна речь, длина как у записи.
 - [ ] `Quit` и запуск: запись в группе «Завершённые», «Завершена», файл на месте.
 
@@ -305,7 +305,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Решение владельца (PRD §15, TASK-065): единственное уведомление — попап о начале занятия, без спама.
 Автотесты: `TestRunAnnouncesExactlyOnce`, `TestRestartDuringLessonDoesNotDuplicate` (`desktop/internal/cases/scheduler/service_test.go`); `TestSchedulerAnnouncesInRecordZoneOnceAcrossRestart` (`desktop/tests/scheduler_sqlite_test.go`).
 Вручную:
-- [ ] Попап «Начинается занятие» — один раз на занятие; после «Пропустить» и после перезапуска во время того же занятия не появляется снова.
+- [ ] Попап «Начинается занятие» — один раз на занятие; после «Не записывать» и после перезапуска во время того же занятия не появляется снова.
 - [ ] Тостов Windows о завершении обработки нет (TASK-065): после распознавания, конспекта и поиска ДЗ в углу экрана и в Центре уведомлений от приложения ничего; ход виден в «Записях и задачах». В «Настройках» два переключателя, «Уведомлять о завершении обработки» нет. Автотест `TestNoCompletionToasts` (`desktop/tests/no_completion_toasts_test.go`).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
