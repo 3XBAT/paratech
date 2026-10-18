@@ -128,7 +128,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestGatewayReplayAgainstPostgres`, `TestGatewayConcurrentIdenticalCallsAgainstPostgres` (`hub/tests/gateway_test.go`); `TestQuotaKeyReplayAgainstPostgres` (`hub/tests/quota_test.go`); `TestRetrySendsSameIdempotencyKey` (`desktop/internal/adapters/hubclient/client_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, после перезапуска Hub не списывает снова).
 Вручную:
-- [ ] «Подключения» → карточка «Сервер обработки» → «Лимит обработки» → «Обновить», записать «Осталось».
+- [ ] «Подключения» → карточка «Конспекты и задания» → «Лимит обработки» → «Обновить», записать «Осталось».
 - [ ] Обработать одно занятие (AC-06, с интернетом). Когда у строки записи «Конспект готов», — «Обновить»: остаток уменьшился.
 - [ ] `Quit`, запуск, «Обновить»: остаток тот же.
 - [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующая запись — «В очереди · лимит исчерпан» с кнопкой «Открыть подключения».
@@ -139,7 +139,7 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 Автотесты: `TestGetRemainingAfterSettleAndReleaseOverHTTPAgainstPostgres` (`hub/tests/quota_test.go`); `TestRefreshQuotaResults` (`desktop/internal/cases/connections/hub_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`).
 Вручную (§8 «Подключения», пункты про ключ и «Лимит обработки»):
-- [ ] С адресом и ключом («Подключения» → карточка «Сервер обработки») «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
+- [ ] С адресом и ключом («Подключения» → карточка «Конспекты и задания») «Обновить»: «Остаток обновлён.», «Осталось», «Лимит», «Зарезервировано…», «Обновлено: <время>», пометка «Это копия для показа…».
 - [ ] Hub остановлен, «Обновить»: цифры прежние, «Устарело: …».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -219,9 +219,9 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 Автотесты: `TestSchemaHasNoSecretColumns`, `TestPersistedStructsHaveNoSecretFields` (`desktop/tests/schema_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog`, `TestCredentialNamesArePinned` (`desktop/internal/app/secrets_test.go`); `TestSMTPPasswordNeverReachesTheDatabase` (`desktop/tests/delivery_smtp_test.go`); `TestConnectionsPageKeepsThePasswordSecret` (`desktop/internal/app/connections_test.go`); `TestConnectionsPageKeepsTheHubKeySecret` (`desktop/internal/app/connections_hub_test.go`); `TestAppOptionsLoggerHasNoDebug` (`desktop/internal/input/wails/shell_windows_test.go`); `TestRealCredentialManager` (`desktop/internal/adapters/wincred/wincred_windows_test.go`, настоящий Credential Manager).
 Вручную:
 - [ ] Только одноразовые секреты: отдельный пароль приложения почты и QA-ключ Hub (`hub keys create -label qa-secrets`). После проверки удалить этот пароль приложения в настройках почты и `hub keys revoke -id <id>`.
-- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»: карточки «Почта» и «Сервер обработки»).
+- [ ] Запуск с `--log-level debug` (Подготовка). Ввести этот пароль почты и ключ Hub (§8 «Подключения»: карточки «Почта» и «Конспекты и задания»).
 - [ ] Панель управления → Диспетчер учётных данных → Учётные данные Windows: есть `paratech-<профиль>/mail/smtp-password` и `paratech-<профиль>/hub/api-key` (или `cmdkey /list | findstr paratech-`). У `la-qa` свой профиль, не папки по умолчанию (ADR-0014): 16 знаков из `secrets_profile_id=` в `la-qa.log`.
-- [ ] После перезапуска страницы «Подключения» → «Почта» и «Подключения» → «Сервер обработки» показывают только «Пароль задан» и «Ключ задан».
+- [ ] После перезапуска страницы «Подключения» → «Почта» и «Подключения» → «Конспекты и задания» показывают только «Пароль задан» и «Ключ задан».
 - [ ] `Quit`. В новом окне PowerShell отключить историю, ввести кусок пароля (8+ символов) по запросу `Read-Host` (не в командной строке) — пусто; затем то же для куска ключа:
   ```powershell
   Set-PSReadLineOption -HistorySaveStyle SaveNothing
@@ -294,7 +294,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestAPIKeyLifecycleAgainstPostgres` (`hub/tests/keys_test.go`); `TestAPIKeyProblemsSendNothing` (`desktop/internal/adapters/hubclient/client_test.go`); `TestSecretsReachNeitherTheDatabaseNorTheLog` (`desktop/internal/app/secrets_test.go`, запрос к Hub с ключом в заголовке).
 Вручную (команды Hub — из `paratech/`, README «Hub API keys»):
-- [ ] `hub keys create -label qa-<имя>`, ключ в «Подключения» → карточка «Сервер обработки», «Обновить»: цифры есть.
+- [ ] `hub keys create -label qa-<имя>`, ключ в «Подключения» → карточка «Конспекты и задания», «Обновить»: цифры есть.
 - [ ] `hub keys revoke -id <id>`, «Обновить»: «Hub не принял ключ: он неверный или отозван. Введите действующий ключ.», цифр нет. Новое занятие: «Конспект» — «Ошибка».
 - [ ] Новый ключ, ввести: «Обновить» снова показывает цифры.
 

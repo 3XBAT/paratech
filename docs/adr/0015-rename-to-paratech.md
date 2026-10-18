@@ -28,8 +28,8 @@ Data, secrets and the Google sign-in of existing testers must survive the update
 both names. The app re-points `paratech:` at `os.Executable()` at every start (ADR-0013).
 
 **Calendar:** a stored calendar named exactly «Learning Assistant» is renamed with `calendars.patch` (summary and
-description) on the next sync: same id, no second calendar. A name the user changed stays. A failed patch is ignored and
-retried at the next sync.
+description) on the next sync: same id, no second calendar. A name the user changed stays. A transient failure is retried at
+the next sync; a refusal (403 that is not a rate limit, other 4xx) is not retried until restart.
 
 ## Consequences
 - An upgraded install keeps its `Programs\LearningAssistant` folder; only fresh installs use `Programs\paratech`.
