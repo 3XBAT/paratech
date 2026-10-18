@@ -81,17 +81,31 @@ ORDER BY created_at, id;
 
 -- Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 -- newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
--- active is a JSON array of status names.
+-- active is a JSON array of status names, hidden_types a JSON array of job types left out of both parts (TASK-074),
+-- so hidden finished jobs never use up max_terminal.
 -- name: ListJobActivityIDs :many
 SELECT id FROM jobs
 WHERE id IS NOT NULL
+  AND type NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(hidden_types) AS TEXT)))
   AND (status IN (SELECT value FROM json_each(CAST(sqlc.arg(active) AS TEXT)))
        OR id IN (SELECT id FROM jobs
                  WHERE id IS NOT NULL
+                   AND type NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(hidden_types) AS TEXT)))
                    AND status NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(active) AS TEXT)))
                  ORDER BY created_at DESC, id DESC
                  LIMIT sqlc.arg(max_terminal)))
 ORDER BY created_at DESC, id DESC;
+
+-- The newest job of the type in one of the statuses (a JSON array of status names), by its last change, leaving out
+-- the ids of except_ids (a JSON array) (TASK-074: the last finished calendar sync that really ran).
+-- name: LastJobOfTypeByStatus :one
+SELECT * FROM jobs
+WHERE type = sqlc.arg(type)
+  AND id IS NOT NULL
+  AND status IN (SELECT value FROM json_each(CAST(sqlc.arg(statuses) AS TEXT)))
+  AND id NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(except_ids) AS TEXT)))
+ORDER BY updated_at DESC, id DESC
+LIMIT 1;
 
 -- Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 -- SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.

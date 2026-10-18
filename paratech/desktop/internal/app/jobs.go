@@ -56,6 +56,13 @@ func sttRegistration(h jobrunner.Handler) jobrunner.Registration {
 	}
 }
 
+// hiddenJobTypes are the job types of background service work that involves no user; «Записи и задачи» leaves them
+// out (TASK-074). The calendar sync runs after every trigger and its result is shown in the Google section instead.
+// STT, summaries, homework, drafts and sending belong to a lesson or an action of the user and stay listed.
+func hiddenJobTypes() []job.Type {
+	return []job.Type{schedulesync.CalendarSyncJobType}
+}
+
 // registrations binds every job type to its handler and policies (PRD sections 7.2-7.4, hard rule 7). Without a
 // speech recognition engine the stt type is left out: the runner claims and recovers only registered types, so STT
 // jobs wait QUEUED (their keys stay usable) until the speech component is activated (sttRegistration).

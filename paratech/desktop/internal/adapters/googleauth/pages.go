@@ -4,18 +4,20 @@ package googleauth
 // icons are inline SVG markup, which no fetch directive governs.
 const pagePolicy = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
-// openAppURL is the button that brings the app's main window forward (docs/adr/0013-paratech-url-scheme.md).
+// openAppURL is the link that brings the app's main window forward (docs/adr/0013-paratech-url-scheme.md).
 const openAppURL = "paratech://open"
 
 // The answer pages of the redirect (Russian UI): constant strings that never echo anything of the request. Colours are
 // the tokens of desktop/frontend/src/ui/tokens.css (ADR-0012); the font is named with a system fallback and never
 // loaded, so the page makes no request at all.
 const (
-	pageDone = pageHead + `<title>Paratech: вход выполнен</title></head><body><main class="card">` +
+	// The success page asks the browser to open the app at once; the link is the fallback.
+	pageDone = pageHead + pageOpenApp + `<title>Paratech: вход выполнен</title></head><body><main class="card">` +
 		`<div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>` +
 		`<h1>Вход выполнен</h1>` +
-		`<p>Google ответил. Можно закрыть эту вкладку и вернуться в приложение — результат входа показан там.</p>` +
-		pageButton + `</main></body></html>`
+		`<p>Google ответил. Браузер предложит открыть paratech. ` +
+		`Можно закрыть эту вкладку и вернуться в приложение — результат входа показан там.</p>` +
+		`<a class="lnk" href="` + openAppURL + `">Открыть paratech, если окно не появилось</a></main></body></html>`
 
 	pageDenied = pageHead + `<title>Paratech: доступ не разрешён</title></head><body><main class="card deny">` +
 		`<div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></div>` +
@@ -35,7 +37,9 @@ const (
 // Shared parts of the pages.
 const (
 	pageButton = `<a class="btn" href="` + openAppURL + `">Открыть Paratech</a>`
-	pageClose  = `<p class="m">Можно закрыть эту вкладку и вернуться в приложение.</p>`
+	// Meta refresh needs no script, and the CSP fetch directives do not govern it.
+	pageOpenApp = `<meta http-equiv="refresh" content="0;url=` + openAppURL + `">`
+	pageClose   = `<p class="m">Можно закрыть эту вкладку и вернуться в приложение.</p>`
 
 	pageHead = `<!doctype html><html lang="ru"><head><meta charset="utf-8">` +
 		`<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">` +
@@ -63,5 +67,6 @@ const (
 		`border-radius:8px;background:var(--prim);color:var(--on-prim);font-weight:500;text-decoration:none}` +
 		`.btn:hover{opacity:.9}.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}` +
 		`.m{margin:16px 0 0;font-size:12.5px}` +
+		`.lnk{font-size:12.5px;color:var(--muted)}.lnk:focus-visible{outline:2px solid var(--accent);outline-offset:2px}` +
 		`</style>`
 )

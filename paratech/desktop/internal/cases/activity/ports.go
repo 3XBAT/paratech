@@ -21,7 +21,7 @@ type RecordingHistory interface {
 type JobHistory interface {
 	// ListActivity returns every non-terminal job (so "Run now" of a waiting job stays reachable, AC-22) plus at most
 	// maxTerminal of the newest terminal ones, newest first by creation time, then id; maxTerminal below 1 adds no
-	// terminal job. Rows that cannot be read are left out and their ids returned in unreadable; only other failures
-	// are errors.
-	ListActivity(ctx context.Context, maxTerminal int) (jobs []*job.Job, unreadable []shared.JobID, err error)
+	// terminal job. Jobs of the hidden types are left out of both parts and do not count against maxTerminal. Rows
+	// that cannot be read are left out and their ids returned in unreadable; only other failures are errors.
+	ListActivity(ctx context.Context, maxTerminal int, hidden []job.Type) (jobs []*job.Job, unreadable []shared.JobID, err error)
 }

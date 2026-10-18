@@ -91,6 +91,7 @@ const (
 	OutcomeOK            SyncOutcome = "ok"
 	OutcomeNotSignedIn   SyncOutcome = "notSignedIn"
 	OutcomeSignInExpired SyncOutcome = "signInExpired"
+	OutcomeNoAccess      SyncOutcome = "noAccess"
 	OutcomeFailed        SyncOutcome = "failed"
 )
 
@@ -112,4 +113,35 @@ type CalendarStatus struct {
 	// LastOutcome and LastRunAt describe the last run that ended in this process.
 	LastOutcome SyncOutcome
 	LastRunAt   time.Time
+
+	// LastRun is the last sync job that finished, of this process or an earlier one; zero if none did. A job that
+	// completed at once because a run was in progress is not a run.
+	LastRun LastRun
+
+	// Attention is what the user must do for the sync to go on; AttentionNone if nothing.
+	Attention Attention
+}
+
+// Attention is an action the calendar sync needs from the user.
+type Attention string
+
+// Attentions of Status.
+const (
+	AttentionNone Attention = ""
+	// AttentionSignIn: signed out after Google stopped accepting the sign-in; sign in again.
+	AttentionSignIn Attention = "signIn"
+	// AttentionNoAccess: signed in, but Google refused the calendar; sign in again and allow the calendar.
+	AttentionNoAccess Attention = "noAccess"
+)
+
+// LastRun is a finished sync job as the Google section shows it (TASK-074).
+type LastRun struct {
+	// At is when the job finished (its last change).
+	At time.Time
+	// Attempts the job took.
+	Attempts int
+	// Outcome is how the run ended: the outcome this process recorded for the job, otherwise what the job record
+	// tells: OutcomeOK for a COMPLETED job, OutcomeFailed for a FAILED or CANCELLED one. A job that ended without a
+	// sign-in completes too, so a COMPLETED record read while signed out is OutcomeNone: not claimed as a success.
+	Outcome SyncOutcome
 }

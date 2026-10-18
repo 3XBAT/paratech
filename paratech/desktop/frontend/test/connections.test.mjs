@@ -426,6 +426,42 @@ test("the Google card reads the client, the account and a waiting sign-in", () =
   assert.deepEqual(chip(appleCardStatus), ["neutral", "Инструкция"]);
 });
 
+test("the Google card shows what Go's calendar attention asks of the user", () => {
+  const ready = { client: "set", account: "signedIn", signingIn: false };
+  const out = { ...ready, account: "signedOut" };
+  const cal = (attention, outcome = "") => ({
+    signedIn: true, pending: 0, pendingMore: false, lastSyncedAt: "", state: "idle", lastOutcome: outcome, attention,
+    message: "m", lastRunAt: "2026-10-16T06:31:00Z", lastRunAttempts: 1, lastRunOutcome: outcome, lastRunText: "",
+  });
+  const g = (state, calendar) => chip(googleCardStatus({ state, loadFailed: false, calendar }));
+  for (const c of [null, undefined, cal("")]) {
+    assert.deepEqual(g(ready, c), ["ok", "Подключено"]);
+    assert.deepEqual(g(out, c), ["wait", "Вход не выполнен"]);
+  }
+  // Go decides; the card does not need signedIn for "signIn" (it comes while signed out).
+  for (const state of [ready, out]) {
+    assert.deepEqual(g(state, cal("signIn")), ["fail", "Нужен вход"], state.account);
+    assert.deepEqual(g(state, cal("noAccess")), ["fail", "Нет доступа"], state.account);
+  }
+  // The outcomes alone do not turn the card red: that rule is Go's (ARCH-44).
+  for (const o of ["ok", "notSignedIn", "signInExpired", "noAccess", "failed"]) {
+    assert.deepEqual(g(ready, cal("", o)), ["ok", "Подключено"], o);
+    assert.deepEqual(g(out, cal("", o)), ["wait", "Вход не выполнен"], o);
+  }
+  // A sign-in waiting for the browser still wins, and so do a missing or broken client and an unknown account.
+  for (const a of ["signIn", "noAccess"]) {
+    assert.deepEqual(g({ ...out, signingIn: true }, cal(a)), ["run", "Ожидание входа"], a);
+    assert.deepEqual(g({ ...ready, signingIn: true }, cal(a)), ["run", "Ожидание входа"], a);
+    assert.deepEqual(g({ ...out, client: "unset" }, cal(a)), ["wait", "Не настроено"], a);
+    assert.deepEqual(g({ ...ready, client: "unavailable" }, cal(a)), ["fail", "Недоступно"], a);
+    assert.deepEqual(g({ ...ready, account: "unsupported" }, cal(a)), ["fail", "Недоступно"], a);
+    assert.deepEqual(g({ ...ready, account: "unavailable" }, cal(a)), ["fail", "Не удалось проверить"], a);
+  }
+  for (const s of [g(ready, cal("noAccess")), g(out, cal("signIn"))]) {
+    assert.ok(s[1].length <= 20, s[1]);
+  }
+});
+
 test("every card chip pairs its colour with a word and an icon where it warns", () => {
   const all = [
     appleCardStatus,

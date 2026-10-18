@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,11 +34,19 @@ type fakeJobs struct {
 	unreadable []shared.JobID
 	err        error
 	limit      int
+	hidden     []job.Type
 }
 
-func (f *fakeJobs) ListActivity(_ context.Context, limit int) ([]*job.Job, []shared.JobID, error) {
-	f.limit = limit
-	return f.list, f.unreadable, f.err
+// ListActivity leaves out the hidden types as the store does.
+func (f *fakeJobs) ListActivity(_ context.Context, limit int, hidden []job.Type) ([]*job.Job, []shared.JobID, error) {
+	f.limit, f.hidden = limit, hidden
+	var out []*job.Job
+	for _, j := range f.list {
+		if !slices.Contains(hidden, j.Type()) {
+			out = append(out, j)
+		}
+	}
+	return out, f.unreadable, f.err
 }
 
 func must(t *testing.T, err error) {
@@ -241,5 +250,60 @@ func TestNilLoggerDiscards(t *testing.T) {
 	}
 	if _, err := s.ListJobs(context.Background()); err != nil {
 		t.Error(err)
+	}
+}
+
+// The hidden service types reach the store, so the store leaves them out before its bound; jobs of the user stay.
+func TestListJobsLeavesOutHiddenTypes(t *testing.T) {
+	typed := func(id string, typ job.Type) *job.Job {
+		t.Helper()
+		j, err := job.New(job.Spec{ID: shared.JobID(id), Type: typ, Key: string(typ) + ":" + id, MaxAttempts: 3}, t0)
+		must(t, err)
+		return j
+	}
+	all := []*job.Job{
+		typed("sync", "calendar_sync"), typed("stt", "stt"), typed("sum", "summarize"), typed("hw", "extract_homework"),
+		typed("draft", "homework_draft"), typed("send", "send_email"),
+	}
+	tests := []struct {
+		name   string
+		hidden []job.Type
+		want   []shared.JobID
+	}{
+		{name: "nothing hidden", want: []shared.JobID{"sync", "stt", "sum", "hw", "draft", "send"}},
+		{name: "calendar sync hidden", hidden: []job.Type{"calendar_sync"}, want: []shared.JobID{"stt", "sum", "hw", "draft", "send"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeJobs{list: all}
+			s, err := New(&fakeRecordings{}, repo, nil, tt.hidden...)
+			must(t, err)
+			got, err := s.ListJobs(context.Background())
+			must(t, err)
+			if !slices.Equal(repo.hidden, tt.hidden) {
+				t.Errorf("hidden passed to the store = %v, want %v", repo.hidden, tt.hidden)
+			}
+			ids := make([]shared.JobID, 0, len(got))
+			for _, j := range got {
+				ids = append(ids, j.ID)
+			}
+			if !slices.Equal(ids, tt.want) {
+				t.Errorf("ListJobs = %v, want %v", ids, tt.want)
+			}
+		})
+	}
+}
+
+// The caller's slice is copied: changing it later does not change what the screen hides.
+func TestNewCopiesHiddenTypes(t *testing.T) {
+	hidden := []job.Type{"calendar_sync"}
+	repo := &fakeJobs{}
+	s, err := New(&fakeRecordings{}, repo, nil, hidden...)
+	must(t, err)
+	hidden[0] = "stt"
+	_, err = s.ListJobs(context.Background())
+	must(t, err)
+	if !slices.Equal(repo.hidden, []job.Type{"calendar_sync"}) {
+		t.Fatalf("hidden = %v, want [calendar_sync]", repo.hidden)
 	}
 }

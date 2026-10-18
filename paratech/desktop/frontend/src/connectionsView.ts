@@ -9,6 +9,7 @@ import type {
   MailSettingsInput,
   SecretStatus,
 } from "./bindings/connections";
+import type { CalendarSyncState } from "./bindings/calendar";
 import type { GoogleState } from "./bindings/google";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
@@ -344,8 +345,15 @@ export function mailCardStatus(s: { saved: Connections | null; loadFailed: boole
   return status("neutral", "Настроено");
 }
 
-/** The card of Google from GoogleStatus: the client, the account and a sign-in waiting for the browser. */
-export function googleCardStatus(s: { state: GoogleState | null; loadFailed: boolean }): CardStatus {
+/**
+ * The card of Google from GoogleStatus (the client, the account and a sign-in waiting for the browser) and the
+ * calendar attention Go reports: what only the user can fix turns the card red.
+ */
+export function googleCardStatus(s: {
+  state: GoogleState | null;
+  loadFailed: boolean;
+  calendar?: CalendarSyncState | null;
+}): CardStatus {
   const g = s.state;
   if (g === null) {
     return s.loadFailed ? status("fail", "Не удалось проверить") : loading;
@@ -358,6 +366,15 @@ export function googleCardStatus(s: { state: GoogleState | null; loadFailed: boo
   }
   if (g.client !== "set") {
     return status("fail", "Недоступно");
+  }
+  if (g.account === "signedIn" || g.account === "signedOut") {
+    // "signIn" comes while signed out, "noAccess" while signed in: Go decides, the card only names it.
+    switch (s.calendar?.attention) {
+      case "signIn":
+        return status("fail", "Нужен вход");
+      case "noAccess":
+        return status("fail", "Нет доступа");
+    }
   }
   switch (g.account) {
     case "signedIn":

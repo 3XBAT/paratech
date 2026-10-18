@@ -49,6 +49,15 @@ func (c *core) wireCalendar(e env, jobs *sqlite.JobRepository, lessons *sqlite.L
 	return nil
 }
 
+// calendarSignedIn runs after a successful Google sign-in: the outcome of the earlier run (an expired sign-in, no
+// access) no longer asks the user anything, and a sync is requested.
+func (c *core) calendarSignedIn(ctx context.Context, log *slog.Logger) {
+	if c.calendarSync != nil {
+		c.calendarSync.ForgetOutcome()
+	}
+	c.requestCalendarSync(ctx, log, "sign-in")
+}
+
 // requestCalendarSync asks for a calendar sync after the trigger why; without a sign-in there is nothing to do. A
 // failure is only logged: the lessons stay pending and the next trigger picks them up.
 func (c *core) requestCalendarSync(ctx context.Context, log *slog.Logger, why string) {
@@ -118,14 +127,17 @@ func lessonWriteError(err error) error {
 	return err
 }
 
-// lessonCalendarError adds the sentinel of the use case to the adapter's sign-in classes; the adapter error stays
-// wrapped, so its retry class is kept.
+// lessonCalendarError adds the sentinel of the use case to the adapter's sign-in and access classes; the adapter
+// error stays wrapped, so its retry class is kept.
 func lessonCalendarError(err error) error {
 	switch {
 	case errors.Is(err, googlecal.ErrReauthRequired):
 		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarSignInExpired, err)
 	case errors.Is(err, googlecal.ErrNotSignedIn):
 		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarNotConnected, err)
+	case errors.Is(err, googlecal.ErrForbidden), errors.Is(err, googlecal.ErrUnauthorized):
+		// Not ErrAuthRejected: it also means a bad client or a broken token answer, where signing in again does not help.
+		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarNoAccess, err)
 	}
 	return err
 }

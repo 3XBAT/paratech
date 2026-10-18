@@ -158,6 +158,24 @@ func TestRegisteredTypes(t *testing.T) {
 	}
 }
 
+// Every registered type is classified for «Записи и задачи» (TASK-074): only the calendar sync, which involves no
+// user, is hidden. A new job type must be added here on purpose.
+func TestHiddenJobTypes(t *testing.T) {
+	shown := []job.Type{
+		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
+		homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+	}
+	hidden := hiddenJobTypes()
+	if !slices.Equal(hidden, []job.Type{schedulesync.CalendarSyncJobType}) {
+		t.Fatalf("hidden types %v, want only %s", hidden, schedulesync.CalendarSyncJobType)
+	}
+	for _, r := range registrations(handlersForTest()) {
+		if slices.Contains(hidden, r.Type) == slices.Contains(shown, r.Type) {
+			t.Errorf("%s is not classified as either shown or hidden", r.Type)
+		}
+	}
+}
+
 // The wired runner has every type registered.
 func TestWiredCoreRegistersEveryType(t *testing.T) {
 	a, _ := newTestAppWith(t, t.TempDir())

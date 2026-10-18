@@ -43,26 +43,35 @@ func TestClassifyGoogleAuth(t *testing.T) {
 	}
 }
 
-// The lesson bridge adds the use case's sign-in sentinels and keeps the adapter error with its class.
+// The lesson bridge adds the use case's sign-in and access sentinels and keeps the adapter error with its class.
 func TestLessonCalendarErrorMapping(t *testing.T) {
 	notSignedIn := backoff.Permanent(fmt.Errorf("op: %w", googlecal.ErrNotSignedIn))
 	expired := backoff.Permanent(fmt.Errorf("op: %w: %w", googlecal.ErrReauthRequired, googlecal.ErrNotSignedIn))
 	transient := backoff.Transient(fmt.Errorf("op: %w", googlecal.ErrUnavailable))
+	forbidden := backoff.Permanent(fmt.Errorf("op: %w", googlecal.ErrForbidden))
+	unauthorized := backoff.Permanent(fmt.Errorf("op: %w", googlecal.ErrUnauthorized))
+	authRejected := backoff.Permanent(fmt.Errorf("op: %w", googlecal.ErrAuthRejected))
+	rateLimited := backoff.Transient(fmt.Errorf("op: %w", googlecal.ErrRateLimited))
 	tests := []struct {
-		name                  string
-		from                  error
-		notConnected, expired bool
+		name                            string
+		from                            error
+		notConnected, expired, noAccess bool
 	}{
-		{"none", nil, false, false},
-		{"not signed in", notSignedIn, true, false},
-		{"sign in again", expired, true, true},
-		{"unavailable", transient, false, false},
+		{"none", nil, false, false, false},
+		{"not signed in", notSignedIn, true, false, false},
+		{"sign in again", expired, true, true, false},
+		{"unavailable", transient, false, false, false},
+		{"forbidden", forbidden, false, false, true},
+		{"token rejected", unauthorized, false, false, true},
+		{"authorization refused", authRejected, false, false, false},
+		{"rate limited", rateLimited, false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := lessonCalendarError(tt.from)
 			if errors.Is(err, schedulesync.ErrCalendarNotConnected) != tt.notConnected ||
-				errors.Is(err, schedulesync.ErrCalendarSignInExpired) != tt.expired || !errors.Is(err, tt.from) {
+				errors.Is(err, schedulesync.ErrCalendarSignInExpired) != tt.expired ||
+				errors.Is(err, schedulesync.ErrCalendarNoAccess) != tt.noAccess || !errors.Is(err, tt.from) {
 				t.Fatalf("lessonCalendarError = %v", err)
 			}
 			if tt.from != nil && backoff.Classify(err) != backoff.Classify(tt.from) {
@@ -73,33 +82,35 @@ func TestLessonCalendarErrorMapping(t *testing.T) {
 }
 
 // The write of one lesson gets schedulesync.ErrLessonRejected for the reasons of that event only, keeping its class;
-// failures of the calendar, the sign-in or the network do not.
+// failures of the calendar, the sign-in or the network do not. A refused access is of the calendar, never of a lesson.
 func TestLessonWriteErrorMapping(t *testing.T) {
 	tests := []struct {
-		reason   error
-		class    func(error) error
-		rejected bool
+		reason             error
+		class              func(error) error
+		rejected, noAccess bool
 	}{
-		{googlecal.ErrInvalidRequest, backoff.Permanent, true},
-		{googlecal.ErrRejected, backoff.Permanent, true},
-		{googlecal.ErrConflict, backoff.Transient, true},
-		{googlecal.ErrNotRestored, backoff.Transient, true},
-		{googlecal.ErrForbidden, backoff.Permanent, false},
-		{googlecal.ErrNotFound, backoff.Permanent, false},
-		{googlecal.ErrUnauthorized, backoff.Permanent, false},
-		{googlecal.ErrForeignCalendar, backoff.Transient, false},
-		{googlecal.ErrRateLimited, backoff.Transient, false},
-		{googlecal.ErrUnavailable, backoff.Transient, false},
-		{googlecal.ErrNetwork, backoff.Transient, false},
-		{googlecal.ErrCredentials, backoff.Transient, false},
-		{googlecal.ErrNotSignedIn, backoff.Permanent, false},
+		{googlecal.ErrInvalidRequest, backoff.Permanent, true, false},
+		{googlecal.ErrRejected, backoff.Permanent, true, false},
+		{googlecal.ErrConflict, backoff.Transient, true, false},
+		{googlecal.ErrNotRestored, backoff.Transient, true, false},
+		{googlecal.ErrForbidden, backoff.Permanent, false, true},
+		{googlecal.ErrNotFound, backoff.Permanent, false, false},
+		{googlecal.ErrUnauthorized, backoff.Permanent, false, true},
+		{googlecal.ErrAuthRejected, backoff.Permanent, false, false},
+		{googlecal.ErrForeignCalendar, backoff.Transient, false, false},
+		{googlecal.ErrRateLimited, backoff.Transient, false, false},
+		{googlecal.ErrUnavailable, backoff.Transient, false, false},
+		{googlecal.ErrNetwork, backoff.Transient, false, false},
+		{googlecal.ErrCredentials, backoff.Transient, false, false},
+		{googlecal.ErrNotSignedIn, backoff.Permanent, false, false},
 	}
 	for _, tt := range tests {
 		from := tt.class(fmt.Errorf("googlecal: upsert lesson: %w", tt.reason))
 		err := lessonWriteError(from)
-		if errors.Is(err, schedulesync.ErrLessonRejected) != tt.rejected || !errors.Is(err, from) ||
+		if errors.Is(err, schedulesync.ErrLessonRejected) != tt.rejected ||
+			errors.Is(err, schedulesync.ErrCalendarNoAccess) != tt.noAccess || !errors.Is(err, from) ||
 			backoff.Classify(err) != backoff.Classify(from) {
-			t.Errorf("lessonWriteError(%v) = %v, want rejected %v", tt.reason, err, tt.rejected)
+			t.Errorf("lessonWriteError(%v) = %v, want rejected %v, no access %v", tt.reason, err, tt.rejected, tt.noAccess)
 		}
 	}
 	if err := lessonWriteError(nil); err != nil {
@@ -258,6 +269,53 @@ func TestWiredCalendarSync(t *testing.T) {
 	}
 	if got := cal.Calendars(); len(got) != 1 || got[0].ID != cals[0].ID || len(cal.Events(cals[0].ID)) != 2 {
 		t.Fatalf("calendars after the second sign-in = %+v", got)
+	}
+}
+
+// Google refusing the calendar asks the user to sign in again and allow it; the next sign-in clears that at once,
+// before its own sync ends, and that sync's success replaces the last run (TASK-074).
+func TestWiredCalendarNoAccessClearedBySignIn(t *testing.T) {
+	ctx := context.Background()
+	g := testenv.StartFakeGoogleOAuth(t)
+	cal := testenv.StartFakeGoogleCalendar(t)
+	cal.AcceptTokens(g.IsLiveAccessToken)
+	a, _ := newTestAppWith(t, t.TempDir())
+	useFakeGoogle(a, g)
+	a.env.googleCalendar = []googlecal.Option{googlecal.WithBaseURL(cal.BaseURL())}
+	core := startCore(t, a)
+	page := wails.NewGoogleService(core.Google, a.log)
+	calPage := wails.NewGoogleCalendarService(core.Calendar, a.log)
+
+	importCSV(t, core, csvHeader+"Math,2026-10-20,09:00,10:30,Europe/Moscow,m1\n")
+	if got, _ := page.SetGoogleClient(ctx, testenv.FakeGoogleClientID, testenv.FakeGoogleClientSecret); !got.OK {
+		t.Fatalf("SetGoogleClient = %+v", got)
+	}
+	cal.FailNext(testenv.FaultForbidden, "")
+	if got, _ := page.GoogleSignIn(ctx); !got.OK {
+		t.Fatalf("GoogleSignIn = %+v", got)
+	}
+	if st := waitCalendarJobs(t, a, 1); st[0] != job.StatusFailed {
+		t.Fatalf("sync after the refused calendar: %v", st)
+	}
+	st, _ := calPage.GoogleCalendarStatus(ctx)
+	if st.Attention != "noAccess" || st.LastRunOutcome != "noAccess" || st.Message != "Нет доступа к Google Календарю: войдите снова и разрешите доступ к календарю." {
+		t.Fatalf("status after the refused calendar = %+v", st)
+	}
+
+	if got, _ := page.GoogleSignOut(ctx); !got.OK {
+		t.Fatalf("GoogleSignOut = %+v", got)
+	}
+	if got, _ := page.GoogleSignIn(ctx); !got.OK {
+		t.Fatalf("GoogleSignIn again = %+v", got)
+	}
+	if st, _ := calPage.GoogleCalendarStatus(ctx); st.Attention != "" {
+		t.Fatalf("status right after the sign-in = %+v", st)
+	}
+	if st := waitCalendarJobs(t, a, 2); st[1] != job.StatusCompleted {
+		t.Fatalf("sync after the sign-in: %v", st)
+	}
+	if st, _ := calPage.GoogleCalendarStatus(ctx); st.Attention != "" || st.LastRunOutcome != "ok" || st.Pending != 0 {
+		t.Fatalf("status after the sync = %+v", st)
 	}
 }
 

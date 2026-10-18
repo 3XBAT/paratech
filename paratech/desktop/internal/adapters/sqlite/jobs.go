@@ -203,16 +203,22 @@ func (r *JobRepository) ListByStatus(ctx context.Context, statuses ...job.Status
 
 // ListActivity lists the jobs of the jobs screen: every job in a non-terminal status (so a waiting job never falls
 // off the list) plus the newest maxTerminal others, newest first by creation time, then id; a maxTerminal below 1
-// adds no terminal job. A row that cannot be read or restored does not fail the listing: it is left out and its id
+// adds no terminal job. Jobs of the hidden types are left out of both parts in the query, so they never take the
+// place of a listed one. A row that cannot be read or restored does not fail the listing: it is left out and its id
 // goes to unreadable. A job that disappeared between the two reads is skipped. Other database errors fail the call.
-func (r *JobRepository) ListActivity(ctx context.Context, maxTerminal int) ([]*job.Job, []shared.JobID, error) {
+func (r *JobRepository) ListActivity(ctx context.Context, maxTerminal int, hidden []job.Type) ([]*job.Job, []shared.JobID, error) {
 	active, err := json.Marshal(jobStatusNames(job.ActiveStatuses()))
+	if err != nil {
+		return nil, nil, err
+	}
+	hiddenTypes, err := jobTypeList(hidden)
 	if err != nil {
 		return nil, nil, err
 	}
 	q := r.db.Queries(ctx)
 	ids, err := q.ListJobActivityIDs(ctx, sqlcgen.ListJobActivityIDsParams{
-		Active: string(active), MaxTerminal: int64(max(maxTerminal, 0)), // SQLite reads a negative LIMIT as no limit
+		HiddenTypes: hiddenTypes, Active: string(active),
+		MaxTerminal: int64(max(maxTerminal, 0)), // SQLite reads a negative LIMIT as no limit
 	})
 	if err != nil {
 		return nil, nil, MapError(ctx, err)
@@ -238,6 +244,43 @@ func (r *JobRepository) ListActivity(ctx context.Context, maxTerminal int) ([]*j
 		jobs = append(jobs, j)
 	}
 	return jobs, unreadable, nil
+}
+
+// LastFinished returns the job of type typ that finished last (COMPLETED, FAILED or CANCELLED), by its last change,
+// leaving out the jobs of except; found is false when none did.
+func (r *JobRepository) LastFinished(ctx context.Context, typ job.Type, except []shared.JobID) (*job.Job, bool, error) {
+	var terminal []job.Status
+	for _, s := range job.Statuses() {
+		if s.IsTerminal() {
+			terminal = append(terminal, s)
+		}
+	}
+	statuses, err := json.Marshal(jobStatusNames(terminal))
+	if err != nil {
+		return nil, false, err
+	}
+	exceptIDs := make([]string, len(except))
+	for i, id := range except {
+		exceptIDs[i] = string(id)
+	}
+	exceptJSON, err := json.Marshal(exceptIDs)
+	if err != nil {
+		return nil, false, err
+	}
+	row, err := r.db.Queries(ctx).LastJobOfTypeByStatus(ctx, sqlcgen.LastJobOfTypeByStatusParams{
+		Type: string(typ), Statuses: string(statuses), ExceptIds: string(exceptJSON),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, MapError(ctx, err)
+	}
+	j, err := jobFromRow(row)
+	if err != nil {
+		return nil, false, err
+	}
+	return j, true, nil
 }
 
 // ListByStatusTolerant is ListByStatus for startup recovery: a row that cannot be read or restored does not fail the

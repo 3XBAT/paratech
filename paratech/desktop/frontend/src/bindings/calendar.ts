@@ -6,8 +6,11 @@ import type { CallByName } from "./settings";
 /** The sync job as the page reads it; "unavailable" means the state could not be read. */
 export type CalendarSyncJobState = "idle" | "queued" | "running" | "retrying" | "waitingForNetwork" | "unavailable";
 
-/** The last run since the app started; "" if none. */
-export type CalendarSyncOutcome = "" | "ok" | "notSignedIn" | "signInExpired" | "failed";
+/** How a sync run ended; "" if none (or, for the last finished job, the record cannot tell). */
+export type CalendarSyncOutcome = "" | "ok" | "notSignedIn" | "signInExpired" | "noAccess" | "failed";
+
+/** What the user must do, decided in Go: nothing, sign in again, or sign in again and allow the calendar. */
+export type CalendarAttention = "" | "signIn" | "noAccess";
 
 /** The sync state as the Go binding returns it. */
 export interface CalendarSyncState {
@@ -18,9 +21,17 @@ export interface CalendarSyncState {
   /** RFC 3339 UTC of the last lesson written; "" if none. */
   lastSyncedAt: string;
   state: CalendarSyncJobState;
+  /** The last run since the app started. */
   lastOutcome: CalendarSyncOutcome;
+  attention: CalendarAttention;
   /** One fixed line from Go that sums the state up. */
   message: string;
+  /** The last finished sync job, also of an earlier start: its end in RFC 3339 UTC, "" if none finished. */
+  lastRunAt: string;
+  lastRunAttempts: number;
+  lastRunOutcome: CalendarSyncOutcome;
+  /** A fixed line from Go with the result of that job; "" if none. */
+  lastRunText: string;
 }
 
 /** The answer to «Синхронизировать». */
@@ -40,7 +51,9 @@ export const jobStates: readonly CalendarSyncJobState[] = [
   "idle", "queued", "running", "retrying", "waitingForNetwork", "unavailable",
 ];
 
-export const outcomes: readonly CalendarSyncOutcome[] = ["", "ok", "notSignedIn", "signInExpired", "failed"];
+export const outcomes: readonly CalendarSyncOutcome[] = ["", "ok", "notSignedIn", "signInExpired", "noAccess", "failed"];
+
+export const attentions: readonly CalendarAttention[] = ["", "signIn", "noAccess"];
 
 function record(raw: unknown, what: string): Record<string, unknown> {
   if (typeof raw !== "object" || raw === null) {
@@ -76,8 +89,17 @@ export function parseCalendarSyncState(raw: unknown): CalendarSyncState {
   if (!jobStates.includes(r.state as CalendarSyncJobState)) {
     throw new Error(`${w}: state is not a sync state`);
   }
-  if (!outcomes.includes(r.lastOutcome as CalendarSyncOutcome)) {
-    throw new Error(`${w}: lastOutcome is not a sync outcome`);
+  for (const key of ["lastOutcome", "lastRunOutcome"]) {
+    if (!outcomes.includes(r[key] as CalendarSyncOutcome)) {
+      throw new Error(`${w}: ${key} is not a sync outcome`);
+    }
+  }
+  if (!attentions.includes(r.attention as CalendarAttention)) {
+    throw new Error(`${w}: attention is not a known attention`);
+  }
+  const attempts = r.lastRunAttempts;
+  if (typeof attempts !== "number" || !Number.isInteger(attempts) || attempts < 0) {
+    throw new Error(`${w}: lastRunAttempts is not a count`);
   }
   return {
     signedIn: bool(r, "signedIn", w),
@@ -86,7 +108,12 @@ export function parseCalendarSyncState(raw: unknown): CalendarSyncState {
     lastSyncedAt: str(r, "lastSyncedAt", w),
     state: r.state as CalendarSyncJobState,
     lastOutcome: r.lastOutcome as CalendarSyncOutcome,
+    attention: r.attention as CalendarAttention,
     message: str(r, "message", w),
+    lastRunAt: str(r, "lastRunAt", w),
+    lastRunAttempts: attempts,
+    lastRunOutcome: r.lastRunOutcome as CalendarSyncOutcome,
+    lastRunText: str(r, "lastRunText", w),
   };
 }
 
