@@ -20,6 +20,7 @@ A web page can only do that through a URL scheme registered for the app.
   ignores the second launch's data and only shows and focuses the main window. Not running: the app starts normally.
 - The only link the app uses is `paratech://open`; no path, query or action is ever read.
 - After a successful sign-in the main window also comes forward on its own (`GoogleService`).
+- The success page opens `paratech://open` by itself via `<meta http-equiv="refresh">`, with a small fallback link (TASK-073); the denied and failed pages keep the button.
 
 ## Consequences
 - Any web page or local program can open `paratech:` links; the worst outcome is the main window coming forward.
