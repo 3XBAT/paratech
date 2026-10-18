@@ -35,13 +35,17 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 
 	stt := newest(jobs, transcription.STTJobType)
 	summary, homework := newest(jobs, values.SummarizeJobType), newest(jobs, values.ExtractHomeworkJobType)
-	if post := later(summary, homework); post != nil && (stt == nil || !stt.CreatedAt().After(post.CreatedAt())) {
-		// The transcript exists: its post-processing decides, unless a newer transcription runs.
+	if stt != nil {
+		// Post-processing created before the newest transcription belongs to an older transcript.
+		summary, homework = since(summary, stt), since(homework, stt)
+	}
+	if summary != nil || homework != nil {
+		// The transcript exists: its post-processing decides.
 		return postChain(summary, homework)
 	}
 	if stt == nil {
-		// A completed recording gets its STT job at once unless no speech model is installed.
-		return Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueNoModel, Action: ActionOpenModels}
+		// The STT job is enqueued right after the recording completes, or once a speech model is installed.
+		return Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine}
 	}
 	switch {
 	case stt.Status() == job.StatusRunning:
@@ -112,15 +116,12 @@ func failedJob(j *job.Job) bool {
 	return j.Status() == job.StatusFailed || j.Status() == job.StatusCancelled
 }
 
-// later returns the later created of two jobs, either may be nil.
-func later(a, b *job.Job) *job.Job {
-	switch {
-	case a == nil:
-		return b
-	case b == nil || !b.CreatedAt().After(a.CreatedAt()):
-		return a
+// since returns j unless it was created before ref; nil stays nil.
+func since(j, ref *job.Job) *job.Job {
+	if j == nil || j.CreatedAt().Before(ref.CreatedAt()) {
+		return nil
 	}
-	return b
+	return j
 }
 
 // newest returns the latest created job of the type, or nil.

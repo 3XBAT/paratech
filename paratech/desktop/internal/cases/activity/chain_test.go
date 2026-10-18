@@ -116,7 +116,7 @@ func TestChainOf(t *testing.T) {
 		},
 		{
 			name: "completed without a transcription job", rec: recording.StatusCompleted,
-			want: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueNoModel, Action: ActionOpenModels},
+			want: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine},
 		},
 		{
 			name: "transcription queued", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusQueued)},
@@ -209,6 +209,23 @@ func TestChainOf(t *testing.T) {
 				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusRunning) },
 			},
 			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42},
+		},
+		{
+			name: "a newer transcription completed, its post-processing not enqueued yet", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), in("a", sum, job.StatusFailed), in("h", hw, job.StatusFailed),
+				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusCompleted) },
+			},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueInLine},
+		},
+		{
+			name: "a new summary and the homework of the older transcript", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), in("h", hw, job.StatusFailed),
+				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusCompleted) },
+				func(t *testing.T) *job.Job { return jobIn(t, "a2", sum, 2*time.Hour, job.StatusCompleted) },
+			},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueInLine},
 		},
 		{
 			name: "other job types do not count", rec: recording.StatusCompleted,

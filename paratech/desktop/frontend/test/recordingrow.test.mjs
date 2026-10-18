@@ -27,7 +27,7 @@ const { renderToStaticMarkup } = server;
 
 // Mirror the chain codes of internal/cases/activity/types.go.
 const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"];
-const reasons = ["inLine", "retry", "power", "network", "quota", "noModel"];
+const reasons = ["inLine", "retry", "power", "network", "quota"];
 const errorCodes = ["recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"];
 const actions = ["runNow", "openModels", "openConnections", "checkSound"];
 

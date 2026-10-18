@@ -73,7 +73,6 @@ const (
 	QueuePower   QueueReason = "power"   // waits for AC power (PRD section 7.4)
 	QueueNetwork QueueReason = "network" // waits for the network
 	QueueQuota   QueueReason = "quota"   // waits for the Hub quota
-	QueueNoModel QueueReason = "noModel" // no speech model is installed
 )
 
 // ErrorCode says what failed.

@@ -8,7 +8,7 @@ export type ChainStage = "recording" | "saving" | "queued" | "transcribing" | "s
 /** The step a queued or failed chain stopped at; "" otherwise. */
 export type ChainStep = "" | "transcription" | "summary";
 /** Why a queued chain waits; "" otherwise. */
-export type QueueReason = "" | "inLine" | "retry" | "power" | "network" | "quota" | "noModel";
+export type QueueReason = "" | "inLine" | "retry" | "power" | "network" | "quota";
 /** What failed; "" otherwise. */
 export type ChainErrorCode = "" | "recordingFailed" | "transcriptionFailed" | "summaryFailed" | "homeworkFailed";
 /** What the row offers besides Stop; runNow calls runJobNow(actionJobId). */
@@ -120,7 +120,7 @@ function oneOf<T extends string>(r: Record<string, unknown>, key: string, what: 
 
 const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"] as const;
 const steps = ["", "transcription", "summary"] as const;
-const queueReasons = ["", "inLine", "retry", "power", "network", "quota", "noModel"] as const;
+const queueReasons = ["", "inLine", "retry", "power", "network", "quota"] as const;
 const errorCodes = ["", "recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"] as const;
 const actions = ["", "runNow", "openModels", "openConnections", "checkSound"] as const;
 

@@ -157,7 +157,7 @@ func TestListRecordings(t *testing.T) {
 		{
 			ID: "r-completed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusCompleted, StartedAt: t0,
 			StoppedAt: t0.Add(time.Hour), Duration: 59 * time.Minute, HasDuration: true,
-			Chain: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueNoModel, Action: ActionOpenModels},
+			Chain: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine},
 		},
 		{
 			ID: "r-failed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusFailed, StartedAt: t0,

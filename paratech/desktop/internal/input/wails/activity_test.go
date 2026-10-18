@@ -261,7 +261,7 @@ func TestFrontendKnowsChainCodes(t *testing.T) {
 		string(activity.StageFailed),
 		string(activity.StepTranscription), string(activity.StepSummary),
 		string(activity.QueueInLine), string(activity.QueueRetry), string(activity.QueuePower), string(activity.QueueNetwork),
-		string(activity.QueueQuota), string(activity.QueueNoModel),
+		string(activity.QueueQuota),
 		string(activity.ErrorRecordingFailed), string(activity.ErrorTranscriptionFailed),
 		string(activity.ErrorSummaryFailed), string(activity.ErrorHomeworkFailed),
 		string(activity.ActionRunNow), string(activity.ActionOpenModels), string(activity.ActionOpenConnections),
