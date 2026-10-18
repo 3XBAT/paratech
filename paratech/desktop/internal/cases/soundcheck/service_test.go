@@ -99,17 +99,8 @@ func newService(t *testing.T, c LevelChecker, set fakeSettings, recording bool) 
 // waitDone polls the status until the check has ended.
 func waitDone(t *testing.T, s *Service) Status {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		st := s.Status()
-		if st.State == StateDone {
-			return st
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the check did not end: %+v", st)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testenv.Eventually(t, "the check ends", func() bool { return s.Status().State == StateDone }, nil)
+	return s.Status()
 }
 
 func app(t *testing.T, name shared.AppName) values.Source {
