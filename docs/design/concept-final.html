@@ -211,14 +211,21 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
   background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 15px) 14px,calc(100% - 10px) 14px;background-size:5px 5px;background-repeat:no-repeat}
 .group{font-size:12px;font-weight:600;color:var(--muted);margin:18px 0 0}
 
-/* models */
-.mrow{display:grid;grid-template-columns:28px minmax(0,1fr) minmax(220px,300px) auto;gap:4px 16px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
-.card:has(>.mrow){display:grid;grid-template-columns:28px minmax(0,1fr) minmax(220px,300px) auto}.card>.mrow{grid-column:1/-1;grid-template-columns:subgrid}
+/* models: name with «Q5» and size, one muted line with the load scale, status, one button, the «⋯» menu */
+.mrows{display:grid;grid-template-columns:minmax(0,1fr) minmax(110px,130px) fit-content(140px) 32px;overflow:visible}
+.mrow{display:grid;grid-column:1/-1;grid-template-columns:subgrid;gap:4px 12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
 .mrow:last-child{border-bottom:0}
-.radio{appearance:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--control);margin:0;cursor:pointer;display:grid;place-items:center}
-.radio:checked{border-color:var(--prim)}
-.radio:checked::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--prim)}
-.radio:disabled{opacity:.4;cursor:not-allowed}
+.mgt{grid-column:1/-1;margin:0;padding:7px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:12px;font-weight:600}.mrows>.mgt:first-child{border-radius:calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0}
+.mname{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;margin:0;font-size:16px;font-weight:600}
+.mname bdi{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mq{margin-left:-3px;color:var(--muted);text-decoration:underline dotted 1px;text-underline-offset:3px;cursor:help}
+.msize{font-weight:400;color:var(--muted)}
+.mtag{align-self:center;padding:0 7px;border:1px solid var(--line);border-radius:999px;color:var(--accent);font-size:12px;font-weight:500;white-space:nowrap}
+.mline{display:flex;flex-wrap:wrap;align-items:center;gap:2px 5px;margin:3px 0 0}.mline>*{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mline>*+*::before{content:"·" / "";margin-right:5px}
+.mload{display:inline-flex;align-items:center;gap:8px}.mload i{display:inline-block;width:16px;height:8px;margin-right:3px;border-radius:2px;background:var(--panel-2);box-shadow:inset 0 0 0 1px var(--control)}
+.mload i.on{background:var(--accent-fill);box-shadow:none}.mload.heavy i.on{background:var(--wait-t)}
+.mwarn{margin:3px 0 0;color:var(--wait-t)}
+.mmenu{display:flex;justify-content:end}.mmenu .btn{min-width:32px;padding:5px 0;color:var(--muted);font-size:18px;line-height:1}
 
 /* popup */
 .duo{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
@@ -244,8 +251,8 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .empty p{margin:0 0 16px;color:var(--muted);max-width:52ch}
 
 @container (max-width:880px){
+  .mrows{grid-template-columns:minmax(0,1fr) auto 32px}.mrow>div:first-child{grid-column:1/-1}
   .row,.card:has(>.row){grid-template-columns:minmax(0,1fr)}.acts{justify-content:start}
-  .mrow,.card:has(>.mrow){grid-template-columns:28px minmax(0,1fr)}.mrow>.st,.mrow>.acts{grid-column:2}
   .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid2{grid-template-columns:1fr}
   .ln{grid-template-columns:34px 52px minmax(0,1fr) 70px}.ln .tm{display:none}
@@ -422,18 +429,28 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
         <!-- Модели -->
         <section class="screen" data-screen="models" aria-label="Модели речи" hidden>
           <div class="head"><div><span class="lbl">Распознавание речи работает без интернета</span><h2>Модели речи</h2></div>
-            <span class="acts"><button class="btn ghost">Страница моделей</button><button class="btn"><svg class="i"><use href="#i-up"/></svg>Импортировать файл…</button></span></div>
-          <div class="note s-net"><svg class="i"><use href="#i-wave"/></svg><p>Чем больше модель, тем точнее текст, но тем дольше расшифровка. Для ноутбука без видеокарты подходит <strong>small</strong>.</p></div>
-          <div class="card" role="radiogroup" aria-label="Модель по умолчанию">
-            <div class="mrow"><input type="radio" class="radio" name="mdl" checked aria-label="small по умолчанию"><div><p class="t" style="margin:0;font-weight:600">small</p><span class="m num">466 МБ · около 0,4× длительности записи</span></div>
-              <div class="st"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Используется по умолчанию</span></div><div class="acts"><button class="btn ghost">Удалить</button></div></div>
-            <div class="mrow"><input type="radio" class="radio" name="mdl" aria-label="base"><div><p class="t" style="margin:0;font-weight:600">base</p><span class="m num">142 МБ · быстрее, но с ошибками</span></div>
-              <div class="st"><span class="chip s-neu"><svg class="i"><use href="#i-ok"/></svg>Установлена</span></div><div class="acts"><button class="btn ghost">Удалить</button></div></div>
-            <div class="mrow"><input type="radio" class="radio" name="mdl" disabled aria-label="medium, скачивается"><div><p class="t" style="margin:0;font-weight:600">medium</p><span class="m num">1,5 ГБ · точнее, примерно вдвое медленнее small</span></div>
-              <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-down"/></svg>Скачивается · <span class="num">37 %</span></span><div class="prog" role="progressbar" aria-label="Скачивание medium" aria-valuenow="37" aria-valuemin="0" aria-valuemax="100"><b style="--p:37%"></b></div><span class="m num">540 из 1 460 МБ · около 3 минут</span></div>
-              <div class="acts"><button class="btn">Отменить</button></div></div>
-            <div class="mrow"><input type="radio" class="radio" name="mdl" disabled aria-label="large-v3, не установлена"><div><p class="t" style="margin:0;font-weight:600">large-v3</p><span class="m num">3,1 ГБ · медленная на ноутбуке</span></div>
-              <div class="st"><span class="chip s-neu">Не установлена</span></div><div class="acts"><button class="btn"><svg class="i"><use href="#i-down"/></svg>Скачать</button></div></div>
+            <span class="acts"><button class="btn"><svg class="i"><use href="#i-up"/></svg>Импортировать файл модели…</button></span></div>
+          <h3 class="group">Установленные</h3>
+          <div class="card mrows" role="list" aria-label="Установленные модели">
+            <div class="mrow" role="listitem"><div><p class="mname" title="small-q5_1"><bdi>Small</bdi><span class="mq" title="уменьшенная: меньше и быстрее, точность чуть ниже">Q5</span><span class="msize num">181 МБ</span><span class="mtag">Рекомендуется для русского</span></p>
+              <p class="mline m"><span class="mload" role="img" aria-label="Нагрузка на компьютер: 2 из 5"><span aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span aria-hidden="true">Нагрузка 2 из 5</span></span><span>точность хорошая</span><span>русский и др. языки</span></p></div>
+              <div class="st"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>По умолчанию</span></div><div class="acts"><button class="btn danger">Удалить</button></div><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Small Q5" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div>
+          </div>
+          <h3 class="group">Модели для скачивания</h3>
+          <p class="m">Q5 в названии — уменьшенная копия модели: файл меньше, работает быстрее, точность чуть ниже.</p>
+          <div class="card mrows">
+            <p class="mgt">Русский и другие языки</p>
+            <div class="mrow"><div><p class="mname" title="base-f16"><bdi>Base</bdi><span class="msize num">141 МБ</span></p>
+              <p class="mline m"><span class="mload" role="img" aria-label="Нагрузка на компьютер: 2 из 5"><span aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><span aria-hidden="true">Нагрузка 2 из 5</span></span><span>точность средняя</span><span>русский и др. языки</span></p></div>
+              <div class="st"><span class="chip s-neu">Не установлена</span></div><div class="acts"><button class="btn primary" disabled title="Скачивается другая модель: одновременно скачивается только одна"><svg class="i"><use href="#i-down"/></svg>Скачать</button></div><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Base" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div>
+            <div class="mrow"><div><p class="mname" title="medium-q5_0"><bdi>Medium</bdi><span class="mq" title="уменьшенная: меньше и быстрее, точность чуть ниже">Q5</span><span class="msize num">514 МБ</span></p>
+              <p class="mline m"><span class="mload" role="img" aria-label="Нагрузка на компьютер: 3 из 5"><span aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span aria-hidden="true">Нагрузка 3 из 5</span></span><span>точность высокая</span><span>русский и др. языки</span></p></div>
+              <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-down"/></svg>Скачивается</span><div class="prog" role="progressbar" aria-label="Скачивание Medium Q5" aria-valuenow="37" aria-valuemin="0" aria-valuemax="100"><b style="--p:37%"></b></div><span class="m num">37% · 190 МБ из 514 МБ</span></div>
+              <div class="acts"><button class="btn">Отменить</button></div><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Medium Q5" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div>
+            <div class="mrow"><div><p class="mname" title="large-v3-f16"><bdi>Large v3</bdi><span class="msize num">2,9 ГБ</span></p>
+              <p class="mline m"><span class="mload heavy" role="img" aria-label="Нагрузка на компьютер: 5 из 5"><span aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span aria-hidden="true">Нагрузка 5 из 5</span></span><span>точность самая высокая</span><span>русский и др. языки</span></p>
+              <p class="mwarn m">Тяжёлая модель: распознавание будет долгим</p></div>
+              <div class="st"><span class="chip s-neu">Не установлена</span></div><div class="acts"><button class="btn primary" disabled title="Скачивается другая модель: одновременно скачивается только одна"><svg class="i"><use href="#i-down"/></svg>Скачать</button></div><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Large v3" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div>
           </div>
           <div class="gap"></div>
         </section>
