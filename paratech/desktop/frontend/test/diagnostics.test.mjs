@@ -16,7 +16,12 @@ import {
   bundleFailedLines,
   bundleLines,
   checkButton,
+  heardMarkPercent,
+  levelFloorDb,
+  levelPercent,
   pollMs,
+  pollSoundCheck,
+  remainingText,
   soundDisplay,
   soundFailedDisplay,
   texts,
@@ -125,21 +130,152 @@ test("bundle replies are parsed strictly: only a saved bundle has a name", () =>
   }
 });
 
-test("a check shows the source, the level while it runs, then the verdict and its hints", () => {
+test("a running check shows the source, the hint, the level, the seconds left and «Звук слышен» once heard", () => {
   assert.deepEqual(soundDisplay(running), {
-    running: true, level: 0.123, source: "Источник: zoom.exe", lines: [{ text: "Звук слышен.", tone: "ok" }],
+    phase: "running", running: true, percent: levelPercent(0.123), heard: true, source: "Источник: zoom.exe",
+    prompt: "Включите любой звук на компьютере (видео, музыку, звонок)", remaining: "Осталось 11 с",
+    lines: [{ text: "Звук слышен.", tone: "ok" }],
   });
-  assert.deepEqual(soundDisplay({ ...running, heard: false, message: "Включите звук." }).lines,
-    [{ text: "Включите звук.", tone: "muted" }]);
+  const quiet = soundDisplay({ ...running, heard: false, level: 0, message: "Включите звук." });
+  assert.equal(quiet.percent, 0);
+  assert.equal(quiet.heard, false);
+  assert.deepEqual(quiet.lines, [], "nothing but the hint until sound is heard");
+  const whole = soundDisplay({ ...running, source: "Весь звук компьютера", wholeComputer: true });
+  assert.equal(whole.source, "Источник: Весь звук компьютера");
+});
+
+test("a finished check shows the verdict and the hints of the core; other verdicts show its message", () => {
   assert.deepEqual(soundDisplay(silence), {
-    running: false, level: 0, source: "Источник: Весь звук компьютера",
-    lines: [{ text: "Звук не слышен.", tone: "error" }, { text: "Проверьте микшер.", tone: "muted" }],
+    phase: "done", running: false, percent: 0, heard: false, source: "Источник: Весь звук компьютера", prompt: "",
+    remaining: "", lines: [{ text: "Звук не слышен.", tone: "error" }, { text: "Проверьте микшер.", tone: "muted" }],
   });
-  assert.equal(soundDisplay({ ...silence, verdict: "ok", message: "Звук слышен.", hints: [] }).lines[0].tone, "ok");
+  assert.deepEqual(soundDisplay({ ...silence, verdict: "ok", message: "Звук слышен.", hints: [] }).lines,
+    [{ text: "Звук слышен.", tone: "ok" }]);
   assert.equal(soundDisplay({ ...silence, verdict: "busy" }).lines[0].tone, "warning");
-  assert.deepEqual(soundDisplay(idle), { running: false, level: 0, source: "", lines: [] });
-  assert.deepEqual(soundFailedDisplay(),
-    { running: false, level: 0, source: "", lines: [{ text: "Не удалось проверить звук.", tone: "error" }] });
+  for (const verdict of ["not_running", "no_device", "unsupported", "failed"]) {
+    const d = soundDisplay({ ...silence, verdict, message: "m-" + verdict, hints: ["h"] });
+    assert.deepEqual(d.lines, [{ text: "m-" + verdict, tone: "error" }, { text: "h", tone: "muted" }]);
+  }
+  assert.deepEqual(soundDisplay(idle),
+    { phase: "idle", running: false, percent: 0, heard: false, source: "", prompt: "", remaining: "", lines: [] });
+  assert.deepEqual(soundFailedDisplay(), {
+    phase: "failed", running: false, percent: 0, heard: false, source: "", prompt: "", remaining: "",
+    lines: [{ text: "Не удалось проверить звук.", tone: "error" }],
+  });
+});
+
+test("the level is shown on a dB scale from -60 dBFS, so quiet sound is visible", () => {
+  assert.equal(levelFloorDb, -60);
+  assert.equal(levelPercent(0), 0);
+  assert.equal(levelPercent(0.001), 0); // -60 dBFS, the smallest level the core sends
+  assert.equal(levelPercent(0.002), 10);
+  assert.equal(levelPercent(0.01), 33); // -40 dBFS, the threshold of the core
+  assert.equal(levelPercent(0.1), 67);
+  assert.equal(levelPercent(0.5), 90);
+  assert.equal(levelPercent(1), 100);
+  assert.equal(levelPercent(2), 100);
+  assert.equal(levelPercent(-1), 0);
+  assert.equal(levelPercent(Number.NaN), 0);
+  assert.ok(levelPercent(0.02) > 2 * 0.02 * 100, "a quiet level is wider than its linear value");
+  for (let l = 0.001; l < 1; l *= 1.5) {
+    assert.ok(levelPercent(l * 1.5) >= levelPercent(l), "the bar grows with the level");
+  }
+  assert.equal(heardMarkPercent, 33);
+});
+
+test("the seconds left are whole and rounded up", () => {
+  assert.equal(remainingText(15000), "Осталось 15 с");
+  assert.equal(remainingText(10800), "Осталось 11 с");
+  assert.equal(remainingText(1), "Осталось 1 с");
+  assert.equal(remainingText(0), "Осталось 0 с");
+});
+
+// Fake timers: run() fires the one pending timer. Reads are answered by the test, so an overlap would be visible.
+function fakeTimers() {
+  const pending = new Map();
+  let next = 1;
+  return {
+    timers: {
+      set(fn, ms) {
+        assert.equal(ms, pollMs);
+        pending.set(next, fn);
+        return next++;
+      },
+      clear(h) {
+        pending.delete(h);
+      },
+    },
+    pending,
+    run() {
+      assert.equal(pending.size, 1, "exactly one timer is pending");
+      const [h, fn] = [...pending][0];
+      pending.delete(h);
+      fn();
+    },
+  };
+}
+
+function deferredReads() {
+  const waiting = [];
+  const read = () => new Promise((resolve, reject) => waiting.push({ resolve, reject }));
+  return { read, waiting };
+}
+
+const flush = () => new Promise((r) => setImmediate(r));
+
+test("polling reads one at a time and ends when the check is done", async () => {
+  const t = fakeTimers();
+  const r = deferredReads();
+  const states = [];
+  let fails = 0;
+  pollSoundCheck(r.read, (s) => states.push(s.state), () => fails++, t.timers);
+
+  t.run();
+  assert.equal(r.waiting.length, 1);
+  assert.equal(t.pending.size, 0, "no next read before the answer");
+  r.waiting[0].resolve(running);
+  await flush();
+  assert.equal(t.pending.size, 1);
+
+  t.run();
+  r.waiting[1].resolve(silence);
+  await flush();
+  assert.deepEqual(states, ["running", "done"]);
+  assert.equal(t.pending.size, 0, "done ends the polling");
+  assert.equal(fails, 0);
+});
+
+test("a failed read shows the failure once and ends the polling", async () => {
+  const t = fakeTimers();
+  const r = deferredReads();
+  const states = [];
+  let fails = 0;
+  pollSoundCheck(r.read, (s) => states.push(s.state), () => fails++, t.timers);
+  t.run();
+  r.waiting[0].reject(new Error("boom"));
+  await flush();
+  assert.equal(fails, 1);
+  assert.deepEqual(states, []);
+  assert.equal(t.pending.size, 0);
+});
+
+test("stop clears the timer and drops an answer that is on the way", async () => {
+  const t = fakeTimers();
+  const stop = pollSoundCheck(async () => running, () => assert.fail("no state after stop"), () => assert.fail(),
+    t.timers);
+  stop();
+  assert.equal(t.pending.size, 0);
+
+  const t2 = fakeTimers();
+  const r = deferredReads();
+  let calls = 0;
+  const stop2 = pollSoundCheck(r.read, () => calls++, () => calls++, t2.timers);
+  t2.run();
+  stop2();
+  r.waiting[0].resolve(running);
+  await flush();
+  assert.equal(calls, 0);
+  assert.equal(t2.pending.size, 0, "nothing is scheduled after stop");
 });
 
 test("the bundle result: the name when saved, a neutral line when cancelled", () => {
@@ -158,7 +294,7 @@ test("the bundle result: the name when saved, a neutral line when cancelled", ()
 
 test("the sound button starts or stops; buttons are disabled while their call runs", () => {
   assert.deepEqual(checkButton(false, false), { label: "Проверить звук", disabled: false });
-  assert.deepEqual(checkButton(true, false), { label: "Остановить проверку", disabled: false });
+  assert.deepEqual(checkButton(true, false), { label: "Остановить", disabled: false });
   assert.deepEqual(checkButton(false, true), { label: "Проверить звук", disabled: true });
   assert.deepEqual(bundleButton(false), { label: "Сохранить пакет для поддержки…", disabled: false });
   assert.deepEqual(bundleButton(true), { label: "Сохраняем…", disabled: true });
@@ -166,8 +302,10 @@ test("the sound button starts or stops; buttons are disabled while their call ru
   assert.equal(pollMs, 100);
 });
 
-test("the explanations say what is checked and what the bundle holds", () => {
+test("the explanations say what is checked and what the bundle holds; nothing speaks of a tone", () => {
   assert.match(texts.soundExplain, /Ничего не проигрывается/);
+  const all = Object.values(texts).join(" ");
+  assert.ok(!/тон|сигнал|режим/i.test(all), "a text still speaks of the old tone check");
   assert.match(texts.bundleExplain, /без паролей, ключей, аудио, расшифровок и текстов уроков/);
   assert.match(texts.bundleLocal, /никуда не отправляется/);
 });
@@ -185,4 +323,21 @@ test("the page renders text only and never handles a path", () => {
   assert.match(page, /api\.stopSoundCheck\(\)/);
   assert.match(page, /api\.saveSupportBundle\(\)/);
   assert.ok(!/<input\b/.test(page), "the page asks for a path itself");
+});
+
+test("the level bar is an accessible meter and leaving the page stops a running check", () => {
+  const page = src("../src/pages/DiagnosticsPage.tsx");
+  assert.match(page, /role="meter"/);
+  assert.match(page, /aria-valuenow=\{s\.percent\}/);
+  assert.match(page, /aria-label=\{texts\.levelLabel\}/);
+  assert.match(page, /pollSoundCheck\(/);
+  assert.ok(!/setInterval/.test(page), "polling with an interval can overlap calls");
+  // The cleanup of the mount effect stops the poller and a running check.
+  assert.match(page, /return \(\) => \{\s*mounted\.current = false;\s*halt\(\);[\s\S]*?api\.stopSoundCheck\(\)/);
+
+  const css = src("../src/styles.css");
+  for (const gone of [".diag-wait", ".mode-cause", ".modes"]) {
+    assert.ok(!css.includes(gone), `styles.css still has ${gone}`);
+  }
+  assert.match(css, /\.level b \{[^}]*transition: width 80ms/);
 });

@@ -1,21 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { diagnosticsApi } from "../bindings/diagnostics";
+import { diagnosticsApi, type SoundCheck } from "../bindings/diagnostics";
 import { callByName } from "../bindings/runtime";
 import {
   bundleButton,
   bundleFailedLines,
   bundleLines,
   checkButton,
-  pollMs,
+  heardMarkPercent,
+  pollSoundCheck,
   soundDisplay,
   soundFailedDisplay,
   texts,
   type Line,
   type SoundDisplay,
+  type Timers,
   type Tone,
 } from "../diagnosticsView";
 import { Button } from "../ui/Button";
 import { Card, ResultLine, type ResultKind } from "../ui/controls";
+
+const timers: Timers = {
+  set: (fn, ms) => window.setTimeout(fn, ms),
+  clear: (handle) => window.clearTimeout(handle as number),
+};
 
 // "Диагностика": the sound check and the support bundle. Both run in the Go core; the page shows the fixed texts it
 // gets back (ARCH-44).
@@ -32,12 +39,68 @@ export function DiagnosticsPage() {
   // A double click must not start a second call before the disabled button renders.
   const running = useRef(new Set<string>());
 
+  // The poller of a running check and whether the last answer was running (to stop it when the page is left).
+  const stopPolling = useRef<(() => void) | null>(null);
+  const checkRuns = useRef(false);
+
+  function halt() {
+    stopPolling.current?.();
+    stopPolling.current = null;
+  }
+
+  function failed() {
+    halt();
+    checkRuns.current = false;
+    setSound(soundFailedDisplay());
+  }
+
+  // Shows an answer and polls again while the check runs. After the page is left a running check is stopped.
+  function apply(r: SoundCheck) {
+    if (!mounted.current) {
+      if (r.state === "running") {
+        api.stopSoundCheck().catch(() => undefined);
+      }
+      return;
+    }
+    checkRuns.current = r.state === "running";
+    setSound(soundDisplay(r));
+    if (r.state !== "running") {
+      halt();
+      return;
+    }
+    if (stopPolling.current === null) {
+      stopPolling.current = pollSoundCheck(
+        () => api.soundCheckStatus(),
+        (next) => {
+          checkRuns.current = next.state === "running";
+          if (!checkRuns.current) {
+            stopPolling.current = null; // the poller ended itself
+          }
+          setSound(soundDisplay(next));
+        },
+        failed,
+        timers,
+      );
+    }
+  }
+
   useEffect(() => {
     mounted.current = true;
+    // A check that runs already (started before a page switch) is picked up; an old result is not shown again, and
+    // a failed read here shows nothing: the user has not asked for anything yet.
+    api.soundCheckStatus().then(
+      (r) => r.state === "running" && apply(r),
+      () => undefined,
+    );
     return () => {
       mounted.current = false;
+      halt();
+      if (checkRuns.current) {
+        checkRuns.current = false;
+        api.stopSoundCheck().catch(() => undefined);
+      }
     };
-  }, []);
+  }, [api]);
 
   async function once(key: string, setBusy: (b: boolean) => void, action: () => Promise<void>) {
     if (running.current.has(key)) {
@@ -57,30 +120,15 @@ export function DiagnosticsPage() {
 
   const checking = sound?.running ?? false;
 
-  // While the check runs, its state is read again every pollMs; leaving the page stops the polling only.
-  useEffect(() => {
-    if (!checking) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      api.soundCheckStatus().then(
-        (r) => mounted.current && setSound(soundDisplay(r)),
-        () => mounted.current && setSound(soundFailedDisplay()),
-      );
-    }, pollMs);
-    return () => clearTimeout(timer);
-  }, [api, checking, sound]);
-
   const toggleCheck = () =>
     once("sound", setCalling, async () => {
+      // A poll answer must not overwrite the answer of stop.
+      halt();
       try {
-        const r = checking ? await api.stopSoundCheck() : await api.startSoundCheck();
-        if (mounted.current) {
-          setSound(soundDisplay(r));
-        }
+        apply(checking ? await api.stopSoundCheck() : await api.startSoundCheck());
       } catch {
         if (mounted.current) {
-          setSound(soundFailedDisplay());
+          failed();
         }
       }
     });
@@ -121,13 +169,7 @@ export function DiagnosticsPage() {
               {check.label}
             </Button>
           </div>
-          {sound !== null && (
-            <div className="diag-result">
-              {sound.source !== "" && <p className="small muted diag-note">{sound.source}</p>}
-              {sound.running && <progress max={1} value={sound.level} aria-label={texts.levelLabel} />}
-              <Lines lines={sound.lines} />
-            </div>
-          )}
+          {sound !== null && <SoundView sound={sound} />}
         </Card>
 
         <Card className="box diag" label={texts.bundleTitle}>
@@ -147,6 +189,35 @@ export function DiagnosticsPage() {
         </Card>
       </div>
     </section>
+  );
+}
+
+// The source, the hint, the live level with the "слышно" mark and the seconds left, then the result lines.
+function SoundView(props: { sound: SoundDisplay }) {
+  const s = props.sound;
+  return (
+    <div className="diag-result">
+      {s.source !== "" && <p className="small muted diag-note">{s.source}</p>}
+      {s.prompt !== "" && <p className="diag-prompt">{s.prompt}</p>}
+      {s.running && (
+        <div className="level-wrap">
+          <div
+            className={s.heard ? "level heard" : "level"}
+            role="meter"
+            aria-label={texts.levelLabel}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={s.percent}
+            aria-valuetext={`${s.percent} %`}
+          >
+            <b style={{ width: `${s.percent}%` }} />
+            <i style={{ left: `${heardMarkPercent}%` }} aria-hidden="true" />
+          </div>
+          <span className="small muted num">{s.remaining}</span>
+        </div>
+      )}
+      <Lines lines={s.lines} />
+    </div>
   );
 }
 

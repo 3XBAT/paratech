@@ -1,4 +1,4 @@
-// View logic of the "Диагностика" page: texts, button states and the lines of a result. The check and the bundle are
+// View logic of the "Диагностика" page: texts, button states, the level bar, the lines of a result and the polling. The check and the bundle are
 // made in the Go core (ARCH-44); here only what the page shows.
 
 import type { BundleResult, SoundCheck } from "./bindings/diagnostics";
@@ -19,10 +19,14 @@ export const texts = {
     "Приложение слушает выбранный для записи источник и показывает уровень звука. Ничего не проигрывается и не " +
     "записывается.",
   checkSound: "Проверить звук",
-  stopCheck: "Остановить проверку",
+  stopCheck: "Остановить",
   checkFailed: "Не удалось проверить звук.",
   sourcePrefix: "Источник: ",
+  playSomething: "Включите любой звук на компьютере (видео, музыку, звонок)",
+  heard: "Звук слышен.",
   levelLabel: "Уровень звука",
+  remainingPrefix: "Осталось ",
+  secondsSuffix: " с",
   bundleTitle: "Пакет для поддержки",
   bundleExplain:
     "Zip-архив с журналами, версиями Windows и приложения и настройками — без паролей, ключей, аудио, " +
@@ -51,32 +55,134 @@ export function bundleButton(saving: boolean): ButtonState {
   return { label: saving ? texts.saving : texts.saveBundle, disabled: saving };
 }
 
+/** The bottom of the bar: quieter levels show as empty. Go rounds levels to 0.001 (-60 dBFS). */
+export const levelFloorDb = -60;
+
+/**
+ * Maps a linear peak (0..1) to the width of the bar on a dB scale, 0..100, so quiet sound is visible as it is in the
+ * meters of Windows and Zoom.
+ */
+export function levelPercent(level: number): number {
+  if (!Number.isFinite(level) || level <= 0) {
+    return 0;
+  }
+  const db = 20 * Math.log10(Math.min(level, 1));
+  return Math.round(Math.max(0, ((db - levelFloorDb) / -levelFloorDb) * 100));
+}
+
+/**
+ * Where the bar marks "слышно": values.HeardLevel of the core (0.01, -40 dBFS). Only a drawing; whether sound was
+ * heard is always the core's heard flag.
+ */
+export const heardMarkPercent = levelPercent(0.01);
+
+/** The whole seconds left, rounded up so the count reaches 0 only at the end. */
+export function remainingText(ms: number): string {
+  return texts.remainingPrefix + Math.ceil(Math.max(ms, 0) / 1000) + texts.secondsSuffix;
+}
+
+export type SoundPhase = "idle" | "running" | "done" | "failed";
+
 export interface SoundDisplay {
+  phase: SoundPhase;
   running: boolean;
-  /** 0..1 for the level bar. */
-  level: number;
+  /** 0..100, the width of the level bar while running. */
+  percent: number;
+  /** The core heard sound; the bar shows it in the ok colour. */
+  heard: boolean;
   /** "" when there is no source to show. */
   source: string;
+  /** The hint to play something while running, else "". */
+  prompt: string;
+  /** The seconds left while running, else "". */
+  remaining: string;
   lines: Line[];
 }
 
-/** What a check shows: the source, the level and the message; once done the verdict and its hints. */
+/**
+ * What a check shows. While it runs: the source, the hint to play something, the level and the seconds left, and
+ * "Звук слышен" once the core heard sound. Once done: the core's verdict message and its hints.
+ */
 export function soundDisplay(r: SoundCheck): SoundDisplay {
   const source = r.source === "" ? "" : texts.sourcePrefix + r.source;
+  const none = { percent: 0, heard: false, prompt: "", remaining: "" };
   if (r.state === "idle") {
-    return { running: false, level: 0, source: "", lines: [] };
+    return { phase: "idle", running: false, ...none, source: "", lines: [] };
   }
   if (r.state === "running") {
-    return { running: true, level: r.level, source, lines: [{ text: r.message, tone: r.heard ? "ok" : "muted" }] };
+    return {
+      phase: "running", running: true, percent: levelPercent(r.level), heard: r.heard, source,
+      prompt: texts.playSomething, remaining: remainingText(r.remainingMs),
+      lines: r.heard ? [{ text: texts.heard, tone: "ok" }] : [],
+    };
   }
   const tone: Tone = r.verdict === "ok" ? "ok" : r.verdict === "busy" ? "warning" : "error";
   const lines: Line[] = [{ text: r.message, tone }, ...r.hints.map((h) => ({ text: h, tone: "muted" as Tone }))];
-  return { running: false, level: 0, source, lines };
+  return { phase: "done", running: false, ...none, source, lines };
 }
 
 /** What a rejected check call shows: a fixed text, never the error. */
 export function soundFailedDisplay(): SoundDisplay {
-  return { running: false, level: 0, source: "", lines: [{ text: texts.checkFailed, tone: "error" }] };
+  return {
+    phase: "failed", running: false, percent: 0, heard: false, source: "", prompt: "", remaining: "",
+    lines: [{ text: texts.checkFailed, tone: "error" }],
+  };
+}
+
+/** Timers of the poller: window.setTimeout in the page, a fake in tests. */
+export interface Timers {
+  set(fn: () => void, ms: number): unknown;
+  clear(handle: unknown): void;
+}
+
+/**
+ * Reads the state every `every` ms while the check runs. The next read is scheduled only after the previous answer,
+ * so calls never overlap. Polling ends on a state other than running, on a failed read (onFail) and on the returned
+ * stop(); an answer that arrives after stop() is dropped.
+ */
+export function pollSoundCheck(
+  read: () => Promise<SoundCheck>,
+  onState: (r: SoundCheck) => void,
+  onFail: () => void,
+  timers: Timers,
+  every: number = pollMs,
+): () => void {
+  let stopped = false;
+  let handle: unknown;
+
+  const schedule = () => {
+    handle = timers.set(tick, every);
+  };
+  function tick() {
+    handle = undefined;
+    read().then(
+      (r) => {
+        if (stopped) {
+          return;
+        }
+        onState(r);
+        if (r.state === "running") {
+          schedule();
+        }
+      },
+      () => {
+        if (stopped) {
+          return;
+        }
+        stopped = true;
+        onFail();
+      },
+    );
+  }
+
+  schedule();
+  return () => {
+    stopped = true;
+    if (handle !== undefined) {
+      timers.clear(handle);
+      handle = undefined;
+    }
+  };
 }
 
 /** The lines of a bundle answer; a cancelled save is one neutral line. */
