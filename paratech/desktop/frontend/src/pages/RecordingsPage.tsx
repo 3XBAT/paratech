@@ -15,6 +15,7 @@ import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
 import { jobStatusView, queueText, recordingStatusView, showsProgress, type StatusView } from "../statusPresentation";
 import { Button } from "../ui/Button";
+import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, EmptyState, Progress, Row } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { StatusChip } from "../ui/StatusChip";
@@ -184,6 +185,7 @@ export function RecordingsPage({ onOpenSchedule }: { onOpenSchedule?: () => void
       <div className="head">
         <h1>Записи и задачи</h1>
       </div>
+      <SpeechComponentNotice onReady={() => void refresh()} />
       {actionError && (
         <Banner kind="fail" role="alert">
           {actionError}

@@ -286,9 +286,6 @@ export interface Note {
 }
 
 export const texts = {
-  speechMissing:
-    "whisper-cli не найден рядом с программой: распознавание недоступно. Положите whisper-cli.exe и его DLL рядом с " +
-    "learning-assistant.exe и перезапустите приложение.",
   noModels: "Модель не установлена: записи не распознаются, пока вы не импортируете модель.",
   afterImport: "После установки модели ожидающие записи начнут распознаваться без перезапуска.",
   needDefault: "Установлено несколько моделей, но ни одна не выбрана по умолчанию: распознавание ждёт выбора.",
@@ -322,12 +319,9 @@ export const texts = {
   deleteConfirm: "Её файл будет удалён из папки приложения.",
 } as const;
 
-/** The notes above the lists, warnings first. */
+/** The notes above the lists, warnings first. A missing speech component has its own notice (SpeechComponentNotice). */
 export function statusNotes(v: ModelsView): Note[] {
   const notes: Note[] = [];
-  if (!v.speechReady) {
-    notes.push({ text: texts.speechMissing, warning: true });
-  }
   if (v.installed.length === 0) {
     notes.push({ text: texts.noModels, warning: true });
     if (v.speechReady) {

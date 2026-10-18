@@ -69,7 +69,7 @@ export interface ModelsView {
   available: AvailableModel[];
   /** Several models are installed and none is the default: STT jobs wait until the user selects one. */
   needsDefault: boolean;
-  /** whisper-cli was found at start; without it STT jobs wait until a restart. */
+  /** The speech recognition component works; without it STT jobs wait until it is installed. */
   speechReady: boolean;
   machineKnown: boolean;
   download: ModelDownload;
