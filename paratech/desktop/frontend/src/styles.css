@@ -274,3 +274,34 @@ html, body, #root { height: 100%; }
 .clist-footer { margin: 0 0 12px; }
 .clist-more:not(.btn) { padding: 4px 10px; border: 0; border-radius: var(--r-ctl); background: none; color: var(--accent); font-weight: 500; cursor: pointer; }
 .clist-more:not(.btn):hover { background: var(--panel-2); }
+
+/* Расшифровка (TASK-079): a section stays mounted, hidden, under an open transcript. */
+.screen[hidden] { display: none; }
+.tr-links { margin: 0 0 14px; }
+.tr-sub { margin: 4px 0 0; overflow-wrap: anywhere; }
+.tr-title { font-weight: 500; }
+.tr .card.box { margin-bottom: 14px; }
+.tr .card.box + .card.box { margin-top: 0; }
+.tr-state { margin: 0 0 8px; }
+.tr-head .result { margin: 0 0 8px; }
+.tr-note { margin: 8px 0 0; }
+.tr-audio { display: block; width: 100%; max-width: 560px; margin-top: 10px; }
+.tr-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tr-search .input { flex: 1 1 240px; max-width: 420px; }
+.tr-count { min-width: 64px; }
+.tr-share { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 12px; }
+.tr-switch { display: inline-flex; align-items: center; gap: 8px; margin-right: 6px; cursor: pointer; }
+.tr-tools .result { margin-top: 10px; }
+/* A readable column; content-visibility skips the layout of paragraphs off screen, so a 3-hour text stays cheap. */
+.tr-text { max-width: 76ch; padding: 4px 0 24px; }
+.tr-par { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 0 12px; padding: 6px 0; content-visibility: auto; contain-intrinsic-size: auto 96px; }
+.tr-par p { margin: 0; font-size: 16px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tr-time { align-self: start; margin-top: 3px; padding: 2px 6px; border: 0; border-radius: var(--r-chip); background: none; color: var(--accent); font: inherit; font-size: var(--fs-small); line-height: var(--lh-small); text-align: left; cursor: pointer; }
+.tr-time:hover:enabled { background: var(--panel-2); }
+.tr-time:disabled { color: var(--muted); cursor: default; }
+.tr-par mark { border-radius: 3px; background: var(--wait-b); color: var(--wait-t); }
+.tr-par mark.cur { background: var(--run-b); color: var(--run-t); outline: 2px solid var(--accent); }
+@media (forced-colors: active) {
+  .tr-par mark { background: Mark; color: MarkText; }
+  .tr-par mark.cur { outline-color: Highlight; }
+}

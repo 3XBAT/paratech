@@ -31,3 +31,29 @@ export const defaultPage: PageId = "recordings";
 export function pageById(id: string): Page {
   return pages.find((p) => p.id === id) ?? pages.find((p) => p.id === defaultPage)!;
 }
+
+/**
+ * Where the window is: a rail section and, over it, the transcript of a recording (TASK-079). The transcript is not a
+ * rail section: it opens from a recording ("" when closed) and the section under it stays as the user left it.
+ */
+export interface Route {
+  page: PageId;
+  transcript: string;
+}
+
+export const initialRoute: Route = { page: defaultPage, transcript: "" };
+
+/** A rail click: the section, with the transcript closed. */
+export function routeToPage(id: PageId): Route {
+  return { page: id, transcript: "" };
+}
+
+/** Opens the transcript of a recording over the current section. */
+export function routeToTranscript(r: Route, recordingId: string): Route {
+  return { page: r.page, transcript: recordingId };
+}
+
+/** Back from the transcript to the section it was opened from. */
+export function closeTranscript(r: Route): Route {
+  return { page: r.page, transcript: "" };
+}

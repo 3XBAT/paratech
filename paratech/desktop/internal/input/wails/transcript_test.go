@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -357,6 +358,22 @@ func TestTranscriptJSONNames(t *testing.T) {
 	for _, k := range []string{"status", "message", "name"} {
 		if !strings.Contains(string(data), `"`+k+`"`) {
 			t.Errorf("save JSON %s has no %q", data, k)
+		}
+	}
+}
+
+// The page shows the error texts as they are; the frontend wrapper lists each one.
+func TestFrontendKnowsTranscriptErrors(t *testing.T) {
+	src, err := os.ReadFile("../../../frontend/src/bindings/transcript.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []error{
+		ErrTranscriptInvalidID, ErrTranscriptNotFound, ErrTranscriptEmpty, ErrTranscriptFormat, ErrTranscriptPage,
+		ErrTranscriptUnavailable, ErrTranscriptClipboard, ErrTranscriptCopyTooBig,
+	} {
+		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
+			t.Errorf("frontend/src/bindings/transcript.ts does not list the error %q", e)
 		}
 	}
 }
