@@ -163,6 +163,27 @@ type fakeJobs struct {
 	mu      sync.Mutex
 	jobs    []*job.Job
 	listErr error
+	lastErr error
+}
+
+// LastFinished is the terminal job of the type with the latest change, then the greatest id, as the store orders.
+func (f *fakeJobs) LastFinished(_ context.Context, typ job.Type) (*job.Job, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.lastErr != nil {
+		return nil, false, f.lastErr
+	}
+	var last *job.Job
+	for _, j := range f.jobs {
+		if j.Type() != typ || !j.Status().IsTerminal() {
+			continue
+		}
+		if last == nil || j.UpdatedAt().After(last.UpdatedAt()) ||
+			(j.UpdatedAt().Equal(last.UpdatedAt()) && j.ID() > last.ID()) {
+			last = j
+		}
+	}
+	return last, last != nil, nil
 }
 
 func (f *fakeJobs) Enqueue(_ context.Context, j *job.Job) (shared.JobID, bool, error) {
@@ -1026,6 +1047,148 @@ func TestCalendarStatus(t *testing.T) {
 	e.account.set(false, errors.New("fake: store down"))
 	if _, err := e.sync.Status(ctx); err == nil {
 		t.Fatal("Status with a failing store succeeded")
+	}
+}
+
+// finishedSyncJob is a stored sync job that ended in status at finished after attempts attempts.
+func finishedSyncJob(t *testing.T, id string, status job.Status, attempts int, finished time.Time) *job.Job {
+	t.Helper()
+	j, err := job.New(job.Spec{ID: shared.JobID(id), Type: CalendarSyncJobType, Key: "calendar_sync:" + id, MaxAttempts: 5}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range attempts - 1 {
+		if err := j.Claim(t0); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.Retry(t0, t0, "fake: transient"); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.Requeue(t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status == job.StatusCancelled {
+		err = j.Cancel(finished)
+	} else if err = j.Claim(t0); err == nil {
+		if status == job.StatusCompleted {
+			err = j.Complete(finished)
+		} else {
+			err = j.Fail(finished, "schedulesync: calendar sync: fake")
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
+}
+
+// The last run comes from the stored jobs, so it survives a restart: the newest finished job, its attempts and how
+// it ended (TASK-074).
+func TestCalendarStatusLastRunFromStoredJobs(t *testing.T) {
+	later := t0.Add(time.Hour)
+	tests := []struct {
+		name string
+		jobs []*job.Job
+		want LastRun
+	}{
+		{name: "no finished job"},
+		{
+			name: "completed after retries",
+			jobs: []*job.Job{finishedSyncJob(t, "a", job.StatusCompleted, 3, later)},
+			want: LastRun{At: later, Attempts: 3, Outcome: OutcomeOK},
+		},
+		{
+			name: "failed in an earlier process",
+			jobs: []*job.Job{finishedSyncJob(t, "a", job.StatusFailed, 5, later)},
+			want: LastRun{At: later, Attempts: 5, Outcome: OutcomeFailed},
+		},
+		{
+			name: "cancelled counts as failed",
+			jobs: []*job.Job{finishedSyncJob(t, "a", job.StatusCancelled, 1, later)},
+			want: LastRun{At: later, Attempts: 0, Outcome: OutcomeFailed},
+		},
+		{
+			name: "the newest finished one",
+			jobs: []*job.Job{
+				finishedSyncJob(t, "a", job.StatusFailed, 1, t0.Add(time.Minute)),
+				finishedSyncJob(t, "b", job.StatusCompleted, 1, later),
+				finishedSyncJob(t, "c", job.StatusFailed, 2, t0.Add(2*time.Minute)),
+			},
+			want: LastRun{At: later, Attempts: 1, Outcome: OutcomeOK},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSyncEnv(t)
+			e.jobs.jobs = tt.jobs
+			// An unfinished job and a job of another type do not count.
+			running, err := job.New(job.Spec{ID: "z-run", Type: CalendarSyncJobType, Key: "calendar_sync:z", MaxAttempts: 5}, t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := running.Claim(t0.Add(2 * time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			other, err := job.New(job.Spec{ID: "z-stt", Type: "stt", Key: "stt:z", MaxAttempts: 5}, t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := other.Cancel(t0.Add(2 * time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			e.jobs.jobs = append(e.jobs.jobs, running, other)
+
+			st, err := e.sync.Status(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.LastRun != tt.want || st.LastRun.OK() != (tt.want.Outcome == OutcomeOK) {
+				t.Fatalf("LastRun = %+v, want %+v", st.LastRun, tt.want)
+			}
+		})
+	}
+}
+
+// A run of this process keeps the outcome it recorded for its job: a sign-in that expired completes the job but is not
+// a success (TASK-074 criterion 3). Another job that finished later is read from its record.
+func TestCalendarStatusLastRunOfThisProcess(t *testing.T) {
+	ctx := context.Background()
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	e.cal.failNext("ensure", backoff.Permanent(fmt.Errorf("x: %w", ErrCalendarSignInExpired)))
+	if err := e.handle(t); err != nil {
+		t.Fatalf("Handle = %v", err)
+	}
+	// The runner completes the job; the fake store gets it as the runner would leave it.
+	e.jobs.jobs = append(e.jobs.jobs, finishedSyncJob(t, "sync-job", job.StatusCompleted, 1, t0.Add(time.Minute)))
+
+	st, err := e.sync.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := LastRun{At: t0.Add(time.Minute), Attempts: 1, Outcome: OutcomeSignInExpired}
+	if st.LastRun != want || st.LastRun.OK() {
+		t.Fatalf("LastRun = %+v, want %+v", st.LastRun, want)
+	}
+
+	e.jobs.jobs = append(e.jobs.jobs, finishedSyncJob(t, "sync-later", job.StatusCompleted, 2, t0.Add(time.Hour)))
+	if st, _ := e.sync.Status(ctx); st.LastRun != (LastRun{At: t0.Add(time.Hour), Attempts: 2, Outcome: OutcomeOK}) {
+		t.Fatalf("LastRun = %+v, want the later job", st.LastRun)
+	}
+}
+
+// A failure to read the last run leaves it out; the rest of the status is still shown.
+func TestCalendarStatusWithoutTheLastRun(t *testing.T) {
+	e := newSyncEnv(t)
+	e.seed(t, "a", content("Math", at(0)))
+	e.jobs.lastErr = errors.New("fake: unreadable row")
+	st, err := e.sync.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.LastRun != (LastRun{}) || !st.SignedIn || st.Pending != 1 {
+		t.Fatalf("Status = %+v", st)
 	}
 }
 

@@ -112,4 +112,22 @@ type CalendarStatus struct {
 	// LastOutcome and LastRunAt describe the last run that ended in this process.
 	LastOutcome SyncOutcome
 	LastRunAt   time.Time
+
+	// LastRun is the last sync job that finished, of this process or an earlier one; zero if none did.
+	LastRun LastRun
 }
+
+// LastRun is a finished sync job as the Google section shows it (TASK-074).
+type LastRun struct {
+	// At is when the job finished (its last change).
+	At time.Time
+	// Attempts the job took.
+	Attempts int
+	// Outcome is how the run ended: the outcome this process recorded for the job, otherwise what the job record
+	// tells: OutcomeOK for a COMPLETED job, OutcomeFailed for a FAILED or CANCELLED one. A job that ended without a
+	// sign-in completes, so after a restart only the sign-in status tells that case apart.
+	Outcome SyncOutcome
+}
+
+// OK reports whether the run synchronized the calendar.
+func (r LastRun) OK() bool { return r.Outcome == OutcomeOK }

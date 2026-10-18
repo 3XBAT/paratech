@@ -70,11 +70,12 @@ type CalendarSync struct {
 	log         *slog.Logger
 	maxAttempts int
 
-	mu      sync.Mutex
-	busy    bool // a run is in progress
-	rerun   bool // a job started during that run
-	outcome SyncOutcome
-	ranAt   time.Time
+	mu         sync.Mutex
+	busy       bool // a run is in progress
+	rerun      bool // a job started during that run
+	outcome    SyncOutcome
+	ranAt      time.Time
+	outcomeJob shared.JobID // the job of that run
 }
 
 // NewCalendarSync checks the ports.
@@ -180,7 +181,7 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 		c.followUp(ctx)
 	}
 	outcome := outcomeOf(err)
-	c.record(outcome)
+	c.record(snap.ID(), outcome)
 	switch outcome {
 	case OutcomeOK:
 		c.log.Info(opSync, "written", st.written, "deleted", st.deleted, "fresh", st.fresh)
@@ -241,11 +242,11 @@ func outcomeOf(err error) SyncOutcome {
 	return OutcomeFailed
 }
 
-func (c *CalendarSync) record(outcome SyncOutcome) {
+func (c *CalendarSync) record(id shared.JobID, outcome SyncOutcome) {
 	at := c.clock.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.outcome, c.ranAt = outcome, at
+	c.outcome, c.ranAt, c.outcomeJob = outcome, at, id
 }
 
 // runStats counts what one run did.
@@ -477,7 +478,23 @@ func (c *CalendarSync) Status(ctx context.Context) (CalendarStatus, error) {
 	}
 	c.mu.Lock()
 	st.LastOutcome, st.LastRunAt = c.outcome, c.ranAt
+	outcomeJob := c.outcomeJob
 	c.mu.Unlock()
+
+	// The last run is extra information: a row that cannot be read must not hide the rest of the status.
+	last, found, err := c.jobs.LastFinished(ctx, CalendarSyncJobType)
+	switch {
+	case err != nil:
+		c.log.Warn(opStatus, "last run", "unreadable", "err", err)
+	case found:
+		st.LastRun = LastRun{At: last.UpdatedAt(), Attempts: last.Attempts(), Outcome: OutcomeFailed}
+		switch {
+		case last.ID() == outcomeJob && st.LastOutcome != OutcomeNone:
+			st.LastRun.Outcome = st.LastOutcome
+		case last.Status() == job.StatusCompleted:
+			st.LastRun.Outcome = OutcomeOK
+		}
+	}
 	return st, nil
 }
 
