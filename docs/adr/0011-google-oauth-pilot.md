@@ -73,3 +73,6 @@
 - **Accepted crash window:** the calendar is created at Google before its id is stored; a crash in between leaves an
   extra empty calendar the user can delete. After an id that could not be stored, the next insert waits until the
   credential store takes a write again: one extra calendar per failure, not one per attempt.
+
+## Open question (owner, 2026-10-18)
+- Sign-out keeps the calendar binding for now. Revisit: switching to another account vs. signing out for good have opposite needs (keep vs. forget the binding and the app calendar).
