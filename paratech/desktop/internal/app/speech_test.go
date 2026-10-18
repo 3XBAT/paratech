@@ -120,6 +120,10 @@ func TestSpeechReadyAtStartFromTheBundledFolder(t *testing.T) {
 	if err := core.Speech.StartInstall(); !errors.Is(err, speechcomponent.ErrAlreadyActive) {
 		t.Fatalf("StartInstall = %v, want ErrAlreadyActive", err)
 	}
+	// The shutdown cancels a running install before it stops the rest (TestShutdownOrder).
+	if a.life == nil || a.life.cancelSpeech == nil {
+		t.Fatal("the lifecycle does not cancel the speech install at shutdown")
+	}
 }
 
 // TASK-072: without the component the STT job waits; the install from the page downloads the archive from the

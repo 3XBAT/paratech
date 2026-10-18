@@ -150,6 +150,7 @@ func newLifeFakes() *lifeFakes {
 		cleanups:       []cleanup{step("cleanup work", nil), step("cleanup temp", errors.New("disk busy"))},
 		closers:        []closer{release("close storage"), release("release lock")},
 		stopTimeout:    time.Second,
+		cancelSpeech:   func() { ev.add("speech.CancelInstall") },
 	}
 	return f
 }
@@ -209,7 +210,9 @@ func TestShutdownOrder(t *testing.T) {
 		}
 	}
 	got := f.ev.all()[n:]
-	want := []string{"runner.Stop", "recordings.Close", "recordings.Recover returned", "close storage", "release lock"}
+	// A running speech install is cancelled first, so its download does not write during the shutdown.
+	want := []string{"speech.CancelInstall", "runner.Stop", "recordings.Close", "recordings.Recover returned", "close storage",
+		"release lock"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("shutdown order %v, want %v", got, want)
 	}
@@ -220,7 +223,7 @@ func TestShutdownWithoutStart(t *testing.T) {
 	if err := f.life.shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"runner.Stop", "recordings.Close", "close storage", "release lock"}
+	want := []string{"speech.CancelInstall", "runner.Stop", "recordings.Close", "close storage", "release lock"}
 	if got := f.ev.all(); !slices.Equal(got, want) {
 		t.Fatalf("shutdown %v, want %v", got, want)
 	}
@@ -238,13 +241,15 @@ func TestStartUnwinds(t *testing.T) {
 		{
 			name:  "job recovery fails",
 			setup: func(f *lifeFakes) { f.runner.recoverErr = boom },
-			want:  []string{"cleanup work", "cleanup temp", "runner.Recover", "runner.Stop", "recordings.Close"},
+			want: []string{"cleanup work", "cleanup temp", "runner.Recover", "speech.CancelInstall", "runner.Stop",
+				"recordings.Close"},
 		},
 		{
 			name:  "worker start fails",
 			setup: func(f *lifeFakes) { f.runner.startErr = boom },
 			want: []string{"cleanup work", "cleanup temp", "runner.Recover", "deliveries.Recover", "deliveries.Resume",
-				"transcriptions.EnqueuePending", "runner.Start", "runner.Stop", "recordings.Close", "recordings.Recover returned"},
+				"transcriptions.EnqueuePending", "runner.Start", "speech.CancelInstall", "runner.Stop", "recordings.Close",
+				"recordings.Recover returned"},
 		},
 	}
 	for _, tt := range tests {
