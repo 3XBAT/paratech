@@ -118,14 +118,17 @@ func lessonWriteError(err error) error {
 	return err
 }
 
-// lessonCalendarError adds the sentinel of the use case to the adapter's sign-in classes; the adapter error stays
-// wrapped, so its retry class is kept.
+// lessonCalendarError adds the sentinel of the use case to the adapter's sign-in and access classes; the adapter
+// error stays wrapped, so its retry class is kept.
 func lessonCalendarError(err error) error {
 	switch {
 	case errors.Is(err, googlecal.ErrReauthRequired):
 		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarSignInExpired, err)
 	case errors.Is(err, googlecal.ErrNotSignedIn):
 		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarNotConnected, err)
+	case errors.Is(err, googlecal.ErrForbidden), errors.Is(err, googlecal.ErrUnauthorized),
+		errors.Is(err, googlecal.ErrAuthRejected):
+		return fmt.Errorf("%w: %w", schedulesync.ErrCalendarNoAccess, err)
 	}
 	return err
 }
