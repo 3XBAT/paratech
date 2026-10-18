@@ -205,12 +205,14 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 }
 
 // secretsProfile is the Credential Manager profile of the data directory, which exists by now (ADR-0014): the default
-// names only for the default data dir, so a run on another dir never reads or changes the real secrets. The line is
-// what the smoke run of build-alpha.ps1 checks.
+// names only for the default data dir, so a run on another dir never reads or changes the real secrets. The info line
+// is what the smoke run of build-alpha.ps1 checks. The id hashes a predictable path with the user name in it, so like
+// the paths it is only at debug level.
 func (a *App) secretsProfile() wincred.Profile {
 	profile := wincred.ProfileFor(a.cfg.DataDir, a.cfg.DefaultDataDir)
 	if profile.Isolated() {
-		a.log.Info("credential manager profile", "secrets_profile", "isolated", "secrets_profile_id", string(profile))
+		a.log.Info("credential manager profile", "secrets_profile", "isolated")
+		a.log.Debug("credential manager profile id", "secrets_profile_id", string(profile))
 	} else {
 		a.log.Info("credential manager profile", "secrets_profile", "default")
 	}

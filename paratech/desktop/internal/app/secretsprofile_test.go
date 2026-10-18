@@ -109,7 +109,7 @@ func TestOpenCoreSecretsProfile(t *testing.T) {
 		{"default dir", def, def, wincred.DefaultProfile, "secrets_profile=default"},
 		{"default dir with a trailing separator", def + string(filepath.Separator), def, wincred.DefaultProfile, "secrets_profile=default"},
 		{"default dir spelled with ..", filepath.Join(other, "..", "LearningAssistant"), def, wincred.DefaultProfile, "secrets_profile=default"},
-		{"other dir", other, def, isolated, "secrets_profile=isolated secrets_profile_id=" + string(isolated)},
+		{"other dir", other, def, isolated, "secrets_profile=isolated"},
 		{"new dir created by the app", filepath.Join(base, "new"), def, "", "secrets_profile=isolated"},
 		{"default unknown", def, "", wincred.ProfileFor(def, ""), "secrets_profile=isolated"},
 	}
@@ -118,7 +118,7 @@ func TestOpenCoreSecretsProfile(t *testing.T) {
 			a, f := newTestAppWith(t, c.dataDir)
 			a.cfg.DefaultDataDir = c.defaultDir
 			var logs syncBuffer
-			a.log = slog.New(slog.NewTextHandler(&logs, nil))
+			a.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 			if _, err := a.openCore(context.Background()); err != nil {
 				t.Fatal(err)
@@ -133,8 +133,24 @@ func TestOpenCoreSecretsProfile(t *testing.T) {
 					t.Errorf("%s store opened in profile %q (%v), want %q", service, got, ok, want)
 				}
 			}
-			if out := logs.String(); !strings.Contains(out, c.wantLog) {
+			out := logs.String()
+			if !strings.Contains(out, c.wantLog) {
 				t.Errorf("log has no %q:\n%s", c.wantLog, out)
+			}
+			// The id hashes a path with the user name: only a debug line of an isolated profile has it.
+			wantID := "secrets_profile_id=" + string(want)
+			var idLines int
+			for _, line := range strings.Split(out, "\n") {
+				if !strings.Contains(line, "secrets_profile_id") {
+					continue
+				}
+				idLines++
+				if !strings.Contains(line, "level=DEBUG") || !strings.Contains(line, wantID) {
+					t.Errorf("profile id line %q, want level=DEBUG and %q", line, wantID)
+				}
+			}
+			if wantLines := map[bool]int{true: 1, false: 0}[want.Isolated()]; idLines != wantLines {
+				t.Errorf("%d lines with the profile id, want %d:\n%s", idLines, wantLines, out)
 			}
 		})
 	}
