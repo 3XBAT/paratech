@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -193,10 +195,11 @@ func (r *reporter) checkpoints() []string {
 	return out
 }
 
-// engineFunc is an STTEngine from a function, for behaviour FakeSTT does not have.
+// engineFunc is an STTEngine from a function, for behaviour FakeSTT does not have; it reports no live segments.
 type engineFunc func(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(int)) error
 
-func (f engineFunc) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(int)) error {
+func (f engineFunc) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(int),
+	_ func(transcript.Segment)) error {
 	return f(ctx, audio, model, output, progress)
 }
 
@@ -210,6 +213,7 @@ type env struct {
 	models      *fakeModels
 	events      *fakeEvents
 	clock       *testenv.FakeClock
+	live        *fakeLive
 	rec         *recording.Recording
 	model       *sttmodel.Model
 	doc         transcript.Document
@@ -219,7 +223,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{
 		artifacts: testenv.NewMemArtifacts(), transcripts: newFakeTranscripts(), events: &fakeEvents{},
-		clock: testenv.NewFakeClock(t0),
+		clock: testenv.NewFakeClock(t0), live: newFakeLive(),
 	}
 	e.rec = completedRecording(t, "rec-1")
 	e.model = installedModel(t, "m-1")
@@ -241,7 +245,7 @@ func (e *env) rebuild(t *testing.T, engine STTEngine) {
 	t.Helper()
 	svc, err := New(Deps{
 		Engine: engine, Transcripts: e.transcripts, Recordings: e.recordings, Models: e.models, Artifacts: e.artifacts,
-		Events: e.events, Clock: e.clock,
+		Events: e.events, Clock: e.clock, Live: e.live,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,4 +336,72 @@ func docRef(t *testing.T) shared.ArtifactRef {
 		t.Fatal(err)
 	}
 	return ref
+}
+
+// fakeLive keeps live parts per recording by number, like the sqlite upsert; saveErr fails the next saves.
+type fakeLive struct {
+	mu        sync.Mutex
+	parts     map[shared.RecordingID]map[int]transcript.Part
+	batches   []int // sizes of the successful saves
+	saveErr   error
+	deleteErr error
+	deletes   []shared.RecordingID
+}
+
+func newFakeLive() *fakeLive {
+	return &fakeLive{parts: map[shared.RecordingID]map[int]transcript.Part{}}
+}
+
+func (f *fakeLive) SaveParts(ctx context.Context, rec shared.RecordingID, parts []transcript.Part) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	if f.parts[rec] == nil {
+		f.parts[rec] = map[int]transcript.Part{}
+	}
+	for _, p := range parts {
+		f.parts[rec][p.Seq()] = p
+	}
+	f.batches = append(f.batches, len(parts))
+	return nil
+}
+
+func (f *fakeLive) DeleteParts(_ context.Context, rec shared.RecordingID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletes = append(f.deletes, rec)
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	delete(f.parts, rec)
+	return nil
+}
+
+func (f *fakeLive) failSaves(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saveErr = err
+}
+
+// stored returns the texts of the stored parts of rec in number order and the save batch sizes.
+func (f *fakeLive) stored(rec shared.RecordingID) ([]string, []int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seqs := slices.Sorted(maps.Keys(f.parts[rec]))
+	texts := make([]string, 0, len(seqs))
+	for _, n := range seqs {
+		texts = append(texts, f.parts[rec][n].Segment().Text)
+	}
+	return texts, append([]int(nil), f.batches...)
+}
+
+func (f *fakeLive) deleted() []shared.RecordingID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]shared.RecordingID(nil), f.deletes...)
 }

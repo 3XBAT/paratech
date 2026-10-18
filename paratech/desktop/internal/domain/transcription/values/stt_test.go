@@ -57,3 +57,9 @@ func TestNewSTTRequestRejectsInvalidID(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalidSTTRequest", err)
 	}
 }
+
+func TestSTTJobKeyPrefix(t *testing.T) {
+	if got := STTJobKeyPrefix("rec-1"); got != "stt:rec-1:" {
+		t.Fatalf("STTJobKeyPrefix = %q, want %q", got, "stt:rec-1:")
+	}
+}

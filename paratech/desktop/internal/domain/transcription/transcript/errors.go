@@ -12,4 +12,10 @@ var (
 
 	// ErrInvalidLanguage is returned for a language code that is not 2 to 8 lowercase ASCII letters.
 	ErrInvalidLanguage = errors.New("invalid language code")
+
+	// ErrUnknownFormat is returned for an export format other than txt and md.
+	ErrUnknownFormat = errors.New("unknown transcript export format")
+
+	// ErrExportTooLarge is returned by Render when the result would exceed MaxExportBytes.
+	ErrExportTooLarge = errors.New("transcript export too large")
 )

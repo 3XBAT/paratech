@@ -33,6 +33,7 @@ import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
 import { SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import { TranscriptLinks } from "./TranscriptLinks";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
 // instructions with «Сгенерировать заново», the version history, the export to a file and the send by email through
@@ -488,6 +489,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         <span className="muted num">{dueText(a.due)}</span>
       </div>
       {a.description !== "" && <p className="hw-desc">{a.description}</p>}
+      <TranscriptLinks lessonId={a.lessonId} />
 
       <Card className="box">
         <h2>Черновик</h2>

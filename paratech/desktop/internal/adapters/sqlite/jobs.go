@@ -519,3 +519,13 @@ func jobBoolInt(b bool) int64 {
 	}
 	return 0
 }
+
+// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix (for
+// example every STT job of one recording); none wraps shared.ErrNotFound.
+func (r *JobRepository) LatestByKeyPrefix(ctx context.Context, typ job.Type, prefix string) (*job.Job, error) {
+	row, err := r.db.Queries(ctx).LatestJobByKeyPrefix(ctx, sqlcgen.LatestJobByKeyPrefixParams{Type: string(typ), Prefix: prefix})
+	if err != nil {
+		return nil, MapError(ctx, err)
+	}
+	return jobFromRow(row)
+}

@@ -190,3 +190,11 @@ type Transcript struct {
 	Version      int64
 	CreatedAt    int64
 }
+
+type TranscriptPart struct {
+	RecordingID string
+	Seq         int64
+	StartMs     int64
+	EndMs       int64
+	Text        string
+}

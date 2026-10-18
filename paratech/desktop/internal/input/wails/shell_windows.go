@@ -4,6 +4,7 @@ package wails
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -37,7 +38,9 @@ func (s *Shell) run(ctx context.Context) error {
 	allowForegroundHandOff()
 
 	// The single-instance callback runs after New returns; it reads u under the shell lock through ShowMain.
-	app := application.New(appOptions(s.opts, func() { _ = s.ShowMain() }))
+	opts := appOptions(s.opts, func() { _ = s.ShowMain() })
+	media := withMedia(&opts, s.opts.Log)
+	app := application.New(opts)
 
 	// Only the first instance gets here, so a second launch never opens the database (ADR-0007).
 	b, err := s.OpenServices(ctx)
@@ -57,6 +60,8 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Diagnostics))
 	app.RegisterService(application.NewService(b.Help))
 	app.RegisterService(application.NewService(b.Homework))
+	app.RegisterService(application.NewService(b.Transcript))
+	media.setSource(b.Transcript.uc) // the media handler plays recordings through the transcript use case
 
 	u := &windowsUI{app: app}
 	var offs []func()
@@ -124,6 +129,14 @@ func appOptions(opts Options, onSecondInstance func()) application.Options {
 			},
 		},
 	}
+}
+
+// withMedia puts the player of the recordings in front of the asset handler; until the core is open (setSource) the
+// recordings are not found.
+func withMedia(opts *application.Options, log *slog.Logger) *mediaHandler {
+	media := newMediaHandler(opts.Assets.Handler, log)
+	opts.Assets.Handler = media
+	return media
 }
 
 // asfwAny is ASFW_ANY of AllowSetForegroundWindow.

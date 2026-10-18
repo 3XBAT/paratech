@@ -83,7 +83,7 @@ func TestTranscribeCancelKillsProcessTree(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := f.eng.Transcribe(ctx, f.audio(t), model, outRef(t, "x.json"), func(int) { cancel() })
+	err := f.eng.Transcribe(ctx, f.audio(t), model, outRef(t, "x.json"), func(int) { cancel() }, nil)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)

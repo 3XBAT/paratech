@@ -145,3 +145,13 @@ WHERE j.id IS NOT NULL
   AND j.type IN (SELECT value FROM json_each(CAST(sqlc.arg(transcript_types) AS TEXT)))
   AND t.recording_id IN (SELECT value FROM json_each(CAST(sqlc.arg(recordings) AS TEXT)))
 ORDER BY j.created_at, j.id;
+
+-- The newest job of the type whose idempotency key starts with the prefix, in any status (TASK-079: the STT job of a
+-- recording for the transcript viewer). Same exact prefix comparison as HasJobKeyPrefix.
+-- name: LatestJobByKeyPrefix :one
+SELECT * FROM jobs
+WHERE type = sqlc.arg(type)
+  AND id IS NOT NULL
+  AND substr(idempotency_key, 1, length(CAST(sqlc.arg(prefix) AS TEXT))) = CAST(sqlc.arg(prefix) AS TEXT)
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

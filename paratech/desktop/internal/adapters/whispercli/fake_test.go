@@ -36,6 +36,7 @@ const (
 	modeSpam     = "spam"
 	modeEmpty    = "empty"
 	modeFlood    = "flood"
+	modeLive     = "live"
 )
 
 // Exit codes of the fake that point at a broken argument vector.
@@ -197,6 +198,29 @@ func fakeWhisper(args []string) int {
 		writeFile(result, whisperJSON(a.model, []fakeSeg{{0, 1000, "flood"}}))
 		return 0
 
+	case modeLive:
+		// The segment lines of whisper_print_segment_callback, written piecemeal like a flushed printf, between
+		// lines the adapter must drop.
+		writeOut("\n")
+		for _, chunk := range []string{
+			"[00:00:00.000 --> 00:00:02.500]  Привет",
+			", мир.\r\n",
+			"not a segment line\n",
+			"[00:00:02.500 --> 00:00:04.000]  ",
+			"\xd0", "\x9f", "ока\n",
+			"[00:00:01.000 --> 00:00:01.500]  earlier start\n",
+			"[00:00:05.000 --> 00:00:06.000]  " + strings.Repeat("x", 20<<10) + "\n",
+			"[00:00:06.000 --> 00:00:07.000]  bad \xff byte\n",
+			"[00:00:07.000 --> 00:00:08.000]   \n",
+			"[01:02:03.004 --> 01:02:05.000]  last",
+		} {
+			writeOut(chunk)
+			time.Sleep(time.Millisecond)
+		}
+		writeOut("\n")
+		writeFile(result, whisperJSON(a.model, []fakeSeg{{0, 2500, " Привет, мир."}, {2500, 4000, " Пока"}}))
+		return 0
+
 	case modeGarbage:
 		writeFile(result, "not json {")
 		return 0
@@ -289,6 +313,11 @@ func native(s string) string {
 		return n
 	}
 	return s
+}
+
+// writeOut writes s to stdout as one write, like a flushed printf.
+func writeOut(s string) {
+	_, _ = os.Stdout.WriteString(s)
 }
 
 func writeFile(path, content string) {

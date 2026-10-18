@@ -88,6 +88,7 @@ type sttEnv struct {
 type sttOptions struct {
 	engine func(store *filestore.Store) transcribe.STTEngine
 	power  jobrunner.PowerMonitor
+	live   bool // store the live transcript parts (TASK-079)
 }
 
 func newSTTEnv(t *testing.T) *sttEnv {
@@ -127,10 +128,14 @@ func newSTTEnvWith(t *testing.T, opts sttOptions) *sttEnv {
 		}
 	}
 
-	e.stt, err = transcribe.New(transcribe.Deps{
+	sttDeps := transcribe.Deps{
 		Engine: engine, Transcripts: e.transcripts, Recordings: e.recordings, Models: e.models, Artifacts: store,
 		Events: e.events, Clock: e.clock,
-	})
+	}
+	if opts.live {
+		sttDeps.Live = sqlite.NewTranscriptParts(e.db)
+	}
+	e.stt, err = transcribe.New(sttDeps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,9 +446,10 @@ type pacedSTT struct {
 	next    chan struct{}
 }
 
-func (p *pacedSTT) Transcribe(ctx context.Context, audio, model, out shared.ArtifactRef, progress func(percent int)) error {
+func (p *pacedSTT) Transcribe(ctx context.Context, audio, model, out shared.ArtifactRef, progress func(percent int),
+	segment func(transcript.Segment)) error {
 	if !p.paced.Load() {
-		return p.FakeSTT.Transcribe(ctx, audio, model, out, progress)
+		return p.FakeSTT.Transcribe(ctx, audio, model, out, progress, segment)
 	}
 	progress(10)
 	p.started <- struct{}{}

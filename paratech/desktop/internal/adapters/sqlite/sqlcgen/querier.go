@@ -13,12 +13,14 @@ type Querier interface {
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
 	// Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
 	CountJobsWithoutIDByStatus(ctx context.Context, statuses []string) (int64, error)
+	CountTranscriptParts(ctx context.Context, recordingID string) (int64, error)
 	// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
 	// (ON DELETE RESTRICT), and the row is kept.
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
+	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
 	// Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
 	// deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
@@ -93,6 +95,11 @@ type Querier interface {
 	LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error)
 	// The number of the latest stored version, 0 when none; the repository inserts only the versions above it.
 	LatestDraftRevision(ctx context.Context, assignmentID string) (int64, error)
+	// The newest job of the type whose idempotency key starts with the prefix, in any status (TASK-079: the STT job of a
+	// recording for the transcript viewer). Same exact prefix comparison as HasJobKeyPrefix.
+	LatestJobByKeyPrefix(ctx context.Context, arg LatestJobByKeyPrefixParams) (Job, error)
+	// The newest transcript of a recording (TASK-079: the transcript viewer); idx_transcripts_recording serves it.
+	LatestTranscriptByRecording(ctx context.Context, recordingID string) (Transcript, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
@@ -126,6 +133,8 @@ type Querier interface {
 	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
+	// One page in number order; the primary key serves the order.
+	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
 	ListTranscriptRefsByRecording(ctx context.Context, recordingID string) ([]string, error)
 	// Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
@@ -169,6 +178,9 @@ type Querier interface {
 	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
 	// stale save cannot undo ON DELETE SET NULL of the model.
 	UpdateTranscript(ctx context.Context, arg UpdateTranscriptParams) (int64, error)
+	// Live transcript parts (TASK-079). A row is replaced by (recording_id, seq): a rerun of the engine numbers from 0
+	// again. The STT job deletes the rows of a recording once its transcript is stored.
+	UpsertTranscriptPart(ctx context.Context, arg UpsertTranscriptPartParams) error
 }
 
 var _ Querier = (*Queries)(nil)

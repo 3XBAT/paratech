@@ -128,3 +128,25 @@ func TestAppOptionsLoggerHasNoDebug(t *testing.T) {
 		t.Error("the Wails logger must keep Info")
 	}
 }
+
+// The asset server plays the recordings and serves the pages as before.
+func TestAppOptionsServeMedia(t *testing.T) {
+	opts := appOptions(validOptions(), func() {})
+	media := withMedia(&opts, slog.New(slog.DiscardHandler))
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		opts.Assets.Handler.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
+		return rec
+	}
+	if rec := get(popupPage); rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d", popupPage, rec.Code)
+	}
+	if rec := get("/media/recording/r1"); rec.Code != http.StatusNotFound {
+		t.Fatalf("before the core is open: %d, want 404", rec.Code)
+	}
+	media.setSource(&fakeAudio{data: []byte("RIFF")})
+	if rec := get("/media/recording/r1"); rec.Code != http.StatusOK || rec.Body.String() != "RIFF" {
+		t.Fatalf("after the core is open: %d %q", rec.Code, rec.Body.String())
+	}
+}

@@ -14,6 +14,10 @@ import (
 // contexts do not import each other (ARCH-11), so the name is defined here and converted by the use cases.
 const STTJobType = "stt"
 
+// STTJobKeyPrefix is the start of the idempotency key of every STT job of rec, "stt:<recording id>:"; the pinned
+// model id follows it. The enqueue builds keys with it and readers find the jobs of a recording by it.
+func STTJobKeyPrefix(rec shared.RecordingID) string { return STTJobType + ":" + string(rec) + ":" }
+
 // STTRequest is the payload of an STT job: ids only (no audio, no paths, no settings). The model is not part of
 // it: the job pins it in its own column (AC-08).
 type STTRequest struct {

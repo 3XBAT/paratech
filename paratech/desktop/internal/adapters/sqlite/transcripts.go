@@ -12,8 +12,9 @@ import (
 
 // Operation names of the transcript repository, used in its error messages.
 const (
-	opGetTranscript  = "sqlite: get transcript"
-	opSaveTranscript = "sqlite: save transcript"
+	opGetTranscript    = "sqlite: get transcript"
+	opSaveTranscript   = "sqlite: save transcript"
+	opLatestTranscript = "sqlite: latest transcript of recording"
 )
 
 // TranscriptRepository stores transcripts (the transcribe.TranscriptRepository port). Validation stays in
@@ -33,6 +34,20 @@ func (r *TranscriptRepository) Get(ctx context.Context, id shared.TranscriptID) 
 	t, err := transcriptFromRow(row)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opGetTranscript, id, err)
+	}
+	return t, nil
+}
+
+// LatestByRecording loads the newest transcript of the recording; none wraps shared.ErrNotFound.
+func (r *TranscriptRepository) LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error) {
+	row, err := r.db.Queries(ctx).LatestTranscriptByRecording(ctx, string(rec))
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opLatestTranscript, rec, MapError(ctx, err))
+	}
+
+	t, err := transcriptFromRow(row)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opLatestTranscript, rec, err)
 	}
 	return t, nil
 }

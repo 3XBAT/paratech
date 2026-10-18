@@ -31,6 +31,8 @@
     "src/googleView.ts",
     "src/calendarView.ts",
     "src/homeworkView.ts",
+    "src/bindings/transcript.ts",
+    "src/transcriptView.ts",
     "src/pages/HomeworkDialogs.tsx",
     "src/popup/view.ts",
     "src/nav.ts",

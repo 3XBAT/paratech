@@ -123,6 +123,34 @@ func (s *Store) Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser
 	return f, nil
 }
 
+// OpenSeekable returns a seekable reader of a regular file and its size, both from the open handle, for serving a
+// recording with byte ranges (TASK-079). A missing file yields shared.ErrNotFound; the caller closes the reader.
+func (s *Store) OpenSeekable(ctx context.Context, ref shared.ArtifactRef) (io.ReadSeekCloser, int64, error) {
+	rel, fi, err := s.lookup(ctx, opOpen, ref, false)
+	if err != nil {
+		return nil, 0, err
+	}
+	if fi.IsDir() {
+		return nil, 0, isDirErr(ref)
+	}
+
+	f, err := s.root.Open(rel)
+	if err != nil {
+		return nil, 0, mapErr(opOpen, ref, err)
+	}
+	// Checked again on the handle: the file may have been replaced since the lookup.
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		_ = f.Close()
+		if err == nil {
+			return nil, 0, isDirErr(ref)
+		}
+		return nil, 0, mapErr(opOpen, ref, err)
+	}
+
+	return f, st.Size(), nil
+}
+
 // Size returns the size of the file in bytes.
 func (s *Store) Size(ctx context.Context, ref shared.ArtifactRef) (int64, error) {
 	_, fi, err := s.lookup(ctx, opSize, ref, false)

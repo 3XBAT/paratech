@@ -66,6 +66,31 @@ func (q *Queries) InsertTranscript(ctx context.Context, arg InsertTranscriptPara
 	return err
 }
 
+const latestTranscriptByRecording = `-- name: LatestTranscriptByRecording :one
+SELECT id, recording_id, model_id, model_name, model_version, language, text_ref, version, created_at FROM transcripts
+WHERE recording_id = ?1
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+// The newest transcript of a recording (TASK-079: the transcript viewer); idx_transcripts_recording serves it.
+func (q *Queries) LatestTranscriptByRecording(ctx context.Context, recordingID string) (Transcript, error) {
+	row := q.db.QueryRowContext(ctx, latestTranscriptByRecording, recordingID)
+	var i Transcript
+	err := row.Scan(
+		&i.ID,
+		&i.RecordingID,
+		&i.ModelID,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.Language,
+		&i.TextRef,
+		&i.Version,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateTranscript = `-- name: UpdateTranscript :execrows
 UPDATE transcripts
 SET language = ?1,

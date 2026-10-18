@@ -20,12 +20,13 @@ import (
 
 var contractTables = []string{
 	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "proposals", "recordings",
-	"schedule_entries", "settings", "stt_models", "summaries", "transcripts",
+	"schedule_entries", "settings", "stt_models", "summaries", "transcript_parts", "transcripts",
 }
 
 // unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version
 // column (ADR-0004(d)). Draft versions are append-only rows below homework_drafts, which carries the version.
-var unversionedTables = map[string]bool{"homework_draft_revisions": true}
+// Live transcript parts are replaced by their number, never saved through an aggregate (TASK-079).
+var unversionedTables = map[string]bool{"homework_draft_revisions": true, "transcript_parts": true}
 
 func tableNames(t *testing.T, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -75,8 +76,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 8 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 8", first, err)
+	if err != nil || first != 9 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 9", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -186,7 +187,7 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 		notify_on_processing_complete, hub_url, recording_source_app, version, updated_at)
 		VALUES (1, 0, 1, 0, 'https://hub.example', 'zoom.exe', 4, 9)`)
 
-	if err := db.Migrate(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 8); err != nil {
 		t.Fatalf("migrate to 8: %v", err)
 	}
 	if v, err := db.SchemaVersion(ctx); err != nil || v != 8 {
