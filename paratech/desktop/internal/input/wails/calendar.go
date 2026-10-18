@@ -44,6 +44,12 @@ const (
 	msgCalendarSyncScheduled = "Синхронизация уже запланирована."
 	msgCalendarSignInFirst   = "Сначала войдите в Google."
 	msgCalendarSyncFailed    = "Не удалось запустить синхронизацию."
+
+	// Result of the last finished sync, shown after «Последняя синхронизация: <date, time>».
+	msgLastRunOK            = "Успешно."
+	msgLastRunSignInExpired = "Ошибка: вход в Google истёк — войдите снова."
+	msgLastRunNotSignedIn   = "Не выполнена: нет входа в Google."
+	msgLastRunFailed        = "Ошибка: синхронизация не удалась."
 )
 
 // CalendarSyncUseCase is the calendar synchronization of the Google section (ARCH-42).
@@ -63,6 +69,15 @@ type CalendarSyncState struct {
 	// LastOutcome is the last run since the app started: "", "ok", "notSignedIn", "signInExpired" or "failed".
 	LastOutcome string `json:"lastOutcome"`
 	Message     string `json:"message"` // one fixed line that sums the state up
+
+	// The last finished sync job, also of an earlier start of the app (TASK-074). LastRunAt is its end in RFC 3339
+	// UTC, "" if none finished; LastRunOutcome takes the values of LastOutcome; LastRunText is a fixed line of the
+	// result, "" if none.
+	LastRunAt       string `json:"lastRunAt"`
+	LastRunOK       bool   `json:"lastRunOk"`
+	LastRunAttempts int    `json:"lastRunAttempts"`
+	LastRunOutcome  string `json:"lastRunOutcome"`
+	LastRunText     string `json:"lastRunText"`
 }
 
 // CalendarSyncResult answers «Синхронизировать»: OK, a fixed text and the state afterwards.
@@ -121,6 +136,11 @@ func (s *GoogleCalendarService) state(ctx context.Context) CalendarSyncState {
 	if !st.LastWrittenAt.IsZero() {
 		out.LastSyncedAt = st.LastWrittenAt.UTC().Format(time.RFC3339)
 	}
+	if !st.LastRun.At.IsZero() {
+		out.LastRunAt = st.LastRun.At.UTC().Format(time.RFC3339)
+		out.LastRunOK, out.LastRunAttempts = st.LastRun.OK(), st.LastRun.Attempts
+		out.LastRunOutcome, out.LastRunText = string(st.LastRun.Outcome), lastRunText(st.LastRun.Outcome)
+	}
 	out.Message = calendarMessage(out)
 	return out
 }
@@ -139,7 +159,24 @@ func calendarJobState(s job.Status) string {
 	return calendarQueued // QUEUED, or waiting for power or quota: it runs later by itself
 }
 
+func lastRunText(o schedulesync.SyncOutcome) string {
+	switch o {
+	case schedulesync.OutcomeOK:
+		return msgLastRunOK
+	case schedulesync.OutcomeSignInExpired:
+		return msgLastRunSignInExpired
+	case schedulesync.OutcomeNotSignedIn:
+		return msgLastRunNotSignedIn
+	}
+	return msgLastRunFailed
+}
+
 func calendarMessage(st CalendarSyncState) string {
+	// The run of this process, else the last finished job: after a restart the failure is still reported.
+	outcome := st.LastOutcome
+	if outcome == "" {
+		outcome = st.LastRunOutcome
+	}
 	switch {
 	case st.State == calendarRunning:
 		return msgCalendarRunning
@@ -149,11 +186,11 @@ func calendarMessage(st CalendarSyncState) string {
 		return msgCalendarRetrying
 	case st.State == calendarQueued:
 		return msgCalendarQueued
-	case !st.SignedIn && st.LastOutcome == string(schedulesync.OutcomeSignInExpired):
+	case !st.SignedIn && outcome == string(schedulesync.OutcomeSignInExpired):
 		return msgCalendarSignInAgain
 	case !st.SignedIn:
 		return msgCalendarSignIn
-	case st.LastOutcome == string(schedulesync.OutcomeFailed):
+	case outcome == string(schedulesync.OutcomeFailed):
 		return msgCalendarFailed
 	case st.PendingMore:
 		return fmt.Sprintf(msgCalendarPendingMore, st.Pending)

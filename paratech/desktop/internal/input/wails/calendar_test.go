@@ -63,9 +63,84 @@ func TestGoogleCalendarStatusJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"signedIn":true,"pending":3,"pendingMore":false,"lastSyncedAt":"2026-10-16T06:30:00Z","state":"idle",` +
-		`"lastOutcome":"ok","message":"Ждут синхронизации занятий: 3."}`
+		`"lastOutcome":"ok","message":"Ждут синхронизации занятий: 3.",` +
+		`"lastRunAt":"","lastRunOk":false,"lastRunAttempts":0,"lastRunOutcome":"","lastRunText":""}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s\nwant   %s", raw, want)
+	}
+}
+
+// The last finished sync job: its end in UTC, the attempts and a fixed line of the result (TASK-074).
+func TestGoogleCalendarStatusLastRun(t *testing.T) {
+	at := time.Date(2026, 10, 16, 9, 30, 0, 0, time.FixedZone("MSK", 3*3600))
+	lastRun := func(o schedulesync.SyncOutcome, attempts int) schedulesync.LastRun {
+		return schedulesync.LastRun{At: at, Attempts: attempts, Outcome: o}
+	}
+	tests := []struct {
+		name string
+		st   schedulesync.CalendarStatus
+		want CalendarSyncState
+	}{
+		{
+			name: "none finished",
+			st:   schedulesync.CalendarStatus{SignedIn: true},
+			want: CalendarSyncState{SignedIn: true, State: "idle", Message: msgCalendarSynced},
+		},
+		{
+			name: "ok after three attempts",
+			st:   schedulesync.CalendarStatus{SignedIn: true, LastRun: lastRun(schedulesync.OutcomeOK, 3)},
+			want: CalendarSyncState{
+				SignedIn: true, State: "idle", Message: msgCalendarSynced, LastRunAt: "2026-10-16T06:30:00Z",
+				LastRunOK: true, LastRunAttempts: 3, LastRunOutcome: "ok", LastRunText: "Успешно.",
+			},
+		},
+		{
+			name: "failed in an earlier start",
+			st:   schedulesync.CalendarStatus{SignedIn: true, Pending: 2, LastRun: lastRun(schedulesync.OutcomeFailed, 5)},
+			want: CalendarSyncState{
+				SignedIn: true, Pending: 2, State: "idle", Message: msgCalendarFailed, LastRunAt: "2026-10-16T06:30:00Z",
+				LastRunAttempts: 5, LastRunOutcome: "failed", LastRunText: "Ошибка: синхронизация не удалась.",
+			},
+		},
+		{
+			name: "sign-in expired",
+			st: schedulesync.CalendarStatus{
+				LastOutcome: schedulesync.OutcomeSignInExpired, LastRun: lastRun(schedulesync.OutcomeSignInExpired, 1),
+			},
+			want: CalendarSyncState{
+				State: "idle", LastOutcome: "signInExpired", Message: msgCalendarSignInAgain,
+				LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1, LastRunOutcome: "signInExpired",
+				LastRunText: "Ошибка: вход в Google истёк — войдите снова.",
+			},
+		},
+		{
+			name: "not signed in",
+			st:   schedulesync.CalendarStatus{LastRun: lastRun(schedulesync.OutcomeNotSignedIn, 1)},
+			want: CalendarSyncState{
+				State: "idle", Message: msgCalendarSignIn, LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1,
+				LastRunOutcome: "notSignedIn", LastRunText: "Не выполнена: нет входа в Google.",
+			},
+		},
+		{
+			name: "the run of this process decides the message",
+			st: schedulesync.CalendarStatus{
+				SignedIn: true, LastOutcome: schedulesync.OutcomeOK, LastRun: lastRun(schedulesync.OutcomeFailed, 1),
+			},
+			want: CalendarSyncState{
+				SignedIn: true, State: "idle", LastOutcome: "ok", Message: msgCalendarSynced,
+				LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1, LastRunOutcome: "failed",
+				LastRunText: "Ошибка: синхронизация не удалась.",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewGoogleCalendarService(&fakeCalendarSync{status: tt.st}, discard())
+			got, err := s.GoogleCalendarStatus(context.Background())
+			if err != nil || got != tt.want {
+				t.Fatalf("GoogleCalendarStatus = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
 	}
 }
 
