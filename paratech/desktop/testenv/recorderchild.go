@@ -57,6 +57,8 @@ const (
 	RecorderNoDevice = "nodevice"
 	// RecorderBadLevels writes level events out of range or without a level first.
 	RecorderBadLevels = "badlevels"
+	// RecorderNoStart answers a level check with "stopped" and no "started", as a broken child would.
+	RecorderNoStart = "nostart"
 )
 
 // RecorderCrashPackets is when RecorderCrash exits: 40 s of audio, one closed chunk and one partial.
@@ -113,6 +115,8 @@ func RunFakeRecorderChild(args []string, getenv func(string) string) (code int, 
 			src.FailAfter = 100
 		case RecorderHang:
 			return hangAfterStart(), true
+		case RecorderNoStart:
+			return stopWithoutStart(), true
 		case RecorderDeaf:
 			stdin = io.MultiReader(os.Stdin, blockingReader{})
 		case RecorderSlowStart:
@@ -156,6 +160,15 @@ func hangAfterStart() int {
 	for {
 		time.Sleep(time.Hour) // a sleeping process, not a deadlock the runtime would end
 	}
+}
+
+// stopWithoutStart reads the request and reports "stopped" without a start.
+func stopWithoutStart() int {
+	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
+		return 1
+	}
+	fmt.Println(`{"type":"stopped"}`)
+	return 0
 }
 
 // blockingReader never returns.

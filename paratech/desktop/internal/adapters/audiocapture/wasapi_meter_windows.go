@@ -9,8 +9,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// The Windows side of the diagnostics (TASK-058): the friendly name of an output device (IPropertyStore) and the audio meters the healthy-but-mute detector reads (IAudioMeterInformation). Everything runs
-// on a COM thread and releases every interface it gets.
+// The Windows side of the diagnostics (TASK-058): the friendly name of an output device (IPropertyStore) and the
+// audio meters the healthy-but-mute detector reads (IAudioMeterInformation). Everything runs on a COM thread and
+// releases every interface it gets.
 
 // iidIAudioMeterInformation is from the Windows SDK endpointvolume.h; mingw-w64 only declares the interface, so the
 // value is not checked against a header here (docs/refs/audio.md). A wrong value would only make every QueryInterface

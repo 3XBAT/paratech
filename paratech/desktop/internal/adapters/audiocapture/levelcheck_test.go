@@ -78,7 +78,7 @@ func TestChildLevelCheck(t *testing.T) {
 		{name: "the capture ends by itself", src: source(func(s *testenv.ToneSource) { s.FailAfter = 3 }), target: include,
 			code: audiocapture.ChildExitFailed, last: "failed", cause: "failed", heard: true, streams: 1},
 		{name: "the open never completes", src: source(func(s *testenv.ToneSource) { s.OpenBlock = true }), target: include,
-			code: audiocapture.ChildExitOK, last: "stopped"},
+			code: audiocapture.ChildExitFailed, last: "failed", cause: "failed"},
 		{name: "the stream hangs", src: source(func(s *testenv.ToneSource) { s.HangAfter = 5 }), target: include,
 			code: audiocapture.ChildExitOK, last: "stopped", heard: true, levels: true, streams: 1},
 	}
@@ -169,6 +169,23 @@ func TestChildLevelCheckStops(t *testing.T) {
 	}
 }
 
+// A stop by the parent while the open is pending is not a failure: the check was cancelled, not broken.
+func TestChildLevelCheckStopsAPendingOpen(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	src := source(func(s *testenv.ToneSource) { s.OpenBlock = true })
+	run := startChild(t, context.Background(), src, levelLine(audiocapture.Target{Mode: audiocapture.ModeSystem},
+		time.Minute), audiocapture.ChildConfig{})
+	testenv.Eventually(t, "the open is pending", func() bool { return len(src.Opened()) == 1 }, nil)
+	_ = run.stdin.Close()
+	if code := run.exit(t); code != audiocapture.ChildExitOK {
+		t.Fatalf("exit code %d; events %v", code, run.out.events(t))
+	}
+	events := run.out.events(t)
+	if events[len(events)-1]["type"] != "stopped" {
+		t.Fatalf("last event %v, want stopped", events[len(events)-1])
+	}
+}
+
 func assertNoFiles(t *testing.T, store *audiocapture.TestStore) {
 	t.Helper()
 	err := filepath.WalkDir(store.Root(), func(path string, d os.DirEntry, err error) error {
@@ -227,7 +244,8 @@ func TestRecorderCheckLevels(t *testing.T) {
 		{scenario: testenv.RecorderSilent, end: values.SoundOK, levels: true},
 		{scenario: testenv.RecorderFallback, end: values.SoundOK, heard: true, levels: true},
 		{scenario: testenv.RecorderBadLevels, end: values.SoundOK, heard: true, levels: true},
-		{scenario: testenv.RecorderSlowStart, end: values.SoundOK},
+		{scenario: testenv.RecorderSlowStart, end: values.SoundFailed},
+		{scenario: testenv.RecorderNoStart, end: values.SoundFailed},
 		{scenario: testenv.RecorderUnavailable, end: values.SoundUnsupported},
 		{scenario: testenv.RecorderNoDevice, end: values.SoundNoDevice},
 		{scenario: testenv.RecorderFail, end: values.SoundFailed, heard: true},

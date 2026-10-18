@@ -39,13 +39,18 @@ var ErrSelfTestRunning = errors.New("audiocapture: a sound check is already runn
 // errRecordingStarted stops a running sound check: a recording starts and takes the capture.
 var errRecordingStarted = errors.New("a recording started")
 
+// errCheckTimeUp ends a level check in the child after its duration.
+var errCheckTimeUp = errors.New("the sound check time is up")
+
 // levelCheck runs a level check request in the child: it opens one capture of the target, reports a level event
 // every LevelInterval and ends after the request's duration, when stdin closes or when ctx ends, whichever is first.
 // The stream is always stopped and closed before the last event ("stopped", or "failed" with a sound cause).
 func (c *child) levelCheck(ctx context.Context, stop <-chan struct{}, src Source, req LevelRequest) int {
 	// The child's own bound: it ends even when the parent hangs and never closes stdin.
-	ctx, cancel := context.WithTimeout(ctx, req.Duration)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	ctx, cancelTime := context.WithTimeoutCause(ctx, req.Duration, errCheckTimeUp)
+	defer cancelTime()
 	go func() {
 		select {
 		case <-stop:
@@ -56,7 +61,14 @@ func (c *child) levelCheck(ctx context.Context, stop <-chan struct{}, src Source
 
 	stream, err := src.Open(ctx, req.Target, &childObserver{out: c.out})
 	if err != nil {
-		if ctx.Err() != nil {
+		// A capture that did not start by the end of the check failed (a hung activation is not silence); only a stop
+		// by the parent ends a pending open quietly.
+		switch {
+		case errors.Is(context.Cause(ctx), errCheckTimeUp):
+			c.out.emit(event{Type: evFailed, Cause: string(values.SoundFailed),
+				Reason: shortText(fmt.Sprintf("the capture did not start within %v", req.Duration))})
+			return ChildExitFailed
+		case ctx.Err() != nil:
 			c.out.emit(event{Type: evStopped})
 			return ChildExitOK
 		}
@@ -333,9 +345,10 @@ func (r *Recorder) runLevelCheck(ctx context.Context, req LevelRequest, levels f
 	}
 
 	var (
-		end   values.SoundCause
-		done  = ctx.Done()
-		cause error
+		end     values.SoundCause
+		started bool
+		done    = ctx.Done()
+		cause   error
 	)
 	for {
 		select {
@@ -350,12 +363,18 @@ func (r *Recorder) runLevelCheck(ctx context.Context, req LevelRequest, levels f
 					levels(l)
 				}
 			case evStarted:
+				started = true
 				log.Info("sound check capture started", slog.String("mode", ev.Mode), slog.String("device", ev.Device))
 			case evSwitch:
 				log.Info("sound check capture switched", slog.String("from", ev.From), slog.String("to", ev.To),
 					slog.String("cause", ev.Cause))
 			case evStopped:
+				// Without a start nothing was captured: that is a failure, not silence.
 				end = values.SoundOK
+				if !started {
+					end = values.SoundFailed
+					log.Warn("the sound check child stopped before its capture started")
+				}
 				_ = p.Stdin().Close() // the child is done; a closed stdin lets a lingering one end
 			case evFailed:
 				end = failedCause(ev)
