@@ -4,6 +4,7 @@ package audiocapture
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 	"time"
@@ -49,19 +50,48 @@ func (s *wasapiSource) Open(ctx context.Context, target Target, obs Observer) (S
 	}, target, obs)
 }
 
-// comThread runs body on a locked OS thread in the COM MTA; COM objects are created, used and released there only,
-// and CoUninitialize runs after the last release.
+// comThread runs body on a new goroutine locked to its own OS thread in the COM MTA and waits for it; COM objects
+// are created, used and released there only, and CoUninitialize runs after the last release. Never the caller's
+// thread: in the app the caller may be the main thread, which the UI library initialized as an STA, and
+// CoInitializeEx there fails with RPC_E_CHANGED_MODE.
 func comThread(body func()) error {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	uninit, err := coInitialize()
-	if err != nil {
-		return err
+	type result struct {
+		err      error
+		panicked any
 	}
-	defer uninit()
-	body()
-	return nil
+	done := make(chan result, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		uninit, err := coInitialize()
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		defer uninit()
+		// Every exit sends once: a panic goes back to the caller, whose recover (e.g. the app list) handled it
+		// before; a Goexit in body must not leave the caller waiting.
+		completed := false
+		defer func() {
+			r := recover()
+			switch {
+			case r != nil:
+				done <- result{panicked: r}
+			case !completed:
+				done <- result{err: errors.New("audiocapture: the COM thread exited early")}
+			default:
+				done <- result{}
+			}
+		}()
+		body()
+		completed = true
+	}()
+	r := <-done
+	if r.panicked != nil {
+		panic(r.panicked)
+	}
+	return r.err
 }
 
 // currentVersionKey holds the product texts of Windows; it is only read.
