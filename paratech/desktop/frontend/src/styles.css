@@ -208,35 +208,52 @@ html, body, #root { height: 100%; }
 .clist-card .clist-toggle:hover { color: var(--text); text-decoration: none; }
 .clist-card .clist-footer { margin: 6px 0 0; }
 
-/* Расписание: import preview with count tiles, week dividers and the pinned Apply. */
+/* Расписание: import preview with count tiles, week dividers, day headers and the pinned Apply. */
+.sched > .empty { margin-bottom: 8px; }
+.sched-format { margin-top: 24px; }
+.sched-format h2 { margin-bottom: 8px; }
+.sched-format p.small { margin: 0 0 6px; max-width: 80ch; }
+.sched-format .template { margin: 8px 0 10px; }
 .import-preview { margin-top: 8px; }
 .import-preview .group-title { margin-top: 8px; }
 .import-preview .clist-card .clist-header { margin-top: 14px; }
 .clist-body.lst { margin: 0; padding: 0; list-style: none; }
-.ln { display: grid; grid-template-columns: 190px minmax(0, 1fr) minmax(0, 160px) 80px; gap: 0 12px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.ln { display: block; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.ln-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) minmax(0, 160px) 80px; gap: 0 12px; align-items: center; padding: 7px 16px; }
 .ln:last-child, .ln-text:last-child, .diff:last-child { border-bottom: 0; }
-.ln-when { color: var(--muted); font-size: var(--fs-small); }
+.ln-when { font-weight: 600; font-size: var(--fs-body); overflow-wrap: anywhere; }
 .ln-title, .ln-zone { min-width: 0; overflow-wrap: anywhere; }
 .ln-line { text-align: right; }
-/* The divider spans the whole line above the first lesson of a week. */
-.wk { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; margin: -6px -16px 6px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: var(--fs-label); font-weight: 600; }
+/* Week divider at the top of a week's first row; the day header under it. */
+.wk { display: flex; align-items: center; gap: 12px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: var(--fs-label); font-weight: 600; }
 .wk::after { content: ""; order: 1; flex: 1; height: 5px; background: repeating-linear-gradient(90deg, var(--control) 0 1px, transparent 1px 8px); opacity: .35; }
 .wk .n { order: 2; }
+.ln-day { display: block; padding: 10px 16px 2px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; }
+.ln-day.is-today { color: var(--accent); }
+.ln-row.is-past, .ln-row.is-past .ln-when { color: var(--muted); }
+.ln-row.is-past .ln-when { font-weight: 500; }
+.ln-row.is-today { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.ln-row.is-next { box-shadow: inset 3px 0 0 var(--accent-fill); }
 .ln-text { padding: 7px 16px; border-bottom: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
 .g-errors .ln-text { color: var(--rec-t); }
-.diff { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.diff { display: grid; grid-template-columns: 80px minmax(0, 1fr) 20px minmax(0, 1fr); gap: 4px 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .diff .ln-line { text-align: left; }
 .diff del { color: var(--muted); }
 .diff ins { color: var(--run-t); font-weight: 600; text-decoration: none; }
-.diff-arrow { color: var(--muted); }
+.diff-arrow { color: var(--muted); text-align: center; }
 .preview-group .clist-footer { margin: 6px 0 0; }
 /* Keeps Apply and Cancel at the bottom edge of the window while a long preview scrolls. */
 .sticky-actions { position: sticky; bottom: 0; z-index: 2; margin: 16px -24px 0; padding: 12px 24px; border-top: 1px solid var(--line); background: var(--panel); }
 @container app (max-width: 880px) {
-  .ln { grid-template-columns: minmax(0, 1fr) 70px; }
-  .ln-when, .ln-zone { grid-column: 1 / -1; }
+  .ln-row { grid-template-columns: 104px minmax(0, 1fr) 70px; }
+  /* The zone goes under the title; the file line stays on the first line. */
+  .ln-zone { order: 1; grid-column: 2 / -1; }
   .diff { grid-template-columns: minmax(0, 1fr); }
   .diff-arrow { display: none; }
+}
+@media (forced-colors: active) {
+  .ln-row.is-today { outline: 1px solid CanvasText; outline-offset: -1px; }
+  .ln-row.is-next { border-left: 3px solid Highlight; }
 }
 
 /* Small page parts: paragraphs of a section, a row of buttons, a note, the file template, a checksum. */

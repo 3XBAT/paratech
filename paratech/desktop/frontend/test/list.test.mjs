@@ -121,9 +121,9 @@ function preview(over = {}) {
   };
 }
 
-function page(p, lists = {}) {
+function page(p, lists = {}, now = undefined) {
   return renderToStaticMarkup(
-    h(PreviewView, { preview: p, busy: false, lists, onLists: () => undefined, onApply: () => {}, onCancel: () => {} }),
+    h(PreviewView, { preview: p, busy: false, lists, onLists: () => undefined, onApply: () => {}, onCancel: () => {}, now }),
   );
 }
 
@@ -149,6 +149,39 @@ test("the preview shows counters, groups and the pinned Apply", () => {
   assert.match(closed, />Развернуть всё</);
   // The state is keyed by group: another preview object shows the same folding.
   assert.equal(count(page({ ...big, selectionId: "2" }, { added: folded }), "<li"), 5 + 8);
+});
+
+test("lesson rows sit under week and day headers; past ones are muted, today's and the next highlighted", () => {
+  const at = (line, start, end) => ({ line, title: `Урок ${line}`, start, end, zone: "Europe/Moscow" });
+  const markup = page(
+    preview({
+      added: [
+        at(2, "16.10.2026 09:00", "16.10.2026 10:30"),
+        at(3, "16.10.2026 15:00", "16.10.2026 16:30"),
+        at(4, "17.10.2026 09:00", "17.10.2026 10:30"),
+        at(5, "bad", "bad"),
+      ],
+    }),
+    {},
+    new Date("2026-10-16T09:00:00Z"), // 12:00 in Moscow
+  );
+  assert.equal(count(markup, '<span class="wk">'), 1);
+  assert.match(markup, /<span class="ln-day is-today">Сегодня<\/span><span class="ln-row is-past"><span class="ln-when num">09:00–10:30</);
+  assert.match(markup, /<li class="ln"><span class="ln-row is-today is-next"><span class="ln-when num">15:00–16:30</);
+  assert.match(markup, /<span class="ln-day">Завтра<\/span><span class="ln-row"><span class="ln-when num">09:00–10:30</);
+  assert.match(markup, /<li class="ln"><span class="ln-row"><span class="ln-when num">bad – bad</, "no header, the full text");
+});
+
+test("lessons to be removed are muted when past but never highlighted", () => {
+  const at = (start, end) => ({ line: 0, title: "Урок", start, end, zone: "Europe/Moscow" });
+  const markup = page(
+    preview({ removed: [at("16.10.2026 09:00", "16.10.2026 10:30"), at("16.10.2026 15:00", "16.10.2026 16:30")] }),
+    {},
+    new Date("2026-10-16T09:00:00Z"),
+  );
+  assert.match(markup, /<span class="ln-day">Сегодня<\/span><span class="ln-row is-past">/);
+  assert.match(markup, /<li class="ln"><span class="ln-row"><span class="ln-when num">15:00–16:30</);
+  assert.ok(!markup.includes("is-today") && !markup.includes("is-next"));
 });
 
 test("row errors fold the same way, with «Показать все ошибки» and no Apply", () => {

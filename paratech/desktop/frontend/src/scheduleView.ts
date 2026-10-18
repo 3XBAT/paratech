@@ -20,6 +20,11 @@ export function canApply(p: ImportPreview | null): boolean {
   return p !== null && !p.cancelled && p.canCommit && p.selectionId !== "" && p.errors.length === 0;
 }
 
+/** Whether the page shows the empty state: nothing chosen yet, no error and no result to report. */
+export function showEmptyState(p: ImportPreview | null, error: string, done: string): boolean {
+  return p === null && error === "" && done === "";
+}
+
 /** Whether the preview changes anything. */
 export function hasChanges(p: ImportPreview): boolean {
   return p.added.length + p.changed.length + p.removed.length > 0;
@@ -198,6 +203,173 @@ export function weekHeaders(lessons: readonly { start: string }[]): (WeekHeader 
   return out;
 }
 
+// A wall-clock time: a lesson start ("ДД.ММ.ГГГГ ЧЧ:ММ" in its zone) or "now" in that zone.
+interface WallTime {
+  y: number;
+  mo: number;
+  d: number;
+  h: number;
+  mi: number;
+}
+
+function parseWall(s: string): WallTime | null {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})$/.exec(s);
+  if (m === null) {
+    return null;
+  }
+  const [d, mo, y, h, mi] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCDate() !== d || date.getUTCMonth() !== mo - 1 || h > 23 || mi > 59) {
+    return null;
+  }
+  return { y, mo, d, h, mi };
+}
+
+const dayKey = (t: WallTime) => t.y * 10_000 + t.mo * 100 + t.d;
+const minuteKey = (t: WallTime) => dayKey(t) * 10_000 + t.h * 100 + t.mi;
+// Minutes since the epoch as if the wall time were UTC; with a zone offset it gives the instant.
+const wallMinutes = (t: WallTime) => Date.UTC(t.y, t.mo - 1, t.d, t.h, t.mi) / 60_000;
+
+// "now" as a wall time in each zone, one formatter per zone. The zone is file text: like the core (zoneOf in
+// input/wails/prompt.go), an empty or "Local" zone means UTC; another invalid one makes Intl throw a RangeError and gives
+// null, so such a lesson is neither muted nor highlighted.
+function zoneClock(now: Date): (zone: string) => WallTime | null {
+  const cache = new Map<string, WallTime | null>();
+  return (zone) => {
+    if (!cache.has(zone)) {
+      cache.set(zone, wallIn(now, zone));
+    }
+    return cache.get(zone) ?? null;
+  };
+}
+
+function wallIn(now: Date, zone: string): WallTime | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone === "" || zone === "Local" ? "UTC" : zone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+    const t = { y: get("year"), mo: get("month"), d: get("day"), h: get("hour") % 24, mi: get("minute") };
+    return Object.values(t).every(Number.isFinite) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+const weekdays = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const months = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+
+function labelOf(start: string, today: WallTime | null, now: Date): string | null {
+  const s = parseWall(start);
+  if (s === null) {
+    return null;
+  }
+  if (today !== null) {
+    const tomorrow = new Date(Date.UTC(today.y, today.mo - 1, today.d + 1));
+    if (dayKey(s) === dayKey(today)) {
+      return "Сегодня";
+    }
+    if (s.y === tomorrow.getUTCFullYear() && s.mo === tomorrow.getUTCMonth() + 1 && s.d === tomorrow.getUTCDate()) {
+      return "Завтра";
+    }
+  }
+  const weekday = weekdays[new Date(Date.UTC(s.y, s.mo - 1, s.d)).getUTCDay()];
+  const year = today?.y ?? now.getFullYear();
+  return `${weekday}, ${s.d} ${months[s.mo - 1]}${s.y !== year ? ` ${s.y}` : ""}`;
+}
+
+/**
+ * The day of a lesson: «Сегодня», «Завтра» or "пт, 16 октября" (the year only when it is not the current one); null for
+ * an unparsable start. Today is taken in the lesson's zone ("" and "Local" mean UTC); with another invalid zone the label
+ * is always the plain date.
+ */
+export function dayLabel(start: string, zone: string, now: Date): string | null {
+  return labelOf(start, wallIn(now, zone), now);
+}
+
+/**
+ * For each lesson, the day header to show above it: at the start of every run of lessons on one day, null elsewhere.
+ * Like weekHeaders, an unparsable start gets no header and breaks the run; in a list kept in file order a day header can
+ * repeat, as week dividers do.
+ */
+export function dayHeaders(lessons: readonly { start: string; zone: string }[], now: Date): (string | null)[] {
+  const clock = zoneClock(now);
+  const labels = lessons.map((l) => labelOf(l.start, clock(l.zone), now));
+  const keys = lessons.map((l, i) => (labels[i] === null ? null : `${l.start.slice(0, 10)}|${labels[i]}`));
+  return labels.map((label, i) => (label !== null && (i === 0 || keys[i - 1] !== keys[i]) ? label : null));
+}
+
+/** How a lesson row looks: past ones muted, today's and the next one highlighted. */
+export interface LessonMark {
+  past: boolean;
+  today: boolean;
+  /** The lesson with the earliest start among those not ended yet (it may be going on now). */
+  next: boolean;
+}
+
+const noMark: LessonMark = { past: false, today: false, next: false };
+
+/**
+ * Marks for lessons in list order. The list is not sorted (added lessons keep the file order), so `next` goes to the
+ * earliest absolute start, the first in the list on a tie. Each lesson is compared with now in its own zone; an
+ * unparsable start or an invalid zone gives no mark. Without `highlight` (lessons about to be removed) only `past` is set.
+ */
+export function lessonMarks(
+  lessons: readonly { start: string; end: string; zone: string }[],
+  now: Date,
+  highlight = true,
+): LessonMark[] {
+  const clock = zoneClock(now);
+  const nowMinutes = Math.floor(now.getTime() / 60_000);
+  let next = -1;
+  let nextAt = Infinity;
+  const marks = lessons.map((l, i) => {
+    const s = parseWall(l.start);
+    const n = clock(l.zone);
+    if (s === null || n === null) {
+      return noMark;
+    }
+    const e = parseWall(l.end) ?? s;
+    const past = minuteKey(e) <= minuteKey(n);
+    if (!highlight) {
+      return { ...noMark, past };
+    }
+    // The zone offset at now: wall minutes of now in the zone minus the real minutes.
+    const at = wallMinutes(s) - (wallMinutes(n) - nowMinutes);
+    if (!past && at < nextAt) {
+      next = i;
+      nextAt = at;
+    }
+    return { past, today: !past && (dayKey(s) === dayKey(n) || minuteKey(s) <= minuteKey(n)), next: false };
+  });
+  if (next >= 0) {
+    marks[next] = { ...marks[next], next: true };
+  }
+  return marks;
+}
+
+/** The time of a lesson under its day header: "09:00–10:30"; a full end on another day; the full range when unparsable. */
+export function lessonTime(start: string, end: string): string {
+  if (parseWall(start) === null) {
+    return timeRange(start, end);
+  }
+  const [startDate, startTime] = start.split(" ");
+  const [endDate, endTime] = end.split(" ");
+  if (endTime !== undefined && endDate === startDate) {
+    return `${startTime}–${endTime}`;
+  }
+  return `${startTime} – ${end}`;
+}
+
 export function windowText(w: ImportWindow): string {
   return `Импортируются занятия с ${w.from} до ${w.to}; удаляются только занятия внутри этого периода.`;
 }
@@ -207,6 +379,7 @@ export function resultText(r: ImportResult): string {
 }
 
 export const notes = {
+  choose: "Нажмите «Выбрать файл…» вверху страницы.",
   formats: "Поддерживаются файлы ICS, CSV и XLSX до 2 МиБ. Сначала показываются изменения; расписание меняется только после «Применить».",
   allDay: "События на весь день в ICS пропускаются: они не импортируются.",
   uid:

@@ -10,23 +10,26 @@ import {
   commitErrorText,
   conflictParts,
   csvTemplate,
+  dayHeaders,
   errorText,
   groupTitles,
   hasChanges,
+  lessonMarks,
   lessonParts,
+  lessonTime,
   notes,
   type Part,
   type PreviewGroup,
   previewGroups,
   resultText,
   rowErrorParts,
+  showEmptyState,
   summaryChips,
-  timeRange,
   weekHeaders,
   windowText,
 } from "../scheduleView.js";
 import { Button } from "../ui/Button.js";
-import { Banner, CountTiles } from "../ui/controls.js";
+import { Banner, Card, CountTiles, EmptyState } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
@@ -138,16 +141,21 @@ export function SchedulePage() {
     setError("");
   };
 
+  const empty = showEmptyState(preview, error, done);
+
   return (
-    <section className="page">
+    <section className="page sched">
       <div className="head">
-        <h1>Расписание</h1>
-      </div>
-      <p className="muted">{notes.formats}</p>
-      <div className="actions">
-        <Button variant={preview === null ? "primary" : "secondary"} icon="up" disabled={busy} onClick={() => void choose()}>
-          Выбрать файл…
-        </Button>
+        <div>
+          <span className="label">Импорт из файла</span>
+          <h1>Расписание</h1>
+        </div>
+        {/* Always here, one node: keyboard focus stays on it when the empty state goes away. */}
+        <div className="acts">
+          <Button variant={preview === null ? "primary" : "secondary"} icon="up" disabled={busy} onClick={() => void choose()}>
+            Выбрать файл…
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -161,6 +169,13 @@ export function SchedulePage() {
           {done}
         </p>
       )}
+      {empty ? (
+        <EmptyState label="Файл ICS, CSV или XLSX" title="Загрузите расписание из файла">
+          {`${notes.choose} ${notes.formats}`}
+        </EmptyState>
+      ) : (
+        <p className="muted">{notes.formats}</p>
+      )}
       {preview !== null && (
         <PreviewView
           preview={preview}
@@ -169,14 +184,17 @@ export function SchedulePage() {
           onLists={setLists}
           onApply={() => void apply()}
           onCancel={cancel}
+          now={new Date()}
         />
       )}
 
-      <h2 className="group-title">Формат файла</h2>
-      <p className="muted">{notes.allDay}</p>
-      <p className="muted">{notes.uid}</p>
-      <pre className="template">{csvTemplate}</pre>
-      <p className="muted">{notes.noNotifications}</p>
+      <Card className="box sched-format">
+        <h2>Формат файла</h2>
+        <p className="small muted">{notes.allDay}</p>
+        <p className="small muted">{notes.uid}</p>
+        <pre className="template num">{csvTemplate}</pre>
+        <p className="small muted">{notes.noNotifications}</p>
+      </Card>
     </section>
   );
 }
@@ -188,8 +206,11 @@ export function PreviewView(props: {
   onLists: (next: ListStates) => void;
   onApply: () => void;
   onCancel: () => void;
+  /** The moment past and today's lessons are judged against. */
+  now?: Date;
 }) {
   const p = props.preview;
+  const now = props.now ?? new Date();
   const groups = previewGroups(p);
   const folded = allCollapsed(props.lists, groups);
 
@@ -219,11 +240,17 @@ export function PreviewView(props: {
     );
   }
 
-  // A lesson line: the time, the title and the zone from the file (each in its own <bdi>), the file line.
-  function lessons(items: readonly (LessonText & { line: number })[]) {
+  // A lesson line under its week divider and day header: the time, the title and the zone from the file (each in its
+  // own <bdi>), the file line. Past lessons are muted; today's and the next one highlighted unless they are to be removed.
+  function lessons(items: readonly (LessonText & { line: number })[], highlight: boolean) {
     const weeks = weekHeaders(items);
+    const days = dayHeaders(items, now);
+    const marks = lessonMarks(items, now, highlight);
     return (l: LessonText & { line: number }, i: number) => {
       const w = weeks[i];
+      const d = days[i];
+      const m = marks[i];
+      const cls = ["ln-row", m.past && "is-past", m.today && "is-today", m.next && "is-next"].filter(Boolean).join(" ");
       return (
         <li className="ln">
           {w && (
@@ -232,14 +259,17 @@ export function PreviewView(props: {
               <span className="n num">{w.countText}</span>
             </span>
           )}
-          <span className="ln-when num">{timeRange(l.start, l.end)}</span>
-          <span className="ln-title">
-            <Text parts={[{ text: l.title, file: true }]} />
+          {d && <span className={highlight && d === "Сегодня" ? "ln-day is-today" : "ln-day"}>{d}</span>}
+          <span className={cls}>
+            <span className="ln-when num">{lessonTime(l.start, l.end)}</span>
+            <span className="ln-title">
+              <Text parts={[{ text: l.title, file: true }]} />
+            </span>
+            <span className="ln-zone small muted">
+              <Text parts={[{ text: l.zone, file: true }]} />
+            </span>
+            <span className="ln-line small muted num">{l.line > 0 ? `строка ${l.line}` : ""}</span>
           </span>
-          <span className="ln-zone small muted">
-            <Text parts={[{ text: l.zone, file: true }]} />
-          </span>
-          <span className="ln-line small muted num">{l.line > 0 ? `строка ${l.line}` : ""}</span>
         </li>
       );
     };
@@ -285,7 +315,7 @@ export function PreviewView(props: {
         </div>
       )}
       {group("errors", p.errors, (e) => plainRow(rowErrorParts(e)), { more: () => listTexts.allErrors })}
-      {group("added", p.added, lessons(p.added))}
+      {group("added", p.added, lessons(p.added, true))}
       {group("changed", p.changed, (c) => (
         <li className="diff">
           <span className="ln-line small muted num">{c.line > 0 ? `строка ${c.line}` : ""}</span>
@@ -298,7 +328,7 @@ export function PreviewView(props: {
           </ins>
         </li>
       ))}
-      {group("removed", p.removed, lessons(p.removed))}
+      {group("removed", p.removed, lessons(p.removed, false))}
       {group("conflicts", p.conflicts, (c) => plainRow(conflictParts(c)), {
         before: (
           <Banner kind="wait">
