@@ -95,9 +95,12 @@ func (c *Client) ensure(ctx context.Context, op string) (binding, error) {
 			return binding{}, err
 		}
 		if !gone {
-			if current.Summary == LegacyCalendarSummary {
-				// Best effort: a failure keeps the old name until the next call, it never fails the sync.
-				_ = c.rename(ctx, op, b.ID)
+			if current.Summary == LegacyCalendarSummary && c.renameRefused != b.ID {
+				// Best effort: a failure keeps the old name, it never fails the sync. A transient one is retried at the
+				// next call; a refusal is not, so a calendar the user may not edit costs one request per process.
+				if err := c.rename(ctx, op, b.ID); errors.Is(err, ErrForbidden) || errors.Is(err, ErrRejected) {
+					c.renameRefused = b.ID
+				}
 			}
 			return b, nil
 		}
@@ -159,11 +162,14 @@ func (c *Client) save(ctx context.Context, op string, b binding) error {
 // 403 that is not a rate limit (those are errors) counts too: the stored calendar of another Google account may answer
 // it. Alone it could mean anything, so it needs the other check to agree; a sign-in that may not use calendars at all
 // is refused by calendars.insert as well. When the checks disagree the call fails transiently and nothing is created.
-// A calendar that is not gone comes back as calendars.get answered it.
+// A calendar that is not gone comes back as calendars.get answered it; a body that does not decode leaves it empty
+// (only the rename reads it).
 func (c *Client) gone(ctx context.Context, op, id string) (calendarResource, bool, error) {
 	absent := []int{http.StatusNotFound, http.StatusGone, http.StatusForbidden}
 	var current calendarResource
-	status, err := c.do(ctx, op, request{method: http.MethodGet, path: calendarPath(id), out: &current, accept: absent})
+	status, err := c.do(ctx, op, request{
+		method: http.MethodGet, path: calendarPath(id), out: &current, lenient: true, accept: absent,
+	})
 	if err != nil || status < 300 {
 		return current, false, err
 	}

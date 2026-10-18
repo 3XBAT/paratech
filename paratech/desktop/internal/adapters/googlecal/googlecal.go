@@ -86,6 +86,9 @@ type Client struct {
 	mu sync.Mutex
 	// unsaved: the id of a created calendar could not be stored; held under mu.
 	unsaved bool
+	// renameRefused is the calendar whose rename Google refused for good; it is not asked again in this process.
+	// Held under mu.
+	renameRefused string
 }
 
 // New returns a Client over the authorization, the google credential store and the classifier of token source errors.
@@ -144,6 +147,8 @@ type request struct {
 	body   any   // JSON body, or nil
 	out    any   // decoded on 2xx, or nil
 	accept []int // non-2xx statuses returned without an error
+	// lenient: a 2xx body that does not decode into out leaves out as it is instead of failing the call.
+	lenient bool
 }
 
 // googleError is the error body of the Calendar API; only the reasons are used.
@@ -218,7 +223,7 @@ func (c *Client) once(ctx context.Context, op string, r request, target string, 
 
 	status := resp.StatusCode
 	if status >= 200 && status < 300 {
-		if r.out != nil && json.Unmarshal(data, r.out) != nil {
+		if r.out != nil && json.Unmarshal(data, r.out) != nil && !r.lenient {
 			return 0, transient(op, ErrBadResponse)
 		}
 		return status, nil

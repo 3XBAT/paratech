@@ -3,7 +3,9 @@ package googlecal_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"paratech/desktop/internal/adapters/googlecal"
@@ -11,7 +13,8 @@ import (
 )
 
 // A stored calendar named «Learning Assistant» (before ADR-0015) is renamed in place with calendars.patch: no second
-// calendar, the same id and binding. A name the user chose stays, and a failed patch never fails EnsureCalendar.
+// calendar, the same id and binding. A name the user chose stays, and a failed patch never fails EnsureCalendar. A
+// transient failure is retried at the next call, a refusal is not asked again in this process.
 func TestEnsureCalendarRenamesTheLegacyCalendar(t *testing.T) {
 	const legacyDescription = "Расписание занятий и дедлайны из приложения Learning Assistant. [paratech-calendar-v1]"
 	tests := []struct {
@@ -20,17 +23,22 @@ func TestEnsureCalendarRenamesTheLegacyCalendar(t *testing.T) {
 		faults      []testenv.CalendarFault // for the next PATCH requests
 		wantPatches int                     // after the first EnsureCalendar
 		wantSummary string                  // after the first EnsureCalendar
+		refused     bool                    // the failed patch is not retried
 	}{
-		{"legacy name", googlecal.LegacyCalendarSummary, nil, 1, googlecal.CalendarSummary},
-		{"current name", googlecal.CalendarSummary, nil, 0, googlecal.CalendarSummary},
-		{"renamed by the user", "Мои пары", nil, 0, "Мои пары"},
-		{"legacy name in another case", "learning assistant", nil, 0, "learning assistant"},
+		{"legacy name", googlecal.LegacyCalendarSummary, nil, 1, googlecal.CalendarSummary, false},
+		{"current name", googlecal.CalendarSummary, nil, 0, googlecal.CalendarSummary, false},
+		{"renamed by the user", "Мои пары", nil, 0, "Мои пары", false},
+		{"legacy name in another case", "learning assistant", nil, 0, "learning assistant", false},
 		{"patch fails", googlecal.LegacyCalendarSummary, []testenv.CalendarFault{testenv.FaultServerError}, 1,
-			googlecal.LegacyCalendarSummary},
+			googlecal.LegacyCalendarSummary, false},
+		{"patch rate limited", googlecal.LegacyCalendarSummary, []testenv.CalendarFault{testenv.FaultUserRateLimit}, 1,
+			googlecal.LegacyCalendarSummary, false},
 		{"patch refused", googlecal.LegacyCalendarSummary, []testenv.CalendarFault{testenv.FaultForbidden}, 1,
-			googlecal.LegacyCalendarSummary},
+			googlecal.LegacyCalendarSummary, true},
+		{"patch rejected", googlecal.LegacyCalendarSummary, []testenv.CalendarFault{testenv.FaultBadRequest}, 1,
+			googlecal.LegacyCalendarSummary, true},
 		{"patch answer lost", googlecal.LegacyCalendarSummary, []testenv.CalendarFault{testenv.FaultDropAfterWrite}, 1,
-			googlecal.CalendarSummary},
+			googlecal.CalendarSummary, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,9 +69,9 @@ func TestEnsureCalendarRenamesTheLegacyCalendar(t *testing.T) {
 				t.Fatalf("description %q after the rename", cals[0].Description)
 			}
 
-			// The next call retries a failed rename and does nothing after a successful one.
+			// The next call retries a transiently failed rename and does nothing after a successful or refused one.
 			wantAfter := tt.wantPatches
-			if tt.wantSummary == googlecal.LegacyCalendarSummary {
+			if tt.wantSummary == googlecal.LegacyCalendarSummary && !tt.refused {
 				wantAfter++
 			}
 			if again, _, err := r.c.EnsureCalendar(ctx); err != nil || again != old {
@@ -84,5 +92,46 @@ func TestEnsureCalendarRenamesTheLegacyCalendar(t *testing.T) {
 				t.Fatalf("%d events in the stored calendar, want 1", n)
 			}
 		})
+	}
+}
+
+// A 2xx calendars.get whose body is not JSON still means the calendar exists: EnsureCalendar keeps it and does not
+// rename it (the name is unknown).
+func TestEnsureCalendarKeepsACalendarWithAnUndecodableAnswer(t *testing.T) {
+	const id = "cal-1"
+	var patches, inserts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/calendars/"+id:
+			_, _ = w.Write([]byte("not json"))
+		case req.Method == http.MethodPatch:
+			patches.Add(1)
+			_, _ = w.Write([]byte(`{}`))
+		case req.Method == http.MethodPost:
+			inserts.Add(1)
+			_, _ = w.Write([]byte(`{"id":"cal-2"}`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	tr := &http.Transport{}
+	t.Cleanup(tr.CloseIdleConnections)
+	store := testenv.NewMemCredentials()
+	ctx := context.Background()
+	if err := store.Set(ctx, googlecal.CalendarIDName, `{"id":"`+id+`"}`); err != nil {
+		t.Fatal(err)
+	}
+	c, err := googlecal.New(&fakeAuth{transport: tr, token: "t"}, store, classify, googlecal.WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, fresh, err := c.EnsureCalendar(ctx)
+	if err != nil || got != id || fresh {
+		t.Fatalf("EnsureCalendar = %q, %v, %v, want %q, not fresh", got, fresh, err, id)
+	}
+	if p, i := patches.Load(), inserts.Load(); p != 0 || i != 0 {
+		t.Fatalf("%d patches and %d inserts, want none", p, i)
 	}
 }
