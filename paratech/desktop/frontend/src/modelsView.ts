@@ -158,9 +158,6 @@ export const loadWords = ["", "лёгкая", "умеренная", "средн�
 /** The number of segments of the load scale. */
 export const loadLevels = 5;
 
-// Levels 4 and 5 are heavy (ModelLoad.Heavy in the core, docs/refs/whisper.md).
-const heavyFrom = 4;
-
 /** «Small», «Large v3 Turbo»; the catalog id when the family is unknown. */
 export function displayName(m: { family: string; catalogId: string }): string {
   return Object.hasOwn(familyNames, m.family) ? familyNames[m.family] : m.catalogId;
@@ -176,27 +173,17 @@ export function loadText(load: number): string {
   return knownLoad(load) ? `Нагрузка на компьютер: ${load} из ${loadLevels} — ${loadWords[load]}` : "";
 }
 
-/** Whether the page warns that the model is demanding (load 4 or 5). */
-export function isHeavy(load: number): boolean {
-  return knownLoad(load) && load >= heavyFrom;
-}
-
-/** The reduced (quantized, "q…") variant of a model; f16 and anything else is the full one. */
-export function isReduced(m: { quantization: string }): boolean {
-  return /^q/i.test(m.quantization);
-}
-
 export function catalogLabels(m: AvailableModel): CatalogLabels {
   return {
     name: displayName(m),
     recommended: m.recommended && !m.englishOnly ? texts.recommended : "",
     description: Object.hasOwn(tierLabels, m.tier) ? tierLabels[m.tier] : "",
     language: m.englishOnly ? texts.englishOnly : texts.multilingual,
-    variant: isReduced(m) ? texts.reduced : texts.full,
-    variantHint: isReduced(m) ? texts.reducedHint : texts.fullHint,
+    variant: m.reduced ? texts.reduced : texts.full,
+    variantHint: m.reduced ? texts.reducedHint : texts.fullHint,
     accuracy: Object.hasOwn(familyAccuracy, m.family) ? `Точность: ${familyAccuracy[m.family]}` : "",
     load: loadText(m.load),
-    warning: isHeavy(m.load) ? texts.heavy : "",
+    warning: m.heavy ? texts.heavy : "",
   };
 }
 
@@ -235,23 +222,42 @@ export interface CatalogGroup {
 }
 
 /**
- * The catalog after the filters, in the core's order. With every language the list is split into the multilingual
- * and the English-only models; a model of unknown load is hidden by a load limit. Empty groups are dropped.
+ * Whether the row must stay visible whatever the filters: its download runs or it has a partial to discard, so
+ * hiding it would hide the progress and the cancel or discard button.
  */
-export function catalogGroups(list: readonly AvailableModel[], lang: LanguageFilter, load: LoadFilter): CatalogGroup[] {
+export function pinnedByDownload(m: AvailableModel, d: ModelDownload): boolean {
+  const a = catalogActions(m, d);
+  return a.cancel || a.discardPartial;
+}
+
+/**
+ * The catalog after the filters, in the core's order. With every language the list is split into the multilingual
+ * and the English-only models; a model of unknown load is hidden by a load limit. Empty groups are dropped. The row
+ * of the current download is always kept (pinnedByDownload).
+ */
+export function catalogGroups(
+  list: readonly AvailableModel[],
+  lang: LanguageFilter,
+  load: LoadFilter,
+  d: ModelDownload,
+): CatalogGroup[] {
   const limit = load === "any" ? 0 : Number(load);
-  const shown = list.filter((m) => limit === 0 || (knownLoad(m.load) && m.load <= limit));
+  const fits = (m: AvailableModel) =>
+    (limit === 0 || (knownLoad(m.load) && m.load <= limit)) &&
+    (lang === "all" || (lang === "english") === m.englishOnly);
+  const shown = list.filter((m) => fits(m) || pinnedByDownload(m, d));
   const multilingual = shown.filter((m) => !m.englishOnly);
   const english = shown.filter((m) => m.englishOnly);
-  let groups: CatalogGroup[];
-  if (lang === "all") {
-    groups = [
-      { title: texts.multilingual, models: multilingual },
-      { title: texts.englishOnly, models: english },
-    ];
-  } else {
-    groups = [{ title: "", models: lang === "english" ? english : multilingual }];
+  // With one language chosen the list has no headings, unless a pinned row of the other language is in it.
+  const other = lang === "english" ? multilingual : english;
+  if (lang !== "all" && other.length === 0) {
+    const own = lang === "english" ? english : multilingual;
+    return own.length > 0 ? [{ title: "", models: own }] : [];
   }
+  const groups: CatalogGroup[] = [
+    { title: texts.multilingual, models: multilingual },
+    { title: texts.englishOnly, models: english },
+  ];
   return groups.filter((g) => g.models.length > 0);
 }
 
@@ -289,7 +295,9 @@ export const texts = {
   emptyCatalog: "Список моделей пуст. Модель можно установить из файла (см. «Другие модели»).",
   machineUnknown: "Оборудование компьютера не определено: нагрузка указана примерно, для обычного компьютера.",
   catalogTitle: "Модели для скачивания",
-  variantsNote: "Уменьшенная — сжатая копия той же модели: файл меньше, работает быстрее, точность чуть ниже.",
+  variantsNote:
+    "Полная — исходная модель. Уменьшенная — сжатая копия той же модели: файл меньше, работает быстрее, точность " +
+    "чуть ниже.",
   full: "Полная",
   fullHint: "Полная модель: исходный файл, самая высокая точность этого размера.",
   reduced: "Уменьшенная — меньше и быстрее, точность чуть ниже",

@@ -16,8 +16,7 @@ import {
   catalogGroups,
   catalogLabels,
   displayName,
-  isHeavy,
-  isReduced,
+  pinnedByDownload,
   languageFilter,
   languageOptions,
   loadFilter,
@@ -53,6 +52,7 @@ const available = {
   catalogId: "base-q5_1", name: "base", version: "1", sizeBytes: 59707625, quantization: "q5_1",
   capabilities: ["multilingual"], minCpuCores: 2, minRamMb: 1024, recommended: false, likelySlow: false,
   installed: false, installedId: "", hasSourcePage: true, tier: "fast", englishOnly: false, family: "base", load: 1,
+  heavy: false, reduced: true,
 };
 const noDownload = { catalogId: "", phase: "", doneBytes: 0, totalBytes: 0, running: false, error: "" };
 const view = {
@@ -129,6 +129,8 @@ test("replies are parsed strictly", () => {
     { ...view, available: [{ ...available, family: undefined }] }, { ...view, available: [{ ...available, family: 1 }] },
     { ...view, available: [{ ...available, load: undefined }] }, { ...view, available: [{ ...available, load: 6 }] },
     { ...view, available: [{ ...available, load: -1 }] }, { ...view, available: [{ ...available, load: 2.5 }] },
+    { ...view, available: [{ ...available, heavy: undefined }] }, { ...view, available: [{ ...available, heavy: "true" }] },
+    { ...view, available: [{ ...available, reduced: undefined }] }, { ...view, available: [{ ...available, reduced: 1 }] },
   ]) {
     assert.throws(() => parseView(bad), undefined, JSON.stringify(bad));
   }
@@ -301,7 +303,7 @@ test("a catalog row is named by its family; an unknown family shows the catalog 
   }
 });
 
-test("the load is a 5-step scale with words; 4 and 5 are heavy", () => {
+test("the load is a 5-step scale with words; the warning follows the core's heavy flag", () => {
   assert.deepEqual(loadWords, ["", "лёгкая", "умеренная", "средняя", "тяжёлая", "очень тяжёлая"]);
   assert.equal(loadText(0), "");
   assert.equal(loadText(1), "Нагрузка на компьютер: 1 из 5 — лёгкая");
@@ -314,11 +316,11 @@ test("the load is a 5-step scale with words; 4 and 5 are heavy", () => {
   const heavy = "Модель требовательна к ресурсам вашего устройства: распознавание будет долгим на обычном процессоре";
   assert.equal(texts.heavy, heavy);
   for (const load of [0, 1, 2, 3, 4, 5]) {
-    const l = catalogLabels({ ...available, load });
-    assert.equal(isHeavy(load), load >= 4, `load ${load}`);
-    assert.equal(l.warning, load >= 4 ? heavy : "", `load ${load}`);
-    assert.equal(l.load, loadText(load));
+    assert.equal(catalogLabels({ ...available, load }).load, loadText(load));
   }
+  // The page does not repeat the core's rule: only the flag decides the warning, whatever the load.
+  assert.equal(catalogLabels({ ...available, load: 5, heavy: false }).warning, "");
+  assert.equal(catalogLabels({ ...available, load: 1, heavy: true }).warning, heavy);
 });
 
 test("language, variant, accuracy and the recommended label", () => {
@@ -326,15 +328,18 @@ test("language, variant, accuracy and the recommended label", () => {
   assert.equal(at({}).language, "Русский и другие языки");
   assert.equal(at({ englishOnly: true }).language, "Только английский");
 
-  assert.equal(isReduced({ quantization: "q5_1" }), true);
-  assert.equal(isReduced({ quantization: "q5_0" }), true);
-  assert.equal(isReduced({ quantization: "f16" }), false);
-  assert.equal(isReduced({ quantization: "" }), false);
-  assert.equal(at({ quantization: "q5_0" }).variant, "Уменьшенная — меньше и быстрее, точность чуть ниже");
-  assert.equal(at({ quantization: "f16" }).variant, "Полная");
-  assert.notEqual(at({ quantization: "q5_0" }).variantHint, "");
-  assert.notEqual(at({ quantization: "f16" }).variantHint, "");
-  assert.match(texts.variantsNote, /^Уменьшенная — /);
+  // The variant follows the core's reduced flag, not the quantization text.
+  assert.equal(at({ reduced: true }).variant, "Уменьшенная — меньше и быстрее, точность чуть ниже");
+  assert.equal(at({ reduced: false }).variant, "Полная");
+  assert.equal(at({ quantization: "q5_0", reduced: false }).variant, "Полная");
+  assert.equal(at({ quantization: "f16", reduced: true }).variant, "Уменьшенная — меньше и быстрее, точность чуть ниже");
+  assert.notEqual(at({ reduced: true }).variantHint, "");
+  assert.notEqual(at({ reduced: false }).variantHint, "");
+  // The visible page line explains both variants (the row's title is only extra).
+  assert.equal(
+    texts.variantsNote,
+    "Полная — исходная модель. Уменьшенная — сжатая копия той же модели: файл меньше, работает быстрее, точность чуть ниже.",
+  );
 
   const accuracy = {
     tiny: "низкая", base: "средняя", small: "хорошая", medium: "высокая", "large-v3-turbo": "высокая",
@@ -379,21 +384,39 @@ test("the catalog filters by language and load and groups by language", () => {
   const multi = "Русский и другие языки";
   const en = "Только английский";
 
-  assert.deepEqual(ids(catalogGroups(list, "all", "any")), [
+  assert.deepEqual(ids(catalogGroups(list, "all", "any", noDownload)), [
     [multi, ["tiny-q5_1", "small-f16", "large-v3-f16", "x"]],
     [en, ["tiny.en-q5_1", "medium.en-f16"]],
   ]);
-  assert.deepEqual(ids(catalogGroups(list, "multilingual", "any")), [["", ["tiny-q5_1", "small-f16", "large-v3-f16", "x"]]]);
-  assert.deepEqual(ids(catalogGroups(list, "english", "any")), [["", ["tiny.en-q5_1", "medium.en-f16"]]]);
-  assert.deepEqual(ids(catalogGroups(list, "all", "2")), [[multi, ["tiny-q5_1"]], [en, ["tiny.en-q5_1"]]]);
-  assert.deepEqual(ids(catalogGroups(list, "all", "3")), [[multi, ["tiny-q5_1", "small-f16"]], [en, ["tiny.en-q5_1"]]]);
-  assert.deepEqual(ids(catalogGroups(list, "all", "4")), [
+  assert.deepEqual(ids(catalogGroups(list, "multilingual", "any", noDownload)), [["", ["tiny-q5_1", "small-f16", "large-v3-f16", "x"]]]);
+  assert.deepEqual(ids(catalogGroups(list, "english", "any", noDownload)), [["", ["tiny.en-q5_1", "medium.en-f16"]]]);
+  assert.deepEqual(ids(catalogGroups(list, "all", "2", noDownload)), [[multi, ["tiny-q5_1"]], [en, ["tiny.en-q5_1"]]]);
+  assert.deepEqual(ids(catalogGroups(list, "all", "3", noDownload)), [[multi, ["tiny-q5_1", "small-f16"]], [en, ["tiny.en-q5_1"]]]);
+  assert.deepEqual(ids(catalogGroups(list, "all", "4", noDownload)), [
     [multi, ["tiny-q5_1", "small-f16"]], [en, ["tiny.en-q5_1", "medium.en-f16"]],
   ]);
-  assert.deepEqual(ids(catalogGroups(list, "english", "3")), [["", ["tiny.en-q5_1"]]]);
-  assert.deepEqual(ids(catalogGroups([m("tiny-q5_1", 1)], "all", "any")), [[multi, ["tiny-q5_1"]]], "an empty group is dropped");
-  assert.deepEqual(catalogGroups([m("large-v3-f16", 5)], "all", "2"), [], "nothing matches");
-  assert.deepEqual(catalogGroups([], "all", "any"), []);
+  assert.deepEqual(ids(catalogGroups(list, "english", "3", noDownload)), [["", ["tiny.en-q5_1"]]]);
+  assert.deepEqual(ids(catalogGroups([m("tiny-q5_1", 1)], "all", "any", noDownload)), [[multi, ["tiny-q5_1"]]], "an empty group is dropped");
+  assert.deepEqual(catalogGroups([m("large-v3-f16", 5)], "all", "2", noDownload), [], "nothing matches");
+  assert.deepEqual(catalogGroups([], "all", "any", noDownload), []);
+
+  // The row of the running download or of a partial to discard stays visible whatever the filters.
+  const heavyEn = m("medium.en-f16", 4, true);
+  const running = { catalogId: "medium.en-f16", phase: "downloading", doneBytes: 1, totalBytes: 2, running: true, error: "" };
+  const failed = { ...running, phase: "failed", running: false };
+  assert.equal(pinnedByDownload(heavyEn, running), true);
+  assert.equal(pinnedByDownload(heavyEn, { ...running, phase: "verifying" }), true);
+  assert.equal(pinnedByDownload(heavyEn, failed), true);
+  assert.equal(pinnedByDownload(heavyEn, { ...failed, phase: "cancelled" }), true);
+  assert.equal(pinnedByDownload(heavyEn, { ...failed, phase: "installed" }), false);
+  assert.equal(pinnedByDownload(heavyEn, noDownload), false);
+  assert.equal(pinnedByDownload(m("tiny-q5_1", 1), running), false, "another model's download");
+  assert.deepEqual(ids(catalogGroups(list, "all", "2", running)), [[multi, ["tiny-q5_1"]], [en, ["tiny.en-q5_1", "medium.en-f16"]]]);
+  assert.deepEqual(ids(catalogGroups(list, "english", "3", failed)), [["", ["tiny.en-q5_1", "medium.en-f16"]]]);
+  assert.deepEqual(ids(catalogGroups(list, "multilingual", "2", running)), [
+    [multi, ["tiny-q5_1"]], [en, ["medium.en-f16"]],
+  ], "a pinned row of the other language keeps its heading");
+  assert.deepEqual(ids(catalogGroups([heavyEn], "multilingual", "any", running)), [[en, ["medium.en-f16"]]]);
 
   assert.deepEqual(languageOptions.map((o) => o.value), ["all", "multilingual", "english"]);
   assert.deepEqual(loadOptions.map((o) => o.value), ["any", "2", "3", "4"]);
@@ -413,5 +436,8 @@ test("the load scale is not colour only and the filters are native selects", () 
   assert.match(page, /<Select id=\{id\} value=\{load\}/);
   assert.match(page, /<bdi>\{l\.name\}<\/bdi>/);
   assert.ok(!page.includes("style={{"), "no inline styles");
+  assert.match(page, /<LoadScale load=\{m\.load\} heavy=\{m\.heavy\}/, "the heavy colour comes from the core's flag");
+  assert.match(page, /<span className="msize muted num">/, "the size is as large as the name (AC6)");
+  assert.match(page, /catalogGroups\(v\.available, lang, load, v\.download\)/, "the download row is never filtered out");
 });
 

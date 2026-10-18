@@ -47,6 +47,9 @@ export interface AvailableModel {
   family: string;
   /** Load on the computer, 1..5; 0 when unknown (values.LoadOf in the core). */
   load: number;
+  /** The core's flags: a load that gets the "demanding model" warning, and a quantized (reduced) variant. */
+  heavy: boolean;
+  reduced: boolean;
 }
 
 /** The current or last download; phase "" means none yet. */
@@ -237,6 +240,8 @@ export function parseAvailable(raw: unknown): AvailableModel {
     englishOnly: bool(r, "englishOnly", w),
     family: str(r, "family", w),
     load: loadLevel(r, w),
+    heavy: bool(r, "heavy", w),
+    reduced: bool(r, "reduced", w),
   };
 }
 

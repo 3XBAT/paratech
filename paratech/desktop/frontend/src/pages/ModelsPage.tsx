@@ -24,7 +24,6 @@ import {
   errorText,
   type ImportStep,
   installedText,
-  isHeavy,
   keepsSelection,
   languageFilter,
   type LanguageFilter,
@@ -510,7 +509,7 @@ function CatalogList(props: {
   const [lang, setLang] = useState<LanguageFilter>("all");
   const [load, setLoad] = useState<LoadFilter>("any");
   const v = props.view;
-  const groups = catalogGroups(v.available, lang, load);
+  const groups = catalogGroups(v.available, lang, load, v.download);
   return (
     <>
       {!v.machineKnown && <p className="muted">{texts.machineUnknown}</p>}
@@ -573,9 +572,9 @@ function CatalogList(props: {
 }
 
 // Five segments and the words; the words are the accessible name, so the scale is never colour only.
-function LoadScale(props: { load: number; text: string }) {
+function LoadScale(props: { load: number; heavy: boolean; text: string }) {
   return (
-    <span className={isHeavy(props.load) ? "mload heavy" : "mload"} role="img" aria-label={props.text}>
+    <span className={props.heavy ? "mload heavy" : "mload"} role="img" aria-label={props.text}>
       <span className="mload-bar" aria-hidden="true">
         {Array.from({ length: loadLevels }, (_, i) => (
           <i key={i} className={i < props.load ? "on" : undefined} />
@@ -610,7 +609,7 @@ function CatalogRow(props: {
       <div className="row-main">
         <p className="t mname">
           <bdi>{l.name}</bdi>
-          <span className="msize small muted num">{sizeText(m.sizeBytes)}</span>
+          <span className="msize muted num">{sizeText(m.sizeBytes)}</span>
           {l.recommended !== "" && <span className="mtag">{l.recommended}</span>}
         </p>
         {l.description !== "" && <span className="small">{l.description}</span>}
@@ -621,7 +620,7 @@ function CatalogRow(props: {
         <span className="small muted" title={l.variantHint}>
           {l.variant}
         </span>
-        {l.load !== "" && <LoadScale load={m.load} text={l.load} />}
+        {l.load !== "" && <LoadScale load={m.load} heavy={m.heavy} text={l.load} />}
         {l.warning !== "" && <span className="small slow">{l.warning}</span>}
         {m.likelySlow && <span className="small slow">{texts.likelySlow}</span>}
         <span className="label">
