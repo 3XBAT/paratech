@@ -95,7 +95,9 @@ func TestOpenCoreListsActivity(t *testing.T) {
 		t.Fatal("the actions must be the recording session and the job runner")
 	}
 
-	j, err := job.New(job.Spec{ID: "j1", Type: "stt", Key: "stt:r1", MaxAttempts: 3}, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC))
+	// A job outside the recording chain: since TASK-076 stt jobs are shown in their recording rows, not in ListJobs.
+	j, err := job.New(job.Spec{ID: "j1", Type: "homework_draft", Key: "homework_draft:a1", MaxAttempts: 3},
+		time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

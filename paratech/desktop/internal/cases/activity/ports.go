@@ -5,6 +5,7 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -24,4 +25,17 @@ type JobHistory interface {
 	// terminal job. Jobs of the hidden types are left out of both parts and do not count against maxTerminal. Rows
 	// that cannot be read are left out and their ids returned in unreadable; only other failures are errors.
 	ListActivity(ctx context.Context, maxTerminal int, hidden []job.Type) (jobs []*job.Job, unreadable []shared.JobID, err error)
+
+	// ListForRecordings returns the jobs that process the recordings, by recording (TASK-076): the jobs of
+	// byRecording types whose payload names the recording ("recording_id") and the jobs of byTranscript types whose
+	// payload names one of its transcripts ("transcript_id"). Rows that cannot be read are left out and their ids
+	// returned in unreadable; only other failures are errors.
+	ListForRecordings(ctx context.Context, recs []shared.RecordingID, byRecording, byTranscript []job.Type) (
+		jobs map[shared.RecordingID][]*job.Job, unreadable []shared.JobID, err error)
+}
+
+// Lessons reads the lesson of a recording for its title (PRD section 6.1). Implemented by the sqlite adapter.
+type Lessons interface {
+	// Get returns a live lesson; shared.ErrNotFound when it is missing or deleted from the schedule.
+	Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
 }

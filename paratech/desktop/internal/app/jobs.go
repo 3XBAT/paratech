@@ -58,7 +58,8 @@ func sttRegistration(h jobrunner.Handler) jobrunner.Registration {
 
 // hiddenJobTypes are the job types of background service work that involves no user; «Записи и задачи» leaves them
 // out (TASK-074). The calendar sync runs after every trigger and its result is shown in the Google section instead.
-// STT, summaries, homework, drafts and sending belong to a lesson or an action of the user and stay listed.
+// STT, summaries and homework belong to a lesson: the activity use case shows them in the row of their recording
+// (TASK-076); drafts and sending belong to an action of the user and stay listed.
 func hiddenJobTypes() []job.Type {
 	return []job.Type{schedulesync.CalendarSyncJobType}
 }

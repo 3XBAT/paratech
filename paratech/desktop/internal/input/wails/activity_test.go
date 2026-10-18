@@ -55,12 +55,27 @@ func (f *fakeForcer) ForceRun(_ context.Context, id shared.JobID) error {
 // A non-UTC zone checks that the page gets UTC times.
 var at = time.Date(2026, 10, 15, 9, 30, 0, 0, time.FixedZone("MSK", 3*3600))
 
+// The page reads these names (frontend/src/bindings/activity.ts). TASK-076 added the lesson title and the chain
+// status fields to every row.
 func TestActivityServiceListsRecordings(t *testing.T) {
 	uc := &fakeActivity{recs: []activity.Recording{
-		{ID: "r1", LessonID: "l1", Status: recording.StatusRecording, StartedAt: at, Stoppable: true},
+		{
+			ID: "r1", LessonID: "l1", LessonTitle: "История, лекция", Status: recording.StatusRecording, StartedAt: at,
+			Stoppable: true, Chain: activity.Chain{Stage: activity.StageRecording},
+		},
 		{
 			ID: "r2", Status: recording.StatusCompleted, StartedAt: at, StoppedAt: at.Add(time.Hour),
 			Duration: 59*time.Minute + 1500*time.Millisecond, HasDuration: true, Problem: "limit reached",
+			Chain: activity.Chain{
+				Stage: activity.StageQueued, Step: activity.StepTranscription, Percent: 40, QueueReason: activity.QueuePower,
+				JobError: "on battery", Action: activity.ActionRunNow, ActionJob: "j1",
+			},
+		},
+		{
+			ID: "r3", Status: recording.StatusCompleted, StartedAt: at, Chain: activity.Chain{
+				Stage: activity.StageFailed, Step: activity.StepSummary, ErrorCode: activity.ErrorSummaryFailed,
+				Action: activity.ActionOpenConnections,
+			},
 		},
 	}}
 	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, discard()).ListRecordings(context.Background())
@@ -72,10 +87,18 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `[` +
-		`{"id":"r1","lessonId":"l1","status":"RECORDING","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
-		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":true},` +
-		`{"id":"r2","lessonId":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"2026-10-15T07:30:00Z",` +
-		`"durationSeconds":3542,"hasDuration":true,"problem":"limit reached","stoppable":false}]`
+		`{"id":"r1","lessonId":"l1","title":"История, лекция","status":"RECORDING",` +
+		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
+		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"queueReason":"","errorCode":"",` +
+		`"jobError":"","action":"","actionJobId":""},` +
+		`{"id":"r2","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
+		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
+		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"queueReason":"power",` +
+		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1"},` +
+		`{"id":"r3","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
+		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
+		`"progressPercent":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
+		`"actionJobId":""}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}
@@ -222,6 +245,31 @@ func TestFrontendKnowsActivityErrors(t *testing.T) {
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/activity.ts does not list the error %q", e)
+		}
+	}
+}
+
+// The page parses the chain codes strictly (TASK-076), so the frontend wrapper must list every code the core sends.
+func TestFrontendKnowsChainCodes(t *testing.T) {
+	src, err := os.ReadFile("../../../frontend/src/bindings/activity.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := []string{
+		string(activity.StageRecording), string(activity.StageSaving), string(activity.StageQueued),
+		string(activity.StageTranscribing), string(activity.StageSummarizing), string(activity.StageDone),
+		string(activity.StageFailed),
+		string(activity.StepTranscription), string(activity.StepSummary),
+		string(activity.QueueInLine), string(activity.QueueRetry), string(activity.QueuePower), string(activity.QueueNetwork),
+		string(activity.QueueQuota), string(activity.QueueNoModel),
+		string(activity.ErrorRecordingFailed), string(activity.ErrorTranscriptionFailed),
+		string(activity.ErrorSummaryFailed), string(activity.ErrorHomeworkFailed),
+		string(activity.ActionRunNow), string(activity.ActionOpenModels), string(activity.ActionOpenConnections),
+		string(activity.ActionCheckSound),
+	}
+	for _, c := range codes {
+		if !strings.Contains(string(src), `"`+c+`"`) {
+			t.Errorf("frontend/src/bindings/activity.ts does not list the chain code %q", c)
 		}
 	}
 }

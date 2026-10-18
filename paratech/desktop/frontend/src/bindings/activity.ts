@@ -3,10 +3,23 @@
 
 import type { CallByName } from "./settings";
 
-/** One recording, newest first. Times are RFC 3339 in UTC, "" when unknown. */
+/** Step of the whole chain of a recording (TASK-076), decided by the Go core. */
+export type ChainStage = "recording" | "saving" | "queued" | "transcribing" | "summarizing" | "done" | "failed";
+/** The step a queued or failed chain stopped at; "" otherwise. */
+export type ChainStep = "" | "transcription" | "summary";
+/** Why a queued chain waits; "" otherwise. */
+export type QueueReason = "" | "inLine" | "retry" | "power" | "network" | "quota" | "noModel";
+/** What failed; "" otherwise. */
+export type ChainErrorCode = "" | "recordingFailed" | "transcriptionFailed" | "summaryFailed" | "homeworkFailed";
+/** What the row offers besides Stop; runNow calls runJobNow(actionJobId). */
+export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound";
+
+/** One recording with the status of its whole chain, newest first. Times are RFC 3339 in UTC, "" when unknown. */
 export interface RecordingItem {
   id: string;
   lessonId: string;
+  /** Lesson title: imported, untrusted text, render as plain text only. "" without a lesson: show «Запись <дата, время>». */
+  title: string;
   status: string;
   startedAt: string;
   stoppedAt: string;
@@ -15,9 +28,23 @@ export interface RecordingItem {
   hasDuration: boolean;
   problem: string;
   stoppable: boolean;
+  stage: ChainStage;
+  step: ChainStep;
+  /** Transcription progress, 0..100. */
+  progressPercent: number;
+  queueReason: QueueReason;
+  errorCode: ChainErrorCode;
+  /** Last error of the job the stage refers to (failed or retrying); "" otherwise. */
+  jobError: string;
+  action: ChainAction;
+  actionJobId: string;
 }
 
-/** One job, newest first. For a waiting job (WAITING_FOR_*) the status is the waiting reason. */
+/**
+ * One job, newest first. For a waiting job (WAITING_FOR_*) the status is the waiting reason. Since TASK-076 the list
+ * has neither the service jobs nor the jobs of the recording chain (stt, summarize, extract_homework): the recording
+ * rows show those.
+ */
 export interface JobItem {
   id: string;
   type: string;
@@ -83,6 +110,20 @@ function bool(r: Record<string, unknown>, key: string, what: string): boolean {
   return v;
 }
 
+function oneOf<T extends string>(r: Record<string, unknown>, key: string, what: string, allowed: readonly T[]): T {
+  const v = str(r, key, what);
+  if (!(allowed as readonly string[]).includes(v)) {
+    throw new Error(`${what}: unknown ${key}`);
+  }
+  return v as T;
+}
+
+const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"] as const;
+const steps = ["", "transcription", "summary"] as const;
+const queueReasons = ["", "inLine", "retry", "power", "network", "quota", "noModel"] as const;
+const errorCodes = ["", "recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"] as const;
+const actions = ["", "runNow", "openModels", "openConnections", "checkSound"] as const;
+
 function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {
   if (!Array.isArray(raw)) {
     throw new Error(`${what}: reply is not a list`);
@@ -97,6 +138,7 @@ export function parseRecording(raw: unknown): RecordingItem {
   return {
     id: str(r, "id", w),
     lessonId: str(r, "lessonId", w),
+    title: str(r, "title", w),
     status: str(r, "status", w),
     startedAt: str(r, "startedAt", w),
     stoppedAt: str(r, "stoppedAt", w),
@@ -104,6 +146,14 @@ export function parseRecording(raw: unknown): RecordingItem {
     hasDuration: bool(r, "hasDuration", w),
     problem: str(r, "problem", w),
     stoppable: bool(r, "stoppable", w),
+    stage: oneOf(r, "stage", w, stages),
+    step: oneOf(r, "step", w, steps),
+    progressPercent: num(r, "progressPercent", w),
+    queueReason: oneOf(r, "queueReason", w, queueReasons),
+    errorCode: oneOf(r, "errorCode", w, errorCodes),
+    jobError: str(r, "jobError", w),
+    action: oneOf(r, "action", w, actions),
+    actionJobId: str(r, "actionJobId", w),
   };
 }
 

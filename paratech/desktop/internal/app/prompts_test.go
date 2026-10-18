@@ -119,6 +119,16 @@ func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	if !f.recorder.Running(info.ID) {
 		t.Fatal("the capture does not run")
 	}
+
+	// TASK-076: «Записи и задачи» titles the row by the lesson, not by its start time.
+	rows, err := wails.NewActivityService(c.ui.Activity, c.ui.Stopper, c.ui.Forcer, slog.New(slog.DiscardHandler)).
+		ListRecordings(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListRecordings = %+v, %v; want the one recording", rows, err)
+	}
+	if r := rows[0]; r.ID != string(info.ID) || r.LessonID != "lesson-1" || r.Title != "History" || r.Stage != "recording" {
+		t.Fatalf("row %+v, want the recording titled History in the recording stage", r)
+	}
 }
 
 // With the recorder of a build without capture the popup stays up with the "unavailable" problem, the app keeps

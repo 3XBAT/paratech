@@ -12,6 +12,7 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -35,6 +36,46 @@ type fakeJobs struct {
 	err        error
 	limit      int
 	hidden     []job.Type
+
+	chain                     map[shared.RecordingID][]*job.Job
+	badChain                  []shared.JobID
+	chainErr                  error
+	byRecording, byTranscript []job.Type
+}
+
+// fakeLessons returns the lessons by id; a missing one is shared.ErrNotFound, an id in bad fails.
+type fakeLessons struct {
+	titles map[shared.LessonID]string
+	bad    map[shared.LessonID]error
+	gets   int
+}
+
+func (f *fakeLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, error) {
+	f.gets++
+	if err := f.bad[id]; err != nil {
+		return nil, err
+	}
+	title, ok := f.titles[id]
+	if !ok {
+		return nil, shared.ErrNotFound
+	}
+	return lesson.New(lesson.Spec{ID: id, Content: lesson.Content{
+		Title: title, Start: t0, End: t0.Add(90 * time.Minute), TimeZone: "Europe/Moscow",
+	}}, t0)
+}
+
+// ListForRecordings returns the chain jobs of the asked recordings, as the store does.
+func (f *fakeJobs) ListForRecordings(_ context.Context, recs []shared.RecordingID, byRecording, byTranscript []job.Type) (
+	map[shared.RecordingID][]*job.Job, []shared.JobID, error,
+) {
+	f.byRecording, f.byTranscript = byRecording, byTranscript
+	out := map[shared.RecordingID][]*job.Job{}
+	for _, r := range recs {
+		if js, ok := f.chain[r]; ok {
+			out[r] = js
+		}
+	}
+	return out, f.badChain, f.chainErr
 }
 
 // ListActivity leaves out the hidden types as the store does.
@@ -63,19 +104,24 @@ func newRecording(t *testing.T, id string) *recording.Recording {
 	return r
 }
 
+// newJob builds a job of a type outside the recording chain: since TASK-076 the chain jobs (stt, summarize,
+// extract_homework) are shown inside their recording rows, not in the jobs list.
 func newJob(t *testing.T, id string) *job.Job {
 	t.Helper()
-	j, err := job.New(job.Spec{ID: shared.JobID(id), Type: "stt", Key: "stt:" + id, MaxAttempts: 3}, t0)
+	j, err := job.New(job.Spec{ID: shared.JobID(id), Type: "homework_draft", Key: "homework_draft:" + id, MaxAttempts: 3}, t0)
 	must(t, err)
 	return j
 }
 
 func TestNewRequiresPorts(t *testing.T) {
-	if _, err := New(nil, &fakeJobs{}, nil); !errors.Is(err, ErrInvalidConfig) {
+	if _, err := New(nil, &fakeJobs{}, &fakeLessons{}, nil); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("no recordings: err = %v", err)
 	}
-	if _, err := New(&fakeRecordings{}, nil, nil); !errors.Is(err, ErrInvalidConfig) {
+	if _, err := New(&fakeRecordings{}, nil, &fakeLessons{}, nil); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("no jobs: err = %v", err)
+	}
+	if _, err := New(&fakeRecordings{}, &fakeJobs{}, nil, nil); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("no lessons: err = %v", err)
 	}
 }
 
@@ -95,7 +141,7 @@ func TestListRecordings(t *testing.T) {
 	must(t, failed.Fail(t0.Add(time.Second), "device lost"))
 
 	repo := &fakeRecordings{list: []*recording.Recording{recordingNow, completed, failed}}
-	s, err := New(repo, &fakeJobs{}, nil)
+	s, err := New(repo, &fakeJobs{}, &fakeLessons{titles: map[shared.LessonID]string{"l1": "История"}}, nil)
 	must(t, err)
 
 	got, err := s.ListRecordings(context.Background())
@@ -104,12 +150,19 @@ func TestListRecordings(t *testing.T) {
 		t.Errorf("limit = %d, want %d", repo.limit, ListLimit)
 	}
 	want := []Recording{
-		{ID: "r-recording", LessonID: "l1", Status: recording.StatusRecording, StartedAt: t0.Add(time.Second), Stoppable: true},
 		{
-			ID: "r-completed", LessonID: "l1", Status: recording.StatusCompleted, StartedAt: t0, StoppedAt: t0.Add(time.Hour),
-			Duration: 59 * time.Minute, HasDuration: true,
+			ID: "r-recording", LessonID: "l1", LessonTitle: "История", Status: recording.StatusRecording,
+			StartedAt: t0.Add(time.Second), Stoppable: true, Chain: Chain{Stage: StageRecording},
 		},
-		{ID: "r-failed", LessonID: "l1", Status: recording.StatusFailed, StartedAt: t0, Problem: "device lost"},
+		{
+			ID: "r-completed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusCompleted, StartedAt: t0,
+			StoppedAt: t0.Add(time.Hour), Duration: 59 * time.Minute, HasDuration: true,
+			Chain: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueNoModel, Action: ActionOpenModels},
+		},
+		{
+			ID: "r-failed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusFailed, StartedAt: t0,
+			Problem: "device lost", Chain: Chain{Stage: StageFailed, ErrorCode: ErrorRecordingFailed, Action: ActionCheckSound},
+		},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d rows, want %d: %+v", len(got), len(want), got)
@@ -139,7 +192,7 @@ func TestListJobs(t *testing.T) {
 	must(t, failed.Fail(t0.Add(2*time.Minute), "bad input"))
 
 	repo := &fakeJobs{list: []*job.Job{queued, power, network, failed}}
-	s, err := New(&fakeRecordings{}, repo, nil)
+	s, err := New(&fakeRecordings{}, repo, &fakeLessons{}, nil)
 	must(t, err)
 
 	got, err := s.ListJobs(context.Background())
@@ -148,17 +201,17 @@ func TestListJobs(t *testing.T) {
 		t.Errorf("limit = %d, want %d", repo.limit, ListLimit)
 	}
 	want := []Job{
-		{ID: "j-queued", Type: "stt", Status: job.StatusQueued, MaxAttempts: 3, CreatedAt: t0, UpdatedAt: t0, NextRunAt: t0},
+		{ID: "j-queued", Type: "homework_draft", Status: job.StatusQueued, MaxAttempts: 3, CreatedAt: t0, UpdatedAt: t0, NextRunAt: t0},
 		{
-			ID: "j-power", Type: "stt", Status: job.StatusWaitingForPower, Waiting: true, MaxAttempts: 3,
+			ID: "j-power", Type: "homework_draft", Status: job.StatusWaitingForPower, Waiting: true, MaxAttempts: 3,
 			CreatedAt: t0, UpdatedAt: t0.Add(time.Minute), NextRunAt: t0, RunNowOffered: true,
 		},
 		{
-			ID: "j-network", Type: "stt", Status: job.StatusWaitingForNetwork, Waiting: true, MaxAttempts: 3, Percent: 40,
+			ID: "j-network", Type: "homework_draft", Status: job.StatusWaitingForNetwork, Waiting: true, MaxAttempts: 3, Percent: 40,
 			CreatedAt: t0, UpdatedAt: t0.Add(3 * time.Minute), NextRunAt: t0,
 		},
 		{
-			ID: "j-failed", Type: "stt", Status: job.StatusFailed, Attempts: 1, MaxAttempts: 3, LastError: "bad input",
+			ID: "j-failed", Type: "homework_draft", Status: job.StatusFailed, Attempts: 1, MaxAttempts: 3, LastError: "bad input",
 			CreatedAt: t0, UpdatedAt: t0.Add(2 * time.Minute), NextRunAt: t0,
 		},
 	}
@@ -173,7 +226,7 @@ func TestListJobs(t *testing.T) {
 }
 
 func TestListsAreEmptyNotNil(t *testing.T) {
-	s, err := New(&fakeRecordings{}, &fakeJobs{}, nil)
+	s, err := New(&fakeRecordings{}, &fakeJobs{}, &fakeLessons{}, nil)
 	must(t, err)
 	recs, err := s.ListRecordings(context.Background())
 	if err != nil || recs == nil {
@@ -187,7 +240,7 @@ func TestListsAreEmptyNotNil(t *testing.T) {
 
 func TestListErrorsAreWrapped(t *testing.T) {
 	boom := errors.New("disk")
-	s, err := New(&fakeRecordings{err: boom}, &fakeJobs{err: boom}, nil)
+	s, err := New(&fakeRecordings{err: boom}, &fakeJobs{err: boom}, &fakeLessons{}, nil)
 	must(t, err)
 	if _, err := s.ListRecordings(context.Background()); !errors.Is(err, boom) {
 		t.Errorf("ListRecordings err = %v", err)
@@ -202,7 +255,7 @@ func TestUnreadableRowsAreLoggedWhenTheyChange(t *testing.T) {
 	var logs bytes.Buffer
 	recs := &fakeRecordings{list: []*recording.Recording{newRecording(t, "r-ok")}, unreadable: []shared.RecordingID{"r-bad"}}
 	jobs := &fakeJobs{list: []*job.Job{newJob(t, "j-ok")}, unreadable: []shared.JobID{"j-bad"}}
-	s, err := New(recs, jobs, slog.New(slog.NewTextHandler(&logs, nil)))
+	s, err := New(recs, jobs, &fakeLessons{}, slog.New(slog.NewTextHandler(&logs, nil)))
 	must(t, err)
 	ctx := context.Background()
 
@@ -243,7 +296,7 @@ func TestUnreadableRowsAreLoggedWhenTheyChange(t *testing.T) {
 
 // Without a logger the unreadable rows are still left out quietly.
 func TestNilLoggerDiscards(t *testing.T) {
-	s, err := New(&fakeRecordings{unreadable: []shared.RecordingID{"r"}}, &fakeJobs{unreadable: []shared.JobID{"j"}}, nil)
+	s, err := New(&fakeRecordings{unreadable: []shared.RecordingID{"r"}}, &fakeJobs{unreadable: []shared.JobID{"j"}}, &fakeLessons{}, nil)
 	must(t, err)
 	if _, err := s.ListRecordings(context.Background()); err != nil {
 		t.Error(err)
@@ -254,6 +307,8 @@ func TestNilLoggerDiscards(t *testing.T) {
 }
 
 // The hidden service types reach the store, so the store leaves them out before its bound; jobs of the user stay.
+// Since TASK-076 the chain types (stt, summarize, extract_homework) are always left out too: their recording rows
+// show them.
 func TestListJobsLeavesOutHiddenTypes(t *testing.T) {
 	typed := func(id string, typ job.Type) *job.Job {
 		t.Helper()
@@ -265,23 +320,24 @@ func TestListJobsLeavesOutHiddenTypes(t *testing.T) {
 		typed("sync", "calendar_sync"), typed("stt", "stt"), typed("sum", "summarize"), typed("hw", "extract_homework"),
 		typed("draft", "homework_draft"), typed("send", "send_email"),
 	}
+	chain := []job.Type{"stt", "summarize", "extract_homework"}
 	tests := []struct {
 		name   string
 		hidden []job.Type
 		want   []shared.JobID
 	}{
-		{name: "nothing hidden", want: []shared.JobID{"sync", "stt", "sum", "hw", "draft", "send"}},
-		{name: "calendar sync hidden", hidden: []job.Type{"calendar_sync"}, want: []shared.JobID{"stt", "sum", "hw", "draft", "send"}},
+		{name: "only the chain hidden", want: []shared.JobID{"sync", "draft", "send"}},
+		{name: "calendar sync hidden", hidden: []job.Type{"calendar_sync"}, want: []shared.JobID{"draft", "send"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeJobs{list: all}
-			s, err := New(&fakeRecordings{}, repo, nil, tt.hidden...)
+			s, err := New(&fakeRecordings{}, repo, &fakeLessons{}, nil, tt.hidden...)
 			must(t, err)
 			got, err := s.ListJobs(context.Background())
 			must(t, err)
-			if !slices.Equal(repo.hidden, tt.hidden) {
-				t.Errorf("hidden passed to the store = %v, want %v", repo.hidden, tt.hidden)
+			if want := append(slices.Clone(tt.hidden), chain...); !slices.Equal(repo.hidden, want) {
+				t.Errorf("hidden passed to the store = %v, want %v", repo.hidden, want)
 			}
 			ids := make([]shared.JobID, 0, len(got))
 			for _, j := range got {
@@ -298,12 +354,88 @@ func TestListJobsLeavesOutHiddenTypes(t *testing.T) {
 func TestNewCopiesHiddenTypes(t *testing.T) {
 	hidden := []job.Type{"calendar_sync"}
 	repo := &fakeJobs{}
-	s, err := New(&fakeRecordings{}, repo, nil, hidden...)
+	s, err := New(&fakeRecordings{}, repo, &fakeLessons{}, nil, hidden...)
 	must(t, err)
 	hidden[0] = "stt"
 	_, err = s.ListJobs(context.Background())
 	must(t, err)
-	if !slices.Equal(repo.hidden, []job.Type{"calendar_sync"}) {
-		t.Fatalf("hidden = %v, want [calendar_sync]", repo.hidden)
+	if want := []job.Type{"calendar_sync", "stt", "summarize", "extract_homework"}; !slices.Equal(repo.hidden, want) {
+		t.Fatalf("hidden = %v, want %v (the caller's types, then the chain types)", repo.hidden, want)
+	}
+}
+
+// Popup -> recording -> title (TASK-076): a lesson recording is titled by its lesson; an ad-hoc one and one whose
+// lesson is gone have no title (the page shows «Запись <дата, время>»); a lesson that cannot be read leaves only its
+// title out and is logged once per change. Each lesson is read once per list.
+func TestListRecordingsLessonTitles(t *testing.T) {
+	mk := func(id string, l shared.LessonID) *recording.Recording {
+		r, err := recording.New(recording.Spec{ID: shared.RecordingID(id), LessonID: l, MaxDuration: 3 * time.Hour}, t0)
+		must(t, err)
+		return r
+	}
+	recs := &fakeRecordings{list: []*recording.Recording{
+		mk("r-a", "math"), mk("r-b", "math"), mk("r-adhoc", ""), mk("r-gone", "gone"), mk("r-bad", "bad"),
+	}}
+	lessons := &fakeLessons{
+		titles: map[shared.LessonID]string{"math": "Матанализ, лекция"},
+		bad:    map[shared.LessonID]error{"bad": errors.New("sql: Scan error on column title")},
+	}
+	var logs bytes.Buffer
+	s, err := New(recs, &fakeJobs{}, lessons, slog.New(slog.NewTextHandler(&logs, nil)))
+	must(t, err)
+
+	for range 2 {
+		got, err := s.ListRecordings(context.Background())
+		must(t, err)
+		titles := map[shared.RecordingID]string{}
+		for _, r := range got {
+			titles[r.ID] = r.LessonTitle
+		}
+		want := map[shared.RecordingID]string{"r-a": "Матанализ, лекция", "r-b": "Матанализ, лекция", "r-adhoc": "", "r-gone": "", "r-bad": ""}
+		if len(got) != len(want) {
+			t.Fatalf("rows %+v", got)
+		}
+		for id, title := range want {
+			if titles[id] != title {
+				t.Errorf("%s titled %q, want %q", id, titles[id], title)
+			}
+		}
+	}
+	if lessons.gets != 6 {
+		t.Errorf("lesson reads = %d, want 3 per list (one per lesson)", lessons.gets)
+	}
+	if n := strings.Count(logs.String(), "lessons that cannot be read"); n != 1 || !strings.Contains(logs.String(), "bad") {
+		t.Errorf("lesson warnings = %d, want 1 naming the lesson:\n%s", n, logs.String())
+	}
+}
+
+// The chain jobs of the listed recordings are asked by the chain types and decide each row's status; a job that
+// cannot be read is logged once, and a failure of the query fails the list.
+func TestListRecordingsChain(t *testing.T) {
+	rec := recordingIn(t, recording.StatusCompleted)
+	running := jobIn(t, "stt-1", "stt", 0, job.StatusRunning)
+	jobs := &fakeJobs{chain: map[shared.RecordingID][]*job.Job{rec.ID(): {running}}, badChain: []shared.JobID{"stt-bad"}}
+	var logs bytes.Buffer
+	s, err := New(&fakeRecordings{list: []*recording.Recording{rec}}, jobs, &fakeLessons{}, slog.New(slog.NewTextHandler(&logs, nil)))
+	must(t, err)
+
+	for range 2 {
+		got, err := s.ListRecordings(context.Background())
+		must(t, err)
+		if want := (Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42}); len(got) != 1 || got[0].Chain != want {
+			t.Fatalf("rows %+v, want one with %+v", got, want)
+		}
+	}
+	if !slices.Equal(jobs.byRecording, []job.Type{"stt"}) || !slices.Equal(jobs.byTranscript, []job.Type{"summarize", "extract_homework"}) {
+		t.Errorf("asked types %v / %v", jobs.byRecording, jobs.byTranscript)
+	}
+	if n := strings.Count(logs.String(), "jobs that cannot be read"); n != 1 || !strings.Contains(logs.String(), "stt-bad") {
+		t.Errorf("job warnings = %d:\n%s", n, logs.String())
+	}
+
+	boom := errors.New("disk")
+	jobs.chainErr = boom
+	if _, err := s.ListRecordings(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("ListRecordings err = %v, want %v", err, boom)
 	}
 }
