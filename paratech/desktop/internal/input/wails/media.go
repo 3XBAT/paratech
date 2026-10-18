@@ -127,14 +127,13 @@ func clampRange(header string, size int64) (string, bool) {
 	first, last = strings.TrimSpace(first), strings.TrimSpace(last)
 
 	var start, end int64
-	switch {
-	case first == "": // the last n bytes
+	if first == "" { // the last n bytes
 		n, err := strconv.ParseInt(last, 10, 64)
 		if err != nil || n <= 0 {
 			return "", false
 		}
 		start, end = max(size-n, 0), size-1
-	default:
+	} else {
 		s, err := strconv.ParseInt(first, 10, 64)
 		if err != nil || s < 0 {
 			return "", false

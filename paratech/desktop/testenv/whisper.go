@@ -107,7 +107,7 @@ func printSegment(i int, text string) {
 	stamp := func(ms int) string {
 		return fmt.Sprintf("%02d:%02d:%02d.%03d", ms/3_600_000, ms/60_000%60, ms/1000%60, ms%1000)
 	}
-	fmt.Fprintf(os.Stdout, "[%s --> %s]   %s\n", stamp(i*2000), stamp((i+1)*2000), text)
+	_, _ = fmt.Fprintf(os.Stdout, "[%s --> %s]   %s\n", stamp(i*2000), stamp((i+1)*2000), text)
 }
 
 // whisperResult renders the parts of the -oj output of whisper.cpp v1.9.5 that the adapter reads.

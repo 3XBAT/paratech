@@ -253,13 +253,12 @@ func (s *Service) recognition(ctx context.Context, id shared.RecordingID) (State
 		return "", 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
-	st := j.Status()
-	switch {
-	case st == job.StatusRunning:
+	switch j.Status() {
+	case job.StatusRunning:
 		return StateRecognising, j.Progress().Percent(), nil
-	case st == job.StatusFailed || st == job.StatusCancelled:
+	case job.StatusFailed, job.StatusCancelled:
 		return StateFailed, 0, nil
-	case st == job.StatusCompleted:
+	case job.StatusCompleted:
 		// Completed without a transcript: it was removed since, nothing is being recognised.
 		return StateNone, 0, nil
 	}

@@ -13,7 +13,7 @@ func TestSafeFileName(t *testing.T) {
 		{"plain", "Математика 2026-10-18", "Математика 2026-10-18"},
 		{"forbidden characters", `a\b/c:d*e?f"g<h>i|j`, "a_b_c_d_e_f_g_h_i_j"},
 		{"control characters", "a\x00b\nc\u0085d", "a_b c d"}, // line breaks are spaces
-		{"delete character", "ab", "a_b"},
+		{"delete character", "a\x7fb", "a_b"},
 		{"spaces collapse and trim", "  a \t  b  ", "a b"},
 		{"trailing dots", "lesson...", "lesson"},
 		{"reserved name", "CON", "_CON"},
