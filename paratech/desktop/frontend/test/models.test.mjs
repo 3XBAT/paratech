@@ -14,8 +14,21 @@ import {
   canConfirm,
   catalogActions,
   catalogGroups,
-  catalogLabels,
+  accuracyText,
+  catalogAction,
+  catalogEntryOf,
+  catalogMenu,
+  catalogRow,
   displayName,
+  installedMenu,
+  installedName,
+  installedRow,
+  installedText,
+  loadHint,
+  loadLevels,
+  menuKey,
+  progressText,
+  reducedSuffix,
   pinnedByDownload,
   languageFilter,
   languageOptions,
@@ -33,7 +46,6 @@ import {
   keepsSelection,
   modelTitle,
   progressPercent,
-  shortSha,
   sizeText,
   statusNotes,
   texts,
@@ -202,7 +214,6 @@ test("the notes say why recordings are not transcribed", () => {
   assert.equal(defaultBadge(none), "");
   assert.equal(modelTitle(installed), "base 1, q5_1");
   assert.equal(modelTitle({ ...installed, quantization: "" }), "base 1");
-  assert.equal(shortSha(sum), "aaaaaaaaaaaa…");
 });
 
 test("the badge and the default note follow the core's flags, not the count of models (ARCH-44)", () => {
@@ -263,7 +274,8 @@ test("file and catalog text is plain text, isolated in <bdi>", () => {
   const page = readFileSync(new URL("../src/pages/ModelsPage.tsx", import.meta.url), "utf8");
   assert.match(page, /<bdi>\{step\.selection\.fileName\}<\/bdi>/);
   assert.match(page, /<code className="sha">\s*<bdi>\{step\.selection\.sha256\}<\/bdi>/);
-  assert.match(page, /<bdi>\{modelTitle\(m\)\}<\/bdi>/);
+  assert.match(page, /<bdi className="mname-text">\{r\.name\}<\/bdi>/);
+  assert.match(page, /<bdi className="breakable">\{installedName\(deletingModel, view\?\.available \?\? \[\]\)\}<\/bdi>/);
   assert.match(page, /SHA-256 совпадает, установить/);
   for (const file of ["../src/pages/ModelsPage.tsx", "../src/modelsView.ts", "../src/bindings/models.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
@@ -289,7 +301,7 @@ test("a catalog row is named by its family; an unknown family shows the catalog 
   };
   for (const [family, name] of Object.entries(names)) {
     assert.equal(displayName({ family, catalogId: "x" }), name, family);
-    assert.equal(catalogLabels({ ...available, family }).name, name, family);
+    assert.equal(catalogRow({ ...available, family }).name, name, family);
   }
   assert.equal(displayName({ family: "", catalogId: "base-q5_1" }), "base-q5_1");
   assert.equal(displayName({ family: "huge", catalogId: "huge-q5_0" }), "huge-q5_0");
@@ -299,81 +311,208 @@ test("a catalog row is named by its family; an unknown family shows the catalog 
   const catalog = JSON.parse(readFileSync(new URL("../../internal/app/catalog.json", import.meta.url), "utf8"));
   assert.equal(catalog.models.length, 20);
   for (const e of catalog.models) {
-    const l = catalogLabels({ ...available, catalogId: e.id, family: e.family, quantization: e.quantization });
-    assert.ok(Object.values(names).includes(l.name), e.id);
-    assert.match(l.accuracy, /^Точность: /, e.id);
+    const r = catalogRow({ ...available, catalogId: e.id, family: e.family, quantization: e.quantization });
+    assert.ok(Object.values(names).includes(r.name), e.id);
+    assert.match(accuracyText(e.family), /^точность /, e.id);
+    assert.ok(r.details.includes(accuracyText(e.family)), e.id);
   }
 });
 
-test("the load is a 5-step scale with words; the warning follows the core's heavy flag", () => {
+test("the load is a 5-step scale with «Нагрузка N из 5»; the warning follows the core's heavy flag", () => {
+  assert.equal(loadLevels, 5);
   assert.deepEqual(loadWords, ["", "лёгкая", "умеренная", "средняя", "тяжёлая", "очень тяжёлая"]);
   assert.equal(loadText(0), "");
-  assert.equal(loadText(1), "Нагрузка на компьютер: 1 из 5 — лёгкая");
-  assert.equal(loadText(2), "Нагрузка на компьютер: 2 из 5 — умеренная");
-  assert.equal(loadText(3), "Нагрузка на компьютер: 3 из 5 — средняя");
-  assert.equal(loadText(4), "Нагрузка на компьютер: 4 из 5 — тяжёлая");
-  assert.equal(loadText(5), "Нагрузка на компьютер: 5 из 5 — очень тяжёлая");
-  assert.equal(loadText(6), "");
-
-  const heavy = "Модель требовательна к ресурсам вашего устройства: распознавание будет долгим на обычном процессоре";
-  assert.equal(texts.heavy, heavy);
-  for (const load of [0, 1, 2, 3, 4, 5]) {
-    assert.equal(catalogLabels({ ...available, load }).load, loadText(load));
+  for (const n of [1, 2, 3, 4, 5]) {
+    assert.equal(loadText(n), `Нагрузка ${n} из 5`);
+    assert.equal(loadHint(n), `Нагрузка на компьютер: ${n} из 5 — ${loadWords[n]}`);
   }
-  // The page does not repeat the core's rule: only the flag decides the warning, whatever the load.
-  assert.equal(catalogLabels({ ...available, load: 5, heavy: false }).warning, "");
-  assert.equal(catalogLabels({ ...available, load: 1, heavy: true }).warning, heavy);
+  assert.equal(loadText(6), "");
+  assert.equal(loadHint(0), "");
+
+  assert.equal(texts.heavy, "Тяжёлая модель: распознавание будет долгим");
+  for (const load of [0, 1, 2, 3, 4, 5]) {
+    assert.equal(catalogRow({ ...available, load }).load, load);
+  }
+  assert.equal(catalogRow({ ...available, load: 7 }).load, 0, "an unknown load has no scale");
+  // The page does not repeat the core's rule: only the flag (load 4–5 in the core) decides the warning.
+  assert.equal(catalogRow({ ...available, load: 3, heavy: false }).warning, "");
+  assert.equal(catalogRow({ ...available, load: 4, heavy: true }).warning, texts.heavy);
+  assert.equal(catalogRow({ ...available, load: 5, heavy: true }).warning, texts.heavy);
+  assert.equal(catalogRow({ ...available, load: 5, heavy: true }).heavy, true);
+  // The core's «below the recommended hardware» hint is a part of the muted line, never a second warning line.
+  assert.equal(catalogRow({ ...available, likelySlow: true }).slow, texts.likelySlow);
+  assert.equal(catalogRow({ ...available, likelySlow: true }).warning, "");
+  assert.equal(catalogRow({ ...available, likelySlow: true, heavy: true, load: 5 }).slow, "", "one warning only");
 });
 
-test("language, variant, accuracy and the recommended label", () => {
-  const at = (over) => catalogLabels({ ...available, ...over });
-  assert.equal(at({}).language, "Русский и другие языки");
-  assert.equal(at({ englishOnly: true }).language, "Только английский");
-
+test("a catalog row: «Q5» in the name, only two tags, one muted line, the id only in the tooltip", () => {
+  const at = (over) => catalogRow({ ...available, ...over });
   // The variant follows the core's reduced flag, not the quantization text.
-  assert.equal(at({ reduced: true }).variant, "Уменьшенная — меньше и быстрее, точность чуть ниже");
-  assert.equal(at({ reduced: false }).variant, "Полная");
-  assert.equal(at({ quantization: "q5_0", reduced: false }).variant, "Полная");
-  assert.equal(at({ quantization: "f16", reduced: true }).variant, "Уменьшенная — меньше и быстрее, точность чуть ниже");
-  assert.notEqual(at({ reduced: true }).variantHint, "");
-  assert.notEqual(at({ reduced: false }).variantHint, "");
-  // The visible page line explains both variants (the row's title is only extra).
-  assert.equal(
-    texts.variantsNote,
-    "Полная — исходная модель. Уменьшенная — сжатая копия той же модели: файл меньше, работает быстрее, точность чуть ниже.",
-  );
+  assert.equal(at({ reduced: true, quantization: "q5_1" }).suffix, "Q5");
+  assert.equal(at({ reduced: true, quantization: "q5_0" }).suffix, "Q5");
+  assert.equal(at({ reduced: false, quantization: "q5_0" }).suffix, "");
+  assert.equal(at({ reduced: false, quantization: "f16" }).suffix, "");
+  assert.equal(reducedSuffix("q8_0"), "Q8");
+  assert.equal(texts.q5Hint, "уменьшенная: меньше и быстрее, точность чуть ниже");
 
+  // Only «Рекомендуется для русского» and «Только английский» next to the name.
+  assert.deepEqual(at({ recommended: true }).tags, ["Рекомендуется для русского"]);
+  assert.deepEqual(at({ recommended: false }).tags, []);
+  assert.deepEqual(at({ englishOnly: true }).tags, ["Только английский"]);
+  assert.deepEqual(at({ recommended: true, englishOnly: true }).tags, ["Только английский"], "never recommended in English");
+  for (const tier of ["fast", "balanced", "accurate", "max", ""]) {
+    for (const t of at({ tier, recommended: true }).tags) {
+      assert.ok(["Рекомендуется для русского", "Только английский"].includes(t), `${tier}: ${t}`);
+    }
+  }
+
+  // The muted line: accuracy and language; an English-only model has its language as the tag.
+  assert.deepEqual(at({ family: "small" }).details, ["точность хорошая", "русский и другие языки"]);
+  assert.deepEqual(at({ family: "small", englishOnly: true }).details, ["точность хорошая"]);
   const accuracy = {
     tiny: "низкая", base: "средняя", small: "хорошая", medium: "высокая", "large-v3-turbo": "высокая",
     "large-v3": "самая высокая",
   };
   for (const [family, word] of Object.entries(accuracy)) {
-    assert.equal(at({ family }).accuracy, `Точность: ${word}`, family);
+    assert.equal(accuracyText(family), `точность ${word}`, family);
   }
-  assert.equal(at({ family: "" }).accuracy, "");
+  assert.equal(accuracyText(""), "");
+  assert.deepEqual(at({ family: "" }).details, ["русский и другие языки"]);
 
-  assert.equal(at({ recommended: true }).recommended, "Рекомендуется для русского");
-  assert.equal(at({ recommended: false }).recommended, "");
-  assert.equal(at({ recommended: true, englishOnly: true }).recommended, "", "never on an English-only model");
-
-  // The tier is only a secondary description; the heaviest tier has none (the load and the warning say it).
-  assert.equal(at({ tier: "fast" }).description, "Быстрее, но менее точная");
-  assert.equal(at({ tier: "accurate" }).description, "Точнее, но медленнее");
-  assert.equal(at({ tier: "balanced" }).description, "");
-  assert.equal(at({ tier: "max" }).description, "");
-  assert.equal(at({ tier: "toString" }).description, "");
+  // No «Полная»/«Уменьшенная» and no quantization or id in the visible text; the id is the tooltip.
+  for (const [catalogId, quantization, reduced] of [["base-q5_1", "q5_1", true], ["medium-q5_0", "q5_0", true], ["small-f16", "f16", false]]) {
+    for (const over of [{}, { englishOnly: true }, { recommended: true }, { heavy: true, load: 5 }, { likelySlow: true }]) {
+      const r = at({ catalogId, name: catalogId, quantization, reduced, family: catalogId.split("-")[0], ...over });
+      const shown = [r.name, r.suffix, r.size, ...r.tags, loadText(r.load), ...r.details, r.slow, r.warning].join(" ");
+      assert.doesNotMatch(shown, /Полная|Уменьшенная|Быстрее, но|Точнее, но/i, shown);
+      assert.ok(!shown.includes(quantization), `${catalogId}: ${shown}`);
+      assert.ok(!shown.includes(catalogId), `${catalogId}: ${shown}`);
+      assert.equal(r.tip, catalogId);
+    }
+  }
+  for (const t of Object.values(texts)) {
+    assert.doesNotMatch(t, /Полная|Уменьшенная/, t);
+  }
 });
 
-test("a catalog row shows the quantization only in the technical id", () => {
-  for (const [catalogId, quantization] of [["base-q5_1", "q5_1"], ["medium-q5_0", "q5_0"], ["small-f16", "f16"]]) {
-    const l = catalogLabels({ ...available, catalogId, name: catalogId, quantization, family: catalogId.split("-")[0] });
-    const shown = Object.values(l).join(" ");
-    assert.ok(!shown.includes(quantization), `${catalogId}: ${shown}`);
-  }
+test("one action per catalog row: «Скачать», «Отменить» while its download runs or «Удалить» once installed", () => {
+  const running = { catalogId: "base-q5_1", phase: "downloading", doneBytes: 1, totalBytes: 2, running: true, error: "" };
+  const failed = { ...running, phase: "failed", running: false };
+  assert.equal(catalogAction(available, noDownload), "download");
+  assert.equal(catalogAction(available, running), "cancel");
+  assert.equal(catalogAction(available, { ...running, phase: "verifying" }), "cancel");
+  assert.equal(catalogAction(available, failed), "download", "a stopped download resumes with «Скачать»");
+  assert.equal(catalogAction({ ...available, installed: true, installedId: "m-1" }, noDownload), "delete");
+  assert.equal(catalogAction({ ...available, catalogId: "small" }, running), "download", "another model");
+
+  assert.equal(progressText(running), "50% · 1 Б из 2 Б");
+  assert.equal(progressText({ ...running, totalBytes: 0 }), downloadText({ ...running, totalBytes: 0 }));
+  assert.equal(progressText(failed), downloadText(failed));
+});
+
+test("the «⋯» menu has the secondary actions; Escape closes it, arrows move, Tab leaves", () => {
+  const ops = (items) => items.map((i) => i.op);
+  const labels = (items) => items.map((i) => i.label);
+  assert.deepEqual(labels(catalogMenu(available, noDownload)), ["Открыть страницу источника", "Импортировать скачанный файл…"]);
+  const running = { catalogId: "base-q5_1", phase: "downloading", doneBytes: 1, totalBytes: 2, running: true, error: "" };
+  assert.deepEqual(ops(catalogMenu(available, running)), ["source"]);
+  const failed = { ...running, phase: "failed", running: false };
+  assert.deepEqual(labels(catalogMenu(available, failed)), [
+    "Открыть страницу источника", "Удалить недокачанный файл", "Импортировать скачанный файл…",
+  ]);
+  assert.deepEqual(ops(catalogMenu({ ...available, installed: true, installedId: "m-1", hasSourcePage: false }, noDownload)), []);
+
+  const none = { ...installed, isDefault: false, inUse: false };
+  assert.deepEqual(labels(installedMenu(none, null)), ["Сделать по умолчанию"]);
+  assert.deepEqual(ops(installedMenu(installed, null)), []);
+  assert.deepEqual(ops(installedMenu(none, available)), ["default", "source"]);
+  assert.deepEqual(ops(installedMenu(installed, { ...available, hasSourcePage: false })), []);
+
+  assert.equal(menuKey("Escape", 1, 3), "close");
+  assert.equal(menuKey("Escape", -1, 0), "close");
+  assert.equal(menuKey("Tab", 0, 3), "leave");
+  assert.equal(menuKey("ArrowDown", -1, 3), 0);
+  assert.equal(menuKey("ArrowDown", 0, 3), 1);
+  assert.equal(menuKey("ArrowDown", 2, 3), 0);
+  assert.equal(menuKey("ArrowUp", -1, 3), 2);
+  assert.equal(menuKey("ArrowUp", 0, 3), 2);
+  assert.equal(menuKey("ArrowUp", 2, 3), 1);
+  assert.equal(menuKey("Home", 2, 3), 0);
+  assert.equal(menuKey("End", 0, 3), 2);
+  assert.equal(menuKey("ArrowDown", -1, 0), null);
+  assert.equal(menuKey("a", 0, 3), null);
+  assert.equal(menuKey("Enter", 0, 3), null, "Enter clicks the focused item");
+});
+
+test("an installed model has the catalog row format; an imported one its own name, no load scale", () => {
+  const catalog = [
+    { ...available, catalogId: "small-q5_1", family: "small", quantization: "q5_1", reduced: true, load: 2, recommended: true },
+    { ...available, catalogId: "large-v3-f16", family: "large-v3", quantization: "f16", reduced: false, load: 5, heavy: true, likelySlow: true },
+  ];
+  const small = { ...installed, name: "small-q5_1", catalogId: "small-q5_1", quantization: "q5_1", sizeBytes: 190 * 1024 * 1024 };
+  assert.equal(catalogEntryOf(small, catalog), catalog[0]);
+  const r = installedRow(small, catalog);
+  assert.deepEqual([r.name, r.suffix, r.size, r.load], ["Small", "Q5", "190 МБ", 2]);
+  assert.deepEqual(r.tags, ["Рекомендуется для русского"]);
+  assert.deepEqual(r.details, ["точность хорошая", "русский и другие языки"]);
+  assert.match(r.tip, /^small-q5_1\nSHA-256: a{64}$/);
+  assert.equal(installedName(small, catalog), "Small Q5", "no quantization repeated in the title");
+  assert.equal(installedText(small, catalog), "Модель установлена: Small Q5.");
+
+  const large = { ...installed, name: "large-v3-f16", catalogId: "large-v3-f16", quantization: "f16" };
+  const l = installedRow(large, catalog);
+  assert.deepEqual([l.name, l.suffix, l.warning, l.slow, l.heavy], ["Large v3", "", "", "", true], "no warnings once installed");
+  assert.equal(installedName(large, catalog), "Large v3");
+
+  // Imported, or from a catalog entry that is gone: the name, the version and the quantization, no fake scale.
+  const own = { ...installed, fromCatalog: false, catalogId: "", name: "my-model", version: "2", quantization: "q5_0", capabilities: [] };
+  const o = installedRow(own, catalog);
+  assert.deepEqual([o.name, o.suffix, o.load, o.tags.length, o.warning], ["my-model", "", 0, 0, ""]);
+  assert.deepEqual(o.details, ["версия 2", "квантизация q5_0"]);
+  assert.deepEqual(installedRow({ ...own, quantization: "", capabilities: ["multilingual"] }, catalog).details, [
+    "версия 2", "русский и другие языки",
+  ]);
+  assert.equal(installedName(own, catalog), "my-model 2, q5_0");
+  assert.equal(installedText(own), "Модель установлена: my-model 2, q5_0.");
+  const gone = { ...small, catalogId: "small-old" };
+  assert.equal(catalogEntryOf(gone, catalog), null);
+  assert.equal(installedRow(gone, catalog).name, "small-q5_1");
+  assert.equal(catalogEntryOf({ ...small, fromCatalog: false }, catalog), null);
+});
+
+test("the page: one action button, the «⋯» menu, the id only as a tooltip, the import above the lists", () => {
   const page = readFileSync(new URL("../src/pages/ModelsPage.tsx", import.meta.url), "utf8");
+  const importAt = page.indexOf("Импортировать файл модели…");
+  assert.ok(importAt > 0);
+  assert.equal(page.split("Импортировать файл модели…").length, 2, "one import button");
+  assert.ok(importAt < page.indexOf("<CatalogList"), "above the catalog");
+  assert.ok(importAt < page.indexOf("<CollapsibleList"), "above the installed models");
+
   const row = page.slice(page.indexOf("function CatalogRow("));
-  assert.ok(!row.includes("modelTitle("), "the catalog row does not use name + version + quantization");
-  assert.equal(row.match(/<bdi>\{m\.catalogId\}<\/bdi>/g).length, 1, "the id once, as plain text");
+  for (const gone of ["Остановить скачивание", "Открыть страницу источника", "Импортировать скачанный файл", "Удалить недокачанный файл", "catalogLabels", "texts.likelySlow"]) {
+    assert.ok(!row.includes(gone), `the catalog row has no ${gone}`);
+  }
+  assert.doesNotMatch(page, /<bdi>\{m\.catalogId\}|>\{m\.catalogId\}</, "the id is never visible text");
+  assert.ok(!page.includes("modelTitle("), "titles come from the row text");
+  assert.match(page, /<p className="t mname" title=\{props\.tip\}>/, "the id is the tooltip of the name");
+  assert.match(page, /<span className="mq" title=\{texts\.q5Hint\}>/);
+  assert.match(page, /<span className="vh">, \{texts\.q5Hint\}<\/span>/, "the hint for screen readers too");
+  assert.match(page, /aria-haspopup="menu"/);
+  assert.match(page, /aria-expanded=\{open\}/);
+  assert.match(page, /aria-label=\{label\}/);
+  assert.match(page, /role="menuitem"/);
+  assert.match(page, /menuKey\(e\.key,/);
+  assert.match(page, /next === "close"\) \{\s*setOpen\(false\);\s*button\.current\?\.focus\(\);/, "Escape returns the focus");
+  assert.match(page, /addEventListener\("pointerdown", outside\)/, "a click outside closes the menu");
+  for (const r of ["function CatalogRow(", "function InstalledRow("]) {
+    const body = page.slice(page.indexOf(r));
+    const end = body.indexOf("\n}\n");
+    const buttons = body.slice(0, end).match(/<Button\b/g) ?? [];
+    assert.ok(buttons.length >= 1, r);
+    assert.ok(body.slice(0, end).includes("<RowMenu"), `${r} has the «⋯» menu`);
+  }
+  const installedBody = page.slice(page.indexOf("function InstalledRow("));
+  assert.equal(installedBody.slice(0, installedBody.indexOf("\n}\n")).match(/<Button\b/g).length, 1, "only «Удалить»");
 });
 
 test("the catalog filters by language and load and groups by language", () => {
@@ -431,15 +570,17 @@ test("the catalog filters by language and load and groups by language", () => {
 
 test("the load scale is not colour only and the filters are native selects", () => {
   const page = readFileSync(new URL("../src/pages/ModelsPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /role="img" aria-label=\{props\.text\}/);
+  assert.match(page, /role="img" aria-label=\{hint\} title=\{hint\}/);
   assert.match(page, /useState<LanguageFilter>\("all"\)/, "every language by default");
   assert.match(page, /useState<LoadFilter>\("any"\)/, "any load by default");
   assert.match(page, /<Select id=\{id\} value=\{lang\}/);
   assert.match(page, /<Select id=\{id\} value=\{load\}/);
-  assert.match(page, /<bdi>\{l\.name\}<\/bdi>/);
   assert.ok(!page.includes("style={{"), "no inline styles");
-  assert.match(page, /<LoadScale load=\{m\.load\} heavy=\{m\.heavy\}/, "the heavy colour comes from the core's flag");
-  assert.match(page, /<span className="msize muted num">/, "the size is as large as the name (AC6)");
+  assert.match(page, /<LoadScale load=\{r\.load\} heavy=\{r\.heavy\}/, "the heavy colour comes from the core's flag");
+  assert.match(page, /<span className="msize muted num">\{r\.size\}<\/span>/, "the size is as large as the name (AC6)");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.mname-text \{[^}]*text-overflow: ellipsis/, "a long name ends with an ellipsis");
+  assert.match(css, /\.mrows \{[^}]*grid-template-columns: minmax\(0, 1fr\) /, "aligned columns, the name shrinks first");
   assert.match(page, /catalogGroups\(v\.available, lang, load, v\.download\)/, "the download row is never filtered out");
 });
 

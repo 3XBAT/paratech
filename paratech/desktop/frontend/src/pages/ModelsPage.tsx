@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { initialListState, type ListState } from "../listView";
@@ -12,17 +12,22 @@ import {
 import { callByName } from "../bindings/runtime";
 import {
   canConfirm,
+  catalogAction,
   catalogActions,
+  catalogEntryOf,
   catalogGroups,
-  catalogLabels,
+  catalogMenu,
+  catalogRow,
   confirmation,
   confirmStep,
   defaultBadge,
   downloadChip,
   downloadOf,
-  downloadText,
   errorText,
   type ImportStep,
+  installedMenu,
+  installedName,
+  installedRow,
   installedText,
   keepsSelection,
   languageFilter,
@@ -30,11 +35,16 @@ import {
   languageOptions,
   loadFilter,
   type LoadFilter,
+  loadHint,
   loadLevels,
   loadOptions,
-  modelTitle,
+  loadText,
+  type MenuItem,
+  menuKey,
+  type MenuOp,
+  type ModelRow,
   progressPercent,
-  shortSha,
+  progressText,
   sizeText,
   statusNotes,
   texts,
@@ -210,7 +220,7 @@ export function ModelsPage() {
         const m = await api.confirmImport(confirmation(s));
         if (mounted.current) {
           setStep({ step: "idle" });
-          setDone(installedText(m));
+          setDone(installedText(m, view?.available ?? []));
         }
       } catch (err) {
         if (!keepsSelection(err)) {
@@ -245,7 +255,7 @@ export function ModelsPage() {
       try {
         const r = await api.importCatalogFile(m.catalogId);
         if (r.model !== null && mounted.current) {
-          setDone(installedText(r.model));
+          setDone(installedText(r.model, view?.available ?? []));
         }
       } catch (err) {
         if (mounted.current) {
@@ -380,9 +390,12 @@ export function ModelsPage() {
           renderItem={(m) => (
             <InstalledRow
               model={m}
+              entry={catalogEntryOf(m, view.available)}
+              catalog={view.available}
               badge={defaultBadge(m)}
               busy={busy}
               onDefault={() => void act(`default:${m.id}`, () => api.setDefault(m.id))}
+              onSource={(id) => void act(`source:${id}`, () => api.openSourcePage(id))}
               onAskDelete={() => setDeleting(m.id)}
             />
           )}
@@ -403,7 +416,7 @@ export function ModelsPage() {
       >
         {deletingModel !== null && (
           <p>
-            <bdi className="breakable">{modelTitle(deletingModel)}</bdi>. {texts.deleteConfirm}
+            <bdi className="breakable">{installedName(deletingModel, view?.available ?? [])}</bdi>. {texts.deleteConfirm}
           </p>
         )}
       </Dialog>
@@ -422,6 +435,7 @@ export function ModelsPage() {
             onDiscard={(m) => void act(`discard:${m.catalogId}`, () => api.discardPartial(m.catalogId))}
             onImport={(m) => void importCatalog(m)}
             onSource={(m) => void act(`source:${m.catalogId}`, () => api.openSourcePage(m.catalogId))}
+            onAskDelete={(m) => setDeleting(m.installedId)}
           />
         ))}
 
@@ -442,34 +456,33 @@ const badgeKinds: Readonly<Record<string, { kind: ChipKind; icon: IconName }>> =
   Используется: { kind: "run", icon: "wave" },
 };
 
+/** «Small Q5»: the name with the suffix, for the labels of the menu and the progress bar. */
+function fullName(r: ModelRow): string {
+  return r.suffix !== "" ? `${r.name} ${r.suffix}` : r.name;
+}
+
 function InstalledRow(props: {
   model: InstalledModel;
+  entry: AvailableModel | null;
+  catalog: readonly AvailableModel[];
   badge: string;
   busy: ReadonlySet<string>;
   onDefault: () => void;
+  onSource: (catalogId: string) => void;
   onAskDelete: () => void;
 }) {
   const m = props.model;
+  const r = installedRow(m, props.catalog);
   const deleteBusy = props.busy.has(`delete:${m.id}`);
   const chip = Object.hasOwn(badgeKinds, props.badge) ? badgeKinds[props.badge] : null;
+  const catalogId = props.entry?.catalogId ?? "";
+  const items = installedMenu(m, props.entry).map((i) => ({
+    ...i,
+    disabled: i.op === "default" ? props.busy.has(`default:${m.id}`) : props.busy.has(`source:${catalogId}`),
+  }));
   return (
     <div className="mrow" role="listitem">
-      <div className="row-main">
-        <p className="t">
-          <bdi>{modelTitle(m)}</bdi>
-        </p>
-        <span className="small muted num">
-          {sizeText(m.sizeBytes)} · установлена {formatTime(m.installedAt)}
-        </span>
-        <details className="sha-details">
-          <summary className="small muted">
-            SHA-256 <code>{shortSha(m.sha256)}</code>
-          </summary>
-          <code className="sha">
-            <bdi>{m.sha256}</bdi>
-          </code>
-        </details>
-      </div>
+      <ModelText row={r} tip={`${r.tip}\nУстановлена ${formatTime(m.installedAt)}`} />
       <div className="st">
         {chip !== null ? (
           <StatusChip kind={chip.kind} icon={chip.icon}>
@@ -482,15 +495,15 @@ function InstalledRow(props: {
         )}
       </div>
       <div className="acts">
-        {!m.isDefault && (
-          <Button variant="ghost" disabled={props.busy.has(`default:${m.id}`)} onClick={props.onDefault}>
-            Сделать по умолчанию
-          </Button>
-        )}
         <Button variant="danger" busy={deleteBusy} busyLabel="Удаление…" disabled={deleteBusy} onClick={props.onAskDelete}>
           Удалить
         </Button>
       </div>
+      <RowMenu
+        name={fullName(r)}
+        items={items}
+        onPick={(op) => (op === "default" ? props.onDefault() : props.onSource(catalogId))}
+      />
     </div>
   );
 }
@@ -507,6 +520,7 @@ function CatalogList(props: {
   onDiscard: CatalogHandler;
   onImport: CatalogHandler;
   onSource: CatalogHandler;
+  onAskDelete: CatalogHandler;
 }) {
   const [lang, setLang] = useState<LanguageFilter>("all");
   const [load, setLoad] = useState<LoadFilter>("any");
@@ -562,6 +576,7 @@ function CatalogList(props: {
                     onDiscard={() => props.onDiscard(m)}
                     onImport={() => props.onImport(m)}
                     onSource={() => props.onSource(m)}
+                    onAskDelete={() => props.onAskDelete(m)}
                   />
                 ))}
               </div>
@@ -573,19 +588,156 @@ function CatalogList(props: {
   );
 }
 
-// Five segments and the words; the words are the accessible name, so the scale is never colour only.
-function LoadScale(props: { load: number; heavy: boolean; text: string }) {
+// Five segments and the short words; the accessible name has the full words, so the scale is never colour only.
+function LoadScale(props: { load: number; heavy: boolean }) {
+  const hint = loadHint(props.load);
   return (
-    <span className={props.heavy ? "mload heavy" : "mload"} role="img" aria-label={props.text}>
+    <span className={props.heavy ? "mload heavy" : "mload"} role="img" aria-label={hint} title={hint}>
       <span className="mload-bar" aria-hidden="true">
         {Array.from({ length: loadLevels }, (_, i) => (
           <i key={i} className={i < props.load ? "on" : undefined} />
         ))}
       </span>
-      <span className="small" aria-hidden="true">
-        {props.text}
-      </span>
+      <span aria-hidden="true">{loadText(props.load)}</span>
     </span>
+  );
+}
+
+// Name, «Q5», size and the two tags; one muted line; a warning line only for a heavy model. The technical id is only
+// in the tooltip. Catalog and file text is plain text in its own <bdi>.
+function ModelText(props: { row: ModelRow; tip: string }) {
+  const r = props.row;
+  return (
+    <div className="row-main">
+      <p className="t mname" title={props.tip}>
+        <bdi className="mname-text">{r.name}</bdi>
+        {r.suffix !== "" && (
+          <span className="mq" title={texts.q5Hint}>
+            {r.suffix}
+            <span className="vh">, {texts.q5Hint}</span>
+          </span>
+        )}
+        <span className="msize muted num">{r.size}</span>
+        {r.tags.map((t) => (
+          <span key={t} className="mtag">
+            {t}
+          </span>
+        ))}
+      </p>
+      {(r.load > 0 || r.details.length > 0 || r.slow !== "") && (
+        <p className="mline small muted">
+          {r.load > 0 && <LoadScale load={r.load} heavy={r.heavy} />}
+          {r.details.map((d) => (
+            <span key={d}>
+              <bdi>{d}</bdi>
+            </span>
+          ))}
+          {r.slow !== "" && <span className="slow">{r.slow}</span>}
+        </p>
+      )}
+      {r.warning !== "" && <p className="mwarn small slow">{r.warning}</p>}
+    </div>
+  );
+}
+
+// The «⋯» menu of a row: Enter/Space or ArrowDown opens it, arrows move, Escape closes it and focuses the button again,
+// Tab or a click outside closes it. Without items the cell stays, so the columns keep aligned.
+function RowMenu(props: {
+  name: string;
+  items: readonly (MenuItem & { disabled: boolean })[];
+  onPick: (op: MenuOp) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const label = `${texts.more}: ${props.name}`;
+
+  const enabled = () =>
+    Array.from(wrap.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    enabled()[0]?.focus();
+    const outside = (e: PointerEvent) => {
+      if (wrap.current !== null && !wrap.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open]);
+
+  if (props.items.length === 0) {
+    return <div className="mmenu" />;
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!open) {
+      if (e.key === "ArrowDown" && e.target === button.current) {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    const list = enabled();
+    const next = menuKey(e.key, list.indexOf(document.activeElement as HTMLButtonElement), list.length);
+    if (next === null) {
+      return;
+    }
+    if (next === "leave") {
+      setOpen(false); // the focus moves on by itself
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    if (next === "close") {
+      setOpen(false);
+      button.current?.focus();
+      return;
+    }
+    list[next]?.focus();
+  };
+
+  return (
+    <div className="mmenu" ref={wrap} onKeyDown={onKeyDown}>
+      <button
+        ref={button}
+        type="button"
+        className="btn ghost mmenu-btn"
+        aria-label={label}
+        title={texts.more}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="mmenu-list" id={menuId} role="menu" aria-label={label}>
+          {props.items.map((i) => (
+            <button
+              key={i.op}
+              type="button"
+              role="menuitem"
+              className="mmenu-item"
+              tabIndex={-1}
+              disabled={i.disabled}
+              onClick={() => {
+                setOpen(false);
+                button.current?.focus();
+                props.onPick(i.op);
+              }}
+            >
+              {i.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -599,36 +751,29 @@ function CatalogRow(props: {
   onDiscard: () => void;
   onImport: () => void;
   onSource: () => void;
+  onAskDelete: () => void;
 }) {
   const m = props.model;
   const a = catalogActions(m, props.download);
+  const action = catalogAction(m, props.download);
   const d = downloadOf(m, props.download);
   const chip = d !== null ? downloadChip(d) : null;
   const key = (op: string) => props.busy.has(`${op}:${m.catalogId}`);
-  const l = catalogLabels(m);
+  const r = catalogRow(m);
+  const deleteBusy = props.busy.has(`delete:${m.installedId}`);
+  const items = catalogMenu(m, props.download).map((i) => ({
+    ...i,
+    disabled: i.op === "import" ? props.dialogBusy : key(i.op),
+  }));
+  const pick: Readonly<Record<MenuOp, () => void>> = {
+    source: props.onSource,
+    discard: props.onDiscard,
+    import: props.onImport,
+    default: () => undefined, // never in a catalog menu
+  };
   return (
     <div className="mrow" role="listitem">
-      <div className="row-main">
-        <p className="t mname">
-          <bdi>{l.name}</bdi>
-          <span className="msize muted num">{sizeText(m.sizeBytes)}</span>
-          {l.recommended !== "" && <span className="mtag">{l.recommended}</span>}
-        </p>
-        {l.description !== "" && <span className="small">{l.description}</span>}
-        <span className="small muted">
-          {l.language}
-          {l.accuracy !== "" && ` · ${l.accuracy}`}
-        </span>
-        <span className="small muted" title={l.variantHint}>
-          {l.variant}
-        </span>
-        {l.load !== "" && <LoadScale load={m.load} heavy={m.heavy} text={l.load} />}
-        {l.warning !== "" && <span className="small slow">{l.warning}</span>}
-        {m.likelySlow && <span className="small slow">{texts.likelySlow}</span>}
-        <span className="label">
-          <bdi>{m.catalogId}</bdi>
-        </span>
-      </div>
+      <ModelText row={r} tip={r.tip} />
       <div className="st">
         <span className="chips">
           {m.installed && (
@@ -644,41 +789,32 @@ function CatalogRow(props: {
           {!m.installed && chip === null && <StatusChip kind="neutral">Не установлена</StatusChip>}
         </span>
         {d !== null && d.phase === "downloading" && d.totalBytes > 0 && (
-          <Progress value={progressPercent(d)} label={`Скачивание ${l.name} (${m.catalogId})`} text={false} />
+          <Progress value={progressPercent(d)} label={`Скачивание ${fullName(r)}`} text={false} />
         )}
         {d !== null && (
           <span className={d.phase === "failed" || d.phase === "cancelled" ? "small problem" : "small muted num"}>
-            {downloadText(d)}
+            {progressText(d)}
           </span>
         )}
       </div>
       <div className="acts">
-        {a.download && (
+        {action === "cancel" && (
+          <Button disabled={key("cancel")} onClick={props.onCancel}>
+            Отменить
+          </Button>
+        )}
+        {action === "delete" && (
+          <Button variant="danger" busy={deleteBusy} busyLabel="Удаление…" disabled={deleteBusy} onClick={props.onAskDelete}>
+            Удалить
+          </Button>
+        )}
+        {action === "download" && a.download && (
           <Button variant="primary" icon="down" disabled={key("download")} onClick={props.onDownload}>
             Скачать
           </Button>
         )}
-        {a.cancel && (
-          <Button disabled={key("cancel")} onClick={props.onCancel}>
-            Остановить скачивание
-          </Button>
-        )}
-        {a.discardPartial && (
-          <Button variant="danger" disabled={key("discard")} onClick={props.onDiscard}>
-            Удалить недокачанный файл
-          </Button>
-        )}
-        {a.openSource && (
-          <Button variant="ghost" disabled={key("source")} onClick={props.onSource}>
-            Открыть страницу источника
-          </Button>
-        )}
-        {a.importFile && (
-          <Button variant="ghost" disabled={props.dialogBusy} onClick={props.onImport}>
-            Импортировать скачанный файл
-          </Button>
-        )}
       </div>
+      <RowMenu name={fullName(r)} items={items} onPick={(op) => pick[op]()} />
     </div>
   );
 }

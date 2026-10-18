@@ -84,39 +84,64 @@ html, body, #root { height: 100%; }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Модели речи: rows with the model, the status and the actions. */
-.mrow { display: grid; gap: 4px 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+/* Модели речи: one row per model (.card.rows pattern): name and size with one muted line, the status, one button and
+   the «⋯» menu, in aligned columns. */
+.mrows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 180px) fit-content(140px) 32px; overflow: visible; }
+/* The card lets the «⋯» menu out, so a heading on top keeps the rounded corners itself. */
+.mrows > .mgroup-title:first-child { border-radius: calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0; }
+.mrow { display: grid; gap: 4px 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .mrow:last-child { border-bottom: 0; }
-.mrows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 300px) fit-content(280px); }
 .mrows > .mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
-.mrow .t { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
-.mrow .row-main { display: flex; flex-direction: column; gap: 2px; }
+.mrow .t { margin: 0; font-weight: 600; }
+.mrow .row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .mrow .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-/* The catalog: filters, groups by language (headings across all columns), name with size and the load scale. */
+.mrow > .acts { flex-wrap: nowrap; }
+/* The catalog: filters, groups by language (headings across all columns). */
 .mfilters { display: flex; flex-wrap: wrap; gap: 0 16px; margin-top: 4px; }
 .mfilters .ui-field { min-width: 220px; }
 .mrows > .mgroup { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
 .mgroup > .mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .mgroup-title { grid-column: 1 / -1; margin: 0; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 600; }
 .mgroup + .mgroup-title { border-top: 1px solid var(--line); }
-.mrow .mname { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: var(--fs-h3); line-height: var(--lh-h3); }
+/* Line 1: the name (a long one ends with an ellipsis), «Q5», the size and the tags. */
+.mrow .mname { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: var(--fs-h3); line-height: var(--lh-h3); }
+.mname-text { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mq { margin-left: -3px; color: var(--muted); text-decoration: underline dotted 1px; text-underline-offset: 3px; cursor: help; }
 .mrow .msize { font-weight: 400; }
-.mtag { align-self: center; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-chip); color: var(--accent); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; }
-.mload { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 2px 0; }
+.mtag { align-self: center; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-chip); color: var(--accent); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; white-space: nowrap; }
+.mrow .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Line 2: the load scale and the rest, separated by dots; line 3: the warning of a heavy model. */
+.mline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; }
+.mline > * + *::before { content: "·"; margin-right: 6px; }
+.mwarn { margin: 0; }
+.mload { display: inline-flex; align-items: center; gap: 8px; }
 .mload-bar { display: inline-flex; gap: 3px; }
-.mload-bar i { width: 14px; height: 6px; border-radius: 2px; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
+.mload-bar i { width: 16px; height: 8px; border-radius: 2px; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--control); }
 .mload-bar i.on { background: var(--accent-fill); box-shadow: none; }
 .mload.heavy .mload-bar i.on { background: var(--wait-t); }
-.sha-details summary { width: fit-content; cursor: pointer; }
+/* The «⋯» menu of a row. */
+.mmenu { position: relative; display: flex; justify-content: end; }
+.btn.mmenu-btn { min-width: 32px; padding: 5px 0; color: var(--muted); font-size: 18px; line-height: 1; }
+.btn.mmenu-btn[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
+.mmenu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: flex; flex-direction: column; min-width: 240px; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--raised); box-shadow: var(--sh-win); }
+.mmenu-item { padding: 7px 10px; border: 0; border-radius: var(--r-ctl); background: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.mmenu-item:hover:enabled, .mmenu-item:focus-visible { background: var(--panel-2); }
+.mmenu-item:disabled { opacity: .5; cursor: not-allowed; }
 .sha-line { margin: 0 0 10px; }
 .slow { color: var(--wait-t); }
 .problem { color: var(--rec-t); overflow-wrap: anywhere; }
 .preview { margin-bottom: 8px; }
 .preview h2 { margin-bottom: 4px; }
 .preview .ui-field { max-width: 360px; }
-@container app (max-width: 880px) {
-  .mrows { grid-template-columns: minmax(0, 1fr); }
-  .mrow > .acts { justify-content: start; }
+/* Narrow: the model on top, then the status, the button and the menu on one line. */
+@container app (max-width: 640px) {
+  .mrows { grid-template-columns: minmax(0, 1fr) auto 32px; }
+  .mrow > .row-main { grid-column: 1 / -1; }
+}
+@media (forced-colors: active) {
+  .mload-bar i { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
+  .mload-bar i.on, .mload.heavy .mload-bar i.on { background: CanvasText; }
+  .mmenu-list { border-color: CanvasText; }
 }
 
 /* Диагностика: the sound check and the support bundle, two cards like Подключения. */
