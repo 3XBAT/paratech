@@ -26,7 +26,8 @@ func validCore() Core {
 		Speech:      &fakeSpeech{},
 		Connections: &fakeConnections{}, Google: &fakeGoogle{}, Calendar: &fakeCalendarSync{},
 		Sound: &fakeSound{}, Bundle: &fakeBundle{},
-		Homework: validHomework(),
+		Homework:   validHomework(),
+		Transcript: &fakeTranscript{},
 	}
 }
 
@@ -85,6 +86,16 @@ func (f *fakeUI) pickBundleFile(string) (string, error) {
 	return "", nil
 }
 
+func (f *fakeUI) pickTranscriptFile(string, string) (string, error) {
+	f.calls = append(f.calls, "pickTranscriptFile")
+	return "", nil
+}
+
+func (f *fakeUI) setClipboardText(string) error {
+	f.calls = append(f.calls, "setClipboardText")
+	return nil
+}
+
 func TestCommands(t *testing.T) {
 	s, err := New(validOptions())
 	if err != nil {
@@ -101,6 +112,8 @@ func TestCommands(t *testing.T) {
 		{"pickScheduleFile", func() error { _, err := s.pickScheduleFile(context.Background()); return err }},
 		{"pickModelFile", func() error { _, err := s.pickModelFile(context.Background()); return err }},
 		{"pickBundleFile", func() error { _, err := s.pickBundleFile(context.Background(), "b.zip"); return err }},
+		{"pickTranscriptFile", func() error { _, err := s.pickTranscriptFile(context.Background(), "t.txt", "txt"); return err }},
+		{"setClipboardText", func() error { return s.setClipboardText(context.Background(), "text") }},
 	}
 
 	for _, c := range commands {

@@ -57,6 +57,8 @@ type Core struct {
 	Bundle SupportBundleUseCase // "Сохранить пакет для поддержки"; the shell shows its save dialog
 
 	Homework HomeworkCore // the homework page: drafts, the send confirmation and the deliveries
+
+	Transcript TranscriptUseCase // the transcript viewer; the shell shows its save dialog and plays the recordings
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -68,6 +70,8 @@ type ui interface {
 	pickScheduleFile() (string, error)
 	pickModelFile() (string, error)
 	pickBundleFile(name string) (string, error)
+	pickTranscriptFile(name, format string) (string, error)
+	setClipboardText(text string) error
 }
 
 // Shell owns the UI: the main window, the tray icon and the popup. Create it with New. Window commands are safe
@@ -166,6 +170,7 @@ type Services struct {
 	Diagnostics *DiagnosticsService
 	Help        *HelpService
 	Homework    *HomeworkService
+	Transcript  *TranscriptService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -217,6 +222,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if !core.Homework.complete() {
 		return Services{}, errors.New("wails: open core: no homework use cases")
 	}
+	if core.Transcript == nil {
+		return Services{}, errors.New("wails: open core: no transcript viewer")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -239,6 +247,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		}, s.opts.Log),
 		Help:     NewHelpService(core.Links, s.opts.Log),
 		Homework: NewHomeworkService(core.Homework, s.opts.Log),
+		Transcript: NewTranscriptService(core.Transcript, transcriptPickerFunc(s.pickTranscriptFile),
+			clipboardFunc(s.setClipboardText), s.opts.Log),
 	}, nil
 }
 
@@ -270,6 +280,24 @@ func (s *Shell) pickBundleFile(_ context.Context, name string) (string, error) {
 		return "", err
 	}
 	return u.pickBundleFile(name)
+}
+
+// pickTranscriptFile shows the save dialog of a transcript over the main window; "" when the user cancels.
+func (s *Shell) pickTranscriptFile(_ context.Context, name, format string) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickTranscriptFile(name, format)
+}
+
+// setClipboardText puts text on the system clipboard.
+func (s *Shell) setClipboardText(_ context.Context, text string) error {
+	u, err := s.current()
+	if err != nil {
+		return err
+	}
+	return u.setClipboardText(text)
 }
 
 func (s *Shell) markStarted() error {

@@ -96,7 +96,7 @@ func TestOpenBindings(t *testing.T) {
 	}
 	b, err := s.OpenServices(context.Background())
 	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Popup == nil || b.Schedule == nil || b.Models == nil || b.Speech == nil ||
-		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil {
+		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil || b.Transcript == nil {
 		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
 
@@ -132,6 +132,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "homework proposals", edit: func(c *Core) { c.Homework.Proposals = nil }},
 		{name: "homework drafts", edit: func(c *Core) { c.Homework.Drafts = nil }},
 		{name: "homework deliveries", edit: func(c *Core) { c.Homework.Deliveries = nil }},
+		{name: "transcript viewer", edit: func(c *Core) { c.Transcript = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
