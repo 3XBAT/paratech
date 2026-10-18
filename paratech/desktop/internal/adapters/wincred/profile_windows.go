@@ -54,5 +54,6 @@ func stripFinalPrefix(path string) string {
 	return path
 }
 
-// foldPath folds the case: Windows paths are case-insensitive.
-func foldPath(path string) string { return strings.ToLower(path) }
+// foldPath folds the case for the profile id: Windows paths are case-insensitive. NTFS compares names upcased, and
+// upcasing, unlike lowercasing, keeps apart names such as U+0130 and 'i' or U+212A and 'k'.
+func foldPath(path string) string { return strings.ToUpper(path) }

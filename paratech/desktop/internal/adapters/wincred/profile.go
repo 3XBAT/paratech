@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -43,23 +44,35 @@ func CheckProfile(p Profile) error {
 // Isolated reports whether p is not the default profile.
 func (p Profile) Isolated() bool { return p != DefaultProfile }
 
-// ProfileFor returns the profile of dataDir. It is DefaultProfile only when dataDir and defaultDir resolve to the same
-// directory; any doubt (defaultDir empty or unresolvable, dataDir unresolvable) gives an isolated profile, never the
-// default one. Call it once dataDir exists: resolving needs the directory.
+// ProfileFor returns the profile of dataDir. It is DefaultProfile only when dataDir and defaultDir are the same
+// directory by file identity (volume and file id), so other spellings of it (case, junctions, symlinks, 8.3 names)
+// match and no name that only folds to it does. Any doubt (defaultDir empty, either directory not found) gives an
+// isolated profile, never the default one. Call it once dataDir exists.
 //
-// Resolving makes the path absolute, follows symlinks and junctions, expands 8.3 short names and, on Windows, folds
-// the case, so two spellings of one directory give one profile.
+// The id of an isolated profile hashes the normalized real path: absolute, symlinks and junctions followed, 8.3
+// short names expanded and, on Windows, the case folded, so two spellings of one directory give one profile.
 func ProfileFor(dataDir, defaultDir string) Profile {
+	if defaultDir != "" && sameDir(dataDir, defaultDir) {
+		return DefaultProfile
+	}
 	dir, err := resolveDir(dataDir)
 	if err != nil {
 		return profileOf(lexicalDir(dataDir))
 	}
-	if defaultDir != "" {
-		if def, err := resolveDir(defaultDir); err == nil && def == dir {
-			return DefaultProfile
-		}
-	}
 	return profileOf(dir)
+}
+
+// sameDir reports whether a and b are one existing directory; false when either cannot be read.
+func sameDir(a, b string) bool {
+	ia, err := os.Stat(a)
+	if err != nil || !ia.IsDir() {
+		return false
+	}
+	ib, err := os.Stat(b)
+	if err != nil || !ib.IsDir() {
+		return false
+	}
+	return os.SameFile(ia, ib)
 }
 
 // resolveDir is the normalized real path of an existing directory.

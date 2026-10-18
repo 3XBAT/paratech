@@ -12,11 +12,12 @@ sign-in and started a calendar sync; the smoke run of `build-alpha.ps1` (`smoke-
 - **Names.** The default data dir (`%LOCALAPPDATA%\LearningAssistant`) keeps `paratech/<service>/<name>`; no migration.
   Any other dir uses `paratech-<profile>/<service>/<name>`, profile = first 16 hex chars of SHA-256 of the normalized path.
   `-` instead of `/` and the fixed length mean no name of one profile equals or starts with a name prefix of another.
-- **Normalization** (`wincred.ProfileFor`, after the app has created and locked the dir): absolute path, then the final path
-  from Windows (`GetFinalPathNameByHandle`: junctions, symlinks, 8.3 names, mapped drives), no trailing separator, lower case.
+- **Default or not** (`wincred.ProfileFor`, after the app has created and locked the dir): the default names only when
+  the data dir and the default dir are the same directory by file identity (`os.SameFile`: volume + file id), so case,
+  a trailing separator, junctions, symlinks and 8.3 names match, and a name that only folds to it (`İ`, Kelvin `K`) does not.
   The explicit `--data-dir` of the default dir (as the recorder child gets) is the default profile.
-- **Fail closed.** Default names only when both paths resolve and are equal; an unknown or unresolvable default dir, or a
-  data dir that does not resolve, gives an isolated profile.
+- **Profile id**: hash of the absolute final path from Windows (`GetFinalPathNameByHandle`), no trailing separator, upper case.
+- **Fail closed.** An unknown default dir, or either dir that cannot be read, gives an isolated profile.
 - The startup log says `secrets_profile=default` or `secrets_profile=isolated secrets_profile_id=<profile>`; the smoke run
   requires `isolated`.
 
