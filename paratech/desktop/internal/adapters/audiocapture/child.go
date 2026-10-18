@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,12 +42,9 @@ type ChildConfig struct {
 	// Now is the monotonic clock that measures gaps; time.Now by default.
 	Now func() time.Time
 
-	// Tone plays the tone of a self-test request ("Check sound"); nil fails the self-test.
-	Tone TonePlayer
-	// OwnPID is the process whose tree the self-test captures with process loopback INCLUDE; 0 means this process.
-	OwnPID uint32
-	// SelfTest tunes the self-test; zero fields take the defaults.
-	SelfTest SelfTestTiming
+	// LevelInterval is how often a level check reports its level: at most this often, so 20 events per second
+	// by default.
+	LevelInterval time.Duration
 }
 
 func (c ChildConfig) withDefaults() ChildConfig {
@@ -64,10 +60,9 @@ func (c ChildConfig) withDefaults() ChildConfig {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
-	if c.OwnPID == 0 {
-		c.OwnPID = uint32(os.Getpid()) //nolint:gosec // PIDs fit in 32 bits on every supported OS
+	if c.LevelInterval <= 0 {
+		c.LevelInterval = DefaultLevelInterval
 	}
-	c.SelfTest = c.SelfTest.withDefaults()
 	return c
 }
 
@@ -75,8 +70,8 @@ func (c ChildConfig) withDefaults() ChildConfig {
 // from stdin, captures from src into closed chunks written through files, reports events on stdout and returns the
 // exit code. It stops when stdin closes or ctx ends: the stream is stopped and drained, the last chunk closed, and
 // "stopped" reported. A capture that ends by itself closes its chunks too and reports "failed". The goroutine that
-// watches stdin ends when stdin reaches EOF. A self-test request plays the tone of cfg.Tone and captures it from src
-// instead (selfTest); it writes no file.
+// watches stdin ends when stdin reaches EOF. A level check request captures its target from src for a while and
+// reports levels instead (levelCheck); it writes no file.
 func RunChild(ctx context.Context, stdin io.Reader, stdout io.Writer, src Source, files ChunkFiles, log *slog.Logger,
 	cfg ChildConfig) int {
 	if log == nil {
@@ -90,11 +85,12 @@ func RunChild(ctx context.Context, stdin io.Reader, stdout io.Writer, src Source
 		err = fmt.Errorf("%w: request longer than %d bytes", ErrProtocol, maxLineBytes)
 	}
 	var (
-		req      Request
-		selfTest bool
+		req   Request
+		lc    LevelRequest
+		level bool
 	)
 	if err == nil {
-		req, selfTest, err = decodeChildRequest(line)
+		req, lc, level, err = decodeChildRequest(line)
 	}
 	if err != nil {
 		c.out.emit(event{Type: evFailed, Reason: shortText("bad request: " + err.Error())})
@@ -107,8 +103,8 @@ func RunChild(ctx context.Context, stdin io.Reader, stdout io.Writer, src Source
 		_, _ = io.Copy(io.Discard, stdin) // nothing is expected after the request; EOF is the stop
 		close(stop)
 	}()
-	if selfTest {
-		return c.selfTest(ctx, stop, src)
+	if level {
+		return c.levelCheck(ctx, stop, src, lc)
 	}
 	return c.run(ctx, stop, src, files)
 }

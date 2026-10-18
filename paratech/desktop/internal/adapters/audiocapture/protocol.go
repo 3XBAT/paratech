@@ -17,8 +17,8 @@ import (
 )
 
 // Line protocol between the app and its recorder child: one JSON object per line. The parent writes exactly one
-// request to the child's stdin, a capture or a self-test, and then closes stdin to stop it; the child writes events to
-// stdout.
+// request to the child's stdin, a capture or a level check, and then closes stdin to stop it; the child writes events
+// to stdout.
 const (
 	protocolVersion = 1
 	maxLineBytes    = 4096
@@ -26,6 +26,9 @@ const (
 
 	minChunkSeconds = 30
 	maxChunkSeconds = 60
+
+	// MaxCheckDuration bounds the capture of one level check ("Check sound").
+	MaxCheckDuration = time.Minute
 )
 
 // maxLeadSilence bounds the lead silence of a restart. It covers the worst case of the defaults: a lost open chunk,
@@ -41,13 +44,13 @@ const (
 	evChunk   = "chunk"   // a chunk was closed: number, frames, rate
 	evStats   = "stats"   // counters; also the heartbeat
 	evFailed  = "failed"  // the capture ended by itself or could not start: reason
-	evStopped = "stopped" // clean stop after stdin closed: frames written; also the end of a self-test
+	evStopped = "stopped" // clean stop after stdin closed: frames written; also the end of a level check
 
-	evSelfTest = "selftest" // the result of one mode of the self-test: mode, cause, output device
+	evLevel = "level" // the peak of the last window of a level check, 0..1
 )
 
-// kindSelfTest is the request kind of the "Check sound" self-test (TASK-058); a capture request has no kind.
-const kindSelfTest = "selftest"
+// kindLevelCheck is the request kind of the "Check sound" level check (TASK-075); a capture request has no kind.
+const kindLevelCheck = "levelcheck"
 
 // ErrProtocol means a protocol line is malformed.
 var ErrProtocol = errors.New("audiocapture: recorder protocol error")
@@ -99,6 +102,25 @@ func (r Request) effectiveTarget() Target {
 	return r.Target
 }
 
+// LevelRequest is the request of a level check: capture Target for Duration and report its levels; nothing is
+// written.
+type LevelRequest struct {
+	Target   Target
+	Duration time.Duration
+}
+
+// Validate checks the target and that the duration is positive, whole milliseconds and at most MaxCheckDuration.
+func (r LevelRequest) Validate() error {
+	if err := r.Target.Validate(); err != nil {
+		return fmt.Errorf("%w: target: %v", ErrProtocol, err)
+	}
+	if r.Duration <= 0 || r.Duration > MaxCheckDuration || r.Duration%time.Millisecond != 0 {
+		return fmt.Errorf("%w: level check duration %v outside 1 ms..%v in whole milliseconds", ErrProtocol, r.Duration,
+			MaxCheckDuration)
+	}
+	return nil
+}
+
 type wireTarget struct {
 	Mode string `json:"mode"`
 	PID  uint32 `json:"pid"`
@@ -113,6 +135,7 @@ type wireRequest struct {
 	ChunkSeconds  int        `json:"chunk_seconds"`
 	LeadSilenceMS int64      `json:"lead_silence_ms"`
 	Floor         string     `json:"floor,omitempty"`
+	DurationMS    int64      `json:"duration_ms,omitempty"` // level check only
 }
 
 // encodeRequest returns the request line, newline included.
@@ -131,46 +154,72 @@ func encodeRequest(r Request) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-// encodeSelfTest returns the self-test request line, newline included.
-func encodeSelfTest() []byte {
-	b, _ := json.Marshal(struct {
-		V    int    `json:"v"`
-		Kind string `json:"kind"`
-	}{V: protocolVersion, Kind: kindSelfTest})
-	return append(b, '\n')
+// encodeLevelCheck returns the level check request line, newline included.
+func encodeLevelCheck(r LevelRequest) ([]byte, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(struct {
+		V          int        `json:"v"`
+		Kind       string     `json:"kind"`
+		Target     wireTarget `json:"target"`
+		DurationMS int64      `json:"duration_ms"`
+	}{
+		V: protocolVersion, Kind: kindLevelCheck, Target: wireTarget{Mode: string(r.Target.Mode), PID: r.Target.PID},
+		DurationMS: r.Duration.Milliseconds(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
 }
 
 // decodeRequest parses and validates a capture request line strictly: unknown fields, trailing data, other versions
-// and a self-test are rejected.
+// and a level check are rejected.
 func decodeRequest(line []byte) (Request, error) {
-	r, selfTest, err := decodeChildRequest(line)
-	if err == nil && selfTest {
-		err = fmt.Errorf("%w: a self-test is not a capture", ErrProtocol)
+	r, _, level, err := decodeChildRequest(line)
+	if err == nil && level {
+		err = fmt.Errorf("%w: a level check is not a capture", ErrProtocol)
 	}
 	return r, err
 }
 
-// decodeChildRequest parses either request strictly; selfTest reports the self-test, which takes no other field.
-func decodeChildRequest(line []byte) (r Request, selfTest bool, err error) {
+// decodeChildRequest parses either request strictly; level reports a level check (lc), which takes only a target and
+// a duration.
+func decodeChildRequest(line []byte) (r Request, lc LevelRequest, level bool, err error) {
 	var w wireRequest
 	if err := decodeStrict(line, &w); err != nil {
-		return Request{}, false, err
+		return Request{}, LevelRequest{}, false, err
 	}
 	if w.V != protocolVersion {
-		return Request{}, false, fmt.Errorf("%w: version %d, want %d", ErrProtocol, w.V, protocolVersion)
+		return Request{}, LevelRequest{}, false, fmt.Errorf("%w: version %d, want %d", ErrProtocol, w.V, protocolVersion)
 	}
 	switch w.Kind {
 	case "":
-	case kindSelfTest:
-		if w != (wireRequest{V: w.V, Kind: w.Kind}) {
-			return Request{}, false, fmt.Errorf("%w: a self-test takes no capture fields", ErrProtocol)
-		}
-		return Request{}, true, nil
+	case kindLevelCheck:
+		lc, err = w.levelCheck()
+		return Request{}, lc, err == nil, err
 	default:
-		return Request{}, false, fmt.Errorf("%w: unknown request kind %q", ErrProtocol, shortText(w.Kind))
+		return Request{}, LevelRequest{}, false, fmt.Errorf("%w: unknown request kind %q", ErrProtocol, shortText(w.Kind))
+	}
+	if w.DurationMS != 0 {
+		return Request{}, LevelRequest{}, false, fmt.Errorf("%w: a capture takes no duration", ErrProtocol)
 	}
 	r, err = w.request()
-	return r, false, err
+	return r, LevelRequest{}, false, err
+}
+
+// levelCheck turns a level check request into its validated form; the capture fields must be absent.
+func (w wireRequest) levelCheck() (LevelRequest, error) {
+	if w != (wireRequest{V: w.V, Kind: w.Kind, Target: w.Target, DurationMS: w.DurationMS}) {
+		return LevelRequest{}, fmt.Errorf("%w: a level check takes no capture fields", ErrProtocol)
+	}
+	if w.DurationMS <= 0 || w.DurationMS > MaxCheckDuration.Milliseconds() {
+		return LevelRequest{}, fmt.Errorf("%w: level check duration %d ms", ErrProtocol, w.DurationMS)
+	}
+	r := LevelRequest{Target: Target{Mode: Mode(w.Target.Mode), PID: w.Target.PID},
+		Duration: time.Duration(w.DurationMS) * time.Millisecond}
+	return r, r.Validate()
 }
 
 // request turns a capture request into its validated form.
@@ -226,7 +275,7 @@ type event struct {
 
 	From   string `json:"from,omitempty"`   // switch
 	To     string `json:"to,omitempty"`     // switch
-	Cause  string `json:"cause,omitempty"`  // switch: a values.SwitchCause; selftest: a values.SoundCause
+	Cause  string `json:"cause,omitempty"`  // switch: a values.SwitchCause; failed level check: a values.SoundCause
 	Reason string `json:"reason,omitempty"` // switch, failed
 
 	N      int    `json:"n,omitempty"`      // chunk
@@ -237,7 +286,8 @@ type event struct {
 	SilentPackets uint64 `json:"silent_packets,omitempty"` // stats
 	Reopens       uint64 `json:"reopens,omitempty"`        // stats
 
-	HandsFree bool `json:"hands_free,omitempty"` // selftest: the output device looks like a Bluetooth hands-free endpoint
+	// Level is the peak of a window of a level check, 0..1; required in a level event, absent elsewhere.
+	Level *float64 `json:"level,omitempty"`
 
 	// Unavailable marks a failure because this build has no capture (recording.ErrCaptureUnavailable).
 	Unavailable bool `json:"unavailable,omitempty"`
@@ -286,8 +336,11 @@ func decodeEvent(line []byte) (event, error) {
 		return event{}, err
 	}
 	switch e.Type {
-	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped, evSelfTest:
+	case evStarted, evAttempt, evSwitch, evChunk, evStats, evFailed, evStopped, evLevel:
 		if err := checkCause(e); err != nil {
+			return event{}, err
+		}
+		if err := checkLevel(e); err != nil {
 			return event{}, err
 		}
 		texts := []*string{&e.Mode, &e.Device, &e.HResult, &e.Error, &e.From, &e.To, &e.Reason}
@@ -302,20 +355,33 @@ func decodeEvent(line []byte) (event, error) {
 	return event{}, fmt.Errorf("%w: unknown event %q", ErrProtocol, shortText(e.Type))
 }
 
-// checkCause accepts only the causes of the event's type: a switch cause, a sound cause of a self-test, none
-// elsewhere.
+// checkCause accepts only the causes of the event's type: a switch cause, the sound cause of a failed level check,
+// none elsewhere.
 func checkCause(e event) error {
 	var ok bool
 	switch e.Type {
 	case evSwitch:
 		ok = e.Cause == "" || values.SwitchCause(e.Cause).Valid()
-	case evSelfTest:
-		ok = values.SoundCause(e.Cause).Valid() && values.CaptureMode(e.Mode).Valid()
+	case evFailed:
+		ok = e.Cause == "" || values.SoundCause(e.Cause).Valid()
 	default:
 		ok = e.Cause == ""
 	}
 	if !ok {
 		return fmt.Errorf("%w: unexpected cause %q of a %s event", ErrProtocol, shortText(e.Cause), e.Type)
+	}
+	return nil
+}
+
+// checkLevel requires a level in 0..1 in a level event and none elsewhere.
+func checkLevel(e event) error {
+	if (e.Type == evLevel) != (e.Level != nil) {
+		return fmt.Errorf("%w: a level belongs to a level event only", ErrProtocol)
+	}
+	if e.Level != nil {
+		if _, err := values.NewSoundLevel(*e.Level); err != nil {
+			return fmt.Errorf("%w: %v", ErrProtocol, err)
+		}
 	}
 	return nil
 }

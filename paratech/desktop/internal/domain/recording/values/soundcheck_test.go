@@ -1,70 +1,133 @@
 package values
 
-import "testing"
+import (
+	"errors"
+	"math"
+	"testing"
+)
 
 func TestSoundCauseValid(t *testing.T) {
-	for _, c := range []SoundCause{SoundOK, SoundNoDevice, SoundSilence, SoundUnsupported, SoundHandsFree, SoundBusy, SoundFailed} {
+	for _, c := range []SoundCause{SoundOK, SoundSilence, SoundNotRunning, SoundNoDevice, SoundUnsupported, SoundBusy,
+		SoundFailed} {
 		if !c.Valid() {
 			t.Errorf("%s is a cause", c)
 		}
 	}
-	for _, c := range []SoundCause{"", "loud", "OK"} {
+	for _, c := range []SoundCause{"", "loud", "OK", "hands_free"} {
 		if c.Valid() {
 			t.Errorf("%q is not a cause", c)
 		}
 	}
 }
 
-func TestSoundCheckVerdict(t *testing.T) {
-	app, err := SourceOf("chrome.exe")
-	if err != nil {
-		t.Fatal(err)
+func TestNewSoundLevel(t *testing.T) {
+	for _, v := range []float64{0, 0.005, 0.01, 0.5, 1} {
+		if l, err := NewSoundLevel(v); err != nil || float64(l) != v {
+			t.Errorf("NewSoundLevel(%v) = %v, %v", v, l, err)
+		}
 	}
-	whole := WholeComputer()
-	check := func(include, system SoundCause, handsFree bool) SoundCheck {
-		return SoundCheck{HandsFree: handsFree, Modes: []ModeCheck{
-			{Mode: CaptureInclude, Cause: include}, {Mode: CaptureSystem, Cause: system},
-		}}
+	for _, v := range []float64{-0.001, 1.0001, 2, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if _, err := NewSoundLevel(v); !errors.Is(err, ErrInvalidSoundLevel) {
+			t.Errorf("NewSoundLevel(%v) = %v, want ErrInvalidSoundLevel", v, err)
+		}
 	}
+}
 
+func TestClampSoundLevel(t *testing.T) {
 	tests := []struct {
-		name   string
-		check  SoundCheck
-		source Source
-		want   SoundCause
+		in   float64
+		want SoundLevel
 	}{
-		{"app: both ok", check(SoundOK, SoundOK, false), app, SoundOK},
-		{"app: include decides", check(SoundUnsupported, SoundOK, false), app, SoundUnsupported},
-		{"app: include ok, classic silent", check(SoundOK, SoundSilence, false), app, SoundOK},
-		{"app: include silent", check(SoundSilence, SoundOK, false), app, SoundSilence},
-		{"app: silence on a hands-free endpoint", check(SoundSilence, SoundSilence, true), app, SoundHandsFree},
-		{"app: hands-free but heard", check(SoundOK, SoundSilence, true), app, SoundOK},
-		{"whole: process loopback ok", check(SoundOK, SoundSilence, false), whole, SoundOK},
-		{"whole: classic as the final fallback", check(SoundUnsupported, SoundOK, false), whole, SoundOK},
-		{"whole: both fail, classic decides", check(SoundUnsupported, SoundSilence, false), whole, SoundSilence},
-		{"whole: hands-free", check(SoundUnsupported, SoundSilence, true), whole, SoundHandsFree},
-		{"no device", check(SoundNoDevice, SoundNoDevice, false), whole, SoundNoDevice},
-		{"failed", check(SoundFailed, SoundFailed, true), app, SoundFailed},
-		{"busy", SoundCheck{Busy: true}, app, SoundBusy},
-		{"nothing tested", SoundCheck{}, whole, SoundFailed},
-		{"a mode cannot be busy", check(SoundBusy, SoundOK, false), app, SoundFailed},
-		{"an unknown cause", check("loud", SoundOK, false), app, SoundFailed},
+		{0, 0}, {0.3, 0.3}, {1, 1}, {1.7, 1}, {-0.2, 0}, {math.NaN(), 0}, {math.Inf(1), 1}, {math.Inf(-1), 0},
+	}
+	for _, tt := range tests {
+		if got := ClampSoundLevel(tt.in); got != tt.want {
+			t.Errorf("ClampSoundLevel(%v) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestSoundLevelHeard(t *testing.T) {
+	tests := []struct {
+		level SoundLevel
+		want  bool
+	}{
+		{0, false}, {0.0099, false}, {HeardLevel, true}, {0.2, true}, {1, true},
+	}
+	for _, tt := range tests {
+		if got := tt.level.Heard(); got != tt.want {
+			t.Errorf("%v.Heard() = %v, want %v", tt.level, got, tt.want)
+		}
+	}
+}
+
+func TestLevelCheckHear(t *testing.T) {
+	var c LevelCheck
+	if c.Heard() {
+		t.Fatal("the zero check heard something")
+	}
+	c = c.Hear(0.002).Hear(0.4).Hear(0.05)
+	if c.Level != 0.4 || c.Peak != 0.4 || !c.Heard() {
+		t.Fatalf("check %+v", c)
+	}
+	if quiet := (LevelCheck{}).Hear(0.009).Hear(0); quiet.Heard() || quiet.Peak != 0.009 {
+		t.Fatalf("quiet check %+v", quiet)
+	}
+}
+
+// Level is the loudest window since it was last shown: a short peak between two reads is not lost.
+func TestLevelCheckShown(t *testing.T) {
+	tests := []struct {
+		name  string
+		check LevelCheck
+		level SoundLevel
+		peak  SoundLevel
+	}{
+		{"nothing heard", LevelCheck{}, 0, 0},
+		{"windows before a read", LevelCheck{}.Hear(0.1).Hear(0.6).Hear(0.2), 0.6, 0.6},
+		{"shown, no new window", LevelCheck{}.Hear(0.6).Shown(), 0.6, 0.6},
+		{"shown twice", LevelCheck{}.Hear(0.6).Shown().Shown(), 0.6, 0.6},
+		{"the next window replaces it", LevelCheck{}.Hear(0.6).Shown().Hear(0.05), 0.05, 0.6},
+		{"then a new maximum", LevelCheck{}.Hear(0.6).Shown().Hear(0.05).Hear(0.3).Hear(0.1), 0.3, 0.6},
+		{"silence after a read", LevelCheck{}.Hear(0.6).Shown().Hear(0), 0, 0.6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.check.Verdict(tt.source); got != tt.want {
-				t.Fatalf("Verdict = %s, want %s", got, tt.want)
+			if tt.check.Level != tt.level || tt.check.Peak != tt.peak {
+				t.Fatalf("check %+v, want level %v, peak %v", tt.check, tt.level, tt.peak)
 			}
 		})
 	}
 }
 
-func TestSoundCheckResult(t *testing.T) {
-	c := SoundCheck{Modes: []ModeCheck{{Mode: CaptureInclude, Cause: SoundOK, HResult: ""}}}
-	if got := c.Result(CaptureInclude); got.Cause != SoundOK {
-		t.Fatalf("include = %+v", got)
+func TestLevelCheckVerdict(t *testing.T) {
+	heard := LevelCheck{}.Hear(0.3)
+	quiet := LevelCheck{}.Hear(0.001)
+	tests := []struct {
+		name  string
+		check LevelCheck
+		end   SoundCause
+		want  SoundCause
+	}{
+		{"heard, time up", heard, SoundOK, SoundOK},
+		{"quiet, time up", quiet, SoundOK, SoundSilence},
+		{"nothing at all", LevelCheck{}, SoundOK, SoundSilence},
+		{"quiet, silence end", quiet, SoundSilence, SoundSilence},
+		{"heard, then failed", heard, SoundFailed, SoundOK},
+		{"heard, then a recording", heard, SoundBusy, SoundBusy},
+		{"quiet, a recording", quiet, SoundBusy, SoundBusy},
+		{"app not running", LevelCheck{}, SoundNotRunning, SoundNotRunning},
+		{"no device", LevelCheck{}, SoundNoDevice, SoundNoDevice},
+		{"unsupported", LevelCheck{}, SoundUnsupported, SoundUnsupported},
+		{"failed", quiet, SoundFailed, SoundFailed},
+		{"an unknown end", LevelCheck{}, "loud", SoundFailed},
+		{"an empty end", LevelCheck{}, "", SoundFailed},
 	}
-	if got := c.Result(CaptureSystem); got != (ModeCheck{Mode: CaptureSystem, Cause: SoundFailed}) {
-		t.Fatalf("a mode not tested = %+v, want failed", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.check.Verdict(tt.end); got != tt.want {
+				t.Fatalf("Verdict(%s) = %s, want %s", tt.end, got, tt.want)
+			}
+		})
 	}
 }

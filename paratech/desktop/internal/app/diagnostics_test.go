@@ -15,29 +15,29 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// The --recorder run mode answers a self-test request with the tone player of the env (a fake here: tests never play
-// sound) and writes nothing.
+// The --recorder run mode answers a level check request with the levels of the env's capture source (a fake here:
+// tests never touch an audio device), plays nothing and writes nothing.
 func TestRecorderModeAnswersTheSoundCheck(t *testing.T) {
 	dataDir := t.TempDir()
-	tone := &testenv.FakeTone{}
-	src := &testenv.ToneSource{Format: testenv.FakeRecorderFormat(), PacketFrames: 80, Interval: 2 * time.Millisecond,
-		Gate: tone.Playing}
+	src := &testenv.ToneSource{Format: testenv.FakeRecorderFormat(), PacketFrames: 80, Interval: 2 * time.Millisecond}
 	a, stdin, out := recorderApp(t, dataDir, src)
-	a.env.tone = tone
 
 	done := make(chan error, 1)
 	go func() { done <- a.Run(context.Background()) }()
-	go func() { _, _ = stdin.Write([]byte(`{"v":1,"kind":"selftest"}` + "\n")) }()
+	go func() {
+		_, _ = stdin.Write([]byte(`{"v":1,"kind":"levelcheck","target":{"mode":"system","pid":0},"duration_ms":300}` + "\n"))
+	}()
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatalf("Run = %v", err)
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("the self-test did not end")
+		t.Fatal("the level check did not end")
 	}
-	if n := strings.Count(out.String(), `"type":"selftest","mode":`); n != 2 || tone.Plays() != 1 {
-		t.Fatalf("events %s; %d plays", out.String(), tone.Plays())
+	if !strings.Contains(out.String(), `"type":"level","level":0.5`) || !strings.Contains(out.String(), `"type":"stopped"`) ||
+		src.Closes() != 1 {
+		t.Fatalf("events %s; %d streams closed", out.String(), src.Closes())
 	}
 	entries, err := os.ReadDir(filepath.Join(dataDir, artifactsDir, "recordings"))
 	if err != nil || len(entries) != 0 {
@@ -49,24 +49,38 @@ func TestRecorderModeAnswersTheSoundCheck(t *testing.T) {
 	}
 }
 
-// "Проверить звук" through the core: the answer of the recorder for the remembered source, busy while it captures.
+// waitSound polls the page until the check is done.
+func waitSound(t *testing.T, page *wails.DiagnosticsService) wails.SoundCheck {
+	t.Helper()
+	var got wails.SoundCheck
+	testenv.Eventually(t, "the sound check ends", func() bool {
+		var err error
+		got, err = page.SoundCheckStatus(context.Background())
+		return err == nil && got.State == "done"
+	}, nil)
+	return got
+}
+
+// "Проверить звук" through the core: the levels of the recorder for the remembered source, busy while it captures.
 func TestSoundCheckThroughTheCore(t *testing.T) {
 	ctx := context.Background()
 	a, f := newTestAppWith(t, t.TempDir())
 	core := startCore(t, a)
 	page := wails.NewDiagnosticsService(wails.DiagnosticsDeps{Sound: core.Sound, Bundle: core.Bundle}, a.log)
 
-	got, err := page.CheckSound(ctx)
-	if err != nil || got.Verdict != "ok" || got.Device != testenv.ToneDevice || len(got.Modes) != 2 {
-		t.Fatalf("CheckSound = %+v, %v", got, err)
+	if got, err := page.StartSoundCheck(ctx); err != nil || got.Source != "Весь звук компьютера" {
+		t.Fatalf("StartSoundCheck = %+v, %v", got, err)
+	}
+	if got := waitSound(t, page); got.Verdict != "ok" || got.Peak != 0.5 || !got.Heard {
+		t.Fatalf("the check = %+v", got)
 	}
 
-	// The whole computer is the default source: classic loopback is its final fallback.
-	f.recorder.SetSoundCheck(values.SoundCheck{Modes: []values.ModeCheck{
-		{Mode: values.CaptureInclude, Cause: values.SoundUnsupported}, {Mode: values.CaptureSystem, Cause: values.SoundSilence},
-	}}, nil)
-	if got, err := page.CheckSound(ctx); err != nil || got.Verdict != "silence" {
-		t.Fatalf("CheckSound = %+v, %v", got, err)
+	f.recorder.SetLevels([]values.SoundLevel{0, 0.002}, values.SoundOK, nil)
+	if _, err := page.StartSoundCheck(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitSound(t, page); got.Verdict != "silence" || len(got.Hints) == 0 {
+		t.Fatalf("a silent check = %+v", got)
 	}
 
 	chunks, err := shared.NewArtifactRef(shared.ArtifactRecordings, "rec1")
@@ -76,20 +90,45 @@ func TestSoundCheckThroughTheCore(t *testing.T) {
 	if err := f.recorder.Start(ctx, "rec1", chunks, values.WholeComputer()); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := page.CheckSound(ctx); err != nil || got.Verdict != "busy" {
-		t.Fatalf("CheckSound while capturing = %+v, %v", got, err)
+	if _, err := page.StartSoundCheck(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitSound(t, page); got.Verdict != "busy" {
+		t.Fatalf("the check while capturing = %+v", got)
 	}
 }
 
-func TestSoundCheckerOfTheRecorder(t *testing.T) {
+// Closing the app ends a running check: its recorder call is cancelled and the session goroutine ends.
+func TestCloseStopsTheSoundCheck(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	ctx := context.Background()
+	a, f := newTestAppWith(t, t.TempDir())
+	core := startCore(t, a)
+	page := wails.NewDiagnosticsService(wails.DiagnosticsDeps{Sound: core.Sound, Bundle: core.Bundle}, a.log)
+	entered, release := f.recorder.HoldLevels()
+	defer release()
+
+	if got, err := page.StartSoundCheck(ctx); err != nil || got.State != "running" {
+		t.Fatalf("StartSoundCheck = %+v, %v", got, err)
+	}
+	<-entered
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := page.SoundCheckStatus(ctx); got.State != "done" {
+		t.Fatalf("after Close %+v", got)
+	}
+}
+
+func TestLevelCheckerOfTheRecorder(t *testing.T) {
 	rec := &testenv.FakeRecorder{}
-	if soundChecker(rec) != rec {
+	if levelChecker(rec) != rec {
 		t.Fatal("a recorder with a sound check is its own checker")
 	}
-	if _, ok := soundChecker(audiocapture.Unavailable{}).(audiocapture.Unavailable); !ok {
+	if _, ok := levelChecker(audiocapture.Unavailable{}).(audiocapture.Unavailable); !ok {
 		t.Fatal("the unavailable recorder answers unsupported")
 	}
-	if _, ok := soundChecker(noCheckRecorder{}).(audiocapture.Unavailable); !ok {
+	if _, ok := levelChecker(noCheckRecorder{}).(audiocapture.Unavailable); !ok {
 		t.Fatal("a recorder without a sound check answers unsupported")
 	}
 }
@@ -97,4 +136,4 @@ func TestSoundCheckerOfTheRecorder(t *testing.T) {
 // noCheckRecorder is a recorder without a sound check.
 type noCheckRecorder struct{ audiocapture.Unavailable }
 
-func (noCheckRecorder) CheckSound() {} // another signature: not a soundcheck.SoundChecker
+func (noCheckRecorder) CheckLevels() {} // another signature: not a soundcheck.LevelChecker

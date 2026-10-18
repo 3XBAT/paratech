@@ -18,7 +18,7 @@
 // values.CaptureDiagnostics: modes, attempts with HRESULTs, switches with causes, Windows version, output device;
 // RecentCaptures lists them for the support bundle.
 //
-// Recorder.CheckSound is "Check sound" (selftest.go): a child with a self-test request plays a tone through the
-// TonePlayer (PlatformTone) and captures it with process loopback INCLUDE of its own process and with classic
-// loopback; a Goertzel filter tells whether each heard it.
+// Recorder.CheckLevels is "Check sound" (levelcheck.go, TASK-075): a child with a level check request captures the
+// user's source as a recording would, for a bounded time, and reports the peak of each 50 ms window; nothing is played
+// or written.
 package audiocapture

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"path/filepath"
+	"time"
 
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/domain/recording/values"
@@ -12,7 +14,7 @@ import (
 
 // Operation names of the log.
 const (
-	opCheckSound = "ui: check sound"
+	opStartSound = "ui: start the sound check"
 	opSaveBundle = "ui: save support bundle"
 	opPickBundle = "ui: choose where to save the support bundle"
 )
@@ -28,45 +30,111 @@ const (
 	msgBundleFailed    = "Не удалось сохранить пакет для поддержки. Выберите другую папку и попробуйте ещё раз."
 )
 
-// Fixed texts of "Проверить звук" (Russian UI), one per verdict.
-var soundMessages = map[values.SoundCause]string{
-	values.SoundOK:          "Звук записывается: проверочный сигнал слышен.",
-	values.SoundNoDevice:    "Нет устройства вывода звука. Подключите динамики или наушники и повторите проверку.",
-	values.SoundSilence:     "Проверочный сигнал не слышен. Проверьте, что устройство вывода включено, и повторите проверку.",
-	values.SoundUnsupported: "Этот способ захвата звука не работает в этой системе. Запись сама перейдёт на весь звук компьютера, если он доступен.",
-	values.SoundHandsFree:   "Bluetooth-гарнитура в режиме разговора: звук записывается плохо или не записывается. Завершите звонок или выберите в Windows вывод «Наушники» (стерео).",
-	values.SoundBusy:        "Идёт запись урока: проверка сейчас недоступна, её сигнал помешал бы записи.",
-	values.SoundFailed:      "Проверка звука не удалась. Попробуйте ещё раз; если не поможет, сохраните пакет для поддержки.",
+// stopSoundWait bounds how long "stop" waits for the check to end; the page polls the status afterwards anyway.
+const stopSoundWait = 5 * time.Second
+
+// Fixed texts of "Проверить звук" (Russian UI, TASK-075).
+const (
+	msgPlaySomething    = "Включите любой звук на компьютере (видео, музыку, звонок)."
+	msgHeard            = "Звук слышен."
+	sourceWholeComputer = "Весь звук компьютера"
+)
+
+// soundTexts are the message and the hints of each verdict; silence has its hints per kind of source.
+var soundTexts = map[values.SoundCause]struct {
+	message string
+	hints   []string
+}{
+	values.SoundOK: {msgHeard, nil},
+	values.SoundSilence: {"Звук не слышен.", []string{
+		"Проверьте, что сейчас что-то звучит и звук не выключен в микшере громкости Windows.",
+	}},
+	values.SoundNotRunning: {"Выбранное приложение не запущено.", []string{
+		"Откройте приложение урока и повторите проверку или выберите другой источник в окне записи.",
+	}},
+	values.SoundNoDevice: {"Нет устройства вывода звука.", []string{
+		"Подключите динамики или наушники и повторите проверку.",
+	}},
+	values.SoundUnsupported: {"Запись звука не работает в этой системе.", []string{
+		"Сохраните пакет для поддержки и передайте его разработчикам.",
+	}},
+	values.SoundBusy: {"Идёт запись урока: проверка звука сейчас недоступна.", nil},
+	values.SoundFailed: {"Проверка звука не удалась.", []string{
+		"Попробуйте ещё раз; если не поможет, сохраните пакет для поддержки.",
+	}},
 }
 
-const (
-	msgCheckRunning  = "Проверка звука уже идёт."
-	msgHandsFreeHint = "Похоже, вывод идёт на Bluetooth-гарнитуру в режиме разговора: качество звука низкое."
-)
+// silenceHintsApp are the hints of silence when an app is checked.
+var silenceHintsApp = []string{
+	"Проверьте, что в выбранном приложении сейчас идёт звук.",
+	"Проверьте, что звук этого приложения не выключен в микшере громкости Windows.",
+	"Если урок идёт в другом приложении, выберите его в окне записи.",
+}
 
 // SoundCheckUseCase is the use case of "Проверить звук" (ARCH-42).
 type SoundCheckUseCase interface {
-	Check(ctx context.Context) (soundcheck.Result, error)
+	Start(ctx context.Context) (soundcheck.Status, error)
+	Status() soundcheck.Status
+	Stop(ctx context.Context) soundcheck.Status
 }
 
-// SoundCheck answers "Проверить звук". Verdict is "ok" or the cause: "no_device", "silence", "unsupported",
-// "hands_free", "busy" or "failed"; Message is its fixed text. Hint is a fixed text when the output device looks like
-// a Bluetooth headset in call mode, "" otherwise.
+// SoundCheck is the state of "Проверить звук" for the page. State is "idle", "running" or "done". Level is the
+// loudest level since the previous status read and Peak the loudest of the check, both 0..1 (Level is 0 once done);
+// Heard reports a level that counts as sound. Verdict is set once done: "ok", "silence", "not_running", "no_device",
+// "unsupported", "busy" or "failed". Message and Hints are fixed texts, the only ones the page shows for a check;
+// Source is the display name of what is checked: sourceWholeComputer or the executable name of the app (untrusted,
+// render as text).
 type SoundCheck struct {
-	Verdict   string      `json:"verdict"`
-	Message   string      `json:"message"`
-	Device    string      `json:"device"` // the default output device; "" when unknown
-	HandsFree bool        `json:"handsFree"`
-	Hint      string      `json:"hint"`
-	Modes     []SoundMode `json:"modes"`
+	State         string   `json:"state"`
+	Level         float64  `json:"level"`
+	Peak          float64  `json:"peak"`
+	Heard         bool     `json:"heard"`
+	ElapsedMs     int64    `json:"elapsedMs"`
+	RemainingMs   int64    `json:"remainingMs"`
+	DurationMs    int64    `json:"durationMs"`
+	Verdict       string   `json:"verdict"`
+	Message       string   `json:"message"`
+	Hints         []string `json:"hints"`
+	Source        string   `json:"source"`
+	WholeComputer bool     `json:"wholeComputer"`
 }
 
-// SoundMode is the result of one capture mode: "include" (capture of an app) or "system" (the output device).
-type SoundMode struct {
-	Mode  string `json:"mode"`
-	OK    bool   `json:"ok"`
-	Cause string `json:"cause"`
+// soundCheck maps a status to the page's answer.
+func soundCheck(st soundcheck.Status) SoundCheck {
+	out := SoundCheck{
+		State: string(st.State), Level: roundLevel(st.Check.Level), Peak: roundLevel(st.Check.Peak), Heard: st.Heard,
+		ElapsedMs: st.Elapsed.Milliseconds(), RemainingMs: max(st.Duration-st.Elapsed, 0).Milliseconds(),
+		DurationMs: st.Duration.Milliseconds(), Hints: []string{}, WholeComputer: st.Source.IsWholeComputer(),
+		Source: sourceWholeComputer,
+	}
+	if !out.WholeComputer {
+		out.Source = st.Source.App().String()
+	}
+	switch st.State {
+	case soundcheck.StateIdle:
+		out.Source, out.WholeComputer = "", false
+	case soundcheck.StateRunning:
+		out.Message = msgPlaySomething
+		if st.Heard {
+			out.Message = msgHeard
+		}
+	default:
+		out.State = string(soundcheck.StateDone)
+		v := st.Verdict
+		if _, ok := soundTexts[v]; !ok {
+			v = values.SoundFailed
+		}
+		t := soundTexts[v]
+		out.Verdict, out.Message, out.Hints = string(v), t.message, append(out.Hints, t.hints...)
+		if v == values.SoundSilence && !out.WholeComputer {
+			out.Hints = append([]string{}, silenceHintsApp...)
+		}
+	}
+	return out
 }
+
+// roundLevel keeps three decimals: enough for a bar, and a stable JSON.
+func roundLevel(l values.SoundLevel) float64 { return math.Round(float64(l)*1000) / 1000 }
 
 // SupportBundleUseCase is the use case of "Сохранить пакет для поддержки" (ARCH-42).
 type SupportBundleUseCase interface {
@@ -134,29 +202,28 @@ func (s *DiagnosticsService) SaveSupportBundle(ctx context.Context) (BundleResul
 	return BundleResult{Status: bundleSaved, Message: msgBundleSaved, Name: filepath.Base(path)}, nil
 }
 
-// CheckSound plays a short tone on the default output device and tells whether the capture hears it. A failure is a
+// StartSoundCheck starts "Проверить звук": for about 15 s the source a recording would use is captured, without
+// recording, and SoundCheckStatus shows its level. A check that runs already is returned as it is. A failure is a
 // normal answer with a fixed text; no error text reaches the page.
-func (s *DiagnosticsService) CheckSound(ctx context.Context) (SoundCheck, error) {
-	r, err := s.deps.Sound.Check(ctx)
+func (s *DiagnosticsService) StartSoundCheck(ctx context.Context) (SoundCheck, error) {
+	st, err := s.deps.Sound.Start(ctx)
 	switch {
-	case errors.Is(err, soundcheck.ErrBusy):
-		return SoundCheck{Verdict: string(values.SoundBusy), Message: msgCheckRunning, Modes: []SoundMode{}}, nil
+	case errors.Is(err, soundcheck.ErrBusy): // the running check is the answer
 	case err != nil:
-		s.log.Warn(opCheckSound, "err", err)
-		r = soundcheck.Result{Verdict: values.SoundFailed}
+		s.log.Warn(opStartSound, "err", err)
+		return soundCheck(soundcheck.Status{State: soundcheck.StateDone, Verdict: values.SoundFailed}), nil
 	}
-	out := SoundCheck{
-		Verdict: string(r.Verdict), Message: soundMessages[r.Verdict], Device: r.Check.Device, HandsFree: r.Check.HandsFree,
-		Modes: make([]SoundMode, 0, len(r.Check.Modes)),
-	}
-	if out.Message == "" {
-		out.Verdict, out.Message = string(values.SoundFailed), soundMessages[values.SoundFailed]
-	}
-	if r.Check.HandsFree && r.Verdict != values.SoundHandsFree {
-		out.Hint = msgHandsFreeHint
-	}
-	for _, m := range r.Check.Modes {
-		out.Modes = append(out.Modes, SoundMode{Mode: string(m.Mode), OK: m.Cause == values.SoundOK, Cause: string(m.Cause)})
-	}
-	return out, nil
+	return soundCheck(st), nil
+}
+
+// SoundCheckStatus returns the state of the last check; the page polls it while the check runs.
+func (s *DiagnosticsService) SoundCheckStatus(context.Context) (SoundCheck, error) {
+	return soundCheck(s.deps.Sound.Status()), nil
+}
+
+// StopSoundCheck ends a running check early and returns its state, done unless it did not end within a few seconds.
+func (s *DiagnosticsService) StopSoundCheck(ctx context.Context) (SoundCheck, error) {
+	ctx, cancel := context.WithTimeout(ctx, stopSoundWait)
+	defer cancel()
+	return soundCheck(s.deps.Sound.Stop(ctx)), nil
 }

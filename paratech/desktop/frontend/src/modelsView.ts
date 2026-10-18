@@ -64,6 +64,14 @@ export function downloadText(d: ModelDownload): string {
   }
 }
 
+/** The download line of the status column: «25% · 50 МБ из 200 МБ» next to the «Скачивается» chip, else downloadText. */
+export function progressText(d: ModelDownload): string {
+  if (d.phase === "downloading" && d.totalBytes > 0) {
+    return `${progressPercent(d)}% · ${sizeText(d.doneBytes)} из ${sizeText(d.totalBytes)}`;
+  }
+  return downloadText(d);
+}
+
 /** The chip of a download phase; null without a download or after it installed (the row says «Установлена»). */
 export function downloadChip(
   d: ModelDownload,
@@ -104,27 +112,121 @@ export function catalogActions(m: AvailableModel, d: ModelDownload): CatalogActi
   };
 }
 
+/** The one action button of a row: download (disabled while another download runs), cancel or delete. */
+export type RowAction = "download" | "cancel" | "delete";
+
+export function catalogAction(m: AvailableModel, d: ModelDownload): RowAction {
+  if (catalogActions(m, d).cancel) {
+    return "cancel";
+  }
+  return m.installed ? "delete" : "download";
+}
+
+/** A secondary action of a row, offered in its «⋯» menu. */
+export type MenuOp = "source" | "discard" | "import" | "default";
+
+export interface MenuItem {
+  op: MenuOp;
+  label: string;
+}
+
+export const menuLabels: Readonly<Record<MenuOp, string>> = {
+  source: "Открыть страницу источника",
+  discard: "Удалить недокачанный файл",
+  import: "Импортировать скачанный файл…",
+  default: "Сделать по умолчанию",
+};
+
+const item = (op: MenuOp): MenuItem => ({ op, label: menuLabels[op] });
+
+export function catalogMenu(m: AvailableModel, d: ModelDownload): MenuItem[] {
+  const a = catalogActions(m, d);
+  const items: MenuItem[] = [];
+  if (a.openSource) {
+    items.push(item("source"));
+  }
+  if (a.discardPartial) {
+    items.push(item("discard"));
+  }
+  if (a.importFile) {
+    items.push(item("import"));
+  }
+  return items;
+}
+
+/** The menu of an installed model; entry is its catalog entry, if any (catalogEntryOf). */
+export function installedMenu(m: InstalledModel, entry: AvailableModel | null): MenuItem[] {
+  const items: MenuItem[] = [];
+  if (!m.isDefault) {
+    items.push(item("default"));
+  }
+  if (entry !== null && entry.hasSourcePage) {
+    items.push(item("source"));
+  }
+  return items;
+}
+
 /**
- * The Russian description of a catalog entry. The name comes from the family; the load level, the family and the
- * flags come from the core, the page only words them. Every model can be downloaded: «Рекомендуется» is a hint.
+ * Whether the «⋯» menu is shown: only while it is open and has items. A menu whose items went away closes, so it does
+ * not come back open (and keeps no outside-click listener) when they return.
  */
-export interface CatalogLabels {
-  /** «Small», «Large v3 Turbo»; the catalog id for an unknown family. */
+export function menuShown(open: boolean, count: number): boolean {
+  return open && count > 0;
+}
+
+/**
+ * A key pressed in an open menu of count items, the focused one at index: the index to focus, "close" (Escape: close
+ * and focus the «⋯» button), "leave" (Tab: close and let the focus move on) or null when the menu ignores the key.
+ */
+export function menuKey(key: string, index: number, count: number): number | "close" | "leave" | null {
+  if (key === "Escape") {
+    return "close";
+  }
+  if (key === "Tab") {
+    return "leave";
+  }
+  if (count <= 0) {
+    return null;
+  }
+  switch (key) {
+    // index is -1 while the «⋯» button itself has the focus.
+    case "ArrowDown":
+      return index < 0 || index + 1 >= count ? 0 : index + 1;
+    case "ArrowUp":
+      return index <= 0 ? count - 1 : index - 1;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The text of a model row, catalog or installed. The family, the load and the flags come from the core; the page only
+ * words them (ARCH-44).
+ */
+export interface ModelRow {
+  /** «Small», «Large v3 Turbo»; the catalog id for an unknown family; the name of an imported model. */
   name: string;
-  /** «Рекомендуется для русского» or "". */
-  recommended: string;
-  /** A short secondary description from the tier, or "". */
-  description: string;
-  language: string;
-  /** «Полная» or «Уменьшенная — …», and what it means (a tooltip). */
-  variant: string;
-  variantHint: string;
-  /** «Точность: хорошая», or "" for an unknown family. */
-  accuracy: string;
-  /** «Нагрузка на компьютер: 4 из 5 — тяжёлая», or "" when the load is unknown. */
-  load: string;
-  /** The warning of a heavy model, or "". */
+  /** «Q5» for a reduced (quantized) variant, "" for a full one. Its meaning is q5Hint. */
+  suffix: string;
+  size: string;
+  /** Only «Рекомендуется для русского» and «Только английский». */
+  tags: string[];
+  /** The load 1..5; 0 when unknown: no scale. */
+  load: number;
+  /** The rest of the muted line after the scale: accuracy, language, version. */
+  details: string[];
+  /** The core's «below the recommended hardware» hint as a part of the muted line, or "". */
+  slow: string;
+  /** The core's heavy flag (load 4–5): the scale is coloured as a warning. */
+  heavy: boolean;
+  /** One short warning line, only with the heavy flag, or "". */
   warning: string;
+  /** The technical id (and the SHA-256 of an installed model): a tooltip only, never visible text. */
+  tip: string;
 }
 
 const familyNames: Readonly<Record<string, string>> = {
@@ -145,13 +247,6 @@ const familyAccuracy: Readonly<Record<string, string>> = {
   "large-v3": "самая высокая",
 };
 
-// No line for "max": the load scale and the heavy warning already say it is slow, and the accuracy line says how
-// accurate it is (turbo is not the most accurate one).
-const tierLabels: Readonly<Record<string, string>> = {
-  fast: "Быстрее, но менее точная",
-  accurate: "Точнее, но медленнее",
-};
-
 /** The words of the load levels 1..5; index 0 (unknown) has none. */
 export const loadWords = ["", "лёгкая", "умеренная", "средняя", "тяжёлая", "очень тяжёлая"] as const;
 
@@ -168,23 +263,97 @@ export function knownLoad(load: number): boolean {
   return Number.isInteger(load) && load >= 1 && load <= loadLevels;
 }
 
-/** «Нагрузка на компьютер: 4 из 5 — тяжёлая»; "" when the load is unknown. */
+/** «Нагрузка 4 из 5», shown next to the scale; "" when the load is unknown. */
 export function loadText(load: number): string {
+  return knownLoad(load) ? `Нагрузка ${load} из ${loadLevels}` : "";
+}
+
+/** «Нагрузка на компьютер: 4 из 5 — тяжёлая», the accessible name and tooltip of the scale; "" when unknown. */
+export function loadHint(load: number): string {
   return knownLoad(load) ? `Нагрузка на компьютер: ${load} из ${loadLevels} — ${loadWords[load]}` : "";
 }
 
-export function catalogLabels(m: AvailableModel): CatalogLabels {
+/** «точность хорошая»; "" for an unknown family. */
+export function accuracyText(family: string): string {
+  return Object.hasOwn(familyAccuracy, family) ? `точность ${familyAccuracy[family]}` : "";
+}
+
+/** «Q5» from "q5_1" or "q5_0"; the quantization in capitals for another scheme. */
+export function reducedSuffix(quantization: string): string {
+  const q = /^q(\d+)/i.exec(quantization);
+  if (q !== null) {
+    return `Q${q[1]}`;
+  }
+  return quantization !== "" ? quantization.toUpperCase() : "Q";
+}
+
+export function catalogRow(m: AvailableModel): ModelRow {
+  const tags: string[] = [];
+  if (m.recommended && !m.englishOnly) {
+    tags.push(texts.recommended);
+  }
+  if (m.englishOnly) {
+    tags.push(texts.englishOnly);
+  }
   return {
     name: displayName(m),
-    recommended: m.recommended && !m.englishOnly ? texts.recommended : "",
-    description: Object.hasOwn(tierLabels, m.tier) ? tierLabels[m.tier] : "",
-    language: m.englishOnly ? texts.englishOnly : texts.multilingual,
-    variant: m.reduced ? texts.reduced : texts.full,
-    variantHint: m.reduced ? texts.reducedHint : texts.fullHint,
-    accuracy: Object.hasOwn(familyAccuracy, m.family) ? `Точность: ${familyAccuracy[m.family]}` : "",
-    load: loadText(m.load),
+    suffix: m.reduced ? reducedSuffix(m.quantization) : "",
+    size: sizeText(m.sizeBytes),
+    tags,
+    load: knownLoad(m.load) ? m.load : 0,
+    heavy: m.heavy,
+    // An English-only model has its language as the tag already.
+    details: [accuracyText(m.family), m.englishOnly ? "" : texts.languages].filter((s) => s !== ""),
+    // The heavy warning says it is slow already.
+    slow: m.likelySlow && !m.heavy ? texts.likelySlow : "",
     warning: m.heavy ? texts.heavy : "",
+    tip: m.catalogId,
   };
+}
+
+/** The catalog entry of an installed model, or null for an imported model or one the catalog no longer has. */
+export function catalogEntryOf(m: InstalledModel, catalog: readonly AvailableModel[]): AvailableModel | null {
+  return m.fromCatalog ? (catalog.find((a) => a.catalogId === m.catalogId) ?? null) : null;
+}
+
+/**
+ * An installed model in the catalog row format, without the warnings. An imported model has no family, so it shows its
+ * own name, the version and the quantization, and no load scale.
+ */
+export function installedRow(m: InstalledModel, catalog: readonly AvailableModel[]): ModelRow {
+  const sha = `SHA-256: ${m.sha256}`;
+  const e = catalogEntryOf(m, catalog);
+  if (e !== null) {
+    return { ...catalogRow(e), size: sizeText(m.sizeBytes), slow: "", warning: "", tip: `${e.catalogId}\n${sha}` };
+  }
+  const details = [`версия ${m.version}`];
+  if (m.quantization !== "") {
+    details.push(`квантизация ${m.quantization}`);
+  }
+  if (m.capabilities.includes("multilingual")) {
+    details.push(texts.languages);
+  }
+  return {
+    name: m.name,
+    suffix: "",
+    size: sizeText(m.sizeBytes),
+    tags: [],
+    load: 0,
+    heavy: false,
+    details,
+    slow: "",
+    warning: "",
+    tip: `${m.name} ${m.version}\n${sha}`,
+  };
+}
+
+/** The name of an installed model in a dialog or a message: «Small Q5»; name, version and quantization if imported. */
+export function installedName(m: InstalledModel, catalog: readonly AvailableModel[]): string {
+  if (catalogEntryOf(m, catalog) === null) {
+    return modelTitle(m);
+  }
+  const r = installedRow(m, catalog);
+  return r.suffix !== "" ? `${r.name} ${r.suffix}` : r.name;
 }
 
 /** The language filter of the catalog. */
@@ -266,11 +435,6 @@ export function modelTitle(m: { name: string; version: string; quantization: str
   return m.quantization !== "" ? `${m.name} ${m.version}, ${m.quantization}` : `${m.name} ${m.version}`;
 }
 
-/** The first 12 hex digits of a SHA-256; the page shows the full one on expand. */
-export function shortSha(sha: string): string {
-  return sha.length > 12 ? `${sha.slice(0, 12)}…` : sha;
-}
-
 /** The badge of an installed model, from the core's flags only: "По умолчанию", "Используется" or none. */
 export function defaultBadge(m: InstalledModel): string {
   if (m.isDefault) {
@@ -292,24 +456,24 @@ export const texts = {
   emptyCatalog: "Список моделей пуст. Модель можно установить из файла (см. «Другие модели»).",
   machineUnknown: "Оборудование компьютера не определено: нагрузка указана примерно, для обычного компьютера.",
   catalogTitle: "Модели для скачивания",
-  variantsNote:
-    "Полная — исходная модель. Уменьшенная — сжатая копия той же модели: файл меньше, работает быстрее, точность " +
-    "чуть ниже.",
-  full: "Полная",
-  fullHint: "Полная модель: исходный файл, самая высокая точность этого размера.",
-  reduced: "Уменьшенная — меньше и быстрее, точность чуть ниже",
-  reducedHint: "Сжатая копия той же модели: файл в 2–3 раза меньше, распознаёт быстрее, ошибок чуть больше.",
+  variantsNote: "Q5 в названии — уменьшенная копия модели: файл меньше, работает быстрее, точность чуть ниже.",
+  /** The tooltip of the «Q5» suffix. */
+  q5Hint: "уменьшенная: меньше и быстрее, точность чуть ниже",
   multilingual: "Русский и другие языки",
+  /** The language in the muted line of a row; short, so the longest line fits one line in the default window. */
+  languages: "русский и др. языки",
   englishOnly: "Только английский",
   recommended: "Рекомендуется для русского",
-  heavy: "Модель требовательна к ресурсам вашего устройства: распознавание будет долгим на обычном процессоре",
+  heavy: "Тяжёлая модель: распознавание будет долгим",
   languageFilter: "Язык",
   loadFilter: "Нагрузка на компьютер",
   noMatch: "Нет моделей с такими условиями. Измените фильтры.",
   otherModels:
     "Другие модели для распознавания лежат на Hugging Face. Скачайте файл .bin в браузере и установите его кнопкой " +
     "«Импортировать файл модели…».",
-  likelySlow: "Может работать медленно на этом компьютере.",
+  likelySlow: "может работать медленно на этом компьютере",
+  more: "Ещё действия",
+  oneDownload: "Скачивается другая модель: одновременно скачивается только одна",
   compareSha:
     "Сравните SHA-256 с указанной на официальной странице модели (Hugging Face: страница файла, строка «SHA256»). " +
     "Устанавливайте, только если они совпадают.",
@@ -334,9 +498,9 @@ export function statusNotes(v: ModelsView): Note[] {
   return notes;
 }
 
-/** "Модель установлена: base 1, q5_1." */
-export function installedText(m: InstalledModel): string {
-  return `Модель установлена: ${modelTitle(m)}.`;
+/** "Модель установлена: Small Q5." or, for an imported model, "Модель установлена: base 1, q5_1." */
+export function installedText(m: InstalledModel, catalog: readonly AvailableModel[] = []): string {
+  return `Модель установлена: ${installedName(m, catalog)}.`;
 }
 
 /** The steps of importing a file outside the catalog (AC-23). */

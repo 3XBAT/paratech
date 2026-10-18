@@ -118,13 +118,15 @@ enqueues `summarize`/`extract_homework` with key `<type>:<transcript id>:v<promp
   interrupted recordings keep their chunks for a later recovery.
 - **Recorder run mode** (`--recorder --data-dir`): no instance lock (the parent holds it), no database, no UI shell,
   no log file, no jobs; only the Storage Manager on `<DataDir>/artifacts`. Events on stdout, log on stderr, stops when
-  stdin closes. A self-test request (TASK-058) plays the tone of `audiocapture.PlatformTone` and writes nothing.
+  stdin closes. A level check request (TASK-075) captures the requested target for a while, reports levels and writes
+  nothing.
 - **Log file (TASK-058).** `app.New` wraps the logger of `main` in `logfile.Tee` (main.go unchanged); everything logs
   through it, the Wails logger behind its Info floor too. `openCore` attaches `<DataDir>/logs/desktop.log` (5 MiB,
   `desktop.1.log`, `desktop.2.log`) right after the instance lock, so a second instance never writes it; a file that
   cannot be opened is a Warn on stderr. `Close` detaches and closes it after the storage.
-- **Diagnostics page (TASK-058).** `input/wails.DiagnosticsService`: `CheckSound` (`cases/soundcheck`: the recorder's
-  `CheckSound`, refused while a recording runs, verdict for the remembered source) and `SaveSupportBundle`
+- **Diagnostics page (TASK-058).** `input/wails.DiagnosticsService`: `StartSoundCheck`, `SoundCheckStatus`,
+  `StopSoundCheck` (TASK-075, `cases/soundcheck`: a 15 s session over the recorder's `CheckLevels` for the remembered
+  source, refused while a recording runs; the lifecycle closes it before the storage) and `SaveSupportBundle`
   (`cases/supportbundle`: native save dialog, then `zipfile` writes about.json, settings.json, capture.json and
   `logs/` with the profile directory as `%USERPROFILE%`; `sysinfo` reads the versions). Nothing is uploaded.
 - **Clocks.** `clock.System` (UTC, with `Sleep`) for every use case; `clock.Local` only for `homeworkflow` (the

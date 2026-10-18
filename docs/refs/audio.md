@@ -46,7 +46,7 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
 | IAudioMeterInformation | GetPeakValue 3 |
 | IAudioClient | Initialize 3, GetBufferSize 4, GetCurrentPadding 6, GetMixFormat 8, Start 10, Stop 11, SetEventHandle 13, GetService 14 |
 | IAudioCaptureClient | GetBuffer 3, ReleaseBuffer 4, GetNextPacketSize 5 |
-| IAudioRenderClient | GetBuffer 3 (also returns the buffer for the self-test tone), ReleaseBuffer 4 |
+| IAudioRenderClient | GetBuffer 3, ReleaseBuffer 4 |
 | IActivateAudioInterfaceAsyncOperation | GetActivateResult 3 |
 
 | Constant | Value |
@@ -166,15 +166,11 @@ Evidence marks: [MS] Microsoft docs, [code] reading of OBS/Chromium/GStreamer so
   tree and the device's processing, which EXCLUDE does not capture.
 - Device name: `IMMDevice::OpenPropertyStore(STGM_READ)` → `GetValue(PKEY_Device_FriendlyName)`; localized
   ("Динамики (Realtek(R) Audio)" on the owner's machine). User hardware names, fine to log.
-- "Check sound" tone: a plain render client on the default endpoint (shared, mix format, no flags, 200 ms buffer),
-  topped up every 10 ms with a 1 kHz sine; the same COM calls as the keep-alive, with data instead of SILENT.
-- **Bluetooth hands-free hint:** form factor Headset or Handset (`PKEY_AudioEndpoint_FormFactor`) and an enumerator
-  name starting with `BTH` (`PKEY_Device_EnumeratorName`; Windows 10 HFP endpoints are expected under `BTHHFENUM`,
-  A2DP under `BTHENUM` with form factor Headphones). Source: the PKEY and enum values are in the mingw-w64 headers;
-  that the endpoint property store has the enumerator name and these values for HFP is **not confirmed** (no MS
-  page found, not checked with a headset; an endpoint may report the software-device enumerator `SWD` instead). Without
-  a `BTH` name the hint never fires; it is a hint, not a cause on its own (silence on such an endpoint becomes
-  "hands_free").
+- "Check sound" (TASK-075) plays nothing: it captures the chosen source and shows its peak level. The tone render
+  client and the Bluetooth hands-free hint of TASK-058 were removed.
+- (Removed with the hint, kept for reference) Bluetooth hands-free: form factor Headset or Handset
+  (`PKEY_AudioEndpoint_FormFactor`) and an enumerator name starting with `BTH` (`PKEY_Device_EnumeratorName`); **not
+  confirmed** (an endpoint may report the software-device enumerator `SWD` instead).
 - Windows version: `RtlGetVersion` for the numbers; `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` ProductName,
   DisplayVersion, UBR read only. ProductName says "Windows 10" on Windows 11; build ≥ 22000 (not Server) = Windows 11.
 

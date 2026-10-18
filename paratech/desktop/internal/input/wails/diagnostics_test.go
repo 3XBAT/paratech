@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/domain/recording/values"
@@ -17,39 +19,79 @@ import (
 
 // fakeSound is the sound check behind the binding.
 type fakeSound struct {
-	r   soundcheck.Result
-	err error
+	st       soundcheck.Status
+	err      error
+	stopped  bool
+	deadline bool // the ctx of Stop had a deadline
 }
 
-func (f *fakeSound) Check(context.Context) (soundcheck.Result, error) { return f.r, f.err }
+func (f *fakeSound) Start(context.Context) (soundcheck.Status, error) { return f.st, f.err }
+func (f *fakeSound) Status() soundcheck.Status                        { return f.st }
+
+func (f *fakeSound) Stop(ctx context.Context) soundcheck.Status {
+	f.stopped = true
+	_, f.deadline = ctx.Deadline()
+	return f.st
+}
 
 func soundPage(f *fakeSound, log *slog.Logger) *DiagnosticsService {
 	return NewDiagnosticsService(DiagnosticsDeps{Sound: f, Bundle: &fakeBundle{}, Picker: &fakePicker{}}, log)
 }
 
-func checked(verdict, include, system values.SoundCause, handsFree bool) soundcheck.Result {
-	return soundcheck.Result{Verdict: verdict, Check: values.SoundCheck{
-		Device: "Динамики (Realtek(R) Audio)", HandsFree: handsFree, Modes: []values.ModeCheck{
-			{Mode: values.CaptureInclude, Cause: include, HResult: "0x80070005"}, {Mode: values.CaptureSystem, Cause: system},
-		},
-	}}
+func zoom(t *testing.T) values.Source {
+	t.Helper()
+	s, err := values.SourceOf("zoom.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
-func TestCheckSoundAnswersEveryVerdict(t *testing.T) {
-	for verdict := range soundMessages {
+func done(source values.Source, verdict values.SoundCause, peak values.SoundLevel) soundcheck.Status {
+	return soundcheck.Status{State: soundcheck.StateDone, Source: source, Check: values.LevelCheck{Peak: peak},
+		Heard: peak.Heard(), Elapsed: 15 * time.Second, Duration: 15 * time.Second, Verdict: verdict}
+}
+
+func TestSoundCheckAnswersEveryVerdict(t *testing.T) {
+	for verdict, text := range soundTexts {
 		t.Run(string(verdict), func(t *testing.T) {
-			s := soundPage(&fakeSound{r: checked(verdict, values.SoundOK, values.SoundSilence, false)}, discard())
-			got, err := s.CheckSound(context.Background())
-			if err != nil || got.Verdict != string(verdict) || got.Message != soundMessages[verdict] || got.Hint != "" {
-				t.Fatalf("CheckSound = %+v, %v", got, err)
+			for _, source := range []values.Source{values.WholeComputer(), zoom(t)} {
+				got, err := soundPage(&fakeSound{st: done(source, verdict, 0)}, discard()).SoundCheckStatus(context.Background())
+				if err != nil || got.State != "done" || got.Verdict != string(verdict) || got.Message != text.message ||
+					got.Hints == nil {
+					t.Fatalf("SoundCheckStatus = %+v, %v", got, err)
+				}
+				if verdict != values.SoundOK && verdict != values.SoundBusy && len(got.Hints) == 0 {
+					t.Fatalf("%s has no hint", verdict)
+				}
 			}
 		})
 	}
+
+	// Silence of an app points at the app; of the whole computer at the mixer.
+	app, err := soundPage(&fakeSound{st: done(zoom(t), values.SoundSilence, 0.001)}, discard()).SoundCheckStatus(context.Background())
+	if err != nil || !slices.Equal(app.Hints, silenceHintsApp) || app.Source != "zoom.exe" || app.WholeComputer {
+		t.Fatalf("silence of an app = %+v", app)
+	}
+	whole, err := soundPage(&fakeSound{st: done(values.WholeComputer(), values.SoundSilence, 0)}, discard()).
+		SoundCheckStatus(context.Background())
+	if err != nil || !slices.Equal(whole.Hints, soundTexts[values.SoundSilence].hints) || whole.Source != sourceWholeComputer ||
+		!whole.WholeComputer {
+		t.Fatalf("silence of the whole computer = %+v", whole)
+	}
+
+	// An unknown verdict reads as failed.
+	got, err := soundPage(&fakeSound{st: done(values.WholeComputer(), "loud", 0)}, discard()).SoundCheckStatus(context.Background())
+	if err != nil || got.Verdict != "failed" || got.Message != soundTexts[values.SoundFailed].message {
+		t.Fatalf("an unknown verdict = %+v, %v", got, err)
+	}
 }
 
-func TestCheckSoundJSON(t *testing.T) {
-	s := soundPage(&fakeSound{r: checked(values.SoundOK, values.SoundOK, values.SoundSilence, true)}, discard())
-	got, err := s.CheckSound(context.Background())
+func TestSoundCheckJSON(t *testing.T) {
+	running := soundcheck.Status{State: soundcheck.StateRunning, Source: zoom(t),
+		Check: values.LevelCheck{Level: 0.12345, Peak: 0.5}, Heard: true, Elapsed: 4200 * time.Millisecond,
+		Duration: 15 * time.Second}
+	got, err := soundPage(&fakeSound{st: running}, discard()).StartSoundCheck(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,48 +99,66 @@ func TestCheckSoundJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"verdict":"ok","message":"` + soundMessages[values.SoundOK] + `","device":"Динамики (Realtek(R) Audio)",` +
-		`"handsFree":true,"hint":"` + msgHandsFreeHint + `","modes":[{"mode":"include","ok":true,"cause":"ok"},` +
-		`{"mode":"system","ok":false,"cause":"silence"}]}`
+	want := `{"state":"running","level":0.123,"peak":0.5,"heard":true,"elapsedMs":4200,"remainingMs":10800,` +
+		`"durationMs":15000,"verdict":"","message":"` + msgHeard + `","hints":[],"source":"zoom.exe","wholeComputer":false}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s\nwant %s (frontend/src/bindings/diagnostics.ts reads these names)", raw, want)
 	}
+
+	quiet := running
+	quiet.Source, quiet.Check, quiet.Heard = values.WholeComputer(), values.LevelCheck{}, false
+	got, _ = soundPage(&fakeSound{st: quiet}, discard()).SoundCheckStatus(context.Background())
+	if got.Message != msgPlaySomething || got.Source != sourceWholeComputer || !got.WholeComputer || got.Verdict != "" {
+		t.Fatalf("a quiet running check = %+v", got)
+	}
+
+	idle, _ := soundPage(&fakeSound{st: soundcheck.Status{State: soundcheck.StateIdle, Duration: 15 * time.Second}}, discard()).
+		SoundCheckStatus(context.Background())
+	raw, _ = json.Marshal(idle)
+	if string(raw) != `{"state":"idle","level":0,"peak":0,"heard":false,"elapsedMs":0,"remainingMs":15000,`+
+		`"durationMs":15000,"verdict":"","message":"","hints":[],"source":"","wholeComputer":false}` {
+		t.Fatalf("idle JSON = %s", raw)
+	}
 }
 
-func TestCheckSoundHidesErrors(t *testing.T) {
+func TestStartSoundCheckHidesErrors(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
 	secret := errors.New(`open C:\Users\student\AppData: denied`)
 
-	got, err := soundPage(&fakeSound{err: secret}, log).CheckSound(context.Background())
+	got, err := soundPage(&fakeSound{err: secret}, log).StartSoundCheck(context.Background())
 	raw, _ := json.Marshal(got)
-	if err != nil || got.Verdict != "failed" || got.Message != soundMessages[values.SoundFailed] ||
-		strings.Contains(string(raw), "student") || string(raw) == "" {
-		t.Fatalf("CheckSound = %s, %v", raw, err)
+	if err != nil || got.State != "done" || got.Verdict != "failed" || strings.Contains(string(raw), "student") {
+		t.Fatalf("StartSoundCheck = %s, %v", raw, err)
 	}
 	if !strings.Contains(logs.String(), "denied") {
 		t.Fatalf("the cause must be logged, got %q", logs.String())
 	}
 
-	got, err = soundPage(&fakeSound{err: soundcheck.ErrBusy}, log).CheckSound(context.Background())
-	if err != nil || got.Verdict != "busy" || got.Message != msgCheckRunning || got.Modes == nil {
+	// A check that runs already is the answer.
+	running := soundcheck.Status{State: soundcheck.StateRunning, Duration: 15 * time.Second}
+	got, err = soundPage(&fakeSound{st: running, err: soundcheck.ErrBusy}, log).StartSoundCheck(context.Background())
+	if err != nil || got.State != "running" || got.Message != msgPlaySomething {
 		t.Fatalf("a running check = %+v, %v", got, err)
-	}
-
-	got, err = soundPage(&fakeSound{r: soundcheck.Result{Verdict: "loud"}}, log).CheckSound(context.Background())
-	if err != nil || got.Verdict != "failed" {
-		t.Fatalf("an unknown verdict = %+v, %v", got, err)
 	}
 }
 
-// The page may call exactly these methods (TestFrontendCallsBoundNames checks the frontend file once it exists).
+func TestStopSoundCheck(t *testing.T) {
+	f := &fakeSound{st: done(values.WholeComputer(), values.SoundOK, 0.4)}
+	got, err := soundPage(f, discard()).StopSoundCheck(context.Background())
+	if err != nil || !f.stopped || !f.deadline || got.Verdict != "ok" || got.Message != msgHeard || got.Peak != 0.4 {
+		t.Fatalf("StopSoundCheck = %+v, %v; stopped %v, bounded %v", got, err, f.stopped, f.deadline)
+	}
+}
+
+// The page may call exactly these methods (TestFrontendCallsBoundNames checks the frontend file).
 func TestDiagnosticsServiceMethods(t *testing.T) {
 	typ := reflect.TypeFor[*DiagnosticsService]()
 	var names []string
 	for i := range typ.NumMethod() {
 		names = append(names, typ.Method(i).Name)
 	}
-	if want := []string{"CheckSound", "SaveSupportBundle"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"SaveSupportBundle", "SoundCheckStatus", "StartSoundCheck", "StopSoundCheck"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("methods %v, want %v", names, want)
 	}
 }
