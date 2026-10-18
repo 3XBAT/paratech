@@ -130,16 +130,18 @@ test("bundle replies are parsed strictly: only a saved bundle has a name", () =>
   }
 });
 
-test("a running check shows the source, the hint, the level, the seconds left and «Звук слышен» once heard", () => {
+test("a running check shows the source, the level, the seconds left and the core's message", () => {
   assert.deepEqual(soundDisplay(running), {
     phase: "running", running: true, percent: levelPercent(0.123), heard: true, source: "Источник: zoom.exe",
-    prompt: "Включите любой звук на компьютере (видео, музыку, звонок)", remaining: "Осталось 11 с",
-    lines: [{ text: "Звук слышен.", tone: "ok" }],
+    prompt: "", remaining: "Осталось 11 с", lines: [{ text: "Звук слышен.", tone: "ok" }],
   });
   const quiet = soundDisplay({ ...running, heard: false, level: 0, message: "Включите звук." });
   assert.equal(quiet.percent, 0);
   assert.equal(quiet.heard, false);
+  assert.equal(quiet.prompt, "Включите звук.", "the hint is the core's text");
   assert.deepEqual(quiet.lines, [], "nothing but the hint until sound is heard");
+  assert.equal(soundDisplay({ ...running, message: "Слышно." }).lines[0].text, "Слышно.", "no text of its own");
+  assert.ok(!("playSomething" in texts) && !("heard" in texts), "the running texts come only from the core");
   const whole = soundDisplay({ ...running, source: "Весь звук компьютера", wholeComputer: true });
   assert.equal(whole.source, "Источник: Весь звук компьютера");
 });
@@ -183,11 +185,14 @@ test("the level is shown on a dB scale from -60 dBFS, so quiet sound is visible"
   assert.equal(heardMarkPercent, 33);
 });
 
-test("the seconds left are whole and rounded up", () => {
+test("the seconds left are whole and rounded up; at 0 a running check is finishing", () => {
   assert.equal(remainingText(15000), "Осталось 15 с");
   assert.equal(remainingText(10800), "Осталось 11 с");
   assert.equal(remainingText(1), "Осталось 1 с");
-  assert.equal(remainingText(0), "Осталось 0 с");
+  assert.equal(remainingText(0), "Завершаем…");
+  assert.equal(remainingText(-5), "Завершаем…");
+  // The capture starts after the countdown, so the core may still run at 0 left.
+  assert.equal(soundDisplay({ ...running, elapsedMs: 15000, remainingMs: 0 }).remaining, "Завершаем…");
 });
 
 // Fake timers: run() fires the one pending timer. Reads are answered by the test, so an overlap would be visible.

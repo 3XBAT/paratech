@@ -22,11 +22,10 @@ export const texts = {
   stopCheck: "Остановить",
   checkFailed: "Не удалось проверить звук.",
   sourcePrefix: "Источник: ",
-  playSomething: "Включите любой звук на компьютере (видео, музыку, звонок)",
-  heard: "Звук слышен.",
   levelLabel: "Уровень звука",
   remainingPrefix: "Осталось ",
   secondsSuffix: " с",
+  finishing: "Завершаем…",
   bundleTitle: "Пакет для поддержки",
   bundleExplain:
     "Zip-архив с журналами, версиями Windows и приложения и настройками — без паролей, ключей, аудио, " +
@@ -76,9 +75,15 @@ export function levelPercent(level: number): number {
  */
 export const heardMarkPercent = levelPercent(0.01);
 
-/** The whole seconds left, rounded up so the count reaches 0 only at the end. */
+/**
+ * The whole seconds left, rounded up. The count starts before the capture does, so a check may still run at 0: then
+ * it shows that it is finishing instead of "0 с".
+ */
 export function remainingText(ms: number): string {
-  return texts.remainingPrefix + Math.ceil(Math.max(ms, 0) / 1000) + texts.secondsSuffix;
+  if (!(ms > 0)) {
+    return texts.finishing;
+  }
+  return texts.remainingPrefix + Math.ceil(ms / 1000) + texts.secondsSuffix;
 }
 
 export type SoundPhase = "idle" | "running" | "done" | "failed";
@@ -92,7 +97,7 @@ export interface SoundDisplay {
   heard: boolean;
   /** "" when there is no source to show. */
   source: string;
-  /** The hint to play something while running, else "". */
+  /** The core's message while running and nothing is heard yet (the hint to play something), else "". */
   prompt: string;
   /** The seconds left while running, else "". */
   remaining: string;
@@ -100,8 +105,8 @@ export interface SoundDisplay {
 }
 
 /**
- * What a check shows. While it runs: the source, the hint to play something, the level and the seconds left, and
- * "Звук слышен" once the core heard sound. Once done: the core's verdict message and its hints.
+ * What a check shows. While it runs: the source, the level, the seconds left and the core's message: the hint to play
+ * something, or an ok line once the core heard sound. Once done: the core's verdict message and its hints.
  */
 export function soundDisplay(r: SoundCheck): SoundDisplay {
   const source = r.source === "" ? "" : texts.sourcePrefix + r.source;
@@ -112,8 +117,8 @@ export function soundDisplay(r: SoundCheck): SoundDisplay {
   if (r.state === "running") {
     return {
       phase: "running", running: true, percent: levelPercent(r.level), heard: r.heard, source,
-      prompt: texts.playSomething, remaining: remainingText(r.remainingMs),
-      lines: r.heard ? [{ text: texts.heard, tone: "ok" }] : [],
+      prompt: r.heard ? "" : r.message, remaining: remainingText(r.remainingMs),
+      lines: r.heard ? [{ text: r.message, tone: "ok" }] : [],
     };
   }
   const tone: Tone = r.verdict === "ok" ? "ok" : r.verdict === "busy" ? "warning" : "error";
