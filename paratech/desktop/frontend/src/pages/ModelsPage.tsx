@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { initialListState, type ListState } from "../listView";
@@ -13,6 +13,7 @@ import { callByName } from "../bindings/runtime";
 import {
   canConfirm,
   catalogActions,
+  catalogGroups,
   catalogLabels,
   confirmation,
   confirmStep,
@@ -23,7 +24,15 @@ import {
   errorText,
   type ImportStep,
   installedText,
+  isHeavy,
   keepsSelection,
+  languageFilter,
+  type LanguageFilter,
+  languageOptions,
+  loadFilter,
+  type LoadFilter,
+  loadLevels,
+  loadOptions,
   modelTitle,
   progressPercent,
   shortSha,
@@ -32,7 +41,7 @@ import {
   texts,
 } from "../modelsView";
 import { Button } from "../ui/Button";
-import { Banner, Card, Dialog, Field, Input, Progress, ResultLine } from "../ui/controls";
+import { Banner, Card, Dialog, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import type { IconName } from "../ui/Icon";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
 
@@ -398,30 +407,21 @@ export function ModelsPage() {
         )}
       </Dialog>
 
-      <h2 className="group-title">Рекомендуемые модели</h2>
+      <h2 className="group-title">{texts.catalogTitle}</h2>
       {view !== null &&
         (view.available.length === 0 ? (
           <p className="muted">{texts.emptyCatalog}</p>
         ) : (
-          <>
-            {!view.machineKnown && <p className="muted">{texts.machineUnknown}</p>}
-            <div className="card mrows" role="list" aria-label="Рекомендуемые модели">
-              {view.available.map((m) => (
-                <CatalogRow
-                  key={m.catalogId}
-                  model={m}
-                  download={view.download}
-                  busy={busy}
-                  dialogBusy={dialogBusy}
-                  onDownload={() => void download(m)}
-                  onCancel={() => void act(`cancel:${m.catalogId}`, () => api.cancelDownload())}
-                  onDiscard={() => void act(`discard:${m.catalogId}`, () => api.discardPartial(m.catalogId))}
-                  onImport={() => void importCatalog(m)}
-                  onSource={() => void act(`source:${m.catalogId}`, () => api.openSourcePage(m.catalogId))}
-                />
-              ))}
-            </div>
-          </>
+          <CatalogList
+            view={view}
+            busy={busy}
+            dialogBusy={dialogBusy}
+            onDownload={(m) => void download(m)}
+            onCancel={(m) => void act(`cancel:${m.catalogId}`, () => api.cancelDownload())}
+            onDiscard={(m) => void act(`discard:${m.catalogId}`, () => api.discardPartial(m.catalogId))}
+            onImport={(m) => void importCatalog(m)}
+            onSource={(m) => void act(`source:${m.catalogId}`, () => api.openSourcePage(m.catalogId))}
+          />
         ))}
 
       <h2 className="group-title">Другие модели</h2>
@@ -494,6 +494,100 @@ function InstalledRow(props: {
   );
 }
 
+type CatalogHandler = (m: AvailableModel) => void;
+
+// The catalog with its filters; the filters are presentation only and start with every model shown.
+function CatalogList(props: {
+  view: ModelsView;
+  busy: ReadonlySet<string>;
+  dialogBusy: boolean;
+  onDownload: CatalogHandler;
+  onCancel: CatalogHandler;
+  onDiscard: CatalogHandler;
+  onImport: CatalogHandler;
+  onSource: CatalogHandler;
+}) {
+  const [lang, setLang] = useState<LanguageFilter>("all");
+  const [load, setLoad] = useState<LoadFilter>("any");
+  const v = props.view;
+  const groups = catalogGroups(v.available, lang, load);
+  return (
+    <>
+      {!v.machineKnown && <p className="muted">{texts.machineUnknown}</p>}
+      <p className="muted">{texts.variantsNote}</p>
+      <div className="mfilters">
+        <Field label={texts.languageFilter}>
+          {(id) => (
+            <Select id={id} value={lang} onChange={(e) => setLang(languageFilter(e.target.value))}>
+              {languageOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label={texts.loadFilter}>
+          {(id) => (
+            <Select id={id} value={load} onChange={(e) => setLoad(loadFilter(e.target.value))}>
+              {loadOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+      {groups.length === 0 ? (
+        <p className="muted" role="status">
+          {texts.noMatch}
+        </p>
+      ) : (
+        <div className="card mrows">
+          {groups.map((g) => (
+            <Fragment key={g.title}>
+              {g.title !== "" && <h3 className="mgroup-title">{g.title}</h3>}
+              <div className="mgroup" role="list" aria-label={g.title !== "" ? g.title : texts.catalogTitle}>
+                {g.models.map((m) => (
+                  <CatalogRow
+                    key={m.catalogId}
+                    model={m}
+                    download={v.download}
+                    busy={props.busy}
+                    dialogBusy={props.dialogBusy}
+                    onDownload={() => props.onDownload(m)}
+                    onCancel={() => props.onCancel(m)}
+                    onDiscard={() => props.onDiscard(m)}
+                    onImport={() => props.onImport(m)}
+                    onSource={() => props.onSource(m)}
+                  />
+                ))}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Five segments and the words; the words are the accessible name, so the scale is never colour only.
+function LoadScale(props: { load: number; text: string }) {
+  return (
+    <span className={isHeavy(props.load) ? "mload heavy" : "mload"} role="img" aria-label={props.text}>
+      <span className="mload-bar" aria-hidden="true">
+        {Array.from({ length: loadLevels }, (_, i) => (
+          <i key={i} className={i < props.load ? "on" : undefined} />
+        ))}
+      </span>
+      <span className="small" aria-hidden="true">
+        {props.text}
+      </span>
+    </span>
+  );
+}
+
 function CatalogRow(props: {
   model: AvailableModel;
   download: ModelDownload;
@@ -514,15 +608,25 @@ function CatalogRow(props: {
   return (
     <div className="mrow" role="listitem">
       <div className="row-main">
-        <p className="t">{l.label !== "" ? l.label : <bdi>{modelTitle(m)}</bdi>}</p>
-        <span className="small muted num">
-          {sizeText(m.sizeBytes)}
-          {l.speed !== "" && ` · ${l.speed}`}
-          {" · "}
-          <bdi>{m.catalogId}</bdi>
+        <p className="t mname">
+          <bdi>{l.name}</bdi>
+          <span className="msize small muted num">{sizeText(m.sizeBytes)}</span>
+          {l.recommended !== "" && <span className="mtag">{l.recommended}</span>}
+        </p>
+        {l.description !== "" && <span className="small">{l.description}</span>}
+        <span className="small muted">
+          {l.language}
+          {l.accuracy !== "" && ` · ${l.accuracy}`}
         </span>
+        <span className="small muted" title={l.variantHint}>
+          {l.variant}
+        </span>
+        {l.load !== "" && <LoadScale load={m.load} text={l.load} />}
         {l.warning !== "" && <span className="small slow">{l.warning}</span>}
         {m.likelySlow && <span className="small slow">{texts.likelySlow}</span>}
+        <span className="label">
+          <bdi>{m.catalogId}</bdi>
+        </span>
       </div>
       <div className="st">
         <span className="chips">
@@ -539,7 +643,7 @@ function CatalogRow(props: {
           {!m.installed && chip === null && <StatusChip kind="neutral">Не установлена</StatusChip>}
         </span>
         {d !== null && d.phase === "downloading" && d.totalBytes > 0 && (
-          <Progress value={progressPercent(d)} label={`Скачивание ${modelTitle(m)}`} text={false} />
+          <Progress value={progressPercent(d)} label={`Скачивание ${l.name} (${m.catalogId})`} text={false} />
         )}
         {d !== null && (
           <span className={d.phase === "failed" || d.phase === "cancelled" ? "small problem" : "small muted num"}>

@@ -105,43 +105,154 @@ export function catalogActions(m: AvailableModel, d: ModelDownload): CatalogActi
 }
 
 /**
- * The Russian description of a catalog entry: the main label (may be empty), the CPU speed line (empty without a tier)
- * and a warning for the largest model. Speeds are qualitative: the machine is not measured.
+ * The Russian description of a catalog entry. The name comes from the family; the load level, the family and the
+ * flags come from the core, the page only words them. Every model can be downloaded: «Рекомендуется» is a hint.
  */
 export interface CatalogLabels {
-  label: string;
-  speed: string;
+  /** «Small», «Large v3 Turbo»; the catalog id for an unknown family. */
+  name: string;
+  /** «Рекомендуется для русского» or "". */
+  recommended: string;
+  /** A short secondary description from the tier, or "". */
+  description: string;
+  language: string;
+  /** «Полная» or «Уменьшенная — …», and what it means (a tooltip). */
+  variant: string;
+  variantHint: string;
+  /** «Точность: хорошая», or "" for an unknown family. */
+  accuracy: string;
+  /** «Нагрузка на компьютер: 4 из 5 — тяжёлая», or "" when the load is unknown. */
+  load: string;
+  /** The warning of a heavy model, or "". */
   warning: string;
 }
 
+const familyNames: Readonly<Record<string, string>> = {
+  tiny: "Tiny",
+  base: "Base",
+  small: "Small",
+  medium: "Medium",
+  "large-v3": "Large v3",
+  "large-v3-turbo": "Large v3 Turbo",
+};
+
+const familyAccuracy: Readonly<Record<string, string>> = {
+  tiny: "низкая",
+  base: "средняя",
+  small: "хорошая",
+  medium: "высокая",
+  "large-v3-turbo": "высокая",
+  "large-v3": "самая высокая",
+};
+
+// No line for "max": the load scale and the heavy warning already say it is slow, and the accuracy line says how
+// accurate it is (turbo is not the most accurate one).
 const tierLabels: Readonly<Record<string, string>> = {
   fast: "Быстрее, но менее точная",
   accurate: "Точнее, но медленнее",
-  max: "Самая точная, но очень медленная на обычном компьютере",
 };
 
-const tierSpeeds: Readonly<Record<string, string>> = {
-  fast: "высокая",
-  balanced: "средняя",
-  accurate: "низкая",
-  max: "очень низкая",
-};
+/** The words of the load levels 1..5; index 0 (unknown) has none. */
+export const loadWords = ["", "лёгкая", "умеренная", "средняя", "тяжёлая", "очень тяжёлая"] as const;
+
+/** The number of segments of the load scale. */
+export const loadLevels = 5;
+
+// Levels 4 and 5 are heavy (ModelLoad.Heavy in the core, docs/refs/whisper.md).
+const heavyFrom = 4;
+
+/** «Small», «Large v3 Turbo»; the catalog id when the family is unknown. */
+export function displayName(m: { family: string; catalogId: string }): string {
+  return Object.hasOwn(familyNames, m.family) ? familyNames[m.family] : m.catalogId;
+}
+
+/** Whether the load is a known level 1..5. */
+export function knownLoad(load: number): boolean {
+  return Number.isInteger(load) && load >= 1 && load <= loadLevels;
+}
+
+/** «Нагрузка на компьютер: 4 из 5 — тяжёлая»; "" when the load is unknown. */
+export function loadText(load: number): string {
+  return knownLoad(load) ? `Нагрузка на компьютер: ${load} из ${loadLevels} — ${loadWords[load]}` : "";
+}
+
+/** Whether the page warns that the model is demanding (load 4 or 5). */
+export function isHeavy(load: number): boolean {
+  return knownLoad(load) && load >= heavyFrom;
+}
+
+/** The reduced (quantized, "q…") variant of a model; f16 and anything else is the full one. */
+export function isReduced(m: { quantization: string }): boolean {
+  return /^q/i.test(m.quantization);
+}
 
 export function catalogLabels(m: AvailableModel): CatalogLabels {
-  let label = "";
-  if (m.englishOnly) {
-    label = "Только английский";
-  } else if (m.recommended) {
-    label = "Рекомендуется для русского";
-  } else if (Object.hasOwn(tierLabels, m.tier)) {
-    label = tierLabels[m.tier];
+  return {
+    name: displayName(m),
+    recommended: m.recommended && !m.englishOnly ? texts.recommended : "",
+    description: Object.hasOwn(tierLabels, m.tier) ? tierLabels[m.tier] : "",
+    language: m.englishOnly ? texts.englishOnly : texts.multilingual,
+    variant: isReduced(m) ? texts.reduced : texts.full,
+    variantHint: isReduced(m) ? texts.reducedHint : texts.fullHint,
+    accuracy: Object.hasOwn(familyAccuracy, m.family) ? `Точность: ${familyAccuracy[m.family]}` : "",
+    load: loadText(m.load),
+    warning: isHeavy(m.load) ? texts.heavy : "",
+  };
+}
+
+/** The language filter of the catalog. */
+export type LanguageFilter = "all" | "multilingual" | "english";
+
+/** The load filter: any load, or at most 2, 3 or 4 of 5. */
+export type LoadFilter = "any" | "2" | "3" | "4";
+
+export const languageOptions: readonly { value: LanguageFilter; label: string }[] = [
+  { value: "all", label: "Все" },
+  { value: "multilingual", label: "Русский и другие языки" },
+  { value: "english", label: "Только английский" },
+];
+
+export const loadOptions: readonly { value: LoadFilter; label: string }[] = [
+  { value: "any", label: "Любая" },
+  { value: "2", label: "До 2 из 5 — лёгкие" },
+  { value: "3", label: "До 3 из 5" },
+  { value: "4", label: "До 4 из 5" },
+];
+
+/** The filter value of a <select>; an unknown value is the default (show all). */
+export function languageFilter(value: string): LanguageFilter {
+  return languageOptions.find((o) => o.value === value)?.value ?? "all";
+}
+
+export function loadFilter(value: string): LoadFilter {
+  return loadOptions.find((o) => o.value === value)?.value ?? "any";
+}
+
+/** A heading of the catalog list ("" for none) and its models. */
+export interface CatalogGroup {
+  title: string;
+  models: AvailableModel[];
+}
+
+/**
+ * The catalog after the filters, in the core's order. With every language the list is split into the multilingual
+ * and the English-only models; a model of unknown load is hidden by a load limit. Empty groups are dropped.
+ */
+export function catalogGroups(list: readonly AvailableModel[], lang: LanguageFilter, load: LoadFilter): CatalogGroup[] {
+  const limit = load === "any" ? 0 : Number(load);
+  const shown = list.filter((m) => limit === 0 || (knownLoad(m.load) && m.load <= limit));
+  const multilingual = shown.filter((m) => !m.englishOnly);
+  const english = shown.filter((m) => m.englishOnly);
+  let groups: CatalogGroup[];
+  if (lang === "all") {
+    groups = [
+      { title: texts.multilingual, models: multilingual },
+      { title: texts.englishOnly, models: english },
+    ];
+  } else {
+    groups = [{ title: "", models: lang === "english" ? english : multilingual }];
   }
-  const speed = Object.hasOwn(tierSpeeds, m.tier) ? `Скорость на CPU: ${tierSpeeds[m.tier]}` : "";
-  const warning =
-    m.tier === "max"
-      ? `Большой файл (${sizeText(m.sizeBytes)}) и очень медленное распознавание на CPU: урок будет распознаваться заметно дольше, чем с другими моделями.`
-      : "";
-  return { label, speed, warning };
+  return groups.filter((g) => g.models.length > 0);
 }
 
 /** "base 1, q5_1": name, version and quantization when there is one. */
@@ -175,8 +286,21 @@ export const texts = {
   noModels: "Модель не установлена: записи не распознаются, пока вы не импортируете модель.",
   afterImport: "После установки модели ожидающие записи начнут распознаваться без перезапуска.",
   needDefault: "Установлено несколько моделей, но ни одна не выбрана по умолчанию: распознавание ждёт выбора.",
-  emptyCatalog: "Список рекомендуемых моделей пуст. Модель можно установить из файла (см. «Другие модели»).",
-  machineUnknown: "Оборудование компьютера не определено: скорость на CPU указана примерно, для обычного компьютера.",
+  emptyCatalog: "Список моделей пуст. Модель можно установить из файла (см. «Другие модели»).",
+  machineUnknown: "Оборудование компьютера не определено: нагрузка указана примерно, для обычного компьютера.",
+  catalogTitle: "Модели для скачивания",
+  variantsNote: "Уменьшенная — сжатая копия той же модели: файл меньше, работает быстрее, точность чуть ниже.",
+  full: "Полная",
+  fullHint: "Полная модель: исходный файл, самая высокая точность этого размера.",
+  reduced: "Уменьшенная — меньше и быстрее, точность чуть ниже",
+  reducedHint: "Сжатая копия той же модели: файл в 2–3 раза меньше, распознаёт быстрее, ошибок чуть больше.",
+  multilingual: "Русский и другие языки",
+  englishOnly: "Только английский",
+  recommended: "Рекомендуется для русского",
+  heavy: "Модель требовательна к ресурсам вашего устройства: распознавание будет долгим на обычном процессоре",
+  languageFilter: "Язык",
+  loadFilter: "Нагрузка на компьютер",
+  noMatch: "Нет моделей с такими условиями. Измените фильтры.",
   otherModels:
     "Другие модели whisper.cpp лежат на Hugging Face. Скачайте файл .bin в браузере и установите его кнопкой " +
     "«Импортировать файл модели…».",
