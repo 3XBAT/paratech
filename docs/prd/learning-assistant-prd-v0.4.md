@@ -1,4 +1,4 @@
-# Learning Assistant — Product Requirements Document
+# paratech — Product Requirements Document
 
 **PRD v0.4 • Local-first Windows MVP**
 
@@ -21,7 +21,7 @@
 
 ## 1. Product vision
 
-Learning Assistant is a Windows desktop application for an individual student. It reduces the manual work around university classes: starting and processing lecture recordings, producing transcripts and summaries, extracting homework and deadlines, generating homework drafts, and keeping the user's academic schedule and tasks synchronized with external calendars.
+paratech is a Windows desktop application for an individual student. It reduces the manual work around university classes: starting and processing lecture recordings, producing transcripts and summaries, extracting homework and deadlines, generating homework drafts, and keeping the user's academic schedule and tasks synchronized with external calendars.
 
 The first release is intentionally a personal/local product for the author and a small group of testers. It is not a multi-user SaaS and is not optimized for horizontal cloud scale.
 
@@ -88,7 +88,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph PC["User's Windows PC (local-first)"]
-        APP["Learning Assistant<br/>desktop app"]
+        APP["paratech<br/>desktop app"]
         DB[("SQLite<br/>structured state")]
         FS[("Local filesystem<br/>artifacts")]
         APP --- DB
@@ -568,7 +568,7 @@ flowchart LR
 
 **Google Calendar is the only external calendar integration in MVP.** It is isolated behind an adapter. Full bidirectional conflict resolution is deferred; the first implementation prefers controlled synchronization (stable external IDs, idempotent upserts) over an unconstrained distributed synchronization system.
 
-- The app writes events to a **dedicated secondary calendar** (e.g. "Learning Assistant") that it creates itself, using the narrow Google OAuth scope `calendar.app.created`, which limits access to calendars created by the app. Reading the user's primary calendar is not required in MVP, since the schedule comes from ICS/CSV/XLSX.
+- The app writes events to a **dedicated secondary calendar** (e.g. "paratech") that it creates itself, using the narrow Google OAuth scope `calendar.app.created`, which limits access to calendars created by the app. Reading the user's primary calendar is not required in MVP, since the schedule comes from ICS/CSV/XLSX.
 - Google Calendar authorization is separate from user authentication (§12).
 - Apple Calendar has no API integration: there is no usable Apple Calendar API on Windows, and the product does not need one.
 
@@ -576,7 +576,7 @@ flowchart LR
 
 | Option | How it works | Access needed | Verdict |
 |---|---|---|---|
-| **A. Add the Google account on iPhone/Mac** (Settings → Calendar → Accounts) | Apple syncs all calendars of the Google account, including "Learning Assistant" | The user signs in to Google on the Apple device; the app does nothing extra | **Recommended** |
+| **A. Add the Google account on iPhone/Mac** (Settings → Calendar → Accounts) | Apple syncs all calendars of the Google account, including "paratech" | The user signs in to Google on the Apple device; the app does nothing extra | **Recommended** |
 | B. Subscribe to the calendar's "secret address in iCal format" | The user copies the link from Google Calendar settings and subscribes in Apple Calendar | Link copied manually (to be verified: not exposed via API) | Read-only, refresh interval configurable; fallback |
 | C. Make the calendar public | Anyone with the link can see events | None | **Not recommended** (privacy) |
 
