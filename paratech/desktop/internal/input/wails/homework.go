@@ -81,7 +81,7 @@ var generationMessages = []struct {
 	{homeworkflow.ErrDraftFull, string(ErrDraftFull)},
 	{homeworkflow.ErrDraftAssignmentGone, "Задание удалено."},
 	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: черновик не подготовить."},
-	{homeworkflow.ErrDraftInvalidAnswer, "Сервер обработки ответил в неверном виде. Попробуйте ещё раз."},
+	{homeworkflow.ErrDraftInvalidAnswer, "Сервис конспектов ответил в неверном виде. Попробуйте ещё раз."},
 }
 
 // rejectMessages explain why a send cannot be confirmed.

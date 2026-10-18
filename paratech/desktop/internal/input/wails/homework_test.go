@@ -502,7 +502,7 @@ func TestGenerationStatus(t *testing.T) {
 		{job.StatusCompleted, nil, "done", ""},
 		{job.StatusCancelled, nil, "failed", msgGenerationCancel},
 		{job.StatusFailed, homeworkflow.ErrDraftChanged, "failed", "Черновик изменился во время генерации. Сгенерируйте ещё раз."},
-		{job.StatusFailed, homeworkflow.ErrDraftInvalidAnswer, "failed", "Сервер обработки ответил в неверном виде. Попробуйте ещё раз."},
+		{job.StatusFailed, homeworkflow.ErrDraftInvalidAnswer, "failed", "Сервис конспектов ответил в неверном виде. Попробуйте ещё раз."},
 		{job.StatusFailed, homeworkflow.ErrDraftLLM, "failed", msgGenerationFailed},
 		{job.StatusFailed, nil, "failed", msgGenerationFailed},
 	}
