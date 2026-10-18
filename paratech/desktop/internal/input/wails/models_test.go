@@ -358,7 +358,7 @@ func TestModelsJSONNames(t *testing.T) {
 	}{
 		{ModelsView{}, "available,download,installed,machineKnown,modelsHomePage,needsDefault,speechReady"},
 		{InstalledModelItem{}, "capabilities,catalogId,fromCatalog,id,inUse,installedAt,isDefault,name,quantization,sha256,sizeBytes,version"},
-		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,hasSourcePage,installed,installedId,likelySlow,minCpuCores,minRamMb,name,quantization,recommended,sizeBytes,tier,version"},
+		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,family,hasSourcePage,installed,installedId,likelySlow,load,minCpuCores,minRamMb,name,quantization,recommended,sizeBytes,tier,version"},
 		{ModelDownload{}, "catalogId,doneBytes,error,phase,running,totalBytes"},
 		{DownloadPlanView{}, "availableBytes,catalogId,enough,haveBytes,requiredBytes,totalBytes,warning"},
 		{ModelFileSelection{}, "cancelled,fileName,selectionId,sha256,sizeBytes,suggestedName,suggestedQuantization,suggestedVersion"},
@@ -918,6 +918,58 @@ func TestModelsListTierAndLanguage(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := fmt.Sprintf(`"tier":%q,"englishOnly":%v`, tc.wantTier, tc.wantEnglish)
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("JSON %s, want %s", raw, want)
+			}
+		})
+	}
+}
+
+// The page gets the family and the load (1..5, 0 unknown) computed by the domain rule, under fixed JSON names
+// (TASK-070).
+func TestModelsListFamilyAndLoad(t *testing.T) {
+	src, err := values.ParseSourceURL("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		family     values.ModelFamily
+		quant      values.Quantization
+		wantFamily string
+		wantLoad   int
+	}{
+		{"full medium", values.FamilyMedium, "f16", "medium", 4},
+		{"quantized medium", values.FamilyMedium, "q5_0", "medium", 3},
+		{"quantized tiny", values.FamilyTiny, "q5_1", "tiny", 1},
+		{"full large-v3", values.FamilyLargeV3, "f16", "large-v3", 5},
+		{"no family", values.FamilyNone, "f16", "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := values.NewCatalogEntry(values.CatalogEntrySpec{
+				ID: "medium-f16", Name: "medium-f16", Version: "1", SizeBytes: 1533763059, SHA256: shownSum,
+				SourceURL: src, Quantization: tc.quant, Family: tc.family,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := newModelFixture(t)
+			f.catalog.available = []modelcatalog.AvailableModel{{Entry: e}}
+			f.catalog.resolveErr = modelselection.ErrModelNotInstalled
+
+			view, err := f.s.List(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a := view.Available[0]; a.Family != tc.wantFamily || a.Load != tc.wantLoad {
+				t.Fatalf("item %+v, want family %q load %d", a, tc.wantFamily, tc.wantLoad)
+			}
+			raw, err := json.Marshal(view.Available[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf(`"family":%q,"load":%d`, tc.wantFamily, tc.wantLoad)
 			if !strings.Contains(string(raw), want) {
 				t.Fatalf("JSON %s, want %s", raw, want)
 			}
