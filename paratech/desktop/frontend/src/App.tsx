@@ -12,7 +12,7 @@ import { Icon, IconSprite } from "./ui/Icon";
 function PageView(props: { id: PageId; visit: number; onOpen: (id: PageId) => void }) {
   switch (props.id) {
     case "recordings":
-      return <RecordingsPage onOpenSchedule={() => props.onOpen("schedule")} />;
+      return <RecordingsPage onOpen={props.onOpen} />;
     case "homework":
       return <HomeworkPage />;
     case "schedule":

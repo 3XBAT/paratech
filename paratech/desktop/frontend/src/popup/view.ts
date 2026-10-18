@@ -1,11 +1,11 @@
-// Display mapping for the recording popup: texts and which buttons to show for a prompt state. Whether snoozing is
-// possible is decided by the Go core ("canSnooze"), never here (ARCH-44).
+// Display mapping for the recording popup: texts and which buttons to show for a prompt state. The prompt states are
+// the Go core's; the popup offers only «Начать запись» and «Не записывать» (no snooze since TASK-076).
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
 import { errorMessages, type PromptView, type SourcesView } from "../bindings/prompt.js";
 
 /** An action the popup calls on the core. */
-export type Action = "start" | "snooze" | "skip";
+export type Action = "start" | "skip";
 
 /** A popup button; "close" only hides the window. */
 export type ButtonId = Action | "close";
@@ -18,9 +18,15 @@ export const headings = {
 
 export const buttonLabels: Readonly<Record<ButtonId, string>> = {
   start: "Начать запись",
-  snooze: "Через 5 минут",
-  skip: "Пропустить",
+  skip: "Не записывать",
   close: "Закрыть",
+};
+
+/** Hover texts and accessible descriptions: what each button does. */
+export const buttonHints: Readonly<Record<ButtonId, string>> = {
+  start: "Записать звук этого занятия",
+  skip: "Закрыть, это занятие не записывается",
+  close: "Закрыть окно",
 };
 
 export const startingLabel = "Запуск…";
@@ -37,10 +43,8 @@ export const problemTexts: Readonly<Record<string, string>> = {
 /** Notes for a prompt that is no longer on offer. */
 export const stateNotes: Readonly<Record<string, string>> = {
   STARTED: "Запись началась.",
-  SNOOZED: "Предложение отложено на 5 минут.",
-  SKIPPED: "Предложение пропущено.",
+  SKIPPED: "Это занятие не записывается.",
   EXPIRED: "Занятие закончилось.",
-  WITHDRAWN: "Предложения записи выключены в настройках.",
 };
 
 export const noPromptNote = "Сейчас нет предложения записи.";
@@ -90,7 +94,7 @@ export function popupModel(view: PromptView | null, pending: Action | null): Pop
 
   const onOffer = view.state === "OFFERED" || view.state === "STARTING";
   const starting = view.state === "STARTING" || pending === "start";
-  const buttons: ButtonId[] = onOffer ? ["start", ...(view.canSnooze ? (["snooze"] as const) : []), "skip"] : ["close"];
+  const buttons: ButtonId[] = onOffer ? ["start", "skip"] : ["close"];
   let note = "";
   if (!onOffer) {
     note = Object.hasOwn(stateNotes, view.state) ? stateNotes[view.state] : staleNote;

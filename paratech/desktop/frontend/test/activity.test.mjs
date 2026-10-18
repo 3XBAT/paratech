@@ -57,7 +57,10 @@ test("every status has a distinct Russian label and unknown ones are shown raw",
   assert.equal(jobStatusLabel("toString"), "toString");
   assert.equal(jobTypeLabel("stt"), "Распознавание речи");
   assert.equal(jobTypeLabel("calendar_sync"), "Синхронизация календаря");
-  assert.equal(jobTypeLabel("send_email"), "send_email");
+  // TASK-076: send_email and homework_draft are the jobs the page still lists, so they have labels now.
+  assert.equal(jobTypeLabel("send_email"), "Отправка письма");
+  assert.equal(jobTypeLabel("homework_draft"), "Черновик домашнего задания");
+  assert.equal(jobTypeLabel("new_kind"), "new_kind");
 });
 
 test("duration is h:mm:ss", () => {

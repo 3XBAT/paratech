@@ -25,9 +25,10 @@ const zoom = { app: "zoom.exe", title: "", playing: false, muted: true, browser:
 const reply = (over = {}) => ({ apps: [chrome, zoom], selected: "", remembered: "", listError: false, ...over });
 
 const lesson = {
-  id: "p1", kind: "lesson", title: "Матанализ", start: "10:00", end: "11:30", state: "OFFERED", problem: "", canSnooze: true,
+  id: "p1", kind: "lesson", title: "Матанализ", start: "10:00", end: "11:30", state: "OFFERED", problem: "",
 };
-const states = ["OFFERED", "STARTING", "STARTED", "SNOOZED", "SKIPPED", "EXPIRED", "WITHDRAWN"];
+// SNOOZED and WITHDRAWN are gone with the snooze (TASK-076).
+const states = ["OFFERED", "STARTING", "STARTED", "SKIPPED", "EXPIRED"];
 
 test("sources calls the bound Go method and keeps the reply", async () => {
   const calls = [];

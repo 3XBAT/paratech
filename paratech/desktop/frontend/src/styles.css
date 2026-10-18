@@ -49,6 +49,8 @@ html, body, #root { height: 100%; }
 .page .group-title { margin: 20px 0 10px; font-size: var(--fs-h3); line-height: var(--lh-h3); letter-spacing: -0.01em; }
 .head + .group-title, .head + .note + .group-title { margin-top: 0; }
 .row-problem { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Lesson titles are imported text of any length. */
+.recordings .row .t { overflow-wrap: anywhere; }
 .statusbar { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: auto -24px -20px; padding: 8px 24px; border-top: 1px solid var(--line); font-size: var(--fs-small); color: var(--muted); }
 .page > .gap { flex: none; height: 24px; }
 .statusbar span { display: inline-flex; align-items: center; gap: 7px; }

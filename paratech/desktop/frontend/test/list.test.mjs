@@ -18,7 +18,8 @@ import {
 import { CollapsibleList } from "../.test-build/CollapsibleList.js";
 import { PreviewView } from "../.test-build/pages/SchedulePage.js";
 import { previewGroups, summaryChips } from "../.test-build/scheduleView.js";
-import { isFinishedJob, isFinishedRecording, splitFinished } from "../.test-build/activityView.js";
+import { isFinishedJob, splitFinished } from "../.test-build/activityView.js";
+import { isFinishedRow } from "../.test-build/recordingRowView.js";
 
 const { renderToStaticMarkup } = server;
 const sizes = [0, 1, 8, 9, 500, 5000];
@@ -218,12 +219,16 @@ test("file text is rendered as text, not HTML", () => {
   }
 });
 
+// TASK-076: a recording row is finished by the stage of its whole chain, not by the recording status: a COMPLETED
+// recording whose transcription still waits stays in view (isFinishedRow replaces isFinishedRecording).
 test("finished recordings and jobs go to the folded list; rows with an action stay in view", () => {
-  assert.equal(isFinishedRecording({ status: "COMPLETED", stoppable: false }), true);
-  assert.equal(isFinishedRecording({ status: "FAILED", stoppable: false }), true);
-  assert.equal(isFinishedRecording({ status: "RECORDING", stoppable: true }), false);
-  assert.equal(isFinishedRecording({ status: "RECOVERY_REQUIRED", stoppable: false }), false);
-  assert.equal(isFinishedRecording({ status: "COMPLETED", stoppable: true }), false, "the core offers Stop");
+  assert.equal(isFinishedRow({ stage: "done", stoppable: false, action: "" }), true);
+  assert.equal(isFinishedRow({ stage: "failed", stoppable: false, action: "checkSound" }), true, "a link is no reason");
+  assert.equal(isFinishedRow({ stage: "recording", stoppable: true, action: "" }), false);
+  assert.equal(isFinishedRow({ stage: "saving", stoppable: false, action: "" }), false);
+  assert.equal(isFinishedRow({ stage: "queued", stoppable: false, action: "" }), false, "a completed recording still in work");
+  assert.equal(isFinishedRow({ stage: "failed", stoppable: false, action: "runNow" }), false, "the core offers Run now");
+  assert.equal(isFinishedRow({ stage: "done", stoppable: true, action: "" }), false, "the core offers Stop");
   for (const s of ["COMPLETED", "FAILED", "CANCELLED"]) {
     assert.equal(isFinishedJob({ status: s, runNowOffered: false }), true, s);
   }

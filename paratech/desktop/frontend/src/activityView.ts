@@ -36,6 +36,9 @@ export const jobTypeLabels: Readonly<Record<string, string>> = {
   summarize: "Конспект",
   extract_homework: "Поиск домашнего задания",
   calendar_sync: "Синхронизация календаря",
+  // The jobs the page still lists since TASK-076 (the chain jobs are inside their recording rows).
+  homework_draft: "Черновик домашнего задания",
+  send_email: "Отправка письма",
 };
 
 function lookup(labels: Readonly<Record<string, string>>, key: string): string {
@@ -57,14 +60,10 @@ export function jobTypeLabel(type: string): string {
   return lookup(jobTypeLabels, type);
 }
 
-// The terminal statuses of the domain (recording.IsTerminal, job.IsTerminal). Only the display grouping uses them: a
-// finished row goes to the folded list, a row the core offers an action for always stays in view.
-const finishedRecordingStatuses: ReadonlySet<string> = new Set(["COMPLETED", "FAILED"]);
+// The terminal statuses of the domain (job.IsTerminal). Only the display grouping uses them: a finished job is not
+// listed, a job the core offers Run now for always stays in view. Recording rows group by their chain
+// (recordingRowView.isFinishedRow).
 const finishedJobStatuses: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
-
-export function isFinishedRecording(r: { status: string; stoppable: boolean }): boolean {
-  return !r.stoppable && finishedRecordingStatuses.has(r.status);
-}
 
 export function isFinishedJob(j: { status: string; runNowOffered: boolean }): boolean {
   return !j.runNowOffered && finishedJobStatuses.has(j.status);

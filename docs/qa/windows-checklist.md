@@ -87,9 +87,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestSTTPathHasNoNetworkImports` (`desktop/tests/stt_network_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, в запросах к Hub нет байтов записи ни как есть, ни в hex или base64; есть текст транскрипта); `TestTranscriptToStructuresThroughFakeHub` (`desktop/tests/postprocess_sqlite_test.go`).
 Вручную (нужны whisper-cli и модель, §6; это же TASK-025):
 - [ ] Записать 1–2 мин речи (AC-03). До «Остановить» выключить интернет (режим «в самолёте» или отключить Wi-Fi и кабель); если Hub запущен на этом компьютере — ещё и остановить Hub.
-- [ ] «Остановить»: «Распознавание речи» → «Расшифровка» → «Готово» без интернета.
+- [ ] «Остановить»: строка записи «Сохраняется» → «Расшифровка N %» → «В очереди · нет сети» (дальше краткое содержание) без интернета.
 - [ ] Самый новый файл в `artifacts\transcripts` открыть в Блокноте: текст похож на сказанное.
-- [ ] «Конспект» и «Поиск домашнего задания» — «Ждёт интернет». Включить интернет (и запустить Hub, если он локальный): примерно через минуту у «Конспект» — «Конспект готов», у «Поиск домашнего задания» — «Готово».
+- [ ] Включить интернет (и запустить Hub, если он локальный): примерно через минуту строка записи «Краткое содержание», затем «Конспект готов».
 - [ ] Записать для TASK-025: длина записи, время распознавания, модель.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -114,8 +114,8 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestJobRunnerQueueSurvivesARestart` (`desktop/tests/jobrunner_sqlite_test.go`); `TestStartupRecoveryAfterACrash` (`desktop/tests/jobrecovery_sqlite_test.go`); `TestSTTJobWaitsForWhisperCLI`, `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, перезапуск без дублей).
 Вручную:
 - [ ] Модель по умолчанию `ggml-small.bin`, запись 5–10 мин, «Остановить».
-- [ ] Пока у «Распознавание речи» «Расшифровка», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
-- [ ] Запуск: в логе `startup recovery finished requeued=1`; задача снова «Расшифровка», затем «Готово»; задача распознавания этой записи одна, не две (законченные задачи — в группе «Завершённые» под «Задачами»).
+- [ ] Пока у строки записи «Расшифровка», завершить главный `learning-assistant.exe` в Диспетчере задач (как в AC-05): `whisper-cli.exe` тоже пропадает.
+- [ ] Запуск: в логе `startup recovery finished requeued=1`; строка снова «Расшифровка», затем дальше по цепочке; строка этой записи одна, не две (законченные записи — в группе «Завершённые»).
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -129,9 +129,9 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 Автотесты: `TestGatewayReplayAgainstPostgres`, `TestGatewayConcurrentIdenticalCallsAgainstPostgres` (`hub/tests/gateway_test.go`); `TestQuotaKeyReplayAgainstPostgres` (`hub/tests/quota_test.go`); `TestRetrySendsSameIdempotencyKey` (`desktop/internal/adapters/hubclient/client_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, после перезапуска Hub не списывает снова).
 Вручную:
 - [ ] «Подключения» → карточка «Сервер обработки» → «Лимит обработки» → «Обновить», записать «Осталось».
-- [ ] Обработать одно занятие (AC-06, с интернетом). Когда у «Конспект» «Конспект готов», а у «Поиск домашнего задания» «Готово», — «Обновить»: остаток уменьшился.
+- [ ] Обработать одно занятие (AC-06, с интернетом). Когда у строки записи «Конспект готов», — «Обновить»: остаток уменьшился.
 - [ ] `Quit`, запуск, «Обновить»: остаток тот же.
-- [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующий «Конспект» — «Минуты обработки закончились».
+- [ ] (по желанию) Перезапустить Hub с маленьким `HUB_QUOTA_LIMIT` (README «Hub quota»): следующая запись — «В очереди · лимит исчерпан» с кнопкой «Открыть подключения».
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
 
@@ -246,9 +246,9 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestHeavyJobWaitsOnBatteryAndRunsWhenACReturns`, `TestPowerLostMidRunStopsAtTheNextCheckpoint` (`desktop/internal/cases/jobrunner/power_test.go`); `TestPowerAwareProcessingOnSQLite` (`desktop/tests/jobpower_sqlite_test.go`); `TestSTTJobPowerLossWaitsAndResumes` (`desktop/tests/transcribe_sqlite_test.go`); `TestReadACPowerReal` (`desktop/internal/adapters/winpower/winpower_windows_test.go`, настоящее питание).
 Вручную (ноутбук; «Обрабатывать только от розетки» включено — так по умолчанию):
-- [ ] Отключить зарядку. Записать 1 мин, «Остановить»: «Распознавание речи» — «Ждёт зарядку», есть «Запустить сейчас».
-- [ ] Подключить зарядку: за ~5–10 с «Расшифровка», затем «Готово».
-- [ ] Запись 5–10 мин, распознавание от сети; во время «Расшифровка» отключить зарядку: в течение минуты «Ждёт зарядку», `whisper-cli.exe` нет в `tasklist`. Подключить: распознавание начинается заново и доходит до «Готово».
+- [ ] Отключить зарядку. Записать 1 мин, «Остановить»: строка записи «В очереди · ждёт питания от сети», есть «Запустить сейчас».
+- [ ] Подключить зарядку: за ~5–10 с «Расшифровка», затем дальше по цепочке.
+- [ ] Запись 5–10 мин, распознавание от сети; во время «Расшифровка» отключить зарядку: в течение минуты «В очереди · ждёт питания от сети», `whisper-cli.exe` нет в `tasklist`. Подключить: распознавание начинается заново, затем «Краткое содержание».
 - [ ] «Конспект» и «Поиск домашнего задания» на батарее не ждут.
 
 Итог: Windows 10 — [ ] ок [ ] нет · Windows 11 — [ ] ок [ ] нет
@@ -257,7 +257,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 Автотесты: `TestSettingOffRunsHeavyJobsOnBattery`, `TestForceRunStartsOneJobOnBattery` (`desktop/internal/cases/jobrunner/power_test.go`); `TestActivityServiceRunJobNow` (`desktop/internal/input/wails/activity_test.go`); `TestRunNowTranscribesAndEnqueuesPostProcessing` (`desktop/internal/app/wiring_test.go`).
 Вручную (ноутбук, на батарее, две ждущие задачи распознавания):
-- [ ] «Запустить сейчас» у одной: «Запуск…», «Расшифровка», «Готово», кнопка пропала; вторая ждёт дальше.
+- [ ] «Запустить сейчас» у одной: «Запуск…», «Расшифровка», кнопка пропала; вторая ждёт дальше.
 - [ ] Снять «Обрабатывать только от розетки»: вторая через несколько секунд «Расшифровка»; новая запись распознаётся сразу.
 - [ ] Вернуть переключатель.
 
