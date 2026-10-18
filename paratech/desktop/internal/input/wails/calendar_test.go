@@ -122,6 +122,34 @@ func TestGoogleCalendarStatusLastRun(t *testing.T) {
 			},
 		},
 		{
+			name: "no access to the calendar",
+			st: schedulesync.CalendarStatus{
+				SignedIn: true, Pending: 1, LastOutcome: schedulesync.OutcomeNoAccess,
+				LastRun: lastRun(schedulesync.OutcomeNoAccess, 1),
+			},
+			want: CalendarSyncState{
+				SignedIn: true, Pending: 1, State: "idle", LastOutcome: "noAccess",
+				Message:   "Нет доступа к Google Календарю: войдите снова и разрешите доступ к календарю.",
+				LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 1, LastRunOutcome: "noAccess",
+				LastRunText: "Ошибка: нет доступа к Google Календарю — войдите снова и разрешите доступ к календарю.",
+			},
+		},
+		{
+			name: "no access in an earlier start",
+			st:   schedulesync.CalendarStatus{SignedIn: true, LastRun: lastRun(schedulesync.OutcomeNoAccess, 1)},
+			want: CalendarSyncState{
+				SignedIn: true, State: "idle", Message: msgCalendarNoAccess, LastRunAt: "2026-10-16T06:30:00Z",
+				LastRunAttempts: 1, LastRunOutcome: "noAccess", LastRunText: msgLastRunNoAccess,
+			},
+		},
+		{
+			name: "outcome unknown while signed out",
+			st:   schedulesync.CalendarStatus{LastRun: lastRun(schedulesync.OutcomeNone, 2)},
+			want: CalendarSyncState{
+				State: "idle", Message: msgCalendarSignIn, LastRunAt: "2026-10-16T06:30:00Z", LastRunAttempts: 2,
+			},
+		},
+		{
 			name: "the run of this process decides the message",
 			st: schedulesync.CalendarStatus{
 				SignedIn: true, LastOutcome: schedulesync.OutcomeOK, LastRun: lastRun(schedulesync.OutcomeFailed, 1),

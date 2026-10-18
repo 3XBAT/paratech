@@ -36,6 +36,7 @@ const (
 	msgCalendarRetrying      = "Google временно недоступен: синхронизация повторится автоматически."
 	msgCalendarSignIn        = "Войдите в Google, чтобы занятия появились в календаре «Learning Assistant»."
 	msgCalendarSignInAgain   = "Вход в Google истёк: войдите снова, чтобы продолжить синхронизацию."
+	msgCalendarNoAccess      = "Нет доступа к Google Календарю: войдите снова и разрешите доступ к календарю."
 	msgCalendarFailed        = "Последняя синхронизация не удалась. Нажмите «Синхронизировать», чтобы повторить."
 	msgCalendarPending       = "Ждут синхронизации занятий: %d."
 	msgCalendarPendingMore   = "Ждут синхронизации занятий: больше %d."
@@ -49,6 +50,7 @@ const (
 	msgLastRunOK            = "Успешно."
 	msgLastRunSignInExpired = "Ошибка: вход в Google истёк — войдите снова."
 	msgLastRunNotSignedIn   = "Не выполнена: нет входа в Google."
+	msgLastRunNoAccess      = "Ошибка: нет доступа к Google Календарю — войдите снова и разрешите доступ к календарю."
 	msgLastRunFailed        = "Ошибка: синхронизация не удалась."
 )
 
@@ -66,13 +68,14 @@ type CalendarSyncState struct {
 	LastSyncedAt string `json:"lastSyncedAt"` // RFC 3339 UTC of the last lesson written; "" if none
 	// State is "idle", "queued", "running", "retrying", "waitingForNetwork" or "unavailable".
 	State string `json:"state"`
-	// LastOutcome is the last run since the app started: "", "ok", "notSignedIn", "signInExpired" or "failed".
+	// LastOutcome is the last run since the app started: "", "ok", "notSignedIn", "signInExpired", "noAccess" or
+	// "failed".
 	LastOutcome string `json:"lastOutcome"`
 	Message     string `json:"message"` // one fixed line that sums the state up
 
 	// The last finished sync job, also of an earlier start of the app (TASK-074). LastRunAt is its end in RFC 3339
-	// UTC, "" if none finished; LastRunOutcome takes the values of LastOutcome; LastRunText is a fixed line of the
-	// result, "" if none.
+	// UTC, "" if none finished; LastRunOutcome takes the values of LastOutcome ("" when the record cannot tell the
+	// result); LastRunText is a fixed line of the result, "" if none.
 	LastRunAt       string `json:"lastRunAt"`
 	LastRunOK       bool   `json:"lastRunOk"`
 	LastRunAttempts int    `json:"lastRunAttempts"`
@@ -167,6 +170,10 @@ func lastRunText(o schedulesync.SyncOutcome) string {
 		return msgLastRunSignInExpired
 	case schedulesync.OutcomeNotSignedIn:
 		return msgLastRunNotSignedIn
+	case schedulesync.OutcomeNoAccess:
+		return msgLastRunNoAccess
+	case schedulesync.OutcomeNone:
+		return "" // the record cannot tell how the run ended
 	}
 	return msgLastRunFailed
 }
@@ -190,6 +197,8 @@ func calendarMessage(st CalendarSyncState) string {
 		return msgCalendarSignInAgain
 	case !st.SignedIn:
 		return msgCalendarSignIn
+	case outcome == string(schedulesync.OutcomeNoAccess):
+		return msgCalendarNoAccess
 	case outcome == string(schedulesync.OutcomeFailed):
 		return msgCalendarFailed
 	case st.PendingMore:
