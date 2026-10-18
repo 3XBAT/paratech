@@ -19,3 +19,10 @@ SET language = sqlc.arg(language),
     text_ref = sqlc.arg(text_ref),
     version  = version + 1
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- The newest transcript of a recording (TASK-079: the transcript viewer); idx_transcripts_recording serves it.
+-- name: LatestTranscriptByRecording :one
+SELECT * FROM transcripts
+WHERE recording_id = sqlc.arg(recording_id)
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

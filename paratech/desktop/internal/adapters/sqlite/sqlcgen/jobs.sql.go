@@ -233,6 +233,48 @@ func (q *Queries) LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeBy
 	return i, err
 }
 
+const latestJobByKeyPrefix = `-- name: LatestJobByKeyPrefix :one
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+WHERE type = ?1
+  AND id IS NOT NULL
+  AND substr(idempotency_key, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT)
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type LatestJobByKeyPrefixParams struct {
+	Type   string
+	Prefix string
+}
+
+// The newest job of the type whose idempotency key starts with the prefix, in any status (TASK-079: the STT job of a
+// recording for the transcript viewer). Same exact prefix comparison as HasJobKeyPrefix.
+func (q *Queries) LatestJobByKeyPrefix(ctx context.Context, arg LatestJobByKeyPrefixParams) (Job, error) {
+	row := q.db.QueryRowContext(ctx, latestJobByKeyPrefix, arg.Type, arg.Prefix)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.IdempotencyKey,
+		&i.Payload,
+		&i.PinnedModelID,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextRunAt,
+		&i.RunNow,
+		&i.ProgressPercent,
+		&i.Checkpoint,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listJobActivityIDs = `-- name: ListJobActivityIDs :many
 SELECT id FROM jobs
 WHERE id IS NOT NULL
