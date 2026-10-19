@@ -153,11 +153,14 @@ func processDone(pid int) bool {
 }
 
 // setProcAttrs keeps the console process from opening a window next to the GUI app; lowPriority starts it below the
-// normal priority class, so the user's apps go first.
+// normal priority class, so the user's apps go first. Otherwise the class is set to normal explicitly: a child
+// inherits a lower class of its parent (seen on the CI runner).
 func setProcAttrs(cmd *exec.Cmd, lowPriority bool) {
 	flags := uint32(windows.CREATE_NO_WINDOW)
 	if lowPriority {
 		flags |= windows.BELOW_NORMAL_PRIORITY_CLASS
+	} else {
+		flags |= windows.NORMAL_PRIORITY_CLASS
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: flags}
 }
