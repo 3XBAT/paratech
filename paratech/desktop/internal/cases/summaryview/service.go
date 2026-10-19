@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/services/summaryexport"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
@@ -34,6 +35,7 @@ const (
 const (
 	summarizeJobType = job.Type(values.SummarizeJobType)
 	extractJobType   = job.Type(values.ExtractHomeworkJobType)
+	lectureJobType   = job.Type(values.LectureTextJobType)
 )
 
 // Service is the summary viewer (TASK-087): it shows the summary of a recording with its key points and the homework
@@ -45,6 +47,7 @@ type Service struct {
 	lessons     LessonReader
 	transcripts TranscriptFinder
 	summaries   SummaryReader
+	lectures    LectureTextReader
 	assignments AssignmentLister
 	jobs        JobFinder
 	writer      TextWriter
@@ -54,8 +57,8 @@ type Service struct {
 
 // New checks that every port is given.
 func New(d Deps) (*Service, error) {
-	if d.Recordings == nil || d.Lessons == nil || d.Transcripts == nil || d.Summaries == nil || d.Assignments == nil ||
-		d.Jobs == nil || d.Writer == nil || d.Clock == nil {
+	if d.Recordings == nil || d.Lessons == nil || d.Transcripts == nil || d.Summaries == nil || d.LectureTexts == nil ||
+		d.Assignments == nil || d.Jobs == nil || d.Writer == nil || d.Clock == nil {
 		return nil, fmt.Errorf("%w: every port except the logger is required", ErrInvalidConfig)
 	}
 	log := d.Log
@@ -64,7 +67,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		recordings: d.Recordings, lessons: d.Lessons, transcripts: d.Transcripts, summaries: d.Summaries,
-		assignments: d.Assignments, jobs: d.Jobs, writer: d.Writer, clock: d.Clock, log: log,
+		lectures: d.LectureTexts, assignments: d.Assignments, jobs: d.Jobs, writer: d.Writer, clock: d.Clock, log: log,
 	}, nil
 }
 
@@ -75,6 +78,7 @@ type results struct {
 	transcript  shared.TranscriptID // empty: not transcribed
 	summary     *summary.Summary    // nil: none
 	assignments []*assignment.Assignment
+	lecture     *lecturetext.LectureText // nil: none
 }
 
 // View returns the summary, the homework and where both stand.
@@ -87,8 +91,12 @@ func (s *Service) View(ctx context.Context, id shared.RecordingID) (View, error)
 	v := View{
 		Recording: id, Lesson: r.rec.LessonID(), Title: s.title(r), StartedAt: r.rec.StartedAt(),
 		Duration: d, HasDuration: has, Transcribed: r.transcript != "",
-		Summary:  Summary{Step: Step{State: StateNone}},
-		Homework: Homework{Step: Step{State: StateNone}, Assignments: assignmentsOf(r.assignments)},
+		Summary:     Summary{Step: Step{State: StateNone}},
+		Homework:    Homework{Step: Step{State: StateNone}, Assignments: assignmentsOf(r.assignments)},
+		LectureText: LectureText{Step: Step{State: StateNone}},
+	}
+	if r.lecture != nil && r.lecture.Ready() {
+		v.LectureText.Ready, v.LectureText.Blocks, v.LectureText.UpdatedAt = true, r.lecture.Blocks(), r.lecture.UpdatedAt()
 	}
 	if r.summary != nil {
 		v.Summary.Ready, v.Summary.Content, v.Summary.UpdatedAt = true, r.summary.Content(), r.summary.UpdatedAt()
@@ -111,6 +119,12 @@ func (s *Service) View(ctx context.Context, id shared.RecordingID) (View, error)
 		v.Summary.State = StateNone
 	}
 	v.Homework.Step = stepOf(hj, len(r.assignments) > 0)
+
+	lj, err := s.job(ctx, lectureJobType, r.transcript)
+	if err != nil {
+		return View{}, err
+	}
+	v.LectureText = lectureOf(lj, v.LectureText)
 	return v, nil
 }
 
@@ -209,6 +223,13 @@ func (s *Service) load(ctx context.Context, id shared.RecordingID) (results, err
 		return results{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if r.assignments, err = s.assignments.ListByTranscript(ctx, t.ID()); err != nil {
+		return results{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	r.lecture, err = s.lectures.Get(ctx, lecturetext.IDOf(t.ID()))
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		r.lecture = nil
+	case err != nil:
 		return results{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return r, nil

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
@@ -37,6 +38,12 @@ type SummaryReader interface {
 	Get(ctx context.Context, id summary.ID) (*summary.Summary, error)
 }
 
+// LectureTextReader reads the lecture text of a transcript (TASK-090). Implemented by the sqlite adapter.
+type LectureTextReader interface {
+	// Get loads a lecture text; none wraps shared.ErrNotFound.
+	Get(ctx context.Context, id lecturetext.ID) (*lecturetext.LectureText, error)
+}
+
 // AssignmentLister lists the homework found in a transcript. Implemented by the sqlite adapter.
 type AssignmentLister interface {
 	// ListByTranscript returns the assignments extracted from t in the order of the extraction answer; none is an
@@ -44,7 +51,8 @@ type AssignmentLister interface {
 	ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error)
 }
 
-// JobFinder finds the summarize and extract_homework jobs of a transcript. Implemented by the sqlite adapter.
+// JobFinder finds the summarize, extract_homework and lecture_text jobs of a transcript. Implemented by the sqlite
+// adapter.
 type JobFinder interface {
 	// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix;
 	// none wraps shared.ErrNotFound.

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/services/summaryexport"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -85,6 +86,21 @@ func (f *fakeSummaries) Get(_ context.Context, id summary.ID) (*summary.Summary,
 	return nil, fmt.Errorf("%w: summary %s", shared.ErrNotFound, id)
 }
 
+type fakeLectures struct {
+	rows map[lecturetext.ID]*lecturetext.LectureText
+	err  error
+}
+
+func (f *fakeLectures) Get(_ context.Context, id lecturetext.ID) (*lecturetext.LectureText, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if l, ok := f.rows[id]; ok {
+		return l, nil
+	}
+	return nil, fmt.Errorf("%w: lecture text %s", shared.ErrNotFound, id)
+}
+
 type fakeAssignments struct {
 	rows map[shared.TranscriptID][]*assignment.Assignment
 	err  error
@@ -134,6 +150,7 @@ type env struct {
 	lessons     *fakeLessons
 	transcripts *fakeTranscripts
 	summaries   *fakeSummaries
+	lectures    *fakeLectures
 	assignments *fakeAssignments
 	jobs        *fakeJobs
 	writer      *fakeWriter
@@ -147,6 +164,7 @@ func newEnv(t *testing.T) *env {
 		lessons:     &fakeLessons{rows: map[shared.LessonID]*lesson.Lesson{}},
 		transcripts: &fakeTranscripts{rows: map[shared.RecordingID]*transcript.Transcript{}},
 		summaries:   &fakeSummaries{rows: map[summary.ID]*summary.Summary{}},
+		lectures:    &fakeLectures{rows: map[lecturetext.ID]*lecturetext.LectureText{}},
 		assignments: &fakeAssignments{rows: map[shared.TranscriptID][]*assignment.Assignment{}},
 		jobs:        &fakeJobs{byPrefix: map[string]*job.Job{}},
 		writer:      &fakeWriter{},
@@ -154,8 +172,9 @@ func newEnv(t *testing.T) *env {
 	}
 	svc, err := New(Deps{
 		Recordings: e.recordings, Lessons: e.lessons, Transcripts: e.transcripts, Summaries: e.summaries,
-		Assignments: e.assignments, Jobs: e.jobs, Writer: e.writer, Clock: testenv.NewFakeClock(t0.In(msk)),
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)),
+		LectureTexts: e.lectures, Assignments: e.assignments, Jobs: e.jobs, Writer: e.writer,
+		Clock: testenv.NewFakeClock(t0.In(msk)),
+		Log:   slog.New(slog.NewTextHandler(e.logs, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +328,9 @@ func TestViewOfAReadySummary(t *testing.T) {
 	if v.Homework.Step != (Step{State: StateDone}) || !reflect.DeepEqual(v.Homework.Assignments, want) {
 		t.Fatalf("homework = %+v", v.Homework)
 	}
-	wantPrefixes := []string{"summarize summarize:tr-r1:", "extract_homework extract_homework:tr-r1:"}
+	wantPrefixes := []string{
+		"summarize summarize:tr-r1:", "extract_homework extract_homework:tr-r1:", "lecture_text lecture_text:tr-r1:",
+	}
 	if !reflect.DeepEqual(e.jobs.prefixes, wantPrefixes) {
 		t.Fatalf("job prefixes = %v", e.jobs.prefixes)
 	}
