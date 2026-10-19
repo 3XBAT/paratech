@@ -39,15 +39,16 @@ func (p promptRecordings) StartRecording(ctx context.Context, lesson shared.Less
 // wirePrompts builds the recording prompt on popup and the scheduler that feeds it. UI mode only: headless has no
 // popup, and a scheduler there would mark the announcements as made without showing anything.
 func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger) error {
+	lessons := sqlite.NewLessonRepository(c.db)
 	prompts, err := recordingprompt.New(recordingprompt.Deps{
 		Settings: sqlite.NewSettingsRepository(c.db), Apps: e.apps(log), Popup: popup,
-		Recordings: promptRecordings{session: c.recordings}, Clock: e.clock, Sleeper: e.clock, Log: log,
+		Recordings: promptRecordings{session: c.recordings}, Lessons: lessons, Clock: e.clock, Sleeper: e.clock, Log: log,
 	}, recordingprompt.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("app: recording prompt: %w", err)
 	}
 	sched, err := scheduler.New(scheduler.Deps{
-		Lessons: sqlite.NewLessonRepository(c.db), Clock: e.clock, Sleeper: e.clock, Events: prompts, Log: log,
+		Lessons: lessons, Clock: e.clock, Sleeper: e.clock, Events: prompts, Log: log,
 	}, scheduler.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("app: scheduler: %w", err)

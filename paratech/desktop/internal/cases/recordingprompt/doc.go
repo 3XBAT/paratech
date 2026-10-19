@@ -15,5 +15,9 @@
 // Sources is the source picker of the popup (TASK-059): the open apps from the AudioApps port and the source to
 // preselect. Start records the source the user picked and, once it runs, remembers it in the settings by app name.
 //
+// The main window uses the same picker (TASK-081): SelectSource remembers a source picked on the diagnostics page (the
+// sound check reads the same setting), and StartManual starts a recording without the popup, linked to the lesson in
+// progress now if there is one; it ends a prompt on offer as started.
+//
 // Rules that apply: ARCH-20..27. The prompt's states and rules live in the domain/recording/prompt aggregate.
 package recordingprompt

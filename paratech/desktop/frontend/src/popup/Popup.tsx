@@ -3,27 +3,29 @@ import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesVie
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
 import { Button } from "../ui/Button";
 import { Banner } from "../ui/controls";
-import { Icon, IconSprite } from "../ui/Icon";
+import { IconSprite } from "../ui/Icon";
+import { SourcePicker } from "../sourcePicker/SourcePicker";
 import {
   actionErrorText,
-  buttonHints,
-  buttonLabels,
   chooseSource,
-  HeightFitter,
+  failedSources,
   initialSelection,
-  loadErrorText,
   nextSelection,
   pickerModel,
+  SourcesPoller,
+  type Selection,
+} from "../sourcePicker/view";
+import {
+  buttonHints,
+  buttonLabels,
+  HeightFitter,
+  loadErrorText,
   popupModel,
   shouldRefresh,
-  sourceMarks,
-  SourcesPoller,
   textsLayout,
   wantedHeight,
   type Action,
   type ButtonId,
-  type Selection,
-  type SourceOption,
 } from "./view";
 
 const browserTimers = {
@@ -79,7 +81,7 @@ export function Popup() {
       s = await api.sources();
     } catch {
       // A malformed or failed reply offers only the whole computer.
-      s = { apps: [], selected: "", remembered: "", listError: true };
+      s = failedSources(null);
     }
     if (forPrompt === promptIdRef.current) {
       setSources(s);
@@ -164,7 +166,6 @@ export function Popup() {
   const m = popupModel(view, pending);
   const picker = pickerModel(sources, selection);
   const showPicker = m.buttons.includes("start");
-  const listShown = listOpen && showPicker && !m.disabled;
   const errorLine = error || m.problem;
   const layout = textsLayout(showPicker ? picker.warnings : [], errorLine);
 
@@ -227,39 +228,14 @@ export function Popup() {
       )}
       {m.note !== "" && <p className="p-note">{m.note}</p>}
       {showPicker && (
-        <div className="picker">
-          <button
-            type="button"
-            className="source chosen"
-            disabled={m.disabled}
-            aria-haspopup="listbox"
-            aria-expanded={listShown}
-            title={picker.chosen.hint}
-            onClick={() => setListOpen((open) => !open)}
-          >
-            <SourceRow option={picker.chosen} />
-            <Icon name="chev" className="caret" />
-          </button>
-          {listShown && (
-            <>
-              <div className="backdrop" onClick={() => setListOpen(false)} />
-              <ul className="list" role="listbox">
-                {picker.options.map((o) => (
-                  <li key={o.app} role="option" aria-selected={o.app === picker.chosen.app}>
-                    <button
-                      type="button"
-                      className={o.app === picker.chosen.app ? "source current" : "source"}
-                      title={o.hint}
-                      onClick={() => choose(o.app)}
-                    >
-                      <SourceRow option={o} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
+        <SourcePicker
+          picker={picker}
+          disabled={m.disabled}
+          open={listOpen}
+          onToggle={() => setListOpen((open) => !open)}
+          onClose={() => setListOpen(false)}
+          onChoose={choose}
+        />
       )}
       {(showPicker || errorLine !== "") && (
         // With an error the window grows to show it in full; past its max height (or without an error) this area
@@ -305,24 +281,5 @@ export function Popup() {
         ))}
       </div>
     </div>
-  );
-}
-
-// SourceRow renders one source as text: names and titles are untrusted, and the icon is only a validated PNG data URL.
-function SourceRow({ option }: { option: SourceOption }) {
-  return (
-    <>
-      {option.icon !== "" ? (
-        <img className="icon" src={option.icon} alt="" draggable={false} />
-      ) : (
-        <span className={option.app === "" ? "icon letter whole" : "icon letter"} aria-hidden="true">
-          {option.letter}
-        </span>
-      )}
-      <span className="name">{option.name}</span>
-      {option.gone && <span className="mark gone">{sourceMarks.gone}</span>}
-      {option.muted && <span className="mark muted">{sourceMarks.muted}</span>}
-      {option.playing && <span className="mark playing">{sourceMarks.playing}</span>}
-    </>
   );
 }

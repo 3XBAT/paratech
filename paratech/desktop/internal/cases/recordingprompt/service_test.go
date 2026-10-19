@@ -18,7 +18,10 @@ import (
 
 func TestNew(t *testing.T) {
 	e := newEnv(t)
-	full := Deps{Settings: e.settings, Apps: e.apps, Popup: e.popup, Recordings: e.recordings, Clock: e.clock, Sleeper: e.clock}
+	full := Deps{
+		Settings: e.settings, Apps: e.apps, Popup: e.popup, Recordings: e.recordings, Lessons: e.lessons, Clock: e.clock,
+		Sleeper: e.clock,
+	}
 	tests := []struct {
 		name string
 		edit func(*Deps, *Config)
@@ -29,6 +32,7 @@ func TestNew(t *testing.T) {
 		{name: "no apps", edit: func(d *Deps, _ *Config) { d.Apps = nil }},
 		{name: "no popup", edit: func(d *Deps, _ *Config) { d.Popup = nil }},
 		{name: "no recordings", edit: func(d *Deps, _ *Config) { d.Recordings = nil }},
+		{name: "no lessons", edit: func(d *Deps, _ *Config) { d.Lessons = nil }},
 		{name: "no clock", edit: func(d *Deps, _ *Config) { d.Clock = nil }},
 		{name: "no sleeper", edit: func(d *Deps, _ *Config) { d.Sleeper = nil }},
 		{name: "zero poll", edit: func(_ *Deps, c *Config) { c.PollInterval = 0 }},

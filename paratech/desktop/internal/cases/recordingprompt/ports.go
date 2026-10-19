@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/recording/values"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -51,6 +52,14 @@ type Recordings interface {
 	// means this build cannot capture; one wrapping limits.ErrRecordingInProgress means another recording runs; one
 	// wrapping recording.ErrSourceNotRunning means the chosen app does not run.
 	StartRecording(ctx context.Context, lesson shared.LessonID, source values.Source) (shared.RecordingID, error)
+}
+
+// Lessons reads the local schedule to link a recording started from the main window to the lesson in progress
+// (TASK-081). Implemented by the sqlite adapter (LessonRepository).
+type Lessons interface {
+	// ListStartingBetween returns the live lessons whose start lies in [from, to), ordered by start. Soft-deleted
+	// lessons are not returned.
+	ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
 }
 
 // Clock supplies the current time (ARCH-24, PRD section 6.1). Implemented by the clock adapter and by a fake.

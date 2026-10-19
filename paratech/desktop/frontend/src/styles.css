@@ -53,6 +53,16 @@ html, body, #root { height: 100%; }
 .recordings .row .t { overflow-wrap: anywhere; }
 .statusbar { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: auto -24px -20px; padding: 8px 24px; border-top: 1px solid var(--line); font-size: var(--fs-small); color: var(--muted); }
 .page > .gap { flex: none; height: 24px; }
+/* Text for screen readers only: the reason of a disabled button, a spoken hint. */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* A warning about the chosen sound source (sourcePicker/SourcePicker.tsx). */
+.picker-warning { margin: 6px 0 0; color: var(--wait-t); }
+/* «Начать запись» of «Записи и задачи» (TASK-081): the panel under the header. */
+.rec-start-panel { max-width: 560px; margin-bottom: 16px; }
+.rec-start-panel .picker { margin-top: 4px; }
+.rec-start-panel p.small { margin-top: 6px; }
+.rec-start-panel .note { margin: 10px 0 0; }
+.rec-start-panel .acts { margin-top: 12px; }
 .statusbar span { display: inline-flex; align-items: center; gap: 7px; }
 .statusbar .r { margin-left: auto; }
 .statusbar .i { width: 14px; height: 14px; }
@@ -118,7 +128,6 @@ html, body, #root { height: 100%; }
 .mq { margin-left: -3px; color: var(--muted); text-decoration: underline dotted 1px; text-underline-offset: 3px; cursor: help; }
 .mrow .msize { font-weight: 400; }
 .mtag { align-self: center; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-chip); color: var(--accent); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; white-space: nowrap; }
-.mrow .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Line 2: the load scale and the rest, separated by dots; line 3: the warning of a heavy model. */
 .mline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; margin: 0; }
 /* A part never breaks inside, so a too narrow line wraps between the parts only. */
@@ -161,6 +170,9 @@ html, body, #root { height: 100%; }
 /* Диагностика: the sound check and the support bundle, two cards like Подключения. */
 .diag .box-desc { margin-bottom: 6px; }
 .diag .acts { margin-top: 10px; }
+/* The source picker right next to «Проверить звук» (TASK-081). */
+.diag .acts.diag-pick { flex-wrap: wrap; margin-top: 4px; }
+.diag-pick .picker { flex: 1 1 220px; min-width: 0; max-width: 360px; }
 .diag-result { margin-top: 12px; }
 .diag-result .result { margin-bottom: 6px; }
 .box p.diag-note { overflow-wrap: anywhere; }

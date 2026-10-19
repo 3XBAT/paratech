@@ -51,13 +51,15 @@ const (
 
 var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 
-// PromptUseCase is the part of the recording prompt use case the popup and the tray need (ARCH-42).
+// PromptUseCase is the part of the recording prompt use case the popup, the tray and the main window need (ARCH-42).
 type PromptUseCase interface {
 	Current() (recordingprompt.View, bool)
 	Sources(ctx context.Context) (recordingprompt.Sources, error)
 	OfferAdHoc(ctx context.Context) (recordingprompt.View, error)
 	Start(ctx context.Context, id prompt.ID, source values.Source) (recordingprompt.View, error)
 	Skip(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
+	SelectSource(ctx context.Context, source values.Source) error
+	StartManual(ctx context.Context, source values.Source) (recordingprompt.Manual, error)
 }
 
 // PromptView is the JSON form of the current prompt.
@@ -94,8 +96,19 @@ type SourceView struct {
 	Icon    string `json:"icon"` // "" or "data:image/png;base64,..."
 }
 
-// PromptService is bound to the popup page like SettingsService ("<package path>.PromptService.<Method>"). Keep the
-// exported method set to what the page may call; the tray's ad-hoc offer is not exported.
+// RecordingStart is the JSON answer of StartRecording.
+type RecordingStart struct {
+	Started bool `json:"started"`
+	// Problem says why it did not start, with the codes of PromptView.Problem; "" once started.
+	Problem     string `json:"problem"`
+	RecordingID string `json:"recordingId"` // "" unless started
+	// Linked reports that the recording belongs to the lesson in progress; otherwise it has no lesson.
+	Linked bool `json:"linked"`
+}
+
+// PromptService is bound to the pages like SettingsService ("<package path>.PromptService.<Method>"): the popup and,
+// for the source picker and a start without the popup, the main window (TASK-081). Keep the exported method set to
+// what the pages may call; the tray's ad-hoc offer is not exported.
 type PromptService struct {
 	uc  PromptUseCase
 	log *slog.Logger
@@ -146,15 +159,9 @@ func (s *PromptService) Sources(ctx context.Context) (SourcesView, error) {
 // Start starts the recording the prompt offers from app (an exe name; "" = the whole computer). A failed start is
 // not an error: the view carries its problem.
 func (s *PromptService) Start(ctx context.Context, id, app string) (PromptView, error) {
-	source := values.WholeComputer()
-	if app != "" {
-		name, err := shared.ParseAppName(app)
-		if err != nil {
-			return PromptView{}, ErrInvalidSource
-		}
-		if source, err = values.SourceOf(name); err != nil {
-			return PromptView{}, ErrInvalidSource
-		}
+	source, err := recordingSourceOf(app)
+	if err != nil {
+		return PromptView{}, err
 	}
 	return s.act("start recording", id, func(pid prompt.ID) (recordingprompt.View, error) {
 		return s.uc.Start(ctx, pid, source)
@@ -164,6 +171,43 @@ func (s *PromptService) Start(ctx context.Context, id, app string) (PromptView, 
 // Skip ends the prompt and hides the popup.
 func (s *PromptService) Skip(ctx context.Context, id string) (PromptView, error) {
 	return s.act("skip prompt", id, func(pid prompt.ID) (recordingprompt.View, error) { return s.uc.Skip(ctx, pid) })
+}
+
+// SelectSource remembers app (an exe name; "" = the whole computer) as the source of the next recordings and of the
+// sound check: the picker of the diagnostics page, shared with the popup.
+func (s *PromptService) SelectSource(ctx context.Context, app string) error {
+	source, err := recordingSourceOf(app)
+	if err != nil {
+		return err
+	}
+	if err := s.uc.SelectSource(ctx, source); err != nil {
+		s.log.Error("ui: select recording source", "err", err)
+		return ErrActionFailed
+	}
+	return nil
+}
+
+// StartRecording starts recording app ("" = the whole computer) from the main window, without the popup; the
+// recording belongs to the lesson in progress, if any. A failed start is not an error: the answer carries its problem
+// ("in_progress" while a recording runs).
+func (s *PromptService) StartRecording(ctx context.Context, app string) (RecordingStart, error) {
+	source, err := recordingSourceOf(app)
+	if err != nil {
+		return RecordingStart{}, err
+	}
+	m, err := s.uc.StartManual(ctx, source)
+	switch {
+	case err == nil:
+		return RecordingStart{Started: true, RecordingID: m.Recording.String(), Linked: m.Lesson != ""}, nil
+	case errors.Is(err, recordingprompt.ErrStartFailed): // the use case logged the cause
+		problem := problemCode(m.Problem)
+		if problem == "" {
+			problem = problemFailed
+		}
+		return RecordingStart{Problem: problem}, nil
+	}
+	s.log.Error("ui: start recording from the main window", "err", err)
+	return RecordingStart{}, ErrActionFailed
 }
 
 // offerAdHoc is the tray's "Show recording popup": an offer without a lesson.
@@ -203,6 +247,22 @@ func promptView(v recordingprompt.View) PromptView {
 		out.Kind = kindAdHoc
 	}
 	return out
+}
+
+// recordingSourceOf parses the source the page sends: an exe name, "" for the whole computer.
+func recordingSourceOf(app string) (values.Source, error) {
+	if app == "" {
+		return values.WholeComputer(), nil
+	}
+	name, err := shared.ParseAppName(app)
+	if err != nil {
+		return values.Source{}, ErrInvalidSource
+	}
+	source, err := values.SourceOf(name)
+	if err != nil {
+		return values.Source{}, ErrInvalidSource
+	}
+	return source, nil
 }
 
 // iconURL is the data URL of a small PNG icon, or "" for anything that is not one.

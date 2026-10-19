@@ -38,6 +38,10 @@
   20 s late (`lesson.StartLateGrace`); no separate Windows notification. It has only «Начать запись» and «Не записывать»:
   the snooze («Через 5 минут») is removed from the prompt aggregate, the use case and the binding. Prompts live in memory
   only, so no stored state had to migrate.
+- TASK-081: the main window has the same source picker (`PromptService.SelectSource`, one remembered source with the
+  popup and the sound check) and «Начать запись» without the popup (`PromptService.StartRecording`). The recording is
+  linked to the lesson in progress (start <= now < end; of overlapping ones the latest start), and a prompt on offer
+  ends as started and hides.
 
 ## Check on Windows by a human (TASK-020)
 1. Start a Zoom/Telemost call and click into its chat. Open the popup from the tray menu, then switch back to the call; better, let a test

@@ -2,21 +2,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSourcesView, promptApi } from "../.test-build/bindings/prompt.js";
+import { collapseAdvice, shouldRefresh } from "../.test-build/popup/view.js";
 import {
   adviceTexts,
   chooseSource,
-  collapseAdvice,
   initialSelection,
   nextSelection,
   pickerModel,
   problemText,
   refreshMs,
-  shouldRefresh,
   sourceMarks,
   sourceOptions,
   SourcesPoller,
   wholeComputerName,
-} from "../.test-build/popup/view.js";
+} from "../.test-build/sourcePicker/view.js";
 
 // Mirror SourcesView of internal/input/wails/prompt.go.
 const icon = "data:image/png;base64,iVBORw0KGgo=";

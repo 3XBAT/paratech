@@ -18,6 +18,10 @@ export const texts = {
   soundExplain:
     "Приложение слушает выбранный для записи источник и показывает уровень звука. Ничего не проигрывается и не " +
     "записывается.",
+  sourceLabel: "Источник звука",
+  sourceLocked: "Источник нельзя сменить во время проверки.",
+  selectFailed: "Не удалось выбрать источник звука.",
+  pickAnother: "Выберите в списке выше другой источник, например «Весь звук компьютера», и проверьте снова.",
   checkSound: "Проверить звук",
   stopCheck: "Остановить",
   checkFailed: "Не удалось проверить звук.",
@@ -124,6 +128,14 @@ export function soundDisplay(r: SoundCheck): SoundDisplay {
   const tone: Tone = r.verdict === "ok" ? "ok" : r.verdict === "busy" ? "warning" : "error";
   const lines: Line[] = [{ text: r.message, tone }, ...r.hints.map((h) => ({ text: h, tone: "muted" as Tone }))];
   return { phase: "done", running: false, ...none, source, lines };
+}
+
+/**
+ * The line under the picker after the chosen app was not running (TASK-081): the source is changed right there. The
+ * core's own message and hints stay with the result.
+ */
+export function pickerHint(r: SoundCheck): string {
+  return r.state === "done" && r.verdict === "not_running" ? texts.pickAnother : "";
 }
 
 /** What a rejected check call shows: a fixed text, never the error. */
