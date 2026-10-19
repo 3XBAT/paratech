@@ -54,6 +54,7 @@ var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 // PromptUseCase is the part of the recording prompt use case the popup, the tray and the main window need (ARCH-42).
 type PromptUseCase interface {
 	Current() (recordingprompt.View, bool)
+	Advice() (recordingprompt.Advice, bool)
 	Sources(ctx context.Context) (recordingprompt.Sources, error)
 	OfferAdHoc(ctx context.Context) (recordingprompt.View, error)
 	Start(ctx context.Context, id prompt.ID, source values.Source) (recordingprompt.View, error)
@@ -79,21 +80,28 @@ type PromptView struct {
 
 // SourcesView is the JSON form of the source picker. App names are exe names ("" = the whole computer).
 type SourcesView struct {
-	Apps       []SourceView `json:"apps"`
-	Selected   string       `json:"selected"`
-	Remembered string       `json:"remembered"`
+	Apps     []SourceView `json:"apps"`
+	Selected string       `json:"selected"`
+	// AutoSelected: selected plays while the remembered app does not (TASK-082); the picker says «выбрано: звук идёт
+	// отсюда».
+	AutoSelected bool   `json:"autoSelected"`
+	Remembered   string `json:"remembered"`
 	// ListError reports that the apps could not be listed; only the whole computer is offered then.
 	ListError bool `json:"listError"`
 }
 
 // SourceView is one app of the picker.
 type SourceView struct {
-	App     string `json:"app"`
-	Title   string `json:"title"` // window title: untrusted text, render as plain text only
-	Playing bool   `json:"playing"`
-	Muted   bool   `json:"muted"` // muted in the Windows mixer: the recording would be silent
-	Browser bool   `json:"browser"`
-	Icon    string `json:"icon"` // "" or "data:image/png;base64,..."
+	App string `json:"app"`
+	// Name is the readable name («Яндекс Браузер»), never empty; untrusted text, plain text only. The exe name belongs
+	// in a tooltip (TASK-082).
+	Name     string `json:"name"`
+	Title    string `json:"title"` // window title: untrusted text, render as plain text only
+	Playing  bool   `json:"playing"`
+	Sounding bool   `json:"sounding"` // its sound is playing right now: the «звук идёт» mark (TASK-082)
+	Muted    bool   `json:"muted"`    // muted in the Windows mixer: the recording would be silent
+	Browser  bool   `json:"browser"`
+	Icon     string `json:"icon"` // "" or "data:image/png;base64,..."
 }
 
 // RecordingStart is the JSON answer of StartRecording.
@@ -131,14 +139,26 @@ func (s *PromptService) Current() *PromptView {
 	return &out
 }
 
+// Advice returns the silent-source advice the popup shows (TASK-082), or null. The popup reads it with Current when
+// it is shown; its buttons call ActivityService.SwitchSource («Переключиться») and ActivityService.DismissAdvice
+// («Оставить»).
+func (s *PromptService) Advice() *AdviceView {
+	a, ok := s.uc.Advice()
+	if !ok {
+		return nil
+	}
+	return adviceView(a.Recording, a.Advice)
+}
+
 // Sources lists what the popup may record. When the apps cannot be listed it still answers, with listError set.
 func (s *PromptService) Sources(ctx context.Context) (SourcesView, error) {
 	src, err := s.uc.Sources(ctx)
 	out := SourcesView{
-		Apps:       make([]SourceView, 0, len(src.Apps)),
-		Selected:   src.Selected.App().String(),
-		Remembered: src.Remembered.String(),
-		ListError:  err != nil,
+		Apps:         make([]SourceView, 0, len(src.Apps)),
+		Selected:     src.Selected.App().String(),
+		AutoSelected: src.AutoSelected,
+		Remembered:   src.Remembered.String(),
+		ListError:    err != nil,
 	}
 	if err != nil {
 		if !s.listFailing.Swap(true) {
@@ -149,7 +169,7 @@ func (s *PromptService) Sources(ctx context.Context) (SourcesView, error) {
 	s.listFailing.Store(false)
 	for _, a := range src.Apps {
 		out.Apps = append(out.Apps, SourceView{
-			App: a.App.String(), Title: a.Title, Playing: a.Playing, Muted: a.Muted,
+			App: a.App.String(), Name: a.Name, Title: a.Title, Playing: a.Playing, Sounding: a.Sounding, Muted: a.Muted,
 			Browser: values.IsBrowser(a.App), Icon: iconURL(a.IconPNG),
 		})
 	}
