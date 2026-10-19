@@ -275,13 +275,15 @@ func TestGenerateEditRegenerateKeepsVersions(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("LLM requests = %d, want 2", len(reqs))
 	}
-	if data := reqs[0].UntrustedData(); strings.Contains(data, "previous_draft") || strings.Contains(data, "student_request") {
+	if data := reqs[0].UntrustedData(); strings.Contains(data, "previous_draft") || strings.Contains(data, prompts.StudentOpen) {
 		t.Fatalf("first request has a previous draft or a request: %s", data)
 	}
-	data := reqs[1].UntrustedData()
-	if !strings.Contains(data, `"student_request":"Make it shorter and keep my Volga example"`) ||
+	// TASK-094: the instructions are the student's own section after the data, not part of the untrusted data.
+	data, student, ok := strings.Cut(reqs[1].UntrustedData(), prompts.StudentOpen)
+	if !ok || !strings.Contains(student, `{"request":"Make it shorter and keep my Volga example"}`) ||
+		strings.Contains(data, "Make it shorter") ||
 		!strings.Contains(data, `"previous_draft":"Deltas form where rivers meet the sea. My example: the Volga."`) {
-		t.Fatalf("regeneration request lacks the instructions or the edited draft: %s", data)
+		t.Fatalf("regeneration request lacks the instructions or the edited draft: %s", reqs[1].UntrustedData())
 	}
 	if strings.Contains(reqs[1].Instructions(), "Volga") {
 		t.Fatal("student text reached the trusted instructions")
@@ -623,7 +625,7 @@ func TestDraftRequestHoldsTheMinimalContext(t *testing.T) {
 	data := req.UntrustedData()
 	for _, want := range []string{
 		`"lesson_title":"Geography"`, `"title":"Read chapter 4"`, `"description":"Pages 40-52 about deltas"`,
-		`"lesson_summary":"Rivers flow into seas and form deltas."`, `"student_request":"in English"`,
+		`"lesson_summary":"Rivers flow into seas and form deltas."`, prompts.StudentOpen + "\n" + `{"request":"in English"}`,
 	} {
 		if !strings.Contains(data, want) {
 			t.Errorf("request lacks %s: %s", want, data)

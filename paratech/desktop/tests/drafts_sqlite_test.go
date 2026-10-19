@@ -154,7 +154,7 @@ func TestDraftGenerateEditRegenerateExport(t *testing.T) {
 		t.Fatalf("draft requests = %d, want 2", len(reqs))
 	}
 	data := reqs[1].UntrustedData()
-	if !strings.Contains(data, `"student_request":"Shorter, keep the Volga"`) || !strings.Contains(data, "Example: the Volga.") ||
+	if !strings.Contains(data, `{"request":"Shorter, keep the Volga"}`) || !strings.Contains(data, "Example: the Volga.") ||
 		!strings.Contains(data, `"lesson_summary":"Rivers and their deltas."`) || !strings.Contains(data, `"lesson_title":"Geography"`) {
 		t.Fatalf("regeneration request = %s", data)
 	}

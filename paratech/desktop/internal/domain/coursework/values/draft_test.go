@@ -49,6 +49,21 @@ func TestNewDraftRequest(t *testing.T) {
 	}
 }
 
+// TASK-094: bidi controls are removed from the instructions; the rest of the text stays as typed.
+func TestCleanInstructionStripsBidi(t *testing.T) {
+	for in, want := range map[string]string{
+		"\u202eshorter\u202c":             "shorter",
+		"\u2066титульный\u2069 лист":      "титульный лист",
+		"a\u200fb\u061cc":                 "abc",
+		"plan:\n1. intro\n2. body \u200d": "plan:\n1. intro\n2. body \u200d",
+	} {
+		got, err := CleanInstruction(in)
+		if err != nil || got != want {
+			t.Errorf("CleanInstruction(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+}
+
 func TestParseDraftPayloadIsStrict(t *testing.T) {
 	for _, bad := range []string{
 		``, `[]`, `{}`, `null`,
