@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/services/limits"
 	"paratech/desktop/internal/domain/recording/values"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -74,6 +75,7 @@ type Service struct {
 	sleeper     Sleeper
 	ids         IDGenerator
 	completions CompletionListener
+	lessons     LessonReader   // nil: no lesson snapshot
 	apps        AudioApps      // nil: no silent-source advice
 	advice      AdviceListener // nil: nobody is told
 	log         *slog.Logger
@@ -129,7 +131,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	s := &Service{
 		recordings: deps.Recordings, transcripts: deps.Transcripts, recorder: deps.Recorder, artifacts: deps.Artifacts,
 		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, completions: deps.Completions,
-		apps: deps.Apps, advice: deps.Advice, log: log,
+		lessons: deps.Lessons, apps: deps.Apps, advice: deps.Advice, log: log,
 		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval, adviceEvery: cfg.AdviceInterval,
 		marked: make(chan struct{}),
 	}
@@ -240,9 +242,11 @@ func (ss *session) rewatch(source values.Source) (values.SourceAdvice, bool) {
 // runs; the session then goes on until Stop, the hard cap or the end of the capture. Only one recording is in
 // progress at a time (limits.ErrRecordingInProgress). A failed or aborted start leaves a FAILED recording and returns
 // its Info with ErrStartFailed or ErrStartAborted; a chosen app that does not run wraps recording.ErrSourceNotRunning.
+// The recording keeps a snapshot of req.LessonID as it is now (TASK-088).
 func (s *Service) Start(ctx context.Context, req StartRequest) (Info, error) {
 	rec, err := recording.New(recording.Spec{
-		ID: s.ids.NewRecordingID(), LessonID: req.LessonID, MaxDuration: s.policy.MaxDuration(),
+		ID: s.ids.NewRecordingID(), LessonID: req.LessonID, Lesson: s.lessonSnapshot(ctx, req.LessonID),
+		MaxDuration: s.policy.MaxDuration(),
 	}, s.clock.Now())
 	if err != nil {
 		return Info{}, fmt.Errorf("%s: %w", opStart, err)
@@ -294,6 +298,27 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (Info, error) {
 	info := infoOf(rec) // the session goroutine owns rec from here
 	go s.run(sess, rec)
 	return info, nil
+}
+
+// lessonSnapshot reads the lesson id for the snapshot of a new recording. A lesson that cannot be read gives no
+// snapshot and is logged: the recording starts anyway, as recording the class matters more than its title.
+func (s *Service) lessonSnapshot(ctx context.Context, id shared.LessonID) values.LessonSnapshot {
+	if id == "" || s.lessons == nil {
+		return values.LessonSnapshot{}
+	}
+	l, err := s.lessons.Get(ctx, id)
+	if err != nil {
+		s.log.Warn("the lesson of the new recording could not be read; it keeps no lesson snapshot",
+			slog.String("lesson", id.String()), slog.Any("error", err))
+		return values.LessonSnapshot{}
+	}
+	return snapshotOf(l)
+}
+
+// snapshotOf is what a recording keeps of l. TASK-089 fills subject, kind and teacher once the lesson has them.
+func snapshotOf(l *lesson.Lesson) values.LessonSnapshot {
+	c := l.Content()
+	return values.NewLessonSnapshot(values.LessonSnapshotSpec{Title: c.Title, Start: c.Start, End: c.End})
 }
 
 // reserve takes the single slot of a recording in progress.

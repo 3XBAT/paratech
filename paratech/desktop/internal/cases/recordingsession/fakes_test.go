@@ -15,8 +15,8 @@ import (
 func stateOf(r *recording.Recording) recording.State {
 	d, _ := r.Duration()
 	return recording.State{
-		Version: r.Version(), ID: r.ID(), LessonID: r.LessonID(), Status: r.Status(), MaxDuration: r.MaxDuration(),
-		Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Silent: r.Silent(), Problem: r.Problem(),
+		Version: r.Version(), ID: r.ID(), LessonID: r.LessonID(), Lesson: r.LessonSnapshot(), Status: r.Status(),
+		MaxDuration: r.MaxDuration(), Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Silent: r.Silent(), Problem: r.Problem(),
 		StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(), HeartbeatAt: r.HeartbeatAt(),
 		CreatedAt: r.CreatedAt(), UpdatedAt: r.UpdatedAt(),
 	}

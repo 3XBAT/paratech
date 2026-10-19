@@ -42,6 +42,7 @@ type env struct {
 	rec    *testenv.FakeRecorder
 	hooks  *hookRecorder // what the service sees: rec with extra failures
 	done   *completions  // the completion listener
+	lesson *memLessons   // the schedule the snapshot of a new recording is read from
 	svc    *Service
 }
 
@@ -52,7 +53,7 @@ func newEnv(t *testing.T, cfg Config) *env {
 	}
 	e := &env{
 		t: t, clock: testenv.NewFakeClock(t0), repo: newMemRepo(), tr: newMemTranscripts(), tx: &fakeTx{},
-		files: testenv.NewMemArtifacts(),
+		files: testenv.NewMemArtifacts(), lesson: &memLessons{},
 	}
 	e.sleeps = newSleepLog(e.clock)
 	e.rec = testenv.NewFakeRecorder(e.files, chunkLen)
@@ -60,7 +61,7 @@ func newEnv(t *testing.T, cfg Config) *env {
 	e.done = &completions{repo: e.repo}
 	svc, err := New(Deps{
 		Recordings: e.repo, Transcripts: e.tr, Recorder: e.hooks, Artifacts: e.files, Tx: e.tx,
-		Clock: e.clock, Sleeper: e.sleeps, IDs: &seqIDs{}, Completions: e.done,
+		Clock: e.clock, Sleeper: e.sleeps, IDs: &seqIDs{}, Completions: e.done, Lessons: e.lesson,
 	}, cfg)
 	if err != nil {
 		t.Fatal(err)
