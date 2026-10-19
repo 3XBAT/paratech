@@ -193,6 +193,10 @@ func (s *Service) mark(ctx context.Context, req Request) error {
 		if err := rec.CheckDeletable(); err != nil {
 			return fmt.Errorf("%w: %w", ErrInProgress, err)
 		}
+		// Asked again: the recovery may have listed the recording since the first look.
+		if s.recovery.Recovering(req.Recording) {
+			return ErrRecovering
+		}
 		contents, err := s.store.Contents(ctx, req.Recording)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStorage, err)
