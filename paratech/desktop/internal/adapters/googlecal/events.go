@@ -206,15 +206,18 @@ var kindNames = map[lesson.Kind]string{
 	lesson.KindLecture: "лекция", lesson.KindSeminar: "семинар", lesson.KindPractice: "практика", lesson.KindLab: "лабораторная",
 }
 
+// htmlText escapes the characters Google reads as markup in a description, so file text stays text.
+var htmlText = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 // lessonText is the event description of a lesson: its kind and teacher when known, then the app note. The teacher
-// is file text, cleaned like a title.
+// is file text, cleaned like a title and escaped: Google renders some HTML in descriptions.
 func lessonText(c lesson.Content) string {
 	var lines []string
 	if name, ok := kindNames[c.Kind]; ok {
 		lines = append(lines, "Тип: "+name)
 	}
 	if t := summary(c.Teacher, ""); t != "" {
-		lines = append(lines, "Преподаватель: "+t)
+		lines = append(lines, "Преподаватель: "+htmlText.Replace(t))
 	}
 	if len(lines) == 0 {
 		return lessonDescription

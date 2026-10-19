@@ -293,6 +293,26 @@ func TestLessonKindAndTeacherInDescription(t *testing.T) {
 	if !strings.HasPrefix(e.Description, "Тип: лабораторная\nПреподаватель: Петров\n\n") || e.Private["revision"] != "3" {
 		t.Fatalf("updated event %+v", e)
 	}
+
+	// The teacher is file text: markup in it is escaped, not rendered by Google.
+	cases := []struct{ teacher, want string }{
+		{`<a href="https://evil.example">Иванов</a>`, `&lt;a href="https://evil.example"&gt;Иванов&lt;/a&gt;`},
+		{"Tom & Jerry", "Tom &amp; Jerry"},
+		{"O'Neil", "O'Neil"},
+	}
+	for i, tc := range cases {
+		content.Teacher = tc.teacher
+		if _, err := l.ChangeContent(content, t0.Add(time.Duration(i+2)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.c.UpsertLesson(ctx, cal, l); err != nil {
+			t.Fatal(err)
+		}
+		e, _ = r.api.Event(cal, googlecal.LessonEventID("l1"))
+		if !strings.HasPrefix(e.Description, "Тип: лабораторная\nПреподаватель: "+tc.want+"\n\n") {
+			t.Errorf("teacher %q: description %q", tc.teacher, e.Description)
+		}
+	}
 }
 
 func TestDeleteEvent(t *testing.T) {
