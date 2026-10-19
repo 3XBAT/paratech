@@ -13,7 +13,8 @@ import (
 const getSettings = `-- name: GetSettings :one
 
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id, version, updated_at,
-       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app
+       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app,
+       recognition_load
 FROM settings
 WHERE id = 1
 `
@@ -37,6 +38,7 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.SmtpUsername,
 		&i.HubUrl,
 		&i.RecordingSourceApp,
+		&i.RecognitionLoad,
 	)
 	return i, err
 }
@@ -44,10 +46,11 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 const insertSettings = `-- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id,
                       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url,
-                      recording_source_app, version, updated_at)
+                      recording_source_app, recognition_load, version, updated_at)
 VALUES (1, ?1, ?2, ?3,
         ?4, ?5, ?6, ?7,
-        ?8, ?9, ?10, 1, ?11)
+        ?8, ?9, ?10,
+        ?11, 1, ?12)
 `
 
 type InsertSettingsParams struct {
@@ -61,6 +64,7 @@ type InsertSettingsParams struct {
 	SmtpUsername            string
 	HubUrl                  string
 	RecordingSourceApp      string
+	RecognitionLoad         string
 	UpdatedAt               int64
 }
 
@@ -78,6 +82,7 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 		arg.SmtpUsername,
 		arg.HubUrl,
 		arg.RecordingSourceApp,
+		arg.RecognitionLoad,
 		arg.UpdatedAt,
 	)
 	return err
@@ -95,9 +100,10 @@ SET recording_prompts_enabled = ?1,
     smtp_username             = ?8,
     hub_url                   = ?9,
     recording_source_app      = ?10,
+    recognition_load          = ?11,
     version                   = version + 1,
-    updated_at                = ?11
-WHERE id = 1 AND version = ?12
+    updated_at                = ?12
+WHERE id = 1 AND version = ?13
 `
 
 type UpdateSettingsParams struct {
@@ -111,6 +117,7 @@ type UpdateSettingsParams struct {
 	SmtpUsername            string
 	HubUrl                  string
 	RecordingSourceApp      string
+	RecognitionLoad         string
 	UpdatedAt               int64
 	ExpectedVersion         int64
 }
@@ -129,6 +136,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.SmtpUsername,
 		arg.HubUrl,
 		arg.RecordingSourceApp,
+		arg.RecognitionLoad,
 		arg.UpdatedAt,
 		arg.ExpectedVersion,
 	)

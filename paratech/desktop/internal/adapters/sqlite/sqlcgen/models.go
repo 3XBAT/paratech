@@ -152,6 +152,7 @@ type Setting struct {
 	SmtpUsername            string
 	HubUrl                  string
 	RecordingSourceApp      string
+	RecognitionLoad         string
 }
 
 type SttModel struct {
@@ -166,6 +167,14 @@ type SttModel struct {
 	Capabilities string
 	InstalledAt  int64
 	Version      int64
+}
+
+type SttSpeed struct {
+	SttModelID      string
+	RecognitionLoad string
+	Factor          float64
+	Samples         int64
+	UpdatedAt       int64
 }
 
 type Summary struct {

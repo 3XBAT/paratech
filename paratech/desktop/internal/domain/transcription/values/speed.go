@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"paratech/desktop/internal/domain/shared"
 )
 
 // Bounds of a measured recognition speed (TASK-084). The factor is the wall time of a run over the duration of its
@@ -28,6 +30,12 @@ const (
 	// maxSpeedSamples caps the stored count; the weight of a new run does not depend on it.
 	maxSpeedSamples = 1_000_000
 )
+
+// SpeedKey names what a speed is measured for: an installed model in a load mode.
+type SpeedKey struct {
+	Model shared.SttModelID
+	Load  shared.RecognitionLoad
+}
 
 // MeasuredSpeed is the recognition speed of one model in one load mode on this computer: the exponential moving
 // average of the speed factor of its runs and how many runs it is based on. The zero value means not measured.
