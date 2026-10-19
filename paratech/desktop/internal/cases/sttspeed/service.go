@@ -94,7 +94,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		out.Catalog[e.ID()] = s.estimates(st, fromEntry[e.ID()], e.Family(), e.Quantization())
 	}
 	if m, err := s.sel.Resolve("", st.def, st.installed); err == nil {
-		out.InUse = m.ID()
+		out.InUse, out.InUseName = m.ID(), m.Name()
 	}
 	return out, nil
 }

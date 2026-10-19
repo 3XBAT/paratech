@@ -90,15 +90,15 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		`{"id":"r1","lessonId":"l1","title":"История, лекция","status":"RECORDING",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"queueReason":"","errorCode":"",` +
-		`"jobError":"","action":"","actionJobId":""},` +
+		`"jobError":"","action":"","actionJobId":"","remainingSeconds":0,"hasRemaining":false},` +
 		`{"id":"r2","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"queueReason":"power",` +
-		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1"},` +
+		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1","remainingSeconds":0,"hasRemaining":false},` +
 		`{"id":"r3","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
-		`"actionJobId":""}]`
+		`"actionJobId":"","remainingSeconds":0,"hasRemaining":false}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}

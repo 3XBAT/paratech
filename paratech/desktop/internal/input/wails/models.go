@@ -12,6 +12,7 @@ import (
 
 	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/speechcomponent"
+	"paratech/desktop/internal/cases/sttspeed"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/services/modelselection"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
@@ -145,10 +146,12 @@ type ModelsDeps struct {
 	Picker    ModelFilePicker
 	// Speech tells whether speech recognition works now (SpeechService shows the details and the install).
 	Speech SpeechStatusReader
+	// Speed gives the recognition time estimates (TASK-084); optional: without it the items have none.
+	Speed SpeedEstimates
 }
 
 // InstalledModelItem is the JSON form of an installed model. InstalledAt is RFC 3339 in UTC. InUse marks the model a
-// new STT job pins; only List sets it.
+// new STT job pins; only List sets it, as Estimates (null otherwise or when unavailable).
 type InstalledModelItem struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
@@ -162,6 +165,8 @@ type InstalledModelItem struct {
 	CatalogID    string   `json:"catalogId"`
 	InstalledAt  string   `json:"installedAt"`
 	InUse        bool     `json:"inUse"`
+	// Estimates: «Запись 1 ч ≈ N мин» in the current mode and in every mode (TASK-084).
+	Estimates *ModelLoadEstimates `json:"estimates"`
 }
 
 // AvailableModelItem is the JSON form of a catalog entry. Tier is "fast", "balanced", "accurate", "max" or "" (none);
@@ -188,6 +193,9 @@ type AvailableModelItem struct {
 	Load          int      `json:"load"`
 	Heavy         bool     `json:"heavy"`
 	Reduced       bool     `json:"reduced"`
+	// Estimates: «Запись 1 ч ≈ N мин» in the current mode and in every mode, with the speed measured for the model
+	// installed from this entry (TASK-084); null when unavailable.
+	Estimates *ModelLoadEstimates `json:"estimates"`
 }
 
 // ModelDownload is the JSON form of the download state. Phase is "" (none yet), "downloading", "verifying",
@@ -215,6 +223,9 @@ type ModelsView struct {
 	MachineKnown   bool                 `json:"machineKnown"`
 	Download       ModelDownload        `json:"download"`
 	ModelsHomePage string               `json:"modelsHomePage"` // to show; OpenModelsHomePage opens it
+	// RecognitionLoad is the current load mode the Current estimates are for: gentle, normal or max; "" when the
+	// estimates are unavailable.
+	RecognitionLoad string `json:"recognitionLoad"`
 }
 
 // DownloadPlanView is the disk space check before a download. Warning is the text when the space is not enough.
@@ -306,13 +317,22 @@ func (s *ModelsService) List(ctx context.Context) (ModelsView, error) {
 		NeedsDefault: needsDefault, SpeechReady: s.speechReady(), Download: downloadView(s.deps.Downloads.DownloadState()),
 		ModelsHomePage: ModelsHomePage,
 	}
+	speed := s.overview(ctx)
+	view.RecognitionLoad = speed.Load.String()
 	for _, m := range installed {
 		item := installedItem(m)
 		item.InUse = inUse != "" && m.ID == inUse
+		if e, ok := speed.Installed[m.ID]; ok {
+			item.Estimates = modelLoadEstimates(e)
+		}
 		view.Installed = append(view.Installed, item)
 	}
 	for _, a := range available {
 		e := a.Entry
+		var est *ModelLoadEstimates
+		if m, ok := speed.Catalog[e.ID()]; ok {
+			est = modelLoadEstimates(m)
+		}
 		view.Available = append(view.Available, AvailableModelItem{
 			CatalogID: string(e.ID()), Name: string(e.Name()), Version: string(e.Version()), SizeBytes: e.SizeBytes(),
 			Quantization: string(e.Quantization()), Capabilities: capabilityTexts(e.Capabilities()),
@@ -320,10 +340,23 @@ func (s *ModelsService) List(ctx context.Context) (ModelsView, error) {
 			Recommended: a.Recommended, LikelySlow: a.LikelySlow, Installed: a.InstalledID != "",
 			InstalledID: string(a.InstalledID), HasSourcePage: !e.SourcePage().IsZero(), Tier: string(e.Tier()),
 			EnglishOnly: e.EnglishOnly(), Family: string(e.Family()), Load: int(e.Load()),
-			Heavy: e.Heavy(), Reduced: e.Reduced(),
+			Heavy: e.Heavy(), Reduced: e.Reduced(), Estimates: est,
 		})
 	}
 	return view, nil
+}
+
+// overview returns the time estimates; empty when there are none. They are extra: the list is shown without them.
+func (s *ModelsService) overview(ctx context.Context) sttspeed.Overview {
+	if s.deps.Speed == nil {
+		return sttspeed.Overview{}
+	}
+	o, err := s.deps.Speed.Overview(ctx)
+	if err != nil {
+		s.log.Warn("ui: recognition time estimates", "err", err)
+		return sttspeed.Overview{}
+	}
+	return o
 }
 
 // speechReady reports whether speech recognition works now; it changes when the component is installed.

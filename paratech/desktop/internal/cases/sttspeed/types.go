@@ -26,6 +26,8 @@ type Overview struct {
 	Catalog   map[values.CatalogID]ModelEstimates
 	Installed map[shared.SttModelID]ModelEstimates
 
-	// InUse is the model a new STT job pins (modelselection); empty when none is installed or the choice is open.
-	InUse shared.SttModelID
+	// InUse is the model a new STT job pins (modelselection), with its name; empty when none is installed or the
+	// choice is open.
+	InUse     shared.SttModelID
+	InUseName values.ModelName
 }

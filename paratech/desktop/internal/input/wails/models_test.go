@@ -358,9 +358,9 @@ func TestModelsJSONNames(t *testing.T) {
 		v    any
 		keys string
 	}{
-		{ModelsView{}, "available,download,installed,machineKnown,modelsHomePage,needsDefault,speechReady"},
-		{InstalledModelItem{}, "capabilities,catalogId,fromCatalog,id,inUse,installedAt,isDefault,name,quantization,sha256,sizeBytes,version"},
-		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,family,hasSourcePage,heavy,installed,installedId,likelySlow,load,minCpuCores,minRamMb,name,quantization,recommended,reduced,sizeBytes,tier,version"},
+		{ModelsView{}, "available,download,installed,machineKnown,modelsHomePage,needsDefault,recognitionLoad,speechReady"},
+		{InstalledModelItem{}, "capabilities,catalogId,estimates,fromCatalog,id,inUse,installedAt,isDefault,name,quantization,sha256,sizeBytes,version"},
+		{AvailableModelItem{}, "capabilities,catalogId,englishOnly,estimates,family,hasSourcePage,heavy,installed,installedId,likelySlow,load,minCpuCores,minRamMb,name,quantization,recommended,reduced,sizeBytes,tier,version"},
 		{ModelDownload{}, "catalogId,doneBytes,error,phase,running,totalBytes"},
 		{DownloadPlanView{}, "availableBytes,catalogId,enough,haveBytes,requiredBytes,totalBytes,warning"},
 		{ModelFileSelection{}, "cancelled,fileName,selectionId,sha256,sizeBytes,suggestedName,suggestedQuantization,suggestedVersion"},

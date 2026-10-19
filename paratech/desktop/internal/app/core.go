@@ -35,6 +35,7 @@ import (
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/cases/speechcomponent"
+	"paratech/desktop/internal/cases/sttspeed"
 	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/transcriptview"
@@ -262,10 +263,18 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
 	}
+	// The time estimates use the processor count the engine runs with (ADR-0016).
+	speed, err := sttspeed.New(sttspeed.Deps{
+		Models: sqlite.NewModelRepository(db), Catalog: embeddedCatalog{}, Speeds: speeds, Settings: settings,
+	}, logicalCPUs())
+	if err != nil {
+		return fmt.Errorf("app: recognition time estimates: %w", err)
+	}
 	history, err := activity.New(recordings, jobs, lessons, log, hiddenJobTypes()...)
 	if err != nil {
 		return fmt.Errorf("app: activity: %w", err)
 	}
+	history.WithRemaining(speed, e.clock)
 	// Local only: the viewer works while the Hub or the internet is down. Titles in the local time zone.
 	viewer, err := transcriptview.New(transcriptview.Deps{
 		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Jobs: jobs, Live: parts, Artifacts: store,
@@ -284,7 +293,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		cleanup{name: "model manager writes allowed", run: c.manager.markReady})
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
-		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech,
+		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech, Speed: speed,
 		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 		Transcript: viewer,

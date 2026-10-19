@@ -138,8 +138,8 @@ func TestOverview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Load != shared.LoadGentle || got.InUse != "m-large" {
-		t.Errorf("load %q, in use %q", got.Load, got.InUse)
+	if got.Load != shared.LoadGentle || got.InUse != "m-large" || got.InUseName != "large-v3-f16" {
+		t.Errorf("load %q, in use %q %q", got.Load, got.InUse, got.InUseName)
 	}
 	if len(got.Catalog) != 2 || len(got.Installed) != 2 {
 		t.Fatalf("catalog %d, installed %d estimates", len(got.Catalog), len(got.Installed))
