@@ -33,6 +33,16 @@ func TestSchemasMatchTheParsers(t *testing.T) {
 		{values.OperationHomeworkDraft, draftWire{}, map[string]float64{
 			"title.minLength": 1, "title.maxLength": MaxTitleRunes, "body.minLength": 1, "body.maxLength": MaxDraftBodyRunes,
 		}},
+		{values.OperationLectureText, lectureTextWire{}, map[string]float64{
+			"blocks.maxItems":                 MaxLectureBlocks,
+			"blocks[].heading.minLength":      1,
+			"blocks[].heading.maxLength":      MaxLectureHeadingRunes,
+			"blocks[].from.minimum":           0,
+			"blocks[].paragraphs.minItems":    1,
+			"blocks[].paragraphs.maxItems":    MaxLectureParagraphs,
+			"blocks[].paragraphs[].minLength": 1,
+			"blocks[].paragraphs[].maxLength": MaxLectureParagraphRunes,
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.op), func(t *testing.T) {
@@ -61,7 +71,7 @@ func walk(t *testing.T, node map[string]any, typ reflect.Type, path string, foun
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
-	for _, k := range []string{"minLength", "maxLength", "maxItems"} {
+	for _, k := range []string{"minLength", "maxLength", "minItems", "maxItems", "minimum"} {
 		if v, ok := node[k].(float64); ok {
 			found[strings.TrimPrefix(path, ".")+"."+k] = v
 		}
@@ -79,6 +89,11 @@ func walk(t *testing.T, node map[string]any, typ reflect.Type, path string, foun
 	case reflect.TypeOf(""):
 		if node["type"] != "string" {
 			t.Fatalf("%s: type %v, the parser takes a string", path, node["type"])
+		}
+		return
+	case reflect.TypeOf(0):
+		if node["type"] != "integer" {
+			t.Fatalf("%s: type %v, the parser takes an integer", path, node["type"])
 		}
 		return
 	}

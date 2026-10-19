@@ -27,6 +27,11 @@ type Lesson struct {
 	// Start anchors relative dates ("by next Monday"). Pass it in the student's time zone: its UTC offset is the one
 	// the model is told to use.
 	Start time.Time
+	// Subject is the subject of the lesson as the schedule names it; empty when unknown (lecture_text only).
+	Subject string
+	// Kind is the kind of the lesson; it only selects trusted wording of the lecture_text instructions, it is never
+	// sent as data.
+	Kind values.LessonKind
 }
 
 // Assignment is what the caller knows about the assignment a draft is for.
@@ -59,6 +64,8 @@ type Context struct {
 	operation             values.Operation
 	lessonTitle           string
 	lessonStart           time.Time
+	lessonSubject         string
+	lessonKind            values.LessonKind
 	transcript            string
 	summary               string
 	assignmentTitle       string
@@ -71,7 +78,8 @@ type Context struct {
 //
 //   - summary: a non-empty transcript;
 //   - extract_homework_deadlines: a non-empty transcript and the lesson start;
-//   - homework_draft: an assignment title or description.
+//   - homework_draft: an assignment title or description;
+//   - lecture_text: a non-empty transcript; the lesson subject and kind are kept too.
 //
 // Texts are trimmed. A missing required field wraps ErrMissingContext, a bad text ErrInvalidMaterial; fields that are
 // not selected are not validated either, they are simply dropped.
@@ -87,7 +95,7 @@ func Select(operation values.Operation, m Material) (Context, error) {
 	}
 
 	switch operation {
-	case values.OperationSummary, values.OperationExtractHomework:
+	case values.OperationSummary, values.OperationExtractHomework, values.OperationLectureText:
 		if c.transcript, err = joinTranscript(m.Transcript); err != nil {
 			return Context{}, err
 		}
@@ -99,6 +107,15 @@ func Select(operation values.Operation, m Material) (Context, error) {
 				return Context{}, fmt.Errorf("%w: lesson start", ErrMissingContext)
 			}
 			c.lessonStart = m.Lesson.Start
+		}
+		if operation == values.OperationLectureText {
+			if c.lessonSubject, err = oneLine("lesson subject", m.Lesson.Subject); err != nil {
+				return Context{}, err
+			}
+			if !m.Lesson.Kind.Valid() {
+				return Context{}, invalid("lesson kind", "is not a known kind")
+			}
+			c.lessonKind = m.Lesson.Kind
 		}
 
 	case values.OperationHomeworkDraft:
@@ -197,7 +214,13 @@ func (c Context) LessonTitle() string { return c.lessonTitle }
 // LessonStart returns the lesson start (extract_homework_deadlines only).
 func (c Context) LessonStart() time.Time { return c.lessonStart }
 
-// Transcript returns the transcript text, one segment per line (summary and extract_homework_deadlines only).
+// LessonSubject returns the lesson subject; empty when unknown (lecture_text only).
+func (c Context) LessonSubject() string { return c.lessonSubject }
+
+// LessonKind returns the lesson kind (lecture_text only).
+func (c Context) LessonKind() values.LessonKind { return c.lessonKind }
+
+// Transcript returns the transcript text, one segment per line (summary, extract_homework_deadlines and lecture_text).
 func (c Context) Transcript() string { return c.transcript }
 
 // Summary returns the lesson summary (homework_draft only).

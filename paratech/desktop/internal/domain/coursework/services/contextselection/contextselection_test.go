@@ -14,7 +14,7 @@ var lessonStart = time.Date(2026, 10, 14, 10, 0, 0, 0, time.FixedZone("MSK", 3*6
 // full returns material with every field set, so each test can see what an operation drops.
 func full() Material {
 	return Material{
-		Lesson:         Lesson{Title: "  Linear algebra  ", Start: lessonStart},
+		Lesson:         Lesson{Title: "  Linear algebra  ", Start: lessonStart, Subject: " Mathematics ", Kind: values.LessonKindSeminar},
 		Transcript:     []Segment{{StartMs: 0, EndMs: 900, Text: " Hello. "}, {StartMs: 900, EndMs: 950, Text: "  "}, {StartMs: 1000, EndMs: 2000, Text: "Solve 1-5."}},
 		Summary:        "SUMMARY-TEXT",
 		Assignment:     Assignment{Title: "Exercises 1-5", Description: "From chapter 2.", Due: lessonStart.Add(48 * time.Hour)},
@@ -39,6 +39,10 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 			operation: values.OperationHomeworkDraft, lessonTitle: "Linear algebra", summary: "SUMMARY-TEXT",
 			assignmentTitle: "Exercises 1-5", assignmentDescription: "From chapter 2.", previousDraft: "PREVIOUS-DRAFT",
 			studentRequest: "make it shorter",
+		}},
+		{values.OperationLectureText, Context{
+			operation: values.OperationLectureText, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
+			lessonKind: values.LessonKindSeminar, transcript: "Hello.\nSolve 1-5.",
 		}},
 	}
 	for _, tc := range cases {
@@ -82,6 +86,9 @@ func TestSelectRejects(t *testing.T) {
 		{"title with control", values.OperationSummary, with(func(m *Material) { m.Lesson.Title = "a\tb" }), ErrInvalidMaterial},
 		{"title too long", values.OperationHomeworkDraft, with(func(m *Material) { m.Lesson.Title = strings.Repeat("я", MaxTitleRunes+1) }), ErrInvalidMaterial},
 		{"assignment title with newline", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Title = "a\nb" }), ErrInvalidMaterial},
+		{"lecture text without transcript", values.OperationLectureText, with(func(m *Material) { m.Transcript = nil }), ErrMissingContext},
+		{"lecture text subject with newline", values.OperationLectureText, with(func(m *Material) { m.Lesson.Subject = "a\nb" }), ErrInvalidMaterial},
+		{"lecture text unknown kind", values.OperationLectureText, with(func(m *Material) { m.Lesson.Kind = "exam" }), ErrInvalidMaterial},
 		{"description with NUL", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Description = "a\x00b" }), ErrInvalidMaterial},
 		{"request too large", values.OperationHomeworkDraft, with(func(m *Material) { m.StudentRequest = strings.Repeat("x", MaxStudentRequestBytes+1) }), ErrInvalidMaterial},
 		{"summary invalid utf8", values.OperationHomeworkDraft, with(func(m *Material) { m.Summary = "\xff" }), ErrInvalidMaterial},

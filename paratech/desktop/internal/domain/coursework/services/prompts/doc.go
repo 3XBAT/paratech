@@ -1,5 +1,5 @@
-// Package prompts is the prompt contract of the LLM operations summary, extract_homework_deadlines and
-// homework_draft (PRD sections 9.1 and 13.3, AC-18): the trusted instructions, the JSON Schema of each answer and the
+// Package prompts is the prompt contract of the LLM operations summary, extract_homework_deadlines, homework_draft
+// and lecture_text (PRD sections 9.1 and 13.3, AC-18, TASK-090): the trusted instructions, the JSON Schema of each answer and the
 // strict checks that turn the untrusted answer into typed values. It is pure: no I/O, no clock, no ids.
 //
 // Separation of instructions and data. Instructions are constants of this package and never contain user data.
@@ -15,4 +15,8 @@
 // counts, no control or bidi-override characters, deadlines as RFC 3339 times near the lesson date. Error messages
 // name fields, never model text. A draft holds a title and a body only; recipients, paths and calendars are never part
 // of an answer (docs/refs/prompt-injection.md rule 2), and extracted deadlines are proposals, not actions.
+//
+// lecture_text is sent per part of the transcript (BuildLectureText, LectureTextVersion): the segments with their
+// indexes and start times, the end of the previous part as context and the lesson title and subject, all as untrusted
+// data. The lesson kind only selects a constant sentence of the instructions (LectureTextInstructions).
 package prompts

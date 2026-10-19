@@ -53,6 +53,11 @@ Reminder: your previous answer to this request could not be read. Answer again w
 	lengthReminder = `
 
 Reminder: your previous answer to this request was cut off before its JSON object ended. Answer again with exactly one complete JSON object that conforms to the JSON Schema above, and keep the texts shorter so that the whole object fits. No Markdown, no code fences, no text before or after it.`
+
+	// The lecture text must keep all content, so a cut-off answer is not asked to be shorter in content.
+	lectureLengthReminder = `
+
+Reminder: your previous answer to this request was cut off before its JSON object ended. Answer again with exactly one complete JSON object that conforms to the JSON Schema above. Keep all the content of the segments, but use short headings, do not repeat context_before and write no text outside the object. No Markdown, no code fences.`
 )
 
 // Remind returns req with a fixed reminder of the answer format appended to its trusted instructions, for a repeated
@@ -61,7 +66,10 @@ Reminder: your previous answer to this request was cut off before its JSON objec
 // request would exceed the size limit).
 func Remind(req values.LLMRequest, truncated bool) (values.LLMRequest, error) {
 	reminder := formatReminder
-	if truncated {
+	switch {
+	case truncated && req.Operation() == values.OperationLectureText:
+		reminder = lectureLengthReminder
+	case truncated:
 		reminder = lengthReminder
 	}
 	return values.NewLLMRequest(req.Operation(), req.ModelAlias(), req.Instructions()+reminder, req.UntrustedData(),
@@ -77,13 +85,19 @@ func Schema(operation values.Operation) string {
 		return extractSchema
 	case values.OperationHomeworkDraft:
 		return draftSchema
+	case values.OperationLectureText:
+		return lectureTextSchema
 	}
 	return ""
 }
 
 // Instructions returns the trusted instructions of operation: constant text written by the app, including the answer
-// schema. They never contain user data. Empty for an unknown operation.
+// schema. They never contain user data. Empty for an unknown operation. For lecture_text they are those of an unknown
+// lesson kind (LectureTextInstructions).
 func Instructions(operation values.Operation) string {
+	if operation == values.OperationLectureText {
+		return LectureTextInstructions(values.LessonKindUnknown)
+	}
 	task := map[values.Operation]string{
 		values.OperationSummary:         summaryTask,
 		values.OperationExtractHomework: extractTask,
@@ -150,6 +164,8 @@ func Build(c contextselection.Context, modelAlias, idempotencyKey string) (value
 			PreviousDraft:  c.PreviousDraft(),
 			StudentRequest: c.StudentRequest(),
 		}
+	case values.OperationLectureText:
+		return values.LLMRequest{}, fmt.Errorf("%w: lecture_text is sent in parts (BuildLectureText)", ErrNoContext)
 	default:
 		return values.LLMRequest{}, fmt.Errorf("%w: no operation selected", ErrNoContext)
 	}
