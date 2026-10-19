@@ -131,6 +131,7 @@ func TestFinishedJobsShowNothing(t *testing.T) {
 	jobs := sqlite.NewJobRepository(u.c.db)
 	want := map[job.Type]job.Status{
 		homeworkflow.SummarizeJobType: job.StatusCompleted, homeworkflow.ExtractHomeworkJobType: job.StatusCompleted,
+		homeworkflow.LectureTextJobType: job.StatusCompleted,
 	}
 	var all []*job.Job
 	testenv.Eventually(t, "every job ends", func() bool {
@@ -138,7 +139,7 @@ func TestFinishedJobsShowNothing(t *testing.T) {
 		if all, _, err = jobs.ListActivity(ctx, 100, nil); err != nil {
 			t.Fatal(err)
 		}
-		return len(all) == 4 && !slices.ContainsFunc(all, func(j *job.Job) bool { return !j.Status().IsTerminal() })
+		return len(all) == 5 && !slices.ContainsFunc(all, func(j *job.Job) bool { return !j.Status().IsTerminal() })
 	}, nil)
 	// After the stop no later event can reach the popup.
 	if err := u.life.shutdown(); err != nil {

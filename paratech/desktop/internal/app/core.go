@@ -139,6 +139,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	speeds := sqlite.NewSpeedStore(db)     // the recognition speed measured on this computer (TASK-084)
 	lessons := sqlite.NewLessonRepository(db)
 	summaries := sqlite.NewSummaryRepository(db)
+	lectureTexts := sqlite.NewLectureTextRepository(db) // the lecture text of a transcript (TASK-090)
 	assignments := sqlite.NewAssignmentRepository(db)
 	maxAttempts := e.runner.Backoff.MaxAttempts
 
@@ -163,15 +164,17 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	post, err := homeworkflow.NewPostProcessor(homeworkflow.PostProcessDeps{
 		LLM: llm, Transcripts: transcripts, Recordings: recordings, Lessons: lessons, Artifacts: store,
-		Summaries: summaries, Assignments: assignments, Jobs: jobs, Clock: e.local, IDs: e.ids, Log: log,
-		ModelAlias: modelAlias, MaxAttempts: maxAttempts,
+		Summaries: summaries, Assignments: assignments, LectureTexts: lectureTexts, Jobs: jobs, Clock: e.local, IDs: e.ids,
+		Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
 	})
 	if err != nil {
 		return fmt.Errorf("app: post-processing: %w", err)
 	}
-	// «Повторить» and «Сделать конспект заново» of the recording rows create new post-processing jobs (TASK-086).
+	// «Повторить» and «Сделать конспект заново» of the recording rows create new post-processing jobs (TASK-086); the
+	// lecture text of an older transcript is started the same way (TASK-090).
 	rerunner, err := homeworkflow.NewRerunner(homeworkflow.RerunDeps{
 		Transcripts: transcripts, Jobs: jobs, Summaries: summaries, Clock: e.local, IDs: e.ids, Log: log,
+		MaxAttempts: maxAttempts,
 	})
 	if err != nil {
 		return fmt.Errorf("app: post-processing reruns: %w", err)
@@ -296,8 +299,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	}
 	// Local only as well: the summary and the homework found are read from the post-processing results.
 	summaryViewer, err := summaryview.New(summaryview.Deps{
-		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Summaries: summaries, Assignments: assignments,
-		Jobs: jobs, Writer: textfile.New(), Clock: e.local, Log: log,
+		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Summaries: summaries,
+		LectureTexts: lectureTexts, Assignments: assignments, Jobs: jobs, Writer: textfile.New(), Clock: e.local, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: summary viewer: %w", err)

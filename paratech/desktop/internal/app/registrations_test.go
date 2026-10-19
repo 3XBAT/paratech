@@ -116,6 +116,8 @@ func TestRegistrationPolicies(t *testing.T) {
 		{typ: transcribe.JobType, heavy: true, recovery: jobrunner.RecoveryRequeue},
 		{typ: homeworkflow.SummarizeJobType, recovery: jobrunner.RecoveryRequeue},
 		{typ: homeworkflow.ExtractHomeworkJobType, recovery: jobrunner.RecoveryRequeue},
+		// TASK-090: light like the other LLM jobs; an interrupted attempt continues from the parts it stored.
+		{typ: homeworkflow.LectureTextJobType, recovery: jobrunner.RecoveryRequeue},
 		{typ: homeworkflow.HomeworkDraftJobType, recovery: jobrunner.RecoveryRequeue},
 		// Hard rule 7: the side effect is never Heavy, never requeued blindly and not cancelled mid-send.
 		{typ: senddelivery.JobType, recovery: jobrunner.RecoveryReconcile, reconciler: true, uncancellable: true},
@@ -150,6 +152,11 @@ func TestRegistrationPolicies(t *testing.T) {
 			t.Errorf("%s timeout %v, want at least twice the Hub request timeout for each of %d calls", tt.typ, got, tt.calls)
 		}
 	}
+	// The lecture text makes its calls one after the other: one Hub request timeout each.
+	if got, calls := registrationOf(t, regs, homeworkflow.LectureTextJobType).Timeout, homeworkflow.MaxLectureTextCalls; got <
+		time.Duration(calls)*hubclient.DefaultRequestTimeout {
+		t.Errorf("lecture_text timeout %v, want at least the Hub request timeout for each of %d calls", got, calls)
+	}
 }
 
 // Every job type has a handler.
@@ -160,7 +167,8 @@ func TestRegisteredTypes(t *testing.T) {
 	}
 	want := []job.Type{
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
-		homeworkflow.HomeworkDraftJobType, senddelivery.JobType, schedulesync.CalendarSyncJobType,
+		homeworkflow.LectureTextJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+		schedulesync.CalendarSyncJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -174,7 +182,7 @@ func TestRegisteredTypes(t *testing.T) {
 func TestHiddenJobTypes(t *testing.T) {
 	shown := []job.Type{
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
-		homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
+		homeworkflow.LectureTextJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
 	}
 	hidden := hiddenJobTypes()
 	if !slices.Equal(hidden, []job.Type{schedulesync.CalendarSyncJobType}) {
@@ -225,8 +233,8 @@ func TestRegistrationsWithoutAnEngine(t *testing.T) {
 		got = append(got, r.Type)
 	}
 	want := []job.Type{
-		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
-		schedulesync.CalendarSyncJobType,
+		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.LectureTextJobType,
+		homeworkflow.HomeworkDraftJobType, senddelivery.JobType, schedulesync.CalendarSyncJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)

@@ -26,6 +26,11 @@ const (
 	// with the room of one call.
 	postProcessJobTimeout = homeworkflow.AnswerCalls * llmJobTimeout
 
+	// lectureTextJobTimeout covers the worst case of one lecture_text attempt: MaxLectureTextCalls (64 parts and the
+	// reminders) one after the other, each ending at the Hub client's request timeout, plus the room of one call for
+	// the local work. An attempt that still times out keeps the parts it made: the next one continues from there.
+	lectureTextJobTimeout = homeworkflow.MaxLectureTextCalls*hubclient.DefaultRequestTimeout + llmJobTimeout
+
 	// sendEmailTimeout is above twice the SMTP session timeout: the smtp adapter's deadline covers the session setup
 	// and then the transaction separately. A configured smtp.Config.Timeout must keep this rule.
 	sendEmailTimeout = 2*smtp.DefaultTimeout + time.Minute
@@ -41,7 +46,7 @@ const modelAlias = "default"
 // jobHandlers are the use cases that run jobs.
 type jobHandlers struct {
 	stt         jobrunner.Handler // nil without a usable speech recognition engine
-	postProcess jobrunner.Handler // summarize and extract_homework
+	postProcess jobrunner.Handler // summarize, extract_homework and lecture_text
 	drafts      jobrunner.Handler
 	delivery    deliveryJobs
 	calendar    jobrunner.Handler // the calendar sync of the schedule
@@ -84,6 +89,7 @@ func registrations(h jobHandlers) []jobrunner.Registration {
 	return append(regs,
 		llm(homeworkflow.SummarizeJobType, h.postProcess, postProcessJobTimeout),
 		llm(homeworkflow.ExtractHomeworkJobType, h.postProcess, postProcessJobTimeout),
+		llm(homeworkflow.LectureTextJobType, h.postProcess, lectureTextJobTimeout),
 		llm(homeworkflow.HomeworkDraftJobType, h.drafts, llmJobTimeout),
 		// An external side effect: never Heavy (a flapping power source must not loop it), never rerun blindly.
 		jobrunner.Registration{

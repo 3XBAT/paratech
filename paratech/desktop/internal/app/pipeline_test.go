@@ -30,6 +30,7 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -48,6 +49,8 @@ const (
 	pipelineExtract = `{"assignments":[` +
 		`{"title":"Exercise 5","description":"Page 12","due":null},` +
 		`{"title":"Read the next chapter","description":"","due":null}]}`
+	// pipelineLecture is the lecture text of the only part (TASK-090).
+	pipelineLecture = `{"blocks":[{"heading":"Greetings","from":0,"paragraphs":["Hello everyone. Exercise 5 is homework."]}]}`
 )
 
 // uiCore is a UI-mode core on dataDir with a fake popup, as the Started hook starts it.
@@ -103,6 +106,7 @@ func pipelineEnv(t *testing.T) (env, *fakes, *testenv.FakeHub, string) {
 	hub := testenv.NewFakeHub()
 	hub.Answer(cvalues.OperationSummary, pipelineSummary)
 	hub.Answer(cvalues.OperationExtractHomework, pipelineExtract)
+	hub.Answer(cvalues.OperationLectureText, pipelineLecture)
 	hubURL, hubHTTP := testenv.StartFakeHub(t, hub)
 
 	e, f := testEnv(t)
@@ -205,6 +209,11 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	if before.transcripts != 1 || before.summaries != 1 || len(before.assignments) != 2 {
 		t.Fatalf("after the pipeline: %+v; want one transcript, one summary, two assignments", before)
 	}
+	// TASK-090: the lecture text is made with them.
+	if lt, err := sqlite.NewLectureTextRepository(u.c.db).Get(ctx, lecturetext.IDOf(tr)); err != nil || !lt.Ready() ||
+		lt.Blocks()[0].Heading() != "Greetings" {
+		t.Fatalf("lecture text after the pipeline: %v", err)
+	}
 	for _, j := range before.jobs {
 		if j.status != job.StatusCompleted || j.attempts != 1 {
 			t.Fatalf("job %+v, want COMPLETED after one attempt", j)
@@ -267,8 +276,8 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 	if got := loggedStatuses(t, dir); !maps.EqualFunc(got, statuses, slices.Equal) {
 		t.Fatalf("statuses after the restart %v, want unchanged %v", got, statuses)
 	}
-	if n, charged := len(hub.Requests()), hub.Charged(); n != 2 || charged != 2 {
-		t.Fatalf("the Hub got %d requests and charged %d keys, want 2 and 2", n, charged)
+	if n, charged := len(hub.Requests()), hub.Charged(); n != 3 || charged != 3 {
+		t.Fatalf("the Hub got %d requests and charged %d keys, want 3 and 3", n, charged)
 	}
 }
 
@@ -318,8 +327,9 @@ func checkTranscriptPin(t *testing.T, c *core, tr shared.TranscriptID, rec share
 func checkHubSawNoAudio(t *testing.T, hub *testenv.FakeHub) {
 	t.Helper()
 	reqs, auth := hub.Requests(), hub.Authorizations()
-	if len(reqs) != 2 || len(auth) != 2 {
-		t.Fatalf("the Hub got %d requests (%d authorized), want 2", len(reqs), len(auth))
+	// The summary, the homework search and the lecture text of one part (TASK-090).
+	if len(reqs) != 3 || len(auth) != 3 {
+		t.Fatalf("the Hub got %d requests (%d authorized), want 3", len(reqs), len(auth))
 	}
 	forms := audioForms([]byte(pipelineAudio))
 	for i, r := range reqs {
