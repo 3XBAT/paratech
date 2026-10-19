@@ -62,7 +62,8 @@ type RecordingItem struct {
 	Step string `json:"step"`
 	// ProgressPercent of the transcription, 0..100.
 	ProgressPercent int `json:"progressPercent"`
-	// QueueReason of a queued chain: inLine, retry, power, network or quota.
+	// QueueReason of a queued chain: inLine, retry, power, network, quota, serviceNotConfigured (the Hub has no address
+	// or key; action openConnections) or serviceUnavailable (the Hub does not answer; retried automatically).
 	QueueReason string `json:"queueReason"`
 	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed or homeworkFailed.
 	ErrorCode string `json:"errorCode"`

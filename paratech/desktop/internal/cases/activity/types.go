@@ -73,6 +73,10 @@ const (
 	QueuePower   QueueReason = "power"   // waits for AC power (PRD section 7.4)
 	QueueNetwork QueueReason = "network" // waits for the network
 	QueueQuota   QueueReason = "quota"   // waits for the Hub quota
+	// QueueServiceNotConfigured: the Hub has no address or key; the job runs once the user sets it up (TASK-083).
+	QueueServiceNotConfigured QueueReason = "serviceNotConfigured"
+	// QueueServiceUnavailable: the Hub did not serve the call for now; the job is retried automatically (TASK-083).
+	QueueServiceUnavailable QueueReason = "serviceUnavailable"
 )
 
 // ErrorCode says what failed.

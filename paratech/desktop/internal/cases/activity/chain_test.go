@@ -77,6 +77,29 @@ func jobIn(t *testing.T, id string, typ job.Type, created time.Duration, s job.S
 	return j
 }
 
+// jobWithCause builds a job of typ created at t0 that the runner parked (WAITING_FOR_NETWORK) or retried (RETRY_WAIT,
+// FAILED with one attempt) with the cause it recorded (TASK-083).
+func jobWithCause(t *testing.T, id string, typ job.Type, s job.Status, cause job.Cause) *job.Job {
+	t.Helper()
+	attempts := 3
+	if s == job.StatusFailed {
+		attempts = 1
+	}
+	j, err := job.New(job.Spec{ID: shared.JobID(id), Type: typ, Key: string(typ) + ":" + id, MaxAttempts: attempts}, t0)
+	must(t, err)
+	must(t, j.Claim(t0.Add(time.Second)))
+	at := t0.Add(2 * time.Second)
+	if s == job.StatusWaitingForNetwork {
+		must(t, j.WaitForCause(s, cause, at))
+	} else {
+		must(t, j.RetryCause(at, at.Add(time.Minute), "hub: hub unavailable", cause))
+	}
+	if j.Status() != s || j.Cause() != cause {
+		t.Fatalf("job in %s %q, want %s %q", j.Status(), j.Cause(), s, cause)
+	}
+	return j
+}
+
 func reportPercent(j *job.Job, percent int, at time.Time) error {
 	p, err := job.NewProgress(percent, "chunk=1")
 	if err != nil {
@@ -98,6 +121,9 @@ func TestChainOf(t *testing.T) {
 	}
 	in := func(id string, typ job.Type, s job.Status) func(t *testing.T) *job.Job {
 		return func(t *testing.T) *job.Job { return jobIn(t, id, typ, 0, s) }
+	}
+	caused := func(id string, typ job.Type, s job.Status, c job.Cause) func(t *testing.T) *job.Job {
+		return func(t *testing.T) *job.Job { return jobWithCause(t, id, typ, s, c) }
 	}
 	tests := []struct {
 		name string
@@ -170,6 +196,39 @@ func TestChainOf(t *testing.T) {
 			name: "summary waits for the network", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), in("a", sum, job.StatusWaitingForNetwork), in("h", hw, job.StatusQueued)},
 			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueNetwork},
+		},
+		{
+			name: "summary service not configured", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), caused("a", sum, job.StatusWaitingForNetwork, job.CauseServiceNotConfigured),
+				in("h", hw, job.StatusQueued)},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueServiceNotConfigured, Action: ActionOpenConnections},
+		},
+		{
+			name: "homework service not configured", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum),
+				caused("h", hw, job.StatusWaitingForNetwork, job.CauseServiceNotConfigured)},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueServiceNotConfigured, Action: ActionOpenConnections},
+		},
+		{
+			name: "summary service unavailable", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), caused("a", sum, job.StatusRetryWait, job.CauseServiceUnavailable),
+				in("h", hw, job.StatusQueued)},
+			want: Chain{
+				Stage: StageQueued, Step: StepSummary, QueueReason: QueueServiceUnavailable, JobError: "hub: hub unavailable",
+			},
+		},
+		{
+			name: "summary retries without a cause", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), caused("a", sum, job.StatusRetryWait, job.CauseNone)},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueRetry, JobError: "hub: hub unavailable"},
+		},
+		{
+			name: "summary failed while the service was unavailable", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), caused("a", sum, job.StatusFailed, job.CauseServiceUnavailable)},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed,
+				JobError: "attempts exhausted: hub: hub unavailable", Action: ActionOpenConnections,
+			},
 		},
 		{
 			name: "homework waits for the quota", rec: recording.StatusCompleted,
