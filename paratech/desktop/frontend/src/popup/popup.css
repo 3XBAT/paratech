@@ -1,7 +1,8 @@
-/* The lesson window, 360x300 DIP (internal/input/wails/spec.go). Needs only tokens.css and fonts.css: the few base and
-   component rules it uses are repeated here, so the popup does not load the main window's styles. With a start error
-   the window grows in height to show the texts in full (Popup.tsx measures them). The buttons never shrink: only the
-   text area does, and it scrolls as a last resort (larger Windows text, max height) instead of pushing them out. */
+/* The lesson window, 360x300 DIP (internal/input/wails/spec.go). Needs only tokens.css, fonts.css and the shared
+   sourcePicker.css: the few base and component rules it uses are repeated here, so the popup does not load the main
+   window's styles. With a start error the window grows in height to show the texts in full (Popup.tsx measures them).
+   The buttons never shrink: only the text area does, and it scrolls as a last resort (larger Windows text, max height)
+   instead of pushing them out. */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body {
@@ -37,23 +38,7 @@ h1, p, ul { margin: 0; }
 .title { overflow: hidden; font-size: var(--fs-h2); line-height: var(--lh-h2); font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; text-overflow: ellipsis; }
 .p-note { color: var(--muted); }
 
-/* Source picker: one row like a select with its own arrow; the list opens over the rest and scrolls inside itself. */
-.picker { position: relative; }
-.source { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 32px; padding: 3px 10px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); text-align: left; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.source:disabled { opacity: .5; cursor: not-allowed; }
-.source .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.icon { flex: none; width: 20px; height: 20px; object-fit: contain; }
-.letter { display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--neu-b); color: var(--neu-t); font-size: 11.5px; font-weight: 600; }
-.letter.whole { font-size: 8px; }
-.mark { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: var(--r-chip); font-size: 11.5px; font-weight: 600; line-height: 16px; }
-.mark.playing { background: var(--ok-b); color: var(--ok-t); }
-.mark.muted, .mark.gone { background: var(--rec-b); color: var(--rec-t); border-style: dashed; }
-.caret { width: 16px; height: 16px; color: var(--muted); }
-.backdrop { position: fixed; inset: 0; z-index: 1; }
-.list { position: absolute; z-index: 2; top: 100%; right: 0; left: 0; max-height: 190px; margin-top: 2px; padding: 2px; overflow-y: auto; list-style: none; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); box-shadow: var(--sh-win); }
-.list .source { border-color: transparent; }
-.list .source:hover { background: var(--panel-2); }
-.list .source.current { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent-fill); }
+/* The source picker is in ../sourcePicker/sourcePicker.css. */
 
 /* Error banner, warnings and the general advice. */
 .texts { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
@@ -84,7 +69,7 @@ h1, p, ul { margin: 0; }
 /* Windows high contrast: system colours replace the palette; borders keep the shapes. */
 @media (forced-colors: active) {
   :focus-visible { outline-color: Highlight; }
-  .btn, .source, .note, .mark { border: 1px solid CanvasText; }
+  .btn, .note { border: 1px solid CanvasText; }
   /* The dot is a background, which forced colours drop. */
   .dot { forced-color-adjust: none; background: CanvasText; }
 }

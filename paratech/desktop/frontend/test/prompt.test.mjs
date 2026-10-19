@@ -10,19 +10,17 @@ import {
   shownEvent,
 } from "../.test-build/bindings/prompt.js";
 import {
-  actionErrorText,
   buttonHints,
   buttonLabels,
   headings,
   noPromptNote,
   popupModel,
-  problemText,
-  problemTexts,
   staleNote,
   startingLabel,
   stateNotes,
   timeRange,
 } from "../.test-build/popup/view.js";
+import { actionErrorText, problemText, problemTexts } from "../.test-build/sourcePicker/view.js";
 
 // Mirror domain/recording/prompt and internal/input/wails/prompt.go. SNOOZED and WITHDRAWN are gone with the snooze
 // (TASK-076, owner's decision 2026-10-18).

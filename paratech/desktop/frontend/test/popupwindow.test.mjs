@@ -3,7 +3,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { popupWindowApi, windowMethods } from "../.test-build/bindings/prompt.js";
 import {
-  adviceTexts,
   collapseAdvice,
   fitSlack,
   HeightFitter,
@@ -11,6 +10,7 @@ import {
   textsLayout,
   wantedHeight,
 } from "../.test-build/popup/view.js";
+import { adviceTexts } from "../.test-build/sourcePicker/view.js";
 
 const error = "Выбранное приложение не запущено. Откройте его или выберите другое.";
 
