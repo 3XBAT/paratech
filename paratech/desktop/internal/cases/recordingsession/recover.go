@@ -212,17 +212,18 @@ func (s *Service) assembleRecovered(ctx context.Context, rec *recording.Recordin
 	if err != nil {
 		return err
 	}
-	duration, ferr := s.finalizeTrack(ctx, rec.ID(), rec.ChunksDir(), track, attempts)
+	assembled, ferr := s.finalizeTrack(ctx, rec.ID(), rec.ChunksDir(), track, attempts)
 	if ferr != nil && ctx.Err() != nil {
 		return ctx.Err() // the stored mark stays for the next start
 	}
 
 	now := s.clock.Now()
 	if ferr == nil {
-		ferr = rec.CompleteRecovery(now, track, duration) // refuses an unusable result without changing rec
+		ferr = rec.CompleteRecoveryTrack(now, track, assembled) // refuses an unusable result without changing rec
 	}
 	switch {
 	case ferr == nil:
+		s.logSilent(rec, assembled)
 	case errors.Is(ferr, recording.ErrNoAudio) || errors.Is(ferr, recording.ErrInvalidRecording):
 		s.log.Warn("the interrupted recording has no usable audio", slog.String("recording", rec.ID().String()), slog.Any("error", ferr))
 		err = rec.FailRecovery(now, problemRecoveryFailed+": "+ferr.Error())

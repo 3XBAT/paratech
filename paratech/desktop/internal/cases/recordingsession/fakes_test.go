@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -16,7 +16,7 @@ func stateOf(r *recording.Recording) recording.State {
 	d, _ := r.Duration()
 	return recording.State{
 		Version: r.Version(), ID: r.ID(), LessonID: r.LessonID(), Status: r.Status(), MaxDuration: r.MaxDuration(),
-		Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Problem: r.Problem(),
+		Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Silent: r.Silent(), Problem: r.Problem(),
 		StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(), HeartbeatAt: r.HeartbeatAt(),
 		CreatedAt: r.CreatedAt(), UpdatedAt: r.UpdatedAt(),
 	}
@@ -233,7 +233,7 @@ func (h *hookRecorder) failFinalizes(errs ...error) {
 	h.finalizeFails = append(h.finalizeFails, errs...)
 }
 
-func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (time.Duration, error) {
+func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (values.AssembledTrack, error) {
 	h.mu.Lock()
 	h.finalizes++
 	var err error
@@ -243,7 +243,7 @@ func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.Artif
 	h.mu.Unlock()
 
 	if err != nil {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
 	return h.FakeRecorder.Finalize(ctx, chunks, output)
 }

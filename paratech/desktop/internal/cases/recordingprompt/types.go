@@ -43,9 +43,13 @@ type View struct {
 
 // Sources is what the source picker offers (TASK-059).
 type Sources struct {
-	Apps []values.AudioApp // playing apps first, then by title (values.SortAudioApps)
-	// Selected is the source to preselect: the remembered app when it is open, else the whole computer.
+	Apps []values.AudioApp // sounding apps first, then playing ones, then by title (values.SortAudioApps)
+	// Selected is the source to preselect (values.Preselect): the remembered app when it plays or no single other app
+	// does, the one other app that plays (AutoSelected), else the whole computer.
 	Selected values.Source
+	// AutoSelected reports that Selected was chosen because it plays while the remembered app does not (TASK-082): the
+	// picker says «выбрано: звук идёт отсюда».
+	AutoSelected bool
 	// Remembered is the app recorded last time, even when it is not open now, so the picker can select it as soon as
 	// it appears; empty for the whole computer.
 	Remembered shared.AppName
@@ -56,6 +60,12 @@ type Manual struct {
 	Recording shared.RecordingID // set once the recording runs
 	Lesson    shared.LessonID    // the lesson in progress the recording is linked to; empty without one
 	Problem   prompt.Problem     // why it did not start; prompt.ProblemNone once it runs
+}
+
+// Advice is the silent-source advice of the running recording as the popup shows it (TASK-082).
+type Advice struct {
+	Recording shared.RecordingID
+	Advice    values.SourceAdvice
 }
 
 func viewOf(p *prompt.Prompt) View {

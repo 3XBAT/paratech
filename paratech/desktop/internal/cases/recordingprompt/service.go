@@ -27,6 +27,7 @@ const (
 	opSources        = "list sources"
 	opRemember       = "remember the source"
 	opStartManual    = "start recording from the main window"
+	opAdvice         = "show the source advice"
 )
 
 // rememberAttempts bounds the saves of the remembered source: a version conflict (the settings page saved meanwhile)
@@ -55,6 +56,7 @@ type Service struct {
 
 	mu      sync.Mutex
 	current *prompt.Prompt // nil when no prompt runs; a prompt is dropped when it ends
+	advice  Advice         // the silent-source advice of the running recording; zero when none (TASK-082)
 	// seq is the last prompt ID. Deliberately not the ID port (ARCH-24): a prompt ID is an in-memory handle of this
 	// process, never stored, and a deterministic sequence is unique enough.
 	seq uint64
@@ -161,7 +163,36 @@ func (s *Service) Sources(ctx context.Context) (Sources, error) {
 		return Sources{Selected: values.WholeComputer(), Remembered: remembered}, fmt.Errorf("%s: %w", opSources, err)
 	}
 	values.SortAudioApps(apps)
-	return Sources{Apps: apps, Selected: values.Preselect(remembered, apps), Remembered: remembered}, nil
+	pre := values.Preselect(remembered, apps)
+	return Sources{Apps: apps, Selected: pre.Source, AutoSelected: pre.Auto, Remembered: remembered}, nil
+}
+
+// SourceAdviceChanged shows the silent-source advice of the running recording id in the popup, without taking the
+// focus, or withdraws it when advice is zero (TASK-082). It is the AdviceListener of the recording session, wired in
+// app. The popup stays while a prompt is on offer.
+func (s *Service) SourceAdviceChanged(_ context.Context, id shared.RecordingID, advice values.SourceAdvice) error {
+	s.mu.Lock()
+	switch {
+	case !advice.IsZero():
+		s.advice = Advice{Recording: id, Advice: advice}
+	case s.advice.Recording == id:
+		s.advice = Advice{}
+	default:
+		s.mu.Unlock()
+		return nil // the advice of another recording is not shown
+	}
+	s.mu.Unlock()
+	if err := s.render(); err != nil {
+		return fmt.Errorf("%s: %w", opAdvice, err)
+	}
+	return nil
+}
+
+// Advice returns the silent-source advice the popup shows, if any.
+func (s *Service) Advice() (Advice, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.advice, !s.advice.Advice.IsZero()
 }
 
 // Start starts the recording of source that prompt id offers. On success the popup hides, the main window stays as
@@ -381,13 +412,14 @@ func (s *Service) Tick(context.Context) error {
 	return s.render()
 }
 
-// render makes the popup match the current prompt: shown while it is offered or starting, hidden otherwise.
+// render makes the popup match the current prompt: shown while it is offered or starting, or while a silent-source
+// advice is up (TASK-082), hidden otherwise.
 func (s *Service) render() error {
 	s.renderMu.Lock()
 	defer s.renderMu.Unlock()
 
 	s.mu.Lock()
-	visible := s.current != nil && s.current.State().Visible()
+	visible := s.current != nil && s.current.State().Visible() || !s.advice.Advice.IsZero()
 	s.mu.Unlock()
 	if visible {
 		return s.popup.ShowPopup()
