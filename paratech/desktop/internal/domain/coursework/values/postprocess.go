@@ -15,6 +15,7 @@ import (
 const (
 	SummarizeJobType       = "summarize"
 	ExtractHomeworkJobType = "extract_homework"
+	LectureTextJobType     = "lecture_text" // the full readable text of the lesson (TASK-090)
 )
 
 // LLMFailedMessage is the fixed last error of a post-processing job whose LLM call failed: the connection, the Hub
@@ -22,7 +23,7 @@ const (
 // other failures (TASK-086); the job may prefix it ("attempts exhausted: ...").
 const LLMFailedMessage = "post-processing: the LLM call failed"
 
-// PostProcessRequest is the payload of a summarize or extract_homework job: the transcript id only. The lesson
+// PostProcessRequest is the payload of a summarize, extract_homework or lecture_text job: the transcript id only. The lesson
 // context and the transcript text are read when the job runs, never copied into the job.
 type PostProcessRequest struct {
 	transcript shared.TranscriptID

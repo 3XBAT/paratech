@@ -20,6 +20,7 @@ func TestNewLLMRequest(t *testing.T) {
 		{"valid summary", OperationSummary, "fast", "Summarise.", "transcript text", "job-1:summary:v1", false},
 		{"valid draft", OperationHomeworkDraft, "smart-2_x", "Draft.", "", "k", false},
 		{"valid extract", OperationExtractHomework, "a", "Extract.", "x", "k", false},
+		{"valid lecture text", OperationLectureText, "default", "Format.", "x", "k", false},
 		{"unknown operation", Operation("delete_everything"), "fast", "i", "", "k", true},
 		{"empty operation", Operation(""), "fast", "i", "", "k", true},
 		{"empty alias", OperationSummary, "", "i", "", "k", true},
