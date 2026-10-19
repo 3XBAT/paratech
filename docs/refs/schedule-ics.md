@@ -19,7 +19,7 @@ syntax and RRULE values; recurrence expansion in our code). PRD sections 4.3 and
 |---|---|
 | `SUMMARY` | title (line breaks become spaces); subject and kind by the title rule of [schedule-csv.md](schedule-csv.md) |
 | `DESCRIPTION` | teacher: the first line `Преподаватель: …` or `Teacher: …` (label case-insensitive) |
-| `ORGANIZER` | teacher from its `CN` when `DESCRIPTION` names none |
+| `ORGANIZER` | teacher from its `CN` when `DESCRIPTION` names none; a `CN` with `@` or equal to `X-WR-CALNAME` (case-insensitive) is ignored: it is usually the calendar owner |
 | `DTSTART` | with `TZID` (IANA or Windows name such as `Russian Standard Time`), UTC `Z`, or floating (needs `X-WR-TIMEZONE`) |
 | `DTEND` / `DURATION` | exactly one of them |
 | `RRULE` | one per event: `FREQ=DAILY/WEEKLY/MONTHLY/YEARLY`, `INTERVAL` 1..1000, `COUNT` or `UNTIL`, `BYDAY` without numbers (DAILY, WEEKLY), `WKST` |

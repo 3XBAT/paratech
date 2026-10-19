@@ -29,6 +29,7 @@ const (
 	propRDate        = "RDATE"
 	propRecurrenceID = "RECURRENCE-ID"
 	propXWRTimezone  = "X-WR-TIMEZONE"
+	propXWRCalName   = "X-WR-CALNAME"
 	propDescription  = "DESCRIPTION"
 	propOrganizer    = "ORGANIZER"
 
@@ -100,6 +101,7 @@ type event struct {
 type reader struct {
 	zones    zones
 	calZone  *time.Location // X-WR-TIMEZONE, nil when absent or unknown
+	calName  string         // X-WR-CALNAME as calendarName returns it
 	from, to time.Time
 }
 
@@ -119,7 +121,7 @@ func (r *reader) read(ev *ics.VEvent, line int) (event, *importplan.RowError, er
 		e.title = cleanTitle(p.Value)
 	}
 	e.id = identity(e.uid, e.title)
-	e.teacher = teacher(ev)
+	e.teacher = teacher(ev, r.calName)
 	if p := prop(ev, propStatus); p != nil {
 		e.cancelled = strings.EqualFold(strings.TrimSpace(p.Value), statusCancelled)
 	}
@@ -366,7 +368,9 @@ func cleanTitle(s string) string {
 
 // teacher reads the teacher of an event: the first DESCRIPTION line "Преподаватель: ..." or "Teacher: ...", else
 // the CN of ORGANIZER, else "". It is untrusted text, cut to one clean line (lesson.CleanText).
-func teacher(ev *ics.VEvent) string {
+// The ORGANIZER of an exported calendar is often its owner, not the teacher, so a CN that is an email address or
+// the calendar name (calName) is ignored.
+func teacher(ev *ics.VEvent, calName string) string {
 	if p := prop(ev, propDescription); p != nil {
 		for _, line := range strings.Split(p.Value, "\n") {
 			label, value, ok := strings.Cut(line, ":")
@@ -384,9 +388,11 @@ func teacher(ev *ics.VEvent) string {
 	}
 	if p := prop(ev, propOrganizer); p != nil {
 		for _, cn := range param(p, paramCommonName) {
-			if t := lesson.CleanText(strings.Trim(cn, `"`), lesson.MaxTeacherRunes); t != "" {
-				return t
+			t := lesson.CleanText(strings.Trim(cn, `"`), lesson.MaxTeacherRunes)
+			if t == "" || strings.Contains(t, "@") || strings.EqualFold(t, calName) {
+				continue
 			}
+			return t
 		}
 	}
 	return ""

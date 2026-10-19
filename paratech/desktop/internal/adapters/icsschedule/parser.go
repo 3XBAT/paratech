@@ -101,6 +101,7 @@ func (p *Parser) Parse(ctx context.Context, data []byte) (importplan.Parsed, err
 	w := p.window()
 	r := &reader{zones: zones{}, from: w.From, to: w.To}
 	r.calZone = calendarZone(cal, r.zones)
+	r.calName = calendarName(cal)
 
 	var out importplan.Parsed
 	read := make([]event, 0, len(events))
@@ -154,6 +155,16 @@ func calendarZone(cal *ics.Calendar, z zones) *time.Location {
 		}
 	}
 	return nil
+}
+
+// calendarName returns the X-WR-CALNAME of the calendar cleaned as a teacher name (to compare with ORGANIZER), or "".
+func calendarName(cal *ics.Calendar) string {
+	for _, p := range cal.CalendarProperties {
+		if strings.EqualFold(p.IANAToken, propXWRCalName) {
+			return lesson.CleanText(p.Value, lesson.MaxTeacherRunes)
+		}
+	}
+	return ""
 }
 
 // occurrences expands the events into rows in file order: the occurrences of a series in time order at the line of
