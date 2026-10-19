@@ -18,6 +18,9 @@ export const headings = {
   none: "Запись",
 } as const;
 
+/** Heading of the silent-source advice (TASK-082); its text and buttons are in sourcePicker/advice.ts. */
+export const adviceHeading = "Идёт запись — нет звука";
+
 export const buttonLabels: Readonly<Record<ButtonId, string>> = {
   start: "Начать запись",
   skip: "Не записывать",

@@ -55,8 +55,9 @@ test("the api calls the bound Go methods with the prompt id", async () => {
     ["paratech/desktop/internal/input/wails.PromptService.Start", "p1", ""],
     ["paratech/desktop/internal/input/wails.PromptService.Skip", "p1"],
   ]);
-  // Snooze is no longer bound (TASK-076); selectSource and startRecording are the main window's (TASK-081).
-  assert.equal(Object.keys(methods).length, 6);
+  // Snooze is no longer bound (TASK-076); selectSource and startRecording are the main window's (TASK-081); advice
+  // is the popup's silent-source advice (TASK-082).
+  assert.equal(Object.keys(methods).length, 7);
   assert.equal("snooze" in api, false);
   assert.equal(shownEvent, "recordingprompt:shown");
 });

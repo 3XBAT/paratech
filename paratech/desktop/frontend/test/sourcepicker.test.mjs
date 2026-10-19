@@ -22,9 +22,13 @@ const src = (file) => readFileSync(new URL(file, import.meta.url), "utf8");
 
 // Mirror SourcesView of internal/input/wails/prompt.go.
 const icon = "data:image/png;base64,iVBORw0KGgo=";
-const chrome = { app: "chrome.exe", title: "Лекция <b> — YouTube", playing: true, muted: false, browser: true, icon };
-const zoom = { app: "zoom.exe", title: "", playing: false, muted: true, browser: false, icon: "" };
-const reply = (over = {}) => ({ apps: [chrome, zoom], selected: "", remembered: "", listError: false, ...over });
+// TASK-082: readable names, the sounding flag and autoSelected.
+const chrome = {
+  app: "chrome.exe", name: "Google Chrome", title: "Лекция <b> — YouTube", playing: true, sounding: true, muted: false,
+  browser: true, icon,
+};
+const zoom = { app: "zoom.exe", name: "Zoom", title: "", playing: false, sounding: false, muted: true, browser: false, icon: "" };
+const reply = (over = {}) => ({ apps: [chrome, zoom], selected: "", autoSelected: false, remembered: "", listError: false, ...over });
 
 const noop = () => undefined;
 const render = (props) =>
@@ -49,9 +53,9 @@ test("«Диагностика» shows the remembered source, the one the sound 
 });
 
 test("a failed list offers only the whole computer and keeps the remembered source", () => {
-  assert.deepEqual(failedSources(null), { apps: [], selected: "", remembered: "", listError: true });
+  assert.deepEqual(failedSources(null), { apps: [], selected: "", autoSelected: false, remembered: "", listError: true });
   const kept = failedSources(reply({ remembered: "zoom.exe" }));
-  assert.deepEqual(kept, { apps: [], selected: "", remembered: "zoom.exe", listError: true });
+  assert.deepEqual(kept, { apps: [], selected: "", autoSelected: false, remembered: "zoom.exe", listError: true });
   const m = pickerModel(kept, savedSelection(kept, null));
   assert.deepEqual(m.options.map((o) => o.app), [""]);
   assert.equal(m.options[0].name, wholeComputerName);
@@ -66,7 +70,7 @@ test("the picker renders untrusted names as text, icons and marks, and the list 
   assert.ok(closed.includes("Лекция &lt;b&gt; — YouTube"), "the title is text");
   assert.ok(!closed.includes("<b>"));
   assert.ok(closed.includes(`src="${icon}"`));
-  assert.ok(closed.includes(sourceMarks.playing));
+  assert.ok(closed.includes(sourceMarks.sounding));
   assert.ok(closed.includes('aria-haspopup="listbox"'));
   assert.ok(closed.includes('aria-expanded="false"'));
   assert.ok(!closed.includes('role="listbox"'));
@@ -75,7 +79,7 @@ test("the picker renders untrusted names as text, icons and marks, and the list 
   assert.ok(open.includes('role="listbox" aria-labelledby="lbl"'));
   assert.equal(open.split('role="option"').length - 1, 3);
   assert.ok(open.includes(wholeComputerName));
-  // zoom.exe has no title and no icon: its name and first letter, and the muted mark.
+  // zoom.exe has no icon: its first letter, and the muted mark.
   assert.ok(open.includes(">Z</span>"));
   assert.ok(open.includes(sourceMarks.muted));
   assert.ok(open.includes('class="source current"'));
@@ -87,7 +91,7 @@ test("the picker renders untrusted names as text, icons and marks, and the list 
   assert.match(locked, /aria-describedby="([^"]+)"[\s\S]*<span id="\1" class="vh">/);
   // Without a reason the hover text is the source.
   assert.ok(!render({ picker, disabled: true }).includes("vh"));
-  assert.ok(closed.includes('title="Лекция &lt;b&gt; — YouTube (chrome.exe)"'));
+  assert.ok(closed.includes('title="Google Chrome — Лекция &lt;b&gt; — YouTube (chrome.exe)"'));
 });
 
 test("the notes are the warnings of the chosen source and, if asked, the advice", () => {

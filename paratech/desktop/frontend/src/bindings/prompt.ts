@@ -3,6 +3,8 @@
 // the same source picker: selectSource remembers the source (shared with the popup and the sound check) and
 // startRecording starts a recording without the popup (TASK-081).
 
+// The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
+import { parseAdvice, type AdviceView } from "./activity.js";
 import type { CallByName } from "./settings";
 
 export type PromptKind = "lesson" | "adhoc";
@@ -24,11 +26,16 @@ export interface PromptView {
 
 /** An app the popup may record from. */
 export interface SourceApp {
-  /** Executable name, for example "chrome.exe": the value Start takes. */
+  /** Executable name, for example "chrome.exe": the value Start takes. Shown only in a tooltip. */
   app: string;
+  /** Readable name («Яндекс Браузер», TASK-082), never empty: the label. Untrusted text, render as plain text only. */
+  name: string;
   /** Window title: untrusted text, render as plain text only. May be empty. */
   title: string;
+  /** It has an active audio session: it may play sound. */
   playing: boolean;
+  /** Its sound plays right now (TASK-082): the «звук идёт» mark. */
+  sounding: boolean;
   /** Muted in the Windows volume mixer: the recording would be silent. */
   muted: boolean;
   /** A browser records all its tabs. */
@@ -41,6 +48,8 @@ export interface SourceApp {
 export interface SourcesView {
   apps: SourceApp[];
   selected: string;
+  /** selected plays while the remembered app does not (TASK-082): the picker says why it is chosen. */
+  autoSelected: boolean;
   /** The app recorded last time, even when it is not open now. */
   remembered: string;
   /** The apps could not be listed: only the whole computer is offered. */
@@ -66,9 +75,10 @@ export const methods = {
   skip: "paratech/desktop/internal/input/wails.PromptService.Skip",
   selectSource: "paratech/desktop/internal/input/wails.PromptService.SelectSource",
   startRecording: "paratech/desktop/internal/input/wails.PromptService.StartRecording",
+  advice: "paratech/desktop/internal/input/wails.PromptService.Advice",
 } as const;
 
-/** Wails event the core emits each time it shows the popup; the page then reads the current prompt. */
+/** Wails event the core emits each time it shows the popup; the page then reads the current prompt and advice. */
 export const shownEvent = "recordingprompt:shown";
 
 /** Messages of the errors the Go binding returns; the page may match them. */
@@ -119,10 +129,14 @@ function parseSourceApp(raw: unknown): SourceApp {
   if (icon !== "" && !(icon.startsWith(iconPrefix) && base64Data.test(icon.slice(iconPrefix.length)))) {
     throw new Error("prompt: source icon is not a PNG data URL");
   }
+  // The core never sends an empty name; if it did, the exe name still labels the entry.
+  const name = str(r, "name").trim() || app;
   return {
     app,
+    name,
     title: str(r, "title"),
     playing: bool(r, "playing"),
+    sounding: bool(r, "sounding"),
     muted: bool(r, "muted"),
     browser: bool(r, "browser"),
     icon,
@@ -138,6 +152,7 @@ export function parseSourcesView(raw: unknown): SourcesView {
   return {
     apps: r.apps.map(parseSourceApp),
     selected: str(r, "selected"),
+    autoSelected: bool(r, "autoSelected"),
     remembered: str(r, "remembered"),
     listError: bool(r, "listError"),
   };
@@ -186,6 +201,8 @@ export interface PromptApi {
   selectSource(app: string): Promise<void>;
   /** Starts recording app ("" = the whole computer) without the popup; a refused start resolves with its problem. */
   startRecording(app: string): Promise<RecordingStart>;
+  /** The silent-source advice the popup shows (TASK-082), or null. */
+  advice(): Promise<AdviceView | null>;
 }
 
 /** Builds the prompt API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -202,6 +219,10 @@ export function promptApi(call: CallByName): PromptApi {
       await call(methods.selectSource, app);
     },
     startRecording: async (app) => parseRecordingStart(await call(methods.startRecording, app)),
+    advice: async () => {
+      const raw = await call(methods.advice);
+      return raw === null || raw === undefined ? null : parseAdvice(raw);
+    },
   };
 }
 

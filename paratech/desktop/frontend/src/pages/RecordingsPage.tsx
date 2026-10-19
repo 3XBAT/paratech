@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { activityApi, type JobItem, type RecordingItem } from "../bindings/activity";
+import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "../bindings/activity";
 import { promptApi } from "../bindings/prompt";
 import { callByName } from "../bindings/runtime";
 import { actionErrorText, formatTime, jobTypeLabel, loadErrorText } from "../activityView";
@@ -8,6 +8,7 @@ import { type ListStates, stateOf, withState } from "../listView";
 import { manualStartTexts, startButton, startOutcome } from "../manualStartView";
 import type { PageId } from "../nav";
 import { anyRecording, type FinishedEntry, finishedKey, pageGroups, queueLine } from "../recordingRowView";
+import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
 import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
 import { useSources } from "../sourcePicker/useSources";
 import {
@@ -115,6 +116,27 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
     }
   }
 
+  // The silent-source advice of the running recording (TASK-082): the click running per recording, and the problem of
+  // the last click per advice (a new suggestion starts clean).
+  const [advicePending, setAdvicePending] = useState<Readonly<Record<string, AdvicePending>>>({});
+  const [adviceProblems, setAdviceProblems] = useState<Readonly<Record<string, string>>>({});
+
+  async function adviceAct(a: AdviceView, kind: "switch" | "dismiss") {
+    const id = a.recordingId;
+    setAdvicePending((p) => ({ ...p, [id]: kind }));
+    setAdviceProblems((p) => ({ ...p, [adviceKey(a)]: "" }));
+    const out = kind === "switch" ? await switchToSuggestion(api, a) : await keepSource(api, a);
+    if (!mounted.current) {
+      return;
+    }
+    setAdvicePending((p) => {
+      const { [id]: _done, ...rest } = p;
+      return rest;
+    });
+    setAdviceProblems((p) => ({ ...p, [adviceKey(a)]: out.kind === "problem" ? out.text : "" }));
+    await refresh();
+  }
+
   // «Начать запись»: the panel with the picker, the choice for this start and the problem of a refused one.
   const [startOpen, setStartOpen] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -199,6 +221,10 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
       onStop={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
       onRunNow={(jobId) => void act(`run:${jobId}`, () => api.runJobNow(jobId))}
       onOpen={(page) => onOpen?.(page)}
+      advicePending={advicePending[r.id] ?? null}
+      adviceProblem={r.advice === null ? "" : (adviceProblems[adviceKey(r.advice)] ?? "")}
+      onSwitchSource={() => r.advice && void adviceAct(r.advice, "switch")}
+      onKeepSource={() => r.advice && void adviceAct(r.advice, "dismiss")}
       extraActions={
         rowOffersTranscript(r) && (
           <Button variant="ghost" icon="doc" onClick={() => openTranscript(r.id)}>

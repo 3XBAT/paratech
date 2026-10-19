@@ -19,9 +19,13 @@ import {
 
 // Mirror SourcesView of internal/input/wails/prompt.go.
 const icon = "data:image/png;base64,iVBORw0KGgo=";
-const chrome = { app: "chrome.exe", title: "Лекция <b> — YouTube", playing: true, muted: false, browser: true, icon };
-const zoom = { app: "zoom.exe", title: "", playing: false, muted: true, browser: false, icon: "" };
-const reply = (over = {}) => ({ apps: [chrome, zoom], selected: "", remembered: "", listError: false, ...over });
+// TASK-082: readable names, the sounding flag and autoSelected.
+const chrome = {
+  app: "chrome.exe", name: "Google Chrome", title: "Лекция <b> — YouTube", playing: true, sounding: true, muted: false,
+  browser: true, icon,
+};
+const zoom = { app: "zoom.exe", name: "Zoom", title: "", playing: false, sounding: false, muted: true, browser: false, icon: "" };
+const reply = (over = {}) => ({ apps: [chrome, zoom], selected: "", autoSelected: false, remembered: "", listError: false, ...over });
 
 const lesson = {
   id: "p1", kind: "lesson", title: "Матанализ", start: "10:00", end: "11:30", state: "OFFERED", problem: "",
@@ -67,18 +71,18 @@ test("the whole computer comes first, then the apps by title or exe name, a lett
   const opts = sourceOptions(reply());
   assert.deepEqual(
     opts.map((o) => [o.app, o.name]),
-    [["", wholeComputerName], ["chrome.exe", "Лекция <b> — YouTube"], ["zoom.exe", "zoom.exe"]],
+    [["", wholeComputerName], ["chrome.exe", "Google Chrome"], ["zoom.exe", "Zoom"]],
   );
   assert.equal(wholeComputerName, "Весь звук компьютера");
   assert.equal(opts[1].icon, icon);
-  assert.equal(opts[1].hint, "Лекция <b> — YouTube (chrome.exe)");
+  assert.equal(opts[1].hint, "Google Chrome — Лекция <b> — YouTube (chrome.exe)");
   assert.equal(opts[2].icon, "");
   assert.equal(opts[2].letter, "Z");
-  assert.equal(sourceOptions(reply({ apps: [{ ...zoom, title: "  " }] }))[1].name, "zoom.exe");
+  assert.equal(sourceOptions(reply({ apps: [{ ...zoom, name: "  " }] }))[1].name, "zoom.exe");
   assert.deepEqual(sourceOptions(null).map((o) => o.app), [""]);
   assert.deepEqual(
-    [sourceMarks.playing, sourceMarks.muted, sourceMarks.gone],
-    ["звучит", "звук выключен в микшере", "приложение закрыто"],
+    [sourceMarks.sounding, sourceMarks.muted, sourceMarks.gone],
+    ["звук идёт", "звук выключен в микшере", "приложение закрыто"],
   );
 });
 
