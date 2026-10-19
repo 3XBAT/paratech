@@ -7,7 +7,6 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/values"
-	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -54,9 +53,10 @@ func (f lessonFinder) find(ctx context.Context, a *assignment.Assignment) (assig
 	return l, nil
 }
 
+// read gathers the snapshot and the live lesson; values.ResolveScheduledLesson decides what is shown.
 func (f lessonFinder) read(ctx context.Context, key lessonKey) (assignmentLesson, error) {
-	loc := f.clock.Now().Location()
 	var out assignmentLesson
+	var snapshot, live *values.ScheduledLesson
 	var recorded time.Time
 
 	if key.transcript != "" {
@@ -65,44 +65,29 @@ func (f lessonFinder) read(ctx context.Context, key lessonKey) (assignmentLesson
 		case err == nil:
 			recorded = rec.StartedAt()
 			if snap := rec.LessonSnapshot(); !snap.IsZero() {
-				out = assignmentLesson{title: snap.Title(), sched: values.ScheduledLesson{
+				out.title = snap.Title()
+				snapshot = &values.ScheduledLesson{
 					Subject: snap.Subject(), Kind: snap.Kind(), Teacher: snap.Teacher(), Start: snap.ScheduledStart(),
-				}}
-				return withDate(out, recorded, loc), nil
+				}
 			}
 		case !errors.Is(err, shared.ErrNotFound):
 			return assignmentLesson{}, err
 		}
 	}
 
-	if key.lesson != "" {
+	if snapshot == nil && key.lesson != "" {
 		l, err := f.lessons.Get(ctx, key.lesson)
 		switch {
 		case err == nil:
 			c := l.Content()
-			kind := ""
-			if c.Kind != lesson.KindUnknown {
-				kind = c.Kind.String()
-			}
-			out = assignmentLesson{title: c.Title, sched: values.ScheduledLesson{
-				Subject: c.Subject, Kind: kind, Teacher: c.Teacher, Start: c.Start,
-			}}
+			out.title = c.Title
+			live = &values.ScheduledLesson{Subject: c.Subject, Kind: c.Kind.String(), Teacher: c.Teacher, Start: c.Start}
 		case !errors.Is(err, shared.ErrNotFound): // a lesson that left the schedule names nothing
 			return assignmentLesson{}, err
 		}
 	}
-	return withDate(out, recorded, loc), nil
-}
-
-// withDate falls back to the recording start for the lesson date and shows the date in the student's zone.
-func withDate(l assignmentLesson, recorded time.Time, loc *time.Location) assignmentLesson {
-	if l.sched.Start.IsZero() {
-		l.sched.Start = recorded
-	}
-	if !l.sched.Start.IsZero() {
-		l.sched.Start = l.sched.Start.In(loc)
-	}
-	return l
+	out.sched = values.ResolveScheduledLesson(snapshot, live, recorded, f.clock.Now().Location())
+	return out, nil
 }
 
 // label resolves what the assignment shows of its lesson (values.NewLessonLabel).

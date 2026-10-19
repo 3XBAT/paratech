@@ -112,3 +112,44 @@ func TestHomeworkEmailSubject(t *testing.T) {
 		t.Fatalf("long subject: %d runes, %q", n, got)
 	}
 }
+
+func TestResolveScheduledLesson(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*3600)
+	start := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
+	recorded := start.Add(2 * time.Minute)
+	snap := ScheduledLesson{Subject: "Матанализ", Kind: "lecture", Teacher: "Иванов", Start: start}
+	live := ScheduledLesson{Subject: "География", Kind: "seminar", Teacher: "Сидоров", Start: start.Add(time.Hour)}
+	with := func(l ScheduledLesson, edit func(*ScheduledLesson)) *ScheduledLesson {
+		edit(&l)
+		return &l
+	}
+
+	cases := []struct {
+		name           string
+		snapshot, live *ScheduledLesson
+		recorded       time.Time
+		zone           *time.Location
+		want           ScheduledLesson
+	}{
+		{"snapshot wins", &snap, &live, recorded, msk, ScheduledLesson{"Матанализ", "lecture", "Иванов", start.In(msk)}},
+		{"live without snapshot", nil, &live, recorded, msk,
+			ScheduledLesson{"География", "seminar", "Сидоров", start.Add(time.Hour).In(msk)}},
+		{"unknown live kind", nil, with(live, func(l *ScheduledLesson) { l.Kind = UnknownLessonKind }), recorded, msk,
+			ScheduledLesson{"География", "", "Сидоров", start.Add(time.Hour).In(msk)}},
+		{"snapshot kind kept as is", with(snap, func(l *ScheduledLesson) { l.Kind = UnknownLessonKind }), nil, recorded, msk,
+			ScheduledLesson{"Матанализ", UnknownLessonKind, "Иванов", start.In(msk)}},
+		{"snapshot without start", with(snap, func(l *ScheduledLesson) { l.Start = time.Time{} }), &live, recorded, msk,
+			ScheduledLesson{"Матанализ", "lecture", "Иванов", recorded.In(msk)}},
+		{"nothing but the recording", nil, nil, recorded, msk, ScheduledLesson{Start: recorded.In(msk)}},
+		{"nothing at all", nil, nil, time.Time{}, msk, ScheduledLesson{}},
+		{"no zone", nil, &live, recorded, nil, live},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveScheduledLesson(tc.snapshot, tc.live, tc.recorded, tc.zone)
+			if got != tc.want || got.Start.Location() != tc.want.Start.Location() {
+				t.Fatalf("got %+v (%s), want %+v (%s)", got, got.Start.Location(), tc.want, tc.want.Start.Location())
+			}
+		})
+	}
+}

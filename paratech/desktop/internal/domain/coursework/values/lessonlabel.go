@@ -76,6 +76,32 @@ type ScheduledLesson struct {
 	Start   time.Time
 }
 
+// UnknownLessonKind is the schedule's code of an unknown lesson kind; a live lesson with it names no kind.
+const UnknownLessonKind = "unknown"
+
+// ResolveScheduledLesson is the one rule of which lesson data an assignment shows (TASK-088, TASK-092): the snapshot
+// the recording kept wins (nil: none); only without it the live lesson (nil: none), whose UnknownLessonKind becomes
+// "". The date falls back to recorded (the recording start; zero if none) and is given in zone (nil: unchanged).
+func ResolveScheduledLesson(snapshot, live *ScheduledLesson, recorded time.Time, zone *time.Location) ScheduledLesson {
+	var out ScheduledLesson
+	switch {
+	case snapshot != nil:
+		out = *snapshot
+	case live != nil:
+		out = *live
+		if out.Kind == UnknownLessonKind {
+			out.Kind = ""
+		}
+	}
+	if out.Start.IsZero() {
+		out.Start = recorded
+	}
+	if !out.Start.IsZero() && zone != nil {
+		out.Start = out.Start.In(zone)
+	}
+	return out
+}
+
 // LessonLabel is what an assignment shows of its lesson: «Предмет · тип · преподаватель» and «занятие 19.10». Build
 // it with NewLessonLabel; the zero value shows nothing.
 type LessonLabel struct {

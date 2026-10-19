@@ -274,22 +274,15 @@ func (s *Service) liveLesson(ctx context.Context, rec *recording.Recording) *les
 // scheduled is what the schedule says of the lesson for its assignments (TASK-092): the snapshot the recording kept,
 // the live lesson only without one; the date falls back to the recording start and is shown in the clock's zone.
 func (s *Service) scheduled(rec *recording.Recording, live *lesson.Lesson) values.ScheduledLesson {
-	var out values.ScheduledLesson
-	switch snap := rec.LessonSnapshot(); {
-	case !snap.IsZero():
-		out = values.ScheduledLesson{Subject: snap.Subject(), Kind: snap.Kind(), Teacher: snap.Teacher(), Start: snap.ScheduledStart()}
-	case live != nil:
+	var snapshot, current *values.ScheduledLesson
+	if snap := rec.LessonSnapshot(); !snap.IsZero() {
+		snapshot = &values.ScheduledLesson{Subject: snap.Subject(), Kind: snap.Kind(), Teacher: snap.Teacher(), Start: snap.ScheduledStart()}
+	}
+	if live != nil {
 		c := live.Content()
-		out = values.ScheduledLesson{Subject: c.Subject, Teacher: c.Teacher, Start: c.Start}
-		if c.Kind != lesson.KindUnknown {
-			out.Kind = c.Kind.String()
-		}
+		current = &values.ScheduledLesson{Subject: c.Subject, Kind: c.Kind.String(), Teacher: c.Teacher, Start: c.Start}
 	}
-	if out.Start.IsZero() {
-		out.Start = rec.StartedAt()
-	}
-	out.Start = out.Start.In(s.clock.Now().Location())
-	return out
+	return values.ResolveScheduledLesson(snapshot, current, rec.StartedAt(), s.clock.Now().Location())
 }
 
 // stepOf derives the state of a step from its newest job; has tells whether a result of the step is stored. No job
