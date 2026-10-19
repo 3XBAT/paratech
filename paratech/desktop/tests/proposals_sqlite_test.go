@@ -55,7 +55,8 @@ func newProposalsEnv(t *testing.T) *proposalsEnv {
 	e.svc, err = homeworkflow.New(homeworkflow.Deps{
 		Proposals: sqlite.NewProposalRepository(e.db), Assignments: e.assignments, AssignmentList: e.assignments,
 		Artifacts:  e.store,
-		Recipients: fixedRecipient{r}, Mailer: e.mailer, Exporter: e.store, Calendar: e.calendar, Clock: e.clock,
+		Recipients: fixedRecipient{r}, Mailer: e.mailer, Exporter: e.store, Calendar: e.calendar,
+		Recordings: sqlite.NewRecordingRepository(e.db), Lessons: sqlite.NewLessonRepository(e.db), Clock: e.clock,
 		IDs: &postIDs{}, Tx: e.db,
 	})
 	if err != nil {

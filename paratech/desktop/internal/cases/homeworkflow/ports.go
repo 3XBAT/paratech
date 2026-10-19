@@ -105,10 +105,11 @@ type RecordingReader interface {
 }
 
 // TranscriptRecordings finds the recording an assignment's transcript was made from, for the lesson it kept at the start
-// (TASK-088): subject, kind, teacher and date of the assignment (TASK-092). Implemented by the sqlite adapter.
+// (TASK-088): subject, kind, teacher and date of the assignment (PRD sections 10 and 11, TASK-092). Implemented by the
+// sqlite adapter.
 type TranscriptRecordings interface {
-	// RecordingOf loads the recording transcript t was made from; a missing transcript or recording wraps
-	// shared.ErrNotFound.
+	// RecordingOf loads the recording transcript t was made from (PRD section 6.2); a missing transcript or recording
+	// wraps shared.ErrNotFound.
 	RecordingOf(ctx context.Context, t shared.TranscriptID) (*recording.Recording, error)
 }
 

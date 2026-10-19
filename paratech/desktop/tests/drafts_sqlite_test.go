@@ -60,7 +60,8 @@ func newDraftsEnv(t *testing.T, llm *testenv.FakeLLM, register bool) (*ppEnv, *h
 	t.Helper()
 	e := newPPEnv(t, llm)
 	drafts, err := homeworkflow.NewDrafts(homeworkflow.DraftDeps{
-		LLM: llm, Assignments: e.assignments, Drafts: sqlite.NewDraftRepository(e.db), Summaries: e.summaries,
+		LLM: llm, Assignments: e.assignments, Recordings: sqlite.NewRecordingRepository(e.db),
+		Drafts: sqlite.NewDraftRepository(e.db), Summaries: e.summaries,
 		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, JobReader: e.jobs,
 		Deliveries: noDeliveries{}, Clock: e.clock, IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
 	})
