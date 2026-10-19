@@ -39,7 +39,7 @@ func (q *Queries) DeleteTranscriptsByRecording(ctx context.Context, recordingID 
 
 const getRecording = `-- name: GetRecording :one
 
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent FROM recordings WHERE id = ?1
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent, lesson_title, lesson_subject, lesson_kind, lesson_teacher, lesson_start, lesson_end FROM recordings WHERE id = ?1
 `
 
 // Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
@@ -64,17 +64,25 @@ func (q *Queries) GetRecording(ctx context.Context, id string) (Recording, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Silent,
+		&i.LessonTitle,
+		&i.LessonSubject,
+		&i.LessonKind,
+		&i.LessonTeacher,
+		&i.LessonStart,
+		&i.LessonEnd,
 	)
 	return i, err
 }
 
 const insertRecording = `-- name: InsertRecording :exec
 INSERT INTO recordings (id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms,
-                        chunk_count, chunks_ref, audio_ref, failure_reason, silent, version, created_at, updated_at)
+                        chunk_count, chunks_ref, audio_ref, failure_reason, silent, lesson_title, lesson_subject,
+                        lesson_kind, lesson_teacher, lesson_start, lesson_end, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, ?13, 1, ?14,
-        ?15)
+        ?10, ?11, ?12, ?13, ?14,
+        ?15, ?16, ?17, ?18,
+        ?19, 1, ?20, ?21)
 `
 
 type InsertRecordingParams struct {
@@ -91,6 +99,12 @@ type InsertRecordingParams struct {
 	AudioRef      sql.NullString
 	FailureReason sql.NullString
 	Silent        int64
+	LessonTitle   sql.NullString
+	LessonSubject sql.NullString
+	LessonKind    sql.NullString
+	LessonTeacher sql.NullString
+	LessonStart   sql.NullInt64
+	LessonEnd     sql.NullInt64
 	CreatedAt     int64
 	UpdatedAt     int64
 }
@@ -111,6 +125,12 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 		arg.AudioRef,
 		arg.FailureReason,
 		arg.Silent,
+		arg.LessonTitle,
+		arg.LessonSubject,
+		arg.LessonKind,
+		arg.LessonTeacher,
+		arg.LessonStart,
+		arg.LessonEnd,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -161,7 +181,7 @@ func (q *Queries) ListRecordingActivityIDs(ctx context.Context, arg ListRecordin
 }
 
 const listRecordingsByStatus = `-- name: ListRecordingsByStatus :many
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent FROM recordings
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent, lesson_title, lesson_subject, lesson_kind, lesson_teacher, lesson_start, lesson_end FROM recordings
 WHERE status IN (/*SLICE:statuses*/?)
 ORDER BY created_at, id
 `
@@ -202,6 +222,12 @@ func (q *Queries) ListRecordingsByStatus(ctx context.Context, statuses []string)
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Silent,
+			&i.LessonTitle,
+			&i.LessonSubject,
+			&i.LessonKind,
+			&i.LessonTeacher,
+			&i.LessonStart,
+			&i.LessonEnd,
 		); err != nil {
 			return nil, err
 		}
@@ -319,8 +345,8 @@ type UpdateRecordingParams struct {
 	ExpectedVersion int64
 }
 
-// Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
-// never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
+// Compare-and-swap on the loaded version (ADR-0004). The lesson, its snapshot, the cap, the chunk directory and the
+// creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 func (q *Queries) UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateRecording,
 		arg.Status,

@@ -10,6 +10,7 @@ import (
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -191,6 +192,7 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 		Version:     row.Version,
 		ID:          shared.RecordingID(row.ID),
 		LessonID:    shared.LessonID(row.LessonID.String),
+		Lesson:      lessonSnapshotFromRow(row),
 		Status:      recording.Status(row.Status),
 		MaxDuration: msDuration(row.MaxDurationMs),
 		Duration:    msDuration(row.DurationMs.Int64),
@@ -211,8 +213,16 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 	return rec, nil
 }
 
+// lessonSnapshotFromRow rebuilds the snapshot through its constructor, so stored text is cleaned like new text.
+func lessonSnapshotFromRow(row sqlcgen.Recording) values.LessonSnapshot {
+	return values.NewLessonSnapshot(values.LessonSnapshotSpec{
+		Title: row.LessonTitle.String, Subject: row.LessonSubject.String, Kind: row.LessonKind.String,
+		Teacher: row.LessonTeacher.String, Start: jobFromNullMs(row.LessonStart), End: jobFromNullMs(row.LessonEnd),
+	})
+}
+
 func recordingInsertParams(rec *recording.Recording) sqlcgen.InsertRecordingParams {
-	u := recordingUpdateParams(rec)
+	u, snap := recordingUpdateParams(rec), rec.LessonSnapshot()
 	return sqlcgen.InsertRecordingParams{
 		ID:            u.ID,
 		LessonID:      jobNullString(string(rec.LessonID())),
@@ -227,6 +237,12 @@ func recordingInsertParams(rec *recording.Recording) sqlcgen.InsertRecordingPara
 		AudioRef:      u.AudioRef,
 		FailureReason: u.FailureReason,
 		Silent:        u.Silent,
+		LessonTitle:   jobNullString(snap.Title()),
+		LessonSubject: jobNullString(snap.Subject()),
+		LessonKind:    jobNullString(snap.Kind()),
+		LessonTeacher: jobNullString(snap.Teacher()),
+		LessonStart:   jobNullMs(snap.ScheduledStart()),
+		LessonEnd:     jobNullMs(snap.ScheduledEnd()),
 		CreatedAt:     jobMs(rec.CreatedAt()),
 		UpdatedAt:     u.UpdatedAt,
 	}

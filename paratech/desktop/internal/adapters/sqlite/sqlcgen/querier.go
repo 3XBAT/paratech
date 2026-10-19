@@ -167,8 +167,8 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due) and the creation
 	// time never change after the parse, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
-	// Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
-	// never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
+	// Compare-and-swap on the loaded version (ADR-0004). The lesson, its snapshot, the cap, the chunk directory and the
+	// creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
 	// Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 	// with VersionCAS to shared.ErrVersionConflict.
