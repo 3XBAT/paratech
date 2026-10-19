@@ -121,7 +121,7 @@ func TestScheduledLessonPromptStartsARecording(t *testing.T) {
 	}
 
 	// TASK-076: «Записи и задачи» titles the row by the lesson, not by its start time.
-	rows, err := wails.NewActivityService(c.ui.Activity, c.ui.Stopper, c.ui.Forcer, slog.New(slog.DiscardHandler)).
+	rows, err := wails.NewActivityService(c.ui.Activity, c.ui.Stopper, c.ui.Forcer, c.ui.Retrier, slog.New(slog.DiscardHandler)).
 		ListRecordings(ctx)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("ListRecordings = %+v, %v; want the one recording", rows, err)

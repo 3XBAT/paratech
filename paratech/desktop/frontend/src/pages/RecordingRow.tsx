@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 // The .js extensions let the Node test runner load the compiled row (test/recordingrow.test.mjs renders it).
-import type { RecordingItem } from "../bindings/activity.js";
+import type { RecordingItem, RetryWork } from "../bindings/activity.js";
 import type { PageId } from "../nav.js";
-import { recordingRowView } from "../recordingRowView.js";
+import { type RowAction, recordingRowView } from "../recordingRowView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import type { StatusView } from "../statusPresentation.js";
@@ -19,6 +19,9 @@ export interface RecordingRowProps {
   onStop: () => void;
   onRunNow: (jobId: string) => void;
   onOpen: (page: PageId) => void;
+  /** «Повторить» (TASK-086): the retry running, and the call; without onRetry the row offers no retry. */
+  retrying?: boolean;
+  onRetry?: (work: Exclude<RetryWork, "">) => void;
   /** More actions of the row, after the core's one (for example opening the transcript). */
   extraActions?: ReactNode;
   /** The silent-source advice of the item (TASK-082): the click running and the problem of the last one. */
@@ -33,7 +36,48 @@ export interface RecordingRowProps {
 export function RecordingRow(props: RecordingRowProps) {
   const r = props.item;
   const v = recordingRowView(r, props.now);
-  const a = v.action;
+  const button = (a: RowAction | null, variant: "secondary" | "ghost") => {
+    switch (a?.kind) {
+      case "runNow":
+        return (
+          <Button
+            icon="play"
+            busy={props.starting}
+            busyLabel="Запуск…"
+            disabled={props.starting}
+            onClick={() => props.onRunNow(a.jobId)}
+          >
+            {a.label}
+          </Button>
+        );
+      case "open":
+        return (
+          <Button variant="ghost" onClick={() => props.onOpen(a.page)}>
+            {a.label}
+          </Button>
+        );
+      case "retry": {
+        const onRetry = props.onRetry;
+        const retrying = props.retrying ?? false;
+        return (
+          onRetry && (
+            <Button
+              variant={variant}
+              icon="play"
+              busy={retrying}
+              busyLabel="Запуск…"
+              disabled={retrying}
+              onClick={() => onRetry(a.work)}
+            >
+              {a.label}
+            </Button>
+          )
+        );
+      }
+      default:
+        return null;
+    }
+  };
   return (
     <Row
       title={v.titleIsTime ? <span className="num">{v.title}</span> : v.title}
@@ -58,22 +102,8 @@ export function RecordingRow(props: RecordingRowProps) {
               Остановить
             </Button>
           )}
-          {a?.kind === "runNow" && (
-            <Button
-              icon="play"
-              busy={props.starting}
-              busyLabel="Запуск…"
-              disabled={props.starting}
-              onClick={() => props.onRunNow(a.jobId)}
-            >
-              {a.label}
-            </Button>
-          )}
-          {a?.kind === "open" && (
-            <Button variant="ghost" onClick={() => props.onOpen(a.page)}>
-              {a.label}
-            </Button>
-          )}
+          {button(v.action, "secondary")}
+          {button(v.secondary, "ghost")}
           {props.extraActions}
         </>
       }

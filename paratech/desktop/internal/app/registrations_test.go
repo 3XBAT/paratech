@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/adapters/componentstore"
 	"paratech/desktop/internal/adapters/filestore"
@@ -42,6 +43,9 @@ var (
 	_ recordingsession.ArtifactStore        = (*filestore.Store)(nil)
 	_ wails.RecordingStopper                = (*recordingsession.Service)(nil)
 	_ wails.JobForcer                       = (*jobrunner.Service)(nil)
+	_ wails.PostProcessRetrier              = (*homeworkflow.Rerunner)(nil)
+	_ homeworkflow.PostJobs                 = (*sqlite.JobRepository)(nil)
+	_ homeworkflow.LatestTranscripts        = (*sqlite.TranscriptRepository)(nil)
 	_ homeworkflow.DraftRepository          = (*sqlite.DraftRepository)(nil)
 	_ hubclient.URLSource                   = hubSettings{}
 	_ smtp.AccountSource                    = mailSettings{}
@@ -134,9 +138,16 @@ func TestRegistrationPolicies(t *testing.T) {
 	if got := registrationOf(t, regs, schedulesync.CalendarSyncJobType).Timeout; got < 10*googlecal.DefaultRequestTimeout {
 		t.Errorf("calendar_sync timeout %v, want room for many Calendar API requests", got)
 	}
-	for _, typ := range []job.Type{homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType} {
-		if got := registrationOf(t, regs, typ).Timeout; got < 2*hubclient.DefaultRequestTimeout {
-			t.Errorf("%s timeout %v, want at least twice the Hub request timeout", typ, got)
+	for _, tt := range []struct {
+		typ   job.Type
+		calls int
+	}{
+		{homeworkflow.SummarizeJobType, homeworkflow.AnswerCalls},
+		{homeworkflow.ExtractHomeworkJobType, homeworkflow.AnswerCalls},
+		{homeworkflow.HomeworkDraftJobType, 1},
+	} {
+		if got := registrationOf(t, regs, tt.typ).Timeout; got < time.Duration(2*tt.calls)*hubclient.DefaultRequestTimeout {
+			t.Errorf("%s timeout %v, want at least twice the Hub request timeout for each of %d calls", tt.typ, got, tt.calls)
 		}
 	}
 }

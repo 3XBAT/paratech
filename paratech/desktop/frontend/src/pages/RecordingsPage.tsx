@@ -224,6 +224,8 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
       onStop={() => void act(`stop:${r.id}`, () => api.stopRecording(r.id))}
       onRunNow={(jobId) => void act(`run:${jobId}`, () => api.runJobNow(jobId))}
       onOpen={(page) => onOpen?.(page)}
+      retrying={busy.has(`retry:${r.id}`)}
+      onRetry={(work) => void act(`retry:${r.id}`, () => api.retryPostProcessing(r.id, work))}
       advicePending={advicePending[r.id] ?? null}
       adviceProblem={r.advice === null ? "" : (adviceProblems[adviceKey(r.advice)] ?? "")}
       onSwitchSource={() => r.advice && void adviceAct(r.advice, "switch")}

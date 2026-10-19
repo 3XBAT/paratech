@@ -169,6 +169,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: post-processing: %w", err)
 	}
+	// «Повторить» and «Сделать конспект заново» of the recording rows create new post-processing jobs (TASK-086).
+	rerunner, err := homeworkflow.NewRerunner(homeworkflow.RerunDeps{
+		Transcripts: transcripts, Jobs: jobs, Summaries: summaries, Clock: e.local, IDs: e.ids, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: post-processing reruns: %w", err)
+	}
 
 	deliveries := sqlite.NewDeliveryRepository(db)
 	c.deliveries, err = senddelivery.New(senddelivery.Deps{
@@ -304,7 +311,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	c.cleanups = append(c.cleanups, cleanup{name: "artifact temporary files", run: store.CleanupTemp},
 		cleanup{name: "model manager writes allowed", run: c.manager.markReady})
 	c.ui = wails.Core{
-		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
+		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner, Retrier: rerunner,
 		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech, Speed: speed,
 		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},

@@ -44,6 +44,30 @@ const answerRule = `Answer with exactly one JSON object that conforms to the JSO
 
 `
 
+// Reminders appended to the instructions of a repeated request after an answer failed the checks (Remind).
+const (
+	formatReminder = `
+
+Reminder: your previous answer to this request could not be read. Answer again with exactly one JSON object that conforms to the JSON Schema above. Start the answer with "{" and end it with "}": no Markdown, no code fences, no text before or after it.`
+
+	lengthReminder = `
+
+Reminder: your previous answer to this request was cut off before its JSON object ended. Answer again with exactly one complete JSON object that conforms to the JSON Schema above, and keep the texts shorter so that the whole object fits. No Markdown, no code fences, no text before or after it.`
+)
+
+// Remind returns req with a fixed reminder of the answer format appended to its trusted instructions, for a repeated
+// request after an answer that failed the checks; truncated selects the reminder to keep the answer shorter. The
+// reminder is constant app text: the rejected answer is never sent back. Errors wrap values.ErrInvalidLLMRequest (the
+// request would exceed the size limit).
+func Remind(req values.LLMRequest, truncated bool) (values.LLMRequest, error) {
+	reminder := formatReminder
+	if truncated {
+		reminder = lengthReminder
+	}
+	return values.NewLLMRequest(req.Operation(), req.ModelAlias(), req.Instructions()+reminder, req.UntrustedData(),
+		req.IdempotencyKey())
+}
+
 // Schema returns the JSON Schema of the answer of operation; empty for an unknown operation.
 func Schema(operation values.Operation) string {
 	switch operation {

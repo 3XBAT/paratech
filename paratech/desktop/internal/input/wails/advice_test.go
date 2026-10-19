@@ -37,7 +37,7 @@ func TestActivityServiceListsTheAdvice(t *testing.T) {
 		}},
 	}}
 	stopper := &fakeStopper{running: true, active: recordingsession.Info{ID: "r1", Advice: ownerAdvice(t)}}
-	got, err := NewActivityService(uc, stopper, &fakeForcer{}, discard()).ListRecordings(context.Background())
+	got, err := NewActivityService(uc, stopper, &fakeForcer{}, &fakeRetrier{}, discard()).ListRecordings(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestActivityServiceListsTheAdvice(t *testing.T) {
 
 	// The whole computer is suggested with empty app and name.
 	stopper.active.Advice.Suggest, stopper.active.Advice.SuggestName = values.WholeComputer(), ""
-	got, _ = NewActivityService(uc, stopper, &fakeForcer{}, discard()).ListRecordings(context.Background())
+	got, _ = NewActivityService(uc, stopper, &fakeForcer{}, &fakeRetrier{}, discard()).ListRecordings(context.Background())
 	if a := got[0].Advice; a == nil || a.SuggestApp != "" || a.SuggestName != "" {
 		t.Fatalf("advice %+v", a)
 	}
@@ -85,7 +85,7 @@ func TestActivityServiceSwitchSource(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			stopper := &fakeStopper{err: tt.err}
-			s := NewActivityService(&fakeActivity{}, stopper, &fakeForcer{}, slog.New(slog.NewTextHandler(&logs, nil)))
+			s := NewActivityService(&fakeActivity{}, stopper, &fakeForcer{}, &fakeRetrier{}, slog.New(slog.NewTextHandler(&logs, nil)))
 			got, err := s.SwitchSource(context.Background(), tt.id, tt.app)
 			if !errors.Is(err, tt.wantErr) || got != tt.want {
 				t.Fatalf("SwitchSource = %+v, %v; want %+v, %v", got, err, tt.want, tt.wantErr)
@@ -120,7 +120,7 @@ func TestActivityServiceDismissAdvice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		stopper := &fakeStopper{err: tt.err}
-		err := NewActivityService(&fakeActivity{}, stopper, &fakeForcer{}, discard()).DismissAdvice(context.Background(), tt.id)
+		err := NewActivityService(&fakeActivity{}, stopper, &fakeForcer{}, &fakeRetrier{}, discard()).DismissAdvice(context.Background(), tt.id)
 		if !errors.Is(err, tt.want) {
 			t.Errorf("%s: DismissAdvice = %v, want %v", tt.name, err, tt.want)
 		}

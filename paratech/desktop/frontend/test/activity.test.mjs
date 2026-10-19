@@ -27,7 +27,8 @@ const recording = {
   id: "r1", lessonId: "l1", title: "История", status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
   stage: "queued", step: "transcription", progressPercent: 0, queueReason: "power", errorCode: "", jobError: "",
-  action: "runNow", actionJobId: "j1", remainingSeconds: 1500, hasRemaining: true, advice: null,
+  action: "runNow", actionJobId: "j1", retryWork: "", canRedoSummary: false, remainingSeconds: 1500, hasRemaining: true,
+  advice: null,
 };
 const job = {
   id: "j1", type: "stt", status: "WAITING_FOR_POWER", waiting: true, attempts: 0, maxAttempts: 3, progressPercent: 0,
@@ -83,6 +84,10 @@ test("errors of the core map to Russian text, unknown ones to a generic text", (
     assert.match(actionErrorText(new Error(msg)), /[а-яё]/i);
   }
   assert.equal(actionErrorText(new Error(errorMessages.cannotRunNow)), "Эту задачу сейчас нельзя запустить.");
+  // TASK-086: the retry and the redo of the summary; an invalid work is a bug of the page, so the generic text.
+  assert.equal(actionErrorText(new Error("the work is already running")), "Уже выполняется — дождитесь окончания.");
+  assert.equal(actionErrorText(new Error("nothing to retry")), "Повторять нечего — уже готово.");
+  assert.equal(actionErrorText(new Error(errorMessages.invalidWork)), actionErrorText(new Error("unknown")));
   assert.equal(actionErrorText({ message: errorMessages.notFound }), actionErrorText(errorMessages.notFound));
   const generic = actionErrorText(new Error("<b>boom</b> C:\\secret"));
   assert.equal(generic, "Не удалось выполнить действие.");
@@ -110,13 +115,19 @@ test("parse accepts well-formed items and drops extra fields", () => {
   for (const queueReason of ["serviceNotConfigured", "serviceUnavailable"]) {
     assert.equal(parseRecording({ ...recording, queueReason }).queueReason, queueReason);
   }
+  // TASK-086: «Повторить» and «Сделать конспект заново».
+  const failed = { ...recording, stage: "failed", action: "retry", actionJobId: "", retryWork: "homework", canRedoSummary: true };
+  assert.deepEqual(parseRecording(failed), failed);
+  assert.equal(parseRecording({ ...failed, action: "openConnections", retryWork: "summary" }).retryWork, "summary");
 });
 
 test("parse rejects malformed items", () => {
   for (const raw of [null, "x", [], {}, { ...recording, stoppable: "yes" }, { ...recording, durationSeconds: Number.NaN }, { ...recording, id: 1 },
     { ...recording, title: undefined }, { ...recording, stage: "paused" }, { ...recording, queueReason: "rain" },
     { ...recording, action: "delete" }, { ...recording, errorCode: 1 },
-    { ...recording, remainingSeconds: undefined }, { ...recording, hasRemaining: "yes" }]) {
+    { ...recording, remainingSeconds: undefined }, { ...recording, hasRemaining: "yes" },
+    { ...recording, retryWork: "transcription" }, { ...recording, retryWork: undefined },
+    { ...recording, canRedoSummary: "true" }, { ...recording, canRedoSummary: undefined }]) {
     assert.throws(() => parseRecording(raw), /recording/);
   }
   for (const raw of [null, 5, {}, { ...job, runNowOffered: 1 }, { ...job, attempts: "0" }, { ...job, status: null }]) {
@@ -135,7 +146,15 @@ test("the api calls the bound methods and checks the replies", async () => {
   assert.deepEqual(await api.listJobs(), [job]);
   await api.stopRecording("r1");
   await api.runJobNow("j1");
-  assert.deepEqual(calls, [[methods.listRecordings], [methods.listJobs], [methods.stopRecording, "r1"], [methods.runJobNow, "j1"]]);
+  await api.retryPostProcessing("r1", "homework");
+  await api.redoSummary("r2");
+  assert.deepEqual(calls, [
+    [methods.listRecordings], [methods.listJobs], [methods.stopRecording, "r1"], [methods.runJobNow, "j1"],
+    [methods.retryPostProcessing, "r1", "homework"], [methods.redoSummary, "r2"],
+  ]);
+  assert.equal(methods.retryPostProcessing, "paratech/desktop/internal/input/wails.ActivityService.RetryPostProcessing");
+  assert.equal(methods.redoSummary, "paratech/desktop/internal/input/wails.ActivityService.RedoSummary");
+  await assert.rejects(activityApi(async () => { throw new Error(errorMessages.alreadyRunning); }).redoSummary("r1"), /already running/);
   await assert.rejects(activityApi(async () => ({})).listJobs(), /jobs: reply is not a list/);
   await assert.rejects(activityApi(async () => [{}]).listRecordings(), /recording/);
 });

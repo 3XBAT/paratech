@@ -40,6 +40,7 @@ type Core struct {
 	Activity ActivityUseCase
 	Stopper  RecordingStopper
 	Forcer   JobForcer
+	Retrier  PostProcessRetrier    // «Повторить» and «Сделать конспект заново» of the recording rows (TASK-086)
 	Prompt   PromptUseCase         // the recording popup; the tray's "Show recording popup" offers an ad-hoc prompt
 	Schedule ScheduleImportUseCase // the schedule import page; the shell shows its open dialog
 	Files    ScheduleFileReader    // reads the file chosen for the schedule import
@@ -198,6 +199,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Forcer == nil {
 		return Services{}, errors.New("wails: open core: no job forcer")
 	}
+	if core.Retrier == nil {
+		return Services{}, errors.New("wails: open core: no post-processing retrier")
+	}
 	if core.Prompt == nil {
 		return Services{}, errors.New("wails: open core: no recording prompt use case")
 	}
@@ -238,7 +242,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	google.window = s
 	return Services{
 		Settings: NewSettingsService(core.Settings, s.opts.Log).withSpeed(core.Speed),
-		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
+		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, core.Retrier, s.opts.Log),
 		Prompt:   NewPromptService(core.Prompt, s.opts.Log),
 		Popup:    NewPopupWindowService(popupFitterFunc(s.fitPopup), s.opts.Log),
 		Schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),

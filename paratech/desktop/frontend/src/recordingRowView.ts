@@ -11,6 +11,7 @@ import type {
   JobItem,
   QueueReason,
   RecordingItem,
+  RetryWork,
 } from "./bindings/activity.js";
 import { formatDuration, formatTime, isFinishedJob, recordingDurationText, splitFinished } from "./activityView.js";
 import { remainingText } from "./durationEstimate.js";
@@ -123,10 +124,18 @@ export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = 
   openModels: "Открыть модели речи",
   openConnections: "Открыть подключения",
   checkSound: "Проверить звук",
+  retry: "Повторить",
 };
 
+/** What the hint of a failed step adds when the row offers «Повторить» (TASK-086). */
+export const retryHints = {
+  retry: "Нажмите «Повторить».",
+  // The LLM call failed: the connection, the key or the quota may need a fix first.
+  afterConnections: "Проверьте подключения и нажмите «Повторить».",
+} as const;
+
 /** The page a navigation action opens; the sound check is on «Диагностика». */
-export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow">, PageId>> = {
+export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow" | "retry">, PageId>> = {
   openModels: "models",
   openConnections: "connections",
   checkSound: "diagnostics",
@@ -135,7 +144,8 @@ export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow">, P
 /** What the row's button does besides Stop. */
 export type RowAction =
   | { kind: "runNow"; jobId: string; label: string }
-  | { kind: "open"; page: PageId; label: string };
+  | { kind: "open"; page: PageId; label: string }
+  | { kind: "retry"; work: Exclude<RetryWork, "">; label: string };
 
 /** What one recording row shows. */
 export interface RecordingRowView {
@@ -153,6 +163,8 @@ export interface RecordingRowView {
   /** The core's notes: the problem of the recording, the last error of the job; plain text. */
   notes: string[];
   action: RowAction | null;
+  /** «Повторить» next to «Открыть подключения» (TASK-086); null for none. */
+  secondary: RowAction | null;
 }
 
 function own<K extends string, V>(map: Readonly<Record<K, V>>, key: string): V | undefined {
@@ -211,19 +223,41 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
         view.hint = silentTexts.hint;
         break;
       }
-      view.hint = own(errorTexts, r.errorCode) ?? "";
+      view.hint = [own(errorTexts, r.errorCode), failedRetryHint(r)].filter((s) => s).join(" ");
       break;
   }
   return view;
 }
 
+function failedRetryHint(r: Pick<RecordingItem, "action" | "retryWork">): string {
+  if (r.retryWork === "") {
+    return "";
+  }
+  if (r.action === "retry") {
+    return retryHints.retry;
+  }
+  return r.action === "openConnections" ? retryHints.afterConnections : "";
+}
+
+function retryAction(work: RetryWork): RowAction | null {
+  return work === "" ? null : { kind: "retry", work, label: actionLabels.retry };
+}
+
 /** The action the core offers for the row (Stop aside). */
-export function rowAction(r: Pick<RecordingItem, "action" | "actionJobId">): RowAction | null {
+export function rowAction(r: Pick<RecordingItem, "action" | "actionJobId" | "retryWork">): RowAction | null {
   if (r.action === "runNow") {
     return r.actionJobId === "" ? null : { kind: "runNow", jobId: r.actionJobId, label: actionLabels.runNow };
   }
+  if (r.action === "retry") {
+    return retryAction(r.retryWork);
+  }
   const page = own(actionPages, r.action);
   return page === undefined ? null : { kind: "open", page, label: actionLabels[r.action as keyof typeof actionPages] };
+}
+
+/** «Повторить» after a fix of the connection: the core sets retryWork also with openConnections (TASK-086). */
+export function rowSecondaryAction(r: Pick<RecordingItem, "action" | "retryWork">): RowAction | null {
+  return r.action === "openConnections" ? retryAction(r.retryWork) : null;
 }
 
 /** Everything one row shows. */
@@ -239,6 +273,7 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
     remaining: remainingText(r),
     notes: [r.problem, r.jobError].filter((s, i, all) => s !== "" && all.indexOf(s) === i),
     action: rowAction(r),
+    secondary: rowSecondaryAction(r),
   };
 }
 

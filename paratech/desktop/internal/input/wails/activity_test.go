@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/cases/activity"
+	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -71,6 +72,21 @@ func (f *fakeForcer) ForceRun(_ context.Context, id shared.JobID) error {
 	return f.err
 }
 
+type fakeRetrier struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeRetrier) Retry(_ context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, error) {
+	f.calls = append(f.calls, "retry "+string(rec)+" "+string(work))
+	return "j9", f.err
+}
+
+func (f *fakeRetrier) RedoSummary(_ context.Context, rec shared.RecordingID) (shared.JobID, error) {
+	f.calls = append(f.calls, "redo "+string(rec))
+	return "j9", f.err
+}
+
 // A non-UTC zone checks that the page gets UTC times.
 var at = time.Date(2026, 10, 15, 9, 30, 0, 0, time.FixedZone("MSK", 3*3600))
 
@@ -93,11 +109,11 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		{
 			ID: "r3", Status: recording.StatusCompleted, StartedAt: at, Chain: activity.Chain{
 				Stage: activity.StageFailed, Step: activity.StepSummary, ErrorCode: activity.ErrorSummaryFailed,
-				Action: activity.ActionOpenConnections,
+				Action: activity.ActionOpenConnections, Retry: activity.WorkSummary, CanRedoSummary: true,
 			},
 		},
 	}}
-	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, discard()).ListRecordings(context.Background())
+	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, &fakeRetrier{}, discard()).ListRecordings(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +125,16 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		`{"id":"r1","lessonId":"l1","title":"История, лекция","status":"RECORDING",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"queueReason":"","errorCode":"",` +
-		`"jobError":"","action":"","actionJobId":"","remainingSeconds":0,"hasRemaining":false,"advice":null},` +
+		`"jobError":"","action":"","actionJobId":"","retryWork":"","canRedoSummary":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r2","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"queueReason":"power",` +
-		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1","remainingSeconds":0,"hasRemaining":false,"advice":null},` +
+		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1",` +
+		`"retryWork":"","canRedoSummary":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r3","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
-		`"actionJobId":"","remainingSeconds":0,"hasRemaining":false,"advice":null}]`
+		`"actionJobId":"","retryWork":"summary","canRedoSummary":true,"remainingSeconds":0,"hasRemaining":false,"advice":null}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}
@@ -129,7 +146,7 @@ func TestActivityServiceListsJobs(t *testing.T) {
 		LastError: "net", CreatedAt: at, UpdatedAt: at.Add(time.Minute), NextRunAt: at.Add(2 * time.Minute),
 		RunNowOffered: true,
 	}}}
-	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, discard()).ListJobs(context.Background())
+	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, &fakeRetrier{}, discard()).ListJobs(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +164,7 @@ func TestActivityServiceListsJobs(t *testing.T) {
 
 // An empty history is an empty list on the page, not null.
 func TestActivityServiceEmptyListsAreArrays(t *testing.T) {
-	s := NewActivityService(&fakeActivity{}, &fakeStopper{}, &fakeForcer{}, discard())
+	s := NewActivityService(&fakeActivity{}, &fakeStopper{}, &fakeForcer{}, &fakeRetrier{}, discard())
 	recs, err := s.ListRecordings(context.Background())
 	if b, _ := json.Marshal(recs); err != nil || string(b) != "[]" {
 		t.Errorf("ListRecordings = %s, %v", b, err)
@@ -161,7 +178,7 @@ func TestActivityServiceEmptyListsAreArrays(t *testing.T) {
 func TestActivityServiceHidesListErrors(t *testing.T) {
 	var logs bytes.Buffer
 	secret := errors.New(`open C:\Users\student\db: locked`)
-	s := NewActivityService(&fakeActivity{err: secret}, &fakeStopper{}, &fakeForcer{}, slog.New(slog.NewTextHandler(&logs, nil)))
+	s := NewActivityService(&fakeActivity{err: secret}, &fakeStopper{}, &fakeForcer{}, &fakeRetrier{}, slog.New(slog.NewTextHandler(&logs, nil)))
 
 	if _, err := s.ListRecordings(context.Background()); !errors.Is(err, ErrActivityUnavailable) || strings.Contains(err.Error(), "student") {
 		t.Errorf("ListRecordings err = %v", err)
@@ -207,7 +224,7 @@ func TestActivityServiceStopRecording(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewActivityService(&fakeActivity{}, tt.stopper, &fakeForcer{}, slog.New(slog.NewTextHandler(&logs, nil)))
+			s := NewActivityService(&fakeActivity{}, tt.stopper, &fakeForcer{}, &fakeRetrier{}, slog.New(slog.NewTextHandler(&logs, nil)))
 			checkActionError(t, s.StopRecording(context.Background(), tt.id), tt.want)
 
 			switch {
@@ -240,7 +257,7 @@ func TestActivityServiceRunJobNow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewActivityService(&fakeActivity{}, &fakeStopper{}, tt.forcer, discard())
+			s := NewActivityService(&fakeActivity{}, &fakeStopper{}, tt.forcer, &fakeRetrier{}, discard())
 			checkActionError(t, s.RunJobNow(context.Background(), tt.id), tt.want)
 
 			switch {
@@ -261,6 +278,7 @@ func TestFrontendKnowsActivityErrors(t *testing.T) {
 	}
 	for _, e := range []error{
 		ErrActivityUnavailable, ErrInvalidID, ErrItemNotFound, ErrRecordingNotRunning, ErrCannotRunNow, ErrActionFailed,
+		ErrInvalidWork, ErrAlreadyRunning, ErrNothingToRetry,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/activity.ts does not list the error %q", e)
@@ -290,5 +308,56 @@ func TestFrontendKnowsChainCodes(t *testing.T) {
 		if !strings.Contains(string(src), `"`+c+`"`) {
 			t.Errorf("frontend/src/bindings/activity.ts does not list the chain code %q", c)
 		}
+	}
+}
+
+// TASK-086: «Повторить» and «Сделать конспект заново» of a recording row.
+func TestActivityServiceRetry(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(s *ActivityService) error
+		err  error
+		want error
+		got  []string
+	}{
+		{name: "retry summary", call: func(s *ActivityService) error {
+			return s.RetryPostProcessing(context.Background(), "r1", "summary")
+		}, got: []string{"retry r1 summary"}},
+		{name: "retry homework", call: func(s *ActivityService) error {
+			return s.RetryPostProcessing(context.Background(), "r1", "homework")
+		}, got: []string{"retry r1 homework"}},
+		{name: "redo summary", call: func(s *ActivityService) error {
+			return s.RedoSummary(context.Background(), "r1")
+		}, got: []string{"redo r1"}},
+		{name: "unknown work", call: func(s *ActivityService) error {
+			return s.RetryPostProcessing(context.Background(), "r1", "draft")
+		}, want: ErrInvalidWork},
+		{name: "invalid id", call: func(s *ActivityService) error {
+			return s.RetryPostProcessing(context.Background(), "r\n1", "summary")
+		}, want: ErrInvalidID},
+		{name: "invalid id of redo", call: func(s *ActivityService) error { return s.RedoSummary(context.Background(), "") },
+			want: ErrInvalidID},
+		{name: "running", call: func(s *ActivityService) error {
+			return s.RetryPostProcessing(context.Background(), "r1", "summary")
+		}, err: fmt.Errorf("x: %w: RUNNING", job.ErrStillActive), want: ErrAlreadyRunning, got: []string{"retry r1 summary"}},
+		{name: "redo while queued", call: func(s *ActivityService) error { return s.RedoSummary(context.Background(), "r1") },
+			err: fmt.Errorf("x: %w: QUEUED", job.ErrStillActive), want: ErrAlreadyRunning, got: []string{"redo r1"}},
+		{name: "completed", call: func(s *ActivityService) error {
+			return s.RetryPostProcessing(context.Background(), "r1", "homework")
+		}, err: job.ErrNotFailed, want: ErrNothingToRetry, got: []string{"retry r1 homework"}},
+		{name: "no summary", call: func(s *ActivityService) error { return s.RedoSummary(context.Background(), "r1") },
+			err: shared.ErrNotFound, want: ErrItemNotFound, got: []string{"redo r1"}},
+		{name: "storage", call: func(s *ActivityService) error { return s.RedoSummary(context.Background(), "r1") },
+			err: errors.New(`open C:\Users\student\db: locked`), want: ErrActionFailed, got: []string{"redo r1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &fakeRetrier{err: tt.err}
+			s := NewActivityService(&fakeActivity{}, &fakeStopper{}, &fakeForcer{}, r, discard())
+			checkActionError(t, tt.call(s), tt.want)
+			if strings.Join(r.calls, ";") != strings.Join(tt.got, ";") {
+				t.Fatalf("calls = %v, want %v", r.calls, tt.got)
+			}
+		})
 	}
 }

@@ -247,3 +247,28 @@ type Tx interface {
 	// version on the instance (Persisted) before the outermost commit, which a rollback does not undo (ADR-0004(d)).
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
+
+// LatestTranscripts finds the newest transcript of a recording, whose post-processing the user starts again
+// (PRD section 9, TASK-086). Implemented by the sqlite adapter.
+type LatestTranscripts interface {
+	// LatestByRecording loads the newest transcript of the recording (PRD section 8); none wraps shared.ErrNotFound.
+	LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error)
+}
+
+// PostJobs finds the newest post-processing job of a transcript and creates the one that follows it (PRD section 9,
+// TASK-086). Implemented by the sqlite adapter.
+type PostJobs interface {
+	// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix
+	// (PRD section 7.2); none wraps shared.ErrNotFound.
+	LatestByKeyPrefix(ctx context.Context, typ job.Type, prefix string) (*job.Job, error)
+
+	// Enqueue stores a new job (PRD section 7.1); for an existing idempotency key it creates nothing and returns the
+	// existing job's ID with created == false.
+	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
+}
+
+// SummaryReader reads the summary of a transcript (PRD section 9). Implemented by the sqlite adapter.
+type SummaryReader interface {
+	// Get loads a summary (PRD section 9); none wraps shared.ErrNotFound.
+	Get(ctx context.Context, id summary.ID) (*summary.Summary, error)
+}

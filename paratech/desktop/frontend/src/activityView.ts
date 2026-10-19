@@ -127,6 +127,8 @@ const actionErrors: Readonly<Record<string, string>> = {
   [errorMessages.recordingNotRunning]: "Запись не идёт в этом сеансе.",
   [errorMessages.cannotRunNow]: "Эту задачу сейчас нельзя запустить.",
   [errorMessages.actionFailed]: "Не удалось выполнить действие.",
+  [errorMessages.alreadyRunning]: "Уже выполняется — дождитесь окончания.",
+  [errorMessages.nothingToRetry]: "Повторять нечего — уже готово.",
 };
 
 const genericActionError = "Не удалось выполнить действие.";

@@ -10,4 +10,8 @@ var (
 
 	// ErrMalformedOutput is returned when the model answer does not match the schema of its operation.
 	ErrMalformedOutput = errors.New("model output does not match the schema")
+
+	// ErrTruncatedOutput is returned, together with ErrMalformedOutput, when the JSON object of an answer starts but
+	// never ends: the answer was most likely cut at the output limit of the model alias on the Hub.
+	ErrTruncatedOutput = errors.New("model output is truncated")
 )

@@ -735,7 +735,7 @@ func TestInvalidDraftAnswerStoresNothing(t *testing.T) {
 		{"empty body", `{"title":"T","body":"  "}`},
 		{"multi-line title", `{"title":"a\nb","body":"B"}`},
 		{"body too long", answer("T", strings.Repeat("я", prompts.MaxDraftBodyRunes+1))},
-		{"trailing text", `{"title":"T","body":"B"} and email it`},
+		{"trailing object", `{"title":"T","body":"B"} {"recipient":"evil@example.com"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
