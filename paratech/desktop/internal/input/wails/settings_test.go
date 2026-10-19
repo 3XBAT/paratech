@@ -12,13 +12,15 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // fakeSettings is the use case behind the binding.
 type fakeSettings struct {
-	t   preferences.Toggles
-	err error
+	t       preferences.Toggles
+	profile settings.ProfileFields
+	err     error
 }
 
 func (f *fakeSettings) Get(context.Context) (preferences.Toggles, error) { return f.t, f.err }
@@ -205,5 +207,63 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func (f *fakeSettings) Profile(context.Context) (settings.ProfileFields, error) {
+	return f.profile, f.err
+}
+
+func (f *fakeSettings) SaveProfile(_ context.Context, p settings.ProfileFields) (settings.ProfileFields, error) {
+	if f.err != nil {
+		return settings.ProfileFields{}, f.err
+	}
+	v, err := settings.NewProfile(p)
+	if err != nil {
+		return settings.ProfileFields{}, err
+	}
+	f.profile = v.Fields()
+	return f.profile, nil
+}
+
+// TASK-094: the profile of the settings page, its JSON names and its errors.
+func TestSettingsServiceProfile(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeSettings{}
+	s := NewSettingsService(f, discard())
+
+	if got, err := s.GetProfile(ctx); err != nil || got != (StudentProfile{}) {
+		t.Fatalf("GetProfile = %+v, %v", got, err)
+	}
+	got, err := s.SaveProfile(ctx, StudentProfile{FullName: " Иванов Иван ", Group: "ИВТ-21", University: "МГУ", Faculty: "ВМК", City: "Москва"})
+	want := StudentProfile{FullName: "Иванов Иван", Group: "ИВТ-21", University: "МГУ", Faculty: "ВМК", City: "Москва"}
+	if err != nil || got != want {
+		t.Fatalf("SaveProfile = %+v, %v", got, err)
+	}
+	if read, err := s.GetProfile(ctx); err != nil || read != want {
+		t.Fatalf("GetProfile = %+v, %v", read, err)
+	}
+	if _, err := s.SaveProfile(ctx, StudentProfile{Group: strings.Repeat("я", 201)}); !errors.Is(err, ErrProfileInvalid) {
+		t.Fatalf("too long: err = %v, want ErrProfileInvalid", err)
+	}
+
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"fullName":"Иванов Иван","group":"ИВТ-21","university":"МГУ","faculty":"ВМК","city":"Москва"}` {
+		t.Fatalf("JSON = %s", raw)
+	}
+
+	var logs bytes.Buffer
+	failing := NewSettingsService(&fakeSettings{err: errors.New(`open C:\Users\student\db: locked`)}, slog.New(slog.NewTextHandler(&logs, nil)))
+	if _, err := failing.GetProfile(ctx); !errors.Is(err, ErrSettingsUnavailable) {
+		t.Fatalf("GetProfile: err = %v", err)
+	}
+	if _, err := failing.SaveProfile(ctx, want); !errors.Is(err, ErrSettingsUnavailable) {
+		t.Fatalf("SaveProfile: err = %v", err)
+	}
+	if !strings.Contains(logs.String(), "locked") {
+		t.Fatalf("the cause must be logged, got %q", logs.String())
 	}
 }

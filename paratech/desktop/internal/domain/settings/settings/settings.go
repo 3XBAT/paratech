@@ -38,6 +38,9 @@ type Settings struct {
 	// recognitionLoad is how hard speech recognition may load the computer (TASK-084).
 	recognitionLoad shared.RecognitionLoad
 
+	// profile is the student profile of the title page of a homework document (TASK-094); not a secret.
+	profile Profile
+
 	updatedAt time.Time // zero: never changed by the user
 }
 
@@ -65,6 +68,7 @@ type State struct {
 	HubURL                  string                 // empty: none
 	RecordingSource         shared.AppName         // empty: the whole computer
 	RecognitionLoad         shared.RecognitionLoad // empty or unknown: shared.DefaultRecognitionLoad
+	Profile                 ProfileFields          // the student profile; empty fields: not set
 	UpdatedAt               time.Time              // zero: stored defaults that the user never changed
 }
 
@@ -87,6 +91,11 @@ func Restore(s State) (*Settings, error) {
 			return nil, fmt.Errorf("%w: recording source: %w", ErrInvalidSettings, err)
 		}
 	}
+	// A broken stored profile (an older or tampered row) is dropped instead of failing the load: it only fills a title page.
+	profile, err := NewProfile(s.Profile)
+	if err != nil {
+		profile = Profile{}
+	}
 	security := s.SMTPSecurity
 	if security == "" {
 		security = DefaultMailSecurity
@@ -106,6 +115,7 @@ func Restore(s State) (*Settings, error) {
 		recordingSource:         s.RecordingSource,
 		// An unknown stored mode (an older or tampered row) falls back to the gentlest instead of failing the load.
 		recognitionLoad: s.RecognitionLoad.OrDefault(),
+		profile:         profile,
 		updatedAt:       s.UpdatedAt,
 	}, nil
 }
