@@ -21,4 +21,10 @@ var (
 
 	// ErrAttemptsExhausted means a job has no attempt left to start.
 	ErrAttemptsExhausted = errors.New("no attempts left")
+
+	// ErrStillActive means a job cannot be rerun: it is still pending, waiting or running.
+	ErrStillActive = errors.New("job is still active")
+
+	// ErrNotFailed means a job cannot be retried: it completed.
+	ErrNotFailed = errors.New("job did not fail")
 )
