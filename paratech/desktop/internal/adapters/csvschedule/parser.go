@@ -29,7 +29,16 @@ const (
 	colEnd      = "end"
 	colTimeZone = "timezone"
 	colUID      = "uid"
+	colSubject  = "subject"
+	colKind     = "kind"
+	colTeacher  = "teacher"
 )
+
+// columnAliases are the other accepted names of the optional columns.
+var columnAliases = map[string]string{"предмет": colSubject, "тип": colKind, "преподаватель": colTeacher}
+
+// optionalColumns are -1 in the column map when absent.
+var optionalColumns = []string{colUID, colSubject, colKind, colTeacher}
 
 var requiredColumns = []string{colTitle, colDate, colStart, colEnd, colTimeZone}
 
@@ -128,14 +137,20 @@ func malformed(err error) error {
 	return &Error{Kind: ErrMalformed, Detail: err.Error()}
 }
 
-// columns maps a column name to its index; uid is -1 when absent.
+// columns maps a column name to its index; an optional column is -1 when absent.
 func columns(header []string) (map[string]int, error) {
-	cols := map[string]int{colUID: -1}
+	cols := map[string]int{}
+	for _, c := range optionalColumns {
+		cols[c] = -1
+	}
 	seen := map[string]bool{}
 	for i, h := range header {
 		name := strings.ToLower(strings.TrimSpace(h))
+		if alias, ok := columnAliases[name]; ok {
+			name = alias
+		}
 		switch name {
-		case colTitle, colDate, colStart, colEnd, colTimeZone, colUID:
+		case colTitle, colDate, colStart, colEnd, colTimeZone, colUID, colSubject, colKind, colTeacher:
 		default:
 			continue // unknown columns are ignored
 		}
@@ -159,7 +174,12 @@ func columns(header []string) (map[string]int, error) {
 }
 
 func parseRow(line int, rec []string, cols map[string]int, zones map[string]*time.Location) (importplan.Row, *importplan.RowError) {
-	get := func(c string) string { return strings.TrimSpace(rec[cols[c]]) }
+	get := func(c string) string {
+		if cols[c] < 0 {
+			return ""
+		}
+		return strings.TrimSpace(rec[cols[c]])
+	}
 	fail := func(field, reason string) (importplan.Row, *importplan.RowError) {
 		return importplan.Row{}, &importplan.RowError{Line: line, Field: field, Reason: reason}
 	}
@@ -188,13 +208,27 @@ func parseRow(line int, rec []string, cols map[string]int, zones map[string]*tim
 		return fail(colEnd, "end is not after start")
 	}
 
+	// Empty subject or kind cells, or no such columns: the title tells (lesson.ClassifyTitle).
+	subject, kind := lesson.ClassifyTitle(title)
+	if s := get(colSubject); s != "" {
+		subject = lesson.CleanText(s, lesson.MaxSubjectRunes)
+	}
+	if k := get(colKind); k != "" {
+		if kind, ok = lesson.ParseKind(k); !ok {
+			return fail(colKind, "not a lesson type (lecture, seminar, practice or lab, in English or Russian)")
+		}
+	}
+	teacher := lesson.CleanText(get(colTeacher), lesson.MaxTeacherRunes)
+
 	key := keyAutoStart + date.Format(dateLayout) + " " + start.Format(clockLayout) + " " + title
-	if cols[colUID] >= 0 && get(colUID) != "" {
+	if get(colUID) != "" {
 		key = keyIDStart + get(colUID)
 	}
 	return importplan.Row{
 		Line: line, Key: key,
-		Content: lesson.Content{Title: title, Start: start, End: end, TimeZone: zone.String()},
+		Content: lesson.Content{
+			Title: title, Start: start, End: end, TimeZone: zone.String(), Subject: subject, Kind: kind, Teacher: teacher,
+		},
 	}, nil
 }
 

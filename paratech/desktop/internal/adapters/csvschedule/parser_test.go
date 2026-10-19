@@ -36,11 +36,11 @@ func TestParseValid(t *testing.T) {
 	}
 
 	want := []importplan.Row{
-		{Line: 2, Key: "id:m-1", Content: lesson.Content{Title: "Math",
+		{Line: 2, Key: "id:m-1", Content: lesson.Content{Title: "Math", Subject: "Math",
 			Start: time.Date(2026, 10, 14, 9, 0, 0, 0, msk), End: time.Date(2026, 10, 14, 10, 30, 0, 0, msk), TimeZone: "Europe/Moscow"}},
-		{Line: 3, Key: "auto:2026-10-14 09:45 Physics, lab", Content: lesson.Content{Title: "Physics, lab",
+		{Line: 3, Key: "auto:2026-10-14 09:45 Physics, lab", Content: lesson.Content{Title: "Physics, lab", Subject: "Physics", Kind: lesson.KindLab,
 			Start: time.Date(2026, 10, 14, 9, 45, 0, 0, time.UTC), End: time.Date(2026, 10, 14, 11, 15, 0, 0, time.UTC), TimeZone: "UTC"}},
-		{Line: 4, Key: "auto:2026-10-15 12:00 =SUM(A1)", Content: lesson.Content{Title: "=SUM(A1)",
+		{Line: 4, Key: "auto:2026-10-15 12:00 =SUM(A1)", Content: lesson.Content{Title: "=SUM(A1)", Subject: "=SUM(A1)",
 			Start: time.Date(2026, 10, 15, 12, 0, 0, 0, msk), End: time.Date(2026, 10, 15, 13, 0, 0, 0, msk), TimeZone: "Europe/Moscow"}},
 	}
 	for i, w := range want {
@@ -110,6 +110,77 @@ func TestParseRowErrors(t *testing.T) {
 				t.Fatalf("error = %+v, want line 3 field %q", e, tt.field)
 			}
 		})
+	}
+}
+
+// Optional subject, kind and teacher columns (TASK-089): given cells win, empty ones and missing columns take what
+// the title tells.
+func TestParseLessonDetails(t *testing.T) {
+	type details struct {
+		subject string
+		kind    lesson.Kind
+		teacher string
+	}
+	tests := []struct {
+		name string
+		src  string
+		want []details
+	}{
+		{"no columns", "title,date,start,end,timezone\n" +
+			"\"Матанализ, лекция\",2026-10-14,09:00,10:00,UTC\n" +
+			"Лабиринты истории,2026-10-14,11:00,12:00,UTC\n",
+			[]details{{"Матанализ", lesson.KindLecture, ""}, {"Лабиринты истории", lesson.KindUnknown, ""}}},
+		{"english columns", "title,date,start,end,timezone,subject,kind,teacher\n" +
+			"Матанализ 1,2026-10-14,09:00,10:00,UTC,Математический анализ,Лек.,  Иванов  И. И. \n" +
+			"Физика (лаб),2026-10-14,11:00,12:00,UTC,,,\n" +
+			"Химия,2026-10-14,13:00,14:00,UTC,,seminar,Петров\n" +
+			"\"Матанализ, семинар\",2026-10-14,15:00,16:00,UTC,Анализ,,\n",
+			[]details{
+				{"Математический анализ", lesson.KindLecture, "Иванов И. И."},
+				{"Физика", lesson.KindLab, ""},
+				{"Химия", lesson.KindSeminar, "Петров"},
+				{"Анализ", lesson.KindSeminar, ""},
+			}},
+		{"russian headers", "Title;Date;Start;End;TimeZone;Предмет;Тип;Преподаватель\n" +
+			"Матанализ;2026-10-14;09:00;10:00;UTC;Матан;практика;Сидоров\n" +
+			"История;2026-10-14;11:00;12:00;UTC;;другое;\n",
+			[]details{{"Матан", lesson.KindPractice, "Сидоров"}, {"История", lesson.KindUnknown, ""}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := parse(t, tt.src)
+			if len(p.Errors) != 0 || len(p.Rows) != len(tt.want) {
+				t.Fatalf("parsed = %+v", p)
+			}
+			for i, w := range tt.want {
+				c := p.Rows[i].Content
+				if c.Subject != w.subject || c.Kind != w.kind || c.Teacher != w.teacher {
+					t.Errorf("row %d = %q, %v, %q; want %q, %v, %q", i, c.Subject, c.Kind, c.Teacher, w.subject, w.kind, w.teacher)
+				}
+				if err := c.Validate(); err != nil {
+					t.Errorf("row %d content invalid: %v", i, err)
+				}
+			}
+		})
+	}
+}
+
+func TestParseLessonDetailErrors(t *testing.T) {
+	p := parse(t, "title,date,start,end,timezone,kind,teacher\n"+
+		"Ok,2026-10-14,08:00,08:30,UTC,lab,\n"+
+		"Math,2026-10-14,09:00,10:00,UTC,экзамен,\n"+
+		"Long,2026-10-14,11:00,12:00,UTC,,"+strings.Repeat("я", lesson.MaxTeacherRunes+50)+"\n")
+	if len(p.Rows) != 2 || len(p.Errors) != 1 {
+		t.Fatalf("parsed = %+v", p)
+	}
+	if e := p.Errors[0]; e.Line != 3 || e.Field != colKind || e.Reason == "" || strings.Contains(e.Reason, "экзамен") {
+		t.Fatalf("error = %+v, want line 3 field kind without the cell value", e)
+	}
+	if got := []rune(p.Rows[1].Content.Teacher); len(got) != lesson.MaxTeacherRunes {
+		t.Fatalf("teacher of %d characters, want it cut to %d", len(got), lesson.MaxTeacherRunes)
+	}
+	if _, err := New().Parse(context.Background(), []byte("title,date,start,end,timezone,subject,Предмет\n")); !errors.Is(err, ErrHeader) {
+		t.Fatalf("subject twice: err = %v, want ErrHeader", err)
 	}
 }
 

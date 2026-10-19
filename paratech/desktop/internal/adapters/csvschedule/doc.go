@@ -7,7 +7,12 @@
 //   - Separator: comma; a semicolon when the header line has semicolons and no commas (spreadsheet exports in
 //     locales that use the decimal comma). Fields may be quoted as in RFC 4180.
 //   - The first line is the header. Column names are case-insensitive, in any order: title, date, start, end,
-//     timezone are required; uid is optional. Other columns (room, teacher, ...) are ignored.
+//     timezone are required; uid, subject (or «предмет»), kind («тип») and teacher («преподаватель») are optional.
+//     Other columns (room, ...) are ignored.
+//   - kind is lecture, seminar, practice or lab, in English or Russian, abbreviated or not ("лекция", "Лек.",
+//     "сем", "пр", "lab"; lesson.ParseKind); another value is a row error of the column. An empty subject or kind
+//     cell, or a missing column, takes the value lesson.ClassifyTitle derives from the title. The teacher is
+//     optional; subject and teacher are cut to one line of lesson.MaxSubjectRunes and MaxTeacherRunes characters.
 //   - date is YYYY-MM-DD, start and end are HH:MM (24 h) on that date in the zone timezone, an IANA name such as
 //     Europe/Moscow. The end must be after the start on the same date; a lesson cannot pass midnight.
 //   - Values are trimmed and kept as plain data (a title starting with "=" is just text).
