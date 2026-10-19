@@ -51,7 +51,8 @@ const advice = {
 const whole = { ...advice, suggestApp: "", suggestName: "" };
 
 const recording = {
-  id: "r1", lessonId: "", title: "", status: "RECORDING", startedAt: "2026-10-19T10:00:00Z", stoppedAt: "",
+  id: "r1", lessonId: "", title: "", subject: "", kind: "", teacher: "",
+  status: "RECORDING", startedAt: "2026-10-19T10:00:00Z", stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: true, stage: "recording", step: "", progressPercent: 0,
   queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "", canRedoSummary: false,
   remainingSeconds: 0, hasRemaining: false, advice,

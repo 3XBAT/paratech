@@ -90,9 +90,9 @@ func TestMigrationToVersion12AddsSilent(t *testing.T) {
 	if _, err := p.UpTo(ctx, 12); err != nil {
 		t.Fatalf("up to 12: %v", err)
 	}
-	r, err := NewRecordingRepository(db).Get(ctx, "r-old")
-	if err != nil || r.Silent() {
-		t.Fatalf("existing recording = %v, %v; want it not silent", r, err)
+	// Read by SQL: the repository needs the columns of later versions.
+	if n := scanInt(t, db.sql, "SELECT silent FROM recordings WHERE id = 'r-old'"); n != 0 {
+		t.Fatalf("existing recording silent = %d; want 0", n)
 	}
 
 	if _, err := p.DownTo(ctx, 11); err != nil {

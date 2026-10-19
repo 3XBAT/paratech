@@ -15,6 +15,8 @@ import {
   chainStatusView,
   errorTexts,
   finishedKey,
+  lessonKindTexts,
+  lessonLine,
   pageGroups,
   queueLine,
   queueReasonHints,
@@ -42,7 +44,8 @@ const actions = ["runNow", "openModels", "openConnections", "checkSound", "retry
 const started = "2026-10-18T17:19:35Z";
 const startMs = Date.parse(started);
 const row = (over = {}) => ({
-  id: "r1", lessonId: "l1", title: "Матанализ", status: "COMPLETED", startedAt: started, stoppedAt: "",
+  id: "r1", lessonId: "l1", title: "Матанализ", subject: "", kind: "", teacher: "",
+  status: "COMPLETED", startedAt: started, stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: false, stage: "done", step: "", progressPercent: 0,
   queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "", canRedoSummary: false,
   remainingSeconds: 0, hasRemaining: false, advice: null, ...over,
@@ -219,6 +222,48 @@ test("the row renders the lesson title and notes as text and only the offered bu
   assert.ok(render(row(), { extraActions: h("button", null, "Ещё") }).includes(">Ещё</button>"), "room for TASK-079");
   const src = readFileSync(new URL("../src/pages/RecordingRow.tsx", import.meta.url), "utf8");
   assert.ok(!src.includes("dangerouslySetInnerHTML"));
+});
+
+test("the lesson line names the known subject, kind and teacher (TASK-088)", () => {
+  assert.deepEqual(lessonKindTexts, { lecture: "лекция", seminar: "семинар", practice: "практика", lab: "лабораторная" });
+  const line = (over) => lessonLine({ title: "Тестовый урок", subject: "", kind: "", teacher: "", ...over });
+  for (const [over, want] of [
+    [{ subject: "Матанализ", kind: "lecture", teacher: "Иванов И. И." }, "Матанализ · лекция · Иванов И. И."],
+    [{ subject: "Матанализ", kind: "lecture" }, "Матанализ · лекция"],
+    [{ kind: "seminar" }, "семинар"],
+    [{ kind: "practice", teacher: "Петрова" }, "практика · Петрова"],
+    [{ subject: "Физика", kind: "lab" }, "Физика · лабораторная"],
+    [{ subject: "  Физика  ", teacher: " Петрова " }, "Физика · Петрова"],
+    [{ subject: "Физика", kind: "other" }, "Физика"],
+    [{ subject: "Физика", kind: "unknown" }, "Физика"],
+    [{ subject: "Физика", kind: "exam" }, "Физика"],
+    [{ subject: "Физика", kind: "toString" }, "Физика"],
+    [{ subject: "Физика", kind: "LECTURE" }, "Физика"],
+    // The subject that repeats the title is not shown twice.
+    [{ title: "Матанализ", subject: " матанализ ", kind: "lecture" }, "лекция"],
+    [{ title: "", subject: "Матанализ" }, "Матанализ"],
+    [{ subject: "   ", teacher: "  " }, ""],
+    [{}, ""],
+  ]) {
+    assert.equal(line(over), want, JSON.stringify(over));
+  }
+  assert.equal(recordingRowView(row({ subject: "Матанализ", kind: "lecture" }), 0).lesson, "лекция");
+  assert.equal(recordingRowView(row(), 0).lesson, "");
+});
+
+test("the row shows the lesson line as text, and nothing extra without it (TASK-088)", () => {
+  const html = render(row({ title: "Тестовый урок", subject: "Матанализ", kind: "lecture", teacher: "Иванов И. И." }));
+  assert.ok(html.includes('<span class="row-lesson">Матанализ · лекция · Иванов И. И.</span>'), html);
+
+  const empty = render(row({ title: "Тестовый урок" }));
+  assert.ok(!empty.includes("row-lesson"));
+  assert.ok(!empty.includes(" · "), empty);
+  // Without a lesson line and without meta there is no empty meta span either.
+  assert.ok(!render(row({ title: "" })).includes('class="small muted"></span>'));
+
+  const unsafe = render(row({ subject: "<img src=x onerror=alert(1)>", teacher: "<a href=x>t</a>" }));
+  assert.ok(!unsafe.includes("<img") && !unsafe.includes("<a "));
+  assert.ok(unsafe.includes("&lt;img src=x onerror=alert(1)&gt; · &lt;a href=x&gt;t&lt;/a&gt;"));
 });
 
 test("the next tick comes just after the next whole second", () => {

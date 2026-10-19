@@ -120,6 +120,12 @@ type Recording struct {
 	CreatedAt     int64
 	UpdatedAt     int64
 	Silent        int64
+	LessonTitle   sql.NullString
+	LessonSubject sql.NullString
+	LessonKind    sql.NullString
+	LessonTeacher sql.NullString
+	LessonStart   sql.NullInt64
+	LessonEnd     sql.NullInt64
 }
 
 type ScheduleEntry struct {

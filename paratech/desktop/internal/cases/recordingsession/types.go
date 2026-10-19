@@ -10,7 +10,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Deps are the ports the Service needs. All are required except Apps, Advice and Log.
+// Deps are the ports the Service needs. All are required except Lessons, Apps, Advice and Log.
 type Deps struct {
 	Recordings  RecordingRepository
 	Transcripts RecordingTranscripts
@@ -21,6 +21,7 @@ type Deps struct {
 	Sleeper     Sleeper
 	IDs         IDGenerator
 	Completions CompletionListener
+	Lessons     LessonReader   // optional: nil keeps no lesson snapshot (TASK-088)
 	Apps        AudioApps      // optional: nil gives no silent-source advice (TASK-082)
 	Advice      AdviceListener // optional: nil tells nobody when the advice changes
 	Log         *slog.Logger   // optional: nil discards

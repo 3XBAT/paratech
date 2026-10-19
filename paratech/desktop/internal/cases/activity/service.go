@@ -76,7 +76,9 @@ func (s *Service) ListRecordings(ctx context.Context) ([]Recording, error) {
 	out := make([]Recording, 0, len(recs))
 	for _, r := range recs {
 		row := recordingRow(r)
-		row.LessonTitle = titles[r.LessonID()]
+		if row.LessonTitle == "" {
+			row.LessonTitle = titles[r.LessonID()]
+		}
 		row.Chain = chainOf(r, chainJobs[r.ID()])
 		row.Remaining, row.HasRemaining = s.remaining(ctx, r, chainJobs[r.ID()], row.Chain)
 		out = append(out, row)
@@ -84,14 +86,15 @@ func (s *Service) ListRecordings(ctx context.Context) ([]Recording, error) {
 	return out, nil
 }
 
-// lessonTitles reads the title of every lesson of recs once. A lesson that is gone has no title; one that cannot be
-// read is logged (when the set changes) and has no title either, so it does not hide the recordings.
+// lessonTitles reads the title of every lesson of recs without a title of their own (TASK-088) once. A lesson that is
+// gone has no title; one that cannot be read is logged (when the set changes) and has no title either, so it does not
+// hide the recordings.
 func (s *Service) lessonTitles(ctx context.Context, recs []*recording.Recording) (map[shared.LessonID]string, error) {
 	titles := make(map[shared.LessonID]string)
 	var bad []shared.LessonID
 	for _, r := range recs {
 		id := r.LessonID()
-		if _, done := titles[id]; done || id == "" {
+		if _, done := titles[id]; done || id == "" || r.LessonSnapshot().Title() != "" {
 			continue
 		}
 		l, err := s.lessons.Get(ctx, id)
@@ -141,8 +144,11 @@ func (s *Service) ListJobs(ctx context.Context) ([]Job, error) {
 
 func recordingRow(r *recording.Recording) Recording {
 	d, ok := r.Duration()
+	lesson := r.LessonSnapshot()
 	return Recording{
-		ID: r.ID(), LessonID: r.LessonID(), Status: r.Status(), StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(),
+		ID: r.ID(), LessonID: r.LessonID(), LessonTitle: lesson.Title(), LessonSubject: lesson.Subject(),
+		LessonKind: lesson.Kind(), LessonTeacher: lesson.Teacher(),
+		Status: r.Status(), StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(),
 		Duration: d, HasDuration: ok, Problem: r.Problem(),
 		Stoppable: recording.CanTransition(r.Status(), recording.StatusStopping),
 	}

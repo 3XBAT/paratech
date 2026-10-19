@@ -249,7 +249,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	c.recordings, err = recordingsession.New(recordingsession.Deps{
 		Recordings: recordings, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: recorder,
 		Artifacts: store, Tx: db, Clock: e.clock, Sleeper: e.clock, IDs: e.ids, Completions: c.transcriptions, Log: log,
-		Apps: e.apps(log), Advice: &c.advice,
+		Lessons: lessons, Apps: e.apps(log), Advice: &c.advice,
 	}, e.recordings)
 	if err != nil {
 		return fmt.Errorf("app: recordings: %w", err)

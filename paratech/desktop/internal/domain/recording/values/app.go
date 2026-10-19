@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -110,26 +108,7 @@ func DisplayName(app shared.AppName, description, product string) string {
 
 // CleanAppName makes untrusted text a safe app name: one line without control and format characters (bidi overrides,
 // zero-width ones), spaces collapsed, at most MaxAppNameBytes of valid UTF-8.
-func CleanAppName(s string) string {
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case r == utf8.RuneError || unicode.Is(unicode.Cf, r):
-			return -1
-		case unicode.IsControl(r) || unicode.IsSpace(r):
-			return ' '
-		}
-		return r
-	}, strings.ToValidUTF8(s, ""))
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > MaxAppNameBytes {
-		cut := MaxAppNameBytes
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = strings.TrimSpace(s[:cut])
-	}
-	return s
-}
+func CleanAppName(s string) string { return cleanLine(s, MaxAppNameBytes) }
 
 // SortAudioApps orders the picker: apps that sound now first, then those with an active session, then by window
 // title and executable name, letter case ignored. The order is stable for equal entries.

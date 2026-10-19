@@ -2686,6 +2686,39 @@
 - Nit: переключение на текущий источник пишет лог и сбрасывает скрытый совет; слабая проверка остановки цикла в TestAdviceEndsWithTheCapture; headless-режим опрашивает приложения для совета, который никто не видит; запасной popup.js (сборка без фронтенда) совет не показывает; TranscribableAudio=false — у тихой записи нет проигрывания в просмотре расшифровки
 - Изменённые существующие тесты: TestPreselect/TestIsBrowser/TestSortAudioApps (новые правила), подпись Finalize в фейках и тестах audiocapture/testenv, TestSourcesSortsAndPreselects и TestPickedSourceIsRememberedOnSQLite (автовыбор), migrate_test 9→12, TestMigrationToVersion9/10 — UpTo вместо полной миграции, ожидания JSON/число методов в wails и TS-тестах, поля фикстур (advice, name, sounding, autoSelected, remainingSeconds)
 
+## [TASK-088] Запись сохраняет название, предмет и тип занятия в момент старта
+**Дата:** 2026-10-19 19:30
+**Статус:** done
+
+### Что сделано
+- values.LessonSnapshot (домен recording): название, предмет, тип (код), преподаватель, время по расписанию; очистка недоверенного текста (одна строка, без управляющих/format-символов, лимиты 512/256 байт), kind — ASCII-код ≤ 32
+- Recording хранит снимок (Spec/State/getter); снимок только при LessonID, Restore допускает снимок без lesson_id (ON DELETE SET NULL)
+- Миграция 0013_recording_lesson_snapshot: lesson_title/subject/kind/teacher/start/end (nullable), schema.sql, sqlc; снимок пишется только при INSERT
+- recordingsession.Start читает занятие через порт LessonReader (попап и ручной старт TASK-081 идут через него); ошибка/занятия нет — запись стартует без снимка (WARN)
+- Снимок первым: строка «Записи и задачи», заголовок и имя файла расшифровки, контекст постобработки (конспект/задания); старые записи — как раньше
+- Строка записи: «Предмет · тип · преподаватель» (известные части; тип — лекция/семинар/практика/лабораторная)
+- docs/qa run-alpha.md и windows-checklist.md (AC-03)
+
+### Тесты
+- [x] Шаг 1: verify.sh (через heavy.sh) на 53d07aa после rebase на 6d98db0 — ALL_GREEN; npm run test 282/282, npm run build — ок
+- [x] Регрессия: app/lessonsnapshot_test.go — запись → импорт другого test.csv (занятие удалено) → строка и расшифровка «Тестовый урок»
+- [ ] Шаг 2 [владельцу]: запись из попапа, затем импорт другого test.csv — запись осталась «Тестовый урок»
+
+### Решения
+- Пока TASK-089 не слит, снимок заполняет только название и время; поля subject/kind/teacher (teacher — добавлен владельцем) готовы и пусты. TASK-089 должен дополнить snapshotOf в cases/recordingsession/service.go
+- Коды типа во фронтенде: lecture, seminar, practice, lab (other/unknown не показываются) — TASK-089 должен использовать их или обновить lessonKindTexts в frontend/src/recordingRowView.ts
+- Название из снимка важнее живого занятия; живое — только если в снимке пусто
+
+### Заметки (follow-up)
+- Review: approve. Medium отложен: черновики заданий (homeworkflow/drafts.go) берут название только из живого занятия — нужен порт assignment→transcript→recording; homeworkflow сейчас правит TASK-086, сделать в TASK-092
+- Security: 0 found, скептики не нужны
+- Low: при пропавшем занятии якорь дат постобработки теперь время по расписанию из снимка (как при живом занятии), а не старт записи
+- Low: чтение занятия до reserve — лишнее чтение при отказе «запись уже идёт»
+- Nit: длинные строки в recordings.sql и stateOf
+- Изменённые существующие тесты: stateOf (restore_test, recordingsession fakes) копируют Lesson; newEnv в recordingsession с фейком memLessons; migrate_test 12→13; TestMigrationToVersion12AddsSilent читает silent SQL-запросом; JSON в wails/activity_test; фикстуры фронтенда получили subject/kind/teacher
+- Среда: GOOS=linux go vet локально требует CGO_ENABLED=0
+
+---
 ## [TASK-087] Просмотр конспекта: «Открыть конспект» в строке записи, на странице заданий и в расшифровке; текст, задания с дедлайнами, копирование и экспорт
 **Дата:** 2026-10-19
 **Статус:** done

@@ -51,6 +51,8 @@ html, body, #root { height: 100%; }
 .row-problem { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Lesson titles are imported text of any length. */
 .recordings .row .t { overflow-wrap: anywhere; }
+/* «Предмет · тип · преподаватель» of a recording (TASK-088): its own line above the time. */
+.row-lesson { display: block; overflow-wrap: anywhere; }
 .statusbar { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: auto -24px -20px; padding: 8px 24px; border-top: 1px solid var(--line); font-size: var(--fs-small); color: var(--muted); }
 .page > .gap { flex: none; height: 24px; }
 /* Text for screen readers only: the reason of a disabled button, a spoken hint. */

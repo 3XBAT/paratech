@@ -7,14 +7,16 @@ SELECT * FROM recordings WHERE id = sqlc.arg(id);
 -- A never-stored recording (version 0) is inserted with version 1.
 -- name: InsertRecording :exec
 INSERT INTO recordings (id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms,
-                        chunk_count, chunks_ref, audio_ref, failure_reason, silent, version, created_at, updated_at)
+                        chunk_count, chunks_ref, audio_ref, failure_reason, silent, lesson_title, lesson_subject,
+                        lesson_kind, lesson_teacher, lesson_start, lesson_end, version, created_at, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(lesson_id), sqlc.arg(status), sqlc.arg(started_at), sqlc.arg(stopped_at),
         sqlc.arg(heartbeat_at), sqlc.arg(max_duration_ms), sqlc.arg(duration_ms), sqlc.arg(chunk_count),
-        sqlc.arg(chunks_ref), sqlc.arg(audio_ref), sqlc.arg(failure_reason), sqlc.arg(silent), 1, sqlc.arg(created_at),
-        sqlc.arg(updated_at));
+        sqlc.arg(chunks_ref), sqlc.arg(audio_ref), sqlc.arg(failure_reason), sqlc.arg(silent), sqlc.arg(lesson_title),
+        sqlc.arg(lesson_subject), sqlc.arg(lesson_kind), sqlc.arg(lesson_teacher), sqlc.arg(lesson_start),
+        sqlc.arg(lesson_end), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
 
--- Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
--- never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
+-- Compare-and-swap on the loaded version (ADR-0004). The lesson, its snapshot, the cap, the chunk directory and the
+-- creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 -- name: UpdateRecording :execrows
 UPDATE recordings
 SET status         = sqlc.arg(status),

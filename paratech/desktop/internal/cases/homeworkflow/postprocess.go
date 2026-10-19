@@ -349,19 +349,29 @@ func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.T
 			Transcript: segments,
 		},
 	}
+	// The lesson as recorded (TASK-088) wins over the schedule, which may have changed or dropped it since.
+	kept := rec.LessonSnapshot()
+	if kept.Title() != "" {
+		in.material.Lesson.Title = kept.Title()
+		if !kept.ScheduledStart().IsZero() {
+			in.material.Lesson.Start = kept.ScheduledStart().In(loc)
+		}
+	}
 	if rec.LessonID() == "" {
 		return in, nil
 	}
 	l, err := p.lessons.Get(ctx, rec.LessonID())
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		// The lesson left the schedule: the recording start still anchors the dates.
+		// The lesson left the schedule: the snapshot or the recording start still anchors the dates.
 		return in, nil
 	case err != nil:
 		return lessonInput{}, p.retry(snap, stepLesson, ErrStorage, err)
 	}
 	in.lesson = l.ID()
-	in.material.Lesson = contextselection.Lesson{Title: l.Content().Title, Start: l.Content().Start.In(loc)}
+	if kept.Title() == "" {
+		in.material.Lesson = contextselection.Lesson{Title: l.Content().Title, Start: l.Content().Start.In(loc)}
+	}
 	return in, nil
 }
 

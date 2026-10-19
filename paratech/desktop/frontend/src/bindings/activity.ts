@@ -40,6 +40,11 @@ export interface RecordingItem {
   lessonId: string;
   /** Lesson title: imported, untrusted text, render as plain text only. "" without a lesson: show «Запись <дата, время>». */
   title: string;
+  /** Lesson snapshot (TASK-088): imported, untrusted text, plain text only; "" when unknown. */
+  subject: string;
+  /** Lesson kind code ("lecture", "seminar", "practice", "lab", "other", "unknown"); "" when unknown. */
+  kind: string;
+  teacher: string;
   status: string;
   startedAt: string;
   stoppedAt: string;
@@ -155,6 +160,11 @@ function str(r: Record<string, unknown>, key: string, what: string): string {
   return v;
 }
 
+// A field an older core does not send reads as ""; a wrong type is still an error.
+function optStr(r: Record<string, unknown>, key: string, what: string): string {
+  return r[key] === undefined ? "" : str(r, key, what);
+}
+
 function num(r: Record<string, unknown>, key: string, what: string): number {
   const v = r[key];
   if (typeof v !== "number" || !Number.isFinite(v)) {
@@ -247,6 +257,9 @@ export function parseRecording(raw: unknown): RecordingItem {
     id: str(r, "id", w),
     lessonId: str(r, "lessonId", w),
     title: str(r, "title", w),
+    subject: optStr(r, "subject", w),
+    kind: optStr(r, "kind", w),
+    teacher: optStr(r, "teacher", w),
     status: str(r, "status", w),
     startedAt: str(r, "startedAt", w),
     stoppedAt: str(r, "stoppedAt", w),

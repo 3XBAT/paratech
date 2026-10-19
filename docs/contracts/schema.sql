@@ -407,3 +407,12 @@ CREATE TABLE stt_speeds (
 -- recordings: 1 when the final track is silent (recording.Recording.Silent): the chosen source played nothing, so the
 -- recording is not transcribed and the UI says so. Only a COMPLETED recording is silent; existing rows are not.
 ALTER TABLE recordings ADD COLUMN silent INTEGER NOT NULL DEFAULT 0 CHECK (silent IN (0, 1));
+
+-- recordings: the snapshot of the lesson at the start (values.LessonSnapshot): imported text, plain text only; the times
+-- are Unix milliseconds of the scheduled start and end. NULL: unknown, an ad-hoc recording or one stored before.
+ALTER TABLE recordings ADD COLUMN lesson_title TEXT;
+ALTER TABLE recordings ADD COLUMN lesson_subject TEXT;
+ALTER TABLE recordings ADD COLUMN lesson_kind TEXT;
+ALTER TABLE recordings ADD COLUMN lesson_teacher TEXT;
+ALTER TABLE recordings ADD COLUMN lesson_start INTEGER;
+ALTER TABLE recordings ADD COLUMN lesson_end INTEGER;
