@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"paratech/desktop/internal/cases/activity"
+	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingsession"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
@@ -23,6 +25,9 @@ var (
 	ErrRecordingNotRunning = errors.New("the recording is not running in this session")
 	ErrCannotRunNow        = errors.New("the job cannot be run now")
 	ErrActionFailed        = errors.New("the action failed")
+	ErrInvalidWork         = errors.New("invalid work")
+	ErrAlreadyRunning      = errors.New("the work is already running")
+	ErrNothingToRetry      = errors.New("nothing to retry")
 )
 
 // ActivityUseCase is the read side the recordings and jobs page needs (ARCH-42).
@@ -50,6 +55,12 @@ const (
 // JobForcer is the "Run now" action; satisfied by jobrunner.Service.
 type JobForcer interface {
 	ForceRun(ctx context.Context, id shared.JobID) error
+}
+
+// PostProcessRetrier starts the post-processing of a recording again (TASK-086); satisfied by homeworkflow.Rerunner.
+type PostProcessRetrier interface {
+	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, error)
+	RedoSummary(ctx context.Context, rec shared.RecordingID) (shared.JobID, error)
 }
 
 // RecordingItem is the JSON form of one recording with the status of its whole chain (TASK-076). Times are RFC 3339
@@ -83,10 +94,16 @@ type RecordingItem struct {
 	ErrorCode string `json:"errorCode"`
 	// JobError is the last error of the job the stage refers to (failed or retrying); "" otherwise.
 	JobError string `json:"jobError"`
-	// Action the row offers besides Stop: "", runNow (RunJobNow with actionJobId), openModels, openConnections or
-	// checkSound.
+	// Action the row offers besides Stop: "", runNow (RunJobNow with actionJobId), openModels, openConnections,
+	// checkSound or retry (RetryPostProcessing with retryWork, «Повторить», TASK-086).
 	Action      string `json:"action"`
 	ActionJobID string `json:"actionJobId"`
+	// RetryWork is the failed post-processing work the row may start again: "summary", "homework" or "". It is set
+	// also when Action is openConnections (the LLM call failed), so «Повторить» can follow a fix of the connection.
+	RetryWork string `json:"retryWork"`
+	// CanRedoSummary: a summary exists and its job is not pending or running, so RedoSummary («Сделать конспект
+	// заново») may run.
+	CanRedoSummary bool `json:"canRedoSummary"`
 
 	// RemainingSeconds is the approximate time left of a queued or running transcription («≈ N мин осталось»,
 	// TASK-084); hasRemaining is false when there is none or no estimate.
@@ -138,13 +155,15 @@ type ActivityService struct {
 	uc      ActivityUseCase
 	stopper RecordingStopper
 	forcer  JobForcer
+	retrier PostProcessRetrier
 	log     *slog.Logger
 }
 
 // NewActivityService returns the binding of the recordings and jobs page. All arguments are required; OpenServices
 // checks the core before calling it.
-func NewActivityService(uc ActivityUseCase, stopper RecordingStopper, forcer JobForcer, log *slog.Logger) *ActivityService {
-	return &ActivityService{uc: uc, stopper: stopper, forcer: forcer, log: log}
+func NewActivityService(uc ActivityUseCase, stopper RecordingStopper, forcer JobForcer, retrier PostProcessRetrier,
+	log *slog.Logger) *ActivityService {
+	return &ActivityService{uc: uc, stopper: stopper, forcer: forcer, retrier: retrier, log: log}
 }
 
 // ListRecordings returns the newest recordings, newest first, one row per recording with its chain status.
@@ -165,6 +184,7 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 			Problem: r.Problem, Stoppable: r.Stoppable,
 			Stage: string(c.Stage), Step: string(c.Step), ProgressPercent: c.Percent, QueueReason: string(c.QueueReason),
 			ErrorCode: string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
+			RetryWork: string(c.Retry), CanRedoSummary: c.CanRedoSummary,
 			RemainingSeconds: int64(r.Remaining.Round(time.Second) / time.Second), HasRemaining: r.HasRemaining,
 		})
 		if running && active.ID == r.ID {
@@ -270,6 +290,44 @@ func (s *ActivityService) RunJobNow(ctx context.Context, id string) error {
 		return ErrCannotRunNow
 	}
 	return s.actionError("run job now", err)
+}
+
+// RetryPostProcessing starts the failed post-processing work ("summary" or "homework") of recording id again as a
+// new job («Повторить», TASK-086); the transcript is kept. Refused with ErrAlreadyRunning while the work is pending or
+// running and with ErrNothingToRetry when it completed.
+func (s *ActivityService) RetryPostProcessing(ctx context.Context, id, work string) error {
+	rid := shared.RecordingID(id)
+	if rid.Validate() != nil {
+		return ErrInvalidID
+	}
+	w := homeworkflow.Work(work)
+	if w != homeworkflow.WorkSummary && w != homeworkflow.WorkHomework {
+		return ErrInvalidWork
+	}
+	_, err := s.retrier.Retry(ctx, rid, w)
+	return s.rerunError("retry post-processing", err)
+}
+
+// RedoSummary makes the summary of recording id again («Сделать конспект заново», TASK-086; it spends quota, so the
+// page asks first). The summary stays until the new one passes the checks. Refused with ErrAlreadyRunning while the
+// summary job is pending or running; ErrItemNotFound without a summary.
+func (s *ActivityService) RedoSummary(ctx context.Context, id string) error {
+	rid := shared.RecordingID(id)
+	if rid.Validate() != nil {
+		return ErrInvalidID
+	}
+	_, err := s.retrier.RedoSummary(ctx, rid)
+	return s.rerunError("redo summary", err)
+}
+
+func (s *ActivityService) rerunError(op string, err error) error {
+	switch {
+	case errors.Is(err, job.ErrStillActive):
+		return ErrAlreadyRunning
+	case errors.Is(err, job.ErrNotFailed):
+		return ErrNothingToRetry
+	}
+	return s.actionError(op, err)
 }
 
 func (s *ActivityService) actionError(op string, err error) error {

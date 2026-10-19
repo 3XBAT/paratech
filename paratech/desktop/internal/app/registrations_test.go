@@ -42,6 +42,9 @@ var (
 	_ recordingsession.ArtifactStore        = (*filestore.Store)(nil)
 	_ wails.RecordingStopper                = (*recordingsession.Service)(nil)
 	_ wails.JobForcer                       = (*jobrunner.Service)(nil)
+	_ wails.PostProcessRetrier              = (*homeworkflow.Rerunner)(nil)
+	_ homeworkflow.PostJobs                 = (*sqlite.JobRepository)(nil)
+	_ homeworkflow.LatestTranscripts        = (*sqlite.TranscriptRepository)(nil)
 	_ homeworkflow.DraftRepository          = (*sqlite.DraftRepository)(nil)
 	_ hubclient.URLSource                   = hubSettings{}
 	_ smtp.AccountSource                    = mailSettings{}

@@ -30,7 +30,7 @@ import (
 
 // pageBindings is the binding of the recordings and jobs page on the opened core.
 func pageBindings(core wails.Core) *wails.ActivityService {
-	return wails.NewActivityService(core.Activity, core.Stopper, core.Forcer, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return wails.NewActivityService(core.Activity, core.Stopper, core.Forcer, core.Retrier, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 // The Stop button ends a running recording: the stored recording is COMPLETED with the chunk it captured.

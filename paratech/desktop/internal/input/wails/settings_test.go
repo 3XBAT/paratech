@@ -126,6 +126,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "activity use case", edit: func(c *Core) { c.Activity = nil }},
 		{name: "recording stopper", edit: func(c *Core) { c.Stopper = nil }},
 		{name: "job forcer", edit: func(c *Core) { c.Forcer = nil }},
+		{name: "post-processing retrier", edit: func(c *Core) { c.Retrier = nil }},
 		{name: "recording prompt use case", edit: func(c *Core) { c.Prompt = nil }},
 		{name: "schedule import use case", edit: func(c *Core) { c.Schedule = nil }},
 		{name: "schedule file reader", edit: func(c *Core) { c.Files = nil }},
@@ -171,7 +172,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		methods int
 	}{
 		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 4}, // SetRecognitionLoad: TASK-084
-		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 6}, // +SwitchSource, DismissAdvice (TASK-082)
+		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 8}, // +SwitchSource, DismissAdvice (TASK-082), +RetryPostProcessing, RedoSummary (TASK-086)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 7},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},

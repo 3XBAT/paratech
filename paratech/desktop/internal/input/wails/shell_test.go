@@ -20,7 +20,7 @@ func validOptions() Options {
 // validCore has every part the bindings need.
 func validCore() Core {
 	return Core{
-		Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{},
+		Settings: &fakeSettings{}, Activity: &fakeActivity{}, Stopper: &fakeStopper{}, Forcer: &fakeForcer{}, Retrier: &fakeRetrier{},
 		Prompt: &fakePrompt{}, Schedule: &fakeSchedule{}, Files: disk(),
 		Models: &fakeCatalog{}, Downloads: &fakeDownloads{}, Imports: &fakeImports{}, Links: &fakeLinks{},
 		Speech:      &fakeSpeech{},
