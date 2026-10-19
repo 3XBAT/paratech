@@ -219,6 +219,26 @@ test("file text is rendered as text, not HTML", () => {
   }
 });
 
+test("lesson rows and changes show the kind, the subject and the teacher as text", () => {
+  const evil = "<b>x</b>";
+  const lec = { ...lesson(1, "Матанализ (лек.)"), subject: "Матанализ", kind: "lecture", teacher: evil };
+  const old = { ...lesson(1, "Матанализ"), subject: "", kind: "unknown", teacher: "" };
+  const markup = page(preview({
+    added: [{ line: 2, ...lec }, { line: 3, ...lesson(3), subject: "Урок 3", kind: "unknown", teacher: "" }],
+    changed: [{ line: 4, before: old, after: { ...old, subject: "Матанализ", kind: "seminar" } }],
+  }));
+  assert.match(
+    markup,
+    /<span class="ln-title"><bdi>Матанализ \(лек\.\)<\/bdi><span class="ln-meta small muted"><span>лекция<\/span><span> · <\/span><span>предмет: <\/span><bdi>Матанализ<\/bdi><span> · <\/span><span>преподаватель: <\/span><bdi>&lt;b&gt;x&lt;\/b&gt;<\/bdi><\/span><\/span>/,
+  );
+  assert.ok(!markup.includes(evil), "raw HTML from the file");
+  assert.equal(count(markup, "ln-meta"), 1, "no details, no line");
+  assert.match(markup, /импорт дополнит их предметом, типом и преподавателем/);
+  assert.match(markup, /<del><bdi>Матанализ<\/bdi><span>, <\/span><span>предмет не указан<\/span>/);
+  assert.match(markup, /<ins><bdi>Матанализ<\/bdi><span>, <\/span><span>семинар<\/span><span> · <\/span><span>предмет: <\/span><bdi>Матанализ<\/bdi>/);
+  assert.ok(!page(preview({ added: [{ line: 2, ...lec }] })).includes("импорт дополнит"), "the note only with filled lessons");
+});
+
 // TASK-076: a recording row is finished by the stage of its whole chain, not by the recording status: a COMPLETED
 // recording whose transcription still waits stays in view (isFinishedRow replaces isFinishedRecording).
 test("finished recordings and jobs go to the folded list; rows with an action stay in view", () => {

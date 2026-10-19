@@ -3,13 +3,23 @@
 
 import type { CallByName } from "./settings";
 
-/** A lesson as the preview shows it. Title is file text: render it as plain text only. */
+/** The type of a class (lesson.Kind codes); "unknown" when neither the file nor the title tells. */
+export type LessonKind = "lecture" | "seminar" | "practice" | "lab" | "unknown";
+
+const lessonKinds: readonly string[] = ["lecture", "seminar", "practice", "lab", "unknown"];
+
+/** A lesson as the preview shows it. Title, subject and teacher are file text: render them as plain text only. */
 export interface LessonText {
   title: string;
   /** "02.01.2006 15:04" in the lesson's zone. */
   start: string;
   end: string;
   zone: string;
+  /** The course; "" when unknown (a lesson stored before subjects existed). */
+  subject: string;
+  kind: LessonKind;
+  /** "" when the file names none. */
+  teacher: string;
 }
 
 /** An added lesson (line in the file) or a removed one (line 0). */
@@ -130,7 +140,17 @@ function list<T>(r: Record<string, unknown>, key: string, what: string, parse: (
 function parseLessonText(raw: unknown): LessonText {
   const w = "lesson";
   const r = record(raw, w);
-  return { title: str(r, "title", w), start: str(r, "start", w), end: str(r, "end", w), zone: str(r, "zone", w) };
+  const kind = str(r, "kind", w);
+  return {
+    title: str(r, "title", w),
+    start: str(r, "start", w),
+    end: str(r, "end", w),
+    zone: str(r, "zone", w),
+    subject: str(r, "subject", w),
+    // A code this page does not know is shown as no kind rather than failing the whole preview.
+    kind: lessonKinds.includes(kind) ? (kind as LessonKind) : "unknown",
+    teacher: str(r, "teacher", w),
+  };
 }
 
 function parseImportLesson(raw: unknown): ImportLesson {

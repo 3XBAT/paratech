@@ -7,15 +7,17 @@ import { allCollapsed, type ListStates, listTexts, setCollapsed, stateOf, withSt
 import {
   applyLabel,
   canApply,
+  changeSides,
   commitErrorText,
   conflictParts,
   csvTemplate,
   dayHeaders,
+  detailParts,
   errorText,
+  fillsDetails,
   groupTitles,
   hasChanges,
   lessonMarks,
-  lessonParts,
   lessonTime,
   notes,
   type Part,
@@ -192,6 +194,8 @@ export function SchedulePage() {
         <h2>Формат файла</h2>
         <p className="small muted">{notes.allDay}</p>
         <p className="small muted">{notes.uid}</p>
+        <p className="small muted">{notes.details}</p>
+        <p className="small muted">{notes.icsDetails}</p>
         <pre className="template num">{csvTemplate}</pre>
         <p className="small muted">{notes.noNotifications}</p>
       </Card>
@@ -240,8 +244,8 @@ export function PreviewView(props: {
     );
   }
 
-  // A lesson line under its week divider and day header: the time, the title and the zone from the file (each in its
-  // own <bdi>), the file line. Past lessons are muted; today's and the next one highlighted unless they are to be removed.
+  // A lesson line under its week divider and day header: the time, the title with its kind, subject and teacher, the
+  // zone from the file (each file piece in its own <bdi>), the file line. Past lessons are muted; today's and the next one highlighted unless they are to be removed.
   function lessons(items: readonly (LessonText & { line: number })[], highlight: boolean) {
     const weeks = weekHeaders(items);
     const days = dayHeaders(items, now);
@@ -251,6 +255,7 @@ export function PreviewView(props: {
       const d = days[i];
       const m = marks[i];
       const cls = ["ln-row", m.past && "is-past", m.today && "is-today", m.next && "is-next"].filter(Boolean).join(" ");
+      const details = detailParts(l);
       return (
         <li className="ln">
           {w && (
@@ -264,6 +269,11 @@ export function PreviewView(props: {
             <span className="ln-when num">{lessonTime(l.start, l.end)}</span>
             <span className="ln-title">
               <Text parts={[{ text: l.title, file: true }]} />
+              {details.length > 0 && (
+                <span className="ln-meta small muted">
+                  <Text parts={details} />
+                </span>
+              )}
             </span>
             <span className="ln-zone small muted">
               <Text parts={[{ text: l.zone, file: true }]} />
@@ -316,18 +326,26 @@ export function PreviewView(props: {
       )}
       {group("errors", p.errors, (e) => plainRow(rowErrorParts(e)), { more: () => listTexts.allErrors })}
       {group("added", p.added, lessons(p.added, true))}
-      {group("changed", p.changed, (c) => (
-        <li className="diff">
-          <span className="ln-line small muted num">{c.line > 0 ? `строка ${c.line}` : ""}</span>
-          <del>
-            <Text parts={lessonParts(c.before)} />
-          </del>
-          <span className="diff-arrow">→</span>
-          <ins>
-            <Text parts={lessonParts(c.after)} />
-          </ins>
-        </li>
-      ))}
+      {group(
+        "changed",
+        p.changed,
+        (c) => {
+          const sides = changeSides(c);
+          return (
+            <li className="diff">
+              <span className="ln-line small muted num">{c.line > 0 ? `строка ${c.line}` : ""}</span>
+              <del>
+                <Text parts={sides.before} />
+              </del>
+              <span className="diff-arrow">→</span>
+              <ins>
+                <Text parts={sides.after} />
+              </ins>
+            </li>
+          );
+        },
+        { before: fillsDetails(p.changed) && <p className="muted">{notes.filledDetails}</p> },
+      )}
       {group("removed", p.removed, lessons(p.removed, false))}
       {group("conflicts", p.conflicts, (c) => plainRow(conflictParts(c)), {
         before: (

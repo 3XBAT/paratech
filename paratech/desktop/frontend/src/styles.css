@@ -254,6 +254,7 @@ html, body, #root { height: 100%; }
 .ln:last-child, .ln-text:last-child, .diff:last-child { border-bottom: 0; }
 .ln-when { font-weight: 600; font-size: var(--fs-body); overflow-wrap: anywhere; }
 .ln-title, .ln-zone { min-width: 0; overflow-wrap: anywhere; }
+.ln-meta { display: block; margin-top: 2px; }
 .ln-line { text-align: right; }
 /* Week divider at the top of a week's first row; the day header under it. */
 .wk { display: flex; align-items: center; gap: 12px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: var(--fs-label); font-weight: 600; }
