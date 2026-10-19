@@ -48,7 +48,9 @@ func (r *Recording) Deleting() bool { return !r.deletingAt.IsZero() }
 func (r *Recording) DeletingAt() time.Time { return r.deletingAt }
 
 // DeletingAssignments returns the found homework the user chose to delete with the recording.
-func (r *Recording) DeletingAssignments() []shared.AssignmentID { return cloneIDs(r.deletingAssignments) }
+func (r *Recording) DeletingAssignments() []shared.AssignmentID {
+	return cloneIDs(r.deletingAssignments)
+}
 
 // cloneIDs copies ids; an empty list is nil, so a stored "[]" restores to the same aggregate.
 func cloneIDs(ids []shared.AssignmentID) []shared.AssignmentID {
