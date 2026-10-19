@@ -15,6 +15,18 @@ func TestLessonKindValid(t *testing.T) {
 	}
 }
 
+func TestLessonKindOf(t *testing.T) {
+	for code, want := range map[string]LessonKind{
+		"lecture": LessonKindLecture, "seminar": LessonKindSeminar, "practice": LessonKindPractice, "lab": LessonKindLab,
+		"unknown": LessonKindUnknown, "": LessonKindUnknown, "other": LessonKindUnknown, "Seminar": LessonKindUnknown,
+		"exam": LessonKindUnknown,
+	} {
+		if got := LessonKindOf(code); got != want {
+			t.Errorf("LessonKindOf(%q) = %q, want %q", code, got, want)
+		}
+	}
+}
+
 func TestLectureTextCheckpoint(t *testing.T) {
 	if got := LectureTextCheckpoint(3, 12); got != "3/12" {
 		t.Fatalf("checkpoint = %q", got)

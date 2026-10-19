@@ -375,10 +375,13 @@ func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.T
 			Transcript: segments,
 		},
 	}
-	// The lesson as recorded (TASK-088) wins over the schedule, which may have changed or dropped it since.
+	// The lesson as recorded (TASK-088/089) wins over the schedule, which may have changed or dropped it since. The
+	// title and subject are untrusted data; the kind only selects trusted wording of the lecture text.
 	kept := rec.LessonSnapshot()
 	if kept.Title() != "" {
 		in.material.Lesson.Title = kept.Title()
+		in.material.Lesson.Subject = kept.Subject()
+		in.material.Lesson.Kind = values.LessonKindOf(kept.Kind())
 		if !kept.ScheduledStart().IsZero() {
 			in.material.Lesson.Start = kept.ScheduledStart().In(loc)
 		}
@@ -396,7 +399,10 @@ func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.T
 	}
 	in.lesson = l.ID()
 	if kept.Title() == "" {
-		in.material.Lesson = contextselection.Lesson{Title: l.Content().Title, Start: l.Content().Start.In(loc)}
+		c := l.Content()
+		in.material.Lesson = contextselection.Lesson{
+			Title: c.Title, Start: c.Start.In(loc), Subject: c.Subject, Kind: values.LessonKindOf(c.Kind.String()),
+		}
 	}
 	return in, nil
 }

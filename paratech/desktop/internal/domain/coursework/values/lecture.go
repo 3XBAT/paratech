@@ -27,6 +27,16 @@ func (k LessonKind) Valid() bool {
 	return false
 }
 
+// LessonKindOf maps the stable kind code of a lesson ("lecture", "seminar", "practice", "lab"; the code the schedule
+// and the recording snapshot keep) to a LessonKind. Anything else, "unknown" and "" included, is LessonKindUnknown.
+func LessonKindOf(code string) LessonKind {
+	k := LessonKind(code)
+	if k.Valid() {
+		return k
+	}
+	return LessonKindUnknown
+}
+
 // LectureTextCheckpoint is the job checkpoint of a lecture_text job: how many of its parts are formatted, "3/12".
 // The recordings screen reads it for the part progress; it holds counts only, never text.
 func LectureTextCheckpoint(done, total int) string {
