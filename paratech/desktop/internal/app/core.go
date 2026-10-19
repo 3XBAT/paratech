@@ -35,6 +35,7 @@ import (
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/cases/speechcomponent"
+	"paratech/desktop/internal/cases/sttspeed"
 	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/transcriptview"
@@ -132,6 +133,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	recordings := sqlite.NewRecordingRepository(db)
 	transcripts := sqlite.NewTranscriptRepository(db)
 	parts := sqlite.NewTranscriptParts(db) // the live transcript while the recognition runs (TASK-079)
+	speeds := sqlite.NewSpeedStore(db)     // the recognition speed measured on this computer (TASK-084)
 	lessons := sqlite.NewLessonRepository(db)
 	summaries := sqlite.NewSummaryRepository(db)
 	assignments := sqlite.NewAssignmentRepository(db)
@@ -225,7 +227,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
 	if err := c.wireSpeech(dataDir, e, transcribe.Deps{
 		Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db), Artifacts: store,
-		Events: post, Clock: e.clock, Log: log, Live: parts,
+		Events: post, Clock: e.clock, Log: log, Live: parts, Settings: settings, Speeds: speeds,
 	}, log); err != nil {
 		return err
 	}
@@ -261,10 +263,18 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
 	}
+	// The time estimates use the processor count the engine runs with (ADR-0016).
+	speed, err := sttspeed.New(sttspeed.Deps{
+		Models: sqlite.NewModelRepository(db), Catalog: embeddedCatalog{}, Speeds: speeds, Settings: settings,
+	}, logicalCPUs())
+	if err != nil {
+		return fmt.Errorf("app: recognition time estimates: %w", err)
+	}
 	history, err := activity.New(recordings, jobs, lessons, log, hiddenJobTypes()...)
 	if err != nil {
 		return fmt.Errorf("app: activity: %w", err)
 	}
+	history.WithRemaining(speed, e.clock)
 	// Local only: the viewer works while the Hub or the internet is down. Titles in the local time zone.
 	viewer, err := transcriptview.New(transcriptview.Deps{
 		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Jobs: jobs, Live: parts, Artifacts: store,
@@ -283,7 +293,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		cleanup{name: "model manager writes allowed", run: c.manager.markReady})
 	c.ui = wails.Core{
 		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
-		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech,
+		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech, Speed: speed,
 		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 		Transcript: viewer,

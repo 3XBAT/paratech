@@ -82,6 +82,7 @@ func settingsFromRow(row sqlcgen.Setting) (*settings.Settings, error) {
 		SMTPLogin:               row.SmtpUsername,
 		HubURL:                  row.HubUrl,
 		RecordingSource:         shared.AppName(row.RecordingSourceApp),
+		RecognitionLoad:         shared.RecognitionLoad(row.RecognitionLoad),
 		UpdatedAt:               settingsFromMs(row.UpdatedAt),
 	})
 }
@@ -98,6 +99,7 @@ func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
 		SmtpUsername:            s.SMTPLogin(),
 		HubUrl:                  s.HubURL(),
 		RecordingSourceApp:      s.RecordingSource().String(),
+		RecognitionLoad:         s.RecognitionLoad().String(),
 		UpdatedAt:               settingsMs(s.UpdatedAt()),
 	}
 }
@@ -115,6 +117,7 @@ func settingsUpdateParams(s *settings.Settings) sqlcgen.UpdateSettingsParams {
 		SmtpUsername:            p.SmtpUsername,
 		HubUrl:                  p.HubUrl,
 		RecordingSourceApp:      p.RecordingSourceApp,
+		RecognitionLoad:         p.RecognitionLoad,
 		UpdatedAt:               p.UpdatedAt,
 		ExpectedVersion:         s.Version(),
 	}

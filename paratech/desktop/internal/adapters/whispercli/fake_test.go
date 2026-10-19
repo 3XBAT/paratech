@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,6 +20,10 @@ const (
 	fakeEnvKey   = "WHISPERCLI_TEST_FAKE"
 	fakeChildKey = "WHISPERCLI_TEST_FAKE_CHILD"
 	fakeOn       = "1"
+
+	// spinEnvKey makes the test binary a CPU-busy child: it keeps every logical processor busy for the given
+	// milliseconds and then sleeps until it is killed.
+	spinEnvKey = "WHISPERCLI_TEST_SPIN_MS"
 )
 
 // Fake scenarios.
@@ -37,6 +44,7 @@ const (
 	modeEmpty    = "empty"
 	modeFlood    = "flood"
 	modeLive     = "live"
+	modeProcess  = "process" // prints the threads and how the process runs (fakeProcess)
 )
 
 // Exit codes of the fake that point at a broken argument vector.
@@ -55,7 +63,34 @@ func TestMain(m *testing.M) {
 	if os.Getenv(fakeEnvKey) == fakeOn {
 		os.Exit(fakeWhisper(os.Args[1:]))
 	}
+	if ms := os.Getenv(spinEnvKey); ms != "" {
+		spin(ms)
+	}
 	os.Exit(m.Run())
+}
+
+// spin busies every logical processor for ms milliseconds, then waits to be killed.
+func spin(ms string) {
+	n, err := strconv.Atoi(ms)
+	if err != nil {
+		os.Exit(2)
+	}
+	stop := time.Now().Add(time.Duration(n) * time.Millisecond)
+	var wg sync.WaitGroup
+	for range runtime.NumCPU() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			x := 0
+			for time.Now().Before(stop) {
+				x++
+			}
+			_ = x
+		}()
+	}
+	wg.Wait()
+	time.Sleep(time.Hour)
+	os.Exit(0)
 }
 
 type fakeArgs struct {
@@ -150,6 +185,11 @@ func fakeWhisper(args []string) int {
 	case modeEcho:
 		cwd, _ := os.Getwd()
 		texts := []string{a.model, a.file, a.out, a.threads, a.lang, cwd, strings.Join(a.flags, " ")}
+		writeFile(result, jsonOf(texts))
+		return 0
+
+	case modeProcess:
+		texts := append([]string{a.threads}, fakeProcess()...)
 		writeFile(result, jsonOf(texts))
 		return 0
 

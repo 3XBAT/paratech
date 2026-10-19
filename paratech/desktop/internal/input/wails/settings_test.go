@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // fakeSettings is the use case behind the binding.
@@ -35,6 +36,14 @@ func (f *fakeSettings) SetProcessOnlyOnACPower(_ context.Context, on bool) (pref
 		return preferences.Toggles{}, f.err
 	}
 	f.t.ProcessOnlyOnACPower = on
+	return f.t, nil
+}
+
+func (f *fakeSettings) SetRecognitionLoad(_ context.Context, l shared.RecognitionLoad) (preferences.Toggles, error) {
+	if f.err != nil {
+		return preferences.Toggles{}, f.err
+	}
+	f.t.RecognitionLoad = l
 	return f.t, nil
 }
 
@@ -62,7 +71,8 @@ func TestSettingsJSONNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true}`
+	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true,"recognitionLoad":"",` +
+		`"loadEstimates":null,"loadEstimatesModel":""}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s, want %s (frontend/src/bindings/settings.ts reads these names)", raw, want)
 	}
@@ -159,7 +169,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		typ     reflect.Type
 		methods int
 	}{
-		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 3},
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 4}, // SetRecognitionLoad: TASK-084
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 4},
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 6}, // -Snooze (TASK-076), +2 (TASK-081)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},

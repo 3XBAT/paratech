@@ -14,7 +14,7 @@ const JobType = job.Type(values.STTJobType)
 // Progress scale of one attempt: the engine run fills 0..engineShare, the stored document is reported at
 // documentStored with the checkpoint CheckpointTranscribed; the runner sets 100 on completion.
 const (
-	engineShare    = 90
+	engineShare    = values.STTEngineShare
 	documentStored = 95
 )
 
@@ -35,6 +35,12 @@ type Deps struct {
 
 	// Live is optional: without it the segments recognised during a run are not stored (no live transcript).
 	Live LiveParts
+
+	// Settings is optional: without it every run uses shared.DefaultRecognitionLoad (TASK-084).
+	Settings SettingsReader
+
+	// Speeds is optional: without it the speed of a run is not measured (TASK-084).
+	Speeds SpeedStore
 }
 
 // EnqueueDeps are the ports the Enqueuer needs. Log is optional.

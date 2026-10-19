@@ -12,6 +12,8 @@ import {
   type ModelImportConfirmation,
   type ModelsView,
 } from "./bindings/models.js";
+import type { ModelLoadEstimates } from "./bindings/load.js";
+import { modelEstimateLine } from "./durationEstimate.js";
 
 /** Formats bytes like the core: "1,5 ГБ", "300 МБ", "12 КБ" (binary units, decimal comma). */
 export function sizeText(n: number): string {
@@ -227,6 +229,17 @@ export interface ModelRow {
   warning: string;
   /** The technical id (and the SHA-256 of an installed model): a tooltip only, never visible text. */
   tip: string;
+  /** «Запись 1 ч ≈ N мин в режиме «Бережная»» (TASK-084), "" without a number. */
+  estimate: string;
+  /** The estimate is above 1 h per 1 h of audio: shown as a warning. */
+  estimateHeavy: boolean;
+  /** The estimate in every mode, one per line: the tooltip of the estimate. */
+  estimateTip: string;
+}
+
+function estimateFields(est: ModelLoadEstimates | null | undefined): Pick<ModelRow, "estimate" | "estimateHeavy" | "estimateTip"> {
+  const e = modelEstimateLine(est);
+  return { estimate: e.text, estimateHeavy: e.heavy, estimateTip: e.tip };
 }
 
 const familyNames: Readonly<Record<string, string>> = {
@@ -295,6 +308,7 @@ export function catalogRow(m: AvailableModel): ModelRow {
   if (m.englishOnly) {
     tags.push(texts.englishOnly);
   }
+  const est = estimateFields(m.estimates);
   return {
     name: displayName(m),
     suffix: m.reduced ? reducedSuffix(m.quantization) : "",
@@ -306,8 +320,10 @@ export function catalogRow(m: AvailableModel): ModelRow {
     details: [accuracyText(m.family), m.englishOnly ? "" : texts.languages].filter((s) => s !== ""),
     // The heavy warning says it is slow already.
     slow: m.likelySlow && !m.heavy ? texts.likelySlow : "",
-    warning: m.heavy ? texts.heavy : "",
+    // With a number the estimate line is the warning: a concrete time instead of «будет долгим».
+    warning: m.heavy && est.estimate === "" ? texts.heavy : "",
     tip: m.catalogId,
+    ...est,
   };
 }
 
@@ -324,7 +340,15 @@ export function installedRow(m: InstalledModel, catalog: readonly AvailableModel
   const sha = `SHA-256: ${m.sha256}`;
   const e = catalogEntryOf(m, catalog);
   if (e !== null) {
-    return { ...catalogRow(e), size: sizeText(m.sizeBytes), slow: "", warning: "", tip: `${e.catalogId}\n${sha}` };
+    // The installed model has its own estimates: measured runs are per installed model.
+    return {
+      ...catalogRow(e),
+      size: sizeText(m.sizeBytes),
+      slow: "",
+      warning: "",
+      tip: `${e.catalogId}\n${sha}`,
+      ...estimateFields(m.estimates),
+    };
   }
   const details = [`версия ${m.version}`];
   if (m.quantization !== "") {
@@ -344,6 +368,7 @@ export function installedRow(m: InstalledModel, catalog: readonly AvailableModel
     slow: "",
     warning: "",
     tip: `${m.name} ${m.version}\n${sha}`,
+    ...estimateFields(m.estimates),
   };
 }
 

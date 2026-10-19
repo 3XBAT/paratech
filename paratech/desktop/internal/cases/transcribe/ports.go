@@ -7,9 +7,11 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/sttmodel"
 	"paratech/desktop/internal/domain/transcription/transcript"
+	"paratech/desktop/internal/domain/transcription/values"
 )
 
 // STTEngine runs local speech recognition (PRD sections 4.3 and 8, AC-06). Implemented by the whispercli adapter
@@ -26,8 +28,29 @@ type STTEngine interface {
 	//
 	// segment, if not nil, is called with each segment as soon as the engine recognised it, in order, with the same
 	// guarantees as progress (TASK-079: live transcript). The segments are a preview; the document is the result.
-	Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
-		segment func(transcript.Segment)) error
+	//
+	// load is the load mode of this run (TASK-084): the engine applies the threads, priority and CPU cap that
+	// loadpolicy gives for it. A change of the setting applies from the next run.
+	Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, load shared.RecognitionLoad,
+		progress func(percent int), segment func(transcript.Segment)) error
+}
+
+// SettingsReader reads the load mode of speech recognition at the start of a run (PRD section 8; TASK-084).
+// Implemented by the sqlite settings repository.
+type SettingsReader interface {
+	// Load returns the stored settings, or the defaults while nothing is stored (PRD section 8).
+	Load(ctx context.Context) (*settings.Settings, error)
+}
+
+// SpeedStore keeps the recognition speed measured per installed model and load mode on this computer, which refines
+// the time estimates of the pages (PRD section 8; TASK-084). Implemented by the sqlite adapter.
+type SpeedStore interface {
+	// Speed returns the measured speed; the zero value when nothing is measured (PRD section 8).
+	Speed(ctx context.Context, key values.SpeedKey) (values.MeasuredSpeed, error)
+
+	// SaveSpeed replaces the speed (PRD section 8). A model that is no longer installed yields an error wrapping
+	// shared.ErrConflict.
+	SaveSpeed(ctx context.Context, key values.SpeedKey, s values.MeasuredSpeed, now time.Time) error
 }
 
 // LiveParts stores what the engine recognised so far, so the transcript viewer shows it while the engine runs and

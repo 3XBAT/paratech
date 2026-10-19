@@ -21,8 +21,8 @@ import (
 
 // sttEngine mirrors the STTEngine port of cases/transcribe (adapters may not import cases, ARCH-30).
 type sttEngine interface {
-	Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
-		segment func(transcript.Segment)) error
+	Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, load shared.RecognitionLoad,
+		progress func(percent int), segment func(transcript.Segment)) error
 }
 
 var _ sttEngine = (*Engine)(nil)
@@ -185,7 +185,7 @@ func TestTranscribeSuccess(t *testing.T) {
 	out := outRef(t, "rec-1/transcript.json")
 
 	var got []int
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), out, func(p int) { got = append(got, p) }, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), out, shared.LoadMax, func(p int) { got = append(got, p) }, nil)
 	if err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestTranscribeNilProgressAndEmptyResult(t *testing.T) {
 	f := newFixture(t, "")
 	out := outRef(t, "empty.json")
 
-	if err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeEmpty), out, nil, nil); err != nil {
+	if err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeEmpty), out, shared.LoadMax, nil, nil); err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
 	if doc := f.stored(t, out); len(doc.Segments) != 0 || doc.Segments == nil {
@@ -260,7 +260,7 @@ func TestTranscribeArgv(t *testing.T) {
 			audioPath := filepath.Join(root, "recordings", filepath.FromSlash(name))
 			out := outRef(t, "argv-"+string(rune('a'+i))+".json")
 
-			err := f.eng.Transcribe(context.Background(), audio, model, out, nil, nil)
+			err := f.eng.Transcribe(context.Background(), audio, model, out, shared.LoadMax, nil, nil)
 			if checkArgEncoding(audioPath) != nil {
 				// Windows: not representable in the ANSI code page of whisper-cli.
 				if !errors.Is(err, ErrInvalidInput) {
@@ -305,7 +305,7 @@ func TestTranscribeEnvironmentIsMinimal(t *testing.T) {
 	f := newFixture(t, "")
 	out := outRef(t, "env.json")
 
-	if err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeEnv), out, nil, nil); err != nil {
+	if err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeEnv), out, shared.LoadMax, nil, nil); err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
 
@@ -361,7 +361,7 @@ func TestTranscribeRejectsUnsafePaths(t *testing.T) {
 			}
 			audio, _ := shared.NewArtifactRef(shared.ArtifactRecordings, "x.wav")
 
-			err := f.eng.Transcribe(context.Background(), audio, model, outRef(t, "x.json"), nil, nil)
+			err := f.eng.Transcribe(context.Background(), audio, model, outRef(t, "x.json"), shared.LoadMax, nil, nil)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
@@ -386,7 +386,7 @@ func TestTranscribeRejectsLinks(t *testing.T) {
 	}
 	ref, _ := shared.NewArtifactRef(shared.ArtifactRecordings, "link.wav")
 
-	err := f.eng.Transcribe(context.Background(), ref, f.model(t, modeOK), outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(context.Background(), ref, f.model(t, modeOK), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
 	}
@@ -411,7 +411,7 @@ func TestTranscribeRefusesUnusableWorkDir(t *testing.T) {
 			f := newFixture(t, "")
 			tt.setup(t, f.work)
 
-			err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), nil, nil)
+			err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 			if !errors.Is(err, ErrWorkDir) || !errors.Is(err, shared.ErrStorage) {
 				t.Fatalf("err = %v, want ErrWorkDir", err)
 			}
@@ -437,7 +437,7 @@ func TestTranscribeWrongKinds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := f.eng.Transcribe(context.Background(), tt.audio, tt.model, tt.outp, nil, nil)
+			err := f.eng.Transcribe(context.Background(), tt.audio, tt.model, tt.outp, shared.LoadMax, nil, nil)
 			if !errors.Is(err, ErrInvalidInput) || !errors.Is(err, shared.ErrInvalidArtifactRef) {
 				t.Fatalf("err = %v, want ErrInvalidInput and ErrInvalidArtifactRef", err)
 			}
@@ -451,7 +451,7 @@ func TestTranscribeExitCodeCarriesStderr(t *testing.T) {
 	f := newFixture(t, "")
 	var progress []int
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeExit3), outRef(t, "x.json"), func(p int) { progress = append(progress, p) }, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeExit3), outRef(t, "x.json"), shared.LoadMax, func(p int) { progress = append(progress, p) }, nil)
 
 	var re *RunError
 	if !errors.As(err, &re) || !errors.Is(err, ErrExit) {
@@ -482,7 +482,7 @@ func TestTranscribeExitZeroWithoutResult(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	f := newFixture(t, "")
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeNoOut), outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeNoOut), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 
 	var re *RunError
 	if !errors.As(err, &re) || !errors.Is(err, ErrNoOutput) {
@@ -498,7 +498,7 @@ func TestTranscribeStderrIsBounded(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	f := newFixture(t, "")
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeSpam), outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeSpam), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 
 	var re *RunError
 	if !errors.As(err, &re) || re.Code != 1 {
@@ -523,7 +523,7 @@ func TestTranscribeCancelKillsProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := f.eng.Transcribe(ctx, f.audio(t), model, outRef(t, "x.json"), func(int) { cancel() }, nil)
+	err := f.eng.Transcribe(ctx, f.audio(t), model, outRef(t, "x.json"), shared.LoadMax, func(int) { cancel() }, nil)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
@@ -545,7 +545,7 @@ func TestTranscribeTimeout(t *testing.T) {
 	f.eng.cfg.Timeout = 2 * time.Second
 	model := f.model(t, modeHang)
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), model, outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), model, outRef(t, "x.json"), shared.LoadMax, nil, nil)
 
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err = %v, want ErrTimeout", err)
@@ -577,7 +577,9 @@ func TestTranscribeBlockingProgress(t *testing.T) {
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- f.eng.Transcribe(context.Background(), audio, model, out, progress, nil) }()
+	go func() {
+		done <- f.eng.Transcribe(context.Background(), audio, model, out, shared.LoadMax, progress, nil)
+	}()
 
 	<-entered
 	testenv.Eventually(t, "transcript stored while the callback blocks", func() bool {
@@ -615,7 +617,7 @@ func TestTranscribeStderrRedactsNonASCIIRoot(t *testing.T) {
 	}
 	f := newFixture(t, root)
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeExit3), outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeExit3), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 
 	var re *RunError
 	if !errors.As(err, &re) || re.Code != 3 {
@@ -646,7 +648,7 @@ func TestKillRunRunningProcess(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	grp := newProcGroup()
+	grp, _ := newProcGroup(0)
 	defer grp.close()
 	_ = grp.attach(cmd.Process.Pid)
 
@@ -676,7 +678,7 @@ func TestTranscribeCancelledBeforeStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := f.eng.Transcribe(ctx, f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(ctx, f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
@@ -701,7 +703,7 @@ func TestTranscribeInvalidResults(t *testing.T) {
 			f.eng.maxOutput = 64 << 10
 			var progress []int
 
-			err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, tt.mode), outRef(t, "x.json"), func(p int) { progress = append(progress, p) }, nil)
+			err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, tt.mode), outRef(t, "x.json"), shared.LoadMax, func(p int) { progress = append(progress, p) }, nil)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
@@ -718,7 +720,7 @@ func TestTranscribeStartFailure(t *testing.T) {
 	f := newFixture(t, "")
 	f.eng.cfg.Binary = filepath.Join(t.TempDir(), "missing", "whisper-cli.exe")
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), nil, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), shared.LoadMax, nil, nil)
 	if !errors.Is(err, ErrStart) {
 		t.Fatalf("err = %v, want ErrStart", err)
 	}
@@ -731,7 +733,7 @@ func TestTranscribeWriteFailure(t *testing.T) {
 	f.store.FailWrites(shared.ErrStorageFull)
 	var progress []int
 
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), func(p int) { progress = append(progress, p) }, nil)
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeOK), outRef(t, "x.json"), shared.LoadMax, func(p int) { progress = append(progress, p) }, nil)
 	if !errors.Is(err, shared.ErrStorageFull) {
 		t.Fatalf("err = %v, want ErrStorageFull", err)
 	}
@@ -751,7 +753,7 @@ func TestTranscribeConcurrent(t *testing.T) {
 	errs := make([]error, n)
 	for i := range n {
 		wg.Go(func() {
-			errs[i] = f.eng.Transcribe(context.Background(), audio, model, outRef(t, "c"+string(rune('0'+i))+".json"), nil, nil)
+			errs[i] = f.eng.Transcribe(context.Background(), audio, model, outRef(t, "c"+string(rune('0'+i))+".json"), shared.LoadMax, nil, nil)
 		})
 	}
 	wg.Wait()
@@ -828,6 +830,7 @@ func TestNewValidatesConfig(t *testing.T) {
 		{name: "work in an artifact kind", edit: func(c *Config) { c.WorkDir = filepath.Join(root, "transcripts", "tmp") }},
 		{name: "work in an artifact kind, other case", edit: func(c *Config) { c.WorkDir = filepath.Join(root, "Models") }},
 		{name: "negative threads", edit: func(c *Config) { c.Threads = -1 }},
+		{name: "negative logical CPUs", edit: func(c *Config) { c.LogicalCPUs = -1 }},
 		{name: "too many threads", edit: func(c *Config) { c.Threads = maxThreads + 1 }},
 		{name: "unknown language", edit: func(c *Config) { c.Language = "xx" }},
 		{name: "upper-case language", edit: func(c *Config) { c.Language = "EN" }},
@@ -851,8 +854,8 @@ func TestNewValidatesConfig(t *testing.T) {
 				if err != nil {
 					t.Fatalf("New: %v", err)
 				}
-				if eng.threads < 1 || !languages[eng.language] {
-					t.Errorf("defaults not applied: threads %d, language %q", eng.threads, eng.language)
+				if eng.cpus < 1 || !languages[eng.language] {
+					t.Errorf("defaults not applied: cpus %d, language %q", eng.cpus, eng.language)
 				}
 				return
 			}

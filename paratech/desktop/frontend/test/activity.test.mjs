@@ -27,7 +27,7 @@ const recording = {
   id: "r1", lessonId: "l1", title: "История", status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
   stage: "queued", step: "transcription", progressPercent: 0, queueReason: "power", errorCode: "", jobError: "",
-  action: "runNow", actionJobId: "j1",
+  action: "runNow", actionJobId: "j1", remainingSeconds: 1500, hasRemaining: true,
 };
 const job = {
   id: "j1", type: "stt", status: "WAITING_FOR_POWER", waiting: true, attempts: 0, maxAttempts: 3, progressPercent: 0,
@@ -115,7 +115,8 @@ test("parse accepts well-formed items and drops extra fields", () => {
 test("parse rejects malformed items", () => {
   for (const raw of [null, "x", [], {}, { ...recording, stoppable: "yes" }, { ...recording, durationSeconds: Number.NaN }, { ...recording, id: 1 },
     { ...recording, title: undefined }, { ...recording, stage: "paused" }, { ...recording, queueReason: "rain" },
-    { ...recording, action: "delete" }, { ...recording, errorCode: 1 }]) {
+    { ...recording, action: "delete" }, { ...recording, errorCode: 1 },
+    { ...recording, remainingSeconds: undefined }, { ...recording, hasRemaining: "yes" }]) {
     assert.throws(() => parseRecording(raw), /recording/);
   }
   for (const raw of [null, 5, {}, { ...job, runNowOffered: 1 }, { ...job, attempts: "0" }, { ...job, status: null }]) {

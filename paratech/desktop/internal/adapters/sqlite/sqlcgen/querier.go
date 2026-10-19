@@ -54,6 +54,9 @@ type Querier interface {
 	// Installed STT models (PRD section 8) with the optimistic-concurrency protocol of ADR-0004(d), and the pin lookup
 	// that blocks the removal of a model an unfinished job depends on (PRD section 14 case 11).
 	GetSttModel(ctx context.Context, id string) (SttModel, error)
+	// Measured recognition speed per installed model and load mode (TASK-084). A row is replaced by
+	// (stt_model_id, recognition_load); the rows go with the model (CASCADE).
+	GetSttSpeed(ctx context.Context, arg GetSttSpeedParams) (GetSttSpeedRow, error)
 	// Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
 	// the transcript id, one summary per transcript (TASK-042).
 	GetSummary(ctx context.Context, id string) (Summary, error)
@@ -133,6 +136,7 @@ type Querier interface {
 	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
+	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
 	// One page in number order; the primary key serves the order.
 	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
@@ -178,6 +182,7 @@ type Querier interface {
 	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
 	// stale save cannot undo ON DELETE SET NULL of the model.
 	UpdateTranscript(ctx context.Context, arg UpdateTranscriptParams) (int64, error)
+	UpsertSttSpeed(ctx context.Context, arg UpsertSttSpeedParams) error
 	// Live transcript parts (TASK-079). A row is replaced by (recording_id, seq): a rerun of the engine numbers from 0
 	// again. The STT job deletes the rows of a recording once its transcript is stored.
 	UpsertTranscriptPart(ctx context.Context, arg UpsertTranscriptPartParams) error

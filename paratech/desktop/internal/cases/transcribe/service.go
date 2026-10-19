@@ -30,6 +30,8 @@ const (
 	stepCheckpoint = "checkpoint"
 	stepLiveSave   = "store live parts"
 	stepLiveDelete = "delete live parts"
+	stepLoad       = "read the load mode"
+	stepSpeed      = "store the measured speed"
 )
 
 // Service is the handler of STT jobs (PRD sections 4.3, 7 and 8): it transcribes the final audio of a COMPLETED
@@ -54,7 +56,9 @@ type Service struct {
 	artifacts   ArtifactStore
 	events      EventPublisher
 	clock       Clock
-	live        LiveParts // nil: no live transcript
+	live        LiveParts      // nil: no live transcript
+	settings    SettingsReader // nil: the default load mode
+	speeds      SpeedStore     // nil: no speed measurement
 	log         *slog.Logger
 }
 
@@ -70,7 +74,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		engine: d.Engine, transcripts: d.Transcripts, recordings: d.Recordings, models: d.Models, artifacts: d.Artifacts,
-		events: d.Events, clock: d.Clock, live: d.Live, log: log,
+		events: d.Events, clock: d.Clock, live: d.Live, settings: d.Settings, speeds: d.Speeds, log: log,
 	}, nil
 }
 
@@ -111,7 +115,7 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		return err
 	}
 
-	doc, err := s.prepareDocument(ctx, snap, rec.ID(), audio, model.File(), docRef, report)
+	doc, err := s.prepareDocument(ctx, snap, rec, audio, model, docRef, report)
 	if err != nil {
 		return err
 	}
@@ -170,8 +174,9 @@ func (s *Service) inputs(ctx context.Context, snap job.Snapshot, req values.STTR
 
 // prepareDocument returns the document of this job, running the engine unless an earlier attempt stored a valid one,
 // and reports the checkpoint.
-func (s *Service) prepareDocument(ctx context.Context, snap job.Snapshot, rec shared.RecordingID,
-	audio, model, docRef shared.ArtifactRef, report func(context.Context, job.Progress) error) (transcript.Document, error) {
+func (s *Service) prepareDocument(ctx context.Context, snap job.Snapshot, rec *recording.Recording,
+	audio shared.ArtifactRef, model *sttmodel.Model, docRef shared.ArtifactRef,
+	report func(context.Context, job.Progress) error) (transcript.Document, error) {
 	doc, err := s.readDocument(ctx, docRef)
 	switch {
 	case err == nil:
@@ -200,14 +205,14 @@ func (s *Service) prepareDocument(ctx context.Context, snap job.Snapshot, rec sh
 	return doc, nil
 }
 
-// runEngine runs the STT engine and forwards its progress to the runner. A failed report kills the engine. The
-// segments recognised meanwhile are stored in batches (live).
-func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, rec shared.RecordingID, audio, model, out shared.ArtifactRef,
-	report func(context.Context, job.Progress) error) error {
+// runEngine runs the STT engine in the load mode read now and forwards its progress to the runner. A failed report
+// kills the engine. The segments recognised meanwhile are stored in batches (live). A successful run is measured.
+func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, rec *recording.Recording, audio shared.ArtifactRef,
+	model *sttmodel.Model, out shared.ArtifactRef, report func(context.Context, job.Progress) error) error {
 	engineCtx, kill := context.WithCancel(ctx)
 	defer kill()
 
-	live := s.newLiveWriter(snap, rec)
+	live := s.newLiveWriter(snap, rec.ID())
 	// Parts recognised before a stop or a failure stay for the viewer; the store does not depend on the job's context.
 	defer live.flush(context.WithoutCancel(ctx), true)
 
@@ -235,7 +240,9 @@ func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, rec shared.R
 		live.flush(ctx, false)
 	}
 
-	err := s.engine.Transcribe(engineCtx, audio, model, out, progress, live.segment(ctx))
+	load := s.loadMode(ctx, snap)
+	started := s.clock.Now()
+	err := s.engine.Transcribe(engineCtx, audio, model.File(), out, load, progress, live.segment(ctx))
 
 	mu.Lock()
 	stopErr := stop
@@ -245,6 +252,7 @@ func (s *Service) runEngine(ctx context.Context, snap job.Snapshot, rec shared.R
 		// Even if the engine finished in the meantime, the runner asked to stop; the next attempt finds the document.
 		return s.stopped(snap, stopErr)
 	case err == nil:
+		s.measure(ctx, snap, values.SpeedKey{Model: model.ID(), Load: load}, s.clock.Now().Sub(started), rec)
 		return nil
 	case ctx.Err() != nil:
 		return s.retry(snap, stepEngine, ErrTranscriptionFailed, err)

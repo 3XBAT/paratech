@@ -132,7 +132,7 @@ whisper-cli.exe -m <model> -f <audio> -of <run-dir>\out -oj -pp -ng -t <threads>
 | `-oj` | `--output-json` | write `<of>.json` | always |
 | `-pp` | `--print-progress` | progress lines on stderr | always |
 | `-ng` | `--no-gpu` | disable GPU | always (CPU-only, PRD section 4.3) |
-| `-t N` | `--threads` | threads (default `min(4, hardware threads)`) | config, 1..256 |
+| `-t N` | `--threads` | threads (default `min(4, hardware threads)`) | load mode (ADR-0016), 1..256 |
 | `-l LANG` | `--language` | language code or `auto` (default `en`); lower-cased by the CLI | config, allowlist below |
 
 Other verified flags, not used: `-p N` processors, `-ot/-on/-d` offsets/duration, `-mc`, `-ml`, `-sow`, `-bo`, `-bs`, `-ac`, `-wt`, `-et`,

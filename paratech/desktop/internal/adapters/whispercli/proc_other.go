@@ -8,10 +8,10 @@ import (
 )
 
 // procGroup is a no-op off Windows: the product targets Windows, and whisper-cli starts no children, so killing
-// the process itself (exec.Cmd.Cancel) is enough here.
+// the process itself (exec.Cmd.Cancel) is enough here. There is no CPU cap either: the load modes only set threads.
 type procGroup struct{}
 
-func newProcGroup() *procGroup { return &procGroup{} }
+func newProcGroup(int) (*procGroup, error) { return &procGroup{}, nil }
 
 func (g *procGroup) attach(int) error { return nil }
 
@@ -19,7 +19,8 @@ func (g *procGroup) kill() {}
 
 func (g *procGroup) close() {}
 
-func setProcAttrs(*exec.Cmd) {}
+// setProcAttrs ignores the priority off Windows.
+func setProcAttrs(*exec.Cmd, bool) {}
 
 // checkArgEncoding accepts every string: POSIX passes argv bytes unchanged.
 func checkArgEncoding(string) error { return nil }

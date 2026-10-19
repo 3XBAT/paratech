@@ -37,6 +37,12 @@ var (
 	// ErrInvalidSize is returned for a model size that is not positive or above MaxModelSizeBytes.
 	ErrInvalidSize = errors.New("invalid model size")
 
+	// ErrInvalidRunPolicy is returned by NewRunPolicy for a thread count or CPU cap out of range.
+	ErrInvalidRunPolicy = errors.New("invalid recognition run policy")
+
+	// ErrInvalidSpeed is returned by RestoreMeasuredSpeed for a stored speed out of range.
+	ErrInvalidSpeed = errors.New("invalid measured recognition speed")
+
 	// ErrInvalidMachine is returned by NewMachine for a negative or half-known hardware profile.
 	ErrInvalidMachine = errors.New("invalid machine profile")
 

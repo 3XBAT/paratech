@@ -13,6 +13,7 @@ import type {
   RecordingItem,
 } from "./bindings/activity.js";
 import { formatDuration, formatTime, isFinishedJob, recordingDurationText, splitFinished } from "./activityView.js";
+import { remainingText } from "./durationEstimate.js";
 import type { PageId } from "./nav.js";
 import { plural } from "./plural.js";
 import type { StatusView } from "./statusPresentation.js";
@@ -141,6 +142,8 @@ export interface RecordingRowView {
   status: StatusView;
   /** Transcription share for the progress bar; null for none. */
   progress: number | null;
+  /** «≈ 25 мин осталось» of a queued or running transcription (TASK-084); "" for none. */
+  remaining: string;
   /** The core's notes: the problem of the recording, the last error of the job; plain text. */
   notes: string[];
   action: RowAction | null;
@@ -221,6 +224,7 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
     meta: meta.filter((s) => s !== "").join(" · "),
     status: chainStatusView(r, now),
     progress: r.stage === "transcribing" && r.progressPercent > 0 ? Math.min(100, r.progressPercent) : null,
+    remaining: remainingText(r),
     notes: [r.problem, r.jobError].filter((s, i, all) => s !== "" && all.indexOf(s) === i),
     action: rowAction(r),
   };

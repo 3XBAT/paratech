@@ -20,13 +20,14 @@ import (
 
 var contractTables = []string{
 	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "proposals", "recordings",
-	"schedule_entries", "settings", "stt_models", "summaries", "transcript_parts", "transcripts",
+	"schedule_entries", "settings", "stt_models", "stt_speeds", "summaries", "transcript_parts", "transcripts",
 }
 
 // unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version
 // column (ADR-0004(d)). Draft versions are append-only rows below homework_drafts, which carries the version.
-// Live transcript parts are replaced by their number, never saved through an aggregate (TASK-079).
-var unversionedTables = map[string]bool{"homework_draft_revisions": true, "transcript_parts": true}
+// Live transcript parts are replaced by their number, never saved through an aggregate (TASK-079); so are the
+// measured recognition speeds (TASK-084).
+var unversionedTables = map[string]bool{"homework_draft_revisions": true, "transcript_parts": true, "stt_speeds": true}
 
 func tableNames(t *testing.T, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -76,8 +77,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 10 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 10", first, err)
+	if err != nil || first != 11 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 11", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -202,6 +203,10 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 	}
 	if n := scanInt(t, db.sql, notifyColumn); n != 0 {
 		t.Fatal("settings.notify_on_processing_complete still exists at version 8")
+	}
+	// The repository reads the current schema: the row is checked at the latest version.
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to the latest: %v", err)
 	}
 	got, err := NewSettingsRepository(db).Load(ctx)
 	if err != nil {

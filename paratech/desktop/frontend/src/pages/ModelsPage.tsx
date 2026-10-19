@@ -637,6 +637,11 @@ function ModelText(props: { row: ModelRow; tip: string }) {
         </p>
       )}
       {r.warning !== "" && <p className="mwarn small slow">{r.warning}</p>}
+      {r.estimate !== "" && (
+        <p className={r.estimateHeavy ? "mest small slow" : "mest small muted"} title={r.estimateTip}>
+          {r.estimateHeavy ? <b>{r.estimate}</b> : r.estimate}
+        </p>
+      )}
     </div>
   );
 }

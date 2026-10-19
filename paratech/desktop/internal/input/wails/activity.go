@@ -73,6 +73,11 @@ type RecordingItem struct {
 	// checkSound.
 	Action      string `json:"action"`
 	ActionJobID string `json:"actionJobId"`
+
+	// RemainingSeconds is the approximate time left of a queued or running transcription («≈ N мин осталось»,
+	// TASK-084); hasRemaining is false when there is none or no estimate.
+	RemainingSeconds int64 `json:"remainingSeconds"`
+	HasRemaining     bool  `json:"hasRemaining"`
 }
 
 // JobItem is the JSON form of one job. Times are RFC 3339 in UTC, empty when unknown.
@@ -122,6 +127,7 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 			Problem: r.Problem, Stoppable: r.Stoppable,
 			Stage: string(c.Stage), Step: string(c.Step), ProgressPercent: c.Percent, QueueReason: string(c.QueueReason),
 			ErrorCode: string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
+			RemainingSeconds: int64(r.Remaining.Round(time.Second) / time.Second), HasRemaining: r.HasRemaining,
 		})
 	}
 	return out, nil

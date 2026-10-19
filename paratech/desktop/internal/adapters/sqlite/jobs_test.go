@@ -720,7 +720,7 @@ func TestMigrationToVersion10AddsJobCause(t *testing.T) {
 	mustExec(t, db, `INSERT INTO jobs (id, type, status, idempotency_key, max_attempts, next_run_at, created_at, updated_at)
 		VALUES ('j1', 'summarize', 'WAITING_FOR_NETWORK', 'k1', 3, 0, 0, 0)`)
 
-	if err := db.Migrate(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 10); err != nil {
 		t.Fatalf("migrate to 10: %v", err)
 	}
 	if v, err := db.SchemaVersion(ctx); err != nil || v != 10 {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/domain/transcription/services/loadpolicy"
 	"paratech/desktop/internal/domain/transcription/transcript"
+	"paratech/desktop/internal/domain/transcription/values"
 )
 
 const (
@@ -28,10 +31,7 @@ const (
 	dirPerm = 0o700
 
 	// maxThreads bounds Config.Threads.
-	maxThreads = 256
-
-	// defaultMaxThreads mirrors the CLI default min(4, hardware threads).
-	defaultMaxThreads = 4
+	maxThreads = values.MaxRunThreads
 
 	// waitDelay bounds the wait for the process and its pipes after a kill or exit.
 	waitDelay = 5 * time.Second
@@ -71,14 +71,21 @@ type Config struct {
 	// run directories.
 	WorkDir string
 
-	// Threads is the -t value; 0 means min(4, CPUs).
+	// Threads, when set, is the -t value of every run whatever the load mode (tests, diagnostics); 0 means the
+	// thread count of the mode (loadpolicy).
 	Threads int
+
+	// LogicalCPUs is the logical processor count the load modes are computed for; 0 means runtime.NumCPU().
+	LogicalCPUs int
 
 	// Language is the -l value from the whisper.cpp list; "" means LanguageAuto.
 	Language string
 
 	// Timeout kills a run that takes longer; 0 means no limit besides the context.
 	Timeout time.Duration
+
+	// Log receives the warning that the CPU cap of a run could not be set; nil discards it.
+	Log *slog.Logger
 }
 
 // Engine runs whisper-cli once per Transcribe call. It is safe for concurrent use.
@@ -86,9 +93,12 @@ type Engine struct {
 	cfg       Config
 	paths     Paths
 	artifacts Artifacts
-	threads   int
+	threads   int // 0: by the load mode
+	cpus      int
+	policy    loadpolicy.Policy
 	language  string
 	redact    []redaction
+	log       *slog.Logger
 
 	// Overridable in tests.
 	env           []string
@@ -111,12 +121,15 @@ func New(cfg Config, paths Paths, artifacts Artifacts) (*Engine, error) {
 		return nil, err
 	}
 
-	threads := cfg.Threads
-	if threads == 0 {
-		threads = min(defaultMaxThreads, runtime.NumCPU())
+	if cfg.Threads < 0 || cfg.Threads > maxThreads {
+		return nil, fmt.Errorf("%w: threads must be 0..%d", ErrConfig, maxThreads)
 	}
-	if threads < 1 || threads > maxThreads {
-		return nil, fmt.Errorf("%w: threads must be 1..%d", ErrConfig, maxThreads)
+	cpus := cfg.LogicalCPUs
+	if cpus == 0 {
+		cpus = runtime.NumCPU()
+	}
+	if cpus < 1 {
+		return nil, fmt.Errorf("%w: negative logical CPU count", ErrConfig)
 	}
 
 	lang := cfg.Language
@@ -131,12 +144,20 @@ func New(cfg Config, paths Paths, artifacts Artifacts) (*Engine, error) {
 		return nil, fmt.Errorf("%w: negative timeout", ErrConfig)
 	}
 
+	log := cfg.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+
 	return &Engine{
 		cfg:       cfg,
 		paths:     paths,
 		artifacts: artifacts,
-		threads:   threads,
+		threads:   cfg.Threads,
+		cpus:      cpus,
+		policy:    loadpolicy.New(),
 		language:  lang,
+		log:       log,
 		redact: []redaction{
 			newRedaction(cfg.DataRoot, placeholderData),
 			newRedaction(filepath.Dir(cfg.Binary), placeholderBin),
@@ -196,6 +217,9 @@ func checkDirs(root, work string) error {
 // Transcribe recognises audio with model and stores the transcript document at output. Cancelling ctx kills the
 // process; on any failure nothing is written and the run directory is removed.
 //
+// load is the load mode of this run (loadpolicy): it sets the threads, the priority and, on Windows, the hard CPU cap
+// of the job object. A cap that cannot be set is logged and the run goes on uncapped with the lowered priority.
+//
 // progress, if not nil, receives increasing percentages up to 100 (100 only after the result is stored), possibly
 // skipping values. It is called on a goroutine of the adapter, so it must be safe for that; calls never overlap and
 // none happens after Transcribe returns. A slow callback never stalls the process, but Transcribe waits for it.
@@ -204,8 +228,8 @@ func checkDirs(root, work string) error {
 // of progress (its own goroutine, no overlap, none after return). These are a live preview with the rules of the
 // result (valid UTF-8, no control characters, bounded, non-decreasing starts); the stored document is the result.
 // Without segment stdout goes to the null device.
-func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
-	segment func(transcript.Segment)) error {
+func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, load shared.RecognitionLoad,
+	progress func(percent int), segment func(transcript.Segment)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -235,8 +259,9 @@ func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.Art
 	// A failed removal leaves only a private directory that CleanupWork removes at the next start.
 	defer func() { _ = removeAll(runDir) }()
 
+	policy := e.runPolicy(load)
 	outPrefix := filepath.Join(runDir, outName)
-	args := buildArgs(modelPath, audioPath, outPrefix, e.threads, e.language)
+	args := buildArgs(modelPath, audioPath, outPrefix, policy.Threads(), e.language)
 
 	var send func(int)
 	if progress != nil {
@@ -254,7 +279,7 @@ func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.Art
 		out = newStdoutSink(pump.send)
 	}
 
-	if err := e.run(ctx, runDir, args, sink, out); err != nil {
+	if err := e.run(ctx, runDir, args, policy, sink, out); err != nil {
 		return err
 	}
 
@@ -273,6 +298,18 @@ func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.Art
 
 	sink.final()
 	return nil
+}
+
+// runPolicy is the policy of the mode on this computer; Config.Threads, when set, replaces its thread count.
+func (e *Engine) runPolicy(load shared.RecognitionLoad) values.RunPolicy {
+	p := e.policy.For(load, e.cpus)
+	if e.threads == 0 {
+		return p
+	}
+	if o, err := values.NewRunPolicy(e.threads, p.LowPriority(), p.CPUCapPercent()); err == nil {
+		return o
+	}
+	return p
 }
 
 // resolve turns a reference into a checked path of an existing regular file (links are refused).
@@ -322,8 +359,29 @@ func (e *Engine) newRunDir() (string, error) {
 	return dir, nil
 }
 
-// run starts the process and waits for it. It returns nil only for exit code 0. out, if not nil, reads stdout.
-func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *stderrSink, out *stdoutSink) error {
+// attacher is the part of procGroup that attach uses; tests fake it.
+type attacher interface {
+	attach(pid int) error
+}
+
+// attach puts the process into the group. Outside the job the CPU cap does not hold, so a failure is logged like a
+// cap that cannot be set, unless that was already logged or the mode has no cap.
+func (e *Engine) attach(grp attacher, pid int, policy values.RunPolicy, capErr error) {
+	err := grp.attach(pid)
+	if err != nil && capErr == nil && policy.CPUCapPercent() > 0 {
+		e.warnUncapped(policy, fmt.Errorf("attach to the job object: %w", err))
+	}
+}
+
+func (e *Engine) warnUncapped(policy values.RunPolicy, err error) {
+	e.log.Warn("speech recognition runs without the CPU cap of its load mode",
+		slog.Int("cap_percent", policy.CPUCapPercent()), slog.Any("err", err))
+}
+
+// run starts the process with the priority and CPU cap of policy and waits for it. It returns nil only for exit code 0.
+// out, if not nil, reads stdout.
+func (e *Engine) run(ctx context.Context, runDir string, args []string, policy values.RunPolicy, sink *stderrSink,
+	out *stdoutSink) error {
 	var runCtx context.Context
 	var cancel context.CancelFunc
 	if e.cfg.Timeout > 0 {
@@ -333,8 +391,11 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 	}
 	defer cancel()
 
-	grp := newProcGroup()
+	grp, capErr := newProcGroup(policy.CPUCapPercent())
 	defer grp.close()
+	if capErr != nil {
+		e.warnUncapped(policy, capErr)
+	}
 
 	cmd := exec.CommandContext(runCtx, e.cfg.Binary, args...) //nolint:gosec // binary and arguments are validated (args.go)
 	cmd.Dir = runDir
@@ -346,7 +407,7 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 	}
 	cmd.Stderr = sink
 	cmd.WaitDelay = waitDelay
-	setProcAttrs(cmd)
+	setProcAttrs(cmd, policy.LowPriority())
 	cmd.Cancel = func() error { return killRun(cmd.Process, grp) }
 
 	if err := cmd.Start(); err != nil {
@@ -357,7 +418,7 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, sink *st
 	}
 
 	// Best effort: without the job only the process itself is killed (whisper-cli starts no children).
-	_ = grp.attach(cmd.Process.Pid)
+	e.attach(grp, cmd.Process.Pid, policy, capErr)
 
 	err := cmd.Wait()
 	sink.stop()

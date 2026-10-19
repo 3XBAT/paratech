@@ -50,6 +50,7 @@ type Core struct {
 	Imports   ModelImports
 	Links     LinkOpener             // also opens the pages of the help screens
 	Speech    SpeechComponentUseCase // the speech recognition component: status and install, on both pages
+	Speed     SpeedEstimates         // the recognition time estimates of the models and settings pages; optional
 
 	Connections ConnectionsUseCase  // the mail and Hub section of the settings page
 	Google      GoogleUseCase       // the Google section of the same page
@@ -230,14 +231,14 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
-		Settings: NewSettingsService(core.Settings, s.opts.Log),
+		Settings: NewSettingsService(core.Settings, s.opts.Log).withSpeed(core.Speed),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, s.opts.Log),
 		Prompt:   NewPromptService(core.Prompt, s.opts.Log),
 		Popup:    NewPopupWindowService(popupFitterFunc(s.fitPopup), s.opts.Log),
 		Schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
 		Models: NewModelsService(ModelsDeps{
 			Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links,
-			Picker: modelPickerFunc(s.pickModelFile), Speech: core.Speech,
+			Picker: modelPickerFunc(s.pickModelFile), Speech: core.Speech, Speed: core.Speed,
 		}, s.opts.Log),
 		Speech: NewSpeechService(core.Speech, s.opts.Log),
 
