@@ -74,32 +74,32 @@ func insertOldRecording(t *testing.T, db *DB, id string) {
 		created_at, updated_at) VALUES ('`+id+`', 'COMPLETED', 0, 1000, 'recordings/`+id+`', 'recordings/`+id+`.wav', 1, 0, 0)`)
 }
 
-// Version 11 adds recordings.silent, 0 for the existing rows, and goes back down keeping them.
-func TestMigrationToVersion11AddsSilent(t *testing.T) {
+// Version 12 adds recordings.silent, 0 for the existing rows, and goes back down keeping them.
+func TestMigrationToVersion12AddsSilent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 9); err != nil {
-		t.Fatalf("up to 9: %v", err)
+	if _, err := p.UpTo(ctx, 11); err != nil {
+		t.Fatalf("up to 11: %v", err)
 	}
 	insertOldRecording(t, db, "r-old")
 
-	if _, err := p.UpTo(ctx, 11); err != nil {
-		t.Fatalf("up to 11: %v", err)
+	if _, err := p.UpTo(ctx, 12); err != nil {
+		t.Fatalf("up to 12: %v", err)
 	}
 	r, err := NewRecordingRepository(db).Get(ctx, "r-old")
 	if err != nil || r.Silent() {
 		t.Fatalf("existing recording = %v, %v; want it not silent", r, err)
 	}
 
-	if _, err := p.DownTo(ctx, 9); err != nil {
-		t.Fatalf("down to 9: %v", err)
+	if _, err := p.DownTo(ctx, 11); err != nil {
+		t.Fatalf("down to 11: %v", err)
 	}
 	if n := scanInt(t, db.sql, "SELECT count(*) FROM pragma_table_info('recordings') WHERE name = 'silent'"); n != 0 {
-		t.Fatal("recordings.silent still exists at version 9")
+		t.Fatal("recordings.silent still exists at version 11")
 	}
 	if n := countRecordings(t, db); n != 1 {
 		t.Fatalf("recordings = %d, want the recording kept", n)

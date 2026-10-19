@@ -154,7 +154,7 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
     nothing changes), then the child is stopped and the next one captures the new target; one child at a time; a
     child that does not start goes back to the old source. Not a fallback; counted in `SourceSwitches`.
   - Silent track: the assembly counts audible 1-s windows; fewer than 3 or under 1 % = silent (`recordings.silent`,
-    migration 0011): no transcription, the row shows «Запись без звука» with «Проверить звук».
+    migration 0012): no transcription, the row shows «Запись без звука» with «Проверить звук».
 - **CI:** builds `CGO_ENABLED=0`; runners have no audio device, so live audio checks stay manual (TASK-016, compat matrix).
 
 ## Verification (TASK-016, owner, Windows 10 19045)
