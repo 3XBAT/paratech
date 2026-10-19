@@ -126,7 +126,8 @@
 .row:last-child { border-bottom: 0; }
 
 /* The rows of one list share its columns, so statuses and buttons line up from row to row. */
-.rows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 320px) minmax(120px, auto); }
+/* The actions column is capped: with many buttons they wrap instead of squeezing the title to one letter per line. */
+.rows { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(200px, 300px) fit-content(340px); }
 .rows > .row { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .row .t { margin: 0; font-weight: 600; }
 .row-main { min-width: 0; }
