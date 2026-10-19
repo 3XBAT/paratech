@@ -35,6 +35,9 @@ type Settings struct {
 	// whole computer. An app name, never a process (it is remembered across restarts).
 	recordingSource shared.AppName
 
+	// recognitionLoad is how hard speech recognition may load the computer (TASK-084).
+	recognitionLoad shared.RecognitionLoad
+
 	updatedAt time.Time // zero: never changed by the user
 }
 
@@ -44,6 +47,7 @@ func New() *Settings {
 		recordingPromptsEnabled: DefaultRecordingPromptsEnabled,
 		processOnlyOnACPower:    DefaultProcessOnlyOnACPower,
 		smtpSecurity:            DefaultMailSecurity,
+		recognitionLoad:         shared.DefaultRecognitionLoad,
 	}
 }
 
@@ -52,15 +56,16 @@ type State struct {
 	Version                 int64
 	RecordingPromptsEnabled bool
 	ProcessOnlyOnACPower    bool
-	DefaultSttModel         shared.SttModelID // empty: none selected
-	HomeworkRecipient       string            // empty: none
-	SMTPHost                string            // empty: none
-	SMTPPort                int               // 0: the default of the mode
-	SMTPSecurity            MailSecurity      // empty: DefaultMailSecurity
-	SMTPLogin               string            // empty: none
-	HubURL                  string            // empty: none
-	RecordingSource         shared.AppName    // empty: the whole computer
-	UpdatedAt               time.Time         // zero: stored defaults that the user never changed
+	DefaultSttModel         shared.SttModelID      // empty: none selected
+	HomeworkRecipient       string                 // empty: none
+	SMTPHost                string                 // empty: none
+	SMTPPort                int                    // 0: the default of the mode
+	SMTPSecurity            MailSecurity           // empty: DefaultMailSecurity
+	SMTPLogin               string                 // empty: none
+	HubURL                  string                 // empty: none
+	RecordingSource         shared.AppName         // empty: the whole computer
+	RecognitionLoad         shared.RecognitionLoad // empty or unknown: shared.DefaultRecognitionLoad
+	UpdatedAt               time.Time              // zero: stored defaults that the user never changed
 }
 
 // Restore rebuilds stored settings without side effects; it only checks that the state is consistent.
@@ -99,7 +104,9 @@ func Restore(s State) (*Settings, error) {
 		smtpLogin:               s.SMTPLogin,
 		hubURL:                  s.HubURL,
 		recordingSource:         s.RecordingSource,
-		updatedAt:               s.UpdatedAt,
+		// An unknown stored mode (an older or tampered row) falls back to the gentlest instead of failing the load.
+		recognitionLoad: s.RecognitionLoad.OrDefault(),
+		updatedAt:       s.UpdatedAt,
 	}, nil
 }
 
@@ -253,6 +260,17 @@ func (s *Settings) SetRecordingSource(app shared.AppName, now time.Time) error {
 		}
 	}
 	return change(s, &s.recordingSource, app, now)
+}
+
+// RecognitionLoad returns how hard speech recognition may load the computer (TASK-084).
+func (s *Settings) RecognitionLoad() shared.RecognitionLoad { return s.recognitionLoad }
+
+// SetRecognitionLoad sets the load mode of speech recognition; it applies from the next recognition run.
+func (s *Settings) SetRecognitionLoad(l shared.RecognitionLoad, now time.Time) error {
+	if !l.Valid() {
+		return fmt.Errorf("%w: unknown recognition load %q", ErrInvalidSettings, l)
+	}
+	return change(s, &s.recognitionLoad, l, now)
 }
 
 // change sets one field. Setting the current value is a no-op, so repeating a request does not move UpdatedAt.
