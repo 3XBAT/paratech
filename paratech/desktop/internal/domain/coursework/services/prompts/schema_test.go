@@ -29,6 +29,8 @@ func TestSchemasMatchTheParsers(t *testing.T) {
 			"assignments[].title.minLength":       1,
 			"assignments[].title.maxLength":       MaxTitleRunes,
 			"assignments[].description.maxLength": MaxDescriptionRunes,
+			"subject_hint.maxLength":              MaxHintRunes,
+			"teacher_hint.maxLength":              MaxHintRunes,
 		}},
 		{values.OperationHomeworkDraft, draftWire{}, map[string]float64{
 			"title.minLength": 1, "title.maxLength": MaxTitleRunes, "body.minLength": 1, "body.maxLength": MaxDraftBodyRunes,

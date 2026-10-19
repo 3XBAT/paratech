@@ -25,8 +25,10 @@ const extractSchema = `{
   "title": "extract_homework_deadlines",
   "type": "object",
   "additionalProperties": false,
-  "required": ["assignments"],
+  "required": ["assignments", "subject_hint", "teacher_hint"],
   "properties": {
+    "subject_hint": {"type": "string", "maxLength": 200, "description": "Subject named in the transcript, or empty."},
+    "teacher_hint": {"type": "string", "maxLength": 200, "description": "Teacher named in the transcript, or empty."},
     "assignments": {
       "type": "array",
       "maxItems": 20,

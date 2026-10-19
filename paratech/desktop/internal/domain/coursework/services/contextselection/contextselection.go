@@ -13,7 +13,7 @@ import (
 // Limits of the selected fields. Together they stay below values.MaxRequestPayloadSize; a transcript above
 // MaxTranscriptBytes is refused rather than cut, so that the model never works on a silently truncated lesson.
 const (
-	MaxTitleRunes          = 200       // lesson and assignment titles
+	MaxTitleRunes          = 200       // lesson and assignment titles, the subject and the teacher
 	MaxTranscriptBytes     = 512 << 10 // the joined transcript text
 	MaxDescriptionBytes    = 16 << 10  // the assignment description
 	MaxSummaryBytes        = 128 << 10 // the lesson summary
@@ -27,6 +27,9 @@ type Lesson struct {
 	// Start anchors relative dates ("by next Monday"). Pass it in the student's time zone: its UTC offset is the one
 	// the model is told to use.
 	Start time.Time
+	// Subject and Teacher name the lesson (TASK-092); a homework draft sends them as context.
+	Subject string
+	Teacher string
 }
 
 // Assignment is what the caller knows about the assignment a draft is for.
@@ -58,6 +61,8 @@ type Material struct {
 type Context struct {
 	operation             values.Operation
 	lessonTitle           string
+	lessonSubject         string
+	lessonTeacher         string
 	lessonStart           time.Time
 	transcript            string
 	summary               string
@@ -119,6 +124,12 @@ func Select(operation values.Operation, m Material) (Context, error) {
 			}
 		}
 		if c.assignmentTitle, err = oneLine("assignment title", m.Assignment.Title); err != nil {
+			return Context{}, err
+		}
+		if c.lessonSubject, err = oneLine("lesson subject", m.Lesson.Subject); err != nil {
+			return Context{}, err
+		}
+		if c.lessonTeacher, err = oneLine("lesson teacher", m.Lesson.Teacher); err != nil {
 			return Context{}, err
 		}
 		if c.assignmentTitle == "" && c.assignmentDescription == "" {
@@ -193,6 +204,12 @@ func (c Context) IsZero() bool { return c == Context{} }
 
 // LessonTitle returns the lesson title; empty when unknown.
 func (c Context) LessonTitle() string { return c.lessonTitle }
+
+// LessonSubject returns the subject of the lesson (homework_draft only); empty when unknown.
+func (c Context) LessonSubject() string { return c.lessonSubject }
+
+// LessonTeacher returns the teacher of the lesson (homework_draft only); empty when unknown.
+func (c Context) LessonTeacher() string { return c.lessonTeacher }
 
 // LessonStart returns the lesson start (extract_homework_deadlines only).
 func (c Context) LessonStart() time.Time { return c.lessonStart }

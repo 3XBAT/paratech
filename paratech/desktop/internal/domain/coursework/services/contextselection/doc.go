@@ -5,7 +5,7 @@
 //
 //   - summary: the lesson title and the transcript text;
 //   - extract_homework_deadlines: the lesson title, the lesson start (the anchor for relative dates) and the transcript;
-//   - homework_draft: the lesson title, the assignment title and description, the lesson summary, the previous draft
+//   - homework_draft: the lesson title, subject and teacher, the assignment title and description, the lesson summary, the previous draft
 //     and the student's refinement request. The transcript is not sent: the summary stands for it.
 //
 // Segment timestamps, the assignment deadline and anything else the caller holds are never selected. Every selected
