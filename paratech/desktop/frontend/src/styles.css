@@ -222,6 +222,9 @@ html, body, #root { height: 100%; }
 .hw .box .acts + .result { margin-top: 10px; }
 .hw-gen { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 12px; }
 .hw-quote { display: block; white-space: pre-wrap; }
+.hw-lesson, .sm-lesson { display: block; overflow-wrap: anywhere; }
+.hw-lesson-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 10px; }
+.hw-lesson-head .hw-lesson { color: var(--text); }
 .hw-send { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 0 0 12px; color: var(--text); }
 .hw-send dt { color: var(--muted); }
 .hw-send dd { margin: 0; overflow-wrap: anywhere; }

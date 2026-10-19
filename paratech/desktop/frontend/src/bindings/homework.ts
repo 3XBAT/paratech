@@ -4,6 +4,7 @@
 // Sending: exportDraft(shown version) -> prepareSend -> the confirmation dialog -> confirmSend or cancelSend.
 // confirmSend is the only call that leads to an email; call it only from the dialog's confirm button (AC-14).
 
+import { type LessonSource, lessonSource } from "../lessonLabel.js";
 import type { CallByName } from "./settings";
 
 /** One assignment, newest first. Times are RFC 3339 in UTC, "" when unset. */
@@ -16,6 +17,17 @@ export interface AssignmentItem {
   due: string;
   userEdited: boolean;
   updatedAt: string;
+  /** The lesson (TASK-092): the shown subject and teacher with their source, the kind and the lesson start. */
+  subject: string;
+  subjectSource: LessonSource;
+  /** "lecture", "seminar", "practice", "lab" or "". */
+  kind: string;
+  teacher: string;
+  teacherSource: LessonSource;
+  lessonDate: string;
+  /** The student's correction, "" when none: the values of the correction form. */
+  correctedSubject: string;
+  correctedTeacher: string;
 }
 
 /** How a draft version was made. */
@@ -220,6 +232,14 @@ export function parseAssignment(raw: unknown): AssignmentItem {
     due: str(r, "due", w),
     userEdited: bool(r, "userEdited", w),
     updatedAt: str(r, "updatedAt", w),
+    subject: str(r, "subject", w),
+    subjectSource: lessonSource(str(r, "subjectSource", w)),
+    kind: str(r, "kind", w),
+    teacher: str(r, "teacher", w),
+    teacherSource: lessonSource(str(r, "teacherSource", w)),
+    lessonDate: str(r, "lessonDate", w),
+    correctedSubject: str(r, "correctedSubject", w),
+    correctedTeacher: str(r, "correctedTeacher", w),
   };
 }
 
@@ -314,6 +334,8 @@ export function parseDelivery(raw: unknown): DeliveryItem {
 export interface HomeworkApi {
   listAssignments(): Promise<AssignmentItem[]>;
   openAssignment(id: string): Promise<AssignmentDetail>;
+  /** Stores the student's subject and teacher of the assignment; "" removes that correction. Returns it as shown. */
+  correctLesson(id: string, subject: string, teacher: string): Promise<AssignmentItem>;
   draftVersion(id: string, version: number): Promise<VersionText>;
   /** Generates from version base, the one the page shows (0: no draft yet). */
   generate(id: string, base: number, instruction: string): Promise<GenerateStarted>;
@@ -338,6 +360,8 @@ export function homeworkApi(call: CallByName): HomeworkApi {
   return {
     listAssignments: async () => list(await call(methods.listAssignments), "assignments", parseAssignment),
     openAssignment: async (id) => parseAssignmentDetail(await call(methods.openAssignment, id)),
+    correctLesson: async (id, subject, teacher) =>
+      parseAssignment(await call(methods.correctLesson, id, subject, teacher)),
     draftVersion: async (id, version) => parseVersionText(await call(methods.draftVersion, id, version)),
     generate: async (id, base, instruction) =>
       parseGenerateStarted(await call(methods.generate, id, base, instruction)),

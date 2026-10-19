@@ -16,6 +16,7 @@ import {
   summaryParagraphs,
   updatedText,
 } from "../summaryView.js";
+import { lessonText } from "../lessonLabel.js";
 import { Button } from "../ui/Button.js";
 import { Card, ResultLine, Row } from "../ui/controls.js";
 
@@ -119,6 +120,7 @@ export function HomeworkCard(props: RetryProps & { view: SummaryView; onOpenAssi
               title={a.title}
               meta={
                 <>
+                  {lessonText(a) !== "" && <span className="sm-lesson">{lessonText(a)}</span>}
                   <span className="num">{assignmentMeta(a)}</span>
                   {a.description !== "" && <span className="sm-desc">{a.description}</span>}
                 </>

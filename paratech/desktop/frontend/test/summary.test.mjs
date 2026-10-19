@@ -43,6 +43,12 @@ const assignment = (over = {}) => ({
   description: "Из учебника, параграф 3",
   due: "2026-10-25T20:59:00Z",
   userEdited: false,
+  subject: "Матанализ",
+  subjectSource: "schedule",
+  kind: "lecture",
+  teacher: "",
+  teacherSource: "",
+  lessonDate: "2026-10-19T06:00:00Z",
   ...over,
 });
 const view = (over = {}) => ({
