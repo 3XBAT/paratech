@@ -11,8 +11,9 @@ import (
 // Bounds of a measured recognition speed (TASK-084). The factor is the wall time of a run over the duration of its
 // audio: 0.5 means a 1 h recording took 30 min.
 const (
-	// MinMeasuredAudio is the shortest audio whose run counts: in a shorter one loading the model dominates.
-	MinMeasuredAudio = time.Minute
+	// MinMeasuredAudio is the shortest audio whose run counts: the wall time includes loading the model, which
+	// would inflate the factor of a shorter recording.
+	MinMeasuredAudio = 5 * time.Minute
 
 	// MinSpeedFactor and MaxSpeedFactor bound a sane factor; a run outside (a clock jump, a sleep of the computer)
 	// is ignored.
@@ -22,10 +23,9 @@ const (
 	// speedSmoothing is the weight of a new run in the moving average.
 	speedSmoothing = 0.3
 
-	// A run outlierRatio times off an average of at least outlierAfter runs is ignored: one long sleep of the
-	// computer in the middle of a run must not spoil a settled average.
+	// A run is clamped to outlierRatio times off the average before it is added: one long sleep of the computer
+	// moves the average only a little, yet a bad first run is still corrected by the following real ones.
 	outlierRatio = 3.0
-	outlierAfter = 3
 
 	// maxSpeedSamples caps the stored count; the weight of a new run does not depend on it.
 	maxSpeedSamples = 1_000_000
@@ -62,8 +62,8 @@ func (m MeasuredSpeed) Factor() float64 { return m.factor }
 func (m MeasuredSpeed) Samples() int { return m.samples }
 
 // Observe returns the speed with one more successful run that took wall for audio. ok is false, and m is returned
-// unchanged, when the run does not count: audio shorter than MinMeasuredAudio, a factor out of range, or a factor
-// outlierRatio times off a settled average.
+// unchanged, when the run does not count: audio shorter than MinMeasuredAudio or a factor out of range. A factor more
+// than outlierRatio times off the average counts as that bound.
 func (m MeasuredSpeed) Observe(wall, audio time.Duration) (next MeasuredSpeed, ok bool) {
 	if audio < MinMeasuredAudio || wall <= 0 {
 		return m, false
@@ -75,9 +75,7 @@ func (m MeasuredSpeed) Observe(wall, audio time.Duration) (next MeasuredSpeed, o
 	if m.IsZero() {
 		return MeasuredSpeed{factor: f, samples: 1}, true
 	}
-	if m.samples >= outlierAfter && (f > m.factor*outlierRatio || f < m.factor/outlierRatio) {
-		return m, false
-	}
+	f = min(max(f, m.factor/outlierRatio), m.factor*outlierRatio)
 	return MeasuredSpeed{
 		factor:  m.factor + speedSmoothing*(f-m.factor),
 		samples: min(m.samples+1, maxSpeedSamples),

@@ -25,14 +25,6 @@ func TestObserveFirstAndAverage(t *testing.T) {
 }
 
 func TestObserveRejectsAbsurdRuns(t *testing.T) {
-	settled, err := RestoreMeasuredSpeed(0.5, outlierAfter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	young, err := RestoreMeasuredSpeed(0.5, outlierAfter-1)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	tests := []struct {
 		name        string
@@ -40,15 +32,11 @@ func TestObserveRejectsAbsurdRuns(t *testing.T) {
 		wall, audio time.Duration
 		ok          bool
 	}{
-		{"short audio", MeasuredSpeed{}, 10 * time.Second, 59 * time.Second, false},
-		{"exactly a minute", MeasuredSpeed{}, 30 * time.Second, time.Minute, true},
+		{"short audio", MeasuredSpeed{}, 2 * time.Minute, MinMeasuredAudio - time.Second, false},
+		{"exactly the shortest audio", MeasuredSpeed{}, 2 * time.Minute, MinMeasuredAudio, true},
 		{"no wall time", MeasuredSpeed{}, 0, time.Hour, false},
 		{"too fast", MeasuredSpeed{}, time.Second, time.Hour, false},
 		{"too slow", MeasuredSpeed{}, 51 * time.Hour, time.Hour, false},
-		{"far above a settled average", settled, 2 * time.Hour, time.Hour, false},
-		{"far below a settled average", settled, 5 * time.Minute, time.Hour, false},
-		{"within a settled average", settled, time.Hour, time.Hour, true},
-		{"far off a young average counts", young, 2 * time.Hour, time.Hour, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,6 +48,45 @@ func TestObserveRejectsAbsurdRuns(t *testing.T) {
 				t.Errorf("a rejected run changed the speed: %+v, want %+v", got, tt.m)
 			}
 		})
+	}
+}
+
+// A run far off the average counts as outlierRatio times off it: 0.5 + 0.3 * (1.5 - 0.5) and 0.5 + 0.3 * (0.5/3 - 0.5).
+func TestObserveClampsOutliers(t *testing.T) {
+	settled, err := RestoreMeasuredSpeed(0.5, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		wall time.Duration
+		want float64
+	}{
+		{"far above", 10 * time.Hour, 0.8},
+		{"far below", 5 * time.Minute, 0.4},
+		{"within", time.Hour, 0.65},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := settled.Observe(tt.wall, time.Hour)
+			if !ok || math.Abs(got.Factor()-tt.want) > 1e-9 || got.Samples() != 11 {
+				t.Errorf("Observe = %+v ok %v, want factor %v over 11", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+// A bad first run (a sleep of the computer) must not lock the average: steady real runs bring it back.
+func TestObserveConvergesAfterABadFirstRun(t *testing.T) {
+	m, ok := MeasuredSpeed{}.Observe(5*time.Hour, time.Hour)
+	if !ok || m.Factor() != 5 {
+		t.Fatalf("first run: %+v ok %v", m, ok)
+	}
+	for i := 0; i < 20; i++ {
+		m, _ = m.Observe(30*time.Minute, time.Hour)
+	}
+	if math.Abs(m.Factor()-0.5) > 0.05 {
+		t.Errorf("factor after 20 steady runs = %v, want near 0.5", m.Factor())
 	}
 }
 
