@@ -13,13 +13,15 @@ import (
 )
 
 // TranscriptionTimes estimates how long recognising audio with an installed model takes in the current load mode
-// (TASK-084); ok is false without an estimate. The app bridges it to the recognition speed use case.
+// (PRD section 8; TASK-084). The app wires the recognition speed use case.
 type TranscriptionTimes interface {
+	// TranscriptionTime returns the processing time of audio; ok is false without an estimate (PRD section 8).
 	TranscriptionTime(ctx context.Context, model shared.SttModelID, audio time.Duration) (d time.Duration, ok bool, err error)
 }
 
-// Clock supplies the current time for the time left of a running transcription (ARCH-24).
+// Clock supplies the current time for the time left of a running transcription (ARCH-24; PRD section 7.3).
 type Clock interface {
+	// Now returns the current time (PRD section 7.3).
 	Now() time.Time
 }
 

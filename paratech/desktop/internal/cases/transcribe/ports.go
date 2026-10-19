@@ -35,20 +35,21 @@ type STTEngine interface {
 		progress func(percent int), segment func(transcript.Segment)) error
 }
 
-// SettingsReader reads the load mode of speech recognition at the start of a run (TASK-084). Implemented by the
-// sqlite settings repository.
+// SettingsReader reads the load mode of speech recognition at the start of a run (PRD section 8; TASK-084).
+// Implemented by the sqlite settings repository.
 type SettingsReader interface {
-	// Load returns the stored settings, or the defaults while nothing is stored.
+	// Load returns the stored settings, or the defaults while nothing is stored (PRD section 8).
 	Load(ctx context.Context) (*settings.Settings, error)
 }
 
-// SpeedStore keeps the recognition speed measured per installed model and load mode on this computer (TASK-084),
-// which refines the time estimates of the pages. Implemented by the sqlite adapter.
+// SpeedStore keeps the recognition speed measured per installed model and load mode on this computer, which refines
+// the time estimates of the pages (PRD section 8; TASK-084). Implemented by the sqlite adapter.
 type SpeedStore interface {
-	// Speed returns the measured speed; the zero value when nothing is measured.
+	// Speed returns the measured speed; the zero value when nothing is measured (PRD section 8).
 	Speed(ctx context.Context, key values.SpeedKey) (values.MeasuredSpeed, error)
 
-	// SaveSpeed replaces the speed. A model that is no longer installed yields an error wrapping shared.ErrConflict.
+	// SaveSpeed replaces the speed (PRD section 8). A model that is no longer installed yields an error wrapping
+	// shared.ErrConflict.
 	SaveSpeed(ctx context.Context, key values.SpeedKey, s values.MeasuredSpeed, now time.Time) error
 }
 
