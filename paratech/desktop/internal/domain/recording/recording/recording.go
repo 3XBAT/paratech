@@ -53,6 +53,8 @@ type Recording struct {
 	lesson  shared.LessonID
 	status  Status
 
+	lessonSnapshot values.LessonSnapshot // the lesson as it was at the start (TASK-088); zero without one
+
 	maxDuration time.Duration
 	duration    time.Duration // final duration; meaningful only with audio
 	chunks      int
@@ -73,6 +75,8 @@ type Spec struct {
 	ID          shared.RecordingID
 	LessonID    shared.LessonID // optional: empty for an ad-hoc recording
 	MaxDuration time.Duration   // hard cap of this recording, see the limits policy
+	// Lesson is the snapshot of the lesson at the start (TASK-088); only with LessonID, optional even then.
+	Lesson values.LessonSnapshot
 }
 
 // New creates a STARTING recording whose chunks go to recordings/<id>.
@@ -87,10 +91,13 @@ func New(spec Spec, now time.Time) (*Recording, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidRecording, err)
 	}
+	if spec.LessonID == "" && !spec.Lesson.IsZero() {
+		return nil, fmt.Errorf("%w: a lesson snapshot without a lesson", ErrInvalidRecording)
+	}
 
 	r := &Recording{
-		id: spec.ID, lesson: spec.LessonID, status: StatusStarting, maxDuration: spec.MaxDuration, chunksDir: dir,
-		startedAt: now, createdAt: now, updatedAt: now,
+		id: spec.ID, lesson: spec.LessonID, lessonSnapshot: spec.Lesson, status: StatusStarting,
+		maxDuration: spec.MaxDuration, chunksDir: dir, startedAt: now, createdAt: now, updatedAt: now,
 	}
 	if err := r.validate(); err != nil {
 		return nil, err
@@ -100,9 +107,11 @@ func New(spec Spec, now time.Time) (*Recording, error) {
 
 // State is the stored form of a recording, for Restore.
 type State struct {
-	Version     int64
-	ID          shared.RecordingID
-	LessonID    shared.LessonID
+	Version  int64
+	ID       shared.RecordingID
+	LessonID shared.LessonID
+	// Lesson is the snapshot of the lesson at the start; it outlives the link to the lesson (LessonID may be empty).
+	Lesson      values.LessonSnapshot
 	Status      Status
 	MaxDuration time.Duration
 	Duration    time.Duration // final duration; must be zero without Audio
@@ -121,7 +130,7 @@ type State struct {
 // Restore rebuilds a stored recording without side effects; it only checks that the state is consistent.
 func Restore(s State) (*Recording, error) {
 	r := &Recording{
-		version: s.Version, id: s.ID, lesson: s.LessonID, status: s.Status,
+		version: s.Version, id: s.ID, lesson: s.LessonID, lessonSnapshot: s.Lesson, status: s.Status,
 		maxDuration: s.MaxDuration, duration: s.Duration, chunks: s.Chunks, chunksDir: s.ChunksDir, audio: s.Audio,
 		silent: s.Silent, problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
 		createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
@@ -184,6 +193,10 @@ func (r *Recording) ID() shared.RecordingID { return r.id }
 
 // LessonID returns the lesson the recording belongs to, empty for an ad-hoc recording.
 func (r *Recording) LessonID() shared.LessonID { return r.lesson }
+
+// LessonSnapshot returns what the recording kept of its lesson at the start (TASK-088); the zero value without a
+// lesson and for a recording stored before snapshots existed. It stays when the schedule deletes the lesson.
+func (r *Recording) LessonSnapshot() values.LessonSnapshot { return r.lessonSnapshot }
 
 // Status returns the current lifecycle state.
 func (r *Recording) Status() Status { return r.status }
