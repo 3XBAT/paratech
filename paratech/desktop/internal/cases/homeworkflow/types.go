@@ -19,6 +19,7 @@ import (
 const (
 	SummarizeJobType       = job.Type(values.SummarizeJobType)
 	ExtractHomeworkJobType = job.Type(values.ExtractHomeworkJobType)
+	LectureTextJobType     = job.Type(values.LectureTextJobType) // the lecture text, part by part (TASK-090)
 )
 
 // HomeworkDraftJobType is the job type of a draft generation (Drafts). The app registers it like the post-processing
@@ -92,17 +93,18 @@ func viewOf(p *proposal.Proposal) ProposalView {
 
 // PostProcessDeps are the ports and settings of the PostProcessor. Log is optional.
 type PostProcessDeps struct {
-	LLM         LLMClient
-	Transcripts TranscriptReader
-	Recordings  RecordingReader
-	Lessons     LessonReader
-	Artifacts   ArtifactStore
-	Summaries   SummaryRepository
-	Assignments AssignmentRepository
-	Jobs        JobEnqueuer
-	Clock       Clock
-	IDs         IDGenerator
-	Log         *slog.Logger
+	LLM          LLMClient
+	Transcripts  TranscriptReader
+	Recordings   RecordingReader
+	Lessons      LessonReader
+	Artifacts    ArtifactStore
+	Summaries    SummaryRepository
+	Assignments  AssignmentRepository
+	LectureTexts LectureTextRepository
+	Jobs         JobEnqueuer
+	Clock        Clock
+	IDs          IDGenerator
+	Log          *slog.Logger
 
 	// ModelAlias is the Hub model alias of the requests, from the app configuration (values.NewLLMRequest rules).
 	ModelAlias string

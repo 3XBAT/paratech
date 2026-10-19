@@ -53,7 +53,8 @@ func TestNewPostProcessorValidates(t *testing.T) {
 	}
 }
 
-// AC-1 of TASK-042: the STT completion event enqueues both jobs, once per transcript.
+// AC-1 of TASK-042: the STT completion event enqueues both jobs, once per transcript, and the lecture text job of
+// TASK-090 with them.
 func TestTranscriptCreatedEnqueuesBothJobsOnce(t *testing.T) {
 	e := newPPEnv(t)
 	ev := e.transcripts["t1"].Created()
@@ -63,11 +64,15 @@ func TestTranscriptCreatedEnqueuesBothJobsOnce(t *testing.T) {
 		}
 	}
 
-	if len(e.jobs) != 2 {
-		t.Fatalf("jobs = %d, want 2 (a repeated event creates nothing)", len(e.jobs))
+	if len(e.jobs) != 3 {
+		t.Fatalf("jobs = %d, want 3 (a repeated event creates nothing)", len(e.jobs))
 	}
-	for _, typ := range []job.Type{SummarizeJobType, ExtractHomeworkJobType} {
-		key := fmt.Sprintf("%s:t1:v%d", typ, prompts.Version)
+	for _, typ := range []job.Type{SummarizeJobType, ExtractHomeworkJobType, LectureTextJobType} {
+		version := prompts.Version
+		if typ == LectureTextJobType {
+			version = prompts.LectureTextVersion
+		}
+		key := fmt.Sprintf("%s:t1:v%d", typ, version)
 		j, ok := e.jobs[key]
 		if !ok {
 			t.Fatalf("no job with key %q; have %v", key, e.jobs)

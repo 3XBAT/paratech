@@ -1,0 +1,227 @@
+package homeworkflow
+
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"log/slog"
+
+	"paratech/desktop/internal/domain/coursework/lecturetext"
+	"paratech/desktop/internal/domain/coursework/services/contextselection"
+	"paratech/desktop/internal/domain/coursework/services/lectureparts"
+	"paratech/desktop/internal/domain/coursework/services/prompts"
+	"paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/shared"
+)
+
+// LectureTextReminders bounds the repeats with a format reminder of one lecture_text job run, over all its parts: a
+// run makes one paid call per part plus at most these (TASK-090).
+const LectureTextReminders = 3
+
+// MaxLectureTextCalls bounds the LLM calls of one lecture_text job run. The app sizes the job timeout by it.
+const MaxLectureTextCalls = lectureparts.MaxParts + LectureTextReminders
+
+// lectureText runs one attempt of a lecture_text job (TASK-090): the transcript is planned into parts
+// (lectureparts.Plan) and each part not stored yet is formatted by the LLM, checked and stored at once, so an attempt
+// that stops (timeout, crash, network) continues from the next part. The LLM keys are derived from the job and the
+// request (llmKey), so a rerun of the attempt is replayed by the Hub for free. The parts belong to a run named by a
+// digest of all its requests: a new job with the same requests (a retry after a failure) keeps the parts made, while a
+// changed transcript or prompt starts afresh. Once every part is there, the merged text replaces the one shown
+// before (lecturetext.Publish). The answer is model output (hard rule 3): stored as data, it triggers nothing.
+func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
+	in lessonInput) error {
+	sel, err := contextselection.Select(values.OperationLectureText, in.material)
+	switch {
+	case errors.Is(err, contextselection.ErrMissingContext):
+		return p.permanent(snap, stepContext, ErrNothingToProcess, err)
+	case err != nil:
+		return p.permanent(snap, stepContext, ErrContextRefused, err)
+	}
+	segments := make([]lectureparts.Segment, len(in.material.Transcript))
+	for i, s := range in.material.Transcript {
+		segments[i] = lectureparts.Segment{StartMs: s.StartMs, Text: s.Text}
+	}
+	plan, err := lectureparts.Plan(segments)
+	switch {
+	case errors.Is(err, lectureparts.ErrEmpty):
+		return p.permanent(snap, stepContext, ErrNothingToProcess, err)
+	case err != nil:
+		return p.permanent(snap, stepContext, ErrContextRefused, err)
+	}
+	reqs, run, err := p.lectureRequests(snap.ID(), sel, plan)
+	if err != nil {
+		return p.permanent(snap, stepContext, ErrContextRefused, err)
+	}
+
+	lt, err := p.lectureTextOf(ctx, snap, in)
+	if err != nil {
+		return err
+	}
+	total := len(plan)
+	next := lt.NextPart(run, total)
+	if next == total {
+		// Every part was stored but the text was not published: only the merge is left.
+		return p.saveLecturePart(ctx, snap, in, run, total, -1, nil)
+	}
+	if err := p.partsDone(ctx, snap, report, next, total); err != nil {
+		return err
+	}
+
+	reminders := LectureTextReminders
+	for i := next; i < total; i++ {
+		part := plan[i]
+		blocks, err := askChecked(ctx, p, snap, reqs[i], &reminders, func(out values.UntrustedOutput) ([]lecturetext.Block, error) {
+			return lectureBlocks(part, out)
+		})
+		if err != nil {
+			return err
+		}
+		// Reported before the part is stored: the runner refuses a cancelled job, and then nothing is stored.
+		if err := p.partsDone(ctx, snap, report, i+1, total); err != nil {
+			return err
+		}
+		if err := p.saveLecturePart(ctx, snap, in, run, total, i, blocks); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lectureRequests builds the requests of all parts, keyed with llmKey, and the id of their run: a digest of the
+// model alias and of every request without its key.
+func (p *PostProcessor) lectureRequests(id shared.JobID, sel contextselection.Context, plan []lectureparts.Part) (
+	[]values.LLMRequest, string, error) {
+	h := sha256.New()
+	h.Write([]byte(p.modelAlias))
+	reqs := make([]values.LLMRequest, len(plan))
+	for i, part := range plan {
+		items := part.Items()
+		lp := prompts.LecturePart{
+			LessonTitle: sel.LessonTitle(), Subject: sel.LessonSubject(), Kind: sel.LessonKind(), Part: i + 1,
+			Parts: len(plan), ContextBefore: part.Context(), Segments: make([]prompts.LectureSegment, len(items)),
+		}
+		for j, it := range items {
+			lp.Segments[j] = prompts.LectureSegment{Index: it.Index, StartMs: it.StartMs, Text: it.Text}
+		}
+		draft, err := prompts.BuildLectureText(lp, p.modelAlias, pendingKey)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, s := range []string{draft.Instructions(), draft.UntrustedData()} {
+			h.Write([]byte{0})
+			h.Write([]byte(s))
+		}
+		if reqs[i], err = values.NewLLMRequest(draft.Operation(), draft.ModelAlias(), draft.Instructions(),
+			draft.UntrustedData(), llmKey(id, draft)); err != nil {
+			return nil, "", err
+		}
+	}
+	return reqs, fmt.Sprintf("lt:v%d:%x", prompts.LectureTextVersion, h.Sum(nil)[:16]), nil
+}
+
+// lectureBlocks checks the answer of a part and turns it into blocks; the segment indexes the model named become start
+// times inside the part (lectureparts.Part.Starts).
+func lectureBlocks(part lectureparts.Part, out values.UntrustedOutput) ([]lecturetext.Block, error) {
+	answer, err := prompts.ParseLectureText(out)
+	if err != nil {
+		return nil, err
+	}
+	items := answer.Blocks()
+	froms := make([]int, len(items))
+	for i, b := range items {
+		froms[i] = b.From()
+	}
+	starts := part.Starts(froms)
+	blocks := make([]lecturetext.Block, len(items))
+	for i, b := range items {
+		if blocks[i], err = lecturetext.NewBlock(b.Heading(), starts[i], b.Paragraphs()); err != nil {
+			return nil, err
+		}
+	}
+	return blocks, nil
+}
+
+// lectureTextOf loads the lecture text of the transcript, or a new one.
+func (p *PostProcessor) lectureTextOf(ctx context.Context, snap job.Snapshot, in lessonInput) (*lecturetext.LectureText, error) {
+	lt, err := p.lectures.Get(ctx, lecturetext.IDOf(in.transcript))
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		lt, err = lecturetext.New(lecturetext.Spec{Transcript: in.transcript, Lesson: in.lesson}, p.clock.Now())
+		if err != nil {
+			return nil, p.permanent(snap, stepSave, ErrStorage, err)
+		}
+	case err != nil:
+		return nil, p.retry(snap, stepSave, ErrStorage, err)
+	}
+	return lt, nil
+}
+
+// saveLecturePart stores the blocks of part index of run and, once the run is complete, publishes the merged text in
+// the same save. index -1 only publishes a run whose parts are all stored. A conflict reloads and decides again; a
+// part another attempt stored meanwhile is not stored twice.
+func (p *PostProcessor) saveLecturePart(ctx context.Context, snap job.Snapshot, in lessonInput, run string, total, index int,
+	blocks []lecturetext.Block) error {
+	var last error
+	for range saveAttempts {
+		lt, err := p.lectureTextOf(ctx, snap, in)
+		if err != nil {
+			return err
+		}
+		if index >= 0 {
+			if lt.NextPart(run, total) > index {
+				return nil
+			}
+			if err := lt.AddPart(run, total, index, blocks, p.clock.Now()); err != nil {
+				// Another run was stored meanwhile: the next attempt plans again.
+				return p.retry(snap, stepSave, ErrStorage, err)
+			}
+		}
+		if lt.Complete() {
+			if err := p.publishLectureText(snap, lt, run); err != nil {
+				return err
+			}
+		}
+
+		if last = p.lectures.Save(ctx, lt); last == nil || !errors.Is(last, shared.ErrConflict) {
+			break
+		}
+	}
+	if last != nil {
+		return p.retry(snap, stepSave, ErrStorage, last)
+	}
+	return nil
+}
+
+// publishLectureText merges the parts of the complete run and makes them the text shown. A run whose parts hold no
+// block at all (no speech worth keeping) has nothing to show.
+func (p *PostProcessor) publishLectureText(snap job.Snapshot, lt *lecturetext.LectureText, run string) error {
+	merged, err := lectureparts.Merge(lt.Parts())
+	if err != nil {
+		return p.permanent(snap, stepSave, ErrStorage, err)
+	}
+	if len(merged) == 0 {
+		return p.permanent(snap, stepAnswer, ErrNothingToProcess, nil)
+	}
+	if err := lt.Publish(run, merged, prompts.LectureTextVersion, p.clock.Now()); err != nil {
+		return p.permanent(snap, stepSave, ErrStorage, err)
+	}
+	return nil
+}
+
+// partsDone reports how many parts are stored, as the percentage and the checkpoint "done/total"
+// (values.LectureTextCheckpoint) that the recordings screen shows. The runner refuses it when the job was cancelled
+// or changed meanwhile.
+func (p *PostProcessor) partsDone(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
+	done, total int) error {
+	pr, err := job.NewProgress(done*100/total, values.LectureTextCheckpoint(done, total))
+	if err != nil {
+		return p.permanent(snap, stepProgress, ErrStorage, err)
+	}
+	if err := report(ctx, pr); err != nil {
+		p.log.Info("post-processing job stopped", slog.String("job", snap.ID().String()), slog.Any("reason", err))
+		return fail(ErrStopped, err)
+	}
+	return nil
+}
