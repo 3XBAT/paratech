@@ -53,6 +53,14 @@ func (s *Service) SetProcessOnlyOnACPower(ctx context.Context, enabled bool) (To
 	})
 }
 
+// SetRecognitionLoad sets how hard speech recognition may load the computer (TASK-084) and returns the stored
+// toggles. It applies from the next recognition run; a running one keeps its mode.
+func (s *Service) SetRecognitionLoad(ctx context.Context, load shared.RecognitionLoad) (Toggles, error) {
+	return s.change(ctx, "set recognition load", func(st *settings.Settings, now time.Time) error {
+		return st.SetRecognitionLoad(load, now)
+	})
+}
+
 // change reloads the settings and applies fn again while the save meets a stale version (ADR-0004(d)).
 func (s *Service) change(ctx context.Context, op string, fn func(*settings.Settings, time.Time) error) (Toggles, error) {
 	var err error
@@ -87,5 +95,6 @@ func toggles(st *settings.Settings) Toggles {
 	return Toggles{
 		RecordingPromptsEnabled: st.RecordingPromptsEnabled(),
 		ProcessOnlyOnACPower:    st.ProcessOnlyOnACPower(),
+		RecognitionLoad:         st.RecognitionLoad(),
 	}
 }

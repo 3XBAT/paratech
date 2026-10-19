@@ -44,6 +44,7 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 		RecordingPromptsEnabled: s.RecordingPromptsEnabled(),
 		ProcessOnlyOnACPower:    s.ProcessOnlyOnACPower(),
 		DefaultSttModel:         s.DefaultSttModel(),
+		RecognitionLoad:         s.RecognitionLoad(),
 		UpdatedAt:               s.UpdatedAt(),
 	}
 	s.Persisted(r.stored.Version)
@@ -75,7 +76,10 @@ func TestGetReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Toggles{RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower}
+	want := Toggles{
+		RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower,
+		RecognitionLoad: shared.DefaultRecognitionLoad,
+	}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
 	}
@@ -98,7 +102,7 @@ func TestSetToggles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (Toggles{}) {
+	if got != (Toggles{RecognitionLoad: shared.LoadGentle}) {
 		t.Fatalf("after AC off: %+v, want both off", got)
 	}
 	if !repo.stored.UpdatedAt.Equal(start) {
@@ -152,5 +156,23 @@ func TestLoadErrorIsReturned(t *testing.T) {
 	}
 	if _, err := s.SetProcessOnlyOnACPower(context.Background(), true); !errors.Is(err, boom) {
 		t.Errorf("Set: err = %v", err)
+	}
+}
+
+// TASK-084: the load mode is stored like the toggles; an unknown mode is refused and changes nothing.
+func TestSetRecognitionLoad(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	s := newService(t, repo)
+
+	got, err := s.SetRecognitionLoad(ctx, shared.LoadMax)
+	if err != nil || got.RecognitionLoad != shared.LoadMax || repo.stored.RecognitionLoad != shared.LoadMax {
+		t.Fatalf("SetRecognitionLoad(max) = %+v, %v; stored %q", got, err, repo.stored.RecognitionLoad)
+	}
+	if _, err := s.SetRecognitionLoad(ctx, "turbo"); !errors.Is(err, settings.ErrInvalidSettings) {
+		t.Fatalf("unknown mode: err = %v, want ErrInvalidSettings", err)
+	}
+	if read, err := s.Get(ctx); err != nil || read.RecognitionLoad != shared.LoadMax {
+		t.Fatalf("Get = %+v, %v; want max kept", read, err)
 	}
 }

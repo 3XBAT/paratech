@@ -25,6 +25,11 @@ type Recording struct {
 	// Stoppable: the user may stop the recording (only a RECORDING one).
 	Stoppable bool
 	Chain     Chain
+
+	// Remaining is the approximate time left of a queued or running transcription (TASK-084); HasRemaining is false
+	// when there is none or no estimate.
+	Remaining    time.Duration
+	HasRemaining bool
 }
 
 // Chain is the one status of everything that happens to a recording (TASK-076): the screen shows it instead of the

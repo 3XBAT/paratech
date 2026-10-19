@@ -24,6 +24,8 @@ type Service struct {
 	lessons    Lessons
 	hidden     []job.Type
 	log        *slog.Logger
+	times      TranscriptionTimes // nil: no time left (WithRemaining)
+	clock      Clock
 
 	// The screen polls every few seconds; the unreadable ids are logged only when they change, not on every poll.
 	mu                sync.Mutex
@@ -76,6 +78,7 @@ func (s *Service) ListRecordings(ctx context.Context) ([]Recording, error) {
 		row := recordingRow(r)
 		row.LessonTitle = titles[r.LessonID()]
 		row.Chain = chainOf(r, chainJobs[r.ID()])
+		row.Remaining, row.HasRemaining = s.remaining(ctx, r, chainJobs[r.ID()], row.Chain)
 		out = append(out, row)
 	}
 	return out, nil
