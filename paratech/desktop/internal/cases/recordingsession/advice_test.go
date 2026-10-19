@@ -378,3 +378,144 @@ func TestAdviceWithdrawnAtTheEnd(t *testing.T) {
 		t.Fatalf("listener told %+v, want the advice and then none", told)
 	}
 }
+
+// The advice ends with the capture: once a stop is asked for or the capture ends by itself, the frozen stats would
+// read as silence, so the advice is withdrawn before the recording is assembled and the loop looks no more.
+func TestAdviceEndsWithTheCapture(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	tests := []struct {
+		name string
+		end  func(a *adviceEnv, id shared.RecordingID) <-chan error
+	}{
+		{"stop", func(a *adviceEnv, id shared.RecordingID) <-chan error {
+			stopped := make(chan error, 1)
+			go func() {
+				_, err := a.svc.Stop(testCtx(a.t), id)
+				stopped <- err
+			}()
+			return stopped
+		}},
+		{"capture ended", func(a *adviceEnv, id shared.RecordingID) <-chan error {
+			a.rec.End(id, errors.New("device lost"))
+			done := make(chan error, 1)
+			done <- nil
+			return done
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAdviceEnv(t)
+			a.apps.set(ownerApps()...)
+			info := a.startSource("browser.exe")
+			for range 3 {
+				a.tick()
+			}
+			if a.advice().IsZero() {
+				t.Fatal("no advice")
+			}
+			a.feed(info.ID, "a")
+			listed := a.apps.listed()
+
+			entered, release := a.rec.HoldFinalize()
+			defer release()
+			ended := tt.end(a, info.ID)
+			<-entered
+
+			if told := a.told.all(); len(told) != 2 || !told[1].IsZero() {
+				t.Fatalf("listener told %+v before the assembly, want the advice withdrawn", told)
+			}
+			if adv := a.advice(); !adv.IsZero() {
+				t.Fatalf("advice during the assembly: %+v", adv)
+			}
+			a.clock.Advance(adviceEvery)
+			select {
+			case a.sleeper.ticks <- struct{}{}:
+				t.Fatal("the advice loop still runs during the assembly")
+			default:
+			}
+
+			release()
+			if err := <-ended; err != nil {
+				t.Fatal(err)
+			}
+			if told := a.told.all(); len(told) != 2 || a.apps.listed() != listed {
+				t.Fatalf("listener told %+v, %d listings after the end (want %d)", told, a.apps.listed(), listed)
+			}
+		})
+	}
+}
+
+// An observation taken before a switch is not counted against the new source.
+func TestObservationOfAnOldSourceDropped(t *testing.T) {
+	browser, err := values.SourceOf("browser.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &session{watch: values.NewSourceWatch(browser)}
+	quiet := values.SourceObservation{At: t0, Listed: true, Apps: ownerApps()}
+
+	_, gen := sess.watching()
+	sess.rewatch(cometSource(t))
+	sess.observe(gen, quiet)
+	if sess.watch != values.NewSourceWatch(cometSource(t)) {
+		t.Fatalf("a stale observation changed the watch: %+v", sess.watch)
+	}
+
+	src, gen := sess.watching()
+	sess.observe(gen, quiet)
+	if src != cometSource(t) || sess.watch == values.NewSourceWatch(cometSource(t)) {
+		t.Fatalf("a current observation of %v was dropped", src)
+	}
+}
+
+// A switch whose caller gave up may still be done by the recorder: the session then follows the recorder's source,
+// and a later switch to the same source is not skipped on the session's word.
+func TestCancelledSwitchResyncsTheSource(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			a := newAdviceEnv(t)
+			info := a.startSource("browser.exe")
+			a.hooks.switchesThenFails(cause)
+
+			err := a.svc.SwitchSource(testCtx(t), info.ID, cometSource(t))
+			if !errors.Is(err, cause) || errors.Is(err, ErrSwitchRefused) {
+				t.Fatalf("SwitchSource = %v, want %v", err, cause)
+			}
+			if cur, _ := a.svc.Active(); cur.Source != cometSource(t) {
+				t.Fatalf("session source %v, the recorder captures comet.exe", cur.Source)
+			}
+
+			browser, err := values.SourceOf("browser.exe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.svc.SwitchSource(testCtx(t), info.ID, browser); err != nil {
+				t.Fatal(err)
+			}
+			if src, _ := a.rec.Source(info.ID); src != browser {
+				t.Fatalf("the recorder captures %v", src)
+			}
+		})
+	}
+}
+
+// The session's source has drifted from the recorder's: a switch to the session's source still reaches the recorder.
+func TestSwitchToTheSessionSourceReachesTheRecorder(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	a := newAdviceEnv(t)
+	info := a.startSource("browser.exe")
+	if err := a.rec.Switch(testCtx(t), info.ID, cometSource(t)); err != nil { // behind the session's back
+		t.Fatal(err)
+	}
+	browser, err := values.SourceOf("browser.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.SwitchSource(testCtx(t), info.ID, browser); err != nil {
+		t.Fatal(err)
+	}
+	if src, _ := a.rec.Source(info.ID); src != browser {
+		t.Fatalf("the recorder captures %v, want browser.exe", src)
+	}
+}

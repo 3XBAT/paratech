@@ -189,6 +189,26 @@ type hookRecorder struct {
 	stopCause     error         // context.Cause seen by the hanging Stop
 	finalizeFails []error       // errors returned by the next Finalize calls, one each
 	finalizes     int           // Finalize calls, failed ones included
+	switchThen    error         // returned by the next Switch after it switched, as one whose caller gave up late
+}
+
+// switchesThenFails makes the next Switch switch and then return err.
+func (h *hookRecorder) switchesThenFails(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.switchThen = err
+}
+
+func (h *hookRecorder) Switch(ctx context.Context, id shared.RecordingID, source values.Source) error {
+	h.mu.Lock()
+	err := h.switchThen
+	h.switchThen = nil
+	h.mu.Unlock()
+
+	if serr := h.FakeRecorder.Switch(ctx, id, source); serr != nil || err == nil {
+		return serr
+	}
+	return err
 }
 
 // hangStops makes the next Stop calls block until their context ends; the channel closes when the first one enters.

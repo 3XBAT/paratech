@@ -15,8 +15,18 @@ import (
 // values.SourceWatch of the session; this file feeds it and carries out the answer of the user.
 
 // advise looks at once and then every advice interval whether the capture heard sound and, while it hears nothing,
-// which apps play, until ctx ends. It writes nothing: the advice lives in the session (Info.Advice) and goes to the AdviceListener.
+// which apps play, until ctx ends or a stop is requested. It writes nothing: the advice lives in the session
+// (Info.Advice) and goes to the AdviceListener. When it returns, an advice shown is withdrawn: the stats of a capture
+// that is ending freeze and would read as silence.
 func (s *Service) advise(ctx context.Context, sess *session) {
+	defer func() {
+		if advice, changed := sess.updateWatch(func(w values.SourceWatch) values.SourceWatch {
+			return values.NewSourceWatch(w.Source())
+		}); changed {
+			s.adviceChanged(sess.id, advice)
+		}
+	}()
+
 	var (
 		prev   values.CaptureStats
 		failed bool // the last listing failed: logged once
@@ -26,12 +36,18 @@ func (s *Service) advise(ctx context.Context, sess *session) {
 		if !first && s.sleeper.Sleep(ctx, s.adviceEvery) != nil {
 			return
 		}
+		if ctx.Err() != nil || sess.stopRequested() {
+			return
+		}
+
+		// The look belongs to the source watched now; one that a switch overtakes is dropped (session.observe).
+		source, gen := sess.watching()
 		d, ok := s.recorder.Diagnostics(ctx, sess.id)
 		obs := values.SourceObservation{At: s.clock.Now(), Heard: ok && d.Stats.HeardSince(prev)}
 		if ok {
 			prev = d.Stats
 		}
-		if !obs.Heard && !sess.source().IsWholeComputer() {
+		if !obs.Heard && !source.IsWholeComputer() {
 			lctx, cancel := context.WithTimeout(ctx, adviceListTimeout)
 			apps, err := s.apps.List(lctx)
 			cancel()
@@ -46,7 +62,10 @@ func (s *Service) advise(ctx context.Context, sess *session) {
 					slog.Any("error", err))
 			}
 		}
-		if advice, changed := sess.updateWatch(func(w values.SourceWatch) values.SourceWatch { return w.Observe(obs) }); changed {
+		if ctx.Err() != nil {
+			return
+		}
+		if advice, changed := sess.observe(gen, obs); changed {
 			s.adviceChanged(sess.id, advice)
 		}
 	}
@@ -81,7 +100,7 @@ func (s *Service) tellAdvice(id shared.RecordingID, advice values.SourceAdvice) 
 // chunks. The advice is cleared and watches the new source. A recording that this process does not capture yields
 // ErrNotRunning (shared.ErrNotFound when there is none); one that is stopping or finished, or a capture that refuses,
 // yields ErrSwitchRefused; an app that does not run wraps recording.ErrSourceNotRunning. On any error the recording
-// goes on with the source it had. Switching to the current source does nothing.
+// goes on with the source it had. Switching to the current source changes nothing in the capture.
 func (s *Service) SwitchSource(ctx context.Context, id shared.RecordingID, source values.Source) error {
 	sess, err := s.running(ctx, id)
 	if err != nil {
@@ -94,26 +113,56 @@ func (s *Service) SwitchSource(ctx context.Context, id shared.RecordingID, sourc
 	if sess.stopRequested() || !info.Status.CanSwitchSource() {
 		return fmt.Errorf("%s %s: %w: %s", opSwitch, id, ErrSwitchRefused, info.Status)
 	}
-	if info.Source == source {
-		return nil
-	}
+	// No short cut on the session's source: the recorder does nothing for its current source, and the session's
+	// source may lag behind a switch that was given up but done.
 	if err := s.recorder.Switch(ctx, id, source); err != nil {
-		if !errors.Is(err, recording.ErrSourceNotRunning) && ctx.Err() == nil {
+		cancelled := ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+		if !errors.Is(err, recording.ErrSourceNotRunning) && !cancelled {
 			err = fmt.Errorf("%w: %w", ErrSwitchRefused, err)
 		}
 		s.log.Warn("switching the source failed; the recording goes on as it was", slog.String("recording", id.String()),
 			slog.String("source", source.String()), slog.Any("error", err))
+		if cancelled {
+			s.resyncSource(ctx, sess)
+		}
 		return fmt.Errorf("%s %s: %w", opSwitch, id, err)
 	}
 
 	s.log.Info("recording source switched", slog.String("recording", id.String()), slog.String("from", info.Source.String()),
 		slog.String("to", source.String()))
-	if advice, changed := sess.updateWatch(func(values.SourceWatch) values.SourceWatch {
-		return values.NewSourceWatch(source)
-	}); changed {
+	if advice, changed := sess.rewatch(source); changed {
 		s.adviceChanged(id, advice)
 	}
 	return nil
+}
+
+// resyncSource makes the session watch the source the recorder captures, after a switch whose caller gave up: the
+// recorder may have switched anyway.
+func (s *Service) resyncSource(ctx context.Context, sess *session) {
+	d, ok := s.recorder.Diagnostics(context.WithoutCancel(ctx), sess.id)
+	if !ok {
+		return
+	}
+	captured := values.WholeComputer()
+	switch {
+	case !d.App.IsZero():
+		src, err := values.SourceOf(d.App)
+		if err != nil {
+			return
+		}
+		captured = src
+	case d.TargetMode == values.CaptureInclude:
+		return // an app without its name: unknown
+	}
+	if captured == sess.source() {
+		return
+	}
+
+	s.log.Info("the recording source follows the recorder after a cancelled switch", slog.String("recording", sess.id.String()),
+		slog.String("source", captured.String()))
+	if advice, changed := sess.rewatch(captured); changed {
+		s.adviceChanged(sess.id, advice)
+	}
 }
 
 // DismissAdvice hides the current advice of the running recording id («Оставить») until it changes (TASK-082). A

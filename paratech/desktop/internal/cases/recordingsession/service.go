@@ -152,6 +152,7 @@ type session struct {
 	err         error                   // why the session ended without a final status
 	cancelStart context.CancelCauseFunc // set while the capture starts
 	watch       values.SourceWatch      // the silent-source advice of the captured source (TASK-082)
+	watchGen    uint64                  // bumped whenever watch is replaced for another source
 	advice      values.SourceAdvice     // the advice last published; zero when none
 }
 
@@ -189,7 +190,8 @@ func (ss *session) snapshot() (Info, error) {
 	return info, ss.err
 }
 
-// updateWatch applies f to the watch of the source and returns the advice to show, and whether it changed.
+// updateWatch applies f, under the lock of the session, to the watch of the source and returns the advice to show, and
+// whether it changed.
 func (ss *session) updateWatch(f func(values.SourceWatch) values.SourceWatch) (values.SourceAdvice, bool) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -206,6 +208,32 @@ func (ss *session) source() values.Source {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	return ss.watch.Source()
+}
+
+// watching returns the watched source and its generation, for an observation to be taken.
+func (ss *session) watching() (values.Source, uint64) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.watch.Source(), ss.watchGen
+}
+
+// observe feeds o, taken while the watch had generation gen, to the watch. An observation of a source that has been
+// switched away since is dropped: it would count the old source's silence against the new one.
+func (ss *session) observe(gen uint64, o values.SourceObservation) (values.SourceAdvice, bool) {
+	return ss.updateWatch(func(w values.SourceWatch) values.SourceWatch {
+		if ss.watchGen != gen {
+			return w
+		}
+		return w.Observe(o)
+	})
+}
+
+// rewatch starts a new watch of source, a new generation.
+func (ss *session) rewatch(source values.Source) (values.SourceAdvice, bool) {
+	return ss.updateWatch(func(values.SourceWatch) values.SourceWatch {
+		ss.watchGen++
+		return values.NewSourceWatch(source)
+	})
 }
 
 // Start creates a recording and starts the capture of req.Source into recordings/<id>. It returns once the capture
@@ -348,8 +376,22 @@ func (s *Service) run(sess *session, rec *recording.Recording) {
 
 	ended := make(chan error, 1)
 	bg.Go(func() { ended <- s.recorder.Wait(watchCtx, rec.ID()) })
+
+	// The advice ends with the capture, before it is stopped and assembled (quiet).
+	adviceCtx, stopAdvice := context.WithCancel(watchCtx)
+	defer stopAdvice()
+	advised := make(chan struct{})
 	if s.apps != nil {
-		bg.Go(func() { s.advise(watchCtx, sess) })
+		bg.Go(func() {
+			defer close(advised)
+			s.advise(adviceCtx, sess)
+		})
+	} else {
+		close(advised)
+	}
+	quiet := func() {
+		stopAdvice()
+		<-advised
 	}
 
 	deadline := rec.Deadline()
@@ -360,7 +402,7 @@ func (s *Service) run(sess *session, rec *recording.Recording) {
 		return reached
 	}
 
-	err := s.follow(ctx, sess, rec, ended, beat, arm)
+	err := s.follow(ctx, sess, rec, ended, beat, arm, quiet)
 	stopWatching()
 	bg.Wait()
 	s.finish(sess, rec, err)
@@ -394,9 +436,9 @@ func (s *Service) watch(ctx context.Context, deadline time.Time, reached chan<- 
 }
 
 // follow waits for what ends the capture and finalizes the recording. It returns nil when the recording reached a
-// final status that was saved, otherwise why not.
+// final status that was saved, otherwise why not. quiet ends the silent-source advice and waits until it has.
 func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Recording, ended <-chan error,
-	beat <-chan struct{}, arm func() <-chan struct{}) error {
+	beat <-chan struct{}, arm func() <-chan struct{}, quiet func()) error {
 	atLimit := arm()
 	var noted bool // the capture fallback is on the recording
 	for {
@@ -416,6 +458,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 			}
 
 		case <-sess.stopCh:
+			quiet()
 			s.noteFallback(ctx, rec, &noted) // a fallback since the last heartbeat
 			if err := rec.Stop(s.clock.Now()); err != nil {
 				s.haltCapture(ctx, rec.ID())
@@ -447,6 +490,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 				s.haltCapture(ctx, rec.ID())
 				return err
 			}
+			quiet()
 			s.log.Info("recording reached its hard cap", slog.String("recording", rec.ID().String()))
 			if err := s.persist(ctx, sess, rec); err != nil {
 				s.haltCapture(ctx, rec.ID())
@@ -462,6 +506,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 				s.haltCapture(ctx, rec.ID())
 				return ErrAbandoned
 			}
+			quiet()
 			problem := problemCaptureEnded
 			if cerr != nil {
 				problem += ": " + cerr.Error()
