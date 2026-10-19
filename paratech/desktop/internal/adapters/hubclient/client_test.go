@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
@@ -282,6 +283,11 @@ func TestErrorMapping(t *testing.T) {
 			if errors.Is(err, shared.ErrNetworkUnavailable) {
 				t.Error("a Hub answer must not look like a network failure")
 			}
+			// Every retried Hub failure but the quota wait shows as "service unavailable" (TASK-083).
+			wantUnavailable := tc.want.class == backoff.ClassTransient && !errors.Is(err, shared.ErrQuotaExceeded)
+			if got := backoff.CauseOf(err) == job.CauseServiceUnavailable; got != wantUnavailable {
+				t.Errorf("cause %q, want service unavailable %v", backoff.CauseOf(err), wantUnavailable)
+			}
 		})
 	}
 }
@@ -311,6 +317,10 @@ func TestQuotaAndNetworkMapToWaitStates(t *testing.T) {
 	}
 	if backoff.Classify(err) != backoff.ClassTransient {
 		t.Fatal("a network error must be transient")
+	}
+	// The closed listener refuses the dial: the network works and the Hub is down (TASK-083).
+	if c := backoff.CauseOf(err); c != job.CauseServiceUnavailable {
+		t.Fatalf("refused dial has cause %q, want service unavailable", c)
 	}
 }
 

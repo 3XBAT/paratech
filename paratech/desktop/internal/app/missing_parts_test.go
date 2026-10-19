@@ -147,17 +147,19 @@ func TestAlphaCoreWithoutMissingPartsStaysUsable(t *testing.T) {
 		})
 	}
 
-	// TASK-076: each recording row shows the step its chain waits at, with the reason.
+	// TASK-076: each recording row shows the step its chain waits at, with the reason. TASK-083: the parked summary
+	// says the Hub is not set up, not "no network", and offers the connections page.
 	rows, err := page.ListRecordings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stages := map[string]string{}
 	for _, r := range rows {
-		stages[r.ID] = r.Stage + "/" + r.Step + "/" + r.QueueReason
+		stages[r.ID] = r.Stage + "/" + r.Step + "/" + r.QueueReason + "/" + r.Action
 	}
-	if stages[string(recSTT)] != "queued/transcription/inLine" || stages[string(recLLM)] != "queued/summary/network" {
-		t.Errorf("chain stages %v: want the transcription in line and the summary waiting for the network", stages)
+	if stages[string(recSTT)] != "queued/transcription/inLine/" ||
+		stages[string(recLLM)] != "queued/summary/serviceNotConfigured/openConnections" {
+		t.Errorf("chain stages %v: want the transcription in line and the summary waiting for the Hub setup", stages)
 	}
 
 	if err := a.Close(); err != nil {

@@ -44,6 +44,37 @@ func TestNetworkAndQuotaErrorsWait(t *testing.T) {
 	}
 }
 
+// The runner records why the job waits or retries (TASK-083); the status and the attempts stay as before.
+func TestRunnerRecordsCause(t *testing.T) {
+	notConfigured := errors.Join(shared.ErrServiceNotConfigured, shared.ErrNetworkUnavailable, backoff.ErrTransient)
+	tests := []struct {
+		name      string
+		err       error
+		want      job.Status
+		wantCause job.Cause
+		attempts  int
+	}{
+		{"not configured", fmt.Errorf("summarize: %w", notConfigured), job.StatusWaitingForNetwork, job.CauseServiceNotConfigured, 0},
+		{"network", backoff.Transient(shared.ErrNetworkUnavailable), job.StatusWaitingForNetwork, job.CauseNone, 0},
+		{"unavailable", backoff.Transient(shared.ErrServiceUnavailable), job.StatusRetryWait, job.CauseServiceUnavailable, 1},
+		{"other", errors.New("boom"), job.StatusRetryWait, job.CauseNone, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, nil, nil)
+			e.register(typeMail, func(context.Context, job.Snapshot, func(context.Context, job.Progress) error) error {
+				return tc.err
+			})
+			id := e.enqueue(typeMail, 3)
+			e.start()
+			e.waitStatus(id, tc.want)
+			if st := e.repo.snapshot(id); st.Cause != tc.wantCause || st.Attempts != tc.attempts {
+				t.Fatalf("cause %q attempts %d, want %q %d", st.Cause, st.Attempts, tc.wantCause, tc.attempts)
+			}
+		})
+	}
+}
+
 func TestWaitingJobIsRetriedAfterTheRecheck(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

@@ -48,7 +48,7 @@ func (c *Client) GetRemaining(ctx context.Context) (values.QuotaSnapshot, error)
 		}
 		// Our own deadline: Connect may report it as unavailable or canceled, depending on where the call was.
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
-			return values.QuotaSnapshot{}, transient(opRemaining, ErrTimeout)
+			return values.QuotaSnapshot{}, unavailable(opRemaining, ErrTimeout)
 		}
 		return values.QuotaSnapshot{}, mapCallError(opRemaining, err)
 	}

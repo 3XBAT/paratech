@@ -37,7 +37,7 @@ func stateOf(j *job.Job) job.State {
 		Version: j.Version(), ID: j.ID(), Type: j.Type(), Status: j.Status(), Key: j.Key(), Payload: j.Payload(),
 		PinnedModelID: j.PinnedModelID(), Attempts: j.Attempts(), MaxAttempts: j.MaxAttempts(), NextRunAt: j.NextRunAt(),
 		RunNow: j.RunNow(), Percent: p.Percent(), Checkpoint: p.Checkpoint(), LastError: j.LastError(),
-		CreatedAt: j.CreatedAt(), StartedAt: j.StartedAt(), FinishedAt: j.FinishedAt(), UpdatedAt: j.UpdatedAt(),
+		Cause: j.Cause(), CreatedAt: j.CreatedAt(), StartedAt: j.StartedAt(), FinishedAt: j.FinishedAt(), UpdatedAt: j.UpdatedAt(),
 	}
 }
 

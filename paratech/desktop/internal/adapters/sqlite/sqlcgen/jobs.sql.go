@@ -71,7 +71,7 @@ func (q *Queries) CountJobsWithoutIDByStatus(ctx context.Context, statuses []str
 
 const getJob = `-- name: GetJob :one
 
-SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs WHERE id = ?1
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs WHERE id = ?1
 `
 
 // Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
@@ -98,6 +98,7 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 		&i.FinishedAt,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.Cause,
 	)
 	return i, err
 }
@@ -137,12 +138,12 @@ func (q *Queries) HasJobKeyPrefix(ctx context.Context, arg HasJobKeyPrefixParams
 
 const insertJob = `-- name: InsertJob :exec
 INSERT INTO jobs (id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at,
-                  run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version,
-                  updated_at)
+                  run_now, progress_percent, checkpoint, last_error, cause, created_at, started_at, finished_at,
+                  version, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, ?13,
-        ?14, ?15, ?16, 1, ?17)
+        ?10, ?11, ?12, ?13, ?14,
+        ?15, ?16, ?17, 1, ?18)
 `
 
 type InsertJobParams struct {
@@ -159,6 +160,7 @@ type InsertJobParams struct {
 	ProgressPercent int64
 	Checkpoint      sql.NullString
 	LastError       sql.NullString
+	Cause           string
 	CreatedAt       int64
 	StartedAt       sql.NullInt64
 	FinishedAt      sql.NullInt64
@@ -181,6 +183,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 		arg.ProgressPercent,
 		arg.Checkpoint,
 		arg.LastError,
+		arg.Cause,
 		arg.CreatedAt,
 		arg.StartedAt,
 		arg.FinishedAt,
@@ -190,7 +193,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 }
 
 const lastJobOfTypeByStatus = `-- name: LastJobOfTypeByStatus :one
-SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs
 WHERE type = ?1
   AND id IS NOT NULL
   AND status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
@@ -229,12 +232,13 @@ func (q *Queries) LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeBy
 		&i.FinishedAt,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.Cause,
 	)
 	return i, err
 }
 
 const latestJobByKeyPrefix = `-- name: LatestJobByKeyPrefix :one
-SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs
 WHERE type = ?1
   AND id IS NOT NULL
   AND substr(idempotency_key, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT)
@@ -271,6 +275,7 @@ func (q *Queries) LatestJobByKeyPrefix(ctx context.Context, arg LatestJobByKeyPr
 		&i.FinishedAt,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.Cause,
 	)
 	return i, err
 }
@@ -453,7 +458,7 @@ func (q *Queries) ListJobIDsByStatus(ctx context.Context, statuses []string) ([]
 }
 
 const listJobsByStatus = `-- name: ListJobsByStatus :many
-SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs
 WHERE status IN (/*SLICE:statuses*/?)
 ORDER BY created_at, id
 `
@@ -496,6 +501,7 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, statuses []string) ([]Jo
 			&i.FinishedAt,
 			&i.Version,
 			&i.UpdatedAt,
+			&i.Cause,
 		); err != nil {
 			return nil, err
 		}
@@ -511,7 +517,7 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, statuses []string) ([]Jo
 }
 
 const nextClaimableJob = `-- name: NextClaimableJob :one
-SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at FROM jobs
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs
 WHERE status = 'QUEUED'
   AND attempts < max_attempts
   AND next_run_at <= ?1
@@ -563,6 +569,7 @@ func (q *Queries) NextClaimableJob(ctx context.Context, arg NextClaimableJobPara
 		&i.FinishedAt,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.Cause,
 	)
 	return i, err
 }
@@ -576,11 +583,12 @@ SET status           = ?1,
     progress_percent = ?5,
     checkpoint       = ?6,
     last_error       = ?7,
-    started_at       = ?8,
-    finished_at      = ?9,
+    cause            = ?8,
+    started_at       = ?9,
+    finished_at      = ?10,
     version          = version + 1,
-    updated_at       = ?10
-WHERE id = ?11 AND status = 'QUEUED' AND version = ?12
+    updated_at       = ?11
+WHERE id = ?12 AND status = 'QUEUED' AND version = ?13
 `
 
 type UpdateClaimedJobParams struct {
@@ -591,6 +599,7 @@ type UpdateClaimedJobParams struct {
 	ProgressPercent int64
 	Checkpoint      sql.NullString
 	LastError       sql.NullString
+	Cause           string
 	StartedAt       sql.NullInt64
 	FinishedAt      sql.NullInt64
 	UpdatedAt       int64
@@ -608,6 +617,7 @@ func (q *Queries) UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobPara
 		arg.ProgressPercent,
 		arg.Checkpoint,
 		arg.LastError,
+		arg.Cause,
 		arg.StartedAt,
 		arg.FinishedAt,
 		arg.UpdatedAt,
@@ -629,11 +639,12 @@ SET status           = ?1,
     progress_percent = ?5,
     checkpoint       = ?6,
     last_error       = ?7,
-    started_at       = ?8,
-    finished_at      = ?9,
+    cause            = ?8,
+    started_at       = ?9,
+    finished_at      = ?10,
     version          = version + 1,
-    updated_at       = ?10
-WHERE id = ?11 AND version = ?12
+    updated_at       = ?11
+WHERE id = ?12 AND version = ?13
 `
 
 type UpdateJobParams struct {
@@ -644,6 +655,7 @@ type UpdateJobParams struct {
 	ProgressPercent int64
 	Checkpoint      sql.NullString
 	LastError       sql.NullString
+	Cause           string
 	StartedAt       sql.NullInt64
 	FinishedAt      sql.NullInt64
 	UpdatedAt       int64
@@ -661,6 +673,7 @@ func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, er
 		arg.ProgressPercent,
 		arg.Checkpoint,
 		arg.LastError,
+		arg.Cause,
 		arg.StartedAt,
 		arg.FinishedAt,
 		arg.UpdatedAt,

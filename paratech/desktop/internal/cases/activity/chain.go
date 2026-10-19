@@ -91,9 +91,18 @@ func postChain(summary, homework *job.Job) Chain {
 	return Chain{Stage: StageDone}
 }
 
-// queued is the chain of a step whose job waits; the job's status is the reason.
+// queued is the chain of a step whose job waits; the job's status and the cause it recorded are the reason. A Hub
+// that is not set up parks the job in WAITING_FOR_NETWORK too (TASK-083), so the cause comes first.
 func queued(step Step, j *job.Job) Chain {
 	c := Chain{Stage: StageQueued, Step: step, JobError: j.LastError()}
+	switch {
+	case j.Cause() == job.CauseServiceNotConfigured:
+		c.QueueReason, c.Action = QueueServiceNotConfigured, ActionOpenConnections
+		return c
+	case j.Cause() == job.CauseServiceUnavailable:
+		c.QueueReason = QueueServiceUnavailable
+		return c
+	}
 	switch j.Status() {
 	case job.StatusRetryWait:
 		c.QueueReason = QueueRetry

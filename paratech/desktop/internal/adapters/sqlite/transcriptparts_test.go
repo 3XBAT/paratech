@@ -253,8 +253,8 @@ func TestMigrationToVersion9AddsTranscriptParts(t *testing.T) {
 	}
 	saveRecording(t, NewRecordingRepository(db), recordingInStatus(t, recording.StatusCompleted))
 
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatalf("migrate to 9: %v", err)
+	if _, err := p.UpTo(ctx, 9); err != nil {
+		t.Fatalf("up to 9: %v", err)
 	}
 	if v, err := db.SchemaVersion(ctx); err != nil || v != 9 {
 		t.Fatalf("SchemaVersion = %d, %v; want 9", v, err)

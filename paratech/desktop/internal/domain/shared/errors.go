@@ -23,6 +23,15 @@ var (
 	// WAITING_FOR_NETWORK (PRD section 7.2).
 	ErrNetworkUnavailable = errors.New("network unavailable")
 
+	// ErrServiceNotConfigured means a cloud service the call needs (the Hub) is not set up: no address, no key, or a
+	// refused address. The adapter also wraps ErrNetworkUnavailable, so the job parks until the user sets it up; the
+	// job then records why it waits (TASK-083).
+	ErrServiceNotConfigured = errors.New("service not configured")
+
+	// ErrServiceUnavailable means a cloud service did not serve the call for now (unavailable, busy, timed out, rate
+	// limited) while the network itself is not known to be down; the job is retried with backoff (TASK-083).
+	ErrServiceUnavailable = errors.New("service unavailable")
+
 	// ErrQuotaExceeded means the Hub rejected a quota reservation; an LLM job then waits in
 	// WAITING_FOR_QUOTA (PRD sections 7.2 and 9.2).
 	ErrQuotaExceeded = errors.New("quota exceeded")

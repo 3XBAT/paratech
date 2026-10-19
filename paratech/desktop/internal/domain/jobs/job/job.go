@@ -83,6 +83,7 @@ type Job struct {
 	progress    int
 	checkpoint  string
 	lastError   string
+	cause       Cause
 
 	createdAt  time.Time
 	startedAt  time.Time
@@ -142,6 +143,7 @@ type State struct {
 	Percent       int
 	Checkpoint    string
 	LastError     string
+	Cause         Cause // why the job waits or retries beyond its status; CauseNone otherwise
 	CreatedAt     time.Time
 	StartedAt     time.Time // zero = never started
 	FinishedAt    time.Time // zero = not finished
@@ -153,7 +155,7 @@ func Restore(s State) (*Job, error) {
 	j := &Job{
 		version: s.Version, id: s.ID, typ: s.Type, status: s.Status, key: s.Key, payload: s.Payload, pinned: s.PinnedModelID,
 		attempts: s.Attempts, maxAttempts: s.MaxAttempts, nextRunAt: s.NextRunAt, runNow: s.RunNow,
-		progress: s.Percent, checkpoint: s.Checkpoint, lastError: s.LastError,
+		progress: s.Percent, checkpoint: s.Checkpoint, lastError: s.LastError, cause: s.Cause,
 		createdAt: s.CreatedAt, startedAt: s.StartedAt, finishedAt: s.FinishedAt, updatedAt: s.UpdatedAt,
 	}
 	if s.Version < 1 {
@@ -173,6 +175,12 @@ func Restore(s State) (*Job, error) {
 	}
 	if s.Status == StatusRunning && s.StartedAt.IsZero() {
 		return nil, fmt.Errorf("%w: RUNNING job without start time", ErrInvalidJob)
+	}
+	if !s.Cause.Valid() {
+		return nil, fmt.Errorf("%w: unknown cause %q", ErrInvalidJob, s.Cause)
+	}
+	if s.Cause != CauseNone && !s.Status.keepsCause() {
+		return nil, fmt.Errorf("%w: %s job with cause %q", ErrInvalidJob, s.Status, s.Cause)
 	}
 	if _, err := NewProgress(s.Percent, s.Checkpoint); err != nil {
 		return nil, err
@@ -246,6 +254,9 @@ func (j *Job) Progress() Progress { return Progress{percent: j.progress, checkpo
 // LastError returns the sanitized message of the last failure.
 func (j *Job) LastError() string { return j.lastError }
 
+// Cause returns why the job waits or retries beyond its status; CauseNone in every other status.
+func (j *Job) Cause() Cause { return j.cause }
+
 // CreatedAt returns the creation time.
 func (j *Job) CreatedAt() time.Time { return j.createdAt }
 
@@ -274,6 +285,7 @@ func (j *Job) move(to Status, now time.Time) error {
 	}
 	j.status = to
 	j.updatedAt = now
+	j.cause = CauseNone // a cause describes one wait or retry; the method that sets it does so after the move
 	if to.IsTerminal() {
 		j.finishedAt = now
 	}
@@ -323,6 +335,14 @@ func (j *Job) Complete(now time.Time) error {
 
 // Retry records a transient failure of a RUNNING job: RETRY_WAIT until runAt, or FAILED when no attempt is left.
 func (j *Job) Retry(now, runAt time.Time, msg string) error {
+	return j.RetryCause(now, runAt, msg, CauseNone)
+}
+
+// RetryCause is Retry that also records why the attempt failed (TASK-083).
+func (j *Job) RetryCause(now, runAt time.Time, msg string, cause Cause) error {
+	if !cause.Valid() {
+		return fmt.Errorf("%w: unknown cause %q", ErrInvalidTransition, cause)
+	}
 	to := StatusRetryWait
 	if j.attempts >= j.maxAttempts {
 		to = StatusFailed
@@ -338,6 +358,7 @@ func (j *Job) Retry(now, runAt time.Time, msg string) error {
 	if to == StatusFailed {
 		j.lastError = limitText(msgAttemptsExhausted + msg)
 	}
+	j.cause = cause
 	return nil
 }
 
@@ -356,6 +377,14 @@ func (j *Job) Cancel(now time.Time) error { return j.move(StatusCancelled, now) 
 // WaitFor moves the job to one of the WAITING_FOR_* statuses. Waiting is not a failure: the attempt of a RUNNING
 // job is given back.
 func (j *Job) WaitFor(reason Status, now time.Time) error {
+	return j.WaitForCause(reason, CauseNone, now)
+}
+
+// WaitForCause is WaitFor that also records why the job waits (TASK-083).
+func (j *Job) WaitForCause(reason Status, cause Cause, now time.Time) error {
+	if !cause.Valid() {
+		return fmt.Errorf("%w: unknown cause %q", ErrInvalidTransition, cause)
+	}
 	if !reason.IsWaiting() {
 		return fmt.Errorf("%w: %s is not a waiting status", ErrInvalidTransition, reason)
 	}
@@ -367,6 +396,7 @@ func (j *Job) WaitFor(reason Status, now time.Time) error {
 		j.attempts--
 	}
 	j.runNow = false // a power wait must hold again after the override
+	j.cause = cause
 	return nil
 }
 

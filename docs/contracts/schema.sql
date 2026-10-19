@@ -381,3 +381,7 @@ CREATE TABLE transcript_parts (
     text         TEXT    NOT NULL,
     PRIMARY KEY (recording_id, seq)
 );
+
+-- jobs: job.Cause of the last unsuccessful attempt, for example a Hub that is not set up while the job parks in
+-- WAITING_FOR_NETWORK; empty in every other case. Values = job.Causes.
+ALTER TABLE jobs ADD COLUMN cause TEXT NOT NULL DEFAULT '' CHECK (cause IN ('', 'service_not_configured', 'service_unavailable'));

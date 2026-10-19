@@ -13,7 +13,8 @@ import (
 )
 
 // Reasons of a failed call (ARCH-32). A returned error is an *Error that matches exactly one of them (ErrNotConfigured
-// also its reason), or shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is.
+// also its reason), or shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is. A Hub that does not
+// serve for now also matches shared.ErrServiceUnavailable, a missing setup shared.ErrServiceNotConfigured (TASK-083).
 var (
 	// ErrInvalidConfig is returned by New for an unusable configuration. A call matches it with ErrNotConfigured when
 	// the URL source gives a URL the client refuses.
@@ -23,8 +24,8 @@ var (
 	ErrInvalidRequest = errors.New("invalid request")
 
 	// ErrNotConfigured means the Hub URL or the API key is not set, or the stored URL is refused. The error also
-	// matches the reason (ErrNoURL, ErrMissingAPIKey or ErrInvalidConfig) and shared.ErrNetworkUnavailable, so the job
-	// waits in WAITING_FOR_NETWORK instead of failing.
+	// matches the reason (ErrNoURL, ErrMissingAPIKey or ErrInvalidConfig), shared.ErrServiceNotConfigured and
+	// shared.ErrNetworkUnavailable, so the job waits in WAITING_FOR_NETWORK instead of failing and shows why.
 	ErrNotConfigured = errors.New("not configured")
 
 	// ErrNoURL means no Hub URL is set in the settings.
@@ -103,6 +104,14 @@ func transient(op string, reason error) *Error {
 	return &Error{op: op, reason: reason, class: backoff.ErrTransient}
 }
 
+// unavailable is a transient failure of the Hub itself (no answer in time, unavailable, busy, rate limited), as opposed
+// to a missing network or a local problem.
+func unavailable(op string, reason error) *Error {
+	e := transient(op, reason)
+	e.extra = []error{shared.ErrServiceUnavailable}
+	return e
+}
+
 func permanent(op string, reason error) *Error {
 	return &Error{op: op, reason: reason, class: backoff.ErrPermanent}
 }
@@ -111,7 +120,7 @@ func permanent(op string, reason error) *Error {
 // parks without using attempts and runs once the user configures the Hub, while a permanent failure would block the
 // job keys of the post-processing for ever.
 func notConfigured(why error) *Error {
-	return &Error{op: "hub", reason: ErrNotConfigured, extra: []error{why, shared.ErrNetworkUnavailable}, class: backoff.ErrTransient}
+	return &Error{op: "hub", reason: ErrNotConfigured, extra: []error{why, shared.ErrServiceNotConfigured, shared.ErrNetworkUnavailable}, class: backoff.ErrTransient}
 }
 
 // quotaExceeded carries no class marker: the job waits for quota, not for a backoff delay. Unmarked errors are
@@ -123,7 +132,7 @@ func quotaExceeded(op string) *Error { return &Error{op: op, reason: shared.ErrQ
 func mapCallError(op string, err error) *Error {
 	ce := new(connect.Error)
 	if !errors.As(err, &ce) {
-		return transient(op, ErrUnavailable)
+		return unavailable(op, ErrUnavailable)
 	}
 
 	if d := errorDetail(ce); d != nil {
@@ -134,28 +143,34 @@ func mapCallError(op string, err error) *Error {
 
 	switch ce.Code() {
 	case connect.CodeDeadlineExceeded:
-		return transient(op, ErrTimeout)
+		return unavailable(op, ErrTimeout)
 	case connect.CodeUnavailable:
 		// A net.Error under a client-made code means no answer came at all (DNS, dial, reset). Connect strips the
 		// *url.Error of http.Client.Do, and a proxy error page carries no net.Error.
 		var netErr net.Error
 		if !connect.IsWireError(err) && errors.As(err, &netErr) {
-			return transient(op, shared.ErrNetworkUnavailable)
+			e := transient(op, shared.ErrNetworkUnavailable)
+			if connRefused(err) {
+				// The host answered, so the network works and the Hub is down; the job still parks as before, but
+				// shows "service unavailable" instead of "no network" (TASK-083).
+				e.extra = []error{shared.ErrServiceUnavailable}
+			}
+			return e
 		}
-		return transient(op, ErrUnavailable)
+		return unavailable(op, ErrUnavailable)
 	case connect.CodeResourceExhausted:
 		// A client-side resource_exhausted is the read limit on the answer; only the Hub's own means rate limited.
 		if !connect.IsWireError(err) {
 			return permanent(op, ErrBadResponse)
 		}
-		return transient(op, ErrRateLimited)
+		return unavailable(op, ErrRateLimited)
 	case connect.CodeUnauthenticated:
 		return permanent(op, ErrInvalidAPIKey)
 	case connect.CodeAborted:
-		return transient(op, ErrBusy)
+		return unavailable(op, ErrBusy)
 	case connect.CodeCanceled:
 		// The parent context is not done (checked by the caller), so the stream was reset by the other side.
-		return transient(op, ErrUnavailable)
+		return unavailable(op, ErrUnavailable)
 	}
 	return permanent(op, ErrRejected)
 }
@@ -166,7 +181,7 @@ func mapDetail(op string, d *hubv1.ErrorDetail) *Error {
 	case hubv1.ErrorCode_ERROR_CODE_QUOTA_EXCEEDED:
 		return quotaExceeded(op)
 	case hubv1.ErrorCode_ERROR_CODE_RATE_LIMITED:
-		e := transient(op, ErrRateLimited)
+		e := unavailable(op, ErrRateLimited)
 		e.retryAfter = retryAfter(d)
 		return e
 	case hubv1.ErrorCode_ERROR_CODE_INVALID_API_KEY:
@@ -175,7 +190,7 @@ func mapDetail(op string, d *hubv1.ErrorDetail) *Error {
 		if !d.GetRetryable() {
 			return permanent(op, ErrProvider)
 		}
-		e := transient(op, ErrProvider)
+		e := unavailable(op, ErrProvider)
 		e.retryAfter = retryAfter(d)
 		return e
 	case hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT:

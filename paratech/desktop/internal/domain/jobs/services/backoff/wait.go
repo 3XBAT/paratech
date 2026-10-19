@@ -25,6 +25,20 @@ func WaitStatus(err error) (status job.Status, ok bool) {
 	return "", false
 }
 
+// CauseOf returns what the job records about a failed attempt besides its status (TASK-083): a cloud service that is
+// not set up, or one that does not serve for now. A plain network failure has no cause: WAITING_FOR_NETWORK says it.
+// Both service errors may also match shared.ErrNetworkUnavailable (the job then parks without using attempts), so the
+// status does not decide the cause.
+func CauseOf(err error) job.Cause {
+	switch {
+	case errors.Is(err, shared.ErrServiceNotConfigured):
+		return job.CauseServiceNotConfigured
+	case errors.Is(err, shared.ErrServiceUnavailable):
+		return job.CauseServiceUnavailable
+	}
+	return job.CauseNone
+}
+
 // Rechecks says when a job waiting for the network or the quota is tried again. The desktop has no signal that either
 // came back, so the job is requeued after a fixed wait; a try that still finds no network or quota waits again
 // without using an attempt.

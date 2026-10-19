@@ -110,6 +110,10 @@ func TestNotConfiguredParks(t *testing.T) {
 			if parked != tc.parked || (parked && status != job.StatusWaitingForNetwork) {
 				t.Fatalf("wait status = %v, %v; want parked %v", status, parked, tc.parked)
 			}
+			// The job records why it waits, so the screen says "not configured", not "no network" (TASK-083).
+			if c := backoff.CauseOf(err); (c == job.CauseServiceNotConfigured) != tc.parked {
+				t.Fatalf("cause %q, want not configured %v", c, tc.parked)
+			}
 			if tc.parked && err.Error() != "hub: not configured" {
 				t.Fatalf("error text %q, want the fixed text", err.Error())
 			}

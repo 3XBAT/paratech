@@ -10,11 +10,11 @@ SELECT id FROM jobs WHERE idempotency_key = sqlc.arg(idempotency_key);
 -- A never-stored job (version 0) is inserted with version 1.
 -- name: InsertJob :exec
 INSERT INTO jobs (id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at,
-                  run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version,
-                  updated_at)
+                  run_now, progress_percent, checkpoint, last_error, cause, created_at, started_at, finished_at,
+                  version, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(type), sqlc.arg(status), sqlc.arg(idempotency_key), sqlc.arg(payload),
         sqlc.arg(pinned_model_id), sqlc.arg(attempts), sqlc.arg(max_attempts), sqlc.arg(next_run_at),
-        sqlc.arg(run_now), sqlc.arg(progress_percent), sqlc.arg(checkpoint), sqlc.arg(last_error),
+        sqlc.arg(run_now), sqlc.arg(progress_percent), sqlc.arg(checkpoint), sqlc.arg(last_error), sqlc.arg(cause),
         sqlc.arg(created_at), sqlc.arg(started_at), sqlc.arg(finished_at), 1, sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
@@ -27,6 +27,7 @@ SET status           = sqlc.arg(status),
     progress_percent = sqlc.arg(progress_percent),
     checkpoint       = sqlc.arg(checkpoint),
     last_error       = sqlc.arg(last_error),
+    cause            = sqlc.arg(cause),
     started_at       = sqlc.arg(started_at),
     finished_at      = sqlc.arg(finished_at),
     version          = version + 1,
@@ -43,6 +44,7 @@ SET status           = sqlc.arg(status),
     progress_percent = sqlc.arg(progress_percent),
     checkpoint       = sqlc.arg(checkpoint),
     last_error       = sqlc.arg(last_error),
+    cause            = sqlc.arg(cause),
     started_at       = sqlc.arg(started_at),
     finished_at      = sqlc.arg(finished_at),
     version          = version + 1,

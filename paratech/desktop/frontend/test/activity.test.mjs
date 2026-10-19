@@ -107,6 +107,9 @@ test("a running recording shows the time elapsed by the client clock", () => {
 test("parse accepts well-formed items and drops extra fields", () => {
   assert.deepEqual(parseRecording({ ...recording, path: "C:\\x.wav" }), recording);
   assert.deepEqual(parseJob({ ...job, payload: "{}" }), job);
+  for (const queueReason of ["serviceNotConfigured", "serviceUnavailable"]) {
+    assert.equal(parseRecording({ ...recording, queueReason }).queueReason, queueReason);
+  }
 });
 
 test("parse rejects malformed items", () => {

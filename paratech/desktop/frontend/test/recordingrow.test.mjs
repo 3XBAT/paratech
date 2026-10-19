@@ -18,6 +18,7 @@ import {
   pageGroups,
   queueLine,
   queueReasonHints,
+  queueReasonLabels,
   queueReasonTexts,
   recordingRowView,
   rowAction,
@@ -29,7 +30,10 @@ const { renderToStaticMarkup } = server;
 
 // Mirror the chain codes of internal/cases/activity/types.go.
 const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"];
-const reasons = ["inLine", "retry", "power", "network", "quota"];
+// The service reasons have their own chip (TASK-083); the others read «В очереди · <reason>».
+const suffixedReasons = ["inLine", "retry", "power", "network", "quota"];
+const ownLabelReasons = ["serviceNotConfigured", "serviceUnavailable"];
+const reasons = [...suffixedReasons, ...ownLabelReasons];
 const errorCodes = ["recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"];
 const actions = ["runNow", "openModels", "openConnections", "checkSound"];
 
@@ -43,11 +47,12 @@ const row = (over = {}) => ({
 
 test("every chain code has its own Russian text", () => {
   assert.deepEqual(Object.keys(stageLabels), stages);
-  assert.deepEqual(Object.keys(queueReasonTexts), reasons);
+  assert.deepEqual(Object.keys(queueReasonTexts), suffixedReasons);
+  assert.deepEqual(Object.keys(queueReasonLabels), ownLabelReasons);
   assert.deepEqual(Object.keys(queueReasonHints), reasons);
   assert.deepEqual(Object.keys(errorTexts), errorCodes);
   assert.deepEqual(Object.keys(actionLabels), actions);
-  for (const texts of [stageLabels, queueReasonTexts, queueReasonHints, errorTexts, actionLabels]) {
+  for (const texts of [stageLabels, queueReasonTexts, queueReasonLabels, queueReasonHints, errorTexts, actionLabels]) {
     const values = Object.values(texts);
     assert.equal(new Set(values).size, values.length);
     values.forEach((v) => assert.match(v, /[а-яё]/i));
@@ -85,13 +90,40 @@ test("one status per stage, in the order of the chain", () => {
 test("a queued chain says why it waits and which step is next", () => {
   for (const reason of reasons) {
     const v = chainStatusView(row({ stage: "queued", step: "summary", queueReason: reason }), 0);
-    assert.equal(v.label, `В очереди · ${queueReasonTexts[reason]}`, reason);
+    const label = ownLabelReasons.includes(reason) ? queueReasonLabels[reason] : `В очереди · ${queueReasonTexts[reason]}`;
+    assert.equal(v.label, label, reason);
     assert.equal(v.hint, `Дальше краткое содержание. ${queueReasonHints[reason]}`, reason);
   }
   const power = chainStatusView(row({ stage: "queued", step: "transcription", queueReason: "power" }), 0);
   assert.deepEqual([power.label, power.kind, power.icon], ["В очереди · ждёт питания от сети", "wait", "plug"]);
   assert.match(power.hint, /^Дальше расшифровка\./);
   assert.equal(chainStatusView(row({ stage: "queued", queueReason: "network" }), 0).kind, "net");
+});
+
+test("a summary service problem is named by the core's reason, not by no network (TASK-083)", () => {
+  const off = row({ stage: "queued", step: "summary", queueReason: "serviceNotConfigured", action: "openConnections", jobError: "network unavailable" });
+  const v = recordingRowView(off, 0);
+  assert.deepEqual([v.status.label, v.status.kind, v.status.icon], ["Сервис конспектов не настроен", "wait", "warn"]);
+  assert.equal(
+    v.status.hint,
+    "Дальше краткое содержание. Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
+  );
+  assert.deepEqual(v.action, { kind: "open", page: "connections", label: "Открыть подключения" });
+  const offHtml = render(off);
+  assert.ok(offHtml.includes("Сервис конспектов не настроен"));
+  assert.ok(!offHtml.includes("В очереди"));
+  assert.ok(offHtml.includes("Открыть подключения"));
+  assert.ok(!offHtml.includes("нет сети"));
+
+  const down = recordingRowView(row({ stage: "queued", step: "summary", queueReason: "serviceUnavailable", jobError: "hub: unavailable" }), 0);
+  assert.deepEqual([down.status.label, down.status.kind, down.status.icon], ["Сервис конспектов недоступен", "wait", "clock"]);
+  assert.equal(down.status.hint, "Дальше краткое содержание. Повторим автоматически.");
+  assert.equal(down.action, null);
+
+  // Only the reason decides: a network error text does not turn a service reason into no network, nor the reverse.
+  const net = chainStatusView(row({ stage: "queued", step: "summary", queueReason: "network", jobError: "hub: not configured" }), 0);
+  assert.deepEqual([net.label, net.kind], ["В очереди · нет сети", "net"]);
+  assert.equal(net.hint, "Дальше краткое содержание. Продолжится само, как только появится сеть.");
 });
 
 test("a failed chain names what failed and offers the core's action", () => {
