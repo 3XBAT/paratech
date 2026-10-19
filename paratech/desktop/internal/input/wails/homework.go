@@ -37,7 +37,7 @@ const (
 	ErrSendNotFound          = homeworkError("Отправка не найдена: подготовьте её ещё раз.")
 	ErrSendCannotConfirm     = homeworkError("Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.")
 	ErrSendAlreadyDecided    = homeworkError("Эта отправка уже подтверждена или отменена.")
-	ErrSendStale             = homeworkError("Файл или адрес получателя изменились после подтверждения. Проверьте и подтвердите ещё раз.")
+	ErrSendStale             = homeworkError("Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.")
 	ErrSendUnresolved        = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.")
 	ErrSendIncomplete        = homeworkError("Не удалось завершить отправку. Повторите — второе письмо не уйдёт — или проверьте список писем ниже.")
 	ErrExportLocked          = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.")
@@ -117,7 +117,7 @@ type HomeworkProposals interface {
 	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
-	ConfirmSend(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string) (homeworkflow.ProposalView, error)
 	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 }
 
@@ -467,13 +467,15 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPrepa
 
 // ConfirmSend is the user's click on «Отправить» in the confirmation dialog (AC-14): the use case confirms the send
 // proposal the dialog showed and executes it, which creates the delivery. It is the only binding that leads to an
-// email. Repeating it with the same proposal after a failure creates no second email (ErrSendIncomplete says so).
-func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID string) error {
+// email. subject is the one the dialog showed (SendPreparation.Subject): if the core's subject changed meanwhile,
+// nothing is sent (ErrSendStale). Repeating it with the same proposal after a failure creates no second email
+// (ErrSendIncomplete says so).
+func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject string) error {
 	pid := proposal.ID(proposalID)
 	if pid.Validate() != nil {
 		return ErrHomeworkInvalidID
 	}
-	_, err := s.proposals.ConfirmSend(ctx, pid)
+	_, err := s.proposals.ConfirmSend(ctx, pid, subject)
 	switch {
 	case err == nil:
 		return nil

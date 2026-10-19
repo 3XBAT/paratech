@@ -47,13 +47,14 @@ func (c *hwCalls) list() []string {
 
 // fakeHWProposals is HomeworkProposals; err, when set, is returned by every method, and the per-method errors override it.
 type fakeHWProposals struct {
-	log        *hwCalls
-	err        error
-	confirmErr error // returned by ConfirmSend
-	declineErr error
-	proposal   homeworkflow.ProposalView // returned by ProposeSend and Get
-	list       []homeworkflow.AssignmentView
-	corrected  homeworkflow.LessonCorrection // the last CorrectLesson
+	log          *hwCalls
+	err          error
+	confirmErr   error // returned by ConfirmSend
+	declineErr   error
+	proposal     homeworkflow.ProposalView // returned by ProposeSend and Get
+	list         []homeworkflow.AssignmentView
+	corrected    homeworkflow.LessonCorrection // the last CorrectLesson
+	shownSubject string                        // the last ConfirmSend
 }
 
 func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
@@ -85,8 +86,9 @@ func (f *fakeHWProposals) Get(context.Context, proposal.ID) (homeworkflow.Propos
 	return f.proposal, f.err
 }
 
-func (f *fakeHWProposals) ConfirmSend(context.Context, proposal.ID) (homeworkflow.ProposalView, error) {
+func (f *fakeHWProposals) ConfirmSend(_ context.Context, _ proposal.ID, subject string) (homeworkflow.ProposalView, error) {
 	f.log.add("ConfirmSend")
+	f.shownSubject = subject
 	return f.proposal, cmpErr(f.confirmErr, f.err)
 }
 
@@ -257,7 +259,7 @@ var everyHomeworkCall = []hwCall{
 		_, err := s.PrepareSend(context.Background(), id)
 		return err
 	}},
-	{"ConfirmSend", func(s *HomeworkService, id string) error { return s.ConfirmSend(context.Background(), id) }},
+	{"ConfirmSend", func(s *HomeworkService, id string) error { return s.ConfirmSend(context.Background(), id, "ДЗ") }},
 	{"CancelSend", func(s *HomeworkService, id string) error { return s.CancelSend(context.Background(), id) }},
 	{"Deliveries", func(s *HomeworkService, id string) error {
 		_, err := s.Deliveries(context.Background(), id)
@@ -361,7 +363,7 @@ func TestConfirmSendErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newHWEnv()
 			tt.edit(e)
-			if err := e.svc.ConfirmSend(context.Background(), "p1"); !errors.Is(err, tt.want) {
+			if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ"); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
 			if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend"}) {
@@ -376,7 +378,7 @@ func TestConfirmSendErrors(t *testing.T) {
 func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
 	e := newHWEnv()
 	e.proposals.confirmErr = errors.New("execute: mark executed: database is locked")
-	err := e.svc.ConfirmSend(context.Background(), "p1")
+	err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ")
 	if !errors.Is(err, ErrSendIncomplete) || strings.Contains(err.Error(), "locked") {
 		t.Fatalf("failed ConfirmSend = %v, want ErrSendIncomplete", err)
 	}
@@ -385,11 +387,14 @@ func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
 	}
 
 	e.proposals.confirmErr = nil
-	if err := e.svc.ConfirmSend(context.Background(), "p1"); err != nil {
+	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ"); err != nil {
 		t.Fatalf("repeated ConfirmSend = %v", err)
 	}
 	if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend", "ConfirmSend"}) {
 		t.Fatalf("calls = %v, want the same use case call twice", got)
+	}
+	if e.proposals.shownSubject != "ДЗ" {
+		t.Fatalf("shown subject = %q, want the dialog's", e.proposals.shownSubject)
 	}
 }
 

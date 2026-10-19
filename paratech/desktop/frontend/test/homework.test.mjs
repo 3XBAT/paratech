@@ -190,14 +190,14 @@ test("the bindings call the bound Go methods with the page's arguments", async (
   });
   assert.deepEqual(await api.generate("a1", 2, "короче"), { jobId: "j1", base: 2 });
   assert.equal((await api.prepareSend("a1")).status, "ready");
-  await api.confirmSend("p1");
+  await api.confirmSend("p1", "ДЗ");
   await api.cancelSend("p2");
   assert.equal((await api.deliveries("a1"))[0].notice, notice);
   assert.equal((await api.sendAgain("d1")).status, "PENDING");
   assert.deepEqual(calls, [
     [methods.generate, "a1", 2, "короче"],
     [methods.prepareSend, "a1"],
-    [methods.confirmSend, "p1"],
+    [methods.confirmSend, "p1", "ДЗ"],
     [methods.cancelSend, "p2"],
     [methods.deliveries, "a1"],
     [methods.sendAgain, "d1"],
@@ -326,7 +326,11 @@ for (const [binding, component, handler, nextComponent] of [
 test("a retry repeats the same send; a refused export opens no send dialog", () => {
   const dialogs = code("pages/HomeworkDialogs.tsx");
   assert.equal(count(dialogs, ".prepareSend("), 0, "the dialog never prepares a new send");
-  assert.equal(count(dialogs, ".confirmSend(props.prep.proposalId)"), 1, "confirmSend takes the dialog's own send");
+  assert.equal(
+    count(dialogs, ".confirmSend(props.prep.proposalId, props.prep.subject)"),
+    1,
+    "confirmSend takes the dialog's own send and the subject it shows",
+  );
   assert.match(dialogs, /retry \? "Повторить" : "Отправить"/);
 
   const page = code("pages/HomeworkPage.tsx");

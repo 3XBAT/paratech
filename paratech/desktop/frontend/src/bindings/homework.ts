@@ -150,7 +150,7 @@ export const errorMessages = {
   sendNotFound: "Отправка не найдена: подготовьте её ещё раз.",
   sendCannotConfirm: "Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.",
   sendAlreadyDecided: "Эта отправка уже подтверждена или отменена.",
-  sendStale: "Файл или адрес получателя изменились после подтверждения. Проверьте и подтвердите ещё раз.",
+  sendStale: "Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.",
   sendUnresolved:
     "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
   /** confirmSend failed; repeating it with the same proposalId is safe: no second email. */
@@ -345,8 +345,8 @@ export interface HomeworkApi {
   exportDraft(id: string, version: number): Promise<ExportResult>;
   /** Builds the confirmation dialog; sends nothing. */
   prepareSend(id: string): Promise<SendPreparation>;
-  /** The dialog's confirm button only: confirms the shown send and creates the email (AC-14). */
-  confirmSend(proposalId: string): Promise<void>;
+  /** The dialog's confirm button only: confirms the shown send and subject, creates the email (AC-14). */
+  confirmSend(proposalId: string, subject: string): Promise<void>;
   /** The dialog's cancel button: the send can never happen afterwards. */
   cancelSend(proposalId: string): Promise<void>;
   deliveries(id: string): Promise<DeliveryItem[]>;
@@ -369,8 +369,8 @@ export function homeworkApi(call: CallByName): HomeworkApi {
     editDraft: async (id, base, title, body) => parseVersionText(await call(methods.editDraft, id, base, title, body)),
     exportDraft: async (id, version) => parseExportResult(await call(methods.exportDraft, id, version)),
     prepareSend: async (id) => parseSendPreparation(await call(methods.prepareSend, id)),
-    confirmSend: async (proposalId) => {
-      await call(methods.confirmSend, proposalId);
+    confirmSend: async (proposalId, subject) => {
+      await call(methods.confirmSend, proposalId, subject);
     },
     cancelSend: async (proposalId) => {
       await call(methods.cancelSend, proposalId);

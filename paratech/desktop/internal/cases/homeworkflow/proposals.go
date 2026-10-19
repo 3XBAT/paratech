@@ -10,6 +10,7 @@ import (
 	"io"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
@@ -63,8 +64,8 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 	return view, nil
 }
 
-// proposalView is the view of p with the email subject of a validated send, for the confirmation dialog: the same
-// subject Execute sends (emailSubject).
+// proposalView is the view of p with the email subject of a validated send, for the confirmation dialog. ConfirmSend
+// carries it back, and Execute sends it only if it is still the subject the core builds (proposal.Facts.Subject).
 func (s *Service) proposalView(ctx context.Context, p *proposal.Proposal) (ProposalView, error) {
 	v := viewOf(p)
 	if p.Kind() != proposal.KindSendHomework || p.Status() != proposal.StatusValidated {
@@ -82,6 +83,10 @@ func (s *Service) emailSubject(ctx context.Context, id shared.AssignmentID) (str
 	if err != nil {
 		return "", err
 	}
+	return s.subjectOf(ctx, a)
+}
+
+func (s *Service) subjectOf(ctx context.Context, a *assignment.Assignment) (string, error) {
 	l, err := s.lessons.label(ctx, a)
 	if err != nil {
 		return "", err
@@ -124,6 +129,11 @@ func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Fac
 	case err == nil:
 		f.AssignmentExists = true
 		f.AssignmentTitle = a.Details().Title() // the export heading comes from the stored assignment, not the model
+		if p.Kind().NeedsSubject() {
+			if f.Subject, err = s.subjectOf(ctx, a); err != nil {
+				return f, err
+			}
+		}
 	case !errors.Is(err, shared.ErrNotFound):
 		return f, err
 	}
@@ -189,11 +199,13 @@ func (s *Service) Confirm(ctx context.Context, id proposal.ID) (ProposalView, er
 }
 
 // ConfirmSend is the user's click on the confirmation of a send_homework_email proposal: Confirm, then Execute
-// (AC-14). Repeating it with the same proposal is safe (hard rule 7): a CONFIRMED proposal whose Execute failed, maybe
-// after the delivery was saved, is executed again under the same idempotency key, so no second email is created, and
-// an EXECUTED one is returned as it is. Another kind yields ErrNotASend before any change; other statuses yield the
+// (AC-14). shownSubject is the email subject the dialog showed (ProposalView.Subject); if the subject the core builds
+// differs by then (a correction or a new extraction), the proposal goes STALE and nothing is sent (hard rule 3).
+// Repeating it with the same proposal is safe (hard rule 7): a CONFIRMED proposal whose Execute failed, maybe after
+// the delivery was saved, is executed again under the same idempotency key, so no second email is created, and an
+// EXECUTED one is returned as it is. Another kind yields ErrNotASend before any change; other statuses yield the
 // error of proposal.Confirm (proposal.ErrInvalidTransition).
-func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID) (ProposalView, error) {
+func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string) (ProposalView, error) {
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
 		p, err := s.proposals.Get(ctx, id)
 		if err != nil {
@@ -211,7 +223,7 @@ func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID) (ProposalView
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmSend, err)
 	}
-	return s.Execute(ctx, id)
+	return s.execute(ctx, id, &shownSubject)
 }
 
 // Decline records that the user refused a VALIDATED proposal; it can never be executed afterwards.
@@ -246,8 +258,14 @@ func (s *Service) change(ctx context.Context, op string, id proposal.ID, apply f
 // port, the trusted facts are read again: if what the user confirmed changed, the proposal is stored STALE and
 // proposal.ErrStale is returned without calling a port. If the port fails, the proposal stays CONFIRMED and Execute
 // may be repeated: the command carries the same idempotency key, so the adapter does not act twice (hard rule 7).
-// The port is called outside the transaction (Tx forbids external I/O).
+// The port is called outside the transaction (Tx forbids external I/O). Execute does not compare the email subject
+// with a shown one: the user's path to an email is ConfirmSend.
 func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, error) {
+	return s.execute(ctx, id, nil)
+}
+
+// execute is Execute; a non-nil shownSubject is the subject the user confirmed, checked by Recheck.
+func (s *Service) execute(ctx context.Context, id proposal.ID, shownSubject *string) (ProposalView, error) {
 	p, err := s.proposals.Get(ctx, id)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
@@ -260,6 +278,10 @@ func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, er
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
+	facts.ShownSubject = facts.Subject
+	if shownSubject != nil {
+		facts.ShownSubject = *shownSubject
+	}
 	if err := p.Recheck(facts, s.clock.Now()); err != nil {
 		if errors.Is(err, proposal.ErrStale) {
 			// The version check of Save refuses this if a concurrent Execute changed the proposal meanwhile.
@@ -270,7 +292,7 @@ func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, er
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
 
-	if err := s.perform(ctx, p); err != nil {
+	if err := s.perform(ctx, p, facts); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
 
@@ -298,19 +320,16 @@ func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, er
 }
 
 // perform obtains the command from the proposal (which refuses unless CONFIRMED) and hands it to the port of its kind.
-// The email subject and the lesson of a deadline event come from trusted local state and the cleaned hints (TASK-092).
-func (s *Service) perform(ctx context.Context, p *proposal.Proposal) error {
+// The email subject is the one Recheck accepted (f); the lesson of a deadline event comes from trusted local state and
+// the cleaned hints (TASK-092).
+func (s *Service) perform(ctx context.Context, p *proposal.Proposal, f proposal.Facts) error {
 	switch p.Kind() {
 	case proposal.KindSendHomework:
 		cmd, err := p.EmailCommand()
 		if err != nil {
 			return err
 		}
-		subject, err := s.emailSubject(ctx, p.AssignmentID())
-		if err != nil {
-			return err
-		}
-		if cmd, err = cmd.WithSubject(subject); err != nil {
+		if cmd, err = cmd.WithSubject(f.Subject); err != nil {
 			return err
 		}
 		return s.mailer.SendHomework(ctx, cmd)

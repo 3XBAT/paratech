@@ -45,7 +45,7 @@ export function SendDialog(props: {
     setBusy(true);
     setError("");
     try {
-      await props.api.confirmSend(props.prep.proposalId);
+      await props.api.confirmSend(props.prep.proposalId, props.prep.subject);
       props.onClose("sent");
     } catch (err) {
       retryable.current = sendRetryable(err);

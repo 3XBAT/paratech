@@ -222,7 +222,7 @@ func TestSendSubjectAndDeadlineLesson(t *testing.T) {
 	if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Subject != want {
 		t.Fatalf("Get = %+v, %v", got, err)
 	}
-	if _, err := e.svc.ConfirmSend(ctx, v.ID); err != nil {
+	if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); err != nil {
 		t.Fatal(err)
 	}
 	if calls := e.out.mailer.Calls(); len(calls) != 1 || calls[0].Subject() != want {
@@ -296,5 +296,61 @@ func TestDraftFallsBackToTheLiveLesson(t *testing.T) {
 		if !strings.Contains(data, want) {
 			t.Errorf("request lacks %s: %s", want, data)
 		}
+	}
+}
+
+// A subject change between the dialog and the click makes the send STALE: no email with a subject the user did not
+// see (hard rule 3).
+func TestSendSubjectChangedAfterTheDialog(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name   string
+		change func(t *testing.T, e *lessonEnv, id shared.AssignmentID)
+	}{
+		{"user correction", func(t *testing.T, e *lessonEnv, id shared.AssignmentID) {
+			if _, err := e.svc.CorrectLesson(ctx, LessonCorrection{ID: id, Subject: "Геометрия"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"new extraction", func(t *testing.T, e *lessonEnv, _ shared.AssignmentID) {
+			e.llm.Answer(values.OperationExtractHomework, `{"subject_hint":"Физика","teacher_hint":"","assignments":[`+
+				`{"title":"Read chapter 4","description":"Pages 40-52","due":"2026-10-16T23:59:00+03:00"}]}`)
+			if err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newLessonEnv(t, nil, hintsAnswer)
+			id := e.first().ID
+			ref, err := proposal.ExportRef(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.out.files.Write(ctx, ref, strings.NewReader("my homework")); err != nil {
+				t.Fatal(err)
+			}
+			v, err := e.svc.ProposeSend(ctx, id)
+			if err != nil || v.Status != proposal.StatusValidated {
+				t.Fatalf("ProposeSend = %+v, %v", v, err)
+			}
+
+			tc.change(t, e, id)
+			if now, err := e.svc.emailSubject(ctx, id); err != nil || now == v.Subject {
+				t.Fatalf("subject after the change = %q, %v; want other than %q", now, err, v.Subject)
+			}
+
+			if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); !errors.Is(err, proposal.ErrStale) {
+				t.Fatalf("ConfirmSend = %v, want ErrStale", err)
+			}
+			if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusStale ||
+				got.Reason != proposal.ReasonSubjectChanged {
+				t.Fatalf("proposal = %+v, %v; want STALE %s", got, err, proposal.ReasonSubjectChanged)
+			}
+			if n := len(e.out.mailer.Calls()); n != 0 {
+				t.Fatalf("mailer calls = %d, want none", n)
+			}
+		})
 	}
 }
