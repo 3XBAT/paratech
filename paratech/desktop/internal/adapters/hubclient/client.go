@@ -149,6 +149,10 @@ func (c *Client) Complete(ctx context.Context, req values.LLMRequest) (values.LL
 		if perr := ctx.Err(); perr != nil {
 			return values.LLMResult{}, fmt.Errorf("%s: %w", opComplete, perr)
 		}
+		// Our own deadline: Connect may report it as unavailable or canceled, depending on where the call was.
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			return values.LLMResult{}, transient(opComplete, ErrTimeout)
+		}
 		return values.LLMResult{}, mapCallError(opComplete, err)
 	}
 	return resultOf(resp.Msg)
