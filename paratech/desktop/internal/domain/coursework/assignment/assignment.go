@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -41,6 +42,9 @@ type Assignment struct {
 	details    Details
 	userEdited bool
 
+	hints      values.LessonNames // subject and teacher the extraction found in the transcript (model output)
+	correction values.LessonNames // subject and teacher the user entered; empty fields correct nothing
+
 	createdAt time.Time
 	updatedAt time.Time
 }
@@ -52,6 +56,7 @@ type Spec struct {
 	Origin        Origin
 	PromptVersion int // the prompts version of the extraction, at least 1
 	Details       Details
+	Hints         values.LessonNames // optional
 }
 
 // NewExtracted creates an assignment from one item of an extraction answer, never stored (Version() == 0).
@@ -61,7 +66,7 @@ func NewExtracted(spec Spec, now time.Time) (*Assignment, error) {
 	}
 	a := &Assignment{
 		id: spec.ID, lesson: spec.Lesson, transcript: spec.Origin.Transcript, source: spec.Origin.Index,
-		promptVersion: spec.PromptVersion, details: spec.Details, createdAt: now, updatedAt: now,
+		promptVersion: spec.PromptVersion, details: spec.Details, hints: spec.Hints, createdAt: now, updatedAt: now,
 	}
 	if err := a.validate(); err != nil {
 		return nil, err
@@ -81,6 +86,10 @@ type State struct {
 	Description   string
 	Due           time.Time // zero: no deadline
 	UserEdited    bool
+	HintSubject   string // "": none
+	HintTeacher   string
+	UserSubject   string // "": not corrected
+	UserTeacher   string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -101,7 +110,10 @@ func Restore(s State) (*Assignment, error) {
 	}
 	a := &Assignment{
 		version: s.Version, id: s.ID, lesson: s.Lesson, transcript: s.Transcript, source: s.SourceIndex,
-		promptVersion: s.PromptVersion, details: d, userEdited: s.UserEdited, createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
+		promptVersion: s.PromptVersion, details: d, userEdited: s.UserEdited,
+		hints:      values.NewLessonNames(s.HintSubject, s.HintTeacher),
+		correction: values.NewLessonNames(s.UserSubject, s.UserTeacher),
+		createdAt:  s.CreatedAt, updatedAt: s.UpdatedAt,
 	}
 	if err := a.validate(); err != nil {
 		return nil, err
@@ -156,6 +168,30 @@ func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (cha
 	return true, nil
 }
 
+// SetHints stores the subject and teacher the extraction of the same item found in the transcript. They are not user
+// data, so a new extraction replaces them even when the user edited the details; they never replace the schedule or
+// the user's correction (values.NewLessonLabel). changed tells whether the assignment must be saved.
+func (a *Assignment) SetHints(h values.LessonNames, now time.Time) (changed bool, err error) {
+	if a.source == noSource {
+		return false, ErrNotExtracted
+	}
+	if a.hints == h {
+		return false, nil
+	}
+	a.hints, a.updatedAt = h, now
+	return true, nil
+}
+
+// Correct stores the subject and teacher the user entered; an empty field removes the correction of that field, so
+// the schedule or the hint shows again. changed tells whether the assignment must be saved.
+func (a *Assignment) Correct(c values.LessonNames, now time.Time) (changed bool) {
+	if a.correction == c {
+		return false
+	}
+	a.correction, a.updatedAt = c, now
+	return true
+}
+
 // Superseded reports whether a new extraction answer of the same transcript with items items leaves the assignment
 // behind, so that reprocessing may withdraw (delete) it: it was extracted at a position the answer no longer has and
 // the user never edited it. Matching is by position only (see the package doc).
@@ -204,6 +240,12 @@ func (a *Assignment) Details() Details { return a.details }
 // UserEdited reports whether the user edited the assignment; reprocessing then leaves it alone.
 func (a *Assignment) UserEdited() bool { return a.userEdited }
 
+// Hints returns the subject and teacher the extraction found in the transcript; model output, shown marked.
+func (a *Assignment) Hints() values.LessonNames { return a.hints }
+
+// Correction returns the subject and teacher the user entered.
+func (a *Assignment) Correction() values.LessonNames { return a.correction }
+
 // CreatedAt returns the creation time.
 func (a *Assignment) CreatedAt() time.Time { return a.createdAt }
 
@@ -215,7 +257,8 @@ func (a *Assignment) State() State {
 	return State{
 		Version: a.version, ID: a.id, Lesson: a.lesson, Transcript: a.transcript, SourceIndex: a.source,
 		PromptVersion: a.promptVersion, Title: a.details.title, Description: a.details.description, Due: a.details.due,
-		UserEdited: a.userEdited, CreatedAt: a.createdAt, UpdatedAt: a.updatedAt,
+		UserEdited: a.userEdited, HintSubject: a.hints.Subject(), HintTeacher: a.hints.Teacher(),
+		UserSubject: a.correction.Subject(), UserTeacher: a.correction.Teacher(), CreatedAt: a.createdAt, UpdatedAt: a.updatedAt,
 	}
 }
 

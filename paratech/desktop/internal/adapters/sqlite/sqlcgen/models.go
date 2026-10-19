@@ -21,6 +21,10 @@ type Assignment struct {
 	UpdatedAt     int64
 	SourceIndex   sql.NullInt64
 	PromptVersion sql.NullInt64
+	HintSubject   string
+	HintTeacher   string
+	UserSubject   string
+	UserTeacher   string
 }
 
 type Delivery struct {

@@ -531,6 +531,10 @@ func TestRecheck(t *testing.T) {
 		{"attachment removed", outEmail, func(f *Facts) { f.Attachment = Digest{} }, ReasonNoArtifact},
 		{"attachment content changed", outEmail, func(f *Facts) { f.Attachment = mustDigest(t, shaB, 11) }, ReasonArtifactChanged},
 		{"attachment size changed", outEmail, func(f *Facts) { f.Attachment = mustDigest(t, shaA, 12) }, ReasonArtifactChanged},
+		{"subject as shown", outEmail, func(f *Facts) { f.Subject, f.ShownSubject = "Физика: x", "Физика: x" }, ""},
+		{"subject changed", outEmail, func(f *Facts) { f.Subject, f.ShownSubject = "Химия: x", "Физика: x" }, ReasonSubjectChanged},
+		{"subject not shown", outEmail, func(f *Facts) { f.Subject = "Физика: x" }, ReasonSubjectChanged},
+		{"export ignores subject", outExport, func(f *Facts) { f.Subject = "Физика: x" }, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -551,6 +555,11 @@ func TestRecheck(t *testing.T) {
 			}
 			if _, err := p.EmailCommand(); !errors.Is(err, ErrNotConfirmed) {
 				t.Fatalf("command from a stale proposal: %v", err)
+			}
+			st := p.State()
+			st.Version = 1
+			if _, err := Restore(st); err != nil {
+				t.Fatalf("Restore of the stale proposal: %v", err)
 			}
 		})
 	}

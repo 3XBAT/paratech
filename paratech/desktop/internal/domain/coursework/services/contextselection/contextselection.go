@@ -13,7 +13,7 @@ import (
 // Limits of the selected fields. Together they stay below values.MaxRequestPayloadSize; a transcript above
 // MaxTranscriptBytes is refused rather than cut, so that the model never works on a silently truncated lesson.
 const (
-	MaxTitleRunes          = 200       // lesson and assignment titles
+	MaxTitleRunes          = 200       // lesson and assignment titles, the subject and the teacher
 	MaxTranscriptBytes     = 512 << 10 // the joined transcript text
 	MaxDescriptionBytes    = 16 << 10  // the assignment description
 	MaxSummaryBytes        = 128 << 10 // the lesson summary
@@ -27,8 +27,10 @@ type Lesson struct {
 	// Start anchors relative dates ("by next Monday"). Pass it in the student's time zone: its UTC offset is the one
 	// the model is told to use.
 	Start time.Time
-	// Subject is the subject of the lesson as the schedule names it; empty when unknown (lecture_text only).
+	// Subject and Teacher name the lesson as the schedule does; empty when unknown. A homework draft sends both as
+	// context (TASK-092); a lecture text sends the subject (TASK-090).
 	Subject string
+	Teacher string
 	// Kind is the kind of the lesson; it only selects trusted wording of the lecture_text instructions, it is never
 	// sent as data.
 	Kind values.LessonKind
@@ -63,8 +65,9 @@ type Material struct {
 type Context struct {
 	operation             values.Operation
 	lessonTitle           string
-	lessonStart           time.Time
 	lessonSubject         string
+	lessonTeacher         string
+	lessonStart           time.Time
 	lessonKind            values.LessonKind
 	transcript            string
 	summary               string
@@ -136,6 +139,12 @@ func Select(operation values.Operation, m Material) (Context, error) {
 			}
 		}
 		if c.assignmentTitle, err = oneLine("assignment title", m.Assignment.Title); err != nil {
+			return Context{}, err
+		}
+		if c.lessonSubject, err = oneLine("lesson subject", m.Lesson.Subject); err != nil {
+			return Context{}, err
+		}
+		if c.lessonTeacher, err = oneLine("lesson teacher", m.Lesson.Teacher); err != nil {
 			return Context{}, err
 		}
 		if c.assignmentTitle == "" && c.assignmentDescription == "" {
@@ -211,11 +220,14 @@ func (c Context) IsZero() bool { return c == Context{} }
 // LessonTitle returns the lesson title; empty when unknown.
 func (c Context) LessonTitle() string { return c.lessonTitle }
 
+// LessonSubject returns the subject of the lesson (homework_draft and lecture_text); empty when unknown.
+func (c Context) LessonSubject() string { return c.lessonSubject }
+
+// LessonTeacher returns the teacher of the lesson (homework_draft only); empty when unknown.
+func (c Context) LessonTeacher() string { return c.lessonTeacher }
+
 // LessonStart returns the lesson start (extract_homework_deadlines only).
 func (c Context) LessonStart() time.Time { return c.lessonStart }
-
-// LessonSubject returns the lesson subject; empty when unknown (lecture_text only).
-func (c Context) LessonSubject() string { return c.lessonSubject }
 
 // LessonKind returns the lesson kind (lecture_text only).
 func (c Context) LessonKind() values.LessonKind { return c.lessonKind }

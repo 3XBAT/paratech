@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/summary"
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -66,6 +67,15 @@ type Assignment struct {
 	Description string
 	Due         time.Time // zero: no deadline
 	UserEdited  bool
+
+	// The lesson (TASK-092): «Предмет · тип · преподаватель», «занятие 19.10». A subject or teacher from the
+	// transcript (values.SourceTranscript) is model output and is shown marked «по записи».
+	Subject       string
+	SubjectSource values.NameSource
+	Kind          string // code of the lesson kind; empty if unknown
+	Teacher       string
+	TeacherSource values.NameSource
+	LessonDate    time.Time // in the clock's zone; zero if unknown
 }
 
 // Homework is the homework found in the lesson and where its search stands.

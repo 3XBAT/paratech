@@ -99,7 +99,7 @@ func TestListAssignmentsIsBoundedAndWrapsErrors(t *testing.T) {
 	svc, err := New(Deps{
 		Proposals: proposalRepo{e.store}, Assignments: assignmentRepo{e.store}, AssignmentList: failingList{&limits},
 		Artifacts: e.files, Recipients: recipients{e.store}, Mailer: e.mailer, Exporter: e.exporter, Calendar: e.calendar,
-		Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
+		Recordings: noRecordings{}, Lessons: noLessons{}, Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +272,7 @@ func TestConfirmSend(t *testing.T) {
 			}
 			if tt.fail != nil {
 				heal := tt.fail(e, v.ID)
-				if _, err := e.svc.ConfirmSend(ctx, v.ID); err == nil {
+				if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); err == nil {
 					t.Fatal("ConfirmSend succeeded, want the injected failure")
 				}
 				if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusConfirmed {
@@ -280,13 +280,13 @@ func TestConfirmSend(t *testing.T) {
 				}
 				heal()
 			}
-			got, err := e.svc.ConfirmSend(ctx, v.ID)
+			got, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject)
 			if err != nil || got.Status != proposal.StatusExecuted {
 				t.Fatalf("ConfirmSend = %+v, %v; want EXECUTED", got, err)
 			}
 
 			// Executed: a further click calls nothing.
-			if again, err := e.svc.ConfirmSend(ctx, v.ID); err != nil || again.Status != proposal.StatusExecuted {
+			if again, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); err != nil || again.Status != proposal.StatusExecuted {
 				t.Fatalf("ConfirmSend of an executed send = %+v, %v", again, err)
 			}
 			calls := e.mailer.Calls()
@@ -346,7 +346,7 @@ func TestConfirmSendRefuses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newEnv(t).withHomework(t)
 			id := tt.setup(t, e)
-			if _, err := e.svc.ConfirmSend(ctx, id); !errors.Is(err, tt.want) {
+			if _, err := e.svc.ConfirmSend(ctx, id, ""); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
 			if tt.status != "" {

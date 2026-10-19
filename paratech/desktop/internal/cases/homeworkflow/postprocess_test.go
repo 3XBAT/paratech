@@ -118,7 +118,7 @@ func TestSummarizeStoresTheSummary(t *testing.T) {
 	if strings.Contains(r.Instructions(), "rivers") {
 		t.Fatal("transcript text leaked into the trusted instructions")
 	}
-	if want := llmKey("j1", r); r.IdempotencyKey() != want || !strings.HasPrefix(want, "pp:summary:v1:") {
+	if want := llmKey("j1", r); r.IdempotencyKey() != want || !strings.HasPrefix(want, fmt.Sprintf("pp:summary:v%d:", prompts.Version)) {
 		t.Fatalf("idempotency key = %q, want %q", r.IdempotencyKey(), want)
 	}
 	if len(e.assignments) != 0 {
@@ -247,7 +247,7 @@ func TestLLMKeyFollowsTheRequestContent(t *testing.T) {
 	if renamed.IdempotencyKey() == first.IdempotencyKey() {
 		t.Fatal("a changed request reused the key")
 	}
-	if len(renamed.IdempotencyKey()) > values.MaxIdempotencyKeyLen || !strings.HasPrefix(renamed.IdempotencyKey(), "pp:summary:v1:") {
+	if len(renamed.IdempotencyKey()) > values.MaxIdempotencyKeyLen || !strings.HasPrefix(renamed.IdempotencyKey(), fmt.Sprintf("pp:summary:v%d:", prompts.Version)) {
 		t.Fatalf("key = %q", renamed.IdempotencyKey())
 	}
 }

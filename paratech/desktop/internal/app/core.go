@@ -190,8 +190,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	}
 	// The deliveries lock the export file of an assignment while one of its emails is unresolved.
 	c.drafts, err = homeworkflow.NewDrafts(homeworkflow.DraftDeps{
-		LLM: llm, Assignments: assignments, Drafts: sqlite.NewDraftRepository(db), Summaries: summaries, Lessons: lessons,
-		Artifacts: store, Jobs: jobs, JobReader: jobs, Deliveries: c.deliveries, Clock: e.local, IDs: e.ids, Tx: db,
+		LLM: llm, Assignments: assignments, Recordings: recordings, Drafts: sqlite.NewDraftRepository(db),
+		Summaries: summaries, Lessons: lessons, Artifacts: store, Jobs: jobs, JobReader: jobs, Deliveries: c.deliveries, Clock: e.local, IDs: e.ids, Tx: db,
 		Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
 	})
 	if err != nil {

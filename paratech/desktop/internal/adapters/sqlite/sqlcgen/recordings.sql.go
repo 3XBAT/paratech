@@ -74,6 +74,43 @@ func (q *Queries) GetRecording(ctx context.Context, id string) (Recording, error
 	return i, err
 }
 
+const getRecordingOfTranscript = `-- name: GetRecordingOfTranscript :one
+SELECT recordings.id, recordings.lesson_id, recordings.status, recordings.started_at, recordings.stopped_at, recordings.heartbeat_at, recordings.max_duration_ms, recordings.duration_ms, recordings.chunk_count, recordings.chunks_ref, recordings.audio_ref, recordings.failure_reason, recordings.version, recordings.created_at, recordings.updated_at, recordings.silent, recordings.lesson_title, recordings.lesson_subject, recordings.lesson_kind, recordings.lesson_teacher, recordings.lesson_start, recordings.lesson_end FROM recordings
+JOIN transcripts ON transcripts.recording_id = recordings.id
+WHERE transcripts.id = ?1
+`
+
+// The recording a transcript was made from, for the lesson snapshot of its assignments (TASK-092).
+func (q *Queries) GetRecordingOfTranscript(ctx context.Context, transcriptID string) (Recording, error) {
+	row := q.db.QueryRowContext(ctx, getRecordingOfTranscript, transcriptID)
+	var i Recording
+	err := row.Scan(
+		&i.ID,
+		&i.LessonID,
+		&i.Status,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.HeartbeatAt,
+		&i.MaxDurationMs,
+		&i.DurationMs,
+		&i.ChunkCount,
+		&i.ChunksRef,
+		&i.AudioRef,
+		&i.FailureReason,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Silent,
+		&i.LessonTitle,
+		&i.LessonSubject,
+		&i.LessonKind,
+		&i.LessonTeacher,
+		&i.LessonStart,
+		&i.LessonEnd,
+	)
+	return i, err
+}
+
 const insertRecording = `-- name: InsertRecording :exec
 INSERT INTO recordings (id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms,
                         chunk_count, chunks_ref, audio_ref, failure_reason, silent, lesson_title, lesson_subject,

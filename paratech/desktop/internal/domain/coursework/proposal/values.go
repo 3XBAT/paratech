@@ -57,6 +57,9 @@ func (k Kind) NeedsRecipient() bool { return k == KindSendHomework }
 // NeedsAttachment reports whether the kind is checked against the content of the export file.
 func (k Kind) NeedsAttachment() bool { return k == KindSendHomework }
 
+// NeedsSubject reports whether the kind is checked against the email subject the user confirmed.
+func (k Kind) NeedsSubject() bool { return k == KindSendHomework }
+
 // NeedsAssignmentTitle reports whether the kind takes the stored title of the assignment (the heading of an export).
 func (k Kind) NeedsAssignmentTitle() bool { return k == KindExportHomework }
 
@@ -74,6 +77,7 @@ const (
 	// Stale only: the trusted state the user confirmed changed before execution.
 	ReasonRecipientChanged RejectReason = "recipient_changed"         // the configured recipient is not the confirmed one
 	ReasonArtifactChanged  RejectReason = "homework_artifact_changed" // the export file is not the confirmed content
+	ReasonSubjectChanged   RejectReason = "email_subject_changed"     // the email subject is not the one the user saw
 )
 
 // validFor reports whether r is a reason a proposal in status s may carry.
@@ -82,7 +86,8 @@ func (r RejectReason) validFor(s Status) bool {
 	case StatusRejected:
 		return r == ReasonUnknownAssignment || r == ReasonNoRecipient || r == ReasonNoArtifact || r == ReasonDueOutOfRange
 	case StatusStale:
-		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact || r == ReasonArtifactChanged
+		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact ||
+			r == ReasonArtifactChanged || r == ReasonSubjectChanged
 	}
 	return false
 }
@@ -163,6 +168,12 @@ type Facts struct {
 	AssignmentTitle  string    // its stored title, when it exists
 	Recipient        Recipient // the configured homework recipient; zero if none
 	Attachment       Digest    // the content of ExportRef of the assignment; zero if the file does not exist
+
+	// Send only, read before execution (Kind.NeedsSubject): the email subject the core builds now from trusted state
+	// and the one the confirmation dialog showed, carried back by the user's confirmation. Recheck is STALE when they
+	// differ, so the email never gets a subject the user did not see.
+	Subject      string
+	ShownSubject string
 }
 
 // exportFile is the file name of the exported homework inside exports/<assignment id>/.

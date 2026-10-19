@@ -21,7 +21,7 @@ func lessonStart() time.Time {
 // Every field carries a unique marker, so a test can tell exactly which material reached the request.
 func material() contextselection.Material {
 	return contextselection.Material{
-		Lesson: contextselection.Lesson{Title: "LESSON-TITLE", Start: lessonStart()},
+		Lesson: contextselection.Lesson{Title: "LESSON-TITLE", Start: lessonStart(), Subject: "LESSON-SUBJECT", Teacher: "LESSON-TEACHER"},
 		Transcript: []contextselection.Segment{
 			{StartMs: 123456, EndMs: 234567, Text: "TRANSCRIPT-ONE"},
 			{StartMs: 345678, EndMs: 456789, Text: "TRANSCRIPT-TWO"},
@@ -78,18 +78,18 @@ func TestBuildSendsOnlyTheContextOfTheOperation(t *testing.T) {
 			op:       values.OperationSummary,
 			keys:     []string{"lesson_title", "transcript"},
 			included: []string{"LESSON-TITLE", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO"},
-			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2026-10-14", "Wednesday", "2031", "123456", "234567"},
+			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2026-10-14", "Wednesday", "2031", "123456", "234567", "LESSON-SUBJECT", "LESSON-TEACHER"},
 		},
 		{
 			op:       values.OperationExtractHomework,
 			keys:     []string{"lesson_title", "lesson_start", "lesson_weekday", "transcript"},
 			included: []string{"LESSON-TITLE", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO", "2026-10-14T10:00:00+03:00", "Wednesday"},
-			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2031", "123456", "234567"},
+			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2031", "123456", "234567", "LESSON-SUBJECT", "LESSON-TEACHER"},
 		},
 		{
 			op:       values.OperationHomeworkDraft,
-			keys:     []string{"lesson_title", "assignment", "lesson_summary", "previous_draft", "student_request"},
-			included: []string{"LESSON-TITLE", "SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST"},
+			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "assignment", "lesson_summary", "previous_draft", "student_request"},
+			included: []string{"LESSON-TITLE", "LESSON-SUBJECT", "LESSON-TEACHER", "SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST"},
 			excluded: []string{"TRANSCRIPT-ONE", "TRANSCRIPT-TWO", "2026-10-14", "2031", "123456"},
 		},
 	}
@@ -265,5 +265,17 @@ func TestRemind(t *testing.T) {
 	}
 	if _, err := Remind(big, ErrMalformedOutput); !errors.Is(err, values.ErrInvalidLLMRequest) {
 		t.Fatalf("Remind over the size limit = %v", err)
+	}
+}
+
+func TestExtractionAsksForHints(t *testing.T) {
+	ins := Instructions(values.OperationExtractHomework)
+	for _, s := range []string{"subject_hint", "teacher_hint", "only when it is said in the transcript"} {
+		if !strings.Contains(ins, s) {
+			t.Errorf("extraction instructions do not mention %q", s)
+		}
+	}
+	if !strings.Contains(Instructions(values.OperationHomeworkDraft), "lesson_subject") {
+		t.Error("draft instructions do not explain lesson_subject")
 	}
 }

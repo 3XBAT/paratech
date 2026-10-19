@@ -5,8 +5,8 @@
 //
 //   - summary: the lesson title and the transcript text;
 //   - extract_homework_deadlines: the lesson title, the lesson start (the anchor for relative dates) and the transcript;
-//   - homework_draft: the lesson title, the assignment title and description, the lesson summary, the previous draft
-//     and the student's refinement request. The transcript is not sent: the summary stands for it;
+//   - homework_draft: the lesson title, subject and teacher, the assignment title and description, the lesson summary,
+//     the previous draft and the student's refinement request. The transcript is not sent: the summary stands for it;
 //   - lecture_text: the lesson title, its subject and kind and the transcript. The kind only selects trusted wording.
 //     The transcript is sent in parts with segment start times (domain/coursework/services/lectureparts, TASK-090).
 //

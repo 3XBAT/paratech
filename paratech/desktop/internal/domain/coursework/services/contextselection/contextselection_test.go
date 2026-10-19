@@ -14,7 +14,7 @@ var lessonStart = time.Date(2026, 10, 14, 10, 0, 0, 0, time.FixedZone("MSK", 3*6
 // full returns material with every field set, so each test can see what an operation drops.
 func full() Material {
 	return Material{
-		Lesson:         Lesson{Title: "  Linear algebra  ", Start: lessonStart, Subject: " Mathematics ", Kind: values.LessonKindSeminar},
+		Lesson:         Lesson{Title: "  Linear algebra  ", Start: lessonStart, Subject: " Mathematics ", Teacher: " Ivanova ", Kind: values.LessonKindSeminar},
 		Transcript:     []Segment{{StartMs: 0, EndMs: 900, Text: " Hello. "}, {StartMs: 900, EndMs: 950, Text: "  "}, {StartMs: 1000, EndMs: 2000, Text: "Solve 1-5."}},
 		Summary:        "SUMMARY-TEXT",
 		Assignment:     Assignment{Title: "Exercises 1-5", Description: "From chapter 2.", Due: lessonStart.Add(48 * time.Hour)},
@@ -36,7 +36,8 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 			transcript: "Hello.\nSolve 1-5.",
 		}},
 		{values.OperationHomeworkDraft, Context{
-			operation: values.OperationHomeworkDraft, lessonTitle: "Linear algebra", summary: "SUMMARY-TEXT",
+			operation: values.OperationHomeworkDraft, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
+			lessonTeacher: "Ivanova", summary: "SUMMARY-TEXT",
 			assignmentTitle: "Exercises 1-5", assignmentDescription: "From chapter 2.", previousDraft: "PREVIOUS-DRAFT",
 			studentRequest: "make it shorter",
 		}},
@@ -147,5 +148,30 @@ func TestSelectDraftWithDescriptionOnly(t *testing.T) {
 	}
 	if c.AssignmentDescription() != "Read chapter 3." || c.AssignmentTitle() != "" || c.Operation() != values.OperationHomeworkDraft {
 		t.Fatalf("unexpected context %+v", c)
+	}
+}
+
+func TestSubjectAndTeacherGoToTheDraftOnly(t *testing.T) {
+	m := Material{
+		Lesson:     Lesson{Title: "L", Start: time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC), Subject: " Физика ", Teacher: "Петров"},
+		Transcript: []Segment{{Text: "x"}},
+		Assignment: Assignment{Title: "T"},
+	}
+	c, err := Select(values.OperationHomeworkDraft, m)
+	if err != nil || c.LessonSubject() != "Физика" || c.LessonTeacher() != "Петров" {
+		t.Fatalf("draft: %q %q %v", c.LessonSubject(), c.LessonTeacher(), err)
+	}
+	for _, op := range []values.Operation{values.OperationSummary, values.OperationExtractHomework} {
+		c, err := Select(op, m)
+		if err != nil || c.LessonSubject() != "" || c.LessonTeacher() != "" {
+			t.Fatalf("%s: %q %q %v", op, c.LessonSubject(), c.LessonTeacher(), err)
+		}
+	}
+
+	for _, bad := range []Lesson{{Subject: "a\nb"}, {Teacher: strings.Repeat("я", MaxTitleRunes+1)}} {
+		m.Lesson = bad
+		if _, err := Select(values.OperationHomeworkDraft, m); !errors.Is(err, ErrInvalidMaterial) {
+			t.Fatalf("lesson %+v: error = %v, want ErrInvalidMaterial", bad, err)
+		}
 	}
 }

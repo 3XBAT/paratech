@@ -3,6 +3,7 @@
 // assignment titles and the lecture text are model output: show them as plain text, never as HTML. Copy and save run only on the user's
 // click.
 
+import { type LessonSource, lessonSource } from "../lessonLabel.js";
 import type { CallByName } from "./settings";
 
 /** Where the summary or the homework search stands. */
@@ -45,6 +46,14 @@ export interface SummaryAssignment {
   /** RFC 3339 in UTC, "" without a deadline. */
   due: string;
   userEdited: boolean;
+  /** The lesson (TASK-092), as on the homework page. */
+  subject: string;
+  subjectSource: LessonSource;
+  kind: string;
+  teacher: string;
+  teacherSource: LessonSource;
+  /** RFC 3339 in UTC, "" when unknown. */
+  lessonDate: string;
 }
 
 export interface SummaryHomework extends SummaryStep {
@@ -212,6 +221,12 @@ export function parseAssignment(raw: unknown): SummaryAssignment {
     description: str(r, "description", w),
     due: str(r, "due", w),
     userEdited: bool(r, "userEdited", w),
+    subject: str(r, "subject", w),
+    subjectSource: lessonSource(str(r, "subjectSource", w)),
+    kind: str(r, "kind", w),
+    teacher: str(r, "teacher", w),
+    teacherSource: lessonSource(str(r, "teacherSource", w)),
+    lessonDate: str(r, "lessonDate", w),
   };
 }
 

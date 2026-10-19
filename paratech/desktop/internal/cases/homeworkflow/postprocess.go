@@ -225,7 +225,7 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 	if op == values.OperationSummary {
 		return p.summarize(ctx, snap, report, in, ans.summary)
 	}
-	return p.extract(ctx, snap, report, in, ans.details)
+	return p.extract(ctx, snap, report, in, ans.details, ans.hints)
 }
 
 // AnswerCalls bounds the LLM calls of one post-processing job run: the request and at most two repeats after an
@@ -238,6 +238,7 @@ const AnswerCalls = 3
 type checkedAnswer struct {
 	summary summary.Content
 	details []assignment.Details
+	hints   values.LessonNames // subject and teacher named in the transcript (TASK-092)
 }
 
 // ask calls the LLM and checks the answer; an answer that fails the checks is asked again with a reminder of the
@@ -307,7 +308,7 @@ func check(op values.Operation, out values.UntrustedOutput, lessonStart time.Tim
 		}
 		details = append(details, d)
 	}
-	return checkedAnswer{details: details}, nil
+	return checkedAnswer{details: details, hints: x.Hints()}, nil
 }
 
 // remind builds the repeat of req after an answer rejected with rejection, keyed again with llmKey.
@@ -472,15 +473,16 @@ func (p *PostProcessor) summarize(ctx context.Context, snap job.Snapshot, report
 	return nil
 }
 
-// extract stores one assignment per checked item, keeping the ones the user edited.
+// extract stores one assignment per checked item, keeping the ones the user edited. Every assignment of the answer
+// gets its hints: the subject and teacher the model found in the transcript, stored apart from the schedule.
 func (p *PostProcessor) extract(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
-	in lessonInput, details []assignment.Details) error {
+	in lessonInput, details []assignment.Details, hints values.LessonNames) error {
 	if err := p.answered(ctx, snap, report); err != nil {
 		return err
 	}
 
 	for i, d := range details {
-		if err := p.storeAssignment(ctx, snap, in, i, d); err != nil {
+		if err := p.storeAssignment(ctx, snap, in, i, d, hints); err != nil {
 			return err
 		}
 	}
@@ -535,7 +537,8 @@ func (p *PostProcessor) withdraw(ctx context.Context, snap job.Snapshot, a *assi
 }
 
 // storeAssignment creates the assignment of item index or applies the new details to the one made before.
-func (p *PostProcessor) storeAssignment(ctx context.Context, snap job.Snapshot, in lessonInput, index int, d assignment.Details) error {
+func (p *PostProcessor) storeAssignment(ctx context.Context, snap job.Snapshot, in lessonInput, index int, d assignment.Details,
+	hints values.LessonNames) error {
 	var last error
 	for range saveAttempts {
 		a, err := p.assignments.GetBySource(ctx, in.transcript, index)
@@ -544,7 +547,7 @@ func (p *PostProcessor) storeAssignment(ctx context.Context, snap job.Snapshot, 
 			a, err = assignment.NewExtracted(assignment.Spec{
 				ID: p.ids.NewAssignmentID(), Lesson: in.lesson,
 				Origin:        assignment.Origin{Transcript: in.transcript, Index: index},
-				PromptVersion: prompts.Version, Details: d,
+				PromptVersion: prompts.Version, Details: d, Hints: hints,
 			}, p.clock.Now())
 			if err != nil {
 				return p.permanent(snap, stepSave, ErrStorage, err)
@@ -556,7 +559,11 @@ func (p *PostProcessor) storeAssignment(ctx context.Context, snap job.Snapshot, 
 			if err != nil {
 				return p.permanent(snap, stepSave, ErrStorage, err)
 			}
-			if !changed {
+			hinted, err := a.SetHints(hints, p.clock.Now())
+			if err != nil {
+				return p.permanent(snap, stepSave, ErrStorage, err)
+			}
+			if !changed && !hinted {
 				return nil
 			}
 		}

@@ -78,8 +78,8 @@ func newDraftEnv(t *testing.T) *draftEnv {
 
 func (e *draftEnv) draftDeps(llm LLMClient) DraftDeps {
 	return DraftDeps{
-		LLM: llm, Assignments: ppAssignments{e.ppStore}, Drafts: e.drafts, Summaries: ppSummaries{e.ppStore},
-		Lessons: ppLessons{e.ppStore}, Artifacts: e.files, Jobs: ppJobs{e.ppStore}, JobReader: ppJobs{e.ppStore},
+		LLM: llm, Assignments: ppAssignments{e.ppStore}, Recordings: ppTranscriptRecordings{e.ppStore}, Drafts: e.drafts,
+		Summaries: ppSummaries{e.ppStore}, Lessons: ppLessons{e.ppStore}, Artifacts: e.files, Jobs: ppJobs{e.ppStore}, JobReader: ppJobs{e.ppStore},
 		Deliveries: e.deliveries, Clock: e.clock, IDs: ppIDs{e.ppStore}, Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
 	}
 }

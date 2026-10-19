@@ -33,6 +33,8 @@
     "src/googleView.ts",
     "src/calendarView.ts",
     "src/homeworkView.ts",
+    "src/lessonLabel.ts",
+    "src/pages/LessonCorrection.tsx",
     "src/bindings/transcript.ts",
     "src/transcriptView.ts",
     "src/bindings/summary.ts",

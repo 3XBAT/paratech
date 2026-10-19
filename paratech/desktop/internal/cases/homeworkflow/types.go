@@ -50,6 +50,8 @@ type Deps struct {
 	Mailer         HomeworkMailer
 	Exporter       HomeworkExporter
 	Calendar       DeadlineCalendar
+	Recordings     TranscriptRecordings // the lesson snapshot of an assignment (TASK-092)
+	Lessons        LessonReader         // the live lesson when there is no snapshot
 	Clock          Clock
 	IDs            IDGenerator
 	Tx             Tx
@@ -67,6 +69,7 @@ type ProposalView struct {
 	Body         string
 	Due          time.Time
 	Recipient    string // the trusted address for send_homework_email, set once validated
+	Subject      string // the email subject of a validated send_homework_email, built by the core (TASK-092)
 	CreatedAt    time.Time
 	ConfirmedAt  time.Time
 
@@ -132,20 +135,44 @@ type AssignmentView struct {
 	UserEdited  bool
 	Version     int64 // the stored version, for the UI to tell a changed assignment
 	UpdatedAt   time.Time
+
+	// The lesson (TASK-092): «Предмет · тип · преподаватель», «занятие 19.10». A subject or teacher from the
+	// transcript (values.SourceTranscript) is model output and is shown marked «по записи».
+	Subject       string
+	SubjectSource values.NameSource
+	Kind          string // code of the lesson kind ("lecture", ...); empty if unknown
+	Teacher       string
+	TeacherSource values.NameSource
+	LessonDate    time.Time // the lesson start in the student's zone; zero if unknown
+	// CorrectedSubject and CorrectedTeacher are the user's correction, for the edit form; empty: none.
+	CorrectedSubject string
+	CorrectedTeacher string
 }
 
-func assignmentViewOf(a *assignment.Assignment) AssignmentView {
+func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) AssignmentView {
 	d := a.Details()
 	return AssignmentView{
 		ID: a.ID(), LessonID: a.LessonID(), Title: d.Title(), Description: d.Description(), Due: d.Due(),
 		UserEdited: a.UserEdited(), Version: a.Version(), UpdatedAt: a.UpdatedAt(),
+		Subject: l.Subject(), SubjectSource: l.SubjectSource(), Kind: l.Kind(), Teacher: l.Teacher(),
+		TeacherSource: l.TeacherSource(), LessonDate: l.Date(),
+		CorrectedSubject: a.Correction().Subject(), CorrectedTeacher: a.Correction().Teacher(),
 	}
+}
+
+// LessonCorrection is the subject and teacher the user entered for an assignment (TASK-092); an empty field removes
+// the correction of that field.
+type LessonCorrection struct {
+	ID      shared.AssignmentID
+	Subject string
+	Teacher string
 }
 
 // DraftDeps are the ports and settings of Drafts. Log is optional.
 type DraftDeps struct {
 	LLM         LLMClient
 	Assignments AssignmentRepository
+	Recordings  TranscriptRecordings // the lesson snapshot of the assignment (TASK-092)
 	Drafts      DraftRepository
 	Summaries   SummaryRepository
 	Lessons     LessonReader

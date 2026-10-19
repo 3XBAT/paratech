@@ -58,8 +58,8 @@ func (s *Service) LectureSuggestedName(ctx context.Context, id shared.RecordingI
 		return "", err
 	}
 	at := rec.StartedAt().In(s.clock.Now().Location())
-	if title := s.lessonTitle(ctx, rec); title != "" {
-		return summaryexport.FileName(fmt.Sprintf(lectureLessonFileName, title, at.Format(fileDateLayout)), f), nil
+	if l := s.liveLesson(ctx, rec); l != nil && l.Content().Title != "" {
+		return summaryexport.FileName(fmt.Sprintf(lectureLessonFileName, l.Content().Title, at.Format(fileDateLayout)), f), nil
 	}
 	return summaryexport.FileName(fmt.Sprintf(lectureAdHocFileName, at.Format(fileTimeLayout)), f), nil
 }

@@ -51,6 +51,8 @@ type Querier interface {
 	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
 	// store the result.
 	GetRecording(ctx context.Context, id string) (Recording, error)
+	// The recording a transcript was made from, for the lesson snapshot of its assignments (TASK-092).
+	GetRecordingOfTranscript(ctx context.Context, transcriptID string) (Recording, error)
 	// Settings singleton (row id = 1) of the settings repository, with the optimistic-concurrency protocol of ADR-0004(d).
 	// No row means the defaults of the aggregate (version 0).
 	GetSettings(ctx context.Context) (Setting, error)

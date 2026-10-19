@@ -13,6 +13,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -75,8 +76,9 @@ func New(d Deps) (*Service, error) {
 type results struct {
 	rec         *recording.Recording
 	lessonTitle string
-	transcript  shared.TranscriptID // empty: not transcribed
-	summary     *summary.Summary    // nil: none
+	lesson      values.ScheduledLesson // what the schedule says of the lesson, for the assignments
+	transcript  shared.TranscriptID    // empty: not transcribed
+	summary     *summary.Summary       // nil: none
 	assignments []*assignment.Assignment
 	lecture     *lecturetext.LectureText // nil: none
 }
@@ -92,7 +94,7 @@ func (s *Service) View(ctx context.Context, id shared.RecordingID) (View, error)
 		Recording: id, Lesson: r.rec.LessonID(), Title: s.title(r), StartedAt: r.rec.StartedAt(),
 		Duration: d, HasDuration: has, Transcribed: r.transcript != "",
 		Summary:     Summary{Step: Step{State: StateNone}},
-		Homework:    Homework{Step: Step{State: StateNone}, Assignments: assignmentsOf(r.assignments)},
+		Homework:    Homework{Step: Step{State: StateNone}, Assignments: assignmentsOf(r.assignments, r.lesson)},
 		LectureText: LectureText{Step: Step{State: StateNone}},
 	}
 	if r.lecture != nil && r.lecture.Ready() {
@@ -144,8 +146,8 @@ func (s *Service) SuggestedName(ctx context.Context, id shared.RecordingID, f su
 		return "", err
 	}
 	at := rec.StartedAt().In(s.clock.Now().Location())
-	if title := s.lessonTitle(ctx, rec); title != "" {
-		return summaryexport.FileName(fmt.Sprintf(lessonFileName, title, at.Format(fileDateLayout)), f), nil
+	if l := s.liveLesson(ctx, rec); l != nil && l.Content().Title != "" {
+		return summaryexport.FileName(fmt.Sprintf(lessonFileName, l.Content().Title, at.Format(fileDateLayout)), f), nil
 	}
 	return summaryexport.FileName(fmt.Sprintf(adHocFileName, at.Format(fileTimeLayout)), f), nil
 }
@@ -204,7 +206,11 @@ func (s *Service) load(ctx context.Context, id shared.RecordingID) (results, err
 	if err != nil {
 		return results{}, err
 	}
-	r := results{rec: rec, lessonTitle: s.lessonTitle(ctx, rec)}
+	live := s.liveLesson(ctx, rec)
+	r := results{rec: rec, lesson: s.scheduled(rec, live)}
+	if live != nil {
+		r.lessonTitle = live.Content().Title
+	}
 
 	t, err := s.transcripts.LatestByRecording(ctx, id)
 	switch {
@@ -270,19 +276,34 @@ func (s *Service) title(r results) string {
 	return fmt.Sprintf(adHocTitle, r.rec.StartedAt().In(s.clock.Now().Location()).Format(titleTimeLayout))
 }
 
-// lessonTitle is "" for an ad-hoc recording or a lesson that is gone; a failed read only costs the title.
-func (s *Service) lessonTitle(ctx context.Context, rec *recording.Recording) string {
+// liveLesson is the lesson of the recording in the schedule; nil for an ad-hoc recording or a lesson that is gone. A
+// failed read only costs the title.
+func (s *Service) liveLesson(ctx context.Context, rec *recording.Recording) *lesson.Lesson {
 	if rec.LessonID() == "" {
-		return ""
+		return nil
 	}
 	l, err := s.lessons.Get(ctx, rec.LessonID())
 	if err != nil {
 		if !errors.Is(err, shared.ErrNotFound) {
 			s.log.Warn(opLesson, slog.String("recording", string(rec.ID())), slog.Any("cause", err))
 		}
-		return ""
+		return nil
 	}
-	return l.Content().Title
+	return l
+}
+
+// scheduled is what the schedule says of the lesson for its assignments (TASK-092): the snapshot the recording kept,
+// the live lesson only without one; the date falls back to the recording start and is shown in the clock's zone.
+func (s *Service) scheduled(rec *recording.Recording, live *lesson.Lesson) values.ScheduledLesson {
+	var snapshot, current *values.ScheduledLesson
+	if snap := rec.LessonSnapshot(); !snap.IsZero() {
+		snapshot = &values.ScheduledLesson{Subject: snap.Subject(), Kind: snap.Kind(), Teacher: snap.Teacher(), Start: snap.ScheduledStart()}
+	}
+	if live != nil {
+		c := live.Content()
+		current = &values.ScheduledLesson{Subject: c.Subject, Kind: c.Kind.String(), Teacher: c.Teacher, Start: c.Start}
+	}
+	return values.ResolveScheduledLesson(snapshot, current, rec.StartedAt(), s.clock.Now().Location())
 }
 
 // stepOf derives the state of a step from its newest job; has tells whether a result of the step is stored. No job
@@ -328,11 +349,16 @@ func waitOf(j *job.Job) WaitReason {
 	return WaitInLine
 }
 
-func assignmentsOf(list []*assignment.Assignment) []Assignment {
+func assignmentsOf(list []*assignment.Assignment, sched values.ScheduledLesson) []Assignment {
 	out := make([]Assignment, len(list))
 	for i, a := range list {
 		d := a.Details()
-		out[i] = Assignment{ID: a.ID(), Title: d.Title(), Description: d.Description(), Due: d.Due(), UserEdited: a.UserEdited()}
+		l := values.NewLessonLabel(sched, a.Hints(), a.Correction())
+		out[i] = Assignment{
+			ID: a.ID(), Title: d.Title(), Description: d.Description(), Due: d.Due(), UserEdited: a.UserEdited(),
+			Subject: l.Subject(), SubjectSource: l.SubjectSource(), Kind: l.Kind(), Teacher: l.Teacher(),
+			TeacherSource: l.TeacherSource(), LessonDate: l.Date(),
+		}
 	}
 	return out
 }
