@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -22,8 +23,8 @@ var (
 	ErrSwitchRefused = errors.New("audiocapture: the capture cannot switch now")
 
 	// ErrSwitchFailed means the recorder child of the new source did not start; the capture goes back to the source it
-	// had.
-	ErrSwitchFailed = errors.New("audiocapture: the new source did not start")
+	// had. It wraps recording.ErrSourceDidNotStart.
+	ErrSwitchFailed = fmt.Errorf("audiocapture: %w", recording.ErrSourceDidNotStart)
 )
 
 // switchReq is one switch handed to the supervisor.

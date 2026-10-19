@@ -186,8 +186,8 @@ func TestRecorderSwitchGoesBackWhenTheNewSourceFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := switchTo(t, e, cometSource(t))
-	if !errors.Is(err, audiocapture.ErrSwitchFailed) {
-		t.Fatalf("Switch = %v, want ErrSwitchFailed", err)
+	if !errors.Is(err, audiocapture.ErrSwitchFailed) || !errors.Is(err, recording.ErrSourceDidNotStart) {
+		t.Fatalf("Switch = %v, want ErrSwitchFailed wrapping recording.ErrSourceDidNotStart", err)
 	}
 	e.waitDiag(t, "zoom is captured again", func(d audiocapture.Diagnostics) bool {
 		return d.Running && d.App == "zoom.exe" && d.TargetPID == zoom1.PID

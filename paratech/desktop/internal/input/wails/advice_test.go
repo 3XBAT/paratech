@@ -72,6 +72,8 @@ func TestActivityServiceSwitchSource(t *testing.T) {
 			err: fmt.Errorf("switch: %w", recording.ErrSourceNotRunning), want: SourceSwitch{Problem: "source_gone"}},
 		{name: "refused", id: "r1", app: "comet.exe",
 			err: fmt.Errorf("switch: %w", recordingsession.ErrSwitchRefused), want: SourceSwitch{Problem: "refused"}},
+		{name: "the new source did not start", id: "r1", app: "comet.exe",
+			err: fmt.Errorf("switch: %w", recordingsession.ErrSwitchFailed), want: SourceSwitch{Problem: "failed"}},
 		{name: "not running", id: "r1", app: "comet.exe",
 			err: fmt.Errorf("switch: %w", recordingsession.ErrNotRunning), wantErr: ErrRecordingNotRunning},
 		{name: "unknown", id: "r1", app: "comet.exe", err: shared.ErrNotFound, wantErr: ErrItemNotFound},

@@ -99,7 +99,8 @@ func (s *Service) tellAdvice(id shared.RecordingID, advice values.SourceAdvice) 
 // SwitchSource makes the running recording id capture source from now on (TASK-082): the same recording, the same
 // chunks. The advice is cleared and watches the new source. A recording that this process does not capture yields
 // ErrNotRunning (shared.ErrNotFound when there is none); one that is stopping or finished, or a capture that refuses,
-// yields ErrSwitchRefused; an app that does not run wraps recording.ErrSourceNotRunning. On any error the recording
+// yields ErrSwitchRefused; an app that does not run wraps recording.ErrSourceNotRunning, a new source whose capture
+// did not start ErrSwitchFailed. On any error the recording
 // goes on with the source it had. Switching to the current source changes nothing in the capture.
 func (s *Service) SwitchSource(ctx context.Context, id shared.RecordingID, source values.Source) error {
 	sess, err := s.running(ctx, id)
@@ -117,7 +118,10 @@ func (s *Service) SwitchSource(ctx context.Context, id shared.RecordingID, sourc
 	// source may lag behind a switch that was given up but done.
 	if err := s.recorder.Switch(ctx, id, source); err != nil {
 		cancelled := ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-		if !errors.Is(err, recording.ErrSourceNotRunning) && !cancelled {
+		switch {
+		case errors.Is(err, recording.ErrSourceDidNotStart):
+			err = fmt.Errorf("%w: %w", ErrSwitchFailed, err)
+		case !errors.Is(err, recording.ErrSourceNotRunning) && !cancelled:
 			err = fmt.Errorf("%w: %w", ErrSwitchRefused, err)
 		}
 		s.log.Warn("switching the source failed; the recording goes on as it was", slog.String("recording", id.String()),

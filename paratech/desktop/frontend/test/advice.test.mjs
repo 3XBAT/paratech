@@ -104,7 +104,7 @@ test("switchSource and dismissAdvice call the bound methods and check the answer
   assert.equal(Object.keys(methods).length, 6);
   assert.equal(errorMessages.invalidSource, "invalid source");
 
-  for (const problem of ["source_gone", "refused"]) {
+  for (const problem of ["source_gone", "refused", "failed"]) {
     assert.deepEqual(parseSourceSwitch({ switched: false, problem }), { switched: false, problem });
   }
   for (const bad of [
@@ -173,6 +173,9 @@ test("«Переключиться» and «Оставить»: done, or a proble
   });
   assert.deepEqual(await switchToSuggestion(fake({ switched: false, problem: "refused" }), advice), {
     kind: "problem", text: switchProblemTexts.refused,
+  });
+  assert.deepEqual(await switchToSuggestion(fake({ switched: false, problem: "failed" }), advice), {
+    kind: "problem", text: "Не удалось переключиться: источник не запустился. Запись идёт как раньше.",
   });
   assert.deepEqual(await keepSource(fake(), advice), { kind: "done" });
   assert.deepEqual(calls.at(-1), ["dismiss", "r1"]);

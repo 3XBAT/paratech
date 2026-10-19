@@ -76,7 +76,7 @@ export interface AdviceView {
 }
 
 /** Why a switch did not happen; "" once switched. The recording goes on with its old source either way. */
-export type SwitchProblem = "" | "source_gone" | "refused";
+export type SwitchProblem = "" | "source_gone" | "refused" | "failed";
 
 /** The answer of switchSource. */
 export interface SourceSwitch {
@@ -185,7 +185,7 @@ const errorCodes = [
   "homeworkFailed",
   "silentRecording",
 ] as const;
-const switchProblems = ["", "source_gone", "refused"] as const;
+const switchProblems = ["", "source_gone", "refused", "failed"] as const;
 const actions = ["", "runNow", "openModels", "openConnections", "checkSound"] as const;
 
 function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {

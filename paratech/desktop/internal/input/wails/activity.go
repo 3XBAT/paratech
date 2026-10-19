@@ -44,6 +44,7 @@ type RecordingStopper interface {
 const (
 	switchSourceGone = "source_gone" // the chosen app does not run
 	switchRefused    = "refused"     // the recording cannot switch now (stopping, or another switch runs)
+	switchFailed     = "failed"      // the capture of the new source did not start
 )
 
 // JobForcer is the "Run now" action; satisfied by jobrunner.Service.
@@ -110,8 +111,9 @@ type AdviceView struct {
 // SourceSwitch is the answer of SwitchSource.
 type SourceSwitch struct {
 	Switched bool `json:"switched"`
-	// Problem says why not: "source_gone" (the app does not run any more) or "refused" (the recording cannot switch
-	// now); "" once switched. The recording goes on with its old source either way.
+	// Problem says why not: "source_gone" (the app does not run any more), "refused" (the recording cannot switch
+	// now) or "failed" (the capture of the new source did not start); "" once switched. The recording goes on with its
+	// old source either way.
 	Problem string `json:"problem"`
 }
 
@@ -201,6 +203,8 @@ func (s *ActivityService) SwitchSource(ctx context.Context, id, app string) (Sou
 		return SourceSwitch{Switched: true}, nil
 	case errors.Is(err, recording.ErrSourceNotRunning): // the use case logged it
 		return SourceSwitch{Problem: switchSourceGone}, nil
+	case errors.Is(err, recordingsession.ErrSwitchFailed):
+		return SourceSwitch{Problem: switchFailed}, nil
 	case errors.Is(err, recordingsession.ErrSwitchRefused):
 		return SourceSwitch{Problem: switchRefused}, nil
 	case errors.Is(err, recordingsession.ErrNotRunning):

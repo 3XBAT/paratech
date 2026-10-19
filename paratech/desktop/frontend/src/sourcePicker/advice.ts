@@ -20,6 +20,7 @@ export const adviceHints = {
 export const switchProblemTexts = {
   source_gone: "Это приложение уже закрыто — переключиться не получилось. Запись идёт как раньше.",
   refused: "Сейчас переключиться нельзя. Повторите через несколько секунд.",
+  failed: "Не удалось переключиться: источник не запустился. Запись идёт как раньше.",
 } as const;
 
 const switchErrors: Readonly<Record<string, string>> = {

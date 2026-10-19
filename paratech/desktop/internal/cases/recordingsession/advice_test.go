@@ -3,6 +3,7 @@ package recordingsession
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -316,6 +317,18 @@ func TestSwitchSourceRefused(t *testing.T) {
 		}
 		cur, _ := a.svc.Active()
 		if cur.Source.App() != "browser.exe" || !a.rec.Running(info.ID) {
+			t.Fatalf("source %v after a failed switch", cur.Source)
+		}
+	})
+	t.Run("the new source did not start", func(t *testing.T) {
+		a := newAdviceEnv(t)
+		info := a.startSource("browser.exe")
+		a.rec.FailSwitch(fmt.Errorf("child: %w", recording.ErrSourceDidNotStart))
+		err := a.svc.SwitchSource(testCtx(t), info.ID, cometSource(t))
+		if !errors.Is(err, ErrSwitchFailed) || errors.Is(err, ErrSwitchRefused) {
+			t.Fatalf("SwitchSource = %v, want ErrSwitchFailed", err)
+		}
+		if cur, _ := a.svc.Active(); cur.Source.App() != "browser.exe" || !a.rec.Running(info.ID) {
 			t.Fatalf("source %v after a failed switch", cur.Source)
 		}
 	})
