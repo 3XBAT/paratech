@@ -1,5 +1,16 @@
 import { useCallback, useState } from "react";
-import { bottomGroupStart, closeTranscript, initialRoute, type PageId, pages, routeToPage, routeToTranscript } from "./nav";
+import {
+  bottomGroupStart,
+  closeTranscript,
+  initialRoute,
+  type PageId,
+  pages,
+  routeToAssignment,
+  routeToPage,
+  routeToSummary,
+  routeToTranscript,
+} from "./nav";
+import { OpenSummaryContext } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
@@ -8,15 +19,16 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { RecordingsPage } from "./pages/RecordingsPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SummaryPage } from "./pages/SummaryPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
 import { Icon, IconSprite } from "./ui/Icon";
 
-function PageView(props: { id: PageId; visit: number; onOpen: (id: PageId) => void }) {
+function PageView(props: { id: PageId; visit: number; assignment: string; onOpen: (id: PageId) => void }) {
   switch (props.id) {
     case "recordings":
       return <RecordingsPage onOpen={props.onOpen} />;
     case "homework":
-      return <HomeworkPage />;
+      return <HomeworkPage openAssignment={props.assignment} />;
     case "schedule":
       return <SchedulePage />;
     case "connections":
@@ -37,7 +49,15 @@ export function App() {
   const [visit, setVisit] = useState(0);
   const current = route.page;
   const openTranscript = useCallback((id: string) => setRoute((r) => routeToTranscript(r, id)), []);
+  const openSummary = useCallback((id: string) => setRoute((r) => routeToSummary(r, id)), []);
   const openPage = useCallback((id: PageId) => setRoute(routeToPage(id)), []);
+  // Counts the jumps to an assignment: each one opens «Домашние задания» afresh on that assignment.
+  const [jump, setJump] = useState(0);
+  const openAssignment = useCallback((id: string) => {
+    setRoute(routeToAssignment(id));
+    setJump((j) => j + 1);
+  }, []);
+  const overlay = route.transcript !== "" || route.summary !== "";
 
   return (
     <div className="shell">
@@ -60,16 +80,33 @@ export function App() {
         ))}
       </nav>
       <main className="sheet">
-        {/* A new key per section replays the entry animation. The section stays mounted under an open transcript, so
-            «Назад» finds it as the user left it. */}
-        <div key={current} className="screen" hidden={route.transcript !== ""}>
+        {/* A new key per section replays the entry animation. The section stays mounted under an open transcript or
+            summary, so «Назад» finds it as the user left it. */}
+        <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
           <OpenTranscriptContext.Provider value={openTranscript}>
-            <PageView id={current} visit={visit} onOpen={openPage} />
+            <OpenSummaryContext.Provider value={openSummary}>
+              <PageView id={current} visit={visit} assignment={route.assignment} onOpen={openPage} />
+            </OpenSummaryContext.Provider>
           </OpenTranscriptContext.Provider>
         </div>
         {route.transcript !== "" && (
           <div key={`transcript:${route.transcript}`} className="screen">
-            <TranscriptPage recordingId={route.transcript} onBack={() => setRoute(closeTranscript)} />
+            <TranscriptPage
+              recordingId={route.transcript}
+              onBack={() => setRoute(closeTranscript)}
+              onOpenSummary={openSummary}
+            />
+          </div>
+        )}
+        {route.summary !== "" && (
+          <div key={`summary:${route.summary}`} className="screen">
+            {/* TASK-086: pass onRetry (the retry binding) for «Повторить» / «Сделать конспект заново». */}
+            <SummaryPage
+              recordingId={route.summary}
+              onBack={() => setRoute(closeTranscript)}
+              onOpenTranscript={openTranscript}
+              onOpenAssignment={openAssignment}
+            />
           </div>
         )}
       </main>

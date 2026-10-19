@@ -106,7 +106,7 @@ func TestOpenBindings(t *testing.T) {
 	}
 	b, err := s.OpenServices(context.Background())
 	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Popup == nil || b.Schedule == nil || b.Models == nil || b.Speech == nil ||
-		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil || b.Transcript == nil {
+		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil || b.Transcript == nil || b.Summary == nil {
 		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
 
@@ -143,6 +143,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "homework drafts", edit: func(c *Core) { c.Homework.Drafts = nil }},
 		{name: "homework deliveries", edit: func(c *Core) { c.Homework.Deliveries = nil }},
 		{name: "transcript viewer", edit: func(c *Core) { c.Transcript = nil }},
+		{name: "summary viewer", edit: func(c *Core) { c.Summary = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
@@ -183,6 +184,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "help.ts", typ: reflect.TypeFor[*HelpService](), methods: 1},
 		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 13},
 		{file: "transcript.ts", typ: reflect.TypeFor[*TranscriptService](), methods: 6},
+		{file: "summary.ts", typ: reflect.TypeFor[*SummaryService](), methods: 3}, // TASK-087
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

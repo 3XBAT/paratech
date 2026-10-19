@@ -31,8 +31,13 @@ import { Banner, Card, Input, Progress, ResultLine, type ResultKind, Segmented }
 
 // «Расшифровка» of one recording (TASK-079): the local transcript, live while the recognition runs, with search,
 // copy, save and playback from a timestamp. Works offline: everything comes from the core on this computer. The text
-// is recognised speech and is rendered as React text only; the highlight is built from text pieces.
-export function TranscriptPage(props: { recordingId: string; onBack: () => void }) {
+// is recognised speech and is rendered as React text only; the highlight is built from text pieces. «Открыть конспект»
+// (TASK-087) shows once the recognition is done: the summary page itself says whether the summary is ready.
+export function TranscriptPage(props: {
+  recordingId: string;
+  onBack: () => void;
+  onOpenSummary: (recordingId: string) => void;
+}) {
   const { recordingId: id } = props;
   const api = useMemo(() => transcriptApi(callByName), []);
   const [status, setStatus] = useState<TranscriptStatus | null>(null);
@@ -119,6 +124,11 @@ export function TranscriptPage(props: { recordingId: string; onBack: () => void 
             {status && status.startedAt !== "" && <span className="muted num"> · {formatTime(status.startedAt)}</span>}
           </p>
         </div>
+        {status?.state === "done" && (
+          <Button variant="ghost" icon="doc" onClick={() => props.onOpenSummary(id)}>
+            Открыть конспект
+          </Button>
+        )}
       </div>
       {error && (
         <Banner kind="fail" role="alert">

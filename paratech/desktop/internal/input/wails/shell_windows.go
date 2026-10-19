@@ -61,6 +61,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Help))
 	app.RegisterService(application.NewService(b.Homework))
 	app.RegisterService(application.NewService(b.Transcript))
+	app.RegisterService(application.NewService(b.Summary))
 	media.setSource(b.Transcript.uc) // the media handler plays recordings through the transcript use case
 
 	u := &windowsUI{app: app}

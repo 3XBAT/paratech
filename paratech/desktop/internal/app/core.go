@@ -36,6 +36,7 @@ import (
 	"paratech/desktop/internal/cases/soundcheck"
 	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/cases/sttspeed"
+	"paratech/desktop/internal/cases/summaryview"
 	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/transcriptview"
@@ -286,6 +287,14 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: transcript viewer: %w", err)
 	}
+	// Local only as well: the summary and the homework found are read from the post-processing results.
+	summaryViewer, err := summaryview.New(summaryview.Deps{
+		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Summaries: summaries, Assignments: assignments,
+		Jobs: jobs, Writer: textfile.New(), Clock: e.local, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: summary viewer: %w", err)
+	}
 
 	// A model installed while the app runs gets the waiting recordings enqueued at once; without the speech component
 	// their jobs wait QUEUED until it is installed (the pages offer it: Speech).
@@ -300,6 +309,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 		Transcript: viewer,
+		Summary:    summaryViewer,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

@@ -33,27 +33,40 @@ export function pageById(id: string): Page {
 }
 
 /**
- * Where the window is: a rail section and, over it, the transcript of a recording (TASK-079). The transcript is not a
- * rail section: it opens from a recording ("" when closed) and the section under it stays as the user left it.
+ * Where the window is: a rail section and, over it, the transcript (TASK-079) or the summary (TASK-087) of a recording.
+ * Neither is a rail section: they open from a recording ("" when closed), one at a time, and the section under them
+ * stays as the user left it. assignment: the assignment «Домашние задания» opens with ("" for the list).
  */
 export interface Route {
   page: PageId;
   transcript: string;
+  summary: string;
+  assignment: string;
 }
 
-export const initialRoute: Route = { page: defaultPage, transcript: "" };
+export const initialRoute: Route = { page: defaultPage, transcript: "", summary: "", assignment: "" };
 
-/** A rail click: the section, with the transcript closed. */
+/** A rail click: the section, with the transcript and the summary closed. */
 export function routeToPage(id: PageId): Route {
-  return { page: id, transcript: "" };
+  return { page: id, transcript: "", summary: "", assignment: "" };
 }
 
-/** Opens the transcript of a recording over the current section. */
+/** Opens the transcript of a recording over the current section (in place of an open summary). */
 export function routeToTranscript(r: Route, recordingId: string): Route {
-  return { page: r.page, transcript: recordingId };
+  return { ...r, transcript: recordingId, summary: "" };
 }
 
-/** Back from the transcript to the section it was opened from. */
+/** Opens the summary of a recording over the current section (in place of an open transcript). */
+export function routeToSummary(r: Route, recordingId: string): Route {
+  return { ...r, transcript: "", summary: recordingId };
+}
+
+/** Back from the transcript or the summary to the section it was opened from. */
 export function closeTranscript(r: Route): Route {
-  return { page: r.page, transcript: "" };
+  return { ...r, transcript: "", summary: "" };
+}
+
+/** Opens an assignment in «Домашние задания» (from the summary). */
+export function routeToAssignment(assignmentId: string): Route {
+  return { page: "homework", transcript: "", summary: "", assignment: assignmentId };
 }

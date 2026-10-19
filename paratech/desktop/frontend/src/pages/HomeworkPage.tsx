@@ -40,9 +40,10 @@ import { TranscriptLinks } from "./TranscriptLinks";
 // the confirmation dialog (AC-13, AC-14, AC-15). The core decides what can be sent and what to offer for an email; the
 // page shows it. Assignment, draft and instruction texts may be model output: they are plain React text and textarea
 // values only, never HTML (hard rule 3).
-export function HomeworkPage() {
+// openAssignment: the assignment to open at once (a jump from the summary, TASK-087); "" shows the list.
+export function HomeworkPage(props: { openAssignment?: string }) {
   const api = useMemo(() => homeworkApi(callByName), []);
-  const [openId, setOpenId] = useState("");
+  const [openId, setOpenId] = useState(props.openAssignment ?? "");
 
   return openId === "" ? (
     <AssignmentList api={api} onOpen={setOpenId} />
