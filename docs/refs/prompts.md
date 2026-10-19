@@ -6,7 +6,8 @@ Source: TASK-093. Code: `desktop/internal/domain/coursework/services/prompts` (i
 ## What a request holds
 - Trusted instructions: constants of `prompts` (English, Russian phrasings quoted as examples) + the JSON Schema.
 - Untrusted data between `<untrusted_data>` markers: the transcript and the lesson context (title, subject, kind,
-  teacher, `lesson_start`, `next_lesson_start`). "К следующему занятию" resolves to `next_lesson_start`.
+  teacher, `lesson_start`, `next_lesson_start`, `next_lesson_kind`). "К следующему занятию" resolves to
+  `next_lesson_start`; "к следующему семинару" only when `next_lesson_kind` is `seminar`, else `due` is null.
 - The lesson kind (closed enum) also picks one constant sentence of the summary and lecture text instructions.
 
 ## Changing a prompt
