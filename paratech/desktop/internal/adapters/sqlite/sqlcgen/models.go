@@ -83,6 +83,20 @@ type Job struct {
 	Cause           string
 }
 
+type LectureText struct {
+	ID            string
+	TranscriptID  sql.NullString
+	LessonID      sql.NullString
+	Blocks        string
+	PromptVersion int64
+	Run           string
+	RunParts      int64
+	Parts         string
+	Version       int64
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
 type Proposal struct {
 	ID               string
 	Kind             string
