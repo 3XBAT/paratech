@@ -46,6 +46,10 @@ export interface RecordingItem {
   jobError: string;
   action: ChainAction;
   actionJobId: string;
+  /** Approximate time left of a queued or running transcription («≈ N мин осталось», TASK-084). */
+  remainingSeconds: number;
+  /** false: no time left to show. */
+  hasRemaining: boolean;
 }
 
 /**
@@ -171,6 +175,8 @@ export function parseRecording(raw: unknown): RecordingItem {
     jobError: str(r, "jobError", w),
     action: oneOf(r, "action", w, actions),
     actionJobId: str(r, "actionJobId", w),
+    remainingSeconds: num(r, "remainingSeconds", w),
+    hasRemaining: bool(r, "hasRemaining", w),
   };
 }
 

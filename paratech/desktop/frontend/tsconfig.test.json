@@ -21,6 +21,8 @@
     "src/pages/AppleCalendarHelpPage.tsx",
     "src/bindings/calendar.ts",
     "src/bindings/homework.ts",
+    "src/bindings/load.ts",
+    "src/durationEstimate.ts",
     "src/activityView.ts",
     "src/scheduleView.ts",
     "src/modelsView.ts",

@@ -59,19 +59,19 @@ const sum = "a".repeat(64);
 const installed = {
   id: "m-1", name: "base", version: "1", sizeBytes: 59707625, sha256: sum, quantization: "q5_1",
   capabilities: ["multilingual"], isDefault: true, fromCatalog: true, catalogId: "base-q5_1",
-  installedAt: "2026-10-15T06:30:00Z", inUse: true,
+  installedAt: "2026-10-15T06:30:00Z", inUse: true, estimates: null,
 };
 const available = {
   catalogId: "base-q5_1", name: "base", version: "1", sizeBytes: 59707625, quantization: "q5_1",
   capabilities: ["multilingual"], minCpuCores: 2, minRamMb: 1024, recommended: false, likelySlow: false,
   installed: false, installedId: "", hasSourcePage: true, tier: "fast", englishOnly: false, family: "base", load: 1,
-  heavy: false, reduced: true,
+  heavy: false, reduced: true, estimates: null,
 };
 const noDownload = { catalogId: "", phase: "", doneBytes: 0, totalBytes: 0, running: false, error: "" };
 const view = {
   installed: [installed], available: [available], needsDefault: false, speechReady: true, machineKnown: false,
   download: noDownload,
-  modelsHomePage: "https://huggingface.co/ggerganov/whisper.cpp",
+  modelsHomePage: "https://huggingface.co/ggerganov/whisper.cpp", recognitionLoad: "",
 };
 const selection = {
   cancelled: false, selectionId: "7", fileName: "ggml-small.bin", sizeBytes: 487601967, sha256: sum,

@@ -2,6 +2,7 @@
 // confirmation of a shown file; the core shows the open dialog, keeps the chosen path and owns every URL.
 // Errors of the core are fixed Russian texts the page shows as plain text.
 
+import { parseModelLoadEstimates, recognitionLoads, type ModelLoadEstimates, type RecognitionLoad } from "./load.js";
 import type { CallByName } from "./settings";
 
 /** An installed model. Name and version are checked by the core; render them as plain text anyway. */
@@ -20,6 +21,8 @@ export interface InstalledModel {
   installedAt: string;
   /** The model a new STT job pins now (at most one); only list sets it, an import reply has false. */
   inUse: boolean;
+  /** «Запись 1 ч ≈ N мин» in the current mode and in every mode (TASK-084); null when unavailable. */
+  estimates: ModelLoadEstimates | null;
 }
 
 /**
@@ -50,6 +53,8 @@ export interface AvailableModel {
   /** The core's flags: a load that gets the "demanding model" warning, and a quantized (reduced) variant. */
   heavy: boolean;
   reduced: boolean;
+  /** «Запись 1 ч ≈ N мин» in the current mode and in every mode (TASK-084); null when unavailable. */
+  estimates: ModelLoadEstimates | null;
 }
 
 /** The current or last download; phase "" means none yet. */
@@ -74,6 +79,8 @@ export interface ModelsView {
   machineKnown: boolean;
   download: ModelDownload;
   modelsHomePage: string;
+  /** The load mode of the current estimates; "" when they are unavailable. */
+  recognitionLoad: RecognitionLoad | "";
 }
 
 /** The disk space check before a download; warning is set when the space is not enough. */
@@ -216,6 +223,7 @@ export function parseInstalled(raw: unknown): InstalledModel {
     catalogId: str(r, "catalogId", w),
     installedAt: str(r, "installedAt", w),
     inUse: bool(r, "inUse", w),
+    estimates: parseModelLoadEstimates(r.estimates),
   };
 }
 
@@ -242,6 +250,7 @@ export function parseAvailable(raw: unknown): AvailableModel {
     load: loadLevel(r, w),
     heavy: bool(r, "heavy", w),
     reduced: bool(r, "reduced", w),
+    estimates: parseModelLoadEstimates(r.estimates),
   };
 }
 
@@ -258,6 +267,14 @@ export function parseDownload(raw: unknown): ModelDownload {
   };
 }
 
+function viewLoad(r: Record<string, unknown>, what: string): RecognitionLoad | "" {
+  const v = str(r, "recognitionLoad", what);
+  if (v !== "" && !(recognitionLoads as readonly string[]).includes(v)) {
+    throw new Error(`${what}: unknown recognitionLoad`);
+  }
+  return v as RecognitionLoad | "";
+}
+
 export function parseView(raw: unknown): ModelsView {
   const w = "models";
   const r = record(raw, w);
@@ -269,6 +286,7 @@ export function parseView(raw: unknown): ModelsView {
     machineKnown: bool(r, "machineKnown", w),
     download: parseDownload(r.download),
     modelsHomePage: str(r, "modelsHomePage", w),
+    recognitionLoad: viewLoad(r, w),
   };
 }
 

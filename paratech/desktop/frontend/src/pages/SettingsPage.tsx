@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { callByName } from "../bindings/runtime";
-import { settingsApi, type Settings, type SettingsApi } from "../bindings/settings";
+import { recognitionLoads, type RecognitionLoad } from "../bindings/load";
+import { settingsApi, type Settings, type SettingsApi, type SettingsToggle } from "../bindings/settings";
+import { estimateTexts, loadDescriptions, loadLabels, settingEstimateLine } from "../durationEstimate";
 import { Card, ResultLine, Segmented, Toggle as Switch } from "../ui/controls";
 import { currentTheme, setTheme, type ThemeChoice } from "../ui/theme";
 
-type Toggle = keyof Settings;
+type Toggle = SettingsToggle;
 
 const labels: Record<Toggle, string> = {
   recordingPromptsEnabled: "Автоматически предлагать запись в начале занятия",
@@ -16,7 +18,7 @@ const hints: Record<Toggle, string> = {
   processOnlyOnAcPower: "На батарее расшифровка ждёт подключения питания и начнётся сама.",
 };
 
-const setters: Record<Toggle, Exclude<keyof SettingsApi, "get">> = {
+const setters: Record<Toggle, Exclude<keyof SettingsApi, "get" | "setRecognitionLoad">> = {
   recordingPromptsEnabled: "setRecordingPromptsEnabled",
   processOnlyOnAcPower: "setProcessOnlyOnAcPower",
 };
@@ -26,6 +28,8 @@ const themeOptions: readonly { value: ThemeChoice; label: string }[] = [
   { value: "light", label: "Светлая" },
   { value: "dark", label: "Тёмная" },
 ];
+
+const loadOptions = recognitionLoads.map((value) => ({ value, label: loadLabels[value] }));
 
 // The page only shows and forwards the values; defaults and rules live in the Go core (ARCH-44). The theme is kept in
 // the webview's storage (ADR-0012), so it needs no binding; the popup reads it from there and follows a change.
@@ -47,17 +51,32 @@ export function SettingsPage() {
     };
   }, [api]);
 
-  async function change(toggle: Toggle, enabled: boolean) {
+  async function save(action: () => Promise<Settings>) {
     setSaving(true);
     setError("");
     try {
-      setSettings(await api[setters[toggle]](enabled));
+      setSettings(await action());
     } catch {
       setError("Не удалось сохранить настройки.");
     } finally {
       setSaving(false);
     }
   }
+
+  function change(toggle: Toggle, enabled: boolean) {
+    return save(() => api[setters[toggle]](enabled));
+  }
+
+  // The mode buttons cannot be disabled, so a click while saving or on the current mode is ignored here.
+  function chooseLoad(load: RecognitionLoad) {
+    if (saving || settings === null || settings.recognitionLoad === load) {
+      return;
+    }
+    void save(() => api.setRecognitionLoad(load));
+  }
+
+  const estimate =
+    settings !== null ? settingEstimateLine(settings.loadEstimates, settings.loadEstimatesModel, settings.recognitionLoad) : null;
 
   function chooseTheme(choice: ThemeChoice) {
     setTheme(choice);
@@ -85,6 +104,33 @@ export function SettingsPage() {
               onChange={(checked) => void change(toggle, checked)}
             />
           ))}
+        {settings !== null && (
+          <div className="set">
+            <span>{estimateTexts.setting}</span>
+            <Segmented
+              label={estimateTexts.setting}
+              options={loadOptions}
+              value={settings.recognitionLoad}
+              onChange={chooseLoad}
+            />
+            <ul className="small muted load-modes">
+              {recognitionLoads.map((l) => (
+                <li key={l}>
+                  «{loadLabels[l]}» — {loadDescriptions[l]}
+                </li>
+              ))}
+            </ul>
+            <span className="small muted">{estimateTexts.nextRun}</span>
+            {estimate !== null &&
+              (estimate.heavy ? (
+                <span className="small slow">
+                  <b>{estimate.text}</b>
+                </span>
+              ) : (
+                <span className="small muted">{estimate.text}</span>
+              ))}
+          </div>
+        )}
         {/* While a change is saved every switch waits for it; this line says why they are dimmed. */}
         {saving && (
           <p className="small muted" role="status">

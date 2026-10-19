@@ -34,6 +34,7 @@ export function RecordingRow(props: RecordingRowProps) {
       status={
         <StatusLine view={v.status} notes={v.notes}>
           {v.progress !== null && <Progress value={v.progress} label={v.status.label} text={false} />}
+          {v.remaining !== "" && <span className="small muted num row-remaining">{v.remaining}</span>}
         </StatusLine>
       }
       actions={
