@@ -24,7 +24,8 @@ const jobStatuses = [
 ];
 
 const recording = {
-  id: "r1", lessonId: "l1", title: "История", status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
+  id: "r1", lessonId: "l1", title: "История", subject: "", kind: "", teacher: "",
+  status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
   stage: "queued", step: "transcription", progressPercent: 0, queueReason: "power", errorCode: "", jobError: "",
   action: "runNow", actionJobId: "j1", remainingSeconds: 1500, hasRemaining: true, advice: null,
@@ -109,6 +110,16 @@ test("parse accepts well-formed items and drops extra fields", () => {
   assert.deepEqual(parseJob({ ...job, payload: "{}" }), job);
   for (const queueReason of ["serviceNotConfigured", "serviceUnavailable"]) {
     assert.equal(parseRecording({ ...recording, queueReason }).queueReason, queueReason);
+  }
+});
+
+test("parse reads the lesson snapshot and an older core without it as empty (TASK-088)", () => {
+  const lesson = { subject: "Матанализ", kind: "lecture", teacher: "Иванов И. И." };
+  assert.deepEqual(parseRecording({ ...recording, ...lesson }), { ...recording, ...lesson });
+  const { subject, kind, teacher, ...older } = recording;
+  assert.deepEqual(parseRecording(older), recording);
+  for (const bad of [{ subject: 1 }, { kind: null }, { teacher: ["x"] }]) {
+    assert.throws(() => parseRecording({ ...recording, ...bad }), /recording/, JSON.stringify(bad));
   }
 });
 

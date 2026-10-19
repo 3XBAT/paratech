@@ -143,6 +143,8 @@ export interface RecordingRowView {
   title: string;
   /** The title is the start time (tabular digits). */
   titleIsTime: boolean;
+  /** «Матанализ · лекция · Иванов И. И.»: the known parts of the lesson; "" for none. Plain text. */
+  lesson: string;
   /** Start time (when the title is the lesson) and the final duration; "" for none. */
   meta: string;
   status: StatusView;
@@ -167,6 +169,22 @@ export function rowTitle(r: Pick<RecordingItem, "title" | "startedAt">): { text:
   }
   const at = formatTime(r.startedAt);
   return { text: at === "—" ? "Запись" : `Запись ${at}`, isTime: true };
+}
+
+/** Russian names of the lesson kinds; other codes ("other", "unknown", new ones) are not shown. */
+export const lessonKindTexts: Readonly<Record<string, string>> = {
+  lecture: "лекция",
+  seminar: "семинар",
+  practice: "практика",
+  lab: "лабораторная",
+};
+
+/** «Предмет · тип · преподаватель» from the known parts; the subject is skipped when it repeats the title. */
+export function lessonLine(r: Pick<RecordingItem, "title" | "subject" | "kind" | "teacher">): string {
+  const subject = r.subject.trim();
+  const repeatsTitle = subject.toLowerCase() === r.title.trim().toLowerCase();
+  const parts = [repeatsTitle ? "" : subject, own(lessonKindTexts, r.kind) ?? "", r.teacher.trim()];
+  return parts.filter((s) => s !== "").join(" · ");
 }
 
 /** The chip, its hint and the progress of the chain; a running recording shows its elapsed time by the clock `now`. */
@@ -233,6 +251,7 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
   return {
     title: t.text,
     titleIsTime: t.isTime,
+    lesson: lessonLine(r),
     meta: meta.filter((s) => s !== "").join(" · "),
     status: chainStatusView(r, now),
     progress: r.stage === "transcribing" && r.progressPercent > 0 ? Math.min(100, r.progressPercent) : null,

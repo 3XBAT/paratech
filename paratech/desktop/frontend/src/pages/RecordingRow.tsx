@@ -37,7 +37,14 @@ export function RecordingRow(props: RecordingRowProps) {
   return (
     <Row
       title={v.titleIsTime ? <span className="num">{v.title}</span> : v.title}
-      meta={v.meta !== "" && <span className="num">{v.meta}</span>}
+      meta={
+        (v.lesson !== "" || v.meta !== "") && (
+          <>
+            {v.lesson !== "" && <span className="row-lesson">{v.lesson}</span>}
+            {v.meta !== "" && <span className="num">{v.meta}</span>}
+          </>
+        )
+      }
       status={
         <StatusLine view={v.status} notes={v.notes}>
           {v.progress !== null && <Progress value={v.progress} label={v.status.label} text={false} />}
