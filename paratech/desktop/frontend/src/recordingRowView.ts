@@ -64,6 +64,8 @@ export const queueReasonTexts: Readonly<Record<Exclude<QueueReason, "">, string>
   power: "ждёт питания от сети",
   network: "нет сети",
   quota: "лимит исчерпан",
+  serviceNotConfigured: "сервис не настроен",
+  serviceUnavailable: "сервис недоступен",
 };
 
 /** What happens next, under the chip. */
@@ -73,6 +75,9 @@ export const queueReasonHints: Readonly<Record<Exclude<QueueReason, "">, string>
   power: "Ноутбук на батарее. Начнётся само после подключения питания.",
   network: "Продолжится само, как только появится сеть.",
   quota: "Лимит обработки исчерпан. Продолжится, когда он пополнится. Запись сохранена.",
+  serviceNotConfigured:
+    "Сервис конспектов не настроен. Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
+  serviceUnavailable: "Сервис конспектов недоступен, повторим автоматически.",
 };
 
 const queueReasonLooks: Readonly<Record<Exclude<QueueReason, "">, Look>> = {
@@ -81,6 +86,9 @@ const queueReasonLooks: Readonly<Record<Exclude<QueueReason, "">, Look>> = {
   power: { kind: "wait", icon: "plug" },
   network: { kind: "net", icon: "off" },
   quota: { kind: "wait", icon: "clock" },
+  // Not configured needs the user; unavailable only waits.
+  serviceNotConfigured: { kind: "wait", icon: "warn" },
+  serviceUnavailable: { kind: "wait", icon: "clock" },
 };
 
 /** The step a queued chain waits with, as the start of its hint. */
