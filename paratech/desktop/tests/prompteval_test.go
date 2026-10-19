@@ -41,6 +41,7 @@ type evalLesson struct {
 	Teacher   string `json:"teacher"`
 	Start     string `json:"start"`
 	NextStart string `json:"next_start"`
+	NextKind  string `json:"next_kind"` // the kind of the next lesson; only with next_start
 }
 
 // evalExpected is one assignment the teacher gave. Every keyword must occur in the title or description (case and
@@ -104,6 +105,9 @@ func (c *evalCase) check() error {
 	if !values.LessonKind(c.Lesson.Kind).Valid() {
 		return fmt.Errorf("kind %q", c.Lesson.Kind)
 	}
+	if !values.LessonKind(c.Lesson.NextKind).Valid() || (c.Lesson.NextKind != "" && c.Lesson.NextStart == "") {
+		return fmt.Errorf("next kind %q without a known kind or a next start", c.Lesson.NextKind)
+	}
 	for i, e := range c.Expected {
 		if len(e.Keywords) == 0 {
 			return fmt.Errorf("expected[%d] has no keywords", i)
@@ -123,7 +127,7 @@ func (c evalCase) request(alias string) (values.LLMRequest, error) {
 	next, _ := time.Parse(time.RFC3339, c.Lesson.NextStart) // zero when absent; checked by check
 	m := contextselection.Material{Lesson: contextselection.Lesson{
 		Title: c.Lesson.Title, Subject: c.Lesson.Subject, Teacher: c.Lesson.Teacher, Kind: values.LessonKind(c.Lesson.Kind),
-		Start: c.start, NextStart: next,
+		Start: c.start, NextStart: next, NextKind: values.LessonKind(c.Lesson.NextKind),
 	}}
 	for _, s := range c.Transcript {
 		m.Transcript = append(m.Transcript, contextselection.Segment{Text: s})

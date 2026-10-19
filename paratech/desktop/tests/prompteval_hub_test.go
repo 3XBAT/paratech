@@ -59,7 +59,7 @@ func TestPromptEvalCases(t *testing.T) {
 			t.Fatalf("duplicate case %q", c.Name)
 		}
 		names[c.Name] = true
-		for _, s := range append([]string{c.Lesson.Teacher, c.Lesson.Title}, c.Transcript...) {
+		for _, s := range append([]string{c.Lesson.Teacher, c.Lesson.Title, c.Lesson.Subject}, c.Transcript...) {
 			if looksPersonal(s) {
 				t.Errorf("%s: %q looks like a contact detail", c.Name, s)
 			}
@@ -75,6 +75,9 @@ func TestPromptEvalCases(t *testing.T) {
 		}
 		if (c.Lesson.NextStart != "") != strings.Contains(req.UntrustedData(), `"next_lesson_start"`) {
 			t.Errorf("%s: next_lesson_start does not follow the case", c.Name)
+		}
+		if (c.Lesson.NextKind != "") != strings.Contains(req.UntrustedData(), `"next_lesson_kind":"`+c.Lesson.NextKind+`"`) {
+			t.Errorf("%s: next_lesson_kind does not follow the case", c.Name)
 		}
 		if again, _ := c.request(evalDefaultModel); again != req {
 			t.Errorf("%s: the request is not deterministic", c.Name)
