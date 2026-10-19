@@ -70,7 +70,7 @@ export function parseModelLoadEstimates(raw: unknown): ModelLoadEstimates | null
     return null;
   }
   const r = record(raw, "load estimates");
-  const modes = r.modes ?? [];
+  const modes = r.modes;
   if (!Array.isArray(modes)) {
     throw new Error("load estimates: modes is not a list");
   }

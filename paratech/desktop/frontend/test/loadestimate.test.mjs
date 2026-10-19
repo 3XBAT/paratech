@@ -62,12 +62,11 @@ test("the three modes have their Russian names and one-line descriptions", () =>
 test("estimates are parsed strictly; null is no estimate", () => {
   assert.deepEqual(parseModelLoadEstimates(large), large);
   assert.equal(parseModelLoadEstimates(null), null);
-  assert.deepEqual(parseModelLoadEstimates({ current: large.current, modes: null }).modes, []);
   for (const bad of [
     undefined, "x", {}, { ...large, current: null }, { ...large, current: { ...large.current, mode: "turbo" } },
     { ...large, current: { ...large.current, source: "guess" } }, { ...large, current: { ...large.current, secondsPerHour: -1 } },
     { ...large, current: { ...large.current, secondsPerHour: 1.5 } }, { ...large, current: { ...large.current, heavy: "no" } },
-    { ...large, modes: {} },
+    { ...large, modes: {} }, { ...large, modes: null }, { current: large.current }, { ...large, modes: [{ mode: "gentle" }] },
   ]) {
     assert.throws(() => parseModelLoadEstimates(bad), undefined, JSON.stringify(bad));
   }
@@ -131,7 +130,16 @@ test("the settings page offers the three modes, says when a change applies and w
   assert.match(page, /<Segmented\s+label=\{estimateTexts\.setting\}/);
   assert.match(page, /\{estimateTexts\.nextRun\}/);
   assert.match(page, /loadDescriptions\[l\]/);
-  assert.match(page, /<span className="small slow">\s*<b>\{estimate\.text\}<\/b>/, "a heavy estimate is a bold warning");
+  assert.match(
+    page,
+    /<span className="small slow" title=\{estimatesTip\(settings\.loadEstimates\)\}>\s*<b>\{estimate\.text\}<\/b>/,
+    "a heavy estimate is a bold warning with every mode on hover",
+  );
+  assert.match(
+    page,
+    /<span className="small muted" title=\{estimatesTip\(settings\.loadEstimates\)\}>\s*\{estimate\.text\}/,
+    "the estimate shows every mode on hover",
+  );
   assert.match(page, /api\.setRecognitionLoad\(load\)/);
 });
 

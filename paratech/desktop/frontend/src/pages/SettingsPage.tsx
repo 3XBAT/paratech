@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { callByName } from "../bindings/runtime";
 import { recognitionLoads, type RecognitionLoad } from "../bindings/load";
 import { settingsApi, type Settings, type SettingsApi, type SettingsToggle } from "../bindings/settings";
-import { estimateTexts, loadDescriptions, loadLabels, settingEstimateLine } from "../durationEstimate";
+import { estimatesTip, estimateTexts, loadDescriptions, loadLabels, settingEstimateLine } from "../durationEstimate";
 import { Card, ResultLine, Segmented, Toggle as Switch } from "../ui/controls";
 import { currentTheme, setTheme, type ThemeChoice } from "../ui/theme";
 
@@ -123,11 +123,13 @@ export function SettingsPage() {
             <span className="small muted">{estimateTexts.nextRun}</span>
             {estimate !== null &&
               (estimate.heavy ? (
-                <span className="small slow">
+                <span className="small slow" title={estimatesTip(settings.loadEstimates)}>
                   <b>{estimate.text}</b>
                 </span>
               ) : (
-                <span className="small muted">{estimate.text}</span>
+                <span className="small muted" title={estimatesTip(settings.loadEstimates)}>
+                  {estimate.text}
+                </span>
               ))}
           </div>
         )}
