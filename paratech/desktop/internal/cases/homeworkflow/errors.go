@@ -1,6 +1,10 @@
 package homeworkflow
 
-import "errors"
+import (
+	"errors"
+
+	"paratech/desktop/internal/domain/coursework/values"
+)
 
 // Errors of the homework workflow use case (ARCH-18). Domain errors (proposal.ErrMalformed,
 // proposal.ErrNotConfirmed, proposal.ErrInvalidTransition, ...) are returned wrapped, not translated.
@@ -51,7 +55,7 @@ var (
 
 	// ErrLLM means the LLM call failed. The cause decides: no network or no quota makes the job wait, a permanent
 	// cause fails it, anything else is retried.
-	ErrLLM = errors.New("post-processing: the LLM call failed")
+	ErrLLM = errors.New(values.LLMFailedMessage)
 
 	// ErrInvalidAnswer means the model answers did not match the schema of the operation, also after the repeats with
 	// a format reminder; nothing is stored. Permanent: a rerun of the job gets the same stored answers from the Hub

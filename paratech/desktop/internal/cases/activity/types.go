@@ -43,7 +43,22 @@ type Chain struct {
 	JobError    string      // last error of the job the stage refers to (failed or retrying); sanitized by the job
 	Action      Action      // what the screen offers for this row besides Stop
 	ActionJob   shared.JobID
+
+	// Retry is the post-processing work whose job failed or was cancelled and that the row may start again
+	// («Повторить», TASK-086), also when Action is the connections page; "" when there is none.
+	Retry Work
+	// CanRedoSummary: a summary was made and its job is not pending or running, so «Сделать конспект заново» may run.
+	CanRedoSummary bool
 }
+
+// Work is a post-processing work of a recording (TASK-086); the values are those of homeworkflow.Work.
+type Work string
+
+// Works.
+const (
+	WorkSummary  Work = "summary"
+	WorkHomework Work = "homework"
+)
 
 // Stage of the chain, in its order.
 type Stage string
@@ -107,6 +122,8 @@ const (
 	ActionOpenModels      Action = "openModels"      // the speech models page
 	ActionOpenConnections Action = "openConnections" // the connections page (Hub key, quota)
 	ActionCheckSound      Action = "checkSound"      // the sound check
+	// ActionRetry starts the failed post-processing work Chain.Retry again with a new job (TASK-086).
+	ActionRetry Action = "retry"
 )
 
 // Job is one row of the jobs screen.

@@ -1,6 +1,8 @@
 package activity
 
 import (
+	"strings"
+
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
@@ -46,7 +48,7 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	}
 	if summary != nil || homework != nil {
 		// The transcript exists: its post-processing decides.
-		return postChain(summary, homework)
+		return withRedo(postChain(summary, homework), jobs, stt)
 	}
 	if stt == nil {
 		// The STT job is enqueued right after the recording completes, or once a speech model is installed.
@@ -63,7 +65,26 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	case stt.Status() != job.StatusCompleted:
 		return queued(StepTranscription, stt)
 	}
-	return postChain(summary, homework)
+	return withRedo(postChain(summary, homework), jobs, stt)
+}
+
+// withRedo sets CanRedoSummary: the newest summary job of the transcript has finished and one of its summary jobs
+// completed, so a summary is stored (a failed redo keeps the one before).
+func withRedo(c Chain, jobs []*job.Job, stt *job.Job) Chain {
+	last := newest(jobs, values.SummarizeJobType)
+	if stt != nil {
+		last = since(last, stt)
+	}
+	if last == nil || !last.Status().IsTerminal() {
+		return c
+	}
+	for _, j := range jobs {
+		if j.Type() == values.SummarizeJobType && j.Status() == job.StatusCompleted && (stt == nil || since(j, stt) != nil) {
+			c.CanRedoSummary = true
+			break
+		}
+	}
+	return c
 }
 
 // postChain is the chain once the transcript exists: the summary and the homework search; nil is a job not enqueued
@@ -72,11 +93,19 @@ func postChain(summary, homework *job.Job) Chain {
 	post := []struct {
 		j    *job.Job
 		code ErrorCode
-	}{{summary, ErrorSummaryFailed}, {homework, ErrorHomeworkFailed}}
+		work Work
+	}{{summary, ErrorSummaryFailed, WorkSummary}, {homework, ErrorHomeworkFailed, WorkHomework}}
 	for _, p := range post {
 		if p.j != nil && failedJob(p.j) {
+			// The connections page helps only when the LLM call or the Hub failed (connection, key, quota); an invalid
+			// or cut-off answer and the other failures are retried with a new job (TASK-086).
+			action := ActionRetry
+			if p.j.Cause() != job.CauseNone || strings.HasSuffix(p.j.LastError(), values.LLMFailedMessage) {
+				action = ActionOpenConnections
+			}
 			return Chain{
-				Stage: StageFailed, Step: StepSummary, ErrorCode: p.code, JobError: p.j.LastError(), Action: ActionOpenConnections,
+				Stage: StageFailed, Step: StepSummary, ErrorCode: p.code, JobError: p.j.LastError(), Action: action,
+				Retry: p.work,
 			}
 		}
 	}

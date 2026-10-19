@@ -78,6 +78,23 @@ func jobIn(t *testing.T, id string, typ job.Type, created time.Duration, s job.S
 	return j
 }
 
+// Last errors of post-processing jobs (homeworkflow).
+const (
+	msgInvalid   = "post-processing: the LLM answer does not match the schema"
+	msgTruncated = "post-processing: the LLM answer was cut off at the output limit"
+	msgLLM       = "post-processing: the LLM call failed"
+)
+
+// failed returns a builder of a job of typ created at t0+created that failed with msg.
+func failed(id string, typ job.Type, created time.Duration, msg string) func(t *testing.T) *job.Job {
+	return func(t *testing.T) *job.Job {
+		t.Helper()
+		j := jobIn(t, id, typ, created, job.StatusRunning)
+		must(t, j.Fail(t0.Add(created+3*time.Second), msg))
+		return j
+	}
+}
+
 // jobWithCause builds a job of typ created at t0 that the runner parked (WAITING_FOR_NETWORK) or retried (RETRY_WAIT,
 // FAILED with one attempt) with the cause it recorded (TASK-083).
 func jobWithCause(t *testing.T, id string, typ job.Type, s job.Status, cause job.Cause) *job.Job {
@@ -208,7 +225,10 @@ func TestChainOf(t *testing.T) {
 			name: "homework service not configured", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum),
 				caused("h", hw, job.StatusWaitingForNetwork, job.CauseServiceNotConfigured)},
-			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueServiceNotConfigured, Action: ActionOpenConnections},
+			want: Chain{
+				Stage: StageQueued, Step: StepSummary, QueueReason: QueueServiceNotConfigured, Action: ActionOpenConnections,
+				CanRedoSummary: true,
+			},
 		},
 		{
 			name: "summary service unavailable", rec: recording.StatusCompleted,
@@ -228,20 +248,22 @@ func TestChainOf(t *testing.T) {
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), caused("a", sum, job.StatusFailed, job.CauseServiceUnavailable)},
 			want: Chain{
 				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed,
-				JobError: "attempts exhausted: hub: hub unavailable", Action: ActionOpenConnections,
+				JobError: "attempts exhausted: hub: hub unavailable", Action: ActionOpenConnections, Retry: WorkSummary,
 			},
 		},
 		{
 			name: "homework waits for the quota", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), in("h", hw, job.StatusWaitingForQuota)},
-			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueQuota, Action: ActionOpenConnections},
+			want: Chain{
+				Stage: StageQueued, Step: StepSummary, QueueReason: QueueQuota, Action: ActionOpenConnections, CanRedoSummary: true,
+			},
 		},
 		{
 			name: "summary failed", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), in("a", sum, job.StatusFailed), in("h", hw, job.StatusRunning)},
 			want: Chain{
 				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed, JobError: "bad answer",
-				Action: ActionOpenConnections,
+				Action: ActionRetry, Retry: WorkSummary,
 			},
 		},
 		{
@@ -249,13 +271,13 @@ func TestChainOf(t *testing.T) {
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), in("h", hw, job.StatusFailed)},
 			want: Chain{
 				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorHomeworkFailed, JobError: "bad answer",
-				Action: ActionOpenConnections,
+				Action: ActionRetry, Retry: WorkHomework, CanRedoSummary: true,
 			},
 		},
 		{
 			name: "summary ready", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw)},
-			want: Chain{Stage: StageDone},
+			want: Chain{Stage: StageDone, CanRedoSummary: true},
 		},
 		{
 			name: "post-processing without a transcription job", rec: recording.StatusCompleted,
@@ -285,12 +307,88 @@ func TestChainOf(t *testing.T) {
 				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusCompleted) },
 				func(t *testing.T) *job.Job { return jobIn(t, "a2", sum, 2*time.Hour, job.StatusCompleted) },
 			},
-			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueInLine},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueInLine, CanRedoSummary: true},
 		},
 		{
 			name: "other job types do not count", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw), in("d", "homework_draft", job.StatusFailed)},
-			want: Chain{Stage: StageDone},
+			want: Chain{Stage: StageDone, CanRedoSummary: true},
+		},
+		// TASK-086: a retry for an invalid answer, the connections page only for the LLM call.
+		{
+			name: "summary answer invalid", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), failed("a", sum, 0, msgInvalid), done("h", hw)},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed, JobError: msgInvalid,
+				Action: ActionRetry, Retry: WorkSummary,
+			},
+		},
+		{
+			name: "homework answer cut off", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), failed("h", hw, 0, msgTruncated)},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorHomeworkFailed, JobError: msgTruncated,
+				Action: ActionRetry, Retry: WorkHomework, CanRedoSummary: true,
+			},
+		},
+		{
+			name: "summary LLM call failed", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), failed("a", sum, 0, msgLLM), done("h", hw)},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed, JobError: msgLLM,
+				Action: ActionOpenConnections, Retry: WorkSummary,
+			},
+		},
+		{
+			name: "homework LLM call failed for good", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), failed("h", hw, 0, "attempts exhausted: "+msgLLM)},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorHomeworkFailed, JobError: "attempts exhausted: " + msgLLM,
+				Action: ActionOpenConnections, Retry: WorkHomework, CanRedoSummary: true,
+			},
+		},
+		{
+			name: "summary cancelled", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), in("a", sum, job.StatusCancelled), done("h", hw)},
+			want: Chain{Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed, Action: ActionRetry, Retry: WorkSummary},
+		},
+		{
+			name: "a retry runs", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), failed("a", sum, 0, msgInvalid), done("h", hw),
+				func(t *testing.T) *job.Job { return jobIn(t, "a2", sum, time.Hour, job.StatusRunning) },
+			},
+			want: Chain{Stage: StageSummarizing, Step: StepSummary},
+		},
+		{
+			name: "a redo waits", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), done("h", hw),
+				func(t *testing.T) *job.Job { return jobIn(t, "a2", sum, time.Hour, job.StatusQueued) },
+			},
+			want: Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueInLine},
+		},
+		{
+			name: "a redo failed, the summary before stays", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), done("h", hw), failed("a2", sum, time.Hour, msgInvalid),
+			},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed, JobError: msgInvalid,
+				Action: ActionRetry, Retry: WorkSummary, CanRedoSummary: true,
+			},
+		},
+		{
+			name: "the summary of an older transcript cannot be redone", rec: recording.StatusCompleted,
+			jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum),
+				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusCompleted) },
+				failed("a2", sum, 2*time.Hour, msgInvalid),
+			},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorSummaryFailed, JobError: msgInvalid,
+				Action: ActionRetry, Retry: WorkSummary,
+			},
 		},
 	}
 	for _, tt := range tests {
