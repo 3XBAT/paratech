@@ -228,3 +228,37 @@ func TestUnknownOperationHasNoPrompt(t *testing.T) {
 		t.Fatalf("an unknown operation has a prompt")
 	}
 }
+
+func TestRemind(t *testing.T) {
+	req, err := values.NewLLMRequest(values.OperationSummary, "default", Instructions(values.OperationSummary), "data", "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	format, err := Remind(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	length, err := Remind(req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []values.LLMRequest{format, length} {
+		if !strings.HasPrefix(r.Instructions(), req.Instructions()) || r.Instructions() == req.Instructions() ||
+			r.UntrustedData() != "data" || r.IdempotencyKey() != "key-1" || r.ModelAlias() != "default" ||
+			r.Operation() != values.OperationSummary {
+			t.Fatalf("reminded request = %q", r.Instructions())
+		}
+	}
+	if format.Instructions() == length.Instructions() || !strings.Contains(length.Instructions(), "cut off") {
+		t.Fatal("the truncation reminder must differ from the format reminder")
+	}
+
+	big, err := values.NewLLMRequest(values.OperationSummary, "default", "x",
+		strings.Repeat("d", values.MaxRequestPayloadSize-1), "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Remind(big, false); !errors.Is(err, values.ErrInvalidLLMRequest) {
+		t.Fatalf("Remind over the size limit = %v", err)
+	}
+}

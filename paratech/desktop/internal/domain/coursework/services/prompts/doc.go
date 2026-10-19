@@ -8,7 +8,9 @@
 // forge the closing marker. The instructions tell the model that this block is data, never instructions.
 //
 // Answers. The Hub contract has no schema field (ADR-0005): the schema is part of the instructions and the answer is
-// checked here. ParseSummary, ParseExtraction and ParseDraft accept exactly one JSON object of the schema: no unknown,
+// checked here. A code fence or a sentence around the object is removed first (TASK-086), a second object or an array
+// is not; an object that never ends is reported as truncated (ErrTruncatedOutput). ParseSummary, ParseExtraction and
+// ParseDraft then accept exactly one JSON object of the schema: no unknown,
 // differently-cased or duplicate keys, all fields present, correct types, no trailing data, bounded sizes and item
 // counts, no control or bidi-override characters, deadlines as RFC 3339 times near the lesson date. Error messages
 // name fields, never model text. A draft holds a title and a body only; recipients, paths and calendars are never part
