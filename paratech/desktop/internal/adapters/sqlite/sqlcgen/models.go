@@ -143,6 +143,9 @@ type ScheduleEntry struct {
 	Version                int64
 	CreatedAt              int64
 	UpdatedAt              int64
+	Subject                string
+	Kind                   string
+	Teacher                string
 }
 
 type Setting struct {

@@ -12,7 +12,7 @@ import (
 
 const getLesson = `-- name: GetLesson :one
 
-SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at FROM schedule_entries WHERE id = ?1 AND deleted_at IS NULL
+SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at, subject, kind, teacher FROM schedule_entries WHERE id = ?1 AND deleted_at IS NULL
 `
 
 // Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
@@ -35,17 +35,21 @@ func (q *Queries) GetLesson(ctx context.Context, id string) (ScheduleEntry, erro
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Subject,
+		&i.Kind,
+		&i.Teacher,
 	)
 	return i, err
 }
 
 const insertLesson = `-- name: InsertLesson :exec
-INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision,
-                              calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at)
+INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, subject, kind, teacher, source_uid,
+                              start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at,
+                              deleted_at, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
-        ?6, ?7, ?8,
-        ?9, ?10, ?11, 1,
-        ?12, ?13)
+        ?6, ?7, ?8, ?9, ?10,
+        ?11, ?12, ?13, ?14, 1,
+        ?15, ?16)
 `
 
 type InsertLessonParams struct {
@@ -54,6 +58,9 @@ type InsertLessonParams struct {
 	StartsAt               int64
 	EndsAt                 int64
 	Timezone               string
+	Subject                string
+	Kind                   string
+	Teacher                string
 	SourceUid              sql.NullString
 	StartNotifiedAt        sql.NullInt64
 	ContentRevision        int64
@@ -72,6 +79,9 @@ func (q *Queries) InsertLesson(ctx context.Context, arg InsertLessonParams) erro
 		arg.StartsAt,
 		arg.EndsAt,
 		arg.Timezone,
+		arg.Subject,
+		arg.Kind,
+		arg.Teacher,
 		arg.SourceUid,
 		arg.StartNotifiedAt,
 		arg.ContentRevision,
@@ -97,7 +107,7 @@ func (q *Queries) LessonExists(ctx context.Context, id string) (bool, error) {
 }
 
 const listLessonsPendingCalendarSync = `-- name: ListLessonsPendingCalendarSync :many
-SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at FROM schedule_entries
+SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at, subject, kind, teacher FROM schedule_entries
 WHERE deleted_at IS NOT NULL OR calendar_synced_revision IS NULL OR calendar_synced_revision < content_revision
 ORDER BY starts_at, id
 LIMIT ?1
@@ -128,6 +138,9 @@ func (q *Queries) ListLessonsPendingCalendarSync(ctx context.Context, maxRows in
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Subject,
+			&i.Kind,
+			&i.Teacher,
 		); err != nil {
 			return nil, err
 		}
@@ -143,7 +156,7 @@ func (q *Queries) ListLessonsPendingCalendarSync(ctx context.Context, maxRows in
 }
 
 const listLessonsStartingBetween = `-- name: ListLessonsStartingBetween :many
-SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at FROM schedule_entries
+SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at, subject, kind, teacher FROM schedule_entries
 WHERE deleted_at IS NULL AND starts_at >= ?1 AND starts_at < ?2
 ORDER BY starts_at, id
 `
@@ -177,6 +190,9 @@ func (q *Queries) ListLessonsStartingBetween(ctx context.Context, arg ListLesson
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Subject,
+			&i.Kind,
+			&i.Teacher,
 		); err != nil {
 			return nil, err
 		}
@@ -192,7 +208,7 @@ func (q *Queries) ListLessonsStartingBetween(ctx context.Context, arg ListLesson
 }
 
 const listLiveLessons = `-- name: ListLiveLessons :many
-SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at FROM schedule_entries WHERE deleted_at IS NULL ORDER BY starts_at, id
+SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at, subject, kind, teacher FROM schedule_entries WHERE deleted_at IS NULL ORDER BY starts_at, id
 `
 
 func (q *Queries) ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error) {
@@ -219,6 +235,9 @@ func (q *Queries) ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error) 
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Subject,
+			&i.Kind,
+			&i.Teacher,
 		); err != nil {
 			return nil, err
 		}
@@ -251,15 +270,18 @@ SET title                    = ?1,
     starts_at                = ?2,
     ends_at                  = ?3,
     timezone                 = ?4,
-    source_uid               = ?5,
-    start_notified_at        = ?6,
-    content_revision         = ?7,
-    calendar_synced_revision = ?8,
-    calendar_synced_at       = ?9,
-    deleted_at               = ?10,
+    subject                  = ?5,
+    kind                     = ?6,
+    teacher                  = ?7,
+    source_uid               = ?8,
+    start_notified_at        = ?9,
+    content_revision         = ?10,
+    calendar_synced_revision = ?11,
+    calendar_synced_at       = ?12,
+    deleted_at               = ?13,
     version                  = version + 1,
-    updated_at               = ?11
-WHERE id = ?12 AND version = ?13
+    updated_at               = ?14
+WHERE id = ?15 AND version = ?16
 `
 
 type UpdateLessonParams struct {
@@ -267,6 +289,9 @@ type UpdateLessonParams struct {
 	StartsAt               int64
 	EndsAt                 int64
 	Timezone               string
+	Subject                string
+	Kind                   string
+	Teacher                string
 	SourceUid              sql.NullString
 	StartNotifiedAt        sql.NullInt64
 	ContentRevision        int64
@@ -285,6 +310,9 @@ func (q *Queries) UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int
 		arg.StartsAt,
 		arg.EndsAt,
 		arg.Timezone,
+		arg.Subject,
+		arg.Kind,
+		arg.Teacher,
 		arg.SourceUid,
 		arg.StartNotifiedAt,
 		arg.ContentRevision,
