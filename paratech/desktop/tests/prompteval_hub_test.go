@@ -41,7 +41,11 @@ func TestPromptEvalHub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log("\n" + evalTable(alias, runEval(t.Context(), client, alias, cases)))
+	table, err := evalTable(alias, runEval(t.Context(), client, alias, cases))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("\n" + table)
 }
 
 // The cases are 5-10 synthetic lessons without personal data, and each builds a request with the lesson context.
@@ -242,7 +246,10 @@ func TestPromptEvalFakeHub(t *testing.T) {
 		}
 	}
 
-	table := evalTable(evalDefaultModel, rows)
+	table, err := evalTable(evalDefaultModel, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, s := range []string{fmt.Sprintf("prompts v%d", prompts.Version), "case", "due ok", "TOTAL", "practice-next-class"} {
 		if !strings.Contains(table, s) {
 			t.Errorf("table misses %q:\n%s", s, table)

@@ -239,23 +239,34 @@ func runEval(ctx context.Context, llm evalLLM, alias string, cases []evalCase) [
 }
 
 // evalTable renders the rows with a total and the prompts version, so that runs can be compared.
-func evalTable(alias string, rows []evalRow) string {
+func evalTable(alias string, rows []evalRow) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "prompts v%d, model alias %q, %d cases\n", prompts.Version, alias, len(rows))
 	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "case\texpected\tfound\tmissed\textra\tdue ok\tnote")
+	var werr error // the first write error; later writes are skipped
+	line := func(format string, a ...any) {
+		if werr == nil {
+			_, werr = fmt.Fprintf(w, format, a...)
+		}
+	}
+	line("case\texpected\tfound\tmissed\textra\tdue ok\tnote\n")
 	var total evalRow
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%s\n", r.Name, r.Expected, r.Found, r.Missed, r.Extra, r.DueOK, r.Note)
+		line("%s\t%d\t%d\t%d\t%d\t%d\t%s\n", r.Name, r.Expected, r.Found, r.Missed, r.Extra, r.DueOK, r.Note)
 		total.Expected += r.Expected
 		total.Found += r.Found
 		total.Missed += r.Missed
 		total.Extra += r.Extra
 		total.DueOK += r.DueOK
 	}
-	fmt.Fprintf(w, "TOTAL\t%d\t%d\t%d\t%d\t%d\t\n", total.Expected, total.Found, total.Missed, total.Extra, total.DueOK)
-	_ = w.Flush()
-	return b.String()
+	line("TOTAL\t%d\t%d\t%d\t%d\t%d\t\n", total.Expected, total.Found, total.Missed, total.Extra, total.DueOK)
+	if err := w.Flush(); werr == nil {
+		werr = err
+	}
+	if werr != nil {
+		return "", fmt.Errorf("eval table: %w", werr)
+	}
+	return b.String(), nil
 }
 
 // envKey is the API key from the environment as the hubclient credential store: the eval never reads the Windows

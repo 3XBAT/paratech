@@ -157,7 +157,7 @@ func TestExtractionRules(t *testing.T) {
 		"«доклад»", "«реферат»", "«лабораторная к …»",
 		"Not homework: examples and problems solved or started in class",
 		"means next_lesson_start; without next_lesson_start, due is null",
-		"«к следующему семинару», «к следующей лабораторной», «к следующей практике»",
+		"«к следующей лекции», «к следующему семинару», «к следующей лабораторной», «к следующей практике»",
 		"only when next_lesson_kind is that kind",
 		"a subgroup", "is still listed",
 		"due is null and description ends with a short note",
