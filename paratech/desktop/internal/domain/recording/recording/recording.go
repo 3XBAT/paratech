@@ -2,7 +2,6 @@ package recording
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -142,7 +141,7 @@ func Restore(s State) (*Recording, error) {
 		maxDuration: s.MaxDuration, duration: s.Duration, chunks: s.Chunks, chunksDir: s.ChunksDir, audio: s.Audio,
 		silent: s.Silent, problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
 		createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
-		deletingAt: s.DeletingAt, deletingAssignments: slices.Clone(s.DeletingAssignments),
+		deletingAt: s.DeletingAt, deletingAssignments: cloneIDs(s.DeletingAssignments),
 	}
 
 	switch {

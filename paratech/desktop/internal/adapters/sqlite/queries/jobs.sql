@@ -148,6 +148,15 @@ WHERE j.id IS NOT NULL
   AND t.recording_id IN (SELECT value FROM json_each(CAST(sqlc.arg(recordings) AS TEXT)))
 ORDER BY j.created_at, j.id;
 
+-- The jobs of the types whose payload names one of the assignments ("assignment_id", the homework draft payload),
+-- for the deletion of a recording with its homework (TASK-095). Both lists are JSON arrays.
+-- name: ListJobIDsByPayloadAssignment :many
+SELECT id FROM jobs
+WHERE id IS NOT NULL
+  AND type IN (SELECT value FROM json_each(CAST(sqlc.arg(types) AS TEXT)))
+  AND json_extract(payload, '$.assignment_id') IN (SELECT value FROM json_each(CAST(sqlc.arg(assignments) AS TEXT)))
+ORDER BY created_at, id;
+
 -- The newest job of the type whose idempotency key starts with the prefix, in any status (TASK-079: the STT job of a
 -- recording for the transcript viewer). Same exact prefix comparison as HasJobKeyPrefix.
 -- name: LatestJobByKeyPrefix :one

@@ -146,6 +146,19 @@ func (r *RecordingRepository) ListUntranscribed(ctx context.Context, after share
 	return out, nil
 }
 
+// ListDeleting returns the ids of the recordings marked for deletion, oldest mark first (TASK-095).
+func (r *RecordingRepository) ListDeleting(ctx context.Context) ([]shared.RecordingID, error) {
+	ids, err := r.db.Queries(ctx).ListDeletingRecordingIDs(ctx)
+	if err != nil {
+		return nil, MapError(ctx, err)
+	}
+	out := make([]shared.RecordingID, len(ids))
+	for i, id := range ids {
+		out[i] = shared.RecordingID(id)
+	}
+	return out, nil
+}
+
 // Delete removes the row of rec if it still has the version rec was loaded with (ADR-0004(d)).
 func (r *RecordingRepository) Delete(ctx context.Context, rec *recording.Recording) error {
 	return r.db.Do(ctx, func(ctx context.Context) error {
@@ -201,6 +214,11 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 		}
 	}
 
+	var deleting []shared.AssignmentID
+	if err := json.Unmarshal([]byte(row.DeletingAssignments), &deleting); err != nil {
+		return nil, fmt.Errorf("sqlite: stored recording %s: assignments to delete: %w", row.ID, err)
+	}
+
 	rec, err := recording.Restore(recording.State{
 		Version:     row.Version,
 		ID:          shared.RecordingID(row.ID),
@@ -219,6 +237,9 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 		HeartbeatAt: jobFromNullMs(row.HeartbeatAt),
 		CreatedAt:   jobFromMs(row.CreatedAt),
 		UpdatedAt:   jobFromMs(row.UpdatedAt),
+
+		DeletingAt:          jobFromNullMs(row.DeletingAt),
+		DeletingAssignments: deleting,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: stored recording %s: %w", row.ID, err)
@@ -258,6 +279,9 @@ func recordingInsertParams(rec *recording.Recording) sqlcgen.InsertRecordingPara
 		LessonEnd:     jobNullMs(snap.ScheduledEnd()),
 		CreatedAt:     jobMs(rec.CreatedAt()),
 		UpdatedAt:     u.UpdatedAt,
+
+		DeletingAt:          u.DeletingAt,
+		DeletingAssignments: u.DeletingAssignments,
 	}
 }
 
@@ -267,6 +291,11 @@ func recordingUpdateParams(rec *recording.Recording) sqlcgen.UpdateRecordingPara
 	if d, ok := rec.Duration(); ok {
 		duration = sql.NullInt64{Int64: d.Milliseconds(), Valid: true}
 	}
+	ids := rec.DeletingAssignments()
+	if ids == nil {
+		ids = []shared.AssignmentID{}
+	}
+	deleting, _ := json.Marshal(ids) // a list of strings always marshals
 	return sqlcgen.UpdateRecordingParams{
 		ID:              string(rec.ID()),
 		ExpectedVersion: rec.Version(),
@@ -280,6 +309,9 @@ func recordingUpdateParams(rec *recording.Recording) sqlcgen.UpdateRecordingPara
 		FailureReason:   jobNullString(rec.Problem()),
 		Silent:          jobBoolInt(rec.Silent()),
 		UpdatedAt:       jobMs(rec.UpdatedAt()),
+
+		DeletingAt:          jobNullMs(rec.DeletingAt()),
+		DeletingAssignments: string(deleting),
 	}
 }
 

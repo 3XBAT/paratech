@@ -37,7 +37,7 @@ func (r *Recording) MarkDeleting(now time.Time, assignments []shared.AssignmentI
 		return err
 	}
 
-	r.deletingAt, r.deletingAssignments, r.updatedAt = now, slices.Clone(assignments), now
+	r.deletingAt, r.deletingAssignments, r.updatedAt = now, cloneIDs(assignments), now
 	return nil
 }
 
@@ -48,8 +48,14 @@ func (r *Recording) Deleting() bool { return !r.deletingAt.IsZero() }
 func (r *Recording) DeletingAt() time.Time { return r.deletingAt }
 
 // DeletingAssignments returns the found homework the user chose to delete with the recording.
-func (r *Recording) DeletingAssignments() []shared.AssignmentID {
-	return slices.Clone(r.deletingAssignments)
+func (r *Recording) DeletingAssignments() []shared.AssignmentID { return cloneIDs(r.deletingAssignments) }
+
+// cloneIDs copies ids; an empty list is nil, so a stored "[]" restores to the same aggregate.
+func cloneIDs(ids []shared.AssignmentID) []shared.AssignmentID {
+	if len(ids) == 0 {
+		return nil
+	}
+	return slices.Clone(ids)
 }
 
 // HasSound reports whether the recording holds audio files: the final track or chunks written so far.
