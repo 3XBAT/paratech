@@ -41,7 +41,9 @@ type fakePrompt struct {
 
 func (f *fakePrompt) Current() (recordingprompt.View, bool) { return f.view, f.has }
 
-func (f *fakePrompt) Advice() (recordingprompt.Advice, bool) { return f.advice, !f.advice.Advice.IsZero() }
+func (f *fakePrompt) Advice() (recordingprompt.Advice, bool) {
+	return f.advice, !f.advice.Advice.IsZero()
+}
 
 func (f *fakePrompt) Sources(context.Context) (recordingprompt.Sources, error) {
 	f.calls = append(f.calls, "sources")
