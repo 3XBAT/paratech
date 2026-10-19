@@ -202,9 +202,10 @@ func TestReserveDecisionTable(t *testing.T) {
 
 			// A different fingerprint is a conflict in every state and changes nothing.
 			for name, r := range map[string]ReserveRequest{
-				"amount":    request(t, "k", 101),
-				"alias":     mustRequest(t, "k", "summary", "slow", 100),
-				"operation": mustRequest(t, "k", "homework_draft", "fast", 100),
+				"amount":         request(t, "k", 101),
+				"alias":          mustRequest(t, "k", "summary", "slow", 100),
+				"operation":      mustRequest(t, "k", "homework_draft", "fast", 100),
+				"detailed notes": mustRequest(t, "k", "detailed_notes", "fast", 100),
 			} {
 				if _, _, err := a.Reserve(r, rid(9), now); !errors.Is(err, ErrIdempotencyConflict) {
 					t.Errorf("different %s: err = %v, want ErrIdempotencyConflict", name, err)

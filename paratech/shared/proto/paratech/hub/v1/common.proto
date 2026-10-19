@@ -35,6 +35,8 @@ enum OperationType {
   OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES = 2;
   // Draft of a homework answer.
   OPERATION_TYPE_HOMEWORK_DRAFT = 3;
+  // Detailed structured lecture notes.
+  OPERATION_TYPE_DETAILED_NOTES = 4;
 }
 
 // QuotaUnit is the unit of a QuotaAmount. The PRD leaves the final quota unit open (section 19, decision 4); the field
