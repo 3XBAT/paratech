@@ -474,7 +474,8 @@ func TestRenamedLessonBetweenAttemptsStillCompletes(t *testing.T) {
 	}
 }
 
-// Test step 3 of TASK-042: an invalid answer creates no records and fails the job at once, without retries.
+// Test step 3 of TASK-042: an invalid answer creates no records and fails the job, without retries of the job. Since
+// TASK-086 one attempt asks again twice with a format reminder before it fails.
 func TestInvalidLLMAnswerFailsTheJobWithoutRecords(t *testing.T) {
 	llm := testenv.NewFakeLLM()
 	llm.Answer(values.OperationSummary, `Sure! Here is the summary: rivers.`)
@@ -516,8 +517,8 @@ func TestInvalidLLMAnswerFailsTheJobWithoutRecords(t *testing.T) {
 	if err := e.runner.Stop(stopCtx); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(llm.Requests()); n != 2 {
-		t.Fatalf("LLM requests = %d, want 2 (no retry of a permanent failure)", n)
+	if n := len(llm.Requests()); n != 2*3 {
+		t.Fatalf("LLM requests = %d, want 3 per job (no retry of a permanent failure)", n)
 	}
 	for _, id := range failed {
 		if j, err := e.jobs.Get(ctx, id); err != nil || j.Status() != job.StatusFailed || j.Attempts() != 1 {
@@ -531,6 +532,73 @@ func TestInvalidLLMAnswerFailsTheJobWithoutRecords(t *testing.T) {
 	if _, err := e.summaries.Get(ctx, summary.IDOf(ppTranscript)); err == nil {
 		t.Fatal("a summary was stored from an invalid answer")
 	}
+}
+
+// TASK-086 on SQLite through the real Hub client: the gateway wraps the extraction in a fence (accepted) and cuts the
+// summary off (three paid calls, then a permanent failure). A rerun of the failed job is replayed by the Hub for free;
+// «Повторить» makes a new job whose new keys reach the model, and the summary is stored.
+func TestRetryAfterACutOffAnswerThroughFakeHub(t *testing.T) {
+	hub := testenv.NewFakeHub()
+	hub.Answer(values.OperationSummary, `{"summary":"Rivers and their del`)
+	hub.Answer(values.OperationExtractHomework, "Here is the JSON:\n```json\n"+ppExtract+"\n```")
+	e := newPPEnv(t, fakeHubClient(t, hub))
+	e.start()
+
+	failed := e.waitPost(homeworkflow.SummarizeJobType, job.StatusFailed)
+	e.waitPost(homeworkflow.ExtractHomeworkJobType, job.StatusCompleted)
+	if !strings.HasSuffix(failed.LastError(), homeworkflow.ErrTruncatedAnswer.Error()) || failed.Attempts() != 1 {
+		t.Fatalf("summary job: attempts %d, last error %q", failed.Attempts(), failed.LastError())
+	}
+	if hub.Charged() != 3+1 {
+		t.Fatalf("charged = %d, want three summary calls and one extraction", hub.Charged())
+	}
+
+	ctx := context.Background()
+	rr, err := homeworkflow.NewRerunner(homeworkflow.RerunDeps{
+		Transcripts: sqlite.NewTranscriptRepository(e.db), Jobs: e.jobs, Summaries: e.summaries, Clock: e.clock,
+		IDs: &postIDs{n: 100},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rr.RedoSummary(ctx, "r1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("RedoSummary without a summary = %v", err)
+	}
+	if _, err := rr.Retry(ctx, "r1", homeworkflow.WorkHomework); !errors.Is(err, job.ErrNotFailed) {
+		t.Fatalf("Retry of the completed extraction = %v", err)
+	}
+
+	hub.Answer(values.OperationSummary, ppSummary)
+	id, err := rr.Retry(ctx, "r1", homeworkflow.WorkSummary)
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	testenv.Eventually(t, "the retried summary job completes", func() bool {
+		j, err := e.jobs.Get(ctx, id)
+		return err == nil && j.Status() == job.StatusCompleted
+	}, func() { e.clock.Advance(time.Second) })
+	e.checkStructures()
+	if hub.Charged() != 3+1+1 {
+		t.Fatalf("charged = %d, want one more call for the retry", hub.Charged())
+	}
+	if old, err := e.jobs.Get(ctx, failed.ID()); err != nil || old.Status() != job.StatusFailed {
+		t.Fatalf("the failed job changed: %v %v", old, err)
+	}
+	if _, err := sqlite.NewTranscriptRepository(e.db).Get(ctx, ppTranscript); err != nil {
+		t.Fatalf("transcript: %v", err)
+	}
+
+	// «Сделать конспект заново»: the new summary replaces the old one only once it passed.
+	hub.Answer(values.OperationSummary, "no JSON at all")
+	redo, err := rr.RedoSummary(ctx, "r1")
+	if err != nil {
+		t.Fatalf("RedoSummary: %v", err)
+	}
+	testenv.Eventually(t, "the redo fails", func() bool {
+		j, err := e.jobs.Get(ctx, redo)
+		return err == nil && j.Status() == job.StatusFailed
+	}, func() { e.clock.Advance(time.Second) })
+	e.checkStructures()
 }
 
 // AC-3 of TASK-042 on SQLite: the user's edit of an assignment and its deadline survives reprocessing.
