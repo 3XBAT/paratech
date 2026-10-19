@@ -25,6 +25,14 @@ func TestClassifyTitle(t *testing.T) {
 		{"История России (ЛК)", "История России", KindLecture},
 		{"Матанализ: семинар", "Матанализ", KindSeminar},
 
+		// Kind first in the first brackets, as university portals write it.
+		{"Компьютерные сети (лабораторная работа, подгруппа 2, чётная неделя)", "Компьютерные сети", KindLab},
+		{"Операционные системы (лекция); поток 1", "Операционные системы", KindLecture},
+		{"Программирование (лекция, верхняя неделя)", "Программирование", KindLecture},
+		{"Немецкий язык A1 (онлайн-группа, Берлин)", "Немецкий язык A1 (онлайн-группа, Берлин)", KindUnknown},
+		{"Гостевая лекция: машинное обучение", "Гостевая лекция: машинное обучение", KindUnknown},
+		{"Физика (поток 1, лекция)", "Физика (поток 1, лекция)", KindUnknown},
+
 		// Kind first: before a separator, in brackets at the start, or with a topic.
 		{"Лекция: Матанализ", "Матанализ", KindLecture},
 		{"Lecture: Calculus", "Calculus", KindLecture},

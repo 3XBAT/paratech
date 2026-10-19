@@ -14,8 +14,10 @@
 //   - UTF-8, an optional byte order mark, at most MaxFileBytes, MaxEvents VEVENTs and importplan.MaxRows lessons
 //     in the bounds. One complete VCALENDAR (a cut file is refused). A logical line has at most 64 KiB and
 //     32 parameter separators (golang-ical needs quadratic time for more); components nest at most 16 deep.
-//   - Title: SUMMARY; escaped line breaks and tabs become spaces. LOCATION, DESCRIPTION, alarms and attendees are
-//     ignored (a lesson has no field for them).
+//   - Title: SUMMARY; escaped line breaks and tabs become spaces. The subject and the kind of the class are derived
+//     from it (lesson.ClassifyTitle). Teacher: the first DESCRIPTION line "Преподаватель: ..." or "Teacher: ..."
+//     (label case-insensitive), else the CN parameter of ORGANIZER, else none; cut to one clean line of
+//     lesson.MaxTeacherRunes. LOCATION, the rest of DESCRIPTION, alarms and attendees are ignored.
 //   - Times: DTSTART with TZID (an IANA name, or a Windows name such as "Russian Standard Time" mapped through
 //     golang-ical's CLDR table), in UTC ("Z"), or floating. A floating time uses X-WR-TIMEZONE of the calendar;
 //     without it the event is a row error. A UTC event recurs in UTC and its lessons show X-WR-TIMEZONE when the

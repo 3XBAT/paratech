@@ -199,11 +199,13 @@ func occurrences(ctx context.Context, w importplan.Window, events []event) ([]im
 			return &Error{Kind: ErrTooMany, Detail: fmt.Sprintf("more than %d lessons in the import dates", importplan.MaxRows)}
 		}
 		start = start.In(e.label)
+		subject, kind := lesson.ClassifyTitle(e.title)
 		rows = append(rows, importplan.Row{
 			Line: e.line,
 			Key:  k,
 			Content: lesson.Content{
 				Title: e.title, Start: start, End: start.Add(e.duration), TimeZone: e.label.String(),
+				Subject: subject, Kind: kind, Teacher: e.teacher,
 			},
 		})
 		return nil

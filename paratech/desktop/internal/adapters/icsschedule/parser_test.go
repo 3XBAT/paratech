@@ -85,7 +85,12 @@ func checkRows(t *testing.T, got importplan.Parsed, want []wantRow) {
 	}
 	for i, w := range want {
 		g := got.Rows[i]
-		c := lesson.Content{Title: w.title, Start: w.start, End: w.start.Add(w.dur), TimeZone: w.zone}
+		// Subject and kind come from the title; the teacher is checked by TestLessonDetails.
+		subject, kind := lesson.ClassifyTitle(w.title)
+		c := lesson.Content{
+			Title: w.title, Start: w.start, End: w.start.Add(w.dur), TimeZone: w.zone,
+			Subject: subject, Kind: kind, Teacher: g.Content.Teacher,
+		}
 		if g.Line != w.line || g.Key != w.key || !g.Content.Equal(c) {
 			t.Errorf("row %d = line %d key %q %+v\nwant      line %d key %q %+v", i, g.Line, g.Key, g.Content, w.line, w.key, c)
 		}
@@ -332,6 +337,58 @@ func TestUniversityPortalExport(t *testing.T) {
 	got := parseWith(t, p, strings.Replace(src, "X-WR-TIMEZONE:Asia/Yekaterinburg\n", "", 1))
 	if len(got.Rows) != 0 || len(got.Errors) != 4 || got.Errors[0].Line != 6 || got.Errors[0].Field != propDTStart {
 		t.Fatalf("floating without a calendar zone = %+v", got)
+	}
+}
+
+// Subject and kind come from SUMMARY, the teacher from a DESCRIPTION line or the CN of ORGANIZER (TASK-089).
+func TestLessonDetails(t *testing.T) {
+	event := func(uid, summary string, extra ...string) string {
+		return "BEGIN:VEVENT\r\nUID:" + uid + "\r\nSUMMARY:" + summary + "\r\n" +
+			"DTSTART:20261006T090000Z\r\nDURATION:PT1H\r\n" + strings.Join(extra, "") + "END:VEVENT\r\n"
+	}
+	src := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
+		event("a", "Матанализ (лек.)", "DESCRIPTION:Ауд. 101\\nTeacher : Ivanov I.\\nПреподаватель: Петров\r\n") +
+		event("b", "Лекция по физике", "ORGANIZER;CN=\"Сидоров С. С.\":mailto:teacher@example.edu\r\n") +
+		event("c", "Calculus [lab]", "DESCRIPTION:преподаватель:  Смирнова  А. А.\r\n", "ORGANIZER;CN=Other:mailto:other@example.edu\r\n") +
+		event("d", "Лабиринты истории", "DESCRIPTION:Преподаватель:\\nСсылка: https://meet.example\r\n") +
+		event("e", "History", "DESCRIPTION:Teacher: "+strings.Repeat("я", lesson.MaxTeacherRunes+20)+"\r\n") +
+		"END:VCALENDAR\r\n"
+	p := newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	got := parseWith(t, p, src)
+	want := []struct {
+		subject string
+		kind    lesson.Kind
+		teacher string
+	}{
+		{"Матанализ", lesson.KindLecture, "Ivanov I."},
+		{"Физике", lesson.KindLecture, "Сидоров С. С."},
+		{"Calculus", lesson.KindLab, "Смирнова А. А."},
+		{"Лабиринты истории", lesson.KindUnknown, ""},
+		{"History", lesson.KindUnknown, strings.Repeat("я", lesson.MaxTeacherRunes)},
+	}
+	if len(got.Errors) != 0 || len(got.Rows) != len(want) {
+		t.Fatalf("parsed = %+v", got)
+	}
+	for i, w := range want {
+		c := got.Rows[i].Content
+		if c.Subject != w.subject || c.Kind != w.kind || c.Teacher != w.teacher || c.Validate() != nil {
+			t.Errorf("row %d = %q, %v, %q; want %q, %v, %q", i, c.Subject, c.Kind, c.Teacher, w.subject, w.kind, w.teacher)
+		}
+	}
+
+	// The fixtures: a Google export names the teacher in DESCRIPTION, a portal puts the kind in brackets.
+	msk := zone(t, "Europe/Moscow")
+	g := parseWith(t, newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, msk), time.Date(2026, 11, 1, 0, 0, 0, 0, msk)), fixture(t, "google.ics"))
+	if c := g.Rows[0].Content; c.Teacher != "доц. Иванова" || c.Subject != "Математический анализ" {
+		t.Errorf("google.ics first lesson = %+v", c)
+	}
+	yek := zone(t, "Asia/Yekaterinburg")
+	u := parseWith(t, newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, yek), time.Date(2026, 10, 31, 0, 0, 0, 0, yek)), fixture(t, "university_portal.ics"))
+	if c := u.Rows[0].Content; c.Teacher != "проф. Петров П. П." || c.Subject != "Операционные системы" || c.Kind != lesson.KindLecture {
+		t.Errorf("university_portal.ics first lesson = %+v", c)
+	}
+	if c := u.Rows[1].Content; c.Subject != "Компьютерные сети" || c.Kind != lesson.KindLab {
+		t.Errorf("university_portal.ics second lesson = %+v", c)
 	}
 }
 

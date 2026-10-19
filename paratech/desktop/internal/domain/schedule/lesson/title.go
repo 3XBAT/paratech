@@ -18,6 +18,8 @@ var topicWords = []string{"по", "on"}
 // abbreviation (ParseKind) in one of these places, never inside a word ("Лабиринты истории" is not a lab):
 //
 //   - in brackets at the end or the start: "Матанализ (лек.)", "Calculus [lab]", "(сем) Физика";
+//   - as the first item of the first brackets after the subject, as university portals write it:
+//     "Компьютерные сети (лабораторная работа, подгруппа 2)", "Операционные системы (лекция); поток 1";
 //   - after the last or before the first separator (comma, colon, a dash with spaces): "Матанализ, лекция",
 //     "Лекция: Матанализ", "Физика - практика";
 //   - before "по" or "on": "Лекция по физике" gives the subject "Физике". Only the first letter is capitalized; the
@@ -36,7 +38,10 @@ func ClassifyTitle(title string) (subject string, kind Kind) {
 		return whole, k
 	}
 
-	for _, rule := range []func(string) (string, Kind, bool){bracketAtEnd, bracketAtStart, kindAfterSeparator, kindBeforeSeparator, kindWithTopic} {
+	rules := []func(string) (string, Kind, bool){
+		bracketAtEnd, bracketAtStart, bracketFirstItem, kindAfterSeparator, kindBeforeSeparator, kindWithTopic,
+	}
+	for _, rule := range rules {
 		s, k, ok := rule(t)
 		if !ok {
 			continue
@@ -86,6 +91,24 @@ func bracketAtStart(t string) (string, Kind, bool) {
 		if k, ok := knownKind(t[1:i]); ok {
 			return t[i+1:], k, true
 		}
+	}
+	return "", KindUnknown, false
+}
+
+// bracketFirstItem: "Компьютерные сети (лабораторная работа, подгруппа 2)". The subject is the text before the
+// first opening bracket.
+func bracketFirstItem(t string) (string, Kind, bool) {
+	i := strings.IndexAny(t, "([")
+	if i <= 0 {
+		return "", KindUnknown, false
+	}
+	j := strings.IndexByte(t[i:], closingBracket[t[i]])
+	if j < 0 {
+		return "", KindUnknown, false
+	}
+	first, _, _ := strings.Cut(strings.ReplaceAll(t[i+1:i+j], ";", ","), ",")
+	if k, ok := knownKind(first); ok {
+		return t[:i], k, true
 	}
 	return "", KindUnknown, false
 }
