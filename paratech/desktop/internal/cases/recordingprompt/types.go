@@ -18,6 +18,7 @@ type Deps struct {
 	Apps       AudioApps
 	Popup      Popup
 	Recordings Recordings
+	Lessons    Lessons
 	Clock      Clock
 	Sleeper    Sleeper
 	Log        *slog.Logger // optional: nil discards
@@ -48,6 +49,13 @@ type Sources struct {
 	// Remembered is the app recorded last time, even when it is not open now, so the picker can select it as soon as
 	// it appears; empty for the whole computer.
 	Remembered shared.AppName
+}
+
+// Manual is the result of a start from the main window (TASK-081).
+type Manual struct {
+	Recording shared.RecordingID // set once the recording runs
+	Lesson    shared.LessonID    // the lesson in progress the recording is linked to; empty without one
+	Problem   prompt.Problem     // why it did not start; prompt.ProblemNone once it runs
 }
 
 func viewOf(p *prompt.Prompt) View {

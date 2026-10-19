@@ -76,14 +76,16 @@ func newPromptScenario(t *testing.T) *promptScenario {
 	sc := &promptScenario{
 		t: t, clock: clock, popup: &testenv.FakePopup{}, prefs: prefs, apps: &testenv.FakeAudioApps{}, recordings: &startedLessons{},
 	}
+	lessons := sqlite.NewLessonRepository(db)
 	sc.prompts, err = recordingprompt.New(recordingprompt.Deps{
-		Settings: settings, Apps: sc.apps, Popup: sc.popup, Recordings: sc.recordings, Clock: clock, Sleeper: clock,
+		Settings: settings, Apps: sc.apps, Popup: sc.popup, Recordings: sc.recordings, Lessons: lessons, Clock: clock,
+		Sleeper: clock,
 	}, recordingprompt.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	sc.sched, err = scheduler.New(scheduler.Deps{
-		Lessons: sqlite.NewLessonRepository(db), Clock: clock, Sleeper: clock, Events: sc.prompts,
+		Lessons: lessons, Clock: clock, Sleeper: clock, Events: sc.prompts,
 	}, scheduler.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -210,5 +212,57 @@ func TestPickedSourceIsRememberedOnSQLite(t *testing.T) {
 	sc.apps.Set(values.AudioApp{App: "chrome.exe", PID: 200})
 	if src, err = sc.prompts.Sources(ctx); err != nil || !src.Selected.IsWholeComputer() || src.Remembered != "zoom.exe" {
 		t.Fatalf("Sources without zoom = %+v, %v; want the whole computer selected and zoom still remembered", src, err)
+	}
+}
+
+// TASK-081 on SQLite: «Начать запись» of the main window links the recording to the lesson in progress, start
+// included and end excluded at the store's precision. The other lesson of dstSchedule is a week away, so any lesson
+// here is the London one.
+func TestManualStartLinksTheLessonOnSQLite(t *testing.T) {
+	tests := []struct {
+		name   string
+		at     time.Duration // from londonStart
+		linked bool
+	}{
+		{name: "just before the start", at: -time.Millisecond},
+		{name: "at the start", linked: true},
+		{name: "in the middle", at: 45 * time.Minute, linked: true},
+		{name: "just before the end", at: 90*time.Minute - time.Millisecond, linked: true},
+		{name: "at the end", at: 90 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := newPromptScenario(t)
+			sc.clock.Advance(londonStart.Add(tt.at).Sub(sc.clock.Now()))
+			m, err := sc.prompts.StartManual(context.Background(), values.WholeComputer())
+			if err != nil || m.Recording != "rec-1" || (m.Lesson != "") != tt.linked {
+				t.Fatalf("StartManual = %+v, %v; want linked %v", m, err, tt.linked)
+			}
+			if starts := sc.recordings.all(); !slices.Equal(starts, []shared.LessonID{m.Lesson}) {
+				t.Fatalf("starts %v, want %q", starts, m.Lesson)
+			}
+		})
+	}
+}
+
+// TASK-081: a start from the main window while the lesson popup is on offer records that lesson and ends the popup.
+func TestManualStartEndsTheLessonPopupOnSQLite(t *testing.T) {
+	sc := newPromptScenario(t)
+	sc.tickAt(londonStart)
+	v, ok := sc.prompts.Current()
+	if !ok || !sc.popup.Visible() {
+		t.Fatal("no popup at the start")
+	}
+	sc.clock.Advance(time.Minute)
+	m, err := sc.prompts.StartManual(context.Background(), values.WholeComputer())
+	if err != nil || m.Lesson != v.Lesson.ID {
+		t.Fatalf("StartManual = %+v, %v; want the lesson %s", m, err, v.Lesson.ID)
+	}
+	if _, ok := sc.prompts.Current(); ok || sc.popup.Visible() {
+		t.Fatal("the popup must end after a start from the main window")
+	}
+	sc.tickAt(londonStart.Add(2 * time.Minute))
+	if sc.popup.Shows() != 1 {
+		t.Fatalf("shows %d: the lesson must not be offered again", sc.popup.Shows())
 	}
 }
