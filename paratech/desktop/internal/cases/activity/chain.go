@@ -24,7 +24,12 @@ func chainJobTypes() []job.Type { return append(recordingJobTypes(), transcriptJ
 // the newest counts: an older one was replaced (for example a transcription with another model).
 func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	switch r.Status() {
-	case recording.StatusCompleted: // processed: the jobs decide below
+	case recording.StatusCompleted:
+		if r.Silent() {
+			// TASK-082: nothing to transcribe; a job enqueued before cannot succeed either.
+			return Chain{Stage: StageFailed, ErrorCode: ErrorSilentRecording, Action: ActionCheckSound}
+		}
+		// processed: the jobs decide below
 	case recording.StatusFailed:
 		return Chain{Stage: StageFailed, ErrorCode: ErrorRecordingFailed, Action: ActionCheckSound}
 	case recording.StatusStarting, recording.StatusRecording:

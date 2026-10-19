@@ -93,6 +93,9 @@ const (
 	ErrorTranscriptionFailed ErrorCode = "transcriptionFailed"
 	ErrorSummaryFailed       ErrorCode = "summaryFailed"
 	ErrorHomeworkFailed      ErrorCode = "homeworkFailed"
+	// ErrorSilentRecording: the track is silent all or almost all the time (TASK-082), so it is not transcribed; the
+	// row offers ActionCheckSound.
+	ErrorSilentRecording ErrorCode = "silentRecording"
 )
 
 // Action is what the screen offers for a row.

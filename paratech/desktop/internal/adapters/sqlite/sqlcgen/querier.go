@@ -142,7 +142,8 @@ type Querier interface {
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
 	ListTranscriptRefsByRecording(ctx context.Context, recordingID string) ([]string, error)
 	// Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
-	// startup sweep that enqueues their transcription). Ids only: the caller loads each one and its aggregate decides.
+	// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082). Ids only: the
+	// caller loads each one and its aggregate decides.
 	ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).

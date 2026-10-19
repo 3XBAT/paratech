@@ -251,7 +251,8 @@ func TestMigrationToVersion9AddsTranscriptParts(t *testing.T) {
 	if _, err := p.UpTo(ctx, 8); err != nil {
 		t.Fatalf("up to 8: %v", err)
 	}
-	saveRecording(t, NewRecordingRepository(db), recordingInStatus(t, recording.StatusCompleted))
+	// A row of the version 8 schema: the repository writes the columns of the latest version.
+	insertOldRecording(t, db, "r-COMPLETED")
 
 	if _, err := p.UpTo(ctx, 9); err != nil {
 		t.Fatalf("up to 9: %v", err)

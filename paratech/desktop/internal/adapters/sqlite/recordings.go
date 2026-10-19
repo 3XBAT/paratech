@@ -197,6 +197,7 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 		Chunks:      int(row.ChunkCount),
 		ChunksDir:   chunks,
 		Audio:       audio,
+		Silent:      row.Silent != 0,
 		Problem:     row.FailureReason.String,
 		StartedAt:   jobFromMs(row.StartedAt),
 		StoppedAt:   jobFromNullMs(row.StoppedAt),
@@ -225,6 +226,7 @@ func recordingInsertParams(rec *recording.Recording) sqlcgen.InsertRecordingPara
 		ChunksRef:     rec.ChunksDir().String(),
 		AudioRef:      u.AudioRef,
 		FailureReason: u.FailureReason,
+		Silent:        u.Silent,
 		CreatedAt:     jobMs(rec.CreatedAt()),
 		UpdatedAt:     u.UpdatedAt,
 	}
@@ -247,6 +249,7 @@ func recordingUpdateParams(rec *recording.Recording) sqlcgen.UpdateRecordingPara
 		ChunkCount:      int64(rec.Chunks()),
 		AudioRef:        jobNullString(rec.Audio().String()),
 		FailureReason:   jobNullString(rec.Problem()),
+		Silent:          jobBoolInt(rec.Silent()),
 		UpdatedAt:       jobMs(rec.UpdatedAt()),
 	}
 }

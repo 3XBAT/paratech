@@ -39,7 +39,7 @@ func (q *Queries) DeleteTranscriptsByRecording(ctx context.Context, recordingID 
 
 const getRecording = `-- name: GetRecording :one
 
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at FROM recordings WHERE id = ?1
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent FROM recordings WHERE id = ?1
 `
 
 // Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
@@ -63,17 +63,18 @@ func (q *Queries) GetRecording(ctx context.Context, id string) (Recording, error
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Silent,
 	)
 	return i, err
 }
 
 const insertRecording = `-- name: InsertRecording :exec
 INSERT INTO recordings (id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms,
-                        chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at)
+                        chunk_count, chunks_ref, audio_ref, failure_reason, silent, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, 1, ?13,
-        ?14)
+        ?10, ?11, ?12, ?13, 1, ?14,
+        ?15)
 `
 
 type InsertRecordingParams struct {
@@ -89,6 +90,7 @@ type InsertRecordingParams struct {
 	ChunksRef     string
 	AudioRef      sql.NullString
 	FailureReason sql.NullString
+	Silent        int64
 	CreatedAt     int64
 	UpdatedAt     int64
 }
@@ -108,6 +110,7 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 		arg.ChunksRef,
 		arg.AudioRef,
 		arg.FailureReason,
+		arg.Silent,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -158,7 +161,7 @@ func (q *Queries) ListRecordingActivityIDs(ctx context.Context, arg ListRecordin
 }
 
 const listRecordingsByStatus = `-- name: ListRecordingsByStatus :many
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at FROM recordings
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent FROM recordings
 WHERE status IN (/*SLICE:statuses*/?)
 ORDER BY created_at, id
 `
@@ -198,6 +201,7 @@ func (q *Queries) ListRecordingsByStatus(ctx context.Context, statuses []string)
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Silent,
 		); err != nil {
 			return nil, err
 		}
@@ -246,6 +250,7 @@ WHERE r.id IS NOT NULL
   AND r.id > ?1
   AND r.status = ?2
   AND r.audio_ref IS NOT NULL
+  AND r.silent = 0
   AND NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.recording_id = r.id)
 ORDER BY r.id
 LIMIT ?3
@@ -258,7 +263,8 @@ type ListUntranscribedRecordingIDsParams struct {
 }
 
 // Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
-// startup sweep that enqueues their transcription). Ids only: the caller loads each one and its aggregate decides.
+// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082). Ids only: the
+// caller loads each one and its aggregate decides.
 func (q *Queries) ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listUntranscribedRecordingIDs, arg.After, arg.Status, arg.MaxRows)
 	if err != nil {
@@ -292,9 +298,10 @@ SET status         = ?1,
     chunk_count    = ?6,
     audio_ref      = ?7,
     failure_reason = ?8,
+    silent         = ?9,
     version        = version + 1,
-    updated_at     = ?9
-WHERE id = ?10 AND version = ?11
+    updated_at     = ?10
+WHERE id = ?11 AND version = ?12
 `
 
 type UpdateRecordingParams struct {
@@ -306,6 +313,7 @@ type UpdateRecordingParams struct {
 	ChunkCount      int64
 	AudioRef        sql.NullString
 	FailureReason   sql.NullString
+	Silent          int64
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -323,6 +331,7 @@ func (q *Queries) UpdateRecording(ctx context.Context, arg UpdateRecordingParams
 		arg.ChunkCount,
 		arg.AudioRef,
 		arg.FailureReason,
+		arg.Silent,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,
