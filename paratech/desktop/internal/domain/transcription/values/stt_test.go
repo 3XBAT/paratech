@@ -63,3 +63,16 @@ func TestSTTJobKeyPrefix(t *testing.T) {
 		t.Fatalf("STTJobKeyPrefix = %q, want %q", got, "stt:rec-1:")
 	}
 }
+
+func TestSTTEnginePercent(t *testing.T) {
+	tests := []struct {
+		job, want int
+	}{
+		{-5, 0}, {0, 0}, {45, 50}, {STTEngineShare, 100}, {95, 100}, {100, 100},
+	}
+	for _, tt := range tests {
+		if got := STTEnginePercent(tt.job); got != tt.want {
+			t.Errorf("STTEnginePercent(%d) = %d, want %d", tt.job, got, tt.want)
+		}
+	}
+}

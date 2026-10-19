@@ -63,8 +63,11 @@ func TestListRecordingsRemaining(t *testing.T) {
 		hasAny bool
 	}{
 		{"queued: the whole estimate", []*job.Job{sttJob(t, "m-1")}, &fakeTimes{perHour: 40 * time.Minute}, 0, 40 * time.Minute, true},
-		{"running at 25 percent", []*job.Job{sttJob(t, "m-1", claimAt(time.Minute), progressAt(25, 5*time.Minute))},
-			&fakeTimes{perHour: 40 * time.Minute}, 6 * time.Minute, 30 * time.Minute, true},
+		// The job percent 45 is half of the engine run (STTEngineShare 90).
+		{"running at half of the engine", []*job.Job{sttJob(t, "m-1", claimAt(time.Minute), progressAt(45, 5*time.Minute))},
+			&fakeTimes{perHour: 40 * time.Minute}, 6 * time.Minute, 20 * time.Minute, true},
+		{"engine done, document being stored", []*job.Job{sttJob(t, "m-1", claimAt(time.Minute), progressAt(transcription.STTEngineShare, 5*time.Minute))},
+			&fakeTimes{perHour: 40 * time.Minute}, 6 * time.Minute, time.Minute, true},
 		{"running before the first progress", []*job.Job{sttJob(t, "m-1", claimAt(0))},
 			&fakeTimes{perHour: 40 * time.Minute}, 10 * time.Minute, 30 * time.Minute, true},
 		{"overdue: at least a minute", []*job.Job{sttJob(t, "m-1", claimAt(0))},

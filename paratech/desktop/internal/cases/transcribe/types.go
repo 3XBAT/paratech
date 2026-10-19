@@ -14,7 +14,7 @@ const JobType = job.Type(values.STTJobType)
 // Progress scale of one attempt: the engine run fills 0..engineShare, the stored document is reported at
 // documentStored with the checkpoint CheckpointTranscribed; the runner sets 100 on completion.
 const (
-	engineShare    = 90
+	engineShare    = values.STTEngineShare
 	documentStored = 95
 )
 

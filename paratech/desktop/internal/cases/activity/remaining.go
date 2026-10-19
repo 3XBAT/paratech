@@ -7,23 +7,9 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
-	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/services/speedestimate"
 	transcription "paratech/desktop/internal/domain/transcription/values"
 )
-
-// TranscriptionTimes estimates how long recognising audio with an installed model takes in the current load mode
-// (PRD section 8; TASK-084). The app wires the recognition speed use case.
-type TranscriptionTimes interface {
-	// TranscriptionTime returns the processing time of audio; ok is false without an estimate (PRD section 8).
-	TranscriptionTime(ctx context.Context, model shared.SttModelID, audio time.Duration) (d time.Duration, ok bool, err error)
-}
-
-// Clock supplies the current time for the time left of a running transcription (ARCH-24; PRD section 7.3).
-type Clock interface {
-	// Now returns the current time (PRD section 7.3).
-	Now() time.Time
-}
 
 // WithRemaining makes ListRecordings fill the approximate time left of a queued or running transcription
 // (Recording.Remaining). Call it once, before the Service is used; without it no row has a time left.
@@ -55,7 +41,9 @@ func (s *Service) remaining(ctx context.Context, r *recording.Recording, jobs []
 	if !ok {
 		return 0, false
 	}
-	// Before the first progress the job's last update is its start (Claim).
-	left := speedestimate.New().Remaining(total, running, c.Percent, s.clock.Now().Sub(stt.UpdatedAt()))
+	// Before the first progress the job's last update is its start (Claim). The job percent includes storing the
+	// document; the estimate covers only the engine run.
+	percent := transcription.STTEnginePercent(c.Percent)
+	left := speedestimate.New().Remaining(total, running, percent, s.clock.Now().Sub(stt.UpdatedAt()))
 	return left, left > 0
 }

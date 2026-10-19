@@ -14,6 +14,15 @@ import (
 // contexts do not import each other (ARCH-11), so the name is defined here and converted by the use cases.
 const STTJobType = "stt"
 
+// STTEngineShare is the part of an STT job's progress percent that the engine run fills (0..STTEngineShare); storing
+// the document fills the rest. The transcription use case reports by it, the time left reads it back (TASK-084).
+const STTEngineShare = 90
+
+// STTEnginePercent converts the progress percent of an STT job back to the engine's own progress, 0..100.
+func STTEnginePercent(jobPercent int) int {
+	return min(max(jobPercent, 0)*100/STTEngineShare, 100)
+}
+
 // STTJobKeyPrefix is the start of the idempotency key of every STT job of rec, "stt:<recording id>:"; the pinned
 // model id follows it. The enqueue builds keys with it and readers find the jobs of a recording by it.
 func STTJobKeyPrefix(rec shared.RecordingID) string { return STTJobType + ":" + string(rec) + ":" }
