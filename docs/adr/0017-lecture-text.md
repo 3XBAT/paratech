@@ -30,5 +30,7 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
 - A long lesson takes tens of minutes of calls; while a lecture text job runs it holds one light worker.
 - The part size is a guess about the alias limit: a truncated part is asked again to keep all content; if it still
   does not fit, the Hub owner raises `max_output` of the alias.
-- The kind and subject come from the lesson snapshot of TASK-088/089 (one place in `homeworkflow` load); until then the
-  kind is unknown.
+- The kind and subject come from the recording's lesson snapshot (TASK-088/089), else from the lesson; one place in
+  `homeworkflow` load.
+- Once a lecture text job of the current transcript completed (`lectureTextReady`), the recordings row offers the lecture
+  text instead of the raw transcript. The transcript is never deleted: retries are made from it.

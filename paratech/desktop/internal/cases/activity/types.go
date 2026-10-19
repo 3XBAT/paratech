@@ -59,6 +59,9 @@ type Chain struct {
 	Retry Work
 	// CanRedoSummary: a summary was made and its job is not pending or running, so «Сделать конспект заново» may run.
 	CanRedoSummary bool
+	// LectureTextReady: the lecture text of the current transcript is stored (TASK-090), so the row offers it instead
+	// of the raw transcript; the transcript itself is kept (it feeds the retries).
+	LectureTextReady bool
 }
 
 // Work is a post-processing work of a recording (TASK-086); the values are those of homeworkflow.Work.

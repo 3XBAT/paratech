@@ -111,6 +111,7 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 			ID: "r3", Status: recording.StatusCompleted, StartedAt: at, Chain: activity.Chain{
 				Stage: activity.StageFailed, Step: activity.StepSummary, ErrorCode: activity.ErrorSummaryFailed,
 				Action: activity.ActionOpenConnections, Retry: activity.WorkSummary, CanRedoSummary: true,
+				LectureTextReady: true,
 			},
 		},
 	}}
@@ -127,16 +128,16 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		`"status":"RECORDING",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"partsDone":0,"parts":0,"queueReason":"","errorCode":"",` +
-		`"jobError":"","action":"","actionJobId":"","retryWork":"","canRedoSummary":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
+		`"jobError":"","action":"","actionJobId":"","retryWork":"","canRedoSummary":false,"lectureTextReady":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r2","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"partsDone":0,"parts":0,"queueReason":"power",` +
 		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1",` +
-		`"retryWork":"","canRedoSummary":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
+		`"retryWork":"","canRedoSummary":false,"lectureTextReady":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r3","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"partsDone":0,"parts":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
-		`"actionJobId":"","retryWork":"summary","canRedoSummary":true,"remainingSeconds":0,"hasRemaining":false,"advice":null}]`
+		`"actionJobId":"","retryWork":"summary","canRedoSummary":true,"lectureTextReady":true,"remainingSeconds":0,"hasRemaining":false,"advice":null}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}

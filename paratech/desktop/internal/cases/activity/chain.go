@@ -50,7 +50,7 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	}
 	if summary != nil || homework != nil || lecture != nil {
 		// The transcript exists: its post-processing decides.
-		return withRedo(postChain(summary, homework, lecture), jobs, stt)
+		return withStored(postChain(summary, homework, lecture), jobs, stt)
 	}
 	if stt == nil {
 		// The STT job is enqueued right after the recording completes, or once a speech model is installed.
@@ -67,26 +67,34 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	case stt.Status() != job.StatusCompleted:
 		return queued(StepTranscription, stt)
 	}
-	return withRedo(postChain(summary, homework, lecture), jobs, stt)
+	return withStored(postChain(summary, homework, lecture), jobs, stt)
 }
 
-// withRedo sets CanRedoSummary: the newest summary job of the transcript has finished and one of its summary jobs
-// completed, so a summary is stored (a failed redo keeps the one before).
-func withRedo(c Chain, jobs []*job.Job, stt *job.Job) Chain {
+// withStored sets what is stored of the current transcript. CanRedoSummary: the newest summary job has finished and
+// one of its summary jobs completed, so a summary is stored (a failed redo keeps the one before). LectureTextReady: a
+// lecture text job of the transcript completed; a later run replaces the text only when it completes, so a newer job
+// that runs or failed keeps it ready.
+func withStored(c Chain, jobs []*job.Job, stt *job.Job) Chain {
+	c.LectureTextReady = completedSince(jobs, values.LectureTextJobType, stt)
 	last := newest(jobs, values.SummarizeJobType)
 	if stt != nil {
 		last = since(last, stt)
 	}
-	if last == nil || !last.Status().IsTerminal() {
-		return c
-	}
-	for _, j := range jobs {
-		if j.Type() == values.SummarizeJobType && j.Status() == job.StatusCompleted && (stt == nil || since(j, stt) != nil) {
-			c.CanRedoSummary = true
-			break
-		}
+	if last != nil && last.Status().IsTerminal() {
+		c.CanRedoSummary = completedSince(jobs, values.SummarizeJobType, stt)
 	}
 	return c
+}
+
+// completedSince reports whether a job of the type completed, created no earlier than stt (any one when stt is nil):
+// one of the current transcript.
+func completedSince(jobs []*job.Job, typ job.Type, stt *job.Job) bool {
+	for _, j := range jobs {
+		if j.Type() == typ && j.Status() == job.StatusCompleted && (stt == nil || since(j, stt) != nil) {
+			return true
+		}
+	}
+	return false
 }
 
 // postChain is the chain once the transcript exists: the summary and the homework search, then the lecture text; nil

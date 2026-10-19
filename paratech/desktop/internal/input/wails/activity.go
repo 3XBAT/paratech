@@ -114,6 +114,9 @@ type RecordingItem struct {
 	// CanRedoSummary: a summary exists and its job is not pending or running, so RedoSummary («Сделать конспект
 	// заново») may run.
 	CanRedoSummary bool `json:"canRedoSummary"`
+	// LectureTextReady: the lecture text of the recording is stored (TASK-090): the row offers «Открыть текст лекции»
+	// instead of the raw transcript, which it offers only while this is false.
+	LectureTextReady bool `json:"lectureTextReady"`
 
 	// RemainingSeconds is the approximate time left of a queued or running transcription («≈ N мин осталось»,
 	// TASK-084); hasRemaining is false when there is none or no estimate.
@@ -196,7 +199,7 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 			Stage: string(c.Stage), Step: string(c.Step), ProgressPercent: c.Percent, PartsDone: c.PartsDone, Parts: c.Parts,
 			QueueReason: string(c.QueueReason),
 			ErrorCode:   string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
-			RetryWork: string(c.Retry), CanRedoSummary: c.CanRedoSummary,
+			RetryWork: string(c.Retry), CanRedoSummary: c.CanRedoSummary, LectureTextReady: c.LectureTextReady,
 			RemainingSeconds: int64(r.Remaining.Round(time.Second) / time.Second), HasRemaining: r.HasRemaining,
 		})
 		if running && active.ID == r.ID {

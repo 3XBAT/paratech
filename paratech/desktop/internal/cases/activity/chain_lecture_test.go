@@ -48,7 +48,34 @@ func TestChainOfLectureText(t *testing.T) {
 		},
 		{
 			name: "made", jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw), done("l", lt)},
-			want: Chain{Stage: StageDone, CanRedoSummary: true},
+			want: Chain{Stage: StageDone, CanRedoSummary: true, LectureTextReady: true},
+		},
+		{
+			name: "a new run keeps the text made before", jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), done("h", hw), done("l", lt),
+				func(t *testing.T) *job.Job { return jobIn(t, "l2", lt, time.Hour, job.StatusRunning) },
+			},
+			want: Chain{Stage: StageLectureText, Step: StepLectureText, Percent: 42, CanRedoSummary: true, LectureTextReady: true},
+		},
+		{
+			name: "a failed new run keeps the text made before", jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), done("h", hw), done("l", lt),
+				failed("l2", lt, time.Hour, msgInvalid),
+			},
+			want: Chain{
+				Stage: StageFailed, Step: StepLectureText, ErrorCode: ErrorLectureTextFailed, JobError: msgInvalid,
+				Action: ActionRetry, Retry: WorkLectureText, CanRedoSummary: true, LectureTextReady: true,
+			},
+		},
+		{
+			name: "the text of an older transcript is not ready", jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), done("h", hw), done("l", lt),
+				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusCompleted) },
+				func(t *testing.T) *job.Job { return jobIn(t, "a2", sum, 2*time.Hour, job.StatusCompleted) },
+				func(t *testing.T) *job.Job { return jobIn(t, "h2", hw, 2*time.Hour, job.StatusCompleted) },
+				func(t *testing.T) *job.Job { return jobIn(t, "l2", lt, 2*time.Hour, job.StatusQueued) },
+			},
+			want: Chain{Stage: StageQueued, Step: StepLectureText, QueueReason: QueueInLine, CanRedoSummary: true},
 		},
 		{
 			name: "queued", jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw), in("l", lt, job.StatusQueued)},
