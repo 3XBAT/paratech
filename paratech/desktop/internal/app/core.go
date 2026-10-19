@@ -28,6 +28,7 @@ import (
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/cases/recordingdelete"
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/scheduler"
@@ -63,6 +64,7 @@ type core struct {
 	deliveries *senddelivery.Service
 	drafts     *homeworkflow.Drafts
 	proposals  *homeworkflow.Service
+	deletions  *recordingdelete.Service // «Удалить» of the recordings and the resume at the start (TASK-095)
 
 	// transcriptions enqueues the STT job of a completed recording and runs the startup sweep.
 	transcriptions *transcribe.Enqueuer
@@ -258,6 +260,16 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: recordings: %w", err)
 	}
 
+	// After the runner (it cancels the jobs of a recording) and the recordings (the recovery guard).
+	c.deletions, err = recordingdelete.New(recordingdelete.Deps{
+		Recordings: recordings, Store: sqlite.NewRecordingDeletions(db), Jobs: jobs, Canceller: c.runner, Artifacts: store,
+		Recovery: c.recordings, Clock: e.clock, Sleeper: e.clock, Tx: db,
+		Sync: calendarRequest{c: c, log: log, why: "recording deletion"}, Log: log,
+	}, recordingdelete.Config{TrackExtension: e.recordings.TrackExtension})
+	if err != nil {
+		return fmt.Errorf("app: recording deletion: %w", err)
+	}
+
 	c.sound, err = soundcheck.New(soundcheck.Deps{
 		Checker: levelChecker(recorder), Settings: settings, Recordings: recordingActivity{c.recordings}, Clock: e.clock,
 		Log: log,
@@ -320,6 +332,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 		Transcript: viewer,
 		Summary:    summaryViewer,
+		Deletion:   c.deletions,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

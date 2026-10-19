@@ -25,6 +25,7 @@ var (
 	_ schedulesync.CalendarAdapter  = lessonCalendar{}
 	_ homeworkflow.DeadlineCalendar = deadlineCalendar{}
 	_ schedulesync.CalendarAccount  = googleAccount{}
+	_ schedulesync.DeadlineEvents   = lessonCalendar{}
 	_ jobrunner.Handler             = (*schedulesync.CalendarSync)(nil)
 	_ googlecal.Auth                = (*googleauth.Authorizer)(nil)
 	_ googlecal.AuthClassifier      = classifyGoogleAuth
@@ -42,6 +43,8 @@ func (c *core) wireCalendar(e env, jobs *sqlite.JobRepository, lessons *sqlite.L
 	c.calendarSync, err = schedulesync.NewCalendarSync(schedulesync.CalendarDeps{
 		Lessons: lessons, Calendar: lessonCalendar{c.calendar}, Account: googleAccount{c.googleSignIn}, Jobs: jobs,
 		Clock: e.clock, IDs: e.ids, Tx: c.db, Log: log, MaxAttempts: maxAttempts,
+		// The deadline events of the assignments deleted with a recording (TASK-095).
+		Removals: sqlite.NewDeadlineEventRemovals(c.db), Deadlines: lessonCalendar{c.calendar},
 	})
 	if err != nil {
 		return fmt.Errorf("app: calendar sync: %w", err)
@@ -74,6 +77,15 @@ func (c *core) requestCalendarSync(ctx context.Context, log *slog.Logger, why st
 		log.Info("calendar sync requested", "after", why, "job", req.JobID.String())
 	}
 }
+
+// calendarRequest is the recordingdelete.SyncRequester: a calendar sync after the trigger why, only logged.
+type calendarRequest struct {
+	c   *core
+	log *slog.Logger
+	why string
+}
+
+func (r calendarRequest) RequestSync(ctx context.Context) { r.c.requestCalendarSync(ctx, r.log, r.why) }
 
 // classifyGoogleAuth is the googlecal.AuthClassifier of the googleauth token source: no sign-in or no client is "not
 // signed in", invalid_grant is "sign in again", a refused refresh is "rejected"; the rest (network, Google down, the
@@ -109,6 +121,11 @@ func (l lessonCalendar) UpsertLesson(ctx context.Context, calendarID string, ls 
 
 func (l lessonCalendar) DeleteEvent(ctx context.Context, calendarID string, id shared.LessonID) error {
 	return lessonWriteError(l.c.DeleteEvent(ctx, calendarID, id))
+}
+
+// DeleteDeadline is schedulesync.DeadlineEvents: a refusal of that one event is skipped like a lesson's.
+func (l lessonCalendar) DeleteDeadline(ctx context.Context, calendarID string, id shared.AssignmentID) error {
+	return lessonWriteError(l.c.DeleteDeadline(ctx, calendarID, id))
 }
 
 // lessonWriteError is lessonCalendarError for the write of one lesson: the adapter reasons that concern only that

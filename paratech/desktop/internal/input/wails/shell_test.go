@@ -29,6 +29,7 @@ func validCore() Core {
 		Homework:   validHomework(),
 		Transcript: &fakeTranscript{},
 		Summary:    &fakeSummary{},
+		Deletion:   &fakeDeletion{},
 	}
 }
 
