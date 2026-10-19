@@ -32,7 +32,7 @@ func TestNewLessonSnapshot(t *testing.T) {
 		},
 		{
 			name: "texts trimmed and made one line",
-			spec: LessonSnapshotSpec{Title: "  Мат\nанализ\t ", Subject: "\x00Физ​ика‮", Teacher: " \r\n "},
+			spec: LessonSnapshotSpec{Title: "  Мат\nанализ\t ", Subject: "\x00Физ\u200bика\u202e", Teacher: " \r\n "},
 			want: want{title: "Мат анализ", subject: "Физика"},
 		},
 		{
