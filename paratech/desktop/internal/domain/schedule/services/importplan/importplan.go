@@ -384,4 +384,7 @@ func writeContent(field func(string), num func(int64), c lesson.Content) {
 	num(c.Start.UnixNano())
 	num(c.End.UnixNano())
 	field(c.TimeZone)
+	field(c.Subject)
+	field(c.Kind.String())
+	field(c.Teacher)
 }
