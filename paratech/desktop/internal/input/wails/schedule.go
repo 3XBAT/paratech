@@ -62,12 +62,17 @@ type pickerFunc func(ctx context.Context) (string, error)
 // PickScheduleFile implements FilePicker.
 func (f pickerFunc) PickScheduleFile(ctx context.Context) (string, error) { return f(ctx) }
 
-// LessonText is a lesson as the preview shows it. Title is file text: render it as plain text only.
+// LessonText is a lesson as the preview shows it. Title, Subject and Teacher are file text: render them as plain
+// text only. Subject is "" when unknown; Kind is "lecture", "seminar", "practice", "lab" or "unknown"; Teacher is
+// "" when the file names none.
 type LessonText struct {
-	Title string `json:"title"`
-	Start string `json:"start"` // "02.01.2006 15:04" in the lesson's zone
-	End   string `json:"end"`
-	Zone  string `json:"zone"`
+	Title   string `json:"title"`
+	Start   string `json:"start"` // "02.01.2006 15:04" in the lesson's zone
+	End     string `json:"end"`
+	Zone    string `json:"zone"`
+	Subject string `json:"subject"`
+	Kind    string `json:"kind"`
+	Teacher string `json:"teacher"`
 }
 
 // ImportLesson is an added lesson (Line is its line in the file) or a removed one (Line 0).
@@ -344,7 +349,10 @@ func previewView(name string, src importplan.Source, p schedulesync.Preview) Imp
 
 func lessonText(c lesson.Content) LessonText {
 	loc := zoneOf(c.TimeZone)
-	return LessonText{Title: c.Title, Start: lessonTime(c.Start, loc), End: lessonTime(c.End, loc), Zone: c.TimeZone}
+	return LessonText{
+		Title: c.Title, Start: lessonTime(c.Start, loc), End: lessonTime(c.End, loc), Zone: c.TimeZone,
+		Subject: c.Subject, Kind: c.Kind.String(), Teacher: c.Teacher,
+	}
 }
 
 func lessonTime(t time.Time, loc *time.Location) string {
