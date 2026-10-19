@@ -121,8 +121,8 @@ type Recorder interface {
 	Switch(ctx context.Context, id shared.RecordingID, source values.Source) error
 }
 
-// LessonReader reads the lesson a recording starts for, so that the recording keeps a snapshot of it (TASK-088): a
-// later import may delete the lesson. Implemented by the sqlite adapter.
+// LessonReader reads the lesson a recording starts for, so that the recording keeps a snapshot of it (PRD sections 6.2
+// and 11, TASK-088): a later import may delete the lesson. Implemented by the sqlite adapter.
 type LessonReader interface {
 	// Get returns a live lesson (PRD section 11); an error wrapping shared.ErrNotFound when it is missing or deleted.
 	Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
