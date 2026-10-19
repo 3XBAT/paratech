@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"paratech/desktop/internal/domain/jobs/job"
@@ -43,16 +44,22 @@ func (s *Service) finish(ctx context.Context, id shared.RecordingID, wait time.D
 		return pending, nil
 	}
 
-	res, err := s.purge(ctx, id)
+	res, err := s.purge(ctx, id, jobs)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return gone, nil
 	case errors.Is(err, errBusy):
-		s.log.Warn("a job of the recording started again; the next start finishes the deletion",
+		s.log.Warn("a job of the recording started or ran meanwhile; the next start finishes the deletion",
 			slog.String("recording", id.String()))
 		return pending, nil
 	case err != nil:
-		return Result{}, err
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
+		// The recording stays marked: the next start purges it, like a file that could not be deleted.
+		s.log.Warn("recording rows not removed; the next start tries again", slog.String("recording", id.String()),
+			slog.Any("error", err))
+		return pending, nil
 	}
 	s.log.Info("recording deleted", slog.String("recording", id.String()), slog.Int("assignments", len(res.Deleted)),
 		slog.Int("assignments_kept", len(res.Kept)))
@@ -103,38 +110,57 @@ func (s *Service) stopJobs(ctx context.Context, id shared.RecordingID, wait time
 }
 
 // deleteFiles removes the chunks, the track and the transcript documents of the recording. Every delete is idempotent.
+// The refs come from stored values, so each is deleted only under the directory of its kind; another is left.
 func (s *Service) deleteFiles(ctx context.Context, rec *recording.Recording, jobs []*job.Job) error {
 	docs, err := s.store.Files(ctx, rec.ID())
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrStorage, err)
 	}
 
-	files := []shared.ArtifactRef{rec.ChunksDir()}
+	sound := []shared.ArtifactRef{rec.ChunksDir()}
 	if a := rec.Audio(); !a.IsZero() {
-		files = append(files, a)
+		sound = append(sound, a)
 	}
 	// A track written just before a crash may exist without being recorded on the aggregate.
 	if track, err := rec.TrackRef(s.cfg.TrackExtension); err == nil {
-		files = append(files, track)
+		sound = append(sound, track)
 	}
-	files = append(files, docs...)
+	texts := slices.Clone(docs)
 	// The document of an STT job is written before its transcript row, so a cancelled job may leave one without a row.
 	for _, j := range jobs {
 		if j.Type() != transcription.STTJobType {
 			continue
 		}
 		if ref, err := transcript.DocumentRef(shared.TranscriptID(j.ID())); err == nil {
-			files = append(files, ref)
+			texts = append(texts, ref)
 		}
+	}
+
+	type file struct {
+		ref  shared.ArtifactRef
+		kind shared.ArtifactKind
+	}
+	files := make([]file, 0, len(sound)+len(texts))
+	for _, f := range sound {
+		files = append(files, file{f, shared.ArtifactRecordings})
+	}
+	for _, f := range texts {
+		files = append(files, file{f, shared.ArtifactTranscripts})
 	}
 
 	seen := make(map[shared.ArtifactRef]bool, len(files))
 	for _, f := range files {
-		if seen[f] {
+		if seen[f.ref] {
 			continue
 		}
-		seen[f] = true
-		if err := s.artifacts.Delete(ctx, f); err != nil {
+		seen[f.ref] = true
+		if f.ref.Kind() != f.kind {
+			s.log.Warn("a file of a deleted recording is outside its directory and is left",
+				slog.String("recording", rec.ID().String()), slog.String("kind", string(f.ref.Kind())),
+				slog.String("want", string(f.kind)))
+			continue
+		}
+		if err := s.artifacts.Delete(ctx, f.ref); err != nil {
 			return fmt.Errorf("%w: %w", ErrStorage, err)
 		}
 	}
@@ -142,8 +168,13 @@ func (s *Service) deleteFiles(ctx context.Context, rec *recording.Recording, job
 }
 
 // purge removes the rows in one transaction, after checking again that no job of the recording is unfinished: the
-// write transaction keeps a job from being claimed or enqueued until the commit.
-func (s *Service) purge(ctx context.Context, id shared.RecordingID) (Result, error) {
+// write transaction keeps a job from being claimed or enqueued until the commit. A job that stopped did not see (enqueued
+// and finished meanwhile) may have left a file, so it is errBusy too: the next start deletes the files again.
+func (s *Service) purge(ctx context.Context, id shared.RecordingID, stopped []*job.Job) (Result, error) {
+	known := make(map[shared.JobID]bool, len(stopped))
+	for _, j := range stopped {
+		known[j.ID()] = true
+	}
 	res := Result{Recording: id, Outcome: OutcomeDeleted}
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
 		rec, err := s.get(ctx, id)
@@ -157,13 +188,18 @@ func (s *Service) purge(ctx context.Context, id shared.RecordingID) (Result, err
 		if len(unfinished(jobs)) > 0 {
 			return errBusy
 		}
+		for _, j := range jobs {
+			if !known[j.ID()] {
+				return errBusy
+			}
+		}
 		contents, err := s.store.Contents(ctx, id)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStorage, err)
 		}
 
 		res.Deleted = deletion.Deletable(contents.Assignments, rec.DeletingAssignments())
-		res.Kept = kept(contents.Assignments, res.Deleted)
+		res.Kept = deletion.Kept(contents.Assignments, res.Deleted)
 		ids := make([]shared.JobID, len(jobs))
 		for i, j := range jobs {
 			ids[i] = j.ID()
@@ -220,22 +256,6 @@ func unfinished(jobs []*job.Job) []*job.Job {
 	for _, j := range jobs {
 		if !j.Status().IsTerminal() {
 			out = append(out, j)
-		}
-	}
-	return out
-}
-
-// kept returns the found assignments that are not deleted, in found order.
-func kept(found []deletion.Assignment, deleted []shared.AssignmentID) []shared.AssignmentID {
-	gone := make(map[shared.AssignmentID]bool, len(deleted))
-	for _, id := range deleted {
-		gone[id] = true
-	}
-	out := []shared.AssignmentID{}
-	for _, a := range found {
-		if !gone[a.ID] {
-			out = append(out, a.ID)
-			gone[a.ID] = true
 		}
 	}
 	return out

@@ -363,3 +363,94 @@ func TestDeleteMany(t *testing.T) {
 		t.Fatalf("DeleteMany of %d = %v, want ErrInvalidRequest", len(many), err)
 	}
 }
+
+// A purge that fails on storage leaves the recording marked for the next start; a cancelled call is an error.
+func TestPurgeFailureIsPending(t *testing.T) {
+	cases := []struct {
+		name    string
+		fail    error
+		cancel  bool
+		want    Outcome
+		wantErr error
+	}{
+		{"storage busy", shared.ErrStorageBusy, false, OutcomePending, nil},
+		{"version conflict", shared.ErrVersionConflict, false, OutcomePending, nil},
+		{"cancelled", context.Canceled, true, "", context.Canceled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld()
+			w.addRecording(t, "r1", recording.StatusFailed)
+			w.failPurge = tc.fail
+			s := newService(t, w)
+			c, cancel := context.WithCancel(ctx)
+			defer cancel()
+			if tc.cancel {
+				// Marked first, so only the purge sees the cancelled context.
+				w.onDelete = cancel
+			}
+			res, err := s.Delete(c, Request{Recording: "r1"})
+			if !errors.Is(err, tc.wantErr) || res.Outcome != tc.want {
+				t.Fatalf("Delete = %+v, %v; want %q, %v", res, err, tc.want, tc.wantErr)
+			}
+			if r, ok := w.stored("r1"); !ok || !r.Deleting() {
+				t.Fatal("the recording is not left marked")
+			}
+		})
+	}
+}
+
+// Only refs of the expected kind are deleted: a stored transcript ref outside transcripts/ is left.
+func TestDeleteFilesChecksTheKind(t *testing.T) {
+	w := newWorld()
+	w.addRecording(t, "r1", recording.StatusCompleted)
+	doc, other, export := mustRef(t, "transcripts/t1.json"), mustRef(t, "recordings/r2.wav"), mustRef(t, "exports/a1")
+	w.setContents("r1", deletion.Contents{Transcripts: 3}, doc, other, export)
+
+	res, err := newService(t, w).Delete(ctx, Request{Recording: "r1"})
+	if err != nil || res.Outcome != OutcomeDeleted {
+		t.Fatalf("Delete = %+v, %v", res, err)
+	}
+	if !slices.Contains(w.deleted, doc) {
+		t.Fatalf("%s not deleted (deleted %v)", doc, w.deleted)
+	}
+	for _, f := range []shared.ArtifactRef{other, export} {
+		if slices.Contains(w.deleted, f) || !w.files[f] {
+			t.Errorf("%s was deleted", f)
+		}
+	}
+}
+
+// A job enqueued and finished between the stop and the purge may have left a file: the recording stays marked and the
+// next start deletes the files again.
+func TestPurgeSeesAJobThatRanMeanwhile(t *testing.T) {
+	w := newWorld()
+	w.addRecording(t, "r1", recording.StatusCompleted)
+	late, _ := transcript.DocumentRef("j-late")
+	added := false
+	w.onDelete = func() {
+		if !added {
+			added = true
+			w.addJob(t, "j-late", transcription.STTJobType, "r1", "", job.StatusCompleted, 0)
+			w.mu.Lock()
+			w.files[late] = true
+			w.mu.Unlock()
+		}
+	}
+
+	res, err := newService(t, w).Delete(ctx, Request{Recording: "r1"})
+	if err != nil || res.Outcome != OutcomePending {
+		t.Fatalf("Delete = %+v, %v; want pending", res, err)
+	}
+	if r, ok := w.stored("r1"); !ok || !r.Deleting() {
+		t.Fatal("the recording is not left marked")
+	}
+
+	n, err := newService(t, w).Resume(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("Resume = %d, %v; want 1", n, err)
+	}
+	if w.files[late] || !slices.Contains(w.purged["r1"], "j-late") {
+		t.Fatalf("after Resume: document left %v, purged %v", w.files[late], w.purged["r1"])
+	}
+}

@@ -38,6 +38,7 @@ type world struct {
 	failFiles   error // returned by every artifact Delete
 	failPurge   error // returned by Purge
 	onSleep     func()
+	onDelete    func() // called, unlocked, after every artifact Delete
 	cancelCalls int
 }
 
@@ -310,12 +311,17 @@ type artifactsFake struct{ w *world }
 
 func (f artifactsFake) Delete(_ context.Context, ref shared.ArtifactRef) error {
 	f.w.mu.Lock()
-	defer f.w.mu.Unlock()
 	if f.w.failFiles != nil {
+		f.w.mu.Unlock()
 		return f.w.failFiles
 	}
 	f.w.deleted = append(f.w.deleted, ref)
 	delete(f.w.files, ref)
+	hook := f.w.onDelete
+	f.w.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 
