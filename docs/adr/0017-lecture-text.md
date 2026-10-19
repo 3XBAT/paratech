@@ -20,7 +20,7 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
 - **Cost bound**: one paid call per part, plus at most 3 format reminders per job run in total (`LectureTextReminders`).
   LLM keys are derived from the job and the request, so a rerun of an attempt is replayed by the Hub for free.
 - **Resumable**: the aggregate `coursework/lecturetext` stores each finished part (table `lecture_texts`, migration
-  0013). An attempt that stops continues from the next part; a new job with the same requests (a retry) keeps them. The
+  0015). An attempt that stops continues from the next part; a new job with the same requests (a retry) keeps them. The
   text shown is replaced only when a run completes. Job timeout = 67 calls × the Hub request timeout + slack.
 - **Lesson kind** (`values.LessonKind`) only selects a constant sentence of the trusted instructions; the title and
   subject (schedule text) go into the untrusted data only.
