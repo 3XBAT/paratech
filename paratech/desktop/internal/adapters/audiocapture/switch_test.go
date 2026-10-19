@@ -225,3 +225,34 @@ func TestRecorderSwitchWhileWaitingForTheApp(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The capture waits for the closed app and a switch to another app fails: the capture goes back to waiting for the
+// app, not to a child on its dead process, and follows the app when it is back.
+func TestRecorderSwitchFailsWhileWaitingForTheApp(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	finder := newFakeFinder(zoom1, comet)
+	cfg := rebindConfig()
+	cfg.MaxRestarts = 0
+	e, _ := newAppEnv(t, cfg, finder, testenv.RecorderTone, testenv.RecorderUnavailable, testenv.RecorderTone)
+	if err := e.rec.Start(context.Background(), "rec1", e.chunks, zoomSource(t)); err != nil {
+		t.Fatal(err)
+	}
+	finder.set(comet)
+	e.waitDiag(t, "the capture waits for zoom", func(d audiocapture.Diagnostics) bool { return d.WaitingForApp })
+
+	if err := switchTo(t, e, cometSource(t)); !errors.Is(err, audiocapture.ErrSwitchFailed) {
+		t.Fatalf("Switch = %v, want ErrSwitchFailed", err)
+	}
+	time.Sleep(10 * rebindConfig().RebindInterval)
+	if d := e.diag(t); d.App != "zoom.exe" || !d.WaitingForApp || d.Running || e.launcher.count() != 2 {
+		t.Fatalf("diagnostics %+v, %d children; want the capture waiting for zoom without a child", d, e.launcher.count())
+	}
+
+	finder.set(zoom2, comet)
+	e.waitDiag(t, "the new zoom is captured", func(d audiocapture.Diagnostics) bool {
+		return d.Running && d.TargetPID == zoom2.PID && !d.WaitingForApp
+	})
+	if err := stop(t, e); err != nil {
+		t.Fatal(err)
+	}
+}

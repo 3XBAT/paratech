@@ -140,18 +140,22 @@ func (c *capture) update(f func(d *Diagnostics)) {
 	f(&c.diag)
 }
 
-// wait waits for ch and reports false if a stop came first. A switch of the user ends the wait early (true): the
-// supervisor takes it next.
+// wait waits for ch and reports false if a stop came first. A pending switch of the user ends the wait early (true):
+// the supervisor takes it next. A kick whose switch was taken already does not.
 func (c *capture) wait(ch <-chan time.Time) bool {
-	select {
-	case <-ch:
-		return true
-	case <-c.switchKick:
-		return true
-	case <-c.stopCh:
-		return false
-	case <-c.abortCh:
-		return false
+	for {
+		select {
+		case <-ch:
+			return true
+		case <-c.switchKick:
+			if c.switchPending() {
+				return true
+			}
+		case <-c.stopCh:
+			return false
+		case <-c.abortCh:
+			return false
+		}
 	}
 }
 
@@ -224,9 +228,15 @@ func (r *Recorder) supervise(c *capture) {
 			floor = prev.floor
 			c.answer(sw, fmt.Errorf("%w: %s", ErrSwitchFailed, shortText(out.reason)))
 		}
-		switched := reverted || c.switchPending()
 		next := out.rebind
-		if !switched && next == nil && r.lostApp(c, out, floor) {
+		var waitApp bool
+		if reverted {
+			next = nil
+			// Back to an app that had exited: wait for it again, not a child on its dead process.
+			waitApp = c.bind != nil && c.bind.waiting
+		}
+		switched := (reverted && !waitApp) || c.switchPending()
+		if !switched && next == nil && (waitApp || r.lostApp(c, out, floor)) {
 			// The app exited: the end of its child is no crash and uses no restart; the capture waits for the app.
 			found, ok := r.waitForApp(c)
 			if !ok {
