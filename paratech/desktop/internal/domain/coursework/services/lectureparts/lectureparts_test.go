@@ -284,13 +284,23 @@ func TestMergeKeepsTheParagraphLimit(t *testing.T) {
 }
 
 func TestCondensed(t *testing.T) {
-	// One part of 10 segments of 100 runes (Cyrillic: 2 bytes each) = 1000 runes.
-	seg := strings.Repeat("я", 100)
+	// One part of 10 distinct segments of 100 runes (Cyrillic: 2 bytes each) = 1000 runes.
 	big := make([]Segment, 10)
 	for i := range big {
-		big[i] = Segment{StartMs: int64(i) * 1000, Text: seg}
+		big[i] = Segment{StartMs: int64(i) * 1000, Text: strings.Repeat(string(rune('а'+i)), 100)}
 	}
 	tiny := []Segment{{Text: strings.Repeat("я", MinCheckedRunes-1)}}
+	// A whisper loop on silence: 40 identical segments, 880 runes raw, 22 distinct (spacing and case ignored).
+	loop := make([]Segment, 40)
+	for i := range loop {
+		loop[i] = Segment{StartMs: int64(i) * 1000, Text: "Продолжение следует..."}
+	}
+	loop[1].Text = "продолжение  СЛЕДУЕТ..."
+	// The same, but the distinct texts are 600+ runes: 6 segments of 100 runes, each said 5 times.
+	repeated := make([]Segment, 30)
+	for i := range repeated {
+		repeated[i] = Segment{StartMs: int64(i) * 1000, Text: strings.Repeat(string(rune('а'+i%6)), 100)}
+	}
 	tests := []struct {
 		name       string
 		segments   []Segment
@@ -301,7 +311,11 @@ func TestCondensed(t *testing.T) {
 		{"at the threshold", big, []string{strings.Repeat("я", 450)}, false},
 		{"below the threshold", big, []string{strings.Repeat("я", 449)}, true},
 		{"a summary", big, []string{"Коротко о реках."}, true},
-		{"no paragraphs", big, nil, true},
+		// An empty answer is allowed for noise (prompts.LectureTextInstructions), so it is not condensed.
+		{"no paragraphs", big, nil, false},
+		{"repeated segments count once", loop, []string{"Продолжение следует."}, false},
+		{"repeats of real text count once: kept", repeated, []string{strings.Repeat("я", 270)}, false},
+		{"repeats of real text count once: condensed", repeated, []string{strings.Repeat("я", 269)}, true},
 		{"a tiny part is not checked", tiny, []string{"Да."}, false},
 	}
 	for _, tt := range tests {

@@ -96,11 +96,21 @@ const (
 )
 
 // Condensed reports whether paragraphs, the text of the answer of the part (headings excluded), keep less than
-// MinKeptPercent of the runes of its segments; always false for a part under MinCheckedRunes.
+// MinKeptPercent of the runes of its distinct segment texts (normalize), so repeats such as whisper loops on silence
+// do not count. Always false for an empty answer (the prompt allows it for noise) and for an input under
+// MinCheckedRunes.
 func (p Part) Condensed(paragraphs []string) bool {
+	if len(paragraphs) == 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(p.items))
 	in := 0
 	for _, it := range p.items {
-		in += utf8.RuneCountInString(it.Text)
+		text := normalize(it.Text)
+		if !seen[text] {
+			seen[text] = true
+			in += utf8.RuneCountInString(text)
+		}
 	}
 	if in < MinCheckedRunes {
 		return false

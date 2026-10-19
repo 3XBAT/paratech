@@ -530,6 +530,29 @@ func TestLectureTextCondensedAnswer(t *testing.T) {
 	})
 }
 
+// A part of whisper loops on silence (600+ runes of one repeated segment) may be answered with no blocks: the
+// prompt allows it, so it is accepted on the first call.
+func TestLectureTextEmptyAnswerForRepeats(t *testing.T) {
+	e := newPPEnv(t)
+	lines := lectureLines(70) // part 0
+	for range 40 {            // part 1: 40 × 22 runes
+		lines = append(lines, "Продолжение следует...")
+	}
+	e.addTranscript("r2", "l1", "t2", lessonStart.Add(3*time.Minute), lines...)
+	e.llm.Reply(values.OperationLectureText,
+		testenv.LLMReply{Output: partAnswer("A", 0, 0, 70)},
+		testenv.LLMReply{Output: `{"blocks":[]}`})
+	if err := e.handle(e.snapshot("j1", LectureTextJobType, "t2")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.llm.Requests()); n != 2 {
+		t.Fatalf("calls = %d, want 2", n)
+	}
+	if l := e.lecture("t2"); l == nil || !l.Ready() || len(l.Blocks()) != 1 {
+		t.Fatal("the lecture text was not stored")
+	}
+}
+
 // Only a part out of order (another attempt stored a run meanwhile) is retried; a part the aggregate refuses is
 // permanent.
 func TestLectureTextAddPartErrors(t *testing.T) {
