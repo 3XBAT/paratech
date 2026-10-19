@@ -42,7 +42,8 @@ const startMs = Date.parse(started);
 const row = (over = {}) => ({
   id: "r1", lessonId: "l1", title: "Матанализ", status: "COMPLETED", startedAt: started, stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: false, stage: "done", step: "", progressPercent: 0,
-  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", advice: null, ...over,
+  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", remainingSeconds: 0, hasRemaining: false,
+  advice: null, ...over,
 });
 
 test("every chain code has its own Russian text", () => {

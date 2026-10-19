@@ -53,7 +53,8 @@ const whole = { ...advice, suggestApp: "", suggestName: "" };
 const recording = {
   id: "r1", lessonId: "", title: "", status: "RECORDING", startedAt: "2026-10-19T10:00:00Z", stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: true, stage: "recording", step: "", progressPercent: 0,
-  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", advice,
+  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", remainingSeconds: 0,
+  hasRemaining: false, advice,
 };
 
 // Mirror SourcesView of internal/input/wails/prompt.go.

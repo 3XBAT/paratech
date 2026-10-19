@@ -188,7 +188,7 @@ const recording = {
   id: "r1", lessonId: "l1", title: "Матанализ", status: "COMPLETED", startedAt: "2026-10-18T17:19:35Z", stoppedAt: "",
   durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false, stage: "transcribing", step: "",
   progressPercent: 40, queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "",
-  remainingSeconds: 1490, hasRemaining: true,
+  remainingSeconds: 1490, hasRemaining: true, advice: null,
 };
 
 test("a recording row shows the time left as its own element, only when the core has one", () => {
