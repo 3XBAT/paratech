@@ -61,12 +61,12 @@ func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, repo
 	}
 	total := len(plan)
 	next := lt.NextPart(run, total)
+	if err := p.partsDone(ctx, snap, report, next, total); err != nil {
+		return err
+	}
 	if next == total {
 		// Every part was stored but the text was not published: only the merge is left.
 		return p.saveLecturePart(ctx, snap, in, run, total, -1, nil)
-	}
-	if err := p.partsDone(ctx, snap, report, next, total); err != nil {
-		return err
 	}
 
 	reminders := LectureTextReminders

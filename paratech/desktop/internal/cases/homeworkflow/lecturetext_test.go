@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/lecturetext"
+	"paratech/desktop/internal/domain/coursework/services/contextselection"
+	"paratech/desktop/internal/domain/coursework/services/lectureparts"
 	"paratech/desktop/internal/domain/coursework/services/prompts"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -395,5 +397,61 @@ func TestLectureTextInjectionStaysData(t *testing.T) {
 	}
 	if len(e.jobs) != 0 || e.records() != 0 {
 		t.Fatal("the answer caused something besides the lecture text")
+	}
+}
+
+// A run whose parts were all stored but not published (an attempt that stopped after its last part) is only merged:
+// no call is made again.
+func TestLectureTextPublishesAStoredRun(t *testing.T) {
+	e := newPPEnv(t)
+	ctx := context.Background()
+	snap := e.snapshot("j1", LectureTextJobType, "t1")
+	in, err := e.pp.load(ctx, snap, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, err := contextselection.Select(values.OperationLectureText, in.material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segs := make([]lectureparts.Segment, len(in.material.Transcript))
+	for i, s := range in.material.Transcript {
+		segs[i] = lectureparts.Segment{StartMs: s.StartMs, Text: s.Text}
+	}
+	plan, err := lectureparts.Plan(segs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, run, err := e.pp.lectureRequests(snap.ID(), sel, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := lecturetext.New(lecturetext.Spec{Transcript: "t1"}, ppT0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := lecturetext.NewBlock("Rivers", 0, []string{"Today we talk about rivers."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.AddPart(run, len(plan), 0, []lecturetext.Block{b}, ppT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := (ppLectures{e.ppStore}).Save(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+
+	var rep reports
+	if err := e.pp.Handle(ctx, snap, rep.report); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.llm.Requests()); n != 0 {
+		t.Fatalf("calls = %d, want none", n)
+	}
+	if got := e.lecture("t1"); !got.Ready() || got.Blocks()[0].Heading() != "Rivers" {
+		t.Fatal("the stored run was not published")
+	}
+	if got := rep.checkpoints(); !slices.Equal(got, []string{"1/1"}) {
+		t.Fatalf("progress = %v", got)
 	}
 }
