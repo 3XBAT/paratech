@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ type FakeRecorder struct {
 	startErr     error
 	stopErr      error
 	finalizeErr  error
+	switchErr    error
 	startHold    *hold // when set, Start waits at it
 	finalizeHold *hold // when set, Finalize waits at it
 	onStarted    func(id shared.RecordingID)
@@ -58,6 +60,8 @@ type fakeCapture struct {
 	ended    chan struct{}
 	err      error
 	switches []values.CaptureSwitch
+	stats    values.CaptureStats
+	sourceSw int // switches of the user (Switch)
 }
 
 // NewFakeRecorder returns a recorder that writes through files; each chunk stands for chunk of audio.
@@ -70,6 +74,9 @@ func (f *FakeRecorder) FailStart(err error) { f.set(func() { f.startErr = err })
 
 // FailStop makes later Stop calls fail with err; nil heals it.
 func (f *FakeRecorder) FailStop(err error) { f.set(func() { f.stopErr = err }) }
+
+// FailSwitch makes later Switch calls fail with err; nil heals it.
+func (f *FakeRecorder) FailSwitch(err error) { f.set(func() { f.switchErr = err }) }
 
 // FailFinalize makes later Finalize calls fail with err; nil heals it.
 func (f *FakeRecorder) FailFinalize(err error) { f.set(func() { f.finalizeErr = err }) }
@@ -237,44 +244,82 @@ func (f *FakeRecorder) Wait(ctx context.Context, id shared.RecordingID) error {
 }
 
 // Finalize concatenates the payloads of the readable chunks of dir into output, in name order, and skips the chunks
-// that are not complete (Recorder contract). The duration is one chunk length per readable chunk. Without a readable
+// that are not complete (Recorder contract). The duration is one chunk length per readable chunk; its seconds are
+// audible unless the payload of the chunk is empty or only zero bytes (a silent chunk, TASK-082). Without a readable
 // chunk it returns an error wrapping recording.ErrNoAudio and writes nothing.
-func (f *FakeRecorder) Finalize(ctx context.Context, dir, output shared.ArtifactRef) (time.Duration, error) {
+func (f *FakeRecorder) Finalize(ctx context.Context, dir, output shared.ArtifactRef) (values.AssembledTrack, error) {
 	f.mu.Lock()
 	f.finalizes++
 	err, h := f.finalizeErr, f.finalizeHold
 	f.mu.Unlock()
 	if err != nil {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
 	if err := h.wait(ctx); err != nil {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
 
 	chunks, err := f.files.List(ctx, dir)
 	if err != nil && !errors.Is(err, shared.ErrNotFound) {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
 
 	var track bytes.Buffer
-	readable := 0
+	readable, audible := 0, 0
 	for _, ref := range chunks {
 		content, err := f.read(ctx, ref)
 		if err != nil {
-			return 0, err
+			return values.AssembledTrack{}, err
 		}
 		if payload, ok := ChunkPayload(content); ok {
 			track.Write(payload)
 			readable++
+			if slices.ContainsFunc(payload, func(b byte) bool { return b != 0 }) {
+				audible++
+			}
 		}
 	}
 	if readable == 0 {
-		return 0, fmt.Errorf("fake recorder: %w in %s", recording.ErrNoAudio, dir)
+		return values.AssembledTrack{}, fmt.Errorf("fake recorder: %w in %s", recording.ErrNoAudio, dir)
 	}
 	if err := f.files.Write(ctx, output, &track); err != nil {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
-	return time.Duration(readable) * f.chunk, nil
+	perChunk := int((f.chunk + time.Second - 1) / time.Second)
+	return values.AssembledTrack{
+		Duration: time.Duration(readable) * f.chunk, Seconds: readable * perChunk, AudibleSeconds: audible * perChunk,
+	}, nil
+}
+
+// Switch makes the running capture of id record source from now on, as the Windows recorder does (TASK-082); it
+// fails as FailSwitch says, or with ErrNotCapturing when id does not capture.
+func (f *FakeRecorder) Switch(_ context.Context, id shared.RecordingID, source values.Source) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.switchErr != nil {
+		return f.switchErr
+	}
+	c := f.captures[id]
+	if c == nil || !c.running {
+		return fmt.Errorf("%w: %s", ErrNotCapturing, id)
+	}
+	if c.source != source {
+		c.source = source
+		c.sourceSw++
+	}
+	return nil
+}
+
+// SetStats makes the Diagnostics of the capture of id report stats, as the heartbeats of a recorder child do.
+func (f *FakeRecorder) SetStats(id shared.RecordingID, stats values.CaptureStats) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.captures[id]
+	if c == nil {
+		return fmt.Errorf("%w: %s", ErrNotCapturing, id)
+	}
+	c.stats = stats
+	return nil
 }
 
 func (f *FakeRecorder) read(ctx context.Context, ref shared.ArtifactRef) ([]byte, error) {
@@ -315,7 +360,7 @@ func (f *FakeRecorder) Diagnostics(_ context.Context, id shared.RecordingID) (va
 	}
 	d := values.CaptureDiagnostics{
 		Running: c.running, TargetMode: target, App: c.source.App(), Mode: target, Windows: ToneWindows(), Device: ToneDevice,
-		Switches: append([]values.CaptureSwitch(nil), c.switches...),
+		Switches: append([]values.CaptureSwitch(nil), c.switches...), Stats: c.stats, SourceSwitches: c.sourceSw,
 	}
 	if n := len(c.switches); n > 0 {
 		d.Mode = c.switches[n-1].To

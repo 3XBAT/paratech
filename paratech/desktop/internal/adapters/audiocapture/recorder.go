@@ -218,7 +218,7 @@ func (r *Recorder) start(ctx context.Context, c *capture) error {
 			d := c.snapshot()
 			r.log.Info("capture started", slog.String("recording", id.String()), slog.String("windows", d.Windows.String()),
 				slog.String("build", d.Windows.BuildString()), slog.String("target", string(target.Mode)),
-				slog.String("mode", string(d.Mode)), slog.String("app", c.app.String()),
+				slog.String("mode", string(d.Mode)), slog.String("app", d.App.String()),
 				slog.Uint64("target_pid", uint64(target.PID)), slog.String("device", d.Device),
 				slog.String("format", d.Format.String()))
 			return nil
@@ -310,8 +310,9 @@ func (r *Recorder) Wait(ctx context.Context, id shared.RecordingID) error {
 }
 
 // Finalize assembles the readable chunks of chunks into the track output (16 kHz mono 16-bit WAV) and returns its
-// duration counted in frames. It needs no capture and is safe to run concurrently with other recordings.
-func (r *Recorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (time.Duration, error) {
+// duration counted in frames and its audible seconds. It needs no capture and is safe to run concurrently with other
+// recordings.
+func (r *Recorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (values.AssembledTrack, error) {
 	return assemble(ctx, r.deps.Files, chunks, output, r.log)
 }
 

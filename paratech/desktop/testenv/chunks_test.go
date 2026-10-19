@@ -68,7 +68,7 @@ func TestFakeRecorderSkipsBrokenChunks(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, err := f.Finalize(ctx, dir, out)
-	if err != nil || d != 2*time.Minute || read(t, m, out) != "ab" {
+	if err != nil || d.Duration != 2*time.Minute || d.Silent() || read(t, m, out) != "ab" {
 		t.Fatalf("Finalize = %v, %v", d, err)
 	}
 	if paths := strings.Join(m.Paths(), " "); !strings.Contains(paths, "chunk-0004") {

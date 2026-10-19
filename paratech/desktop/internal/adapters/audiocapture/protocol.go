@@ -284,7 +284,9 @@ type event struct {
 
 	Packets       uint64 `json:"packets,omitempty"`        // stats
 	SilentPackets uint64 `json:"silent_packets,omitempty"` // stats
-	Reopens       uint64 `json:"reopens,omitempty"`        // stats
+	// AudiblePackets are the packets whose peak reaches values.HeardLevel (stats).
+	AudiblePackets uint64 `json:"audible_packets,omitempty"`
+	Reopens        uint64 `json:"reopens,omitempty"` // stats
 
 	// Level is the peak of a window of a level check, 0..1; required in a level event, absent elsewhere.
 	Level *float64 `json:"level,omitempty"`

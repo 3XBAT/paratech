@@ -38,9 +38,11 @@ type binding struct {
 type capture struct {
 	id     shared.RecordingID
 	chunks shared.ArtifactRef
-	app    shared.AppName // the app the capture follows; empty for none. Never changes, so any goroutine may read it
-	target Target         // changed by the supervisor on a re-bind
-	bind   *binding       // nil unless the capture follows an app
+	// app, target and bind belong to the supervisor (newCapture sets them first): other goroutines read the
+	// diagnostics. A re-bind changes target; a switch of the user (TASK-082) changes all three.
+	app    shared.AppName // the app the capture follows; empty for none
+	target Target
+	bind   *binding // nil unless the capture follows an app
 
 	ctx    context.Context // ends with a stop, an abort or the end: bounds the checks of the app
 	cancel context.CancelFunc
@@ -51,12 +53,16 @@ type capture struct {
 	stopOnce, abortOnce sync.Once
 	stopCh              chan struct{} // Stop: close the child's stdin
 	abortCh             chan struct{} // kill the child at once (abandoned start, Stop past its context)
+	switchKick          chan struct{} // buffered: a switch of the user is pending
 
-	mu      sync.Mutex
-	ended   bool
-	err     error // why the capture ended by itself; nil after a stop
-	stopErr error // the stop was not clean
-	diag    Diagnostics
+	mu        sync.Mutex
+	ended     bool
+	begun     bool       // the first child runs: switches are accepted
+	pending   *switchReq // a switch the supervisor has not taken yet
+	answering *switchReq // a switch taken and not answered yet
+	err       error      // why the capture ended by itself; nil after a stop
+	stopErr   error      // the stop was not clean
+	diag      Diagnostics
 }
 
 func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target, bind *binding) *capture {
@@ -64,7 +70,7 @@ func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target,
 	c := &capture{
 		id: id, chunks: chunks, target: target, bind: bind, ctx: ctx, cancel: cancel,
 		started: make(chan error, 1), done: make(chan struct{}),
-		stopCh: make(chan struct{}), abortCh: make(chan struct{}),
+		stopCh: make(chan struct{}), abortCh: make(chan struct{}), switchKick: make(chan struct{}, 1),
 		diag: Diagnostics{TargetMode: target.Mode, TargetPID: target.PID},
 	}
 	if bind != nil {
@@ -104,6 +110,7 @@ func (c *capture) end(err, stopErr error) {
 	if err != nil {
 		c.diag.Failure = shortText(err.Error())
 	}
+	c.refuseSwitches()
 }
 
 func (c *capture) result() error {
@@ -133,10 +140,13 @@ func (c *capture) update(f func(d *Diagnostics)) {
 	f(&c.diag)
 }
 
-// wait waits for ch and reports false if a stop came first.
+// wait waits for ch and reports false if a stop came first. A switch of the user ends the wait early (true): the
+// supervisor takes it next.
 func (c *capture) wait(ch <-chan time.Time) bool {
 	select {
 	case <-ch:
+		return true
+	case <-c.switchKick:
 		return true
 	case <-c.stopCh:
 		return false
@@ -185,9 +195,16 @@ func (r *Recorder) supervise(c *capture) {
 		restarts int
 	)
 	for first := true; ; first = false {
+		// A switch of the user: the next child captures the new target from the start of the fallback chain.
+		sw := c.takeSwitch()
+		var prev switchPrev
+		if sw != nil {
+			prev = r.applySwitch(c, sw, floor)
+			floor = ""
+		}
 		req := Request{Recording: c.id, Chunks: c.chunks, Target: c.target, ChunkSeconds: r.cfg.ChunkSeconds,
 			LeadSilence: lead, Floor: floor}
-		out := r.runChild(c, req, first)
+		out := r.runChild(c, req, first, sw)
 
 		if first && !out.started {
 			c.started <- startFailure(out)
@@ -200,8 +217,16 @@ func (r *Recorder) supervise(c *capture) {
 			r.retire(c)
 			return
 		}
+		// The child of a switch that never ran: back to the old source, without a restart.
+		reverted := sw != nil && !out.started
+		if reverted {
+			r.revertSwitch(c, prev, out.reason)
+			floor = prev.floor
+			c.answer(sw, fmt.Errorf("%w: %s", ErrSwitchFailed, shortText(out.reason)))
+		}
+		switched := reverted || c.switchPending()
 		next := out.rebind
-		if next == nil && r.lostApp(c, out, floor) {
+		if !switched && next == nil && r.lostApp(c, out, floor) {
 			// The app exited: the end of its child is no crash and uses no restart; the capture waits for the app.
 			found, ok := r.waitForApp(c)
 			if !ok {
@@ -209,16 +234,19 @@ func (r *Recorder) supervise(c *capture) {
 				r.retire(c)
 				return
 			}
-			next = &found
+			next = found
+			switched = found == nil // the user chose another source meanwhile
 		}
-		if next != nil {
+		switch {
+		case switched: // the next child captures the source the user chose; no restart is counted
+		case next != nil:
 			r.rebind(c, *next)
 			if c.stopping() {
 				c.end(nil, nil)
 				r.retire(c)
 				return
 			}
-		} else {
+		default:
 			if out.kind == endStopped { // nobody asked: the capture must go on
 				out.kind, out.reason = endCrashed, "the recorder child stopped without a stop request"
 			}
@@ -318,17 +346,21 @@ func (r *Recorder) lostApp(c *capture, out runOutcome, floor Mode) bool {
 	return true
 }
 
-// waitForApp looks for a new instance of the app every RebindInterval until one appears (ok) or the capture stops.
-func (r *Recorder) waitForApp(c *capture) (ProcessIdentity, bool) {
+// waitForApp looks for a new instance of the app every RebindInterval until one appears (ok), the user switches to
+// another source (ok with nil) or the capture stops.
+func (r *Recorder) waitForApp(c *capture) (*ProcessIdentity, bool) {
 	for {
 		if !c.wait(r.after(r.cfg.RebindInterval)) || c.stopping() {
-			return ProcessIdentity{}, false
+			return nil, false
+		}
+		if c.switchPending() {
+			return nil, true
 		}
 		if !r.mayRebind(c) {
 			continue
 		}
 		if p := r.probeApp(c.ctx, c.bind.proc, true, true); p.next != nil {
-			return *p.next, true
+			return p.next, true
 		}
 	}
 }
@@ -373,8 +405,9 @@ func startFailure(out runOutcome) error {
 	return errors.New(reason)
 }
 
-// runChild runs one child until it has exited and is reaped.
-func (r *Recorder) runChild(c *capture, req Request, first bool) runOutcome {
+// runChild runs one child until it has exited and is reaped. sw is the switch of the user this child carries out: it
+// is answered once the child runs.
+func (r *Recorder) runChild(c *capture, req Request, first bool, sw *switchReq) runOutcome {
 	out := runOutcome{runStart: r.now()}
 	line, err := encodeRequest(req)
 	if err != nil {
@@ -470,7 +503,11 @@ func (r *Recorder) runChild(c *capture, req Request, first bool) runOutcome {
 			switch ev.Type {
 			case evStarted:
 				if first && !out.started {
+					c.update(func(*Diagnostics) { c.begun = true })
 					c.started <- nil
+				}
+				if sw != nil && !out.started {
+					c.answer(sw, nil)
 				}
 				out.started = true
 			case evFailed, evStopped:
@@ -482,6 +519,12 @@ func (r *Recorder) runChild(c *capture, req Request, first bool) runOutcome {
 
 		case <-stopCh:
 			closeStdin()
+
+		case <-c.switchKick:
+			if stopCh != nil && c.switchPending() {
+				log.Info("stopping the recorder child to capture the source the user chose")
+				closeStdin()
+			}
 
 		case <-watch:
 			watch = nil
@@ -584,7 +627,8 @@ func (r *Recorder) apply(c *capture, ev event, out *runOutcome, log *slog.Logger
 		c.update(func(d *Diagnostics) { d.Chunks++ })
 	case evStats:
 		c.update(func(d *Diagnostics) {
-			d.Stats = Stats{Packets: ev.Packets, SilentPackets: ev.SilentPackets, Frames: ev.Frames, Reopens: ev.Reopens}
+			d.Stats = Stats{Packets: ev.Packets, SilentPackets: ev.SilentPackets, AudiblePackets: ev.AudiblePackets,
+				Frames: ev.Frames, Reopens: ev.Reopens}
 		})
 	case evFailed:
 		out.reason, out.unavailable = ev.Reason, ev.Unavailable

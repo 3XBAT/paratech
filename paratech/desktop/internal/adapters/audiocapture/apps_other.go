@@ -11,3 +11,4 @@ type unavailableApps struct{}
 func (unavailableApps) snapshot(bool) (snapshot, error)      { return snapshot{}, ErrUnavailable }
 func (unavailableApps) inspect(uint32) (procIdentity, error) { return procIdentity{}, ErrUnavailable }
 func (unavailableApps) icon(string) []byte                   { return nil }
+func (unavailableApps) describe(string) (string, string)     { return "", "" }

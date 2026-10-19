@@ -152,14 +152,14 @@ func TestRecorderStartStopFinalize(t *testing.T) {
 	if len(names) < 2 || slices.ContainsFunc(names, func(n string) bool { return strings.HasSuffix(n, ".partial") }) {
 		t.Fatalf("chunks after a clean stop = %v, want closed chunks only", names)
 	}
-	d, err := e.rec.Finalize(ctx, e.chunks, e.track)
-	if err != nil || d <= 30*time.Second {
-		t.Fatalf("Finalize = %v, %v", d, err)
+	tr, err := e.rec.Finalize(ctx, e.chunks, e.track)
+	if err != nil || tr.Duration <= 30*time.Second || tr.Silent() {
+		t.Fatalf("Finalize = %+v, %v; want a long audible track", tr, err)
 	}
 
 	diag := e.diag(t)
 	if diag.Running || diag.Mode != audiocapture.ModeExclude || diag.Windows != testenv.ToneWindows() || diag.Device != testenv.ToneDevice || diag.Restarts != 0 ||
-		diag.Format != testenv.FakeRecorderFormat().Stream() || diag.Stats.Packets == 0 || len(diag.Attempts) != 1 || !diag.Attempts[0].OK {
+		diag.Format != testenv.FakeRecorderFormat().Stream() || diag.Stats.Packets == 0 || diag.Stats.AudiblePackets == 0 || len(diag.Attempts) != 1 || !diag.Attempts[0].OK {
 		t.Fatalf("diagnostics = %+v", diag)
 	}
 	if diag.TargetMode != audiocapture.ModeExclude || diag.TargetPID != uint32(os.Getpid()) {

@@ -82,10 +82,11 @@ func TestFinalizeMixedFormats(t *testing.T) {
 	pieces := []piece{{s16, 1000, 88200}, {f32, 1000, 96001}, {up, 1000, 8000}, {s32x6, 1000, 96000}, {same, 1000, 16000}}
 	writeChunks(t, store, dir, pieces...)
 
-	d, err := assemble(context.Background(), store, dir, track, quiet())
+	tr, err := assemble(context.Background(), store, dir, track, quiet())
 	if err != nil {
 		t.Fatal(err)
 	}
+	d := tr.Duration
 
 	info, samples := readTrack(t, store, track)
 	var exact float64
@@ -150,12 +151,12 @@ func TestFinalizeSkipsBrokenChunks(t *testing.T) {
 	store.put(t, mustRef(t, "r1/notes.txt"), []byte("ignored"))
 	before := store.names(t, dir)
 
-	d, err := assemble(context.Background(), store, dir, track, quiet())
+	tr, err := assemble(context.Background(), store, dir, track, quiet())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d != time.Second {
-		t.Fatalf("duration = %v, want only the readable chunk (1s)", d)
+	if tr.Duration != time.Second || tr.Seconds != 1 || tr.AudibleSeconds != 1 {
+		t.Fatalf("track = %+v, want only the readable chunk (1s, audible)", tr)
 	}
 	if got := store.names(t, dir); !slices.Equal(got, before) {
 		t.Fatalf("chunks after Finalize = %v, want them all left on disk %v", got, before)
@@ -324,5 +325,47 @@ func TestResamplerTimeline(t *testing.T) {
 		if int64(len(out)) != want || want != TrackRate {
 			t.Errorf("%d Hz: %d outputs, want %d", rate, len(out), TrackRate)
 		}
+	}
+}
+
+// TASK-082: the assembly counts the audible seconds, so a track of zeros is told apart.
+func TestFinalizeCountsAudibleSeconds(t *testing.T) {
+	f := Format{SampleRate: 48000, Channels: 2, BitsPerSample: 32, Float: true}
+	tests := []struct {
+		name             string
+		amps             []float64 // one second each
+		seconds, audible int
+		silent           bool
+	}{
+		{"zeros", []float64{0, 0, 0, 0, 0}, 5, 0, true},
+		{"below the heard level", []float64{0.005, 0.005, 0.005}, 3, 0, true},
+		{"sound", []float64{0.5, 0, 0.5, 0.5, 0}, 5, 3, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newDirStore(t)
+			dir, track := mustRef(t, "r1"), mustRef(t, "r1.wav")
+			w, _ := newTestWriter(t, store, dir)
+			if err := w.SetFormat(f); err != nil {
+				t.Fatal(err)
+			}
+			for _, amp := range tt.amps {
+				if err := w.Write(tone(f, 1000, amp, 0, int(f.SampleRate))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			tr, err := assemble(context.Background(), store, dir, track, quiet())
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The resampler's filter may spill a few samples of sound into a silent neighbour second.
+			if tr.Seconds != tt.seconds || tr.AudibleSeconds < tt.audible || tr.AudibleSeconds > tt.audible+2 || tr.Silent() != tt.silent {
+				t.Fatalf("track %+v (silent %v), want %d seconds, %d audible", tr, tr.Silent(), tt.seconds, tt.audible)
+			}
+		})
 	}
 }

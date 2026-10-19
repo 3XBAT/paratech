@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 )
 
 // Exit codes of the recorder child.
@@ -116,9 +117,10 @@ type child struct {
 	log *slog.Logger
 	req Request
 
-	packets, silent atomic.Uint64
-	frames          atomic.Int64
-	stream          atomic.Value // Stream, once open
+	packets, silent, audible atomic.Uint64
+	mono                     []float32 // scratch of the peak of a packet
+	frames                   atomic.Int64
+	stream                   atomic.Value // Stream, once open
 
 	w *chunkWriter
 	// last is when the previous packet arrived. Gaps are measured from it, not from the stream start, so the drift
@@ -274,6 +276,11 @@ func (c *child) write(p Packet) error {
 		c.silent.Add(1)
 	} else {
 		err = c.w.Write(p.Data)
+		// Counted for the silent-source advice (TASK-082): zeros that are not flagged silent are no sound either.
+		c.mono = toMono(p.Format, p.Data, c.mono[:0])
+		if values.ClampSoundLevel(samplePeak(c.mono)).Heard() {
+			c.audible.Add(1)
+		}
 	}
 	if err != nil {
 		return err
@@ -302,7 +309,7 @@ func (c *child) emitStats() {
 	if s, ok := c.stream.Load().(Stream); ok {
 		reopens = s.Reopens()
 	}
-	c.out.emit(event{Type: evStats, Packets: c.packets.Load(), SilentPackets: c.silent.Load(),
+	c.out.emit(event{Type: evStats, Packets: c.packets.Load(), SilentPackets: c.silent.Load(), AudiblePackets: c.audible.Load(),
 		Frames: c.frames.Load(), Reopens: reopens})
 }
 

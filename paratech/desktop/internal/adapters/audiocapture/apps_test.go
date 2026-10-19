@@ -245,6 +245,8 @@ type fakePlatform struct {
 	inspectErr error
 	icons      map[string][]byte
 	iconCalls  map[string]int
+	versions   map[string]appVersion
+	descCalls  map[string]int
 	block      chan struct{} // when set, snapshot waits for it
 	panics     bool
 	sessionsOn []bool // the sessions argument of every snapshot
@@ -259,6 +261,8 @@ func newFakePlatform() *fakePlatform {
 		},
 		icons:     map[string][]byte{`C:\Chrome\chrome.exe`: []byte("chrome-png")},
 		iconCalls: map[string]int{},
+		versions:  map[string]appVersion{},
+		descCalls: map[string]int{},
 	}
 }
 
@@ -296,6 +300,14 @@ func (f *fakePlatform) icon(path string) []byte {
 	defer f.mu.Unlock()
 	f.iconCalls[path]++
 	return f.icons[path]
+}
+
+func (f *fakePlatform) describe(path string) (string, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.descCalls[path]++
+	v := f.versions[path]
+	return v.description, v.product
 }
 
 func (f *fakePlatform) set(change func(f *fakePlatform)) {
@@ -570,4 +582,84 @@ func (unavailableAppsForTest) snapshot(bool) (snapshot, error) { return snapshot
 func (unavailableAppsForTest) inspect(uint32) (procIdentity, error) {
 	return procIdentity{}, ErrUnavailable
 }
-func (unavailableAppsForTest) icon(string) []byte { return nil }
+func (unavailableAppsForTest) icon(string) []byte               { return nil }
+func (unavailableAppsForTest) describe(string) (string, string) { return "", "" }
+
+// TASK-082: a session sounds when its meter shows sound now; an active session alone does not.
+func TestMarkSessionsSounding(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessions []sessionInfo
+		sounding []string
+	}{
+		{"chrome sounds through its audio service", []sessionInfo{{pid: 202, state: sessionActive, peak: 0.2, peakOK: true}}, []string{"chrome.exe"}},
+		{"active but quiet", []sessionInfo{{pid: 202, state: sessionActive, peak: 0, peakOK: true}}, nil},
+		{"meter unknown", []sessionInfo{{pid: 202, state: sessionActive, peak: 0.2}}, nil},
+		{"below the floor", []sessionInfo{{pid: 300, state: sessionActive, peak: peakFloor / 2, peakOK: true}}, nil},
+		{"muted", []sessionInfo{{pid: 300, state: sessionActive, peak: 0.2, peakOK: true, muted: true}}, nil},
+		{"inactive", []sessionInfo{{pid: 300, peak: 0.2, peakOK: true}}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := desktop()
+			s.sessions = tt.sessions
+			var sounding []string
+			for _, c := range appsOf(s, maxApps) {
+				if c.app.Sounding {
+					sounding = append(sounding, c.app.App.String())
+				}
+			}
+			if !slices.Equal(sounding, tt.sounding) {
+				t.Fatalf("sounding %v, want %v", sounding, tt.sounding)
+			}
+		})
+	}
+}
+
+// TASK-082: every listed app has a readable name: the known list, then the version resource (cached per executable),
+// then the executable name.
+func TestAppsListNames(t *testing.T) {
+	p := newFakePlatform()
+	p.snap.procs = append(p.snap.procs, proc(600, 10, "Telemost.exe", 600), proc(700, 10, "tool.exe", 700))
+	p.snap.windows = append(p.snap.windows, win(600, "Телемост"), win(700, "Tool"))
+	p.ids[600] = procIdentity{alive: true, image: `C:\Telemost\Telemost.exe`, session: ourSession, created: 600}
+	p.ids[700] = procIdentity{alive: true, image: `C:\Tool\tool.exe`, session: ourSession, created: 700}
+	p.versions[`C:\Telemost\Telemost.exe`] = appVersion{description: "Яндекс\u202e Телемост\n", product: "Telemost"}
+	a := newApps(p, nil)
+
+	for range 2 {
+		got, err := a.List(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := map[shared.AppName]string{}
+		for _, app := range got {
+			names[app.App] = app.Name
+		}
+		want := map[shared.AppName]string{
+			"chrome.exe": "Google Chrome", "zoom.exe": "Zoom", "telemost.exe": "Яндекс Телемост", "tool.exe": "tool",
+		}
+		for app, name := range want {
+			if names[app] != name {
+				t.Errorf("name of %s = %q, want %q", app, names[app], name)
+			}
+		}
+	}
+	if p.descCalls[`C:\Telemost\Telemost.exe`] != 1 || p.descCalls[`C:\Tool\tool.exe`] != 1 || p.descCalls[`C:\Chrome\chrome.exe`] != 0 {
+		t.Fatalf("version reads %v, want one per unknown executable and none for a known app", p.descCalls)
+	}
+}
+
+func TestAppsNameCacheIsBounded(t *testing.T) {
+	p := newFakePlatform()
+	a := newApps(p, nil)
+	for i := range maxNameCache + 5 {
+		p.set(func(f *fakePlatform) {
+			f.ids[7] = procIdentity{alive: true, image: `C:\x\` + strings.Repeat("a", i+1) + ".exe", created: 7}
+		})
+		a.nameOf("x.exe", 7, true)
+	}
+	if len(a.names) > maxNameCache {
+		t.Fatalf("%d cached names", len(a.names))
+	}
+}
