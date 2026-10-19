@@ -71,7 +71,7 @@ func TestPrepareSendShowsTheSubjectOfTheAssignment(t *testing.T) {
 		ID: "p1", Kind: proposal.KindSendHomework, Status: proposal.StatusValidated, AssignmentID: "a1",
 		Recipient: "teacher@school.example", Subject: "Матанализ: домашнее задание к 27.10",
 	}
-	got, err := e.svc.PrepareSend(context.Background(), "a1")
+	got, err := e.svc.PrepareSend(context.Background(), "a1", "txt")
 	if err != nil || got.Subject != "Матанализ: домашнее задание к 27.10" {
 		t.Fatalf("PrepareSend = %+v, %v", got, err)
 	}

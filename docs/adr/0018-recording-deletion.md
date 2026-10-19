@@ -11,7 +11,7 @@ crash in the middle, and Google may hold deadline events of the deleted homework
 
 ## Decision
 - **Mark first.** `recording.MarkDeleting` stores a deletion mark and the chosen assignments in one transaction
-  (`recordings.deleting_at`, `deleting_assignments`, migration 0017). A marked recording is hidden from the lists, never
+  (`recordings.deleting_at`, `deleting_assignments`, migration 0018). A marked recording is hidden from the lists, never
   transcribed or assembled. A recording in progress is refused.
 - **Jobs.** The unfinished jobs of the recording (by recording, by its transcripts, draft jobs of the chosen
   assignments) are cancelled through `jobrunner.Service.Cancel`; the use case looks again until none is unfinished,

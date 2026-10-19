@@ -29,6 +29,9 @@ type draftEnv struct {
 	*ppEnv
 	drafts     *testenv.MemDrafts
 	deliveries *unresolvedDeliveries
+	profiles   *fakeProfiles
+	renderer   *fakeRenderer
+	saved      *memFiles
 	svc        *Drafts
 }
 
@@ -54,7 +57,8 @@ func (u *unresolvedDeliveries) mark(a shared.AssignmentID, unresolved bool) {
 func newDraftEnv(t *testing.T) *draftEnv {
 	t.Helper()
 	e := &draftEnv{ppEnv: newPPEnv(t), drafts: testenv.NewMemDrafts(),
-		deliveries: &unresolvedDeliveries{set: map[shared.AssignmentID]bool{}}}
+		deliveries: &unresolvedDeliveries{set: map[shared.AssignmentID]bool{}},
+		profiles:   &fakeProfiles{}, renderer: &fakeRenderer{}, saved: &memFiles{}}
 	svc, err := NewDrafts(e.draftDeps(e.llm))
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +84,8 @@ func (e *draftEnv) draftDeps(llm LLMClient) DraftDeps {
 	return DraftDeps{
 		LLM: llm, Assignments: ppAssignments{e.ppStore}, Recordings: ppTranscriptRecordings{e.ppStore}, Drafts: e.drafts,
 		Summaries: ppSummaries{e.ppStore}, Lessons: ppLessons{e.ppStore}, Artifacts: e.files, Jobs: ppJobs{e.ppStore}, JobReader: ppJobs{e.ppStore},
-		Deliveries: e.deliveries, Clock: e.clock, IDs: ppIDs{e.ppStore}, Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
+		Deliveries: e.deliveries, Profiles: e.profiles, Renderer: e.renderer, Files: e.saved, Clock: e.clock,
+		IDs: ppIDs{e.ppStore}, Tx: tx{newStore(e.t)}, ModelAlias: testAlias, MaxAttempts: 3,
 	}
 }
 
@@ -120,10 +125,14 @@ func (e *draftEnv) generate(instruction string) (GenerateResult, error) {
 	return res, e.run(res.JobID)
 }
 
-// run handles the stored job id once, as a worker would.
+// run handles the stored job id once, as a worker would; a handled job is then COMPLETED, as the runner records it.
 func (e *draftEnv) run(id shared.JobID) error {
 	e.t.Helper()
-	return e.svc.Handle(context.Background(), e.job(id).Snapshot(), nil)
+	err := e.svc.Handle(context.Background(), e.job(id).Snapshot(), nil)
+	if err == nil && !e.job(id).Status().IsTerminal() {
+		e.settle(id, job.StatusCompleted)
+	}
+	return err
 }
 
 func (e *draftEnv) job(id shared.JobID) *job.Job {
@@ -176,6 +185,9 @@ func TestNewDraftsValidates(t *testing.T) {
 		{"no jobs", func(d *DraftDeps) { d.Jobs = nil }},
 		{"no job reader", func(d *DraftDeps) { d.JobReader = nil }},
 		{"no deliveries", func(d *DraftDeps) { d.Deliveries = nil }},
+		{"no profiles", func(d *DraftDeps) { d.Profiles = nil }},
+		{"no renderer", func(d *DraftDeps) { d.Renderer = nil }},
+		{"no files", func(d *DraftDeps) { d.Files = nil }},
 		{"no clock", func(d *DraftDeps) { d.Clock = nil }},
 		{"no ids", func(d *DraftDeps) { d.IDs = nil }},
 		{"no tx", func(d *DraftDeps) { d.Tx = nil }},
@@ -275,13 +287,15 @@ func TestGenerateEditRegenerateKeepsVersions(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("LLM requests = %d, want 2", len(reqs))
 	}
-	if data := reqs[0].UntrustedData(); strings.Contains(data, "previous_draft") || strings.Contains(data, "student_request") {
+	if data := reqs[0].UntrustedData(); strings.Contains(data, "previous_draft") || strings.Contains(data, prompts.StudentOpen) {
 		t.Fatalf("first request has a previous draft or a request: %s", data)
 	}
-	data := reqs[1].UntrustedData()
-	if !strings.Contains(data, `"student_request":"Make it shorter and keep my Volga example"`) ||
+	// TASK-094: the instructions are the student's own section after the data, not part of the untrusted data.
+	data, student, ok := strings.Cut(reqs[1].UntrustedData(), prompts.StudentOpen)
+	if !ok || !strings.Contains(student, `{"request":"Make it shorter and keep my Volga example"}`) ||
+		strings.Contains(data, "Make it shorter") ||
 		!strings.Contains(data, `"previous_draft":"Deltas form where rivers meet the sea. My example: the Volga."`) {
-		t.Fatalf("regeneration request lacks the instructions or the edited draft: %s", data)
+		t.Fatalf("regeneration request lacks the instructions or the edited draft: %s", reqs[1].UntrustedData())
 	}
 	if strings.Contains(reqs[1].Instructions(), "Volga") {
 		t.Fatal("student text reached the trusted instructions")
@@ -330,9 +344,9 @@ func TestDoubleGenerateMakesOneJob(t *testing.T) {
 	if err != nil || again.Created || again.JobID != results[0].JobID {
 		t.Fatalf("same instructions again: %+v, %v", again, err)
 	}
-	other, err := e.svc.Generate(ctx, "a1", "longer")
-	if err != nil || !other.Created {
-		t.Fatalf("other instructions: %+v, %v", other, err)
+	// TASK-094: other instructions wait until the running generation is over.
+	if other, err := e.svc.Generate(ctx, "a1", "longer"); !errors.Is(err, ErrGenerationRunning) || e.jobCount() != 1 {
+		t.Fatalf("other instructions while one runs: %+v, %v", other, err)
 	}
 
 	// Once the job added its version the base moved on: the same click is a new generation.
@@ -623,7 +637,7 @@ func TestDraftRequestHoldsTheMinimalContext(t *testing.T) {
 	data := req.UntrustedData()
 	for _, want := range []string{
 		`"lesson_title":"Geography"`, `"title":"Read chapter 4"`, `"description":"Pages 40-52 about deltas"`,
-		`"lesson_summary":"Rivers flow into seas and form deltas."`, `"student_request":"in English"`,
+		`"lesson_summary":"Rivers flow into seas and form deltas."`, prompts.StudentOpen + "\n" + `{"request":"in English"}`,
 	} {
 		if !strings.Contains(data, want) {
 			t.Errorf("request lacks %s: %s", want, data)

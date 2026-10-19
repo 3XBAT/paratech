@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -16,12 +17,32 @@ var ErrSettingsUnavailable = errors.New("settings are unavailable")
 // ErrUnknownRecognitionLoad is what the UI sees for a load mode other than gentle, normal or max.
 var ErrUnknownRecognitionLoad = errors.New("unknown recognition load")
 
+// settingsError is an error of the settings page: a fixed Russian text the page shows as it is (like homeworkError).
+type settingsError string
+
+func (e settingsError) Error() string { return string(e) }
+
+// ErrProfileInvalid is what the UI sees for a profile field the core refuses.
+const ErrProfileInvalid = settingsError("Каждое поле профиля — одна строка до 200 символов без управляющих символов.")
+
 // SettingsUseCase is the part of the preferences use case the settings page needs (ARCH-42).
 type SettingsUseCase interface {
 	Get(ctx context.Context) (preferences.Toggles, error)
 	SetRecordingPromptsEnabled(ctx context.Context, enabled bool) (preferences.Toggles, error)
 	SetProcessOnlyOnACPower(ctx context.Context, enabled bool) (preferences.Toggles, error)
 	SetRecognitionLoad(ctx context.Context, load shared.RecognitionLoad) (preferences.Toggles, error)
+	Profile(ctx context.Context) (settings.ProfileFields, error)
+	SaveProfile(ctx context.Context, f settings.ProfileFields) (settings.ProfileFields, error)
+}
+
+// StudentProfile is the JSON form of the student profile («Профиль студента», TASK-094): the title page of a homework
+// document in Word names these. Every field is optional ("" not set).
+type StudentProfile struct {
+	FullName   string `json:"fullName"`
+	Group      string `json:"group"`
+	University string `json:"university"`
+	Faculty    string `json:"faculty"` // faculty or department
+	City       string `json:"city"`
 }
 
 // Settings is the JSON form of the toggles on the settings page.
@@ -85,6 +106,36 @@ func (s *SettingsService) SetRecognitionLoad(ctx context.Context, load string) (
 	}
 	t, err := s.uc.SetRecognitionLoad(ctx, l)
 	return s.reply(ctx, "set recognition load", t, err)
+}
+
+// GetProfile returns the student profile.
+func (s *SettingsService) GetProfile(ctx context.Context) (StudentProfile, error) {
+	f, err := s.uc.Profile(ctx)
+	if err != nil {
+		s.log.Error("ui: get profile", "err", err)
+		return StudentProfile{}, ErrSettingsUnavailable
+	}
+	return studentProfile(f), nil
+}
+
+// SaveProfile stores the student profile as the page sends it and returns it as stored (trimmed). A field that is not
+// one line of at most 200 characters is ErrProfileInvalid and nothing is stored.
+func (s *SettingsService) SaveProfile(ctx context.Context, p StudentProfile) (StudentProfile, error) {
+	f, err := s.uc.SaveProfile(ctx, settings.ProfileFields{
+		FullName: p.FullName, Group: p.Group, University: p.University, Faculty: p.Faculty, City: p.City,
+	})
+	switch {
+	case errors.Is(err, settings.ErrInvalidSettings):
+		return StudentProfile{}, ErrProfileInvalid
+	case err != nil:
+		s.log.Error("ui: save profile", "err", err)
+		return StudentProfile{}, ErrSettingsUnavailable
+	}
+	return studentProfile(f), nil
+}
+
+func studentProfile(f settings.ProfileFields) StudentProfile {
+	return StudentProfile{FullName: f.FullName, Group: f.Group, University: f.University, Faculty: f.Faculty, City: f.City}
 }
 
 func (s *SettingsService) reply(ctx context.Context, op string, t preferences.Toggles, err error) (Settings, error) {

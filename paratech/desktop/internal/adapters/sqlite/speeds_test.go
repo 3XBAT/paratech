@@ -144,6 +144,10 @@ func TestMigrationToVersion11AddsRecognitionLoad(t *testing.T) {
 	if _, err := p.UpTo(ctx, 11); err != nil {
 		t.Fatalf("migrate to 11: %v", err)
 	}
+	// The repository reads the columns of the later migrations too (TASK-094: the student profile).
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatalf("migrate to the latest: %v", err)
+	}
 	got, err := NewSettingsRepository(db).Load(ctx)
 	if err != nil {
 		t.Fatalf("Load of a version 10 row: %v", err)

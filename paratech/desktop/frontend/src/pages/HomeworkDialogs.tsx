@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled dialogs (test/homework.test.mjs renders them).
-import type { DeliveryItem, HomeworkApi, SendPreparation } from "../bindings/homework.js";
-import { errorText, sendRetryable, sizeText } from "../homeworkView.js";
+import { type DeliveryItem, type HomeworkApi, type SendFormat, sendFormats, type SendPreparation } from "../bindings/homework.js";
+import { errorText, sendFormatLabels, sendRetryable, sizeText } from "../homeworkView.js";
 import { Dialog, ResultLine } from "../ui/controls.js";
 
 // The two dialogs that lead to an email. Each one has a single call site of its binding, in its confirm button handler
@@ -13,13 +13,18 @@ export type SendResult = "sent" | "cancelled" | "failed";
 
 /**
  * Asks to send the prepared homework: the draft version, recipient, subject and attachment, «Отправить» and «Отмена».
- * Any way of closing it other than «Отправить» cancels the send in the core. version is the one exportDraft wrote to
- * the attached file.
+ * Any way of closing it other than «Отправить» cancels the send in the core. version is the one the export wrote to
+ * the attached file. The format choice asks the page for a new preparation (onFormat): the dialog never prepares a
+ * send itself. While switching, nothing can be confirmed; problem is why the last switch did not happen ("" none), the
+ * shown preparation then stays as it was.
  */
 export function SendDialog(props: {
   api: HomeworkApi;
   prep: SendPreparation;
   version: number;
+  switching?: boolean;
+  problem?: string;
+  onFormat?: (format: SendFormat) => void;
   onClose: (result: SendResult) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -45,7 +50,7 @@ export function SendDialog(props: {
     setBusy(true);
     setError("");
     try {
-      await props.api.confirmSend(props.prep.proposalId, props.prep.subject);
+      await props.api.confirmSend(props.prep.proposalId, props.prep.subject, props.prep.attachmentFormat);
       props.onClose("sent");
     } catch (err) {
       retryable.current = sendRetryable(err);
@@ -58,7 +63,7 @@ export function SendDialog(props: {
   }
 
   async function onCancelSend() {
-    if (running.current) {
+    if (running.current || props.switching === true) {
       return; // a confirmation on its way is not cancelled halfway
     }
     running.current = true;
@@ -72,13 +77,15 @@ export function SendDialog(props: {
     props.onClose(confirmed.current ? "failed" : "cancelled");
   }
 
+  const switching = props.switching === true;
+  const formatLocked = busy || tried || switching || props.onFormat === undefined;
   return (
     <Dialog
       open
       title="Отправить домашнее задание?"
       confirmLabel={busy ? "Отправка…" : retry ? "Повторить" : "Отправить"}
       cancelLabel={tried ? "Закрыть" : "Отмена"}
-      confirmDisabled={busy || (tried && !retry)}
+      confirmDisabled={busy || switching || (tried && !retry)}
       onConfirm={() => void onConfirmSend()}
       onCancel={() => void onCancelSend()}
     >
@@ -98,6 +105,31 @@ export function SendDialog(props: {
           <bdi>{props.prep.attachmentName}</bdi> <span className="num">({sizeText(props.prep.attachmentSize)})</span>
         </dd>
       </dl>
+      <fieldset className="hw-format" disabled={formatLocked}>
+        <legend>Формат вложения</legend>
+        {sendFormats.map((f) => (
+          <label key={f}>
+            <input
+              type="radio"
+              name="hw-send-format"
+              value={f}
+              checked={props.prep.attachmentFormat === f}
+              onChange={() => props.onFormat?.(f)}
+            />
+            {sendFormatLabels[f]}
+          </label>
+        ))}
+        {switching && (
+          <span className="small muted" role="status">
+            Подготовка…
+          </span>
+        )}
+      </fieldset>
+      {props.problem && (
+        <ResultLine kind="fail" role="alert">
+          {props.problem}
+        </ResultLine>
+      )}
       <p>Письмо уйдёт сразу после подтверждения.</p>
       {error && (
         <ResultLine kind="fail" role="alert">

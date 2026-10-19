@@ -73,21 +73,22 @@ type ProposalView struct {
 	CreatedAt    time.Time
 	ConfirmedAt  time.Time
 
-	// The attachment of send_homework_email pinned at validation: the file name of proposal.ExportRef and the size of
-	// the pinned content. Empty and 0 while nothing is pinned.
-	AttachmentName string
-	AttachmentSize int64
+	// The attachment of send_homework_email pinned at validation: the file name of proposal.ExportRefOf and the size of
+	// the pinned content. Empty and 0 while nothing is pinned. AttachmentFormat is the format the user chose (TASK-094).
+	AttachmentName   string
+	AttachmentSize   int64
+	AttachmentFormat proposal.Format
 }
 
 func viewOf(p *proposal.Proposal) ProposalView {
 	v := ProposalView{
 		ID: p.ID(), Kind: p.Kind(), Status: p.Status(), Reason: p.Reason(), AssignmentID: p.AssignmentID(),
 		Title: p.Title(), Body: p.Body(), Due: p.Due(), Recipient: p.Recipient().Address(),
-		CreatedAt: p.CreatedAt(), ConfirmedAt: p.ConfirmedAt(),
+		CreatedAt: p.CreatedAt(), ConfirmedAt: p.ConfirmedAt(), AttachmentFormat: p.AttachmentFormat(),
 	}
 	if d := p.AttachmentDigest(); !d.IsZero() {
 		// The ref of a stored proposal's assignment is valid: the id was checked when it was parsed.
-		if ref, err := proposal.ExportRef(p.AssignmentID()); err == nil {
+		if ref, err := proposal.ExportRefOf(p.AssignmentID(), p.AttachmentFormat()); err == nil {
 			v.AttachmentName, v.AttachmentSize = path.Base(ref.Path()), d.Size()
 		}
 	}
@@ -180,6 +181,9 @@ type DraftDeps struct {
 	Jobs        JobEnqueuer
 	JobReader   JobReader
 	Deliveries  UnresolvedDeliveries
+	Profiles    ProfileSource    // the student profile of the title page (TASK-094)
+	Renderer    DocumentRenderer // the Word file of a version
+	Files       DocumentWriter   // a Word file saved where the student chose
 	Clock       Clock
 	IDs         IDGenerator
 	Tx          Tx
@@ -241,10 +245,11 @@ func draftVersionViewOf(d *homeworkdraft.Draft, r homeworkdraft.Revision) DraftV
 	}
 }
 
-// GenerationView is the state of a generation job for the homework screen (Drafts.Generation).
+// GenerationView is the state of a generation job for the homework screen (Drafts.Generation, Drafts.ActiveGeneration).
 type GenerationView struct {
-	JobID  shared.JobID
-	Status job.Status
+	JobID   shared.JobID
+	Status  job.Status
+	Percent int // the progress the job reported, 0..100
 	// Failure is the ErrDraft* error a FAILED job ended with (errors.Is); nil for other statuses or an unknown cause.
 	Failure error
 }

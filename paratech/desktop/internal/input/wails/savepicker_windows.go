@@ -81,6 +81,34 @@ func (u *windowsUI) pickTextFile(title, name, format string) (string, error) {
 	return path, nil
 }
 
+// Texts of the save dialog of a Word file (TASK-094).
+const (
+	docxDialogTitle   = "Сохранение в Word"
+	docxFilterName    = "Документ Word (*.docx)"
+	docxFilterPattern = "*.docx"
+)
+
+// pickDocxFile shows the native save dialog of a Word file, modal to the main window, with name proposed; the filter
+// makes the dialog add .docx to a typed name. "" means the user cancelled.
+func (u *windowsUI) pickDocxFile(name string) (string, error) {
+	path, err := u.app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
+		Title:                docxDialogTitle,
+		Filename:             name,
+		Filters:              []application.FileFilter{{DisplayName: docxFilterName, Pattern: docxFilterPattern}},
+		CanCreateDirectories: true,
+		Window:               u.main,
+	}).PromptForSingleSelection()
+	switch {
+	case err != nil && err.Error() == dialogCancelled:
+		return "", nil
+	case err != nil:
+		return "", err
+	case path == "" || path == ".": // filepath.Clean of an empty result
+		return "", nil
+	}
+	return path, nil
+}
+
 // errClipboard means Windows refused the clipboard (another program holds it open).
 var errClipboard = errors.New("wails: the clipboard is not available")
 

@@ -198,8 +198,8 @@ type Querier interface {
 	UpdateLectureText(ctx context.Context, arg UpdateLectureTextParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int64, error)
-	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due) and the creation
-	// time never change after the parse, so they are not written again.
+	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
+	// format the user chose before the validation and the creation time never change, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). The lesson, its snapshot, the cap, the chunk directory and the
 	// creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.

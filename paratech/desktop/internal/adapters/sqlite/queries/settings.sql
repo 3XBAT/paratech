@@ -4,7 +4,7 @@
 -- name: GetSettings :one
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id, version, updated_at,
        homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app,
-       recognition_load
+       recognition_load, student_full_name, student_group, student_university, student_faculty, student_city
 FROM settings
 WHERE id = 1;
 
@@ -13,11 +13,13 @@ WHERE id = 1;
 -- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id,
                       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url,
-                      recording_source_app, recognition_load, version, updated_at)
+                      recording_source_app, recognition_load, student_full_name, student_group,
+                      student_university, student_faculty, student_city, version, updated_at)
 VALUES (1, sqlc.arg(recording_prompts_enabled), sqlc.arg(process_only_on_ac_power), sqlc.arg(default_stt_model_id),
         sqlc.arg(homework_recipient), sqlc.arg(smtp_host), sqlc.arg(smtp_port), sqlc.arg(smtp_security),
         sqlc.arg(smtp_username), sqlc.arg(hub_url), sqlc.arg(recording_source_app),
-        sqlc.arg(recognition_load), 1, sqlc.arg(updated_at));
+        sqlc.arg(recognition_load), sqlc.arg(student_full_name), sqlc.arg(student_group), sqlc.arg(student_university),
+        sqlc.arg(student_faculty), sqlc.arg(student_city), 1, sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 -- with VersionCAS to shared.ErrVersionConflict.
@@ -34,6 +36,11 @@ SET recording_prompts_enabled = sqlc.arg(recording_prompts_enabled),
     hub_url                   = sqlc.arg(hub_url),
     recording_source_app      = sqlc.arg(recording_source_app),
     recognition_load          = sqlc.arg(recognition_load),
+    student_full_name         = sqlc.arg(student_full_name),
+    student_group             = sqlc.arg(student_group),
+    student_university        = sqlc.arg(student_university),
+    student_faculty           = sqlc.arg(student_faculty),
+    student_city              = sqlc.arg(student_city),
     version                   = version + 1,
     updated_at                = sqlc.arg(updated_at)
 WHERE id = 1 AND version = sqlc.arg(expected_version);

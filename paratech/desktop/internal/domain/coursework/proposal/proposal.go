@@ -43,6 +43,7 @@ type Proposal struct {
 	recipient       Recipient // the trusted recipient frozen at validation; email proposals only
 	attachment      Digest    // the export content pinned at validation; email proposals only
 	assignmentTitle string    // the heading of the export file, frozen at validation; export proposals only
+	format          Format    // the attachment chosen before validation; email proposals only
 	createdAt       time.Time
 	updatedAt       time.Time
 	confirmedAt     time.Time
@@ -84,7 +85,26 @@ func New(id ID, out values.UntrustedOutput, now time.Time) (*Proposal, error) {
 	if err := p.fill(w); err != nil {
 		return nil, err
 	}
+	if p.kind.NeedsAttachment() {
+		p.format = FormatText
+	}
 	return p, nil
+}
+
+// ChooseFormat sets the attachment of a PROPOSED send_homework_email proposal (TASK-094): the user picks it in the
+// confirmation dialog before the proposal is validated, so the digest pinned at validation is the one of that file.
+// Another status yields ErrInvalidTransition, another kind or an unknown format ErrInvalidProposal.
+func (p *Proposal) ChooseFormat(f Format) error {
+	switch {
+	case p.status != StatusProposed:
+		return fmt.Errorf("%w: choose the format in %s", ErrInvalidTransition, p.status)
+	case !p.kind.NeedsAttachment():
+		return fmt.Errorf("%w: kind %s has no attachment", ErrInvalidProposal, p.kind)
+	case !f.Valid():
+		return fmt.Errorf("%w: unknown attachment format %q", ErrInvalidProposal, string(f))
+	}
+	p.format = f
+	return nil
 }
 
 func malformed(format string, args ...any) error {
@@ -197,6 +217,7 @@ type State struct {
 	AttachmentSHA256 string
 	AttachmentSize   int64
 	AssignmentTitle  string // export proposals once validated; else empty
+	AttachmentFormat Format // email proposals; empty: FormatText (stored before TASK-094); else empty
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	ConfirmedAt      time.Time
@@ -270,6 +291,13 @@ func Restore(s State) (*Proposal, error) {
 		(wantTitle && !validTitle(s.AssignmentTitle)) {
 		return bad("an assignment title exists exactly for a validated export proposal")
 	}
+	format := s.AttachmentFormat
+	switch {
+	case p.kind.NeedsAttachment() && format == "":
+		format = FormatText
+	case p.kind.NeedsAttachment() && !format.Valid(), !p.kind.NeedsAttachment() && format != "":
+		return bad("an attachment format exists exactly for an email proposal")
+	}
 	confirmed := s.Status == StatusConfirmed || s.Status == StatusExecuted || s.Status == StatusStale
 	if confirmed == s.ConfirmedAt.IsZero() || (s.Status == StatusExecuted) == s.ExecutedAt.IsZero() {
 		return bad("confirmation and execution times do not match the status")
@@ -282,6 +310,7 @@ func Restore(s State) (*Proposal, error) {
 	p.recipient = recipient
 	p.attachment = attachment
 	p.assignmentTitle = strings.TrimSpace(s.AssignmentTitle)
+	p.format = format
 	p.createdAt, p.updatedAt = s.CreatedAt, s.UpdatedAt
 	p.confirmedAt, p.executedAt = s.ConfirmedAt, s.ExecutedAt
 	return p, nil
@@ -295,7 +324,7 @@ func (p *Proposal) State() State {
 		Version: p.version, ID: p.id, Kind: p.kind, Status: p.status, AssignmentID: p.assignment,
 		Title: p.title, Body: p.body, Due: p.due, Reason: p.reason, Recipient: p.recipient.Address(),
 		AttachmentSHA256: p.attachment.SHA256(), AttachmentSize: p.attachment.Size(), AssignmentTitle: p.assignmentTitle,
-		CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt, ExecutedAt: p.executedAt,
+		AttachmentFormat: p.format, CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt, ExecutedAt: p.executedAt,
 	}
 }
 
@@ -402,6 +431,8 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 		return ReasonNoArtifact
 	case p.kind.NeedsAttachment() && f.Attachment != p.attachment:
 		return ReasonArtifactChanged
+	case p.kind.NeedsAttachment() && f.ShownFormat != p.format:
+		return ReasonFormatChanged
 	case p.kind.NeedsSubject() && f.Subject != f.ShownSubject:
 		return ReasonSubjectChanged
 	}
@@ -476,6 +507,9 @@ func (p *Proposal) Recipient() Recipient { return p.recipient }
 
 // AttachmentDigest returns the export content pinned at validation (send_homework_email only).
 func (p *Proposal) AttachmentDigest() Digest { return p.attachment }
+
+// AttachmentFormat returns the attachment the user chose (send_homework_email only; empty for the other kinds).
+func (p *Proposal) AttachmentFormat() Format { return p.format }
 
 // AssignmentTitle returns the trusted heading of the export file, frozen at validation (export_homework only).
 func (p *Proposal) AssignmentTitle() string { return p.assignmentTitle }

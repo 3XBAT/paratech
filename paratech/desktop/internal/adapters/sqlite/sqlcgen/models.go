@@ -124,6 +124,7 @@ type Proposal struct {
 	Version          int64
 	CreatedAt        int64
 	UpdatedAt        int64
+	AttachmentFormat string
 }
 
 type Recording struct {
@@ -188,6 +189,11 @@ type Setting struct {
 	HubUrl                  string
 	RecordingSourceApp      string
 	RecognitionLoad         string
+	StudentFullName         string
+	StudentGroup            string
+	StudentUniversity       string
+	StudentFaculty          string
+	StudentCity             string
 }
 
 type SttModel struct {

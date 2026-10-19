@@ -23,10 +23,16 @@ import { SummaryPage } from "./pages/SummaryPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
 import { Icon, IconSprite } from "./ui/Icon";
 
-function PageView(props: { id: PageId; visit: number; assignment: string; onOpen: (id: PageId) => void }) {
+function PageView(props: {
+  id: PageId;
+  visit: number;
+  assignment: string;
+  onOpen: (id: PageId) => void;
+  onOpenAssignment: (id: string) => void;
+}) {
   switch (props.id) {
     case "recordings":
-      return <RecordingsPage onOpen={props.onOpen} />;
+      return <RecordingsPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
     case "homework":
       return <HomeworkPage openAssignment={props.assignment} />;
     case "schedule":
@@ -90,7 +96,13 @@ export function App() {
         <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
           <OpenTranscriptContext.Provider value={openTranscript}>
             <OpenSummaryContext.Provider value={openSummary}>
-              <PageView id={current} visit={visit} assignment={route.assignment} onOpen={openPage} />
+              <PageView
+                id={current}
+                visit={visit}
+                assignment={route.assignment}
+                onOpen={openPage}
+                onOpenAssignment={openAssignment}
+              />
             </OpenSummaryContext.Provider>
           </OpenTranscriptContext.Provider>
         </div>

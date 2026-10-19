@@ -46,9 +46,11 @@ func build(t *testing.T, op values.Operation, m contextselection.Material) value
 	return r
 }
 
-// payload returns the JSON object between the markers, checking that the markers frame the data exactly once.
+// payload returns the JSON object between the markers, checking that the markers frame the data exactly once. The
+// section of the student's instructions, if any, is left out (see studentSection).
 func payload(t *testing.T, data string) map[string]any {
 	t.Helper()
+	data, _, _ = strings.Cut(data, "\n\n"+StudentOpen+"\n")
 	inner, ok := strings.CutPrefix(data, DataOpen+"\n")
 	if !ok {
 		t.Fatalf("data does not start with the open marker")
@@ -88,9 +90,9 @@ func TestBuildSendsOnlyTheContextOfTheOperation(t *testing.T) {
 		},
 		{
 			op:       values.OperationHomeworkDraft,
-			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "assignment", "lesson_summary", "previous_draft", "student_request"},
-			included: []string{"LESSON-TITLE", "LESSON-SUBJECT", "LESSON-TEACHER", "SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST"},
-			excluded: []string{"TRANSCRIPT-ONE", "TRANSCRIPT-TWO", "2026-10-14", "2031", "123456"},
+			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "assignment", "lesson_summary", "previous_draft"},
+			included: []string{"LESSON-TITLE", "LESSON-SUBJECT", "LESSON-TEACHER", "SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT"},
+			excluded: []string{"TRANSCRIPT-ONE", "TRANSCRIPT-TWO", "2026-10-14", "2031", "123456", "STUDENT-REQUEST"},
 		},
 	}
 	for _, tc := range cases {
@@ -113,8 +115,10 @@ func TestBuildSendsOnlyTheContextOfTheOperation(t *testing.T) {
 					t.Errorf("request is missing %q", s)
 				}
 			}
+			// The student's section is checked by TestDraftStudentInstructionsAreASeparateSection.
+			data, _, _ := strings.Cut(r.UntrustedData(), StudentOpen)
 			for _, s := range tc.excluded {
-				if strings.Contains(flat.String(), s) || strings.Contains(r.UntrustedData(), s) || strings.Contains(r.Instructions(), s) {
+				if strings.Contains(flat.String(), s) || strings.Contains(data, s) || strings.Contains(r.Instructions(), s) {
 					t.Errorf("request contains %q, which the operation does not need", s)
 				}
 			}

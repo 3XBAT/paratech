@@ -21,8 +21,12 @@ const HomeworkDraftJobType = "homework_draft"
 const MaxInstructionBytes = 4 << 10
 
 // CleanInstruction validates and trims the student's additional instructions: valid UTF-8, no control characters
-// other than line breaks and tabs, at most MaxInstructionBytes. Empty is valid: a plain generation.
+// other than line breaks and tabs, at most MaxInstructionBytes. Bidi controls are removed (StripBidi). Empty is valid:
+// a plain generation.
 func CleanInstruction(s string) (string, error) {
+	if utf8.ValidString(s) {
+		s = StripBidi(s)
+	}
 	s = strings.TrimSpace(s)
 	switch {
 	case !utf8.ValidString(s):
@@ -36,6 +40,21 @@ func CleanInstruction(s string) (string, error) {
 }
 
 func badControl(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' }
+
+// StripBidi removes the bidirectional controls (embeddings, overrides, isolates and marks), which can make text look
+// different from what it says. Other text is unchanged.
+func StripBidi(s string) string {
+	return strings.Map(func(r rune) rune {
+		if isBidiControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isBidiControl(r rune) bool {
+	return r == 0x061C || r == 0x200E || r == 0x200F || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069)
+}
 
 // DraftRequest is the payload of a homework_draft job: the assignment, the draft version the generation starts from
 // (0: no draft yet) and the student's instructions. The instructions are copied into the job because they are its

@@ -14,7 +14,7 @@ const getSettings = `-- name: GetSettings :one
 
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id, version, updated_at,
        homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app,
-       recognition_load
+       recognition_load, student_full_name, student_group, student_university, student_faculty, student_city
 FROM settings
 WHERE id = 1
 `
@@ -39,6 +39,11 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.HubUrl,
 		&i.RecordingSourceApp,
 		&i.RecognitionLoad,
+		&i.StudentFullName,
+		&i.StudentGroup,
+		&i.StudentUniversity,
+		&i.StudentFaculty,
+		&i.StudentCity,
 	)
 	return i, err
 }
@@ -46,11 +51,13 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 const insertSettings = `-- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id,
                       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url,
-                      recording_source_app, recognition_load, version, updated_at)
+                      recording_source_app, recognition_load, student_full_name, student_group,
+                      student_university, student_faculty, student_city, version, updated_at)
 VALUES (1, ?1, ?2, ?3,
         ?4, ?5, ?6, ?7,
         ?8, ?9, ?10,
-        ?11, 1, ?12)
+        ?11, ?12, ?13, ?14,
+        ?15, ?16, 1, ?17)
 `
 
 type InsertSettingsParams struct {
@@ -65,6 +72,11 @@ type InsertSettingsParams struct {
 	HubUrl                  string
 	RecordingSourceApp      string
 	RecognitionLoad         string
+	StudentFullName         string
+	StudentGroup            string
+	StudentUniversity       string
+	StudentFaculty          string
+	StudentCity             string
 	UpdatedAt               int64
 }
 
@@ -83,6 +95,11 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 		arg.HubUrl,
 		arg.RecordingSourceApp,
 		arg.RecognitionLoad,
+		arg.StudentFullName,
+		arg.StudentGroup,
+		arg.StudentUniversity,
+		arg.StudentFaculty,
+		arg.StudentCity,
 		arg.UpdatedAt,
 	)
 	return err
@@ -101,9 +118,14 @@ SET recording_prompts_enabled = ?1,
     hub_url                   = ?9,
     recording_source_app      = ?10,
     recognition_load          = ?11,
+    student_full_name         = ?12,
+    student_group             = ?13,
+    student_university        = ?14,
+    student_faculty           = ?15,
+    student_city              = ?16,
     version                   = version + 1,
-    updated_at                = ?12
-WHERE id = 1 AND version = ?13
+    updated_at                = ?17
+WHERE id = 1 AND version = ?18
 `
 
 type UpdateSettingsParams struct {
@@ -118,6 +140,11 @@ type UpdateSettingsParams struct {
 	HubUrl                  string
 	RecordingSourceApp      string
 	RecognitionLoad         string
+	StudentFullName         string
+	StudentGroup            string
+	StudentUniversity       string
+	StudentFaculty          string
+	StudentCity             string
 	UpdatedAt               int64
 	ExpectedVersion         int64
 }
@@ -137,6 +164,11 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.HubUrl,
 		arg.RecordingSourceApp,
 		arg.RecognitionLoad,
+		arg.StudentFullName,
+		arg.StudentGroup,
+		arg.StudentUniversity,
+		arg.StudentFaculty,
+		arg.StudentCity,
 		arg.UpdatedAt,
 		arg.ExpectedVersion,
 	)

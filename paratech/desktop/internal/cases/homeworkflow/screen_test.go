@@ -144,7 +144,7 @@ func TestProposeSend(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(e)
 			}
-			v, err := e.svc.ProposeSend(context.Background(), "a1")
+			v, err := e.svc.ProposeSend(context.Background(), "a1", proposal.FormatText)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -177,7 +177,7 @@ func TestProposeSend(t *testing.T) {
 func TestProposeSendRefusesAnInvalidID(t *testing.T) {
 	e := newEnv(t).withHomework(t)
 	for _, id := range []shared.AssignmentID{"", "../a1", `a1","kind":"export_homework`} {
-		if _, err := e.svc.ProposeSend(context.Background(), id); err == nil {
+		if _, err := e.svc.ProposeSend(context.Background(), id, proposal.FormatText); err == nil {
 			t.Errorf("ProposeSend(%q) succeeded", id)
 		}
 	}
@@ -192,7 +192,7 @@ func TestProposeSendThenConfirm(t *testing.T) {
 	ctx := context.Background()
 	t.Run("sends the confirmed content", func(t *testing.T) {
 		e := newEnv(t).withHomework(t)
-		v, err := e.svc.ProposeSend(ctx, "a1")
+		v, err := e.svc.ProposeSend(ctx, "a1", proposal.FormatText)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,7 +213,7 @@ func TestProposeSendThenConfirm(t *testing.T) {
 	})
 	t.Run("stale after a change", func(t *testing.T) {
 		e := newEnv(t).withHomework(t)
-		v, err := e.svc.ProposeSend(ctx, "a1")
+		v, err := e.svc.ProposeSend(ctx, "a1", proposal.FormatText)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -266,13 +266,13 @@ func TestConfirmSend(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newEnv(t).withHomework(t)
-			v, err := e.svc.ProposeSend(ctx, "a1")
+			v, err := e.svc.ProposeSend(ctx, "a1", proposal.FormatText)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if tt.fail != nil {
 				heal := tt.fail(e, v.ID)
-				if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); err == nil {
+				if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject, proposal.FormatText); err == nil {
 					t.Fatal("ConfirmSend succeeded, want the injected failure")
 				}
 				if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusConfirmed {
@@ -280,13 +280,13 @@ func TestConfirmSend(t *testing.T) {
 				}
 				heal()
 			}
-			got, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject)
+			got, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject, proposal.FormatText)
 			if err != nil || got.Status != proposal.StatusExecuted {
 				t.Fatalf("ConfirmSend = %+v, %v; want EXECUTED", got, err)
 			}
 
 			// Executed: a further click calls nothing.
-			if again, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); err != nil || again.Status != proposal.StatusExecuted {
+			if again, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject, proposal.FormatText); err != nil || again.Status != proposal.StatusExecuted {
 				t.Fatalf("ConfirmSend of an executed send = %+v, %v", again, err)
 			}
 			calls := e.mailer.Calls()
@@ -322,7 +322,7 @@ func TestConfirmSendRefuses(t *testing.T) {
 		{name: "rejected", want: proposal.ErrInvalidTransition, status: proposal.StatusRejected,
 			setup: func(t *testing.T, e *env) proposal.ID {
 				e.recipient = ""
-				v, err := e.svc.ProposeSend(ctx, "a1")
+				v, err := e.svc.ProposeSend(ctx, "a1", proposal.FormatText)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -330,7 +330,7 @@ func TestConfirmSendRefuses(t *testing.T) {
 			}},
 		{name: "declined", want: proposal.ErrInvalidTransition, status: proposal.StatusDeclined,
 			setup: func(t *testing.T, e *env) proposal.ID {
-				v, err := e.svc.ProposeSend(ctx, "a1")
+				v, err := e.svc.ProposeSend(ctx, "a1", proposal.FormatText)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -346,7 +346,7 @@ func TestConfirmSendRefuses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newEnv(t).withHomework(t)
 			id := tt.setup(t, e)
-			if _, err := e.svc.ConfirmSend(ctx, id, ""); !errors.Is(err, tt.want) {
+			if _, err := e.svc.ConfirmSend(ctx, id, "", proposal.FormatText); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
 			if tt.status != "" {

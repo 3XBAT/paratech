@@ -228,6 +228,9 @@ html, body, #root { height: 100%; }
 .hw-send { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 0 0 12px; color: var(--text); }
 .hw-send dt { color: var(--muted); }
 .hw-send dd { margin: 0; overflow-wrap: anywhere; }
+.hw-format { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 12px; padding: 0; border: 0; }
+.hw-format legend { float: left; margin-right: 4px; padding: 0; color: var(--muted); }
+.hw-format label { display: inline-flex; align-items: center; gap: 6px; }
 .hw .dialog-body p { margin: 0 0 10px; }
 
 /* Настройки: one card of switch lines and the theme. */

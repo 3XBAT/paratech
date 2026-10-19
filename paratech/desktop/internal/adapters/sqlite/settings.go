@@ -20,7 +20,8 @@ const (
 
 // SettingsRepository stores the settings singleton (the modelcatalog.SettingsRepository port; its Load also serves the
 // SettingsReader ports of recordingsession, jobrunner and transcribe, and the mail and Hub setup the app reads for the
-// smtp and hubclient adapters; with Save it is the SettingsStore of recordingprompt, which remembers the source). No column holds a secret (hard rule 4). Defaults and validation stay in
+// smtp and hubclient adapters and the student profile of the homework drafts; with Save it is the SettingsStore of
+// recordingprompt, which remembers the source). No column holds a secret (hard rule 4). Defaults and validation stay in
 // settings.Settings: the repository only converts between the row and the aggregate.
 type SettingsRepository struct{ db *DB }
 
@@ -83,11 +84,16 @@ func settingsFromRow(row sqlcgen.Setting) (*settings.Settings, error) {
 		HubURL:                  row.HubUrl,
 		RecordingSource:         shared.AppName(row.RecordingSourceApp),
 		RecognitionLoad:         shared.RecognitionLoad(row.RecognitionLoad),
-		UpdatedAt:               settingsFromMs(row.UpdatedAt),
+		Profile: settings.ProfileFields{
+			FullName: row.StudentFullName, Group: row.StudentGroup, University: row.StudentUniversity,
+			Faculty: row.StudentFaculty, City: row.StudentCity,
+		},
+		UpdatedAt: settingsFromMs(row.UpdatedAt),
 	})
 }
 
 func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
+	profile := s.Profile().Fields()
 	return sqlcgen.InsertSettingsParams{
 		RecordingPromptsEnabled: settingsBool(s.RecordingPromptsEnabled()),
 		ProcessOnlyOnAcPower:    settingsBool(s.ProcessOnlyOnACPower()),
@@ -100,6 +106,11 @@ func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
 		HubUrl:                  s.HubURL(),
 		RecordingSourceApp:      s.RecordingSource().String(),
 		RecognitionLoad:         s.RecognitionLoad().String(),
+		StudentFullName:         profile.FullName,
+		StudentGroup:            profile.Group,
+		StudentUniversity:       profile.University,
+		StudentFaculty:          profile.Faculty,
+		StudentCity:             profile.City,
 		UpdatedAt:               settingsMs(s.UpdatedAt()),
 	}
 }
@@ -118,6 +129,11 @@ func settingsUpdateParams(s *settings.Settings) sqlcgen.UpdateSettingsParams {
 		HubUrl:                  p.HubUrl,
 		RecordingSourceApp:      p.RecordingSourceApp,
 		RecognitionLoad:         p.RecognitionLoad,
+		StudentFullName:         p.StudentFullName,
+		StudentGroup:            p.StudentGroup,
+		StudentUniversity:       p.StudentUniversity,
+		StudentFaculty:          p.StudentFaculty,
+		StudentCity:             p.StudentCity,
 		UpdatedAt:               p.UpdatedAt,
 		ExpectedVersion:         s.Version(),
 	}

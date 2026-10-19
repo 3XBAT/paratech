@@ -45,6 +45,7 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 		ProcessOnlyOnACPower:    s.ProcessOnlyOnACPower(),
 		DefaultSttModel:         s.DefaultSttModel(),
 		RecognitionLoad:         s.RecognitionLoad(),
+		Profile:                 s.Profile().Fields(),
 		UpdatedAt:               s.UpdatedAt(),
 	}
 	s.Persisted(r.stored.Version)
@@ -174,5 +175,34 @@ func TestSetRecognitionLoad(t *testing.T) {
 	}
 	if read, err := s.Get(ctx); err != nil || read.RecognitionLoad != shared.LoadMax {
 		t.Fatalf("Get = %+v, %v; want max kept", read, err)
+	}
+}
+
+// TASK-094: the student profile is stored trimmed with the other settings; a bad field changes nothing.
+func TestSaveProfile(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{conflicts: 1}
+	s := newService(t, repo)
+
+	if got, err := s.Profile(ctx); err != nil || got != (settings.ProfileFields{}) {
+		t.Fatalf("fresh profile = %+v, %v", got, err)
+	}
+	got, err := s.SaveProfile(ctx, settings.ProfileFields{FullName: " Иванов Иван ", Group: "ИВТ-21", City: "Москва"})
+	want := settings.ProfileFields{FullName: "Иванов Иван", Group: "ИВТ-21", City: "Москва"}
+	if err != nil || got != want || repo.stored.Profile != want {
+		t.Fatalf("SaveProfile = %+v, %v; stored %+v", got, err, repo.stored.Profile)
+	}
+	if _, err := s.SaveProfile(ctx, settings.ProfileFields{Group: "a\nb"}); !errors.Is(err, settings.ErrInvalidSettings) {
+		t.Fatalf("bad group: err = %v, want ErrInvalidSettings", err)
+	}
+	if read, err := s.Profile(ctx); err != nil || read != want {
+		t.Fatalf("Profile = %+v, %v; want %+v kept", read, err, want)
+	}
+	// The toggles keep the profile and the profile keeps the toggles.
+	if _, err := s.SetProcessOnlyOnACPower(ctx, false); err != nil || repo.stored.Profile != want {
+		t.Fatalf("toggle dropped the profile: %v, %+v", err, repo.stored.Profile)
+	}
+	if _, err := s.SaveProfile(ctx, settings.ProfileFields{}); err != nil || repo.stored.ProcessOnlyOnACPower {
+		t.Fatalf("clearing the profile: %v, AC only %v", err, repo.stored.ProcessOnlyOnACPower)
 	}
 }

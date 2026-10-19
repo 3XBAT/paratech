@@ -14,6 +14,7 @@ import (
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/schedule/lesson"
+	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/transcript"
 )
@@ -224,11 +225,38 @@ type JobEnqueuer interface {
 }
 
 // JobReader gives read access to a job of this workflow, so that a Generate whose idempotency key belongs to a job
-// that failed or was cancelled can start the generation again (PRD sections 7.2, 10 and 14 case 5). Implemented by
-// the sqlite adapter.
+// that failed or was cancelled can start the generation again (PRD sections 7.2, 10 and 14 case 5), and so that the
+// screen and Generate see the generation an assignment has going (TASK-094). Implemented by the sqlite adapter.
 type JobReader interface {
 	// Get loads a job (PRD section 7.2). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.JobID) (*job.Job, error)
+
+	// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix
+	// (PRD section 7.2); none wraps shared.ErrNotFound. Called inside Tx.Do it reads in that transaction.
+	LatestByKeyPrefix(ctx context.Context, typ job.Type, prefix string) (*job.Job, error)
+}
+
+// ProfileSource reads the student profile from the local settings, for the title page of a Word file (PRD section 10
+// step 6, TASK-094). Implemented by the sqlite settings repository.
+type ProfileSource interface {
+	// Load returns the stored settings, or the defaults (an empty profile) while nothing is stored (PRD section 10).
+	Load(ctx context.Context) (*settings.Settings, error)
+}
+
+// DocumentRenderer renders a homework document as a Word file (PRD section 10 step 6, TASK-094). Implemented by the
+// docx adapter.
+type DocumentRenderer interface {
+	// Render returns the .docx bytes of doc; the same document gives the same bytes (PRD section 10: the attachment is
+	// pinned by its digest).
+	Render(ctx context.Context, doc values.Document) ([]byte, error)
+}
+
+// DocumentWriter writes a file to the path the student chose in the save dialog, atomically (a failure leaves no half
+// file under that name; PRD sections 5.2 and 10 step 6). Implemented by the textfile adapter; errors never carry the
+// path.
+type DocumentWriter interface {
+	// WriteFile replaces the file at path with content (PRD section 10 step 6).
+	WriteFile(ctx context.Context, path string, content []byte) error
 }
 
 // Clock supplies the current time (ARCH-24; PRD section 10). Implemented by the clock adapter and by a controllable fake in tests.

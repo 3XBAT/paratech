@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "../bindings/activity";
 import { promptApi } from "../bindings/prompt";
 import { callByName } from "../bindings/runtime";
-import { actionErrorText, formatTime, jobTypeLabel, loadErrorText } from "../activityView";
+import { actionErrorText, formatTime, jobAssignment, jobTitle, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
 import { manualStartTexts, startButton, startOutcome } from "../manualStartView";
@@ -33,8 +33,14 @@ const pollMs = 3000;
 
 // The page shows what the Go core reports: one row per recording with the status of its whole chain (TASK-076). The
 // Stop, Run now and link buttons appear only when the core offers them (ARCH-44). «Начать запись» starts a recording
-// without the popup, from the popup's source picker (TASK-081).
-export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) {
+// without the popup, from the popup's source picker (TASK-081). A draft job row opens its assignment (TASK-094).
+export function RecordingsPage({
+  onOpen,
+  onOpenAssignment,
+}: {
+  onOpen?: (page: PageId) => void;
+  onOpenAssignment?: (assignmentId: string) => void;
+}) {
   const api = useMemo(() => activityApi(callByName), []);
   const prompts = useMemo(() => promptApi(callByName), []);
   const openTranscript = useOpenTranscript();
@@ -235,10 +241,11 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
   const jobRow = (j: JobItem) => {
     const v = jobStatusView(j);
     const starting = busy.has(`run:${j.id}`);
+    const assignment = jobAssignment(j);
     return (
       <Row
         key={j.id}
-        title={jobTypeLabel(j.type)}
+        title={jobTitle(j)}
         meta={
           <span className="num">
             Обновлена {formatTime(j.updatedAt)} · попыток: {j.attempts} из {j.maxAttempts}
@@ -250,17 +257,24 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
           </StatusLine>
         }
         actions={
-          j.runNowOffered && (
-            <Button
-              icon="play"
-              busy={starting}
-              busyLabel="Запуск…"
-              disabled={starting}
-              onClick={() => void act(`run:${j.id}`, () => api.runJobNow(j.id))}
-            >
-              Запустить сейчас
-            </Button>
-          )
+          <>
+            {j.runNowOffered && (
+              <Button
+                icon="play"
+                busy={starting}
+                busyLabel="Запуск…"
+                disabled={starting}
+                onClick={() => void act(`run:${j.id}`, () => api.runJobNow(j.id))}
+              >
+                Запустить сейчас
+              </Button>
+            )}
+            {assignment !== "" && onOpenAssignment && (
+              <Button variant="ghost" icon="doc" onClick={() => onOpenAssignment(assignment)}>
+                Открыть задание
+              </Button>
+            )}
+          </>
         }
       />
     );

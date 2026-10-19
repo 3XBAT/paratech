@@ -5,13 +5,18 @@
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
 import { formatTime } from "./activityView.js";
 import {
+  type ActiveGeneration,
   type DeliveryItem,
+  type DocxSaveResult,
+  type DraftStatus,
   errorMessages,
   type GenerationState,
   type GenerationStatus,
+  type SendFormat,
   type VersionSource,
 } from "./bindings/homework.js";
 import { plural } from "./plural.js";
+import type { ResultKind } from "./ui/controls.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -26,6 +31,8 @@ export interface ChipView {
 /** How often the page asks for a running generation and for emails on their way. */
 export const generationPollMs = 2000;
 export const deliveryPollMs = 3000;
+/** How often an open assignment asks the core for a new version or a generation started elsewhere (TASK-094). */
+export const draftPollMs = 3000;
 
 interface Look {
   kind: ChipKind;
@@ -34,18 +41,100 @@ interface Look {
 }
 
 const generationLooks: Readonly<Record<GenerationState, Look>> = {
-  generating: { kind: "run", icon: "wave", label: "Готовится черновик" },
+  generating: { kind: "run", icon: "wave", label: "Готовим черновик…" },
   waitingNetwork: { kind: "net", icon: "off", label: "Ждёт интернет" },
   waitingQuota: { kind: "wait", icon: "clock", label: "Лимит обработки исчерпан" },
   failed: { kind: "fail", icon: "warn", label: "Черновик не готов" },
   done: { kind: "ok", icon: "ok", label: "Черновик готов" },
 };
 
-/** The chip of a generation; the hint is the core's fixed text for the waiting and failed states. */
+/**
+ * The chip of a generation; the hint is the core's fixed text for the waiting and failed states, the progress of a
+ * running one.
+ */
 export function generationView(s: GenerationStatus): ChipView {
   const look = generationLooks[s.state];
-  const hint = s.message !== "" ? s.message : s.state === "generating" ? "Обычно до минуты." : "";
+  let hint = s.message;
+  if (hint === "" && s.state === "generating") {
+    hint = s.percent > 0 && s.percent < 100 ? `Готово ${Math.round(s.percent)} %.` : "Обычно до минуты.";
+  }
   return { ...look, hint };
+}
+
+/** The generation the page follows: its job and its last state. */
+export interface FollowedGeneration {
+  jobId: string;
+  status: GenerationStatus;
+}
+
+/** The core's running generation (from openAssignment or draftStatus) as the page follows it. */
+export function followGeneration(g: ActiveGeneration | null): FollowedGeneration | null {
+  return g === null ? null : { jobId: g.jobId, status: { state: g.state, message: g.message, percent: g.percent } };
+}
+
+/**
+ * What a draftStatus answer asks of the page: reload the assignment when a newer version than the latest one it
+ * knows appeared, and follow a generation it does not follow yet (started before the page opened or elsewhere).
+ */
+export function draftStatusStep(
+  st: DraftStatus,
+  knownLatest: number,
+  followedJob: string,
+): { reload: boolean; follow: FollowedGeneration | null } {
+  const follow = st.generation !== null && st.generation.jobId !== followedJob ? followGeneration(st.generation) : null;
+  return { reload: st.latestVersion > knownLatest, follow };
+}
+
+/** The busy label of the generate button while the core prepares a draft. */
+export const generatingLabel = "Готовим черновик…";
+
+/** The generate button and the instructions field: off while a generation goes on or the shown text forbids one. */
+export interface GenerateOffer {
+  label: string;
+  disabled: boolean;
+  reason: string | undefined;
+  instructionDisabled: boolean;
+}
+
+export function generateOffer(o: { hasDraft: boolean; generating: boolean; olderShown: boolean; dirty: boolean }): GenerateOffer {
+  const label = o.hasDraft ? "Сгенерировать заново" : "Сгенерировать черновик";
+  if (o.generating) {
+    // The button's busy label says why.
+    return { label, disabled: true, reason: undefined, instructionDisabled: true };
+  }
+  const reason = regenerateBlockedReason(o.olderShown, o.dirty);
+  return { label, disabled: reason !== undefined, reason, instructionDisabled: false };
+}
+
+/** generate was refused because a generation of the assignment already goes on: the page picks it up. */
+export function generationRunning(err: unknown): boolean {
+  return errorMessage(err) === errorMessages.generationRunning;
+}
+
+/** The line under the draft after «Сохранить в Word (.docx)»: the core's text and the saved file's name. */
+export function docxSaveView(r: DocxSaveResult): { kind: ResultKind; text: string } {
+  switch (r.status) {
+    case "saved":
+      return { kind: "ok", text: r.name === "" ? r.message : `${r.message} Файл: «${r.name}».` };
+    case "cancelled":
+      return { kind: "wait", text: r.message };
+    case "failed":
+      return { kind: "fail", text: r.message };
+  }
+}
+
+/** The attachment a send dialog starts with; the student's last choice on the page wins. */
+export const defaultSendFormat: SendFormat = "docx";
+
+export const sendFormatLabels: Readonly<Record<SendFormat, string>> = {
+  docx: "Word (.docx)",
+  // The text attachment is the Markdown export (homework.md); the wire value stays "txt".
+  txt: "Текст (.md)",
+};
+
+/** A new choice in the dialog needs a new export and preparation, unless nothing changes or the dialog is busy. */
+export function sendFormatChange(current: SendFormat, next: SendFormat, busy: boolean): boolean {
+  return !busy && next !== current;
 }
 
 /** A generation in these states goes on in the core: the page keeps asking. */

@@ -132,6 +132,13 @@ export interface JobItem {
   nextRunAt: string;
   /** AC-22: "Run now" is offered (a job waiting for AC power). */
   runNowOffered: boolean;
+  /** The assignment of a homework draft job (TASK-094): the row opens it; "" for other jobs. */
+  assignmentId: string;
+  /** Model text: render as plain text only. */
+  assignmentTitle: string;
+  assignmentSubject: string;
+  /** The row's name «Черновик: <задание> · <предмет>»; "" when the job is not a draft or the assignment is unknown. */
+  label: string;
 }
 
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
@@ -328,6 +335,10 @@ export function parseJob(raw: unknown): JobItem {
     updatedAt: str(r, "updatedAt", w),
     nextRunAt: str(r, "nextRunAt", w),
     runNowOffered: bool(r, "runNowOffered", w),
+    assignmentId: str(r, "assignmentId", w),
+    assignmentTitle: str(r, "assignmentTitle", w),
+    assignmentSubject: str(r, "assignmentSubject", w),
+    label: str(r, "label", w),
   };
 }
 
