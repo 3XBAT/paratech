@@ -178,6 +178,7 @@ type Services struct {
 	Homework    *HomeworkService
 	Transcript  *TranscriptService
 	Summary     *SummaryService
+	LectureText *LectureTextService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -264,6 +265,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			clipboardFunc(s.setClipboardText), s.opts.Log),
 		Summary: NewSummaryService(core.Summary, summaryPickerFunc(s.pickSummaryFile), clipboardFunc(s.setClipboardText),
 			s.opts.Log),
+		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
+			clipboardFunc(s.setClipboardText), s.opts.Log),
 	}, nil
 }
 

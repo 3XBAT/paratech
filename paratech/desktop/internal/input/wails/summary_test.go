@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/cases/summaryview"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/services/summaryexport"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/shared"
@@ -31,6 +32,29 @@ type fakeSummary struct {
 	}
 	exportErr error
 	calls     []string
+
+	lectureTimes bool // the times argument of the last lecture text call
+}
+
+func (f *fakeSummary) LectureText(_ context.Context, id shared.RecordingID, times bool) (string, error) {
+	f.calls = append(f.calls, "LectureText "+string(id))
+	f.lectureTimes = times
+	return f.text, f.err
+}
+
+func (f *fakeSummary) LectureSuggestedName(_ context.Context, _ shared.RecordingID, fm summaryexport.Format) (string, error) {
+	f.calls = append(f.calls, "LectureSuggestedName "+string(fm))
+	return f.name, f.err
+}
+
+func (f *fakeSummary) ExportLectureText(_ context.Context, id shared.RecordingID, fm summaryexport.Format, times bool,
+	path string) error {
+	f.calls = append(f.calls, "ExportLectureText")
+	f.exported.id, f.exported.f, f.exported.path, f.lectureTimes = id, fm, path, times
+	if f.exportErr != nil {
+		return f.exportErr
+	}
+	return f.err
 }
 
 func (f *fakeSummary) View(_ context.Context, id shared.RecordingID) (summaryview.View, error) {
@@ -149,6 +173,11 @@ func TestSummaryView(t *testing.T) {
 				{ID: "a2", Title: "Карта"},
 			},
 		},
+		LectureText: summaryview.LectureText{
+			Step: summaryview.Step{State: summaryview.StateFailed, JobError: "post-processing: stopped"}, Ready: true,
+			Blocks:    []lecturetext.Block{lectureBlock(t, "<i>Введение</i>", 3_725_400, "Сегодня о реках.", "Дельты.")},
+			UpdatedAt: started.Add(3 * time.Hour), PartsDone: 3, Parts: 12,
+		},
 	}
 
 	got, err := f.svc.View(context.Background(), "r1")
@@ -168,6 +197,14 @@ func TestSummaryView(t *testing.T) {
 				{ID: "a1", Title: "<b>Глава 4</b>", Description: "Стр. 40", Due: "2026-10-16T04:01:00Z", UserEdited: true},
 				{ID: "a2", Title: "Карта"},
 			},
+		},
+		LectureText: SummaryLectureText{
+			SummaryStep: SummaryStep{State: "failed", Message: msgLectureFailed, JobError: "post-processing: stopped"},
+			Ready:       true,
+			Blocks: []SummaryLectureBlock{{
+				Heading: "<i>Введение</i>", StartSeconds: 3725, Time: "1:02:05", Paragraphs: []string{"Сегодня о реках.", "Дельты."},
+			}},
+			UpdatedAt: "2026-10-14T07:01:00Z", PartsDone: 3, Parts: 12, RetryWork: "lectureText",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

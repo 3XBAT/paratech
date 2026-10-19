@@ -85,17 +85,21 @@ type RecordingItem struct {
 	Problem         string `json:"problem"`
 	Stoppable       bool   `json:"stoppable"`
 
-	// Stage: recording, saving, queued, transcribing, summarizing, done or failed.
+	// Stage: recording, saving, queued, transcribing, summarizing, lectureText («Текст лекции…», TASK-090), done or
+	// failed.
 	Stage string `json:"stage"`
-	// Step of a queued or failed chain: "", "transcription" or "summary".
+	// Step of a queued, failed or lectureText chain: "", "transcription", "summary" or "lectureText".
 	Step string `json:"step"`
-	// ProgressPercent of the transcription, 0..100.
+	// ProgressPercent of the transcription or of the lecture text, 0..100.
 	ProgressPercent int `json:"progressPercent"`
+	// PartsDone of Parts of the lecture text are made (step lectureText, «3 из 12»); parts is 0 when unknown.
+	PartsDone int `json:"partsDone"`
+	Parts     int `json:"parts"`
 	// QueueReason of a queued chain: inLine, retry, power, network, quota, serviceNotConfigured (the Hub has no address
 	// or key; action openConnections) or serviceUnavailable (the Hub does not answer; retried automatically).
 	QueueReason string `json:"queueReason"`
-	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed, homeworkFailed or
-	// silentRecording (the track is silent: «Запись без звука», TASK-082).
+	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed, homeworkFailed,
+	// lectureTextFailed (TASK-090) or silentRecording (the track is silent: «Запись без звука», TASK-082).
 	ErrorCode string `json:"errorCode"`
 	// JobError is the last error of the job the stage refers to (failed or retrying); "" otherwise.
 	JobError string `json:"jobError"`
@@ -103,8 +107,9 @@ type RecordingItem struct {
 	// checkSound or retry (RetryPostProcessing with retryWork, «Повторить», TASK-086).
 	Action      string `json:"action"`
 	ActionJobID string `json:"actionJobId"`
-	// RetryWork is the failed post-processing work the row may start again: "summary", "homework" or "". It is set
-	// also when Action is openConnections (the LLM call failed), so «Повторить» can follow a fix of the connection.
+	// RetryWork is the failed post-processing work the row may start again: "summary", "homework", "lectureText" or
+	// "". It is set also when Action is openConnections (the LLM call failed), so «Повторить» can follow a fix of the
+	// connection.
 	RetryWork string `json:"retryWork"`
 	// CanRedoSummary: a summary exists and its job is not pending or running, so RedoSummary («Сделать конспект
 	// заново») may run.
@@ -188,8 +193,9 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 			StartedAt: timeText(r.StartedAt), StoppedAt: timeText(r.StoppedAt),
 			DurationSeconds: int64(r.Duration.Round(time.Second) / time.Second), HasDuration: r.HasDuration,
 			Problem: r.Problem, Stoppable: r.Stoppable,
-			Stage: string(c.Stage), Step: string(c.Step), ProgressPercent: c.Percent, QueueReason: string(c.QueueReason),
-			ErrorCode: string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
+			Stage: string(c.Stage), Step: string(c.Step), ProgressPercent: c.Percent, PartsDone: c.PartsDone, Parts: c.Parts,
+			QueueReason: string(c.QueueReason),
+			ErrorCode:   string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
 			RetryWork: string(c.Retry), CanRedoSummary: c.CanRedoSummary,
 			RemainingSeconds: int64(r.Remaining.Round(time.Second) / time.Second), HasRemaining: r.HasRemaining,
 		})
@@ -298,8 +304,9 @@ func (s *ActivityService) RunJobNow(ctx context.Context, id string) error {
 	return s.actionError("run job now", err)
 }
 
-// RetryPostProcessing starts the failed post-processing work ("summary" or "homework") of recording id again as a
-// new job («Повторить», TASK-086); the transcript is kept. Refused with ErrAlreadyRunning while the work is pending or
+// RetryPostProcessing starts the failed post-processing work ("summary", "homework" or "lectureText") of recording
+// id again as a new job («Повторить», TASK-086); the transcript is kept. "lectureText" also starts the lecture text of
+// a recording processed before it existed (TASK-090). Refused with ErrAlreadyRunning while the work is pending or
 // running and with ErrNothingToRetry when it completed.
 func (s *ActivityService) RetryPostProcessing(ctx context.Context, id, work string) error {
 	rid := shared.RecordingID(id)
@@ -307,7 +314,7 @@ func (s *ActivityService) RetryPostProcessing(ctx context.Context, id, work stri
 		return ErrInvalidID
 	}
 	w := homeworkflow.Work(work)
-	if w != homeworkflow.WorkSummary && w != homeworkflow.WorkHomework {
+	if w != homeworkflow.WorkSummary && w != homeworkflow.WorkHomework && w != homeworkflow.WorkLectureText {
 		return ErrInvalidWork
 	}
 	_, err := s.retrier.Retry(ctx, rid, w)
