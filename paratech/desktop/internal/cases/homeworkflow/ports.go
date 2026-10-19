@@ -249,26 +249,26 @@ type Tx interface {
 }
 
 // LatestTranscripts finds the newest transcript of a recording, whose post-processing the user starts again
-// (TASK-086). Implemented by the sqlite adapter.
+// (PRD section 9, TASK-086). Implemented by the sqlite adapter.
 type LatestTranscripts interface {
-	// LatestByRecording loads the newest transcript of the recording; none wraps shared.ErrNotFound.
+	// LatestByRecording loads the newest transcript of the recording (PRD section 8); none wraps shared.ErrNotFound.
 	LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error)
 }
 
-// PostJobs finds the newest post-processing job of a transcript and creates the one that follows it (TASK-086).
-// Implemented by the sqlite adapter.
+// PostJobs finds the newest post-processing job of a transcript and creates the one that follows it (PRD section 9,
+// TASK-086). Implemented by the sqlite adapter.
 type PostJobs interface {
-	// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix;
-	// none wraps shared.ErrNotFound.
+	// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix
+	// (PRD section 7.2); none wraps shared.ErrNotFound.
 	LatestByKeyPrefix(ctx context.Context, typ job.Type, prefix string) (*job.Job, error)
 
-	// Enqueue stores a new job; for an existing idempotency key it creates nothing and returns the existing job's ID
-	// with created == false.
+	// Enqueue stores a new job (PRD section 7.1); for an existing idempotency key it creates nothing and returns the
+	// existing job's ID with created == false.
 	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
 }
 
 // SummaryReader reads the summary of a transcript (PRD section 9). Implemented by the sqlite adapter.
 type SummaryReader interface {
-	// Get loads a summary; none wraps shared.ErrNotFound.
+	// Get loads a summary (PRD section 9); none wraps shared.ErrNotFound.
 	Get(ctx context.Context, id summary.ID) (*summary.Summary, error)
 }
