@@ -102,7 +102,7 @@ func TestRestoreKeepsTheLessonNames(t *testing.T) {
 	}
 
 	// Stored text is cleaned like new text.
-	st.HintSubject, st.UserTeacher = "Физика‮\nx", "  Иванов  "
+	st.HintSubject, st.UserTeacher = "Физика\u202e\nx", "  Иванов  "
 	got, err = Restore(st)
 	if err != nil {
 		t.Fatal(err)

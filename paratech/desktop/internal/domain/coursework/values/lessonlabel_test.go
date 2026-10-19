@@ -13,13 +13,13 @@ func TestCleanName(t *testing.T) {
 		name, in, want string
 	}{
 		{"plain", "Матанализ", "Матанализ"},
-		{"spaces collapsed", "  Иванов \t И. И.  ", "Иванов И. И."},
+		{"spaces collapsed", "  Иванов \t И.\u00a0И.  ", "Иванов И. И."},
 		{"line breaks", "Физика\r\nSubject: x", "Физика Subject: x"},
-		{"line separator", "a b c", "a b c"},
-		{"bidi and zero width", "ab‮cd​⁦e", "abcde"},
+		{"line separator", "a\u2028b\u2029c", "a b c"},
+		{"bidi and zero width", "ab\u202ecd\u200b\u2066e", "abcde"},
 		{"control", "a\x00b\x1bc", "a b c"},
 		{"invalid utf-8", "a\xffb", "ab"},
-		{"only junk", "‮\r\n", ""},
+		{"only junk", "\u202e\r\n", ""},
 		{"cut", long, strings.Repeat("я", MaxNameRunes)},
 	}
 	for _, tc := range cases {
@@ -55,7 +55,7 @@ func TestNewLessonLabelPrecedence(t *testing.T) {
 		{"correction wins", sched, hints, NewLessonNames("Геометрия", "Сидоров"), "Геометрия", SourceUser, "Сидоров", SourceUser},
 		{"partial correction", sched, hints, NewLessonNames("", "Сидоров"), "Матанализ", SourceSchedule, "Сидоров", SourceUser},
 		{"nothing", ScheduledLesson{}, LessonNames{}, LessonNames{}, "", SourceNone, "", SourceNone},
-		{"blank schedule text is no schedule", ScheduledLesson{Subject: " ‮ "}, hints, LessonNames{}, "Алгебра", SourceTranscript, "Петров", SourceTranscript},
+		{"blank schedule text is no schedule", ScheduledLesson{Subject: " \u202e "}, hints, LessonNames{}, "Алгебра", SourceTranscript, "Петров", SourceTranscript},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,7 +97,7 @@ func TestHomeworkEmailSubject(t *testing.T) {
 		{"subject only", "Матанализ", time.Time{}, "Матанализ: домашнее задание"},
 		{"neither", "", time.Time{}, "Домашнее задание"},
 		{"header injection", "Физика\r\nBcc: evil@example.com", time.Time{}, "Физика Bcc: evil@example.com: домашнее задание"},
-		{"only control characters", "\r\n‮", time.Time{}, "Домашнее задание"},
+		{"only control characters", "\r\n\u202e", time.Time{}, "Домашнее задание"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
