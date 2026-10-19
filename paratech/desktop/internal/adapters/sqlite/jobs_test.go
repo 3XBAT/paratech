@@ -489,11 +489,46 @@ func requireSameJob(t *testing.T, got, want *job.Job) {
 	case got.ID() != want.ID(), got.Type() != want.Type(), got.Status() != want.Status(), got.Key() != want.Key(),
 		got.Payload() != want.Payload(), got.PinnedModelID() != want.PinnedModelID(),
 		got.Attempts() != want.Attempts(), got.MaxAttempts() != want.MaxAttempts(), got.RunNow() != want.RunNow(),
-		g != w, got.LastError() != want.LastError(), got.Version() != want.Version(),
+		g != w, got.LastError() != want.LastError(), got.Cause() != want.Cause(), got.Version() != want.Version(),
 		!got.NextRunAt().Equal(want.NextRunAt()), !got.CreatedAt().Equal(want.CreatedAt()),
 		!got.StartedAt().Equal(want.StartedAt()), !got.FinishedAt().Equal(want.FinishedAt()),
 		!got.UpdatedAt().Equal(want.UpdatedAt()):
 		t.Fatalf("round trip differs:\n got  %+v\n want %+v", got, want)
+	}
+}
+
+// Every job.Cause is accepted by the CHECK of jobs.cause and round-trips through Save; another value is refused
+// (TASK-083).
+func TestAllCausesRoundTrip(t *testing.T) {
+	db := openTest(t, nil)
+	r, ctx := NewJobRepository(db), context.Background()
+	for _, c := range job.Causes() {
+		t.Run("cause "+string(c), func(t *testing.T) {
+			j := jobInStatus(t, job.StatusRunning)
+			if _, created, err := r.Enqueue(ctx, j); err != nil || !created {
+				t.Fatalf("Enqueue: created=%v err=%v", created, err)
+			}
+			if err := j.WaitForCause(job.StatusWaitingForNetwork, c, jobT0.Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Save(ctx, j); err != nil {
+				t.Fatal(err)
+			}
+			got, err := r.Get(ctx, j.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireSameJob(t, got, j)
+			mustExec(t, db, "DELETE FROM jobs WHERE id = '"+string(j.ID())+"'")
+		})
+	}
+
+	j := jobInStatus(t, job.StatusRetryWait)
+	if _, _, err := r.Enqueue(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.ExecContext(ctx, "UPDATE jobs SET cause = 'bogus' WHERE id = ?", string(j.ID())); err == nil {
+		t.Fatal("the CHECK of jobs.cause accepted an unknown cause")
 	}
 }
 
@@ -668,5 +703,40 @@ func TestJobWritesJoinTheOuterTransaction(t *testing.T) {
 	})
 	if !errors.Is(err, sentinel) || countJobs(t, db) != 0 {
 		t.Fatalf("err=%v rows=%d, want rollback", err, countJobs(t, db))
+	}
+}
+
+// Version 10 adds jobs.cause: stored jobs get no cause, and going down removes the column and keeps the rows.
+func TestMigrationToVersion10AddsJobCause(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 9); err != nil {
+		t.Fatalf("up to 9: %v", err)
+	}
+	mustExec(t, db, `INSERT INTO jobs (id, type, status, idempotency_key, max_attempts, next_run_at, created_at, updated_at)
+		VALUES ('j1', 'summarize', 'WAITING_FOR_NETWORK', 'k1', 3, 0, 0, 0)`)
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to 10: %v", err)
+	}
+	if v, err := db.SchemaVersion(ctx); err != nil || v != 10 {
+		t.Fatalf("SchemaVersion = %d, %v; want 10", v, err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs WHERE id = 'j1' AND cause = ''"); n != 1 {
+		t.Fatal("a stored job did not get the empty cause")
+	}
+
+	if _, err := p.DownTo(ctx, 9); err != nil {
+		t.Fatalf("down to 9: %v", err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM pragma_table_info('jobs') WHERE name = 'cause'"); n != 0 {
+		t.Fatal("jobs.cause still exists at version 9")
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM jobs"); n != 1 {
+		t.Fatalf("jobs = %d, want the job kept", n)
 	}
 }

@@ -80,6 +80,7 @@ type Job struct {
 	FinishedAt      sql.NullInt64
 	Version         int64
 	UpdatedAt       int64
+	Cause           string
 }
 
 type Proposal struct {

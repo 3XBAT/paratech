@@ -73,3 +73,34 @@ func TestRechecks(t *testing.T) {
 		}
 	}
 }
+
+func TestCauseOf(t *testing.T) {
+	// The Hub client's "not configured" matches both sentinels so that the job parks like for a network failure.
+	notConfigured := errors.Join(shared.ErrServiceNotConfigured, shared.ErrNetworkUnavailable, ErrTransient)
+	tests := []struct {
+		name       string
+		err        error
+		want       job.Cause
+		wantStatus job.Status // WaitStatus of the same error: unchanged by the cause
+	}{
+		{"nil", nil, job.CauseNone, ""},
+		{"unclassified", errors.New("boom"), job.CauseNone, ""},
+		{"not configured", notConfigured, job.CauseServiceNotConfigured, job.StatusWaitingForNetwork},
+		{"not configured wrapped", fmt.Errorf("summarize: %w", notConfigured), job.CauseServiceNotConfigured, job.StatusWaitingForNetwork},
+		{"network", Transient(shared.ErrNetworkUnavailable), job.CauseNone, job.StatusWaitingForNetwork},
+		{"unavailable", Transient(shared.ErrServiceUnavailable), job.CauseServiceUnavailable, ""},
+		{"refused by the host", errors.Join(shared.ErrNetworkUnavailable, shared.ErrServiceUnavailable, ErrTransient),
+			job.CauseServiceUnavailable, job.StatusWaitingForNetwork},
+		{"quota", shared.ErrQuotaExceeded, job.CauseNone, job.StatusWaitingForQuota},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CauseOf(tc.err); got != tc.want {
+				t.Fatalf("CauseOf(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+			if got, _ := WaitStatus(tc.err); got != tc.wantStatus {
+				t.Fatalf("WaitStatus(%v) = %q, want %q", tc.err, got, tc.wantStatus)
+			}
+		})
+	}
+}

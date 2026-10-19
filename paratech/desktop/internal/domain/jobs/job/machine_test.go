@@ -485,6 +485,11 @@ func TestRestore(t *testing.T) {
 		{"running with finish", with(func(s *State) { s.FinishedAt = t0 }), true},
 		{"retry wait with finish", with(func(s *State) { s.Status = StatusRetryWait; s.FinishedAt = t0 }), true},
 		{"queued never started", with(func(s *State) { s.Status = StatusQueued; s.StartedAt = time.Time{}; s.Attempts = 0 }), false},
+		{"waiting with cause", with(func(s *State) { s.Status = StatusWaitingForNetwork; s.Cause = CauseServiceNotConfigured }), false},
+		{"retry wait with cause", with(func(s *State) { s.Status = StatusRetryWait; s.Cause = CauseServiceUnavailable }), false},
+		{"unknown cause", with(func(s *State) { s.Status = StatusRetryWait; s.Cause = "bogus" }), true},
+		{"running with cause", with(func(s *State) { s.Cause = CauseServiceUnavailable }), true},
+		{"completed with cause", with(func(s *State) { s.Status = StatusCompleted; s.FinishedAt = t0; s.Cause = CauseServiceUnavailable }), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

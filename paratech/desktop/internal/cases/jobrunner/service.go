@@ -684,8 +684,8 @@ func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error,
 		return outcomeWaitingPower, j.WaitFor(job.StatusWaitingForPower, now)
 	case cause == nil && waits:
 		// No network or no quota (PRD sections 7.2 and 9.2): the job waits without using an attempt, and the keeper
-		// tries it again after Config.Rechecks.
-		return outcomeWaiting, j.WaitFor(wait, now)
+		// tries it again after Config.Rechecks. The cause tells a Hub that is not set up from a missing network.
+		return outcomeWaiting, j.WaitForCause(wait, backoff.CauseOf(herr), now)
 	case backoff.Classify(herr) == backoff.ClassPermanent:
 		return outcomeFailed, j.Fail(now, herr.Error())
 	case cause != nil && !errors.Is(cause, errTimeout) && recovery != RecoveryRequeue:
@@ -705,7 +705,7 @@ func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error,
 	if !retry {
 		return outcomeFailed, j.Fail(now, "attempts exhausted: "+msg)
 	}
-	return outcomeRetry, j.Retry(now, now.Add(delay), msg)
+	return outcomeRetry, j.RetryCause(now, now.Add(delay), msg, backoff.CauseOf(herr))
 }
 
 // jitterUnit returns a number in [0, 1) for the backoff; any problem with the source means no jitter.
