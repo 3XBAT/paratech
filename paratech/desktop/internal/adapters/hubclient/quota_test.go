@@ -263,6 +263,11 @@ func TestGetRemainingIsBounded(t *testing.T) {
 		case <-ctx.Done():
 		case <-release:
 		}
+		// Like the real Hub: a handler stopped by the propagated deadline answers deadline_exceeded, and that answer
+		// may reach the client just before the client's own timer fires.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, connect.NewError(connect.CodeDeadlineExceeded, ctx.Err())
+		}
 		return nil, connect.NewError(connect.CodeCanceled, nil)
 	}}, 50*time.Millisecond)
 
