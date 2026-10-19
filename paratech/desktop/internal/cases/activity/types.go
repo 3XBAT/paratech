@@ -12,12 +12,18 @@ import (
 type Recording struct {
 	ID       shared.RecordingID
 	LessonID shared.LessonID // empty for an ad-hoc recording
-	// LessonTitle is the title of the lesson (imported text, shown as plain text only); empty without a lesson or
-	// when the lesson is gone from the schedule.
+	// LessonTitle is the title the recording kept of its lesson at the start (TASK-088), else the title of the lesson in
+	// the schedule (imported text, shown as plain text only); empty without a lesson or when a recording without a
+	// snapshot lost its lesson.
 	LessonTitle string
-	Status      recording.Status
-	StartedAt   time.Time
-	StoppedAt   time.Time // zero while capturing or if unknown
+	// LessonSubject, LessonKind (a short code such as "lecture") and LessonTeacher come from the snapshot kept at the
+	// start; empty if unknown. Imported text, shown as plain text only.
+	LessonSubject string
+	LessonKind    string
+	LessonTeacher string
+	Status        recording.Status
+	StartedAt     time.Time
+	StoppedAt     time.Time // zero while capturing or if unknown
 	// Duration is the length of the final track; HasDuration is false until the recording is COMPLETED.
 	Duration    time.Duration
 	HasDuration bool

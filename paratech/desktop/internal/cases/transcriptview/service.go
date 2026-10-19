@@ -228,8 +228,12 @@ func (s *Service) title(ctx context.Context, rec *recording.Recording) string {
 	return fmt.Sprintf(adHocTitle, rec.StartedAt().In(s.clock.Now().Location()).Format(titleTimeLayout))
 }
 
-// lessonTitle is "" for an ad-hoc recording or a lesson that is gone; a failed read only costs the title.
+// lessonTitle is the title the recording kept at its start (TASK-088), else the title of its lesson in the schedule;
+// "" for an ad-hoc recording or a lesson that is gone. A failed read only costs the title.
 func (s *Service) lessonTitle(ctx context.Context, rec *recording.Recording) string {
+	if t := rec.LessonSnapshot().Title(); t != "" {
+		return t
+	}
 	if rec.LessonID() == "" {
 		return ""
 	}
