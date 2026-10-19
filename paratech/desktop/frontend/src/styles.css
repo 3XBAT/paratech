@@ -87,10 +87,10 @@ html, body, #root { height: 100%; }
 }
 
 /* Модели речи: one row per model (.card.rows pattern): name and size with one muted line, the status, one button and
-   the «⋯» menu, in aligned columns. */
-/* The status column fits the widest chip («По умолчанию», ~125px) and no more, so the name keeps the room for one muted
-   line (~500px for «Large v3 · Нагрузка 5 из 5 · точность самая высокая · русский и др. языки») at 1024px. */
-.mrows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 130px) fit-content(140px) 32px; overflow: visible; }
+   the «⋯» menu, each in its own column. The row is a subgrid with padding and gaps, which reach the parent tracks as
+   extra margins: the status, button and menu tracks are content-sized so those margins widen them instead of pushing
+   the «⋯» button over the main one (a fixed 32px track did). */
+.mrows { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(200px) max-content max-content; overflow: visible; }
 /* The card lets the «⋯» menu out, so a heading on top keeps the rounded corners itself. */
 .mrows > .mgroup-title:first-child { border-radius: calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0; }
 .mrow { display: grid; gap: 4px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
@@ -100,6 +100,11 @@ html, body, #root { height: 100%; }
 .mrow .row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .mrow .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .mrow > .acts { flex-wrap: nowrap; }
+/* One width for «Скачать», «Удалить», «Отменить»: the buttons fill the column of the widest one. */
+.mrow > .acts > .btn { flex: 1 0 auto; min-width: 120px; }
+/* Statuses and progress stay on one line; only an error message may wrap. */
+.mrow .mst, .mrow .mst .chip-text { white-space: nowrap; }
+.mrow .mst .problem { white-space: normal; }
 /* The catalog: filters, groups by language (headings across all columns). */
 .mfilters { display: flex; flex-wrap: wrap; gap: 0 16px; margin-top: 4px; }
 .mfilters .ui-field { min-width: 220px; }
@@ -144,7 +149,7 @@ html, body, #root { height: 100%; }
 /* Narrow (the 800×560 window): the model across the row, then the status, the button and the menu on a second line,
    still in columns shared by every row. */
 @container app (max-width: 880px) {
-  .mrows { grid-template-columns: minmax(0, 1fr) auto 32px; }
+  .mrows { grid-template-columns: minmax(0, 1fr) max-content max-content; }
   .mrow > .row-main { grid-column: 1 / -1; }
 }
 @media (forced-colors: active) {

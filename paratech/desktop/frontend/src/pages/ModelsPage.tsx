@@ -484,7 +484,7 @@ function InstalledRow(props: {
   return (
     <div className="mrow" role="listitem">
       <ModelText row={r} tip={`${r.tip}\nУстановлена ${formatTime(m.installedAt)}`} />
-      <div className="st">
+      <div className="st mst">
         {chip !== null ? (
           <StatusChip kind={chip.kind} icon={chip.icon}>
             {props.badge}
@@ -784,7 +784,7 @@ function CatalogRow(props: {
   return (
     <div className="mrow" role="listitem">
       <ModelText row={r} tip={r.tip} />
-      <div className="st">
+      <div className="st mst">
         <span className="chips">
           {m.installed && (
             <StatusChip kind="neutral" icon="ok">

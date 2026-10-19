@@ -602,11 +602,32 @@ test("the load scale is not colour only and the filters are native selects", () 
   assert.match(page, /<span className="msize muted num">\{r\.size\}<\/span>/, "the size is as large as the name (AC6)");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.mname-text \{[^}]*text-overflow: ellipsis/, "a long name ends with an ellipsis");
-  assert.match(css, /\.mrows \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(110px, 130px\) /, "aligned columns, a narrow status, the name shrinks first");
-  assert.match(css, /@container app \(max-width: 880px\) \{\s*\.mrows \{ grid-template-columns: minmax\(0, 1fr\) auto 32px; \}\s*\.mrow > \.row-main \{ grid-column: 1 \/ -1; \}/,
+  assert.match(css, /\.mrows \{[^}]*grid-template-columns: minmax\(0, 1fr\) fit-content\(200px\) /, "aligned columns, a narrow status, the name shrinks first");
+  assert.match(css, /@container app \(max-width: 880px\) \{\s*\.mrows \{ grid-template-columns: minmax\(0, 1fr\) max-content max-content; \}\s*\.mrow > \.row-main \{ grid-column: 1 \/ -1; \}/,
     "at 800 px the model spans the row, the status and the actions go below in shared columns");
   assert.match(css, /\.mline > \* \{[^}]*white-space: nowrap/, "a part of the muted line never breaks inside");
   assert.match(css, /\.mline > \* \+ \*::before \{ content: "·" \/ "";/, "the dots are not read aloud");
   assert.match(page, /catalogGroups\(v\.available, lang, load, v\.download\)/, "the download row is never filtered out");
 });
 
+test("a model row has four cells: text, status (nowrap), button, «⋯» in its own content-sized column", () => {
+  const page = readFileSync(new URL("../src/pages/ModelsPage.tsx", import.meta.url), "utf8");
+  for (const fn of ["function InstalledRow(", "function CatalogRow("]) {
+    const start = page.indexOf(fn);
+    assert.ok(start > 0, fn);
+    const body = page.slice(start, page.indexOf("\n}\n", start));
+    const row = body.slice(body.indexOf('<div className="mrow" role="listitem">'));
+    // The direct children of the row, in order: each one is a column of the .mrows grid.
+    const cells = [...row.matchAll(/^ {6}<(\w+)(?: className="([^"]*)")?/gm)].map((m) => `${m[1]}${m[2] ? "." + m[2] : ""}`);
+    assert.deepEqual(cells, ["ModelText", "div.st mst", "div.acts", "RowMenu"], fn);
+  }
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const tracks = [...css.matchAll(/\.mrows \{[^}]*grid-template-columns: ([^;]+);/g)].map((m) => m[1]);
+  assert.deepEqual(tracks, [
+    "minmax(0, 1fr) fit-content(200px) max-content max-content",
+    "minmax(0, 1fr) max-content max-content",
+  ]);
+  assert.match(css, /\.mrow \.mst, \.mrow \.mst \.chip-text \{ white-space: nowrap; \}/);
+  assert.match(css, /\.mrow > \.acts > \.btn \{ flex: 1 0 auto; min-width: 120px; \}/);
+  assert.ok(!/\.mmenu[^{]*\{[^}]*position: absolute/.test(css.replace(/\.mmenu-list \{[^}]*\}/, "")), "«⋯» is not an overlay");
+});
