@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { actionErrorText } from "../activityView";
+import { type ActivityApi, activityApi } from "../bindings/activity";
 import { callByName } from "../bindings/runtime";
 import { type SummaryApi, summaryApi, type SummarySaveFormat, type SummaryView } from "../bindings/summary";
 import {
@@ -7,11 +9,14 @@ import {
   nextPollMs,
   noSummaryHint,
   pageTitle,
+  redoTexts,
+  retryAction,
+  retryClick,
   type RetryStep,
 } from "../summaryView";
 import { saveResultText } from "../transcriptView";
 import { Button } from "../ui/Button";
-import { Banner, Card, ResultLine, type ResultKind, Segmented } from "../ui/controls";
+import { Banner, Card, Dialog, ResultLine, type ResultKind, Segmented } from "../ui/controls";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 
 export interface SummaryPageProps {
@@ -19,8 +24,6 @@ export interface SummaryPageProps {
   onBack: () => void;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
-  /** TASK-086: the retry binding; the retry buttons stay hidden while it is undefined. */
-  onRetry?: (recordingId: string, step: RetryStep) => Promise<void>;
 }
 
 // «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found and where
@@ -29,6 +32,7 @@ export interface SummaryPageProps {
 export function SummaryPage(props: SummaryPageProps) {
   const { recordingId: id } = props;
   const api = useMemo(() => summaryApi(callByName), []);
+  const activity = useMemo(() => activityApi(callByName), []);
   const [view, setView] = useState<SummaryView | null>(null);
   const [error, setError] = useState("");
   // A new value starts the polling again (after a retry the steps go on).
@@ -71,8 +75,8 @@ export function SummaryPage(props: SummaryPageProps) {
   }, [api, id, refresh]);
 
   const meta = view ? headerMeta(view) : "";
-  const onRetry = props.onRetry;
-  const retry = onRetry && ((step: RetryStep) => onRetry(id, step).then(() => setRefresh((n) => n + 1)));
+  // After a started retry or redo the steps go on: ask for the view again.
+  const reload = () => setRefresh((n) => n + 1);
 
   return (
     <section className="page tr sm">
@@ -105,7 +109,8 @@ export function SummaryPage(props: SummaryPageProps) {
           view={view}
           onOpenTranscript={props.onOpenTranscript}
           onOpenAssignment={props.onOpenAssignment}
-          onRetry={retry}
+          activity={activity}
+          onStarted={reload}
         />
       )}
     </section>
@@ -122,7 +127,8 @@ function Viewer(props: {
   view: SummaryView;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
-  onRetry?: (step: RetryStep) => Promise<void>;
+  activity: ActivityApi;
+  onStarted: () => void;
 }) {
   const { api, view } = props;
   const id = view.recordingId;
@@ -131,6 +137,7 @@ function Viewer(props: {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
   const [format, setFormat] = useState<SummarySaveFormat>("txt");
+  const [askingRedo, setAskingRedo] = useState(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -175,14 +182,40 @@ function Viewer(props: {
       return r && { kind: r.ok ? "ok" : "fail", text: r.text };
     });
 
-  const onRetry = props.onRetry;
-  const retry =
-    onRetry &&
-    ((step: RetryStep) =>
-      void act(`retry:${step}`, async () => {
-        await onRetry(step);
-        return null;
-      }));
+  // Retry and redo report failures with the recordings screen's texts: they are the activity binding's errors.
+  const start = (step: RetryStep, call: () => Promise<void>) =>
+    act(`retry:${step}`, async () => {
+      let refused: Message | null = null;
+      try {
+        await call();
+      } catch (err) {
+        refused = { kind: "fail", text: actionErrorText(err) };
+      }
+      // Reload on a refusal too: it usually means a run started elsewhere (the row) and the polling has stopped.
+      props.onStarted();
+      return refused;
+    });
+
+  const retry = (step: RetryStep) =>
+    retryClick(view, step, {
+      retry: (work) => void start(work, () => props.activity.retryPostProcessing(id, work)),
+      askRedo: () => setAskingRedo(true),
+    });
+
+  const redo = () => {
+    setAskingRedo(false);
+    void start("summary", () => props.activity.redoSummary(id));
+  };
+
+  // The dialog closes by itself once the summary is no longer one to make again (a new run started meanwhile), and
+  // does not come back on its own when that run is done.
+  const redoOffered = retryAction(view, "summary")?.kind === "redo";
+  useEffect(() => {
+    if (!redoOffered) {
+      setAskingRedo(false);
+    }
+  }, [redoOffered]);
+
   const retrying: RetryStep | "" = busy === "retry:summary" ? "summary" : busy === "retry:homework" ? "homework" : "";
 
   const ready = view.summary.ready;
@@ -241,13 +274,26 @@ function Viewer(props: {
         view={view}
         onRetry={retry}
         retrying={retrying}
+        retryDisabled={!idle}
       />
       <HomeworkCard
         view={view}
         onOpenAssignment={props.onOpenAssignment}
         onRetry={retry}
         retrying={retrying}
+        retryDisabled={!idle}
       />
+      <Dialog
+        open={askingRedo && redoOffered}
+        title={redoTexts.title}
+        confirmLabel={redoTexts.confirm}
+        cancelLabel={redoTexts.cancel}
+        confirmDisabled={!idle}
+        onConfirm={redo}
+        onCancel={() => setAskingRedo(false)}
+      >
+        <p>{redoTexts.body}</p>
+      </Dialog>
     </>
   );
 }

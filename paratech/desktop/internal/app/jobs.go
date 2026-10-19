@@ -19,7 +19,12 @@ const (
 	sttTimeout = 6 * time.Hour
 
 	// llmJobTimeout leaves room for a Hub call that ends at its own request timeout and a retry inside the attempt.
+	// A homework draft makes one call.
 	llmJobTimeout = 5 * hubclient.DefaultRequestTimeout
+
+	// postProcessJobTimeout covers the worst case of a summarize or extract_homework run: AnswerCalls calls, each
+	// with the room of one call.
+	postProcessJobTimeout = homeworkflow.AnswerCalls * llmJobTimeout
 
 	// sendEmailTimeout is above twice the SMTP session timeout: the smtp adapter's deadline covers the session setup
 	// and then the transaction separately. A configured smtp.Config.Timeout must keep this rule.
@@ -68,18 +73,18 @@ func hiddenJobTypes() []job.Type {
 // speech recognition engine the stt type is left out: the runner claims and recovers only registered types, so STT
 // jobs wait QUEUED (their keys stay usable) until the speech component is activated (sttRegistration).
 func registrations(h jobHandlers) []jobrunner.Registration {
-	llm := func(t job.Type, handler jobrunner.Handler) jobrunner.Registration {
+	llm := func(t job.Type, handler jobrunner.Handler, timeout time.Duration) jobrunner.Registration {
 		// Light: they wait on the Hub, not the CPU. Requeue: the LLM call is idempotent by its key.
-		return jobrunner.Registration{Type: t, Handler: handler, Recovery: jobrunner.RecoveryRequeue, Timeout: llmJobTimeout}
+		return jobrunner.Registration{Type: t, Handler: handler, Recovery: jobrunner.RecoveryRequeue, Timeout: timeout}
 	}
 	var regs []jobrunner.Registration
 	if h.stt != nil {
 		regs = append(regs, sttRegistration(h.stt))
 	}
 	return append(regs,
-		llm(homeworkflow.SummarizeJobType, h.postProcess),
-		llm(homeworkflow.ExtractHomeworkJobType, h.postProcess),
-		llm(homeworkflow.HomeworkDraftJobType, h.drafts),
+		llm(homeworkflow.SummarizeJobType, h.postProcess, postProcessJobTimeout),
+		llm(homeworkflow.ExtractHomeworkJobType, h.postProcess, postProcessJobTimeout),
+		llm(homeworkflow.HomeworkDraftJobType, h.drafts, llmJobTimeout),
 		// An external side effect: never Heavy (a flapping power source must not loop it), never rerun blindly.
 		jobrunner.Registration{
 			Type: senddelivery.JobType, Handler: h.delivery, Reconciler: h.delivery, Recovery: jobrunner.RecoveryReconcile,

@@ -54,8 +54,8 @@ const recording = {
   id: "r1", lessonId: "", title: "", subject: "", kind: "", teacher: "",
   status: "RECORDING", startedAt: "2026-10-19T10:00:00Z", stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: true, stage: "recording", step: "", progressPercent: 0,
-  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", remainingSeconds: 0,
-  hasRemaining: false, advice,
+  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "", canRedoSummary: false,
+  remainingSeconds: 0, hasRemaining: false, advice,
 };
 
 // Mirror SourcesView of internal/input/wails/prompt.go.
@@ -103,7 +103,7 @@ test("switchSource and dismissAdvice call the bound methods and check the answer
     ["paratech/desktop/internal/input/wails.ActivityService.SwitchSource", "r1", ""],
     ["paratech/desktop/internal/input/wails.ActivityService.DismissAdvice", "r1"],
   ]);
-  assert.equal(Object.keys(methods).length, 6);
+  assert.equal(Object.keys(methods).length, 8); // +RetryPostProcessing, RedoSummary (TASK-086)
   assert.equal(errorMessages.invalidSource, "invalid source");
 
   for (const problem of ["source_gone", "refused", "failed"]) {

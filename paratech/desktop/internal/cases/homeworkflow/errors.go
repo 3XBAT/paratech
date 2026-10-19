@@ -1,6 +1,10 @@
 package homeworkflow
 
-import "errors"
+import (
+	"errors"
+
+	"paratech/desktop/internal/domain/coursework/values"
+)
 
 // Errors of the homework workflow use case (ARCH-18). Domain errors (proposal.ErrMalformed,
 // proposal.ErrNotConfirmed, proposal.ErrInvalidTransition, ...) are returned wrapped, not translated.
@@ -51,11 +55,16 @@ var (
 
 	// ErrLLM means the LLM call failed. The cause decides: no network or no quota makes the job wait, a permanent
 	// cause fails it, anything else is retried.
-	ErrLLM = errors.New("post-processing: the LLM call failed")
+	ErrLLM = errors.New(values.LLMFailedMessage)
 
-	// ErrInvalidAnswer means the model answer does not match the schema of its operation; nothing is stored. Permanent:
-	// the same request returns the same stored answer from the Hub (idempotency key).
+	// ErrInvalidAnswer means the model answers did not match the schema of the operation, also after the repeats with
+	// a format reminder; nothing is stored. Permanent: a rerun of the job gets the same stored answers from the Hub
+	// (idempotency keys); the user retries with a new job (Rerunner).
 	ErrInvalidAnswer = errors.New("post-processing: the LLM answer does not match the schema")
+
+	// ErrTruncatedAnswer is ErrInvalidAnswer for a last answer that looks cut off at the output limit of the model alias
+	// (the desktop sends no limit of its own); the Hub owner may raise it. Permanent.
+	ErrTruncatedAnswer = errors.New("post-processing: the LLM answer looks cut off at the output limit")
 
 	// ErrStorage means reading or writing local state failed. Retried unless the cause is permanent.
 	ErrStorage = errors.New("post-processing: local storage failed")
@@ -65,6 +74,9 @@ var (
 
 	// ErrEnqueue means the post-processing jobs of a transcript could not be created; the caller retries.
 	ErrEnqueue = errors.New("post-processing: jobs could not be created")
+
+	// ErrUnknownWork means Rerunner.Retry got a work that is not post-processing.
+	ErrUnknownWork = errors.New("post-processing: unknown work")
 )
 
 // Errors of the homework_draft job (Drafts.Handle). They are stored as the job's last error and shown in the UI, so

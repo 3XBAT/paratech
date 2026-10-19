@@ -17,6 +17,11 @@ const (
 	ExtractHomeworkJobType = "extract_homework"
 )
 
+// LLMFailedMessage is the fixed last error of a post-processing job whose LLM call failed: the connection, the Hub
+// key, the quota or the provider. The recordings screen offers the connections page for it and «Повторить» for the
+// other failures (TASK-086); the job may prefix it ("attempts exhausted: ...").
+const LLMFailedMessage = "post-processing: the LLM call failed"
+
 // PostProcessRequest is the payload of a summarize or extract_homework job: the transcript id only. The lesson
 // context and the transcript text are read when the job runs, never copied into the job.
 type PostProcessRequest struct {

@@ -24,6 +24,8 @@ import {
   queueReasonTexts,
   recordingRowView,
   rowAction,
+  retryHints,
+  rowSecondaryAction,
   rowTitle,
   stageLabels,
 } from "../.test-build/recordingRowView.js";
@@ -37,7 +39,7 @@ const suffixedReasons = ["inLine", "retry", "power", "network", "quota"];
 const ownLabelReasons = ["serviceNotConfigured", "serviceUnavailable"];
 const reasons = [...suffixedReasons, ...ownLabelReasons];
 const errorCodes = ["recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"];
-const actions = ["runNow", "openModels", "openConnections", "checkSound"];
+const actions = ["runNow", "openModels", "openConnections", "checkSound", "retry"];
 
 const started = "2026-10-18T17:19:35Z";
 const startMs = Date.parse(started);
@@ -45,8 +47,8 @@ const row = (over = {}) => ({
   id: "r1", lessonId: "l1", title: "Матанализ", subject: "", kind: "", teacher: "",
   status: "COMPLETED", startedAt: started, stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: false, stage: "done", step: "", progressPercent: 0,
-  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", remainingSeconds: 0, hasRemaining: false,
-  advice: null, ...over,
+  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "", canRedoSummary: false,
+  remainingSeconds: 0, hasRemaining: false, advice: null, ...over,
 });
 
 test("every chain code has its own Russian text", () => {
@@ -142,6 +144,37 @@ test("a failed chain names what failed and offers the core's action", () => {
   assert.deepEqual(rowAction(row({ action: "checkSound" })), { kind: "open", page: "diagnostics", label: "Проверить звук" });
   assert.deepEqual(Object.keys(actionPages), ["openModels", "openConnections", "checkSound"]);
   assert.equal(rowAction(row()), null);
+});
+
+test("a failed post-processing offers «Повторить», also next to the connections after an LLM call failure (TASK-086)", () => {
+  const retry = row({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary" });
+  assert.deepEqual(rowAction(retry), { kind: "retry", work: "summary", label: "Повторить" });
+  assert.equal(rowSecondaryAction(retry), null);
+  assert.equal(chainStatusView(retry, 0).hint, `${errorTexts.summaryFailed} ${retryHints.retry}`);
+  assert.ok(!chainStatusView(retry, 0).hint.includes("подключени"), "an unreadable answer is no connection problem");
+  assert.equal(rowAction({ ...retry, retryWork: "" }), null, "no work to retry");
+
+  const llm = row({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" });
+  assert.deepEqual(rowAction(llm), { kind: "open", page: "connections", label: "Открыть подключения" });
+  assert.deepEqual(rowSecondaryAction(llm), { kind: "retry", work: "homework", label: "Повторить" });
+  assert.equal(chainStatusView(llm, 0).hint, `${errorTexts.homeworkFailed} ${retryHints.afterConnections}`);
+  assert.equal(rowSecondaryAction({ ...llm, retryWork: "" }), null);
+  assert.equal(chainStatusView({ ...llm, retryWork: "" }, 0).hint, errorTexts.homeworkFailed);
+
+  // A queued service problem keeps its link only; running or queued work is never retried.
+  assert.equal(rowSecondaryAction(row({ stage: "queued", queueReason: "serviceNotConfigured", action: "openConnections" })), null);
+  assert.equal(recordingRowView(row({ stage: "summarizing" }), 0).secondary, null);
+
+  // The hint names «Повторить» too; ">Повторить<" is the button's label.
+  const html = render(retry, { onRetry: () => undefined });
+  assert.ok(html.includes(">Повторить<"));
+  assert.ok(!html.includes("Открыть подключения"));
+  const both = render(llm, { onRetry: () => undefined });
+  assert.ok(both.includes(">Повторить<"));
+  assert.ok(both.indexOf("Открыть подключения") < both.indexOf(">Повторить<"), "the link first, the retry next to it");
+  assert.ok(render(retry, { onRetry: () => undefined, retrying: true }).includes("disabled"));
+  assert.ok(!render(retry).includes(">Повторить<"), "no retry without onRetry");
+  assert.ok(!render(row({ canRedoSummary: true }), { onRetry: () => undefined }).includes("заново"), "the redo is on the summary screen");
 });
 
 test("the core's notes are shown once each", () => {

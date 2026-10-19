@@ -20,9 +20,11 @@ import { Button } from "../ui/Button.js";
 import { Card, ResultLine, Row } from "../ui/controls.js";
 
 export interface RetryProps {
-  /** Undefined until TASK-086 adds the retry binding: then the buttons show. */
+  /** «Повторить» / «Сделать конспект заново» (TASK-086); without it the buttons stay hidden. */
   onRetry?: (step: RetryStep) => void;
   retrying?: RetryStep | "";
+  /** Another action of the page (copy, save, a start) is running. */
+  retryDisabled?: boolean;
 }
 
 function Line(props: { line: StepLine }) {
@@ -43,7 +45,6 @@ function Line(props: { line: StepLine }) {
   );
 }
 
-// TASK-086: wire «Повторить» / «Сделать конспект заново» to the retry binding (pass onRetry to SummaryPage).
 function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
   const label = retryLabel(props.view, props.step);
   const onRetry = props.onRetry;
@@ -56,7 +57,7 @@ function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
       <Button
         busy={busy}
         busyLabel="Запуск…"
-        disabled={(props.retrying ?? "") !== ""}
+        disabled={props.retryDisabled === true || (props.retrying ?? "") !== ""}
         onClick={() => onRetry(props.step)}
       >
         {label}

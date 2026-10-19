@@ -34,7 +34,7 @@ func TestParseSummaryRejects(t *testing.T) {
 	cases := []struct{ name, text string }{
 		{"empty", ``},
 		{"not json", `The lesson was about vectors.`},
-		{"code fence", "```json\n{\"summary\": \"S\", \"key_points\": []}\n```"},
+		{"array around the object", `[{"summary": "S", "key_points": []}]`},
 		{"array", `[]`},
 		{"null", `null`},
 		{"missing summary", `{"key_points": []}`},
@@ -65,7 +65,8 @@ func TestParseSummaryRejects(t *testing.T) {
 		{"deep nesting", strings.Repeat("[", 1000)},
 		{"nested value too deep", `{"summary": ` + strings.Repeat("[", MaxNesting) + strings.Repeat("]", MaxNesting) + `, "key_points": []}`},
 		{"trailing object", `{"summary": "S", "key_points": []}{"summary": "T", "key_points": []}`},
-		{"trailing text", `{"summary": "S", "key_points": []} and more`},
+		{"trailing text with a brace", `{"summary": "S", "key_points": []} and more}`},
+		{"truncated", `{"summary": "S", "key_points": ["a"`},
 		{"invalid utf8", "{\"summary\": \"\xff\", \"key_points\": []}"},
 		{"oversize", `{"summary": "S", "key_points": []}` + strings.Repeat(" ", MaxOutputBytes)},
 	}
@@ -242,7 +243,7 @@ func TestErrorsDoNotQuoteModelText(t *testing.T) {
 		`{"title": "T", "body": "B", "` + secret + `": 1}`,
 		`{"title": "T", "body": 1, "x": "` + secret + `"}`,
 		`{"title": "` + secret + "\u0007" + `", "body": "B"}`,
-		`{"title": "T", "body": "B"} ` + secret,
+		`{"title": "T", "body": "B"} ` + secret + `}`,
 		`{"title": "T", "body": "` + secret,
 	}
 	for _, a := range answers {
@@ -253,5 +254,112 @@ func TestErrorsDoNotQuoteModelText(t *testing.T) {
 	if _, err := ParseExtraction(out(`{"assignments": [{"title": "T", "description": "D", "due": "`+secret+`"}]}`), lessonStart()); err == nil ||
 		strings.Contains(err.Error(), secret) {
 		t.Fatalf("error %v quotes the answer", err)
+	}
+}
+
+// TASK-086: models behind some gateways wrap the object in a code fence or a sentence; the object is taken out and
+// checked as strictly as before.
+func TestParseSummaryUnwraps(t *testing.T) {
+	const obj = `{"summary": "S {not a brace} \"q\" \\", "key_points": ["a}b"]}`
+	cases := []struct{ name, text string }{
+		{"bare", obj},
+		{"spaces", " \n\t" + obj + "\n "},
+		{"json fence", "```json\n" + obj + "\n```"},
+		{"plain fence", "```\n" + obj + "\n```"},
+		{"fence without a newline", "```json" + obj + "```"},
+		{"prose before", "Here is the JSON:\n" + obj},
+		{"prose after", obj + "\nHope this helps."},
+		{"prose and fence", "Sure!\n```json\n" + obj + "\n```\nDone."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := ParseSummary(out(tc.text))
+			if err != nil {
+				t.Fatalf("ParseSummary: %v", err)
+			}
+			if s.Text() != `S {not a brace} "q" \` || !slices.Equal(s.KeyPoints(), []string{"a}b"}) {
+				t.Fatalf("summary = %q %q", s.Text(), s.KeyPoints())
+			}
+		})
+	}
+
+	// The other operations share the extraction.
+	if _, err := ParseDraft(out("```json\n{\"title\": \"T\", \"body\": \"B\"}\n```")); err != nil {
+		t.Fatalf("ParseDraft in a fence: %v", err)
+	}
+	if _, err := ParseExtraction(out("Result:\n{\"assignments\": []}"), lessonStart()); err != nil {
+		t.Fatalf("ParseExtraction after prose: %v", err)
+	}
+}
+
+// A second object, an array or broken JSON around the object is still an error; an object that never ends is
+// reported as truncated.
+func TestParseSummaryWrappingRejects(t *testing.T) {
+	const obj = `{"summary": "S", "key_points": []}`
+	const evil = `{"summary": "T", "key_points": []}`
+	cases := []struct {
+		name      string
+		text      string
+		truncated bool
+	}{
+		{"second object after", obj + "\n" + evil, false},
+		{"second object before", evil + "\n" + obj, false},
+		{"second object inside the fence", "```json\n" + obj + "\n" + evil + "\n```", false},
+		{"second object after the fence", "```json\n" + obj + "\n```\n" + evil, false},
+		{"second object before the fence", evil + "\n```json\n" + obj + "\n```", false},
+		{"closing brace in the prose before", "Note } here\n" + obj, false},
+		{"bracket in the prose after", obj + " [1]", false},
+		{"array", "[" + obj + "]", false},
+		{"nested object in the prose", "a {b} " + obj, false},
+		{"broken object", `{"summary": "S", "key_points": [}`, false},
+		{"unquoted key", `{summary: "S", "key_points": []}`, false},
+		{"no object", "```json\n```", false},
+		{"cut inside a string", `{"summary": "The lesson was abo`, true},
+		{"cut after a value", `{"summary": "S", "key_points": ["a", "b"`, true},
+		{"cut in a fence", "```json\n{\"summary\": \"S\", \"key", true},
+		{"cut after an escape", `{"summary": "S\`, true},
+		{"only an opening brace", "{", true},
+		{"unbalanced braces", `{"summary": "S", "key_points": [{}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := ParseSummary(out(tc.text))
+			if !errors.Is(err, ErrMalformedOutput) {
+				t.Fatalf("error = %v, want ErrMalformedOutput", err)
+			}
+			if errors.Is(err, ErrTruncatedOutput) != tc.truncated {
+				t.Fatalf("error = %v, truncated = %v", err, tc.truncated)
+			}
+			if s.Text() != "" {
+				t.Fatal("a rejected answer produced a summary")
+			}
+			if got := Shape(out(tc.text)).Truncated; got != tc.truncated {
+				t.Fatalf("Shape.Truncated = %v, want %v", got, tc.truncated)
+			}
+		})
+	}
+
+	// The size limit applies to the whole answer, wrapping included.
+	big := "```json\n" + obj + "\n```" + strings.Repeat(" ", MaxOutputBytes)
+	if _, err := ParseSummary(out(big)); !errors.Is(err, ErrMalformedOutput) {
+		t.Fatalf("oversize wrapped answer: %v", err)
+	}
+}
+
+func TestShape(t *testing.T) {
+	cases := []struct {
+		text string
+		want AnswerShape
+	}{
+		{"", AnswerShape{Bytes: 0, Start: StartEmpty}},
+		{" \n", AnswerShape{Bytes: 2, Start: StartEmpty}},
+		{"```json\n{}\n```", AnswerShape{Bytes: 14, Start: StartFence}},
+		{` {"a": 1}`, AnswerShape{Bytes: 9, Start: StartObject}},
+		{`Sure: {"a": "b`, AnswerShape{Bytes: 14, Start: StartText, Truncated: true}},
+	}
+	for _, tc := range cases {
+		if got := Shape(out(tc.text)); got != tc.want {
+			t.Errorf("Shape(%q) = %+v, want %+v", tc.text, got, tc.want)
+		}
 	}
 }

@@ -160,19 +160,56 @@ export function assignmentMeta(a: Pick<SummaryAssignment, "due" | "userEdited">)
 /** Which step a retry is for (TASK-086). */
 export type RetryStep = "summary" | "homework";
 
+/** What the retry button of a step does: start the failed work again, or make a done summary again (asks first). */
+export type RetryAction = { kind: "retry"; work: RetryStep } | { kind: "redo" };
+
 /**
- * The label of the retry button of a step, or null when it offers none: a failed step «Повторить», a ready summary
- * «Сделать конспект заново». The button shows only once TASK-086 passes the handler.
+ * The action of a step's retry button, or null when it offers none: a failed step is retried, a ready summary may be
+ * made again. A waiting or running step offers nothing.
  */
-export function retryLabel(v: SummaryView, step: RetryStep): string | null {
+export function retryAction(v: SummaryView, step: RetryStep): RetryAction | null {
   if (step === "homework") {
-    return v.homework.state === "failed" ? "Повторить" : null;
+    return v.homework.state === "failed" ? { kind: "retry", work: "homework" } : null;
   }
   if (v.summary.state === "failed") {
-    return "Повторить";
+    return { kind: "retry", work: "summary" };
   }
-  return v.summary.state === "done" && v.summary.ready ? "Сделать конспект заново" : null;
+  return v.summary.state === "done" && v.summary.ready ? { kind: "redo" } : null;
 }
+
+/** The label of the retry button of a step, or null when it offers none. */
+export function retryLabel(v: SummaryView, step: RetryStep): string | null {
+  const a = retryAction(v, step);
+  if (a === null) {
+    return null;
+  }
+  return a.kind === "redo" ? "Сделать конспект заново" : "Повторить";
+}
+
+/** A click on a step's retry button: a retry starts at once, a redo only opens the confirmation (it spends quota). */
+export function retryClick(
+  v: SummaryView,
+  step: RetryStep,
+  on: { retry: (work: RetryStep) => void; askRedo: () => void },
+): void {
+  const a = retryAction(v, step);
+  if (a === null) {
+    return;
+  }
+  if (a.kind === "redo") {
+    on.askRedo();
+  } else {
+    on.retry(a.work);
+  }
+}
+
+/** The confirmation of «Сделать конспект заново». */
+export const redoTexts = {
+  title: "Сделать конспект заново?",
+  body: "Модель прочитает расшифровку ещё раз, это расходует квоту. Текущий конспект останется, пока не будет готов новый.",
+  confirm: "Сделать заново",
+  cancel: "Отмена",
+} as const;
 
 export const noSummaryHint = "Конспекта пока нет: копировать и сохранять нечего.";
 

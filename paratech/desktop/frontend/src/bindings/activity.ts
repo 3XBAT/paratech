@@ -26,8 +26,13 @@ export type ChainErrorCode =
   | "homeworkFailed"
   /** The track is silent (TASK-082): «Запись без звука» with checkSound. */
   | "silentRecording";
-/** What the row offers besides Stop; runNow calls runJobNow(actionJobId). */
-export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound";
+/**
+ * What the row offers besides Stop; runNow calls runJobNow(actionJobId), retry calls retryPostProcessing(id,
+ * retryWork) (TASK-086).
+ */
+export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound" | "retry";
+/** The failed post-processing work the row may start again (TASK-086); "" for none. */
+export type RetryWork = "" | "summary" | "homework";
 
 /** One recording with the status of its whole chain, newest first. Times are RFC 3339 in UTC, "" when unknown. */
 export interface RecordingItem {
@@ -58,6 +63,10 @@ export interface RecordingItem {
   jobError: string;
   action: ChainAction;
   actionJobId: string;
+  /** Work «Повторить» starts again; set also with openConnections, so the retry can follow a fixed connection. */
+  retryWork: RetryWork;
+  /** A summary exists and is not being made: «Сделать конспект заново» may run (TASK-086). */
+  canRedoSummary: boolean;
   /** Approximate time left of a queued or running transcription («≈ N мин осталось», TASK-084). */
   remainingSeconds: number;
   /** false: no time left to show. */
@@ -118,6 +127,8 @@ export const methods = {
   runJobNow: "paratech/desktop/internal/input/wails.ActivityService.RunJobNow",
   switchSource: "paratech/desktop/internal/input/wails.ActivityService.SwitchSource",
   dismissAdvice: "paratech/desktop/internal/input/wails.ActivityService.DismissAdvice",
+  retryPostProcessing: "paratech/desktop/internal/input/wails.ActivityService.RetryPostProcessing",
+  redoSummary: "paratech/desktop/internal/input/wails.ActivityService.RedoSummary",
 } as const;
 
 /** Messages of the errors the Go binding returns (checked by a Go test); the page may match them. */
@@ -129,6 +140,9 @@ export const errorMessages = {
   cannotRunNow: "the job cannot be run now",
   actionFailed: "the action failed",
   invalidSource: "invalid source",
+  invalidWork: "invalid work",
+  alreadyRunning: "the work is already running",
+  nothingToRetry: "nothing to retry",
 } as const;
 
 function record(raw: unknown, what: string): Record<string, unknown> {
@@ -196,7 +210,8 @@ const errorCodes = [
   "silentRecording",
 ] as const;
 const switchProblems = ["", "source_gone", "refused", "failed"] as const;
-const actions = ["", "runNow", "openModels", "openConnections", "checkSound"] as const;
+const actions = ["", "runNow", "openModels", "openConnections", "checkSound", "retry"] as const;
+const retryWorks = ["", "summary", "homework"] as const;
 
 function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {
   if (!Array.isArray(raw)) {
@@ -260,6 +275,8 @@ export function parseRecording(raw: unknown): RecordingItem {
     jobError: str(r, "jobError", w),
     action: oneOf(r, "action", w, actions),
     actionJobId: str(r, "actionJobId", w),
+    retryWork: oneOf(r, "retryWork", w, retryWorks),
+    canRedoSummary: bool(r, "canRedoSummary", w),
     remainingSeconds: num(r, "remainingSeconds", w),
     hasRemaining: bool(r, "hasRemaining", w),
     advice: r.advice === null ? null : parseAdvice(r.advice),
@@ -295,6 +312,10 @@ export interface ActivityApi {
   switchSource(recordingId: string, app: string): Promise<SourceSwitch>;
   /** Hides the advice of the running recording until it changes («Оставить»). */
   dismissAdvice(recordingId: string): Promise<void>;
+  /** Starts the failed post-processing work of the recording again as a new job («Повторить», TASK-086). */
+  retryPostProcessing(recordingId: string, work: Exclude<RetryWork, "">): Promise<void>;
+  /** Makes the summary of the recording again («Сделать конспект заново», TASK-086); spends quota, ask first. */
+  redoSummary(recordingId: string): Promise<void>;
 }
 
 /** Builds the recordings and jobs API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -311,6 +332,12 @@ export function activityApi(call: CallByName): ActivityApi {
     switchSource: async (recordingId, app) => parseSourceSwitch(await call(methods.switchSource, recordingId, app)),
     dismissAdvice: async (recordingId) => {
       await call(methods.dismissAdvice, recordingId);
+    },
+    retryPostProcessing: async (recordingId, work) => {
+      await call(methods.retryPostProcessing, recordingId, work);
+    },
+    redoSummary: async (recordingId) => {
+      await call(methods.redoSummary, recordingId);
     },
   };
 }

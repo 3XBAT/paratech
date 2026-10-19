@@ -88,7 +88,7 @@ func TestOpenCoreListsActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if core.Activity == nil || core.Stopper == nil || core.Forcer == nil {
+	if core.Activity == nil || core.Stopper == nil || core.Forcer == nil || core.Retrier == nil {
 		t.Fatalf("core = %+v: want the activity use case and both actions", core)
 	}
 	if core.Stopper != a.core.recordings || core.Forcer != a.core.runner {

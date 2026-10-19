@@ -20,6 +20,9 @@ import {
   nextPollMs,
   pageTitle,
   pollMs,
+  redoTexts,
+  retryAction,
+  retryClick,
   retryLabel,
   rowSummaryOffer,
   showsEarlier,
@@ -248,7 +251,7 @@ test("model text renders as text only: no HTML, no links, line breaks kept as te
   assert.ok(summary.includes("<p>абзац</p>"));
   assert.ok(summary.includes("<li>&lt;img"), "key points are list items");
   assert.ok(!summary.includes("href"));
-  assert.ok(!summary.includes("Повторить") && !summary.includes("Сделать конспект заново"), "no retry button without TASK-086");
+  assert.ok(!summary.includes("Повторить") && !summary.includes("Сделать конспект заново"), "no retry button without a handler");
 
   const opened = [];
   const homework = renderToStaticMarkup(h(HomeworkCard, { view: v, onOpenAssignment: (id) => opened.push(id) }));
@@ -273,6 +276,66 @@ test("the states show, and the retry buttons appear only with a handler", () => 
 
   const rerun = renderToStaticMarkup(h(SummaryCard, { view: view({ summary: step("waiting", { message: "Конспект ждёт очереди." }) }) }));
   assert.ok(rerun.includes("Конспект ждёт очереди.") && rerun.includes(earlierNote) && rerun.includes("Первый абзац."), rerun);
+});
+
+test("a failed step is retried at once, a ready summary is made again only after the confirmation, a running one offers nothing", () => {
+  const failed = view({
+    summary: { ...step("failed"), ready: false },
+    homework: { ...step("failed"), assignments: [] },
+  });
+  assert.deepEqual(retryAction(failed, "summary"), { kind: "retry", work: "summary" });
+  assert.deepEqual(retryAction(failed, "homework"), { kind: "retry", work: "homework" });
+  assert.deepEqual(retryAction(view(), "summary"), { kind: "redo" });
+  for (const state of ["waiting", "running"]) {
+    const going = view({ summary: step(state), homework: { ...step(state), assignments: [] } });
+    assert.equal(retryAction(going, "summary"), null, state);
+    assert.equal(retryAction(going, "homework"), null, state);
+    assert.equal(renderToStaticMarkup(h(SummaryCard, { view: going, onRetry: () => undefined })).includes("<button"), false, state);
+  }
+
+  const clicks = (v, s) => {
+    const calls = [];
+    retryClick(v, s, { retry: (work) => calls.push(`retry:${work}`), askRedo: () => calls.push("ask") });
+    return calls;
+  };
+  assert.deepEqual(clicks(failed, "summary"), ["retry:summary"]);
+  assert.deepEqual(clicks(failed, "homework"), ["retry:homework"]);
+  assert.deepEqual(clicks(view(), "summary"), ["ask"], "a redo spends quota: the click only asks");
+  assert.deepEqual(clicks(view({ summary: step("running") }), "summary"), []);
+  assert.deepEqual(clicks(view(), "homework"), []);
+
+  assert.match(redoTexts.body, /квоту/);
+  assert.match(redoTexts.body, /Текущий конспект останется/);
+  const redo = renderToStaticMarkup(h(SummaryCard, { view: view(), onRetry: () => undefined }));
+  assert.ok(redo.includes("Сделать конспект заново"), redo);
+  const idle = renderToStaticMarkup(h(SummaryCard, { view: failed, onRetry: () => undefined }));
+  assert.ok(!idle.includes("disabled"), idle);
+  for (const card of [SummaryCard, HomeworkCard]) {
+    const busy = renderToStaticMarkup(
+      h(card, { view: failed, onRetry: () => undefined, retryDisabled: true, onOpenAssignment: () => undefined }),
+    );
+    assert.ok(busy.includes("Повторить") && busy.includes("disabled"), "no start while copy or save runs: " + busy);
+  }
+});
+
+test("the page retries through the activity binding and redoes the summary only from the dialog's confirm", () => {
+  const page = src("pages/SummaryPage.tsx");
+  assert.match(page, /activityApi\(callByName\)/);
+  assert.match(page, /retryClick\(view, step,/);
+  assert.match(page, /props\.activity\.retryPostProcessing\(id, work\)/);
+  assert.equal(page.split("redoSummary(").length - 1, 1, "one call site of redoSummary");
+  const redo = page.slice(page.indexOf("const redo = () =>"), page.indexOf("};", page.indexOf("const redo = () =>")));
+  assert.match(redo, /props\.activity\.redoSummary\(id\)/, "the call site is the confirm handler");
+  assert.match(page, /onConfirm=\{redo\}/);
+  assert.match(page, /onCancel=\{\(\) => setAskingRedo\(false\)\}/, "cancel only closes the dialog");
+  assert.match(page, /open=\{askingRedo && redoOffered\}/, "no dialog once a new run started");
+  assert.match(page, /actionErrorText\(err\)/);
+  const start = page.slice(page.indexOf("const start = "), page.indexOf("const retry = "));
+  assert.equal(start.split("props.onStarted()").length - 1, 1, "one reload");
+  assert.ok(start.indexOf("props.onStarted()") > start.indexOf("catch (err)"), "a refused start reloads too");
+  assert.match(start, /return refused;/, "the refusal stays visible after the reload");
+  assert.match(page, /retryDisabled=\{!idle\}/);
+  assert.ok(!page.includes("window.confirm"));
 });
 
 // Source guards: read the TypeScript sources, not the build.

@@ -247,7 +247,8 @@ func ParseDraft(out values.UntrustedOutput) (Draft, error) {
 	return Draft{title: title, body: body}, nil
 }
 
-// decode reads exactly one JSON object of at most MaxOutputBytes into v. Beyond DisallowUnknownFields it requires
+// decode reads exactly one JSON object of at most MaxOutputBytes into v, after extractObject removed the wrapping
+// some models add. Beyond DisallowUnknownFields it requires
 // object keys to be exactly one of names (encoding/json matches keys case-insensitively) and unique (it keeps the
 // last duplicate, which would hide text from whoever reads the first).
 func decode(out values.UntrustedOutput, v any, names ...string) error {
@@ -257,6 +258,10 @@ func decode(out values.UntrustedOutput, v any, names ...string) error {
 	}
 	if !utf8.ValidString(text) {
 		return malformed("output is not valid UTF-8")
+	}
+	text, err := extractObject(text)
+	if err != nil {
+		return err
 	}
 	if err := checkKeys(text, names); err != nil {
 		return err
@@ -272,6 +277,89 @@ func decode(out values.UntrustedOutput, v any, names ...string) error {
 		return malformed("trailing data after the JSON object")
 	}
 	return nil
+}
+
+// Shapes of the start of an answer, for the log (Shape).
+const (
+	StartEmpty  = "empty"  // nothing but whitespace
+	StartFence  = "fence"  // a Markdown code fence
+	StartObject = "object" // the JSON object itself
+	StartText   = "text"   // anything else, for example prose
+)
+
+// AnswerShape describes an answer without its content, so that a rejected answer can be diagnosed from the log
+// without leaking lecture text.
+type AnswerShape struct {
+	Bytes     int
+	Start     string // StartEmpty, StartFence, StartObject or StartText
+	Truncated bool   // a JSON object starts but never ends
+}
+
+// Shape returns the shape of an answer.
+func Shape(out values.UntrustedOutput) AnswerShape {
+	text := out.Unvalidated()
+	s := AnswerShape{Bytes: len(text)}
+	trimmed := strings.TrimSpace(text)
+	switch {
+	case trimmed == "":
+		s.Start = StartEmpty
+	case strings.HasPrefix(trimmed, "```"):
+		s.Start = StartFence
+	case trimmed[0] == '{':
+		s.Start = StartObject
+	default:
+		s.Start = StartText
+	}
+	if len(text) <= MaxOutputBytes {
+		_, err := extractObject(text)
+		s.Truncated = errors.Is(err, ErrTruncatedOutput)
+	}
+	return s
+}
+
+// extractObject returns the one JSON object of an answer without the wrapping some models add despite the
+// instructions: a Markdown code fence or a sentence before or after it. The object runs from the first '{' to its
+// matching '}' (a scan that skips JSON strings). The text around it may hold no brace or bracket, so a second object
+// or an array cannot hide there. An answer without '{' is returned as it is, for the strict checks to reject. An
+// object that never ends wraps ErrTruncatedOutput: the answer was most likely cut at the output limit.
+func extractObject(text string) (string, error) {
+	start := strings.IndexByte(text, '{')
+	if start < 0 {
+		return text, nil
+	}
+	if strings.ContainsAny(text[:start], "}[]") {
+		return "", malformed("data before the JSON object")
+	}
+
+	end := -1
+	depth, inString, escaped := 0, false, false
+	for i := start; i < len(text) && end < 0; i++ {
+		c := text[i]
+		switch {
+		case inString && escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case inString:
+			inString = c != '"'
+		case c == '"':
+			inString = true
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				end = i + 1
+			}
+		}
+	}
+	if end < 0 {
+		return "", fmt.Errorf("%w: %w: the JSON object does not end", ErrMalformedOutput, ErrTruncatedOutput)
+	}
+	if strings.ContainsAny(text[end:], "{}[]") {
+		return "", malformed("trailing data after the JSON object")
+	}
+	return text[start:end], nil
 }
 
 // checkKeys walks the tokens of text and rejects an object key that is not exactly one of names or repeats within
