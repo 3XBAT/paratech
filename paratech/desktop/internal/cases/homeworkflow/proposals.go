@@ -56,7 +56,41 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 	if err := s.tx.Do(ctx, func(ctx context.Context) error { return s.proposals.Save(ctx, p) }); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
-	return viewOf(p), nil
+	view, err := s.proposalView(ctx, p)
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
+	}
+	return view, nil
+}
+
+// proposalView is the view of p with the email subject of a validated send, for the confirmation dialog: the same
+// subject Execute sends (emailSubject).
+func (s *Service) proposalView(ctx context.Context, p *proposal.Proposal) (ProposalView, error) {
+	v := viewOf(p)
+	if p.Kind() != proposal.KindSendHomework || p.Status() != proposal.StatusValidated {
+		return v, nil
+	}
+	var err error
+	v.Subject, err = s.emailSubject(ctx, p.AssignmentID())
+	return v, err
+}
+
+// emailSubject is the subject of the homework email of assignment id: its subject (correction, schedule or hint) and
+// its deadline in the student's zone (values.HomeworkEmailSubject).
+func (s *Service) emailSubject(ctx context.Context, id shared.AssignmentID) (string, error) {
+	a, err := s.assignments.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	l, err := s.lessons.label(ctx, a)
+	if err != nil {
+		return "", err
+	}
+	due := a.Details().Due()
+	if !due.IsZero() {
+		due = due.In(s.clock.Now().Location())
+	}
+	return values.HomeworkEmailSubject(l.Subject(), due), nil
 }
 
 // sendRequest is the canonical send_homework_email object: the only field the wire allows for the kind.
@@ -141,7 +175,11 @@ func (s *Service) Get(ctx context.Context, id proposal.ID) (ProposalView, error)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opGet, err)
 	}
-	return viewOf(p), nil
+	view, err := s.proposalView(ctx, p)
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opGet, err)
+	}
+	return view, nil
 }
 
 // Confirm records the explicit user approval of a VALIDATED proposal (AC-14). Only the UI calls it, on a user action;
@@ -260,11 +298,19 @@ func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, er
 }
 
 // perform obtains the command from the proposal (which refuses unless CONFIRMED) and hands it to the port of its kind.
+// The email subject and the lesson of a deadline event come from trusted local state and the cleaned hints (TASK-092).
 func (s *Service) perform(ctx context.Context, p *proposal.Proposal) error {
 	switch p.Kind() {
 	case proposal.KindSendHomework:
 		cmd, err := p.EmailCommand()
 		if err != nil {
+			return err
+		}
+		subject, err := s.emailSubject(ctx, p.AssignmentID())
+		if err != nil {
+			return err
+		}
+		if cmd, err = cmd.WithSubject(subject); err != nil {
 			return err
 		}
 		return s.mailer.SendHomework(ctx, cmd)
@@ -279,7 +325,15 @@ func (s *Service) perform(ctx context.Context, p *proposal.Proposal) error {
 		if err != nil {
 			return err
 		}
-		return s.calendar.UpsertDeadline(ctx, cmd)
+		a, err := s.assignments.Get(ctx, p.AssignmentID())
+		if err != nil {
+			return err
+		}
+		l, err := s.lessons.label(ctx, a)
+		if err != nil {
+			return err
+		}
+		return s.calendar.UpsertDeadline(ctx, cmd.WithLesson(l))
 	}
 	return fmt.Errorf("%w: %s", ErrUnsupportedKind, p.Kind())
 }

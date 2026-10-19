@@ -57,7 +57,7 @@ type Drafts struct {
 	assignments AssignmentRepository
 	drafts      DraftRepository
 	summaries   SummaryRepository
-	lessons     LessonReader
+	lessons     lessonFinder
 	artifacts   ArtifactStore
 	jobs        JobEnqueuer
 	jobReader   JobReader
@@ -74,7 +74,7 @@ type Drafts struct {
 
 // NewDrafts checks the ports, the model alias and the limits.
 func NewDrafts(d DraftDeps) (*Drafts, error) {
-	if d.LLM == nil || d.Assignments == nil || d.Drafts == nil || d.Summaries == nil || d.Lessons == nil ||
+	if d.LLM == nil || d.Assignments == nil || d.Recordings == nil || d.Drafts == nil || d.Summaries == nil || d.Lessons == nil ||
 		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Deliveries == nil || d.Clock == nil || d.IDs == nil ||
 		d.Tx == nil {
 		return nil, fmt.Errorf("%w: every draft port is required", ErrInvalidConfig)
@@ -90,7 +90,8 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 		return nil, fmt.Errorf("%w: generate retries %d, want 0-%d", ErrInvalidConfig, d.GenerateRetries, MaxGenerateRetries)
 	}
 	s := &Drafts{
-		llm: d.LLM, assignments: d.Assignments, drafts: d.Drafts, summaries: d.Summaries, lessons: d.Lessons,
+		llm: d.LLM, assignments: d.Assignments, drafts: d.Drafts, summaries: d.Summaries,
+		lessons:   lessonFinder{recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock},
 		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, deliveries: d.Deliveries, clock: d.Clock, ids: d.IDs,
 		tx: d.Tx, log: d.Log,
 		modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts, generateRetries: d.GenerateRetries,
@@ -406,7 +407,8 @@ func (s *Drafts) Handle(ctx context.Context, snap job.Snapshot, report func(ctx 
 	})
 }
 
-// material gathers what the generation may send: the lesson title and summary are optional context.
+// material gathers what the generation may send: the lesson title, subject, teacher and summary are optional context.
+// The lesson is the one the recording kept (TASK-088), the live schedule only without a snapshot.
 func (s *Drafts) material(ctx context.Context, snap job.Snapshot, a *assignment.Assignment, d *homeworkdraft.Draft,
 	req values.DraftRequest) (contextselection.Material, error) {
 	details := a.Details()
@@ -418,15 +420,14 @@ func (s *Drafts) material(ctx context.Context, snap job.Snapshot, a *assignment.
 		m.PreviousDraft = base.Body()
 	}
 
-	if a.LessonID() != "" {
-		l, err := s.lessons.Get(ctx, a.LessonID())
-		switch {
-		case err == nil:
-			m.Lesson.Title = l.Content().Title
-		case !errors.Is(err, shared.ErrNotFound): // a lesson that left the schedule is no context
-			return contextselection.Material{}, s.retry(snap, stepLesson, ErrDraftStorage, err)
-		}
+	l, err := s.lessons.find(ctx, a)
+	if err != nil {
+		return contextselection.Material{}, s.retry(snap, stepLesson, ErrDraftStorage, err)
 	}
+	// A snapshot title is bounded in bytes, the context in characters: cut, never refuse.
+	m.Lesson.Title = values.CleanName(l.title)
+	label := values.NewLessonLabel(l.sched, a.Hints(), a.Correction())
+	m.Lesson.Subject, m.Lesson.Teacher = label.Subject(), label.Teacher()
 	if a.TranscriptID() != "" {
 		sum, err := s.summaries.Get(ctx, summary.IDOf(a.TranscriptID()))
 		switch {

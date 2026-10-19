@@ -99,7 +99,7 @@ func TestListAssignmentsIsBoundedAndWrapsErrors(t *testing.T) {
 	svc, err := New(Deps{
 		Proposals: proposalRepo{e.store}, Assignments: assignmentRepo{e.store}, AssignmentList: failingList{&limits},
 		Artifacts: e.files, Recipients: recipients{e.store}, Mailer: e.mailer, Exporter: e.exporter, Calendar: e.calendar,
-		Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
+		Recordings: noRecordings{}, Lessons: noLessons{}, Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
 	})
 	if err != nil {
 		t.Fatal(err)

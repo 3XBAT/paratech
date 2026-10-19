@@ -104,6 +104,14 @@ type RecordingReader interface {
 	Get(ctx context.Context, id shared.RecordingID) (*recording.Recording, error)
 }
 
+// TranscriptRecordings finds the recording an assignment's transcript was made from, for the lesson it kept at the start
+// (TASK-088): subject, kind, teacher and date of the assignment (TASK-092). Implemented by the sqlite adapter.
+type TranscriptRecordings interface {
+	// RecordingOf loads the recording transcript t was made from; a missing transcript or recording wraps
+	// shared.ErrNotFound.
+	RecordingOf(ctx context.Context, t shared.TranscriptID) (*recording.Recording, error)
+}
+
 // LessonReader gives read access to the schedule entry of a recording: its title and start are the minimal lesson
 // context of an LLM operation (PRD sections 9.1 and 11). Implemented by the sqlite adapter.
 type LessonReader interface {

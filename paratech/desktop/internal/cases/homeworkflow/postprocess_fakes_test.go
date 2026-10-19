@@ -102,6 +102,17 @@ func (r ppRecordings) Get(_ context.Context, id shared.RecordingID) (*recording.
 	return rec, nil
 }
 
+// ppTranscriptRecordings joins a transcript to its recording, like the sqlite adapter.
+type ppTranscriptRecordings struct{ s *ppStore }
+
+func (r ppTranscriptRecordings) RecordingOf(ctx context.Context, t shared.TranscriptID) (*recording.Recording, error) {
+	tr, err := ppTranscripts(r).Get(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return ppRecordings(r).Get(ctx, tr.RecordingID())
+}
+
 type ppLessons struct{ s *ppStore }
 
 func (r ppLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, error) {
@@ -426,6 +437,7 @@ func (e *ppEnv) handle(snap job.Snapshot) error {
 var (
 	_ TranscriptReader     = ppTranscripts{}
 	_ RecordingReader      = ppRecordings{}
+	_ TranscriptRecordings = ppTranscriptRecordings{}
 	_ LessonReader         = ppLessons{}
 	_ SummaryRepository    = ppSummaries{}
 	_ AssignmentRepository = ppAssignments{}
