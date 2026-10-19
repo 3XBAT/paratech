@@ -156,9 +156,14 @@ func (s *Service) newDelivery(ctx context.Context, cmd proposal.EmailCommand) (*
 		return nil, fmt.Errorf("%w: %w", proposal.ErrStale, delivery.ErrAttachmentChanged)
 	}
 
+	// The core builds the subject per assignment (TASK-092); the configured one is the fallback.
+	subject := cmd.Subject()
+	if subject == "" {
+		subject = s.subject
+	}
 	return delivery.New(delivery.Spec{
 		ID: s.ids.NewDeliveryID(), AssignmentID: cmd.AssignmentID(), Recipient: cmd.Recipient().Address(),
-		Subject: s.subject, Attachment: att, MessageID: s.ids.NewMessageID(), Key: cmd.IdempotencyKey(),
+		Subject: subject, Attachment: att, MessageID: s.ids.NewMessageID(), Key: cmd.IdempotencyKey(),
 		ConfirmedAt: cmd.ConfirmedAt(),
 	}, s.clock.Now())
 }
@@ -263,7 +268,8 @@ func (s *Service) ListForAssignment(ctx context.Context, a shared.AssignmentID) 
 	return out, nil
 }
 
-// Subject returns the subject of a homework email, for the confirmation dialog: the core sets it, never the model.
+// Subject returns the default subject of a homework email, used when the command carries none: the core sets it,
+// never the model.
 func (s *Service) Subject() string { return s.subject }
 
 // MarkSent records the user's decision that an UNKNOWN delivery was sent, after checking the mailbox
