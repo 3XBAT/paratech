@@ -1,6 +1,7 @@
 # Local development infrastructure of the Hub. Not a production deployment.
 #
 #   docker compose -f hub/docker-compose.yml up -d --wait postgres      # database only (run from paratech/)
+#   (Windows may reserve 55432 for Hyper-V/WSL: set HUB_PG_PORT, e.g. 15432, and use that port in the URLs below)
 #   HUB_DATABASE_URL=postgres://hub:hub-dev-only@127.0.0.1:55432/hub?sslmode=disable go run ./hub/cmd/hub
 #   HUB_TEST_DATABASE_URL=<same URL> go test -race ./hub/...           # DB tests use their own schema each
 #   docker compose -f hub/docker-compose.yml --profile hub up -d --build # also the Hub container, on 127.0.0.1:58080
@@ -18,7 +19,7 @@ services:
       POSTGRES_PASSWORD: hub-dev-only
       POSTGRES_DB: hub
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${HUB_PG_PORT:-55432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hub -d hub"]
       interval: 2s
