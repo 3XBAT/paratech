@@ -70,6 +70,9 @@ var (
 
 	// ErrEnqueue means the post-processing jobs of a transcript could not be created; the caller retries.
 	ErrEnqueue = errors.New("post-processing: jobs could not be created")
+
+	// ErrUnknownWork means Rerunner.Retry got a work that is not post-processing.
+	ErrUnknownWork = errors.New("post-processing: unknown work")
 )
 
 // Errors of the homework_draft job (Drafts.Handle). They are stored as the job's last error and shown in the UI, so

@@ -74,6 +74,22 @@ func (r ppTranscripts) Get(_ context.Context, id shared.TranscriptID) (*transcri
 	return t, nil
 }
 
+// LatestByRecording returns the transcript of rec with the newest creation time.
+func (r ppTranscripts) LatestByRecording(_ context.Context, rec shared.RecordingID) (*transcript.Transcript, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out *transcript.Transcript
+	for _, t := range r.s.transcripts {
+		if t.RecordingID() == rec && (out == nil || t.CreatedAt().After(out.CreatedAt())) {
+			out = t
+		}
+	}
+	if out == nil {
+		return nil, fmt.Errorf("transcript of %s: %w", rec, shared.ErrNotFound)
+	}
+	return out, nil
+}
+
 type ppRecordings struct{ s *ppStore }
 
 func (r ppRecordings) Get(_ context.Context, id shared.RecordingID) (*recording.Recording, error) {
@@ -246,6 +262,25 @@ func (r ppJobs) Get(_ context.Context, id shared.JobID) (*job.Job, error) {
 	return nil, fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
 }
 
+// LatestByKeyPrefix returns the stored job itself, newest by creation time, then id.
+func (r ppJobs) LatestByKeyPrefix(_ context.Context, typ job.Type, prefix string) (*job.Job, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out *job.Job
+	for key, j := range r.s.jobs {
+		if j.Type() != typ || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if out == nil || j.CreatedAt().After(out.CreatedAt()) || (j.CreatedAt().Equal(out.CreatedAt()) && j.ID() > out.ID()) {
+			out = j
+		}
+	}
+	if out == nil {
+		return nil, fmt.Errorf("job %s %s: %w", typ, prefix, shared.ErrNotFound)
+	}
+	return out, nil
+}
+
 type ppIDs struct{ s *ppStore }
 
 func (g ppIDs) next(prefix string) string {
@@ -396,6 +431,9 @@ var (
 	_ AssignmentRepository = ppAssignments{}
 	_ JobEnqueuer          = ppJobs{}
 	_ JobReader            = ppJobs{}
+	_ PostJobs             = ppJobs{}
+	_ LatestTranscripts    = ppTranscripts{}
+	_ SummaryReader        = ppSummaries{}
 	_ IDGenerator          = ppIDs{}
 	_ LLMClient            = (*testenv.FakeLLM)(nil)
 )
