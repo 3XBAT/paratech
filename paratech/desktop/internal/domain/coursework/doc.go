@@ -4,8 +4,9 @@
 // domain/coursework/proposal (the side-effect boundary, PRD section 13.3), domain/coursework/homeworkdraft (the draft
 // versions of one assignment).
 // Value objects shared by aggregates live in domain/coursework/values. Domain services:
-// domain/coursework/services/contextselection (the minimal context of an LLM operation, PRD section 9.1) and
-// domain/coursework/services/prompts (instructions, answer schemas and strict answer parsing).
+// domain/coursework/services/contextselection (the minimal context of an LLM operation, PRD section 9.1),
+// domain/coursework/services/prompts (instructions, answer schemas and strict answer parsing) and
+// domain/coursework/services/summaryexport (the summary as text or Markdown for the clipboard and a saved file).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //

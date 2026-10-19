@@ -62,6 +62,7 @@ type Core struct {
 	Homework HomeworkCore // the homework page: drafts, the send confirmation and the deliveries
 
 	Transcript TranscriptUseCase // the transcript viewer; the shell shows its save dialog and plays the recordings
+	Summary    SummaryUseCase    // the summary viewer; the shell shows its save dialog
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -74,6 +75,7 @@ type ui interface {
 	pickModelFile() (string, error)
 	pickBundleFile(name string) (string, error)
 	pickTranscriptFile(name, format string) (string, error)
+	pickSummaryFile(name, format string) (string, error)
 	setClipboardText(text string) error
 }
 
@@ -174,6 +176,7 @@ type Services struct {
 	Help        *HelpService
 	Homework    *HomeworkService
 	Transcript  *TranscriptService
+	Summary     *SummaryService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -228,6 +231,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Transcript == nil {
 		return Services{}, errors.New("wails: open core: no transcript viewer")
 	}
+	if core.Summary == nil {
+		return Services{}, errors.New("wails: open core: no summary viewer")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -252,6 +258,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Homework: NewHomeworkService(core.Homework, s.opts.Log),
 		Transcript: NewTranscriptService(core.Transcript, transcriptPickerFunc(s.pickTranscriptFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
+		Summary: NewSummaryService(core.Summary, summaryPickerFunc(s.pickSummaryFile), clipboardFunc(s.setClipboardText),
+			s.opts.Log),
 	}, nil
 }
 
@@ -292,6 +300,15 @@ func (s *Shell) pickTranscriptFile(_ context.Context, name, format string) (stri
 		return "", err
 	}
 	return u.pickTranscriptFile(name, format)
+}
+
+// pickSummaryFile shows the save dialog of a summary over the main window; "" when the user cancels.
+func (s *Shell) pickSummaryFile(_ context.Context, name, format string) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickSummaryFile(name, format)
 }
 
 // setClipboardText puts text on the system clipboard.
