@@ -185,13 +185,15 @@ function Viewer(props: {
   // Retry and redo report failures with the recordings screen's texts: they are the activity binding's errors.
   const start = (step: RetryStep, call: () => Promise<void>) =>
     act(`retry:${step}`, async () => {
+      let refused: Message | null = null;
       try {
         await call();
       } catch (err) {
-        return { kind: "fail", text: actionErrorText(err) };
+        refused = { kind: "fail", text: actionErrorText(err) };
       }
+      // Reload on a refusal too: it usually means a run started elsewhere (the row) and the polling has stopped.
       props.onStarted();
-      return null;
+      return refused;
     });
 
   const retry = (step: RetryStep) =>
@@ -272,12 +274,14 @@ function Viewer(props: {
         view={view}
         onRetry={retry}
         retrying={retrying}
+        retryDisabled={!idle}
       />
       <HomeworkCard
         view={view}
         onOpenAssignment={props.onOpenAssignment}
         onRetry={retry}
         retrying={retrying}
+        retryDisabled={!idle}
       />
       <Dialog
         open={askingRedo && redoOffered}

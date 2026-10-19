@@ -23,6 +23,8 @@ export interface RetryProps {
   /** «Повторить» / «Сделать конспект заново» (TASK-086); without it the buttons stay hidden. */
   onRetry?: (step: RetryStep) => void;
   retrying?: RetryStep | "";
+  /** Another action of the page (copy, save, a start) is running. */
+  retryDisabled?: boolean;
 }
 
 function Line(props: { line: StepLine }) {
@@ -55,7 +57,7 @@ function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
       <Button
         busy={busy}
         busyLabel="Запуск…"
-        disabled={(props.retrying ?? "") !== ""}
+        disabled={props.retryDisabled === true || (props.retrying ?? "") !== ""}
         onClick={() => onRetry(props.step)}
       >
         {label}

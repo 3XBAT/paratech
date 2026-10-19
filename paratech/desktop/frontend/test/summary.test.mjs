@@ -308,6 +308,14 @@ test("a failed step is retried at once, a ready summary is made again only after
   assert.match(redoTexts.body, /Текущий конспект останется/);
   const redo = renderToStaticMarkup(h(SummaryCard, { view: view(), onRetry: () => undefined }));
   assert.ok(redo.includes("Сделать конспект заново"), redo);
+  const idle = renderToStaticMarkup(h(SummaryCard, { view: failed, onRetry: () => undefined }));
+  assert.ok(!idle.includes("disabled"), idle);
+  for (const card of [SummaryCard, HomeworkCard]) {
+    const busy = renderToStaticMarkup(
+      h(card, { view: failed, onRetry: () => undefined, retryDisabled: true, onOpenAssignment: () => undefined }),
+    );
+    assert.ok(busy.includes("Повторить") && busy.includes("disabled"), "no start while copy or save runs: " + busy);
+  }
 });
 
 test("the page retries through the activity binding and redoes the summary only from the dialog's confirm", () => {
@@ -322,7 +330,11 @@ test("the page retries through the activity binding and redoes the summary only 
   assert.match(page, /onCancel=\{\(\) => setAskingRedo\(false\)\}/, "cancel only closes the dialog");
   assert.match(page, /open=\{askingRedo && redoOffered\}/, "no dialog once a new run started");
   assert.match(page, /actionErrorText\(err\)/);
-  assert.match(page, /props\.onStarted\(\)/);
+  const start = page.slice(page.indexOf("const start = "), page.indexOf("const retry = "));
+  assert.equal(start.split("props.onStarted()").length - 1, 1, "one reload");
+  assert.ok(start.indexOf("props.onStarted()") > start.indexOf("catch (err)"), "a refused start reloads too");
+  assert.match(start, /return refused;/, "the refusal stays visible after the reload");
+  assert.match(page, /retryDisabled=\{!idle\}/);
   assert.ok(!page.includes("window.confirm"));
 });
 
