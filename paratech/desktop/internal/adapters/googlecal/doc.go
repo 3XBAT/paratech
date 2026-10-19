@@ -11,6 +11,8 @@
 //     stored (ADR-0004(e)) and a repeated upsert updates the same event: PUT, then insert with the id on 404, then
 //     PUT again on 409. A retry after a lost answer never makes a second event (hard rule 7). An update whose answer
 //     is still cancelled is not reported as written (ErrNotRestored).
+//   - A lesson event has the lesson title as its summary and names the kind and the teacher of the class, when
+//     known, in its description (TASK-089); both are part of the lesson content, so a change of them updates it.
 //   - Requests go only to the base URL (https://www.googleapis.com/calendar/v3), with the bearer client of
 //     adapters/googleauth (wired in app; this package does not import it), no redirects, a timeout per request and
 //     bounded answers. A 401 drops the cached access token and is retried once.

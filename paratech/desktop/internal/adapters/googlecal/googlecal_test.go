@@ -256,6 +256,45 @@ func TestChangedLessonUpdatesTheEvent(t *testing.T) {
 	}
 }
 
+// The description names the kind and the teacher of a lesson (TASK-089); a change of them updates the event.
+func TestLessonKindAndTeacherInDescription(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	cal := r.calendar(t)
+	plain := newLesson(t, "l0", "Алгебра")
+	l := newLesson(t, "l1", "Алгебра, семинар")
+	content := l.Content()
+	content.Subject, content.Kind, content.Teacher = "Алгебра", lesson.KindSeminar, "Иванов И. И."
+	if _, err := l.ChangeContent(content, t0); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []*lesson.Lesson{plain, l} {
+		if err := r.c.UpsertLesson(ctx, cal, x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e, _ := r.api.Event(cal, googlecal.LessonEventID("l1"))
+	if !strings.HasPrefix(e.Description, "Тип: семинар\nПреподаватель: Иванов И. И.\n\n") || !strings.Contains(e.Description, "paratech") {
+		t.Fatalf("description %q", e.Description)
+	}
+	if e, _ := r.api.Event(cal, googlecal.LessonEventID("l0")); strings.Contains(e.Description, "Тип:") ||
+		strings.Contains(e.Description, "Преподаватель:") {
+		t.Fatalf("description of a lesson without kind and teacher %q", e.Description)
+	}
+
+	content.Kind, content.Teacher = lesson.KindLab, "Петров"
+	if _, err := l.ChangeContent(content, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.c.UpsertLesson(ctx, cal, l); err != nil {
+		t.Fatal(err)
+	}
+	e, _ = r.api.Event(cal, googlecal.LessonEventID("l1"))
+	if !strings.HasPrefix(e.Description, "Тип: лабораторная\nПреподаватель: Петров\n\n") || e.Private["revision"] != "3" {
+		t.Fatalf("updated event %+v", e)
+	}
+}
+
 func TestDeleteEvent(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
