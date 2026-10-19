@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
+	"time"
 
 	"paratech/desktop/internal/domain/recording/prompt"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
+	"paratech/desktop/internal/domain/schedule/services/ongoing"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -24,11 +26,16 @@ const (
 	opSettings       = "read settings"
 	opSources        = "list sources"
 	opRemember       = "remember the source"
+	opStartManual    = "start recording from the main window"
 )
 
 // rememberAttempts bounds the saves of the remembered source: a version conflict (the settings page saved meanwhile)
 // reloads once.
 const rememberAttempts = 2
+
+// lessonLookahead ends the lesson query just past now, so a lesson starting right now is listed whatever the store's
+// time precision; ongoing.Current keeps only the lessons in progress.
+const lessonLookahead = time.Second
 
 // Service offers recordings through the popup (PRD section 6.1).
 type Service struct {
@@ -36,6 +43,7 @@ type Service struct {
 	apps       AudioApps
 	popup      Popup
 	recordings Recordings
+	lessons    Lessons
 	clock      Clock
 	sleeper    Sleeper
 	log        *slog.Logger
@@ -55,9 +63,9 @@ type Service struct {
 // New validates the configuration and builds the Service. It starts nothing; call Run.
 func New(deps Deps, cfg Config) (*Service, error) {
 	switch {
-	case deps.Settings == nil || deps.Apps == nil || deps.Popup == nil || deps.Recordings == nil || deps.Clock == nil ||
-		deps.Sleeper == nil:
-		return nil, fmt.Errorf("%w: settings, apps, popup, recordings, clock and sleeper are required", ErrInvalidConfig)
+	case deps.Settings == nil || deps.Apps == nil || deps.Popup == nil || deps.Recordings == nil || deps.Lessons == nil ||
+		deps.Clock == nil || deps.Sleeper == nil:
+		return nil, fmt.Errorf("%w: settings, apps, popup, recordings, lessons, clock and sleeper are required", ErrInvalidConfig)
 	case cfg.PollInterval <= 0:
 		return nil, fmt.Errorf("%w: poll interval %v", ErrInvalidConfig, cfg.PollInterval)
 	}
@@ -67,8 +75,8 @@ func New(deps Deps, cfg Config) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
-		settings: deps.Settings, apps: deps.Apps, popup: deps.Popup, recordings: deps.Recordings, clock: deps.Clock, sleeper: deps.Sleeper,
-		log: log, cfg: cfg,
+		settings: deps.Settings, apps: deps.Apps, popup: deps.Popup, recordings: deps.Recordings, lessons: deps.Lessons,
+		clock: deps.Clock, sleeper: deps.Sleeper, log: log, cfg: cfg,
 	}, nil
 }
 
@@ -210,18 +218,97 @@ func (s *Service) Start(ctx context.Context, id prompt.ID, source values.Source)
 	return view, nil
 }
 
-// remember stores source as the one to preselect next time; a version conflict reloads once. Failures are logged:
-// the recording runs either way.
+// StartManual starts recording source from the main window, without a prompt (TASK-081). The recording is linked to
+// the lesson in progress now (ongoing.Current), or to none; a schedule that cannot be read is logged and the recording
+// starts without a lesson, as recording the class matters more than the link. On success source is remembered like
+// in Start, and a prompt on offer ends as started and hides: the recording it offered runs, and a second one would be
+// refused anyway. A prompt whose own start runs is left to finish; one of the two starts is refused as in progress.
+// A failed start returns Manual with its problem and an error wrapping ErrStartFailed; until the recordings are ready
+// the problem is prompt.ProblemRecovering.
+func (s *Service) StartManual(ctx context.Context, source values.Source) (Manual, error) {
+	if !s.recordings.Ready() {
+		return Manual{Problem: prompt.ProblemRecovering}, fmt.Errorf("%s: %w: %w", opStartManual, ErrStartFailed, ErrNotReady)
+	}
+
+	lessonID := s.lessonNow(ctx)
+	rec, err := s.recordings.StartRecording(ctx, lessonID, source)
+	if err != nil {
+		problem := prompt.ProblemOf(err)
+		s.log.Warn("recording did not start from the main window", slog.String("lesson", lessonID.String()),
+			slog.String("problem", problem.String()), slog.Any("error", err))
+		return Manual{Lesson: lessonID, Problem: problem}, fmt.Errorf("%s: %w: %w", opStartManual, ErrStartFailed, err)
+	}
+
+	s.log.Info("recording started from the main window", slog.String("recording", rec.String()),
+		slog.String("lesson", lessonID.String()), slog.String("source", source.String()))
+	s.endOffer()
+	s.remember(ctx, source)
+	return Manual{Recording: rec, Lesson: lessonID}, nil
+}
+
+// lessonNow is the lesson in progress now, or none; a failed read is logged.
+func (s *Service) lessonNow(ctx context.Context) shared.LessonID {
+	now := s.clock.Now()
+	lessons, err := s.lessons.ListStartingBetween(ctx, now.Add(-lesson.MaxDuration), now.Add(lessonLookahead))
+	if err != nil {
+		s.log.Warn("the lesson in progress could not be read; recording without a lesson", slog.Any("error", err))
+		return ""
+	}
+	if l := ongoing.Current(lessons, now); l != nil {
+		return l.ID()
+	}
+	return ""
+}
+
+// endOffer ends an offered prompt as started, because a recording started without it, and hides the popup.
+func (s *Service) endOffer() {
+	s.mu.Lock()
+	p := s.current
+	if p == nil || p.State() != prompt.StateOffered {
+		s.mu.Unlock()
+		return
+	}
+	err := p.BeginStart()
+	if err == nil {
+		err = p.Started()
+	}
+	s.current = nil
+	s.mu.Unlock()
+	if err != nil { // unreachable: OFFERED allows both
+		s.log.Warn("recording prompt did not end as started", slog.String("prompt", p.ID().String()), slog.Any("error", err))
+	} else {
+		s.log.Info("recording prompt ended by a start from the main window", slog.String("prompt", p.ID().String()))
+	}
+	s.renderLogged(opStartManual)
+}
+
+// SelectSource remembers source as the one recordings and the sound check use (TASK-081): the picker of the
+// diagnostics page, the same remembered source the popup preselects. Unlike after a start, a failure to save is
+// returned: the user asked for exactly this.
+func (s *Service) SelectSource(ctx context.Context, source values.Source) error {
+	if err := s.rememberSource(ctx, source); err != nil {
+		return err
+	}
+	s.log.Info("recording source selected", slog.String("source", source.String()))
+	return nil
+}
+
+// remember stores source as the one to preselect next time. Failures are logged: the recording runs either way.
 func (s *Service) remember(ctx context.Context, source values.Source) {
+	if err := s.rememberSource(ctx, source); err != nil {
+		s.log.Warn("the recording source was not remembered", slog.String("source", source.String()), slog.Any("error", err))
+	}
+}
+
+// rememberSource saves source in the settings; a version conflict reloads once.
+func (s *Service) rememberSource(ctx context.Context, source values.Source) error {
 	var err error
 	for range rememberAttempts {
 		if err = s.saveSource(ctx, source); !errors.Is(err, shared.ErrVersionConflict) {
 			break
 		}
 	}
-	if err != nil {
-		s.log.Warn("the recording source was not remembered", slog.String("source", source.String()), slog.Any("error", err))
-	}
+	return err
 }
 
 func (s *Service) saveSource(ctx context.Context, source values.Source) error {

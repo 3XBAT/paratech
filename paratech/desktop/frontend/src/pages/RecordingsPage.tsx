@@ -1,11 +1,23 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { activityApi, type JobItem, type RecordingItem } from "../bindings/activity";
+import { promptApi } from "../bindings/prompt";
 import { callByName } from "../bindings/runtime";
 import { actionErrorText, formatTime, jobTypeLabel, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
+import { manualStartTexts, startButton, startOutcome } from "../manualStartView";
 import type { PageId } from "../nav";
 import { anyRecording, type FinishedEntry, finishedKey, pageGroups, queueLine } from "../recordingRowView";
+import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
+import { useSources } from "../sourcePicker/useSources";
+import {
+  actionErrorText as startErrorText,
+  chooseSource,
+  initialSelection,
+  nextSelection,
+  pickerModel,
+  type Selection,
+} from "../sourcePicker/view";
 import { jobStatusView, showsProgress } from "../statusPresentation";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
@@ -19,9 +31,11 @@ import { RecordingRow, StatusLine } from "./RecordingRow";
 const pollMs = 3000;
 
 // The page shows what the Go core reports: one row per recording with the status of its whole chain (TASK-076). The
-// Stop, Run now and link buttons appear only when the core offers them (ARCH-44).
+// Stop, Run now and link buttons appear only when the core offers them (ARCH-44). «Начать запись» starts a recording
+// without the popup, from the popup's source picker (TASK-081).
 export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) {
   const api = useMemo(() => activityApi(callByName), []);
+  const prompts = useMemo(() => promptApi(callByName), []);
   const openTranscript = useOpenTranscript();
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
@@ -101,6 +115,66 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
     }
   }
 
+  // «Начать запись»: the panel with the picker, the choice for this start and the problem of a refused one.
+  const [startOpen, setStartOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
+  const [startProblem, setStartProblem] = useState("");
+  const [selection, setSelection] = useState<Selection>(initialSelection);
+  const [listOpen, setListOpen] = useState(false);
+  const { sources } = useSources(startOpen && !listOpen && !starting);
+  const reasonId = useId();
+  const labelId = useId();
+
+  useEffect(() => {
+    if (sources !== null) {
+      setSelection((prev) => nextSelection(prev, sources));
+    }
+  }, [sources]);
+
+  const startState = startButton(recordings, starting);
+  const picker = pickerModel(sources, selection);
+
+  // Each opening starts with a fresh choice, like a new popup.
+  function toggleStart() {
+    setStartProblem("");
+    setListOpen(false);
+    if (!startOpen) {
+      setSelection(sources === null ? initialSelection : nextSelection(initialSelection, sources));
+    }
+    setStartOpen(!startOpen);
+  }
+
+  async function confirmStart() {
+    if (startingRef.current || startState.disabled) {
+      return;
+    }
+    startingRef.current = true;
+    setStarting(true);
+    setStartProblem("");
+    setListOpen(false);
+    try {
+      const out = startOutcome(await prompts.startRecording(picker.chosen.app));
+      if (mounted.current) {
+        if (out.kind === "started") {
+          setStartOpen(false);
+        } else {
+          setStartProblem(out.problem);
+        }
+      }
+    } catch (err) {
+      if (mounted.current) {
+        setStartProblem(startErrorText(err));
+      }
+    } finally {
+      startingRef.current = false;
+      if (mounted.current) {
+        setStarting(false);
+        void refresh();
+      }
+    }
+  }
+
   // The elapsed time of a running recording ticks every second from startedAt, independent of the 3 s poll.
   const now = useNow(anyRecording(recordings ?? []));
 
@@ -177,7 +251,70 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
     <section className="page recordings">
       <div className="head">
         <h1>Записи и задачи</h1>
+        <div className="rec-start">
+          <Button
+            variant="primary"
+            icon="rec"
+            // An open panel can always be closed, except while its start is on the way.
+            disabled={starting || (startState.disabled && !startOpen)}
+            aria-expanded={startOpen}
+            title={startState.reason || undefined}
+            aria-describedby={startState.reason ? reasonId : undefined}
+            onClick={toggleStart}
+          >
+            {manualStartTexts.open}
+          </Button>
+          {startState.reason && (
+            <span id={reasonId} className="vh">
+              {startState.reason}
+            </span>
+          )}
+        </div>
       </div>
+      {startOpen && (
+        <div className="card box rec-start-panel" role="group" aria-label={manualStartTexts.title}>
+          <h2>{manualStartTexts.title}</h2>
+          <span className="small muted box-desc">{manualStartTexts.explain}</span>
+          <span className="label" id={labelId}>
+            {manualStartTexts.sourceLabel}
+          </span>
+          <SourcePicker
+            picker={picker}
+            disabled={starting}
+            open={listOpen}
+            onToggle={() => setListOpen((open) => !open)}
+            onClose={() => setListOpen(false)}
+            onChoose={(app) => {
+              setSelection(chooseSource(app));
+              setListOpen(false);
+            }}
+            labelId={labelId}
+          />
+          <SourceNotes picker={picker} advice />
+          {startProblem !== "" && (
+            <Banner kind="fail" role="alert">
+              {startProblem}
+            </Banner>
+          )}
+          <div className="acts start">
+            <Button
+              variant="primary"
+              icon="rec"
+              busy={starting}
+              busyLabel={manualStartTexts.starting}
+              disabled={startState.disabled}
+              title={startState.reason || undefined}
+              aria-describedby={startState.reason ? reasonId : undefined}
+              onClick={() => void confirmStart()}
+            >
+              {manualStartTexts.start}
+            </Button>
+            <Button variant="ghost" disabled={starting} onClick={toggleStart}>
+              {manualStartTexts.cancel}
+            </Button>
+          </div>
+        </div>
+      )}
       <SpeechComponentNotice onReady={() => void refresh()} />
       {actionError && (
         <Banner kind="fail" role="alert">

@@ -53,9 +53,10 @@ Windows 10 и 11 могут вести себя по-разному в двух 
 
 ## AC-03. Запись запускается и останавливается из попапа и надёжно хранится
 
-Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`); строка записи и статус цепочки — `TestChainOf`, `TestListRecordingsLessonTitles` (`desktop/internal/cases/activity`), `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`).
+Автотесты: `TestStartStopCompletes` (`desktop/internal/cases/recordingsession/service_test.go`); `TestStopButtonStopsTheRecording` (`desktop/internal/app/wiring_test.go`); `TestLessonToAssignmentsThroughTheWiredCore` (`desktop/internal/app/pipeline_test.go`, все статусы записи и дорожка в хранилище); `TestRecordingWithTheRecorderChild` (`desktop/tests/recording_capture_test.go`); строка записи и статус цепочки — `TestChainOf`, `TestListRecordingsLessonTitles` (`desktop/internal/cases/activity`), `TestScheduledLessonPromptStartsARecording` (`desktop/internal/app/prompts_test.go`); старт без попапа — `TestManualStartLinksTheLessonInProgress` (`desktop/internal/app/manualstart_test.go`), `TestManualStartLinksTheLessonOnSQLite` (`desktop/tests/recordingprompt_sqlite_test.go`), `test/sourcepicker.test.mjs` (фронтенд).
 Вручную (§8, пункт 9):
 - [ ] Видео с речью в Chrome. Попап занятия: выбрать Chrome, «Начать запись»: «Запуск…», попап скрылся; в «Записях и задачах» строка называется по занятию (не по времени), «Идёт запись», время растёт каждую секунду. Запись из трея без занятия называется «Запись <дата, время>».
+- [ ] «Записи и задачи» → «Начать запись» в шапке, выбрать Chrome, «Начать запись»: строка «Запись <дата, время>» (во время занятия — название занятия), «Идёт запись», «Остановить»; кнопка в шапке недоступна с подсказкой «Уже идёт запись…», пока запись не остановлена.
 - [ ] Через 2 мин «Остановить»: одна строка на запись меняет статус по цепочке: «Сохраняется» → «Расшифровка N %» или «В очереди» с причиной → «Краткое содержание» → «Конспект готов» (или «Ошибка» с действием). Отдельных строк задач распознавания и конспекта нет; законченные записи — в одной группе «Завершённые (N)».
 - [ ] `%LOCALAPPDATA%\la-qa\artifacts\recordings\<id>.wav` играет, слышна речь, длина как у записи.
 - [ ] `Quit` и запуск: запись в группе «Завершённые», «Завершена», файл на месте.
@@ -286,6 +287,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 - [ ] Лекция в Chrome, другое видео в Edge. В попапе Chrome, запись 1 мин: в `<id>.wav` только лекция, звука Edge нет.
 - [ ] То же с «Весь звук компьютера»: слышны оба.
 - [ ] Тестовый звонок Zoom/Teams/Телемост, выбран клиент: голос собеседника записан.
+- [ ] «Диагностика»: рядом с «Проверить звук» тот же список; выбрать Edge, «Проверить звук» — источник Edge; следующий попап предлагает Edge. Закрыть Edge: «приложение закрыто», итог «Выбранное приложение не запущено.» с подсказкой выбрать другой источник выше. Во время проверки список недоступен.
 - [ ] Совет в попапе виден всегда: «Чтобы не слышать лекцию, убавьте громкость Windows или наушников…».
 - [ ] Выключить звук вкладки (Mute site): в записи тишина. Ползунок приложения в микшере громкости в 0: тишина, в попапе «Звук этого приложения выключен в микшере Windows…». Вместо этого громкость Windows 0: звук записан.
 - [ ] В логе `capture running` с `mode=include`. Если есть `capture mode switched` — писался весь звук: записать сборку Windows.

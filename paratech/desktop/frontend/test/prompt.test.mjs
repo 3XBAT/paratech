@@ -1,21 +1,26 @@
 // Runs on the modules compiled by `npm run test` (tsconfig.test.json) with the Node test runner.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { errorMessages, methods, parsePromptView, promptApi, shownEvent } from "../.test-build/bindings/prompt.js";
 import {
-  actionErrorText,
+  errorMessages,
+  methods,
+  parsePromptView,
+  parseRecordingStart,
+  promptApi,
+  shownEvent,
+} from "../.test-build/bindings/prompt.js";
+import {
   buttonHints,
   buttonLabels,
   headings,
   noPromptNote,
   popupModel,
-  problemText,
-  problemTexts,
   staleNote,
   startingLabel,
   stateNotes,
   timeRange,
 } from "../.test-build/popup/view.js";
+import { actionErrorText, problemText, problemTexts } from "../.test-build/sourcePicker/view.js";
 
 // Mirror domain/recording/prompt and internal/input/wails/prompt.go. SNOOZED and WITHDRAWN are gone with the snooze
 // (TASK-076, owner's decision 2026-10-18).
@@ -50,10 +55,44 @@ test("the api calls the bound Go methods with the prompt id", async () => {
     ["paratech/desktop/internal/input/wails.PromptService.Start", "p1", ""],
     ["paratech/desktop/internal/input/wails.PromptService.Skip", "p1"],
   ]);
-  // Snooze is no longer bound (TASK-076): five methods became four.
-  assert.equal(Object.keys(methods).length, 4);
+  // Snooze is no longer bound (TASK-076); selectSource and startRecording are the main window's (TASK-081).
+  assert.equal(Object.keys(methods).length, 6);
   assert.equal("snooze" in api, false);
   assert.equal(shownEvent, "recordingprompt:shown");
+});
+
+// TASK-081: the picker of the diagnostics page and «Начать запись» of «Записи и задачи».
+test("the main window remembers a source and starts a recording without the popup", async () => {
+  const started = { started: true, problem: "", recordingId: "rec-1", linked: true };
+  const { call, calls } = fakeCall(started);
+  const api = promptApi(call);
+  assert.equal(await api.selectSource("zoom.exe"), undefined);
+  await api.selectSource("");
+  assert.deepEqual(await api.startRecording("zoom.exe"), started);
+  assert.deepEqual(calls, [
+    ["paratech/desktop/internal/input/wails.PromptService.SelectSource", "zoom.exe"],
+    ["paratech/desktop/internal/input/wails.PromptService.SelectSource", ""],
+    ["paratech/desktop/internal/input/wails.PromptService.StartRecording", "zoom.exe"],
+  ]);
+});
+
+test("a refused start resolves with its problem", async () => {
+  const busy = { started: false, problem: "in_progress", recordingId: "", linked: false };
+  assert.deepEqual(await promptApi(fakeCall(busy).call).startRecording(""), busy);
+  for (const p of problems) {
+    assert.equal(parseRecordingStart({ ...busy, problem: p }).problem, p);
+  }
+});
+
+test("a malformed start reply is an error", async () => {
+  const ok = { started: true, problem: "", recordingId: "rec-1", linked: false };
+  for (const bad of [
+    null, "x", [], { ...ok, started: "yes" }, { ...ok, linked: 1 }, { ...ok, recordingId: 7 },
+    { ...ok, problem: "failed" }, { ...ok, started: false },
+  ]) {
+    assert.throws(() => parseRecordingStart(bad), undefined, JSON.stringify(bad));
+  }
+  await assert.rejects(promptApi(fakeCall({ started: true }).call).startRecording(""));
 });
 
 test("no current prompt is null", async () => {

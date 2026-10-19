@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { diagnosticsApi, type SoundCheck } from "../bindings/diagnostics";
+import { promptApi } from "../bindings/prompt";
 import { callByName } from "../bindings/runtime";
 import {
   bundleButton,
@@ -7,6 +8,7 @@ import {
   bundleLines,
   checkButton,
   heardMarkPercent,
+  pickerHint,
   pollSoundCheck,
   soundDisplay,
   soundFailedDisplay,
@@ -16,6 +18,9 @@ import {
   type Timers,
   type Tone,
 } from "../diagnosticsView";
+import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
+import { useSources } from "../sourcePicker/useSources";
+import { pickerModel, savedSelection } from "../sourcePicker/view";
 import { Button } from "../ui/Button";
 import { Card, ResultLine, type ResultKind } from "../ui/controls";
 
@@ -25,15 +30,25 @@ const timers: Timers = {
 };
 
 // "Диагностика": the sound check and the support bundle. Both run in the Go core; the page shows the fixed texts it
-// gets back (ARCH-44).
+// gets back (ARCH-44). The check listens to the remembered recording source, chosen here in the popup's picker
+// (TASK-081); the picker is locked while a check runs.
 export function DiagnosticsPage() {
   const api = useMemo(() => diagnosticsApi(callByName), []);
+  const prompts = useMemo(() => promptApi(callByName), []);
   const mounted = useRef(true);
 
   const [calling, setCalling] = useState(false);
   const [sound, setSound] = useState<SoundDisplay | null>(null);
+  const [hint, setHint] = useState("");
 
-  const [saving, setSaving] = useState(false);
+  // The source picker: the app being remembered while selectSource runs, and the error of the last choice.
+  const [listOpen, setListOpen] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [selectError, setSelectError] = useState("");
+  const labelId = useId();
+  const { sources, refresh, remembered } = useSources(!listOpen && saving === null);
+
+  const [bundleSaving, setBundleSaving] = useState(false);
   const [bundle, setBundle] = useState<Line[]>([]);
 
   // A double click must not start a second call before the disabled button renders.
@@ -48,10 +63,16 @@ export function DiagnosticsPage() {
     stopPolling.current = null;
   }
 
+  function show(r: SoundCheck) {
+    setSound(soundDisplay(r));
+    setHint(pickerHint(r));
+  }
+
   function failed() {
     halt();
     checkRuns.current = false;
     setSound(soundFailedDisplay());
+    setHint("");
   }
 
   // Shows an answer and polls again while the check runs. After the page is left a running check is stopped.
@@ -63,7 +84,7 @@ export function DiagnosticsPage() {
       return;
     }
     checkRuns.current = r.state === "running";
-    setSound(soundDisplay(r));
+    show(r);
     if (r.state !== "running") {
       halt();
       return;
@@ -76,7 +97,7 @@ export function DiagnosticsPage() {
           if (!checkRuns.current) {
             stopPolling.current = null; // the poller ended itself
           }
-          setSound(soundDisplay(next));
+          show(next);
         },
         failed,
         timers,
@@ -134,7 +155,7 @@ export function DiagnosticsPage() {
     });
 
   const saveBundle = () =>
-    once("bundle", setSaving, async () => {
+    once("bundle", setBundleSaving, async () => {
       setBundle([]);
       try {
         const r = await api.saveSupportBundle();
@@ -148,8 +169,38 @@ export function DiagnosticsPage() {
       }
     });
 
+  const selection = savedSelection(sources, saving);
+  const picker = pickerModel(sources, selection);
+
+  // The old result was about the previous source: it goes once another one is chosen.
+  async function choose(app: string) {
+    setListOpen(false);
+    if (saving !== null || checkRuns.current || app === selection.app) {
+      return;
+    }
+    setSaving(app);
+    setSelectError("");
+    setSound(null);
+    setHint("");
+    try {
+      await prompts.selectSource(app);
+      if (mounted.current) {
+        remembered(app);
+      }
+    } catch {
+      if (mounted.current) {
+        setSelectError(texts.selectFailed);
+      }
+    } finally {
+      if (mounted.current) {
+        setSaving(null);
+        refresh();
+      }
+    }
+  }
+
   const check = checkButton(checking, calling);
-  const save = bundleButton(saving);
+  const save = bundleButton(bundleSaving);
 
   return (
     <section className="page">
@@ -164,11 +215,31 @@ export function DiagnosticsPage() {
         <Card className="box diag" label={texts.soundTitle}>
           <h2>{texts.soundTitle}</h2>
           <span className="small muted box-desc">{texts.soundExplain}</span>
-          <div className="acts start">
-            <Button disabled={check.disabled} onClick={() => void toggleCheck()}>
+          <span className="label" id={labelId}>
+            {texts.sourceLabel}
+          </span>
+          <div className="acts start diag-pick">
+            <SourcePicker
+              picker={picker}
+              disabled={sources === null || saving !== null || checking || calling}
+              disabledReason={checking ? texts.sourceLocked : undefined}
+              open={listOpen}
+              onToggle={() => setListOpen((open) => !open)}
+              onClose={() => setListOpen(false)}
+              onChoose={(app) => void choose(app)}
+              labelId={labelId}
+            />
+            <Button disabled={check.disabled || saving !== null} onClick={() => void toggleCheck()}>
               {check.label}
             </Button>
           </div>
+          {hint !== "" && <p className="small picker-warning">{hint}</p>}
+          <SourceNotes picker={picker} />
+          {selectError !== "" && (
+            <ResultLine kind="fail" role="alert">
+              {selectError}
+            </ResultLine>
+          )}
           {sound !== null && <SoundView sound={sound} />}
         </Card>
 

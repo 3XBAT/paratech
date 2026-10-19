@@ -168,6 +168,45 @@ func (f *fakeRecordings) started() []shared.LessonID {
 	return append([]shared.LessonID(nil), f.lessons...)
 }
 
+// fakeLessons is the schedule; it returns the lessons starting in [from, to) like the sqlite repository.
+type fakeLessons struct {
+	mu      sync.Mutex
+	lessons []*lesson.Lesson
+	err     error
+	from    time.Time
+	to      time.Time
+}
+
+func (f *fakeLessons) ListStartingBetween(_ context.Context, from, to time.Time) ([]*lesson.Lesson, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.from, f.to = from, to
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []*lesson.Lesson
+	for _, l := range f.lessons {
+		if start := l.Content().Start; !l.Deleted() && !start.Before(from) && start.Before(to) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+// add stores a live lesson running [start, start+d).
+func (f *fakeLessons) add(t *testing.T, id shared.LessonID, start time.Time, d time.Duration) {
+	t.Helper()
+	l, err := lesson.New(lesson.Spec{ID: id, Content: lesson.Content{
+		Title: "History", Start: start, End: start.Add(d), TimeZone: "Europe/Moscow",
+	}}, start.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lessons = append(f.lessons, l)
+}
+
 type env struct {
 	t          *testing.T
 	clock      *testenv.FakeClock
@@ -175,6 +214,7 @@ type env struct {
 	apps       *fakeApps
 	popup      *testenv.FakePopup
 	recordings *fakeRecordings
+	lessons    *fakeLessons
 	svc        *Service
 }
 
@@ -182,11 +222,11 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{
 		t: t, clock: testenv.NewFakeClock(t0.Add(-5 * time.Minute)), settings: &fakeSettings{}, apps: &fakeApps{},
-		popup: &testenv.FakePopup{}, recordings: &fakeRecordings{},
+		popup: &testenv.FakePopup{}, recordings: &fakeRecordings{}, lessons: &fakeLessons{},
 	}
 	svc, err := New(Deps{
-		Settings: e.settings, Apps: e.apps, Popup: e.popup, Recordings: e.recordings, Clock: e.clock, Sleeper: e.clock,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Settings: e.settings, Apps: e.apps, Popup: e.popup, Recordings: e.recordings, Lessons: e.lessons, Clock: e.clock,
+		Sleeper: e.clock, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
