@@ -10,8 +10,11 @@
 //     read errors, so a damaged file could otherwise import only part of a sheet.
 //   - Only the first visible sheet (the leftmost tab Excel shows) is read; other sheets are ignored.
 //   - The first non-empty row is the header, with the column names of CSV (title, date, start, end, timezone,
-//     optional uid; case-insensitive, any order, unknown columns ignored). Empty rows are skipped. At most
-//     importplan.MaxRows lessons.
+//     optional uid, subject or «предмет», kind or «тип», teacher or «преподаватель»; case-insensitive, any order,
+//     unknown columns ignored). Empty rows are skipped. At most importplan.MaxRows lessons.
+//   - kind, subject and teacher follow CSV: kind is a type such as "лекция", "сем" or "lab" (lesson.ParseKind),
+//     another value is a row error of the column; an empty subject or kind cell, or a missing column, takes what
+//     lesson.ClassifyTitle derives from the title.
 //
 // Cells: stored values are read, never formatted and never calculated. A formula cell gives the value the
 // spreadsheet saved with it (what Excel shows); a formula without a saved value is an empty cell. Text cells use the
