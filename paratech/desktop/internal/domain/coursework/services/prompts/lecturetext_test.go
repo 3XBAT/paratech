@@ -53,7 +53,7 @@ func TestParseLectureTextRejects(t *testing.T) {
 		{"two-line heading", block(`"heading":"a\nb","from":0,"paragraphs":["p"]`), false},
 		{"no paragraphs", block(`"heading":"a","from":0,"paragraphs":[]`), false},
 		{"empty paragraph", block(`"heading":"a","from":0,"paragraphs":[""]`), false},
-		{"bidi override", block(`"heading":"a","from":0,"paragraphs":["a‮b"]`), false},
+		{"bidi override", block(`"heading":"a","from":0,"paragraphs":["a\u202eb"]`), false},
 		{"too many blocks", `{"blocks":[` + many(MaxLectureBlocks+1, `{"heading":"a","from":0,"paragraphs":["p"]}`) + `]}`, false},
 		{"too many paragraphs", block(`"heading":"a","from":0,"paragraphs":[` + many(MaxLectureParagraphs+1, `"p"`) + `]`), false},
 		{"paragraph too long", block(`"heading":"a","from":0,"paragraphs":["` + strings.Repeat("я", MaxLectureParagraphRunes+1) + `"]`), false},

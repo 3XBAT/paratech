@@ -29,7 +29,7 @@ func TestNewBlock(t *testing.T) {
 		{"valid", " Введение ", 0, []string{" Сегодня о реках. ", "Вторая мысль."}, true},
 		{"empty heading", " ", 0, []string{"a"}, false},
 		{"multi-line heading", "a\nb", 0, []string{"a"}, false},
-		{"heading with line separator", "a b", 0, []string{"a"}, false},
+		{"heading with line separator", "a\u2028b", 0, []string{"a"}, false},
 		{"heading too long", strings.Repeat("я", MaxHeadingRunes+1), 0, []string{"a"}, false},
 		{"heading at limit", strings.Repeat("я", MaxHeadingRunes), 0, []string{"a"}, true},
 		{"negative start", "a", -1, []string{"a"}, false},
@@ -37,7 +37,7 @@ func TestNewBlock(t *testing.T) {
 		{"too many paragraphs", "a", 0, make([]string, MaxParagraphs+1), false},
 		{"blank paragraph", "a", 0, []string{"a", " "}, false},
 		{"paragraph with control", "a", 0, []string{"a\x00b"}, false},
-		{"paragraph with bidi override", "a", 0, []string{"a‮b"}, false},
+		{"paragraph with bidi override", "a", 0, []string{"a\u202eb"}, false},
 		{"paragraph with line break", "a", 0, []string{"a\nb"}, true},
 		{"paragraph too long", "a", 0, []string{strings.Repeat("я", MaxParagraphRunes+1)}, false},
 		{"invalid utf8", "a", 0, []string{"\xff"}, false},
