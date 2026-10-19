@@ -16,6 +16,7 @@ func stateOf(r *Recording) State {
 		MaxDuration: r.MaxDuration(), Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Silent: r.Silent(), Problem: r.Problem(),
 		StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(), HeartbeatAt: r.HeartbeatAt(),
 		CreatedAt: r.CreatedAt(), UpdatedAt: r.UpdatedAt(),
+		DeletingAt: r.DeletingAt(), DeletingAssignments: r.DeletingAssignments(),
 	}
 }
 

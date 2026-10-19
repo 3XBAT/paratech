@@ -16,6 +16,9 @@ var (
 	// ErrNotDeletable means the recording is still being captured or finalized and cannot be deleted.
 	ErrNotDeletable = errors.New("recording cannot be deleted while it is in progress")
 
+	// ErrDeleting means the recording is already marked for deletion (TASK-095).
+	ErrDeleting = errors.New("recording is already being deleted")
+
 	// ErrNoAudio means the chunk directory of a recording holds no readable audio: no chunk at all, or only chunks
 	// that cannot be read. It is returned by the Recorder adapters, so the recording fails instead of being retried.
 	ErrNoAudio = errors.New("recording has no readable audio")
