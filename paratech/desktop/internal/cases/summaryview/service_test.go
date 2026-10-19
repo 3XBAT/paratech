@@ -303,8 +303,8 @@ func TestViewOfAReadySummary(t *testing.T) {
 		t.Fatalf("summary = %+v", v.Summary)
 	}
 	want := []Assignment{
-		{ID: "a1", Title: "Прочитать главу 4", Description: "Стр. 40-52", Due: due},
-		{ID: "a2", Title: "Нарисовать карту"},
+		{ID: "a1", Title: "Прочитать главу 4", Description: "Стр. 40-52", Due: due, LessonDate: t0.In(msk)},
+		{ID: "a2", Title: "Нарисовать карту", LessonDate: t0.In(msk)},
 	}
 	if v.Homework.Step != (Step{State: StateDone}) || !reflect.DeepEqual(v.Homework.Assignments, want) {
 		t.Fatalf("homework = %+v", v.Homework)

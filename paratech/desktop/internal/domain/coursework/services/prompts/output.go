@@ -22,7 +22,8 @@ const (
 	MaxHomework         = 20 // items of one extraction
 	MaxTitleRunes       = 200
 	MaxDescriptionRunes = 4000
-	MaxDraftBodyRunes   = 16000 // keeps a draft below proposal.MaxBodyBytes even in 4-byte runes
+	MaxHintRunes        = values.MaxNameRunes // subject_hint and teacher_hint
+	MaxDraftBodyRunes   = 16000               // keeps a draft below proposal.MaxBodyBytes even in 4-byte runes
 
 	// A deadline outside [lesson start - MaxDueBefore, lesson start + MaxDueAhead] is a model error.
 	MaxDueBefore = 24 * time.Hour
@@ -64,10 +65,15 @@ func (h Homework) Due() time.Time { return h.due }
 // Extraction is the validated answer of the extract_homework_deadlines operation; it may hold no homework.
 type Extraction struct {
 	homework []Homework
+	hints    values.LessonNames
 }
 
 // Homework returns the assignments found, in the order of the answer.
 func (e Extraction) Homework() []Homework { return append([]Homework(nil), e.homework...) }
+
+// Hints returns the subject and teacher the model found in the transcript, cleaned to one plain line each; empty when
+// not named. They are model output: shown marked and never put over the schedule (values.NewLessonLabel).
+func (e Extraction) Hints() values.LessonNames { return e.hints }
 
 // Draft is the validated answer of the homework_draft operation. It holds text only: where the homework goes is
 // decided by the core from local state, never by the model.
@@ -82,7 +88,8 @@ func (d Draft) Title() string { return d.title }
 // Body returns the homework text.
 func (d Draft) Body() string { return d.body }
 
-// Wire shapes of the answers. Pointers tell a missing field from an empty one; every field is required.
+// Wire shapes of the answers. Pointers tell a missing field from an empty one; every field is required except the
+// hints of the extraction, which an answer of the earlier prompts lacks.
 type summaryWire struct {
 	Summary   *string   `json:"summary"`
 	KeyPoints *[]string `json:"key_points"`
@@ -90,6 +97,8 @@ type summaryWire struct {
 
 type extractWire struct {
 	Assignments *[]homeworkWire `json:"assignments"`
+	SubjectHint *string         `json:"subject_hint"`
+	TeacherHint *string         `json:"teacher_hint"`
 }
 
 type homeworkWire struct {
@@ -160,14 +169,15 @@ func ParseSummary(out values.UntrustedOutput) (Summary, error) {
 // ParseExtraction checks the answer of an extract_homework_deadlines request: at most MaxHomework assignments, each
 // with a one-line title, a description (may be empty) and a due that is null or an RFC 3339 time with the UTC offset
 // of lessonStart within [lessonStart - MaxDueBefore, lessonStart + MaxDueAhead]. lessonStart is the one the request was built with; a zero
-// one wraps ErrNoContext. Other errors wrap ErrMalformedOutput.
+// one wraps ErrNoContext. Other errors wrap ErrMalformedOutput. The hints are lenient: missing or null is empty, and
+// a text is cleaned to one line and cut to MaxHintRunes instead of failing the answer, since they are only a label.
 func ParseExtraction(out values.UntrustedOutput, lessonStart time.Time) (Extraction, error) {
 	if lessonStart.IsZero() {
 		return Extraction{}, fmt.Errorf("%w: no lesson start to check deadlines against", ErrNoContext)
 	}
 
 	var w extractWire
-	if err := decode(out, &w, "assignments", "title", "description", "due"); err != nil {
+	if err := decode(out, &w, "assignments", "subject_hint", "teacher_hint", "title", "description", "due"); err != nil {
 		return Extraction{}, err
 	}
 	if w.Assignments == nil {
@@ -185,7 +195,7 @@ func ParseExtraction(out values.UntrustedOutput, lessonStart time.Time) (Extract
 		}
 		items = append(items, h)
 	}
-	return Extraction{homework: items}, nil
+	return Extraction{homework: items, hints: values.NewLessonNames(deref(w.SubjectHint), deref(w.TeacherHint))}, nil
 }
 
 func checkHomework(a homeworkWire, lessonStart time.Time) (Homework, error) {
@@ -217,6 +227,13 @@ func checkHomework(a homeworkWire, lessonStart time.Time) (Homework, error) {
 		h.due = due.UTC()
 	}
 	return h, nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func offset(t time.Time) int {

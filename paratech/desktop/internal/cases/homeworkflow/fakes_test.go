@@ -10,6 +10,8 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -126,6 +128,20 @@ func (r recipients) HomeworkRecipient(context.Context) (proposal.Recipient, erro
 	return proposal.NewRecipient(r.s.recipient)
 }
 
+// TranscriptRecordings and LessonReader: the assignments of the proposal pipeline have no lesson.
+
+type noRecordings struct{}
+
+func (noRecordings) RecordingOf(_ context.Context, t shared.TranscriptID) (*recording.Recording, error) {
+	return nil, fmt.Errorf("transcript %s: %w", t, shared.ErrNotFound)
+}
+
+type noLessons struct{}
+
+func (noLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, error) {
+	return nil, fmt.Errorf("lesson %s: %w", id, shared.ErrNotFound)
+}
+
 // IDGenerator.
 
 type ids struct{ s *store }
@@ -174,7 +190,7 @@ func newEnv(t *testing.T) *env {
 	svc, err := New(Deps{
 		Proposals: proposalRepo{e.store}, Assignments: assignmentRepo{e.store}, AssignmentList: assignmentList{e.store},
 		Artifacts: e.files, Recipients: recipients{e.store}, Mailer: e.mailer, Exporter: e.exporter, Calendar: e.calendar,
-		Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
+		Recordings: noRecordings{}, Lessons: noLessons{}, Clock: e.clock, IDs: ids{e.store}, Tx: tx{e.store},
 	})
 	if err != nil {
 		t.Fatal(err)

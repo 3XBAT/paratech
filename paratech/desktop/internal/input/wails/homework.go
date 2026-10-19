@@ -37,7 +37,7 @@ const (
 	ErrSendNotFound          = homeworkError("Отправка не найдена: подготовьте её ещё раз.")
 	ErrSendCannotConfirm     = homeworkError("Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.")
 	ErrSendAlreadyDecided    = homeworkError("Эта отправка уже подтверждена или отменена.")
-	ErrSendStale             = homeworkError("Файл или адрес получателя изменились после подтверждения. Проверьте и подтвердите ещё раз.")
+	ErrSendStale             = homeworkError("Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.")
 	ErrSendUnresolved        = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.")
 	ErrSendIncomplete        = homeworkError("Не удалось завершить отправку. Повторите — второе письмо не уйдёт — или проверьте список писем ниже.")
 	ErrExportLocked          = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.")
@@ -95,6 +95,7 @@ var rejectMessages = map[proposal.RejectReason]string{
 const (
 	opListAssignments = "ui: list assignments"
 	opOpenAssignment  = "ui: open assignment"
+	opCorrectLesson   = "ui: correct the lesson of an assignment"
 	opDraftVersion    = "ui: get draft version"
 	opGenerate        = "ui: generate draft"
 	opGeneration      = "ui: get draft generation"
@@ -113,9 +114,10 @@ const (
 type HomeworkProposals interface {
 	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
+	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
-	ConfirmSend(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
+	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string) (homeworkflow.ProposalView, error)
 	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 }
 
@@ -151,14 +153,27 @@ func (c HomeworkCore) complete() bool {
 
 // AssignmentItem is the JSON form of an assignment. Title and description may be model text: the page shows them
 // as text only. Times are RFC 3339 in UTC, "" when unset.
+//
+// The lesson (TASK-092): Subject and Teacher with their source ("schedule", "transcript", "user" or "" when
+// unknown); a "transcript" one is a model hint from the recording, shown marked «по записи». Kind is the code of the
+// lesson kind ("lecture", "seminar", "practice", "lab" or ""). LessonDate is the lesson start («занятие 19.10»).
+// CorrectedSubject and CorrectedTeacher are the user's correction, "" when none, for the correction form.
 type AssignmentItem struct {
-	ID          string `json:"id"`
-	LessonID    string `json:"lessonId"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Due         string `json:"due"`
-	UserEdited  bool   `json:"userEdited"`
-	UpdatedAt   string `json:"updatedAt"`
+	ID               string `json:"id"`
+	LessonID         string `json:"lessonId"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	Due              string `json:"due"`
+	UserEdited       bool   `json:"userEdited"`
+	UpdatedAt        string `json:"updatedAt"`
+	Subject          string `json:"subject"`
+	SubjectSource    string `json:"subjectSource"`
+	Kind             string `json:"kind"`
+	Teacher          string `json:"teacher"`
+	TeacherSource    string `json:"teacherSource"`
+	LessonDate       string `json:"lessonDate"`
+	CorrectedSubject string `json:"correctedSubject"`
+	CorrectedTeacher string `json:"correctedTeacher"`
 }
 
 // VersionItem is one draft version in the history list.
@@ -296,6 +311,20 @@ func (s *HomeworkService) OpenAssignment(ctx context.Context, id string) (Assign
 	return out, nil
 }
 
+// CorrectLesson stores the subject and teacher the student entered for assignment id; they win over the schedule and
+// the hint from the recording. An empty text removes the correction of that field. Returns the assignment as shown.
+func (s *HomeworkService) CorrectLesson(ctx context.Context, id, subject, teacher string) (AssignmentItem, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return AssignmentItem{}, err
+	}
+	v, err := s.proposals.CorrectLesson(ctx, homeworkflow.LessonCorrection{ID: aid, Subject: subject, Teacher: teacher})
+	if err != nil {
+		return AssignmentItem{}, s.fail(opCorrectLesson, err, ErrHomeworkNotFound)
+	}
+	return assignmentItem(v), nil
+}
+
 // DraftVersion returns version n of the draft of assignment id.
 func (s *HomeworkService) DraftVersion(ctx context.Context, id string, n int) (VersionText, error) {
 	aid, err := assignmentID(id)
@@ -428,20 +457,25 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPrepa
 		return out, nil
 	}
 	out.Status = sendReady
-	out.Recipient, out.Subject = v.Recipient, s.deliveries.Subject()
+	out.Recipient, out.Subject = v.Recipient, v.Subject
+	if out.Subject == "" {
+		out.Subject = s.deliveries.Subject()
+	}
 	out.AttachmentName, out.AttachmentSize = v.AttachmentName, v.AttachmentSize
 	return out, nil
 }
 
 // ConfirmSend is the user's click on «Отправить» in the confirmation dialog (AC-14): the use case confirms the send
 // proposal the dialog showed and executes it, which creates the delivery. It is the only binding that leads to an
-// email. Repeating it with the same proposal after a failure creates no second email (ErrSendIncomplete says so).
-func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID string) error {
+// email. subject is the one the dialog showed (SendPreparation.Subject): if the core's subject changed meanwhile,
+// nothing is sent (ErrSendStale). Repeating it with the same proposal after a failure creates no second email
+// (ErrSendIncomplete says so).
+func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject string) error {
 	pid := proposal.ID(proposalID)
 	if pid.Validate() != nil {
 		return ErrHomeworkInvalidID
 	}
-	_, err := s.proposals.ConfirmSend(ctx, pid)
+	_, err := s.proposals.ConfirmSend(ctx, pid, subject)
 	switch {
 	case err == nil:
 		return nil
@@ -565,6 +599,9 @@ func assignmentItem(a homeworkflow.AssignmentView) AssignmentItem {
 	return AssignmentItem{
 		ID: string(a.ID), LessonID: string(a.LessonID), Title: a.Title, Description: a.Description, Due: rfc3339(a.Due),
 		UserEdited: a.UserEdited, UpdatedAt: rfc3339(a.UpdatedAt),
+		Subject: a.Subject, SubjectSource: string(a.SubjectSource), Kind: a.Kind, Teacher: a.Teacher,
+		TeacherSource: string(a.TeacherSource), LessonDate: rfc3339(a.LessonDate),
+		CorrectedSubject: a.CorrectedSubject, CorrectedTeacher: a.CorrectedTeacher,
 	}
 }
 

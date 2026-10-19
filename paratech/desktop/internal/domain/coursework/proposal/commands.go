@@ -2,7 +2,10 @@ package proposal
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
@@ -20,6 +23,7 @@ type EmailCommand struct {
 	attachment shared.ArtifactRef
 	digest     Digest
 	confirmed  time.Time
+	subject    string // empty: the mailer's default subject
 }
 
 // ExportCommand writes homework text to the export file of an assignment (PRD section 10 step 6).
@@ -37,6 +41,7 @@ type CalendarCommand struct {
 	assignment shared.AssignmentID
 	title      string
 	due        time.Time
+	lesson     values.LessonLabel // what the event names of the lesson; zero: nothing
 }
 
 // idempotencyKey is stable for one proposal: executing it again after a crash or a retry repeats the same request,
@@ -89,6 +94,30 @@ func (p *Proposal) CalendarCommand() (CalendarCommand, error) {
 	return CalendarCommand{key: p.idempotencyKey(), assignment: p.assignment, title: p.title, due: p.due}, nil
 }
 
+// WithSubject returns c with the email subject the core built from trusted local state
+// (values.HomeworkEmailSubject). The subject must be one line of 1 to values.MaxEmailSubjectRunes characters without
+// control or format characters, so it cannot add a mail header; otherwise, or for the zero command, the error wraps
+// ErrInvalidProposal.
+func (c EmailCommand) WithSubject(subject string) (EmailCommand, error) {
+	switch {
+	case c.IsZero():
+		return EmailCommand{}, fmt.Errorf("%w: zero email command", ErrInvalidProposal)
+	case strings.TrimSpace(subject) == "" || !utf8.ValidString(subject) ||
+		utf8.RuneCountInString(subject) > values.MaxEmailSubjectRunes || strings.ContainsFunc(subject, notInSubject):
+		return EmailCommand{}, fmt.Errorf("%w: email subject must be one line of 1-%d characters", ErrInvalidProposal,
+			values.MaxEmailSubjectRunes)
+	}
+	c.subject = subject
+	return c, nil
+}
+
+func notInSubject(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == 0x2028 || r == 0x2029
+}
+
+// Subject returns the email subject; empty when the core set none and the mailer uses its default.
+func (c EmailCommand) Subject() string { return c.subject }
+
 // IdempotencyKey returns the key that makes a repeated send safe.
 func (c EmailCommand) IdempotencyKey() string { return c.key }
 
@@ -125,6 +154,20 @@ func (c ExportCommand) Content() string { return c.content }
 
 // IsZero reports whether c is the zero value, which no adapter may act on.
 func (c ExportCommand) IsZero() bool { return c == ExportCommand{} }
+
+// WithLesson returns c with what the event says about the lesson of the assignment: subject, kind, teacher and
+// date, resolved by the core (values.NewLessonLabel). A transcript hint stays marked by its source. The zero command
+// stays zero, so no adapter acts on it.
+func (c CalendarCommand) WithLesson(l values.LessonLabel) CalendarCommand {
+	if c.IsZero() {
+		return CalendarCommand{}
+	}
+	c.lesson = l
+	return c
+}
+
+// Lesson returns what the event names of the lesson; zero when nothing.
+func (c CalendarCommand) Lesson() values.LessonLabel { return c.lesson }
 
 // IdempotencyKey returns the key that makes a repeated upsert safe.
 func (c CalendarCommand) IdempotencyKey() string { return c.key }

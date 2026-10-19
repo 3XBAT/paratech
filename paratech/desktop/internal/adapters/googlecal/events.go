@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -27,6 +28,12 @@ const (
 	deadlineDescription = "Дедлайн из paratech. Изменения делайте в приложении."
 	lessonFallback      = "Занятие"
 	deadlineFallback    = "Дедлайн"
+
+	// Parts of the lesson lines of a deadline event (TASK-092).
+	labelSeparator  = " · "
+	fromTranscript  = " (по записи)"
+	lessonDateLabel = "Занятие "
+	lessonDateText  = "02.01"
 
 	// maxSummaryRunes caps an event title; longer titles are cut.
 	maxSummaryRunes = 200
@@ -148,7 +155,7 @@ func (c *Client) UpsertDeadline(ctx context.Context, cmd proposal.CalendarComman
 	}
 	due := cmd.Due().UTC()
 	e := event{
-		Summary: summary(cmd.Title(), deadlineFallback), Description: deadlineDescription, Status: statusConfirmed,
+		Summary: summary(cmd.Title(), deadlineFallback), Description: deadlineText(cmd.Lesson()), Status: statusConfirmed,
 		Start: eventTime{DateTime: rfc3339(due), TimeZone: "UTC"},
 		End:   eventTime{DateTime: rfc3339(due.Add(deadlineLength)), TimeZone: "UTC"},
 		ExtendedProperties: extendedProperties{Private: map[string]string{
@@ -223,6 +230,43 @@ func lessonText(c lesson.Content) string {
 		return lessonDescription
 	}
 	return strings.Join(lines, "\n") + "\n\n" + lessonDescription
+}
+
+// deadlineText is the event description of a deadline: «Предмет · тип · преподаватель» and «Занятие ДД.ММ» when
+// known, then the app note. A subject or teacher from the transcript is a model hint and is marked «(по записи)». The
+// texts are cleaned like a title and escaped: Google renders some HTML in descriptions.
+func deadlineText(l values.LessonLabel) string {
+	var parts []string
+	if s := summary(l.Subject(), ""); s != "" {
+		parts = append(parts, htmlText.Replace(s)+marked(l.SubjectSource()))
+	}
+	if k, err := lesson.KindOf(l.Kind()); err == nil {
+		if name, ok := kindNames[k]; ok {
+			parts = append(parts, name)
+		}
+	}
+	if s := summary(l.Teacher(), ""); s != "" {
+		parts = append(parts, htmlText.Replace(s)+marked(l.TeacherSource()))
+	}
+
+	var lines []string
+	if len(parts) > 0 {
+		lines = append(lines, strings.Join(parts, labelSeparator))
+	}
+	if !l.Date().IsZero() {
+		lines = append(lines, lessonDateLabel+l.Date().Format(lessonDateText))
+	}
+	if len(lines) == 0 {
+		return deadlineDescription
+	}
+	return strings.Join(lines, "\n") + "\n\n" + deadlineDescription
+}
+
+func marked(s values.NameSource) string {
+	if s == values.SourceTranscript {
+		return fromTranscript
+	}
+	return ""
 }
 
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }

@@ -30,6 +30,7 @@ func newEditEnv(t *testing.T) *editEnv {
 		Proposals: proposalRepo{e.store}, Assignments: ppAssignments{pe.ppStore},
 		AssignmentList: ppAssignmentList{pe.ppStore}, Artifacts: e.files,
 		Recipients: recipients{e.store}, Mailer: e.mailer, Exporter: e.exporter, Calendar: e.calendar,
+		Recordings: ppTranscriptRecordings{pe.ppStore}, Lessons: ppLessons{pe.ppStore},
 		Clock: pe.clock, IDs: ids{e.store}, Tx: tx{e.store},
 	})
 	if err != nil {

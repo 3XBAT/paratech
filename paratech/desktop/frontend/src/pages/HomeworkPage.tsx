@@ -28,11 +28,13 @@ import {
   regenerateBlockedReason,
   versionTitle,
 } from "../homeworkView";
+import { lessonText } from "../lessonLabel";
 import { initialListState, type ListState } from "../listView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
 import { SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import { LessonCorrection } from "./LessonCorrection";
 import { TranscriptLinks } from "./TranscriptLinks";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
@@ -110,11 +112,17 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
 
   const row = (a: AssignmentItem) => {
     const chip = assignmentDeliveryView(Object.hasOwn(deliveries, a.id) ? deliveries[a.id] : undefined);
+    const lesson = lessonText(a);
     return (
       <Row
         key={a.id}
         title={a.title}
-        meta={<span className="num">{dueText(a.due)}</span>}
+        meta={
+          <>
+            {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
+            <span className="num">{dueText(a.due)}</span>
+          </>
+        }
         status={chip && <Chip view={chip} />}
         actions={<Button onClick={() => props.onOpen(a.id)}>Открыть</Button>}
       />
@@ -192,6 +200,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [message, setMessage] = useState<Message | null>(null);
   const [sendOpen, setSendOpen] = useState<SendOpen | null>(null);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
+  const [correcting, setCorrecting] = useState(false);
   const mounted = useRef(true);
   const acting = useRef(false); // one action at a time; a double click must not start a second one
   const loadingDeliveries = useRef(false);
@@ -475,6 +484,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   }
 
   const a = detail.assignment;
+  const lesson = lessonText(a);
   const versions = [...detail.versions].reverse(); // newest first
   const genView = gen && generationView(gen.status);
 
@@ -489,6 +499,25 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         <h1 className="hw-title">{a.title}</h1>
         <span className="muted num">{dueText(a.due)}</span>
       </div>
+      <div className="hw-lesson-head">
+        {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
+        {!correcting && (
+          <Button variant="ghost" onClick={() => setCorrecting(true)}>
+            Поправить предмет и преподавателя
+          </Button>
+        )}
+      </div>
+      {correcting && (
+        <LessonCorrection
+          assignment={a}
+          correct={api.correctLesson}
+          onCorrected={(next) => {
+            setDetail((d) => (d === null ? d : { ...d, assignment: next }));
+            setCorrecting(false);
+          }}
+          onClose={() => setCorrecting(false)}
+        />
+      )}
       {a.description !== "" && <p className="hw-desc">{a.description}</p>}
       <TranscriptLinks lessonId={a.lessonId} />
 

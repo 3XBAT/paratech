@@ -14,5 +14,10 @@
 // stored. Assignments at positions the new answer no longer has are withdrawn unless the user edited them
 // (Superseded) or a delivery still references them.
 //
+// The subject and teacher of the lesson come from the recording's lesson snapshot (outside this context). The
+// extraction may add hints found in the transcript (model output, SetHints) and the user may correct both (Correct);
+// values.NewLessonLabel decides what is shown. Hints are replaced by every extraction, even of a user-edited
+// assignment: they are not user data.
+//
 // Invariant: once the user edited an assignment (Edit), reprocessing never changes it again (Reextract keeps it).
 package assignment

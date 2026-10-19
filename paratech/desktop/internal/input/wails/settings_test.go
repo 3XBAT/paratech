@@ -183,7 +183,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "calendar.ts", typ: reflect.TypeFor[*GoogleCalendarService](), methods: 2},
 		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 4},
 		{file: "help.ts", typ: reflect.TypeFor[*HelpService](), methods: 1},
-		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 13},
+		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 14}, // +CorrectLesson (TASK-092)
 		{file: "transcript.ts", typ: reflect.TypeFor[*TranscriptService](), methods: 6},
 		{file: "summary.ts", typ: reflect.TypeFor[*SummaryService](), methods: 3}, // TASK-087
 	}

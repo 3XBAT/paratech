@@ -372,10 +372,10 @@ func (p *Proposal) check(f Facts, now time.Time) RejectReason {
 }
 
 // Recheck compares a CONFIRMED proposal with fresh trusted facts right before execution. If what the user confirmed
-// no longer holds (the assignment is gone; for an email the recipient or the export content differs), the proposal
-// moves to the terminal STALE status with the reason and Recheck returns an error wrapping ErrStale; the caller saves
-// the proposal and calls no port. Any other status yields ErrNotConfirmed. The due time is not checked again: the
-// user confirmed it.
+// no longer holds (the assignment is gone; for an email the recipient, the export content or the subject differs),
+// the proposal moves to the terminal STALE status with the reason and Recheck returns an error wrapping ErrStale; the
+// caller saves the proposal and calls no port. Any other status yields ErrNotConfirmed. The due time is not checked
+// again: the user confirmed it.
 func (p *Proposal) Recheck(f Facts, now time.Time) error {
 	if p.status != StatusConfirmed {
 		return fmt.Errorf("%w: status %s", ErrNotConfirmed, p.status)
@@ -402,6 +402,8 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 		return ReasonNoArtifact
 	case p.kind.NeedsAttachment() && f.Attachment != p.attachment:
 		return ReasonArtifactChanged
+	case p.kind.NeedsSubject() && f.Subject != f.ShownSubject:
+		return ReasonSubjectChanged
 	}
 	return ""
 }

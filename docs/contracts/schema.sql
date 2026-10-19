@@ -423,3 +423,11 @@ ALTER TABLE recordings ADD COLUMN lesson_end INTEGER;
 ALTER TABLE schedule_entries ADD COLUMN subject TEXT NOT NULL DEFAULT '' CHECK (length(subject) <= 200);
 ALTER TABLE schedule_entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown' CHECK (kind IN ('unknown', 'lecture', 'seminar', 'practice', 'lab'));
 ALTER TABLE schedule_entries ADD COLUMN teacher TEXT NOT NULL DEFAULT '' CHECK (length(teacher) <= 200);
+
+-- assignments: the subject and teacher the homework search found in the transcript (hint_*, model output, shown
+-- marked «по записи») and the ones the user entered (user_*); '' none. One plain line of at most values.MaxNameRunes
+-- characters each. The schedule's subject and teacher are read from the recording's lesson snapshot, never copied here.
+ALTER TABLE assignments ADD COLUMN hint_subject TEXT NOT NULL DEFAULT '' CHECK (length(hint_subject) <= 200);
+ALTER TABLE assignments ADD COLUMN hint_teacher TEXT NOT NULL DEFAULT '' CHECK (length(hint_teacher) <= 200);
+ALTER TABLE assignments ADD COLUMN user_subject TEXT NOT NULL DEFAULT '' CHECK (length(user_subject) <= 200);
+ALTER TABLE assignments ADD COLUMN user_teacher TEXT NOT NULL DEFAULT '' CHECK (length(user_teacher) <= 200);

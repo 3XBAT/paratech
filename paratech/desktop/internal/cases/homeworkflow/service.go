@@ -14,6 +14,7 @@ type Service struct {
 	mailer      HomeworkMailer
 	exporter    HomeworkExporter
 	calendar    DeadlineCalendar
+	lessons     lessonFinder
 	clock       Clock
 	ids         IDGenerator
 	tx          Tx
@@ -22,14 +23,14 @@ type Service struct {
 // New builds the Service.
 func New(d Deps) (*Service, error) {
 	if d.Proposals == nil || d.Assignments == nil || d.AssignmentList == nil || d.Artifacts == nil ||
-		d.Recipients == nil || d.Mailer == nil || d.Exporter == nil || d.Calendar == nil || d.Clock == nil ||
-		d.IDs == nil || d.Tx == nil {
+		d.Recipients == nil || d.Mailer == nil || d.Exporter == nil || d.Calendar == nil || d.Recordings == nil ||
+		d.Lessons == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
 	}
 
 	return &Service{
 		proposals: d.Proposals, assignments: d.Assignments, list: d.AssignmentList, artifacts: d.Artifacts,
 		recipients: d.Recipients, mailer: d.Mailer, exporter: d.Exporter, calendar: d.Calendar, clock: d.Clock,
-		ids: d.IDs, tx: d.Tx,
+		ids: d.IDs, tx: d.Tx, lessons: lessonFinder{recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock},
 	}, nil
 }

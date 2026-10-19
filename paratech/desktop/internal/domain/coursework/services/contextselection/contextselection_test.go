@@ -142,3 +142,28 @@ func TestSelectDraftWithDescriptionOnly(t *testing.T) {
 		t.Fatalf("unexpected context %+v", c)
 	}
 }
+
+func TestSubjectAndTeacherGoToTheDraftOnly(t *testing.T) {
+	m := Material{
+		Lesson:     Lesson{Title: "L", Start: time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC), Subject: " Физика ", Teacher: "Петров"},
+		Transcript: []Segment{{Text: "x"}},
+		Assignment: Assignment{Title: "T"},
+	}
+	c, err := Select(values.OperationHomeworkDraft, m)
+	if err != nil || c.LessonSubject() != "Физика" || c.LessonTeacher() != "Петров" {
+		t.Fatalf("draft: %q %q %v", c.LessonSubject(), c.LessonTeacher(), err)
+	}
+	for _, op := range []values.Operation{values.OperationSummary, values.OperationExtractHomework} {
+		c, err := Select(op, m)
+		if err != nil || c.LessonSubject() != "" || c.LessonTeacher() != "" {
+			t.Fatalf("%s: %q %q %v", op, c.LessonSubject(), c.LessonTeacher(), err)
+		}
+	}
+
+	for _, bad := range []Lesson{{Subject: "a\nb"}, {Teacher: strings.Repeat("я", MaxTitleRunes+1)}} {
+		m.Lesson = bad
+		if _, err := Select(values.OperationHomeworkDraft, m); !errors.Is(err, ErrInvalidMaterial) {
+			t.Fatalf("lesson %+v: error = %v, want ErrInvalidMaterial", bad, err)
+		}
+	}
+}
