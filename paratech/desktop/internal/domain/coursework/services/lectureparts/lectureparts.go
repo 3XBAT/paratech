@@ -87,6 +87,31 @@ func (p Part) Starts(froms []int) []int64 {
 	return out
 }
 
+// The lecture text keeps all content, only filler and repetitions go, so an answer far shorter than its part was
+// condensed. MinKeptPercent leaves room for heavy filler; a part under MinCheckedRunes is not checked because a few
+// filler words can be most of it.
+const (
+	MinKeptPercent  = 45
+	MinCheckedRunes = 600
+)
+
+// Condensed reports whether paragraphs, the text of the answer of the part (headings excluded), keep less than
+// MinKeptPercent of the runes of its segments; always false for a part under MinCheckedRunes.
+func (p Part) Condensed(paragraphs []string) bool {
+	in := 0
+	for _, it := range p.items {
+		in += utf8.RuneCountInString(it.Text)
+	}
+	if in < MinCheckedRunes {
+		return false
+	}
+	out := 0
+	for _, s := range paragraphs {
+		out += utf8.RuneCountInString(s)
+	}
+	return out*100 < in*MinKeptPercent
+}
+
 // Plan splits the segments into parts (see the package comment). Blank segments are skipped, but the indexes stay
 // those of the transcript. Starts that go back in time are moved forward to the start before them. Errors:
 // ErrEmpty without speech, ErrInvalidSegment for a segment that is not one line of valid UTF-8.
@@ -177,6 +202,7 @@ func Merge(parts [][]lecturetext.Block) ([]lecturetext.Block, error) {
 			prev := out[len(out)-1]
 			paragraphs := b.Paragraphs()
 			prevParagraphs := prev.Paragraphs()
+			// A paragraph really said twice across a part border is dropped too: accepted, it cannot be told apart.
 			if normalize(paragraphs[0]) == normalize(prevParagraphs[len(prevParagraphs)-1]) {
 				paragraphs = paragraphs[1:]
 			}

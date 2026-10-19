@@ -3,6 +3,7 @@ package prompts
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -197,7 +198,7 @@ func TestRemindLectureText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	long, err := Remind(req, true)
+	long, err := Remind(req, fmt.Errorf("%w: %w", ErrMalformedOutput, ErrTruncatedOutput))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,9 +206,13 @@ func TestRemindLectureText(t *testing.T) {
 		long.Operation() != values.OperationLectureText {
 		t.Fatal("truncated lecture text: not the lecture reminder")
 	}
-	format, _ := Remind(req, false)
+	format, _ := Remind(req, ErrMalformedOutput)
 	if !strings.HasSuffix(format.Instructions(), formatReminder) {
 		t.Fatal("format reminder missing")
+	}
+	full, _ := Remind(req, ErrCondensedOutput)
+	if !strings.HasSuffix(full.Instructions(), condensedReminder) {
+		t.Fatal("condensed lecture text: not the reminder to keep all content")
 	}
 }
 

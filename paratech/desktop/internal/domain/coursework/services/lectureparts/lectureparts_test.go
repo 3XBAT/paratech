@@ -282,3 +282,37 @@ func TestMergeKeepsTheParagraphLimit(t *testing.T) {
 		t.Fatalf("blocks = %d", len(got))
 	}
 }
+
+func TestCondensed(t *testing.T) {
+	// One part of 10 segments of 100 runes (Cyrillic: 2 bytes each) = 1000 runes.
+	seg := strings.Repeat("я", 100)
+	big := make([]Segment, 10)
+	for i := range big {
+		big[i] = Segment{StartMs: int64(i) * 1000, Text: seg}
+	}
+	tiny := []Segment{{Text: strings.Repeat("я", MinCheckedRunes-1)}}
+	tests := []struct {
+		name       string
+		segments   []Segment
+		paragraphs []string
+		want       bool
+	}{
+		{"full", big, []string{strings.Repeat("я", 600), strings.Repeat("я", 400)}, false},
+		{"at the threshold", big, []string{strings.Repeat("я", 450)}, false},
+		{"below the threshold", big, []string{strings.Repeat("я", 449)}, true},
+		{"a summary", big, []string{"Коротко о реках."}, true},
+		{"no paragraphs", big, nil, true},
+		{"a tiny part is not checked", tiny, []string{"Да."}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, err := Plan(tt.segments)
+			if err != nil || len(plan) != 1 {
+				t.Fatalf("Plan = %d parts, %v", len(plan), err)
+			}
+			if got := plan[0].Condensed(tt.paragraphs); got != tt.want {
+				t.Fatalf("Condensed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

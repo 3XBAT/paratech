@@ -3,6 +3,7 @@ package prompts
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -234,11 +235,11 @@ func TestRemind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	format, err := Remind(req, false)
+	format, err := Remind(req, ErrMalformedOutput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	length, err := Remind(req, true)
+	length, err := Remind(req, fmt.Errorf("%w: %w", ErrMalformedOutput, ErrTruncatedOutput))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,13 +253,17 @@ func TestRemind(t *testing.T) {
 	if format.Instructions() == length.Instructions() || !strings.Contains(length.Instructions(), "cut off") {
 		t.Fatal("the truncation reminder must differ from the format reminder")
 	}
+	// The reminder to keep all content is for the lecture text only.
+	if other, _ := Remind(req, ErrCondensedOutput); other.Instructions() != format.Instructions() {
+		t.Fatal("a condensed summary must get the format reminder")
+	}
 
 	big, err := values.NewLLMRequest(values.OperationSummary, "default", "x",
 		strings.Repeat("d", values.MaxRequestPayloadSize-1), "key-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Remind(big, false); !errors.Is(err, values.ErrInvalidLLMRequest) {
+	if _, err := Remind(big, ErrMalformedOutput); !errors.Is(err, values.ErrInvalidLLMRequest) {
 		t.Fatalf("Remind over the size limit = %v", err)
 	}
 }

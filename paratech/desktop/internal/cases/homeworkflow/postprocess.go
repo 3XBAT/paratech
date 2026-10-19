@@ -273,7 +273,7 @@ func askChecked[T any](ctx context.Context, p *PostProcessor, snap job.Snapshot,
 		if *reminders <= 0 {
 			return none, p.permanent(snap, stepAnswer, invalidAnswer(truncated), rejection)
 		}
-		if req, err = remind(snap.ID(), req, truncated); err != nil {
+		if req, err = remind(snap.ID(), req, rejection); err != nil {
 			p.log.Warn("post-processing answer not asked again: the format reminder does not fit the request size limit",
 				slog.String("job", snap.ID().String()), slog.String("type", string(snap.Type())), slog.Int("call", call),
 				slog.Any("cause", err))
@@ -310,9 +310,9 @@ func check(op values.Operation, out values.UntrustedOutput, lessonStart time.Tim
 	return checkedAnswer{details: details}, nil
 }
 
-// remind builds the repeat of req after a rejected answer, keyed again with llmKey.
-func remind(id shared.JobID, req values.LLMRequest, truncated bool) (values.LLMRequest, error) {
-	r, err := prompts.Remind(req, truncated)
+// remind builds the repeat of req after an answer rejected with rejection, keyed again with llmKey.
+func remind(id shared.JobID, req values.LLMRequest, rejection error) (values.LLMRequest, error) {
+	r, err := prompts.Remind(req, rejection)
 	if err != nil {
 		return values.LLMRequest{}, err
 	}

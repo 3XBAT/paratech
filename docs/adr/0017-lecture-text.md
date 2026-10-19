@@ -17,14 +17,18 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
   marked "do not output". The merge needs no LLM: blocks are joined in order, a first paragraph repeating the last one is
   dropped, a block with the same heading continues the previous one. The model names the start segment of a block
   (`from`); it is clamped into the part and kept non-decreasing.
-- **Cost bound**: one paid call per part, plus at most 3 format reminders per job run in total (`LectureTextReminders`).
-  LLM keys are derived from the job and the request, so a rerun of an attempt is replayed by the Hub for free.
+- **Cost bound**: at most parts + 3 paid calls per attempt: one per part plus at most 3 format reminders per attempt
+  (`LectureTextReminders`). LLM keys are derived from the job and the request, so the requests a rerun asks again
+  (reminders included) are replayed by the Hub for free.
+- **No condensing**: an answer whose paragraphs keep under 45% of the runes of a part of 600+ runes is asked again
+  with a reminder to keep all content, from the same budget (`lectureparts.Part.Condensed`).
 - **Resumable**: the aggregate `coursework/lecturetext` stores each finished part (table `lecture_texts`, migration
   0015). An attempt that stops continues from the next part; a new job with the same requests (a retry) keeps them. The
   text shown is replaced only when a run completes. Job timeout = 67 calls × the Hub request timeout + slack.
 - **Lesson kind** (`values.LessonKind`) only selects a constant sentence of the trusted instructions; the title and
   subject (schedule text) go into the untrusted data only.
-- Hub: operation `lecture_text` with its own quota counter (Hub migration 0005).
+- Hub: operation `lecture_text` with its own operation label in the quota ledger (quota is shared per key; Hub
+  migration 0005).
 
 ## Consequences
 - A long lesson takes tens of minutes of calls; while a lecture text job runs it holds one light worker.

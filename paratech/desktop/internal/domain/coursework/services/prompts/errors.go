@@ -14,4 +14,8 @@ var (
 	// ErrTruncatedOutput is returned, together with ErrMalformedOutput, when the JSON object of an answer starts but
 	// never ends: the answer was most likely cut at the output limit of the model alias on the Hub.
 	ErrTruncatedOutput = errors.New("model output is truncated")
+
+	// ErrCondensedOutput is returned when a lecture text answer is far shorter than its part
+	// (lectureparts.Part.Condensed): the model summarized instead of keeping all content.
+	ErrCondensedOutput = errors.New("model output is condensed")
 )

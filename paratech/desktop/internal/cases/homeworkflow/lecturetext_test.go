@@ -50,6 +50,24 @@ func lectureAnswer(heading string, from int, paragraphs ...string) string {
 	return string(b)
 }
 
+// fullParagraphs is the text of lectureLines from..to-1, in paragraphs of 10 lines: a lecture text answer that keeps
+// all content of those segments (lectureparts.Part.Condensed).
+func fullParagraphs(from, to int) []string {
+	lines := lectureLines(to)[from:]
+	var out []string
+	for len(lines) > 0 {
+		n := min(10, len(lines))
+		out = append(out, strings.Join(lines[:n], " "))
+		lines = lines[n:]
+	}
+	return out
+}
+
+// partAnswer is a valid answer of one block that starts at segment from and keeps all content of lines lo..hi-1.
+func partAnswer(heading string, from, lo, hi int) string {
+	return lectureAnswer(heading, from, fullParagraphs(lo, hi)...)
+}
+
 // newLectureEnv is newPPEnv with transcript t2 of n lines for recording r2 of lesson l1.
 func newLectureEnv(t *testing.T, n int) *ppEnv {
 	t.Helper()
@@ -100,9 +118,9 @@ func untrusted(t *testing.T, r values.LLMRequest) map[string]any {
 // TASK-090: a long transcript is formatted part by part, one call per part, and the merged text is stored.
 func TestLectureTextIsMadePartByPart(t *testing.T) {
 	e := newLectureEnv(t, 150)
-	e.llm.Answer(values.OperationLectureText, lectureAnswer("Rivers", 0, "Part one."))
-	e.llm.Answer(values.OperationLectureText, lectureAnswer("Deltas", 75, "Part two."))
-	e.llm.Answer(values.OperationLectureText, lectureAnswer("Deltas", 140, "Part three."))
+	e.llm.Answer(values.OperationLectureText, partAnswer("Rivers", 0, 0, 70))
+	e.llm.Answer(values.OperationLectureText, partAnswer("Deltas", 75, 70, 140))
+	e.llm.Answer(values.OperationLectureText, partAnswer("Deltas", 140, 140, 150))
 
 	var rep reports
 	if err := e.pp.Handle(context.Background(), e.snapshot("j1", LectureTextJobType, "t2"), rep.report); err != nil {
@@ -149,7 +167,8 @@ func TestLectureTextIsMadePartByPart(t *testing.T) {
 	for _, b := range l.Blocks() {
 		got = append(got, fmt.Sprintf("%s@%d:%s", b.Heading(), b.StartMs(), strings.Join(b.Paragraphs(), "|")))
 	}
-	want := []string{"Rivers@0:Part one.", "Deltas@75000:Part two.|Part three."}
+	want := []string{"Rivers@0:" + strings.Join(fullParagraphs(0, 70), "|"),
+		"Deltas@75000:" + strings.Join(append(fullParagraphs(70, 140), fullParagraphs(140, 150)...), "|")}
 	if !slices.Equal(got, want) {
 		t.Fatalf("blocks = %v, want %v", got, want)
 	}
@@ -170,15 +189,15 @@ func TestLectureTextOfAShortTranscript(t *testing.T) {
 	}
 }
 
-// A part whose answer fails the checks is asked again with a reminder; the repeats of a run share one budget.
+// A part whose answer fails the checks is asked again with a reminder; the repeats of an attempt share one budget.
 func TestLectureTextReminders(t *testing.T) {
 	t.Run("a part passes after a reminder", func(t *testing.T) {
 		e := newLectureEnv(t, 150)
 		e.llm.Reply(values.OperationLectureText,
-			testenv.LLMReply{Output: lectureAnswer("A", 0, "One.")},
+			testenv.LLMReply{Output: partAnswer("A", 0, 0, 70)},
 			testenv.LLMReply{Output: "Here is the text of the lecture."},
-			testenv.LLMReply{Output: lectureAnswer("B", 70, "Two.")},
-			testenv.LLMReply{Output: lectureAnswer("C", 140, "Three.")})
+			testenv.LLMReply{Output: partAnswer("B", 70, 70, 140)},
+			testenv.LLMReply{Output: partAnswer("C", 140, 140, 150)})
 		if err := e.handle(e.snapshot("j1", LectureTextJobType, "t2")); err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +217,7 @@ func TestLectureTextReminders(t *testing.T) {
 	t.Run("the budget runs out", func(t *testing.T) {
 		e := newLectureEnv(t, 150)
 		e.llm.Reply(values.OperationLectureText,
-			testenv.LLMReply{Output: lectureAnswer("A", 0, "One.")},
+			testenv.LLMReply{Output: partAnswer("A", 0, 0, 70)},
 			testenv.LLMReply{Output: "no JSON"})
 		err := e.handle(e.snapshot("j1", LectureTextJobType, "t2"))
 		if !errors.Is(err, ErrInvalidAnswer) || backoff.Classify(err) != backoff.ClassPermanent {
@@ -218,7 +237,7 @@ func TestLectureTextReminders(t *testing.T) {
 		// A retry is a new job: the stored part is kept, the failed part is asked anew under new keys.
 		failedKey := e.freshLLM()[1].IdempotencyKey()
 		e.llm.Reply(values.OperationLectureText,
-			testenv.LLMReply{Output: lectureAnswer("B", 70, "Two.")}, testenv.LLMReply{Output: lectureAnswer("C", 140, "Three.")})
+			testenv.LLMReply{Output: partAnswer("B", 70, 70, 140)}, testenv.LLMReply{Output: partAnswer("C", 140, 140, 150)})
 		if err := e.handle(e.snapshot("j2", LectureTextJobType, "t2")); err != nil {
 			t.Fatal(err)
 		}
@@ -250,7 +269,7 @@ func TestLectureTextReminders(t *testing.T) {
 func TestLectureTextResumesWithTheSameKeys(t *testing.T) {
 	e := newLectureEnv(t, 150)
 	e.llm.Reply(values.OperationLectureText,
-		testenv.LLMReply{Output: lectureAnswer("A", 0, "One.")},
+		testenv.LLMReply{Output: partAnswer("A", 0, 0, 70)},
 		testenv.LLMReply{Err: shared.ErrNetworkUnavailable})
 	snap := e.snapshot("j1", LectureTextJobType, "t2")
 	err := e.handle(snap)
@@ -263,7 +282,7 @@ func TestLectureTextResumesWithTheSameKeys(t *testing.T) {
 
 	first := e.freshLLM()
 	e.llm.Reply(values.OperationLectureText,
-		testenv.LLMReply{Output: lectureAnswer("B", 70, "Two.")}, testenv.LLMReply{Output: lectureAnswer("C", 140, "Three.")})
+		testenv.LLMReply{Output: partAnswer("B", 70, 70, 140)}, testenv.LLMReply{Output: partAnswer("C", 140, 140, 150)})
 	var rep reports
 	if err := e.pp.Handle(context.Background(), snap, rep.report); err != nil {
 		t.Fatalf("second attempt: %v", err)
@@ -293,14 +312,14 @@ func TestLectureTextIsReplacedOnlyWhenComplete(t *testing.T) {
 	e.lectures[lecturetext.IDOf("t2")] = st
 
 	e.llm.Reply(values.OperationLectureText,
-		testenv.LLMReply{Output: lectureAnswer("New", 0, "New one.")}, testenv.LLMReply{Err: shared.ErrNetworkUnavailable})
+		testenv.LLMReply{Output: partAnswer("New", 0, 0, 70)}, testenv.LLMReply{Err: shared.ErrNetworkUnavailable})
 	_ = e.handle(e.snapshot("j2", LectureTextJobType, "t2"))
 	if l := e.lecture("t2"); !l.Ready() || l.Blocks()[0].Heading() != "Old" {
 		t.Fatal("an unfinished run replaced the text")
 	}
 
 	e.llm.Reply(values.OperationLectureText,
-		testenv.LLMReply{Output: lectureAnswer("New", 70, "New two.")}, testenv.LLMReply{Output: lectureAnswer("New", 140, "New three.")})
+		testenv.LLMReply{Output: partAnswer("New", 70, 70, 140)}, testenv.LLMReply{Output: partAnswer("New", 140, 140, 150)})
 	if err := e.handle(e.snapshot("j2", LectureTextJobType, "t2")); err != nil {
 		t.Fatal(err)
 	}
@@ -361,11 +380,15 @@ func TestLectureTextFailures(t *testing.T) {
 // The model names segments outside its part or going back: the starts stay inside the part and in order.
 func TestLectureTextClampsTheStarts(t *testing.T) {
 	e := newLectureEnv(t, 150)
-	twoBlocks := `{"blocks":[{"heading":"X","from":999,"paragraphs":["a"]},{"heading":"Y","from":72,"paragraphs":["b"]},` +
-		`{"heading":"Z","from":71,"paragraphs":["c"]}]}`
+	full := fullParagraphs(70, 140)
+	threeBlocks, _ := json.Marshal(map[string]any{"blocks": []any{
+		map[string]any{"heading": "X", "from": 999, "paragraphs": full[:2]},
+		map[string]any{"heading": "Y", "from": 72, "paragraphs": full[2:4]},
+		map[string]any{"heading": "Z", "from": 71, "paragraphs": full[4:]},
+	}})
 	e.llm.Reply(values.OperationLectureText,
-		testenv.LLMReply{Output: lectureAnswer("A", 5, "One.")}, testenv.LLMReply{Output: twoBlocks},
-		testenv.LLMReply{Output: lectureAnswer("C", 3, "Three.")})
+		testenv.LLMReply{Output: partAnswer("A", 5, 0, 70)}, testenv.LLMReply{Output: string(threeBlocks)},
+		testenv.LLMReply{Output: partAnswer("C", 3, 140, 150)})
 	if err := e.handle(e.snapshot("j1", LectureTextJobType, "t2")); err != nil {
 		t.Fatal(err)
 	}
@@ -453,5 +476,89 @@ func TestLectureTextPublishesAStoredRun(t *testing.T) {
 	}
 	if got := rep.checkpoints(); !slices.Equal(got, []string{"1/1"}) {
 		t.Fatalf("progress = %v", got)
+	}
+}
+
+// "No condensing": an answer far shorter than its part is asked again with the reminder to keep all content, from the
+// same budget; a tiny part is not checked.
+func TestLectureTextCondensedAnswer(t *testing.T) {
+	t.Run("asked again, then accepted", func(t *testing.T) {
+		e := newLectureEnv(t, 150)
+		e.llm.Reply(values.OperationLectureText,
+			testenv.LLMReply{Output: lectureAnswer("A", 0, "The lesson was about rivers.")},
+			testenv.LLMReply{Output: partAnswer("A", 0, 0, 70)},
+			testenv.LLMReply{Output: partAnswer("B", 70, 70, 140)},
+			testenv.LLMReply{Output: partAnswer("C", 140, 140, 150)})
+		if err := e.handle(e.snapshot("j1", LectureTextJobType, "t2")); err != nil {
+			t.Fatal(err)
+		}
+		reqs := e.llm.Requests()
+		if len(reqs) != 4 {
+			t.Fatalf("calls = %d, want 4", len(reqs))
+		}
+		if reqs[1].UntrustedData() != reqs[0].UntrustedData() || !strings.Contains(reqs[1].Instructions(), "do not summarize") ||
+			reqs[1].IdempotencyKey() == reqs[0].IdempotencyKey() {
+			t.Fatal("the repeat is not the same part with the reminder to keep all content")
+		}
+		l := e.lecture("t2")
+		if l == nil || !l.Ready() || l.Blocks()[0].Paragraphs()[0] != fullParagraphs(0, 70)[0] {
+			t.Fatal("the full answer was not stored")
+		}
+	})
+
+	t.Run("the budget runs out", func(t *testing.T) {
+		e := newLectureEnv(t, 150)
+		e.llm.Reply(values.OperationLectureText, testenv.LLMReply{Output: lectureAnswer("A", 0, "Rivers.")})
+		err := e.handle(e.snapshot("j1", LectureTextJobType, "t2"))
+		if !errors.Is(err, ErrInvalidAnswer) || backoff.Classify(err) != backoff.ClassPermanent {
+			t.Fatalf("Handle = %v, want a permanent ErrInvalidAnswer", err)
+		}
+		if n := len(e.llm.Requests()); n != 1+LectureTextReminders {
+			t.Fatalf("calls = %d, want 1 + %d reminders", n, LectureTextReminders)
+		}
+	})
+
+	t.Run("a tiny part is not checked", func(t *testing.T) {
+		e := newLectureEnv(t, 5) // 5 lines of 100 runes: under lectureparts.MinCheckedRunes
+		e.llm.Answer(values.OperationLectureText, lectureAnswer("A", 0, "Rivers."))
+		if err := e.handle(e.snapshot("j1", LectureTextJobType, "t2")); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(e.llm.Requests()); n != 1 || !e.lecture("t2").Ready() {
+			t.Fatalf("calls = %d, want the short answer accepted", n)
+		}
+	})
+}
+
+// Only a part out of order (another attempt stored a run meanwhile) is retried; a part the aggregate refuses is
+// permanent.
+func TestLectureTextAddPartErrors(t *testing.T) {
+	e := newPPEnv(t)
+	ctx := context.Background()
+	snap := e.snapshot("j1", LectureTextJobType, "t1")
+	in, err := e.pp.load(ctx, snap, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := lecturetext.NewBlock("Rivers", 0, []string{"Today we talk about rivers."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		index     int
+		blocks    []lecturetext.Block
+		permanent bool
+	}{
+		{"out of order", 1, []lecturetext.Block{b}, false},
+		{"refused by the aggregate", 0, []lecturetext.Block{{}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := e.pp.saveLecturePart(ctx, snap, in, "lt:v1:run", 2, tt.index, tt.blocks)
+			if !errors.Is(err, ErrStorage) || (backoff.Classify(err) == backoff.ClassPermanent) != tt.permanent {
+				t.Fatalf("saveLecturePart = %v (class %v), want ErrStorage, permanent %v", err, backoff.Classify(err), tt.permanent)
+			}
+		})
 	}
 }

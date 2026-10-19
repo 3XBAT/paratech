@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -58,19 +59,26 @@ Reminder: your previous answer to this request was cut off before its JSON objec
 	lectureLengthReminder = `
 
 Reminder: your previous answer to this request was cut off before its JSON object ended. Answer again with exactly one complete JSON object that conforms to the JSON Schema above. Keep all the content of the segments, but use short headings, do not repeat context_before and write no text outside the object. No Markdown, no code fences.`
+
+	condensedReminder = `
+
+Reminder: your previous answer to this request was much shorter than the segments. Answer again with exactly one JSON object that conforms to the JSON Schema above. Keep all the content of the segments: do not summarize, shorten or skip anything; remove only filler words and repetitions. No Markdown, no code fences, no text before or after it.`
 )
 
 // Remind returns req with a fixed reminder of the answer format appended to its trusted instructions, for a repeated
-// request after an answer that failed the checks; truncated selects the reminder to keep the answer shorter. The
-// reminder is constant app text: the rejected answer is never sent back. Errors wrap values.ErrInvalidLLMRequest (the
-// request would exceed the size limit).
-func Remind(req values.LLMRequest, truncated bool) (values.LLMRequest, error) {
+// request after an answer that failed the checks with rejection: ErrTruncatedOutput selects the reminder to keep the
+// answer shorter, ErrCondensedOutput the one to keep all content. The reminder is constant app text: the rejected
+// answer is never sent back. Errors wrap values.ErrInvalidLLMRequest (the request would exceed the size limit).
+func Remind(req values.LLMRequest, rejection error) (values.LLMRequest, error) {
+	lecture := req.Operation() == values.OperationLectureText
 	reminder := formatReminder
-	switch {
-	case truncated && req.Operation() == values.OperationLectureText:
+	switch truncated := errors.Is(rejection, ErrTruncatedOutput); {
+	case truncated && lecture:
 		reminder = lectureLengthReminder
 	case truncated:
 		reminder = lengthReminder
+	case lecture && errors.Is(rejection, ErrCondensedOutput):
+		reminder = condensedReminder
 	}
 	return values.NewLLMRequest(req.Operation(), req.ModelAlias(), req.Instructions()+reminder, req.UntrustedData(),
 		req.IdempotencyKey())

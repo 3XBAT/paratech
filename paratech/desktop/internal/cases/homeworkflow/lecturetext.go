@@ -16,11 +16,11 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// LectureTextReminders bounds the repeats with a format reminder of one lecture_text job run, over all its parts: a
-// run makes one paid call per part plus at most these (TASK-090).
+// LectureTextReminders bounds the repeats with a format reminder of one attempt of a lecture_text job, over all its
+// parts: an attempt makes one paid call per part plus at most these (TASK-090).
 const LectureTextReminders = 3
 
-// MaxLectureTextCalls bounds the LLM calls of one lecture_text job run. The app sizes the job timeout by it.
+// MaxLectureTextCalls bounds the LLM calls of one attempt of a lecture_text job. The app sizes the job timeout by it.
 const MaxLectureTextCalls = lectureparts.MaxParts + LectureTextReminders
 
 // lectureText runs one attempt of a lecture_text job (TASK-090): the transcript is planned into parts
@@ -122,7 +122,8 @@ func (p *PostProcessor) lectureRequests(id shared.JobID, sel contextselection.Co
 }
 
 // lectureBlocks checks the answer of a part and turns it into blocks; the segment indexes the model named become start
-// times inside the part (lectureparts.Part.Starts).
+// times inside the part (lectureparts.Part.Starts). An answer far shorter than the part (lectureparts.Part.Condensed)
+// is rejected with prompts.ErrCondensedOutput, so it is asked again to keep all content.
 func lectureBlocks(part lectureparts.Part, out values.UntrustedOutput) ([]lecturetext.Block, error) {
 	answer, err := prompts.ParseLectureText(out)
 	if err != nil {
@@ -130,8 +131,13 @@ func lectureBlocks(part lectureparts.Part, out values.UntrustedOutput) ([]lectur
 	}
 	items := answer.Blocks()
 	froms := make([]int, len(items))
+	var paragraphs []string
 	for i, b := range items {
 		froms[i] = b.From()
+		paragraphs = append(paragraphs, b.Paragraphs()...)
+	}
+	if part.Condensed(paragraphs) {
+		return nil, fmt.Errorf("%w: %d paragraphs", prompts.ErrCondensedOutput, len(paragraphs))
 	}
 	starts := part.Starts(froms)
 	blocks := make([]lecturetext.Block, len(items))
@@ -173,9 +179,13 @@ func (p *PostProcessor) saveLecturePart(ctx context.Context, snap job.Snapshot, 
 			if lt.NextPart(run, total) > index {
 				return nil
 			}
-			if err := lt.AddPart(run, total, index, blocks, p.clock.Now()); err != nil {
+			err := lt.AddPart(run, total, index, blocks, p.clock.Now())
+			switch {
+			case errors.Is(err, lecturetext.ErrPartOutOfOrder):
 				// Another run was stored meanwhile: the next attempt plans again.
 				return p.retry(snap, stepSave, ErrStorage, err)
+			case err != nil:
+				return p.permanent(snap, stepSave, ErrStorage, err)
 			}
 		}
 		if lt.Complete() {
