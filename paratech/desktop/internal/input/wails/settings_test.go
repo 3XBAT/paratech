@@ -164,6 +164,17 @@ func TestOpenBindings(t *testing.T) {
 	}
 }
 
+// TestFrontendKnowsSettingsErrors keeps the error texts the settings page shows as they are equal to the binding's.
+func TestFrontendKnowsSettingsErrors(t *testing.T) {
+	src, err := os.ReadFile("../../../frontend/src/bindings/settings.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `"`+ErrProfileInvalid.Error()+`"`) {
+		t.Errorf("frontend/src/bindings/settings.ts does not list the error %q", ErrProfileInvalid)
+	}
+}
+
 // TestFrontendCallsBoundNames keeps the method names in the frontend wrappers equal to what Wails binds: the package
 // path, the type name and the method name (bindings.go in Wails v3). The page calls them by name, so a rename on
 // either side would only fail at run time.

@@ -35,6 +35,8 @@ const recording = {
 const job = {
   id: "j1", type: "stt", status: "WAITING_FOR_POWER", waiting: true, attempts: 0, maxAttempts: 3, progressPercent: 0,
   lastError: "", createdAt: "2026-10-15T10:00:00Z", updatedAt: "2026-10-15T10:00:00Z", nextRunAt: "", runNowOffered: true,
+  // TASK-094: the assignment of a draft job; "" for the others.
+  assignmentId: "", assignmentTitle: "", assignmentSubject: "", label: "",
 };
 
 test("every waiting status has its own non-empty reason", () => {
@@ -169,4 +171,31 @@ test("the api calls the bound methods and checks the replies", async () => {
   await assert.rejects(activityApi(async () => { throw new Error(errorMessages.alreadyRunning); }).redoSummary("r1"), /already running/);
   await assert.rejects(activityApi(async () => ({})).listJobs(), /jobs: reply is not a list/);
   await assert.rejects(activityApi(async () => [{}]).listRecordings(), /recording/);
+});
+
+test("a draft job row is named by the core and opens its assignment (TASK-094)", async () => {
+  const { jobAssignment, jobTitle } = await import("../.test-build/activityView.js");
+  const draft = {
+    ...job, type: "homework_draft", assignmentId: "a1", assignmentTitle: "Задача 1", assignmentSubject: "Матанализ",
+    label: "Черновик: Задача 1 · Матанализ",
+  };
+  assert.deepEqual(parseJob(draft), draft);
+  assert.equal(jobTitle(draft), "Черновик: Задача 1 · Матанализ");
+  assert.equal(jobAssignment(draft), "a1");
+  // Without a label (another job, or the assignment is gone) the row keeps its type and opens nothing.
+  assert.equal(jobTitle({ ...draft, label: "" }), "Черновик домашнего задания");
+  assert.equal(jobTitle(job), jobTypeLabel("stt"));
+  assert.equal(jobAssignment(job), "");
+  for (const key of ["assignmentId", "assignmentTitle", "assignmentSubject", "label"]) {
+    assert.throws(() => parseJob({ ...draft, [key]: null }), /job/, key);
+  }
+
+  const { readFileSync } = await import("node:fs");
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /title=\{jobTitle\(j\)\}/);
+  assert.match(page, /\{assignment !== "" && onOpenAssignment && \(/);
+  assert.match(page, /onClick=\{\(\) => onOpenAssignment\(assignment\)\}/);
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /<RecordingsPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
+  assert.match(app, /onOpenAssignment=\{openAssignment\}/);
 });

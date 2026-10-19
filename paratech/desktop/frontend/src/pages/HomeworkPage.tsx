@@ -8,6 +8,7 @@ import {
   type GenerationStatus,
   type HomeworkApi,
   homeworkApi,
+  type SendFormat,
   type SendPreparation,
   type VersionText,
 } from "../bindings/homework";
@@ -16,16 +17,25 @@ import {
   assignmentDeliveryView,
   blockedByEmail,
   type ChipView,
+  defaultSendFormat,
   deliveriesInFlight,
   deliveryPollMs,
   deliveryView,
+  docxSaveView,
+  draftPollMs,
+  draftStatusStep,
   dueText,
   errorText,
+  type FollowedGeneration,
+  followGeneration,
+  generateOffer,
+  generatingLabel,
   generationGoesOn,
   generationPollMs,
+  generationRunning,
   generationView,
   isStale,
-  regenerateBlockedReason,
+  sendFormatChange,
   versionTitle,
 } from "../homeworkView";
 import { lessonText } from "../lessonLabel";
@@ -40,7 +50,8 @@ import { TranscriptLinks } from "./TranscriptLinks";
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
 // instructions with «Сгенерировать заново», the version history, the export to a file and the send by email through
 // the confirmation dialog (AC-13, AC-14, AC-15). The core decides what can be sent and what to offer for an email; the
-// page shows it. Assignment, draft and instruction texts may be model output: they are plain React text and textarea
+// page shows it. Whether a draft is being generated comes from the core too (TASK-094): the page asks it while open,
+// so a generation started earlier or elsewhere and a version made meanwhile show up without opening the page again. Assignment, draft and instruction texts may be model output: they are plain React text and textarea
 // values only, never HTML (hard rule 3).
 // openAssignment: the assignment to open at once (a jump from the summary, TASK-087); "" shows the list.
 export function HomeworkPage(props: { openAssignment?: string }) {
@@ -173,15 +184,15 @@ interface Message {
   at: "draft" | "mail";
 }
 
-/** The open send dialog: the core's preparation and the version written to the attached file. */
+/**
+ * The open send dialog: the core's preparation and the version written to the attached file; switching while another
+ * format is prepared, problem why the last switch failed ("" none).
+ */
 interface SendOpen {
   prep: SendPreparation;
   version: number;
-}
-
-interface Generation {
-  jobId: string;
-  status: GenerationStatus;
+  switching: boolean;
+  problem: string;
 }
 
 function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => void }) {
@@ -193,12 +204,14 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [instruction, setInstruction] = useState("");
-  const [gen, setGen] = useState<Generation | null>(null);
+  const [gen, setGen] = useState<FollowedGeneration | null>(null);
   const [deliveries, setDeliveries] = useState<DeliveryItem[] | null>(null);
   const [deliveriesError, setDeliveriesError] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
   const [sendOpen, setSendOpen] = useState<SendOpen | null>(null);
+  // The attachment the next send dialog starts with: the student's last choice on this page.
+  const [sendFormat, setSendFormat] = useState<SendFormat>(defaultSendFormat);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const mounted = useRef(true);
@@ -207,6 +220,11 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const deliveriesAgain = useRef(false);
   // The send the open dialog shows: cancelled in the core if the page goes away without an answer.
   const pendingSend = useRef("");
+  const switchingFormat = useRef(false);
+  // What the draft poll compares with and how it may reload; updated on every render.
+  const known = useRef({ latest: 0, job: "", keepText: false, keepShown: false });
+  // Asks the core at once instead of at the next tick (after a refused second generation).
+  const pollDraftNow = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     mounted.current = true;
@@ -220,14 +238,22 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     };
   }, [api]);
 
-  // keepText: the fields keep what the student typed; otherwise they show the latest version.
+  // keepText: the fields keep what the student typed; otherwise they show the latest version. keepShown: the shown
+  // version and the fields stay (an older version is open or a send dialog shows this one).
   const reload = useCallback(
-    async (keepText: boolean) => {
+    async (keepText: boolean, keepShown = false) => {
       const d = await api.openAssignment(id);
       if (!mounted.current) {
         return;
       }
       setDetail(d);
+      const running = d.generation;
+      if (running !== null) {
+        setGen((g) => (g !== null && g.jobId === running.jobId ? g : followGeneration(running)));
+      }
+      if (keepShown) {
+        return;
+      }
       setShown(d.latest);
       if (!keepText) {
         setTitle(d.latest?.title ?? "");
@@ -326,6 +352,50 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     };
   }, [api, jobId, reload]);
 
+  // While the page is open it asks the core for a newer version and for a generation it does not follow yet. One call
+  // at a time; a failed one is retried at the next tick.
+  useEffect(() => {
+    let stopped = false;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      inFlight = true;
+      try {
+        const st = await api.draftStatus(id);
+        if (stopped) {
+          return;
+        }
+        const k = known.current;
+        const step = draftStatusStep(st, k.latest, k.job);
+        if (step.follow !== null) {
+          setGen(step.follow);
+        }
+        if (step.reload) {
+          await reload(k.keepText, k.keepShown);
+        }
+      } catch {
+        // Nothing to show: the page keeps what it has and asks again.
+      } finally {
+        inFlight = false;
+      }
+      if (!stopped) {
+        timer = setTimeout(() => void tick(), draftPollMs);
+      }
+    };
+    pollDraftNow.current = () => {
+      if (!stopped && !inFlight) {
+        clearTimeout(timer);
+        void tick();
+      }
+    };
+    timer = setTimeout(() => void tick(), draftPollMs);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      pollDraftNow.current = () => undefined;
+    };
+  }, [api, id, reload]);
+
   async function act(key: string, action: () => Promise<void>, at: Message["at"] = "draft") {
     if (acting.current) {
       return;
@@ -337,7 +407,12 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       await action();
     } catch (err) {
       if (mounted.current) {
-        setMessage({ kind: "fail", text: errorText(err), at });
+        // A refused second generation is no failure: the running one is picked up and shown.
+        const running = generationRunning(err);
+        setMessage({ kind: running ? "wait" : "fail", text: errorText(err), at });
+        if (running) {
+          pollDraftNow.current();
+        }
         if (isStale(err)) {
           // Unsaved text stays in the fields, now over the new latest version.
           await reload(dirty).catch(() => undefined);
@@ -361,7 +436,13 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const readOnly = !isLatest || generating;
   const idle = busy === "" && sendOpen === null && sendAgain === null;
   const savedReason = dirty ? "Сначала сохраните или отмените правку." : undefined;
-  const regenerateReason = regenerateBlockedReason(shown !== null && !isLatest, dirty);
+  const offer = generateOffer({ hasDraft: latest !== null, generating, olderShown: shown !== null && !isLatest, dirty });
+  known.current = {
+    latest: latest?.number ?? 0,
+    job: gen?.jobId ?? "",
+    keepText: dirty,
+    keepShown: (shown !== null && !isLatest) || sendOpen !== null,
+  };
 
   const save = () =>
     act("save", async () => {
@@ -385,7 +466,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     act("generate", async () => {
       // A new version always starts from the latest one; the button is off while an older one is shown.
       const g = await api.generate(id, latest?.number ?? 0, instruction);
-      setGen({ jobId: g.jobId, status: { state: "generating", message: "" } });
+      setGen({ jobId: g.jobId, status: { state: "generating", message: "", percent: 0 } });
     });
 
   const showVersion = (n: number) =>
@@ -412,15 +493,34 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       setMessage({ kind: "ok", text: `Версия ${r.version} сохранена в файл «${r.fileName}».`, at: "draft" });
     });
 
-  // The shown version goes to the file the email attaches; the core then checks the send and fills the dialog. A
+  // «Сохранить в Word (.docx)»: the core asks where in the native save dialog and answers with a fixed text.
+  const saveWord = () =>
+    act("docx", async () => {
+      if (shown === null) {
+        return;
+      }
+      const r = await api.saveDocx(id, shown.number);
+      if (mounted.current) {
+        const v = docxSaveView(r);
+        setMessage({ kind: v.kind, text: v.text, at: "draft" });
+      }
+    });
+
+  // Version n goes to the file the email attaches in format; the core then checks the send and fills the dialog. A
   // refused export (exportLocked: an earlier email is unresolved) throws here, so no send is prepared.
+  async function prepareSendAs(format: SendFormat, n: number): Promise<SendOpen> {
+    const exported = format === "docx" ? await api.exportDocx(id, n) : await api.exportDraft(id, n);
+    const prep = await api.prepareSend(id, format);
+    return { prep, version: exported.version, switching: false, problem: "" };
+  }
+
   const startSend = () =>
     act("send", async () => {
       if (shown === null) {
         return;
       }
-      const exported = await api.exportDraft(id, shown.number);
-      const prep = await api.prepareSend(id);
+      const open = await prepareSendAs(sendFormat, shown.number);
+      const prep = open.prep;
       if (!mounted.current) {
         if (prep.status === "ready") {
           void api.cancelSend(prep.proposalId).catch(() => undefined); // nobody saw this dialog
@@ -429,11 +529,51 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       }
       if (prep.status === "ready") {
         pendingSend.current = prep.proposalId;
-        setSendOpen({ prep, version: exported.version });
+        setSendOpen(open);
       } else {
         setMessage({ kind: "fail", text: prep.message, at: "draft" });
       }
     });
+
+  // Another attachment format in the dialog: a new export and preparation of the same version. Only a ready one
+  // replaces the shown send, which is then cancelled; otherwise the dialog keeps it and says why.
+  async function switchFormat(format: SendFormat) {
+    const open = sendOpen;
+    if (open === null || switchingFormat.current || !sendFormatChange(open.prep.attachmentFormat, format, open.switching)) {
+      return;
+    }
+    switchingFormat.current = true;
+    setSendOpen({ ...open, switching: true, problem: "" });
+    try {
+      const next = await prepareSendAs(format, open.version);
+      if (!mounted.current) {
+        if (next.prep.status === "ready") {
+          void api.cancelSend(next.prep.proposalId).catch(() => undefined); // nobody saw this dialog
+        }
+        return;
+      }
+      if (next.prep.status === "ready") {
+        const old = pendingSend.current;
+        pendingSend.current = next.prep.proposalId;
+        setSendOpen(next);
+        setSendFormat(format);
+        if (old !== "") {
+          void api.cancelSend(old).catch(() => undefined);
+        }
+      } else {
+        setSendOpen({ ...open, switching: false, problem: next.prep.message });
+      }
+    } catch (err) {
+      if (mounted.current) {
+        setSendOpen({ ...open, switching: false, problem: errorText(err) });
+        if (blockedByEmail(err)) {
+          void loadDeliveries();
+        }
+      }
+    } finally {
+      switchingFormat.current = false;
+    }
+  }
 
   const sendClosed = (result: SendResult) => {
     pendingSend.current = "";
@@ -583,6 +723,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
               >
                 Сохранить в файл
               </Button>
+              <Button icon="down" busy={busy === "docx"} busyLabel="Сохранение…" disabled={!idle || dirty} onClick={saveWord}>
+                Сохранить в Word (.docx)
+              </Button>
               <Button
                 icon="mail"
                 busy={busy === "send"}
@@ -611,7 +754,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
               className="input hw-instr"
               rows={3}
               value={instruction}
-              readOnly={generating}
+              disabled={offer.instructionDisabled}
               onChange={(e) => setInstruction(e.target.value)}
             />
           )}
@@ -620,12 +763,12 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           <Button
             variant={latest === null ? "primary" : "secondary"}
             busy={generating || busy === "generate"}
-            busyLabel="Генерация…"
-            disabled={!idle || generating || regenerateReason !== undefined}
-            disabledReason={regenerateReason}
+            busyLabel={generatingLabel}
+            disabled={!idle || offer.disabled}
+            disabledReason={offer.reason}
             onClick={generate}
           >
-            {latest === null ? "Сгенерировать черновик" : "Сгенерировать заново"}
+            {offer.label}
           </Button>
         </div>
         {genView && (
@@ -723,7 +866,17 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         </div>
       )}
 
-      {sendOpen && <SendDialog api={api} prep={sendOpen.prep} version={sendOpen.version} onClose={sendClosed} />}
+      {sendOpen && (
+        <SendDialog
+          api={api}
+          prep={sendOpen.prep}
+          version={sendOpen.version}
+          switching={sendOpen.switching}
+          problem={sendOpen.problem}
+          onFormat={(f) => void switchFormat(f)}
+          onClose={sendClosed}
+        />
+      )}
       {sendAgain && <SendAgainDialog api={api} delivery={sendAgain} onClose={sendAgainClosed} />}
     </section>
   );

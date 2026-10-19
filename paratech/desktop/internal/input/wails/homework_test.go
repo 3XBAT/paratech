@@ -735,7 +735,7 @@ func TestFrontendKnowsHomeworkErrors(t *testing.T) {
 		ErrHomeworkUnavailable, ErrHomeworkInvalidID, ErrHomeworkNotFound, ErrDraftVersionNotFound, ErrDraftStale,
 		ErrDraftInvalid, ErrDraftFull, ErrInstructionInvalid, ErrGenerateRetries, ErrGenerationNotFound, ErrSendNotFound,
 		ErrSendCannotConfirm, ErrSendAlreadyDecided, ErrSendStale, ErrSendUnresolved, ErrSendIncomplete, ErrExportLocked,
-		ErrDeliveryNotFound, ErrDeliveryActionInvalid,
+		ErrDeliveryNotFound, ErrDeliveryActionInvalid, ErrGenerationRunning, ErrSendFormat, // +2: TASK-094
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/homework.ts does not list the error %q", e)

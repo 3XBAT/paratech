@@ -1,7 +1,8 @@
 // Homework page bindings: calls into the Go core (internal/input/wails/homework.go). The core decides what is
 // offered (canMarkSent, canSendAgain, the send dialog's status) and writes every text; the page only shows them.
 // Titles, bodies, instructions and descriptions may be model text: show them as plain text, never as HTML.
-// Sending: exportDraft(shown version) -> prepareSend -> the confirmation dialog -> confirmSend or cancelSend.
+// Sending: exportDraft or exportDocx (shown version) -> prepareSend(format) -> the confirmation dialog -> confirmSend
+// (with the prepared format) or cancelSend. Changing the format in the dialog is a new export and prepareSend.
 // confirmSend is the only call that leads to an email; call it only from the dialog's confirm button (AC-14).
 
 import { type LessonSource, lessonSource } from "../lessonLabel.js";
@@ -54,11 +55,27 @@ export interface VersionText {
   createdAt: string;
 }
 
-/** An opened assignment: its versions in order and the latest text (null: no draft yet). */
+/** An opened assignment: its versions in order, the latest text (null: no draft yet) and the running generation. */
 export interface AssignmentDetail {
   assignment: AssignmentItem;
   versions: VersionItem[];
   latest: VersionText | null;
+  /** The generation that is pending or running in the core (TASK-094); null: none. */
+  generation: ActiveGeneration | null;
+}
+
+/** A pending or running generation of an assignment: its job (for generationStatus) and its state. */
+export interface ActiveGeneration {
+  jobId: string;
+  state: GenerationState;
+  message: string;
+  percent: number;
+}
+
+/** The cheap state of a draft to poll: latestVersion larger than the shown one means a new version (0: no draft). */
+export interface DraftStatus {
+  latestVersion: number;
+  generation: ActiveGeneration | null;
 }
 
 /** The generation job to follow with generationStatus. */
@@ -73,12 +90,30 @@ export type GenerationState = "generating" | "waitingNetwork" | "waitingQuota" |
 export interface GenerationStatus {
   state: GenerationState;
   message: string;
+  /** The progress the job reported, 0..100 (100 when done). */
+  percent: number;
 }
 
 /** The version written to the file a send attaches. */
 export interface ExportResult {
   version: number;
   fileName: string;
+}
+
+/** The attachment of a send: the Word file or the text file. */
+export type SendFormat = "docx" | "txt";
+
+export type DocxSaveStatus = "saved" | "cancelled" | "failed";
+
+/**
+ * «Сохранить в Word (.docx)»: the core's fixed text, the saved file's base name ("" unless saved) and the Word file a
+ * send attaches ("" when it could not be updated; message says why).
+ */
+export interface DocxSaveResult {
+  status: DocxSaveStatus;
+  message: string;
+  name: string;
+  attachmentName: string;
 }
 
 /** "ready": the dialog shows recipient, subject and attachment and offers the confirmation; "rejected": message only. */
@@ -96,6 +131,8 @@ export interface SendPreparation {
   attachmentName: string;
   /** Bytes. */
   attachmentSize: number;
+  /** The format this preparation is for; confirmSend sends it back. */
+  attachmentFormat: SendFormat;
 }
 
 /** One email of an assignment, newest first. Status is the core's code: PENDING, SENDING, SENT, FAILED, UNKNOWN. */
@@ -121,12 +158,15 @@ export interface DeliveryItem {
 export const methods = {
   listAssignments: "paratech/desktop/internal/input/wails.HomeworkService.ListAssignments",
   openAssignment: "paratech/desktop/internal/input/wails.HomeworkService.OpenAssignment",
+  draftStatus: "paratech/desktop/internal/input/wails.HomeworkService.DraftStatus",
   correctLesson: "paratech/desktop/internal/input/wails.HomeworkService.CorrectLesson",
   draftVersion: "paratech/desktop/internal/input/wails.HomeworkService.DraftVersion",
   generate: "paratech/desktop/internal/input/wails.HomeworkService.Generate",
   generationStatus: "paratech/desktop/internal/input/wails.HomeworkService.GenerationStatus",
   editDraft: "paratech/desktop/internal/input/wails.HomeworkService.EditDraft",
   exportDraft: "paratech/desktop/internal/input/wails.HomeworkService.ExportDraft",
+  exportDocx: "paratech/desktop/internal/input/wails.HomeworkService.ExportDocx",
+  saveDocx: "paratech/desktop/internal/input/wails.HomeworkService.SaveDocx",
   prepareSend: "paratech/desktop/internal/input/wails.HomeworkService.PrepareSend",
   confirmSend: "paratech/desktop/internal/input/wails.HomeworkService.ConfirmSend",
   cancelSend: "paratech/desktop/internal/input/wails.HomeworkService.CancelSend",
@@ -146,6 +186,9 @@ export const errorMessages = {
   draftFull: "У черновика уже 100 версий: больше добавить нельзя.",
   instructionInvalid: "Инструкция слишком длинная (больше 4 КБ) или содержит недопустимые символы.",
   generateRetries: "Эта генерация уже много раз не удалась. Измените инструкцию или текст черновика.",
+  /** generate refused: a generation of the assignment is pending or running. */
+  generationRunning: "Черновик уже готовится. Дождитесь окончания и повторите.",
+  sendFormat: "Неизвестный формат вложения: выберите .docx или .txt.",
   generationNotFound: "Генерация не найдена: обновите страницу.",
   sendNotFound: "Отправка не найдена: подготовьте её ещё раз.",
   sendCannotConfirm: "Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.",
@@ -173,6 +216,10 @@ export const generationStates: readonly GenerationState[] = [
 ];
 
 export const sendStatuses: readonly SendStatus[] = ["ready", "rejected"];
+
+export const sendFormats: readonly SendFormat[] = ["docx", "txt"];
+
+export const docxSaveStatuses: readonly DocxSaveStatus[] = ["saved", "cancelled", "failed"];
 
 function record(raw: unknown, what: string): Record<string, unknown> {
   if (typeof raw !== "object" || raw === null) {
@@ -276,7 +323,29 @@ export function parseAssignmentDetail(raw: unknown): AssignmentDetail {
     assignment: parseAssignment(r.assignment),
     versions: list(r.versions, `${w} versions`, parseVersionItem),
     latest: r.latest === null ? null : parseVersionText(r.latest),
+    generation: parseActiveGeneration(r.generation, w),
   };
+}
+
+/** null stays null: no generation is running. */
+export function parseActiveGeneration(raw: unknown, what: string): ActiveGeneration | null {
+  if (raw === null) {
+    return null;
+  }
+  const w = `${what} generation`;
+  const r = record(raw, w);
+  return {
+    jobId: str(r, "jobId", w),
+    state: oneOf(r, "state", generationStates, w),
+    message: str(r, "message", w),
+    percent: num(r, "percent", w),
+  };
+}
+
+export function parseDraftStatus(raw: unknown): DraftStatus {
+  const w = "draft status";
+  const r = record(raw, w);
+  return { latestVersion: num(r, "latestVersion", w), generation: parseActiveGeneration(r.generation, w) };
 }
 
 export function parseGenerateStarted(raw: unknown): GenerateStarted {
@@ -288,13 +357,24 @@ export function parseGenerateStarted(raw: unknown): GenerateStarted {
 export function parseGenerationStatus(raw: unknown): GenerationStatus {
   const w = "generation status";
   const r = record(raw, w);
-  return { state: oneOf(r, "state", generationStates, w), message: str(r, "message", w) };
+  return { state: oneOf(r, "state", generationStates, w), message: str(r, "message", w), percent: num(r, "percent", w) };
 }
 
 export function parseExportResult(raw: unknown): ExportResult {
   const w = "export result";
   const r = record(raw, w);
   return { version: num(r, "version", w), fileName: str(r, "fileName", w) };
+}
+
+export function parseDocxSaveResult(raw: unknown): DocxSaveResult {
+  const w = "docx save result";
+  const r = record(raw, w);
+  return {
+    status: oneOf(r, "status", docxSaveStatuses, w),
+    message: str(r, "message", w),
+    name: str(r, "name", w),
+    attachmentName: str(r, "attachmentName", w),
+  };
 }
 
 export function parseSendPreparation(raw: unknown): SendPreparation {
@@ -309,6 +389,7 @@ export function parseSendPreparation(raw: unknown): SendPreparation {
     subject: str(r, "subject", w),
     attachmentName: str(r, "attachmentName", w),
     attachmentSize: num(r, "attachmentSize", w),
+    attachmentFormat: oneOf(r, "attachmentFormat", sendFormats, w),
   };
 }
 
@@ -334,6 +415,8 @@ export function parseDelivery(raw: unknown): DeliveryItem {
 export interface HomeworkApi {
   listAssignments(): Promise<AssignmentItem[]>;
   openAssignment(id: string): Promise<AssignmentDetail>;
+  /** The cheap poll of an open assignment: a larger latestVersion than shown means reload with openAssignment. */
+  draftStatus(id: string): Promise<DraftStatus>;
   /** Stores the student's subject and teacher of the assignment; "" removes that correction. Returns it as shown. */
   correctLesson(id: string, subject: string, teacher: string): Promise<AssignmentItem>;
   draftVersion(id: string, version: number): Promise<VersionText>;
@@ -343,10 +426,17 @@ export interface HomeworkApi {
   /** Stores the student's text over version base as a new version. */
   editDraft(id: string, base: number, title: string, body: string): Promise<VersionText>;
   exportDraft(id: string, version: number): Promise<ExportResult>;
-  /** Builds the confirmation dialog; sends nothing. */
-  prepareSend(id: string): Promise<SendPreparation>;
-  /** The dialog's confirm button only: confirms the shown send and subject, creates the email (AC-14). */
-  confirmSend(proposalId: string, subject: string): Promise<void>;
+  /** Writes the version as the Word file a send in .docx attaches. */
+  exportDocx(id: string, version: number): Promise<ExportResult>;
+  /** «Сохранить в Word (.docx)»: the core asks where in the native save dialog. */
+  saveDocx(id: string, version: number): Promise<DocxSaveResult>;
+  /** Builds the confirmation dialog for the attachment in format; sends nothing. */
+  prepareSend(id: string, format: SendFormat): Promise<SendPreparation>;
+  /**
+   * The dialog's confirm button only: confirms the shown send, subject and attachment format, creates the email
+   * (AC-14).
+   */
+  confirmSend(proposalId: string, subject: string, format: SendFormat): Promise<void>;
   /** The dialog's cancel button: the send can never happen afterwards. */
   cancelSend(proposalId: string): Promise<void>;
   deliveries(id: string): Promise<DeliveryItem[]>;
@@ -360,6 +450,7 @@ export function homeworkApi(call: CallByName): HomeworkApi {
   return {
     listAssignments: async () => list(await call(methods.listAssignments), "assignments", parseAssignment),
     openAssignment: async (id) => parseAssignmentDetail(await call(methods.openAssignment, id)),
+    draftStatus: async (id) => parseDraftStatus(await call(methods.draftStatus, id)),
     correctLesson: async (id, subject, teacher) =>
       parseAssignment(await call(methods.correctLesson, id, subject, teacher)),
     draftVersion: async (id, version) => parseVersionText(await call(methods.draftVersion, id, version)),
@@ -368,9 +459,11 @@ export function homeworkApi(call: CallByName): HomeworkApi {
     generationStatus: async (jobId) => parseGenerationStatus(await call(methods.generationStatus, jobId)),
     editDraft: async (id, base, title, body) => parseVersionText(await call(methods.editDraft, id, base, title, body)),
     exportDraft: async (id, version) => parseExportResult(await call(methods.exportDraft, id, version)),
-    prepareSend: async (id) => parseSendPreparation(await call(methods.prepareSend, id)),
-    confirmSend: async (proposalId, subject) => {
-      await call(methods.confirmSend, proposalId, subject);
+    exportDocx: async (id, version) => parseExportResult(await call(methods.exportDocx, id, version)),
+    saveDocx: async (id, version) => parseDocxSaveResult(await call(methods.saveDocx, id, version)),
+    prepareSend: async (id, format) => parseSendPreparation(await call(methods.prepareSend, id, format)),
+    confirmSend: async (proposalId, subject, format) => {
+      await call(methods.confirmSend, proposalId, subject, format);
     },
     cancelSend: async (proposalId) => {
       await call(methods.cancelSend, proposalId);
