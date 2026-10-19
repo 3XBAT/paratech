@@ -1,12 +1,17 @@
 package whispercli
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/domain/transcription/values"
 )
 
 // Priorities fakeProcess prints on Windows.
@@ -85,5 +90,41 @@ func TestRunPolicyDefaultsToTheCPUs(t *testing.T) {
 	}
 	if p := eng.runPolicy(shared.LoadMax); p.Threads() != min(runtime.NumCPU(), maxThreads) {
 		t.Errorf("max threads = %d, want every logical processor", p.Threads())
+	}
+}
+
+type attachFunc func(pid int) error
+
+func (f attachFunc) attach(pid int) error { return f(pid) }
+
+// A process left outside the job runs without the CPU cap: that is logged like a cap that cannot be set, once.
+func TestAttachFailureWarnsOfTheMissingCap(t *testing.T) {
+	failing := attachFunc(func(int) error { return errors.New("access denied") })
+	ok := attachFunc(func(int) error { return nil })
+	tests := []struct {
+		name   string
+		grp    attacher
+		cap    int
+		capErr error
+		warn   bool
+	}{
+		{"capped mode, attach fails", failing, 40, nil, true},
+		{"capped mode, attached", ok, 40, nil, false},
+		{"no cap in the mode", failing, 0, nil, false},
+		{"cap error already logged", failing, 40, errors.New("create job object"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			e := &Engine{log: slog.New(slog.NewTextHandler(&buf, nil))}
+			policy, err := values.NewRunPolicy(2, true, tt.cap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.attach(tt.grp, 1234, policy, tt.capErr)
+			if got := strings.Contains(buf.String(), "without the CPU cap"); got != tt.warn {
+				t.Errorf("warned = %v, want %v; log %q", got, tt.warn, buf.String())
+			}
+		})
 	}
 }

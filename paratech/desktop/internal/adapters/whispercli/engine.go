@@ -359,6 +359,25 @@ func (e *Engine) newRunDir() (string, error) {
 	return dir, nil
 }
 
+// attacher is the part of procGroup that attach uses; tests fake it.
+type attacher interface {
+	attach(pid int) error
+}
+
+// attach puts the process into the group. Outside the job the CPU cap does not hold, so a failure is logged like a
+// cap that cannot be set, unless that was already logged or the mode has no cap.
+func (e *Engine) attach(grp attacher, pid int, policy values.RunPolicy, capErr error) {
+	err := grp.attach(pid)
+	if err != nil && capErr == nil && policy.CPUCapPercent() > 0 {
+		e.warnUncapped(policy, fmt.Errorf("attach to the job object: %w", err))
+	}
+}
+
+func (e *Engine) warnUncapped(policy values.RunPolicy, err error) {
+	e.log.Warn("speech recognition runs without the CPU cap of its load mode",
+		slog.Int("cap_percent", policy.CPUCapPercent()), slog.Any("err", err))
+}
+
 // run starts the process with the priority and CPU cap of policy and waits for it. It returns nil only for exit code 0.
 // out, if not nil, reads stdout.
 func (e *Engine) run(ctx context.Context, runDir string, args []string, policy values.RunPolicy, sink *stderrSink,
@@ -375,8 +394,7 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, policy v
 	grp, capErr := newProcGroup(policy.CPUCapPercent())
 	defer grp.close()
 	if capErr != nil {
-		e.log.Warn("speech recognition runs without the CPU cap of its load mode",
-			slog.Int("cap_percent", policy.CPUCapPercent()), slog.Any("err", capErr))
+		e.warnUncapped(policy, capErr)
 	}
 
 	cmd := exec.CommandContext(runCtx, e.cfg.Binary, args...) //nolint:gosec // binary and arguments are validated (args.go)
@@ -400,7 +418,7 @@ func (e *Engine) run(ctx context.Context, runDir string, args []string, policy v
 	}
 
 	// Best effort: without the job only the process itself is killed (whisper-cli starts no children).
-	_ = grp.attach(cmd.Process.Pid)
+	e.attach(grp, cmd.Process.Pid, policy, capErr)
 
 	err := cmd.Wait()
 	sink.stop()
