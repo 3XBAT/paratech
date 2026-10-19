@@ -112,8 +112,8 @@ type Recorder interface {
 	// running capture.
 	Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (values.AssembledTrack, error)
 
-	// Switch makes the running capture of id record source from now on, into the same chunk directory (TASK-082: the
-	// user follows the silent-source advice). The new source is resolved first: an app that does not run fails with an
+	// Switch makes the running capture of id record source from now on, into the same chunk directory
+	// (PRD section 6.3, TASK-082: the user follows the silent-source advice). The new source is resolved first: an app that does not run fails with an
 	// error wrapping recording.ErrSourceNotRunning, and on any failure the capture goes on with the source it had. There
 	// is one capture per recording at any time. It returns once the new source is captured, or with an error when the
 	// capture is stopping or ended.
@@ -125,14 +125,16 @@ type Recorder interface {
 // elsewhere it fails, and no advice is given).
 type AudioApps interface {
 	// List returns the apps with a visible window in this Windows session except this app, with Sounding and a
-	// readable Name. It returns soon after ctx ends, and within a few seconds anyway.
+	// readable Name (PRD section 6.3). It returns soon after ctx ends, and within a few seconds anyway.
 	List(ctx context.Context) ([]values.AudioApp, error)
 }
 
-// AdviceListener is told when the silent-source advice of the running recording changes (TASK-082), so that the
-// popup can show it without taking the focus. The zero advice means none any more. Implemented in app over the
+// AdviceListener is told when the silent-source advice of the running recording changes (PRD sections 6.1 and 6.3,
+// TASK-082), so that the popup can show it without taking the focus. The zero advice means none any more. Implemented in app over the
 // recording prompt. It must return quickly; an error is only logged.
 type AdviceListener interface {
+	// SourceAdviceChanged shows advice for the recording id, or withdraws it when advice is zero (PRD section 6.1:
+	// the popup never takes the focus).
 	SourceAdviceChanged(ctx context.Context, id shared.RecordingID, advice values.SourceAdvice) error
 }
 
