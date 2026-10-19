@@ -132,6 +132,10 @@ type LessonReader interface {
 	// Get loads a live lesson (PRD section 11). It returns an error wrapping shared.ErrNotFound if there is none or it
 	// was removed from the schedule.
 	Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
+
+	// ListStartingBetween returns the live lessons whose start lies in [from, to), ordered by start; the
+	// post-processing looks up the next lesson of the subject in it (TASK-093). Soft-deleted lessons are not listed.
+	ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
 }
 
 // ProposalRepository stores the actions the LLM proposed, with their validation and confirmation state

@@ -19,7 +19,13 @@
 // name fields, never model text. A draft holds a title and a body only; recipients, paths and calendars are never part
 // of an answer (docs/refs/prompt-injection.md rule 2), and extracted deadlines are proposals, not actions.
 //
+// Lesson context (TASK-093). summary, extract_homework_deadlines and lecture_text carry the lesson as untrusted data
+// (LessonInfo): title, subject, kind, teacher, start and the start of the next lesson of the same subject, which
+// resolves "by the next class". The kind, chosen by the app, also selects a constant sentence of the summary and
+// lecture text instructions (InstructionsFor).
+//
 // lecture_text is sent per part of the transcript (BuildLectureText, LectureTextVersion): the segments with their
-// indexes and start times, the end of the previous part as context and the lesson title and subject, all as untrusted
-// data. The lesson kind only selects a constant sentence of the instructions (LectureTextInstructions).
+// indexes and start times, the end of the previous part as context and the lesson context, all as untrusted data.
+//
+// Changing the prompts and checking their quality: docs/refs/prompts.md.
 package prompts

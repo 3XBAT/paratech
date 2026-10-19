@@ -9,12 +9,18 @@ import (
 	"paratech/desktop/internal/domain/coursework/values"
 )
 
-var lessonStart = time.Date(2026, 10, 14, 10, 0, 0, 0, time.FixedZone("MSK", 3*60*60))
+var (
+	lessonStart = time.Date(2026, 10, 14, 10, 0, 0, 0, time.FixedZone("MSK", 3*60*60))
+	nextStart   = lessonStart.Add(7 * 24 * time.Hour)
+)
 
 // full returns material with every field set, so each test can see what an operation drops.
 func full() Material {
 	return Material{
-		Lesson:         Lesson{Title: "  Linear algebra  ", Start: lessonStart, Subject: " Mathematics ", Teacher: " Ivanova ", Kind: values.LessonKindSeminar},
+		Lesson: Lesson{
+			Title: "  Linear algebra  ", Start: lessonStart, Subject: " Mathematics ", Teacher: " Ivanova ", Kind: values.LessonKindSeminar,
+			NextStart: nextStart,
+		},
 		Transcript:     []Segment{{StartMs: 0, EndMs: 900, Text: " Hello. "}, {StartMs: 900, EndMs: 950, Text: "  "}, {StartMs: 1000, EndMs: 2000, Text: "Solve 1-5."}},
 		Summary:        "SUMMARY-TEXT",
 		Assignment:     Assignment{Title: "Exercises 1-5", Description: "From chapter 2.", Due: lessonStart.Add(48 * time.Hour)},
@@ -29,11 +35,14 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 		want Context
 	}{
 		{values.OperationSummary, Context{
-			operation: values.OperationSummary, lessonTitle: "Linear algebra", transcript: "Hello.\nSolve 1-5.",
+			operation: values.OperationSummary, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
+			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
+			nextLessonStart: nextStart, transcript: "Hello.\nSolve 1-5.",
 		}},
 		{values.OperationExtractHomework, Context{
-			operation: values.OperationExtractHomework, lessonTitle: "Linear algebra", lessonStart: lessonStart,
-			transcript: "Hello.\nSolve 1-5.",
+			operation: values.OperationExtractHomework, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
+			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
+			nextLessonStart: nextStart, transcript: "Hello.\nSolve 1-5.",
 		}},
 		{values.OperationHomeworkDraft, Context{
 			operation: values.OperationHomeworkDraft, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
@@ -43,7 +52,8 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 		}},
 		{values.OperationLectureText, Context{
 			operation: values.OperationLectureText, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
-			lessonKind: values.LessonKindSeminar, transcript: "Hello.\nSolve 1-5.",
+			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
+			nextLessonStart: nextStart, transcript: "Hello.\nSolve 1-5.",
 		}},
 	}
 	for _, tc := range cases {
@@ -90,6 +100,11 @@ func TestSelectRejects(t *testing.T) {
 		{"lecture text without transcript", values.OperationLectureText, with(func(m *Material) { m.Transcript = nil }), ErrMissingContext},
 		{"lecture text subject with newline", values.OperationLectureText, with(func(m *Material) { m.Lesson.Subject = "a\nb" }), ErrInvalidMaterial},
 		{"lecture text unknown kind", values.OperationLectureText, with(func(m *Material) { m.Lesson.Kind = "exam" }), ErrInvalidMaterial},
+		{"summary unknown kind", values.OperationSummary, with(func(m *Material) { m.Lesson.Kind = "exam" }), ErrInvalidMaterial},
+		{"extract teacher with newline", values.OperationExtractHomework, with(func(m *Material) { m.Lesson.Teacher = "a\nb" }), ErrInvalidMaterial},
+		{"summary subject with line separator", values.OperationSummary, with(func(m *Material) { m.Lesson.Subject = "a b" }), ErrInvalidMaterial},
+		{"next lesson at the lesson start", values.OperationExtractHomework, with(func(m *Material) { m.Lesson.NextStart = lessonStart }), ErrInvalidMaterial},
+		{"next lesson before the lesson", values.OperationLectureText, with(func(m *Material) { m.Lesson.NextStart = lessonStart.Add(-time.Hour) }), ErrInvalidMaterial},
 		{"description with NUL", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Description = "a\x00b" }), ErrInvalidMaterial},
 		{"request too large", values.OperationHomeworkDraft, with(func(m *Material) { m.StudentRequest = strings.Repeat("x", MaxStudentRequestBytes+1) }), ErrInvalidMaterial},
 		{"summary invalid utf8", values.OperationHomeworkDraft, with(func(m *Material) { m.Summary = "\xff" }), ErrInvalidMaterial},
@@ -151,28 +166,45 @@ func TestSelectDraftWithDescriptionOnly(t *testing.T) {
 	}
 }
 
-func TestSubjectAndTeacherGoToTheDraftOnly(t *testing.T) {
+// TASK-092 sent the subject and teacher to the draft; TASK-093 sends them with every operation on the lesson.
+func TestSubjectAndTeacherGoToEveryLessonOperation(t *testing.T) {
+	start := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
 	m := Material{
-		Lesson:     Lesson{Title: "L", Start: time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC), Subject: " Физика ", Teacher: "Петров"},
+		Lesson:     Lesson{Title: "L", Start: start, Subject: " Физика ", Teacher: "Петров"},
 		Transcript: []Segment{{Text: "x"}},
 		Assignment: Assignment{Title: "T"},
 	}
-	c, err := Select(values.OperationHomeworkDraft, m)
-	if err != nil || c.LessonSubject() != "Физика" || c.LessonTeacher() != "Петров" {
-		t.Fatalf("draft: %q %q %v", c.LessonSubject(), c.LessonTeacher(), err)
-	}
-	for _, op := range []values.Operation{values.OperationSummary, values.OperationExtractHomework} {
+	for _, op := range []values.Operation{
+		values.OperationHomeworkDraft, values.OperationSummary, values.OperationExtractHomework, values.OperationLectureText,
+	} {
 		c, err := Select(op, m)
-		if err != nil || c.LessonSubject() != "" || c.LessonTeacher() != "" {
+		if err != nil || c.LessonSubject() != "Физика" || c.LessonTeacher() != "Петров" {
 			t.Fatalf("%s: %q %q %v", op, c.LessonSubject(), c.LessonTeacher(), err)
 		}
-	}
-
-	for _, bad := range []Lesson{{Subject: "a\nb"}, {Teacher: strings.Repeat("я", MaxTitleRunes+1)}} {
-		m.Lesson = bad
-		if _, err := Select(values.OperationHomeworkDraft, m); !errors.Is(err, ErrInvalidMaterial) {
-			t.Fatalf("lesson %+v: error = %v, want ErrInvalidMaterial", bad, err)
+		for _, bad := range []Lesson{{Subject: "a\nb", Start: start}, {Teacher: strings.Repeat("я", MaxTitleRunes+1), Start: start}} {
+			b := m
+			b.Lesson = bad
+			if _, err := Select(op, b); !errors.Is(err, ErrInvalidMaterial) {
+				t.Fatalf("%s: lesson %+v: error = %v, want ErrInvalidMaterial", op, bad, err)
+			}
 		}
+	}
+}
+
+// The next lesson anchors "by the next class"; without the lesson start it means nothing and is dropped.
+func TestSelectNextLessonStart(t *testing.T) {
+	m := full()
+	m.Lesson.Start = time.Time{}
+	c, err := Select(values.OperationSummary, m)
+	if err != nil || !c.NextLessonStart().IsZero() || !c.LessonStart().IsZero() {
+		t.Fatalf("summary without a start: next %v, err %v", c.NextLessonStart(), err)
+	}
+	c, err = Select(values.OperationExtractHomework, full())
+	if err != nil || !c.NextLessonStart().Equal(nextStart) {
+		t.Fatalf("extract: next %v, err %v", c.NextLessonStart(), err)
+	}
+	if c, err := Select(values.OperationHomeworkDraft, full()); err != nil || !c.NextLessonStart().IsZero() || !c.LessonStart().IsZero() {
+		t.Fatalf("draft keeps the lesson times: %v %v %v", c.LessonStart(), c.NextLessonStart(), err)
 	}
 }
 

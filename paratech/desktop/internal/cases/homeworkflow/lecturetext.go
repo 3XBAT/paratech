@@ -99,8 +99,7 @@ func (p *PostProcessor) lectureRequests(id shared.JobID, sel contextselection.Co
 	for i, part := range plan {
 		items := part.Items()
 		lp := prompts.LecturePart{
-			LessonTitle: sel.LessonTitle(), Subject: sel.LessonSubject(), Kind: sel.LessonKind(), Part: i + 1,
-			Parts: len(plan), ContextBefore: part.Context(), Segments: make([]prompts.LectureSegment, len(items)),
+			Lesson: prompts.LessonOf(sel), Part: i + 1, Parts: len(plan), ContextBefore: part.Context(), Segments: make([]prompts.LectureSegment, len(items)),
 		}
 		for j, it := range items {
 			lp.Segments[j] = prompts.LectureSegment{Index: it.Index, StartMs: it.StartMs, Text: it.Text}

@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
+	"paratech/desktop/internal/domain/schedule/services/nextlesson"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/transcript"
 )
@@ -27,6 +28,7 @@ const (
 	stepDocument   = "read document"
 	stepRecording  = "load recording"
 	stepLesson     = "load lesson"
+	stepSchedule   = "load next lesson"
 	stepContext    = "select context"
 	stepLLM        = "llm"
 	stepAnswer     = "check answer"
@@ -266,6 +268,9 @@ func askChecked[T any](ctx context.Context, p *PostProcessor, snap job.Snapshot,
 		}
 		ans, rejection := check(res.Output)
 		if rejection == nil {
+			p.log.Info("post-processing answer accepted", append([]any{
+				slog.String("job", snap.ID().String()), slog.String("type", string(snap.Type())), slog.Int("call", call),
+			}, versionAttrs(snap.Type())...)...)
 			return ans, nil
 		}
 
@@ -335,10 +340,21 @@ func (p *PostProcessor) rejected(snap job.Snapshot, call, reminders int, shape p
 		slog.Int("reminders_left", reminders), slog.Int("bytes", shape.Bytes), slog.String("start", shape.Start),
 		slog.Bool("truncated", shape.Truncated), slog.Any("cause", cause),
 	}
+	attrs = append(attrs, versionAttrs(snap.Type())...)
 	if shape.Truncated {
 		attrs = append(attrs, slog.String("hint", "likely cut off at the output limit; raise max_output of the model alias on the Hub"))
 	}
 	p.log.Warn("post-processing answer rejected", attrs...)
+}
+
+// versionAttrs name the prompts the requests of a job type are built with, so that runs can be compared in the log
+// (TASK-093). The lecture text has a version of its own.
+func versionAttrs(t job.Type) []any {
+	attrs := []any{slog.Int("prompts_version", prompts.Version)}
+	if t == LectureTextJobType {
+		attrs = append(attrs, slog.Int("lecture_text_version", prompts.LectureTextVersion))
+	}
+	return attrs
 }
 
 // load reads the transcript text and the lesson context of the job.
@@ -382,28 +398,48 @@ func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.T
 	if kept.Title() != "" {
 		in.material.Lesson.Title = kept.Title()
 		in.material.Lesson.Subject = kept.Subject()
+		in.material.Lesson.Teacher = kept.Teacher()
 		in.material.Lesson.Kind = values.LessonKindOf(kept.Kind())
 		if !kept.ScheduledStart().IsZero() {
 			in.material.Lesson.Start = kept.ScheduledStart().In(loc)
 		}
 	}
-	if rec.LessonID() == "" {
-		return in, nil
-	}
-	l, err := p.lessons.Get(ctx, rec.LessonID())
-	switch {
-	case errors.Is(err, shared.ErrNotFound):
-		// The lesson left the schedule: the snapshot or the recording start still anchors the dates.
-		return in, nil
-	case err != nil:
-		return lessonInput{}, p.retry(snap, stepLesson, ErrStorage, err)
-	}
-	in.lesson = l.ID()
-	if kept.Title() == "" {
-		c := l.Content()
-		in.material.Lesson = contextselection.Lesson{
-			Title: c.Title, Start: c.Start.In(loc), Subject: c.Subject, Kind: values.LessonKindOf(c.Kind.String()),
+	if rec.LessonID() != "" {
+		l, err := p.lessons.Get(ctx, rec.LessonID())
+		switch {
+		case errors.Is(err, shared.ErrNotFound):
+			// The lesson left the schedule: the snapshot or the recording start still anchors the dates.
+		case err != nil:
+			return lessonInput{}, p.retry(snap, stepLesson, ErrStorage, err)
+		default:
+			in.lesson = l.ID()
+			if kept.Title() == "" {
+				c := l.Content()
+				in.material.Lesson = contextselection.Lesson{
+					Title: c.Title, Start: c.Start.In(loc), Subject: c.Subject, Teacher: c.Teacher,
+					Kind: values.LessonKindOf(c.Kind.String()),
+				}
+			}
 		}
+	}
+	return p.withNextLesson(ctx, snap, rec.LessonID(), in)
+}
+
+// withNextLesson adds the start of the next lesson of the same subject (nextlesson.Next), which resolves "by the next
+// class" (TASK-093). An unknown subject adds nothing. A schedule read error is retried like the other reads of load:
+// the request must not depend on a passing storage error, and a local read rarely fails twice.
+func (p *PostProcessor) withNextLesson(ctx context.Context, snap job.Snapshot, self shared.LessonID, in lessonInput) (lessonInput, error) {
+	l := in.material.Lesson
+	cur := nextlesson.Current{ID: self, Subject: l.Subject, Title: l.Title, Start: l.Start}
+	if !cur.Known() {
+		return in, nil
+	}
+	list, err := p.lessons.ListStartingBetween(ctx, cur.Start, cur.Start.Add(nextlesson.Window))
+	if err != nil {
+		return lessonInput{}, p.retry(snap, stepSchedule, ErrStorage, err)
+	}
+	if next := nextlesson.Next(list, cur); next != nil {
+		in.material.Lesson.NextStart = next.Content().Start.In(l.Start.Location())
 	}
 	return in, nil
 }
