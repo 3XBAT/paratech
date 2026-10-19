@@ -710,7 +710,7 @@ func TestHomeworkJSONNames(t *testing.T) {
 		{ActiveGeneration{}, `{"jobId":"","state":"","message":"","percent":0}`},
 		{DraftStatus{}, `{"latestVersion":0,"generation":null}`},
 		{ExportResult{}, `{"version":0,"fileName":""}`},
-		{DocxSaveResult{}, `{"status":"","message":"","name":"","attachmentName":""}`},
+		{DocxSaveResult{}, `{"status":"","message":"","name":""}`},
 		{SendPreparation{}, `{"proposalId":"","status":"","reason":"","message":"","recipient":"","subject":"","attachmentName":"","attachmentSize":0,"attachmentFormat":""}`},
 		{DeliveryItem{}, `{"id":"","status":"","recipient":"","subject":"","attempts":0,"lastError":"","confirmedAt":"","sentAt":"","createdAt":"","canMarkSent":false,"canSendAgain":false,"notice":""}`},
 	}

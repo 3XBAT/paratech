@@ -196,14 +196,9 @@ test("a refused second generation is recognised and shown as the core's text", (
   assert.equal(errorText(new Error(errorMessages.sendFormat)), errorMessages.sendFormat);
 });
 
-test("the Word save line: saved with its file, saved without the attachment, cancelled, failed", () => {
-  const r = (over) => ({ status: "saved", message: "Файл Word сохранён.", name: "ДЗ.docx", attachmentName: "a1.docx", ...over });
+test("the Word save line: saved with its file, cancelled, failed", () => {
+  const r = (over) => ({ status: "saved", message: "Файл Word сохранён.", name: "ДЗ.docx", ...over });
   assert.deepEqual(docxSaveView(r({})), { kind: "ok", text: "Файл Word сохранён. Файл: «ДЗ.docx»." });
-  const notAttached = "Файл Word сохранён, но для письма он не обновлён: предыдущее письмо с этим заданием ещё не решено.";
-  assert.deepEqual(docxSaveView(r({ message: notAttached, attachmentName: "" })), {
-    kind: "wait",
-    text: `${notAttached} Файл: «ДЗ.docx».`,
-  });
   assert.deepEqual(docxSaveView(r({ status: "cancelled", message: "Сохранение отменено.", name: "" })), {
     kind: "wait",
     text: "Сохранение отменено.",
@@ -215,7 +210,7 @@ test("the attachment format: Word first, a change only when it differs and the d
   assert.deepEqual([...sendFormats], ["docx", "txt"]);
   assert.equal(defaultSendFormat, "docx");
   assert.match(sendFormatLabels.docx, /\.docx/);
-  assert.match(sendFormatLabels.txt, /\.txt/);
+  assert.equal(sendFormatLabels.txt, "Текст (.md)", "the text attachment is homework.md");
   assert.equal(sendFormatChange("docx", "txt", false), true);
   assert.equal(sendFormatChange("docx", "docx", false), false);
   assert.equal(sendFormatChange("docx", "txt", true), false, "not while another one is prepared");
@@ -230,7 +225,7 @@ test("the replies with a generation, a draft status and a Word save are checked"
   assert.deepEqual(parseDraftStatus({ latestVersion: 2, generation: null }), { latestVersion: 2, generation: null });
   assert.throws(() => parseDraftStatus({ latestVersion: "2", generation: null }), /draft status/);
   assert.throws(() => parseDraftStatus({ latestVersion: 2, generation: { jobId: "j1" } }), /draft status/);
-  const saved = { status: "saved", message: "m", name: "n.docx", attachmentName: "" };
+  const saved = { status: "saved", message: "m", name: "n.docx" };
   assert.deepEqual(parseDocxSaveResult(saved), saved);
   assert.throws(() => parseDocxSaveResult({ ...saved, status: "maybe" }), /docx save result/);
   assert.throws(() => parseDocxSaveResult({ ...saved, name: null }), /docx save result/);
@@ -307,7 +302,7 @@ test("the bindings call the bound Go methods with the page's arguments", async (
     },
     [methods.draftStatus]: { latestVersion: 3, generation: null },
     [methods.exportDocx]: { version: 3, fileName: "a1.docx" },
-    [methods.saveDocx]: { status: "cancelled", message: "Сохранение отменено.", name: "", attachmentName: "" },
+    [methods.saveDocx]: { status: "cancelled", message: "Сохранение отменено.", name: "" },
     [methods.deliveries]: [delivery("UNKNOWN", { notice, canMarkSent: true, canSendAgain: true })],
     [methods.sendAgain]: delivery("PENDING"),
   };
@@ -379,7 +374,7 @@ test("the send dialog offers .docx and .txt with the prepared one chosen; a swit
   const html = renderToStaticMarkup(h(SendDialog, { api, prep, version: 2, onFormat: () => undefined, onClose: () => undefined }));
   assert.match(html, /Формат вложения/);
   assert.match(html, /<input type="radio" name="hw-send-format" checked="" value="docx"\/>Word \(\.docx\)/);
-  assert.match(html, /<input type="radio" name="hw-send-format" value="txt"\/>Текст \(\.txt\)/);
+  assert.match(html, /<input type="radio" name="hw-send-format" value="txt"\/>Текст \(\.md\)/);
   assert.match(html, /<fieldset class="hw-format">/, "the choice is open");
   const switching = renderToStaticMarkup(
     h(SendDialog, { api, prep, version: 2, switching: true, problem: "Нет файла Word", onFormat: () => undefined, onClose: () => undefined }),

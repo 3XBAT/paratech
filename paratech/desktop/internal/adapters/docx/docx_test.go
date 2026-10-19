@@ -132,9 +132,6 @@ func TestPackageStructure(t *testing.T) {
 			t.Errorf("styles lack %s", id)
 		}
 	}
-	if MediaType != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
-		t.Fatal("wrong media type")
-	}
 }
 
 func TestTitlePageThenBody(t *testing.T) {
@@ -159,6 +156,19 @@ func TestTitlePageThenBody(t *testing.T) {
 	}
 	if !strings.Contains(doc, `Строка 1</w:t><w:br/><w:t xml:space="preserve">Строка 2`) {
 		t.Fatal("the lines of a paragraph are not broken")
+	}
+}
+
+// A title page without a body ends the document: no page break, so no blank second page.
+func TestTitlePageWithoutBlocks(t *testing.T) {
+	doc := sample()
+	doc.Blocks = nil
+	parts, _ := entries(t, render(t, doc))
+	if strings.Contains(parts["word/document.xml"], `<w:br w:type="page"/>`) {
+		t.Fatal("a title page without a body ends with a page break")
+	}
+	if got := texts(t, parts["word/document.xml"]); len(got) == 0 || got[0] != "МГУ" {
+		t.Fatalf("texts = %q", got)
 	}
 }
 

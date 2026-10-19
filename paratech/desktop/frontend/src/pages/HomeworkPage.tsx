@@ -493,7 +493,8 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       setMessage({ kind: "ok", text: `Версия ${r.version} сохранена в файл «${r.fileName}».`, at: "draft" });
     });
 
-  // «Сохранить в Word (.docx)»: the core asks where in the native save dialog and answers with a fixed text.
+  // «Сохранить в Word (.docx)»: the core asks where in the native save dialog and answers with a fixed text. The email
+  // attachment is not touched here: prepareSendAs exports the shown version right before the send dialog.
   const saveWord = () =>
     act("docx", async () => {
       if (shown === null) {

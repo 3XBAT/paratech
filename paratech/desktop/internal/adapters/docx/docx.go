@@ -21,9 +21,6 @@ import (
 	"paratech/desktop/internal/domain/coursework/values"
 )
 
-// MediaType is the MIME type of a .docx file.
-const MediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
 // ErrRender means the package could not be assembled.
 var ErrRender = errors.New("docx: the document cannot be rendered")
 
@@ -125,7 +122,7 @@ func document(doc values.Document) string {
 	var b strings.Builder
 	b.WriteString(xmlHeader + `<w:document xmlns:w="` + wordNS + `"><w:body>`)
 	if !doc.Title.IsZero() {
-		titlePage(&b, doc.Title)
+		titlePage(&b, doc.Title, len(doc.Blocks) > 0)
 	}
 	for _, bl := range doc.Blocks {
 		block(&b, bl)
@@ -134,8 +131,8 @@ func document(doc values.Document) string {
 	return b.String()
 }
 
-// titlePage writes the lines of the title page that are set, then a page break.
-func titlePage(b *strings.Builder, t values.TitlePage) {
+// titlePage writes the lines of the title page that are set, then a page break when a body follows (no blank page).
+func titlePage(b *strings.Builder, t values.TitlePage, body bool) {
 	lines := []struct {
 		text   string
 		align  string
@@ -169,7 +166,9 @@ func titlePage(b *strings.Builder, t values.TitlePage) {
 		text(b, l.text)
 		b.WriteString(`</w:r></w:p>`)
 	}
-	b.WriteString(pageBreak)
+	if body {
+		b.WriteString(pageBreak)
+	}
 }
 
 // block writes a heading, or a paragraph whose lines are separated by line breaks.

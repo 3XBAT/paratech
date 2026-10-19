@@ -57,14 +57,14 @@ func TestSaveDocx(t *testing.T) {
 	ctx := context.Background()
 	e := newHWEnv()
 	got, err := e.svc.SaveDocx(ctx, "a1", 2)
-	want := DocxSaveResult{Status: "saved", Message: msgDocxSaved, Name: "Rivers.docx", AttachmentName: "homework.docx"}
+	want := DocxSaveResult{Status: "saved", Message: msgDocxSaved, Name: "Rivers.docx"}
 	if err != nil || got != want {
 		t.Fatalf("SaveDocx = %+v, %v; want %+v", got, err, want)
 	}
 	if e.picker.name != "Rivers.docx" || e.drafts.savedTo != e.picker.path {
 		t.Fatalf("dialog proposed %q, saved to %q", e.picker.name, e.drafts.savedTo)
 	}
-	if calls := e.calls.list(); !slices.Equal(calls, []string{"DraftVersion", "DocxName", "SaveDocx", "ExportDocx"}) {
+	if calls := e.calls.list(); !slices.Equal(calls, []string{"DraftVersion", "DocxName", "SaveDocx"}) {
 		t.Fatalf("calls = %v", calls)
 	}
 
@@ -87,10 +87,10 @@ func TestSaveDocx(t *testing.T) {
 		t.Fatalf("write failure: %+v, %v", got, err)
 	}
 
-	// Saved, but the attachment is locked by an unresolved email.
+	// An unresolved email locks only the attachment, not a file the student saves.
 	e = newHWEnv()
 	e.drafts.exportErr = fmt.Errorf("x: %w", homeworkflow.ErrExportLocked)
-	if got, err := e.svc.SaveDocx(ctx, "a1", 2); err != nil || got.Status != "saved" || got.AttachmentName != "" || got.Message != msgDocxNotAttached {
+	if got, err := e.svc.SaveDocx(ctx, "a1", 2); err != nil || got.Status != "saved" || got.Message != msgDocxSaved || e.called("ExportDocx") {
 		t.Fatalf("locked attachment: %+v, %v", got, err)
 	}
 

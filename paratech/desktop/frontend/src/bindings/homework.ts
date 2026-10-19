@@ -105,15 +105,11 @@ export type SendFormat = "docx" | "txt";
 
 export type DocxSaveStatus = "saved" | "cancelled" | "failed";
 
-/**
- * «Сохранить в Word (.docx)»: the core's fixed text, the saved file's base name ("" unless saved) and the Word file a
- * send attaches ("" when it could not be updated; message says why).
- */
+/** «Сохранить в Word (.docx)»: the core's fixed text and the saved file's base name ("" unless saved). */
 export interface DocxSaveResult {
   status: DocxSaveStatus;
   message: string;
   name: string;
-  attachmentName: string;
 }
 
 /** "ready": the dialog shows recipient, subject and attachment and offers the confirmation; "rejected": message only. */
@@ -373,7 +369,6 @@ export function parseDocxSaveResult(raw: unknown): DocxSaveResult {
     status: oneOf(r, "status", docxSaveStatuses, w),
     message: str(r, "message", w),
     name: str(r, "name", w),
-    attachmentName: str(r, "attachmentName", w),
   };
 }
 

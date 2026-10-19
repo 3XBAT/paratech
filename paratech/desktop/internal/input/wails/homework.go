@@ -74,11 +74,16 @@ const (
 	msgRejectedDefault = "Отправить нельзя: подготовьте отправку ещё раз."
 	msgNoDocx          = "Нет файла Word с заданием: сначала нажмите «Сохранить в Word (.docx)»."
 
-	msgDocxSaved        = "Файл Word сохранён."
-	msgDocxCancelled    = "Сохранение отменено."
-	msgDocxFailed       = "Не удалось сохранить файл. Выберите другую папку и попробуйте ещё раз."
-	msgDocxNotAttached  = "Файл Word сохранён, но для письма он не обновлён: предыдущее письмо с этим заданием ещё не решено."
-	msgDocxAttachFailed = "Файл Word сохранён, но для письма его обновить не удалось. Попробуйте ещё раз."
+	msgDocxSaved     = "Файл Word сохранён."
+	msgDocxCancelled = "Сохранение отменено."
+	msgDocxFailed    = "Не удалось сохранить файл. Выберите другую папку и попробуйте ещё раз."
+)
+
+// Statuses of «Сохранить в Word (.docx)» as the page reads them.
+const (
+	docxSaved     = "saved"
+	docxCancelled = "cancelled"
+	docxFailed    = "failed"
 )
 
 // Attachment formats of a send as the page names them.
@@ -282,13 +287,11 @@ type ExportResult struct {
 }
 
 // DocxSaveResult answers «Сохранить в Word (.docx)»: Status "saved", "cancelled" or "failed", a fixed text and the
-// base name of the saved file ("" unless saved). AttachmentName is the Word file a send in .docx attaches, updated to
-// this version ("" when it could not be updated; Message then says why).
+// base name of the saved file ("" unless saved).
 type DocxSaveResult struct {
-	Status         string `json:"status"`
-	Message        string `json:"message"`
-	Name           string `json:"name"`
-	AttachmentName string `json:"attachmentName"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Name    string `json:"name"`
 }
 
 // SendPreparation is the content of the confirmation dialog. Status "ready": the dialog shows recipient, subject and
@@ -577,9 +580,9 @@ func (s *HomeworkService) ExportDocx(ctx context.Context, id string, n int) (Exp
 }
 
 // SaveDocx is «Сохранить в Word (.docx)»: it asks in the native save dialog where to save version n as a Word file
-// with the title page (the profile and the lesson of the assignment) and writes it there; then it updates the Word
-// file a send in .docx attaches, unless an email of the assignment is unresolved. Neither the path nor an error text
-// reaches the page; the page gets the base name of the file.
+// with the title page (the profile and the lesson of the assignment) and writes it there. It does not touch the file a
+// send attaches: the page calls ExportDocx before the send dialog. Neither the path nor an error text reaches the page;
+// the page gets the base name of the file.
 func (s *HomeworkService) SaveDocx(ctx context.Context, id string, n int) (DocxSaveResult, error) {
 	aid, err := assignmentID(id)
 	if err != nil {
@@ -598,37 +601,24 @@ func (s *HomeworkService) SaveDocx(ctx context.Context, id string, n int) (DocxS
 	}
 	if s.docx == nil {
 		s.log.Error(opPickDocx, "err", "no save dialog")
-		return DocxSaveResult{Status: transcriptFailed, Message: msgDocxFailed}, nil
+		return DocxSaveResult{Status: docxFailed, Message: msgDocxFailed}, nil
 	}
 	target, err := s.docx.PickDocxFile(ctx, name)
 	switch {
 	case err != nil:
 		s.log.Warn(opPickDocx, "err", err)
-		return DocxSaveResult{Status: transcriptFailed, Message: msgDocxFailed}, nil
+		return DocxSaveResult{Status: docxFailed, Message: msgDocxFailed}, nil
 	case target == "":
-		return DocxSaveResult{Status: transcriptCancelled, Message: msgDocxCancelled}, nil
+		return DocxSaveResult{Status: docxCancelled, Message: msgDocxCancelled}, nil
 	}
 	if err := s.drafts.SaveDocx(ctx, aid, n, target); err != nil {
 		if errors.Is(err, shared.ErrNotFound) {
 			return DocxSaveResult{}, s.fail(opSaveDocx, err, ErrDraftVersionNotFound)
 		}
 		s.log.Error(opSaveDocx, "err", err) // the adapters' errors carry neither the path nor the text
-		return DocxSaveResult{Status: transcriptFailed, Message: msgDocxFailed}, nil
+		return DocxSaveResult{Status: docxFailed, Message: msgDocxFailed}, nil
 	}
-
-	out := DocxSaveResult{Status: transcriptSaved, Message: msgDocxSaved, Name: baseName(target)}
-	res, err := s.drafts.ExportDocx(ctx, aid, n)
-	switch {
-	case errors.Is(err, homeworkflow.ErrExportLocked):
-		s.log.Info(opExportDocx, "result", homeworkflow.ErrExportLocked)
-		out.Message = msgDocxNotAttached
-	case err != nil:
-		s.log.Error(opExportDocx, "err", err)
-		out.Message = msgDocxAttachFailed
-	default:
-		out.AttachmentName = path.Base(res.File.Path())
-	}
-	return out, nil
+	return DocxSaveResult{Status: docxSaved, Message: msgDocxSaved, Name: baseName(target)}, nil
 }
 
 // PrepareSend checks a send of the exported homework with the attachment in format ("txt" or "docx") against the

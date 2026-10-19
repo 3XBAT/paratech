@@ -114,11 +114,8 @@ export function generationRunning(err: unknown): boolean {
 /** The line under the draft after «Сохранить в Word (.docx)»: the core's text and the saved file's name. */
 export function docxSaveView(r: DocxSaveResult): { kind: ResultKind; text: string } {
   switch (r.status) {
-    case "saved": {
-      const text = r.name === "" ? r.message : `${r.message} Файл: «${r.name}».`;
-      // Saved, but the file a send in .docx attaches is not updated: the message says why.
-      return { kind: r.attachmentName === "" ? "wait" : "ok", text };
-    }
+    case "saved":
+      return { kind: "ok", text: r.name === "" ? r.message : `${r.message} Файл: «${r.name}».` };
     case "cancelled":
       return { kind: "wait", text: r.message };
     case "failed":
@@ -131,7 +128,8 @@ export const defaultSendFormat: SendFormat = "docx";
 
 export const sendFormatLabels: Readonly<Record<SendFormat, string>> = {
   docx: "Word (.docx)",
-  txt: "Текст (.txt)",
+  // The text attachment is the Markdown export (homework.md); the wire value stays "txt".
+  txt: "Текст (.md)",
 };
 
 /** A new choice in the dialog needs a new export and preparation, unless nothing changes or the dialog is busy. */

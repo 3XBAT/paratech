@@ -43,7 +43,8 @@ const (
 //
 // Instructions are trusted text written by the app. UntrustedData carries user data such as transcript
 // excerpts; it is kept separate from the instructions and must never be interpreted as instructions
-// (hard rule 3, PRD section 13.3). Raw audio is never part of a request (AC-06).
+// (hard rule 3, PRD section 13.3). The student's own instructions of a homework draft travel in UntrustedData too,
+// in a separate section after the data block (prompts.StudentOpen). Raw audio is never part of a request (AC-06).
 type LLMRequest struct {
 	operation      Operation
 	modelAlias     string
