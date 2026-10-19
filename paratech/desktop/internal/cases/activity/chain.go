@@ -14,7 +14,7 @@ func recordingJobTypes() []job.Type { return []job.Type{transcription.STTJobType
 
 // transcriptJobTypes are the job types of the chain whose payload names a transcript of the recording.
 func transcriptJobTypes() []job.Type {
-	return []job.Type{values.SummarizeJobType, values.ExtractHomeworkJobType}
+	return []job.Type{values.SummarizeJobType, values.ExtractHomeworkJobType, values.LectureTextJobType}
 }
 
 // chainJobTypes returns every job type of the chain. Their jobs are shown inside the row of their recording, never
@@ -22,8 +22,9 @@ func transcriptJobTypes() []job.Type {
 func chainJobTypes() []job.Type { return append(recordingJobTypes(), transcriptJobTypes()...) }
 
 // chainOf derives the one status of the whole chain of a recording (TASK-076) from the recording and the jobs that
-// process it: capture, saving, transcription, then the summary and the homework. Of several jobs of one type only
-// the newest counts: an older one was replaced (for example a transcription with another model).
+// process it: capture, saving, transcription, then the summary and the homework, then the lecture text (TASK-090). Of
+// several jobs of one type only the newest counts: an older one was replaced (for example a transcription with another
+// model).
 func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	switch r.Status() {
 	case recording.StatusCompleted:
@@ -42,13 +43,14 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 
 	stt := newest(jobs, transcription.STTJobType)
 	summary, homework := newest(jobs, values.SummarizeJobType), newest(jobs, values.ExtractHomeworkJobType)
+	lecture := newest(jobs, values.LectureTextJobType)
 	if stt != nil {
 		// Post-processing created before the newest transcription belongs to an older transcript.
-		summary, homework = since(summary, stt), since(homework, stt)
+		summary, homework, lecture = since(summary, stt), since(homework, stt), since(lecture, stt)
 	}
-	if summary != nil || homework != nil {
+	if summary != nil || homework != nil || lecture != nil {
 		// The transcript exists: its post-processing decides.
-		return withRedo(postChain(summary, homework), jobs, stt)
+		return withRedo(postChain(summary, homework, lecture), jobs, stt)
 	}
 	if stt == nil {
 		// The STT job is enqueued right after the recording completes, or once a speech model is installed.
@@ -65,7 +67,7 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	case stt.Status() != job.StatusCompleted:
 		return queued(StepTranscription, stt)
 	}
-	return withRedo(postChain(summary, homework), jobs, stt)
+	return withRedo(postChain(summary, homework, lecture), jobs, stt)
 }
 
 // withRedo sets CanRedoSummary: the newest summary job of the transcript has finished and one of its summary jobs
@@ -87,9 +89,9 @@ func withRedo(c Chain, jobs []*job.Job, stt *job.Job) Chain {
 	return c
 }
 
-// postChain is the chain once the transcript exists: the summary and the homework search; nil is a job not enqueued
-// yet.
-func postChain(summary, homework *job.Job) Chain {
+// postChain is the chain once the transcript exists: the summary and the homework search, then the lecture text; nil
+// is a job not enqueued yet.
+func postChain(summary, homework, lecture *job.Job) Chain {
 	post := []struct {
 		j    *job.Job
 		code ErrorCode
@@ -97,14 +99,8 @@ func postChain(summary, homework *job.Job) Chain {
 	}{{summary, ErrorSummaryFailed, WorkSummary}, {homework, ErrorHomeworkFailed, WorkHomework}}
 	for _, p := range post {
 		if p.j != nil && failedJob(p.j) {
-			// The connections page helps only when the LLM call or the Hub failed (connection, key, quota); an invalid
-			// or cut-off answer and the other failures are retried with a new job (TASK-086).
-			action := ActionRetry
-			if p.j.Cause() != job.CauseNone || strings.HasSuffix(p.j.LastError(), values.LLMFailedMessage) {
-				action = ActionOpenConnections
-			}
 			return Chain{
-				Stage: StageFailed, Step: StepSummary, ErrorCode: p.code, JobError: p.j.LastError(), Action: action,
+				Stage: StageFailed, Step: StepSummary, ErrorCode: p.code, JobError: p.j.LastError(), Action: failedAction(p.j),
 				Retry: p.work,
 			}
 		}
@@ -122,7 +118,41 @@ func postChain(summary, homework *job.Job) Chain {
 			return queued(StepSummary, p.j)
 		}
 	}
-	return Chain{Stage: StageDone}
+	return lectureChain(lecture)
+}
+
+// lectureChain is the chain once the summary and the homework are done: the lecture text, with its part progress. A
+// transcript made before the lecture text existed has no job: the chain is done, the summary page offers to make it.
+func lectureChain(j *job.Job) Chain {
+	switch {
+	case j == nil || j.Status() == job.StatusCompleted:
+		return Chain{Stage: StageDone}
+	case failedJob(j):
+		return Chain{
+			Stage: StageFailed, Step: StepLectureText, ErrorCode: ErrorLectureTextFailed, JobError: j.LastError(),
+			Action: failedAction(j), Retry: WorkLectureText,
+		}
+	}
+	var c Chain
+	if j.Status() == job.StatusRunning {
+		c = Chain{Stage: StageLectureText, Step: StepLectureText, Percent: j.Progress().Percent()}
+	} else {
+		c = queued(StepLectureText, j)
+	}
+	if done, parts, ok := values.ParseLectureTextCheckpoint(j.Progress().Checkpoint()); ok {
+		c.PartsDone, c.Parts = done, parts
+	}
+	return c
+}
+
+// failedAction is what the row offers for a failed post-processing job. The connections page helps only when the LLM
+// call or the Hub failed (connection, key, quota); an invalid or cut-off answer and the other failures are retried
+// with a new job (TASK-086).
+func failedAction(j *job.Job) Action {
+	if j.Cause() != job.CauseNone || strings.HasSuffix(j.LastError(), values.LLMFailedMessage) {
+		return ActionOpenConnections
+	}
+	return ActionRetry
 }
 
 // queued is the chain of a step whose job waits; the job's status and the cause it recorded are the reason. A Hub

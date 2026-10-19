@@ -307,8 +307,8 @@ func TestNilLoggerDiscards(t *testing.T) {
 }
 
 // The hidden service types reach the store, so the store leaves them out before its bound; jobs of the user stay.
-// Since TASK-076 the chain types (stt, summarize, extract_homework) are always left out too: their recording rows
-// show them.
+// Since TASK-076 the chain types (stt, summarize, extract_homework and, since TASK-090, lecture_text) are always left
+// out too: their recording rows show them.
 func TestListJobsLeavesOutHiddenTypes(t *testing.T) {
 	typed := func(id string, typ job.Type) *job.Job {
 		t.Helper()
@@ -318,9 +318,9 @@ func TestListJobsLeavesOutHiddenTypes(t *testing.T) {
 	}
 	all := []*job.Job{
 		typed("sync", "calendar_sync"), typed("stt", "stt"), typed("sum", "summarize"), typed("hw", "extract_homework"),
-		typed("draft", "homework_draft"), typed("send", "send_email"),
+		typed("lt", "lecture_text"), typed("draft", "homework_draft"), typed("send", "send_email"),
 	}
-	chain := []job.Type{"stt", "summarize", "extract_homework"}
+	chain := []job.Type{"stt", "summarize", "extract_homework", "lecture_text"}
 	tests := []struct {
 		name   string
 		hidden []job.Type
@@ -359,7 +359,7 @@ func TestNewCopiesHiddenTypes(t *testing.T) {
 	hidden[0] = "stt"
 	_, err = s.ListJobs(context.Background())
 	must(t, err)
-	if want := []job.Type{"calendar_sync", "stt", "summarize", "extract_homework"}; !slices.Equal(repo.hidden, want) {
+	if want := []job.Type{"calendar_sync", "stt", "summarize", "extract_homework", "lecture_text"}; !slices.Equal(repo.hidden, want) {
 		t.Fatalf("hidden = %v, want %v (the caller's types, then the chain types)", repo.hidden, want)
 	}
 }
@@ -426,7 +426,8 @@ func TestListRecordingsChain(t *testing.T) {
 			t.Fatalf("rows %+v, want one with %+v", got, want)
 		}
 	}
-	if !slices.Equal(jobs.byRecording, []job.Type{"stt"}) || !slices.Equal(jobs.byTranscript, []job.Type{"summarize", "extract_homework"}) {
+	if !slices.Equal(jobs.byRecording, []job.Type{"stt"}) ||
+		!slices.Equal(jobs.byTranscript, []job.Type{"summarize", "extract_homework", "lecture_text"}) {
 		t.Errorf("asked types %v / %v", jobs.byRecording, jobs.byTranscript)
 	}
 	if n := strings.Count(logs.String(), "jobs that cannot be read"); n != 1 || !strings.Contains(logs.String(), "stt-bad") {
