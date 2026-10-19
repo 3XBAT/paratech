@@ -37,7 +37,7 @@ const (
 	OperationSummary         Operation = "summary"
 	OperationExtractHomework Operation = "extract_homework_deadlines"
 	OperationHomeworkDraft   Operation = "homework_draft"
-	OperationDetailedNotes   Operation = "detailed_notes"
+	OperationLectureText     Operation = "lecture_text"
 )
 
 // Spec is a validated completion request of a client (gateway.proto CompletionSpec). Build it with NewSpec.
@@ -133,7 +133,7 @@ func (s Spec) GoString() string { return "values.Spec" + s.String() }
 
 func validOperation(op Operation) bool {
 	return op == OperationSummary || op == OperationExtractHomework || op == OperationHomeworkDraft ||
-		op == OperationDetailedNotes
+		op == OperationLectureText
 }
 
 func validKey(s string) bool {

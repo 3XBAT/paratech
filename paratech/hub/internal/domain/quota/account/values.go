@@ -24,7 +24,7 @@ const (
 	OperationSummary         Operation = "summary"
 	OperationExtractHomework Operation = "extract_homework_deadlines"
 	OperationHomeworkDraft   Operation = "homework_draft"
-	OperationDetailedNotes   Operation = "detailed_notes"
+	OperationLectureText     Operation = "lecture_text"
 )
 
 // Format limits of ADR-0005(b).
@@ -37,7 +37,7 @@ const (
 // ParseOperation accepts a known operation.
 func ParseOperation(s string) (Operation, error) {
 	switch op := Operation(s); op {
-	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationDetailedNotes:
+	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText:
 		return op, nil
 	default:
 		return "", fmt.Errorf("%w: unknown operation type", ErrInvalidArgument)

@@ -20,7 +20,7 @@ func TestNewSpec(t *testing.T) {
 		{key: strings.Repeat("~", 128), op: "homework_draft", alias: "a", instr: "i"},
 		{key: "!", op: "extract_homework_deadlines", alias: "0-_" + strings.Repeat("z", 61), instr: "i", data: ""},
 		{key: "k", op: "summary", alias: "a", instr: strings.Repeat("i", MaxPayloadBytes-2), data: "д"},
-		{key: "k", op: "detailed_notes", alias: "a", instr: "i", data: "lesson"},
+		{key: "k", op: "lecture_text", alias: "a", instr: "i", data: "lesson"},
 	} {
 		if _, err := NewSpec(ok.key, ok.op, ok.alias, ok.instr, ok.data, 0); err != nil {
 			t.Errorf("NewSpec(%q, %q, %q): %v", ok.key, ok.op, ok.alias, err)

@@ -108,7 +108,7 @@ func TestCompleteMapsOperations(t *testing.T) {
 		hubv1.OperationType_OPERATION_TYPE_SUMMARY:                    "summary",
 		hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES: "extract_homework_deadlines",
 		hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT:             "homework_draft",
-		hubv1.OperationType_OPERATION_TYPE_DETAILED_NOTES:             "detailed_notes",
+		hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT:               "lecture_text",
 		hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED:                "",
 		hubv1.OperationType(99):                                       "",
 	} {
