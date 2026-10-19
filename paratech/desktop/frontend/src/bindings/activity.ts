@@ -4,9 +4,18 @@
 import type { CallByName } from "./settings";
 
 /** Step of the whole chain of a recording (TASK-076), decided by the Go core. */
-export type ChainStage = "recording" | "saving" | "queued" | "transcribing" | "summarizing" | "done" | "failed";
-/** The step a queued or failed chain stopped at; "" otherwise. */
-export type ChainStep = "" | "transcription" | "summary";
+export type ChainStage =
+  | "recording"
+  | "saving"
+  | "queued"
+  | "transcribing"
+  | "summarizing"
+  /** The lecture text is being made, after the summary and the homework (TASK-090). */
+  | "lectureText"
+  | "done"
+  | "failed";
+/** The step a queued, failed or lectureText chain is at; "" otherwise. */
+export type ChainStep = "" | "transcription" | "summary" | "lectureText";
 /** Why a queued chain waits; "" otherwise. */
 export type QueueReason =
   | ""
@@ -24,6 +33,7 @@ export type ChainErrorCode =
   | "transcriptionFailed"
   | "summaryFailed"
   | "homeworkFailed"
+  | "lectureTextFailed"
   /** The track is silent (TASK-082): «Запись без звука» with checkSound. */
   | "silentRecording";
 /**
@@ -32,7 +42,7 @@ export type ChainErrorCode =
  */
 export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound" | "retry";
 /** The failed post-processing work the row may start again (TASK-086); "" for none. */
-export type RetryWork = "" | "summary" | "homework";
+export type RetryWork = "" | "summary" | "homework" | "lectureText";
 
 /** One recording with the status of its whole chain, newest first. Times are RFC 3339 in UTC, "" when unknown. */
 export interface RecordingItem {
@@ -55,8 +65,11 @@ export interface RecordingItem {
   stoppable: boolean;
   stage: ChainStage;
   step: ChainStep;
-  /** Transcription progress, 0..100. */
+  /** Progress of the transcription or of the lecture text, 0..100. */
   progressPercent: number;
+  /** partsDone of parts of the lecture text are made («3 из 12»); parts is 0 when unknown. */
+  partsDone: number;
+  parts: number;
   queueReason: QueueReason;
   errorCode: ChainErrorCode;
   /** Last error of the job the stage refers to (failed or retrying); "" otherwise. */
@@ -67,6 +80,8 @@ export interface RecordingItem {
   retryWork: RetryWork;
   /** A summary exists and is not being made: «Сделать конспект заново» may run (TASK-086). */
   canRedoSummary: boolean;
+  /** The lecture text of the current transcript is stored (TASK-090): the row offers it instead of the transcript. */
+  lectureTextReady: boolean;
   /** Approximate time left of a queued or running transcription («≈ N мин осталось», TASK-084). */
   remainingSeconds: number;
   /** false: no time left to show. */
@@ -189,8 +204,17 @@ function oneOf<T extends string>(r: Record<string, unknown>, key: string, what: 
   return v as T;
 }
 
-const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"] as const;
-const steps = ["", "transcription", "summary"] as const;
+const stages = [
+  "recording",
+  "saving",
+  "queued",
+  "transcribing",
+  "summarizing",
+  "lectureText",
+  "done",
+  "failed",
+] as const;
+const steps = ["", "transcription", "summary", "lectureText"] as const;
 const queueReasons = [
   "",
   "inLine",
@@ -207,11 +231,12 @@ const errorCodes = [
   "transcriptionFailed",
   "summaryFailed",
   "homeworkFailed",
+  "lectureTextFailed",
   "silentRecording",
 ] as const;
 const switchProblems = ["", "source_gone", "refused", "failed"] as const;
 const actions = ["", "runNow", "openModels", "openConnections", "checkSound", "retry"] as const;
-const retryWorks = ["", "summary", "homework"] as const;
+const retryWorks = ["", "summary", "homework", "lectureText"] as const;
 
 function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {
   if (!Array.isArray(raw)) {
@@ -270,6 +295,8 @@ export function parseRecording(raw: unknown): RecordingItem {
     stage: oneOf(r, "stage", w, stages),
     step: oneOf(r, "step", w, steps),
     progressPercent: num(r, "progressPercent", w),
+    partsDone: num(r, "partsDone", w),
+    parts: num(r, "parts", w),
     queueReason: oneOf(r, "queueReason", w, queueReasons),
     errorCode: oneOf(r, "errorCode", w, errorCodes),
     jobError: str(r, "jobError", w),
@@ -277,6 +304,7 @@ export function parseRecording(raw: unknown): RecordingItem {
     actionJobId: str(r, "actionJobId", w),
     retryWork: oneOf(r, "retryWork", w, retryWorks),
     canRedoSummary: bool(r, "canRedoSummary", w),
+    lectureTextReady: bool(r, "lectureTextReady", w),
     remainingSeconds: num(r, "remainingSeconds", w),
     hasRemaining: bool(r, "hasRemaining", w),
     advice: r.advice === null ? null : parseAdvice(r.advice),

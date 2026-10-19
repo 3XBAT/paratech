@@ -38,6 +38,8 @@
     "src/bindings/summary.ts",
     "src/summaryView.ts",
     "src/pages/SummaryParts.tsx",
+    "src/lectureTextView.ts",
+    "src/pages/LectureTextParts.tsx",
     "src/pages/HomeworkDialogs.tsx",
     "src/popup/view.ts",
     "src/sourcePicker/view.ts",

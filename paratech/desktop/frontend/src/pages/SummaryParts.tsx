@@ -27,7 +27,8 @@ export interface RetryProps {
   retryDisabled?: boolean;
 }
 
-function Line(props: { line: StepLine }) {
+/** The state line of a step; also used by the lecture text card. */
+export function Line(props: { line: StepLine }) {
   const l = props.line;
   return (
     <>

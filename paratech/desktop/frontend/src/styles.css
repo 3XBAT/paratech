@@ -349,3 +349,9 @@ html, body, #root { height: 100%; }
 .sm-points li { margin: 0 0 4px; white-space: pre-line; overflow-wrap: anywhere; }
 .sm-homework .row .t, .sm-desc { overflow-wrap: anywhere; }
 .sm-desc { display: block; margin-top: 4px; white-space: pre-line; }
+/* Текст лекции (TASK-090): blocks of model text; the raw transcript is only a small link next to it. */
+.sm-lecture-tools { margin: 0 0 12px; }
+.sm-block { content-visibility: auto; contain-intrinsic-size: auto 240px; }
+.sm-block .sm-h { overflow-wrap: anywhere; }
+.sm-time { margin-right: 8px; font-weight: normal; }
+.row-source, .sm-source { font-size: var(--fs-small); }

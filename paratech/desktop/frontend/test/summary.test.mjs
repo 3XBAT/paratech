@@ -62,7 +62,18 @@ const view = (over = {}) => ({
     ...over.summary,
   },
   homework: { ...step("done"), assignments: [assignment()], ...over.homework },
-  ...Object.fromEntries(Object.entries(over).filter(([k]) => k !== "summary" && k !== "homework")),
+  lectureText: {
+    ...step("done"),
+    ready: true,
+    blocks: [{ heading: "Пределы", startSeconds: 0, time: "0:00", paragraphs: ["Абзац."] }],
+    updatedAt: "2026-10-19T07:10:00Z",
+    partsDone: 0,
+    parts: 0,
+    canStart: false,
+    retryWork: "",
+    ...over.lectureText,
+  },
+  ...Object.fromEntries(Object.entries(over).filter(([k]) => !["summary", "homework", "lectureText"].includes(k))),
 });
 
 test("the api calls the bound methods with their arguments and checks the replies", async () => {
@@ -147,9 +158,10 @@ test("a recording row offers the summary from its chain: main when it is made, e
     assert.equal(rowSummaryOffer(r), null, JSON.stringify(r));
   }
   // The row puts the summary inside the transcript's slot: every chain that offers the summary offers the transcript.
-  for (const stage of ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"]) {
-    for (const s of ["", "transcription", "summary"]) {
-      for (const errorCode of ["", "recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed", "silentRecording"]) {
+  for (const stage of ["recording", "saving", "queued", "transcribing", "summarizing", "lectureText", "done", "failed"]) {
+    for (const s of ["", "transcription", "summary", "lectureText"]) {
+      for (const errorCode of ["", "recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed",
+        "lectureTextFailed", "silentRecording"]) {
         const r = { stage, step: s, errorCode };
         if (rowSummaryOffer(r) !== null) {
           assert.ok(rowOffersTranscript(r), JSON.stringify(r));
@@ -361,10 +373,15 @@ test("the viewer renders text only, talks only to the core and polls without ove
 });
 
 test("the row, the homework page and the transcript open the summary without a call per row", () => {
-  const rows = src("pages/RecordingsPage.tsx");
-  assert.match(rows, /rowSummaryOffer\(r\)/);
-  assert.match(rows, /onClick=\{\(\) => openSummary\(r\.id\)\}/);
-  assert.ok(!rows.includes("summaryApi"), "no summary call per row");
+  // The row's links (RecordingLinks, TASK-090) come from rowLinks over the list's chain.
+  assert.match(src("recordingRowView.ts"), /const summary = rowSummaryOffer\(r\)/);
+  const rows = src("pages/RecordingRow.tsx");
+  assert.match(rows, /rowLinks\(r\)/);
+  assert.match(rows, /onClick=\{\(\) => props\.onOpenSummary\(r\.id\)\}/);
+  assert.match(src("pages/RecordingsPage.tsx"), /<RecordingLinks item=\{r\} onOpenSummary=\{openSummary\}/);
+  for (const rel of ["pages/RecordingRow.tsx", "pages/RecordingsPage.tsx"]) {
+    assert.ok(!src(rel).includes("summaryApi"), "no summary call per row");
+  }
   const links = src("pages/TranscriptLinks.tsx");
   assert.match(links, /rowSummaryOffer\(r\)/);
   assert.ok(!links.includes("summaryApi"));
