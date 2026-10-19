@@ -112,12 +112,14 @@ func (r *AssignmentRepository) Save(ctx context.Context, a *assignment.Assignmen
 				ID: string(st.ID), LessonID: jobNullString(string(st.Lesson)), TranscriptID: jobNullString(string(st.Transcript)),
 				Title: st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
 				SourceIndex: nullSourceIndex(st.SourceIndex), PromptVersion: nullPromptVersion(st.PromptVersion),
+				HintSubject: st.HintSubject, HintTeacher: st.HintTeacher, UserSubject: st.UserSubject, UserTeacher: st.UserTeacher,
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 		}
 		n, err := q.UpdateAssignment(ctx, sqlcgen.UpdateAssignmentParams{
 			Title: st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
-			PromptVersion: nullPromptVersion(st.PromptVersion), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
+			PromptVersion: nullPromptVersion(st.PromptVersion), HintSubject: st.HintSubject, HintTeacher: st.HintTeacher,
+			UserSubject: st.UserSubject, UserTeacher: st.UserTeacher, UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
 			ExpectedVersion: st.Version,
 		})
 		return VersionCAS(ctx, n, err)
@@ -174,6 +176,7 @@ func assignmentFromRow(row sqlcgen.Assignment) (*assignment.Assignment, error) {
 		Transcript: shared.TranscriptID(row.TranscriptID.String), SourceIndex: source,
 		PromptVersion: int(row.PromptVersion.Int64), Title: row.Title, Description: row.Description,
 		Due: jobFromNullMs(row.DueAt), UserEdited: row.UserEdited != 0,
+		HintSubject: row.HintSubject, HintTeacher: row.HintTeacher, UserSubject: row.UserSubject, UserTeacher: row.UserTeacher,
 		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})
 	if err != nil {

@@ -74,3 +74,9 @@ SELECT text_ref FROM transcripts WHERE recording_id = sqlc.arg(recording_id) ORD
 
 -- name: DeleteTranscriptsByRecording :exec
 DELETE FROM transcripts WHERE recording_id = sqlc.arg(recording_id);
+
+-- The recording a transcript was made from, for the lesson snapshot of its assignments (TASK-092).
+-- name: GetRecordingOfTranscript :one
+SELECT recordings.* FROM recordings
+JOIN transcripts ON transcripts.recording_id = recordings.id
+WHERE transcripts.id = sqlc.arg(transcript_id);

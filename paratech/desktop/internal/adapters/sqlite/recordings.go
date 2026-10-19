@@ -30,6 +30,19 @@ func (r *RecordingRepository) Get(ctx context.Context, id shared.RecordingID) (*
 	return recordingFromRow(row)
 }
 
+// opRecordingOfTranscript names RecordingOf in its error messages.
+const opRecordingOfTranscript = "sqlite: get the recording of a transcript"
+
+// RecordingOf loads the recording transcript t was made from (homeworkflow.TranscriptRecordings, TASK-092); a missing
+// transcript or recording wraps shared.ErrNotFound.
+func (r *RecordingRepository) RecordingOf(ctx context.Context, t shared.TranscriptID) (*recording.Recording, error) {
+	row, err := r.db.Queries(ctx).GetRecordingOfTranscript(ctx, string(t))
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opRecordingOfTranscript, t, MapError(ctx, err))
+	}
+	return recordingFromRow(row)
+}
+
 // Save writes the recording: an INSERT for version 0, otherwise a version compare-and-swap (ADR-0004(d)).
 func (r *RecordingRepository) Save(ctx context.Context, rec *recording.Recording) error {
 	next := rec.Version() + 1
