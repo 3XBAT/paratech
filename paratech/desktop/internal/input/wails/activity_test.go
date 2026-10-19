@@ -159,7 +159,7 @@ func TestActivityServiceListsJobs(t *testing.T) {
 	}
 	want := `[{"id":"j1","type":"stt","status":"WAITING_FOR_POWER","waiting":true,"attempts":1,"maxAttempts":3,` +
 		`"progressPercent":40,"lastError":"net","createdAt":"2026-10-15T06:30:00Z","updatedAt":"2026-10-15T06:31:00Z",` +
-		`"nextRunAt":"2026-10-15T06:32:00Z","runNowOffered":true}]`
+		`"nextRunAt":"2026-10-15T06:32:00Z","runNowOffered":true,"assignmentId":"","assignmentTitle":"","assignmentSubject":"","label":""}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}
@@ -365,5 +365,25 @@ func TestActivityServiceRetry(t *testing.T) {
 				t.Fatalf("calls = %v, want %v", r.calls, tt.got)
 			}
 		})
+	}
+}
+
+// TASK-094: the row of a draft job names its assignment and carries the id the page opens.
+func TestActivityServiceNamesDraftRows(t *testing.T) {
+	uc := &fakeActivity{jobs: []activity.Job{
+		{ID: "j1", Type: "homework_draft", Status: job.StatusRunning, AssignmentID: "a1", AssignmentTitle: "Пределы",
+			AssignmentSubject: "Математический анализ"},
+		{ID: "j2", Type: "homework_draft", Status: job.StatusQueued, AssignmentID: "a2", AssignmentTitle: "Эссе"},
+		{ID: "j3", Type: "homework_draft", Status: job.StatusQueued, AssignmentID: "a3"},
+	}}
+	got, err := NewActivityService(uc, &fakeStopper{}, &fakeForcer{}, &fakeRetrier{}, discard()).ListJobs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Черновик: Пределы · Математический анализ", "Черновик: Эссе", ""}
+	for i, w := range want {
+		if got[i].Label != w || got[i].AssignmentID != uc.jobs[i].AssignmentID.String() {
+			t.Errorf("row %d = %q %q, want %q", i, got[i].Label, got[i].AssignmentID, w)
+		}
 	}
 }

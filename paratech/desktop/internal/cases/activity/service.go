@@ -25,6 +25,7 @@ type Service struct {
 	hidden     []job.Type
 	log        *slog.Logger
 	times      TranscriptionTimes // nil: no time left (WithRemaining)
+	drafts     DraftAssignments   // nil: draft rows name no assignment (WithDraftAssignments)
 	clock      Clock
 
 	// The screen polls every few seconds; the unreadable ids are logged only when they change, not on every poll.
@@ -139,6 +140,7 @@ func (s *Service) ListJobs(ctx context.Context) ([]Job, error) {
 	for _, j := range jobs {
 		out = append(out, jobRow(j))
 	}
+	s.nameDrafts(ctx, out, jobs)
 	return out, nil
 }
 

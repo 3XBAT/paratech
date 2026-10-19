@@ -53,3 +53,11 @@ type Clock interface {
 	// Now returns the current time (PRD section 7.3).
 	Now() time.Time
 }
+
+// DraftAssignments names the assignment of a homework draft job for its row (TASK-094). The app wires it over the
+// homework use case; it is optional (WithDraftAssignments).
+type DraftAssignments interface {
+	// DraftAssignment returns the title and the subject the assignment shows (PRD section 10); a missing assignment
+	// wraps shared.ErrNotFound.
+	DraftAssignment(ctx context.Context, id shared.AssignmentID) (title, subject string, err error)
+}
