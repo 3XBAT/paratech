@@ -71,3 +71,24 @@ func TestDeletable(t *testing.T) {
 		})
 	}
 }
+
+func TestKept(t *testing.T) {
+	cases := []struct {
+		name    string
+		found   []Assignment
+		deleted []shared.AssignmentID
+		want    []shared.AssignmentID
+	}{
+		{"none deleted", found, nil, []shared.AssignmentID{"plain", "draft", "sent"}},
+		{"some deleted, in found order", found, []shared.AssignmentID{"draft"}, []shared.AssignmentID{"plain", "sent"}},
+		{"all deleted", found, []shared.AssignmentID{"plain", "draft", "sent"}, []shared.AssignmentID{}},
+		{"duplicate row", []Assignment{{ID: "plain"}, {ID: "plain"}}, nil, []shared.AssignmentID{"plain"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Kept(tc.found, tc.deleted); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Kept = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

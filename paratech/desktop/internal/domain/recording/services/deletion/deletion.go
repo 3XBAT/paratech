@@ -87,3 +87,20 @@ func Deletable(found []Assignment, chosen []shared.AssignmentID) []shared.Assign
 	}
 	return out
 }
+
+// Kept returns the found assignments that stay without the recording (those not in deleted), in found order, each
+// once.
+func Kept(found []Assignment, deleted []shared.AssignmentID) []shared.AssignmentID {
+	gone := make(map[shared.AssignmentID]bool, len(deleted))
+	for _, id := range deleted {
+		gone[id] = true
+	}
+	out := []shared.AssignmentID{}
+	for _, a := range found {
+		if !gone[a.ID] {
+			out = append(out, a.ID)
+			gone[a.ID] = true
+		}
+	}
+	return out
+}
