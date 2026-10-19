@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/adapters/sqlite"
-	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/input/wails"
 	"paratech/desktop/testenv"
@@ -62,7 +61,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 	}
 
 	prep, err := page.PrepareSend(ctx, "a1")
-	if err != nil || prep.Status != "ready" || prep.Recipient != teacher || prep.Subject != senddelivery.DefaultSubject ||
+	if err != nil || prep.Status != "ready" || prep.Recipient != teacher || prep.Subject != "Домашнее задание" || // TASK-092: no subject, no deadline
 		prep.AttachmentName != "homework.md" || prep.AttachmentSize != info.Size() {
 		t.Fatalf("PrepareSend = %+v, %v", prep, err)
 	}
@@ -78,7 +77,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 		return err == nil && len(ds) == 1 && ds[0].Status == "SENT"
 	}, nil)
 	ds, err := page.Deliveries(ctx, "a1")
-	if err != nil || ds[0].Recipient != teacher || ds[0].CanMarkSent || ds[0].CanSendAgain || ds[0].Notice != "" ||
+	if err != nil || ds[0].Recipient != teacher || ds[0].Subject != prep.Subject || ds[0].CanMarkSent || ds[0].CanSendAgain || ds[0].Notice != "" ||
 		ds[0].SentAt == "" || len(mail.Messages()) != 1 {
 		t.Fatalf("Deliveries = %+v, %v, messages %d", ds, err, len(mail.Messages()))
 	}

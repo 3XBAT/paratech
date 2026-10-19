@@ -18,7 +18,8 @@ func (c *core) wireProposals(e env, settings settingsLoader) error {
 	c.proposals, err = homeworkflow.New(homeworkflow.Deps{
 		Proposals: sqlite.NewProposalRepository(c.db), Assignments: assignments, AssignmentList: assignments,
 		Artifacts: c.store, Recipients: recipientSettings{settings}, Mailer: c.deliveries, Exporter: c.store,
-		Calendar: deadlineCalendar{c.calendar}, Clock: e.local, IDs: e.ids, Tx: c.db,
+		Calendar: deadlineCalendar{c.calendar}, Recordings: sqlite.NewRecordingRepository(c.db),
+		Lessons: sqlite.NewLessonRepository(c.db), Clock: e.local, IDs: e.ids, Tx: c.db,
 	})
 	if err != nil {
 		return fmt.Errorf("app: action proposals: %w", err)

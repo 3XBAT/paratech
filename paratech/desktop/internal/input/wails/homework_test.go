@@ -53,6 +53,7 @@ type fakeHWProposals struct {
 	declineErr error
 	proposal   homeworkflow.ProposalView // returned by ProposeSend and Get
 	list       []homeworkflow.AssignmentView
+	corrected  homeworkflow.LessonCorrection // the last CorrectLesson
 }
 
 func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
@@ -63,6 +64,15 @@ func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.Assig
 func (f *fakeHWProposals) Assignment(_ context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error) {
 	f.log.add("Assignment")
 	return homeworkflow.AssignmentView{ID: id, Title: "Rivers", UpdatedAt: hwT0}, f.err
+}
+
+func (f *fakeHWProposals) CorrectLesson(_ context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error) {
+	f.log.add("CorrectLesson")
+	f.corrected = c
+	return homeworkflow.AssignmentView{
+		ID: c.ID, Title: "Rivers", UpdatedAt: hwT0, Subject: c.Subject, SubjectSource: values.SourceUser,
+		CorrectedSubject: c.Subject,
+	}, f.err
 }
 
 func (f *fakeHWProposals) ProposeSend(context.Context, shared.AssignmentID) (homeworkflow.ProposalView, error) {
@@ -217,6 +227,10 @@ var everyHomeworkCall = []hwCall{
 	}},
 	{"OpenAssignment", func(s *HomeworkService, id string) error {
 		_, err := s.OpenAssignment(context.Background(), id)
+		return err
+	}},
+	{"CorrectLesson", func(s *HomeworkService, id string) error {
+		_, err := s.CorrectLesson(context.Background(), id, "Физика", "")
 		return err
 	}},
 	{"DraftVersion", func(s *HomeworkService, id string) error {
@@ -617,10 +631,10 @@ func TestHomeworkJSONNames(t *testing.T) {
 		v    any
 		want string
 	}{
-		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":""}`},
+		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""}`},
 		{VersionItem{}, `{"number":0,"source":"","instruction":"","latest":false,"createdAt":""}`},
 		{VersionText{}, `{"number":0,"source":"","title":"","body":"","instruction":"","latest":false,"createdAt":""}`},
-		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":""},"versions":[],"latest":null}`},
+		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""},"versions":[],"latest":null}`},
 		{GenerateStarted{}, `{"jobId":"","base":0}`},
 		{GenerationStatus{}, `{"state":"","message":""}`},
 		{ExportResult{}, `{"version":0,"fileName":""}`},

@@ -95,6 +95,7 @@ var rejectMessages = map[proposal.RejectReason]string{
 const (
 	opListAssignments = "ui: list assignments"
 	opOpenAssignment  = "ui: open assignment"
+	opCorrectLesson   = "ui: correct the lesson of an assignment"
 	opDraftVersion    = "ui: get draft version"
 	opGenerate        = "ui: generate draft"
 	opGeneration      = "ui: get draft generation"
@@ -113,6 +114,7 @@ const (
 type HomeworkProposals interface {
 	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
+	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	ConfirmSend(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
@@ -151,14 +153,27 @@ func (c HomeworkCore) complete() bool {
 
 // AssignmentItem is the JSON form of an assignment. Title and description may be model text: the page shows them
 // as text only. Times are RFC 3339 in UTC, "" when unset.
+//
+// The lesson (TASK-092): Subject and Teacher with their source ("schedule", "transcript", "user" or "" when
+// unknown); a "transcript" one is a model hint from the recording, shown marked «по записи». Kind is the code of the
+// lesson kind ("lecture", "seminar", "practice", "lab" or ""). LessonDate is the lesson start («занятие 19.10»).
+// CorrectedSubject and CorrectedTeacher are the user's correction, "" when none, for the correction form.
 type AssignmentItem struct {
-	ID          string `json:"id"`
-	LessonID    string `json:"lessonId"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Due         string `json:"due"`
-	UserEdited  bool   `json:"userEdited"`
-	UpdatedAt   string `json:"updatedAt"`
+	ID               string `json:"id"`
+	LessonID         string `json:"lessonId"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	Due              string `json:"due"`
+	UserEdited       bool   `json:"userEdited"`
+	UpdatedAt        string `json:"updatedAt"`
+	Subject          string `json:"subject"`
+	SubjectSource    string `json:"subjectSource"`
+	Kind             string `json:"kind"`
+	Teacher          string `json:"teacher"`
+	TeacherSource    string `json:"teacherSource"`
+	LessonDate       string `json:"lessonDate"`
+	CorrectedSubject string `json:"correctedSubject"`
+	CorrectedTeacher string `json:"correctedTeacher"`
 }
 
 // VersionItem is one draft version in the history list.
@@ -296,6 +311,20 @@ func (s *HomeworkService) OpenAssignment(ctx context.Context, id string) (Assign
 	return out, nil
 }
 
+// CorrectLesson stores the subject and teacher the student entered for assignment id; they win over the schedule and
+// the hint from the recording. An empty text removes the correction of that field. Returns the assignment as shown.
+func (s *HomeworkService) CorrectLesson(ctx context.Context, id, subject, teacher string) (AssignmentItem, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return AssignmentItem{}, err
+	}
+	v, err := s.proposals.CorrectLesson(ctx, homeworkflow.LessonCorrection{ID: aid, Subject: subject, Teacher: teacher})
+	if err != nil {
+		return AssignmentItem{}, s.fail(opCorrectLesson, err, ErrHomeworkNotFound)
+	}
+	return assignmentItem(v), nil
+}
+
 // DraftVersion returns version n of the draft of assignment id.
 func (s *HomeworkService) DraftVersion(ctx context.Context, id string, n int) (VersionText, error) {
 	aid, err := assignmentID(id)
@@ -428,7 +457,10 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPrepa
 		return out, nil
 	}
 	out.Status = sendReady
-	out.Recipient, out.Subject = v.Recipient, s.deliveries.Subject()
+	out.Recipient, out.Subject = v.Recipient, v.Subject
+	if out.Subject == "" {
+		out.Subject = s.deliveries.Subject()
+	}
 	out.AttachmentName, out.AttachmentSize = v.AttachmentName, v.AttachmentSize
 	return out, nil
 }
@@ -565,6 +597,9 @@ func assignmentItem(a homeworkflow.AssignmentView) AssignmentItem {
 	return AssignmentItem{
 		ID: string(a.ID), LessonID: string(a.LessonID), Title: a.Title, Description: a.Description, Due: rfc3339(a.Due),
 		UserEdited: a.UserEdited, UpdatedAt: rfc3339(a.UpdatedAt),
+		Subject: a.Subject, SubjectSource: string(a.SubjectSource), Kind: a.Kind, Teacher: a.Teacher,
+		TeacherSource: string(a.TeacherSource), LessonDate: rfc3339(a.LessonDate),
+		CorrectedSubject: a.CorrectedSubject, CorrectedTeacher: a.CorrectedTeacher,
 	}
 }
 

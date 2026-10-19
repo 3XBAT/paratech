@@ -107,13 +107,20 @@ type SummaryContent struct {
 }
 
 // SummaryAssignment is an assignment found in the lesson; ID opens it in «Домашние задания». Title and Description
-// may be model output: text only. Due is RFC 3339 in UTC, "" without a deadline.
+// may be model output: text only. Due is RFC 3339 in UTC, "" without a deadline. The lesson fields are those of
+// AssignmentItem (TASK-092): a "transcript" source is shown marked «по записи».
 type SummaryAssignment struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Due         string `json:"due"`
-	UserEdited  bool   `json:"userEdited"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	Due           string `json:"due"`
+	UserEdited    bool   `json:"userEdited"`
+	Subject       string `json:"subject"`
+	SubjectSource string `json:"subjectSource"`
+	Kind          string `json:"kind"`
+	Teacher       string `json:"teacher"`
+	TeacherSource string `json:"teacherSource"`
+	LessonDate    string `json:"lessonDate"`
 }
 
 // SummaryHomework is the homework found in the lesson and the state of its search.
@@ -190,11 +197,17 @@ func (s *SummaryService) View(ctx context.Context, recordingID string) (SummaryV
 		out.Summary.KeyPoints = append(out.Summary.KeyPoints, v.Summary.Content.KeyPoints()...)
 	}
 	for i, a := range v.Homework.Assignments {
-		out.Homework.Assignments[i] = SummaryAssignment{
-			ID: string(a.ID), Title: a.Title, Description: a.Description, Due: timeText(a.Due), UserEdited: a.UserEdited,
-		}
+		out.Homework.Assignments[i] = summaryAssignment(a)
 	}
 	return out, nil
+}
+
+func summaryAssignment(a summaryview.Assignment) SummaryAssignment {
+	return SummaryAssignment{
+		ID: string(a.ID), Title: a.Title, Description: a.Description, Due: timeText(a.Due), UserEdited: a.UserEdited,
+		Subject: a.Subject, SubjectSource: string(a.SubjectSource), Kind: a.Kind, Teacher: a.Teacher,
+		TeacherSource: string(a.TeacherSource), LessonDate: timeText(a.LessonDate),
+	}
 }
 
 // CopyAll puts the summary with its key points and the homework found on the clipboard as plain text. Nothing leaves

@@ -109,6 +109,7 @@ export interface DeliveryItem {
 export const methods = {
   listAssignments: "paratech/desktop/internal/input/wails.HomeworkService.ListAssignments",
   openAssignment: "paratech/desktop/internal/input/wails.HomeworkService.OpenAssignment",
+  correctLesson: "paratech/desktop/internal/input/wails.HomeworkService.CorrectLesson",
   draftVersion: "paratech/desktop/internal/input/wails.HomeworkService.DraftVersion",
   generate: "paratech/desktop/internal/input/wails.HomeworkService.Generate",
   generationStatus: "paratech/desktop/internal/input/wails.HomeworkService.GenerationStatus",
