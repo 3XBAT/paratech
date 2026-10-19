@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -215,5 +216,21 @@ func TestDeleteServiceMethodSet(t *testing.T) {
 	}
 	if !reflect.DeepEqual(names, []string{"Delete", "Preview"}) {
 		t.Fatalf("methods = %v", names)
+	}
+}
+
+// TestFrontendKnowsDeleteErrors keeps the error texts the deletion dialog shows as they are equal to the binding's.
+func TestFrontendKnowsDeleteErrors(t *testing.T) {
+	src, err := os.ReadFile("../../../frontend/src/bindings/recordingDelete.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []error{
+		ErrDeleteInvalidID, ErrDeleteNotFound, ErrDeleteInProgress, ErrDeleteRecovering, ErrDeleteChoice, ErrDeleteTooMany,
+		ErrDeleteUnavailable,
+	} {
+		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
+			t.Errorf("frontend/src/bindings/recordingDelete.ts does not list the error %q", e)
+		}
 	}
 }

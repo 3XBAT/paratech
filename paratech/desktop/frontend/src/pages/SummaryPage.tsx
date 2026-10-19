@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { actionErrorText } from "../activityView";
 import { type ActivityApi, activityApi } from "../bindings/activity";
+import { recordingDeleteApi } from "../bindings/recordingDelete";
 import { callByName } from "../bindings/runtime";
 import {
   type LectureTextApi,
@@ -11,6 +12,7 @@ import {
   type SummaryView,
 } from "../bindings/summary";
 import { lectureCopiedText } from "../lectureTextView";
+import { type DeleteOutcome, deleteOutcome, deleteTexts } from "../recordingDeleteView";
 import type { SummarySection } from "../openSummary";
 import {
   errorText,
@@ -27,6 +29,7 @@ import { saveResultText } from "../transcriptView";
 import { Button } from "../ui/Button";
 import { Banner, Card, Dialog, ResultLine, type ResultKind, Segmented } from "../ui/controls";
 import { LectureTextCard } from "./LectureTextParts";
+import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 
 export interface SummaryPageProps {
@@ -36,6 +39,8 @@ export interface SummaryPageProps {
   onBack: () => void;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
+  /** The recording was deleted here (TASK-095): back to the list of recordings. */
+  onDeleted: () => void;
 }
 
 // «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found, the lecture
@@ -46,6 +51,10 @@ export function SummaryPage(props: SummaryPageProps) {
   const api = useMemo(() => summaryApi(callByName), []);
   const activity = useMemo(() => activityApi(callByName), []);
   const lecture = useMemo(() => lectureTextApi(callByName), []);
+  const deletion = useMemo(() => recordingDeleteApi(callByName), []);
+  const [deleting, setDeleting] = useState(false);
+  // Set only when nothing was deleted: a deleted recording leaves this screen.
+  const [deleteFailed, setDeleteFailed] = useState<DeleteOutcome | null>(null);
   const [view, setView] = useState<SummaryView | null>(null);
   const [error, setError] = useState("");
   // A new value starts the polling again (after a retry the steps go on).
@@ -108,7 +117,37 @@ export function SummaryPage(props: SummaryPageProps) {
             </p>
           )}
         </div>
+        <Button
+          variant="ghost"
+          disabled={deleting}
+          onClick={() => {
+            setDeleteFailed(null);
+            setDeleting(true);
+          }}
+        >
+          {deleteTexts.summaryButton}
+        </Button>
       </div>
+      {deleteFailed && (
+        <Banner kind="fail" role="alert">
+          {deleteFailed.lines.join(" ")}
+        </Banner>
+      )}
+      {deleting && (
+        <RecordingDeleteDialog
+          api={deletion}
+          ids={[id]}
+          onCancel={() => setDeleting(false)}
+          onDone={(res, preview) => {
+            setDeleting(false);
+            if (res.removed > 0) {
+              props.onDeleted();
+            } else {
+              setDeleteFailed(deleteOutcome(res, preview));
+            }
+          }}
+        />
+      )}
       {error && (
         <Banner kind="fail" role="alert">
           {error}
