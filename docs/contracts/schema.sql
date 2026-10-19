@@ -453,6 +453,7 @@ CREATE TABLE lecture_texts (
 );
 CREATE INDEX idx_lecture_texts_lesson ON lecture_texts (lesson_id);
 
+-- Migration 0017.
 -- settings: the student profile of the title page of a homework document (settings.Profile): full name, group,
 -- university, faculty or department and city; '' not set. One plain line of at most settings.MaxProfileRunes
 -- characters each. Local data, not a secret.
