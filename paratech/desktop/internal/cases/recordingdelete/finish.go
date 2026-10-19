@@ -68,7 +68,8 @@ func (s *Service) finish(ctx context.Context, id shared.RecordingID, wait time.D
 // stopJobs cancels the unfinished jobs of the marked recording and looks again until none is left, at least twice and
 // for at most wait. A job claimed or enqueued meanwhile is found by the next look. It returns the recording and its
 // jobs, all finished, or errBusy.
-func (s *Service) stopJobs(ctx context.Context, id shared.RecordingID, wait time.Duration) (*recording.Recording, []*job.Job, error) {
+func (s *Service) stopJobs(ctx context.Context, id shared.RecordingID, wait time.Duration) (
+	*recording.Recording, []*job.Job, error) {
 	deadline := s.clock.Now().Add(wait)
 	for look := 0; ; look++ {
 		rec, err := s.get(ctx, id)
@@ -193,7 +194,8 @@ func (s *Service) get(ctx context.Context, id shared.RecordingID) (*recording.Re
 // jobsOf returns the jobs of the recording, of its transcripts and of the assignments chosen with it. Rows that cannot
 // be read are left as they are.
 func (s *Service) jobsOf(ctx context.Context, rec *recording.Recording) ([]*job.Job, error) {
-	byRecording, bad, err := s.jobs.ListForRecordings(ctx, []shared.RecordingID{rec.ID()}, recordingJobTypes(), transcriptJobTypes())
+	byRecording, bad, err := s.jobs.ListForRecordings(ctx, []shared.RecordingID{rec.ID()}, recordingJobTypes(),
+		transcriptJobTypes())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStorage, err)
 	}

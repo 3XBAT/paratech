@@ -116,13 +116,14 @@ type CalendarAdapter interface {
 }
 
 // DeadlineRemovals are the assignments deleted with their recording whose Google deadline event is still to be
-// removed (TASK-095, ADR-0018). The deletion writes one in the transaction that deletes the assignment; the sync
-// deletes the event and then the row. Implemented by the sqlite adapter.
+// removed (PRD sections 11.3 and 13.1; TASK-095, ADR-0018). The deletion writes one in the transaction that deletes
+// the assignment; the sync deletes the event and then the row. Implemented by the sqlite adapter.
 type DeadlineRemovals interface {
-	// ListDeadlineRemovals returns up to limit assignments, oldest first.
+	// ListDeadlineRemovals returns up to limit assignments, oldest first (PRD section 11.3).
 	ListDeadlineRemovals(ctx context.Context, limit int) ([]shared.AssignmentID, error)
 
-	// PurgeDeadlineRemoval forgets one once its event is gone; a missing row is not an error.
+	// PurgeDeadlineRemoval forgets one once its event is gone; a missing row is not an error (PRD section 11.3:
+	// idempotent).
 	PurgeDeadlineRemoval(ctx context.Context, id shared.AssignmentID) error
 }
 
@@ -131,7 +132,7 @@ type DeadlineRemovals interface {
 // concerns only that event wraps ErrLessonRejected).
 type DeadlineEvents interface {
 	// DeleteDeadline removes the event of the assignment id from the calendar calendarID by its derived event id; an
-	// event that is already gone or never existed is not an error.
+	// event that is already gone or never existed is not an error (PRD section 11.3: idempotent).
 	DeleteDeadline(ctx context.Context, calendarID string, id shared.AssignmentID) error
 }
 
