@@ -366,23 +366,23 @@ func TestLessonKindColumn(t *testing.T) {
 	}
 }
 
-// Version 13 adds subject, kind and teacher: a lesson stored before reads as unknown with no subject or teacher, and
+// Version 14 adds subject, kind and teacher: a lesson stored before reads as unknown with no subject or teacher, and
 // the migration goes back down keeping it.
-func TestMigrationToVersion13AddsLessonDetails(t *testing.T) {
+func TestMigrationToVersion14AddsLessonDetails(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 12); err != nil {
-		t.Fatalf("up to 12: %v", err)
+	if _, err := p.UpTo(ctx, 13); err != nil {
+		t.Fatalf("up to 13: %v", err)
 	}
 	mustExec(t, db, `INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, source_uid, version,
 		created_at, updated_at) VALUES ('l-old', 'Матанализ, лекция', 0, 5400000, 'Europe/Moscow', 'csv:id:1', 1, 0, 0)`)
 
-	if _, err := p.UpTo(ctx, 13); err != nil {
-		t.Fatalf("up to 13: %v", err)
+	if _, err := p.UpTo(ctx, 14); err != nil {
+		t.Fatalf("up to 14: %v", err)
 	}
 	l, err := NewLessonRepository(db).Get(ctx, "l-old")
 	if err != nil {
@@ -392,12 +392,12 @@ func TestMigrationToVersion13AddsLessonDetails(t *testing.T) {
 		t.Fatalf("existing lesson = %+v; want no subject, unknown kind, no teacher", c)
 	}
 
-	if _, err := p.DownTo(ctx, 12); err != nil {
-		t.Fatalf("down to 12: %v", err)
+	if _, err := p.DownTo(ctx, 13); err != nil {
+		t.Fatalf("down to 13: %v", err)
 	}
 	const detailColumns = "SELECT count(*) FROM pragma_table_info('schedule_entries') WHERE name IN ('subject', 'kind', 'teacher')"
 	if n := scanInt(t, db.sql, detailColumns); n != 0 {
-		t.Fatalf("%d detail columns still exist at version 12", n)
+		t.Fatalf("%d detail columns still exist at version 13", n)
 	}
 	if n := scanInt(t, db.sql, "SELECT count(*) FROM schedule_entries"); n != 1 {
 		t.Fatalf("lessons = %d, want the lesson kept", n)
