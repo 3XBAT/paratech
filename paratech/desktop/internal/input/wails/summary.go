@@ -69,6 +69,11 @@ type SummaryUseCase interface {
 	Text(ctx context.Context, id shared.RecordingID) (string, error)
 	SuggestedName(ctx context.Context, id shared.RecordingID, f summaryexport.Format) (string, error)
 	Export(ctx context.Context, id shared.RecordingID, f summaryexport.Format, path string) error
+
+	// The lecture text (TASK-090), bound as LectureTextService.
+	LectureText(ctx context.Context, id shared.RecordingID, times bool) (string, error)
+	LectureSuggestedName(ctx context.Context, id shared.RecordingID, f summaryexport.Format) (string, error)
+	ExportLectureText(ctx context.Context, id shared.RecordingID, f summaryexport.Format, times bool, path string) error
 }
 
 // SummaryFilePicker shows the native save dialog of a summary with name proposed, filtered to format ("txt" or "md").
@@ -141,6 +146,8 @@ type SummaryView struct {
 	Transcribed     bool            `json:"transcribed"`
 	Summary         SummaryContent  `json:"summary"`
 	Homework        SummaryHomework `json:"homework"`
+	// LectureText is the lecture text (TASK-090) and the state of its job.
+	LectureText SummaryLectureText `json:"lectureText"`
 }
 
 // SummarySaveResult answers «Сохранить как…»: Status "saved", "cancelled" or "failed", a fixed text and the base name
@@ -199,6 +206,7 @@ func (s *SummaryService) View(ctx context.Context, recordingID string) (SummaryV
 	for i, a := range v.Homework.Assignments {
 		out.Homework.Assignments[i] = summaryAssignment(a)
 	}
+	out.LectureText = lectureTextView(v.LectureText, v.Transcribed)
 	return out, nil
 }
 

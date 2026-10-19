@@ -54,7 +54,8 @@ const recording = {
   id: "r1", lessonId: "", title: "", subject: "", kind: "", teacher: "",
   status: "RECORDING", startedAt: "2026-10-19T10:00:00Z", stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: true, stage: "recording", step: "", progressPercent: 0,
-  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "", canRedoSummary: false,
+  partsDone: 0, parts: 0, queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "",
+  canRedoSummary: false, lectureTextReady: false,
   remainingSeconds: 0, hasRemaining: false, advice,
 };
 

@@ -9,10 +9,11 @@
 // the homework drafts (Drafts in drafts.go): Generate enqueues a homework_draft job (one per assignment, base version
 // and instructions, so a double click makes one job), the job adds the model's draft as a new version unless the
 // student changed the draft meanwhile, EditDraft adds the student's version, and ExportDraft writes a chosen version
-// to the export file of the assignment.
+// to the export file of the assignment. TASK-090 adds the lecture text (lecturetext.go): a lecture_text job formats the
+// transcript part by part into the full readable text of the lesson, and the Rerunner starts it for older transcripts.
 //
-// The PostProcessor and the draft job have no side-effect port at all: summaries, assignments, deadlines and draft
-// versions are local data. Exporting a draft is an explicit user action on a version the user picked, to a file the
+// The PostProcessor and the draft job have no side-effect port at all: summaries, assignments, deadlines, lecture texts
+// and draft versions are local data. Exporting a draft is an explicit user action on a version the user picked, to a file the
 // core derives; putting a deadline into the calendar or sending homework goes through an action proposal and the
 // user's confirmation.
 //

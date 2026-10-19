@@ -16,6 +16,9 @@ var (
 	// ErrNoSummary means there is nothing to copy or save yet: the recording has no summary.
 	ErrNoSummary = errors.New("summaryview: no summary yet")
 
+	// ErrNoLectureText means there is no lecture text to copy or save yet (TASK-090).
+	ErrNoLectureText = errors.New("summaryview: no lecture text yet")
+
 	// ErrUnavailable means local storage could not be read or the file could not be written.
 	ErrUnavailable = errors.New("summaryview: local storage failed")
 )

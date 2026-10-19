@@ -154,6 +154,43 @@ func assertLedger(t *testing.T, db *DB, owner shared.APIKeyID, kinds []string) {
 	}
 }
 
+// The lecture_text operation (migration 0005) is stored and read back: the same request replays, another operation
+// under the key conflicts.
+func TestQuotaAccountsLectureText(t *testing.T) {
+	db := migratedDB(t)
+	repo, owner, p := db.QuotaAccounts(), storedOwner(t, db), quotaPolicy(t, 1000)
+	scope := scopeOf(owner, p, keyT0)
+	scope.Key = "job-1:lecture_text"
+	req := func(op string) account.ReserveRequest {
+		r, err := account.NewReserveRequest(string(scope.Key), op, "fast", "tokens", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	for attempt, want := range []bool{false, true} {
+		err := repo.Modify(t.Context(), scope, func(a *account.Account) error {
+			_, replayed, err := a.Reserve(req("lecture_text"), resID(attempt+1), keyT0)
+			if err == nil && replayed != want {
+				err = fmt.Errorf("attempt %d: replayed = %v, want %v", attempt, replayed, want)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := repo.Modify(t.Context(), scope, func(a *account.Account) error {
+		_, _, err := a.Reserve(req("summary"), resID(3), keyT0)
+		return err
+	})
+	if !errors.Is(err, account.ErrIdempotencyConflict) {
+		t.Fatalf("other operation: err = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
 func TestQuotaAccountsRollback(t *testing.T) {
 	db := migratedDB(t)
 	repo, owner, p := db.QuotaAccounts(), storedOwner(t, db), quotaPolicy(t, 1000)

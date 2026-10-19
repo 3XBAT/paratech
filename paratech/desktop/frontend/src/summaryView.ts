@@ -7,6 +7,7 @@ import { formatDuration, formatTime } from "./activityView.js";
 import type { RecordingItem } from "./bindings/activity.js";
 import {
   errorMessages,
+  lectureErrorMessages,
   type SummaryAssignment,
   type SummaryState,
   type SummaryStep,
@@ -29,7 +30,7 @@ export type SummaryOffer = "main" | "extra" | null;
 
 /**
  * Whether a row of «Записи и задачи» offers «Открыть конспект», from the chain the list already has (no call per row).
- * Main: the chain is done, or only the homework search failed (the summary did not). Extra: the summary is queued,
+ * Main: the chain is done or at the lecture text, or only the homework search or the lecture text failed. Extra: the summary is queued,
  * running or failed, so the page shows why and keeps the place for «Повторить».
  */
 export function rowSummaryOffer(r: Pick<RecordingItem, "stage" | "step" | "errorCode">): SummaryOffer {
@@ -38,10 +39,16 @@ export function rowSummaryOffer(r: Pick<RecordingItem, "stage" | "step" | "error
       return "main";
     case "summarizing":
       return "extra";
+    // The lecture text comes after the summary and the homework, so the summary is there.
+    case "lectureText":
+      return "main";
     case "queued":
+      if (r.step === "lectureText") {
+        return "main";
+      }
       return r.step === "summary" ? "extra" : null;
     case "failed":
-      if (r.errorCode === "homeworkFailed") {
+      if (r.errorCode === "homeworkFailed" || r.errorCode === "lectureTextFailed") {
         return "main";
       }
       return r.errorCode === "summaryFailed" ? "extra" : null;
@@ -60,8 +67,9 @@ function isFinal(state: SummaryState): boolean {
 }
 
 /**
- * The wait before the next view, or null to stop: errors is the number of failed calls in a row. Only both steps
- * done or failed stop; a step that has not started is asked for slower, since the recognition may still run.
+ * The wait before the next view, or null to stop: errors is the number of failed calls in a row. Only the summary and
+ * the homework done or failed with no lecture text being made stop (a lecture text never made waits for a click); a
+ * step that has not started is asked for slower, since the recognition may still run.
  */
 export function nextPollMs(last: SummaryView | null, errors: number): number | null {
   if (errors > 0) {
@@ -70,10 +78,11 @@ export function nextPollMs(last: SummaryView | null, errors: number): number | n
   if (last === null) {
     return pollMs;
   }
-  if (isFinal(last.summary.state) && isFinal(last.homework.state)) {
+  const lecture = isActive(last.lectureText.state);
+  if (isFinal(last.summary.state) && isFinal(last.homework.state) && !lecture) {
     return null;
   }
-  return isActive(last.summary.state) || isActive(last.homework.state) ? pollMs : idlePollMs;
+  return isActive(last.summary.state) || isActive(last.homework.state) || lecture ? pollMs : idlePollMs;
 }
 
 /** «<дата, время> · Длительность 0:45:00» under the title; "" parts are left out. */
@@ -213,7 +222,10 @@ export const redoTexts = {
 
 export const noSummaryHint = "Конспекта пока нет: копировать и сохранять нечего.";
 
-const knownErrors: ReadonlySet<string> = new Set(Object.values(errorMessages));
+const knownErrors: ReadonlySet<string> = new Set([
+  ...Object.values(errorMessages),
+  ...Object.values(lectureErrorMessages),
+]);
 
 /** The core's fixed text of a failed call as it is; anything else (a malformed reply) gets the generic text. */
 export function errorText(err: unknown): string {

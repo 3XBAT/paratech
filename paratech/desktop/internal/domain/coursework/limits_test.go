@@ -5,8 +5,10 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/homeworkdraft"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/services/contextselection"
+	"paratech/desktop/internal/domain/coursework/services/lectureparts"
 	"paratech/desktop/internal/domain/coursework/services/prompts"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
@@ -28,6 +30,11 @@ func TestAggregateLimitsMatchThePrompts(t *testing.T) {
 		{"draft body in 4-byte runes", proposal.MaxBodyBytes, 4 * prompts.MaxDraftBodyRunes, false},
 		{"homework draft title", homeworkdraft.MaxTitleRunes, prompts.MaxTitleRunes, true},
 		{"homework draft body", homeworkdraft.MaxBodyRunes, prompts.MaxDraftBodyRunes, true},
+		{"lecture text heading", lecturetext.MaxHeadingRunes, prompts.MaxLectureHeadingRunes, true},
+		{"lecture text paragraph", lecturetext.MaxParagraphRunes, prompts.MaxLectureParagraphRunes, true},
+		{"lecture text paragraphs of a block", lecturetext.MaxParagraphs, prompts.MaxLectureParagraphs, false},
+		{"lecture text blocks of a run", lecturetext.MaxBlocks, lecturetext.MaxParts * prompts.MaxLectureBlocks, false},
+		{"lecture text parts", lecturetext.MaxParts, lectureparts.MaxParts, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -25,6 +25,12 @@ const (
 	MaxHintRunes        = values.MaxNameRunes // subject_hint and teacher_hint
 	MaxDraftBodyRunes   = 16000               // keeps a draft below proposal.MaxBodyBytes even in 4-byte runes
 
+	// Lecture text (one part): blocks, paragraphs of a block, heading and paragraph lengths.
+	MaxLectureBlocks         = 40
+	MaxLectureParagraphs     = 40
+	MaxLectureHeadingRunes   = 200
+	MaxLectureParagraphRunes = 4000
+
 	// A deadline outside [lesson start - MaxDueBefore, lesson start + MaxDueAhead] is a model error.
 	MaxDueBefore = 24 * time.Hour
 	MaxDueAhead  = 2 * 365 * 24 * time.Hour

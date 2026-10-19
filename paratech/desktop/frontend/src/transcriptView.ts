@@ -53,6 +53,7 @@ export function rowOffersTranscript(r: Pick<RecordingItem, "stage" | "errorCode"
     case "queued":
     case "transcribing":
     case "summarizing":
+    case "lectureText":
     case "done":
       return true;
     case "failed":

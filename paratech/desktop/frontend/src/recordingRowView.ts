@@ -18,6 +18,8 @@ import { remainingText } from "./durationEstimate.js";
 import type { PageId } from "./nav.js";
 import { plural } from "./plural.js";
 import type { StatusView } from "./statusPresentation.js";
+import { rowSummaryOffer, type SummaryOffer } from "./summaryView.js";
+import { rowOffersTranscript } from "./transcriptView.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -32,6 +34,7 @@ export const stageLabels: Readonly<Record<ChainStage, string>> = {
   queued: "В очереди",
   transcribing: "Расшифровка",
   summarizing: "Краткое содержание",
+  lectureText: "Текст лекции…",
   done: "Конспект готов",
   failed: "Ошибка",
 };
@@ -42,6 +45,7 @@ const stageLooks: Readonly<Record<ChainStage, Look>> = {
   queued: { kind: "neutral", icon: "clock" },
   transcribing: { kind: "run", icon: "wave" },
   summarizing: { kind: "run", icon: "doc" },
+  lectureText: { kind: "run", icon: "doc" },
   done: { kind: "ok", icon: "ok" },
   failed: { kind: "fail", icon: "warn" },
 };
@@ -52,6 +56,7 @@ const stageHints: Readonly<Record<ChainStage, string>> = {
   queued: "",
   transcribing: "",
   summarizing: "Обычно до минуты.",
+  lectureText: "",
   done: "",
   failed: "",
 };
@@ -104,6 +109,7 @@ const queueReasonLooks: Readonly<Record<Exclude<QueueReason, "">, Look>> = {
 export const stepTexts: Readonly<Record<Exclude<ChainStep, "">, string>> = {
   transcription: "Дальше расшифровка.",
   summary: "Дальше краткое содержание.",
+  lectureText: "Дальше текст лекции.",
 };
 
 export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRecording">, string>> = {
@@ -111,6 +117,7 @@ export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRec
   transcriptionFailed: "Не удалось расшифровать запись.",
   summaryFailed: "Не удалось сделать краткое содержание.",
   homeworkFailed: "Не удалось найти домашнее задание.",
+  lectureTextFailed: "Не удалось составить текст лекции.",
 };
 
 /** A silent recording (TASK-082) has its own chip instead of «Ошибка»: nothing failed, the source played nothing. */
@@ -158,7 +165,7 @@ export interface RecordingRowView {
   /** Start time (when the title is the lesson) and the final duration; "" for none. */
   meta: string;
   status: StatusView;
-  /** Transcription share for the progress bar; null for none. */
+  /** Transcription or lecture text share for the progress bar; null for none. */
   progress: number | null;
   /** «≈ 25 мин осталось» of a queued or running transcription (TASK-084); "" for none. */
   remaining: string;
@@ -199,6 +206,11 @@ export function lessonLine(r: Pick<RecordingItem, "title" | "subject" | "kind" |
   return parts.filter((s) => s !== "").join(" · ");
 }
 
+/** «3 из 12» of the lecture text's parts; "" while their number is unknown. */
+export function partsText(r: Pick<RecordingItem, "partsDone" | "parts">): string {
+  return r.parts > 0 ? `${r.partsDone} из ${r.parts}` : "";
+}
+
 /** The chip, its hint and the progress of the chain; a running recording shows its elapsed time by the clock `now`. */
 export function chainStatusView(r: RecordingItem, now: number): StatusView {
   const look = own(stageLooks, r.stage) ?? { kind: "neutral" as const, icon: null };
@@ -228,11 +240,17 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
         view.kind = reasonLook.kind;
         view.icon = reasonLook.icon;
       }
-      view.hint = [own(stepTexts, r.step), own(queueReasonHints, r.queueReason)].filter((s) => s).join(" ");
+      // A lecture text that waits halfway says how far it got.
+      const parts = r.step === "lectureText" ? partsText(r) : "";
+      const step = parts === "" ? own(stepTexts, r.step) : `Текст лекции: готово ${parts}.`;
+      view.hint = [step, own(queueReasonHints, r.queueReason)].filter((s) => s).join(" ");
       break;
     }
     case "transcribing":
       view.value = r.progressPercent > 0 ? `${r.progressPercent} %` : "";
+      break;
+    case "lectureText":
+      view.value = partsText(r);
       break;
     case "failed":
       if (r.errorCode === "silentRecording") {
@@ -288,12 +306,38 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
     lesson: lessonLine(r),
     meta: meta.filter((s) => s !== "").join(" · "),
     status: chainStatusView(r, now),
-    progress: r.stage === "transcribing" && r.progressPercent > 0 ? Math.min(100, r.progressPercent) : null,
+    progress:
+      (r.stage === "transcribing" || r.stage === "lectureText") && r.progressPercent > 0
+        ? Math.min(100, r.progressPercent)
+        : null,
     remaining: remainingText(r),
     notes: [r.problem, r.jobError].filter((s, i, all) => s !== "" && all.indexOf(s) === i),
     action: rowAction(r),
     secondary: rowSecondaryAction(r),
   };
+}
+
+/** The links of a row to the texts of the recording. */
+export interface RowLinks {
+  /** «Открыть текст лекции», the main link once the lecture text is ready (TASK-090). */
+  lectureText: boolean;
+  summary: SummaryOffer;
+  /** «Открыть расшифровку» without a lecture text; with one, the small «Исходная расшифровка». */
+  transcript: "full" | "source" | null;
+}
+
+/** Which links a row offers, from the chain the list already has (no call per row). */
+export function rowLinks(
+  r: Pick<RecordingItem, "stage" | "step" | "errorCode" | "lectureTextReady">,
+): RowLinks {
+  if (!rowOffersTranscript(r)) {
+    return { lectureText: false, summary: null, transcript: null };
+  }
+  const summary = rowSummaryOffer(r);
+  if (!r.lectureTextReady) {
+    return { lectureText: false, summary, transcript: "full" };
+  }
+  return { lectureText: true, summary: summary === null ? null : "extra", transcript: "source" };
 }
 
 /**

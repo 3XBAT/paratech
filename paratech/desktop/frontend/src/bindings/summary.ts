@@ -1,6 +1,6 @@
-// Summary viewer bindings: calls into the Go core (internal/input/wails/summary.go). The core reads the local
+// Summary viewer bindings: calls into the Go core (internal/input/wails/summary.go and lecturetext.go). The core reads the local
 // post-processing results and writes every text; nothing here goes to the network. The summary, its key points and the
-// assignment titles are model output: show them as plain text, never as HTML. Copy and save run only on the user's
+// assignment titles and the lecture text are model output: show them as plain text, never as HTML. Copy and save run only on the user's
 // click.
 
 import { type LessonSource, lessonSource } from "../lessonLabel.js";
@@ -60,6 +60,31 @@ export interface SummaryHomework extends SummaryStep {
   assignments: SummaryAssignment[];
 }
 
+/** One block of the lecture text; heading and paragraphs are model output. */
+export interface SummaryLectureBlock {
+  heading: string;
+  startSeconds: number;
+  /** Where the block starts: "12:05" or "1:02:05". */
+  time: string;
+  paragraphs: string[];
+}
+
+/** The lecture text (TASK-090) and the state of its job. */
+export interface SummaryLectureText extends SummaryStep {
+  /** blocks hold the text; it may be ready while a new run waits, runs or failed. */
+  ready: boolean;
+  blocks: SummaryLectureBlock[];
+  /** RFC 3339 in UTC, "" unless ready. */
+  updatedAt: string;
+  /** partsDone of parts are made while the job waits or runs; parts is 0 when unknown. */
+  partsDone: number;
+  parts: number;
+  /** Never made: «Сделать текст лекции» may start it. */
+  canStart: boolean;
+  /** "lectureText": ActivityService.RetryPostProcessing may start it (after a failure, or canStart). */
+  retryWork: "" | "lectureText";
+}
+
 export interface SummaryView {
   recordingId: string;
   /** "" for an ad-hoc recording. */
@@ -74,6 +99,7 @@ export interface SummaryView {
   transcribed: boolean;
   summary: SummaryContent;
   homework: SummaryHomework;
+  lectureText: SummaryLectureText;
 }
 
 export type SummarySaveFormat = "txt" | "md";
@@ -94,6 +120,12 @@ export const methods = {
   saveAs: "paratech/desktop/internal/input/wails.SummaryService.SaveAs",
 } as const;
 
+/** The lecture text's bound methods (LectureTextService). */
+export const lectureMethods = {
+  copy: "paratech/desktop/internal/input/wails.LectureTextService.Copy",
+  saveAs: "paratech/desktop/internal/input/wails.LectureTextService.SaveAs",
+} as const;
+
 /** Messages of the errors the Go binding returns (checked by a Go test); the page shows them as they are. */
 export const errorMessages = {
   invalidId: "Неверный идентификатор записи.",
@@ -102,6 +134,12 @@ export const errorMessages = {
   format: "Неизвестный формат файла.",
   unavailable: "Не удалось прочитать конспект. Попробуйте ещё раз.",
   clipboard: "Не удалось скопировать в буфер обмена. Попробуйте ещё раз.",
+} as const;
+
+/** The lecture text's own errors; the others are those of the summary. */
+export const lectureErrorMessages = {
+  empty: "Текста лекции пока нет.",
+  unavailable: "Не удалось прочитать текст лекции. Попробуйте ещё раз.",
 } as const;
 
 export const summaryStates: readonly SummaryState[] = ["none", "waiting", "running", "done", "failed"];
@@ -116,6 +154,7 @@ export const summaryWaitReasons: readonly SummaryWaitReason[] = [
   "serviceUnavailable",
 ];
 const saveStatuses: readonly SummarySaveStatus[] = ["saved", "cancelled", "failed"];
+const lectureRetryWorks = ["", "lectureText"] as const;
 
 function record(raw: unknown, what: string): Record<string, unknown> {
   if (typeof raw !== "object" || raw === null) {
@@ -191,6 +230,41 @@ export function parseAssignment(raw: unknown): SummaryAssignment {
   };
 }
 
+function strings(r: Record<string, unknown>, key: string, what: string): string[] {
+  return list(r, key, what).map((p) => {
+    if (typeof p !== "string") {
+      throw new Error(`${what}: an item of ${key} is not a string`);
+    }
+    return p;
+  });
+}
+
+export function parseLectureBlock(raw: unknown): SummaryLectureBlock {
+  const w = "lecture block";
+  const r = record(raw, w);
+  return {
+    heading: str(r, "heading", w),
+    startSeconds: count(r, "startSeconds", w),
+    time: str(r, "time", w),
+    paragraphs: strings(r, "paragraphs", w),
+  };
+}
+
+export function parseLectureText(raw: unknown): SummaryLectureText {
+  const w = "summary view: lectureText";
+  const r = record(raw, w);
+  return {
+    ...parseStep(r, w),
+    ready: bool(r, "ready", w),
+    blocks: list(r, "blocks", w).map(parseLectureBlock),
+    updatedAt: str(r, "updatedAt", w),
+    partsDone: count(r, "partsDone", w),
+    parts: count(r, "parts", w),
+    canStart: bool(r, "canStart", w),
+    retryWork: oneOf(r, "retryWork", lectureRetryWorks, w),
+  };
+}
+
 /** Checks the shape of a reply; a malformed reply is an error, not a default. */
 export function parseView(raw: unknown): SummaryView {
   const w = "summary view";
@@ -221,6 +295,7 @@ export function parseView(raw: unknown): SummaryView {
       ...parseStep(h, `${w}: homework`),
       assignments: list(h, "assignments", `${w}: homework`).map(parseAssignment),
     },
+    lectureText: parseLectureText(r.lectureText),
   };
 }
 
@@ -246,5 +321,22 @@ export function summaryApi(call: CallByName): SummaryApi {
       await call(methods.copyAll, id);
     },
     saveAs: async (id, format) => parseSaveResult(await call(methods.saveAs, id, format)),
+  };
+}
+
+export interface LectureTextApi {
+  /** Puts the lecture text with the block times on the clipboard as plain text. */
+  copy(recordingId: string): Promise<void>;
+  /** Shows the Windows save dialog; the path never comes from the page. */
+  saveAs(recordingId: string, format: SummarySaveFormat): Promise<SummarySaveResult>;
+}
+
+/** Builds the lecture text API; copy and save always include the block times («[12:05]»). */
+export function lectureTextApi(call: CallByName): LectureTextApi {
+  return {
+    copy: async (id) => {
+      await call(lectureMethods.copy, id, true);
+    },
+    saveAs: async (id, format) => parseSaveResult(await call(lectureMethods.saveAs, id, format, true)),
   };
 }

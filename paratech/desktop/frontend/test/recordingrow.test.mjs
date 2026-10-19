@@ -33,12 +33,12 @@ import {
 const { renderToStaticMarkup } = server;
 
 // Mirror the chain codes of internal/cases/activity/types.go.
-const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "done", "failed"];
+const stages = ["recording", "saving", "queued", "transcribing", "summarizing", "lectureText", "done", "failed"];
 // The service reasons have their own chip (TASK-083); the others read «В очереди · <reason>».
 const suffixedReasons = ["inLine", "retry", "power", "network", "quota"];
 const ownLabelReasons = ["serviceNotConfigured", "serviceUnavailable"];
 const reasons = [...suffixedReasons, ...ownLabelReasons];
-const errorCodes = ["recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"];
+const errorCodes = ["recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed", "lectureTextFailed"];
 const actions = ["runNow", "openModels", "openConnections", "checkSound", "retry"];
 
 const started = "2026-10-18T17:19:35Z";
@@ -47,7 +47,8 @@ const row = (over = {}) => ({
   id: "r1", lessonId: "l1", title: "Матанализ", subject: "", kind: "", teacher: "",
   status: "COMPLETED", startedAt: started, stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: false, stage: "done", step: "", progressPercent: 0,
-  queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "", canRedoSummary: false,
+  partsDone: 0, parts: 0, queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "",
+  canRedoSummary: false, lectureTextReady: false,
   remainingSeconds: 0, hasRemaining: false, advice: null, ...over,
 });
 

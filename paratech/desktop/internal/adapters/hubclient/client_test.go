@@ -154,6 +154,7 @@ func TestOperationsMapToContract(t *testing.T) {
 		{values.OperationSummary, hubv1.OperationType_OPERATION_TYPE_SUMMARY},
 		{values.OperationExtractHomework, hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES},
 		{values.OperationHomeworkDraft, hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT},
+		{values.OperationLectureText, hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.op), func(t *testing.T) {

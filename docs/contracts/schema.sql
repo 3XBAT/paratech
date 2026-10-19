@@ -431,3 +431,24 @@ ALTER TABLE assignments ADD COLUMN hint_subject TEXT NOT NULL DEFAULT '' CHECK (
 ALTER TABLE assignments ADD COLUMN hint_teacher TEXT NOT NULL DEFAULT '' CHECK (length(hint_teacher) <= 200);
 ALTER TABLE assignments ADD COLUMN user_subject TEXT NOT NULL DEFAULT '' CHECK (length(user_subject) <= 200);
 ALTER TABLE assignments ADD COLUMN user_teacher TEXT NOT NULL DEFAULT '' CHECK (length(user_teacher) <= 200);
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- lecture_texts (migration 0016): the lecture text of one transcript. Aggregate coursework/lecturetext; id = the
+-- transcript id. blocks is the text shown (empty until a run completed); run, run_parts and parts are the run in
+-- progress and its finished parts, so a run that stops continues from the next part. The text is model output, stored as data only (hard rule
+-- 3); it stays when its transcript is deleted (transcript_id SET NULL), like the summary.
+-- ---------------------------------------------------------------------------------------------------------------
+CREATE TABLE lecture_texts (
+    id              TEXT    PRIMARY KEY,
+    transcript_id   TEXT    REFERENCES transcripts (id) ON DELETE SET NULL,
+    lesson_id       TEXT    REFERENCES schedule_entries (id) ON DELETE SET NULL,
+    blocks          TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(blocks)), -- JSON array of {heading, start_ms, paragraphs}
+    prompt_version  INTEGER NOT NULL DEFAULT 0 CHECK (prompt_version >= 0),  -- prompts.LectureTextVersion; 0 without blocks
+    run             TEXT    NOT NULL DEFAULT '' CHECK (length(run) <= 128),  -- digest of the requests of the run; '' none
+    run_parts       INTEGER NOT NULL DEFAULT 0 CHECK (run_parts BETWEEN 0 AND 64),
+    parts           TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(parts)),  -- JSON array of the finished parts (block arrays)
+    version         INTEGER NOT NULL DEFAULT 0,                               -- optimistic concurrency (ADR-0004)
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_lecture_texts_lesson ON lecture_texts (lesson_id);

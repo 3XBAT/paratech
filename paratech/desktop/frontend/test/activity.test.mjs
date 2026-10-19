@@ -27,8 +27,9 @@ const recording = {
   id: "r1", lessonId: "l1", title: "История", subject: "", kind: "", teacher: "",
   status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
-  stage: "queued", step: "transcription", progressPercent: 0, queueReason: "power", errorCode: "", jobError: "",
-  action: "runNow", actionJobId: "j1", retryWork: "", canRedoSummary: false, remainingSeconds: 1500, hasRemaining: true,
+  stage: "queued", step: "transcription", progressPercent: 0, partsDone: 0, parts: 0, queueReason: "power", errorCode: "",
+  jobError: "", action: "runNow", actionJobId: "j1", retryWork: "", canRedoSummary: false, lectureTextReady: false,
+  remainingSeconds: 1500, hasRemaining: true,
   advice: null,
 };
 const job = {

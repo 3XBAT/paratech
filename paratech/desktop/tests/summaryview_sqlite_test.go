@@ -24,21 +24,23 @@ import (
 
 // The adapters satisfy the ports of the summary viewer.
 var (
-	_ summaryview.RecordingReader  = (*sqlite.RecordingRepository)(nil)
-	_ summaryview.LessonReader     = (*sqlite.LessonRepository)(nil)
-	_ summaryview.TranscriptFinder = (*sqlite.TranscriptRepository)(nil)
-	_ summaryview.SummaryReader    = (*sqlite.SummaryRepository)(nil)
-	_ summaryview.AssignmentLister = (*sqlite.AssignmentRepository)(nil)
-	_ summaryview.JobFinder        = (*sqlite.JobRepository)(nil)
-	_ summaryview.TextWriter       = textfile.Writer{}
+	_ summaryview.RecordingReader   = (*sqlite.RecordingRepository)(nil)
+	_ summaryview.LessonReader      = (*sqlite.LessonRepository)(nil)
+	_ summaryview.TranscriptFinder  = (*sqlite.TranscriptRepository)(nil)
+	_ summaryview.SummaryReader     = (*sqlite.SummaryRepository)(nil)
+	_ summaryview.LectureTextReader = (*sqlite.LectureTextRepository)(nil)
+	_ summaryview.AssignmentLister  = (*sqlite.AssignmentRepository)(nil)
+	_ summaryview.JobFinder         = (*sqlite.JobRepository)(nil)
+	_ summaryview.TextWriter        = textfile.Writer{}
 )
 
 func newSummaryViewer(t *testing.T, e *ppEnv) *summaryview.Service {
 	t.Helper()
 	v, err := summaryview.New(summaryview.Deps{
 		Recordings: sqlite.NewRecordingRepository(e.db), Lessons: sqlite.NewLessonRepository(e.db),
-		Transcripts: sqlite.NewTranscriptRepository(e.db), Summaries: e.summaries, Assignments: e.assignments,
-		Jobs: e.jobs, Writer: textfile.New(), Clock: e.clock,
+		Transcripts: sqlite.NewTranscriptRepository(e.db), Summaries: e.summaries,
+		LectureTexts: sqlite.NewLectureTextRepository(e.db), Assignments: e.assignments, Jobs: e.jobs,
+		Writer: textfile.New(), Clock: e.clock,
 	})
 	if err != nil {
 		t.Fatal(err)

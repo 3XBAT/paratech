@@ -59,6 +59,8 @@ func hubOperation(op values.Operation) hubv1.OperationType {
 		return hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES
 	case values.OperationHomeworkDraft:
 		return hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT
+	case values.OperationLectureText:
+		return hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT
 	}
 	return hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED
 }

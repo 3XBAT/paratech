@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 // The .js extensions let the Node test runner load the compiled row (test/recordingrow.test.mjs renders it).
 import type { RecordingItem, RetryWork } from "../bindings/activity.js";
 import type { PageId } from "../nav.js";
-import { type RowAction, recordingRowView } from "../recordingRowView.js";
+import type { SummarySection } from "../openSummary.js";
+import { type RowAction, recordingRowView, rowLinks } from "../recordingRowView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import type { StatusView } from "../statusPresentation.js";
@@ -128,6 +129,44 @@ export function RecordingRow(props: RecordingRowProps) {
         )
       }
     />
+  );
+}
+
+/**
+ * The links of a row to the texts of the recording: «Открыть текст лекции» once it is ready (TASK-090), then
+ * «Открыть конспект», and the transcript: «Открыть расшифровку», or the small «Исходная расшифровка» next to a lecture
+ * text.
+ */
+export function RecordingLinks(props: {
+  item: RecordingItem;
+  onOpenSummary: (recordingId: string, section?: SummarySection) => void;
+  onOpenTranscript: (recordingId: string) => void;
+}) {
+  const r = props.item;
+  const l = rowLinks(r);
+  return (
+    <>
+      {l.lectureText && (
+        <Button icon="doc" onClick={() => props.onOpenSummary(r.id, "lecture")}>
+          Открыть текст лекции
+        </Button>
+      )}
+      {l.summary !== null && (
+        <Button variant={l.summary === "main" ? "secondary" : "ghost"} icon="doc" onClick={() => props.onOpenSummary(r.id)}>
+          Открыть конспект
+        </Button>
+      )}
+      {l.transcript === "full" && (
+        <Button variant="ghost" icon="doc" onClick={() => props.onOpenTranscript(r.id)}>
+          Открыть расшифровку
+        </Button>
+      )}
+      {l.transcript === "source" && (
+        <Button variant="ghost" className="row-source" onClick={() => props.onOpenTranscript(r.id)}>
+          Исходная расшифровка
+        </Button>
+      )}
+    </>
   );
 }
 

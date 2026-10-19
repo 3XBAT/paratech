@@ -56,6 +56,8 @@ const (
 	OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES OperationType = 2
 	// Draft of a homework answer.
 	OperationType_OPERATION_TYPE_HOMEWORK_DRAFT OperationType = 3
+	// Full readable text of the lesson formatted from the transcript.
+	OperationType_OPERATION_TYPE_LECTURE_TEXT OperationType = 4
 )
 
 // Enum value maps for OperationType.
@@ -65,12 +67,14 @@ var (
 		1: "OPERATION_TYPE_SUMMARY",
 		2: "OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES",
 		3: "OPERATION_TYPE_HOMEWORK_DRAFT",
+		4: "OPERATION_TYPE_LECTURE_TEXT",
 	}
 	OperationType_value = map[string]int32{
 		"OPERATION_TYPE_UNSPECIFIED":                0,
 		"OPERATION_TYPE_SUMMARY":                    1,
 		"OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES": 2,
 		"OPERATION_TYPE_HOMEWORK_DRAFT":             3,
+		"OPERATION_TYPE_LECTURE_TEXT":               4,
 	}
 )
 
@@ -346,12 +350,13 @@ const file_paratech_hub_v1_common_proto_rawDesc = "" +
 	"\x0eperiod_ends_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\fperiodEndsAt\"O\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
-	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens*\x9d\x01\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens*\xbe\x01\n" +
 	"\rOperationType\x12\x1e\n" +
 	"\x1aOPERATION_TYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16OPERATION_TYPE_SUMMARY\x10\x01\x12-\n" +
 	")OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES\x10\x02\x12!\n" +
-	"\x1dOPERATION_TYPE_HOMEWORK_DRAFT\x10\x03*>\n" +
+	"\x1dOPERATION_TYPE_HOMEWORK_DRAFT\x10\x03\x12\x1f\n" +
+	"\x1bOPERATION_TYPE_LECTURE_TEXT\x10\x04*>\n" +
 	"\tQuotaUnit\x12\x1a\n" +
 	"\x16QUOTA_UNIT_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11QUOTA_UNIT_TOKENS\x10\x01B\xab\x01\n" +

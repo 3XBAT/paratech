@@ -19,7 +19,7 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "proposals", "recordings",
+	"assignments", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts", "proposals", "recordings",
 	"schedule_entries", "settings", "stt_models", "stt_speeds", "summaries", "transcript_parts", "transcripts",
 }
 
@@ -77,8 +77,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, nil)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 15 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 15", first, err)
+	if err != nil || first != 16 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 16", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")

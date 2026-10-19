@@ -7,6 +7,7 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/homeworkdraft"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
@@ -80,6 +81,17 @@ type SummaryRepository interface {
 	// Save inserts or updates a summary (PRD section 9). It is the version compare-and-swap of ADR-0004(d), like
 	// AssignmentRepository.Save: an insert of an existing id or a stale version yields shared.ErrVersionConflict.
 	Save(ctx context.Context, s *summary.Summary) error
+}
+
+// LectureTextRepository stores the lecture texts of transcripts with the finished parts of their runs (PRD section 9,
+// TASK-090). Implemented by the sqlite adapter.
+type LectureTextRepository interface {
+	// Get loads a lecture text (PRD section 9). It returns an error wrapping shared.ErrNotFound if there is none.
+	Get(ctx context.Context, id lecturetext.ID) (*lecturetext.LectureText, error)
+
+	// Save inserts or updates a lecture text (PRD section 9). It is the version compare-and-swap of ADR-0004(d), like
+	// SummaryRepository.Save: an insert of an existing id or a stale version yields shared.ErrVersionConflict.
+	Save(ctx context.Context, l *lecturetext.LectureText) error
 }
 
 // DraftRepository stores the draft history of each assignment (PRD section 10, AC-13). Implemented by the sqlite

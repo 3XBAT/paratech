@@ -151,6 +151,8 @@ func operationOf(op hubv1.OperationType) string {
 		return string(values.OperationExtractHomework)
 	case hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT:
 		return string(values.OperationHomeworkDraft)
+	case hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT:
+		return string(values.OperationLectureText)
 	default:
 		return ""
 	}

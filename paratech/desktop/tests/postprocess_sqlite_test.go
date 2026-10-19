@@ -40,18 +40,19 @@ import (
 // The adapters satisfy the ports of the post-processing, and the PostProcessor is both the STT completion consumer
 // and the handler of its jobs.
 var (
-	_ homeworkflow.LLMClient            = (*hubclient.Client)(nil)
-	_ homeworkflow.TranscriptReader     = (*sqlite.TranscriptRepository)(nil)
-	_ homeworkflow.RecordingReader      = (*sqlite.RecordingRepository)(nil)
-	_ homeworkflow.LessonReader         = (*sqlite.LessonRepository)(nil)
-	_ homeworkflow.SummaryRepository    = (*sqlite.SummaryRepository)(nil)
-	_ homeworkflow.AssignmentRepository = (*sqlite.AssignmentRepository)(nil)
-	_ homeworkflow.JobEnqueuer          = (*sqlite.JobRepository)(nil)
-	_ homeworkflow.ArtifactStore        = (*filestore.Store)(nil)
-	_ homeworkflow.Tx                   = (*sqlite.DB)(nil)
-	_ hubclient.Credentials             = (*testenv.MemCredentials)(nil)
-	_ transcribe.EventPublisher         = (*homeworkflow.PostProcessor)(nil)
-	_ jobrunner.Handler                 = (*homeworkflow.PostProcessor)(nil)
+	_ homeworkflow.LLMClient             = (*hubclient.Client)(nil)
+	_ homeworkflow.TranscriptReader      = (*sqlite.TranscriptRepository)(nil)
+	_ homeworkflow.RecordingReader       = (*sqlite.RecordingRepository)(nil)
+	_ homeworkflow.LessonReader          = (*sqlite.LessonRepository)(nil)
+	_ homeworkflow.SummaryRepository     = (*sqlite.SummaryRepository)(nil)
+	_ homeworkflow.LectureTextRepository = (*sqlite.LectureTextRepository)(nil)
+	_ homeworkflow.AssignmentRepository  = (*sqlite.AssignmentRepository)(nil)
+	_ homeworkflow.JobEnqueuer           = (*sqlite.JobRepository)(nil)
+	_ homeworkflow.ArtifactStore         = (*filestore.Store)(nil)
+	_ homeworkflow.Tx                    = (*sqlite.DB)(nil)
+	_ hubclient.Credentials              = (*testenv.MemCredentials)(nil)
+	_ transcribe.EventPublisher          = (*homeworkflow.PostProcessor)(nil)
+	_ jobrunner.Handler                  = (*homeworkflow.PostProcessor)(nil)
 )
 
 // The student's zone; the lesson is on Wednesday 14 October 2026, 10:00 MSK.
@@ -116,7 +117,8 @@ func newPPEnv(t *testing.T, llm homeworkflow.LLMClient) *ppEnv {
 
 	e.post, err = homeworkflow.NewPostProcessor(homeworkflow.PostProcessDeps{
 		LLM: llm, Transcripts: transcripts, Recordings: recordings, Lessons: lessons, Artifacts: store,
-		Summaries: e.summaries, Assignments: e.assignments, Jobs: e.jobs, Clock: e.clock, IDs: &postIDs{},
+		Summaries: e.summaries, Assignments: e.assignments, LectureTexts: sqlite.NewLectureTextRepository(e.db), Jobs: e.jobs,
+		Clock: e.clock, IDs: &postIDs{},
 		ModelAlias: "default", MaxAttempts: 3,
 	})
 	if err != nil {

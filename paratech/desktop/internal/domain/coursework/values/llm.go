@@ -17,12 +17,14 @@ const (
 	OperationSummary         Operation = "summary"
 	OperationExtractHomework Operation = "extract_homework_deadlines"
 	OperationHomeworkDraft   Operation = "homework_draft"
+	// OperationLectureText formats one part of a transcript into the full readable text of the lesson (TASK-090).
+	OperationLectureText Operation = "lecture_text"
 )
 
 // Valid reports whether o is a known operation.
 func (o Operation) Valid() bool {
 	switch o {
-	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft:
+	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText:
 		return true
 	}
 	return false

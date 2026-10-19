@@ -4,12 +4,13 @@ import (
 	"log/slog"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
-// State is where a post-processing step (the summary or the homework search) of a recording stands.
+// State is where a post-processing step (the summary, the homework search or the lecture text) of a recording stands.
 type State string
 
 // States of a step.
@@ -83,6 +84,21 @@ type Homework struct {
 	Assignments []Assignment
 }
 
+// LectureText is the lecture text of the recording (TASK-090) and where its job stands. StateNone with a transcript
+// means it was never made (the transcript is older than the lecture text): CanStart offers to make it.
+type LectureText struct {
+	Step
+	// Ready: Blocks hold the text. It may be ready while a new run waits, runs or failed.
+	Ready     bool
+	Blocks    []lecturetext.Block // model output: plain text only
+	UpdatedAt time.Time
+	// PartsDone of Parts are made, for a job that waits or runs; Parts is 0 when unknown.
+	PartsDone int
+	Parts     int
+	// CanStart: the transcript has no lecture text job, so one may be started.
+	CanStart bool
+}
+
 // View is the summary viewer of one recording.
 type View struct {
 	Recording shared.RecordingID
@@ -97,17 +113,19 @@ type View struct {
 	Transcribed bool
 	Summary     Summary
 	Homework    Homework
+	LectureText LectureText
 }
 
 // Deps are the ports the Service needs; Log is optional.
 type Deps struct {
-	Recordings  RecordingReader
-	Lessons     LessonReader
-	Transcripts TranscriptFinder
-	Summaries   SummaryReader
-	Assignments AssignmentLister
-	Jobs        JobFinder
-	Writer      TextWriter
-	Clock       Clock
-	Log         *slog.Logger
+	Recordings   RecordingReader
+	Lessons      LessonReader
+	Transcripts  TranscriptFinder
+	Summaries    SummaryReader
+	LectureTexts LectureTextReader
+	Assignments  AssignmentLister
+	Jobs         JobFinder
+	Writer       TextWriter
+	Clock        Clock
+	Log          *slog.Logger
 }

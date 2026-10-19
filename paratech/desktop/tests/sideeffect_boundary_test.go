@@ -121,8 +121,8 @@ func TestCarriesDetectsNestedModelOutput(t *testing.T) {
 // The post-processing of a transcript (TASK-042) only stores data: none of its ports is a side-effect port, and no
 // port it calls takes model output, so the answer of the model reaches the database only as validated aggregate values.
 func TestPostProcessorReachesNoSideEffect(t *testing.T) {
-	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.PostProcessDeps{}), 10)
-	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.RerunDeps{}), 5) // TASK-086: «Повторить» only enqueues jobs
+	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.PostProcessDeps{}), 11) // +LectureTexts (TASK-090)
+	checkNoSideEffectPorts(t, reflect.TypeOf(homeworkflow.RerunDeps{}), 5)        // TASK-086: «Повторить» only enqueues jobs
 }
 
 // The homework drafts (TASK-043) have no side-effect port either: a generated draft is stored as a version. Exporting

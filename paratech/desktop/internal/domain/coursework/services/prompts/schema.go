@@ -57,3 +57,32 @@ const draftSchema = `{
     "body": {"type": "string", "minLength": 1, "maxLength": 16000, "description": "The homework text."}
   }
 }`
+
+const lectureTextSchema = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lecture_text",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["blocks"],
+  "properties": {
+    "blocks": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["heading", "from", "paragraphs"],
+        "properties": {
+          "heading": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Short topic of the block, one line."},
+          "from": {"type": "integer", "minimum": 0, "description": "Index i of the segment where the block starts."},
+          "paragraphs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 40,
+            "items": {"type": "string", "minLength": 1, "maxLength": 4000, "description": "One paragraph of the text as said."}
+          }
+        }
+      }
+    }
+  }
+}`

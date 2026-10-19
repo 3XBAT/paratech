@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { actionErrorText } from "../activityView";
 import { type ActivityApi, activityApi } from "../bindings/activity";
 import { callByName } from "../bindings/runtime";
-import { type SummaryApi, summaryApi, type SummarySaveFormat, type SummaryView } from "../bindings/summary";
+import {
+  type LectureTextApi,
+  lectureTextApi,
+  type SummaryApi,
+  summaryApi,
+  type SummarySaveFormat,
+  type SummaryView,
+} from "../bindings/summary";
+import { lectureCopiedText } from "../lectureTextView";
+import type { SummarySection } from "../openSummary";
 import {
   errorText,
   headerMeta,
@@ -17,22 +26,26 @@ import {
 import { saveResultText } from "../transcriptView";
 import { Button } from "../ui/Button";
 import { Banner, Card, Dialog, ResultLine, type ResultKind, Segmented } from "../ui/controls";
+import { LectureTextCard } from "./LectureTextParts";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 
 export interface SummaryPageProps {
   recordingId: string;
+  /** "lecture": scroll to the lecture text once loaded (the row's «Открыть текст лекции»). */
+  section?: SummarySection;
   onBack: () => void;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
 }
 
-// «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found and where
-// both stand, with copy and save. Works offline: everything comes from the core on this computer. The summary is model
-// output and is rendered as React text only.
+// «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found, the lecture
+// text (TASK-090) and where they stand, with copy and save. Works offline: everything comes from the core on this
+// computer. The summary and the lecture text are model output and are rendered as React text only.
 export function SummaryPage(props: SummaryPageProps) {
   const { recordingId: id } = props;
   const api = useMemo(() => summaryApi(callByName), []);
   const activity = useMemo(() => activityApi(callByName), []);
+  const lecture = useMemo(() => lectureTextApi(callByName), []);
   const [view, setView] = useState<SummaryView | null>(null);
   const [error, setError] = useState("");
   // A new value starts the polling again (after a retry the steps go on).
@@ -106,7 +119,9 @@ export function SummaryPage(props: SummaryPageProps) {
       ) : (
         <Viewer
           api={api}
+          lecture={lecture}
           view={view}
+          section={props.section}
           onOpenTranscript={props.onOpenTranscript}
           onOpenAssignment={props.onOpenAssignment}
           activity={activity}
@@ -122,9 +137,14 @@ interface Message {
   text: string;
 }
 
+// The actions of the lecture card have keys "lecture:<action>" and show their result in that card.
+const lecturePrefix = "lecture:";
+
 function Viewer(props: {
   api: SummaryApi;
+  lecture: LectureTextApi;
   view: SummaryView;
+  section?: SummarySection;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
   activity: ActivityApi;
@@ -135,9 +155,11 @@ function Viewer(props: {
   const mounted = useRef(true);
   const acting = useRef(false);
   const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState<Message | null>(null);
+  const [message, setMessage] = useState<(Message & { lecture: boolean }) | null>(null);
   const [format, setFormat] = useState<SummarySaveFormat>("txt");
+  const [lectureFormat, setLectureFormat] = useState<SummarySaveFormat>("txt");
   const [askingRedo, setAskingRedo] = useState(false);
+  const lectureRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -146,21 +168,29 @@ function Viewer(props: {
     };
   }, []);
 
+  // Opened for the lecture text: scroll to it once, when the first view is shown.
+  useEffect(() => {
+    if (props.section === "lecture") {
+      lectureRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [props.section]);
+
   async function act(key: string, action: () => Promise<Message | null>) {
     if (acting.current) {
       return;
     }
     acting.current = true;
+    const lecture = key.startsWith(lecturePrefix);
     setBusy(key);
     setMessage(null);
     try {
       const m = await action();
       if (mounted.current) {
-        setMessage(m);
+        setMessage(m && { ...m, lecture });
       }
     } catch (err) {
       if (mounted.current) {
-        setMessage({ kind: "fail", text: errorText(err) });
+        setMessage({ kind: "fail", text: errorText(err), lecture });
       }
     } finally {
       acting.current = false;
@@ -182,9 +212,21 @@ function Viewer(props: {
       return r && { kind: r.ok ? "ok" : "fail", text: r.text };
     });
 
+  const copyLecture = () =>
+    act(`${lecturePrefix}copy`, async () => {
+      await props.lecture.copy(id);
+      return { kind: "ok", text: lectureCopiedText };
+    });
+
+  const saveLecture = () =>
+    act(`${lecturePrefix}save`, async () => {
+      const r = saveResultText(await props.lecture.saveAs(id, lectureFormat));
+      return r && { kind: r.ok ? "ok" : "fail", text: r.text };
+    });
+
   // Retry and redo report failures with the recordings screen's texts: they are the activity binding's errors.
-  const start = (step: RetryStep, call: () => Promise<void>) =>
-    act(`retry:${step}`, async () => {
+  const start = (step: RetryStep | "lectureText", call: () => Promise<void>) =>
+    act(step === "lectureText" ? `${lecturePrefix}start` : `retry:${step}`, async () => {
       let refused: Message | null = null;
       try {
         await call();
@@ -254,13 +296,14 @@ function Viewer(props: {
           >
             Сохранить как…
           </Button>
-          {view.transcribed && (
+          {/* With a lecture text the transcript is only its source: the small link in the lecture card. */}
+          {view.transcribed && !view.lectureText.ready && (
             <Button variant="ghost" icon="doc" onClick={() => props.onOpenTranscript(id)}>
               Открыть расшифровку
             </Button>
           )}
         </div>
-        {message && (
+        {message && !message.lecture && (
           <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
             {message.text}
           </ResultLine>
@@ -283,6 +326,20 @@ function Viewer(props: {
         retrying={retrying}
         retryDisabled={!idle}
       />
+      <div ref={lectureRef}>
+        <LectureTextCard
+          view={view}
+          busy={busy.startsWith(lecturePrefix) ? busy.slice(lecturePrefix.length) : ""}
+          disabled={!idle}
+          format={lectureFormat}
+          onFormat={setLectureFormat}
+          onCopy={() => void copyLecture()}
+          onSave={() => void saveLecture()}
+          onStart={() => void start("lectureText", () => props.activity.retryPostProcessing(id, "lectureText"))}
+          onOpenTranscript={() => props.onOpenTranscript(id)}
+          message={message?.lecture ? message : null}
+        />
+      </div>
       <Dialog
         open={askingRedo && redoOffered}
         title={redoTexts.title}

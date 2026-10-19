@@ -40,6 +40,9 @@ type Querier interface {
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetJobIDByKey(ctx context.Context, idempotencyKey string) (string, error)
+	// Lecture texts of transcripts (TASK-090) with the optimistic-concurrency protocol of ADR-0004(d). The id is the
+	// transcript id, one lecture text per transcript.
+	GetLectureText(ctx context.Context, id string) (LectureText, error)
 	// Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
 	// delete of ADR-0004(e): removing a lesson sets deleted_at, only PurgeDeletedLesson deletes a row.
 	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
@@ -77,6 +80,8 @@ type Querier interface {
 	InsertDraftRevision(ctx context.Context, arg InsertDraftRevisionParams) error
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
+	// A never-stored lecture text (version 0) is inserted with version 1.
+	InsertLectureText(ctx context.Context, arg InsertLectureTextParams) error
 	// A never-stored lesson (version 0) is inserted with version 1.
 	InsertLesson(ctx context.Context, arg InsertLessonParams) error
 	// A never-stored proposal (version 0) is inserted with version 1.
@@ -164,6 +169,9 @@ type Querier interface {
 	UpdateDraftVersion(ctx context.Context, arg UpdateDraftVersionParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
+	// Compare-and-swap on the loaded version. The transcript and the lesson never change, so a stale save cannot undo
+	// ON DELETE SET NULL.
+	UpdateLectureText(ctx context.Context, arg UpdateLectureTextParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int64, error)
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due) and the creation

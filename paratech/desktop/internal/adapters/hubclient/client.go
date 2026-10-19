@@ -184,6 +184,8 @@ func operationType(op values.Operation) (hubv1.OperationType, bool) {
 		return hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES, true
 	case values.OperationHomeworkDraft:
 		return hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT, true
+	case values.OperationLectureText:
+		return hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT, true
 	}
 	return hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED, false
 }

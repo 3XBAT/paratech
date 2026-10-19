@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/lecturetext"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -37,6 +38,8 @@ type ppStore struct {
 	recordings  map[shared.RecordingID]*recording.Recording
 	lessons     map[shared.LessonID]*lesson.Lesson
 	summaries   map[summary.ID]summary.State
+	lectures    map[lecturetext.ID]lecturetext.State
+	lectureSave error // returned by every lecture text save while set
 	assignments map[shared.AssignmentID]assignment.State
 	jobs        map[string]*job.Job // by idempotency key
 	saves       int                 // successful summary and assignment saves
@@ -54,6 +57,7 @@ func newPPStore() *ppStore {
 	return &ppStore{
 		transcripts: map[shared.TranscriptID]*transcript.Transcript{}, recordings: map[shared.RecordingID]*recording.Recording{},
 		lessons: map[shared.LessonID]*lesson.Lesson{}, summaries: map[summary.ID]summary.State{},
+		lectures:    map[lecturetext.ID]lecturetext.State{},
 		assignments: map[shared.AssignmentID]assignment.State{}, jobs: map[string]*job.Job{},
 		inUse: map[shared.AssignmentID]bool{},
 	}
@@ -152,6 +156,35 @@ func (r ppSummaries) Save(_ context.Context, s *summary.Summary) error {
 	r.s.summaries[s.ID()] = st
 	r.s.saves++
 	s.Persisted(st.Version)
+	return nil
+}
+
+type ppLectures struct{ s *ppStore }
+
+func (r ppLectures) Get(_ context.Context, id lecturetext.ID) (*lecturetext.LectureText, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	st, ok := r.s.lectures[id]
+	if !ok {
+		return nil, fmt.Errorf("lecture text %s: %w", id, shared.ErrNotFound)
+	}
+	return lecturetext.Restore(st)
+}
+
+func (r ppLectures) Save(_ context.Context, l *lecturetext.LectureText) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.lectureSave != nil {
+		return r.s.lectureSave
+	}
+	stored, exists := r.s.lectures[l.ID()]
+	if (l.Version() == 0) == exists || (exists && stored.Version != l.Version()) {
+		return shared.ErrVersionConflict
+	}
+	st := l.State()
+	st.Version++
+	r.s.lectures[l.ID()] = st
+	l.Persisted(st.Version)
 	return nil
 }
 
@@ -370,8 +403,9 @@ func newPPEnv(t *testing.T) *ppEnv {
 func (e *ppEnv) deps() PostProcessDeps {
 	return PostProcessDeps{
 		LLM: e.llm, Transcripts: ppTranscripts{e.ppStore}, Recordings: ppRecordings{e.ppStore}, Lessons: ppLessons{e.ppStore},
-		Artifacts: e.files, Summaries: ppSummaries{e.ppStore}, Assignments: ppAssignments{e.ppStore}, Jobs: ppJobs{e.ppStore},
-		Clock: e.clock, IDs: ppIDs{e.ppStore}, ModelAlias: testAlias,
+		Artifacts: e.files, Summaries: ppSummaries{e.ppStore}, Assignments: ppAssignments{e.ppStore},
+		LectureTexts: ppLectures{e.ppStore}, Jobs: ppJobs{e.ppStore}, Clock: e.clock, IDs: ppIDs{e.ppStore},
+		ModelAlias: testAlias,
 	}
 }
 
@@ -435,17 +469,18 @@ func (e *ppEnv) handle(snap job.Snapshot) error {
 
 // Compile-time checks: the fakes satisfy the ports they stand for.
 var (
-	_ TranscriptReader     = ppTranscripts{}
-	_ RecordingReader      = ppRecordings{}
-	_ TranscriptRecordings = ppTranscriptRecordings{}
-	_ LessonReader         = ppLessons{}
-	_ SummaryRepository    = ppSummaries{}
-	_ AssignmentRepository = ppAssignments{}
-	_ JobEnqueuer          = ppJobs{}
-	_ JobReader            = ppJobs{}
-	_ PostJobs             = ppJobs{}
-	_ LatestTranscripts    = ppTranscripts{}
-	_ SummaryReader        = ppSummaries{}
-	_ IDGenerator          = ppIDs{}
-	_ LLMClient            = (*testenv.FakeLLM)(nil)
+	_ TranscriptReader      = ppTranscripts{}
+	_ RecordingReader       = ppRecordings{}
+	_ TranscriptRecordings  = ppTranscriptRecordings{}
+	_ LessonReader          = ppLessons{}
+	_ SummaryRepository     = ppSummaries{}
+	_ LectureTextRepository = ppLectures{}
+	_ AssignmentRepository  = ppAssignments{}
+	_ JobEnqueuer           = ppJobs{}
+	_ JobReader             = ppJobs{}
+	_ PostJobs              = ppJobs{}
+	_ LatestTranscripts     = ppTranscripts{}
+	_ SummaryReader         = ppSummaries{}
+	_ IDGenerator           = ppIDs{}
+	_ LLMClient             = (*testenv.FakeLLM)(nil)
 )

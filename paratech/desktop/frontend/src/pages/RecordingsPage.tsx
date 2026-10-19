@@ -27,9 +27,7 @@ import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
 import { useOpenSummary } from "../openSummary";
 import { useOpenTranscript } from "../openTranscript";
-import { rowSummaryOffer } from "../summaryView";
-import { rowOffersTranscript } from "../transcriptView";
-import { RecordingRow, StatusLine } from "./RecordingRow";
+import { RecordingLinks, RecordingRow, StatusLine } from "./RecordingRow";
 
 const pollMs = 3000;
 
@@ -230,25 +228,7 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
       adviceProblem={r.advice === null ? "" : (adviceProblems[adviceKey(r.advice)] ?? "")}
       onSwitchSource={() => r.advice && void adviceAct(r.advice, "switch")}
       onKeepSource={() => r.advice && void adviceAct(r.advice, "dismiss")}
-      extraActions={
-        rowOffersTranscript(r) && (
-          <>
-            {/* Every chain that offers the summary is past the recognition, so the transcript is offered too. */}
-            {rowSummaryOffer(r) !== null && (
-              <Button
-                variant={rowSummaryOffer(r) === "main" ? "secondary" : "ghost"}
-                icon="doc"
-                onClick={() => openSummary(r.id)}
-              >
-                Открыть конспект
-              </Button>
-            )}
-            <Button variant="ghost" icon="doc" onClick={() => openTranscript(r.id)}>
-              Открыть расшифровку
-            </Button>
-          </>
-        )
-      }
+      extraActions={<RecordingLinks item={r} onOpenSummary={openSummary} onOpenTranscript={openTranscript} />}
     />
   );
 

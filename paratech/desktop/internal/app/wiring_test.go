@@ -95,8 +95,9 @@ func TestRunNowTranscribesAndEnqueuesPostProcessing(t *testing.T) {
 	testenv.Eventually(t, "STT job completes", func() bool { return status("job-stt") == job.StatusCompleted }, nil)
 
 	keys := map[string]job.Type{
-		fmt.Sprintf("%s:job-stt:v%d", homeworkflow.SummarizeJobType, prompts.Version):       homeworkflow.SummarizeJobType,
-		fmt.Sprintf("%s:job-stt:v%d", homeworkflow.ExtractHomeworkJobType, prompts.Version): homeworkflow.ExtractHomeworkJobType,
+		fmt.Sprintf("%s:job-stt:v%d", homeworkflow.SummarizeJobType, prompts.Version):              homeworkflow.SummarizeJobType,
+		fmt.Sprintf("%s:job-stt:v%d", homeworkflow.ExtractHomeworkJobType, prompts.Version):        homeworkflow.ExtractHomeworkJobType,
+		fmt.Sprintf("%s:job-stt:v%d", homeworkflow.LectureTextJobType, prompts.LectureTextVersion): homeworkflow.LectureTextJobType,
 	}
 	waiting := func() []*job.Job {
 		list, err := jobs.ListByStatus(ctx, job.StatusWaitingForNetwork)
@@ -116,7 +117,7 @@ func TestRunNowTranscribesAndEnqueuesPostProcessing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 3 {
+	if len(all) != 4 {
 		t.Fatalf("%d jobs, want the STT job and one job per post-processing type", len(all))
 	}
 }

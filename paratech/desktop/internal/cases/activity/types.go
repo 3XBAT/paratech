@@ -41,9 +41,13 @@ type Recording struct {
 // Chain is the one status of everything that happens to a recording (TASK-076): the screen shows it instead of the
 // rows of the jobs that process the recording.
 type Chain struct {
-	Stage       Stage
-	Step        Step        // the step a queued or failed chain stopped at
-	Percent     int         // progress of the transcription, 0..100
+	Stage   Stage
+	Step    Step // the step a queued or failed chain stopped at
+	Percent int  // progress of the transcription or of the lecture text, 0..100
+	// PartsDone and Parts are the progress of the lecture text by parts (TASK-090), "3 of 12"; Parts is 0 when
+	// unknown (the job has not reported yet).
+	PartsDone   int
+	Parts       int
 	QueueReason QueueReason // why a queued chain waits
 	ErrorCode   ErrorCode   // what failed
 	JobError    string      // last error of the job the stage refers to (failed or retrying); sanitized by the job
@@ -55,6 +59,9 @@ type Chain struct {
 	Retry Work
 	// CanRedoSummary: a summary was made and its job is not pending or running, so «Сделать конспект заново» may run.
 	CanRedoSummary bool
+	// LectureTextReady: the lecture text of the current transcript is stored (TASK-090), so the row offers it instead
+	// of the raw transcript; the transcript itself is kept (it feeds the retries).
+	LectureTextReady bool
 }
 
 // Work is a post-processing work of a recording (TASK-086); the values are those of homeworkflow.Work.
@@ -62,8 +69,9 @@ type Work string
 
 // Works.
 const (
-	WorkSummary  Work = "summary"
-	WorkHomework Work = "homework"
+	WorkSummary     Work = "summary"
+	WorkHomework    Work = "homework"
+	WorkLectureText Work = "lectureText"
 )
 
 // Stage of the chain, in its order.
@@ -76,6 +84,7 @@ const (
 	StageQueued       Stage = "queued"       // the next step waits; QueueReason says why
 	StageTranscribing Stage = "transcribing" // speech recognition runs
 	StageSummarizing  Stage = "summarizing"  // the summary and the homework are being made
+	StageLectureText  Stage = "lectureText"  // the lecture text is being made, after the summary and the homework
 	StageDone         Stage = "done"         // the summary is ready
 	StageFailed       Stage = "failed"       // a step failed; ErrorCode says which
 )
@@ -86,7 +95,8 @@ type Step string
 // Steps.
 const (
 	StepTranscription Step = "transcription"
-	StepSummary       Step = "summary" // the summary and the homework search
+	StepSummary       Step = "summary"     // the summary and the homework search
+	StepLectureText   Step = "lectureText" // the lecture text (TASK-090)
 )
 
 // QueueReason says why a step waits.
@@ -114,6 +124,7 @@ const (
 	ErrorTranscriptionFailed ErrorCode = "transcriptionFailed"
 	ErrorSummaryFailed       ErrorCode = "summaryFailed"
 	ErrorHomeworkFailed      ErrorCode = "homeworkFailed"
+	ErrorLectureTextFailed   ErrorCode = "lectureTextFailed"
 	// ErrorSilentRecording: the track is silent all or almost all the time (TASK-082), so it is not transcribed; the
 	// row offers ActionCheckSound.
 	ErrorSilentRecording ErrorCode = "silentRecording"

@@ -10,7 +10,7 @@ import {
   routeToSummary,
   routeToTranscript,
 } from "./nav";
-import { OpenSummaryContext } from "./openSummary";
+import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
@@ -49,7 +49,12 @@ export function App() {
   const [visit, setVisit] = useState(0);
   const current = route.page;
   const openTranscript = useCallback((id: string) => setRoute((r) => routeToTranscript(r, id)), []);
-  const openSummary = useCallback((id: string) => setRoute((r) => routeToSummary(r, id)), []);
+  // Where the summary page opens (TASK-090); not part of the route: «Назад» and a new open reset it.
+  const [summarySection, setSummarySection] = useState<SummarySection | undefined>(undefined);
+  const openSummary = useCallback((id: string, section?: SummarySection) => {
+    setSummarySection(section);
+    setRoute((r) => routeToSummary(r, id));
+  }, []);
   const openPage = useCallback((id: PageId) => setRoute(routeToPage(id)), []);
   // Counts the jumps to an assignment: each one opens «Домашние задания» afresh on that assignment.
   const [jump, setJump] = useState(0);
@@ -102,6 +107,7 @@ export function App() {
           <div key={`summary:${route.summary}`} className="screen">
             <SummaryPage
               recordingId={route.summary}
+              section={summarySection}
               onBack={() => setRoute(closeTranscript)}
               onOpenTranscript={openTranscript}
               onOpenAssignment={openAssignment}

@@ -77,6 +77,7 @@ func TestNewRerunnerValidates(t *testing.T) {
 		"no summaries":   func(d *RerunDeps) { d.Summaries = nil },
 		"no clock":       func(d *RerunDeps) { d.Clock = nil },
 		"no ids":         func(d *RerunDeps) { d.IDs = nil },
+		"bad attempts":   func(d *RerunDeps) { d.MaxAttempts = -1 },
 	} {
 		d := full
 		mutate(&d)
@@ -96,6 +97,7 @@ func TestRetryAfterPermanentFailure(t *testing.T) {
 	}{
 		{WorkSummary, SummarizeJobType, values.OperationSummary, summaryAnswer},
 		{WorkHomework, ExtractHomeworkJobType, values.OperationExtractHomework, extractAnswer},
+		{WorkLectureText, LectureTextJobType, values.OperationLectureText, lectureAnswer("Rivers", 0, "Rivers.")},
 	} {
 		t.Run(string(tc.work), func(t *testing.T) {
 			e := newRerunEnv(t)
@@ -125,8 +127,8 @@ func TestRetryAfterPermanentFailure(t *testing.T) {
 				failed.Status() != job.StatusFailed {
 				t.Fatalf("new job %s key %q status %s payload %s", next.ID(), next.Key(), next.Status(), next.Payload())
 			}
-			if n := len(e.jobs); n != 3 {
-				t.Fatalf("jobs = %d, want the two of the transcript and one retry", n)
+			if n := len(e.jobs); n != 4 {
+				t.Fatalf("jobs = %d, want the three of the transcript and one retry", n)
 			}
 
 			e.llm.Answer(tc.op, tc.answer)
@@ -137,7 +139,7 @@ func TestRetryAfterPermanentFailure(t *testing.T) {
 			if last := reqs[len(reqs)-1]; oldKeys[last.IdempotencyKey()] || last.Instructions() != prompts.Instructions(tc.op) {
 				t.Fatal("the retried job reused an old LLM key or a reminder")
 			}
-			if e.records() == 0 {
+			if e.records() == 0 && e.lecture("t1") == nil {
 				t.Fatal("nothing stored after the retry")
 			}
 			if tr, err := (ppTranscripts{e.ppStore}).Get(ctx, "t1"); err != nil || tr.Version() != e.transcripts["t1"].Version() {
@@ -218,6 +220,41 @@ func TestRetryRefusals(t *testing.T) {
 	}
 }
 
+// TASK-090: a transcript made before the lecture text existed has no lecture_text job; «Повторить» of the lecture
+// text starts its first one, once.
+func TestRetryStartsAMissingLectureText(t *testing.T) {
+	e := newRerunEnv(t)
+	ctx := context.Background()
+	delete(e.jobs, jobKey(LectureTextJobType, "t1"))
+	before := len(e.jobs)
+
+	id, err := e.rr.Retry(ctx, "r1", WorkLectureText)
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	j := e.latest(LectureTextJobType)
+	if j.ID() != id || j.Key() != jobKey(LectureTextJobType, "t1") || j.Payload() != `{"transcript_id":"t1"}` ||
+		j.Status() != job.StatusQueued || j.MaxAttempts() != DefaultPostProcessAttempts || len(e.jobs) != before+1 {
+		t.Fatalf("job %s key %q payload %s status %s", j.ID(), j.Key(), j.Payload(), j.Status())
+	}
+	if _, err := e.rr.Retry(ctx, "r1", WorkLectureText); !errors.Is(err, job.ErrStillActive) || len(e.jobs) != before+1 {
+		t.Fatalf("second click = %v", err)
+	}
+
+	e.llm.Answer(values.OperationLectureText, lectureAnswer("Rivers", 0, "Rivers."))
+	if err := e.run(j); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.rr.Retry(ctx, "r1", WorkLectureText); !errors.Is(err, job.ErrNotFailed) {
+		t.Fatalf("Retry of a made lecture text = %v, want ErrNotFailed", err)
+	}
+	// Only the lecture text starts when missing: the other works have nothing to retry.
+	delete(e.jobs, jobKey(SummarizeJobType, "t1"))
+	if _, err := e.rr.Retry(ctx, "r1", WorkSummary); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("Retry of a missing summary job = %v, want ErrNotFound", err)
+	}
+}
+
 // AC-7 of TASK-086: «Сделать конспект заново» keeps the old summary until a new answer passes the checks.
 func TestRedoSummaryKeepsTheOldOneUntilANewOnePasses(t *testing.T) {
 	e := newRerunEnv(t)
@@ -272,7 +309,7 @@ func TestRedoSummaryNeedsASummary(t *testing.T) {
 	if _, err := e.rr.RedoSummary(context.Background(), "r9"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("RedoSummary of an unknown recording = %v", err)
 	}
-	if n := len(e.jobs); n != 2 {
+	if n := len(e.jobs); n != 3 {
 		t.Fatalf("jobs = %d, want no new job", n)
 	}
 }
