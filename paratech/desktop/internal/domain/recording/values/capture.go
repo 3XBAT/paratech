@@ -170,12 +170,24 @@ func (v WindowsVersion) String() string {
 	return strings.Join(parts, " ")
 }
 
-// CaptureStats are the counters of a running capture.
+// CaptureStats are the counters of a running capture. A restarted recorder child counts from zero again.
 type CaptureStats struct {
 	Packets       uint64
 	SilentPackets uint64
-	Frames        int64
-	Reopens       uint64
+	// AudiblePackets are the packets whose peak reaches HeardLevel (TASK-082): a stream of zeros that is not flagged
+	// silent counts as no sound too.
+	AudiblePackets uint64
+	Frames         int64
+	Reopens        uint64
+}
+
+// HeardSince reports whether the capture heard sound between the snapshots prev and s. Counters below prev mean a
+// new recorder child, which counts from zero.
+func (s CaptureStats) HeardSince(prev CaptureStats) bool {
+	if s.Packets < prev.Packets || s.AudiblePackets < prev.AudiblePackets {
+		return s.AudiblePackets > 0
+	}
+	return s.AudiblePackets > prev.AudiblePackets
 }
 
 // CaptureDiagnostics is a snapshot of the capture of one recording (TASK-058): what was asked for, what runs now, on
@@ -201,6 +213,9 @@ type CaptureDiagnostics struct {
 
 	WaitingForApp bool // the app's process exited and no new instance is captured yet
 	Rebinds       int  // new instances of the app captured
+	// SourceSwitches counts the switches of the user to another source of the same recording (TASK-082). They are no
+	// fallback and are not listed in Switches.
+	SourceSwitches int
 }
 
 // Fallback returns the switch to classic loopback, if the capture made one (it is one-way, so there is at most one).

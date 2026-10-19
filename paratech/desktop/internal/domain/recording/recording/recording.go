@@ -58,6 +58,7 @@ type Recording struct {
 	chunks      int
 	chunksDir   shared.ArtifactRef
 	audio       shared.ArtifactRef
+	silent      bool // the final track is silent all or almost all the time (TASK-082)
 	problem     string
 
 	startedAt   time.Time
@@ -108,6 +109,7 @@ type State struct {
 	Chunks      int
 	ChunksDir   shared.ArtifactRef
 	Audio       shared.ArtifactRef // the final track; set exactly when COMPLETED
+	Silent      bool               // the final track is silent; only on a COMPLETED recording
 	Problem     string
 	StartedAt   time.Time
 	StoppedAt   time.Time // zero = the capture has not ended
@@ -121,7 +123,7 @@ func Restore(s State) (*Recording, error) {
 	r := &Recording{
 		version: s.Version, id: s.ID, lesson: s.LessonID, status: s.Status,
 		maxDuration: s.MaxDuration, duration: s.Duration, chunks: s.Chunks, chunksDir: s.ChunksDir, audio: s.Audio,
-		problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
+		silent: s.Silent, problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
 		createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
 	}
 
@@ -134,6 +136,8 @@ func Restore(s State) (*Recording, error) {
 		return nil, fmt.Errorf("%w: %s recording with audio %q", ErrInvalidRecording, s.Status, s.Audio)
 	case s.Audio.IsZero() && s.Duration != 0:
 		return nil, fmt.Errorf("%w: duration without a final track", ErrInvalidRecording)
+	case s.Silent && s.Status != StatusCompleted:
+		return nil, fmt.Errorf("%w: a silent track on a %s recording", ErrInvalidRecording, s.Status)
 	case (s.Status == StatusStarting || s.Status == StatusRecording) && !s.StoppedAt.IsZero():
 		return nil, fmt.Errorf("%w: %s recording with a stop time", ErrInvalidRecording, s.Status)
 	case s.Status == StatusStopping && s.StoppedAt.IsZero():
@@ -204,6 +208,10 @@ func (r *Recording) ChunksDir() shared.ArtifactRef { return r.chunksDir }
 
 // Audio returns the final track; the zero reference until COMPLETED.
 func (r *Recording) Audio() shared.ArtifactRef { return r.audio }
+
+// Silent reports a COMPLETED recording whose final track is silent all or almost all the time (TASK-082): the chosen
+// source played nothing. It is not transcribed.
+func (r *Recording) Silent() bool { return r.silent }
 
 // Problem returns a short text about what went wrong, empty if nothing did. A COMPLETED recording keeps the
 // reason why its capture ended early and the note of a capture fallback (NoteCaptureFallback).
@@ -410,6 +418,16 @@ func (r *Recording) Complete(now time.Time, audio shared.ArtifactRef, duration t
 	return nil
 }
 
+// CompleteTrack is Complete with what the assembly measured: a silent track (values.AssembledTrack.Silent) marks the
+// recording Silent, so it is not transcribed (TASK-082).
+func (r *Recording) CompleteTrack(now time.Time, audio shared.ArtifactRef, track values.AssembledTrack) error {
+	if err := r.Complete(now, audio, track.Duration); err != nil {
+		return err
+	}
+	r.silent = track.Silent()
+	return nil
+}
+
 // Fail moves the recording to FAILED: a start that did not succeed, a finalization that did not, or a recovery that
 // is impossible. Chunk files are not touched.
 func (r *Recording) Fail(now time.Time, problem string) error {
@@ -509,6 +527,16 @@ func (r *Recording) CompleteRecovery(now time.Time, audio shared.ArtifactRef, du
 	return nil
 }
 
+// CompleteRecoveryTrack is CompleteRecovery with what the assembly measured: a silent track marks the recording
+// Silent, as CompleteTrack does.
+func (r *Recording) CompleteRecoveryTrack(now time.Time, audio shared.ArtifactRef, track values.AssembledTrack) error {
+	if err := r.CompleteRecovery(now, audio, track.Duration); err != nil {
+		return err
+	}
+	r.silent = track.Silent()
+	return nil
+}
+
 // FailRecovery moves a recording that AwaitsAssembly to FAILED because its chunks hold no readable audio. A STOPPING
 // recording passes through FINALIZING, as the table requires. The chunk files are not touched.
 func (r *Recording) FailRecovery(now time.Time, problem string) error {
@@ -565,9 +593,9 @@ func (r *Recording) reasonBeforeDeferral() string {
 }
 
 // TranscribableAudio returns the final track to transcribe; ok is false unless the recording is COMPLETED with a
-// final track: only such a recording can be transcribed.
+// final track that is not silent: only such a recording can be transcribed (a silent one would give an empty text).
 func (r *Recording) TranscribableAudio() (audio shared.ArtifactRef, ok bool) {
-	if r.status != StatusCompleted || r.audio.IsZero() {
+	if r.status != StatusCompleted || r.audio.IsZero() || r.silent {
 		return shared.ArtifactRef{}, false
 	}
 	return r.audio, true

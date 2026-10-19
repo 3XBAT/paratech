@@ -41,7 +41,8 @@ func TestSource(t *testing.T) {
 }
 
 func TestIsBrowser(t *testing.T) {
-	for _, app := range []shared.AppName{"chrome.exe", "msedge.exe", "firefox.exe", "browser.exe", "opera.exe", "brave.exe", "vivaldi.exe"} {
+	for _, app := range []shared.AppName{"chrome.exe", "msedge.exe", "firefox.exe", "browser.exe", "opera.exe", "brave.exe", "vivaldi.exe",
+		"comet.exe", "arc.exe", "chromium.exe", "thorium.exe"} {
 		if !IsBrowser(app) {
 			t.Errorf("%s is a browser", app)
 		}
@@ -61,36 +62,76 @@ func TestSortAudioApps(t *testing.T) {
 		{App: "a.exe", Title: "Same"},
 		{App: "chrome.exe", Title: "Another tab", Playing: true},
 		{App: "notepad.exe", Title: ""},
+		{App: "comet.exe", Title: "video", Sounding: true, Playing: true},
 	}
 	SortAudioApps(apps)
 	var got []shared.AppName
 	for _, a := range apps {
 		got = append(got, a.App)
 	}
-	want := []shared.AppName{"chrome.exe", "msedge.exe", "notepad.exe", "a.exe", "b.exe", "zoom.exe"}
+	want := []shared.AppName{"comet.exe", "chrome.exe", "msedge.exe", "notepad.exe", "a.exe", "b.exe", "zoom.exe"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("order %v, want %v", got, want)
 	}
 }
 
 func TestPreselect(t *testing.T) {
-	apps := []AudioApp{{App: "zoom.exe"}, {App: "chrome.exe"}}
+	quiet := []AudioApp{{App: "zoom.exe"}, {App: "chrome.exe"}}
 	tests := []struct {
 		name       string
 		remembered shared.AppName
-		want       Source
+		apps       []AudioApp
+		want       Preselection
 	}{
-		{"remembered app is open", "chrome.exe", Source{app: "chrome.exe"}},
-		{"remembered app is not open", "ms-teams.exe", WholeComputer()},
-		{"nothing remembered", "", WholeComputer()},
-		{"malformed name", "Chrome.exe", WholeComputer()},
+		{"remembered app is open", "chrome.exe", quiet, Preselection{Source: Source{app: "chrome.exe"}}},
+		{"remembered app is not open", "ms-teams.exe", quiet, Preselection{Source: WholeComputer()}},
+		{"nothing remembered", "", quiet, Preselection{Source: WholeComputer()}},
+		{"malformed name", "Chrome.exe", quiet, Preselection{Source: WholeComputer()}},
+		{"empty list", "chrome.exe", nil, Preselection{Source: WholeComputer()}},
+		{
+			"owner case: remembered silent, one other sounds", "browser.exe",
+			[]AudioApp{{App: "browser.exe"}, {App: "comet.exe", Sounding: true, Playing: true}, {App: "zoom.exe"}},
+			Preselection{Source: Source{app: "comet.exe"}, Auto: true},
+		},
+		{
+			"remembered not running, one other sounds", "browser.exe",
+			[]AudioApp{{App: "comet.exe", Sounding: true}},
+			Preselection{Source: Source{app: "comet.exe"}, Auto: true},
+		},
+		{
+			"remembered sounds", "browser.exe",
+			[]AudioApp{{App: "browser.exe", Sounding: true}, {App: "comet.exe", Sounding: true}},
+			Preselection{Source: Source{app: "browser.exe"}},
+		},
+		{
+			"remembered has an active session", "browser.exe",
+			[]AudioApp{{App: "browser.exe", Playing: true}, {App: "comet.exe", Sounding: true}},
+			Preselection{Source: Source{app: "browser.exe"}},
+		},
+		{
+			"two others sound", "browser.exe",
+			[]AudioApp{{App: "browser.exe"}, {App: "comet.exe", Sounding: true}, {App: "zoom.exe", Sounding: true}},
+			Preselection{Source: Source{app: "browser.exe"}},
+		},
+		{
+			"sounding wins over playing", "browser.exe",
+			[]AudioApp{{App: "browser.exe"}, {App: "comet.exe", Sounding: true}, {App: "zoom.exe", Playing: true}},
+			Preselection{Source: Source{app: "comet.exe"}, Auto: true},
+		},
+		{
+			"no sounding app, one with a session", "browser.exe",
+			[]AudioApp{{App: "browser.exe"}, {App: "zoom.exe", Playing: true}},
+			Preselection{Source: Source{app: "zoom.exe"}, Auto: true},
+		},
+		{
+			"whole computer remembered stays", "",
+			[]AudioApp{{App: "comet.exe", Sounding: true}},
+			Preselection{Source: WholeComputer()},
+		},
 	}
 	for _, tt := range tests {
-		if got := Preselect(tt.remembered, apps); got != tt.want {
-			t.Errorf("%s: Preselect = %v, want %v", tt.name, got, tt.want)
+		if got := Preselect(tt.remembered, tt.apps); got != tt.want {
+			t.Errorf("%s: Preselect = %+v, want %+v", tt.name, got, tt.want)
 		}
-	}
-	if got := Preselect("chrome.exe", nil); !got.IsWholeComputer() {
-		t.Errorf("empty list: Preselect = %v", got)
 	}
 }
