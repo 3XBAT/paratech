@@ -109,6 +109,9 @@ type lessonRow struct {
 	Start    time.Time
 	End      time.Time
 	Zone     string
+	Subject  string
+	Kind     lesson.Kind
+	Teacher  string
 	Revision int64
 	Version  int64
 	Deleted  bool
@@ -127,6 +130,7 @@ func (e *scheduleEnv) schedule() map[shared.LessonID]lessonRow {
 		c := l.Content()
 		out[l.ID()] = lessonRow{
 			ID: l.ID(), UID: l.SourceUID(), Title: c.Title, Start: c.Start.UTC(), End: c.End.UTC(), Zone: c.TimeZone,
+			Subject: c.Subject, Kind: c.Kind, Teacher: c.Teacher,
 			Revision: l.ContentRevision(), Version: l.Version(), Deleted: l.Deleted(),
 		}
 	}

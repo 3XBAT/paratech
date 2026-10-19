@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,5 +305,101 @@ func TestLessonPurgeDeleted(t *testing.T) {
 	}
 	if err := repo.Save(ctx, gone); !errors.Is(err, shared.ErrVersionConflict) {
 		t.Fatalf("save of a purged lesson = %v, want ErrVersionConflict (never re-inserted)", err)
+	}
+}
+
+// Subject, kind and teacher survive a save and a change, for every kind.
+func TestLessonDetailsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo := NewLessonRepository(openTest(t, nil))
+
+	for i, kind := range lesson.Kinds() {
+		l := newTestLesson(t, "l"+kind.String(), "csv:id:"+kind.String(), i*2)
+		c := l.Content()
+		c.Subject, c.Kind, c.Teacher = "Матанализ", kind, "Иванов И. И."
+		if _, err := l.ChangeContent(c, lesT0); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, l); err != nil {
+			t.Fatalf("%v: %v", kind, err)
+		}
+		got, err := repo.Get(ctx, l.ID())
+		if err != nil || !got.Content().Equal(c) {
+			t.Fatalf("%v: got %+v, %v; want %+v", kind, got.Content(), err, c)
+		}
+
+		c.Teacher = ""
+		if _, err := got.ChangeContent(c, lesT0); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+		if again, err := repo.Get(ctx, l.ID()); err != nil || !again.Content().Equal(c) {
+			t.Fatalf("%v after update: got %+v, %v; want %+v", kind, again.Content(), err, c)
+		}
+	}
+}
+
+// The CHECK of schedule_entries.kind holds exactly the codes of lesson.Kinds; an unreadable stored kind fails the
+// load instead of becoming unknown.
+func TestLessonKindColumn(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, nil)
+	const insert = `INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, kind, created_at, updated_at)
+		VALUES (?, 'math', 0, 10, 'UTC', ?, 0, 0)`
+	for _, k := range lesson.Kinds() {
+		mustExec(t, db, insert, "l-"+k.String(), k.String())
+	}
+	if _, err := db.sql.ExecContext(ctx, insert, "l-bad", "exam"); !errors.Is(MapError(ctx, err), ErrConstraint) {
+		t.Fatalf("unknown kind code: err = %v, want ErrConstraint", err)
+	}
+	if _, err := db.sql.ExecContext(ctx, `UPDATE schedule_entries SET teacher = ? WHERE id = 'l-lab'`,
+		strings.Repeat("я", lesson.MaxTeacherRunes+1)); !errors.Is(MapError(ctx, err), ErrConstraint) {
+		t.Fatalf("long teacher: err = %v, want ErrConstraint", err)
+	}
+
+	mustExec(t, db, `PRAGMA ignore_check_constraints = 1`)
+	mustExec(t, db, `UPDATE schedule_entries SET kind = 'exam' WHERE id = 'l-lab'`)
+	if _, err := NewLessonRepository(db).Get(ctx, "l-lab"); !errors.Is(err, lesson.ErrInvalidLesson) {
+		t.Fatalf("stored unknown kind code: err = %v, want ErrInvalidLesson", err)
+	}
+}
+
+// Version 14 adds subject, kind and teacher: a lesson stored before reads as unknown with no subject or teacher, and
+// the migration goes back down keeping it.
+func TestMigrationToVersion14AddsLessonDetails(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 13); err != nil {
+		t.Fatalf("up to 13: %v", err)
+	}
+	mustExec(t, db, `INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, source_uid, version,
+		created_at, updated_at) VALUES ('l-old', 'Матанализ, лекция', 0, 5400000, 'Europe/Moscow', 'csv:id:1', 1, 0, 0)`)
+
+	if _, err := p.UpTo(ctx, 14); err != nil {
+		t.Fatalf("up to 14: %v", err)
+	}
+	l, err := NewLessonRepository(db).Get(ctx, "l-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := l.Content(); c.Title != "Матанализ, лекция" || c.Subject != "" || c.Kind != lesson.KindUnknown || c.Teacher != "" {
+		t.Fatalf("existing lesson = %+v; want no subject, unknown kind, no teacher", c)
+	}
+
+	if _, err := p.DownTo(ctx, 13); err != nil {
+		t.Fatalf("down to 13: %v", err)
+	}
+	const detailColumns = "SELECT count(*) FROM pragma_table_info('schedule_entries') WHERE name IN ('subject', 'kind', 'teacher')"
+	if n := scanInt(t, db.sql, detailColumns); n != 0 {
+		t.Fatalf("%d detail columns still exist at version 13", n)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM schedule_entries"); n != 1 {
+		t.Fatalf("lessons = %d, want the lesson kept", n)
 	}
 }

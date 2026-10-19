@@ -14,13 +14,15 @@ PRD sections 4.3 and 11.2, AC-16. The columns are those of [schedule-csv.md](sch
 
 ## Columns
 The first non-empty row is the header; names as in CSV (`title`, `date`, `start`, `end`, `timezone`, optional
-`uid`), case-insensitive, any order. Unknown columns and empty rows are ignored.
+`uid`, `subject`/`предмет`, `kind`/`тип`, `teacher`/`преподаватель`), case-insensitive, any order. Unknown columns
+and empty rows are ignored. Subject, kind and teacher follow CSV: kind values, the title rule for empty cells and the
+`kind` row error are in [schedule-csv.md](schedule-csv.md).
 
 | Column | Text cell | Number cell (typed in Excel) |
 |---|---|---|
 | `date` | `YYYY-MM-DD` | a date (whole day; 1900 or 1904 date system of the workbook) |
 | `start`, `end` | `HH:MM`, 24 h | a time of day, whole minutes |
-| `title`, `timezone`, `uid` | text | the stored number as text |
+| `title`, `timezone`, `uid`, `subject`, `kind`, `teacher` | text | the stored number as text |
 
 - Stored values are read; number formats are not applied and formulas are never calculated. A formula cell gives
   the value saved with it (what Excel shows); without a saved value it is empty.

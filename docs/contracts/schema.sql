@@ -416,3 +416,10 @@ ALTER TABLE recordings ADD COLUMN lesson_kind TEXT;
 ALTER TABLE recordings ADD COLUMN lesson_teacher TEXT;
 ALTER TABLE recordings ADD COLUMN lesson_start INTEGER;
 ALTER TABLE recordings ADD COLUMN lesson_end INTEGER;
+
+-- schedule_entries: the course of the lesson ('' unknown), the type of the class (values = lesson.Kinds) and the
+-- teacher ('' none), at most lesson.MaxSubjectRunes and MaxTeacherRunes characters; part of the content the calendar
+-- shows. Lessons stored before stay unknown until the next import of their file derives them.
+ALTER TABLE schedule_entries ADD COLUMN subject TEXT NOT NULL DEFAULT '' CHECK (length(subject) <= 200);
+ALTER TABLE schedule_entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown' CHECK (kind IN ('unknown', 'lecture', 'seminar', 'practice', 'lab'));
+ALTER TABLE schedule_entries ADD COLUMN teacher TEXT NOT NULL DEFAULT '' CHECK (length(teacher) <= 200);

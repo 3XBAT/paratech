@@ -11,6 +11,7 @@ import (
 
 	ics "github.com/arran4/golang-ical"
 
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/schedule/services/importplan"
 )
 
@@ -28,10 +29,18 @@ const (
 	propRDate        = "RDATE"
 	propRecurrenceID = "RECURRENCE-ID"
 	propXWRTimezone  = "X-WR-TIMEZONE"
+	propXWRCalName   = "X-WR-CALNAME"
+	propDescription  = "DESCRIPTION"
+	propOrganizer    = "ORGANIZER"
+
+	paramCommonName = "CN"
 
 	statusCancelled = "CANCELLED"
 	paramRange      = "RANGE"
 )
+
+// teacherLabels start a DESCRIPTION line that names the teacher: "Преподаватель: Иванов И. И.".
+var teacherLabels = []string{"преподаватель", "teacher"}
 
 // maxDatesPerEvent bounds the EXDATE and the RDATE values of one event (each).
 const maxDatesPerEvent = importplan.MaxRows
@@ -70,6 +79,7 @@ type event struct {
 	uid       string // as written; "" when missing
 	id        string // identity part of the row keys
 	title     string
+	teacher   string
 	cancelled bool
 	allDay    bool
 
@@ -91,6 +101,7 @@ type event struct {
 type reader struct {
 	zones    zones
 	calZone  *time.Location // X-WR-TIMEZONE, nil when absent or unknown
+	calName  string         // X-WR-CALNAME as calendarName returns it
 	from, to time.Time
 }
 
@@ -110,6 +121,7 @@ func (r *reader) read(ev *ics.VEvent, line int) (event, *importplan.RowError, er
 		e.title = cleanTitle(p.Value)
 	}
 	e.id = identity(e.uid, e.title)
+	e.teacher = teacher(ev, r.calName)
 	if p := prop(ev, propStatus); p != nil {
 		e.cancelled = strings.EqualFold(strings.TrimSpace(p.Value), statusCancelled)
 	}
@@ -352,6 +364,38 @@ func props(ev *ics.VEvent, name string) []*ics.IANAProperty {
 func cleanTitle(s string) string {
 	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s)
 	return strings.TrimSpace(s)
+}
+
+// teacher reads the teacher of an event: the first DESCRIPTION line "Преподаватель: ..." or "Teacher: ...", else
+// the CN of ORGANIZER, else "". It is untrusted text, cut to one clean line (lesson.CleanText).
+// The ORGANIZER of an exported calendar is often its owner, not the teacher, so a CN that is an email address or
+// the calendar name (calName) is ignored.
+func teacher(ev *ics.VEvent, calName string) string {
+	if p := prop(ev, propDescription); p != nil {
+		for _, line := range strings.Split(p.Value, "\n") {
+			label, value, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			for _, l := range teacherLabels {
+				if strings.EqualFold(strings.TrimSpace(label), l) {
+					if t := lesson.CleanText(value, lesson.MaxTeacherRunes); t != "" {
+						return t
+					}
+				}
+			}
+		}
+	}
+	if p := prop(ev, propOrganizer); p != nil {
+		for _, cn := range param(p, paramCommonName) {
+			t := lesson.CleanText(strings.Trim(cn, `"`), lesson.MaxTeacherRunes)
+			if t == "" || strings.Contains(t, "@") || strings.EqualFold(t, calName) {
+				continue
+			}
+			return t
+		}
+	}
+	return ""
 }
 
 // identity is the stable part of an event's row keys: the UID when it is short printable text without '/', else its

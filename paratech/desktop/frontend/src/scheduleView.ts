@@ -67,9 +67,75 @@ export function timeRange(start: string, end: string): string {
   return `${start} – ${end}`;
 }
 
-/** "Матанализ, 14.10.2026 09:00–10:30 (Europe/Moscow)". */
-export function lessonParts(l: LessonText): Part[] {
-  return [fromFile(l.title), fixed(`, ${timeRange(l.start, l.end)} (`), fromFile(l.zone), fixed(")")];
+const kindLabels: Readonly<Record<string, string>> = {
+  lecture: "лекция",
+  seminar: "семинар",
+  practice: "практика",
+  lab: "лабораторная",
+};
+
+/** The Russian name of a lesson kind; "" for "unknown" and any other code. */
+export function kindLabel(kind: string): string {
+  return Object.hasOwn(kindLabels, kind) ? kindLabels[kind] : "";
+}
+
+/** Whether the subject says more than the title: known and not just the title again. */
+export function showsSubject(l: LessonText): boolean {
+  const subject = l.subject ?? "";
+  return subject !== "" && subject !== l.title.trim();
+}
+
+/**
+ * The details of a lesson joined by " · ": "лекция · предмет: Матанализ · преподаватель: Иванов И. И.". The subject is
+ * named only when it differs from the title, unless `subject` forces it (a change of the subject alone); a forced empty
+ * subject reads «предмет не указан». Empty for a lesson without details.
+ */
+export function detailParts(l: LessonText, subject = showsSubject(l)): Part[] {
+  const items: Part[][] = [];
+  const kind = kindLabel(l.kind);
+  if (kind !== "") {
+    items.push([fixed(kind)]);
+  }
+  if (subject) {
+    items.push((l.subject ?? "") === "" ? [fixed("предмет не указан")] : [fixed("предмет: "), fromFile(l.subject)]);
+  }
+  if ((l.teacher ?? "") !== "") {
+    items.push([fixed("преподаватель: "), fromFile(l.teacher)]);
+  }
+  return items.flatMap((item, i) => (i === 0 ? item : [fixed(" · "), ...item]));
+}
+
+/** "Матанализ, лекция · преподаватель: Иванов И. И., 14.10.2026 09:00–10:30 (Europe/Moscow)". */
+export function lessonParts(l: LessonText, subject = showsSubject(l)): Part[] {
+  const details = detailParts(l, subject);
+  return [
+    fromFile(l.title),
+    ...(details.length > 0 ? [fixed(", "), ...details] : []),
+    fixed(`, ${timeRange(l.start, l.end)} (`),
+    fromFile(l.zone),
+    fixed(")"),
+  ];
+}
+
+// A side of a change implies its subject when the subject is the title, so a title change shows it.
+const impliesSubject = (l: LessonText) => (l.subject ?? "") === l.title.trim();
+
+/**
+ * The two sides of a change. A changed subject the titles do not show (an old lesson without one, or a subject column
+ * edited alone) is named on both sides; otherwise each side names it as a lesson does.
+ */
+export function changeSides(c: ImportChange): { before: Part[]; after: Part[] } {
+  const force =
+    (c.before.subject ?? "") !== (c.after.subject ?? "") && !(impliesSubject(c.before) && impliesSubject(c.after));
+  return {
+    before: lessonParts(c.before, force || showsSubject(c.before)),
+    after: lessonParts(c.after, force || showsSubject(c.after)),
+  };
+}
+
+/** Whether the changes hold lessons stored before subjects existed, which this import fills in. */
+export function fillsDetails(changes: readonly ImportChange[]): boolean {
+  return changes.some((c) => (c.before.subject ?? "") === "" && (c.after.subject ?? "") !== "");
 }
 
 /** "строка 2: Матанализ, ..."; a removed lesson (line 0) has no line. */
@@ -79,7 +145,8 @@ export function lineParts(line: number, parts: readonly Part[]): Part[] {
 
 /** "строка 3: <before> → <after>". */
 export function changeParts(c: ImportChange): Part[] {
-  return lineParts(c.line, [...lessonParts(c.before), fixed(" → "), ...lessonParts(c.after)]);
+  const sides = changeSides(c);
+  return lineParts(c.line, [...sides.before, fixed(" → "), ...sides.after]);
 }
 
 export function conflictParts(c: ImportConflict): Part[] {
@@ -385,6 +452,15 @@ export const notes = {
   uid:
     "CSV и XLSX: первая строка — заголовок с колонками title, date (ГГГГ-ММ-ДД), start и end (ЧЧ:ММ), timezone " +
     "(например Europe/Moscow) и uid. Без uid изменение названия, даты или начала занятия выглядит как «удалено + добавлено».",
+  details:
+    "Необязательные колонки: subject (предмет), kind (тип: лекция, семинар, практика или лабораторная; можно " +
+    "сокращённо и по-английски — «лек.», «сем», «пр», «лаб», lecture, lab) и teacher (преподаватель). Пустая ячейка " +
+    "или колонки нет — предмет и тип берутся из названия: «Матанализ, лекция», «Физика (лаб.)», «Лекция: История».",
+  icsDetails:
+    "ICS: предмет и тип берутся из названия события, преподаватель — из строки «Преподаватель: …» в описании или " +
+    "из организатора.",
+  filledDetails:
+    "Занятия, загруженные раньше, показываются изменёнными: импорт дополнит их предметом, типом и преподавателем.",
   noNotifications: "Уведомления об импорте не показываются.",
   rowErrors: "Ничего не будет записано: исправьте ошибки в файле и выберите его снова.",
   noChanges: "Изменений нет: расписание уже совпадает с файлом.",
@@ -394,8 +470,9 @@ export const notes = {
 
 /** The CSV template (docs/refs/schedule-csv.md); XLSX uses the same columns. */
 export const csvTemplate = [
-  "title,date,start,end,timezone,uid",
-  "Математика,2026-10-14,09:00,10:30,Europe/Moscow,math-1",
+  "title,date,start,end,timezone,uid,subject,kind,teacher",
+  "Математика,2026-10-14,09:00,10:30,Europe/Moscow,math-1,Математика,лекция,Иванов И. И.",
+  "Физика (лаб.),2026-10-14,11:00,12:30,Europe/Moscow,phys-1,,,",
 ].join("\n");
 
 const errorTexts: Readonly<Record<string, string>> = {

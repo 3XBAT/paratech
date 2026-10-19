@@ -17,7 +17,9 @@ syntax and RRULE values; recurrence expansion in our code). PRD sections 4.3 and
 ## Supported properties
 | Property | Use |
 |---|---|
-| `SUMMARY` | title (line breaks become spaces) |
+| `SUMMARY` | title (line breaks become spaces); subject and kind by the title rule of [schedule-csv.md](schedule-csv.md) |
+| `DESCRIPTION` | teacher: the first line `Преподаватель: …` or `Teacher: …` (label case-insensitive) |
+| `ORGANIZER` | teacher from its `CN` when `DESCRIPTION` names none; a `CN` with `@` or equal to `X-WR-CALNAME` (case-insensitive) is ignored: it is usually the calendar owner |
 | `DTSTART` | with `TZID` (IANA or Windows name such as `Russian Standard Time`), UTC `Z`, or floating (needs `X-WR-TIMEZONE`) |
 | `DTEND` / `DURATION` | exactly one of them |
 | `RRULE` | one per event: `FREQ=DAILY/WEEKLY/MONTHLY/YEARLY`, `INTERVAL` 1..1000, `COUNT` or `UNTIL`, `BYDAY` without numbers (DAILY, WEEKLY), `WKST` |
@@ -29,7 +31,7 @@ syntax and RRULE values; recurrence expansion in our code). PRD sections 4.3 and
 - Repeating lessons keep their wall-clock time across DST in the event zone; UTC series recur in UTC.
 - All-day events (`VALUE=DATE`) are not lessons and are skipped.
 - `VTIMEZONE` blocks are not read: the zone database is compiled in; unknown `TZID` is a row error.
-- Ignored: `LOCATION`, `DESCRIPTION`, alarms, attendees.
+- Ignored: `LOCATION`, the rest of `DESCRIPTION`, alarms, attendees. The teacher is cut to one line of 200 characters.
 
 ## Identity and re-import
 - A one-off event with a `UID` (no `RRULE`, `RDATE` or changed occurrences) is `ics:<UID>`: moving it shows as

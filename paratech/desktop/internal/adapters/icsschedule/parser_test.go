@@ -64,12 +64,13 @@ func eventLines(src string) []int {
 
 // wantRow is an expected row: start in the zone of the content, and the length.
 type wantRow struct {
-	line  int
-	key   string
-	title string
-	start time.Time
-	dur   time.Duration
-	zone  string
+	line    int
+	key     string
+	title   string
+	start   time.Time
+	dur     time.Duration
+	zone    string
+	teacher string
 }
 
 func checkRows(t *testing.T, got importplan.Parsed, want []wantRow) {
@@ -85,7 +86,12 @@ func checkRows(t *testing.T, got importplan.Parsed, want []wantRow) {
 	}
 	for i, w := range want {
 		g := got.Rows[i]
-		c := lesson.Content{Title: w.title, Start: w.start, End: w.start.Add(w.dur), TimeZone: w.zone}
+		// Subject and kind come from the title.
+		subject, kind := lesson.ClassifyTitle(w.title)
+		c := lesson.Content{
+			Title: w.title, Start: w.start, End: w.start.Add(w.dur), TimeZone: w.zone,
+			Subject: subject, Kind: kind, Teacher: w.teacher,
+		}
 		if g.Line != w.line || g.Key != w.key || !g.Content.Equal(c) {
 			t.Errorf("row %d = line %d key %q %+v\nwant      line %d key %q %+v", i, g.Line, g.Key, g.Content, w.line, w.key, c)
 		}
@@ -205,18 +211,18 @@ func TestGoogleCalendarExport(t *testing.T) {
 	var want []wantRow
 	for _, day := range []int{5, 7, 19, 21, 26, 28} { // the 12th is moved, the 14th is cancelled
 		s := time.Date(2026, 10, day, 9, 0, 0, 0, msk)
-		want = append(want, wantRow{lines[0], k(math, s), "Математический анализ", s, 90 * time.Minute, "Europe/Moscow"})
+		want = append(want, wantRow{lines[0], k(math, s), "Математический анализ", s, 90 * time.Minute, "Europe/Moscow", "доц. Иванова"})
 	}
 	moved := time.Date(2026, 10, 12, 11, 0, 0, 0, msk)
 	want = append(want, wantRow{lines[1], k(math, time.Date(2026, 10, 12, 9, 0, 0, 0, msk)),
-		"Математический анализ (перенос)", moved, 90 * time.Minute, "Europe/Moscow"})
+		"Математический анализ (перенос)", moved, 90 * time.Minute, "Europe/Moscow", ""})
 	// A single event in UTC is shown in the calendar zone X-WR-TIMEZONE; its key is the UID alone.
 	consult := time.Date(2026, 10, 16, 15, 0, 0, 0, msk)
-	want = append(want, wantRow{lines[3], phys, "Консультация по физике", consult, 90 * time.Minute, "Europe/Moscow"})
+	want = append(want, wantRow{lines[3], phys, "Консультация по физике", consult, 90 * time.Minute, "Europe/Moscow", ""})
 	// Berlin leaves summer time on 2026-10-25: the class stays at 18:00 local, which is an hour later in UTC.
 	for _, day := range []int{6, 13, 20, 27} {
 		s := time.Date(2026, 10, day, 18, 0, 0, 0, ber)
-		want = append(want, wantRow{lines[5], k(german, s), "Немецкий язык A1 (онлайн-группа, Берлин)", s, 90 * time.Minute, "Europe/Berlin"})
+		want = append(want, wantRow{lines[5], k(german, s), "Немецкий язык A1 (онлайн-группа, Берлин)", s, 90 * time.Minute, "Europe/Berlin", ""})
 	}
 
 	p := newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, msk), time.Date(2026, 11, 1, 0, 0, 0, 0, msk))
@@ -318,12 +324,12 @@ func TestUniversityPortalExport(t *testing.T) {
 
 	// Floating times are read in X-WR-TIMEZONE; line numbers count the folded line (the last event is on line 31).
 	want := []wantRow{
-		{7, "lesson-104512@schedule.example.edu", "Операционные системы (лекция); поток 1", at(5, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
-		{16, "lesson-104513@schedule.example.edu", "Компьютерные сети (лабораторная работа, подгруппа 2, чётная неделя)", at(5, 10, 15), 90 * time.Minute, "Asia/Yekaterinburg"},
-		{25, k(pe, at(6, 12, 0)), "Физическая культура", at(6, 12, 0), 90 * time.Minute, "Asia/Yekaterinburg"},
-		{31, k("lesson-104520@schedule.example.edu", at(7, 8, 30)), "Интенсив: Python", at(7, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
-		{31, k("lesson-104520@schedule.example.edu", at(8, 8, 30)), "Интенсив: Python", at(8, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
-		{31, k("lesson-104520@schedule.example.edu", at(9, 8, 30)), "Интенсив: Python", at(9, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg"},
+		{7, "lesson-104512@schedule.example.edu", "Операционные системы (лекция); поток 1", at(5, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg", "проф. Петров П. П."},
+		{16, "lesson-104513@schedule.example.edu", "Компьютерные сети (лабораторная работа, подгруппа 2, чётная неделя)", at(5, 10, 15), 90 * time.Minute, "Asia/Yekaterinburg", ""},
+		{25, k(pe, at(6, 12, 0)), "Физическая культура", at(6, 12, 0), 90 * time.Minute, "Asia/Yekaterinburg", ""},
+		{31, k("lesson-104520@schedule.example.edu", at(7, 8, 30)), "Интенсив: Python", at(7, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg", ""},
+		{31, k("lesson-104520@schedule.example.edu", at(8, 8, 30)), "Интенсив: Python", at(8, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg", ""},
+		{31, k("lesson-104520@schedule.example.edu", at(9, 8, 30)), "Интенсив: Python", at(9, 8, 30), 90 * time.Minute, "Asia/Yekaterinburg", ""},
 	}
 	p := newParser(t, at(1, 0, 0), at(31, 0, 0))
 	checkRows(t, parseWith(t, p, src), want)
@@ -332,6 +338,66 @@ func TestUniversityPortalExport(t *testing.T) {
 	got := parseWith(t, p, strings.Replace(src, "X-WR-TIMEZONE:Asia/Yekaterinburg\n", "", 1))
 	if len(got.Rows) != 0 || len(got.Errors) != 4 || got.Errors[0].Line != 6 || got.Errors[0].Field != propDTStart {
 		t.Fatalf("floating without a calendar zone = %+v", got)
+	}
+}
+
+// Subject and kind come from SUMMARY, the teacher from a DESCRIPTION line or the CN of ORGANIZER (TASK-089).
+func TestLessonDetails(t *testing.T) {
+	event := func(uid, summary string, extra ...string) string {
+		return "BEGIN:VEVENT\r\nUID:" + uid + "\r\nSUMMARY:" + summary + "\r\n" +
+			"DTSTART:20261006T090000Z\r\nDURATION:PT1H\r\n" + strings.Join(extra, "") + "END:VEVENT\r\n"
+	}
+	src := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME: Учёба \r\n" +
+		event("a", "Матанализ (лек.)", "DESCRIPTION:Ауд. 101\\nTeacher : Ivanov I.\\nПреподаватель: Петров\r\n") +
+		event("b", "Лекция по физике", "ORGANIZER;CN=\"Сидоров С. С.\":mailto:teacher@example.edu\r\n") +
+		event("c", "Calculus [lab]", "DESCRIPTION:преподаватель:  Смирнова  А. А.\r\n", "ORGANIZER;CN=Other:mailto:other@example.edu\r\n") +
+		event("d", "Лабиринты истории", "DESCRIPTION:Преподаватель:\\nСсылка: https://meet.example\r\n") +
+		event("e", "History", "DESCRIPTION:Teacher: "+strings.Repeat("я", lesson.MaxTeacherRunes+20)+"\r\n") +
+		// The ORGANIZER of an export is often the calendar owner: a CN with '@' or equal to the calendar name is not
+		// a teacher.
+		event("f", "Physics", "ORGANIZER;CN=student@example.edu:mailto:student@example.edu\r\n") +
+		event("g", "Chemistry", "ORGANIZER;CN=учёба:mailto:calendar@example.edu\r\n") +
+		event("h", "Biology", "ORGANIZER;CN=Иванов И. И.:mailto:ivanov@example.edu\r\n") +
+		"END:VCALENDAR\r\n"
+	p := newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	got := parseWith(t, p, src)
+	want := []struct {
+		subject string
+		kind    lesson.Kind
+		teacher string
+	}{
+		{"Матанализ", lesson.KindLecture, "Ivanov I."},
+		{"Физике", lesson.KindLecture, "Сидоров С. С."},
+		{"Calculus", lesson.KindLab, "Смирнова А. А."},
+		{"Лабиринты истории", lesson.KindUnknown, ""},
+		{"History", lesson.KindUnknown, strings.Repeat("я", lesson.MaxTeacherRunes)},
+		{"Physics", lesson.KindUnknown, ""},
+		{"Chemistry", lesson.KindUnknown, ""},
+		{"Biology", lesson.KindUnknown, "Иванов И. И."},
+	}
+	if len(got.Errors) != 0 || len(got.Rows) != len(want) {
+		t.Fatalf("parsed = %+v", got)
+	}
+	for i, w := range want {
+		c := got.Rows[i].Content
+		if c.Subject != w.subject || c.Kind != w.kind || c.Teacher != w.teacher || c.Validate() != nil {
+			t.Errorf("row %d = %q, %v, %q; want %q, %v, %q", i, c.Subject, c.Kind, c.Teacher, w.subject, w.kind, w.teacher)
+		}
+	}
+
+	// The fixtures: a Google export names the teacher in DESCRIPTION, a portal puts the kind in brackets.
+	msk := zone(t, "Europe/Moscow")
+	g := parseWith(t, newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, msk), time.Date(2026, 11, 1, 0, 0, 0, 0, msk)), fixture(t, "google.ics"))
+	if c := g.Rows[0].Content; c.Teacher != "доц. Иванова" || c.Subject != "Математический анализ" {
+		t.Errorf("google.ics first lesson = %+v", c)
+	}
+	yek := zone(t, "Asia/Yekaterinburg")
+	u := parseWith(t, newParser(t, time.Date(2026, 10, 1, 0, 0, 0, 0, yek), time.Date(2026, 10, 31, 0, 0, 0, 0, yek)), fixture(t, "university_portal.ics"))
+	if c := u.Rows[0].Content; c.Teacher != "проф. Петров П. П." || c.Subject != "Операционные системы" || c.Kind != lesson.KindLecture {
+		t.Errorf("university_portal.ics first lesson = %+v", c)
+	}
+	if c := u.Rows[1].Content; c.Subject != "Компьютерные сети" || c.Kind != lesson.KindLab {
+		t.Errorf("university_portal.ics second lesson = %+v", c)
 	}
 }
 

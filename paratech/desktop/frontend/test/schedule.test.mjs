@@ -7,13 +7,17 @@ import {
   applyLabel,
   canApply,
   changeParts,
+  changeSides,
   commitErrorText,
   conflictParts,
   csvTemplate,
   dayHeaders,
   dayLabel,
+  detailParts,
   errorText,
+  fillsDetails,
   hasChanges,
+  kindLabel,
   lessonMarks,
   lessonParts,
   lessonTime,
@@ -33,8 +37,18 @@ import {
 // The pieces of parts that come from the file, which the page isolates in <bdi>.
 const fromFile = (parts) => parts.filter((p) => p.file).map((p) => p.text);
 
-const math = { title: "Математика <b>", start: "14.10.2026 09:00", end: "14.10.2026 10:30", zone: "Europe/Moscow" };
-const lab = { title: "Лаба", start: "14.10.2026 10:00", end: "14.10.2026 11:30", zone: "Europe/Moscow" };
+// No details to show: the subject is the title, the kind unknown, no teacher.
+const math = {
+  title: "Математика <b>", start: "14.10.2026 09:00", end: "14.10.2026 10:30", zone: "Europe/Moscow",
+  subject: "Математика <b>", kind: "unknown", teacher: "",
+};
+const lab = {
+  title: "Лаба", start: "14.10.2026 10:00", end: "14.10.2026 11:30", zone: "Europe/Moscow",
+  subject: "Лаба", kind: "unknown", teacher: "",
+};
+const lecture = {
+  ...math, title: "Матанализ (лек.)", subject: "Матанализ", kind: "lecture", teacher: "Иванов И. И.",
+};
 
 // Mirrors the JSON of internal/input/wails/schedule.go (TestScheduleChooseFileShowsThePreview).
 const preview = {
@@ -84,11 +98,19 @@ test("a preview is parsed strictly", () => {
     null, "x", { ...preview, canCommit: "yes" }, { ...preview, selectionId: 1 }, { ...preview, added: [{ line: 2 }] },
     { ...preview, unchangedCount: -1 }, { ...preview, changed: [{ line: 1, before: math }] }, { ...preview, window: 3 },
     { ...preview, errors: [{ line: "1", field: "", reason: "" }] },
+    { ...preview, added: [{ line: 2, ...math, subject: undefined }] }, { ...preview, removed: [{ line: 0, ...lab, kind: 1 }] },
+    { ...preview, conflicts: [{ line: 2, lesson: math, withLine: 0, with: { ...lab, teacher: null } }] },
   ]) {
     assert.throws(() => parsePreview(bad), undefined, JSON.stringify(bad));
   }
   assert.throws(() => parseResult({ added: 1, changed: 0 }));
   assert.deepEqual(parseResult({ added: 1, changed: 0, removed: 0 }), { added: 1, changed: 0, removed: 0 });
+});
+
+test("a kind code the page does not know is shown as no kind", () => {
+  const p = parsePreview({ ...preview, added: [{ line: 2, ...lecture, kind: "exam" }], changed: [], removed: [] });
+  assert.equal(p.added[0].kind, "unknown");
+  assert.deepEqual(parsePreview({ ...preview, added: [{ line: 2, ...lecture }] }).added[0], { line: 2, ...lecture });
 });
 
 test("Apply is offered only after a preview the core accepts", () => {
@@ -134,10 +156,57 @@ test("lessons, changes and conflicts are plain text", () => {
   assert.equal(resultText({ added: 1, changed: 2, removed: 3 }), "Расписание обновлено: добавлено 1, изменено 2, удалено 3.");
 });
 
+test("a lesson shows its kind, a subject other than the title and the teacher", () => {
+  assert.deepEqual(["lecture", "seminar", "practice", "lab"].map(kindLabel), ["лекция", "семинар", "практика", "лабораторная"]);
+  for (const k of ["unknown", "", "exam", "toString", "__proto__"]) {
+    assert.equal(kindLabel(k), "", k);
+  }
+
+  assert.equal(
+    plain(lessonParts(lecture)),
+    "Матанализ (лек.), лекция · предмет: Матанализ · преподаватель: Иванов И. И., 14.10.2026 09:00–10:30 (Europe/Moscow)",
+  );
+  assert.deepEqual(fromFile(lessonParts(lecture)), [lecture.title, "Матанализ", "Иванов И. И.", "Europe/Moscow"]);
+  assert.equal(plain(detailParts({ ...lecture, title: " Матанализ " })), "лекция · преподаватель: Иванов И. И.", "subject = title");
+  assert.equal(plain(detailParts({ ...lecture, kind: "unknown", teacher: "" })), "предмет: Матанализ");
+  assert.equal(plain(detailParts({ ...lecture, subject: "", kind: "lab", teacher: "" })), "лабораторная", "old lesson");
+  assert.deepEqual(detailParts(math), []);
+  assert.equal(plain(lessonParts(math)), "Математика <b>, 14.10.2026 09:00–10:30 (Europe/Moscow)");
+  // Fixtures written before the details existed still render.
+  assert.deepEqual(detailParts({ title: "Урок", start: "", end: "", zone: "" }), []);
+});
+
+test("a change shows a subject the titles do not", () => {
+  const old = { ...lecture, title: "Матанализ", subject: "", kind: "unknown", teacher: "" };
+  const now = { ...lecture, title: "Матанализ" };
+  const filled = changeSides({ line: 2, before: old, after: now });
+  assert.equal(plain(filled.before), "Матанализ, предмет не указан, 14.10.2026 09:00–10:30 (Europe/Moscow)");
+  assert.equal(
+    plain(filled.after),
+    "Матанализ, лекция · предмет: Матанализ · преподаватель: Иванов И. И., 14.10.2026 09:00–10:30 (Europe/Moscow)",
+  );
+  assert.equal(fillsDetails([{ line: 2, before: old, after: now }]), true);
+  assert.equal(fillsDetails(preview.changed), false);
+
+  const kindOnly = changeParts({ line: 3, before: { ...math, kind: "seminar" }, after: { ...math, kind: "practice" } });
+  assert.equal(
+    plain(kindOnly),
+    "строка 3: Математика <b>, семинар, 14.10.2026 09:00–10:30 (Europe/Moscow) → Математика <b>, практика, " +
+      "14.10.2026 09:00–10:30 (Europe/Moscow)",
+  );
+  // Title and subject change together: the titles show it, the subject is not repeated.
+  assert.equal(plain(changeSides(preview.changed[0]).after), "Лаба, 14.10.2026 10:00–11:30 (Europe/Moscow)");
+});
+
 test("file text is isolated piece by piece: a bidi override cannot reorder the line", () => {
   const rlo = "\u202E"; // RIGHT-TO-LEFT OVERRIDE
-  const evil = { ...math, title: `a${rlo}b`, zone: `Z${rlo}` };
+  const evil = { ...math, title: `a${rlo}b`, subject: `a${rlo}b`, zone: `Z${rlo}` };
   assert.deepEqual(fromFile(lessonParts(evil)), [evil.title, evil.zone]);
+  const details = { ...lecture, subject: `S${rlo}`, teacher: `T${rlo}` };
+  assert.deepEqual(fromFile(lessonParts(details)), [details.title, details.subject, details.teacher, details.zone]);
+  for (const p of lessonParts(details).filter((p) => !p.file)) {
+    assert.ok(!p.text.includes(rlo), `fixed text ${JSON.stringify(p.text)} holds file text`);
+  }
   assert.deepEqual(fromFile(changeParts({ line: 1, before: evil, after: lab })), [evil.title, evil.zone, lab.title, lab.zone]);
   assert.deepEqual(fromFile(conflictParts({ line: 1, lesson: evil, withLine: 2, with: lab })), [
     evil.title, evil.zone, lab.title, lab.zone,
@@ -165,8 +234,16 @@ test("errors of the core map to Russian text, unknown ones to a generic text", (
 });
 
 test("the page states the owner's decisions and the template", () => {
-  assert.equal(csvTemplate.split("\n")[0], "title,date,start,end,timezone,uid");
-  assert.equal(csvTemplate.split("\n")[1].split(",").length, 6);
+  const rows = csvTemplate.split("\n");
+  assert.equal(rows[0], "title,date,start,end,timezone,uid,subject,kind,teacher");
+  assert.deepEqual(rows.map((r) => r.split(",").length), [9, 9, 9], "no quoted cells in the template");
+  assert.match(rows[1], /,лекция,/);
+  assert.match(rows[2], /\(лаб\.\),.*,,,$/, "empty optional cells: the title tells");
+  for (const word of ["subject (предмет)", "kind (тип", "teacher (преподаватель)", "лабораторная", "из названия"]) {
+    assert.ok(notes.details.includes(word), word);
+  }
+  assert.match(notes.icsDetails, /«Преподаватель: …» в описании/);
+  assert.match(notes.filledDetails, /предметом, типом и преподавателем/);
   assert.match(notes.allDay, /весь день/);
   assert.match(notes.uid, /uid/);
   assert.match(notes.uid, /Без uid изменение названия, даты или начала занятия выглядит как «удалено \+ добавлено»/);

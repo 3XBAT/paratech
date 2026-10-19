@@ -18,12 +18,38 @@ First line is the header. Names are case-insensitive, any order. Unknown columns
 | `end` | yes | `HH:MM`, after `start` on the same date |
 | `timezone` | yes | IANA name, e.g. `Europe/Moscow`, `UTC` |
 | `uid` | no | stable id of the lesson in your source |
+| `subject` (or `предмет`) | no | the course, e.g. `Матанализ` (TASK-089) |
+| `kind` (or `тип`) | no | type of class, see below |
+| `teacher` (or `преподаватель`) | no | text |
 
 ```csv
-title,date,start,end,timezone,uid
-Math,2026-10-14,09:00,10:30,Europe/Moscow,math-1
-Physics,2026-10-14,10:45,12:15,Europe/Moscow,
+title,date,start,end,timezone,uid,subject,kind,teacher
+Math,2026-10-14,09:00,10:30,Europe/Moscow,math-1,Math,lecture,Ivanov I. I.
+Physics (lab),2026-10-14,10:45,12:15,Europe/Moscow,,,,
 ```
+
+## Subject, kind and teacher
+- `kind` values, case-insensitive, a trailing dot allowed: lecture (`лекция`, `лек`, `лк`, `lecture`, `lec`),
+  seminar (`семинар`, `сем`, `seminar`, `sem`), practice (`практика`, `практ`, `пр`, `пз`, `практическое занятие`,
+  `practice`, `practical`), lab (`лабораторная`, `лабораторная работа`, `лаб`, `лр`, `lab`, `laboratory`).
+  Another value is a row error of the column `kind`.
+- An empty `subject` or `kind` cell, or no such column, takes the value derived from the title (rule below).
+- `subject` and `teacher` are cut to one line of 200 characters.
+
+## Title rule
+Used for ICS and for rows without `subject`/`kind` (`lesson.ClassifyTitle`). The kind is recognized only as a whole
+word or abbreviation in one of these places; otherwise the kind is unknown and the subject is the title.
+
+| Title | Subject | Kind |
+|---|---|---|
+| `Матанализ, лекция` / `Матанализ (лек.)` / `Матанализ: семинар` | Матанализ | lecture / lecture / seminar |
+| `Физика - практика` (dash with spaces) | Физика | practice |
+| `Лекция: Матанализ` / `[лаб] Физика` / `Lecture: Calculus` | Матанализ / Физика / Calculus | lecture / lab / lecture |
+| `Компьютерные сети (лабораторная работа, подгруппа 2)` | Компьютерные сети | lab |
+| `Лекция по физике` / `Lecture on Calculus` | Физике / Calculus | lecture |
+| `Лабиринты истории`, `Практическая философия`, `Физика-практика` | the title | unknown |
+
+"X по Y" keeps the grammatical case of Y and only capitalizes its first letter (no declension).
 
 ## Identity and re-import
 - With `uid`: the lesson is `csv:id:<uid>`; changing its time or title shows as "changed".

@@ -15,6 +15,9 @@
 // # Glossary
 //
 //   - Lesson: one schedule entry (a class occurrence) with start, end and the time zone of the source record.
+//   - Subject, kind, teacher: the course of a lesson, the type of the class (lecture, seminar, practice, lab or
+//     unknown) and who teaches it. Files give them in columns, or the subject and kind are derived from the title
+//     (lesson.ClassifyTitle).
 //   - Import: ICS, CSV or XLSX file parsed into lessons through parse, validate, preview, commit; a malformed
 //     file never changes the local schedule.
 //   - Source UID: the identity of an entry in the imported file, used to diff a new import against the stored schedule.

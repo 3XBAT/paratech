@@ -88,13 +88,13 @@ func TestParseValid(t *testing.T) {
 		t.Fatalf("parsed = %+v", p)
 	}
 	want := []importplan.Row{
-		{Line: 2, Key: "id:101", Content: lesson.Content{Title: "Math",
+		{Line: 2, Key: "id:101", Content: lesson.Content{Title: "Math", Subject: "Math",
 			Start: time.Date(2026, 10, 14, 9, 0, 0, 0, msk), End: time.Date(2026, 10, 14, 10, 30, 0, 0, msk), TimeZone: "Europe/Moscow"}},
-		{Line: 3, Key: "auto:2026-10-14 09:45 Physics, lab", Content: lesson.Content{Title: "Physics, lab",
+		{Line: 3, Key: "auto:2026-10-14 09:45 Physics, lab", Content: lesson.Content{Title: "Physics, lab", Subject: "Physics", Kind: lesson.KindLab,
 			Start: time.Date(2026, 10, 14, 9, 45, 0, 0, time.UTC), End: time.Date(2026, 10, 14, 11, 15, 0, 0, time.UTC), TimeZone: "UTC"}},
-		{Line: 4, Key: "auto:2026-10-15 12:00 =SUM(A1)", Content: lesson.Content{Title: "=SUM(A1)",
+		{Line: 4, Key: "auto:2026-10-15 12:00 =SUM(A1)", Content: lesson.Content{Title: "=SUM(A1)", Subject: "=SUM(A1)",
 			Start: time.Date(2026, 10, 15, 12, 0, 0, 0, msk), End: time.Date(2026, 10, 15, 13, 0, 0, 0, msk), TimeZone: "Europe/Moscow"}},
-		{Line: 5, Key: "auto:2026-10-16 08:00 Chemistry", Content: lesson.Content{Title: "Chemistry",
+		{Line: 5, Key: "auto:2026-10-16 08:00 Chemistry", Content: lesson.Content{Title: "Chemistry", Subject: "Chemistry",
 			Start: time.Date(2026, 10, 16, 8, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC), TimeZone: "UTC"}},
 	}
 	for i, w := range want {
@@ -174,6 +174,40 @@ func TestRowErrors(t *testing.T) {
 				t.Fatalf("a row error must block the plan: %+v, %v", plan, err)
 			}
 		})
+	}
+}
+
+// Optional subject, kind and teacher columns (TASK-089), as in CSV: given cells win, empty ones take what the title
+// tells; a bad kind is a row error of its column.
+func TestLessonDetails(t *testing.T) {
+	data := workbook(t, [][]any{
+		{"Title", "Date", "Start", "End", "TimeZone", "Предмет", "Тип", "Преподаватель"},
+		{"Матанализ 1", day(2026, 10, 14), clock(9, 0), clock(10, 0), "UTC", "Математический анализ", "Лек.", " Иванов  И. И. "},
+		{"Физика (лаб)", day(2026, 10, 14), clock(11, 0), clock(12, 0), "UTC"},
+		{"Химия", day(2026, 10, 14), clock(13, 0), clock(14, 0), "UTC", nil, "seminar", "Петров"},
+		{"Экзамен", day(2026, 10, 14), clock(15, 0), clock(16, 0), "UTC", nil, "exam" + secret},
+	}, nil)
+	p := parse(t, data)
+	if len(p.Rows) != 3 || len(p.Errors) != 1 {
+		t.Fatalf("parsed = %+v", p)
+	}
+	want := []struct {
+		subject string
+		kind    lesson.Kind
+		teacher string
+	}{
+		{"Математический анализ", lesson.KindLecture, "Иванов И. И."},
+		{"Физика", lesson.KindLab, ""},
+		{"Химия", lesson.KindSeminar, "Петров"},
+	}
+	for i, w := range want {
+		c := p.Rows[i].Content
+		if c.Subject != w.subject || c.Kind != w.kind || c.Teacher != w.teacher || c.Validate() != nil {
+			t.Errorf("row %d = %q, %v, %q; want %q, %v, %q", i, c.Subject, c.Kind, c.Teacher, w.subject, w.kind, w.teacher)
+		}
+	}
+	if e := p.Errors[0]; e.Line != 5 || e.Field != "kind" || !strings.HasPrefix(e.Reason, "column G: ") || strings.Contains(e.Reason, secret) {
+		t.Fatalf("error = %+v, want line 5 field kind in column G", e)
 	}
 }
 

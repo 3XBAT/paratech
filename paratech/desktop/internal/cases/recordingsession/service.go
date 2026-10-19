@@ -315,10 +315,18 @@ func (s *Service) lessonSnapshot(ctx context.Context, id shared.LessonID) values
 	return snapshotOf(l)
 }
 
-// snapshotOf is what a recording keeps of l. TASK-089 fills subject, kind and teacher once the lesson has them.
+// snapshotOf is what a recording keeps of l. An unknown kind is kept as no kind. The snapshot bounds its texts in
+// bytes, the lesson in characters: a very long Cyrillic subject or teacher is cut, never refused.
 func snapshotOf(l *lesson.Lesson) values.LessonSnapshot {
 	c := l.Content()
-	return values.NewLessonSnapshot(values.LessonSnapshotSpec{Title: c.Title, Start: c.Start, End: c.End})
+
+	kind := ""
+	if c.Kind != lesson.KindUnknown {
+		kind = c.Kind.String()
+	}
+	return values.NewLessonSnapshot(values.LessonSnapshotSpec{
+		Title: c.Title, Subject: c.Subject, Kind: kind, Teacher: c.Teacher, Start: c.Start, End: c.End,
+	})
 }
 
 // reserve takes the single slot of a recording in progress.

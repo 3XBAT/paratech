@@ -24,7 +24,16 @@ const (
 	colEnd      = "end"
 	colTimeZone = "timezone"
 	colUID      = "uid"
+	colSubject  = "subject"
+	colKind     = "kind"
+	colTeacher  = "teacher"
 )
+
+// columnAliases are the other accepted names of the optional columns.
+var columnAliases = map[string]string{"предмет": colSubject, "тип": colKind, "преподаватель": colTeacher}
+
+// optionalColumns are -1 in the column map when absent.
+var optionalColumns = []string{colUID, colSubject, colKind, colTeacher}
 
 var requiredColumns = []string{colTitle, colDate, colStart, colEnd, colTimeZone}
 
@@ -51,18 +60,24 @@ var (
 
 // rowReader turns the cells of one data row into a lesson row.
 type rowReader struct {
-	cols     map[string]int // column name -> cell index; uid is -1 when absent
+	cols     map[string]int // column name -> cell index; an optional column is -1 when absent
 	date1904 bool
 	zones    map[string]*time.Location
 }
 
 func newRowReader(line int, header []string, date1904 bool) (*rowReader, error) {
-	cols := map[string]int{colUID: -1}
+	cols := map[string]int{}
+	for _, c := range optionalColumns {
+		cols[c] = -1
+	}
 	seen := map[string]bool{}
 	for i, h := range header {
 		name := strings.ToLower(strings.TrimSpace(h))
+		if alias, ok := columnAliases[name]; ok {
+			name = alias
+		}
 		switch name {
-		case colTitle, colDate, colStart, colEnd, colTimeZone, colUID:
+		case colTitle, colDate, colStart, colEnd, colTimeZone, colUID, colSubject, colKind, colTeacher:
 		default:
 			continue // unknown columns are ignored
 		}
@@ -127,8 +142,15 @@ func (r *rowReader) parse(line int, cells []string) (importplan.Row, *importplan
 		return r.fail(line, colEnd, domainReason(err))
 	}
 
+	// Empty subject or kind cells, or no such columns: the title tells.
+	subject, kind, ok := lesson.DetailsFrom(title, get(colSubject), get(colKind))
+	if !ok {
+		return r.fail(line, colKind, "not a lesson type (lecture, seminar, practice or lab, in English or Russian)")
+	}
+	teacher := lesson.CleanText(get(colTeacher), lesson.MaxTeacherRunes)
+
 	key, keyCol := keyAutoStart+date.Format(dateLayout)+" "+start.Format(clockLayout)+" "+title, colTitle
-	if uid := get(colUID); r.cols[colUID] >= 0 && uid != "" {
+	if uid := get(colUID); uid != "" {
 		key, keyCol = keyIDStart+uid, colUID
 	}
 
@@ -140,7 +162,9 @@ func (r *rowReader) parse(line int, cells []string) (importplan.Row, *importplan
 	}
 	return importplan.Row{
 		Line: line, Key: key,
-		Content: lesson.Content{Title: title, Start: start, End: end, TimeZone: zone.String()},
+		Content: lesson.Content{
+			Title: title, Start: start, End: end, TimeZone: zone.String(), Subject: subject, Kind: kind, Teacher: teacher,
+		},
 	}, nil
 }
 

@@ -107,11 +107,17 @@ func content(t *testing.T, title string, hour int) lesson.Content {
 	return lesson.Content{Title: title, Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow"}
 }
 
+// detailed gives c the subject, kind and teacher of a lesson file (TASK-089).
+func detailed(c lesson.Content) lesson.Content {
+	c.Subject, c.Kind, c.Teacher = "Math", lesson.KindLecture, "Ivanov I."
+	return c
+}
+
 // fullPreview has every kind of entry and can be committed.
 func fullPreview(t *testing.T) schedulesync.Preview {
 	return schedulesync.Preview{ConfirmToken: "tok-1", Plan: importplan.Plan{
 		Source:    importplan.SourceCSV,
-		Added:     []importplan.Addition{{Line: 2, UID: "csv:id:a", Content: content(t, "Math <b>", 9)}},
+		Added:     []importplan.Addition{{Line: 2, UID: "csv:id:a", Content: detailed(content(t, "Math <b>", 9))}},
 		Changed:   []importplan.Change{{Line: 3, Before: content(t, "Physics", 11), After: content(t, "Physics", 12)}},
 		Unchanged: []importplan.Change{{Line: 4}, {Line: 5}},
 		Removed:   []importplan.Removal{{UID: "csv:id:r", Content: content(t, "Old", 15)}},
@@ -146,16 +152,19 @@ func TestScheduleChooseFileShowsThePreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The page reads these names (frontend/src/bindings/schedule.ts); times are in the lesson's zone.
+	// A lesson without subject, kind and teacher (TASK-089).
+	const none = `,"subject":"","kind":"unknown","teacher":""}`
 	want := `{"cancelled":false,"selectionId":"` + got.SelectionID + `","fileName":"Lessons.CSV","source":"csv","errors":[],` +
-		`"added":[{"line":2,"title":"Math \u003cb\u003e","start":"14.10.2026 09:00","end":"14.10.2026 10:30","zone":"Europe/Moscow"}],` +
-		`"changed":[{"line":3,"before":{"title":"Physics","start":"14.10.2026 11:00","end":"14.10.2026 12:30","zone":"Europe/Moscow"},` +
-		`"after":{"title":"Physics","start":"14.10.2026 12:00","end":"14.10.2026 13:30","zone":"Europe/Moscow"}}],` +
-		`"removed":[{"line":0,"title":"Old","start":"14.10.2026 15:00","end":"14.10.2026 16:30","zone":"Europe/Moscow"}],` +
+		`"added":[{"line":2,"title":"Math \u003cb\u003e","start":"14.10.2026 09:00","end":"14.10.2026 10:30","zone":"Europe/Moscow",` +
+		`"subject":"Math","kind":"lecture","teacher":"Ivanov I."}],` +
+		`"changed":[{"line":3,"before":{"title":"Physics","start":"14.10.2026 11:00","end":"14.10.2026 12:30","zone":"Europe/Moscow"` + none + `,` +
+		`"after":{"title":"Physics","start":"14.10.2026 12:00","end":"14.10.2026 13:30","zone":"Europe/Moscow"` + none + `}],` +
+		`"removed":[{"line":0,"title":"Old","start":"14.10.2026 15:00","end":"14.10.2026 16:30","zone":"Europe/Moscow"` + none + `],` +
 		`"unchangedCount":2,` +
-		`"conflicts":[{"line":2,"lesson":{"title":"Math \u003cb\u003e","start":"14.10.2026 09:00","end":"14.10.2026 10:30","zone":"Europe/Moscow"},` +
-		`"withLine":6,"with":{"title":"Lab","start":"14.10.2026 10:00","end":"14.10.2026 11:30","zone":"Europe/Moscow"}},` +
-		`{"line":3,"lesson":{"title":"Physics","start":"14.10.2026 12:00","end":"14.10.2026 13:30","zone":"Europe/Moscow"},` +
-		`"withLine":0,"with":{"title":"Manual","start":"14.10.2026 12:00","end":"14.10.2026 13:30","zone":"Europe/Moscow"}}],` +
+		`"conflicts":[{"line":2,"lesson":{"title":"Math \u003cb\u003e","start":"14.10.2026 09:00","end":"14.10.2026 10:30","zone":"Europe/Moscow"` + none + `,` +
+		`"withLine":6,"with":{"title":"Lab","start":"14.10.2026 10:00","end":"14.10.2026 11:30","zone":"Europe/Moscow"` + none + `},` +
+		`{"line":3,"lesson":{"title":"Physics","start":"14.10.2026 12:00","end":"14.10.2026 13:30","zone":"Europe/Moscow"` + none + `,` +
+		`"withLine":0,"with":{"title":"Manual","start":"14.10.2026 12:00","end":"14.10.2026 13:30","zone":"Europe/Moscow"` + none + `}],` +
 		`"conflictsTruncated":true,"window":null,"canCommit":true}`
 	if string(raw) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", raw, want)

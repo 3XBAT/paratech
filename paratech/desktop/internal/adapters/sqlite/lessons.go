@@ -79,7 +79,7 @@ func saveLesson(ctx context.Context, q *sqlcgen.Queries, l *lesson.Lesson) error
 	if l.Version() == 0 {
 		return DuplicateAsVersionConflict(MapError(ctx, q.InsertLesson(ctx, sqlcgen.InsertLessonParams{
 			ID: p.ID, Title: p.Title, StartsAt: p.StartsAt, EndsAt: p.EndsAt, Timezone: p.Timezone,
-			SourceUid: p.SourceUid, StartNotifiedAt: p.StartNotifiedAt, ContentRevision: p.ContentRevision,
+			Subject: p.Subject, Kind: p.Kind, Teacher: p.Teacher, SourceUid: p.SourceUid, StartNotifiedAt: p.StartNotifiedAt, ContentRevision: p.ContentRevision,
 			CalendarSyncedRevision: p.CalendarSyncedRevision, CalendarSyncedAt: p.CalendarSyncedAt,
 			DeletedAt: p.DeletedAt, CreatedAt: jobMs(l.CreatedAt()), UpdatedAt: p.UpdatedAt,
 		})))
@@ -150,11 +150,16 @@ func lessonsFromRows(ctx context.Context, rows []sqlcgen.ScheduleEntry, err erro
 }
 
 func lessonFromRow(row sqlcgen.ScheduleEntry) (*lesson.Lesson, error) {
+	kind, err := lesson.KindOf(row.Kind)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: stored lesson %s: %w", row.ID, err)
+	}
 	l, err := lesson.Restore(lesson.State{
 		Version: row.Version,
 		ID:      shared.LessonID(row.ID),
 		Content: lesson.Content{
 			Title: row.Title, Start: jobFromMs(row.StartsAt), End: jobFromMs(row.EndsAt), TimeZone: row.Timezone,
+			Subject: row.Subject, Kind: kind, Teacher: row.Teacher,
 		},
 		SourceUID:              row.SourceUid.String,
 		StartNotifiedAt:        jobFromNullMs(row.StartNotifiedAt),
@@ -184,6 +189,9 @@ func lessonUpdateParams(l *lesson.Lesson) sqlcgen.UpdateLessonParams {
 		StartsAt:               jobMs(c.Start),
 		EndsAt:                 jobMs(c.End),
 		Timezone:               c.TimeZone,
+		Subject:                c.Subject,
+		Kind:                   c.Kind.String(),
+		Teacher:                c.Teacher,
 		SourceUid:              jobNullString(l.SourceUID()),
 		StartNotifiedAt:        jobNullMs(l.StartNotifiedAt()),
 		ContentRevision:        l.ContentRevision(),

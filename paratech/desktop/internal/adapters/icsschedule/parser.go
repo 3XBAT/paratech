@@ -101,6 +101,7 @@ func (p *Parser) Parse(ctx context.Context, data []byte) (importplan.Parsed, err
 	w := p.window()
 	r := &reader{zones: zones{}, from: w.From, to: w.To}
 	r.calZone = calendarZone(cal, r.zones)
+	r.calName = calendarName(cal)
 
 	var out importplan.Parsed
 	read := make([]event, 0, len(events))
@@ -156,6 +157,16 @@ func calendarZone(cal *ics.Calendar, z zones) *time.Location {
 	return nil
 }
 
+// calendarName returns the X-WR-CALNAME of the calendar cleaned as a teacher name (to compare with ORGANIZER), or "".
+func calendarName(cal *ics.Calendar) string {
+	for _, p := range cal.CalendarProperties {
+		if strings.EqualFold(p.IANAToken, propXWRCalName) {
+			return lesson.CleanText(p.Value, lesson.MaxTeacherRunes)
+		}
+	}
+	return ""
+}
+
 // occurrences expands the events into rows in file order: the occurrences of a series in time order at the line of
 // its master event, a changed occurrence at its own line.
 func occurrences(ctx context.Context, w importplan.Window, events []event) ([]importplan.Row, []importplan.RowError, error) {
@@ -199,11 +210,13 @@ func occurrences(ctx context.Context, w importplan.Window, events []event) ([]im
 			return &Error{Kind: ErrTooMany, Detail: fmt.Sprintf("more than %d lessons in the import dates", importplan.MaxRows)}
 		}
 		start = start.In(e.label)
+		subject, kind := lesson.ClassifyTitle(e.title)
 		rows = append(rows, importplan.Row{
 			Line: e.line,
 			Key:  k,
 			Content: lesson.Content{
 				Title: e.title, Start: start, End: start.Add(e.duration), TimeZone: e.label.String(),
+				Subject: subject, Kind: kind, Teacher: e.teacher,
 			},
 		})
 		return nil

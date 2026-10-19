@@ -49,6 +49,15 @@ func TestContentValidate(t *testing.T) {
 		{"zone with space", func(c *Content) { c.TimeZone = "Europe/ Moscow" }, false},
 		{"zone with leading slash", func(c *Content) { c.TimeZone = "/Europe" }, false},
 		{"long zone", func(c *Content) { c.TimeZone = strings.Repeat("A", MaxTimeZoneBytes+1) }, false},
+		{"subject, kind and teacher", func(c *Content) { c.Subject, c.Kind, c.Teacher = "Матанализ", KindLab, "Иванов И. И." }, true},
+		{"subject at limit", func(c *Content) { c.Subject = strings.Repeat("я", MaxSubjectRunes) }, true},
+		{"long subject", func(c *Content) { c.Subject = strings.Repeat("я", MaxSubjectRunes+1) }, false},
+		{"subject with line break", func(c *Content) { c.Subject = "Math\n2" }, false},
+		{"subject with outer space", func(c *Content) { c.Subject = " Math" }, false},
+		{"unknown kind value", func(c *Content) { c.Kind = Kind(99) }, false},
+		{"teacher at limit", func(c *Content) { c.Teacher = strings.Repeat("я", MaxTeacherRunes) }, true},
+		{"long teacher", func(c *Content) { c.Teacher = strings.Repeat("я", MaxTeacherRunes+1) }, false},
+		{"teacher with bidi control", func(c *Content) { c.Teacher = "Ivanov\u202e" }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,10 +130,17 @@ func TestContentEqualAndOverlaps(t *testing.T) {
 	if !a.Equal(sameInstant) {
 		t.Error("same instants in another location are not Equal")
 	}
-	other := a
-	other.TimeZone = "UTC"
-	if a.Equal(other) {
-		t.Error("another zone name is Equal")
+	for name, mutate := range map[string]func(*Content){
+		"zone name": func(c *Content) { c.TimeZone = "UTC" },
+		"subject":   func(c *Content) { c.Subject = "Physics" },
+		"kind":      func(c *Content) { c.Kind = KindSeminar },
+		"teacher":   func(c *Content) { c.Teacher = "Petrov" },
+	} {
+		other := a
+		mutate(&other)
+		if a.Equal(other) {
+			t.Errorf("another %s is Equal", name)
+		}
 	}
 
 	tests := []struct {
@@ -249,6 +265,16 @@ func TestChangeContent(t *testing.T) {
 		changed, err := l.ChangeContent(c, t1)
 		if err != nil || !changed || l.ContentRevision() != 2 || !l.UpdatedAt().Equal(t1) || l.Content().Title != "Physics" {
 			t.Fatalf("changed=%v err=%v revision=%d updated=%v", changed, err, l.ContentRevision(), l.UpdatedAt())
+		}
+	})
+
+	t.Run("a new kind or teacher is a change", func(t *testing.T) {
+		l := newLesson(t)
+		c := l.Content()
+		c.Kind, c.Teacher = KindLecture, "Ivanov"
+		changed, err := l.ChangeContent(c, t1)
+		if err != nil || !changed || l.ContentRevision() != 2 || l.Content().Kind != KindLecture || l.Content().Teacher != "Ivanov" {
+			t.Fatalf("changed=%v err=%v revision=%d content=%+v", changed, err, l.ContentRevision(), l.Content())
 		}
 	})
 

@@ -107,7 +107,7 @@ func (c *Client) UpsertLesson(ctx context.Context, calendarID string, l *lesson.
 		return err
 	}
 	e := event{
-		Summary: summary(content.Title, lessonFallback), Description: lessonDescription, Status: statusConfirmed,
+		Summary: summary(content.Title, lessonFallback), Description: lessonText(content), Status: statusConfirmed,
 		Start: eventTime{DateTime: rfc3339(content.Start), TimeZone: content.TimeZone},
 		End:   eventTime{DateTime: rfc3339(content.End), TimeZone: content.TimeZone},
 		ExtendedProperties: extendedProperties{Private: map[string]string{
@@ -199,6 +199,30 @@ func (c *Client) update(ctx context.Context, op, path string, e event) (int, err
 		return 0, transient(op, ErrNotRestored)
 	}
 	return status, err
+}
+
+// kindNames are the kinds of a lesson as the event description names them; an unknown kind is not named.
+var kindNames = map[lesson.Kind]string{
+	lesson.KindLecture: "лекция", lesson.KindSeminar: "семинар", lesson.KindPractice: "практика", lesson.KindLab: "лабораторная",
+}
+
+// htmlText escapes the characters Google reads as markup in a description, so file text stays text.
+var htmlText = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// lessonText is the event description of a lesson: its kind and teacher when known, then the app note. The teacher
+// is file text, cleaned like a title and escaped: Google renders some HTML in descriptions.
+func lessonText(c lesson.Content) string {
+	var lines []string
+	if name, ok := kindNames[c.Kind]; ok {
+		lines = append(lines, "Тип: "+name)
+	}
+	if t := summary(c.Teacher, ""); t != "" {
+		lines = append(lines, "Преподаватель: "+htmlText.Replace(t))
+	}
+	if len(lines) == 0 {
+		return lessonDescription
+	}
+	return strings.Join(lines, "\n") + "\n\n" + lessonDescription
 }
 
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }

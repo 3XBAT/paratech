@@ -24,6 +24,12 @@ type Content struct {
 	Start    time.Time
 	End      time.Time
 	TimeZone string // IANA name of the source record, e.g. Europe/Moscow
+
+	// Subject is the course the class belongs to, "" when unknown (a lesson stored before subjects existed and
+	// never imported again). Kind is the type of the class. Teacher is optional. See ClassifyTitle.
+	Subject string
+	Kind    Kind
+	Teacher string
 }
 
 // Validate checks the invariants of a lesson's content.
@@ -34,7 +40,16 @@ func (c Content) Validate() error {
 	if err := ValidateSpan(c.Start, c.End); err != nil {
 		return err
 	}
-	return ValidateTimeZoneName(c.TimeZone)
+	if err := ValidateTimeZoneName(c.TimeZone); err != nil {
+		return err
+	}
+	if err := ValidateSubject(c.Subject); err != nil {
+		return err
+	}
+	if err := c.Kind.Validate(); err != nil {
+		return err
+	}
+	return ValidateTeacher(c.Teacher)
 }
 
 // ValidateTitle checks a lesson title: not blank, at most MaxTitleBytes, valid text without control characters.
@@ -64,9 +79,10 @@ func ValidateSpan(start, end time.Time) error {
 	return nil
 }
 
-// Equal reports whether both contents show the same lesson: same title, same instants, same zone name.
+// Equal reports whether both contents show the same lesson: same texts, same instants, same zone name and kind.
 func (c Content) Equal(o Content) bool {
-	return c.Title == o.Title && c.Start.Equal(o.Start) && c.End.Equal(o.End) && c.TimeZone == o.TimeZone
+	return c.Title == o.Title && c.Start.Equal(o.Start) && c.End.Equal(o.End) && c.TimeZone == o.TimeZone &&
+		c.Subject == o.Subject && c.Kind == o.Kind && c.Teacher == o.Teacher
 }
 
 // Overlaps reports whether the two time ranges share time. Touching ranges (one ends when the other starts) do not.

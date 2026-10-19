@@ -174,6 +174,34 @@ func TestBuildReimportIsNoOp(t *testing.T) {
 	}
 }
 
+// A new subject, kind or teacher of the same lesson is a change, and the confirmed plan names it.
+func TestBuildReimportDetectsDetails(t *testing.T) {
+	math := content("Math", at(0))
+	math.Subject, math.Kind, math.Teacher = "Math", lesson.KindLecture, "Ivanov"
+	current := []*lesson.Lesson{stored(t, "l1", "csv:math", math, false)}
+	same, err := Build(SourceCSV, Parsed{Rows: []Row{row(2, "math", math)}}, current)
+	if err != nil || same.HasChanges() {
+		t.Fatalf("same details: plan %+v, err %v", same, err)
+	}
+
+	for name, mutate := range map[string]func(*lesson.Content){
+		"subject": func(c *lesson.Content) { c.Subject = "Calculus" },
+		"kind":    func(c *lesson.Content) { c.Kind = lesson.KindSeminar },
+		"teacher": func(c *lesson.Content) { c.Teacher = "Petrov" },
+	} {
+		after := math
+		mutate(&after)
+		p, err := Build(SourceCSV, Parsed{Rows: []Row{row(2, "math", after)}}, current)
+		if err != nil || len(p.Changed) != 1 || len(p.Unchanged) != 0 || !p.Changed[0].After.Equal(after) {
+			t.Errorf("%s: plan %+v, err %v; want one change", name, p, err)
+			continue
+		}
+		if p.Fingerprint == same.Fingerprint {
+			t.Errorf("%s: the fingerprint does not cover it", name)
+		}
+	}
+}
+
 func TestBuildConflicts(t *testing.T) {
 	manual := stored(t, "l-manual", "", content("Manual", at(0)), false)
 	ics := stored(t, "l-ics", "ics:1", content("ICS", at(10)), false)
