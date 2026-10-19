@@ -57,15 +57,22 @@ const stageHints: Readonly<Record<ChainStage, string>> = {
 /** The saving stage of a recording cut off by a crash says what happens to it. */
 export const recoveryHint = "Запись прервалась. Сохранённая часть восстановится при следующем запуске.";
 
+/** Reasons whose chip is its own text, not «В очереди · …»: the acceptance criterion of TASK-083 quotes it. */
+type OwnLabelReason = "serviceNotConfigured" | "serviceUnavailable";
+
 /** Shown in the chip after «В очереди». */
-export const queueReasonTexts: Readonly<Record<Exclude<QueueReason, "">, string>> = {
+export const queueReasonTexts: Readonly<Record<Exclude<QueueReason, "" | OwnLabelReason>, string>> = {
   inLine: "ждёт очереди",
   retry: "повтор позже",
   power: "ждёт питания от сети",
   network: "нет сети",
   quota: "лимит исчерпан",
-  serviceNotConfigured: "сервис не настроен",
-  serviceUnavailable: "сервис недоступен",
+};
+
+/** The whole chip for the reasons that replace «В очереди · …». */
+export const queueReasonLabels: Readonly<Record<OwnLabelReason, string>> = {
+  serviceNotConfigured: "Сервис конспектов не настроен",
+  serviceUnavailable: "Сервис конспектов недоступен",
 };
 
 /** What happens next, under the chip. */
@@ -75,9 +82,9 @@ export const queueReasonHints: Readonly<Record<Exclude<QueueReason, "">, string>
   power: "Ноутбук на батарее. Начнётся само после подключения питания.",
   network: "Продолжится само, как только появится сеть.",
   quota: "Лимит обработки исчерпан. Продолжится, когда он пополнится. Запись сохранена.",
-  serviceNotConfigured:
-    "Сервис конспектов не настроен. Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
-  serviceUnavailable: "Сервис конспектов недоступен, повторим автоматически.",
+  // The chip already names the service; the hint only says what to do.
+  serviceNotConfigured: "Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
+  serviceUnavailable: "Повторим автоматически.",
 };
 
 const queueReasonLooks: Readonly<Record<Exclude<QueueReason, "">, Look>> = {
@@ -175,9 +182,10 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
       break;
     case "queued": {
       const reason = own(queueReasonTexts, r.queueReason);
+      const ownLabel = own(queueReasonLabels, r.queueReason);
       const reasonLook = own(queueReasonLooks, r.queueReason);
-      if (reason !== undefined && reasonLook !== undefined) {
-        view.label = `${view.label} · ${reason}`;
+      if ((reason !== undefined || ownLabel !== undefined) && reasonLook !== undefined) {
+        view.label = ownLabel ?? `${view.label} · ${reason}`;
         view.kind = reasonLook.kind;
         view.icon = reasonLook.icon;
       }
