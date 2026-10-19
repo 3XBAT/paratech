@@ -338,7 +338,7 @@ func (m *Mailer) message(d *delivery.Delivery, data []byte, from string) (*mail.
 	msg.SetDate()
 	msg.SetBodyString(mail.TypeTextPlain, m.cfg.Body)
 	if err := msg.AttachReader(path.Base(d.Attachment().Ref().Path()), bytes.NewReader(data),
-		mail.WithFileContentType(mail.TypeTextPlain)); err != nil {
+		mail.WithFileContentType(mail.ContentType(d.Attachment().MediaType()))); err != nil {
 		return nil, fail(msgMessage, delivery.ErrRejected)
 	}
 	return msg, nil

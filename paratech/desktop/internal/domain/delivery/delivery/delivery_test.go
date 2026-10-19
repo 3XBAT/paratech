@@ -492,3 +492,25 @@ func TestStatusPredicates(t *testing.T) {
 		})
 	}
 }
+
+// TASK-094: a Word attachment is declared as one; everything else stays plain text.
+func TestAttachmentMediaType(t *testing.T) {
+	for path, want := range map[string]string{
+		"a1/homework.md":   MediaTypeText,
+		"a1/homework.docx": MediaTypeDocx,
+		"a1/HOMEWORK.DOCX": MediaTypeDocx,
+		"a1/homework.txt":  MediaTypeText,
+	} {
+		r, err := shared.NewArtifactRef(shared.ArtifactExports, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := NewAttachment(r, digest, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := a.MediaType(); got != want {
+			t.Errorf("%s: media type = %s, want %s", path, got, want)
+		}
+	}
+}

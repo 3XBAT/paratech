@@ -5,7 +5,10 @@
 // Separation of instructions and data. Instructions are constants of this package and never contain user data.
 // The selected context (domain/coursework/services/contextselection) goes into LLMRequest.UntrustedData only, as one
 // JSON object between the lines DataOpen and DataClose; encoding/json escapes '<' and '>', so a transcript cannot
-// forge the closing marker. The instructions tell the model that this block is data, never instructions.
+// forge the closing marker. The instructions tell the model that this block is data, never instructions. The
+// student's own instructions of a homework draft (TASK-094) follow in a section of their own between StudentOpen and
+// StudentClose, one JSON object too: the model follows them about the homework text only, never about the answer
+// format or actions, and nothing in the data can open such a section.
 //
 // Answers. The Hub contract has no schema field (ADR-0005): the schema is part of the instructions and the answer is
 // checked here. A code fence or a sentence around the object is removed first (TASK-086), a second object or an array

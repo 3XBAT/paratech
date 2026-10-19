@@ -77,6 +77,7 @@ type ui interface {
 	pickBundleFile(name string) (string, error)
 	pickTranscriptFile(name, format string) (string, error)
 	pickSummaryFile(name, format string) (string, error)
+	pickDocxFile(name string) (string, error)
 	setClipboardText(text string) error
 }
 
@@ -260,7 +261,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
 		}, s.opts.Log),
 		Help:     NewHelpService(core.Links, s.opts.Log),
-		Homework: NewHomeworkService(core.Homework, s.opts.Log),
+		Homework: NewHomeworkService(core.Homework, s.opts.Log).withDocxPicker(docxPickerFunc(s.pickDocxFile)),
 		Transcript: NewTranscriptService(core.Transcript, transcriptPickerFunc(s.pickTranscriptFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
 		Summary: NewSummaryService(core.Summary, summaryPickerFunc(s.pickSummaryFile), clipboardFunc(s.setClipboardText),
@@ -316,6 +317,15 @@ func (s *Shell) pickSummaryFile(_ context.Context, name, format string) (string,
 		return "", err
 	}
 	return u.pickSummaryFile(name, format)
+}
+
+// pickDocxFile shows the save dialog of a Word file over the main window; "" when the user cancels.
+func (s *Shell) pickDocxFile(_ context.Context, name string) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickDocxFile(name)
 }
 
 // setClipboardText puts text on the system clipboard.

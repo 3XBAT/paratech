@@ -161,6 +161,30 @@ type JobItem struct {
 	UpdatedAt       string `json:"updatedAt"`
 	NextRunAt       string `json:"nextRunAt"`
 	RunNowOffered   bool   `json:"runNowOffered"`
+
+	// The assignment of a homework draft job (TASK-094): AssignmentID opens it in «Домашние задания»; Label is the
+	// row's name «Черновик: <задание> · <предмет>» ("" when the job is not a draft or the assignment is unknown).
+	AssignmentID      string `json:"assignmentId"`
+	AssignmentTitle   string `json:"assignmentTitle"`
+	AssignmentSubject string `json:"assignmentSubject"`
+	Label             string `json:"label"`
+}
+
+// Fixed texts of the job rows (Russian UI).
+const (
+	draftLabel     = "Черновик: "
+	draftSeparator = " · "
+)
+
+// draftRowLabel names the row of a draft job by its assignment; "" without a title.
+func draftRowLabel(title, subject string) string {
+	if title == "" {
+		return ""
+	}
+	if subject == "" {
+		return draftLabel + title
+	}
+	return draftLabel + title + draftSeparator + subject
 }
 
 // ActivityService is bound to the UI like SettingsService ("<package path>.ActivityService.<Method>").
@@ -276,6 +300,8 @@ func (s *ActivityService) ListJobs(ctx context.Context) ([]JobItem, error) {
 			Attempts: j.Attempts, MaxAttempts: j.MaxAttempts, ProgressPercent: j.Percent, LastError: j.LastError,
 			CreatedAt: timeText(j.CreatedAt), UpdatedAt: timeText(j.UpdatedAt), NextRunAt: timeText(j.NextRunAt),
 			RunNowOffered: j.RunNowOffered,
+			AssignmentID:  string(j.AssignmentID), AssignmentTitle: j.AssignmentTitle, AssignmentSubject: j.AssignmentSubject,
+			Label: draftRowLabel(j.AssignmentTitle, j.AssignmentSubject),
 		})
 	}
 	return out, nil

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/componentstore"
+	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"
@@ -191,7 +192,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// The deliveries lock the export file of an assignment while one of its emails is unresolved.
 	c.drafts, err = homeworkflow.NewDrafts(homeworkflow.DraftDeps{
 		LLM: llm, Assignments: assignments, Recordings: recordings, Drafts: sqlite.NewDraftRepository(db),
-		Summaries: summaries, Lessons: lessons, Artifacts: store, Jobs: jobs, JobReader: jobs, Deliveries: c.deliveries, Clock: e.local, IDs: e.ids, Tx: db,
+		Summaries: summaries, Lessons: lessons, Artifacts: store, Jobs: jobs, JobReader: jobs, Deliveries: c.deliveries,
+		Profiles: settings, Renderer: docx.New(), Files: textfile.New(), Clock: e.local, IDs: e.ids, Tx: db,
 		Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts, GenerateRetries: e.generateRetries,
 	})
 	if err != nil {
@@ -289,6 +291,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: activity: %w", err)
 	}
 	history.WithRemaining(speed, e.clock)
+	history.WithDraftAssignments(draftNames{c.proposals}) // «Черновик: <задание> · <предмет>» (TASK-094)
 	// Local only: the viewer works while the Hub or the internet is down. Titles in the local time zone.
 	viewer, err := transcriptview.New(transcriptview.Deps{
 		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Jobs: jobs, Live: parts, Artifacts: store,
@@ -359,6 +362,17 @@ type modelResolver struct {
 func (r modelResolver) ResolveForJob(ctx context.Context, requested shared.SttModelID) (shared.SttModelID, error) {
 	m, err := r.models.ResolveForJob(ctx, requested)
 	return m.ID, err
+}
+
+// draftNames is the DraftAssignments port of the activity screen over the homework use case; mapping only.
+type draftNames struct {
+	homework *homeworkflow.Service
+}
+
+// DraftAssignment returns the title and the subject the assignment shows.
+func (n draftNames) DraftAssignment(ctx context.Context, id shared.AssignmentID) (string, string, error) {
+	v, err := n.homework.Assignment(ctx, id)
+	return v.Title, v.Subject, err
 }
 
 // close releases the storage in reverse order of opening. It is safe to call more than once.

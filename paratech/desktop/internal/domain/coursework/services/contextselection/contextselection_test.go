@@ -175,3 +175,13 @@ func TestSubjectAndTeacherGoToTheDraftOnly(t *testing.T) {
 		}
 	}
 }
+
+// TASK-094: the student's instructions reach their own prompt section without bidi controls.
+func TestSelectStripsBidiFromTheStudentRequest(t *testing.T) {
+	m := full()
+	m.StudentRequest = " \u202emake it shorter\u202c "
+	c, err := Select(values.OperationHomeworkDraft, m)
+	if err != nil || c.StudentRequest() != "make it shorter" {
+		t.Fatalf("Select = %q, %v", c.StudentRequest(), err)
+	}
+}

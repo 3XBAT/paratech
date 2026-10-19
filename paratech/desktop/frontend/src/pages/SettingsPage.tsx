@@ -1,9 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { callByName } from "../bindings/runtime";
 import { recognitionLoads, type RecognitionLoad } from "../bindings/load";
-import { settingsApi, type Settings, type SettingsApi, type SettingsToggle } from "../bindings/settings";
+import {
+  profileFields,
+  settingsApi,
+  type Settings,
+  type SettingsApi,
+  type SettingsToggle,
+  type StudentProfile,
+} from "../bindings/settings";
 import { estimatesTip, estimateTexts, loadDescriptions, loadLabels, settingEstimateLine } from "../durationEstimate";
-import { Card, ResultLine, Segmented, Toggle as Switch } from "../ui/controls";
+import {
+  emptyProfile,
+  maxProfileLength,
+  profileChanged,
+  profileErrorText,
+  profileLabels,
+  profilePlaceholders,
+} from "../profileView";
+import { Button } from "../ui/Button";
+import { Card, Field, Input, ResultLine, Segmented, Toggle as Switch } from "../ui/controls";
 import { currentTheme, setTheme, type ThemeChoice } from "../ui/theme";
 
 type Toggle = SettingsToggle;
@@ -18,7 +34,7 @@ const hints: Record<Toggle, string> = {
   processOnlyOnAcPower: "На батарее расшифровка ждёт подключения питания и начнётся сама.",
 };
 
-const setters: Record<Toggle, Exclude<keyof SettingsApi, "get" | "setRecognitionLoad">> = {
+const setters: Record<Toggle, "setRecordingPromptsEnabled" | "setProcessOnlyOnAcPower"> = {
   recordingPromptsEnabled: "setRecordingPromptsEnabled",
   processOnlyOnAcPower: "setProcessOnlyOnAcPower",
 };
@@ -150,6 +166,104 @@ export function SettingsPage() {
           <span className="small muted">«Как в системе» следует настройке Windows: светлый или тёмный режим.</span>
         </div>
       </Card>
+      <ProfileCard api={api} />
     </section>
+  );
+}
+
+// «Профиль студента» (TASK-094): the title page of a homework Word file names these. Unlike the switches it is saved
+// with a button, so a half-typed name is not stored.
+function ProfileCard(props: { api: SettingsApi }) {
+  const { api } = props;
+  const [stored, setStored] = useState<StudentProfile | null>(null);
+  const [form, setForm] = useState<StudentProfile>(emptyProfile);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const running = useRef(false); // a double click comes before the re-render that disables the button
+
+  useEffect(() => {
+    let active = true;
+    api.getProfile().then(
+      (p) => {
+        if (active) {
+          setStored(p);
+          setForm(p);
+        }
+      },
+      () => active && setError("Не удалось загрузить профиль."),
+    );
+    return () => {
+      active = false;
+    };
+  }, [api]);
+
+  async function onSave() {
+    if (running.current) {
+      return;
+    }
+    running.current = true;
+    setBusy(true);
+    setError("");
+    setSaved(false);
+    try {
+      const p = await api.saveProfile(form);
+      setStored(p);
+      setForm(p);
+      setSaved(true);
+    } catch (err) {
+      setError(profileErrorText(err));
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  const changed = stored !== null && profileChanged(form, stored);
+  return (
+    <Card className="box settings" label="Профиль студента">
+      <h2>Профиль студента</h2>
+      <p className="small muted box-desc">
+        Для титульного листа файла Word с домашним заданием. Все поля необязательные: пустые на титульный лист не
+        попадут.
+      </p>
+      {stored === null && !error && <p className="muted">Загрузка…</p>}
+      {stored !== null &&
+        profileFields.map((f) => (
+          <Field key={f} label={profileLabels[f]}>
+            {(fid) => (
+              <Input
+                id={fid}
+                value={form[f]}
+                maxLength={maxProfileLength}
+                placeholder={profilePlaceholders[f]}
+                readOnly={busy}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSaved(false);
+                  setForm((p) => ({ ...p, [f]: v }));
+                }}
+              />
+            )}
+          </Field>
+        ))}
+      {stored !== null && (
+        <div className="acts start">
+          <Button variant="primary" busy={busy} busyLabel="Сохранение…" disabled={busy || !changed} onClick={() => void onSave()}>
+            Сохранить профиль
+          </Button>
+        </div>
+      )}
+      {saved && (
+        <ResultLine kind="ok" role="status">
+          Профиль сохранён.
+        </ResultLine>
+      )}
+      {error && (
+        <ResultLine kind="fail" role="alert">
+          {error}
+        </ResultLine>
+      )}
+    </Card>
   );
 }

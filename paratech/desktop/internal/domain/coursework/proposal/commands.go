@@ -63,7 +63,7 @@ func (p *Proposal) EmailCommand() (EmailCommand, error) {
 	if err := p.ready(KindSendHomework); err != nil {
 		return EmailCommand{}, err
 	}
-	ref, err := ExportRef(p.assignment)
+	ref, err := ExportRefOf(p.assignment, p.format)
 	if err != nil {
 		return EmailCommand{}, err
 	}

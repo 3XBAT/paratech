@@ -67,3 +67,40 @@ test("a failing call rejects", async () => {
   });
   await assert.rejects(api.get(), /unavailable/);
 });
+
+// «Профиль студента» (TASK-094).
+const profile = { fullName: "Иванов Иван", group: "ИВТ-21", university: "МГУ", faculty: "", city: "Москва" };
+
+test("the profile is read and saved through the bound Go methods", async () => {
+  const { call, calls } = fakeCall(profile);
+  const api = settingsApi(call);
+  assert.deepEqual(await api.getProfile(), profile);
+  assert.deepEqual(await api.saveProfile({ ...profile, city: " Москва " }), profile);
+  assert.deepEqual(calls, [[methods.getProfile], [methods.saveProfile, { ...profile, city: " Москва " }]]);
+  assert.equal(methods.getProfile, "paratech/desktop/internal/input/wails.SettingsService.GetProfile");
+  assert.equal(methods.saveProfile, "paratech/desktop/internal/input/wails.SettingsService.SaveProfile");
+});
+
+test("a malformed profile is an error; extra fields are dropped", async () => {
+  const { parseProfile } = await import("../.test-build/bindings/settings.js");
+  assert.deepEqual(parseProfile({ ...profile, token: "x" }), profile);
+  for (const raw of [null, "x", {}, { ...profile, group: 1 }, { ...profile, city: undefined }]) {
+    assert.throws(() => parseProfile(raw), /profile/);
+  }
+});
+
+test("the profile form: labels, the change check and the core's error text", async () => {
+  const { errorMessages, profileFields } = await import("../.test-build/bindings/settings.js");
+  const { emptyProfile, maxProfileLength, profileChanged, profileErrorText, profileLabels } = await import(
+    "../.test-build/profileView.js"
+  );
+  assert.deepEqual(profileFields.map((f) => profileLabels[f]), ["ФИО", "Группа", "Вуз", "Факультет или кафедра", "Город"]);
+  assert.deepEqual(Object.keys(emptyProfile).sort(), [...profileFields].sort());
+  assert.equal(maxProfileLength, 200);
+  assert.equal(profileChanged(profile, { ...profile }), false);
+  assert.equal(profileChanged({ ...profile, faculty: "ВМК" }, profile), true);
+  assert.equal(profileChanged(emptyProfile, profile), true);
+  assert.equal(profileErrorText(new Error(errorMessages.profileInvalid)), errorMessages.profileInvalid);
+  assert.equal(profileErrorText(new Error("settings are unavailable")), "Не удалось сохранить профиль.");
+  assert.equal(profileErrorText(null), "Не удалось сохранить профиль.");
+});

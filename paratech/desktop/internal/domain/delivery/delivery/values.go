@@ -51,6 +51,21 @@ func (a Attachment) SHA256() string { return a.sha256 }
 // Size returns the size of the confirmed content in bytes.
 func (a Attachment) Size() int64 { return a.size }
 
+// Media types of an attachment, by the extension of its file.
+const (
+	MediaTypeText = "text/plain"
+	MediaTypeDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+// MediaType returns the MIME type the email declares for the attachment: a Word file (.docx, TASK-094) or plain text
+// (the text export and anything else).
+func (a Attachment) MediaType() string {
+	if strings.HasSuffix(strings.ToLower(a.ref.Path()), ".docx") {
+		return MediaTypeDocx
+	}
+	return MediaTypeText
+}
+
 // Matches reports whether content with the given SHA-256 and size is the confirmed one.
 func (a Attachment) Matches(sha256Hex string, size int64) bool {
 	return a.sha256 == sha256Hex && a.size == size

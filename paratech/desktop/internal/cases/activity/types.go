@@ -158,4 +158,10 @@ type Job struct {
 	NextRunAt   time.Time
 	// RunNowOffered: the screen offers "Run now" (PRD section 7.4, AC-22).
 	RunNowOffered bool
+
+	// The assignment of a homework draft job (TASK-094): the id opens it, the title and the subject name the row
+	// («Черновик: <задание> · <предмет>»). Empty for other jobs; the title and subject also when it is gone.
+	AssignmentID      shared.AssignmentID
+	AssignmentTitle   string
+	AssignmentSubject string
 }

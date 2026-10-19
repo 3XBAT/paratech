@@ -215,14 +215,14 @@ func TestSendSubjectAndDeadlineLesson(t *testing.T) {
 	}
 
 	const want = "Матанализ: домашнее задание к 16.10"
-	v, err := e.svc.ProposeSend(ctx, id)
+	v, err := e.svc.ProposeSend(ctx, id, proposal.FormatText)
 	if err != nil || v.Status != proposal.StatusValidated || v.Subject != want {
 		t.Fatalf("ProposeSend = %+v, %v; want subject %q", v, err, want)
 	}
 	if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Subject != want {
 		t.Fatalf("Get = %+v, %v", got, err)
 	}
-	if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); err != nil {
+	if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject, proposal.FormatText); err != nil {
 		t.Fatal(err)
 	}
 	if calls := e.out.mailer.Calls(); len(calls) != 1 || calls[0].Subject() != want {
@@ -331,7 +331,7 @@ func TestSendSubjectChangedAfterTheDialog(t *testing.T) {
 			if err := e.out.files.Write(ctx, ref, strings.NewReader("my homework")); err != nil {
 				t.Fatal(err)
 			}
-			v, err := e.svc.ProposeSend(ctx, id)
+			v, err := e.svc.ProposeSend(ctx, id, proposal.FormatText)
 			if err != nil || v.Status != proposal.StatusValidated {
 				t.Fatalf("ProposeSend = %+v, %v", v, err)
 			}
@@ -341,7 +341,7 @@ func TestSendSubjectChangedAfterTheDialog(t *testing.T) {
 				t.Fatalf("subject after the change = %q, %v; want other than %q", now, err, v.Subject)
 			}
 
-			if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject); !errors.Is(err, proposal.ErrStale) {
+			if _, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject, proposal.FormatText); !errors.Is(err, proposal.ErrStale) {
 				t.Fatalf("ConfirmSend = %v, want ErrStale", err)
 			}
 			if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusStale ||

@@ -97,6 +97,11 @@ func (f *fakeUI) pickSummaryFile(string, string) (string, error) {
 	return "", nil
 }
 
+func (f *fakeUI) pickDocxFile(string) (string, error) {
+	f.calls = append(f.calls, "pickDocxFile")
+	return "", nil
+}
+
 func (f *fakeUI) setClipboardText(string) error {
 	f.calls = append(f.calls, "setClipboardText")
 	return nil
@@ -120,6 +125,7 @@ func TestCommands(t *testing.T) {
 		{"pickBundleFile", func() error { _, err := s.pickBundleFile(context.Background(), "b.zip"); return err }},
 		{"pickTranscriptFile", func() error { _, err := s.pickTranscriptFile(context.Background(), "t.txt", "txt"); return err }},
 		{"pickSummaryFile", func() error { _, err := s.pickSummaryFile(context.Background(), "s.md", "md"); return err }},
+		{"pickDocxFile", func() error { _, err := s.pickDocxFile(context.Background(), "h.docx"); return err }},
 		{"setClipboardText", func() error { return s.setClipboardText(context.Background(), "text") }},
 	}
 

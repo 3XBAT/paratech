@@ -452,3 +452,18 @@ CREATE TABLE lecture_texts (
     updated_at      INTEGER NOT NULL
 );
 CREATE INDEX idx_lecture_texts_lesson ON lecture_texts (lesson_id);
+
+-- Migration 0017.
+-- settings: the student profile of the title page of a homework document (settings.Profile): full name, group,
+-- university, faculty or department and city; '' not set. One plain line of at most settings.MaxProfileRunes
+-- characters each. Local data, not a secret.
+ALTER TABLE settings ADD COLUMN student_full_name TEXT NOT NULL DEFAULT '' CHECK (length(student_full_name) <= 200);
+ALTER TABLE settings ADD COLUMN student_group TEXT NOT NULL DEFAULT '' CHECK (length(student_group) <= 200);
+ALTER TABLE settings ADD COLUMN student_university TEXT NOT NULL DEFAULT '' CHECK (length(student_university) <= 200);
+ALTER TABLE settings ADD COLUMN student_faculty TEXT NOT NULL DEFAULT '' CHECK (length(student_faculty) <= 200);
+ALTER TABLE settings ADD COLUMN student_city TEXT NOT NULL DEFAULT '' CHECK (length(student_city) <= 200);
+
+-- proposals: the file a send_homework_email attaches (proposal.Format), chosen by the user in the confirmation dialog
+-- and pinned with the digest: 'txt' the text export, 'docx' the Word export; '' for the other kinds and for sends stored
+-- before, which attach the text export.
+ALTER TABLE proposals ADD COLUMN attachment_format TEXT NOT NULL DEFAULT '' CHECK (attachment_format IN ('', 'txt', 'docx'));

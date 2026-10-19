@@ -61,20 +61,53 @@ func (s *Service) SetRecognitionLoad(ctx context.Context, load shared.Recognitio
 	})
 }
 
+// Profile returns the student profile (TASK-094); every field is empty while none is set.
+func (s *Service) Profile(ctx context.Context) (settings.ProfileFields, error) {
+	st, err := s.repo.Load(ctx)
+	if err != nil {
+		return settings.ProfileFields{}, fmt.Errorf("preferences: get profile: %w", err)
+	}
+	return st.Profile().Fields(), nil
+}
+
+// SaveProfile replaces the student profile with f and returns it as stored (trimmed). A field the profile refuses
+// wraps settings.ErrInvalidSettings and nothing is stored.
+func (s *Service) SaveProfile(ctx context.Context, f settings.ProfileFields) (settings.ProfileFields, error) {
+	p, err := settings.NewProfile(f)
+	if err != nil {
+		return settings.ProfileFields{}, fmt.Errorf("preferences: save profile: %w", err)
+	}
+	st, err := s.changeSettings(ctx, "save profile", func(st *settings.Settings, now time.Time) error {
+		return st.SetProfile(p, now)
+	})
+	if err != nil {
+		return settings.ProfileFields{}, err
+	}
+	return st.Profile().Fields(), nil
+}
+
 // change reloads the settings and applies fn again while the save meets a stale version (ADR-0004(d)).
 func (s *Service) change(ctx context.Context, op string, fn func(*settings.Settings, time.Time) error) (Toggles, error) {
+	st, err := s.changeSettings(ctx, op, fn)
+	if err != nil {
+		return Toggles{}, err
+	}
+	return toggles(st), nil
+}
+
+func (s *Service) changeSettings(ctx context.Context, op string, fn func(*settings.Settings, time.Time) error) (*settings.Settings, error) {
 	var err error
 	for range conflictAttempts {
 		var st *settings.Settings
 		st, err = s.changeOnce(ctx, fn)
 		if err == nil {
-			return toggles(st), nil
+			return st, nil
 		}
 		if !errors.Is(err, shared.ErrVersionConflict) {
 			break
 		}
 	}
-	return Toggles{}, fmt.Errorf("preferences: %s: %w", op, err)
+	return nil, fmt.Errorf("preferences: %s: %w", op, err)
 }
 
 func (s *Service) changeOnce(ctx context.Context, fn func(*settings.Settings, time.Time) error) (*settings.Settings, error) {

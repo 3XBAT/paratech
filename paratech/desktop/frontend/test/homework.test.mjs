@@ -5,19 +5,37 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { errorMessages, generationStates, homeworkApi, methods } from "../.test-build/bindings/homework.js";
+import {
+  errorMessages,
+  generationStates,
+  homeworkApi,
+  methods,
+  parseAssignmentDetail,
+  parseDocxSaveResult,
+  parseDraftStatus,
+  sendFormats,
+} from "../.test-build/bindings/homework.js";
 import {
   assignmentDeliveryView,
   blockedByEmail,
+  defaultSendFormat,
   deliveriesInFlight,
   deliveryLooks,
   deliveryView,
+  docxSaveView,
+  draftStatusStep,
   dueText,
   errorText,
+  followGeneration,
+  generateOffer,
+  generatingLabel,
   generationGoesOn,
+  generationRunning,
   generationView,
   isStale,
   regenerateBlockedReason,
+  sendFormatChange,
+  sendFormatLabels,
   sendRetryable,
   sizeText,
   versionTitle,
@@ -101,7 +119,7 @@ test("every generation state has a chip; waiting and failed ones show the core's
   }
   assert.deepEqual(
     generationStates.map((state) => generationView({ state, message: "" }).label),
-    ["Готовится черновик", "Ждёт интернет", "Лимит обработки исчерпан", "Черновик не готов", "Черновик готов"],
+    ["Готовим черновик…", "Ждёт интернет", "Лимит обработки исчерпан", "Черновик не готов", "Черновик готов"],
   );
   const text = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
   assert.equal(generationView({ state: "waitingNetwork", message: text }).hint, text);
@@ -110,6 +128,107 @@ test("every generation state has a chip; waiting and failed ones show the core's
     ["generating", "waitingNetwork", "waitingQuota"],
     "failed and done stop the polling",
   );
+});
+
+test("a running generation shows its progress; without one the usual time", () => {
+  assert.equal(generationView({ state: "generating", message: "", percent: 0 }).hint, "Обычно до минуты.");
+  assert.equal(generationView({ state: "generating", message: "", percent: 40 }).hint, "Готово 40 %.");
+  assert.equal(generationView({ state: "generating", message: "", percent: 100 }).hint, "Обычно до минуты.");
+  const wait = "Нет связи с сервисом конспектов.";
+  assert.equal(generationView({ state: "waitingNetwork", message: wait, percent: 40 }).hint, wait, "the core's text wins");
+});
+
+// Mirrors AssignmentItem of internal/input/wails/homework.go.
+const assignment = () => ({
+  id: "a1", lessonId: "l1", title: "Задача 1", description: "", due: "", userEdited: false,
+  updatedAt: "2026-10-19T10:00:00Z", subject: "Матанализ", subjectSource: "schedule", kind: "lecture", teacher: "",
+  teacherSource: "", lessonDate: "", correctedSubject: "", correctedTeacher: "",
+});
+
+// Mirrors ActiveGeneration of internal/input/wails/homework.go.
+const active = (over = {}) => ({ jobId: "j1", state: "generating", message: "", percent: 10, ...over });
+
+test("the page follows the core's generation; a new version reloads the assignment", () => {
+  assert.equal(followGeneration(null), null);
+  assert.deepEqual(followGeneration(active({ state: "waitingQuota", message: "m" })), {
+    jobId: "j1",
+    status: { state: "waitingQuota", message: "m", percent: 10 },
+  });
+  // Opened again while the generation goes on: nothing followed yet, so it is picked up.
+  assert.deepEqual(draftStatusStep({ latestVersion: 2, generation: active() }, 2, ""), {
+    reload: false,
+    follow: followGeneration(active()),
+  });
+  // Already followed: no second follow; a finished draft (version 3) reloads.
+  assert.deepEqual(draftStatusStep({ latestVersion: 3, generation: null }, 2, "j1"), { reload: true, follow: null });
+  assert.deepEqual(draftStatusStep({ latestVersion: 2, generation: active() }, 2, "j1"), { reload: false, follow: null });
+  // The first draft appears on a page that had none.
+  assert.equal(draftStatusStep({ latestVersion: 1, generation: null }, 0, "").reload, true);
+  assert.equal(draftStatusStep({ latestVersion: 1, generation: null }, 1, "").reload, false);
+  // A generation started elsewhere after the followed one ended.
+  assert.equal(draftStatusStep({ latestVersion: 3, generation: active({ jobId: "j2" }) }, 3, "j1").follow.jobId, "j2");
+});
+
+test("while a draft is prepared, generate and the instructions are off with «Готовим черновик…»", () => {
+  assert.equal(generatingLabel, "Готовим черновик…");
+  const base = { hasDraft: true, generating: false, olderShown: false, dirty: false };
+  assert.deepEqual(generateOffer(base), {
+    label: "Сгенерировать заново",
+    disabled: false,
+    reason: undefined,
+    instructionDisabled: false,
+  });
+  assert.equal(generateOffer({ ...base, hasDraft: false }).label, "Сгенерировать черновик");
+  const running = generateOffer({ ...base, generating: true });
+  assert.equal(running.disabled, true);
+  assert.equal(running.instructionDisabled, true);
+  const dirty = generateOffer({ ...base, dirty: true });
+  assert.equal(dirty.disabled, true);
+  assert.match(dirty.reason, /сохраните/);
+  assert.equal(dirty.instructionDisabled, false, "the instructions stay editable");
+  assert.match(generateOffer({ ...base, olderShown: true }).reason, /из последней/);
+});
+
+test("a refused second generation is recognised and shown as the core's text", () => {
+  assert.equal(generationRunning(new Error(errorMessages.generationRunning)), true);
+  assert.equal(generationRunning(new Error(errorMessages.draftStale)), false);
+  assert.equal(errorText(new Error(errorMessages.generationRunning)), "Черновик уже готовится. Дождитесь окончания и повторите.");
+  assert.equal(errorText(new Error(errorMessages.sendFormat)), errorMessages.sendFormat);
+});
+
+test("the Word save line: saved with its file, cancelled, failed", () => {
+  const r = (over) => ({ status: "saved", message: "Файл Word сохранён.", name: "ДЗ.docx", ...over });
+  assert.deepEqual(docxSaveView(r({})), { kind: "ok", text: "Файл Word сохранён. Файл: «ДЗ.docx»." });
+  assert.deepEqual(docxSaveView(r({ status: "cancelled", message: "Сохранение отменено.", name: "" })), {
+    kind: "wait",
+    text: "Сохранение отменено.",
+  });
+  assert.equal(docxSaveView(r({ status: "failed", message: "Не удалось сохранить файл.", name: "" })).kind, "fail");
+});
+
+test("the attachment format: Word first, a change only when it differs and the dialog is free", () => {
+  assert.deepEqual([...sendFormats], ["docx", "txt"]);
+  assert.equal(defaultSendFormat, "docx");
+  assert.match(sendFormatLabels.docx, /\.docx/);
+  assert.equal(sendFormatLabels.txt, "Текст (.md)", "the text attachment is homework.md");
+  assert.equal(sendFormatChange("docx", "txt", false), true);
+  assert.equal(sendFormatChange("docx", "docx", false), false);
+  assert.equal(sendFormatChange("docx", "txt", true), false, "not while another one is prepared");
+});
+
+test("the replies with a generation, a draft status and a Word save are checked", () => {
+  const detail = { assignment: assignment(), versions: [], latest: null, generation: active() };
+  assert.deepEqual(parseAssignmentDetail(detail).generation, active());
+  assert.equal(parseAssignmentDetail({ ...detail, generation: null }).generation, null);
+  assert.throws(() => parseAssignmentDetail({ ...detail, generation: active({ state: "paused" }) }), /generation/);
+  assert.throws(() => parseAssignmentDetail({ ...detail, generation: undefined }), /generation/);
+  assert.deepEqual(parseDraftStatus({ latestVersion: 2, generation: null }), { latestVersion: 2, generation: null });
+  assert.throws(() => parseDraftStatus({ latestVersion: "2", generation: null }), /draft status/);
+  assert.throws(() => parseDraftStatus({ latestVersion: 2, generation: { jobId: "j1" } }), /draft status/);
+  const saved = { status: "saved", message: "m", name: "n.docx" };
+  assert.deepEqual(parseDocxSaveResult(saved), saved);
+  assert.throws(() => parseDocxSaveResult({ ...saved, status: "maybe" }), /docx save result/);
+  assert.throws(() => parseDocxSaveResult({ ...saved, name: null }), /docx save result/);
 });
 
 test("emails on their way keep the page asking; settled ones do not", () => {
@@ -179,8 +298,11 @@ test("the bindings call the bound Go methods with the page's arguments", async (
     [methods.generate]: { jobId: "j1", base: 2 },
     [methods.prepareSend]: {
       proposalId: "p1", status: "ready", reason: "", message: "", recipient: "t@example.org", subject: "ДЗ",
-      attachmentName: "homework.md", attachmentSize: 12,
+      attachmentName: "homework.docx", attachmentSize: 12, attachmentFormat: "docx",
     },
+    [methods.draftStatus]: { latestVersion: 3, generation: null },
+    [methods.exportDocx]: { version: 3, fileName: "a1.docx" },
+    [methods.saveDocx]: { status: "cancelled", message: "Сохранение отменено.", name: "" },
     [methods.deliveries]: [delivery("UNKNOWN", { notice, canMarkSent: true, canSendAgain: true })],
     [methods.sendAgain]: delivery("PENDING"),
   };
@@ -189,19 +311,31 @@ test("the bindings call the bound Go methods with the page's arguments", async (
     return replies[method] ?? null;
   });
   assert.deepEqual(await api.generate("a1", 2, "короче"), { jobId: "j1", base: 2 });
-  assert.equal((await api.prepareSend("a1")).status, "ready");
-  await api.confirmSend("p1", "ДЗ");
+  const prep = await api.prepareSend("a1", "docx");
+  assert.equal(prep.status, "ready");
+  assert.equal(prep.attachmentFormat, "docx");
+  await api.confirmSend("p1", "ДЗ", prep.attachmentFormat);
   await api.cancelSend("p2");
   assert.equal((await api.deliveries("a1"))[0].notice, notice);
   assert.equal((await api.sendAgain("d1")).status, "PENDING");
+  assert.deepEqual(await api.draftStatus("a1"), { latestVersion: 3, generation: null });
+  assert.deepEqual(await api.exportDocx("a1", 3), { version: 3, fileName: "a1.docx" });
+  assert.equal((await api.saveDocx("a1", 3)).status, "cancelled");
   assert.deepEqual(calls, [
     [methods.generate, "a1", 2, "короче"],
-    [methods.prepareSend, "a1"],
-    [methods.confirmSend, "p1", "ДЗ"],
+    [methods.prepareSend, "a1", "docx"],
+    [methods.confirmSend, "p1", "ДЗ", "docx"],
     [methods.cancelSend, "p2"],
     [methods.deliveries, "a1"],
     [methods.sendAgain, "d1"],
+    [methods.draftStatus, "a1"],
+    [methods.exportDocx, "a1", 3],
+    [methods.saveDocx, "a1", 3],
   ]);
+  assert.equal(methods.draftStatus, "paratech/desktop/internal/input/wails.HomeworkService.DraftStatus");
+  assert.equal(methods.exportDocx, "paratech/desktop/internal/input/wails.HomeworkService.ExportDocx");
+  assert.equal(methods.saveDocx, "paratech/desktop/internal/input/wails.HomeworkService.SaveDocx");
+  await assert.rejects(() => homeworkApi(async () => ({ ...replies[methods.prepareSend], attachmentFormat: "pdf" })).prepareSend("a1", "txt"));
   await assert.rejects(() => homeworkApi(async () => ({ state: "maybe", message: "" })).generationStatus("j1"));
 });
 
@@ -216,7 +350,7 @@ test("the send dialog shows the version, recipient, subject and attachment as te
   const { api, calls } = noCallApi();
   const prep = {
     proposalId: "p1", status: "ready", reason: "", message: "", recipient: "<b>t</b>@example.org",
-    subject: "ДЗ <i>1</i>", attachmentName: "homework <script>.md", attachmentSize: 12800,
+    subject: "ДЗ <i>1</i>", attachmentName: "homework <script>.md", attachmentSize: 12800, attachmentFormat: "txt",
   };
   const html = renderToStaticMarkup(h(SendDialog, { api, prep, version: 3, onClose: () => undefined }));
   assert.match(html, /Версия 3</);
@@ -228,6 +362,29 @@ test("the send dialog shows the version, recipient, subject and attachment as te
   assert.match(html, />Отправить</);
   assert.match(html, />Отмена</);
   assert.ok(!html.includes("<b>") && !html.includes("<script"));
+  assert.deepEqual(calls, []);
+});
+
+test("the send dialog offers .docx and .txt with the prepared one chosen; a switch confirms nothing", () => {
+  const { api, calls } = noCallApi();
+  const prep = {
+    proposalId: "p1", status: "ready", reason: "", message: "", recipient: "t@example.org", subject: "ДЗ",
+    attachmentName: "a1.docx", attachmentSize: 100, attachmentFormat: "docx",
+  };
+  const html = renderToStaticMarkup(h(SendDialog, { api, prep, version: 2, onFormat: () => undefined, onClose: () => undefined }));
+  assert.match(html, /Формат вложения/);
+  assert.match(html, /<input type="radio" name="hw-send-format" checked="" value="docx"\/>Word \(\.docx\)/);
+  assert.match(html, /<input type="radio" name="hw-send-format" value="txt"\/>Текст \(\.md\)/);
+  assert.match(html, /<fieldset class="hw-format">/, "the choice is open");
+  const switching = renderToStaticMarkup(
+    h(SendDialog, { api, prep, version: 2, switching: true, problem: "Нет файла Word", onFormat: () => undefined, onClose: () => undefined }),
+  );
+  assert.match(switching, /<fieldset class="hw-format" disabled="">/);
+  assert.match(switching, /Подготовка…/);
+  assert.match(switching, /Нет файла Word/);
+  assert.match(switching, /<button type="button" class="btn primary" disabled="">Отправить</, "nothing to confirm while switching");
+  const locked = renderToStaticMarkup(h(SendDialog, { api, prep, version: 2, onClose: () => undefined }));
+  assert.match(locked, /<fieldset class="hw-format" disabled="">/, "no handler, no choice");
   assert.deepEqual(calls, []);
 });
 
@@ -327,22 +484,51 @@ test("a retry repeats the same send; a refused export opens no send dialog", () 
   const dialogs = code("pages/HomeworkDialogs.tsx");
   assert.equal(count(dialogs, ".prepareSend("), 0, "the dialog never prepares a new send");
   assert.equal(
-    count(dialogs, ".confirmSend(props.prep.proposalId, props.prep.subject)"),
+    count(dialogs, ".confirmSend(props.prep.proposalId, props.prep.subject, props.prep.attachmentFormat)"),
     1,
-    "confirmSend takes the dialog's own send and the subject it shows",
+    "confirmSend takes the dialog's own send, the subject and the format it shows",
   );
   assert.match(dialogs, /retry \? "Повторить" : "Отправить"/);
 
   const page = code("pages/HomeworkPage.tsx");
+  // The export of the chosen format comes first and its failure stops the preparation.
+  const helper = functionBody(page, "async function prepareSendAs(");
+  const prepare = page.slice(helper.start, helper.end);
+  const docx = prepare.indexOf("await api.exportDocx(");
+  const txt = prepare.indexOf("await api.exportDraft(");
+  const prep = prepare.indexOf("await api.prepareSend(id, format)");
+  assert.ok(docx >= 0 && txt >= 0 && prep > docx && prep > txt, "the export comes first");
+  assert.ok(!prepare.includes("try {") && !prepare.includes(".catch("), "no export failure is swallowed");
+  assert.match(prepare, /version: exported\.version/, "the dialog shows the exported version");
+
   const body = functionBody(page, "const startSend = () =>");
   const start = page.slice(body.start, body.end);
-  const exp = start.indexOf("await api.exportDraft(");
-  const prep = start.indexOf("await api.prepareSend(");
-  assert.ok(exp >= 0 && prep > exp, "the export comes first and its failure stops the send");
+  const call = start.indexOf("await prepareSendAs(");
+  assert.ok(call >= 0, "the send is prepared through the export");
   assert.ok(!start.includes("try {"), "no export failure is swallowed");
-  assert.ok(!start.slice(0, prep).includes(".catch("), "no export failure is swallowed");
-  assert.ok(start.indexOf("setSendOpen(") > prep, "the dialog opens only after both");
-  assert.match(start, /version: exported\.version/, "the dialog shows the exported version");
+  assert.ok(!start.slice(0, call).includes(".catch("), "no export failure is swallowed");
+  assert.ok(start.indexOf("setSendOpen(") > call, "the dialog opens only after both");
+
+  // A format switch prepares anew; only a ready preparation replaces the shown send, which is then cancelled.
+  const sw = functionBody(page, "async function switchFormat(");
+  const switching = page.slice(sw.start, sw.end);
+  const again = switching.indexOf("await prepareSendAs(");
+  const replace = switching.indexOf("pendingSend.current = next.prep.proposalId");
+  assert.ok(again >= 0 && replace > again, "the new send is prepared before it replaces the old one");
+  assert.ok(switching.indexOf("api.cancelSend(old)") > replace, "the old send is cancelled after the replacement");
+  assert.equal(count(switching, ".confirmSend("), 0);
+});
+
+test("the open assignment asks the core for its draft until the page goes away", () => {
+  const page = code("pages/HomeworkPage.tsx");
+  assert.equal(count(page, "api.draftStatus(id)"), 1);
+  assert.match(page, /draftStatusStep\(st, k\.latest, k\.job\)/);
+  assert.match(page, /setTimeout\(\(\) => void tick\(\), draftPollMs\)/);
+  assert.match(page, /pollDraftNow\.current = \(\) => undefined;/, "the poll stops on unmount");
+  assert.match(page, /disabled=\{offer\.instructionDisabled\}/, "the instructions follow the core's generation");
+  assert.match(page, /busyLabel=\{generatingLabel\}/);
+  assert.match(page, />\s*Сохранить в Word \(\.docx\)\s*</);
+  assert.equal(count(page, "api.saveDocx(id, shown.number)"), 1, "Word saves the shown version");
 });
 
 test("the homework page renders model text as plain text only", () => {

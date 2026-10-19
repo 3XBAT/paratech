@@ -60,6 +60,16 @@ export function jobTypeLabel(type: string): string {
   return lookup(jobTypeLabels, type);
 }
 
+/** The title of a job row: the core's label of a draft job («Черновик: <задание> · <предмет>»), else its type. */
+export function jobTitle(j: { type: string; label: string }): string {
+  return j.label !== "" ? j.label : jobTypeLabel(j.type);
+}
+
+/** The assignment a job row opens in «Домашние задания»; "" when the row opens nothing. */
+export function jobAssignment(j: { assignmentId: string }): string {
+  return j.assignmentId;
+}
+
 // The terminal statuses of the domain (job.IsTerminal). Only the display grouping uses them: a finished job goes to
 // «Завершённые», a job the core offers Run now for always stays in view. Recording rows group by their chain
 // (recordingRowView.isFinishedRow).

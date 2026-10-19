@@ -46,7 +46,7 @@ func mustDigest(t *testing.T, sha string, size int64) Digest {
 func goodFacts(t *testing.T) Facts {
 	return Facts{
 		AssignmentExists: true, AssignmentTitle: "Algebra", Recipient: mustRecipient(t, "teacher@school.example"),
-		Attachment: mustDigest(t, shaA, 11),
+		Attachment: mustDigest(t, shaA, 11), ShownFormat: FormatText,
 	}
 }
 

@@ -138,6 +138,8 @@ func Select(operation values.Operation, m Material) (Context, error) {
 				return Context{}, err
 			}
 		}
+		// The student's instructions go into a section of their own (TASK-094); bidi controls never reach it.
+		c.studentRequest = strings.TrimSpace(values.StripBidi(c.studentRequest))
 		if c.assignmentTitle, err = oneLine("assignment title", m.Assignment.Title); err != nil {
 			return Context{}, err
 		}
