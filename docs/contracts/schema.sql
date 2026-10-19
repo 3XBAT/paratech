@@ -425,9 +425,9 @@ ALTER TABLE schedule_entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown' CHE
 ALTER TABLE schedule_entries ADD COLUMN teacher TEXT NOT NULL DEFAULT '' CHECK (length(teacher) <= 200);
 
 -- ---------------------------------------------------------------------------------------------------------------
--- lecture_texts: the lecture text of one transcript. Aggregate coursework/lecturetext; id = the transcript id. blocks is
--- the text shown (empty until a run completed); run, run_parts and parts are the run in progress and its finished
--- parts, so a run that stops continues from the next part. The text is model output, stored as data only (hard rule
+-- lecture_texts (migration 0016): the lecture text of one transcript. Aggregate coursework/lecturetext; id = the
+-- transcript id. blocks is the text shown (empty until a run completed); run, run_parts and parts are the run in
+-- progress and its finished parts, so a run that stops continues from the next part. The text is model output, stored as data only (hard rule
 -- 3); it stays when its transcript is deleted (transcript_id SET NULL), like the summary.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE lecture_texts (

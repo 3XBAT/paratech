@@ -24,7 +24,7 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
   texts counted once) is asked again with a reminder to keep all content, from the same budget
   (`lectureparts.Part.Condensed`). An empty answer (noise) is accepted.
 - **Resumable**: the aggregate `coursework/lecturetext` stores each finished part (table `lecture_texts`, migration
-  0015). An attempt that stops continues from the next part; a new job with the same requests (a retry) keeps them. The
+  0016). An attempt that stops continues from the next part; a new job with the same requests (a retry) keeps them. The
   text shown is replaced only when a run completes. Job timeout = 67 calls × the Hub request timeout + slack.
 - **Lesson kind** (`values.LessonKind`) only selects a constant sentence of the trusted instructions; the title and
   subject (schedule text) go into the untrusted data only.
