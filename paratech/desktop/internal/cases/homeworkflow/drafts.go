@@ -62,6 +62,9 @@ type Drafts struct {
 	jobs        JobEnqueuer
 	jobReader   JobReader
 	deliveries  UnresolvedDeliveries
+	profiles    ProfileSource
+	renderer    DocumentRenderer
+	files       DocumentWriter
 	clock       Clock
 	ids         IDGenerator
 	tx          Tx
@@ -75,8 +78,8 @@ type Drafts struct {
 // NewDrafts checks the ports, the model alias and the limits.
 func NewDrafts(d DraftDeps) (*Drafts, error) {
 	if d.LLM == nil || d.Assignments == nil || d.Recordings == nil || d.Drafts == nil || d.Summaries == nil || d.Lessons == nil ||
-		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Deliveries == nil || d.Clock == nil || d.IDs == nil ||
-		d.Tx == nil {
+		d.Artifacts == nil || d.Jobs == nil || d.JobReader == nil || d.Deliveries == nil || d.Profiles == nil ||
+		d.Renderer == nil || d.Files == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
 		return nil, fmt.Errorf("%w: every draft port is required", ErrInvalidConfig)
 	}
 	// The alias rules belong to the request value; a throwaway request checks them once, at wiring time.
@@ -92,7 +95,8 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 	s := &Drafts{
 		llm: d.LLM, assignments: d.Assignments, drafts: d.Drafts, summaries: d.Summaries,
 		lessons:   lessonFinder{recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock},
-		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, deliveries: d.Deliveries, clock: d.Clock, ids: d.IDs,
+		artifacts: d.Artifacts, jobs: d.Jobs, jobReader: d.JobReader, deliveries: d.Deliveries, profiles: d.Profiles,
+		renderer: d.Renderer, files: d.Files, clock: d.Clock, ids: d.IDs,
 		tx: d.Tx, log: d.Log,
 		modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts, generateRetries: d.GenerateRetries,
 	}
@@ -114,8 +118,9 @@ func NewDrafts(d DraftDeps) (*Drafts, error) {
 // Created false (PRD section 14 case 5 forbids concurrent equivalent jobs). If that job failed or was cancelled, the
 // student retries: Generate enqueues the same request under the next round of the key (":r1", ":r2", ...), so
 // concurrent clicks after a failure still race for one key and make one job; after DraftDeps.GenerateRetries rounds
-// it returns ErrGenerateRetries. Two generations from the same base with different instructions are two jobs: the one that
-// finishes second fails with ErrDraftChanged, although the student edited nothing (the base moved on).
+// it returns ErrGenerateRetries. While a generation of the assignment is pending or running, another request (other
+// instructions or another base) is refused with ErrGenerationRunning (TASK-094): the check and the enqueue run in one
+// transaction, so concurrent clicks make at most one active job per assignment.
 // Errors: a missing assignment wraps shared.ErrNotFound, bad instructions values.ErrInvalidDraftRequest, a full
 // draft homeworkdraft.ErrFull; nothing is created then.
 func (s *Drafts) Generate(ctx context.Context, a shared.AssignmentID, instruction string) (GenerateResult, error) {
@@ -154,30 +159,89 @@ func (s *Drafts) generate(ctx context.Context, a shared.AssignmentID, base int, 
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
 
+	var res GenerateResult
+	err = s.tx.Do(ctx, func(ctx context.Context) error {
+		active, err := s.active(ctx, a)
+		if err != nil {
+			return err
+		}
+		if active != nil && !sameRequest(active.Key(), req) {
+			return fmt.Errorf("%w: job %s", ErrGenerationRunning, active.ID())
+		}
+		res, err = s.enqueue(ctx, req)
+		return err
+	})
+	if err != nil {
+		return GenerateResult{}, fmt.Errorf("%s %s: %w", opGenerate, a, err)
+	}
+	return res, nil
+}
+
+// enqueue creates the job of req under the first round of its key whose job did not end without a result, or returns
+// the live or completed job of that round.
+func (s *Drafts) enqueue(ctx context.Context, req values.DraftRequest) (GenerateResult, error) {
 	for round := 0; round <= s.generateRetries; round++ {
 		j, err := job.New(job.Spec{
 			ID: s.ids.NewJobID(), Type: HomeworkDraftJobType, Key: draftJobKey(req, round), Payload: req.Payload(),
 			MaxAttempts: s.maxAttempts,
 		}, s.clock.Now())
 		if err != nil {
-			return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+			return GenerateResult{}, err
 		}
 		id, created, err := s.jobs.Enqueue(ctx, j)
 		if err != nil {
-			return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+			return GenerateResult{}, err
 		}
 		if created {
-			return GenerateResult{JobID: id, Created: true, Base: base}, nil
+			return GenerateResult{JobID: id, Created: true, Base: req.Base()}, nil
 		}
 		existing, err := s.jobReader.Get(ctx, id)
 		if err != nil {
-			return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
+			return GenerateResult{}, err
 		}
 		if !endedWithoutResult(existing.Status()) {
-			return GenerateResult{JobID: id, Created: false, Base: base}, nil
+			return GenerateResult{JobID: id, Created: false, Base: req.Base()}, nil
 		}
 	}
-	return GenerateResult{}, fmt.Errorf("%s %s: %w", opGenerate, a, ErrGenerateRetries)
+	return GenerateResult{}, ErrGenerateRetries
+}
+
+// active returns the generation job of assignment a that is pending or running, nil when there is none. The newest
+// draft job of the assignment is enough: Generate never starts one while another is active.
+func (s *Drafts) active(ctx context.Context, a shared.AssignmentID) (*job.Job, error) {
+	j, err := s.jobReader.LatestByKeyPrefix(ctx, HomeworkDraftJobType, draftKeyPrefix(a))
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case j.Status().IsTerminal():
+		return nil, nil
+	}
+	return j, nil
+}
+
+// sameRequest reports whether key is a round of the key of req (draftJobKey).
+func sameRequest(key string, req values.DraftRequest) bool {
+	first := draftJobKey(req, 0)
+	return key == first || strings.HasPrefix(key, first+":r")
+}
+
+// ActiveGeneration returns the generation of assignment a that is pending or running, with its status and progress
+// (TASK-094): the screen shows «Готовим черновик…» also after it was left and opened again, and offers no second
+// generation meanwhile. ok is false when there is none. A missing assignment wraps shared.ErrNotFound.
+func (s *Drafts) ActiveGeneration(ctx context.Context, a shared.AssignmentID) (view GenerationView, ok bool, err error) {
+	if _, err := s.assignments.Get(ctx, a); err != nil {
+		return GenerationView{}, false, fmt.Errorf("%s %s: %w", opGeneration, a, err)
+	}
+	j, err := s.active(ctx, a)
+	if err != nil {
+		return GenerationView{}, false, fmt.Errorf("%s %s: %w", opGeneration, a, err)
+	}
+	if j == nil {
+		return GenerationView{}, false, nil
+	}
+	return GenerationView{JobID: j.ID(), Status: j.Status(), Percent: j.Progress().Percent()}, true, nil
 }
 
 // endedWithoutResult reports whether a generation job is over without adding a version (FAILED or CANCELLED), so
@@ -203,7 +267,7 @@ func (s *Drafts) Generation(ctx context.Context, id shared.JobID) (GenerationVie
 	if j.Type() != HomeworkDraftJobType {
 		return GenerationView{}, fmt.Errorf("%s %s: not a draft job: %w", opGeneration, id, shared.ErrNotFound)
 	}
-	v := GenerationView{JobID: j.ID(), Status: j.Status()}
+	v := GenerationView{JobID: j.ID(), Status: j.Status(), Percent: j.Progress().Percent()}
 	if j.Status() == job.StatusFailed {
 		for _, e := range draftFailures {
 			if strings.HasSuffix(j.LastError(), e.Error()) {
@@ -220,11 +284,17 @@ func (s *Drafts) Generation(ctx context.Context, id shared.JobID) (GenerationVie
 // is the first try; round n > 0 is the n-th retry after a failed or cancelled job (Generate).
 func draftJobKey(r values.DraftRequest, round int) string {
 	sum := sha256.Sum256([]byte(r.Instruction()))
-	key := fmt.Sprintf("%s:%s:b%d:v%d:%x", HomeworkDraftJobType, r.Assignment(), r.Base(), prompts.Version, sum[:8])
+	key := fmt.Sprintf("%sb%d:v%d:%x", draftKeyPrefix(r.Assignment()), r.Base(), prompts.Version, sum[:8])
 	if round > 0 {
 		key += fmt.Sprintf(":r%d", round)
 	}
 	return key
+}
+
+// draftKeyPrefix starts the key of every generation job of assignment a. The id is a safe file-name segment without
+// ':' (shared.AssignmentID.Validate), so no other assignment's keys share the prefix.
+func draftKeyPrefix(a shared.AssignmentID) string {
+	return fmt.Sprintf("%s:%s:", HomeworkDraftJobType, a)
 }
 
 // EditDraft stores what the student wrote as a new version (PRD section 10 step 3). e.Base is the version the student

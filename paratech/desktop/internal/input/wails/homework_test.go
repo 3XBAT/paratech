@@ -55,6 +55,8 @@ type fakeHWProposals struct {
 	list         []homeworkflow.AssignmentView
 	corrected    homeworkflow.LessonCorrection // the last CorrectLesson
 	shownSubject string                        // the last ConfirmSend
+	shownFormat  proposal.Format               // the last ConfirmSend
+	format       proposal.Format               // the last ProposeSend
 }
 
 func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
@@ -76,8 +78,9 @@ func (f *fakeHWProposals) CorrectLesson(_ context.Context, c homeworkflow.Lesson
 	}, f.err
 }
 
-func (f *fakeHWProposals) ProposeSend(context.Context, shared.AssignmentID) (homeworkflow.ProposalView, error) {
+func (f *fakeHWProposals) ProposeSend(_ context.Context, _ shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error) {
 	f.log.add("ProposeSend")
+	f.format = format
 	return f.proposal, f.err
 }
 
@@ -86,9 +89,9 @@ func (f *fakeHWProposals) Get(context.Context, proposal.ID) (homeworkflow.Propos
 	return f.proposal, f.err
 }
 
-func (f *fakeHWProposals) ConfirmSend(_ context.Context, _ proposal.ID, subject string) (homeworkflow.ProposalView, error) {
+func (f *fakeHWProposals) ConfirmSend(_ context.Context, _ proposal.ID, subject string, format proposal.Format) (homeworkflow.ProposalView, error) {
 	f.log.add("ConfirmSend")
-	f.shownSubject = subject
+	f.shownSubject, f.shownFormat = subject, format
 	return f.proposal, cmpErr(f.confirmErr, f.err)
 }
 
@@ -112,7 +115,10 @@ type fakeHWDrafts struct {
 	err        error
 	versions   []homeworkflow.DraftVersionView
 	generation homeworkflow.GenerationView
-	exportErr  error // returned by ExportDraft
+	active     *homeworkflow.GenerationView // returned by ActiveGeneration; nil: none
+	exportErr  error                        // returned by ExportDraft and ExportDocx
+	saveErr    error                        // returned by SaveDocx
+	savedTo    string                       // the last SaveDocx path
 	gotBase    int
 	gotEdit    homeworkflow.DraftEdit
 }
@@ -157,6 +163,49 @@ func (f *fakeHWDrafts) ExportDraft(_ context.Context, a shared.AssignmentID, n i
 	return homeworkflow.DraftExport{Version: n, File: ref}, f.err
 }
 
+func (f *fakeHWDrafts) ActiveGeneration(context.Context, shared.AssignmentID) (homeworkflow.GenerationView, bool, error) {
+	f.log.add("ActiveGeneration")
+	if f.active == nil {
+		return homeworkflow.GenerationView{}, false, f.err
+	}
+	return *f.active, true, f.err
+}
+
+func (f *fakeHWDrafts) ExportDocx(_ context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftExport, error) {
+	f.log.add("ExportDocx")
+	if f.exportErr != nil {
+		return homeworkflow.DraftExport{}, f.exportErr
+	}
+	ref, err := proposal.ExportRefOf(a, proposal.FormatDocx)
+	if err != nil {
+		return homeworkflow.DraftExport{}, err
+	}
+	return homeworkflow.DraftExport{Version: n, File: ref}, f.err
+}
+
+func (f *fakeHWDrafts) SaveDocx(_ context.Context, _ shared.AssignmentID, _ int, path string) error {
+	f.log.add("SaveDocx")
+	f.savedTo = path
+	return cmpErr(f.saveErr, f.err)
+}
+
+func (f *fakeHWDrafts) DocxName(context.Context, shared.AssignmentID) (string, error) {
+	f.log.add("DocxName")
+	return "Rivers.docx", f.err
+}
+
+// fakeDocxPicker is the save dialog of a Word file: the path it answers and an error.
+type fakeDocxPicker struct {
+	path string
+	err  error
+	name string // the proposed name
+}
+
+func (f *fakeDocxPicker) PickDocxFile(_ context.Context, name string) (string, error) {
+	f.name = name
+	return f.path, f.err
+}
+
 // fakeHWDeliveries is HomeworkDeliveries.
 type fakeHWDeliveries struct {
 	log   *hwCalls
@@ -187,6 +236,7 @@ type hwEnv struct {
 	proposals  *fakeHWProposals
 	drafts     *fakeHWDrafts
 	deliveries *fakeHWDeliveries
+	picker     *fakeDocxPicker
 	logs       *bytes.Buffer
 	svc        *HomeworkService
 }
@@ -201,8 +251,9 @@ func newHWEnv() *hwEnv {
 		}},
 		drafts:     &fakeHWDrafts{log: calls},
 		deliveries: &fakeHWDeliveries{log: calls},
+		picker:     &fakeDocxPicker{path: `C:\Users\student\Documents\Rivers.docx`},
 	}
-	e.svc = NewHomeworkService(e.core(), slog.New(slog.NewTextHandler(e.logs, nil)))
+	e.svc = NewHomeworkService(e.core(), slog.New(slog.NewTextHandler(e.logs, nil))).withDocxPicker(e.picker)
 	return e
 }
 
@@ -255,11 +306,25 @@ var everyHomeworkCall = []hwCall{
 		_, err := s.ExportDraft(context.Background(), id, 1)
 		return err
 	}},
-	{"PrepareSend", func(s *HomeworkService, id string) error {
-		_, err := s.PrepareSend(context.Background(), id)
+	{"ExportDocx", func(s *HomeworkService, id string) error {
+		_, err := s.ExportDocx(context.Background(), id, 1)
 		return err
 	}},
-	{"ConfirmSend", func(s *HomeworkService, id string) error { return s.ConfirmSend(context.Background(), id, "ДЗ") }},
+	{"SaveDocx", func(s *HomeworkService, id string) error {
+		_, err := s.SaveDocx(context.Background(), id, 1)
+		return err
+	}},
+	{"DraftStatus", func(s *HomeworkService, id string) error {
+		_, err := s.DraftStatus(context.Background(), id)
+		return err
+	}},
+	{"PrepareSend", func(s *HomeworkService, id string) error {
+		_, err := s.PrepareSend(context.Background(), id, "txt")
+		return err
+	}},
+	{"ConfirmSend", func(s *HomeworkService, id string) error {
+		return s.ConfirmSend(context.Background(), id, "ДЗ", "txt")
+	}},
 	{"CancelSend", func(s *HomeworkService, id string) error { return s.CancelSend(context.Background(), id) }},
 	{"Deliveries", func(s *HomeworkService, id string) error {
 		_, err := s.Deliveries(context.Background(), id)
@@ -363,7 +428,7 @@ func TestConfirmSendErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newHWEnv()
 			tt.edit(e)
-			if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ"); !errors.Is(err, tt.want) {
+			if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
 			if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend"}) {
@@ -378,7 +443,7 @@ func TestConfirmSendErrors(t *testing.T) {
 func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
 	e := newHWEnv()
 	e.proposals.confirmErr = errors.New("execute: mark executed: database is locked")
-	err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ")
+	err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt")
 	if !errors.Is(err, ErrSendIncomplete) || strings.Contains(err.Error(), "locked") {
 		t.Fatalf("failed ConfirmSend = %v, want ErrSendIncomplete", err)
 	}
@@ -387,7 +452,7 @@ func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
 	}
 
 	e.proposals.confirmErr = nil
-	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ"); err != nil {
+	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); err != nil {
 		t.Fatalf("repeated ConfirmSend = %v", err)
 	}
 	if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend", "ConfirmSend"}) {
@@ -421,10 +486,10 @@ func TestCancelSend(t *testing.T) {
 
 func TestPrepareSend(t *testing.T) {
 	e := newHWEnv()
-	got, err := e.svc.PrepareSend(context.Background(), "a1")
+	got, err := e.svc.PrepareSend(context.Background(), "a1", "txt")
 	want := SendPreparation{
 		ProposalID: "p1", Status: "ready", Recipient: "teacher@school.example", Subject: "Домашнее задание",
-		AttachmentName: "homework.md", AttachmentSize: 42,
+		AttachmentName: "homework.md", AttachmentSize: 42, AttachmentFormat: "txt",
 	}
 	if err != nil || got != want {
 		t.Fatalf("PrepareSend = %+v, %v\nwant %+v", got, err, want)
@@ -447,7 +512,7 @@ func TestPrepareSend(t *testing.T) {
 		e.proposals.proposal = homeworkflow.ProposalView{
 			ID: "p2", Kind: proposal.KindSendHomework, Status: proposal.StatusRejected, Reason: tt.reason,
 		}
-		got, err := e.svc.PrepareSend(context.Background(), "a1")
+		got, err := e.svc.PrepareSend(context.Background(), "a1", "txt")
 		if err != nil || got.Status != "rejected" || got.Reason != string(tt.reason) || !strings.Contains(got.Message, tt.text) ||
 			got.Recipient != "" || got.Subject != "" {
 			t.Errorf("%s: PrepareSend = %+v, %v", tt.reason, got, err)
@@ -639,11 +704,14 @@ func TestHomeworkJSONNames(t *testing.T) {
 		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""}`},
 		{VersionItem{}, `{"number":0,"source":"","instruction":"","latest":false,"createdAt":""}`},
 		{VersionText{}, `{"number":0,"source":"","title":"","body":"","instruction":"","latest":false,"createdAt":""}`},
-		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""},"versions":[],"latest":null}`},
+		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""},"versions":[],"latest":null,"generation":null}`},
 		{GenerateStarted{}, `{"jobId":"","base":0}`},
-		{GenerationStatus{}, `{"state":"","message":""}`},
+		{GenerationStatus{}, `{"state":"","message":"","percent":0}`},
+		{ActiveGeneration{}, `{"jobId":"","state":"","message":"","percent":0}`},
+		{DraftStatus{}, `{"latestVersion":0,"generation":null}`},
 		{ExportResult{}, `{"version":0,"fileName":""}`},
-		{SendPreparation{}, `{"proposalId":"","status":"","reason":"","message":"","recipient":"","subject":"","attachmentName":"","attachmentSize":0}`},
+		{DocxSaveResult{}, `{"status":"","message":"","name":"","attachmentName":""}`},
+		{SendPreparation{}, `{"proposalId":"","status":"","reason":"","message":"","recipient":"","subject":"","attachmentName":"","attachmentSize":0,"attachmentFormat":""}`},
 		{DeliveryItem{}, `{"id":"","status":"","recipient":"","subject":"","attempts":0,"lastError":"","confirmedAt":"","sentAt":"","createdAt":"","canMarkSent":false,"canSendAgain":false,"notice":""}`},
 	}
 	for _, tt := range tests {

@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // Student is what the title page names of the student: the fields of the student profile, plain text.
@@ -70,6 +71,19 @@ func Build(in Input) values.Document {
 	}
 	doc.Blocks = append(doc.Blocks, body...)
 	return doc
+}
+
+// DocxExtension is the extension of a Word file.
+const DocxExtension = ".docx"
+
+// FileName is the name the save dialog proposes for the Word file of an assignment: its title, safe for Windows
+// (shared.SafeFileName), or «Домашнее задание» when nothing usable is left, with DocxExtension.
+func FileName(assignmentTitle string) string {
+	name := shared.SafeFileName(assignmentTitle)
+	if name == "" {
+		name = headingPlain
+	}
+	return name + DocxExtension
 }
 
 func performer(group, name string) string {

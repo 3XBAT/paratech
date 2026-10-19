@@ -53,7 +53,7 @@ func (r *ProposalRepository) Save(ctx context.Context, p *proposal.Proposal) err
 				ID: string(st.ID), Kind: string(st.Kind), Status: string(st.Status), AssignmentID: string(st.AssignmentID),
 				Title: st.Title, Body: st.Body, DueAt: jobNullMs(st.Due), Reason: string(st.Reason), Recipient: st.Recipient,
 				AttachmentSha256: st.AttachmentSHA256, AttachmentSize: st.AttachmentSize, AssignmentTitle: st.AssignmentTitle,
-				ConfirmedAt: jobNullMs(st.ConfirmedAt), ExecutedAt: jobNullMs(st.ExecutedAt),
+				AttachmentFormat: string(st.AttachmentFormat), ConfirmedAt: jobNullMs(st.ConfirmedAt), ExecutedAt: jobNullMs(st.ExecutedAt),
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 		}
@@ -79,7 +79,8 @@ func proposalFromRow(row sqlcgen.Proposal) (*proposal.Proposal, error) {
 		AssignmentID: shared.AssignmentID(row.AssignmentID), Title: row.Title, Body: row.Body, Due: jobFromNullMs(row.DueAt),
 		Reason: proposal.RejectReason(row.Reason), Recipient: row.Recipient, AttachmentSHA256: row.AttachmentSha256,
 		AttachmentSize: row.AttachmentSize, AssignmentTitle: row.AssignmentTitle,
-		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		AttachmentFormat: proposal.Format(row.AttachmentFormat),
+		CreatedAt:        jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 		ConfirmedAt: jobFromNullMs(row.ConfirmedAt), ExecutedAt: jobFromNullMs(row.ExecutedAt),
 	})
 	if err != nil {

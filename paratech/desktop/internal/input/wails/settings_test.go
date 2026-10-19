@@ -173,7 +173,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		typ     reflect.Type
 		methods int
 	}{
-		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 4}, // SetRecognitionLoad: TASK-084
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 6}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094)
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 8}, // +SwitchSource, DismissAdvice (TASK-082), +RetryPostProcessing, RedoSummary (TASK-086)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 7},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},
@@ -185,7 +185,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "calendar.ts", typ: reflect.TypeFor[*GoogleCalendarService](), methods: 2},
 		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 4},
 		{file: "help.ts", typ: reflect.TypeFor[*HelpService](), methods: 1},
-		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 14}, // +CorrectLesson (TASK-092)
+		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 17}, // +CorrectLesson (TASK-092), +DraftStatus, ExportDocx, SaveDocx (TASK-094)
 		{file: "transcript.ts", typ: reflect.TypeFor[*TranscriptService](), methods: 6},
 		{file: "summary.ts", typ: reflect.TypeFor[*SummaryService](), methods: 3},     // TASK-087
 		{file: "summary.ts", typ: reflect.TypeFor[*LectureTextService](), methods: 2}, // TASK-090

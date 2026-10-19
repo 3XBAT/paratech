@@ -33,6 +33,8 @@ const (
 	ErrDraftFull             = homeworkError("У черновика уже 100 версий: больше добавить нельзя.")
 	ErrInstructionInvalid    = homeworkError("Инструкция слишком длинная (больше 4 КБ) или содержит недопустимые символы.")
 	ErrGenerateRetries       = homeworkError("Эта генерация уже много раз не удалась. Измените инструкцию или текст черновика.")
+	ErrGenerationRunning     = homeworkError("Черновик уже готовится. Дождитесь окончания и повторите.")
+	ErrSendFormat            = homeworkError("Неизвестный формат вложения: выберите .docx или .txt.")
 	ErrGenerationNotFound    = homeworkError("Генерация не найдена: обновите страницу.")
 	ErrSendNotFound          = homeworkError("Отправка не найдена: подготовьте её ещё раз.")
 	ErrSendCannotConfirm     = homeworkError("Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.")
@@ -70,6 +72,19 @@ const (
 	msgGenerationCancel = "Генерация отменена."
 
 	msgRejectedDefault = "Отправить нельзя: подготовьте отправку ещё раз."
+	msgNoDocx          = "Нет файла Word с заданием: сначала нажмите «Сохранить в Word (.docx)»."
+
+	msgDocxSaved        = "Файл Word сохранён."
+	msgDocxCancelled    = "Сохранение отменено."
+	msgDocxFailed       = "Не удалось сохранить файл. Выберите другую папку и попробуйте ещё раз."
+	msgDocxNotAttached  = "Файл Word сохранён, но для письма он не обновлён: предыдущее письмо с этим заданием ещё не решено."
+	msgDocxAttachFailed = "Файл Word сохранён, но для письма его обновить не удалось. Попробуйте ещё раз."
+)
+
+// Attachment formats of a send as the page names them.
+const (
+	formatTxt  = "txt"
+	formatDocx = "docx"
 )
 
 // generationMessages explain a failed generation by the error its job ended with.
@@ -101,6 +116,10 @@ const (
 	opGeneration      = "ui: get draft generation"
 	opEditDraft       = "ui: edit draft"
 	opExportDraft     = "ui: export draft"
+	opExportDocx      = "ui: export the word file"
+	opSaveDocx        = "ui: save the word file"
+	opPickDocx        = "ui: choose where to save the word file"
+	opDraftStatus     = "ui: draft status"
 	opPrepareSend     = "ui: prepare send"
 	opConfirmSend     = "ui: confirm send"
 	opCancelSend      = "ui: cancel send"
@@ -115,9 +134,9 @@ type HomeworkProposals interface {
 	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
-	ProposeSend(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
+	ProposeSend(ctx context.Context, a shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
-	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string) (homeworkflow.ProposalView, error)
+	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
 	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 }
 
@@ -127,8 +146,26 @@ type HomeworkDrafts interface {
 	DraftVersion(ctx context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftVersionView, error)
 	GenerateFrom(ctx context.Context, a shared.AssignmentID, base int, instruction string) (homeworkflow.GenerateResult, error)
 	Generation(ctx context.Context, id shared.JobID) (homeworkflow.GenerationView, error)
+	ActiveGeneration(ctx context.Context, a shared.AssignmentID) (homeworkflow.GenerationView, bool, error)
 	EditDraft(ctx context.Context, e homeworkflow.DraftEdit) (homeworkflow.DraftVersionView, error)
 	ExportDraft(ctx context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftExport, error)
+	ExportDocx(ctx context.Context, a shared.AssignmentID, n int) (homeworkflow.DraftExport, error)
+	SaveDocx(ctx context.Context, a shared.AssignmentID, n int, path string) error
+	DocxName(ctx context.Context, a shared.AssignmentID) (string, error)
+}
+
+// DocxFilePicker shows the native save dialog of a Word file with name proposed. It returns the chosen path, or ""
+// when the user cancels; the path never comes from the page.
+type DocxFilePicker interface {
+	PickDocxFile(ctx context.Context, name string) (string, error)
+}
+
+// docxPickerFunc adapts a function to DocxFilePicker.
+type docxPickerFunc func(ctx context.Context, name string) (string, error)
+
+// PickDocxFile implements DocxFilePicker.
+func (f docxPickerFunc) PickDocxFile(ctx context.Context, name string) (string, error) {
+	return f(ctx, name)
 }
 
 // HomeworkDeliveries is the part of senddelivery.Service the page uses (ARCH-42): the deliveries of an assignment and
@@ -197,11 +234,31 @@ type VersionText struct {
 	CreatedAt   string `json:"createdAt"`
 }
 
-// AssignmentDetail is an opened assignment: its versions in order and the text of the latest one (null: no draft).
+// AssignmentDetail is an opened assignment: its versions in order, the text of the latest one (null: no draft) and
+// the generation that is pending or running (null: none; TASK-094), so the page shows «Готовим черновик…» and offers
+// no second generation also after it was left and opened again.
 type AssignmentDetail struct {
-	Assignment AssignmentItem `json:"assignment"`
-	Versions   []VersionItem  `json:"versions"`
-	Latest     *VersionText   `json:"latest"`
+	Assignment AssignmentItem    `json:"assignment"`
+	Versions   []VersionItem     `json:"versions"`
+	Latest     *VersionText      `json:"latest"`
+	Generation *ActiveGeneration `json:"generation"`
+}
+
+// ActiveGeneration is a generation that is pending or running: its job (for GenerationStatus) and its state as
+// GenerationStatus gives it ("generating", "waitingNetwork" or "waitingQuota").
+type ActiveGeneration struct {
+	JobID   string `json:"jobId"`
+	State   string `json:"state"`
+	Message string `json:"message"`
+	Percent int    `json:"percent"`
+}
+
+// DraftStatus is the cheap state of the draft of an assignment for the page to poll (TASK-094): the number of the
+// latest version (0: no draft; a larger one than shown means a new version to load) and the active generation (null:
+// none).
+type DraftStatus struct {
+	LatestVersion int               `json:"latestVersion"`
+	Generation    *ActiveGeneration `json:"generation"`
 }
 
 // GenerateStarted answers Generate: the job to follow with GenerationStatus.
@@ -215,25 +272,38 @@ type GenerateStarted struct {
 type GenerationStatus struct {
 	State   string `json:"state"`
 	Message string `json:"message"`
+	Percent int    `json:"percent"` // the progress the job reported, 0..100
 }
 
-// ExportResult answers ExportDraft: the version written and the name of the file a send attaches.
+// ExportResult answers ExportDraft and ExportDocx: the version written and the name of the file a send attaches.
 type ExportResult struct {
 	Version  int    `json:"version"`
 	FileName string `json:"fileName"`
 }
 
+// DocxSaveResult answers «Сохранить в Word (.docx)»: Status "saved", "cancelled" or "failed", a fixed text and the
+// base name of the saved file ("" unless saved). AttachmentName is the Word file a send in .docx attaches, updated to
+// this version ("" when it could not be updated; Message then says why).
+type DocxSaveResult struct {
+	Status         string `json:"status"`
+	Message        string `json:"message"`
+	Name           string `json:"name"`
+	AttachmentName string `json:"attachmentName"`
+}
+
 // SendPreparation is the content of the confirmation dialog. Status "ready": the dialog shows recipient, subject and
 // attachment and the user may confirm ProposalID; "rejected": it shows Message (Reason is the core's code).
+// AttachmentFormat is the format the preparation is for ("txt" or "docx"); ConfirmSend sends it back.
 type SendPreparation struct {
-	ProposalID     string `json:"proposalId"`
-	Status         string `json:"status"`
-	Reason         string `json:"reason"`
-	Message        string `json:"message"`
-	Recipient      string `json:"recipient"`
-	Subject        string `json:"subject"`
-	AttachmentName string `json:"attachmentName"`
-	AttachmentSize int64  `json:"attachmentSize"`
+	ProposalID       string `json:"proposalId"`
+	Status           string `json:"status"`
+	Reason           string `json:"reason"`
+	Message          string `json:"message"`
+	Recipient        string `json:"recipient"`
+	Subject          string `json:"subject"`
+	AttachmentName   string `json:"attachmentName"`
+	AttachmentSize   int64  `json:"attachmentSize"`
+	AttachmentFormat string `json:"attachmentFormat"`
 }
 
 // DeliveryItem is the JSON form of a delivery (AC-15). Status is the core's code (PENDING, SENDING, SENT, FAILED,
@@ -261,12 +331,19 @@ type HomeworkService struct {
 	proposals  HomeworkProposals
 	drafts     HomeworkDrafts
 	deliveries HomeworkDeliveries
+	docx       DocxFilePicker // nil: «Сохранить в Word» fails
 	log        *slog.Logger
 }
 
 // NewHomeworkService returns the binding of the homework page; OpenServices checks the core before calling it.
 func NewHomeworkService(c HomeworkCore, log *slog.Logger) *HomeworkService {
 	return &HomeworkService{proposals: c.Proposals, drafts: c.Drafts, deliveries: c.Deliveries, log: log}
+}
+
+// withDocxPicker adds the save dialog of «Сохранить в Word (.docx)».
+func (s *HomeworkService) withDocxPicker(p DocxFilePicker) *HomeworkService {
+	s.docx = p
+	return s
 }
 
 // ListAssignments returns the newest assignments, newest first.
@@ -308,7 +385,41 @@ func (s *HomeworkService) OpenAssignment(ctx context.Context, id string) (Assign
 			out.Latest = &t
 		}
 	}
+	if out.Generation, err = s.activeGeneration(ctx, aid); err != nil {
+		return AssignmentDetail{}, s.fail(opOpenAssignment, err, ErrHomeworkNotFound)
+	}
 	return out, nil
+}
+
+// DraftStatus returns the number of the latest draft version and the generation that is pending or running, for the
+// assignment page to poll while it is open (TASK-094): a larger number than the page shows means a new version.
+func (s *HomeworkService) DraftStatus(ctx context.Context, id string) (DraftStatus, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return DraftStatus{}, err
+	}
+	versions, err := s.drafts.DraftVersions(ctx, aid)
+	if err != nil {
+		return DraftStatus{}, s.fail(opDraftStatus, err, ErrHomeworkNotFound)
+	}
+	var out DraftStatus
+	for _, v := range versions {
+		out.LatestVersion = max(out.LatestVersion, v.Number)
+	}
+	if out.Generation, err = s.activeGeneration(ctx, aid); err != nil {
+		return DraftStatus{}, s.fail(opDraftStatus, err, ErrHomeworkNotFound)
+	}
+	return out, nil
+}
+
+// activeGeneration is the pending or running generation of a, nil when none.
+func (s *HomeworkService) activeGeneration(ctx context.Context, a shared.AssignmentID) (*ActiveGeneration, error) {
+	v, ok, err := s.drafts.ActiveGeneration(ctx, a)
+	if err != nil || !ok {
+		return nil, err
+	}
+	st := generationStatus(v)
+	return &ActiveGeneration{JobID: string(v.JobID), State: st.State, Message: st.Message, Percent: st.Percent}, nil
 }
 
 // CorrectLesson stores the subject and teacher the student entered for assignment id; they win over the schedule and
@@ -361,6 +472,9 @@ func (s *HomeworkService) Generate(ctx context.Context, id string, base int, ins
 	case errors.Is(err, homeworkflow.ErrGenerateRetries):
 		s.log.Info(opGenerate, "result", homeworkflow.ErrGenerateRetries)
 		return GenerateStarted{}, ErrGenerateRetries
+	case errors.Is(err, homeworkflow.ErrGenerationRunning):
+		s.log.Info(opGenerate, "result", homeworkflow.ErrGenerationRunning)
+		return GenerateStarted{}, ErrGenerationRunning
 	}
 	return GenerateStarted{}, s.fail(opGenerate, err, ErrHomeworkNotFound)
 }
@@ -375,24 +489,29 @@ func (s *HomeworkService) GenerationStatus(ctx context.Context, jobID string) (G
 	if err != nil {
 		return GenerationStatus{}, s.fail(opGeneration, err, ErrGenerationNotFound)
 	}
+	return generationStatus(v), nil
+}
+
+// generationStatus is the page's state of a generation job.
+func generationStatus(v homeworkflow.GenerationView) GenerationStatus {
 	switch v.Status {
 	case job.StatusCompleted:
-		return GenerationStatus{State: genDone}, nil
+		return GenerationStatus{State: genDone, Percent: 100}
 	case job.StatusWaitingForNetwork:
-		return GenerationStatus{State: genWaitingNetwork, Message: msgWaitingNetwork}, nil
+		return GenerationStatus{State: genWaitingNetwork, Message: msgWaitingNetwork, Percent: v.Percent}
 	case job.StatusWaitingForQuota:
-		return GenerationStatus{State: genWaitingQuota, Message: msgWaitingQuota}, nil
+		return GenerationStatus{State: genWaitingQuota, Message: msgWaitingQuota, Percent: v.Percent}
 	case job.StatusCancelled:
-		return GenerationStatus{State: genFailed, Message: msgGenerationCancel}, nil
+		return GenerationStatus{State: genFailed, Message: msgGenerationCancel}
 	case job.StatusFailed:
 		for _, m := range generationMessages {
 			if errors.Is(v.Failure, m.err) {
-				return GenerationStatus{State: genFailed, Message: m.msg}, nil
+				return GenerationStatus{State: genFailed, Message: m.msg}
 			}
 		}
-		return GenerationStatus{State: genFailed, Message: msgGenerationFailed}, nil
+		return GenerationStatus{State: genFailed, Message: msgGenerationFailed}
 	}
-	return GenerationStatus{State: genGenerating}, nil
+	return GenerationStatus{State: genGenerating, Percent: v.Percent}
 }
 
 // EditDraft stores what the student wrote over version base as a new version and returns the latest version.
@@ -436,22 +555,106 @@ func (s *HomeworkService) ExportDraft(ctx context.Context, id string, n int) (Ex
 	return ExportResult{Version: res.Version, FileName: path.Base(res.File.Path())}, nil
 }
 
-// PrepareSend checks a send of the exported homework against the trusted local state and returns the content of the
-// confirmation dialog. Nothing is sent: only ConfirmSend sends.
-func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPreparation, error) {
+// ExportDocx writes version n as a Word file with the title page (TASK-094) to the file a send in .docx attaches,
+// replacing an earlier one. While an email of the assignment is unresolved, nothing is written (ErrExportLocked).
+func (s *HomeworkService) ExportDocx(ctx context.Context, id string, n int) (ExportResult, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return ExportResult{}, err
+	}
+	if n < 1 {
+		return ExportResult{}, ErrDraftVersionNotFound
+	}
+	res, err := s.drafts.ExportDocx(ctx, aid, n)
+	if errors.Is(err, homeworkflow.ErrExportLocked) {
+		s.log.Info(opExportDocx, "result", homeworkflow.ErrExportLocked)
+		return ExportResult{}, ErrExportLocked
+	}
+	if err != nil {
+		return ExportResult{}, s.fail(opExportDocx, err, ErrDraftVersionNotFound)
+	}
+	return ExportResult{Version: res.Version, FileName: path.Base(res.File.Path())}, nil
+}
+
+// SaveDocx is «Сохранить в Word (.docx)»: it asks in the native save dialog where to save version n as a Word file
+// with the title page (the profile and the lesson of the assignment) and writes it there; then it updates the Word
+// file a send in .docx attaches, unless an email of the assignment is unresolved. Neither the path nor an error text
+// reaches the page; the page gets the base name of the file.
+func (s *HomeworkService) SaveDocx(ctx context.Context, id string, n int) (DocxSaveResult, error) {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return DocxSaveResult{}, err
+	}
+	if n < 1 {
+		return DocxSaveResult{}, ErrDraftVersionNotFound
+	}
+	// Checked before the dialog: a missing version is an error of the page, not an empty file.
+	if _, err := s.drafts.DraftVersion(ctx, aid, n); err != nil {
+		return DocxSaveResult{}, s.fail(opSaveDocx, err, ErrDraftVersionNotFound)
+	}
+	name, err := s.drafts.DocxName(ctx, aid)
+	if err != nil {
+		return DocxSaveResult{}, s.fail(opSaveDocx, err, ErrHomeworkNotFound)
+	}
+	if s.docx == nil {
+		s.log.Error(opPickDocx, "err", "no save dialog")
+		return DocxSaveResult{Status: transcriptFailed, Message: msgDocxFailed}, nil
+	}
+	target, err := s.docx.PickDocxFile(ctx, name)
+	switch {
+	case err != nil:
+		s.log.Warn(opPickDocx, "err", err)
+		return DocxSaveResult{Status: transcriptFailed, Message: msgDocxFailed}, nil
+	case target == "":
+		return DocxSaveResult{Status: transcriptCancelled, Message: msgDocxCancelled}, nil
+	}
+	if err := s.drafts.SaveDocx(ctx, aid, n, target); err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return DocxSaveResult{}, s.fail(opSaveDocx, err, ErrDraftVersionNotFound)
+		}
+		s.log.Error(opSaveDocx, "err", err) // the adapters' errors carry neither the path nor the text
+		return DocxSaveResult{Status: transcriptFailed, Message: msgDocxFailed}, nil
+	}
+
+	out := DocxSaveResult{Status: transcriptSaved, Message: msgDocxSaved, Name: baseName(target)}
+	res, err := s.drafts.ExportDocx(ctx, aid, n)
+	switch {
+	case errors.Is(err, homeworkflow.ErrExportLocked):
+		s.log.Info(opExportDocx, "result", homeworkflow.ErrExportLocked)
+		out.Message = msgDocxNotAttached
+	case err != nil:
+		s.log.Error(opExportDocx, "err", err)
+		out.Message = msgDocxAttachFailed
+	default:
+		out.AttachmentName = path.Base(res.File.Path())
+	}
+	return out, nil
+}
+
+// PrepareSend checks a send of the exported homework with the attachment in format ("txt" or "docx") against the
+// trusted local state and returns the content of the confirmation dialog. A change of the format in the dialog is a
+// new PrepareSend. Nothing is sent: only ConfirmSend sends.
+func (s *HomeworkService) PrepareSend(ctx context.Context, id, format string) (SendPreparation, error) {
 	aid, err := assignmentID(id)
 	if err != nil {
 		return SendPreparation{}, err
 	}
-	v, err := s.proposals.ProposeSend(ctx, aid)
+	f, err := sendFormat(format)
+	if err != nil {
+		return SendPreparation{}, err
+	}
+	v, err := s.proposals.ProposeSend(ctx, aid, f)
 	if err != nil {
 		return SendPreparation{}, s.fail(opPrepareSend, err, ErrHomeworkNotFound)
 	}
-	out := SendPreparation{ProposalID: string(v.ID), Reason: string(v.Reason)}
+	out := SendPreparation{ProposalID: string(v.ID), Reason: string(v.Reason), AttachmentFormat: format}
 	if v.Status != proposal.StatusValidated {
 		out.Status, out.Message = sendRejected, msgRejectedDefault
 		if msg, ok := rejectMessages[v.Reason]; ok {
 			out.Message = msg
+		}
+		if v.Reason == proposal.ReasonNoArtifact && f == proposal.FormatDocx {
+			out.Message = msgNoDocx
 		}
 		s.log.Info(opPrepareSend, "result", v.Status, "reason", v.Reason)
 		return out, nil
@@ -467,15 +670,19 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id string) (SendPrepa
 
 // ConfirmSend is the user's click on «Отправить» in the confirmation dialog (AC-14): the use case confirms the send
 // proposal the dialog showed and executes it, which creates the delivery. It is the only binding that leads to an
-// email. subject is the one the dialog showed (SendPreparation.Subject): if the core's subject changed meanwhile,
-// nothing is sent (ErrSendStale). Repeating it with the same proposal after a failure creates no second email
-// (ErrSendIncomplete says so).
-func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject string) error {
+// email. subject and format are the ones the dialog showed (SendPreparation.Subject and AttachmentFormat): if the
+// core's subject changed meanwhile or the format is not the prepared one, nothing is sent (ErrSendStale). Repeating it
+// with the same proposal after a failure creates no second email (ErrSendIncomplete says so).
+func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject, format string) error {
 	pid := proposal.ID(proposalID)
 	if pid.Validate() != nil {
 		return ErrHomeworkInvalidID
 	}
-	_, err := s.proposals.ConfirmSend(ctx, pid, subject)
+	f, err := sendFormat(format)
+	if err != nil {
+		return err
+	}
+	_, err = s.proposals.ConfirmSend(ctx, pid, subject, f)
 	switch {
 	case err == nil:
 		return nil
@@ -585,6 +792,17 @@ func (s *HomeworkService) fail(op string, err, notFound error) error {
 	}
 	s.log.Error(op, "err", err)
 	return ErrHomeworkUnavailable
+}
+
+// sendFormat reads the attachment format of the page.
+func sendFormat(format string) (proposal.Format, error) {
+	switch format {
+	case formatTxt:
+		return proposal.FormatText, nil
+	case formatDocx:
+		return proposal.FormatDocx, nil
+	}
+	return "", ErrSendFormat
 }
 
 func assignmentID(id string) (shared.AssignmentID, error) {

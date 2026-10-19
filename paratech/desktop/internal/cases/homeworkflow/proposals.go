@@ -40,10 +40,20 @@ const (
 // stored. Well-formed output is validated against trusted local state: the assignment, the configured recipient and the
 // export file. The result is VALIDATED, waiting for the user, or REJECTED with a reason. No side effect happens here.
 func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (ProposalView, error) {
+	return s.propose(ctx, out, "")
+}
+
+// propose is Propose; a non-empty format is the attachment the user chose for a send (ProposeSend).
+func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, format proposal.Format) (ProposalView, error) {
 	now := s.clock.Now()
 	p, err := proposal.New(s.ids.NewProposalID(), out, now)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
+	}
+	if format != "" {
+		if err := p.ChooseFormat(format); err != nil {
+			return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
+		}
 	}
 
 	facts, err := s.facts(ctx, p)
@@ -104,20 +114,25 @@ type sendRequest struct {
 	AssignmentID string        `json:"assignment_id"`
 }
 
-// ProposeSend is the user's request to email the exported homework of assignment a (PRD section 10 step 7). It takes
-// exactly the Propose path, so the same strict parse and the same validation against trusted state apply as to a model
-// proposal: the result is VALIDATED with the recipient and the export content frozen, for the confirmation dialog, or
-// REJECTED with a reason (unknown assignment, no recipient, nothing exported). No side effect happens here.
-func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID) (ProposalView, error) {
+// ProposeSend is the user's request to email the exported homework of assignment a (PRD section 10 step 7) with the
+// attachment in format (the text export or the Word export, TASK-094). It takes exactly the Propose path, so the same
+// strict parse and the same validation against trusted state apply as to a model proposal: the result is VALIDATED with
+// the recipient, the format and the content of that export file frozen, for the confirmation dialog, or REJECTED with
+// a reason (unknown assignment, no recipient, nothing exported in that format). An unknown format wraps
+// proposal.ErrInvalidProposal. No side effect happens here.
+func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID, format proposal.Format) (ProposalView, error) {
 	if err := a.Validate(); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
+	}
+	if !format.Valid() {
+		return ProposalView{}, fmt.Errorf("%s: %w: unknown attachment format %q", opProposeSend, proposal.ErrInvalidProposal, string(format))
 	}
 	raw, err := json.Marshal(sendRequest{Kind: proposal.KindSendHomework, AssignmentID: a.String()})
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
 	}
 	// Wrapped as untrusted on purpose: the request then passes the one parser every proposal passes.
-	return s.Propose(ctx, values.NewUntrustedOutput(string(raw)))
+	return s.propose(ctx, values.NewUntrustedOutput(string(raw)), format)
 }
 
 // facts reads the trusted local state a proposal is checked against, only what its kind needs. It runs outside a
@@ -147,7 +162,7 @@ func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Fac
 	}
 
 	if p.Kind().NeedsAttachment() {
-		d, err := s.exportDigest(ctx, p.AssignmentID())
+		d, err := s.exportDigest(ctx, p.AssignmentID(), p.AttachmentFormat())
 		if err != nil {
 			return f, err
 		}
@@ -156,9 +171,10 @@ func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Fac
 	return f, nil
 }
 
-// exportDigest streams the export file of the assignment through SHA-256; a missing file yields the zero digest.
-func (s *Service) exportDigest(ctx context.Context, a shared.AssignmentID) (proposal.Digest, error) {
-	ref, err := proposal.ExportRef(a)
+// exportDigest streams the export file of the assignment in format f through SHA-256; a missing file yields the zero
+// digest.
+func (s *Service) exportDigest(ctx context.Context, a shared.AssignmentID, f proposal.Format) (proposal.Digest, error) {
+	ref, err := proposal.ExportRefOf(a, f)
 	if err != nil {
 		return proposal.Digest{}, err
 	}
@@ -201,11 +217,13 @@ func (s *Service) Confirm(ctx context.Context, id proposal.ID) (ProposalView, er
 // ConfirmSend is the user's click on the confirmation of a send_homework_email proposal: Confirm, then Execute
 // (AC-14). shownSubject is the email subject the dialog showed (ProposalView.Subject); if the subject the core builds
 // differs by then (a correction or a new extraction), the proposal goes STALE and nothing is sent (hard rule 3).
+// shownFormat is the attachment format the dialog showed (ProposalView.AttachmentFormat); another one than the
+// proposal pinned makes it STALE too, so a changed choice is never sent silently (TASK-094).
 // Repeating it with the same proposal is safe (hard rule 7): a CONFIRMED proposal whose Execute failed, maybe after
 // the delivery was saved, is executed again under the same idempotency key, so no second email is created, and an
 // EXECUTED one is returned as it is. Another kind yields ErrNotASend before any change; other statuses yield the
 // error of proposal.Confirm (proposal.ErrInvalidTransition).
-func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string) (ProposalView, error) {
+func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (ProposalView, error) {
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
 		p, err := s.proposals.Get(ctx, id)
 		if err != nil {
@@ -223,7 +241,13 @@ func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID, shownSubject 
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmSend, err)
 	}
-	return s.execute(ctx, id, &shownSubject)
+	return s.execute(ctx, id, &shown{subject: shownSubject, format: shownFormat})
+}
+
+// shown is what the confirmation dialog of a send showed the user.
+type shown struct {
+	subject string
+	format  proposal.Format
 }
 
 // Decline records that the user refused a VALIDATED proposal; it can never be executed afterwards.
@@ -264,8 +288,8 @@ func (s *Service) Execute(ctx context.Context, id proposal.ID) (ProposalView, er
 	return s.execute(ctx, id, nil)
 }
 
-// execute is Execute; a non-nil shownSubject is the subject the user confirmed, checked by Recheck.
-func (s *Service) execute(ctx context.Context, id proposal.ID, shownSubject *string) (ProposalView, error) {
+// execute is Execute; a non-nil seen is what the user confirmed (subject and format), checked by Recheck.
+func (s *Service) execute(ctx context.Context, id proposal.ID, seen *shown) (ProposalView, error) {
 	p, err := s.proposals.Get(ctx, id)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
@@ -278,9 +302,9 @@ func (s *Service) execute(ctx context.Context, id proposal.ID, shownSubject *str
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
-	facts.ShownSubject = facts.Subject
-	if shownSubject != nil {
-		facts.ShownSubject = *shownSubject
+	facts.ShownSubject, facts.ShownFormat = facts.Subject, p.AttachmentFormat()
+	if seen != nil {
+		facts.ShownSubject, facts.ShownFormat = seen.subject, seen.format
 	}
 	if err := p.Recheck(facts, s.clock.Now()); err != nil {
 		if errors.Is(err, proposal.ErrStale) {

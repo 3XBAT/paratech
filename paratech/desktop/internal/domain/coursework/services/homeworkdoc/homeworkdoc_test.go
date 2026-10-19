@@ -117,3 +117,15 @@ func TestEmptyDraft(t *testing.T) {
 		t.Fatalf("document = %+v", got)
 	}
 }
+
+func TestFileName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Пределы: задачи 1-5": "Пределы_ задачи 1-5.docx",
+		"  ":                  "Домашнее задание.docx",
+		"con":                 "_con.docx",
+	} {
+		if got := FileName(in); got != want {
+			t.Errorf("FileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

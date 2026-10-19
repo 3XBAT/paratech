@@ -29,6 +29,13 @@ var (
 	// ErrExportLocked is returned by Drafts.ExportDraft while an email of the assignment is unresolved (PENDING,
 	// SENDING or UNKNOWN): the export file is its attachment, and overwriting it would fail or change that email.
 	ErrExportLocked = errors.New("homework draft: the export file is the attachment of an unresolved email")
+
+	// ErrNoPath is returned by Drafts.SaveDocx without a target path.
+	ErrNoPath = errors.New("homework draft: no file to save to")
+
+	// ErrGenerationRunning is returned by Drafts.Generate while another generation of the assignment is pending or
+	// running (TASK-094): one draft job per assignment at a time. The same request again returns that job instead.
+	ErrGenerationRunning = errors.New("homework draft: a generation of the assignment is already running")
 )
 
 // Errors of the post-processing jobs (PostProcessor). They are stored as the job's last error and shown in the UI, so

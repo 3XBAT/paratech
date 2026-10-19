@@ -78,6 +78,7 @@ const (
 	ReasonRecipientChanged RejectReason = "recipient_changed"         // the configured recipient is not the confirmed one
 	ReasonArtifactChanged  RejectReason = "homework_artifact_changed" // the export file is not the confirmed content
 	ReasonSubjectChanged   RejectReason = "email_subject_changed"     // the email subject is not the one the user saw
+	ReasonFormatChanged    RejectReason = "attachment_format_changed" // the attachment format is not the one the user saw
 )
 
 // validFor reports whether r is a reason a proposal in status s may carry.
@@ -87,7 +88,7 @@ func (r RejectReason) validFor(s Status) bool {
 		return r == ReasonUnknownAssignment || r == ReasonNoRecipient || r == ReasonNoArtifact || r == ReasonDueOutOfRange
 	case StatusStale:
 		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact ||
-			r == ReasonArtifactChanged || r == ReasonSubjectChanged
+			r == ReasonArtifactChanged || r == ReasonSubjectChanged || r == ReasonFormatChanged
 	}
 	return false
 }
@@ -174,17 +175,50 @@ type Facts struct {
 	// differ, so the email never gets a subject the user did not see.
 	Subject      string
 	ShownSubject string
+
+	// ShownFormat is the attachment format the confirmation dialog showed (send only, read before execution); Recheck
+	// is STALE when it is not the format the proposal pinned.
+	ShownFormat Format
 }
 
-// exportFile is the file name of the exported homework inside exports/<assignment id>/.
-const exportFile = "homework.md"
+// Format is the file a send_homework_email attaches (TASK-094): the text export or the Word export of the assignment.
+type Format string
 
-// ExportRef is the file the homework of an assignment is exported to and attached from. The core derives it; the model
-// cannot choose a path. The id is a safe file-name segment (shared.AssignmentID.Validate), so the reference cannot
-// leave the exports directory.
+// Attachment formats.
+const (
+	FormatText Format = "txt"  // the text export (ExportRef), as before TASK-094
+	FormatDocx Format = "docx" // the Word export with the title page
+)
+
+// Valid reports whether f is a known format.
+func (f Format) Valid() bool { return f == FormatText || f == FormatDocx }
+
+// File names of the exported homework inside exports/<assignment id>/, by format.
+const (
+	exportFile     = "homework.md"
+	exportDocxFile = "homework.docx"
+)
+
+// ExportRef is the file the homework of an assignment is exported to and attached from as text. The core derives it;
+// the model cannot choose a path. The id is a safe file-name segment (shared.AssignmentID.Validate), so the reference
+// cannot leave the exports directory.
 func ExportRef(a shared.AssignmentID) (shared.ArtifactRef, error) {
+	return ExportRefOf(a, FormatText)
+}
+
+// ExportRefOf is the export file of the assignment in format f: ExportRef for FormatText, homework.docx next to it for
+// FormatDocx. An unknown format wraps ErrInvalidProposal.
+func ExportRefOf(a shared.AssignmentID, f Format) (shared.ArtifactRef, error) {
 	if err := a.Validate(); err != nil {
 		return shared.ArtifactRef{}, err
 	}
-	return shared.NewArtifactRef(shared.ArtifactExports, a.String()+"/"+exportFile)
+	name := exportFile
+	switch f {
+	case FormatText:
+	case FormatDocx:
+		name = exportDocxFile
+	default:
+		return shared.ArtifactRef{}, fmt.Errorf("%w: unknown attachment format %q", ErrInvalidProposal, string(f))
+	}
+	return shared.NewArtifactRef(shared.ArtifactExports, a.String()+"/"+name)
 }

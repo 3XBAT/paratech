@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/adapters/textfile"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/domain/coursework/homeworkdraft"
@@ -63,7 +65,8 @@ func newDraftsEnv(t *testing.T, llm *testenv.FakeLLM, register bool) (*ppEnv, *h
 		LLM: llm, Assignments: e.assignments, Recordings: sqlite.NewRecordingRepository(e.db),
 		Drafts: sqlite.NewDraftRepository(e.db), Summaries: e.summaries,
 		Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Jobs: e.jobs, JobReader: e.jobs,
-		Deliveries: noDeliveries{}, Clock: e.clock, IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
+		Deliveries: noDeliveries{}, Profiles: sqlite.NewSettingsRepository(e.db), Renderer: docx.New(), Files: textfile.New(),
+		Clock: e.clock, IDs: &draftIDs{}, Tx: e.db, ModelAlias: "default", MaxAttempts: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
