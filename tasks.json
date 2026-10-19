@@ -1854,6 +1854,26 @@
                 "TASK-072"
             ],
             "status": "done"
+        },
+        {
+            "id": "TASK-085",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Hub] Шлюзы Anthropic: передача ключа через Authorization: Bearer и базовый адрес с путём",
+            "acceptance_criteria": [
+                "Новая настройка HUB_ANTHROPIC_AUTH (флаг тоже): x-api-key (по умолчанию, как сейчас) или bearer (ключ в Authorization: Bearer); неизвестное значение — ошибка запуска с понятным текстом",
+                "HUB_ANTHROPIC_BASE_URL может содержать путь (например https://gw.example.ru/anthropic → https://gw.example.ru/anthropic/v1/messages); запрос/фрагмент/учётные данные в адресе по-прежнему запрещены, http только для loopback, перенаправления запрещены",
+                "Ключ по-прежнему не попадает в логи, ошибки и String()/LogValue в обоих режимах; заголовок x-api-key не отправляется в режиме bearer и наоборот",
+                "Тесты адаптера (оба режима, путь, отказ от redirect), конфигурации; docs/refs/anthropic.md и ADR/доки Hub — короткий раздел «Шлюз»: пример для шлюза с Bearer (как ANTHROPIC_AUTH_TOKEN в Claude Code)"
+            ],
+            "test_steps": [
+                "Шаг 1: go test -race -count=1 ./hub/...",
+                "Шаг 2: [владельцу] запустить Hub с HUB_ANTHROPIC_BASE_URL=https://ai.starimg.ru и HUB_ANTHROPIC_AUTH=bearer, получить конспект записи"
+            ],
+            "dependencies": [
+                "TASK-034"
+            ],
+            "status": "pending"
         }
     ]
 }
