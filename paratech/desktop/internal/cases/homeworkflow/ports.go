@@ -83,13 +83,13 @@ type SummaryRepository interface {
 	Save(ctx context.Context, s *summary.Summary) error
 }
 
-// LectureTextRepository stores the lecture texts of transcripts with the finished parts of their runs (TASK-090).
-// Implemented by the sqlite adapter.
+// LectureTextRepository stores the lecture texts of transcripts with the finished parts of their runs (PRD section 9,
+// TASK-090). Implemented by the sqlite adapter.
 type LectureTextRepository interface {
-	// Get loads a lecture text (TASK-090). It returns an error wrapping shared.ErrNotFound if there is none.
+	// Get loads a lecture text (PRD section 9). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id lecturetext.ID) (*lecturetext.LectureText, error)
 
-	// Save inserts or updates a lecture text (TASK-090). It is the version compare-and-swap of ADR-0004(d), like
+	// Save inserts or updates a lecture text (PRD section 9). It is the version compare-and-swap of ADR-0004(d), like
 	// SummaryRepository.Save: an insert of an existing id or a stale version yields shared.ErrVersionConflict.
 	Save(ctx context.Context, l *lecturetext.LectureText) error
 }
