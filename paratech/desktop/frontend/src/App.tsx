@@ -100,7 +100,6 @@ export function App() {
         )}
         {route.summary !== "" && (
           <div key={`summary:${route.summary}`} className="screen">
-            {/* TASK-086: pass onRetry (the retry binding) for «Повторить» / «Сделать конспект заново». */}
             <SummaryPage
               recordingId={route.summary}
               onBack={() => setRoute(closeTranscript)}
