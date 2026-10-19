@@ -58,8 +58,13 @@ type RecordingItem struct {
 	ID       string `json:"id"`
 	LessonID string `json:"lessonId"`
 	// Title is the lesson title (imported text: render as plain text only); "" without a lesson, and the page then
-	// titles the row «Запись <дата, время>» from startedAt.
-	Title     string `json:"title"`
+	// titles the row «Запись <дата, время>» from startedAt. A recording keeps it from its start (TASK-088).
+	Title string `json:"title"`
+	// Subject, Kind and Teacher of the lesson as kept at the start (TASK-088), "" if unknown: «Матанализ · лекция».
+	// Kind is a short code (lecture, seminar, ...); Subject and Teacher are imported text: plain text only.
+	Subject   string `json:"subject"`
+	Kind      string `json:"kind"`
+	Teacher   string `json:"teacher"`
 	Status    string `json:"status"`
 	StartedAt string `json:"startedAt"`
 	StoppedAt string `json:"stoppedAt"`
@@ -159,7 +164,8 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 	for _, r := range recs {
 		c := r.Chain
 		out = append(out, RecordingItem{
-			ID: string(r.ID), LessonID: string(r.LessonID), Title: r.LessonTitle, Status: string(r.Status),
+			ID: string(r.ID), LessonID: string(r.LessonID), Title: r.LessonTitle, Subject: r.LessonSubject,
+			Kind: r.LessonKind, Teacher: r.LessonTeacher, Status: string(r.Status),
 			StartedAt: timeText(r.StartedAt), StoppedAt: timeText(r.StoppedAt),
 			DurationSeconds: int64(r.Duration.Round(time.Second) / time.Second), HasDuration: r.HasDuration,
 			Problem: r.Problem, Stoppable: r.Stoppable,

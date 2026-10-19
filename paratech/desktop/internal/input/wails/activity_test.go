@@ -75,11 +75,12 @@ func (f *fakeForcer) ForceRun(_ context.Context, id shared.JobID) error {
 var at = time.Date(2026, 10, 15, 9, 30, 0, 0, time.FixedZone("MSK", 3*3600))
 
 // The page reads these names (frontend/src/bindings/activity.ts). TASK-076 added the lesson title and the chain
-// status fields to every row.
+// status fields to every row, TASK-088 the subject, kind and teacher of the lesson.
 func TestActivityServiceListsRecordings(t *testing.T) {
 	uc := &fakeActivity{recs: []activity.Recording{
 		{
-			ID: "r1", LessonID: "l1", LessonTitle: "История, лекция", Status: recording.StatusRecording, StartedAt: at,
+			ID: "r1", LessonID: "l1", LessonTitle: "История, лекция", LessonSubject: "История", LessonKind: "lecture",
+			LessonTeacher: "Петров", Status: recording.StatusRecording, StartedAt: at,
 			Stoppable: true, Chain: activity.Chain{Stage: activity.StageRecording},
 		},
 		{
@@ -106,15 +107,16 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `[` +
-		`{"id":"r1","lessonId":"l1","title":"История, лекция","status":"RECORDING",` +
+		`{"id":"r1","lessonId":"l1","title":"История, лекция","subject":"История","kind":"lecture","teacher":"Петров",` +
+		`"status":"RECORDING",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"queueReason":"","errorCode":"",` +
 		`"jobError":"","action":"","actionJobId":"","remainingSeconds":0,"hasRemaining":false,"advice":null},` +
-		`{"id":"r2","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
+		`{"id":"r2","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"queueReason":"power",` +
 		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1","remainingSeconds":0,"hasRemaining":false,"advice":null},` +
-		`{"id":"r3","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
+		`{"id":"r3","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
 		`"actionJobId":"","remainingSeconds":0,"hasRemaining":false,"advice":null}]`
