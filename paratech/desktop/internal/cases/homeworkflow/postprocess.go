@@ -44,8 +44,9 @@ const (
 // A job selects the minimal lesson context (contextselection), builds the request with the trusted instructions and
 // the transcript as untrusted data (prompts.Build), calls the LLM Client and checks the answer with the strict parser
 // of its operation. The answer is model output (hard rule 3): it is stored as data and never triggers a side effect.
-// Nothing is written before the whole answer passed the checks, so an invalid answer creates no records and fails the
-// job at once (permanent): the Hub returns the same stored answer for the same idempotency key, so a retry cannot help.
+// Nothing is written before the whole answer passed the checks, so an invalid answer creates no records. Such an
+// answer is asked again with a reminder of the format (ask, TASK-086), then the job fails at once (permanent): a rerun
+// of the job sends the same requests, which the Hub answers from its store, so only a new job (Rerunner) asks anew.
 //
 // Idempotency (hard rule 7): the job keys are derived from the transcript and the prompts version, so a repeated
 // event creates no second job; the LLM idempotency key is a digest of the job and the built request (llmKey), so a
@@ -204,17 +205,109 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 		return p.permanent(snap, stepContext, ErrContextRefused, err)
 	}
 
-	res, err := p.llm.Complete(ctx, llmReq)
+	ans, err := p.ask(ctx, snap, llmReq, sel.LessonStart())
 	if err != nil {
-		return p.retry(snap, stepLLM, ErrLLM, err)
+		return err
+	}
+	if op == values.OperationSummary {
+		return p.summarize(ctx, snap, report, in, ans.summary)
+	}
+	return p.extract(ctx, snap, report, in, ans.details)
+}
+
+// answerCalls bounds the LLM calls of one job run: the request and at most two repeats after an answer that failed
+// the checks. Each call has its own idempotency key, derived from the job and the request (llmKey), and a repeat
+// differs only by a fixed reminder, so a rerun of the job sends the same requests and the Hub replays them instead of
+// charging again (AC-11).
+const answerCalls = 3
+
+// checkedAnswer is a model answer that passed the checks of its operation.
+type checkedAnswer struct {
+	summary summary.Content
+	details []assignment.Details
+}
+
+// ask calls the LLM and checks the answer; an answer that fails the checks is asked again with a reminder of the
+// format (prompts.Remind), up to answerCalls calls, then the job fails for good with ErrInvalidAnswer or, when the
+// last answer was cut off, ErrTruncatedAnswer. A truncated answer gets no larger limit: the desktop leaves
+// max_output_tokens to the Hub alias (0), so the reminder asks for shorter texts and the log says the alias limit
+// may be raised on the Hub.
+func (p *PostProcessor) ask(ctx context.Context, snap job.Snapshot, req values.LLMRequest, lessonStart time.Time) (checkedAnswer, error) {
+	for call := 1; ; call++ {
+		res, err := p.llm.Complete(ctx, req)
+		if err != nil {
+			return checkedAnswer{}, p.retry(snap, stepLLM, ErrLLM, err)
+		}
+		ans, err := check(req.Operation(), res.Output, lessonStart)
+		if err == nil {
+			return ans, nil
+		}
+
+		truncated := errors.Is(err, prompts.ErrTruncatedOutput)
+		p.rejected(snap, call, prompts.Shape(res.Output), err)
+		if call == answerCalls {
+			return checkedAnswer{}, p.permanent(snap, stepAnswer, invalidAnswer(truncated), err)
+		}
+		if req, err = remind(snap.ID(), req, truncated); err != nil {
+			return checkedAnswer{}, p.permanent(snap, stepAnswer, invalidAnswer(truncated), err)
+		}
+	}
+}
+
+// check parses the answer of op strictly and builds the values it stores.
+func check(op values.Operation, out values.UntrustedOutput, lessonStart time.Time) (checkedAnswer, error) {
+	if op == values.OperationSummary {
+		s, err := prompts.ParseSummary(out)
+		if err != nil {
+			return checkedAnswer{}, err
+		}
+		content, err := summary.NewContent(s.Text(), s.KeyPoints())
+		return checkedAnswer{summary: content}, err
 	}
 
-	switch op {
-	case values.OperationSummary:
-		return p.summarize(ctx, snap, report, in, res.Output)
-	default:
-		return p.extract(ctx, snap, report, in, res.Output, sel.LessonStart())
+	x, err := prompts.ParseExtraction(out, lessonStart)
+	if err != nil {
+		return checkedAnswer{}, err
 	}
+	items := x.Homework()
+	details := make([]assignment.Details, 0, len(items))
+	for _, h := range items {
+		d, err := assignment.NewDetails(h.Title(), h.Description(), h.Due())
+		if err != nil {
+			return checkedAnswer{}, err
+		}
+		details = append(details, d)
+	}
+	return checkedAnswer{details: details}, nil
+}
+
+// remind builds the repeat of req after a rejected answer, keyed again with llmKey.
+func remind(id shared.JobID, req values.LLMRequest, truncated bool) (values.LLMRequest, error) {
+	r, err := prompts.Remind(req, truncated)
+	if err != nil {
+		return values.LLMRequest{}, err
+	}
+	return values.NewLLMRequest(r.Operation(), r.ModelAlias(), r.Instructions(), r.UntrustedData(), llmKey(id, r))
+}
+
+func invalidAnswer(truncated bool) error {
+	if truncated {
+		return ErrTruncatedAnswer
+	}
+	return ErrInvalidAnswer
+}
+
+// rejected logs an answer that failed the checks by its shape only, never its text (lecture content).
+func (p *PostProcessor) rejected(snap job.Snapshot, call int, shape prompts.AnswerShape, cause error) {
+	attrs := []any{
+		slog.String("job", snap.ID().String()), slog.String("type", string(snap.Type())), slog.Int("call", call),
+		slog.Int("calls", answerCalls), slog.Int("bytes", shape.Bytes), slog.String("start", shape.Start),
+		slog.Bool("truncated", shape.Truncated), slog.Any("cause", cause),
+	}
+	if shape.Truncated {
+		attrs = append(attrs, slog.String("hint", "the answer hit the output limit; raise max_output of the model alias on the Hub"))
+	}
+	p.log.Warn("post-processing answer rejected", attrs...)
 }
 
 // load reads the transcript text and the lesson context of the job.
@@ -292,17 +385,9 @@ func (p *PostProcessor) readSegments(ctx context.Context, ref shared.ArtifactRef
 	return out, nil
 }
 
-// summarize checks the summary answer and stores it.
+// summarize stores the checked summary; a summary made before is replaced only now, after the new answer passed.
 func (p *PostProcessor) summarize(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
-	in lessonInput, out values.UntrustedOutput) error {
-	s, err := prompts.ParseSummary(out)
-	if err != nil {
-		return p.permanent(snap, stepAnswer, ErrInvalidAnswer, err)
-	}
-	content, err := summary.NewContent(s.Text(), s.KeyPoints())
-	if err != nil {
-		return p.permanent(snap, stepAnswer, ErrInvalidAnswer, err)
-	}
+	in lessonInput, content summary.Content) error {
 	if err := p.answered(ctx, snap, report); err != nil {
 		return err
 	}
@@ -341,22 +426,9 @@ func (p *PostProcessor) summarize(ctx context.Context, snap job.Snapshot, report
 	return nil
 }
 
-// extract checks the extraction answer and stores one assignment per item, keeping the ones the user edited.
+// extract stores one assignment per checked item, keeping the ones the user edited.
 func (p *PostProcessor) extract(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
-	in lessonInput, out values.UntrustedOutput, lessonStart time.Time) error {
-	x, err := prompts.ParseExtraction(out, lessonStart)
-	if err != nil {
-		return p.permanent(snap, stepAnswer, ErrInvalidAnswer, err)
-	}
-	items := x.Homework()
-	details := make([]assignment.Details, 0, len(items))
-	for _, h := range items {
-		d, err := assignment.NewDetails(h.Title(), h.Description(), h.Due())
-		if err != nil {
-			return p.permanent(snap, stepAnswer, ErrInvalidAnswer, err)
-		}
-		details = append(details, d)
-	}
+	in lessonInput, details []assignment.Details) error {
 	if err := p.answered(ctx, snap, report); err != nil {
 		return err
 	}

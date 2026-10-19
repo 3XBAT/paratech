@@ -53,9 +53,14 @@ var (
 	// cause fails it, anything else is retried.
 	ErrLLM = errors.New("post-processing: the LLM call failed")
 
-	// ErrInvalidAnswer means the model answer does not match the schema of its operation; nothing is stored. Permanent:
-	// the same request returns the same stored answer from the Hub (idempotency key).
+	// ErrInvalidAnswer means the model answers did not match the schema of the operation, also after the repeats with
+	// a format reminder; nothing is stored. Permanent: a rerun of the job gets the same stored answers from the Hub
+	// (idempotency keys); the user retries with a new job (Rerunner).
 	ErrInvalidAnswer = errors.New("post-processing: the LLM answer does not match the schema")
+
+	// ErrTruncatedAnswer is ErrInvalidAnswer for a last answer that was cut off at the output limit of the model alias
+	// (the desktop sends no limit of its own); the Hub owner may raise it. Permanent.
+	ErrTruncatedAnswer = errors.New("post-processing: the LLM answer was cut off at the output limit")
 
 	// ErrStorage means reading or writing local state failed. Retried unless the cause is permanent.
 	ErrStorage = errors.New("post-processing: local storage failed")

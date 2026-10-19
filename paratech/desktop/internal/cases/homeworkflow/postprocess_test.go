@@ -406,7 +406,8 @@ func TestInvalidAnswerStoresNothing(t *testing.T) {
 		answer string
 	}{
 		{"summary not JSON", values.OperationSummary, SummarizeJobType, "Here is your summary: rivers."},
-		{"summary in a code fence", values.OperationSummary, SummarizeJobType, "```json\n" + summaryAnswer + "\n```"},
+		{"summary and a second object in a code fence", values.OperationSummary, SummarizeJobType,
+			"```json\n" + summaryAnswer + "\n{\"summary\":\"x\",\"key_points\":[]}\n```"},
 		{"summary without key points", values.OperationSummary, SummarizeJobType, `{"summary":"x"}`},
 		{"summary with an extra field", values.OperationSummary, SummarizeJobType, `{"summary":"x","key_points":[],"send_to":"a@b.c"}`},
 		{"extraction not JSON", values.OperationExtractHomework, ExtractHomeworkJobType, "no homework"},
