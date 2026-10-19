@@ -37,23 +37,34 @@ func (u *windowsUI) pickBundleFile(name string) (string, error) {
 	return path, nil
 }
 
-// Texts of the save dialog of a transcript.
+// Texts of the save dialogs of a transcript and of a summary.
 const (
 	transcriptDialogTitle = "Сохранение расшифровки"
+	summaryDialogTitle    = "Сохранение конспекта"
 	transcriptFilterText  = "Текст (*.txt)"
 	transcriptFilterMD    = "Markdown (*.md)"
 )
 
-// pickTranscriptFile shows the native save dialog, modal to the main window, with name proposed and the one filter of
+// pickTranscriptFile shows the save dialog of a transcript (pickTextFile).
+func (u *windowsUI) pickTranscriptFile(name, format string) (string, error) {
+	return u.pickTextFile(transcriptDialogTitle, name, format)
+}
+
+// pickSummaryFile shows the save dialog of a summary (pickTextFile).
+func (u *windowsUI) pickSummaryFile(name, format string) (string, error) {
+	return u.pickTextFile(summaryDialogTitle, name, format)
+}
+
+// pickTextFile shows the native save dialog, modal to the main window, with name proposed and the one filter of
 // format, whose extension the dialog adds to a typed name (Wails takes the default extension from the first filter).
 // "" means the user cancelled.
-func (u *windowsUI) pickTranscriptFile(name, format string) (string, error) {
+func (u *windowsUI) pickTextFile(title, name, format string) (string, error) {
 	filter := application.FileFilter{DisplayName: transcriptFilterText, Pattern: "*.txt"}
 	if format == "md" {
 		filter = application.FileFilter{DisplayName: transcriptFilterMD, Pattern: "*.md"}
 	}
 	path, err := u.app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
-		Title:                transcriptDialogTitle,
+		Title:                title,
 		Filename:             name,
 		Filters:              []application.FileFilter{filter},
 		CanCreateDirectories: true,
