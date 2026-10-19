@@ -28,6 +28,9 @@ var topicWords = []string{"по", "on"}
 //
 // The subject is the rest of the title, trimmed of separators. Otherwise the kind is KindUnknown and the subject is
 // the title. The subject is a clean line of at most MaxSubjectRunes (CleanText); a blank title gives "".
+//
+// Changing this rule changes the derived details of stored lessons: on the next re-import they show as changed and
+// their calendar events are rewritten.
 func ClassifyTitle(title string) (subject string, kind Kind) {
 	t := CleanText(title, utf8.RuneCountInString(title))
 	whole := CleanText(t, MaxSubjectRunes)
@@ -51,6 +54,21 @@ func ClassifyTitle(title string) (subject string, kind Kind) {
 		}
 	}
 	return whole, KindUnknown
+}
+
+// DetailsFrom gives the subject and the kind of a table row (CSV, XLSX): a non-empty subject or kind cell wins, an
+// empty one is taken from the title (ClassifyTitle). ok is false when the kind cell is not a kind (ParseKind).
+func DetailsFrom(title, subjectCell, kindCell string) (subject string, kind Kind, ok bool) {
+	subject, kind = ClassifyTitle(title)
+	if s := strings.TrimSpace(subjectCell); s != "" {
+		subject = CleanText(s, MaxSubjectRunes)
+	}
+	if k := strings.TrimSpace(kindCell); k != "" {
+		if kind, ok = ParseKind(k); !ok {
+			return "", KindUnknown, false
+		}
+	}
+	return subject, kind, true
 }
 
 // knownKind is ParseKind without the words of KindUnknown: a title saying "Другое" says nothing about the kind.

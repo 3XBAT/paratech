@@ -142,15 +142,10 @@ func (r *rowReader) parse(line int, cells []string) (importplan.Row, *importplan
 		return r.fail(line, colEnd, domainReason(err))
 	}
 
-	// Empty subject or kind cells, or no such columns: the title tells (lesson.ClassifyTitle).
-	subject, kind := lesson.ClassifyTitle(title)
-	if s := get(colSubject); s != "" {
-		subject = lesson.CleanText(s, lesson.MaxSubjectRunes)
-	}
-	if k := get(colKind); k != "" {
-		if kind, ok = lesson.ParseKind(k); !ok {
-			return r.fail(line, colKind, "not a lesson type (lecture, seminar, practice or lab, in English or Russian)")
-		}
+	// Empty subject or kind cells, or no such columns: the title tells.
+	subject, kind, ok := lesson.DetailsFrom(title, get(colSubject), get(colKind))
+	if !ok {
+		return r.fail(line, colKind, "not a lesson type (lecture, seminar, practice or lab, in English or Russian)")
 	}
 	teacher := lesson.CleanText(get(colTeacher), lesson.MaxTeacherRunes)
 

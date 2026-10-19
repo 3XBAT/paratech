@@ -94,3 +94,30 @@ func TestClassifyTitleSubjectIsValid(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailsFrom(t *testing.T) {
+	tests := []struct {
+		name                         string
+		title, subjectCell, kindCell string
+		subject                      string
+		kind                         Kind
+		ok                           bool
+	}{
+		{"no cells: the title tells", "Матанализ (лек.)", "", "", "Матанализ", KindLecture, true},
+		{"subject cell wins", "Матанализ (лек.)", "Математический анализ", "", "Математический анализ", KindLecture, true},
+		{"kind cell wins", "Матанализ (лек.)", "", "сем.", "Матанализ", KindSeminar, true},
+		{"both cells win", "Лабиринты истории", "История", "Lab", "История", KindLab, true},
+		{"blank cells are empty", "Физика, практика", "  ", " ", "Физика", KindPractice, true},
+		{"subject cell is cleaned", "Физика", "Физика\u202e\tи химия", "", "Физика и химия", KindUnknown, true},
+		{"kind cell other", "Физика, лекция", "", "другое", "Физика", KindUnknown, true},
+		{"unknown kind cell", "Физика, лекция", "Физика", "экзамен", "", KindUnknown, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			subject, kind, ok := DetailsFrom(tt.title, tt.subjectCell, tt.kindCell)
+			if subject != tt.subject || kind != tt.kind || ok != tt.ok {
+				t.Errorf("DetailsFrom = %q, %v, %v; want %q, %v, %v", subject, kind, ok, tt.subject, tt.kind, tt.ok)
+			}
+		})
+	}
+}

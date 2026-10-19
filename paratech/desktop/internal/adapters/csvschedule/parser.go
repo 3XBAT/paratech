@@ -208,15 +208,10 @@ func parseRow(line int, rec []string, cols map[string]int, zones map[string]*tim
 		return fail(colEnd, "end is not after start")
 	}
 
-	// Empty subject or kind cells, or no such columns: the title tells (lesson.ClassifyTitle).
-	subject, kind := lesson.ClassifyTitle(title)
-	if s := get(colSubject); s != "" {
-		subject = lesson.CleanText(s, lesson.MaxSubjectRunes)
-	}
-	if k := get(colKind); k != "" {
-		if kind, ok = lesson.ParseKind(k); !ok {
-			return fail(colKind, "not a lesson type (lecture, seminar, practice or lab, in English or Russian)")
-		}
+	// Empty subject or kind cells, or no such columns: the title tells.
+	subject, kind, ok := lesson.DetailsFrom(title, get(colSubject), get(colKind))
+	if !ok {
+		return fail(colKind, "not a lesson type (lecture, seminar, practice or lab, in English or Russian)")
 	}
 	teacher := lesson.CleanText(get(colTeacher), lesson.MaxTeacherRunes)
 
