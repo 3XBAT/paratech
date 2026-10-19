@@ -402,6 +402,7 @@ func TestFrontendKnowsSummaryErrors(t *testing.T) {
 	}
 	for _, e := range []error{
 		ErrSummaryInvalidID, ErrSummaryNotFound, ErrSummaryEmpty, ErrSummaryFormat, ErrSummaryUnavailable, ErrSummaryClipboard,
+		ErrLectureTextEmpty, ErrLectureTextUnavailable,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/summary.ts does not list the error %q", e)
