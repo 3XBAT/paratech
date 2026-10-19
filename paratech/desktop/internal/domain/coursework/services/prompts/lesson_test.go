@@ -24,6 +24,7 @@ func lessonMaterial() contextselection.Material {
 	m.Lesson.Kind = values.LessonKindPractice
 	// The next lesson is given in UTC; it reaches the model with the offset of lesson_start.
 	m.Lesson.NextStart = time.Date(2026, 10, 21, 7, 0, 0, 0, time.UTC)
+	m.Lesson.NextKind = values.LessonKindSeminar
 	return m
 }
 
@@ -36,6 +37,7 @@ var wantLesson = map[string]string{
 	"lesson_weekday":      "Wednesday",
 	"next_lesson_start":   "2026-10-21T10:00:00+03:00",
 	"next_lesson_weekday": "Wednesday",
+	"next_lesson_kind":    "seminar",
 }
 
 // requestOf builds the request of op from lessonMaterial; lecture_text is built per part like the use case does.
@@ -94,7 +96,7 @@ func TestLessonContextOmitsTheUnknown(t *testing.T) {
 		Transcript: []contextselection.Segment{{Text: "x"}},
 	}
 	obj := payload(t, build(t, values.OperationExtractHomework, m).UntrustedData())
-	for _, k := range []string{"lesson_title", "lesson_subject", "lesson_teacher", "lesson_kind", "next_lesson_start", "next_lesson_weekday"} {
+	for _, k := range []string{"lesson_title", "lesson_subject", "lesson_teacher", "lesson_kind", "next_lesson_start", "next_lesson_weekday", "next_lesson_kind"} {
 		if _, ok := obj[k]; ok {
 			t.Errorf("%s is present", k)
 		}
@@ -127,6 +129,27 @@ func TestNextLessonUsesTheOffsetOfTheLessonStart(t *testing.T) {
 	}
 }
 
+// next_lesson_kind is sent only with next_lesson_start and only when the app knows the kind (a closed enum).
+func TestNextLessonKind(t *testing.T) {
+	start := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	next := start.Add(7 * 24 * time.Hour)
+	for _, tc := range []struct {
+		name string
+		l    LessonInfo
+		want string
+	}{
+		{"known kind", LessonInfo{Start: start, NextStart: next, NextKind: values.LessonKindLab}, "lab"},
+		{"unknown kind", LessonInfo{Start: start, NextStart: next, NextKind: values.LessonKindUnknown}, ""},
+		{"invalid kind", LessonInfo{Start: start, NextStart: next, NextKind: "exam"}, ""},
+		{"no next lesson", LessonInfo{Start: start, NextKind: values.LessonKindLab}, ""},
+		{"no lesson start", LessonInfo{NextStart: next, NextKind: values.LessonKindLab}, ""},
+	} {
+		if got := tc.l.data().NextLessonKind; got != tc.want {
+			t.Errorf("%s: next_lesson_kind = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestExtractionRules(t *testing.T) {
 	ins := Instructions(values.OperationExtractHomework)
 	for _, s := range []string{
@@ -134,6 +157,8 @@ func TestExtractionRules(t *testing.T) {
 		"«доклад»", "«реферат»", "«лабораторная к …»",
 		"Not homework: examples and problems solved or started in class",
 		"means next_lesson_start; without next_lesson_start, due is null",
+		"«к следующему семинару», «к следующей лабораторной», «к следующей практике»",
+		"only when next_lesson_kind is that kind",
 		"a subgroup", "is still listed",
 		"due is null and description ends with a short note",
 		"only when it is said in the transcript",

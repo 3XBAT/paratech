@@ -20,9 +20,9 @@
 // of an answer (docs/refs/prompt-injection.md rule 2), and extracted deadlines are proposals, not actions.
 //
 // Lesson context (TASK-093). summary, extract_homework_deadlines and lecture_text carry the lesson as untrusted data
-// (LessonInfo): title, subject, kind, teacher, start and the start of the next lesson of the same subject, which
-// resolves "by the next class". The kind, chosen by the app, also selects a constant sentence of the summary and
-// lecture text instructions (InstructionsFor).
+// (LessonInfo): title, subject, kind, teacher, start and the start and kind of the next lesson of the same subject,
+// which resolve "by the next class" and "by the next seminar". The kinds, chosen by the app, are a closed enum; the
+// lesson kind also selects a constant sentence of the summary and lecture text instructions (InstructionsFor).
 //
 // lecture_text is sent per part of the transcript (BuildLectureText, LectureTextVersion): the segments with their
 // indexes and start times, the end of the previous part as context and the lesson context, all as untrusted data.

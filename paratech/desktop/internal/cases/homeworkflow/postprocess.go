@@ -425,8 +425,8 @@ func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.T
 	return p.withNextLesson(ctx, snap, rec.LessonID(), in)
 }
 
-// withNextLesson adds the start of the next lesson of the same subject (nextlesson.Next), which resolves "by the next
-// class" (TASK-093). An unknown subject adds nothing. A schedule read error is retried like the other reads of load:
+// withNextLesson adds the start and kind of the next lesson of the same subject (nextlesson.Next), which resolve
+// "by the next class" (TASK-093). An unknown subject adds nothing. A schedule read error is retried like the other reads of load:
 // the request must not depend on a passing storage error, and a local read rarely fails twice.
 func (p *PostProcessor) withNextLesson(ctx context.Context, snap job.Snapshot, self shared.LessonID, in lessonInput) (lessonInput, error) {
 	l := in.material.Lesson
@@ -439,7 +439,9 @@ func (p *PostProcessor) withNextLesson(ctx context.Context, snap job.Snapshot, s
 		return lessonInput{}, p.retry(snap, stepSchedule, ErrStorage, err)
 	}
 	if next := nextlesson.Next(list, cur); next != nil {
-		in.material.Lesson.NextStart = next.Content().Start.In(l.Start.Location())
+		c := next.Content()
+		in.material.Lesson.NextStart = c.Start.In(l.Start.Location())
+		in.material.Lesson.NextKind = values.LessonKindOf(c.Kind.String())
 	}
 	return in, nil
 }

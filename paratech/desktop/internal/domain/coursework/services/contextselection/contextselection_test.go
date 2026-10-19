@@ -19,7 +19,7 @@ func full() Material {
 	return Material{
 		Lesson: Lesson{
 			Title: "  Linear algebra  ", Start: lessonStart, Subject: " Mathematics ", Teacher: " Ivanova ", Kind: values.LessonKindSeminar,
-			NextStart: nextStart,
+			NextStart: nextStart, NextKind: values.LessonKindLab,
 		},
 		Transcript:     []Segment{{StartMs: 0, EndMs: 900, Text: " Hello. "}, {StartMs: 900, EndMs: 950, Text: "  "}, {StartMs: 1000, EndMs: 2000, Text: "Solve 1-5."}},
 		Summary:        "SUMMARY-TEXT",
@@ -37,12 +37,12 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 		{values.OperationSummary, Context{
 			operation: values.OperationSummary, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
 			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
-			nextLessonStart: nextStart, transcript: "Hello.\nSolve 1-5.",
+			nextLessonStart: nextStart, nextLessonKind: values.LessonKindLab, transcript: "Hello.\nSolve 1-5.",
 		}},
 		{values.OperationExtractHomework, Context{
 			operation: values.OperationExtractHomework, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
 			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
-			nextLessonStart: nextStart, transcript: "Hello.\nSolve 1-5.",
+			nextLessonStart: nextStart, nextLessonKind: values.LessonKindLab, transcript: "Hello.\nSolve 1-5.",
 		}},
 		{values.OperationHomeworkDraft, Context{
 			operation: values.OperationHomeworkDraft, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
@@ -53,7 +53,7 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 		{values.OperationLectureText, Context{
 			operation: values.OperationLectureText, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
 			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
-			nextLessonStart: nextStart, transcript: "Hello.\nSolve 1-5.",
+			nextLessonStart: nextStart, nextLessonKind: values.LessonKindLab, transcript: "Hello.\nSolve 1-5.",
 		}},
 	}
 	for _, tc := range cases {
@@ -104,6 +104,7 @@ func TestSelectRejects(t *testing.T) {
 		{"extract teacher with newline", values.OperationExtractHomework, with(func(m *Material) { m.Lesson.Teacher = "a\nb" }), ErrInvalidMaterial},
 		{"summary subject with line separator", values.OperationSummary, with(func(m *Material) { m.Lesson.Subject = "a b" }), ErrInvalidMaterial},
 		{"next lesson at the lesson start", values.OperationExtractHomework, with(func(m *Material) { m.Lesson.NextStart = lessonStart }), ErrInvalidMaterial},
+		{"next lesson of an unknown kind", values.OperationExtractHomework, with(func(m *Material) { m.Lesson.NextKind = "exam" }), ErrInvalidMaterial},
 		{"next lesson before the lesson", values.OperationLectureText, with(func(m *Material) { m.Lesson.NextStart = lessonStart.Add(-time.Hour) }), ErrInvalidMaterial},
 		{"description with NUL", values.OperationHomeworkDraft, with(func(m *Material) { m.Assignment.Description = "a\x00b" }), ErrInvalidMaterial},
 		{"request too large", values.OperationHomeworkDraft, with(func(m *Material) { m.StudentRequest = strings.Repeat("x", MaxStudentRequestBytes+1) }), ErrInvalidMaterial},
@@ -196,12 +197,12 @@ func TestSelectNextLessonStart(t *testing.T) {
 	m := full()
 	m.Lesson.Start = time.Time{}
 	c, err := Select(values.OperationSummary, m)
-	if err != nil || !c.NextLessonStart().IsZero() || !c.LessonStart().IsZero() {
-		t.Fatalf("summary without a start: next %v, err %v", c.NextLessonStart(), err)
+	if err != nil || !c.NextLessonStart().IsZero() || !c.LessonStart().IsZero() || c.NextLessonKind() != values.LessonKindUnknown {
+		t.Fatalf("summary without a start: next %v %q, err %v", c.NextLessonStart(), c.NextLessonKind(), err)
 	}
 	c, err = Select(values.OperationExtractHomework, full())
-	if err != nil || !c.NextLessonStart().Equal(nextStart) {
-		t.Fatalf("extract: next %v, err %v", c.NextLessonStart(), err)
+	if err != nil || !c.NextLessonStart().Equal(nextStart) || c.NextLessonKind() != values.LessonKindLab {
+		t.Fatalf("extract: next %v %q, err %v", c.NextLessonStart(), c.NextLessonKind(), err)
 	}
 	if c, err := Select(values.OperationHomeworkDraft, full()); err != nil || !c.NextLessonStart().IsZero() || !c.LessonStart().IsZero() {
 		t.Fatalf("draft keeps the lesson times: %v %v %v", c.LessonStart(), c.NextLessonStart(), err)

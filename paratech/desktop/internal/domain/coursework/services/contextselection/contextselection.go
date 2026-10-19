@@ -36,6 +36,8 @@ type Lesson struct {
 	// NextStart is the start of the next lesson of the same subject in the schedule, in the zone of Start; zero when
 	// unknown. It resolves "by the next class" (TASK-093).
 	NextStart time.Time
+	// NextKind is the kind of that next lesson, chosen by the app; it resolves "by the next seminar" (TASK-093).
+	NextKind values.LessonKind
 }
 
 // Assignment is what the caller knows about the assignment a draft is for.
@@ -71,6 +73,7 @@ type Context struct {
 	lessonTeacher         string
 	lessonStart           time.Time
 	nextLessonStart       time.Time
+	nextLessonKind        values.LessonKind
 	lessonKind            values.LessonKind
 	transcript            string
 	summary               string
@@ -87,7 +90,7 @@ type Context struct {
 //   - homework_draft: an assignment title or description.
 //
 // The operations on the transcript also keep the lesson context: subject, teacher, kind, start and the start of the
-// next lesson of the subject (dropped without a start; one not after the start is refused).
+// next lesson of the subject with its kind (dropped without a start; one not after the start is refused).
 //
 // Texts are trimmed. A missing required field wraps ErrMissingContext, a bad text ErrInvalidMaterial; fields that are
 // not selected are not validated either, they are simply dropped.
@@ -170,7 +173,10 @@ func (c *Context) selectLesson(l Lesson) error {
 		if !l.NextStart.After(l.Start) {
 			return invalid("next lesson start", "is not after the lesson start")
 		}
-		c.nextLessonStart = l.NextStart
+		if !l.NextKind.Valid() {
+			return invalid("next lesson kind", "is not a known kind")
+		}
+		c.nextLessonStart, c.nextLessonKind = l.NextStart, l.NextKind
 	}
 	return nil
 }
@@ -252,6 +258,9 @@ func (c Context) LessonStart() time.Time { return c.lessonStart }
 
 // NextLessonStart returns the start of the next lesson of the same subject; zero when unknown.
 func (c Context) NextLessonStart() time.Time { return c.nextLessonStart }
+
+// NextLessonKind returns the kind of the next lesson of the same subject; unknown without a next lesson.
+func (c Context) NextLessonKind() values.LessonKind { return c.nextLessonKind }
 
 // LessonKind returns the lesson kind (the operations on the transcript).
 func (c Context) LessonKind() values.LessonKind { return c.lessonKind }
