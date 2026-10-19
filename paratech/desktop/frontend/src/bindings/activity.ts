@@ -18,7 +18,14 @@ export type QueueReason =
   | "serviceNotConfigured"
   | "serviceUnavailable";
 /** What failed; "" otherwise. */
-export type ChainErrorCode = "" | "recordingFailed" | "transcriptionFailed" | "summaryFailed" | "homeworkFailed";
+export type ChainErrorCode =
+  | ""
+  | "recordingFailed"
+  | "transcriptionFailed"
+  | "summaryFailed"
+  | "homeworkFailed"
+  /** The track is silent (TASK-082): «Запись без звука» with checkSound. */
+  | "silentRecording";
 /** What the row offers besides Stop; runNow calls runJobNow(actionJobId). */
 export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound";
 
@@ -50,6 +57,31 @@ export interface RecordingItem {
   remainingSeconds: number;
   /** false: no time left to show. */
   hasRemaining: boolean;
+  /** The silent-source advice of the running recording (TASK-082); null when none. */
+  advice: AdviceView | null;
+}
+
+/**
+ * The silent-source advice (TASK-082): the chosen app is silent while another one (or several: suggestApp "", the
+ * whole computer) plays. Names are untrusted text: render as plain text only; exe names belong in a tooltip.
+ */
+export interface AdviceView {
+  recordingId: string;
+  /** Exe name of the chosen app and its readable name. */
+  silentApp: string;
+  silentName: string;
+  /** Exe name to switch to, "" for the whole computer; its readable name, "" for the whole computer. */
+  suggestApp: string;
+  suggestName: string;
+}
+
+/** Why a switch did not happen; "" once switched. The recording goes on with its old source either way. */
+export type SwitchProblem = "" | "source_gone" | "refused" | "failed";
+
+/** The answer of switchSource. */
+export interface SourceSwitch {
+  switched: boolean;
+  problem: SwitchProblem;
 }
 
 /**
@@ -79,6 +111,8 @@ export const methods = {
   listJobs: "paratech/desktop/internal/input/wails.ActivityService.ListJobs",
   stopRecording: "paratech/desktop/internal/input/wails.ActivityService.StopRecording",
   runJobNow: "paratech/desktop/internal/input/wails.ActivityService.RunJobNow",
+  switchSource: "paratech/desktop/internal/input/wails.ActivityService.SwitchSource",
+  dismissAdvice: "paratech/desktop/internal/input/wails.ActivityService.DismissAdvice",
 } as const;
 
 /** Messages of the errors the Go binding returns (checked by a Go test); the page may match them. */
@@ -89,6 +123,7 @@ export const errorMessages = {
   recordingNotRunning: "the recording is not running in this session",
   cannotRunNow: "the job cannot be run now",
   actionFailed: "the action failed",
+  invalidSource: "invalid source",
 } as const;
 
 function record(raw: unknown, what: string): Record<string, unknown> {
@@ -142,7 +177,15 @@ const queueReasons = [
   "serviceNotConfigured",
   "serviceUnavailable",
 ] as const;
-const errorCodes = ["", "recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed"] as const;
+const errorCodes = [
+  "",
+  "recordingFailed",
+  "transcriptionFailed",
+  "summaryFailed",
+  "homeworkFailed",
+  "silentRecording",
+] as const;
+const switchProblems = ["", "source_gone", "refused", "failed"] as const;
 const actions = ["", "runNow", "openModels", "openConnections", "checkSound"] as const;
 
 function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {
@@ -150,6 +193,35 @@ function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {
     throw new Error(`${what}: reply is not a list`);
   }
   return raw.map(parse);
+}
+
+/** Checks the shape of an advice; a malformed reply is an error, not a default. */
+export function parseAdvice(raw: unknown): AdviceView {
+  const w = "advice";
+  const r = record(raw, w);
+  const a: AdviceView = {
+    recordingId: str(r, "recordingId", w),
+    silentApp: str(r, "silentApp", w),
+    silentName: str(r, "silentName", w),
+    suggestApp: str(r, "suggestApp", w),
+    suggestName: str(r, "suggestName", w),
+  };
+  if (a.recordingId === "" || a.silentApp === "") {
+    throw new Error(`${w}: recordingId or silentApp is empty`);
+  }
+  return a;
+}
+
+/** Checks the shape of a switch answer; a malformed reply is an error, not a default. */
+export function parseSourceSwitch(raw: unknown): SourceSwitch {
+  const w = "switch";
+  const r = record(raw, w);
+  const switched = bool(r, "switched", w);
+  const problem = oneOf(r, "problem", w, switchProblems);
+  if (switched !== (problem === "")) {
+    throw new Error(`${w}: switched and problem disagree`);
+  }
+  return { switched, problem };
 }
 
 /** Checks the shape of one recording; a malformed reply is an error, not a default. */
@@ -177,6 +249,7 @@ export function parseRecording(raw: unknown): RecordingItem {
     actionJobId: str(r, "actionJobId", w),
     remainingSeconds: num(r, "remainingSeconds", w),
     hasRemaining: bool(r, "hasRemaining", w),
+    advice: r.advice === null ? null : parseAdvice(r.advice),
   };
 }
 
@@ -205,6 +278,10 @@ export interface ActivityApi {
   listJobs(): Promise<JobItem[]>;
   stopRecording(id: string): Promise<void>;
   runJobNow(id: string): Promise<void>;
+  /** Switches the running recording to app (an exe name; "" = the whole computer): the advice «Переключиться». */
+  switchSource(recordingId: string, app: string): Promise<SourceSwitch>;
+  /** Hides the advice of the running recording until it changes («Оставить»). */
+  dismissAdvice(recordingId: string): Promise<void>;
 }
 
 /** Builds the recordings and jobs API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -217,6 +294,10 @@ export function activityApi(call: CallByName): ActivityApi {
     },
     runJobNow: async (id) => {
       await call(methods.runJobNow, id);
+    },
+    switchSource: async (recordingId, app) => parseSourceSwitch(await call(methods.switchSource, recordingId, app)),
+    dismissAdvice: async (recordingId) => {
+      await call(methods.dismissAdvice, recordingId);
     },
   };
 }

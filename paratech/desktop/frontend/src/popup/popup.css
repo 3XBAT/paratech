@@ -45,6 +45,10 @@ h1, p, ul { margin: 0; }
 .texts > * { flex: none; }
 .note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--rec-t) 30%, transparent); border-radius: var(--r-ctl); background: var(--rec-b); font-size: var(--fs-small); line-height: 17px; }
 .note > .i { width: 16px; height: 16px; margin-top: 1px; color: var(--rec-t); }
+/* The silent-source advice (TASK-082): a warning, not an error. */
+.note.s-wait { border-color: color-mix(in srgb, var(--wait-t) 40%, transparent); background: var(--wait-b); font-weight: 500; }
+.note.s-wait > .i { color: var(--wait-t); }
+.auto-note { color: var(--ok-t); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; }
 .note > div { min-width: 0; }
 .clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .warning { color: var(--wait-t); font-size: var(--fs-label); line-height: var(--lh-label); }

@@ -66,3 +66,32 @@ func TestRetireListsARecordingOnce(t *testing.T) {
 		t.Fatalf("the oldest capture stays: ended = %v", r.ended)
 	}
 }
+
+// A kick left over from a switch that was taken already does not end a wait (the restart backoff, the wait for the
+// app) early; a pending switch does.
+func TestWaitIgnoresAStaleSwitchKick(t *testing.T) {
+	t.Run("stale kick", func(t *testing.T) {
+		c := newCapture("rec1", shared.ArtifactRef{}, Target{Mode: ModeSystem}, nil)
+		c.switchKick <- struct{}{}
+		ch := make(chan time.Time)
+		done := make(chan bool, 1)
+		go func() { done <- c.wait(ch) }()
+
+		select {
+		case ch <- time.Now():
+		case <-time.After(5 * time.Second):
+			t.Fatal("the wait ended before its timer")
+		}
+		if !<-done {
+			t.Fatal("wait = false")
+		}
+	})
+	t.Run("pending switch", func(t *testing.T) {
+		c := newCapture("rec1", shared.ArtifactRef{}, Target{Mode: ModeSystem}, nil)
+		c.pending = &switchReq{reply: make(chan error, 1)}
+		c.switchKick <- struct{}{}
+		if !c.wait(make(chan time.Time)) {
+			t.Fatal("wait = false")
+		}
+	})
+}

@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import type { RecordingItem } from "../bindings/activity.js";
 import type { PageId } from "../nav.js";
 import { recordingRowView } from "../recordingRowView.js";
+import type { AdvicePending } from "../sourcePicker/advice.js";
+import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import type { StatusView } from "../statusPresentation.js";
 import { Button } from "../ui/Button.js";
 import { Progress, Row } from "../ui/controls.js";
@@ -19,9 +21,14 @@ export interface RecordingRowProps {
   onOpen: (page: PageId) => void;
   /** More actions of the row, after the core's one (for example opening the transcript). */
   extraActions?: ReactNode;
+  /** The silent-source advice of the item (TASK-082): the click running and the problem of the last one. */
+  advicePending?: AdvicePending;
+  adviceProblem?: string;
+  onSwitchSource?: () => void;
+  onKeepSource?: () => void;
 }
 
-// One recording with the status of its whole chain. The lesson title and the core's notes are untrusted text: React
+// One recording with the status of its whole chain, and the silent-source advice of a running one. The lesson title and the core's notes are untrusted text: React
 // renders them as text only.
 export function RecordingRow(props: RecordingRowProps) {
   const r = props.item;
@@ -69,6 +76,19 @@ export function RecordingRow(props: RecordingRowProps) {
           )}
           {props.extraActions}
         </>
+      }
+      below={
+        r.advice !== null &&
+        props.onSwitchSource &&
+        props.onKeepSource && (
+          <SourceAdvice
+            advice={r.advice}
+            pending={props.advicePending ?? null}
+            problem={props.adviceProblem ?? ""}
+            onSwitch={props.onSwitchSource}
+            onKeep={props.onKeepSource}
+          />
+        )
       }
     />
   );

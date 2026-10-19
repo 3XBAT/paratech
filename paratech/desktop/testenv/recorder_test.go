@@ -117,7 +117,7 @@ func TestFakeRecorderCaptureAndFinalize(t *testing.T) {
 
 	out := ref(t, "recordings/r1.wav")
 	d, err := f.Finalize(ctx, dir, out)
-	if err != nil || d != 2*time.Minute || read(t, m, out) != "ab" {
+	if err != nil || d.Duration != 2*time.Minute || d.Silent() || read(t, m, out) != "ab" {
 		t.Fatalf("Finalize = %v, %v", d, err)
 	}
 	if _, err := f.Finalize(ctx, ref(t, "recordings/empty"), ref(t, "recordings/empty.wav")); err == nil {
@@ -210,5 +210,43 @@ func TestFakeRecorderKeepsTheSource(t *testing.T) {
 	}
 	if got, ok := f.Source("r1"); !ok || got != zoom {
 		t.Fatalf("Source = %v, %v; want %v", got, ok, zoom)
+	}
+}
+
+// TASK-082: chunks of zeros make a silent track; Switch changes the source of a running capture.
+func TestFakeRecorderSilentTrackAndSwitch(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemArtifacts()
+	f := NewFakeRecorder(m, time.Minute)
+	dir := ref(t, "recordings/r1")
+	zoom, err := values.SourceOf("zoom.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Start(ctx, "r1", dir, zoom); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Feed(ctx, "r1", make([]byte, 16)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Switch(ctx, "r1", values.WholeComputer()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetStats("r1", values.CaptureStats{Packets: 10, AudiblePackets: 4}); err != nil {
+		t.Fatal(err)
+	}
+	d, ok := f.Diagnostics(ctx, "r1")
+	if !ok || d.App != "" || d.TargetMode != values.CaptureExclude || d.SourceSwitches != 1 || d.Stats.AudiblePackets != 4 {
+		t.Fatalf("diagnostics %+v", d)
+	}
+	if err := f.Stop(ctx, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Switch(ctx, "r1", zoom); !errors.Is(err, ErrNotCapturing) {
+		t.Fatalf("Switch after the stop = %v", err)
+	}
+	tr, err := f.Finalize(ctx, dir, ref(t, "recordings/r1.wav"))
+	if err != nil || !tr.Silent() || tr.Seconds != 60 || tr.AudibleSeconds != 0 {
+		t.Fatalf("Finalize = %+v, %v; want a silent minute", tr, err)
 	}
 }

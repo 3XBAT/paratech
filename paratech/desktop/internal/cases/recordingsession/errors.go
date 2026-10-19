@@ -26,6 +26,14 @@ var (
 	// interrupted and waits for recovery.
 	ErrNotRunning = errors.New("recording is not running in this session")
 
+	// ErrSwitchRefused means the source of the recording cannot be switched now: it is not being captured any more
+	// (stopping or finished), or the capture refused (TASK-082). The recording goes on as it was.
+	ErrSwitchRefused = errors.New("the source of the recording cannot be switched now")
+
+	// ErrSwitchFailed means the capture of the new source did not start (TASK-082). The recording goes on with the
+	// source it had.
+	ErrSwitchFailed = errors.New("the new source of the recording did not start")
+
 	// ErrAbandoned means the session ended before the recording was finished: a forced shutdown, or the recording
 	// was changed elsewhere. The stored state is left for the recovery after a restart.
 	ErrAbandoned = errors.New("recording session ended before the recording was finished")

@@ -10,7 +10,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Deps are the ports the Service needs. All are required except Log.
+// Deps are the ports the Service needs. All are required except Apps, Advice and Log.
 type Deps struct {
 	Recordings  RecordingRepository
 	Transcripts RecordingTranscripts
@@ -21,22 +21,33 @@ type Deps struct {
 	Sleeper     Sleeper
 	IDs         IDGenerator
 	Completions CompletionListener
-	Log         *slog.Logger // optional: nil discards
+	Apps        AudioApps      // optional: nil gives no silent-source advice (TASK-082)
+	Advice      AdviceListener // optional: nil tells nobody when the advice changes
+	Log         *slog.Logger   // optional: nil discards
 }
 
 // DefaultHeartbeatInterval is how often the session of a running capture stores its liveness mark (PRD section 6.2).
 const DefaultHeartbeatInterval = 15 * time.Second
+
+// DefaultAdviceInterval is how often the session looks whether the capture hears sound (TASK-082): the recorder child
+// reports its counters every 5 s.
+const DefaultAdviceInterval = 5 * time.Second
 
 // Config tunes the Service.
 type Config struct {
 	MaxDuration       time.Duration // hard cap of a recording; validated by the limits policy
 	TrackExtension    string        // extension of the final track recordings/<id>.<ext>
 	HeartbeatInterval time.Duration // how often a running capture stores its heartbeat; positive
+	AdviceInterval    time.Duration // how often the silent-source advice looks; 0 takes DefaultAdviceInterval
 }
 
-// DefaultConfig returns the 3 hour cap, a WAV track and a heartbeat every 15 seconds.
+// DefaultConfig returns the 3 hour cap, a WAV track, a heartbeat every 15 seconds and a look for the silent-source
+// advice every 5 seconds.
 func DefaultConfig() Config {
-	return Config{MaxDuration: limits.DefaultMaxDuration, TrackExtension: "wav", HeartbeatInterval: DefaultHeartbeatInterval}
+	return Config{
+		MaxDuration: limits.DefaultMaxDuration, TrackExtension: "wav", HeartbeatInterval: DefaultHeartbeatInterval,
+		AdviceInterval: DefaultAdviceInterval,
+	}
 }
 
 // StartRequest is what the popup or the UI asks for.
@@ -56,12 +67,19 @@ type Info struct {
 	Duration  time.Duration // length of the final track; zero until COMPLETED
 	Chunks    int
 	Problem   string // short reason of a failure or of an early end
+	// Silent marks a COMPLETED recording whose track is silent all or almost all the time (TASK-082).
+	Silent bool
+
+	// Source is what the session captures now; Advice suggests another one while the chosen app is silent and another
+	// app plays (TASK-082); the zero value is none. Both are known only while this process captures the recording.
+	Source values.Source
+	Advice values.SourceAdvice
 }
 
 func infoOf(r *recording.Recording) Info {
 	d, _ := r.Duration()
 	return Info{
 		ID: r.ID(), LessonID: r.LessonID(), Status: r.Status(), StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(),
-		Deadline: r.Deadline(), Duration: d, Chunks: r.Chunks(), Problem: r.Problem(),
+		Deadline: r.Deadline(), Duration: d, Chunks: r.Chunks(), Problem: r.Problem(), Silent: r.Silent(),
 	}
 }

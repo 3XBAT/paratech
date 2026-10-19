@@ -104,12 +104,38 @@ type Recorder interface {
 	Diagnostics(ctx context.Context, id shared.RecordingID) (d values.CaptureDiagnostics, ok bool)
 
 	// Finalize assembles the readable chunks in the directory chunks, in name order, into the single file output and
-	// returns its duration (PRD section 6.2: FINALIZING, recovery after a restart). A chunk that cannot be read as
-	// audio, typically the last one cut short by a crash (PRD section 6.3), is skipped and left on disk. Without a
-	// readable chunk (none at all, or only broken ones) it returns an error wrapping recording.ErrNoAudio, after which
-	// the recording fails without retries; any other error counts as transient. It is idempotent (output is
-	// overwritten) and does not need a running capture.
-	Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (time.Duration, error)
+	// returns its duration and how many of its seconds are audible, so a silent recording is told apart (PRD section
+	// 6.2: FINALIZING, recovery after a restart; TASK-082). A chunk that cannot be read as audio, typically the last one
+	// cut short by a crash (PRD section 6.3), is skipped and left on disk. Without a readable chunk (none at all, or
+	// only broken ones) it returns an error wrapping recording.ErrNoAudio, after which the recording fails without
+	// retries; any other error counts as transient. It is idempotent (output is overwritten) and does not need a
+	// running capture.
+	Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (values.AssembledTrack, error)
+
+	// Switch makes the running capture of id record source from now on, into the same chunk directory
+	// (PRD section 6.3, TASK-082: the user follows the silent-source advice). The new source is resolved first: an app that does not run fails with an
+	// error wrapping recording.ErrSourceNotRunning, and on any failure the capture goes on with the source it had. There
+	// is one capture per recording at any time. It returns once the new source is captured, or with an error when the
+	// capture is stopping or ended.
+	Switch(ctx context.Context, id shared.RecordingID, source values.Source) error
+}
+
+// AudioApps lists the open apps with their audio state (PRD section 6.3, TASK-082), for the silent-source advice:
+// the session lists them only while the capture hears nothing. Implemented by the audiocapture adapter (Windows;
+// elsewhere it fails, and no advice is given).
+type AudioApps interface {
+	// List returns the apps with a visible window in this Windows session except this app, with Sounding and a
+	// readable Name (PRD section 6.3). It returns soon after ctx ends, and within a few seconds anyway.
+	List(ctx context.Context) ([]values.AudioApp, error)
+}
+
+// AdviceListener is told when the silent-source advice of the running recording changes (PRD sections 6.1 and 6.3,
+// TASK-082), so that the popup can show it without taking the focus. The zero advice means none any more. Implemented in app over the
+// recording prompt. It must return quickly; an error is only logged.
+type AdviceListener interface {
+	// SourceAdviceChanged shows advice for the recording id, or withdraws it when advice is zero (PRD section 6.1:
+	// the popup never takes the focus).
+	SourceAdviceChanged(ctx context.Context, id shared.RecordingID, advice values.SourceAdvice) error
 }
 
 // ArtifactStore is the access of this use case to recording files. All file access goes through

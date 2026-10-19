@@ -21,6 +21,8 @@ const (
 	opGet     = "get recording"
 	opDelete  = "delete recording"
 	opRecover = "recover recordings"
+	opSwitch  = "switch the recording source"
+	opDismiss = "dismiss the source advice"
 )
 
 // Problem texts stored on a recording; an error text may follow after a colon.
@@ -44,6 +46,9 @@ const (
 	finalizeAttempts  = 3
 	finalizeRetryBase = time.Second
 )
+
+// adviceListTimeout bounds one listing of the apps for the silent-source advice.
+const adviceListTimeout = 3 * time.Second
 
 // detachedTimeout bounds, on the Sleeper's time, a call that outlives its caller or a shutdown (a save of the state,
 // a stop of the capture), so that a hung port cannot block Close.
@@ -69,11 +74,14 @@ type Service struct {
 	sleeper     Sleeper
 	ids         IDGenerator
 	completions CompletionListener
+	apps        AudioApps      // nil: no silent-source advice
+	advice      AdviceListener // nil: nobody is told
 	log         *slog.Logger
 
-	policy    limits.Policy
-	trackExt  string
-	heartbeat time.Duration
+	policy      limits.Policy
+	trackExt    string
+	heartbeat   time.Duration
+	adviceEvery time.Duration
 
 	life     context.Context // parent of the session work; ends on a forced Close
 	shutdown context.CancelFunc
@@ -106,6 +114,12 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	if cfg.HeartbeatInterval <= 0 {
 		return nil, fmt.Errorf("%w: heartbeat interval %v", ErrInvalidConfig, cfg.HeartbeatInterval)
 	}
+	switch {
+	case cfg.AdviceInterval < 0:
+		return nil, fmt.Errorf("%w: advice interval %v", ErrInvalidConfig, cfg.AdviceInterval)
+	case cfg.AdviceInterval == 0:
+		cfg.AdviceInterval = DefaultAdviceInterval
+	}
 
 	log := deps.Log
 	if log == nil {
@@ -114,8 +128,10 @@ func New(deps Deps, cfg Config) (*Service, error) {
 
 	s := &Service{
 		recordings: deps.Recordings, transcripts: deps.Transcripts, recorder: deps.Recorder, artifacts: deps.Artifacts,
-		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, completions: deps.Completions, log: log,
-		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval, marked: make(chan struct{}),
+		tx: deps.Tx, clock: deps.Clock, sleeper: deps.Sleeper, ids: deps.IDs, completions: deps.Completions,
+		apps: deps.Apps, advice: deps.Advice, log: log,
+		policy: policy, trackExt: cfg.TrackExtension, heartbeat: cfg.HeartbeatInterval, adviceEvery: cfg.AdviceInterval,
+		marked: make(chan struct{}),
 	}
 	s.life, s.shutdown = context.WithCancel(context.Background())
 	return s, nil
@@ -129,10 +145,15 @@ type session struct {
 	stopCh   chan struct{} // closed when a stop is requested
 	done     chan struct{} // closed when the session ended; info and err are final then
 
+	switching sync.Mutex // one switch of the source at a time
+
 	mu          sync.Mutex
 	info        Info
 	err         error                   // why the session ended without a final status
 	cancelStart context.CancelCauseFunc // set while the capture starts
+	watch       values.SourceWatch      // the silent-source advice of the captured source (TASK-082)
+	watchGen    uint64                  // bumped whenever watch is replaced for another source
+	advice      values.SourceAdvice     // the advice last published; zero when none
 }
 
 func (ss *session) requestStop() {
@@ -164,7 +185,55 @@ func (ss *session) publish(r *recording.Recording) {
 func (ss *session) snapshot() (Info, error) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-	return ss.info, ss.err
+	info := ss.info
+	info.Source, info.Advice = ss.watch.Source(), ss.advice
+	return info, ss.err
+}
+
+// updateWatch applies f, under the lock of the session, to the watch of the source and returns the advice to show, and
+// whether it changed.
+func (ss *session) updateWatch(f func(values.SourceWatch) values.SourceWatch) (values.SourceAdvice, bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.watch = f(ss.watch)
+	a, _ := ss.watch.Advice()
+	if a == ss.advice {
+		return a, false
+	}
+	ss.advice = a
+	return a, true
+}
+
+func (ss *session) source() values.Source {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.watch.Source()
+}
+
+// watching returns the watched source and its generation, for an observation to be taken.
+func (ss *session) watching() (values.Source, uint64) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.watch.Source(), ss.watchGen
+}
+
+// observe feeds o, taken while the watch had generation gen, to the watch. An observation of a source that has been
+// switched away since is dropped: it would count the old source's silence against the new one.
+func (ss *session) observe(gen uint64, o values.SourceObservation) (values.SourceAdvice, bool) {
+	return ss.updateWatch(func(w values.SourceWatch) values.SourceWatch {
+		if ss.watchGen != gen {
+			return w
+		}
+		return w.Observe(o)
+	})
+}
+
+// rewatch starts a new watch of source, a new generation.
+func (ss *session) rewatch(source values.Source) (values.SourceAdvice, bool) {
+	return ss.updateWatch(func(values.SourceWatch) values.SourceWatch {
+		ss.watchGen++
+		return values.NewSourceWatch(source)
+	})
 }
 
 // Start creates a recording and starts the capture of req.Source into recordings/<id>. It returns once the capture
@@ -179,7 +248,7 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (Info, error) {
 		return Info{}, fmt.Errorf("%s: %w", opStart, err)
 	}
 
-	sess, err := s.reserve(rec)
+	sess, err := s.reserve(rec, req.Source)
 	if err != nil {
 		return Info{}, fmt.Errorf("%s: %w", opStart, err)
 	}
@@ -228,7 +297,7 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (Info, error) {
 }
 
 // reserve takes the single slot of a recording in progress.
-func (s *Service) reserve(rec *recording.Recording) (*session, error) {
+func (s *Service) reserve(rec *recording.Recording, source values.Source) (*session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -246,17 +315,25 @@ func (s *Service) reserve(rec *recording.Recording) (*session, error) {
 		return nil, fmt.Errorf("%w: %s", err, s.active.id)
 	}
 
-	sess := &session{id: rec.ID(), stopCh: make(chan struct{}), done: make(chan struct{}), info: infoOf(rec)}
+	sess := &session{
+		id: rec.ID(), stopCh: make(chan struct{}), done: make(chan struct{}), info: infoOf(rec),
+		watch: values.NewSourceWatch(source),
+	}
 	s.active = sess
 	s.wg.Add(1)
 	return sess, nil
 }
 
-// finish publishes the last state, frees the slot and wakes the waiters of the session.
+// finish publishes the last state, frees the slot and wakes the waiters of the session. An advice shown is withdrawn.
 func (s *Service) finish(sess *session, rec *recording.Recording, err error) {
 	sess.mu.Lock()
 	sess.info, sess.err = infoOf(rec), err
+	shown := !sess.advice.IsZero()
+	sess.advice = values.SourceAdvice{}
 	sess.mu.Unlock()
+	if shown {
+		s.tellAdvice(rec.ID(), values.SourceAdvice{})
+	}
 
 	s.mu.Lock()
 	if s.active == sess {
@@ -300,6 +377,23 @@ func (s *Service) run(sess *session, rec *recording.Recording) {
 	ended := make(chan error, 1)
 	bg.Go(func() { ended <- s.recorder.Wait(watchCtx, rec.ID()) })
 
+	// The advice ends with the capture, before it is stopped and assembled (quiet).
+	adviceCtx, stopAdvice := context.WithCancel(watchCtx)
+	defer stopAdvice()
+	advised := make(chan struct{})
+	if s.apps != nil {
+		bg.Go(func() {
+			defer close(advised)
+			s.advise(adviceCtx, sess)
+		})
+	} else {
+		close(advised)
+	}
+	quiet := func() {
+		stopAdvice()
+		<-advised
+	}
+
 	deadline := rec.Deadline()
 	beat := make(chan struct{}, 1)
 	arm := func() <-chan struct{} {
@@ -308,7 +402,7 @@ func (s *Service) run(sess *session, rec *recording.Recording) {
 		return reached
 	}
 
-	err := s.follow(ctx, sess, rec, ended, beat, arm)
+	err := s.follow(ctx, sess, rec, ended, beat, arm, quiet)
 	stopWatching()
 	bg.Wait()
 	s.finish(sess, rec, err)
@@ -342,9 +436,9 @@ func (s *Service) watch(ctx context.Context, deadline time.Time, reached chan<- 
 }
 
 // follow waits for what ends the capture and finalizes the recording. It returns nil when the recording reached a
-// final status that was saved, otherwise why not.
+// final status that was saved, otherwise why not. quiet ends the silent-source advice and waits until it has.
 func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Recording, ended <-chan error,
-	beat <-chan struct{}, arm func() <-chan struct{}) error {
+	beat <-chan struct{}, arm func() <-chan struct{}, quiet func()) error {
 	atLimit := arm()
 	var noted bool // the capture fallback is on the recording
 	for {
@@ -364,6 +458,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 			}
 
 		case <-sess.stopCh:
+			quiet()
 			s.noteFallback(ctx, rec, &noted) // a fallback since the last heartbeat
 			if err := rec.Stop(s.clock.Now()); err != nil {
 				s.haltCapture(ctx, rec.ID())
@@ -395,6 +490,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 				s.haltCapture(ctx, rec.ID())
 				return err
 			}
+			quiet()
 			s.log.Info("recording reached its hard cap", slog.String("recording", rec.ID().String()))
 			if err := s.persist(ctx, sess, rec); err != nil {
 				s.haltCapture(ctx, rec.ID())
@@ -410,6 +506,7 @@ func (s *Service) follow(ctx context.Context, sess *session, rec *recording.Reco
 				s.haltCapture(ctx, rec.ID())
 				return ErrAbandoned
 			}
+			quiet()
 			problem := problemCaptureEnded
 			if cerr != nil {
 				problem += ": " + cerr.Error()
@@ -527,14 +624,17 @@ func (s *Service) assemble(ctx context.Context, sess *session, rec *recording.Re
 	if err != nil {
 		return err
 	}
-	duration, ferr := s.finalizeTrack(ctx, rec.ID(), rec.ChunksDir(), track, attempts)
+	assembled, ferr := s.finalizeTrack(ctx, rec.ID(), rec.ChunksDir(), track, attempts)
 	if ferr != nil && ctx.Err() != nil {
 		return ErrAbandoned
 	}
 
 	now := s.clock.Now()
 	if ferr == nil {
-		ferr = rec.Complete(now, track, duration)
+		ferr = rec.CompleteTrack(now, track, assembled)
+	}
+	if ferr == nil {
+		s.logSilent(rec, assembled)
 	}
 	if ferr != nil {
 		s.log.Warn("assembling the recording failed", slog.String("recording", rec.ID().String()), slog.Any("error", ferr))
@@ -547,6 +647,14 @@ func (s *Service) assemble(ctx context.Context, sess *session, rec *recording.Re
 	}
 	s.announceCompleted(ctx, rec)
 	return nil
+}
+
+// logSilent tells that a recording is silent and is not transcribed (TASK-082).
+func (s *Service) logSilent(rec *recording.Recording, track values.AssembledTrack) {
+	if rec.Silent() {
+		s.log.Warn("the recording is silent; it is not transcribed", slog.String("recording", rec.ID().String()),
+			slog.Int("seconds", track.Seconds), slog.Int("audible_seconds", track.AudibleSeconds))
+	}
 }
 
 // announceCompleted tells the listener about a saved recording that can be transcribed (the aggregate decides). It
@@ -566,7 +674,7 @@ func (s *Service) announceCompleted(ctx context.Context, rec *recording.Recordin
 
 // finalizeTrack runs Recorder.Finalize up to attempts times with a doubling delay; a shutdown and missing audio are
 // not retried.
-func (s *Service) finalizeTrack(ctx context.Context, id shared.RecordingID, chunks, track shared.ArtifactRef, attempts int) (time.Duration, error) {
+func (s *Service) finalizeTrack(ctx context.Context, id shared.RecordingID, chunks, track shared.ArtifactRef, attempts int) (values.AssembledTrack, error) {
 	delay := finalizeRetryBase
 	for attempt := 1; ; attempt++ {
 		d, err := s.recorder.Finalize(ctx, chunks, track)
@@ -577,7 +685,7 @@ func (s *Service) finalizeTrack(ctx context.Context, id shared.RecordingID, chun
 		s.log.Warn("assembling the recording failed; retrying", slog.String("recording", id.String()),
 			slog.Int("attempt", attempt), slog.Any("error", err))
 		if serr := s.sleeper.Sleep(ctx, delay); serr != nil {
-			return 0, err
+			return values.AssembledTrack{}, err
 		}
 		delay *= 2
 	}

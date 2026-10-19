@@ -17,6 +17,7 @@ import (
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -33,13 +34,31 @@ func (f *fakeActivity) ListRecordings(context.Context) ([]activity.Recording, er
 func (f *fakeActivity) ListJobs(context.Context) ([]activity.Job, error) { return f.jobs, f.err }
 
 type fakeStopper struct {
-	got shared.RecordingID
-	err error
+	got       shared.RecordingID
+	err       error
+	active    recordingsession.Info
+	running   bool
+	gotSource values.Source
+	calls     []string
 }
 
 func (f *fakeStopper) Stop(_ context.Context, id shared.RecordingID) (recordingsession.Info, error) {
 	f.got = id
 	return recordingsession.Info{ID: id}, f.err
+}
+
+func (f *fakeStopper) Active() (recordingsession.Info, bool) { return f.active, f.running }
+
+func (f *fakeStopper) SwitchSource(_ context.Context, id shared.RecordingID, source values.Source) error {
+	f.got, f.gotSource = id, source
+	f.calls = append(f.calls, "switch")
+	return f.err
+}
+
+func (f *fakeStopper) DismissAdvice(_ context.Context, id shared.RecordingID) error {
+	f.got = id
+	f.calls = append(f.calls, "dismiss")
+	return f.err
 }
 
 type fakeForcer struct {
@@ -90,15 +109,15 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		`{"id":"r1","lessonId":"l1","title":"История, лекция","status":"RECORDING",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"queueReason":"","errorCode":"",` +
-		`"jobError":"","action":"","actionJobId":"","remainingSeconds":0,"hasRemaining":false},` +
+		`"jobError":"","action":"","actionJobId":"","remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r2","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"queueReason":"power",` +
-		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1","remainingSeconds":0,"hasRemaining":false},` +
+		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1","remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r3","lessonId":"","title":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
-		`"actionJobId":"","remainingSeconds":0,"hasRemaining":false}]`
+		`"actionJobId":"","remainingSeconds":0,"hasRemaining":false,"advice":null}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}

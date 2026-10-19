@@ -27,4 +27,8 @@ var (
 	// ErrSourceNotRunning means the app chosen as the recording source does not run, so its audio cannot be captured.
 	// Recorder adapters wrap it.
 	ErrSourceNotRunning = errors.New("the chosen app is not running")
+
+	// ErrSourceDidNotStart means the capture of the source a running recording was switched to did not start, so the
+	// capture went back to its old source (TASK-082). Recorder adapters wrap it.
+	ErrSourceDidNotStart = errors.New("the capture of the chosen source did not start")
 )

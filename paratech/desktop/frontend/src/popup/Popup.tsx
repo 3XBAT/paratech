@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { activityApi, type AdviceView } from "../bindings/activity";
 import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
 import { Button } from "../ui/Button";
 import { Banner } from "../ui/controls";
 import { IconSprite } from "../ui/Icon";
+import {
+  adviceHints,
+  adviceKey,
+  adviceLabels,
+  adviceModel,
+  keepSource,
+  switchToSuggestion,
+  type AdvicePending,
+} from "../sourcePicker/advice";
 import { SourcePicker } from "../sourcePicker/SourcePicker";
 import {
   actionErrorText,
@@ -16,6 +26,7 @@ import {
   type Selection,
 } from "../sourcePicker/view";
 import {
+  adviceHeading,
   buttonHints,
   buttonLabels,
   HeightFitter,
@@ -34,10 +45,16 @@ const browserTimers = {
 };
 
 // The popup shows the prompt the Go core holds and passes the clicks back; the core hides the window after
-// start and skip. No element takes focus on its own: the popup must not steal it (AC-01).
+// start and skip. While the running recording has a silent-source advice (TASK-082) the core shows the popup for it
+// too, and the advice comes first. No element takes focus on its own: the popup must not steal it (AC-01).
 export function Popup() {
   const api = useMemo(() => promptApi(callByName), []);
+  const activity = useMemo(() => activityApi(callByName), []);
   const [view, setView] = useState<PromptView | null>(null);
+  const [advice, setAdvice] = useState<AdviceView | null>(null);
+  const [advicePending, setAdvicePending] = useState<AdvicePending>(null);
+  const [adviceProblem, setAdviceProblem] = useState("");
+  const adviceRef = useRef<AdviceView | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState("");
@@ -55,10 +72,19 @@ export function Popup() {
   const reload = useCallback(
     async (clearError: boolean) => {
       const seq = ++latest.current;
+      // A failed advice read only hides the advice: the prompt still shows.
+      const adviceRead = api.advice().catch(() => null);
       try {
         const v = await api.current();
+        const a = await adviceRead;
         if (seq === latest.current) {
           setView(v);
+          // The problem of a click belongs to its advice: a new suggestion starts clean.
+          if ((adviceRef.current && adviceKey(adviceRef.current)) !== (a && adviceKey(a))) {
+            setAdviceProblem("");
+          }
+          adviceRef.current = a;
+          setAdvice(a);
           if (clearError) {
             setError("");
           }
@@ -158,7 +184,7 @@ export function Popup() {
     poller.refreshNow();
   }, [promptId, poller]);
 
-  const refresh = shouldRefresh(view, visible, pending, listOpen);
+  const refresh = advice === null && shouldRefresh(view, visible, pending, listOpen);
   useEffect(() => {
     poller.setActive(refresh);
   }, [refresh, poller]);
@@ -167,12 +193,32 @@ export function Popup() {
   const picker = pickerModel(sources, selection);
   const showPicker = m.buttons.includes("start");
   const errorLine = error || m.problem;
-  const layout = textsLayout(showPicker ? picker.warnings : [], errorLine);
+  const notes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
+  const layout = textsLayout(notes, errorLine);
 
   useLayoutEffect(() => {
-    growsRef.current = layout.grows;
+    // The advice keeps the normal size: its text is short.
+    growsRef.current = advice === null && layout.grows;
     measure();
   });
+
+  async function adviceAct(kind: "switch" | "dismiss") {
+    if (advice === null || advicePending !== null) {
+      return;
+    }
+    setAdvicePending(kind);
+    setAdviceProblem("");
+    const out = kind === "switch" ? await switchToSuggestion(activity, advice) : await keepSource(activity, advice);
+    setAdvicePending(null);
+    if (out.kind === "problem") {
+      setAdviceProblem(out.text);
+      return;
+    }
+    // The core withdraws the advice and hides the popup unless a prompt is on offer: show what it holds now.
+    adviceRef.current = null;
+    setAdvice(null);
+    void reload(false);
+  }
 
   async function act(action: Action) {
     if (view === null || pending !== null) {
@@ -213,6 +259,39 @@ export function Popup() {
     return null;
   }
 
+  if (advice !== null) {
+    const am = adviceModel(advice);
+    return (
+      <div className="popup" ref={popupRef}>
+        <IconSprite />
+        <div className="p-top live">
+          <span className="dot" aria-hidden="true" />
+          <span className="heading">{adviceHeading}</span>
+        </div>
+        <div className="texts">
+          <Banner kind="wait" role="status">
+            <span title={am.hint}>{am.text}</span>
+          </Banner>
+          {adviceProblem !== "" && <p className="warning">{adviceProblem}</p>}
+        </div>
+        <div className="pbtns">
+          <Button
+            variant="primary"
+            className="wide"
+            disabled={advicePending !== null}
+            title={adviceHints.switch}
+            onClick={() => void adviceAct("switch")}
+          >
+            {advicePending === "switch" ? adviceLabels.switching : adviceLabels.switch}
+          </Button>
+          <Button disabled={advicePending !== null} title={adviceHints.keep} onClick={() => void adviceAct("dismiss")}>
+            {adviceLabels.keep}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="popup" ref={popupRef}>
       <IconSprite />
@@ -248,6 +327,7 @@ export function Popup() {
               </span>
             </Banner>
           )}
+          {showPicker && picker.autoNote !== "" && <p className="auto-note">{picker.autoNote}</p>}
           {showPicker &&
             picker.warnings.map((w) => (
               <p key={w} className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? w : undefined}>

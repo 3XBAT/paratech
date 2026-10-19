@@ -34,6 +34,7 @@ const (
 	maxTitleBytes = 256
 	maxTreeDepth  = 64 // parent links walked from one process
 	maxIconCache  = 128
+	maxNameCache  = 256
 )
 
 // Audio session states (AudioSessionState, audiosessiontypes.h); 0 is inactive.
@@ -125,6 +126,10 @@ type appPlatform interface {
 
 	// icon returns a small PNG of the icon of the executable at path, nil when there is none.
 	icon(path string) []byte
+
+	// describe returns FileDescription and ProductName of the version resource of the executable at path (TASK-082);
+	// empty when there is none. Untrusted text.
+	describe(path string) (description, product string)
 }
 
 // candidate is an app found in a snapshot: its picker entry and the root of its process tree.
@@ -244,8 +249,11 @@ func appsOf(s snapshot, limit int) []candidate {
 	return out
 }
 
-// markSessions sets Playing and Muted from the audio sessions. A session belongs to an app when its process is in
-// the app's tree: Chromium plays through a child process ("Audio Service"), so session PIDs are walked up.
+// markSessions sets Playing, Sounding and Muted from the audio sessions. A session belongs to an app when its process
+// is in the app's tree: Chromium plays through a child process ("Audio Service"), so session PIDs are walked up.
+// Sounding uses the test of the healthy-but-mute detector (sessionInfo.audible): an active, unmuted session whose
+// meter shows more than peakFloor now. The meter is one reading, so the low floor catches quiet speech; an idle app
+// reads 0.
 func markSessions(t tree, apps []candidate, sessions []sessionInfo) {
 	roots := make(map[uint32]int, len(apps))
 	for i, c := range apps {
@@ -262,6 +270,9 @@ func markSessions(t tree, apps []candidate, sessions []sessionInfo) {
 		}
 		if ss.state == sessionActive {
 			apps[i].app.Playing = true
+		}
+		if ss.audible() {
+			apps[i].app.Sounding = true
 		}
 		if ss.muted || (ss.volumeOK && ss.volume <= 0) {
 			apps[i].app.Muted = true
@@ -321,7 +332,11 @@ type Apps struct {
 
 	mu    sync.Mutex
 	icons map[string][]byte // by executable path; only icons read, so a failed read is tried again by a later List
+	names map[string]appVersion
 }
+
+// appVersion is what the version resource of an executable says about it; empty when it says nothing.
+type appVersion struct{ description, product string }
 
 // PlatformApps returns the apps of this OS: on 64-bit Windows the visible windows and audio sessions; elsewhere every
 // call fails with an error wrapping ErrUnavailable (recording.ErrCaptureUnavailable).
@@ -333,13 +348,15 @@ func newApps(p appPlatform, log *slog.Logger) *Apps {
 	}
 	return &Apps{
 		platform: p, log: log, now: time.Now, timeout: appsTimeout, gate: make(chan struct{}, 1), icons: map[string][]byte{},
+		names: map[string]appVersion{},
 	}
 }
 
 // List returns the apps with a visible window in this Windows session except this app, one per executable, topmost
-// first. Playing and Muted come from the audio sessions; without them (Windows refused) the apps are still listed.
-// Icons are cached per executable; an icon that cannot be read, or is not read within iconBudget, is nil until a
-// later List reads it.
+// first. Playing, Sounding and Muted come from the audio sessions; without them (Windows refused) the apps are still
+// listed. Icons and version resources are cached per executable; an icon that cannot be read, or is not read within
+// iconBudget, is nil until a later List reads it. Name is never empty (values.DisplayName): the known name, the
+// version resource read within iconBudget, else the executable name.
 func (a *Apps) List(ctx context.Context) ([]values.AudioApp, error) {
 	return bounded(ctx, a, opList, func() ([]values.AudioApp, error) {
 		began := a.now()
@@ -354,7 +371,9 @@ func (a *Apps) List(ctx context.Context) ([]values.AudioApp, error) {
 		found := appsOf(snap, maxApps)
 		out := make([]values.AudioApp, 0, len(found))
 		for _, c := range found {
-			c.app.IconPNG = a.iconOf(c.root.pid, a.now().Sub(began) < iconBudget)
+			read := a.now().Sub(began) < iconBudget
+			c.app.IconPNG = a.iconOf(c.root.pid, read)
+			c.app.Name = a.nameOf(c.app.App, c.root.pid, read)
 			out = append(out, c.app)
 		}
 		return out, nil
@@ -437,6 +456,33 @@ func (a *Apps) iconOf(pid uint32, read bool) []byte {
 	}
 	a.icons[id.image] = icon
 	return icon
+}
+
+// nameOf returns the readable name of app, reading the version resource of the executable of pid first when read is
+// true and it is not cached. A known name needs no read.
+func (a *Apps) nameOf(app shared.AppName, pid uint32, read bool) string {
+	if name, ok := values.KnownAppName(app); ok {
+		return name
+	}
+	var v appVersion
+	if id, err := a.platform.inspect(pid); err == nil && id.image != "" {
+		a.mu.Lock()
+		cached, ok := a.names[id.image]
+		a.mu.Unlock()
+		switch {
+		case ok:
+			v = cached
+		case read:
+			v.description, v.product = a.platform.describe(id.image)
+			a.mu.Lock()
+			if len(a.names) >= maxNameCache {
+				clear(a.names)
+			}
+			a.names[id.image] = v // also when empty: an executable without a version resource keeps none
+			a.mu.Unlock()
+		}
+	}
+	return values.DisplayName(app, v.description, v.product)
 }
 
 // bounded runs f on its own goroutine, one call of a at a time, and gives up after a.timeout or when ctx ends. A

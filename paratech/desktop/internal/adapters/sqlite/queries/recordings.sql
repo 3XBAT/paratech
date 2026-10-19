@@ -7,10 +7,10 @@ SELECT * FROM recordings WHERE id = sqlc.arg(id);
 -- A never-stored recording (version 0) is inserted with version 1.
 -- name: InsertRecording :exec
 INSERT INTO recordings (id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms,
-                        chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at)
+                        chunk_count, chunks_ref, audio_ref, failure_reason, silent, version, created_at, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(lesson_id), sqlc.arg(status), sqlc.arg(started_at), sqlc.arg(stopped_at),
         sqlc.arg(heartbeat_at), sqlc.arg(max_duration_ms), sqlc.arg(duration_ms), sqlc.arg(chunk_count),
-        sqlc.arg(chunks_ref), sqlc.arg(audio_ref), sqlc.arg(failure_reason), 1, sqlc.arg(created_at),
+        sqlc.arg(chunks_ref), sqlc.arg(audio_ref), sqlc.arg(failure_reason), sqlc.arg(silent), 1, sqlc.arg(created_at),
         sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version (ADR-0004). The lesson, the cap, the chunk directory and the creation time
@@ -25,6 +25,7 @@ SET status         = sqlc.arg(status),
     chunk_count    = sqlc.arg(chunk_count),
     audio_ref      = sqlc.arg(audio_ref),
     failure_reason = sqlc.arg(failure_reason),
+    silent         = sqlc.arg(silent),
     version        = version + 1,
     updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
@@ -49,13 +50,15 @@ WHERE id IS NOT NULL
 ORDER BY created_at DESC, id DESC;
 
 -- Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
--- startup sweep that enqueues their transcription). Ids only: the caller loads each one and its aggregate decides.
+-- startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082). Ids only: the
+-- caller loads each one and its aggregate decides.
 -- name: ListUntranscribedRecordingIDs :many
 SELECT r.id FROM recordings r
 WHERE r.id IS NOT NULL
   AND r.id > sqlc.arg(after)
   AND r.status = sqlc.arg(status)
   AND r.audio_ref IS NOT NULL
+  AND r.silent = 0
   AND NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.recording_id = r.id)
 ORDER BY r.id
 LIMIT sqlc.arg(max_rows);

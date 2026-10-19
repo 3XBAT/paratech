@@ -9,7 +9,9 @@
 .picker .letter { display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--neu-b); color: var(--neu-t); font-size: 11.5px; font-weight: 600; }
 .picker .letter.whole { font-size: 8px; }
 .picker .mark { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: var(--r-chip); font-size: 11.5px; font-weight: 600; line-height: 16px; }
-.picker .mark.playing { background: var(--ok-b); color: var(--ok-t); }
+/* «звук идёт» (TASK-082) must stand out: the one mark that tells which app really plays. */
+.picker .mark.sounding { display: inline-flex; align-items: center; gap: 3px; border-color: var(--ok-t); background: var(--ok-b); color: var(--ok-t); }
+.picker .mark .i { width: 12px; height: 12px; stroke-width: 2.2; }
 .picker .mark.muted, .picker .mark.gone { background: var(--rec-b); color: var(--rec-t); border-style: dashed; }
 .picker .caret { width: 16px; height: 16px; color: var(--muted); }
 .picker .backdrop { position: fixed; inset: 0; z-index: 1; }

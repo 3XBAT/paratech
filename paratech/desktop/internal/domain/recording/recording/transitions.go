@@ -40,6 +40,10 @@ func (s Status) InProgress() bool {
 	return s.Valid() && !s.IsTerminal() && s != StatusRecoveryRequired
 }
 
+// CanSwitchSource reports whether the user may switch a recording in status s to another source (TASK-082): only
+// while it is captured. The session keeps the source; the recording goes on with the same chunks.
+func (s Status) CanSwitchSource() bool { return s == StatusRecording }
+
 // UnfinishedStatuses returns the non-terminal statuses, for the startup recovery of interrupted recordings.
 func UnfinishedStatuses() []Status {
 	var out []Status

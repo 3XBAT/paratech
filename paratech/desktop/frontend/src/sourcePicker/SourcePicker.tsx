@@ -81,15 +81,24 @@ function SourceRow({ option }: { option: SourceOption }) {
       <span className="name">{option.name}</span>
       {option.gone && <span className="mark gone">{sourceMarks.gone}</span>}
       {option.muted && <span className="mark muted">{sourceMarks.muted}</span>}
-      {option.playing && <span className="mark playing">{sourceMarks.playing}</span>}
+      {option.sounding && (
+        <span className="mark sounding">
+          <Icon name="wave" />
+          {sourceMarks.sounding}
+        </span>
+      )}
     </>
   );
 }
 
-/** The warnings about the chosen source and, if asked, the general advice: small plain text under the picker. */
+/**
+ * Why the app is chosen (by sound), the warnings about the chosen source and, if asked, the general advice: small
+ * plain text under the picker.
+ */
 export function SourceNotes(props: { picker: PickerModel; advice?: boolean }) {
   return (
     <>
+      {props.picker.autoNote !== "" && <p className="small picker-auto">{props.picker.autoNote}</p>}
       {props.picker.warnings.map((w) => (
         <p key={w} className="small picker-warning">
           {w}

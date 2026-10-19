@@ -206,7 +206,12 @@ func TestPickedSourceIsRememberedOnSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if src, err = sc.prompts.Sources(ctx); err != nil || src.Selected != zoom || src.Remembered != "zoom.exe" {
+	// TASK-082: while zoom is silent and chrome alone plays, chrome is preselected instead, marked as such.
+	if src, err = sc.prompts.Sources(ctx); err != nil || src.Selected.App() != "chrome.exe" || !src.AutoSelected || src.Remembered != "zoom.exe" {
+		t.Fatalf("Sources after the start = %+v, %v; want chrome preselected because it plays", src, err)
+	}
+	sc.apps.Set(values.AudioApp{App: "zoom.exe", Title: "Zoom Meeting", PID: 300}, values.AudioApp{App: "chrome.exe", PID: 200})
+	if src, err = sc.prompts.Sources(ctx); err != nil || src.Selected != zoom || src.AutoSelected || src.Remembered != "zoom.exe" {
 		t.Fatalf("Sources after the start = %+v, %v; want zoom preselected", src, err)
 	}
 	sc.apps.Set(values.AudioApp{App: "chrome.exe", PID: 200})

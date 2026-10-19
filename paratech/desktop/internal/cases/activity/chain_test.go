@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -310,6 +311,25 @@ func TestChainCoversEveryRecordingStatus(t *testing.T) {
 	for _, s := range recording.Statuses() {
 		if got := chainOf(recordingIn(t, s), nil); got.Stage == "" {
 			t.Errorf("%s has no stage", s)
+		}
+	}
+}
+
+// TASK-082: a silent recording is not transcribed: its row says so and offers the sound check, whatever its jobs.
+func TestChainOfSilentRecording(t *testing.T) {
+	r := recordingIn(t, recording.StatusFinalizing)
+	track, err := r.TrackRef("wav")
+	must(t, err)
+	must(t, r.CompleteTrack(t0.Add(2*time.Hour), track, values.AssembledTrack{Duration: time.Hour, Seconds: 3600}))
+
+	want := Chain{Stage: StageFailed, ErrorCode: ErrorSilentRecording, Action: ActionCheckSound}
+	for _, jobs := range [][]*job.Job{
+		nil,
+		{jobIn(t, "stt", job.Type("stt"), time.Hour, job.StatusFailed)},
+		{jobIn(t, "stt", job.Type("stt"), time.Hour, job.StatusRunning)},
+	} {
+		if got := chainOf(r, jobs); got != want {
+			t.Fatalf("chain %+v, want %+v", got, want)
 		}
 	}
 }

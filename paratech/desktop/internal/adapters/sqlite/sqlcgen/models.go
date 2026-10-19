@@ -119,6 +119,7 @@ type Recording struct {
 	Version       int64
 	CreatedAt     int64
 	UpdatedAt     int64
+	Silent        int64
 }
 
 type ScheduleEntry struct {

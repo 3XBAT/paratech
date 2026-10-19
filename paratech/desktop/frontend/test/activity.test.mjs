@@ -27,7 +27,7 @@ const recording = {
   id: "r1", lessonId: "l1", title: "История", status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
   stage: "queued", step: "transcription", progressPercent: 0, queueReason: "power", errorCode: "", jobError: "",
-  action: "runNow", actionJobId: "j1", remainingSeconds: 1500, hasRemaining: true,
+  action: "runNow", actionJobId: "j1", remainingSeconds: 1500, hasRemaining: true, advice: null,
 };
 const job = {
   id: "j1", type: "stt", status: "WAITING_FOR_POWER", waiting: true, attempts: 0, maxAttempts: 3, progressPercent: 0,

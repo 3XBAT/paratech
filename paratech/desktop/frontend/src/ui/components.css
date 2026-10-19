@@ -130,6 +130,7 @@
 .rows > .row { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .row .t { margin: 0; font-weight: 600; }
 .row-main { min-width: 0; }
+.row-below { grid-column: 1 / -1; min-width: 0; }
 .st { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 6px; }
 .acts.start { justify-content: start; }

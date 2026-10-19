@@ -9,5 +9,9 @@
 // recording prompt (cases/recordingprompt) starts nothing before it. Not here yet: the UI action that offers a recording
 // kept for recovery to the user.
 //
+// While a recording of one app runs, the session also watches for the silent-source advice (advice.go, TASK-082): the
+// capture hears nothing while another app plays; SwitchSource moves the same recording to another source and
+// DismissAdvice hides the advice. A track that is silent all along is marked so and not transcribed.
+//
 // Rules that apply: ARCH-20..27. The state machine of a recording lives in the recording aggregate, not here.
 package recordingsession

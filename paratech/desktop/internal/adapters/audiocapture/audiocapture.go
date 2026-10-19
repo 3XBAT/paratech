@@ -29,6 +29,11 @@ func (Unavailable) Stop(context.Context, shared.RecordingID) error { return ErrU
 // Wait has no capture to wait for.
 func (Unavailable) Wait(context.Context, shared.RecordingID) error { return ErrUnavailable }
 
+// Switch has no capture to switch.
+func (Unavailable) Switch(context.Context, shared.RecordingID, values.Source) error {
+	return ErrUnavailable
+}
+
 // Diagnostics knows no capture.
 func (Unavailable) Diagnostics(context.Context, shared.RecordingID) (values.CaptureDiagnostics, bool) {
 	return values.CaptureDiagnostics{}, false
@@ -40,6 +45,6 @@ func (Unavailable) CheckLevels(context.Context, values.Source, time.Duration, fu
 }
 
 // Finalize cannot assemble the chunks; the recording stays for a later recovery.
-func (Unavailable) Finalize(context.Context, shared.ArtifactRef, shared.ArtifactRef) (time.Duration, error) {
-	return 0, ErrUnavailable
+func (Unavailable) Finalize(context.Context, shared.ArtifactRef, shared.ArtifactRef) (values.AssembledTrack, error) {
+	return values.AssembledTrack{}, ErrUnavailable
 }

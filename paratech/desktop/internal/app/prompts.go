@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/recordingprompt"
@@ -36,6 +37,21 @@ func (p promptRecordings) StartRecording(ctx context.Context, lesson shared.Less
 	return info.ID, err
 }
 
+// adviceRelay is the AdviceListener of the recording session: it hands the silent-source advice to the recording
+// prompt, which shows it in the popup (TASK-082). The prompt is wired after the session and only in UI mode; until
+// then, and headless, the advice is only kept by the session.
+type adviceRelay struct {
+	prompts atomic.Pointer[recordingprompt.Service]
+}
+
+// SourceAdviceChanged forwards the advice to the prompt, if any.
+func (r *adviceRelay) SourceAdviceChanged(ctx context.Context, id shared.RecordingID, advice values.SourceAdvice) error {
+	if p := r.prompts.Load(); p != nil {
+		return p.SourceAdviceChanged(ctx, id, advice)
+	}
+	return nil
+}
+
 // wirePrompts builds the recording prompt on popup and the scheduler that feeds it. UI mode only: headless has no
 // popup, and a scheduler there would mark the announcements as made without showing anything.
 func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger) error {
@@ -56,6 +72,7 @@ func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger)
 
 	c.prompts, c.scheduler = prompts, sched
 	c.ui.Prompt = prompts
+	c.advice.prompts.Store(prompts)
 	return nil
 }
 

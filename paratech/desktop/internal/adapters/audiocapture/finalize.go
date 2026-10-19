@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"time"
+	"math"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -47,30 +48,63 @@ type segment struct {
 }
 
 // assemble writes the readable final chunks of dir, in name order, as one 16 kHz mono 16-bit WAV track and returns
-// its duration (frames / rate). Temporary and broken chunks are skipped and left on disk; without a readable chunk
-// the error wraps recording.ErrNoAudio. Other errors are transient. It reads the chunks twice (check and count, then
-// convert) and streams the track, so memory does not grow with the recording.
-func assemble(ctx context.Context, files TrackFiles, dir, output shared.ArtifactRef, log *slog.Logger) (time.Duration, error) {
+// its duration (frames / rate) and how many of its seconds are audible (TASK-082: a silent recording). Temporary and
+// broken chunks are skipped and left on disk; without a readable chunk the error wraps recording.ErrNoAudio. Other
+// errors are transient. It reads the chunks twice (check and count, then convert) and streams the track, so memory
+// does not grow with the recording.
+func assemble(ctx context.Context, files TrackFiles, dir, output shared.ArtifactRef, log *slog.Logger) (values.AssembledTrack, error) {
 	segs, total, err := scanChunks(ctx, files, dir, log)
 	if err != nil {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
 	if total == 0 {
-		return 0, fmt.Errorf("audiocapture: %s: %w in %s", opAssemble, recording.ErrNoAudio, dir)
+		return values.AssembledTrack{}, fmt.Errorf("audiocapture: %s: %w in %s", opAssemble, recording.ErrNoAudio, dir)
 	}
 	if total*int64(trackFormat().BlockAlign()) > maxDataBytes(trackFormat()) {
-		return 0, fmt.Errorf("audiocapture: %s: %d frames exceed the WAV size limit", opAssemble, total)
+		return values.AssembledTrack{}, fmt.Errorf("audiocapture: %s: %d frames exceed the WAV size limit", opAssemble, total)
 	}
 
 	tr := &trackReader{ctx: ctx, files: files, segs: segs, total: total}
 	defer tr.close()
 	if err := files.Write(ctx, output, tr); err != nil {
-		return 0, fmt.Errorf("audiocapture: %s: %w", opAssemble, err)
+		return values.AssembledTrack{}, fmt.Errorf("audiocapture: %s: %w", opAssemble, err)
 	}
 	if tr.written != total {
-		return 0, fmt.Errorf("audiocapture: %s: wrote %d of %d frames", opAssemble, tr.written, total)
+		return values.AssembledTrack{}, fmt.Errorf("audiocapture: %s: wrote %d of %d frames", opAssemble, tr.written, total)
 	}
-	return durationOf(total, TrackRate), nil
+	tr.loud.close()
+	return values.AssembledTrack{
+		Duration: durationOf(total, TrackRate), Seconds: tr.loud.seconds, AudibleSeconds: tr.loud.audible,
+	}, nil
+}
+
+// loudness counts the one-second windows of the track and those whose peak reaches values.HeardLevel.
+type loudness struct {
+	pos     int // samples of the open window
+	peak    float64
+	seconds int
+	audible int
+}
+
+func (l *loudness) add(samples []float32) {
+	for _, x := range samples {
+		l.peak = max(l.peak, math.Abs(float64(x)))
+		if l.pos++; l.pos == TrackRate {
+			l.close()
+		}
+	}
+}
+
+// close ends the open window, if any.
+func (l *loudness) close() {
+	if l.pos == 0 {
+		return
+	}
+	l.seconds++
+	if values.ClampSoundLevel(l.peak).Heard() {
+		l.audible++
+	}
+	l.pos, l.peak = 0, 0
 }
 
 // scanChunks validates the final chunks of dir and groups them into segments.
@@ -150,6 +184,7 @@ type trackReader struct {
 	segs    []segment
 	total   int64
 	written int64
+	loud    loudness
 
 	pending []byte
 	pos     int
@@ -273,6 +308,7 @@ func (t *trackReader) emit(s *segment, out []float32) {
 	}
 	t.produced += int64(len(out))
 	t.written += int64(len(out))
+	t.loud.add(out)
 	t.pending = appendPCM16(t.pending, out)
 }
 

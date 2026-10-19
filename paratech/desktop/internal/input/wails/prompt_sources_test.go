@@ -28,14 +28,15 @@ func TestPromptServiceSources(t *testing.T) {
 	small := pngIcon(64)
 	uc := &fakePrompt{sources: recordingprompt.Sources{
 		Apps: []values.AudioApp{
-			{App: "chrome.exe", Title: "<img src=x onerror=alert(1)>", PID: 7, Playing: true, IconPNG: small},
-			{App: "zoom.exe", Title: "Zoom", Muted: true, IconPNG: []byte("GIF89a")},
+			{App: "chrome.exe", Name: "Google Chrome", Title: "<img src=x onerror=alert(1)>", PID: 7, Playing: true, Sounding: true, IconPNG: small},
+			{App: "zoom.exe", Name: "Zoom", Title: "Zoom", Muted: true, IconPNG: []byte("GIF89a")},
 			{App: "teams.exe", IconPNG: pngIcon(maxIconBytes + 1)},
 			{App: "telemost.exe", IconPNG: pngIcon(maxIconBytes)},
 			{App: "obs64.exe", IconPNG: pngSignature[:4]},
 		},
-		Selected:   mustSource(t, "zoom.exe"),
-		Remembered: "zoom.exe",
+		Selected:     mustSource(t, "zoom.exe"),
+		AutoSelected: true,
+		Remembered:   "zoom.exe",
 	}}
 	got, err := NewPromptService(uc, discard()).Sources(context.Background())
 	if err != nil {
@@ -51,13 +52,14 @@ func TestPromptServiceSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"apps":[` +
-		`{"app":"chrome.exe","title":"\u003cimg src=x onerror=alert(1)\u003e","playing":true,"muted":false,"browser":true,` +
+		`{"app":"chrome.exe","name":"Google Chrome","title":"\u003cimg src=x onerror=alert(1)\u003e","playing":true,` +
+		`"sounding":true,"muted":false,"browser":true,` +
 		`"icon":"data:image/png;base64,` + base64.StdEncoding.EncodeToString(small) + `"},` +
-		`{"app":"zoom.exe","title":"Zoom","playing":false,"muted":true,"browser":false,"icon":""},` +
-		`{"app":"teams.exe","title":"","playing":false,"muted":false,"browser":false,"icon":""},` +
-		`{"app":"telemost.exe","title":"","playing":false,"muted":false,"browser":false,"icon":"max"},` +
-		`{"app":"obs64.exe","title":"","playing":false,"muted":false,"browser":false,"icon":""}],` +
-		`"selected":"zoom.exe","remembered":"zoom.exe","listError":false}`
+		`{"app":"zoom.exe","name":"Zoom","title":"Zoom","playing":false,"sounding":false,"muted":true,"browser":false,"icon":""},` +
+		`{"app":"teams.exe","name":"","title":"","playing":false,"sounding":false,"muted":false,"browser":false,"icon":""},` +
+		`{"app":"telemost.exe","name":"","title":"","playing":false,"sounding":false,"muted":false,"browser":false,"icon":"max"},` +
+		`{"app":"obs64.exe","name":"","title":"","playing":false,"sounding":false,"muted":false,"browser":false,"icon":""}],` +
+		`"selected":"zoom.exe","autoSelected":true,"remembered":"zoom.exe","listError":false}`
 	if string(raw) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", raw, want)
 	}
@@ -69,7 +71,7 @@ func TestPromptServiceSourcesEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"apps":[],"selected":"","remembered":"","listError":false}`; string(raw) != want {
+	if want := `{"apps":[],"selected":"","autoSelected":false,"remembered":"","listError":false}`; string(raw) != want {
 		t.Fatalf("JSON = %s, want %s", raw, want)
 	}
 }
@@ -88,7 +90,7 @@ func TestPromptServiceSourcesListError(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := `{"apps":[],"selected":"","remembered":"zoom.exe","listError":true}`; string(raw) != want {
+		if want := `{"apps":[],"selected":"","autoSelected":false,"remembered":"zoom.exe","listError":true}`; string(raw) != want {
 			t.Fatalf("JSON = %s, want %s", raw, want)
 		}
 	}

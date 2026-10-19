@@ -420,17 +420,28 @@ func appNames(apps []values.AudioApp) []shared.AppName {
 	return out
 }
 
-// TASK-059: the picker lists the apps that play first and preselects the remembered app when it is open.
+// TASK-059: the picker lists the apps that play first and preselects the remembered app when it is open. TASK-082:
+// when the remembered app does not play and exactly one other app does, that one is preselected and marked.
 func TestSourcesSortsAndPreselects(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
-		name       string
-		remembered shared.AppName
-		selected   values.Source
+		name          string
+		remembered    shared.AppName
+		chromePlaying bool
+		selected      values.Source
+		auto          bool
 	}{
 		{name: "remembered app is open", remembered: "zoom.exe", selected: mustSource(t, "zoom.exe")},
 		{name: "remembered app is closed", remembered: "ms-teams.exe", selected: values.WholeComputer()},
-		{name: "whole computer remembered", remembered: "", selected: values.WholeComputer()},
+		{name: "whole computer remembered", remembered: "", chromePlaying: true, selected: values.WholeComputer()},
+		{
+			name: "remembered app is silent, chrome plays", remembered: "zoom.exe", chromePlaying: true,
+			selected: mustSource(t, "chrome.exe"), auto: true,
+		},
+		{
+			name: "remembered app is closed, chrome plays", remembered: "ms-teams.exe", chromePlaying: true,
+			selected: mustSource(t, "chrome.exe"), auto: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -438,7 +449,7 @@ func TestSourcesSortsAndPreselects(t *testing.T) {
 			e.settings.source = tt.remembered
 			e.apps.set(nil,
 				values.AudioApp{App: "zoom.exe", Title: "Zoom Meeting", PID: 10},
-				values.AudioApp{App: "chrome.exe", Title: "Lecture - YouTube", PID: 20, Playing: true},
+				values.AudioApp{App: "chrome.exe", Title: "Lecture - YouTube", PID: 20, Playing: tt.chromePlaying, Sounding: tt.chromePlaying},
 				values.AudioApp{App: "notepad.exe", Title: "Notes", PID: 30},
 			)
 			got, err := e.svc.Sources(ctx)
@@ -448,8 +459,9 @@ func TestSourcesSortsAndPreselects(t *testing.T) {
 			if want := []shared.AppName{"chrome.exe", "notepad.exe", "zoom.exe"}; !slices.Equal(appNames(got.Apps), want) {
 				t.Fatalf("apps %v, want %v", appNames(got.Apps), want)
 			}
-			if got.Selected != tt.selected || got.Remembered != tt.remembered {
-				t.Fatalf("selected %v, remembered %q; want %v, %q", got.Selected, got.Remembered, tt.selected, tt.remembered)
+			if got.Selected != tt.selected || got.AutoSelected != tt.auto || got.Remembered != tt.remembered {
+				t.Fatalf("selected %v (auto %v), remembered %q; want %v (auto %v), %q", got.Selected, got.AutoSelected,
+					got.Remembered, tt.selected, tt.auto, tt.remembered)
 			}
 		})
 	}

@@ -25,13 +25,19 @@ func TestLiveApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	playing, icons, titled := 0, 0, 0
+	playing, sounding, icons, titled := 0, 0, 0, 0
 	for _, a := range list {
 		if a.Title != "" {
 			titled++
 		}
 		if a.Playing {
 			playing++
+		}
+		if a.Sounding {
+			sounding++
+		}
+		if a.Name == "" {
+			t.Errorf("%s has no name", a.App)
 		}
 		if a.IconPNG != nil {
 			icons++
@@ -44,7 +50,8 @@ func TestLiveApps(t *testing.T) {
 		if same, err := apps.Same(ctx, id); err != nil || !same {
 			t.Errorf("Same(%s) = %v, %v", a.App, same, err)
 		}
-		t.Logf("%s: pid %d, playing %v, muted %v, icon %d bytes", a.App, a.PID, a.Playing, a.Muted, len(a.IconPNG))
+		t.Logf("%s (%q): pid %d, playing %v, sounding %v, muted %v, icon %d bytes", a.App, a.Name, a.PID, a.Playing,
+			a.Sounding, a.Muted, len(a.IconPNG))
 	}
-	t.Logf("%d apps, %d playing, %d with an icon, %d with a title", len(list), playing, icons, titled)
+	t.Logf("%d apps, %d playing, %d sounding, %d with an icon, %d with a title", len(list), playing, sounding, icons, titled)
 }

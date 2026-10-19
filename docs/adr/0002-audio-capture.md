@@ -141,6 +141,20 @@ stop end to end, Bluetooth/HFP, sleep/resume, privacy toggle, 3 h, Defender/Smar
   succeeds for a dead PID, so check liveness. Exclude our own process. Open links via `explorer.exe` so the browser is not in
   our tree. Show the mute advice and the "same browser" hint.
   Done: popup picker (marks, 3 s refresh, advice), remembered by exe, re-bind by exe while recording; checks: `docs/qa/compat-matrix.md` (moved from `docs/qa/run-alpha.md` in TASK-058).
+- **TASK-082 (empty recordings):** owner case: a video in Comet, Yandex Browser chosen, three recordings of zeros.
+  - Names: known list (`values.KnownAppName`), else FileDescription / ProductName of the exe (version resource), else
+    the exe name; cleaned and bounded. The exe name is only a tooltip.
+  - Picker: "sounding" = a session meter > 1e-4 now (as the mute detector); sounding apps first. If the remembered app
+    is silent or closed and exactly one other app sounds, that one is preselected and marked.
+  - Advice: while an app is recorded and the child's audible packets (peak ≥ 0.01) do not grow, the session lists the
+    apps every 5 s (nothing is written); after 15 s of silence while another app sounds it advises a switch
+    (one app, or the whole computer when several sound). «Оставить» hides it until the suggestion changes or the
+    source is heard again. Shown in the row and in the popup (no focus).
+  - Switch: the same recording, the same chunk directory and numbering; the target is resolved first (on failure
+    nothing changes), then the child is stopped and the next one captures the new target; one child at a time; a
+    child that does not start goes back to the old source. Not a fallback; counted in `SourceSwitches`.
+  - Silent track: the assembly counts audible 1-s windows; fewer than 3 or under 1 % = silent (`recordings.silent`,
+    migration 0012): no transcription, the row shows «Запись без звука» with «Проверить звук».
 - **CI:** builds `CGO_ENABLED=0`; runners have no audio device, so live audio checks stay manual (TASK-016, compat matrix).
 
 ## Verification (TASK-016, owner, Windows 10 19045)

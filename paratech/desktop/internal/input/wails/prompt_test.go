@@ -35,9 +35,15 @@ type fakePrompt struct {
 	manual    recordingprompt.Manual
 	manualErr error
 	selectErr error
+
+	advice recordingprompt.Advice
 }
 
 func (f *fakePrompt) Current() (recordingprompt.View, bool) { return f.view, f.has }
+
+func (f *fakePrompt) Advice() (recordingprompt.Advice, bool) {
+	return f.advice, !f.advice.Advice.IsZero()
+}
 
 func (f *fakePrompt) Sources(context.Context) (recordingprompt.Sources, error) {
 	f.calls = append(f.calls, "sources")
@@ -261,15 +267,15 @@ func TestFrontendKnowsPromptErrors(t *testing.T) {
 	}
 }
 
-// Every exported method is callable from the pages: the four the popup uses (no Snooze since TASK-076) and the
-// source picker and start of the main window (TASK-081).
+// Every exported method is callable from the pages: the four the popup uses (no Snooze since TASK-076), the source
+// picker and start of the main window (TASK-081) and the silent-source advice of the popup (TASK-082).
 func TestPromptServiceMethodSet(t *testing.T) {
 	typ := reflect.TypeFor[*PromptService]()
 	var got []string
 	for i := range typ.NumMethod() {
 		got = append(got, typ.Method(i).Name)
 	}
-	if want := []string{"Current", "SelectSource", "Skip", "Sources", "Start", "StartRecording"}; !slices.Equal(got, want) {
+	if want := []string{"Advice", "Current", "SelectSource", "Skip", "Sources", "Start", "StartRecording"}; !slices.Equal(got, want) {
 		t.Fatalf("exported methods %v, want %v", got, want)
 	}
 }

@@ -39,6 +39,8 @@
     "src/popup/view.ts",
     "src/sourcePicker/view.ts",
     "src/sourcePicker/SourcePicker.tsx",
+    "src/sourcePicker/advice.ts",
+    "src/sourcePicker/SourceAdvice.tsx",
     "src/manualStartView.ts",
     "src/nav.ts",
     "src/listView.ts",

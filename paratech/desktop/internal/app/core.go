@@ -90,6 +90,8 @@ type core struct {
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
 	prompts   *recordingprompt.Service
+	// advice hands the silent-source advice of the recordings to the prompts once they are wired (TASK-082).
+	advice adviceRelay
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -239,6 +241,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	c.recordings, err = recordingsession.New(recordingsession.Deps{
 		Recordings: recordings, Transcripts: sqlite.NewRecordingTranscripts(db), Recorder: recorder,
 		Artifacts: store, Tx: db, Clock: e.clock, Sleeper: e.clock, IDs: e.ids, Completions: c.transcriptions, Log: log,
+		Apps: e.apps(log), Advice: &c.advice,
 	}, e.recordings)
 	if err != nil {
 		return fmt.Errorf("app: recordings: %w", err)

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
@@ -16,7 +16,7 @@ func stateOf(r *recording.Recording) recording.State {
 	d, _ := r.Duration()
 	return recording.State{
 		Version: r.Version(), ID: r.ID(), LessonID: r.LessonID(), Status: r.Status(), MaxDuration: r.MaxDuration(),
-		Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Problem: r.Problem(),
+		Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Silent: r.Silent(), Problem: r.Problem(),
 		StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(), HeartbeatAt: r.HeartbeatAt(),
 		CreatedAt: r.CreatedAt(), UpdatedAt: r.UpdatedAt(),
 	}
@@ -189,6 +189,26 @@ type hookRecorder struct {
 	stopCause     error         // context.Cause seen by the hanging Stop
 	finalizeFails []error       // errors returned by the next Finalize calls, one each
 	finalizes     int           // Finalize calls, failed ones included
+	switchThen    error         // returned by the next Switch after it switched, as one whose caller gave up late
+}
+
+// switchesThenFails makes the next Switch switch and then return err.
+func (h *hookRecorder) switchesThenFails(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.switchThen = err
+}
+
+func (h *hookRecorder) Switch(ctx context.Context, id shared.RecordingID, source values.Source) error {
+	h.mu.Lock()
+	err := h.switchThen
+	h.switchThen = nil
+	h.mu.Unlock()
+
+	if serr := h.FakeRecorder.Switch(ctx, id, source); serr != nil || err == nil {
+		return serr
+	}
+	return err
 }
 
 // hangStops makes the next Stop calls block until their context ends; the channel closes when the first one enters.
@@ -233,7 +253,7 @@ func (h *hookRecorder) failFinalizes(errs ...error) {
 	h.finalizeFails = append(h.finalizeFails, errs...)
 }
 
-func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (time.Duration, error) {
+func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.ArtifactRef) (values.AssembledTrack, error) {
 	h.mu.Lock()
 	h.finalizes++
 	var err error
@@ -243,7 +263,7 @@ func (h *hookRecorder) Finalize(ctx context.Context, chunks, output shared.Artif
 	h.mu.Unlock()
 
 	if err != nil {
-		return 0, err
+		return values.AssembledTrack{}, err
 	}
 	return h.FakeRecorder.Finalize(ctx, chunks, output)
 }

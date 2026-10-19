@@ -9,6 +9,8 @@ import (
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingsession"
+	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -29,10 +31,21 @@ type ActivityUseCase interface {
 	ListJobs(ctx context.Context) ([]activity.Job, error)
 }
 
-// RecordingStopper stops a recording; satisfied by recordingsession.Service.
+// RecordingStopper controls the running recording: stop, the silent-source advice and the switch of its source
+// (TASK-082); satisfied by recordingsession.Service.
 type RecordingStopper interface {
 	Stop(ctx context.Context, id shared.RecordingID) (recordingsession.Info, error)
+	Active() (recordingsession.Info, bool)
+	SwitchSource(ctx context.Context, id shared.RecordingID, source values.Source) error
+	DismissAdvice(ctx context.Context, id shared.RecordingID) error
 }
+
+// Problems of SourceSwitch.
+const (
+	switchSourceGone = "source_gone" // the chosen app does not run
+	switchRefused    = "refused"     // the recording cannot switch now (stopping, or another switch runs)
+	switchFailed     = "failed"      // the capture of the new source did not start
+)
 
 // JobForcer is the "Run now" action; satisfied by jobrunner.Service.
 type JobForcer interface {
@@ -65,7 +78,8 @@ type RecordingItem struct {
 	// QueueReason of a queued chain: inLine, retry, power, network, quota, serviceNotConfigured (the Hub has no address
 	// or key; action openConnections) or serviceUnavailable (the Hub does not answer; retried automatically).
 	QueueReason string `json:"queueReason"`
-	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed or homeworkFailed.
+	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed, homeworkFailed or
+	// silentRecording (the track is silent: «Запись без звука», TASK-082).
 	ErrorCode string `json:"errorCode"`
 	// JobError is the last error of the job the stage refers to (failed or retrying); "" otherwise.
 	JobError string `json:"jobError"`
@@ -78,6 +92,29 @@ type RecordingItem struct {
 	// TASK-084); hasRemaining is false when there is none or no estimate.
 	RemainingSeconds int64 `json:"remainingSeconds"`
 	HasRemaining     bool  `json:"hasRemaining"`
+
+	// Advice is the silent-source advice of the running recording (TASK-082); null when none.
+	Advice *AdviceView `json:"advice"`
+}
+
+// AdviceView is the silent-source advice (TASK-082): «В <silentName> нет звука, звук идёт из <suggestName>.
+// Переключиться?»; for the whole computer «…звук идёт из других приложений… Записывать весь звук компьютера?». The
+// names are untrusted text: render as plain text only; the exe names belong in a tooltip.
+type AdviceView struct {
+	RecordingID string `json:"recordingId"`
+	SilentApp   string `json:"silentApp"`   // exe name of the chosen app
+	SilentName  string `json:"silentName"`  // its readable name
+	SuggestApp  string `json:"suggestApp"`  // exe name to switch to; "" = the whole computer
+	SuggestName string `json:"suggestName"` // its readable name; "" for the whole computer
+}
+
+// SourceSwitch is the answer of SwitchSource.
+type SourceSwitch struct {
+	Switched bool `json:"switched"`
+	// Problem says why not: "source_gone" (the app does not run any more), "refused" (the recording cannot switch
+	// now) or "failed" (the capture of the new source did not start); "" once switched. The recording goes on with its
+	// old source either way.
+	Problem string `json:"problem"`
 }
 
 // JobItem is the JSON form of one job. Times are RFC 3339 in UTC, empty when unknown.
@@ -117,6 +154,7 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 		s.log.Error("ui: list recordings", "err", err)
 		return nil, ErrActivityUnavailable
 	}
+	active, running := s.stopper.Active()
 	out := make([]RecordingItem, 0, len(recs))
 	for _, r := range recs {
 		c := r.Chain
@@ -129,8 +167,63 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 			ErrorCode: string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
 			RemainingSeconds: int64(r.Remaining.Round(time.Second) / time.Second), HasRemaining: r.HasRemaining,
 		})
+		if running && active.ID == r.ID {
+			out[len(out)-1].Advice = adviceView(active.ID, active.Advice)
+		}
 	}
 	return out, nil
+}
+
+// adviceView is the JSON form of an advice; nil for none.
+func adviceView(id shared.RecordingID, a values.SourceAdvice) *AdviceView {
+	if a.IsZero() {
+		return nil
+	}
+	return &AdviceView{
+		RecordingID: string(id), SilentApp: a.Silent.String(), SilentName: a.SilentName,
+		SuggestApp: a.Suggest.App().String(), SuggestName: a.SuggestName,
+	}
+}
+
+// SwitchSource switches the running recording id to app (an exe name; "" = the whole computer): the advice
+// «Переключиться» (TASK-082). The same recording goes on with the new source. A switch that cannot be done is no
+// error: the answer carries its problem and the recording keeps its source.
+func (s *ActivityService) SwitchSource(ctx context.Context, id, app string) (SourceSwitch, error) {
+	rid := shared.RecordingID(id)
+	if rid.Validate() != nil {
+		return SourceSwitch{}, ErrInvalidID
+	}
+	source, err := recordingSourceOf(app)
+	if err != nil {
+		return SourceSwitch{}, err
+	}
+	err = s.stopper.SwitchSource(ctx, rid, source)
+	switch {
+	case err == nil:
+		return SourceSwitch{Switched: true}, nil
+	case errors.Is(err, recording.ErrSourceNotRunning): // the use case logged it
+		return SourceSwitch{Problem: switchSourceGone}, nil
+	case errors.Is(err, recordingsession.ErrSwitchFailed):
+		return SourceSwitch{Problem: switchFailed}, nil
+	case errors.Is(err, recordingsession.ErrSwitchRefused):
+		return SourceSwitch{Problem: switchRefused}, nil
+	case errors.Is(err, recordingsession.ErrNotRunning):
+		return SourceSwitch{}, ErrRecordingNotRunning
+	}
+	return SourceSwitch{}, s.actionError("switch the recording source", err)
+}
+
+// DismissAdvice hides the advice of the running recording id until it changes («Оставить», TASK-082).
+func (s *ActivityService) DismissAdvice(ctx context.Context, id string) error {
+	rid := shared.RecordingID(id)
+	if rid.Validate() != nil {
+		return ErrInvalidID
+	}
+	err := s.stopper.DismissAdvice(ctx, rid)
+	if errors.Is(err, recordingsession.ErrNotRunning) {
+		return ErrRecordingNotRunning
+	}
+	return s.actionError("dismiss the source advice", err)
 }
 
 // ListJobs returns the newest jobs, newest first, without the service jobs and the jobs of the recording chain

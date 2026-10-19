@@ -48,8 +48,9 @@ export const wholeComputerName = "Весь звук компьютера";
 /** Placeholder of the whole-computer entry in place of an icon. */
 export const wholeComputerBadge = "ПК";
 
+/** Marks of an entry. Only sounding apps are marked: an open audio session alone may well be silent (TASK-082). */
 export const sourceMarks = {
-  playing: "звучит",
+  sounding: "звук идёт",
   muted: "звук выключен в микшере",
   gone: "приложение закрыто",
 } as const;
@@ -61,6 +62,9 @@ export const adviceTexts = {
   muted: "Звук этого приложения выключен в микшере Windows: запись будет пустой. Включите его и убавьте общую громкость.",
   listError: "Список приложений недоступен, можно записать весь звук компьютера.",
 } as const;
+
+/** Said under the picker when the core chose the app because it plays while the remembered one does not. */
+export const autoSelectedNote = "Выбрано: звук идёт отсюда.";
 
 /** How often the open apps are listed again while a picker is shown. */
 export const refreshMs = 3000;
@@ -80,12 +84,21 @@ export function chooseSource(app: string): Selection {
 }
 
 /**
- * The selection of a start after a new picker reply (popup, «Начать запись»). The user's choice wins; otherwise the
- * remembered app is taken as soon as it is listed, an app taken before is kept (it may only be restarting), and else
- * the core's preselection.
+ * The selection of a start after a new picker reply (popup, «Начать запись»). The user's choice wins; then the core's
+ * preselection of the app that plays while the remembered one does not (TASK-082), kept while that app is open so a
+ * pause in its sound does not switch back; otherwise the remembered app is taken as soon as it is listed, an app taken
+ * before is kept (it may only be restarting), and else the core's preselection.
  */
 export function nextSelection(prev: Selection, sources: SourcesView): Selection {
   if (prev.explicit) {
+    return prev;
+  }
+  if (sources.autoSelected) {
+    return { app: sources.selected, explicit: false };
+  }
+  // A non-explicit app other than the remembered one can only come from the preselection above.
+  const listed = (app: string) => sources.apps.some((a) => a.app === app);
+  if (prev.app !== "" && prev.app !== sources.remembered && listed(prev.app)) {
     return prev;
   }
   if (sources.remembered !== "" && sources.apps.some((a) => a.app === sources.remembered)) {
@@ -107,22 +120,23 @@ export function savedSelection(sources: SourcesView | null, saving: string | nul
 
 /** What a failed list call is taken as: only the whole computer, the remembered source kept from the last reply. */
 export function failedSources(prev: SourcesView | null): SourcesView {
-  return { apps: [], selected: "", remembered: prev?.remembered ?? "", listError: true };
+  return { apps: [], selected: "", autoSelected: false, remembered: prev?.remembered ?? "", listError: true };
 }
 
 /** One entry of the picker. */
 export interface SourceOption {
   /** Exe name; "" for the whole computer. */
   app: string;
-  /** What the entry shows: the window title, else the exe name. */
+  /** What the entry shows: the readable app name (TASK-082). */
   name: string;
-  /** Hover text: the title with the exe name. */
+  /** Hover text: the name, the window title and the exe name. */
   hint: string;
   /** Validated PNG data URL or "". */
   icon: string;
   /** Shown in place of a missing icon. */
   letter: string;
-  playing: boolean;
+  /** Its sound plays right now: the «звук идёт» mark. */
+  sounding: boolean;
   muted: boolean;
   browser: boolean;
   /** The chosen app is not in the list any more. */
@@ -131,7 +145,7 @@ export interface SourceOption {
 
 const wholeComputer: SourceOption = {
   app: "", name: wholeComputerName, hint: wholeComputerName, icon: "", letter: wholeComputerBadge,
-  playing: false, muted: false, browser: false, gone: false,
+  sounding: false, muted: false, browser: false, gone: false,
 };
 
 function firstLetter(name: string): string {
@@ -139,17 +153,26 @@ function firstLetter(name: string): string {
   return first.toUpperCase();
 }
 
-/** The entries of the picker: the whole computer first, then the apps in the core's order. */
+/** Hover text of an app: its name, the window title when it says more, and the exe name in brackets. */
+export function sourceHint(name: string, title: string, app: string): string {
+  const t = title.trim();
+  const label = t !== "" && t !== name ? `${name} — ${t}` : name;
+  return label === app ? app : `${label} (${app})`;
+}
+
+/**
+ * The entries of the picker: the whole computer first, then the apps in the core's order (sounding ones first; the
+ * page does not re-sort them).
+ */
 export function sourceOptions(sources: SourcesView | null): SourceOption[] {
   const apps = sources?.apps ?? [];
   return [
     wholeComputer,
     ...apps.map((a): SourceOption => {
-      const title = a.title.trim();
-      const name = title || a.app;
+      const name = a.name.trim() || a.app;
       return {
-        app: a.app, name, hint: title ? `${title} (${a.app})` : a.app, icon: a.icon, letter: firstLetter(name),
-        playing: a.playing, muted: a.muted, browser: a.browser, gone: false,
+        app: a.app, name, hint: sourceHint(name, a.title, a.app), icon: a.icon, letter: firstLetter(name),
+        sounding: a.sounding, muted: a.muted, browser: a.browser, gone: false,
       };
     }),
   ];
@@ -161,6 +184,8 @@ export interface PickerModel {
   chosen: SourceOption;
   /** Warnings about the chosen source, most important first. */
   warnings: string[];
+  /** autoSelectedNote when the chosen app is the core's choice by sound, else "". */
+  autoNote: string;
   /** The small general advice, always shown. */
   advice: string;
 }
@@ -186,7 +211,10 @@ export function pickerModel(sources: SourcesView | null, selection: Selection): 
   if (sources?.listError) {
     warnings.push(adviceTexts.listError);
   }
-  return { options, chosen, warnings, advice: adviceTexts.always };
+  // Not the user's choice and not the remembered app: only the preselection by sound picks that (nextSelection).
+  const auto = sources !== null && !sources.listError && !selection.explicit && selection.app !== "" &&
+    selection.app !== sources.remembered && !chosen.gone;
+  return { options, chosen, warnings, autoNote: auto ? autoSelectedNote : "", advice: adviceTexts.always };
 }
 
 /** Timers the poller uses; the browser's in the page, fakes in tests. */

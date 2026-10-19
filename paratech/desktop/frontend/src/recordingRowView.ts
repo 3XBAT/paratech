@@ -105,12 +105,18 @@ export const stepTexts: Readonly<Record<Exclude<ChainStep, "">, string>> = {
   summary: "Дальше краткое содержание.",
 };
 
-export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "">, string>> = {
+export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRecording">, string>> = {
   recordingFailed: "Запись не удалась.",
   transcriptionFailed: "Не удалось расшифровать запись.",
   summaryFailed: "Не удалось сделать краткое содержание.",
   homeworkFailed: "Не удалось найти домашнее задание.",
 };
+
+/** A silent recording (TASK-082) has its own chip instead of «Ошибка»: nothing failed, the source played nothing. */
+export const silentTexts = {
+  label: "Запись без звука",
+  hint: "В записи нет звука — скорее всего, был выбран не тот источник. Проверьте звук перед следующим занятием.",
+} as const;
 
 export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = {
   runNow: "Запустить сейчас",
@@ -199,6 +205,12 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
       view.value = r.progressPercent > 0 ? `${r.progressPercent} %` : "";
       break;
     case "failed":
+      if (r.errorCode === "silentRecording") {
+        view.label = silentTexts.label;
+        view.kind = "wait";
+        view.hint = silentTexts.hint;
+        break;
+      }
       view.hint = own(errorTexts, r.errorCode) ?? "";
       break;
   }
