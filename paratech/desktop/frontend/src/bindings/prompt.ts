@@ -1,5 +1,7 @@
 // Recording prompt bindings: calls into the Go core (internal/input/wails/prompt.go). The core owns the prompt; the
-// popup only shows it and offers "Start recording" and "Do not record" (no snooze since TASK-076).
+// popup only shows it and offers "Start recording" and "Do not record" (no snooze since TASK-076). The main window uses
+// the same source picker: selectSource remembers the source (shared with the popup and the sound check) and
+// startRecording starts a recording without the popup (TASK-081).
 
 import type { CallByName } from "./settings";
 
@@ -45,12 +47,25 @@ export interface SourcesView {
   listError: boolean;
 }
 
+/** The answer of a start from the main window. */
+export interface RecordingStart {
+  started: boolean;
+  /** Why it did not start, with the codes of PromptView.problem ("in_progress" while a recording runs); "" once started. */
+  problem: string;
+  /** "" unless started. */
+  recordingId: string;
+  /** The recording belongs to the lesson in progress; otherwise it has no lesson. */
+  linked: boolean;
+}
+
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {
   current: "paratech/desktop/internal/input/wails.PromptService.Current",
   sources: "paratech/desktop/internal/input/wails.PromptService.Sources",
   start: "paratech/desktop/internal/input/wails.PromptService.Start",
   skip: "paratech/desktop/internal/input/wails.PromptService.Skip",
+  selectSource: "paratech/desktop/internal/input/wails.PromptService.SelectSource",
+  startRecording: "paratech/desktop/internal/input/wails.PromptService.StartRecording",
 } as const;
 
 /** Wails event the core emits each time it shows the popup; the page then reads the current prompt. */
@@ -128,6 +143,17 @@ export function parseSourcesView(raw: unknown): SourcesView {
   };
 }
 
+/** Checks the shape of a start from the main window; a malformed reply is an error, not a default. */
+export function parseRecordingStart(raw: unknown): RecordingStart {
+  const r = record(raw, "reply");
+  const started = bool(r, "started");
+  const problem = str(r, "problem");
+  if (started !== (problem === "")) {
+    throw new Error("prompt: started and problem disagree");
+  }
+  return { started, problem, recordingId: str(r, "recordingId"), linked: bool(r, "linked") };
+}
+
 /** Checks the shape of a prompt; a malformed reply is an error, not a default. */
 export function parsePromptView(raw: unknown): PromptView {
   if (typeof raw !== "object" || raw === null) {
@@ -156,6 +182,10 @@ export interface PromptApi {
   /** Starts recording from app (an exe name; "" = the whole computer). */
   start(id: string, app: string): Promise<PromptView>;
   skip(id: string): Promise<PromptView>;
+  /** Remembers app ("" = the whole computer) as the source of the next recordings and of the sound check. */
+  selectSource(app: string): Promise<void>;
+  /** Starts recording app ("" = the whole computer) without the popup; a refused start resolves with its problem. */
+  startRecording(app: string): Promise<RecordingStart>;
 }
 
 /** Builds the prompt API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -168,6 +198,10 @@ export function promptApi(call: CallByName): PromptApi {
     sources: async () => parseSourcesView(await call(methods.sources)),
     start: async (id, app) => parsePromptView(await call(methods.start, id, app)),
     skip: async (id) => parsePromptView(await call(methods.skip, id)),
+    selectSource: async (app) => {
+      await call(methods.selectSource, app);
+    },
+    startRecording: async (app) => parseRecordingStart(await call(methods.startRecording, app)),
   };
 }
 
