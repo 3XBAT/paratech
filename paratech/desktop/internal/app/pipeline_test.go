@@ -197,9 +197,10 @@ func TestLessonToAssignmentsThroughTheWiredCore(t *testing.T) {
 		t.Fatalf("STT job went %v, want QUEUED -> RUNNING -> COMPLETED (sampled)", chain)
 	}
 
-	// The transcript (id = the STT job id) feeds both Hub jobs.
+	// The transcript (id = the STT job id) feeds the three Hub jobs; each is awaited before the jobs are read.
 	tr := shared.TranscriptID(stt.ID())
-	for _, typ := range []job.Type{homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType} {
+	hubJobs := []job.Type{homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.LectureTextJobType}
+	for _, typ := range hubJobs {
 		pp := onlyJob(t, jobs, typ)
 		if chain := statusChain(t, jobs, pp.ID(), job.StatusCompleted); !orderedChain(chain) {
 			t.Fatalf("%s job went %v", typ, chain)
