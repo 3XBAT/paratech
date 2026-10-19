@@ -25,7 +25,9 @@ import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, EmptyState, Progress, Row } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
+import { useOpenSummary } from "../openSummary";
 import { useOpenTranscript } from "../openTranscript";
+import { rowSummaryOffer } from "../summaryView";
 import { rowOffersTranscript } from "../transcriptView";
 import { RecordingRow, StatusLine } from "./RecordingRow";
 
@@ -38,6 +40,7 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
   const api = useMemo(() => activityApi(callByName), []);
   const prompts = useMemo(() => promptApi(callByName), []);
   const openTranscript = useOpenTranscript();
+  const openSummary = useOpenSummary();
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
   const [recordingsError, setRecordingsError] = useState("");
@@ -227,9 +230,21 @@ export function RecordingsPage({ onOpen }: { onOpen?: (page: PageId) => void }) 
       onKeepSource={() => r.advice && void adviceAct(r.advice, "dismiss")}
       extraActions={
         rowOffersTranscript(r) && (
-          <Button variant="ghost" icon="doc" onClick={() => openTranscript(r.id)}>
-            Открыть расшифровку
-          </Button>
+          <>
+            {/* Every chain that offers the summary is past the recognition, so the transcript is offered too. */}
+            {rowSummaryOffer(r) !== null && (
+              <Button
+                variant={rowSummaryOffer(r) === "main" ? "secondary" : "ghost"}
+                icon="doc"
+                onClick={() => openSummary(r.id)}
+              >
+                Открыть конспект
+              </Button>
+            )}
+            <Button variant="ghost" icon="doc" onClick={() => openTranscript(r.id)}>
+              Открыть расшифровку
+            </Button>
+          </>
         )
       }
     />

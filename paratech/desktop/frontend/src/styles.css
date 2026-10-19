@@ -332,3 +332,17 @@ html, body, #root { height: 100%; }
   .tr-par mark { background: Mark; color: MarkText; }
   .tr-par mark.cur { outline-color: Highlight; }
 }
+
+/* Конспект (TASK-087): the same layout as the transcript; model text keeps its line breaks and never overflows. */
+.sm .box h2 { margin: 0 0 8px; }
+.sm-state { margin: 0 0 8px; }
+.sm-summary .result, .sm-homework .result { margin: 0 0 8px; }
+.sm-detail { margin: 0 0 8px; overflow-wrap: anywhere; }
+.sm-retry { margin: 0 0 8px; }
+.sm-text { max-width: 76ch; }
+.sm-text p { margin: 0 0 12px; font-size: 16px; line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
+.sm-h { margin: 16px 0 6px; font-size: 16px; }
+.sm-points { max-width: 76ch; margin: 0 0 12px; padding-left: 22px; line-height: 1.6; }
+.sm-points li { margin: 0 0 4px; white-space: pre-line; overflow-wrap: anywhere; }
+.sm-homework .row .t, .sm-desc { overflow-wrap: anywhere; }
+.sm-desc { display: block; margin-top: 4px; white-space: pre-line; }
