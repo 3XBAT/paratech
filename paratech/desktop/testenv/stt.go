@@ -14,6 +14,7 @@ import (
 // STTCall is one call of FakeSTT.Transcribe.
 type STTCall struct {
 	Audio, Model, Output shared.ArtifactRef
+	Load                 shared.RecognitionLoad
 }
 
 // FakeSTT is an STT engine that reports a fixed progress sequence and writes a fixed document, like the whispercli
@@ -76,10 +77,10 @@ func (f *FakeSTT) Calls() []STTCall {
 
 // Transcribe follows the STTEngine port: live segments, progress, then the document or the configured error. A
 // cancelled context stops it between reports, without output.
-func (f *FakeSTT) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(percent int),
-	segment func(transcript.Segment)) error {
+func (f *FakeSTT) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, load shared.RecognitionLoad,
+	progress func(percent int), segment func(transcript.Segment)) error {
 	f.mu.Lock()
-	f.calls = append(f.calls, STTCall{Audio: audio, Model: model, Output: output})
+	f.calls = append(f.calls, STTCall{Audio: audio, Model: model, Output: output, Load: load})
 	steps, err, block, doc := append([]int(nil), f.progress...), f.err, f.block, f.doc
 	segs := append([]transcript.Segment(nil), f.segments...)
 	f.mu.Unlock()

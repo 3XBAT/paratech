@@ -35,6 +35,12 @@ type Deps struct {
 
 	// Live is optional: without it the segments recognised during a run are not stored (no live transcript).
 	Live LiveParts
+
+	// Settings is optional: without it every run uses shared.DefaultRecognitionLoad (TASK-084).
+	Settings SettingsReader
+
+	// Speeds is optional: without it the speed of a run is not measured (TASK-084).
+	Speeds SpeedStore
 }
 
 // EnqueueDeps are the ports the Enqueuer needs. Log is optional.

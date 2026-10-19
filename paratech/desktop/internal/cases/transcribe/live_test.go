@@ -33,8 +33,8 @@ func texts(ss []transcript.Segment) []string {
 // liveEngineFunc is an STTEngine that also reports live segments.
 type liveEngineFunc func(ctx context.Context, out shared.ArtifactRef, progress func(int), segment func(transcript.Segment)) error
 
-func (f liveEngineFunc) Transcribe(ctx context.Context, _, _, out shared.ArtifactRef, progress func(int),
-	segment func(transcript.Segment)) error {
+func (f liveEngineFunc) Transcribe(ctx context.Context, _, _, out shared.ArtifactRef, _ shared.RecognitionLoad,
+	progress func(int), segment func(transcript.Segment)) error {
 	return f(ctx, out, progress, segment)
 }
 

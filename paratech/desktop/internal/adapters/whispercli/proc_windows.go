@@ -29,6 +29,23 @@ const (
 	exeExt = ".exe"
 )
 
+// CPU rate control of a job object (winnt.h: JOB_OBJECT_CPU_RATE_CONTROL_*); x/sys/windows has the information class
+// JobObjectCpuRateControlInformation but not these flags.
+const (
+	jobCPURateControlEnable  = 0x1
+	jobCPURateControlHardCap = 0x4
+
+	// cpuRateUnit: CpuRate is the share of all processors in 1/100 of a percent.
+	cpuRateUnit = 100
+)
+
+// jobCPURateControl is JOBOBJECT_CPU_RATE_CONTROL_INFORMATION of winnt.h: DWORD ControlFlags followed by a union of
+// DWORD CpuRate, DWORD Weight and two WORDs MinRate/MaxRate; 8 bytes. Only CpuRate is used.
+type jobCPURateControl struct {
+	ControlFlags uint32
+	CPURate      uint32
+}
+
 // x/sys/windows has no wrapper for WideCharToMultiByte.
 var procWideCharToMultiByte = windows.NewLazySystemDLL("kernel32.dll").NewProc("WideCharToMultiByte")
 
@@ -38,11 +55,16 @@ type procGroup struct {
 	job windows.Handle
 }
 
-// newProcGroup returns a group, or nil when the job cannot be created; nil degrades to killing the process only.
-func newProcGroup() *procGroup {
+// newProcGroup returns a group, or nil when the job cannot be created; nil degrades to killing the process only. A
+// capPercent of 1..100 hard-caps the CPU use of the job across all processors; capErr tells that the cap is not set
+// (the group still works without it).
+func newProcGroup(capPercent int) (g *procGroup, capErr error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
-		return nil
+		if capPercent > 0 {
+			capErr = fmt.Errorf("create job object: %w", err)
+		}
+		return nil, capErr
 	}
 
 	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
@@ -54,10 +76,33 @@ func newProcGroup() *procGroup {
 		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))) //nolint:gosec // the API takes the struct address
 	if err != nil {
 		_ = windows.CloseHandle(job)
-		return nil
+		if capPercent > 0 {
+			capErr = fmt.Errorf("set job limits: %w", err)
+		}
+		return nil, capErr
 	}
 
-	return &procGroup{job: job}
+	if capPercent > 0 {
+		capErr = setCPUCap(job, capPercent)
+	}
+	return &procGroup{job: job}, capErr
+}
+
+// setCPUCap sets the hard CPU cap of the job; the processes assigned later are throttled to it.
+func setCPUCap(job windows.Handle, capPercent int) error {
+	if capPercent < 1 || capPercent > 100 {
+		return fmt.Errorf("cpu cap %d percent out of range", capPercent)
+	}
+	info := jobCPURateControl{
+		ControlFlags: jobCPURateControlEnable | jobCPURateControlHardCap,
+		CPURate:      uint32(capPercent) * cpuRateUnit, //nolint:gosec // bounded to 1..100 above
+	}
+	_, err := windows.SetInformationJobObject(job, windows.JobObjectCpuRateControlInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))) //nolint:gosec // the API takes the struct address
+	if err != nil {
+		return fmt.Errorf("set job cpu rate: %w", err)
+	}
+	return nil
 }
 
 // attach puts the started process into the job. The PID cannot be reused yet: exec.Cmd holds a process handle
@@ -107,9 +152,14 @@ func processDone(pid int) bool {
 	return err == nil && ev == windows.WAIT_OBJECT_0
 }
 
-// setProcAttrs keeps the console process from opening a window next to the GUI app.
-func setProcAttrs(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+// setProcAttrs keeps the console process from opening a window next to the GUI app; lowPriority starts it below the
+// normal priority class, so the user's apps go first.
+func setProcAttrs(cmd *exec.Cmd, lowPriority bool) {
+	flags := uint32(windows.CREATE_NO_WINDOW)
+	if lowPriority {
+		flags |= windows.BELOW_NORMAL_PRIORITY_CLASS
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: flags}
 }
 
 func binaryNameOK(bin string) bool {

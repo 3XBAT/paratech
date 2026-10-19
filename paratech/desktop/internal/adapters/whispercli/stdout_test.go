@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/transcript"
 	"paratech/desktop/testenv"
 )
@@ -253,7 +254,7 @@ func TestTranscribeDeliversLiveSegments(t *testing.T) {
 	out := outRef(t, "rec-1/live.json")
 
 	var got []transcript.Segment
-	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeLive), out, nil,
+	err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeLive), out, shared.LoadMax, nil,
 		func(s transcript.Segment) { got = append(got, s) })
 	if err != nil {
 		t.Fatalf("Transcribe: %v", err)
@@ -281,7 +282,7 @@ func TestTranscribeDeliversLiveSegments(t *testing.T) {
 func TestTranscribeWithoutSegmentCallback(t *testing.T) {
 	f := newFixture(t, "")
 	out := outRef(t, "rec-1/quiet.json")
-	if err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeLive), out, nil, nil); err != nil {
+	if err := f.eng.Transcribe(context.Background(), f.audio(t), f.model(t, modeLive), out, shared.LoadMax, nil, nil); err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
 }

@@ -135,6 +135,7 @@ func (a *speechActivator) Activate(ctx context.Context, folder values.ComponentF
 	}
 	engine, err := whispercli.New(whispercli.Config{
 		Binary: filepath.Join(dir, a.spec.Executable()), DataRoot: a.root, WorkDir: filepath.Join(a.root, sttWorkDir),
+		LogicalCPUs: logicalCPUs(), Log: a.log,
 	}, a.store, a.store)
 	if err != nil {
 		return fmt.Errorf("app: speech recognition engine: %w", err)

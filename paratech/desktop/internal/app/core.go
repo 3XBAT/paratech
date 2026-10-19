@@ -132,6 +132,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	recordings := sqlite.NewRecordingRepository(db)
 	transcripts := sqlite.NewTranscriptRepository(db)
 	parts := sqlite.NewTranscriptParts(db) // the live transcript while the recognition runs (TASK-079)
+	speeds := sqlite.NewSpeedStore(db)     // the recognition speed measured on this computer (TASK-084)
 	lessons := sqlite.NewLessonRepository(db)
 	summaries := sqlite.NewSummaryRepository(db)
 	assignments := sqlite.NewAssignmentRepository(db)
@@ -225,7 +226,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// The post-processor is the consumer of the STT completion event: it enqueues the follow-up jobs idempotently.
 	if err := c.wireSpeech(dataDir, e, transcribe.Deps{
 		Transcripts: transcripts, Recordings: recordings, Models: sqlite.NewModelRepository(db), Artifacts: store,
-		Events: post, Clock: e.clock, Log: log, Live: parts,
+		Events: post, Clock: e.clock, Log: log, Live: parts, Settings: settings, Speeds: speeds,
 	}, log); err != nil {
 		return err
 	}

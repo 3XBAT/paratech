@@ -198,8 +198,8 @@ func (r *reporter) checkpoints() []string {
 // engineFunc is an STTEngine from a function, for behaviour FakeSTT does not have; it reports no live segments.
 type engineFunc func(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(int)) error
 
-func (f engineFunc) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, progress func(int),
-	_ func(transcript.Segment)) error {
+func (f engineFunc) Transcribe(ctx context.Context, audio, model, output shared.ArtifactRef, _ shared.RecognitionLoad,
+	progress func(int), _ func(transcript.Segment)) error {
 	return f(ctx, audio, model, output, progress)
 }
 

@@ -57,7 +57,7 @@ func TestHandleSuccess(t *testing.T) {
 
 	// The engine got the recording's final track, the pinned model's file and the job's document reference.
 	calls := e.engine.Calls()
-	want := testenv.STTCall{Audio: e.rec.Audio(), Model: e.model.File(), Output: docRef(t)}
+	want := testenv.STTCall{Audio: e.rec.Audio(), Model: e.model.File(), Output: docRef(t), Load: shared.LoadGentle}
 	if len(calls) != 1 || calls[0] != want {
 		t.Fatalf("engine calls = %+v, want [%+v]", calls, want)
 	}
