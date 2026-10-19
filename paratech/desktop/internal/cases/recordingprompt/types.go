@@ -44,8 +44,8 @@ type View struct {
 // Sources is what the source picker offers (TASK-059).
 type Sources struct {
 	Apps []values.AudioApp // sounding apps first, then playing ones, then by title (values.SortAudioApps)
-	// Selected is the source to preselect (values.Preselect): the remembered app when it plays or no single other app
-	// does, the one other app that plays (AutoSelected), else the whole computer.
+	// Selected is the source to preselect (values.Preselect): the remembered app when it sounds or no single other app
+	// does, the one other app that sounds (AutoSelected), else the whole computer.
 	Selected values.Source
 	// AutoSelected reports that Selected was chosen because it plays while the remembered app does not (TASK-082): the
 	// picker says «выбрано: звук идёт отсюда».

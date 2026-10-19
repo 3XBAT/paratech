@@ -165,22 +165,24 @@ type Preselection struct {
 
 // Preselect chooses the source the picker selects first:
 //   - nothing (or the whole computer) remembered: the whole computer, which records everything anyway;
-//   - the remembered app plays: it;
-//   - otherwise, when exactly one other app plays (sounding apps count first; without any, apps with an active
-//     session), that app, with Auto set;
+//   - the remembered app sounds: it;
+//   - otherwise exactly one other app sounds: that app, with Auto set (an active but silent session of the
+//     remembered app does not keep it: the owner's case of TASK-082);
+//   - otherwise, when nothing sounds, the remembered app has no active session and exactly one other app has one:
+//     that app, with Auto set;
 //   - otherwise the remembered app when it is in the list, else the whole computer.
 func Preselect(remembered shared.AppName, apps []AudioApp) Preselection {
 	if remembered.IsZero() || remembered.Validate() != nil {
 		return Preselection{Source: WholeComputer()}
 	}
-	present := false
+
+	present, remSounding, remPlaying := false, false, false
 	var sounding, playing []shared.AppName
 	for _, a := range apps {
 		if a.App == remembered {
 			present = true
-			if a.Sounding || a.Playing {
-				return Preselection{Source: Source{app: remembered}}
-			}
+			remSounding = remSounding || a.Sounding
+			remPlaying = remPlaying || a.Playing
 			continue
 		}
 		if a.Sounding {
@@ -190,12 +192,16 @@ func Preselect(remembered shared.AppName, apps []AudioApp) Preselection {
 			playing = append(playing, a.App)
 		}
 	}
-	others := sounding
-	if len(others) == 0 {
-		others = playing
-	}
-	if len(others) == 1 {
-		if s, err := SourceOf(others[0]); err == nil {
+
+	switch {
+	case remSounding:
+		return Preselection{Source: Source{app: remembered}}
+	case len(sounding) == 1:
+		if s, err := SourceOf(sounding[0]); err == nil {
+			return Preselection{Source: s, Auto: true}
+		}
+	case len(sounding) == 0 && !remPlaying && len(playing) == 1:
+		if s, err := SourceOf(playing[0]); err == nil {
 			return Preselection{Source: s, Auto: true}
 		}
 	}

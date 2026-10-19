@@ -104,8 +104,18 @@ func TestPreselect(t *testing.T) {
 			Preselection{Source: Source{app: "browser.exe"}},
 		},
 		{
-			"remembered has an active session", "browser.exe",
+			"remembered has an active silent session, one other sounds", "browser.exe",
 			[]AudioApp{{App: "browser.exe", Playing: true}, {App: "comet.exe", Sounding: true}},
+			Preselection{Source: Source{app: "comet.exe"}, Auto: true},
+		},
+		{
+			"nothing sounds, remembered and one other have a session", "browser.exe",
+			[]AudioApp{{App: "browser.exe", Playing: true}, {App: "zoom.exe", Playing: true}},
+			Preselection{Source: Source{app: "browser.exe"}},
+		},
+		{
+			"remembered sounds, it wins over another with a session", "browser.exe",
+			[]AudioApp{{App: "browser.exe", Sounding: true, Playing: true}, {App: "zoom.exe", Playing: true}},
 			Preselection{Source: Source{app: "browser.exe"}},
 		},
 		{
