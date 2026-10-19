@@ -257,7 +257,7 @@ func TestRedoSummaryKeepsTheOldOneUntilANewOnePasses(t *testing.T) {
 	if st, _ := e.summaryOf("t1"); st.Text != "Rivers and lakes." || st.Version != old.Version+1 {
 		t.Fatalf("summary = %+v, want the new one", st)
 	}
-	if n := len(e.llm.RequestsFor(values.OperationSummary)); n != 1+answerCalls+1 {
+	if n := len(e.llm.RequestsFor(values.OperationSummary)); n != 1+AnswerCalls+1 {
 		t.Fatalf("summary calls = %d", n)
 	}
 }

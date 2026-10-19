@@ -599,6 +599,10 @@ func TestRetryAfterACutOffAnswerThroughFakeHub(t *testing.T) {
 		return err == nil && j.Status() == job.StatusFailed
 	}, func() { e.clock.Advance(time.Second) })
 	e.checkStructures()
+	kept, err := e.summaries.Get(ctx, summary.IDOf(ppTranscript))
+	if err != nil || kept.Content().Text() != "Rivers and their deltas." {
+		t.Fatalf("the failed redo replaced the summary: %v %v", kept, err)
+	}
 }
 
 // AC-3 of TASK-042 on SQLite: the user's edit of an assignment and its deadline survives reprocessing.

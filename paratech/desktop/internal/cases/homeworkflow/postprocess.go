@@ -215,11 +215,11 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 	return p.extract(ctx, snap, report, in, ans.details)
 }
 
-// answerCalls bounds the LLM calls of one job run: the request and at most two repeats after an answer that failed
-// the checks. Each call has its own idempotency key, derived from the job and the request (llmKey), and a repeat
+// AnswerCalls bounds the LLM calls of one post-processing job run: the request and at most two repeats after an
+// answer that failed the checks. The app sizes the job timeout by it. Each call has its own idempotency key, derived from the job and the request (llmKey), and a repeat
 // differs only by a fixed reminder, so a rerun of the job sends the same requests and the Hub replays them instead of
 // charging again (AC-11).
-const answerCalls = 3
+const AnswerCalls = 3
 
 // checkedAnswer is a model answer that passed the checks of its operation.
 type checkedAnswer struct {
@@ -228,28 +228,32 @@ type checkedAnswer struct {
 }
 
 // ask calls the LLM and checks the answer; an answer that fails the checks is asked again with a reminder of the
-// format (prompts.Remind), up to answerCalls calls, then the job fails for good with ErrInvalidAnswer or, when the
+// format (prompts.Remind), up to AnswerCalls calls, then the job fails for good with ErrInvalidAnswer or, when the
 // last answer was cut off, ErrTruncatedAnswer. A truncated answer gets no larger limit: the desktop leaves
 // max_output_tokens to the Hub alias (0), so the reminder asks for shorter texts and the log says the alias limit
-// may be raised on the Hub.
+// may be raised on the Hub. When the reminder does not fit the request size limit, the job fails at once with the
+// error of the answer it has: that answer is what went wrong, the lesson context itself was sent and answered.
 func (p *PostProcessor) ask(ctx context.Context, snap job.Snapshot, req values.LLMRequest, lessonStart time.Time) (checkedAnswer, error) {
 	for call := 1; ; call++ {
 		res, err := p.llm.Complete(ctx, req)
 		if err != nil {
 			return checkedAnswer{}, p.retry(snap, stepLLM, ErrLLM, err)
 		}
-		ans, err := check(req.Operation(), res.Output, lessonStart)
-		if err == nil {
+		ans, rejection := check(req.Operation(), res.Output, lessonStart)
+		if rejection == nil {
 			return ans, nil
 		}
 
-		truncated := errors.Is(err, prompts.ErrTruncatedOutput)
-		p.rejected(snap, call, prompts.Shape(res.Output), err)
-		if call == answerCalls {
-			return checkedAnswer{}, p.permanent(snap, stepAnswer, invalidAnswer(truncated), err)
+		truncated := errors.Is(rejection, prompts.ErrTruncatedOutput)
+		p.rejected(snap, call, prompts.Shape(res.Output), rejection)
+		if call == AnswerCalls {
+			return checkedAnswer{}, p.permanent(snap, stepAnswer, invalidAnswer(truncated), rejection)
 		}
 		if req, err = remind(snap.ID(), req, truncated); err != nil {
-			return checkedAnswer{}, p.permanent(snap, stepAnswer, invalidAnswer(truncated), err)
+			p.log.Warn("post-processing answer not asked again: the format reminder does not fit the request size limit",
+				slog.String("job", snap.ID().String()), slog.String("type", string(snap.Type())), slog.Int("call", call),
+				slog.Any("cause", err))
+			return checkedAnswer{}, p.permanent(snap, stepAnswer, invalidAnswer(truncated), rejection)
 		}
 	}
 }
@@ -301,11 +305,11 @@ func invalidAnswer(truncated bool) error {
 func (p *PostProcessor) rejected(snap job.Snapshot, call int, shape prompts.AnswerShape, cause error) {
 	attrs := []any{
 		slog.String("job", snap.ID().String()), slog.String("type", string(snap.Type())), slog.Int("call", call),
-		slog.Int("calls", answerCalls), slog.Int("bytes", shape.Bytes), slog.String("start", shape.Start),
+		slog.Int("calls", AnswerCalls), slog.Int("bytes", shape.Bytes), slog.String("start", shape.Start),
 		slog.Bool("truncated", shape.Truncated), slog.Any("cause", cause),
 	}
 	if shape.Truncated {
-		attrs = append(attrs, slog.String("hint", "the answer hit the output limit; raise max_output of the model alias on the Hub"))
+		attrs = append(attrs, slog.String("hint", "likely cut off at the output limit; raise max_output of the model alias on the Hub"))
 	}
 	p.log.Warn("post-processing answer rejected", attrs...)
 }

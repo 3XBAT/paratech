@@ -62,9 +62,9 @@ var (
 	// (idempotency keys); the user retries with a new job (Rerunner).
 	ErrInvalidAnswer = errors.New("post-processing: the LLM answer does not match the schema")
 
-	// ErrTruncatedAnswer is ErrInvalidAnswer for a last answer that was cut off at the output limit of the model alias
+	// ErrTruncatedAnswer is ErrInvalidAnswer for a last answer that looks cut off at the output limit of the model alias
 	// (the desktop sends no limit of its own); the Hub owner may raise it. Permanent.
-	ErrTruncatedAnswer = errors.New("post-processing: the LLM answer was cut off at the output limit")
+	ErrTruncatedAnswer = errors.New("post-processing: the LLM answer looks cut off at the output limit")
 
 	// ErrStorage means reading or writing local state failed. Retried unless the cause is permanent.
 	ErrStorage = errors.New("post-processing: local storage failed")

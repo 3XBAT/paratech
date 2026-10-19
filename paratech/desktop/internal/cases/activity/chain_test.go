@@ -81,7 +81,7 @@ func jobIn(t *testing.T, id string, typ job.Type, created time.Duration, s job.S
 // Last errors of post-processing jobs (homeworkflow).
 const (
 	msgInvalid   = "post-processing: the LLM answer does not match the schema"
-	msgTruncated = "post-processing: the LLM answer was cut off at the output limit"
+	msgTruncated = "post-processing: the LLM answer looks cut off at the output limit"
 	msgLLM       = "post-processing: the LLM call failed"
 )
 

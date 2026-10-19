@@ -17,7 +17,7 @@ import (
 )
 
 // TASK-086: the owner's gateway answers with fences, prose or a cut-off object. The checks unwrap what they can, an
-// answer that still fails is asked again with a fixed reminder, at most answerCalls calls per job run.
+// answer that still fails is asked again with a fixed reminder, at most AnswerCalls calls per job run.
 func TestInvalidAnswerIsAskedAgain(t *testing.T) {
 	const cut = `{"summary":"The lesson was about`
 	tests := []struct {
@@ -122,7 +122,7 @@ func (h *hubReplay) Complete(ctx context.Context, req values.LLMRequest) (values
 }
 
 // A rerun of the job (a crash, a retry of the runner) sends the same requests, so the Hub replays them instead of
-// charging again (hard rule 7, AC-11): at most answerCalls paid calls per job.
+// charging again (hard rule 7, AC-11): at most AnswerCalls paid calls per job.
 func TestRepeatedCallsKeepTheirKeysAcrossRuns(t *testing.T) {
 	e := newPPEnv(t)
 	hub := &hubReplay{inner: e.llm, stored: map[string]values.LLMResult{}}
@@ -141,8 +141,8 @@ func TestRepeatedCallsKeepTheirKeysAcrossRuns(t *testing.T) {
 		if err := e.handle(snap); !errors.Is(err, ErrTruncatedAnswer) && !errors.Is(err, ErrInvalidAnswer) {
 			t.Fatalf("run %d: Handle = %v", run, err)
 		}
-		if hub.paid != answerCalls {
-			t.Fatalf("run %d: paid calls = %d, want %d", run, hub.paid, answerCalls)
+		if hub.paid != AnswerCalls {
+			t.Fatalf("run %d: paid calls = %d, want %d", run, hub.paid, AnswerCalls)
 		}
 	}
 
@@ -150,7 +150,7 @@ func TestRepeatedCallsKeepTheirKeysAcrossRuns(t *testing.T) {
 	if err := e.handle(e.snapshot("j2", SummarizeJobType, "t1")); !errors.Is(err, ErrInvalidAnswer) {
 		t.Fatalf("Handle = %v", err)
 	}
-	if hub.paid != 2*answerCalls {
+	if hub.paid != 2*AnswerCalls {
 		t.Fatalf("paid calls = %d: a new job must not reuse the keys of the old one", hub.paid)
 	}
 }
@@ -193,5 +193,51 @@ func TestRejectedAnswerLogsTheShapeOnly(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("log lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// A request at the size limit leaves no room for the reminder: the job fails at once with the error of the answer it
+// got, not as a refused context, and the log says why it was not asked again.
+func TestReminderThatDoesNotFitFailsWithTheAnswerError(t *testing.T) {
+	tests := []struct {
+		name    string
+		answer  string
+		wantErr error
+	}{
+		{name: "invalid answer", answer: "prose", wantErr: ErrInvalidAnswer},
+		{name: "cut-off answer", answer: `{"summary":"cut`, wantErr: ErrTruncatedAnswer},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			e := newPPEnv(t)
+			d := e.deps()
+			d.Log = slog.New(slog.NewTextHandler(&logs, nil))
+			pp, err := NewPostProcessor(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.llm.Answer(values.OperationSummary, tc.answer)
+
+			instr := prompts.Instructions(values.OperationSummary)
+			data := strings.Repeat("x", values.MaxRequestPayloadSize-len(instr))
+			req, err := values.NewLLMRequest(values.OperationSummary, "default", instr, data, "k1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = pp.ask(context.Background(), e.snapshot("j1", SummarizeJobType, "t1"), req, lessonStart)
+
+			if n := len(e.llm.Requests()); n != 1 {
+				t.Fatalf("LLM calls = %d, want 1", n)
+			}
+			if !errors.Is(err, tc.wantErr) || !errors.Is(err, prompts.ErrMalformedOutput) ||
+				errors.Is(err, values.ErrInvalidLLMRequest) || errors.Is(err, ErrContextRefused) ||
+				backoff.Classify(err) != backoff.ClassPermanent {
+				t.Fatalf("ask = %v, want a permanent %v caused by the answer", err, tc.wantErr)
+			}
+			if !strings.Contains(logs.String(), "reminder does not fit") {
+				t.Fatalf("log does not say the reminder did not fit:\n%s", logs.String())
+			}
+		})
 	}
 }

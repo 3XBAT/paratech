@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/adapters/componentstore"
 	"paratech/desktop/internal/adapters/filestore"
@@ -137,9 +138,16 @@ func TestRegistrationPolicies(t *testing.T) {
 	if got := registrationOf(t, regs, schedulesync.CalendarSyncJobType).Timeout; got < 10*googlecal.DefaultRequestTimeout {
 		t.Errorf("calendar_sync timeout %v, want room for many Calendar API requests", got)
 	}
-	for _, typ := range []job.Type{homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.HomeworkDraftJobType} {
-		if got := registrationOf(t, regs, typ).Timeout; got < 2*hubclient.DefaultRequestTimeout {
-			t.Errorf("%s timeout %v, want at least twice the Hub request timeout", typ, got)
+	for _, tt := range []struct {
+		typ   job.Type
+		calls int
+	}{
+		{homeworkflow.SummarizeJobType, homeworkflow.AnswerCalls},
+		{homeworkflow.ExtractHomeworkJobType, homeworkflow.AnswerCalls},
+		{homeworkflow.HomeworkDraftJobType, 1},
+	} {
+		if got := registrationOf(t, regs, tt.typ).Timeout; got < time.Duration(2*tt.calls)*hubclient.DefaultRequestTimeout {
+			t.Errorf("%s timeout %v, want at least twice the Hub request timeout for each of %d calls", tt.typ, got, tt.calls)
 		}
 	}
 }
