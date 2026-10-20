@@ -489,3 +489,7 @@ CREATE TABLE deadline_event_removals (
 -- line and a kind code. NULL: not corrected, the lesson snapshot or the schedule names it.
 ALTER TABLE recordings ADD COLUMN user_subject TEXT CHECK (user_subject IS NULL OR length(user_subject) BETWEEN 1 AND 256);
 ALTER TABLE recordings ADD COLUMN user_kind TEXT CHECK (user_kind IS NULL OR user_kind IN ('lecture', 'seminar', 'practice', 'lab'));
+
+-- summaries (migration 0020): the sections as a JSON array of {"heading","text","points"} objects (summary.Section).
+-- NULL: a summary made before, one plain text.
+ALTER TABLE summaries ADD COLUMN sections TEXT CHECK (sections IS NULL OR (json_valid(sections) AND json_type(sections) = 'array'));

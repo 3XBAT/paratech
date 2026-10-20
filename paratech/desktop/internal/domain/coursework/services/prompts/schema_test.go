@@ -21,7 +21,11 @@ func TestSchemasMatchTheParsers(t *testing.T) {
 		limits map[string]float64
 	}{
 		{values.OperationSummary, summaryWire{}, map[string]float64{
-			"summary.minLength": 1, "summary.maxLength": MaxSummaryRunes,
+			"sections.minItems": 1, "sections.maxItems": MaxSummarySections,
+			"sections[].heading.minLength": 1, "sections[].heading.maxLength": MaxSectionHeadingRunes,
+			"sections[].text.minLength": 1, "sections[].text.maxLength": MaxSectionTextRunes,
+			"sections[].points.maxItems":    MaxSectionPoints,
+			"sections[].points[].minLength": 1, "sections[].points[].maxLength": MaxSectionPointRunes,
 			"key_points.maxItems": MaxKeyPoints, "key_points[].minLength": 1, "key_points[].maxLength": MaxKeyPointRunes,
 		}},
 		{values.OperationExtractHomework, extractWire{}, map[string]float64{

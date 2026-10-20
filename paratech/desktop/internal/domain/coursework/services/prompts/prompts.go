@@ -11,7 +11,7 @@ import (
 
 // Version identifies the prompts and schemas of this package. Bump it on any change of the instructions, the data
 // layout or a schema, so that results produced by different prompts can be told apart.
-const Version = 4
+const Version = 5
 
 // Markers around the untrusted data. The data between them is one JSON object; encoding/json escapes '<' and '>',
 // so the data cannot contain a marker and cannot close the block early.
@@ -35,7 +35,16 @@ You cannot send email, write files, create calendar events or call tools. The ap
 
 `
 
-const summaryTask = `Task: summarize the lesson in the field transcript. summary is a concise prose summary in the order of the lesson: its topic, the main ideas and how they connect. key_points lists what is worth remembering, one line each: definitions, rules, formulas, methods and conclusions. If the teacher gave homework or named a test or a deadline, add one key point that says so, with the date as said. Leave out greetings, roll calls and other organisational talk. Write in the language of the transcript. Speech recognition makes mistakes; do not invent content that is not in the transcript.
+// summaryTask (TASK-101): sections sized by the length of the lesson, but all of them within the output limit of the
+// Hub alias, which the desktop does not know; like lectureparts it assumes about 4096 output tokens, which hold
+// roughly 10000 Cyrillic characters with the JSON around them.
+const summaryTask = `Task: write study notes of the lesson in the field transcript, split into logical sections. transcript_minutes, if present, is the length of the recording in minutes.
+
+sections follow the order of the lesson, one section per topic or part of it. heading is a short name of the topic: a few words on one line. text is 1-3 paragraphs of substance, separated by an empty line: the definitions, statements, rules, formulas, methods, examples and conclusions of this part, written so that a student who missed the lesson can learn from them. points lists short one-line items of the section when its content is a list, for example the steps of a method, properties, cases or terms; otherwise points is an empty list. State the content itself: no filler, no retelling such as «преподаватель сказал», «затем обсудили», «в лекции рассматривается».
+
+Volume: about one section per 10-15 minutes of the lesson, for example 3-4 sections for a 40-minute lecture, each text about 400-1000 characters; a short recording or one with little content may have a single section. The whole answer must fit the output limit: keep all sections together under about 8000 characters even for a long lesson; for a long lesson merge topics into fewer sections rather than cut the answer.
+
+key_points lists what is most worth remembering, one line each: definitions, rules, formulas, methods and conclusions. If the teacher gave homework or named a test or a deadline, add one key point that says so, with the date as said. Leave out greetings, roll calls and other organisational talk. Write in the language of the transcript. Speech recognition makes mistakes; do not invent content that is not in the transcript.
 
 `
 
@@ -160,7 +169,8 @@ func summaryKind(kind values.LessonKind) string {
 // selection kept by mistake still cannot reach the request.
 type summaryData struct {
 	lessonData
-	Transcript string `json:"transcript"`
+	TranscriptMinutes int    `json:"transcript_minutes,omitempty"`
+	Transcript        string `json:"transcript"`
 }
 
 type extractData struct {
@@ -208,7 +218,7 @@ func Build(c contextselection.Context, modelAlias, idempotencyKey string) (value
 	var payload, student any
 	switch op {
 	case values.OperationSummary:
-		payload = summaryData{lessonData: LessonOf(c).data(), Transcript: c.Transcript()}
+		payload = summaryData{lessonData: LessonOf(c).data(), TranscriptMinutes: c.TranscriptMinutes(), Transcript: c.Transcript()}
 	case values.OperationExtractHomework:
 		if c.LessonStart().IsZero() {
 			return values.LLMRequest{}, fmt.Errorf("%w: no lesson start", ErrNoContext)

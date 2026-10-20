@@ -296,7 +296,12 @@ func check(op values.Operation, out values.UntrustedOutput, lessonStart time.Tim
 		if err != nil {
 			return checkedAnswer{}, err
 		}
-		content, err := summary.NewContent(s.Text(), s.KeyPoints())
+		secs := s.Sections()
+		sections := make([]summary.Section, len(secs))
+		for i, sec := range secs {
+			sections[i] = summary.Section{Heading: sec.Heading(), Text: sec.Text(), Points: sec.Points()}
+		}
+		content, err := summary.NewSectionedContent(sections, s.KeyPoints())
 		return checkedAnswer{summary: content}, err
 	}
 

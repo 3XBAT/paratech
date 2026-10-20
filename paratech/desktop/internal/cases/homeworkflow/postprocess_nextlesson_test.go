@@ -47,7 +47,7 @@ func TestPostProcessingSendsTheNextLessonOfTheSubject(t *testing.T) {
 		op     values.Operation
 		answer string
 	}{
-		SummarizeJobType:       {values.OperationSummary, `{"summary":"S","key_points":[]}`},
+		SummarizeJobType:       {values.OperationSummary, `{"sections":[{"heading":"H","text":"S","points":[]}],"key_points":[]}`},
 		ExtractHomeworkJobType: {values.OperationExtractHomework, `{"assignments":[],"subject_hint":"","teacher_hint":""}`},
 		LectureTextJobType:     {values.OperationLectureText, lectureAnswer("Rivers", 0, "Today we talk about rivers. Homework: read chapter 4 by Friday.")},
 	}
@@ -122,7 +122,7 @@ func TestNextLessonUnknown(t *testing.T) {
 	t.Run("no lesson of the subject", func(t *testing.T) {
 		e := newPPEnv(t)
 		e.addLesson("other", "Physics", "Physics", "", lesson.KindUnknown, lessonStart.Add(24*time.Hour), false)
-		e.llm.Answer(values.OperationSummary, `{"summary":"S","key_points":[]}`)
+		e.llm.Answer(values.OperationSummary, `{"sections":[{"heading":"H","text":"S","points":[]}],"key_points":[]}`)
 		if err := e.handle(e.snapshot("j1", SummarizeJobType, "t1")); err != nil {
 			t.Fatalf("Handle: %v", err)
 		}
@@ -134,7 +134,7 @@ func TestNextLessonUnknown(t *testing.T) {
 	t.Run("ad-hoc recording without a subject", func(t *testing.T) {
 		e := newPPEnv(t)
 		e.addTranscript("r2", "", "t2", lessonStart, "Homework: essay.")
-		e.llm.Answer(values.OperationSummary, `{"summary":"S","key_points":[]}`)
+		e.llm.Answer(values.OperationSummary, `{"sections":[{"heading":"H","text":"S","points":[]}],"key_points":[]}`)
 		if err := e.handle(e.snapshot("j1", SummarizeJobType, "t2")); err != nil {
 			t.Fatalf("Handle: %v", err)
 		}
@@ -168,7 +168,7 @@ func TestPostProcessingLogsThePromptsVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.llm.Answer(values.OperationSummary, "not json")
-	e.llm.Answer(values.OperationSummary, `{"summary":"S","key_points":[]}`)
+	e.llm.Answer(values.OperationSummary, `{"sections":[{"heading":"H","text":"S","points":[]}],"key_points":[]}`)
 	e.llm.Answer(values.OperationLectureText, lectureAnswer("Rivers", 0, "Today we talk about rivers. Homework: read chapter 4 by Friday."))
 
 	if err := pp.Handle(context.Background(), e.snapshot("j1", SummarizeJobType, "t1"), nil); err != nil {

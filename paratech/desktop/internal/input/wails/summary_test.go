@@ -189,6 +189,8 @@ func TestSummaryView(t *testing.T) {
 		HasDuration: true, Transcribed: true,
 		Summary: SummaryContent{
 			SummaryStep: SummaryStep{State: "done", Message: msgSummaryDone}, Ready: true, Text: "Реки.\n\nДельты.",
+			// A summary made before TASK-101 is one section without heading.
+			Sections:  []SummarySection{{Text: "Реки.\n\nДельты.", Points: []string{}}},
 			KeyPoints: []string{"Реки текут", "Дельта"}, UpdatedAt: "2026-10-14T06:01:00Z",
 		},
 		Homework: SummaryHomework{
@@ -231,6 +233,7 @@ func TestSummaryViewOfNothingYet(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"keyPoints":[]`) || !strings.Contains(string(data), `"assignments":[]`) ||
+		!strings.Contains(string(data), `"sections":[]`) ||
 		got.Summary.Message != msgSummaryNone || got.Homework.Message != msgHomeworkNone || got.DurationSeconds != 0 {
 		t.Fatalf("View = %s", data)
 	}

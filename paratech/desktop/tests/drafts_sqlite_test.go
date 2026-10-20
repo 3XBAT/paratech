@@ -158,7 +158,7 @@ func TestDraftGenerateEditRegenerateExport(t *testing.T) {
 	}
 	data := reqs[1].UntrustedData()
 	if !strings.Contains(data, `{"request":"Shorter, keep the Volga"}`) || !strings.Contains(data, "Example: the Volga.") ||
-		!strings.Contains(data, `"lesson_summary":"Rivers and their deltas."`) || !strings.Contains(data, `"lesson_title":"Geography"`) {
+		!strings.Contains(data, `"lesson_summary":"Rivers:\nRivers and their deltas."`) || !strings.Contains(data, `"lesson_title":"Geography"`) {
 		t.Fatalf("regeneration request = %s", data)
 	}
 

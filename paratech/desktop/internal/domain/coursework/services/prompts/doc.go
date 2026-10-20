@@ -17,7 +17,9 @@
 // differently-cased or duplicate keys, all fields present, correct types, no trailing data, bounded sizes and item
 // counts, no control or bidi-override characters, deadlines as RFC 3339 times near the lesson date. Error messages
 // name fields, never model text. A draft holds a title and a body only; recipients, paths and calendars are never part
-// of an answer (docs/refs/prompt-injection.md rule 2), and extracted deadlines are proposals, not actions.
+// of an answer (docs/refs/prompt-injection.md rule 2), and extracted deadlines are proposals, not actions. A summary is
+// a list of headed sections (text and optional points) plus the key points (TASK-101); its volume follows the length
+// of the recording, sent as data (transcript_minutes), within the output limit of the Hub.
 //
 // Lesson context (TASK-093). summary, extract_homework_deadlines and lecture_text carry the lesson as untrusted data
 // (LessonInfo): title, subject, kind, teacher, start and the start and kind of the next lesson of the same subject,

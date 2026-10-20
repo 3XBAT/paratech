@@ -73,7 +73,7 @@ type Querier interface {
 	// (stt_model_id, recognition_load); the rows go with the model (CASCADE).
 	GetSttSpeed(ctx context.Context, arg GetSttSpeedParams) (GetSttSpeedRow, error)
 	// Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
-	// the transcript id, one summary per transcript (TASK-042).
+	// the transcript id, one summary per transcript (TASK-042). sections is NULL for a summary made before TASK-101.
 	GetSummary(ctx context.Context, id string) (Summary, error)
 	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
 	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).

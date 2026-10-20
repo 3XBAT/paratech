@@ -61,7 +61,8 @@ type Document struct {
 }
 
 // Render renders d as plain text or Markdown: the title (a Markdown heading), a line with the date and length, the
-// summary text, the key points and the homework as lists. Sections without items are left out.
+// summary (its sections with their headings, TASK-101), the key points and the homework as lists. Sections without
+// items are left out.
 func Render(d Document, f Format) (string, error) {
 	if err := f.Validate(); err != nil {
 		return "", err
@@ -83,7 +84,7 @@ func Render(d Document, f Format) (string, error) {
 		b.WriteString("\n")
 	}
 
-	writeText(&b, d.Content.Text(), md)
+	writeSummary(&b, d.Content, md, "## ")
 
 	if points := d.Content.KeyPoints(); len(points) > 0 {
 		b.WriteString("\n" + heading(keyPointsHeading, md))
@@ -151,6 +152,29 @@ func heading(s string, md bool) string {
 		return "## " + s + "\n\n"
 	}
 	return s + ":\n"
+}
+
+// writeSummary writes a summary. Plain text is the text of the content, which renders sections with their headings
+// (summary.Content.Text); Markdown writes each section as a heading of level (for example "## "), its text and its
+// points as a list.
+func writeSummary(b *strings.Builder, c summary.Content, md bool, level string) {
+	if !md || !c.Sectioned() {
+		writeText(b, c.Text(), md)
+		return
+	}
+	for i, s := range c.Sections() {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(level + line(oneLine(s.Heading), true) + "\n\n")
+		writeText(b, s.Text, true)
+		if len(s.Points) > 0 {
+			b.WriteString("\n")
+			for _, p := range s.Points {
+				b.WriteString("- " + line(oneLine(p), true) + "\n")
+			}
+		}
+	}
 }
 
 // writeText writes the summary text line by line, keeping its paragraphs. In Markdown the indentation is dropped:

@@ -69,7 +69,7 @@ func TestSummaryViewerAfterPostProcessing(t *testing.T) {
 	if v.Title != "Geography" || v.Lesson != "l1" || !v.Transcribed || v.Duration != 85*time.Minute {
 		t.Fatalf("head = %+v", v)
 	}
-	if v.Summary.State != summaryview.StateDone || !v.Summary.Ready || v.Summary.Content.Text() != "Rivers and their deltas." {
+	if v.Summary.State != summaryview.StateDone || !v.Summary.Ready || v.Summary.Content.Text() != ppSummaryText {
 		t.Fatalf("summary = %+v", v.Summary)
 	}
 	if v.Homework.State != summaryview.StateDone || len(v.Homework.Assignments) != 2 ||
@@ -86,7 +86,7 @@ func TestSummaryViewerAfterPostProcessing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# Geography\n\n14\\.10.2026, 10:01 · 1 ч 25 мин\n\nRivers and their deltas.\n" +
+	want := "# Geography\n\n14\\.10.2026, 10:01 · 1 ч 25 мин\n\n## Rivers\n\nRivers and their deltas.\n" +
 		"\n## Ключевые моменты\n\n- Rivers flow to the sea\n" +
 		"\n## Домашние задания\n\n- Read chapter 4 — до 16.10.2026, 23:59\n  Pages 40-52\n" +
 		"- Draw a map of rivers — до 21.10.2026, 10:00\n"

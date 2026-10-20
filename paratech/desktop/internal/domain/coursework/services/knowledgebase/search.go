@@ -51,11 +51,33 @@ type Segment struct {
 	Text    string
 }
 
+// SummarySection is one section of a summary, as plain values. A summary made before TASK-101 is one section
+// without heading and points.
+type SummarySection struct {
+	Heading string
+	Text    string
+	Points  []string
+}
+
+// SummaryTexts returns the texts of a summary as Document.Summary holds them: one per section, its heading, text and
+// points on lines of their own, followed by the key points. So a section is matched once, whichever part matches.
+func SummaryTexts(sections []SummarySection, keyPoints []string) []string {
+	out := make([]string, 0, len(sections)+len(keyPoints))
+	for _, s := range sections {
+		parts := append([]string{s.Heading, s.Text}, s.Points...)
+		if s.Heading == "" {
+			parts = parts[1:]
+		}
+		out = append(out, strings.Join(parts, "\n"))
+	}
+	return append(out, keyPoints...)
+}
+
 // Document is everything searched of one lesson. Every text is untrusted.
 type Document struct {
 	Recording shared.RecordingID
 	Title     string
-	// Summary is the summary text followed by its key points; nil: no summary.
+	// Summary is the texts of the summary (SummaryTexts): one per section, then the key points; nil: no summary.
 	Summary  []string
 	Blocks   []Block
 	Segments []Segment
@@ -70,7 +92,8 @@ type Snippet struct {
 }
 
 // Hit is one place a query was found. Index is the block (SectionLectureText) or segment (SectionTranscript) index,
-// for the summary 0 for its text and i+1 for its key point i, 0 for the title. StartMs is where the block or segment
+// for the summary the index of its text in Document.Summary: i for section i, n+j for key point j of a summary of n
+// sections (of a summary made before TASK-101, 0 for its text and j+1 for key point j), 0 for the title. StartMs is where the block or segment
 // starts in the recording, 0 for the title and the summary.
 type Hit struct {
 	Recording shared.RecordingID

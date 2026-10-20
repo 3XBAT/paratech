@@ -230,6 +230,7 @@ type Summary struct {
 	Version       int64
 	CreatedAt     int64
 	UpdatedAt     int64
+	Sections      sql.NullString
 }
 
 type Transcript struct {

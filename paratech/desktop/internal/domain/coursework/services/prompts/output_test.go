@@ -12,16 +12,38 @@ import (
 
 func out(s string) values.UntrustedOutput { return values.NewUntrustedOutput(s) }
 
+// summaryOf is a summary answer with sections (JSON array items) and key points (a JSON array).
+func summaryOf(sections, keyPoints string) string {
+	return `{"sections": [` + sections + `], "key_points": ` + keyPoints + `}`
+}
+
+// sectionOf is one section of a summary answer; points is a JSON array.
+func sectionOf(heading, text, points string) string {
+	return `{"heading": "` + heading + `", "text": "` + text + `", "points": ` + points + `}`
+}
+
 func TestParseSummary(t *testing.T) {
-	s, err := ParseSummary(out(` {"summary": " Vectors and matrices. \n Next: determinants. ", "key_points": [" Vectors ", "Matrices"]} `))
+	answer := ` ` + summaryOf(
+		sectionOf(" Vectors ", ` Vectors have a direction. \n\n Next: matrices. `, `[" Addition ", "Scaling"]`)+", "+
+			sectionOf("Determinants", "A number of a square matrix.", `[]`),
+		`[" Vectors ", "Matrices"]`) + ` `
+	s, err := ParseSummary(out(answer))
 	if err != nil {
 		t.Fatalf("ParseSummary: %v", err)
 	}
-	if s.Text() != "Vectors and matrices. \n Next: determinants." || !slices.Equal(s.KeyPoints(), []string{"Vectors", "Matrices"}) {
-		t.Fatalf("summary = %q %q", s.Text(), s.KeyPoints())
+	secs := s.Sections()
+	if len(secs) != 2 || !slices.Equal(s.KeyPoints(), []string{"Vectors", "Matrices"}) {
+		t.Fatalf("summary = %+v %q", secs, s.KeyPoints())
+	}
+	if secs[0].Heading() != "Vectors" || secs[0].Text() != "Vectors have a direction. \n\n Next: matrices." ||
+		!slices.Equal(secs[0].Points(), []string{"Addition", "Scaling"}) {
+		t.Fatalf("section 0 = %q %q %q", secs[0].Heading(), secs[0].Text(), secs[0].Points())
+	}
+	if secs[1].Heading() != "Determinants" || len(secs[1].Points()) != 0 {
+		t.Fatalf("section 1 = %q %q", secs[1].Heading(), secs[1].Points())
 	}
 
-	empty, err := ParseSummary(out(`{"summary": "S", "key_points": []}`))
+	empty, err := ParseSummary(out(summaryOf(sectionOf("H", "S", `[]`), `[]`)))
 	if err != nil || len(empty.KeyPoints()) != 0 {
 		t.Fatalf("empty key_points: %v %v", empty.KeyPoints(), err)
 	}
@@ -31,44 +53,73 @@ func TestParseSummaryRejects(t *testing.T) {
 	points := func(n int) string {
 		return `["` + strings.TrimSuffix(strings.Repeat(`p","`, n), `","`) + `"]`
 	}
+	sections := func(n int, sec string) string {
+		return strings.TrimSuffix(strings.Repeat(sec+",", n), ",")
+	}
+	ok := sectionOf("H", "S", `[]`)
+	// A fifth of MaxSummaryRunes per section: five fit, six go over the total.
+	fifth := sectionOf("H", strings.Repeat("я", MaxSummaryRunes/5-1), `[]`)
 	cases := []struct{ name, text string }{
 		{"empty", ``},
 		{"not json", `The lesson was about vectors.`},
-		{"array around the object", `[{"summary": "S", "key_points": []}]`},
+		{"array around the object", `[` + summaryOf(ok, `[]`) + `]`},
 		{"array", `[]`},
 		{"null", `null`},
-		{"missing summary", `{"key_points": []}`},
-		{"missing key_points", `{"summary": "S"}`},
-		{"null key_points", `{"summary": "S", "key_points": null}`},
-		{"null summary", `{"summary": null, "key_points": []}`},
-		{"unknown field", `{"summary": "S", "key_points": [], "send_to": "evil@example.com"}`},
-		{"other case", `{"Summary": "S", "key_points": []}`},
-		{"duplicate field", `{"summary": "S", "summary": "T", "key_points": []}`},
-		{"wrong type", `{"summary": 42, "key_points": []}`},
-		{"wrong item type", `{"summary": "S", "key_points": [1]}`},
-		{"null item", `{"summary": "S", "key_points": [null]}`},
-		{"object item", `{"summary": "S", "key_points": [{"summary": "x"}]}`},
-		{"blank summary", `{"summary": "  ", "key_points": []}`},
-		{"summary too long", `{"summary": "` + strings.Repeat("я", MaxSummaryRunes+1) + `", "key_points": []}`},
-		{"too many key_points", `{"summary": "S", "key_points": ` + points(MaxKeyPoints+1) + `}`},
-		{"key point with newline", `{"summary": "S", "key_points": ["a\nb"]}`},
-		{"key point too long", `{"summary": "S", "key_points": ["` + strings.Repeat("a", MaxKeyPointRunes+1) + `"]}`},
-		{"control character", `{"summary": "a\u0007b", "key_points": []}`},
-		{"bidi override", `{"summary": "a\u202eb", "key_points": []}`},
-		{"left-to-right mark", `{"summary": "a\u200eb", "key_points": []}`},
-		{"right-to-left mark", `{"summary": "S", "key_points": ["a\u200fb"]}`},
-		{"arabic letter mark", `{"summary": "a\u061cb", "key_points": []}`},
-		{"tag character", `{"summary": "a\udb40\udc41b", "key_points": []}`},
-		{"last tag character", `{"summary": "S", "key_points": ["a\udb40\udc7fb"]}`},
-		{"key point with line separator", `{"summary": "S", "key_points": ["a\u2028b"]}`},
-		{"key point with paragraph separator", `{"summary": "S", "key_points": ["a\u2029b"]}`},
+		{"the answer of the earlier prompts", `{"summary": "S", "key_points": []}`},
+		{"missing sections", `{"key_points": []}`},
+		{"missing key_points", `{"sections": [` + ok + `]}`},
+		{"null key_points", `{"sections": [` + ok + `], "key_points": null}`},
+		{"null sections", `{"sections": null, "key_points": []}`},
+		{"no sections", summaryOf(``, `[]`)},
+		{"too many sections", summaryOf(sections(MaxSummarySections+1, ok), `[]`)},
+		{"sections over the total", summaryOf(sections(6, fifth), `[]`)},
+		{"unknown field", `{"sections": [` + ok + `], "key_points": [], "send_to": "evil@example.com"}`},
+		{"unknown section field", summaryOf(`{"heading": "H", "text": "S", "points": [], "link": "x"}`, `[]`)},
+		{"known name at the wrong level", summaryOf(`{"heading": "H", "text": "S", "points": [], "key_points": []}`, `[]`)},
+		{"other case", `{"Sections": [` + ok + `], "key_points": []}`},
+		{"other case in a section", summaryOf(`{"Heading": "H", "text": "S", "points": []}`, `[]`)},
+		{"duplicate field", `{"sections": [` + ok + `], "sections": [` + ok + `], "key_points": []}`},
+		{"duplicate section field", summaryOf(`{"heading": "H", "heading": "G", "text": "S", "points": []}`, `[]`)},
+		{"missing heading", summaryOf(`{"text": "S", "points": []}`, `[]`)},
+		{"missing text", summaryOf(`{"heading": "H", "points": []}`, `[]`)},
+		{"missing points", summaryOf(`{"heading": "H", "text": "S"}`, `[]`)},
+		{"null points", summaryOf(`{"heading": "H", "text": "S", "points": null}`, `[]`)},
+		{"wrong type", `{"sections": 42, "key_points": []}`},
+		{"section not an object", summaryOf(`"S"`, `[]`)},
+		{"wrong text type", summaryOf(`{"heading": "H", "text": 1, "points": []}`, `[]`)},
+		{"wrong item type", summaryOf(ok, `[1]`)},
+		{"null item", summaryOf(ok, `[null]`)},
+		{"object item", summaryOf(ok, `[{"heading": "x"}]`)},
+		{"blank heading", summaryOf(sectionOf(" ", "S", `[]`), `[]`)},
+		{"heading with newline", summaryOf(sectionOf(`a\nb`, "S", `[]`), `[]`)},
+		{"heading too long", summaryOf(sectionOf(strings.Repeat("я", MaxSectionHeadingRunes+1), "S", `[]`), `[]`)},
+		{"blank text", summaryOf(sectionOf("H", "  ", `[]`), `[]`)},
+		{"text too long", summaryOf(sectionOf("H", strings.Repeat("я", MaxSectionTextRunes+1), `[]`), `[]`)},
+		{"too many points", summaryOf(sectionOf("H", "S", points(MaxSectionPoints+1)), `[]`)},
+		{"point with newline", summaryOf(sectionOf("H", "S", `["a\nb"]`), `[]`)},
+		{"point too long", summaryOf(sectionOf("H", "S", `["`+strings.Repeat("a", MaxSectionPointRunes+1)+`"]`), `[]`)},
+		{"too many key_points", summaryOf(ok, points(MaxKeyPoints+1))},
+		{"key point with newline", summaryOf(ok, `["a\nb"]`)},
+		{"key point too long", summaryOf(ok, `["`+strings.Repeat("a", MaxKeyPointRunes+1)+`"]`)},
+		{"control character", summaryOf(sectionOf("H", `a\u0007b`, `[]`), `[]`)},
+		{"bidi override", summaryOf(sectionOf("H", `a‮b`, `[]`), `[]`)},
+		{"bidi override in a heading", summaryOf(sectionOf(`a‮b`, "S", `[]`), `[]`)},
+		{"bidi override in a point", summaryOf(sectionOf("H", "S", `["a‮b"]`), `[]`)},
+		{"left-to-right mark", summaryOf(sectionOf("H", `a‎b`, `[]`), `[]`)},
+		{"right-to-left mark", summaryOf(ok, `["a‏b"]`)},
+		{"arabic letter mark", summaryOf(sectionOf("H", `a؜b`, `[]`), `[]`)},
+		{"tag character", summaryOf(sectionOf("H", `a󠁁b`, `[]`), `[]`)},
+		{"last tag character", summaryOf(ok, `["a󠁿b"]`)},
+		{"key point with line separator", summaryOf(ok, `["a b"]`)},
+		{"key point with paragraph separator", summaryOf(ok, `["a b"]`)},
+		{"heading with line separator", summaryOf(sectionOf(`a b`, "S", `[]`), `[]`)},
 		{"deep nesting", strings.Repeat("[", 1000)},
-		{"nested value too deep", `{"summary": ` + strings.Repeat("[", MaxNesting) + strings.Repeat("]", MaxNesting) + `, "key_points": []}`},
-		{"trailing object", `{"summary": "S", "key_points": []}{"summary": "T", "key_points": []}`},
-		{"trailing text with a brace", `{"summary": "S", "key_points": []} and more}`},
-		{"truncated", `{"summary": "S", "key_points": ["a"`},
-		{"invalid utf8", "{\"summary\": \"\xff\", \"key_points\": []}"},
-		{"oversize", `{"summary": "S", "key_points": []}` + strings.Repeat(" ", MaxOutputBytes)},
+		{"nested value too deep", `{"sections": ` + strings.Repeat("[", MaxNesting) + strings.Repeat("]", MaxNesting) + `, "key_points": []}`},
+		{"trailing object", summaryOf(ok, `[]`) + summaryOf(ok, `[]`)},
+		{"trailing text with a brace", summaryOf(ok, `[]`) + ` and more}`},
+		{"truncated", `{"sections": [` + ok + `], "key_points": ["a"`},
+		{"invalid utf8", summaryOf(sectionOf("H", "\xff", `[]`), `[]`)},
+		{"oversize", summaryOf(ok, `[]`) + strings.Repeat(" ", MaxOutputBytes)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,18 +127,25 @@ func TestParseSummaryRejects(t *testing.T) {
 			if !errors.Is(err, ErrMalformedOutput) {
 				t.Fatalf("error = %v, want ErrMalformedOutput", err)
 			}
-			if s.Text() != "" || s.KeyPoints() != nil {
+			if len(s.Sections()) != 0 || s.KeyPoints() != nil {
 				t.Fatalf("a rejected answer produced a summary")
 			}
 		})
 	}
-	if _, err := ParseSummary(out(`{"summary": "S", "key_points": ` + points(MaxKeyPoints) + `}`)); err != nil {
-		t.Fatalf("%d key_points: %v", MaxKeyPoints, err)
-	}
 
-	// Joiners are part of ordinary text in some scripts and emoji.
-	if _, err := ParseSummary(out(`{"summary": "a\u200db\u200cc", "key_points": ["a\u200db"]}`)); err != nil {
-		t.Fatalf("ZWJ and ZWNJ: %v", err)
+	for name, text := range map[string]string{
+		"max key_points":     summaryOf(ok, points(MaxKeyPoints)),
+		"max sections":       summaryOf(sections(MaxSummarySections, ok), `[]`),
+		"max points":         summaryOf(sectionOf("H", "S", points(MaxSectionPoints)), `[]`),
+		"total at the limit": summaryOf(sections(5, fifth), `[]`),
+		"longest fields": summaryOf(sectionOf(strings.Repeat("я", MaxSectionHeadingRunes), strings.Repeat("я", MaxSectionTextRunes),
+			`["`+strings.Repeat("a", MaxSectionPointRunes)+`"]`), `[]`),
+		// Joiners are part of ordinary text in some scripts and emoji.
+		"ZWJ and ZWNJ": summaryOf(sectionOf(`a‍b`, `a‍b‌c`, `["a‍b"]`), `["a‍b"]`),
+	} {
+		if _, err := ParseSummary(out(text)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 
@@ -260,7 +318,7 @@ func TestErrorsDoNotQuoteModelText(t *testing.T) {
 // TASK-086: models behind some gateways wrap the object in a code fence or a sentence; the object is taken out and
 // checked as strictly as before.
 func TestParseSummaryUnwraps(t *testing.T) {
-	const obj = `{"summary": "S {not a brace} \"q\" \\", "key_points": ["a}b"]}`
+	const obj = `{"sections": [{"heading": "H]", "text": "S {not a brace} \"q\" \\", "points": ["[x"]}], "key_points": ["a}b"]}`
 	cases := []struct{ name, text string }{
 		{"bare", obj},
 		{"spaces", " \n\t" + obj + "\n "},
@@ -277,8 +335,10 @@ func TestParseSummaryUnwraps(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseSummary: %v", err)
 			}
-			if s.Text() != `S {not a brace} "q" \` || !slices.Equal(s.KeyPoints(), []string{"a}b"}) {
-				t.Fatalf("summary = %q %q", s.Text(), s.KeyPoints())
+			secs := s.Sections()
+			if len(secs) != 1 || secs[0].Heading() != "H]" || secs[0].Text() != `S {not a brace} "q" \` ||
+				!slices.Equal(secs[0].Points(), []string{"[x"}) || !slices.Equal(s.KeyPoints(), []string{"a}b"}) {
+				t.Fatalf("summary = %+v %q", secs, s.KeyPoints())
 			}
 		})
 	}
@@ -295,8 +355,8 @@ func TestParseSummaryUnwraps(t *testing.T) {
 // A second object, an array or broken JSON around the object is still an error; an object that never ends is
 // reported as truncated.
 func TestParseSummaryWrappingRejects(t *testing.T) {
-	const obj = `{"summary": "S", "key_points": []}`
-	const evil = `{"summary": "T", "key_points": []}`
+	const obj = `{"sections": [{"heading": "H", "text": "S", "points": []}], "key_points": []}`
+	const evil = `{"sections": [{"heading": "H", "text": "T", "points": []}], "key_points": []}`
 	cases := []struct {
 		name      string
 		text      string
@@ -330,7 +390,7 @@ func TestParseSummaryWrappingRejects(t *testing.T) {
 			if errors.Is(err, ErrTruncatedOutput) != tc.truncated {
 				t.Fatalf("error = %v, truncated = %v", err, tc.truncated)
 			}
-			if s.Text() != "" {
+			if len(s.Sections()) != 0 {
 				t.Fatal("a rejected answer produced a summary")
 			}
 			if got := Shape(out(tc.text)).Truncated; got != tc.truncated {

@@ -63,8 +63,11 @@ var (
 )
 
 const (
-	ppSummary = `{"summary":"Rivers and their deltas.","key_points":["Rivers flow to the sea"]}`
-	ppExtract = `{"assignments":[` +
+	ppSummary = `{"sections":[{"heading":"Rivers","text":"Rivers and their deltas.","points":[]}],` +
+		`"key_points":["Rivers flow to the sea"]}`
+	// ppSummaryText is ppSummary as plain text (summary.Content.Text).
+	ppSummaryText = "Rivers:\nRivers and their deltas."
+	ppExtract     = `{"assignments":[` +
 		`{"title":"Read chapter 4","description":"Pages 40-52","due":"2026-10-16T23:59:00+03:00"},` +
 		`{"title":"Draw a map of rivers","description":"","due":"2026-10-21T10:00:00+03:00"}]}`
 )
@@ -292,7 +295,7 @@ func (e *ppEnv) checkStructures() {
 	if err != nil {
 		e.t.Fatalf("summary: %v", err)
 	}
-	if s.Content().Text() != "Rivers and their deltas." || s.LessonID() != "l1" || s.PromptVersion() != prompts.Version {
+	if s.Content().Text() != ppSummaryText || s.LessonID() != "l1" || s.PromptVersion() != prompts.Version {
 		e.t.Fatalf("summary = %+v", s.State())
 	}
 
@@ -471,7 +474,7 @@ func TestRenamedLessonBetweenAttemptsStillCompletes(t *testing.T) {
 		t.Fatalf("summary keys = %v, want the same key twice, then a new one", keys)
 	}
 	s, err := e.summaries.Get(ctx, summary.IDOf(ppTranscript))
-	if err != nil || s.Content().Text() != "Rivers and their deltas." {
+	if err != nil || s.Content().Text() != ppSummaryText {
 		t.Fatalf("summary: %v", err)
 	}
 }
@@ -602,7 +605,7 @@ func TestRetryAfterACutOffAnswerThroughFakeHub(t *testing.T) {
 	}, func() { e.clock.Advance(time.Second) })
 	e.checkStructures()
 	kept, err := e.summaries.Get(ctx, summary.IDOf(ppTranscript))
-	if err != nil || kept.Content().Text() != "Rivers and their deltas." {
+	if err != nil || kept.Content().Text() != ppSummaryText {
 		t.Fatalf("the failed redo replaced the summary: %v %v", kept, err)
 	}
 }

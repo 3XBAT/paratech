@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/services/prompts"
+	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
@@ -19,7 +21,8 @@ import (
 )
 
 const (
-	summaryAnswer = `{"summary":"The lesson was about rivers.","key_points":["Rivers flow to the sea","Deltas"]}`
+	summaryAnswer = `{"sections":[{"heading":"Rivers","text":"The lesson was about rivers.","points":["Deltas form at the mouth"]}],` +
+		`"key_points":["Rivers flow to the sea","Deltas"]}`
 	extractAnswer = `{"assignments":[` +
 		`{"title":"Read chapter 4","description":"Pages 40-52","due":"2026-10-16T23:59:00+03:00"},` +
 		`{"title":"Map of rivers","description":"","due":null}]}`
@@ -99,7 +102,8 @@ func TestSummarizeStoresTheSummary(t *testing.T) {
 	if !ok {
 		t.Fatal("no summary stored")
 	}
-	if st.Text != "The lesson was about rivers." || len(st.KeyPoints) != 2 || st.Lesson != "l1" || st.Transcript != "t1" ||
+	wantSections := []summary.Section{{Heading: "Rivers", Text: "The lesson was about rivers.", Points: []string{"Deltas form at the mouth"}}}
+	if !reflect.DeepEqual(st.Sections, wantSections) || len(st.KeyPoints) != 2 || st.Lesson != "l1" || st.Transcript != "t1" ||
 		st.PromptVersion != prompts.Version || st.Version != 1 {
 		t.Fatalf("summary = %+v", st)
 	}

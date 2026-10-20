@@ -19,6 +19,9 @@ const (
 	MaxSummaryBytes        = 128 << 10 // the lesson summary
 	MaxPreviousDraftBytes  = 128 << 10 // the draft being refined
 	MaxStudentRequestBytes = 4 << 10   // the student's refinement request
+
+	// MaxTranscriptMinutes bounds the length of the recording sent with a summary; a longer one is not sent.
+	MaxTranscriptMinutes = 24 * 60
 )
 
 // Lesson is what the caller knows about the lesson.
@@ -47,7 +50,8 @@ type Assignment struct {
 	Due         time.Time // never sent: a draft does not need it
 }
 
-// Segment is one recognised piece of the transcript. Only the text is ever sent.
+// Segment is one recognised piece of the transcript. Only the text is sent, and for a summary the end of the last
+// segment as the length of the recording (TranscriptMinutes).
 type Segment struct {
 	StartMs int64
 	EndMs   int64
@@ -76,6 +80,7 @@ type Context struct {
 	nextLessonKind        values.LessonKind
 	lessonKind            values.LessonKind
 	transcript            string
+	transcriptMinutes     int
 	summary               string
 	assignmentTitle       string
 	assignmentDescription string
@@ -112,6 +117,9 @@ func Select(operation values.Operation, m Material) (Context, error) {
 		}
 		if c.transcript == "" {
 			return Context{}, fmt.Errorf("%w: transcript is empty", ErrMissingContext)
+		}
+		if operation == values.OperationSummary {
+			c.transcriptMinutes = minutesOf(m.Transcript)
 		}
 		if operation == values.OperationExtractHomework && m.Lesson.Start.IsZero() {
 			return Context{}, fmt.Errorf("%w: lesson start", ErrMissingContext)
@@ -238,6 +246,20 @@ func joinTranscript(segments []Segment) (string, error) {
 	return b.String(), nil
 }
 
+// minutesOf returns the length of the recording in whole minutes, rounded up: the latest segment end. 0 when the
+// segments carry no times or the length is beyond MaxTranscriptMinutes.
+func minutesOf(segments []Segment) int {
+	var end int64
+	for _, s := range segments {
+		end = max(end, s.EndMs)
+	}
+	const minute = 60 * 1000
+	if end <= 0 || end > MaxTranscriptMinutes*minute {
+		return 0
+	}
+	return int((end + minute - 1) / minute)
+}
+
 // Operation returns the operation the context was selected for.
 func (c Context) Operation() values.Operation { return c.operation }
 
@@ -267,6 +289,10 @@ func (c Context) LessonKind() values.LessonKind { return c.lessonKind }
 
 // Transcript returns the transcript text, one segment per line (summary, extract_homework_deadlines and lecture_text).
 func (c Context) Transcript() string { return c.transcript }
+
+// TranscriptMinutes returns the length of the recording in minutes, a guide to the volume of the summary (summary
+// only, TASK-101); 0 when unknown.
+func (c Context) TranscriptMinutes() int { return c.transcriptMinutes }
 
 // Summary returns the lesson summary (homework_draft only).
 func (c Context) Summary() string { return c.summary }

@@ -9,9 +9,28 @@ const summarySchema = `{
   "title": "summary",
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "key_points"],
+  "required": ["sections", "key_points"],
   "properties": {
-    "summary": {"type": "string", "minLength": 1, "maxLength": 20000, "description": "Summary of the lesson."},
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "Logical sections in the order of the lesson; all texts together at most 20000 characters.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["heading", "text", "points"],
+        "properties": {
+          "heading": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Short topic of the section, one line."},
+          "text": {"type": "string", "minLength": 1, "maxLength": 4000, "description": "1-3 paragraphs separated by an empty line."},
+          "points": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {"type": "string", "minLength": 1, "maxLength": 300, "description": "One line."}
+          }
+        }
+      }
+    },
     "key_points": {
       "type": "array",
       "maxItems": 20,
