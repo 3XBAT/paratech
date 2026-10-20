@@ -3213,3 +3213,26 @@
 - Пункт внутри раздела не подсвечивается отдельно (попадание указывает на раздел целиком)
 - Возможен конфликт с TASK-100 в SummaryParts.tsx/styles.css: сохранять классы sm-sec/kb-focus
 - Изменённые существующие тесты: prompts output/schema/prompts_test (новая форма ответа, лимиты, transcript_minutes, бюджет 6000), contextselection_test, limits_test, homeworkflow postprocess/nextlesson/rerun, app/pipeline_test, tests/postprocess_sqlite, drafts_sqlite (заголовок в lesson_summary), summaryview_sqlite (## в .md), prompteval_hub_test, wails summary_test, sqlite migrate_test 19→20; фронтенд summary/knowledge/lecturetext/lesson .test.mjs (поле sections; индекс попадания без −1)
+## [TASK-106 (часть 1: сборщик)] Сборщик .pptx и модель презентации в домене
+**Дата:** 2026-10-20
+**Статус:** pending (сделана только часть 1; генерация и UI — после TASK-105)
+
+### Что сделано
+- values/presentation.go: Presentation, Slide (титульный, заголовок + тезисы ≤ 6, два столбца, заключение), заметки докладчика; шаблоны paper (по умолчанию), white, graphite; Validate: ≤ 30 слайдов, ≤ 6 тезисов (и в столбце), длины в рунах, подзаголовок ≤ 4 строк; CleanPresentationText — домен решает, что текст пуст после удаления управляющих/bidi символов
+- adapters/pptx: archive/zip + PresentationML без новых зависимостей; темы, мастер, 3 макета, мастер заметок, заметки к каждому слайду; Golos Text с запасным системным шрифтом (pitchFamily 34); оранжевый акцент — только тонкая полоса под заголовком; без картинок; экранирование XML; детерминированный вывод
+- docs/qa/run-alpha.md: раздел «TASK-106 (часть 1)» — проверка владельцем в PowerPoint и Impress
+
+### Тесты
+- [x] go test -race пакетов pptx, values, desktop/tests; verify.sh — см. отчёт PR
+- [ ] [владельцу] открыть примеры в PowerPoint и LibreOffice Impress (без запроса на восстановление)
+
+### Решения (подтвердить)
+- Слайд «заключение» может быть без строк; пустые поля, которые вид слайда не показывает, — ошибка проверки (ничего не теряется молча)
+- Шаблоны: paper (#F4F4F1), white (#FFFFFF), graphite (#1F2023, светлый текст)
+
+### Заметки (follow-up)
+- Review: approve; medium (команда для владельца в POSIX-синтаксисе, TestSample не создавал папку) и low/nit (пустой после очистки текст, лимит строк подзаголовка, экранирование имени темы, const геометрии) — исправлены
+- Security: 0 found, скептики не нужны
+- Часть 2: путь и имя файла выбирать через безопасный адаптер, не из текста модели; сохранение — с подтверждением (правило 3)
+- normAutofit без fontScale: PowerPoint ужимает текст только после правки; очень длинные тезисы могут не влезть
+- Модель документа TASK-104 (values/document.go) не трогали; после её слияния сверить подход
