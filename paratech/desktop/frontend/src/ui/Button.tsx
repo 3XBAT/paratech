@@ -5,6 +5,8 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className"> {
   variant?: ButtonVariant;
+  /** Small (24px) or large (36px); the default is 30px. */
+  size?: "sm" | "lg";
   icon?: IconName;
   /** Shows busyLabel instead of the label; the width stays the same. Disabling stays with the caller. */
   busy?: boolean;
@@ -17,6 +19,7 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 
 export function Button({
   variant = "secondary",
+  size,
   icon,
   busy = false,
   busyLabel,
@@ -28,7 +31,7 @@ export function Button({
 }: ButtonProps) {
   const reasonId = useId();
   const reason = rest.disabled && disabledReason ? disabledReason : "";
-  const cls = ["btn", variant === "secondary" ? "" : variant, className ?? ""].filter((c) => c).join(" ");
+  const cls = ["btn", variant === "secondary" ? "" : variant, size ?? "", className ?? ""].filter((c) => c).join(" ");
   const button = (
     <button type={type} className={cls} aria-describedby={reason ? reasonId : undefined} {...rest}>
       {icon && <Icon name={icon} />}

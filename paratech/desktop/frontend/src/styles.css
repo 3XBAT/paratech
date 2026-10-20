@@ -154,11 +154,12 @@ html, body, #root { height: 100%; }
 .mload.heavy .mload-bar i.on { background: var(--wait-t); }
 /* The «⋯» menu of a row. */
 .mmenu { position: relative; display: flex; justify-content: end; }
-.btn.mmenu-btn { min-width: 32px; padding: 5px 0; color: var(--muted); font-size: 18px; line-height: 1; }
-.btn.mmenu-btn[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
-.mmenu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: flex; flex-direction: column; min-width: 240px; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--raised); box-shadow: var(--sh-win); }
-.mmenu-item { padding: 7px 10px; border: 0; border-radius: var(--r-ctl); background: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
-.mmenu-item:hover:enabled, .mmenu-item:focus-visible { background: var(--panel-2); }
+/* «⋯» has no outline: a monochrome glyph on a square as tall as a button. */
+.btn.mmenu-btn { width: var(--h-ctl); padding: 0; color: var(--muted); font-size: 18px; line-height: 1; }
+.btn.mmenu-btn:hover:enabled, .btn.mmenu-btn[aria-expanded="true"] { background: var(--fill); color: var(--text); }
+.mmenu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: flex; flex-direction: column; min-width: 240px; padding: 4px; border: 0; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--sh-pop); }
+.mmenu-item { padding: 8px 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.mmenu-item:hover:enabled, .mmenu-item:focus-visible { background: var(--fill); }
 .mmenu-item:disabled { opacity: .5; cursor: not-allowed; }
 .sha-line { margin: 0 0 10px; }
 .slow { color: var(--wait-t); }
@@ -175,7 +176,7 @@ html, body, #root { height: 100%; }
 @media (forced-colors: active) {
   .mload-bar i { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
   .mload-bar i.on, .mload.heavy .mload-bar i.on { background: CanvasText; }
-  .mmenu-list { border-color: CanvasText; }
+  .mmenu-list { border: 1px solid CanvasText; }
 }
 
 /* Диагностика: the sound check and the support bundle, two cards like Подключения. */
@@ -365,7 +366,7 @@ html, body, #root { height: 100%; }
 /* Deleting recordings (TASK-095): the «⋯» menu leaves the card, the row checkbox, the bar of the selected ones and the
    confirmation, which scrolls when many recordings are listed. */
 .row-check { display: inline-flex; align-items: baseline; gap: 8px; }
-.mmenu-hint { max-width: 260px; padding: 0 10px 6px; white-space: normal; }
+.mmenu-hint { max-width: 260px; padding: 0 12px 8px; white-space: normal; }
 .rec-selected { margin-bottom: 12px; }
 .rec-deleted-line { display: block; overflow-wrap: anywhere; }
 .del-body { max-height: 55vh; overflow: auto; }

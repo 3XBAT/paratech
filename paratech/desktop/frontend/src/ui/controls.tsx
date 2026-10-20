@@ -16,15 +16,16 @@ export interface SegmentedOption<T extends string> {
   label: ReactNode;
 }
 
-/** A row of mutually exclusive buttons (filters, theme). */
+/** A row of mutually exclusive buttons (screen parts, filters, file format, theme); `large` for screen parts. */
 export function Segmented<T extends string>(props: {
   label: string;
   options: readonly SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  large?: boolean;
 }) {
   return (
-    <div className="seg" role="group" aria-label={props.label}>
+    <div className={props.large ? "seg lg" : "seg"} role="group" aria-label={props.label}>
       {props.options.map((o) => (
         <button key={o.value} type="button" aria-pressed={o.value === props.value} onClick={() => props.onChange(o.value)}>
           {o.label}
