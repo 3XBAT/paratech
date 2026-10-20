@@ -12,7 +12,7 @@ import (
 func stateOf(r *Recording) State {
 	d, _ := r.Duration()
 	return State{
-		Version: r.Version(), ID: r.ID(), LessonID: r.LessonID(), Lesson: r.LessonSnapshot(), Status: r.Status(),
+		Version: r.Version(), ID: r.ID(), LessonID: r.LessonID(), Lesson: r.LessonSnapshot(), Correction: r.LessonCorrection(), Status: r.Status(),
 		MaxDuration: r.MaxDuration(), Duration: d, Chunks: r.Chunks(), ChunksDir: r.ChunksDir(), Audio: r.Audio(), Silent: r.Silent(), Problem: r.Problem(),
 		StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(), HeartbeatAt: r.HeartbeatAt(),
 		CreatedAt: r.CreatedAt(), UpdatedAt: r.UpdatedAt(),
