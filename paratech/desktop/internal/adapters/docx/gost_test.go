@@ -24,7 +24,8 @@ func paper() values.Document {
 			Heading: "Реферат по дисциплине «Физика»", Topic: "Колебания маятника",
 			Performer: "Выполнил: студент группы Ф-21 Иванов И. И.", Checker: "Проверил: Петров П. П.", Place: "Москва 2026",
 		},
-		TableOfContents: true,
+		TableOfContents:   true,
+		SectionsOnNewPage: true,
 		Blocks: []values.Block{
 			{Kind: values.BlockHeading, Level: 1, Lines: []string{"Введение"}},
 			{Kind: values.BlockParagraph, Lines: []string{"Маятник — тело, совершающее колебания."}},
@@ -188,7 +189,9 @@ func TestStylesFollowTheProfile(t *testing.T) {
 			`<w:sz w:val="28"/><w:szCs w:val="28"/><w:lang w:val="ru-RU"/>`,
 			`<w:spacing w:after="0" w:line="360" w:lineRule="auto"/>`,
 			`w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:widowControl/><w:ind w:firstLine="709"/><w:jc w:val="both"/>`,
-			`w:styleId="Heading1"><w:name w:val="heading 1"/>`, `<w:sz w:val="32"/>`,
+			// Headings in the body size, bold (GOST 7.32).
+			`w:styleId="Heading1"><w:name w:val="heading 1"/>`, `<w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/>`,
+			`<w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/>`, `<w:outlineLvl w:val="2"/></w:pPr><w:rPr><w:b/><w:i/><w:sz w:val="28"/>`,
 			`w:styleId="TOC1"><w:name w:val="toc 1"/>`, `w:pos="9355"`, // 11906 - 1701 - 850
 			`w:styleId="Caption"><w:name w:val="caption"/>`, `w:styleId="TableGrid"`, `<w:insideV w:val="single"`,
 			`|<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="850" w:bottom="1134" w:left="1701" w:header="709" w:footer="709" w:gutter="0"/>`,
@@ -199,6 +202,7 @@ func TestStylesFollowTheProfile(t *testing.T) {
 		}, []string{
 			`w:ascii="PT Astra Serif" w:hAnsi="PT Astra Serif"`, `<w:sz w:val="24"/><w:szCs w:val="24"/>`,
 			`<w:spacing w:after="0" w:line="240" w:lineRule="auto"/>`, `<w:ind w:firstLine="567"/>`,
+			`<w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/>`,
 			`w:pos="9355"`, // 11906 - 1984 - 567 (35 mm, 10 mm)
 			`|<w:pgMar w:top="1417" w:right="567" w:bottom="1417" w:left="1984" w:header="709" w:footer="709"`,
 		}},
@@ -461,6 +465,14 @@ func TestPageNumbersAndPages(t *testing.T) {
 	if strings.Contains(d, "titlePg") || strings.Contains(d, `w:type="first"`) {
 		t.Fatal("a document without a title page hides the first number")
 	}
+
+	// Without SectionsOnNewPage («Сохранить в Word»): no heading starts a page, with or without a title page or TOC.
+	for _, doc := range []values.Document{paper(), noTitle, sample()} {
+		doc.SectionsOnNewPage = false
+		if d := part(t, doc, "word/document.xml"); strings.Contains(d, "pageBreakBefore") {
+			t.Fatal("a heading starts a new page without SectionsOnNewPage")
+		}
+	}
 }
 
 func TestPlaceholdersAreVisible(t *testing.T) {
@@ -529,6 +541,12 @@ func TestOversizedDocumentsAreRefused(t *testing.T) {
 		{Blocks: []values.Block{{Kind: values.BlockTable, Table: values.Table{Rows: [][]string{make([]string, values.MaxTableColumns+1)}}}}},
 		{Blocks: []values.Block{{Kind: values.BlockTable}}},
 		{Blocks: []values.Block{{Kind: values.BlockParagraph, Lines: []string{strings.Repeat("a", values.MaxTextRunes+1)}}}},
+		// Empty cells cost no characters, but rows are padded to the widest one: refused by the cell count.
+		{Blocks: slices.Repeat([]values.Block{{Kind: values.BlockTable, Table: values.Table{
+			Header: make([]string, values.MaxTableColumns), Rows: make([][]string, values.MaxTableRows-1),
+		}}}, values.MaxDocumentBlocks)},
+		// Empty list items cost no characters either: refused by the item count.
+		{Blocks: slices.Repeat([]values.Block{{Kind: values.BlockBulletList, Lines: make([]string, values.MaxBlockLines)}}, values.MaxDocumentBlocks)},
 	}
 	for i, d := range cases {
 		b, err := New().Render(context.Background(), d)
@@ -536,6 +554,24 @@ func TestOversizedDocumentsAreRefused(t *testing.T) {
 			t.Errorf("document %d: err = %v", i, err)
 		}
 	}
+}
+
+// A document at every structure limit, with no text at all, still renders to a bounded size.
+func TestStructureAtTheLimitsStaysSmall(t *testing.T) {
+	const maxDocumentXML = 16 << 20
+	table := values.Block{Kind: values.BlockTable, Table: values.Table{
+		Header: make([]string, values.MaxTableColumns), Rows: make([][]string, values.MaxTableRows-1),
+	}}
+	list := values.Block{Kind: values.BlockBulletList, Lines: make([]string, values.MaxBlockLines)}
+	blocks := slices.Repeat([]values.Block{table}, values.MaxDocumentCells/(values.MaxTableRows*values.MaxTableColumns))
+	blocks = append(blocks, slices.Repeat([]values.Block{list}, values.MaxDocumentItems/values.MaxBlockLines)...)
+	blocks = append(blocks, slices.Repeat([]values.Block{{Kind: values.BlockBibliography}}, values.MaxDocumentBlocks-len(blocks))...)
+	doc := values.Document{TableOfContents: true, SectionsOnNewPage: true, Blocks: blocks}
+	n := len(part(t, doc, "word/document.xml"))
+	if n > maxDocumentXML {
+		t.Fatalf("document.xml = %d bytes, want at most %d", n, maxDocumentXML)
+	}
+	t.Logf("document.xml = %d bytes", n)
 }
 
 func TestPaperIsDeterministic(t *testing.T) {

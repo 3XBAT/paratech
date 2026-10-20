@@ -53,7 +53,8 @@ func styles(f values.Formatting) string {
 		font, font, font, font, size, size, lineValue(f.LineSpacingPct))
 	fmt.Fprintf(&b, `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>`+
 		`<w:pPr><w:widowControl/><w:ind w:firstLine="%d"/><w:jc w:val="both"/></w:pPr></w:style>`, twipsFromTenthMM(f.IndentTenthMM))
-	b.WriteString(headingStyle(1, size+4, "") + headingStyle(2, size, "") + headingStyle(3, size, "<w:i/>"))
+	// GOST 7.32: headings in the body size, bold.
+	b.WriteString(headingStyle(1, size, "") + headingStyle(2, size, "") + headingStyle(3, size, "<w:i/>"))
 	for level := 1; level <= values.MaxHeadingLevel; level++ {
 		fmt.Fprintf(&b, `<w:style w:type="paragraph" w:styleId="%s%d"><w:name w:val="toc %d"/>`+
 			`<w:basedOn w:val="Normal"/><w:next w:val="Normal"/>`+

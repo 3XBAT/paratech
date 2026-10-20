@@ -14,8 +14,11 @@ import "strconv"
 type Document struct {
 	Title           TitlePage // the zero TitlePage: no title page
 	TableOfContents bool      // a table of contents after the title page, built from the headings
-	Format          Formatting
-	Blocks          []Block
+	// SectionsOnNewPage starts every level-1 heading and the bibliography on a new page (GOST 7.32). Finished papers
+	// set it (TASK-105); «Сохранить в Word» does not, so a homework draft keeps its headings on the page.
+	SectionsOnNewPage bool
+	Format            Formatting
+	Blocks            []Block
 }
 
 // TitlePage are the lines of the title page, each already worded (domain/coursework/services/homeworkdoc); an empty
@@ -56,7 +59,7 @@ const (
 
 // Block is one block of the document. By Kind:
 //   - BlockHeading: Lines joined by spaces, Level from MinHeadingLevel to MaxHeadingLevel (a level out of range is
-//     clamped). A level-1 heading starts a new page (GOST 7.32).
+//     clamped). With SectionsOnNewPage, a level-1 heading starts a new page.
 //   - BlockParagraph: Lines, which the renderer breaks as they are (a list typed line by line stays a list).
 //   - BlockBulletList, BlockNumberedList: Lines are the items, one level.
 //   - BlockTable: Table; Caption is the table name, numbered by TableCaption above the table.

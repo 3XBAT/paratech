@@ -18,7 +18,7 @@ type Formatting struct {
 	MarginRightMM  int
 	MarginBottomMM int
 	MarginLeftMM   int
-	IndentTenthMM  int // tenths of a millimetre: 125 is 1.25 cm
+	IndentTenthMM  int // tenths of a millimetre: 125 is 1.25 cm; 0 is the default, so no indent cannot be chosen yet
 }
 
 // GOST 7.32 defaults.

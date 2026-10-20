@@ -31,6 +31,7 @@ type body struct {
 	b         strings.Builder
 	f         values.Formatting
 	toc       bool
+	newPages  bool  // level-1 headings start new pages (Document.SectionsOnNewPage)
 	pageStart bool  // nothing is written on the current page yet: a level-1 heading needs no page break
 	headings  int   // headings written, numbers their bookmarks
 	tables    int   // tables written, numbers their captions
@@ -46,7 +47,7 @@ type heading struct {
 
 // document renders word/document.xml and returns the definitions of its numbered lists in instance order.
 func document(doc values.Document, f values.Formatting) (string, []int) {
-	w := &body{f: f, toc: doc.TableOfContents, pageStart: true}
+	w := &body{f: f, toc: doc.TableOfContents, newPages: doc.SectionsOnNewPage, pageStart: true}
 	w.b.WriteString(xmlHeader + `<w:document xmlns:w="` + wordNS + `" xmlns:r="` + relNS + `"><w:body>`)
 	title := !doc.Title.IsZero()
 	if title {
@@ -208,12 +209,12 @@ func (w *body) block(bl values.Block) {
 	w.pageStart = false
 }
 
-// heading writes a heading paragraph; a level-1 heading starts a new page unless the page is still empty (GOST
-// 7.32). With a TOC, the heading is the target of its entry.
+// heading writes a heading paragraph; with newPages, a level-1 heading starts a new page unless the page is still
+// empty (GOST 7.32). With a TOC, the heading is the target of its entry.
 func (w *body) heading(level int, s, pPr string) {
 	b := &w.b
 	fmt.Fprintf(b, `<w:p><w:pPr><w:pStyle w:val="%s%d"/>`, styleHeading, level)
-	if level == values.MinHeadingLevel && !w.pageStart {
+	if w.newPages && level == values.MinHeadingLevel && !w.pageStart {
 		b.WriteString(`<w:pageBreakBefore/>`)
 	}
 	b.WriteString(pPr + `</w:pPr>`)
