@@ -16,20 +16,23 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// LectureTextReminders bounds the repeats with a format reminder of one attempt of a lecture_text job, over all its
-// parts: an attempt makes one paid call per part plus at most these (TASK-090).
+// LectureTextReminders bounds the repeats with a format reminder of one step of a lecture_text job: a step makes one
+// paid call for its part plus at most these (TASK-090, TASK-097).
 const LectureTextReminders = 3
 
-// MaxLectureTextCalls bounds the LLM calls of one attempt of a lecture_text job. The app sizes the job timeout by it.
-const MaxLectureTextCalls = lectureparts.MaxParts + LectureTextReminders
+// MaxLectureTextCalls bounds the LLM calls of one step of a lecture_text job. The app sizes the job timeout by it.
+const MaxLectureTextCalls = 1 + LectureTextReminders
 
-// lectureText runs one attempt of a lecture_text job (TASK-090): the transcript is planned into parts
-// (lectureparts.Plan) and each part not stored yet is formatted by the LLM, checked and stored at once, so an attempt
-// that stops (timeout, crash, network) continues from the next part. The LLM keys are derived from the job and the
-// request (llmKey), so a rerun of the attempt is replayed by the Hub for free. The parts belong to a run named by a
-// digest of its requests (lectureRequests): a new job with the same requests (a retry after a failure) keeps the
-// parts made, while a changed transcript or prompt starts afresh. Once every part is there, the merged text replaces the one shown
-// before (lecturetext.Publish). The answer is model output (hard rule 3): stored as data, it triggers nothing.
+// lectureText runs one step of a lecture_text job (TASK-090, TASK-097): the transcript is planned into parts
+// (lectureparts.Plan) and the first part not stored yet is formatted by the LLM, checked and stored. While parts are
+// left the step returns job.ErrContinueLater, so the runner puts the job at the end of the queue and the jobs that
+// waited meanwhile (drafts, emails, the calendar) run before the next part. A step that stops (timeout, crash,
+// network) is repeated from the same part. The LLM keys are derived from the job and the request (llmKey), so a
+// repeated step is replayed by the Hub for free. The parts belong to a run named by a digest of its requests
+// (lectureRequests): a new job with the same requests (a retry after a failure) keeps the parts made, while a changed
+// transcript or prompt starts afresh. The step that stores the last part publishes the merged text in place of the one
+// shown before (lecturetext.Publish) and completes the job. The answer is model output (hard rule 3): stored as data,
+// it triggers nothing.
 func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	in lessonInput) error {
 	sel, err := contextselection.Select(values.OperationLectureText, in.material)
@@ -70,21 +73,28 @@ func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, repo
 	}
 
 	reminders := LectureTextReminders
-	for i := next; i < total; i++ {
-		part := plan[i]
-		blocks, err := askChecked(ctx, p, snap, reqs[i], &reminders, func(out values.UntrustedOutput) ([]lecturetext.Block, error) {
-			return lectureBlocks(part, out)
-		})
-		if err != nil {
-			return err
-		}
-		// Reported before the part is stored: the runner refuses a cancelled job, and then nothing is stored.
-		if err := p.partsDone(ctx, snap, report, i+1, total); err != nil {
-			return err
-		}
-		if err := p.saveLecturePart(ctx, snap, in, run, total, i, blocks); err != nil {
-			return err
-		}
+	part := plan[next]
+	blocks, err := askChecked(ctx, p, snap, reqs[next], &reminders, func(out values.UntrustedOutput) ([]lecturetext.Block, error) {
+		return lectureBlocks(part, out)
+	})
+	if err != nil {
+		return err
+	}
+	// The checkpoint never gets ahead of the stored parts: a step that dies in the save would leave "next+1" with
+	// next parts stored, and the repeated step could not yield (job.ErrNoProgress). The unchanged checkpoint is
+	// reported again first, so a job cancelled during the call stores nothing. A report that fails after the save
+	// stops the step with the part stored; the next step continues after it.
+	if err := p.partsDone(ctx, snap, report, next, total); err != nil {
+		return err
+	}
+	if err := p.saveLecturePart(ctx, snap, in, run, total, next, blocks); err != nil {
+		return err
+	}
+	if err := p.partsDone(ctx, snap, report, next+1, total); err != nil {
+		return err
+	}
+	if next+1 < total {
+		return job.ErrContinueLater
 	}
 	return nil
 }

@@ -85,6 +85,11 @@ type Job struct {
 	lastError   string
 	cause       Cause
 
+	// claimProgress is the progress when this aggregate claimed the job; Yield refuses a step that left it unchanged.
+	// It lives only in memory for one claim: the runner keeps the claimed aggregate until the step ends.
+	claimProgress Progress
+	claimed       bool
+
 	createdAt  time.Time
 	startedAt  time.Time
 	finishedAt time.Time
@@ -308,6 +313,7 @@ func (j *Job) Claim(now time.Time) error {
 	}
 	j.attempts++
 	j.runNow = false // the override covers one start; a later power wait must hold again
+	j.claimProgress, j.claimed = j.Progress(), true
 	if j.startedAt.IsZero() {
 		j.startedAt = now
 	}
@@ -421,6 +427,30 @@ func (j *Job) Requeue(now time.Time) error {
 		return err
 	}
 	j.nextRunAt = now
+	return nil
+}
+
+// Yield ends one step of a RUNNING job that does its work in steps (TASK-097): the job goes back to QUEUED, due now,
+// so the jobs that were due before it are claimed first. A finished step is not a failure: the attempt is given back
+// (otherwise a job claimed with its last attempt could never be claimed again), the progress stays and the error of
+// an earlier failed step is cleared. A step that left the progress as it was at the claim (or a job not claimed by
+// this aggregate) is refused with ErrNoProgress, so a job cannot loop forever without using attempts.
+func (j *Job) Yield(now time.Time) error {
+	if j.status != StatusRunning {
+		return fmt.Errorf("%w: yield of a %s job", ErrInvalidTransition, j.status)
+	}
+	if !j.claimed || j.Progress() == j.claimProgress {
+		return ErrNoProgress
+	}
+	if err := j.move(StatusQueued, now); err != nil {
+		return err
+	}
+	if j.attempts > 0 {
+		j.attempts--
+	}
+	j.nextRunAt = now
+	j.lastError = ""
+	j.claimed = false
 	return nil
 }
 

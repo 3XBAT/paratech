@@ -132,9 +132,9 @@ export type ResultKind = "ok" | "wait" | "fail";
 const resultIcons: Readonly<Record<ResultKind, IconName>> = { ok: "ok", wait: "warn", fail: "warn" };
 
 /** The outcome of an action: a line with an icon under its button, instead of a toast. */
-export function ResultLine(props: { kind: ResultKind; role?: "status" | "alert"; children: ReactNode }) {
+export function ResultLine(props: { kind: ResultKind; role?: "status" | "alert"; title?: string; children: ReactNode }) {
   return (
-    <p className={`result s-${props.kind}`} role={props.role}>
+    <p className={`result s-${props.kind}`} role={props.role} title={props.title || undefined}>
       <Icon name={resultIcons[props.kind]} />
       <span>{props.children}</span>
     </p>

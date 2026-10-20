@@ -34,10 +34,26 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
   migration 0005).
 
 ## Consequences
-- A long lesson takes tens of minutes of calls; while a lecture text job runs it holds one light worker.
+- A long lesson takes tens of minutes of calls; each part holds a light worker for one step only (TASK-097).
 - The part size is a guess about the alias limit: a truncated part is asked again to keep all content; if it still
   does not fit, the Hub owner raises `max_output` of the alias.
 - The kind and subject come from the recording's lesson snapshot (TASK-088/089), else from the lesson; one place in
   `homeworkflow` load.
 - Once a lecture text job of the current transcript completed (`lectureTextReady`), the recordings row offers the lecture
   text instead of the raw transcript. The transcript is never deleted: retries are made from it.
+
+## Amendment: one part per job step (TASK-097)
+- A 3-hour lesson held one of the two workers for over two hours, and drafts, emails and the calendar waited. Now one
+  lecture_text job still makes the whole text, but each claim formats and stores only the first part not stored
+  (`lecturetext.NextPart`). While parts are left the handler returns `job.ErrContinueLater` and the runner calls
+  `job.Yield`: QUEUED, due now, the attempt given back, the progress kept. The claim order (`next_run_at`,
+  `created_at`) runs the jobs that were due before it first. The step that stores the last part publishes the text and
+  completes the job.
+- One job means one part at a time, the same keys, the same «Повторить» and «Сделать текст лекции заново», and the
+  deletion cancels it like any job. A crash or a failed step repeats only the part not stored yet.
+- Attempts count failed steps of the whole job. The reminder budget (`LectureTextReminders`) and the timeout are per
+  step: at most 1 + 3 paid calls per step, so a lecture whose every part needs all reminders costs up to 4 × parts.
+  Example: a ~40-part lecture can make up to ~160 paid calls (before: parts + 3 per attempt); reminders fire only on a
+  bad format. A step that asks to continue without storing a part uses an attempt (`job.ErrNoProgress`).
+- Between steps the job is QUEUED with its checkpoint "N/M"; views that should show it as in progress read the
+  checkpoint.

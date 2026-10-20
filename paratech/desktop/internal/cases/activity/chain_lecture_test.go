@@ -31,8 +31,11 @@ func TestChainOfLectureText(t *testing.T) {
 			must(t, err)
 			at := t0.Add(3 * time.Second)
 			must(t, j.ReportProgress(p, at))
-			if s == job.StatusRetryWait {
+			switch s {
+			case job.StatusRetryWait:
 				must(t, j.Retry(at, at.Add(time.Minute), "hub timeout"))
+			case job.StatusQueued: // the step stored its part and yielded (TASK-097)
+				must(t, j.Yield(at))
 			}
 			return j
 		}
@@ -90,6 +93,17 @@ func TestChainOfLectureText(t *testing.T) {
 			name: "runs before its first report",
 			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw), parts("l", job.StatusRunning, 0, "")},
 			want: Chain{Stage: StageLectureText, Step: StepLectureText, CanRedoSummary: true},
+		},
+		{
+			// TASK-097: between two steps the row stays «Текст лекции… 3 из 12», not «в очереди».
+			name: "between parts",
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw), parts("l", job.StatusQueued, 25, "3/12")},
+			want: Chain{Stage: StageLectureText, Step: StepLectureText, Percent: 25, PartsDone: 3, Parts: 12, CanRedoSummary: true},
+		},
+		{
+			name: "queued before its first part",
+			jobs: []func(t *testing.T) *job.Job{done("s", stt), done("a", sum), done("h", hw), parts("l", job.StatusQueued, 0, "0/12")},
+			want: Chain{Stage: StageQueued, Step: StepLectureText, QueueReason: QueueInLine, Parts: 12, CanRedoSummary: true},
 		},
 		{
 			name: "retries with the parts it has",

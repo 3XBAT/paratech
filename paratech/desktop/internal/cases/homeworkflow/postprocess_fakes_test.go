@@ -2,6 +2,7 @@ package homeworkflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -483,8 +484,20 @@ func (e *ppEnv) snapshot(id shared.JobID, typ job.Type, t shared.TranscriptID) j
 	return j.Snapshot()
 }
 
+// maxSteps bounds the step loops of the tests: a job that keeps asking to continue fails the test instead of hanging.
+const maxSteps = 100
+
+// handle runs the job as the runner does: a step that returns job.ErrContinueLater (a lecture text part, TASK-097) is
+// followed by the next one until the job ends.
 func (e *ppEnv) handle(snap job.Snapshot) error {
-	return e.pp.Handle(context.Background(), snap, nil)
+	e.t.Helper()
+	for range maxSteps {
+		if err := e.pp.Handle(context.Background(), snap, nil); !errors.Is(err, job.ErrContinueLater) {
+			return err
+		}
+	}
+	e.t.Fatalf("the job still continues after %d steps", maxSteps)
+	return nil
 }
 
 // Compile-time checks: the fakes satisfy the ports they stand for.

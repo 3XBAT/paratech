@@ -142,7 +142,8 @@ func lectureChain(j *job.Job) Chain {
 		}
 	}
 	var c Chain
-	if j.Status() == job.StatusRunning {
+	// A QUEUED job with stored parts goes on from them: the row shows it as being made, not «в очереди».
+	if j.Status() == job.StatusRunning || values.LectureTextResumes(j.Status() == job.StatusQueued, j.Progress().Checkpoint()) {
 		c = Chain{Stage: StageLectureText, Step: StepLectureText, Percent: j.Progress().Percent()}
 	} else {
 		c = queued(StepLectureText, j)

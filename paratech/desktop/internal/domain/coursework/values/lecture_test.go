@@ -55,3 +55,14 @@ func TestLectureTextCheckpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestLectureTextResumes(t *testing.T) {
+	for in, want := range map[string]bool{"3/12": true, "12/12": true, "1/1": true, "0/12": false, "": false, "x": false} {
+		if got := LectureTextResumes(true, in); got != want {
+			t.Errorf("LectureTextResumes(true, %q) = %v, want %v", in, got, want)
+		}
+		if LectureTextResumes(false, in) {
+			t.Errorf("LectureTextResumes(false, %q) = true, want false: only a QUEUED job resumes", in)
+		}
+	}
+}

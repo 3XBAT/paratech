@@ -32,6 +32,10 @@ func lectureOf(j *job.Job, v LectureText) LectureText {
 		// Finished without a text: it was removed since, nothing is being made.
 		v.State = StateNone
 	}
+	if values.LectureTextResumes(j.Status() == job.StatusQueued, j.Progress().Checkpoint()) {
+		// QUEUED with stored parts (TASK-097): it goes on from them, so it is still being made.
+		v.Step = Step{State: StateRunning}
+	}
 	if v.State == StateWaiting || v.State == StateRunning {
 		if done, parts, ok := values.ParseLectureTextCheckpoint(j.Progress().Checkpoint()); ok {
 			v.PartsDone, v.Parts = done, parts

@@ -186,7 +186,7 @@ type lessonInput struct {
 	material   contextselection.Material
 }
 
-// Handle runs one attempt of a summarize or extract_homework job (jobrunner.Handler).
+// Handle runs one attempt of a summarize or extract_homework job, or one step of a lecture_text job (jobrunner.Handler).
 func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report func(ctx context.Context, pr job.Progress) error) error {
 	if report == nil {
 		report = func(context.Context, job.Progress) error { return nil }

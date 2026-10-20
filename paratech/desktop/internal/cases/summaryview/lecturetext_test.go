@@ -37,7 +37,7 @@ func (e *env) lectureJob(t *testing.T, tr shared.TranscriptID, st job.Status, ch
 	t.Helper()
 	e.addJob(t, "lecture_text", tr, job.StatusQueued, job.CauseNone)
 	j := e.jobs.byPrefix["lecture_text:"+string(tr)+":"]
-	if st == job.StatusQueued {
+	if st == job.StatusQueued && checkpoint == "" {
 		return
 	}
 	must := func(err error) {
@@ -58,6 +58,8 @@ func (e *env) lectureJob(t *testing.T, tr shared.TranscriptID, st job.Status, ch
 		must(j.Complete(t0))
 	case job.StatusRetryWait:
 		must(j.Retry(t0, t0.Add(time.Minute), "hub timeout"))
+	case job.StatusQueued: // a step stored its part and yielded (TASK-097)
+		must(j.Yield(t0))
 	}
 }
 
@@ -75,6 +77,15 @@ func TestViewLectureText(t *testing.T) {
 		{
 			name: "running with parts", status: job.StatusRunning, checkpoint: "3/12",
 			want: LectureText{Step: Step{State: StateRunning}, PartsDone: 3, Parts: 12},
+		},
+		{
+			// TASK-097: between two steps it is still being made, not «в очереди».
+			name: "between parts", status: job.StatusQueued, checkpoint: "3/12",
+			want: LectureText{Step: Step{State: StateRunning}, PartsDone: 3, Parts: 12},
+		},
+		{
+			name: "queued before any part", status: job.StatusQueued, checkpoint: "0/12",
+			want: LectureText{Step: Step{State: StateWaiting, Wait: WaitInLine}, PartsDone: 0, Parts: 12},
 		},
 		{
 			name: "retrying with parts", status: job.StatusRetryWait, checkpoint: "4/12",
