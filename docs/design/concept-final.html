@@ -226,6 +226,8 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .mload i.on{background:var(--accent-fill);box-shadow:none}.mload.heavy i.on{background:var(--wait-t)}
 .mwarn{margin:3px 0 0;color:var(--wait-t)}
 .mmenu{display:flex;justify-content:end}.mmenu .btn{min-width:32px;padding:5px 0;color:var(--muted);font-size:18px;line-height:1}
+/* recordings (TASK-096): one main button and «⋯» per row; the round «Повторить» right next to the error chip */
+.st-head{display:flex;align-items:center;gap:6px}.btn.icon-btn{width:28px;min-height:28px;padding:0;border-radius:50%;color:var(--accent)}.btn.icon-btn .i{width:16px;height:16px}
 
 /* popup */
 .duo{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
@@ -286,6 +288,7 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
   <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></symbol>
   <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
   <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M17.66 2.34v4h-4"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
 </svg>
 
@@ -332,23 +335,23 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
           <div class="card" role="list">
             <div class="row" role="listitem"><div><p class="t">Матанализ, лекция</p><span class="m">Сегодня, 10:40–12:10 · Zoom</span></div>
               <div class="st"><span class="chip s-rec"><span class="dot"></span>Идёт запись · <span class="num">00:42:17</span></span><span class="m">Окно можно закрыть — запись продолжится.</span></div>
-              <div class="acts"><button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button></div></div>
+              <div class="acts"><button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Матанализ, лекция" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
             <div class="row" role="listitem"><div><p class="t">Физика, семинар</p><span class="m">Вчера, 14:00–15:30 · 1 ч 27 мин</span></div>
               <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-wave"/></svg>Расшифровка · <span class="num">64 %</span></span>
                 <div class="prog" role="progressbar" aria-label="Расшифровка" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100"><b style="--p:64%"></b></div><span class="m num">Осталось около 6 минут</span></div>
-              <div class="acts"></div></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть расшифровку</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Физика, семинар" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
             <div class="row" role="listitem"><div><p class="t">История России, лекция</p><span class="m">Вчера, 12:20–13:50 · конспект</span></div>
               <div class="st"><span class="chip s-wait"><svg class="i"><use href="#i-plug"/></svg>Ждёт зарядку</span><span class="m">Ноутбук на батарее, конспект отложен. Начнётся сам после подключения питания.</span></div>
-              <div class="acts"><button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button></div></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: История России, лекция" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
             <div class="row" role="listitem"><div><p class="t">Английский язык, семинар</p><span class="m">Вчера, 10:40–12:10 · поиск домашнего задания</span></div>
               <div class="st"><span class="chip s-net"><svg class="i"><use href="#i-off"/></svg>Ждёт интернет</span><span class="m">Продолжится само, как только появится сеть.</span></div>
-              <div class="acts"></div></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть расшифровку</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Английский язык, семинар" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
             <div class="row" role="listitem"><div><p class="t">Программирование на Python</p><span class="m">Пн, 14 сентября · 1 ч 30 мин</span></div>
               <div class="st"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span><span class="m">2 задания · ближайшее до пт, 18 сентября</span></div>
-              <div class="acts"><button class="btn ghost">Открыть</button></div></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть конспект</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Программирование на Python" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
             <div class="row" role="listitem"><div><p class="t">Линейная алгебра, семинар</p><span class="m">Пн, 14 сентября · 58 мин</span></div>
-              <div class="st"><span class="chip s-fail"><svg class="i"><use href="#i-warn"/></svg>Не распознано</span><span class="m">В записи почти нет звука. Возможно, выбрано не то приложение.</span></div>
-              <div class="acts"><button class="btn ghost">Проверить звук</button><button class="btn">Повторить</button></div></div>
+              <div class="st"><span class="st-head"><span class="chip s-fail" title="permanent failure: the LLM answer does not match the schema"><svg class="i"><use href="#i-warn"/></svg>Ошибка</span><button class="btn icon-btn" aria-label="Повторить краткое содержание" title="Повторить краткое содержание"><svg class="i"><use href="#i-retry"/></svg></button></span><span class="m">Не удалось сделать краткое содержание. Нажмите «Повторить».</span></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть расшифровку</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Линейная алгебра, семинар" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
           </div>
           <div class="gap"></div>
           <div class="statusbar" role="status"><span>В очереди 1 задача</span><span>Следующая пара — Физика, 14:00</span><span>Модель речи: small</span><span class="r"><svg class="i"><use href="#i-lock"/></svg>Звук обрабатывается только на этом компьютере</span></div>
