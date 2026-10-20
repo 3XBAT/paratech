@@ -14,7 +14,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// TASK-090: the kind of the lesson selects the trusted wording, the title and subject are untrusted data only. The
+// TASK-090, TASK-093: the kind of the lesson selects the trusted wording; title, subject and teacher are untrusted data. The
 // recording's snapshot wins over the schedule (like the title, TASK-088); without a snapshot the schedule is used.
 func TestLectureTextTakesTheLessonKindAndSubject(t *testing.T) {
 	kept := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
@@ -27,21 +27,22 @@ func TestLectureTextTakesTheLessonKindAndSubject(t *testing.T) {
 		wantKind    values.LessonKind
 		wantTitle   string
 		wantSubject string
+		wantTeacher string
 	}{
 		"seminar snapshot": {
 			lessonID: "l1", snapshot: seminar,
-			wantKind: values.LessonKindSeminar, wantTitle: "Матанализ, семинар", wantSubject: "Матанализ",
+			wantKind: values.LessonKindSeminar, wantTitle: "Матанализ, семинар", wantSubject: "Матанализ", wantTeacher: "Петров",
 		},
 		"lesson deleted from the schedule": {
 			lessonID: "gone", snapshot: seminar,
-			wantKind: values.LessonKindSeminar, wantTitle: "Матанализ, семинар", wantSubject: "Матанализ",
+			wantKind: values.LessonKindSeminar, wantTitle: "Матанализ, семинар", wantSubject: "Матанализ", wantTeacher: "Петров",
 		},
 		"snapshot of an unknown kind": {
 			lessonID: "l2", snapshot: recvalues.LessonSnapshotSpec{Title: "Матанализ", Kind: "unknown", Start: kept},
 			wantKind: values.LessonKindUnknown, wantTitle: "Матанализ",
 		},
 		"no snapshot: the schedule": {
-			lessonID: "l2", wantKind: values.LessonKindLab, wantTitle: "Физика, лаб.", wantSubject: "Физика",
+			lessonID: "l2", wantKind: values.LessonKindLab, wantTitle: "Физика, лаб.", wantSubject: "Физика", wantTeacher: "Иванова",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -76,18 +77,17 @@ func TestLectureTextTakesTheLessonKindAndSubject(t *testing.T) {
 				t.Fatalf("instructions are not the wording of %q:\n%s", tc.wantKind, got)
 			}
 			data := untrusted(t, reqs[0])
-			subject, _ := data["subject"].(string)
-			if data["lesson_title"] != tc.wantTitle || subject != tc.wantSubject {
-				t.Fatalf("untrusted data: title %v, subject %q; want %q, %q", data["lesson_title"], subject, tc.wantTitle, tc.wantSubject)
+			subject, _ := data["lesson_subject"].(string)
+			teacher, _ := data["lesson_teacher"].(string)
+			if data["lesson_title"] != tc.wantTitle || subject != tc.wantSubject || teacher != tc.wantTeacher {
+				t.Fatalf("untrusted data: title %v, subject %q, teacher %q; want %q, %q, %q",
+					data["lesson_title"], subject, teacher, tc.wantTitle, tc.wantSubject, tc.wantTeacher)
 			}
-			// Schedule text never reaches the trusted instructions; the teacher is not sent at all.
+			// Schedule text never reaches the trusted instructions; the teacher is data only (TASK-093).
 			for _, s := range []string{"Матанализ", "Физика", "Петров", "Иванова"} {
 				if strings.Contains(reqs[0].Instructions(), s) {
 					t.Fatalf("%q is in the trusted instructions", s)
 				}
-			}
-			if d := reqs[0].UntrustedData(); strings.Contains(d, "Петров") || strings.Contains(d, "Иванова") {
-				t.Fatalf("the teacher is in the data: %s", d)
 			}
 		})
 	}

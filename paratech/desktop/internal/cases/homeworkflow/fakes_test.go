@@ -142,6 +142,10 @@ func (noLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, err
 	return nil, fmt.Errorf("lesson %s: %w", id, shared.ErrNotFound)
 }
 
+func (noLessons) ListStartingBetween(context.Context, time.Time, time.Time) ([]*lesson.Lesson, error) {
+	return nil, nil
+}
+
 // IDGenerator.
 
 type ids struct{ s *store }

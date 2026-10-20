@@ -27,8 +27,8 @@ const MaxLectureTextCalls = lectureparts.MaxParts + LectureTextReminders
 // (lectureparts.Plan) and each part not stored yet is formatted by the LLM, checked and stored at once, so an attempt
 // that stops (timeout, crash, network) continues from the next part. The LLM keys are derived from the job and the
 // request (llmKey), so a rerun of the attempt is replayed by the Hub for free. The parts belong to a run named by a
-// digest of all its requests: a new job with the same requests (a retry after a failure) keeps the parts made, while a
-// changed transcript or prompt starts afresh. Once every part is there, the merged text replaces the one shown
+// digest of its requests (lectureRequests): a new job with the same requests (a retry after a failure) keeps the
+// parts made, while a changed transcript or prompt starts afresh. Once every part is there, the merged text replaces the one shown
 // before (lecturetext.Publish). The answer is model output (hard rule 3): stored as data, it triggers nothing.
 func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	in lessonInput) error {
@@ -90,7 +90,9 @@ func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, repo
 }
 
 // lectureRequests builds the requests of all parts, keyed with llmKey, and the id of their run: a digest of the
-// model alias and of every request without its key.
+// model alias and of every request without its key and without the lesson context. The context comes from the
+// schedule, so a re-import between attempts must not drop the stored parts and repeat paid calls (ADR-0017); the
+// kind still selects the instructions, which are in the digest.
 func (p *PostProcessor) lectureRequests(id shared.JobID, sel contextselection.Context, plan []lectureparts.Part) (
 	[]values.LLMRequest, string, error) {
 	h := sha256.New()
@@ -99,8 +101,7 @@ func (p *PostProcessor) lectureRequests(id shared.JobID, sel contextselection.Co
 	for i, part := range plan {
 		items := part.Items()
 		lp := prompts.LecturePart{
-			LessonTitle: sel.LessonTitle(), Subject: sel.LessonSubject(), Kind: sel.LessonKind(), Part: i + 1,
-			Parts: len(plan), ContextBefore: part.Context(), Segments: make([]prompts.LectureSegment, len(items)),
+			Lesson: prompts.LessonOf(sel), Part: i + 1, Parts: len(plan), ContextBefore: part.Context(), Segments: make([]prompts.LectureSegment, len(items)),
 		}
 		for j, it := range items {
 			lp.Segments[j] = prompts.LectureSegment{Index: it.Index, StartMs: it.StartMs, Text: it.Text}
@@ -109,7 +110,13 @@ func (p *PostProcessor) lectureRequests(id shared.JobID, sel contextselection.Co
 		if err != nil {
 			return nil, "", err
 		}
-		for _, s := range []string{draft.Instructions(), draft.UntrustedData()} {
+		bare := lp
+		bare.Lesson = prompts.LessonInfo{}
+		plain, err := prompts.BuildLectureText(bare, p.modelAlias, pendingKey)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, s := range []string{draft.Instructions(), plain.UntrustedData()} {
 			h.Write([]byte{0})
 			h.Write([]byte(s))
 		}

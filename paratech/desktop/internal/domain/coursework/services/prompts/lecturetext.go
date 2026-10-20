@@ -9,9 +9,9 @@ import (
 
 // LectureTextVersion identifies the lecture_text prompt, data layout and schema (TASK-090), apart from Version so that
 // a change of one does not redo the other. Bump it on any change of them.
-const LectureTextVersion = 1
+const LectureTextVersion = 2
 
-const lectureTextTask = `Task: turn the speech-recognition text of one part of a lesson into the full readable text of that part. The field segments holds the recognised segments of this part in order; each has an index i, its start time at (minutes:seconds from the start of the recording) and its text. context_before, if present, is the end of the previous part, only for continuity: do not output it and do not repeat its content. part and parts tell which part of the lesson this is; lesson_title and subject, if present, name the lesson.
+const lectureTextTask = `Task: turn the speech-recognition text of one part of a lesson into the full readable text of that part. The field segments holds the recognised segments of this part in order; each has an index i, its start time at (minutes:seconds from the start of the recording) and its text. context_before, if present, is the end of the previous part, only for continuity: do not output it and do not repeat its content. part and parts tell which part of the lesson this is.
 
 This is not a summary. Write the text as it was said, in the speaker's order and in the language of the transcript:
 - keep all the content: every explanation, definition, example, number, formula, question, answer, remark and digression; do not summarize, shorten, condense or leave anything out, and do not add anything that was not said;
@@ -49,7 +49,7 @@ func LectureTextInstructions(kind values.LessonKind) string {
 	case values.LessonKindLab:
 		note = kindLab + lectureKindNote
 	}
-	return preamble + lectureTextTask + note + answerRule + lectureTextSchema
+	return preamble + lessonRule + lectureTextTask + note + answerRule + lectureTextSchema
 }
 
 // LectureSegment is one recognised segment of a part of the lecture text.
@@ -60,11 +60,9 @@ type LectureSegment struct {
 }
 
 // LecturePart is what one lecture_text request is made of. Every text field is user data and goes into the untrusted
-// data only; Kind selects trusted wording and is not sent as data.
+// data only; Lesson.Kind also selects trusted wording.
 type LecturePart struct {
-	LessonTitle   string
-	Subject       string
-	Kind          values.LessonKind
+	Lesson        LessonInfo
 	Part, Parts   int    // 1-based number of the part and the number of parts
 	ContextBefore string // the end of the previous part, for continuity only; empty for the first part
 	Segments      []LectureSegment
@@ -77,15 +75,14 @@ type lectureSegmentData struct {
 }
 
 type lectureTextData struct {
-	LessonTitle   string               `json:"lesson_title,omitempty"`
-	Subject       string               `json:"subject,omitempty"`
+	lessonData
 	Part          int                  `json:"part"`
 	Parts         int                  `json:"parts"`
 	ContextBefore string               `json:"context_before,omitempty"`
 	Segments      []lectureSegmentData `json:"segments"`
 }
 
-// BuildLectureText builds the request of one part: the constant LectureTextInstructions(p.Kind) and the part as one
+// BuildLectureText builds the request of one part: the constant LectureTextInstructions(p.Lesson.Kind) and the part as one
 // JSON object between DataOpen and DataClose. The result is deterministic, so a retry of the same part sends the same
 // request. Errors wrap ErrNoContext (no segments or a bad part number) or values.ErrInvalidLLMRequest.
 func BuildLectureText(p LecturePart, modelAlias, idempotencyKey string) (values.LLMRequest, error) {
@@ -93,7 +90,7 @@ func BuildLectureText(p LecturePart, modelAlias, idempotencyKey string) (values.
 		return values.LLMRequest{}, fmt.Errorf("%w: part %d of %d with %d segments", ErrNoContext, p.Part, p.Parts, len(p.Segments))
 	}
 	data := lectureTextData{
-		LessonTitle: p.LessonTitle, Subject: p.Subject, Part: p.Part, Parts: p.Parts, ContextBefore: p.ContextBefore,
+		lessonData: p.Lesson.data(), Part: p.Part, Parts: p.Parts, ContextBefore: p.ContextBefore,
 		Segments: make([]lectureSegmentData, len(p.Segments)),
 	}
 	for i, s := range p.Segments {
@@ -103,7 +100,7 @@ func BuildLectureText(p LecturePart, modelAlias, idempotencyKey string) (values.
 	if err != nil {
 		return values.LLMRequest{}, fmt.Errorf("%w: encode the part: %w", ErrNoContext, err)
 	}
-	return values.NewLLMRequest(values.OperationLectureText, modelAlias, LectureTextInstructions(p.Kind),
+	return values.NewLLMRequest(values.OperationLectureText, modelAlias, LectureTextInstructions(p.Lesson.Kind),
 		DataOpen+"\n"+string(b)+"\n"+DataClose, idempotencyKey)
 }
 

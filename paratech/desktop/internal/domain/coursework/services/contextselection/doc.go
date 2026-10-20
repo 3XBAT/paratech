@@ -3,14 +3,14 @@
 //
 // The caller gathers what it has into a Material; Select keeps only the fields the operation uses and drops the rest:
 //
-//   - summary: the lesson title and the transcript text;
-//   - extract_homework_deadlines: the lesson title, the lesson start (the anchor for relative dates) and the transcript;
+//   - summary, extract_homework_deadlines and lecture_text: the transcript and the lesson context (TASK-093): title,
+//     subject, kind, teacher, start (the anchor for relative dates) and the start and kind of the next lesson of
+//     the same subject (the anchor for "by the next class"). lecture_text is sent in parts with segment start times
+//     (domain/coursework/services/lectureparts, TASK-090);
 //   - homework_draft: the lesson title, subject and teacher, the assignment title and description, the lesson summary,
-//     the previous draft and the student's refinement request. The transcript is not sent: the summary stands for it;
-//   - lecture_text: the lesson title, its subject and kind and the transcript. The kind only selects trusted wording.
-//     The transcript is sent in parts with segment start times (domain/coursework/services/lectureparts, TASK-090).
+//     the previous draft and the student's refinement request. The transcript is not sent: the summary stands for it.
 //
 // Segment timestamps (except in the parts of lecture_text), the assignment deadline and anything else the caller
-// holds are never selected. Every selected
-// text is user data: domain/coursework/services/prompts puts it into the untrusted part of the request only.
+// holds are never selected. Every selected text is user data: domain/coursework/services/prompts puts it into the
+// untrusted part of the request only.
 package contextselection

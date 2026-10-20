@@ -2919,11 +2919,36 @@
 - Low: DraftStatus грузит весь агрегат черновика каждые 3 с — при необходимости узкий запрос номера последней версии
 - Изменённые существующие тесты: prompts_test (секция студента вне данных), drafts_test (новые порты, run завершает задачу, другой запрос при активной → ErrGenerationRunning), lessons_test/screen_test/app homework_test (формат в ProposeSend/ConfirmSend/PrepareSend), proposal_test (ShownFormat), preferences service_test, migrate_test 16→17, speeds_test (миграция до последней версии), wails settings/homework/lesson/activity/shell тесты (новые методы/поля), tests/drafts_sqlite_test, фронтенд homework.test.mjs (метка «Готовим черновик…», формат, .md), activity.test.mjs (новые поля)
 
+## [TASK-093] Качество системных инструкций: контекст занятия, правила заданий и дедлайнов, акценты по типу, проверочные примеры и оценка через Hub
 ## [TASK-095] Удаление записи (одной и нескольких) с подтверждением: звук, расшифровка, конспект, текст лекции, задачи; найденные задания по выбору
 **Дата:** 2026-10-20
 **Статус:** done
 
 ### Что сделано
+- Контекст занятия во всех запросах постобработки (краткое содержание, задания, текст лекции) как недоверенные данные: предмет, тип, преподаватель, начало, день недели, следующее занятие того же предмета (next_lesson_start, next_lesson_kind)
+- Правило «тот же предмет / следующее занятие» в домене: domain/schedule/services/nextlesson (окно 60 дней, без удалённых и самого занятия); порт LessonReader.ListStartingBetween; ошибка чтения расписания — повтор (ErrStorage)
+- Правила поиска заданий: русские формулировки, отличие от разобранных примеров, группы/подгруппы, «к следующему занятию» → next_lesson_start, «к следующему семинару/лабораторной/практике/лекции» — только если next_lesson_kind совпадает, иначе due null с пометкой; акценты краткого содержания по типу занятия
+- Prompts Version 3→4, LectureTextVersion 1→2; версии в логах (answer accepted/rejected) и в ключах задач; run id текста лекции не зависит от контекста занятия (переимпорт расписания не сбрасывает готовые части)
+- Оценка: 9 синтетических занятий desktop/tests/testdata/prompteval, TestPromptEvalHub (только при PARATECH_EVAL_HUB_URL + PARATECH_EVAL_HUB_KEY, ключ из окружения), тест на поддельном Hub всегда; docs/refs/prompts.md; поправка в ADR-0017
+
+### Тесты
+- [x] Шаг 1: verify.sh (через heavy.sh) на 6371f5c поверх 0677076 — build, vet, windows vet, тесты, lint, windows lint зелёные; VULN_FAIL: новые уязвимости excelize v2.11.0 (GO-2026-6684/6685/6688/6689, xlsxschedule), к задаче не относятся
+- [ ] Шаг 2 [владельцу]: прогнать оценку через свой Hub: `$env:PARATECH_EVAL_HUB_URL=...; $env:PARATECH_EVAL_HUB_KEY=...; go -C paratech test ./desktop/tests -run TestPromptEvalHub -v -count=1` (платные вызовы, ~1 на пример)
+
+### Решения (подтвердить)
+- Тип занятия теперь и в данных (замкнутый enum), не только в выборе фразы — ADR-0017 дополнен
+- Следующее занятие — любого типа того же предмета; для «к следующему семинару» при несовпадении типа срок не ставится (безопасно, студент заполнит)
+- Ошибка чтения расписания при поиске следующего занятия — повтор задачи, а не «неизвестно»
+
+### Заметки (follow-up)
+- Review: medium (тип следующего занятия) и low (run id текста лекции зависел от расписания) исправлены, повторное ревью — approve; security: 2 прохода — 0 находок
+- Новые advisory excelize (GO-2026-6684/6685/6688/6689) ломают vulncheck для всех веток: нужна отдельная задача — обновить excelize до исправленной версии (ADR/task) или решение по allow-list
+- Low: следующий семинар при промежуточной лекции не находится (due null); при необходимости передавать следующее занятие каждого типа
+- Low: уже готовые части текста лекции после переимпорта хранят старый контекст (предмет/преподаватель)
+- Nit: summary/extract теперь отклоняют предмет/преподавателя с управляющими символами (на практике их чистит импорт)
+- Изменённые существующие тесты: contextselection_test (новые поля, тест предмета/преподавателя для всех операций, новые случаи отказа), prompts_test (ключи данных), prompts/lecturetext_test (LecturePart.Lesson, lesson_subject, тип и преподаватель в данных), homeworkflow/lecturetext_lesson_test (преподаватель в данных), фейки noLessons/ppLessons (ListStartingBetween)
+
+---
 - Домен: пометка удаления в агрегате записи (MarkDeleting; идущую запись удалить нельзя; помеченная не транскрибируется и не собирается при восстановлении); сервис domain/recording/services/deletion (классы заданий plain/draft/emails, CheckChoice, Deletable, Kept)
 - Use case cases/recordingdelete: Preview, Delete (пачка до 100), Resume при старте: пометка в БД → отмена задач через jobrunner.Cancel и ожидание (до 20 с) → файлы через порт хранилища (ссылки проверяются по виду) → purge в одной транзакции BEGIN IMMEDIATE (повторная проверка незавершённых и новых задач; иначе pending до следующего запуска)
 - Миграция 0018_recording_deletion (recordings.deleting_at/deleting_assignments, deadline_event_removals), schema.sql, sqlc

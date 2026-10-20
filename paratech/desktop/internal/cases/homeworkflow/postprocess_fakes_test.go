@@ -49,6 +49,8 @@ type ppStore struct {
 	beforeDelete   func()                       // run once before the next assignment delete, without the lock
 	inUse          map[shared.AssignmentID]bool // assignments a delivery references
 	readErr        error                        // returned by every transcript Get when set
+	listErr        error                        // returned by every lesson ListStartingBetween when set
+	listCalls      int                          // calls of lesson ListStartingBetween
 	jobGetErr      error                        // returned by every job Get when set
 	seq            int
 }
@@ -127,6 +129,24 @@ func (r ppLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, e
 		return nil, fmt.Errorf("lesson %s: %w", id, shared.ErrNotFound)
 	}
 	return l, nil
+}
+
+// ListStartingBetween lists the live lessons starting in [from, to) ordered by start, like the sqlite adapter.
+func (r ppLessons) ListStartingBetween(_ context.Context, from, to time.Time) ([]*lesson.Lesson, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.listCalls++
+	if r.s.listErr != nil {
+		return nil, r.s.listErr
+	}
+	var out []*lesson.Lesson
+	for _, l := range r.s.lessons {
+		if s := l.Content().Start; !l.Deleted() && !s.Before(from) && s.Before(to) {
+			out = append(out, l)
+		}
+	}
+	slices.SortFunc(out, func(a, b *lesson.Lesson) int { return a.Content().Start.Compare(b.Content().Start) })
+	return out, nil
 }
 
 type ppSummaries struct{ s *ppStore }

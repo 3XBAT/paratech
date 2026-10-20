@@ -28,6 +28,8 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
   text shown is replaced only when a run completes. Job timeout = 67 calls × the Hub request timeout + slack.
 - **Lesson kind** (`values.LessonKind`) only selects a constant sentence of the trusted instructions; the title and
   subject (schedule text) go into the untrusted data only.
+  *Amended by TASK-093*: kind, teacher, lesson start and the next lesson are sent as untrusted data too (kind is a
+  closed enum chosen by the app); the run id ignores the lesson context, so a schedule re-import keeps stored parts.
 - Hub: operation `lecture_text` with its own operation label in the quota ledger (quota is shared per key; Hub
   migration 0005).
 

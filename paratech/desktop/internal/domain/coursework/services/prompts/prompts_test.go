@@ -78,15 +78,15 @@ func TestBuildSendsOnlyTheContextOfTheOperation(t *testing.T) {
 	}{
 		{
 			op:       values.OperationSummary,
-			keys:     []string{"lesson_title", "transcript"},
-			included: []string{"LESSON-TITLE", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO"},
-			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2026-10-14", "Wednesday", "2031", "123456", "234567", "LESSON-SUBJECT", "LESSON-TEACHER"},
+			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "lesson_start", "lesson_weekday", "transcript"},
+			included: []string{"LESSON-TITLE", "LESSON-SUBJECT", "LESSON-TEACHER", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO", "2026-10-14T10:00:00+03:00", "Wednesday"},
+			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2031", "123456", "234567"},
 		},
 		{
 			op:       values.OperationExtractHomework,
-			keys:     []string{"lesson_title", "lesson_start", "lesson_weekday", "transcript"},
-			included: []string{"LESSON-TITLE", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO", "2026-10-14T10:00:00+03:00", "Wednesday"},
-			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2031", "123456", "234567", "LESSON-SUBJECT", "LESSON-TEACHER"},
+			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "lesson_start", "lesson_weekday", "transcript"},
+			included: []string{"LESSON-TITLE", "LESSON-SUBJECT", "LESSON-TEACHER", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO", "2026-10-14T10:00:00+03:00", "Wednesday"},
+			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2031", "123456", "234567"},
 		},
 		{
 			op:       values.OperationHomeworkDraft,

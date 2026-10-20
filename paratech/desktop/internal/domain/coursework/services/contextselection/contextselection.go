@@ -27,13 +27,17 @@ type Lesson struct {
 	// Start anchors relative dates ("by next Monday"). Pass it in the student's time zone: its UTC offset is the one
 	// the model is told to use.
 	Start time.Time
-	// Subject and Teacher name the lesson as the schedule does; empty when unknown. A homework draft sends both as
-	// context (TASK-092); a lecture text sends the subject (TASK-090).
+	// Subject and Teacher name the lesson as the schedule does; empty when unknown (TASK-092, TASK-093).
 	Subject string
 	Teacher string
-	// Kind is the kind of the lesson; it only selects trusted wording of the lecture_text instructions, it is never
-	// sent as data.
+	// Kind is the kind of the lesson, chosen by the app; it selects trusted wording of the summary and lecture_text
+	// instructions and is sent as data too (TASK-093).
 	Kind values.LessonKind
+	// NextStart is the start of the next lesson of the same subject in the schedule, in the zone of Start; zero when
+	// unknown. It resolves "by the next class" (TASK-093).
+	NextStart time.Time
+	// NextKind is the kind of that next lesson, chosen by the app; it resolves "by the next seminar" (TASK-093).
+	NextKind values.LessonKind
 }
 
 // Assignment is what the caller knows about the assignment a draft is for.
@@ -68,6 +72,8 @@ type Context struct {
 	lessonSubject         string
 	lessonTeacher         string
 	lessonStart           time.Time
+	nextLessonStart       time.Time
+	nextLessonKind        values.LessonKind
 	lessonKind            values.LessonKind
 	transcript            string
 	summary               string
@@ -79,10 +85,12 @@ type Context struct {
 
 // Select validates the material and keeps only the fields operation uses (see the package comment). Required fields:
 //
-//   - summary: a non-empty transcript;
+//   - summary and lecture_text: a non-empty transcript;
 //   - extract_homework_deadlines: a non-empty transcript and the lesson start;
-//   - homework_draft: an assignment title or description;
-//   - lecture_text: a non-empty transcript; the lesson subject and kind are kept too.
+//   - homework_draft: an assignment title or description.
+//
+// The operations on the transcript also keep the lesson context: subject, teacher, kind, start and the start of the
+// next lesson of the subject with its kind (dropped without a start; one not after the start is refused).
 //
 // Texts are trimmed. A missing required field wraps ErrMissingContext, a bad text ErrInvalidMaterial; fields that are
 // not selected are not validated either, they are simply dropped.
@@ -105,20 +113,11 @@ func Select(operation values.Operation, m Material) (Context, error) {
 		if c.transcript == "" {
 			return Context{}, fmt.Errorf("%w: transcript is empty", ErrMissingContext)
 		}
-		if operation == values.OperationExtractHomework {
-			if m.Lesson.Start.IsZero() {
-				return Context{}, fmt.Errorf("%w: lesson start", ErrMissingContext)
-			}
-			c.lessonStart = m.Lesson.Start
+		if operation == values.OperationExtractHomework && m.Lesson.Start.IsZero() {
+			return Context{}, fmt.Errorf("%w: lesson start", ErrMissingContext)
 		}
-		if operation == values.OperationLectureText {
-			if c.lessonSubject, err = oneLine("lesson subject", m.Lesson.Subject); err != nil {
-				return Context{}, err
-			}
-			if !m.Lesson.Kind.Valid() {
-				return Context{}, invalid("lesson kind", "is not a known kind")
-			}
-			c.lessonKind = m.Lesson.Kind
+		if err := c.selectLesson(m.Lesson); err != nil {
+			return Context{}, err
 		}
 
 	case values.OperationHomeworkDraft:
@@ -154,6 +153,32 @@ func Select(operation values.Operation, m Material) (Context, error) {
 		}
 	}
 	return c, nil
+}
+
+// selectLesson keeps the lesson context of an operation on the transcript (TASK-093).
+func (c *Context) selectLesson(l Lesson) error {
+	var err error
+	if c.lessonSubject, err = oneLine("lesson subject", l.Subject); err != nil {
+		return err
+	}
+	if c.lessonTeacher, err = oneLine("lesson teacher", l.Teacher); err != nil {
+		return err
+	}
+	if !l.Kind.Valid() {
+		return invalid("lesson kind", "is not a known kind")
+	}
+	c.lessonKind = l.Kind
+	c.lessonStart = l.Start
+	if !l.Start.IsZero() && !l.NextStart.IsZero() {
+		if !l.NextStart.After(l.Start) {
+			return invalid("next lesson start", "is not after the lesson start")
+		}
+		if !l.NextKind.Valid() {
+			return invalid("next lesson kind", "is not a known kind")
+		}
+		c.nextLessonStart, c.nextLessonKind = l.NextStart, l.NextKind
+	}
+	return nil
 }
 
 func invalid(field, why string) error {
@@ -222,16 +247,22 @@ func (c Context) IsZero() bool { return c == Context{} }
 // LessonTitle returns the lesson title; empty when unknown.
 func (c Context) LessonTitle() string { return c.lessonTitle }
 
-// LessonSubject returns the subject of the lesson (homework_draft and lecture_text); empty when unknown.
+// LessonSubject returns the subject of the lesson; empty when unknown.
 func (c Context) LessonSubject() string { return c.lessonSubject }
 
-// LessonTeacher returns the teacher of the lesson (homework_draft only); empty when unknown.
+// LessonTeacher returns the teacher of the lesson; empty when unknown.
 func (c Context) LessonTeacher() string { return c.lessonTeacher }
 
-// LessonStart returns the lesson start (extract_homework_deadlines only).
+// LessonStart returns the lesson start (the operations on the transcript; always set for extract_homework_deadlines).
 func (c Context) LessonStart() time.Time { return c.lessonStart }
 
-// LessonKind returns the lesson kind (lecture_text only).
+// NextLessonStart returns the start of the next lesson of the same subject; zero when unknown.
+func (c Context) NextLessonStart() time.Time { return c.nextLessonStart }
+
+// NextLessonKind returns the kind of the next lesson of the same subject; unknown without a next lesson.
+func (c Context) NextLessonKind() values.LessonKind { return c.nextLessonKind }
+
+// LessonKind returns the lesson kind (the operations on the transcript).
 func (c Context) LessonKind() values.LessonKind { return c.lessonKind }
 
 // Transcript returns the transcript text, one segment per line (summary, extract_homework_deadlines and lecture_text).

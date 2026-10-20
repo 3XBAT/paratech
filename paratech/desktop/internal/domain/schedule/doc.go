@@ -1,7 +1,8 @@
 // Package schedule is the bounded context of the local class schedule, the canonical copy of which lives in
 // SQLite (PRD sections 11 and 5.3, AC-16, AC-20).
 // Aggregates: domain/schedule/lesson. Domain services: domain/schedule/services/importplan (validation, preview and
-// conflicts of an import).
+// conflicts of an import), domain/schedule/services/ongoing (the lesson in progress) and
+// domain/schedule/services/nextlesson (the next lesson of the same subject).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //
