@@ -444,8 +444,8 @@ type UpdateRecordingParams struct {
 }
 
 // Compare-and-swap on the loaded version (ADR-0004). The user's correction of the lesson (TASK-091) is mutable; the
-// lesson, its snapshot, the cap, the chunk directory and the
-// creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
+// lesson, its snapshot, the cap, the chunk directory and the creation time never change; lesson_id is left alone so
+// that ON DELETE SET NULL of the lesson is not undone by a stale save.
 func (q *Queries) UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateRecording,
 		arg.Status,

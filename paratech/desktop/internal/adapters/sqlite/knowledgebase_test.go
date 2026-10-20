@@ -93,7 +93,12 @@ func TestKnowledgeBaseListsLessonsAndReadiness(t *testing.T) {
 	if err := published.Publish("run", blocks, 1, asgT0); err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range []*lecturetext.LectureText{published, newTestLectureText(t, "t-new"), newTestLectureText(t, "t-old")} {
+	// t-new has a finished part of its run but nothing published: not ready.
+	unpublished := newTestLectureText(t, "t-new")
+	if err := unpublished.AddPart("run", 2, 0, blocks, asgT0); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []*lecturetext.LectureText{published, unpublished, newTestLectureText(t, "t-old")} {
 		if err := lectures.Save(ctx, l); err != nil {
 			t.Fatal(err)
 		}

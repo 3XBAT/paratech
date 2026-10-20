@@ -33,7 +33,8 @@ type ListKnowledgeBaseReadinessRow struct {
 }
 
 // What is stored for the newest transcript of each lesson (the order of LatestTranscriptByRecording): its id (empty: none),
-// whether it has a summary and a finished lecture text (blocks are empty until a run completed).
+// whether it has a summary and a finished lecture text (blocks are empty until a run completed: the rule of
+// lecturetext.LectureText.Ready, keep them in step).
 func (q *Queries) ListKnowledgeBaseReadiness(ctx context.Context, status string) ([]ListKnowledgeBaseReadinessRow, error) {
 	rows, err := q.db.QueryContext(ctx, listKnowledgeBaseReadiness, status)
 	if err != nil {

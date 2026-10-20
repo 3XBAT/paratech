@@ -18,8 +18,8 @@ VALUES (sqlc.arg(id), sqlc.arg(lesson_id), sqlc.arg(status), sqlc.arg(started_at
         sqlc.arg(user_kind), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version (ADR-0004). The user's correction of the lesson (TASK-091) is mutable; the
--- lesson, its snapshot, the cap, the chunk directory and the
--- creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
+-- lesson, its snapshot, the cap, the chunk directory and the creation time never change; lesson_id is left alone so
+-- that ON DELETE SET NULL of the lesson is not undone by a stale save.
 -- name: UpdateRecording :execrows
 UPDATE recordings
 SET status         = sqlc.arg(status),

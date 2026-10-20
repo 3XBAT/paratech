@@ -150,7 +150,8 @@ type Querier interface {
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
 	// What is stored for the newest transcript of each lesson (the order of LatestTranscriptByRecording): its id (empty: none),
-	// whether it has a summary and a finished lecture text (blocks are empty until a run completed).
+	// whether it has a summary and a finished lecture text (blocks are empty until a run completed: the rule of
+	// lecturetext.LectureText.Ready, keep them in step).
 	ListKnowledgeBaseReadiness(ctx context.Context, status string) ([]ListKnowledgeBaseReadinessRow, error)
 	// The knowledge base (TASK-091): no index of its own, it reads the recordings and what was made from them, so a
 	// deleted recording leaves it with its rows (ADR-0018, ADR-0019). Lessons are completed recordings with a track that
@@ -210,8 +211,8 @@ type Querier interface {
 	// format the user chose before the validation and the creation time never change, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). The user's correction of the lesson (TASK-091) is mutable; the
-	// lesson, its snapshot, the cap, the chunk directory and the
-	// creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
+	// lesson, its snapshot, the cap, the chunk directory and the creation time never change; lesson_id is left alone so
+	// that ON DELETE SET NULL of the lesson is not undone by a stale save.
 	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
 	// Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 	// with VersionCAS to shared.ErrVersionConflict.

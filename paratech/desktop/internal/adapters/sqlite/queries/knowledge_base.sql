@@ -13,7 +13,8 @@ WHERE id IS NOT NULL
 ORDER BY started_at DESC, id DESC;
 
 -- What is stored for the newest transcript of each lesson (the order of LatestTranscriptByRecording): its id (empty: none),
--- whether it has a summary and a finished lecture text (blocks are empty until a run completed).
+-- whether it has a summary and a finished lecture text (blocks are empty until a run completed: the rule of
+-- lecturetext.LectureText.Ready, keep them in step).
 -- name: ListKnowledgeBaseReadiness :many
 SELECT r.id AS recording_id,
        CAST(COALESCE(t.id, '') AS TEXT) AS transcript_id,
