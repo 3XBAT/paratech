@@ -28,6 +28,8 @@ export interface LectureTextCardProps {
   onStart: () => void;
   onOpenTranscript: () => void;
   message: { kind: ResultKind; text: string } | null;
+  /** A shown block to mark: a search hit of the knowledge base (TASK-091). */
+  focusBlock?: number;
 }
 
 export function LectureTextCard(props: LectureTextCardProps) {
@@ -89,7 +91,7 @@ export function LectureTextCard(props: LectureTextCardProps) {
       {blocks.length > 0 && (
         <div className="sm-text sm-lecture-text" aria-label="Текст лекции">
           {blocks.map((b, i) => (
-            <section key={i} className="sm-block">
+            <section key={i} className={i === props.focusBlock ? "sm-block kb-focus" : "sm-block"}>
               <h3 className="sm-h">
                 {b.time !== "" && <span className="muted num sm-time">{b.time}</span>}
                 {b.heading}

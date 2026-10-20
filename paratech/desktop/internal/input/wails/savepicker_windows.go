@@ -37,10 +37,11 @@ func (u *windowsUI) pickBundleFile(name string) (string, error) {
 	return path, nil
 }
 
-// Texts of the save dialogs of a transcript and of a summary.
+// Texts of the save dialogs of a transcript, of a summary and of an exported subject.
 const (
 	transcriptDialogTitle = "Сохранение расшифровки"
 	summaryDialogTitle    = "Сохранение конспекта"
+	knowledgeDialogTitle  = "Экспорт предмета"
 	transcriptFilterText  = "Текст (*.txt)"
 	transcriptFilterMD    = "Markdown (*.md)"
 )
@@ -53,6 +54,11 @@ func (u *windowsUI) pickTranscriptFile(name, format string) (string, error) {
 // pickSummaryFile shows the save dialog of a summary (pickTextFile).
 func (u *windowsUI) pickSummaryFile(name, format string) (string, error) {
 	return u.pickTextFile(summaryDialogTitle, name, format)
+}
+
+// pickKnowledgeFile shows the save dialog of an exported subject, always Markdown (pickTextFile).
+func (u *windowsUI) pickKnowledgeFile(name string) (string, error) {
+	return u.pickTextFile(knowledgeDialogTitle, name, "md")
 }
 
 // pickTextFile shows the native save dialog, modal to the main window, with name proposed and the one filter of

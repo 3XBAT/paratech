@@ -53,7 +53,8 @@ type Recording struct {
 	lesson  shared.LessonID
 	status  Status
 
-	lessonSnapshot values.LessonSnapshot // the lesson as it was at the start (TASK-088); zero without one
+	lessonSnapshot values.LessonSnapshot   // the lesson as it was at the start (TASK-088); zero without one
+	correction     values.LessonCorrection // the subject and kind the user set (TASK-091); zero: none
 
 	maxDuration time.Duration
 	duration    time.Duration // final duration; meaningful only with audio
@@ -115,7 +116,9 @@ type State struct {
 	ID       shared.RecordingID
 	LessonID shared.LessonID
 	// Lesson is the snapshot of the lesson at the start; it outlives the link to the lesson (LessonID may be empty).
-	Lesson      values.LessonSnapshot
+	Lesson values.LessonSnapshot
+	// Correction is the subject and kind the user set (TASK-091); zero: none.
+	Correction  values.LessonCorrection
 	Status      Status
 	MaxDuration time.Duration
 	Duration    time.Duration // final duration; must be zero without Audio
@@ -137,7 +140,7 @@ type State struct {
 // Restore rebuilds a stored recording without side effects; it only checks that the state is consistent.
 func Restore(s State) (*Recording, error) {
 	r := &Recording{
-		version: s.Version, id: s.ID, lesson: s.LessonID, lessonSnapshot: s.Lesson, status: s.Status,
+		version: s.Version, id: s.ID, lesson: s.LessonID, lessonSnapshot: s.Lesson, correction: s.Correction, status: s.Status,
 		maxDuration: s.MaxDuration, duration: s.Duration, chunks: s.Chunks, chunksDir: s.ChunksDir, audio: s.Audio,
 		silent: s.Silent, problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
 		createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,

@@ -152,6 +152,8 @@ type Recording struct {
 	LessonEnd           sql.NullInt64
 	DeletingAt          sql.NullInt64
 	DeletingAssignments string
+	UserSubject         sql.NullString
+	UserKind            sql.NullString
 }
 
 type ScheduleEntry struct {

@@ -7,7 +7,8 @@
 // domain/coursework/services/contextselection (the minimal context of an LLM operation, PRD section 9.1),
 // domain/coursework/services/prompts (instructions, answer schemas and strict answer parsing),
 // domain/coursework/services/lectureparts (the parts of the lecture text and their merge) and
-// domain/coursework/services/summaryexport (the summary and the lecture text as text or Markdown).
+// domain/coursework/services/summaryexport (the summary and the lecture text as text or Markdown, a whole subject as
+// Markdown) and domain/coursework/services/knowledgebase (subjects, lessons and the search of the knowledge base).
 //
 // Layout of a context (docs/architecture.md section 3.1):
 //

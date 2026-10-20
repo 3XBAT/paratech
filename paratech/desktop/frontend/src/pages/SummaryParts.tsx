@@ -68,8 +68,8 @@ function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
   );
 }
 
-/** The summary card: its state, the text in paragraphs and the key points. */
-export function SummaryCard(props: RetryProps & { view: SummaryView }) {
+/** The summary card: its state, the text in paragraphs and the key points; focusPoint marks a listed one (TASK-091). */
+export function SummaryCard(props: RetryProps & { view: SummaryView; focusPoint?: number }) {
   const v = props.view;
   const line = summaryLine(v);
   const paras = v.summary.ready ? summaryParagraphs(v.summary.text) : [];
@@ -93,7 +93,9 @@ export function SummaryCard(props: RetryProps & { view: SummaryView }) {
           <h3 className="sm-h">Главное</h3>
           <ul className="sm-points">
             {points.map((p, i) => (
-              <li key={i}>{p}</li>
+              <li key={i} className={i === props.focusPoint ? "kb-focus" : undefined}>
+                {p}
+              </li>
             ))}
           </ul>
         </>

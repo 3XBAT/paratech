@@ -2,6 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { formatTime } from "../activityView";
 import { callByName } from "../bindings/runtime";
 import { type SaveFormat, type TranscriptApi, transcriptApi, type TranscriptStatus } from "../bindings/transcript";
+import { paragraphOf } from "../knowledgeView";
 import {
   applyPage,
   emptyLoaded,
@@ -32,11 +33,15 @@ import { Banner, Card, Input, Progress, ResultLine, type ResultKind, Segmented }
 // «Расшифровка» of one recording (TASK-079): the local transcript, live while the recognition runs, with search,
 // copy, save and playback from a timestamp. Works offline: everything comes from the core on this computer. The text
 // is recognised speech and is rendered as React text only; the highlight is built from text pieces. «Открыть конспект»
-// (TASK-087) shows once the recognition is done: the summary page itself says whether the summary is ready.
+// (TASK-087) shows once the recognition is done: the summary page itself says whether the summary is ready. Embedded
+// in a lesson of «База знаний» (TASK-091) it has no head of its own and may open at a segment found by the search.
 export function TranscriptPage(props: {
   recordingId: string;
   onBack: () => void;
   onOpenSummary: (recordingId: string) => void;
+  embedded?: boolean;
+  /** The segment to scroll to and mark once it is loaded; -1 or undefined for none. */
+  focusSegment?: number;
 }) {
   const { recordingId: id } = props;
   const api = useMemo(() => transcriptApi(callByName), []);
@@ -111,25 +116,29 @@ export function TranscriptPage(props: {
 
   return (
     <section className="page tr">
-      <div className="hw-back">
-        <Button variant="ghost" onClick={props.onBack}>
-          Назад
-        </Button>
-      </div>
-      <div className="head">
-        <div>
-          <h1>Расшифровка</h1>
-          <p className="tr-sub">
-            <span className="tr-title">{title}</span>
-            {status && status.startedAt !== "" && <span className="muted num"> · {formatTime(status.startedAt)}</span>}
-          </p>
-        </div>
-        {status?.state === "done" && (
-          <Button variant="ghost" icon="doc" onClick={() => props.onOpenSummary(id)}>
-            Открыть конспект
-          </Button>
-        )}
-      </div>
+      {!props.embedded && (
+        <>
+          <div className="hw-back">
+            <Button variant="ghost" onClick={props.onBack}>
+              Назад
+            </Button>
+          </div>
+          <div className="head">
+            <div>
+              <h1>Расшифровка</h1>
+              <p className="tr-sub">
+                <span className="tr-title">{title}</span>
+                {status && status.startedAt !== "" && <span className="muted num"> · {formatTime(status.startedAt)}</span>}
+              </p>
+            </div>
+            {status?.state === "done" && (
+              <Button variant="ghost" icon="doc" onClick={() => props.onOpenSummary(id)}>
+                Открыть конспект
+              </Button>
+            )}
+          </div>
+        </>
+      )}
       {error && (
         <Banner kind="fail" role="alert">
           {error}
@@ -138,7 +147,7 @@ export function TranscriptPage(props: {
       {status === null ? (
         !error && <p className="muted">Загрузка…</p>
       ) : (
-        <Viewer api={api} status={status} loaded={loaded} view={view!} />
+        <Viewer api={api} status={status} loaded={loaded} view={view!} focusSegment={props.focusSegment ?? -1} />
       )}
     </section>
   );
@@ -154,10 +163,12 @@ function Viewer(props: {
   status: TranscriptStatus;
   loaded: Loaded;
   view: ReturnType<typeof statusView>;
+  focusSegment: number;
 }) {
   const { api, status, view } = props;
   const id = status.recordingId;
   const paras = useMemo(() => paragraphs(props.loaded.segments), [props.loaded.segments]);
+  const focusPara = paragraphOf(paras, props.focusSegment);
   const audio = useRef<HTMLAudioElement>(null);
   const textBox = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
@@ -183,6 +194,15 @@ function Viewer(props: {
       mounted.current = false;
     };
   }, []);
+
+  // The found segment is scrolled to once, when its page has come.
+  const focused = useRef(false);
+  useEffect(() => {
+    if (focusPara >= 0 && !focused.current) {
+      focused.current = true;
+      textBox.current?.querySelector(".tr-par.kb-focus")?.scrollIntoView({ block: "center" });
+    }
+  }, [focusPara]);
 
   // Only a new query or a step moves the text; new segments of a running recognition do not.
   useEffect(() => {
@@ -394,6 +414,7 @@ function Viewer(props: {
               para={p}
               folded={folded}
               current={localMatch(search, i, cur)}
+              focused={i === focusPara}
               playable={playable}
               onPlay={play}
             />
@@ -408,6 +429,7 @@ interface ParagraphProps {
   para: Paragraph;
   folded: string;
   current: number;
+  focused: boolean;
   playable: boolean;
   onPlay: (startMs: number) => void;
 }
@@ -421,6 +443,7 @@ function sameParagraph(a: ParagraphProps, b: ParagraphProps): boolean {
     x[x.length - 1] === y[y.length - 1] &&
     a.folded === b.folded &&
     a.current === b.current &&
+    a.focused === b.focused &&
     a.playable === b.playable &&
     a.onPlay === b.onPlay
   );
@@ -431,7 +454,7 @@ const ParagraphView = memo(function ParagraphView(props: ParagraphProps) {
   const { para } = props;
   const pieces = paragraphPieces(para, props.folded);
   return (
-    <div className="tr-par">
+    <div className={props.focused ? "tr-par kb-focus" : "tr-par"}>
       <button
         type="button"
         className="tr-time num"
