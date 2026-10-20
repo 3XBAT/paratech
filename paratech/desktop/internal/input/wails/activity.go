@@ -37,12 +37,26 @@ type ActivityUseCase interface {
 }
 
 // RecordingStopper controls the running recording: stop, the silent-source advice and the switch of its source
-// (TASK-082); satisfied by recordingsession.Service.
+// (TASK-082) and its live sound (TASK-099); satisfied by recordingsession.Service.
 type RecordingStopper interface {
 	Stop(ctx context.Context, id shared.RecordingID) (recordingsession.Info, error)
 	Active() (recordingsession.Info, bool)
 	SwitchSource(ctx context.Context, id shared.RecordingID, source values.Source) error
 	DismissAdvice(ctx context.Context, id shared.RecordingID) error
+	Sound(ctx context.Context) (recordingsession.LiveSound, bool)
+}
+
+// RecordingSound is the live sound of the running recording (TASK-099), for the level capsule of «Идёт запись» and
+// of the popup; the page polls it about 4 times a second while a recording runs. Recording is false (and the rest
+// zero) when no recording captures. Level is 0..1; Heard: sound now («слышно»), otherwise «Тихо»; QuietMs is how
+// long nothing was heard; QuietHint: nothing for 2 minutes, show the calm hint.
+type RecordingSound struct {
+	Recording   bool    `json:"recording"`
+	RecordingID string  `json:"recordingId"`
+	Level       float64 `json:"level"`
+	Heard       bool    `json:"heard"`
+	QuietMs     int64   `json:"quietMs"`
+	QuietHint   bool    `json:"quietHint"`
 }
 
 // Problems of SourceSwitch.
@@ -283,6 +297,19 @@ func (s *ActivityService) DismissAdvice(ctx context.Context, id string) error {
 		return ErrRecordingNotRunning
 	}
 	return s.actionError("dismiss the source advice", err)
+}
+
+// RecordingSound returns the live sound of the running recording (TASK-099); nothing is stored.
+func (s *ActivityService) RecordingSound(ctx context.Context) (RecordingSound, error) {
+	live, ok := s.stopper.Sound(ctx)
+	if !ok {
+		return RecordingSound{}, nil
+	}
+	r := live.Reading
+	return RecordingSound{
+		Recording: true, RecordingID: string(live.ID), Level: roundLevel(r.Level), Heard: r.Heard,
+		QuietMs: r.Quiet.Milliseconds(), QuietHint: r.Hint,
+	}, nil
 }
 
 // ListJobs returns the newest jobs, newest first, without the service jobs and the jobs of the recording chain

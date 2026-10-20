@@ -326,6 +326,16 @@ func (r *Recorder) Diagnostics(_ context.Context, id shared.RecordingID) (d valu
 	return c.snapshot(), true
 }
 
+// Sound returns what the running capture of id hears (TASK-099): the levels its recorder child reports about 4 times
+// a second, timed on the recorder's clock. ok is false for a capture that is unknown or ended. ctx is not used.
+func (r *Recorder) Sound(_ context.Context, id shared.RecordingID) (values.LiveSound, bool) {
+	c := r.lookup(id)
+	if c == nil {
+		return values.LiveSound{}, false
+	}
+	return c.sound()
+}
+
 // RecentCaptures returns the diagnostics of the captures the recorder still knows (TASK-058, the support bundle): the
 // ended ones it keeps, oldest end first, then the running ones. ctx is not used.
 func (r *Recorder) RecentCaptures(context.Context) []values.CaptureDiagnostics {

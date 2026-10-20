@@ -61,7 +61,8 @@ type fakeCapture struct {
 	err      error
 	switches []values.CaptureSwitch
 	stats    values.CaptureStats
-	sourceSw int // switches of the user (Switch)
+	sourceSw int              // switches of the user (Switch)
+	sound    values.LiveSound // the levels heard (TASK-099)
 }
 
 // NewFakeRecorder returns a recorder that writes through files; each chunk stands for chunk of audio.
@@ -320,6 +321,29 @@ func (f *FakeRecorder) SetStats(id shared.RecordingID, stats values.CaptureStats
 	}
 	c.stats = stats
 	return nil
+}
+
+// HearLevel makes the running capture of id hear l at at, as the level events of a recorder child do (TASK-099).
+func (f *FakeRecorder) HearLevel(id shared.RecordingID, l values.SoundLevel, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.captures[id]
+	if c == nil || !c.running {
+		return fmt.Errorf("%w: %s", ErrNotCapturing, id)
+	}
+	c.sound = c.sound.Hear(l, at)
+	return nil
+}
+
+// Sound returns the levels the running capture of id heard (HearLevel); ok is false unless it runs.
+func (f *FakeRecorder) Sound(_ context.Context, id shared.RecordingID) (values.LiveSound, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.captures[id]
+	if c == nil || !c.running {
+		return values.LiveSound{}, false
+	}
+	return c.sound, true
 }
 
 func (f *FakeRecorder) read(ctx context.Context, ref shared.ArtifactRef) ([]byte, error) {

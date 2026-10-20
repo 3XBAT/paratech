@@ -28,6 +28,9 @@ const (
 	DefaultStatsInterval = 5 * time.Second
 	DefaultDrainTimeout  = 3 * time.Second
 	DefaultMaxGap        = 60 * time.Second
+	// DefaultCaptureLevelInterval is how often a capture reports its level for the live capsule (TASK-099): 4 times
+	// a second.
+	DefaultCaptureLevelInterval = 250 * time.Millisecond
 
 	minGap = 100 * time.Millisecond // shorter differences between the clock and the frames are jitter
 )
@@ -46,6 +49,8 @@ type ChildConfig struct {
 	// LevelInterval is how often a level check reports its level: at most this often, so 20 events per second
 	// by default.
 	LevelInterval time.Duration
+	// CaptureLevelInterval is how often a capture reports its level (TASK-099).
+	CaptureLevelInterval time.Duration
 }
 
 func (c ChildConfig) withDefaults() ChildConfig {
@@ -63,6 +68,9 @@ func (c ChildConfig) withDefaults() ChildConfig {
 	}
 	if c.LevelInterval <= 0 {
 		c.LevelInterval = DefaultLevelInterval
+	}
+	if c.CaptureLevelInterval <= 0 {
+		c.CaptureLevelInterval = DefaultCaptureLevelInterval
 	}
 	return c
 }
@@ -119,6 +127,7 @@ type child struct {
 
 	packets, silent, audible atomic.Uint64
 	mono                     []float32 // scratch of the peak of a packet
+	meter                    levelMeter
 	frames                   atomic.Int64
 	stream                   atomic.Value // Stream, once open
 
@@ -174,7 +183,13 @@ func (c *child) run(ctx context.Context, stop <-chan struct{}, src Source, files
 	c.log.Info("capture started", slog.String("mode", string(info.Mode)), slog.String("format", info.Format.String()),
 		slog.String("device", shortText(info.Device)))
 
+	// The level goes out only while the capture runs: never after the final event.
+	ticking := make(chan struct{})
+	var levels sync.WaitGroup
+	levels.Go(func() { c.reportLevels(&c.meter, c.cfg.CaptureLevelInterval, ticking) })
 	failure := c.capture(runCtx, stream)
+	close(ticking)
+	levels.Wait()
 
 	stream.Stop()
 	if err := stream.Close(); err != nil {
@@ -278,7 +293,9 @@ func (c *child) write(p Packet) error {
 		err = c.w.Write(p.Data)
 		// Counted for the silent-source advice (TASK-082): zeros that are not flagged silent are no sound either.
 		c.mono = toMono(p.Format, p.Data, c.mono[:0])
-		if values.ClampSoundLevel(samplePeak(c.mono)).Heard() {
+		peak := samplePeak(c.mono)
+		c.meter.add(peak)
+		if values.ClampSoundLevel(peak).Heard() {
 			c.audible.Add(1)
 		}
 	}

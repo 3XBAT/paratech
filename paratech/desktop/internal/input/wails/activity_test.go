@@ -41,6 +41,12 @@ type fakeStopper struct {
 	running   bool
 	gotSource values.Source
 	calls     []string
+	sound     recordingsession.LiveSound
+	sounding  bool
+}
+
+func (f *fakeStopper) Sound(context.Context) (recordingsession.LiveSound, bool) {
+	return f.sound, f.sounding
 }
 
 func (f *fakeStopper) Stop(_ context.Context, id shared.RecordingID) (recordingsession.Info, error) {

@@ -63,6 +63,7 @@ type capture struct {
 	err       error      // why the capture ended by itself; nil after a stop
 	stopErr   error      // the stop was not clean
 	diag      Diagnostics
+	live      values.LiveSound // the levels the children report (TASK-099); only in memory
 }
 
 func newCapture(id shared.RecordingID, chunks shared.ArtifactRef, target Target, bind *binding) *capture {
@@ -132,6 +133,19 @@ func (c *capture) snapshot() Diagnostics {
 	d.Attempts = append([]Attempt(nil), d.Attempts...)
 	d.Switches = append([]Switch(nil), d.Switches...)
 	return d
+}
+
+// sound returns what the capture hears; ok is false once it ended.
+func (c *capture) sound() (values.LiveSound, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.live, !c.ended
+}
+
+func (c *capture) hear(l values.SoundLevel, at time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.live = c.live.Hear(l, at)
 }
 
 func (c *capture) update(f func(d *Diagnostics)) {
@@ -645,6 +659,8 @@ func (r *Recorder) apply(c *capture, ev event, out *runOutcome, log *slog.Logger
 		log.Warn("capture failed", slog.String("reason", ev.Reason))
 	case evStopped:
 		log.Info("capture stopped", slog.Int64("frames", ev.Frames))
+	case evLevel: // the decoder checked the level
+		c.hear(values.ClampSoundLevel(*ev.Level), r.now())
 	}
 }
 

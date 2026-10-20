@@ -39,6 +39,11 @@ func (Unavailable) Diagnostics(context.Context, shared.RecordingID) (values.Capt
 	return values.CaptureDiagnostics{}, false
 }
 
+// Sound knows no capture.
+func (Unavailable) Sound(context.Context, shared.RecordingID) (values.LiveSound, bool) {
+	return values.LiveSound{}, false
+}
+
 // CheckLevels cannot capture anything.
 func (Unavailable) CheckLevels(context.Context, values.Source, time.Duration, func(values.SoundLevel)) (values.SoundCause, error) {
 	return "", ErrUnavailable

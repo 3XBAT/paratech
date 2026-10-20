@@ -104,6 +104,11 @@ type Recorder interface {
 	// on every heartbeat and before it ends the capture, and stores a fallback as the problem of the recording.
 	Diagnostics(ctx context.Context, id shared.RecordingID) (d values.CaptureDiagnostics, ok bool)
 
+	// Sound returns what the running capture of id hears (PRD section 6.3, TASK-099): the levels of short windows,
+	// about 4 a second, kept in memory only and timed on the same clock as the Clock port. It returns at once; ok is
+	// false for a capture that is unknown or ended.
+	Sound(ctx context.Context, id shared.RecordingID) (s values.LiveSound, ok bool)
+
 	// Finalize assembles the readable chunks in the directory chunks, in name order, into the single file output and
 	// returns its duration and how many of its seconds are audible, so a silent recording is told apart (PRD section
 	// 6.2: FINALIZING, recovery after a restart; TASK-082). A chunk that cannot be read as audio, typically the last one

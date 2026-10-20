@@ -849,6 +849,25 @@ func (s *Service) Active() (Info, bool) {
 	return info, true
 }
 
+// Sound returns what the recording in progress hears now (TASK-099). ok is false unless a recording captures: none
+// runs, it is starting, stopping or finished. Nothing is stored.
+func (s *Service) Sound(ctx context.Context) (LiveSound, bool) {
+	s.mu.Lock()
+	sess := s.active
+	s.mu.Unlock()
+	if sess == nil || sess.stopRequested() {
+		return LiveSound{}, false
+	}
+	if info, _ := sess.snapshot(); info.Status != recording.StatusRecording {
+		return LiveSound{}, false
+	}
+	live, ok := s.recorder.Sound(ctx, sess.id)
+	if !ok {
+		return LiveSound{}, false
+	}
+	return LiveSound{ID: sess.id, Reading: live.Reading(s.clock.Now())}, true
+}
+
 // Delete removes a finished recording with its files and transcripts (PRD section 13.1) in the order of ADR-0004(a):
 // the aggregate decides first, the files go next, then both rows in one transaction where the aggregate is asked
 // again. A failure after the files were removed is repaired by repeating the request. A recording that the running
