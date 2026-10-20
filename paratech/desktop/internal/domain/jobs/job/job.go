@@ -424,6 +424,25 @@ func (j *Job) Requeue(now time.Time) error {
 	return nil
 }
 
+// Yield ends one step of a RUNNING job that does its work in steps (TASK-097): the job goes back to QUEUED, due now,
+// so the jobs that were due before it are claimed first. A finished step is not a failure: the attempt is given back
+// (otherwise a job claimed with its last attempt could never be claimed again), the progress stays and the error of
+// an earlier failed step is cleared. Each step must make progress, or the job never ends.
+func (j *Job) Yield(now time.Time) error {
+	if j.status != StatusRunning {
+		return fmt.Errorf("%w: yield of a %s job", ErrInvalidTransition, j.status)
+	}
+	if err := j.move(StatusQueued, now); err != nil {
+		return err
+	}
+	if j.attempts > 0 {
+		j.attempts--
+	}
+	j.nextRunAt = now
+	j.lastError = ""
+	return nil
+}
+
 // ForceRun sets the "Run now" override of the power wait: a WAITING_FOR_POWER job is requeued, a QUEUED job keeps its place.
 func (j *Job) ForceRun(now time.Time) error {
 	if j.status == StatusQueued {
