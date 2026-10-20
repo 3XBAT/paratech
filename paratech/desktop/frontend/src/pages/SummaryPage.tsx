@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { actionErrorText } from "../activityView";
 import { type ActivityApi, activityApi } from "../bindings/activity";
 import { recordingDeleteApi } from "../bindings/recordingDelete";
@@ -16,6 +16,7 @@ import { type DeleteOutcome, deleteOutcome, deleteTexts } from "../recordingDele
 import type { SummarySection } from "../openSummary";
 import {
   errorText,
+  firstSegment,
   headerMeta,
   nextPollMs,
   noSummaryHint,
@@ -24,17 +25,29 @@ import {
   retryAction,
   retryClick,
   type RetryStep,
+  type SummarySegment,
+  summarySegments,
 } from "../summaryView";
 import { saveResultText } from "../transcriptView";
 import { Button } from "../ui/Button";
-import { Banner, Card, Dialog, ResultLine, type ResultKind, Segmented } from "../ui/controls";
+import {
+  Banner,
+  Card,
+  Dialog,
+  ResultLine,
+  type ResultKind,
+  Segmented,
+  SegmentTabs,
+  segmentPanelId,
+  segmentTabId,
+} from "../ui/controls";
 import { LectureTextCard } from "./LectureTextParts";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 
 export interface SummaryPageProps {
   recordingId: string;
-  /** "lecture": scroll to the lecture text once loaded (the row's «Открыть текст лекции»). */
+  /** "lecture": show the lecture text first (the row's «Открыть текст лекции»). */
   section?: SummarySection;
   onBack: () => void;
   onOpenTranscript: (recordingId: string) => void;
@@ -44,7 +57,7 @@ export interface SummaryPageProps {
 }
 
 // «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found, the lecture
-// text (TASK-090) and where they stand, with copy and save. Works offline: everything comes from the core on this
+// text (TASK-090) and where they stand, with copy and save; one part at a time in segments (TASK-100). Works offline: everything comes from the core on this
 // computer. The summary and the lecture text are model output and are rendered as React text only.
 export function SummaryPage(props: SummaryPageProps) {
   const { recordingId: id } = props;
@@ -198,7 +211,8 @@ function Viewer(props: {
   const [format, setFormat] = useState<SummarySaveFormat>("txt");
   const [lectureFormat, setLectureFormat] = useState<SummarySaveFormat>("txt");
   const [askingRedo, setAskingRedo] = useState(false);
-  const lectureRef = useRef<HTMLDivElement>(null);
+  const [segment, setSegment] = useState<SummarySegment>(() => firstSegment(props.section));
+  const tabsId = useId();
 
   useEffect(() => {
     mounted.current = true;
@@ -207,10 +221,10 @@ function Viewer(props: {
     };
   }, []);
 
-  // Opened for the lecture text: scroll to it once, when the first view is shown.
+  // Opened again for the lecture text while the screen is shown.
   useEffect(() => {
     if (props.section === "lecture") {
-      lectureRef.current?.scrollIntoView({ block: "start" });
+      setSegment("lecture");
     }
   }, [props.section]);
 
@@ -305,79 +319,89 @@ function Viewer(props: {
 
   return (
     <>
-      <Card className="box tr-tools">
-        <div className="tr-share">
-          <Button
-            busy={busy === "copy"}
-            busyLabel="Копирование…"
-            disabled={!idle || !ready}
-            disabledReason={idle ? noText : undefined}
-            onClick={() => void copy()}
-          >
-            Скопировать конспект
-          </Button>
-          <Segmented
-            label="Формат файла"
-            options={[
-              { value: "txt", label: ".txt" },
-              { value: "md", label: ".md" },
-            ]}
-            value={format}
-            onChange={setFormat}
-          />
-          <Button
-            icon="down"
-            busy={busy === "save"}
-            busyLabel="Сохранение…"
-            disabled={!idle || !ready}
-            disabledReason={idle ? noText : undefined}
-            onClick={() => void save()}
-          >
-            Сохранить как…
-          </Button>
-          {/* With a lecture text the transcript is only its source: the small link in the lecture card. */}
-          {view.transcribed && !view.lectureText.ready && (
-            <Button variant="ghost" icon="doc" onClick={() => props.onOpenTranscript(id)}>
-              Открыть расшифровку
-            </Button>
-          )}
-        </div>
-        {message && !message.lecture && (
-          <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
-            {message.text}
-          </ResultLine>
+      <div className="sm-tabs">
+        <SegmentTabs label="Раздел" base={tabsId} options={summarySegments} value={segment} onChange={setSegment} />
+      </div>
+      <div
+        className="sm-panel"
+        role="tabpanel"
+        id={segmentPanelId(tabsId, segment)}
+        aria-labelledby={segmentTabId(tabsId, segment)}
+      >
+        {segment === "summary" && (
+          <>
+            <Card className="box tr-tools">
+              <div className="tr-share">
+                <Button
+                  busy={busy === "copy"}
+                  busyLabel="Копирование…"
+                  disabled={!idle || !ready}
+                  disabledReason={idle ? noText : undefined}
+                  onClick={() => void copy()}
+                >
+                  Скопировать конспект
+                </Button>
+                <Segmented
+                  label="Формат файла"
+                  options={[
+                    { value: "txt", label: ".txt" },
+                    { value: "md", label: ".md" },
+                  ]}
+                  value={format}
+                  onChange={setFormat}
+                />
+                <Button
+                  icon="down"
+                  busy={busy === "save"}
+                  busyLabel="Сохранение…"
+                  disabled={!idle || !ready}
+                  disabledReason={idle ? noText : undefined}
+                  onClick={() => void save()}
+                >
+                  Сохранить как…
+                </Button>
+                {/* With a lecture text the transcript is only its source: the small link in the lecture card. */}
+                {view.transcribed && !view.lectureText.ready && (
+                  <Button variant="ghost" icon="doc" onClick={() => props.onOpenTranscript(id)}>
+                    Открыть расшифровку
+                  </Button>
+                )}
+              </div>
+              {message && !message.lecture && (
+                <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
+                  {message.text}
+                </ResultLine>
+              )}
+              <p className="small muted tr-note">
+                Конспект хранится на этом компьютере. Копирование и сохранение — только по кнопке, в сеть ничего не уходит.
+              </p>
+            </Card>
+            <SummaryCard view={view} onRetry={retry} retrying={retrying} retryDisabled={!idle} />
+          </>
         )}
-        <p className="small muted tr-note">
-          Конспект хранится на этом компьютере. Копирование и сохранение — только по кнопке, в сеть ничего не уходит.
-        </p>
-      </Card>
-
-      <SummaryCard
-        view={view}
-        onRetry={retry}
-        retrying={retrying}
-        retryDisabled={!idle}
-      />
-      <HomeworkCard
-        view={view}
-        onOpenAssignment={props.onOpenAssignment}
-        onRetry={retry}
-        retrying={retrying}
-        retryDisabled={!idle}
-      />
-      <div ref={lectureRef}>
-        <LectureTextCard
-          view={view}
-          busy={busy.startsWith(lecturePrefix) ? busy.slice(lecturePrefix.length) : ""}
-          disabled={!idle}
-          format={lectureFormat}
-          onFormat={setLectureFormat}
-          onCopy={() => void copyLecture()}
-          onSave={() => void saveLecture()}
-          onStart={() => void start("lectureText", () => props.activity.retryPostProcessing(id, "lectureText"))}
-          onOpenTranscript={() => props.onOpenTranscript(id)}
-          message={message?.lecture ? message : null}
-        />
+        {segment === "lecture" && (
+          <LectureTextCard
+            view={view}
+            busy={busy.startsWith(lecturePrefix) ? busy.slice(lecturePrefix.length) : ""}
+            disabled={!idle}
+            format={lectureFormat}
+            onFormat={setLectureFormat}
+            onCopy={() => void copyLecture()}
+            onSave={() => void saveLecture()}
+            onStart={() => void start("lectureText", () => props.activity.retryPostProcessing(id, "lectureText"))}
+            onOpenTranscript={() => props.onOpenTranscript(id)}
+            message={message?.lecture ? message : null}
+          />
+        )}
+        {segment === "homework" && (
+          <HomeworkCard
+            view={view}
+            onOpenAssignment={props.onOpenAssignment}
+            onRetry={retry}
+            retrying={retrying}
+            retryDisabled={!idle}
+          />
+        )}
       </div>
       <Dialog
         open={askingRedo && redoOffered}

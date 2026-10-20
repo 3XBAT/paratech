@@ -107,7 +107,7 @@ export function SettingsPage() {
           <h1>Настройки</h1>
         </div>
       </div>
-      <Card className="box settings" label="Настройки">
+      <Card className="settings" label="Настройки">
         {settings === null && !error && <p className="muted">Загрузка…</p>}
         {settings !== null &&
           (Object.keys(labels) as Toggle[]).map((toggle) => (
@@ -220,35 +220,38 @@ function ProfileCard(props: { api: SettingsApi }) {
   }
 
   const changed = stored !== null && profileChanged(form, stored);
+  // iOS-style group: the caption above it, the explanation under it, the action below the group.
   return (
-    <Card className="box settings" label="Профиль студента">
-      <h2>Профиль студента</h2>
-      <p className="small muted box-desc">
+    <div className="gsec">
+      <h2 className="group-cap">Профиль студента</h2>
+      <Card className="settings profile" label="Профиль студента">
+        {stored === null && !error && <p className="muted">Загрузка…</p>}
+        {stored !== null &&
+          profileFields.map((f) => (
+            <Field key={f} label={profileLabels[f]}>
+              {(fid) => (
+                <Input
+                  id={fid}
+                  value={form[f]}
+                  maxLength={maxProfileLength}
+                  placeholder={profilePlaceholders[f]}
+                  readOnly={busy}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSaved(false);
+                    setForm((p) => ({ ...p, [f]: v }));
+                  }}
+                />
+              )}
+            </Field>
+          ))}
+      </Card>
+      <p className="small muted group-foot">
         Для титульного листа файла Word с домашним заданием. Все поля необязательные: пустые на титульный лист не
         попадут.
       </p>
-      {stored === null && !error && <p className="muted">Загрузка…</p>}
-      {stored !== null &&
-        profileFields.map((f) => (
-          <Field key={f} label={profileLabels[f]}>
-            {(fid) => (
-              <Input
-                id={fid}
-                value={form[f]}
-                maxLength={maxProfileLength}
-                placeholder={profilePlaceholders[f]}
-                readOnly={busy}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSaved(false);
-                  setForm((p) => ({ ...p, [f]: v }));
-                }}
-              />
-            )}
-          </Field>
-        ))}
       {stored !== null && (
-        <div className="acts start">
+        <div className="acts start group-acts">
           <Button variant="primary" busy={busy} busyLabel="Сохранение…" disabled={busy || !changed} onClick={() => void onSave()}>
             Сохранить профиль
           </Button>
@@ -264,6 +267,6 @@ function ProfileCard(props: { api: SettingsApi }) {
           {error}
         </ResultLine>
       )}
-    </Card>
+    </div>
   );
 }

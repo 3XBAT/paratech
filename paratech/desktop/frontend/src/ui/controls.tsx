@@ -3,6 +3,7 @@
 // the compiled modules (test/list.test.mjs renders the schedule preview); TypeScript and Vite map them to the .tsx files.
 import {
   type InputHTMLAttributes,
+  type KeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
   useEffect,
@@ -16,20 +17,85 @@ export interface SegmentedOption<T extends string> {
   label: ReactNode;
 }
 
-/** A row of mutually exclusive buttons (filters, theme). */
+/** A row of mutually exclusive buttons (screen parts, filters, file format, theme); `large` for screen parts. */
 export function Segmented<T extends string>(props: {
   label: string;
   options: readonly SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  large?: boolean;
 }) {
   return (
-    <div className="seg" role="group" aria-label={props.label}>
+    <div className={props.large ? "seg lg" : "seg"} role="group" aria-label={props.label}>
       {props.options.map((o) => (
         <button key={o.value} type="button" aria-pressed={o.value === props.value} onClick={() => props.onChange(o.value)}>
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** The option an arrow, Home or End key moves to from value (wrapping); null for any other key. */
+export function nextSegment<T extends string>(options: readonly SegmentedOption<T>[], value: T, key: string): T | null {
+  const n = options.length;
+  const i = Math.max(0, options.findIndex((o) => o.value === value));
+  const to =
+    key === "ArrowRight" ? (i + 1) % n : key === "ArrowLeft" ? (i - 1 + n) % n : key === "Home" ? 0 : key === "End" ? n - 1 : -1;
+  return n === 0 || to < 0 ? null : options[to].value;
+}
+
+export const segmentTabId = (base: string, value: string) => `${base}-tab-${value}`;
+export const segmentPanelId = (base: string, value: string) => `${base}-panel-${value}`;
+
+/**
+ * The large segmented control that switches the shown part of a screen: a tablist with one tab stop; arrows, Home and
+ * End move between the parts. The page renders the chosen part in a tabpanel with segmentPanelId(base, value).
+ */
+export function SegmentTabs<T extends string>(props: {
+  label: string;
+  /** The prefix of the tab and panel ids (useId). */
+  base: string;
+  options: readonly SegmentedOption<T>[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const tabs = useRef(new Map<string, HTMLButtonElement>());
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const next = nextSegment(props.options, props.value, e.key);
+    if (next === null) {
+      return;
+    }
+    e.preventDefault();
+    props.onChange(next);
+    tabs.current.get(next)?.focus();
+  };
+  return (
+    <div className="seg lg" role="tablist" aria-label={props.label} onKeyDown={onKey}>
+      {props.options.map((o) => {
+        const selected = o.value === props.value;
+        return (
+          <button
+            key={o.value}
+            ref={(el) => {
+              if (el) {
+                tabs.current.set(o.value, el);
+              } else {
+                tabs.current.delete(o.value);
+              }
+            }}
+            type="button"
+            role="tab"
+            id={segmentTabId(props.base, o.value)}
+            aria-selected={selected}
+            aria-controls={selected ? segmentPanelId(props.base, o.value) : undefined}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => props.onChange(o.value)}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

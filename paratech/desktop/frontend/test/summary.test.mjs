@@ -401,3 +401,56 @@ test("the row, the homework page and the transcript open the summary without a c
   assert.match(app, /onOpenAssignment=\{openAssignment\}/);
   assert.match(src("pages/HomeworkPage.tsx"), /useState\(props\.openAssignment \?\? ""\)/);
 });
+
+// TASK-100: the summary screen shows one part at a time in a segmented control.
+test("the summary screen has the three segments, the summary first, the lecture text first from its row", async () => {
+  const { firstSegment, summarySegments } = await import("../.test-build/summaryView.js");
+  assert.deepEqual(summarySegments.map((s) => s.label), ["Конспект", "Текст лекции", "Задания"]);
+  assert.deepEqual(summarySegments.map((s) => s.value), ["summary", "lecture", "homework"]);
+  assert.equal(firstSegment(), "summary");
+  assert.equal(firstSegment("lecture"), "lecture");
+});
+
+test("the segments are a tablist with one tab stop, moved by the arrows, Home and End", async () => {
+  const { SegmentTabs, nextSegment, segmentPanelId, segmentTabId } = await import("../.test-build/ui/controls.js");
+  const { summarySegments } = await import("../.test-build/summaryView.js");
+  const html = renderToStaticMarkup(
+    h(SegmentTabs, { label: "Раздел", base: "s", options: summarySegments, value: "summary", onChange: () => {} }),
+  );
+  assert.match(html, /^<div class="seg lg" role="tablist" aria-label="Раздел">/);
+  assert.equal(html.split('role="tab"').length - 1, 3);
+  assert.equal(html.split('aria-selected="true"').length - 1, 1, "one chosen segment");
+  assert.match(html, /id="s-tab-summary" aria-selected="true" aria-controls="s-panel-summary" tabindex="0">Конспект</);
+  assert.match(html, /id="s-tab-lecture" aria-selected="false" tabindex="-1">Текст лекции</);
+  assert.match(html, /id="s-tab-homework" aria-selected="false" tabindex="-1">Задания</);
+  assert.equal(segmentTabId("s", "lecture"), "s-tab-lecture");
+  assert.equal(segmentPanelId("s", "lecture"), "s-panel-lecture");
+  assert.equal(nextSegment(summarySegments, "summary", "ArrowRight"), "lecture");
+  assert.equal(nextSegment(summarySegments, "homework", "ArrowRight"), "summary", "wraps");
+  assert.equal(nextSegment(summarySegments, "summary", "ArrowLeft"), "homework");
+  assert.equal(nextSegment(summarySegments, "lecture", "Home"), "summary");
+  assert.equal(nextSegment(summarySegments, "lecture", "End"), "homework");
+  assert.equal(nextSegment(summarySegments, "lecture", "Enter"), null);
+  assert.equal(nextSegment([], "x", "ArrowRight"), null);
+});
+
+test("the page shows only the chosen segment, in its tabpanel", () => {
+  const page = src("pages/SummaryPage.tsx");
+  assert.match(page, /<SegmentTabs label="Раздел" base=\{tabsId\} options=\{summarySegments\} value=\{segment\}/);
+  assert.match(page, /useState<SummarySegment>\(\(\) => firstSegment\(props\.section\)\)/);
+  assert.match(page, /role="tabpanel"\s+id=\{segmentPanelId\(tabsId, segment\)\}\s+aria-labelledby=\{segmentTabId\(tabsId, segment\)\}/);
+  for (const [seg, part] of [["summary", "<SummaryCard"], ["lecture", "<LectureTextCard"], ["homework", "<HomeworkCard"]]) {
+    const at = page.indexOf(`{segment === "${seg}" && (`);
+    assert.ok(at > 0, `a branch for ${seg}`);
+    assert.equal(page.split(part).length - 1, 1, `${part} is rendered once`);
+    const next = page.indexOf("{segment === ", at + 1);
+    const branch = page.slice(at, next < 0 ? page.indexOf("<Dialog") : next);
+    assert.ok(branch.includes(part), `${part} is inside the ${seg} branch`);
+  }
+  // The summary tools stay with the summary; the screen is one reading column at any width.
+  const summary = page.slice(page.indexOf('{segment === "summary" && ('), page.indexOf('{segment === "lecture" && ('));
+  assert.match(summary, /Скопировать конспект/);
+  assert.match(summary, /Конспект хранится на этом компьютере/);
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.page\.sm \{ width: 100%; max-width: 800px; margin-inline: auto; \}/);
+});
