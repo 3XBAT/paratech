@@ -25,6 +25,7 @@ export type IconName =
   | "book"
   | "mail"
   | "retry"
+  | "info"
   | "x";
 
 /** Rendered once per window, before any Icon. */
@@ -108,6 +109,10 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-retry" viewBox="0 0 24 24">
         <path d="M20 12a8 8 0 1 1-2.34-5.66M17.66 2.34v4h-4" />
+      </symbol>
+      <symbol id="i-info" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 11v5M12 8h.01" />
       </symbol>
       <symbol id="i-x" viewBox="0 0 24 24">
         <path d="M6 6l12 12M18 6L6 18" />

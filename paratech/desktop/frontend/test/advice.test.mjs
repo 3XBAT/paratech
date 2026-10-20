@@ -104,7 +104,7 @@ test("switchSource and dismissAdvice call the bound methods and check the answer
     ["paratech/desktop/internal/input/wails.ActivityService.SwitchSource", "r1", ""],
     ["paratech/desktop/internal/input/wails.ActivityService.DismissAdvice", "r1"],
   ]);
-  assert.equal(Object.keys(methods).length, 8); // +RetryPostProcessing, RedoSummary (TASK-086)
+  assert.equal(Object.keys(methods).length, 9); // +RetryPostProcessing, RedoSummary (TASK-086), RecordingSound (TASK-099)
   assert.equal(errorMessages.invalidSource, "invalid source");
 
   for (const problem of ["source_gone", "refused", "failed"]) {

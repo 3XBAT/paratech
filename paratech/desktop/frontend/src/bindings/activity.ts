@@ -114,6 +114,24 @@ export interface SourceSwitch {
 }
 
 /**
+ * The live sound of the running recording (TASK-099), for the level capsule; poll recordingSound about 4 times a
+ * second (every 250 ms) only while a recording runs. The core decides heard and quietHint; the page only shows them.
+ */
+export interface RecordingSound {
+  /** false: no recording captures now (none, starting, stopping or ended); the other fields are zero. */
+  recording: boolean;
+  recordingId: string;
+  /** The current level, 0..1 (peak of the last window); fill the capsule by it. */
+  level: number;
+  /** Sound now: «слышно»; false: «Тихо». */
+  heard: boolean;
+  /** How long nothing was heard, in milliseconds; 0 while heard. */
+  quietMs: number;
+  /** Nothing was heard for 2 minutes: show the calm hint. */
+  quietHint: boolean;
+}
+
+/**
  * One job, newest first. For a waiting job (WAITING_FOR_*) the status is the waiting reason. Since TASK-076 the list
  * has neither the service jobs nor the jobs of the recording chain (stt, summarize, extract_homework): the recording
  * rows show those.
@@ -151,6 +169,7 @@ export const methods = {
   dismissAdvice: "paratech/desktop/internal/input/wails.ActivityService.DismissAdvice",
   retryPostProcessing: "paratech/desktop/internal/input/wails.ActivityService.RetryPostProcessing",
   redoSummary: "paratech/desktop/internal/input/wails.ActivityService.RedoSummary",
+  recordingSound: "paratech/desktop/internal/input/wails.ActivityService.RecordingSound",
 } as const;
 
 /** Messages of the errors the Go binding returns (checked by a Go test); the page may match them. */
@@ -281,6 +300,27 @@ export function parseSourceSwitch(raw: unknown): SourceSwitch {
   return { switched, problem };
 }
 
+/** Checks the shape of the live sound; a malformed reply is an error, not a default. */
+export function parseRecordingSound(raw: unknown): RecordingSound {
+  const w = "sound";
+  const r = record(raw, w);
+  const s: RecordingSound = {
+    recording: bool(r, "recording", w),
+    recordingId: str(r, "recordingId", w),
+    level: num(r, "level", w),
+    heard: bool(r, "heard", w),
+    quietMs: num(r, "quietMs", w),
+    quietHint: bool(r, "quietHint", w),
+  };
+  if (s.level < 0 || s.level > 1 || s.quietMs < 0) {
+    throw new Error(`${w}: level or quietMs out of range`);
+  }
+  if (s.recording === (s.recordingId === "")) {
+    throw new Error(`${w}: recording and recordingId disagree`);
+  }
+  return s;
+}
+
 /** Checks the shape of one recording; a malformed reply is an error, not a default. */
 export function parseRecording(raw: unknown): RecordingItem {
   const w = "recording";
@@ -355,6 +395,8 @@ export interface ActivityApi {
   retryPostProcessing(recordingId: string, work: Exclude<RetryWork, "">): Promise<void>;
   /** Makes the summary of the recording again («Сделать конспект заново», TASK-086); spends quota, ask first. */
   redoSummary(recordingId: string): Promise<void>;
+  /** The live sound of the running recording (TASK-099); poll it about 4 times a second while a recording runs. */
+  recordingSound(): Promise<RecordingSound>;
 }
 
 /** Builds the recordings and jobs API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -378,5 +420,6 @@ export function activityApi(call: CallByName): ActivityApi {
     redoSummary: async (recordingId) => {
       await call(methods.redoSummary, recordingId);
     },
+    recordingSound: async () => parseRecordingSound(await call(methods.recordingSound)),
   };
 }

@@ -77,6 +77,12 @@ type Info struct {
 	Advice values.SourceAdvice
 }
 
+// LiveSound is what the running recording hears now (TASK-099), for the level capsule.
+type LiveSound struct {
+	ID      shared.RecordingID
+	Reading values.SoundReading
+}
+
 func infoOf(r *recording.Recording) Info {
 	d, _ := r.Duration()
 	return Info{

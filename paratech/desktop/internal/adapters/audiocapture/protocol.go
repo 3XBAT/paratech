@@ -46,7 +46,7 @@ const (
 	evFailed  = "failed"  // the capture ended by itself or could not start: reason
 	evStopped = "stopped" // clean stop after stdin closed: frames written; also the end of a level check
 
-	evLevel = "level" // the peak of the last window of a level check, 0..1
+	evLevel = "level" // the peak of the last window of a level check or a running capture (TASK-099), 0..1
 )
 
 // kindLevelCheck is the request kind of the "Check sound" level check (TASK-075); a capture request has no kind.
@@ -288,7 +288,7 @@ type event struct {
 	AudiblePackets uint64 `json:"audible_packets,omitempty"`
 	Reopens        uint64 `json:"reopens,omitempty"` // stats
 
-	// Level is the peak of a window of a level check, 0..1; required in a level event, absent elsewhere.
+	// Level is the peak of a window of a level check or a capture, 0..1; required in a level event, absent elsewhere.
 	Level *float64 `json:"level,omitempty"`
 
 	// Unavailable marks a failure because this build has no capture (recording.ErrCaptureUnavailable).
