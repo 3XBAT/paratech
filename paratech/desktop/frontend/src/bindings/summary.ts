@@ -40,7 +40,7 @@ export interface SummarySection {
 export interface SummaryContent extends SummaryStep {
   /** text and sections hold a summary; it may be ready while a new run waits, runs or failed. */
   ready: boolean;
-  /** The whole summary as plain text (what copy puts on the clipboard). */
+  /** The whole summary as plain text, headings included. */
   text: string;
   /** Never empty when ready; [] otherwise. */
   sections: SummarySection[];

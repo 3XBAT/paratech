@@ -178,6 +178,14 @@ func TestPromptEvalSummaryCases(t *testing.T) {
 			!strings.HasPrefix(req.IdempotencyKey(), fmt.Sprintf("eval-summary:%s:v%d:", c.Name, prompts.Version)) {
 			t.Errorf("%s: request %s %q", c.Name, req.Operation(), req.IdempotencyKey())
 		}
+		// duration_minutes reaches the request as transcript_minutes, as the times of real segments do.
+		minutes := fmt.Sprintf(`"transcript_minutes":%d`, c.DurationMinutes)
+		if got := strings.Contains(req.UntrustedData(), minutes); got != (c.DurationMinutes > 0) {
+			t.Errorf("%s: %s sent = %v", c.Name, minutes, got)
+		}
+		if c.DurationMinutes == 0 && strings.Contains(req.UntrustedData(), "transcript_minutes") {
+			t.Errorf("%s: transcript_minutes sent without duration_minutes", c.Name)
+		}
 		if again, _ := c.requestFor(values.OperationSummary, evalDefaultModel); again != req {
 			t.Errorf("%s: the request is not deterministic", c.Name)
 		}

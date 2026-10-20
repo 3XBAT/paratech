@@ -99,7 +99,7 @@ func checkKeyPoints(keyPoints []string) ([]string, error) {
 }
 
 // Text returns the summary as plain text: the text of a plain summary, the rendering of the sections (headings,
-// texts and points) of a sectioned one.
+// texts and points) of a sectioned one. That rendering may exceed MaxTextRunes, so never pass it back to NewContent.
 func (c Content) Text() string { return c.text }
 
 // Sectioned reports whether the summary has headed sections; false for a plain text.

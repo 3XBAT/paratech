@@ -53,10 +53,13 @@ type evalExpected struct {
 }
 
 type evalCase struct {
-	Name       string         `json:"name"`
-	Lesson     evalLesson     `json:"lesson"`
-	Transcript []string       `json:"transcript"`
-	Expected   []evalExpected `json:"expected"`
+	Name       string     `json:"name"`
+	Lesson     evalLesson `json:"lesson"`
+	Transcript []string   `json:"transcript"`
+	// DurationMinutes, optional, is the length of the recording: the segments get synthetic times spread evenly over
+	// it, so the summary request carries transcript_minutes as in the app. 0 sends no times.
+	DurationMinutes int            `json:"duration_minutes"`
+	Expected        []evalExpected `json:"expected"`
 	// Sections are the sections the summary must have, in the order of the lesson (TASK-101).
 	Sections []evalSection `json:"summary_sections"`
 
@@ -111,6 +114,9 @@ func (c *evalCase) check() error {
 	if !values.LessonKind(c.Lesson.NextKind).Valid() || (c.Lesson.NextKind != "" && c.Lesson.NextStart == "") {
 		return fmt.Errorf("next kind %q without a known kind or a next start", c.Lesson.NextKind)
 	}
+	if c.DurationMinutes < 0 || c.DurationMinutes > contextselection.MaxTranscriptMinutes {
+		return fmt.Errorf("duration_minutes %d is not 0..%d", c.DurationMinutes, contextselection.MaxTranscriptMinutes)
+	}
 	if len(c.Sections) == 0 {
 		return fmt.Errorf("no summary_sections")
 	}
@@ -145,8 +151,14 @@ func (c evalCase) requestFor(op values.Operation, alias string) (values.LLMReque
 		Title: c.Lesson.Title, Subject: c.Lesson.Subject, Teacher: c.Lesson.Teacher, Kind: values.LessonKind(c.Lesson.Kind),
 		Start: c.start, NextStart: next, NextKind: values.LessonKind(c.Lesson.NextKind),
 	}}
-	for _, s := range c.Transcript {
-		m.Transcript = append(m.Transcript, contextselection.Segment{Text: s})
+	total := int64(c.DurationMinutes) * 60 * 1000
+	n := int64(len(c.Transcript))
+	for i, s := range c.Transcript {
+		seg := contextselection.Segment{Text: s}
+		if total > 0 {
+			seg.StartMs, seg.EndMs = total*int64(i)/n, total*int64(i+1)/n
+		}
+		m.Transcript = append(m.Transcript, seg)
 	}
 	sel, err := contextselection.Select(op, m)
 	if err != nil {

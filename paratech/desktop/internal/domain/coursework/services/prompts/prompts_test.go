@@ -290,7 +290,7 @@ func TestExtractionAsksForHints(t *testing.T) {
 func TestSummaryInstructionsAskForSections(t *testing.T) {
 	ins := Instructions(values.OperationSummary)
 	for _, s := range []string{"sections", "heading", "points", "order of the lesson", "transcript_minutes",
-		"one section per 10-15 minutes", "output limit", "8000 characters", "key_points"} {
+		"one section per 10-15 minutes", "output limit", "the whole answer, key_points included, under about 6000 characters", "key_points"} {
 		if !strings.Contains(ins, s) {
 			t.Errorf("summary instructions do not mention %q", s)
 		}
