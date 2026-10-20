@@ -99,6 +99,8 @@ func lectureMessage(l summaryview.LectureText, transcribed bool) string {
 		return msgLectureDone
 	case summaryview.StateFailed:
 		return msgLectureFailed
+	case summaryview.StateNoSpeech:
+		return msgNoSpeech
 	}
 	if transcribed {
 		return msgLectureMissing

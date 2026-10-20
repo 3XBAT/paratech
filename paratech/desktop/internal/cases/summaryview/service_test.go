@@ -330,6 +330,7 @@ func TestViewOfAReadySummary(t *testing.T) {
 	}
 	wantPrefixes := []string{
 		"summarize summarize:tr-r1:", "extract_homework extract_homework:tr-r1:", "lecture_text lecture_text:tr-r1:",
+		"stt stt:r1:", // TASK-110: a transcript without speech
 	}
 	if !reflect.DeepEqual(e.jobs.prefixes, wantPrefixes) {
 		t.Fatalf("job prefixes = %v", e.jobs.prefixes)

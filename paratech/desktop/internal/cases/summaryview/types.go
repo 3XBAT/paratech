@@ -25,6 +25,8 @@ const (
 	StateDone State = "done"
 	// StateFailed: the job failed or was cancelled; a result made before stays visible.
 	StateFailed State = "failed"
+	// StateNoSpeech: the transcript holds no speech (TASK-110), so nothing is made from it and nothing is retried.
+	StateNoSpeech State = "noSpeech"
 )
 
 // WaitReason says why a waiting step waits. The values are those of the queue reasons of the recordings screen.
@@ -111,6 +113,8 @@ type View struct {
 	HasDuration bool
 	// Transcribed: the recording has a transcript, so the summary and the homework can be made.
 	Transcribed bool
+	// NoSpeech: the transcript holds no speech, only whisper's marks (TASK-110); every step is StateNoSpeech.
+	NoSpeech    bool
 	Summary     Summary
 	Homework    Homework
 	LectureText LectureText

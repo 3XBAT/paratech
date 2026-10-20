@@ -128,6 +128,9 @@ const (
 	// ErrorSilentRecording: the track is silent all or almost all the time (TASK-082), so it is not transcribed; the
 	// row offers ActionCheckSound.
 	ErrorSilentRecording ErrorCode = "silentRecording"
+	// ErrorNoSpeech: the transcript holds no speech, only whisper's marks such as "[BLANK_AUDIO]" (TASK-110), so
+	// nothing is post-processed; the row offers ActionCheckSound and no retry.
+	ErrorNoSpeech ErrorCode = "noSpeech"
 )
 
 // Action is what the screen offers for a row.

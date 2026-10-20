@@ -15,6 +15,7 @@ import (
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
+	tvalues "paratech/desktop/internal/domain/transcription/values"
 )
 
 // Titles and file names (Russian UI).
@@ -37,6 +38,7 @@ const (
 	summarizeJobType = job.Type(values.SummarizeJobType)
 	extractJobType   = job.Type(values.ExtractHomeworkJobType)
 	lectureJobType   = job.Type(values.LectureTextJobType)
+	sttJobType       = job.Type(tvalues.STTJobType)
 )
 
 // Service is the summary viewer (TASK-087): it shows the summary of a recording with its key points and the homework
@@ -127,7 +129,44 @@ func (s *Service) View(ctx context.Context, id shared.RecordingID) (View, error)
 		return View{}, err
 	}
 	v.LectureText = lectureOf(lj, v.LectureText)
+
+	stt, err := s.sttJob(ctx, id)
+	if err != nil {
+		return View{}, err
+	}
+	if noSpeech(stt, r.transcript, sj, hj, lj) {
+		none := Step{State: StateNoSpeech}
+		v.NoSpeech, v.Summary.Step, v.Homework.Step = true, none, none
+		v.LectureText.Step, v.LectureText.CanStart, v.LectureText.PartsDone, v.LectureText.Parts = none, false, 0, 0
+	}
 	return v, nil
+}
+
+// noSpeech reports a transcript without speech (TASK-110): its STT job failed for it, or one of its post-processing
+// jobs found nothing to process (a transcript stored before the STT job checked it).
+func noSpeech(stt *job.Job, t shared.TranscriptID, post ...*job.Job) bool {
+	// The transcript id is its STT job id.
+	if stt != nil && stt.ID() == shared.JobID(t) && stt.Status() == job.StatusFailed && tvalues.IsNoSpeech(stt.LastError()) {
+		return true
+	}
+	for _, j := range post {
+		if j != nil && j.Status() == job.StatusFailed && values.IsNothingToProcess(j.LastError()) {
+			return true
+		}
+	}
+	return false
+}
+
+// sttJob returns the newest STT job of the recording, nil if there is none.
+func (s *Service) sttJob(ctx context.Context, id shared.RecordingID) (*job.Job, error) {
+	j, err := s.jobs.LatestByKeyPrefix(ctx, sttJobType, tvalues.STTJobKeyPrefix(id))
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return j, nil
 }
 
 // Text renders the summary with its key points and the homework as plain text for the clipboard.

@@ -113,7 +113,8 @@ type RecordingItem struct {
 	// or key; action openConnections) or serviceUnavailable (the Hub does not answer; retried automatically).
 	QueueReason string `json:"queueReason"`
 	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed, homeworkFailed,
-	// lectureTextFailed (TASK-090) or silentRecording (the track is silent: «Запись без звука», TASK-082).
+	// lectureTextFailed (TASK-090), silentRecording (the track is silent: «Запись без звука», TASK-082) or noSpeech
+	// (the transcript holds no speech: «В записи нет речи», TASK-110; action checkSound, no retryWork).
 	ErrorCode string `json:"errorCode"`
 	// JobError is the last error of the job the stage refers to (failed or retrying); "" otherwise.
 	JobError string `json:"jobError"`
