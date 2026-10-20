@@ -116,19 +116,16 @@ func (s *Service) Segments(ctx context.Context, id shared.RecordingID, from, lim
 		return Page{From: from, Total: len(segs), Final: true, Segments: append([]transcript.Segment(nil), segs[start:end]...)}, nil
 	}
 
-	total, err := s.live.CountParts(ctx, id)
+	// The page is cut from the speech of all parts, not by stored index: the viewer asks for the next page from the
+	// number of segments it has, so dropping marks inside a page would repeat parts. Status counts every part, also
+	// marks stored before TASK-110, so it may overcount; the viewer then gets an empty page.
+	segs, err = s.liveSpeech(ctx, id)
 	if err != nil {
-		return Page{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return Page{}, err
 	}
-	parts, err := s.live.ListParts(ctx, id, from, limit)
-	if err != nil {
-		return Page{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
-	}
-	out := make([]transcript.Segment, len(parts))
-	for i, p := range parts {
-		out[i] = p.Segment()
-	}
-	return Page{From: from, Total: total, Segments: out}, nil
+	start := min(from, len(segs))
+	end := min(start+limit, len(segs))
+	return Page{From: from, Total: len(segs), Segments: append([]transcript.Segment(nil), segs[start:end]...)}, nil
 }
 
 // Text renders the whole transcript as plain text for the clipboard, with or without timestamps.
@@ -276,6 +273,18 @@ func (s *Service) all(ctx context.Context, id shared.RecordingID) ([]transcript.
 		return segs, err
 	}
 
+	out, err := s.liveSpeech(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, ErrNoTranscript
+	}
+	return out, nil
+}
+
+// liveSpeech returns the speech of every live part, in order.
+func (s *Service) liveSpeech(ctx context.Context, id shared.RecordingID) ([]transcript.Segment, error) {
 	var out []transcript.Segment
 	for from := 0; from < transcript.MaxSegments; from += MaxPage {
 		parts, err := s.live.ListParts(ctx, id, from, MaxPage)
@@ -291,9 +300,6 @@ func (s *Service) all(ctx context.Context, id shared.RecordingID) ([]transcript.
 		if len(parts) < MaxPage {
 			break
 		}
-	}
-	if len(out) == 0 {
-		return nil, ErrNoTranscript
 	}
 	return out, nil
 }

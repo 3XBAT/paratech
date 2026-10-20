@@ -2,6 +2,7 @@ package transcriptview
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"paratech/desktop/internal/domain/transcription/transcript"
@@ -47,5 +48,37 @@ func TestMarksInLivePartsAreNotCopied(t *testing.T) {
 	e.addParts(t, "r1", []transcript.Segment{{StartMs: 0, EndMs: 1, Text: "[BLANK_AUDIO]"}, {StartMs: 1, EndMs: 2, Text: " итог"}})
 	if got, err := e.svc.Text(context.Background(), "r1", false); err != nil || got != "итог\n" {
 		t.Fatalf("text = %q, %v", got, err)
+	}
+}
+
+// Live parts stored before the rule hold marks: the viewer pages over their speech, so a page never repeats a part.
+func TestMarksInLivePartsAreNotShown(t *testing.T) {
+	e := newEnv(t)
+	e.addRecording(t, "r1", "")
+	e.addParts(t, "r1", []transcript.Segment{
+		{StartMs: 0, EndMs: 1, Text: "[BLANK_AUDIO]"}, {StartMs: 1, EndMs: 2, Text: " один"},
+		{StartMs: 2, EndMs: 3, Text: "(музыка)"}, {StartMs: 3, EndMs: 4, Text: " два"}, {StartMs: 4, EndMs: 5, Text: " три"},
+	})
+	ctx := context.Background()
+	tests := []struct {
+		from, limit int
+		want        []string
+	}{
+		{0, 2, []string{" один", " два"}},
+		{2, 2, []string{" три"}},
+		{3, 2, nil},
+	}
+	for _, tc := range tests {
+		page, err := e.svc.Segments(ctx, "r1", tc.from, tc.limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, s := range page.Segments {
+			got = append(got, s.Text)
+		}
+		if page.Total != 3 || page.From != tc.from || page.Final || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("Segments(%d, %d) = %+v, want %q", tc.from, tc.limit, page, tc.want)
+		}
 	}
 }
