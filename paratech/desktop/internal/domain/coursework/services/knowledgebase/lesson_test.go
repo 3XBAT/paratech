@@ -34,7 +34,7 @@ func TestNewLesson(t *testing.T) {
 		{name: "correction of an ad-hoc recording", facts: Facts{Correction: Source{Subject: "Физика", Kind: "practice"}},
 			subject: "Физика", kind: "practice", subjectEdited: true, kindEdited: true},
 		{name: "kind that is no code is dropped", facts: Facts{Snapshot: &Source{Kind: "<b>"}, Correction: Source{Kind: "x"}}},
-		{name: "untrusted text is one line", facts: Facts{Snapshot: &Source{Title: "a‮\nb", Subject: "c\td"}},
+		{name: "untrusted text is one line", facts: Facts{Snapshot: &Source{Title: "a\u202e\nb", Subject: "c\td"}},
 			title: "a b", subject: "c d"},
 	}
 	for _, tc := range tests {

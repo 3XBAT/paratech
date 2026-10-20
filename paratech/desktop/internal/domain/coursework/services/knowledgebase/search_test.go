@@ -17,7 +17,7 @@ func TestNewSearch(t *testing.T) {
 		{"  a  ", false},
 		{"a", false},
 		{"", false},
-		{"​​я", false}, // format characters do not count
+		{"\u200b\u200bя", false}, // format characters do not count
 		{strings.Repeat("я", MaxQueryRunes), true},
 		{strings.Repeat("я", MaxQueryRunes+1), false},
 		{"a \n b", true},
@@ -52,7 +52,7 @@ func TestSearchMatches(t *testing.T) {
 		{name: "spaces collapse in the query", query: "теория   поля", text: "теория поля", want: Snippet{Match: "теория поля"}, found: true},
 		{name: "line break matches a space", query: "теория поля", text: "теория\nполя", want: Snippet{Match: "теория поля"}, found: true},
 		{name: "no match", query: "химия", text: "физика"},
-		{name: "control and bidi characters are cut out", query: "ab", text: "x‮\u0007 ab", want: Snippet{Before: "x ", Match: "ab"}, found: true},
+		{name: "control and bidi characters are cut out", query: "ab", text: "x\u202e\u0007 ab", want: Snippet{Before: "x ", Match: "ab"}, found: true},
 		{name: "invalid UTF-8 keeps positions", query: "ab", text: "\xff\xfe ab cd", want: Snippet{Before: "�� ", Match: "ab", After: " cd"}, found: true},
 	}
 	for _, tc := range tests {

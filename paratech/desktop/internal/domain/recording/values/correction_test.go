@@ -18,7 +18,7 @@ func TestNewLessonCorrection(t *testing.T) {
 		{name: "empty corrects nothing"},
 		{name: "subject and kind", subject: "Физика", kind: "lecture", wantSubject: "Физика", wantKind: "lecture"},
 		{name: "kind in any case", kind: " Seminar ", wantKind: "seminar"},
-		{name: "subject cleaned to one line", subject: " Мат‮анализ\n  2 ", wantSubject: "Матанализ 2"},
+		{name: "subject cleaned to one line", subject: " Мат\u202eанализ\n  2 ", wantSubject: "Матанализ 2"},
 		{name: "longest subject", subject: strings.Repeat("ф", MaxLessonSubjectBytes/2), wantSubject: strings.Repeat("ф", MaxLessonSubjectBytes/2)},
 		{name: "subject too long", subject: strings.Repeat("ф", MaxLessonSubjectBytes/2+1), wantErr: true},
 		{name: "unknown kind", kind: "unknown", wantErr: true},
