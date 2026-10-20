@@ -59,8 +59,13 @@ type LiveBatch struct {
 func NewLiveBatch() *LiveBatch { return &LiveBatch{} }
 
 // Add numbers s as the next part and reports whether the pending parts are due. A segment that breaks the rules or
-// starts before the previous one is refused with ErrInvalidDocument and takes no number.
+// starts before the previous one is refused with ErrInvalidDocument and takes no number. A segment without speech
+// (Segment.Speech, TASK-110) is left out without an error; the marks are removed from one with speech.
 func (b *LiveBatch) Add(s Segment, now time.Time) (due bool, err error) {
+	s, ok := s.Speech()
+	if !ok {
+		return b.Due(now), nil
+	}
 	if s.StartMs < b.prevStart {
 		return b.Due(now), fmt.Errorf("%w: part %d starts before the previous one", ErrInvalidDocument, b.next)
 	}
