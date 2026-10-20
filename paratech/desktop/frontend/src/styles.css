@@ -377,3 +377,46 @@ html, body, #root { height: 100%; }
 .del-refusal { color: var(--rec-t); }
 .del-body .del-warn { margin-top: 12px; color: var(--text); font-weight: 600; }
 .del-check { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; color: var(--text); overflow-wrap: anywhere; }
+
+/* База знаний (TASK-091): lists of full-width buttons, hits with a marked match, the tabs of a lesson. Every text is
+   imported, typed or model text, so it wraps and never overflows. */
+.kb { max-width: 900px; }
+.kb-sub { margin: 4px 0 0; }
+.kb-heading { overflow-wrap: anywhere; }
+.kb-search { margin-bottom: 8px; }
+.kb-list { margin: 0; padding: 0; list-style: none; }
+.kb-list > li { border-bottom: 1px solid var(--line); }
+.kb-list > li:last-child { border-bottom: 0; }
+.kb-lesson { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-right: 12px; }
+.kb-lesson > .kb-item { flex: 1 1 320px; }
+.kb-item { display: flex; flex-direction: column; gap: 3px; width: 100%; min-width: 0; padding: 11px 16px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.kb-item:hover { background: var(--panel-2); }
+.kb-name { font-weight: 600; overflow-wrap: anywhere; }
+.kb-none .kb-name { color: var(--muted); }
+.kb-marks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); }
+.kb-mark { display: inline-flex; align-items: center; gap: 4px; }
+.kb-mark.on { color: var(--ok-t); }
+.kb-mark .i { width: 14px; height: 14px; }
+.kb-count { margin: 8px 0; }
+.kb-stale { opacity: .6; }
+.kb-group + .kb-group { margin-top: 12px; }
+.kb-group-head { border-bottom: 1px solid var(--line); }
+.kb-hits { margin: 0; padding: 0; list-style: none; }
+.kb-hit { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 2px 12px; width: 100%; padding: 8px 16px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.kb-hit:hover { background: var(--panel-2); }
+.kb-place { padding-top: 1px; }
+.kb-snippet { overflow-wrap: anywhere; }
+.kb-snippet mark { border-radius: 3px; background: var(--wait-b); color: var(--wait-t); }
+.kb-tabs { margin: 0 0 14px; }
+.kb-form { margin-bottom: 14px; }
+.kb-form .ui-field { max-width: 420px; }
+/* The place a search found: a bar on its left, not colour alone. */
+.kb-focus { box-shadow: inset 3px 0 0 var(--accent-fill); padding-left: 10px; }
+.sm-points li.kb-focus { margin-left: -10px; }
+@container app (max-width: 640px) {
+  .kb-hit { grid-template-columns: minmax(0, 1fr); }
+}
+@media (forced-colors: active) {
+  .kb-snippet mark { background: Mark; color: MarkText; }
+  .kb-focus { border-left: 3px solid Highlight; }
+}

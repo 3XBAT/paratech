@@ -22,6 +22,7 @@ export type IconName =
   | "lock"
   | "key"
   | "doc"
+  | "book"
   | "mail"
   | "retry"
   | "x";
@@ -97,6 +98,9 @@ export function IconSprite() {
       <symbol id="i-doc" viewBox="0 0 24 24">
         <path d="M6.5 3.5h7.5l3.5 3.5v13.5h-11z" />
         <path d="M13.5 3.5V7.5h4M9.5 12h5M9.5 15.5h5" />
+      </symbol>
+      <symbol id="i-book" viewBox="0 0 24 24">
+        <path d="M12 7v13M12 7a3 3 0 0 0-3-2.5H3.5v13H9a3 3 0 0 1 3 2.5M12 7a3 3 0 0 1 3-2.5h5.5v13H15a3 3 0 0 0-3 2.5" />
       </symbol>
       <symbol id="i-mail" viewBox="0 0 24 24">
         <rect x="3.5" y="5.5" width="17" height="13" rx="2" />

@@ -15,6 +15,7 @@ import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { HomeworkPage } from "./pages/HomeworkPage";
+import { KnowledgeBasePage } from "./pages/KnowledgeBasePage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { RecordingsPage } from "./pages/RecordingsPage";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -35,6 +36,8 @@ function PageView(props: {
       return <RecordingsPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
     case "homework":
       return <HomeworkPage openAssignment={props.assignment} />;
+    case "knowledge":
+      return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} />;
     case "schedule":
       return <SchedulePage />;
     case "connections":
