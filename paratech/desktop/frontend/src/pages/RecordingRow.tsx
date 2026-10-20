@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 // The .js extensions let the Node test runner load the compiled row (test/recordingrow.test.mjs renders it).
-import type { JobItem, RecordingItem, RetryWork } from "../bindings/activity.js";
+import type { JobItem, RecordingItem, RecordingSound, RetryWork } from "../bindings/activity.js";
 import { jobAssignment, jobTitle } from "../activityView.js";
 import type { PageId } from "../nav.js";
 import type { SummarySection } from "../openSummary.js";
@@ -22,6 +22,7 @@ import { jobStatusView, showsProgress, type StatusView } from "../statusPresenta
 import { Button, IconButton } from "../ui/Button.js";
 import { Progress, Row } from "../ui/controls.js";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu.js";
+import { SoundLevel } from "../ui/SoundLevel.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
 export interface RecordingRowProps {
@@ -52,6 +53,8 @@ export interface RecordingRowProps {
   /** The checkbox of «Удалить выбранные»; without onSelect the row has none. */
   selected?: boolean;
   onSelect?: (selected: boolean) => void;
+  /** The live sound of the running recording (TASK-099); the capsule shows only for this row's recording. */
+  sound?: RecordingSound | null;
 }
 
 type MenuKey = RowItemKey | "delete";
@@ -69,6 +72,7 @@ export function RecordingRow(props: RecordingRowProps) {
   const texts = props.onOpenSummary !== undefined && props.onOpenTranscript !== undefined;
   const acts = rowActions(r, { texts, redo: props.onRedoSummary !== undefined });
   const title = v.titleIsTime ? <span className="num">{v.title}</span> : v.title;
+  const sound = r.stage === "recording" && props.sound?.recordingId === r.id ? props.sound : null;
 
   const run = (key: MenuKey) => {
     const a = v.action;
@@ -188,6 +192,7 @@ export function RecordingRow(props: RecordingRowProps) {
         >
           {v.progress !== null && <Progress value={v.progress} label={v.status.label} text={false} />}
           {v.remaining !== "" && <span className="small muted num row-remaining">{v.remaining}</span>}
+          <SoundLevel sound={sound} hint />
         </StatusLine>
       }
       actions={

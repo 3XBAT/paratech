@@ -7,6 +7,7 @@ import { Popup } from "./Popup";
 import "../ui/fonts.css";
 import "../ui/tokens.css";
 import "../sourcePicker/sourcePicker.css";
+import "../ui/soundLevel.css";
 import "./popup.css";
 
 // Before the first render, like the main window; then a change in Settings reaches an open popup.

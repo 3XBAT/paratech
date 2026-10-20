@@ -1,0 +1,22 @@
+/* The sound level capsule (TASK-099, docs/design/concept-strict.html «1a»). Scoped to .lvl; --lvl and --fill are
+   optional tokens, the fallbacks are the existing ones. The core's level sets the fill about every 250 ms; a 160 ms
+   transition smooths the steps. */
+.lvl { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.lvl-bar { position: relative; flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--fill, var(--panel-2)); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.lvl-bar b { position: absolute; inset: 0; border-radius: 2px; background: var(--lvl, var(--ok-t)); transform-origin: left center; transform: scaleX(0); transition: transform 160ms linear; }
+.lvl-bar i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted); opacity: .5; }
+/* Quiet: an almost empty grey sliver, no alarm colour. */
+.lvl.quiet .lvl-bar b { transform: scaleX(.04); background: var(--muted); opacity: .6; }
+.lvl.lg .lvl-bar { width: 88px; height: 5px; border-radius: 3px; }
+.lvl-hint { color: var(--muted); font-size: 12px; line-height: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lvl-bar b { transition: none; }
+}
+/* Windows high contrast: system colours; the outline keeps the capsule visible. */
+@media (forced-colors: active) {
+  .lvl-bar { forced-color-adjust: none; outline: 1px solid CanvasText; background: Canvas; box-shadow: none; }
+  .lvl-bar b { background: Highlight; opacity: 1; }
+  .lvl.quiet .lvl-bar b { background: GrayText; }
+  .lvl-bar i { background: CanvasText; opacity: 1; }
+}

@@ -58,12 +58,16 @@ h1, p, ul { margin: 0; }
 /* Buttons: «Начать запись» across the width, the others below it. */
 .pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: auto; }
 .pbtns .wide, .pbtns > .btn:nth-child(2):last-child { grid-column: 1 / -1; }
+/* The running recording (TASK-099): «Остановить» and «Скрыть» side by side; the capsule is in ../ui/soundLevel.css. */
+.pbtns.two > .btn { grid-column: auto; }
+.p-sound { flex: none; display: flex; align-items: center; min-height: 28px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 28px; padding: 3px 12px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast), transform var(--t-fast) var(--ease); }
 .btn:hover:enabled { background: var(--panel-2); }
 .btn:active:enabled { transform: translateY(1px); }
 .btn.primary { min-height: 38px; border-color: var(--prim); background: var(--prim); color: var(--on-prim); }
 .btn.primary:hover:enabled { background: var(--prim); opacity: .9; }
 .btn.ghost { border-color: transparent; background: none; color: var(--accent); }
+.btn.danger { color: var(--rec-t); border-color: color-mix(in srgb, var(--rec) 55%, var(--control)); }
 .btn.ghost:hover:enabled { background: var(--panel-2); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 

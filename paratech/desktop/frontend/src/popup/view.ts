@@ -198,3 +198,34 @@ export class HeightFitter {
 export function shouldRefresh(view: PromptView | null, visible: boolean, pending: Action | null, listOpen: boolean): boolean {
   return visible && !listOpen && view !== null && view.state === "OFFERED" && pending === null;
 }
+
+// The popup while a recording runs (TASK-099, docs/design/concept-strict.html section 4): the level capsule,
+// «Остановить» and «Скрыть». The core says whether a recording captures (RecordingSound.recording).
+
+export const recordingTexts = {
+  heading: "Идёт запись",
+  tip: "Окно можно закрыть — запись продолжится. Остановить можно и в «Записях и задачах».",
+  stop: "Остановить",
+  stopping: "Остановка…",
+  hide: "Скрыть",
+  stopHint: "Остановить запись",
+  hideHint: "Скрыть окно, запись продолжится",
+  stopFailed: "Не удалось остановить запись. Остановите её в «Записях и задачах».",
+} as const;
+
+/**
+ * Whether the popup shows the running recording instead of the prompt: while a recording captures and no prompt is on
+ * offer. The tray's ad-hoc offer is replaced too (a second recording would be refused); a lesson offer stays.
+ */
+export function showsRecording(view: PromptView | null, recording: boolean, pending: Action | null): boolean {
+  if (!recording || pending !== null) {
+    return false;
+  }
+  if (view === null) {
+    return true;
+  }
+  if (view.state === "STARTING") {
+    return false;
+  }
+  return view.state !== "OFFERED" || view.kind === "adhoc";
+}
