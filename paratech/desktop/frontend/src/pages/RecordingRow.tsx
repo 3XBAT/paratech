@@ -1,13 +1,24 @@
 import type { ReactNode } from "react";
 // The .js extensions let the Node test runner load the compiled row (test/recordingrow.test.mjs renders it).
-import type { RecordingItem, RetryWork } from "../bindings/activity.js";
+import type { JobItem, RecordingItem, RetryWork } from "../bindings/activity.js";
+import { jobAssignment, jobTitle } from "../activityView.js";
 import type { PageId } from "../nav.js";
 import type { SummarySection } from "../openSummary.js";
 import { deleteTexts, rowDeleteOffer } from "../recordingDeleteView.js";
-import { type RowItem, type RowItemKey, recordingRowView, rowActions } from "../recordingRowView.js";
+import {
+  type JobItemKey,
+  type JobRowItem,
+  jobActions,
+  jobDetails,
+  jobMeta,
+  type RowItem,
+  type RowItemKey,
+  recordingRowView,
+  rowActions,
+} from "../recordingRowView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
-import type { StatusView } from "../statusPresentation.js";
+import { jobStatusView, showsProgress, type StatusView } from "../statusPresentation.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Progress, Row } from "../ui/controls.js";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu.js";
@@ -197,6 +208,71 @@ export function RecordingRow(props: RecordingRowProps) {
             onKeep={props.onKeepSource}
           />
         )
+      }
+    />
+  );
+}
+
+export interface JobRowProps {
+  item: JobItem;
+  /** «Запустить сейчас» is on the way. */
+  starting: boolean;
+  onRunNow: () => void;
+  /** «Открыть задание» of a draft (TASK-094); without it the row opens nothing. */
+  onOpenAssignment?: (assignmentId: string) => void;
+}
+
+// One task of «Задачи» (a job without a recording), on the same grid as a recording row: one main button and the «⋯»
+// cell, which stays empty without more actions (TASK-098). The job error and the attempts are technical: only in the
+// chip's tooltip (TASK-096). The draft's title is model text: React renders it as text only.
+export function JobRow(props: JobRowProps) {
+  const j = props.item;
+  const v = jobStatusView(j);
+  const assignment = jobAssignment(j);
+  const onOpenAssignment = props.onOpenAssignment;
+  const acts = jobActions(j, { assignment: onOpenAssignment !== undefined });
+  const title = jobTitle(j);
+  const meta = jobMeta(j);
+
+  const run = (key: JobItemKey) => {
+    if (key === "runNow") {
+      props.onRunNow();
+    } else if (assignment !== "" && onOpenAssignment) {
+      onOpenAssignment(assignment);
+    }
+  };
+
+  const main = (i: JobRowItem) =>
+    i.key === "runNow" ? (
+      <Button icon="play" busy={props.starting} busyLabel="Запуск…" disabled={props.starting} onClick={() => run("runNow")}>
+        {i.label}
+      </Button>
+    ) : (
+      <Button icon="doc" onClick={() => run("assignment")}>
+        {i.label}
+      </Button>
+    );
+
+  const menu: RowMenuItem<JobItemKey>[] = acts.menu.map((i) => ({
+    key: i.key,
+    label: i.label,
+    disabled: i.key === "runNow" && props.starting,
+  }));
+
+  return (
+    <Row
+      title={title}
+      meta={meta !== "" && <span className="num">{meta}</span>}
+      status={
+        <StatusLine view={v} notes={[]} details={jobDetails(j)}>
+          {showsProgress(j) && <Progress value={j.progressPercent} label={v.label} text={false} />}
+        </StatusLine>
+      }
+      actions={
+        <>
+          {acts.main !== null && main(acts.main)}
+          <RowMenu label={`Ещё действия: ${title}`} title="Ещё действия" items={menu} onPick={run} />
+        </>
       }
     />
   );

@@ -7,7 +7,7 @@ import { createElement as h } from "react";
 import server from "react-dom/server";
 import { formatTime } from "../.test-build/activityView.js";
 import { nextTickDelay, SecondTicker, tickMs } from "../.test-build/clock.js";
-import { RecordingRow, StatusLine } from "../.test-build/pages/RecordingRow.js";
+import { JobRow, RecordingRow, StatusLine } from "../.test-build/pages/RecordingRow.js";
 import { jobStatusView } from "../.test-build/statusPresentation.js";
 import {
   actionLabels,
@@ -15,7 +15,11 @@ import {
   anyRecording,
   chainStatusView,
   errorTexts,
-  finishedKey,
+  jobActions,
+  jobDetails,
+  jobItemLabels,
+  jobMeta,
+  latestDrafts,
   lessonKindTexts,
   lessonLine,
   pageGroups,
@@ -441,34 +445,133 @@ test("the elapsed time advances by one second per tick, not by the 3 s poll step
 
 const job = (over = {}) => ({
   id: "j1", type: "send_email", status: "QUEUED", waiting: false, attempts: 1, maxAttempts: 3, progressPercent: 0,
-  lastError: "", createdAt: started, updatedAt: started, nextRunAt: "", runNowOffered: false, ...over,
+  lastError: "", createdAt: started, updatedAt: started, nextRunAt: "", runNowOffered: false,
+  assignmentId: "", assignmentTitle: "", assignmentSubject: "", label: "", ...over,
 });
+const at = (min) => new Date(startMs + min * 60_000).toISOString();
 
-// A failed email or homework draft must stay visible: it joins the recordings in the one «Завершённые» group.
-test("finished recordings and finished other jobs share one «Завершённые» group, newest first", () => {
-  const at = (min) => new Date(startMs + min * 60_000).toISOString();
+// TASK-098: «Записи» and «Задачи» are separate sections, each with its own «Идут» and «Завершённые», newest first.
+test("recordings and other jobs are separate sections, each split into in progress and finished", () => {
   const recordings = [
-    row({ id: "r-new", startedAt: at(30) }),
-    row({ id: "r-run", stage: "recording", status: "RECORDING", stoppable: true }),
     row({ id: "r-old", stage: "failed", errorCode: "summaryFailed", startedAt: at(0) }),
+    row({ id: "r-run", stage: "recording", status: "RECORDING", stoppable: true }),
+    row({ id: "r-new", startedAt: at(30) }),
   ];
   const jobs = [
     job({ id: "j-queued" }),
     job({ id: "j-failed", status: "FAILED", lastError: "smtp: 550", createdAt: at(10) }),
-    job({ id: "j-cancelled", type: "homework_draft", status: "CANCELLED", createdAt: at(40) }),
+    job({ id: "j-cancelled", type: "calendar_sync", status: "CANCELLED", createdAt: at(40) }),
     job({ id: "j-runnow", status: "FAILED", runNowOffered: true }),
   ];
   const g = pageGroups(recordings, jobs);
 
-  assert.deepEqual(g.recordings.map((r) => r.id), ["r-run"]);
-  assert.deepEqual(g.otherJobs.map((j) => j.id), ["j-queued", "j-runnow"], "a job with Run now stays in «Другие задачи»");
-  assert.deepEqual(g.finished.map(finishedKey), ["job:j-cancelled", "recording:r-new", "job:j-failed", "recording:r-old"]);
-  assert.equal(g.finished.find((e) => e.item.id === "j-failed").item.lastError, "smtp: 550");
+  assert.deepEqual(g.recordings.active.map((r) => r.id), ["r-run"]);
+  assert.deepEqual(g.recordings.finished.map((r) => r.id), ["r-new", "r-old"]);
+  assert.deepEqual(g.tasks.active.map((j) => j.id), ["j-queued", "j-runnow"], "a job with Run now stays in «Идут»");
+  assert.deepEqual(g.tasks.finished.map((j) => j.id), ["j-cancelled", "j-failed"]);
+  assert.equal(g.tasks.finished.find((j) => j.id === "j-failed").lastError, "smtp: 550", "a failed job keeps its error");
 
-  // Same id in both lists still gives two keys; a bad time sorts last; empty lists give empty groups.
-  const same = pageGroups([row({ id: "x", startedAt: "" })], [job({ id: "x", status: "COMPLETED" })]);
-  assert.deepEqual(same.finished.map(finishedKey), ["job:x", "recording:x"]);
-  assert.deepEqual(pageGroups([], []), { recordings: [], otherJobs: [], finished: [] });
+  // A bad time sorts last; empty lists give empty sections.
+  const bad = pageGroups([row({ id: "x", startedAt: "" }), row({ id: "y" })], []);
+  assert.deepEqual(bad.recordings.finished.map((r) => r.id), ["y", "x"]);
+  assert.deepEqual(pageGroups([], []), { recordings: { active: [], finished: [] }, tasks: { active: [], finished: [] } });
+});
+
+test("only the latest draft job of an assignment is shown (TASK-098)", () => {
+  const draft = (over) => job({ type: "homework_draft", assignmentId: "a1", status: "COMPLETED", ...over });
+  const failedOld = draft({ id: "d-old", status: "FAILED", createdAt: at(0), updatedAt: at(1) });
+  const doneNew = draft({ id: "d-new", createdAt: at(5), updatedAt: at(6) });
+  const other = draft({ id: "d-other", assignmentId: "a2", createdAt: at(2) });
+  const email = job({ id: "e1", assignmentId: "a1" });
+  const loose = job({ id: "d-loose", type: "homework_draft" });
+
+  // The input order does not matter; other jobs, other assignments and drafts without one stay, in order.
+  assert.deepEqual(latestDrafts([failedOld, email, doneNew, other, loose]).map((j) => j.id), ["e1", "d-new", "d-other", "d-loose"]);
+  assert.deepEqual(latestDrafts([doneNew, failedOld]).map((j) => j.id), ["d-new"]);
+  // Equal creation: the later update wins, then the greater id.
+  const a = draft({ id: "d-a", createdAt: at(5), updatedAt: at(9) });
+  assert.deepEqual(latestDrafts([doneNew, a]).map((j) => j.id), ["d-a"]);
+  const b = draft({ id: "d-b", createdAt: at(5), updatedAt: at(9) });
+  assert.deepEqual(latestDrafts([b, a]).map((j) => j.id), ["d-b"]);
+  assert.deepEqual(latestDrafts([a, b]).map((j) => j.id), ["d-b"]);
+  // A draft with a readable time beats one without.
+  assert.deepEqual(latestDrafts([draft({ id: "d-z", createdAt: "" }), failedOld]).map((j) => j.id), ["d-old"]);
+
+  // The page groups only the latest: the old failed draft is in neither group.
+  const g = pageGroups([], [failedOld, doneNew]);
+  assert.deepEqual([...g.tasks.active, ...g.tasks.finished].map((j) => j.id), ["d-new"]);
+});
+
+test("a task row has one main button and the rest in «⋯»; attempts and errors only in the tooltip (TASK-098)", () => {
+  assert.deepEqual(jobActions(job(), { assignment: true }), { main: null, menu: [] });
+  assert.deepEqual(jobActions(job({ assignmentId: "a1" }), { assignment: true }), { main: { key: "assignment", label: "Открыть задание" }, menu: [] });
+  assert.deepEqual(jobActions(job({ assignmentId: "a1" }), { assignment: false }), { main: null, menu: [] });
+  assert.deepEqual(jobActions(job({ assignmentId: "a1", runNowOffered: true }), { assignment: true }), {
+    main: { key: "runNow", label: "Запустить сейчас" },
+    menu: [{ key: "assignment", label: "Открыть задание" }],
+  });
+  assert.equal(jobItemLabels.runNow, actionLabels.runNow);
+
+  assert.equal(jobDetails(job({ lastError: " smtp: 550 ", attempts: 2, maxAttempts: 3 })), "smtp: 550\nПопыток: 2 из 3");
+  assert.equal(jobDetails(job({ maxAttempts: 0 })), "");
+  assert.equal(jobMeta(job()), `Обновлена ${formatTime(started)}`);
+  assert.equal(jobMeta(job({ updatedAt: "" })), "");
+});
+
+function renderJob(item, props = {}) {
+  return renderToStaticMarkup(h(JobRow, { item, starting: false, onRunNow: () => undefined, ...props }));
+}
+
+// The actions cell of a row: the main button (if any), then the «⋯» cell, in the shared .arows grid.
+const actsOf = (html) => html.slice(html.indexOf('<div class="acts">'));
+
+test("a task row renders no technical text and keeps the «⋯» cell, empty without a menu (TASK-098)", () => {
+  const noop = () => undefined;
+  const failed = job({
+    type: "homework_draft", status: "FAILED", lastError: "llm: <b>bad</b>", attempts: 3, maxAttempts: 3,
+    assignmentId: "a1", label: "Черновик: <i>Эссе</i> · История",
+  });
+  const html = renderJob(failed, { onOpenAssignment: noop });
+  assert.equal(html.split("опыток").length - 1, 1, "the attempts only once: in the chip's title");
+  assert.ok(html.includes('title="llm: &lt;b&gt;bad&lt;/b&gt;\nПопыток: 3 из 3"'), "the error and attempts are in the chip's title");
+  assert.ok(html.includes("Черновик: &lt;i&gt;Эссе&lt;/i&gt; · История") && !html.includes("<i>"), "model text as text only");
+  assert.match(actsOf(html), /^<div class="acts"><button type="button" class="btn">.*Открыть задание<\/button><div class="mmenu"><\/div><\/div>/);
+
+  const plain = renderJob(job({ status: "COMPLETED", type: "calendar_sync" }));
+  assert.match(actsOf(plain), /^<div class="acts"><div class="mmenu"><\/div><\/div>/, "no button, the «⋯» cell still there");
+
+  const both = renderJob(job({ status: "WAITING_FOR_POWER", runNowOffered: true, assignmentId: "a1" }), { onOpenAssignment: noop });
+  assert.match(actsOf(both), /^<div class="acts"><button[^>]*>.*Запустить сейчас.*<\/button><div class="mmenu"><button[^>]*aria-label="Ещё действия: /);
+});
+
+test("recording and task rows share one grid: fixed status, button and «⋯» tracks in every card (TASK-098)", () => {
+  // A recording row has the same cells: the main button, then the «⋯» cell.
+  assert.match(actsOf(render(row({ stage: "recording", status: "RECORDING", stoppable: true }))), /^<div class="acts"><button[^>]*class="btn danger"[^>]*>.*<\/button><div class="mmenu">/);
+  assert.match(actsOf(render(row({ stage: "queued", queueReason: "inLine" }))), /^<div class="acts"><div class="mmenu"><\/div><\/div>/);
+
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.equal(page.split('className="card arows"').length - 1, 1, "every group of both sections uses the one card");
+  assert.ok(!page.includes('"card rows"'), "no per-card subgrid");
+  assert.match(page, /renderContainer=\{card\}/);
+  assert.match(page, /<h2 className="group-title">Записи<\/h2>/);
+  assert.match(page, /<h2 className="group-title">Задачи<\/h2>/);
+  assert.match(page, /sectionGroups\("recordings", groups\.recordings, recordingRow\)/);
+  assert.match(page, /sectionGroups\("tasks", groups\.tasks, jobRow\)/);
+  assert.match(page, /<h3 className="arows-sub">Идут<\/h3>/);
+  assert.match(page, /<p className="muted arows-empty">\{tasksEmptyText\}<\/p>/, "an empty «Задачи» has a short hint");
+  assert.ok(!page.includes("attempts"), "the page shows no attempts");
+
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const tracks = [...css.matchAll(/\.arows > \.row \{ grid-template-columns: ([^;]+); \}/g)].map((m) => m[1]);
+  assert.deepEqual(tracks, [
+    "minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 6px + var(--arow-menu))",
+    "minmax(0, 1fr) calc(var(--arow-btn) + 6px + var(--arow-menu))",
+  ], "only the title flexes, wide and narrow");
+  assert.match(css, /\.arows \{ --arow-st: 17rem; --arow-btn: 14rem; --arow-menu: 32px;/);
+  assert.match(css, /\.arows \.acts \{ display: grid; grid-template-columns: var\(--arow-btn\) var\(--arow-menu\);/);
+  assert.match(css, /\.arows \.acts > \.btn, \.arows \.acts > \.btn-with-reason \{ grid-column: 1; width: 100%; \}/, "one button width");
+  assert.match(css, /\.arows \.acts > \.mmenu \{ grid-column: 2; \}/, "«⋯» in its own slot, also without a button");
+  assert.match(css, /@container app \(max-width: 1000px\) \{\s*\.arows > \.row \{[^}]*\}\s*\.arows > \.row > \.row-main \{ grid-column: 1 \/ -1; \}/);
 });
 
 test("«Сделать конспект заново» from «⋯» asks with the summary screen's confirmation first (TASK-096)", () => {
@@ -480,10 +583,10 @@ test("«Сделать конспект заново» from «⋯» asks with th
 });
 
 test("a job row keeps its technical error in the chip's tooltip, not as row text (TASK-096)", () => {
-  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /<StatusLine view=\{v\} notes=\{\[\]\} details=\{j\.lastError\}>/);
-  assert.ok(!page.includes("[j.lastError]"), "the job error is never a row note");
-  assert.match(page, /<Button icon="doc" onClick=\{\(\) => onOpenAssignment\(assignment\)\}>/, "same style as a recording row's main button");
+  const src = readFileSync(new URL("../src/pages/RecordingRow.tsx", import.meta.url), "utf8");
+  assert.match(src, /<StatusLine view=\{v\} notes=\{\[\]\} details=\{jobDetails\(j\)\}>/);
+  assert.ok(!src.includes("[j.lastError]"), "the job error is never a row note");
+  assert.match(src, /<Button icon="doc" onClick=\{\(\) => run\("assignment"\)\}>/, "same style as a recording row's main button");
 
   const err = "permanent failure: the LLM answer does not match the schema";
   const html = renderToStaticMarkup(h(StatusLine, { view: jobStatusView(job({ type: "homework_draft", status: "FAILED" })), notes: [], details: err }));

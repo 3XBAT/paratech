@@ -228,6 +228,13 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
 .mmenu{display:flex;justify-content:end}.mmenu .btn{min-width:32px;padding:5px 0;color:var(--muted);font-size:18px;line-height:1}
 /* recordings (TASK-096): one main button and «⋯» per row; the round «Повторить» right next to the error chip */
 .st-head{display:flex;align-items:center;gap:6px}.btn.icon-btn{width:28px;min-height:28px;padding:0;border-radius:50%;color:var(--accent)}.btn.icon-btn .i{width:16px;height:16px}
+/* recordings (TASK-098): «Записи» and «Задачи» are separate sections, each with «Идут» and «Завершённые (N)»; one row
+   grid for every card: only the title flexes, the status, button and «⋯» tracks are fixed, the «⋯» slot is in every row */
+.sec{font-size:15px;font-weight:600;margin:20px 0 10px}.sec:first-of-type{margin-top:0}
+.card.arows{display:block;overflow:visible}.card.arows>.row{grid-template-columns:minmax(0,1fr) 17rem calc(14rem + 38px)}
+.arows .acts{display:grid;grid-template-columns:14rem 32px;gap:6px}.arows .acts>.btn{grid-column:1;width:100%}.arows .acts>.mmenu{grid-column:2}
+.arows+.group,.arows+.more+.group{margin-top:12px}.group+.card{margin-top:8px}.more{margin-top:6px}
+@container (max-width:1000px){.card.arows>.row{grid-template-columns:minmax(0,1fr) calc(14rem + 38px)}.card.arows>.row>div:first-child{grid-column:1/-1}}
 
 /* popup */
 .duo{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
@@ -340,8 +347,10 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
         <!-- Записи и задачи -->
         <section class="screen" data-screen="rec" aria-label="Записи и задачи">
           <div class="head"><div><span class="lbl">Четверг, 17 сентября</span><h2>Записи и задачи</h2></div>
-            <div class="seg" role="group" aria-label="Показать"><button aria-pressed="true">Все <span class="num">6</span></button><button aria-pressed="false">В работе <span class="num">2</span></button><button aria-pressed="false">Ждут <span class="num">2</span></button><button aria-pressed="false">Ошибки <span class="num">1</span></button></div></div>
-          <div class="card" role="list">
+            </div>
+          <h3 class="sec">Записи</h3>
+          <h4 class="group">Идут</h4>
+          <div class="card arows" role="list">
             <div class="row" role="listitem"><div><p class="t">Матанализ, лекция</p><span class="m">Сегодня, 10:40–12:10 · Zoom</span></div>
               <div class="st"><span class="chip s-rec"><span class="dot"></span>Идёт запись · <span class="num">00:42:17</span></span><span class="m">Окно можно закрыть — запись продолжится.</span></div>
               <div class="acts"><button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Матанализ, лекция" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
@@ -355,6 +364,9 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
             <div class="row" role="listitem"><div><p class="t">Английский язык, семинар</p><span class="m">Вчера, 10:40–12:10 · поиск домашнего задания</span></div>
               <div class="st"><span class="chip s-net"><svg class="i"><use href="#i-off"/></svg>Ждёт интернет</span><span class="m">Продолжится само, как только появится сеть.</span></div>
               <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть расшифровку</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Английский язык, семинар" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
+          </div>
+          <h4 class="group">▾ Завершённые <span class="num">(12)</span></h4>
+          <div class="card arows" role="list">
             <div class="row" role="listitem"><div><p class="t">Программирование на Python</p><span class="m">Пн, 14 сентября · 1 ч 30 мин</span></div>
               <div class="st"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span><span class="m">2 задания · ближайшее до пт, 18 сентября</span></div>
               <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть конспект</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Программирование на Python" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
@@ -362,6 +374,18 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
               <div class="st"><span class="st-head"><span class="chip s-fail" title="permanent failure: the LLM answer does not match the schema"><svg class="i"><use href="#i-warn"/></svg>Ошибка</span><button class="btn icon-btn" aria-label="Повторить краткое содержание" title="Повторить краткое содержание"><svg class="i"><use href="#i-retry"/></svg></button></span><span class="m">Не удалось сделать краткое содержание. Нажмите круглую стрелку «Повторить» у статуса.</span></div>
               <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть расшифровку</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Линейная алгебра, семинар" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
           </div>
+          <div class="more"><button class="btn ghost">Показать ещё</button></div>
+          <h3 class="sec">Задачи</h3>
+          <h4 class="group">Идут</h4>
+          <div class="card arows" role="list">
+            <div class="row" role="listitem"><div><p class="t">Черновик: Эссе о реформах · История России</p><span class="m num">Обновлена 17.09.2026, 10:12:40</span></div>
+              <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-doc"/></svg>Выполняется</span></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть задание</button><div class="mmenu"></div></div></div>
+            <div class="row" role="listitem"><div><p class="t">Отправка письма</p><span class="m num">Обновлена 17.09.2026, 10:05:02</span></div>
+              <div class="st"><span class="chip s-net" title="smtp: dial tcp: no route to host&#10;Попыток: 2 из 5"><svg class="i"><use href="#i-off"/></svg>Ждёт интернет</span><span class="m">Продолжится само, как только появится сеть.</span></div>
+              <div class="acts"><button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Отправка письма" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
+          </div>
+          <h4 class="group">▸ Завершённые <span class="num">(5)</span></h4>
           <div class="gap"></div>
           <div class="statusbar" role="status"><span>В очереди 1 задача</span><span>Следующая пара — Физика, 14:00</span><span>Модель речи: small</span><span class="r"><svg class="i"><use href="#i-lock"/></svg>Звук обрабатывается только на этом компьютере</span></div>
         </section>

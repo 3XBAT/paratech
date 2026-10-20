@@ -3,7 +3,7 @@ import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "
 import { promptApi } from "../bindings/prompt";
 import { recordingDeleteApi } from "../bindings/recordingDelete";
 import { callByName } from "../bindings/runtime";
-import { actionErrorText, formatTime, jobAssignment, jobTitle, loadErrorText } from "../activityView";
+import { actionErrorText, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
 import { manualStartTexts, startButton, startOutcome } from "../manualStartView";
@@ -16,7 +16,7 @@ import {
   selectedText,
   withSelected,
 } from "../recordingDeleteView";
-import { anyRecording, type FinishedEntry, finishedKey, pageGroups, queueLine } from "../recordingRowView";
+import { anyRecording, pageGroups, queueLine, tasksEmptyText } from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
 import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
 import { useSources } from "../sourcePicker/useSources";
@@ -28,17 +28,16 @@ import {
   pickerModel,
   type Selection,
 } from "../sourcePicker/view";
-import { jobStatusView, showsProgress } from "../statusPresentation";
 import { redoTexts } from "../summaryView";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
-import { Banner, Dialog, EmptyState, Progress, ResultLine, Row } from "../ui/controls";
+import { Banner, Dialog, EmptyState, ResultLine } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
 import { useOpenSummary } from "../openSummary";
 import { useOpenTranscript } from "../openTranscript";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
-import { RecordingRow, StatusLine } from "./RecordingRow";
+import { JobRow, RecordingRow } from "./RecordingRow";
 
 const pollMs = 3000;
 
@@ -47,6 +46,7 @@ const pollMs = 3000;
 // without the popup, from the popup's source picker (TASK-081). A draft job row opens its assignment (TASK-094).
 // «Удалить» in a row's «⋯» menu and «Удалить выбранные» delete recordings after one confirmation (TASK-095).
 // «Сделать конспект заново» in the menu asks with the summary screen's confirmation: it spends quota (TASK-096).
+// Recordings and the other jobs are separate sections on one row grid (TASK-098).
 export function RecordingsPage({
   onOpen,
   onOpenAssignment,
@@ -258,13 +258,14 @@ export function RecordingsPage({
   // The elapsed time of a running recording ticks every second from startedAt, independent of the 3 s poll.
   const now = useNow(anyRecording(recordings ?? []));
 
-  // Finished recordings and other jobs share the one folded group; rows in progress (and those with Stop or Run now)
-  // always stay in view.
+  // Two sections, «Записи» and «Задачи», each with «Идут» and the folded «Завершённые» (TASK-098); rows in progress
+  // (and those with Stop or Run now) always stay in view. Only the latest draft job per assignment is listed.
   const groups = pageGroups(recordings ?? [], jobs ?? []);
 
-  // The rows of one list, in a card; CollapsibleList puts the finished ones into the same kind of card.
+  // The rows of one group, in a card on the shared row grid (.arows): status, button and «⋯» columns line up in every
+  // card of both sections. CollapsibleList puts the finished ones into the same kind of card.
   const card = (rows: ReactNode) => (
-    <div className="card rows" role="list">
+    <div className="card arows" role="list">
       {rows}
     </div>
   );
@@ -295,52 +296,49 @@ export function RecordingsPage({
     />
   );
 
-  const jobRow = (j: JobItem) => {
-    // The job error is technical (English, for support): only in the chip's tooltip (TASK-096).
-    const v = jobStatusView(j);
-    const starting = busy.has(`run:${j.id}`);
-    const assignment = jobAssignment(j);
+  const jobRow = (j: JobItem) => (
+    <JobRow
+      key={j.id}
+      item={j}
+      starting={busy.has(`run:${j.id}`)}
+      onRunNow={() => void act(`run:${j.id}`, () => api.runJobNow(j.id))}
+      onOpenAssignment={onOpenAssignment}
+    />
+  );
+
+  // «Идут» and «Завершённые (N)» of one section; the folded state is kept per section across the polls.
+  function sectionGroups<T extends { id: string }>(
+    list: "recordings" | "tasks",
+    section: { active: T[]; finished: T[] },
+    row: (item: T) => ReactNode,
+  ) {
     return (
-      <Row
-        key={j.id}
-        title={jobTitle(j)}
-        meta={
-          <span className="num">
-            Обновлена {formatTime(j.updatedAt)} · попыток: {j.attempts} из {j.maxAttempts}
-          </span>
-        }
-        status={
-          <StatusLine view={v} notes={[]} details={j.lastError}>
-            {showsProgress(j) && <Progress value={j.progressPercent} label={v.label} text={false} />}
-          </StatusLine>
-        }
-        actions={
+      <>
+        {section.active.length > 0 && (
           <>
-            {j.runNowOffered && (
-              <Button
-                icon="play"
-                busy={starting}
-                busyLabel="Запуск…"
-                disabled={starting}
-                onClick={() => void act(`run:${j.id}`, () => api.runJobNow(j.id))}
-              >
-                Запустить сейчас
-              </Button>
-            )}
-            {assignment !== "" && onOpenAssignment && (
-              <Button icon="doc" onClick={() => onOpenAssignment(assignment)}>
-                Открыть задание
-              </Button>
-            )}
+            <h3 className="arows-sub">Идут</h3>
+            {card(section.active.map(row))}
           </>
-        }
-      />
+        )}
+        {section.finished.length > 0 && (
+          <CollapsibleList
+            title="Завершённые"
+            items={section.finished}
+            itemKey={(item) => item.id}
+            renderItem={row}
+            renderContainer={card}
+            state={stateOf(lists, list)}
+            onStateChange={(s) => setLists((l) => withState(l, list, s))}
+            className="clist-card"
+            classNames={{ button: "btn ghost" }}
+          />
+        )}
+      </>
     );
-  };
+  }
 
-  const finishedRow = (e: FinishedEntry) => (e.kind === "recording" ? recordingRow(e.item) : jobRow(e.item));
-
-  const queue = queueLine(recordings ?? [], jobs ?? []);
+  const visibleJobs = [...groups.tasks.active, ...groups.tasks.finished];
+  const queue = queueLine(recordings ?? [], visibleJobs);
 
   return (
     <section className="page recordings">
@@ -417,6 +415,7 @@ export function RecordingsPage({
         </Banner>
       )}
 
+      <h2 className="group-title">Записи</h2>
       {recordingsError && (
         <Banner kind="fail" role="alert">
           {recordingsError}
@@ -459,37 +458,21 @@ export function RecordingsPage({
           Импортируйте расписание — в начале каждой пары появится окно с кнопкой «Начать запись».
         </EmptyState>
       ) : (
-        groups.recordings.length > 0 && (
-          <>
-            <h2 className="group-title">Записи</h2>
-            {card(groups.recordings.map(recordingRow))}
-          </>
-        )
+        sectionGroups("recordings", groups.recordings, recordingRow)
       )}
 
+      <h2 className="group-title">Задачи</h2>
       {jobsError && (
         <Banner kind="fail" role="alert">
           {jobsError}
         </Banner>
       )}
-      {groups.otherJobs.length > 0 && (
-        <>
-          <h2 className="group-title">Другие задачи</h2>
-          {card(groups.otherJobs.map(jobRow))}
-        </>
-      )}
-      {groups.finished.length > 0 && (
-        <CollapsibleList
-          title="Завершённые"
-          items={groups.finished}
-          itemKey={finishedKey}
-          renderItem={finishedRow}
-          renderContainer={card}
-          state={stateOf(lists, "finished")}
-          onStateChange={(s) => setLists((l) => withState(l, "finished", s))}
-          className="clist-card"
-          classNames={{ button: "btn ghost" }}
-        />
+      {jobs === null ? (
+        !jobsError && <p className="muted">Загрузка…</p>
+      ) : visibleJobs.length === 0 ? (
+        <p className="muted arows-empty">{tasksEmptyText}</p>
+      ) : (
+        sectionGroups("tasks", groups.tasks, jobRow)
       )}
 
       {deleting !== null && (

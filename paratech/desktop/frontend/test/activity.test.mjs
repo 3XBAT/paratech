@@ -191,10 +191,13 @@ test("a draft job row is named by the core and opens its assignment (TASK-094)",
   }
 
   const { readFileSync } = await import("node:fs");
+  // The task row (TASK-098: JobRow next to RecordingRow) is titled by jobTitle and opens the assignment it names.
+  const jobRow = readFileSync(new URL("../src/pages/RecordingRow.tsx", import.meta.url), "utf8");
+  assert.match(jobRow, /const title = jobTitle\(j\);/);
+  assert.match(jobRow, /title=\{title\}/);
+  assert.match(jobRow, /\} else if \(assignment !== "" && onOpenAssignment\) \{\s*onOpenAssignment\(assignment\);/);
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /title=\{jobTitle\(j\)\}/);
-  assert.match(page, /\{assignment !== "" && onOpenAssignment && \(/);
-  assert.match(page, /onClick=\{\(\) => onOpenAssignment\(assignment\)\}/);
+  assert.match(page, /onOpenAssignment=\{onOpenAssignment\}/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /<RecordingsPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
   assert.match(app, /onOpenAssignment=\{openAssignment\}/);
