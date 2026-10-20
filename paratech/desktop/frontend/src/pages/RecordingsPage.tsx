@@ -29,15 +29,16 @@ import {
   type Selection,
 } from "../sourcePicker/view";
 import { jobStatusView, showsProgress } from "../statusPresentation";
+import { redoTexts } from "../summaryView";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
-import { Banner, EmptyState, Progress, ResultLine, Row } from "../ui/controls";
+import { Banner, Dialog, EmptyState, Progress, ResultLine, Row } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
 import { useOpenSummary } from "../openSummary";
 import { useOpenTranscript } from "../openTranscript";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
-import { RecordingLinks, RecordingRow, StatusLine } from "./RecordingRow";
+import { RecordingRow, StatusLine } from "./RecordingRow";
 
 const pollMs = 3000;
 
@@ -45,6 +46,7 @@ const pollMs = 3000;
 // Stop, Run now and link buttons appear only when the core offers them (ARCH-44). «Начать запись» starts a recording
 // without the popup, from the popup's source picker (TASK-081). A draft job row opens its assignment (TASK-094).
 // «Удалить» in a row's «⋯» menu and «Удалить выбранные» delete recordings after one confirmation (TASK-095).
+// «Сделать конспект заново» in the menu asks with the summary screen's confirmation: it spends quota (TASK-096).
 export function RecordingsPage({
   onOpen,
   onOpenAssignment,
@@ -151,6 +153,24 @@ export function RecordingsPage({
     if (ids.length > 0) {
       setDeleted(null);
       setDeleting(ids);
+    }
+  }
+
+  // The recording whose «Сделать конспект заново» waits for the confirmation; it closes when the row stops offering it.
+  const [redoAsk, setRedoAsk] = useState<string | null>(null);
+  const redoOffered = redoAsk !== null && (recordings ?? []).some((r) => r.id === redoAsk && r.canRedoSummary);
+
+  useEffect(() => {
+    if (redoAsk !== null && !redoOffered) {
+      setRedoAsk(null);
+    }
+  }, [redoAsk, redoOffered]);
+
+  function redo() {
+    const id = redoAsk;
+    setRedoAsk(null);
+    if (id !== null && !busy.has(`redo:${id}`)) {
+      void act(`redo:${id}`, () => api.redoSummary(id));
     }
   }
 
@@ -265,7 +285,10 @@ export function RecordingsPage({
       adviceProblem={r.advice === null ? "" : (adviceProblems[adviceKey(r.advice)] ?? "")}
       onSwitchSource={() => r.advice && void adviceAct(r.advice, "switch")}
       onKeepSource={() => r.advice && void adviceAct(r.advice, "dismiss")}
-      extraActions={<RecordingLinks item={r} onOpenSummary={openSummary} onOpenTranscript={openTranscript} />}
+      onOpenSummary={openSummary}
+      onOpenTranscript={openTranscript}
+      redoing={busy.has(`redo:${r.id}`)}
+      onRedoSummary={() => setRedoAsk(r.id)}
       onDelete={() => askDelete([r.id])}
       selected={selected.has(r.id)}
       onSelect={(on) => setSelected((sel) => withSelected(sel, r.id, on))}
@@ -484,6 +507,17 @@ export function RecordingsPage({
           }}
         />
       )}
+
+      <Dialog
+        open={redoOffered}
+        title={redoTexts.title}
+        confirmLabel={redoTexts.confirm}
+        cancelLabel={redoTexts.cancel}
+        onConfirm={redo}
+        onCancel={() => setRedoAsk(null)}
+      >
+        <p>{redoTexts.body}</p>
+      </Dialog>
 
       <div className="gap" />
       <div className="statusbar">

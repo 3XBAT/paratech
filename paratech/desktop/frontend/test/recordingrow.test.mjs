@@ -24,7 +24,10 @@ import {
   queueReasonTexts,
   recordingRowView,
   rowAction,
+  rowActions,
   retryHints,
+  retryLabels,
+  rowRetry,
   rowSecondaryAction,
   rowTitle,
   stageLabels,
@@ -164,23 +167,122 @@ test("a failed post-processing offers «Повторить», also next to the c
 
   // A queued service problem keeps its link only; running or queued work is never retried.
   assert.equal(rowSecondaryAction(row({ stage: "queued", queueReason: "serviceNotConfigured", action: "openConnections" })), null);
-  assert.equal(recordingRowView(row({ stage: "summarizing" }), 0).secondary, null);
+  assert.equal(recordingRowView(row({ stage: "summarizing" }), 0).retry, null);
 
-  // The hint names «Повторить» too; ">Повторить<" is the button's label.
+  // The retry is the round icon button next to the chip (TASK-096): its name is in aria-label and title.
+  const label = 'aria-label="Повторить краткое содержание"';
   const html = render(retry, { onRetry: () => undefined });
-  assert.ok(html.includes(">Повторить<"));
+  assert.ok(html.includes(label));
+  assert.ok(!html.includes(">Повторить<"), "no text button");
   assert.ok(!html.includes("Открыть подключения"));
   const both = render(llm, { onRetry: () => undefined });
-  assert.ok(both.includes(">Повторить<"));
-  assert.ok(both.indexOf("Открыть подключения") < both.indexOf(">Повторить<"), "the link first, the retry next to it");
-  assert.ok(render(retry, { onRetry: () => undefined, retrying: true }).includes("disabled"));
-  assert.ok(!render(retry).includes(">Повторить<"), "no retry without onRetry");
-  assert.ok(!render(row({ canRedoSummary: true }), { onRetry: () => undefined }).includes("заново"), "the redo is on the summary screen");
+  assert.ok(both.includes('aria-label="Повторить поиск заданий"'));
+  assert.ok(both.indexOf("Повторить поиск заданий") < both.indexOf("Открыть подключения"), "the retry by the chip, the link in the actions");
+  assert.ok(!render(retry).includes(label), "no retry without onRetry");
+  assert.ok(!render(row({ canRedoSummary: true }), { onRetry: () => undefined }).includes("заново"), "the redo is only in the closed «⋯» menu");
 });
 
-test("the core's notes are shown once each", () => {
-  assert.deepEqual(recordingRowView(row({ problem: "ended early", jobError: "model missing" }), 0).notes, ["ended early", "model missing"]);
-  assert.deepEqual(recordingRowView(row({ problem: "same", jobError: "same" }), 0).notes, ["same"]);
+test("«Повторить» is a round icon button by the chip, named by the work, busy while it runs (TASK-096)", () => {
+  assert.deepEqual(retryLabels, {
+    summary: "Повторить краткое содержание",
+    homework: "Повторить поиск заданий",
+    lectureText: "Повторить текст лекции",
+  });
+  const failed = (work, action = "retry") => row({ stage: "failed", step: "summary", errorCode: "summaryFailed", action, retryWork: work });
+  for (const work of ["summary", "homework", "lectureText"]) {
+    assert.deepEqual(rowRetry(failed(work)), { work, label: retryLabels[work] });
+    assert.deepEqual(rowRetry(failed(work, "openConnections")), { work, label: retryLabels[work] });
+  }
+  assert.equal(rowRetry(failed("")), null);
+  assert.equal(rowRetry(failed("summary", "openModels")), null);
+
+  const picked = [];
+  const html = render(failed("lectureText"), { onRetry: (w) => picked.push(w) });
+  const button = html.match(/<button[^>]*aria-label="Повторить текст лекции"[^>]*>/)?.[0] ?? "";
+  assert.ok(button.includes('type="button"'), button);
+  assert.ok(button.includes('class="btn icon-btn"'), button);
+  assert.ok(button.includes('title="Повторить текст лекции"'), button);
+  assert.ok(!button.includes("disabled") && !button.includes("aria-busy"), button);
+  assert.ok(html.includes('<use href="#i-retry"></use>'));
+  // Right next to the chip, inside the status cell.
+  assert.match(html, /<span class="st-head"><span class="chip s-fail"[^]*?<\/span><\/span><button[^>]*aria-label="Повторить текст лекции"/);
+
+  const busy = render(failed("summary"), { onRetry: () => undefined, retrying: true })
+    .match(/<button[^>]*aria-label="Повторить краткое содержание"[^>]*>/)?.[0] ?? "";
+  assert.ok(busy.includes("disabled") && busy.includes('aria-busy="true"'), busy);
+});
+
+test("one main button per state; the rest goes to «⋯» (TASK-096)", () => {
+  const texts = { texts: true, redo: true };
+  const keys = (over, offers = texts) => {
+    const a = rowActions(row(over), offers);
+    return [a.main?.key ?? null, a.menu.map((i) => i.key)];
+  };
+  // A ready summary leads; the lecture text, the transcript and the redo are in the menu.
+  assert.deepEqual(keys({ canRedoSummary: true }), ["summary", ["transcript", "redo"]]);
+  assert.deepEqual(keys({ canRedoSummary: true, lectureTextReady: true }), ["summary", ["lectureText", "transcript", "redo"]]);
+  // A ready summary and a failed homework search behind the connections: the link goes to the menu.
+  assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" }),
+    ["summary", ["transcript", "open"]]);
+  // No ready summary: the core's fix link leads, else the lecture text, else the transcript.
+  assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary" }),
+    ["open", ["summary", "transcript"]]);
+  assert.deepEqual(keys({ stage: "failed", step: "transcription", errorCode: "transcriptionFailed", action: "openModels" }),
+    ["open", ["transcript"]]);
+  assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary" }),
+    ["transcript", ["summary"]]);
+  assert.deepEqual(keys({ stage: "summarizing", lectureTextReady: true }), ["lectureText", ["summary", "transcript"]]);
+  assert.deepEqual(keys({ stage: "transcribing" }), ["transcript", []]);
+  assert.deepEqual(keys({ stage: "failed", errorCode: "silentRecording", action: "checkSound" }), ["open", []]);
+  // Stop and «Запустить сейчас» stay visible: they are the state's own action.
+  assert.deepEqual(keys({ stage: "recording", status: "RECORDING", stoppable: true }), ["stop", []]);
+  assert.deepEqual(keys({ stage: "queued", step: "summary", queueReason: "power", action: "runNow", actionJobId: "j1" }),
+    ["runNow", ["summary", "transcript"]]);
+  // The page decides what it offers: no texts and no redo without their handlers.
+  assert.deepEqual(keys({ canRedoSummary: true }, { texts: false, redo: false }), [null, []]);
+  assert.deepEqual(keys({ stage: "queued", step: "summary", queueReason: "serviceNotConfigured", action: "openConnections" }, { texts: false, redo: false }),
+    ["open", []]);
+
+  // The row renders the one main button and the «⋯» button; the menu items show only when it opens.
+  const noop = () => undefined;
+  const page = { onOpenSummary: noop, onOpenTranscript: noop, onRedoSummary: noop, onDelete: noop };
+  const html = render(row({ canRedoSummary: true, lectureTextReady: true }), page);
+  assert.ok(html.includes(">Открыть конспект<"));
+  assert.ok(!html.includes("Открыть текст лекции") && !html.includes("Открыть расшифровку") && !html.includes("Исходная расшифровка"));
+  assert.equal(html.split('class="btn"').length - 1, 1, "one main button");
+  assert.ok(html.includes('aria-label="Ещё действия: Матанализ"'));
+  // Every row keeps the «⋯» cell, so the actions column stays aligned.
+  assert.ok(render(row({ stage: "transcribing" })).includes('<div class="mmenu"></div>'));
+});
+
+test("the row shows no technical error text; the details are in the chip's tooltip (TASK-096)", () => {
+  const failed = row({
+    stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary",
+    problem: "", jobError: "permanent failure: hub: answer does not match the schema",
+  });
+  const v = recordingRowView(failed, 0);
+  assert.deepEqual(v.notes, []);
+  assert.equal(v.details, "permanent failure: hub: answer does not match the schema");
+  const html = render(failed, { onRetry: () => undefined });
+  assert.ok(html.includes(errorTexts.summaryFailed));
+  assert.ok(!html.includes("row-problem"));
+  assert.match(html, /<span class="chip s-fail" title="permanent failure: hub: answer does not match the schema">/);
+
+  // The core's Russian note (the capture switch) stays in the row; its English reasons do not.
+  const note = "Захват выбранного приложения не запустился (activation failed) — записывается весь звук компьютера.";
+  assert.deepEqual(recordingRowView(row({ problem: note }), 0).notes, [note]);
+  assert.deepEqual(recordingRowView(row({ problem: `the capture ended unexpectedly; ${note}` }), 0).notes, [note]);
+  assert.deepEqual(recordingRowView(row({ problem: "the capture could not start" }), 0).notes, []);
+  assert.equal(recordingRowView(row({ problem: "the capture could not start", jobError: "x" }), 0).details, "the capture could not start\nx");
+  assert.ok(!render(row({ problem: "the capture could not start" })).includes(">the capture"));
+  assert.ok(!render(row()).includes("title="), "no tooltip without details");
+});
+
+test("the core's details are shown once each", () => {
+  assert.equal(recordingRowView(row({ problem: "ended early", jobError: "model missing" }), 0).details, "ended early\nmodel missing");
+  assert.equal(recordingRowView(row({ problem: "same", jobError: "same" }), 0).details, "same");
+  assert.equal(recordingRowView(row(), 0).details, "");
+  assert.deepEqual(recordingRowView(row({ problem: "Запись прервалась.; Запись прервалась." }), 0).notes, ["Запись прервалась."]);
   assert.deepEqual(recordingRowView(row(), 0).notes, []);
 });
 
@@ -220,7 +322,9 @@ test("the row renders the lesson title and notes as text and only the offered bu
   assert.ok(waiting.includes("Запустить сейчас"));
   assert.ok(waiting.includes("В очереди · ждёт питания от сети"));
 
-  assert.ok(render(row(), { extraActions: h("button", null, "Ещё") }).includes(">Ещё</button>"), "room for TASK-079");
+  const noop = () => undefined;
+  assert.ok(render(row(), { onOpenSummary: noop, onOpenTranscript: noop }).includes(">Открыть конспект<"), "the texts when the page opens them");
+  assert.ok(!render(row()).includes("Открыть"), "no texts without the page's handlers");
   const src = readFileSync(new URL("../src/pages/RecordingRow.tsx", import.meta.url), "utf8");
   assert.ok(!src.includes("dangerouslySetInnerHTML"));
 });
@@ -359,4 +463,12 @@ test("finished recordings and finished other jobs share one «Завершённ
   const same = pageGroups([row({ id: "x", startedAt: "" })], [job({ id: "x", status: "COMPLETED" })]);
   assert.deepEqual(same.finished.map(finishedKey), ["job:x", "recording:x"]);
   assert.deepEqual(pageGroups([], []), { recordings: [], otherJobs: [], finished: [] });
+});
+
+test("«Сделать конспект заново» from «⋯» asks with the summary screen's confirmation first (TASK-096)", () => {
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /onRedoSummary=\{\(\) => setRedoAsk\(r\.id\)\}/, "the menu only opens the confirmation");
+  assert.equal(page.split("api.redoSummary(").length - 1, 1, "one call site");
+  assert.match(page, /function redo\(\) \{[^]*?api\.redoSummary\(id\)/);
+  assert.match(page, /<Dialog\s+open=\{redoOffered\}\s+title=\{redoTexts\.title\}[^]*?onConfirm=\{redo\}/);
 });

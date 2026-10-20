@@ -363,12 +363,13 @@ test("the viewer renders text only, plays only on a click and polls without over
 });
 
 test("the recordings page decides the row's transcript action from the list, without a call per row", () => {
-  // The row's links (RecordingLinks, TASK-090) come from rowLinks over the list's chain.
+  // The row's actions (rowActions, TASK-096) come from rowLinks over the list's chain.
   const page = src("pages/RecordingsPage.tsx");
-  assert.match(page, /extraActions=\{<RecordingLinks item=\{r\}/);
+  assert.match(page, /onOpenTranscript=\{openTranscript\}/);
   assert.match(src("recordingRowView.ts"), /if \(!rowOffersTranscript\(r\)\)/);
+  assert.match(src("recordingRowView.ts"), /offers\.texts \? rowLinks\(r\)/);
   const row = src("pages/RecordingRow.tsx");
-  assert.match(row, /onClick=\{\(\) => props\.onOpenTranscript\(r\.id\)\}/);
+  assert.match(row, /props\.onOpenTranscript\?\.\(r\.id\)/);
   for (const text of [page, row]) {
     assert.ok(!text.includes("transcriptApi"), "no transcript status call per row");
   }

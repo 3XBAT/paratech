@@ -18,12 +18,13 @@ import {
   showsEarlierLecture,
 } from "../.test-build/lectureTextView.js";
 import { LectureTextCard } from "../.test-build/pages/LectureTextParts.js";
-import { RecordingLinks } from "../.test-build/pages/RecordingRow.js";
+import { RecordingRow } from "../.test-build/pages/RecordingRow.js";
 import {
   chainStatusView,
   errorTexts,
   recordingRowView,
   rowAction,
+  rowActions,
   retryHints,
   rowLinks,
   stageLabels,
@@ -242,21 +243,23 @@ test("the row's links: the lecture text first once ready, the transcript then as
   assert.equal(rowSummaryOffer({ stage: "failed", step: "lectureText", errorCode: "lectureTextFailed" }), "main");
   assert.ok(rowOffersTranscript({ stage: "lectureText", errorCode: "" }));
 
-  const opened = [];
-  const links = (item) =>
-    renderToStaticMarkup(
-      h(RecordingLinks, {
-        item,
-        onOpenSummary: (...a) => opened.push(["summary", ...a]),
-        onOpenTranscript: (id) => opened.push(["transcript", id]),
-      }),
-    );
-  const ready = links(row({ lectureTextReady: true }));
-  assert.ok(ready.indexOf("Открыть текст лекции") < ready.indexOf("Открыть конспект"));
-  assert.ok(ready.includes("Исходная расшифровка") && !ready.includes("Открыть расшифровку"));
-  const before = links(row());
-  assert.ok(!before.includes("Открыть текст лекции") && !before.includes("Исходная расшифровка"));
-  assert.ok(before.includes("Открыть конспект") && before.includes("Открыть расшифровку"));
+  // TASK-096: one main button; a ready summary leads, the lecture text leads only without it.
+  const offers = { texts: true, redo: false };
+  const ready = rowActions(row({ lectureTextReady: true }), offers);
+  assert.deepEqual([ready.main.label, ready.menu.map((i) => i.label)], ["Открыть конспект", ["Открыть текст лекции", "Открыть расшифровку"]]);
+  const running = rowActions(row({ stage: "summarizing", lectureTextReady: true }), offers);
+  assert.equal(running.main.label, "Открыть текст лекции");
+  const before = rowActions(row(), offers);
+  assert.deepEqual([before.main.label, before.menu.map((i) => i.label)], ["Открыть конспект", ["Открыть расшифровку"]]);
+
+  const noop = () => undefined;
+  const html = renderToStaticMarkup(
+    h(RecordingRow, {
+      item: row({ stage: "summarizing", lectureTextReady: true }), now: 0, stopping: false, starting: false,
+      onStop: noop, onRunNow: noop, onOpen: noop, onOpenSummary: noop, onOpenTranscript: noop,
+    }),
+  );
+  assert.ok(html.includes(">Открыть текст лекции<") && !html.includes("Открыть расшифровку"));
 });
 
 // Source guards: read the TypeScript sources, not the build.
@@ -277,6 +280,6 @@ test("the lecture text renders text only, talks only to the core and starts thro
   assert.match(page, /props\.lecture\.copy\(id\)/);
   assert.match(page, /props\.lecture\.saveAs\(id, lectureFormat\)/);
   assert.match(page, /props\.activity\.retryPostProcessing\(id, "lectureText"\)/);
-  assert.match(src("pages/RecordingRow.tsx"), /props\.onOpenSummary\(r\.id, "lecture"\)/);
+  assert.match(src("pages/RecordingRow.tsx"), /props\.onOpenSummary\?\.\(r\.id, "lecture"\)/);
   assert.match(src("App.tsx"), /section=\{summarySection\}/);
 });
