@@ -51,8 +51,8 @@ type AssignmentLister interface {
 	ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error)
 }
 
-// JobFinder finds the summarize, extract_homework and lecture_text jobs of a transcript. Implemented by the sqlite
-// adapter.
+// JobFinder finds the summarize, extract_homework and lecture_text jobs of a transcript and the STT job of a recording.
+// Implemented by the sqlite adapter.
 type JobFinder interface {
 	// LatestByKeyPrefix returns the newest job of type typ, in any status, whose idempotency key starts with prefix;
 	// none wraps shared.ErrNotFound.

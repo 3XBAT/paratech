@@ -6,8 +6,8 @@
 import { type LessonSource, lessonSource } from "../lessonLabel.js";
 import type { CallByName } from "./settings";
 
-/** Where the summary or the homework search stands. */
-export type SummaryState = "none" | "waiting" | "running" | "done" | "failed";
+/** Where the summary or the homework search stands; noSpeech: the transcript holds no speech (TASK-110). */
+export type SummaryState = "none" | "waiting" | "running" | "done" | "failed" | "noSpeech";
 
 /** Why a waiting step waits ("" unless waiting); the values of the recordings screen's queue reasons. */
 export type SummaryWaitReason =
@@ -108,6 +108,8 @@ export interface SummaryView {
   hasDuration: boolean;
   /** The recording has a transcript, so the summary and the homework can be made. */
   transcribed: boolean;
+  /** The transcript holds no speech (TASK-110): every step says so, nothing is shown or retried. */
+  noSpeech: boolean;
   summary: SummaryContent;
   homework: SummaryHomework;
   lectureText: SummaryLectureText;
@@ -153,7 +155,7 @@ export const lectureErrorMessages = {
   unavailable: "Не удалось прочитать текст лекции. Попробуйте ещё раз.",
 } as const;
 
-export const summaryStates: readonly SummaryState[] = ["none", "waiting", "running", "done", "failed"];
+export const summaryStates: readonly SummaryState[] = ["none", "waiting", "running", "done", "failed", "noSpeech"];
 export const summaryWaitReasons: readonly SummaryWaitReason[] = [
   "",
   "inLine",
@@ -282,13 +284,30 @@ export function parseLectureText(raw: unknown): SummaryLectureText {
   };
 }
 
+/**
+ * A view without speech (TASK-110) shows none of the stored results: a summary or a lecture text made from whisper's
+ * marks before the check is not a result. The transcript is not offered either: it holds no speech.
+ */
+export function withoutSpeech(v: SummaryView): SummaryView {
+  if (!v.noSpeech) {
+    return v;
+  }
+  return {
+    ...v,
+    transcribed: false,
+    summary: { ...v.summary, ready: false, text: "", sections: [], keyPoints: [], updatedAt: "" },
+    homework: { ...v.homework, assignments: [] },
+    lectureText: { ...v.lectureText, ready: false, blocks: [], updatedAt: "" },
+  };
+}
+
 /** Checks the shape of a reply; a malformed reply is an error, not a default. */
 export function parseView(raw: unknown): SummaryView {
   const w = "summary view";
   const r = record(raw, w);
   const s = record(r.summary, `${w}: summary`);
   const h = record(r.homework, `${w}: homework`);
-  return {
+  return withoutSpeech({
     recordingId: str(r, "recordingId", w),
     lessonId: str(r, "lessonId", w),
     title: str(r, "title", w),
@@ -296,6 +315,7 @@ export function parseView(raw: unknown): SummaryView {
     durationSeconds: count(r, "durationSeconds", w),
     hasDuration: bool(r, "hasDuration", w),
     transcribed: bool(r, "transcribed", w),
+    noSpeech: bool(r, "noSpeech", w),
     summary: {
       ...parseStep(s, `${w}: summary`),
       ready: bool(s, "ready", `${w}: summary`),
@@ -314,7 +334,7 @@ export function parseView(raw: unknown): SummaryView {
       assignments: list(h, "assignments", `${w}: homework`).map(parseAssignment),
     },
     lectureText: parseLectureText(r.lectureText),
-  };
+  });
 }
 
 export function parseSaveResult(raw: unknown): SummarySaveResult {

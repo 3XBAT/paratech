@@ -64,7 +64,7 @@ export function isActive(state: SummaryState): boolean {
 }
 
 function isFinal(state: SummaryState): boolean {
-  return state === "done" || state === "failed";
+  return state === "done" || state === "failed" || state === "noSpeech";
 }
 
 /**
@@ -146,6 +146,8 @@ const stepKinds: Readonly<Record<SummaryState, ResultKind | null>> = {
   running: null,
   done: "ok",
   failed: "fail",
+  // Nothing failed: the source played no speech, as the calm chip of the row (TASK-110).
+  noSpeech: "wait",
 };
 
 export function stepLine(s: SummaryStep): StepLine {
@@ -242,6 +244,9 @@ export const redoTexts = {
 } as const;
 
 export const noSummaryHint = "Конспекта пока нет: копировать и сохранять нечего.";
+
+/** The action of a recording without speech (TASK-110), as on its row: opens «Диагностика». */
+export const checkSoundLabel = "Проверить звук";
 
 const knownErrors: ReadonlySet<string> = new Set([
   ...Object.values(errorMessages),

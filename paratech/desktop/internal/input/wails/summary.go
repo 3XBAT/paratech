@@ -55,6 +55,7 @@ const (
 	msgHomeworkDone       = "Домашние задания найдены."
 	msgHomeworkDoneNone   = "Домашних заданий в этом занятии не найдено."
 	msgHomeworkFailedText = "Не удалось найти домашние задания."
+	msgNoSpeech           = "В записи нет речи — скорее всего, выбран не тот источник звука."
 	msgWaitRetry          = "Не получилось с первого раза, повторится само."
 	msgWaitPower          = "Ноутбук на батарее: продолжится после подключения питания."
 	msgWaitNetwork        = "Нет сети: продолжится, как только она появится."
@@ -148,15 +149,18 @@ type SummaryHomework struct {
 // SummaryView is the summary viewer of one recording. StartedAt is RFC 3339 in UTC; DurationSeconds is valid when
 // HasDuration. Transcribed: the recording has a transcript.
 type SummaryView struct {
-	RecordingID     string          `json:"recordingId"`
-	LessonID        string          `json:"lessonId"`
-	Title           string          `json:"title"`
-	StartedAt       string          `json:"startedAt"`
-	DurationSeconds int64           `json:"durationSeconds"`
-	HasDuration     bool            `json:"hasDuration"`
-	Transcribed     bool            `json:"transcribed"`
-	Summary         SummaryContent  `json:"summary"`
-	Homework        SummaryHomework `json:"homework"`
+	RecordingID     string `json:"recordingId"`
+	LessonID        string `json:"lessonId"`
+	Title           string `json:"title"`
+	StartedAt       string `json:"startedAt"`
+	DurationSeconds int64  `json:"durationSeconds"`
+	HasDuration     bool   `json:"hasDuration"`
+	Transcribed     bool   `json:"transcribed"`
+	// NoSpeech: the transcript holds no speech (TASK-110); every step has state "noSpeech" and the message
+	// «В записи нет речи…», nothing is retried.
+	NoSpeech bool            `json:"noSpeech"`
+	Summary  SummaryContent  `json:"summary"`
+	Homework SummaryHomework `json:"homework"`
 	// LectureText is the lecture text (TASK-090) and the state of its job.
 	LectureText SummaryLectureText `json:"lectureText"`
 }
@@ -197,7 +201,7 @@ func (s *SummaryService) View(ctx context.Context, recordingID string) (SummaryV
 
 	out := SummaryView{
 		RecordingID: string(v.Recording), LessonID: string(v.Lesson), Title: v.Title, StartedAt: timeText(v.StartedAt),
-		HasDuration: v.HasDuration, Transcribed: v.Transcribed,
+		HasDuration: v.HasDuration, Transcribed: v.Transcribed, NoSpeech: v.NoSpeech,
 		Summary: SummaryContent{
 			SummaryStep: summaryStep(v.Summary.Step, summaryMessage(v.Summary.State, v.Summary.Wait, v.Transcribed)),
 			Ready:       v.Summary.Ready, Sections: []SummarySection{}, KeyPoints: []string{},
@@ -321,6 +325,8 @@ func summaryMessage(st summaryview.State, w summaryview.WaitReason, transcribed 
 		return msgSummaryDone
 	case summaryview.StateFailed:
 		return msgSummaryFailedText
+	case summaryview.StateNoSpeech:
+		return msgNoSpeech
 	}
 	if transcribed {
 		return msgSummaryMissing
@@ -341,6 +347,8 @@ func homeworkMessage(hw summaryview.Homework) string {
 		return msgHomeworkDone
 	case summaryview.StateFailed:
 		return msgHomeworkFailedText
+	case summaryview.StateNoSpeech:
+		return msgNoSpeech
 	}
 	return msgHomeworkNone
 }

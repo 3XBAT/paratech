@@ -650,3 +650,32 @@ test("the selection checkbox has its own grid column: on the title's first line,
   const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.ok(!styles.includes(".row-check"), "no inline baseline wrapper");
 });
+
+test("a recording without speech says so and offers only the sound check, no retry and no texts (TASK-110)", async () => {
+  const { noSpeechTexts } = await import("../.test-build/recordingRowView.js");
+  const { rowOffersTranscript } = await import("../.test-build/transcriptView.js");
+  const { rowSummaryOffer } = await import("../.test-build/summaryView.js");
+  // Mirrors the row of internal/input/wails/activity.go for a transcript without speech.
+  for (const step of ["transcription", "summary", "lectureText"]) {
+    const r = row({ stage: "failed", step, errorCode: "noSpeech", action: "checkSound" });
+    const v = recordingRowView(r, 0);
+    assert.deepEqual([v.status.label, v.status.kind], ["Запись без речи", "wait"], step);
+    assert.equal(v.status.hint, "В записи нет речи — скорее всего, выбран не тот источник звука.", step);
+    assert.equal(v.status.label, noSpeechTexts.label);
+    assert.deepEqual(v.action, { kind: "open", page: "diagnostics", label: "Проверить звук" }, step);
+    assert.equal(v.retry, null, step);
+    assert.equal(v.details, "", step);
+    assert.equal(rowOffersTranscript(r), false, step);
+    assert.equal(rowSummaryOffer(r), null, step);
+    const a = rowActions(r, { texts: true, redo: true });
+    assert.deepEqual([a.main?.key ?? null, a.menu.map((i) => i.key)], ["open", []], step);
+
+    const noop = () => undefined;
+    const html = render(r, { onOpenSummary: noop, onOpenTranscript: noop, onRedoSummary: noop, onRetry: noop });
+    assert.ok(html.includes("Запись без речи"), step);
+    assert.ok(html.includes("Проверить звук"), step);
+    for (const s of ["Ошибка", "Повторить", "Сделать конспект заново", "Открыть расшифровку", "Открыть конспект"]) {
+      assert.ok(!html.includes(s), `${step}: ${s}`);
+    }
+  }
+});

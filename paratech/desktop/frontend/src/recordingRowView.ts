@@ -112,7 +112,7 @@ export const stepTexts: Readonly<Record<Exclude<ChainStep, "">, string>> = {
   lectureText: "Дальше текст лекции.",
 };
 
-export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRecording">, string>> = {
+export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRecording" | "noSpeech">, string>> = {
   recordingFailed: "Запись не удалась.",
   transcriptionFailed: "Не удалось расшифровать запись.",
   summaryFailed: "Не удалось сделать краткое содержание.",
@@ -124,6 +124,12 @@ export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRec
 export const silentTexts = {
   label: "Запись без звука",
   hint: "В записи нет звука — скорее всего, был выбран не тот источник. Проверьте звук перед следующим занятием.",
+} as const;
+
+/** A transcript without speech (TASK-110): the same calm chip, the sound check and no retry. */
+export const noSpeechTexts = {
+  label: "Запись без речи",
+  hint: "В записи нет речи — скорее всего, выбран не тот источник звука.",
 } as const;
 
 export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = {
@@ -265,6 +271,12 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
         view.label = silentTexts.label;
         view.kind = "wait";
         view.hint = silentTexts.hint;
+        break;
+      }
+      if (r.errorCode === "noSpeech") {
+        view.label = noSpeechTexts.label;
+        view.kind = "wait";
+        view.hint = noSpeechTexts.hint;
         break;
       }
       view.hint = [own(errorTexts, r.errorCode), failedRetryHint(r)].filter((s) => s).join(" ");

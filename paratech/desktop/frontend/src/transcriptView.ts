@@ -57,8 +57,13 @@ export function rowOffersTranscript(r: Pick<RecordingItem, "stage" | "errorCode"
     case "done":
       return true;
     case "failed":
-      // A silent recording is not transcribed (TASK-082).
-      return r.errorCode !== "recordingFailed" && r.errorCode !== "silentRecording" && r.errorCode !== "";
+      // A silent recording is not transcribed (TASK-082); a transcript without speech shows nothing (TASK-110).
+      return (
+        r.errorCode !== "recordingFailed" &&
+        r.errorCode !== "silentRecording" &&
+        r.errorCode !== "noSpeech" &&
+        r.errorCode !== ""
+      );
     default:
       return false;
   }

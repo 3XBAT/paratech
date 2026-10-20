@@ -145,3 +145,18 @@ func TestLiveBatchRetainIsBounded(t *testing.T) {
 		t.Fatalf("kept %d parts from %d, want the newest %d", len(parts), parts[0].Seq(), maxLivePending)
 	}
 }
+
+// TASK-110: marks without speech take no number and are not stored; marks inside speech are removed.
+func TestLiveBatchSkipsNonSpeech(t *testing.T) {
+	b := NewLiveBatch()
+	for _, s := range []Segment{{0, 1, "[BLANK_AUDIO]"}, {1, 2, " [MUSIC] Привет"}, {2, 3, "(музыка)"}, {3, 4, " всем"}} {
+		if _, err := b.Add(s, liveT0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parts := b.Take()
+	if len(parts) != 2 || parts[0].Seq() != 0 || parts[0].Segment() != (Segment{1, 2, "Привет"}) ||
+		parts[1].Seq() != 1 || parts[1].Segment() != (Segment{3, 4, " всем"}) {
+		t.Fatalf("parts = %+v", parts)
+	}
+}

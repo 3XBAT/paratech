@@ -5,6 +5,7 @@
 import type { SummarySection, SummaryView } from "../bindings/summary.js";
 import {
   assignmentMeta,
+  checkSoundLabel,
   earlierNote,
   homeworkLine,
   keyPointList,
@@ -12,6 +13,7 @@ import {
   type RetryStep,
   showsEarlier,
   type StepLine,
+  stepLine,
   summaryLine,
   summarySections,
   updatedText,
@@ -123,6 +125,24 @@ export function SummaryCard(props: RetryProps & { view: SummaryView; focusSectio
         </>
       )}
       {updated !== "" && <p className="small muted num sm-detail">{updated}</p>}
+    </Card>
+  );
+}
+
+/**
+ * A recording without speech (TASK-110): the core's message and «Проверить звук» instead of the parts, since nothing
+ * was made from it and nothing is retried.
+ */
+export function NoSpeechCard(props: { view: SummaryView; onCheckSound?: () => void }) {
+  const onCheckSound = props.onCheckSound;
+  return (
+    <Card className="box sm-summary">
+      <Line line={stepLine(props.view.summary)} />
+      {onCheckSound !== undefined && (
+        <div className="acts start sm-retry">
+          <Button onClick={onCheckSound}>{checkSoundLabel}</Button>
+        </div>
+      )}
     </Card>
   );
 }

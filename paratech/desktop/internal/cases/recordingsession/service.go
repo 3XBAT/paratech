@@ -667,7 +667,7 @@ func (s *Service) assemble(ctx context.Context, sess *session, rec *recording.Re
 		ferr = rec.CompleteTrack(now, track, assembled)
 	}
 	if ferr == nil {
-		s.logSilent(rec, assembled)
+		s.logTrack(rec, assembled)
 	}
 	if ferr != nil {
 		s.log.Warn("assembling the recording failed", slog.String("recording", rec.ID().String()), slog.Any("error", ferr))
@@ -682,12 +682,18 @@ func (s *Service) assemble(ctx context.Context, sess *session, rec *recording.Re
 	return nil
 }
 
-// logSilent tells that a recording is silent and is not transcribed (TASK-082).
-func (s *Service) logSilent(rec *recording.Recording, track values.AssembledTrack) {
-	if rec.Silent() {
-		s.log.Warn("the recording is silent; it is not transcribed", slog.String("recording", rec.ID().String()),
-			slog.Int("seconds", track.Seconds), slog.Int("audible_seconds", track.AudibleSeconds))
+// logTrack logs what the assembly measured, so that a silent recording the check missed can be diagnosed later
+// (TASK-110), and warns that a silent one is not transcribed (TASK-082).
+func (s *Service) logTrack(rec *recording.Recording, track values.AssembledTrack) {
+	attrs := []any{
+		slog.String("recording", rec.ID().String()), slog.Int("seconds", track.Seconds),
+		slog.Int("audible_seconds", track.AudibleSeconds),
 	}
+	if rec.Silent() {
+		s.log.Warn("the recording is silent; it is not transcribed", attrs...)
+		return
+	}
+	s.log.Info("the recording track is assembled", attrs...)
 }
 
 // announceCompleted tells the listener about a saved recording that can be transcribed (the aggregate decides). It

@@ -50,6 +50,9 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	}
 	if summary != nil || homework != nil || lecture != nil {
 		// The transcript exists: its post-processing decides.
+		if step, ok := noSpeechStep(summary, homework, lecture); ok {
+			return noSpeechChain(step)
+		}
 		return withStored(postChain(summary, homework, lecture), jobs, stt)
 	}
 	if stt == nil {
@@ -59,6 +62,8 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 	switch {
 	case stt.Status() == job.StatusRunning:
 		return Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: stt.Progress().Percent()}
+	case noSpeech(stt):
+		return noSpeechChain(StepTranscription)
 	case failedJob(stt):
 		return Chain{
 			Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, JobError: stt.LastError(),
@@ -152,6 +157,30 @@ func lectureChain(j *job.Job) Chain {
 		c.PartsDone, c.Parts = done, parts
 	}
 	return c
+}
+
+// noSpeech reports a job that failed because the transcript holds no speech (TASK-110): the STT job found only
+// whisper's marks, or a post-processing job of a transcript stored before that check found nothing to process.
+func noSpeech(j *job.Job) bool {
+	return j != nil && j.Status() == job.StatusFailed &&
+		(transcription.IsNoSpeech(j.LastError()) || values.IsNothingToProcess(j.LastError()))
+}
+
+// noSpeechStep returns the step of the first post-processing job that failed for lack of speech.
+func noSpeechStep(summary, homework, lecture *job.Job) (Step, bool) {
+	switch {
+	case noSpeech(summary), noSpeech(homework):
+		return StepSummary, true
+	case noSpeech(lecture):
+		return StepLectureText, true
+	}
+	return "", false
+}
+
+// noSpeechChain is the chain of a recording without speech: like a silent one it offers the sound check, never
+// «Повторить», which would fail the same way.
+func noSpeechChain(step Step) Chain {
+	return Chain{Stage: StageFailed, Step: step, ErrorCode: ErrorNoSpeech, Action: ActionCheckSound}
 }
 
 // failedAction is what the row offers for a failed post-processing job. The connections page helps only when the LLM

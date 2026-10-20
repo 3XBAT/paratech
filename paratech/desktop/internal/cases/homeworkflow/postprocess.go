@@ -209,11 +209,8 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 	}
 
 	sel, err := contextselection.Select(op, in.material)
-	switch {
-	case errors.Is(err, contextselection.ErrMissingContext):
-		return p.permanent(snap, stepContext, ErrNothingToProcess, err)
-	case err != nil:
-		return p.permanent(snap, stepContext, ErrContextRefused, err)
+	if err != nil {
+		return p.permanent(snap, stepContext, contextError(err), err)
 	}
 	llmReq, err := buildRequest(p.modelAlias, snap.ID(), sel)
 	if err != nil {
@@ -378,6 +375,9 @@ func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.T
 		return lessonInput{}, p.permanent(snap, stepDocument, ErrTranscriptUnreadable, err)
 	case err != nil:
 		return lessonInput{}, p.retry(snap, stepDocument, ErrStorage, err)
+	case len(segments) == 0:
+		// Only here a job finds no speech (TASK-110); other missing context is contextError.
+		return lessonInput{}, p.permanent(snap, stepDocument, ErrNothingToProcess, nil)
 	}
 
 	rec, err := p.recordings.Get(ctx, t.RecordingID())
@@ -451,7 +451,9 @@ func (p *PostProcessor) withNextLesson(ctx context.Context, snap job.Snapshot, s
 	return in, nil
 }
 
-// readSegments reads and validates the transcript document.
+// readSegments reads and validates the transcript document and returns its speech: whisper's marks such as
+// "[BLANK_AUDIO]" never reach the model (TASK-110), so a transcript without speech fails with ErrNothingToProcess
+// before any call.
 func (p *PostProcessor) readSegments(ctx context.Context, ref shared.ArtifactRef) ([]contextselection.Segment, error) {
 	rc, err := p.artifacts.Open(ctx, ref)
 	if err != nil {
@@ -467,7 +469,7 @@ func (p *PostProcessor) readSegments(ctx context.Context, ref shared.ArtifactRef
 	if err != nil {
 		return nil, err
 	}
-	segs := doc.Segments()
+	segs := doc.Speech()
 	out := make([]contextselection.Segment, len(segs))
 	for i, s := range segs {
 		out[i] = contextselection.Segment{StartMs: s.StartMs, EndMs: s.EndMs, Text: s.Text}
@@ -637,6 +639,15 @@ func (p *PostProcessor) answered(ctx context.Context, snap job.Snapshot, report 
 }
 
 // permanent fails the job at once; the cause goes to the log only.
+// contextError is the fixed error of a lesson context that contextselection.Select refused. A transcript without
+// speech never gets here (load), so a missing field is never shown as the no-speech state.
+func contextError(err error) error {
+	if errors.Is(err, contextselection.ErrMissingContext) {
+		return ErrIncompleteContext
+	}
+	return ErrContextRefused
+}
+
 func (p *PostProcessor) permanent(snap job.Snapshot, step string, msg, cause error) error {
 	p.warn(snap, step, msg, cause)
 	return backoff.Permanent(fail(msg, cause))

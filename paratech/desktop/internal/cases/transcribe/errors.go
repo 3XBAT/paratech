@@ -1,6 +1,10 @@
 package transcribe
 
-import "errors"
+import (
+	"errors"
+
+	"paratech/desktop/internal/domain/transcription/values"
+)
 
 // Errors of the STT job handler (ARCH-18). They are stored as the job's last error and shown in the UI, so they are
 // short fixed texts without paths, ids or transcript text; the cause stays reachable through errors.Is and goes to
@@ -38,6 +42,10 @@ var (
 
 	// ErrTranscriptConflict means a stored transcript with the job's id belongs to another recording. Permanent.
 	ErrTranscriptConflict = errors.New("stt job: stored transcript belongs to another recording")
+
+	// ErrNoSpeech means the transcript holds no speech (TASK-110): it is stored, but nothing is post-processed.
+	// Permanent.
+	ErrNoSpeech = errors.New(values.NoSpeechMessage)
 
 	// ErrStorage means reading or writing local state failed. Retried unless the cause is permanent.
 	ErrStorage = errors.New("stt job: local storage failed")
