@@ -103,8 +103,8 @@ func TestRecorderSound(t *testing.T) {
 			}
 			var got values.SoundReading
 			testenv.Eventually(t, "the level arrives", func() bool {
-				s, ok := e.rec.Sound(ctx, "rec1")
-				got = s.Reading(time.Now())
+				var ok bool
+				got, ok = e.rec.Sound(ctx, "rec1")
 				if tt.heard {
 					return ok && got.Heard
 				}

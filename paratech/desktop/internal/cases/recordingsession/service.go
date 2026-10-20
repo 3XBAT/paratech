@@ -861,11 +861,11 @@ func (s *Service) Sound(ctx context.Context) (LiveSound, bool) {
 	if info, _ := sess.snapshot(); info.Status != recording.StatusRecording {
 		return LiveSound{}, false
 	}
-	live, ok := s.recorder.Sound(ctx, sess.id)
+	reading, ok := s.recorder.Sound(ctx, sess.id)
 	if !ok {
 		return LiveSound{}, false
 	}
-	return LiveSound{ID: sess.id, Reading: live.Reading(s.clock.Now())}, true
+	return LiveSound{ID: sess.id, Reading: reading}, true
 }
 
 // Delete removes a finished recording with its files and transcripts (PRD section 13.1) in the order of ADR-0004(a):

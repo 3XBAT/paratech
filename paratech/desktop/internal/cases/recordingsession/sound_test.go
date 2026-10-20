@@ -9,9 +9,11 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// TASK-099: the live sound is read only while a recording captures, on the session's clock, and stops with the stop.
+// TASK-099: the live sound is read only while a recording captures, as the recorder reads it, and stops with the
+// stop.
 func TestSoundOfTheRunningRecording(t *testing.T) {
 	e := newEnv(t, DefaultConfig())
+	e.rec.SoundClock(e.clock.Now)
 	ctx := testCtx(t)
 	if s, ok := e.svc.Sound(ctx); ok {
 		t.Fatalf("Sound without a recording = %+v", s)
@@ -46,10 +48,31 @@ func TestSoundOfTheRunningRecording(t *testing.T) {
 	}
 }
 
+// The reading is the recorder's: a jump of the session's clock shows no false silence.
+func TestSoundIgnoresTheSessionClock(t *testing.T) {
+	e := newEnv(t, DefaultConfig())
+	at := e.clock.Now()
+	e.rec.SoundClock(func() time.Time { return at })
+	ctx := testCtx(t)
+	info := e.start()
+	if err := e.rec.HearLevel(info.ID, 0.5, at); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Advance(10 * time.Minute)
+	got, ok := e.svc.Sound(ctx)
+	if want := (LiveSound{ID: info.ID, Reading: values.SoundReading{Level: 0.5, Heard: true}}); !ok || got != want {
+		t.Fatalf("Sound = %+v, %v, want %+v", got, ok, want)
+	}
+	if _, err := e.stopAdvancing(info.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A stopping recording reports no sound any more, even while its capture is still being stopped.
 func TestNoSoundWhileStopping(t *testing.T) {
 	testenv.NoGoroutineLeaks(t)
 	e := newEnv(t, DefaultConfig())
+	e.rec.SoundClock(e.clock.Now)
 	ctx := testCtx(t)
 	info := e.start()
 	if err := e.rec.HearLevel(info.ID, 0.5, e.clock.Now()); err != nil {

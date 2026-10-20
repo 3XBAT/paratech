@@ -659,7 +659,7 @@ func (r *Recorder) apply(c *capture, ev event, out *runOutcome, log *slog.Logger
 		log.Warn("capture failed", slog.String("reason", ev.Reason))
 	case evStopped:
 		log.Info("capture stopped", slog.Int64("frames", ev.Frames))
-	case evLevel: // the decoder checked the level
+	case evLevel: // the level of the child's latest window (TASK-099); decodeEvent validated it
 		c.hear(values.ClampSoundLevel(*ev.Level), r.now())
 	}
 }

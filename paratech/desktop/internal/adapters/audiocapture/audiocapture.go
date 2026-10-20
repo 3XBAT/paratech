@@ -40,8 +40,8 @@ func (Unavailable) Diagnostics(context.Context, shared.RecordingID) (values.Capt
 }
 
 // Sound knows no capture.
-func (Unavailable) Sound(context.Context, shared.RecordingID) (values.LiveSound, bool) {
-	return values.LiveSound{}, false
+func (Unavailable) Sound(context.Context, shared.RecordingID) (values.SoundReading, bool) {
+	return values.SoundReading{}, false
 }
 
 // CheckLevels cannot capture anything.

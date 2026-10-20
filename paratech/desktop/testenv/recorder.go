@@ -50,6 +50,7 @@ type FakeRecorder struct {
 	levelErr     error
 	levelHold    *hold // when set, CheckLevels waits at it after reporting the levels
 	soundChecks  int
+	soundNow     func() time.Time // the clock of Sound; nil is time.Now
 }
 
 type fakeCapture struct {
@@ -335,15 +336,23 @@ func (f *FakeRecorder) HearLevel(id shared.RecordingID, l values.SoundLevel, at 
 	return nil
 }
 
-// Sound returns the levels the running capture of id heard (HearLevel); ok is false unless it runs.
-func (f *FakeRecorder) Sound(_ context.Context, id shared.RecordingID) (values.LiveSound, bool) {
+// SoundClock sets the clock Sound reads the levels at; time.Now until it is set.
+func (f *FakeRecorder) SoundClock(now func() time.Time) { f.set(func() { f.soundNow = now }) }
+
+// Sound returns the reading of the levels the running capture of id heard (HearLevel) at the SoundClock; ok is
+// false unless it runs.
+func (f *FakeRecorder) Sound(_ context.Context, id shared.RecordingID) (values.SoundReading, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	c := f.captures[id]
 	if c == nil || !c.running {
-		return values.LiveSound{}, false
+		return values.SoundReading{}, false
 	}
-	return c.sound, true
+	now := time.Now
+	if f.soundNow != nil {
+		now = f.soundNow
+	}
+	return c.sound.Reading(now()), true
 }
 
 func (f *FakeRecorder) read(ctx context.Context, ref shared.ArtifactRef) ([]byte, error) {
