@@ -46,6 +46,11 @@ func TestPromptEvalHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("\n" + table)
+	summaries, err := summaryTable(alias, runSummaryEval(t.Context(), client, alias, cases))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("\n" + summaries)
 }
 
 // The cases are 5-10 synthetic lessons without personal data, and each builds a request with the lesson context.
@@ -110,14 +115,15 @@ func looksPersonal(s string) bool {
 	return false
 }
 
-// evalFakeHub answers by the lesson title of the request.
+// evalFakeHub answers by the lesson title of the request: an extraction from answers, a summary from summaries.
 type evalFakeHub struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 
-	mu      sync.Mutex
-	answers map[string]string
-	keys    []string
-	auth    []string
+	mu        sync.Mutex
+	answers   map[string]string
+	summaries map[string]string
+	keys      []string
+	auth      []string
 }
 
 func (f *evalFakeHub) Complete(_ context.Context, r *connect.Request[hubv1.CompleteRequest]) (*connect.Response[hubv1.CompleteResponse], error) {
@@ -134,7 +140,11 @@ func (f *evalFakeHub) Complete(_ context.Context, r *connect.Request[hubv1.Compl
 	if err := json.Unmarshal([]byte(inner), &p); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	out, ok := f.answers[p.Title]
+	answers := f.answers
+	if spec.GetOperationType() == hubv1.OperationType_OPERATION_TYPE_SUMMARY {
+		answers = f.summaries
+	}
+	out, ok := answers[p.Title]
 	if !ok {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no canned answer"))
 	}

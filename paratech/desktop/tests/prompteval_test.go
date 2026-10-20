@@ -21,7 +21,8 @@ import (
 )
 
 // Prompt quality eval (TASK-093, docs/refs/prompts.md): synthetic lessons in testdata/prompteval are sent through
-// prompts.Build as extract_homework_deadlines requests and the answers are scored against the expected assignments.
+// prompts.Build as extract_homework_deadlines requests and the answers are scored against the expected assignments;
+// as summary requests (TASK-101) they are scored against the expected sections (summaryeval_test.go).
 // TestPromptEvalHub runs it against a real Hub only when both environment variables below are set; it is never run in
 // CI. TestPromptEvalFakeHub checks the harness against a fake Hub.
 
@@ -56,6 +57,8 @@ type evalCase struct {
 	Lesson     evalLesson     `json:"lesson"`
 	Transcript []string       `json:"transcript"`
 	Expected   []evalExpected `json:"expected"`
+	// Sections are the sections the summary must have, in the order of the lesson (TASK-101).
+	Sections []evalSection `json:"summary_sections"`
 
 	start time.Time
 }
@@ -108,6 +111,14 @@ func (c *evalCase) check() error {
 	if !values.LessonKind(c.Lesson.NextKind).Valid() || (c.Lesson.NextKind != "" && c.Lesson.NextStart == "") {
 		return fmt.Errorf("next kind %q without a known kind or a next start", c.Lesson.NextKind)
 	}
+	if len(c.Sections) == 0 {
+		return fmt.Errorf("no summary_sections")
+	}
+	for i, e := range c.Sections {
+		if len(e.Keywords) == 0 {
+			return fmt.Errorf("summary_sections[%d] has no keywords", i)
+		}
+	}
 	for i, e := range c.Expected {
 		if len(e.Keywords) == 0 {
 			return fmt.Errorf("expected[%d] has no keywords", i)
@@ -121,9 +132,14 @@ func (c *evalCase) check() error {
 	return nil
 }
 
-// request builds the extract request of the case exactly as the app does. The idempotency key is derived from the
-// request, so a changed prompt is asked anew while a repeat of the same prompt is replayed by the Hub for free.
+// request builds the extract request of the case exactly as the app does (requestFor).
 func (c evalCase) request(alias string) (values.LLMRequest, error) {
+	return c.requestFor(values.OperationExtractHomework, alias)
+}
+
+// requestFor builds the request of op for the case exactly as the app does. The idempotency key is derived from the
+// request, so a changed prompt is asked anew while a repeat of the same prompt is replayed by the Hub for free.
+func (c evalCase) requestFor(op values.Operation, alias string) (values.LLMRequest, error) {
 	next, _ := time.Parse(time.RFC3339, c.Lesson.NextStart) // zero when absent; checked by check
 	m := contextselection.Material{Lesson: contextselection.Lesson{
 		Title: c.Lesson.Title, Subject: c.Lesson.Subject, Teacher: c.Lesson.Teacher, Kind: values.LessonKind(c.Lesson.Kind),
@@ -132,7 +148,7 @@ func (c evalCase) request(alias string) (values.LLMRequest, error) {
 	for _, s := range c.Transcript {
 		m.Transcript = append(m.Transcript, contextselection.Segment{Text: s})
 	}
-	sel, err := contextselection.Select(values.OperationExtractHomework, m)
+	sel, err := contextselection.Select(op, m)
 	if err != nil {
 		return values.LLMRequest{}, err
 	}
@@ -142,6 +158,9 @@ func (c evalCase) request(alias string) (values.LLMRequest, error) {
 	}
 	sum := sha256.Sum256([]byte(draft.Instructions() + "\x00" + draft.UntrustedData()))
 	key := fmt.Sprintf("eval:%s:v%d:%x", c.Name, prompts.Version, sum[:12])
+	if op != values.OperationExtractHomework {
+		key = fmt.Sprintf("eval-%s:%s:v%d:%x", op, c.Name, prompts.Version, sum[:12])
+	}
 	return values.NewLLMRequest(draft.Operation(), alias, draft.Instructions(), draft.UntrustedData(), key)
 }
 
