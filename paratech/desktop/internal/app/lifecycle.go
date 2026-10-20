@@ -30,6 +30,9 @@ type (
 	transcriptionLife interface {
 		EnqueuePending(ctx context.Context) (int, error)
 	}
+	deletionLife interface {
+		Resume(ctx context.Context) (int, error)
+	}
 )
 
 // loop is a background loop that runs until its context ends.
@@ -53,6 +56,8 @@ type lifecycle struct {
 	deliveries deliveryLife
 	// transcriptions enqueues what a crash between a COMPLETED save and its listener call lost.
 	transcriptions transcriptionLife
+	// deletions finishes the recording deletions a crash left (nil: none).
+	deletions deletionLife
 	// calendar asks for a calendar sync when signed in (nil: none); it only logs.
 	calendar    func(ctx context.Context)
 	cleanups    []cleanup
@@ -101,13 +106,15 @@ func (c *core) newLifecycle(log *slog.Logger, stopTimeout time.Duration, closers
 	}
 	return &lifecycle{
 		log: log, runner: c.runner, recordings: c.recordings, deliveries: c.deliveries, transcriptions: c.transcriptions,
-		calendar: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "start") },
+		deletions: c.deletions, calendar: func(ctx context.Context) { c.requestCalendarSync(ctx, log, "start") },
 		cleanups: c.cleanups, loops: c.loops(), closers: closers, stopTimeout: stopTimeout, cancelSpeech: cancelSpeech,
 	}
 }
 
-// start runs the startup in this order: the cleanups of a crashed run, the job recovery, the recording recovery in the
-// background (assembling long recordings must not hold up the jobs), the delivery recovery and resumption, the sweep
+// start runs the startup in this order: the cleanups of a crashed run, the job recovery, the recording deletions a
+// crash left (before the recording recovery, which must not assemble a recording being deleted), the recording
+// recovery in the background (assembling long recordings must not hold up the jobs), the delivery recovery and
+// resumption, the sweep
 // of completed recordings without a transcription job, the calendar sync request, the workers, then the loops
 // (scheduler and recording prompt;
 // the prompt starts no recording before the recovery marked the interrupted ones). A failed job recovery or worker
@@ -131,6 +138,15 @@ func (l *lifecycle) start(ctx context.Context) error {
 	}
 	for _, e := range rep.Errors {
 		l.log.Warn("stale job left for the next start", "job", e.Job.String(), "type", string(e.Type), "err", e.Err)
+	}
+
+	// The workers are not started yet, so the jobs of a recording being deleted are cancelled directly.
+	if l.deletions != nil {
+		if n, err := l.deletions.Resume(ctx); err != nil {
+			l.log.Error("resuming recording deletions failed; the next start tries again", "deleted", n, "err", err)
+		} else if n > 0 {
+			l.log.Info("recording deletions finished", "recordings", n)
+		}
 	}
 
 	// Its own context: Close bounds and ends it through recordings.Close.

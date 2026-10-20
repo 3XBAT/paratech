@@ -115,6 +115,27 @@ type CalendarAdapter interface {
 	DeleteEvent(ctx context.Context, calendarID string, id shared.LessonID) error
 }
 
+// DeadlineRemovals are the assignments deleted with their recording whose Google deadline event is still to be
+// removed (PRD sections 11.3 and 13.1; TASK-095, ADR-0018). The deletion writes one in the transaction that deletes
+// the assignment; the sync deletes the event and then the row. Implemented by the sqlite adapter.
+type DeadlineRemovals interface {
+	// ListDeadlineRemovals returns up to limit assignments, oldest first (PRD section 11.3).
+	ListDeadlineRemovals(ctx context.Context, limit int) ([]shared.AssignmentID, error)
+
+	// PurgeDeadlineRemoval forgets one once its event is gone; a missing row is not an error (PRD section 11.3:
+	// idempotent).
+	PurgeDeadlineRemoval(ctx context.Context, id shared.AssignmentID) error
+}
+
+// DeadlineEvents deletes the deadline event of an assignment from the app calendar (PRD section 11.3). Implemented by
+// the googlecal adapter through the app; errors are classed like those of CalendarAdapter.DeleteEvent (an error that
+// concerns only that event wraps ErrLessonRejected).
+type DeadlineEvents interface {
+	// DeleteDeadline removes the event of the assignment id from the calendar calendarID by its derived event id; an
+	// event that is already gone or never existed is not an error (PRD section 11.3: idempotent).
+	DeleteDeadline(ctx context.Context, calendarID string, id shared.AssignmentID) error
+}
+
 // JobEnqueuer creates the calendar synchronization job after a schedule commit (PRD sections 7.1 and 11.3). It is a
 // separate, repeatable step after the commit (ARCH-23, ADR-0004): a crash between the two leaves pending lessons
 // that the next enqueue picks up. Implemented by the sqlite adapter.

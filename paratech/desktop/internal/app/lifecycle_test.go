@@ -327,3 +327,36 @@ func TestStartedHook(t *testing.T) {
 	}
 	a.launchStart() // closed: nothing happens
 }
+
+// fakeDeletions is the resume of the recording deletions at the start (TASK-095).
+type fakeDeletions struct {
+	ev  *events
+	err error
+}
+
+func (f *fakeDeletions) Resume(context.Context) (int, error) {
+	f.ev.add("deletions.Resume")
+	return 1, f.err
+}
+
+// The deletions a crash left are finished after the job recovery (their jobs are no longer stale) and before the
+// recording recovery (which must not assemble a recording being deleted) and the workers; a failure is only logged.
+func TestStartResumesDeletionsBeforeTheRecordingRecovery(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	f := newLifeFakes()
+	f.life.deletions = &fakeDeletions{ev: f.ev, err: errors.New("file busy")}
+	f.deliveries.launched = f.recordings.entered
+
+	if err := f.life.start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-f.recordings.entered
+	resume := f.ev.index(t, "deletions.Resume")
+	if resume < f.ev.index(t, "runner.Recover") || resume > f.ev.index(t, "recordings.Recover") ||
+		resume > f.ev.index(t, "runner.Start") {
+		t.Fatalf("start order %v: want the deletions after the job recovery, before the recording recovery", f.ev.all())
+	}
+	if err := f.life.shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}

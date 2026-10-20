@@ -486,6 +486,9 @@ func TestDeleteWaitsForTheRecovery(t *testing.T) {
 	if err := e.svc.Delete(testCtx(t), "old"); !errors.Is(err, ErrRecovering) {
 		t.Fatalf("Delete during the assembly = %v", err)
 	}
+	if !e.svc.Recovering("old") || e.svc.Recovering("done") {
+		t.Fatalf("Recovering = %v for old, %v for done; want true, false", e.svc.Recovering("old"), e.svc.Recovering("done"))
+	}
 	if !e.repo.has("old") || !slices.Contains(e.files.Paths(), "recordings/old/chunk-0001") {
 		t.Fatal("a refused Delete removed something")
 	}
@@ -495,6 +498,9 @@ func TestDeleteWaitsForTheRecovery(t *testing.T) {
 	release()
 	if err := <-recovered; err != nil {
 		t.Fatal(err)
+	}
+	if e.svc.Recovering("old") {
+		t.Fatal("Recovering after the recovery ended")
 	}
 
 	if err := e.svc.Delete(testCtx(t), "old"); err != nil {

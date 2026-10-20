@@ -58,6 +58,11 @@
     "src/statusPresentation.ts",
     "src/recordingRowView.ts",
     "src/clock.ts",
-    "src/pages/RecordingRow.tsx"
+    "src/pages/RecordingRow.tsx",
+    "src/bindings/recordingDelete.ts",
+    "src/recordingDeleteView.ts",
+    "src/ui/menu.ts",
+    "src/ui/RowMenu.tsx",
+    "src/pages/RecordingDeleteDialog.tsx"
   ]
 }

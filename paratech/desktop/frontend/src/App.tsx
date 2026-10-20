@@ -123,6 +123,7 @@ export function App() {
               onBack={() => setRoute(closeTranscript)}
               onOpenTranscript={openTranscript}
               onOpenAssignment={openAssignment}
+              onDeleted={() => openPage("recordings")}
             />
           </div>
         )}

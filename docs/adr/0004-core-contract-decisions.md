@@ -31,6 +31,7 @@ so a third one needs a new ADR.
    again (the guard is re-checked), then both deletes run, and `RecordingRepository.Delete(r)` is version-guarded like `Save`.
    The small window between (i) and (iii) can only be opened by a status change after (i); the failure then rolls back the rows
    and a repeated deletion cleans up whatever file removal already happened.
+   Extended by ADR-0018: the user's deletion of a recording also removes what was made from it.
 
 Changing the settings default model when a model is removed is NOT such an exception, see (g).
 

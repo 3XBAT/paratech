@@ -27,8 +27,9 @@ const (
 	// syncBatch is the page of pending lessons read at a time.
 	syncBatch = 50
 	// maxLessonsPerRun bounds the lessons one job writes; with more pending it asks for a follow-up job, so one attempt
-	// stays well inside its timeout.
-	maxLessonsPerRun = 1000
+	// stays well inside its timeout. maxRemovalsPerRun is the same for the deadline events of deleted assignments.
+	maxLessonsPerRun  = 1000
+	maxRemovalsPerRun = 1000
 	// maxSkippedInARow stops a run whose writes fail one lesson after another: that is no longer a few bad lessons.
 	// A few stuck lessons at the head of the order must not reach it, or they would stop every run before the rest.
 	maxSkippedInARow = 20
@@ -46,7 +47,8 @@ const (
 // CalendarSync is the controlled one-way synchronization of the local schedule into the app calendar (PRD sections
 // 11.3 and 14 case 8, AC-17, AC-20). It is the handler of CalendarSyncJobType jobs; the local schedule stays the
 // system of record and nothing is read back. Deadlines are not synchronized here: they reach the calendar only through
-// a confirmed proposal (hard rule 3).
+// a confirmed proposal (hard rule 3). Only their removal is: the deadline event of an assignment deleted with its
+// recording (TASK-095) is deleted in every run, before the lessons, and then its removal row (DeadlineRemovals).
 //
 // A run: EnsureCalendar; for a fresh calendar every live lesson is marked never written (one lesson per transaction)
 // and then ConfirmCalendar, so a crash in between sees the calendar fresh again; then the pending lessons page by page:
@@ -74,6 +76,8 @@ type CalendarSync struct {
 	tx          Tx
 	log         *slog.Logger
 	maxAttempts int
+	removals    DeadlineRemovals // nil: no deadline event is removed
+	deadlines   DeadlineEvents
 
 	mu      sync.Mutex
 	busy    bool // a run is in progress
@@ -97,9 +101,12 @@ func NewCalendarSync(d CalendarDeps) (*CalendarSync, error) {
 	if d.MaxAttempts < 0 {
 		return nil, fmt.Errorf("%w: max attempts %d", ErrInvalidConfig, d.MaxAttempts)
 	}
+	if (d.Removals == nil) != (d.Deadlines == nil) {
+		return nil, fmt.Errorf("%w: deadline removals and deadline events go together", ErrInvalidConfig)
+	}
 	c := &CalendarSync{
 		lessons: d.Lessons, calendar: d.Calendar, account: d.Account, jobs: d.Jobs, clock: d.Clock, ids: d.IDs, tx: d.Tx,
-		log: d.Log, maxAttempts: d.MaxAttempts,
+		log: d.Log, maxAttempts: d.MaxAttempts, removals: d.Removals, deadlines: d.Deadlines,
 	}
 	if c.maxAttempts == 0 {
 		c.maxAttempts = backoff.DefaultSpec().MaxAttempts
@@ -194,13 +201,13 @@ func (c *CalendarSync) Handle(ctx context.Context, snap job.Snapshot, _ func(con
 	c.record(snap.ID(), outcome)
 	switch outcome {
 	case OutcomeOK:
-		c.log.Info(opSync, "written", st.written, "deleted", st.deleted, "fresh", st.fresh)
+		c.log.Info(opSync, "written", st.written, "deleted", st.deleted, "fresh", st.fresh, "deadlines_removed", st.removed)
 		return nil
 	case OutcomeNotSignedIn, OutcomeSignInExpired:
 		c.log.Info(opSync, "outcome", string(outcome))
 		return nil
 	}
-	c.log.Warn(opSync, "written", st.written, "deleted", st.deleted, "err", err)
+	c.log.Warn(opSync, "written", st.written, "deleted", st.deleted, "deadlines_removed", st.removed, "err", err)
 	return fmt.Errorf("%s: %w", opSync, err)
 }
 
@@ -278,8 +285,9 @@ func (c *CalendarSync) ForgetOutcome() {
 // runStats counts what one run did.
 type runStats struct {
 	written, deleted int
+	removed          int // deadline events of deleted assignments
 	fresh            bool
-	more             bool // stopped at maxLessonsPerRun with lessons left
+	more             bool // stopped at maxLessonsPerRun or maxRemovalsPerRun with work left
 }
 
 // run is one sync run. Errors of the calendar keep their classes.
@@ -297,6 +305,10 @@ func (c *CalendarSync) run(ctx context.Context) (runStats, error) {
 		if err := c.calendar.ConfirmCalendar(ctx, calendarID); err != nil {
 			return st, err
 		}
+	}
+
+	if err := c.removeDeadlines(ctx, calendarID, &st); err != nil {
+		return st, err
 	}
 
 	// Every page holds at least one lesson not tried yet, or the loop ends; maxLessonsPerRun bounds the rest.
@@ -337,6 +349,51 @@ func (c *CalendarSync) run(ctx context.Context) (runStats, error) {
 		}
 	}
 	return st, sk.err()
+}
+
+// removeDeadlines deletes the deadline events of deleted assignments and then their removal rows; gone is success. An
+// event whose delete fails for a reason of its own is kept for the next run; any other failure ends the run. A crash
+// between the delete and the purge deletes again.
+func (c *CalendarSync) removeDeadlines(ctx context.Context, calendarID string, st *runStats) error {
+	if c.removals == nil {
+		return nil
+	}
+	skipped := map[shared.AssignmentID]bool{}
+	for processed := 0; ; {
+		batch, err := c.removals.ListDeadlineRemovals(ctx, len(skipped)+syncBatch)
+		if err != nil {
+			return backoff.Transient(err)
+		}
+		todo := 0
+		for _, id := range batch {
+			if skipped[id] {
+				continue
+			}
+			if processed >= maxRemovalsPerRun {
+				st.more = true
+				return nil
+			}
+			todo++
+			processed++
+			err := c.deadlines.DeleteDeadline(ctx, calendarID, id)
+			switch {
+			case err == nil:
+			case ctx.Err() != nil, !lessonOnly(err):
+				return err
+			default:
+				skipped[id] = true
+				c.log.Warn(opSync, "deadline event", "kept for the next run", "err", err)
+				continue
+			}
+			if err := c.tx.Do(ctx, func(ctx context.Context) error { return c.removals.PurgeDeadlineRemoval(ctx, id) }); err != nil {
+				return backoff.Transient(err)
+			}
+			st.removed++
+		}
+		if todo == 0 {
+			return nil
+		}
+	}
 }
 
 // lessonOnly reports whether err concerns only the lesson being synced, so the run goes on with the others.

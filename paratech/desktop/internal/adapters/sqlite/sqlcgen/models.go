@@ -27,6 +27,11 @@ type Assignment struct {
 	UserTeacher   string
 }
 
+type DeadlineEventRemoval struct {
+	AssignmentID string
+	CreatedAt    int64
+}
+
 type Delivery struct {
 	ID               string
 	AssignmentID     string
@@ -123,28 +128,30 @@ type Proposal struct {
 }
 
 type Recording struct {
-	ID            string
-	LessonID      sql.NullString
-	Status        string
-	StartedAt     int64
-	StoppedAt     sql.NullInt64
-	HeartbeatAt   sql.NullInt64
-	MaxDurationMs int64
-	DurationMs    sql.NullInt64
-	ChunkCount    int64
-	ChunksRef     string
-	AudioRef      sql.NullString
-	FailureReason sql.NullString
-	Version       int64
-	CreatedAt     int64
-	UpdatedAt     int64
-	Silent        int64
-	LessonTitle   sql.NullString
-	LessonSubject sql.NullString
-	LessonKind    sql.NullString
-	LessonTeacher sql.NullString
-	LessonStart   sql.NullInt64
-	LessonEnd     sql.NullInt64
+	ID                  string
+	LessonID            sql.NullString
+	Status              string
+	StartedAt           int64
+	StoppedAt           sql.NullInt64
+	HeartbeatAt         sql.NullInt64
+	MaxDurationMs       int64
+	DurationMs          sql.NullInt64
+	ChunkCount          int64
+	ChunksRef           string
+	AudioRef            sql.NullString
+	FailureReason       sql.NullString
+	Version             int64
+	CreatedAt           int64
+	UpdatedAt           int64
+	Silent              int64
+	LessonTitle         sql.NullString
+	LessonSubject       sql.NullString
+	LessonKind          sql.NullString
+	LessonTeacher       sql.NullString
+	LessonStart         sql.NullInt64
+	LessonEnd           sql.NullInt64
+	DeletingAt          sql.NullInt64
+	DeletingAssignments string
 }
 
 type ScheduleEntry struct {

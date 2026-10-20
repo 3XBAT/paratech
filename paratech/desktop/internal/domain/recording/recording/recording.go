@@ -63,6 +63,10 @@ type Recording struct {
 	silent      bool // the final track is silent all or almost all the time (TASK-082)
 	problem     string
 
+	// The deletion mark (TASK-095): set before any file or row is removed, so a crash in the middle resumes.
+	deletingAt          time.Time
+	deletingAssignments []shared.AssignmentID // found homework the user chose to delete with the recording
+
 	startedAt   time.Time
 	stoppedAt   time.Time
 	heartbeatAt time.Time
@@ -120,11 +124,14 @@ type State struct {
 	Audio       shared.ArtifactRef // the final track; set exactly when COMPLETED
 	Silent      bool               // the final track is silent; only on a COMPLETED recording
 	Problem     string
-	StartedAt   time.Time
-	StoppedAt   time.Time // zero = the capture has not ended
-	HeartbeatAt time.Time // zero = no heartbeat yet
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// DeletingAt is the deletion mark (zero: not being deleted) and DeletingAssignments the homework deleted with it.
+	DeletingAt          time.Time
+	DeletingAssignments []shared.AssignmentID
+	StartedAt           time.Time
+	StoppedAt           time.Time // zero = the capture has not ended
+	HeartbeatAt         time.Time // zero = no heartbeat yet
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // Restore rebuilds a stored recording without side effects; it only checks that the state is consistent.
@@ -134,6 +141,7 @@ func Restore(s State) (*Recording, error) {
 		maxDuration: s.MaxDuration, duration: s.Duration, chunks: s.Chunks, chunksDir: s.ChunksDir, audio: s.Audio,
 		silent: s.Silent, problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
 		createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
+		deletingAt: s.DeletingAt, deletingAssignments: cloneIDs(s.DeletingAssignments),
 	}
 
 	switch {
@@ -153,6 +161,13 @@ func Restore(s State) (*Recording, error) {
 		return nil, fmt.Errorf("%w: STOPPING recording without a stop time", ErrInvalidRecording)
 	case len(s.Problem) > MaxProblemBytes:
 		return nil, fmt.Errorf("%w: problem text longer than %d bytes", ErrInvalidRecording, MaxProblemBytes)
+	case !s.DeletingAt.IsZero() && s.Status.InProgress():
+		return nil, fmt.Errorf("%w: a %s recording marked for deletion", ErrInvalidRecording, s.Status)
+	case s.DeletingAt.IsZero() && len(s.DeletingAssignments) > 0:
+		return nil, fmt.Errorf("%w: assignments to delete without a deletion mark", ErrInvalidRecording)
+	}
+	if err := checkDeletedAssignments(s.DeletingAssignments); err != nil {
+		return nil, err
 	}
 
 	if err := r.validate(); err != nil {
@@ -497,8 +512,11 @@ func (r *Recording) MarkInterrupted(now time.Time, problem string) error {
 }
 
 // AwaitsAssembly reports whether the recovery after a restart is to assemble the chunks: the session ended while the
-// recording was being stopped or finalized, or it is RECOVERY_REQUIRED.
+// recording was being stopped or finalized, or it is RECOVERY_REQUIRED. A recording marked for deletion never does.
 func (r *Recording) AwaitsAssembly() bool {
+	if r.Deleting() {
+		return false // its files are being deleted: nothing is assembled any more
+	}
 	switch r.status {
 	case StatusStopping, StatusFinalizing, StatusRecoveryRequired:
 		return true
@@ -607,19 +625,12 @@ func (r *Recording) reasonBeforeDeferral() string {
 
 // TranscribableAudio returns the final track to transcribe; ok is false unless the recording is COMPLETED with a
 // final track that is not silent: only such a recording can be transcribed (a silent one would give an empty text).
+// A recording marked for deletion is not transcribed either.
 func (r *Recording) TranscribableAudio() (audio shared.ArtifactRef, ok bool) {
-	if r.status != StatusCompleted || r.audio.IsZero() || r.silent {
+	if r.status != StatusCompleted || r.audio.IsZero() || r.silent || r.Deleting() {
 		return shared.ArtifactRef{}, false
 	}
 	return r.audio, true
-}
-
-// CheckDeletable refuses deletion while the recording is captured or finalized (ADR-0004(a)).
-func (r *Recording) CheckDeletable() error {
-	if r.status.InProgress() {
-		return fmt.Errorf("%w: %s", ErrNotDeletable, r.status)
-	}
-	return nil
 }
 
 // problemText makes a problem description safe to store and show: valid UTF-8, one line, bounded.

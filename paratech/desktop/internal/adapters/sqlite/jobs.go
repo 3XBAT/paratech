@@ -301,6 +301,47 @@ func (r *JobRepository) ListForRecordings(ctx context.Context, recs []shared.Rec
 	return out, unreadable, nil
 }
 
+// ListForAssignments returns the jobs of the types whose payload names one of the assignments ("assignment_id"),
+// oldest first (TASK-095: the draft jobs of the homework deleted with a recording). Unreadable rows are left out and
+// their ids returned.
+func (r *JobRepository) ListForAssignments(ctx context.Context, ids []shared.AssignmentID, types []job.Type) (
+	[]*job.Job, []shared.JobID, error,
+) {
+	list := make([]string, len(ids))
+	for i, id := range ids {
+		list[i] = string(id)
+	}
+	assignments, err := json.Marshal(list)
+	if err != nil {
+		return nil, nil, err
+	}
+	typeList, err := jobTypeList(types)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	q := r.db.Queries(ctx)
+	rows, err := q.ListJobIDsByPayloadAssignment(ctx, sqlcgen.ListJobIDsByPayloadAssignmentParams{
+		Types: typeList, Assignments: string(assignments),
+	})
+	if err != nil {
+		return nil, nil, MapError(ctx, err)
+	}
+	out, unreadable := make([]*job.Job, 0, len(rows)), []shared.JobID{}
+	for _, id := range rows {
+		j, readable, err := getJobTolerant(ctx, q, id)
+		switch {
+		case err != nil:
+			return nil, nil, err
+		case !readable:
+			unreadable = append(unreadable, shared.JobID(id))
+		case j != nil:
+			out = append(out, j)
+		}
+	}
+	return out, unreadable, nil
+}
+
 // getJobTolerant loads one job of a list: a row gone meanwhile is (nil, true, nil), a row that cannot be read is
 // (nil, false, nil); only other failures are errors.
 func getJobTolerant(ctx context.Context, q *sqlcgen.Queries, id string) (*job.Job, bool, error) {

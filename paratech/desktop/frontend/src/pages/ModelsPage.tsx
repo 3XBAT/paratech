@@ -1,4 +1,4 @@
-import { Fragment, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { initialListState, type ListState } from "../listView";
@@ -40,8 +40,6 @@ import {
   loadOptions,
   loadText,
   type MenuItem,
-  menuKey,
-  menuShown,
   type MenuOp,
   type ModelRow,
   progressPercent,
@@ -54,6 +52,7 @@ import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, Card, Dialog, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import type { IconName } from "../ui/Icon";
+import { RowMenu as SharedRowMenu } from "../ui/RowMenu";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
 
 const pollMs = 2000;
@@ -646,112 +645,19 @@ function ModelText(props: { row: ModelRow; tip: string }) {
   );
 }
 
-// The «⋯» menu of a row: Enter/Space or ArrowDown opens it, arrows move, Escape closes it and focuses the button again,
-// Tab or a click outside closes it. Without items the cell stays, so the columns keep aligned.
+// The «⋯» menu of a model row (ui/RowMenu).
 function RowMenu(props: {
   name: string;
   items: readonly (MenuItem & { disabled: boolean })[];
   onPick: (op: MenuOp) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const menuId = useId();
-  const label = `${texts.more}: ${props.name}`;
-  const count = props.items.length;
-  const shown = menuShown(open, count);
-
-  const enabled = () =>
-    Array.from(wrap.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
-
-  useEffect(() => {
-    if (count === 0) {
-      setOpen(false);
-    }
-  }, [count]);
-
-  useEffect(() => {
-    if (!shown) {
-      return;
-    }
-    enabled()[0]?.focus();
-    const outside = (e: PointerEvent) => {
-      if (wrap.current !== null && !wrap.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, [shown]);
-
-  if (count === 0) {
-    return <div className="mmenu" />;
-  }
-
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!open) {
-      if (e.key === "ArrowDown" && e.target === button.current) {
-        e.preventDefault();
-        setOpen(true);
-      }
-      return;
-    }
-    const list = enabled();
-    const next = menuKey(e.key, list.indexOf(document.activeElement as HTMLButtonElement), list.length);
-    if (next === null) {
-      return;
-    }
-    if (next === "leave") {
-      setOpen(false); // the focus moves on by itself
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    if (next === "close") {
-      setOpen(false);
-      button.current?.focus();
-      return;
-    }
-    list[next]?.focus();
-  };
-
   return (
-    <div className="mmenu" ref={wrap} onKeyDown={onKeyDown}>
-      <button
-        ref={button}
-        type="button"
-        className="btn ghost mmenu-btn"
-        aria-label={label}
-        title={texts.more}
-        aria-haspopup="menu"
-        aria-expanded={shown}
-        aria-controls={shown ? menuId : undefined}
-        onClick={() => setOpen((o) => !o)}
-      >
-        ⋯
-      </button>
-      {shown && (
-        <div className="mmenu-list" id={menuId} role="menu" aria-label={label}>
-          {props.items.map((i) => (
-            <button
-              key={i.op}
-              type="button"
-              role="menuitem"
-              className="mmenu-item"
-              tabIndex={-1}
-              disabled={i.disabled}
-              onClick={() => {
-                setOpen(false);
-                button.current?.focus();
-                props.onPick(i.op);
-              }}
-            >
-              {i.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <SharedRowMenu
+      label={`${texts.more}: ${props.name}`}
+      title={texts.more}
+      items={props.items.map((i) => ({ key: i.op, label: i.label, disabled: i.disabled }))}
+      onPick={props.onPick}
+    />
   );
 }
 

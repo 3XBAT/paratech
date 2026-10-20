@@ -17,9 +17,19 @@ type Querier interface {
 	// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
 	// (ON DELETE RESTRICT), and the row is kept.
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
+	// An assignment chosen for deletion, decided in the same transaction. A delivery referencing it fails the delete
+	// (ON DELETE RESTRICT); the use case never chooses such an assignment.
+	DeleteChosenAssignment(ctx context.Context, id string) error
+	DeleteDeadlineEventRemoval(ctx context.Context, assignmentID string) error
+	// The draft of an assignment chosen for deletion; its versions go with it (CASCADE).
+	DeleteDraftOfAssignment(ctx context.Context, assignmentID string) error
+	// A job of the recording, only once it is finished (statuses is the list of terminal statuses).
+	DeleteFinishedJob(ctx context.Context, arg DeleteFinishedJobParams) error
+	DeleteLectureTextsOfRecording(ctx context.Context, recordingID string) error
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
+	DeleteSummariesOfRecording(ctx context.Context, recordingID string) error
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
 	// Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
@@ -73,6 +83,7 @@ type Querier interface {
 	HasJobKeyPrefix(ctx context.Context, arg HasJobKeyPrefixParams) (bool, error)
 	// A never-stored assignment (version 0) is inserted with version 1.
 	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
+	InsertDeadlineEventRemoval(ctx context.Context, arg InsertDeadlineEventRemovalParams) error
 	// A never-stored delivery (version 0) is inserted with version 1.
 	InsertDelivery(ctx context.Context, arg InsertDeliveryParams) error
 	// A never-stored draft (version 0) is inserted with version 1.
@@ -113,6 +124,10 @@ type Querier interface {
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
+	// The deadline events left to remove, oldest first (the calendar sync).
+	ListDeadlineEventRemovals(ctx context.Context, maxRows int64) ([]string, error)
+	// The recordings marked for deletion, oldest mark first (TASK-095: the deletion resumed at the start).
+	ListDeletingRecordingIDs(ctx context.Context) ([]string, error)
 	// The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
 	ListDeliveriesByAssignment(ctx context.Context, arg ListDeliveriesByAssignmentParams) ([]Delivery, error)
 	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
@@ -121,6 +136,9 @@ type Querier interface {
 	// active is a JSON array of status names, hidden_types a JSON array of job types left out of both parts (TASK-074),
 	// so hidden finished jobs never use up max_terminal.
 	ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDsParams) ([]string, error)
+	// The jobs of the types whose payload names one of the assignments ("assignment_id", the homework draft payload),
+	// for the deletion of a recording with its homework (TASK-095). Both lists are JSON arrays.
+	ListJobIDsByPayloadAssignment(ctx context.Context, arg ListJobIDsByPayloadAssignmentParams) ([]string, error)
 	// The jobs that process recordings (TASK-076: one row per recording with the status of its chain), ids only like
 	// ListJobActivityIDs. Each id comes with its recording: jobs of recording_types whose payload names the recording
 	// ("recording_id", the STT payload) and jobs of transcript_types whose payload names one of its transcripts
@@ -139,8 +157,10 @@ type Querier interface {
 	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
-	// active is a JSON array of status names.
+	// active is a JSON array of status names. A recording marked for deletion is left out (TASK-095).
 	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
+	// The assignments found in the transcripts of the recording, with whether a draft or any email exists.
+	ListRecordingAssignments(ctx context.Context, recordingID string) ([]ListRecordingAssignmentsRow, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
@@ -149,14 +169,18 @@ type Querier interface {
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
 	ListTranscriptRefsByRecording(ctx context.Context, recordingID string) ([]string, error)
 	// Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
-	// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082). Ids only: the
-	// caller loads each one and its aggregate decides.
+	// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082), nor those
+	// marked for deletion (TASK-095). Ids only: the caller loads each one and its aggregate decides.
 	ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 	NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error)
 	PurgeDeletedLesson(ctx context.Context, id string) (int64, error)
+	// The deletion of a recording with what was made from it (TASK-095, ADR-0018). The rows go in one transaction after
+	// the files; summaries and lecture texts are keyed by the transcript id.
+	// What the recording holds, for the confirmation.
+	RecordingDeletionCounts(ctx context.Context, recordingID string) (RecordingDeletionCountsRow, error)
 	// Compare-and-swap on the loaded version. The origin (lesson, transcript, source index) and the creation time never
 	// change, so a stale save cannot undo ON DELETE SET NULL of the lesson or the transcript.
 	UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (int64, error)

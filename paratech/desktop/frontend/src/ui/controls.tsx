@@ -213,6 +213,8 @@ export function Dialog(props: {
   cancelLabel: string;
   danger?: boolean;
   confirmDisabled?: boolean;
+  /** While the confirmed action runs: the cancel button is off and Escape does nothing. */
+  cancelDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -240,13 +242,15 @@ export function Dialog(props: {
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
-        props.onCancel();
+        if (!props.cancelDisabled) {
+          props.onCancel();
+        }
       }}
     >
       <h2 id={titleId}>{props.title}</h2>
       <div className="dialog-body">{props.children}</div>
       <div className="acts">
-        <button ref={safe} type="button" className="btn" onClick={props.onCancel}>
+        <button ref={safe} type="button" className="btn" disabled={props.cancelDisabled} onClick={props.onCancel}>
           {props.cancelLabel}
         </button>
         <button

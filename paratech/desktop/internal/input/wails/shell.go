@@ -64,6 +64,8 @@ type Core struct {
 
 	Transcript TranscriptUseCase // the transcript viewer; the shell shows its save dialog and plays the recordings
 	Summary    SummaryUseCase    // the summary viewer; the shell shows its save dialog
+
+	Deletion RecordingDeleteUseCase // «Удалить» of the recording rows and the summary screen (TASK-095)
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -180,6 +182,7 @@ type Services struct {
 	Transcript  *TranscriptService
 	Summary     *SummaryService
 	LectureText *LectureTextService
+	Deletion    *RecordingDeleteService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -240,6 +243,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Summary == nil {
 		return Services{}, errors.New("wails: open core: no summary viewer")
 	}
+	if core.Deletion == nil {
+		return Services{}, errors.New("wails: open core: no recording deletion")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -268,6 +274,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			s.opts.Log),
 		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
+		Deletion: NewRecordingDeleteService(core.Deletion, s.opts.Log),
 	}, nil
 }
 

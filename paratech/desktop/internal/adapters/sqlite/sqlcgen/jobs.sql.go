@@ -327,6 +327,44 @@ func (q *Queries) ListJobActivityIDs(ctx context.Context, arg ListJobActivityIDs
 	return items, nil
 }
 
+const listJobIDsByPayloadAssignment = `-- name: ListJobIDsByPayloadAssignment :many
+SELECT id FROM jobs
+WHERE id IS NOT NULL
+  AND type IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND json_extract(payload, '$.assignment_id') IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+ORDER BY created_at, id
+`
+
+type ListJobIDsByPayloadAssignmentParams struct {
+	Types       string
+	Assignments string
+}
+
+// The jobs of the types whose payload names one of the assignments ("assignment_id", the homework draft payload),
+// for the deletion of a recording with its homework (TASK-095). Both lists are JSON arrays.
+func (q *Queries) ListJobIDsByPayloadAssignment(ctx context.Context, arg ListJobIDsByPayloadAssignmentParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listJobIDsByPayloadAssignment, arg.Types, arg.Assignments)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobIDsByPayloadRecording = `-- name: ListJobIDsByPayloadRecording :many
 SELECT CAST(json_extract(payload, '$.recording_id') AS TEXT) AS recording_id, id
 FROM jobs

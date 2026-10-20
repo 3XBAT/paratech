@@ -361,3 +361,19 @@ html, body, #root { height: 100%; }
 .sm-block .sm-h { overflow-wrap: anywhere; }
 .sm-time { margin-right: 8px; font-weight: normal; }
 .row-source, .sm-source { font-size: var(--fs-small); }
+
+/* Deleting recordings (TASK-095): the «⋯» menu leaves the card, the row checkbox, the bar of the selected ones and the
+   confirmation, which scrolls when many recordings are listed. */
+.recordings .card.rows { overflow: visible; }
+.row-check { display: inline-flex; align-items: baseline; gap: 8px; }
+.mmenu-hint { max-width: 260px; padding: 0 10px 6px; white-space: normal; }
+.rec-selected { margin-bottom: 12px; }
+.rec-deleted-line { display: block; overflow-wrap: anywhere; }
+.del-body { max-height: 55vh; overflow: auto; }
+.del-body p { margin: 0; }
+.del-rec + .del-rec, .del-group { margin-top: 12px; }
+.del-title { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.del-list { margin: 4px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+.del-refusal { color: var(--rec-t); }
+.del-body .del-warn { margin-top: 12px; color: var(--text); font-weight: 600; }
+.del-check { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; color: var(--text); overflow-wrap: anywhere; }

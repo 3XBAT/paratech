@@ -39,7 +39,7 @@ func (q *Queries) DeleteTranscriptsByRecording(ctx context.Context, recordingID 
 
 const getRecording = `-- name: GetRecording :one
 
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent, lesson_title, lesson_subject, lesson_kind, lesson_teacher, lesson_start, lesson_end FROM recordings WHERE id = ?1
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent, lesson_title, lesson_subject, lesson_kind, lesson_teacher, lesson_start, lesson_end, deleting_at, deleting_assignments FROM recordings WHERE id = ?1
 `
 
 // Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
@@ -70,12 +70,14 @@ func (q *Queries) GetRecording(ctx context.Context, id string) (Recording, error
 		&i.LessonTeacher,
 		&i.LessonStart,
 		&i.LessonEnd,
+		&i.DeletingAt,
+		&i.DeletingAssignments,
 	)
 	return i, err
 }
 
 const getRecordingOfTranscript = `-- name: GetRecordingOfTranscript :one
-SELECT recordings.id, recordings.lesson_id, recordings.status, recordings.started_at, recordings.stopped_at, recordings.heartbeat_at, recordings.max_duration_ms, recordings.duration_ms, recordings.chunk_count, recordings.chunks_ref, recordings.audio_ref, recordings.failure_reason, recordings.version, recordings.created_at, recordings.updated_at, recordings.silent, recordings.lesson_title, recordings.lesson_subject, recordings.lesson_kind, recordings.lesson_teacher, recordings.lesson_start, recordings.lesson_end FROM recordings
+SELECT recordings.id, recordings.lesson_id, recordings.status, recordings.started_at, recordings.stopped_at, recordings.heartbeat_at, recordings.max_duration_ms, recordings.duration_ms, recordings.chunk_count, recordings.chunks_ref, recordings.audio_ref, recordings.failure_reason, recordings.version, recordings.created_at, recordings.updated_at, recordings.silent, recordings.lesson_title, recordings.lesson_subject, recordings.lesson_kind, recordings.lesson_teacher, recordings.lesson_start, recordings.lesson_end, recordings.deleting_at, recordings.deleting_assignments FROM recordings
 JOIN transcripts ON transcripts.recording_id = recordings.id
 WHERE transcripts.id = ?1
 `
@@ -107,6 +109,8 @@ func (q *Queries) GetRecordingOfTranscript(ctx context.Context, transcriptID str
 		&i.LessonTeacher,
 		&i.LessonStart,
 		&i.LessonEnd,
+		&i.DeletingAt,
+		&i.DeletingAssignments,
 	)
 	return i, err
 }
@@ -114,36 +118,40 @@ func (q *Queries) GetRecordingOfTranscript(ctx context.Context, transcriptID str
 const insertRecording = `-- name: InsertRecording :exec
 INSERT INTO recordings (id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms,
                         chunk_count, chunks_ref, audio_ref, failure_reason, silent, lesson_title, lesson_subject,
-                        lesson_kind, lesson_teacher, lesson_start, lesson_end, version, created_at, updated_at)
+                        lesson_kind, lesson_teacher, lesson_start, lesson_end, deleting_at, deleting_assignments, version,
+                        created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
         ?10, ?11, ?12, ?13, ?14,
         ?15, ?16, ?17, ?18,
-        ?19, 1, ?20, ?21)
+        ?19, ?20, ?21, 1, ?22,
+        ?23)
 `
 
 type InsertRecordingParams struct {
-	ID            string
-	LessonID      sql.NullString
-	Status        string
-	StartedAt     int64
-	StoppedAt     sql.NullInt64
-	HeartbeatAt   sql.NullInt64
-	MaxDurationMs int64
-	DurationMs    sql.NullInt64
-	ChunkCount    int64
-	ChunksRef     string
-	AudioRef      sql.NullString
-	FailureReason sql.NullString
-	Silent        int64
-	LessonTitle   sql.NullString
-	LessonSubject sql.NullString
-	LessonKind    sql.NullString
-	LessonTeacher sql.NullString
-	LessonStart   sql.NullInt64
-	LessonEnd     sql.NullInt64
-	CreatedAt     int64
-	UpdatedAt     int64
+	ID                  string
+	LessonID            sql.NullString
+	Status              string
+	StartedAt           int64
+	StoppedAt           sql.NullInt64
+	HeartbeatAt         sql.NullInt64
+	MaxDurationMs       int64
+	DurationMs          sql.NullInt64
+	ChunkCount          int64
+	ChunksRef           string
+	AudioRef            sql.NullString
+	FailureReason       sql.NullString
+	Silent              int64
+	LessonTitle         sql.NullString
+	LessonSubject       sql.NullString
+	LessonKind          sql.NullString
+	LessonTeacher       sql.NullString
+	LessonStart         sql.NullInt64
+	LessonEnd           sql.NullInt64
+	DeletingAt          sql.NullInt64
+	DeletingAssignments string
+	CreatedAt           int64
+	UpdatedAt           int64
 }
 
 // A never-stored recording (version 0) is inserted with version 1.
@@ -168,18 +176,50 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 		arg.LessonTeacher,
 		arg.LessonStart,
 		arg.LessonEnd,
+		arg.DeletingAt,
+		arg.DeletingAssignments,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
 	return err
 }
 
+const listDeletingRecordingIDs = `-- name: ListDeletingRecordingIDs :many
+SELECT id FROM recordings WHERE id IS NOT NULL AND deleting_at IS NOT NULL ORDER BY deleting_at, id
+`
+
+// The recordings marked for deletion, oldest mark first (TASK-095: the deletion resumed at the start).
+func (q *Queries) ListDeletingRecordingIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listDeletingRecordingIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecordingActivityIDs = `-- name: ListRecordingActivityIDs :many
 SELECT id FROM recordings
 WHERE id IS NOT NULL
+  AND deleting_at IS NULL
   AND (status IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
        OR id IN (SELECT id FROM recordings
                  WHERE id IS NOT NULL
+                   AND deleting_at IS NULL
                    AND status NOT IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
                  ORDER BY created_at DESC, id DESC
                  LIMIT ?2))
@@ -193,7 +233,7 @@ type ListRecordingActivityIDsParams struct {
 
 // Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 // newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
-// active is a JSON array of status names.
+// active is a JSON array of status names. A recording marked for deletion is left out (TASK-095).
 func (q *Queries) ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listRecordingActivityIDs, arg.Active, arg.MaxTerminal)
 	if err != nil {
@@ -218,7 +258,7 @@ func (q *Queries) ListRecordingActivityIDs(ctx context.Context, arg ListRecordin
 }
 
 const listRecordingsByStatus = `-- name: ListRecordingsByStatus :many
-SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent, lesson_title, lesson_subject, lesson_kind, lesson_teacher, lesson_start, lesson_end FROM recordings
+SELECT id, lesson_id, status, started_at, stopped_at, heartbeat_at, max_duration_ms, duration_ms, chunk_count, chunks_ref, audio_ref, failure_reason, version, created_at, updated_at, silent, lesson_title, lesson_subject, lesson_kind, lesson_teacher, lesson_start, lesson_end, deleting_at, deleting_assignments FROM recordings
 WHERE status IN (/*SLICE:statuses*/?)
 ORDER BY created_at, id
 `
@@ -265,6 +305,8 @@ func (q *Queries) ListRecordingsByStatus(ctx context.Context, statuses []string)
 			&i.LessonTeacher,
 			&i.LessonStart,
 			&i.LessonEnd,
+			&i.DeletingAt,
+			&i.DeletingAssignments,
 		); err != nil {
 			return nil, err
 		}
@@ -314,6 +356,7 @@ WHERE r.id IS NOT NULL
   AND r.status = ?2
   AND r.audio_ref IS NOT NULL
   AND r.silent = 0
+  AND r.deleting_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.recording_id = r.id)
 ORDER BY r.id
 LIMIT ?3
@@ -326,8 +369,8 @@ type ListUntranscribedRecordingIDsParams struct {
 }
 
 // Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
-// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082). Ids only: the
-// caller loads each one and its aggregate decides.
+// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082), nor those
+// marked for deletion (TASK-095). Ids only: the caller loads each one and its aggregate decides.
 func (q *Queries) ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listUntranscribedRecordingIDs, arg.After, arg.Status, arg.MaxRows)
 	if err != nil {
@@ -362,24 +405,28 @@ SET status         = ?1,
     audio_ref      = ?7,
     failure_reason = ?8,
     silent         = ?9,
+    deleting_at    = ?10,
+    deleting_assignments = ?11,
     version        = version + 1,
-    updated_at     = ?10
-WHERE id = ?11 AND version = ?12
+    updated_at     = ?12
+WHERE id = ?13 AND version = ?14
 `
 
 type UpdateRecordingParams struct {
-	Status          string
-	StartedAt       int64
-	StoppedAt       sql.NullInt64
-	HeartbeatAt     sql.NullInt64
-	DurationMs      sql.NullInt64
-	ChunkCount      int64
-	AudioRef        sql.NullString
-	FailureReason   sql.NullString
-	Silent          int64
-	UpdatedAt       int64
-	ID              string
-	ExpectedVersion int64
+	Status              string
+	StartedAt           int64
+	StoppedAt           sql.NullInt64
+	HeartbeatAt         sql.NullInt64
+	DurationMs          sql.NullInt64
+	ChunkCount          int64
+	AudioRef            sql.NullString
+	FailureReason       sql.NullString
+	Silent              int64
+	DeletingAt          sql.NullInt64
+	DeletingAssignments string
+	UpdatedAt           int64
+	ID                  string
+	ExpectedVersion     int64
 }
 
 // Compare-and-swap on the loaded version (ADR-0004). The lesson, its snapshot, the cap, the chunk directory and the
@@ -395,6 +442,8 @@ func (q *Queries) UpdateRecording(ctx context.Context, arg UpdateRecordingParams
 		arg.AudioRef,
 		arg.FailureReason,
 		arg.Silent,
+		arg.DeletingAt,
+		arg.DeletingAssignments,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

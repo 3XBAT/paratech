@@ -170,6 +170,10 @@ func (s *Service) endRecovery() {
 	s.wg.Done()
 }
 
+// Recovering reports whether the running Recover still has to assemble or store the recording id, so that a deletion
+// waits (TASK-095: no track is written after the files of a deleted recording are gone).
+func (s *Service) Recovering(id shared.RecordingID) bool { return s.checkNotRecovering(id) != nil }
+
 // checkNotRecovering refuses a change of a recording that the running Recover has not finished yet.
 func (s *Service) checkNotRecovering(id shared.RecordingID) error {
 	s.mu.Lock()

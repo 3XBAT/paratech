@@ -60,7 +60,7 @@ type CommitResult struct {
 // CalendarSyncJobType is the job type of the calendar synchronization (PRD section 11.3).
 const CalendarSyncJobType = job.Type("calendar_sync")
 
-// CalendarDeps are the ports of CalendarSync; all but Log are required. MaxAttempts bounds the attempts of a sync job;
+// CalendarDeps are the ports of CalendarSync; all but Log, Removals and Deadlines are required. MaxAttempts bounds the attempts of a sync job;
 // 0 takes the backoff default.
 type CalendarDeps struct {
 	Lessons  LessonRepository
@@ -71,6 +71,11 @@ type CalendarDeps struct {
 	IDs      IDGenerator
 	Tx       Tx
 	Log      *slog.Logger
+
+	// Removals and Deadlines, set together, remove the deadline events of deleted assignments in every run
+	// (TASK-095); without them no deadline event is removed.
+	Removals  DeadlineRemovals
+	Deadlines DeadlineEvents
 
 	MaxAttempts int
 }
