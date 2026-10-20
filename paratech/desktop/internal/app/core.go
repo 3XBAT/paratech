@@ -27,6 +27,7 @@ import (
 	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/recordingdelete"
@@ -320,6 +321,14 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: summary viewer: %w", err)
 	}
+	// The knowledge base reads the same local results at query time; dates of the export in the local time zone.
+	knowledge, err := knowledgebase.New(knowledgebase.Deps{
+		Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
+		Artifacts: store, Summaries: summaries, LectureTexts: lectureTexts, Writer: textfile.New(), Clock: e.local, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: knowledge base: %w", err)
+	}
 
 	// A model installed while the app runs gets the waiting recordings enqueued at once; without the speech component
 	// their jobs wait QUEUED until it is installed (the pages offer it: Speech).
@@ -336,6 +345,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Transcript: viewer,
 		Summary:    summaryViewer,
 		Deletion:   c.deletions,
+		Knowledge:  knowledge,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

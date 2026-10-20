@@ -30,6 +30,7 @@ func validCore() Core {
 		Transcript: &fakeTranscript{},
 		Summary:    &fakeSummary{},
 		Deletion:   &fakeDeletion{},
+		Knowledge:  &fakeKnowledge{},
 	}
 }
 
@@ -103,6 +104,11 @@ func (f *fakeUI) pickDocxFile(string) (string, error) {
 	return "", nil
 }
 
+func (f *fakeUI) pickKnowledgeFile(string) (string, error) {
+	f.calls = append(f.calls, "pickKnowledgeFile")
+	return "", nil
+}
+
 func (f *fakeUI) setClipboardText(string) error {
 	f.calls = append(f.calls, "setClipboardText")
 	return nil
@@ -127,6 +133,7 @@ func TestCommands(t *testing.T) {
 		{"pickTranscriptFile", func() error { _, err := s.pickTranscriptFile(context.Background(), "t.txt", "txt"); return err }},
 		{"pickSummaryFile", func() error { _, err := s.pickSummaryFile(context.Background(), "s.md", "md"); return err }},
 		{"pickDocxFile", func() error { _, err := s.pickDocxFile(context.Background(), "h.docx"); return err }},
+		{"pickKnowledgeFile", func() error { _, err := s.pickKnowledgeFile(context.Background(), "Физика.md"); return err }},
 		{"setClipboardText", func() error { return s.setClipboardText(context.Background(), "text") }},
 	}
 

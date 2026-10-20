@@ -66,6 +66,8 @@ type Core struct {
 	Summary    SummaryUseCase    // the summary viewer; the shell shows its save dialog
 
 	Deletion RecordingDeleteUseCase // «Удалить» of the recording rows and the summary screen (TASK-095)
+
+	Knowledge KnowledgeUseCase // the «База знаний» section (TASK-091); the shell shows its save dialog
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -80,6 +82,7 @@ type ui interface {
 	pickTranscriptFile(name, format string) (string, error)
 	pickSummaryFile(name, format string) (string, error)
 	pickDocxFile(name string) (string, error)
+	pickKnowledgeFile(name string) (string, error)
 	setClipboardText(text string) error
 }
 
@@ -183,6 +186,7 @@ type Services struct {
 	Summary     *SummaryService
 	LectureText *LectureTextService
 	Deletion    *RecordingDeleteService
+	Knowledge   *KnowledgeBaseService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -246,6 +250,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Deletion == nil {
 		return Services{}, errors.New("wails: open core: no recording deletion")
 	}
+	if core.Knowledge == nil {
+		return Services{}, errors.New("wails: open core: no knowledge base")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -274,7 +281,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			s.opts.Log),
 		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
-		Deletion: NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
 	}, nil
 }
 
@@ -333,6 +341,15 @@ func (s *Shell) pickDocxFile(_ context.Context, name string) (string, error) {
 		return "", err
 	}
 	return u.pickDocxFile(name)
+}
+
+// pickKnowledgeFile shows the save dialog of an exported subject over the main window; "" when the user cancels.
+func (s *Shell) pickKnowledgeFile(_ context.Context, name string) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickKnowledgeFile(name)
 }
 
 // setClipboardText puts text on the system clipboard.
