@@ -185,6 +185,10 @@ func kindCode(kind string) string {
 // space; it maps one rune to one rune, so positions stay.
 func fold(r rune) rune {
 	switch {
+	case r >= 'a' && r <= 'z', r >= 'а' && r <= 'я':
+		return r
+	case r >= 'A' && r <= 'Z', r >= 'А' && r <= 'Я': // common letters skip the table of unicode.ToLower
+		return r + 'a' - 'A' // 'а' - 'А' is the same 32
 	case r == 'ё' || r == 'Ё':
 		return 'е'
 	case unicode.IsSpace(r) || unicode.IsControl(r) || r == 0x2028 || r == 0x2029:

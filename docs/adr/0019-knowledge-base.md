@@ -23,5 +23,6 @@ tens to a few hundred lessons; transcripts are JSON files in the artifact store.
   are left out: the lecture text is the full text of the lesson.
 
 ## Consequences
-- A search reads every transcript of the base: about a second on a few hundred lessons. If it gets slow, cache parsed
-  transcripts or add FTS5 in a new ADR.
+- A search reads and parses every transcript of the base: measured about 3 s for 200 three-hour lessons, under a
+  second for a semester. The page searches on demand, not per keystroke. If it gets slow, cache parsed transcripts or
+  add FTS5 in a new ADR.

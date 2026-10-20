@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
+	"unicode"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -122,5 +123,21 @@ func TestLessonsOf(t *testing.T) {
 	}
 	if lessons[0].Recording != "r1" {
 		t.Fatal("sorting changed the input")
+	}
+}
+
+// fold is unicode.ToLower with «ё» as «е» and spaces and controls as a space; its fast paths change nothing.
+func TestFold(t *testing.T) {
+	for r := rune(0); r <= 0x2FFFF; r++ {
+		want := unicode.ToLower(r)
+		switch {
+		case r == 'ё' || r == 'Ё':
+			want = 'е'
+		case unicode.IsSpace(r) || unicode.IsControl(r):
+			want = ' '
+		}
+		if got := fold(r); got != want {
+			t.Fatalf("fold(%U) = %U, want %U", r, got, want)
+		}
 	}
 }

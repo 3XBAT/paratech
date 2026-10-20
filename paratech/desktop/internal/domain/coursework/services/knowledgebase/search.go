@@ -84,8 +84,7 @@ type Hit struct {
 // the lecture text and the transcript, each text matched once, at most MaxSectionHits per section of a lesson and
 // MaxHits in all. Build it with NewSearch.
 type Search struct {
-	query     string // folded
-	runes     int
+	query     []rune // folded
 	hits      []Hit
 	truncated bool
 }
@@ -98,7 +97,7 @@ func NewSearch(query string) (*Search, error) {
 	if n < MinQueryRunes || n > MaxQueryRunes {
 		return nil, fmt.Errorf("%w: %d characters, want %d-%d", ErrInvalidQuery, n, MinQueryRunes, MaxQueryRunes)
 	}
-	return &Search{query: strings.Map(fold, q), runes: n}, nil
+	return &Search{query: []rune(strings.Map(fold, q))}, nil
 }
 
 // Scan adds the hits of one lesson; once Full, it adds nothing.
@@ -161,16 +160,13 @@ func (s *Search) section(rec shared.RecordingID, sec Section, texts func(add fun
 
 // match finds the first match of the query in text and cuts the snippet around it.
 func (s *Search) match(text string) (Snippet, bool) {
-	folded := strings.Map(fold, text)
-	at := strings.Index(folded, s.query)
-	if at < 0 {
+	start, ok := s.find(text)
+	if !ok {
 		return Snippet{}, false
 	}
-	// fold maps rune to rune, so the rune position in the folded text is the one in text. Invalid UTF-8 is read
-	// the same way by Map and by the conversion to runes (one U+FFFD per bad byte).
+	// Invalid UTF-8 is read the same way by find and by the conversion to runes: one U+FFFD per bad byte.
 	runes := []rune(text)
-	start := utf8.RuneCountInString(folded[:at])
-	end := start + s.runes
+	end := start + len(s.query)
 
 	from := max(start-snippetLead, 0)
 	to := min(end+max(SnippetRunes-(end-from), 0), len(runes))
@@ -186,6 +182,34 @@ func (s *Search) match(text string) (Snippet, bool) {
 		snip.After += ellipsis
 	}
 	return snip, true
+}
+
+// find returns the rune position of the first match in text. It allocates nothing: most texts do not match, and a
+// search reads every text of the base.
+func (s *Search) find(text string) (int, bool) {
+	for i, n := 0, 0; i < len(text); n++ {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+		if fold(r) == s.query[0] && s.matchesAt(text[i:]) {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// matchesAt reports whether rest starts with the query after its first rune.
+func (s *Search) matchesAt(rest string) bool {
+	for _, want := range s.query[1:] {
+		if rest == "" {
+			return false
+		}
+		r, size := utf8.DecodeRuneInString(rest)
+		if fold(r) != want {
+			return false
+		}
+		rest = rest[size:]
+	}
+	return true
 }
 
 // Full reports that MaxHits are found: scanning more lessons adds nothing.
