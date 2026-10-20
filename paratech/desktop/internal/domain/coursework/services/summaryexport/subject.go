@@ -18,12 +18,19 @@ const (
 	subjectFileFallback   = "База знаний"
 )
 
-// kindTexts are the lesson kinds as an export names them.
-var kindTexts = map[string]string{
-	"lecture":  "лекция",
-	"seminar":  "семинар",
-	"practice": "практика",
-	"lab":      "лабораторная",
+// kindText names a lesson kind code as an export does; "" for an unknown one.
+func kindText(kind string) string {
+	switch kind {
+	case "lecture":
+		return "лекция"
+	case "seminar":
+		return "семинар"
+	case "practice":
+		return "практика"
+	case "lab":
+		return "лабораторная"
+	}
+	return ""
 }
 
 // SubjectLesson is one lesson of an exported subject. Times are in the zone to show.
@@ -105,7 +112,7 @@ func lessonHeading(l SubjectLesson) string {
 	if !l.Start.IsZero() {
 		parts = append(parts, l.Start.Format(dateLayout))
 	}
-	if kind := kindTexts[l.Kind]; kind != "" {
+	if kind := kindText(l.Kind); kind != "" {
 		parts = append(parts, kind)
 	}
 	title := oneLine(l.Title)

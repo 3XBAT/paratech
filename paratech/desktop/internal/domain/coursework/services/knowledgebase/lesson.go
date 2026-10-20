@@ -80,9 +80,9 @@ func NewLesson(f Facts) Lesson {
 	l := Lesson{
 		Recording: f.Recording, StartedAt: f.StartedAt, Duration: f.Duration,
 		Subject: label.Subject(), SubjectEdited: label.SubjectSource() == values.SourceUser,
-		Kind: kindCode(sched.Kind), Ready: f.Ready,
+		Kind: string(values.LessonKindOf(sched.Kind)), Ready: f.Ready,
 	}
-	if k := kindCode(f.Correction.Kind); k != "" {
+	if k := string(values.LessonKindOf(f.Correction.Kind)); k != "" {
 		l.Kind, l.KindEdited = k, true
 	}
 	switch {
@@ -171,14 +171,6 @@ func Oldest(lessons []Lesson) []Lesson {
 	out := Newest(lessons)
 	slices.Reverse(out)
 	return out
-}
-
-// kindCode keeps a lesson kind code ("lecture", "seminar", "practice", "lab"); anything else is "".
-func kindCode(kind string) string {
-	if k := values.LessonKind(kind); k != values.LessonKindUnknown && k.Valid() {
-		return kind
-	}
-	return ""
 }
 
 // fold reads a rune case-insensitively for keys and search, "ё" as "е" and any space or control character as a

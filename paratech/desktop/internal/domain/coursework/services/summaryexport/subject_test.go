@@ -57,3 +57,15 @@ func TestSubjectFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestKindText(t *testing.T) {
+	tests := map[string]string{
+		"lecture": "лекция", "seminar": "семинар", "practice": "практика", "lab": "лабораторная",
+		"": "", "unknown": "", "Lecture": "",
+	}
+	for kind, want := range tests {
+		if got := kindText(kind); got != want {
+			t.Errorf("kindText(%q) = %q, want %q", kind, got, want)
+		}
+	}
+}
