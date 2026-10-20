@@ -237,3 +237,17 @@ export function errorText(err: unknown): string {
   }
   return knownErrors.has(msg) ? msg : errorMessages.unavailable;
 }
+
+/** The parts of the summary screen (TASK-100): one is shown at a time. */
+export type SummarySegment = "summary" | "lecture" | "homework";
+
+export const summarySegments: readonly { value: SummarySegment; label: string }[] = [
+  { value: "summary", label: "Конспект" },
+  { value: "lecture", label: "Текст лекции" },
+  { value: "homework", label: "Задания" },
+];
+
+/** The part shown first: the lecture text when the row's «Открыть текст лекции» opened the screen, else the summary. */
+export function firstSegment(section?: "lecture"): SummarySegment {
+  return section === "lecture" ? "lecture" : "summary";
+}

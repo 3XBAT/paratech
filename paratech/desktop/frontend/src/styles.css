@@ -372,6 +372,15 @@ html, body, #root { height: 100%; }
 .sm-points li { margin: 0 0 4px; white-space: pre-line; overflow-wrap: anywhere; }
 .sm-homework .row .t, .sm-desc { overflow-wrap: anywhere; }
 .sm-desc { display: block; margin-top: 4px; white-space: pre-line; }
+/* Segments (TASK-100): one centred column at any window width, so the reading measure stays ~85 characters of the
+   16px text instead of a short line in a wide card; the column sets the measure, not 76ch of the 14px body. */
+.page.sm { width: 100%; max-width: 800px; margin-inline: auto; }
+.sm-tabs { margin: 0 0 16px; }
+.sm .sm-summary, .sm .sm-lecture { padding: 24px 32px 28px; }
+.sm .sm-text, .sm .sm-points { max-width: none; }
+@container app (max-width: 640px) {
+  .sm .sm-summary, .sm .sm-lecture { padding: 16px; }
+}
 /* Текст лекции (TASK-090): blocks of model text; the raw transcript is only a small link next to it. */
 .sm-lecture-tools { margin: 0 0 12px; }
 .sm-block { content-visibility: auto; contain-intrinsic-size: auto 240px; }

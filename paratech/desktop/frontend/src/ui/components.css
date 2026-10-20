@@ -50,7 +50,7 @@
 .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--r-md); background: var(--fill); }
 .seg button { min-height: 26px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font-size: 13px; line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .seg button:hover { color: var(--text); }
-.seg button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: var(--sh-thumb); }
+.seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: var(--sh-thumb); }
 .seg.lg button { min-height: 28px; padding: 0 16px; font-size: 13.5px; }
 
 /* Status chip («Тетрадь» style): tint, a border of the text colour at 35 %, icon and word; 22px tall, 12/600. */
@@ -186,7 +186,7 @@
 .dialog-body { margin: 8px 0 20px; color: var(--muted); }
 
 @media (forced-colors: active) {
-  .chip, .btn, .tile, .switch, .seg button[aria-pressed="true"], .note, .card, .dialog { border: 1px solid CanvasText; }
+  .chip, .btn, .tile, .switch, .seg button[aria-pressed="true"], .seg button[aria-selected="true"], .note, .card, .dialog { border: 1px solid CanvasText; }
   /* Hairlines are backgrounds too. */
   .row + .row::before, .set + .set::before, .mrow + .mrow::before { forced-color-adjust: none; background: CanvasText; }
   /* The switch knob, the progress fill and the recording dot are backgrounds, which forced colours drop: keep them
