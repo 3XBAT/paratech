@@ -96,11 +96,40 @@ test("text and controls have enough contrast in both themes", () => {
       check(theme, fg, "fill", 4.5);
     }
     check(theme, "text", "fill-2", 4.5);
+    check(theme, "muted", "fill-2", 4.5); // a pressed segment or button keeps its muted label readable
+    // Non-text parts (WCAG 1.4.11): the progress fill on its track, a switch outline on its --fill track.
+    check(theme, "accent-fill", "fill", 3);
+    check(theme, "control", "fill", 3);
     // Error and warning texts outside a chip (danger buttons, problems, field errors, «Может работать медленно»).
     for (const fg of ["rec-t", "wait-t"]) {
       for (const surface of ["raised", "panel"]) {
         check(theme, fg, surface, 4.5);
       }
     }
+  }
+});
+
+// TASK-100: the surfaces of both themes are the strict mockup's (docs/design/concept-strict.html, the token table).
+test("the surfaces, hairlines and shadows are the strict mockup's in light and dark", () => {
+  const mockup = {
+    light: {
+      bg: "#EBEBE7", panel: "#F4F4F1", raised: "#FFFFFF", fill: "#E8E8E4", "fill-2": "#DFDFDA",
+      sep: "rgba(26, 27, 30, .10)", edge: "rgba(26, 27, 30, .07)", "btn-line": "rgba(26, 27, 30, .20)",
+      "sh-thumb": "0 1px 2px rgba(20, 20, 24, .10), 0 0 0 .5px rgba(20, 20, 24, .06)",
+    },
+    dark: {
+      bg: "#121315", panel: "#18191B", raised: "#212225", fill: "#2A2B2F", "fill-2": "#323338",
+      sep: "rgba(236, 235, 231, .09)", edge: "rgba(236, 235, 231, .06)", "btn-line": "rgba(236, 235, 231, .16)",
+      "sh-btn": "0 .5px 1px rgba(0, 0, 0, .4)", "sh-thumb": "0 1px 2px rgba(0, 0, 0, .45)",
+    },
+  };
+  for (const [theme, tokens] of Object.entries(mockup)) {
+    for (const [name, value] of Object.entries(tokens)) {
+      assert.equal(themes[theme][name], value, `${theme}: --${name}`);
+    }
+    // Groups and the segment thumb lie on the sheet: lighter than it in both themes, as in the mockup.
+    assert.ok(luminance(hex(theme, "raised")) > luminance(hex(theme, "panel")), `${theme}: groups stand out of the sheet`);
+    assert.ok(luminance(hex(theme, "panel")) !== luminance(hex(theme, "bg")), `${theme}: the sheet differs from the window`);
+    assert.match(themes[theme].scrim ?? "", /^rgba\(\d+, \d+, \d+, \.\d+\)$/, `${theme}: --scrim`);
   }
 });

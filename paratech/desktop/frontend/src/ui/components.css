@@ -183,7 +183,7 @@
 
 /* Dialog */
 .dialog { max-width: 440px; padding: 20px 24px; border: 0; border-radius: var(--r-xl); background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--edge), var(--sh-win); }
-.dialog::backdrop { background: rgba(20, 20, 24, .35); }
+.dialog::backdrop { background: var(--scrim); }
 .dialog-body { margin: 8px 0 20px; color: var(--muted); }
 
 @media (forced-colors: active) {
