@@ -65,7 +65,14 @@ const view = (lt = {}, over = {}) => ({
   durationSeconds: 2700,
   hasDuration: true,
   transcribed: true,
-  summary: { ...step("done"), ready: true, text: "Конспект.", keyPoints: [], updatedAt: "2026-10-19T07:00:00Z" },
+  summary: {
+    ...step("done"),
+    ready: true,
+    text: "Конспект.",
+    sections: [{ heading: "", text: "Конспект.", points: [] }],
+    keyPoints: [],
+    updatedAt: "2026-10-19T07:00:00Z",
+  },
   homework: { ...step("done"), assignments: [] },
   lectureText: lecture(lt),
   ...over,
@@ -130,7 +137,7 @@ test("the page keeps asking while the lecture text is made, and stops when nothi
   assert.equal(nextPollMs(view(step("failed")), 0), null);
   // Never made (an older transcript): nothing comes until the click, which polls again.
   assert.equal(nextPollMs(view({ ...step("none"), ready: false, canStart: true }), 0), null);
-  assert.equal(nextPollMs(view(step("none"), { transcribed: false, summary: { ...step("none"), ready: false, text: "", keyPoints: [], updatedAt: "" }, homework: { ...step("none"), assignments: [] } }), 0), idlePollMs);
+  assert.equal(nextPollMs(view(step("none"), { transcribed: false, summary: { ...step("none"), ready: false, text: "", sections: [], keyPoints: [], updatedAt: "" }, homework: { ...step("none"), assignments: [] } }), 0), idlePollMs);
 });
 
 test("the lecture card's state line, start button, blocks and dates", () => {

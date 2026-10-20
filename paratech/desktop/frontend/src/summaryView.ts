@@ -9,6 +9,7 @@ import {
   errorMessages,
   lectureErrorMessages,
   type SummaryAssignment,
+  type SummarySection,
   type SummaryState,
   type SummaryStep,
   type SummaryView,
@@ -109,6 +110,26 @@ export function summaryParagraphs(text: string): string[] {
 /** The key points to list, without empty ones. */
 export function keyPointList(points: readonly string[]): string[] {
   return points.map((p) => p.trim()).filter((p) => p !== "");
+}
+
+/** A summary section as shown; index is its place in SummaryContent.sections (a search hit points there). */
+export interface ShownSection {
+  index: number;
+  heading: string;
+  paragraphs: string[];
+  points: string[];
+}
+
+/** The sections to show, trimmed; a section with nothing left is skipped. */
+export function summarySections(sections: readonly SummarySection[]): ShownSection[] {
+  return sections
+    .map((s, index) => ({
+      index,
+      heading: s.heading.trim(),
+      paragraphs: summaryParagraphs(s.text),
+      points: keyPointList(s.points),
+    }))
+    .filter((s) => s.heading !== "" || s.paragraphs.length > 0 || s.points.length > 0);
 }
 
 /** The state line of a step: the core's text and its look; detail is the core's last error for the tooltip only, "" for none. */

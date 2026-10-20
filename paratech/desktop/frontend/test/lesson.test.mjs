@@ -114,7 +114,7 @@ const summaryView = (assignment) => ({
   durationSeconds: 60,
   hasDuration: true,
   transcribed: true,
-  summary: { state: "done", waitReason: "", message: "", jobError: "", ready: false, text: "", keyPoints: [], updatedAt: "" },
+  summary: { state: "done", waitReason: "", message: "", jobError: "", ready: false, text: "", sections: [], keyPoints: [], updatedAt: "" },
   homework: { state: "done", waitReason: "", message: "", jobError: "", assignments: [assignment] },
   lectureText: {
     state: "none", waitReason: "", message: "", jobError: "", ready: false, blocks: [], updatedAt: "",

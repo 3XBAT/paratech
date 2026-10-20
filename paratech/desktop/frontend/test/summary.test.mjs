@@ -7,7 +7,7 @@ import { createElement as h } from "react";
 import server from "react-dom/server";
 import { errorMessages, methods, summaryApi } from "../.test-build/bindings/summary.js";
 import { closeTranscript, routeToAssignment, routeToPage, routeToSummary, routeToTranscript } from "../.test-build/nav.js";
-import { HomeworkCard, SummaryCard } from "../.test-build/pages/SummaryParts.js";
+import { HomeworkCard, SummaryCard, SummarySections } from "../.test-build/pages/SummaryParts.js";
 import {
   assignmentMeta,
   earlierNote,
@@ -29,6 +29,7 @@ import {
   stepLine,
   summaryLine,
   summaryParagraphs,
+  summarySections,
   updatedText,
 } from "../.test-build/summaryView.js";
 import { rowOffersTranscript } from "../.test-build/transcriptView.js";
@@ -63,6 +64,8 @@ const view = (over = {}) => ({
     ...step("done"),
     ready: true,
     text: "Первый абзац.\nВторая строка.\n\nВторой абзац.",
+    // A summary made before TASK-101: one section without a heading.
+    sections: [{ heading: "", text: "Первый абзац.\nВторая строка.\n\nВторой абзац.", points: [] }],
     keyPoints: ["Пределы", " ", "Производные"],
     updatedAt: "2026-10-19T07:00:00Z",
     ...over.summary,
@@ -120,6 +123,11 @@ test("a malformed reply is an error, not a default", async () => {
     view({ summary: { keyPoints: "a" } }),
     view({ summary: { keyPoints: [1] } }),
     view({ summary: { ready: 1 } }),
+    view({ summary: { sections: null } }),
+    view({ summary: { sections: [null] } }),
+    view({ summary: { sections: [{ heading: 1, text: "", points: [] }] } }),
+    view({ summary: { sections: [{ heading: "", text: "", points: null }] } }),
+    view({ summary: { sections: [{ heading: "", text: "", points: [1] }] } }),
     view({ homework: { assignments: null } }),
     view({ homework: { assignments: [{ ...assignment(), due: null }] } }),
     view({ homework: { assignments: [{ ...assignment(), userEdited: "no" }] } }),
@@ -131,7 +139,7 @@ test("a malformed reply is an error, not a default", async () => {
   for (const b of [null, { status: "ok", message: "", name: "" }, { status: "saved", message: "", name: 1 }]) {
     await assert.rejects(summaryApi(async () => b).saveAs("r1", "txt"), undefined, JSON.stringify(b));
   }
-  const empty = view({ lessonId: "", summary: { ready: false, text: "", keyPoints: [], updatedAt: "" } });
+  const empty = view({ lessonId: "", summary: { ready: false, text: "", sections: [], keyPoints: [], updatedAt: "" } });
   assert.deepEqual(await summaryApi(async () => empty).view("r1"), empty);
 });
 
@@ -260,7 +268,11 @@ const hostile = '<img src=x onerror=alert(1)> [ссылка](https://evil.exampl
 
 test("model text renders as text only: no HTML, no links, line breaks kept as text", () => {
   const v = view({
-    summary: { text: `${hostile}\nстрока\n\nабзац`, keyPoints: [hostile] },
+    summary: {
+      text: `${hostile}\nстрока\n\nабзац`,
+      sections: [{ heading: "", text: `${hostile}\nстрока\n\nабзац`, points: [] }],
+      keyPoints: [hostile],
+    },
     homework: { assignments: [assignment({ title: hostile, description: "<b>описание</b>" })] },
   });
   const summary = renderToStaticMarkup(h(SummaryCard, { view: v }));
@@ -277,6 +289,60 @@ test("model text renders as text only: no HTML, no links, line breaks kept as te
   assert.ok(homework.includes("&lt;b&gt;описание&lt;/b&gt;"));
   assert.ok(homework.includes("Открыть задание"));
   assert.ok(!homework.includes("href"));
+});
+
+// TASK-101: the summary in logical sections.
+const sectioned = () =>
+  view({
+    summary: {
+      text: "Реки:\nРеки текут.\n\nВ море.\n- Исток\n\nОзёра:\nОзёра стоят.",
+      sections: [
+        { heading: "Реки", text: "Реки текут.\n\nВ море.", points: ["Исток", " "] },
+        { heading: " ", text: " \n ", points: [] },
+        { heading: "Озёра", text: "Озёра стоят.", points: [] },
+      ],
+      keyPoints: ["Вода"],
+    },
+  });
+
+test("sections are trimmed, split into paragraphs, and empty ones skipped with their place kept", () => {
+  assert.deepEqual(summarySections(sectioned().summary.sections), [
+    { index: 0, heading: "Реки", paragraphs: ["Реки текут.", "В море."], points: ["Исток"] },
+    { index: 2, heading: "Озёра", paragraphs: ["Озёра стоят."], points: [] },
+  ]);
+  assert.deepEqual(summarySections([]), []);
+});
+
+test("sections render as headings, paragraphs and points; an old summary has no heading; «Главное» stays", () => {
+  const html = renderToStaticMarkup(h(SummaryCard, { view: sectioned() }));
+  assert.ok(
+    html.includes(
+      '<section class="sm-sec"><h3 class="sm-h">Реки</h3><p>Реки текут.</p><p>В море.</p><ul class="sm-points"><li>Исток</li></ul></section>' +
+        '<section class="sm-sec"><h3 class="sm-h">Озёра</h3><p>Озёра стоят.</p></section>',
+    ),
+    html,
+  );
+  assert.equal(html.split('class="sm-sec"').length - 1, 2, "the empty section is not shown");
+  assert.ok(html.indexOf("Озёра стоят.") < html.indexOf("Главное") && html.includes("<li>Вода</li>"), html);
+
+  const old = renderToStaticMarkup(h(SummaryCard, { view: view() }));
+  assert.ok(old.includes('<section class="sm-sec"><p>Первый абзац.\nВторая строка.</p><p>Второй абзац.</p></section>'), old);
+  assert.equal(old.split("<h3").length - 1, 1, "only «Главное» is a heading");
+
+  const notReady = renderToStaticMarkup(h(SummaryCard, { view: view({ summary: { ...step("running"), ready: false } }) }));
+  assert.ok(!notReady.includes("sm-sec"), "nothing but the state before the summary is ready");
+
+  const focused = renderToStaticMarkup(h(SummarySections, { sections: sectioned().summary.sections, focusSection: 2 }));
+  assert.ok(focused.includes('<section class="sm-sec kb-focus"><h3 class="sm-h">Озёра</h3>'), focused);
+});
+
+test("section headings, paragraphs and points are text only", () => {
+  const html = renderToStaticMarkup(
+    h(SummarySections, { sections: [{ heading: hostile, text: `${hostile}\n\n<b>x</b>`, points: [hostile] }] }),
+  );
+  assert.ok(!html.includes("<img") && !html.includes("<b>") && !html.includes("href"), html);
+  assert.ok(html.includes(`<h3 class="sm-h">&lt;img src=x onerror=alert(1)&gt; [ссылка](https://evil.example) **жирный**</h3>`), html);
+  assert.ok(html.includes("<p>&lt;b&gt;x&lt;/b&gt;</p>") && html.includes("<li>&lt;img"), html);
 });
 
 test("the states show, and the retry buttons appear only with a handler", () => {

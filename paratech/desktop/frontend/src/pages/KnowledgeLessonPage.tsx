@@ -12,7 +12,7 @@ import {
   type LessonTab,
   lessonTabs,
   shownBlock,
-  shownPoint,
+  summaryFocus,
 } from "../knowledgeView";
 import { lectureCopiedText } from "../lectureTextView";
 import { useOpenSummary } from "../openSummary";
@@ -111,11 +111,13 @@ export function KnowledgeLessonPage(props: {
 
   const focus = props.focus;
   const focusBlock = view && focus.tab === "lecture" ? shownBlock(view, focus.index) : -1;
-  const focusPoint = view && focus.tab === "summary" ? shownPoint(view.summary.keyPoints, focus.index) : -1;
+  const inSummary = view && focus.tab === "summary" ? summaryFocus(view.summary, focus.index) : { section: -1, point: -1 };
+  const focusSection = inSummary.section;
+  const focusPoint = inSummary.point;
 
   // The found place is scrolled to once, when its tab first shows it (the transcript tab does it itself).
   useEffect(() => {
-    if (scrolled.current || tab !== focus.tab || (focusBlock < 0 && focusPoint < 0)) {
+    if (scrolled.current || tab !== focus.tab || (focusBlock < 0 && focusSection < 0 && focusPoint < 0)) {
       return;
     }
     const el = content.current?.querySelector(".kb-focus");
@@ -123,7 +125,7 @@ export function KnowledgeLessonPage(props: {
       scrolled.current = true;
       el.scrollIntoView({ block: "center" });
     }
-  }, [tab, focus.tab, focusBlock, focusPoint]);
+  }, [tab, focus.tab, focusBlock, focusSection, focusPoint]);
 
   return (
     <section className="page tr sm kb-lesson-page">
@@ -188,7 +190,7 @@ export function KnowledgeLessonPage(props: {
             {view === null ? (
               !error && <p className="muted">Загрузка…</p>
             ) : tab === "summary" ? (
-              <SummaryCard view={view} focusPoint={focusPoint} />
+              <SummaryCard view={view} focusSection={focusSection} focusPoint={focusPoint} />
             ) : tab === "homework" ? (
               <HomeworkCard view={view} onOpenAssignment={props.onOpenAssignment} />
             ) : (
