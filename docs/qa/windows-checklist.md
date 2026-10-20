@@ -392,7 +392,7 @@ Apple (TASK-052), можно проверить сейчас: «Подключе
 
 ## Конспект по разделам (TASK-101)
 
-Промпты v5. Автотесты: `desktop/internal/domain/coursework/summary`, `.../services/prompts`, `.../services/summaryexport`, `TestSummarySections*` (`desktop/internal/adapters/sqlite`), `TestSummaryViewSections` (`desktop/internal/input/wails`), `TestPromptEvalSummary*` (`desktop/tests`).
+Промпты v5. Автотесты: `desktop/internal/domain/coursework/summary`, `.../services/prompts`, `.../services/summaryexport`, `TestSummarySectionsRoundTrip`, `TestSummaryWithoutSectionsReadsAsBefore`, `TestSummaryCorruptSections` (`desktop/internal/adapters/sqlite`), `TestSummaryViewSections` (`desktop/internal/input/wails`), `TestPromptEvalSummary*` (`desktop/tests`).
 Вручную (Hub обновлять не нужно):
 - [ ] Старый конспект (сделан до обновления) открывается как раньше: один текст без заголовка.
 - [ ] «Сделать конспект заново» у записи 30–40 мин: 3–4 раздела с заголовками, в каждом 1–3 абзаца по сути, где нужно — пункты; заметно подробнее прежнего; «Главное» на месте.

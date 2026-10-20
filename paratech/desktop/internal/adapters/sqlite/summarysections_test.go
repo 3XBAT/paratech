@@ -86,18 +86,23 @@ func TestSummaryCorruptSections(t *testing.T) {
 		"no heading":      `[{"heading":"","text":"T","points":[]}]`,
 		"no text":         `[{"heading":"H","text":"","points":[]}]`,
 		"not sections":    `["H"]`,
-		"trailing data":   `[{"heading":"H","text":"T","points":[]}] []`,
+		"second invalid":  `[{"heading":"H","text":"T","points":[]},{"heading":"H","points":[]}]`,
 		"bad point":       `[{"heading":"H","text":"T","points":["a\nb"]}]`,
 		"wrong item type": `[{"heading":1,"text":"T","points":[]}]`,
 	}
+	// One database for all cases: opening one per case is slow under -race.
+	e, ctx := newCourseworkEnv(t), context.Background()
+	insert := func(sections string) error {
+		mustExec(t, e.db, "DELETE FROM summaries")
+		_, err := e.db.sql.ExecContext(ctx, `INSERT INTO summaries
+			(id, transcript_id, body, sections, key_points, prompt_version, version, created_at, updated_at)
+			VALUES ('t1', 't1', 'x', ?, '[]', 5, 1, 1, 1)`, sections)
+		return err
+	}
 	for name, sections := range cases {
 		t.Run(name, func(t *testing.T) {
-			e, ctx := newCourseworkEnv(t), context.Background()
-			if _, err := e.db.sql.ExecContext(ctx, `INSERT INTO summaries
-				(id, transcript_id, body, sections, key_points, prompt_version, version, created_at, updated_at)
-				VALUES ('t1', 't1', 'x', ?, '[]', 5, 1, 1, 1)`, sections); err != nil {
-				// The column CHECK refuses what is not a JSON array; that is as good as a refused read.
-				return
+			if err := insert(sections); err != nil {
+				t.Fatalf("insert: %v", err)
 			}
 			if _, err := e.summaries.Get(ctx, "t1"); err == nil {
 				t.Fatal("Get of a row with corrupt sections succeeded")
@@ -106,11 +111,8 @@ func TestSummaryCorruptSections(t *testing.T) {
 	}
 
 	// The column holds JSON arrays only.
-	e, ctx := newCourseworkEnv(t), context.Background()
 	for _, bad := range []string{`{}`, `null`, `not json`} {
-		if _, err := e.db.sql.ExecContext(ctx, `INSERT INTO summaries
-			(id, transcript_id, body, sections, key_points, prompt_version, version, created_at, updated_at)
-			VALUES ('t1', 't1', 'x', ?, '[]', 5, 1, 1, 1)`, bad); err == nil {
+		if err := insert(bad); err == nil {
 			t.Errorf("sections %q stored", bad)
 		}
 	}
