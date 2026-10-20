@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled dialogs (test/homework.test.mjs renders them).
 import { type DeliveryItem, type HomeworkApi, type SendFormat, sendFormats, type SendPreparation } from "../bindings/homework.js";
 import { errorText, sendFormatLabels, sendRetryable, sizeText } from "../homeworkView.js";
-import { Dialog, ResultLine } from "../ui/controls.js";
+import { Dialog, ResultLine, Segmented } from "../ui/controls.js";
 
 // The two dialogs that lead to an email. Each one has a single call site of its binding, in its confirm button handler
 // (test/homework.test.mjs checks it): an email goes out only after the student pressed that button (AC-14, AC-15).
@@ -107,18 +107,17 @@ export function SendDialog(props: {
       </dl>
       <fieldset className="hw-format" disabled={formatLocked}>
         <legend>Формат вложения</legend>
-        {sendFormats.map((f) => (
-          <label key={f}>
-            <input
-              type="radio"
-              name="hw-send-format"
-              value={f}
-              checked={props.prep.attachmentFormat === f}
-              onChange={() => props.onFormat?.(f)}
-            />
-            {sendFormatLabels[f]}
-          </label>
-        ))}
+        {/* The disabled fieldset also disables the segment buttons. */}
+        <Segmented
+          label="Формат вложения"
+          options={sendFormats.map((f) => ({ value: f, label: sendFormatLabels[f] }))}
+          value={props.prep.attachmentFormat}
+          onChange={(f) => {
+            if (f !== props.prep.attachmentFormat) {
+              props.onFormat?.(f);
+            }
+          }}
+        />
         {switching && (
           <span className="small muted" role="status">
             Подготовка…

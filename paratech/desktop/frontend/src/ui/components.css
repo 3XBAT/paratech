@@ -51,6 +51,7 @@
 .seg button { min-height: 26px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font-size: 13px; line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .seg button:hover { color: var(--text); }
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: var(--sh-thumb); }
+.seg button:disabled { opacity: .5; cursor: not-allowed; }
 .seg.lg button { min-height: 28px; padding: 0 16px; font-size: 13.5px; }
 
 /* Status chip («Тетрадь» style): tint, a border of the text colour at 35 %, icon and word; 22px tall, 12/600. */

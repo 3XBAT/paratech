@@ -373,8 +373,11 @@ test("the send dialog offers .docx and .txt with the prepared one chosen; a swit
   };
   const html = renderToStaticMarkup(h(SendDialog, { api, prep, version: 2, onFormat: () => undefined, onClose: () => undefined }));
   assert.match(html, /Формат вложения/);
-  assert.match(html, /<input type="radio" name="hw-send-format" checked="" value="docx"\/>Word \(\.docx\)/);
-  assert.match(html, /<input type="radio" name="hw-send-format" value="txt"\/>Текст \(\.md\)/);
+  // A segmented control (TASK-100) in place of the radio buttons.
+  assert.match(html, /<div class="seg" role="group" aria-label="Формат вложения">/);
+  assert.match(html, /<button type="button" aria-pressed="true">Word \(\.docx\)<\/button>/);
+  assert.match(html, /<button type="button" aria-pressed="false">Текст \(\.md\)<\/button>/);
+  assert.ok(!html.includes('type="radio"'));
   assert.match(html, /<fieldset class="hw-format">/, "the choice is open");
   const switching = renderToStaticMarkup(
     h(SendDialog, { api, prep, version: 2, switching: true, problem: "Нет файла Word", onFormat: () => undefined, onClose: () => undefined }),
