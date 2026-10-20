@@ -134,11 +134,11 @@ export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = 
   retry: "Повторить",
 };
 
-/** What the hint of a failed step adds when the row offers «Повторить» (TASK-086). */
+/** What the hint of a failed step adds when the row offers «Повторить», the round arrow by the chip (TASK-086, TASK-096). */
 export const retryHints = {
-  retry: "Нажмите «Повторить».",
+  retry: "Нажмите круглую стрелку «Повторить» у статуса.",
   // The LLM call failed: the connection, the key or the quota may need a fix first.
-  afterConnections: "Проверьте подключения и нажмите «Повторить».",
+  afterConnections: "Проверьте подключения (меню «⋯») и нажмите круглую стрелку «Повторить».",
 } as const;
 
 /** The page a navigation action opens; the sound check is on «Диагностика». */
@@ -148,7 +148,7 @@ export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow" | "
   checkSound: "diagnostics",
 };
 
-/** What the row's button does besides Stop. */
+/** The core's action of the row besides Stop. */
 export type RowAction =
   | { kind: "runNow"; jobId: string; label: string }
   | { kind: "open"; page: PageId; label: string }
@@ -169,11 +169,19 @@ export interface RecordingRowView {
   progress: number | null;
   /** «≈ 25 мин осталось» of a queued or running transcription (TASK-084); "" for none. */
   remaining: string;
-  /** The core's notes: the problem of the recording, the last error of the job; plain text. */
+  /** The core's notes meant for the user (Russian); plain text. Technical texts go to details only (TASK-096). */
   notes: string[];
+  /** The tooltip of the chip: the problem of the recording and the last error of the job as they are; "" for none. */
+  details: string;
   action: RowAction | null;
-  /** «Повторить» next to «Открыть подключения» (TASK-086); null for none. */
-  secondary: RowAction | null;
+  /** The round «Повторить» next to the chip (TASK-086, TASK-096); null for none. */
+  retry: RowRetry | null;
+}
+
+/** The round «Повторить» of a row: the work it starts and its name for the tooltip and screen readers. */
+export interface RowRetry {
+  work: Exclude<RetryWork, "">;
+  label: string;
 }
 
 function own<K extends string, V>(map: Readonly<Record<K, V>>, key: string): V | undefined {
@@ -296,6 +304,37 @@ export function rowSecondaryAction(r: Pick<RecordingItem, "action" | "retryWork"
   return r.action === "openConnections" ? retryAction(r.retryWork) : null;
 }
 
+/** The names of the round «Повторить» per work (TASK-096). */
+export const retryLabels: Readonly<Record<Exclude<RetryWork, "">, string>> = {
+  summary: "Повторить краткое содержание",
+  homework: "Повторить поиск заданий",
+  lectureText: "Повторить текст лекции",
+};
+
+/** The retry the core offers, as the main action or after a fix of the connection. */
+export function rowRetry(r: Pick<RecordingItem, "action" | "actionJobId" | "retryWork">): RowRetry | null {
+  const a = r.action === "retry" ? rowAction(r) : rowSecondaryAction(r);
+  return a?.kind === "retry" ? { work: a.work, label: own(retryLabels, a.work) ?? actionLabels.retry } : null;
+}
+
+// The core's own notes (the capture switch) are Russian; its failure reasons and job errors are English for support.
+// Format source: recording.withNote joins "<reason>; <note>" and values.CaptureSwitch.Note is the Russian note
+// (desktop/internal/domain/recording).
+const userText = /^[«А-Яа-яЁё]/;
+
+/** The parts of the recording's problem meant for the user; a technical reason before "; " stays in the details. */
+export function userNotes(problem: string): string[] {
+  return problem
+    .split("; ")
+    .map((s) => s.trim())
+    .filter((s, i, all) => userText.test(s) && all.indexOf(s) === i);
+}
+
+/** The chip's tooltip: the problem and the job error once each, one per line. */
+export function detailsText(r: Pick<RecordingItem, "problem" | "jobError">): string {
+  return [r.problem.trim(), r.jobError.trim()].filter((s, i, all) => s !== "" && all.indexOf(s) === i).join("\n");
+}
+
 /** Everything one row shows. */
 export function recordingRowView(r: RecordingItem, now: number): RecordingRowView {
   const t = rowTitle(r);
@@ -311,18 +350,74 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
         ? Math.min(100, r.progressPercent)
         : null,
     remaining: remainingText(r),
-    notes: [r.problem, r.jobError].filter((s, i, all) => s !== "" && all.indexOf(s) === i),
+    notes: userNotes(r.problem),
+    details: detailsText(r),
     action: rowAction(r),
-    secondary: rowSecondaryAction(r),
+    retry: rowRetry(r),
   };
 }
 
-/** The links of a row to the texts of the recording. */
+/** What a row button or «⋯» item does; runNow and open take the job or the page from the core's action. */
+export type RowItemKey = "stop" | "runNow" | "open" | "summary" | "lectureText" | "transcript" | "redo";
+
+export interface RowItem {
+  key: RowItemKey;
+  label: string;
+}
+
+export const rowItemLabels = {
+  stop: "Остановить",
+  summary: "Открыть конспект",
+  lectureText: "Открыть текст лекции",
+  transcript: "Открыть расшифровку",
+  redo: "Сделать конспект заново",
+} as const;
+
+/** What the page lets the row do besides the core's actions. */
+export interface RowOffers {
+  /** Opening the summary, the lecture text and the transcript. */
+  texts: boolean;
+  /** «Сделать конспект заново» (asks first: it spends quota). */
+  redo: boolean;
+}
+
+/** The one main button of a row and the items of its «⋯» menu, in menu order. */
+export interface RowActions {
+  main: RowItem | null;
+  menu: RowItem[];
+}
+
+/**
+ * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», a ready summary, a ready
+ * lecture text, the transcript; the core's fix link (models, connections, sound check) only when no text is offered.
+ * The rest goes to «⋯».
+ */
+export function rowActions(
+  r: Pick<RecordingItem, "stage" | "step" | "errorCode" | "lectureTextReady" | "stoppable" | "action" | "actionJobId" | "retryWork" | "canRedoSummary">,
+  offers: RowOffers,
+): RowActions {
+  const core = rowAction(r);
+  const links: RowLinks = offers.texts ? rowLinks(r) : { lectureText: false, summary: null, transcript: null };
+  const summary = links.transcript === null ? null : rowSummaryOffer(r);
+  const item = (key: RowItemKey, label: string): RowItem => ({ key, label });
+  const stop = r.stoppable ? item("stop", rowItemLabels.stop) : null;
+  const runNow = core?.kind === "runNow" ? item("runNow", core.label) : null;
+  const lecture = links.lectureText ? item("lectureText", rowItemLabels.lectureText) : null;
+  const sum = summary !== null ? item("summary", rowItemLabels.summary) : null;
+  const transcript = links.transcript !== null ? item("transcript", rowItemLabels.transcript) : null;
+  const open = core?.kind === "open" ? item("open", core.label) : null;
+  const redo = offers.redo && r.canRedoSummary ? item("redo", rowItemLabels.redo) : null;
+  const main = stop ?? runNow ?? (summary === "main" ? sum : null) ?? lecture ?? transcript ?? open;
+  const menu = [stop, runNow, lecture, sum, transcript, open, redo].filter((i): i is RowItem => i !== null && i !== main);
+  return { main, menu };
+}
+
+/** The links of a row to the texts of the recording; the row uses only whether each exists (TASK-096). */
 export interface RowLinks {
   /** «Открыть текст лекции», the main link once the lecture text is ready (TASK-090). */
   lectureText: boolean;
   summary: SummaryOffer;
-  /** «Открыть расшифровку» without a lecture text; with one, the small «Исходная расшифровка». */
+  /** «Открыть расшифровку»: "full" without a lecture text, "source" with one. */
   transcript: "full" | "source" | null;
 }
 

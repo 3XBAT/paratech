@@ -27,6 +27,12 @@
 .btn-labels { display: inline-grid; }
 .btn-labels > * { grid-area: 1 / 1; }
 .btn-labels > .btn-off { visibility: hidden; }
+/* A round icon-only button (the row's «Повторить»): as tall as a chip line, never wider than tall. */
+.btn.icon-btn { width: 28px; min-height: 28px; padding: 0; border-radius: 50%; color: var(--accent); }
+.btn.icon-btn .i { width: 16px; height: 16px; }
+.btn.icon-btn[aria-busy="true"] .i { animation: icon-spin 1s linear infinite; }
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn.icon-btn[aria-busy="true"] .i { animation: none; } }
 .btn-with-reason { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 
 /* Segmented */
@@ -133,6 +139,8 @@
 .row-main { min-width: 0; }
 .row-below { grid-column: 1 / -1; min-width: 0; }
 .st { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* The chip with its round «Повторить» right next to it. */
+.st-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 6px; }
 .acts.start { justify-content: start; }
 

@@ -379,12 +379,13 @@ test("the viewer renders text only, talks only to the core and polls without ove
 });
 
 test("the row, the homework page and the transcript open the summary without a call per row", () => {
-  // The row's links (RecordingLinks, TASK-090) come from rowLinks over the list's chain.
+  // The row's actions (rowActions, TASK-096) come from rowLinks and rowSummaryOffer over the list's chain.
   assert.match(src("recordingRowView.ts"), /const summary = rowSummaryOffer\(r\)/);
+  assert.match(src("recordingRowView.ts"), /: rowSummaryOffer\(r\)/);
   const rows = src("pages/RecordingRow.tsx");
-  assert.match(rows, /rowLinks\(r\)/);
-  assert.match(rows, /onClick=\{\(\) => props\.onOpenSummary\(r\.id\)\}/);
-  assert.match(src("pages/RecordingsPage.tsx"), /<RecordingLinks item=\{r\} onOpenSummary=\{openSummary\}/);
+  assert.match(rows, /rowActions\(r, /);
+  assert.match(rows, /props\.onOpenSummary\?\.\(r\.id\)/);
+  assert.match(src("pages/RecordingsPage.tsx"), /onOpenSummary=\{openSummary\}/);
   for (const rel of ["pages/RecordingRow.tsx", "pages/RecordingsPage.tsx"]) {
     assert.ok(!src(rel).includes("summaryApi"), "no summary call per row");
   }

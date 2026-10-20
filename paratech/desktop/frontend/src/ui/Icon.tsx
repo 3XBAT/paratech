@@ -23,6 +23,7 @@ export type IconName =
   | "key"
   | "doc"
   | "mail"
+  | "retry"
   | "x";
 
 /** Rendered once per window, before any Icon. */
@@ -100,6 +101,9 @@ export function IconSprite() {
       <symbol id="i-mail" viewBox="0 0 24 24">
         <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
         <path d="M4.5 7.5l7.5 5.5 7.5-5.5" />
+      </symbol>
+      <symbol id="i-retry" viewBox="0 0 24 24">
+        <path d="M20 12a8 8 0 1 1-2.34-5.66M17.66 2.34v4h-4" />
       </symbol>
       <symbol id="i-x" viewBox="0 0 24 24">
         <path d="M6 6l12 12M18 6L6 18" />

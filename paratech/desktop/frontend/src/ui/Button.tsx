@@ -55,3 +55,24 @@ export function Button({
     </span>
   );
 }
+
+/**
+ * A compact round button with only an icon; its label is the tooltip and the accessible name. While busy it is
+ * disabled and aria-busy, so a second click cannot start the action twice.
+ */
+export function IconButton(props: { icon: IconName; label: string; busy?: boolean; disabled?: boolean; onClick: () => void }) {
+  const busy = props.busy ?? false;
+  return (
+    <button
+      type="button"
+      className="btn icon-btn"
+      aria-label={props.label}
+      title={props.label}
+      aria-busy={busy || undefined}
+      disabled={busy || props.disabled}
+      onClick={props.onClick}
+    >
+      <Icon name={props.icon} />
+    </button>
+  );
+}
