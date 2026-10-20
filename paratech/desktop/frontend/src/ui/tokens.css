@@ -4,15 +4,20 @@
   /* The only place the UI font is named: swapping to Inter or Onest changes this line and src/ui/fonts.css. */
   --font: "Golos Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
 
-  --bg: #EDEDEA;
-  --panel: #FAFAF8;
+  --bg: #EBEBE7;
+  --panel: #F4F4F1; /* the sheet: grouped background under white groups */
   --raised: #FFFFFF;
-  --panel-2: #F2F2EF;
+  --fill: #E8E8E4; /* tracks and hover; no accent text on it (4.37:1) */
+  --fill-2: #DFDFDA;
+  --sep: rgba(26, 27, 30, .10);
+  --edge: rgba(26, 27, 30, .07); /* group contour, drawn as a 1px ring */
+  --btn-line: rgba(26, 27, 30, .20);
+  --panel-2: #F2F2EF; /* the popup only (popup.css); the main window uses --fill */
   --line: #E2E2DD;
   --control: #7A7D83;
   --text: #1A1B1E;
   --muted: #5A5D64;
-  --accent: #A6541E; /* brief: #A9561F, 4.43:1 on --bg; darkened to reach 4.5:1 there */
+  --accent: #A5531E; /* brief: #A9561F; darkened to reach 4.5:1 on --bg (the mockup #A6541E is 4.496:1 on #EBEBE7) */
   --accent-fill: #C26A2E;
   --prim: #1F2023;
   --on-prim: #FAFAF8;
@@ -29,7 +34,8 @@
   --ok-b: #E1EEE5;
   --neu-t: #4E5158;
   --neu-b: #EEEEEB;
-  --sh-1: 0 1px 2px rgba(20, 20, 24, .06);
+  --sh-btn: 0 .5px 1px rgba(20, 20, 24, .10);
+  --sh-thumb: 0 1px 2px rgba(20, 20, 24, .10), 0 0 0 .5px rgba(20, 20, 24, .06);
   --sh-win: 0 1px 2px rgba(20, 20, 24, .05), 0 18px 44px -22px rgba(20, 20, 24, .28);
   color-scheme: light;
 
@@ -55,24 +61,30 @@
   --fs-timer: 15px;
   --lh-timer: 20px;
 
-  /* Spacing, step 4. */
-  --sp-2: 2px;
+  /* Spacing: the 4 px grid only (no 2, 6 or 14). */
   --sp-4: 4px;
-  --sp-6: 6px;
   --sp-8: 8px;
   --sp-12: 12px;
-  --sp-14: 14px;
   --sp-16: 16px;
   --sp-20: 20px;
   --sp-24: 24px;
   --sp-32: 32px;
   --sp-40: 40px;
 
-  --r-chip: 6px;
+  /* Concentric radii: an outer radius is the inner one plus the padding (segment track 8, thumb 6). */
+  --r-xs: 3px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 12px;
+  /* The popup (popup.css) still uses the former control radius. */
   --r-ctl: 8px;
-  --r-seg: 10px;
-  --r-card: 12px;
-  --r-win: 14px;
+
+  /* Fixed heights: a small, normal and large control and the minimal list row. */
+  --h-sm: 24px;
+  --h-ctl: 30px;
+  --h-lg: 36px;
+  --h-row: 44px;
 
   --ease: cubic-bezier(.2, .7, .2, 1);
   --t-fast: 120ms;
@@ -83,9 +95,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #131416;
-    --panel: #1B1C1F;
-    --raised: #202124;
+    --bg: #121315;
+    --panel: #18191B;
+    --raised: #212225;
+    --fill: #2A2B2F;
+    --fill-2: #323338;
+    --sep: rgba(236, 235, 231, .09);
+    --edge: rgba(236, 235, 231, .06);
+    --btn-line: rgba(236, 235, 231, .16);
     --panel-2: #26272B;
     --line: #2C2E32;
     --control: #70747C;
@@ -108,7 +125,8 @@
     --ok-b: #1C2F25;
     --neu-t: #B4B7BD;
     --neu-b: #2A2B2F;
-    --sh-1: 0 1px 2px rgba(0, 0, 0, .35);
+    --sh-btn: 0 .5px 1px rgba(0, 0, 0, .4);
+    --sh-thumb: 0 1px 2px rgba(0, 0, 0, .45);
     --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
     color-scheme: dark;
   }
@@ -116,9 +134,14 @@
 
 /* The same values as the block above (the contrast test checks that they match). */
 :root[data-theme="dark"] {
-  --bg: #131416;
-  --panel: #1B1C1F;
-  --raised: #202124;
+  --bg: #121315;
+  --panel: #18191B;
+  --raised: #212225;
+  --fill: #2A2B2F;
+  --fill-2: #323338;
+  --sep: rgba(236, 235, 231, .09);
+  --edge: rgba(236, 235, 231, .06);
+  --btn-line: rgba(236, 235, 231, .16);
   --panel-2: #26272B;
   --line: #2C2E32;
   --control: #70747C;
@@ -141,7 +164,8 @@
   --ok-b: #1C2F25;
   --neu-t: #B4B7BD;
   --neu-b: #2A2B2F;
-  --sh-1: 0 1px 2px rgba(0, 0, 0, .35);
+  --sh-btn: 0 .5px 1px rgba(0, 0, 0, .4);
+  --sh-thumb: 0 1px 2px rgba(0, 0, 0, .45);
   --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
   color-scheme: dark;
 }

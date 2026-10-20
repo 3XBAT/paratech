@@ -21,7 +21,7 @@ const dark = block(/:root\[data-theme="dark"\]\s*\{([^}]*)\}/, "data-theme dark"
 const themes = { light, dark };
 
 const colours = [
-  "bg", "panel", "raised", "panel-2", "line", "control", "text", "muted", "accent", "accent-fill", "prim", "on-prim", "rec",
+  "bg", "panel", "raised", "fill", "fill-2", "panel-2", "line", "control", "text", "muted", "accent", "accent-fill", "prim", "on-prim", "rec",
   "rec-t", "rec-b", "run-t", "run-b", "wait-t", "wait-b", "net-t", "net-b", "ok-t", "ok-b", "neu-t", "neu-b",
 ];
 
@@ -62,6 +62,12 @@ test("both themes define every colour; the two dark blocks are the same", () => 
       hex(theme, name);
     }
   }
+  // Hairlines and outlines are translucent, so they sit on any surface.
+  for (const theme of Object.keys(themes)) {
+    for (const name of ["sep", "edge", "btn-line"]) {
+      assert.match(themes[theme][name] ?? "", /^rgba\(\d+, \d+, \d+, \.\d+\)$/, `${theme}: --${name}`);
+    }
+  }
   assert.deepEqual(systemDark, dark);
   assert.notEqual(light.bg, dark.bg);
   assert.match(light.font, /^"Golos Text", "Segoe UI Variable Text", "Segoe UI", sans-serif$/);
@@ -80,10 +86,16 @@ test("text and controls have enough contrast in both themes", () => {
       check(theme, `${chip}-t`, `${chip}-b`, 4.5);
       check(theme, "text", `${chip}-b`, 4.5); // banners: plain text on the tint
     }
-    // Hovered ghost buttons, the segmented control and the week dividers are on --panel-2.
+    // Hovered ghost buttons of the popup are on --panel-2.
     for (const fg of ["muted", "accent"]) {
       check(theme, fg, "panel-2", 4.5);
     }
+    // Segment tracks, hovered rows and buttons are on --fill, pressed ones on --fill-2. Accent text never goes there
+    // (4.37:1 in light): a hovered link-like button turns to --text.
+    for (const fg of ["text", "muted"]) {
+      check(theme, fg, "fill", 4.5);
+    }
+    check(theme, "text", "fill-2", 4.5);
     // Error and warning texts outside a chip (danger buttons, problems, field errors, «Может работать медленно»).
     for (const fg of ["rec-t", "wait-t"]) {
       for (const surface of ["raised", "panel"]) {

@@ -25,11 +25,11 @@ html, body, #root { height: 100%; }
   cursor: pointer;
 }
 .rail button:hover { background: var(--panel-2); color: var(--text); }
-.rail button[aria-current="page"] { background: var(--panel); color: var(--text); box-shadow: var(--sh-1); }
+.rail button[aria-current="page"] { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--edge); }
 .rail button[aria-current="page"]::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
 .rail .i { width: 20px; height: 20px; }
 .rail .low { margin-top: auto; }
-.sheet { min-width: 0; min-height: 0; overflow: auto; padding: 20px 24px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); border-top-left-radius: var(--r-card); background: var(--panel); }
+.sheet { min-width: 0; min-height: 0; overflow: auto; padding: 20px 24px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); border-top-left-radius: var(--r-xl); background: var(--panel); }
 .screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
 @container app (max-width: 880px) {
@@ -111,7 +111,7 @@ html, body, #root { height: 100%; }
    the «⋯» button over the main one (a fixed 32px track did). */
 .mrows { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(200px) max-content max-content; overflow: visible; }
 /* The card lets the «⋯» menu out, so a heading on top keeps the rounded corners itself. */
-.mrows > .mgroup-title:first-child { border-radius: calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0; }
+.mrows > .mgroup-title:first-child { border-radius: calc(var(--r-xl) - 1px) calc(var(--r-xl) - 1px) 0 0; }
 .mrow { display: grid; gap: 4px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .mrow:last-child { border-bottom: 0; }
 .mrows > .mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
@@ -136,7 +136,7 @@ html, body, #root { height: 100%; }
 .mname-text { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mq { margin-left: -3px; color: var(--muted); text-decoration: underline dotted 1px; text-underline-offset: 3px; cursor: help; }
 .mrow .msize { font-weight: 400; }
-.mtag { align-self: center; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-chip); color: var(--accent); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; white-space: nowrap; }
+.mtag { align-self: center; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--accent); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; white-space: nowrap; }
 /* Line 2: the load scale and the rest, separated by dots; line 3: the warning of a heavy model. */
 .mline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; margin: 0; }
 /* A part never breaks inside, so a too narrow line wraps between the parts only. */
@@ -332,7 +332,7 @@ html, body, #root { height: 100%; }
 .tr-text { max-width: 76ch; padding: 4px 0 24px; }
 .tr-par { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 0 12px; padding: 6px 0; content-visibility: auto; contain-intrinsic-size: auto 96px; }
 .tr-par p { margin: 0; font-size: 16px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-.tr-time { align-self: start; margin-top: 3px; padding: 2px 6px; border: 0; border-radius: var(--r-chip); background: none; color: var(--accent); font: inherit; font-size: var(--fs-small); line-height: var(--lh-small); text-align: left; cursor: pointer; }
+.tr-time { align-self: start; margin-top: 3px; padding: 2px 6px; border: 0; border-radius: var(--r-sm); background: none; color: var(--accent); font: inherit; font-size: var(--fs-small); line-height: var(--lh-small); text-align: left; cursor: pointer; }
 .tr-time:hover:enabled { background: var(--panel-2); }
 .tr-time:disabled { color: var(--muted); cursor: default; }
 .tr-par mark { border-radius: 3px; background: var(--wait-b); color: var(--wait-t); }
