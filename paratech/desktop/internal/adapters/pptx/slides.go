@@ -175,21 +175,8 @@ func textLines(s string, skipBlank bool) []string {
 }
 
 // clean drops the characters XML cannot hold and the bidi controls, which can make text look different from what it
-// says.
-func clean(s string) string { return values.StripBidi(xmlChars(s)) }
-
-// xmlChars keeps the characters XML 1.0 allows: tab, the line breaks and the ranges of its Char production.
-func xmlChars(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '\t' || r == '\n' || r == '\r':
-			return r
-		case r >= 0x20 && r <= 0xD7FF, r >= 0xE000 && r <= 0xFFFD, r >= 0x10000 && r <= 0x10FFFF:
-			return r
-		}
-		return -1
-	}, strings.ToValidUTF8(s, ""))
-}
+// says. The domain owns the rule, so Validate judges emptiness on the same text the slides show.
+func clean(s string) string { return values.CleanPresentationText(s) }
 
 // escape writes s escaped as XML character data.
 func escape(b *strings.Builder, s string) {

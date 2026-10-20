@@ -508,13 +508,13 @@ title,date,start,end,timezone,uid
 
 В приложении пока ничего не изменилось: есть только сборщик презентаций (`desktop/internal/adapters/pptx`), генерация и кнопки появятся во второй части. Шаблоны: «Бумага» (по умолчанию), «Графит» (тёмный), «Белый»; шрифт Golos Text, без него — системный шрифт без засечек.
 
-**[владельцу]** Проверка образцов. Собрать по файлу на шаблон (из `paratech/`):
+**[владельцу]** Проверка образцов. Собрать по файлу на шаблон (PowerShell, из `paratech/`):
 
-```
-PARATECH_PPTX_SAMPLE_DIR=<папка> go test -count=1 -run TestSample ./desktop/internal/adapters/pptx/
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\pptx-samples"; $env:PARATECH_PPTX_SAMPLE_DIR = "$env:USERPROFILE\pptx-samples"; go test -count=1 -run TestSample ./desktop/internal/adapters/pptx/
 ```
 
-В папке появятся `sample-paper.pptx`, `sample-graphite.pptx`, `sample-white.pptx`. Каждый открыть в PowerPoint и в LibreOffice Impress:
+В папке `%USERPROFILE%\pptx-samples` появятся `sample-paper.pptx`, `sample-graphite.pptx`, `sample-white.pptx`. Каждый открыть в PowerPoint и в LibreOffice Impress:
 
 - нет окна «восстановить содержимое» / «файл повреждён»;
 - 4 слайда 16:9: титульный (название, три строки под тонкой оранжевой чертой), заголовок и 6 тезисов, два столбца с подзаголовками, «Выводы» (строки без маркеров);

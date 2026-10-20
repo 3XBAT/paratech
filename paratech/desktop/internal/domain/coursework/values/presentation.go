@@ -46,7 +46,7 @@ type SlideKind string
 
 // Slide kinds.
 const (
-	SlideTitle      SlideKind = "title"       // Title and an optional Subtitle (author, course, date: one per line)
+	SlideTitle      SlideKind = "title"       // Title and an optional Subtitle (author, course, date: one per line, up to MaxSlideSubtitleLines)
 	SlideBullets    SlideKind = "bullets"     // Title and 1 to MaxSlideBullets Bullets
 	SlideTwoColumns SlideKind = "two_columns" // Title, Left and Right
 	SlideConclusion SlideKind = "conclusion"  // Title and up to MaxSlideBullets short Bullets
@@ -59,6 +59,7 @@ const (
 	MaxSlideTitleRunes    = 120
 	MaxSlideTextRunes     = 250 // a bullet or a column heading
 	MaxSlideSubtitleRunes = 300
+	MaxSlideSubtitleLines = 4 // blank lines are not counted
 	MaxSlideNotesRunes    = 4000
 )
 
@@ -115,6 +116,9 @@ func (s Slide) Validate() error {
 		if len(s.Bullets) > 0 || !s.Left.IsZero() || !s.Right.IsZero() {
 			return fmt.Errorf("%w: a title slide has only a title and a subtitle", ErrInvalidPresentation)
 		}
+		if n := presentationLineCount(s.Subtitle); n > MaxSlideSubtitleLines {
+			return fmt.Errorf("%w: subtitle has %d lines, want at most %d", ErrInvalidPresentation, n, MaxSlideSubtitleLines)
+		}
 		return presentationText("subtitle", s.Subtitle, MaxSlideSubtitleRunes, false)
 	case SlideBullets, SlideConclusion:
 		if s.Subtitle != "" || !s.Left.IsZero() || !s.Right.IsZero() {
@@ -156,12 +160,40 @@ func presentationBullets(name string, list []string, required bool) error {
 	return nil
 }
 
+// Lengths are counted on the raw text, so the input stays bounded; emptiness on the clean text, so a required text
+// is never rendered blank.
 func presentationText(name, s string, maxRunes int, required bool) error {
-	if required && strings.TrimSpace(s) == "" {
+	if required && strings.TrimSpace(CleanPresentationText(s)) == "" {
 		return fmt.Errorf("%w: empty %s", ErrInvalidPresentation, name)
 	}
 	if n := utf8.RuneCountInString(s); n > maxRunes {
 		return fmt.Errorf("%w: %s has %d characters, want at most %d", ErrInvalidPresentation, name, n, maxRunes)
 	}
 	return nil
+}
+
+// CleanPresentationText is the text a renderer shows: invalid UTF-8, the characters XML 1.0 cannot hold (C0 controls
+// other than tab and line breaks, U+FFFE, U+FFFF) and the bidi controls (StripBidi) are dropped.
+func CleanPresentationText(s string) string {
+	return StripBidi(strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return r
+		case r >= 0x20 && r <= 0xD7FF, r >= 0xE000 && r <= 0xFFFD, r >= 0x10000 && r <= 0x10FFFF:
+			return r
+		}
+		return -1
+	}, strings.ToValidUTF8(s, "")))
+}
+
+// presentationLineCount counts the lines of s that are not blank once clean, as a renderer shows them.
+func presentationLineCount(s string) int {
+	s = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(CleanPresentationText(s))
+	n := 0
+	for _, l := range strings.Split(s, "\n") {
+		if strings.Trim(l, " \t") != "" {
+			n++
+		}
+	}
+	return n
 }

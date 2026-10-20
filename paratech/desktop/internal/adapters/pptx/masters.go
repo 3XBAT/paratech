@@ -48,11 +48,14 @@ const (
 type box struct{ x, y, w, h int }
 
 // Geometry of the slides; the layouts repeat it so a slide the student adds looks the same.
-var (
+const (
 	marginX  = 838200
 	contentW = slideW - 2*marginX
 	columnW  = (contentW - 457200) / 2
+)
 
+// The boxes are vars only because Go has no struct constants; nothing assigns them.
+var (
 	coverTitle    = box{marginX, 1645920, contentW, 1828800}
 	coverAccent   = box{marginX, 3611880, 914400, 45720}
 	coverSubtitle = box{marginX, 3886200, contentW, 1828800}
@@ -78,6 +81,9 @@ const (
 // theme renders a theme part. PowerPoint repairs a file whose format scheme lists fewer than three styles of each
 // kind, so every list has three.
 func theme(name string, c colorScheme) string {
+	var n strings.Builder
+	escape(&n, name) // also escapes quotes, so it is safe in an attribute
+	name = n.String()
 	var b strings.Builder
 	b.WriteString(xmlHeader + `<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="` + name + `">`)
 	b.WriteString(`<a:themeElements><a:clrScheme name="` + name + `">`)

@@ -428,6 +428,30 @@ func TestRenderEscapesText(t *testing.T) {
 	if got := paragraphs(t, parts["docProps/core.xml"]); len(got) != 0 || !strings.Contains(parts["docProps/core.xml"], "<dc:title>&lt;b&gt;") {
 		t.Errorf("core.xml: %s", parts["docProps/core.xml"])
 	}
+
+	// Optional texts that clean to nothing still give well-formed parts: a heading is dropped, a notes line is blank.
+	p = values.Presentation{Slides: []values.Slide{
+		{Kind: values.SlideTwoColumns, Title: "t",
+			Left:  values.SlideColumn{Heading: "\x00\u202E", Bullets: []string{"l"}},
+			Right: values.SlideColumn{Heading: "\x01", Bullets: []string{"r"}},
+			Notes: "first\n\x00\u202E\x1f\nthird"},
+		{Kind: values.SlideTitle, Title: "t", Subtitle: "\u2066\x00", Notes: "\x00\u202E"},
+	}}
+	parts = checkPackage(t, render(t, p))
+	if got, want := paragraphs(t, parts["ppt/slides/slide1.xml"]), []string{"t", "l", "r"}; !slices.Equal(got, want) {
+		t.Errorf("columns = %q, want %q", got, want)
+	}
+	if got, want := paragraphs(t, parts["ppt/notesSlides/notesSlide1.xml"]), []string{"first", "", "third"}; !slices.Equal(got, want) {
+		t.Errorf("notes 1 = %q, want %q", got, want)
+	}
+	if got, want := paragraphs(t, parts["ppt/slides/slide2.xml"]), []string{"t"}; !slices.Equal(got, want) {
+		t.Errorf("cover = %q, want %q", got, want)
+	}
+	if got, want := paragraphs(t, parts["ppt/notesSlides/notesSlide2.xml"]), []string{""}; !slices.Equal(got, want) {
+		t.Errorf("notes 2 = %q, want %q", got, want)
+	}
+
+	wellFormed(t, "theme", theme(`a"<&'b`, palettes[values.PresentationPaper].scheme))
 }
 
 func TestRenderTemplates(t *testing.T) {
@@ -499,6 +523,9 @@ func TestRenderErrors(t *testing.T) {
 func TestSample(t *testing.T) {
 	dirs := []string{t.TempDir()}
 	if d := os.Getenv("PARATECH_PPTX_SAMPLE_DIR"); d != "" {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		dirs = append(dirs, d)
 	}
 	for _, tpl := range values.PresentationTemplates() {

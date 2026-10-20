@@ -41,6 +41,16 @@ func TestPresentationValidate(t *testing.T) {
 		{"longest title", func(p *Presentation) { p.Slides[0].Title = long(MaxSlideTitleRunes) }, true},
 		{"title too long", func(p *Presentation) { p.Slides[0].Title = long(MaxSlideTitleRunes + 1) }, false},
 		{"subtitle too long", func(p *Presentation) { p.Slides[0].Subtitle = long(MaxSlideSubtitleRunes + 1) }, false},
+		{"most subtitle lines", func(p *Presentation) { p.Slides[0].Subtitle = "a\nb\r\n\n \nc\rd" }, true},
+		{"too many subtitle lines", func(p *Presentation) { p.Slides[0].Subtitle = "a\nb\r\nc\rd\ne" }, false},
+		{"control-only line is not a subtitle line", func(p *Presentation) { p.Slides[0].Subtitle = "a\nb\nc\nd\n\x00\u202E" }, true},
+		{"NUL title", func(p *Presentation) { p.Slides[0].Title = "\x00" }, false},
+		{"bidi title", func(p *Presentation) { p.Slides[0].Title = "\u202E" }, false},
+		{"control-only title", func(p *Presentation) { p.Slides[1].Title = "\x01\uFFFE\u2066 \xff" }, false},
+		{"NUL bullet", func(p *Presentation) { p.Slides[1].Bullets[0] = "\x00" }, false},
+		{"bidi bullet", func(p *Presentation) { p.Slides[1].Bullets[0] = "\u202E" }, false},
+		{"bidi column bullet", func(p *Presentation) { p.Slides[2].Right.Bullets[0] = "\u202E\x00" }, false},
+		{"text around controls", func(p *Presentation) { p.Slides[1].Bullets[0] = "\u202Ea\x00" }, true},
 		{"title slide with bullets", func(p *Presentation) { p.Slides[0].Bullets = many(1) }, false},
 		{"title slide with a column", func(p *Presentation) { p.Slides[0].Right.Heading = "x" }, false},
 		{"notes too long", func(p *Presentation) { p.Slides[2].Notes = long(MaxSlideNotesRunes + 1) }, false},
@@ -72,6 +82,23 @@ func TestPresentationValidate(t *testing.T) {
 				t.Fatalf("Validate() = %v, want ErrInvalidPresentation", err)
 			}
 		})
+	}
+}
+
+func TestCleanPresentationText(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain текст", "plain текст"},
+		{"tab\tline\nbreak\r", "tab\tline\nbreak\r"},
+		{"a\x00b\x1fc\x7fd", "abc\x7fd"},
+		{"x\uFFFEy\uFFFFz\uFFFD", "xyz\uFFFD"},
+		{"\u202Eright\u2066\u200F", "right"},
+		{"\xffbad", "bad"},
+		{"😀", "😀"},
+	}
+	for _, tc := range cases {
+		if got := CleanPresentationText(tc.in); got != tc.want {
+			t.Errorf("CleanPresentationText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
