@@ -436,48 +436,135 @@ export function rowLinks(
 }
 
 /**
- * A finished row goes to the one folded group «Завершённые»: the summary is ready or the chain failed. A row with
+ * A finished row goes to the folded «Завершённые» of «Записи»: the summary is ready or the chain failed. A row with
  * Stop or Run now stays in view; a failed row keeps its link (models, connections, sound check) in the group.
  */
 export function isFinishedRow(r: Pick<RecordingItem, "stage" | "stoppable" | "action">): boolean {
   return !r.stoppable && r.action !== "runNow" && (r.stage === "done" || r.stage === "failed");
 }
 
-/** One row of the «Завершённые» group: a recording or one of the other jobs (homework draft, email). */
-export type FinishedEntry = { kind: "recording"; item: RecordingItem } | { kind: "job"; item: JobItem };
-
-/** What «Записи и задачи» shows: rows in progress, unfinished other jobs, and the one «Завершённые» group. */
-export interface PageGroups {
-  recordings: RecordingItem[];
-  otherJobs: JobItem[];
-  finished: FinishedEntry[];
-}
-
-// A recording sorts by its start, a job by its creation: a job made from a lesson's summary lands next to it.
-function entryTime(e: FinishedEntry): number {
-  const t = new Date(e.kind === "recording" ? e.item.startedAt : e.item.createdAt).getTime();
-  return Number.isNaN(t) ? -Infinity : t;
+/** One section of the page: the rows in progress («Идут») and the finished ones («Завершённые (N)»), newest first. */
+export interface PageSection<T> {
+  active: T[];
+  finished: T[];
 }
 
 /**
- * Splits the page into its groups. Finished recordings and finished other jobs share the one «Завершённые» group,
- * newest first, so a failed email or homework draft keeps its error in view.
+ * What «Записи и задачи» shows (TASK-098): «Записи» (a recording with its whole chain) and «Задачи» (drafts, emails,
+ * calendar sync and other jobs without a recording), each with its own groups.
  */
-export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly JobItem[]): PageGroups {
-  const rec = splitFinished(recordings, isFinishedRow);
-  const job = splitFinished(jobs, isFinishedJob);
-  const finished: FinishedEntry[] = [
-    ...rec.finished.map((item) => ({ kind: "recording" as const, item })),
-    ...job.finished.map((item) => ({ kind: "job" as const, item })),
-  ];
-  // Array.prototype.sort is stable: equal times keep the core's order, recordings before jobs.
-  finished.sort((a, b) => entryTime(b) - entryTime(a));
-  return { recordings: rec.active, otherJobs: job.active, finished };
+export interface PageGroups {
+  recordings: PageSection<RecordingItem>;
+  tasks: PageSection<JobItem>;
 }
 
-/** The key of a «Завершённые» row; recording and job ids may not collide. */
-export function finishedKey(e: FinishedEntry): string {
-  return `${e.kind}:${e.item.id}`;
+function timeOf(rfc3339: string): number {
+  const t = new Date(rfc3339).getTime();
+  return Number.isNaN(t) ? -Infinity : t;
+}
+
+// Newest first; Array.prototype.sort is stable, so equal times keep the core's order.
+function newestFirst<T>(items: T[], time: (item: T) => string): T[] {
+  return items.sort((a, b) => {
+    const ta = timeOf(time(a));
+    const tb = timeOf(time(b));
+    return ta === tb ? 0 : tb > ta ? 1 : -1;
+  });
+}
+
+const draftJobType = "homework_draft";
+
+// a is newer than b: created later, then updated later, then the greater id, so the choice never depends on the order.
+function newerJob(a: JobItem, b: JobItem): boolean {
+  const ca = timeOf(a.createdAt);
+  const cb = timeOf(b.createdAt);
+  if (ca !== cb) {
+    return ca > cb;
+  }
+  const ua = timeOf(a.updatedAt);
+  const ub = timeOf(b.updatedAt);
+  if (ua !== ub) {
+    return ua > ub;
+  }
+  return a.id > b.id;
+}
+
+/**
+ * Only the latest draft job of each assignment (TASK-098): an older finished one, also a failed one before a newer
+ * done one, is not shown. An older draft still in progress (or offering Run now) stays, like every row in progress.
+ * Other jobs and drafts without an assignment stay; the order is kept.
+ */
+export function latestDrafts(jobs: readonly JobItem[]): JobItem[] {
+  const latest = new Map<string, JobItem>();
+  for (const j of jobs) {
+    if (j.type !== draftJobType || j.assignmentId === "") {
+      continue;
+    }
+    const seen = latest.get(j.assignmentId);
+    if (seen === undefined || newerJob(j, seen)) {
+      latest.set(j.assignmentId, j);
+    }
+  }
+  return jobs.filter(
+    (j) => j.type !== draftJobType || j.assignmentId === "" || latest.get(j.assignmentId) === j || !isFinishedJob(j),
+  );
+}
+
+/** Splits the page into its two sections; finished recordings sort by their start, finished jobs by their creation. */
+export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly JobItem[]): PageGroups {
+  const rec = splitFinished(recordings, isFinishedRow);
+  const job = splitFinished(latestDrafts(jobs), isFinishedJob);
+  return {
+    recordings: { active: rec.active, finished: newestFirst(rec.finished, (r) => r.startedAt) },
+    tasks: { active: job.active, finished: newestFirst(job.finished, (j) => j.createdAt) },
+  };
+}
+
+/** The hint of an empty «Задачи». */
+export const tasksEmptyText = "Здесь появятся черновики заданий, письма и синхронизация календаря.";
+
+/** What a task row does besides the round retry: «Запустить сейчас» and «Открыть задание». */
+export type JobItemKey = "runNow" | "assignment";
+
+export interface JobRowItem {
+  key: JobItemKey;
+  label: string;
+}
+
+export const jobItemLabels: Readonly<Record<JobItemKey, string>> = {
+  runNow: actionLabels.runNow,
+  assignment: "Открыть задание",
+};
+
+/** The one main button of a task row and its «⋯» items, like a recording row (TASK-096, TASK-098). */
+export function jobActions(
+  j: Pick<JobItem, "runNowOffered" | "assignmentId">,
+  offers: { assignment: boolean },
+): { main: JobRowItem | null; menu: JobRowItem[] } {
+  const items: JobRowItem[] = [];
+  if (j.runNowOffered) {
+    items.push({ key: "runNow", label: jobItemLabels.runNow });
+  }
+  if (offers.assignment && j.assignmentId !== "") {
+    items.push({ key: "assignment", label: jobItemLabels.assignment });
+  }
+  return { main: items[0] ?? null, menu: items.slice(1) };
+}
+
+/** The chip's tooltip of a task row: the last error and the attempts, which the row itself does not show. */
+export function jobDetails(j: Pick<JobItem, "lastError" | "attempts" | "maxAttempts">): string {
+  const attempts = j.maxAttempts > 0 ? `Попыток: ${j.attempts} из ${j.maxAttempts}` : "";
+  return [j.lastError.trim(), attempts].filter((s) => s !== "").join("\n");
+}
+
+/** The muted line of a task row: when it last changed, to the minute («Обновлена 17.09.2026, 10:12»). */
+export function jobMeta(j: Pick<JobItem, "updatedAt">): string {
+  const d = new Date(j.updatedAt);
+  if (j.updatedAt === "" || Number.isNaN(d.getTime())) {
+    return "";
+  }
+  const at = d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `Обновлена ${at}`;
 }
 
 /** A recording is capturing: the page ticks its elapsed time every second. */

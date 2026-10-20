@@ -364,7 +364,6 @@ html, body, #root { height: 100%; }
 
 /* Deleting recordings (TASK-095): the «⋯» menu leaves the card, the row checkbox, the bar of the selected ones and the
    confirmation, which scrolls when many recordings are listed. */
-.recordings .card.rows { overflow: visible; }
 .row-check { display: inline-flex; align-items: baseline; gap: 8px; }
 .mmenu-hint { max-width: 260px; padding: 0 10px 6px; white-space: normal; }
 .rec-selected { margin-bottom: 12px; }
@@ -419,4 +418,28 @@ html, body, #root { height: 100%; }
 @media (forced-colors: active) {
   .kb-snippet mark { background: Mark; color: MarkText; }
   .kb-focus { border-left: 3px solid Highlight; }
+}
+
+/* «Записи и задачи» (TASK-098): one row grid for every card of both sections. Only the title track flexes; the status,
+   button and «⋯» tracks are fixed, so the columns start at the same line in separate cards too (a subgrid per card
+   sizes its tracks by that card's content). The «⋯» slot exists in every row, empty without a menu. */
+.arows { --arow-st: 17rem; --arow-btn: 14rem; --arow-menu: 32px; overflow: visible; }
+.arows > .row { grid-template-columns: minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 6px + var(--arow-menu)); }
+/* Child combinators: only the row's own actions cell, not the «Переключиться»/«Оставить» of the advice in .row-below. */
+.arows > .row > .acts { display: grid; grid-template-columns: var(--arow-btn) var(--arow-menu); gap: 6px; }
+.arows > .row > .acts > .btn, .arows > .row > .acts > .btn-with-reason { grid-column: 1; width: 100%; }
+.arows > .row > .acts > .mmenu { grid-column: 2; }
+.page .arows-sub { margin: 16px 0 8px; color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; }
+.group-title + .arows-sub { margin-top: 0; }
+/* Narrower window (also 150 % scaling on a small screen): the title across the row, then the status and the actions,
+   still on shared tracks. It switches earlier than other lists: the fixed tracks would squeeze the title. */
+@container app (max-width: 1000px) {
+  .arows > .row { grid-template-columns: minmax(0, 1fr) calc(var(--arow-btn) + 6px + var(--arow-menu)); }
+  .arows > .row > .row-main { grid-column: 1 / -1; }
+}
+/* Narrow window: next to the fixed actions track the status would shrink to nothing, so the title, the status and the
+   actions stack in one column. */
+@container app (max-width: 720px) {
+  .arows > .row { grid-template-columns: minmax(0, 1fr); }
+  .arows > .row > .acts { justify-self: end; }
 }

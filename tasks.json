@@ -2163,7 +2163,7 @@
             "dependencies": [
                 "TASK-096"
             ],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }
