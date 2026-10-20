@@ -521,7 +521,7 @@ export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly 
 }
 
 /** The hint of an empty «Задачи». */
-export const tasksEmptyText = "Здесь появятся черновики заданий, письма и синхронизация календаря.";
+export const tasksEmptyText = "Здесь появятся решения домашних заданий, письма и синхронизация календаря.";
 
 /** What a task row does besides the round retry: «Запустить сейчас» and «Открыть задание». */
 export type JobItemKey = "runNow" | "assignment";

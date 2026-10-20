@@ -228,7 +228,7 @@ func sameRequest(key string, req values.DraftRequest) bool {
 }
 
 // ActiveGeneration returns the generation of assignment a that is pending or running, with its status and progress
-// (TASK-094): the screen shows «Готовим черновик…» also after it was left and opened again, and offers no second
+// (TASK-094): the screen shows «Готовим решение…» also after it was left and opened again, and offers no second
 // generation meanwhile. ok is false when there is none. A missing assignment wraps shared.ErrNotFound.
 func (s *Drafts) ActiveGeneration(ctx context.Context, a shared.AssignmentID) (view GenerationView, ok bool, err error) {
 	if _, err := s.assignments.Get(ctx, a); err != nil {

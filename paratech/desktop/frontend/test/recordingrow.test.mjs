@@ -550,12 +550,12 @@ test("a task row renders no technical text and keeps the «⋯» cell, empty wit
   const noop = () => undefined;
   const failed = job({
     type: "homework_draft", status: "FAILED", lastError: "llm: <b>bad</b>", attempts: 3, maxAttempts: 3,
-    assignmentId: "a1", label: "Черновик: <i>Эссе</i> · История",
+    assignmentId: "a1", label: "ДЗ: <i>Эссе</i> · История",
   });
   const html = renderJob(failed, { onOpenAssignment: noop });
   assert.equal(html.split("опыток").length - 1, 1, "the attempts only once: in the chip's title");
   assert.ok(html.includes('title="llm: &lt;b&gt;bad&lt;/b&gt;\nПопыток: 3 из 3"'), "the error and attempts are in the chip's title");
-  assert.ok(html.includes("Черновик: &lt;i&gt;Эссе&lt;/i&gt; · История") && !html.includes("<i>"), "model text as text only");
+  assert.ok(html.includes("ДЗ: &lt;i&gt;Эссе&lt;/i&gt; · История") && !html.includes("<i>"), "model text as text only");
   assert.match(actsOf(html), /^<div class="acts"><button type="button" class="btn">.*Открыть задание<\/button><div class="mmenu"><\/div><\/div>/);
 
   const plain = renderJob(job({ status: "COMPLETED", type: "calendar_sync" }));

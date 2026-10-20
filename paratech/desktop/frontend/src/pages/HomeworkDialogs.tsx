@@ -90,7 +90,7 @@ export function SendDialog(props: {
       onCancel={() => void onCancelSend()}
     >
       <dl className="hw-send">
-        <dt>Черновик</dt>
+        <dt>Решение</dt>
         <dd className="num">Версия {props.version}</dd>
         <dt>Кому</dt>
         <dd>

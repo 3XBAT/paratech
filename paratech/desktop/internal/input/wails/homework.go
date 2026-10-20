@@ -27,13 +27,13 @@ const (
 	ErrHomeworkUnavailable   = homeworkError("Не удалось выполнить действие. Попробуйте ещё раз.")
 	ErrHomeworkInvalidID     = homeworkError("Неверный идентификатор.")
 	ErrHomeworkNotFound      = homeworkError("Задание не найдено: обновите список.")
-	ErrDraftVersionNotFound  = homeworkError("Такой версии черновика нет: обновите страницу.")
-	ErrDraftStale            = homeworkError("Черновик изменился: появилась новая версия. Обновите страницу и повторите.")
+	ErrDraftVersionNotFound  = homeworkError("Такой версии решения нет: обновите страницу.")
+	ErrDraftStale            = homeworkError("Решение изменилось: появилась новая версия. Обновите страницу и повторите.")
 	ErrDraftInvalid          = homeworkError("Заголовок: одна строка до 200 символов, текст: до 16000 символов; оба не пустые.")
-	ErrDraftFull             = homeworkError("У черновика уже 100 версий: больше добавить нельзя.")
+	ErrDraftFull             = homeworkError("У решения уже 100 версий: больше добавить нельзя.")
 	ErrInstructionInvalid    = homeworkError("Инструкция слишком длинная (больше 4 КБ) или содержит недопустимые символы.")
-	ErrGenerateRetries       = homeworkError("Эта генерация уже много раз не удалась. Измените инструкцию или текст черновика.")
-	ErrGenerationRunning     = homeworkError("Черновик уже готовится. Дождитесь окончания и повторите.")
+	ErrGenerateRetries       = homeworkError("Эта генерация уже много раз не удалась. Измените инструкцию или текст решения.")
+	ErrGenerationRunning     = homeworkError("Решение уже готовится. Дождитесь окончания и повторите.")
 	ErrSendFormat            = homeworkError("Неизвестный формат вложения: выберите .docx или .txt.")
 	ErrGenerationNotFound    = homeworkError("Генерация не найдена: обновите страницу.")
 	ErrSendNotFound          = homeworkError("Отправка не найдена: подготовьте её ещё раз.")
@@ -68,7 +68,7 @@ const (
 
 	msgWaitingNetwork   = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама."
 	msgWaitingQuota     = "Лимит обработки исчерпан. Генерация продолжится, когда лимит обновится."
-	msgGenerationFailed = "Не удалось подготовить черновик. Попробуйте ещё раз."
+	msgGenerationFailed = "Не удалось подготовить решение. Попробуйте ещё раз."
 	msgGenerationCancel = "Генерация отменена."
 
 	msgRejectedDefault = "Отправить нельзя: подготовьте отправку ещё раз."
@@ -97,17 +97,17 @@ var generationMessages = []struct {
 	err error
 	msg string
 }{
-	{homeworkflow.ErrDraftChanged, "Черновик изменился во время генерации. Сгенерируйте ещё раз."},
+	{homeworkflow.ErrDraftChanged, "Решение изменилось во время генерации. Сгенерируйте ещё раз."},
 	{homeworkflow.ErrDraftFull, string(ErrDraftFull)},
 	{homeworkflow.ErrDraftAssignmentGone, "Задание удалено."},
-	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: черновик не подготовить."},
+	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: решение не подготовить."},
 	{homeworkflow.ErrDraftInvalidAnswer, "Сервис конспектов ответил в неверном виде. Попробуйте ещё раз."},
 }
 
 // rejectMessages explain why a send cannot be confirmed.
 var rejectMessages = map[proposal.RejectReason]string{
 	proposal.ReasonNoRecipient:       "Не указан адрес получателя: задайте его в разделе «Подключения».",
-	proposal.ReasonNoArtifact:        "Нет сохранённого файла с заданием: сначала сохраните черновик в файл.",
+	proposal.ReasonNoArtifact:        "Нет сохранённого файла с заданием: сначала сохраните решение в файл.",
 	proposal.ReasonUnknownAssignment: "Задание не найдено: обновите список.",
 }
 
@@ -240,7 +240,7 @@ type VersionText struct {
 }
 
 // AssignmentDetail is an opened assignment: its versions in order, the text of the latest one (null: no draft) and
-// the generation that is pending or running (null: none; TASK-094), so the page shows «Готовим черновик…» and offers
+// the generation that is pending or running (null: none; TASK-094), so the page shows «Готовим решение…» and offers
 // no second generation also after it was left and opened again.
 type AssignmentDetail struct {
 	Assignment AssignmentItem    `json:"assignment"`

@@ -177,7 +177,7 @@ type JobItem struct {
 	RunNowOffered   bool   `json:"runNowOffered"`
 
 	// The assignment of a homework draft job (TASK-094): AssignmentID opens it in «Домашние задания»; Label is the
-	// row's name «Черновик: <задание> · <предмет>» ("" when the job is not a draft or the assignment is unknown).
+	// row's name «ДЗ: <задание> · <предмет>» ("" when the job is not a draft or the assignment is unknown).
 	AssignmentID      string `json:"assignmentId"`
 	AssignmentTitle   string `json:"assignmentTitle"`
 	AssignmentSubject string `json:"assignmentSubject"`
@@ -186,7 +186,7 @@ type JobItem struct {
 
 // Fixed texts of the job rows (Russian UI).
 const (
-	draftLabel     = "Черновик: "
+	draftLabel     = "ДЗ: "
 	draftSeparator = " · "
 )
 

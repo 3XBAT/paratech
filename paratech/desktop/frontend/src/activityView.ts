@@ -37,7 +37,7 @@ export const jobTypeLabels: Readonly<Record<string, string>> = {
   extract_homework: "Поиск домашнего задания",
   calendar_sync: "Синхронизация календаря",
   // The jobs the page still lists since TASK-076 (the chain jobs are inside their recording rows).
-  homework_draft: "Черновик домашнего задания",
+  homework_draft: "Решение домашнего задания",
   send_email: "Отправка письма",
 };
 
@@ -60,7 +60,7 @@ export function jobTypeLabel(type: string): string {
   return lookup(jobTypeLabels, type);
 }
 
-/** The title of a job row: the core's label of a draft job («Черновик: <задание> · <предмет>»), else its type. */
+/** The title of a job row: the core's label of a draft job («ДЗ: <задание> · <предмет>»), else its type. */
 export function jobTitle(j: { type: string; label: string }): string {
   return j.label !== "" ? j.label : jobTypeLabel(j.type);
 }

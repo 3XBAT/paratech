@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { callByName } from "../bindings/runtime";
 import { recognitionLoads, type RecognitionLoad } from "../bindings/load";
 import {
@@ -99,6 +99,17 @@ export function SettingsPage() {
     setThemeChoice(choice);
   }
 
+  const toggleRow = (toggle: Toggle, s: Settings) => (
+    <Switch
+      label={labels[toggle]}
+      checked={s[toggle]}
+      disabled={saving}
+      hint={hints[toggle]}
+      onChange={(checked) => void change(toggle, checked)}
+    />
+  );
+
+  // iOS-style groups as in docs/design/concept-strict.html: «Запись», «Обработка», «Оформление», «Профиль студента».
   return (
     <section className="page">
       <div className="head">
@@ -107,67 +118,74 @@ export function SettingsPage() {
           <h1>Настройки</h1>
         </div>
       </div>
-      <Card className="settings" label="Настройки">
-        {settings === null && !error && <p className="muted">Загрузка…</p>}
-        {settings !== null &&
-          (Object.keys(labels) as Toggle[]).map((toggle) => (
-            <Switch
-              key={toggle}
-              label={labels[toggle]}
-              checked={settings[toggle]}
-              disabled={saving}
-              hint={hints[toggle]}
-              onChange={(checked) => void change(toggle, checked)}
-            />
-          ))}
-        {settings !== null && (
-          <div className="set">
-            <span>{estimateTexts.setting}</span>
-            <Segmented
-              label={estimateTexts.setting}
-              options={loadOptions}
-              value={settings.recognitionLoad}
-              onChange={chooseLoad}
-            />
-            <ul className="small muted load-modes">
-              {recognitionLoads.map((l) => (
-                <li key={l}>
-                  «{loadLabels[l]}» — {loadDescriptions[l]}
-                </li>
-              ))}
-            </ul>
-            <span className="small muted">{estimateTexts.nextRun}</span>
-            {estimate !== null &&
-              (estimate.heavy ? (
-                <span className="small slow" title={estimatesTip(settings.loadEstimates)}>
-                  <b>{estimate.text}</b>
-                </span>
-              ) : (
-                <span className="small muted" title={estimatesTip(settings.loadEstimates)}>
-                  {estimate.text}
-                </span>
-              ))}
-          </div>
-        )}
-        {/* While a change is saved every switch waits for it; this line says why they are dimmed. */}
-        {saving && (
-          <p className="small muted" role="status">
-            Сохраняется…
-          </p>
-        )}
-        {error && (
-          <ResultLine kind="fail" role="alert">
-            {error}
-          </ResultLine>
-        )}
+      {settings === null && !error && <p className="muted">Загрузка…</p>}
+      {settings !== null && (
+        <>
+          <SettingsGroup caption="Запись">{toggleRow("recordingPromptsEnabled", settings)}</SettingsGroup>
+          <SettingsGroup caption="Обработка">
+            {toggleRow("processOnlyOnAcPower", settings)}
+            <div className="set">
+              <span>{estimateTexts.setting}</span>
+              <Segmented
+                label={estimateTexts.setting}
+                options={loadOptions}
+                value={settings.recognitionLoad}
+                onChange={chooseLoad}
+              />
+              <ul className="small muted load-modes">
+                {recognitionLoads.map((l) => (
+                  <li key={l}>
+                    «{loadLabels[l]}» — {loadDescriptions[l]}
+                  </li>
+                ))}
+              </ul>
+              <span className="small muted">{estimateTexts.nextRun}</span>
+              {estimate !== null &&
+                (estimate.heavy ? (
+                  <span className="small slow" title={estimatesTip(settings.loadEstimates)}>
+                    <b>{estimate.text}</b>
+                  </span>
+                ) : (
+                  <span className="small muted" title={estimatesTip(settings.loadEstimates)}>
+                    {estimate.text}
+                  </span>
+                ))}
+            </div>
+          </SettingsGroup>
+        </>
+      )}
+      {/* While a change is saved every switch waits for it; this line says why they are dimmed. */}
+      {saving && (
+        <p className="small muted group-foot" role="status">
+          Сохраняется…
+        </p>
+      )}
+      {error && (
+        <ResultLine kind="fail" role="alert">
+          {error}
+        </ResultLine>
+      )}
+      <SettingsGroup caption="Оформление">
         <div className="set">
           <span>Тема</span>
           <Segmented label="Тема" options={themeOptions} value={theme} onChange={chooseTheme} />
           <span className="small muted">«Как в системе» следует настройке Windows: светлый или тёмный режим.</span>
         </div>
-      </Card>
+      </SettingsGroup>
       <ProfileCard api={api} />
     </section>
+  );
+}
+
+// One settings group: the caption above, its rows in a card.
+function SettingsGroup(props: { caption: string; children: ReactNode }) {
+  return (
+    <div className="gsec">
+      <h2 className="group-cap">{props.caption}</h2>
+      <Card className="settings" label={props.caption}>
+        {props.children}
+      </Card>
+    </div>
   );
 }
 
