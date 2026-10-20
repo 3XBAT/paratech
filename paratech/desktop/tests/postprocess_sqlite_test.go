@@ -104,6 +104,15 @@ type ppEnv struct {
 // newPPEnv wires the stack with llm as the LLM Client and stores lesson l1, its completed recording r1 and model m1.
 func newPPEnv(t *testing.T, llm homeworkflow.LLMClient) *ppEnv {
 	t.Helper()
+	return newPPEnvWith(t, llm, []transcript.Segment{
+		{StartMs: 0, EndMs: 4000, Text: "Today: rivers and their deltas."},
+		{StartMs: 4000, EndMs: 9000, Text: "Homework: read chapter 4 by Friday and draw a map of rivers by next Wednesday."},
+	})
+}
+
+// newPPEnvWith is newPPEnv whose STT engine recognises segs.
+func newPPEnvWith(t *testing.T, llm homeworkflow.LLMClient, segs []transcript.Segment) *ppEnv {
+	t.Helper()
 	dir := t.TempDir()
 	e := &ppEnv{t: t, clock: testenv.NewFakeClock(ppNow)}
 
@@ -128,10 +137,7 @@ func newPPEnv(t *testing.T, llm homeworkflow.LLMClient) *ppEnv {
 		t.Fatal(err)
 	}
 
-	doc, err := transcript.NewDocument("ru", []transcript.Segment{
-		{StartMs: 0, EndMs: 4000, Text: "Today: rivers and their deltas."},
-		{StartMs: 4000, EndMs: 9000, Text: "Homework: read chapter 4 by Friday and draw a map of rivers by next Wednesday."},
-	})
+	doc, err := transcript.NewDocument("ru", segs)
 	if err != nil {
 		t.Fatal(err)
 	}

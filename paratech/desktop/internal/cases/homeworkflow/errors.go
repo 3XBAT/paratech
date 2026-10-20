@@ -55,7 +55,7 @@ var (
 	ErrTranscriptUnreadable = errors.New("post-processing: transcript document is unreadable")
 
 	// ErrNothingToProcess means the transcript holds no recognised speech. Permanent.
-	ErrNothingToProcess = errors.New("post-processing: the transcript is empty")
+	ErrNothingToProcess = errors.New(values.NothingToProcessMessage)
 
 	// ErrContextRefused means the lesson context cannot be sent: too large or not valid text. Permanent.
 	ErrContextRefused = errors.New("post-processing: the lesson context cannot be sent")

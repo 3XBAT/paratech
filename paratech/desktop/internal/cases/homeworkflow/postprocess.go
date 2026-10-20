@@ -451,7 +451,9 @@ func (p *PostProcessor) withNextLesson(ctx context.Context, snap job.Snapshot, s
 	return in, nil
 }
 
-// readSegments reads and validates the transcript document.
+// readSegments reads and validates the transcript document and returns its speech: whisper's marks such as
+// "[BLANK_AUDIO]" never reach the model (TASK-110), so a transcript without speech fails with ErrNothingToProcess
+// before any call.
 func (p *PostProcessor) readSegments(ctx context.Context, ref shared.ArtifactRef) ([]contextselection.Segment, error) {
 	rc, err := p.artifacts.Open(ctx, ref)
 	if err != nil {
@@ -467,7 +469,7 @@ func (p *PostProcessor) readSegments(ctx context.Context, ref shared.ArtifactRef
 	if err != nil {
 		return nil, err
 	}
-	segs := doc.Segments()
+	segs := doc.Speech()
 	out := make([]contextselection.Segment, len(segs))
 	for i, s := range segs {
 		out[i] = contextselection.Segment{StartMs: s.StartMs, EndMs: s.EndMs, Text: s.Text}

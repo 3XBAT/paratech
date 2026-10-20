@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -22,6 +23,15 @@ const (
 // key, the quota or the provider. The recordings screen offers the connections page for it and «Повторить» for the
 // other failures (TASK-086); the job may prefix it ("attempts exhausted: ...").
 const LLMFailedMessage = "post-processing: the LLM call failed"
+
+// NothingToProcessMessage is the fixed last error of a post-processing job whose transcript holds no speech (TASK-110):
+// the recordings screen tells that the recording has no speech instead of offering «Повторить». The job may prefix it.
+const NothingToProcessMessage = "post-processing: the transcript is empty"
+
+// IsNothingToProcess reports the last error of a post-processing job that failed with NothingToProcessMessage.
+func IsNothingToProcess(lastError string) bool {
+	return strings.HasSuffix(lastError, NothingToProcessMessage)
+}
 
 // PostProcessRequest is the payload of a summarize, extract_homework or lecture_text job: the transcript id only. The lesson
 // context and the transcript text are read when the job runs, never copied into the job.

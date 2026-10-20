@@ -32,6 +32,7 @@ const (
 	stepLiveDelete = "delete live parts"
 	stepLoad       = "read the load mode"
 	stepSpeed      = "store the measured speed"
+	stepSpeech     = "check speech"
 )
 
 // Service is the handler of STT jobs (PRD sections 4.3, 7 and 8): it transcribes the final audio of a COMPLETED
@@ -105,7 +106,7 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 	// An earlier attempt stored the transcript and then crashed or failed to publish.
 	switch t, err := s.transcripts.Get(ctx, id); {
 	case err == nil:
-		return s.finish(ctx, snap, req, t)
+		return s.finishStored(ctx, snap, req, t)
 	case !errors.Is(err, shared.ErrNotFound):
 		return s.retry(snap, stepTranscript, ErrStorage, err)
 	}
@@ -142,7 +143,7 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		t = stored
 	}
 
-	return s.finish(ctx, snap, req, t)
+	return s.finish(ctx, snap, req, t, doc.HasSpeech())
 }
 
 // inputs loads the recording with its final track and the pinned model.
@@ -279,12 +280,31 @@ func (s *Service) readDocument(ctx context.Context, ref shared.ArtifactRef) (tra
 	return transcript.ParseDocument(data)
 }
 
-// finish checks that the stored transcript is this job's and publishes the completion event.
-func (s *Service) finish(ctx context.Context, snap job.Snapshot, req values.STTRequest, t *transcript.Transcript) error {
+// finishStored finishes with a transcript an earlier attempt stored, reading its document for the speech check. An
+// unreadable document is published as before: post-processing reports it.
+func (s *Service) finishStored(ctx context.Context, snap job.Snapshot, req values.STTRequest, t *transcript.Transcript) error {
+	doc, err := s.readDocument(ctx, t.Text())
+	switch {
+	case err == nil:
+		return s.finish(ctx, snap, req, t, doc.HasSpeech())
+	case errors.Is(err, shared.ErrNotFound), errors.Is(err, transcript.ErrInvalidDocument):
+		return s.finish(ctx, snap, req, t, true)
+	}
+	return s.retry(snap, stepDocument, ErrStorage, err)
+}
+
+// finish checks that the stored transcript is this job's and publishes the completion event. A transcript without
+// speech (TASK-110: only marks such as "[BLANK_AUDIO]") stays stored but is not published, so nothing is
+// post-processed and the Hub is not called; the job fails with ErrNoSpeech, which the recordings screen shows like a
+// silent recording.
+func (s *Service) finish(ctx context.Context, snap job.Snapshot, req values.STTRequest, t *transcript.Transcript, speech bool) error {
 	if t.RecordingID() != req.Recording() {
 		return s.permanent(snap, stepTranscript, ErrTranscriptConflict, nil)
 	}
 	s.deleteLive(ctx, snap, t.RecordingID())
+	if !speech {
+		return s.permanent(snap, stepSpeech, ErrNoSpeech, nil)
+	}
 	if err := s.events.TranscriptCreated(ctx, t.Created()); err != nil {
 		return s.retry(snap, stepPublish, ErrPublish, err)
 	}

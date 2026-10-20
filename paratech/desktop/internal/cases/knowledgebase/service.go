@@ -389,7 +389,7 @@ func (s *Service) segments(ctx context.Context, l kb.Lesson) ([]transcript.Segme
 		s.log.Warn(opTranscript, slog.String("recording", string(l.Recording)), slog.Any("cause", err))
 		return nil, nil
 	}
-	return doc.Segments(), nil
+	return doc.Speech(), nil // whisper's marks are not searched (TASK-110)
 }
 
 // recording loads a recording; a missing one is ErrRecordingNotFound.

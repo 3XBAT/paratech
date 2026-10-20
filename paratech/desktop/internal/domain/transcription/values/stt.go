@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -13,6 +14,14 @@ import (
 // STTJobType is the job type of transcribing a recording. The jobs context keeps job types an open set of names, and
 // contexts do not import each other (ARCH-11), so the name is defined here and converted by the use cases.
 const STTJobType = "stt"
+
+// NoSpeechMessage is the fixed last error of an STT job whose transcript holds no speech, only whisper's marks such
+// as "[BLANK_AUDIO]" (TASK-110): the recording is treated like a silent one and nothing is post-processed. The job may
+// prefix it ("permanent: ...").
+const NoSpeechMessage = "stt job: no speech in the recording"
+
+// IsNoSpeech reports the last error of an STT job that failed with NoSpeechMessage.
+func IsNoSpeech(lastError string) bool { return strings.HasSuffix(lastError, NoSpeechMessage) }
 
 // STTEngineShare is the part of an STT job's progress percent that the engine run fills (0..STTEngineShare); storing
 // the document fills the rest. The transcription use case reports by it, the time left reads it back (TASK-084).

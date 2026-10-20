@@ -283,7 +283,10 @@ func (s *Service) all(ctx context.Context, id shared.RecordingID) ([]transcript.
 			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		for _, p := range parts {
-			out = append(out, p.Segment())
+			// Parts stored before TASK-110 may hold marks; the new ones are filtered when stored (LiveBatch).
+			if seg, ok := p.Segment().Speech(); ok {
+				out = append(out, seg)
+			}
 		}
 		if len(parts) < MaxPage {
 			break
@@ -331,7 +334,8 @@ func (s *Service) readDocument(ctx context.Context, ref shared.ArtifactRef) ([]t
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	return doc.Segments(), nil
+	// Whisper's marks such as "[BLANK_AUDIO]" are not shown (TASK-110), also in transcripts stored before.
+	return doc.Speech(), nil
 }
 
 // cached returns the parsed segments of t if they are kept; a transcript is keyed by id and version, so a future
