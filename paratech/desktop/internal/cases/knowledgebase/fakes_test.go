@@ -124,10 +124,16 @@ func (m *memSummaries) Get(_ context.Context, id summary.ID) (*summary.Summary, 
 	return nil, fmt.Errorf("%w: summary %s", shared.ErrNotFound, id)
 }
 
-type memLectures map[lecturetext.ID]*lecturetext.LectureText
+type memLectures struct {
+	rows map[lecturetext.ID]*lecturetext.LectureText
+	err  error
+}
 
-func (m memLectures) Get(_ context.Context, id lecturetext.ID) (*lecturetext.LectureText, error) {
-	if l, ok := m[id]; ok {
+func (m *memLectures) Get(_ context.Context, id lecturetext.ID) (*lecturetext.LectureText, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if l, ok := m.rows[id]; ok {
 		return l, nil
 	}
 	return nil, fmt.Errorf("%w: lecture text %s", shared.ErrNotFound, id)
@@ -154,7 +160,7 @@ type env struct {
 	transcripts memTranscripts
 	artifacts   *testenv.MemArtifacts
 	summaries   *memSummaries
-	lectures    memLectures
+	lectures    *memLectures
 	writer      *fakeWriter
 	logs        *bytes.Buffer
 }
@@ -167,7 +173,7 @@ func newEnv(t *testing.T) *env {
 		transcripts: memTranscripts{},
 		artifacts:   testenv.NewMemArtifacts(),
 		summaries:   &memSummaries{rows: map[summary.ID]*summary.Summary{}},
-		lectures:    memLectures{},
+		lectures:    &memLectures{rows: map[lecturetext.ID]*lecturetext.LectureText{}},
 		writer:      &fakeWriter{},
 		logs:        &bytes.Buffer{},
 	}
@@ -297,7 +303,7 @@ func (e *env) addLectureText(t *testing.T, rec shared.RecordingID, blocks ...lec
 	if err := l.Publish("run", blocks, 1, t0); err != nil {
 		t.Fatal(err)
 	}
-	e.lectures[l.ID()] = l
+	e.lectures.rows[l.ID()] = l
 	r.LectureText = true
 	e.recs.ready[rec] = r
 }

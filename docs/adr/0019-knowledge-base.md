@@ -12,7 +12,7 @@ tens to a few hundred lessons; transcripts are JSON files in the artifact store.
 - **No index, no new dependency.** A search scans at query time: rows from SQLite, transcripts through the Storage
   Manager, matched in the pure service `domain/coursework/services/knowledgebase`: case-insensitive, «ё» = «е»,
   spaces collapsed, 2–100 characters, at most 3 hits per section of a lesson and 50 in all, snippet of 120 characters
-  as one plain line. A broken transcript file is skipped and logged. FTS5 was not needed.
+  as one plain line. A broken transcript file, summary or lecture text row is skipped and logged. FTS5 was not needed.
 - **Deletion needs nothing.** A recording marked for deletion is left out; the purge of ADR-0018 removes the rest.
 - **Lessons** are completed, not silent recordings (failed and silent ones hold no text). Subject and kind: the user's
   correction per field, else the snapshot as a whole, else the live lesson (the rule of assignments,

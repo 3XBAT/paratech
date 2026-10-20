@@ -193,6 +193,16 @@ func TestSetLessonInfoRefuses(t *testing.T) {
 	running, _ := recording.New(recording.Spec{ID: "running", MaxDuration: time.Hour}, t0)
 	_ = running.Begin(t0)
 	e.recs.rows["running"] = running
+	failed, _ := recording.New(recording.Spec{ID: "failed", MaxDuration: time.Hour}, t0)
+	_ = failed.Fail(t0, "device not found")
+	e.recs.rows["failed"] = failed
+	silent, _ := recording.New(recording.Spec{ID: "silent", MaxDuration: time.Hour}, t0)
+	track, _ := silent.TrackRef("wav")
+	if err := errors.Join(silent.Begin(t0), silent.Stop(t0.Add(time.Hour)), silent.Finalize(t0.Add(time.Hour)),
+		silent.CompleteTrack(t0.Add(time.Hour), track, values.AssembledTrack{Duration: time.Hour, Seconds: 3600, AudibleSeconds: 1})); err != nil {
+		t.Fatal(err)
+	}
+	e.recs.rows["silent"] = silent
 
 	tests := []struct {
 		id            shared.RecordingID
@@ -205,6 +215,8 @@ func TestSetLessonInfoRefuses(t *testing.T) {
 		{"nope", "Физика", "", ErrRecordingNotFound},
 		{"deleting", "Физика", "", ErrRecordingNotFound},
 		{"running", "Физика", "", ErrNotFinished},
+		{"failed", "Физика", "", ErrRecordingNotFound},
+		{"silent", "Физика", "", ErrRecordingNotFound},
 	}
 	for _, tc := range tests {
 		if _, err := e.svc.SetLessonInfo(ctx, tc.id, tc.subject, tc.kind); !errors.Is(err, tc.want) {
@@ -303,11 +315,55 @@ func TestSearchSurvivesBrokenTranscripts(t *testing.T) {
 	if !strings.Contains(e.logs.String(), "transcript not searched") {
 		t.Fatalf("the missing file is not logged: %s", e.logs)
 	}
+}
 
-	e.summaries.err = errDisk
-	e.addSummary(t, "r1", "кванты")
-	if _, err := e.svc.Search(ctx, "кванты"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("database error: %v, want ErrUnavailable", err)
+// A summary or lecture text row that cannot be read (say, it fails the aggregate's restore) costs only that section;
+// a cancelled or timed out read still fails the search.
+func TestSearchSurvivesBrokenRows(t *testing.T) {
+	tests := []struct {
+		name     string
+		summary  error
+		lecture  error
+		sections []kb.Section
+		want     error
+		log      string
+	}{
+		{name: "broken summary", summary: errDisk, log: "summary not searched",
+			sections: []kb.Section{kb.SectionTitle, kb.SectionLectureText, kb.SectionTranscript}},
+		{name: "broken lecture text", lecture: errDisk, log: "lecture text not searched",
+			sections: []kb.Section{kb.SectionTitle, kb.SectionSummary, kb.SectionTranscript}},
+		{name: "cancelled summary read", summary: context.Canceled, want: context.Canceled},
+		{name: "timed out lecture text read", lecture: fmt.Errorf("query: %w", context.DeadlineExceeded), want: context.DeadlineExceeded},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, ctx := newEnv(t), context.Background()
+			e.add(t, lessonSpec{id: "r1", title: "Кванты", subject: "Физика"})
+			e.addTranscript(t, "r1", " кванты")
+			e.addSummary(t, "r1", "Секрет кванты.")
+			e.addLectureText(t, "r1", block(t, "Тайна", 0, "Тайна кванты."))
+			e.summaries.err, e.lectures.err = tc.summary, tc.lecture
+
+			res, err := e.svc.Search(ctx, "кванты")
+			if tc.want != nil {
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("Search = %v, want %v", err, tc.want)
+				}
+				return
+			}
+			var got []kb.Section
+			for _, h := range res.Hits {
+				got = append(got, h.Section)
+			}
+			if err != nil || !reflect.DeepEqual(got, tc.sections) {
+				t.Fatalf("sections %v, %v; want %v", got, err, tc.sections)
+			}
+			logs := e.logs.String()
+			if !strings.Contains(logs, tc.log) || !strings.Contains(logs, "r1") || strings.Contains(logs, "Секрет") ||
+				strings.Contains(logs, "Тайна") {
+				t.Fatalf("logs = %s; want %q with the recording and no text", logs, tc.log)
+			}
+		})
 	}
 }
 

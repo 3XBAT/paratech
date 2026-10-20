@@ -22,6 +22,8 @@ const (
 	opUnreadable  = "knowledge base: recordings not readable"
 	opLesson      = "knowledge base: lesson not read"
 	opTranscript  = "knowledge base: transcript not searched"
+	opSummary     = "knowledge base: summary not searched"
+	opLectureText = "knowledge base: lecture text not searched"
 	opCorrectBusy = "knowledge base: recording changed while corrected"
 )
 
@@ -110,6 +112,9 @@ func (s *Service) SetLessonInfo(ctx context.Context, id shared.RecordingID, subj
 			return kb.Lesson{}, ErrNotFinished
 		case err != nil:
 			return kb.Lesson{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		case !rec.InKnowledgeBase():
+			// After the refusals above, so a running recording stays ErrNotFinished; rec is not saved.
+			return kb.Lesson{}, ErrRecordingNotFound
 		}
 		if changed {
 			err = s.recordings.Save(ctx, rec)
@@ -128,7 +133,8 @@ func (s *Service) SetLessonInfo(ctx context.Context, id shared.RecordingID, subj
 }
 
 // Search finds query in the titles, summaries, lecture texts and transcripts of every lesson, newest lessons first,
-// within the caps of kb.Search. A transcript whose file cannot be read is left out of the search, not failed.
+// within the caps of kb.Search. A transcript file, summary or lecture text that cannot be read is left out of the
+// search, not failed.
 func (s *Service) Search(ctx context.Context, query string) (SearchResult, error) {
 	search, err := kb.NewSearch(query)
 	if err != nil {
@@ -282,14 +288,16 @@ func (s *Service) facts(ctx context.Context, rec *recording.Recording, ready kb.
 // document gathers the texts of a lesson for the search.
 func (s *Service) document(ctx context.Context, l kb.Lesson) (kb.Document, error) {
 	doc := kb.Document{Recording: l.Recording, Title: l.Title}
-	if c, ok, err := s.summary(ctx, l.Ready); err != nil {
+	c, ok, err := s.summary(ctx, l.Ready)
+	if err = s.skippable(ctx, err, opSummary, l.Recording); err != nil {
 		return kb.Document{}, err
-	} else if ok {
+	}
+	if ok {
 		doc.Summary = append([]string{c.Text()}, c.KeyPoints()...)
 	}
 
 	blocks, err := s.lectureText(ctx, l.Ready)
-	if err != nil {
+	if err = s.skippable(ctx, err, opLectureText, l.Recording); err != nil {
 		return kb.Document{}, err
 	}
 	for _, b := range blocks {
@@ -304,6 +312,16 @@ func (s *Service) document(ctx context.Context, l kb.Lesson) (kb.Document, error
 		doc.Segments = append(doc.Segments, kb.Segment{StartMs: seg.StartMs, Text: seg.Text})
 	}
 	return doc, nil
+}
+
+// skippable logs a read error of one section and returns nil, so one corrupt row does not break the search; a
+// cancelled or timed out read is returned.
+func (s *Service) skippable(ctx context.Context, err error, op string, rec shared.RecordingID) error {
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	s.log.Warn(op, slog.String("recording", string(rec)), slog.Any("cause", err))
+	return nil
 }
 
 // summary reads the summary of the newest transcript; ok is false when there is none.
