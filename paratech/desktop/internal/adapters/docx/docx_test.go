@@ -107,7 +107,10 @@ func texts(t *testing.T, documentXML string) []string {
 
 func TestPackageStructure(t *testing.T) {
 	parts, names := entries(t, render(t, sample()))
-	want := []string{"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/_rels/document.xml.rels", "word/styles.xml"}
+	want := []string{
+		"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/_rels/document.xml.rels", "word/styles.xml",
+		"word/settings.xml", "word/numbering.xml", "word/footer1.xml", "word/footer2.xml",
+	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("entries = %v, want %v", names, want)
 	}
