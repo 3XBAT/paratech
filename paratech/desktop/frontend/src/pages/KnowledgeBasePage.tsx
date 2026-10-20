@@ -9,12 +9,16 @@ import {
 } from "../bindings/knowledgeBase";
 import { callByName } from "../bindings/runtime";
 import {
+  askSearch,
   checkQuery,
   errorText,
   exportResultLine,
   hitFocus,
   type LessonFocus,
+  idleFlight,
   noFocus,
+  type SearchFlight,
+  searchDone,
   searchPauseMs,
   searchTexts,
   subjectMeta,
@@ -51,7 +55,7 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [searching, setSearching] = useState(false);
-  const seq = useRef(0);
+  const flight = useRef<SearchFlight>(idleFlight);
   const lastQuery = useRef("");
 
   useEffect(() => {
@@ -74,13 +78,14 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
     };
   }, [api, reload]);
 
-  // Searches on Enter (force) or after a pause in typing; an answer to an older query is dropped.
+  // Searches on Enter (force) or after a pause in typing. One call at a time: a query asked meanwhile is sent when
+  // the running call returns, and only the answer to the latest query is shown.
   const runSearch = useCallback(
     async (raw: string, force: boolean) => {
       const c = checkQuery(raw);
       if (c.kind !== "ok") {
-        seq.current++;
         lastQuery.current = "";
+        flight.current = askSearch(flight.current, "").flight;
         setSearching(false);
         setOutcome(c.kind === "empty" ? null : { kind: c.kind });
         return;
@@ -89,20 +94,27 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
         return;
       }
       lastQuery.current = c.query;
-      const my = ++seq.current;
+      const asked = askSearch(flight.current, c.query);
+      flight.current = asked.flight;
       setSearching(true);
-      try {
-        const result = await api.search(c.query);
-        if (my === seq.current) {
-          setOutcome({ kind: "ok", result });
+      let q = asked.send;
+      while (q !== null) {
+        let answer: SearchOutcome;
+        try {
+          answer = { kind: "ok", result: await api.search(q) };
+        } catch (err) {
+          answer = { kind: "error", text: errorText(err) };
         }
-      } catch (err) {
-        if (my === seq.current) {
-          lastQuery.current = "";
-          setOutcome({ kind: "error", text: errorText(err) });
-        }
-      } finally {
-        if (my === seq.current) {
+        const done = searchDone(flight.current);
+        flight.current = done.flight;
+        q = done.send;
+        if (q === null) {
+          if (done.show) {
+            if (answer.kind === "error") {
+              lastQuery.current = "";
+            }
+            setOutcome(answer);
+          }
           setSearching(false);
         }
       }

@@ -7,6 +7,7 @@ import { createElement as h } from "react";
 import server from "react-dom/server";
 import { errorMessages, knowledgeBaseApi, methods } from "../.test-build/bindings/knowledgeBase.js";
 import {
+  askSearch,
   checkQuery,
   clockText,
   correctionDraft,
@@ -17,6 +18,7 @@ import {
   hitCountText,
   hitFocus,
   hitPlace,
+  idleFlight,
   kindOptions,
   lessonHeading,
   lessonLabel,
@@ -26,6 +28,7 @@ import {
   noFocus,
   paragraphOf,
   readyMarks,
+  searchDone,
   searchTexts,
   shownBlock,
   shownPoint,
@@ -199,6 +202,29 @@ test("the query is checked as the core reads it, 2 to 100 characters", () => {
   assert.equal(searchTexts.long, errorMessages.query);
 });
 
+test("one search call at a time: only the latest query waits, cleared or repeated ones are not sent again", () => {
+  let a = askSearch(idleFlight, "предел");
+  assert.equal(a.send, "предел");
+  // Typing on while it runs: nothing is sent, only the latest query is kept.
+  a = askSearch(a.flight, "предел ф");
+  assert.equal(a.send, null);
+  a = askSearch(a.flight, "предел функции");
+  assert.equal(a.send, null);
+  let d = searchDone(a.flight);
+  assert.deepEqual([d.send, d.show], ["предел функции", false]);
+  d = searchDone(d.flight);
+  assert.deepEqual([d.send, d.show], [null, true]);
+  assert.deepEqual(d.flight, idleFlight);
+  // Back to the query that runs: its answer is shown, no second call.
+  a = askSearch(askSearch(askSearch(idleFlight, "ряд").flight, "ряды").flight, "ряд");
+  d = searchDone(a.flight);
+  assert.deepEqual([d.send, d.show, d.flight], [null, true, idleFlight]);
+  // The field cleared while it runs: the answer is dropped.
+  d = searchDone(askSearch(askSearch(idleFlight, "ряд").flight, "").flight);
+  assert.deepEqual([d.send, d.show, d.flight], [null, false, idleFlight]);
+  assert.deepEqual(askSearch(idleFlight, ""), { flight: idleFlight, send: null });
+});
+
 test("the export outcome: saved names the file, cancelled waits, failed fails", () => {
   assert.deepEqual(exportResultLine({ status: "saved", message: "Предмет сохранён.", name: "Физика.md" }), {
     kind: "ok",
@@ -324,5 +350,9 @@ test("the knowledge base renders text only, talks only to the core and searches 
   // Not per keystroke: the typing effect waits for the pause; Enter searches at once.
   assert.match(page, /setTimeout\(\(\) => void runSearch\(query, false\), searchPauseMs\)/);
   assert.match(page, /e\.key === "Enter"[\s\S]*runSearch\(query, true\)/);
+  // One call at a time: the page goes through the flight helpers.
+  assert.match(page, /askSearch\(flight\.current, c\.query\)/);
+  assert.match(page, /searchDone\(flight\.current\)/);
+  assert.equal(page.match(/api\.search\(/g)?.length, 1);
   assert.match(src("App.tsx"), /case "knowledge":\s*return <KnowledgeBasePage/);
 });

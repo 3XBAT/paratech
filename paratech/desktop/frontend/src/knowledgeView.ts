@@ -177,6 +177,36 @@ export const maxQueryChars = 100;
 /** The pause in typing after which the search starts by itself (Enter starts it at once). */
 export const searchPauseMs = 700;
 
+/**
+ * At most one search call at a time (a full scan takes seconds and is not cancelled): while one runs, only the
+ * latest wanted query is kept. next: null = nothing new, "" = the field was cleared (drop the answer).
+ */
+export type SearchFlight = { kind: "idle" } | { kind: "running"; query: string; next: string | null };
+
+export const idleFlight: SearchFlight = { kind: "idle" };
+
+/** The user wants q ("" = no search): send it now, or keep it until the running call returns. */
+export function askSearch(f: SearchFlight, q: string): { flight: SearchFlight; send: string | null } {
+  if (f.kind === "running") {
+    return { flight: { ...f, next: q }, send: null };
+  }
+  return q === "" ? { flight: f, send: null } : { flight: { kind: "running", query: q, next: null }, send: q };
+}
+
+/** The running call returned: send the query wanted since, show this answer, or drop it. */
+export function searchDone(f: SearchFlight): { flight: SearchFlight; send: string | null; show: boolean } {
+  if (f.kind === "idle") {
+    return { flight: f, send: null, show: false };
+  }
+  if (f.next === null || f.next === f.query) {
+    return { flight: idleFlight, send: null, show: true };
+  }
+  if (f.next === "") {
+    return { flight: idleFlight, send: null, show: false };
+  }
+  return { flight: { kind: "running", query: f.next, next: null }, send: f.next, show: false };
+}
+
 export type QueryCheck = { kind: "empty" } | { kind: "short" } | { kind: "long" } | { kind: "ok"; query: string };
 
 /** The query as the core would read it: trimmed, spaces collapsed, counted in characters. */
