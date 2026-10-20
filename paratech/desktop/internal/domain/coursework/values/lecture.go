@@ -58,9 +58,11 @@ func ParseLectureTextCheckpoint(s string) (done, total int, ok bool) {
 	return done, total, true
 }
 
-// LectureTextStarted reports whether the checkpoint says some parts are formatted already. A lecture_text job that
-// is QUEUED with such a checkpoint is between two of its steps (TASK-097): the views show it as being made.
-func LectureTextStarted(checkpoint string) bool {
+// LectureTextResumes reports whether a QUEUED lecture_text job (queued) continues a text being made: its checkpoint
+// says some parts are stored. It is QUEUED like that between two steps (TASK-097), after a failed step came back from
+// RETRY_WAIT, or when startup recovery requeued it; each time it goes on from the stored parts, so the views show it
+// as being made, not as queued.
+func LectureTextResumes(queued bool, checkpoint string) bool {
 	done, _, ok := ParseLectureTextCheckpoint(checkpoint)
-	return ok && done > 0
+	return queued && ok && done > 0
 }
