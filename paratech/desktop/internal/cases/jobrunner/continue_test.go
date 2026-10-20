@@ -3,6 +3,7 @@ package jobrunner
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,9 +89,16 @@ func TestContinueLaterAfterTheTimeout(t *testing.T) {
 	var calls atomic.Int32
 	if err := e.svc.Register(Registration{
 		Type: typeSteps, Recovery: RecoveryRequeue, Timeout: time.Second,
-		Handler: handlerFunc(func(ctx context.Context, _ job.Snapshot, _ func(context.Context, job.Progress) error) error {
+		Handler: handlerFunc(func(ctx context.Context, _ job.Snapshot, report func(context.Context, job.Progress) error) error {
 			if calls.Add(1) > 1 {
 				return nil
+			}
+			p, err := job.NewProgress(50, "1/2")
+			if err != nil {
+				return err
+			}
+			if err := report(ctx, p); err != nil {
+				return err
 			}
 			<-ctx.Done() // the timeout, once drive moves the fake clock
 			return job.ErrContinueLater
@@ -104,5 +112,56 @@ func TestContinueLaterAfterTheTimeout(t *testing.T) {
 	e.drive("the job completes", func() bool { return e.status(id) == job.StatusCompleted })
 	if st := e.repo.snapshot(id); st.Attempts != 1 {
 		t.Fatalf("attempts = %d, want the step given back", st.Attempts)
+	}
+}
+
+// A step that returns job.ErrContinueLater without new progress is a failed attempt (job.ErrNoProgress): the job is
+// retried with backoff and fails once its attempts are used, instead of being queued again forever.
+func TestContinueLaterWithoutProgressUsesAnAttempt(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxAttempts int
+		reportSame  bool // report the checkpoint the step started from
+		wantPath    []job.Status
+	}{
+		{"one attempt, nothing reported", 1, false, []job.Status{
+			job.StatusQueued, job.StatusRunning, job.StatusFailed,
+		}},
+		{"two attempts, same progress reported", 2, true, []job.Status{
+			job.StatusQueued, job.StatusRunning, job.StatusRunning, job.StatusRetryWait, job.StatusQueued,
+			job.StatusRunning, job.StatusRunning, job.StatusFailed,
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t, nil, nil)
+			var calls atomic.Int32
+			e.register(typeSteps, func(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error) error {
+				calls.Add(1)
+				if tt.reportSame {
+					p, err := job.NewProgress(0, snap.Checkpoint()) // a new job starts at 0 percent
+					if err != nil {
+						return err
+					}
+					if err := report(ctx, p); err != nil {
+						return err
+					}
+				}
+				return job.ErrContinueLater
+			})
+			id := e.enqueue(typeSteps, tt.maxAttempts)
+			e.start()
+
+			e.drive("the job fails", func() bool { return e.status(id) == job.StatusFailed })
+			if n := int(calls.Load()); n != tt.maxAttempts {
+				t.Fatalf("handler calls = %d, want one per attempt (%d)", n, tt.maxAttempts)
+			}
+			if got := statuses(e.repo.path(id)); !equalStatuses(got, tt.wantPath) {
+				t.Fatalf("path = %v, want %v", got, tt.wantPath)
+			}
+			if st := e.repo.snapshot(id); st.Attempts != tt.maxAttempts || !strings.Contains(st.LastError, "stored no progress") {
+				t.Fatalf("failed job: attempts %d error %q", st.Attempts, st.LastError)
+			}
+		})
 	}
 }

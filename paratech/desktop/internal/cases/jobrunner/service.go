@@ -52,7 +52,8 @@ const (
 //   - any other error, including a timeout: RETRY_WAIT with bounded exponential backoff, back to QUEUED when due,
 //     for every Recovery policy (see Registration.Reconciler for what that asks of side-effect handlers);
 //   - job.ErrContinueLater (one step of a job that works in steps is stored): QUEUED again, due now, behind the jobs
-//     that were due before it, with the attempt given back (job.Yield, TASK-097);
+//     that were due before it, with the attempt given back (job.Yield, TASK-097); a step that reported no new
+//     progress is a failed attempt and retried like any other error;
 //   - user cancellation: the handler context is cancelled and the job becomes CANCELLED;
 //   - shutdown during an attempt: a RecoveryRequeue job is requeued like a stale RUNNING job at startup recovery;
 //     any other job stays RUNNING and Recover handles it at the next start, as after a crash (hard rule 7);
@@ -684,7 +685,12 @@ func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error,
 		return outcomeCancelled, j.Cancel(now)
 	case errors.Is(herr, job.ErrContinueLater):
 		// The step is stored, so the next one may start whatever ended the context (timeout, shutdown).
-		return outcomeContinued, j.Yield(now)
+		err := j.Yield(now)
+		if !errors.Is(err, job.ErrNoProgress) {
+			return outcomeContinued, err
+		}
+		// A step that stored nothing would repeat forever: it is a failed attempt, retried below.
+		herr = errStepNoProgress
 	case waitPower:
 		// The checkpoint is saved and waiting is not a failure: the aggregate gives the attempt back.
 		return outcomeWaitingPower, j.WaitFor(job.StatusWaitingForPower, now)

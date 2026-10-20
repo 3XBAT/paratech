@@ -53,3 +53,6 @@ var (
 
 	errReconcileTimeout = errors.New("reconciler timed out")
 )
+
+// errStepNoProgress is the stored error of a step that asked to continue later without reporting new progress.
+var errStepNoProgress = errors.New("the step asked to continue later but stored no progress")

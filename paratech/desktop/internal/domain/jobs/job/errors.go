@@ -1,6 +1,9 @@
 package job
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors of the job package (ARCH-18).
 var (
@@ -32,4 +35,7 @@ var (
 	// the step is stored and the job goes to the end of the queue for the next one (Yield). It is a marker for the
 	// runner, never a failure; handlers live in other use cases, so it is part of the domain.
 	ErrContinueLater = errors.New("job continues later")
+
+	// ErrNoProgress is returned by Yield for a step that stored no progress since the claim.
+	ErrNoProgress = fmt.Errorf("%w: job step stored no progress", ErrInvalidTransition)
 )
