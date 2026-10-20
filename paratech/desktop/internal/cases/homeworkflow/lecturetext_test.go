@@ -375,8 +375,10 @@ func TestLectureTextFailures(t *testing.T) {
 		e := newPPEnv(t)
 		e.llm.Answer(values.OperationLectureText, `{"blocks":[]}`)
 		err := e.handle(e.snapshot("j1", LectureTextJobType, "t1"))
-		if !errors.Is(err, ErrNothingToProcess) || backoff.Classify(err) != backoff.ClassPermanent {
-			t.Fatalf("Handle = %v, want a permanent ErrNothingToProcess", err)
+		// The transcript has speech: not the no-speech error, so «Повторить» stays (TASK-110).
+		if !errors.Is(err, ErrLectureTextEmpty) || backoff.Classify(err) != backoff.ClassPermanent ||
+			values.IsNothingToProcess(err.Error()) {
+			t.Fatalf("Handle = %v, want a permanent ErrLectureTextEmpty", err)
 		}
 		if l := e.lecture("t1"); l != nil && l.Ready() {
 			t.Fatal("an empty text was published")

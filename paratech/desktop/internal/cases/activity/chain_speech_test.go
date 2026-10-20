@@ -28,6 +28,9 @@ func TestChainOfNoSpeech(t *testing.T) {
 	}
 	noSpeechSTT := failed("s", stt, 0, permanent(transcription.NoSpeechMessage))
 	empty := permanent(values.NothingToProcessMessage)
+	// The fixed errors of homeworkflow (ErrLectureTextEmpty, ErrIncompleteContext); cases do not import each other.
+	emptyLecture := permanent("post-processing: the lecture text came out empty")
+	incomplete := permanent("post-processing: the lesson context is incomplete")
 	tests := []struct {
 		name string
 		jobs []func(t *testing.T) *job.Job
@@ -66,6 +69,25 @@ func TestChainOfNoSpeech(t *testing.T) {
 				noSpeechSTT, func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusRunning) },
 			},
 			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42},
+		},
+		{
+			// A transcript with speech whose model answers held no block: the normal failure with «Повторить».
+			name: "an empty lecture text is not no speech", jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), done("h", hw), failed("l", lt, 0, emptyLecture),
+			},
+			want: Chain{
+				Stage: StageFailed, Step: StepLectureText, ErrorCode: ErrorLectureTextFailed, JobError: emptyLecture,
+				Action: ActionRetry, Retry: WorkLectureText, CanRedoSummary: true,
+			},
+		},
+		{
+			name: "a missing lesson start is not no speech", jobs: []func(t *testing.T) *job.Job{
+				done("s", stt), done("a", sum), failed("h", hw, 0, incomplete), done("l", lt),
+			},
+			want: Chain{
+				Stage: StageFailed, Step: StepSummary, ErrorCode: ErrorHomeworkFailed, JobError: incomplete,
+				Action: ActionRetry, Retry: WorkHomework, CanRedoSummary: true, LectureTextReady: true,
+			},
 		},
 		{
 			name: "another failure of the transcription is not no speech",

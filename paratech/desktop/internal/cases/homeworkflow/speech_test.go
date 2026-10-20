@@ -2,9 +2,11 @@ package homeworkflow
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"paratech/desktop/internal/domain/coursework/services/contextselection"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
@@ -82,6 +84,28 @@ func TestMarksDoNotReachTheHub(t *testing.T) {
 				if !strings.Contains(data, speech) {
 					t.Errorf("the request lacks %q: %s", speech, data)
 				}
+			}
+		})
+	}
+}
+
+// TASK-110 review: only a transcript without speech is the no-speech error; a missing lesson field and a refused
+// context keep errors that offer «Повторить».
+func TestContextError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"missing lesson start", fmt.Errorf("%w: lesson start", contextselection.ErrMissingContext), ErrIncompleteContext},
+		{"missing transcript", fmt.Errorf("%w: transcript is empty", contextselection.ErrMissingContext), ErrIncompleteContext},
+		{"invalid material", contextselection.ErrInvalidMaterial, ErrContextRefused},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := contextError(tc.err)
+			if got != tc.want || values.IsNothingToProcess(got.Error()) {
+				t.Fatalf("contextError = %v, want %v", got, tc.want)
 			}
 		})
 	}

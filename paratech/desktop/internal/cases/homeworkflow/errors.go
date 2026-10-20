@@ -57,6 +57,14 @@ var (
 	// ErrNothingToProcess means the transcript holds no recognised speech. Permanent.
 	ErrNothingToProcess = errors.New(values.NothingToProcessMessage)
 
+	// ErrIncompleteContext means the lesson context lacks a field the operation needs, such as the lesson start.
+	// Permanent; unlike ErrNothingToProcess the recordings screen offers «Повторить».
+	ErrIncompleteContext = errors.New("post-processing: the lesson context is incomplete")
+
+	// ErrLectureTextEmpty means the model answers of every part held no block, so there is no lecture text to show.
+	// Permanent; the transcript has speech, so «Повторить» is offered (not the no-speech state).
+	ErrLectureTextEmpty = errors.New("post-processing: the lecture text came out empty")
+
 	// ErrContextRefused means the lesson context cannot be sent: too large or not valid text. Permanent.
 	ErrContextRefused = errors.New("post-processing: the lesson context cannot be sent")
 

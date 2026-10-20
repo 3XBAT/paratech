@@ -36,11 +36,8 @@ const MaxLectureTextCalls = 1 + LectureTextReminders
 func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	in lessonInput) error {
 	sel, err := contextselection.Select(values.OperationLectureText, in.material)
-	switch {
-	case errors.Is(err, contextselection.ErrMissingContext):
-		return p.permanent(snap, stepContext, ErrNothingToProcess, err)
-	case err != nil:
-		return p.permanent(snap, stepContext, ErrContextRefused, err)
+	if err != nil {
+		return p.permanent(snap, stepContext, contextError(err), err)
 	}
 	segments := make([]lectureparts.Segment, len(in.material.Transcript))
 	for i, s := range in.material.Transcript {
@@ -222,14 +219,15 @@ func (p *PostProcessor) saveLecturePart(ctx context.Context, snap job.Snapshot, 
 }
 
 // publishLectureText merges the parts of the complete run and makes them the text shown. A run whose parts hold no
-// block at all (no speech worth keeping) has nothing to show.
+// block at all has nothing to show: the transcript has speech (load), so it fails with ErrLectureTextEmpty, which
+// offers «Повторить», not with the no-speech ErrNothingToProcess.
 func (p *PostProcessor) publishLectureText(snap job.Snapshot, lt *lecturetext.LectureText, run string) error {
 	merged, err := lectureparts.Merge(lt.Parts())
 	if err != nil {
 		return p.permanent(snap, stepSave, ErrStorage, err)
 	}
 	if len(merged) == 0 {
-		return p.permanent(snap, stepAnswer, ErrNothingToProcess, nil)
+		return p.permanent(snap, stepAnswer, ErrLectureTextEmpty, nil)
 	}
 	if err := lt.Publish(run, merged, prompts.LectureTextVersion, p.clock.Now()); err != nil {
 		return p.permanent(snap, stepSave, ErrStorage, err)
