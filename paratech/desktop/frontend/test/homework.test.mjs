@@ -545,6 +545,14 @@ test("the homework page renders model text as plain text only", () => {
   }
 });
 
+// Go interpreted ("…" with escapes) and raw (`…`) string literals.
+const goStrings = (text) => text.match(/"(?:[^"\\\n]|\\.)*"|`[^`]*`/g) ?? [];
+
+test("the Go literal extractor keeps each literal whole", () => {
+  const sample = 'a := "unavailable\\n" // черновик\nb := "say \\"ok\\"" + `raw`\n';
+  assert.deepEqual(goStrings(sample), ['"unavailable\\n"', '"say \\"ok\\""', "`raw`"]);
+});
+
 // TASK-102: the student sees «решение», never «черновик»; internal names (draft…) and comments may keep it.
 test("no user-facing text says «черновик»", () => {
   for (const rel of sourceFiles()) {
@@ -553,7 +561,7 @@ test("no user-facing text says «черновик»", () => {
   // The core's texts the page shows as they are: the string literals of the bindings.
   for (const go of ["homework.go", "activity.go"]) {
     const text = readFileSync(new URL(`../../internal/input/wails/${go}`, import.meta.url), "utf8");
-    for (const lit of text.match(/"(?:[^"\\n]|\.)*"/g) ?? []) {
+    for (const lit of goStrings(text)) {
       assert.doesNotMatch(lit, /чернов/i, `${go}: ${lit}`);
     }
   }
