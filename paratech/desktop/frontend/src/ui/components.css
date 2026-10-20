@@ -141,6 +141,8 @@
 .st { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 /* The chip with its round «Повторить» right next to it. */
 .st-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The chip next to the round «Повторить» is as tall as the button (28px). */
+.st-head .chip { min-height: 28px; }
 .acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 6px; }
 .acts.start { justify-content: start; }
 
