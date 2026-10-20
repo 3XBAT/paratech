@@ -4,7 +4,11 @@ import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesVie
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
 import { Button } from "../ui/Button";
 import { Banner } from "../ui/controls";
-import { IconSprite } from "../ui/Icon";
+import { Icon, IconSprite } from "../ui/Icon";
+import { SoundLevel } from "../ui/SoundLevel";
+import { soundTexts } from "../soundLevelView";
+import { useNow } from "../useNow";
+import { useRecordingSound } from "../useRecordingSound";
 import {
   adviceHints,
   adviceKey,
@@ -29,14 +33,19 @@ import {
   adviceHeading,
   buttonHints,
   buttonLabels,
+  elapsedText,
   HeightFitter,
   loadErrorText,
   popupModel,
+  recordingInfo,
+  recordingTexts,
   shouldRefresh,
+  showsRecording,
   textsLayout,
   wantedHeight,
   type Action,
   type ButtonId,
+  type RecordingInfo,
 } from "./view";
 
 const browserTimers = {
@@ -68,6 +77,13 @@ export function Popup() {
   const [visible, setVisible] = useState(() => document.visibilityState === "visible");
   const promptId = view?.id ?? "";
   const promptIdRef = useRef(promptId);
+
+  // The running recording (TASK-099): its sound is read while the popup is visible and a recording captures.
+  const { sound, refresh: refreshSound } = useRecordingSound(activity.recordingSound, visible && advice === null, true);
+  const [stopping, setStopping] = useState(false);
+  const [stopProblem, setStopProblem] = useState("");
+  // Title and start of the running recording: read once per recording shown, the timer ticks here from startedAt.
+  const [info, setInfo] = useState<{ id: string; info: RecordingInfo | null } | null>(null);
 
   const reload = useCallback(
     async (clearError: boolean) => {
@@ -154,6 +170,8 @@ export function Popup() {
       fitter.forget();
       void reload(true);
       poller.refreshNow();
+      refreshSound();
+      setStopProblem("");
     }).then(
       (stop) => {
         if (alive) {
@@ -173,7 +191,7 @@ export function Popup() {
       document.removeEventListener("visibilitychange", onVisibility);
       poller.setActive(false);
     };
-  }, [reload, poller, fitter]);
+  }, [reload, poller, fitter, refreshSound]);
 
   // A new prompt starts with a fresh picker: no choice carries over from the previous offer.
   useEffect(() => {
@@ -195,10 +213,34 @@ export function Popup() {
   const errorLine = error || m.problem;
   const notes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
   const layout = textsLayout(notes, errorLine);
+  const live = sound !== null && advice === null && showsRecording(view, sound.recording, pending);
+  const liveId = live && sound !== null ? sound.recordingId : "";
+
+  useEffect(() => {
+    if (liveId === "") {
+      return;
+    }
+    let alive = true;
+    // A failed read only leaves out the title and the timer.
+    activity.listRecordings().then(
+      (items) => {
+        if (alive) {
+          setInfo({ id: liveId, info: recordingInfo(items, liveId) });
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [activity, liveId]);
+
+  const liveInfo = info !== null && info.id === liveId ? info.info : null;
+  const now = useNow(liveInfo !== null && liveInfo.startedAt !== "");
 
   useLayoutEffect(() => {
-    // The advice keeps the normal size: its text is short.
-    growsRef.current = advice === null && layout.grows;
+    // The advice and the running recording keep the normal size: their texts are short.
+    growsRef.current = advice === null && !live && layout.grows;
     measure();
   });
 
@@ -239,6 +281,32 @@ export function Popup() {
       void reload(false);
     } finally {
       setPending(null);
+    }
+  }
+
+  // Hides the recording view. The tray's ad-hoc offer it replaced is skipped, so it does not come back after the
+  // recording; the core hides the window then, and hideWindow covers the rest.
+  function hideRecording() {
+    if (view !== null && view.kind === "adhoc" && view.state === "OFFERED") {
+      void api.skip(view.id).catch(() => undefined);
+    }
+    hideWindow().catch(() => undefined);
+  }
+
+  async function stop(recordingId: string) {
+    if (stopping) {
+      return;
+    }
+    setStopping(true);
+    setStopProblem("");
+    try {
+      await activity.stopRecording(recordingId);
+      hideRecording();
+    } catch {
+      setStopProblem(recordingTexts.stopFailed);
+    } finally {
+      setStopping(false);
+      refreshSound();
     }
   }
 
@@ -286,6 +354,57 @@ export function Popup() {
           </Button>
           <Button disabled={advicePending !== null} title={adviceHints.keep} onClick={() => void adviceAct("dismiss")}>
             {adviceLabels.keep}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (live && sound !== null) {
+    const quietHint = sound.quietHint && !sound.heard;
+    const timer = liveInfo === null ? "" : elapsedText(liveInfo.startedAt, now);
+    return (
+      <div className="popup" ref={popupRef}>
+        <IconSprite />
+        <div className="p-top live">
+          <span className="dot" aria-hidden="true" />
+          <span className="heading">{recordingTexts.heading}</span>
+          {timer !== "" && <span className="time num">{timer}</span>}
+        </div>
+        {liveInfo !== null && (
+          <h1 className="title" title={liveInfo.title}>
+            {liveInfo.title}
+          </h1>
+        )}
+        <div className="p-sound">
+          <SoundLevel sound={sound} large />
+        </div>
+        <div className="texts">
+          {/* The calm hint replaces the tip: no alarm colour (the core's silent-source advice comes later). */}
+          {quietHint ? (
+            <p className="p-note soft">
+              <Icon name="info" />
+              <span>{soundTexts.hint}</span>
+            </p>
+          ) : (
+            <p className="p-note">{recordingTexts.tip}</p>
+          )}
+          {stopProblem !== "" && <p className="warning">{stopProblem}</p>}
+        </div>
+        <div className="pbtns two">
+          <Button
+            variant="danger"
+            icon="stop"
+            busy={stopping}
+            busyLabel={recordingTexts.stopping}
+            disabled={stopping}
+            title={recordingTexts.stopHint}
+            onClick={() => void stop(sound.recordingId)}
+          >
+            {recordingTexts.stop}
+          </Button>
+          <Button title={recordingTexts.hideHint} onClick={hideRecording}>
+            {recordingTexts.hide}
           </Button>
         </div>
       </div>

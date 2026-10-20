@@ -84,7 +84,7 @@ func (c *child) levelCheck(ctx context.Context, stop <-chan struct{}, src Source
 	m := &levelMeter{}
 	var bg sync.WaitGroup
 	ticking := make(chan struct{})
-	bg.Go(func() { c.reportLevels(m, ticking) })
+	bg.Go(func() { c.reportLevels(m, c.cfg.LevelInterval, ticking) })
 	stopper := context.AfterFunc(ctx, stream.Stop)
 
 	failure := meterStream(ctx, stream, m)
@@ -139,10 +139,10 @@ func meterStream(ctx context.Context, stream Stream, m *levelMeter) error {
 	}
 }
 
-// reportLevels emits the level of each window until done is closed: at most one event per LevelInterval, and a
-// window without packets reports 0.
-func (c *child) reportLevels(m *levelMeter, done <-chan struct{}) {
-	t := time.NewTicker(c.cfg.LevelInterval)
+// reportLevels emits the level of each window until done is closed: at most one event per every, and a window
+// without packets reports 0.
+func (c *child) reportLevels(m *levelMeter, every time.Duration, done <-chan struct{}) {
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {

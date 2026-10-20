@@ -59,6 +59,8 @@
     "src/recordingRowView.ts",
     "src/clock.ts",
     "src/pages/RecordingRow.tsx",
+    "src/soundLevelView.ts",
+    "src/ui/SoundLevel.tsx",
     "src/bindings/recordingDelete.ts",
     "src/recordingDeleteView.ts",
     "src/ui/menu.ts",
