@@ -84,6 +84,21 @@ func (r *reports) report(_ context.Context, p job.Progress) error {
 	return nil
 }
 
+// steps runs the job step by step as the runner does, with the progress callback report, and returns how many LLM
+// calls each step made; a step that does not return job.ErrContinueLater ends the job with its error.
+func (e *ppEnv) steps(snap job.Snapshot, report func(context.Context, job.Progress) error) ([]int, error) {
+	e.t.Helper()
+	var calls []int
+	for {
+		before := len(e.llm.Requests())
+		err := e.pp.Handle(context.Background(), snap, report)
+		calls = append(calls, len(e.llm.Requests())-before)
+		if !errors.Is(err, job.ErrContinueLater) {
+			return calls, err
+		}
+	}
+}
+
 func (r *reports) checkpoints() []string {
 	var out []string
 	for _, p := range r.list {
@@ -115,7 +130,8 @@ func untrusted(t *testing.T, r values.LLMRequest) map[string]any {
 	return m
 }
 
-// TASK-090: a long transcript is formatted part by part, one call per part, and the merged text is stored.
+// TASK-090: a long transcript is formatted part by part, one call per part, and the merged text is stored. TASK-097:
+// each part is one step; the steps before the last end with job.ErrContinueLater.
 func TestLectureTextIsMadePartByPart(t *testing.T) {
 	e := newLectureEnv(t, 150)
 	e.llm.Answer(values.OperationLectureText, partAnswer("Rivers", 0, 0, 70))
@@ -123,8 +139,12 @@ func TestLectureTextIsMadePartByPart(t *testing.T) {
 	e.llm.Answer(values.OperationLectureText, partAnswer("Deltas", 140, 140, 150))
 
 	var rep reports
-	if err := e.pp.Handle(context.Background(), e.snapshot("j1", LectureTextJobType, "t2"), rep.report); err != nil {
+	calls, err := e.steps(e.snapshot("j1", LectureTextJobType, "t2"), rep.report)
+	if err != nil {
 		t.Fatalf("Handle: %v", err)
+	}
+	if !slices.Equal(calls, []int{1, 1, 1}) {
+		t.Fatalf("calls per step = %v, want one step per part with one call each", calls)
 	}
 
 	reqs := e.llm.Requests()
@@ -155,7 +175,7 @@ func TestLectureTextIsMadePartByPart(t *testing.T) {
 		t.Fatalf("first segment of part 2 = %v", first)
 	}
 
-	if got := rep.checkpoints(); !slices.Equal(got, []string{"0/3", "1/3", "2/3", "3/3"}) {
+	if got := rep.checkpoints(); !slices.Equal(got, []string{"0/3", "1/3", "1/3", "2/3", "2/3", "3/3"}) {
 		t.Fatalf("progress = %v", got)
 	}
 	l := e.lecture("t2")
@@ -189,7 +209,8 @@ func TestLectureTextOfAShortTranscript(t *testing.T) {
 	}
 }
 
-// A part whose answer fails the checks is asked again with a reminder; the repeats of an attempt share one budget.
+// A part whose answer fails the checks is asked again with a reminder; each step (one part, TASK-097) has its own
+// budget of LectureTextReminders repeats.
 func TestLectureTextReminders(t *testing.T) {
 	t.Run("a part passes after a reminder", func(t *testing.T) {
 		e := newLectureEnv(t, 150)
@@ -250,6 +271,25 @@ func TestLectureTextReminders(t *testing.T) {
 		}
 	})
 
+	t.Run("each step has its own budget", func(t *testing.T) {
+		e := newLectureEnv(t, 150)
+		bad := testenv.LLMReply{Output: "no JSON"}
+		e.llm.Reply(values.OperationLectureText,
+			bad, bad, bad, testenv.LLMReply{Output: partAnswer("A", 0, 0, 70)},
+			bad, bad, bad, testenv.LLMReply{Output: partAnswer("B", 70, 70, 140)},
+			testenv.LLMReply{Output: partAnswer("C", 140, 140, 150)})
+		calls, err := e.steps(e.snapshot("j1", LectureTextJobType, "t2"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []int{1 + LectureTextReminders, 1 + LectureTextReminders, 1}; !slices.Equal(calls, want) {
+			t.Fatalf("calls per step = %v, want %v", calls, want)
+		}
+		if l := e.lecture("t2"); l == nil || !l.Ready() {
+			t.Fatal("lecture text not stored")
+		}
+	})
+
 	t.Run("a cut-off answer ends the budget as truncated", func(t *testing.T) {
 		e := newPPEnv(t)
 		e.llm.Answer(values.OperationLectureText, `{"blocks":[{"heading":"A","from":0,"paragraphs":["Today we`)
@@ -284,14 +324,14 @@ func TestLectureTextResumesWithTheSameKeys(t *testing.T) {
 	e.llm.Reply(values.OperationLectureText,
 		testenv.LLMReply{Output: partAnswer("B", 70, 70, 140)}, testenv.LLMReply{Output: partAnswer("C", 140, 140, 150)})
 	var rep reports
-	if err := e.pp.Handle(context.Background(), snap, rep.report); err != nil {
+	if _, err := e.steps(snap, rep.report); err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
 	reqs := e.llm.Requests()
 	if len(reqs) != 2 || reqs[0].IdempotencyKey() != first[1].IdempotencyKey() || reqs[0].UntrustedData() != first[1].UntrustedData() {
 		t.Fatalf("calls = %d; the resumed part must repeat the request of the first attempt", len(reqs))
 	}
-	if got := rep.checkpoints(); !slices.Equal(got, []string{"1/3", "2/3", "3/3"}) {
+	if got := rep.checkpoints(); !slices.Equal(got, []string{"1/3", "2/3", "2/3", "3/3"}) {
 		t.Fatalf("progress = %v", got)
 	}
 	if !e.lecture("t2").Ready() {

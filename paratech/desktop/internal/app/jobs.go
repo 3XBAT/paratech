@@ -26,9 +26,9 @@ const (
 	// with the room of one call.
 	postProcessJobTimeout = homeworkflow.AnswerCalls * llmJobTimeout
 
-	// lectureTextJobTimeout covers the worst case of one lecture_text attempt: MaxLectureTextCalls (64 parts and the
-	// reminders) one after the other, each ending at the Hub client's request timeout, plus the room of one call for
-	// the local work. An attempt that still times out keeps the parts it made: the next one continues from there.
+	// lectureTextJobTimeout covers the worst case of one lecture_text step (one part, TASK-097): MaxLectureTextCalls
+	// (the part and its reminders) one after the other, each ending at the Hub client's request timeout, plus the room
+	// of one call for the local work. A step that still times out is retried from the same part.
 	lectureTextJobTimeout = homeworkflow.MaxLectureTextCalls*hubclient.DefaultRequestTimeout + llmJobTimeout
 
 	// sendEmailTimeout is above twice the SMTP session timeout: the smtp adapter's deadline covers the session setup
