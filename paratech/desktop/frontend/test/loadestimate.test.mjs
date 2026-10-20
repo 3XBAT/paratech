@@ -2,7 +2,7 @@
 // (tsconfig.test.json) with the Node test runner.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
 import { parseModelLoadEstimates, recognitionLoads } from "../.test-build/bindings/load.js";
@@ -72,33 +72,46 @@ test("estimates are parsed strictly; null is no estimate", () => {
   }
 });
 
-test("a model line: the number in the current mode, «примерно» for the table, a warning above 1 h", () => {
-  assert.deepEqual(modelEstimateLine(large), {
-    text: "Запись 1 ч ≈ 3 ч 20 мин в режиме «Бережная» (примерно) — дольше самой записи",
+test("a model line: only a number measured on this computer, a warning above 1 h (TASK-111)", () => {
+  assert.deepEqual(modelEstimateLine(large), { text: "", heavy: false, tip: "" }, "table: no time at all");
+  const measuredLarge = { ...large, current: est("normal", 8280, "measured") };
+  assert.deepEqual(modelEstimateLine(measuredLarge), {
+    text: "Запись 1 ч ≈ 2 ч 18 мин в режиме «Обычная» на этом компьютере — дольше самой записи",
     heavy: true,
-    tip: "Бережная: ≈ 3 ч 20 мин (примерно)\nОбычная: ≈ 2 ч 18 мин\nМаксимальная: ≈ 50 мин (примерно)",
+    tip:
+      "Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 2 ч 18 мин\n" +
+      "Максимальная: скорость неизвестна до первого распознавания",
   });
   const s = modelEstimateLine(small);
-  assert.equal(s.text, "Запись 1 ч ≈ 25 мин в режиме «Обычная»", "measured: no «примерно»");
+  assert.equal(s.text, "Запись 1 ч ≈ 25 мин в режиме «Обычная» на этом компьютере");
   assert.equal(s.heavy, false);
-  assert.equal(s.tip, "Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 25 мин\nМаксимальная: ≈ 15 мин (примерно)");
+  assert.equal(s.tip, "Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 25 мин\nМаксимальная: скорость неизвестна до первого распознавания");
+  for (const line of [modelEstimateLine(measuredLarge), s]) {
+    assert.doesNotMatch(line.text + line.tip, /примерно/);
+  }
 
   const none = { text: "", heavy: false, tip: "" };
   assert.deepEqual(modelEstimateLine(null), none);
   assert.deepEqual(modelEstimateLine(undefined), none);
   assert.deepEqual(modelEstimateLine({ ...small, current: est("gentle", 0, "unknown") }), none, "unknown: nothing shown");
   assert.deepEqual(modelEstimateLine({ ...small, current: est("gentle", 0, "table") }), none, "0 is unknown");
+  assert.deepEqual(modelEstimateLine({ ...small, current: est("gentle", 0, "measured") }), none, "0 is unknown");
+  assert.deepEqual(modelEstimateLine({ ...small, current: est("max", 900, "table") }), none, "table: nothing shown");
+  assert.deepEqual(modelEstimateLine({ ...small, current: est("max", 9000, "table") }), none, "a heavy table number: no warning either");
   assert.equal(estimatesTip(null), "");
   assert.equal(estimateValue(est("max", 90, "measured")), "≈ 2 мин");
+  assert.equal(estimateValue(est("max", 90, "table")), "", "table: no number");
+  assert.equal(estimateValue(est("max", 90, "unknown")), "");
 });
 
-test("the setting shows the model in use in the selected mode", () => {
-  assert.deepEqual(settingEstimateLine(large, "large-v3-f16", "gentle"), {
-    text: "Модель «large-v3-f16»: запись 1 ч ≈ 3 ч 20 мин (примерно) — дольше самой записи",
+test("the setting shows the model in use in the selected mode, only when measured (TASK-111)", () => {
+  assert.equal(settingEstimateLine(large, "large-v3-f16", "gentle"), null, "table: no time, no «дольше самой записи»");
+  assert.deepEqual(settingEstimateLine(large, "large-v3-f16", "normal"), {
+    text: "Модель «large-v3-f16»: запись 1 ч ≈ 2 ч 18 мин на этом компьютере — дольше самой записи",
     heavy: true,
   });
-  assert.deepEqual(settingEstimateLine(large, "large-v3-f16", "normal"), { text: "Модель «large-v3-f16»: запись 1 ч ≈ 2 ч 18 мин — дольше самой записи", heavy: true });
-  assert.deepEqual(settingEstimateLine(small, "small-q5_1", "max"), { text: "Модель «small-q5_1»: запись 1 ч ≈ 15 мин (примерно)", heavy: false });
+  assert.equal(settingEstimateLine(small, "small-q5_1", "max"), null, "table");
+  assert.deepEqual(settingEstimateLine(small, "small-q5_1", "normal"), { text: "Модель «small-q5_1»: запись 1 ч ≈ 25 мин на этом компьютере", heavy: false });
   assert.equal(settingEstimateLine(small, "small-q5_1", "gentle"), null, "unknown speed");
   assert.equal(settingEstimateLine(null, "", "gentle"), null);
   assert.equal(settingEstimateLine(large, "", "gentle"), null);
@@ -154,17 +167,20 @@ const installedModel = {
   installedAt: "2026-10-15T06:30:00Z", inUse: true, estimates: small,
 };
 
-test("models: every row shows the estimate; the number replaces the vague heavy warning", () => {
-  const r = catalogRow(catalogEntry);
-  assert.equal(r.estimate, "Запись 1 ч ≈ 3 ч 20 мин в режиме «Бережная» (примерно) — дольше самой записи");
+test("models: a row shows the measured estimate; the number replaces the vague heavy warning", () => {
+  const table = catalogRow(catalogEntry);
+  assert.deepEqual([table.estimate, table.estimateHeavy, table.estimateTip], ["", false, ""], "table: no time (TASK-111)");
+  assert.equal(table.warning, texts.heavy, "without a measured number the old warning stays");
+  const r = catalogRow({ ...catalogEntry, estimates: { ...large, current: est("normal", 8280, "measured") } });
+  assert.equal(r.estimate, "Запись 1 ч ≈ 2 ч 18 мин в режиме «Обычная» на этом компьютере — дольше самой записи");
   assert.equal(r.estimateHeavy, true);
-  assert.match(r.estimateTip, /^Бережная: ≈ 3 ч 20 мин \(примерно\)\nОбычная: /);
+  assert.match(r.estimateTip, /^Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 2 ч 18 мин\n/);
   assert.equal(r.warning, "", "the number is the warning");
   assert.equal(catalogRow({ ...catalogEntry, estimates: null }).warning, texts.heavy, "without a number the old warning stays");
   assert.equal(catalogRow({ ...catalogEntry, estimates: null }).estimate, "");
 
   const i = installedRow(installedModel, [catalogEntry]);
-  assert.equal(i.estimate, "Запись 1 ч ≈ 25 мин в режиме «Обычная»", "an installed model has its own (measured) estimates");
+  assert.equal(i.estimate, "Запись 1 ч ≈ 25 мин в режиме «Обычная» на этом компьютере", "an installed model has its own (measured) estimates");
   assert.equal(i.estimateHeavy, false);
   const own = installedRow({ ...installedModel, fromCatalog: false, catalogId: "", estimates: null }, []);
   assert.deepEqual([own.estimate, own.estimateTip], ["", ""]);
@@ -214,4 +230,18 @@ test("the settings page groups its rows under the captions of the mockup (TASK-1
   assert.ok(at.every((i) => i >= 0) && at[0] < at[1] && at[1] < at[2], "the groups in the mockup's order");
   assert.match(page, /<h2 className="group-cap">\{props\.caption\}<\/h2>/);
   assert.match(page, /<h2 className="group-cap">Профиль студента<\/h2>/);
+});
+
+test("recognition runs on the processor only: no caption mentions a video card (TASK-111)", () => {
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = new URL(e.name + (e.isDirectory() ? "/" : ""), dir);
+      return e.isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+    });
+  const files = walk(new URL("../src/", import.meta.url));
+  assert.ok(files.length > 10, "the sources are found");
+  for (const f of files) {
+    assert.doesNotMatch(readFileSync(f, "utf8"), /видеокарт|GPU|CUDA/i, f.pathname);
+  }
+  assert.doesNotMatch(Object.values(estimateTexts).join(" "), /примерно/);
 });

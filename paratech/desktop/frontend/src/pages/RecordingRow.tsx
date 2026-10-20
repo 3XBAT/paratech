@@ -153,23 +153,19 @@ export function RecordingRow(props: RecordingRowProps) {
 
   return (
     <Row
-      title={
-        onSelect ? (
-          <span className="row-check">
-            <input
-              type="checkbox"
-              checked={props.selected ?? false}
-              disabled={del.disabled}
-              title={del.hint || undefined}
-              aria-label={`Выбрать: ${v.title}`}
-              onChange={(e) => onSelect(e.target.checked)}
-            />
-            {title}
-          </span>
-        ) : (
-          title
+      lead={
+        onSelect && (
+          <input
+            type="checkbox"
+            checked={props.selected ?? false}
+            disabled={del.disabled}
+            title={del.hint || undefined}
+            aria-label={`Выбрать: ${v.title}`}
+            onChange={(e) => onSelect(e.target.checked)}
+          />
         )
       }
+      title={title}
       meta={
         (v.lesson !== "" || v.meta !== "") && (
           <>

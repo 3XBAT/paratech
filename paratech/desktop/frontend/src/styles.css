@@ -392,7 +392,6 @@ html, body, #root { height: 100%; }
 
 /* Deleting recordings (TASK-095): the «⋯» menu leaves the card, the row checkbox, the bar of the selected ones and the
    confirmation, which scrolls when many recordings are listed. */
-.row-check { display: inline-flex; align-items: baseline; gap: 8px; }
 .mmenu-hint { max-width: 260px; padding: 0 12px 8px; white-space: normal; }
 .rec-selected { margin-bottom: 12px; }
 .rec-deleted-line { display: block; overflow-wrap: anywhere; }

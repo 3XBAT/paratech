@@ -195,9 +195,9 @@ export interface ModelRow {
   warning: string;
   /** The technical id (and the SHA-256 of an installed model): a tooltip only, never visible text. */
   tip: string;
-  /** «Запись 1 ч ≈ N мин в режиме «Бережная»» (TASK-084), "" without a number. */
+  /** «Запись 1 ч ≈ N мин в режиме «Бережная» на этом компьютере» (TASK-084), "" until measured (TASK-111). */
   estimate: string;
-  /** The estimate is above 1 h per 1 h of audio: shown as a warning. */
+  /** The measured estimate is above 1 h per 1 h of audio: shown as a warning. */
   estimateHeavy: boolean;
   /** The estimate in every mode, one per line: the tooltip of the estimate. */
   estimateTip: string;
@@ -445,7 +445,8 @@ export const texts = {
   afterImport: "После установки модели ожидающие записи начнут распознаваться без перезапуска.",
   needDefault: "Установлено несколько моделей, но ни одна не выбрана по умолчанию: распознавание ждёт выбора.",
   emptyCatalog: "Список моделей пуст. Модель можно установить из файла (см. «Другие модели»).",
-  machineUnknown: "Оборудование компьютера не определено: нагрузка указана примерно, для обычного компьютера.",
+  // No time here (TASK-111): the time is shown only once measured on this computer.
+  machineUnknown: "Оборудование компьютера не определено: нагрузка указана для обычного компьютера.",
   catalogTitle: "Модели для скачивания",
   variantsNote: "Q5 в названии — уменьшенная копия модели: файл меньше, работает быстрее, точность чуть ниже.",
   /** The tooltip of the «Q5» suffix. */

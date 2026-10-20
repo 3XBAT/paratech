@@ -208,6 +208,11 @@ test("the notes say why recordings are not transcribed", () => {
   const two = { ...view, installed: [none, { ...none, id: "m-2" }], needsDefault: true };
   assert.deepEqual(statusNotes(two).map((n) => n.text), [texts.needDefault]);
   assert.match(texts.machineUnknown, /не определено/);
+  // TASK-111: the time is shown only once measured on this computer; recognition runs on the processor only.
+  assert.doesNotMatch(texts.machineUnknown, /примерно|≈|\d|мин|час|врем|быстр|долг/i, "no time promised");
+  for (const t of Object.values(texts)) {
+    assert.doesNotMatch(t, /видеокарт|GPU|графическ/i, t);
+  }
 
   assert.equal(defaultBadge(installed), "По умолчанию");
   assert.equal(defaultBadge({ ...installed, inUse: false }), "По умолчанию");

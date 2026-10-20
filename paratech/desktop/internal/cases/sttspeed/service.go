@@ -100,7 +100,8 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 }
 
 // TranscriptionTime returns how long recognising audio with the installed model takes in the current mode; ok is
-// false when there is no estimate (an imported model never measured, a model no longer installed).
+// true only for a speed measured on this computer (TASK-111): the rough table, an unknown speed or a model no
+// longer installed give no time.
 func (s *Service) TranscriptionTime(ctx context.Context, model shared.SttModelID, audio time.Duration) (
 	d time.Duration, ok bool, err error) {
 	st, err := s.read(ctx)
@@ -112,7 +113,10 @@ func (s *Service) TranscriptionTime(ctx context.Context, model shared.SttModelID
 			continue
 		}
 		e := s.estimate(st, model, familyOf(st.catalog, m), m.Quantization(), st.load)
-		return e.For(audio), e.Known(), nil
+		if !e.Known() || e.Source() != speedestimate.SourceMeasured {
+			return 0, false, nil
+		}
+		return e.For(audio), true, nil
 	}
 	return 0, false, nil
 }
