@@ -44,7 +44,8 @@ type Lessons interface {
 // TranscriptionTimes estimates how long recognising audio with an installed model takes in the current load mode
 // (PRD section 8; TASK-084). The app wires the recognition speed use case.
 type TranscriptionTimes interface {
-	// TranscriptionTime returns the processing time of audio; ok is false without an estimate (PRD section 8).
+	// TranscriptionTime returns the processing time of audio; ok is false unless the speed was measured on this
+	// computer (PRD section 8; TASK-111).
 	TranscriptionTime(ctx context.Context, model shared.SttModelID, audio time.Duration) (d time.Duration, ok bool, err error)
 }
 

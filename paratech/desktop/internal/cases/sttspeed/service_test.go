@@ -181,14 +181,30 @@ func TestOverviewWithoutAModelInUse(t *testing.T) {
 	}
 }
 
+// TASK-111: a time only from a speed measured on this computer, never from the rough table.
 func TestTranscriptionTime(t *testing.T) {
-	speeds := fakeSpeeds{{Model: "m-large", Load: shared.LoadNormal}: measured(t, 0.5)}
-	models := []*sttmodel.Model{catalogModel(t, "m-large", "large-v3-f16"), importedModel(t, "m-custom")}
+	speeds := fakeSpeeds{
+		{Model: "m-large", Load: shared.LoadNormal}: measured(t, 0.5),
+		{Model: "m-small", Load: shared.LoadGentle}: measured(t, 0.2),
+	}
+	models := []*sttmodel.Model{catalogModel(t, "m-large", "large-v3-f16"), catalogModel(t, "m-small", "small-q5_1"),
+		importedModel(t, "m-custom")}
 	s := newService(t, models, speeds, fakeSettings{load: shared.LoadNormal})
 	ctx := context.Background()
 
 	if d, ok, err := s.TranscriptionTime(ctx, "m-large", 90*time.Minute); err != nil || !ok || d != 45*time.Minute {
 		t.Errorf("measured: %v %v %v; want 45m", d, ok, err)
+	}
+	// Measured only in another mode: the table would give a time for normal, but it is not shown.
+	if d, ok, err := s.TranscriptionTime(ctx, "m-small", time.Hour); err != nil || ok || d != 0 {
+		t.Errorf("table estimate: %v %v %v; want no time", d, ok, err)
+	}
+	gentle := newService(t, models, speeds, fakeSettings{load: shared.LoadGentle})
+	if d, ok, err := gentle.TranscriptionTime(ctx, "m-small", time.Hour); err != nil || !ok || d != 12*time.Minute {
+		t.Errorf("measured in gentle: %v %v %v; want 12m", d, ok, err)
+	}
+	if d, ok, err := gentle.TranscriptionTime(ctx, "m-large", time.Hour); err != nil || ok || d != 0 {
+		t.Errorf("large in gentle from the table: %v %v %v; want no time", d, ok, err)
 	}
 	if d, ok, err := s.TranscriptionTime(ctx, "m-custom", time.Hour); err != nil || ok || d != 0 {
 		t.Errorf("imported, never measured: %v %v %v; want no estimate", d, ok, err)
