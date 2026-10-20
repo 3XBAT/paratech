@@ -285,7 +285,10 @@ test("the states show, and the retry buttons appear only with a handler", () => 
     homework: { ...step("failed", { message: "Не удалось найти домашние задания." }), assignments: [] },
   });
   const s = renderToStaticMarkup(h(SummaryCard, { view: failed }));
-  assert.ok(s.includes("Не удалось составить конспект.") && s.includes("Сервис ответил ошибкой."), s);
+  assert.ok(s.includes("Не удалось составить конспект."), s);
+  // The job error is technical: only the tooltip of the state line (TASK-097).
+  assert.ok(s.includes('title="Сервис ответил ошибкой."'), s);
+  assert.equal(s.split("Сервис ответил ошибкой.").length - 1, 1, "and nowhere else");
   assert.ok(!s.includes("<button"));
   const withRetry = renderToStaticMarkup(h(SummaryCard, { view: failed, onRetry: () => undefined }));
   assert.ok(withRetry.includes("Повторить"));

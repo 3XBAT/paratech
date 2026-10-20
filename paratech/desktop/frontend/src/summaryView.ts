@@ -111,7 +111,7 @@ export function keyPointList(points: readonly string[]): string[] {
   return points.map((p) => p.trim()).filter((p) => p !== "");
 }
 
-/** The state line of a step: the core's text and its look; detail is the core's last error, "" for none. */
+/** The state line of a step: the core's text and its look; detail is the core's last error for the tooltip only, "" for none. */
 export interface StepLine {
   /** null: plain text (running, none). */
   kind: ResultKind | null;

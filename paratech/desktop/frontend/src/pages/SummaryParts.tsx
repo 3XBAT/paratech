@@ -28,22 +28,21 @@ export interface RetryProps {
   retryDisabled?: boolean;
 }
 
-/** The state line of a step; also used by the lecture text card. */
+/**
+ * The state line of a step; also used by the lecture text card. Only the core's Russian message is text: the job
+ * error is technical (English, for support) and stays in the tooltip, as on the recording rows (TASK-096, TASK-097).
+ */
 export function Line(props: { line: StepLine }) {
   const l = props.line;
-  return (
-    <>
-      {l.kind === null ? (
-        <p className="sm-state" role="status">
-          {l.message}
-        </p>
-      ) : (
-        <ResultLine kind={l.kind} role={l.kind === "fail" ? "alert" : "status"}>
-          {l.message}
-        </ResultLine>
-      )}
-      {l.detail !== "" && <p className="small muted sm-detail">{l.detail}</p>}
-    </>
+  const title = l.detail || undefined;
+  return l.kind === null ? (
+    <p className="sm-state" role="status" title={title}>
+      {l.message}
+    </p>
+  ) : (
+    <ResultLine kind={l.kind} role={l.kind === "fail" ? "alert" : "status"} title={title}>
+      {l.message}
+    </ResultLine>
   );
 }
 

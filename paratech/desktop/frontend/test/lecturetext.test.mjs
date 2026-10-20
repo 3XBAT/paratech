@@ -208,6 +208,19 @@ test("the lecture card without a text: the core's state, the start button, no to
   assert.ok(lectureCopiedText.includes("скопирован"));
 });
 
+test("a failed lecture text shows the Russian message; the technical error is only the tooltip (TASK-097)", () => {
+  const err = "post-processing: the LLM call failed";
+  const visible = (html) => html.replace(/<[^>]*>/g, "");
+  for (const state of ["failed", "waiting"]) {
+    const html = card(view({ ...step(state, { message: "Не удалось составить текст лекции.", jobError: err }), ready: false, blocks: [] }));
+    assert.ok(visible(html).includes("Не удалось составить текст лекции."), html);
+    assert.ok(!visible(html).includes(err), "no technical text in the visible text");
+    assert.ok(html.includes(`title="${err}"`), "the error is in the line's title");
+    assert.equal(html.split(err).length - 1, 1, "and nowhere else");
+  }
+  assert.ok(!card(view({ ...step("failed", { message: "Не удалось." }), ready: false })).includes("title="), "no tooltip without an error");
+});
+
 test("the row shows the lecture text with its parts and the progress bar", () => {
   assert.equal(stageLabels.lectureText, "Текст лекции…");
   const v = chainStatusView(row({ stage: "lectureText", step: "lectureText", partsDone: 3, parts: 12 }), 0);
