@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>paratech — концепт «Строгий» (2026-10-20)</title>
+<!--
+  Static mockup, no network. Stricter take on the approved «Эфир» style (docs/design/brief.md):
+  inset grouped lists, hairline separators, segmented controls, concentric radii, quiet buttons,
+  monochrome icons, plus the live sound level indicator. Font: the local Golos Text woff2 from the
+  frontend's node_modules, falling back to Segoe UI.
+-->
+<style>
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: local("Golos Text"), url("../../paratech/desktop/frontend/node_modules/@fontsource-variable/golos-text/files/golos-text-cyrillic-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: local("Golos Text"), url("../../paratech/desktop/frontend/node_modules/@fontsource-variable/golos-text/files/golos-text-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ───────────── Tokens (proposed for src/ui/tokens.css) ───────────── */
+.t-light, :root {
+  --font: "Golos Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --bg: #EBEBE7;        /* window, title bar, side rail */
+  --panel: #F4F4F1;     /* sheet = grouped background (darker than before so white groups read without borders) */
+  --raised: #FFFFFF;    /* groups, controls */
+  --fill: #E8E8E4;      /* segmented track, hover, meter track */
+  --fill-2: #DFDFDA;    /* pressed */
+  --sep: rgba(26, 27, 30, .10);      /* hairline inside groups */
+  --edge: rgba(26, 27, 30, .07);     /* group outline (0 0 0 1px) */
+  --btn-line: rgba(26, 27, 30, .20); /* quiet button outline; the label identifies the button */
+  --control: #7A7D83;   /* inputs, switches, checkboxes: 3:1 */
+  --text: #1A1B1E;
+  --muted: #5A5D64;
+  --accent: #A6541E;
+  --accent-fill: #C26A2E;
+  --prim: #1F2023;
+  --on-prim: #FAFAF8;
+  --rec: #B23A30;
+  --rec-t: #9C3027; --rec-b: #F7E5E2;
+  --run-t: #8A4716; --run-b: #F5E9DE;
+  --wait-t: #735000; --wait-b: #F4ECD4;
+  --net-t: #2B5788; --net-b: #E3EBF4;
+  --ok-t: #2C6644; --ok-b: #E1EEE5;
+  --neu-t: #4E5158; --neu-b: #EEEEEB;
+  --lvl: #2C6644;       /* level meter fill = ok colour, as «слышно» in Диагностика */
+  --sh-btn: 0 .5px 1px rgba(20, 20, 24, .10);
+  --sh-thumb: 0 1px 2px rgba(20, 20, 24, .10), 0 0 0 .5px rgba(20, 20, 24, .06);
+  --sh-win: 0 1px 2px rgba(20, 20, 24, .05), 0 18px 44px -22px rgba(20, 20, 24, .28);
+  --sh-pop: 0 0 0 1px rgba(20, 20, 24, .08), 0 12px 32px -12px rgba(20, 20, 24, .30);
+
+  --r-xs: 3px; --r-sm: 6px; --r-md: 8px; --r-lg: 10px; --r-xl: 12px;
+  --h-sm: 24px; --h-ctl: 30px; --h-lg: 36px; --h-row: 44px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  color-scheme: light;
+}
+.t-dark {
+  --bg: #121315;
+  --panel: #18191B;
+  --raised: #212225;
+  --fill: #2A2B2F;
+  --fill-2: #323338;
+  --sep: rgba(236, 235, 231, .09);
+  --edge: rgba(236, 235, 231, .06);
+  --btn-line: rgba(236, 235, 231, .16);
+  --control: #70747C;
+  --text: #ECEBE7;
+  --muted: #9EA1A8;
+  --accent: #DE9A68;
+  --accent-fill: #D08A57;
+  --prim: #E6E4DF;
+  --on-prim: #16171A;
+  --rec: #E8766B;
+  --rec-t: #F0958B; --rec-b: #3A2422;
+  --run-t: #E8AC7C; --run-b: #33281F;
+  --wait-t: #DFC07A; --wait-b: #312B1C;
+  --net-t: #98BBE4; --net-b: #1E2937;
+  --ok-t: #8FCDA7; --ok-b: #1C2F25;
+  --neu-t: #B4B7BD; --neu-b: #2A2B2F;
+  --lvl: #8FCDA7;
+  --sh-btn: 0 .5px 1px rgba(0, 0, 0, .4);
+  --sh-thumb: 0 1px 2px rgba(0, 0, 0, .45);
+  --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
+  --sh-pop: 0 0 0 1px rgba(255, 255, 255, .06), 0 14px 36px -12px rgba(0, 0, 0, .8);
+  color-scheme: dark;
+}
+
+/* ───────────── Mockup page ───────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { background: #DCDCD7; }
+body { margin: 0; padding: 40px 24px 80px; font-family: var(--font); font-size: 14px; line-height: 20px; color: #1A1B1E; -webkit-font-smoothing: antialiased; }
+.doc { width: 1232px; margin: 0 auto; }
+.doc > h1 { margin: 0 0 4px; font-size: 28px; line-height: 34px; font-weight: 650; letter-spacing: -0.03em; }
+.doc > .lead { margin: 0 0 24px; color: #4E5158; max-width: 80ch; }
+.intro { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 48px; }
+.intro .group { padding: 20px 24px; }
+.intro h2 { margin: 0 0 12px; font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.intro ul { margin: 0; padding-left: 18px; }
+.intro li { margin-bottom: 8px; }
+.intro li b { font-weight: 600; }
+.tok { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 18px; }
+.tok th { padding: 6px 0; text-align: left; font-weight: 600; color: #5A5D64; }
+.tok td { padding: 6px 12px 6px 0; border-top: 1px solid rgba(26,27,30,.10); vertical-align: top; }
+.tok td:first-child { white-space: nowrap; font-weight: 500; }
+code { font-family: inherit; font-variant-numeric: tabular-nums; }
+.label-sec { display: flex; align-items: baseline; gap: 12px; margin: 56px 0 16px; }
+.label-sec b { font-size: 13px; font-weight: 600; color: #5A5D64; font-variant-numeric: tabular-nums; }
+.label-sec span { font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.label-sec em { margin-left: auto; font-style: normal; font-size: 12.5px; color: #5A5D64; }
+.caption { margin: 12px 0 0; font-size: 12.5px; line-height: 18px; color: #4E5158; max-width: 100ch; }
+
+/* ───────────── Base inside a themed frame ───────────── */
+.t-light, .t-dark { color: var(--text); font-family: var(--font); }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; line-height: 18px; }
+.i { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.i.s14 { width: 14px; height: 14px; }
+.i.s16 { width: 16px; height: 16px; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Window */
+.win { overflow: hidden; border-radius: 8px; background: var(--bg); box-shadow: var(--sh-win), 0 0 0 1px rgba(20,20,24,.10); }
+.tbar { display: flex; align-items: center; height: 32px; padding-left: 14px; font-size: 12px; color: var(--muted); }
+.tbar .app { display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text); }
+.tbar .logo { width: 16px; height: 16px; border-radius: 4px; background: #2A2B2F; display: grid; place-items: center; }
+.tbar .logo svg { width: 12px; height: 12px; stroke: #E58A47; stroke-width: 2.4; fill: none; stroke-linecap: round; }
+.tbar .wc { margin-left: auto; display: flex; }
+.tbar .wc span { display: grid; place-items: center; width: 46px; height: 32px; }
+.tbar .wc .i { width: 14px; height: 14px; stroke-width: 1.2; }
+.shell { display: grid; grid-template-columns: 108px minmax(0, 1fr); min-height: 760px; }
+.shell.tall { height: auto; min-height: 760px; }
+
+/* Side rail: same structure, quieter selection (hairline + fill, no shadow), orange mark kept. */
+.rail { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px 12px; }
+.rail a { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px; border-radius: var(--r-md); color: var(--muted); font-size: 11.5px; line-height: 14px; font-weight: 500; text-align: center; text-decoration: none; }
+.rail a:hover { background: var(--fill); color: var(--text); }
+.rail a[aria-current="page"] { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--edge); }
+.rail a[aria-current="page"]::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
+.rail .i { width: 20px; height: 20px; }
+.rail .low { margin-top: auto; }
+.badge { position: absolute; top: 4px; right: 18px; width: 7px; height: 7px; border-radius: 50%; background: var(--rec); box-shadow: 0 0 0 2px var(--bg); }
+
+/* Sheet: grouped background; content column with even 24/32 padding. */
+.sheet { display: flex; flex-direction: column; min-width: 0; padding: 24px 32px 0; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); }
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.head h1 { margin: 0; font-size: 24px; line-height: 30px; font-weight: 650; letter-spacing: -0.025em; }
+.head .over { display: block; margin-bottom: 4px; font-size: 12.5px; line-height: 16px; color: var(--muted); }
+.sec-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; padding: 0 16px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--muted); }
+.sec-h.big { margin-bottom: 12px; padding: 0; font-size: 17px; line-height: 22px; letter-spacing: -0.015em; color: var(--text); }
+.sec-h .cnt { font-weight: 500; }
+.section + .section { margin-top: 32px; }
+.sub + .sub { margin-top: 20px; }
+.foot { margin: 8px 0 0; padding: 0 16px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+
+/* Inset group (iOS Settings): white, radius 10, a faint edge, hairline separators inset 16px from the left. */
+.group { position: relative; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
+.group > .r { position: relative; }
+.group > .r + .r::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
+.group > .r.inset-ico + .r::before, .group > .r + .r.inset-ico::before { left: 48px; }
+
+/* ── Buttons: quiet. Secondary = white + hairline + micro-shadow (macOS push button). One graphite primary per screen. */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--h-ctl); padding: 0 12px; border: 0; border-radius: var(--r-sm); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); color: var(--text); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background 120ms; }
+.btn:hover { background: var(--fill); }
+.btn .i { width: 16px; height: 16px; color: var(--muted); }
+.btn.primary { background: var(--prim); color: var(--on-prim); box-shadow: var(--sh-btn); }
+.btn.primary .i { color: currentColor; }
+.btn.primary:hover { opacity: .9; }
+.btn.danger { color: var(--rec-t); box-shadow: 0 0 0 1px color-mix(in srgb, var(--rec-t) 40%, transparent), var(--sh-btn); }
+.btn.danger .i { color: currentColor; }
+.btn.plain { background: none; box-shadow: none; color: var(--accent); }
+.btn.plain .i { color: currentColor; }
+.btn.plain:hover { background: var(--fill); }
+.btn.lg { height: var(--h-lg); font-size: 14px; }
+.btn.sm { height: var(--h-sm); padding: 0 8px; font-size: 12.5px; }
+.btn.w { width: 100%; }
+/* «⋯» and round «Повторить»: no outline, monochrome glyph. */
+.ibtn { display: inline-grid; place-items: center; width: var(--h-ctl); height: var(--h-ctl); padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); cursor: pointer; }
+.ibtn:hover { background: var(--fill); color: var(--text); }
+.ibtn.round { width: 24px; height: 24px; border-radius: 50%; }
+.ibtn.round .i { width: 15px; height: 15px; }
+
+/* ── Segmented: track = fill, thumb = raised; concentric radii 8 → 6. */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md); background: var(--fill); }
+.seg button { height: 26px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.seg button[aria-pressed="false"] { color: var(--muted); }
+.seg button[aria-pressed="false"]:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--raised); box-shadow: var(--sh-thumb); }
+.seg.lg button { height: 28px; padding: 0 16px; font-size: 13.5px; }
+.seg .n { margin-left: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ── Status chip («Тетрадь»): kept, evened — 22px tall, 12/600, edge 35 %; dashed for net/fail, double ring for ok. */
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 6px; border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); border-radius: var(--r-sm); background: var(--b); color: var(--c); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap; }
+.chip .i { width: 13px; height: 13px; stroke-width: 2; }
+.s-rec { --c: var(--rec-t); --b: var(--rec-b); }
+.s-run { --c: var(--run-t); --b: var(--run-b); }
+.s-wait { --c: var(--wait-t); --b: var(--wait-b); }
+.s-net { --c: var(--net-t); --b: var(--net-b); }
+.s-ok { --c: var(--ok-t); --b: var(--ok-b); }
+.s-fail { --c: var(--rec-t); --b: var(--rec-b); }
+.s-neu { --c: var(--neu-t); --b: var(--neu-b); }
+.chip.s-net, .chip.s-fail { border-style: dashed; }
+.chip.s-ok { box-shadow: inset 0 0 0 2px var(--b), inset 0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--rec); animation: breath 2.4s ease-in-out infinite; }
+@keyframes breath { 50% { opacity: .35; } }
+
+/* ── Progress */
+.prog { width: 100%; max-width: 200px; height: 4px; border-radius: var(--r-xs); background: var(--fill); overflow: hidden; }
+.prog b { display: block; height: 100%; border-radius: var(--r-xs); background: var(--accent-fill); }
+
+/* ── SOUND LEVEL INDICATOR ──
+   A capsule 56×4 like the Diagnostics bar (same «слышно» mark), plus one quiet word. Real app: the core's level
+   sets --v (0..1) every ~250 ms and a 160 ms transition smooths it; here a slow keyframe imitates speech. */
+.lvl { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.lvl-bar { position: relative; flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.lvl-bar b { position: absolute; inset: 0; border-radius: 2px; background: var(--lvl); transform-origin: left center; transform: scaleX(var(--v, .6)); transition: transform 160ms linear; }
+.lvl-bar i { position: absolute; top: 0; bottom: 0; left: 18%; width: 1px; background: var(--muted); opacity: .5; }
+.lvl.on .lvl-bar b { animation: speak 3.2s ease-in-out infinite; }
+.lvl.quiet .lvl-bar b { --v: .04; background: var(--muted); opacity: .6; animation: idle 4s ease-in-out infinite; }
+.lvl.lg .lvl-bar { width: 88px; height: 5px; border-radius: 3px; }
+@keyframes speak {
+  0% { transform: scaleX(.42); } 9% { transform: scaleX(.66); } 17% { transform: scaleX(.5); } 26% { transform: scaleX(.78); }
+  34% { transform: scaleX(.58); } 43% { transform: scaleX(.36); } 52% { transform: scaleX(.62); } 61% { transform: scaleX(.71); }
+  70% { transform: scaleX(.47); } 79% { transform: scaleX(.69); } 89% { transform: scaleX(.4); } 100% { transform: scaleX(.42); }
+}
+@keyframes idle { 0%, 100% { transform: scaleX(.03); } 50% { transform: scaleX(.07); } }
+@media (prefers-reduced-motion: reduce) {
+  .lvl.on .lvl-bar b, .lvl.quiet .lvl-bar b, .dot { animation: none; }
+  .lvl-bar b { transition: none; }
+}
+@media (forced-colors: active) {
+  .lvl-bar { forced-color-adjust: none; outline: 1px solid CanvasText; background: Canvas; }
+  .lvl-bar b { background: Highlight; opacity: 1; }
+}
+
+/* ── «Записи и задачи»: one row grid for all cards (TASK-098): title · status 272 · button 224 + 4 + «⋯» 30. */
+.arows > .r { display: grid; grid-template-columns: minmax(0, 1fr) 272px 258px; gap: 4px 24px; align-items: start; min-height: var(--h-row); padding: 12px 16px; }
+.r .main { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 12px; min-width: 0; }
+.r .main.nocheck { grid-template-columns: minmax(0, 1fr); }
+.r .main input { grid-row: 1; margin: 2px 0 0; width: 16px; height: 16px; accent-color: var(--prim); }
+.r .t { margin: 0; font-weight: 600; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r .meta { grid-column: -2; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.r .meta span { display: block; }
+.r .st { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding-top: 0; }
+.r .st-head { display: flex; align-items: center; gap: 4px; }
+.r .hint { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.r .acts { display: grid; grid-template-columns: 224px 30px; gap: 4px; align-items: center; margin-top: -4px; }
+.r .acts .btn { width: 100%; }
+.r .acts .slot { width: 224px; height: 1px; }
+.r.live { background: linear-gradient(90deg, color-mix(in srgb, var(--rec) 5%, transparent), transparent 40%); border-radius: var(--r-lg) var(--r-lg) 0 0; }
+.disclose { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 8px; padding: 0 16px; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 18px; font-weight: 600; cursor: pointer; }
+.disclose .i { width: 14px; height: 14px; transition: transform 120ms; }
+.disclose:hover { color: var(--text); }
+.more { display: flex; justify-content: center; padding: 8px; }
+.statusbar { display: flex; gap: 24px; margin: auto -32px 0; padding: 8px 32px; border-top: 1px solid var(--sep); font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.statusbar span { display: inline-flex; align-items: center; gap: 8px; }
+.statusbar .r2 { margin-left: auto; }
+.spacer { flex: 1; min-height: 24px; }
+
+/* ── Summary */
+.back { margin: -8px 0 8px -8px; }
+.sub-line { margin: 4px 0 0; color: var(--muted); }
+.sub-line b { color: var(--text); font-weight: 500; }
+.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.toolbar .grow { flex: 1; }
+.sum-grid { display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 24px; align-items: start; }
+.reading { padding: 24px 32px 28px; }
+.reading .stamp { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.reading p { max-width: 68ch; margin: 0 0 12px; font-size: 15.5px; line-height: 1.65; }
+.reading h3 { margin: 24px 0 8px; font-size: 15.5px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.reading ul { max-width: 68ch; margin: 0; padding-left: 20px; font-size: 15.5px; line-height: 1.6; }
+.reading li { margin-bottom: 4px; }
+.reading li::marker { color: var(--muted); }
+.hw-r { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+.hw-r .t { font-weight: 600; }
+.hw-r .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* ── Settings: inset grouped */
+.settings { width: 680px; }
+.set { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: center; min-height: var(--h-row); padding: 8px 16px; }
+.set .lab { line-height: 20px; }
+.set .note { grid-column: 1 / -1; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.set .est { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.switch { position: relative; width: 40px; height: 24px; margin: 0; border: 1px solid var(--control); border-radius: 12px; background: var(--fill); appearance: none; cursor: pointer; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 120ms var(--ease); }
+.switch:checked { border-color: var(--prim); background: var(--prim); }
+.switch:checked::after { transform: translateX(16px); background: var(--on-prim); }
+.field { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: 16px; min-height: var(--h-row); padding: 4px 16px; }
+.field input { width: 100%; height: var(--h-ctl); padding: 0 8px; border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; }
+.field input::placeholder { color: var(--muted); }
+.field input:hover { background: var(--fill); }
+.field input:focus { outline: none; border-color: var(--accent); background: var(--raised); }
+.group-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.modes { margin: 0; padding: 0; list-style: none; }
+
+/* ── Popup 360×300 (separate lightweight window, never takes focus) */
+.pops { display: flex; gap: 32px; align-items: flex-start; }
+.pop-w { display: flex; flex-direction: column; gap: 12px; }
+.pop-cap { font-size: 12.5px; line-height: 18px; color: #4E5158; max-width: 360px; }
+.pop { display: flex; flex-direction: column; width: 360px; height: 300px; padding: 16px; border-radius: 8px; background: var(--panel); box-shadow: var(--sh-pop); }
+.pop .top { display: flex; align-items: center; gap: 8px; height: 18px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.pop .top.live { color: var(--rec-t); }
+.pop .top .time { margin-left: auto; color: var(--muted); font-weight: 500; }
+.pop .top .timer { margin-left: auto; color: var(--text); font-size: 13.5px; font-weight: 600; }
+.pop .title { margin: 8px 0 12px; overflow: hidden; font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; text-overflow: ellipsis; }
+.pop .group { border-radius: var(--r-md); }
+.src { display: flex; align-items: center; gap: 8px; height: var(--h-lg); padding: 0 8px 0 12px; }
+.src .app { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--fill); color: var(--text); }
+.src .app .i { width: 14px; height: 14px; }
+.src .name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src .chev { color: var(--muted); }
+.pop .tip { margin: 8px 0 0; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.pop .soft { display: flex; gap: 8px; margin: 8px 0 0; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.pop .soft .i { margin-top: 1px; width: 14px; height: 14px; }
+.pop .soft a { color: var(--accent); font-weight: 500; text-decoration: none; }
+.pop .btns { display: grid; gap: 4px; margin-top: auto; }
+.pop .btns.two { grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ── Meter specimen */
+.spec { display: grid; grid-template-columns: repeat(4, 1fr); }
+.spec > div { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+.spec > div + div { box-shadow: inset 1px 0 0 var(--sep); }
+.spec h4 { margin: 0; font-size: 13px; line-height: 18px; font-weight: 600; }
+.spec p { margin: 0; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.frame-pad { padding: 24px; border-radius: 8px; background: var(--panel); box-shadow: 0 0 0 1px rgba(20,20,24,.10); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-rec" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6.5 3.5h7.5l3.5 3.5v13.5h-11z"/><path d="M13.5 3.5V7.5h4M9.5 12h5M9.5 15.5h5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v13M12 7a3 3 0 0 0-3-2.5H3.5v13H9a3 3 0 0 1 3 2.5M12 7a3 3 0 0 1 3-2.5h5.5v13H15a3 3 0 0 0-3 2.5"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-model" viewBox="0 0 24 24"><path d="M4 12h.01M8 8v8M12 4.5v15M16 8.5v7M20 12h.01"/></symbol>
+    <symbol id="i-diag" viewBox="0 0 24 24"><path d="M4 16a8 8 0 0 1 16 0M12 16l3.6-4.2M12 8v1.6M6.3 10.3l1.1 1.1M17.7 10.3l-1.1 1.1"/></symbol>
+    <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></symbol>
+    <symbol id="i-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.3M19 12.5a10 10 0 0 0-3.3-2M12 20h.01"/></symbol>
+    <symbol id="i-ok" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-chevr" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v4h14v-4"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4.5 7.5l7.5 5.5 7.5-5.5"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M17.66 2.34v4h-4"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="2.6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="12" height="11" rx="2"/><path d="M15.5 10.5l5-3v9l-5-3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+  <h1>paratech — «Эфир», строгая версия</h1>
+  <p class="lead">Тот же «Эфир»: графит, тёплая бумага, редкий медный акцент, Golos Text, ярлыки «Тетради», боковая панель. Строже: сгруппированные списки как в Настройках iOS, волосяные разделители, сегменты, одинаковые радиусы и тихие кнопки. Плюс индикатор звука во время записи.</p>
+
+  <div class="intro t-light">
+    <div class="group">
+      <h2>Что изменилось</h2>
+      <ul>
+        <li><b>Сгруппированные списки, как в Настройках iOS.</b> Белые группы лежат на чуть более тёмном листе (<code>#F4F4F1</code>), видимой рамки нет. Строки разделены волосяной линией с отступом 16 px слева. Заголовки групп — 13 px, приглушённые, без капса.</li>
+        <li><b>Строгая сетка 4 px и постоянные высоты.</b> Строка от 44 px, кнопка 30, малая 24, крупная 36. Между группами 24–32 px, у листа поля 24/32.</li>
+        <li><b>Пять концентрических радиусов: 3 · 6 · 8 · 10 · 12.</b> Внешний радиус равен внутреннему плюс отступ: дорожка сегмента 8, ползунок 6.</li>
+        <li><b>Тихие кнопки.</b> Вторичная — белая, с волосяной рамкой и микротенью, как кнопка macOS. Графитовая главная — одна на экран. «⋯» и круглая «Повторить» — без рамки, иконка монохромная.</li>
+        <li><b>Сегменты вместо вкладок и радиокнопок.</b> Разделы конспекта, формат файла, нагрузка, тема.</li>
+        <li><b>Цвет — только для смысла.</b> Медный цвет остался только у метки раздела, фокуса, ссылок и прогресса. Все иконки монохромные, штрих 1.6.</li>
+        <li><b>Ярлыки «Тетради» сохранены, но стали ровнее.</b> Высота 22, текст 12/600, рамка 35 %. Пунктир для «сеть» и «ошибка» и двойное кольцо для «готово» остались.</li>
+        <li><b>Индикатор звука.</b> Капсула 56×4 с меткой «слышно», как шкала в Диагностике. Пока звук идёт, она зелёная и «дышит». В тишине капсула пустая, рядом слово «Тихо», а через 2 минуты — тихая подсказка без тревожного цвета.</li>
+      </ul>
+    </div>
+    <div class="group">
+      <h2>Новые токены для tokens.css</h2>
+      <table class="tok">
+        <tr><th>Токен</th><th>Светлая</th><th>Тёмная</th></tr>
+        <tr><td>--panel (лист = фон групп)</td><td><code>#F4F4F1</code></td><td><code>#18191B</code></td></tr>
+        <tr><td>--raised (группа, кнопка)</td><td><code>#FFFFFF</code></td><td><code>#212225</code></td></tr>
+        <tr><td>--bg (окно, панель)</td><td><code>#EBEBE7</code></td><td><code>#121315</code></td></tr>
+        <tr><td>--fill / --fill-2 (дорожки, наведение / нажатие)</td><td><code>#E8E8E4 / #DFDFDA</code></td><td><code>#2A2B2F / #323338</code></td></tr>
+        <tr><td>--sep (волосок в группе, 1 px)</td><td><code>rgba(26,27,30,.10)</code></td><td><code>rgba(236,235,231,.09)</code></td></tr>
+        <tr><td>--edge (контур группы)</td><td><code>rgba(26,27,30,.07)</code></td><td><code>rgba(236,235,231,.06)</code></td></tr>
+        <tr><td>--btn-line (рамка тихой кнопки)</td><td><code>rgba(26,27,30,.20)</code></td><td><code>rgba(236,235,231,.16)</code></td></tr>
+        <tr><td>--lvl (индикатор звука)</td><td><code>#2C6644</code></td><td><code>#8FCDA7</code></td></tr>
+        <tr><td>Радиусы</td><td colspan="2"><code>--r-xs 3</code> (прогресс, шкала) · <code>--r-sm 6</code> (ярлык, кнопка, поле, ползунок) · <code>--r-md 8</code> (дорожка сегмента, меню, баннер, группа в окне урока) · <code>--r-lg 10</code> (группа) · <code>--r-xl 12</code> (лист, диалог)</td></tr>
+        <tr><td>Высоты</td><td colspan="2"><code>--h-sm 24</code> · <code>--h-ctl 30</code> · <code>--h-lg 36</code> · <code>--h-row 44</code> (мин. строка)</td></tr>
+        <tr><td>Отступы</td><td colspan="2">Только 4 · 8 · 12 · 16 · 20 · 24 · 32 · 40 (без 2/6/14). Строка 12×16; отступ волоска 16 (48 при иконке слева); подпись группы 8 до группы; между группами 24, между разделами 32; лист 24 сверху, 32 по бокам</td></tr>
+        <tr><td>Тени</td><td colspan="2"><code>--sh-btn 0 .5px 1px rgba(20,20,24,.10)</code> · <code>--sh-thumb 0 1px 2px rgba(20,20,24,.10), 0 0 0 .5px rgba(20,20,24,.06)</code>; --sh-win без изменений</td></tr>
+        <tr><td>Контраст текста</td><td colspan="2">Текст ≥ 13.3, --muted ≥ 5.4 (на --fill), --accent ≥ 4.5 на --bg/--panel/--raised. На --fill акцентный текст не ставим (4.37). Ярлыки — без изменений (5.68–8.01). Шкала к дорожке ≥ 5.5 : 1</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═════════════ 1. Записи и задачи ═════════════ -->
+  <div class="label-sec"><b>1</b><span>Записи и задачи</span><em>светлая · 1232 px</em></div>
+  <div id="scr1" class="t-light">
+  <div class="win">
+    <div class="tbar"><span class="app"><span class="logo"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-5 3 10 3-7 2 2h5"/></svg></span>paratech</span><span class="wc"><span><svg class="i"><use href="#i-min"/></svg></span><span><svg class="i"><use href="#i-max"/></svg></span><span><svg class="i"><use href="#i-x"/></svg></span></span></div>
+    <div class="shell">
+      <nav class="rail" aria-label="Разделы">
+        <a href="#" aria-current="page"><svg class="i"><use href="#i-rec"/></svg>Записи и задачи<span class="badge" aria-label="идёт запись"></span></a>
+        <a href="#"><svg class="i"><use href="#i-doc"/></svg>Домашние задания</a>
+        <a href="#"><svg class="i"><use href="#i-book"/></svg>База знаний</a>
+        <a href="#"><svg class="i"><use href="#i-cal"/></svg>Расписание</a>
+        <a href="#"><svg class="i"><use href="#i-link"/></svg>Подключения</a>
+        <a href="#"><svg class="i"><use href="#i-model"/></svg>Модели речи</a>
+        <a href="#"><svg class="i"><use href="#i-diag"/></svg>Диагностика</a>
+        <a href="#" class="low"><svg class="i"><use href="#i-set"/></svg>Настройки</a>
+      </nav>
+      <main class="sheet">
+        <div class="head">
+          <h1>Записи и задачи</h1>
+          <button class="btn primary"><svg class="i"><use href="#i-rec"/></svg>Начать запись</button>
+        </div>
+
+        <section class="section">
+          <h2 class="sec-h big">Записи</h2>
+          <div class="sub">
+            <h3 class="sec-h">Идут</h3>
+            <div class="group arows" role="list">
+              <div class="r live" role="listitem">
+                <div class="main nocheck">
+                  <p class="t">Математический анализ</p>
+                  <div class="meta"><span>Лекция · Петров А. В.</span><span class="num">Сегодня, 10:30 · Zoom</span></div>
+                </div>
+                <div class="st">
+                  <span class="chip s-rec"><span class="dot"></span>Идёт запись · <span class="num">00:42:17</span></span>
+                  <span class="lvl on js-live" role="img" aria-label="Уровень звука: звук идёт"><span class="lvl-bar"><b></b><i></i></span><span class="js-word">Звук идёт</span></span>
+                  <span class="hint">Окно можно закрыть — запись продолжится.</span>
+                </div>
+                <div class="acts">
+                  <button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button>
+                  <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+                </div>
+              </div>
+              <div class="r" role="listitem">
+                <div class="main">
+                  <input type="checkbox" aria-label="Выбрать">
+                  <p class="t">Физика</p>
+                  <div class="meta"><span>Семинар · Иванова Е. С.</span><span class="num">Сегодня, 08:50 · 1:28:40</span></div>
+                </div>
+                <div class="st">
+                  <span class="chip s-run"><svg class="i"><use href="#i-clock"/></svg>Расшифровка · <span class="num">64 %</span></span>
+                  <span class="prog" role="progressbar" aria-valuenow="64"><b style="width:64%"></b></span>
+                  <span class="hint num">Осталось около 6 минут.</span>
+                </div>
+                <div class="acts"><span class="slot"></span><button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button></div>
+              </div>
+              <div class="r" role="listitem">
+                <div class="main">
+                  <input type="checkbox" aria-label="Выбрать">
+                  <p class="t">История России</p>
+                  <div class="meta"><span>Лекция · Смирнов О. Н.</span><span class="num">Вчера, 14:00 · 1:30:02</span></div>
+                </div>
+                <div class="st">
+                  <span class="chip s-wait"><svg class="i"><use href="#i-plug"/></svg>Ждёт зарядку</span>
+                  <span class="hint">Ноутбук на батарее. Начнётся само после подключения питания.</span>
+                </div>
+                <div class="acts">
+                  <button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button>
+                  <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="sub">
+            <button class="disclose" aria-expanded="true"><svg class="i"><use href="#i-chev"/></svg>Завершённые <span class="cnt num">· 12</span></button>
+            <div class="group arows" role="list">
+              <div class="r" role="listitem">
+                <div class="main">
+                  <input type="checkbox" aria-label="Выбрать">
+                  <p class="t">Линейная алгебра</p>
+                  <div class="meta"><span>Практика · Кузнецов Д. А.</span><span class="num">Пн, 19 окт., 12:10 · 1:29:15</span></div>
+                </div>
+                <div class="st">
+                  <span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span>
+                  <span class="hint">2 задания · ближайшее до пт, 23 октября</span>
+                </div>
+                <div class="acts">
+                  <button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть конспект</button>
+                  <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+                </div>
+              </div>
+              <div class="r" role="listitem">
+                <div class="main">
+                  <input type="checkbox" aria-label="Выбрать">
+                  <p class="t">Английский язык</p>
+                  <div class="meta"><span>Практика · Орлова М. И.</span><span class="num">Пн, 19 окт., 10:30 · 1:30:00</span></div>
+                </div>
+                <div class="st">
+                  <span class="st-head"><span class="chip s-fail"><svg class="i"><use href="#i-warn"/></svg>Запись без звука</span><button class="ibtn round" aria-label="Повторить" title="Повторить"><svg class="i"><use href="#i-retry"/></svg></button></span>
+                  <span class="hint">В записи нет звука — скорее всего, был выбран не тот источник.</span>
+                </div>
+                <div class="acts">
+                  <button class="btn"><svg class="i"><use href="#i-diag"/></svg>Проверить звук</button>
+                  <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+                </div>
+              </div>
+              <div class="r" role="listitem">
+                <div class="main">
+                  <input type="checkbox" aria-label="Выбрать">
+                  <p class="t">Программирование</p>
+                  <div class="meta"><span>Лабораторная · Волков С. П.</span><span class="num">Сб, 17 окт., 09:00 · 1:31:47</span></div>
+                </div>
+                <div class="st">
+                  <span class="chip s-net"><svg class="i"><use href="#i-off"/></svg>Ждёт интернет</span>
+                  <span class="hint">Продолжится само, как только появится сеть.</span>
+                </div>
+                <div class="acts">
+                  <button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть расшифровку</button>
+                  <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+                </div>
+              </div>
+            </div>
+            <div class="more"><button class="btn plain sm">Показать ещё 9</button></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2 class="sec-h big">Задачи</h2>
+          <div class="group arows" role="list">
+            <div class="r" role="listitem">
+              <div class="main nocheck">
+                <p class="t">Черновик задания: задачи 1–5 из § 4</p>
+                <div class="meta"><span class="num">Линейная алгебра · до пт, 23 октября</span></div>
+              </div>
+              <div class="st">
+                <span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Черновик готов</span>
+              </div>
+              <div class="acts">
+                <button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть задание</button>
+                <span></span>
+              </div>
+            </div>
+            <div class="r" role="listitem">
+              <div class="main nocheck">
+                <p class="t">Синхронизация календаря</p>
+                <div class="meta"><span class="num">3 срока · Google Календарь</span></div>
+              </div>
+              <div class="st">
+                <span class="chip s-neu"><svg class="i"><use href="#i-clock"/></svg>В очереди</span>
+                <span class="hint">Начнётся после текущей задачи.</span>
+              </div>
+              <div class="acts">
+                <button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button>
+                <span></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="spacer"></div>
+        <div class="statusbar">
+          <span class="num">В очереди 2 задачи</span>
+          <span class="r2"><svg class="i s14"><use href="#i-lock"/></svg>Звук обрабатывается только на этом компьютере</span>
+        </div>
+      </main>
+    </div>
+  </div>
+  </div>
+  <p class="caption">Колонки как в TASK-098: название растягивается; статус — 272 px; главная кнопка — 224 px, у всех строк одна ширина; слот «⋯» — 30 px, он есть в каждой строке, даже пустой. Ярлыки во всех группах начинаются на одной линии. У строки «Идёт запись» едва заметный красноватый край слева и индикатор звука под ярлыком. Волосяные разделители начинаются с отступом 16 px, как в iOS. Счётчик над «Завершёнными» — приглушённый, после точки.</p>
+
+  <!-- Meter specimen -->
+  <div class="label-sec"><b>1a</b><span>Индикатор звука: состояния</span><em>CSS-анимация, при prefers-reduced-motion — неподвижен</em></div>
+  <div class="t-light frame-pad">
+    <div class="group spec">
+      <div>
+        <h4>Звук идёт</h4>
+        <span class="lvl on" role="img" aria-label="Уровень звука: звук идёт"><span class="lvl-bar"><b></b><i></i></span>Звук идёт</span>
+        <p>Зелёная заливка спокойно «дышит» в пределах 35–80 %. Метка на 18 % — порог «слышно» из Диагностики (−40 дБFS).</p>
+      </div>
+      <div>
+        <h4>Тихо (до 2 мин)</h4>
+        <span class="lvl quiet" role="img" aria-label="Уровень звука: тихо"><span class="lvl-bar"><b></b><i></i></span>Тихо</span>
+        <p>Заливка почти пустая и серая. Обычная пауза — преподаватель молчит; подсказки нет, цвет не меняется.</p>
+      </div>
+      <div>
+        <h4>Тишина дольше 2 мин</h4>
+        <span class="lvl quiet" role="img" aria-label="Уровень звука: звука нет 2 минуты"><span class="lvl-bar"><b></b><i></i></span><span class="num">Звука нет 2 мин</span></span>
+        <p>Рядом приглушённая строка: «Если занятие идёт, проверьте источник». Потом, как и сейчас, появляется совет ядра «Идёт запись — нет звука» (жёлтый, TASK-082).</p>
+      </div>
+      <div>
+        <h4>Крупный (окно урока)</h4>
+        <span class="lvl on lg" role="img" aria-label="Уровень звука: звук идёт"><span class="lvl-bar"><b></b><i></i></span>Звук идёт</span>
+        <p>88×5 — в строке источника окна урока. Без чисел и децибел. Для экранного диктора: <code>role="img"</code> и слово рядом, цвет не единственный признак.</p>
+      </div>
+    </div>
+    <p class="caption" style="margin-left:16px">В приложении ядро отдаёт уровень примерно раз в 250 мс и задаёт <code>--v</code> (0…1); переход 160 мс сглаживает шаги. Здесь движение имитирует ключевой кадр. При reduced-motion анимация и переход выключены: капсула показывает последний уровень.</p>
+  </div>
+
+  <!-- ═════════════ 2. Конспект ═════════════ -->
+  <div class="label-sec"><b>2</b><span>Конспект</span><em>Конспект / Текст лекции / Задания — сегменты</em></div>
+  <div class="t-light">
+  <div class="win">
+    <div class="tbar"><span class="app"><span class="logo"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-5 3 10 3-7 2 2h5"/></svg></span>paratech</span><span class="wc"><span><svg class="i"><use href="#i-min"/></svg></span><span><svg class="i"><use href="#i-max"/></svg></span><span><svg class="i"><use href="#i-x"/></svg></span></span></div>
+    <div class="shell tall">
+      <nav class="rail" aria-label="Разделы">
+        <a href="#" aria-current="page"><svg class="i"><use href="#i-rec"/></svg>Записи и задачи</a>
+        <a href="#"><svg class="i"><use href="#i-doc"/></svg>Домашние задания</a>
+        <a href="#"><svg class="i"><use href="#i-book"/></svg>База знаний</a>
+        <a href="#"><svg class="i"><use href="#i-cal"/></svg>Расписание</a>
+        <a href="#"><svg class="i"><use href="#i-link"/></svg>Подключения</a>
+        <a href="#"><svg class="i"><use href="#i-model"/></svg>Модели речи</a>
+        <a href="#"><svg class="i"><use href="#i-diag"/></svg>Диагностика</a>
+        <a href="#" class="low"><svg class="i"><use href="#i-set"/></svg>Настройки</a>
+      </nav>
+      <main class="sheet">
+        <div class="back"><button class="btn plain sm"><svg class="i"><use href="#i-back"/></svg>Записи и задачи</button></div>
+        <div class="head" style="margin-bottom:16px">
+          <div>
+            <h1>Конспект</h1>
+            <p class="sub-line num"><b>Линейная алгебра</b> · Пн, 19 окт., 12:10 · Длительность 1:29:15</p>
+          </div>
+          <button class="btn plain">Удалить запись</button>
+        </div>
+        <div class="toolbar">
+          <div class="seg lg" role="group" aria-label="Раздел">
+            <button aria-pressed="true">Конспект</button><button aria-pressed="false">Текст лекции</button><button aria-pressed="false">Задания<span class="n">2</span></button>
+          </div>
+          <span class="grow"></span>
+          <button class="btn"><svg class="i"><use href="#i-copy"/></svg>Скопировать конспект</button>
+          <div class="seg" role="group" aria-label="Формат файла"><button aria-pressed="true">.txt</button><button aria-pressed="false">.md</button></div>
+          <button class="btn"><svg class="i"><use href="#i-down"/></svg>Сохранить как…</button>
+          <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+        </div>
+        <div class="sum-grid">
+          <article class="group reading" aria-label="Текст конспекта">
+            <div class="stamp"><span class="chip s-ok"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span><span class="small muted num">Составлен 19 окт., 14:02</span></div>
+            <p>Занятие посвящено линейным отображениям и их матрицам. Разобрали, как матрица отображения меняется при смене базиса, и вывели формулу <span class="num">A′ = C⁻¹AC</span>. Отдельно обсудили, почему след и определитель от базиса не зависят.</p>
+            <p>Во второй части решали задачи на нахождение ядра и образа. Преподаватель предупредил, что на контрольной будет задача на собственные векторы матрицы 3×3.</p>
+            <h3>Главное</h3>
+            <ul>
+              <li>Матрица отображения зависит от базиса, само отображение — нет.</li>
+              <li>При смене базиса матрица отображения меняется по формуле <span class="num">C⁻¹AC</span>, где C — матрица перехода.</li>
+              <li>dim Ker A + dim Im A = dim V (теорема о ранге и дефекте).</li>
+              <li>Подобные матрицы имеют одинаковые след, определитель и характеристический многочлен.</li>
+            </ul>
+          </article>
+          <aside>
+            <h3 class="sec-h">Задания из занятия</h3>
+            <div class="group">
+              <div class="r hw-r">
+                <span class="t">Задачи 1–5 из § 4</span>
+                <div class="row"><span class="chip s-wait"><svg class="i"><use href="#i-clock"/></svg>до пт, 23 окт.</span><button class="btn sm">Открыть задание</button></div>
+              </div>
+              <div class="r hw-r">
+                <span class="t">Доказать теорему о ранге и дефекте</span>
+                <div class="row"><span class="chip s-neu"><svg class="i"><use href="#i-clock"/></svg>до пн, 26 окт.</span><button class="btn sm">Открыть задание</button></div>
+              </div>
+            </div>
+            <p class="foot">Сроки уходят в Google Календарь только после вашего подтверждения.</p>
+          </aside>
+        </div>
+        <div class="spacer"></div>
+        <div class="statusbar">
+          <span class="muted">Открыть расшифровку можно в «⋯»</span>
+          <span class="r2"><svg class="i s14"><use href="#i-lock"/></svg>Конспект хранится на этом компьютере. Копирование и сохранение — только по кнопке</span>
+        </div>
+      </main>
+    </div>
+  </div>
+  </div>
+  <p class="caption">Раньше конспект, текст лекции и задания шли друг за другом на одной длинной странице. Теперь это три сегмента. Кнопки «Скопировать» и «Сохранить» относятся к выбранному сегменту. Текст набран 15.5/1.65, строка — до 68 знаков. Справа — задания, сроки в ярлыках.</p>
+
+  <!-- ═════════════ 3. Настройки ═════════════ -->
+  <div class="label-sec"><b>3</b><span>Настройки</span><em>сгруппированные списки</em></div>
+  <div class="t-light">
+  <div class="win">
+    <div class="tbar"><span class="app"><span class="logo"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-5 3 10 3-7 2 2h5"/></svg></span>paratech</span><span class="wc"><span><svg class="i"><use href="#i-min"/></svg></span><span><svg class="i"><use href="#i-max"/></svg></span><span><svg class="i"><use href="#i-x"/></svg></span></span></div>
+    <div class="shell tall">
+      <nav class="rail" aria-label="Разделы">
+        <a href="#"><svg class="i"><use href="#i-rec"/></svg>Записи и задачи</a>
+        <a href="#"><svg class="i"><use href="#i-doc"/></svg>Домашние задания</a>
+        <a href="#"><svg class="i"><use href="#i-book"/></svg>База знаний</a>
+        <a href="#"><svg class="i"><use href="#i-cal"/></svg>Расписание</a>
+        <a href="#"><svg class="i"><use href="#i-link"/></svg>Подключения</a>
+        <a href="#"><svg class="i"><use href="#i-model"/></svg>Модели речи</a>
+        <a href="#"><svg class="i"><use href="#i-diag"/></svg>Диагностика</a>
+        <a href="#" class="low" aria-current="page"><svg class="i"><use href="#i-set"/></svg>Настройки</a>
+      </nav>
+      <main class="sheet">
+        <div class="head"><div><span class="over">Изменения сохраняются сразу</span><h1>Настройки</h1></div></div>
+        <div class="settings">
+          <section class="section">
+            <h2 class="sec-h">Запись</h2>
+            <div class="group">
+              <div class="r set"><span class="lab">Автоматически предлагать запись в начале занятия</span><input class="switch" type="checkbox" role="switch" checked aria-label="Автоматически предлагать запись"></div>
+            </div>
+            <p class="foot">Перед началом пары появится окно с кнопкой «Начать запись».</p>
+          </section>
+          <section class="section">
+            <h2 class="sec-h">Обработка</h2>
+            <div class="group">
+              <div class="r set"><span class="lab">Обрабатывать только от розетки</span><input class="switch" type="checkbox" role="switch" checked aria-label="Обрабатывать только от розетки"></div>
+              <div class="r set">
+                <span class="lab">Нагрузка при распознавании</span>
+                <div class="seg" role="group" aria-label="Нагрузка при распознавании"><button aria-pressed="true">Бережная</button><button aria-pressed="false">Обычная</button><button aria-pressed="false">Максимальная</button></div>
+                <span class="est num"><svg class="i s14"><use href="#i-clock"/></svg>Запись 1 ч ≈ 3 ч 20 мин в режиме «Бережная» (примерно)</span>
+              </div>
+            </div>
+            <div class="foot">
+              <ul class="modes">
+                <li>«Бережная» — низкий приоритет, не больше ~40 % процессора</li>
+                <li>«Обычная» — низкий приоритет, без потолка</li>
+                <li>«Максимальная» — без ограничений, быстрее всего</li>
+              </ul>
+              На батарее расшифровка ждёт подключения питания и начнётся сама. Нагрузка применится к следующему распознаванию.
+            </div>
+          </section>
+          <section class="section">
+            <h2 class="sec-h">Оформление</h2>
+            <div class="group">
+              <div class="r set"><span class="lab">Тема</span><div class="seg" role="group" aria-label="Тема"><button aria-pressed="true">Как в системе</button><button aria-pressed="false">Светлая</button><button aria-pressed="false">Тёмная</button></div></div>
+            </div>
+            <p class="foot">«Как в системе» следует настройке Windows: светлый или тёмный режим.</p>
+          </section>
+          <section class="section">
+            <h2 class="sec-h">Профиль студента</h2>
+            <div class="group">
+              <label class="r field"><span>ФИО</span><input value="Соколова Анна Сергеевна"></label>
+              <label class="r field"><span>Группа</span><input value="ИВТ-21"></label>
+              <label class="r field"><span>Вуз</span><input placeholder="Название вуза"></label>
+              <label class="r field"><span>Факультет или кафедра</span><input placeholder="Факультет информатики"></label>
+              <label class="r field"><span>Город</span><input placeholder="Москва"></label>
+            </div>
+            <p class="foot">Для титульного листа файла Word с домашним заданием. Все поля необязательные: пустые на титульный лист не попадут.</p>
+            <div class="group-acts"><button class="btn primary">Сохранить профиль</button></div>
+          </section>
+          <div style="height:32px"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+  </div>
+  <p class="caption">Подпись группы сверху, пояснение снизу — как в Настройках iOS. Подпись слева, элемент управления прижат вправо. Поля профиля встроены в строки: рамка появляется при фокусе, при наведении — заливка. Переключатели и поля сохраняют рамку --control (3 : 1).</p>
+
+  <!-- ═════════════ 4. Окно урока ═════════════ -->
+  <div class="label-sec"><b>4</b><span>Окно урока</span><em>360×300, не забирает фокус</em></div>
+  <div class="t-light frame-pad">
+    <div class="pops">
+      <div class="pop-w">
+        <div class="pop">
+          <div class="top"><span class="dot" style="background:var(--muted);animation:none"></span>Начинается занятие<span class="time num">10:30–11:50</span></div>
+          <div class="title" title="Математический анализ">Математический анализ</div>
+          <div class="group"><div class="src"><span class="app"><svg class="i"><use href="#i-video"/></svg></span><span class="name">Zoom</span><span class="lvl on" role="img" aria-label="Звук идёт"><span class="lvl-bar"><b></b><i></i></span>звук идёт</span><svg class="i s16 chev"><use href="#i-chev"/></svg></div></div>
+          <p class="tip">Записывается только звук Zoom. Окно можно закрыть — запись продолжится.</p>
+          <div class="btns"><button class="btn primary lg w"><svg class="i"><use href="#i-rec"/></svg>Начать запись</button><button class="btn plain w">Не записывать</button></div>
+        </div>
+        <p class="pop-cap"><b>Предложение.</b> В строке источника тот же индикатор: видно, что звук Zoom уже доходит до приложения, ещё до начала записи. Точка серая и не «дышит»: запись пока не идёт.</p>
+      </div>
+      <div class="pop-w">
+        <div class="pop">
+          <div class="top live"><span class="dot"></span>Идёт запись<span class="timer num">00:12:04</span></div>
+          <div class="title" title="Математический анализ">Математический анализ</div>
+          <div class="group"><div class="src"><span class="app"><svg class="i"><use href="#i-video"/></svg></span><span class="name">Zoom</span><span class="lvl on lg" role="img" aria-label="Уровень звука: звук идёт"><span class="lvl-bar"><b></b><i></i></span>Звук идёт</span></div></div>
+          <p class="tip">Окно можно закрыть — запись продолжится. Остановить можно и в «Записях и задачах».</p>
+          <div class="btns two"><button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button><button class="btn">Скрыть</button></div>
+        </div>
+        <p class="pop-cap"><b>Запись идёт, звук есть.</b> Таймер — табличными цифрами. Шкала крупнее (88×5), остальное спокойное: никакого красного, кроме точки и слов «Идёт запись».</p>
+      </div>
+      <div class="pop-w">
+        <div class="pop">
+          <div class="top live"><span class="dot"></span>Идёт запись<span class="timer num">00:14:37</span></div>
+          <div class="title" title="Математический анализ">Математический анализ</div>
+          <div class="group"><div class="src"><span class="app"><svg class="i"><use href="#i-video"/></svg></span><span class="name">Zoom</span><span class="lvl quiet lg" role="img" aria-label="Уровень звука: звука нет 2 минуты"><span class="lvl-bar"><b></b><i></i></span><span class="num">Тихо 2 мин</span></span></div></div>
+          <p class="soft"><svg class="i"><use href="#i-info"/></svg><span>Если занятие идёт, а звука нет, возможно, выбран не тот источник. <a href="#">Сменить источник</a></span></p>
+          <div class="btns two"><button class="btn danger"><svg class="i"><use href="#i-stop"/></svg>Остановить</button><button class="btn">Скрыть</button></div>
+        </div>
+        <p class="pop-cap"><b>Тишина.</b> Тревожного цвета нет: приглушённая строка с иконкой «i» и ссылкой. Если тишина не проходит, ядро, как и сейчас, показывает свой совет «Идёт запись — нет звука».</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ 5. Тёмная тема ═════════════ -->
+  <div class="label-sec"><b>5</b><span>Записи и задачи — тёмная тема</span><em>индикатор в состоянии «Тихо»</em></div>
+  <div id="scr5" class="t-dark"></div>
+  <p class="caption">Тёмная тема: лист <code>#18191B</code>, группы <code>#212225</code>, волоски — 9 % светлого. Шкала светло-зелёная (<code>#8FCDA7</code>, 7.7 : 1 к дорожке). Здесь индикатор показан в состоянии «Тихо».</p>
+</div>
+
+<script>
+// Screen 5 is screen 1 in the dark theme, with the meter switched to «Тихо» to show the second state.
+(function () {
+  var src = document.querySelector("#scr1 .win");
+  var dst = document.getElementById("scr5");
+  if (!src || !dst) return;
+  var copy = src.cloneNode(true);
+  var live = copy.querySelector(".js-live");
+  if (live) {
+    live.classList.remove("on");
+    live.classList.add("quiet");
+    live.setAttribute("aria-label", "Уровень звука: тихо");
+    live.querySelector(".js-word").textContent = "Тихо";
+  }
+  dst.appendChild(copy);
+})();
+</script>
+</body>
+</html>
