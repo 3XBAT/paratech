@@ -304,7 +304,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: activity: %w", err)
 	}
 	history.WithRemaining(speed, e.clock)
-	history.WithDraftAssignments(draftNames{c.proposals}) // «Черновик: <задание> · <предмет>» (TASK-094)
+	history.WithDraftAssignments(draftNames{c.proposals}) // «ДЗ: <задание> · <предмет>» (TASK-094)
 	// Local only: the viewer works while the Hub or the internet is down. Titles in the local time zone.
 	viewer, err := transcriptview.New(transcriptview.Deps{
 		Recordings: recordings, Lessons: lessons, Transcripts: transcripts, Jobs: jobs, Live: parts, Artifacts: store,

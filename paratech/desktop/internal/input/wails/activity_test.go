@@ -386,7 +386,7 @@ func TestActivityServiceNamesDraftRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Черновик: Пределы · Математический анализ", "Черновик: Эссе", ""}
+	want := []string{"ДЗ: Пределы · Математический анализ", "ДЗ: Эссе", ""}
 	for i, w := range want {
 		if got[i].Label != w || got[i].AssignmentID != uc.jobs[i].AssignmentID.String() {
 			t.Errorf("row %d = %q %q, want %q", i, got[i].Label, got[i].AssignmentID, w)

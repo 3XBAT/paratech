@@ -64,7 +64,7 @@ test("every status has a distinct Russian label and unknown ones are shown raw",
   assert.equal(jobTypeLabel("calendar_sync"), "Синхронизация календаря");
   // TASK-076: send_email and homework_draft are the jobs the page still lists, so they have labels now.
   assert.equal(jobTypeLabel("send_email"), "Отправка письма");
-  assert.equal(jobTypeLabel("homework_draft"), "Черновик домашнего задания");
+  assert.equal(jobTypeLabel("homework_draft"), "Решение домашнего задания");
   assert.equal(jobTypeLabel("new_kind"), "new_kind");
 });
 
@@ -177,13 +177,13 @@ test("a draft job row is named by the core and opens its assignment (TASK-094)",
   const { jobAssignment, jobTitle } = await import("../.test-build/activityView.js");
   const draft = {
     ...job, type: "homework_draft", assignmentId: "a1", assignmentTitle: "Задача 1", assignmentSubject: "Матанализ",
-    label: "Черновик: Задача 1 · Матанализ",
+    label: "ДЗ: Задача 1 · Матанализ",
   };
   assert.deepEqual(parseJob(draft), draft);
-  assert.equal(jobTitle(draft), "Черновик: Задача 1 · Матанализ");
+  assert.equal(jobTitle(draft), "ДЗ: Задача 1 · Матанализ");
   assert.equal(jobAssignment(draft), "a1");
   // Without a label (another job, or the assignment is gone) the row keeps its type and opens nothing.
-  assert.equal(jobTitle({ ...draft, label: "" }), "Черновик домашнего задания");
+  assert.equal(jobTitle({ ...draft, label: "" }), "Решение домашнего задания");
   assert.equal(jobTitle(job), jobTypeLabel("stt"));
   assert.equal(jobAssignment(job), "");
   for (const key of ["assignmentId", "assignmentTitle", "assignmentSubject", "label"]) {

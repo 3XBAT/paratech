@@ -119,7 +119,7 @@ test("every generation state has a chip; waiting and failed ones show the core's
   }
   assert.deepEqual(
     generationStates.map((state) => generationView({ state, message: "" }).label),
-    ["Готовим черновик…", "Ждёт интернет", "Лимит обработки исчерпан", "Черновик не готов", "Черновик готов"],
+    ["Готовим решение…", "Ждёт интернет", "Лимит обработки исчерпан", "Решение не готово", "Решение готово"],
   );
   const text = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
   assert.equal(generationView({ state: "waitingNetwork", message: text }).hint, text);
@@ -169,8 +169,8 @@ test("the page follows the core's generation; a new version reloads the assignme
   assert.equal(draftStatusStep({ latestVersion: 3, generation: active({ jobId: "j2" }) }, 3, "j1").follow.jobId, "j2");
 });
 
-test("while a draft is prepared, generate and the instructions are off with «Готовим черновик…»", () => {
-  assert.equal(generatingLabel, "Готовим черновик…");
+test("while a draft is prepared, generate and the instructions are off with «Готовим решение…»", () => {
+  assert.equal(generatingLabel, "Готовим решение…");
   const base = { hasDraft: true, generating: false, olderShown: false, dirty: false };
   assert.deepEqual(generateOffer(base), {
     label: "Сгенерировать заново",
@@ -178,7 +178,7 @@ test("while a draft is prepared, generate and the instructions are off with «Г
     reason: undefined,
     instructionDisabled: false,
   });
-  assert.equal(generateOffer({ ...base, hasDraft: false }).label, "Сгенерировать черновик");
+  assert.equal(generateOffer({ ...base, hasDraft: false }).label, "Сгенерировать ДЗ");
   const running = generateOffer({ ...base, generating: true });
   assert.equal(running.disabled, true);
   assert.equal(running.instructionDisabled, true);
@@ -192,7 +192,7 @@ test("while a draft is prepared, generate and the instructions are off with «Г
 test("a refused second generation is recognised and shown as the core's text", () => {
   assert.equal(generationRunning(new Error(errorMessages.generationRunning)), true);
   assert.equal(generationRunning(new Error(errorMessages.draftStale)), false);
-  assert.equal(errorText(new Error(errorMessages.generationRunning)), "Черновик уже готовится. Дождитесь окончания и повторите.");
+  assert.equal(errorText(new Error(errorMessages.generationRunning)), "Решение уже готовится. Дождитесь окончания и повторите.");
   assert.equal(errorText(new Error(errorMessages.sendFormat)), errorMessages.sendFormat);
 });
 
@@ -542,5 +542,19 @@ test("the homework page renders model text as plain text only", () => {
   }
   for (const rel of ["pages/HomeworkPage.tsx", "pages/HomeworkDialogs.tsx", "homeworkView.ts", "bindings/homework.ts"]) {
     assert.doesNotMatch(code(rel), /markdown|marked|DOMParser|createContextualFragment/i, rel);
+  }
+});
+
+// TASK-102: the student sees «решение», never «черновик»; internal names (draft…) and comments may keep it.
+test("no user-facing text says «черновик»", () => {
+  for (const rel of sourceFiles()) {
+    assert.doesNotMatch(code(rel), /чернов/i, rel);
+  }
+  // The core's texts the page shows as they are: the string literals of the bindings.
+  for (const go of ["homework.go", "activity.go"]) {
+    const text = readFileSync(new URL(`../../internal/input/wails/${go}`, import.meta.url), "utf8");
+    for (const lit of text.match(/"(?:[^"\\n]|\.)*"/g) ?? []) {
+      assert.doesNotMatch(lit, /чернов/i, `${go}: ${lit}`);
+    }
   }
 });

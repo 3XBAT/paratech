@@ -207,3 +207,11 @@ test("a recording row shows the time left as its own element, only when the core
   const none = renderToStaticMarkup(h(RecordingRow, { item: { ...recording, hasRemaining: false }, ...props }));
   assert.ok(!none.includes("осталось"));
 });
+
+test("the settings page groups its rows under the captions of the mockup (TASK-102)", () => {
+  const page = readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8");
+  const at = ["Запись", "Обработка", "Оформление"].map((c) => page.indexOf(`<SettingsGroup caption="${c}">`));
+  assert.ok(at.every((i) => i >= 0) && at[0] < at[1] && at[1] < at[2], "the groups in the mockup's order");
+  assert.match(page, /<h2 className="group-cap">\{props\.caption\}<\/h2>/);
+  assert.match(page, /<h2 className="group-cap">Профиль студента<\/h2>/);
+});

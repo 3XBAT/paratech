@@ -155,7 +155,7 @@ export interface JobItem {
   /** Model text: render as plain text only. */
   assignmentTitle: string;
   assignmentSubject: string;
-  /** The row's name «Черновик: <задание> · <предмет>»; "" when the job is not a draft or the assignment is unknown. */
+  /** The row's name «ДЗ: <задание> · <предмет>»; "" when the job is not a draft or the assignment is unknown. */
   label: string;
 }
 

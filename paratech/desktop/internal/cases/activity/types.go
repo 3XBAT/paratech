@@ -160,7 +160,7 @@ type Job struct {
 	RunNowOffered bool
 
 	// The assignment of a homework draft job (TASK-094): the id opens it, the title and the subject name the row
-	// («Черновик: <задание> · <предмет>»). Empty for other jobs; the title and subject also when it is gone.
+	// («ДЗ: <задание> · <предмет>»). Empty for other jobs; the title and subject also when it is gone.
 	AssignmentID      shared.AssignmentID
 	AssignmentTitle   string
 	AssignmentSubject string
