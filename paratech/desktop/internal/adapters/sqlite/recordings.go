@@ -105,6 +105,12 @@ func (r *RecordingRepository) ListActivity(ctx context.Context, maxTerminal int)
 		return nil, nil, MapError(ctx, err)
 	}
 
+	return loadRecordings(ctx, q, ids)
+}
+
+// loadRecordings loads the recordings of ids in their order. A row that cannot be read or restored is left out and its
+// id goes to unreadable; a recording that disappeared meanwhile is skipped. Other database errors fail the call.
+func loadRecordings(ctx context.Context, q *sqlcgen.Queries, ids []string) ([]*recording.Recording, []shared.RecordingID, error) {
 	recs, unreadable := make([]*recording.Recording, 0, len(ids)), []shared.RecordingID{}
 	for _, id := range ids {
 		row, err := q.GetRecording(ctx, id)
@@ -218,12 +224,17 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 	if err := json.Unmarshal([]byte(row.DeletingAssignments), &deleting); err != nil {
 		return nil, fmt.Errorf("sqlite: stored recording %s: assignments to delete: %w", row.ID, err)
 	}
+	correction, err := values.NewLessonCorrection(row.UserSubject.String, row.UserKind.String)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: stored recording %s: %w", row.ID, err)
+	}
 
 	rec, err := recording.Restore(recording.State{
 		Version:     row.Version,
 		ID:          shared.RecordingID(row.ID),
 		LessonID:    shared.LessonID(row.LessonID.String),
 		Lesson:      lessonSnapshotFromRow(row),
+		Correction:  correction,
 		Status:      recording.Status(row.Status),
 		MaxDuration: msDuration(row.MaxDurationMs),
 		Duration:    msDuration(row.DurationMs.Int64),
@@ -282,6 +293,9 @@ func recordingInsertParams(rec *recording.Recording) sqlcgen.InsertRecordingPara
 
 		DeletingAt:          u.DeletingAt,
 		DeletingAssignments: u.DeletingAssignments,
+
+		UserSubject: u.UserSubject,
+		UserKind:    u.UserKind,
 	}
 }
 
@@ -312,6 +326,9 @@ func recordingUpdateParams(rec *recording.Recording) sqlcgen.UpdateRecordingPara
 
 		DeletingAt:          jobNullMs(rec.DeletingAt()),
 		DeletingAssignments: string(deleting),
+
+		UserSubject: jobNullString(rec.LessonCorrection().Subject()),
+		UserKind:    jobNullString(rec.LessonCorrection().Kind()),
 	}
 }
 

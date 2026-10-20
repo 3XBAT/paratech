@@ -149,6 +149,14 @@ type Querier interface {
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
+	// What is stored for the newest transcript of each lesson (the order of LatestTranscriptByRecording): its id (empty: none),
+	// whether it has a summary and a finished lecture text (blocks are empty until a run completed).
+	ListKnowledgeBaseReadiness(ctx context.Context, status string) ([]ListKnowledgeBaseReadinessRow, error)
+	// The knowledge base (TASK-091): no index of its own, it reads the recordings and what was made from them, so a
+	// deleted recording leaves it with its rows (ADR-0018, ADR-0019). Lessons are completed recordings with a track that
+	// is not silent and no deletion mark (recording.Recording.InKnowledgeBase decides; the filter only saves reads).
+	// Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
+	ListKnowledgeBaseRecordingIDs(ctx context.Context, status string) ([]string, error)
 	// The rule of lesson.CalendarPending, stated on the columns (and matching idx_schedule_entries_calendar_pending).
 	ListLessonsPendingCalendarSync(ctx context.Context, maxRows int64) ([]ScheduleEntry, error)
 	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
@@ -201,7 +209,8 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
 	// format the user chose before the validation and the creation time never change, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
-	// Compare-and-swap on the loaded version (ADR-0004). The lesson, its snapshot, the cap, the chunk directory and the
+	// Compare-and-swap on the loaded version (ADR-0004). The user's correction of the lesson (TASK-091) is mutable; the
+	// lesson, its snapshot, the cap, the chunk directory and the
 	// creation time never change; lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
 	// Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
