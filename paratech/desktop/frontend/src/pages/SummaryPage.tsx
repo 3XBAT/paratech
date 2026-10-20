@@ -43,7 +43,7 @@ import {
 } from "../ui/controls";
 import { LectureTextCard } from "./LectureTextParts";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
-import { HomeworkCard, SummaryCard } from "./SummaryParts";
+import { HomeworkCard, NoSpeechCard, SummaryCard } from "./SummaryParts";
 
 export interface SummaryPageProps {
   recordingId: string;
@@ -54,6 +54,8 @@ export interface SummaryPageProps {
   onOpenAssignment: (assignmentId: string) => void;
   /** The recording was deleted here (TASK-095): back to the list of recordings. */
   onDeleted: () => void;
+  /** «Проверить звук» of a recording without speech (TASK-110): opens «Диагностика». */
+  onCheckSound: () => void;
 }
 
 // «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found, the lecture
@@ -178,6 +180,7 @@ export function SummaryPage(props: SummaryPageProps) {
           onOpenAssignment={props.onOpenAssignment}
           activity={activity}
           onStarted={reload}
+          onCheckSound={props.onCheckSound}
         />
       )}
     </section>
@@ -201,6 +204,7 @@ function Viewer(props: {
   onOpenAssignment: (assignmentId: string) => void;
   activity: ActivityApi;
   onStarted: () => void;
+  onCheckSound: () => void;
 }) {
   const { api, view } = props;
   const id = view.recordingId;
@@ -310,6 +314,11 @@ function Viewer(props: {
       setAskingRedo(false);
     }
   }, [redoOffered]);
+
+  // Nothing was made from a recording without speech (TASK-110): no parts, no tools, only the sound check.
+  if (view.noSpeech) {
+    return <NoSpeechCard view={view} onCheckSound={props.onCheckSound} />;
+  }
 
   const retrying: RetryStep | "" = busy === "retry:summary" ? "summary" : busy === "retry:homework" ? "homework" : "";
 

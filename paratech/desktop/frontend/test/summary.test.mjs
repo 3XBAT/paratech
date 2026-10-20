@@ -60,6 +60,7 @@ const view = (over = {}) => ({
   durationSeconds: 2700,
   hasDuration: true,
   transcribed: true,
+  noSpeech: false,
   summary: {
     ...step("done"),
     ready: true,
@@ -519,4 +520,66 @@ test("the page shows only the chosen segment, in its tabpanel", () => {
   assert.match(summary, /Конспект хранится на этом компьютере/);
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.page\.sm \{ width: 100%; max-width: 800px; margin-inline: auto; \}/);
+});
+
+// Mirrors the view of internal/input/wails/summary.go for a transcript without speech (TASK-110).
+const noSpeechMessage = "В записи нет речи — скорее всего, выбран не тот источник звука.";
+const noSpeechView = () => {
+  const none = step("noSpeech", { message: noSpeechMessage });
+  // A summary made from «[BLANK_AUDIO]» before the check may still be stored.
+  return view({ noSpeech: true, summary: none, homework: none, lectureText: { ...none, canStart: false, retryWork: "" } });
+};
+
+test("a view without speech hides every stored result and the transcript (TASK-110)", async () => {
+  const v = await summaryApi(async () => noSpeechView()).view("r1");
+  assert.equal(v.noSpeech, true);
+  assert.equal(v.transcribed, false);
+  assert.deepEqual(
+    [v.summary.ready, v.summary.text, v.summary.sections, v.summary.keyPoints, v.summary.updatedAt],
+    [false, "", [], [], ""],
+  );
+  assert.deepEqual(v.homework.assignments, []);
+  assert.deepEqual([v.lectureText.ready, v.lectureText.blocks, v.lectureText.updatedAt], [false, [], ""]);
+  for (const s of [v.summary, v.homework, v.lectureText]) {
+    assert.deepEqual([s.state, s.message, s.jobError], ["noSpeech", noSpeechMessage, ""]);
+  }
+  // Strict: noSpeech is required.
+  const { noSpeech: _, ...missing } = view();
+  await assert.rejects(summaryApi(async () => missing).view("r1"));
+  await assert.rejects(summaryApi(async () => ({ ...view(), noSpeech: "yes" })).view("r1"));
+});
+
+test("a view without speech offers no retry, no redo and stops asking (TASK-110)", async () => {
+  const v = await summaryApi(async () => noSpeechView()).view("r1");
+  const { lectureLine, lectureStartLabel } = await import("../.test-build/lectureTextView.js");
+  assert.equal(retryLabel(v, "summary"), null);
+  assert.equal(retryLabel(v, "homework"), null);
+  assert.equal(lectureStartLabel(v), null);
+  assert.equal(showsEarlier(v), false);
+  assert.deepEqual(stepLine(v.summary), { kind: "wait", message: noSpeechMessage, detail: "" });
+  assert.deepEqual(lectureLine(v), { kind: "wait", message: noSpeechMessage, detail: "" });
+  assert.equal(nextPollMs(v, 0), null);
+
+  const summary = renderToStaticMarkup(h(SummaryCard, { view: v, onRetry: () => undefined }));
+  assert.ok(summary.includes(noSpeechMessage));
+  assert.ok(!summary.includes("Повторить") && !summary.includes("заново") && !summary.includes("Первый абзац"));
+});
+
+test("the no-speech card shows the core's message and «Проверить звук» only (TASK-110)", async () => {
+  const { NoSpeechCard } = await import("../.test-build/pages/SummaryParts.js");
+  const { checkSoundLabel } = await import("../.test-build/summaryView.js");
+  assert.equal(checkSoundLabel, "Проверить звук");
+  const v = await summaryApi(async () => noSpeechView()).view("r1");
+  const html = renderToStaticMarkup(h(NoSpeechCard, { view: v, onCheckSound: () => undefined }));
+  assert.ok(html.includes(noSpeechMessage));
+  assert.ok(html.includes(">Проверить звук<"));
+  for (const s of ["Повторить", "заново", "Открыть расшифровку", "Скопировать", "Сохранить"]) {
+    assert.ok(!html.includes(s), s);
+  }
+  assert.ok(!renderToStaticMarkup(h(NoSpeechCard, { view: v })).includes("<button"), "no button without its handler");
+  // The page shows the card instead of the parts and opens «Диагностика» with it.
+  const page = readFileSync(new URL("../src/pages/SummaryPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /if \(view\.noSpeech\) \{\s*return <NoSpeechCard/);
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(app.includes('onCheckSound={() => openPage("diagnostics")}'));
 });

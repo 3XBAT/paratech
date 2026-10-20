@@ -127,6 +127,7 @@ export function App() {
               onOpenTranscript={openTranscript}
               onOpenAssignment={openAssignment}
               onDeleted={() => openPage("recordings")}
+              onCheckSound={() => openPage("diagnostics")}
             />
           </div>
         )}

@@ -35,7 +35,9 @@ export type ChainErrorCode =
   | "homeworkFailed"
   | "lectureTextFailed"
   /** The track is silent (TASK-082): «Запись без звука» with checkSound. */
-  | "silentRecording";
+  | "silentRecording"
+  /** The transcript holds no speech (TASK-110): «В записи нет речи» with checkSound, no retry. */
+  | "noSpeech";
 /**
  * What the row offers besides Stop; runNow calls runJobNow(actionJobId), retry calls retryPostProcessing(id,
  * retryWork) (TASK-086).
@@ -259,6 +261,7 @@ const errorCodes = [
   "homeworkFailed",
   "lectureTextFailed",
   "silentRecording",
+  "noSpeech",
 ] as const;
 const switchProblems = ["", "source_gone", "refused", "failed"] as const;
 const actions = ["", "runNow", "openModels", "openConnections", "checkSound", "retry"] as const;

@@ -65,6 +65,7 @@ const view = (lt = {}, over = {}) => ({
   durationSeconds: 2700,
   hasDuration: true,
   transcribed: true,
+  noSpeech: false,
   summary: {
     ...step("done"),
     ready: true,
