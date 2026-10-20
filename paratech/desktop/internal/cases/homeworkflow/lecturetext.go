@@ -80,11 +80,17 @@ func (p *PostProcessor) lectureText(ctx context.Context, snap job.Snapshot, repo
 	if err != nil {
 		return err
 	}
-	// Reported before the part is stored: the runner refuses a cancelled job, and then nothing is stored.
-	if err := p.partsDone(ctx, snap, report, next+1, total); err != nil {
+	// The checkpoint never gets ahead of the stored parts: a step that dies in the save would leave "next+1" with
+	// next parts stored, and the repeated step could not yield (job.ErrNoProgress). The unchanged checkpoint is
+	// reported again first, so a job cancelled during the call stores nothing. A report that fails after the save
+	// stops the step with the part stored; the next step continues after it.
+	if err := p.partsDone(ctx, snap, report, next, total); err != nil {
 		return err
 	}
 	if err := p.saveLecturePart(ctx, snap, in, run, total, next, blocks); err != nil {
+		return err
+	}
+	if err := p.partsDone(ctx, snap, report, next+1, total); err != nil {
 		return err
 	}
 	if next+1 < total {

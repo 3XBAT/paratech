@@ -689,7 +689,8 @@ func (s *Service) transition(ctx context.Context, j *job.Job, herr, cause error,
 		if !errors.Is(err, job.ErrNoProgress) {
 			return outcomeContinued, err
 		}
-		// A step that stored nothing would repeat forever: it is a failed attempt, retried below.
+		// A step that stored nothing would repeat forever: it is a failed attempt, retried below. This skips the
+		// power and shutdown cases on purpose: the step stored nothing, so a retry is safe for every policy.
 		herr = errStepNoProgress
 	case waitPower:
 		// The checkpoint is saved and waiting is not a failure: the aggregate gives the attempt back.
