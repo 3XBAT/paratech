@@ -227,7 +227,7 @@ func (s *Service) assembleRecovered(ctx context.Context, rec *recording.Recordin
 	}
 	switch {
 	case ferr == nil:
-		s.logSilent(rec, assembled)
+		s.logTrack(rec, assembled)
 	case errors.Is(ferr, recording.ErrNoAudio) || errors.Is(ferr, recording.ErrInvalidRecording):
 		s.log.Warn("the interrupted recording has no usable audio", slog.String("recording", rec.ID().String()), slog.Any("error", ferr))
 		err = rec.FailRecovery(now, problemRecoveryFailed+": "+ferr.Error())
