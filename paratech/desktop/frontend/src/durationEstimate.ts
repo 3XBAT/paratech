@@ -20,7 +20,7 @@ export const loadDescriptions: Readonly<Record<RecognitionLoad, string>> = {
 export const estimateTexts = {
   setting: "Нагрузка при распознавании",
   nextRun: "Применится к следующему распознаванию.",
-  approximate: " (примерно)",
+  onThisComputer: " на этом компьютере",
   heavy: " — дольше самой записи",
   unknown: "скорость неизвестна до первого распознавания",
 } as const;
@@ -42,24 +42,23 @@ export function durationText(seconds: number): string {
   return m === 0 ? `${h} ч` : `${h} ч ${m} мин`;
 }
 
-/** Whether the estimate has a number to show. */
-export function knownEstimate(e: LoadEstimate | null | undefined): e is LoadEstimate {
-  return e !== null && e !== undefined && e.source !== "unknown" && e.secondsPerHour > 0;
+/**
+ * Whether the estimate has a number to show: only one measured on this computer (TASK-111). The core's table numbers
+ * are for a typical computer and misled the owner of a fast one, so the UI never shows them.
+ */
+export function measuredEstimate(e: LoadEstimate | null | undefined): e is LoadEstimate {
+  return e !== null && e !== undefined && e.source === "measured" && e.secondsPerHour > 0;
 }
 
-/** «≈ 3 ч 20 мин (примерно)»; "" when unknown. */
+/** «≈ 3 ч 20 мин»; "" when not measured. */
 export function estimateValue(e: LoadEstimate | null | undefined): string {
-  if (!knownEstimate(e)) {
-    return "";
-  }
-  const approx = e.source === "table" ? estimateTexts.approximate : "";
-  return `≈ ${durationText(e.secondsPerHour)}${approx}`;
+  return measuredEstimate(e) ? `≈ ${durationText(e.secondsPerHour)}` : "";
 }
 
 /** The line of a model on «Модели речи»; text "" when there is no number. */
 export interface EstimateLine {
   text: string;
-  /** 1 h of audio takes longer than 1 h: the line is a warning. */
+  /** 1 h of audio takes longer than 1 h on this computer: the line is a warning. */
   heavy: boolean;
   /** Every mode, one per line: the tooltip. */
   tip: string;
@@ -67,33 +66,39 @@ export interface EstimateLine {
 
 const noLine: EstimateLine = { text: "", heavy: false, tip: "" };
 
-/** «Бережная: ≈ 3 ч 20 мин (примерно)» per mode, one per line. */
+/** «Бережная: ≈ 3 ч 20 мин» per mode, one per line; a mode not measured yet has no number. */
 export function estimatesTip(est: ModelLoadEstimates | null | undefined): string {
   if (est === null || est === undefined) {
     return "";
   }
   return est.modes
-    .map((e) => `${loadLabels[e.mode]}: ${knownEstimate(e) ? estimateValue(e) : estimateTexts.unknown}`)
+    .map((e) => `${loadLabels[e.mode]}: ${measuredEstimate(e) ? estimateValue(e) : estimateTexts.unknown}`)
     .join("\n");
 }
 
-/** «Запись 1 ч ≈ 3 ч 20 мин в режиме «Бережная» (примерно)», for the current mode; nothing when unknown. */
+// The heavy warning stays for a measured number: slower than the recording itself is then a fact of this computer.
+function heavyText(e: LoadEstimate): string {
+  return e.heavy ? estimateTexts.heavy : "";
+}
+
+/**
+ * «Запись 1 ч ≈ 3 ч 20 мин в режиме «Бережная» на этом компьютере», for the current mode; nothing when not measured.
+ */
 export function modelEstimateLine(est: ModelLoadEstimates | null | undefined): EstimateLine {
-  if (est === null || est === undefined || !knownEstimate(est.current)) {
+  if (est === null || est === undefined || !measuredEstimate(est.current)) {
     return noLine;
   }
   const c = est.current;
-  const approx = c.source === "table" ? estimateTexts.approximate : "";
   return {
-    text: `Запись 1 ч ≈ ${durationText(c.secondsPerHour)} в режиме «${loadLabels[c.mode]}»${approx}${c.heavy ? estimateTexts.heavy : ""}`,
+    text: `Запись 1 ч ≈ ${durationText(c.secondsPerHour)} в режиме «${loadLabels[c.mode]}»${estimateTexts.onThisComputer}${heavyText(c)}`,
     heavy: c.heavy,
     tip: estimatesTip(est),
   };
 }
 
 /**
- * «Модель «large-v3-f16»: запись 1 ч ≈ 3 ч 20 мин (примерно)» next to the setting, in the selected mode; null when
- * there is no model in use or no number.
+ * «Модель «large-v3-f16»: запись 1 ч ≈ 3 ч 20 мин на этом компьютере» next to the setting, in the selected mode; null
+ * when there is no model in use or no measured number.
  */
 export function settingEstimateLine(
   est: ModelLoadEstimates | null,
@@ -104,11 +109,11 @@ export function settingEstimateLine(
     return null;
   }
   const e = est.modes.find((m) => m.mode === load) ?? (est.current.mode === load ? est.current : null);
-  if (!knownEstimate(e)) {
+  if (!measuredEstimate(e)) {
     return null;
   }
   return {
-    text: `Модель «${model}»: запись 1 ч ${estimateValue(e)}${e.heavy ? estimateTexts.heavy : ""}`,
+    text: `Модель «${model}»: запись 1 ч ${estimateValue(e)}${estimateTexts.onThisComputer}${heavyText(e)}`,
     heavy: e.heavy,
   };
 }

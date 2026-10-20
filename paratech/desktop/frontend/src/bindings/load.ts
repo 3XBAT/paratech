@@ -6,7 +6,7 @@ export type RecognitionLoad = "gentle" | "normal" | "max";
 
 export const recognitionLoads: readonly RecognitionLoad[] = ["gentle", "normal", "max"];
 
-/** table: rough («примерно»); measured: runs on this computer; unknown: no number. */
+/** table: the generic speed table, never shown (TASK-111); measured: runs on this computer; unknown: no number. */
 export type EstimateSource = "table" | "measured" | "unknown";
 
 const sources: readonly EstimateSource[] = ["table", "measured", "unknown"];

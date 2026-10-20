@@ -158,6 +158,12 @@
 .rows > .row { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .row .t { margin: 0; font-weight: 600; }
 .row-main { min-width: 0; }
+/* A leading control (TASK-111): a column of its own, so the meta starts under the title; its box is one title line
+   high (1lh), so the control centres on the first line at any zoom and when the title wraps. */
+.row-lead { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: start; }
+.row-lead > :not(.row-lead-box) { grid-column: 2; }
+.row-lead-box { grid-column: 1; grid-row: 1; display: flex; align-items: center; height: 1lh; }
+.row-lead-box > input { margin: 0; }
 .row-below { grid-column: 1 / -1; min-width: 0; }
 .st { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* The chip with its round «Повторить» right next to it. */

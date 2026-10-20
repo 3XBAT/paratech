@@ -628,3 +628,25 @@ test("the retry hints name the round arrow by the status (TASK-096)", () => {
   assert.equal(retryHints.retry, "Нажмите круглую стрелку «Повторить» у статуса.");
   assert.equal(retryHints.afterConnections, "Проверьте подключения (меню «⋯») и нажмите круглую стрелку «Повторить».");
 });
+
+test("the selection checkbox has its own grid column: on the title's first line, the meta under the title (TASK-111)", () => {
+  const title = "Очень длинное название занятия, которое переносится на вторую строку в узком окне";
+  const html = render(row({ title, durationSeconds: 3600, hasDuration: true }), { onDelete() {}, onSelect() {} });
+  assert.match(
+    html,
+    /<div class="row-main row-lead"><span class="row-lead-box"><input type="checkbox"[^>]*><\/span><p class="t">[^<]*<\/p><span class="small muted">/,
+    "checkbox box, title, meta: three cells of the lead grid",
+  );
+  assert.ok(html.includes(`<p class="t">${title}</p>`), "the title alone in its cell");
+  assert.ok(!html.includes("row-check"), "the old inline checkbox wrapper is gone");
+  const plain = render(row());
+  assert.ok(plain.includes('<div class="row-main"><p class="t">'), "without selection the row has no lead column");
+
+  const css = readFileSync(new URL("../src/ui/components.css", import.meta.url), "utf8");
+  assert.match(css, /\.row-lead \{ display: grid; grid-template-columns: auto minmax\(0, 1fr\); column-gap: 8px; align-items: start; \}/);
+  assert.match(css, /\.row-lead > :not\(\.row-lead-box\) \{ grid-column: 2; \}/, "the title and the meta share the content column");
+  // One title line high: centred on the first line at any zoom, whatever the title wraps to.
+  assert.match(css, /\.row-lead-box \{ grid-column: 1; grid-row: 1; display: flex; align-items: center; height: 1lh; \}/);
+  const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.ok(!styles.includes(".row-check"), "no inline baseline wrapper");
+});

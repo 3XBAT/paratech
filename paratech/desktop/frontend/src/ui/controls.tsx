@@ -219,10 +219,19 @@ export function Card(props:{ children: ReactNode; className?: string; label?: st
  * One line of a list: title and meta, status, actions; one column in a narrow window. Put rows in a `.card.rows` list:
  * the list owns the columns. `below` spans the whole row under them (a warning about the row).
  */
-export function Row(props: { title: ReactNode; meta?: ReactNode; status?: ReactNode; actions?: ReactNode; below?: ReactNode }) {
+export function Row(props: {
+  /** A control before the title (the selection checkbox): its own column, so the meta starts under the title. */
+  lead?: ReactNode;
+  title: ReactNode;
+  meta?: ReactNode;
+  status?: ReactNode;
+  actions?: ReactNode;
+  below?: ReactNode;
+}) {
   return (
     <div className="row" role="listitem">
-      <div className="row-main">
+      <div className={props.lead ? "row-main row-lead" : "row-main"}>
+        {props.lead && <span className="row-lead-box">{props.lead}</span>}
         <p className="t">{props.title}</p>
         {props.meta && <span className="small muted">{props.meta}</span>}
       </div>
