@@ -490,8 +490,9 @@ function newerJob(a: JobItem, b: JobItem): boolean {
 }
 
 /**
- * Only the latest draft job of each assignment (TASK-098): an older one, also a failed one before a newer done one, is
- * not shown. Other jobs and drafts without an assignment stay; the order is kept.
+ * Only the latest draft job of each assignment (TASK-098): an older finished one, also a failed one before a newer
+ * done one, is not shown. An older draft still in progress (or offering Run now) stays, like every row in progress.
+ * Other jobs and drafts without an assignment stay; the order is kept.
  */
 export function latestDrafts(jobs: readonly JobItem[]): JobItem[] {
   const latest = new Map<string, JobItem>();
@@ -504,7 +505,9 @@ export function latestDrafts(jobs: readonly JobItem[]): JobItem[] {
       latest.set(j.assignmentId, j);
     }
   }
-  return jobs.filter((j) => j.type !== draftJobType || j.assignmentId === "" || latest.get(j.assignmentId) === j);
+  return jobs.filter(
+    (j) => j.type !== draftJobType || j.assignmentId === "" || latest.get(j.assignmentId) === j || !isFinishedJob(j),
+  );
 }
 
 /** Splits the page into its two sections; finished recordings sort by their start, finished jobs by their creation. */
@@ -554,10 +557,14 @@ export function jobDetails(j: Pick<JobItem, "lastError" | "attempts" | "maxAttem
   return [j.lastError.trim(), attempts].filter((s) => s !== "").join("\n");
 }
 
-/** The muted line of a task row: when it last changed. */
+/** The muted line of a task row: when it last changed, to the minute («Обновлена 17.09.2026, 10:12»). */
 export function jobMeta(j: Pick<JobItem, "updatedAt">): string {
-  const at = formatTime(j.updatedAt);
-  return at === "—" ? "" : `Обновлена ${at}`;
+  const d = new Date(j.updatedAt);
+  if (j.updatedAt === "" || Number.isNaN(d.getTime())) {
+    return "";
+  }
+  const at = d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `Обновлена ${at}`;
 }
 
 /** A recording is capturing: the page ticks its elapsed time every second. */

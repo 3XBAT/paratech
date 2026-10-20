@@ -500,6 +500,23 @@ test("only the latest draft job of an assignment is shown (TASK-098)", () => {
   // The page groups only the latest: the old failed draft is in neither group.
   const g = pageGroups([], [failedOld, doneNew]);
   assert.deepEqual([...g.tasks.active, ...g.tasks.finished].map((j) => j.id), ["d-new"]);
+
+  // Only finished older drafts are hidden: one still in progress, waiting or offering Run now stays in «Идут».
+  const runningOld = draft({ id: "d-run", status: "RUNNING", createdAt: at(0) });
+  const waitingOld = draft({ id: "d-wait", status: "WAITING_FOR_NETWORK", waiting: true, createdAt: at(1) });
+  const runNowOld = draft({ id: "d-runnow", status: "FAILED", runNowOffered: true, createdAt: at(2) });
+  assert.deepEqual(latestDrafts([runningOld, waitingOld, runNowOld, doneNew]).map((j) => j.id), ["d-run", "d-wait", "d-runnow", "d-new"]);
+  const kept = pageGroups([], [runningOld, doneNew]);
+  assert.deepEqual(kept.tasks.active.map((j) => j.id), ["d-run"], "an older running draft stays in view");
+  assert.deepEqual(kept.tasks.finished.map((j) => j.id), ["d-new"]);
+  const queuedOld = draft({ id: "d-queued", status: "QUEUED", createdAt: at(0) });
+  const inLine = pageGroups([], [queuedOld, doneNew]);
+  assert.equal(queueLine([], [...inLine.tasks.active, ...inLine.tasks.finished]), "В очереди 1 задача", "the queue line counts the kept draft");
+  // An older failed draft behind a newer done one, and an older done one behind a newer failed one, are hidden.
+  assert.deepEqual(latestDrafts([failedOld, doneNew]).map((j) => j.id), ["d-new"]);
+  const doneOld = draft({ id: "d-done-old", createdAt: at(0) });
+  const failedNew = draft({ id: "d-failed-new", status: "FAILED", createdAt: at(5) });
+  assert.deepEqual(latestDrafts([doneOld, failedNew]).map((j) => j.id), ["d-failed-new"]);
 });
 
 test("a task row has one main button and the rest in «⋯»; attempts and errors only in the tooltip (TASK-098)", () => {
@@ -514,7 +531,11 @@ test("a task row has one main button and the rest in «⋯»; attempts and error
 
   assert.equal(jobDetails(job({ lastError: " smtp: 550 ", attempts: 2, maxAttempts: 3 })), "smtp: 550\nПопыток: 2 из 3");
   assert.equal(jobDetails(job({ maxAttempts: 0 })), "");
-  assert.equal(jobMeta(job()), `Обновлена ${formatTime(started)}`);
+  // To the minute, like «17.09.2026, 10:12», without the seconds of formatTime.
+  const d = new Date(started);
+  const two = (n) => String(n).padStart(2, "0");
+  assert.equal(jobMeta(job()), `Обновлена ${two(d.getDate())}.${two(d.getMonth() + 1)}.${d.getFullYear()}, ${two(d.getHours())}:${two(d.getMinutes())}`);
+  assert.equal(jobMeta(job({ updatedAt: "not a time" })), "");
   assert.equal(jobMeta(job({ updatedAt: "" })), "");
 });
 
@@ -555,8 +576,13 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   assert.match(page, /renderContainer=\{card\}/);
   assert.match(page, /<h2 className="group-title">Записи<\/h2>/);
   assert.match(page, /<h2 className="group-title">Задачи<\/h2>/);
-  assert.match(page, /sectionGroups\("recordings", groups\.recordings, recordingRow\)/);
-  assert.match(page, /sectionGroups\("tasks", groups\.tasks, jobRow\)/);
+  assert.match(page, /sectionGroups\("recordings", "записи", groups\.recordings, recordingRow\)/);
+  assert.match(page, /sectionGroups\("tasks", "задачи", groups\.tasks, jobRow\)/);
+  // The two «Завершённые» toggles have distinct accessible names: a hidden word after the title.
+  assert.match(page, /Завершённые<span className="vh"> \{name\}<\/span>/);
+  // No «Записи» heading right above the empty state's own heading.
+  assert.match(page, /\{!noRecordings && <h2 className="group-title">Записи<\/h2>\}/);
+  assert.match(page, /\) : noRecordings \? \(\s*<EmptyState/);
   assert.match(page, /<h3 className="arows-sub">Идут<\/h3>/);
   assert.match(page, /<p className="muted arows-empty">\{tasksEmptyText\}<\/p>/, "an empty «Задачи» has a short hint");
   assert.ok(!page.includes("attempts"), "the page shows no attempts");
@@ -566,12 +592,16 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   assert.deepEqual(tracks, [
     "minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 6px + var(--arow-menu))",
     "minmax(0, 1fr) calc(var(--arow-btn) + 6px + var(--arow-menu))",
-  ], "only the title flexes, wide and narrow");
+    "minmax(0, 1fr)",
+  ], "only the title flexes, wide and narrow; one column when very narrow");
   assert.match(css, /\.arows \{ --arow-st: 17rem; --arow-btn: 14rem; --arow-menu: 32px;/);
-  assert.match(css, /\.arows \.acts \{ display: grid; grid-template-columns: var\(--arow-btn\) var\(--arow-menu\);/);
-  assert.match(css, /\.arows \.acts > \.btn, \.arows \.acts > \.btn-with-reason \{ grid-column: 1; width: 100%; \}/, "one button width");
-  assert.match(css, /\.arows \.acts > \.mmenu \{ grid-column: 2; \}/, "«⋯» in its own slot, also without a button");
+  assert.match(css, /\.arows > \.row > \.acts \{ display: grid; grid-template-columns: var\(--arow-btn\) var\(--arow-menu\);/);
+  assert.match(css, /\.arows > \.row > \.acts > \.btn, \.arows > \.row > \.acts > \.btn-with-reason \{ grid-column: 1; width: 100%; \}/, "one button width");
+  assert.match(css, /\.arows > \.row > \.acts > \.mmenu \{ grid-column: 2; \}/, "«⋯» in its own slot, also without a button");
+  // Only the row's own actions cell: a descendant rule would also stack the advice's «Переключиться»/«Оставить».
+  assert.ok(!/\.arows\s+\.acts/.test(css), "no descendant .arows .acts rule");
   assert.match(css, /@container app \(max-width: 1000px\) \{\s*\.arows > \.row \{[^}]*\}\s*\.arows > \.row > \.row-main \{ grid-column: 1 \/ -1; \}/);
+  assert.match(css, /@container app \(max-width: 720px\) \{\s*\.arows > \.row \{ grid-template-columns: minmax\(0, 1fr\); \}\s*\.arows > \.row > \.acts \{ justify-self: end; \}/, "very narrow: one column");
 });
 
 test("«Сделать конспект заново» from «⋯» asks with the summary screen's confirmation first (TASK-096)", () => {

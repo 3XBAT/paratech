@@ -306,9 +306,11 @@ export function RecordingsPage({
     />
   );
 
-  // «Идут» and «Завершённые (N)» of one section; the folded state is kept per section across the polls.
+  // «Идут» and «Завершённые (N)» of one section; the folded state is kept per section across the polls. The hidden
+  // word gives the two «Завершённые» toggles distinct names for screen readers.
   function sectionGroups<T extends { id: string }>(
     list: "recordings" | "tasks",
+    name: string,
     section: { active: T[]; finished: T[] },
     row: (item: T) => ReactNode,
   ) {
@@ -322,7 +324,11 @@ export function RecordingsPage({
         )}
         {section.finished.length > 0 && (
           <CollapsibleList
-            title="Завершённые"
+            title={
+              <>
+                Завершённые<span className="vh"> {name}</span>
+              </>
+            }
             items={section.finished}
             itemKey={(item) => item.id}
             renderItem={row}
@@ -338,6 +344,7 @@ export function RecordingsPage({
   }
 
   const visibleJobs = [...groups.tasks.active, ...groups.tasks.finished];
+  const noRecordings = recordings !== null && recordings.length === 0;
   const queue = queueLine(recordings ?? [], visibleJobs);
 
   return (
@@ -415,7 +422,8 @@ export function RecordingsPage({
         </Banner>
       )}
 
-      <h2 className="group-title">Записи</h2>
+      {/* The empty state has its own heading. */}
+      {!noRecordings && <h2 className="group-title">Записи</h2>}
       {recordingsError && (
         <Banner kind="fail" role="alert">
           {recordingsError}
@@ -443,7 +451,7 @@ export function RecordingsPage({
       )}
       {recordings === null ? (
         !recordingsError && <p className="muted">Загрузка…</p>
-      ) : recordings.length === 0 ? (
+      ) : noRecordings ? (
         <EmptyState
           label="Записей пока нет"
           title="Здесь появятся записи пар"
@@ -458,7 +466,7 @@ export function RecordingsPage({
           Импортируйте расписание — в начале каждой пары появится окно с кнопкой «Начать запись».
         </EmptyState>
       ) : (
-        sectionGroups("recordings", groups.recordings, recordingRow)
+        sectionGroups("recordings", "записи", groups.recordings, recordingRow)
       )}
 
       <h2 className="group-title">Задачи</h2>
@@ -472,7 +480,7 @@ export function RecordingsPage({
       ) : visibleJobs.length === 0 ? (
         <p className="muted arows-empty">{tasksEmptyText}</p>
       ) : (
-        sectionGroups("tasks", groups.tasks, jobRow)
+        sectionGroups("tasks", "задачи", groups.tasks, jobRow)
       )}
 
       {deleting !== null && (

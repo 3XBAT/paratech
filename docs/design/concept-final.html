@@ -232,9 +232,10 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
    grid for every card: only the title flexes, the status, button and «⋯» tracks are fixed, the «⋯» slot is in every row */
 .sec{font-size:15px;font-weight:600;margin:20px 0 10px}.sec:first-of-type{margin-top:0}
 .card.arows{display:block;overflow:visible}.card.arows>.row{grid-template-columns:minmax(0,1fr) 17rem calc(14rem + 38px)}
-.arows .acts{display:grid;grid-template-columns:14rem 32px;gap:6px}.arows .acts>.btn{grid-column:1;width:100%}.arows .acts>.mmenu{grid-column:2}
+.arows>.row>.acts{display:grid;grid-template-columns:14rem 32px;gap:6px}.arows>.row>.acts>.btn{grid-column:1;width:100%}.arows>.row>.acts>.mmenu{grid-column:2}
 .arows+.group,.arows+.more+.group{margin-top:12px}.group+.card{margin-top:8px}.more{margin-top:6px}
 @container (max-width:1000px){.card.arows>.row{grid-template-columns:minmax(0,1fr) calc(14rem + 38px)}.card.arows>.row>div:first-child{grid-column:1/-1}}
+@container (max-width:720px){.card.arows>.row{grid-template-columns:minmax(0,1fr)}.card.arows>.row>.acts{justify-self:end}}
 
 /* popup */
 .duo{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
@@ -378,10 +379,10 @@ h3{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
           <h3 class="sec">Задачи</h3>
           <h4 class="group">Идут</h4>
           <div class="card arows" role="list">
-            <div class="row" role="listitem"><div><p class="t">Черновик: Эссе о реформах · История России</p><span class="m num">Обновлена 17.09.2026, 10:12:40</span></div>
+            <div class="row" role="listitem"><div><p class="t">Черновик: Эссе о реформах · История России</p><span class="m num">Обновлена 17.09.2026, 10:12</span></div>
               <div class="st"><span class="chip s-run"><svg class="i"><use href="#i-doc"/></svg>Выполняется</span></div>
               <div class="acts"><button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть задание</button><div class="mmenu"></div></div></div>
-            <div class="row" role="listitem"><div><p class="t">Отправка письма</p><span class="m num">Обновлена 17.09.2026, 10:05:02</span></div>
+            <div class="row" role="listitem"><div><p class="t">Отправка письма</p><span class="m num">Обновлена 17.09.2026, 10:05</span></div>
               <div class="st"><span class="chip s-net" title="smtp: dial tcp: no route to host&#10;Попыток: 2 из 5"><svg class="i"><use href="#i-off"/></svg>Ждёт интернет</span><span class="m">Продолжится само, как только появится сеть.</span></div>
               <div class="acts"><button class="btn"><svg class="i"><use href="#i-play"/></svg>Запустить сейчас</button><div class="mmenu"><button class="btn ghost" aria-label="Ещё действия: Отправка письма" aria-haspopup="menu" aria-expanded="false">⋯</button></div></div></div>
           </div>
