@@ -89,7 +89,7 @@ func (r *reports) report(_ context.Context, p job.Progress) error {
 func (e *ppEnv) steps(snap job.Snapshot, report func(context.Context, job.Progress) error) ([]int, error) {
 	e.t.Helper()
 	var calls []int
-	for {
+	for range maxSteps {
 		before := len(e.llm.Requests())
 		err := e.pp.Handle(context.Background(), snap, report)
 		calls = append(calls, len(e.llm.Requests())-before)
@@ -97,6 +97,8 @@ func (e *ppEnv) steps(snap job.Snapshot, report func(context.Context, job.Progre
 			return calls, err
 		}
 	}
+	e.t.Fatalf("the job still continues after %d steps", maxSteps)
+	return calls, nil
 }
 
 func (r *reports) checkpoints() []string {
