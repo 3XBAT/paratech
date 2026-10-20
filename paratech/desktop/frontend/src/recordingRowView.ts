@@ -134,11 +134,11 @@ export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = 
   retry: "Повторить",
 };
 
-/** What the hint of a failed step adds when the row offers «Повторить» (TASK-086). */
+/** What the hint of a failed step adds when the row offers «Повторить», the round arrow by the chip (TASK-086, TASK-096). */
 export const retryHints = {
-  retry: "Нажмите «Повторить».",
+  retry: "Нажмите круглую стрелку «Повторить» у статуса.",
   // The LLM call failed: the connection, the key or the quota may need a fix first.
-  afterConnections: "Проверьте подключения и нажмите «Повторить».",
+  afterConnections: "Проверьте подключения (меню «⋯») и нажмите круглую стрелку «Повторить».",
 } as const;
 
 /** The page a navigation action opens; the sound check is on «Диагностика». */
@@ -318,6 +318,8 @@ export function rowRetry(r: Pick<RecordingItem, "action" | "actionJobId" | "retr
 }
 
 // The core's own notes (the capture switch) are Russian; its failure reasons and job errors are English for support.
+// Format source: recording.withNote joins "<reason>; <note>" and values.CaptureSwitch.Note is the Russian note
+// (desktop/internal/domain/recording).
 const userText = /^[«А-Яа-яЁё]/;
 
 /** The parts of the recording's problem meant for the user; a technical reason before "; " stays in the details. */
@@ -410,12 +412,12 @@ export function rowActions(
   return { main, menu };
 }
 
-/** The links of a row to the texts of the recording. */
+/** The links of a row to the texts of the recording; the row uses only whether each exists (TASK-096). */
 export interface RowLinks {
   /** «Открыть текст лекции», the main link once the lecture text is ready (TASK-090). */
   lectureText: boolean;
   summary: SummaryOffer;
-  /** «Открыть расшифровку» without a lecture text; with one, the small «Исходная расшифровка». */
+  /** «Открыть расшифровку»: "full" without a lecture text, "source" with one. */
   transcript: "full" | "source" | null;
 }
 

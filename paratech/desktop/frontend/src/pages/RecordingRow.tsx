@@ -129,8 +129,8 @@ export function RecordingRow(props: RecordingRowProps) {
     }
   };
 
-  const busy = (key: MenuKey) =>
-    (key === "stop" && props.stopping) || (key === "runNow" && props.starting) || (key === "redo" && (props.redoing ?? false));
+  // «Остановить» is always the main button, never in the menu.
+  const busy = (key: MenuKey) => (key === "runNow" && props.starting) || (key === "redo" && (props.redoing ?? false));
   const menu: RowMenuItem<MenuKey>[] = acts.menu.map((i) => ({ key: i.key, label: i.label, disabled: busy(i.key) }));
   if (props.onDelete) {
     menu.push({ key: "delete", label: deleteTexts.menu, disabled: del.disabled, hint: del.hint });

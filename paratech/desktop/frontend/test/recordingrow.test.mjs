@@ -7,7 +7,8 @@ import { createElement as h } from "react";
 import server from "react-dom/server";
 import { formatTime } from "../.test-build/activityView.js";
 import { nextTickDelay, SecondTicker, tickMs } from "../.test-build/clock.js";
-import { RecordingRow } from "../.test-build/pages/RecordingRow.js";
+import { RecordingRow, StatusLine } from "../.test-build/pages/RecordingRow.js";
+import { jobStatusView } from "../.test-build/statusPresentation.js";
 import {
   actionLabels,
   actionPages,
@@ -476,4 +477,21 @@ test("«Сделать конспект заново» from «⋯» asks with th
   assert.equal(page.split("api.redoSummary(").length - 1, 1, "one call site");
   assert.match(page, /function redo\(\) \{[^]*?api\.redoSummary\(id\)/);
   assert.match(page, /<Dialog\s+open=\{redoOffered\}\s+title=\{redoTexts\.title\}[^]*?onConfirm=\{redo\}/);
+});
+
+test("a job row keeps its technical error in the chip's tooltip, not as row text (TASK-096)", () => {
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /<StatusLine view=\{v\} notes=\{\[\]\} details=\{j\.lastError\}>/);
+  assert.ok(!page.includes("[j.lastError]"), "the job error is never a row note");
+  assert.match(page, /<Button icon="doc" onClick=\{\(\) => onOpenAssignment\(assignment\)\}>/, "same style as a recording row's main button");
+
+  const err = "permanent failure: the LLM answer does not match the schema";
+  const html = renderToStaticMarkup(h(StatusLine, { view: jobStatusView(job({ type: "homework_draft", status: "FAILED" })), notes: [], details: err }));
+  assert.ok(html.includes(`title="${err}"`), "the error is in the chip's title");
+  assert.equal(html.split(err).length - 1, 1, "and nowhere else");
+});
+
+test("the retry hints name the round arrow by the status (TASK-096)", () => {
+  assert.equal(retryHints.retry, "Нажмите круглую стрелку «Повторить» у статуса.");
+  assert.equal(retryHints.afterConnections, "Проверьте подключения (меню «⋯») и нажмите круглую стрелку «Повторить».");
 });

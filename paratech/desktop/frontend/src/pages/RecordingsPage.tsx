@@ -296,6 +296,7 @@ export function RecordingsPage({
   );
 
   const jobRow = (j: JobItem) => {
+    // The job error is technical (English, for support): only in the chip's tooltip (TASK-096).
     const v = jobStatusView(j);
     const starting = busy.has(`run:${j.id}`);
     const assignment = jobAssignment(j);
@@ -309,7 +310,7 @@ export function RecordingsPage({
           </span>
         }
         status={
-          <StatusLine view={v} notes={j.lastError === "" ? [] : [j.lastError]}>
+          <StatusLine view={v} notes={[]} details={j.lastError}>
             {showsProgress(j) && <Progress value={j.progressPercent} label={v.label} text={false} />}
           </StatusLine>
         }
@@ -327,7 +328,7 @@ export function RecordingsPage({
               </Button>
             )}
             {assignment !== "" && onOpenAssignment && (
-              <Button variant="ghost" icon="doc" onClick={() => onOpenAssignment(assignment)}>
+              <Button icon="doc" onClick={() => onOpenAssignment(assignment)}>
                 Открыть задание
               </Button>
             )}
