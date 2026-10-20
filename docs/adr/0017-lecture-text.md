@@ -53,5 +53,7 @@ model. The desktop sends `max_output_tokens = 0` (the alias maximum, unknown to 
   deletion cancels it like any job. A crash or a failed step repeats only the part not stored yet.
 - Attempts count failed steps of the whole job. The reminder budget (`LectureTextReminders`) and the timeout are per
   step: at most 1 + 3 paid calls per step, so a lecture whose every part needs all reminders costs up to 4 × parts.
+  Example: a ~40-part lecture can make up to ~160 paid calls (before: parts + 3 per attempt); reminders fire only on a
+  bad format. A step that asks to continue without storing a part uses an attempt (`job.ErrNoProgress`).
 - Between steps the job is QUEUED with its checkpoint "N/M"; views that should show it as in progress read the
   checkpoint.
