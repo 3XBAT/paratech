@@ -63,6 +63,9 @@
     "src/recordingDeleteView.ts",
     "src/ui/menu.ts",
     "src/ui/RowMenu.tsx",
-    "src/pages/RecordingDeleteDialog.tsx"
+    "src/pages/RecordingDeleteDialog.tsx",
+    "src/bindings/knowledgeBase.ts",
+    "src/knowledgeView.ts",
+    "src/pages/KnowledgeParts.tsx"
   ]
 }
