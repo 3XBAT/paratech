@@ -102,12 +102,12 @@ func TestParseSummaryRejects(t *testing.T) {
 		{"key point with newline", summaryOf(ok, `["a\nb"]`)},
 		{"key point too long", summaryOf(ok, `["`+strings.Repeat("a", MaxKeyPointRunes+1)+`"]`)},
 		{"control character", summaryOf(sectionOf("H", `a\u0007b`, `[]`), `[]`)},
-		{"bidi override", summaryOf(sectionOf("H", `a‮b`, `[]`), `[]`)},
-		{"bidi override in a heading", summaryOf(sectionOf(`a‮b`, "S", `[]`), `[]`)},
-		{"bidi override in a point", summaryOf(sectionOf("H", "S", `["a‮b"]`), `[]`)},
-		{"left-to-right mark", summaryOf(sectionOf("H", `a‎b`, `[]`), `[]`)},
-		{"right-to-left mark", summaryOf(ok, `["a‏b"]`)},
-		{"arabic letter mark", summaryOf(sectionOf("H", `a؜b`, `[]`), `[]`)},
+		{"bidi override", summaryOf(sectionOf("H", "a\u202eb", `[]`), `[]`)},
+		{"bidi override in a heading", summaryOf(sectionOf("a\u202eb", "S", `[]`), `[]`)},
+		{"bidi override in a point", summaryOf(sectionOf("H", "S", "[\"a\u202eb\"]"), `[]`)},
+		{"left-to-right mark", summaryOf(sectionOf("H", "a\u200eb", `[]`), `[]`)},
+		{"right-to-left mark", summaryOf(ok, "[\"a\u200fb\"]")},
+		{"arabic letter mark", summaryOf(sectionOf("H", "a\u061cb", `[]`), `[]`)},
 		{"tag character", summaryOf(sectionOf("H", `a󠁁b`, `[]`), `[]`)},
 		{"last tag character", summaryOf(ok, `["a󠁿b"]`)},
 		{"key point with line separator", summaryOf(ok, `["a b"]`)},
@@ -141,7 +141,7 @@ func TestParseSummaryRejects(t *testing.T) {
 		"longest fields": summaryOf(sectionOf(strings.Repeat("я", MaxSectionHeadingRunes), strings.Repeat("я", MaxSectionTextRunes),
 			`["`+strings.Repeat("a", MaxSectionPointRunes)+`"]`), `[]`),
 		// Joiners are part of ordinary text in some scripts and emoji.
-		"ZWJ and ZWNJ": summaryOf(sectionOf(`a‍b`, `a‍b‌c`, `["a‍b"]`), `["a‍b"]`),
+		"ZWJ and ZWNJ": summaryOf(sectionOf("a\u200db", "a\u200db\u200cc", "[\"a\u200db\"]"), "[\"a\u200db\"]"),
 	} {
 		if _, err := ParseSummary(out(text)); err != nil {
 			t.Errorf("%s: %v", name, err)
