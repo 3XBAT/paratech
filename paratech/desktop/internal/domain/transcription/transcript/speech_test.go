@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,19 @@ func TestSegmentSpeech(t *testing.T) {
 		{name: "music symbol with words", text: "♪ la la ♪", want: "♪ la la ♪", speech: true},
 		{name: "number alone", text: "42", want: "42", speech: true},
 		{name: "unclosed bracket", text: "[BLANK_AUDIO", want: "[BLANK_AUDIO", speech: true},
+		// Marks are short; a longer group is speech (TASK-110 review).
+		{name: "short parenthesised phrase", text: "(тихо говорит)"},
+		{name: "short starred phrase", text: "*звонок в дверь*"},
+		{name: "speech in parentheses", text: "(Ну, хорошо, давайте начнём.)", want: "(Ну, хорошо, давайте начнём.)", speech: true},
+		{name: "speech in stars", text: "*очень важно запомнить это правило*", want: "*очень важно запомнить это правило*", speech: true},
+		{name: "long word in parentheses", text: "(" + strings.Repeat("а", 31) + ")", want: "(" + strings.Repeat("а", 31) + ")", speech: true},
+		{name: "speech in brackets", text: "[Сейчас я покажу вам пример]", want: "[Сейчас я покажу вам пример]", speech: true},
+		// Inside speech only whisper-style square-bracket marks are removed.
+		{name: "two-letter index kept", text: "a[ij] равно нулю", want: "a[ij] равно нулю", speech: true},
+		{name: "lower-case word in brackets kept", text: "см. [пример] выше", want: "см. [пример] выше", speech: true},
+		{name: "russian mark stripped", text: "[Музыка] Начнём", want: "Начнём", speech: true},
+		{name: "spaced mark stripped", text: "Итак [ Silence ] дальше", want: "Итак дальше", speech: true},
+		{name: "upper-case mark stripped", text: "Итак [MUSIC]", want: "Итак", speech: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
