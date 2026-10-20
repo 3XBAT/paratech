@@ -224,11 +224,16 @@ test("one main button per state; the rest goes to «⋯» (TASK-096)", () => {
   // A ready summary and a failed homework search behind the connections: the link goes to the menu.
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" }),
     ["summary", ["transcript", "open"]]);
-  // No ready summary: the core's fix link leads, else the lecture text, else the transcript.
+  // No ready summary: the lecture text leads, else the transcript; the fix link stays in the menu.
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary" }),
-    ["open", ["summary", "transcript"]]);
+    ["transcript", ["summary", "open"]]);
+  assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary", lectureTextReady: true }),
+    ["lectureText", ["summary", "transcript", "open"]]);
+  // A failed transcription keeps its recognised part, so the transcript leads there too.
   assert.deepEqual(keys({ stage: "failed", step: "transcription", errorCode: "transcriptionFailed", action: "openModels" }),
-    ["open", ["transcript"]]);
+    ["transcript", ["open"]]);
+  // No text at all: the fix link is the fallback main button.
+  assert.deepEqual(keys({ stage: "failed", step: "", errorCode: "recordingFailed", action: "checkSound" }), ["open", []]);
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary" }),
     ["transcript", ["summary"]]);
   assert.deepEqual(keys({ stage: "summarizing", lectureTextReady: true }), ["lectureText", ["summary", "transcript"]]);

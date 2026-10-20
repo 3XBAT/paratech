@@ -386,8 +386,9 @@ export interface RowActions {
 }
 
 /**
- * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», a ready summary, the
- * core's fix link (models, connections, sound check), a ready lecture text, the transcript. The rest goes to «⋯».
+ * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», a ready summary, a ready
+ * lecture text, the transcript; the core's fix link (models, connections, sound check) only when no text is offered.
+ * The rest goes to «⋯».
  */
 export function rowActions(
   r: Pick<RecordingItem, "stage" | "step" | "errorCode" | "lectureTextReady" | "stoppable" | "action" | "actionJobId" | "retryWork" | "canRedoSummary">,
@@ -404,7 +405,7 @@ export function rowActions(
   const transcript = links.transcript !== null ? item("transcript", rowItemLabels.transcript) : null;
   const open = core?.kind === "open" ? item("open", core.label) : null;
   const redo = offers.redo && r.canRedoSummary ? item("redo", rowItemLabels.redo) : null;
-  const main = stop ?? runNow ?? (summary === "main" ? sum : null) ?? open ?? lecture ?? transcript;
+  const main = stop ?? runNow ?? (summary === "main" ? sum : null) ?? lecture ?? transcript ?? open;
   const menu = [stop, runNow, lecture, sum, transcript, open, redo].filter((i): i is RowItem => i !== null && i !== main);
   return { main, menu };
 }
