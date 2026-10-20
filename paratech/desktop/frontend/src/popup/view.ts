@@ -3,6 +3,7 @@
 // The source picker and the start problem texts are shared with the main window (sourcePicker/view.ts).
 
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
+import type { RecordingItem } from "../bindings/activity.js";
 import type { PromptView } from "../bindings/prompt.js";
 import { problemText } from "../sourcePicker/view.js";
 
@@ -199,8 +200,10 @@ export function shouldRefresh(view: PromptView | null, visible: boolean, pending
   return visible && !listOpen && view !== null && view.state === "OFFERED" && pending === null;
 }
 
-// The popup while a recording runs (TASK-099, docs/design/concept-strict.html section 4): the level capsule,
-// «Остановить» and «Скрыть». The core says whether a recording captures (RecordingSound.recording).
+// The popup while a recording runs (TASK-099, docs/design/concept-strict.html section 4): the lesson title, the
+// elapsed time, the level capsule, «Остановить» and «Скрыть». The core says whether a recording captures
+// (RecordingSound.recording). The mockup's source row is not shown: no binding says which source the running
+// recording captures (the remembered source may differ after a switch or a choice in «Диагностика»).
 
 export const recordingTexts = {
   heading: "Идёт запись",
@@ -211,7 +214,36 @@ export const recordingTexts = {
   stopHint: "Остановить запись",
   hideHint: "Скрыть окно, запись продолжится",
   stopFailed: "Не удалось остановить запись. Остановите её в «Записях и задачах».",
+  noLesson: "Запись без занятия",
 } as const;
+
+/** What the popup shows of the running recording besides its sound. */
+export interface RecordingInfo {
+  /** Lesson title (untrusted, plain text) or recordingTexts.noLesson. */
+  title: string;
+  /** RFC 3339; "" when unknown (no timer). */
+  startedAt: string;
+}
+
+/** The running recording id from the list the core returns; null when it is not listed. */
+export function recordingInfo(items: readonly RecordingItem[], id: string): RecordingInfo | null {
+  const r = items.find((i) => i.id === id);
+  if (r === undefined) {
+    return null;
+  }
+  return { title: r.title.trim() || recordingTexts.noLesson, startedAt: r.startedAt };
+}
+
+/** The elapsed time «hh:mm:ss» since startedAt by the clock now (skew clamped to 0); "" when startedAt is unknown. */
+export function elapsedText(startedAt: string, now: number): string {
+  const started = startedAt === "" ? NaN : Date.parse(startedAt);
+  if (Number.isNaN(started) || !Number.isFinite(now)) {
+    return "";
+  }
+  const total = Math.floor(Math.max(0, now - started) / 1000);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(Math.floor(total / 3600))}:${two(Math.floor((total % 3600) / 60))}:${two(total % 60)}`;
+}
 
 /**
  * Whether the popup shows the running recording instead of the prompt: while a recording captures and no prompt is on

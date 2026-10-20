@@ -8,12 +8,14 @@ import server from "react-dom/server";
 import { activityApi, methods, parseRecordingSound } from "../.test-build/bindings/activity.js";
 import { heardMarkPercent, levelPercent } from "../.test-build/diagnosticsView.js";
 import { RecordingRow } from "../.test-build/pages/RecordingRow.js";
-import { recordingTexts, showsRecording } from "../.test-build/popup/view.js";
+import { elapsedText, recordingInfo, recordingTexts, showsRecording } from "../.test-build/popup/view.js";
 import {
   soundLevelModel,
   soundMarkPercent,
+  soundKeepOnFailures,
   SoundPoller,
   soundPollMs,
+  soundRetryMs,
   soundTexts,
 } from "../.test-build/soundLevelView.js";
 import { SoundLevel } from "../.test-build/ui/SoundLevel.js";
@@ -229,7 +231,9 @@ test("the poller reads every 250 ms while active, never two reads at a time, and
   assert.equal(max, 1);
 });
 
-test("a failed read hides the capsule; untilIdle pauses after no recording until refreshNow", async () => {
+// Changed in the review: a failure no longer hides the capsule at once nor pauses untilIdle polling (the popup fell back
+// to the prompt view while recording); it keeps the last reading for two failures and retries every second.
+test("failed reads keep the last reading for two failures and retry; untilIdle pauses only after no recording", async () => {
   const timers = fakeTimers();
   const shown = [];
   let reply = heard();
@@ -252,23 +256,95 @@ test("a failed read hides the capsule; untilIdle pauses after no recording until
   assert.equal(timers.planned.size, 1, "recording: polling goes on");
 
   fail = true;
+  for (let i = 1; i <= soundKeepOnFailures; i++) {
+    timers.fire();
+    await settle();
+    assert.deepEqual(shown.at(-1), heard(), `failure ${i} keeps the last reading`);
+    assert.equal(timers.planned.size, 1, "untilIdle: a failure keeps polling");
+    assert.equal([...timers.planned.values()][0].ms, soundRetryMs, "slower retry");
+  }
   timers.fire();
   await settle();
-  assert.equal(shown.at(-1), null, "a failure shows nothing");
-  assert.equal(timers.planned.size, 0, "untilIdle: a failure pauses");
+  assert.equal(shown.at(-1), null, "a third failure in a row shows nothing");
+  assert.equal(timers.planned.size, 1, "and still retries");
+  assert.equal(soundRetryMs, 1000);
+
+  fail = false;
+  timers.fire();
+  await settle();
+  assert.deepEqual(shown.at(-1), heard(), "a good read shows again");
+  assert.equal([...timers.planned.values()][0].ms, soundPollMs);
+
+  // One failure after a good read keeps it again: the count starts over.
+  fail = true;
+  timers.fire();
+  await settle();
+  assert.deepEqual(shown.at(-1), heard());
 
   fail = false;
   reply = idle;
-  p.refreshNow();
+  timers.fire();
   await settle();
-  assert.equal(reads, 3);
   assert.deepEqual(shown.at(-1), idle);
   assert.equal(timers.planned.size, 0, "untilIdle: no recording pauses");
+  const before = reads;
 
   reply = heard();
   p.refreshNow();
   await settle();
+  assert.equal(reads, before + 1);
   assert.equal(timers.planned.size, 1, "a refresh with a recording resumes");
   p.setActive(false);
   assert.equal(timers.planned.size, 0);
+});
+
+test("without untilIdle a failure retries too", async () => {
+  const timers = fakeTimers();
+  const shown = [];
+  const p = new SoundPoller(async () => { throw new Error("boom"); }, (s) => shown.push(s), timers);
+  p.setActive(true);
+  await settle();
+  assert.deepEqual(shown, [], "nothing shown before the third failure");
+  assert.equal([...timers.planned.values()][0].ms, soundRetryMs);
+  p.setActive(false);
+});
+
+test("the popup's recording state: title and timer from one list read, hh:mm:ss ticking locally", () => {
+  assert.deepEqual(recordingInfo([row({ id: "r0" }), row()], "r1"), { title: "Матанализ", startedAt: started });
+  assert.deepEqual(recordingInfo([row({ title: "  " })], "r1"), { title: "Запись без занятия", startedAt: started });
+  assert.equal(recordingInfo([row()], "r2"), null);
+  const t0 = Date.parse(started);
+  assert.equal(elapsedText(started, t0 + (12 * 60 + 4) * 1000 + 999), "00:12:04");
+  assert.equal(elapsedText(started, t0 + (25 * 3600 + 1) * 1000), "25:00:01");
+  assert.equal(elapsedText(started, t0 - 5000), "00:00:00", "clock skew is clamped");
+  assert.equal(elapsedText("", t0), "");
+  assert.equal(elapsedText("bad", t0), "");
+
+  const popup = readFileSync(new URL("../src/popup/Popup.tsx", import.meta.url), "utf8");
+  // Read once per recording shown (keyed by its id), not with every sound read.
+  assert.match(popup, /activity\.listRecordings\(\)[\s\S]*\}, \[activity, liveId\]\);/);
+  assert.equal(popup.match(/listRecordings/g).length, 1);
+  assert.match(popup, /useNow\(liveInfo !== null/);
+  // The hint keeps the info icon of the mockup; «Остановка…» does not change the button width.
+  assert.match(popup, /<p className="p-note soft">\s*<Icon name="info" \/>/);
+  assert.match(popup, /busy=\{stopping\}\s*busyLabel=\{recordingTexts\.stopping\}/);
+});
+
+test("popup CSS: «Остановить» and «Скрыть» sit side by side, busy labels keep the width", () => {
+  const css = readFileSync(new URL("../src/popup/popup.css", import.meta.url), "utf8");
+  // The rule that spans a lone second button across the row must not reach the two-button row.
+  const spans = css.match(/^[^{\n]*\{ grid-column: 1 \/ -1; \}/gm) ?? [];
+  assert.equal(spans.length, 1);
+  assert.match(spans[0], /\.pbtns:not\(\.two\) > \.btn:nth-child\(2\):last-child/);
+  assert.doesNotMatch(spans[0], /\.pbtns > \.btn:nth-child/);
+  assert.match(css, /\.btn-labels > \.btn-off \{ visibility: hidden; \}/);
+  // .btn.danger comes after the ghost rules.
+  assert.ok(css.indexOf(".btn.danger") > css.indexOf(".btn.ghost:hover:enabled"));
+});
+
+test("the main window reads the sound only while it is visible", () => {
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /useRecordingSound\(api\.recordingSound, visible && anyRecording/);
+  assert.match(page, /addEventListener\("visibilitychange"/);
+  assert.match(page, /removeEventListener\("visibilitychange"/);
 });

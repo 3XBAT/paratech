@@ -57,19 +57,25 @@ h1, p, ul { margin: 0; }
 
 /* Buttons: «Начать запись» across the width, the others below it. */
 .pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: auto; }
-.pbtns .wide, .pbtns > .btn:nth-child(2):last-child { grid-column: 1 / -1; }
-/* The running recording (TASK-099): «Остановить» and «Скрыть» side by side; the capsule is in ../ui/soundLevel.css. */
-.pbtns.two > .btn { grid-column: auto; }
+/* The running recording (TASK-099): .two keeps «Остановить» and «Скрыть» side by side. */
+.pbtns .wide, .pbtns:not(.two) > .btn:nth-child(2):last-child { grid-column: 1 / -1; }
+/* Its capsule is in ../ui/soundLevel.css; the hint carries the info icon (concept-strict.html section 4). */
 .p-sound { flex: none; display: flex; align-items: center; min-height: 28px; }
+.p-note.soft { display: flex; align-items: flex-start; gap: 6px; }
+.p-note.soft > .i { width: 16px; height: 16px; margin-top: 2px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 28px; padding: 3px 12px; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background var(--t-fast), transform var(--t-fast) var(--ease); }
 .btn:hover:enabled { background: var(--panel-2); }
 .btn:active:enabled { transform: translateY(1px); }
 .btn.primary { min-height: 38px; border-color: var(--prim); background: var(--prim); color: var(--on-prim); }
 .btn.primary:hover:enabled { background: var(--prim); opacity: .9; }
 .btn.ghost { border-color: transparent; background: none; color: var(--accent); }
-.btn.danger { color: var(--rec-t); border-color: color-mix(in srgb, var(--rec) 55%, var(--control)); }
 .btn.ghost:hover:enabled { background: var(--panel-2); }
+.btn.danger { color: var(--rec-t); border-color: color-mix(in srgb, var(--rec) 55%, var(--control)); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* Button busy labels share one cell, so the width stays (as in ../ui/components.css). */
+.btn-labels { display: inline-grid; }
+.btn-labels > * { grid-area: 1 / 1; }
+.btn-labels > .btn-off { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

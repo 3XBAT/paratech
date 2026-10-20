@@ -258,8 +258,15 @@ export function RecordingsPage({
 
   // The elapsed time of a running recording ticks every second from startedAt, independent of the 3 s poll.
   const now = useNow(anyRecording(recordings ?? []));
-  // The level capsule of the running recording (TASK-099): read only while a row shows it running.
-  const { sound } = useRecordingSound(api.recordingSound, anyRecording(recordings ?? []));
+  // The level capsule of the running recording (TASK-099): read only while a row shows it running and the window is
+  // visible (a hidden main window does not poll 4 times a second).
+  const [visible, setVisible] = useState(() => document.visibilityState === "visible");
+  useEffect(() => {
+    const onVisibility = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+  const { sound } = useRecordingSound(api.recordingSound, visible && anyRecording(recordings ?? []));
 
   // Two sections, «Записи» and «Задачи», each with «Идут» and the folded «Завершённые» (TASK-098); rows in progress
   // (and those with Stop or Run now) always stay in view. Only the latest draft job per assignment is listed.

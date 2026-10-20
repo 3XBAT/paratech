@@ -67,10 +67,17 @@ export interface SoundTimers {
   clear(handle: unknown): void;
 }
 
+/** After a failed read the next one comes later: the core may be busy. */
+export const soundRetryMs = 1000;
+
+/** How many failed reads in a row keep the last good reading on screen. */
+export const soundKeepOnFailures = 2;
+
 /**
  * SoundPoller reads the live sound every soundPollMs while active. Reads never overlap: the next one is planned only
- * after the previous one has settled. A failed read shows nothing (null). With untilIdle the polling also pauses
- * after a reply without a recording (or a failure) until refreshNow: the popup asks only when it is shown.
+ * after the previous one has settled. A failed read keeps the last good reading for soundKeepOnFailures reads, then
+ * shows nothing (null); after a failure it reads again in soundRetryMs. With untilIdle the polling pauses only after a
+ * successful reply without a recording, until refreshNow: the popup asks only when it is shown.
  */
 export class SoundPoller {
   private active = false;
@@ -79,6 +86,7 @@ export class SoundPoller {
   private handle: unknown = undefined;
   /** Replies of an earlier activation are dropped. */
   private gen = 0;
+  private failures = 0;
 
   constructor(
     private readonly read: () => Promise<RecordingSound>,
@@ -96,6 +104,7 @@ export class SoundPoller {
     this.active = on;
     this.gen++;
     this.again = false;
+    this.failures = 0;
     this.cancel();
     if (on) {
       this.tick();
@@ -116,6 +125,13 @@ export class SoundPoller {
       this.timers.clear(this.handle);
       this.handle = undefined;
     }
+  }
+
+  private plan(ms: number): void {
+    this.handle = this.timers.set(() => {
+      this.handle = undefined;
+      this.tick();
+    }, ms);
   }
 
   private tick(): void {
@@ -144,16 +160,24 @@ export class SoundPoller {
           }
           return;
         }
-        this.apply(next);
+        const failed = next === null;
+        if (failed) {
+          this.failures++;
+          if (this.failures > soundKeepOnFailures) {
+            this.apply(null);
+          }
+        } else {
+          this.failures = 0;
+          this.apply(next);
+        }
         const again = this.again;
         this.again = false;
         if (again) {
           this.tick();
+        } else if (failed) {
+          this.plan(soundRetryMs);
         } else if (!this.untilIdle || next?.recording === true) {
-          this.handle = this.timers.set(() => {
-            this.handle = undefined;
-            this.tick();
-          }, this.ms);
+          this.plan(this.ms);
         }
       });
   }

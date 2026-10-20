@@ -8,8 +8,8 @@ const browserTimers = {
 };
 
 /**
- * The live sound of the running recording (TASK-099), read every 250 ms while `active`; null when none or a read
- * failed. untilIdle pauses after a reply without a recording until refresh (the popup calls it when it is shown).
+ * The live sound of the running recording (TASK-099), read every 250 ms while `active`; null when none or reads keep
+ * failing. untilIdle pauses after a reply without a recording until refresh (the popup calls it when it is shown).
  */
 export function useRecordingSound(
   read: () => Promise<RecordingSound>,
