@@ -590,8 +590,8 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const tracks = [...css.matchAll(/\.arows > \.row \{ grid-template-columns: ([^;]+); \}/g)].map((m) => m[1]);
   assert.deepEqual(tracks, [
-    "minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 6px + var(--arow-menu))",
-    "minmax(0, 1fr) calc(var(--arow-btn) + 6px + var(--arow-menu))",
+    "minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 4px + var(--arow-menu))",
+    "minmax(0, 1fr) calc(var(--arow-btn) + 4px + var(--arow-menu))",
     "minmax(0, 1fr)",
   ], "only the title flexes, wide and narrow; one column when very narrow");
   assert.match(css, /\.arows \{ --arow-st: 17rem; --arow-btn: 14rem; --arow-menu: 32px;/);
