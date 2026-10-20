@@ -142,7 +142,7 @@ func lectureChain(j *job.Job) Chain {
 		}
 	}
 	var c Chain
-	if j.Status() == job.StatusRunning {
+	if j.Status() == job.StatusRunning || betweenParts(j) {
 		c = Chain{Stage: StageLectureText, Step: StepLectureText, Percent: j.Progress().Percent()}
 	} else {
 		c = queued(StepLectureText, j)
@@ -151,6 +151,13 @@ func lectureChain(j *job.Job) Chain {
 		c.PartsDone, c.Parts = done, parts
 	}
 	return c
+}
+
+// betweenParts reports whether a lecture_text job is QUEUED between two of its steps (TASK-097): it stored parts and
+// waits for nothing but its turn (a QUEUED job has no cause), so the row keeps showing it as being made instead of
+// flickering to «в очереди».
+func betweenParts(j *job.Job) bool {
+	return j.Status() == job.StatusQueued && values.LectureTextStarted(j.Progress().Checkpoint())
 }
 
 // failedAction is what the row offers for a failed post-processing job. The connections page helps only when the LLM

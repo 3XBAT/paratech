@@ -57,3 +57,10 @@ func ParseLectureTextCheckpoint(s string) (done, total int, ok bool) {
 	}
 	return done, total, true
 }
+
+// LectureTextStarted reports whether the checkpoint says some parts are formatted already. A lecture_text job that
+// is QUEUED with such a checkpoint is between two of its steps (TASK-097): the views show it as being made.
+func LectureTextStarted(checkpoint string) bool {
+	done, _, ok := ParseLectureTextCheckpoint(checkpoint)
+	return ok && done > 0
+}

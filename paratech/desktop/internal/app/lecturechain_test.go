@@ -20,6 +20,7 @@ import (
 
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
+	"paratech/desktop/internal/cases/summaryview"
 	"paratech/desktop/internal/domain/coursework/lecturetext"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -229,6 +230,21 @@ func checkLectureReady(t *testing.T, c *core) {
 	}
 }
 
+// checkBetweenParts checks that a lecture text QUEUED after part 1 is shown on the summary page as being made,
+// «1 из 3», not as «в очереди». The recording row is not checked here: these tests store the transcript without its
+// summary jobs, so the row waits for the summary (activity tests cover the row).
+func checkBetweenParts(t *testing.T, c *core) {
+	t.Helper()
+	ctx := context.Background()
+	v, err := c.ui.Summary.View(ctx, "rec-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := v.LectureText; l.State != summaryview.StateRunning || l.PartsDone != 1 || l.Parts != chainParts {
+		t.Fatalf("summary page between parts: %+v, want running at 1 of %d", l.Step, chainParts)
+	}
+}
+
 // A draft generation queued while the lecture text waits runs after the first part, not after the whole lecture.
 func TestLectureTextLetsAQueuedDraftRunBetweenParts(t *testing.T) {
 	ctx := context.Background()
@@ -283,6 +299,7 @@ func TestLectureTextContinuesAfterARestart(t *testing.T) {
 	if stopped.Status() != job.StatusQueued || stopped.Progress().Checkpoint() != cvalues.LectureTextCheckpoint(1, chainParts) {
 		t.Fatalf("after the shutdown: %s at %q, want QUEUED after part 1", stopped.Status(), stopped.Progress().Checkpoint())
 	}
+	checkBetweenParts(t, again.c)
 	again.start(t)
 	testenv.Eventually(t, "the lecture text completes after the restart", func() bool {
 		j := jobOfType(t, again.app, homeworkflow.LectureTextJobType)

@@ -55,3 +55,11 @@ func TestLectureTextCheckpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestLectureTextStarted(t *testing.T) {
+	for in, want := range map[string]bool{"3/12": true, "12/12": true, "1/1": true, "0/12": false, "": false, "x": false} {
+		if got := LectureTextStarted(in); got != want {
+			t.Errorf("LectureTextStarted(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
