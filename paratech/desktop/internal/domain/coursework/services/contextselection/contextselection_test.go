@@ -38,6 +38,7 @@ func TestSelectKeepsOnlyWhatTheOperationUses(t *testing.T) {
 			operation: values.OperationSummary, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
 			lessonTeacher: "Ivanova", lessonKind: values.LessonKindSeminar, lessonStart: lessonStart,
 			nextLessonStart: nextStart, nextLessonKind: values.LessonKindLab, transcript: "Hello.\nSolve 1-5.",
+			transcriptMinutes: 1, // 2 s, rounded up (TASK-101)
 		}},
 		{values.OperationExtractHomework, Context{
 			operation: values.OperationExtractHomework, lessonTitle: "Linear algebra", lessonSubject: "Mathematics",
@@ -216,5 +217,40 @@ func TestSelectStripsBidiFromTheStudentRequest(t *testing.T) {
 	c, err := Select(values.OperationHomeworkDraft, m)
 	if err != nil || c.StudentRequest() != "make it shorter" {
 		t.Fatalf("Select = %q, %v", c.StudentRequest(), err)
+	}
+}
+
+func TestTranscriptMinutes(t *testing.T) {
+	const minute = 60 * 1000
+	cases := []struct {
+		name     string
+		segments []Segment
+		want     int
+	}{
+		{"no times", []Segment{{Text: "a"}}, 0},
+		{"one minute", []Segment{{EndMs: minute, Text: "a"}}, 1},
+		{"rounded up", []Segment{{EndMs: 40*minute + 1, Text: "a"}}, 41},
+		{"latest end wins", []Segment{{EndMs: 30 * minute, Text: "a"}, {EndMs: 10 * minute, Text: "b"}}, 30},
+		{"at the limit", []Segment{{EndMs: MaxTranscriptMinutes * minute, Text: "a"}}, MaxTranscriptMinutes},
+		{"beyond the limit", []Segment{{EndMs: MaxTranscriptMinutes*minute + 1, Text: "a"}}, 0},
+		{"negative", []Segment{{EndMs: -5, Text: "a"}}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := full()
+			m.Transcript = tc.segments
+			c, err := Select(values.OperationSummary, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.TranscriptMinutes() != tc.want {
+				t.Fatalf("TranscriptMinutes = %d, want %d", c.TranscriptMinutes(), tc.want)
+			}
+			// Only the summary is sized by the length.
+			x, err := Select(values.OperationExtractHomework, m)
+			if err != nil || x.TranscriptMinutes() != 0 {
+				t.Fatalf("extraction minutes = %d, %v", x.TranscriptMinutes(), err)
+			}
+		})
 	}
 }

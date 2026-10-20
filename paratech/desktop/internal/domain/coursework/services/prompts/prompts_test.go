@@ -77,8 +77,9 @@ func TestBuildSendsOnlyTheContextOfTheOperation(t *testing.T) {
 		excluded []string
 	}{
 		{
-			op:       values.OperationSummary,
-			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "lesson_start", "lesson_weekday", "transcript"},
+			op: values.OperationSummary,
+			// transcript_minutes: the length of the recording, the end of the last segment (TASK-101).
+			keys:     []string{"lesson_title", "lesson_subject", "lesson_teacher", "lesson_start", "lesson_weekday", "transcript_minutes", "transcript"},
 			included: []string{"LESSON-TITLE", "LESSON-SUBJECT", "LESSON-TEACHER", "TRANSCRIPT-ONE\nTRANSCRIPT-TWO", "2026-10-14T10:00:00+03:00", "Wednesday"},
 			excluded: []string{"SUMMARY-TEXT", "ASSIGNMENT-TITLE", "ASSIGNMENT-DESCRIPTION", "PREVIOUS-DRAFT", "STUDENT-REQUEST", "2031", "123456", "234567"},
 		},
@@ -281,5 +282,29 @@ func TestExtractionAsksForHints(t *testing.T) {
 	}
 	if !strings.Contains(Instructions(values.OperationHomeworkDraft), "lesson_subject") {
 		t.Error("draft instructions do not explain lesson_subject")
+	}
+}
+
+// TASK-101: the summary is asked for in sections sized by the lesson and within the output limit; the length of the
+// recording is data, never part of the instructions.
+func TestSummaryInstructionsAskForSections(t *testing.T) {
+	ins := Instructions(values.OperationSummary)
+	for _, s := range []string{"sections", "heading", "points", "order of the lesson", "transcript_minutes",
+		"one section per 10-15 minutes", "output limit", "the whole answer, key_points included, under about 6000 characters", "key_points"} {
+		if !strings.Contains(ins, s) {
+			t.Errorf("summary instructions do not mention %q", s)
+		}
+	}
+
+	m := material()
+	m.Transcript = []contextselection.Segment{{StartMs: 0, EndMs: 40*60*1000 - 1, Text: "TRANSCRIPT-ONE"}}
+	r := build(t, values.OperationSummary, m)
+	if got := payload(t, r.UntrustedData())["transcript_minutes"]; got != float64(40) {
+		t.Fatalf("transcript_minutes = %v, want 40", got)
+	}
+
+	m.Transcript = []contextselection.Segment{{Text: "TRANSCRIPT-ONE"}}
+	if _, ok := payload(t, build(t, values.OperationSummary, m).UntrustedData())["transcript_minutes"]; ok {
+		t.Fatal("an unknown length is sent")
 	}
 }

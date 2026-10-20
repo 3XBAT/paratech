@@ -45,7 +45,8 @@ import (
 // The Hub's answers: a summary and two assignments without a deadline (a deadline must carry the UTC offset of the
 // lesson in the machine's zone).
 const (
-	pipelineSummary = `{"summary":"Greetings and exercise 5.","key_points":["Exercise 5 is homework"]}`
+	pipelineSummary = `{"sections":[{"heading":"Greetings","text":"Greetings and exercise 5.","points":[]}],` +
+		`"key_points":["Exercise 5 is homework"]}`
 	pipelineExtract = `{"assignments":[` +
 		`{"title":"Exercise 5","description":"Page 12","due":null},` +
 		`{"title":"Read the next chapter","description":"","due":null}]}`

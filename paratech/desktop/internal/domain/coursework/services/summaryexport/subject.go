@@ -50,8 +50,8 @@ type SubjectDocument struct {
 }
 
 // RenderSubject renders a whole subject as one Markdown file (TASK-091): the subject as the first heading, then per
-// lesson a heading «19.10.2026, 10:00 · лекция · Название», its summary with the key points and its lecture text with
-// the time of each block. Transcripts are not included: the lecture text is the full text of the lesson. Every text
+// lesson a heading «19.10.2026, 10:00 · лекция · Название», its summary (its sections as headings, TASK-101) with the
+// key points and its lecture text with the time of each block. Transcripts are not included: the lecture text is the full text of the lesson. Every text
 // is escaped (shared.EscapeMarkdown), so model output forms no markup.
 func RenderSubject(d SubjectDocument) string {
 	var b strings.Builder
@@ -67,7 +67,7 @@ func RenderSubject(d SubjectDocument) string {
 		if l.Summary.IsZero() {
 			b.WriteString(subjectNoSummary + "\n")
 		} else {
-			writeText(&b, l.Summary.Text(), true)
+			writeSummary(&b, l.Summary, true, "#### ")
 			if points := l.Summary.KeyPoints(); len(points) > 0 {
 				b.WriteString("\n#### " + keyPointsHeading + "\n\n")
 				for _, p := range points {

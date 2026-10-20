@@ -293,7 +293,12 @@ func (s *Service) document(ctx context.Context, l kb.Lesson) (kb.Document, error
 		return kb.Document{}, err
 	}
 	if ok {
-		doc.Summary = append([]string{c.Text()}, c.KeyPoints()...)
+		secs := c.Sections()
+		sections := make([]kb.SummarySection, len(secs))
+		for i, sec := range secs {
+			sections[i] = kb.SummarySection{Heading: sec.Heading, Text: sec.Text, Points: sec.Points}
+		}
+		doc.Summary = kb.SummaryTexts(sections, c.KeyPoints())
 	}
 
 	blocks, err := s.lectureText(ctx, l.Ready)

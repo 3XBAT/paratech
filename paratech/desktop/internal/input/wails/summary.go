@@ -101,14 +101,25 @@ type SummaryStep struct {
 	JobError   string `json:"jobError"`
 }
 
-// SummaryContent is the summary and its state. Ready: Text holds a summary (it may be ready while a new run waits,
-// runs or failed). Text and KeyPoints are model output: the page shows them as text only, never as HTML.
+// SummaryContent is the summary and its state. Ready: Text and Sections hold a summary (it may be ready while a new
+// run waits, runs or failed). Text is the whole summary as plain text (the copy), Sections its logical sections
+// (TASK-101): never empty when ready, a summary made before is one section with an empty heading and no points. Text,
+// Sections and KeyPoints are model output: the page shows them as text only, never as HTML.
 type SummaryContent struct {
 	SummaryStep
-	Ready     bool     `json:"ready"`
-	Text      string   `json:"text"`
-	KeyPoints []string `json:"keyPoints"`
-	UpdatedAt string   `json:"updatedAt"` // RFC 3339 in UTC, "" unless ready
+	Ready     bool             `json:"ready"`
+	Text      string           `json:"text"`
+	Sections  []SummarySection `json:"sections"`
+	KeyPoints []string         `json:"keyPoints"`
+	UpdatedAt string           `json:"updatedAt"` // RFC 3339 in UTC, "" unless ready
+}
+
+// SummarySection is one section of a summary: a one-line heading ("" only for a summary made before TASK-101), its
+// text (paragraphs separated by an empty line) and its points, one line each (never null).
+type SummarySection struct {
+	Heading string   `json:"heading"`
+	Text    string   `json:"text"`
+	Points  []string `json:"points"`
 }
 
 // SummaryAssignment is an assignment found in the lesson; ID opens it in «Домашние задания». Title and Description
@@ -189,7 +200,7 @@ func (s *SummaryService) View(ctx context.Context, recordingID string) (SummaryV
 		HasDuration: v.HasDuration, Transcribed: v.Transcribed,
 		Summary: SummaryContent{
 			SummaryStep: summaryStep(v.Summary.Step, summaryMessage(v.Summary.State, v.Summary.Wait, v.Transcribed)),
-			Ready:       v.Summary.Ready, KeyPoints: []string{},
+			Ready:       v.Summary.Ready, Sections: []SummarySection{}, KeyPoints: []string{},
 		},
 		Homework: SummaryHomework{
 			SummaryStep: summaryStep(v.Homework.Step, homeworkMessage(v.Homework)),
@@ -202,6 +213,10 @@ func (s *SummaryService) View(ctx context.Context, recordingID string) (SummaryV
 	if v.Summary.Ready {
 		out.Summary.Text, out.Summary.UpdatedAt = v.Summary.Content.Text(), timeText(v.Summary.UpdatedAt)
 		out.Summary.KeyPoints = append(out.Summary.KeyPoints, v.Summary.Content.KeyPoints()...)
+		for _, sec := range v.Summary.Content.Sections() {
+			out.Summary.Sections = append(out.Summary.Sections,
+				SummarySection{Heading: sec.Heading, Text: sec.Text, Points: append([]string{}, sec.Points...)})
+		}
 	}
 	for i, a := range v.Homework.Assignments {
 		out.Homework.Assignments[i] = summaryAssignment(a)

@@ -1,8 +1,8 @@
 // Parts of the summary viewer (TASK-087) that only show a view: the summary, the found homework and the state lines.
-// Summary text, key points and assignment titles are model output: React text nodes only, no HTML, no links from them.
+// Summary sections, key points and assignment titles are model output: React text nodes only, no HTML, no links from them.
 
 // The .js extensions let the Node test runner load the compiled modules (test/summary.test.mjs renders these parts).
-import type { SummaryView } from "../bindings/summary.js";
+import type { SummarySection, SummaryView } from "../bindings/summary.js";
 import {
   assignmentMeta,
   earlierNote,
@@ -13,7 +13,7 @@ import {
   showsEarlier,
   type StepLine,
   summaryLine,
-  summaryParagraphs,
+  summarySections,
   updatedText,
 } from "../summaryView.js";
 import { lessonText } from "../lessonLabel.js";
@@ -67,11 +67,40 @@ function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
   );
 }
 
-/** The summary card: its state, the text in paragraphs and the key points; focusPoint marks a listed one (TASK-091). */
-export function SummaryCard(props: RetryProps & { view: SummaryView; focusPoint?: number }) {
+/** The summary's sections (TASK-101): a heading, paragraphs and points; focusSection marks one (TASK-091). */
+export function SummarySections(props: { sections: readonly SummarySection[]; focusSection?: number }) {
+  const shown = summarySections(props.sections);
+  if (shown.length === 0) {
+    return null;
+  }
+  return (
+    <div className="sm-text" aria-label="Текст конспекта">
+      {shown.map((s) => (
+        <section key={s.index} className={s.index === props.focusSection ? "sm-sec kb-focus" : "sm-sec"}>
+          {s.heading !== "" && <h3 className="sm-h">{s.heading}</h3>}
+          {s.paragraphs.map((p, i) => (
+            <p key={i}>{p}</p>
+          ))}
+          {s.points.length > 0 && (
+            <ul className="sm-points">
+              {s.points.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The summary card: its state, the sections and the key points. focusSection (an index of summary.sections) and
+ * focusPoint (of the listed key points) mark the place a search found (TASK-091).
+ */
+export function SummaryCard(props: RetryProps & { view: SummaryView; focusSection?: number; focusPoint?: number }) {
   const v = props.view;
   const line = summaryLine(v);
-  const paras = v.summary.ready ? summaryParagraphs(v.summary.text) : [];
   const points = v.summary.ready ? keyPointList(v.summary.keyPoints) : [];
   const updated = updatedText(v);
   return (
@@ -80,13 +109,7 @@ export function SummaryCard(props: RetryProps & { view: SummaryView; focusPoint?
       {line && <Line line={line} />}
       {showsEarlier(v) && <p className="small muted sm-detail">{earlierNote}</p>}
       <RetrySlot {...props} step="summary" />
-      {paras.length > 0 && (
-        <div className="sm-text" aria-label="Текст конспекта">
-          {paras.map((p, i) => (
-            <p key={i}>{p}</p>
-          ))}
-        </div>
-      )}
+      {v.summary.ready && <SummarySections sections={v.summary.sections} focusSection={props.focusSection} />}
       {points.length > 0 && (
         <>
           <h3 className="sm-h">Главное</h3>

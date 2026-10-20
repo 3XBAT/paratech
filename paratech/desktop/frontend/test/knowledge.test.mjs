@@ -35,6 +35,7 @@ import {
   subjectMeta,
   subjectName,
   subjectPlaceholder,
+  summaryFocus,
 } from "../.test-build/knowledgeView.js";
 import { HitList, LessonInfoForm, LessonList, ReadyMarks, Snippet, SubjectList } from "../.test-build/pages/KnowledgeParts.js";
 
@@ -168,8 +169,9 @@ test("readiness marks and subject counts", () => {
 test("a hit opens the lesson at its place", () => {
   assert.deepEqual(hitFocus(hit()), { tab: "transcript", index: 7 });
   assert.deepEqual(hitFocus(hit({ section: "lectureText", index: 2 })), { tab: "lecture", index: 2 });
-  assert.deepEqual(hitFocus(hit({ section: "summary", index: 0 })), { tab: "summary", index: -1 });
-  assert.deepEqual(hitFocus(hit({ section: "summary", index: 3 })), { tab: "summary", index: 2 });
+  // TASK-101: the summary index is the core's (sections, then key points); summaryFocus maps it with the view.
+  assert.deepEqual(hitFocus(hit({ section: "summary", index: 0 })), { tab: "summary", index: 0 });
+  assert.deepEqual(hitFocus(hit({ section: "summary", index: 3 })), { tab: "summary", index: 3 });
   assert.deepEqual(hitFocus(hit({ section: "title", index: 0 })), noFocus);
   assert.equal(hitPlace(hit()), "Расшифровка · 12:05");
   assert.equal(hitPlace(hit({ section: "summary", time: "" })), "Кратко");
@@ -265,6 +267,22 @@ test("the place of a hit maps onto what the viewers show", () => {
   assert.equal(shownPoint(["a", " ", "c"], 2), 1);
   assert.equal(shownPoint(["a", " ", "c"], 1), -1);
   assert.equal(shownPoint(["a"], -1), -1);
+  // A summary hit: section i of n, else key point index-n (TASK-101).
+  const sec = (heading, text = "") => ({ heading, text, points: [] });
+  const sm = { ready: true, sections: [sec("Реки", "a"), sec(" ", " "), sec("Озёра")], keyPoints: ["x", " ", "z"] };
+  assert.deepEqual(summaryFocus(sm, 0), { section: 0, point: -1 });
+  assert.deepEqual(summaryFocus(sm, 1), { section: -1, point: -1 }); // an empty section is not shown
+  assert.deepEqual(summaryFocus(sm, 2), { section: 2, point: -1 });
+  assert.deepEqual(summaryFocus(sm, 3), { section: -1, point: 0 });
+  assert.deepEqual(summaryFocus(sm, 4), { section: -1, point: -1 });
+  assert.deepEqual(summaryFocus(sm, 5), { section: -1, point: 1 });
+  assert.deepEqual(summaryFocus(sm, 6), { section: -1, point: -1 });
+  assert.deepEqual(summaryFocus(sm, -1), { section: -1, point: -1 });
+  assert.deepEqual(summaryFocus({ ...sm, ready: false }, 0), { section: -1, point: -1 });
+  // A summary made before sections: 0 is its text, j+1 key point j, as before.
+  const old = { ready: true, sections: [sec("", "Текст.")], keyPoints: ["x", "y"] };
+  assert.deepEqual(summaryFocus(old, 0), { section: 0, point: -1 });
+  assert.deepEqual(summaryFocus(old, 2), { section: -1, point: 1 });
   const seg = (index) => ({ index, startMs: 0, endMs: 0, start: "", text: "" });
   const paras = [
     { first: 0, start: "", startMs: 0, segments: [seg(0), seg(1)] },
@@ -354,5 +372,8 @@ test("the knowledge base renders text only, talks only to the core and searches 
   assert.match(page, /askSearch\(flight\.current, c\.query\)/);
   assert.match(page, /searchDone\(flight\.current\)/);
   assert.equal(page.match(/api\.search\(/g)?.length, 1);
+  const lessonPage = src("pages/KnowledgeLessonPage.tsx");
+  assert.match(lessonPage, /summaryFocus\(view\.summary, focus\.index\)/);
+  assert.match(lessonPage, /<SummaryCard view=\{view\} focusSection=\{focusSection\} focusPoint=\{focusPoint\} \/>/);
   assert.match(src("App.tsx"), /case "knowledge":\s*return <KnowledgeBasePage/);
 });

@@ -369,6 +369,9 @@ html, body, #root { height: 100%; }
 .sm-h { margin: 16px 0 8px; font-size: 16px; }
 .sm-points { max-width: 76ch; margin: 0 0 12px; padding-left: 24px; line-height: 1.6; }
 .sm-points li { margin: 0 0 4px; white-space: pre-line; overflow-wrap: anywhere; }
+/* Sections of the summary (TASK-101): a model heading wraps; the first one sits under the card title. */
+.sm-sec .sm-h { overflow-wrap: anywhere; }
+.sm-sec:first-child > .sm-h { margin-top: 4px; }
 .sm-homework .row .t, .sm-desc { overflow-wrap: anywhere; }
 .sm-desc { display: block; margin-top: 4px; white-space: pre-line; }
 /* Segments (TASK-100): one centred column at any window width, so the reading measure stays ~85 characters of the

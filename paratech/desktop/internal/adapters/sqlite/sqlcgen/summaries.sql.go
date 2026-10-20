@@ -12,11 +12,11 @@ import (
 
 const getSummary = `-- name: GetSummary :one
 
-SELECT id, transcript_id, lesson_id, body, key_points, prompt_version, version, created_at, updated_at FROM summaries WHERE id = ?1
+SELECT id, transcript_id, lesson_id, body, key_points, prompt_version, version, created_at, updated_at, sections FROM summaries WHERE id = ?1
 `
 
 // Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
-// the transcript id, one summary per transcript (TASK-042).
+// the transcript id, one summary per transcript (TASK-042). sections is NULL for a summary made before TASK-101.
 func (q *Queries) GetSummary(ctx context.Context, id string) (Summary, error) {
 	row := q.db.QueryRowContext(ctx, getSummary, id)
 	var i Summary
@@ -30,14 +30,15 @@ func (q *Queries) GetSummary(ctx context.Context, id string) (Summary, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Sections,
 	)
 	return i, err
 }
 
 const insertSummary = `-- name: InsertSummary :exec
-INSERT INTO summaries (id, transcript_id, lesson_id, body, key_points, prompt_version, version, created_at, updated_at)
-VALUES (?1, ?2, ?3, ?4, ?5,
-        ?6, 1, ?7, ?8)
+INSERT INTO summaries (id, transcript_id, lesson_id, body, sections, key_points, prompt_version, version, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+        ?7, 1, ?8, ?9)
 `
 
 type InsertSummaryParams struct {
@@ -45,6 +46,7 @@ type InsertSummaryParams struct {
 	TranscriptID  sql.NullString
 	LessonID      sql.NullString
 	Body          string
+	Sections      sql.NullString
 	KeyPoints     string
 	PromptVersion int64
 	CreatedAt     int64
@@ -58,6 +60,7 @@ func (q *Queries) InsertSummary(ctx context.Context, arg InsertSummaryParams) er
 		arg.TranscriptID,
 		arg.LessonID,
 		arg.Body,
+		arg.Sections,
 		arg.KeyPoints,
 		arg.PromptVersion,
 		arg.CreatedAt,
@@ -69,15 +72,17 @@ func (q *Queries) InsertSummary(ctx context.Context, arg InsertSummaryParams) er
 const updateSummary = `-- name: UpdateSummary :execrows
 UPDATE summaries
 SET body           = ?1,
-    key_points     = ?2,
-    prompt_version = ?3,
+    sections       = ?2,
+    key_points     = ?3,
+    prompt_version = ?4,
     version        = version + 1,
-    updated_at     = ?4
-WHERE id = ?5 AND version = ?6
+    updated_at     = ?5
+WHERE id = ?6 AND version = ?7
 `
 
 type UpdateSummaryParams struct {
 	Body            string
+	Sections        sql.NullString
 	KeyPoints       string
 	PromptVersion   int64
 	UpdatedAt       int64
@@ -90,6 +95,7 @@ type UpdateSummaryParams struct {
 func (q *Queries) UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateSummary,
 		arg.Body,
+		arg.Sections,
 		arg.KeyPoints,
 		arg.PromptVersion,
 		arg.UpdatedAt,

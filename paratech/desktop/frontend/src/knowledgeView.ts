@@ -12,11 +12,11 @@ import {
   type LessonKind,
   lessonKinds,
 } from "./bindings/knowledgeBase.js";
-import type { SummaryView } from "./bindings/summary.js";
+import type { SummaryContent, SummaryView } from "./bindings/summary.js";
 import { lectureBlocks } from "./lectureTextView.js";
 import { plural } from "./plural.js";
 import { kindLabel } from "./scheduleView.js";
-import { keyPointList } from "./summaryView.js";
+import { keyPointList, summarySections } from "./summaryView.js";
 import type { Paragraph } from "./transcriptView.js";
 
 function localDate(rfc3339: string): Date | null {
@@ -115,7 +115,7 @@ export const lessonTabs: readonly { value: LessonTab; label: string }[] = [
 
 /**
  * Where a lesson opens. index: for "lecture" the block of SummaryView.lectureText.blocks, for "transcript" the
- * segment, for "summary" -1 for the text, else the key point; -1 for none.
+ * segment, for "summary" the hit's index (summaryFocus maps it onto a section or a key point); -1 for none.
  */
 export interface LessonFocus {
   tab: LessonTab;
@@ -124,7 +124,7 @@ export interface LessonFocus {
 
 export const noFocus: LessonFocus = { tab: "summary", index: -1 };
 
-/** The place a search hit opens: the lecture block, the transcript segment, the summary text or a key point. */
+/** The place a search hit opens: the lecture block, the transcript segment, a summary section or a key point. */
 export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocus {
   switch (h.section) {
     case "lectureText":
@@ -132,7 +132,7 @@ export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocu
     case "transcript":
       return { tab: "transcript", index: h.index };
     case "summary":
-      return { tab: "summary", index: h.index - 1 };
+      return { tab: "summary", index: h.index };
     case "title":
       return noFocus;
   }
@@ -292,6 +292,25 @@ export function shownPoint(points: readonly string[], index: number): number {
     return -1;
   }
   return keyPointList(points.slice(0, index)).length;
+}
+
+/**
+ * A summary hit's index as SummaryCard marks it: i < n is section i of n sections, n+j is key point j (the core's
+ * KnowledgeHit). section is an index of summary.sections, point one of the listed key points; -1 when not shown.
+ */
+export function summaryFocus(
+  s: Pick<SummaryContent, "ready" | "sections" | "keyPoints">,
+  index: number,
+): { section: number; point: number } {
+  const none = { section: -1, point: -1 };
+  if (!s.ready || index < 0) {
+    return none;
+  }
+  const n = s.sections.length;
+  if (index >= n) {
+    return { section: -1, point: shownPoint(s.keyPoints, index - n) };
+  }
+  return summarySections(s.sections.slice(index, index + 1)).length > 0 ? { section: index, point: -1 } : none;
 }
 
 /** The paragraph holding the transcript segment; -1 while it is not loaded. */

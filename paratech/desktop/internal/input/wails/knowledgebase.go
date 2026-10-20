@@ -105,7 +105,8 @@ type KnowledgeLesson struct {
 
 // KnowledgeHit is one place the query was found. Section is "title", "summary", "lectureText" or "transcript". Index
 // is the block index of the lecture text (SummaryView.lectureText.blocks), the segment index of the transcript
-// (TranscriptService.Segments from it), for the summary 0 for its text and i+1 for key point i, 0 for the title.
+// (TranscriptService.Segments from it), for the summary i for section i (SummaryView.summary.sections) and n+j for
+// key point j of a summary of n sections (so 0 for the text of a summary made before TASK-101), 0 for the title.
 // StartMs is where the block or segment starts ("time": "12:05"), 0 and "" otherwise. Before, Match and After are the
 // snippet: one plain line, "…" where it was cut; the page marks Match, as text only, never HTML.
 type KnowledgeHit struct {

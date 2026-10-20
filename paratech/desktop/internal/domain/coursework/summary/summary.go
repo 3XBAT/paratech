@@ -31,36 +31,95 @@ func (id ID) String() string { return string(id) }
 // Validate applies the rules of a transcript id, which a summary id is.
 func (id ID) Validate() error { return shared.TranscriptID(id).Validate() }
 
-// Content is the summary text and its key points. It is a validated value: build it with NewContent.
+// Content is the summary and its key points. A summary is either sectioned (TASK-101: headed sections) or a plain
+// text, the form of the summaries made before; a plain text reads as one section without heading. It is a validated
+// value: build it with NewSectionedContent or NewContent.
 type Content struct {
-	text      string
+	text      string    // the plain text; of a sectioned summary its rendering (plainText)
+	sections  []Section // nil: a plain text
 	keyPoints []string
 }
 
-// NewContent validates and trims the text (1 to MaxTextRunes characters, line breaks and tabs allowed) and the key
-// points (at most MaxKeyPoints lines of 1 to MaxKeyPointRunes characters).
+// NewContent validates and trims a plain summary text (1 to MaxTextRunes characters, line breaks and tabs allowed)
+// and the key points (at most MaxKeyPoints lines of 1 to MaxKeyPointRunes characters).
 func NewContent(text string, keyPoints []string) (Content, error) {
 	text = strings.TrimSpace(text)
 	if text == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > MaxTextRunes ||
 		strings.ContainsFunc(text, badControl) {
 		return Content{}, fmt.Errorf("%w: text must be 1-%d characters without control characters", ErrInvalidContent, MaxTextRunes)
 	}
+	points, err := checkKeyPoints(keyPoints)
+	if err != nil {
+		return Content{}, err
+	}
+	return Content{text: text, keyPoints: points}, nil
+}
+
+// NewSectionedContent validates and trims the sections and key points of a summary: 1 to MaxSections sections, each
+// with a one-line heading of 1 to MaxHeadingRunes characters, a text of 1 to MaxSectionTextRunes characters and at
+// most MaxSectionPoints one-line points of 1 to MaxPointRunes; at most MaxTextRunes characters in all; key points as
+// NewContent.
+func NewSectionedContent(sections []Section, keyPoints []string) (Content, error) {
+	if len(sections) == 0 || len(sections) > MaxSections {
+		return Content{}, fmt.Errorf("%w: 1-%d sections", ErrInvalidContent, MaxSections)
+	}
+	out := make([]Section, 0, len(sections))
+	total := 0
+	for i, s := range sections {
+		s, err := checkSection(i, s)
+		if err != nil {
+			return Content{}, err
+		}
+		total += s.runes()
+		out = append(out, s)
+	}
+	if total > MaxTextRunes {
+		return Content{}, fmt.Errorf("%w: sections hold more than %d characters", ErrInvalidContent, MaxTextRunes)
+	}
+	points, err := checkKeyPoints(keyPoints)
+	if err != nil {
+		return Content{}, err
+	}
+	return Content{text: plainText(out), sections: out, keyPoints: points}, nil
+}
+
+func checkKeyPoints(keyPoints []string) ([]string, error) {
 	if len(keyPoints) > MaxKeyPoints {
-		return Content{}, fmt.Errorf("%w: more than %d key points", ErrInvalidContent, MaxKeyPoints)
+		return nil, fmt.Errorf("%w: more than %d key points", ErrInvalidContent, MaxKeyPoints)
 	}
 	points := make([]string, 0, len(keyPoints))
 	for i, p := range keyPoints {
 		p = strings.TrimSpace(p)
 		if p == "" || !utf8.ValidString(p) || utf8.RuneCountInString(p) > MaxKeyPointRunes || strings.ContainsFunc(p, notInLine) {
-			return Content{}, fmt.Errorf("%w: key point %d must be one line of 1-%d characters", ErrInvalidContent, i, MaxKeyPointRunes)
+			return nil, fmt.Errorf("%w: key point %d must be one line of 1-%d characters", ErrInvalidContent, i, MaxKeyPointRunes)
 		}
 		points = append(points, p)
 	}
-	return Content{text: text, keyPoints: points}, nil
+	return points, nil
 }
 
-// Text returns the summary text.
+// Text returns the summary as plain text: the text of a plain summary, the rendering of the sections (headings,
+// texts and points) of a sectioned one. That rendering may exceed MaxTextRunes, so never pass it back to NewContent.
 func (c Content) Text() string { return c.text }
+
+// Sectioned reports whether the summary has headed sections; false for a plain text.
+func (c Content) Sectioned() bool { return c.sections != nil }
+
+// Sections returns a copy of the sections; a plain text is one section without heading and points. Empty for the
+// zero value.
+func (c Content) Sections() []Section {
+	if c.IsZero() {
+		return nil
+	}
+	if c.sections == nil {
+		return []Section{{Text: c.text}}
+	}
+	out := make([]Section, len(c.sections))
+	for i, s := range c.sections {
+		out[i] = s.clone()
+	}
+	return out
+}
 
 // KeyPoints returns a copy of the key points.
 func (c Content) KeyPoints() []string { return slices.Clone(c.keyPoints) }
@@ -68,9 +127,10 @@ func (c Content) KeyPoints() []string { return slices.Clone(c.keyPoints) }
 // IsZero reports whether c is the invalid zero value.
 func (c Content) IsZero() bool { return c.text == "" }
 
-// Equal reports whether both contents hold the same text and key points.
+// Equal reports whether both contents hold the same text, sections and key points.
 func (c Content) Equal(o Content) bool {
-	return c.text == o.text && slices.Equal(c.keyPoints, o.keyPoints)
+	return c.text == o.text && c.Sectioned() == o.Sectioned() &&
+		slices.EqualFunc(c.sections, o.sections, Section.equal) && slices.Equal(c.keyPoints, o.keyPoints)
 }
 
 // Summary is the summary of one transcript (PRD section 9). Fields change only through the methods below.
@@ -117,7 +177,8 @@ type State struct {
 	Transcript    shared.TranscriptID // empty: the transcript was deleted
 	Lesson        shared.LessonID     // empty: none
 	PromptVersion int
-	Text          string
+	Text          string    // the plain text; of a sectioned summary its rendering, which Restore derives again
+	Sections      []Section // nil: a plain text (summaries made before TASK-101)
 	KeyPoints     []string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -128,7 +189,7 @@ func Restore(st State) (*Summary, error) {
 	if st.Version < 1 {
 		return nil, fmt.Errorf("%w: stored version %d", ErrInvalidSummary, st.Version)
 	}
-	c, err := NewContent(st.Text, st.KeyPoints)
+	c, err := restoreContent(st)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidSummary, err)
 	}
@@ -143,6 +204,13 @@ func Restore(st State) (*Summary, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func restoreContent(st State) (Content, error) {
+	if st.Sections != nil {
+		return NewSectionedContent(st.Sections, st.KeyPoints)
+	}
+	return NewContent(st.Text, st.KeyPoints)
 }
 
 func (s *Summary) validate() error {
@@ -203,10 +271,14 @@ func (s *Summary) UpdatedAt() time.Time { return s.updatedAt }
 
 // State returns the stored form of the summary, for the repositories.
 func (s *Summary) State() State {
-	return State{
+	st := State{
 		Version: s.version, ID: s.id, Transcript: s.transcript, Lesson: s.lesson, PromptVersion: s.promptVersion,
 		Text: s.content.text, KeyPoints: s.content.KeyPoints(), CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
 	}
+	if s.content.Sectioned() {
+		st.Sections = s.content.Sections()
+	}
+	return st
 }
 
 // Version returns the version this instance was last loaded or saved with: 0 for an aggregate that was never

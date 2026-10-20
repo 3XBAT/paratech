@@ -29,10 +29,21 @@ export interface SummaryStep {
   jobError: string;
 }
 
-export interface SummaryContent extends SummaryStep {
-  /** text holds a summary; it may be ready while a new run waits, runs or failed. */
-  ready: boolean;
+/** One logical section of a summary (TASK-101); heading is "" only for a summary made before sections. */
+export interface SummarySection {
+  heading: string;
+  /** Paragraphs separated by an empty line. */
   text: string;
+  points: string[];
+}
+
+export interface SummaryContent extends SummaryStep {
+  /** text and sections hold a summary; it may be ready while a new run waits, runs or failed. */
+  ready: boolean;
+  /** The whole summary as plain text, headings included. */
+  text: string;
+  /** Never empty when ready; [] otherwise. */
+  sections: SummarySection[];
   keyPoints: string[];
   /** RFC 3339 in UTC, "" unless ready. */
   updatedAt: string;
@@ -239,6 +250,12 @@ function strings(r: Record<string, unknown>, key: string, what: string): string[
   });
 }
 
+export function parseSection(raw: unknown): SummarySection {
+  const w = "summary section";
+  const r = record(raw, w);
+  return { heading: str(r, "heading", w), text: str(r, "text", w), points: strings(r, "points", w) };
+}
+
 export function parseLectureBlock(raw: unknown): SummaryLectureBlock {
   const w = "lecture block";
   const r = record(raw, w);
@@ -283,6 +300,7 @@ export function parseView(raw: unknown): SummaryView {
       ...parseStep(s, `${w}: summary`),
       ready: bool(s, "ready", `${w}: summary`),
       text: str(s, "text", `${w}: summary`),
+      sections: list(s, "sections", `${w}: summary`).map(parseSection),
       keyPoints: list(s, "keyPoints", `${w}: summary`).map((p) => {
         if (typeof p !== "string") {
           throw new Error(`${w}: summary: a key point is not a string`);

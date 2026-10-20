@@ -287,11 +287,11 @@ func TestRedoSummaryKeepsTheOldOneUntilANewOnePasses(t *testing.T) {
 	if _, err := e.rr.RedoSummary(ctx, "r1"); err != nil {
 		t.Fatalf("RedoSummary after a failed redo: %v", err)
 	}
-	e.llm.Answer(values.OperationSummary, `{"summary":"Rivers and lakes.","key_points":["Lakes"]}`)
+	e.llm.Answer(values.OperationSummary, `{"sections":[{"heading":"Lakes","text":"Rivers and lakes.","points":[]}],"key_points":["Lakes"]}`)
 	if err := e.run(e.latest(SummarizeJobType)); err != nil {
 		t.Fatalf("second redo: %v", err)
 	}
-	if st, _ := e.summaryOf("t1"); st.Text != "Rivers and lakes." || st.Version != old.Version+1 {
+	if st, _ := e.summaryOf("t1"); st.Text != "Lakes:\nRivers and lakes." || st.Version != old.Version+1 {
 		t.Fatalf("summary = %+v, want the new one", st)
 	}
 	if n := len(e.llm.RequestsFor(values.OperationSummary)); n != 1+AnswerCalls+1 {

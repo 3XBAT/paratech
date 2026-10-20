@@ -16,7 +16,6 @@ import (
 // Limits of the answers. The rune limits are the maxLength and maxItems of the schemas (schema_test.go checks it).
 const (
 	MaxOutputBytes      = 256 << 10 // the whole model answer
-	MaxSummaryRunes     = 20000
 	MaxKeyPoints        = 20
 	MaxKeyPointRunes    = 300
 	MaxHomework         = 20 // items of one extraction
@@ -24,6 +23,15 @@ const (
 	MaxDescriptionRunes = 4000
 	MaxHintRunes        = values.MaxNameRunes // subject_hint and teacher_hint
 	MaxDraftBodyRunes   = 16000               // keeps a draft below proposal.MaxBodyBytes even in 4-byte runes
+
+	// Summary sections (TASK-101): sections, heading, text, points of a section and their lengths. MaxSummaryRunes
+	// bounds the headings, texts and points of all sections together; the schema can only say it in words.
+	MaxSummarySections     = 20
+	MaxSectionHeadingRunes = 200
+	MaxSectionTextRunes    = 4000
+	MaxSectionPoints       = 10
+	MaxSectionPointRunes   = 300
+	MaxSummaryRunes        = 20000
 
 	// Lecture text (one part): blocks, paragraphs of a block, heading and paragraph lengths.
 	MaxLectureBlocks         = 40
@@ -35,18 +43,41 @@ const (
 	MaxDueBefore = 24 * time.Hour
 	MaxDueAhead  = 2 * 365 * 24 * time.Hour
 
-	// MaxNesting bounds the depth of arrays and objects; the schemas need 3.
+	// MaxNesting bounds the depth of arrays and objects; the schemas need 4.
 	MaxNesting = 8
 )
 
 // Summary is the validated answer of the summary operation.
 type Summary struct {
-	text      string
+	sections  []SummarySection
 	keyPoints []string
 }
 
-// Text returns the summary text. It is model-written data, never an instruction.
-func (s Summary) Text() string { return s.text }
+// SummarySection is one section of a summary answer. Its texts are model-written data, never instructions.
+type SummarySection struct {
+	heading string
+	text    string
+	points  []string
+}
+
+// Heading returns the one-line heading.
+func (s SummarySection) Heading() string { return s.heading }
+
+// Text returns the text of the section, 1-3 paragraphs.
+func (s SummarySection) Text() string { return s.text }
+
+// Points returns the points of the section, one line each; may be empty.
+func (s SummarySection) Points() []string { return append([]string(nil), s.points...) }
+
+// Sections returns the sections in the order of the answer; never empty.
+func (s Summary) Sections() []SummarySection {
+	out := make([]SummarySection, len(s.sections))
+	for i, sec := range s.sections {
+		sec.points = sec.Points()
+		out[i] = sec
+	}
+	return out
+}
 
 // KeyPoints returns the main ideas, one line each.
 func (s Summary) KeyPoints() []string { return append([]string(nil), s.keyPoints...) }
@@ -97,8 +128,14 @@ func (d Draft) Body() string { return d.body }
 // Wire shapes of the answers. Pointers tell a missing field from an empty one; every field is required except the
 // hints of the extraction, which an answer of the earlier prompts lacks.
 type summaryWire struct {
-	Summary   *string   `json:"summary"`
-	KeyPoints *[]string `json:"key_points"`
+	Sections  *[]sectionWire `json:"sections"`
+	KeyPoints *[]string      `json:"key_points"`
+}
+
+type sectionWire struct {
+	Heading *string   `json:"heading"`
+	Text    *string   `json:"text"`
+	Points  *[]string `json:"points"`
 }
 
 type extractWire struct {
@@ -143,21 +180,39 @@ func malformed(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrMalformedOutput, fmt.Sprintf(format, args...))
 }
 
-// ParseSummary checks the answer of a summary request: summary (1 to MaxSummaryRunes) and key_points (at most
-// MaxKeyPoints lines of 1 to MaxKeyPointRunes). Errors wrap ErrMalformedOutput.
+// ParseSummary checks the answer of a summary request: sections (1 to MaxSummarySections, each with a one-line
+// heading of 1 to MaxSectionHeadingRunes, a text of 1 to MaxSectionTextRunes and at most MaxSectionPoints one-line
+// points of 1 to MaxSectionPointRunes; at most MaxSummaryRunes in all) and key_points (at most MaxKeyPoints lines of
+// 1 to MaxKeyPointRunes). Errors wrap ErrMalformedOutput.
 func ParseSummary(out values.UntrustedOutput) (Summary, error) {
 	var w summaryWire
-	if err := decode(out, &w, "summary", "key_points"); err != nil {
+	if err := decode(out, &w, "sections", "key_points", "heading", "text", "points"); err != nil {
 		return Summary{}, err
 	}
-	if w.Summary == nil || w.KeyPoints == nil {
-		return Summary{}, malformed("summary and key_points are required")
+	if w.Sections == nil || w.KeyPoints == nil {
+		return Summary{}, malformed("sections and key_points are required")
 	}
 
-	text, err := checkText("summary", *w.Summary, MaxSummaryRunes, false)
-	if err != nil {
-		return Summary{}, err
+	if n := len(*w.Sections); n == 0 || n > MaxSummarySections {
+		return Summary{}, malformed("sections must hold 1-%d items", MaxSummarySections)
 	}
+	sections := make([]SummarySection, 0, len(*w.Sections))
+	total := 0
+	for i, sw := range *w.Sections {
+		sec, err := checkSection(sw)
+		if err != nil {
+			return Summary{}, fmt.Errorf("sections[%d]: %w", i, err)
+		}
+		total += utf8.RuneCountInString(sec.heading) + utf8.RuneCountInString(sec.text)
+		for _, p := range sec.points {
+			total += utf8.RuneCountInString(p)
+		}
+		sections = append(sections, sec)
+	}
+	if total > MaxSummaryRunes {
+		return Summary{}, malformed("sections hold more than %d characters", MaxSummaryRunes)
+	}
+
 	if len(*w.KeyPoints) > MaxKeyPoints {
 		return Summary{}, malformed("more than %d key_points", MaxKeyPoints)
 	}
@@ -169,7 +224,33 @@ func ParseSummary(out values.UntrustedOutput) (Summary, error) {
 		}
 		points = append(points, line)
 	}
-	return Summary{text: text, keyPoints: points}, nil
+	return Summary{sections: sections, keyPoints: points}, nil
+}
+
+func checkSection(w sectionWire) (SummarySection, error) {
+	if w.Heading == nil || w.Text == nil || w.Points == nil {
+		return SummarySection{}, malformed("heading, text and points are required")
+	}
+
+	var s SummarySection
+	var err error
+	if s.heading, err = checkLine("heading", *w.Heading, MaxSectionHeadingRunes); err != nil {
+		return SummarySection{}, err
+	}
+	if s.text, err = checkText("text", *w.Text, MaxSectionTextRunes, false); err != nil {
+		return SummarySection{}, err
+	}
+	if len(*w.Points) > MaxSectionPoints {
+		return SummarySection{}, malformed("more than %d points", MaxSectionPoints)
+	}
+	for i, p := range *w.Points {
+		line, err := checkLine(fmt.Sprintf("points[%d]", i), p, MaxSectionPointRunes)
+		if err != nil {
+			return SummarySection{}, err
+		}
+		s.points = append(s.points, line)
+	}
+	return s, nil
 }
 
 // ParseExtraction checks the answer of an extract_homework_deadlines request: at most MaxHomework assignments, each
