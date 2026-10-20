@@ -2,8 +2,10 @@ package homeworkdoc
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
+	"paratech/desktop/internal/domain/coursework/homeworkdraft"
 	"paratech/desktop/internal/domain/coursework/values"
 )
 
@@ -126,6 +128,24 @@ func TestFileName(t *testing.T) {
 	} {
 		if got := FileName(in); got != want {
 			t.Errorf("FileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Every draft the app stores (homeworkdraft.MaxBodyRunes) builds a document within the limits, so «Сохранить в Word»
+// is never refused by the renderer.
+func TestBuildStaysWithinTheDocumentLimits(t *testing.T) {
+	const maxBody = homeworkdraft.MaxBodyRunes
+	in := full()
+	for _, body := range []string{
+		strings.Repeat("a\n\n", maxBody/3), // the most blocks
+		strings.Repeat("a\n", maxBody/2),   // the most lines of a block
+		strings.Repeat("я", maxBody),       // the longest line
+		strings.Repeat("# a\n", maxBody/4), // the most headings
+	} {
+		in.DraftBody = body
+		if err := Build(in).Validate(); err != nil {
+			t.Fatalf("body of %d bytes: %v", len(body), err)
 		}
 	}
 }
