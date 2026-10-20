@@ -3,12 +3,14 @@ import type { ReactNode } from "react";
 import type { RecordingItem, RetryWork } from "../bindings/activity.js";
 import type { PageId } from "../nav.js";
 import type { SummarySection } from "../openSummary.js";
+import { deleteTexts, rowDeleteOffer } from "../recordingDeleteView.js";
 import { type RowAction, recordingRowView, rowLinks } from "../recordingRowView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import type { StatusView } from "../statusPresentation.js";
 import { Button } from "../ui/Button.js";
 import { Progress, Row } from "../ui/controls.js";
+import { RowMenu } from "../ui/RowMenu.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
 export interface RecordingRowProps {
@@ -30,6 +32,11 @@ export interface RecordingRowProps {
   adviceProblem?: string;
   onSwitchSource?: () => void;
   onKeepSource?: () => void;
+  /** «Удалить» in the «⋯» menu (TASK-095); without onDelete the row has no menu. */
+  onDelete?: () => void;
+  /** The checkbox of «Удалить выбранные»; without onSelect the row has none. */
+  selected?: boolean;
+  onSelect?: (selected: boolean) => void;
 }
 
 // One recording with the status of its whole chain, and the silent-source advice of a running one. The lesson title and the core's notes are untrusted text: React
@@ -37,6 +44,9 @@ export interface RecordingRowProps {
 export function RecordingRow(props: RecordingRowProps) {
   const r = props.item;
   const v = recordingRowView(r, props.now);
+  const del = rowDeleteOffer(r);
+  const onSelect = props.onSelect;
+  const title = v.titleIsTime ? <span className="num">{v.title}</span> : v.title;
   const button = (a: RowAction | null, variant: "secondary" | "ghost") => {
     switch (a?.kind) {
       case "runNow":
@@ -81,7 +91,23 @@ export function RecordingRow(props: RecordingRowProps) {
   };
   return (
     <Row
-      title={v.titleIsTime ? <span className="num">{v.title}</span> : v.title}
+      title={
+        onSelect ? (
+          <span className="row-check">
+            <input
+              type="checkbox"
+              checked={props.selected ?? false}
+              disabled={del.disabled}
+              title={del.hint || undefined}
+              aria-label={`Выбрать: ${v.title}`}
+              onChange={(e) => onSelect(e.target.checked)}
+            />
+            {title}
+          </span>
+        ) : (
+          title
+        )
+      }
       meta={
         (v.lesson !== "" || v.meta !== "") && (
           <>
@@ -113,6 +139,14 @@ export function RecordingRow(props: RecordingRowProps) {
           {button(v.action, "secondary")}
           {button(v.secondary, "ghost")}
           {props.extraActions}
+          {props.onDelete && (
+            <RowMenu
+              label={`Ещё действия: ${v.title}`}
+              title="Ещё действия"
+              items={[{ key: "delete", label: deleteTexts.menu, disabled: del.disabled, hint: del.hint }]}
+              onPick={props.onDelete}
+            />
+          )}
         </>
       }
       below={

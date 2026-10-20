@@ -2,6 +2,7 @@ package recording
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -141,7 +142,7 @@ func TestRecoveryOutcomesValidate(t *testing.T) {
 				if err := tc.call(r); !errors.Is(err, ErrInvalidRecording) {
 					t.Fatalf("error = %v, want ErrInvalidRecording", err)
 				}
-				if stateOf(r) != before {
+				if !reflect.DeepEqual(stateOf(r), before) {
 					t.Fatal("a refused outcome changed the recording")
 				}
 			})

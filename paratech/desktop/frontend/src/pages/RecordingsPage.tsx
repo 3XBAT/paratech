@@ -1,12 +1,21 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "../bindings/activity";
 import { promptApi } from "../bindings/prompt";
+import { recordingDeleteApi } from "../bindings/recordingDelete";
 import { callByName } from "../bindings/runtime";
 import { actionErrorText, formatTime, jobAssignment, jobTitle, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import { type ListStates, stateOf, withState } from "../listView";
 import { manualStartTexts, startButton, startOutcome } from "../manualStartView";
 import type { PageId } from "../nav";
+import {
+  type DeleteOutcome,
+  deleteOutcome,
+  deleteTexts,
+  pruneSelection,
+  selectedText,
+  withSelected,
+} from "../recordingDeleteView";
 import { anyRecording, type FinishedEntry, finishedKey, pageGroups, queueLine } from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
 import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
@@ -22,11 +31,12 @@ import {
 import { jobStatusView, showsProgress } from "../statusPresentation";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
-import { Banner, EmptyState, Progress, Row } from "../ui/controls";
+import { Banner, EmptyState, Progress, ResultLine, Row } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
 import { useOpenSummary } from "../openSummary";
 import { useOpenTranscript } from "../openTranscript";
+import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { RecordingLinks, RecordingRow, StatusLine } from "./RecordingRow";
 
 const pollMs = 3000;
@@ -34,6 +44,7 @@ const pollMs = 3000;
 // The page shows what the Go core reports: one row per recording with the status of its whole chain (TASK-076). The
 // Stop, Run now and link buttons appear only when the core offers them (ARCH-44). «Начать запись» starts a recording
 // without the popup, from the popup's source picker (TASK-081). A draft job row opens its assignment (TASK-094).
+// «Удалить» in a row's «⋯» menu and «Удалить выбранные» delete recordings after one confirmation (TASK-095).
 export function RecordingsPage({
   onOpen,
   onOpenAssignment,
@@ -43,6 +54,7 @@ export function RecordingsPage({
 }) {
   const api = useMemo(() => activityApi(callByName), []);
   const prompts = useMemo(() => promptApi(callByName), []);
+  const deletion = useMemo(() => recordingDeleteApi(callByName), []);
   const openTranscript = useOpenTranscript();
   const openSummary = useOpenSummary();
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
@@ -120,6 +132,25 @@ export function RecordingsPage({
     }
     if (mounted.current) {
       await refresh();
+    }
+  }
+
+  // Deletion (TASK-095): the rows checked for «Удалить выбранные», the ids of the open confirmation and the last result.
+  // No audio plays here: the transcript's player is on its own screen, which is closed while this list shows.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [deleting, setDeleting] = useState<readonly string[] | null>(null);
+  const [deleted, setDeleted] = useState<DeleteOutcome | null>(null);
+
+  useEffect(() => {
+    if (recordings !== null) {
+      setSelected((sel) => pruneSelection(sel, recordings));
+    }
+  }, [recordings]);
+
+  function askDelete(ids: readonly string[]) {
+    if (ids.length > 0) {
+      setDeleted(null);
+      setDeleting(ids);
     }
   }
 
@@ -235,6 +266,9 @@ export function RecordingsPage({
       onSwitchSource={() => r.advice && void adviceAct(r.advice, "switch")}
       onKeepSource={() => r.advice && void adviceAct(r.advice, "dismiss")}
       extraActions={<RecordingLinks item={r} onOpenSummary={openSummary} onOpenTranscript={openTranscript} />}
+      onDelete={() => askDelete([r.id])}
+      selected={selected.has(r.id)}
+      onSelect={(on) => setSelected((sel) => withSelected(sel, r.id, on))}
     />
   );
 
@@ -364,6 +398,26 @@ export function RecordingsPage({
           {recordingsError}
         </Banner>
       )}
+      {selected.size > 0 && (
+        <div className="acts start rec-selected" role="group" aria-label="Выбранные записи">
+          <span className="num">{selectedText(selected.size)}</span>
+          <Button variant="danger" disabled={deleting !== null} onClick={() => askDelete([...selected])}>
+            {deleteTexts.selectedDelete}
+          </Button>
+          <Button variant="ghost" disabled={deleting !== null} onClick={() => setSelected(new Set())}>
+            {deleteTexts.selectedClear}
+          </Button>
+        </div>
+      )}
+      {deleted && (
+        <ResultLine kind={deleted.kind} role={deleted.kind === "fail" ? "alert" : "status"}>
+          {deleted.lines.map((l, i) => (
+            <span key={i} className="rec-deleted-line">
+              {l}
+            </span>
+          ))}
+        </ResultLine>
+      )}
       {recordings === null ? (
         !recordingsError && <p className="muted">Загрузка…</p>
       ) : recordings.length === 0 ? (
@@ -411,6 +465,23 @@ export function RecordingsPage({
           onStateChange={(s) => setLists((l) => withState(l, "finished", s))}
           className="clist-card"
           classNames={{ button: "btn ghost" }}
+        />
+      )}
+
+      {deleting !== null && (
+        <RecordingDeleteDialog
+          api={deletion}
+          ids={deleting}
+          onCancel={() => {
+            setDeleting(null);
+            void refresh();
+          }}
+          onDone={(res, preview) => {
+            setDeleting(null);
+            setDeleted(deleteOutcome(res, preview));
+            setSelected(new Set());
+            void refresh();
+          }}
         />
       )}
 

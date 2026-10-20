@@ -140,6 +140,21 @@ func (c *Client) DeleteEvent(ctx context.Context, calendarID string, id shared.L
 	return err
 }
 
+// DeleteDeadline removes the deadline event of an assignment that was deleted with its recording (TASK-095,
+// schedulesync.DeadlineEvents through the app); any 2xx, a missing (404) or an already deleted (410) event is success.
+func (c *Client) DeleteDeadline(ctx context.Context, calendarID string, id shared.AssignmentID) error {
+	if id.Validate() != nil {
+		return permanent(opDeleteDeadline, ErrInvalidRequest)
+	}
+	if err := c.checkCalendar(ctx, opDeleteDeadline, calendarID); err != nil {
+		return err
+	}
+	_, err := c.do(ctx, opDeleteDeadline, request{
+		method: http.MethodDelete, path: calendarPath(calendarID, "events", DeadlineEventID(id)), accept: []int{404, 410},
+	})
+	return err
+}
+
 // UpsertDeadline writes the deadline of a confirmed proposal into the app calendar, creating the calendar if needed
 // (homeworkflow.DeadlineCalendar). The event is keyed by the assignment; the proposal key is kept as a private
 // property. A calendar created here stays fresh, so the next schedule synchronization rewrites the lessons.

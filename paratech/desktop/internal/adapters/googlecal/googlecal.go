@@ -44,6 +44,7 @@ const (
 	opUpsertLesson   = "googlecal: upsert lesson"
 	opDeleteEvent    = "googlecal: delete event"
 	opUpsertDeadline = "googlecal: upsert deadline"
+	opDeleteDeadline = "googlecal: delete deadline"
 )
 
 // Auth is the Google authorization (googleauth.Authorizer in the app).

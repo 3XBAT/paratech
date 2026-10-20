@@ -118,9 +118,11 @@ func TestMigrationToVersion13AddsLessonSnapshot(t *testing.T) {
 	if _, err := p.UpTo(ctx, 13); err != nil {
 		t.Fatalf("up to 13: %v", err)
 	}
-	r, err := NewRecordingRepository(db).Get(ctx, "r-old")
-	if err != nil || !r.LessonSnapshot().IsZero() {
-		t.Fatalf("existing recording = %v, %v; want no snapshot", r, err)
+	// Raw SQL: the repository reads the columns of later migrations too.
+	if n := scanInt(t, db.sql, `SELECT count(*) FROM recordings WHERE id = 'r-old' AND lesson_title IS NULL
+		AND lesson_subject IS NULL AND lesson_kind IS NULL AND lesson_teacher IS NULL AND lesson_start IS NULL
+		AND lesson_end IS NULL`); n != 1 {
+		t.Fatalf("existing recording with an empty snapshot = %d, want 1", n)
 	}
 
 	if _, err := p.DownTo(ctx, 12); err != nil {

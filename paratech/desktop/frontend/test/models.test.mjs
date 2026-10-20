@@ -515,17 +515,20 @@ test("the page: one action button, the «⋯» menu, the id only as a tooltip, t
   assert.match(page, /<p className="t mname" title=\{props\.tip\}>/, "the id is the tooltip of the name");
   assert.match(page, /<span className="mq" title=\{texts\.q5Hint\}>/);
   assert.match(page, /<span className="vh">, \{texts\.q5Hint\}<\/span>/, "the hint for screen readers too");
-  assert.match(page, /aria-haspopup="menu"/);
-  assert.match(page, /aria-expanded=\{shown\}/);
-  assert.match(page, /const shown = menuShown\(open, count\);/);
-  assert.match(page, /if \(count === 0\) \{\s*setOpen\(false\);\s*\}\s*\}, \[count\]\);/, "a menu whose items went away closes");
-  assert.match(page, /\{shown && \(\s*<div className="mmenu-list"/, "the list only while shown");
-  assert.match(page, /if \(!shown\) \{\s*return;\s*\}[^]*?\}, \[shown\]\);/, "the outside listener only while shown");
-  assert.match(page, /aria-label=\{label\}/);
-  assert.match(page, /role="menuitem"/);
-  assert.match(page, /menuKey\(e\.key,/);
-  assert.match(page, /next === "close"\) \{\s*setOpen\(false\);\s*button\.current\?\.focus\(\);/, "Escape returns the focus");
-  assert.match(page, /addEventListener\("pointerdown", outside\)/, "a click outside closes the menu");
+  // The «⋯» menu itself is shared with the recordings list (ui/RowMenu.tsx, TASK-095).
+  const menu = readFileSync(new URL("../src/ui/RowMenu.tsx", import.meta.url), "utf8");
+  assert.match(page, /<SharedRowMenu\b/);
+  assert.match(menu, /aria-haspopup="menu"/);
+  assert.match(menu, /aria-expanded=\{shown\}/);
+  assert.match(menu, /const shown = menuShown\(open, count\);/);
+  assert.match(menu, /if \(count === 0\) \{\s*setOpen\(false\);\s*\}\s*\}, \[count\]\);/, "a menu whose items went away closes");
+  assert.match(menu, /\{shown && \(\s*<div className="mmenu-list"/, "the list only while shown");
+  assert.match(menu, /if \(!shown\) \{\s*return;\s*\}[^]*?\}, \[shown\]\);/, "the outside listener only while shown");
+  assert.match(menu, /aria-label=\{props\.label\}/);
+  assert.match(menu, /role="menuitem"/);
+  assert.match(menu, /menuKey\(e\.key,/);
+  assert.match(menu, /next === "close"\) \{\s*setOpen\(false\);\s*button\.current\?\.focus\(\);/, "Escape returns the focus");
+  assert.match(menu, /addEventListener\("pointerdown", outside\)/, "a click outside closes the menu");
   for (const r of ["function CatalogRow(", "function InstalledRow("]) {
     const body = page.slice(page.indexOf(r));
     const end = body.indexOf("\n}\n");
