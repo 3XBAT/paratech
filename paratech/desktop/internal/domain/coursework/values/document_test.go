@@ -22,6 +22,29 @@ func paragraphs(n int) []Block {
 	return out
 }
 
+// lists returns n bullet lists of items empty items each.
+func lists(n, items int) []Block {
+	out := make([]Block, n)
+	for i := range out {
+		out[i] = Block{Kind: BlockBulletList, Lines: make([]string, items)}
+	}
+	return out
+}
+
+// tables returns n tables of rows rows (the header included): a header of MaxTableColumns empty cells, then rows
+// with one empty cell each, padded to MaxTableColumns when rendered.
+func tables(n, rows int) []Block {
+	out := make([]Block, n)
+	for i := range out {
+		r := make([][]string, rows-1)
+		for j := range r {
+			r[j] = []string{""}
+		}
+		out[i] = Block{Kind: BlockTable, Table: Table{Header: make([]string, MaxTableColumns), Rows: r}}
+	}
+	return out
+}
+
 func TestDocumentValidate(t *testing.T) {
 	long := strings.Repeat("я", MaxTextRunes)
 	cases := []struct {
@@ -66,6 +89,16 @@ func TestDocumentValidate(t *testing.T) {
 		{"too many columns", Document{Blocks: []Block{{Kind: BlockTable, Table: Table{Rows: [][]string{{"a"}, lines(MaxTableColumns+1, "")}}}}}, false},
 		{"cell too long", Document{Blocks: []Block{{Kind: BlockTable, Table: Table{Rows: [][]string{{long + "я"}}}}}}, false},
 		{"header cell too long", Document{Blocks: []Block{{Kind: BlockTable, Table: Table{Header: []string{long + "я"}}}}}, false},
+		// Structure limits: empty items and cells cost no characters but still render.
+		{"items at the document limit", Document{Blocks: lists(MaxDocumentItems/MaxBlockLines, MaxBlockLines)}, true},
+		{"too many items in the document", Document{Blocks: append(lists(MaxDocumentItems/MaxBlockLines, MaxBlockLines),
+			Block{Kind: BlockParagraph, Lines: []string{""}})}, false},
+		{"paragraph lines count as items", Document{Blocks: append(lists(MaxDocumentItems/MaxBlockLines, MaxBlockLines-1),
+			Block{Kind: BlockParagraph, Lines: lines(MaxDocumentItems/MaxBlockLines+1, "")})}, false},
+		{"cells at the document limit", Document{Blocks: tables(MaxDocumentCells/(MaxTableRows*MaxTableColumns), MaxTableRows)}, true},
+		{"too many cells in the document", Document{Blocks: append(tables(MaxDocumentCells/(MaxTableRows*MaxTableColumns), MaxTableRows),
+			Block{Kind: BlockTable, Table: Table{Rows: [][]string{{"a"}}}})}, false},
+		{"short rows count as padded", Document{Blocks: tables(MaxDocumentCells/(MaxTableRows/2*MaxTableColumns)+1, MaxTableRows/2)}, false},
 		{"a table of another kind is not checked", Document{Blocks: []Block{{Kind: BlockParagraph, Table: Table{Rows: make([][]string, MaxTableRows+1)}}}}, true},
 	}
 	for _, tc := range cases {
