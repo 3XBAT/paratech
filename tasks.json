@@ -2933,7 +2933,7 @@
                 "из paratech/: go vet ./desktop/... && GOOS=windows go vet ./desktop/... && go test -race ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }

@@ -56,7 +56,7 @@ func tableNames(t *testing.T, q interface {
 }
 
 func TestMigrateCreatesAllTables(t *testing.T) {
-	t.Parallel() // migrates a database of its own for real
+	t.Parallel() // uses a database of its own
 	db := openMigrating(t)
 	if got := tableNames(t, db.sql); !reflect.DeepEqual(got, contractTables) {
 		t.Fatalf("tables = %v, want %v", got, contractTables)
@@ -77,7 +77,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 }
 
 func TestMigrateIsIdempotent(t *testing.T) {
-	t.Parallel() // migrates a database of its own for real
+	t.Parallel() // uses a database of its own
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
@@ -154,7 +154,7 @@ func TestSchemaChecksHaveNoSideEffects(t *testing.T) {
 }
 
 func TestMigrateDownAndUpAgain(t *testing.T) {
-	t.Parallel() // migrates a database of its own for real
+	t.Parallel() // uses a database of its own
 	ctx := context.Background()
 	db := openMigrating(t)
 	p, err := db.provider()
@@ -178,7 +178,7 @@ func TestMigrateDownAndUpAgain(t *testing.T) {
 // Version 8 drops the notices of finished processing (TASK-065) from a database of version 7 that holds them, keeps
 // the other settings, and goes back down to 7.
 func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
-	t.Parallel() // migrates a database of its own for real
+	t.Parallel() // uses a database of its own
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()
@@ -454,7 +454,7 @@ func diff(a, b []string) (onlyA, onlyB []string) {
 }
 
 func TestMigrationMatchesContractSchema(t *testing.T) {
-	t.Parallel() // migrates a database of its own for real
+	t.Parallel() // uses a database of its own
 	schema, err := os.ReadFile(contractSchemaPath(t))
 	if err != nil {
 		t.Fatal(err)
@@ -479,7 +479,7 @@ func TestMigrationMatchesContractSchema(t *testing.T) {
 // TestContractComparisonDetectsDrift proves that the comparison above can fail: a contract with an extra index and a
 // changed CHECK differs from the migrations.
 func TestContractComparisonDetectsDrift(t *testing.T) {
-	t.Parallel() // migrates a database of its own for real
+	t.Parallel() // uses a database of its own
 	schema, err := os.ReadFile(contractSchemaPath(t))
 	if err != nil {
 		t.Fatal(err)
