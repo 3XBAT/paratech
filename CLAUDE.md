@@ -79,10 +79,10 @@ Always check that Windows code compiles: `cd paratech && GOOS=windows go vet ./d
 Memory between sessions is only files and git:
 - `tasks.json` — task list (generated from the PRD with `docs/process/prd-to-tasks.prompt.md`). Statuses: `pending`, `done`, `blocked`.
   Agents may change only the `status` field; never delete or rewrite tasks.
-- `progress.txt` — append-only log; read the latest entries before starting, append an entry when finishing (format in the file header).
+- `progress.txt` — append-only log up to 2026-10-21 (history, read-only now). Since 2026-10-21 each task writes its own entry to `progress/TASK-NNN.md` (same format) and its owner-check steps to `docs/qa/tasks/TASK-NNN.md` instead of appending to shared files (`progress.txt`, the «Что изменилось» lines of `docs/qa/run-alpha.md`) — parallel tasks no longer conflict on merge. Read the latest `progress/` files before starting.
 - `docs/tasks/` — human-written detailed specs/drafts; `tasks.json` is what the loop executes.
 The script itself commits `tasks.json`/`progress.txt` after each iteration; agents commit only code (`git -C paratech add -A .`).
-Mark a task `blocked` (with the reason in `progress.txt`) when it cannot be finished autonomously: it needs verification on real Windows,
+Mark a task `blocked` (with the reason in `progress/TASK-NNN.md`) when it cannot be finished autonomously: it needs verification on real Windows,
 a user decision, or external access. Never mark `done` without running every `test_steps` item.
 Options: `RALPH_AGENT`, `RALPH_MAX_ITERATIONS`, `RALPH_MAX_STALLS`, `RALPH_REVIEW` (see the top of `ralph.sh`).
 

@@ -9,11 +9,11 @@ How the task loop is run by Claude Code in a session (not by `ralph.sh`). A new 
 4. Never run two coordinator sessions at once (shared working tree and branches).
 
 ## Per task (one task = one branch = one PR)
-1. Branch `ralph/<date>-task-NNN` from fresh `origin/master`. Pick a `pending` task whose dependencies are `done` (critical first). Tasks needing a real device, a user decision or external access: mark `blocked` with the reason in `progress.txt`.
+1. Branch `ralph/<date>-task-NNN` from fresh `origin/master`. Pick a `pending` task whose dependencies are `done` (critical first). Tasks needing a real device, a user decision or external access: mark `blocked` with the reason in `progress/TASK-NNN.md`.
 2. Implement with the profile agent (`go-core`, `hub-dev`, `frontend`) and pass `model: "opus"` explicitly. The prompt must carry: the task id, the files/ADRs/PRD sections to read, the style rules, the verification commands, the commit format. Subagents do not see the conversation.
-3. Verify yourself: `.github/scripts/verify.sh` (rebase on master, sqlc drift, build, vet, tests with `-race`, lint, vulncheck).
-4. Review: `reviewer` (diff vs master). In parallel `security-auditor` (no skeptic since 2026-10-21; `docs/process/security-review.md`). Fix blocker/high/medium findings with the implementing agent, then verify again. Low findings and deferred items go to `progress.txt`.
-5. Bookkeeping: set the task `status` to `done` in `tasks.json` (status only), append an entry to `progress.txt` (what was done, decisions to confirm, follow-ups), commit as `ralph: TASK-NNN done (...)`.
+3. Verify (since 2026-10-21): while working and after fixes run only the touched scope — `go vet`/`go test -race` of the changed packages and their dependants, `golangci-lint` on them (both GOOS when Windows code is touched), npm test/build when the frontend is touched, sqlc/buf drift when touched. One full `.github/scripts/verify.sh` before the first push is optional; CI runs everything and the merge waits for green CI.
+4. Review: `reviewer` (diff vs master). In parallel `security-auditor` (no skeptic since 2026-10-21; `docs/process/security-review.md`). Fix blocker/high/medium findings with the implementing agent, then re-run the touched scope. Low findings and deferred items go to `progress/TASK-NNN.md`.
+5. Bookkeeping: set the task `status` to `done` in `tasks.json` (status only), write `progress/TASK-NNN.md` (what was done, decisions to confirm, follow-ups) and the owner-check steps to `docs/qa/tasks/TASK-NNN.md` (no edits to shared logs), commit as `ralph: TASK-NNN done (...)`.
 6. Push, open the PR with `gh pr create` (short body: task, changes, verification, open decisions; no generated-with line). Merge when CI is green (`gh pr checks`) with `gh pr merge --merge`. Do not use `--auto`. Do not force-push. Do not merge PRs you did not create for the loop.
 7. Next task: branch from fresh master again. While CI runs, the next implementation may start on a branch from `origin/master`; run `verify.sh` before finishing it (it rebases and resolves generated-file conflicts).
 
