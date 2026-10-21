@@ -79,17 +79,18 @@ Always check that Windows code compiles: `cd paratech && GOOS=windows go vet ./d
 Memory between sessions is only files and git:
 - `tasks.json` — task list (generated from the PRD with `docs/process/prd-to-tasks.prompt.md`). Statuses: `pending`, `done`, `blocked`.
   Agents may change only the `status` field; never delete or rewrite tasks.
-- `progress.txt` — append-only log; read the latest entries before starting, append an entry when finishing (format in the file header).
+- `progress.txt` — append-only log up to 2026-10-21 (history, read-only now). Since 2026-10-21 each task writes its own entry to `progress/TASK-NNN.md` (same format) and its owner-check steps to `docs/qa/tasks/TASK-NNN.md` instead of appending to shared files (`progress.txt`, the «Что изменилось» lines of `docs/qa/run-alpha.md`) — parallel tasks no longer conflict on merge. Read the latest `progress/` files before starting.
 - `docs/tasks/` — human-written detailed specs/drafts; `tasks.json` is what the loop executes.
 The script itself commits `tasks.json`/`progress.txt` after each iteration; agents commit only code (`git -C paratech add -A .`).
-Mark a task `blocked` (with the reason in `progress.txt`) when it cannot be finished autonomously: it needs verification on real Windows,
+Mark a task `blocked` (with the reason in `progress/TASK-NNN.md`) when it cannot be finished autonomously: it needs verification on real Windows,
 a user decision, or external access. Never mark `done` without running every `test_steps` item.
 Options: `RALPH_AGENT`, `RALPH_MAX_ITERATIONS`, `RALPH_MAX_STALLS`, `RALPH_REVIEW` (see the top of `ralph.sh`).
 
 ## Subagents
-Defined in `.claude/agents/`: `architect`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`, `security-auditor`, `security-skeptic`.
-Security review is adversarial and mandatory for every task (`docs/process/security-review.md`): `security-auditor` finds holes, one `security-skeptic` per finding tries to refute it,
-only confirmed findings are fixed (by the implementing agent, with a regression test).
+Defined in `.claude/agents/`: `architect`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`, `security-auditor` (`security-skeptic` is no longer used, owner 2026-10-21).
+Security review is mandatory for every task (`docs/process/security-review.md`): `security-auditor` finds holes, the coordinator judges them,
+High/Medium findings are fixed by the implementing agent with a regression test, and `reviewer` re-checks the fix.
+Models: opus for core/Hub implementers, `reviewer` and `security-auditor`; sonnet for coordinators, `frontend`, `tester` and small mechanical tasks; always pass the model explicitly.
 Subagents do not see the conversation: always point them to the task file, the PRD sections, `docs/architecture.md` and the files they may touch.
 
 ## Continuing the loop in a new session
