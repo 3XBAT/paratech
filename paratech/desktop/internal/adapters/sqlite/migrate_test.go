@@ -56,7 +56,8 @@ func tableNames(t *testing.T, q interface {
 }
 
 func TestMigrateCreatesAllTables(t *testing.T) {
-	db := openTest(t, nil)
+	t.Parallel() // uses a database of its own
+	db := openMigrating(t)
 	if got := tableNames(t, db.sql); !reflect.DeepEqual(got, contractTables) {
 		t.Fatalf("tables = %v, want %v", got, contractTables)
 	}
@@ -76,8 +77,9 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 }
 
 func TestMigrateIsIdempotent(t *testing.T) {
+	t.Parallel() // uses a database of its own
 	ctx := context.Background()
-	db := openTest(t, nil)
+	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
 	if err != nil || first != 20 {
 		t.Fatalf("SchemaVersion after Open = %d, %v; want 20", first, err)
@@ -116,6 +118,7 @@ func TestMigrateRefusesNewerSchema(t *testing.T) {
 // Open without Migrate still refuses a database from a newer build.
 func TestOpenRefusesNewerSchemaWithAndWithoutMigrate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "newer.db")
+	seedFromTemplate(t, path)
 	first, err := Open(context.Background(), Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatal(err)
@@ -151,8 +154,9 @@ func TestSchemaChecksHaveNoSideEffects(t *testing.T) {
 }
 
 func TestMigrateDownAndUpAgain(t *testing.T) {
+	t.Parallel() // uses a database of its own
 	ctx := context.Background()
-	db := openTest(t, nil)
+	db := openMigrating(t)
 	p, err := db.provider()
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +178,7 @@ func TestMigrateDownAndUpAgain(t *testing.T) {
 // Version 8 drops the notices of finished processing (TASK-065) from a database of version 7 that holds them, keeps
 // the other settings, and goes back down to 7.
 func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
+	t.Parallel() // uses a database of its own
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()
@@ -449,6 +454,7 @@ func diff(a, b []string) (onlyA, onlyB []string) {
 }
 
 func TestMigrationMatchesContractSchema(t *testing.T) {
+	t.Parallel() // uses a database of its own
 	schema, err := os.ReadFile(contractSchemaPath(t))
 	if err != nil {
 		t.Fatal(err)
@@ -462,7 +468,7 @@ func TestMigrationMatchesContractSchema(t *testing.T) {
 		t.Fatalf("contract produced only %d objects, expected tables, indexes and columns", len(fromContract))
 	}
 
-	migrated := schemaObjects(t, openTest(t, nil).sql)
+	migrated := schemaObjects(t, openMigrating(t).sql)
 	onlyContract, onlyMigration := diff(fromContract, migrated)
 	if len(onlyContract) > 0 || len(onlyMigration) > 0 {
 		t.Fatalf("migrations and docs/contracts/schema.sql define different objects.\nonly in the contract:\n  %s\nonly in the migrations:\n  %s",
@@ -473,6 +479,7 @@ func TestMigrationMatchesContractSchema(t *testing.T) {
 // TestContractComparisonDetectsDrift proves that the comparison above can fail: a contract with an extra index and a
 // changed CHECK differs from the migrations.
 func TestContractComparisonDetectsDrift(t *testing.T) {
+	t.Parallel() // uses a database of its own
 	schema, err := os.ReadFile(contractSchemaPath(t))
 	if err != nil {
 		t.Fatal(err)

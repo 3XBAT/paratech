@@ -25,7 +25,7 @@ var (
 // withSettings is one run of the app: open the database, build the repository, close everything afterwards.
 func withSettings(t *testing.T, path string, fn func(r *sqlite.SettingsRepository)) {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: path, Migrate: true})
+	db, err := openSQLite(context.Background(), t, sqlite.Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

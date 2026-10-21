@@ -538,6 +538,7 @@ func TestWaitForWriteSlotHonorsContext(t *testing.T) {
 
 func TestCloseWakesWritersWaitingForSlot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "closewait.db")
+	seedFromTemplate(t, path)
 	db, err := Open(context.Background(), Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatal(err)

@@ -101,7 +101,7 @@ type downloadEnv struct {
 
 func openDownloadEnv(t *testing.T, dir string, srv *modelServer, ids *seqIDs) *downloadEnv {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: filepath.Join(dir, "app.db"), Migrate: true})
+	db, err := openSQLite(context.Background(), t, sqlite.Options{Path: filepath.Join(dir, "app.db"), Migrate: true})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

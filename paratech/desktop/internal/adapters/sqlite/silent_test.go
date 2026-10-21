@@ -76,6 +76,7 @@ func insertOldRecording(t *testing.T, db *DB, id string) {
 
 // Version 12 adds recordings.silent, 0 for the existing rows, and goes back down keeping them.
 func TestMigrationToVersion12AddsSilent(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

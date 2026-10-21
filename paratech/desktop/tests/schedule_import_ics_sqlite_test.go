@@ -23,7 +23,7 @@ var _ schedulesync.ScheduleParser = (*icsschedule.Parser)(nil)
 
 func newICSScheduleEnv(t *testing.T) *scheduleEnv {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: filepath.Join(t.TempDir(), "app.db"), Migrate: true})
+	db, err := openSQLite(context.Background(), t, sqlite.Options{Path: filepath.Join(t.TempDir(), "app.db"), Migrate: true})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -129,6 +129,7 @@ func TestSettingsRecognitionLoadRoundTrip(t *testing.T) {
 // Version 11 adds the load mode with the default gentle to an existing settings row and the speed table, and goes
 // back down to 10.
 func TestMigrationToVersion11AddsRecognitionLoad(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

@@ -49,7 +49,7 @@ func runnerConfig(workers int) jobrunner.Config {
 
 func openRunnerDB(t *testing.T, path string) *sqlite.DB {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: path, Migrate: true})
+	db, err := openSQLite(context.Background(), t, sqlite.Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
