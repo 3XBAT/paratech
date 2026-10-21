@@ -32,7 +32,7 @@ func TestRecordingWithTheRecorderChild(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
 
-	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dataDir, "app.db"), Migrate: true})
+	db, err := openSQLite(ctx, t, sqlite.Options{Path: filepath.Join(dataDir, "app.db"), Migrate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestRecordingNotesTheFallbackOfTheRecorderChild(t *testing.T) {
 			testenv.NoGoroutineLeaks(t)
 			ctx := context.Background()
 			dataDir := t.TempDir()
-			db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dataDir, "app.db"), Migrate: true})
+			db, err := openSQLite(ctx, t, sqlite.Options{Path: filepath.Join(dataDir, "app.db"), Migrate: true})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -48,7 +48,7 @@ func (e *startEvents) count() int {
 
 func openScheduleDB(t *testing.T, path string) *sqlite.DB {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: path, Migrate: true})
+	db, err := openSQLite(context.Background(), t, sqlite.Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatal(err)
 	}

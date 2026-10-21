@@ -369,6 +369,7 @@ func TestLessonKindColumn(t *testing.T) {
 // Version 14 adds subject, kind and teacher: a lesson stored before reads as unknown with no subject or teacher, and
 // the migration goes back down keeping it.
 func TestMigrationToVersion14AddsLessonDetails(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

@@ -104,6 +104,7 @@ func TestRecordingLessonSnapshotCleanedOnRead(t *testing.T) {
 
 // Version 13 adds the snapshot columns, NULL for the existing rows, and goes back down keeping the rows.
 func TestMigrationToVersion13AddsLessonSnapshot(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

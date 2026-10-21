@@ -708,6 +708,7 @@ func TestJobWritesJoinTheOuterTransaction(t *testing.T) {
 
 // Version 10 adds jobs.cause: stored jobs get no cause, and going down removes the column and keeps the rows.
 func TestMigrationToVersion10AddsJobCause(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

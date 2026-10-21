@@ -102,6 +102,7 @@ func TestTranscriptPartsUpsertOnRerun(t *testing.T) {
 func TestTranscriptPartsSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "restart.db")
 	ctx := context.Background()
+	seedFromTemplate(t, path)
 	first, err := Open(ctx, Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +243,7 @@ func TestLatestJobByKeyPrefix(t *testing.T) {
 
 // Version 9 adds transcript_parts to a database of version 8 and goes back down.
 func TestMigrationToVersion9AddsTranscriptParts(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

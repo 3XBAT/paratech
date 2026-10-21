@@ -301,6 +301,7 @@ func TestSettingsLoadAndSaveAfterClose(t *testing.T) {
 // reopenSettings is one run of the app: open the database at path, run fn, close it.
 func reopenSettings(t *testing.T, path string, fn func(r *SettingsRepository)) {
 	t.Helper()
+	seedFromTemplate(t, path)
 	db, err := Open(context.Background(), Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatalf("Open: %v", err)

@@ -307,6 +307,7 @@ func TestAssignmentSurvivesTranscriptDeletion(t *testing.T) {
 
 // Version 2 of the schema adds columns to a table that may already hold rows of version 1.
 func TestMigrationToVersion2KeepsAssignments(t *testing.T) {
+	t.Parallel() // migrates a database of its own for real
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
 	p, err := db.provider()

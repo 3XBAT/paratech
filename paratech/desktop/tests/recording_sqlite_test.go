@@ -72,7 +72,7 @@ func newRecordingEnv(t *testing.T, dir string) *recordingEnv {
 // newRecordingEnvWith is newRecordingEnv with the given service configuration.
 func newRecordingEnvWith(t *testing.T, dir string, cfg recordingsession.Config) *recordingEnv {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: filepath.Join(dir, "app.db"), Migrate: true})
+	db, err := openSQLite(context.Background(), t, sqlite.Options{Path: filepath.Join(dir, "app.db"), Migrate: true})
 	if err != nil {
 		t.Fatal(err)
 	}

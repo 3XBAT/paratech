@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,11 +18,17 @@ func openTest(t *testing.T, mutate func(*Options)) *DB {
 	return openAt(t, filepath.Join(t.TempDir(), "test.db"), mutate)
 }
 
+// openAt opens the database at path. A missing file that is to be migrated is first created as a copy of a database
+// migrated once per test process (migrating takes seconds under -race); Open still runs Migrate on it, which finds it
+// up to date. Tests of the migrations themselves use openMigrating.
 func openAt(t *testing.T, path string, mutate func(*Options)) *DB {
 	t.Helper()
 	opts := Options{Path: path, Migrate: true}
 	if mutate != nil {
 		mutate(&opts)
+	}
+	if opts.Migrate {
+		seedFromTemplate(t, path)
 	}
 	db, err := Open(context.Background(), opts)
 	if err != nil {
@@ -33,6 +40,68 @@ func openAt(t *testing.T, path string, mutate func(*Options)) *DB {
 		}
 	})
 	return db
+}
+
+// openMigrating opens a new database and really migrates it, bypassing the template: for the tests of migrations.
+func openMigrating(t *testing.T) *DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "migrating.db")
+	db, err := Open(context.Background(), Options{Path: path, Migrate: true})
+	if err != nil {
+		t.Fatalf("Open(%s): %v", path, err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	return db
+}
+
+var (
+	templateOnce  sync.Once
+	templateBytes []byte
+	templateErr   error
+)
+
+// migratedTemplate returns the contents of a freshly migrated database file, built once per test process. Close
+// checkpoints the WAL and removes the side files, so the main file alone is the whole database.
+func migratedTemplate() ([]byte, error) {
+	templateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "sqlite-template-")
+		if err != nil {
+			templateErr = err
+			return
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		path := filepath.Join(dir, "template.db")
+		db, err := Open(context.Background(), Options{Path: path, Migrate: true})
+		if err != nil {
+			templateErr = err
+			return
+		}
+		if err := db.Close(); err != nil {
+			templateErr = err
+			return
+		}
+		templateBytes, templateErr = os.ReadFile(path)
+	})
+	return templateBytes, templateErr
+}
+
+// seedFromTemplate writes the migrated template to path unless a database already exists there.
+func seedFromTemplate(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		return // an existing database is opened as it is
+	}
+	data, err := migratedTemplate()
+	if err != nil {
+		t.Fatalf("migrated template: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		_ = os.Remove(path) // for example a missing directory: Open reports it as before
+	}
 }
 
 func mustExec(t *testing.T, db *DB, query string, args ...any) {
@@ -142,6 +211,7 @@ func TestOpenWithoutMigrateLeavesEmptyDatabase(t *testing.T) {
 
 func TestCloseReleasesFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "close.db")
+	seedFromTemplate(t, path)
 	db, err := Open(context.Background(), Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +239,7 @@ func TestCloseReleasesFiles(t *testing.T) {
 
 func TestReopenKeepsData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reopen.db")
+	seedFromTemplate(t, path)
 	db, err := Open(context.Background(), Options{Path: path, Migrate: true})
 	if err != nil {
 		t.Fatal(err)
