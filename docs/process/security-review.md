@@ -1,18 +1,19 @@
 # Security review process
 
 Every task goes through a security review in addition to the architecture and quality review by `reviewer`.
-The review is adversarial: one agent looks for holes, other agents try to prove each hole is not real, and only what survives is fixed.
+One agent looks for holes; the coordinator judges each finding, and confirmed High/Medium findings are fixed.
+The refuting step with `security-skeptic` was removed by the owner on 2026-10-21 (the auditor rarely reports findings, the extra pass cost more than it gave).
 
 ## Roles
 | Step | Agent | Rule |
 |---|---|---|
 | 1. Find | `security-auditor` (read-only) | Reads the task diff, reports findings with an attack path and a confidence score. Never fixes. |
-| 2. Refute | `security-skeptic` (read-only), ONE instance per finding, launched in parallel | Tries to prove the finding is not a vulnerability, with evidence (file:line). If it cannot, it confirms it. |
-| 3. Fix | the implementing agent (`go-core`, `hub-dev`, `frontend`) | Fixes only CONFIRMED and PARTIAL findings, adds a regression test that fails before the fix. Does not touch REFUTED findings. |
-| 4. Re-check | `security-skeptic` on the fix (or `reviewer`) | Confirms the fix closes the attack path and introduces no new one. |
+| 2. Judge | the coordinator | Reads each finding against the code; a finding it doubts is recorded with the reason, not silently dropped. |
+| 3. Fix | the implementing agent (`go-core`, `hub-dev`, `frontend`) | Fixes High and Medium findings, adds a regression test that fails before the fix. |
+| 4. Re-check | `reviewer` on the fix commits | Confirms the fix closes the attack path and introduces no new one. |
 
 The coordinator (the main session or `ralph.sh`) runs the steps, keeps the findings list and records the outcome in `progress.txt`
-(`Security: N found, M refuted, K fixed, J accepted` plus one line per accepted risk).
+(`Security: N found, K fixed, J accepted, D doubted` plus one line per accepted or doubted finding).
 
 ## When
 - After every task, after the normal review (`reviewer`) and before the task is marked `done`.
@@ -38,9 +39,9 @@ Not security findings: denial of service, resource exhaustion, rate limiting, mi
 
 ## Automatic layers (no agent needed)
 - `gosec` linter in `.golangci.yml` and `govulncheck` in CI catch known bad patterns and known vulnerable dependencies.
-  `govulncheck` runs through `.github/scripts/vulncheck.py` for every module. A finding that does not apply to the product may be listed in `.github/vulncheck-allow.txt` only after `security-skeptic` refutes it, with a reason and a removal condition; stale entries fail CI. Prefer bumping Go or the dependency.
+  `govulncheck` runs through `.github/scripts/vulncheck.py` for every module. A finding that does not apply to the product may be listed in `.github/vulncheck-allow.txt` only with a written reason checked by the reviewer, with a reason and a removal condition; stale entries fail CI. Prefer bumping Go or the dependency.
 - The Anthropic `Security Guidance` plugin (hooks on edits and on stop, if enabled in the session) adds pattern warnings; treat its warnings as input for the auditor, not as a verdict.
-- `claude-security` (Anthropic plugin) can be used for an occasional deep scan of the whole repository; its findings go through the same refute step.
+- `claude-security` (Anthropic plugin) can be used for an occasional deep scan of the whole repository; its findings go through the same judge step.
 
-## Report format of the auditor and the skeptic
-See `.claude/agents/security-auditor.md` and `.claude/agents/security-skeptic.md`.
+## Report format of the auditor
+See `.claude/agents/security-auditor.md` (`security-skeptic.md` is kept but no longer used).
