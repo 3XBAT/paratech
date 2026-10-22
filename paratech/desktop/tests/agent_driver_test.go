@@ -386,7 +386,7 @@ func TestDriverContextEndLeavesRequestContinuable(t *testing.T) {
 // round is refused and the planner goes on with stated assumptions.
 func TestDriverSupervisorDecisions(t *testing.T) {
 	e := newDriverEnv(t)
-	q := `{"questions":[{"kind":"text","text":"Объём?"}]}`
+	q := `{"questions":[{"kind":"text","question":"Объём?"}]}`
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "answer_question", Args: `{"question":"Что такое ряд?"}`},
 		testenv.AgentCall{ID: "c2", Tool: "find_lessons", Args: `{}`}).
 		Then(testenv.AgentCall{ID: "c3", Tool: "answer_question", Args: `{"question":"Что такое предел?"}`},
