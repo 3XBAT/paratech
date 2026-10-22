@@ -74,4 +74,6 @@ type Step struct {
 type UnknownFacts struct{}
 
 // Facts returns zero facts.
-func (UnknownFacts) Facts(context.Context, values.Call) (thread.Facts, error) { return thread.Facts{}, nil }
+func (UnknownFacts) Facts(context.Context, values.Call) (thread.Facts, error) {
+	return thread.Facts{}, nil
+}

@@ -21,7 +21,10 @@ func (c *fixedClock) Now() time.Time { c.now = c.now.Add(time.Second); return c.
 
 type seqIDs struct{ n int }
 
-func (g *seqIDs) NewThreadID() shared.ThreadID { g.n++; return shared.ThreadID(fmt.Sprintf("th%d", g.n)) }
+func (g *seqIDs) NewThreadID() shared.ThreadID {
+	g.n++
+	return shared.ThreadID(fmt.Sprintf("th%d", g.n))
+}
 
 // fakeModel answers steps from a script; each entry is a reply or an error. It records every request.
 type fakeModel struct {
