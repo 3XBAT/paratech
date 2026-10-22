@@ -46,6 +46,14 @@ const (
 	RefuseUnavailable   Refusal = "unavailable"     // this desktop version cannot run the tool yet
 	RefuseNameTaken     Refusal = "name_taken"      // a subject or folder of that name exists
 	RefuseNotFound      Refusal = "not_found"       // the object the call names is gone
+
+	// Refusals of the proposal tools (class C): nothing was proposed.
+	RefuseNoRecipient   Refusal = "no_recipient"         // no homework recipient in the settings
+	RefuseNotExported   Refusal = "version_not_exported" // the export file does not hold that draft version
+	RefuseNoDue         Refusal = "no_due"               // the assignment has no deadline
+	RefuseDueOutOfRange Refusal = "due_out_of_range"     // the deadline is past or too far ahead
+	RefuseNotDeletable  Refusal = "not_deletable"        // the recording is in progress or being recovered
+	RefuseUnresolved    Refusal = "email_unresolved"     // an earlier email of the assignment has an unknown outcome
 )
 
 // assumptionsNote tells the planner to go on after a refused third question round (ADR-0021).

@@ -487,6 +487,19 @@ func (p *Proposal) Status() Status { return p.status }
 // Executed reports whether the side effect was already performed, so a repeated execution does nothing.
 func (p *Proposal) Executed() bool { return p.status == StatusExecuted }
 
+// Attaches reports whether the proposal is a VALIDATED send whose pinned attachment is exactly d: the agent's send of
+// a draft version (TASK-127) is kept only when the export file holds that version.
+func (p *Proposal) Attaches(d Digest) bool {
+	return p.kind == KindSendHomework && p.status == StatusValidated && !d.IsZero() && p.attachment == d
+}
+
+// WaitsAsDeadline reports whether the proposal is a VALIDATED deadline event of assignment a with this title and due
+// time: proposing the same deadline again reuses it instead of a second «Да» (TASK-127).
+func (p *Proposal) WaitsAsDeadline(a shared.AssignmentID, title string, due time.Time) bool {
+	return p.kind == KindDeadlineEvent && p.status == StatusValidated && p.assignment == a &&
+		p.title == strings.TrimSpace(title) && p.due.Equal(due)
+}
+
 // AssignmentID returns the assignment the proposal refers to.
 func (p *Proposal) AssignmentID() shared.AssignmentID { return p.assignment }
 

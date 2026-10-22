@@ -18,9 +18,11 @@ type Service struct {
 	clock       Clock
 	ids         IDGenerator
 	tx          Tx
+	drafts      DraftReader      // nil: no send of a named draft version, no version on the confirmation
+	waiting     WaitingProposals // nil: a deadline proposed again is a new proposal
 }
 
-// New builds the Service.
+// New builds the Service; Drafts and Waiting are optional.
 func New(d Deps) (*Service, error) {
 	if d.Proposals == nil || d.Assignments == nil || d.AssignmentList == nil || d.Artifacts == nil ||
 		d.Recipients == nil || d.Mailer == nil || d.Exporter == nil || d.Calendar == nil || d.Recordings == nil ||
@@ -32,5 +34,6 @@ func New(d Deps) (*Service, error) {
 		proposals: d.Proposals, assignments: d.Assignments, list: d.AssignmentList, artifacts: d.Artifacts,
 		recipients: d.Recipients, mailer: d.Mailer, exporter: d.Exporter, calendar: d.Calendar, clock: d.Clock,
 		ids: d.IDs, tx: d.Tx, lessons: lessonFinder{recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock},
+		drafts: d.Drafts, waiting: d.Waiting,
 	}, nil
 }

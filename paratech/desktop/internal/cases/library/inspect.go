@@ -170,6 +170,24 @@ func (s *Service) Inspect(ctx context.Context, id shared.MaterialID) (Inspected,
 	return out, nil
 }
 
+// MentionsEmail reports whether the quarantined reader said the material names an email address (TASK-127): the
+// confirmation of a send then says «В файле указан другой адрес — не используется». It reads only the stored answer,
+// never the text, and asks nobody: no answer yet, a refused one or no reader is false. The address itself is never
+// kept (ADR-0022).
+func (s *Service) MentionsEmail(ctx context.Context, id shared.MaterialID) (bool, error) {
+	if s.inspections == nil {
+		return false, nil
+	}
+	cur, err := s.inspections.Get(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return cur.Status() == inspection.StatusDone && cur.Answer().MentionsEmail, nil
+}
+
 // suggestion is the answer as the student sees it: a subject removed since it was named is dropped.
 func suggestion(a inspection.Answer, live map[shared.SubjectID]bool) *inspection.Answer {
 	if a.Subject != "" && !live[a.Subject] {

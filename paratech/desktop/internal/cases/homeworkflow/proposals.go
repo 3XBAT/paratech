@@ -25,6 +25,7 @@ const (
 	opDecline     = "homeworkflow: decline proposal"
 	opExecute     = "homeworkflow: execute proposal"
 	opConfirmSend = "homeworkflow: confirm sending"
+	opConfirmDue  = "homeworkflow: confirm deadline"
 )
 
 // The pipeline of PRD section 13.3 (AC-14, AC-18):
@@ -40,11 +41,13 @@ const (
 // stored. Well-formed output is validated against trusted local state: the assignment, the configured recipient and the
 // export file. The result is VALIDATED, waiting for the user, or REJECTED with a reason. No side effect happens here.
 func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (ProposalView, error) {
-	return s.propose(ctx, out, "")
+	return s.propose(ctx, out, "", nil)
 }
 
-// propose is Propose; a non-empty format is the attachment the user chose for a send (ProposeSend).
-func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, format proposal.Format) (ProposalView, error) {
+// propose is Propose; a non-empty format is the attachment the user chose for a send (ProposeSend). A non-nil want is
+// the content the send must attach (ProposeEmailOfVersion): a validated send that pins another file is not stored and
+// ErrVersionNotExported is returned.
+func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, format proposal.Format, want *proposal.Digest) (ProposalView, error) {
 	now := s.clock.Now()
 	p, err := proposal.New(s.ids.NewProposalID(), out, now)
 	if err != nil {
@@ -62,6 +65,9 @@ func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, forma
 	}
 	if err := p.Validate(facts, now); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
+	}
+	if want != nil && p.Status() == proposal.StatusValidated && !p.Attaches(*want) {
+		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, ErrVersionNotExported)
 	}
 
 	if err := s.tx.Do(ctx, func(ctx context.Context) error { return s.proposals.Save(ctx, p) }); err != nil {
@@ -82,7 +88,10 @@ func (s *Service) proposalView(ctx context.Context, p *proposal.Proposal) (Propo
 		return v, nil
 	}
 	var err error
-	v.Subject, err = s.emailSubject(ctx, p.AssignmentID())
+	if v.Subject, err = s.emailSubject(ctx, p.AssignmentID()); err != nil {
+		return v, err
+	}
+	v.DraftVersion, err = s.pinnedVersion(ctx, p)
 	return v, err
 }
 
@@ -132,7 +141,7 @@ func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID, format
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSend, err)
 	}
 	// Wrapped as untrusted on purpose: the request then passes the one parser every proposal passes.
-	return s.propose(ctx, values.NewUntrustedOutput(string(raw)), format)
+	return s.propose(ctx, values.NewUntrustedOutput(string(raw)), format, nil)
 }
 
 // facts reads the trusted local state a proposal is checked against, only what its kind needs. It runs outside a
@@ -242,6 +251,31 @@ func (s *Service) ConfirmSend(ctx context.Context, id proposal.ID, shownSubject 
 		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmSend, err)
 	}
 	return s.execute(ctx, id, &shown{subject: shownSubject, format: shownFormat})
+}
+
+// ConfirmDeadline is the user's click on «Да, в календарь» of a create_deadline_event proposal (TASK-127): Confirm,
+// then Execute. Like ConfirmSend, repeating it is safe: a CONFIRMED proposal whose Execute failed is executed again
+// (the calendar upserts the event of the assignment, so there is never a second one) and an EXECUTED one is returned
+// as it is. Another kind yields ErrNotADeadline before any change; other statuses the error of proposal.Confirm.
+func (s *Service) ConfirmDeadline(ctx context.Context, id proposal.ID) (ProposalView, error) {
+	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		p, err := s.proposals.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if p.Kind() != proposal.KindDeadlineEvent {
+			return fmt.Errorf("%w: %s", ErrNotADeadline, p.Kind())
+		}
+		changed, err := p.ConfirmOnce(s.clock.Now())
+		if err != nil || !changed {
+			return err
+		}
+		return s.proposals.Save(ctx, p)
+	})
+	if err != nil {
+		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmDue, err)
+	}
+	return s.execute(ctx, id, nil)
 }
 
 // shown is what the confirmation dialog of a send showed the user.
