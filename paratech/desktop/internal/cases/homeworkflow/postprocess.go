@@ -191,7 +191,7 @@ func operationOf(t job.Type) (values.Operation, bool) {
 type lessonInput struct {
 	transcript shared.TranscriptID
 	doc        shared.MaterialID // set instead of transcript for a job on a library material (TASK-122)
-	lesson     shared.LessonID // empty: an ad-hoc recording or a lesson no longer in the schedule
+	lesson     shared.LessonID   // empty: an ad-hoc recording or a lesson no longer in the schedule
 	material   contextselection.Material
 }
 

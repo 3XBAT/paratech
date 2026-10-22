@@ -28,15 +28,15 @@ func request(t *testing.T, cands ...Candidate) Request {
 
 func TestCandidateName(t *testing.T) {
 	tests := map[string]string{
-		"Физика":                         "Физика",
-		"Матан: часть 2":                 "Матан часть 2",
+		"Физика":         "Физика",
+		"Матан: часть 2": "Матан часть 2",
 		"  Теория   вероятностей (ТВиМС) ": "Теория вероятностей (ТВиМС)",
-		"C++ / Go":                       "C Go",
-		"::/\\":                          "",
-		"a\x00b\nc":                      "a b c",
-		strings.Repeat("я", 200):         strings.Repeat("я", MaxNameRunes),
-		strings.Repeat("я ", 60):         strings.TrimSpace(strings.Repeat("я ", 40)),
-		"bad \xff utf":                   "bad utf",
+		"C++ / Go":               "C Go",
+		"::/\\":                  "",
+		"a\x00b\nc":              "a b c",
+		strings.Repeat("я", 200): strings.Repeat("я", MaxNameRunes),
+		strings.Repeat("я ", 60): strings.TrimSpace(strings.Repeat("я ", 40)),
+		"bad \xff utf":           "bad utf",
 	}
 	for in, want := range tests {
 		if got := CandidateName(in); got != want {

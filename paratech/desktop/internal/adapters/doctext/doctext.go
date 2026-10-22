@@ -362,4 +362,3 @@ func attr(s xml.StartElement, local string) string {
 	}
 	return ""
 }
-

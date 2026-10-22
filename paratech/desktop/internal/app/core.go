@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/componentstore"
-	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/doctext"
+	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"

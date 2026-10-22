@@ -22,15 +22,15 @@ Untrusted text and the property it must never break: `name`, `source` (`material
 `ics_title`, `reader_enum`), `untrusted`, `property`, `refused_as_name` (never a stored subject/folder name),
 `pending_driver` (what only the Driver, TASK-117, can check end to end).
 
-Tests: `desktop/tests/agent_injection_test.go` (every argument of every tool, names, tool results through the use case)
-and `hub/tests/agent_eval_test.go` (catalog check, the step through the handler, and the INSPECT_MATERIAL reader:
+Tests: `desktop/tests/agent_injection_test.go` (every argument of every tool, names, tool results through the use case,
+and the INSPECT_MATERIAL answer: every fixture in every answer slot is refused by the desktop parser, and as the text
+of an uploaded file read end to end it moves nothing) and `hub/tests/agent_eval_test.go` (catalog check, the step through the handler, and the INSPECT_MATERIAL reader:
 every fixture as the material text, obeyed by the model in each answer slot, is a permanent `PROVIDER_ERROR`).
 
 Pending the Driver / later tasks (not faked here):
 - C tool not executed end to end through the loop; `input/agent` has no Confirm/Execute/Send/Delete (TASK-117, TASK-127).
 - Result mapper drops transcript and file text from tool results (ADR-0022, TASK-117).
 - ICS lesson title through the real loop; library → base mapping drops names `ParseName` refuses (TASK-117/121).
-- INSPECT_MATERIAL reader output on the desktop side (TASK-122 desktop part); the Hub side is enforced.
 
 ## Adding a fixture
 

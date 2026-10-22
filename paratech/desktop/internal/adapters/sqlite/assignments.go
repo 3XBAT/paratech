@@ -142,7 +142,7 @@ func (r *AssignmentRepository) Save(ctx context.Context, a *assignment.Assignmen
 			return DuplicateAsVersionConflict(MapError(ctx, q.InsertAssignment(ctx, sqlcgen.InsertAssignmentParams{
 				ID: string(st.ID), LessonID: jobNullString(string(st.Lesson)), TranscriptID: jobNullString(string(st.Transcript)),
 				MaterialID: jobNullString(string(st.Material)),
-				Title: st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
+				Title:      st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
 				SourceIndex: nullSourceIndex(st.SourceIndex), PromptVersion: nullPromptVersion(st.PromptVersion),
 				HintSubject: st.HintSubject, HintTeacher: st.HintTeacher, UserSubject: st.UserSubject, UserTeacher: st.UserTeacher,
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
@@ -206,7 +206,7 @@ func assignmentFromRow(row sqlcgen.Assignment) (*assignment.Assignment, error) {
 	a, err := assignment.Restore(assignment.State{
 		Version: row.Version, ID: shared.AssignmentID(row.ID), Lesson: shared.LessonID(row.LessonID.String),
 		Transcript: shared.TranscriptID(row.TranscriptID.String), Material: shared.MaterialID(row.MaterialID.String),
-		SourceIndex: source,
+		SourceIndex:   source,
 		PromptVersion: int(row.PromptVersion.Int64), Title: row.Title, Description: row.Description,
 		Due: jobFromNullMs(row.DueAt), UserEdited: row.UserEdited != 0,
 		HintSubject: row.HintSubject, HintTeacher: row.HintTeacher, UserSubject: row.UserSubject, UserTeacher: row.UserTeacher,

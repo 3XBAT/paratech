@@ -78,7 +78,7 @@ func NewExtracted(spec Spec, now time.Time) (*Assignment, error) {
 	}
 	a := &Assignment{
 		id: spec.ID, lesson: spec.Lesson, transcript: spec.Origin.Transcript, material: spec.Origin.Material,
-		source: spec.Origin.Index,
+		source:        spec.Origin.Index,
 		promptVersion: spec.PromptVersion, details: spec.Details, hints: spec.Hints, createdAt: now, updatedAt: now,
 	}
 	if err := a.validate(); err != nil {
@@ -132,7 +132,7 @@ func Restore(s State) (*Assignment, error) {
 	}
 	a := &Assignment{
 		version: s.Version, id: s.ID, lesson: s.Lesson, transcript: s.Transcript, material: s.Material,
-		source: s.SourceIndex,
+		source:        s.SourceIndex,
 		promptVersion: s.PromptVersion, details: d, userEdited: s.UserEdited,
 		hints:      values.NewLessonNames(s.HintSubject, s.HintTeacher),
 		correction: values.NewLessonNames(s.UserSubject, s.UserTeacher),

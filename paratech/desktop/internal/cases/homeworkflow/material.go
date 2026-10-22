@@ -38,7 +38,9 @@ func materialJobType(w Work) (job.Type, bool) {
 }
 
 // isMaterialJob reports whether t is a job on a library material.
-func isMaterialJob(t job.Type) bool { return t == MaterialSummaryJobType || t == MaterialHomeworkJobType }
+func isMaterialJob(t job.Type) bool {
+	return t == MaterialSummaryJobType || t == MaterialHomeworkJobType
+}
 
 // materialJobKey is the idempotency key of the first job of type typ for material m and the prompts version.
 func materialJobKey(typ job.Type, m shared.MaterialID) string {

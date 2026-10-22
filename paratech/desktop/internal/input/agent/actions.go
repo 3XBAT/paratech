@@ -124,7 +124,7 @@ func NewActions(d ActionDeps) (*Actions, error) {
 	return &Actions{
 		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, rerunner: d.Rerunner, materials: d.Materials,
 		drafts: d.Drafts,
-		jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
+		jobs:   d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
 	}, nil
 }
 

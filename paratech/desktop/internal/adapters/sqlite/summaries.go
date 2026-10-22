@@ -62,7 +62,7 @@ func (r *SummaryRepository) Save(ctx context.Context, s *summary.Summary) error 
 			return DuplicateAsVersionConflict(MapError(ctx, q.InsertSummary(ctx, sqlcgen.InsertSummaryParams{
 				ID: string(st.ID), TranscriptID: jobNullString(string(st.Transcript)), MaterialID: jobNullString(string(st.Material)),
 				LessonID: jobNullString(string(st.Lesson)),
-				Body: st.Text, Sections: sections, KeyPoints: string(points), PromptVersion: int64(st.PromptVersion),
+				Body:     st.Text, Sections: sections, KeyPoints: string(points), PromptVersion: int64(st.PromptVersion),
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 		}
@@ -126,7 +126,7 @@ func summaryFromRow(row sqlcgen.Summary) (*summary.Summary, error) {
 	s, err := summary.Restore(summary.State{
 		Version: row.Version, ID: summary.ID(row.ID), Transcript: shared.TranscriptID(row.TranscriptID.String),
 		Material: shared.MaterialID(row.MaterialID.String),
-		Lesson: shared.LessonID(row.LessonID.String), PromptVersion: int(row.PromptVersion), Text: row.Body,
+		Lesson:   shared.LessonID(row.LessonID.String), PromptVersion: int(row.PromptVersion), Text: row.Body,
 		Sections: sections, KeyPoints: points, CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})
 	if err != nil {
