@@ -33,7 +33,9 @@ type fakeLibrary struct {
 	created  library.NewSubject
 }
 
-func (f *fakeLibrary) note(format string, args ...any) { f.calls = append(f.calls, fmt.Sprintf(format, args...)) }
+func (f *fakeLibrary) note(format string, args ...any) {
+	f.calls = append(f.calls, fmt.Sprintf(format, args...))
+}
 
 func (f *fakeLibrary) Subjects(context.Context) ([]*subject.Subject, error) { return f.subjects, f.err }
 
