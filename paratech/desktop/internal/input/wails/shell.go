@@ -70,6 +70,8 @@ type Core struct {
 	Knowledge KnowledgeUseCase // the «База знаний» section (TASK-091); the shell shows its save dialog
 
 	Library LibraryUseCase // «Предметы» (TASK-121); the shell shows its open dialog, Files reads the chosen file
+
+	Agent AgentCore // the agent panel (TASK-119); the shell attaches its panel to the Wails events
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -191,6 +193,10 @@ type Services struct {
 	Deletion    *RecordingDeleteService
 	Knowledge   *KnowledgeBaseService
 	Library     *LibraryService
+	Agent       *AgentService
+
+	// AgentPanel is not bound: the shell attaches it to the Wails events while the app runs.
+	AgentPanel *AgentPanel
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -260,6 +266,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Library == nil {
 		return Services{}, errors.New("wails: open core: no library")
 	}
+	if !core.Agent.complete() {
+		return Services{}, errors.New("wails: open core: no agent")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -288,9 +297,11 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			s.opts.Log),
 		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
-		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
-		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
-		Library:   NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log),
+		Deletion:   NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Knowledge:  NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
+		Library:    NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log),
+		Agent:      NewAgentService(core.Agent, s.opts.Log),
+		AgentPanel: core.Agent.Panel,
 	}, nil
 }
 
