@@ -2,6 +2,8 @@ package thread
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"paratech/desktop/internal/domain/agent/values"
@@ -456,13 +458,32 @@ func entry(turn int, text string, calls *values.SealedCalls, results ...values.T
 func TestWindow(t *testing.T) {
 	sealed := &values.SealedCalls{Calls: []values.RawCall{{CallID: "c", Tool: "reply", ArgumentsJSON: `{}`}}, Seal: []byte{1}}
 	var entries []values.HistoryEntry
-	for turn := 1; turn <= 8; turn++ {
-		entries = append(entries, entry(turn, "просьба", nil), entry(turn, "", sealed), entry(turn, "", nil, ok("c")))
+	for turn := 1; turn <= 20; turn++ {
+		entries = append(entries, entry(turn, fmt.Sprintf("просьба %d", turn), nil), entry(turn, "", sealed), entry(turn, "", nil, ok("c")))
 	}
-	got := Window(entries, 8)
-	// 12 earlier entries at most: four whole requests before the current one.
-	if len(got) != 15 || got[0].StudentText == "" {
+	got := Window(entries, 20)
+	// Earlier requests shrink to their texts (the last MaxHistoryTurns of them); only the current one has echoes, so
+	// the last echo is always one the Hub still keeps.
+	if len(got) != MaxHistoryTurns+3 || got[0].StudentText != "просьба 8" {
 		t.Fatalf("window has %d entries, first %+v", len(got), got[0])
+	}
+	for i, h := range got[:MaxHistoryTurns] {
+		if h.StudentText == "" || h.Calls != nil || len(h.Results) > 0 {
+			t.Fatalf("earlier entry %d = %+v, want a text only", i, h)
+		}
+	}
+	if cur := got[MaxHistoryTurns:]; cur[0].StudentText != "просьба 20" || cur[1].Calls == nil || len(cur[2].Results) != 1 {
+		t.Fatalf("current request = %+v", cur)
+	}
+
+	// Earlier texts are bounded by bytes too.
+	big := strings.Repeat("a", MaxHistoryBytes/2+1)
+	var heavy []values.HistoryEntry
+	for turn := 1; turn <= 5; turn++ {
+		heavy = append(heavy, entry(turn, big, nil))
+	}
+	if got := Window(heavy, 5); len(got) != 2 || got[1].StudentText != big {
+		t.Fatalf("heavy window has %d entries", len(got))
 	}
 
 	// The current request is always whole, even when it alone is above the limits.

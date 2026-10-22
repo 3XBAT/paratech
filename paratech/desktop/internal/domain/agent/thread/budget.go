@@ -38,35 +38,37 @@ const (
 )
 
 // Window picks the history sent with a step from the stored entries of this thread, oldest first: every entry of the
-// current request and, before them, the earlier entries that fit WindowStart. The window starts at the student's text
-// of a request, the shape the Hub accepts (an echo of calls is always followed by its results in storage).
+// current request and, before them, the student's texts of earlier requests that fit WindowStart. Echoes of earlier
+// requests are never sent: the Hub keeps the model turn of an echo only for a while, and it looks it up for the last
+// echo of the window, which must therefore belong to the current request (ADR-0023). Student texts in a row are a
+// shape the Hub accepts.
 func Window(entries []values.HistoryEntry, current int) []values.HistoryTurn {
 	cur := slices.IndexFunc(entries, func(e values.HistoryEntry) bool { return e.Turn >= current })
 	if cur < 0 {
 		cur = len(entries)
 	}
-	sizes := make([]int, cur)
-	for i, e := range entries[:cur] {
-		sizes[i] = e.Entry.Size()
+	var earlier []values.HistoryTurn
+	for _, e := range entries[:cur] {
+		if e.Entry.StudentText != "" {
+			earlier = append(earlier, values.HistoryTurn{StudentText: e.Entry.StudentText})
+		}
+	}
+	sizes := make([]int, len(earlier))
+	for i, e := range earlier {
+		sizes[i] = e.Size()
 	}
 	start := WindowStart(sizes)
-	for start < cur && !requestStart(entries, start) {
-		start++
-	}
-	out := make([]values.HistoryTurn, 0, len(entries)-start)
-	for _, e := range entries[start:] {
+	out := make([]values.HistoryTurn, 0, len(earlier)-start+len(entries)-cur)
+	out = append(out, earlier[start:]...)
+	for _, e := range entries[cur:] {
 		out = append(out, e.Entry)
 	}
 	return out
 }
 
-func requestStart(entries []values.HistoryEntry, i int) bool {
-	return entries[i].Entry.StudentText != "" && (i == 0 || entries[i-1].Turn != entries[i].Turn)
-}
-
 // WindowStart returns the index of the oldest turn sent in full, given the sizes of the turns oldest first: at most
-// MaxHistoryTurns turns and MaxHistoryBytes bytes, counted from the newest. Turns before the index shrink to action
-// lines; len(sizes) means none is sent in full.
+// MaxHistoryTurns turns and MaxHistoryBytes bytes, counted from the newest. Turns before the index are not sent;
+// len(sizes) means none is sent.
 func WindowStart(sizes []int) int {
 	total := 0
 	start := len(sizes)

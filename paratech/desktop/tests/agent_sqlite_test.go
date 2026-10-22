@@ -361,7 +361,14 @@ func TestAgentKeysOnContinueRetryAndRestart(t *testing.T) {
 	if err != nil || st.Status != thread.StatusDone || st.Turn != 4 {
 		t.Fatalf("restart after the turn expired = %+v, %v", st, err)
 	}
-	last := e.hub.Requests()[len(e.hub.Requests())-1]
+	reqs = e.hub.Requests()
+	// Earlier requests go as texts only, so the Hub never needs the model turn of an earlier echo.
+	for _, turn := range reqs[len(reqs)-2].GetTurns() {
+		if turn.GetStudentText() == "" {
+			t.Fatalf("the expired attempt sent an earlier echo: %v", reqs[len(reqs)-2])
+		}
+	}
+	last := reqs[len(reqs)-1]
 	if len(last.GetTurns()) != 1 || last.GetTurns()[0].GetStudentText() != "третий вопрос" || last.GetIdempotencyKey() != "ag:th1:4:1" {
 		t.Fatalf("restarted request = %v", last)
 	}

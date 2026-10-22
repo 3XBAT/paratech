@@ -32,8 +32,9 @@ const (
 // MaxOutputTokens is the output cap of one planner step; the Hub raises it to its floor and clamps it to its cap.
 const MaxOutputTokens = 1024
 
-// historyLimit is the most entries read for a step: the earlier window plus a whole current request.
-const historyLimit = thread.MaxHistoryTurns + 2*thread.MaxSteps + 1
+// historyLimit is the most entries read for a step: enough whole requests (a text, then an echo and results per
+// step) for the texts of the earlier window plus the current request.
+const historyLimit = (thread.MaxHistoryTurns + 1) * (2*thread.MaxSteps + 1)
 
 // Service runs the steps of agent requests. Operations on threads run one at a time; Stop does not wait for a running
 // step (see Stop).

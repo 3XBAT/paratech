@@ -20,5 +20,6 @@
 // echo of calls only followed by the results of exactly those calls. IDs created by approved create steps are kept
 // per request, so a deferred plan argument binds only to one of them from an earlier step.
 //
-// Older turns are not part of the aggregate: the history sent to the planner is chosen by WindowStart.
+// Older turns are not part of the aggregate: the history sent to the planner is chosen by Window, which sends earlier
+// requests as their texts only (the Hub keeps the model turn of an echo only for a while).
 package thread
