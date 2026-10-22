@@ -54,18 +54,12 @@ test("the api calls the binding by name and parses the replies defensively", asy
     if (method === methods.subjects) {
       return [{ id: "s1", name: "Физика", aliases: null, semester: "2026-autumn", semesterLabel: "Осень 2026", folders: null }];
     }
-    if (method === methods.importDroppedFile) {
-      return { cancelled: false, existing: true, material: { id: "m1", name: "a.txt" } };
-    }
     return null;
   });
   const subjects = await api.subjects();
   assert.deepEqual(subjects[0].aliases, []);
   assert.deepEqual(subjects[0].folders, []);
-  const res = await api.importDroppedFile("C:\\x\\a.txt");
-  assert.deepEqual(calls[1], [methods.importDroppedFile, "C:\\x\\a.txt"]);
-  assert.equal(res.existing, true);
-  assert.equal(res.material.id, "m1");
+  assert.equal(api.importDroppedFile, undefined);
   assert.equal(parseImport({ cancelled: true, material: null }).material, null);
   assert.throws(() => parseSubject({ id: 1 }));
   // The fake answers null: a malformed reply is an error, not a default subject.
