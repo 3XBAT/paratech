@@ -597,6 +597,29 @@ func TestRealTree(t *testing.T) {
 	})
 }
 
+// agentPackages are the packages of the agent context and its use cases (ADR-0021, section 12); each has a doc.go.
+var agentPackages = []string{
+	"internal/domain/agent",
+	"internal/domain/agent/thread",
+	"internal/domain/agent/action",
+	"internal/domain/agent/values",
+	"internal/domain/agent/services/actionpolicy",
+	"internal/cases/agentturn",
+	"internal/cases/agentjournal",
+}
+
+func TestAgentLayout(t *testing.T) {
+	root := moduleRoot(t)
+	for _, dir := range agentPackages {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(dir), "doc.go")); err != nil {
+			t.Errorf("ARCH-01: %s: agent package has no doc.go: %v", dir, err)
+		}
+		if got := classify(dir).layer; got != layerDomain && got != layerCases {
+			t.Errorf("%s is classified as %s", dir, got)
+		}
+	}
+}
+
 // --- negative tests on synthetic trees ------------------------------------------------------------
 
 func goSrc(imports ...string) string {
@@ -652,6 +675,9 @@ func TestImportMatrix(t *testing.T) {
 		{name: "pkg external test imports its package", file: "pkg/migrations/migrations_test.go", imps: []string{m + "/pkg/migrations"}},
 		{name: "tests unrestricted", file: "tests/flow_test.go", imps: []string{m + "/internal/adapters/sqlite", m + "/internal/cases/run"}},
 		{name: "spike imports another spike package", file: "spikes/audio-capture/cmd/capturespike/main.go", imps: []string{m + "/spikes/audio-capture/wavchunk", "golang.org/x/sys/windows"}},
+		{name: "agent aggregate uses its policy and values", file: "internal/domain/agent/thread/thread.go", imps: []string{m + "/internal/domain/agent/services/actionpolicy", m + "/internal/domain/agent/values", m + "/internal/domain/shared"}},
+		{name: "agent ports use the agent domain", file: "internal/cases/agentturn/ports.go", imps: []string{m + "/internal/domain/agent/thread", m + "/internal/domain/agent/values"}},
+		{name: "agent driver uses several cases", file: "internal/input/agent/driver.go", imps: []string{m + "/internal/cases/agentturn", m + "/internal/cases/agentjournal", m + "/internal/cases/homeworkflow"}},
 
 		// violations
 		{name: "domain imports adapters", file: "internal/domain/jobs/job/job.go", imps: []string{m + "/internal/adapters/sqlite"}, want: "ARCH-10"},
@@ -694,6 +720,10 @@ func TestImportMatrix(t *testing.T) {
 		{name: "config imports pkg", file: "config/config.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
 		{name: "metrics imports pkg", file: "internal/metrics/metrics.go", imps: []string{m + "/pkg/migrations"}, want: "ARCH-04"},
 		{name: "sibling service", file: "internal/app/app.go", imps: []string{"paratech/hub/internal/domain/quota"}, want: "section-9"},
+		{name: "agent domain imports another context", file: "internal/domain/agent/values/result.go", imps: []string{m + "/internal/domain/library/subject"}, want: "ARCH-11"},
+		{name: "agentturn imports agentjournal", file: "internal/cases/agentturn/service.go", imps: []string{m + "/internal/cases/agentjournal"}, want: "ARCH-20"},
+		{name: "wails imports the agent driver", file: "internal/input/wails/agent.go", imps: []string{m + "/internal/input/agent"}, want: "ARCH-40"},
+		{name: "agent driver imports the hub client", file: "internal/input/agent/driver.go", imps: []string{m + "/internal/adapters/hubclient"}, want: "ARCH-40"},
 		{name: "adapter imports a spike", file: "internal/adapters/audio/capture.go", imps: []string{m + "/spikes/audio-capture/wasapi"}, want: "ARCH-01"},
 		{name: "app imports a spike", file: "internal/app/app.go", imps: []string{m + "/spikes/audio-capture/wavchunk"}, want: "ARCH-01"},
 		{name: "cmd imports a spike", file: "cmd/desktop/main.go", imps: []string{m + "/spikes/audio-capture"}, want: "ARCH-01"},

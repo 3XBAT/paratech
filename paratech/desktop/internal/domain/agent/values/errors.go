@@ -1,0 +1,29 @@
+package values
+
+import "errors"
+
+// Errors of the agent values. Parse errors of a tool call become an is_error result for the planner; their texts
+// carry the argument name and the rule, never the rejected value.
+var (
+	// ErrUnknownTool means the tool is not in the catalog of this desktop version.
+	ErrUnknownTool = errors.New("unknown tool")
+
+	// ErrInvalidArguments means the arguments of a call break the catalog: not a JSON object, an unknown, duplicate
+	// or missing argument, a wrong type, an enum value outside the list or a broken one-of pair.
+	ErrInvalidArguments = errors.New("invalid tool arguments")
+
+	// ErrInvalidRef is returned for a malformed ID or an unknown ID kind.
+	ErrInvalidRef = errors.New("invalid id")
+
+	// ErrInvalidDate is returned for a value that is not a calendar date YYYY-MM-DD.
+	ErrInvalidDate = errors.New("invalid date")
+
+	// ErrInvalidText is returned for a card text, label or name that breaks its length or character rules.
+	ErrInvalidText = errors.New("invalid text")
+
+	// ErrInvalidCard is returned for a card that breaks its invariants.
+	ErrInvalidCard = errors.New("invalid card")
+
+	// ErrInvalidScope is returned for a scope or base that breaks its invariants.
+	ErrInvalidScope = errors.New("invalid scope")
+)
