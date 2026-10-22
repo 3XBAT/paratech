@@ -47,3 +47,14 @@ func TestPurgeRunsAtStartAndStopsWithTheContext(t *testing.T) {
 		}
 	}
 }
+
+// TestPurgersRunEveryStore: the stored results and the kept agent turns are both purged, even when one store fails.
+func TestPurgersRunEveryStore(t *testing.T) {
+	down := errors.New("db down")
+	failing := &countingPurger{err: down, ran: make(chan struct{})}
+	working := &countingPurger{ran: make(chan struct{})}
+	n, err := purgers{failing, working}.PurgeResults(t.Context())
+	if n != 6 || !errors.Is(err, down) || failing.calls != 1 || working.calls != 1 {
+		t.Fatalf("purge = %d, %v (calls %d, %d)", n, err, failing.calls, working.calls)
+	}
+}

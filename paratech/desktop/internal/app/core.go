@@ -24,6 +24,8 @@ import (
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
+	"paratech/desktop/internal/cases/agentjournal"
+	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
@@ -98,6 +100,10 @@ type core struct {
 	prompts   *recordingprompt.Service
 	// advice hands the silent-source advice of the recordings to the prompts once they are wired (TASK-082).
 	advice adviceRelay
+
+	// The agent core (wireAgent): the steps of a request and the action journal.
+	agent   *agentturn.Service
+	journal *agentjournal.Service
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -339,6 +345,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	})
 	if err != nil {
 		return fmt.Errorf("app: knowledge base: %w", err)
+	}
+
+	if err := c.wireAgent(e, llm, log); err != nil {
+		return err
 	}
 
 	// A model installed while the app runs gets the waiting recordings enqueued at once; without the speech component

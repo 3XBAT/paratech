@@ -1,0 +1,357 @@
+package sqlite
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"testing"
+	"time"
+
+	"paratech/desktop/internal/domain/agent/action"
+	"paratech/desktop/internal/domain/agent/thread"
+	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/shared"
+)
+
+var agentT0 = time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
+
+func agentAt(min int) time.Time { return agentT0.Add(time.Duration(min) * time.Minute) }
+
+type fixedNow struct{ t time.Time }
+
+func (f fixedNow) Now() time.Time { return f.t }
+
+func agentRef(t *testing.T, kind values.IDKind, id string) values.Ref {
+	t.Helper()
+	r, err := values.NewRef(kind, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func agentCall(t *testing.T, id, tool, args string) values.Call {
+	t.Helper()
+	c, err := values.ParseCall(id, tool, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// subjectThread is a thread of subject s1 whose request has an approved plan, an executed create step with the
+// created folder recorded, and an answered call waiting to be taken.
+func subjectThread(t *testing.T) *thread.Thread {
+	t.Helper()
+	s1 := agentRef(t, values.KindSubject, "s1")
+	key, err := thread.SubjectKey(s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th, err := thread.New("th1", key, agentT0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := values.NewScope(s1, values.ScreenSubjects, agentRef(t, values.KindLesson, "l1"), values.Ref{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := th.StartRequest(scope, agentAt(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Observe(agentRef(t, values.KindUpload, "u1")); err != nil {
+		t.Fatal(err)
+	}
+	plan := agentCall(t, "p1", "show_plan", `{"summary":"План","steps":[`+
+		`{"tool":"create_folder","args":{"subject":"s1","name":"Лабы"}},`+
+		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}}]}`).Args().PlanSteps("steps")
+	ctxRefs := values.NewRefSet(scope.Refs()...)
+	if err := th.ProposePlan(plan, ctxRefs, agentAt(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ApprovePlan(agentAt(3)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.BeginStep(agentAt(4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.EndStep(1, 500, agentAt(5)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Expect([]values.RawCall{{CallID: "w1", Tool: "create_folder", ArgumentsJSON: `{}`}}, agentAt(5)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.Admit(agentCall(t, "w1", "create_folder", `{"subject":"s1","name":"Лабы"}`), thread.Facts{Context: ctxRefs}, agentAt(5)); err != nil {
+		t.Fatal(err)
+	}
+	res := values.ToolResult{CallID: "w1", ResultJSON: `{"folder":"f1"}`}
+	if err := th.Answer(res, agentRef(t, values.KindFolder, "f1"), agentAt(6)); err != nil {
+		t.Fatal(err)
+	}
+	return th
+}
+
+func sameThread(t *testing.T, got, want *thread.Thread) {
+	t.Helper()
+	g, w := got.State(), want.State()
+	if !reflect.DeepEqual(g, w) {
+		t.Fatalf("stored thread differs:\n got %+v\n    %+v\nwant %+v\n    %+v", g, g.Current, w, w.Current)
+	}
+}
+
+func TestAgentThreadRoundTrip(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAgentThreadRepository(db)
+	th := subjectThread(t)
+	if err := repo.Save(ctx, th); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if th.Version() != 1 {
+		t.Fatalf("version = %d", th.Version())
+	}
+	got, err := repo.Get(ctx, "th1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	sameThread(t, got, th)
+
+	// The next step: results taken, a new step open; saved with a compare-and-swap.
+	if _, ok := got.TakeResults(agentAt(7)); !ok {
+		t.Fatal("results not complete")
+	}
+	if _, err := got.BeginStep(agentAt(8)); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Stop(values.StopFailed, agentAt(9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Retry(agentAt(9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, got); err != nil {
+		t.Fatalf("second Save: %v", err)
+	}
+	again, err := repo.GetByKey(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameThread(t, again, got)
+	if key, _ := again.StepKey(); key != "ag:th1:1:2:r1" {
+		t.Fatalf("restored step key = %q", key)
+	}
+
+	// The stale copy loses.
+	if err := repo.Save(ctx, th); !errors.Is(err, shared.ErrVersionConflict) {
+		t.Fatalf("stale Save = %v", err)
+	}
+	if _, err := repo.Get(ctx, "nope"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("Get of a missing thread = %v", err)
+	}
+	if _, err := repo.GetByKey(ctx, thread.NoSubject); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("GetByKey of a missing thread = %v", err)
+	}
+}
+
+func TestAgentThreadKeyIsUnique(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAgentThreadRepository(db)
+	a, _ := thread.New("a", thread.NoSubject, agentT0)
+	b, _ := thread.New("b", thread.NoSubject, agentT0)
+	if err := repo.Save(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, b); !errors.Is(err, shared.ErrDuplicate) {
+		t.Fatalf("second thread of a key = %v", err)
+	}
+	again, _ := thread.New("a", "s9", agentT0)
+	if err := repo.Save(ctx, again); !errors.Is(err, shared.ErrVersionConflict) {
+		t.Fatalf("an id stored first = %v", err)
+	}
+}
+
+func TestAgentThreadRunningAndEarlierTurns(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAgentThreadRepository(db)
+
+	waiting, _ := thread.New("w", thread.NoSubject, agentT0)
+	if err := waiting.StartRequest(values.Scope{}, agentAt(1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := waiting.AskQuestions(agentAt(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, waiting); err != nil {
+		t.Fatal(err)
+	}
+	if running, err := repo.ListRunning(ctx); err != nil || len(running) != 0 {
+		t.Fatalf("ListRunning with a waiting request = %d, %v", len(running), err)
+	}
+
+	// A new request cancels the waiting one, in storage too.
+	if err := waiting.StartRequest(values.Scope{}, agentAt(3)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, waiting); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := db.sql.QueryRowContext(ctx, "SELECT status FROM agent_turns WHERE thread_id = 'w' AND number = 1").Scan(&status); err != nil || status != "CANCELLED" {
+		t.Fatalf("earlier request = %q, %v", status, err)
+	}
+	running, err := repo.ListRunning(ctx)
+	if err != nil || len(running) != 1 || running[0].ID() != "w" {
+		t.Fatalf("ListRunning = %v, %v", running, err)
+	}
+}
+
+func TestAgentHistory(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	h := NewAgentHistory(db, fixedNow{agentT0})
+	entries := []values.HistoryEntry{
+		{Turn: 1, Entry: values.HistoryTurn{StudentText: "создай папку"}},
+		{Turn: 1, Entry: values.HistoryTurn{Calls: &values.SealedCalls{
+			Calls: []values.RawCall{{CallID: "w1", Tool: "create_folder", ArgumentsJSON: `{"name":"Лабы"}`}}, Seal: []byte{0, 1, 255},
+		}}},
+		{Turn: 1, Entry: values.HistoryTurn{Results: []values.ToolResult{{CallID: "w1", ResultJSON: `{"error":"x"}`, IsError: true}}}},
+		{Turn: 2, Entry: values.HistoryTurn{StudentText: "ещё"}},
+	}
+	for _, e := range entries {
+		if err := h.Append(ctx, "th1", e.Turn, e.Entry); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	got, err := h.Since(ctx, "th1", 0, 100)
+	if err != nil || !reflect.DeepEqual(got, entries) {
+		t.Fatalf("Since = %+v, %v", got, err)
+	}
+	if got, _ := h.Since(ctx, "th1", 2, 100); len(got) != 1 || got[0].Entry.StudentText != "ещё" {
+		t.Fatalf("Since turn 2 = %+v", got)
+	}
+	if got, _ := h.Since(ctx, "th1", 0, 2); !reflect.DeepEqual(got, entries[2:]) {
+		t.Fatalf("last two = %+v", got)
+	}
+	if err := h.Append(ctx, "th1", 2, values.HistoryTurn{}); !errors.Is(err, values.ErrInvalidResult) {
+		t.Fatalf("Append of an empty entry = %v", err)
+	}
+	if err := h.Append(ctx, "nope", 1, entries[0].Entry); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("Append to a missing thread = %v", err)
+	}
+}
+
+func TestAgentActions(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAgentActionRepository(db)
+	due, _ := values.NewDate(2026, 11, 1)
+	comps := []struct {
+		tool values.Tool
+		comp action.Compensation
+	}{
+		{values.ToolCreateSubject, action.RemoveSubject{Subject: agentRef(t, values.KindSubject, "s2")}},
+		{values.ToolCreateFolder, action.RemoveFolder{Subject: agentRef(t, values.KindSubject, "s1"), Folder: agentRef(t, values.KindFolder, "f1")}},
+		{values.ToolPlaceUpload, action.ReturnToInbox{Material: agentRef(t, values.KindMaterial, "m1")}},
+		{values.ToolLinkMaterial, action.UnlinkMaterial{Material: agentRef(t, values.KindMaterial, "m1"), Lesson: agentRef(t, values.KindLesson, "l1")}},
+		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r1"), OldSubject: agentRef(t, values.KindSubject, "s1"), OldKind: "lab"}},
+		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r2")}},
+		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a1"), OldDue: due}},
+		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a2")}},
+		{values.ToolMakeSummary, action.CancelJob{Job: agentRef(t, values.KindJob, "j1")}},
+	}
+	for i, tc := range comps {
+		id := shared.ActionID("a" + string(rune('0'+i)))
+		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: "c" + string(rune('0'+i)), Tool: tc.tool}, agentAt(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, a); err != nil {
+			t.Fatalf("insert %s: %v", tc.comp.Kind(), err)
+		}
+		if err := a.Complete(tc.comp, 3, agentAt(i).Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, a); err != nil {
+			t.Fatalf("update %s: %v", tc.comp.Kind(), err)
+		}
+		got, err := repo.Get(ctx, id)
+		if err != nil || !reflect.DeepEqual(got.State(), a.State()) {
+			t.Fatalf("%s: got %+v, %v\nwant %+v", tc.comp.Kind(), got.State(), err, a.State())
+		}
+	}
+
+	proposal := agentRef(t, values.KindProposal, "p1")
+	p, err := action.NewProposed(action.Spec{ID: "ap", Thread: "th1", Turn: 1, CallID: "cp", Tool: values.ToolProposeSend}, proposal, agentAt(20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := repo.Get(ctx, "ap"); err != nil || got.Proposal() != proposal {
+		t.Fatalf("proposed = %+v, %v", got, err)
+	}
+
+	pending, _ := action.New(action.Spec{ID: "pending", Thread: "th1", Turn: 2, CallID: "c1", Tool: values.ToolCreateSubject}, agentAt(30))
+	if err := repo.Save(ctx, pending); err != nil {
+		t.Fatal(err)
+	}
+	dup, _ := action.New(action.Spec{ID: "dup", Thread: "th1", Turn: 2, CallID: "c1", Tool: values.ToolCreateSubject}, agentAt(31))
+	if err := repo.Save(ctx, dup); !errors.Is(err, shared.ErrDuplicate) {
+		t.Fatalf("second entry of a call = %v", err)
+	}
+	stale, _ := repo.Get(ctx, "pending")
+	if err := pending.Fail(agentAt(32)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, pending); err != nil {
+		t.Fatal(err)
+	}
+	if err := stale.Fail(agentAt(33)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, stale); !errors.Is(err, shared.ErrVersionConflict) {
+		t.Fatalf("stale Save = %v", err)
+	}
+
+	list, err := repo.ListByThread(ctx, "th1", 3)
+	if err != nil || len(list) != 3 || list[0].ID() != "pending" || list[1].ID() != "ap" {
+		t.Fatalf("ListByThread = %v, %v", list, err)
+	}
+	open, _ := action.New(action.Spec{ID: "open", Thread: "th1", Turn: 3, CallID: "c1", Tool: values.ToolCreateSubject}, agentAt(40))
+	if err := repo.Save(ctx, open); err != nil {
+		t.Fatal(err)
+	}
+	unfinished, err := repo.ListUnfinished(ctx)
+	if err != nil || len(unfinished) != 1 || unfinished[0].ID() != "open" {
+		t.Fatalf("ListUnfinished = %v, %v", unfinished, err)
+	}
+	if _, err := repo.Get(ctx, "nope"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("Get of a missing entry = %v", err)
+	}
+}
+
+// A row a newer build or a broken tool wrote is refused on read, not half restored.
+func TestAgentRowsAreCheckedOnRead(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `UPDATE agent_turns SET open_calls = '[{"id":"w1","plan_step":7}]' WHERE thread_id = 'th1'`)
+	if _, err := NewAgentThreadRepository(db).Get(ctx, "th1"); err == nil {
+		t.Fatal("a request with a call of an unknown plan step was restored")
+	}
+	mustExec(t, db, `UPDATE agent_turns SET open_calls = '[{"id":"w1","plan_step":0,"extra":1}]' WHERE thread_id = 'th1'`)
+	if _, err := NewAgentThreadRepository(db).Get(ctx, "th1"); err == nil {
+		t.Fatal("an unknown field was accepted")
+	}
+
+	mustExec(t, db, `INSERT INTO agent_actions (id, thread_id, turn, call_id, tool, status, compensation, target_version, version, created_at, updated_at)
+		VALUES ('x', 'th1', 1, 'c', 'create_subject', 'DONE', '{"kind":"cancel_job","job":"j"}', 1, 1, 0, 0)`)
+	if _, err := NewAgentActionRepository(db).Get(ctx, "x"); !errors.Is(err, action.ErrInvalidCompensation) {
+		t.Fatalf("a compensation of another tool = %v", err)
+	}
+}

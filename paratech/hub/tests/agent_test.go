@@ -32,10 +32,12 @@ import (
 
 // The adapters and the fake implement the ports of the agent step use case.
 var (
-	_ agentstep.Provider    = (*anthropic.Client)(nil)
-	_ agentstep.Provider    = (*testenv.FakeAgentProvider)(nil)
-	_ agentstep.Accounts    = (*postgres.QuotaAccounts)(nil)
-	_ agentstep.RateLimiter = (*ratelimit.Limiter)(nil)
+	_ agentstep.Provider       = (*anthropic.Client)(nil)
+	_ agentstep.Provider       = (*testenv.FakeAgentProvider)(nil)
+	_ agentstep.Accounts       = (*postgres.QuotaAccounts)(nil)
+	_ agentstep.AssistantTurns = (*postgres.AgentTurns)(nil)
+	_ agentstep.AssistantTurns = (*testenv.AgentTurns)(nil)
+	_ agentstep.RateLimiter    = (*ratelimit.Limiter)(nil)
 )
 
 // agStudentText must never reach a log or a stored row; model output (the calls) is stored on purpose.
@@ -91,7 +93,7 @@ func newAgentEnv(t *testing.T, steps ...testenv.AgentProviderStep) agentEnv {
 		t.Fatal(err)
 	}
 	agentSvc, err := agentstep.New(agentstep.Deps{
-		Accounts: e.db.QuotaAccounts(), Provider: e.provider, Limiter: limiter, Clock: e.clock, Random: testenv.Random{},
+		Accounts: e.db.QuotaAccounts(), Turns: e.db.AgentTurns(), Provider: e.provider, Limiter: limiter, Clock: e.clock, Random: testenv.Random{},
 		Models: models, Sealer: e.sealer, Log: log,
 	}, agentstep.Config{
 		Unit: "tokens", Limit: 1_000_000, ReservationTTL: quotaTTL, KeyRetention: gwRetention, CallTimeout: 4 * time.Minute,
@@ -232,7 +234,7 @@ func TestAgentStepAgainstPostgres(t *testing.T) {
 	if strings.Join(ops, ",") != "agent_step/planner,agent_step/planner" {
 		t.Fatalf("key records = %v", ops)
 	}
-	for _, table := range []string{"quota_accounts", "quota_reservations", "quota_idempotency_keys", "quota_ledger", "api_keys"} {
+	for _, table := range []string{"quota_accounts", "quota_reservations", "quota_idempotency_keys", "quota_ledger", "api_keys", "agent_turns"} {
 		var n int
 		if err := e.conn.QueryRow(t.Context(), "SELECT count(*) FROM "+table+" t WHERE t::text LIKE '%agent-marker%' OR t::text LIKE '%Calculus%'").
 			Scan(&n); err != nil || n != 0 {
@@ -294,6 +296,38 @@ func TestAgentStepAndCompleteKeysNeverMatch(t *testing.T) {
 	}
 	if len(e.provider.Calls()) != 0 {
 		t.Fatal("the agent provider was called")
+	}
+}
+
+// TestAgentStepTurnGoneAgainstPostgres: every returned call set keeps a turn row of its owner; when the row is gone,
+// the continuation is failed_precondition without a provider call or a charge, and a replay stays free.
+func TestAgentStepTurnGoneAgainstPostgres(t *testing.T) {
+	e := newAgentEnv(t, agAnswer(t, [3]string{"toolu_01", "find_lessons", `{"subject":"subj-1"}`}))
+	first, err := e.step(t.Context(), agStepRequest("ag:1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := e.rowCount(t, "agent_turns", e.owner); n != 1 {
+		t.Fatalf("kept turns = %d", n)
+	}
+	used, _ := e.assertConsistent(t, e.owner)
+
+	if _, err := e.conn.Exec(t.Context(), "DELETE FROM agent_turns WHERE api_key_id = $1", e.owner.String()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.step(t.Context(), agStepRequest("ag:2", echoOf(first)...))
+	var ce *connectrpc.Error
+	if !errors.As(err, &ce) || ce.Code() != connectrpc.CodeFailedPrecondition {
+		t.Fatalf("continuation without the kept turn: err = %v", err)
+	}
+	if after, held := e.assertConsistent(t, e.owner); after != used || held != 0 {
+		t.Fatalf("used %d -> %d, held %d", used, after, held)
+	}
+	if again, err := e.step(t.Context(), agStepRequest("ag:1")); err != nil || !again.GetReplayed() {
+		t.Fatalf("replay = %v, %v", again, err)
+	}
+	if len(e.provider.Calls()) != 1 {
+		t.Fatalf("provider calls = %d", len(e.provider.Calls()))
 	}
 }
 

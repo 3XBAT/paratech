@@ -162,6 +162,8 @@ func TestAgentStepErrorMapping(t *testing.T) {
 		{name: "conflict", err: agentstep.ErrIdempotencyConflict, code: connectrpc.CodeFailedPrecondition,
 			detail: hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT},
 		{name: "running", err: agentstep.ErrAttemptRunning, code: connectrpc.CodeAborted},
+		{name: "turn gone", err: fmt.Errorf("agentstep: kept turn: %w", agentstep.ErrTurnGone), code: connectrpc.CodeFailedPrecondition,
+			message: "the Hub no longer keeps the model turn of the echoed calls; start again from the student's text"},
 		{name: "bad seal", err: fmt.Errorf("x: %w", agentstep.ErrBadSeal), code: connectrpc.CodeInvalidArgument,
 			message: "the seal of echoed calls does not match"},
 		{name: "unknown catalog", err: agentstep.ErrUnknownCatalog, code: connectrpc.CodeInvalidArgument, message: "unknown tool catalog version"},

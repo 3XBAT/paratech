@@ -16,14 +16,17 @@ const MaxSeenRefs = 4096
 
 // Thread is the agent thread of one subject or of no subject. Fields change only through its methods (ARCH-14).
 type Thread struct {
-	version   int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
-	id        shared.ThreadID
-	key       Key
-	turns     int   // number of the last request; 0 = none yet
-	current   *Turn // the last request; nil only when turns == 0
-	seen      values.RefSet
-	createdAt time.Time
-	updatedAt time.Time
+	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
+	id      shared.ThreadID
+	key     Key
+	turns   int   // number of the last request; 0 = none yet
+	current *Turn // the last request; nil only when turns == 0
+	seen    values.RefSet
+	// historyFrom is the first request whose history is sent to the planner; a restarted request sends no older
+	// echo, whose model turn the Hub no longer keeps (ADR-0023). 0 means all.
+	historyFrom int
+	createdAt   time.Time
+	updatedAt   time.Time
 }
 
 // New creates an empty thread.
@@ -43,6 +46,7 @@ func New(id shared.ThreadID, key Key, now time.Time) (*Thread, error) {
 // TurnState is the stored form of the current request.
 type TurnState struct {
 	Number       int
+	Scope        values.Scope
 	Status       Status
 	Resume       Status
 	StopReason   values.StopReason
@@ -51,20 +55,24 @@ type TurnState struct {
 	ProposedPlan []values.PlanStep
 	ApprovedPlan []values.PlanStep
 	Used         []bool
+	Retry        int
+	Open         []OpenCall
+	Created      []Created
 	StartedAt    time.Time
 	UpdatedAt    time.Time
 }
 
 // State is the stored form of a thread, for Restore.
 type State struct {
-	Version   int64
-	ID        shared.ThreadID
-	Key       Key
-	Turns     int
-	Current   *TurnState // nil when Turns == 0
-	Seen      []values.Ref
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Version     int64
+	ID          shared.ThreadID
+	Key         Key
+	Turns       int
+	Current     *TurnState // nil when Turns == 0
+	Seen        []values.Ref
+	HistoryFrom int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Restore rebuilds a stored thread without side effects and checks its invariants.
@@ -86,6 +94,9 @@ func Restore(s State) (*Thread, error) {
 	if len(s.Seen) > MaxSeenRefs {
 		return bad("too many seen ids")
 	}
+	if s.HistoryFrom < 0 || s.HistoryFrom > s.Turns {
+		return bad("history start out of range")
+	}
 	for _, r := range s.Seen {
 		if r.IsZero() {
 			return bad("zero seen id")
@@ -96,9 +107,12 @@ func Restore(s State) (*Thread, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := th.inScope(t.scope); err != nil {
+			return nil, err
+		}
 		th.current = &t
 	}
-	th.version, th.turns, th.updatedAt = s.Version, s.Turns, s.UpdatedAt
+	th.version, th.turns, th.historyFrom, th.updatedAt = s.Version, s.Turns, s.HistoryFrom, s.UpdatedAt
 	th.seen.Add(s.Seen...)
 	return th, nil
 }
@@ -126,11 +140,20 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		return bad("a proposed plan exists exactly while awaiting the plan")
 	case len(s.Used) != len(s.ApprovedPlan):
 		return bad("used flags do not match the approved plan")
+	case s.Retry < 0 || s.Retry > MaxRetries:
+		return bad("retry count out of range")
+	case s.StepOpen && len(s.Open) > 0:
+		return bad("an open step while results are pending")
+	case !validOpen(s.Open, len(s.ApprovedPlan)):
+		return bad("bad open calls")
+	case !validCreated(s.Created, len(s.ApprovedPlan)):
+		return bad("bad created ids")
 	}
 	return Turn{
-		number: s.Number, status: s.Status, resume: s.Resume, stopReason: s.StopReason, budget: s.Budget,
+		number: s.Number, scope: s.Scope, status: s.Status, resume: s.Resume, stopReason: s.StopReason, budget: s.Budget,
 		stepOpen: s.StepOpen, proposed: slices.Clone(s.ProposedPlan), approved: slices.Clone(s.ApprovedPlan),
-		used: slices.Clone(s.Used), startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
+		used: slices.Clone(s.Used), retry: s.Retry, open: slices.Clone(s.Open), created: slices.Clone(s.Created),
+		startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
 	}, nil
 }
 
@@ -138,18 +161,26 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 func (th *Thread) State() State {
 	s := State{
 		Version: th.version, ID: th.id, Key: th.key, Turns: th.turns, Seen: th.seen.Sorted(),
-		CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
+		HistoryFrom: th.historyFrom, CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
 	}
 	if th.current != nil {
 		t := th.current
 		s.Current = &TurnState{
-			Number: t.number, Status: t.status, Resume: t.resume, StopReason: t.stopReason, Budget: t.budget,
+			Number: t.number, Scope: t.scope, Status: t.status, Resume: t.resume, StopReason: t.stopReason, Budget: t.budget,
 			StepOpen: t.stepOpen, ProposedPlan: slices.Clone(t.proposed), ApprovedPlan: slices.Clone(t.approved),
-			Used: slices.Clone(t.used), StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
+			Used: slices.Clone(t.used), Retry: t.retry, Open: slices.Clone(t.open), Created: slices.Clone(t.created),
+			StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
 		}
 	}
 	return s
 }
+
+// Persisted records the version the store assigned after a successful Save. It is called by the repository adapter
+// only, after the write succeeded (ADR-0004).
+func (th *Thread) Persisted(version int64) { th.version = version }
+
+// HistoryFrom returns the first request whose history is sent to the planner (0: all).
+func (th *Thread) HistoryFrom() int { return th.historyFrom }
 
 // ID returns the thread ID.
 func (th *Thread) ID() shared.ThreadID { return th.id }
@@ -179,10 +210,14 @@ func (th *Thread) StartTurn(now time.Time) error {
 	if now.IsZero() {
 		return fmt.Errorf("%w: no time", ErrInvalidThread)
 	}
+	if t := th.current; t != nil && !t.status.IsTerminal() && t.status.stepping() {
+		return ErrTurnInProgress
+	}
+	// The results of the last calls belong to the history before the new text (Abandon, TakeResults).
+	if t := th.current; t != nil && len(t.open) > 0 {
+		return ErrResultsPending
+	}
 	if t := th.current; t != nil && !t.status.IsTerminal() {
-		if t.status.stepping() {
-			return ErrTurnInProgress
-		}
 		if err := th.Cancel(now); err != nil {
 			return err
 		}
@@ -190,6 +225,26 @@ func (th *Thread) StartTurn(now time.Time) error {
 	th.turns++
 	th.current = &Turn{number: th.turns, status: StatusPlanning, startedAt: now, updatedAt: now}
 	th.updatedAt = now
+	return nil
+}
+
+// StartRequest is StartTurn in a scope of this thread: the scope's subject must be the thread's key (the context
+// chip picks the thread), so a request never carries another subject.
+func (th *Thread) StartRequest(scope values.Scope, now time.Time) error {
+	if err := th.inScope(scope); err != nil {
+		return err
+	}
+	if err := th.StartTurn(now); err != nil {
+		return err
+	}
+	th.current.scope = scope
+	return nil
+}
+
+func (th *Thread) inScope(scope values.Scope) error {
+	if k, err := KeyOf(scope); err != nil || k != th.key {
+		return fmt.Errorf("%w: the scope belongs to another thread", ErrInvalidThread)
+	}
 	return nil
 }
 
@@ -250,6 +305,9 @@ func (th *Thread) BeginStep(now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if len(t.open) > 0 {
+		return "", ErrResultsPending
+	}
 	if t.budget.Steps >= MaxSteps {
 		return "", th.stopBudget("steps", now)
 	}
@@ -258,6 +316,7 @@ func (th *Thread) BeginStep(now time.Time) (string, error) {
 	}
 	t.budget.Steps++
 	t.stepOpen = true
+	t.retry = 0
 	t.updatedAt, th.updatedAt = now, now
 	return th.stepKey(t), nil
 }
@@ -274,7 +333,13 @@ func (th *Thread) StepKey() (string, error) {
 	return th.stepKey(t), nil
 }
 
+// stepKey is ag:<thread>:<turn>:<step>, plus :r<N> after the student's N-th «Повторить» of a failed step: the Hub
+// replays a failure of a key for a day, so a retry needs a new key, while «Продолжить» after a lost answer must
+// repeat the same one (free replay).
 func (th *Thread) stepKey(t *Turn) string {
+	if t.retry > 0 {
+		return fmt.Sprintf("ag:%s:%d:%d:r%d", th.id, t.number, t.budget.Steps, t.retry)
+	}
 	return fmt.Sprintf("ag:%s:%d:%d", th.id, t.number, t.budget.Steps)
 }
 
@@ -357,6 +422,8 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 	}
 	adm := Admission{Class: class, Paid: rule.Paid, PlanStep: -1}
 	if !class.IsWrite() {
+		// Paid R calls (answer_question, inspect_upload) are reads: they do not count as the paid job without a plan.
+		t.admitted(call, adm)
 		return adm, nil
 	}
 
@@ -365,7 +432,7 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 	}
 	if len(t.approved) > 0 {
 		for i, s := range t.approved {
-			if !t.used[i] && s.Matches(call) {
+			if !t.used[i] && s.Matches(call) && t.deferredBound(s, i, call) {
 				adm.PlanStep = i
 				break
 			}
@@ -397,8 +464,16 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 			return Admission{}, err
 		}
 	}
+	t.admitted(call, adm)
 	t.updatedAt, th.updatedAt = now, now
 	return adm, nil
+}
+
+// admitted marks the open call (if the step's calls were recorded with Expect) as allowed to run.
+func (t *Turn) admitted(call values.Call, adm Admission) {
+	if oc := t.openCall(call.ID()); oc != nil && !oc.Answered {
+		oc.Tool, oc.PlanStep, oc.Admitted = call.Tool(), adm.PlanStep, true
+	}
 }
 
 func (th *Thread) known(context values.RefSet) values.RefSet {
@@ -461,6 +536,7 @@ func (th *Thread) ApprovePlan(now time.Time) error {
 	}
 	t.approved, t.proposed = t.proposed, nil
 	t.used = make([]bool, len(t.approved))
+	t.created = nil // step indexes refer to the plan they were created under
 	return nil
 }
 
@@ -477,7 +553,7 @@ func (th *Thread) RevisePlan(now time.Time) error {
 	if err := th.move(StatusPlanning, now); err != nil {
 		return err
 	}
-	t.proposed, t.approved, t.used = nil, nil, nil
+	t.proposed, t.approved, t.used, t.created = nil, nil, nil, nil
 	return nil
 }
 
@@ -561,10 +637,61 @@ func (th *Thread) Continue(now time.Time) error {
 	if t.status != StatusStopped {
 		return fmt.Errorf("%w: request is not stopped", ErrInvalidTransition)
 	}
-	if t.stopReason == values.StopBudget {
+	switch t.stopReason {
+	case values.StopBudget:
 		return ErrBudgetExceeded
+	case values.StopFailed:
+		return ErrRetryRequired
+	case values.StopExpired:
+		return ErrRestartRequired
 	}
 	return th.move(t.resume, now)
+}
+
+// Retry is «Повторить» after a step failed for good: the open step is sent again under a new key (StepKey). After
+// MaxRetries retries the request stops for good (budget).
+func (th *Thread) Retry(now time.Time) error {
+	t, err := th.turn()
+	if err != nil {
+		return err
+	}
+	if t.status != StatusStopped || t.stopReason != values.StopFailed || !t.stepOpen {
+		return fmt.Errorf("%w: no failed step to retry", ErrInvalidTransition)
+	}
+	if t.retry >= MaxRetries {
+		t.stopReason = values.StopBudget
+		t.updatedAt, th.updatedAt = now, now
+		return fmt.Errorf("%w: retries", ErrBudgetExceeded)
+	}
+	if err := th.move(t.resume, now); err != nil {
+		return err
+	}
+	t.retry++
+	return nil
+}
+
+// Restart starts the request again after its model turn expired on the Hub: the stopped request is cancelled, a new
+// one starts, and only its own history is sent from now on (HistoryFrom). The case adds the student's text again.
+func (th *Thread) Restart(now time.Time) error {
+	t, err := th.turn()
+	if err != nil {
+		return err
+	}
+	if t.status != StatusStopped || t.stopReason != values.StopExpired {
+		return fmt.Errorf("%w: the request did not expire", ErrInvalidTransition)
+	}
+	if len(t.open) > 0 {
+		return ErrResultsPending
+	}
+	scope := t.scope
+	if err := th.Cancel(now); err != nil {
+		return err
+	}
+	if err := th.StartRequest(scope, now); err != nil {
+		return err
+	}
+	th.historyFrom = th.turns
+	return nil
 }
 
 // Cancel ends a request that is not finished.
@@ -578,12 +705,37 @@ func (th *Thread) Cancel(now time.Time) error {
 	}
 	t.stepOpen = false
 	t.proposed = nil
+	th.Abandon(values.RefuseNotDone, now)
 	return nil
 }
 
 // IsRefusal reports whether err refuses a single call (is_error for the planner) rather than ending the request.
 func IsRefusal(err error) bool {
-	return errors.Is(err, ErrPlanRequired) || errors.Is(err, ErrNotInPlan) || errors.Is(err, ErrTooManyRounds) ||
-		errors.Is(err, ErrInvalidPlan) || errors.Is(err, actionpolicy.ErrUnknownID) || errors.Is(err, values.ErrUnknownTool) ||
-		errors.Is(err, values.ErrInvalidArguments)
+	_, ok := RefusalOf(err)
+	return ok
+}
+
+// RefusalOf maps an error that refuses a single call to the enum the planner gets back (ADR-0022: never the text).
+// A budget stop is a refusal of that call too; the request is STOPPED.
+func RefusalOf(err error) (values.Refusal, bool) {
+	switch {
+	case errors.Is(err, ErrPlanRequired):
+		return values.RefusePlanRequired, true
+	case errors.Is(err, ErrNotInPlan):
+		return values.RefuseNotInPlan, true
+	case errors.Is(err, ErrTooManyRounds):
+		return values.RefuseTooManyRounds, true
+	case errors.Is(err, ErrInvalidPlan):
+		return values.RefuseInvalidPlan, true
+	case errors.Is(err, actionpolicy.ErrUnknownID):
+		return values.RefuseUnknownID, true
+	case errors.Is(err, values.ErrUnknownTool), errors.Is(err, actionpolicy.ErrUnknownTool):
+		return values.RefuseUnknownTool, true
+	case errors.Is(err, values.ErrInvalidArguments), errors.Is(err, values.ErrInvalidRef),
+		errors.Is(err, values.ErrInvalidDate), errors.Is(err, values.ErrInvalidText):
+		return values.RefuseInvalidArgs, true
+	case errors.Is(err, ErrBudgetExceeded):
+		return values.RefuseBudget, true
+	}
+	return "", false
 }

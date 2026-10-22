@@ -38,6 +38,7 @@ var t0 = time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 type fixture struct {
 	svc      *agentstep.Service
 	store    *testenv.QuotaStore
+	turns    *testenv.AgentTurns
 	provider *testenv.FakeAgentProvider
 	limiter  *testenv.FakeLimiter
 	clock    *testenv.FakeClock
@@ -98,18 +99,19 @@ func newFixture(t *testing.T, limit int64, steps ...testenv.AgentProviderStep) f
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newFixtureWith(t, limit, sealer, testenv.NewQuotaStore(), steps...)
+	return newFixtureWith(t, limit, sealer, testenv.NewQuotaStore(), testenv.NewAgentTurns(), steps...)
 }
 
-func newFixtureWith(t *testing.T, limit int64, sealer *seal.Sealer, store *testenv.QuotaStore, steps ...testenv.AgentProviderStep) fixture {
+func newFixtureWith(t *testing.T, limit int64, sealer *seal.Sealer, store *testenv.QuotaStore, turns *testenv.AgentTurns,
+	steps ...testenv.AgentProviderStep) fixture {
 	t.Helper()
 	_, system, catalog := profiles(t)
 	f := fixture{
-		store: store, provider: testenv.NewFakeAgentProvider(steps...), limiter: &testenv.FakeLimiter{},
+		store: store, turns: turns, provider: testenv.NewFakeAgentProvider(steps...), limiter: &testenv.FakeLimiter{},
 		clock: testenv.NewFakeClock(t0), sealer: sealer, logs: &syncBuffer{}, system: system, catalog: catalog,
 	}
 	svc, err := agentstep.New(agentstep.Deps{
-		Accounts: f.store, Provider: f.provider, Limiter: f.limiter, Clock: f.clock, Random: testenv.Random{}, Models: models(t),
+		Accounts: f.store, Turns: f.turns, Provider: f.provider, Limiter: f.limiter, Clock: f.clock, Random: testenv.Random{}, Models: models(t),
 		Sealer: sealer, Log: slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}, config(t, limit))
 	if err != nil {
@@ -208,7 +210,7 @@ func TestNewValidates(t *testing.T) {
 	store := testenv.NewQuotaStore()
 	sealer, _ := testenv.Sealer(1)
 	full := agentstep.Deps{
-		Accounts: store, Provider: testenv.NewFakeAgentProvider(), Limiter: &testenv.FakeLimiter{}, Clock: testenv.NewFakeClock(t0),
+		Accounts: store, Turns: testenv.NewAgentTurns(), Provider: testenv.NewFakeAgentProvider(), Limiter: &testenv.FakeLimiter{}, Clock: testenv.NewFakeClock(t0),
 		Random: testenv.Random{}, Models: models(t), Sealer: sealer, Log: slog.New(slog.DiscardHandler),
 	}
 	if _, err := agentstep.New(full, config(t, 10)); err != nil {
@@ -217,6 +219,7 @@ func TestNewValidates(t *testing.T) {
 	_, system, catalog := profiles(t)
 	broken := map[string]func(*agentstep.Deps, *agentstep.Config){
 		"accounts":          func(d *agentstep.Deps, _ *agentstep.Config) { d.Accounts = nil },
+		"turns":             func(d *agentstep.Deps, _ *agentstep.Config) { d.Turns = nil },
 		"provider":          func(d *agentstep.Deps, _ *agentstep.Config) { d.Provider = nil },
 		"limiter":           func(d *agentstep.Deps, _ *agentstep.Config) { d.Limiter = nil },
 		"clock":             func(d *agentstep.Deps, _ *agentstep.Config) { d.Clock = nil },
@@ -390,15 +393,15 @@ func TestForgedSeals(t *testing.T) {
 // TestSealRotation: after a key rotation an echo sealed with the old key still verifies and a replay is sealed with
 // the new key; once the old key is dropped, its echoes are refused.
 func TestSealRotation(t *testing.T) {
-	store := testenv.NewQuotaStore()
+	store, turns := testenv.NewQuotaStore(), testenv.NewAgentTurns()
 	old, _ := testenv.Sealer(1)
-	first := newFixtureWith(t, 1_000_000, old, store, twoCalls(t)).step(t, command(alice, "ag:1"))
+	first := newFixtureWith(t, 1_000_000, old, store, turns, twoCalls(t)).step(t, command(alice, "ag:1"))
 	if first.Seal[0] != 1 {
 		t.Fatalf("seal version = %d", first.Seal[0])
 	}
 
 	rotated, _ := testenv.Sealer(2, 1)
-	f := newFixtureWith(t, 1_000_000, rotated, store, answer(t, 1, 1, toolCall(t, "toolu_09", "reply", `{"text":"Ок."}`)))
+	f := newFixtureWith(t, 1_000_000, rotated, store, turns, answer(t, 1, 1, toolCall(t, "toolu_09", "reply", `{"text":"Ок."}`)))
 	if res := f.step(t, command(alice, "ag:2", echo(first)...)); res.Seal[0] != 2 {
 		t.Fatalf("new seal version = %d", res.Seal[0])
 	}
@@ -408,7 +411,7 @@ func TestSealRotation(t *testing.T) {
 	}
 
 	dropped, _ := testenv.Sealer(2)
-	g := newFixtureWith(t, 1_000_000, dropped, store)
+	g := newFixtureWith(t, 1_000_000, dropped, store, turns)
 	if _, err := g.svc.Step(t.Context(), command(alice, "ag:3", echo(first)...)); !errors.Is(err, agentstep.ErrBadSeal) {
 		t.Fatalf("echo of a dropped key: err = %v", err)
 	}
@@ -621,7 +624,7 @@ func TestOutputFloorIsPerProfile(t *testing.T) {
 	}
 	provider := testenv.NewFakeAgentProvider(twoCalls(t))
 	deps := agentstep.Deps{
-		Accounts: testenv.NewQuotaStore(), Provider: provider, Limiter: &testenv.FakeLimiter{}, Clock: testenv.NewFakeClock(t0),
+		Accounts: testenv.NewQuotaStore(), Turns: testenv.NewAgentTurns(), Provider: provider, Limiter: &testenv.FakeLimiter{}, Clock: testenv.NewFakeClock(t0),
 		Random: testenv.Random{}, Models: models(t), Sealer: sealer, Log: slog.New(slog.DiscardHandler),
 	}
 	cfg := config(t, 1_000_000)

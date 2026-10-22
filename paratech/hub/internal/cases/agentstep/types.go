@@ -15,6 +15,7 @@ import (
 // Deps are the ports and domain services of the step; all are required.
 type Deps struct {
 	Accounts Accounts
+	Turns    AssistantTurns
 	Provider Provider
 	Limiter  RateLimiter
 	Clock    Clock

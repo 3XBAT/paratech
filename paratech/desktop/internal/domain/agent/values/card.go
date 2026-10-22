@@ -209,10 +209,19 @@ const (
 	StopBudget  StopReason = "budget"  // «Остановлено: лимит просьбы»; cannot be continued
 	StopOffline StopReason = "offline" // «Не завершено: нет связи · Продолжить»
 	StopUser    StopReason = "user"    // the student pressed «Стоп»; may be continued
+	StopQuota   StopReason = "quota"   // the quota is used up; «Продолжить» repeats the same key later
+	StopFailed  StopReason = "failed"  // the step failed for good; «Повторить» sends it again with a new key
+	StopExpired StopReason = "expired" // the Hub no longer keeps the model turn; the request starts again from its text
 )
 
 // Valid reports whether r is one of the reasons.
-func (r StopReason) Valid() bool { return r == StopBudget || r == StopOffline || r == StopUser }
+func (r StopReason) Valid() bool {
+	switch r {
+	case StopBudget, StopOffline, StopUser, StopQuota, StopFailed, StopExpired:
+		return true
+	}
+	return false
+}
 
 // StoppedCard tells why a request stopped.
 type StoppedCard struct {

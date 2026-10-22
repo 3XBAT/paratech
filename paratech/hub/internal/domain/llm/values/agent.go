@@ -143,13 +143,15 @@ const (
 )
 
 // Turn is one history turn of a thread: what the student typed, an echo of calls the Hub returned (with their seal),
-// or the results of those calls. Build it with StudentTurn, CallsTurn or ResultsTurn.
+// or the results of those calls. Build it with StudentTurn, CallsTurn or ResultsTurn. An echo inside an AgentCall may
+// also carry the kept assistant turn of its calls (AgentCall.WithAssistant).
 type Turn struct {
-	kind    TurnKind
-	text    string
-	calls   []ToolCall
-	seal    []byte
-	results []ToolResult
+	kind      TurnKind
+	text      string
+	calls     []ToolCall
+	seal      []byte
+	results   []ToolResult
+	assistant AssistantTurn
 }
 
 // StudentTurn checks the student's text: non-blank, valid UTF-8 without NUL, at most MaxStudentTextBytes.
@@ -210,9 +212,12 @@ func (t Turn) Seal() []byte { return bytes.Clone(t.seal) }
 // Results are the results of a TurnResults (a copy).
 func (t Turn) Results() []ToolResult { return append([]ToolResult(nil), t.results...) }
 
+// Assistant is the kept assistant turn of an echo, zero when the call carries none.
+func (t Turn) Assistant() AssistantTurn { return t.assistant }
+
 // bytes is the size of the texts of the turn.
 func (t Turn) bytes() int64 {
-	n := int64(len(t.text)) + int64(len(t.seal))
+	n := int64(len(t.text)) + int64(len(t.seal)) + int64(len(t.assistant.raw))
 	for _, c := range t.calls {
 		n += int64(len(c.callID) + len(c.tool) + len(c.arguments))
 	}

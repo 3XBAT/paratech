@@ -1,6 +1,10 @@
 package values
 
-import "paratech/desktop/internal/domain/shared"
+import (
+	"fmt"
+
+	"paratech/desktop/internal/domain/shared"
+)
 
 // Types of one planner step on the Hub (gateway.proto AgentStep, ADR-0023). They cross the AgentModel port of
 // cases/agentturn, so they live here (ARCH-26); the hubclient adapter maps them to the protobuf messages.
@@ -32,6 +36,56 @@ type HistoryTurn struct {
 	Results     []ToolResult
 }
 
+// Validate checks that exactly one part of the entry is set and that it is within the Hub limits.
+func (h HistoryTurn) Validate() error {
+	set := 0
+	if h.StudentText != "" {
+		set++
+		if len(h.StudentText) > MaxStudentTextBytes {
+			return fmt.Errorf("%w: student text longer than %d bytes", ErrInvalidResult, MaxStudentTextBytes)
+		}
+	}
+	if h.Calls != nil {
+		set++
+		if len(h.Calls.Calls) == 0 || len(h.Calls.Seal) == 0 {
+			return fmt.Errorf("%w: an echo needs calls and a seal", ErrInvalidResult)
+		}
+	}
+	if len(h.Results) > 0 {
+		set++
+		for _, r := range h.Results {
+			if err := r.Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	if set != 1 {
+		return fmt.Errorf("%w: a history entry holds exactly one of text, calls and results", ErrInvalidResult)
+	}
+	return nil
+}
+
+// Size returns the bytes of the entry that count toward the history window.
+func (h HistoryTurn) Size() int {
+	n := len(h.StudentText)
+	if h.Calls != nil {
+		n += len(h.Calls.Seal)
+		for _, c := range h.Calls.Calls {
+			n += len(c.CallID) + len(c.Tool) + len(c.ArgumentsJSON)
+		}
+	}
+	for _, r := range h.Results {
+		n += len(r.CallID) + len(r.ResultJSON)
+	}
+	return n
+}
+
+// HistoryEntry is a stored history entry with the number of the request it belongs to.
+type HistoryEntry struct {
+	Turn  int
+	Entry HistoryTurn
+}
+
 // StepRequest is one planner step: the key ag:<thread>:<turn>:<step>, the shared base, the current scope and the
 // history window of this thread only.
 type StepRequest struct {
@@ -41,6 +95,28 @@ type StepRequest struct {
 	Scope           Scope
 	History         []HistoryTurn
 	MaxOutputTokens int
+}
+
+// MaxReplyCalls bounds the calls of a reply the desktop records; over the budget of 4 the request stops anyway.
+const MaxReplyCalls = 8
+
+// Validate checks the shape of a reply before anything of it is recorded: 1..MaxReplyCalls calls with well-formed,
+// distinct call IDs, a seal, and non-negative usage. The calls themselves are parsed one by one with ParseCall.
+func (r StepReply) Validate() error {
+	if len(r.Calls.Calls) == 0 || len(r.Calls.Calls) > MaxReplyCalls || len(r.Calls.Seal) == 0 {
+		return fmt.Errorf("%w: a reply has 1..%d sealed calls", ErrInvalidResult, MaxReplyCalls)
+	}
+	if r.InputTokens < 0 || r.OutputTokens < 0 {
+		return fmt.Errorf("%w: negative usage", ErrInvalidResult)
+	}
+	ids := map[string]bool{}
+	for _, c := range r.Calls.Calls {
+		if err := checkCallID(c.CallID); err != nil || ids[c.CallID] {
+			return fmt.Errorf("%w: call ids must be distinct and well formed", ErrInvalidResult)
+		}
+		ids[c.CallID] = true
+	}
+	return nil
 }
 
 // StepReply is the Hub's answer: 1..4 sealed calls and the usage the budget counts.

@@ -119,7 +119,10 @@ every 5 minutes) then clears its answer, so no output outlives the retention whi
 ## Hub agent step
 `GatewayService.AgentStep` (ADR-0023): one planner step with tool use. The Hub picks the prompt and tool catalog
 (`hub/pkg/prompts/agent/panel/v<N>`, version = `catalog_version`) and the planner alias; the client sends neither. Rate limit,
-ledger, replay and conflicts work as for `Complete`; echoed tool calls must carry the Hub's seal. Settings:
+ledger, replay and conflicts work as for `Complete`; echoed tool calls must carry the Hub's seal. The model's raw turn
+(thinking with its signature) is kept in `agent_turns` per API key and sent back with the next step; the client never sees
+it, and it is purged with the stored answers. A continuation whose kept turn is gone is `failed_precondition`, not charged.
+Settings:
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|

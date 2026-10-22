@@ -38,6 +38,21 @@ type agentWireRequest struct {
 type agentWireMessage struct {
 	Role    string           `json:"role"`
 	Content []agentWireBlock `json:"content"`
+	// raw, when set, is the kept assistant content of an echo, sent instead of Content as it was received: the API
+	// wants the thinking blocks of the turn back unchanged, signatures included (docs/refs/anthropic.md section 7).
+	raw json.RawMessage
+}
+
+// MarshalJSON sends raw as the content when it is set.
+func (m agentWireMessage) MarshalJSON() ([]byte, error) {
+	if m.raw == nil {
+		type plain agentWireMessage // without the method, so this does not recurse
+		return json.Marshal(plain(m))
+	}
+	return json.Marshal(struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}{Role: m.Role, Content: m.raw})
 }
 
 // agentWireBlock is a text, tool_use or tool_result block; the fields of the other kinds stay empty and are omitted.
@@ -91,12 +106,13 @@ func newAgentWireRequest(call values.AgentCall) agentWireRequest {
 }
 
 // agentMessages maps the turns to messages: student text and tool results are user turns, echoed calls the assistant
-// turn with tool_use blocks. Consecutive turns of one role share a message (results first, as the API wants tool
-// results at the start of a user message). The last block carries the second cache breakpoint.
+// turn with tool_use blocks, or the kept raw turn of the model when the echo carries one. Consecutive turns of one
+// role share a message (results first, as the API wants tool results at the start of a user message). The last block
+// carries the second cache breakpoint.
 func agentMessages(turns []values.Turn) []agentWireMessage {
 	var msgs []agentWireMessage
 	add := func(role string, blocks ...agentWireBlock) {
-		if n := len(msgs); n > 0 && msgs[n-1].Role == role {
+		if n := len(msgs); n > 0 && msgs[n-1].Role == role && msgs[n-1].raw == nil {
 			msgs[n-1].Content = append(msgs[n-1].Content, blocks...)
 			return
 		}
@@ -107,6 +123,10 @@ func agentMessages(turns []values.Turn) []agentWireMessage {
 		case values.TurnStudentText:
 			add(roleUser, agentWireBlock{Type: blockText, Text: t.Text()})
 		case values.TurnCalls:
+			if kept := t.Assistant(); !kept.IsZero() {
+				msgs = append(msgs, agentWireMessage{Role: roleAssistant, raw: json.RawMessage(kept.Raw())})
+				continue
+			}
 			for _, c := range t.Calls() {
 				add(roleAssistant, agentWireBlock{Type: blockToolUse, ID: c.CallID(), Name: c.Tool(), Input: json.RawMessage(c.Arguments())})
 			}
@@ -116,18 +136,20 @@ func agentMessages(turns []values.Turn) []agentWireMessage {
 			}
 		}
 	}
-	if n := len(msgs); n > 0 {
+	// The turn order ends every echo with its results, so the last message is never a raw one; checked anyway.
+	if n := len(msgs); n > 0 && msgs[n-1].raw == nil {
 		last := &msgs[n-1].Content[len(msgs[n-1].Content)-1]
 		last.CacheControl = &wireCacheControl{Type: cacheEphemeral}
 	}
 	return msgs
 }
 
+// agentWireResponse keeps content raw: it is read as blocks and also kept as it is for the next step.
 type agentWireResponse struct {
-	Type       string               `json:"type"`
-	Content    []agentWireBlockRead `json:"content"`
-	StopReason *string              `json:"stop_reason"`
-	Usage      *wireUsage           `json:"usage"`
+	Type       string          `json:"type"`
+	Content    json.RawMessage `json:"content"`
+	StopReason *string         `json:"stop_reason"`
+	Usage      *wireUsage      `json:"usage"`
 }
 
 type agentWireBlockRead struct {
@@ -137,11 +159,12 @@ type agentWireBlockRead struct {
 	Input json.RawMessage `json:"input"`
 }
 
-// readAgentAnswer decodes a 200 answer to a planner call. Text and thinking blocks are ignored; every tool_use block
+// readAgentAnswer decodes a 200 answer to a planner call. Text and thinking blocks are not read; every tool_use block
 // becomes a call with its input re-encoded canonically (sorted keys, no duplicate keys), so the arguments the Hub
-// checks, seals and returns are one exact string. The stop reason is checked first: a refusal is a refused answer.
-// A block that is not a valid call makes a malformed answer and a text-only answer one without tool use, all with
-// their usage; a body without usage is a permanent error.
+// checks, seals and returns are one exact string. The whole content array is kept raw in the answer (the assistant
+// turn the next step sends back). The stop reason is checked first: a refusal is a refused answer. A block that is
+// not a valid call, or content too large to keep, makes a malformed answer and a text-only answer one without tool
+// use, all with their usage; a body without usage is a permanent error.
 func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != contentTypeJSON {
 		return values.AgentAnswer{}, permanent("unexpected content type")
@@ -153,9 +176,17 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if len(body) > maxResponseBytes {
 		return values.AgentAnswer{}, permanent("response too large")
 	}
-	var r agentWireResponse
+	var (
+		r      agentWireResponse
+		blocks []agentWireBlockRead
+	)
 	if err := json.Unmarshal(body, &r); err != nil || r.Type != responseTypeMessage || r.Usage == nil {
 		return values.AgentAnswer{}, permanent("malformed response")
+	}
+	if len(r.Content) > 0 && string(r.Content) != "null" {
+		if err := json.Unmarshal(r.Content, &blocks); err != nil {
+			return values.AgentAnswer{}, permanent("malformed response")
+		}
 	}
 	usage, ok := r.Usage.toUsage()
 	if !ok {
@@ -165,7 +196,7 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 		return values.RefusedAgentAnswer(usage), nil
 	}
 	var calls []values.ToolCall
-	for _, b := range r.Content {
+	for _, b := range blocks {
 		if b.Type != blockToolUse {
 			continue
 		}
@@ -182,7 +213,15 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	}
 	// With tool choice auto the model may answer in plain text: no tool_use block is an unusable, billed answer.
 	toolUse := r.StopReason != nil && *r.StopReason == stopReasonToolUse && len(calls) > 0
-	return values.NewAgentAnswer(calls, usage, toolUse), nil
+	answer := values.NewAgentAnswer(calls, usage, toolUse)
+	if !toolUse {
+		return answer, nil
+	}
+	turn, err := values.NewAssistantTurn(string(r.Content))
+	if err != nil {
+		return values.MalformedAgentAnswer(usage), nil
+	}
+	return answer.WithAssistant(turn), nil
 }
 
 // canonicalObject re-encodes a JSON object with sorted keys, exact numbers and no HTML escaping.

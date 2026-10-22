@@ -53,13 +53,18 @@ calls in the history; the seal stops that. It does not stop free text in student
 - **Logs**: the Hub writes no texts; results kept ≤ 24 h as in ADR-0005(d).
 
 ## Consequences
-- Use case `hub/cases/agentstep`: rate limit → limits → seal check → reserve → provider → schema check → settle → new
-  seal.
+- Use case `hub/cases/agentstep`: rate limit → limits → seal check → reserve → kept turn → provider → schema check →
+  keep turn → settle → new seal.
 - Cache reads/writes are counted as ordinary tokens in the tester's quota; the saving is the owner's.
 - `prompt_ref` for existing operations (`SUMMARY`, `EXTRACT`, `DRAFT`, `LECTURE_TEXT`) comes later, one operation at a
   time; it breaks the replay fixtures of TASK-093 until they are updated.
 - The seal is bound to the thread but not to the turn/step position, so a sealed call set could be echoed again within
   the same thread; the desktop provenance and plan checks bound that.
 - Open: minimum cacheable prefix length and prices are to be checked in `docs/refs/anthropic.md` before TASK-114.
-- Open: with default (adaptive) thinking on, whether echoed `tool_use` turns need their `thinking` blocks (the Hub
-  does not keep them); to verify before rollout.
+- Thinking (TASK-116): with default thinking the API wants the last assistant turn back with its `thinking` blocks
+  and signatures unchanged. The Hub keeps the raw content of every answer whose calls it returns in Postgres
+  `agent_turns` (migration 0007), keyed by API key ID + `CallSetKey` (SHA-256 of thread, profile, catalog version and
+  calls, what the seal binds), written before settle, purged with stored results (≤ 24 h), never logged or returned.
+  The next step sends it in place of the last echo (earlier echoes stay plain `tool_use`). No kept turn:
+  `failed_precondition` before the provider call, nothing charged; a replay does not need it. A failed write is only
+  logged (the answer stands, its continuation fails). The kept turn is not in the reservation; usage is settled as is.

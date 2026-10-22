@@ -21,6 +21,7 @@ const (
 	msgBadSeal        = "the seal of echoed calls does not match"
 	msgAgentDisabled  = "agent steps are not enabled on this Hub"
 	msgAgentProvider  = "the LLM provider failed or answered without valid tool calls"
+	msgTurnGone       = "the Hub no longer keeps the model turn of the echoed calls; start again from the student's text"
 )
 
 // AgentStepper is what the gateway handler needs from the agent step use case (ARCH-42).
@@ -162,6 +163,9 @@ func (g *Gateway) agentError(ctx context.Context, err error) error {
 		})
 	case errors.Is(err, agentstep.ErrAttemptRunning):
 		return connectrpc.NewError(connectrpc.CodeAborted, errors.New(msgRunning))
+	case errors.Is(err, agentstep.ErrTurnGone):
+		// Permanent and not charged; no new ErrorCode, so the contract stays as it is.
+		return connectrpc.NewError(connectrpc.CodeFailedPrecondition, errors.New(msgTurnGone))
 	case errors.Is(err, agentstep.ErrBadSeal):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgBadSeal))
 	case errors.Is(err, agentstep.ErrUnknownCatalog):

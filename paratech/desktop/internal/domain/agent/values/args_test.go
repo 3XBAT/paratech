@@ -290,6 +290,26 @@ func TestPlanSteps(t *testing.T) {
 		t.Fatal("decoded plan lost the deferred subject")
 	}
 
+	// Only an ID the step needs is deferred, and a call must fill in every deferred ID.
+	lessonStep, err := DecodePlanSteps(`[{"tool":"create_folder","args":{"subject":"s1","name":"А"}},` +
+		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1","lesson":"l1"}}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := lessonStep[1].Deferred(); len(d) != 0 {
+		t.Fatalf("folder deferred next to a planned lesson: %v", d)
+	}
+	if c, _ := ParseCall("c4", "place_upload", `{"upload":"u1","subject":"s1","lesson":"l1"}`); !lessonStep[1].Matches(c) {
+		t.Fatal("the planned lesson step does not match")
+	}
+	if d := steps[5].Deferred(); len(d) != 1 || d[0] != "folder" {
+		t.Fatalf("deferred of the created folder step = %v", d)
+	}
+	optional := PlanStep{tool: ToolFindLessons, args: Args{vals: map[string]argValue{}}, deferred: []string{"subject"}}
+	if c, _ := ParseCall("c5", "find_lessons", `{}`); optional.Matches(c) {
+		t.Fatal("a call without a deferred id matches")
+	}
+
 	bad := []struct{ name, steps string }{
 		{"empty", `[]`},
 		{"unknown tool", `[{"tool":"send_email"}]`},

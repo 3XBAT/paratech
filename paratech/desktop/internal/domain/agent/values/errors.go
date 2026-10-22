@@ -26,4 +26,11 @@ var (
 
 	// ErrInvalidScope is returned for a scope or base that breaks its invariants.
 	ErrInvalidScope = errors.New("invalid scope")
+
+	// ErrInvalidResult is returned for a tool result or a history entry that breaks its limits.
+	ErrInvalidResult = errors.New("invalid tool result")
+
+	// ErrTurnGone means the Hub no longer keeps the model turn of the last echoed calls (ADR-0023), so the request
+	// cannot continue; it starts again from the student's text. AgentModel errors wrap it.
+	ErrTurnGone = errors.New("the hub no longer keeps the model turn")
 )

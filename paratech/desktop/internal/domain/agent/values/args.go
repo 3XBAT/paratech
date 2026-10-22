@@ -51,6 +51,9 @@ func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
 	return Call{id: callID, tool: t, args: args}, nil
 }
 
+// CheckCallID checks a call ID given by the Hub: 1..MaxCallIDBytes ASCII letters, digits, '-' or '_'.
+func CheckCallID(id string) error { return checkCallID(id) }
+
 func checkCallID(id string) error {
 	if id == "" || len(id) > MaxCallIDBytes {
 		return fmt.Errorf("%w: call id must have 1..%d bytes", ErrInvalidArguments, MaxCallIDBytes)

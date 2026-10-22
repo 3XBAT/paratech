@@ -19,7 +19,7 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
+	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
 	"material_lessons", "materials", "proposals", "recordings", "schedule_entries", "settings", "stt_models", "stt_speeds",
 	"subject_aliases", "subject_folders", "subjects", "summaries", "transcript_parts", "transcripts",
 }
@@ -29,10 +29,11 @@ var contractTables = []string{
 // Live transcript parts are replaced by their number, never saved through an aggregate (TASK-079); so are the
 // measured recognition speeds (TASK-084). The deadline events left to remove are only inserted and removed (TASK-095).
 // The aliases and folders of a subject and the lesson links of a material are rows of those aggregates, which carry
-// the version (TASK-121).
+// the version (TASK-121). Agent requests are saved with their thread, which carries the version, and the agent
+// history is append-only (TASK-116).
 var unversionedTables = map[string]bool{
 	"homework_draft_revisions": true, "transcript_parts": true, "stt_speeds": true, "deadline_event_removals": true,
-	"subject_aliases": true, "subject_folders": true, "material_lessons": true,
+	"subject_aliases": true, "subject_folders": true, "material_lessons": true, "agent_turns": true, "agent_steps": true,
 }
 
 func tableNames(t *testing.T, q interface {
@@ -85,8 +86,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 21 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 21", first, err)
+	if err != nil || first != 22 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 22", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")

@@ -8,6 +8,64 @@ import (
 	"database/sql"
 )
 
+type AgentAction struct {
+	ID            string
+	ThreadID      string
+	Turn          int64
+	CallID        string
+	Tool          string
+	Status        string
+	Compensation  sql.NullString
+	TargetVersion int64
+	Proposal      string
+	Version       int64
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
+type AgentStep struct {
+	ThreadID  string
+	Seq       int64
+	Turn      int64
+	Entry     string
+	Body      string
+	CreatedAt int64
+}
+
+type AgentThread struct {
+	ID          string
+	SubjectKey  string
+	Turns       int64
+	HistoryFrom int64
+	Seen        string
+	Version     int64
+	CreatedAt   int64
+	UpdatedAt   int64
+}
+
+type AgentTurn struct {
+	ThreadID       string
+	Number         int64
+	Status         string
+	ResumeStatus   string
+	StopReason     string
+	Scope          string
+	Steps          int64
+	Writes         int64
+	PaidUnplanned  int64
+	PlannerInput   int64
+	QuestionRounds int64
+	StepOpen       int64
+	Retry          int64
+	ProposedPlan   string
+	ApprovedPlan   string
+	Used           string
+	OpenCalls      string
+	CreatedIds     string
+	StartedAt      int64
+	UpdatedAt      int64
+}
+
 type Assignment struct {
 	ID            string
 	LessonID      sql.NullString
