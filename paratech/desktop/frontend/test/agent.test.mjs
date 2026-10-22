@@ -170,6 +170,15 @@ test("a failed button operation keeps the plan and its buttons and only attaches
   assert.equal(next.entries[0].update.problem, "");
 });
 
+test("a refused button on a stopped request shows the stop card and the problem card", () => {
+  const s = stateWith(
+    { type: "update", update: update({ status: "STOPPED", stopReason: "offline" }) },
+    { type: "update", update: update({ status: "", cards: [], problem: "budget" }) },
+  );
+  const types = entryModel(s.entries[0]).cards.map((c) => c.type);
+  assert.deepEqual(types.slice(-2), ["stopped", "problem"]);
+});
+
 test("the first update of a sent request binds to it by scope, and the next ones by thread", () => {
   const s = stateWith(
     { type: "asked", id: 1, text: "вопрос", scope },

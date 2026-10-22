@@ -411,10 +411,11 @@ export function entryModel(e: Entry): EntryModel {
   const stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
   if (stop) {
     cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
-  } else if (u.problem !== "") {
+  }
+  if (u.problem !== "") {
     const next: ButtonId[] = u.problem === "retry_required" ? ["retry"] : u.problem === "restart_required" ? ["restart"] : [];
     cards.push({ type: "problem", text: updateProblemTexts[u.problem] ?? updateProblemTexts.failed, buttons: buttons(next) });
-  } else if (u.status === "CANCELLED") {
+  } else if (!stop && u.status === "CANCELLED") {
     cards.push({ type: "stopped", text: "Отменено", buttons: [] });
   }
   return { ...base, cards };
