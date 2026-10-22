@@ -47,6 +47,7 @@ import (
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/transcriptview"
 	"paratech/desktop/internal/domain/shared"
+	agentloop "paratech/desktop/internal/input/agent"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -101,9 +102,10 @@ type core struct {
 	// advice hands the silent-source advice of the recordings to the prompts once they are wired (TASK-082).
 	advice adviceRelay
 
-	// The agent core (wireAgent): the steps of a request and the action journal.
+	// The agent core (wireAgent): the steps of a request, the action journal and the Driver of the requests.
 	agent   *agentturn.Service
 	journal *agentjournal.Service
+	driver  *agentloop.Driver
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -347,7 +349,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: knowledge base: %w", err)
 	}
 
-	if err := c.wireAgent(e, llm, log); err != nil {
+	if err := c.wireAgent(e, llm, agentReads{
+		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
+	}, log); err != nil {
 		return err
 	}
 
@@ -423,6 +427,10 @@ func (n draftNames) DraftAssignment(ctx context.Context, id shared.AssignmentID)
 // close releases the storage in reverse order of opening. It is safe to call more than once.
 func (c *core) close() error {
 	var errs []error
+	if c.driver != nil {
+		c.driver.Close() // its requests write to the database
+		c.driver = nil
+	}
 	if c.components != nil {
 		errs = append(errs, c.components.Close())
 		c.components = nil

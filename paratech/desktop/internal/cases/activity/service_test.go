@@ -41,6 +41,9 @@ type fakeJobs struct {
 	badChain                  []shared.JobID
 	chainErr                  error
 	byRecording, byTranscript []job.Type
+
+	gets   []shared.JobID
+	getErr error
 }
 
 // fakeLessons returns the lessons by id; a missing one is shared.ErrNotFound, an id in bad fails.
@@ -88,6 +91,24 @@ func (f *fakeJobs) ListActivity(_ context.Context, limit int, hidden []job.Type)
 		}
 	}
 	return out, f.unreadable, f.err
+}
+
+// Get finds a job of any type in the list or the chains, as the store does.
+func (f *fakeJobs) Get(_ context.Context, id shared.JobID) (*job.Job, error) {
+	f.gets = append(f.gets, id)
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	all := slices.Clone(f.list)
+	for _, js := range f.chain {
+		all = append(all, js...)
+	}
+	for _, j := range all {
+		if j.ID() == id {
+			return j, nil
+		}
+	}
+	return nil, shared.ErrNotFound
 }
 
 func must(t *testing.T, err error) {

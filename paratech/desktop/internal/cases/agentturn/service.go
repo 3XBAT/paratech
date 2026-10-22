@@ -15,18 +15,19 @@ import (
 
 // Operation names, for error texts.
 const (
-	opNew      = "agentturn: new"
-	opAsk      = "agentturn: ask"
-	opSubmit   = "agentturn: submit"
-	opApprove  = "agentturn: approve plan"
-	opRevise   = "agentturn: revise plan"
-	opAnswer   = "agentturn: answer questions"
-	opStop     = "agentturn: stop"
-	opContinue = "agentturn: continue"
-	opRetry    = "agentturn: retry"
-	opRestart  = "agentturn: restart"
-	opCancel   = "agentturn: cancel"
-	opRecover  = "agentturn: recover"
+	opNew       = "agentturn: new"
+	opAsk       = "agentturn: ask"
+	opSubmit    = "agentturn: submit"
+	opApprove   = "agentturn: approve plan"
+	opRevise    = "agentturn: revise plan"
+	opAnswer    = "agentturn: answer questions"
+	opStop      = "agentturn: stop"
+	opContinue  = "agentturn: continue"
+	opRetry     = "agentturn: retry"
+	opRestart   = "agentturn: restart"
+	opCancel    = "agentturn: cancel"
+	opInterrupt = "agentturn: interrupt"
+	opRecover   = "agentturn: recover"
 )
 
 // MaxOutputTokens is the output cap of one planner step; the Hub raises it to its floor and clamps it to its cap.
@@ -253,10 +254,13 @@ func (s *Service) answerUI(ctx context.Context, ref TurnRef, tool values.Tool, o
 	return s.drive(ctx, c, op)
 }
 
+// maxStopSaves bounds the saves of «Стоп» when steps keep saving in between.
+const maxStopSaves = 3
+
 // Stop is «Стоп». It does not wait for a running step: the step's save then finds the stopped request and drops the
 // reply, and «Продолжить» repeats the step under the same key (a free replay on the Hub).
 func (s *Service) Stop(ctx context.Context, ref TurnRef) (Step, error) {
-	for attempt := 0; ; attempt++ {
+	for attempt := 1; ; attempt++ {
 		c, err := s.load(ctx, ref, opStop)
 		if err != nil {
 			return Step{}, err
@@ -265,7 +269,7 @@ func (s *Service) Stop(ctx context.Context, ref TurnRef) (Step, error) {
 			return Step{}, fmt.Errorf("%s: %w", opStop, err)
 		}
 		err = s.save(ctx, c)
-		if errors.Is(err, shared.ErrVersionConflict) && attempt == 0 {
+		if errors.Is(err, shared.ErrVersionConflict) && attempt < maxStopSaves {
 			continue // a step saved in between; stop the newer state
 		}
 		if err != nil {
@@ -369,6 +373,36 @@ func (s *Service) Cancel(ctx context.Context, ref TurnRef) (Step, error) {
 	return s.drive(ctx, c, opCancel)
 }
 
+// Interrupt closes a request whose calls the Driver will not run because its context ended (the app closes): calls
+// without results are answered as not done and the request stops as «нет связи», so «Продолжить» goes on as after
+// Recover. A request the student already stopped keeps its reason. Only «Отмена» cancels a request.
+func (s *Service) Interrupt(ctx context.Context, ref TurnRef) (Step, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for attempt := 1; ; attempt++ {
+		c, err := s.load(ctx, ref, opInterrupt)
+		if err != nil {
+			return Step{}, err
+		}
+		now := s.clock.Now()
+		c.th.Abandon(values.RefuseNotDone, now)
+		c.takeResults(s)
+		if turn, _ := c.th.Turn(); turn.Status() != thread.StatusStopped {
+			if err := c.th.Stop(values.StopOffline, now); err != nil {
+				return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
+			}
+		}
+		err = s.save(ctx, c)
+		if errors.Is(err, shared.ErrVersionConflict) && attempt < maxStopSaves {
+			continue // «Стоп» saved in between (it does not wait for s.mu)
+		}
+		if err != nil {
+			return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
+		}
+		return stepOf(c), nil
+	}
+}
+
 // Recover runs at start, before the panel works: a request left running by a crash stops as «нет связи» with its
 // step open (so «Продолжить» replays the same key), and calls that were handed to the Driver get the result
 // outcome_unknown (the journal shows them UNKNOWN). It returns the number of requests stopped.
@@ -445,7 +479,7 @@ func (s *Service) save(ctx context.Context, c *change) error {
 func stepOf(c *change) Step {
 	turn, _ := c.th.Turn()
 	st := Step{
-		Thread: c.th.ID(), Turn: turn.Number(), Status: turn.Status(), StopReason: turn.StopReason(),
+		Thread: c.th.ID(), Turn: turn.Number(), Scope: turn.Scope(), Status: turn.Status(), StopReason: turn.StopReason(),
 		Calls: c.calls, Cards: c.cards,
 	}
 	if turn.Status() == thread.StatusStopped {

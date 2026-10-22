@@ -146,6 +146,14 @@ const (
 	ActionRetry Action = "retry"
 )
 
+// JobState is what the agent's job_status shows of a job (TASK-117): no error text, payload or names.
+type JobState struct {
+	ID      shared.JobID
+	Type    job.Type
+	Status  job.Status
+	Percent int
+}
+
 // Job is one row of the jobs screen.
 type Job struct {
 	ID          shared.JobID

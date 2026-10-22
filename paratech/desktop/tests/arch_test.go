@@ -606,6 +606,7 @@ var agentPackages = []string{
 	"internal/domain/agent/services/actionpolicy",
 	"internal/cases/agentturn",
 	"internal/cases/agentjournal",
+	"internal/input/agent",
 }
 
 func TestAgentLayout(t *testing.T) {
@@ -614,10 +615,75 @@ func TestAgentLayout(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(dir), "doc.go")); err != nil {
 			t.Errorf("ARCH-01: %s: agent package has no doc.go: %v", dir, err)
 		}
-		if got := classify(dir).layer; got != layerDomain && got != layerCases {
+		if got := classify(dir).layer; got != layerDomain && got != layerCases && got != layerInput {
 			t.Errorf("%s is classified as %s", dir, got)
 		}
 	}
+}
+
+// irreversibleVerbs start the names of methods that confirm, execute, delete or send: the agent has no path to them
+// (ADR-0021, ADR-0022), so no exported method or interface method of input/agent may have such a name.
+var irreversibleVerbs = []string{"Confirm", "Execute", "Delete", "Send"}
+
+func TestAgentDriverHasNoIrreversibleMethods(t *testing.T) {
+	v, err := checkNoIrreversible(moduleRoot(t), "internal/input/agent")
+	report(t, v, err)
+}
+
+func TestCheckNoIrreversibleDetects(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"internal/input/agent/x.go": "package agent\n\ntype D struct{}\n\nfunc (D) ConfirmSend() {}\n\nfunc (D) ask() {}\n\n" +
+			"type P interface{ Execute() }\n",
+		"internal/input/agent/x_test.go": "package agent\n\nfunc (D) DeleteAll() {}\n",
+	})
+	v, err := checkNoIrreversible(root, "internal/input/agent")
+	if err != nil || len(v) != 2 {
+		t.Fatalf("violations = %v, %v", v, err)
+	}
+}
+
+func checkNoIrreversible(root, dir string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(dir)))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	bad := func(name string) bool {
+		for _, verb := range irreversibleVerbs {
+			if strings.HasPrefix(name, verb) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		rel := dir + "/" + e.Name()
+		f, err := parseFile(root, rel, 0)
+		if err != nil {
+			return nil, err
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.FuncDecl:
+				if x.Recv != nil && x.Name.IsExported() && bad(x.Name.Name) {
+					out = append(out, violation("ADR-0021", rel, "agent method "+x.Name.Name))
+				}
+			case *ast.InterfaceType:
+				for _, m := range x.Methods.List {
+					for _, name := range m.Names {
+						if bad(name.Name) {
+							out = append(out, violation("ADR-0021", rel, "agent interface method "+name.Name))
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	return out, nil
 }
 
 // --- negative tests on synthetic trees ------------------------------------------------------------

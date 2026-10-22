@@ -403,7 +403,7 @@ func TestAgentEvalBudget(t *testing.T) {
 	})
 
 	t.Run("unknown cost needs a plan", func(t *testing.T) {
-		e := newEvalEnv(t, agentturn.UnknownFacts{})
+		e := newEvalEnv(t, zeroFacts{})
 		e.hub.Then(testenv.AgentCall{ID: "w1", Tool: "triage_assignment", Args: `{"upload":"u1"}`}).Then(evalEnd)
 		st := evalAsk(t, e, "разбери задание")
 		if len(st.Calls) != 0 {

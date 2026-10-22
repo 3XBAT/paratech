@@ -52,7 +52,7 @@ type Subjects interface {
 
 // CallFacts tells what the agent domain cannot see in a call before it runs: the cost estimate of a paid call,
 // whether it would replace a ready result, and the triage outcome of the request. Facts.Context is filled by the
-// case. Implemented later by the agent input layer from the use cases that know (ADR-0021).
+// case. Implemented by input/agent from the use cases that know (ADR-0021); an unknown cost stays zero (needs a plan).
 type CallFacts interface {
 	Facts(ctx context.Context, call values.Call) (thread.Facts, error)
 }

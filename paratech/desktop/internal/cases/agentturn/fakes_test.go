@@ -232,6 +232,13 @@ func (h *memHistory) all(id shared.ThreadID) []values.HistoryEntry {
 	return slices.Clone(h.entries[id])
 }
 
+// zeroFacts knows nothing of a call: the cost is unknown (a paid write needs a plan), no ready result, no triage.
+type zeroFacts struct{}
+
+func (zeroFacts) Facts(context.Context, values.Call) (thread.Facts, error) {
+	return thread.Facts{}, nil
+}
+
 type subjects []values.BaseSubject
 
 func (s subjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) { return s, nil }
@@ -284,7 +291,7 @@ func newEnv(t *testing.T) *env {
 	s1, _ := values.NewRef(values.KindSubject, "s1")
 	svc, err := New(Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
-		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: UnknownFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
+		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
 	})
 	if err != nil {
 		t.Fatal(err)

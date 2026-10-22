@@ -1,7 +1,6 @@
 package agentturn
 
 import (
-	"context"
 	"log/slog"
 
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
@@ -59,21 +58,14 @@ type Call struct {
 	PlanStep int // the approved step it executes; -1 none
 }
 
-// Step is the state of the request after an operation: the calls to run and the cards to show, in order.
+// Step is the state of the request after an operation: the calls to run and the cards to show, in order. Scope is
+// the scope of the request, the default subject of the read tools.
 type Step struct {
 	Thread     shared.ThreadID
 	Turn       int
+	Scope      values.Scope
 	Status     thread.Status
 	StopReason values.StopReason
 	Calls      []Call
 	Cards      []values.Card
-}
-
-// UnknownFacts is the CallFacts of a desktop that cannot estimate calls yet: the cost is unknown (so every paid
-// write needs a plan), no ready result and no triage are known. The agent input layer replaces it.
-type UnknownFacts struct{}
-
-// Facts returns zero facts.
-func (UnknownFacts) Facts(context.Context, values.Call) (thread.Facts, error) {
-	return thread.Facts{}, nil
 }
