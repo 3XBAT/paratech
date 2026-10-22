@@ -31,6 +31,9 @@ func TestParseCall(t *testing.T) {
 		{name: "due date", tool: "edit_due", args: `{"assignment":"a1","due":"2026-11-03"}`},
 		{name: "reply text with newline", tool: "reply", args: `{"text":"Готово.\nКонспект в папке."}`},
 		{name: "cannot do", tool: "cannot_do", args: `{"your_part":["Сдать лично"],"our_part":["Черновик"]}`},
+		{name: "cannot do, one part empty", tool: "cannot_do", args: `{"your_part":[],"our_part":["Черновик"]}`},
+		{name: "longest text list", tool: "cannot_do", args: `{"your_part":[` + strings.Repeat(`"a",`, MaxTextListItems-1) + `"a"],"our_part":[]}`},
+		{name: "plan with empty notes", tool: "show_plan", args: `{"summary":"x","steps":[{"tool":"create_subject","arguments":{"name":"Химия"}}],"notes":[]}`},
 		{name: "whitespace around object", tool: "list_subjects", args: " {} \n"},
 
 		// refused
@@ -63,7 +66,8 @@ func TestParseCall(t *testing.T) {
 		{name: "ids not array", tool: "job_status", args: `{"ids":"j1"}`, wantErr: ErrInvalidArguments},
 		{name: "text too long", tool: "reply", args: `{"text":"` + strings.Repeat("x", MaxTextRunes+1) + `"}`, wantErr: ErrInvalidArguments},
 		{name: "text with html", tool: "reply", args: `{"text":"<script>x</script>"}`, wantErr: ErrInvalidArguments},
-		{name: "text list too long", tool: "cannot_do", args: `{"your_part":["a","a","a","a","a","a","a","a","a"],"our_part":["b"]}`, wantErr: ErrInvalidArguments},
+		{name: "text list too long", tool: "cannot_do", args: `{"your_part":[` + strings.Repeat(`"a",`, MaxTextListItems) + `"a"],"our_part":["b"]}`, wantErr: ErrInvalidArguments},
+		{name: "cannot do with nothing", tool: "cannot_do", args: `{"your_part":[],"our_part":[]}`, wantErr: ErrInvalidArguments},
 		{name: "too large", tool: "search", args: `{"query":"a","x":"` + strings.Repeat("x", MaxArgumentsBytes) + `"}`, wantErr: ErrInvalidArguments},
 	}
 	for _, tt := range tests {
@@ -220,12 +224,12 @@ func TestArgsAccessors(t *testing.T) {
 
 func TestPlanSteps(t *testing.T) {
 	args := `{"summary":"Разложить файл и сделать конспект","steps":[` +
-		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1","folder":"f1"}},` +
-		`{"tool":"make_summary","args":{"material":"m1"}},` +
-		`{"tool":"create_subject","args":{"name":"Физика"}},` +
-		`{"tool":"generate_draft","args":{"assignment":"a1"}},` +
-		`{"tool":"create_folder","args":{"name":"Лекции"}},` +
-		`{"tool":"place_upload","args":{"upload":"u2","subject":"s1"}}],"notes":["Займёт пару минут"]}`
+		`{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1","folder":"f1"}},` +
+		`{"tool":"make_summary","arguments":{"material":"m1"}},` +
+		`{"tool":"create_subject","arguments":{"name":"Физика"}},` +
+		`{"tool":"generate_draft","arguments":{"assignment":"a1"}},` +
+		`{"tool":"create_folder","arguments":{"name":"Лекции"}},` +
+		`{"tool":"place_upload","arguments":{"upload":"u2","subject":"s1"}}],"notes":["Займёт пару минут"]}`
 	call, err := ParseCall("c1", "show_plan", args)
 	if err != nil {
 		t.Fatalf("ParseCall: %v", err)
@@ -286,13 +290,16 @@ func TestPlanSteps(t *testing.T) {
 	if err != nil || again != enc {
 		t.Fatalf("round trip: %s != %s (%v)", again, enc, err)
 	}
+	if !strings.Contains(enc, `"arguments":{`) || strings.Contains(enc, `"args"`) {
+		t.Fatalf("stored steps are not in the Hub shape: %s", enc)
+	}
 	if c, _ := ParseCall("c3", "create_folder", `{"subject":"s9","name":"Лекции"}`); !dec[4].Matches(c) {
 		t.Fatal("decoded plan lost the deferred subject")
 	}
 
 	// Only an ID the step needs is deferred, and a call must fill in every deferred ID.
-	lessonStep, err := DecodePlanSteps(`[{"tool":"create_folder","args":{"subject":"s1","name":"А"}},` +
-		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1","lesson":"l1"}}]`)
+	lessonStep, err := DecodePlanSteps(`[{"tool":"create_folder","arguments":{"subject":"s1","name":"А"}},` +
+		`{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1","lesson":"l1"}}]`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,19 +321,20 @@ func TestPlanSteps(t *testing.T) {
 		{"empty", `[]`},
 		{"unknown tool", `[{"tool":"send_email"}]`},
 		{"unknown key", `[{"tool":"make_summary","why":"x"}]`},
-		{"text argument", `[{"tool":"reply","args":{"text":"x"}}]`},
-		{"unknown argument", `[{"tool":"make_summary","args":{"path":"C:/x"}}]`},
-		{"bad id", `[{"tool":"make_summary","args":{"material":"a/b"}}]`},
+		{"args instead of arguments", `[{"tool":"make_summary","args":{"material":"m1"}}]`},
+		{"text argument", `[{"tool":"reply","arguments":{"text":"x"}}]`},
+		{"unknown argument", `[{"tool":"make_summary","arguments":{"path":"C:/x"}}]`},
+		{"bad id", `[{"tool":"make_summary","arguments":{"material":"a/b"}}]`},
 		{"duplicate key", `[{"tool":"make_summary","tool":"write_work"}]`},
 		{"too many", `[` + strings.Repeat(`{"tool":"list_subjects"},`, MaxPlanSteps) + `{"tool":"list_subjects"}]`},
 		{"no required argument", `[{"tool":"make_lecture_text"}]`},
-		{"no due", `[{"tool":"edit_due","args":{"assignment":"a1"}}]`},
+		{"no due", `[{"tool":"edit_due","arguments":{"assignment":"a1"}}]`},
 		{"no name", `[{"tool":"create_subject"}]`},
 		{"neither of one-of", `[{"tool":"make_summary"}]`},
-		{"both of one-of", `[{"tool":"make_summary","args":{"recording":"r1","material":"m1"}}]`},
-		{"no folder or lesson", `[{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}}]`},
-		{"subject created later", `[{"tool":"create_folder","args":{"name":"X"}},{"tool":"create_subject","args":{"name":"Y"}}]`},
-		{"folder is not a subject", `[{"tool":"create_folder","args":{"subject":"s1","name":"X"}},{"tool":"create_folder","args":{"name":"Y"}}]`},
+		{"both of one-of", `[{"tool":"make_summary","arguments":{"recording":"r1","material":"m1"}}]`},
+		{"no folder or lesson", `[{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1"}}]`},
+		{"subject created later", `[{"tool":"create_folder","arguments":{"name":"X"}},{"tool":"create_subject","arguments":{"name":"Y"}}]`},
+		{"folder is not a subject", `[{"tool":"create_folder","arguments":{"subject":"s1","name":"X"}},{"tool":"create_folder","arguments":{"name":"Y"}}]`},
 	}
 	for _, b := range bad {
 		t.Run("bad/"+b.name, func(t *testing.T) {
@@ -344,18 +352,24 @@ func TestQuestions(t *testing.T) {
 		qs   string
 		ok   bool
 	}{
-		{"choice and text", `[{"kind":"choice","text":"Какой формат?","options":["docx","pdf"],"default":0},{"kind":"text","text":"Сколько страниц?"}]`, true},
-		{"default out of range", `[{"kind":"choice","text":"Q","options":["a","b"],"default":2}]`, false},
-		{"negative default", `[{"kind":"choice","text":"Q","options":["a","b"],"default":-1}]`, false},
-		{"fractional default", `[{"kind":"choice","text":"Q","options":["a","b"],"default":0.5}]`, false},
-		{"default as string", `[{"kind":"choice","text":"Q","options":["a","b"],"default":"0"}]`, false},
-		{"no default", `[{"kind":"choice","text":"Q","options":["a","b"]}]`, false},
-		{"one option", `[{"kind":"choice","text":"Q","options":["a"],"default":0}]`, false},
-		{"text with options", `[{"kind":"text","text":"Q","options":["a","b"]}]`, false},
-		{"unknown kind", `[{"kind":"file","text":"Q"}]`, false},
-		{"unknown key", `[{"kind":"text","text":"Q","to":"x@y"}]`, false},
-		{"too many", `[{"kind":"text","text":"1"},{"kind":"text","text":"2"},{"kind":"text","text":"3"},{"kind":"text","text":"4"}]`, false},
-		{"html option", `[{"kind":"choice","text":"Q","options":["<a>","b"],"default":0}]`, false},
+		{"choice and text", `[{"kind":"choice","question":"Какой формат?","options":["docx","pdf"],"default":0},{"kind":"text","question":"Сколько страниц?"}]`, true},
+		{"default out of range", `[{"kind":"choice","question":"Q","options":["a","b"],"default":2}]`, false},
+		{"negative default", `[{"kind":"choice","question":"Q","options":["a","b"],"default":-1}]`, false},
+		{"fractional default", `[{"kind":"choice","question":"Q","options":["a","b"],"default":0.5}]`, false},
+		{"default as string", `[{"kind":"choice","question":"Q","options":["a","b"],"default":"0"}]`, false},
+		{"no default", `[{"kind":"choice","question":"Q","options":["a","b"]}]`, true},
+		{"one option", `[{"kind":"choice","question":"Q","options":["a"],"default":0}]`, false},
+		{"most options", `[{"kind":"choice","question":"Q","options":["1","2","3","4","5","6"],"default":5}]`, true},
+		{"too many options", `[{"kind":"choice","question":"Q","options":["1","2","3","4","5","6","7"],"default":0}]`, false},
+		{"text with options", `[{"kind":"text","question":"Q","options":["a","b"]}]`, false},
+		{"text with empty options", `[{"kind":"text","question":"Q","options":[]}]`, true},
+		{"text with default", `[{"kind":"text","question":"Q","default":0}]`, false},
+		{"text instead of question", `[{"kind":"text","text":"Q"}]`, false},
+		{"most questions", `[{"kind":"text","question":"1"},{"kind":"text","question":"2"},{"kind":"text","question":"3"}]`, true},
+		{"unknown kind", `[{"kind":"file","question":"Q"}]`, false},
+		{"unknown key", `[{"kind":"text","question":"Q","to":"x@y"}]`, false},
+		{"too many", `[{"kind":"text","question":"1"},{"kind":"text","question":"2"},{"kind":"text","question":"3"},{"kind":"text","question":"4"}]`, false},
+		{"html option", `[{"kind":"choice","question":"Q","options":["<a>","b"],"default":0}]`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,5 +381,13 @@ func TestQuestions(t *testing.T) {
 				t.Fatal("no questions parsed")
 			}
 		})
+	}
+
+	call, err := ParseCall("c1", "ask_questions", `{"questions":[{"kind":"choice","question":"Q","options":["a","b"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := call.Args().Questions("questions")[0]; q.Default != 0 || q.Text != "Q" || len(q.Options) != 2 {
+		t.Fatalf("choice without a default = %+v, want the first option preselected", q)
 	}
 }

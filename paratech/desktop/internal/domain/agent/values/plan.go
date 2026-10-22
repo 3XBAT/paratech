@@ -66,11 +66,21 @@ func (s PlanStep) Matches(call Call) bool {
 	return true
 }
 
+// JSON keys of plan_steps and questions, exactly as the Hub checks them (hub toolcatalog/schema.go).
+const (
+	keyTool      = "tool"
+	keyArguments = "arguments"
+	keyKind      = "kind"
+	keyQuestion  = "question"
+	keyOptions   = "options"
+	keyDefault   = "default"
+)
+
 // EncodePlanSteps returns the steps as the JSON the planner sends (plan_steps), for storage.
 func EncodePlanSteps(steps []PlanStep) (string, error) {
 	type step struct {
 		Tool Tool           `json:"tool"`
-		Args map[string]any `json:"args,omitempty"`
+		Args map[string]any `json:"arguments,omitempty"`
 	}
 	out := make([]step, 0, len(steps))
 	for _, s := range steps {
@@ -135,11 +145,11 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 		return PlanStep{}, err
 	}
 	for k := range fields {
-		if k != "tool" && k != "args" {
+		if k != keyTool && k != keyArguments {
 			return PlanStep{}, fmt.Errorf("%w: plan step has an unknown key %q", ErrInvalidArguments, k)
 		}
 	}
-	name, err := decodeString(fields["tool"])
+	name, err := decodeString(fields[keyTool])
 	if err != nil {
 		return PlanStep{}, fmt.Errorf("%w: plan step tool: %w", ErrInvalidArguments, err)
 	}
@@ -149,7 +159,7 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 	}
 	spec, _ := specOf(t)
 	vals := map[string]argValue{}
-	if rawArgs, ok := fields["args"]; ok {
+	if rawArgs, ok := fields[keyArguments]; ok {
 		members, err := decodeObject(rawArgs)
 		if err != nil {
 			return PlanStep{}, err
@@ -227,7 +237,7 @@ type Question struct {
 	Kind    QuestionKind
 	Text    Text
 	Options []Text // choice only, MinOptions..MaxOptions
-	Default int    // choice only: index of the default option
+	Default int    // choice only: index of the default option (0 when the planner gave none)
 	CiteRef string // optional reference to the place in a source, set by the desktop (triage questions), never by the planner
 }
 
@@ -284,15 +294,15 @@ func parseQuestion(raw json.RawMessage) (Question, error) {
 		return Question{}, err
 	}
 	for k := range fields {
-		if !slices.Contains([]string{"kind", "text", "options", "default"}, k) {
+		if !slices.Contains([]string{keyKind, keyQuestion, keyOptions, keyDefault}, k) {
 			return Question{}, fmt.Errorf("%w: question has an unknown key %q", ErrInvalidArguments, k)
 		}
 	}
-	kind, err := decodeString(fields["kind"])
+	kind, err := decodeString(fields[keyKind])
 	if err != nil {
 		return Question{}, fmt.Errorf("%w: question kind: %w", ErrInvalidArguments, err)
 	}
-	text, err := decodeString(fields["text"])
+	text, err := decodeString(fields[keyQuestion])
 	if err != nil {
 		return Question{}, fmt.Errorf("%w: question text: %w", ErrInvalidArguments, err)
 	}
@@ -303,7 +313,7 @@ func parseQuestion(raw json.RawMessage) (Question, error) {
 	q := Question{Kind: QuestionKind(kind), Text: t}
 	switch q.Kind {
 	case QuestionChoice:
-		rawOpts, ok := fields["options"]
+		rawOpts, ok := fields[keyOptions]
 		if !ok {
 			return Question{}, fmt.Errorf("%w: a choice needs options", ErrInvalidArguments)
 		}
@@ -322,18 +332,20 @@ func parseQuestion(raw json.RawMessage) (Question, error) {
 			}
 			q.Options = append(q.Options, o)
 		}
-		rawDef, ok := fields["default"]
-		if !ok {
-			return Question{}, fmt.Errorf("%w: a choice needs a default option", ErrInvalidArguments)
-		}
-		if q.Default, err = decodeInt(rawDef); err != nil {
-			return Question{}, err
+		// The Hub makes default optional; without one the first option is preselected.
+		if rawDef, ok := fields[keyDefault]; ok {
+			if q.Default, err = decodeInt(rawDef); err != nil {
+				return Question{}, err
+			}
 		}
 	case QuestionText:
-		if _, ok := fields["options"]; ok {
-			return Question{}, fmt.Errorf("%w: a text question has no options", ErrInvalidArguments)
+		// The Hub admits "options": [] on a text question; options with items or a default have no meaning here.
+		if rawOpts, ok := fields[keyOptions]; ok {
+			if _, err := decodeArray(rawOpts, 0, 0); err != nil {
+				return Question{}, fmt.Errorf("%w: a text question has no options", ErrInvalidArguments)
+			}
 		}
-		if _, ok := fields["default"]; ok {
+		if _, ok := fields[keyDefault]; ok {
 			return Question{}, fmt.Errorf("%w: a text question has no default", ErrInvalidArguments)
 		}
 	default:

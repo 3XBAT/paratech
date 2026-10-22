@@ -45,7 +45,7 @@ func createSubjects(n int, extra string) string {
 		if i > 0 {
 			s += `,`
 		}
-		s += `{"tool":"create_subject","args":{"name":"` + subjectName(i) + `"}}`
+		s += `{"tool":"create_subject","arguments":{"name":"` + subjectName(i) + `"}}`
 	}
 	if extra != "" {
 		s += `,` + extra
@@ -88,7 +88,7 @@ func reach(t *testing.T, s Status) *Thread {
 	switch s {
 	case StatusPlanning:
 	case StatusAwaitingPlan:
-		err = th.ProposePlan(planSteps(t, `[{"tool":"make_summary","args":{"recording":"r1"}}]`), context(t), at(2))
+		err = th.ProposePlan(planSteps(t, `[{"tool":"make_summary","arguments":{"recording":"r1"}}]`), context(t), at(2))
 	case StatusAwaitingAnswers:
 		_, err = th.AskQuestions(at(2))
 	case StatusExecuting:
@@ -147,7 +147,7 @@ func TestOperationsFromEveryStatus(t *testing.T) {
 	type op func(t *testing.T, th *Thread) error
 	ops := map[string]op{
 		"ProposePlan": func(t *testing.T, th *Thread) error {
-			return th.ProposePlan(planSteps(t, `[{"tool":"make_summary","args":{"recording":"r1"}}]`), context(t), at(5))
+			return th.ProposePlan(planSteps(t, `[{"tool":"make_summary","arguments":{"recording":"r1"}}]`), context(t), at(5))
 		},
 		"ApprovePlan":     func(_ *testing.T, th *Thread) error { return th.ApprovePlan(at(5)) },
 		"RevisePlan":      func(_ *testing.T, th *Thread) error { return th.RevisePlan(at(5)) },
@@ -491,7 +491,7 @@ func TestAdmitWithoutPlan(t *testing.T) {
 
 func TestApprovedPlan(t *testing.T) {
 	ctx := context(t)
-	plan := `[{"tool":"place_upload","args":{"upload":"u1","subject":"s1","folder":"f1"}},{"tool":"make_lecture_text","args":{"recording":"r1"}},{"tool":"propose_delete_recording","args":{"recording":"r1"}}]`
+	plan := `[{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1","folder":"f1"}},{"tool":"make_lecture_text","arguments":{"recording":"r1"}},{"tool":"propose_delete_recording","arguments":{"recording":"r1"}}]`
 	th := newThread(t)
 	if err := th.Observe(ref(t, values.KindFolder, "f1")); err != nil {
 		t.Fatal(err)
@@ -536,7 +536,7 @@ func TestApprovedPlan(t *testing.T) {
 	}
 
 	// A new plan from EXECUTING replaces the approved one once approved.
-	if err := th.ProposePlan(planSteps(t, `[{"tool":"create_subject","args":{"name":"Химия"}}]`), ctx, at(5)); err != nil {
+	if err := th.ProposePlan(planSteps(t, `[{"tool":"create_subject","arguments":{"name":"Химия"}}]`), ctx, at(5)); err != nil {
 		t.Fatal(err)
 	}
 	if err := th.ApprovePlan(at(6)); err != nil {
@@ -555,10 +555,10 @@ func TestProposePlanRules(t *testing.T) {
 		want  error
 	}{
 		{"read step", `[{"tool":"list_subjects"}]`, ErrInvalidPlan},
-		{"unknown id", `[{"tool":"make_summary","args":{"recording":"r7"}}]`, actionpolicy.ErrUnknownID},
+		{"unknown id", `[{"tool":"make_summary","arguments":{"recording":"r7"}}]`, actionpolicy.ErrUnknownID},
 		{"too many writes", createSubjects(MaxWrites+1, ""), ErrInvalidPlan},
-		{"C steps do not count as writes", createSubjects(MaxWrites, `{"tool":"propose_delete_recording","args":{"recording":"r1"}}`), nil},
-		{"created subject", `[{"tool":"create_subject","args":{"name":"Физика"}},{"tool":"create_folder","args":{"name":"Лекции"}}]`, nil},
+		{"C steps do not count as writes", createSubjects(MaxWrites, `{"tool":"propose_delete_recording","arguments":{"recording":"r1"}}`), nil},
+		{"created subject", `[{"tool":"create_subject","arguments":{"name":"Физика"}},{"tool":"create_folder","arguments":{"name":"Лекции"}}]`, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -580,7 +580,7 @@ func TestProposePlanRules(t *testing.T) {
 	// plan reaches ProposePlan; a UI step cannot carry its text arguments at all.
 	for _, steps := range []string{
 		`[{"tool":"make_lecture_text"}]`,
-		`[{"tool":"edit_due","args":{"assignment":"a1"}}]`,
+		`[{"tool":"edit_due","arguments":{"assignment":"a1"}}]`,
 		`[{"tool":"reply"}]`,
 	} {
 		_, err := values.ParseCall("c1", "show_plan", `{"summary":"План","steps":`+steps+`}`)
@@ -593,14 +593,14 @@ func TestProposePlanRules(t *testing.T) {
 func TestRevisePlanDropsApprovedPlan(t *testing.T) {
 	ctx := context(t)
 	th := newThread(t)
-	if err := th.ProposePlan(planSteps(t, `[{"tool":"make_lecture_text","args":{"recording":"r1"}}]`), ctx, at(2)); err != nil {
+	if err := th.ProposePlan(planSteps(t, `[{"tool":"make_lecture_text","arguments":{"recording":"r1"}}]`), ctx, at(2)); err != nil {
 		t.Fatal(err)
 	}
 	if err := th.ApprovePlan(at(3)); err != nil {
 		t.Fatal(err)
 	}
 	// EXECUTING -> new plan -> AWAITING_PLAN -> «Изменить» -> PLANNING: the old approval is gone.
-	if err := th.ProposePlan(planSteps(t, `[{"tool":"create_subject","args":{"name":"Химия"}}]`), ctx, at(4)); err != nil {
+	if err := th.ProposePlan(planSteps(t, `[{"tool":"create_subject","arguments":{"name":"Химия"}}]`), ctx, at(4)); err != nil {
 		t.Fatal(err)
 	}
 	if err := th.RevisePlan(at(5)); err != nil {

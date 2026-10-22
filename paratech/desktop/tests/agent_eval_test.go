@@ -305,13 +305,12 @@ func TestAgentEvalProvenance(t *testing.T) {
 	}
 }
 
-// desktopPlan is a show_plan call in the plan step shape the desktop parser reads today ("args"; see the TASK-135
-// report, bug B1: the Hub checks "arguments").
+// desktopPlan is a show_plan call in the plan step shape the Hub checks ("arguments").
 func desktopPlan(summary string, steps ...string) string {
 	return `{"summary":"` + summary + `","steps":[` + strings.Join(steps, ",") + `]}`
 }
 
-func desktopStep(tool, args string) string { return `{"tool":"` + tool + `","args":` + args + `}` }
+func desktopStep(tool, args string) string { return `{"tool":"` + tool + `","arguments":` + args + `}` }
 
 // TestAgentEvalDeferredPlanIDs: a deferred plan argument binds only to an ID an earlier approved step created in this
 // request; a known ID that the plan did not create is not in the plan.
@@ -355,7 +354,7 @@ func TestAgentEvalDeferredPlanIDs(t *testing.T) {
 // the request is not stopped and the student sees no third card.
 func TestAgentEvalThirdQuestionRound(t *testing.T) {
 	e := newEvalEnv(t, evalFacts{cost: evalCost})
-	q := `{"questions":[{"kind":"text","text":"Какой объём?"}]}` // desktop question shape today (bug B1)
+	q := `{"questions":[{"kind":"text","question":"Какой объём?"}]}`
 	e.hub.Then(testenv.AgentCall{ID: "q1", Tool: "ask_questions", Args: q}).
 		Then(testenv.AgentCall{ID: "q2", Tool: "ask_questions", Args: q}).
 		Then(testenv.AgentCall{ID: "q3", Tool: "ask_questions", Args: q}).

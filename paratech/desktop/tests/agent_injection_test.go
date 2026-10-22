@@ -48,9 +48,9 @@ func baselineValue(a values.ArgSpec) any {
 	case values.ArgTextList:
 		return []string{"Готово."}
 	case values.ArgPlanSteps:
-		return []any{map[string]any{"tool": "create_subject", "args": map[string]any{"name": "Химия"}}} // bug B1 shape
+		return []any{map[string]any{"tool": "create_subject", "arguments": map[string]any{"name": "Химия"}}}
 	default: // questions
-		return []any{map[string]any{"kind": "text", "text": "Какой объём?"}} // bug B1 shape
+		return []any{map[string]any{"kind": "text", "question": "Какой объём?"}}
 	}
 }
 
@@ -60,9 +60,9 @@ func injectedValue(a values.ArgSpec, text string) any {
 	case values.ArgIDs, values.ArgTextList:
 		return []string{text}
 	case values.ArgPlanSteps:
-		return []any{map[string]any{"tool": "propose_send", "args": map[string]any{"assignment": "a1", "version": text}}}
+		return []any{map[string]any{"tool": "propose_send", "arguments": map[string]any{"assignment": "a1", "version": text}}}
 	case values.ArgQuestions:
-		return []any{map[string]any{"kind": "text", "text": text}}
+		return []any{map[string]any{"kind": "text", "question": text}}
 	}
 	return text
 }

@@ -112,9 +112,9 @@ func takeAll(t *testing.T, th *Thread) []values.ToolResult {
 func approvedFolderPlan(t *testing.T) *Thread {
 	t.Helper()
 	th := newThread(t)
-	steps := planSteps(t, `[{"tool":"create_folder","args":{"subject":"s1","name":"Папка А"}},`+
-		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}},`+
-		`{"tool":"create_folder","args":{"subject":"s1","name":"Папка Б"}}]`)
+	steps := planSteps(t, `[{"tool":"create_folder","arguments":{"subject":"s1","name":"Папка А"}},`+
+		`{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1"}},`+
+		`{"tool":"create_folder","arguments":{"subject":"s1","name":"Папка Б"}}]`)
 	if err := th.ProposePlan(steps, context(t), at(2)); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestDeferredIDBindsToCreatedID(t *testing.T) {
 	t.Run("a new plan forgets the created ids", func(t *testing.T) {
 		th := approvedFolderPlan(t)
 		createFolder(t, th, "c1", "Папка А", "fa")
-		steps := planSteps(t, `[{"tool":"make_summary","args":{"recording":"r1"}}]`)
+		steps := planSteps(t, `[{"tool":"make_summary","arguments":{"recording":"r1"}}]`)
 		if err := th.ProposePlan(steps, context(t), at(5)); err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +252,7 @@ func TestAnswerRules(t *testing.T) {
 func TestStartTurnNeedsTakenResults(t *testing.T) {
 	th := newThread(t)
 	stepWith(t, th, "c1")
-	if err := th.ProposePlan(planSteps(t, `[{"tool":"make_summary","args":{"recording":"r1"}}]`), context(t), at(3)); err != nil {
+	if err := th.ProposePlan(planSteps(t, `[{"tool":"make_summary","arguments":{"recording":"r1"}}]`), context(t), at(3)); err != nil {
 		t.Fatal(err)
 	}
 	if err := th.StartTurn(at(4)); !errors.Is(err, ErrResultsPending) {
