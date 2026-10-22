@@ -159,6 +159,14 @@ func TestStepErrors(t *testing.T) {
 			want: []error{ErrIdempotencyConflict, backoff.ErrPermanent}, absent: []error{agent.ErrTurnGone},
 		},
 		{
+			// Only a failed_precondition without any detail is turn gone (ADR-0023); a detail of any code is not.
+			name: "failed precondition with another detail is not turn gone",
+			err: detailErr(connect.CodeFailedPrecondition, &hubv1.ErrorDetail{
+				Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "other",
+			}),
+			absent: []error{ErrTurnGone, agent.ErrTurnGone},
+		},
+		{
 			name: "quota",
 			err:  detailErr(connect.CodeResourceExhausted, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_QUOTA_EXCEEDED, Message: "q"}),
 			want: []error{shared.ErrQuotaExceeded},
