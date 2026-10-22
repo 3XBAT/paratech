@@ -35,13 +35,45 @@ type FakeHub struct {
 	quotaAuth []string
 	rejectKey bool
 	quotaDown bool
+	// refuse is how many next new keys of an operation get the Hub's schema refusal of a reader answer;
+	// refused keeps the refused keys, which replay the refusal.
+	refuse  map[hubv1.OperationType]int
+	refused map[string]bool
 }
 
 // NewFakeHub returns a Hub without scripted outputs; an operation without one is answered with unavailable.
 func NewFakeHub() *FakeHub {
 	return &FakeHub{
 		outputs: map[hubv1.OperationType]string{}, results: map[string]*hubv1.CompletionResult{}, prints: map[string]string{},
+		refuse: map[hubv1.OperationType]int{}, refused: map[string]bool{},
 	}
+}
+
+// AnswerInspect sets the model output of INSPECT_MATERIAL for keys the Hub has not seen yet. The fake returns it as
+// is, without the Hub's own schema check, so the desktop parser is what is tested.
+func (h *FakeHub) AnswerInspect(output string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.outputs[hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL] = output
+}
+
+// RefuseInspect makes the next n new keys of INSPECT_MATERIAL fail as the Hub's schema refusal does: unavailable
+// with PROVIDER_ERROR, not retryable, charged; the same key replays the refusal.
+func (h *FakeHub) RefuseInspect(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.refuse[hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL] = n
+}
+
+// providerRefusal is the Hub's answer to a reader answer outside its schema (errors.proto).
+func providerRefusal() error {
+	e := connect.NewError(connect.CodeUnavailable, errors.New("fake hub: answer refused by the schema"))
+	d, err := connect.NewErrorDetail(&hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Retryable: false})
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	e.AddDetail(d)
+	return e
 }
 
 // Answer sets the model output of operation for keys the Hub has not seen yet.
@@ -82,8 +114,16 @@ func (h *FakeHub) Complete(_ context.Context, r *connect.Request[hubv1.CompleteR
 		return nil, idempotencyConflict()
 	}
 	h.prints[key] = string(fp)
+	if h.refused[key] {
+		return nil, providerRefusal()
+	}
 	if res, ok := h.results[key]; ok {
 		return connect.NewResponse(&hubv1.CompleteResponse{Result: res}), nil
+	}
+	if op := spec.GetOperationType(); h.refuse[op] > 0 {
+		h.refuse[op]--
+		h.refused[key] = true
+		return nil, providerRefusal()
 	}
 	out, ok := h.outputs[spec.GetOperationType()]
 	if !ok {
@@ -174,11 +214,12 @@ func (h *FakeHub) Authorizations() []string {
 	return append([]string(nil), h.auth...)
 }
 
-// Charged returns the number of distinct idempotency keys the Hub executed: what a tester would pay for.
+// Charged returns the number of distinct idempotency keys the Hub executed: what a tester would pay for. A refused
+// reader answer is charged too.
 func (h *FakeHub) Charged() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.results)
+	return len(h.results) + len(h.refused)
 }
 
 // StartFakeHub serves h over TLS on a loopback port until the test ends and returns its base URL and an HTTP client
