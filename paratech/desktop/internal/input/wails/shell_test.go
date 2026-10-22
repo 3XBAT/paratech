@@ -34,6 +34,7 @@ func validCore() Core {
 		Library:    &fakeLibrary{},
 		Agent: AgentCore{
 			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
+			Journal: &fakeJournal{}, Clock: fixedClock{},
 		},
 	}
 }
