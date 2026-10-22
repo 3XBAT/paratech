@@ -109,7 +109,10 @@ replay, or release. A retry with the same idempotency key replays the stored ans
 key is `IDEMPOTENCY_CONFLICT`. A gateway key lives 5 minutes less than `HUB_IDEMPOTENCY_RETENTION`; the purge (at start and
 every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` is not implemented
 (ADR-0010, ADR-0023). `INSPECT_MATERIAL`, `ANSWER` and `TRIAGE_ASSIGNMENT` take no client instructions: the Hub uses its own prompt
-(`hub/pkg/prompts/ops`) and alias; until a prompt ships, the operation is `invalid_argument`. Settings (env or flag):
+(`hub/pkg/prompts/ops`) and alias; until a prompt ships, or while its alias is not in `HUB_LLM_MODELS`, the operation is
+`invalid_argument`. `INSPECT_MATERIAL` takes `{"today","subjects":[{"id","name"}],"material_text"}` as data and returns only
+`{"doc_kind","subject","lesson_date","has_homework","has_ticket_list","mentions_email"}`; an answer outside that schema is a
+charged, non-retryable `PROVIDER_ERROR` (`hub/internal/domain/llm/services/inspect`). Settings (env or flag):
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
@@ -127,7 +130,7 @@ Settings:
 | Env | Flag | Default | Rule |
 |---|---|---|---|
 | `HUB_AGENT_SEAL_KEYS` | none (env only) | none | `version:hex[,version:hex]`, versions 1..255, secrets >= 32 bytes (e.g. `openssl rand -hex 32`); the first signs, the others are still accepted (rotation). Unset: `AgentStep` is `unimplemented`. Secret, never printed |
-| `HUB_AGENT_PLANNER_ALIAS` | `-agent-planner-alias` | `planner` | allowlist alias of the planner and of `INSPECT_MATERIAL`; must be in `HUB_LLM_MODELS` when seal keys are set |
+| `HUB_AGENT_PLANNER_ALIAS` | `-agent-planner-alias` | `planner` | allowlist alias of the planner and of `INSPECT_MATERIAL`; must be in `HUB_LLM_MODELS` when seal keys are set (without it `INSPECT_MATERIAL` is off) |
 | `HUB_AGENT_STRONG_ALIAS` | `-agent-strong-alias` | `default` | allowlist alias of `ANSWER` and `TRIAGE_ASSIGNMENT` |
 
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.

@@ -33,8 +33,24 @@ func TestEmbeddedPanelV1(t *testing.T) {
 	}
 }
 
+func TestEmbeddedInspectMaterialV1(t *testing.T) {
+	v, system, err := Op("inspect_material")
+	if err != nil || v != 1 {
+		t.Fatalf("Op(inspect_material) = v%d, %v; want v1", v, err)
+	}
+	if len(bytes.TrimSpace(system)) == 0 || !utf8.Valid(system) || bytes.IndexByte(system, 0) >= 0 {
+		t.Fatal("ops/inspect_material/v1/system.md must be non-empty UTF-8 without NUL")
+	}
+	// The prompt names every key of the answer schema the Hub checks (domain/llm/services/inspect).
+	for _, key := range []string{"doc_kind", "subject", "lesson_date", "has_homework", "has_ticket_list", "mentions_email"} {
+		if !bytes.Contains(system, []byte(`"`+key+`"`)) {
+			t.Errorf("the prompt does not name %s", key)
+		}
+	}
+}
+
 func TestNoEmbeddedOperationPromptsYet(t *testing.T) {
-	for _, op := range []string{"inspect_material", "answer", "triage_assignment"} {
+	for _, op := range []string{"answer", "triage_assignment"} {
 		if _, _, err := Op(op); !errors.Is(err, ErrNotFound) {
 			t.Errorf("Op(%s): err = %v, want ErrNotFound", op, err)
 		}

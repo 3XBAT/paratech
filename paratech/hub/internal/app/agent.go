@@ -55,7 +55,9 @@ func newAgentParts(cfg config.Config, models *modelallowlist.List) (*agentParts,
 			return nil, fmt.Errorf("app: prompt of %s v%d must be non-empty UTF-8 without NUL", op, version)
 		}
 		if _, _, err := models.Resolve(alias, 0); err != nil {
-			return nil, fmt.Errorf("app: alias %q of %s: %w", alias, op, err)
+			// Like AgentStep without a seal key: a Hub whose allowlist lacks the alias still starts, and the
+			// operation is refused as unavailable.
+			continue
 		}
 		parts.serverPrompts[op] = gateway.ServerPrompt{Alias: alias, Version: "v" + strconv.FormatUint(uint64(version), 10), Text: string(text)}
 	}
