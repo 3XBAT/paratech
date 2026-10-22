@@ -30,10 +30,14 @@ type PostRepository interface {
 	ListUpdatedSince(ctx context.Context, since time.Time, limit int) ([]*post.Post, error)
 }
 
-// TranscriptReader finds the recording of a transcript (PRD section 8). Implemented by the sqlite adapter.
+// TranscriptReader finds the recording of a transcript and its newest transcript (PRD section 8). Implemented by the
+// sqlite adapter.
 type TranscriptReader interface {
 	// Get loads a transcript (PRD section 8); none wraps shared.ErrNotFound.
 	Get(ctx context.Context, id shared.TranscriptID) (*transcript.Transcript, error)
+
+	// LatestByRecording loads the newest transcript of a recording (PRD section 8); none wraps shared.ErrNotFound.
+	LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error)
 }
 
 // SummaryReader tells whether a transcript has a summary (PRD section 9): a transcript without speech never gets one

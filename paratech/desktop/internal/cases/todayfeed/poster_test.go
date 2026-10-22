@@ -100,6 +100,47 @@ func TestPosterRefusesABadPayload(t *testing.T) {
 	}
 }
 
+// A rerun makes a new transcript of the recording: its events switch the post, while a late job of the old
+// transcript changes nothing.
+func TestPosterIgnoresEventsOfAnOlderTranscript(t *testing.T) {
+	w := newWorld(t)
+	w.addRecording("r1", "l1", "Матанализ", at(21, 10, 30), "t1")
+	w.summaries["t1"] = true
+	p := w.poster()
+	ctx := context.Background()
+
+	if err := p.JobCompleted(ctx, snapshot(t, summarize, "t1")); err != nil {
+		t.Fatal(err)
+	}
+	w.addTranscript("r1", "t2", at(21, 13, 0))
+	w.summaries["t2"] = true
+
+	steps := []struct {
+		name    string
+		typ     string
+		tr      shared.TranscriptID
+		saves   int
+		summary bool
+		hw      bool
+	}{
+		{"rerun summary switches the post", summarize, "t2", 2, true, false},
+		{"late homework of the old transcript", extract, "t1", 2, true, false},
+		{"late summary of the old transcript", summarize, "t1", 2, true, false},
+		{"rerun homework", extract, "t2", 3, true, true},
+	}
+	for _, s := range steps {
+		w.clock.Advance(time.Minute)
+		if err := p.JobCompleted(ctx, snapshot(t, s.typ, s.tr)); err != nil {
+			t.Fatalf("%s: %v", s.name, err)
+		}
+		st := w.posts.rows["r1"]
+		if st.Transcript != "t2" || w.posts.saves != s.saves || !st.SummaryAt.IsZero() != s.summary || !st.HomeworkAt.IsZero() != s.hw {
+			t.Fatalf("%s: post = %+v, %d saves; want t2, %d saves, summary %v, homework %v", s.name, st, w.posts.saves,
+				s.saves, s.summary, s.hw)
+		}
+	}
+}
+
 // Two events of one recording saved at once: the loser reloads and records again, so both are kept.
 func TestPosterRetriesAConcurrentSave(t *testing.T) {
 	w := newWorld(t)

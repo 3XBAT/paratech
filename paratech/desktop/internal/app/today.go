@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -14,6 +15,9 @@ import (
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
+
+// postTimeout bounds the recording of a post after its job, which runs detached from the job's context.
+const postTimeout = 5 * time.Second
 
 // todayPosts is the jobrunner hook of «Сегодня» (ADR-0021, TASK-125): after a post-processing attempt succeeded, the
 // post after the lesson is recorded. A failure of the post never fails the job: the summary and the homework are
@@ -34,7 +38,10 @@ func (h todayPosts) Handle(ctx context.Context, snap job.Snapshot, report func(c
 	if err := h.Handler.Handle(ctx, snap, report); err != nil {
 		return err
 	}
-	if err := h.poster.JobCompleted(ctx, snap); err != nil {
+	// The job is done already: a shutdown cancelling ctx right now must not lose its post.
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), postTimeout)
+	defer cancel()
+	if err := h.poster.JobCompleted(pctx, snap); err != nil {
 		h.log.Warn("today post not recorded", slog.String("job", snap.ID().String()), slog.Any("cause", err))
 	}
 	return nil

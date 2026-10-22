@@ -174,13 +174,19 @@ func (w *world) addRecording(rec shared.RecordingID, les shared.LessonID, subjec
 		w.t.Fatal(err)
 	}
 	w.recordings[rec] = r
+	w.addTranscript(rec, tr, start.Add(90*time.Minute))
+}
+
+// addTranscript stores a transcript of a recording, e.g. the one of a rerun.
+func (w *world) addTranscript(rec shared.RecordingID, tr shared.TranscriptID, created time.Time) {
+	w.t.Helper()
 	ref, err := transcript.DocumentRef(tr)
 	if err != nil {
 		w.t.Fatal(err)
 	}
 	t, err := transcript.New(transcript.Spec{
 		ID: tr, RecordingID: rec, ModelID: "m1", ModelName: "base", ModelVersion: "1", Language: "ru", Text: ref,
-	}, start.Add(90*time.Minute))
+	}, created)
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -238,6 +244,23 @@ func (f worldTranscripts) Get(_ context.Context, id shared.TranscriptID) (*trans
 		return t, nil
 	}
 	return nil, shared.ErrNotFound
+}
+
+// LatestByRecording follows the order of the sqlite query: created_at DESC, id DESC.
+func (f worldTranscripts) LatestByRecording(_ context.Context, rec shared.RecordingID) (*transcript.Transcript, error) {
+	var latest *transcript.Transcript
+	for _, t := range f.w.transcripts {
+		if t.RecordingID() != rec {
+			continue
+		}
+		if latest == nil || cmp.Or(t.CreatedAt().Compare(latest.CreatedAt()), cmp.Compare(t.ID(), latest.ID())) > 0 {
+			latest = t
+		}
+	}
+	if latest == nil {
+		return nil, shared.ErrNotFound
+	}
+	return latest, nil
 }
 
 type worldSummaries struct{ w *world }

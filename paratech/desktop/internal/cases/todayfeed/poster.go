@@ -19,6 +19,7 @@ const (
 	opRecord    = "todayfeed: record a post"
 	opNoSummary = "todayfeed: no summary stored, no post"
 	opNoSource  = "todayfeed: transcript gone, no post"
+	opStale     = "todayfeed: event of an older transcript, ignored"
 )
 
 // Poster records the posts after lessons from the completed post-processing jobs.
@@ -69,7 +70,7 @@ func (p *Poster) JobCompleted(ctx context.Context, snap job.Snapshot) error {
 
 // Record applies event e of transcript t to the post of its recording, creating the post on the first event. A
 // summary event counts only when the summary is stored, so a lesson without speech (TASK-110) never gets a post
-// about its summary. Concurrent saves are reloaded and recorded again; the same event twice changes nothing.
+// about its summary. An event of a transcript that is not the newest of its recording is ignored. Concurrent saves are reloaded and recorded again; the same event twice changes nothing.
 func (p *Poster) Record(ctx context.Context, e post.Event, t shared.TranscriptID) error {
 	if e == post.EventSummary {
 		_, err := p.summaries.Get(ctx, summary.IDOf(t))
@@ -90,7 +91,17 @@ func (p *Poster) Record(ctx context.Context, e post.Event, t shared.TranscriptID
 		return fmt.Errorf("%s: %w", opRecord, err)
 	}
 
+	// A late job of a transcript replaced by a rerun must not switch the post back to the old results.
 	rec := tr.RecordingID()
+	latest, err := p.transcripts.LatestByRecording(ctx, rec)
+	if err != nil {
+		return fmt.Errorf("%s: %w", opRecord, err)
+	}
+	if latest.ID() != t {
+		p.log.Info(opStale, slog.String("transcript", t.String()), slog.String("latest", latest.ID().String()))
+		return nil
+	}
+
 	var last error
 	for range saveAttempts {
 		now := p.clock.Now()
