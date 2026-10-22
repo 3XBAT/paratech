@@ -37,5 +37,6 @@ free subject string (case-insensitive). Threads (ADR-0021), «Предметы»
 - Undo of library actions: an empty subject or folder is removed, a placed file goes back to «Входящие», a link is
   removed; the file itself is never deleted by Undo.
 - A visible `%USERPROFILE%\paratech` folder, if ever wanted, needs its own ADR.
-- Open: how existing recordings with a free subject string are mapped to subject IDs (suggested from the schedule via
-  `subjectmatch`, never auto-created) is settled in TASK-121.
+- `library.Service` implements the knowledgebase subject-resolver port (wired in `app`).
+- Settled (TASK-121): no backfill. A free subject string resolves to a subject ID at read time via `subjectmatch`
+  (name or alias); an unresolved string keeps the legacy grouping of ADR-0019.

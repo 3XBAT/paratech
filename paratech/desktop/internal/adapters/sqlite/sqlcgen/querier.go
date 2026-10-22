@@ -10,6 +10,9 @@ import (
 )
 
 type Querier interface {
+	// Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
+	// a soft-deleted lesson get a new version (Undo compares material versions).
+	BumpMaterialsLinkedToDeletedLesson(ctx context.Context, id string) error
 	// Only the current request of a thread can be unfinished: a new request cancels a waiting one (thread.StartTurn), so
 	// the stored rows of earlier requests follow.
 	CancelEarlierAgentTurns(ctx context.Context, arg CancelEarlierAgentTurnsParams) error
