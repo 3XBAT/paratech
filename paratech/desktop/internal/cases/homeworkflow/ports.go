@@ -150,8 +150,8 @@ type ProposalRepository interface {
 	Save(ctx context.Context, p *proposal.Proposal) error
 }
 
-// DraftReader reads the draft history of an assignment: the agent's send names a draft version (TASK-127), and the
-// confirmation shows which version the pinned attachment is. Implemented by the sqlite adapter.
+// DraftReader reads the draft history of an assignment (PRD section 10): the agent's send names a draft version
+// (TASK-127), and the confirmation shows which version the pinned attachment is. Implemented by the sqlite adapter.
 type DraftReader interface {
 	// Get loads the draft of an assignment (PRD section 10); none wraps shared.ErrNotFound.
 	Get(ctx context.Context, a shared.AssignmentID) (*homeworkdraft.Draft, error)
@@ -160,7 +160,7 @@ type DraftReader interface {
 // WaitingProposals lists the proposals in one status (PRD section 13.3), so the same deadline proposed again reuses
 // the one that waits for «Да» (TASK-127). Implemented by the sqlite adapter.
 type WaitingProposals interface {
-	// ListByStatus returns the proposals in status, newest first, at most limit.
+	// ListByStatus returns the proposals in status, newest first, at most limit (PRD section 13.3).
 	ListByStatus(ctx context.Context, status proposal.Status, limit int) ([]*proposal.Proposal, error)
 }
 

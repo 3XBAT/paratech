@@ -53,7 +53,6 @@ const (
 	RefuseNoDue         Refusal = "no_due"               // the assignment has no deadline
 	RefuseDueOutOfRange Refusal = "due_out_of_range"     // the deadline is past or too far ahead
 	RefuseNotDeletable  Refusal = "not_deletable"        // the recording is in progress or being recovered
-	RefuseUnresolved    Refusal = "email_unresolved"     // an earlier email of the assignment has an unknown outcome
 )
 
 // assumptionsNote tells the planner to go on after a refused third question round (ADR-0021).
