@@ -277,6 +277,61 @@ test("a refused «Да» shows the core's text, keeps «Да» available and doe
   assert.equal(flow.state.card.state, "done");
 });
 
+const staleText = "Предложение не найдено: возможно, оно уже обработано.";
+const buttonsOf = (flow) => html(h(ConfirmCardView, { model: confirmCardModel(flow.state.card), busy: "", error: flow.state.error, onYes: noop, onNo: noop }));
+
+test("a stale «Да» re-reads the card: the error stays, no buttons are offered", async () => {
+  const api = fakeApi({
+    confirm: async () => { throw staleText; },
+    card: async () => card({ state: "stale", message: "Предложение устарело." }),
+  });
+  const flow = new ConfirmFlow(api, noop);
+  flow.show(card());
+  await flow.yes();
+  assert.equal(flow.state.error, staleText);
+  assert.equal(flow.state.card.state, "stale");
+  const out = buttonsOf(flow);
+  assert.match(out, /role="alert"/);
+  assert.doesNotMatch(out, /<button/);
+});
+
+test("a refused «Нет» re-reads the card; a failed re-read keeps the old card", async () => {
+  const api = fakeApi({
+    decline: async () => { throw staleText; },
+    card: async () => card({ state: "done" }),
+  });
+  const flow = new ConfirmFlow(api, noop);
+  flow.show(card());
+  await flow.no();
+  assert.equal(flow.state.error, staleText);
+  assert.equal(flow.state.card.state, "done");
+  assert.doesNotMatch(buttonsOf(flow), /<button/);
+
+  const broken = fakeApi({
+    decline: async () => { throw staleText; },
+    card: async () => { throw new Error("boom"); },
+  });
+  const flow2 = new ConfirmFlow(broken, noop);
+  flow2.show(card());
+  await flow2.no();
+  assert.equal(flow2.state.error, staleText);
+  assert.equal(flow2.state.card.state, "waiting");
+  assert.equal(flow2.state.busy, "");
+});
+
+test("stale or rejected without a message does not say «Отклонено»", () => {
+  for (const state of ["stale", "rejected"]) {
+    const m = confirmCardModel(card({ state, message: "" }));
+    assert.notEqual(m.outcome, "");
+    assert.doesNotMatch(m.outcome, /Отклонено/);
+  }
+});
+
+test("the unknown-format text of the core is shown as is", () => {
+  const t = "Неизвестный формат вложения: выберите .docx или .txt.";
+  assert.equal(confirmErrorText(t), t);
+});
+
 test("an unknown error text becomes the generic one; a failed load can be retried", async () => {
   let fail = true;
   const api = fakeApi({
@@ -342,6 +397,12 @@ test("posts offer «Да, в календарь» for a deadline action only, an
   assert.doesNotMatch(html(h(PostsSection, { posts: [post([])], onOpenSummary: noop, calendar: calls })), /Да, в календарь/);
   assert.equal(isDeadlineAction("create_deadline_event", ""), false);
   assert.equal(isDeadlineAction("create_deadline_event", "a1"), true);
+});
+
+test("an earlier non-deadline action for the same assignment does not hide the button", () => {
+  const cal = [{ kind: "other", assignmentId: "a1", due: "" }, { kind: "create_deadline_event", assignmentId: "a1", due: "2026-10-24T12:00:00Z" }];
+  const out = html(h(PostsSection, { posts: [post(cal)], onOpenSummary: noop, calendar: { api: fakeApi(), deleteApi: {} } }));
+  assert.equal((out.match(/Да, в календарь/g) ?? []).length, 1);
 });
 
 test("«Да, в календарь» makes one proposal, then the card asks «Да»; the calendar is written by Confirm only", async () => {

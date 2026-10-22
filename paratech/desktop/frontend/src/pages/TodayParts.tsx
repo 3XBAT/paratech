@@ -268,7 +268,8 @@ export function PostsSection(props: {
                   <div className="small muted today-meta num">{m.homework === "" ? m.meta : `${m.meta} · ${m.homework}`}</div>
                   {props.calendar !== undefined &&
                     p.calendar
-                      .filter((c, i, all) => isDeadlineAction(c.kind, c.assignmentId) && all.findIndex((x) => x.assignmentId === c.assignmentId) === i)
+                      .filter((c) => isDeadlineAction(c.kind, c.assignmentId))
+                      .filter((c, i, all) => all.findIndex((x) => x.assignmentId === c.assignmentId) === i)
                       .map((c) => (
                         <PostCalendar
                           key={c.assignmentId}

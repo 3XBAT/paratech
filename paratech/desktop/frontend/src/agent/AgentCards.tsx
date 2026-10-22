@@ -231,7 +231,7 @@ function Card(props: { card: CardModel; actions: CardActions }) {
       );
     case "confirm":
       if (card.target !== null && props.actions.confirm !== undefined) {
-        return <ConfirmCard api={props.actions.confirm.api} deleteApi={props.actions.confirm.deleteApi} target={card.target} />;
+        return <ConfirmCard key={`${card.target.kind}:${card.target.id}`} api={props.actions.confirm.api} deleteApi={props.actions.confirm.deleteApi} target={card.target} />;
       }
       return (
         <section className="ag-card ag-confirm">

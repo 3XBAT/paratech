@@ -27,6 +27,7 @@ export const confirmTexts = {
   doneSend: "Письмо отправлено.",
   doneDelete: "Запись удалена.",
   declined: "Отклонено: ничего не выполнено.",
+  notActual: "Предложение больше не действует: ничего не выполнено.",
   confirmedAgain: "Подтверждено, но не выполнено. Повторное «Да» не создаст дубль.",
   noDeletable: "Удалить нельзя.",
   adHoc: "Запись",
@@ -101,7 +102,7 @@ function outcomeOf(c: ConfirmCard): string {
       return confirmTexts.declined;
     case "stale":
     case "rejected":
-      return c.message !== "" ? c.message : confirmTexts.declined;
+      return c.message !== "" ? c.message : confirmTexts.notActual;
     case "confirmed":
       return c.message !== "" ? c.message : confirmTexts.confirmedAgain;
     case "waiting":
@@ -238,7 +239,7 @@ export class ConfirmFlow {
     try {
       this.set({ card: await this.api.confirm(card), busy: "" });
     } catch (err) {
-      this.set({ error: confirmErrorText(err), busy: "" });
+      await this.refused(card, err);
     } finally {
       this.pending = false;
     }
@@ -255,9 +256,20 @@ export class ConfirmFlow {
     try {
       this.set({ card: await this.api.decline({ kind: card.targetKind as ConfirmTarget["kind"], id: card.targetId }), busy: "" });
     } catch (err) {
-      this.set({ error: confirmErrorText(err), busy: "" });
+      await this.refused(card, err);
     } finally {
       this.pending = false;
+    }
+  }
+
+  /** The core refused: keep the error line and re-read the card so it shows its real state; keep the old card on failure. */
+  private async refused(card: ConfirmCard, err: unknown): Promise<void> {
+    const error = confirmErrorText(err);
+    try {
+      const fresh = await this.api.card({ kind: card.targetKind as ConfirmTarget["kind"], id: card.targetId });
+      this.set({ card: fresh, error, busy: "" });
+    } catch {
+      this.set({ error, busy: "" });
     }
   }
 
