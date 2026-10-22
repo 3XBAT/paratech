@@ -1,0 +1,1721 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>paratech — концепт «Агент в центре» (2026-10-21)</title>
+<!--
+  Static mockup, no network. Style = concept-strict (grouped lists, hairlines, quiet buttons, segmented controls),
+  with the owner's notes of 2026-10-21: icon-only rail with tooltips to the right, neutral palette + ONE accent
+  (the --acc variable; swatches in Настройки → Оформление switch it live), true dark theme.
+  The accent text colours are derived from --acc with color-mix so every swatch keeps ≥ 4.5:1 (checked for all five).
+-->
+<style>
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: local("Golos Text"), url("../../paratech/desktop/frontend/node_modules/@fontsource-variable/golos-text/files/golos-text-cyrillic-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: local("Golos Text"), url("../../paratech/desktop/frontend/node_modules/@fontsource-variable/golos-text/files/golos-text-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ───────────── Tokens ─────────────
+   One accent: --acc. Light text accent = 78 % acc + black, dark = 60 % acc + white; soft chip fill 12 % / 14 %.
+   Contrast (worst case over the five swatches): light text on --bg 4.91, on chip 5.10; dark text on --raised 5.82, on chip 5.11. */
+:root { --acc: #C26A2E; }
+.t-light, :root {
+  --font: "Golos Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --bg: #EBEBE7;
+  --panel: #F4F4F1;
+  --raised: #FFFFFF;
+  --fill: #E8E8E4;
+  --fill-2: #DFDFDA;
+  --sep: rgba(26, 27, 30, .10);
+  --edge: rgba(26, 27, 30, .07);
+  --btn-line: rgba(26, 27, 30, .20);
+  --control: #7A7D83;
+  --text: #1A1B1E;
+  --muted: #5A5D64;
+  --prim: #1F2023;
+  --on-prim: #FAFAF8;
+  --accent: color-mix(in srgb, var(--acc) 78%, #000);
+  --accent-fill: var(--acc);
+  --acc-soft: color-mix(in srgb, var(--acc) 12%, #fff);
+  --neu-t: #4E5158; --neu-b: #EEEEEB;
+  --err-t: #9C3027; --err-b: #F7E5E2;
+  --lvl: #5A5D64;
+  --sh-btn: 0 .5px 1px rgba(20, 20, 24, .10);
+  --sh-thumb: 0 1px 2px rgba(20, 20, 24, .10), 0 0 0 .5px rgba(20, 20, 24, .06);
+  --sh-win: 0 1px 2px rgba(20, 20, 24, .05), 0 18px 44px -22px rgba(20, 20, 24, .28);
+  --sh-pop: 0 0 0 1px rgba(20, 20, 24, .08), 0 12px 32px -12px rgba(20, 20, 24, .30);
+  --r-xs: 3px; --r-sm: 6px; --r-md: 8px; --r-lg: 10px; --r-xl: 12px;
+  --h-sm: 24px; --h-ctl: 30px; --h-lg: 36px; --h-row: 44px;
+  color-scheme: light;
+}
+/* True dark, neutral-warm like Claude's dark UI: no blue-black, no tinted greys. */
+.t-dark {
+  --bg: #1C1C1B;
+  --panel: #232322;
+  --raised: #2C2C2A;
+  --fill: #353533;
+  --fill-2: #3E3E3B;
+  --sep: rgba(236, 235, 230, .09);
+  --edge: rgba(236, 235, 230, .07);
+  --btn-line: rgba(236, 235, 230, .18);
+  --control: #7C7B75;
+  --text: #ECEBE6;
+  --muted: #A6A49C;
+  --prim: #ECEBE6;
+  --on-prim: #1C1C1B;
+  --accent: color-mix(in srgb, var(--acc) 60%, #fff);
+  --accent-fill: color-mix(in srgb, var(--acc) 85%, #fff);
+  --acc-soft: color-mix(in srgb, var(--acc) 14%, #2C2C2A);
+  --neu-t: #BDBBB3; --neu-b: #333331;
+  --err-t: #EE9188; --err-b: #3A2522;
+  --lvl: #BDBBB3;
+  --sh-btn: 0 .5px 1px rgba(0, 0, 0, .4);
+  --sh-thumb: 0 1px 2px rgba(0, 0, 0, .45);
+  --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
+  --sh-pop: 0 0 0 1px rgba(255, 255, 255, .06), 0 14px 36px -12px rgba(0, 0, 0, .8);
+  color-scheme: dark;
+}
+
+/* ───────────── Mockup page ───────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { background: #DCDCD7; }
+body { margin: 0; padding: 32px 24px 80px; font-family: var(--font); font-size: 14px; line-height: 20px; color: #1A1B1E; -webkit-font-smoothing: antialiased; }
+.doc { width: 1280px; margin: 0 auto; }
+.doc > h1 { margin: 0 0 4px; font-size: 28px; line-height: 34px; font-weight: 650; letter-spacing: -0.03em; }
+.doc > .lead { margin: 0 0 24px; color: #4E5158; max-width: 90ch; }
+.intro { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; margin-bottom: 32px; }
+.intro .group { padding: 20px 24px; }
+.intro h2 { margin: 0 0 12px; font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.intro h2 + ul, .intro h2 + table { margin-top: 0; }
+.intro ul { margin: 0 0 20px; padding-left: 18px; }
+.intro ul:last-child { margin-bottom: 0; }
+.intro li { margin-bottom: 8px; }
+.intro li b { font-weight: 600; }
+.navmap { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 18px; margin-bottom: 20px; }
+.navmap td { padding: 8px 12px 8px 0; border-top: 1px solid rgba(26,27,30,.10); vertical-align: top; }
+.navmap td:first-child { white-space: nowrap; font-weight: 600; width: 1%; }
+.navmap td:first-child .i { margin-right: 8px; vertical-align: -4px; color: #5A5D64; }
+.switcher { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin: 0 -24px 8px; padding: 12px 24px; background: #DCDCD7; border-bottom: 1px solid rgba(26,27,30,.10); }
+.switcher .lab { font-size: 12.5px; font-weight: 600; color: #4E5158; }
+.switcher .grow { flex: 1; }
+.label-sec { display: flex; align-items: baseline; gap: 12px; margin: 32px 0 12px; }
+.label-sec b { font-size: 13px; font-weight: 600; color: #4E5158; font-variant-numeric: tabular-nums; }
+.label-sec span { font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.label-sec em { margin-left: auto; font-style: normal; font-size: 12.5px; color: #4E5158; }
+.stepper { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.caption { margin: 12px 0 0; font-size: 12.5px; line-height: 18px; color: #4E5158; max-width: 120ch; }
+.caption b { color: #1A1B1E; font-weight: 600; }
+.scn { display: none; }
+.scn.on { display: block; }
+.frame { display: none; }
+.frame.on { display: block; }
+body.all .frame { display: block; margin-bottom: 40px; }
+body.all .stepper { display: none; }
+.frame-h { display: none; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #4E5158; }
+body.all .frame-h { display: block; }
+body.shot .intro, body.shot .doc > h1, body.shot .doc > .lead { display: none; }
+
+/* ───────────── Base inside a themed frame ───────────── */
+.t-light, .t-dark { color: var(--text); font-family: var(--font); }
+.num { font-variant-numeric: tabular-nums; }
+code { font-family: inherit; font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; line-height: 18px; }
+.i { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.i.s14 { width: 14px; height: 14px; }
+.i.s16 { width: 16px; height: 16px; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.grow { flex: 1; }
+
+/* Window: 1280×800, the sheet and the agent thread scroll inside. */
+.win { position: relative; display: flex; flex-direction: column; width: 1280px; height: 800px; overflow: hidden; border-radius: 8px; background: var(--bg); box-shadow: var(--sh-win), 0 0 0 1px rgba(20,20,24,.10); }
+body.fit .win { height: auto; min-height: 800px; }
+.tbar { position: relative; flex: none; display: flex; align-items: center; height: 32px; padding-left: 12px; font-size: 12px; color: var(--muted); }
+.tbar .app { display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text); }
+.logo, .mark { flex: none; width: 16px; height: 16px; border-radius: 4px; background: #2A2B2F; display: grid; place-items: center; box-shadow: 0 0 0 1px var(--edge); }
+.logo svg, .mark svg { width: 12px; height: 12px; stroke: #E58A47; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mark.lg { width: 20px; height: 20px; border-radius: 5px; }
+.mark.lg svg { width: 14px; height: 14px; }
+.tbar .wc { margin-left: auto; display: flex; }
+.tbar .wc span { display: grid; place-items: center; width: 46px; height: 32px; }
+.tbar .wc .i { width: 14px; height: 14px; stroke-width: 1.2; }
+.ask-pill { position: absolute; left: 50%; top: 4px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: 360px; height: 24px; padding: 0 4px 0 8px; border: 0; border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.ask-pill .grow { text-align: left; }
+.ask-pill[aria-expanded="true"] { background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line); color: var(--text); }
+.kbd { display: inline-flex; align-items: center; height: 18px; padding: 0 4px; border-radius: var(--r-xs); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line); color: var(--muted); font-size: 11.5px; line-height: 14px; font-weight: 500; white-space: nowrap; }
+.shell { flex: 1; min-height: 0; display: grid; grid-template-columns: 56px minmax(0, 1fr); }
+.shell.ag { grid-template-columns: 56px minmax(0, 1fr) 384px; }
+
+/* Icon-only rail (owner note 1): 40×40 targets, monochrome line icons; the current item = accent icon + accent mark.
+   The label appears as a tooltip to the RIGHT on hover and on keyboard focus. */
+.rail { position: relative; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 8px 12px; }
+.rail a { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r-md); color: var(--muted); text-decoration: none; }
+.rail a:hover { background: var(--fill); color: var(--text); }
+.rail a[aria-current="page"] { background: var(--panel); color: var(--accent); box-shadow: 0 0 0 1px var(--edge); }
+.rail a[aria-current="page"]::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: -8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
+.rail .i { width: 20px; height: 20px; }
+.rail .low { margin-top: auto; }
+.rail .tip { position: absolute; left: calc(100% + 8px); top: 50%; transform: translate(-4px, -50%); padding: 4px 8px; border-radius: var(--r-sm); background: var(--prim); color: var(--on-prim); font-size: 12.5px; line-height: 18px; font-weight: 500; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 120ms, transform 120ms; box-shadow: var(--sh-pop); }
+.rail .tip::before { content: ""; position: absolute; left: -4px; top: 50%; width: 8px; height: 8px; margin-top: -4px; background: var(--prim); transform: rotate(45deg); border-radius: 1px; }
+.rail a:hover .tip, .rail a:focus-visible .tip, .rail a.demo-tip .tip { opacity: 1; transform: translate(0, -50%); }
+.badge { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill); box-shadow: 0 0 0 2px var(--bg); }
+
+/* Sheet */
+.sheet { container-type: inline-size; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 24px 32px 0; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); scrollbar-width: thin; scrollbar-color: var(--fill-2) transparent; }
+.shell.ag .sheet { border-right: 1px solid var(--edge); border-top-right-radius: var(--r-xl); }
+body.fit .sheet { overflow: visible; }
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.head h1 { margin: 0; font-size: 24px; line-height: 30px; font-weight: 650; letter-spacing: -0.025em; }
+.head .over { display: block; margin-bottom: 4px; font-size: 12.5px; line-height: 16px; color: var(--muted); }
+.head .acts { display: flex; gap: 8px; }
+.sec-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; padding: 0 16px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--muted); }
+.sec-h .cnt { font-weight: 500; }
+.sec-h .r2 { margin-left: auto; font-weight: 500; }
+.section + .section { margin-top: 24px; }
+.foot { margin: 8px 0 0; padding: 0 16px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.back { margin: -8px 0 8px -8px; }
+.sub-line { margin: 4px 0 0; color: var(--muted); }
+.sub-line b { color: var(--text); font-weight: 500; }
+.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.statusbar { display: flex; gap: 24px; margin: auto -32px 0; padding: 8px 32px; border-top: 1px solid var(--sep); font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.statusbar span { display: inline-flex; align-items: center; gap: 8px; }
+.statusbar .r2 { margin-left: auto; }
+.spacer { flex: 1; min-height: 24px; }
+
+.group { position: relative; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
+.group > .r { position: relative; }
+.group > .r + .r::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--h-ctl); padding: 0 12px; border: 0; border-radius: var(--r-sm); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); color: var(--text); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background 120ms; }
+.btn:hover { background: var(--fill); }
+.btn .i { width: 16px; height: 16px; color: var(--muted); }
+.btn.primary { background: var(--prim); color: var(--on-prim); box-shadow: var(--sh-btn); }
+.btn.primary .i { color: currentColor; }
+.btn.primary:hover { opacity: .9; }
+.btn.plain { background: none; box-shadow: none; color: var(--accent); }
+.btn.plain .i { color: currentColor; }
+.btn.plain:hover { background: none; text-decoration: underline; text-underline-offset: 3px; }
+.btn.lg { height: var(--h-lg); font-size: 14px; }
+.btn.sm { height: var(--h-sm); padding: 0 8px; font-size: 12.5px; gap: 4px; }
+.btn.sm .i { width: 14px; height: 14px; }
+.ibtn { display: inline-grid; place-items: center; width: var(--h-ctl); height: var(--h-ctl); padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); cursor: pointer; }
+.ibtn:hover { background: var(--fill); color: var(--text); }
+.ibtn.sm { width: 24px; height: 24px; }
+.ibtn.sm .i { width: 14px; height: 14px; }
+
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md); background: var(--fill); }
+.seg button { height: 26px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.seg button[aria-pressed="false"] { color: var(--muted); }
+.seg button[aria-pressed="false"]:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--raised); box-shadow: var(--sh-thumb); }
+.seg button[disabled] { color: var(--muted); opacity: .6; cursor: default; }
+.seg.lg button { height: 28px; padding: 0 16px; font-size: 13.5px; }
+.seg.full { display: flex; }
+.seg.full button { flex: 1; padding: 0 8px; }
+.seg .n { margin-left: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Status chips (owner note 2): neutral by default; the shape says the state — check = done, dashed = waits for
+   something outside, plain = info. Accent only for «needs you / in progress». Red only for a failure. */
+.chip { --c: var(--neu-t); --b: var(--neu-b); display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 6px; border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); border-radius: var(--r-sm); background: var(--b); color: var(--c); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap; }
+.chip .i { width: 13px; height: 13px; stroke-width: 2; }
+.chip.s-wait { border-style: dashed; }
+.chip.s-acc { --c: var(--accent); --b: var(--acc-soft); }
+.chip.s-fail { --c: var(--err-t); --b: var(--err-b); border-style: dashed; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill); animation: breath 2.4s ease-in-out infinite; }
+@keyframes breath { 50% { opacity: .35; } }
+.prog { display: block; width: 100%; max-width: 200px; height: 4px; border-radius: var(--r-xs); background: var(--fill); overflow: hidden; }
+.prog b { display: block; height: 100%; border-radius: var(--r-xs); background: var(--accent-fill); }
+
+/* Sound meter: neutral fill now (no green), same capsule and «слышно» mark. */
+.lvl { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.lvl-bar { position: relative; flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.lvl-bar b { position: absolute; inset: 0; border-radius: 2px; background: var(--lvl); transform-origin: left center; transform: scaleX(.6); }
+.lvl-bar i { position: absolute; top: 0; bottom: 0; left: 18%; width: 1px; background: var(--muted); opacity: .5; }
+.lvl.on .lvl-bar b { animation: speak 3.2s ease-in-out infinite; }
+@keyframes speak { 0% { transform: scaleX(.42); } 17% { transform: scaleX(.66); } 34% { transform: scaleX(.5); } 52% { transform: scaleX(.78); } 70% { transform: scaleX(.47); } 89% { transform: scaleX(.69); } 100% { transform: scaleX(.42); } }
+
+/* ───────────── «Сегодня» ───────────── */
+.ask { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 8px 0 12px; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); }
+.ask input { flex: 1; min-width: 0; height: 36px; border: 0; background: none; color: var(--text); font: inherit; font-size: 15px; }
+.ask input::placeholder { color: var(--muted); }
+.ask input:focus { outline: none; }
+.ask:focus-within { box-shadow: 0 0 0 2px var(--accent); }
+.sugg { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.post { margin-top: 16px; }
+.today { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; margin-top: 24px; }
+@container (max-width: 900px) { .today { grid-template-columns: minmax(0, 1fr); } }
+.prow { display: grid; grid-template-columns: 84px minmax(0, 1fr) 200px 120px; gap: 4px 16px; align-items: center; min-height: 60px; padding: 12px 16px; }
+.prow .tm { font-weight: 600; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.prow .tm span { display: block; font-weight: 500; font-size: 12.5px; color: var(--muted); }
+.prow .t { margin: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .meta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.prow .st { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.prow .ac { justify-self: end; }
+.prow.live { background: linear-gradient(90deg, var(--acc-soft), transparent 45%); }
+.wrow { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 12px 16px; }
+.wrow > .i { color: var(--accent); }
+.wrow .t { font-weight: 600; }
+.wrow .meta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.drow { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 48px; padding: 8px 16px; }
+.drow .d { font-weight: 600; font-size: 13.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.drow .d span { display: block; font-weight: 500; font-size: 12.5px; color: var(--muted); }
+.drow .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drow .meta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.lrow { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 16px; }
+.lrow > .i { color: var(--muted); }
+.lrow .tx { flex: 1; min-width: 0; }
+.lrow .t { font-weight: 500; }
+.lrow .meta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+
+/* ───────────── Agent panel ───────────── */
+.agent { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ap-head { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 16px; }
+.ap-head .nm { font-weight: 600; }
+.ap-ctx { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; font-size: 12.5px; color: var(--muted); }
+.ctx { display: inline-flex; align-items: center; gap: 4px; max-width: 280px; color: var(--text); height: 24px; padding: 0 2px 0 8px; border-radius: var(--r-sm); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.ctx > span { overflow: hidden; text-overflow: ellipsis; }
+.ctx .i { color: var(--muted); }
+.ctx .ibtn { width: 20px; height: 20px; }
+.ctx .ibtn .i { width: 12px; height: 12px; }
+.ap-thread { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 16px; scrollbar-width: thin; scrollbar-color: var(--fill-2) transparent; }
+body.fit .ap-thread { overflow: visible; }
+.ap-thread > * { flex: none; }
+.ap-comp { flex: none; padding: 0 16px 8px; }
+.comp { border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); }
+.comp textarea { display: block; width: 100%; height: 44px; padding: 12px 12px 0; border: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; background: none; color: var(--text); font: inherit; resize: none; }
+.comp textarea::placeholder { color: var(--muted); }
+.comp textarea:focus { outline: none; }
+.comp:focus-within { box-shadow: 0 0 0 2px var(--accent); }
+.comp-row { display: flex; align-items: center; gap: 4px; padding: 4px; }
+.comp-row .small { color: var(--muted); }
+.ap-rule { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+.ap-rule .i { width: 13px; height: 13px; }
+
+.mt { align-self: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mu { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 88%; }
+.mu .bub { padding: 8px 12px; border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); background: var(--fill-2); }
+.fatt { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 8px; border-radius: var(--r-md); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
+.fatt .fi { display: grid; place-items: center; width: 28px; height: 32px; border-radius: var(--r-xs); background: var(--fill); color: var(--muted); font-size: 11.5px; font-weight: 700; }
+.fatt .fn { font-weight: 600; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+.fatt .fm { font-size: 12px; line-height: 16px; color: var(--muted); }
+
+.card { padding: 12px 16px 16px; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
+.card-h { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12.5px; line-height: 18px; font-weight: 600; color: var(--muted); }
+.card-h .t2 { margin-left: auto; font-weight: 500; }
+.card p { margin: 0 0 8px; }
+.card p:last-child { margin-bottom: 0; }
+.card .lead2 { margin: 0 0 8px; font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.card ul, .card ol { margin: 0 0 8px; padding-left: 20px; }
+.card li { margin-bottom: 4px; }
+.card li::marker { color: var(--muted); }
+.card-a { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.card .note { display: flex; gap: 8px; margin: 8px 0 0; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.card .note .i { width: 14px; height: 14px; margin-top: 2px; }
+.card.ask-card { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.card.ask-card > .card-h { color: var(--accent); }
+/* Irreversible: the one place besides failures where the restrained red appears. */
+.card.confirm { box-shadow: 0 0 0 1px color-mix(in srgb, var(--err-t) 45%, transparent); }
+.card.confirm > .card-h { color: var(--err-t); }
+.kv { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; margin: 8px 0 0; font-size: 13px; line-height: 18px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.kv dd .small { display: block; color: var(--muted); }
+.trust { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--neu-t); }
+.trust .i { width: 13px; height: 13px; }
+.mailtext { margin-top: 8px; padding: 8px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: 13px; line-height: 19px; }
+
+/* Action line: a reversible action already done, with «Отменить». */
+.act { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: 12.5px; line-height: 18px; }
+.act > .i { width: 14px; height: 14px; color: var(--muted); }
+.act .tx { flex: 1; min-width: 0; }
+.act.raised { background: var(--raised); }
+.act.undone .tx { color: var(--muted); text-decoration: line-through; }
+
+/* Citations */
+.cite { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; margin: 0 1px; border: 0; border-radius: var(--r-xs); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line); color: var(--accent); font-size: 12px; line-height: 16px; font-weight: 600; font-variant-numeric: tabular-nums; vertical-align: 1px; cursor: pointer; white-space: nowrap; }
+.cite:hover { text-decoration: underline; text-underline-offset: 2px; }
+.cite[aria-pressed="true"] { box-shadow: 0 0 0 1.5px var(--accent); }
+.srcs { margin: 12px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--sep); }
+.card .srcs { padding-left: 0; }
+.srcs li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 2px 8px; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--sep); font-size: 13px; line-height: 18px; }
+.srcs li:last-child { border-bottom: 0; padding-bottom: 0; }
+.srcs .ttl { font-weight: 500; }
+.srcs .ttl a { color: var(--accent); text-decoration: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+.srcs .ttl a:hover { text-decoration: underline; }
+.srcs q { grid-column: 2; font-size: 12.5px; color: var(--muted); }
+.missing { margin-top: 12px; padding: 8px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: 13px; line-height: 18px; }
+.missing .chip { margin-bottom: 4px; }
+
+/* Question card */
+.q-blk + .q-blk { margin-top: 12px; }
+.q-lab { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font-size: 12.5px; line-height: 18px; font-weight: 600; }
+.q-lab .muted { font-weight: 500; }
+.q-hint { margin: 4px 0 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+.opt { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 13px; line-height: 18px; cursor: pointer; }
+.opt input { margin: 2px 0 0; accent-color: var(--prim); }
+.inp { width: 100%; height: var(--h-ctl); padding: 0 8px; border: 1px solid var(--control); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+.inp::placeholder { color: var(--muted); }
+.inp:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Progress card checklist */
+.chk { list-style: none; margin: 12px 0 0; padding: 0 !important; }
+.chk li { display: flex; align-items: center; gap: 8px; margin: 0; padding: 4px 0; font-size: 13px; line-height: 18px; }
+.chk li .i { width: 16px; height: 16px; color: var(--muted); }
+.chk li.cur { font-weight: 600; }
+.chk li.cur .i { color: var(--accent); }
+.chk li.todo { color: var(--muted); }
+
+/* File preview */
+.fprev { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: start; }
+.page { display: flex; flex-direction: column; align-items: center; aspect-ratio: 1 / 1.414; padding: 8px 6px; border-radius: 2px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(20,20,24,.16), 0 2px 4px rgba(20,20,24,.10); color: #1A1B1E; font-size: 4.6px; line-height: 6.4px; text-align: center; }
+.page .pg-t { margin-top: 18%; font-size: 7px; line-height: 9px; font-weight: 700; letter-spacing: .04em; }
+.page .pg-s { margin-top: 3px; }
+.page .pg-r { align-self: flex-end; margin-top: auto; text-align: right; }
+.page .pg-c { margin-top: 10%; }
+.fname { font-weight: 600; font-size: 13.5px; line-height: 18px; overflow-wrap: anywhere; }
+.fmeta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+
+/* Drop overlay: the whole window accepts a file. */
+.drop { position: absolute; inset: 32px 0 0 0; z-index: 40; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 80%, transparent); }
+.drop::before { content: ""; position: absolute; inset: 12px; border: 2px dashed var(--accent-fill); border-radius: var(--r-xl); }
+.drop .box { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 440px; padding: 24px 32px; border-radius: var(--r-xl); background: var(--raised); box-shadow: var(--sh-pop); text-align: center; }
+.drop .box > .i { width: 28px; height: 28px; color: var(--accent); }
+.drop .box b { font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.015em; }
+.drop .box p { margin: 0; color: var(--muted); }
+.ghost { position: absolute; left: 61%; top: 58%; display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 8px; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--sh-pop); transform: rotate(-2deg); }
+
+/* Reading (lecture page) */
+.sum-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.reading { padding: 24px 32px 28px; }
+.reading .stamp { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.reading p { max-width: 68ch; margin: 0 0 12px; font-size: 15.5px; line-height: 1.65; }
+.reading h3 { margin: 20px 0 8px; font-size: 15.5px; line-height: 22px; font-weight: 600; }
+.reading ul { max-width: 68ch; margin: 0 0 12px; padding-left: 20px; font-size: 15.5px; line-height: 1.6; }
+.reading li { margin-bottom: 4px; }
+.reading li::marker { color: var(--muted); }
+.reading .small { font-size: 12.5px; }
+.hw-r { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+.hw-r .t { font-weight: 600; }
+.hw-r .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tr p { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 16px; max-width: none; margin: 0; padding: 8px 12px; border-radius: var(--r-md); font-size: 15px; line-height: 1.6; }
+.tr .tc { color: var(--accent); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; text-decoration: none; padding-top: 2px; }
+.tr p.hl { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--accent-fill); }
+.player { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 8px 16px 8px 8px; }
+.player .prog { max-width: none; flex: 1; }
+
+/* Tree */
+.subj { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
+.tree { font-size: 13.5px; line-height: 18px; }
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree .ti { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--r-sm); color: var(--text); white-space: nowrap; cursor: pointer; }
+.tree .ti:hover { background: var(--fill); }
+.tree .ti > .i { width: 14px; height: 14px; color: var(--muted); }
+.tree .ti .nm { overflow: hidden; text-overflow: ellipsis; }
+.tree .ti .cnt { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tree .ti.cur { background: var(--raised); box-shadow: 0 0 0 1px var(--edge); font-weight: 600; }
+.tree .ti.sem { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.tree .lv1 > li > .ti { padding-left: 8px; }
+.tree .lv2 > li > .ti { padding-left: 28px; }
+.tree .lv2 .ti > .i { color: var(--muted); }
+.tree .fresh { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--accent); }
+.tree-acts { display: flex; gap: 8px; margin-top: 12px; padding: 12px 0 0; border-top: 1px solid var(--sep); }
+
+/* Journal */
+.jrow { display: grid; grid-template-columns: 48px minmax(0, 1fr) 210px 190px; gap: 4px 16px; align-items: center; min-height: 56px; padding: 12px 16px; }
+.jrow .tm { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.jrow .t { font-weight: 600; }
+.jrow .meta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.jrow .st { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.jrow .ac { justify-self: end; display: flex; align-items: center; gap: 8px; }
+.jrow .hint { font-size: 12.5px; color: var(--muted); }
+.jrow.undone .t { color: var(--muted); text-decoration: line-through; }
+
+/* Helper mode */
+.hgrid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: start; }
+@container (max-width: 860px) { .hgrid { grid-template-columns: minmax(0, 1fr); } }
+.srow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 12px; align-items: start; padding: 12px 16px; }
+.srow input { margin: 2px 0 0; width: 16px; height: 16px; accent-color: var(--prim); }
+.srow .t { font-weight: 500; }
+.srow.done .t { color: var(--muted); }
+.srow.cur { background: linear-gradient(90deg, var(--acc-soft), transparent 55%); }
+.srow.cur .t { font-weight: 600; }
+.srow .meta { grid-column: 2; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.pits { margin: 0; padding: 12px 16px 12px 36px; font-size: 13px; line-height: 19px; }
+.pits li { margin-bottom: 4px; }
+.pits li::marker { color: var(--muted); }
+
+/* Settings */
+.sgrid { display: grid; grid-template-columns: 200px minmax(0, 640px); gap: 32px; align-items: start; }
+.snav .r { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; font-weight: 500; cursor: pointer; }
+.snav .r .i { color: var(--muted); }
+.snav .r.cur { font-weight: 600; }
+.snav .r.cur .i { color: var(--accent); }
+.snav .r.cur::after { content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--accent-fill); }
+.set { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: center; min-height: var(--h-row); padding: 8px 16px; }
+.set .note { grid-column: 1 / -1; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.switch { position: relative; width: 40px; height: 24px; margin: 0; border: 1px solid var(--control); border-radius: 12px; background: var(--fill); appearance: none; cursor: pointer; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 120ms; }
+.switch:checked { border-color: var(--prim); background: var(--prim); }
+.switch:checked::after { transform: translateX(16px); background: var(--on-prim); }
+.swatches { display: flex; gap: 12px; }
+.sw { position: relative; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); cursor: pointer; }
+.sw[aria-checked="true"] { box-shadow: 0 0 0 2px var(--raised), 0 0 0 4px var(--text); }
+.sw[aria-checked="true"]::after { content: ""; position: absolute; left: 9px; top: 7px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.sw-name { font-size: 12.5px; color: var(--muted); }
+.preview { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 16px; }
+.mini-rail { display: flex; gap: 4px; padding: 4px; border-radius: var(--r-md); background: var(--bg); }
+.mini-rail span { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-sm); color: var(--muted); }
+.mini-rail span.cur { background: var(--panel); color: var(--accent); box-shadow: 0 0 0 1px var(--edge); }
+.mini-rail span.cur::before { content: ""; position: absolute; bottom: -3px; left: 10px; right: 10px; height: 2px; border-radius: 2px; background: var(--accent-fill); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dot, .lvl.on .lvl-bar b { animation: none; }
+  .rail .tip, .switch::after, .btn { transition: none; }
+}
+@media (forced-colors: active) {
+  .lvl-bar { forced-color-adjust: none; outline: 1px solid CanvasText; background: Canvas; }
+  .lvl-bar b, .prog b { background: Highlight; }
+  .rail a[aria-current="page"] { outline: 2px solid Highlight; }
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h3l2-5 3 10 3-7 2 2h5"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-6.5 8 6.5M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4l2 2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></symbol>
+    <symbol id="i-tasks" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 12l2.5 2.5L16 9"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-log" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="1.8"/></symbol>
+    <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-rec" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6.5 3.5h7.5l3.5 3.5v13.5h-11z"/><path d="M13.5 3.5V7.5h4M9.5 12h5M9.5 15.5h5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v13M12 7a3 3 0 0 0-3-2.5H3.5v13H9a3 3 0 0 1 3 2.5M12 7a3 3 0 0 1 3-2.5h5.5v13H15a3 3 0 0 0-3 2.5"/></symbol>
+    <symbol id="i-model" viewBox="0 0 24 24"><path d="M4 12h.01M8 8v8M12 4.5v15M16 8.5v7M20 12h.01"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-diag" viewBox="0 0 24 24"><path d="M4 16a8 8 0 0 1 16 0M12 16l3.6-4.2M12 8v1.6M6.3 10.3l1.1 1.1M17.7 10.3l-1.1 1.1"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.6-1-2.6 0-1 .8-1.7 1.8-1.7h2.2a3.7 3.7 0 0 0 3.7-3.7C20.5 6.9 16.7 3.5 12 3.5z"/><path d="M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01" stroke-width="2.4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+    <symbol id="i-ok" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-chevr" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v4h14v-4"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4.5 7.5l7.5 5.5 7.5-5.5"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="2.6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-q" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2-2.4 3.5M12 17h.01"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5l7 3v5c0 4.5-3 8-7 9.5-4-1.5-7-5-7-9.5v-5z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 4h4M6.5 7l1 13h9l1-13"/></symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+  <h1>paratech — агент в центре</h1>
+  <p class="lead">Концепт 2026-10-21. Строгий стиль: сгруппированные списки, волосяные линии, тихие кнопки, сегменты, Golos Text. Новое — агент как слой над всем приложением: строка «Спросить paratech» на главной, правая панель на любом экране (Ctrl+K), ответы карточками. Плюс заметки владельца по оформлению: только значки в боковой панели, нейтральная палитра и один акцентный цвет.</p>
+
+  <div class="intro t-light">
+    <div class="group">
+      <h2>Как устроен агентский режим</h2>
+      <ul>
+        <li><b>Агент — слой над всем приложением.</b> Строка «Спросить paratech» вверху «Сегодня» и правая панель на любом экране: Ctrl+K или поле в заголовке окна. Панель знает, где вы: предмет, лекция, шаг задания. Это видно по ярлыку контекста, его можно снять.</li>
+        <li><b>Файл можно бросить в любое место окна.</b> Он уходит агенту, и тот предлагает, что с ним сделать.</li>
+        <li><b>Ответ — карточки, а не простыня текста.</b> План «Понял так», вопрос, ход работы, результат, подтверждение, строка действия с «Отменить», ответ со ссылками.</li>
+        <li><b>Сначала план, потом работа.</b> Если запрос можно понять по-разному или работа большая, агент показывает «Понял так: …» и ждёт «Да». Вопросов — не больше двух раундов, всегда можно «Пропустить — сделай как считаешь».</li>
+        <li><b>Обратимое — сразу, с «Отменить».</b> Создать предмет или папку, прикрепить файл, сделать конспект. Каждое такое действие — строка с «Отменить», все они собраны в «Журнале».</li>
+        <li><b>Необратимое — только после «Да».</b> Письмо, событие в календаре, удаление: карточка подтверждения показывает, кому, что и какую версию. Без «Да» ничего не уходит.</li>
+        <li><b>Чужие файлы — это данные, а не команды.</b> Получателей агент берёт только из доверенных контактов и профиля. Адреса и просьбы из текста методички или задания он не выполняет.</li>
+        <li><b>Честно о границах.</b> Ответ по лекциям — со ссылками: лекция и время, файл и страница, по клику открывается место. Чего нет в материалах, помечено «Нет в ваших лекциях». Если задачу нельзя сделать целиком, агент так и говорит и переходит в режим помощника.</li>
+      </ul>
+      <h2>Оформление: заметки владельца</h2>
+      <ul>
+        <li><b>Боковая панель — только значки.</b> Узкая полоса 56 px, простые монохромные значки. Текущий раздел — акцентный значок и метка слева. Подпись — подсказка справа от значка при наведении и при фокусе с клавиатуры (как в «Собес Тех»).</li>
+        <li><b>Меньше цветов.</b> Нейтральные графит и серые, в тёмной теме — настоящий тёмный, как в Claude. Ярлыки статусов серые, состояние читается по значку и рамке: галочка — готово, пунктир — ждёт извне. Акцент — только у «ждёт вас» и «идёт сейчас». Сдержанный красный — только у сбоя и подтверждения необратимого действия.</li>
+        <li><b>Один акцент — одна переменная.</b> По умолчанию медный <code>#C26A2E</code>. В «Настройки → Оформление» можно выбрать: медный, синий, зелёный, фиолетовый, графит. Выбор переключает весь макет. Оттенки для текста считаются из одного цвета, контраст не ниже 4.5&nbsp;:&nbsp;1 у всех пяти в обеих темах.</li>
+      </ul>
+    </div>
+    <div class="group">
+      <h2>Навигация — 6 разделов</h2>
+      <table class="navmap">
+        <tr><td><svg class="i"><use href="#i-home"/></svg>Сегодня</td><td>Главная: «Спросить paratech», пары дня с записью, «Ждёт вашего «Да»», «Горит на 7 дней», «Готово за день», сообщения агента.</td></tr>
+        <tr><td><svg class="i"><use href="#i-folder"/></svg>Предметы</td><td>Дерево: Семестр → Предмет → Лекции / Семинары / Лабораторные / Материалы / ДЗ / Билеты, свои папки.</td></tr>
+        <tr><td><svg class="i"><use href="#i-tasks"/></svg>Задания</td><td>Все ДЗ и работы со сроками: решения, рефераты, режим помощника.</td></tr>
+        <tr><td><svg class="i"><use href="#i-cal"/></svg>Расписание</td><td>Пары, импорт и синхронизация с Google Календарём.</td></tr>
+        <tr><td><svg class="i"><use href="#i-log"/></svg>Журнал</td><td>Обработка (распознавание, конспект, тексты лекций) и все действия агента с «Отменить».</td></tr>
+        <tr><td><svg class="i"><use href="#i-set"/></svg>Настройки</td><td>Модели речи · Подключения · Диагностика · Профиль · Оформление.</td></tr>
+      </table>
+      <h2>Типы карточек</h2>
+      <ul>
+        <li><b>План</b> — «Понял так: …», [Да] [Изменить] [Отмена].</li>
+        <li><b>Вопрос</b> — варианты, свой ответ, «Пропустить — сделай как считаешь». Рамка акцентная: ждёт вас.</li>
+        <li><b>Ход работы</b> — «Пишу раздел 3 из 6», можно закрыть окно.</li>
+        <li><b>Результат</b> — превью файла, «Открыть в Word», «Доработать», «Отправить преподавателю».</li>
+        <li><b>Подтверждение</b> — только для необратимого. Сдержанная красная рамка, «Отправить» / «Не отправлять».</li>
+        <li><b>Строка действия</b> — «Создал папку «Контрольные» · Отменить».</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="switcher t-light">
+    <div class="seg lg" role="group" aria-label="Сценарий" id="scnSeg">
+      <button aria-pressed="true" data-s="1">1 · Сегодня</button><button aria-pressed="false" data-s="2">2 · Пропустил пару</button><button aria-pressed="false" data-s="3">3 · Реферат под ключ</button><button aria-pressed="false" data-s="4">4 · Вопрос по лекциям</button><button aria-pressed="false" data-s="5">5 · Нельзя целиком</button><button aria-pressed="false" data-s="6">6 · Предметы</button><button aria-pressed="false" data-s="7">7 · Журнал</button><button aria-pressed="false" data-s="8">8 · Тёмная</button><button aria-pressed="false" data-s="9">9 · Оформление</button>
+    </div>
+    <span class="lab">Шаги</span>
+    <div class="seg" role="group" aria-label="Показ шагов" id="modeSeg"><button aria-pressed="true" data-m="one">по одному</button><button aria-pressed="false" data-m="all">все подряд</button></div>
+    <span class="lab">Окно</span>
+    <div class="seg" role="group" aria-label="Высота окна" id="fitSeg"><button aria-pressed="true" data-f="800">1280×800</button><button aria-pressed="false" data-f="fit">по содержимому</button></div>
+    <span class="lab">Акцент</span>
+    <div class="swatches js-sw" role="radiogroup" aria-label="Акцентный цвет"></div>
+  </div>
+
+  <!-- ═════════════ Templates (cloned by the script) ═════════════ -->
+  <template id="tpl-today">
+    <div class="head">
+      <div><span class="over num">Среда, 21 октября · 12:20</span><h1>Сегодня</h1></div>
+    </div>
+    <label class="ask">
+      <span class="mark lg"><svg><use href="#i-wave"/></svg></span>
+      <input placeholder="Спросить paratech: что задали, сделай конспект, объясни тему…" aria-label="Спросить paratech">
+      <button class="ibtn" aria-label="Прикрепить файл" title="Прикрепить файл — или бросьте его в окно"><svg class="i"><use href="#i-clip"/></svg></button>
+      <span class="kbd">Ctrl+K</span>
+    </label>
+    <div class="sugg">
+      <button class="btn sm">Что горит на неделе?</button>
+      <button class="btn sm">Конспект по файлу</button>
+      <button class="btn sm">Повторить вчерашнюю лекцию</button>
+      <button class="btn sm">Объясни, что было на матане</button>
+    </div>
+
+    <div class="card ask-card post">
+      <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>paratech<span class="t2 num">11:52</span></div>
+      <p class="lead2">Пара по матану закончилась: конспект готов, нашёл ДЗ к 24.10 — добавить в календарь?</p>
+      <p class="small muted">Задачи 1–7 из § 5 · до сб, 24 октября, 23:59 · Google Календарь «Учёба». Откуда: <button class="cite">Лекция · 21.10 · 01:12:40</button></p>
+      <div class="card-a">
+        <button class="btn primary"><svg class="i"><use href="#i-cal"/></svg>Да, добавить</button>
+        <button class="btn"><svg class="i"><use href="#i-doc"/></svg>Открыть конспект</button>
+        <button class="btn plain">Не сейчас</button>
+      </div>
+    </div>
+
+    <div class="today">
+      <div>
+        <section class="section">
+          <h2 class="sec-h">Пары сегодня <span class="cnt num">· 5</span></h2>
+          <div class="group" role="list">
+            <div class="r prow" role="listitem">
+              <div class="tm">08:50<span>10:10</span></div>
+              <div><p class="t">Физика</p><div class="meta">Семинар · Иванова Е. С.</div></div>
+              <div class="st"><span class="chip s-acc"><svg class="i"><use href="#i-clock"/></svg>Распознавание · <span class="num">64 %</span></span><span class="prog"><b style="width:64%"></b></span></div>
+              <div class="ac"><button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button></div>
+            </div>
+            <div class="r prow" role="listitem">
+              <div class="tm">10:30<span>11:50</span></div>
+              <div><p class="t">Математический анализ</p><div class="meta">Лекция · Петров А. В.</div></div>
+              <div class="st"><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span><span class="small muted">1 задание · до сб, 24 окт.</span></div>
+              <div class="ac"><button class="btn sm">Открыть</button></div>
+            </div>
+            <div class="r prow live" role="listitem">
+              <div class="tm">12:10<span>13:30</span></div>
+              <div><p class="t">Английский язык</p><div class="meta">Практика · Орлова М. И. · Zoom</div></div>
+              <div class="st"><span class="chip s-acc"><span class="dot"></span>Идёт запись · <span class="num">00:09:41</span></span><span class="lvl on" role="img" aria-label="Уровень звука: звук идёт"><span class="lvl-bar"><b></b><i></i></span>Звук идёт</span></div>
+              <div class="ac"><button class="btn sm"><svg class="i"><use href="#i-stop"/></svg>Остановить</button></div>
+            </div>
+            <div class="r prow" role="listitem">
+              <div class="tm">14:00<span>15:20</span></div>
+              <div><p class="t">Инженерная графика</p><div class="meta">Лабораторная · Зайцев К. Л. · Teams</div></div>
+              <div class="st"><span class="small muted">Через 1 ч 40 мин</span></div>
+              <div class="ac"><button class="btn sm"><svg class="i"><use href="#i-rec"/></svg>Записать</button></div>
+            </div>
+            <div class="r prow" role="listitem">
+              <div class="tm">15:40<span>17:00</span></div>
+              <div><p class="t">История России</p><div class="meta">Лекция · Смирнов О. Н. · Zoom</div></div>
+              <div class="st"><span class="small muted">Окно записи появится в 15:38</span></div>
+              <div class="ac"><button class="btn sm"><svg class="i"><use href="#i-rec"/></svg>Записать</button></div>
+            </div>
+          </div>
+        </section>
+        <section class="section">
+          <h2 class="sec-h">Готово за день <span class="cnt num">· 3</span></h2>
+          <div class="group">
+            <div class="r lrow"><svg class="i"><use href="#i-ok"/></svg><div class="tx"><div class="t">Конспект · Математический анализ</div><div class="meta num">Лекция 21.10 · 11:52 · нашлось 1 задание</div></div><button class="btn sm">Открыть</button></div>
+            <div class="r lrow"><svg class="i"><use href="#i-ok"/></svg><div class="tx"><div class="t">Конспект по слайдам · Линейная алгебра</div><div class="meta num">Лекция 20.10 · 09:14 · по вашему файлу</div></div><button class="btn sm">Открыть</button></div>
+            <div class="r lrow"><svg class="i"><use href="#i-ok"/></svg><div class="tx"><div class="t">Расписание обновлено</div><div class="meta num">08:00 · 2 изменения на следующей неделе</div></div><button class="btn sm">Посмотреть</button></div>
+          </div>
+        </section>
+      </div>
+      <div>
+        <section class="section">
+          <h2 class="sec-h">Ждёт вашего «Да» <span class="cnt num">· 3</span></h2>
+          <div class="group">
+            <div class="r wrow"><svg class="i"><use href="#i-cal"/></svg><div><div class="t">Срок в календарь</div><div class="meta">ДЗ · Матанализ · до сб, 24.10</div></div><button class="btn sm">Посмотреть</button></div>
+            <div class="r wrow"><svg class="i"><use href="#i-mail"/></svg><div><div class="t">Письмо преподавателю</div><div class="meta">Реферат → Смирнов О. Н.</div></div><button class="btn sm">Проверить</button></div>
+            <div class="r wrow"><svg class="i"><use href="#i-q"/></svg><div><div class="t">Вопрос paratech</div><div class="meta">Тема эссе: из списка или своя?</div></div><button class="btn sm">Ответить</button></div>
+          </div>
+          <p class="foot">Письма, календарь и удаление — только после вашего «Да».</p>
+        </section>
+        <section class="section">
+          <h2 class="sec-h">Горит на 7 дней <span class="cnt num">· 5</span></h2>
+          <div class="group">
+            <div class="r drow"><div class="d">пт<span>23.10</span></div><div style="min-width:0"><div class="t">Реферат</div><div class="meta">История России</div></div><span class="chip s-acc num">через 2 дня</span></div>
+            <div class="r drow"><div class="d">сб<span>24.10</span></div><div style="min-width:0"><div class="t">Задачи 1–7 из § 5</div><div class="meta">Математический анализ</div></div><span class="chip num">3 дня</span></div>
+            <div class="r drow"><div class="d">пн<span>26.10</span></div><div style="min-width:0"><div class="t">ЛР 3. Чертёж вала</div><div class="meta">Инженерная графика</div></div><span class="chip num">5 дней</span></div>
+            <div class="r drow"><div class="d">вт<span>27.10</span></div><div style="min-width:0"><div class="t">Задачи 3, 5, 8</div><div class="meta">Линейная алгебра</div></div><span class="chip num">6 дней</span></div>
+            <div class="r drow"><div class="d">ср<span>28.10</span></div><div style="min-width:0"><div class="t">Контрольная</div><div class="meta">Линейная алгебра</div></div><span class="chip num">7 дней</span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="statusbar">
+      <span class="num">В очереди 2 задачи</span>
+      <span class="r2"><svg class="i s14"><use href="#i-lock"/></svg>Звук обрабатывается только на этом компьютере</span>
+    </div>
+  </template>
+
+  <template id="tpl-tasks">
+    <div class="head">
+      <div><span class="over num">6 активных · ближайшее — пт, 23 октября</span><h1>Задания</h1></div>
+      <div class="acts"><button class="btn"><svg class="i"><use href="#i-plus"/></svg>Задание</button></div>
+    </div>
+    <div class="toolbar">
+      <div class="seg lg" role="group" aria-label="Фильтр"><button aria-pressed="true">Активные<span class="n">6</span></button><button aria-pressed="false">Ждут «Да»<span class="n">2</span></button><button aria-pressed="false">Сданные<span class="n">14</span></button></div>
+    </div>
+    <div class="group" role="list">
+      <div class="r prow" role="listitem" style="grid-template-columns: 64px minmax(0,1fr) 220px 150px">
+        <div class="tm">пт<span>23.10</span></div>
+        <div><p class="t">Реферат</p><div class="meta">История России · по методичке</div></div>
+        <div class="st js-ref"></div>
+        <div class="ac"><button class="btn sm">Открыть</button></div>
+      </div>
+      <div class="r prow" role="listitem" style="grid-template-columns: 64px minmax(0,1fr) 220px 150px">
+        <div class="tm">сб<span>24.10</span></div>
+        <div><p class="t">Задачи 1–7 из § 5</p><div class="meta">Математический анализ</div></div>
+        <div class="st"><span class="chip s-acc"><svg class="i"><use href="#i-cal"/></svg>Ждёт «Да» · календарь</span></div>
+        <div class="ac"><button class="btn sm">Открыть</button></div>
+      </div>
+      <div class="r prow" role="listitem" style="grid-template-columns: 64px minmax(0,1fr) 220px 150px">
+        <div class="tm">пн<span>26.10</span></div>
+        <div><p class="t">ЛР 3. Чертёж вала</p><div class="meta">Инженерная графика · сдать .vkd</div></div>
+        <div class="st js-lab"><span class="chip"><svg class="i"><use href="#i-circle"/></svg>Не начато</span></div>
+        <div class="ac"><button class="btn sm">Открыть</button></div>
+      </div>
+      <div class="r prow" role="listitem" style="grid-template-columns: 64px minmax(0,1fr) 220px 150px">
+        <div class="tm">вт<span>27.10</span></div>
+        <div><p class="t">Задачи 3, 5, 8</p><div class="meta">Линейная алгебра · из слайдов</div></div>
+        <div class="st"><span class="chip"><svg class="i"><use href="#i-circle"/></svg>Не начато</span></div>
+        <div class="ac"><button class="btn sm">Открыть</button></div>
+      </div>
+      <div class="r prow" role="listitem" style="grid-template-columns: 64px minmax(0,1fr) 220px 150px">
+        <div class="tm">ср<span>28.10</span></div>
+        <div><p class="t">Контрольная</p><div class="meta">Линейная алгебра</div></div>
+        <div class="st"><span class="chip"><svg class="i"><use href="#i-book"/></svg>Подготовка</span></div>
+        <div class="ac"><button class="btn sm">Открыть</button></div>
+      </div>
+      <div class="r prow" role="listitem" style="grid-template-columns: 64px minmax(0,1fr) 220px 150px">
+        <div class="tm">пт<span>30.10</span></div>
+        <div><p class="t">Эссе «My future profession»</p><div class="meta">Английский язык</div></div>
+        <div class="st"><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Черновик готов</span></div>
+        <div class="ac"><button class="btn sm">Открыть</button></div>
+      </div>
+    </div>
+    <p class="foot">Сроки уходят в Google Календарь и письма — преподавателю только после вашего «Да».</p>
+    <div class="spacer"></div>
+    <div class="statusbar"><span>Ближайший срок — пт, 23 октября</span><span class="r2"><svg class="i s14"><use href="#i-lock"/></svg>Файлы хранятся на этом компьютере</span></div>
+  </template>
+
+  <template id="tpl-subjects">
+    <div class="subj">
+      <nav class="tree" aria-label="Предметы">
+        <ul class="lv0">
+          <li><div class="ti sem"><svg class="i"><use href="#i-chev"/></svg><span class="nm">Осень 2026</span></div>
+            <ul class="lv1">
+              <li><div class="ti"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">Математический анализ</span></div></li>
+              <li><div class="ti cur"><svg class="i"><use href="#i-chev"/></svg><span class="nm">Линейная алгебра</span></div>
+                <ul class="lv2">
+                  <li><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">Лекции</span><span class="cnt">6</span></div></li>
+                  <li><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">Семинары</span><span class="cnt">5</span></div></li>
+                  <li><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">Лабораторные</span><span class="cnt">—</span></div></li>
+                  <li><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">Материалы</span><span class="cnt">3</span></div></li>
+                  <li><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">ДЗ</span><span class="cnt">2</span></div></li>
+                  <li><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">Билеты</span><span class="cnt">1</span></div></li>
+                  <li class="js-fresh"><div class="ti"><svg class="i"><use href="#i-folder"/></svg><span class="nm">Контрольные</span><span class="fresh">новая</span></div></li>
+                </ul>
+              </li>
+              <li><div class="ti"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">Физика</span></div></li>
+              <li><div class="ti"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">История России</span></div></li>
+              <li><div class="ti"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">Инженерная графика</span></div></li>
+              <li><div class="ti"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">Программирование</span></div></li>
+              <li><div class="ti"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">Английский язык</span></div></li>
+            </ul>
+          </li>
+          <li style="margin-top:8px"><div class="ti sem"><svg class="i"><use href="#i-chevr"/></svg><span class="nm">Весна 2026</span><span class="cnt">7</span></div></li>
+        </ul>
+        <div class="tree-acts"><button class="btn sm"><svg class="i"><use href="#i-plus"/></svg>Предмет</button><button class="btn sm"><svg class="i"><use href="#i-plus"/></svg>Папка</button></div>
+      </nav>
+      <div>
+        <div class="head" style="margin-bottom:16px">
+          <div><span class="over">Осень 2026 · Кузнецов Д. А.</span><h1>Линейная алгебра</h1><p class="sub-line small">Лекции — вт, 10:30 · Семинары — пн, 12:10</p></div>
+          <button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button>
+        </div>
+        <section class="section">
+          <h2 class="sec-h">Ближайшее</h2>
+          <div class="group">
+            <div class="r drow"><div class="d">вт<span>27.10</span></div><div style="min-width:0"><div class="t">Задачи 3, 5, 8</div><div class="meta">ДЗ · со слайда 24</div></div><span class="chip num">6 дней</span></div>
+            <div class="r drow"><div class="d">ср<span>28.10</span></div><div style="min-width:0"><div class="t">Контрольная</div><div class="meta">3 темы · билеты</div></div><span class="chip num">7 дней</span></div>
+          </div>
+        </section>
+        <section class="section">
+          <h2 class="sec-h">Лекции <span class="cnt num">· 6</span><span class="r2"><button class="btn plain sm">Все</button></span></h2>
+          <div class="group">
+            <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Матрицы операторов</div><div class="meta num">Вт, 20.10 · записи нет</div></div><span class="chip"><svg class="i"><use href="#i-doc"/></svg>По слайдам</span></div>
+            <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Собственные векторы и значения</div><div class="meta num">Вт, 13.10 · 1:30:12</div></div><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span></div>
+            <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Смена базиса</div><div class="meta num">Вт, 06.10 · 1:29:40</div></div><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span></div>
+          </div>
+        </section>
+        <section class="section">
+          <h2 class="sec-h">Материалы <span class="cnt num">· 3</span></h2>
+          <div class="group">
+            <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Лекция 5. Матрицы.pdf</div><div class="meta num">24 стр. · к лекции 20.10</div></div></div>
+            <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Программа курса.docx</div><div class="meta num">4 стр.</div></div></div>
+            <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Проскуряков. Сборник задач.pdf</div><div class="meta num">384 стр.</div></div></div>
+          </div>
+        </section>
+        <div style="height:32px"></div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ═════════════ 1. Сегодня ═════════════ -->
+  <section class="scn on" data-scn="1">
+    <div class="label-sec"><b>1</b><span>Сегодня</span><em>светлая · панель агента закрыта</em></div>
+    <div class="frame on" data-step="1">
+      <div class="t-light" id="s1win">
+        <div class="win" data-nav="today" data-badge="today" data-tip="tasks">
+          <div class="shell"><main class="sheet" data-tpl="tpl-today"></main></div>
+        </div>
+      </div>
+      <p class="caption"><b>Главная = день студента.</b> Вверху — строка «Спросить paratech» с подсказками. Под ней — сообщение агента, он пишет сам: «Пара по матану закончилась… — добавить в календарь?». Рамка акцентная — ждёт вас; у ответа есть ссылка на место в лекции. Слева — пары дня: идёт запись с индикатором звука, «Записать» у будущих. Справа — «Ждёт вашего «Да»» (срок в календарь, письмо, вопрос агента) и «Горит на 7 дней». Ярлыки статусов серые; акцентом выделено только «идёт» и «ждёт вас». В боковой панели для примера показана подсказка «Задания» — она появляется справа при наведении и при фокусе.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 2. Пропустил пару ═════════════ -->
+  <section class="scn" data-scn="2">
+    <div class="label-sec"><b>2</b><span>Пропустил пару</span><em>файл в окно → план → действия с «Отменить» → страница лекции</em></div>
+    <div class="stepper"><div class="seg" role="group" aria-label="Шаг"><button aria-pressed="true" data-step="1">1 · Файл в окне</button><button aria-pressed="false" data-step="2">2 · План</button><button aria-pressed="false" data-step="3">3 · Сделано</button><button aria-pressed="false" data-step="4">4 · Лекция</button></div></div>
+
+    <div class="frame on" data-step="1">
+      <p class="frame-h">Шаг 1 · Файл в окне</p>
+      <div class="t-light">
+        <div class="win" data-nav="today" data-badge="today">
+          <div class="shell"><main class="sheet" data-tpl="tpl-today"></main></div>
+          <div class="drop">
+            <div class="box">
+              <svg class="i"><use href="#i-up"/></svg>
+              <b>Отпустите — файл получит paratech</b>
+              <p>Можно бросить в любое место окна. Сначала paratech предложит, что с ним сделать.</p>
+            </div>
+            <div class="ghost"><span class="fatt" style="padding:0;box-shadow:none;background:none"><span class="fi">PDF</span><span><span class="fn" style="display:block">Лекция 5. Матрицы.pdf</span><span class="fm num">24 стр. · 3,1 МБ</span></span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Студент тянет файл из «Загрузок» на любой экран. Окно целиком становится зоной приёма: пунктир по краю и одна подсказка. Пока файл никуда не положен.</p>
+    </div>
+
+    <div class="frame" data-step="2">
+      <p class="frame-h">Шаг 2 · План</p>
+      <div class="t-light">
+        <div class="win" data-nav="today" data-badge="today" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-today"></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx=""></div>
+              <div class="ap-thread">
+                <span class="mt">Сегодня, 15:11</span>
+                <div class="mu">
+                  <div class="fatt"><span class="fi">PDF</span><span><span class="fn" style="display:block">Лекция 5. Матрицы.pdf</span><span class="fm num">24 стр.</span></span></div>
+                  <div class="bub">пропустил вчерашнюю пару по линалу</div>
+                </div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>План</div>
+                  <p class="lead2">Понял так: добавлю слайды к «Линейная алгебра · Лекция · 20.10» и сделаю конспект по ним.</p>
+                  <ul class="small">
+                    <li>Пара по расписанию: вт, 20.10, 10:30, Кузнецов Д. А. Записи этой пары нет.</li>
+                    <li>Конспект — только по слайдам, без устных пояснений.</li>
+                    <li>Если на слайдах есть домашнее задание — найду и покажу.</li>
+                  </ul>
+                  <p class="note"><svg class="i"><use href="#i-undo"/></svg><span>Всё это можно будет отменить. В календарь и почту без отдельного «Да» ничего не уйдёт.</span></p>
+                  <div class="card-a">
+                    <button class="btn primary" data-go="3">Да</button>
+                    <button class="btn">Изменить</button>
+                    <button class="btn plain">Отмена</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Ответить или уточнить…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Панель открылась сама. Агент понял, о какой паре речь: «вчера» + «линал» + расписание. Он не делает молча, а показывает «Понял так» с тремя пунктами. «Изменить» открывает тот же план для правки, «Отмена» ничего не трогает. Ярлыка контекста нет: студент на «Сегодня».</p>
+    </div>
+
+    <div class="frame" data-step="3">
+      <p class="frame-h">Шаг 3 · Сделано</p>
+      <div class="t-light">
+        <div class="win" data-nav="today" data-badge="today" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-today"></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="Линейная алгебра · 20.10"></div>
+              <div class="ap-thread">
+                <div class="mu">
+                  <div class="fatt"><span class="fi">PDF</span><span><span class="fn" style="display:block">Лекция 5. Матрицы.pdf</span><span class="fm num">24 стр.</span></span></div>
+                  <div class="bub">пропустил вчерашнюю пару по линалу</div>
+                </div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">План принят · <span class="num">15:12</span></span></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Добавил «Лекция 5. Матрицы.pdf» к «Линейная алгебра · Лекция · 20.10»</span><button class="btn plain sm undo">Отменить</button></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Сделал конспект по слайдам</span><button class="btn plain sm undo">Отменить</button></div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Готово<span class="t2 num">15:13</span></div>
+                  <p class="lead2">Конспект по слайдам готов</p>
+                  <p>Нашёл домашнее задание: задачи 3, 5, 8 из Проскурякова, сдать до вт, 27 октября <button class="cite">стр. 24</button></p>
+                  <div class="card-a">
+                    <button class="btn primary" data-go="4"><svg class="i"><use href="#i-doc"/></svg>Открыть лекцию</button>
+                    <button class="btn"><svg class="i"><use href="#i-cal"/></svg>Срок в календарь…</button>
+                  </div>
+                  <p class="note"><svg class="i"><use href="#i-info"/></svg><span>Срок попадёт в календарь только после вашего «Да».</span></p>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Спросить про эту лекцию…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">После «Да» обратимые действия выполняются сразу, и каждое получает строку с «Отменить». Нажмите «Отменить» в макете — строка зачеркнётся. Появился ярлык контекста: дальше разговор идёт об этой лекции. Календарь — уже необратимое действие, поэтому кнопка с многоточием: откроется подтверждение.</p>
+    </div>
+
+    <div class="frame" data-step="4">
+      <p class="frame-h">Шаг 4 · Страница лекции</p>
+      <div class="t-light">
+        <div class="win" data-nav="subj">
+          <div class="shell">
+            <main class="sheet">
+              <div class="back"><button class="btn plain sm"><svg class="i"><use href="#i-back"/></svg>Линейная алгебра · Лекции</button></div>
+              <div class="head" style="margin-bottom:12px">
+                <div><span class="over">Линейная алгебра · Лекция · Кузнецов Д. А.</span><h1>Вт, 20 октября · Матрицы операторов</h1></div>
+                <div class="acts"><button class="btn"><svg class="i"><use href="#i-rec"/></svg>Добавить запись</button><button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button></div>
+              </div>
+              <div class="act raised" style="margin-bottom:16px"><svg class="i"><use href="#i-wave"/></svg><span class="tx">paratech добавил слайды и сделал конспект по вашему запросу «пропустил вчерашнюю пару по линалу» · <span class="num">15:12</span></span><button class="btn plain sm undo">Отменить всё</button></div>
+              <div class="toolbar">
+                <div class="seg lg" role="group" aria-label="Раздел"><button aria-pressed="true">Конспект</button><button aria-pressed="false" disabled title="Записи этой пары нет">Текст лекции</button><button aria-pressed="false">Материалы<span class="n">1</span></button><button aria-pressed="false">Задания<span class="n">1</span></button></div>
+                <span class="grow"></span>
+                <button class="btn"><svg class="i"><use href="#i-copy"/></svg>Скопировать</button>
+                <button class="btn"><svg class="i"><use href="#i-down"/></svg>Сохранить как…</button>
+              </div>
+              <div class="sum-grid">
+                <article class="group reading" aria-label="Конспект">
+                  <div class="stamp"><span class="chip"><svg class="i"><use href="#i-doc"/></svg>По слайдам · записи нет</span><span class="small muted num">Составлен 21 окт., 15:13 из «Лекция 5. Матрицы.pdf»</span></div>
+                  <p>Лекция — о матрицах линейных операторов. Слайды начинаются с определения матрицы оператора в базисе <button class="cite">стр. 3</button> и правила её построения по образам базисных векторов <button class="cite">стр. 4</button>.</p>
+                  <p>Дальше — действия с операторами. Сумме и композиции операторов соответствуют сумма и произведение матриц <button class="cite">стр. 7–9</button>. Обратный оператор существует, только если det A ≠ 0 <button class="cite">стр. 11</button>.</p>
+                  <h3>Главное</h3>
+                  <ul>
+                    <li>Столбцы матрицы оператора — координаты образов базисных векторов <button class="cite">стр. 4</button></li>
+                    <li>Композиции операторов соответствует произведение матриц, порядок важен <button class="cite">стр. 8</button></li>
+                    <li>Ранг оператора равен рангу его матрицы в любом базисе <button class="cite">стр. 14</button></li>
+                    <li>Памятка: собственные векторы — det(A − λE) = 0, затем (A − λE)x = 0 <button class="cite">стр. 18</button></li>
+                  </ul>
+                  <p class="small muted">Устных пояснений преподавателя здесь нет: записи этой пары нет. Если у кого-то из группы есть запись, её можно добавить — конспект обновится.</p>
+                </article>
+                <aside>
+                  <h3 class="sec-h">Задание со слайдов</h3>
+                  <div class="group">
+                    <div class="r hw-r">
+                      <span class="t">Задачи 3, 5, 8 из сборника Проскурякова</span>
+                      <div class="row"><span class="chip num"><svg class="i"><use href="#i-clock"/></svg>до вт, 27 окт.</span><button class="cite">стр. 24</button></div>
+                    </div>
+                    <div class="r hw-r">
+                      <div class="row"><span class="chip s-acc"><svg class="i"><use href="#i-cal"/></svg>Ждёт вашего «Да»</span></div>
+                      <span class="small muted">Добавить срок в Google Календарь «Учёба»?</span>
+                      <div class="row"><button class="btn primary sm">Да, добавить</button><button class="btn sm">Не надо</button></div>
+                    </div>
+                  </div>
+                  <h3 class="sec-h" style="margin-top:24px">Материалы</h3>
+                  <div class="group">
+                    <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Лекция 5. Матрицы.pdf</div><div class="meta num">24 стр. · добавлен в 15:12</div></div><button class="btn sm">Открыть</button></div>
+                  </div>
+                  <p class="foot">Всё, что сделал paratech, есть в «Журнале» — там же «Отменить».</p>
+                </aside>
+              </div>
+              <div class="spacer"></div>
+              <div class="statusbar"><span>Сноски «стр. N» открывают слайд</span><span class="r2"><svg class="i s14"><use href="#i-lock"/></svg>Файл и конспект хранятся на этом компьютере</span></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><b>Результат.</b> Обычная страница лекции, только конспект собран по слайдам — это честно написано в ярлыке. «Текст лекции» неактивен. У каждого утверждения есть сноска на страницу PDF. Найденное ДЗ лежит справа, срок в календарь ждёт «Да». Сверху — строка с «Отменить всё» на случай, если агент понял неверно.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 3. Реферат под ключ ═════════════ -->
+  <section class="scn" data-scn="3">
+    <div class="label-sec"><b>3</b><span>Реферат под ключ</span><em>вопросы → план → ход работы → результат → подтверждение письма</em></div>
+    <div class="stepper"><div class="seg" role="group" aria-label="Шаг"><button aria-pressed="true" data-step="1">1 · Вопросы</button><button aria-pressed="false" data-step="2">2 · План</button><button aria-pressed="false" data-step="3">3 · Пишется</button><button aria-pressed="false" data-step="4">4 · Готово</button><button aria-pressed="false" data-step="5">5 · Отправка</button></div></div>
+
+    <div class="frame on" data-step="1">
+      <p class="frame-h">Шаг 1 · Вопросы (раунд 1 из 2)</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-tasks" data-ref='<span class="chip s-acc"><svg class="i"><use href="#i-q"/></svg>Ждёт ответа</span><span class="small muted">У paratech 3 вопроса</span>'></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="История России"></div>
+              <div class="ap-thread">
+                <span class="mt">Сегодня, 15:40</span>
+                <div class="mu">
+                  <div class="fatt"><span class="fi">PDF</span><span><span class="fn" style="display:block">Методичка_реферат_История.pdf</span><span class="fm num">9 стр.</span></span></div>
+                  <div class="bub">сделай реферат по этой методичке к пятнице</div>
+                </div>
+                <div class="card ask-card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Уточню перед работой<span class="t2">раунд 1 из 2</span></div>
+                  <div class="q-blk">
+                    <p class="q-lab">Объём</p>
+                    <div class="seg full" role="group" aria-label="Объём"><button aria-pressed="false">10–12 стр.</button><button aria-pressed="true">15–20 стр.</button><button aria-pressed="false">25 стр.</button></div>
+                    <p class="q-hint">В методичке — 15–20 страниц <button class="cite">стр. 2</button></p>
+                  </div>
+                  <div class="q-blk">
+                    <p class="q-lab">Литература</p>
+                    <div class="seg full" role="group" aria-label="Оформление литературы"><button aria-pressed="true">ГОСТ Р 7.0.100–2018</button><button aria-pressed="false">ГОСТ 7.1–2003</button></div>
+                    <p class="q-hint">В методичке написано «по ГОСТ», без номера <button class="cite">стр. 3</button></p>
+                  </div>
+                  <div class="q-blk">
+                    <p class="q-lab">Тема <span class="muted">— из списка методички</span></p>
+                    <label class="opt"><input type="radio" name="t31" checked>Реформы Петра I и их последствия</label>
+                    <label class="opt"><input type="radio" name="t31">Отмена крепостного права 1861 года</label>
+                    <label class="opt"><input type="radio" name="t31">Смутное время: причины и итоги</label>
+                    <label class="opt"><input type="radio" name="t31">Индустриализация СССР 1928–1937</label>
+                  </div>
+                  <div class="q-blk"><input class="inp" placeholder="Или ответьте своими словами…" aria-label="Свой ответ"></div>
+                  <div class="card-a">
+                    <button class="btn primary" data-go="2">Ответить</button>
+                    <button class="btn plain" data-go="2">Пропустить — сделай как считаешь</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Ответить своими словами…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Агент спрашивает только то, что меняет результат. Все вопросы — в одной карточке. Варианты уже выбраны по методичке, рядом ссылка на страницу, откуда это взято. Есть «свой ответ» и «Пропустить — сделай как считаешь». Раундов не больше двух. Рамка акцентная: карточка ждёт вас. В списке «Заданий» у реферата — «Ждёт ответа».</p>
+    </div>
+
+    <div class="frame" data-step="2">
+      <p class="frame-h">Шаг 2 · План</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-tasks" data-ref='<span class="chip s-acc"><svg class="i"><use href="#i-tasks"/></svg>Ждёт «Да» по плану</span>'></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="История России"></div>
+              <div class="ap-thread">
+                <div class="mu"><div class="bub">15–20 стр. · ГОСТ Р 7.0.100–2018 · «Реформы Петра I и их последствия»</div></div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>План</div>
+                  <p class="lead2">Понял так: реферат «Реформы Петра I и их последствия», 15–20 страниц, к пт, 23 октября.</p>
+                  <ol class="small">
+                    <li>Введение</li>
+                    <li>Предпосылки реформ</li>
+                    <li>Военные реформы и флот</li>
+                    <li>Государственное управление</li>
+                    <li>Экономика и культура</li>
+                    <li>Заключение</li>
+                  </ol>
+                  <ul class="small">
+                    <li>Список литературы — 10–12 источников из рекомендованных <button class="cite">стр. 6–7</button>, по ГОСТ Р 7.0.100–2018.</li>
+                    <li>Титульный лист — из вашего профиля: Соколова А. С., ИВТ-21.</li>
+                    <li>Файл Word, поля и шрифт — как в методичке <button class="cite">стр. 3</button></li>
+                  </ul>
+                  <div class="card-a">
+                    <button class="btn primary" data-go="3">Да</button>
+                    <button class="btn">Изменить</button>
+                    <button class="btn plain">Отмена</button>
+                  </div>
+                  <p class="note"><svg class="i"><use href="#i-clock"/></svg><span>Займёт около 10 минут. Окно можно закрыть — работа продолжится.</span></p>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Изменить план своими словами…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Ответы свернулись в одну реплику студента. План — с разделами, и видно, откуда берутся литература и оформление. Второй раунд вопросов не понадобился. «Изменить» позволяет переставить разделы или поправить план словами.</p>
+    </div>
+
+    <div class="frame" data-step="3">
+      <p class="frame-h">Шаг 3 · Пишется</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1" data-badge="tasks">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-tasks" data-ref='<span class="chip s-acc"><svg class="i"><use href="#i-edit"/></svg>Пишется · <span class="num">3 из 6</span></span><span class="prog"><b style="width:42%"></b></span>'></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="История России"></div>
+              <div class="ap-thread">
+                <div class="mu"><div class="bub">15–20 стр. · ГОСТ Р 7.0.100–2018 · «Реформы Петра I и их последствия»</div></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">План принят · 6 разделов · <span class="num">15:48</span></span></div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Работа идёт<span class="t2 num">≈ 6 мин</span></div>
+                  <p class="lead2">Пишу раздел 3 из 6</p>
+                  <span class="prog" style="max-width:none" role="progressbar" aria-valuenow="42"><b style="width:42%"></b></span>
+                  <ul class="chk">
+                    <li><svg class="i"><use href="#i-ok"/></svg>Введение</li>
+                    <li><svg class="i"><use href="#i-ok"/></svg>Предпосылки реформ</li>
+                    <li class="cur"><svg class="i"><use href="#i-edit"/></svg>Военные реформы и флот</li>
+                    <li class="todo"><svg class="i"><use href="#i-circle"/></svg>Государственное управление</li>
+                    <li class="todo"><svg class="i"><use href="#i-circle"/></svg>Экономика и культура</li>
+                    <li class="todo"><svg class="i"><use href="#i-circle"/></svg>Заключение и литература</li>
+                  </ul>
+                  <div class="card-a"><button class="btn sm"><svg class="i"><use href="#i-stop"/></svg>Остановить</button><button class="btn plain sm" data-go="4">Показать результат</button></div>
+                  <p class="note"><svg class="i"><use href="#i-info"/></svg><span>Окно можно закрыть. Когда закончу, реферат появится в «Заданиях», без всплывающих уведомлений.</span></p>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Можно писать, пока идёт работа…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Ход работы — одна карточка, она обновляется на месте: раздел N из M, отметки пройденного, «Остановить». Тот же прогресс виден в строке «Заданий» и в «Журнале». Всплывающего уведомления о готовности нет (PRD §15).</p>
+    </div>
+
+    <div class="frame" data-step="4">
+      <p class="frame-h">Шаг 4 · Готово</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-tasks" data-ref='<span class="chip"><svg class="i"><use href="#i-ok"/></svg>Реферат готов</span><span class="small muted">Не отправлен</span>'></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="История России"></div>
+              <div class="ap-thread" data-bottom>
+                <div class="mu"><div class="bub">15–20 стр. · ГОСТ Р 7.0.100–2018 · «Реформы Петра I и их последствия»</div></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">План принят · 6 разделов · <span class="num">15:48</span></span></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Написал 6 разделов и список литературы · <span class="num">16:05</span></span></div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Готово<span class="t2 num">16:05</span></div>
+                  <div class="fprev">
+                    <div class="page" aria-hidden="true">
+                      <div>Министерство науки и высшего образования РФ</div>
+                      <div class="pg-s">Московский технический университет<br>Факультет информатики</div>
+                      <div class="pg-t">РЕФЕРАТ</div>
+                      <div class="pg-s">по дисциплине «История России»<br>на тему «Реформы Петра I<br>и их последствия»</div>
+                      <div class="pg-r">Выполнила: студентка гр. ИВТ-21<br>Соколова А. С.<br>Проверил: Смирнов О. Н.</div>
+                      <div class="pg-c">Москва 2026</div>
+                    </div>
+                    <div>
+                      <div class="fname">Реферат_<wbr>Петр_I_<wbr>Соколова.docx</div>
+                      <div class="fmeta num">Word · 18 стр. · версия 2</div>
+                      <p class="small" style="margin-top:8px">Титульный лист — из профиля: Соколова А. С., ИВТ-21, Московский технический университет. Литература: 11 источников, ГОСТ Р 7.0.100–2018.</p>
+                    </div>
+                  </div>
+                  <div class="card-a">
+                    <button class="btn sm"><svg class="i"><use href="#i-ext"/></svg>Открыть в Word</button>
+                    <button class="btn sm"><svg class="i"><use href="#i-edit"/></svg>Доработать</button>
+                    <button class="btn sm" data-go="5"><svg class="i"><use href="#i-mail"/></svg>Отправить преподавателю</button>
+                  </div>
+                  <p class="note"><svg class="i"><use href="#i-info"/></svg><span>Проверьте список литературы перед сдачей: источники взяты из методички, но выходные данные стоит сверить.</span></p>
+                </div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Сохранил в «История России → ДЗ»</span><button class="btn plain sm undo">Отменить</button></div>
+              </div>
+              <div class="ap-comp" data-ph="Что доработать?"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><b>Результат.</b> Превью титульного листа (данные из профиля), имя файла, объём и версия. Три действия: «Открыть в Word», «Доработать» (правка словами — получится версия 3), «Отправить преподавателю». Сохранение в папку предмета обратимо — строка с «Отменить». В строке «Заданий» — «Реферат готов · Не отправлен».</p>
+    </div>
+
+    <div class="frame" data-step="5">
+      <p class="frame-h">Шаг 5 · «Отправить преподавателю» → подтверждение</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-tasks" data-ref='<span class="chip s-acc"><svg class="i"><use href="#i-mail"/></svg>Ждёт «Да» · письмо</span><span class="small muted">Реферат готов, не отправлен</span>'></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="История России"></div>
+              <div class="ap-thread">
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Готово<span class="t2 num">16:05</span></div>
+                  <div class="fprev">
+                    <div class="page" aria-hidden="true">
+                      <div>Министерство науки и высшего образования РФ</div>
+                      <div class="pg-s">Московский технический университет<br>Факультет информатики</div>
+                      <div class="pg-t">РЕФЕРАТ</div>
+                      <div class="pg-s">по дисциплине «История России»<br>на тему «Реформы Петра I<br>и их последствия»</div>
+                      <div class="pg-r">Выполнила: студентка гр. ИВТ-21<br>Соколова А. С.<br>Проверил: Смирнов О. Н.</div>
+                      <div class="pg-c">Москва 2026</div>
+                    </div>
+                    <div>
+                      <div class="fname">Реферат_<wbr>Петр_I_<wbr>Соколова.docx</div>
+                      <div class="fmeta num">Word · 18 стр. · версия 2</div>
+                      <p class="small" style="margin-top:8px">Титульный лист — из профиля. Литература: 11 источников, ГОСТ Р 7.0.100–2018.</p>
+                    </div>
+                  </div>
+                  <div class="card-a">
+                    <button class="btn sm"><svg class="i"><use href="#i-ext"/></svg>Открыть в Word</button>
+                    <button class="btn sm"><svg class="i"><use href="#i-edit"/></svg>Доработать</button>
+                    <button class="btn sm" aria-pressed="true"><svg class="i"><use href="#i-mail"/></svg>Отправить преподавателю</button>
+                  </div>
+                </div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Сохранил в «История России → ДЗ»</span><button class="btn plain sm undo">Отменить</button></div>
+                <div class="card confirm">
+                  <div class="card-h"><svg class="i s14"><use href="#i-warn"/></svg>Необратимо · нужно ваше «Да»</div>
+                  <p class="lead2">Отправить реферат преподавателю?</p>
+                  <dl class="kv">
+                    <dt>Кому</dt><dd>Смирнов Олег Николаевич<span class="small">o.smirnov@uni-mail.ru</span><span class="trust"><svg class="i"><use href="#i-shield"/></svg>из ваших доверенных контактов</span></dd>
+                    <dt>Вложение</dt><dd>Реферат_Петр_I_Соколова.docx<span class="small num">версия 2 от 21.10, 16:05 · 18 стр. · <button class="btn plain sm" style="height:18px;padding:0">другая версия</button></span></dd>
+                    <dt>Тема</dt><dd>Реферат · Соколова А. С., ИВТ-21</dd>
+                  </dl>
+                  <div class="mailtext">Олег Николаевич, добрый день. Направляю реферат «Реформы Петра I и их последствия». Соколова Анна, ИВТ-21.</div>
+                  <p class="note"><svg class="i"><use href="#i-info"/></svg><span>В методичке указан другой адрес — referat@kafedra-mail.ru. Адреса из чужих файлов не используются. Если он нужен, добавьте его в контакты сами.</span></p>
+                  <div class="card-a">
+                    <button class="btn primary"><svg class="i"><use href="#i-mail"/></svg>Отправить</button>
+                    <button class="btn">Не отправлять</button>
+                    <button class="btn plain">Изменить текст</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Спросить про реферат…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><b>Подтверждение.</b> Письмо — необратимое действие, поэтому отдельная карточка со сдержанной красной рамкой. В ней получатель из доверенных контактов, точная версия вложения и текст письма. Адрес из методички показан, но не используется. Пока нет «Отправить», письмо не уходит. Если ответ сервера неизвестен, отправка сверяется, а не повторяется вслепую (правило 7).</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 4. Вопрос по лекциям ═════════════ -->
+  <section class="scn" data-scn="4">
+    <div class="label-sec"><b>4</b><span>Вопрос по лекциям</span><em>ответ со ссылками → переход к месту в лекции</em></div>
+    <div class="stepper"><div class="seg" role="group" aria-label="Шаг"><button aria-pressed="true" data-step="1">1 · Ответ</button><button aria-pressed="false" data-step="2">2 · Переход по ссылке</button></div></div>
+
+    <div class="frame on" data-step="1">
+      <p class="frame-h">Шаг 1 · Ответ со ссылками</p>
+      <div class="t-light">
+        <div class="win" data-nav="subj" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-subjects" data-nofresh="1"></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="Линейная алгебра"></div>
+              <div class="ap-thread js-a4"></div>
+              <div class="ap-comp" data-ph="Спросить про «Линейная алгебра»…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Ярлык «Линейная алгебра»: поиск идёт по записям и файлам этого предмета. В тексте ответа — номера ссылок, под ним — список источников: лекция + время, семинар + время, PDF + страница. То, чего в материалах нет, отмечено «Нет в ваших лекциях». Предложение объяснить по общим знаниям — с пометкой, что ответ будет без ссылок.</p>
+    </div>
+
+    <div class="frame" data-step="2">
+      <p class="frame-h">Шаг 2 · Переход по ссылке [1]</p>
+      <div class="t-light">
+        <div class="win" data-nav="subj" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet">
+              <div class="back"><button class="btn plain sm"><svg class="i"><use href="#i-back"/></svg>Линейная алгебра · Лекции</button></div>
+              <div class="head" style="margin-bottom:12px">
+                <div><span class="over num">Линейная алгебра · Лекция · Вт, 13 октября, 10:30 · 1:30:12</span><h1>Собственные векторы и значения</h1></div>
+              </div>
+              <div class="toolbar">
+                <div class="seg lg" role="group" aria-label="Раздел"><button aria-pressed="false">Конспект</button><button aria-pressed="true">Текст лекции</button><button aria-pressed="false">Задания<span class="n">1</span></button></div>
+              </div>
+              <div class="group player">
+                <button class="ibtn" aria-label="Слушать с 00:41:12"><svg class="i"><use href="#i-play"/></svg></button>
+                <span class="num small">00:41:12</span>
+                <span class="prog"><b style="width:46%"></b></span>
+                <span class="num small muted">1:30:12</span>
+              </div>
+              <div class="act raised" style="margin-bottom:12px"><svg class="i"><use href="#i-search"/></svg><span class="tx">Ссылка [1] из ответа paratech · <span class="num">00:41:12–00:52:30</span> · фрагмент подсвечен</span><button class="btn plain sm">Снять подсветку</button></div>
+              <article class="group reading tr" aria-label="Текст лекции" style="padding:16px 20px">
+                <p><a class="tc" href="#">00:39:48</a><span>…так, с подобными матрицами закончили. Теперь важная тема, она будет на контрольной.</span></p>
+                <p class="hl"><a class="tc" href="#">00:41:12</a><span>Собственный вектор — это ненулевой вектор, который при отображении только растягивается или сжимается: A x = λ x. Число λ называют собственным значением.</span></p>
+                <p class="hl"><a class="tc" href="#">00:42:30</a><span>Как их искать? Переносим всё в одну сторону: (A − λE) x = 0. Ненулевое решение есть, только если det(A − λE) = 0 — это характеристическое уравнение.</span></p>
+                <p class="hl"><a class="tc" href="#">00:44:05</a><span>Давайте на примере. Матрица два на два: два, один, один, два. Считаем определитель…</span></p>
+                <p class="hl"><a class="tc" href="#">00:47:30</a><span>…итак, λ₁ = 1, λ₂ = 3. Для каждого найдём вектор — подставляем в систему по очереди.</span></p>
+                <p><a class="tc" href="#">00:52:30</a><span>Хорошо. На семинаре в понедельник будет матрица три на три, готовьтесь.</span></p>
+              </article>
+              <div style="height:32px"></div>
+            </main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="Лекция · 13.10"></div>
+              <div class="ap-thread js-a4 js-a4p"></div>
+              <div class="ap-comp" data-ph="Спросить про этот фрагмент…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">По клику на [1] открывается текст лекции на нужном времени, фрагмент подсвечен, плеер стоит на 00:41:12. Панель остаётся открытой, ссылка [1] отмечена. Контекст сузился до «Лекция · 13.10», и следующий вопрос будет про этот фрагмент.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 5. Нельзя сделать целиком ═════════════ -->
+  <section class="scn" data-scn="5">
+    <div class="label-sec"><b>5</b><span>Нельзя сделать целиком</span><em>честный отказ → режим помощника</em></div>
+    <div class="stepper"><div class="seg" role="group" aria-label="Шаг"><button aria-pressed="true" data-step="1">1 · Честный ответ</button><button aria-pressed="false" data-step="2">2 · Режим помощника</button></div></div>
+
+    <div class="frame on" data-step="1">
+      <p class="frame-h">Шаг 1 · Честный ответ</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-tasks" data-ref='<span class="chip"><svg class="i"><use href="#i-ok"/></svg>Черновик готов</span>'></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="ЛР 3. Чертёж вала"></div>
+              <div class="ap-thread">
+                <span class="mt">Сегодня, 17:20</span>
+                <div class="mu">
+                  <div class="fatt"><span class="fi">PDF</span><span><span class="fn" style="display:block">ЛР3_Вал_задание.pdf</span><span class="fm num">3 стр. · вариант 12</span></span></div>
+                  <div class="bub">начертить деталь в ВузКАД и сдать .vkd</div>
+                </div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Целиком не получится</div>
+                  <p class="lead2">Начертить в ВузКАД за вас не получится</p>
+                  <p>Работать в ВузКАД я не умею, и собрать файл .vkd не смогу. Чертёж — ваша часть. Остальное могу взять на себя:</p>
+                  <ul class="chk" style="margin-top:0">
+                    <li><svg class="i"><use href="#i-ok"/></svg>план по шагам под ваш вариант 12</li>
+                    <li><svg class="i"><use href="#i-ok"/></svg>что сдать и в каком виде</li>
+                    <li><svg class="i"><use href="#i-ok"/></svg>где чаще всего ошибаются</li>
+                    <li><svg class="i"><use href="#i-ok"/></svg>пояснительная записка .docx — сразу</li>
+                    <li><svg class="i"><use href="#i-ok"/></svg>ответ по любому шагу</li>
+                  </ul>
+                  <div class="card-a">
+                    <button class="btn primary" data-go="2">Включить режим помощника</button>
+                    <button class="btn">Только записку</button>
+                    <button class="btn plain">Отмена</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Спросить про лабораторную…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Агент не делает вид, что сдаст .vkd. Он прямо говорит, что не может, и сразу перечисляет, что может. Это тот же план «Понял так», только честно разделённый на «ваша часть» и «моя часть».</p>
+    </div>
+
+    <div class="frame" data-step="2">
+      <p class="frame-h">Шаг 2 · Режим помощника</p>
+      <div class="t-light">
+        <div class="win" data-nav="tasks" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet">
+              <div class="back"><button class="btn plain sm"><svg class="i"><use href="#i-back"/></svg>Задания</button></div>
+              <div class="head" style="margin-bottom:16px">
+                <div><span class="over">Инженерная графика · Лабораторная · до пн, 26 октября</span><h1>ЛР 3. Чертёж вала</h1></div>
+                <span class="chip"><svg class="i"><use href="#i-user"/></svg>Режим помощника · чертите вы</span>
+              </div>
+              <div class="hgrid">
+                <section>
+                  <h2 class="sec-h">План по шагам <span class="cnt num">· 3 из 8</span></h2>
+                  <div class="group">
+                    <div class="r srow done"><input type="checkbox" checked aria-label="Готово"><div><div class="t">Откройте шаблон А3 и заполните основную надпись</div></div><span></span><div class="meta">Шифр детали — ИГ.03.012 <button class="cite">Задание, стр. 1</button></div></div>
+                    <div class="r srow done"><input type="checkbox" checked aria-label="Готово"><div><div class="t">Постройте главный вид по осевой линии</div></div><span></span></div>
+                    <div class="r srow done"><input type="checkbox" checked aria-label="Готово"><div><div class="t">Ступени вала: Ø30, Ø40, Ø35</div></div><span></span><div class="meta">Длины — по таблице варианта 12 <button class="cite">стр. 2</button></div></div>
+                    <div class="r srow cur"><input type="checkbox" aria-label="Готово"><div><div class="t">Фаски 2×45° на обоих торцах</div></div><button class="btn sm" aria-pressed="true">Спросить по шагу</button><div class="meta">Сейчас этот шаг — вопрос в панели справа</div></div>
+                    <div class="r srow"><input type="checkbox" aria-label="Готово"><div><div class="t">Шпоночный паз и сечение А–А</div></div><button class="btn plain sm">Спросить по шагу</button></div>
+                    <div class="r srow"><input type="checkbox" aria-label="Готово"><div><div class="t">Размеры и шероховатость</div></div><button class="btn plain sm">Спросить по шагу</button></div>
+                    <div class="r srow"><input type="checkbox" aria-label="Готово"><div><div class="t">Технические требования</div></div><button class="btn plain sm">Спросить по шагу</button></div>
+                    <div class="r srow"><input type="checkbox" aria-label="Готово"><div><div class="t">Сохраните .vkd и экспортируйте PDF</div></div><button class="btn plain sm">Спросить по шагу</button></div>
+                  </div>
+                  <h2 class="sec-h" style="margin-top:24px">Где часто ошибаются</h2>
+                  <div class="group">
+                    <ul class="pits">
+                      <li>Сечение А–А без обозначения плоскости разреза</li>
+                      <li>Фаска указана только на одном торце</li>
+                      <li>Шероховатость в старом обозначении</li>
+                      <li>В основной надписи нет шифра детали</li>
+                    </ul>
+                  </div>
+                  <p class="foot">Из задания и методички «ЛР_ИГ_2026.pdf», стр. 5–6.</p>
+                </section>
+                <section>
+                  <h2 class="sec-h">Что сдать</h2>
+                  <div class="group">
+                    <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Чертёж вала.vkd</div><div class="meta">Делаете вы в ВузКАД</div></div><span class="chip s-wait">Ваша часть</span></div>
+                    <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Чертёж вала.pdf</div><div class="meta">Экспорт из ВузКАД</div></div><span class="chip s-wait">Ваша часть</span></div>
+                    <div class="r lrow"><svg class="i"><use href="#i-doc"/></svg><div class="tx"><div class="t">Пояснительная записка.docx</div><div class="meta">Сделал paratech</div></div><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Готово</span></div>
+                  </div>
+                  <h2 class="sec-h" style="margin-top:24px">Пояснительная записка</h2>
+                  <div class="group" style="padding:16px">
+                    <div class="fprev" style="grid-template-columns:72px minmax(0,1fr)">
+                      <div class="page" aria-hidden="true"><div>Московский технический университет</div><div class="pg-t">ПОЯСНИТЕЛЬНАЯ ЗАПИСКА</div><div class="pg-s">к лабораторной работе № 3<br>«Чертёж вала»</div><div class="pg-r">Соколова А. С., ИВТ-21</div><div class="pg-c">2026</div></div>
+                      <div><div class="fname">Пояснительная_<wbr>записка_<wbr>ЛР3.docx</div><div class="fmeta num">Word · 4 стр. · титульный лист из профиля</div>
+                        <div class="card-a" style="margin-top:8px"><button class="btn sm"><svg class="i"><use href="#i-ext"/></svg>Открыть в Word</button><button class="btn sm"><svg class="i"><use href="#i-edit"/></svg>Доработать</button></div></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <div style="height:32px"></div>
+            </main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="ЛР 3 · шаг 4"></div>
+              <div class="ap-thread">
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Включил режим помощника для «ЛР 3. Чертёж вала»</span><button class="btn plain sm undo">Отменить</button></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Сделал «Пояснительная_записка_ЛР3.docx»</span><button class="btn plain sm undo">Отменить</button></div>
+                <span class="mt">17:46</span>
+                <div class="mu"><div class="bub">как правильно обозначить фаску 2×45 на торце?</div></div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>Шаг 4 · фаски</div>
+                  <p>Фаска 2×45° — срез кромки с катетом 2 мм под углом 45°. На главном виде её показывают линией на торце, а размер ставят на выносной полке: «2×45°» <button class="cite">Задание, стр. 2</button>. Нужны обе — на левом и на правом торце <button class="cite">ЛР_ИГ_2026, стр. 5</button></p>
+                  <div class="missing"><span class="chip s-wait"><svg class="i"><use href="#i-info"/></svg>Нет в ваших материалах</span><div>Где в ВузКАД инструмент «Фаска» — инструкции к программе в ваших файлах нет.</div></div>
+                  <div class="card-a"><button class="btn sm"><svg class="i"><use href="#i-ok"/></svg>Шаг 4 сделан</button></div>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Спросить по шагу 4…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><b>Режим помощника.</b> Страница задания превращается в чек-лист: шаги под вариант (со ссылками на задание), «Спросить по шагу», что сдать — ваша часть отмечена пунктиром, частые ошибки и готовая пояснительная записка. «Спросить по шагу» сужает контекст панели до шага. Где ответа в материалах нет, это сказано прямо.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 6. Предметы ═════════════ -->
+  <section class="scn" data-scn="6">
+    <div class="label-sec"><b>6</b><span>Предметы</span><em>дерево · страница предмета · панель с контекстом</em></div>
+    <div class="frame on" data-step="1">
+      <div class="t-light">
+        <div class="win" data-nav="subj" data-agent="1">
+          <div class="shell ag">
+            <main class="sheet" data-tpl="tpl-subjects"></main>
+            <aside class="agent" aria-label="paratech">
+              <div class="ap-head" data-ctx="Линейная алгебра"></div>
+              <div class="ap-thread">
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-wave"/></svg></span>paratech</div>
+                  <p>Работаю в «Линейная алгебра»: 6 лекций, 5 семинаров, 3 файла, 2 задания. Чтобы спросить про всё сразу, снимите ярлык сверху.</p>
+                  <div class="sugg"><button class="btn sm">Что будет на контрольной?</button><button class="btn sm">Все конспекты одним файлом</button><button class="btn sm">Собери билеты из лекций</button></div>
+                </div>
+                <span class="mt">Сегодня, 15:31</span>
+                <div class="mu"><div class="bub">сделай папку для контрольных</div></div>
+                <div class="act"><svg class="i"><use href="#i-ok"/></svg><span class="tx">Создал папку «Контрольные» в «Линейная алгебра»</span><button class="btn plain sm undo">Отменить</button></div>
+                <div class="mu"><div class="bub">что будет на контрольной?</div></div>
+                <div class="card">
+                  <div class="card-h"><span class="mark"><svg><use href="#i-book"/></svg></span>По вашим материалам</div>
+                  <p>Преподаватель называл три темы: смена базиса <button class="cite">1</button>, ядро и образ <button class="cite">2</button> и собственные векторы матрицы 3×3 <button class="cite">3</button>. Дата — ср, 28 октября <button class="cite">4</button></p>
+                  <ol class="srcs">
+                    <li><button class="cite">1</button><span class="ttl">Лекция · Вт, 06.10 · <a href="#">01:21:40</a></span></li>
+                    <li><button class="cite">2</button><span class="ttl">Семинар · Пн, 19.10 · <a href="#">01:02:15</a></span></li>
+                    <li><button class="cite">3</button><span class="ttl">Лекция · Вт, 13.10 · <a href="#">00:39:48</a></span></li>
+                    <li><button class="cite">4</button><span class="ttl">Программа курса.docx · <a href="#">стр. 3</a></span></li>
+                  </ol>
+                  <div class="card-a"><button class="btn sm"><svg class="i"><use href="#i-doc"/></svg>Шпаргалку в «Контрольные»</button></div>
+                </div>
+              </div>
+              <div class="ap-comp" data-ph="Спросить про «Линейная алгебра»…"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Дерево: Семестр → Предмет → Лекции / Семинары / Лабораторные / Материалы / ДЗ / Билеты, внизу «＋ Предмет» и «＋ Папка». Новая папка «Контрольные» создана агентом: она отмечена в дереве, а в панели — строка с «Отменить». Ярлык контекста «Линейная алгебра» сужает поиск. Ответ — со ссылками на лекции, семинар и программу курса.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 7. Журнал ═════════════ -->
+  <section class="scn" data-scn="7">
+    <div class="label-sec"><b>7</b><span>Журнал</span><em>обработка и действия агента</em></div>
+    <div class="frame on" data-step="1">
+      <div class="t-light">
+        <div class="win" data-nav="log">
+          <div class="shell">
+            <main class="sheet">
+              <div class="head">
+                <div><span class="over">Что делается на этом компьютере и что paratech сделал по вашим просьбам</span><h1>Журнал</h1></div>
+              </div>
+              <div class="toolbar">
+                <div class="seg lg" role="group" aria-label="Фильтр"><button aria-pressed="true">Всё</button><button aria-pressed="false">Обработка<span class="n">3</span></button><button aria-pressed="false">Действия paratech<span class="n">7</span></button><button aria-pressed="false">Отменённые<span class="n">1</span></button></div>
+              </div>
+              <section class="section">
+                <h2 class="sec-h">Сейчас</h2>
+                <div class="group">
+                  <div class="r jrow"><span class="tm">17:00</span><div><div class="t">Распознавание · История России</div><div class="meta num">Лекция · 21.10, 15:40 · 1:20:11</div></div><div class="st"><span class="chip s-acc"><svg class="i"><use href="#i-clock"/></svg>Распознавание · <span class="num">64 %</span></span><span class="prog"><b style="width:64%"></b></span></div><div class="ac"><span class="hint num">≈ 6 мин</span><button class="ibtn" aria-label="Ещё действия"><svg class="i"><use href="#i-dots"/></svg></button></div></div>
+                  <div class="r jrow"><span class="tm">17:02</span><div><div class="t">Тексты лекций для поиска · Линейная алгебра</div><div class="meta">paratech · по запросу «где говорили про собственные векторы?»</div></div><div class="st"><span class="chip s-acc"><svg class="i"><use href="#i-doc"/></svg>Текст лекции <span class="num">2 из 4</span></span><span class="prog"><b style="width:50%"></b></span></div><div class="ac"><button class="btn sm"><svg class="i"><use href="#i-stop"/></svg>Остановить</button></div></div>
+                  <div class="r jrow"><span class="tm">15:20</span><div><div class="t">Конспект · Инженерная графика</div><div class="meta">Начнётся после текущего распознавания</div></div><div class="st"><span class="chip s-wait"><svg class="i"><use href="#i-clock"/></svg>В очереди</span></div><div class="ac"></div></div>
+                </div>
+              </section>
+              <section class="section">
+                <h2 class="sec-h">Сегодня</h2>
+                <div class="group">
+                  <div class="r jrow"><span class="tm">16:07</span><div><div class="t">Письмо преподавателю отправлено</div><div class="meta">Смирнов О. Н. · Реферат_Петр_I_Соколова.docx, версия 2 · после вашего «Да» в 16:07</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-mail"/></svg>Отправлено</span><span class="hint">Отменить нельзя</span></div><div class="ac"><button class="btn sm">Показать письмо</button></div></div>
+                  <div class="r jrow"><span class="tm">16:05</span><div><div class="t">Создал «Реферат_Петр_I_Соколова.docx»</div><div class="meta">История России → ДЗ · по запросу «сделай реферат по этой методичке к пятнице»</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-wave"/></svg>paratech</span></div><div class="ac"><button class="btn sm undo-j"><svg class="i"><use href="#i-undo"/></svg>Отменить</button></div></div>
+                  <div class="r jrow"><span class="tm">15:12</span><div><div class="t">Добавил «Лекция 5. Матрицы.pdf» к лекции 20.10</div><div class="meta">Линейная алгебра · по запросу «пропустил вчерашнюю пару по линалу»</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-wave"/></svg>paratech</span></div><div class="ac"><button class="btn sm undo-j"><svg class="i"><use href="#i-undo"/></svg>Отменить</button></div></div>
+                  <div class="r jrow"><span class="tm">15:12</span><div><div class="t">Сделал конспект по слайдам</div><div class="meta">Линейная алгебра · Лекция · 20.10</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-wave"/></svg>paratech</span></div><div class="ac"><button class="btn sm undo-j"><svg class="i"><use href="#i-undo"/></svg>Отменить</button></div></div>
+                  <div class="r jrow"><span class="tm">11:54</span><div><div class="t">Срок добавлен в Google Календарь</div><div class="meta">ДЗ: задачи 1–7 из § 5 · до сб, 24.10 · после вашего «Да» в 11:54</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-cal"/></svg>В календаре</span></div><div class="ac"><button class="btn sm">Убрать из календаря…</button></div></div>
+                  <div class="r jrow"><span class="tm">11:52</span><div><div class="t">Конспект · Математический анализ</div><div class="meta">Лекция · 21.10, 10:30 · нашлось 1 задание</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span></div><div class="ac"><button class="btn sm">Открыть</button></div></div>
+                  <div class="r jrow"><span class="tm">11:50</span><div><div class="t">Распознавание · Математический анализ</div><div class="meta">Лекция · 21.10 · 1:20:04</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-ok"/></svg>Готово</span></div><div class="ac"></div></div>
+                </div>
+              </section>
+              <section class="section">
+                <h2 class="sec-h">Пн, 19 октября</h2>
+                <div class="group">
+                  <div class="r jrow"><span class="tm">18:20</span><div><div class="t">Создал предмет «Линейная алгебра»</div><div class="meta">По запросу «заведи предметы из расписания»</div></div><div class="st"><span class="chip"><svg class="i"><use href="#i-wave"/></svg>paratech</span></div><div class="ac"><button class="btn sm undo-j"><svg class="i"><use href="#i-undo"/></svg>Отменить</button></div></div>
+                  <div class="r jrow undone"><span class="tm">18:21</span><div><div class="t">Создал папку «Разное»</div><div class="meta">Линейная алгебра</div></div><div class="st"><span class="chip s-wait"><svg class="i"><use href="#i-undo"/></svg>Отменено вами в 18:25</span></div><div class="ac"><button class="btn plain sm">Вернуть</button></div></div>
+                  <div class="r jrow"><span class="tm">14:02</span><div><div class="t">Распознавание · Английский язык</div><div class="meta">Практика · 19.10 · 1:30:00</div></div><div class="st"><span class="chip s-fail"><svg class="i"><use href="#i-warn"/></svg>Запись без звука</span><span class="hint">Похоже, выбран не тот источник</span></div><div class="ac"><button class="btn sm"><svg class="i"><use href="#i-diag"/></svg>Проверить звук</button></div></div>
+                </div>
+                <p class="foot">Обратимое отменяется здесь одной кнопкой. Письма и события в Google Календаре так не отменяются: «Убрать из календаря…» снова попросит «Да», а отправленное письмо вернуть нельзя.</p>
+              </section>
+              <div style="height:32px"></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Один журнал на всё: идущая обработка (распознавание, конспект, «Текст лекции 2 из 4»), действия агента (у каждого указан запрос, по которому оно сделано, и «Отменить») и необратимое — с отметкой, когда вы сказали «Да». Красный в этом списке один — у сбоя «Запись без звука». Нажмите «Отменить» в макете — строка зачеркнётся.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 8. Тёмная ═════════════ -->
+  <section class="scn" data-scn="8">
+    <div class="label-sec"><b>8</b><span>Сегодня — тёмная тема</span><em>настоящий тёмный, один акцент</em></div>
+    <div class="frame on" data-step="1">
+      <div class="t-dark" data-clone="s1win"></div>
+      <p class="caption">Тёмная тема без синевы: окно <code>#1C1C1B</code>, лист <code>#232322</code>, группы <code>#2C2C2A</code>, текст <code>#ECEBE6</code>, приглушённый <code>#A6A49C</code> (5.6 : 1 на группе). Акцент светлеет из той же переменной: 60 % цвета + белый. Попробуйте переключить акцент вверху страницы — изменится и здесь.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════ 9. Оформление ═════════════ -->
+  <section class="scn" data-scn="9">
+    <div class="label-sec"><b>9</b><span>Настройки → Оформление</span><em>акцентный цвет переключает весь макет</em></div>
+    <div class="stepper"><div class="seg" role="group" aria-label="Шаг"><button aria-pressed="true" data-step="1">Светлая</button><button aria-pressed="false" data-step="2">Тёмная</button></div></div>
+    <div class="frame on" data-step="1">
+      <p class="frame-h">Светлая</p>
+      <div class="t-light" id="setwin">
+        <div class="win" data-nav="set">
+          <div class="shell">
+            <main class="sheet">
+              <div class="head"><div><span class="over">Изменения сохраняются сразу</span><h1>Настройки</h1></div></div>
+              <div class="sgrid">
+                <nav class="group snav" aria-label="Разделы настроек">
+                  <div class="r"><svg class="i"><use href="#i-model"/></svg>Модели речи</div>
+                  <div class="r"><svg class="i"><use href="#i-link"/></svg>Подключения</div>
+                  <div class="r"><svg class="i"><use href="#i-diag"/></svg>Диагностика</div>
+                  <div class="r"><svg class="i"><use href="#i-user"/></svg>Профиль</div>
+                  <div class="r cur" aria-current="page"><svg class="i"><use href="#i-palette"/></svg>Оформление</div>
+                </nav>
+                <div>
+                  <section class="section">
+                    <h2 class="sec-h">Тема</h2>
+                    <div class="group"><div class="r set"><span>Тема</span><div class="seg js-theme" role="group" aria-label="Тема"><button aria-pressed="true">Как в системе</button><button aria-pressed="false">Светлая</button><button aria-pressed="false">Тёмная</button></div></div></div>
+                    <p class="foot">«Как в системе» следует настройке Windows. Тема общая для главного окна и окна урока.</p>
+                  </section>
+                  <section class="section">
+                    <h2 class="sec-h">Акцентный цвет</h2>
+                    <div class="group">
+                      <div class="r set"><span>Цвет <span class="sw-name js-swname">· Медный, по умолчанию</span></span><div class="swatches js-sw" role="radiogroup" aria-label="Акцентный цвет"></div></div>
+                    </div>
+                    <p class="foot">Акцент отмечает только то, что ждёт вас или идёт сейчас: текущий раздел, фокус, ссылки, прогресс, «Ждёт вашего «Да»». Ярлыки статусов остаются серыми. Красный — только у сбоев и подтверждения необратимого.</p>
+                  </section>
+                  <section class="section">
+                    <h2 class="sec-h">Как это выглядит</h2>
+                    <div class="group">
+                      <div class="preview">
+                        <span class="mini-rail"><span class="cur"><svg class="i"><use href="#i-home"/></svg></span><span><svg class="i"><use href="#i-folder"/></svg></span><span><svg class="i"><use href="#i-tasks"/></svg></span></span>
+                        <span class="chip s-acc"><svg class="i"><use href="#i-mail"/></svg>Ждёт вашего «Да»</span>
+                        <span class="chip s-acc"><span class="dot"></span>Идёт запись · <span class="num">00:09:41</span></span>
+                        <span class="prog" style="width:120px"><b style="width:64%"></b></span>
+                        <button class="btn plain sm">Открыть лекцию</button>
+                        <button class="cite">стр. 24</button>
+                      </div>
+                      <div class="preview" style="border-top:1px solid var(--sep)">
+                        <span class="chip"><svg class="i"><use href="#i-ok"/></svg>Конспект готов</span>
+                        <span class="chip s-wait"><svg class="i"><use href="#i-clock"/></svg>Ждёт интернет</span>
+                        <span class="chip"><svg class="i"><use href="#i-circle"/></svg>Не начато</span>
+                        <span class="chip s-fail"><svg class="i"><use href="#i-warn"/></svg>Не распознано</span>
+                        <span class="small muted">— серые и один сдержанный красный, акцент их не меняет</span>
+                      </div>
+                    </div>
+                  </section>
+                  <section class="section">
+                    <h2 class="sec-h">paratech</h2>
+                    <div class="group">
+                      <div class="r set"><span>Писать на «Сегодня» самому — после пары, перед сроком</span><input class="switch" type="checkbox" role="switch" checked aria-label="Писать на «Сегодня» самому"></div>
+                      <div class="r set"><span>Открывать панель</span><span class="kbd">Ctrl+K</span></div>
+                    </div>
+                    <p class="foot">Без всплывающих уведомлений: сообщения агента видны только в окне.</p>
+                  </section>
+                  <div style="height:32px"></div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Пять образцов: медный (по умолчанию, <code>#C26A2E</code>), синий <code>#3B78C2</code>, зелёный <code>#3E8A5A</code>, фиолетовый <code>#8A63CF</code>, графит <code>#6A6D73</code>. Клик меняет переменную <code>--acc</code> у корня страницы, и все окна макета перекрашиваются сразу. Текст акцентом в светлой теме — 78 % цвета + чёрный (на фоне окна от 4.91 : 1), в тёмной — 60 % цвета + белый (на группе от 5.82 : 1).</p>
+    </div>
+    <div class="frame" data-step="2">
+      <p class="frame-h">Тёмная</p>
+      <div class="t-dark" data-clone="setwin" data-darkseg="1"></div>
+      <p class="caption">Та же страница в тёмной теме. Акцент светлее, но это тот же цвет. Медная метка у текущего раздела хорошо видна и на настоящем тёмном фоне.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var NAV = [["today", "i-home", "Сегодня"], ["subj", "i-folder", "Предметы"], ["tasks", "i-tasks", "Задания"], ["sched", "i-cal", "Расписание"], ["log", "i-log", "Журнал"], ["set", "i-set", "Настройки"]];
+  var SW = [["#C26A2E", "Медный, по умолчанию"], ["#3B78C2", "Синий"], ["#3E8A5A", "Зелёный"], ["#8A63CF", "Фиолетовый"], ["#6A6D73", "Графит"]];
+  var ico = function (id, cls) { return '<svg class="i' + (cls ? " " + cls : "") + '"><use href="#' + id + '"/></svg>'; };
+  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+
+  // 1. Shared sheets from templates.
+  $$("[data-tpl]").forEach(function (el) {
+    el.appendChild(document.getElementById(el.getAttribute("data-tpl")).content.cloneNode(true));
+    var ref = el.getAttribute("data-ref");
+    var slot = el.querySelector(".js-ref");
+    if (slot) slot.innerHTML = ref || '<span class="chip"><svg class="i"><use href="#i-circle"/></svg>Не начато</span>';
+    if (el.hasAttribute("data-nofresh")) $$(".fresh", el).forEach(function (f) { f.remove(); });
+  });
+
+  // 2. Window chrome: title bar with the «Спросить paratech» field, icon rail with tooltips to the right.
+  $$(".win[data-nav]").forEach(function (win) {
+    var open = win.getAttribute("data-agent") === "1";
+    var cur = win.getAttribute("data-nav"), badge = win.getAttribute("data-badge"), tip = win.getAttribute("data-tip");
+    win.insertAdjacentHTML("afterbegin",
+      '<div class="tbar"><span class="app"><span class="logo"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-5 3 10 3-7 2 2h5"/></svg></span>paratech</span>' +
+      '<button class="ask-pill" aria-expanded="' + open + '">' + ico("i-search", "s14") + '<span class="grow">Спросить paratech</span><span class="kbd">Ctrl+K</span></button>' +
+      '<span class="wc"><span>' + ico("i-min") + '</span><span>' + ico("i-max") + '</span><span>' + ico("i-x") + '</span></span></div>');
+    var rail = '<nav class="rail" aria-label="Разделы">';
+    NAV.forEach(function (n) {
+      rail += '<a href="#" class="' + (n[0] === "set" ? "low " : "") + (n[0] === tip ? "demo-tip" : "") + '" aria-label="' + n[2] + '"' + (n[0] === cur ? ' aria-current="page"' : "") + ">" +
+        ico(n[1]) + (n[0] === badge ? '<span class="badge"></span>' : "") + '<span class="tip" aria-hidden="true">' + n[2] + "</span></a>";
+    });
+    win.querySelector(".shell").insertAdjacentHTML("afterbegin", rail + "</nav>");
+  });
+
+  // 3. Agent panel head and composer.
+  $$(".ap-head").forEach(function (h) {
+    var ctx = h.getAttribute("data-ctx");
+    h.innerHTML = '<span class="mark lg"><svg><use href="#i-wave"/></svg></span><span class="nm">paratech</span>' +
+      '<span class="grow"></span><span class="kbd">Ctrl+K</span><button class="ibtn" aria-label="Закрыть панель">' + ico("i-x", "s16") + "</button>";
+    if (ctx) h.insertAdjacentHTML("afterend", '<div class="ap-ctx"><span>Контекст</span><span class="ctx" title="paratech знает, где вы. Снимите, чтобы спрашивать про всё.">' + ico("i-book", "s14") + "<span>" + ctx + '</span><button class="ibtn" aria-label="Снять контекст">' + ico("i-x") + "</button></span></div>");
+  });
+  $$(".ap-comp").forEach(function (c) {
+    c.innerHTML = '<div class="comp"><textarea rows="1" placeholder="' + (c.getAttribute("data-ph") || "Спросить paratech…") + '" aria-label="Сообщение для paratech"></textarea>' +
+      '<div class="comp-row"><button class="ibtn sm" aria-label="Прикрепить файл">' + ico("i-clip") + '</button><span class="small">Файл можно бросить в любое место окна</span><span class="grow"></span>' +
+      '<button class="btn sm" aria-label="Отправить">' + ico("i-send") + "</button></div></div>" +
+      '<p class="ap-rule">' + ico("i-shield") + "Письма, календарь и удаление — только после вашего «Да»</p>";
+  });
+
+  // 4. Scenario 4 answer (shared by both steps).
+  var a4 = '<span class="mt">Сегодня, 17:02</span><div class="mu"><div class="bub">где говорили про собственные векторы?</div></div>' +
+    '<div class="card"><div class="card-h"><span class="mark"><svg><use href="#i-book"/></svg></span>По вашим материалам</div>' +
+    '<p>Подробно — на лекции 13 октября: определение, характеристическое уравнение det(A − λE) = 0 и пример для матрицы 2×2 <button class="cite js-c1">1</button>. ' +
+    'На семинаре 19 октября решали задачу для матрицы 3×3 <button class="cite">2</button>. В слайдах к лекции 20.10 есть короткая памятка с алгоритмом <button class="cite">3</button></p>' +
+    '<ol class="srcs">' +
+    '<li><button class="cite js-c1">1</button><span class="ttl">Лекция · Вт, 13.10 · <a href="#">00:41:12–00:52:30</a></span><q>Собственный вектор — это ненулевой вектор, который при отображении только растягивается…</q></li>' +
+    '<li><button class="cite">2</button><span class="ttl">Семинар · Пн, 19.10 · <a href="#">00:12:05</a></span><q>Задача 4: матрица 3×3, корни 1, 2, 2</q></li>' +
+    '<li><button class="cite">3</button><span class="ttl">Лекция 5. Матрицы.pdf · <a href="#">стр. 18</a></span></li></ol>' +
+    '<div class="missing"><span class="chip s-wait">' + ico("i-info") + 'Нет в ваших лекциях</span><div>Случай кратных собственных значений — когда векторов меньше, чем корней, — в записях и файлах не разбирали.</div></div>' +
+    '<div class="card-a"><button class="btn sm">Объяснить по общим знаниям</button><button class="btn sm">Шпаргалку в «Контрольные»</button></div>' +
+    '<p class="note">' + ico("i-info") + "<span>Ответ по общим знаниям будет помечен «не из ваших лекций» и без ссылок.</span></p></div>";
+  $$(".js-a4").forEach(function (t) {
+    t.innerHTML = a4;
+    if (t.classList.contains("js-a4p")) $$(".js-c1", t).forEach(function (c) { c.setAttribute("aria-pressed", "true"); });
+  });
+
+  // 5. Clones: dark «Сегодня», dark settings.
+  $$("[data-clone]").forEach(function (dst) {
+    var src = document.getElementById(dst.getAttribute("data-clone")).querySelector(".win");
+    var copy = src.cloneNode(true);
+    if (dst.hasAttribute("data-darkseg")) $$(".js-theme button", copy).forEach(function (b, i) { b.setAttribute("aria-pressed", String(i === 2)); });
+    $$(".demo-tip", copy).forEach(function (a) { a.classList.remove("demo-tip"); });
+    dst.appendChild(copy);
+  });
+
+  // 6. Accent swatches (all copies stay in sync).
+  function setAccent(i) {
+    document.documentElement.style.setProperty("--acc", SW[i][0]);
+    $$(".js-sw").forEach(function (g) { $$(".sw", g).forEach(function (b, j) { b.setAttribute("aria-checked", String(i === j)); }); });
+    $$(".js-swname").forEach(function (n) { n.textContent = "· " + SW[i][1]; });
+  }
+  $$(".js-sw").forEach(function (g) {
+    g.innerHTML = SW.map(function (s, j) { return '<button class="sw" role="radio" aria-checked="' + (j === 0) + '" aria-label="' + s[1] + '" title="' + s[1] + " " + s[0] + '" style="--c:' + s[0] + '" data-i="' + j + '"></button>'; }).join("");
+  });
+
+  // 7. Scenario / step switching.
+  function scrollThreads(root) {
+    // Like a chat that keeps the latest question in view: the last student message goes to the top when the
+    // answer is long; otherwise the thread sits at the bottom.
+    $$(".ap-thread", root).forEach(function (t) {
+      var mus = $$(".mu", t), last = mus[mus.length - 1];
+      var bottom = t.scrollHeight - t.clientHeight;
+      t.scrollTop = last && !t.hasAttribute("data-bottom") ? Math.min(Math.max(last.offsetTop - 28, 0), bottom) : bottom;
+    });
+  }
+  function setStep(scn, n) {
+    $$(".frame", scn).forEach(function (f) { f.classList.toggle("on", f.getAttribute("data-step") === String(n)); });
+    $$(".stepper button", scn).forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-step") === String(n))); });
+    scrollThreads(scn);
+  }
+  function setScn(s, step) {
+    $$(".scn").forEach(function (x) { x.classList.toggle("on", x.getAttribute("data-scn") === String(s)); });
+    $$("#scnSeg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-s") === String(s))); });
+    var scn = document.querySelector('.scn[data-scn="' + s + '"]');
+    if (scn) setStep(scn, step || 1);
+  }
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("button, a");
+    if (!t) return;
+    if (t.tagName === "A" && t.getAttribute("href") === "#") e.preventDefault();
+    if (t.matches("#scnSeg button")) { setScn(t.getAttribute("data-s")); history.replaceState(null, "", "#s" + t.getAttribute("data-s")); return; }
+    if (t.matches(".stepper button")) { var sc = t.closest(".scn"); setStep(sc, t.getAttribute("data-step")); history.replaceState(null, "", "#s" + sc.getAttribute("data-scn") + "-" + t.getAttribute("data-step")); return; }
+    if (t.matches("#modeSeg button")) { $$("#modeSeg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b === t)); }); document.body.classList.toggle("all", t.getAttribute("data-m") === "all"); scrollThreads(document); return; }
+    if (t.matches("#fitSeg button")) { $$("#fitSeg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b === t)); }); document.body.classList.toggle("fit", t.getAttribute("data-f") === "fit"); scrollThreads(document); return; }
+    if (t.matches(".sw")) { setAccent(+t.getAttribute("data-i")); return; }
+    if (t.hasAttribute("data-go")) { setStep(t.closest(".scn"), t.getAttribute("data-go")); return; }
+    if (t.matches(".act .undo")) { var a = t.closest(".act"); var u = a.classList.toggle("undone"); t.textContent = u ? "Вернуть" : (t.getAttribute("data-l") || "Отменить"); return; }
+    if (t.matches(".undo-j")) { var r = t.closest(".jrow"); var d = r.classList.toggle("undone"); t.innerHTML = d ? "Вернуть" : ico("i-undo") + "Отменить"; t.classList.toggle("plain", d); return; }
+    if (t.matches(".seg button") && !t.closest("#scnSeg, #modeSeg, #fitSeg, .stepper")) { $$("button", t.parentNode).forEach(function (b) { if (!b.disabled) b.setAttribute("aria-pressed", String(b === t)); }); }
+  });
+  $$(".act .undo").forEach(function (b) { b.setAttribute("data-l", b.textContent); });
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey && (e.key === "k" || e.key === "K" || e.key === "л" || e.key === "Л")) { e.preventDefault(); setScn(6); }
+  });
+
+  var m = /^#s(\d)(?:-(\d))?/.exec(location.hash);
+  if (/[?&]all\b/.test(location.search)) { document.body.classList.add("all"); }
+  if (/[?&]fit\b/.test(location.search)) { document.body.classList.add("fit"); }
+  if (/[?&]shot\b/.test(location.search)) { document.body.classList.add("shot"); }
+  var am = /[?&]acc=(\d)/.exec(location.search);
+  setAccent(am ? +am[1] : 0);
+  setScn(m ? m[1] : 1, m && m[2] ? m[2] : 1);
+})();
+</script>
+</body>
+</html>

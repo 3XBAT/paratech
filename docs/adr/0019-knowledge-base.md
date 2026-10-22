@@ -17,6 +17,7 @@ tens to a few hundred lessons; transcripts are JSON files in the artifact store.
 - **Lessons** are completed, not silent recordings (failed and silent ones hold no text). Subject and kind: the user's
   correction per field, else the snapshot as a whole, else the live lesson (the rule of assignments,
   `values.ResolveScheduledLesson`). Subjects are grouped case-insensitively; empty is «Без предмета».
+  *Amended by ADR-0024*: lessons are grouped by subject ID of the `library` context, not by the free string.
 - **Correction** is stored on the recording (`user_subject`, `user_kind`, migration 0019) through
   `Recording.CorrectLesson`; the snapshot stays write-once. Empty clears it.
 - **Export** of a subject: one Markdown file, lessons oldest first, each with its summary and lecture text. Transcripts

@@ -2417,7 +2417,7 @@
                 "проверить ссылки и номера ADR; go test ./desktop/tests/... (arch-тест не сломан)"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-113",

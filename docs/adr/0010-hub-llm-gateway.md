@@ -16,7 +16,9 @@ hash, an upper-bound reservation and a deadline below the reservation TTL.
 - **Reservation** (`domain/llm/services/requestlimits`) = bytes of instructions + data + 1024 framing tokens + the clamped
   `max_output_tokens`. A provider token is at least one byte, so this bounds the charge without a tokenizer; it errs high.
 - **Key record.** The ledger fingerprint gets `request_hash`: SHA-256 of operation, alias, both texts and the requested
-  `max_output_tokens` (each length-prefixed, the key itself left out). A different hash is IDEMPOTENCY_CONFLICT in every state,
+  `max_output_tokens` (each length-prefixed, the key itself left out). *Amended by ADR-0023*: for `INSPECT_MATERIAL`,
+  `ANSWER`, `TRIAGE_ASSIGNMENT` the server prompt version replaces the instructions text; client instructions or a
+  different alias are `invalid_argument`. A different hash is IDEMPOTENCY_CONFLICT in every state,
   checked before anything is replayed. The answer (output + usage) is stored on the key record by `account.Complete` in the
   settle transaction, so one aggregate per transaction still holds (ARCH-23). Output is opaque bytes to the quota context. A late
   attempt (a newer one owns the key) is charged but its result is dropped. Migration 0004 adds the columns; no request text is
