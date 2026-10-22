@@ -241,8 +241,11 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 	for submits := 0; ; submits++ {
 		if ctx.Err() != nil {
 			// A failed Hub call already stored the request stopped; only calls handed to us need closing.
-			if err == nil {
+			switch {
+			case err == nil && len(st.Calls) > 0:
 				d.interrupt(ctx, st)
+			case err == nil:
+				d.publish(st, ProblemNone) // the step is stored; the panel still shows it
 			}
 			return
 		}
@@ -284,9 +287,6 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 // request stops continuable («Продолжить»), as when the ctx ends during a Hub call. Results of calls that ran are
 // dropped too: a read cut by the ctx would report a false failure.
 func (d *Driver) interrupt(ctx context.Context, st agentturn.Step) {
-	if len(st.Calls) == 0 {
-		return
-	}
 	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), refOf(st))
 	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)

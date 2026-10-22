@@ -263,6 +263,24 @@ func TestDriverContextEndsBeforeCalls(t *testing.T) {
 	}
 }
 
+// The ctx ends while the step use case answers without calls: the stored step still reaches the panel.
+func TestDriverContextEndsWithFinalStep(t *testing.T) {
+	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Готово"}), nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	turns.beforeAnswer = cancel
+	d, sink := newDriver(t, newReads(), turns)
+	if err := d.Ask(ctx, agentturn.AskInput{Text: "привет"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	if ups := sink.all(); len(ups) != 1 || ups[0].Status != thread.StatusDone {
+		t.Fatalf("updates = %+v", ups)
+	}
+	if rep := turns.report(); len(rep.stopped) != 0 || len(rep.cancelled) != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+}
+
 // Close cancels a running loop, waits for it and refuses new requests; the request stays continuable.
 func TestDriverClose(t *testing.T) {
 	r := newReads()
