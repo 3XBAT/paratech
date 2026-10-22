@@ -74,17 +74,19 @@ type actionsActivity struct {
 	recordings []activity.Recording
 }
 
-func (a actionsActivity) ListRecordings(context.Context) ([]activity.Recording, error) { return a.recordings, nil }
+func (a actionsActivity) ListRecordings(context.Context) ([]activity.Recording, error) {
+	return a.recordings, nil
+}
 
 type actionsEnv struct {
 	*agentEnv
 	knowledge *driverKnowledge
 	activity  actionsActivity
 	lib       *library.Service
-	actions *agentloop.Actions
-	driver  *agentloop.Driver
-	sink    *driverSink
-	physics *subject.Subject
+	actions   *agentloop.Actions
+	driver    *agentloop.Driver
+	sink      *driverSink
+	physics   *subject.Subject
 }
 
 func newActionsEnv(t *testing.T) *actionsEnv {

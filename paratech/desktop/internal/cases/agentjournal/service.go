@@ -33,7 +33,8 @@ const (
 const MaxList = 200
 
 // Service is the action journal. Each method is one short transaction on one entry (a single CAS save); the use case
-// that acts runs between Begin and Finish, idempotent by Entry.Key (ADR-0021, ARCH-23).
+// that acts runs between Begin and Finish. No key is passed to it: the one entry per (thread, turn, call ID) and
+// Find make a repeated call act at most once (ADR-0021, ARCH-23).
 type Service struct {
 	actions    ActionRepository
 	comp       Compensator
@@ -74,8 +75,8 @@ func (s *Service) Find(ctx context.Context, th shared.ThreadID, turn int, callID
 	return entryOf(a, s.clock.Now()), nil
 }
 
-// Begin records a U call PENDING before its use case runs (first transaction). The use case then runs with
-// Entry.Key as its idempotency key. A second entry for the same call is shared.ErrVersionConflict: use Find.
+// Begin records a U call PENDING before its use case runs (first transaction). A second entry for the same call is
+// shared.ErrVersionConflict: use Find.
 func (s *Service) Begin(ctx context.Context, in BeginInput) (Entry, error) {
 	a, err := action.New(spec(s.ids.NewActionID(), in), s.clock.Now())
 	if err != nil {

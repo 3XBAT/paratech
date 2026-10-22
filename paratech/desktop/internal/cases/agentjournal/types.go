@@ -51,7 +51,7 @@ type Entry struct {
 	CanUndo      bool
 	NoUndo       action.NoUndo       // why «Отменить» is not offered; empty when it is
 	Compensation action.Compensation // DONE and later: what Undo does (the Driver rebuilds a repeated call's result)
-	Key          string              // idempotency key of the use case run between Begin and Finish
+	Key          string              // the entry's key, namespaced by thread and action; use cases take none
 	Proposal     values.Ref          // PROPOSED only
 	CreatedAt    time.Time
 	UpdatedAt    time.Time

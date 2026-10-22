@@ -201,8 +201,8 @@ func (a *Action) Compensation() Compensation { return a.comp }
 // Proposal returns the proposal or preview of a PROPOSED action.
 func (a *Action) Proposal() values.Ref { return a.proposal }
 
-// Key is the idempotency key of the use case run between PENDING and the outcome, namespaced by thread and action
-// (not the call ID alone, which the planner could repeat in another thread).
+// Key names the entry, namespaced by thread and action (not the call ID alone, which the planner could repeat in
+// another thread). No use case takes it: the one entry per call makes a repeated call act at most once.
 func (a *Action) Key() string { return fmt.Sprintf("ag:%s:act:%s", a.thread, a.id) }
 
 // CanUndo reports whether «Отменить» is offered at now: DONE, or UNDOING whose compensation stopped (a retry).
