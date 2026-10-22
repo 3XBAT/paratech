@@ -36,6 +36,23 @@ func planSteps(t *testing.T, steps string) []values.PlanStep {
 	return call(t, "show_plan", `{"summary":"План","steps":`+steps+`}`).Args().PlanSteps("steps")
 }
 
+func subjectName(i int) string { return "Предмет " + string(rune('A'+i)) }
+
+// createSubjects returns a plan of n create_subject steps with names subjectName(0..n-1), then the extra steps.
+func createSubjects(n int, extra string) string {
+	s := `[`
+	for i := range n {
+		if i > 0 {
+			s += `,`
+		}
+		s += `{"tool":"create_subject","args":{"name":"` + subjectName(i) + `"}}`
+	}
+	if extra != "" {
+		s += `,` + extra
+	}
+	return s + `]`
+}
+
 // context is the base and scope of the tests: subject s1, lesson l1, recording r1, upload u1.
 func context(t *testing.T) values.RefSet {
 	return values.NewRefSet(ref(t, values.KindSubject, "s1"), ref(t, values.KindLesson, "l1"),
@@ -343,17 +360,14 @@ func TestBudget(t *testing.T) {
 	})
 	t.Run("writes", func(t *testing.T) {
 		th := newThread(t)
-		steps := `[` +
-			`{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"},` +
-			`{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"}]`
-		if err := th.ProposePlan(planSteps(t, steps), nil, at(2)); err != nil {
+		if err := th.ProposePlan(planSteps(t, createSubjects(MaxWrites, "")), nil, at(2)); err != nil {
 			t.Fatal(err)
 		}
 		if err := th.ApprovePlan(at(3)); err != nil {
 			t.Fatal(err)
 		}
 		for i := range MaxWrites {
-			if _, err := th.Admit(call(t, "create_subject", `{"name":"Предмет `+string(rune('A'+i))+`"}`), Facts{}, at(4)); err != nil {
+			if _, err := th.Admit(call(t, "create_subject", `{"name":"`+subjectName(i)+`"}`), Facts{}, at(4)); err != nil {
 				t.Fatalf("write %d: %v", i+1, err)
 			}
 		}
@@ -477,8 +491,11 @@ func TestAdmitWithoutPlan(t *testing.T) {
 
 func TestApprovedPlan(t *testing.T) {
 	ctx := context(t)
-	plan := `[{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}},{"tool":"make_lecture_text","args":{"recording":"r1"}},{"tool":"propose_delete_recording","args":{"recording":"r1"}}]`
+	plan := `[{"tool":"place_upload","args":{"upload":"u1","subject":"s1","folder":"f1"}},{"tool":"make_lecture_text","args":{"recording":"r1"}},{"tool":"propose_delete_recording","args":{"recording":"r1"}}]`
 	th := newThread(t)
+	if err := th.Observe(ref(t, values.KindFolder, "f1")); err != nil {
+		t.Fatal(err)
+	}
 	if err := th.ProposePlan(planSteps(t, plan), ctx, at(2)); err != nil {
 		t.Fatal(err)
 	}
@@ -489,9 +506,6 @@ func TestApprovedPlan(t *testing.T) {
 		t.Fatalf("Admit while awaiting the plan = %v", err)
 	}
 	if err := th.ApprovePlan(at(3)); err != nil {
-		t.Fatal(err)
-	}
-	if err := th.Observe(ref(t, values.KindFolder, "f1")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -541,14 +555,10 @@ func TestProposePlanRules(t *testing.T) {
 		want  error
 	}{
 		{"read step", `[{"tool":"list_subjects"}]`, ErrInvalidPlan},
-		{"UI step", `[{"tool":"reply"}]`, ErrInvalidPlan},
 		{"unknown id", `[{"tool":"make_summary","args":{"recording":"r7"}}]`, actionpolicy.ErrUnknownID},
-		{"too many writes", `[` +
-			`{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"},` +
-			`{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"}]`, ErrInvalidPlan},
-		{"C steps do not count as writes", `[` +
-			`{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"create_subject"},` +
-			`{"tool":"create_subject"},{"tool":"create_subject"},{"tool":"propose_delete_recording","args":{"recording":"r1"}}]`, nil},
+		{"too many writes", createSubjects(MaxWrites+1, ""), ErrInvalidPlan},
+		{"C steps do not count as writes", createSubjects(MaxWrites, `{"tool":"propose_delete_recording","args":{"recording":"r1"}}`), nil},
+		{"created subject", `[{"tool":"create_subject","args":{"name":"Физика"}},{"tool":"create_folder","args":{"name":"Лекции"}}]`, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -565,6 +575,49 @@ func TestProposePlanRules(t *testing.T) {
 	th := newThread(t)
 	if err := th.ProposePlan(nil, ctx, at(2)); !errors.Is(err, ErrInvalidPlan) {
 		t.Fatalf("empty plan = %v", err)
+	}
+	// A step without its required arguments would approve any call of the tool, so show_plan is refused before a
+	// plan reaches ProposePlan; a UI step cannot carry its text arguments at all.
+	for _, steps := range []string{
+		`[{"tool":"make_lecture_text"}]`,
+		`[{"tool":"edit_due","args":{"assignment":"a1"}}]`,
+		`[{"tool":"reply"}]`,
+	} {
+		_, err := values.ParseCall("c1", "show_plan", `{"summary":"План","steps":`+steps+`}`)
+		if !errors.Is(err, values.ErrInvalidArguments) {
+			t.Fatalf("incomplete plan %s = %v", steps, err)
+		}
+	}
+}
+
+func TestRevisePlanDropsApprovedPlan(t *testing.T) {
+	ctx := context(t)
+	th := newThread(t)
+	if err := th.ProposePlan(planSteps(t, `[{"tool":"make_lecture_text","args":{"recording":"r1"}}]`), ctx, at(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ApprovePlan(at(3)); err != nil {
+		t.Fatal(err)
+	}
+	// EXECUTING -> new plan -> AWAITING_PLAN -> «Изменить» -> PLANNING: the old approval is gone.
+	if err := th.ProposePlan(planSteps(t, `[{"tool":"create_subject","args":{"name":"Химия"}}]`), ctx, at(4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.RevisePlan(at(5)); err != nil {
+		t.Fatal(err)
+	}
+	turn, _ := th.Turn()
+	if turn.Status() != StatusPlanning || len(turn.ApprovedPlan()) != 0 || len(th.State().Current.Used) != 0 {
+		t.Fatalf("after RevisePlan: %s, approved %d", turn.Status(), len(turn.ApprovedPlan()))
+	}
+	s := th.State()
+	s.Version = 1
+	if _, err := Restore(s); err != nil {
+		t.Fatalf("Restore after RevisePlan = %v", err)
+	}
+	_, err := th.Admit(call(t, "make_lecture_text", `{"recording":"r1"}`), Facts{Context: ctx, CostMicroUSD: 90_000}, at(6))
+	if !errors.Is(err, ErrPlanRequired) {
+		t.Fatalf("write of the dropped plan = %v", err)
 	}
 }
 

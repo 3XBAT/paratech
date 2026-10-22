@@ -464,7 +464,8 @@ func (th *Thread) ApprovePlan(now time.Time) error {
 	return nil
 }
 
-// RevisePlan is «Изменить»: the plan is dropped and the planner continues.
+// RevisePlan is «Изменить»: the proposed plan and any earlier approved plan are dropped and the planner continues,
+// so later writes need a new «Да».
 func (th *Thread) RevisePlan(now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
@@ -476,7 +477,7 @@ func (th *Thread) RevisePlan(now time.Time) error {
 	if err := th.move(StatusPlanning, now); err != nil {
 		return err
 	}
-	t.proposed = nil
+	t.proposed, t.approved, t.used = nil, nil, nil
 	return nil
 }
 

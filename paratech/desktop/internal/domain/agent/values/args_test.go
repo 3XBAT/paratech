@@ -220,19 +220,22 @@ func TestArgsAccessors(t *testing.T) {
 
 func TestPlanSteps(t *testing.T) {
 	args := `{"summary":"Разложить файл и сделать конспект","steps":[` +
-		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}},` +
+		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1","folder":"f1"}},` +
 		`{"tool":"make_summary","args":{"material":"m1"}},` +
-		`{"tool":"create_subject","args":{"name":"Физика"}}],"notes":["Займёт пару минут"]}`
+		`{"tool":"create_subject","args":{"name":"Физика"}},` +
+		`{"tool":"generate_draft","args":{"assignment":"a1"}},` +
+		`{"tool":"create_folder","args":{"name":"Лекции"}},` +
+		`{"tool":"place_upload","args":{"upload":"u2","subject":"s1"}}],"notes":["Займёт пару минут"]}`
 	call, err := ParseCall("c1", "show_plan", args)
 	if err != nil {
 		t.Fatalf("ParseCall: %v", err)
 	}
 	steps := call.Args().PlanSteps("steps")
-	if len(steps) != 3 {
+	if len(steps) != 6 {
 		t.Fatalf("steps = %d", len(steps))
 	}
 	refs := call.Refs()
-	if len(refs) != 3 {
+	if len(refs) != 6 {
 		t.Fatalf("plan refs = %v", refs)
 	}
 
@@ -243,13 +246,21 @@ func TestPlanSteps(t *testing.T) {
 		step int
 		want bool
 	}{
-		{"same ids, extra id", "place_upload", `{"upload":"u1","subject":"s1","folder":"f1"}`, 0, true},
+		{"same ids", "place_upload", `{"upload":"u1","subject":"s1","folder":"f1"}`, 0, true},
 		{"other upload", "place_upload", `{"upload":"u2","subject":"s1","folder":"f1"}`, 0, false},
+		{"other folder", "place_upload", `{"upload":"u1","subject":"s1","folder":"f2"}`, 0, false},
+		{"lesson instead of folder", "place_upload", `{"upload":"u1","subject":"s1","lesson":"l1"}`, 0, false},
 		{"other tool", "make_summary", `{"material":"m1"}`, 0, false},
 		{"summary of material", "make_summary", `{"material":"m1"}`, 1, true},
 		{"summary of recording", "make_summary", `{"recording":"r1"}`, 1, false},
 		{"same name", "create_subject", `{"name":"Физика"}`, 2, true},
 		{"other name", "create_subject", `{"name":"Химия"}`, 2, false},
+		{"planned draft", "generate_draft", `{"assignment":"a1"}`, 3, true},
+		{"extra argument", "generate_draft", `{"assignment":"a1","instruction":"кратко"}`, 3, false},
+		{"created subject", "create_folder", `{"subject":"s9","name":"Лекции"}`, 4, true},
+		{"created subject, other name", "create_folder", `{"subject":"s9","name":"Семинары"}`, 4, false},
+		{"created folder", "place_upload", `{"upload":"u2","subject":"s1","folder":"f9"}`, 5, true},
+		{"lesson instead of created folder", "place_upload", `{"upload":"u2","subject":"s1","lesson":"l1"}`, 5, false},
 	}
 	for _, m := range match {
 		t.Run(m.name, func(t *testing.T) {
@@ -275,6 +286,9 @@ func TestPlanSteps(t *testing.T) {
 	if err != nil || again != enc {
 		t.Fatalf("round trip: %s != %s (%v)", again, enc, err)
 	}
+	if c, _ := ParseCall("c3", "create_folder", `{"subject":"s9","name":"Лекции"}`); !dec[4].Matches(c) {
+		t.Fatal("decoded plan lost the deferred subject")
+	}
 
 	bad := []struct{ name, steps string }{
 		{"empty", `[]`},
@@ -285,6 +299,14 @@ func TestPlanSteps(t *testing.T) {
 		{"bad id", `[{"tool":"make_summary","args":{"material":"a/b"}}]`},
 		{"duplicate key", `[{"tool":"make_summary","tool":"write_work"}]`},
 		{"too many", `[` + strings.Repeat(`{"tool":"list_subjects"},`, MaxPlanSteps) + `{"tool":"list_subjects"}]`},
+		{"no required argument", `[{"tool":"make_lecture_text"}]`},
+		{"no due", `[{"tool":"edit_due","args":{"assignment":"a1"}}]`},
+		{"no name", `[{"tool":"create_subject"}]`},
+		{"neither of one-of", `[{"tool":"make_summary"}]`},
+		{"both of one-of", `[{"tool":"make_summary","args":{"recording":"r1","material":"m1"}}]`},
+		{"no folder or lesson", `[{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}}]`},
+		{"subject created later", `[{"tool":"create_folder","args":{"name":"X"}},{"tool":"create_subject","args":{"name":"Y"}}]`},
+		{"folder is not a subject", `[{"tool":"create_folder","args":{"subject":"s1","name":"X"}},{"tool":"create_folder","args":{"name":"Y"}}]`},
 	}
 	for _, b := range bad {
 		t.Run("bad/"+b.name, func(t *testing.T) {

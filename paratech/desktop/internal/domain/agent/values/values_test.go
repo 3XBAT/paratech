@@ -85,6 +85,7 @@ func TestParseText(t *testing.T) {
 		{"nbsp", "a\u00a0b", false},
 		{"angle", "1 < 2", false},
 		{"invalid utf8", "a\xffb", false},
+		{"replacement character", "a�b", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,6 +97,18 @@ func TestParseText(t *testing.T) {
 				t.Fatalf("error %v is not ErrInvalidText", err)
 			}
 		})
+	}
+	for _, in := range []string{"a�b", "a\xffb"} {
+		if _, err := ParseLabel(in); !errors.Is(err, ErrInvalidText) {
+			t.Fatalf("ParseLabel(%q) = %v", in, err)
+		}
+		if _, err := ParseName(in); !errors.Is(err, ErrInvalidText) {
+			t.Fatalf("ParseName(%q) = %v", in, err)
+		}
+	}
+	// A JSON string with invalid UTF-8 decodes to U+FFFD and is refused as an argument.
+	if _, err := ParseCall("c1", "search", "{\"query\":\"a\xffb\"}"); !errors.Is(err, ErrInvalidText) {
+		t.Fatalf("query with invalid UTF-8 = %v", err)
 	}
 	if _, err := ParseLabel("a\nb"); err == nil {
 		t.Fatal("label accepted a newline")

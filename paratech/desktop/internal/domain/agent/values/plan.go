@@ -6,14 +6,19 @@ import (
 	"slices"
 )
 
-// PlanStep is one planned call of a plan card: a tool and some of its arguments. Only ID, date, enum and label
-// arguments may appear, so the desktop renders the step from templates; IDs created later in the plan (a new subject)
-// are left out. A later call matches the step when it has the same tool and every argument of the step has the same
-// value in the call.
+// PlanStep is one planned call of a plan card: a tool and its arguments. Only ID, date, enum and label arguments may
+// appear, so the desktop renders the step from templates. A step carries every required argument (and one of each
+// one-of pair) except an ID of a subject or folder that an earlier step of the plan creates; such IDs are deferred. A
+// later call matches the step when it has the same tool and exactly the step's arguments with the same values, plus
+// only deferred IDs, so an approved step is never a wildcard.
 type PlanStep struct {
-	tool Tool
-	args Args
+	tool     Tool
+	args     Args
+	deferred []string // ID arguments an earlier step creates; the call fills them in
 }
+
+// createdKinds maps a step tool to the ID kind it creates for later steps of the same plan.
+var createdKinds = map[Tool]IDKind{ToolCreateSubject: KindSubject, ToolCreateFolder: KindFolder}
 
 // Tool returns the planned tool.
 func (s PlanStep) Tool() Tool { return s.tool }
@@ -26,9 +31,20 @@ func (s PlanStep) Matches(call Call) bool {
 	if call.tool != s.tool {
 		return false
 	}
-	for name, want := range s.args.vals {
-		got, ok := call.args.vals[name]
-		if !ok || got.canon != want.canon {
+	for name, got := range call.args.vals {
+		want, ok := s.args.vals[name]
+		if !ok {
+			if !slices.Contains(s.deferred, name) {
+				return false
+			}
+			continue
+		}
+		if got.canon != want.canon {
+			return false
+		}
+	}
+	for name := range s.args.vals {
+		if _, ok := call.args.vals[name]; !ok {
 			return false
 		}
 	}
@@ -83,17 +99,22 @@ func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) {
 		return nil, err
 	}
 	out := make([]PlanStep, 0, len(items))
+	created := map[IDKind]bool{}
 	for _, it := range items {
-		s, err := parsePlanStep(it)
+		s, err := parsePlanStep(it, created)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, s)
+		if k, ok := createdKinds[s.tool]; ok {
+			created[k] = true
+		}
 	}
 	return out, nil
 }
 
-func parsePlanStep(raw json.RawMessage) (PlanStep, error) {
+// parsePlanStep parses one step; created holds the ID kinds that earlier steps create.
+func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, error) {
 	fields, err := decodeObject(raw)
 	if err != nil {
 		return PlanStep{}, err
@@ -130,7 +151,29 @@ func parsePlanStep(raw json.RawMessage) (PlanStep, error) {
 			vals[n] = v
 		}
 	}
-	return PlanStep{tool: t, args: Args{vals: vals}}, nil
+	var deferred []string
+	for _, as := range spec.args {
+		if _, ok := vals[as.Name]; ok {
+			continue
+		}
+		if as.Type == ArgID && created[as.Kind] {
+			deferred = append(deferred, as.Name)
+			continue
+		}
+		if as.Required {
+			return PlanStep{}, fmt.Errorf("%w: plan step %s needs %s", ErrInvalidArguments, t, as.Name)
+		}
+	}
+	for _, pair := range spec.oneOf {
+		_, a := vals[pair[0]]
+		_, b := vals[pair[1]]
+		open := slices.Contains(deferred, pair[0]) || slices.Contains(deferred, pair[1])
+		if a && b || !a && !b && !open {
+			return PlanStep{}, fmt.Errorf("%w: plan step %s needs exactly one of %s and %s", ErrInvalidArguments, t,
+				pair[0], pair[1])
+		}
+	}
+	return PlanStep{tool: t, args: Args{vals: vals}, deferred: deferred}, nil
 }
 
 // QuestionKind is the kind of a question on a Questions card.

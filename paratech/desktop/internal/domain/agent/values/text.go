@@ -55,7 +55,7 @@ func ParseName(s string) (Name, error) {
 		return "", fmt.Errorf("%w: a name must have 1..%d characters", ErrInvalidText, MaxLabelRunes)
 	}
 	for _, r := range s {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(nameExtraRunes, r) {
+		if r == utf8.RuneError || !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(nameExtraRunes, r) {
 			return "", fmt.Errorf("%w: a name may hold only letters, digits, spaces and .,-()", ErrInvalidText)
 		}
 	}
@@ -80,6 +80,10 @@ func checkPrintable(s string, maxRunes int, newlines bool) error {
 		}
 		if !unicode.IsPrint(r) {
 			return fmt.Errorf("%w: has a control, format or separator character", ErrInvalidText)
+		}
+		// JSON decoding turns invalid UTF-8 into U+FFFD, so it marks broken input.
+		if r == utf8.RuneError {
+			return fmt.Errorf("%w: has a replacement character", ErrInvalidText)
 		}
 		if r == '<' || r == '>' {
 			return fmt.Errorf("%w: has an angle bracket (no HTML)", ErrInvalidText)
