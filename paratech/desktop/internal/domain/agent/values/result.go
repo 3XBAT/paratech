@@ -43,6 +43,7 @@ const (
 	RefuseNotDone       Refusal = "not_done"        // cancelled or interrupted before it ran
 	RefuseFailed        Refusal = "failed"          // the use case failed
 	RefuseUnknown       Refusal = "outcome_unknown" // the app stopped while it ran; see the journal
+	RefuseUnavailable   Refusal = "unavailable"     // this desktop version cannot run the tool yet
 )
 
 // assumptionsNote tells the planner to go on after a refused third question round (ADR-0021).
