@@ -44,7 +44,15 @@ export function DropZone(props: { onImported?: () => void }) {
   done.current = props.onImported;
 
   useEffect(() => {
-    const enter = (e: DragEvent) => {
+    // Wails hit-tests the pointer with elementFromPoint(..).closest("[data-file-drop-target]"): the target must be
+    // always mounted and contain everything hit-testable, so it is body (html, body and #root fill the window), not
+    // the pointer-events:none overlay that exists only during a drag.
+    document.body.setAttribute(dropTargetAttr, "");
+    return () => document.body.removeAttribute(dropTargetAttr);
+  }, []);
+
+  useEffect(() => {
+    const enter =(e: DragEvent) => {
       if (hasFiles(e.dataTransfer)) {
         e.preventDefault();
         depth.current = nextDepth(depth.current, "enter");
@@ -104,7 +112,7 @@ export function DropZone(props: { onImported?: () => void }) {
   return (
     <>
       {over && (
-        <div className="drop-overlay" aria-hidden="true" {...{ [dropTargetAttr]: "" }}>
+        <div className="drop-overlay" aria-hidden="true">
           <div className="drop-box">
             <Icon name="down" />
             <p>{dropTexts.overlay}</p>

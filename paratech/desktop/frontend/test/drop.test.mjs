@@ -79,10 +79,15 @@ test("the subscription listens to library:dropped, passes the outcome on, and do
   absent();
 });
 
-test("the overlay is the Wails drop target and the page has no path or import binding", () => {
+test("body is the persistent Wails drop target, not the overlay; the page has no path or import binding", () => {
   assert.equal(dropTargetAttr, "data-file-drop-target");
   const zone = readFileSync(new URL("../src/pages/DropZone.tsx", import.meta.url), "utf8");
-  assert.match(zone, /dropTargetAttr/);
+  assert.match(zone, /document\.body\.setAttribute\(dropTargetAttr/);
+  assert.match(zone, /document\.body\.removeAttribute\(dropTargetAttr/);
+  const overlay = zone.match(/<div className="drop-overlay"[^>]*>/)?.[0] ?? "";
+  assert.ok(overlay && !/dropTargetAttr|data-file-drop-target/.test(overlay));
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /html, body, #root \{ height: 100%/);
   for (const f of [zone, readFileSync(new URL("../src/dropFiles.ts", import.meta.url), "utf8")]) {
     assert.ok(!/importDroppedFile|files:dropped|dataTransfer\.files/.test(f));
   }
