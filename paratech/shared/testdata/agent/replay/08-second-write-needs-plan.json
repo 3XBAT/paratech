@@ -1,0 +1,21 @@
+{
+  "name": "08-second-write-needs-plan",
+  "about": "The second write of a request needs a plan.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "create_subject",
+      "arguments_json": "{\"name\":\"Химия\"}"
+    },
+    {
+      "call_id": "toolu_02",
+      "tool": "create_folder",
+      "arguments_json": "{\"subject\":\"s1\",\"name\":\"Лабы\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "driver:U",
+    "toolu_02": "refused:plan_required"
+  }
+}

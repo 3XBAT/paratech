@@ -63,8 +63,8 @@ func subjectThread(t *testing.T) *thread.Thread {
 		t.Fatal(err)
 	}
 	plan := agentCall(t, "p1", "show_plan", `{"summary":"План","steps":[`+
-		`{"tool":"create_folder","args":{"subject":"s1","name":"Лабы"}},`+
-		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}}]}`).Args().PlanSteps("steps")
+		`{"tool":"create_folder","arguments":{"subject":"s1","name":"Лабы"}},`+
+		`{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1"}}]}`).Args().PlanSteps("steps")
 	ctxRefs := values.NewRefSet(scope.Refs()...)
 	if err := th.ProposePlan(plan, ctxRefs, agentAt(2)); err != nil {
 		t.Fatal(err)

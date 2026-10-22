@@ -154,8 +154,8 @@ func TestRefusalsGoBackToThePlanner(t *testing.T) {
 // Plan approval with deferred IDs: the create step's ID is bound, another known ID is refused (decision a).
 func TestPlanApprovalAndCreatedIDs(t *testing.T) {
 	e := newEnv(t)
-	plan := `{"summary":"Создать папку","steps":[{"tool":"create_folder","args":{"subject":"s1","name":"Лабы"}},` +
-		`{"tool":"create_folder","args":{"subject":"s1","name":"Лекции"}}]}`
+	plan := `{"summary":"Создать папку","steps":[{"tool":"create_folder","arguments":{"subject":"s1","name":"Лабы"}},` +
+		`{"tool":"create_folder","arguments":{"subject":"s1","name":"Лекции"}}]}`
 	e.model.then(raw("p1", "show_plan", plan)).
 		then(raw("w1", "create_folder", `{"subject":"s1","name":"Лабы"}`)).
 		then(raw("w2", "create_folder", `{"subject":"s1","name":"Чужая"}`)).
@@ -197,7 +197,7 @@ func TestPlanApprovalAndCreatedIDs(t *testing.T) {
 
 func TestRevisePlan(t *testing.T) {
 	e := newEnv(t)
-	plan := `{"summary":"План","steps":[{"tool":"create_subject","args":{"name":"Химия"}}]}`
+	plan := `{"summary":"План","steps":[{"tool":"create_subject","arguments":{"name":"Химия"}}]}`
 	e.model.then(raw("p1", "show_plan", plan)).then(raw("r1", "reply", `{"text":"Хорошо"}`))
 	st := ask(t, e, "добавь предмет")
 	if _, err := e.svc.RevisePlan(t.Context(), ref(st), "<b>"); !errors.Is(err, ErrInvalidInput) {
@@ -214,7 +214,7 @@ func TestRevisePlan(t *testing.T) {
 // Decision (c): a third question round is refused and the planner continues with stated assumptions.
 func TestThirdQuestionRound(t *testing.T) {
 	e := newEnv(t)
-	q := `{"questions":[{"kind":"choice","text":"Какой вариант?","options":["А","Б"],"default":0}]}`
+	q := `{"questions":[{"kind":"choice","question":"Какой вариант?","options":["А","Б"],"default":0}]}`
 	e.model.then(raw("q1", "ask_questions", q)).then(raw("q2", "ask_questions", q)).
 		then(raw("q3", "ask_questions", q)).then(raw("r1", "reply", `{"text":"Сделано с допущениями"}`))
 
@@ -517,7 +517,7 @@ func TestRecover(t *testing.T) {
 // A new request closes the calls a waiting request left open, so the history keeps its shape.
 func TestAskClosesWaitingRequest(t *testing.T) {
 	e := newEnv(t)
-	plan := `{"summary":"План","steps":[{"tool":"create_subject","args":{"name":"Химия"}}]}`
+	plan := `{"summary":"План","steps":[{"tool":"create_subject","arguments":{"name":"Химия"}}]}`
 	e.model.then(raw("p1", "show_plan", plan)).then(raw("r1", "reply", `{"text":"ок"}`))
 	st := ask(t, e, "добавь")
 	st2 := ask(t, e, "нет, другое")
@@ -539,7 +539,7 @@ func TestAskClosesWaitingRequest(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	e := newEnv(t)
-	plan := `{"summary":"План","steps":[{"tool":"create_subject","args":{"name":"Химия"}}]}`
+	plan := `{"summary":"План","steps":[{"tool":"create_subject","arguments":{"name":"Химия"}}]}`
 	e.model.then(raw("p1", "show_plan", plan))
 	st := ask(t, e, "добавь")
 	st, err := e.svc.Cancel(t.Context(), ref(st))

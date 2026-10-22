@@ -1,0 +1,15 @@
+{
+  "name": "21-ask-questions",
+  "about": "Questions in the shape the Hub checks (question).",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "ask_questions",
+      "arguments_json": "{\"questions\":[{\"kind\":\"choice\",\"question\":\"Какой объём работы?\",\"options\":[\"5 страниц\",\"10 страниц\"],\"default\":0}]}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "card:questions"
+  }
+}

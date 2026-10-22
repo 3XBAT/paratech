@@ -1,0 +1,15 @@
+{
+  "name": "01-list-assignments",
+  "about": "Read tool: goes to the Driver as class R.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "list_assignments",
+      "arguments_json": "{\"subject\":\"s1\",\"status\":\"upcoming\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "driver:R"
+  }
+}

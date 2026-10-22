@@ -1,0 +1,525 @@
+package tests
+
+// Agent checks, level 1, Hub side (TASK-135, design §3.3, ADR-0023): the recorded answers and the injection fixtures
+// of shared/testdata/agent through the real router, key check, AgentStep handler and use case, seal service and tool
+// catalog. Only the provider, the quota store and the kept-turn store are fakes, so no Postgres is needed.
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	connectrpc "connectrpc.com/connect"
+
+	"paratech/hub/internal/cases/agentstep"
+	"paratech/hub/internal/cases/gateway"
+	"paratech/hub/internal/cases/keyauth"
+	"paratech/hub/internal/cases/keys"
+	"paratech/hub/internal/domain/llm/services/modelallowlist"
+	"paratech/hub/internal/domain/llm/services/seal"
+	"paratech/hub/internal/domain/llm/services/toolcatalog"
+	"paratech/hub/internal/domain/llm/values"
+	"paratech/hub/internal/domain/shared"
+	"paratech/hub/internal/input/connect"
+	"paratech/hub/testenv"
+	hubv1 "paratech/shared/gen/paratech/hub/v1"
+	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
+)
+
+const evalThread = "th-eval"
+
+// evalHub is the Hub's public listener with AgentStep wired to the real use case.
+type evalHub struct {
+	provider *testenv.FakeAgentProvider
+	store    *testenv.QuotaStore
+	sealer   *seal.Sealer
+	catalog  *toolcatalog.Catalog
+	system   string
+	client   hubv1connect.GatewayServiceClient
+	keys     map[shared.APIKeyID]string // issued key ID -> bearer key
+	owner    shared.APIKeyID
+}
+
+// noCompleter stands for Complete, which these checks do not use.
+type noCompleter struct{}
+
+func (noCompleter) Complete(_ context.Context, _ gateway.Command) (gateway.Result, error) {
+	return gateway.Result{}, errors.New("not used")
+}
+
+type readyProbe struct{}
+
+func (readyProbe) Ping(context.Context) error { return nil }
+
+func newEvalHub(t *testing.T) *evalHub {
+	t.Helper()
+	clock := testenv.NewFakeClock(time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC))
+	keyStore := testenv.NewKeyStore()
+	keySvc, err := keys.New(keyStore, clock, testenv.Random{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &evalHub{provider: testenv.NewFakeAgentProvider(), store: testenv.NewQuotaStore(), keys: map[shared.APIKeyID]string{}}
+	for _, label := range []string{"eval-tester", "other-tester"} {
+		issued, err := keySvc.Issue(t.Context(), label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.keys[shared.APIKeyID(issued.ID)] = issued.Key
+		if h.owner == "" {
+			h.owner = shared.APIKeyID(issued.ID)
+		}
+	}
+
+	models, err := modelallowlist.New([]modelallowlist.Entry{
+		{Alias: "default", Model: "claude-strong", MaxOutput: 4096},
+		{Alias: "planner", Model: "claude-planner", MaxOutput: 512},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.sealer, err = testenv.Sealer(1); err != nil {
+		t.Fatal(err)
+	}
+	if h.system, h.catalog, err = testenv.PanelV1(); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.DiscardHandler)
+	svc, err := agentstep.New(agentstep.Deps{
+		Accounts: h.store, Turns: testenv.NewAgentTurns(), Provider: h.provider, Limiter: &testenv.FakeLimiter{}, Clock: clock,
+		Random: testenv.Random{}, Models: models, Sealer: h.sealer, Log: log,
+	}, agentstep.Config{
+		Unit: "tokens", Limit: 1_000_000, ReservationTTL: 10 * time.Minute, KeyRetention: 24 * time.Hour, CallTimeout: time.Minute,
+		Profiles: []agentstep.Profile{{Name: values.ProfilePanel, Alias: "planner", Versions: []agentstep.Version{{System: h.system, Catalog: h.catalog}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := keyauth.New(keyStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh, err := connect.NewGateway(noCompleter{}, log, connect.WithAgentStep(svc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := connect.NewRouter(connect.Deps{Log: log, Readiness: readyProbe{}, Auth: auth, Gateway: gh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	h.client = hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
+	return h
+}
+
+func (h *evalHub) other() shared.APIKeyID {
+	for id := range h.keys {
+		if id != h.owner {
+			return id
+		}
+	}
+	return ""
+}
+
+// evalRequest is a step of thread th-eval with the given turns (default: one student text).
+func evalRequest(key string, turns ...*hubv1.AgentTurn) *hubv1.AgentStepRequest {
+	if len(turns) == 0 {
+		turns = []*hubv1.AgentTurn{{Turn: &hubv1.AgentTurn_StudentText{StudentText: "что задали на неделю?"}}}
+	}
+	return &hubv1.AgentStepRequest{
+		IdempotencyKey: key, ThreadId: evalThread, Profile: hubv1.AgentProfile_AGENT_PROFILE_PANEL, CatalogVersion: 1,
+		Base:  &hubv1.AgentBase{Subjects: []*hubv1.AgentSubject{{SubjectId: "s1", Name: "Физика"}}, Today: "2026-10-22", TimeZone: "Europe/Moscow"},
+		Scope: &hubv1.AgentScope{SubjectId: "s1", Screen: hubv1.AgentScreen_AGENT_SCREEN_ASSIGNMENTS},
+		Turns: turns,
+	}
+}
+
+func (h *evalHub) stepAs(t *testing.T, owner shared.APIKeyID, msg *hubv1.AgentStepRequest) (*hubv1.AgentStepResponse, error) {
+	t.Helper()
+	req := connectrpc.NewRequest(msg)
+	req.Header().Set("Authorization", "Bearer "+h.keys[owner])
+	resp, err := h.client.AgentStep(t.Context(), req)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+func (h *evalHub) step(t *testing.T, msg *hubv1.AgentStepRequest) (*hubv1.AgentStepResponse, error) {
+	t.Helper()
+	return h.stepAs(t, h.owner, msg)
+}
+
+// answerWith is a provider answer with the given calls; calls the domain cannot even build are a malformed answer.
+func answerWith(t *testing.T, calls ...[3]string) testenv.AgentProviderStep {
+	t.Helper()
+	u, err := values.NewUsage(900, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]values.ToolCall, 0, len(calls))
+	for _, c := range calls {
+		call, err := values.NewToolCall(c[0], c[1], c[2])
+		if err != nil {
+			return testenv.AgentProviderStep{Answer: values.MalformedAgentAnswer(u)}
+		}
+		out = append(out, call)
+	}
+	return testenv.AgentProviderStep{Answer: values.NewAgentAnswer(out, u, true)}
+}
+
+// echoTurns is the history after resp: the student's text, the sealed calls and one result per call.
+func echoTurns(text string, resp *hubv1.AgentStepResponse, result string) []*hubv1.AgentTurn {
+	results := &hubv1.ToolResults{}
+	for _, c := range resp.GetCalls().GetCalls() {
+		results.Results = append(results.Results, &hubv1.ToolResult{CallId: c.GetCallId(), ResultJson: result})
+	}
+	return []*hubv1.AgentTurn{
+		{Turn: &hubv1.AgentTurn_StudentText{StudentText: text}},
+		{Turn: &hubv1.AgentTurn_Calls{Calls: resp.GetCalls()}},
+		{Turn: &hubv1.AgentTurn_Results{Results: results}},
+	}
+}
+
+func modelCallsOf(t *testing.T, resp *hubv1.AgentStepResponse) []values.ToolCall {
+	t.Helper()
+	var out []values.ToolCall
+	for _, c := range resp.GetCalls().GetCalls() {
+		call, err := values.NewToolCall(c.GetCallId(), c.GetTool(), c.GetArgumentsJson())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, call)
+	}
+	return out
+}
+
+func (h *evalHub) binding(owner shared.APIKeyID) seal.Binding {
+	return seal.Binding{Owner: owner, ThreadID: evalThread, Profile: values.ProfilePanel, CatalogVersion: 1}
+}
+
+// --- fixtures -------------------------------------------------------------------------------------------------------
+
+type evalReplayFixture struct {
+	Name  string `json:"name"`
+	Calls []struct {
+		CallID        string `json:"call_id"`
+		Tool          string `json:"tool"`
+		ArgumentsJSON string `json:"arguments_json"`
+	} `json:"calls"`
+	Hub string `json:"hub"`
+}
+
+type evalInjectionFixture struct {
+	Name      string `json:"name"`
+	Untrusted string `json:"untrusted"`
+}
+
+func loadEvalFixtures[T any](t *testing.T, dir string) []T {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(codeRoot(t), "shared", "testdata", "agent", dir, "*.json"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no fixtures in shared/testdata/agent/%s (%v)", dir, err)
+	}
+	slices.Sort(files)
+	out := make([]T, 0, len(files))
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v T
+		if err := json.Unmarshal(raw, &v); err != nil {
+			t.Fatalf("%s: %v", filepath.Base(f), err)
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// --- checks ---------------------------------------------------------------------------------------------------------
+
+// TestAgentEvalHubReplayFixtures: a recorded answer the catalog accepts comes back unchanged and sealed for the caller
+// and the thread; one it refuses is a non-retryable PROVIDER_ERROR. In both cases the same key answers again without
+// a second provider call (free replay, or the stored failure).
+func TestAgentEvalHubReplayFixtures(t *testing.T) {
+	for _, fx := range loadEvalFixtures[evalReplayFixture](t, "replay") {
+		t.Run(fx.Name, func(t *testing.T) {
+			h := newEvalHub(t)
+			calls := make([][3]string, 0, len(fx.Calls))
+			for _, c := range fx.Calls {
+				calls = append(calls, [3]string{c.CallID, c.Tool, c.ArgumentsJSON})
+			}
+			h.provider.Push(answerWith(t, calls...))
+
+			for attempt := range 2 {
+				resp, err := h.step(t, evalRequest("ag:th-eval:1:1"))
+				switch fx.Hub {
+				case "accept":
+					if err != nil {
+						t.Fatalf("attempt %d: %v", attempt, err)
+					}
+					got := resp.GetCalls().GetCalls()
+					if len(got) != len(fx.Calls) || resp.GetReplayed() != (attempt == 1) {
+						t.Fatalf("attempt %d: response %v", attempt, resp)
+					}
+					for i, c := range fx.Calls {
+						if got[i].GetCallId() != c.CallID || got[i].GetTool() != c.Tool || got[i].GetArgumentsJson() != c.ArgumentsJSON {
+							t.Fatalf("call %d changed on the way: %v", i, got[i])
+						}
+					}
+					if err := h.sealer.Verify(h.binding(h.owner), modelCallsOf(t, resp), resp.GetCalls().GetSeal()); err != nil {
+						t.Fatalf("seal: %v", err)
+					}
+				case "reject":
+					code, d := gwDetail(t, err)
+					if code != connectrpc.CodeUnavailable || d.GetCode() != hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR || d.GetRetryable() {
+						t.Fatalf("attempt %d: %v / %v, want a permanent PROVIDER_ERROR", attempt, code, d)
+					}
+				default:
+					t.Fatalf("unknown expectation %q", fx.Hub)
+				}
+			}
+			if n := len(h.provider.Calls()); n != 1 {
+				t.Fatalf("provider calls = %d, want the repeat served from the ledger", n)
+			}
+		})
+	}
+}
+
+// TestAgentEvalHubForgedSeal: an echo whose calls or binding differ from what the Hub sealed is invalid_argument
+// before the ledger or the provider is touched.
+func TestAgentEvalHubForgedSeal(t *testing.T) {
+	h := newEvalHub(t)
+	h.provider.Push(answerWith(t, [3]string{"toolu_01", "find_lessons", `{"subject":"s1"}`}))
+	first, err := h.step(t, evalRequest("ag:th-eval:1:1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := len(h.store.Ledger(h.owner))
+	foreign, err := testenv.Sealer(7) // a seal made with a secret the Hub does not have
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mutate := func(f func(sc *hubv1.SealedCalls)) *hubv1.AgentStepRequest {
+		turns := echoTurns("что задали на неделю?", first, `{"lessons":[]}`)
+		sc := turns[1].GetCalls()
+		forged := &hubv1.SealedCalls{Seal: bytes.Clone(sc.GetSeal())}
+		for _, c := range sc.GetCalls() {
+			forged.Calls = append(forged.Calls, &hubv1.ToolCall{CallId: c.GetCallId(), Tool: c.GetTool(), ArgumentsJson: c.GetArgumentsJson()})
+		}
+		f(forged)
+		turns[1] = &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_Calls{Calls: forged}}
+		return evalRequest("ag:th-eval:1:2", turns...)
+	}
+	otherThread := evalRequest("ag:th-eval:1:2", echoTurns("что задали на неделю?", first, `{}`)...)
+	otherThread.ThreadId = "th-other"
+
+	cases := map[string]struct {
+		owner shared.APIKeyID
+		msg   *hubv1.AgentStepRequest
+	}{
+		"changed argument":  {h.owner, mutate(func(sc *hubv1.SealedCalls) { sc.Calls[0].ArgumentsJson = `{"subject":"s2"}` })},
+		"changed tool":      {h.owner, mutate(func(sc *hubv1.SealedCalls) { sc.Calls[0].Tool = "list_subjects"; sc.Calls[0].ArgumentsJson = `{}` })},
+		"flipped seal byte": {h.owner, mutate(func(sc *hubv1.SealedCalls) { sc.Seal[len(sc.Seal)-1] ^= 1 })},
+		"truncated seal":    {h.owner, mutate(func(sc *hubv1.SealedCalls) { sc.Seal = sc.Seal[:8] })},
+		"added call": {h.owner, mutate(func(sc *hubv1.SealedCalls) {
+			sc.Calls = append(sc.Calls, &hubv1.ToolCall{CallId: "toolu_99", Tool: "list_subjects", ArgumentsJson: "{}"})
+		})},
+		"another thread": {h.owner, otherThread},
+		"another tester": {h.other(), evalRequest("ag:th-eval:1:2", echoTurns("что задали на неделю?", first, `{}`)...)},
+		"seal of a foreign key": {h.owner, mutate(func(sc *hubv1.SealedCalls) {
+			sc.Calls[0].ArgumentsJson = `{"subject":"s2"}`
+			sc.Seal = foreign.Seal(h.binding(h.owner), []values.ToolCall{mustToolCall(t, sc.Calls[0])})
+		})},
+	}
+	for name, c := range cases {
+		if name == "added call" {
+			// The results must name every echoed call, or the request is refused for its shape before the seal.
+			c.msg.Turns[2].GetResults().Results = append(c.msg.Turns[2].GetResults().Results, &hubv1.ToolResult{CallId: "toolu_99", ResultJson: "{}"})
+		}
+		_, err := h.stepAs(t, c.owner, c.msg)
+		var ce *connectrpc.Error
+		if !errors.As(err, &ce) || ce.Code() != connectrpc.CodeInvalidArgument || ce.Message() != "the seal of echoed calls does not match" {
+			t.Errorf("%s: err = %v, want the seal refused", name, err)
+		}
+	}
+	if len(h.provider.Calls()) != 1 || len(h.store.Ledger(h.owner)) != ledger || len(h.store.Ledger(h.other())) != 0 {
+		t.Fatal("a forged echo reached the provider or the ledger")
+	}
+}
+
+func mustToolCall(t *testing.T, c *hubv1.ToolCall) values.ToolCall {
+	t.Helper()
+	call, err := values.NewToolCall(c.GetCallId(), c.GetTool(), c.GetArgumentsJson())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return call
+}
+
+// golden catalog argument types, for the sweep.
+type evalCatalog struct {
+	Tools []struct {
+		Name      string `json:"name"`
+		Arguments []struct {
+			Name     string   `json:"name"`
+			Type     string   `json:"type"`
+			Required bool     `json:"required"`
+			Values   []string `json:"values"`
+		} `json:"arguments"`
+	} `json:"tools"`
+}
+
+func evalBaseline(typ string, enum []string) any {
+	switch typ {
+	case "id":
+		return "x1"
+	case "ids":
+		return []string{"x1"}
+	case "date":
+		return "2026-10-22"
+	case "enum":
+		return enum[0]
+	case "label", "text":
+		return "a"
+	case "text_list":
+		return []string{"a"}
+	case "plan_steps":
+		return []any{map[string]any{"tool": "list_subjects"}}
+	}
+	return []any{map[string]any{"kind": "text", "question": "q"}} // questions
+}
+
+func evalInjected(typ, text string) any {
+	switch typ {
+	case "ids", "text_list":
+		return []string{text}
+	case "plan_steps":
+		return []any{map[string]any{"tool": "propose_send", "arguments": map[string]any{"assignment": "a1", "version": text}}}
+	case "questions":
+		return []any{map[string]any{"kind": "text", "question": text}}
+	}
+	return text
+}
+
+// TestAgentEvalHubInjectionSweep puts each untrusted text into every argument of every tool and runs the Hub's check
+// of returned calls. Enum and date arguments never take it; an ID argument takes it only when it has the shape of an
+// ID (no spaces): such a call reaches the desktop, whose typed provenance check refuses it
+// (desktop/tests/agent_injection_test.go, same fixtures). Labels, card texts and plan step arguments are free text
+// for the Hub; the desktop checks them.
+func TestAgentEvalHubInjectionSweep(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cat evalCatalog
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		t.Fatal(err)
+	}
+	_, catalog, err := testenv.PanelV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(tool string, args map[string]any) error {
+		b, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call, err := values.NewToolCall("toolu_01", tool, string(b))
+		if err != nil {
+			return err
+		}
+		return catalog.Check(call)
+	}
+
+	for _, fx := range loadEvalFixtures[evalInjectionFixture](t, "injection") {
+		for _, tool := range cat.Tools {
+			base := map[string]any{}
+			for _, a := range tool.Arguments {
+				if a.Required {
+					base[a.Name] = evalBaseline(a.Type, a.Values)
+				}
+			}
+			if err := check(tool.Name, base); err != nil {
+				t.Fatalf("%s: the baseline call is refused: %v", tool.Name, err)
+			}
+			for _, a := range tool.Arguments {
+				args := map[string]any{}
+				for k, v := range base {
+					args[k] = v
+				}
+				args[a.Name] = evalInjected(a.Type, fx.Untrusted)
+				err := check(tool.Name, args)
+				switch a.Type {
+				case "enum", "date":
+					if err == nil {
+						t.Errorf("%s: %s.%s (%s) took the untrusted text", fx.Name, tool.Name, a.Name, a.Type)
+					}
+				case "id", "ids":
+					if (err == nil) != values.ValidID(fx.Untrusted) {
+						t.Errorf("%s: %s.%s: accepted %v, want only an ID-shaped text", fx.Name, tool.Name, a.Name, err == nil)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestAgentEvalHubInjectionThroughTheStep: the untrusted text arrives as the student's text and inside a tool result.
+// The provider gets it only in the history, never in the system prompt, the tool list, the base or the scope; and
+// when the provider obeys it with a call the catalog does not allow (an address argument), the Hub answers a
+// permanent PROVIDER_ERROR and returns no call.
+func TestAgentEvalHubInjectionThroughTheStep(t *testing.T) {
+	for _, fx := range loadEvalFixtures[evalInjectionFixture](t, "injection") {
+		t.Run(fx.Name, func(t *testing.T) {
+			h := newEvalHub(t)
+			q, err := json.Marshal(fx.Untrusted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.provider.Push(
+				answerWith(t, [3]string{"toolu_01", "inspect_upload", `{"upload":"u1"}`}),
+				answerWith(t, [3]string{"toolu_02", "propose_send", `{"assignment":"a1","version":"v1","to":` + string(q) + `}`}),
+			)
+			first, err := h.step(t, evalRequest("ag:th-eval:1:1", &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_StudentText{StudentText: fx.Untrusted}}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = h.step(t, evalRequest("ag:th-eval:1:2", echoTurns(fx.Untrusted, first, `{"note":`+string(q)+`}`)...))
+			code, d := gwDetail(t, err)
+			if code != connectrpc.CodeUnavailable || d.GetCode() != hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR || d.GetRetryable() {
+				t.Fatalf("obedient call: %v / %v, want a permanent PROVIDER_ERROR", code, d)
+			}
+
+			calls := h.provider.Calls()
+			if len(calls) != 2 {
+				t.Fatalf("provider calls = %d", len(calls))
+			}
+			for i, c := range calls {
+				if c.System() != h.system || fmt.Sprint(c.Tools()) != fmt.Sprint(calls[0].Tools()) || len(c.Tools()) != len(h.catalog.Specs()) {
+					t.Fatalf("call %d: the system prompt or the tool list changed", i)
+				}
+				if strings.Contains(c.Base(), fx.Untrusted) || strings.Contains(c.Scope(), fx.Untrusted) {
+					t.Fatalf("call %d: the untrusted text is in the base or the scope", i)
+				}
+			}
+			turns := calls[1].Turns()
+			if len(turns) != 3 || turns[0].Text() != fx.Untrusted || !strings.Contains(turns[2].Results()[0].JSON(), "note") {
+				t.Fatalf("history = %v", turns)
+			}
+		})
+	}
+}

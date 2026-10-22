@@ -1,0 +1,15 @@
+{
+  "name": "02-find-lessons",
+  "about": "Read tool with dates and an enum.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "find_lessons",
+      "arguments_json": "{\"subject\":\"s1\",\"from\":\"2026-10-20\",\"to\":\"2026-10-26\",\"kind\":\"lecture\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "driver:R"
+  }
+}

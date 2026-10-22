@@ -197,7 +197,7 @@ func TestSpecAccessorsReturnCopies(t *testing.T) {
 }
 
 func TestCards(t *testing.T) {
-	plan, err := ParseCall("c1", "show_plan", `{"summary":"x","steps":[{"tool":"make_summary","args":{"recording":"r1"}}]}`)
+	plan, err := ParseCall("c1", "show_plan", `{"summary":"x","steps":[{"tool":"make_summary","arguments":{"recording":"r1"}}]}`)
 	if err != nil {
 		t.Fatal(err)
 	}

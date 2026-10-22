@@ -1,0 +1,15 @@
+{
+  "name": "04-propose-send-unknown-version",
+  "about": "C tool with a version ID nobody showed the planner: refused, never a card.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "propose_send",
+      "arguments_json": "{\"assignment\":\"a1\",\"version\":\"v9\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "refused:unknown_id"
+  }
+}

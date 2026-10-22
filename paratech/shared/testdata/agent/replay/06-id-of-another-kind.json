@@ -1,0 +1,15 @@
+{
+  "name": "06-id-of-another-kind",
+  "about": "A subject ID used as an assignment: typed provenance refuses it.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "delivery_status",
+      "arguments_json": "{\"assignment\":\"s1\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "refused:unknown_id"
+  }
+}

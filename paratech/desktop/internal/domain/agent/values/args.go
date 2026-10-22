@@ -14,11 +14,11 @@ const (
 	MaxArgumentsBytes = 8 << 10 // arguments_json of one call
 	MaxCallIDBytes    = 64
 	MaxIDsPerArg      = 20 // job_status.ids
-	MaxTextListItems  = 8
+	MaxTextListItems  = 10 // 0..10 as the Hub; cannot_do needs one item in either list
 	MaxPlanSteps      = 8
-	MaxQuestions      = 3
+	MaxQuestions      = 3 // stricter than the Hub (5): the planner is told at most 3 per round
 	MinOptions        = 2
-	MaxOptions        = 5
+	MaxOptions        = 6
 )
 
 // Call is a tool call of the planner after strict parsing: a catalog tool and arguments that match its schema.
@@ -47,6 +47,9 @@ func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
 	args, err := parseArgs(spec, []byte(argumentsJSON))
 	if err != nil {
 		return Call{}, err
+	}
+	if t == ToolCannotDo && len(args.TextList("your_part"))+len(args.TextList("our_part")) == 0 {
+		return Call{}, fmt.Errorf("%w: cannot_do needs an item in your_part or our_part", ErrInvalidArguments)
 	}
 	return Call{id: callID, tool: t, args: args}, nil
 }
@@ -371,7 +374,7 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 }
 
 func parseTextList(raw json.RawMessage) ([]Text, error) {
-	items, err := decodeArray(raw, 1, MaxTextListItems)
+	items, err := decodeArray(raw, 0, MaxTextListItems)
 	if err != nil {
 		return nil, err
 	}

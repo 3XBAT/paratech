@@ -202,8 +202,8 @@ func TestAgentAskResultAndSecondStep(t *testing.T) {
 func TestAgentPlanApproval(t *testing.T) {
 	e := newAgentEnv(t)
 	ctx := context.Background()
-	plan := `{"summary":"Разложить файл","steps":[{"tool":"create_folder","args":{"subject":"s1","name":"Лабы"}},` +
-		`{"tool":"place_upload","args":{"upload":"u1","subject":"s1"}}]}`
+	plan := `{"summary":"Разложить файл","steps":[{"tool":"create_folder","arguments":{"subject":"s1","name":"Лабы"}},` +
+		`{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1"}}]}`
 	e.hub.Then(testenv.AgentCall{ID: "toolu_p", Tool: "show_plan", Args: plan}).
 		Then(testenv.AgentCall{ID: "toolu_w1", Tool: "create_folder", Args: `{"subject":"s1","name":"Лабы"}`}).
 		Then(testenv.AgentCall{ID: "toolu_w2", Tool: "place_upload", Args: `{"upload":"u1","subject":"s1","folder":"f1"}`}).
@@ -247,7 +247,7 @@ func TestAgentPlanApproval(t *testing.T) {
 func TestAgentThirdQuestionRound(t *testing.T) {
 	e := newAgentEnv(t)
 	ctx := context.Background()
-	q := `{"questions":[{"kind":"text","text":"Объём работы?"}]}`
+	q := `{"questions":[{"kind":"text","question":"Объём работы?"}]}`
 	e.hub.Then(testenv.AgentCall{ID: "q1", Tool: "ask_questions", Args: q}).
 		Then(testenv.AgentCall{ID: "q2", Tool: "ask_questions", Args: q}).
 		Then(testenv.AgentCall{ID: "q3", Tool: "ask_questions", Args: q}).

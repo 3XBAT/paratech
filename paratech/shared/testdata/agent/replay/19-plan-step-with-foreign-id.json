@@ -1,0 +1,15 @@
+{
+  "name": "19-plan-step-with-foreign-id",
+  "about": "A plan whose step names an ID nobody showed the planner.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "show_plan",
+      "arguments_json": "{\"summary\":\"План: отправить работу.\",\"steps\":[{\"tool\":\"propose_send\",\"arguments\":{\"assignment\":\"a1\",\"version\":\"attacker@example.invalid\"}}]}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "refused:invalid_plan"
+  }
+}
