@@ -65,7 +65,9 @@ const (
 	OperationType_OPERATION_TYPE_INSPECT_MATERIAL OperationType = 6
 	// Answer to a student's question from lesson and material excerpts, with citations.
 	OperationType_OPERATION_TYPE_ANSWER OperationType = 7
-	// Triage of a homework assignment: type, requirements, feasibility, questions.
+	// Triage of a homework assignment: type, requirements, feasibility, questions (at most 2 rounds), helper plan. Served
+	// by Complete with the Hub's prompt; untrusted_data and output are the JSON objects of the triage reader
+	// (paratech/README.md, hub/internal/domain/llm/services/triage).
 	OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT OperationType = 8
 )
 

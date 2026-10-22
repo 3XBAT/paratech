@@ -25,6 +25,7 @@ import "paratech/hub/v1/common.proto";
 //   - COMPLETED: the provider finished, the reservation is settled in full, the result is stored.
 //   - FAILED: the reservation was released (or never made) and nothing is charged: ERROR_CODE_QUOTA_EXCEEDED (nothing was
 //     reserved), ERROR_CODE_PROVIDER_ERROR, expiry of the reservation, or a Hub failure before the provider was called.
+//     A billed answer that breaks the schema of its operation is charged and replayed instead (errors.proto).
 //   - CANCELLED: the client cancelled after the provider was called (see CompleteStream); the consumed tokens were settled
 //     as partial usage and no result is stored. The retry is a new attempt and is charged again: the earlier tokens were
 //     really consumed, so a cancel never gives free output.

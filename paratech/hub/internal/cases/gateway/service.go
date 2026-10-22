@@ -10,6 +10,7 @@ import (
 	"paratech/hub/internal/domain/llm/services/inspect"
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/services/requestlimits"
+	"paratech/hub/internal/domain/llm/services/triage"
 	"paratech/hub/internal/domain/llm/values"
 	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/domain/shared"
@@ -94,8 +95,42 @@ type call struct {
 	spec    values.Spec
 	reserve account.ReserveRequest
 	request values.Request
-	// reader is set for INSPECT_MATERIAL: the answer must pass its schema before it is stored or returned.
-	reader *inspect.Input
+	// reader is set for a quarantined reader (INSPECT_MATERIAL, TRIAGE_ASSIGNMENT): the answer must pass its schema
+	// before it is stored or returned.
+	reader *reader
+}
+
+// reader is the strict answer check of a quarantined reader: canonical turns a valid answer into the form the Hub
+// stores and returns; failed is the stored marker of a charged refusal, which canonical never accepts.
+type reader struct {
+	canonical func(output string) (string, error)
+	failed    string
+}
+
+// newReader checks the input of a reader operation and returns its answer check and the data the model reads; nil
+// for any other operation.
+func newReader(op values.Operation, data string) (*reader, string, error) {
+	switch op {
+	case values.OperationInspectMaterial:
+		in, err := inspect.ParseInput(data)
+		if err != nil {
+			return nil, "", err
+		}
+		return &reader{failed: inspect.FailedOutput, canonical: func(out string) (string, error) {
+			a, err := in.ParseAnswer(out)
+			return a.Encode(), err
+		}}, in.ModelData(), nil
+	case values.OperationTriageAssignment:
+		in, err := triage.ParseInput(data)
+		if err != nil {
+			return nil, "", err
+		}
+		return &reader{failed: triage.FailedOutput, canonical: func(out string) (string, error) {
+			a, err := in.ParseAnswer(out)
+			return a.Encode(), err
+		}}, in.ModelData(), nil
+	}
+	return nil, data, nil
 }
 
 // Complete runs one completion for cmd.Owner. Errors: *RateLimitedError, ErrInvalidRequest, *QuotaExceededError,
@@ -146,7 +181,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	attrs = append(attrs, "reservation", rec.ID.String())
 	if stored.Stored && c.reader != nil {
 		// The stored answer is the canonical one or FailedOutput; a refused answer stays refused, never paid twice.
-		if _, err := c.reader.ParseAnswer(stored.Output); err != nil {
+		if _, err := c.reader.canonical(stored.Output); err != nil {
 			logCall(outcomeProvider, append(attrs, "replayed", true, "input_tokens", stored.InputTokens, "output_tokens", stored.OutputTokens)...)
 			return Result{}, invalidAnswer()
 		}
@@ -192,11 +227,11 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	usage := completion.Usage()
 	output := completion.Output()
 	if c.reader != nil {
-		answer, aerr := c.reader.ParseAnswer(output)
+		canonical, aerr := c.reader.canonical(output)
 		if aerr != nil {
 			// The provider billed this answer: charged and stored as a refusal, so a retry with the key repeats the
 			// refusal instead of paying again (as AgentStep does, ADR-0023). Nothing of the answer leaves the Hub.
-			if _, _, err := s.settle(ctx, c, rec.ID, inspect.FailedOutput, usage); err != nil {
+			if _, _, err := s.settle(ctx, c, rec.ID, c.reader.failed, usage); err != nil {
 				s.log.ErrorContext(ctx, "completion settlement failed", "reservation", rec.ID.String(), "err", err)
 				logCall(outcomeFailed, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output())...)
 				return Result{}, err
@@ -205,7 +240,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 				"stop", completion.Stop().String(), "err", aerr)...)
 			return Result{}, invalidAnswer()
 		}
-		output = answer.Encode()
+		output = canonical
 	}
 	res, quota, err := s.settle(ctx, c, rec.ID, output, usage)
 	if err != nil {
@@ -252,15 +287,10 @@ func (s *Service) validate(cmd Command) (call, error) {
 			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 		}
 	}
-	data := spec.Data()
-	var reader *inspect.Input
-	if spec.Operation() == values.OperationInspectMaterial {
-		in, err := inspect.ParseInput(data)
-		if err != nil {
-			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
-		}
-		// The model reads the checked, re-encoded input; the fingerprint stays over what the client sent.
-		reader, data = &in, in.ModelData()
+	// A reader's model reads the checked, re-encoded input; the fingerprint stays over what the client sent.
+	rd, data, err := newReader(spec.Operation(), spec.Data())
+	if err != nil {
+		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
 	model, maxOutput, err := s.models.Resolve(spec.Alias(), spec.MaxOutput())
 	if err != nil {
@@ -281,7 +311,7 @@ func (s *Service) validate(cmd Command) (call, error) {
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	return call{owner: cmd.Owner, spec: spec, reserve: reserve, request: request, reader: reader}, nil
+	return call{owner: cmd.Owner, spec: spec, reserve: reserve, request: request, reader: rd}, nil
 }
 
 // start opens a new attempt or finds the stored result of the latest one, in one transaction on a context detached

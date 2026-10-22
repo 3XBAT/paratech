@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
+	"paratech/hub/internal/domain/llm/services/strictjson"
 	"paratech/hub/internal/domain/llm/values"
 )
 
@@ -98,23 +98,23 @@ func ParseInput(data string) (Input, error) {
 		seen = map[string]bool{}
 		ids  = map[string]bool{}
 	)
-	err := decodeObject(data, func(key string, d *json.Decoder) error {
+	err := strictjson.DecodeObject(data, func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
 		case keyToday:
-			in.today, ok = readString(d)
+			in.today, ok = strictjson.ReadString(d)
 			if !ok || !values.ValidDate(in.today) {
 				return fmt.Errorf("%w: today must be a date YYYY-MM-DD", ErrInvalidInput)
 			}
 		case keyMaterialText:
-			in.text, ok = readString(d)
+			in.text, ok = strictjson.ReadString(d)
 			if !ok || len(in.text) > MaxTextBytes || strings.TrimSpace(in.text) == "" || strings.ContainsRune(in.text, 0) {
 				return fmt.Errorf("%w: material text must be 1-%d bytes, not blank, without NUL", ErrInvalidInput, MaxTextBytes)
 			}
 		case keySubjects:
 			in.subjects = []Subject{}
-			return readArray(d, func(d *json.Decoder) error {
+			return strictjson.ReadArray(d, func(d *json.Decoder) error {
 				s, err := readSubject(d)
 				if err != nil {
 					return err
@@ -146,14 +146,14 @@ func ParseInput(data string) (Input, error) {
 func readSubject(d *json.Decoder) (Subject, error) {
 	var s Subject
 	seen := map[string]bool{}
-	err := readObject(d, func(key string, d *json.Decoder) error {
+	err := strictjson.ReadObject(d, func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
 		case keyID:
-			s.ID, ok = readString(d)
+			s.ID, ok = strictjson.ReadString(d)
 		case keyName:
-			s.Name, ok = readString(d)
+			s.Name, ok = strictjson.ReadString(d)
 		}
 		if !ok {
 			return fmt.Errorf("%w: a subject is {id, name} of strings", ErrInvalidInput)
@@ -201,7 +201,7 @@ type Answer struct {
 // and one Markdown code fence around the object are tolerated; anything else (another key, free text, an address in
 // any field, a second object) refuses the whole answer.
 func (in Input) ParseAnswer(output string) (Answer, error) {
-	body, ok := unfence(output)
+	body, ok := strictjson.Unfence(output)
 	if !ok {
 		return Answer{}, fmt.Errorf("%w: not valid UTF-8", ErrInvalidAnswer)
 	}
@@ -209,29 +209,29 @@ func (in Input) ParseAnswer(output string) (Answer, error) {
 		a    Answer
 		seen = map[string]bool{}
 	)
-	err := decodeObject(body, func(key string, d *json.Decoder) error {
+	err := strictjson.DecodeObject(body, func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
 		case keyDocKind:
 			var s string
-			s, ok = readString(d)
+			s, ok = strictjson.ReadString(d)
 			ok = ok && slices.Contains(DocKinds(), DocKind(s))
 			a.DocKind = DocKind(s)
 		case keySubject:
 			var present bool
-			a.Subject, present, ok = readNullableString(d)
+			a.Subject, present, ok = strictjson.ReadNullableString(d)
 			ok = ok && (!present || in.candidate(a.Subject))
 		case keyLessonDate:
 			var present bool
-			a.LessonDate, present, ok = readNullableString(d)
+			a.LessonDate, present, ok = strictjson.ReadNullableString(d)
 			ok = ok && (!present || values.ValidDate(a.LessonDate))
 		case keyHasHomework:
-			a.HasHomework, ok = readBool(d)
+			a.HasHomework, ok = strictjson.ReadBool(d)
 		case keyHasTicketList:
-			a.HasTicketList, ok = readBool(d)
+			a.HasTicketList, ok = strictjson.ReadBool(d)
 		case keyMentionsEmail:
-			a.MentionsEmail, ok = readBool(d)
+			a.MentionsEmail, ok = strictjson.ReadBool(d)
 		}
 		if !ok {
 			return fmt.Errorf("%w: %s is not a value of the schema", ErrInvalidAnswer, safeKey(key))
@@ -279,22 +279,6 @@ func orNull(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// unfence trims whitespace and one surrounding Markdown code fence (``` or ```json), which models add despite the
-// prompt; what is inside is checked as strictly as without it.
-func unfence(output string) (string, bool) {
-	if !utf8.ValidString(output) {
-		return "", false
-	}
-	s := strings.TrimSpace(output)
-	if rest, ok := strings.CutPrefix(s, "```"); ok {
-		rest = strings.TrimPrefix(rest, "json")
-		if inner, ok := strings.CutSuffix(rest, "```"); ok && strings.HasPrefix(inner, "\n") {
-			s = strings.TrimSpace(inner)
-		}
-	}
-	return s, true
 }
 
 // safeKey names a schema key in an error; any other key (model text) is not quoted.
