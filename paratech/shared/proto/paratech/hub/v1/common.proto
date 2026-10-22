@@ -37,6 +37,15 @@ enum OperationType {
   OPERATION_TYPE_HOMEWORK_DRAFT = 3;
   // Full readable text of the lesson formatted from the transcript.
   OPERATION_TYPE_LECTURE_TEXT = 4;
+  // One step of the agent planner. Names the ledger entries of GatewayService.AgentStep; never valid in a
+  // CompletionSpec (ADR-0023).
+  OPERATION_TYPE_AGENT_STEP = 5;
+  // Quarantined reading of an uploaded material; the answer holds only enums, IDs, dates and flags (ADR-0022).
+  OPERATION_TYPE_INSPECT_MATERIAL = 6;
+  // Answer to a student's question from lesson and material excerpts, with citations.
+  OPERATION_TYPE_ANSWER = 7;
+  // Triage of a homework assignment: type, requirements, feasibility, questions.
+  OPERATION_TYPE_TRIAGE_ASSIGNMENT = 8;
 }
 
 // QuotaUnit is the unit of a QuotaAmount. The PRD leaves the final quota unit open (section 19, decision 4); the field

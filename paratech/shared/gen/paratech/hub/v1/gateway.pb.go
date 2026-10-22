@@ -21,6 +21,116 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// AgentProfile selects the server prompt, the tool catalog and the model alias. Closed set.
+type AgentProfile int32
+
+const (
+	AgentProfile_AGENT_PROFILE_UNSPECIFIED AgentProfile = 0
+	// The agent panel of the desktop app.
+	AgentProfile_AGENT_PROFILE_PANEL AgentProfile = 1
+)
+
+// Enum value maps for AgentProfile.
+var (
+	AgentProfile_name = map[int32]string{
+		0: "AGENT_PROFILE_UNSPECIFIED",
+		1: "AGENT_PROFILE_PANEL",
+	}
+	AgentProfile_value = map[string]int32{
+		"AGENT_PROFILE_UNSPECIFIED": 0,
+		"AGENT_PROFILE_PANEL":       1,
+	}
+)
+
+func (x AgentProfile) Enum() *AgentProfile {
+	p := new(AgentProfile)
+	*p = x
+	return p
+}
+
+func (x AgentProfile) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AgentProfile) Descriptor() protoreflect.EnumDescriptor {
+	return file_paratech_hub_v1_gateway_proto_enumTypes[0].Descriptor()
+}
+
+func (AgentProfile) Type() protoreflect.EnumType {
+	return &file_paratech_hub_v1_gateway_proto_enumTypes[0]
+}
+
+func (x AgentProfile) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AgentProfile.Descriptor instead.
+func (AgentProfile) EnumDescriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{0}
+}
+
+// AgentScreen is the desktop screen the request was made on.
+type AgentScreen int32
+
+const (
+	AgentScreen_AGENT_SCREEN_UNSPECIFIED AgentScreen = 0
+	AgentScreen_AGENT_SCREEN_TODAY       AgentScreen = 1
+	AgentScreen_AGENT_SCREEN_SUBJECTS    AgentScreen = 2
+	AgentScreen_AGENT_SCREEN_ASSIGNMENTS AgentScreen = 3
+	AgentScreen_AGENT_SCREEN_SCHEDULE    AgentScreen = 4
+	AgentScreen_AGENT_SCREEN_JOURNAL     AgentScreen = 5
+	AgentScreen_AGENT_SCREEN_SETTINGS    AgentScreen = 6
+)
+
+// Enum value maps for AgentScreen.
+var (
+	AgentScreen_name = map[int32]string{
+		0: "AGENT_SCREEN_UNSPECIFIED",
+		1: "AGENT_SCREEN_TODAY",
+		2: "AGENT_SCREEN_SUBJECTS",
+		3: "AGENT_SCREEN_ASSIGNMENTS",
+		4: "AGENT_SCREEN_SCHEDULE",
+		5: "AGENT_SCREEN_JOURNAL",
+		6: "AGENT_SCREEN_SETTINGS",
+	}
+	AgentScreen_value = map[string]int32{
+		"AGENT_SCREEN_UNSPECIFIED": 0,
+		"AGENT_SCREEN_TODAY":       1,
+		"AGENT_SCREEN_SUBJECTS":    2,
+		"AGENT_SCREEN_ASSIGNMENTS": 3,
+		"AGENT_SCREEN_SCHEDULE":    4,
+		"AGENT_SCREEN_JOURNAL":     5,
+		"AGENT_SCREEN_SETTINGS":    6,
+	}
+)
+
+func (x AgentScreen) Enum() *AgentScreen {
+	p := new(AgentScreen)
+	*p = x
+	return p
+}
+
+func (x AgentScreen) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AgentScreen) Descriptor() protoreflect.EnumDescriptor {
+	return file_paratech_hub_v1_gateway_proto_enumTypes[1].Descriptor()
+}
+
+func (AgentScreen) Type() protoreflect.EnumType {
+	return &file_paratech_hub_v1_gateway_proto_enumTypes[1]
+}
+
+func (x AgentScreen) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AgentScreen.Descriptor instead.
+func (AgentScreen) EnumDescriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{1}
+}
+
 // CompletionSpec describes one LLM operation. It is shared by Complete and CompleteStream so that both validate the same
 // way. There is deliberately no field for a URL, host or provider: the model is an alias resolved by the Hub.
 //
@@ -426,6 +536,702 @@ func (*CompleteStreamResponse_Delta) isCompleteStreamResponse_Event() {}
 
 func (*CompleteStreamResponse_Result) isCompleteStreamResponse_Event() {}
 
+type AgentStepRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Same rules as CompletionSpec.idempotency_key; the desktop uses "ag:<thread>:<turn>:<step>".
+	IdempotencyKey string `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	// Opaque desktop ID of the thread (one per subject plus "no subject"); bound into the seal.
+	ThreadId string       `protobuf:"bytes,2,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
+	Profile  AgentProfile `protobuf:"varint,3,opt,name=profile,proto3,enum=paratech.hub.v1.AgentProfile" json:"profile,omitempty"`
+	// Version of the tool catalog the desktop implements; an unknown version is "invalid_argument".
+	CatalogVersion uint32      `protobuf:"varint,4,opt,name=catalog_version,json=catalogVersion,proto3" json:"catalog_version,omitempty"`
+	Base           *AgentBase  `protobuf:"bytes,5,opt,name=base,proto3" json:"base,omitempty"`
+	Scope          *AgentScope `protobuf:"bytes,6,opt,name=scope,proto3" json:"scope,omitempty"`
+	// History of this thread only, oldest first, trimmed by the desktop: at most 64 turns, the whole request at most
+	// 256 KiB.
+	Turns []*AgentTurn `protobuf:"bytes,7,rep,name=turns,proto3" json:"turns,omitempty"`
+	// As CompletionSpec.max_output_tokens: clamped per profile, the basis of the reservation.
+	MaxOutputTokens uint32 `protobuf:"varint,8,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AgentStepRequest) Reset() {
+	*x = AgentStepRequest{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentStepRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentStepRequest) ProtoMessage() {}
+
+func (x *AgentStepRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentStepRequest.ProtoReflect.Descriptor instead.
+func (*AgentStepRequest) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AgentStepRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *AgentStepRequest) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
+	}
+	return ""
+}
+
+func (x *AgentStepRequest) GetProfile() AgentProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return AgentProfile_AGENT_PROFILE_UNSPECIFIED
+}
+
+func (x *AgentStepRequest) GetCatalogVersion() uint32 {
+	if x != nil {
+		return x.CatalogVersion
+	}
+	return 0
+}
+
+func (x *AgentStepRequest) GetBase() *AgentBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *AgentStepRequest) GetScope() *AgentScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *AgentStepRequest) GetTurns() []*AgentTurn {
+	if x != nil {
+		return x.Turns
+	}
+	return nil
+}
+
+func (x *AgentStepRequest) GetMaxOutputTokens() uint32 {
+	if x != nil {
+		return x.MaxOutputTokens
+	}
+	return 0
+}
+
+// AgentBase is the student context shared by all threads (cacheable prefix of the prompt).
+type AgentBase struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Subjects []*AgentSubject        `protobuf:"bytes,1,rep,name=subjects,proto3" json:"subjects,omitempty"`
+	// Local date of the student, "YYYY-MM-DD".
+	Today string `protobuf:"bytes,2,opt,name=today,proto3" json:"today,omitempty"`
+	// IANA time zone name of the student, for example "Europe/Moscow".
+	TimeZone      string `protobuf:"bytes,3,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentBase) Reset() {
+	*x = AgentBase{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentBase) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentBase) ProtoMessage() {}
+
+func (x *AgentBase) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentBase.ProtoReflect.Descriptor instead.
+func (*AgentBase) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AgentBase) GetSubjects() []*AgentSubject {
+	if x != nil {
+		return x.Subjects
+	}
+	return nil
+}
+
+func (x *AgentBase) GetToday() string {
+	if x != nil {
+		return x.Today
+	}
+	return ""
+}
+
+func (x *AgentBase) GetTimeZone() string {
+	if x != nil {
+		return x.TimeZone
+	}
+	return ""
+}
+
+type AgentSubject struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SubjectId string                 `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
+	// Name given by the student; a short label, data for the model, never instructions.
+	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSubject) Reset() {
+	*x = AgentSubject{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSubject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSubject) ProtoMessage() {}
+
+func (x *AgentSubject) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSubject.ProtoReflect.Descriptor instead.
+func (*AgentSubject) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AgentSubject) GetSubjectId() string {
+	if x != nil {
+		return x.SubjectId
+	}
+	return ""
+}
+
+func (x *AgentSubject) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// AgentScope is the context of the current thread: only the current subject, never other subjects.
+type AgentScope struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty for the thread without a subject.
+	SubjectId string      `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
+	Screen    AgentScreen `protobuf:"varint,2,opt,name=screen,proto3,enum=paratech.hub.v1.AgentScreen" json:"screen,omitempty"`
+	// Lesson or assignment open on the screen; empty when none.
+	LessonId      string `protobuf:"bytes,3,opt,name=lesson_id,json=lessonId,proto3" json:"lesson_id,omitempty"`
+	AssignmentId  string `protobuf:"bytes,4,opt,name=assignment_id,json=assignmentId,proto3" json:"assignment_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentScope) Reset() {
+	*x = AgentScope{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentScope) ProtoMessage() {}
+
+func (x *AgentScope) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentScope.ProtoReflect.Descriptor instead.
+func (*AgentScope) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AgentScope) GetSubjectId() string {
+	if x != nil {
+		return x.SubjectId
+	}
+	return ""
+}
+
+func (x *AgentScope) GetScreen() AgentScreen {
+	if x != nil {
+		return x.Screen
+	}
+	return AgentScreen_AGENT_SCREEN_UNSPECIFIED
+}
+
+func (x *AgentScope) GetLessonId() string {
+	if x != nil {
+		return x.LessonId
+	}
+	return ""
+}
+
+func (x *AgentScope) GetAssignmentId() string {
+	if x != nil {
+		return x.AssignmentId
+	}
+	return ""
+}
+
+type AgentTurn struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Turn:
+	//
+	//	*AgentTurn_StudentText
+	//	*AgentTurn_Calls
+	//	*AgentTurn_Results
+	Turn          isAgentTurn_Turn `protobuf_oneof:"turn"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentTurn) Reset() {
+	*x = AgentTurn{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentTurn) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentTurn) ProtoMessage() {}
+
+func (x *AgentTurn) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentTurn.ProtoReflect.Descriptor instead.
+func (*AgentTurn) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *AgentTurn) GetTurn() isAgentTurn_Turn {
+	if x != nil {
+		return x.Turn
+	}
+	return nil
+}
+
+func (x *AgentTurn) GetStudentText() string {
+	if x != nil {
+		if x, ok := x.Turn.(*AgentTurn_StudentText); ok {
+			return x.StudentText
+		}
+	}
+	return ""
+}
+
+func (x *AgentTurn) GetCalls() *SealedCalls {
+	if x != nil {
+		if x, ok := x.Turn.(*AgentTurn_Calls); ok {
+			return x.Calls
+		}
+	}
+	return nil
+}
+
+func (x *AgentTurn) GetResults() *ToolResults {
+	if x != nil {
+		if x, ok := x.Turn.(*AgentTurn_Results); ok {
+			return x.Results
+		}
+	}
+	return nil
+}
+
+type isAgentTurn_Turn interface {
+	isAgentTurn_Turn()
+}
+
+type AgentTurn_StudentText struct {
+	// What the student typed; at most 4 KiB. Data for the model, bounded by limits rather than trusted.
+	StudentText string `protobuf:"bytes,1,opt,name=student_text,json=studentText,proto3,oneof"`
+}
+
+type AgentTurn_Calls struct {
+	// Echo of an earlier AgentStepResponse.calls; refused when the seal does not match.
+	Calls *SealedCalls `protobuf:"bytes,2,opt,name=calls,proto3,oneof"`
+}
+
+type AgentTurn_Results struct {
+	// Results of executing the echoed calls of the previous turn.
+	Results *ToolResults `protobuf:"bytes,3,opt,name=results,proto3,oneof"`
+}
+
+func (*AgentTurn_StudentText) isAgentTurn_Turn() {}
+
+func (*AgentTurn_Calls) isAgentTurn_Turn() {}
+
+func (*AgentTurn_Results) isAgentTurn_Turn() {}
+
+// SealedCalls is a set of tool calls produced by the Hub. The seal is an HMAC computed by the Hub over the caller's API
+// key ID, thread_id, profile, catalog_version and the calls in order; its first byte is the key version (ADR-0023).
+type SealedCalls struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Calls         []*ToolCall            `protobuf:"bytes,1,rep,name=calls,proto3" json:"calls,omitempty"`
+	Seal          []byte                 `protobuf:"bytes,2,opt,name=seal,proto3" json:"seal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SealedCalls) Reset() {
+	*x = SealedCalls{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SealedCalls) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SealedCalls) ProtoMessage() {}
+
+func (x *SealedCalls) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SealedCalls.ProtoReflect.Descriptor instead.
+func (*SealedCalls) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SealedCalls) GetCalls() []*ToolCall {
+	if x != nil {
+		return x.Calls
+	}
+	return nil
+}
+
+func (x *SealedCalls) GetSeal() []byte {
+	if x != nil {
+		return x.Seal
+	}
+	return nil
+}
+
+// ToolCall is one call proposed by the model. UNTRUSTED: the desktop validates the tool and its arguments against the
+// catalog and its own state before acting (hard rule 3).
+type ToolCall struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	CallId string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	// Tool name from the catalog of catalog_version.
+	Tool string `protobuf:"bytes,2,opt,name=tool,proto3" json:"tool,omitempty"`
+	// JSON object, at most 8 KiB.
+	ArgumentsJson string `protobuf:"bytes,3,opt,name=arguments_json,json=argumentsJson,proto3" json:"arguments_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolCall) Reset() {
+	*x = ToolCall{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolCall) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolCall) ProtoMessage() {}
+
+func (x *ToolCall) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolCall.ProtoReflect.Descriptor instead.
+func (*ToolCall) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ToolCall) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *ToolCall) GetTool() string {
+	if x != nil {
+		return x.Tool
+	}
+	return ""
+}
+
+func (x *ToolCall) GetArgumentsJson() string {
+	if x != nil {
+		return x.ArgumentsJson
+	}
+	return ""
+}
+
+type ToolResults struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Results       []*ToolResult          `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolResults) Reset() {
+	*x = ToolResults{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolResults) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolResults) ProtoMessage() {}
+
+func (x *ToolResults) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolResults.ProtoReflect.Descriptor instead.
+func (*ToolResults) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ToolResults) GetResults() []*ToolResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
+// ToolResult is what the desktop reports for one call. Size-limited data for the model, never instructions.
+type ToolResult struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	CallId string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	// JSON, at most 16 KiB.
+	ResultJson    string `protobuf:"bytes,2,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	IsError       bool   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolResult) Reset() {
+	*x = ToolResult{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolResult) ProtoMessage() {}
+
+func (x *ToolResult) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolResult.ProtoReflect.Descriptor instead.
+func (*ToolResult) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ToolResult) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *ToolResult) GetResultJson() string {
+	if x != nil {
+		return x.ResultJson
+	}
+	return ""
+}
+
+func (x *ToolResult) GetIsError() bool {
+	if x != nil {
+		return x.IsError
+	}
+	return false
+}
+
+type AgentStepResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 1 to 4 calls, sealed by the Hub.
+	Calls         *SealedCalls   `protobuf:"bytes,1,opt,name=calls,proto3" json:"calls,omitempty"`
+	Usage         *Usage         `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	Quota         *QuotaSnapshot `protobuf:"bytes,3,opt,name=quota,proto3" json:"quota,omitempty"`
+	ReservationId string         `protobuf:"bytes,4,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	// True when this answer is the stored result of an earlier call with the same idempotency key.
+	Replayed      bool `protobuf:"varint,5,opt,name=replayed,proto3" json:"replayed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentStepResponse) Reset() {
+	*x = AgentStepResponse{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentStepResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentStepResponse) ProtoMessage() {}
+
+func (x *AgentStepResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentStepResponse.ProtoReflect.Descriptor instead.
+func (*AgentStepResponse) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *AgentStepResponse) GetCalls() *SealedCalls {
+	if x != nil {
+		return x.Calls
+	}
+	return nil
+}
+
+func (x *AgentStepResponse) GetUsage() *Usage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *AgentStepResponse) GetQuota() *QuotaSnapshot {
+	if x != nil {
+		return x.Quota
+	}
+	return nil
+}
+
+func (x *AgentStepResponse) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *AgentStepResponse) GetReplayed() bool {
+	if x != nil {
+		return x.Replayed
+	}
+	return false
+}
+
 var File_paratech_hub_v1_gateway_proto protoreflect.FileDescriptor
 
 const file_paratech_hub_v1_gateway_proto_rawDesc = "" +
@@ -454,10 +1260,72 @@ const file_paratech_hub_v1_gateway_proto_rawDesc = "" +
 	"\x16CompleteStreamResponse\x12\x16\n" +
 	"\x05delta\x18\x01 \x01(\tH\x00R\x05delta\x12;\n" +
 	"\x06result\x18\x02 \x01(\v2!.paratech.hub.v1.CompletionResultH\x00R\x06resultB\a\n" +
-	"\x05event2\xc6\x01\n" +
+	"\x05event\"\xfb\x02\n" +
+	"\x10AgentStepRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x1b\n" +
+	"\tthread_id\x18\x02 \x01(\tR\bthreadId\x127\n" +
+	"\aprofile\x18\x03 \x01(\x0e2\x1d.paratech.hub.v1.AgentProfileR\aprofile\x12'\n" +
+	"\x0fcatalog_version\x18\x04 \x01(\rR\x0ecatalogVersion\x12.\n" +
+	"\x04base\x18\x05 \x01(\v2\x1a.paratech.hub.v1.AgentBaseR\x04base\x121\n" +
+	"\x05scope\x18\x06 \x01(\v2\x1b.paratech.hub.v1.AgentScopeR\x05scope\x120\n" +
+	"\x05turns\x18\a \x03(\v2\x1a.paratech.hub.v1.AgentTurnR\x05turns\x12*\n" +
+	"\x11max_output_tokens\x18\b \x01(\rR\x0fmaxOutputTokens\"y\n" +
+	"\tAgentBase\x129\n" +
+	"\bsubjects\x18\x01 \x03(\v2\x1d.paratech.hub.v1.AgentSubjectR\bsubjects\x12\x14\n" +
+	"\x05today\x18\x02 \x01(\tR\x05today\x12\x1b\n" +
+	"\ttime_zone\x18\x03 \x01(\tR\btimeZone\"A\n" +
+	"\fAgentSubject\x12\x1d\n" +
+	"\n" +
+	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xa3\x01\n" +
+	"\n" +
+	"AgentScope\x12\x1d\n" +
+	"\n" +
+	"subject_id\x18\x01 \x01(\tR\tsubjectId\x124\n" +
+	"\x06screen\x18\x02 \x01(\x0e2\x1c.paratech.hub.v1.AgentScreenR\x06screen\x12\x1b\n" +
+	"\tlesson_id\x18\x03 \x01(\tR\blessonId\x12#\n" +
+	"\rassignment_id\x18\x04 \x01(\tR\fassignmentId\"\xa8\x01\n" +
+	"\tAgentTurn\x12#\n" +
+	"\fstudent_text\x18\x01 \x01(\tH\x00R\vstudentText\x124\n" +
+	"\x05calls\x18\x02 \x01(\v2\x1c.paratech.hub.v1.SealedCallsH\x00R\x05calls\x128\n" +
+	"\aresults\x18\x03 \x01(\v2\x1c.paratech.hub.v1.ToolResultsH\x00R\aresultsB\x06\n" +
+	"\x04turn\"R\n" +
+	"\vSealedCalls\x12/\n" +
+	"\x05calls\x18\x01 \x03(\v2\x19.paratech.hub.v1.ToolCallR\x05calls\x12\x12\n" +
+	"\x04seal\x18\x02 \x01(\fR\x04seal\"^\n" +
+	"\bToolCall\x12\x17\n" +
+	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x12\n" +
+	"\x04tool\x18\x02 \x01(\tR\x04tool\x12%\n" +
+	"\x0earguments_json\x18\x03 \x01(\tR\rargumentsJson\"D\n" +
+	"\vToolResults\x125\n" +
+	"\aresults\x18\x01 \x03(\v2\x1b.paratech.hub.v1.ToolResultR\aresults\"a\n" +
+	"\n" +
+	"ToolResult\x12\x17\n" +
+	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x1f\n" +
+	"\vresult_json\x18\x02 \x01(\tR\n" +
+	"resultJson\x12\x19\n" +
+	"\bis_error\x18\x03 \x01(\bR\aisError\"\xee\x01\n" +
+	"\x11AgentStepResponse\x122\n" +
+	"\x05calls\x18\x01 \x01(\v2\x1c.paratech.hub.v1.SealedCallsR\x05calls\x12,\n" +
+	"\x05usage\x18\x02 \x01(\v2\x16.paratech.hub.v1.UsageR\x05usage\x124\n" +
+	"\x05quota\x18\x03 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota\x12%\n" +
+	"\x0ereservation_id\x18\x04 \x01(\tR\rreservationId\x12\x1a\n" +
+	"\breplayed\x18\x05 \x01(\bR\breplayed*F\n" +
+	"\fAgentProfile\x12\x1d\n" +
+	"\x19AGENT_PROFILE_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13AGENT_PROFILE_PANEL\x10\x01*\xcc\x01\n" +
+	"\vAgentScreen\x12\x1c\n" +
+	"\x18AGENT_SCREEN_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12AGENT_SCREEN_TODAY\x10\x01\x12\x19\n" +
+	"\x15AGENT_SCREEN_SUBJECTS\x10\x02\x12\x1c\n" +
+	"\x18AGENT_SCREEN_ASSIGNMENTS\x10\x03\x12\x19\n" +
+	"\x15AGENT_SCREEN_SCHEDULE\x10\x04\x12\x18\n" +
+	"\x14AGENT_SCREEN_JOURNAL\x10\x05\x12\x19\n" +
+	"\x15AGENT_SCREEN_SETTINGS\x10\x062\x9a\x02\n" +
 	"\x0eGatewayService\x12O\n" +
 	"\bComplete\x12 .paratech.hub.v1.CompleteRequest\x1a!.paratech.hub.v1.CompleteResponse\x12c\n" +
-	"\x0eCompleteStream\x12&.paratech.hub.v1.CompleteStreamRequest\x1a'.paratech.hub.v1.CompleteStreamResponse0\x01B\xac\x01\n" +
+	"\x0eCompleteStream\x12&.paratech.hub.v1.CompleteStreamRequest\x1a'.paratech.hub.v1.CompleteStreamResponse0\x01\x12R\n" +
+	"\tAgentStep\x12!.paratech.hub.v1.AgentStepRequest\x1a\".paratech.hub.v1.AgentStepResponseB\xac\x01\n" +
 	"\x13com.paratech.hub.v1B\fGatewayProtoP\x01Z)paratech/shared/gen/paratech/hub/v1;hubv1\xa2\x02\x03PHX\xaa\x02\x0fParatech.Hub.V1\xca\x02\x0fParatech\\Hub\\V1\xe2\x02\x1bParatech\\Hub\\V1\\GPBMetadata\xea\x02\x11Paratech::Hub::V1b\x06proto3"
 
 var (
@@ -472,35 +1340,63 @@ func file_paratech_hub_v1_gateway_proto_rawDescGZIP() []byte {
 	return file_paratech_hub_v1_gateway_proto_rawDescData
 }
 
-var file_paratech_hub_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_paratech_hub_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_paratech_hub_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_paratech_hub_v1_gateway_proto_goTypes = []any{
-	(*CompletionSpec)(nil),         // 0: paratech.hub.v1.CompletionSpec
-	(*CompletionResult)(nil),       // 1: paratech.hub.v1.CompletionResult
-	(*CompleteRequest)(nil),        // 2: paratech.hub.v1.CompleteRequest
-	(*CompleteResponse)(nil),       // 3: paratech.hub.v1.CompleteResponse
-	(*CompleteStreamRequest)(nil),  // 4: paratech.hub.v1.CompleteStreamRequest
-	(*CompleteStreamResponse)(nil), // 5: paratech.hub.v1.CompleteStreamResponse
-	(OperationType)(0),             // 6: paratech.hub.v1.OperationType
-	(*Usage)(nil),                  // 7: paratech.hub.v1.Usage
-	(*QuotaSnapshot)(nil),          // 8: paratech.hub.v1.QuotaSnapshot
+	(AgentProfile)(0),              // 0: paratech.hub.v1.AgentProfile
+	(AgentScreen)(0),               // 1: paratech.hub.v1.AgentScreen
+	(*CompletionSpec)(nil),         // 2: paratech.hub.v1.CompletionSpec
+	(*CompletionResult)(nil),       // 3: paratech.hub.v1.CompletionResult
+	(*CompleteRequest)(nil),        // 4: paratech.hub.v1.CompleteRequest
+	(*CompleteResponse)(nil),       // 5: paratech.hub.v1.CompleteResponse
+	(*CompleteStreamRequest)(nil),  // 6: paratech.hub.v1.CompleteStreamRequest
+	(*CompleteStreamResponse)(nil), // 7: paratech.hub.v1.CompleteStreamResponse
+	(*AgentStepRequest)(nil),       // 8: paratech.hub.v1.AgentStepRequest
+	(*AgentBase)(nil),              // 9: paratech.hub.v1.AgentBase
+	(*AgentSubject)(nil),           // 10: paratech.hub.v1.AgentSubject
+	(*AgentScope)(nil),             // 11: paratech.hub.v1.AgentScope
+	(*AgentTurn)(nil),              // 12: paratech.hub.v1.AgentTurn
+	(*SealedCalls)(nil),            // 13: paratech.hub.v1.SealedCalls
+	(*ToolCall)(nil),               // 14: paratech.hub.v1.ToolCall
+	(*ToolResults)(nil),            // 15: paratech.hub.v1.ToolResults
+	(*ToolResult)(nil),             // 16: paratech.hub.v1.ToolResult
+	(*AgentStepResponse)(nil),      // 17: paratech.hub.v1.AgentStepResponse
+	(OperationType)(0),             // 18: paratech.hub.v1.OperationType
+	(*Usage)(nil),                  // 19: paratech.hub.v1.Usage
+	(*QuotaSnapshot)(nil),          // 20: paratech.hub.v1.QuotaSnapshot
 }
 var file_paratech_hub_v1_gateway_proto_depIdxs = []int32{
-	6, // 0: paratech.hub.v1.CompletionSpec.operation_type:type_name -> paratech.hub.v1.OperationType
-	7, // 1: paratech.hub.v1.CompletionResult.usage:type_name -> paratech.hub.v1.Usage
-	8, // 2: paratech.hub.v1.CompletionResult.quota:type_name -> paratech.hub.v1.QuotaSnapshot
-	0, // 3: paratech.hub.v1.CompleteRequest.spec:type_name -> paratech.hub.v1.CompletionSpec
-	1, // 4: paratech.hub.v1.CompleteResponse.result:type_name -> paratech.hub.v1.CompletionResult
-	0, // 5: paratech.hub.v1.CompleteStreamRequest.spec:type_name -> paratech.hub.v1.CompletionSpec
-	1, // 6: paratech.hub.v1.CompleteStreamResponse.result:type_name -> paratech.hub.v1.CompletionResult
-	2, // 7: paratech.hub.v1.GatewayService.Complete:input_type -> paratech.hub.v1.CompleteRequest
-	4, // 8: paratech.hub.v1.GatewayService.CompleteStream:input_type -> paratech.hub.v1.CompleteStreamRequest
-	3, // 9: paratech.hub.v1.GatewayService.Complete:output_type -> paratech.hub.v1.CompleteResponse
-	5, // 10: paratech.hub.v1.GatewayService.CompleteStream:output_type -> paratech.hub.v1.CompleteStreamResponse
-	9, // [9:11] is the sub-list for method output_type
-	7, // [7:9] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	18, // 0: paratech.hub.v1.CompletionSpec.operation_type:type_name -> paratech.hub.v1.OperationType
+	19, // 1: paratech.hub.v1.CompletionResult.usage:type_name -> paratech.hub.v1.Usage
+	20, // 2: paratech.hub.v1.CompletionResult.quota:type_name -> paratech.hub.v1.QuotaSnapshot
+	2,  // 3: paratech.hub.v1.CompleteRequest.spec:type_name -> paratech.hub.v1.CompletionSpec
+	3,  // 4: paratech.hub.v1.CompleteResponse.result:type_name -> paratech.hub.v1.CompletionResult
+	2,  // 5: paratech.hub.v1.CompleteStreamRequest.spec:type_name -> paratech.hub.v1.CompletionSpec
+	3,  // 6: paratech.hub.v1.CompleteStreamResponse.result:type_name -> paratech.hub.v1.CompletionResult
+	0,  // 7: paratech.hub.v1.AgentStepRequest.profile:type_name -> paratech.hub.v1.AgentProfile
+	9,  // 8: paratech.hub.v1.AgentStepRequest.base:type_name -> paratech.hub.v1.AgentBase
+	11, // 9: paratech.hub.v1.AgentStepRequest.scope:type_name -> paratech.hub.v1.AgentScope
+	12, // 10: paratech.hub.v1.AgentStepRequest.turns:type_name -> paratech.hub.v1.AgentTurn
+	10, // 11: paratech.hub.v1.AgentBase.subjects:type_name -> paratech.hub.v1.AgentSubject
+	1,  // 12: paratech.hub.v1.AgentScope.screen:type_name -> paratech.hub.v1.AgentScreen
+	13, // 13: paratech.hub.v1.AgentTurn.calls:type_name -> paratech.hub.v1.SealedCalls
+	15, // 14: paratech.hub.v1.AgentTurn.results:type_name -> paratech.hub.v1.ToolResults
+	14, // 15: paratech.hub.v1.SealedCalls.calls:type_name -> paratech.hub.v1.ToolCall
+	16, // 16: paratech.hub.v1.ToolResults.results:type_name -> paratech.hub.v1.ToolResult
+	13, // 17: paratech.hub.v1.AgentStepResponse.calls:type_name -> paratech.hub.v1.SealedCalls
+	19, // 18: paratech.hub.v1.AgentStepResponse.usage:type_name -> paratech.hub.v1.Usage
+	20, // 19: paratech.hub.v1.AgentStepResponse.quota:type_name -> paratech.hub.v1.QuotaSnapshot
+	4,  // 20: paratech.hub.v1.GatewayService.Complete:input_type -> paratech.hub.v1.CompleteRequest
+	6,  // 21: paratech.hub.v1.GatewayService.CompleteStream:input_type -> paratech.hub.v1.CompleteStreamRequest
+	8,  // 22: paratech.hub.v1.GatewayService.AgentStep:input_type -> paratech.hub.v1.AgentStepRequest
+	5,  // 23: paratech.hub.v1.GatewayService.Complete:output_type -> paratech.hub.v1.CompleteResponse
+	7,  // 24: paratech.hub.v1.GatewayService.CompleteStream:output_type -> paratech.hub.v1.CompleteStreamResponse
+	17, // 25: paratech.hub.v1.GatewayService.AgentStep:output_type -> paratech.hub.v1.AgentStepResponse
+	23, // [23:26] is the sub-list for method output_type
+	20, // [20:23] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_paratech_hub_v1_gateway_proto_init() }
@@ -513,18 +1409,24 @@ func file_paratech_hub_v1_gateway_proto_init() {
 		(*CompleteStreamResponse_Delta)(nil),
 		(*CompleteStreamResponse_Result)(nil),
 	}
+	file_paratech_hub_v1_gateway_proto_msgTypes[10].OneofWrappers = []any{
+		(*AgentTurn_StudentText)(nil),
+		(*AgentTurn_Calls)(nil),
+		(*AgentTurn_Results)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_paratech_hub_v1_gateway_proto_rawDesc), len(file_paratech_hub_v1_gateway_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   6,
+			NumEnums:      2,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_paratech_hub_v1_gateway_proto_goTypes,
 		DependencyIndexes: file_paratech_hub_v1_gateway_proto_depIdxs,
+		EnumInfos:         file_paratech_hub_v1_gateway_proto_enumTypes,
 		MessageInfos:      file_paratech_hub_v1_gateway_proto_msgTypes,
 	}.Build()
 	File_paratech_hub_v1_gateway_proto = out.File
