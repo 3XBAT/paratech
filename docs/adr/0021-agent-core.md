@@ -41,7 +41,8 @@ impersonal voice («План: …», never «я»). Tools are the existing use c
   only a caption. «Да» is a click in `input/wails` that records the approved step list in the thread. Every later write
   in the request must match an approved step (tool and IDs), else `is_error`; it is never executed. Each approved
   step runs at most once.
-- **Replacing a ready result** is class C (confirm card bound to that action), not U, until previous versions are kept.
+- **Replacing a ready result** stays U but always needs an approved plan (TASK-123); its Undo can only stop the job
+  while it runs, the old result is not kept.
 - **Provenance** (typed): an ID in arguments passes only if it appeared in a field of the same ID type in the
   scope/base or in tool results of this thread, else `is_error`.
 - **Budget per request** (`thread`): ≤ 8 steps, ≤ 4 calls per step, ≤ 6 writes, ≤ 1 paid job without a plan,
@@ -49,11 +50,13 @@ impersonal voice («План: …», never «я»). Tools are the existing use c
 - **Journal and Undo** (`agent/action`): `PENDING → DONE | FAILED`, `DONE → UNDOING → UNDONE | UNDO_REFUSED`,
   `PROPOSED` for C (status read from the proposal). Two short transactions (record, then outcome); the use case between
   them is idempotent by a key namespaced by thread and action, not `call_id` alone (ARCH-23, no new ADR-0004
-  exception). Compensation is idempotent and checks the target version: changed since → `UNDO_REFUSED`. At start
-  `PENDING → UNKNOWN` (no Undo), `UNDOING` is retried.
+  exception). Compensation is idempotent and checks the target version in the same transaction as the change:
+  changed since → `UNDO_REFUSED` (reason `changed`, `result_ready` or `cannot_stop`); already compensated → `UNDONE`.
+  PENDING stores an intent (target, its version before, prior state); at start it is settled: effect found → `DONE`,
+  target unchanged → `FAILED`, else `UNKNOWN` (paid jobs always). `UNDOING` is retried. A call ID runs once per request.
 - **Compensations**: subject/folder → removed if empty; placed upload → back to «Входящие» (file kept); link →
-  unlinked; lesson info / due date → old values stored in the record; paid job running → `jobrunner.Cancel`, finished →
-  result removed.
+  unlinked; lesson info / due date → old values stored in the record (D7); paid job running → `jobrunner.Cancel`,
+  finished → refused (`result_ready`, no previous version kept).
 - **Cards** (`agent/values`): Plan, Questions (round 1..2), Progress (job), Result, Confirm (proposal/preview only),
   ActionLine (Undo), Answer (verified citations), CannotDo. Texts are desktop templates; model text only in
   `show_plan/reply/cannot_do` fields, ≤ 300 characters, no HTML.
@@ -73,5 +76,6 @@ is unchanged.
 - Desktop migration (next free number): `agent_threads`, `agent_turns`, `agent_steps`, `agent_actions`.
 - Policy tests are CI-blocking (ADR-0022): C never runs, ID without typed provenance, write outside the approved plan,
   3rd question round, budget, and `input/agent` interfaces expose no `Confirm/Execute/Delete/Send` method.
-- Open: keeping previous versions of a paid result (so its replacement can become U with Undo); where they are kept is
-  decided in the task that builds it.
+- Open: keeping previous versions of a paid result (so Undo of a finished replacement can restore it); where they
+  are kept is decided in the task that builds it.
+- `input/agent.Actions` implements the journal's Compensator and Resolver ports over the same use cases (app wires it).
