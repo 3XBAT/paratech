@@ -309,27 +309,32 @@ type LatestTranscripts interface {
 	LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error)
 }
 
-// MaterialTexts reads a library material and its text (TASK-122). Implemented by cases/library (library.Service,
-// wired by the app). A missing material wraps shared.ErrNotFound, a removed one material.ErrRemoved; a text that is not
-// read material.ErrTextNotExtracted, an unreadable one material.ErrTextUnreadable, damaged bytes material.ErrDamaged.
+// MaterialTexts reads a library material and its text for its summary and homework search (PRD sections 9 and 10,
+// TASK-122). Implemented by cases/library (library.Service, wired by the app).
 type MaterialTexts interface {
+	// MaterialText returns the material and its text (PRD section 9). A missing material wraps shared.ErrNotFound, a
+	// removed one material.ErrRemoved; a text that is not read material.ErrTextNotExtracted, an unreadable one
+	// material.ErrTextUnreadable, damaged bytes material.ErrDamaged.
 	MaterialText(ctx context.Context, id shared.MaterialID) (*material.Material, material.Text, error)
 }
 
-// MaterialLookup finds a library material (cases/library, wired by the app).
+// MaterialLookup finds a library material before its work starts (PRD section 9, TASK-122). Implemented by
+// cases/library, wired by the app.
 type MaterialLookup interface {
+	// Material returns the material in any status (PRD section 9); a missing one is an error of the library.
 	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 }
 
 // MaterialAssignments finds the assignments extracted from a library material, like GetBySource and
-// ListByTranscript for a transcript (TASK-122). Implemented by the sqlite adapter. A port of its own so that the fakes
-// of AssignmentRepository stay small.
+// ListByTranscript for a transcript (PRD section 10, TASK-122). Implemented by the sqlite adapter. A port of its own
+// so that the fakes of AssignmentRepository stay small.
 type MaterialAssignments interface {
-	// GetByMaterialSource loads the assignment of item index of the extraction of material m; none wraps
-	// shared.ErrNotFound.
+	// GetByMaterialSource loads the assignment of item index of the extraction of material m (PRD section 10); none
+	// wraps shared.ErrNotFound.
 	GetByMaterialSource(ctx context.Context, m shared.MaterialID, index int) (*assignment.Assignment, error)
 
-	// ListByMaterial loads the assignments extracted from material m in the order of the answer; none is empty.
+	// ListByMaterial loads the assignments extracted from material m in the order of the answer (PRD section 10);
+	// none is an empty list.
 	ListByMaterial(ctx context.Context, m shared.MaterialID) ([]*assignment.Assignment, error)
 }
 
