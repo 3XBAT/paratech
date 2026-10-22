@@ -16,24 +16,26 @@ const api: AgentApi = agentApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
 /** Ctrl+K focuses the input of the panel from anywhere in the window. */
-function useFocusShortcut(input: RefObject<HTMLInputElement | null>) {
+function useFocusShortcut(input: RefObject<HTMLInputElement | null>, reveal?: () => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isFocusPanelKey(e)) {
         e.preventDefault();
-        input.current?.focus();
+        // A closed panel opens first; the input can take focus once it is shown again.
+        reveal?.();
+        setTimeout(() => input.current?.focus(), 0);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [input]);
+  }, [input, reveal]);
 }
 
 /**
  * The agent panel: talks to the core through the bindings only. The Hub is the core's business; the panel holds no
  * keys and keeps nothing in browser storage.
  */
-export function AgentPanel(props: { page: PageId; assignmentId: string }) {
+export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?: () => void }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState("");
@@ -42,7 +44,7 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
   const ctx = contextFor(props.page, props.assignmentId, removedOn === props.page);
   const input = useRef<HTMLInputElement>(null);
   const askId = useRef(0);
-  useFocusShortcut(input);
+  useFocusShortcut(input, props.reveal);
 
   // A hint chip elsewhere in the window puts its text into the input; sending stays with the user.
   useEffect(() => {
@@ -50,12 +52,14 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
       const text = draftText(e);
       if (text !== "") {
         setDraft(text.slice(0, 4000));
-        input.current?.focus();
+        // A closed panel opens first; the input can take focus once it is shown again.
+        props.reveal?.();
+        setTimeout(() => input.current?.focus(), 0);
       }
     };
     window.addEventListener(draftEvent, onDraft);
     return () => window.removeEventListener(draftEvent, onDraft);
-  }, []);
+  }, [props.reveal]);
 
   useEffect(() => {
     let off: (() => void) | undefined;
