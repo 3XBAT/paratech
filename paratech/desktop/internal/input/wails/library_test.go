@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -295,8 +294,9 @@ func TestLibraryImportFile(t *testing.T) {
 
 func TestLibraryImportDroppedFile(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir() // absolute on every OS; the fake reader never touches it
-	good := filepath.Join(dir, "Лекция 1.DOCX")
+	// Windows paths on every OS: the check is string work and the fake reader never touches the disk.
+	dir := `C:\Users\student\Документы`
+	good := dir + `\Лекция 1.DOCX`
 	files := &memFiles{files: map[string][]byte{good: []byte("bytes")}}
 	s, uc, logs := newLibraryBinding(t, "", files)
 	res, err := s.ImportDroppedFile(ctx, good)
@@ -307,7 +307,6 @@ func TestLibraryImportDroppedFile(t *testing.T) {
 		t.Fatalf("upload %q %q, limit %d", uc.upload.Name, uc.upload.Data, files.limit)
 	}
 
-	sep := string(filepath.Separator)
 	tests := []struct {
 		name string
 		path string
@@ -315,19 +314,29 @@ func TestLibraryImportDroppedFile(t *testing.T) {
 	}{
 		{"empty", "", ErrLibraryDroppedPath},
 		{"relative", "Лекция.docx", ErrLibraryDroppedPath},
-		{"relative up", ".." + sep + "Лекция.docx", ErrLibraryDroppedPath},
-		{"traversal", dir + sep + ".." + sep + "Лекция.docx", ErrLibraryDroppedPath},
-		{"dot segment", dir + sep + "." + sep + "Лекция.docx", ErrLibraryDroppedPath},
+		{"relative up", `..\Лекция.docx`, ErrLibraryDroppedPath},
+		{"traversal", dir + `\..\Лекция.docx`, ErrLibraryDroppedPath},
+		{"traversal, slashes", "C:/Users/../Лекция.docx", ErrLibraryDroppedPath},
+		{"dot segment", dir + `\.\Лекция.docx`, ErrLibraryDroppedPath},
 		{"network share", `\\server\share\Лекция.docx`, ErrLibraryDroppedPath},
 		{"network share, slashes", "//server/share/Лекция.docx", ErrLibraryDroppedPath},
+		{"network share, mixed", `\/server/share/Лекция.docx`, ErrLibraryDroppedPath},
+		{"network share, mixed other way", `/\server\share\Лекция.docx`, ErrLibraryDroppedPath},
 		{"device path", `\\?\C:\Users\student\Лекция.docx`, ErrLibraryDroppedPath},
-		{"alternate stream", filepath.Join(dir, "a.docx:hidden.txt"), ErrLibraryDroppedPath},
-		{"nul byte", filepath.Join(dir, "a\x00.docx"), ErrLibraryDroppedPath},
-		{"not UTF-8", filepath.Join(dir, "a\xff.docx"), ErrLibraryDroppedPath},
-		{"too long", filepath.Join(dir, strings.Repeat("a", maxDroppedPath)+".docx"), ErrLibraryDroppedPath},
-		{"executable", filepath.Join(dir, "setup.exe"), ErrLibraryUnsupported},
-		{"no extension", filepath.Join(dir, "README"), ErrLibraryUnsupported},
-		{"shortcut", filepath.Join(dir, "Лекция.docx.lnk"), ErrLibraryUnsupported},
+		{"device namespace", `\\.\C:\Users\student\Лекция.docx`, ErrLibraryDroppedPath},
+		{"rooted without drive", `\Users\student\Лекция.docx`, ErrLibraryDroppedPath},
+		{"rooted without drive, slash", "/server/Лекция.docx", ErrLibraryDroppedPath},
+		{"drive-relative", `C:Лекция.docx`, ErrLibraryDroppedPath},
+		{"non-letter drive", `1:\Лекция.docx`, ErrLibraryDroppedPath},
+		{"non-ASCII drive", `Ж:\Лекция.docx`, ErrLibraryDroppedPath},
+		{"alternate stream", dir + `\a.docx:hidden.txt`, ErrLibraryDroppedPath},
+		{"nul byte", dir + "\\a\x00.docx", ErrLibraryDroppedPath},
+		{"not UTF-8", dir + "\\a\xff.docx", ErrLibraryDroppedPath},
+		{"too long", dir + `\` + strings.Repeat("a", maxDroppedPath) + ".docx", ErrLibraryDroppedPath},
+		{"executable", dir + `\setup.exe`, ErrLibraryUnsupported},
+		{"no extension", dir + `\README`, ErrLibraryUnsupported},
+		{"dot in folder only", `C:\Users\a.docx\README`, ErrLibraryUnsupported},
+		{"shortcut", dir + `\Лекция.docx.lnk`, ErrLibraryUnsupported},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -343,6 +352,12 @@ func TestLibraryImportDroppedFile(t *testing.T) {
 				t.Fatalf("the log has the path: %s", logs.String())
 			}
 		})
+	}
+
+	for _, ok := range []string{`c:\a.pdf`, "D:/Учёба/a.txt", `Z:\x/y\Слайды.PPTX`} {
+		if err := droppedPathError(ok); err != nil {
+			t.Fatalf("droppedPathError(%q) = %v, want nil", ok, err)
+		}
 	}
 
 	// The reader's refusal (a directory, a device, a missing file) and the size limit hold as for the dialog.

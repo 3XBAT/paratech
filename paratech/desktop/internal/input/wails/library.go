@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -285,27 +284,45 @@ func (s *LibraryService) ImportDroppedFile(ctx context.Context, path string) (Li
 	return s.importPath(ctx, path)
 }
 
-// droppedPathError checks a path the page passed; the error is the page's text.
+// droppedPathError checks a path the page passed; the error is the page's text. Only a drive-letter path ("C:\...")
+// is accepted: an allow-list, because Windows reads mixed separators ("\/host/share") as UNC and "\x" as rooted on
+// the current drive. The check is plain string work, so it means the same on every OS the tests run on.
 func droppedPathError(path string) error {
 	if path == "" || len(path) > maxDroppedPath || !utf8.ValidString(path) || strings.ContainsRune(path, 0) ||
-		!filepath.IsAbs(path) || strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
+		!driveLetterPath(path) {
 		return ErrLibraryDroppedPath
 	}
-	// A volume name is "C:" here; any other colon names an alternate data stream.
-	rest := path[len(filepath.VolumeName(path)):]
+	// Past "C:", any colon names an alternate data stream.
+	rest := path[2:]
 	if strings.ContainsRune(rest, ':') {
 		return ErrLibraryDroppedPath
 	}
-	for _, part := range strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' }) {
+	for _, part := range strings.FieldsFunc(rest, isPathSeparator) {
 		if part == ".." || part == "." {
 			return ErrLibraryDroppedPath
 		}
 	}
-	if !droppedExtension(strings.ToLower(filepath.Ext(path))) {
+	name := baseName(path)
+	ext := ""
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		ext = name[i:]
+	}
+	if !droppedExtension(strings.ToLower(ext)) {
 		return ErrLibraryUnsupported
 	}
 	return nil
 }
+
+// driveLetterPath reports whether path starts with an ASCII drive letter, a colon and a separator.
+func driveLetterPath(path string) bool {
+	if len(path) < 3 || path[1] != ':' || !isPathSeparator(rune(path[2])) {
+		return false
+	}
+	c := path[0] | 0x20 // ASCII lower case
+	return c >= 'a' && c <= 'z'
+}
+
+func isPathSeparator(r rune) bool { return r == '/' || r == '\\' }
 
 // importPath reads the file at path and imports it.
 func (s *LibraryService) importPath(ctx context.Context, path string) (LibraryImport, error) {
