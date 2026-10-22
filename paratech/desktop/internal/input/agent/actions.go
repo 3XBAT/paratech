@@ -210,11 +210,20 @@ func (a *Actions) createFolder(ctx context.Context, call values.Call) (prepared,
 	if err != nil {
 		return prepared{}, err
 	}
+	before := sub.Version()
 	return prepared{
-		intent: action.Intent{Target: subRef, Before: sub.Version(), Name: string(name)},
+		intent: action.Intent{Target: subRef, Before: before, Name: string(name)},
 		run: func(ctx context.Context) (effect, error) {
 			var e effect
 			err := a.tx.Do(ctx, func(ctx context.Context) error {
+				// Rebase trusts Before: a subject changed since then must not be built on.
+				now, err := a.subject(ctx, sub.ID())
+				if err != nil {
+					return err
+				}
+				if now.Version() != before {
+					return errMovedOn
+				}
 				f, err := a.library.CreateFolder(ctx, sub.ID(), string(name))
 				if err != nil {
 					return err
@@ -557,7 +566,8 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 }
 
 // Apply applies a compensation if its target is still at expectedVersion, in one transaction with that check
-// (agentjournal.Compensator), and returns the target's version after it (0 when it is gone). A job is cancelled
+// (agentjournal.Compensator), and returns the target's version after it (0 when it is gone or was already
+// compensated, so nothing rebases on it). A job is cancelled
 // through the job runner: a finished one is action.ErrResultReady.
 func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVersion int64) (int64, error) {
 	if v, ok := c.(action.CancelJob); ok {
@@ -573,8 +583,7 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 			return err
 		}
 		if t.Compensated {
-			after = t.Version
-			return nil
+			return nil // nothing applied: after stays 0, so no earlier action rebases on it
 		}
 		if t.Version != expectedVersion {
 			return action.ErrTargetChanged

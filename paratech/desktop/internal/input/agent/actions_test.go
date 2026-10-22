@@ -278,6 +278,79 @@ func TestApplyComparesTheVersion(t *testing.T) {
 	}
 }
 
+// hookTx runs before once ahead of the next transaction: a change by the student between prepare and run.
+type hookTx struct {
+	Tx
+	before func()
+}
+
+func (tx *hookTx) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	if f := tx.before; f != nil {
+		tx.before = nil
+		f()
+	}
+	return tx.Tx.Do(ctx, fn)
+}
+
+// create_folder compares and swaps on the subject version it saw: a subject changed between prepare and run gets no
+// folder, so «Отменить всё» cannot rebase create_subject over the student's change.
+func TestCreateFolderComparesTheSubjectVersion(t *testing.T) {
+	w := newWorld(t)
+	act(t, w, writeCall(t, "c1", values.ToolCreateSubject, `{"name":"Химия"}`))
+	folders := len(w.lib.subjects["s-new1"].Folders())
+	w.actions.tx = &hookTx{Tx: w.tx, before: func() { bump(w.lib.subjects["s-new1"]) }}
+
+	r, e := act(t, w, writeCall(t, "c2", values.ToolCreateFolder, `{"subject":"s-new1","name":"Лабы"}`))
+	if !r.out.Result.IsError || e.Status != action.StatusFailed || e.CanUndo {
+		t.Fatalf("result = %+v, entry %+v", r.out.Result, e)
+	}
+	if n := len(w.lib.subjects["s-new1"].Folders()); n != folders {
+		t.Fatalf("folders = %d: a folder was created on a changed subject", n)
+	}
+
+	undone, err := w.journal.UndoRequest(t.Context(), req.Thread, req.Turn)
+	if err != nil || len(undone) != 1 || undone[0].Status != action.StatusUndoRefused || undone[0].NoUndo != action.NoUndoChanged {
+		t.Fatalf("UndoRequest = %+v, %v", undone, err)
+	}
+	if _, ok := w.lib.subjects["s-new1"]; !ok {
+		t.Fatal("the subject the student changed was removed")
+	}
+}
+
+// Apply on a target already compensated applies nothing and returns version 0, so no earlier action rebases on it.
+func TestApplyOnACompensatedTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		tool   values.Tool
+		args   string
+		revert func(t *testing.T, w *world)
+	}{
+		{"folder removed by the student", values.ToolCreateFolder, `{"subject":"s1","name":"Лабы"}`,
+			func(t *testing.T, w *world) {
+				if err := w.lib.RemoveFolder(t.Context(), "s1", "f-new1"); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		{"due set back by the student", values.ToolEditDue, `{"assignment":"a1","due":"2026-10-30"}`,
+			func(_ *testing.T, w *world) {
+				v := w.assignments.views["a1"]
+				v.Due, v.Version = time.Date(2026, 10, 24, 15, 30, 0, 0, time.UTC), v.Version+1
+				w.assignments.views["a1"] = v
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			_, e := act(t, w, writeCall(t, "c1", tt.tool, tt.args))
+			tt.revert(t, w)
+			after, err := w.actions.Apply(t.Context(), e.Compensation, 1)
+			if err != nil || after != 0 {
+				t.Fatalf("Apply = %d, %v, want 0 and no error", after, err)
+			}
+		})
+	}
+}
+
 // A paid job: running -> cancelled (UNDONE); finished -> its result stays (result_ready); not stoppable -> cannot_stop;
 // failed by itself -> nothing left to undo.
 func TestUndoOfAPaidJob(t *testing.T) {

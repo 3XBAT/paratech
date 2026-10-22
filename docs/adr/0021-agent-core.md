@@ -54,7 +54,8 @@ impersonal voice («План: …», never «я»). Tools are the existing use c
   is idempotent and checks the target version in the same transaction as the change: changed since → `UNDO_REFUSED`
   (reason `changed`, `result_ready` or `cannot_stop`); already compensated → `UNDONE`. «Отменить всё» goes newest
   first; an earlier action follows its target's version through the undo of a later action of the request that
-  started from the version it left (`action.Rebase`), a student change in between still refuses. PENDING stores an
+  started from the version it left (`action.Rebase`), a student change in between still refuses; this holds because
+  every U tool compare-and-swaps on its intent's `Before` in the transaction of its change. PENDING stores an
   intent (target, its version before, prior state, for lesson info / due date also the new values); at start it is
   settled: effect found → `DONE`, target unchanged → `FAILED`, else `UNKNOWN` (paid jobs always). `UNDOING` is retried
   at start and by «Отменить» after 1 min. A paid job that already existed is not the agent's (`FAILED`, no Undo).

@@ -321,7 +321,7 @@ func (a *Action) TargetRef() values.Ref {
 // target («Отменить всё» goes newest first): the later one started from exactly the version this one left (its intent
 // Before), so the version its compensation left (after) is the one this Undo expects now. A change by the student in
 // between breaks that chain and the Undo is still refused. later must be the last undo applied to the target. It
-// reports whether the expected version moved.
+// reports whether the expected version moved. Sound only because every U tool compare-and-swaps on its Intent.Before.
 func (a *Action) Rebase(later *Action, after int64) bool {
 	target := a.TargetRef()
 	switch {
