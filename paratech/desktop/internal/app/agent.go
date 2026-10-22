@@ -13,6 +13,7 @@ import (
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/senddelivery"
 	agentloop "paratech/desktop/internal/input/agent"
+	"paratech/desktop/internal/input/wails"
 )
 
 // agentReads are the use cases the agent reads through: the library and the knowledge base, the recordings and jobs,
@@ -26,8 +27,8 @@ type agentReads struct {
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, ADR-0021): the steps of a request on the Hub's AgentStep, the
-// action journal and the Driver that runs the read tools. The panel comes with TASK-119; until then the Driver's
-// updates go nowhere and nothing calls it. Today and the zone of the base come from the student's clock.
+// action journal and the Driver that runs the read tools; its updates go to the agent panel of the UI (TASK-119).
+// Today and the zone of the base come from the student's clock.
 func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, log *slog.Logger) error {
 	facts, err := agentloop.NewFacts(reads.knowledge)
 	if err != nil {
@@ -50,8 +51,9 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent journal: %w", err)
 	}
+	c.panel = wails.NewAgentPanel(log)
 	c.driver, err = agentloop.New(agentloop.Deps{
-		Turns: c.agent, Sink: noPanel{}, Library: reads.library, Knowledge: reads.knowledge, Activity: reads.activity,
+		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Knowledge: reads.knowledge, Activity: reads.activity,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Clock: e.local, Log: log,
 	})
 	if err != nil {
@@ -67,7 +69,16 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	return nil
 }
 
-// noPanel drops the Driver's updates until the panel binding exists (TASK-119).
-type noPanel struct{}
+// panelSink hands the Driver's updates to the agent panel of the UI (TASK-119); mapping only, as input/wails does not
+// import input/agent.
+type panelSink struct {
+	panel *wails.AgentPanel
+}
 
-func (noPanel) Publish(agentloop.Update) {}
+// Publish forwards u.
+func (s panelSink) Publish(u agentloop.Update) {
+	s.panel.Publish(wails.AgentUpdate{
+		Thread: u.Thread, Turn: u.Turn, Scope: u.Scope, Status: u.Status, StopReason: u.StopReason, Cards: u.Cards,
+		Problem: string(u.Problem),
+	})
+}

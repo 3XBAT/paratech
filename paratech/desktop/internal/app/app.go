@@ -38,7 +38,7 @@ type App struct {
 	// shell is nil in headless mode.
 	shell *wails.Shell
 
-	// startCtx ends when Close begins: it stops a startup that is still running.
+	// startCtx ends when Close begins: it stops a startup that is still running and the agent's requests.
 	startCtx    context.Context
 	cancelStart context.CancelFunc
 	starting    sync.WaitGroup
@@ -200,6 +200,8 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 			return wails.Core{}, errors.Join(err, c.close(), closeLog(), lock.Release())
 		}
 	}
+	// The agent's requests outlive the Wails calls that start them; they end with the app (Close, then the Driver's).
+	c.ui.Agent.Life = a.startCtx
 	a.core = c
 	a.life = c.newLifecycle(a.log, a.env.stopTimeout,
 		closer{name: "storage", close: c.close}, closer{name: "log file", close: closeLog},
