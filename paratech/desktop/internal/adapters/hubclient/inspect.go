@@ -18,8 +18,8 @@ const opInspect = "hubclient: inspect material"
 // InspectMaterial runs the quarantined reader of a library material (OPERATION_TYPE_INSPECT_MATERIAL, ADR-0022; the
 // library.MaterialReader port) with the URL, key, limits and error classes of Complete. It sends no instructions and
 // no model alias: the Hub uses its own prompt and alias. The returned output is untrusted model text; the only thing
-// to do with it is inspection.Request.Parse. A schema refusal of the Hub is a permanent ErrProvider that also matches
-// inspection.ErrInvalidAnswer (charged; the next attempt needs a new key, which a new attempt of the request has).
+// to do with it is inspection.Request.Parse. A permanent ErrProvider (the Hub's charged schema refusal or an uncharged model refusal) also matches
+// inspection.ErrInvalidAnswer and uses up an attempt; the next attempt has a new key.
 func (c *Client) InspectMaterial(ctx context.Context, req inspection.Request) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("%s: %w", opInspect, err)
@@ -56,7 +56,7 @@ func (c *Client) InspectMaterial(ctx context.Context, req inspection.Request) (s
 		}
 		e := mapCallError(opInspect, err)
 		if errors.Is(e, ErrProvider) && errors.Is(e, backoff.ErrPermanent) {
-			// The Hub's schema check refused the answer: the domain's refusal of an answer, charged.
+			// A permanent provider error counts as a refused answer (charged or not, the attempt is used).
 			e.extra = append(e.extra, inspection.ErrInvalidAnswer)
 		}
 		return "", e
