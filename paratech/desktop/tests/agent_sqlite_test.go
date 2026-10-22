@@ -47,7 +47,9 @@ func (b baseSubjects) BaseSubjects(context.Context) ([]values.BaseSubject, error
 // zeroFacts knows nothing of a call: the cost is unknown (a paid write needs a plan), no ready result, no triage.
 type zeroFacts struct{}
 
-func (zeroFacts) Facts(context.Context, values.Call) (thread.Facts, error) { return thread.Facts{}, nil }
+func (zeroFacts) Facts(context.Context, values.Call) (thread.Facts, error) {
+	return thread.Facts{}, nil
+}
 
 type agentEnv struct {
 	db      *sqlite.DB
