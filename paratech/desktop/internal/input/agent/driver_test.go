@@ -60,9 +60,10 @@ func TestDriverRunsReadCallsAndShowsCards(t *testing.T) {
 	}
 	d.Wait()
 
-	submitted, cancelled, _ := turns.report()
-	if len(submitted) != 1 || len(submitted[0].Outcomes) != 1 || len(cancelled) != 0 {
-		t.Fatalf("submitted %+v, cancelled %v", submitted, cancelled)
+	rep := turns.report()
+	submitted := rep.submitted
+	if len(submitted) != 1 || len(submitted[0].Outcomes) != 1 || len(rep.cancelled) != 0 || len(rep.stopped) != 0 {
+		t.Fatalf("report %+v", rep)
 	}
 	out := submitted[0].Outcomes[0]
 	if out.Result.CallID != "c1" || out.Result.IsError || !strings.Contains(out.Result.ResultJSON, `"id":"s1"`) ||
@@ -106,7 +107,7 @@ func TestDriverAnswersUnavailableTools(t *testing.T) {
 				t.Fatal(err)
 			}
 			d.Wait()
-			submitted, _, _ := turns.report()
+			submitted := turns.report().submitted
 			if len(submitted) != 1 {
 				t.Fatalf("submitted %+v", submitted)
 			}
@@ -118,7 +119,8 @@ func TestDriverAnswersUnavailableTools(t *testing.T) {
 	}
 }
 
-// Errors of the step use case reach the panel as an enum, never as text.
+// Errors of the step use case reach the panel as an enum, never as text, in an update that names the request the
+// button acted on.
 func TestDriverPublishesProblems(t *testing.T) {
 	tests := []struct {
 		err  error
@@ -140,9 +142,36 @@ func TestDriverPublishesProblems(t *testing.T) {
 			t.Fatal(err)
 		}
 		d.Wait()
-		if ups := sink.all(); len(ups) != 1 || ups[0].Problem != tt.want {
+		if ups := sink.all(); len(ups) != 1 || ups[0].Problem != tt.want || ups[0].Thread != th1 || ups[0].Turn != 1 {
 			t.Errorf("%v: updates %+v", tt.err, ups)
 		}
+	}
+}
+
+// A failed Ask has no thread yet: its update names the scope; a failed Submit names the request of the step.
+func TestDriverProblemNamesTheRequest(t *testing.T) {
+	scope := subjectScope(t, "s1")
+	turns := (&scriptedTurns{}).then(agentturn.Step{}, thread.ErrTurnInProgress)
+	d, sink := newDriver(t, newReads(), turns)
+	if err := d.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: "привет"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	if ups := sink.all(); len(ups) != 1 || ups[0].Problem != ProblemBusy || ups[0].Scope != scope || ups[0].Thread != "" {
+		t.Fatalf("Ask updates %+v", ups)
+	}
+
+	first := step(thread.StatusExecuting, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)})
+	first.Scope = scope
+	turns = (&scriptedTurns{}).then(first, nil).then(agentturn.Step{}, errors.New("disk full"))
+	d, sink = newDriver(t, newReads(), turns)
+	if err := d.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: "мои предметы"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	ups := sink.all()
+	if len(ups) != 2 || ups[1].Problem != ProblemFailed || ups[1].Thread != th1 || ups[1].Turn != 1 || ups[1].Scope != scope {
+		t.Fatalf("Submit updates %+v", ups)
 	}
 }
 
@@ -187,8 +216,9 @@ func TestDriverOfflineStopAndContinue(t *testing.T) {
 	}
 }
 
-// Cancelling the ctx while a call runs ends the loop: the call is not reported, the request is cancelled with a
-// context that still works, and no goroutine is left (Wait returns; run with -race).
+// Cancelling the ctx while a call runs ends the loop: the call is not reported, the request stops continuable (not
+// cancelled) through a context that still works, the panel gets the stopped request, and no goroutine is left (Wait
+// returns; run with -race).
 func TestDriverCancelViaContext(t *testing.T) {
 	r := newReads()
 	r.library.block, r.library.started = true, make(chan struct{})
@@ -203,19 +233,37 @@ func TestDriverCancelViaContext(t *testing.T) {
 	cancel()
 	d.Wait()
 
-	submitted, cancelled, cancelErrs := turns.report()
-	if len(submitted) != 0 || len(cancelled) != 1 || cancelled[0] != (agentturn.TurnRef{Thread: th1, Turn: 1}) {
-		t.Fatalf("submitted %+v, cancelled %+v", submitted, cancelled)
+	rep := turns.report()
+	if len(rep.submitted) != 0 || len(rep.cancelled) != 0 || len(rep.stopped) != 1 ||
+		rep.stopped[0] != (agentturn.TurnRef{Thread: th1, Turn: 1}) {
+		t.Fatalf("report %+v", rep)
 	}
-	if cancelErrs[0] != nil {
-		t.Fatalf("Cancel got a dead context: %v", cancelErrs[0])
+	if rep.opCtx[0] != nil {
+		t.Fatalf("Interrupt got a dead context: %v", rep.opCtx[0])
 	}
-	if ups := sink.all(); len(ups) != 1 {
+	ups := sink.all()
+	if len(ups) != 2 || ups[1].Status != thread.StatusStopped || ups[1].StopReason != values.StopOffline {
 		t.Fatalf("updates = %+v", ups)
 	}
 }
 
-// Close cancels a running loop, waits for it and refuses new requests.
+// The ctx ends while the step use case answers with calls: they are never run, the request stops continuable.
+func TestDriverContextEndsBeforeCalls(t *testing.T) {
+	r := newReads()
+	turns := (&scriptedTurns{}).then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	turns.beforeAnswer = cancel
+	d, _ := newDriver(t, r, turns)
+	if err := d.Ask(ctx, agentturn.AskInput{Text: "мои предметы"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	if rep := turns.report(); len(rep.submitted) != 0 || len(rep.cancelled) != 0 || len(rep.stopped) != 1 {
+		t.Fatalf("report %+v", rep)
+	}
+}
+
+// Close cancels a running loop, waits for it and refuses new requests; the request stays continuable.
 func TestDriverClose(t *testing.T) {
 	r := newReads()
 	r.library.block, r.library.started = true, make(chan struct{})
@@ -226,8 +274,8 @@ func TestDriverClose(t *testing.T) {
 	}
 	<-r.library.started
 	d.Close()
-	if _, cancelled, _ := turns.report(); len(cancelled) != 1 {
-		t.Fatalf("cancelled = %v", cancelled)
+	if rep := turns.report(); len(rep.stopped) != 1 || len(rep.cancelled) != 0 {
+		t.Fatalf("report %+v", rep)
 	}
 	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Ask after Close = %v", err)
@@ -243,9 +291,8 @@ func TestDriverLoopIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Wait()
-	submitted, cancelled, _ := turns.report()
-	if len(submitted) != thread.MaxSteps || len(cancelled) != 1 {
-		t.Fatalf("submitted %d, cancelled %d", len(submitted), len(cancelled))
+	if rep := turns.report(); len(rep.submitted) != thread.MaxSteps || len(rep.cancelled) != 1 || len(rep.stopped) != 0 {
+		t.Fatalf("submitted %d, cancelled %d, stopped %d", len(rep.submitted), len(rep.cancelled), len(rep.stopped))
 	}
 }
 

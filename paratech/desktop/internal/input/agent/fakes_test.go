@@ -221,8 +221,11 @@ type scriptedTurns struct {
 	errs      []error          // errs[i] goes with steps[i]
 	submitted []agentturn.SubmitInput
 	cancelled []agentturn.TurnRef
-	cancelCtx []error // ctx.Err() seen by Cancel
+	stopped   []agentturn.TurnRef // by Interrupt
+	opCtx     []error             // ctx.Err() seen by Cancel and Interrupt
 	endless   agentturn.Step
+	// beforeAnswer, when set, runs before an answer of the script is returned (a ctx ending meanwhile).
+	beforeAnswer func()
 }
 
 func (s *scriptedTurns) then(st agentturn.Step, err error) *scriptedTurns {
@@ -234,6 +237,9 @@ func (s *scriptedTurns) then(st agentturn.Step, err error) *scriptedTurns {
 func (s *scriptedTurns) next() (agentturn.Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.beforeAnswer != nil {
+		s.beforeAnswer()
+	}
 	if len(s.endless.Calls) > 0 {
 		return s.endless, nil
 	}
@@ -288,15 +294,36 @@ func (s *scriptedTurns) Cancel(ctx context.Context, ref agentturn.TurnRef) (agen
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cancelled = append(s.cancelled, ref)
-	s.cancelCtx = append(s.cancelCtx, ctx.Err())
+	s.opCtx = append(s.opCtx, ctx.Err())
 	return agentturn.Step{Thread: ref.Thread, Turn: ref.Turn, Status: thread.StatusCancelled}, nil
 }
 
-func (s *scriptedTurns) report() ([]agentturn.SubmitInput, []agentturn.TurnRef, []error) {
+// Interrupt stops the request as offline, as agentturn does.
+func (s *scriptedTurns) Interrupt(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]agentturn.SubmitInput(nil), s.submitted...), append([]agentturn.TurnRef(nil), s.cancelled...),
-		append([]error(nil), s.cancelCtx...)
+	s.stopped = append(s.stopped, ref)
+	s.opCtx = append(s.opCtx, ctx.Err())
+	return agentturn.Step{
+		Thread: ref.Thread, Turn: ref.Turn, Status: thread.StatusStopped, StopReason: values.StopOffline,
+		Cards: []values.Card{values.StoppedCard{Reason: values.StopOffline}},
+	}, nil
+}
+
+// turnsReport is what the Driver reported to the step use case.
+type turnsReport struct {
+	submitted          []agentturn.SubmitInput
+	cancelled, stopped []agentturn.TurnRef
+	opCtx              []error
+}
+
+func (s *scriptedTurns) report() turnsReport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return turnsReport{
+		submitted: slices.Clone(s.submitted), cancelled: slices.Clone(s.cancelled), stopped: slices.Clone(s.stopped),
+		opCtx: slices.Clone(s.opCtx),
+	}
 }
 
 // chanSink collects the updates; tests read them after Driver.Wait.

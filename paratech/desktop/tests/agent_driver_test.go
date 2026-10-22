@@ -341,8 +341,9 @@ func TestDriverOfflineStopsAndContinues(t *testing.T) {
 	}
 }
 
-// Cancelling the ctx while a read runs cancels the request, so the thread is free for the next one.
-func TestDriverCancelLeavesThreadUsable(t *testing.T) {
+// The ctx ends while a read runs (the app closes): the call is answered not_done and the request stops as «нет
+// связи», continuable like a lost Hub call; «Продолжить» sends the not_done result and the request goes on.
+func TestDriverContextEndLeavesRequestContinuable(t *testing.T) {
 	e := newDriverEnv(t)
 	e.knowledge.block, e.knowledge.started = true, make(chan struct{})
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "find_lessons", Args: `{}`})
@@ -359,12 +360,24 @@ func TestDriverCancelLeavesThreadUsable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn, _ := th.Turn(); turn.Status() != thread.StatusCancelled || len(turn.OpenCalls()) != 0 {
-		t.Fatalf("request after cancel = %s, open %v", turn.Status(), turn.OpenCalls())
+	turn, _ := th.Turn()
+	if turn.Status() != thread.StatusStopped || turn.StopReason() != values.StopOffline || len(turn.OpenCalls()) != 0 {
+		t.Fatalf("request after the ctx ended = %s %s, open %v", turn.Status(), turn.StopReason(), turn.OpenCalls())
 	}
+	if up := e.sink.last(t); up.Status != thread.StatusStopped || up.StopReason != values.StopOffline {
+		t.Fatalf("last update = %+v", up)
+	}
+
 	e.hub.Then(testenv.AgentCall{ID: "c2", Tool: "reply", Args: `{"text":"Готово"}`})
-	if up := e.ask(t, physicsScope(t), "ещё раз"); up.Status != thread.StatusDone || up.Turn != 2 {
-		t.Fatalf("next request = %+v", up)
+	if err := e.driver.Continue(t.Context(), agentturn.TurnRef{Thread: "th1", Turn: 1}); err != nil {
+		t.Fatal(err)
+	}
+	e.driver.Wait()
+	if up := e.sink.last(t); up.Status != thread.StatusDone || up.Turn != 1 {
+		t.Fatalf("after Continue = %+v", up)
+	}
+	if got := e.resultsOf(t, len(e.hub.Requests())-1); len(got) != 1 || got[0] != `{"error":"not_done"}` {
+		t.Fatalf("results after Continue = %v", got)
 	}
 }
 

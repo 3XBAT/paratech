@@ -15,18 +15,19 @@ import (
 
 // Operation names, for error texts.
 const (
-	opNew      = "agentturn: new"
-	opAsk      = "agentturn: ask"
-	opSubmit   = "agentturn: submit"
-	opApprove  = "agentturn: approve plan"
-	opRevise   = "agentturn: revise plan"
-	opAnswer   = "agentturn: answer questions"
-	opStop     = "agentturn: stop"
-	opContinue = "agentturn: continue"
-	opRetry    = "agentturn: retry"
-	opRestart  = "agentturn: restart"
-	opCancel   = "agentturn: cancel"
-	opRecover  = "agentturn: recover"
+	opNew       = "agentturn: new"
+	opAsk       = "agentturn: ask"
+	opSubmit    = "agentturn: submit"
+	opApprove   = "agentturn: approve plan"
+	opRevise    = "agentturn: revise plan"
+	opAnswer    = "agentturn: answer questions"
+	opStop      = "agentturn: stop"
+	opContinue  = "agentturn: continue"
+	opRetry     = "agentturn: retry"
+	opRestart   = "agentturn: restart"
+	opCancel    = "agentturn: cancel"
+	opInterrupt = "agentturn: interrupt"
+	opRecover   = "agentturn: recover"
 )
 
 // MaxOutputTokens is the output cap of one planner step; the Hub raises it to its floor and clamps it to its cap.
@@ -370,6 +371,36 @@ func (s *Service) Cancel(ctx context.Context, ref TurnRef) (Step, error) {
 		return Step{}, fmt.Errorf("%s: %w", opCancel, err)
 	}
 	return s.drive(ctx, c, opCancel)
+}
+
+// Interrupt closes a request whose calls the Driver will not run because its context ended (the app closes): calls
+// without results are answered as not done and the request stops as «нет связи», so «Продолжить» goes on as after
+// Recover. A request the student already stopped keeps its reason. Only «Отмена» cancels a request.
+func (s *Service) Interrupt(ctx context.Context, ref TurnRef) (Step, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for attempt := 1; ; attempt++ {
+		c, err := s.load(ctx, ref, opInterrupt)
+		if err != nil {
+			return Step{}, err
+		}
+		now := s.clock.Now()
+		c.th.Abandon(values.RefuseNotDone, now)
+		c.takeResults(s)
+		if turn, _ := c.th.Turn(); turn.Status() != thread.StatusStopped {
+			if err := c.th.Stop(values.StopOffline, now); err != nil {
+				return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
+			}
+		}
+		err = s.save(ctx, c)
+		if errors.Is(err, shared.ErrVersionConflict) && attempt < maxStopSaves {
+			continue // «Стоп» saved in between (it does not wait for s.mu)
+		}
+		if err != nil {
+			return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
+		}
+		return stepOf(c), nil
+	}
 }
 
 // Recover runs at start, before the panel works: a request left running by a crash stops as «нет связи» with its

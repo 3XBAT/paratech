@@ -18,7 +18,7 @@ import (
 const (
 	opNew     = "agent: new"
 	opRequest = "agent: request"
-	opAbandon = "agent: abandon calls"
+	opAbandon = "agent: close calls"
 	opTool    = "agent: tool"
 	opTooLong = "agent: request loop over its step limit"
 	opBadCard = "agent: card dropped"
@@ -49,6 +49,7 @@ type Turns interface {
 	Retry(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Restart(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Cancel(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
+	Interrupt(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 }
 
 // Problem is why an operation on a request did not go through, as an enum (no error text reaches the panel).
@@ -67,10 +68,13 @@ const (
 )
 
 // Update is what the panel gets after each move of a request: its state and the cards to show, in order. Cards hold
-// only IDs, enums and the short checked texts of show_plan, ask_questions, reply and cannot_do (no HTML).
+// only IDs, enums and the short checked texts of show_plan, ask_questions, reply and cannot_do (no HTML). An update of
+// a failed operation names the request it acted on: Thread and Turn for a button, only Scope for an Ask whose thread
+// may not exist yet.
 type Update struct {
 	Thread     shared.ThreadID
 	Turn       int
+	Scope      values.Scope
 	Status     thread.Status
 	StopReason values.StopReason
 	Cards      []values.Card
@@ -101,8 +105,9 @@ type Deps struct {
 }
 
 // Driver runs agent requests: each operation runs in its own goroutine until the request waits for the student or
-// ends. The ctx of an operation bounds the whole loop it starts; when it is cancelled while calls wait to run, the
-// request is cancelled (its calls answered as not done), so it never stays running with calls nobody runs.
+// ends. The ctx of an operation bounds the whole loop it starts, so it must live as long as the app (TASK-119: not the
+// ctx of a Wails call, which ends with the call). When it ends while calls wait to run, the calls are answered as not
+// done and the request stops continuable, so it never stays running with calls nobody runs; only Cancel ends it.
 type Driver struct {
 	turns Turns
 	sink  Sink
@@ -137,52 +142,56 @@ func New(d Deps) (*Driver, error) {
 
 // Ask starts a request typed in the panel.
 func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Ask(ctx, in) })
+	at := agentturn.Step{Scope: in.Scope}
+	return d.start(ctx, at, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Ask(ctx, in) })
 }
 
 // ApprovePlan is «Да» on the plan card.
 func (d *Driver) ApprovePlan(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.ApprovePlan(ctx, ref) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.ApprovePlan(ctx, ref) })
 }
 
 // RevisePlan is «Изменить» on the plan card with the change the student typed.
 func (d *Driver) RevisePlan(ctx context.Context, ref agentturn.TurnRef, wish string) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.RevisePlan(ctx, ref, wish) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) {
+		return d.turns.RevisePlan(ctx, ref, wish)
+	})
 }
 
 // AnswerQuestions sends the answers of a Questions card.
 func (d *Driver) AnswerQuestions(ctx context.Context, ref agentturn.TurnRef, answers []values.Answer) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) {
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) {
 		return d.turns.AnswerQuestions(ctx, ref, answers)
 	})
 }
 
 // Stop is «Стоп»; a running step's reply is dropped and «Продолжить» replays it.
 func (d *Driver) Stop(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Stop(ctx, ref) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Stop(ctx, ref) })
 }
 
 // Continue is «Продолжить» after a stop, a lost connection or the quota: the same step key, a free replay.
 func (d *Driver) Continue(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Continue(ctx, ref) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Continue(ctx, ref) })
 }
 
 // Retry is «Повторить» after a step failed for good.
 func (d *Driver) Retry(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Retry(ctx, ref) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Retry(ctx, ref) })
 }
 
 // Restart starts an expired request again from its text.
 func (d *Driver) Restart(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Restart(ctx, ref) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Restart(ctx, ref) })
 }
 
 // Cancel is «Отмена»: the request ends.
 func (d *Driver) Cancel(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Cancel(ctx, ref) })
+	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Cancel(ctx, ref) })
 }
 
-// Wait blocks until every running operation has ended.
+// Wait blocks until every operation started so far has ended. It is for tests: no operation may start while it waits
+// (the sync.WaitGroup rule); the app uses Close.
 func (d *Driver) Wait() { d.wg.Wait() }
 
 // Close cancels the running operations, waits for them and refuses new ones.
@@ -196,7 +205,8 @@ func (d *Driver) Close() {
 	d.wg.Wait()
 }
 
-func (d *Driver) start(ctx context.Context, op func(ctx context.Context) (agentturn.Step, error)) error {
+// start runs op and its loop in a goroutine; at is the request it acts on, for an update when op fails.
+func (d *Driver) start(ctx context.Context, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -210,7 +220,7 @@ func (d *Driver) start(ctx context.Context, op func(ctx context.Context) (agentt
 	go func() {
 		defer d.wg.Done()
 		defer d.forget(id)
-		d.run(ctx, op)
+		d.run(ctx, at, op)
 	}()
 	return nil
 }
@@ -224,18 +234,22 @@ func (d *Driver) forget(id uint64) {
 	}
 }
 
-// run is the loop of one operation: show the step, run its calls, report their results, until no call is left.
-func (d *Driver) run(ctx context.Context, op func(ctx context.Context) (agentturn.Step, error)) {
+// run is the loop of one operation: show the step, run its calls, report their results, until no call is left. at is
+// the request the operation acts on; it names the request in an update of a failed operation.
+func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
 	st, err := op(ctx)
 	for submits := 0; ; submits++ {
 		if ctx.Err() != nil {
 			// A failed Hub call already stored the request stopped; only calls handed to us need closing.
 			if err == nil {
-				d.abandon(ctx, st)
+				d.interrupt(ctx, st)
 			}
 			return
 		}
 		if err != nil {
+			if st.Thread == "" {
+				st = at
+			}
 			d.log.WarnContext(ctx, opRequest, "thread", st.Thread.String(), "err", err)
 			d.publish(st, problemOf(err))
 			return
@@ -245,8 +259,11 @@ func (d *Driver) run(ctx context.Context, op func(ctx context.Context) (agenttur
 			return
 		}
 		if submits == maxSubmits {
+			// A broken invariant of the step use case, not a lost context: the request ends for good.
 			d.log.ErrorContext(ctx, opTooLong, "thread", st.Thread.String())
-			d.abandon(ctx, st)
+			if _, err := d.turns.Cancel(context.WithoutCancel(ctx), refOf(st)); err != nil {
+				d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)
+			}
 			return
 		}
 
@@ -255,21 +272,27 @@ func (d *Driver) run(ctx context.Context, op func(ctx context.Context) (agenttur
 			outcomes = append(outcomes, d.tools.run(ctx, st.Scope, c))
 		}
 		if ctx.Err() != nil {
-			d.abandon(ctx, st)
+			d.interrupt(ctx, st)
 			return
 		}
+		at = agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope}
 		st, err = d.turns.Submit(ctx, agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
 	}
 }
 
-// abandon cancels a request whose calls will not run, so they are answered as not done and the thread is free.
-func (d *Driver) abandon(ctx context.Context, st agentturn.Step) {
+// interrupt closes a request whose calls will not run because the ctx ended: they are answered as not done and the
+// request stops continuable («Продолжить»), as when the ctx ends during a Hub call. Results of calls that ran are
+// dropped too: a read cut by the ctx would report a false failure.
+func (d *Driver) interrupt(ctx context.Context, st agentturn.Step) {
 	if len(st.Calls) == 0 {
 		return
 	}
-	if _, err := d.turns.Cancel(context.WithoutCancel(ctx), refOf(st)); err != nil {
+	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), refOf(st))
+	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)
+		return
 	}
+	d.publish(stopped, ProblemNone)
 }
 
 // publish hands the step to the panel; a card that breaks its rules is dropped, never shown.
@@ -283,12 +306,16 @@ func (d *Driver) publish(st agentturn.Step, p Problem) {
 		cards = append(cards, c)
 	}
 	d.sink.Publish(Update{
-		Thread: st.Thread, Turn: st.Turn, Status: st.Status, StopReason: st.StopReason, Cards: cards, Problem: p,
+		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason, Cards: cards, Problem: p,
 	})
 }
 
 func refOf(st agentturn.Step) agentturn.TurnRef {
 	return agentturn.TurnRef{Thread: st.Thread, Turn: st.Turn}
+}
+
+func stepAt(ref agentturn.TurnRef) agentturn.Step {
+	return agentturn.Step{Thread: ref.Thread, Turn: ref.Turn}
 }
 
 // problemOf sorts an error of the step use case into the enum the panel shows.

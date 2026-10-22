@@ -542,6 +542,72 @@ func TestRecover(t *testing.T) {
 	}
 }
 
+// The Driver's context ended while its calls waited: they are answered not_done and the request stops as offline,
+// so «Продолжить» goes on; a request the student stopped keeps its reason; a «Стоп» saved in between is retried.
+func TestInterrupt(t *testing.T) {
+	tests := []struct {
+		name   string
+		before func(t *testing.T, e *env, st Step)
+		want   values.StopReason
+	}{
+		{"running", func(*testing.T, *env, Step) {}, values.StopOffline},
+		{"stopped by the student", func(t *testing.T, e *env, st Step) {
+			if _, err := e.svc.Stop(t.Context(), ref(st)); err != nil {
+				t.Fatal(err)
+			}
+		}, values.StopUser},
+		{"stop saved in between", func(t *testing.T, e *env, st Step) {
+			fired := false
+			e.threads.afterGet = func() {
+				if fired {
+					return
+				}
+				fired = true
+				if _, err := e.svc.Stop(context.Background(), ref(st)); err != nil {
+					t.Errorf("Stop: %v", err)
+				}
+			}
+		}, values.StopUser},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.model.then(raw("c1", "list_subjects", `{}`)).then(raw("r1", "reply", `{"text":"ок"}`))
+			st := ask(t, e, "мои предметы")
+			tt.before(t, e, st)
+
+			got, err := e.svc.Interrupt(t.Context(), ref(st))
+			if err != nil || got.Status != thread.StatusStopped || got.StopReason != tt.want || len(got.Calls) != 0 ||
+				len(got.Cards) != 1 || got.Cards[0] != (values.StoppedCard{Reason: tt.want}) {
+				t.Fatalf("Interrupt = %+v, %v", got, err)
+			}
+			th, _ := e.threads.Get(t.Context(), st.Thread)
+			if turn, _ := th.Turn(); len(turn.OpenCalls()) != 0 {
+				t.Fatalf("calls left open: %+v", turn.OpenCalls())
+			}
+			got, err = e.svc.Continue(t.Context(), ref(st))
+			if err != nil || got.Status != thread.StatusDone {
+				t.Fatalf("Continue = %+v, %v", got, err)
+			}
+			if res := lastResults(t, e); len(res) != 1 || res[0].ResultJSON != `{"error":"not_done"}` {
+				t.Fatalf("results sent = %+v", res)
+			}
+		})
+	}
+}
+
+func TestInterruptEndedRequest(t *testing.T) {
+	e := newEnv(t)
+	e.model.then(raw("r1", "reply", `{"text":"ок"}`))
+	st := ask(t, e, "привет")
+	if _, err := e.svc.Interrupt(t.Context(), ref(st)); !errors.Is(err, thread.ErrInvalidTransition) {
+		t.Fatalf("Interrupt of a done request = %v", err)
+	}
+	if _, err := e.svc.Interrupt(t.Context(), TurnRef{Thread: st.Thread, Turn: 9}); !errors.Is(err, ErrStaleTurn) {
+		t.Fatalf("Interrupt of an old request = %v", err)
+	}
+}
+
 // A new request closes the calls a waiting request left open, so the history keeps its shape.
 func TestAskClosesWaitingRequest(t *testing.T) {
 	e := newEnv(t)
