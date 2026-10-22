@@ -1,7 +1,8 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type AgentApi, agentApi, type CallProblem, parseUpdate, type UpdateView, updateEvent } from "../bindings/agent.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
-import { askInput, callProblemText, contextFor, isFocusPanelKey, requestText } from "../agentView.js";
+import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, requestText, type UndoNote, undoableActions } from "../agentView.js";
+import { problemText, undoOutcome } from "../journalView.js";
 import { type Entry, initialPanelState, reducePanel } from "../agentState.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
@@ -82,14 +83,6 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
     return () => window.removeEventListener("focus", load);
   }, [loadState]);
 
-  useEffect(() => {
-    // The history of the thread «Без предмета»; it says "unavailable" until the core can read it, and then nothing is shown.
-    api.history("").then(
-      (h) => h.problem === "" && dispatch({ type: "history", requests: h.requests }),
-      () => undefined,
-    );
-  }, []);
-
   const submit = useCallback(() => {
     const text = requestText(draft);
     if (text === null) {
@@ -114,6 +107,53 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
 
   // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
   const [pressed, setPressed] = useState<Record<string, UpdateView | null>>({});
+
+  // What «Отменить» did, per action. The journal itself is «Журнал»; here only the lines of the thread.
+  const [undoNotes, setUndoNotes] = useState<Record<string, UndoNote>>({});
+  const undoNotesRef = useRef(undoNotes);
+  undoNotesRef.current = undoNotes;
+  const setNote = useCallback((id: string, note: UndoNote) => setUndoNotes((m) => ({ ...m, [id]: note })), []);
+
+  const undoOne = useCallback(
+    (actionId: string) => {
+      const cur = undoNotesRef.current[actionId];
+      if (cur?.busy || cur?.done) {
+        return;
+      }
+      setNote(actionId, { busy: true, done: false, text: "" });
+      api.undo(actionId).then(
+        (v) => {
+          const o = undoOutcome(v);
+          setNote(actionId, { busy: false, done: o.ok, text: o.text });
+        },
+        () => setNote(actionId, { busy: false, done: false, text: undoOutcome({ problem: "failed", actionId, status: "", refusal: "" }).text }),
+      );
+    },
+    [setNote],
+  );
+
+  const undoAll = useCallback(
+    (ref: { threadId: string; turn: number }, ids: string[]) => {
+      ids.forEach((id) => setNote(id, { busy: true, done: false, text: "" }));
+      api.undoRequest(ref).then(
+        (v) => {
+          const outcomes = new Map(v.actions.map((a) => [a.actionId, undoOutcome({ ...a, problem: "" })]));
+          const whole = problemText(v.problem);
+          ids.forEach((id) => {
+            const o = outcomes.get(id);
+            setNote(id, { busy: false, done: o?.ok === true, text: o?.ok ? "" : (o?.text ?? whole) });
+          });
+          if (whole !== "") {
+            setNotice(whole);
+          }
+        },
+        () => {
+          ids.forEach((id) => setNote(id, { busy: false, done: false, text: problemText("failed") }));
+        },
+      );
+    },
+    [setNote],
+  );
 
   const actionsFor = useCallback((e: Entry): CardActions => {
     const ref = { threadId: e.threadId, turn: e.turn };
@@ -154,8 +194,16 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
       press: (id) => named && !busy && run(calls[id]()),
       revise: (wish) => named && !busy && run(api.revisePlan(ref, wish)),
       answer: (answers) => named && !busy && run(api.answer(ref, answers)),
+      undo: (actionId) => named && undoOne(actionId),
+      undoAll: () => {
+        const ids = undoableActions(entryModel(e).cards).filter((id) => !undoNotes[id]?.done && !undoNotes[id]?.busy);
+        if (named && ids.length > 0) {
+          undoAll(ref, ids);
+        }
+      },
+      undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [pressed, loadState]);
+  }, [pressed, loadState, undoNotes, undoOne, undoAll]);
 
   return (
     <AgentPanelView

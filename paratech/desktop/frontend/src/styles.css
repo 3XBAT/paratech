@@ -1,34 +1,28 @@
 /* App shell: a side rail on the window background, the section on a sheet (docs/design/brief.md section 5). */
 html, body, #root { height: 100%; }
-.shell { container: app / inline-size; display: grid; grid-template-columns: 108px minmax(0, 1fr); height: 100%; padding-top: 8px; }
-.rail { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 4px 8px 12px; overflow-y: auto; }
+.shell { container: app / inline-size; display: grid; grid-template-columns: 64px minmax(0, 1fr); height: 100%; padding-top: 8px; }
+/* Icon-only rail (docs/design/concept-agent.html): 40px targets, the name is a tooltip to the right. */
+.rail { position: relative; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 0; padding: 4px 8px 12px; }
 .rail button {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 2px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 0;
   border-radius: var(--r-md);
   background: none;
   color: var(--muted);
-  font-size: var(--fs-nav);
-  line-height: var(--lh-nav);
-  font-weight: 500;
-  letter-spacing: -0.005em;
-  text-align: center;
-  /* Labels wrap only between words («Записи и задачи»), never inside one. */
-  overflow-wrap: normal;
-  word-break: normal;
-  hyphens: manual;
   cursor: pointer;
 }
 .rail button:hover { background: var(--fill); color: var(--text); }
-.rail button[aria-current="page"] { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--edge); }
-.rail button[aria-current="page"]::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
+.rail button[aria-current="page"] { background: var(--panel); color: var(--accent); box-shadow: 0 0 0 1px var(--edge); }
+.rail button[aria-current="page"]::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: -8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
 .rail .i { width: 20px; height: 20px; }
 .rail .low { margin-top: auto; }
+.rail .tip { position: absolute; left: calc(100% + 8px); top: 50%; transform: translate(-4px, -50%); padding: 4px 8px; border-radius: var(--r-sm); background: var(--prim); color: var(--on-prim); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--t-fast), transform var(--t-fast); box-shadow: var(--sh-pop); }
+.rail button:hover .tip, .rail button:focus-visible .tip { opacity: 1; transform: translate(0, -50%); }
 .sheet { min-width: 0; min-height: 0; overflow: auto; padding: 24px 32px; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); }
 .screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
@@ -41,6 +35,39 @@ html, body, #root { height: 100%; }
 @media (forced-colors: active) {
   .rail button[aria-current="page"] { outline: 2px solid Highlight; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .rail .tip { transition: none; }
+}
+
+/* Tabs of «Настройки». */
+.set-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; }
+.set-tabs button { min-height: var(--h-ctl); padding: 0 12px; border: 0; border-radius: var(--r-md); background: none; color: var(--muted); font: inherit; font-size: var(--fs-small); font-weight: 500; cursor: pointer; }
+.set-tabs button:hover { background: var(--fill); color: var(--text); }
+.set-tabs button[aria-current="page"] { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px var(--edge); }
+
+/* «Предметы»: a form of one name, an empty folder. */
+.name-form { display: flex; flex-direction: column; gap: 8px; max-width: 420px; margin-bottom: 16px; }
+.empty-folder { grid-column: 1 / -1; margin: 0; padding: 12px 16px; }
+
+/* «Журнал»: the filters over the list. */
+.jr-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin-bottom: 16px; }
+.jr-field { display: flex; flex-direction: column; gap: 4px; }
+.jr-check { display: inline-flex; align-items: center; gap: 8px; min-height: var(--h-ctl); }
+.jr-check input { accent-color: var(--prim); }
+
+/* The drop zone over the whole window and the report of a drop. */
+.drop-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 82%, transparent); pointer-events: none; }
+.drop-overlay::before { content: ""; position: absolute; inset: 12px; border: 2px dashed var(--accent-fill); border-radius: var(--r-xl); }
+.drop-box { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
+.drop-box .i { width: 28px; height: 28px; color: var(--accent); }
+.drop-box p { margin: 0; }
+.drop-report { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; align-items: flex-start; gap: 12px; max-width: 420px; padding: 12px 12px 12px 16px; border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--sh-pop); }
+.drop-report ul { flex: 1; margin: 0; padding: 0; list-style: none; }
+.drop-report li { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-small); line-height: var(--lh-small); }
+.drop-report li + li { margin-top: 4px; }
+.drop-report li .i { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+.drop-report li.ok .i { color: var(--ok-t); }
+.drop-report li.fail .i { color: var(--wait-t); }
 
 /* Page parts shared by the sections on the new components. */
 .page { display: flex; flex: 1; flex-direction: column; }

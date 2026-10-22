@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { callByName } from "../bindings/runtime";
 import { recognitionLoads, type RecognitionLoad } from "../bindings/load";
 import {
@@ -20,9 +20,13 @@ import {
 } from "../profileView";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, ResultLine, Segmented, Toggle as Switch } from "../ui/controls";
+import { type Accent, accents, currentAccent, setAccent } from "../ui/accent";
 import { currentTheme, setTheme, type ThemeChoice } from "../ui/theme";
 
 type Toggle = SettingsToggle;
+
+/** The part of «Настройки» a tab shows. */
+export type SettingsPart = "settings" | "profile" | "appearance";
 
 const labels: Record<Toggle, string> = {
   recordingPromptsEnabled: "Автоматически предлагать запись в начале занятия",
@@ -49,12 +53,14 @@ const loadOptions = recognitionLoads.map((value) => ({ value, label: loadLabels[
 
 // The page only shows and forwards the values; defaults and rules live in the Go core (ARCH-44). The theme is kept in
 // the webview's storage (ADR-0012), so it needs no binding; the popup reads it from there and follows a change.
-export function SettingsPage() {
+export function SettingsPage(props: { part?: SettingsPart }) {
+  const part = props.part ?? "settings";
   const api = useMemo(() => settingsApi(callByName), []);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [theme, setThemeChoice] = useState<ThemeChoice>(currentTheme);
+  const [accent, setAccentChoice] = useState<Accent>(currentAccent);
 
   useEffect(() => {
     let active = true;
@@ -94,6 +100,11 @@ export function SettingsPage() {
   const estimate =
     settings !== null ? settingEstimateLine(settings.loadEstimates, settings.loadEstimatesModel, settings.recognitionLoad) : null;
 
+  function chooseAccent(a: Accent) {
+    setAccent(a);
+    setAccentChoice(a);
+  }
+
   function chooseTheme(choice: ThemeChoice) {
     setTheme(choice);
     setThemeChoice(choice);
@@ -109,70 +120,117 @@ export function SettingsPage() {
     />
   );
 
-  // iOS-style groups as in docs/design/concept-strict.html: «Запись», «Обработка», «Оформление», «Профиль студента».
+  // «Настройки» has three parts on its tabs: the switches ("settings"), «Оформление» and «Профиль студента».
+  if (part === "settings") {
+    return (
+      <section className="page">
+        <div className="head">
+          <div>
+            <span className="label">Изменения сохраняются сразу</span>
+            <h1>Настройки</h1>
+          </div>
+        </div>
+        {settings === null && !error && <p className="muted">Загрузка…</p>}
+        {settings !== null && (
+          <>
+            <SettingsGroup caption="Запись">{toggleRow("recordingPromptsEnabled", settings)}</SettingsGroup>
+            <SettingsGroup caption="Обработка">
+              {toggleRow("processOnlyOnAcPower", settings)}
+              <div className="set">
+                <span>{estimateTexts.setting}</span>
+                <Segmented
+                  label={estimateTexts.setting}
+                  options={loadOptions}
+                  value={settings.recognitionLoad}
+                  onChange={chooseLoad}
+                />
+                <ul className="small muted load-modes">
+                  {recognitionLoads.map((l) => (
+                    <li key={l}>
+                      «{loadLabels[l]}» — {loadDescriptions[l]}
+                    </li>
+                  ))}
+                </ul>
+                <span className="small muted">{estimateTexts.nextRun}</span>
+                {estimate !== null &&
+                  (estimate.heavy ? (
+                    <span className="small slow" title={estimatesTip(settings.loadEstimates)}>
+                      <b>{estimate.text}</b>
+                    </span>
+                  ) : (
+                    <span className="small muted" title={estimatesTip(settings.loadEstimates)}>
+                      {estimate.text}
+                    </span>
+                  ))}
+              </div>
+            </SettingsGroup>
+          </>
+        )}
+        {/* While a change is saved every switch waits for it; this line says why they are dimmed. */}
+        {saving && (
+          <p className="small muted group-foot" role="status">
+            Сохраняется…
+          </p>
+        )}
+        {error && (
+          <ResultLine kind="fail" role="alert">
+            {error}
+          </ResultLine>
+        )}
+      </section>
+    );
+  }
+
+  if (part === "profile") {
+    return (
+      <section className="page">
+        <div className="head">
+          <div>
+            <span className="label">Для титульного листа домашнего задания</span>
+            <h1>Профиль</h1>
+          </div>
+        </div>
+        <ProfileCard api={api} />
+      </section>
+    );
+  }
+
+  // part === "appearance"
   return (
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">Изменения сохраняются сразу</span>
-          <h1>Настройки</h1>
+          <span className="label">Хранится на этом компьютере</span>
+          <h1>Оформление</h1>
         </div>
       </div>
-      {settings === null && !error && <p className="muted">Загрузка…</p>}
-      {settings !== null && (
-        <>
-          <SettingsGroup caption="Запись">{toggleRow("recordingPromptsEnabled", settings)}</SettingsGroup>
-          <SettingsGroup caption="Обработка">
-            {toggleRow("processOnlyOnAcPower", settings)}
-            <div className="set">
-              <span>{estimateTexts.setting}</span>
-              <Segmented
-                label={estimateTexts.setting}
-                options={loadOptions}
-                value={settings.recognitionLoad}
-                onChange={chooseLoad}
-              />
-              <ul className="small muted load-modes">
-                {recognitionLoads.map((l) => (
-                  <li key={l}>
-                    «{loadLabels[l]}» — {loadDescriptions[l]}
-                  </li>
-                ))}
-              </ul>
-              <span className="small muted">{estimateTexts.nextRun}</span>
-              {estimate !== null &&
-                (estimate.heavy ? (
-                  <span className="small slow" title={estimatesTip(settings.loadEstimates)}>
-                    <b>{estimate.text}</b>
-                  </span>
-                ) : (
-                  <span className="small muted" title={estimatesTip(settings.loadEstimates)}>
-                    {estimate.text}
-                  </span>
-                ))}
-            </div>
-          </SettingsGroup>
-        </>
-      )}
-      {/* While a change is saved every switch waits for it; this line says why they are dimmed. */}
-      {saving && (
-        <p className="small muted group-foot" role="status">
-          Сохраняется…
-        </p>
-      )}
-      {error && (
-        <ResultLine kind="fail" role="alert">
-          {error}
-        </ResultLine>
-      )}
       <SettingsGroup caption="Оформление">
         <div className="set">
           <span>Тема</span>
           <Segmented label="Тема" options={themeOptions} value={theme} onChange={chooseTheme} />
           <span className="small muted">«Как в системе» следует настройке Windows: светлый или тёмный режим.</span>
         </div>
+        <div className="set">
+          <span>
+            Цвет <span className="sw-name small muted">· {accent.name}</span>
+          </span>
+          <div className="swatches" role="radiogroup" aria-label="Акцентный цвет">
+            {accents.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                className="sw"
+                role="radio"
+                aria-checked={a.id === accent.id}
+                aria-label={a.name}
+                title={a.name}
+                style={{ "--c": a.hex } as CSSProperties}
+                onClick={() => chooseAccent(a)}
+              />
+            ))}
+          </div>
+        </div>
       </SettingsGroup>
-      <ProfileCard api={api} />
     </section>
   );
 }

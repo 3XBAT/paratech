@@ -53,8 +53,16 @@ export function AgentPanelView(props: AgentPanelViewProps) {
             autoComplete="off"
             onChange={(e) => props.onDraft(e.target.value)}
           />
-          <button type="submit" className="btn primary sm" disabled={!mode.inputEnabled || props.draft.trim() === ""}>
-            {texts.send}
+          <button
+            type="submit"
+            className="ag-send"
+            aria-label={texts.send}
+            title={texts.send}
+            disabled={!mode.inputEnabled || props.draft.trim() === ""}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
           </button>
         </form>
         <div className="ag-ctx">
