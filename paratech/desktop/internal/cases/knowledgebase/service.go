@@ -32,6 +32,7 @@ const correctAttempts = 3
 
 // Service is the knowledge base (TASK-091). Everything is local: no port talks to the network.
 type Service struct {
+	library     SubjectResolver // nil: no library, lessons grouped by their free string
 	lessons     LessonStore
 	recordings  RecordingRepository
 	schedule    LessonReader
@@ -55,7 +56,7 @@ func New(d Deps) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
-		lessons: d.Lessons, recordings: d.Recordings, schedule: d.Schedule, transcripts: d.Transcripts,
+		library: d.Library, lessons: d.Lessons, recordings: d.Recordings, schedule: d.Schedule, transcripts: d.Transcripts,
 		artifacts: d.Artifacts, summaries: d.Summaries, lectures: d.LectureTexts, writer: d.Writer, clock: d.Clock, log: log,
 	}, nil
 }
@@ -69,8 +70,8 @@ func (s *Service) Subjects(ctx context.Context) ([]kb.Subject, error) {
 	return kb.Subjects(all), nil
 }
 
-// Lessons lists the lessons of the subject with key (kb.Subject.Key; "" for kb.NoSubjectName), newest first. A key
-// without lessons gives an empty list.
+// Lessons lists the lessons of the subject with key (kb.Subject.Key: the library subject, else the free string; "" for
+// kb.NoSubjectName), newest first. A key without lessons gives an empty list.
 func (s *Service) Lessons(ctx context.Context, key string) ([]kb.Lesson, error) {
 	all, err := s.all(ctx)
 	if err != nil {
@@ -245,7 +246,7 @@ func (s *Service) all(ctx context.Context) ([]kb.Lesson, error) {
 			out = append(out, kb.NewLesson(s.facts(ctx, rec, ready[rec.ID()])))
 		}
 	}
-	return out, nil
+	return s.resolve(ctx, out)
 }
 
 // lessonOf is the lesson of one recording.
@@ -254,7 +255,39 @@ func (s *Service) lessonOf(ctx context.Context, rec *recording.Recording) (kb.Le
 	if err != nil {
 		return kb.Lesson{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	return kb.NewLesson(s.facts(ctx, rec, ready[rec.ID()])), nil
+	out, err := s.resolve(ctx, []kb.Lesson{kb.NewLesson(s.facts(ctx, rec, ready[rec.ID()]))})
+	if err != nil {
+		return kb.Lesson{}, err
+	}
+	return out[0], nil
+}
+
+// resolve sets the library subject of the lessons whose free subject string names one (ADR-0024). The strings are
+// resolved at every read; nothing stored is rewritten.
+func (s *Service) resolve(ctx context.Context, lessons []kb.Lesson) ([]kb.Lesson, error) {
+	if s.library == nil {
+		return lessons, nil
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, l := range lessons {
+		if l.Subject != "" && !seen[l.Subject] {
+			seen[l.Subject] = true
+			names = append(names, l.Subject)
+		}
+	}
+	if len(names) == 0 {
+		return lessons, nil
+	}
+	matches, err := s.library.ResolveSubjects(ctx, names)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	resolved := make(map[string]kb.LibrarySubject, len(matches))
+	for name, m := range matches {
+		resolved[name] = kb.LibrarySubject{ID: m.ID, Name: m.Name}
+	}
+	return kb.WithLibrary(lessons, resolved), nil
 }
 
 // facts gathers what is known of the lesson of rec. The live lesson is read only when the snapshot lacks the title;
