@@ -233,7 +233,7 @@ func containsKind(kinds []values.CardKind, k values.CardKind) bool {
 // TestAgentEvalCToolIsNeverExecuted: a C call reaches the Driver only as class C, which the agent may not execute (a
 // proposal card); a write that would replace a ready result needs a plan (TASK-123) and is never run without one; and
 // the agent use cases expose no method that confirms, executes, sends or deletes. That the Driver turns class C into a
-// card only is checked with TASK-117.
+// card only is checked in input/agent (propose_test.go) and end to end in agent_propose_test.go (TASK-127).
 func TestAgentEvalCToolIsNeverExecuted(t *testing.T) {
 	e := newEvalEnv(t, evalFacts{cost: evalCost, replaces: map[values.Tool]bool{values.ToolMakeSummary: true}})
 	e.hub.Then(

@@ -74,6 +74,8 @@ type Core struct {
 	Agent AgentCore // the agent panel (TASK-119); the shell attaches its panel to the Wails events
 
 	Today TodayUseCase // «Сегодня» (TASK-125)
+
+	AgentConfirm AgentConfirmCore // the confirm cards of the agent panel (TASK-127)
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -198,6 +200,8 @@ type Services struct {
 	Agent       *AgentService
 	Today       *TodayService
 
+	AgentConfirm *AgentConfirmService
+
 	// AgentPanel is not bound: the shell attaches it to the Wails events while the app runs.
 	AgentPanel *AgentPanel
 }
@@ -275,6 +279,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Today == nil {
 		return Services{}, errors.New("wails: open core: no today screen")
 	}
+	if !core.AgentConfirm.complete() {
+		return Services{}, errors.New("wails: open core: no agent confirm cards")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -309,6 +316,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Agent:      NewAgentService(core.Agent, s.opts.Log),
 		Today:      NewTodayService(core.Today, s.opts.Log),
 		AgentPanel: core.Agent.Panel,
+
+		AgentConfirm: NewAgentConfirmService(core.AgentConfirm, s.opts.Log),
 	}, nil
 }
 

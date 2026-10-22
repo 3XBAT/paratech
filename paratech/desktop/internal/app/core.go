@@ -396,6 +396,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock},
 		Today: todayScreen,
+		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
+		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
