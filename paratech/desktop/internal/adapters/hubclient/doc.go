@@ -12,6 +12,11 @@
 //     key never goes to another host. No URL, a refused stored URL or no key is "hub: not configured", which waits
 //     like a network failure.
 //
+// Step runs one agent planner step (GatewayService.AgentStep, ADR-0023; the agentturn.AgentModel port) with the same
+// URL, key, limits and error classes. Its key ag:<thread>:<turn>:<step> comes from the agent thread. The Hub's
+// failed_precondition without a detail («the model turn is gone») is ErrTurnGone, which also matches the agent
+// domain's values.ErrTurnGone.
+//
 // GetRemaining reads the tester's quota (QuotaService.GetRemaining, AC-12) with the same URL, key, limits and error
 // classes, for the «Подключения» page; the answer is shown, never used to decide (the Hub decides at Reserve).
 //
