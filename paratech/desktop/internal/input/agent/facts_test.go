@@ -51,6 +51,8 @@ func TestFacts(t *testing.T) {
 func TestBaseSubjects(t *testing.T) {
 	lib := &fakeLibrary{subjects: []*subject.Subject{
 		newSubject(t, "s1", "Физика"), newSubject(t, "s2", injection), newSubject(t, "s3", "Линейная алгебра (2 часть)"),
+		// A colon is a valid library name but not a valid agent Name: it must be dropped, not fail every request.
+		newSubject(t, "s4", "Иностранный язык: английский"),
 	}}
 	b, err := NewBaseSubjects(lib)
 	if err != nil {
