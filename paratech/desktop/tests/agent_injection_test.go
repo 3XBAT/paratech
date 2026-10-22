@@ -149,7 +149,7 @@ func TestAgentInjectionSlotSweep(t *testing.T) {
 		}
 		// Lecture text and turnkey writing always need a plan; their arguments are still valid.
 		rule, _ := actionpolicy.Of(tool)
-		if _, err := decideAlone(t, tool, baselineArgs(spec)); err != nil && !(rule.AlwaysPlan && errors.Is(err, thread.ErrPlanRequired)) {
+		if _, err := decideAlone(t, tool, baselineArgs(spec)); err != nil && (!rule.AlwaysPlan || !errors.Is(err, thread.ErrPlanRequired)) {
 			t.Fatalf("%s: the baseline call is refused: %v", tool, err)
 		}
 	}
