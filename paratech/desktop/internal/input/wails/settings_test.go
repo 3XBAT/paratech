@@ -109,7 +109,7 @@ func TestOpenBindings(t *testing.T) {
 	b, err := s.OpenServices(context.Background())
 	if err != nil || b.Settings == nil || b.Activity == nil || b.Prompt == nil || b.Popup == nil || b.Schedule == nil || b.Models == nil || b.Speech == nil ||
 		b.Connections == nil || b.Diagnostics == nil || b.Homework == nil || b.Transcript == nil || b.Summary == nil ||
-		b.Deletion == nil || b.Knowledge == nil {
+		b.Deletion == nil || b.Knowledge == nil || b.Library == nil {
 		t.Fatalf("OpenServices = %+v, %v", b, err)
 	}
 
@@ -150,6 +150,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "summary viewer", edit: func(c *Core) { c.Summary = nil }},
 		{name: "recording deletion", edit: func(c *Core) { c.Deletion = nil }},
 		{name: "knowledge base", edit: func(c *Core) { c.Knowledge = nil }},
+		{name: "library", edit: func(c *Core) { c.Library = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {

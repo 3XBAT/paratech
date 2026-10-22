@@ -90,3 +90,30 @@ func (id DeliveryID) String() string { return string(id) }
 
 // Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id DeliveryID) Validate() error { return validateID("delivery", string(id)) }
+
+// SubjectID identifies a subject of the library (ADR-0021, ADR-0024).
+type SubjectID string
+
+// String returns the identifier as a plain string.
+func (id SubjectID) String() string { return string(id) }
+
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
+func (id SubjectID) Validate() error { return validateID("subject", string(id)) }
+
+// FolderID identifies a folder of a subject of the library (ADR-0024).
+type FolderID string
+
+// String returns the identifier as a plain string.
+func (id FolderID) String() string { return string(id) }
+
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
+func (id FolderID) Validate() error { return validateID("folder", string(id)) }
+
+// MaterialID identifies a file of the library (ADR-0024).
+type MaterialID string
+
+// String returns the identifier as a plain string.
+func (id MaterialID) String() string { return string(id) }
+
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
+func (id MaterialID) Validate() error { return validateID("material", string(id)) }

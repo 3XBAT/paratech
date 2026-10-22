@@ -7,7 +7,7 @@
 
 -- +goose Up
 -- ---------------------------------------------------------------------------------------------------------------
--- agent_threads (migration 0021): one thread per subject key (the subject id, or 'NONE' for «Без предмета»).
+-- agent_threads (migration 0022): one thread per subject key (the subject id, or 'NONE' for «Без предмета»).
 -- Aggregate agent/thread; its current request is the agent_turns row number = turns. seen is the JSON array of the
 -- {"kind","id"} the provenance check knows from tool results; history_from is the first request whose history is
 -- sent (a request restarted after its model turn expired on the Hub sends only its own).

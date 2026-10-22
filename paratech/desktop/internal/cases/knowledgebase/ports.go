@@ -8,6 +8,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/lecturetext"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/coursework/summary"
+	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
@@ -69,6 +70,13 @@ type LectureTextReader interface {
 // nothing remains under that name. Implemented by the textfile adapter.
 type TextWriter interface {
 	WriteFile(ctx context.Context, path string, content []byte) error
+}
+
+// SubjectResolver maps the free subject strings of lessons to the subjects of the library (ADR-0024): name or alias,
+// an ambiguous string matches none, unmatched strings are absent. Implemented by cases/library, wired by the app; no
+// stored string is rewritten.
+type SubjectResolver interface {
+	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
 }
 
 // Clock supplies the current time; its location is the one exported dates are shown in (ARCH-24). The app wires the

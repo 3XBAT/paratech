@@ -164,6 +164,27 @@ type LectureText struct {
 	UpdatedAt     int64
 }
 
+type Material struct {
+	ID           string
+	Sha256       string
+	SizeBytes    int64
+	Type         string
+	OriginalName string
+	SubjectID    sql.NullString
+	FolderID     sql.NullString
+	Status       string
+	TextStatus   string
+	Version      int64
+	CreatedAt    int64
+	UpdatedAt    int64
+}
+
+type MaterialLesson struct {
+	MaterialID string
+	LessonID   string
+	Position   int64
+}
+
 type Proposal struct {
 	ID               string
 	Kind             string
@@ -276,6 +297,32 @@ type SttSpeed struct {
 	Factor          float64
 	Samples         int64
 	UpdatedAt       int64
+}
+
+type Subject struct {
+	ID        string
+	Name      string
+	NameKey   string
+	Semester  string
+	Version   int64
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+type SubjectAlias struct {
+	AliasKey  string
+	SubjectID string
+	Alias     string
+	Position  int64
+}
+
+type SubjectFolder struct {
+	ID        string
+	SubjectID string
+	Name      string
+	NameKey   string
+	System    string
+	Position  int64
 }
 
 type Summary struct {

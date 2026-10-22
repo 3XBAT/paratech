@@ -15,6 +15,9 @@ func TestIDValidate(t *testing.T) {
 		"LessonID":     func(s string) error { return LessonID(s).Validate() },
 		"AssignmentID": func(s string) error { return AssignmentID(s).Validate() },
 		"DeliveryID":   func(s string) error { return DeliveryID(s).Validate() },
+		"SubjectID":    func(s string) error { return SubjectID(s).Validate() },
+		"FolderID":     func(s string) error { return FolderID(s).Validate() },
+		"MaterialID":   func(s string) error { return MaterialID(s).Validate() },
 	}
 	cases := []struct {
 		name    string

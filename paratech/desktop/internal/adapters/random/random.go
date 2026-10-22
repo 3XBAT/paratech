@@ -50,6 +50,15 @@ func (IDs) NewThreadID() shared.ThreadID { return shared.ThreadID(token()) }
 // NewActionID returns a fresh agent journal entry identifier.
 func (IDs) NewActionID() shared.ActionID { return shared.ActionID(token()) }
 
+// NewSubjectID returns a fresh subject identifier of the library.
+func (IDs) NewSubjectID() shared.SubjectID { return shared.SubjectID(token()) }
+
+// NewFolderID returns a fresh folder identifier of the library.
+func (IDs) NewFolderID() shared.FolderID { return shared.FolderID(token()) }
+
+// NewMaterialID returns a fresh material identifier of the library.
+func (IDs) NewMaterialID() shared.MaterialID { return shared.MaterialID(token()) }
+
 // NewMessageID returns a fresh RFC 5322 Message-ID "<random@paratech.invalid>".
 func (IDs) NewMessageID() string { return "<" + token() + "@" + messageIDDomain + ">" }
 

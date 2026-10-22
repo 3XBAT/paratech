@@ -16,11 +16,13 @@ const (
 	ArtifactTranscripts ArtifactKind = "transcripts"
 	ArtifactModels      ArtifactKind = "models"
 	ArtifactExports     ArtifactKind = "exports"
+	// ArtifactMaterials holds the files of the library, one per sha256 (ADR-0024).
+	ArtifactMaterials ArtifactKind = "materials"
 )
 
 func (k ArtifactKind) valid() bool {
 	switch k {
-	case ArtifactRecordings, ArtifactTranscripts, ArtifactModels, ArtifactExports:
+	case ArtifactRecordings, ArtifactTranscripts, ArtifactModels, ArtifactExports, ArtifactMaterials:
 		return true
 	}
 	return false

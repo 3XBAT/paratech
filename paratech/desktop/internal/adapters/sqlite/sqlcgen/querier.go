@@ -16,6 +16,9 @@ type Querier interface {
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
 	// Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
 	CountJobsWithoutIDByStatus(ctx context.Context, statuses []string) (int64, error)
+	CountMaterialsInFolder(ctx context.Context, arg CountMaterialsInFolderParams) (int64, error)
+	// Files of a subject in any status: a removed one still blocks the removal of its subject.
+	CountMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) (int64, error)
 	CountTranscriptParts(ctx context.Context, recordingID string) (int64, error)
 	// The current request is replaced as a whole in the transaction of its thread's compare-and-swap.
 	DeleteAgentTurn(ctx context.Context, arg DeleteAgentTurnParams) error
@@ -31,9 +34,15 @@ type Querier interface {
 	// A job of the recording, only once it is finished (statuses is the list of terminal statuses).
 	DeleteFinishedJob(ctx context.Context, arg DeleteFinishedJobParams) error
 	DeleteLectureTextsOfRecording(ctx context.Context, recordingID string) error
+	DeleteMaterialLessons(ctx context.Context, materialID string) error
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
+	// Removes the subject with its aliases and folders (CASCADE); a material still filed under it fails the RESTRICT.
+	DeleteSubject(ctx context.Context, arg DeleteSubjectParams) (int64, error)
+	DeleteSubjectAliases(ctx context.Context, subjectID string) error
+	// Folders are never renamed, so a save only inserts and deletes them; a folder that holds a file fails the RESTRICT.
+	DeleteSubjectFolder(ctx context.Context, arg DeleteSubjectFolderParams) error
 	DeleteSummariesOfRecording(ctx context.Context, recordingID string) error
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
@@ -67,6 +76,8 @@ type Querier interface {
 	// Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
 	// delete of ADR-0004(e): removing a lesson sets deleted_at, only PurgeDeletedLesson deletes a row.
 	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
+	GetMaterial(ctx context.Context, id string) (Material, error)
+	GetMaterialBySHA256(ctx context.Context, sha256 string) (Material, error)
 	// Action proposals of the LLM (PRD section 13.3) with the optimistic-concurrency protocol of ADR-0004(d).
 	GetProposal(ctx context.Context, id string) (Proposal, error)
 	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
@@ -83,6 +94,7 @@ type Querier interface {
 	// Measured recognition speed per installed model and load mode (TASK-084). A row is replaced by
 	// (stt_model_id, recognition_load); the rows go with the model (CASCADE).
 	GetSttSpeed(ctx context.Context, arg GetSttSpeedParams) (GetSttSpeedRow, error)
+	GetSubject(ctx context.Context, id string) (Subject, error)
 	// Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
 	// the transcript id, one summary per transcript (TASK-042). sections is NULL for a summary made before TASK-101.
 	GetSummary(ctx context.Context, id string) (Summary, error)
@@ -112,6 +124,9 @@ type Querier interface {
 	InsertLectureText(ctx context.Context, arg InsertLectureTextParams) error
 	// A never-stored lesson (version 0) is inserted with version 1.
 	InsertLesson(ctx context.Context, arg InsertLessonParams) error
+	// A never-stored material (version 0) is inserted with version 1.
+	InsertMaterial(ctx context.Context, arg InsertMaterialParams) error
+	InsertMaterialLesson(ctx context.Context, arg InsertMaterialLessonParams) error
 	// A never-stored proposal (version 0) is inserted with version 1.
 	InsertProposal(ctx context.Context, arg InsertProposalParams) error
 	// A never-stored recording (version 0) is inserted with version 1.
@@ -122,6 +137,11 @@ type Querier interface {
 	// A never-stored model (version 0) is inserted with version 1. A second (name, model_version) violates the UNIQUE
 	// rule and surfaces as shared.ErrDuplicate.
 	InsertSttModel(ctx context.Context, arg InsertSttModelParams) error
+	// A never-stored subject (version 0) is inserted with version 1.
+	InsertSubject(ctx context.Context, arg InsertSubjectParams) error
+	InsertSubjectAlias(ctx context.Context, arg InsertSubjectAliasParams) error
+	// A folder goes after the others: its position is one more than the largest of its subject.
+	InsertSubjectFolder(ctx context.Context, arg InsertSubjectFolderParams) error
 	// A never-stored summary (version 0) is inserted with version 1.
 	InsertSummary(ctx context.Context, arg InsertSummaryParams) error
 	// A never-stored transcript (version 0) is inserted with version 1.
@@ -144,6 +164,8 @@ type Querier interface {
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
 	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
 	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
+	ListAllSubjectAliases(ctx context.Context) ([]SubjectAlias, error)
+	ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
 	// The deadline events left to remove, oldest first (the calendar sync).
 	ListDeadlineEventRemovals(ctx context.Context, maxRows int64) ([]string, error)
@@ -152,6 +174,7 @@ type Querier interface {
 	// The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
 	ListDeliveriesByAssignment(ctx context.Context, arg ListDeliveriesByAssignmentParams) ([]Delivery, error)
 	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
+	ListInboxMaterials(ctx context.Context) ([]Material, error)
 	// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names, hidden_types a JSON array of job types left out of both parts (TASK-074),
@@ -183,6 +206,8 @@ type Querier interface {
 	ListLessonsPendingCalendarSync(ctx context.Context, maxRows int64) ([]ScheduleEntry, error)
 	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
+	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
+	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
 	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
 	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
@@ -191,11 +216,21 @@ type Querier interface {
 	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
 	// The assignments found in the transcripts of the recording, with whether a draft or any email exists.
 	ListRecordingAssignments(ctx context.Context, recordingID string) ([]ListRecordingAssignmentsRow, error)
+	// The free subject strings the recordings name (the user's correction, else the lesson snapshot), with how many
+	// recordings name each; a recording marked for deletion is left out.
+	ListRecordingSubjectCounts(ctx context.Context) ([]ListRecordingSubjectCountsRow, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
 	// Threads whose current request was running (startup recovery).
 	ListRunningAgentThreadIDs(ctx context.Context) ([]string, error)
+	// The free subject strings of the live schedule, with how many lessons name each.
+	ListScheduleSubjectCounts(ctx context.Context) ([]ListScheduleSubjectCountsRow, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
+	ListSubjectAliases(ctx context.Context, subjectID string) ([]SubjectAlias, error)
+	ListSubjectFolders(ctx context.Context, subjectID string) ([]SubjectFolder, error)
+	// The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
+	// aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
+	ListSubjects(ctx context.Context) ([]Subject, error)
 	// One page in number order; the primary key serves the order.
 	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
@@ -235,6 +270,8 @@ type Querier interface {
 	UpdateLectureText(ctx context.Context, arg UpdateLectureTextParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int64, error)
+	// The content (sha256, size, type, name) never changes.
+	UpdateMaterial(ctx context.Context, arg UpdateMaterialParams) (int64, error)
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
 	// format the user chose before the validation and the creation time never change, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
@@ -248,6 +285,7 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. An installed model does not change today; the update exists so that Save
 	// keeps the protocol of every repository.
 	UpdateSttModel(ctx context.Context, arg UpdateSttModelParams) (int64, error)
+	UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (int64, error)
 	// Compare-and-swap on the loaded version. The transcript and the lesson never change, so a stale save cannot undo
 	// ON DELETE SET NULL.
 	UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error)

@@ -55,6 +55,9 @@ type idSource interface {
 	NewProposalID() proposal.ID
 	NewDeliveryID() shared.DeliveryID
 	NewSttModelID() shared.SttModelID
+	NewSubjectID() shared.SubjectID
+	NewFolderID() shared.FolderID
+	NewMaterialID() shared.MaterialID
 	NewMessageID() string
 	NewThreadID() shared.ThreadID
 	NewActionID() shared.ActionID
