@@ -1,0 +1,497 @@
+// The agent panel (TASK-120): bindings, the reducer of updates, context, Ctrl+K, the cards and plain-text rendering.
+// Runs on the modules compiled by `npm run test` (tsconfig.test.json) with the Node test runner.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { createElement as h } from "react";
+import server from "react-dom/server";
+import { agentApi, methods, parseState, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
+import {
+  initialPanelState,
+  orderedEntries,
+  panelMode,
+  reducePanel,
+} from "../.test-build/agentState.js";
+import {
+  askInput,
+  collectAnswers,
+  contextFor,
+  entryModel,
+  isFocusPanelKey,
+  parseArtifact,
+  requestText,
+  roundCaption,
+  skipAnswers,
+  stepText,
+  texts,
+} from "../.test-build/agentView.js";
+import { AgentRequest } from "../.test-build/agent/AgentCards.js";
+import { AgentPanelView } from "../.test-build/agent/AgentPanelView.js";
+
+const { renderToStaticMarkup } = server;
+const noop = () => undefined;
+const actions = { press: noop, revise: noop, answer: noop };
+
+function card(over) {
+  return {
+    kind: "reply", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "",
+    cannotDo: null, text: "", stopReason: "", ...over,
+  };
+}
+
+function update(over) {
+  return {
+    threadId: "t1", turn: 1, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "DONE",
+    stopReason: "", problem: "", cards: [], ...over,
+  };
+}
+
+const scope = { text: "x", subjectId: "", lessonId: "", assignmentId: "", screen: "today" };
+const ready = { link: "ready", readOnly: false };
+
+function stateWith(...actionsList) {
+  return actionsList.reduce(reducePanel, reducePanel(initialPanelState, { type: "link", link: ready }));
+}
+
+function modelOf(u) {
+  return entryModel({ key: "k", seq: 1, threadId: u.threadId, turn: u.turn, text: "", scope: null, callProblem: "", update: u });
+}
+
+function html(u) {
+  return renderToStaticMarkup(h(AgentRequest, { model: modelOf(u), actions }));
+}
+
+// ---- Bindings ----
+
+test("bound method names match the Go AgentService", () => {
+  const go = readFileSync(new URL("../../internal/input/wails/agent.go", import.meta.url), "utf8");
+  const goMethods = [...go.matchAll(/^func \(s \*AgentService\) ([A-Z]\w*)\(/gm)].map((m) => m[1]);
+  const prefix = "paratech/desktop/internal/input/wails.AgentService.";
+  const ts = Object.values(methods).map((m) => m.slice(prefix.length));
+  assert.deepEqual([...ts].sort(), [...goMethods].sort());
+  assert.equal(updateEvent, "agent:update");
+});
+
+test("the api sends the typed arguments and reads the problem of the reply", async () => {
+  const calls = [];
+  const api = agentApi(async (method, ...args) => {
+    calls.push([method, ...args]);
+    return method === methods.state ? { link: "no_key", readOnly: true } : { problem: "offline" };
+  });
+  assert.deepEqual(await api.state(), { link: "no_key", readOnly: true });
+  assert.equal(await api.ask(scope), "offline");
+  assert.equal(await api.approvePlan({ threadId: "t", turn: 2 }), "offline");
+  assert.deepEqual(calls[1], [methods.ask, scope]);
+  assert.deepEqual(calls[2], [methods.approvePlan, { threadId: "t", turn: 2 }]);
+  const odd = agentApi(async () => ({ problem: "something new" }));
+  assert.equal(await odd.stop({ threadId: "t", turn: 1 }), "failed");
+});
+
+test("history and undo say unavailable until the core can do them, without data", async () => {
+  const api = agentApi(async (method) =>
+    method === methods.history ? { problem: "unavailable", requests: [] } : { problem: "unavailable" },
+  );
+  const hist = await api.history("");
+  assert.equal(hist.problem, "unavailable");
+  assert.deepEqual(hist.requests, []);
+  assert.equal(await api.undo("a1"), "unavailable");
+});
+
+test("parseUpdate checks the shape, tolerates null lists and drops unknown cards", () => {
+  const raw = {
+    threadId: "t", turn: 1, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "DONE",
+    stopReason: "", problem: "",
+    cards: [
+      { kind: "reply", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "", cannotDo: null, text: "ok", stopReason: "" },
+      { kind: "hologram" },
+    ],
+  };
+  const u = parseUpdate(raw);
+  assert.equal(u.cards.length, 1);
+  assert.equal(parseUpdate({ ...raw, cards: null }).cards.length, 0);
+  assert.throws(() => parseUpdate({ ...raw, turn: "1" }));
+  assert.throws(() => parseUpdate(null));
+  assert.throws(() => parseState({ link: "weird", readOnly: false }));
+});
+
+// ---- Reducer ----
+
+test("updates of one request replace each other; other requests stay", () => {
+  const s = stateWith(
+    { type: "update", update: update({ status: "PLANNING" }) },
+    { type: "update", update: update({ threadId: "t2", status: "EXECUTING" }) },
+    { type: "update", update: update({ status: "EXECUTING" }) },
+  );
+  assert.equal(s.entries.length, 2);
+  assert.equal(s.entries.find((e) => e.threadId === "t1").update.status, "EXECUTING");
+});
+
+test("a finished request is not reopened by a late update of another operation", () => {
+  const s = stateWith(
+    { type: "update", update: update({ status: "DONE" }) },
+    { type: "update", update: update({ status: "EXECUTING" }) },
+  );
+  assert.equal(s.entries[0].update.status, "DONE");
+  // A stopped request can continue: that is a legitimate change.
+  const t = stateWith(
+    { type: "update", update: update({ status: "STOPPED", stopReason: "user" }) },
+    { type: "update", update: update({ status: "EXECUTING" }) },
+  );
+  assert.equal(t.entries[0].update.status, "EXECUTING");
+});
+
+test("a failed Ask arrives with an empty threadId and is matched by scope", () => {
+  const s = stateWith(
+    { type: "asked", id: 1, text: "первое", scope: { ...scope, screen: "today" } },
+    { type: "asked", id: 2, text: "второе", scope: { ...scope, screen: "settings" } },
+    { type: "update", update: update({ threadId: "", turn: 0, screen: "settings", status: "", problem: "failed" }) },
+  );
+  const [first, second] = s.entries;
+  assert.equal(first.update, null);
+  assert.equal(second.update.problem, "failed");
+  assert.equal(second.text, "второе");
+  assert.equal(second.threadId, "");
+});
+
+test("a failed button operation keeps the plan and its buttons and only attaches the problem", () => {
+  const plan = update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan: { summary: "s", steps: [], notes: [] } })] });
+  const s = stateWith(
+    { type: "update", update: plan },
+    { type: "update", update: update({ status: "", cards: [], problem: "invalid" }) },
+  );
+  assert.equal(s.entries.length, 1);
+  assert.equal(s.entries[0].update.status, "AWAITING_PLAN");
+  const m = entryModel(s.entries[0]);
+  assert.equal(m.cards[0].type, "plan");
+  assert.deepEqual(m.cards[0].buttons.map((b) => b.id), ["approve", "revise", "cancel"]);
+  assert.equal(m.cards.at(-1).type, "problem");
+  // The next real update clears the problem.
+  const next = reducePanel(s, { type: "update", update: update({ status: "EXECUTING" }) });
+  assert.equal(next.entries[0].update.problem, "");
+});
+
+test("a refused button on a stopped request shows the stop card and the problem card", () => {
+  const s = stateWith(
+    { type: "update", update: update({ status: "STOPPED", stopReason: "offline" }) },
+    { type: "update", update: update({ status: "", cards: [], problem: "budget" }) },
+  );
+  const types = entryModel(s.entries[0]).cards.map((c) => c.type);
+  assert.deepEqual(types.slice(-2), ["stopped", "problem"]);
+});
+
+test("the first update of a sent request binds to it by scope, and the next ones by thread", () => {
+  const s = stateWith(
+    { type: "asked", id: 1, text: "вопрос", scope },
+    { type: "update", update: update({ status: "PLANNING" }) },
+    { type: "update", update: update({ status: "AWAITING_PLAN" }) },
+  );
+  assert.equal(s.entries.length, 1);
+  assert.equal(s.entries[0].text, "вопрос");
+  assert.equal(s.entries[0].threadId, "t1");
+  assert.equal(s.entries[0].update.status, "AWAITING_PLAN");
+});
+
+test("updates arriving in reverse order keep the thread order by turn", () => {
+  const s = stateWith(
+    { type: "update", update: update({ turn: 2 }) },
+    { type: "update", update: update({ turn: 1 }) },
+    { type: "update", update: update({ threadId: "t0", turn: 1 }) },
+  );
+  assert.deepEqual(orderedEntries(s.entries).map((e) => `${e.threadId}:${e.turn}`), ["t1:1", "t1:2", "t0:1"]);
+});
+
+test("a refused Ask marks the request; an accepted one changes nothing", () => {
+  const sent = stateWith({ type: "asked", id: 7, text: "q", scope });
+  assert.equal(reducePanel(sent, { type: "askResult", id: 7, problem: "" }), sent);
+  const failed = reducePanel(sent, { type: "askResult", id: 7, problem: "offline" });
+  assert.equal(failed.entries[0].callProblem, "offline");
+  assert.equal(modelOf(update()).callLine, "");
+  assert.equal(entryModel(failed.entries[0]).callLine, "Нет связи с paratech.");
+});
+
+// ---- Context and Ctrl+K ----
+
+test("the context label follows the screen and is removable down to «Без предмета»", () => {
+  const home = contextFor("recordings", "", false);
+  assert.equal(home.label, "Записи и задачи");
+  assert.equal(home.ask.screen, "today");
+  assert.equal(home.removable, true);
+  const hw = contextFor("homework", "a1", false);
+  assert.equal(hw.label, "Домашние задания");
+  assert.deepEqual(hw.ask, { subjectId: "", lessonId: "", assignmentId: "a1", screen: "assignments" });
+  assert.equal(contextFor("diagnostics", "", false).ask.screen, "settings");
+  const none = contextFor("homework", "a1", true);
+  assert.equal(none.label, "Без предмета");
+  assert.equal(none.removable, false);
+  assert.equal(none.ask.assignmentId, "");
+  assert.equal(askInput(none, "что задали").text, "что задали");
+});
+
+test("Ctrl+K focuses the panel; other keys do not", () => {
+  const key = (over) => ({ key: "k", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, ...over });
+  assert.equal(isFocusPanelKey(key({})), true);
+  assert.equal(isFocusPanelKey(key({ key: "K" })), true);
+  assert.equal(isFocusPanelKey(key({ ctrlKey: false })), false);
+  assert.equal(isFocusPanelKey(key({ key: "j" })), false);
+  assert.equal(isFocusPanelKey(key({ shiftKey: true })), false);
+  assert.equal(requestText("  \n "), null);
+  assert.equal(requestText(" привет "), "привет");
+});
+
+// ---- Plan card ----
+
+test("plan card: caption, steps in impersonal words, buttons only while the plan awaits an answer", () => {
+  const plan = {
+    summary: "Создать предмет и разложить файл",
+    steps: [
+      { tool: "create_subject", args: [{ name: "name", type: "label", idKind: "", value: "Матан", values: [] }], deferred: [] },
+      { tool: "place_upload", args: [{ name: "upload", type: "id", idKind: "upload", value: "u1", values: [] }], deferred: ["subject"] },
+      { tool: "edit_due", args: [{ name: "due", type: "date", idKind: "", value: "2026-11-03", values: [] }], deferred: [] },
+    ],
+    notes: ["Файл останется во «Входящих»"],
+  };
+  const m = modelOf(update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan })] })).cards[0];
+  assert.equal(m.type, "plan");
+  assert.equal(m.caption, "Понял так");
+  assert.deepEqual(m.steps, [
+    "Создание предмета · Матан",
+    "Размещение файла · файл · после предыдущих шагов",
+    "Изменение срока · срок 03.11.2026",
+  ]);
+  assert.deepEqual(m.buttons.map((b) => b.label), ["Да", "Изменить", "Отмена"]);
+  const later = modelOf(update({ status: "EXECUTING", cards: [card({ kind: "plan", plan })] })).cards[0];
+  assert.deepEqual(later.buttons, []);
+  assert.equal(stepText({ tool: "new_tool", args: [], deferred: [] }), "Шаг");
+  const out = html(update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan })] }));
+  assert.match(out, /Понял так/);
+  assert.match(out, />Да</);
+});
+
+// ---- Question card ----
+
+test("question card: round N of 2, skip text, defaults and typed answers", () => {
+  const questions = {
+    round: 2,
+    questions: [
+      { kind: "choice", text: "Какой формат?", options: ["Word", "Текст"], default: 1, citeRef: "" },
+      { kind: "text", text: "Сколько страниц?", options: [], default: 0, citeRef: "" },
+    ],
+  };
+  const u = update({ status: "AWAITING_ANSWERS", cards: [card({ kind: "questions", questions })] });
+  const m = modelOf(u).cards[0];
+  assert.equal(m.caption, roundCaption(2));
+  assert.equal(m.caption, "Уточнение · раунд 2 из 2");
+  assert.equal(m.skip, "Пропустить — сделай как считаешь");
+  assert.equal(m.active, true);
+  assert.deepEqual(skipAnswers(questions.questions), [
+    { question: 0, option: 1, text: "" },
+    { question: 1, option: 0, text: texts.skipTextAnswer },
+  ]);
+  assert.equal(collectAnswers(questions.questions, {}, {}), null);
+  assert.deepEqual(collectAnswers(questions.questions, { 0: 0 }, { 1: " 5 " }), [
+    { question: 0, option: 0, text: "" },
+    { question: 1, option: 0, text: "5" },
+  ]);
+  const out = html(u);
+  assert.match(out, /Пропустить — сделай как считаешь/);
+  assert.match(out, /Какой формат\?/);
+  assert.doesNotMatch(html({ ...u, status: "EXECUTING" }), /Пропустить/);
+});
+
+// ---- Progress card ----
+
+test("progress card: shown while working, with «Стоп» only while executing", () => {
+  const u = update({ status: "EXECUTING", cards: [card({ kind: "progress", jobId: "j1" })] });
+  const m = modelOf(u).cards;
+  assert.equal(m.length, 1);
+  assert.deepEqual(m[0].buttons.map((b) => b.label), ["Стоп"]);
+  const planning = modelOf(update({ status: "PLANNING" })).cards;
+  assert.equal(planning[0].type, "progress");
+  assert.deepEqual(planning[0].buttons, []);
+  assert.match(html(u), /Работа идёт/);
+});
+
+// ---- Result card ----
+
+test("result card: the artifact reference becomes a label, never a path to open", () => {
+  assert.deepEqual(parseArtifact("exports/hw/task-1.docx"), { kind: "Файл", name: "task-1.docx" });
+  assert.deepEqual(parseArtifact("transcripts/2026/a.txt"), { kind: "Расшифровка", name: "a.txt" });
+  for (const bad of ["", "exports", "exports/", "models/x.bin", "exports/../secret", "exports//x", "exports/C:/x", "exports/a\\b", "/etc/passwd", "exports/\u0000x", "http://evil/x"]) {
+    assert.equal(parseArtifact(bad), null, bad);
+  }
+  const ok = html(update({ cards: [card({ kind: "result", artifact: "exports/hw/task-1.docx" })] }));
+  assert.match(ok, /task-1\.docx/);
+  assert.doesNotMatch(ok, /<a |href="[^#]/);
+  const bad = html(update({ cards: [card({ kind: "result", artifact: "exports/../x" })] }));
+  assert.match(bad, /Файл недоступен для показа/);
+});
+
+// ---- Answer, reply, cannot do ----
+
+test("answer card says the answer is ready without inventing its content", () => {
+  const out = html(update({ cards: [card({ kind: "answer", answerId: "ans1" })] }));
+  assert.match(out, /Ответ по материалам/);
+  assert.doesNotMatch(out, /ans1/);
+});
+
+test("cannot-do card: «Целиком не получится» with both parts", () => {
+  const out = html(update({
+    cards: [card({ kind: "cannot_do", cannotDo: { yourPart: ["Решить задачу 3"], ourPart: ["Оформить файл"] } })],
+  }));
+  assert.match(out, /Целиком не получится/);
+  assert.match(out, /Решить задачу 3/);
+  assert.match(out, /Оформить файл/);
+});
+
+// ---- Action line and confirm ----
+
+test("action line: «Отменить» is shown but disabled until the journal exists", () => {
+  const m = modelOf(update({ cards: [card({ kind: "action_line", actionId: "a1" })] })).cards[0];
+  assert.equal(m.type, "action");
+  assert.equal(m.undo.enabled, false);
+  const out = html(update({ cards: [card({ kind: "action_line", actionId: "a1" })] }));
+  assert.match(out, /<button[^>]*disabled[^>]*>Отменить</);
+  assert.match(out, /Пока недоступно/);
+});
+
+test("confirm card offers no buttons yet", () => {
+  const out = html(update({ cards: [card({ kind: "confirm", target: { kind: "proposal", id: "p1" } })] }));
+  assert.match(out, /Нужно подтверждение/);
+  assert.doesNotMatch(out, /<button/);
+});
+
+// ---- Stop reasons ----
+
+test("stop reasons: offline continues, failed retries, expired restarts, budget has no button", () => {
+  const stop = (reason, over = {}) => modelOf(update({ status: "STOPPED", stopReason: reason, ...over })).cards.at(-1);
+  const off = stop("offline");
+  assert.equal(off.type, "stopped");
+  assert.equal(off.text, "Не завершено: нет связи");
+  assert.deepEqual(off.buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
+  assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Начать заново"]);
+  assert.deepEqual(stop("budget").buttons, []);
+  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  // A stopped card and the update's reason are one card, not two.
+  const both = modelOf(update({ status: "STOPPED", stopReason: "offline", cards: [card({ kind: "stopped", stopReason: "offline" })] }));
+  assert.equal(both.cards.filter((c) => c.type === "stopped").length, 1);
+  const out = html(update({ status: "STOPPED", stopReason: "offline" }));
+  assert.match(out, /Не завершено: нет связи/);
+  assert.match(out, />Продолжить</);
+});
+
+test("update problems explain themselves and offer the next step", () => {
+  const p = (problem) => modelOf(update({ status: "", problem })).cards.at(-1);
+  assert.deepEqual(p("retry_required").buttons.map((b) => b.label), ["Повторить"]);
+  assert.deepEqual(p("restart_required").buttons.map((b) => b.label), ["Начать заново"]);
+  assert.equal(p("busy").type, "problem");
+  assert.equal(p("something unknown").text, "Не удалось выполнить просьбу.");
+});
+
+// ---- Offline ----
+
+function panelHtml(state, over = {}) {
+  return renderToStaticMarkup(
+    h(AgentPanelView, {
+      state, ctx: contextFor("recordings", "", false), draft: "", notice: "", inputRef: { current: null },
+      onDraft: noop, onSubmit: noop, onRemoveContext: noop, actionsFor: () => actions, ...over,
+    }),
+  );
+}
+
+test("offline: input disabled, «Нет связи с paratech», last thread visible with the stale note", () => {
+  const withThread = reducePanel(
+    reducePanel(initialPanelState, { type: "link", link: { link: "no_key", readOnly: true } }),
+    { type: "update", update: update({ cards: [card({ kind: "reply", text: "Последний ответ" })] }) },
+  );
+  const mode = panelMode(withThread);
+  assert.equal(mode.inputEnabled, false);
+  assert.equal(mode.offline, true);
+  assert.equal(mode.placeholder, "Нет связи с paratech");
+  assert.equal(mode.staleNote, "нет связи — может быть неактуально");
+  const out = panelHtml(withThread);
+  assert.match(out, /<input[^>]*disabled/);
+  assert.match(out, /Нет связи с paratech/);
+  assert.match(out, /нет связи — может быть неактуально/);
+  assert.match(out, /Последний ответ/);
+  // Without a thread there is nothing to call outdated.
+  assert.equal(panelMode(reducePanel(initialPanelState, { type: "link", link: { link: "no_hub", readOnly: true } })).staleNote, "");
+});
+
+test("a request stopped for lack of connection also reads as offline until it continues", () => {
+  const s = stateWith({ type: "update", update: update({ status: "STOPPED", stopReason: "offline" }) });
+  assert.equal(panelMode(s).inputEnabled, false);
+  const back = reducePanel(s, { type: "update", update: update({ status: "EXECUTING" }) });
+  assert.equal(panelMode(back).inputEnabled, true);
+});
+
+test("a local offline refusal does not lock the input", () => {
+  const s = reducePanel(stateWith({ type: "asked", id: 3, text: "q", scope }), { type: "askResult", id: 3, problem: "offline" });
+  assert.equal(panelMode(s).inputEnabled, true);
+});
+
+test("online: the input is enabled; before State answers it is not", () => {
+  const out = panelHtml(stateWith());
+  assert.doesNotMatch(out, /<input[^>]*disabled/);
+  assert.match(out, /Спросить paratech/);
+  assert.match(out, /Ctrl\+K/);
+  assert.equal(panelMode(initialPanelState).inputEnabled, false);
+});
+
+test("the context chip shows the label and the remove button only while removable", () => {
+  const out = panelHtml(stateWith());
+  assert.match(out, /Записи и задачи/);
+  assert.match(out, /aria-label="Убрать контекст"/);
+  const none = panelHtml(stateWith(), { ctx: contextFor("recordings", "", true) });
+  assert.match(none, /Без предмета/);
+  assert.doesNotMatch(none, /Убрать контекст/);
+});
+
+// ---- Plain text ----
+
+test("model text is rendered as plain text, never as markup", () => {
+  const evil = `<img src=x onerror=alert(1)><script>alert(2)</script> <b>жирный</b> & "кавычки"`;
+  const u = update({
+    status: "AWAITING_PLAN",
+    cards: [
+      card({ kind: "reply", text: evil }),
+      card({
+        kind: "plan",
+        plan: {
+          summary: evil,
+          steps: [{ tool: "create_subject", args: [{ name: "n", type: "label", idKind: "", value: evil, values: [] }], deferred: [] }],
+          notes: [evil],
+        },
+      }),
+      card({
+        kind: "questions",
+        questions: { round: 1, questions: [{ kind: "choice", text: evil, options: [evil], default: 0, citeRef: "" }] },
+      }),
+      card({ kind: "cannot_do", cannotDo: { yourPart: [evil], ourPart: [evil] } }),
+    ],
+  });
+  const out = html(u);
+  for (const tag of ["<img", "<script", "<b>"]) {
+    assert.ok(!out.includes(tag), `${tag} must be escaped`);
+  }
+  assert.ok(out.includes("&lt;img src=x onerror=alert(1)&gt;"));
+  assert.ok(out.includes("&lt;script&gt;"));
+  const userText = renderToStaticMarkup(
+    h(AgentRequest, {
+      model: entryModel({ key: "l", seq: 1, threadId: "", turn: 0, text: evil, scope, callProblem: "", update: null }),
+      actions,
+    }),
+  );
+  assert.ok(!userText.includes("<img"));
+});
+
+test("the panel code never builds markup from text", () => {
+  // homework.test.mjs bans the HTML-writing APIs in every source file, these included; here only that they are scanned.
+  const dir = new URL("../src/agent/", import.meta.url);
+  const files = readdirSync(dir).filter((f) => f.endsWith(".tsx"));
+  assert.ok(files.length >= 3);
+  for (const f of files) {
+    assert.doesNotMatch(readFileSync(new URL(f, dir), "utf8"), /DOMParser|document\.write|createContextualFragment/, f);
+  }
+});

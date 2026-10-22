@@ -68,6 +68,11 @@
     "src/pages/RecordingDeleteDialog.tsx",
     "src/bindings/knowledgeBase.ts",
     "src/knowledgeView.ts",
-    "src/pages/KnowledgeParts.tsx"
+    "src/pages/KnowledgeParts.tsx",
+    "src/bindings/agent.ts",
+    "src/agentState.ts",
+    "src/agentView.ts",
+    "src/agent/AgentCards.tsx",
+    "src/agent/AgentPanelView.tsx"
   ]
 }
