@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/domain/library/material"
@@ -39,7 +42,21 @@ const (
 	ErrLibraryFileUnreadable  = libraryError("Не удалось прочитать файл.")
 	ErrLibraryBusy            = libraryError("Данные сейчас меняются. Попробуйте ещё раз.")
 	ErrLibraryUnavailable     = libraryError("Не удалось прочитать библиотеку. Попробуйте ещё раз.")
+	ErrLibraryDroppedPath     = libraryError("Этот файл добавить нельзя: перетащите файл с диска этого компьютера.")
 )
+
+// maxDroppedPath bounds a dropped path in bytes (the longest Windows path is 32767 UTF-16 units).
+const maxDroppedPath = 32767
+
+// droppedExtension reports whether a dropped file may have the extension ext (lower case), as in the open dialog;
+// the type is still told from the content.
+func droppedExtension(ext string) bool {
+	switch ext {
+	case ".docx", ".pptx", ".pdf", ".txt":
+		return true
+	}
+	return false
+}
 
 // Operation names of the log.
 const (
@@ -51,6 +68,7 @@ const (
 	opLibraryRemoveSub   = "ui: remove subject"
 	opLibraryMaterials   = "ui: library files"
 	opLibraryPick        = "ui: choose a file for the library"
+	opLibraryDrop        = "ui: file dropped on the window refused"
 	opLibraryRead        = "ui: read a file for the library"
 	opLibraryImport      = "ui: import a file into the library"
 	opLibraryPlace       = "ui: file a material"
@@ -253,6 +271,44 @@ func (s *LibraryService) ImportFile(ctx context.Context) (LibraryImport, error) 
 	case path == "":
 		return LibraryImport{Cancelled: true}, nil
 	}
+	return s.importPath(ctx, path)
+}
+
+// ImportDroppedFile puts a file dropped on the window into «Входящие», as ImportFile does. The path comes from the
+// page, so it is untrusted: only a local absolute path to a DOCX, PPTX, PDF or TXT file is read (no network or device
+// paths, no "..", no alternate streams); the reader takes regular files only.
+func (s *LibraryService) ImportDroppedFile(ctx context.Context, path string) (LibraryImport, error) {
+	if err := droppedPathError(path); err != nil {
+		s.log.Info(opLibraryDrop, "result", err.Error())
+		return LibraryImport{}, err
+	}
+	return s.importPath(ctx, path)
+}
+
+// droppedPathError checks a path the page passed; the error is the page's text.
+func droppedPathError(path string) error {
+	if path == "" || len(path) > maxDroppedPath || !utf8.ValidString(path) || strings.ContainsRune(path, 0) ||
+		!filepath.IsAbs(path) || strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
+		return ErrLibraryDroppedPath
+	}
+	// A volume name is "C:" here; any other colon names an alternate data stream.
+	rest := path[len(filepath.VolumeName(path)):]
+	if strings.ContainsRune(rest, ':') {
+		return ErrLibraryDroppedPath
+	}
+	for _, part := range strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if part == ".." || part == "." {
+			return ErrLibraryDroppedPath
+		}
+	}
+	if !droppedExtension(strings.ToLower(filepath.Ext(path))) {
+		return ErrLibraryUnsupported
+	}
+	return nil
+}
+
+// importPath reads the file at path and imports it.
+func (s *LibraryService) importPath(ctx context.Context, path string) (LibraryImport, error) {
 	data, err := s.files.ReadFile(ctx, path, material.MaxBytes)
 	switch {
 	case err != nil:

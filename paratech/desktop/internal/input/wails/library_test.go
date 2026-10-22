@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -289,6 +290,72 @@ func TestLibraryImportFile(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "student") || strings.Contains(logs.String(), "Лекция") {
 		t.Fatalf("the log has the path or the file name: %s", logs.String())
+	}
+}
+
+func TestLibraryImportDroppedFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir() // absolute on every OS; the fake reader never touches it
+	good := filepath.Join(dir, "Лекция 1.DOCX")
+	files := &memFiles{files: map[string][]byte{good: []byte("bytes")}}
+	s, uc, logs := newLibraryBinding(t, "", files)
+	res, err := s.ImportDroppedFile(ctx, good)
+	if err != nil || res.Cancelled || res.Material == nil || res.Material.ID != "m1" {
+		t.Fatalf("ImportDroppedFile = %+v, %v", res, err)
+	}
+	if uc.upload.Name != "Лекция 1.DOCX" || string(uc.upload.Data) != "bytes" || files.limit != material.MaxBytes {
+		t.Fatalf("upload %q %q, limit %d", uc.upload.Name, uc.upload.Data, files.limit)
+	}
+
+	sep := string(filepath.Separator)
+	tests := []struct {
+		name string
+		path string
+		want error
+	}{
+		{"empty", "", ErrLibraryDroppedPath},
+		{"relative", "Лекция.docx", ErrLibraryDroppedPath},
+		{"relative up", ".." + sep + "Лекция.docx", ErrLibraryDroppedPath},
+		{"traversal", dir + sep + ".." + sep + "Лекция.docx", ErrLibraryDroppedPath},
+		{"dot segment", dir + sep + "." + sep + "Лекция.docx", ErrLibraryDroppedPath},
+		{"network share", `\\server\share\Лекция.docx`, ErrLibraryDroppedPath},
+		{"network share, slashes", "//server/share/Лекция.docx", ErrLibraryDroppedPath},
+		{"device path", `\\?\C:\Users\student\Лекция.docx`, ErrLibraryDroppedPath},
+		{"alternate stream", filepath.Join(dir, "a.docx:hidden.txt"), ErrLibraryDroppedPath},
+		{"nul byte", filepath.Join(dir, "a\x00.docx"), ErrLibraryDroppedPath},
+		{"not UTF-8", filepath.Join(dir, "a\xff.docx"), ErrLibraryDroppedPath},
+		{"too long", filepath.Join(dir, strings.Repeat("a", maxDroppedPath)+".docx"), ErrLibraryDroppedPath},
+		{"executable", filepath.Join(dir, "setup.exe"), ErrLibraryUnsupported},
+		{"no extension", filepath.Join(dir, "README"), ErrLibraryUnsupported},
+		{"shortcut", filepath.Join(dir, "Лекция.docx.lnk"), ErrLibraryUnsupported},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := &memFiles{files: map[string][]byte{tt.path: []byte("bytes")}}
+			s, uc, logs := newLibraryBinding(t, "", files)
+			if _, err := s.ImportDroppedFile(ctx, tt.path); !errors.Is(err, tt.want) {
+				t.Fatalf("ImportDroppedFile = %v, want %v", err, tt.want)
+			}
+			if files.limit != 0 || uc.upload.Data != nil {
+				t.Fatalf("a refused path was read or imported")
+			}
+			if strings.Contains(logs.String(), "Лекция") || strings.Contains(logs.String(), "server") {
+				t.Fatalf("the log has the path: %s", logs.String())
+			}
+		})
+	}
+
+	// The reader's refusal (a directory, a device, a missing file) and the size limit hold as for the dialog.
+	unreadable, _, _ := newLibraryBinding(t, "", &memFiles{err: errors.New("not a regular file")})
+	if _, err := unreadable.ImportDroppedFile(ctx, good); !errors.Is(err, ErrLibraryFileUnreadable) {
+		t.Fatalf("ImportDroppedFile unreadable = %v", err)
+	}
+	large, luc, _ := newLibraryBinding(t, "", &memFiles{files: map[string][]byte{good: make([]byte, material.MaxBytes+1)}})
+	if _, err := large.ImportDroppedFile(ctx, good); !errors.Is(err, ErrLibraryFileTooLarge) || luc.upload.Data != nil {
+		t.Fatalf("ImportDroppedFile too large = %v", err)
+	}
+	if strings.Contains(logs.String(), "Лекция") {
+		t.Fatalf("the log has the file name: %s", logs.String())
 	}
 }
 
