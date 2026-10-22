@@ -36,7 +36,8 @@ func validCore() Core {
 			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
 			Journal: &fakeJournal{}, Clock: fixedClock{},
 		},
-		Today: &fakeToday{},
+		Today:        &fakeToday{},
+		AgentConfirm: AgentConfirmCore{Proposals: newConfirmProposals(), Materials: fakeMaterials{}, Deletions: &fakeDeletion{}},
 	}
 }
 

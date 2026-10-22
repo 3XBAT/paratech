@@ -28,9 +28,11 @@ type agentReads struct {
 	materials   *homeworkflow.MaterialJobs // the summary and homework search of a library material (TASK-122)
 }
 
-// wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, ADR-0021): the steps of a request on the Hub's
-// AgentStep, the action journal with Undo and the Driver that runs the read tools and the reversible actions; its
+// wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, TASK-127, ADR-0021): the steps of a request on the
+// Hub's AgentStep, the action journal with Undo and the Driver that runs the read tools, the reversible actions and
+// the proposals (a confirm card only: the proposals service and the deletion preview, never their confirmation); its
 // updates go to the agent panel of the UI (TASK-119). Today and the zone of the base come from the student's clock.
+// It needs c.drafts and c.deletions.
 func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, log *slog.Logger) error {
 	facts, err := agentloop.NewFacts(reads.knowledge)
 	if err != nil {
@@ -69,8 +71,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library,
 		Knowledge: reads.knowledge, Activity: reads.activity,
-		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions, Clock: e.local,
-		Log: log,
+		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions,
+		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Clock: e.local, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent driver: %w", err)

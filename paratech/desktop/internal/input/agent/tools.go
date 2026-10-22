@@ -62,9 +62,9 @@ type Deliveries interface {
 	ListForAssignment(ctx context.Context, a shared.AssignmentID) ([]senddelivery.View, error)
 }
 
-// tools runs the calls a step admits: the read tools, the paid reader inspect_upload (TASK-122) and the reversible
-// actions (write.go, actions.go). answer_question, the proposals and the turnkey tools come with later tasks and
-// answer "unavailable" until then. A failing use case answers an error enum: no error text reaches the planner
+// tools runs the calls a step admits: the read tools, the paid reader inspect_upload (TASK-122), the reversible
+// actions (write.go, actions.go) and the proposals of class C (propose.go, TASK-127), which only make a confirm card.
+// answer_question and the turnkey tools come with later tasks and answer "unavailable" until then. A failing use case answers an error enum: no error text reaches the planner
 // (ADR-0022).
 type tools struct {
 	library     SubjectLibrary
@@ -75,6 +75,9 @@ type tools struct {
 	deliveries  Deliveries
 	journal     Journal
 	actions     *Actions
+	proposals   Proposals        // nil: propose_deadline and propose_send answer "unavailable"
+	deletions   DeletionPreviews // nil: propose_delete_recording answers "unavailable"
+	drafts      DraftVersions    // nil: list_assignments shows no draft version
 	clock       Clock
 	log         *slog.Logger
 }
@@ -107,8 +110,11 @@ var paidReads = []values.Tool{values.ToolInspectUpload}
 
 // run runs one admitted call of step st and returns what it gave.
 func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran {
-	if c.Class == actionpolicy.ClassU {
+	switch c.Class {
+	case actionpolicy.ClassU:
 		return t.write(ctx, st, c)
+	case actionpolicy.ClassC:
+		return t.propose(ctx, st, c)
 	}
 	return ran{out: t.read(ctx, st.Scope, c)}
 }
@@ -246,11 +252,39 @@ func (t tools) listAssignments(ctx context.Context, call values.Call, scope valu
 		if m, ok := subjects[v.Subject]; ok && v.Subject != "" {
 			row.Subject, _ = refOfID(values.KindSubject, string(m.ID))
 		}
-		if q.Match(row) {
-			rows = append(rows, row)
+		if !q.Match(row) {
+			continue
 		}
+		if row.Version, err = t.latestVersion(ctx, v.ID); err != nil {
+			return values.ToolResult{}, nil, err
+		}
+		rows = append(rows, row)
 	}
 	return values.AssignmentsResult(call.ID(), rows)
+}
+
+// latestVersion is the latest draft version of an assignment, zero without a draft or without the drafts wired.
+func (t tools) latestVersion(ctx context.Context, a shared.AssignmentID) (values.Ref, error) {
+	if t.drafts == nil {
+		return values.Ref{}, nil
+	}
+	versions, err := t.drafts.DraftVersions(ctx, a)
+	if errors.Is(err, shared.ErrNotFound) {
+		return values.Ref{}, nil
+	}
+	if err != nil {
+		return values.Ref{}, err
+	}
+	for _, v := range versions {
+		if v.Latest {
+			r, err := values.VersionRef(v.Number)
+			if err != nil {
+				return values.Ref{}, nil
+			}
+			return r, nil
+		}
+	}
+	return values.Ref{}, nil
 }
 
 // --- job_status ----------------------------------------------------------------------------------------

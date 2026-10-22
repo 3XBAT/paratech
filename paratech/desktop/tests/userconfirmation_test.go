@@ -1,8 +1,8 @@
 package tests
 
 // Source test for the user's confirmation (AC-14, AC-15, TASK-040 follow-up closed by TASK-045): the use case methods
-// that act on the user's decision, homeworkflow.Service.Confirm, Execute and ConfirmSend (an email, an export, a
-// calendar event) and senddelivery.Service.MarkSent and SendAgain (the resolution of an unknown outcome), are called in
+// that act on the user's decision, homeworkflow.Service.Confirm, Execute, ConfirmSend and ConfirmDeadline (an email,
+// an export, a calendar event; ConfirmDeadline since TASK-127) and senddelivery.Service.MarkSent and SendAgain (the resolution of an unknown outcome), are called in
 // production code only by the Wails bindings, where a click of the user is the caller. go/parser has no types, so the
 // check is by name: no production file may select a method with one of these names, except the bindings and the few
 // use case files that implement these methods on top of the aggregates' methods of the same names. The list names
@@ -22,12 +22,13 @@ import (
 
 // userOnlyMethods are the method names only a user's action may call.
 var userOnlyMethods = map[string]bool{
-	"Confirm": true, "Execute": true, "ConfirmSend": true, "MarkSent": true, "SendAgain": true,
+	"Confirm": true, "Execute": true, "ConfirmSend": true, "ConfirmDeadline": true, "MarkSent": true, "SendAgain": true,
 }
 
 // userOnlyCallers are the production files (module-relative, slash-separated) where the names may appear.
 var userOnlyCallers = map[string]bool{
 	"internal/input/wails/homework.go":         true, // the bindings: ConfirmSend, MarkSent, SendAgain
+	"internal/input/wails/agentconfirm.go":     true, // «Да» of the agent's confirm card: ConfirmSend, ConfirmDeadline
 	"internal/cases/homeworkflow/proposals.go": true, // ConfirmSend = proposal.Confirm, then Execute
 	"internal/cases/senddelivery/service.go":   true, // MarkSent and SendAgain on the delivery aggregate
 	"internal/cases/senddelivery/job.go":       true, // the reconciler's resolution on the delivery aggregate

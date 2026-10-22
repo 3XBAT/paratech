@@ -21,11 +21,13 @@ const (
 )
 
 // Journal is the action journal (cases/agentjournal) as the write tools use it: every action is PENDING before its
-// use case runs and DONE or FAILED after (ADR-0021); Find makes a call run again under the same ID act once.
+// use case runs and DONE or FAILED after (ADR-0021), a proposal of a C tool is PROPOSED; Find makes a call run again
+// under the same ID act once.
 type Journal interface {
 	Find(ctx context.Context, th shared.ThreadID, turn int, callID string) (agentjournal.Entry, error)
 	Begin(ctx context.Context, in agentjournal.BeginInput) (agentjournal.Entry, error)
 	Finish(ctx context.Context, id shared.ActionID, out agentjournal.Outcome) (agentjournal.Entry, error)
+	Propose(ctx context.Context, in agentjournal.BeginInput, proposal values.Ref) (agentjournal.Entry, error)
 }
 
 // ran is what running one call gave: the outcome for the step use case, whether it was an action (its outcome is

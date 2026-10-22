@@ -55,6 +55,11 @@ type Deps struct {
 	Clock          Clock
 	IDs            IDGenerator
 	Tx             Tx
+
+	// Optional (TASK-127): the agent's send of a named draft version and the version shown on its confirmation, and
+	// the reuse of a deadline or version send proposal that already waits for «Да».
+	Drafts  DraftReader
+	Waiting WaitingProposals
 }
 
 // ProposalView is a proposal as the confirmation dialog shows it (PRD section 13.3, AC-14): what will happen, to which
@@ -78,6 +83,9 @@ type ProposalView struct {
 	AttachmentName   string
 	AttachmentSize   int64
 	AttachmentFormat proposal.Format
+	// DraftVersion is the draft version whose text is exactly the pinned attachment (a text export); 0 when none is
+	// (a Word file, an edit since the export) or the drafts are not wired (TASK-127).
+	DraftVersion int
 }
 
 func viewOf(p *proposal.Proposal) ProposalView {
@@ -153,6 +161,8 @@ type AssignmentView struct {
 	// CorrectedSubject and CorrectedTeacher are the user's correction, for the edit form; empty: none.
 	CorrectedSubject string
 	CorrectedTeacher string
+	// MaterialID is the library material the assignment was found in; empty for one from a lesson (TASK-122).
+	MaterialID shared.MaterialID
 }
 
 func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) AssignmentView {
@@ -162,7 +172,7 @@ func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) Assignment
 		UserEdited: a.UserEdited(), Version: a.Version(), UpdatedAt: a.UpdatedAt(),
 		Subject: l.Subject(), SubjectSource: l.SubjectSource(), Kind: l.Kind(), Teacher: l.Teacher(),
 		TeacherSource: l.TeacherSource(), LessonDate: l.Date(),
-		CorrectedSubject: a.Correction().Subject(), CorrectedTeacher: a.Correction().Teacher(),
+		CorrectedSubject: a.Correction().Subject(), CorrectedTeacher: a.Correction().Teacher(), MaterialID: a.MaterialID(),
 	}
 }
 

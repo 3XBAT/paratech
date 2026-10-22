@@ -26,6 +26,19 @@ var (
 	// ErrNotASend is returned by Service.ConfirmSend for a proposal that is not a send_homework_email one.
 	ErrNotASend = errors.New("homework workflow: not a send proposal")
 
+	// ErrNotADeadline is returned by Service.ConfirmDeadline for a proposal that is not a create_deadline_event one.
+	ErrNotADeadline = errors.New("homework workflow: not a deadline proposal")
+
+	// ErrNoDue is returned by Service.ProposeDeadline for an assignment without a deadline; nothing is proposed.
+	ErrNoDue = errors.New("homework workflow: the assignment has no deadline")
+
+	// ErrVersionNotExported is returned by Service.ProposeEmailOfVersion when the export file does not hold exactly
+	// that draft version (not exported, another version or a Word file); nothing is proposed.
+	ErrVersionNotExported = errors.New("homework workflow: the export file does not hold that draft version")
+
+	// ErrNoDrafts is returned by Service.ProposeEmailOfVersion when the service was built without the drafts.
+	ErrNoDrafts = errors.New("homework workflow: drafts are not wired")
+
 	// ErrExportLocked is returned by Drafts.ExportDraft while an email of the assignment is unresolved (PENDING,
 	// SENDING or UNKNOWN): the export file is its attachment, and overwriting it would fail or change that email.
 	ErrExportLocked = errors.New("homework draft: the export file is the attachment of an unresolved email")

@@ -27,8 +27,10 @@ and the INSPECT_MATERIAL answer: every fixture in every answer slot is refused b
 of an uploaded file read end to end it moves nothing) and `hub/tests/agent_eval_test.go` (catalog check, the step through the handler, and the INSPECT_MATERIAL reader:
 every fixture as the material text, obeyed by the model in each answer slot, is a permanent `PROVIDER_ERROR`).
 
+The C tools run end to end through the Driver to a confirm card in `desktop/tests/agent_propose_test.go` (TASK-127):
+the methodichka fixture is the source file of the assignment, its address never becomes the recipient.
+
 Pending the Driver / later tasks (not faked here):
-- C tool not executed end to end through the loop; `input/agent` has no Confirm/Execute/Send/Delete (TASK-117, TASK-127).
 - Result mapper drops transcript and file text from tool results (ADR-0022, TASK-117).
 - ICS lesson title through the real loop; library → base mapping drops names `ParseName` refuses (TASK-117/121).
 

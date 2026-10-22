@@ -11,15 +11,19 @@ import (
 // local state, the user confirms, and only then the adapter acts. The mailer is the delivery service (a delivery keyed
 // by the command, never resent while its outcome is unknown), the exporter writes through the Storage Manager, the
 // recipient comes from the settings, the deadline goes to the app calendar (deadlineCalendar; only this path writes a
-// deadline, hard rule 3). It needs c.deliveries and c.calendar.
+// deadline, hard rule 3). The drafts let the agent's send name a draft version and the confirmation show it; the
+// waiting proposals let the same deadline proposed again reuse its card (TASK-127). It needs c.deliveries and
+// c.calendar.
 func (c *core) wireProposals(e env, settings settingsLoader) error {
 	var err error
 	assignments := sqlite.NewAssignmentRepository(c.db)
+	proposals := sqlite.NewProposalRepository(c.db)
 	c.proposals, err = homeworkflow.New(homeworkflow.Deps{
-		Proposals: sqlite.NewProposalRepository(c.db), Assignments: assignments, AssignmentList: assignments,
+		Proposals: proposals, Assignments: assignments, AssignmentList: assignments,
 		Artifacts: c.store, Recipients: recipientSettings{settings}, Mailer: c.deliveries, Exporter: c.store,
 		Calendar: deadlineCalendar{c.calendar}, Recordings: sqlite.NewRecordingRepository(c.db),
 		Lessons: sqlite.NewLessonRepository(c.db), Clock: e.local, IDs: e.ids, Tx: c.db,
+		Drafts: sqlite.NewDraftRepository(c.db), Waiting: proposals,
 	})
 	if err != nil {
 		return fmt.Errorf("app: action proposals: %w", err)

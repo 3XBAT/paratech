@@ -91,8 +91,9 @@ type Clock interface {
 	Now() time.Time
 }
 
-// Deps are the dependencies of the Driver; every one except Journal, Actions, Inspector and Log is required. Without
-// Journal and Actions the actions (class U) answer "unavailable", without Inspector inspect_upload does.
+// Deps are the dependencies of the Driver; every one except Journal, Actions, Inspector, Proposals, Deletions, Drafts
+// and Log is required. Without Journal and Actions the actions (class U) answer "unavailable", without Inspector
+// inspect_upload does, without Journal and Proposals or Deletions the proposals (class C) do.
 type Deps struct {
 	Turns       Turns
 	Sink        Sink
@@ -104,6 +105,9 @@ type Deps struct {
 	Deliveries  Deliveries
 	Journal     Journal
 	Actions     *Actions
+	Proposals   Proposals
+	Deletions   DeletionPreviews
+	Drafts      DraftVersions
 	Clock       Clock
 	Log         *slog.Logger
 }
@@ -139,7 +143,8 @@ func New(d Deps) (*Driver, error) {
 		turns: d.Turns, sink: d.Sink, log: log, cancels: map[uint64]context.CancelFunc{},
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, knowledge: d.Knowledge, activity: d.Activity, assignments: d.Assignments,
-			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, clock: d.Clock, log: log,
+			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
+			deletions: d.Deletions, drafts: d.Drafts, clock: d.Clock, log: log,
 		},
 	}, nil
 }

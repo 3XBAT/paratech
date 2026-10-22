@@ -116,6 +116,7 @@ type AssignmentRow struct {
 	Lesson  Ref
 	Due     Date
 	Status  AssignmentStatus
+	Version Ref // the latest draft version, for propose_send; zero without a draft
 }
 
 // JobRow is one job of job_status.
@@ -289,12 +290,13 @@ func AssignmentsResult(callID string, rows []AssignmentRow) (ToolResult, []Ref, 
 		Lesson  string `json:"lesson,omitempty"`
 		Due     string `json:"due,omitempty"`
 		Status  string `json:"status"`
+		Version string `json:"version,omitempty"`
 	}
 	items := make([]item, 0, len(rows))
 	refs := make([][]Ref, 0, len(rows)) // per row
 	for _, r := range rows {
 		if err := errorsOf(wantRef(r.ID, KindAssignment, true), wantRef(r.Subject, KindSubject, false),
-			wantRef(r.Lesson, KindLesson, false)); err != nil {
+			wantRef(r.Lesson, KindLesson, false), wantRef(r.Version, KindVersion, false)); err != nil {
 			return ToolResult{}, nil, err
 		}
 		if !slices.Contains([]AssignmentStatus{AssignmentUpcoming, AssignmentOverdue, AssignmentNoDue}, r.Status) {
@@ -302,8 +304,9 @@ func AssignmentsResult(callID string, rows []AssignmentRow) (ToolResult, []Ref, 
 		}
 		items = append(items, item{
 			ID: r.ID.ID(), Subject: r.Subject.ID(), Lesson: r.Lesson.ID(), Due: r.Due.String(), Status: string(r.Status),
+			Version: r.Version.ID(),
 		})
-		refs = append(refs, []Ref{r.ID, r.Subject, r.Lesson})
+		refs = append(refs, []Ref{r.ID, r.Subject, r.Lesson, r.Version})
 	}
 	return listResult(callID, "assignments", items, refs)
 }
