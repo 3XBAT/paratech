@@ -89,8 +89,9 @@ func newAgent(t *testing.T, link AgentLink) (*AgentService, *fakeAgentDriver, co
 	t.Cleanup(cancel)
 	var logs bytes.Buffer
 	d := &fakeAgentDriver{}
-	s := NewAgentService(AgentCore{Driver: d, Link: link, Panel: NewAgentPanel(discard()), Life: life},
-		slog.New(slog.NewTextHandler(&logs, nil)))
+	s := NewAgentService(AgentCore{
+		Driver: d, Link: link, Panel: NewAgentPanel(discard()), Life: life, Journal: &fakeJournal{}, Clock: fixedClock{},
+	}, slog.New(slog.NewTextHandler(&logs, nil)))
 	return s, d, cancel, &logs
 }
 
@@ -303,15 +304,14 @@ func TestAgentDriverRefusal(t *testing.T) {
 	}
 }
 
-func TestAgentUndoAndHistoryNotYet(t *testing.T) {
+// Undo and History go to the journal, never to the Driver (the Undo cases are in agentjournal_test.go).
+func TestAgentUndoAndHistorySkipTheDriver(t *testing.T) {
 	s, d, _, _ := newAgent(t, readyLink())
-	if res := s.Undo(context.Background(), "act-1"); res.Problem != AgentProblemUnavailable {
+	if res := s.Undo(context.Background(), "act-1"); res.Problem != "" {
 		t.Errorf("Undo = %+v", res)
 	}
-	h := s.History(context.Background(), "")
-	b, err := json.Marshal(h)
-	if err != nil || string(b) != `{"problem":"unavailable","requests":[]}` {
-		t.Errorf("History = %s, %v", b, err)
+	if h := s.History(context.Background(), AgentHistoryFilter{}); h.Problem != "" {
+		t.Errorf("History = %+v", h)
 	}
 	if len(d.calls) != 0 {
 		t.Errorf("driver calls = %+v", d.calls)

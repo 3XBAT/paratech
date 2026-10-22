@@ -2,7 +2,17 @@ import { useId, useState } from "react";
 import type { AnswerInput } from "../bindings/agent.js";
 import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
-import { type ButtonId, type ButtonModel, type CardModel, collectAnswers, type EntryModel, skipAnswers, texts } from "../agentView.js";
+import {
+  type ButtonId,
+  type ButtonModel,
+  type CardModel,
+  collectAnswers,
+  type EntryModel,
+  skipAnswers,
+  texts,
+  undoableActions,
+  type UndoNote,
+} from "../agentView.js";
 
 // Every text of the model reaches the page as a React text node: React escapes it, so markup in it stays visible text.
 // No element is built from model text.
@@ -14,6 +24,12 @@ export interface CardActions {
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
+  /** «Отменить» of an action line. */
+  undo(actionId: string): void;
+  /** «Отменить всё» of the request. */
+  undoAll(): void;
+  /** What «Отменить» of the action did, if it was pressed. */
+  undoNote(actionId: string): UndoNote | undefined;
 }
 
 function Buttons(props: { buttons: ButtonModel[]; busy?: boolean; onPress: (id: ButtonId) => void }) {
@@ -215,16 +231,25 @@ function Card(props: { card: CardModel; actions: CardActions }) {
           <p className="muted">{card.text}</p>
         </section>
       );
-    case "action":
+    case "action": {
+      const note = props.actions.undoNote(card.actionId);
       return (
         <div className="ag-act">
-          <Icon name="ok" />
-          <span className="ag-act-tx">{card.text}</span>
-          <Button size="sm" variant="ghost" disabled disabledReason={card.undo.reason}>
-            {card.undo.label}
-          </Button>
+          <Icon name={note?.done ? "back" : "ok"} />
+          <span className="ag-act-tx">{note?.done ? texts.undoDone : card.text}</span>
+          {!note?.done && (
+            <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
+              {note?.busy ? texts.undoBusy : card.undo.label}
+            </Button>
+          )}
+          {note && !note.done && !note.busy && note.text !== "" && (
+            <span className="ag-act-note small muted" role="status">
+              {note.text}
+            </span>
+          )}
         </div>
       );
+    }
     case "stopped":
     case "problem":
       return (
@@ -244,6 +269,8 @@ function Card(props: { card: CardModel; actions: CardActions }) {
 /** One request of the thread: the student's text, then the cards. */
 export function AgentRequest(props: { model: EntryModel; actions: CardActions }) {
   const { model } = props;
+  // «Отменить всё» only when there is more than one action left to undo.
+  const open = undoableActions(model.cards).filter((id) => !props.actions.undoNote(id)?.done);
   return (
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
@@ -256,6 +283,13 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions })
         // Kind and caption (the question round) are in the key so a new card does not inherit the typed state of the old one.
         <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />
       ))}
+      {open.length > 1 && (
+        <div className="ag-actions">
+          <Button size="sm" variant="ghost" disabled={open.some((id) => props.actions.undoNote(id)?.busy)} onClick={props.actions.undoAll}>
+            {texts.undoAll}
+          </Button>
+        </div>
+      )}
     </article>
   );
 }

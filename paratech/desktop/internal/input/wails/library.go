@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/domain/library/material"
@@ -39,7 +41,21 @@ const (
 	ErrLibraryFileUnreadable  = libraryError("Не удалось прочитать файл.")
 	ErrLibraryBusy            = libraryError("Данные сейчас меняются. Попробуйте ещё раз.")
 	ErrLibraryUnavailable     = libraryError("Не удалось прочитать библиотеку. Попробуйте ещё раз.")
+	ErrLibraryDroppedPath     = libraryError("Этот файл добавить нельзя: перетащите файл с диска этого компьютера.")
 )
+
+// maxDroppedPath bounds a dropped path in bytes (the longest Windows path is 32767 UTF-16 units).
+const maxDroppedPath = 32767
+
+// droppedExtension reports whether a dropped file may have the extension ext (lower case), as in the open dialog;
+// the type is still told from the content.
+func droppedExtension(ext string) bool {
+	switch ext {
+	case ".docx", ".pptx", ".pdf", ".txt":
+		return true
+	}
+	return false
+}
 
 // Operation names of the log.
 const (
@@ -51,6 +67,7 @@ const (
 	opLibraryRemoveSub   = "ui: remove subject"
 	opLibraryMaterials   = "ui: library files"
 	opLibraryPick        = "ui: choose a file for the library"
+	opLibraryDrop        = "ui: file dropped on the window refused"
 	opLibraryRead        = "ui: read a file for the library"
 	opLibraryImport      = "ui: import a file into the library"
 	opLibraryPlace       = "ui: file a material"
@@ -253,6 +270,62 @@ func (s *LibraryService) ImportFile(ctx context.Context) (LibraryImport, error) 
 	case path == "":
 		return LibraryImport{Cancelled: true}, nil
 	}
+	return s.importPath(ctx, path)
+}
+
+// ImportDroppedFile puts a file dropped on the window into «Входящие», as ImportFile does. The path comes from the
+// page, so it is untrusted: only a local absolute path to a DOCX, PPTX, PDF or TXT file is read (no network or device
+// paths, no "..", no alternate streams); the reader takes regular files only.
+func (s *LibraryService) ImportDroppedFile(ctx context.Context, path string) (LibraryImport, error) {
+	if err := droppedPathError(path); err != nil {
+		s.log.Info(opLibraryDrop, "result", err.Error())
+		return LibraryImport{}, err
+	}
+	return s.importPath(ctx, path)
+}
+
+// droppedPathError checks a path the page passed; the error is the page's text. Only a drive-letter path ("C:\...")
+// is accepted: an allow-list, because Windows reads mixed separators ("\/host/share") as UNC and "\x" as rooted on
+// the current drive. The check is plain string work, so it means the same on every OS the tests run on.
+func droppedPathError(path string) error {
+	if path == "" || len(path) > maxDroppedPath || !utf8.ValidString(path) || strings.ContainsRune(path, 0) ||
+		!driveLetterPath(path) {
+		return ErrLibraryDroppedPath
+	}
+	// Past "C:", any colon names an alternate data stream.
+	rest := path[2:]
+	if strings.ContainsRune(rest, ':') {
+		return ErrLibraryDroppedPath
+	}
+	for _, part := range strings.FieldsFunc(rest, isPathSeparator) {
+		if part == ".." || part == "." {
+			return ErrLibraryDroppedPath
+		}
+	}
+	name := baseName(path)
+	ext := ""
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		ext = name[i:]
+	}
+	if !droppedExtension(strings.ToLower(ext)) {
+		return ErrLibraryUnsupported
+	}
+	return nil
+}
+
+// driveLetterPath reports whether path starts with an ASCII drive letter, a colon and a separator.
+func driveLetterPath(path string) bool {
+	if len(path) < 3 || path[1] != ':' || !isPathSeparator(rune(path[2])) {
+		return false
+	}
+	c := path[0] | 0x20 // ASCII lower case
+	return c >= 'a' && c <= 'z'
+}
+
+func isPathSeparator(r rune) bool { return r == '/' || r == '\\' }
+
+// importPath reads the file at path and imports it.
+func (s *LibraryService) importPath(ctx context.Context, path string) (LibraryImport, error) {
 	data, err := s.files.ReadFile(ctx, path, material.MaxBytes)
 	switch {
 	case err != nil:

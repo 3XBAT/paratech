@@ -2676,7 +2676,7 @@
                 "TASK-120",
                 "TASK-123"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-125",
@@ -2936,6 +2936,29 @@
                 "Исполнитель: frontend"
             ],
             "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-124"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-138",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Предметы · ядро + UI] Перетаскивание файла в окно по-настоящему: путь остаётся в Go, на страницу приходят только id",
+            "acceptance_criteria": [
+                "Супервизор 2026-10-22 (follow-up TASK-124): WebView2 не отдаёт странице путь брошенного файла, поэтому drop zone из TASK-124 всегда показывает подсказку «Добавить файл»; ревьюер TASK-124 (High) — не принимать путь от страницы",
+                "Go: окно с EnableFileDrop, обработчик events.Common.WindowFilesDropped в input/wails (только //go:build windows, заглушки для других ОС); пути проверяются в Go (только локальные диски, без UNC и смешанных разделителей, как в TASK-124), файл импортируется существующим use case, на страницу уходит событие только с id и именами импортированных файлов либо с причиной отказа",
+                "Биндинг ImportDroppedFile(path), принимающий путь от страницы, удалён; тесты на него переписаны под новый путь",
+                "Frontend: drop overlay из TASK-124 слушает новое событие с id; бросок не открывает файл в окне; «Добавить файл» работает как раньше",
+                "docs/architecture.md: одна строка — нативные пути броска остаются в Go, через границу Wails идут только id",
+                "Два прогона исполнителей: сначала go-core (opus), затем frontend (sonnet). Проверка в настоящем окне — шаги владельцу в docs/qa/tasks/TASK-138.md",
+                "Исполнитель: go-core, затем frontend"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов input/wails и app, GOOS=windows go vet",
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [

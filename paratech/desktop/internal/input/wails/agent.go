@@ -33,7 +33,8 @@ const (
 	AgentProblemInvalid     = "invalid"     // malformed ids, turn or answers
 	AgentProblemOffline     = "offline"     // Ask while the Hub is not set up (AgentState says why); the panel is read-only
 	AgentProblemClosed      = "closed"      // the app is closing
-	AgentProblemUnavailable = "unavailable" // not available yet (Undo, History)
+	AgentProblemUnavailable = "unavailable" // Undo is not wired
+	AgentProblemBusy        = "busy"        // UndoRequest met a concurrent change; nothing more was undone, try again
 	AgentProblemFailed      = "failed"
 )
 
@@ -71,17 +72,19 @@ type AgentLink interface {
 	Get(ctx context.Context) (connections.View, error)
 }
 
-// AgentCore is what the agent panel needs. Life must live as long as the app: the Driver's operations outlive the
-// Wails call that starts them (TASK-117 handoff).
+// AgentCore is what the agent panel and «Журнал» need. Life must live as long as the app: the Driver's operations
+// outlive the Wails call that starts them (TASK-117 handoff).
 type AgentCore struct {
-	Driver AgentDriver
-	Link   AgentLink
-	Panel  *AgentPanel
-	Life   context.Context
+	Driver  AgentDriver
+	Link    AgentLink
+	Panel   *AgentPanel
+	Life    context.Context
+	Journal AgentJournal
+	Clock   AgentClock
 }
 
 func (c AgentCore) complete() bool {
-	return c.Driver != nil && c.Link != nil && c.Panel != nil && c.Life != nil
+	return c.Driver != nil && c.Link != nil && c.Panel != nil && c.Life != nil && c.Journal != nil && c.Clock != nil
 }
 
 // AgentAskInput is a request typed in the panel with the context the UI chose. Empty ids mean none; an empty
@@ -119,25 +122,20 @@ type AgentState struct {
 	ReadOnly bool   `json:"readOnly"`
 }
 
-// AgentHistoryView is the stored requests of a thread, oldest first. Problem is "unavailable" until the history read
-// exists.
-type AgentHistoryView struct {
-	Problem  string            `json:"problem"`
-	Requests []AgentUpdateView `json:"requests"`
-}
-
 // AgentService is bound to the agent panel ("<package path>.AgentService.<Method>").
 type AgentService struct {
-	driver AgentDriver
-	link   AgentLink
-	life   context.Context
-	log    *slog.Logger
+	driver  AgentDriver
+	link    AgentLink
+	journal AgentJournal
+	clock   AgentClock
+	life    context.Context
+	log     *slog.Logger
 }
 
 // NewAgentService returns the binding of the agent panel; OpenServices checks the core first. The shell attaches
 // c.Panel to its events itself.
 func NewAgentService(c AgentCore, log *slog.Logger) *AgentService {
-	return &AgentService{driver: c.Driver, link: c.Link, life: c.Life, log: log}
+	return &AgentService{driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, life: c.Life, log: log}
 }
 
 // State returns the Hub link of the panel; it calls no Hub.
@@ -207,17 +205,6 @@ func (s *AgentService) Restart(_ context.Context, ref AgentTurnRef) AgentResult 
 // Cancel is «Отмена».
 func (s *AgentService) Cancel(_ context.Context, ref AgentTurnRef) AgentResult {
 	return s.onTurn(opAgentCancel, ref, s.driver.Cancel)
-}
-
-// Undo is «Отменить» of an action line; not available yet (TASK-123).
-func (s *AgentService) Undo(context.Context, string) AgentResult {
-	return AgentResult{Problem: AgentProblemUnavailable}
-}
-
-// History returns the stored requests of the thread of subjectID ("" «Без предмета»); not available yet: there is
-// no read use case of the stored requests.
-func (s *AgentService) History(context.Context, string) AgentHistoryView {
-	return AgentHistoryView{Problem: AgentProblemUnavailable, Requests: []AgentUpdateView{}}
 }
 
 // onTurn checks ref and runs op on the app-lifetime ctx: the call's ctx ends with the call.
