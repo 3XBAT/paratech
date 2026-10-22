@@ -2,6 +2,7 @@ import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } 
 import { type AgentApi, agentApi, type CallProblem, parseUpdate, type UpdateView, updateEvent } from "../bindings/agent.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
 import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, requestText, type UndoNote, undoableActions } from "../agentView.js";
+import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
 import { type Entry, initialPanelState, reducePanel } from "../agentState.js";
 import type { PageId } from "../nav.js";
@@ -39,6 +40,19 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
   const input = useRef<HTMLInputElement>(null);
   const askId = useRef(0);
   useFocusShortcut(input);
+
+  // A hint chip elsewhere in the window puts its text into the input; sending stays with the user.
+  useEffect(() => {
+    const onDraft = (e: Event) => {
+      const text = draftText(e);
+      if (text !== "") {
+        setDraft(text.slice(0, 4000));
+        input.current?.focus();
+      }
+    };
+    window.addEventListener(draftEvent, onDraft);
+    return () => window.removeEventListener(draftEvent, onDraft);
+  }, []);
 
   useEffect(() => {
     let off: (() => void) | undefined;

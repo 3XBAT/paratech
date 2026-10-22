@@ -12,6 +12,7 @@ import "./sourcePicker/sourcePicker.css";
 import "./ui/soundLevel.css";
 import "./styles.css";
 import "./agent/agent.css";
+import "./pages/today.css";
 
 // Before the first render: the CSP forbids an inline script in index.html.
 initTheme();
