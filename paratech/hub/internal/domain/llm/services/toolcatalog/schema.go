@@ -249,7 +249,8 @@ func boundedText(s string, maxRunes int, multiline bool) bool {
 	}
 	blank := true
 	for _, r := range s {
-		if unicode.IsControl(r) && !(multiline && (r == '\n' || r == '\t')) {
+		lineBreak := multiline && (r == '\n' || r == '\t')
+		if unicode.IsControl(r) && !lineBreak {
 			return false
 		}
 		if !unicode.IsSpace(r) {
