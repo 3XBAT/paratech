@@ -9,6 +9,7 @@ func TestAgentIDValidate(t *testing.T) {
 	validators := map[string]func(string) error{
 		"ThreadID": func(s string) error { return ThreadID(s).Validate() },
 		"ActionID": func(s string) error { return ActionID(s).Validate() },
+		"WorkID":   func(s string) error { return WorkID(s).Validate() },
 	}
 	cases := []struct {
 		name    string
