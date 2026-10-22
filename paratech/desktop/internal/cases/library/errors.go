@@ -60,4 +60,28 @@ var (
 
 	// ErrUnavailable means local storage could not be read or written.
 	ErrUnavailable = errors.New("library: local storage failed")
+
+	// ErrNotConfigured means the reading of texts is not wired (no extractor, reader or inspection store).
+	ErrNotConfigured = errors.New("library: text reading is not configured")
+
+	// ErrFileDamaged means the stored bytes of a file no longer have its sha256 or are gone; uploading the file again
+	// repairs it.
+	ErrFileDamaged = errors.New("library: stored file is damaged")
+
+	// ErrNoText means a file whose text is not read: PDF (ADR-0024).
+	ErrNoText = errors.New("library: the text of this file type is not read")
+
+	// ErrTextUnreadable means a file whose text could not be read: damaged or beyond the reader's limits.
+	ErrTextUnreadable = errors.New("library: the text of the file cannot be read")
+
+	// ErrReaderUnavailable means the Hub's reader could not be reached now (no network, Hub not configured or busy);
+	// trying again later helps and is not charged twice.
+	ErrReaderUnavailable = errors.New("library: the reader is unavailable")
+
+	// ErrQuota means the tester's quota on the Hub is used up.
+	ErrQuota = errors.New("library: the quota is used up")
+
+	// ErrReaderRefused means the reader's answer was refused (outside its schema); after inspection.MaxAttempts
+	// refusals the text is not inspected again.
+	ErrReaderRefused = errors.New("library: the reader's answer was refused")
 )

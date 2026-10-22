@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
@@ -54,6 +55,9 @@ type BlobStore interface {
 	// Size returns the size of a stored file; a missing one wraps shared.ErrNotFound.
 	Size(ctx context.Context, ref shared.ArtifactRef) (int64, error)
 
+	// Open opens a stored file for reading; a missing one wraps shared.ErrNotFound.
+	Open(ctx context.Context, ref shared.ArtifactRef) (io.ReadCloser, error)
+
 	// Write stores the content atomically.
 	Write(ctx context.Context, ref shared.ArtifactRef, content io.Reader) error
 }
@@ -74,6 +78,30 @@ type SubjectStrings interface {
 // wires the local clock.
 type Clock interface {
 	Now() time.Time
+}
+
+// TextExtractor reads the text of a file of the library (TASK-122). Implemented by the doctext adapter. A type whose
+// text is not read (PDF) wraps material.ErrTextNotExtracted; a damaged file or one beyond the reader's limits
+// material.ErrTextUnreadable.
+type TextExtractor interface {
+	Extract(ctx context.Context, typ material.Type, data []byte) (material.Text, error)
+}
+
+// MaterialReader is the quarantined reader INSPECT_MATERIAL on the Hub (ADR-0022). Implemented by the hubclient
+// adapter. The output is untrusted model text: only inspection.Request.Parse reads it. Errors follow the Hub client:
+// shared.ErrQuotaExceeded, inspection.ErrInvalidAnswer for the Hub's schema refusal of the answer (charged); anything
+// else (no network, no Hub, a refused key) charged nothing as an answer.
+type MaterialReader interface {
+	InspectMaterial(ctx context.Context, req inspection.Request) (string, error)
+}
+
+// InspectionRepository stores the reader's outcome per material. Implemented by the sqlite adapter.
+type InspectionRepository interface {
+	// Get loads the inspection of a material; none wraps shared.ErrNotFound.
+	Get(ctx context.Context, m shared.MaterialID) (*inspection.Inspection, error)
+
+	// Save writes it under its version: a stale one wraps shared.ErrVersionConflict.
+	Save(ctx context.Context, i *inspection.Inspection) error
 }
 
 // IDs generates the identifiers of new subjects, folders and materials (ARCH-24).

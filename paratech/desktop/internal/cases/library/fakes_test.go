@@ -1,13 +1,16 @@
 package library
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
@@ -261,6 +264,16 @@ func (f *fakeBlobs) Size(_ context.Context, ref shared.ArtifactRef) (int64, erro
 	return int64(len(data)), nil
 }
 
+func (f *fakeBlobs) Open(_ context.Context, ref shared.ArtifactRef) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.files[ref.String()]
+	if !ok {
+		return nil, shared.ErrNotFound
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
 func (f *fakeBlobs) Write(_ context.Context, ref shared.ArtifactRef, content io.Reader) error {
 	data, err := io.ReadAll(content)
 	if err != nil {
@@ -273,6 +286,89 @@ func (f *fakeBlobs) Write(_ context.Context, ref shared.ArtifactRef, content io.
 	}
 	f.files[ref.String()] = data
 	f.writes++
+	return nil
+}
+
+// fakeTexts reads a TXT file as lines; any other type, and text starting with "BROKEN", cannot be read.
+type fakeTexts struct{ calls int }
+
+func (f *fakeTexts) Extract(_ context.Context, typ material.Type, data []byte) (material.Text, error) {
+	f.calls++
+	switch {
+	case typ == material.TypePDF:
+		return material.Text{}, material.ErrTextNotExtracted
+	case typ != material.TypeTXT, bytes.HasPrefix(data, []byte("BROKEN")):
+		return material.Text{}, fmt.Errorf("fake: %w", material.ErrTextUnreadable)
+	}
+	return material.NewText(material.FragmentsOf(strings.Split(string(data), "\n")), false)
+}
+
+// fakeReader is the Hub's reader: it answers the next scripted output or error and records the requests.
+type fakeReader struct {
+	mu      sync.Mutex
+	outputs []string
+	errs    []error
+	reqs    []inspection.Request
+}
+
+func (f *fakeReader) InspectMaterial(_ context.Context, req inspection.Request) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqs = append(f.reqs, req)
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		if err != nil {
+			return "", err
+		}
+	}
+	if len(f.outputs) == 0 {
+		return "", fmt.Errorf("fake reader: no output scripted")
+	}
+	out := f.outputs[0]
+	if len(f.outputs) > 1 {
+		f.outputs = f.outputs[1:]
+	}
+	return out, nil
+}
+
+func (f *fakeReader) requests() []inspection.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.reqs)
+}
+
+// fakeInspections keeps states with the version protocol.
+type fakeInspections struct {
+	mu   sync.Mutex
+	rows map[shared.MaterialID]inspection.State
+	err  error
+}
+
+func (f *fakeInspections) Get(_ context.Context, m shared.MaterialID) (*inspection.Inspection, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	st, ok := f.rows[m]
+	if !ok {
+		return nil, shared.ErrNotFound
+	}
+	return inspection.Restore(st)
+}
+
+func (f *fakeInspections) Save(_ context.Context, i *inspection.Inspection) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := i.State()
+	cur, ok := f.rows[st.Material]
+	if (st.Version == 0 && ok) || (st.Version > 0 && (!ok || cur.Version != st.Version)) {
+		return shared.ErrVersionConflict
+	}
+	st.Version++
+	f.rows[st.Material] = st
+	i.Persisted(st.Version)
 	return nil
 }
 
@@ -319,13 +415,16 @@ func (g *seqIDs) NewFolderID() shared.FolderID     { return shared.FolderID(g.ne
 func (g *seqIDs) NewMaterialID() shared.MaterialID { return shared.MaterialID(g.next("m")) }
 
 type env struct {
-	subjects  *fakeSubjects
-	materials *fakeMaterials
-	blobs     *fakeBlobs
-	lessons   fakeLessons
-	strings   *fakeStrings
-	clock     *fakeClock
-	svc       *Service
+	subjects    *fakeSubjects
+	materials   *fakeMaterials
+	blobs       *fakeBlobs
+	lessons     fakeLessons
+	strings     *fakeStrings
+	clock       *fakeClock
+	texts       *fakeTexts
+	reader      *fakeReader
+	inspections *fakeInspections
+	svc         *Service
 }
 
 func newEnv(t interface {
@@ -336,11 +435,12 @@ func newEnv(t interface {
 	e := &env{
 		subjects: newFakeSubjects(), materials: newFakeMaterials(), blobs: newFakeBlobs(),
 		lessons: fakeLessons{live: map[shared.LessonID]bool{"l1": true, "l2": true}}, strings: &fakeStrings{},
-		clock: &fakeClock{now: t0},
+		clock: &fakeClock{now: t0}, texts: &fakeTexts{}, reader: &fakeReader{},
+		inspections: &fakeInspections{rows: map[shared.MaterialID]inspection.State{}},
 	}
 	svc, err := New(Deps{
 		Subjects: e.subjects, Materials: e.materials, Blobs: e.blobs, Lessons: e.lessons, Strings: e.strings,
-		Clock: e.clock, IDs: &seqIDs{},
+		Clock: e.clock, IDs: &seqIDs{}, Texts: e.texts, Reader: e.reader, Inspections: e.inspections,
 	})
 	if err != nil {
 		t.Fatal(err)

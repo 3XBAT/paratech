@@ -60,7 +60,7 @@ func TestInspectMaterialErrors(t *testing.T) {
 		match []error
 	}{
 		{"schema refusal", detailErr(connect.CodeUnavailable, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR}),
-			[]error{ErrProvider, backoff.ErrPermanent}},
+			[]error{ErrProvider, backoff.ErrPermanent, inspection.ErrInvalidAnswer}},
 		{"quota", detailErr(connect.CodeResourceExhausted, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_QUOTA_EXCEEDED}),
 			[]error{shared.ErrQuotaExceeded}},
 		{"not served yet", connect.NewError(connect.CodeInvalidArgument, errors.New("operation unavailable")),
@@ -74,6 +74,10 @@ func TestInspectMaterialErrors(t *testing.T) {
 			if !errors.Is(err, m) {
 				t.Errorf("%s: %v does not match %v", tt.name, err, m)
 			}
+		}
+		// Only the schema refusal is a refused answer; a rejected request or a quota is not charged as one.
+		if refused := errors.Is(err, inspection.ErrInvalidAnswer); refused != (tt.name == "schema refusal") {
+			t.Errorf("%s: matches ErrInvalidAnswer = %v", tt.name, refused)
 		}
 	}
 

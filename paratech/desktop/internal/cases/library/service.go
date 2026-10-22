@@ -19,6 +19,10 @@ const (
 	opSubjectBusy  = "library: subject changed while saved"
 	opMaterialBusy = "library: material changed while saved"
 	opBlobRewrite  = "library: stored file missing or damaged, written again"
+	opBlobDamaged  = "library: stored file does not match its sha256"
+	opTextStatus   = "library: text status not saved"
+	opInspectSave  = "library: inspection not saved"
+	opInspectAsked = "library: material inspected"
 )
 
 // saveAttempts bounds the saves of one change that lose against another save of the same aggregate.
@@ -26,17 +30,20 @@ const saveAttempts = 3
 
 // Service is the library (TASK-121). Everything is local: no port talks to the network.
 type Service struct {
-	subjects  SubjectRepository
-	materials MaterialRepository
-	blobs     BlobStore
-	lessons   LessonReader
-	strings   SubjectStrings
-	clock     Clock
-	ids       IDs
-	log       *slog.Logger
+	subjects    SubjectRepository
+	materials   MaterialRepository
+	blobs       BlobStore
+	lessons     LessonReader
+	strings     SubjectStrings
+	clock       Clock
+	ids         IDs
+	texts       TextExtractor
+	reader      MaterialReader
+	inspections InspectionRepository
+	log         *slog.Logger
 }
 
-// New checks that every port is given.
+// New checks that every required port is given (see Deps).
 func New(d Deps) (*Service, error) {
 	if d.Subjects == nil || d.Materials == nil || d.Blobs == nil || d.Lessons == nil || d.Strings == nil ||
 		d.Clock == nil || d.IDs == nil {
@@ -48,7 +55,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		subjects: d.Subjects, materials: d.Materials, blobs: d.Blobs, lessons: d.Lessons, strings: d.Strings,
-		clock: d.Clock, ids: d.IDs, log: log,
+		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, log: log,
 	}, nil
 }
 
@@ -267,12 +274,17 @@ func (s *Service) Import(ctx context.Context, up Upload) (Imported, error) {
 	}
 }
 
-// ensureBlob writes data to ref unless a file of its size is there; the write is atomic and the name is the
-// content's sha256, so a write over an existing file changes nothing.
+// ensureBlob writes data to ref unless the same bytes are there: a stored file of another size, or of the same size
+// but another sha256 (damaged), is written again. The write is atomic and the name is the content's sha256, so a write
+// over an existing file changes nothing.
 func (s *Service) ensureBlob(ctx context.Context, ref shared.ArtifactRef, data []byte) error {
 	size, err := s.blobs.Size(ctx, ref)
 	if err == nil && size == int64(len(data)) {
-		return nil
+		stored, rerr := s.readBlob(ctx, ref)
+		if rerr == nil && material.DigestOf(stored) == material.DigestOf(data) {
+			return nil
+		}
+		err = errors.Join(errors.New("same size, other content"), rerr)
 	}
 	if err == nil || !errors.Is(err, shared.ErrNotFound) {
 		s.log.Warn(opBlobRewrite, slog.String("file", ref.String()), slog.Any("cause", err))
