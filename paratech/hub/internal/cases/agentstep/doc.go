@@ -6,4 +6,8 @@
 // (output cap, end of turn, invalid calls) is charged and stored as a failure, so its retry repeats the failure; only
 // a refusal or a call without an answer is released. The key rules live in the account aggregate; every ledger
 // step is one transaction (ARCH-23).
+//
+// The model's raw turn of every returned call set (thinking with its signature) is kept on the Hub, scoped by the
+// tester, and sent back unchanged with the last echo of the next step; the desktop never sees it. When it is gone
+// the step fails with ErrTurnGone before the provider is called.
 package agentstep

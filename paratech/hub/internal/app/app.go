@@ -187,9 +187,10 @@ func (a *App) runServer(ctx context.Context) error {
 		return err
 	}
 	var gatewayOpts []connect.GatewayOption
+	toPurge := purgers{gatewaySvc}
 	if a.agent.sealer != nil {
 		agentSvc, err := agentstep.New(agentstep.Deps{
-			Accounts: db.QuotaAccounts(), Provider: a.llm.provider, Limiter: a.llm.limiter, Clock: clock.System{},
+			Accounts: db.QuotaAccounts(), Turns: db.AgentTurns(), Provider: a.llm.provider, Limiter: a.llm.limiter, Clock: clock.System{},
 			Random: random.Source{}, Models: a.llm.models, Sealer: a.agent.sealer, Log: a.log,
 		}, agentstep.Config{
 			Unit: a.cfg.QuotaUnit, Limit: a.cfg.QuotaLimit, ReservationTTL: a.cfg.QuotaReservationTTL,
@@ -199,6 +200,7 @@ func (a *App) runServer(ctx context.Context) error {
 			return err
 		}
 		gatewayOpts = append(gatewayOpts, connect.WithAgentStep(agentSvc))
+		toPurge = append(toPurge, agentSvc)
 	} else {
 		a.log.Warn("agent steps disabled: no seal key", "env", config.EnvAgentSealKeys)
 	}
@@ -215,7 +217,7 @@ func (a *App) runServer(ctx context.Context) error {
 	purged := make(chan struct{})
 	go func() {
 		defer close(purged)
-		purgeResults(purgeCtx, a.log, gatewaySvc, account.ResultPurgeInterval)
+		purgeResults(purgeCtx, a.log, toPurge, account.ResultPurgeInterval)
 	}()
 	defer func() {
 		stopPurge()
@@ -228,9 +230,28 @@ func (a *App) runServer(ctx context.Context) error {
 	return err
 }
 
-// resultPurger is what the purge loop needs from the gateway use case.
+// resultPurger is what the purge loop needs from the gateway and agent step use cases.
 type resultPurger interface {
 	PurgeResults(ctx context.Context) (int64, error)
+}
+
+// purgers purges each store of model output in turn; one failure does not stop the others.
+type purgers []resultPurger
+
+// PurgeResults implements resultPurger: the total count and every error.
+func (ps purgers) PurgeResults(ctx context.Context) (int64, error) {
+	var (
+		total int64
+		errs  []error
+	)
+	for _, p := range ps {
+		n, err := p.PurgeResults(ctx)
+		total += n
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return total, errors.Join(errs...)
 }
 
 // purgeResults clears stored results past their result window now and then every interval until ctx ends (PRD

@@ -26,6 +26,19 @@ type Accounts interface {
 	Modify(ctx context.Context, scope account.Scope, fn func(*account.Account) error) error
 }
 
+// AssistantTurns keeps the provider's raw assistant turn of every returned call set, so that the step that sends the
+// results of those calls can give the model its own turn back unchanged (thinking with its signature, ADR-0023).
+// Entries are scoped by owner: a tester never reads or triggers another tester's turn. The postgres adapter serves it.
+type AssistantTurns interface {
+	// Keep stores turn (zero: the provider gave none) for owner under key at now. An entry already kept under the key
+	// stays as it is.
+	Keep(ctx context.Context, owner shared.APIKeyID, key string, turn values.AssistantTurn, now time.Time) error
+	// Kept returns the turn kept for owner under key after since; ok is false when there is none.
+	Kept(ctx context.Context, owner shared.APIKeyID, key string, since time.Time) (turn values.AssistantTurn, ok bool, err error)
+	// PurgeTurns deletes every entry kept at or before cutoff and returns how many.
+	PurgeTurns(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
 // RateLimiter decides whether owner may make one more call at now. The gateway shares the same limiter, so Complete
 // and AgentStep count against one per-tester budget.
 type RateLimiter interface {

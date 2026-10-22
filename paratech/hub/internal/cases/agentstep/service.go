@@ -22,6 +22,8 @@ const (
 	opSettle  = "settle"
 	opRelease = "release"
 	opReplay  = "replay"
+	opTurn    = "kept turn"
+	opPurge   = "purge kept turns"
 )
 
 // Outcomes in the log line of a step.
@@ -35,6 +37,7 @@ const (
 	outcomeConflict    = "idempotency_conflict"
 	outcomeRunning     = "attempt_running"
 	outcomeProvider    = "provider_error"
+	outcomeTurnGone    = "turn_gone"
 	outcomeCanceled    = "canceled"
 	outcomeFailed      = "failed"
 )
@@ -53,6 +56,7 @@ type profile struct {
 // Service runs the agent step scenario (ADR-0023).
 type Service struct {
 	accounts    Accounts
+	turns       AssistantTurns
 	provider    Provider
 	limiter     RateLimiter
 	clock       Clock
@@ -68,8 +72,8 @@ type Service struct {
 // New checks the dependencies and the configuration: every profile is known, its alias is in the allowlist and it
 // has at least one version, each with a server prompt and a catalog of that version.
 func New(d Deps, cfg Config) (*Service, error) {
-	if d.Accounts == nil || d.Provider == nil || d.Limiter == nil || d.Clock == nil || d.Random == nil || d.Models == nil ||
-		d.Sealer == nil || d.Log == nil {
+	if d.Accounts == nil || d.Turns == nil || d.Provider == nil || d.Limiter == nil || d.Clock == nil || d.Random == nil ||
+		d.Models == nil || d.Sealer == nil || d.Log == nil {
 		return nil, fmt.Errorf("%w: every dependency is required", ErrInvalidConfig)
 	}
 	p, err := account.NewPolicy(cfg.Unit, cfg.Limit, cfg.ReservationTTL, cfg.KeyRetention)
@@ -84,7 +88,7 @@ func New(d Deps, cfg Config) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		accounts: d.Accounts, provider: d.Provider, limiter: d.Limiter, clock: d.Clock, random: d.Random, models: d.Models,
+		accounts: d.Accounts, turns: d.Turns, provider: d.Provider, limiter: d.Limiter, clock: d.Clock, random: d.Random, models: d.Models,
 		sealer: d.Sealer, log: d.Log, policy: p, callTimeout: cfg.CallTimeout, profiles: profiles,
 	}, nil
 }
@@ -137,10 +141,12 @@ type step struct {
 	version Version
 	reserve account.ReserveRequest
 	call    values.AgentCall
+	// echoKey names the call set of the last echo, whose kept model turn the provider needs back; "" without an echo.
+	echoKey string
 }
 
 // Step runs one planner step for cmd.Owner. Errors: *RateLimitedError, ErrInvalidRequest (ErrUnknownCatalog,
-// ErrBadSeal), *QuotaExceededError, ErrIdempotencyConflict, ErrAttemptRunning, *ProviderFailedError, the client's
+// ErrBadSeal), *QuotaExceededError, ErrIdempotencyConflict, ErrAttemptRunning, ErrTurnGone, *ProviderFailedError, the client's
 // context error; anything else is a Hub failure. A provider call that has started is finished, settled and stored even
 // if the client goes away.
 func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
@@ -212,6 +218,19 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 		logStep(outcomeCanceled, attrs...)
 		return Result{}, fmt.Errorf("agentstep: %s: %w", opStep, err)
 	}
+	// Looked up only now, so a replay never depends on the kept turn. Without it the provider would refuse the
+	// continuation (or lose the model's reasoning), so the step fails instead and nothing is charged.
+	call, err := s.withKeptTurn(ctx, st)
+	if err != nil {
+		s.release(ctx, st, rec.ID, account.ReasonFailed)
+		if errors.Is(err, ErrTurnGone) {
+			logStep(outcomeTurnGone, attrs...)
+		} else {
+			s.log.ErrorContext(ctx, "agent step kept turn unreadable", "reservation", rec.ID.String(), "err", err)
+			logStep(outcomeFailed, attrs...)
+		}
+		return Result{}, err
+	}
 	timeout := min(s.callTimeout, rec.ExpiresAt.Sub(s.clock.Now())-ledgerTimeout)
 	if timeout <= 0 {
 		s.release(ctx, st, rec.ID, account.ReasonFailed)
@@ -220,7 +239,7 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	}
 	// Detached from the client (unary rule, gateway.proto): a started call finishes and is paid for and stored.
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-	answer, err := s.provider.Step(callCtx, st.call)
+	answer, err := s.provider.Step(callCtx, call)
 	cancel()
 	if err == nil && answer.Refused() {
 		err = answer.Failure()
@@ -255,6 +274,11 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 		return Result{}, failure
 	}
 
+	// Kept before the settlement, so a replayed answer can always be continued. A failure is only logged: the answer is
+	// paid for and returned, and only a continuation of it fails (ErrTurnGone).
+	if err := s.keep(ctx, st, calls, answer.Assistant()); err != nil {
+		s.log.ErrorContext(ctx, "agent step turn not kept", "reservation", rec.ID.String(), "err", err)
+	}
 	quota, err = s.settle(ctx, st, rec.ID, values.EncodeCalls(calls), usage)
 	if err != nil {
 		s.log.ErrorContext(ctx, "agent step settlement failed", "reservation", rec.ID.String(), "err", err)
@@ -317,7 +341,16 @@ func (s *Service) validate(cmd Command) (step, error) {
 	if err != nil {
 		return step{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	return step{owner: cmd.Owner, binding: binding, version: version, reserve: reserve, call: call}, nil
+	st := step{owner: cmd.Owner, binding: binding, version: version, reserve: reserve, call: call}
+	turns := req.Turns()
+	if i := values.LastCalls(turns); i >= 0 {
+		st.echoKey = callSetKey(binding, turns[i].Calls())
+	}
+	return st, nil
+}
+
+func callSetKey(b seal.Binding, calls []values.ToolCall) string {
+	return values.CallSetKey(b.ThreadID, b.Profile, b.CatalogVersion, calls)
 }
 
 // request builds the domain request of cmd; every part is checked by its constructor.
@@ -394,6 +427,50 @@ func (s *Service) result(st step, calls []values.ToolCall, in, out int64, quota 
 		Calls: dto, Seal: s.sealer.Seal(st.binding, calls), InputTokens: in, OutputTokens: out, Quota: quota,
 		ReservationID: id.String(), Replayed: replayed,
 	}
+}
+
+// withKeptTurn is the provider call of st with the kept model turn of its last echo attached. A turn that is not kept
+// (any more) is ErrTurnGone; a zero turn means the provider gave none and the echo goes out as it is.
+func (s *Service) withKeptTurn(ctx context.Context, st step) (values.AgentCall, error) {
+	if st.echoKey == "" {
+		return st.call, nil
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerTimeout)
+	defer cancel()
+	turn, ok, err := s.turns.Kept(readCtx, st.owner, st.echoKey, s.policy.ResultCutoff(s.clock.Now()))
+	switch {
+	case err != nil:
+		return values.AgentCall{}, fmt.Errorf("agentstep: %s: %w", opTurn, err)
+	case !ok:
+		return values.AgentCall{}, fmt.Errorf("agentstep: %s: %w", opTurn, ErrTurnGone)
+	case turn.IsZero():
+		return st.call, nil
+	}
+	call, err := st.call.WithAssistant(turn)
+	if err != nil {
+		return values.AgentCall{}, fmt.Errorf("agentstep: %s: %w", opTurn, err)
+	}
+	return call, nil
+}
+
+// keep stores the model turn of the returned calls under their call set for the next step.
+func (s *Service) keep(ctx context.Context, st step, calls []values.ToolCall, turn values.AssistantTurn) error {
+	keepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerTimeout)
+	defer cancel()
+	if err := s.turns.Keep(keepCtx, st.owner, callSetKey(st.binding, calls), turn, s.clock.Now()); err != nil {
+		return fmt.Errorf("agentstep: %s: %w", opTurn, err)
+	}
+	return nil
+}
+
+// PurgeResults deletes the kept model turns whose result window has ended (ADR-0005(d), ADR-0023) and returns how
+// many; a turn lives no longer than a stored result.
+func (s *Service) PurgeResults(ctx context.Context) (int64, error) {
+	n, err := s.turns.PurgeTurns(ctx, s.policy.ResultCutoff(s.clock.Now()))
+	if err != nil {
+		return 0, fmt.Errorf("agentstep: %s: %w", opPurge, err)
+	}
+	return n, nil
 }
 
 // start opens a new attempt or finds the stored result of the latest one, in one transaction on a context detached

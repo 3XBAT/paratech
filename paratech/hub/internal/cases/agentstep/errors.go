@@ -24,6 +24,9 @@ var (
 	ErrIdempotencyConflict = errors.New("idempotency key used with a different request")
 	// ErrAttemptRunning means an attempt with the same key is still running; retry with backoff.
 	ErrAttemptRunning = errors.New("an attempt with this idempotency key is still running")
+	// ErrTurnGone means the Hub no longer keeps (or never kept) the model's turn of the last echoed calls, so the tool
+	// loop cannot go on; nothing was charged. Permanent: the thread starts again from the student's text.
+	ErrTurnGone = errors.New("the model turn of the echoed calls is no longer kept")
 )
 
 // RateLimitedError means the tester exceeded the rate limit; nothing was reserved.
