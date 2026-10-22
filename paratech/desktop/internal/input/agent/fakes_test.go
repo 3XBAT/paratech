@@ -223,7 +223,9 @@ type scriptedTurns struct {
 	cancelled []agentturn.TurnRef
 	stopped   []agentturn.TurnRef // by Interrupt
 	opCtx     []error             // ctx.Err() seen by Cancel and Interrupt
-	endless   agentturn.Step
+	// interrupted are the inputs of Interrupt: the outcomes of the calls that ran before the ctx ended.
+	interrupted []agentturn.SubmitInput
+	endless     agentturn.Step
 	// beforeAnswer, when set, runs before an answer of the script is returned (a ctx ending meanwhile).
 	beforeAnswer func()
 }
@@ -298,11 +300,13 @@ func (s *scriptedTurns) Cancel(ctx context.Context, ref agentturn.TurnRef) (agen
 	return agentturn.Step{Thread: ref.Thread, Turn: ref.Turn, Status: thread.StatusCancelled}, nil
 }
 
-// Interrupt stops the request as offline, as agentturn does.
-func (s *scriptedTurns) Interrupt(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error) {
+// Interrupt stops the request as offline, as agentturn does, and records the outcomes of the calls that ran.
+func (s *scriptedTurns) Interrupt(ctx context.Context, in agentturn.SubmitInput) (agentturn.Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	ref := in.Turn
 	s.stopped = append(s.stopped, ref)
+	s.interrupted = append(s.interrupted, in)
 	s.opCtx = append(s.opCtx, ctx.Err())
 	return agentturn.Step{
 		Thread: ref.Thread, Turn: ref.Turn, Status: thread.StatusStopped, StopReason: values.StopOffline,
@@ -312,17 +316,17 @@ func (s *scriptedTurns) Interrupt(ctx context.Context, ref agentturn.TurnRef) (a
 
 // turnsReport is what the Driver reported to the step use case.
 type turnsReport struct {
-	submitted          []agentturn.SubmitInput
-	cancelled, stopped []agentturn.TurnRef
-	opCtx              []error
+	submitted, interrupted []agentturn.SubmitInput
+	cancelled, stopped     []agentturn.TurnRef
+	opCtx                  []error
 }
 
 func (s *scriptedTurns) report() turnsReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return turnsReport{
-		submitted: slices.Clone(s.submitted), cancelled: slices.Clone(s.cancelled), stopped: slices.Clone(s.stopped),
-		opCtx: slices.Clone(s.opCtx),
+		submitted: slices.Clone(s.submitted), interrupted: slices.Clone(s.interrupted), cancelled: slices.Clone(s.cancelled),
+		stopped: slices.Clone(s.stopped), opCtx: slices.Clone(s.opCtx),
 	}
 }
 

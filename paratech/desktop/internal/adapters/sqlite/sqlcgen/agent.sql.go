@@ -46,7 +46,7 @@ func (q *Queries) DeleteAgentTurn(ctx context.Context, arg DeleteAgentTurnParams
 }
 
 const getAgentAction = `-- name: GetAgentAction :one
-SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at FROM agent_actions WHERE id = ?1
+SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions WHERE id = ?1
 `
 
 func (q *Queries) GetAgentAction(ctx context.Context, id string) (AgentAction, error) {
@@ -65,6 +65,41 @@ func (q *Queries) GetAgentAction(ctx context.Context, id string) (AgentAction, e
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Intent,
+		&i.UndoRefusal,
+	)
+	return i, err
+}
+
+const getAgentActionByCall = `-- name: GetAgentActionByCall :one
+SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions
+WHERE thread_id = ?1 AND turn = ?2 AND call_id = ?3
+`
+
+type GetAgentActionByCallParams struct {
+	ThreadID string
+	Turn     int64
+	CallID   string
+}
+
+func (q *Queries) GetAgentActionByCall(ctx context.Context, arg GetAgentActionByCallParams) (AgentAction, error) {
+	row := q.db.QueryRowContext(ctx, getAgentActionByCall, arg.ThreadID, arg.Turn, arg.CallID)
+	var i AgentAction
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.Turn,
+		&i.CallID,
+		&i.Tool,
+		&i.Status,
+		&i.Compensation,
+		&i.TargetVersion,
+		&i.Proposal,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Intent,
+		&i.UndoRefusal,
 	)
 	return i, err
 }
@@ -150,11 +185,11 @@ func (q *Queries) GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (Age
 }
 
 const insertAgentAction = `-- name: InsertAgentAction :exec
-INSERT INTO agent_actions (id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version,
-                           created_at, updated_at)
+INSERT INTO agent_actions (id, thread_id, turn, call_id, tool, status, intent, compensation, target_version,
+                           undo_refusal, proposal, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6,
-        ?7, ?8, ?9, 1, ?10,
-        ?11)
+        ?7, ?8, ?9, ?10, ?11, 1,
+        ?12, ?13)
 `
 
 type InsertAgentActionParams struct {
@@ -164,8 +199,10 @@ type InsertAgentActionParams struct {
 	CallID        string
 	Tool          string
 	Status        string
+	Intent        sql.NullString
 	Compensation  sql.NullString
 	TargetVersion int64
+	UndoRefusal   string
 	Proposal      string
 	CreatedAt     int64
 	UpdatedAt     int64
@@ -180,8 +217,10 @@ func (q *Queries) InsertAgentAction(ctx context.Context, arg InsertAgentActionPa
 		arg.CallID,
 		arg.Tool,
 		arg.Status,
+		arg.Intent,
 		arg.Compensation,
 		arg.TargetVersion,
+		arg.UndoRefusal,
 		arg.Proposal,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -317,9 +356,9 @@ func (q *Queries) LastAgentStepSeq(ctx context.Context, threadID string) (int64,
 }
 
 const listAgentActionsByThread = `-- name: ListAgentActionsByThread :many
-SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at FROM agent_actions
+SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions
 WHERE thread_id = ?1
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT ?2
 `
 
@@ -328,6 +367,8 @@ type ListAgentActionsByThreadParams struct {
 	MaxRows  int64
 }
 
+// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
+// in reverse.
 func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error) {
 	rows, err := q.db.QueryContext(ctx, listAgentActionsByThread, arg.ThreadID, arg.MaxRows)
 	if err != nil {
@@ -350,6 +391,8 @@ func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentAct
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Intent,
+			&i.UndoRefusal,
 		); err != nil {
 			return nil, err
 		}
@@ -408,6 +451,51 @@ func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) 
 	return items, nil
 }
 
+const listRecentAgentActions = `-- name: ListRecentAgentActions :many
+SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions
+ORDER BY created_at DESC, rowid DESC
+LIMIT ?1
+`
+
+// The journal of the panel: the newest entries of every thread.
+func (q *Queries) ListRecentAgentActions(ctx context.Context, maxRows int64) ([]AgentAction, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentAgentActions, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentAction{}
+	for rows.Next() {
+		var i AgentAction
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.Turn,
+			&i.CallID,
+			&i.Tool,
+			&i.Status,
+			&i.Compensation,
+			&i.TargetVersion,
+			&i.Proposal,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Intent,
+			&i.UndoRefusal,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningAgentThreadIDs = `-- name: ListRunningAgentThreadIDs :many
 SELECT t.id FROM agent_threads t
 JOIN agent_turns u ON u.thread_id = t.id AND u.number = t.turns
@@ -440,7 +528,7 @@ func (q *Queries) ListRunningAgentThreadIDs(ctx context.Context) ([]string, erro
 }
 
 const listUnfinishedAgentActions = `-- name: ListUnfinishedAgentActions :many
-SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, id
+SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, rowid
 `
 
 func (q *Queries) ListUnfinishedAgentActions(ctx context.Context) ([]AgentAction, error) {
@@ -465,6 +553,8 @@ func (q *Queries) ListUnfinishedAgentActions(ctx context.Context) ([]AgentAction
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Intent,
+			&i.UndoRefusal,
 		); err != nil {
 			return nil, err
 		}
@@ -484,26 +574,29 @@ UPDATE agent_actions
 SET status         = ?1,
     compensation   = ?2,
     target_version = ?3,
+    undo_refusal   = ?4,
     version        = version + 1,
-    updated_at     = ?4
-WHERE id = ?5 AND version = ?6
+    updated_at     = ?5
+WHERE id = ?6 AND version = ?7
 `
 
 type UpdateAgentActionParams struct {
 	Status          string
 	Compensation    sql.NullString
 	TargetVersion   int64
+	UndoRefusal     string
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
 }
 
-// Compare-and-swap on the loaded version; the call never changes.
+// Compare-and-swap on the loaded version; the call and its intent never change.
 func (q *Queries) UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateAgentAction,
 		arg.Status,
 		arg.Compensation,
 		arg.TargetVersion,
+		arg.UndoRefusal,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

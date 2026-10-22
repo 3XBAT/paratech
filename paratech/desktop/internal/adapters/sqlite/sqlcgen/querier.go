@@ -10,6 +10,9 @@ import (
 )
 
 type Querier interface {
+	// Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
+	// a soft-deleted lesson get a new version (Undo compares material versions).
+	BumpMaterialsLinkedToDeletedLesson(ctx context.Context, id string) error
 	// Only the current request of a thread can be unfinished: a new request cancels a waiting one (thread.StartTurn), so
 	// the stored rows of earlier requests follow.
 	CancelEarlierAgentTurns(ctx context.Context, arg CancelEarlierAgentTurnsParams) error
@@ -47,6 +50,7 @@ type Querier interface {
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
 	GetAgentAction(ctx context.Context, id string) (AgentAction, error)
+	GetAgentActionByCall(ctx context.Context, arg GetAgentActionByCallParams) (AgentAction, error)
 	// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
 	// journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
 	GetAgentThread(ctx context.Context, id string) (AgentThread, error)
@@ -161,6 +165,8 @@ type Querier interface {
 	LatestTranscriptByRecording(ctx context.Context, recordingID string) (Transcript, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
+	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
+	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
 	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
 	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
@@ -208,6 +214,8 @@ type Querier interface {
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
 	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
 	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
+	// The journal of the panel: the newest entries of every thread.
+	ListRecentAgentActions(ctx context.Context, maxRows int64) ([]AgentAction, error)
 	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
 	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
@@ -249,7 +257,7 @@ type Querier interface {
 	// the files; summaries and lecture texts are keyed by the transcript id.
 	// What the recording holds, for the confirmation.
 	RecordingDeletionCounts(ctx context.Context, recordingID string) (RecordingDeletionCountsRow, error)
-	// Compare-and-swap on the loaded version; the call never changes.
+	// Compare-and-swap on the loaded version; the call and its intent never change.
 	UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error)
 	// Compare-and-swap on the loaded version; the key never changes.
 	UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadParams) (int64, error)

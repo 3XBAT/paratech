@@ -572,15 +572,15 @@ func TestRetryAfterACutOffAnswerThroughFakeHub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rr.RedoSummary(ctx, "r1"); !errors.Is(err, shared.ErrNotFound) {
+	if _, _, err := rr.RedoSummary(ctx, "r1"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("RedoSummary without a summary = %v", err)
 	}
-	if _, err := rr.Retry(ctx, "r1", homeworkflow.WorkHomework); !errors.Is(err, job.ErrNotFailed) {
+	if _, _, err := rr.Retry(ctx, "r1", homeworkflow.WorkHomework); !errors.Is(err, job.ErrNotFailed) {
 		t.Fatalf("Retry of the completed extraction = %v", err)
 	}
 
 	hub.Answer(values.OperationSummary, ppSummary)
-	id, err := rr.Retry(ctx, "r1", homeworkflow.WorkSummary)
+	id, _, err := rr.Retry(ctx, "r1", homeworkflow.WorkSummary)
 	if err != nil {
 		t.Fatalf("Retry: %v", err)
 	}
@@ -601,7 +601,7 @@ func TestRetryAfterACutOffAnswerThroughFakeHub(t *testing.T) {
 
 	// «Сделать конспект заново»: the new summary replaces the old one only once it passed.
 	hub.Answer(values.OperationSummary, "no JSON at all")
-	redo, err := rr.RedoSummary(ctx, "r1")
+	redo, _, err := rr.RedoSummary(ctx, "r1")
 	if err != nil {
 		t.Fatalf("RedoSummary: %v", err)
 	}

@@ -112,10 +112,14 @@ func (r *LessonRepository) ListPendingCalendarSync(ctx context.Context, limit in
 }
 
 // PurgeDeleted removes the row of a soft-deleted lesson. A missing row is not an error; a live lesson is
-// shared.ErrConflict and stays.
+// shared.ErrConflict and stays. Materials linked to the lesson lose the link by FK cascade, so their version is
+// bumped in the same transaction.
 func (r *LessonRepository) PurgeDeleted(ctx context.Context, id shared.LessonID) error {
 	return r.db.Do(ctx, func(ctx context.Context) error {
 		q := r.db.Queries(ctx)
+		if err := q.BumpMaterialsLinkedToDeletedLesson(ctx, string(id)); err != nil {
+			return MapError(ctx, err)
+		}
 		n, err := q.PurgeDeletedLesson(ctx, string(id))
 		if err != nil {
 			return MapError(ctx, err)

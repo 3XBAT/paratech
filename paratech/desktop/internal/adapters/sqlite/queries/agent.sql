@@ -72,29 +72,42 @@ LIMIT sqlc.arg(max_rows);
 -- name: GetAgentAction :one
 SELECT * FROM agent_actions WHERE id = sqlc.arg(id);
 
+-- name: GetAgentActionByCall :one
+SELECT * FROM agent_actions
+WHERE thread_id = sqlc.arg(thread_id) AND turn = sqlc.arg(turn) AND call_id = sqlc.arg(call_id);
+
 -- A never-stored entry (version 0) is inserted with version 1.
 -- name: InsertAgentAction :exec
-INSERT INTO agent_actions (id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version,
-                           created_at, updated_at)
+INSERT INTO agent_actions (id, thread_id, turn, call_id, tool, status, intent, compensation, target_version,
+                           undo_refusal, proposal, version, created_at, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(thread_id), sqlc.arg(turn), sqlc.arg(call_id), sqlc.arg(tool), sqlc.arg(status),
-        sqlc.arg(compensation), sqlc.arg(target_version), sqlc.arg(proposal), 1, sqlc.arg(created_at),
-        sqlc.arg(updated_at));
+        sqlc.arg(intent), sqlc.arg(compensation), sqlc.arg(target_version), sqlc.arg(undo_refusal), sqlc.arg(proposal), 1,
+        sqlc.arg(created_at), sqlc.arg(updated_at));
 
--- Compare-and-swap on the loaded version; the call never changes.
+-- Compare-and-swap on the loaded version; the call and its intent never change.
 -- name: UpdateAgentAction :execrows
 UPDATE agent_actions
 SET status         = sqlc.arg(status),
     compensation   = sqlc.arg(compensation),
     target_version = sqlc.arg(target_version),
+    undo_refusal   = sqlc.arg(undo_refusal),
     version        = version + 1,
     updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
+-- Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
+-- in reverse.
 -- name: ListAgentActionsByThread :many
 SELECT * FROM agent_actions
 WHERE thread_id = sqlc.arg(thread_id)
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at DESC, rowid DESC
+LIMIT sqlc.arg(max_rows);
+
+-- The journal of the panel: the newest entries of every thread.
+-- name: ListRecentAgentActions :many
+SELECT * FROM agent_actions
+ORDER BY created_at DESC, rowid DESC
 LIMIT sqlc.arg(max_rows);
 
 -- name: ListUnfinishedAgentActions :many
-SELECT * FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, id;
+SELECT * FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, rowid;

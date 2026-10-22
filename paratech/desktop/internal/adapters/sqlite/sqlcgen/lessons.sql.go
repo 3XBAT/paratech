@@ -10,6 +10,22 @@ import (
 	"database/sql"
 )
 
+const bumpMaterialsLinkedToDeletedLesson = `-- name: BumpMaterialsLinkedToDeletedLesson :exec
+UPDATE materials
+SET version = version + 1
+WHERE id IN (SELECT ml.material_id
+             FROM material_lessons ml
+                      JOIN schedule_entries se ON se.id = ml.lesson_id
+             WHERE ml.lesson_id = ?1 AND se.deleted_at IS NOT NULL)
+`
+
+// Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
+// a soft-deleted lesson get a new version (Undo compares material versions).
+func (q *Queries) BumpMaterialsLinkedToDeletedLesson(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, bumpMaterialsLinkedToDeletedLesson, id)
+	return err
+}
+
 const getLesson = `-- name: GetLesson :one
 
 SELECT id, title, starts_at, ends_at, timezone, source_uid, start_notified_at, content_revision, calendar_synced_revision, calendar_synced_at, deleted_at, version, created_at, updated_at, subject, kind, teacher FROM schedule_entries WHERE id = ?1 AND deleted_at IS NULL

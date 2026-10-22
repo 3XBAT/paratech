@@ -73,8 +73,8 @@ type JobForcer interface {
 
 // PostProcessRetrier starts the post-processing of a recording again (TASK-086); satisfied by homeworkflow.Rerunner.
 type PostProcessRetrier interface {
-	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, error)
-	RedoSummary(ctx context.Context, rec shared.RecordingID) (shared.JobID, error)
+	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (id shared.JobID, created bool, err error)
+	RedoSummary(ctx context.Context, rec shared.RecordingID) (id shared.JobID, created bool, err error)
 }
 
 // RecordingItem is the JSON form of one recording with the status of its whole chain (TASK-076). Times are RFC 3339
@@ -374,7 +374,7 @@ func (s *ActivityService) RetryPostProcessing(ctx context.Context, id, work stri
 	if w != homeworkflow.WorkSummary && w != homeworkflow.WorkHomework && w != homeworkflow.WorkLectureText {
 		return ErrInvalidWork
 	}
-	_, err := s.retrier.Retry(ctx, rid, w)
+	_, _, err := s.retrier.Retry(ctx, rid, w)
 	return s.rerunError("retry post-processing", err)
 }
 
@@ -386,7 +386,7 @@ func (s *ActivityService) RedoSummary(ctx context.Context, id string) error {
 	if rid.Validate() != nil {
 		return ErrInvalidID
 	}
-	_, err := s.retrier.RedoSummary(ctx, rid)
+	_, _, err := s.retrier.RedoSummary(ctx, rid)
 	return s.rerunError("redo summary", err)
 }
 

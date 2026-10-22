@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/agent/action"
@@ -62,6 +63,10 @@ func (r *AgentActionRepository) Save(ctx context.Context, a *action.Action) erro
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", opSaveAgentAction, st.ID, err)
 	}
+	intent, err := intentText(st.Intent)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opSaveAgentAction, st.ID, err)
+	}
 	proposal := ""
 	if !st.Proposal.IsZero() {
 		proposal = st.Proposal.String()
@@ -73,13 +78,13 @@ func (r *AgentActionRepository) Save(ctx context.Context, a *action.Action) erro
 		if st.Version == 0 {
 			return DuplicateAsVersionConflict(MapError(ctx, q.InsertAgentAction(ctx, sqlcgen.InsertAgentActionParams{
 				ID: string(st.ID), ThreadID: string(st.Thread), Turn: int64(st.Turn), CallID: st.CallID, Tool: string(st.Tool),
-				Status: string(st.Status), Compensation: comp, TargetVersion: st.TargetVersion, Proposal: proposal,
-				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				Status: string(st.Status), Intent: intent, Compensation: comp, TargetVersion: st.TargetVersion,
+				UndoRefusal: string(st.Refusal), Proposal: proposal, CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 		}
 		n, err := q.UpdateAgentAction(ctx, sqlcgen.UpdateAgentActionParams{
-			Status: string(st.Status), Compensation: comp, TargetVersion: st.TargetVersion, UpdatedAt: jobMs(st.UpdatedAt),
-			ID: string(st.ID), ExpectedVersion: st.Version,
+			Status: string(st.Status), Compensation: comp, TargetVersion: st.TargetVersion, UndoRefusal: string(st.Refusal),
+			UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 		})
 		return VersionCAS(ctx, n, err)
 	})
@@ -97,6 +102,26 @@ func (r *AgentActionRepository) ListByThread(ctx context.Context, th shared.Thre
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opListAgentActions, th, MapError(ctx, err))
+	}
+	return actionsFromRows(rows)
+}
+
+// GetByCall loads the entry of a call of a request; a missing one wraps shared.ErrNotFound.
+func (r *AgentActionRepository) GetByCall(ctx context.Context, th shared.ThreadID, turn int, callID string) (*action.Action, error) {
+	row, err := r.db.Queries(ctx).GetAgentActionByCall(ctx, sqlcgen.GetAgentActionByCallParams{
+		ThreadID: string(th), Turn: int64(turn), CallID: callID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s %s/%d/%s: %w", opGetAgentAction, th, turn, callID, MapError(ctx, err))
+	}
+	return actionFromRow(row)
+}
+
+// ListRecent returns the newest entries of every thread, at most limit.
+func (r *AgentActionRepository) ListRecent(ctx context.Context, limit int) ([]*action.Action, error) {
+	rows, err := r.db.Queries(ctx).ListRecentAgentActions(ctx, int64(max(limit, 0)))
+	if err != nil {
+		return nil, fmt.Errorf("%s recent: %w", opListAgentActions, MapError(ctx, err))
 	}
 	return actionsFromRows(rows)
 }
@@ -130,6 +155,10 @@ func actionFromRow(row sqlcgen.AgentAction) (*action.Action, error) {
 	if err != nil {
 		return bad("compensation", err)
 	}
+	intent, err := intentFrom(row.Intent)
+	if err != nil {
+		return bad("intent", err)
+	}
 	var proposal values.Ref
 	if row.Proposal != "" {
 		kind, id, _ := strings.Cut(row.Proposal, ":")
@@ -139,9 +168,9 @@ func actionFromRow(row sqlcgen.AgentAction) (*action.Action, error) {
 	}
 	a, err := action.Restore(action.State{
 		Version: row.Version, ID: shared.ActionID(row.ID), Thread: shared.ThreadID(row.ThreadID), Turn: int(row.Turn),
-		CallID: row.CallID, Tool: values.Tool(row.Tool), Status: action.Status(row.Status), Compensation: comp,
-		TargetVersion: row.TargetVersion, Proposal: proposal, CreatedAt: jobFromMs(row.CreatedAt),
-		UpdatedAt: jobFromMs(row.UpdatedAt),
+		CallID: row.CallID, Tool: values.Tool(row.Tool), Status: action.Status(row.Status), Intent: intent,
+		Compensation: comp, TargetVersion: row.TargetVersion, Refusal: action.UndoRefusal(row.UndoRefusal),
+		Proposal: proposal, CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})
 	if err != nil {
 		return bad("restore", err)
@@ -149,10 +178,98 @@ func actionFromRow(row sqlcgen.AgentAction) (*action.Action, error) {
 	return a, nil
 }
 
+// intentWire is the stored form of action.Intent; prior and next are compensations in their own stored form.
+type intentWire struct {
+	Target string            `json:"target,omitempty"` // "<kind>:<id>"
+	Before int64             `json:"before,omitempty"`
+	Prior  *compensationWire `json:"prior,omitempty"`
+	Next   *compensationWire `json:"next,omitempty"`
+	Name   string            `json:"name,omitempty"`
+}
+
+func intentText(in action.Intent) (sql.NullString, error) {
+	if in.IsZero() {
+		return sql.NullString{}, nil
+	}
+	w := intentWire{Before: in.Before, Name: in.Name}
+	if !in.Target.IsZero() {
+		w.Target = in.Target.String()
+	}
+	var err error
+	if w.Prior, err = optionalWire(in.Prior); err != nil {
+		return sql.NullString{}, err
+	}
+	if w.Next, err = optionalWire(in.Next); err != nil {
+		return sql.NullString{}, err
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("encode intent: %w", err)
+	}
+	return sql.NullString{String: string(b), Valid: true}, nil
+}
+
+func optionalWire(c action.Compensation) (*compensationWire, error) {
+	if c == nil {
+		return nil, nil
+	}
+	w, err := wireOf(c)
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+func intentFrom(s sql.NullString) (action.Intent, error) {
+	if !s.Valid {
+		return action.Intent{}, nil
+	}
+	var w intentWire
+	if err := strictJSON(s.String, &w); err != nil {
+		return action.Intent{}, err
+	}
+	in := action.Intent{Before: w.Before, Name: w.Name}
+	if w.Target != "" {
+		kind, id, _ := strings.Cut(w.Target, ":")
+		target, err := values.NewRef(values.IDKind(kind), id)
+		if err != nil {
+			return action.Intent{}, err
+		}
+		in.Target = target
+	}
+	if w.Prior != nil {
+		p, err := compensationOfWire(*w.Prior)
+		if err != nil {
+			return action.Intent{}, err
+		}
+		in.Prior = p
+	}
+	if w.Next != nil {
+		n, err := compensationOfWire(*w.Next)
+		if err != nil {
+			return action.Intent{}, err
+		}
+		in.Next = n
+	}
+	return in, nil
+}
+
 func compensationText(c action.Compensation) (sql.NullString, error) {
 	if c == nil {
 		return sql.NullString{}, nil
 	}
+	w, err := wireOf(c)
+	if err != nil {
+		return sql.NullString{}, err
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("encode compensation: %w", err)
+	}
+	return sql.NullString{String: string(b), Valid: true}, nil
+}
+
+func wireOf(c action.Compensation) (compensationWire, error) {
 	w := compensationWire{Kind: string(c.Kind())}
 	switch v := c.(type) {
 	case action.RemoveSubject:
@@ -160,23 +277,22 @@ func compensationText(c action.Compensation) (sql.NullString, error) {
 	case action.RemoveFolder:
 		w.Subject, w.Folder = v.Subject.ID(), v.Folder.ID()
 	case action.ReturnToInbox:
-		w.Material = v.Material.ID()
+		w.Material, w.Lesson = v.Material.ID(), v.Lesson.ID()
 	case action.UnlinkMaterial:
 		w.Material, w.Lesson = v.Material.ID(), v.Lesson.ID()
 	case action.RestoreLessonInfo:
-		w.Recording, w.OldSubject, w.OldKind = v.Recording.ID(), v.OldSubject.ID(), v.OldKind
+		w.Recording, w.OldSubject, w.OldKind = v.Recording.ID(), v.OldSubject, v.OldKind
 	case action.RestoreDue:
-		w.Assignment, w.OldDue = v.Assignment.ID(), v.OldDue.String()
+		w.Assignment = v.Assignment.ID()
+		if !v.OldDue.IsZero() {
+			w.OldDue = v.OldDue.UTC().Format(time.RFC3339Nano)
+		}
 	case action.CancelJob:
 		w.Job = v.Job.ID()
 	default:
-		return sql.NullString{}, fmt.Errorf("unknown compensation %s", c.Kind())
+		return compensationWire{}, fmt.Errorf("unknown compensation %s", c.Kind())
 	}
-	b, err := json.Marshal(w)
-	if err != nil {
-		return sql.NullString{}, fmt.Errorf("encode compensation: %w", err)
-	}
-	return sql.NullString{String: string(b), Valid: true}, nil
+	return w, nil
 }
 
 func compensationFrom(s sql.NullString) (action.Compensation, error) {
@@ -187,6 +303,10 @@ func compensationFrom(s sql.NullString) (action.Compensation, error) {
 	if err := strictJSON(s.String, &w); err != nil {
 		return nil, err
 	}
+	return compensationOfWire(w)
+}
+
+func compensationOfWire(w compensationWire) (action.Compensation, error) {
 	ref := func(kind values.IDKind, id string) values.Ref {
 		r, _ := optionalRef(kind, id) // a malformed id stays zero and fails the compensation's check in Restore
 		return r
@@ -197,23 +317,23 @@ func compensationFrom(s sql.NullString) (action.Compensation, error) {
 	case action.CompRemoveFolder:
 		return action.RemoveFolder{Subject: ref(values.KindSubject, w.Subject), Folder: ref(values.KindFolder, w.Folder)}, nil
 	case action.CompReturnToInbox:
-		return action.ReturnToInbox{Material: ref(values.KindMaterial, w.Material)}, nil
-	case action.CompUnlinkMaterial:
-		return action.UnlinkMaterial{Material: ref(values.KindMaterial, w.Material), Lesson: ref(values.KindLesson, w.Lesson)}, nil
-	case action.CompRestoreLessonInfo:
-		old, err := optionalRef(values.KindSubject, w.OldSubject)
+		lesson, err := optionalRef(values.KindLesson, w.Lesson)
 		if err != nil {
 			return nil, err
 		}
-		return action.RestoreLessonInfo{Recording: ref(values.KindRecording, w.Recording), OldSubject: old, OldKind: w.OldKind}, nil
+		return action.ReturnToInbox{Material: ref(values.KindMaterial, w.Material), Lesson: lesson}, nil
+	case action.CompUnlinkMaterial:
+		return action.UnlinkMaterial{Material: ref(values.KindMaterial, w.Material), Lesson: ref(values.KindLesson, w.Lesson)}, nil
+	case action.CompRestoreLessonInfo:
+		return action.RestoreLessonInfo{Recording: ref(values.KindRecording, w.Recording), OldSubject: w.OldSubject, OldKind: w.OldKind}, nil
 	case action.CompRestoreDue:
-		var due values.Date
+		var due time.Time
 		if w.OldDue != "" {
-			d, err := values.ParseDate(w.OldDue)
+			d, err := time.Parse(time.RFC3339Nano, w.OldDue)
 			if err != nil {
 				return nil, err
 			}
-			due = d
+			due = d.UTC()
 		}
 		return action.RestoreDue{Assignment: ref(values.KindAssignment, w.Assignment), OldDue: due}, nil
 	case action.CompCancelJob:

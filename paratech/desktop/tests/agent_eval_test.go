@@ -231,8 +231,9 @@ func containsKind(kinds []values.CardKind, k values.CardKind) bool {
 }
 
 // TestAgentEvalCToolIsNeverExecuted: a C call reaches the Driver only as class C, which the agent may not execute (a
-// proposal card); a write that would replace a ready result is C too; and the agent use cases expose no method that
-// confirms, executes, sends or deletes. That the Driver turns class C into a card only is checked with TASK-117.
+// proposal card); a write that would replace a ready result needs a plan (TASK-123) and is never run without one; and
+// the agent use cases expose no method that confirms, executes, sends or deletes. That the Driver turns class C into a
+// card only is checked with TASK-117.
 func TestAgentEvalCToolIsNeverExecuted(t *testing.T) {
 	e := newEvalEnv(t, evalFacts{cost: evalCost, replaces: map[values.Tool]bool{values.ToolMakeSummary: true}})
 	e.hub.Then(
@@ -246,8 +247,11 @@ func TestAgentEvalCToolIsNeverExecuted(t *testing.T) {
 		t.Fatalf("first step calls = %+v", st.Calls)
 	}
 	st = e.submit(t, st, okOutcome(st.Calls[0]), okOutcome(st.Calls[1], agentRef(t, values.KindRecording, "rec1")))
-	if len(st.Calls) != 1 || st.Calls[0].Call.Tool() != values.ToolMakeSummary || st.Calls[0].Class != actionpolicy.ClassC {
-		t.Fatalf("a summary that replaces a ready one = %+v, want class C", st.Calls)
+	if len(st.Calls) != 0 {
+		t.Fatalf("a summary that replaces a ready one ran without a plan: %+v", st.Calls)
+	}
+	if r, ok := resultOf(e, "toolu_3"); !ok || refusalOf(t, r) != string(values.RefusePlanRequired) {
+		t.Fatalf("a summary that replaces a ready one: result %v, want plan_required", r)
 	}
 
 	forbidden := []string{"Confirm", "Execute", "Send", "Delete"}

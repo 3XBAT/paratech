@@ -424,6 +424,21 @@ func TestLinkUnlink(t *testing.T) {
 	}
 }
 
+func TestMaterial(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	m := importText(t, e, "x")
+	got, err := e.svc.Material(ctx, m.ID())
+	if err != nil || got.ID() != m.ID() || !got.InInbox() || got.Version() != m.Version() {
+		t.Fatalf("Material = %+v, %v", got, err)
+	}
+	if _, err := e.svc.Material(ctx, "nope"); !errors.Is(err, ErrMaterialNotFound) {
+		t.Fatalf("Material(unknown) = %v", err)
+	}
+	if _, err := e.svc.Material(ctx, "a b"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Material(bad id) = %v", err)
+	}
+}
+
 func TestRemoveRestoreMaterial(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	phys := createSubject(t, e, "Физика")

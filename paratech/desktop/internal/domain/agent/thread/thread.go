@@ -404,7 +404,8 @@ type Admission struct {
 }
 
 // Admit decides whether a call may run (ADR-0021, ADR-0022): every ID must have typed provenance; a U call counts
-// as a write, must match an unused step when a plan is approved and otherwise must not need a plan. C calls only
+// as a write, must match an unused step when a plan is approved and otherwise must not need a plan (replacing a
+// ready result needs one too); a paid U call without a plan counts toward MaxPaidUnplanned. C calls only
 // create a proposal (Admission.Class tells), UI calls are handled by ProposePlan, AskQuestions and Complete. A
 // refused call is never executed; over the write limit the request stops (budget).
 func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, error) {
@@ -412,11 +413,11 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 	if err != nil {
 		return Admission{}, err
 	}
-	class, err := actionpolicy.Classify(call.Tool(), f.ReplacesReady)
+	rule, err := actionpolicy.Of(call.Tool())
 	if err != nil {
 		return Admission{}, err
 	}
-	rule, _ := actionpolicy.Of(call.Tool())
+	class := rule.Class
 	if err := actionpolicy.CheckProvenance(call.Refs(), th.known(f.Context)); err != nil {
 		return Admission{}, err
 	}
@@ -443,7 +444,7 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 		t.used[adm.PlanStep] = true
 	} else {
 		reason, err := actionpolicy.NeedsPlan(call.Tool(), actionpolicy.Facts{
-			WritesBefore: t.budget.Writes, CostMicroUSD: f.CostMicroUSD, Triage: f.Triage,
+			WritesBefore: t.budget.Writes, CostMicroUSD: f.CostMicroUSD, Triage: f.Triage, ReplacesReady: f.ReplacesReady,
 		})
 		if err != nil {
 			return Admission{}, err
@@ -692,6 +693,22 @@ func (th *Thread) Restart(now time.Time) error {
 	}
 	th.historyFrom = th.turns
 	return nil
+}
+
+// Interrupt closes a request whose Driver stops running its calls (its context ended, the app closes). Calls the
+// Driver answered before (Answer) keep their results: a write that ran reports its real outcome, never «not done».
+// Calls without a result are answered not done, and a running request stops as «нет связи», so «Продолжить» goes on;
+// a request the student stopped keeps its reason.
+func (th *Thread) Interrupt(now time.Time) error {
+	t, err := th.turn()
+	if err != nil {
+		return err
+	}
+	th.Abandon(values.RefuseNotDone, now)
+	if t.status == StatusStopped {
+		return nil
+	}
+	return th.Stop(values.StopOffline, now)
 }
 
 // Cancel ends a request that is not finished.

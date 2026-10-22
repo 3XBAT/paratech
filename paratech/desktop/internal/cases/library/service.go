@@ -195,6 +195,21 @@ func (s *Service) Materials(ctx context.Context, sub shared.SubjectID) ([]*mater
 	return list, nil
 }
 
+// Material returns one file of the library in any status; a missing one is ErrMaterialNotFound.
+func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
+	if id.Validate() != nil {
+		return nil, ErrInvalidRequest
+	}
+	m, err := s.materials.Get(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, ErrMaterialNotFound
+	case err != nil:
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return m, nil
+}
+
 // Import stores an upload in «Входящие»: the type is detected from the content, the bytes are kept once under their
 // sha256. The same bytes uploaded again return the material that exists (Existing), a removed one back in
 // «Входящие». A stored file that is missing or has another size is written again.

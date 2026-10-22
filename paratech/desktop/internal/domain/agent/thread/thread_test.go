@@ -425,7 +425,7 @@ func TestAdmitWithoutPlan(t *testing.T) {
 		{"costly paid write", "make_summary", `{"recording":"r1"}`, Facts{Context: ctx, CostMicroUSD: 90_000}, ErrPlanRequired, "", 0},
 		{"lecture text", "make_lecture_text", `{"recording":"r1"}`, Facts{Context: ctx, CostMicroUSD: 1}, ErrPlanRequired, "", 0},
 		{"after partial triage", "set_lesson_info", `{"recording":"r1","subject":"s1","kind":"lab"}`, Facts{Context: ctx, Triage: actionpolicy.TriagePartly}, ErrPlanRequired, "", 0},
-		{"replaces a ready result", "make_summary", `{"recording":"r1"}`, Facts{Context: ctx, ReplacesReady: true}, nil, actionpolicy.ClassC, 0},
+		{"replaces a ready result", "make_summary", `{"recording":"r1"}`, Facts{Context: ctx, CostMicroUSD: 1, ReplacesReady: true}, ErrPlanRequired, "", 0},
 		{"C proposal", "propose_delete_recording", `{"recording":"r1"}`, Facts{Context: ctx}, nil, actionpolicy.ClassC, 0},
 		{"UI", "reply", `{"text":"Готово"}`, Facts{}, nil, actionpolicy.ClassUI, 0},
 		{"unknown id", "set_lesson_info", `{"recording":"r2","subject":"s1","kind":"lab"}`, Facts{Context: ctx}, actionpolicy.ErrUnknownID, "", 0},

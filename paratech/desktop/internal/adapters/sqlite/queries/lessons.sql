@@ -49,6 +49,16 @@ WHERE deleted_at IS NOT NULL OR calendar_synced_revision IS NULL OR calendar_syn
 ORDER BY starts_at, id
 LIMIT sqlc.arg(max_rows);
 
+-- Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
+-- a soft-deleted lesson get a new version (Undo compares material versions).
+-- name: BumpMaterialsLinkedToDeletedLesson :exec
+UPDATE materials
+SET version = version + 1
+WHERE id IN (SELECT ml.material_id
+             FROM material_lessons ml
+                      JOIN schedule_entries se ON se.id = ml.lesson_id
+             WHERE ml.lesson_id = sqlc.arg(id) AND se.deleted_at IS NOT NULL);
+
 -- name: PurgeDeletedLesson :execrows
 DELETE FROM schedule_entries WHERE id = sqlc.arg(id) AND deleted_at IS NOT NULL;
 

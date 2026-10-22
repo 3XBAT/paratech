@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -247,7 +248,7 @@ func TestAgentActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewAgentActionRepository(db)
-	due, _ := values.NewDate(2026, 11, 1)
+	due := time.Date(2026, 11, 1, 18, 30, 0, 0, time.UTC)
 	comps := []struct {
 		tool values.Tool
 		comp action.Compensation
@@ -255,8 +256,9 @@ func TestAgentActions(t *testing.T) {
 		{values.ToolCreateSubject, action.RemoveSubject{Subject: agentRef(t, values.KindSubject, "s2")}},
 		{values.ToolCreateFolder, action.RemoveFolder{Subject: agentRef(t, values.KindSubject, "s1"), Folder: agentRef(t, values.KindFolder, "f1")}},
 		{values.ToolPlaceUpload, action.ReturnToInbox{Material: agentRef(t, values.KindMaterial, "m1")}},
+		{values.ToolPlaceUpload, action.ReturnToInbox{Material: agentRef(t, values.KindMaterial, "m1"), Lesson: agentRef(t, values.KindLesson, "l1")}},
 		{values.ToolLinkMaterial, action.UnlinkMaterial{Material: agentRef(t, values.KindMaterial, "m1"), Lesson: agentRef(t, values.KindLesson, "l1")}},
-		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r1"), OldSubject: agentRef(t, values.KindSubject, "s1"), OldKind: "lab"}},
+		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r1"), OldSubject: "Физика (лаб.)", OldKind: "lab"}},
 		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r2")}},
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a1"), OldDue: due}},
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a2")}},
@@ -331,6 +333,115 @@ func TestAgentActions(t *testing.T) {
 	}
 	if _, err := repo.Get(ctx, "nope"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("Get of a missing entry = %v", err)
+	}
+}
+
+// The intent recorded before an action, the refusal of its Undo, the lookup by call and the journal of every thread.
+func TestAgentActionIntentRefusalAndLookups(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAgentActionRepository(db)
+	a1 := agentRef(t, values.KindAssignment, "a1")
+	m1 := agentRef(t, values.KindMaterial, "m1")
+	intents := []struct {
+		tool values.Tool
+		in   action.Intent
+	}{
+		{values.ToolEditDue, action.Intent{Target: a1, Before: 4, Prior: action.RestoreDue{Assignment: a1, OldDue: time.Date(2026, 11, 1, 18, 0, 0, 0, time.UTC)},
+			Next: action.RestoreDue{Assignment: a1, OldDue: time.Date(2026, 11, 3, 18, 0, 0, 0, time.UTC)}}},
+		{values.ToolPlaceUpload, action.Intent{Target: m1, Before: 2, Prior: action.ReturnToInbox{Material: m1, Lesson: agentRef(t, values.KindLesson, "l1")}}},
+		{values.ToolCreateSubject, action.Intent{Name: "Химия (лаб.)"}},
+		{values.ToolMakeSummary, action.Intent{}},
+	}
+	for i, tc := range intents {
+		id := shared.ActionID(fmt.Sprintf("i%d", i))
+		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 5, CallID: fmt.Sprintf("c%d", i), Tool: tc.tool, Intent: tc.in}, agentAt(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		got, err := repo.GetByCall(ctx, "th1", 5, fmt.Sprintf("c%d", i))
+		if err != nil || !reflect.DeepEqual(got.State(), a.State()) {
+			t.Fatalf("%s: got %+v, %v\nwant %+v", tc.tool, got.State(), err, a.State())
+		}
+	}
+	if _, err := repo.GetByCall(ctx, "th1", 6, "c0"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("GetByCall of another request = %v", err)
+	}
+
+	refused, _ := repo.Get(ctx, "i0")
+	steps := []func() error{
+		func() error { return refused.Complete(action.RestoreDue{Assignment: a1}, 5, agentAt(10)) },
+		func() error { return refused.BeginUndo(agentAt(11)) },
+		func() error { return refused.RefuseUndo(action.UndoResultReady, agentAt(12)) },
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, refused); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := repo.Get(ctx, "i0"); err != nil || got.Refusal() != action.UndoResultReady || got.Intent() != intents[0].in {
+		t.Fatalf("refused = %+v, %v", got, err)
+	}
+
+	recent, err := repo.ListRecent(ctx, 2)
+	if err != nil || len(recent) != 2 || recent[0].ID() != "i3" || recent[1].ID() != "i2" {
+		t.Fatalf("ListRecent = %v, %v", recent, err)
+	}
+	mustExec(t, db, `UPDATE agent_actions SET undo_refusal = '' WHERE id = 'i0'`)
+	if _, err := repo.Get(ctx, "i0"); !errors.Is(err, action.ErrInvalidAction) {
+		t.Fatalf("UNDO_REFUSED without a reason = %v", err)
+	}
+	mustExec(t, db, `UPDATE agent_actions SET intent = '{"target":"assignment:a1"}' WHERE id = 'i1'`)
+	if _, err := repo.Get(ctx, "i1"); err == nil {
+		t.Fatal("an intent with a target but no version was restored")
+	}
+}
+
+// Entries of the same instant are listed in insert order, not by their random ids: «Отменить всё» goes exactly in
+// reverse.
+func TestAgentActionsSameInstantKeepInsertOrder(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAgentActionRepository(db)
+	ids := []shared.ActionID{"zz", "mm", "aa"} // inserted in this order, ids sorted the other way
+	for i, id := range ids {
+		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: values.ToolCreateSubject}, agentAt(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []shared.ActionID{"aa", "mm", "zz"}
+	lists := map[string]func() ([]*action.Action, error){
+		"ListByThread": func() ([]*action.Action, error) { return repo.ListByThread(ctx, "th1", 10) },
+		"ListRecent":   func() ([]*action.Action, error) { return repo.ListRecent(ctx, 10) },
+	}
+	for name, list := range lists {
+		got, err := list()
+		if err != nil || len(got) != len(want) {
+			t.Fatalf("%s = %v, %v", name, got, err)
+		}
+		for i, a := range got {
+			if a.ID() != want[i] {
+				t.Fatalf("%s[%d] = %s, want %s (newest inserted first)", name, i, a.ID(), want[i])
+			}
+		}
+	}
+	unfinished, err := repo.ListUnfinished(ctx)
+	if err != nil || len(unfinished) != 3 || unfinished[0].ID() != "zz" || unfinished[2].ID() != "aa" {
+		t.Fatalf("ListUnfinished = %v, %v", unfinished, err)
 	}
 }
 

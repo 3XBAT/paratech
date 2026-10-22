@@ -50,7 +50,7 @@ func reach(t *testing.T, s Status) *Action {
 		StatusUnknown:     {func() error { _, err := a.Recover(at(1)); return err }},
 		StatusUndoing:     {func() error { return a.Complete(subjectComp(t), 1, at(1)) }, func() error { return a.BeginUndo(at(2)) }},
 		StatusUndone:      {func() error { return a.Complete(subjectComp(t), 1, at(1)) }, func() error { return a.BeginUndo(at(2)) }, func() error { return a.FinishUndo(at(3)) }},
-		StatusUndoRefused: {func() error { return a.Complete(subjectComp(t), 1, at(1)) }, func() error { return a.BeginUndo(at(2)) }, func() error { return a.RefuseUndo(at(3)) }},
+		StatusUndoRefused: {func() error { return a.Complete(subjectComp(t), 1, at(1)) }, func() error { return a.BeginUndo(at(2)) }, func() error { return a.RefuseUndo(UndoChanged, at(3)) }},
 	}
 	for _, step := range steps[s] {
 		if err := step(); err != nil {
@@ -97,13 +97,15 @@ func TestOperationsFromEveryStatus(t *testing.T) {
 		"Complete":   func(t *testing.T, a *Action) error { return a.Complete(subjectComp(t), 1, at(9)) },
 		"Fail":       func(_ *testing.T, a *Action) error { return a.Fail(at(9)) },
 		"BeginUndo":  func(_ *testing.T, a *Action) error { return a.BeginUndo(at(9)) },
+		"StartUndo":  func(_ *testing.T, a *Action) error { return a.StartUndo(at(9)) },
 		"FinishUndo": func(_ *testing.T, a *Action) error { return a.FinishUndo(at(9)) },
-		"RefuseUndo": func(_ *testing.T, a *Action) error { return a.RefuseUndo(at(9)) },
+		"RefuseUndo": func(_ *testing.T, a *Action) error { return a.RefuseUndo(UndoChanged, at(9)) },
 	}
 	want := map[string]map[Status]Status{
 		"Complete":   {StatusPending: StatusDone},
 		"Fail":       {StatusPending: StatusFailed},
 		"BeginUndo":  {StatusDone: StatusUndoing},
+		"StartUndo":  {StatusDone: StatusUndoing, StatusUndoing: StatusUndoing}, // UNDOING since at(2): stale at at(9)
 		"FinishUndo": {StatusUndoing: StatusUndone},
 		"RefuseUndo": {StatusUndoing: StatusUndoRefused},
 	}
@@ -153,8 +155,8 @@ func TestRecover(t *testing.T) {
 			if err != nil || retry != tt.retry || a.Status() != tt.to {
 				t.Fatalf("Recover = %v, %v; status %s; want %v %s", retry, err, a.Status(), tt.retry, tt.to)
 			}
-			if a.CanUndo() != (tt.to == StatusDone) {
-				t.Fatalf("CanUndo = %v in %s", a.CanUndo(), tt.to)
+			if a.CanUndo(at(2)) != (tt.to == StatusDone) {
+				t.Fatalf("CanUndo = %v in %s", a.CanUndo(at(2)), tt.to)
 			}
 		})
 	}
@@ -177,7 +179,7 @@ func TestUndoChecksTarget(t *testing.T) {
 	if err := a.CheckTarget(5); !errors.Is(err, ErrTargetChanged) {
 		t.Fatalf("changed target = %v", err)
 	}
-	if err := a.RefuseUndo(at(3)); err != nil || a.Status() != StatusUndoRefused {
+	if err := a.RefuseUndo(UndoChanged, at(3)); err != nil || a.Status() != StatusUndoRefused {
 		t.Fatalf("RefuseUndo = %v", err)
 	}
 }
@@ -186,7 +188,7 @@ func TestCompensationMatchesTool(t *testing.T) {
 	s1, f1 := ref(t, values.KindSubject, "s1"), ref(t, values.KindFolder, "f1")
 	m1, l1 := ref(t, values.KindMaterial, "m1"), ref(t, values.KindLesson, "l1")
 	r1, a1, j1 := ref(t, values.KindRecording, "r1"), ref(t, values.KindAssignment, "a1"), ref(t, values.KindJob, "j1")
-	due, _ := values.NewDate(2026, time.November, 3)
+	due := time.Date(2026, time.November, 3, 18, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name string
 		tool values.Tool
@@ -196,8 +198,9 @@ func TestCompensationMatchesTool(t *testing.T) {
 		{"remove subject", values.ToolCreateSubject, RemoveSubject{Subject: s1}, true},
 		{"remove folder", values.ToolCreateFolder, RemoveFolder{Subject: s1, Folder: f1}, true},
 		{"return to inbox", values.ToolPlaceUpload, ReturnToInbox{Material: m1}, true},
+		{"return to inbox and unlink", values.ToolPlaceUpload, ReturnToInbox{Material: m1, Lesson: l1}, true},
 		{"unlink", values.ToolLinkMaterial, UnlinkMaterial{Material: m1, Lesson: l1}, true},
-		{"restore lesson info", values.ToolSetLessonInfo, RestoreLessonInfo{Recording: r1, OldSubject: s1, OldKind: "seminar"}, true},
+		{"restore lesson info", values.ToolSetLessonInfo, RestoreLessonInfo{Recording: r1, OldSubject: "Физика (лекции)", OldKind: "seminar"}, true},
 		{"restore empty lesson info", values.ToolSetLessonInfo, RestoreLessonInfo{Recording: r1}, true},
 		{"restore due", values.ToolEditDue, RestoreDue{Assignment: a1, OldDue: due}, true},
 		{"restore no due", values.ToolEditDue, RestoreDue{Assignment: a1}, true},
@@ -211,7 +214,8 @@ func TestCompensationMatchesTool(t *testing.T) {
 		{"folder without subject", values.ToolCreateFolder, RemoveFolder{Folder: f1}, false},
 		{"lesson as material", values.ToolLinkMaterial, UnlinkMaterial{Material: l1, Lesson: l1}, false},
 		{"old kind outside enum", values.ToolSetLessonInfo, RestoreLessonInfo{Recording: r1, OldKind: "exam"}, false},
-		{"old subject wrong kind", values.ToolSetLessonInfo, RestoreLessonInfo{Recording: r1, OldSubject: l1}, false},
+		{"old subject on two lines", values.ToolSetLessonInfo, RestoreLessonInfo{Recording: r1, OldSubject: "a\nb"}, false},
+		{"inbox with a recording as lesson", values.ToolPlaceUpload, ReturnToInbox{Material: m1, Lesson: r1}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -323,6 +327,15 @@ func TestRestore(t *testing.T) {
 		{"proposal on a U entry", StatusPending, func(s *State) { s.Proposal = ref(t, values.KindProposal, "p1") }},
 		{"proposed without proposal", StatusProposed, func(s *State) { s.Proposal = values.Ref{} }},
 		{"updated before created", StatusDone, func(s *State) { s.UpdatedAt = t0.Add(-time.Minute) }},
+		{"refused without a reason", StatusUndoRefused, func(s *State) { s.Refusal = "" }},
+		{"unknown refusal", StatusUndoRefused, func(s *State) { s.Refusal = "tired" }},
+		{"refusal on a done entry", StatusDone, func(s *State) { s.Refusal = UndoChanged }},
+		{"intent with a target but no version", StatusPending, func(s *State) {
+			s.Intent = Intent{Target: ref(t, values.KindSubject, "s1")}
+		}},
+		{"intent prior of another tool", StatusPending, func(s *State) {
+			s.Intent = Intent{Prior: CancelJob{Job: ref(t, values.KindJob, "j1")}}
+		}},
 	}
 	for _, b := range bad {
 		t.Run("bad/"+b.name, func(t *testing.T) {

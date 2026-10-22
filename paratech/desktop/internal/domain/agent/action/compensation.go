@@ -3,6 +3,10 @@ package action
 import (
 	"fmt"
 	"slices"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/agent/values"
 )
@@ -67,13 +71,21 @@ func (c RemoveFolder) validate() error {
 	return firstErr(need(c.Subject, values.KindSubject), need(c.Folder, values.KindFolder))
 }
 
-// ReturnToInbox undoes place_upload: the material goes back to «Входящие»; the file is kept.
-type ReturnToInbox struct{ Material values.Ref }
+// ReturnToInbox undoes place_upload: the material goes back to «Входящие»; the file is kept. Lesson is the lesson the
+// action linked it to (zero: none), unlinked again.
+type ReturnToInbox struct{ Material, Lesson values.Ref }
 
 // Kind returns CompReturnToInbox.
 func (ReturnToInbox) Kind() CompensationKind { return CompReturnToInbox }
 
-func (c ReturnToInbox) validate() error { return need(c.Material, values.KindMaterial) }
+func (c ReturnToInbox) validate() error {
+	if !c.Lesson.IsZero() {
+		if err := need(c.Lesson, values.KindLesson); err != nil {
+			return err
+		}
+	}
+	return need(c.Material, values.KindMaterial)
+}
 
 // UnlinkMaterial undoes link_material.
 type UnlinkMaterial struct{ Material, Lesson values.Ref }
@@ -85,10 +97,14 @@ func (c UnlinkMaterial) validate() error {
 	return firstErr(need(c.Material, values.KindMaterial), need(c.Lesson, values.KindLesson))
 }
 
-// RestoreLessonInfo undoes set_lesson_info with the values before it. Zero OldSubject and empty OldKind mean none.
+// maxOldSubject bounds the stored old subject correction (a local value, never sent to the planner).
+const maxOldSubject = 512
+
+// RestoreLessonInfo undoes set_lesson_info with the correction before it (D7): the subject string the student or the
+// agent set and the kind code; empty means no correction. The string stays local: Undo writes it back as it was.
 type RestoreLessonInfo struct {
 	Recording  values.Ref
-	OldSubject values.Ref
+	OldSubject string
 	OldKind    string
 }
 
@@ -99,8 +115,8 @@ func (c RestoreLessonInfo) validate() error {
 	if err := need(c.Recording, values.KindRecording); err != nil {
 		return err
 	}
-	if !c.OldSubject.IsZero() && c.OldSubject.Kind() != values.KindSubject {
-		return fmt.Errorf("%w: old subject is not a subject id", ErrInvalidCompensation)
+	if len(c.OldSubject) > maxOldSubject || !utf8.ValidString(c.OldSubject) || strings.ContainsFunc(c.OldSubject, unicode.IsControl) {
+		return fmt.Errorf("%w: old subject is not one line of text", ErrInvalidCompensation)
 	}
 	spec, _ := values.SpecOf(values.ToolSetLessonInfo)
 	for _, a := range spec.Args() {
@@ -111,10 +127,10 @@ func (c RestoreLessonInfo) validate() error {
 	return nil
 }
 
-// RestoreDue undoes edit_due with the old due date; a zero OldDue means there was none.
+// RestoreDue undoes edit_due with the old deadline as it was stored (D7: date and time); zero means there was none.
 type RestoreDue struct {
 	Assignment values.Ref
-	OldDue     values.Date
+	OldDue     time.Time
 }
 
 // Kind returns CompRestoreDue.

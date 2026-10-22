@@ -83,14 +83,14 @@ type fakeRetrier struct {
 	err   error
 }
 
-func (f *fakeRetrier) Retry(_ context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, error) {
+func (f *fakeRetrier) Retry(_ context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, bool, error) {
 	f.calls = append(f.calls, "retry "+string(rec)+" "+string(work))
-	return "j9", f.err
+	return "j9", true, f.err
 }
 
-func (f *fakeRetrier) RedoSummary(_ context.Context, rec shared.RecordingID) (shared.JobID, error) {
+func (f *fakeRetrier) RedoSummary(_ context.Context, rec shared.RecordingID) (shared.JobID, bool, error) {
 	f.calls = append(f.calls, "redo "+string(rec))
-	return "j9", f.err
+	return "j9", true, f.err
 }
 
 // A non-UTC zone checks that the page gets UTC times.

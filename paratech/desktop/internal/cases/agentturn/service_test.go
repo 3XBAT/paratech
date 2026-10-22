@@ -576,7 +576,7 @@ func TestInterrupt(t *testing.T) {
 			st := ask(t, e, "мои предметы")
 			tt.before(t, e, st)
 
-			got, err := e.svc.Interrupt(t.Context(), ref(st))
+			got, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st)})
 			if err != nil || got.Status != thread.StatusStopped || got.StopReason != tt.want || len(got.Calls) != 0 ||
 				len(got.Cards) != 1 || got.Cards[0] != (values.StoppedCard{Reason: tt.want}) {
 				t.Fatalf("Interrupt = %+v, %v", got, err)
@@ -596,14 +596,46 @@ func TestInterrupt(t *testing.T) {
 	}
 }
 
+// The context ended after an action ran: its real outcome (journaled DONE) reaches the planner, not «not done»; only
+// the call that never ran is not done (TASK-117 follow-up).
+func TestInterruptAfterAnExecutedCall(t *testing.T) {
+	e := newEnv(t)
+	e.model.then(raw("c1", "create_subject", `{"name":"Химия"}`), raw("c2", "list_subjects", `{}`)).
+		then(raw("r1", "reply", `{"text":"ок"}`))
+	st := ask(t, e, "добавь химию")
+	if len(st.Calls) != 2 {
+		t.Fatalf("calls = %+v", st.Calls)
+	}
+	created := mustRef(t, values.KindSubject, "s9")
+	done := Outcome{Result: values.ToolResult{CallID: "c1", ResultJSON: `{"changed":true,"done":true,"id":"s9"}`}, Created: created}
+	got, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{done}})
+	if err != nil || got.Status != thread.StatusStopped || got.StopReason != values.StopOffline {
+		t.Fatalf("Interrupt = %+v, %v", got, err)
+	}
+	if _, err := e.svc.Continue(t.Context(), ref(st)); err != nil {
+		t.Fatal(err)
+	}
+	res := lastResults(t, e)
+	if len(res) != 2 || res[0] != done.Result || res[1].ResultJSON != `{"error":"not_done"}` {
+		t.Fatalf("results sent = %+v", res)
+	}
+	th, _ := e.threads.Get(t.Context(), st.Thread)
+	if !th.Seen(created) {
+		t.Fatal("the created subject is not known to the provenance check")
+	}
+	if _, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("zz", `{}`)}}); err == nil {
+		t.Fatal("Interrupt accepted a result of a call the Driver does not run")
+	}
+}
+
 func TestInterruptEndedRequest(t *testing.T) {
 	e := newEnv(t)
 	e.model.then(raw("r1", "reply", `{"text":"ок"}`))
 	st := ask(t, e, "привет")
-	if _, err := e.svc.Interrupt(t.Context(), ref(st)); !errors.Is(err, thread.ErrInvalidTransition) {
+	if _, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st)}); !errors.Is(err, thread.ErrInvalidTransition) {
 		t.Fatalf("Interrupt of a done request = %v", err)
 	}
-	if _, err := e.svc.Interrupt(t.Context(), TurnRef{Thread: st.Thread, Turn: 9}); !errors.Is(err, ErrStaleTurn) {
+	if _, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: TurnRef{Thread: st.Thread, Turn: 9}}); !errors.Is(err, ErrStaleTurn) {
 		t.Fatalf("Interrupt of an old request = %v", err)
 	}
 }

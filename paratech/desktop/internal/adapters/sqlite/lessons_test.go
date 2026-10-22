@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -305,6 +306,65 @@ func TestLessonPurgeDeleted(t *testing.T) {
 	}
 	if err := repo.Save(ctx, gone); !errors.Is(err, shared.ErrVersionConflict) {
 		t.Fatalf("save of a purged lesson = %v, want ErrVersionConflict (never re-inserted)", err)
+	}
+}
+
+// A purge drops material links by FK cascade; every material that lost a link must get a new version (Undo compares
+// versions), the others keep theirs.
+func TestLessonPurgeBumpsLinkedMaterials(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	lessons, materials := NewLessonRepository(db), NewMaterialRepository(db)
+	live, gone := newTestLesson(t, "live", "", 0), newTestLesson(t, "gone", "", 2)
+	if err := lessons.ApplyChanges(ctx, []*lesson.Lesson{live, gone}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	links := map[shared.MaterialID][]shared.LessonID{"m-gone": {"gone"}, "m-both": {"live", "gone"}, "m-live": {"live"}, "m-none": nil}
+	for id, ls := range links {
+		m := newLibMaterial(t, id, string(id))
+		for _, l := range ls {
+			if _, err := m.Link(l, libT0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := materials.Save(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := gone.MarkDeleted(lesT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := lessons.ApplyChanges(ctx, nil, []*lesson.Lesson{gone}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lessons.PurgeDeleted(ctx, "live"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("purge of a live lesson = %v, want ErrConflict", err)
+	}
+	for i := 0; i < 2; i++ { // the second purge finds nothing and bumps nothing
+		if err := lessons.PurgeDeleted(ctx, "gone"); err != nil {
+			t.Fatalf("purge #%d: %v", i+1, err)
+		}
+	}
+
+	tests := []struct {
+		id      shared.MaterialID
+		version int64
+		lessons []shared.LessonID
+	}{
+		{"m-gone", 2, nil},
+		{"m-both", 2, []shared.LessonID{"live"}},
+		{"m-live", 1, []shared.LessonID{"live"}},
+		{"m-none", 1, nil},
+	}
+	for _, tt := range tests {
+		m, err := materials.Get(ctx, tt.id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", tt.id, err)
+		}
+		if m.Version() != tt.version || !slices.Equal(m.Lessons(), tt.lessons) {
+			t.Errorf("%s: version %d, lessons %v; want %d, %v", tt.id, m.Version(), m.Lessons(), tt.version, tt.lessons)
+		}
 	}
 }
 
