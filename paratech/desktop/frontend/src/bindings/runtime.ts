@@ -25,6 +25,17 @@ export async function onEvent(name: string, handler: () => void): Promise<() => 
   return (await load()).Events.On(name, () => handler());
 }
 
+/**
+ * Listens to a Wails event and passes its data on (the first emitted value); resolves to the function that stops
+ * listening. The data is untrusted until a parser has checked it.
+ */
+export async function onEventData(name: string, handler: (data: unknown) => void): Promise<() => void> {
+  return (await load()).Events.On(name, (event) => {
+    const data = (event as { data?: unknown } | null)?.data;
+    handler(Array.isArray(data) && data.length === 1 ? data[0] : data);
+  });
+}
+
 /** Hides the window the page runs in. */
 export async function hideWindow(): Promise<void> {
   await (await load()).Window.Hide();

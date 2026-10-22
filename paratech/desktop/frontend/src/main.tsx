@@ -9,6 +9,7 @@ import "./ui/components.css";
 import "./sourcePicker/sourcePicker.css";
 import "./ui/soundLevel.css";
 import "./styles.css";
+import "./agent/agent.css";
 
 // Before the first render: the CSP forbids an inline script in index.html.
 initTheme();

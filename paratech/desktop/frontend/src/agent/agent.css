@@ -1,0 +1,73 @@
+/* Agent panel: the right column of the window (docs/design/concept-agent.html). Neutral surfaces, one accent. */
+.shell.with-agent { grid-template-columns: 108px minmax(0, 1fr) 340px; }
+.shell.with-agent .sheet { border-right: 1px solid var(--edge); border-top-right-radius: var(--r-xl); }
+@container app (max-width: 880px) {
+  .shell.with-agent { grid-template-columns: 84px minmax(0, 1fr) 280px; }
+}
+
+.ag { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ag-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 4px 12px 8px 16px; }
+.ag-title { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.ag-name { font-weight: 600; }
+.ag-kbd { margin-left: auto; padding: 0 4px; border-radius: var(--r-xs); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line); color: var(--muted); font: inherit; font-size: 11.5px; line-height: 18px; font-weight: 500; }
+.ag-ask-form { display: flex; align-items: center; gap: 8px; }
+.ag-input { flex: 1; min-width: 0; height: var(--h-lg); padding: 0 12px; border: 0; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); color: var(--text); font: inherit; }
+.ag-input::placeholder { color: var(--muted); }
+.ag-input:focus { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+.ag-input:disabled { background: var(--fill); cursor: not-allowed; }
+.ag-ctx { display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); color: var(--muted); }
+.ag-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 24px; padding: 0 2px 0 8px; border-radius: var(--r-sm); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); color: var(--text); font-size: var(--fs-small); font-weight: 500; white-space: nowrap; }
+.ag-chip-text { overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
+.ag-chip-x { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--muted); cursor: pointer; }
+.ag-chip-x:hover { background: var(--fill); color: var(--text); }
+.ag-chip-x .i { width: 12px; height: 12px; }
+.ag-offline { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--neu-t); font-size: var(--fs-small); font-weight: 600; }
+.ag-offline .i { width: 14px; height: 14px; }
+
+.ag-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 4px 12px 16px 16px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--fill-2) transparent; }
+.ag-thread > * { flex: none; }
+.ag-empty, .ag-stale { margin: 0; }
+.ag-stale { align-self: center; text-align: center; }
+.ag-req { display: flex; flex-direction: column; gap: 8px; }
+.ag-user { align-self: flex-end; max-width: 88%; margin: 0; padding: 8px 12px; border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); background: var(--fill-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.ag-callline { margin: 0; }
+
+.ag-card { padding: 12px 16px 16px; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
+.ag-card p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.ag-card p:last-child { margin-bottom: 0; }
+.ag-card-h { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; color: var(--muted); }
+.ag-ask { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.ag-ask > .ag-card-h { color: var(--accent); }
+.ag-confirm { box-shadow: 0 0 0 1px color-mix(in srgb, var(--rec-t) 45%, transparent); }
+.ag-confirm > .ag-card-h { color: var(--rec-t); }
+.ag-lead { font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; letter-spacing: -0.01em; }
+/* The reply is the model's text: line breaks stay, markup is never interpreted. */
+.ag-text { white-space: pre-wrap; }
+.ag-sub { font-size: var(--fs-small); font-weight: 600; color: var(--muted); }
+.ag-list { margin: 0 0 8px; padding-left: 20px; overflow-wrap: anywhere; }
+.ag-list li { margin-bottom: 4px; }
+.ag-list li::marker { color: var(--muted); }
+.ag-note { display: flex; gap: 8px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
+.ag-note .i { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+.ag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.ag-revise { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.ag-inp { width: 100%; height: var(--h-ctl); padding: 0 8px; border: 1px solid var(--control); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: inherit; }
+.ag-inp:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ag-q { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.ag-q legend { padding: 0; margin-bottom: 4px; font-weight: 600; overflow-wrap: anywhere; }
+.ag-opt { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; cursor: pointer; }
+.ag-opt input { margin: 3px 0 0; accent-color: var(--prim); }
+.ag-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill); animation: ag-breath var(--t-breath) ease-in-out infinite; }
+@keyframes ag-breath { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .ag-dot { animation: none; } }
+.ag-file { display: flex; align-items: center; gap: 8px; }
+.ag-file .i { flex: none; color: var(--muted); }
+.ag-file-kind { color: var(--muted); }
+.ag-file-name { font-weight: 600; overflow-wrap: anywhere; }
+
+.ag-act, .ag-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: var(--fs-small); line-height: var(--lh-small); }
+.ag-act .i, .ag-stop .i { flex: none; width: 14px; height: 14px; color: var(--muted); }
+.ag-act-tx { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+@media (forced-colors: active) {
+  .ag-input:focus { outline: 2px solid Highlight; }
+}

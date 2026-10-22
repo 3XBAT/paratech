@@ -10,6 +10,7 @@ import {
   routeToSummary,
   routeToTranscript,
 } from "./nav";
+import { AgentPanel } from "./agent/AgentPanel";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -74,7 +75,7 @@ export function App() {
   const overlay = route.transcript !== "" || route.summary !== "";
 
   return (
-    <div className="shell">
+    <div className="shell with-agent">
       <IconSprite />
       <nav className="rail" aria-label="Разделы">
         {pages.map((p) => (
@@ -132,6 +133,7 @@ export function App() {
           </div>
         )}
       </main>
+      <AgentPanel page={current} assignmentId={route.assignment} />
     </div>
   );
 }
