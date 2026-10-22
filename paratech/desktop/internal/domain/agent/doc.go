@@ -1,7 +1,7 @@
 // Package agent is the bounded context of the agent panel (ADR-0021, ADR-0022): threads per subject, requests and
 // their steps, the tool catalog, the action policy and the action journal with Undo.
-// Aggregates: domain/agent/thread, domain/agent/action. Values: domain/agent/values. Services:
-// domain/agent/services/actionpolicy.
+// Aggregates: domain/agent/thread, domain/agent/action, domain/agent/post (the post after a lesson, TASK-125). Values:
+// domain/agent/values. Services: domain/agent/services/actionpolicy, domain/agent/services/today (rules of «Сегодня»).
 //
 // Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared; views of other contexts
 // reach it as agent-owned values (Ref, Scope, Base) filled by use cases.

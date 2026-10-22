@@ -226,7 +226,11 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	// The stt type is registered by the speech activator once the speech component verified (wireSpeech); until then
 	// STT jobs wait QUEUED.
-	handlers := jobHandlers{postProcess: post, drafts: c.drafts}
+	postHandler, err := withTodayPosts(post, db, e, log) // a post on «Сегодня» after each lesson (TASK-125)
+	if err != nil {
+		return err
+	}
+	handlers := jobHandlers{postProcess: postHandler, drafts: c.drafts}
 	handlers.delivery = c.deliveries
 	// Before the proposals (the deadline calendar) and the runner (the calendar sync handler).
 	if err := c.wireGoogle(e, profile, log); err != nil {
@@ -350,6 +354,11 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: knowledge base: %w", err)
 	}
 
+	todayScreen, err := c.newTodayScreen(e, lib, log)
+	if err != nil {
+		return err
+	}
+
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
 		rerunner: rerunner,
@@ -376,6 +385,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Library:    lib,
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel},
+		Today: todayScreen,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
