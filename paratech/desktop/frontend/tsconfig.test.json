@@ -81,6 +81,10 @@
     "src/pages/SubjectsParts.tsx",
     "src/pages/JournalParts.tsx",
     "src/ui/Rail.tsx",
-    "src/ui/accent.ts"
+    "src/ui/accent.ts",
+    "src/bindings/today.ts",
+    "src/todayView.ts",
+    "src/agentDraft.ts",
+    "src/pages/TodayParts.tsx"
   ]
 }
