@@ -199,7 +199,7 @@ func TestAgentAskResultAndSecondStep(t *testing.T) {
 	if res := lastTurn(t, reqs[1]).GetResults().GetResults(); len(res) != 1 || res[0].GetResultJson() != `{"id":"s2"}` {
 		t.Fatalf("results sent = %v", res)
 	}
-	entries, err := e.journal.List(ctx, st.Thread, 10)
+	entries, err := e.journal.ListThread(ctx, st.Thread, 10)
 	if err != nil || len(entries) != 1 || entries[0].Status != action.StatusDone || !entries[0].CanUndo {
 		t.Fatalf("journal = %+v, %v", entries, err)
 	}
@@ -306,7 +306,7 @@ func TestAgentRecoverAfterRestart(t *testing.T) {
 	if rep, err := e.journal.Recover(ctx); err != nil || rep.Unknown != 1 {
 		t.Fatalf("journal Recover = %+v, %v", rep, err)
 	}
-	entries, _ := e.journal.List(ctx, st.Thread, 10)
+	entries, _ := e.journal.ListThread(ctx, st.Thread, 10)
 	if len(entries) != 1 || entries[0].ID != entry.ID || entries[0].Status != action.StatusUnknown || entries[0].CanUndo {
 		t.Fatalf("journal after restart = %+v", entries)
 	}

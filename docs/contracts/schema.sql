@@ -650,3 +650,9 @@ CREATE TABLE agent_actions (
 );
 CREATE INDEX idx_agent_actions_thread ON agent_actions (thread_id, created_at);
 CREATE INDEX idx_agent_actions_open ON agent_actions (status) WHERE status IN ('PENDING', 'UNDOING');
+
+-- agent_actions (migration 0023): intent is the JSON object {"target","before","prior","name"} of action.Intent (NULL:
+-- none); undo_refusal is why an UNDO_REFUSED entry was refused. The journal of the panel lists entries by created_at.
+ALTER TABLE agent_actions ADD COLUMN intent TEXT CHECK (intent IS NULL OR (json_valid(intent) AND json_type(intent) = 'object'));
+ALTER TABLE agent_actions ADD COLUMN undo_refusal TEXT NOT NULL DEFAULT '' CHECK (undo_refusal IN ('', 'changed', 'result_ready', 'cannot_stop'));
+CREATE INDEX idx_agent_actions_created ON agent_actions (created_at);

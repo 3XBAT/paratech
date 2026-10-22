@@ -21,6 +21,8 @@ type AgentAction struct {
 	Version       int64
 	CreatedAt     int64
 	UpdatedAt     int64
+	Intent        sql.NullString
+	UndoRefusal   string
 }
 
 type AgentStep struct {

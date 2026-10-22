@@ -50,6 +50,7 @@ type Querier interface {
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
 	GetAgentAction(ctx context.Context, id string) (AgentAction, error)
+	GetAgentActionByCall(ctx context.Context, arg GetAgentActionByCallParams) (AgentAction, error)
 	// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
 	// journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
 	GetAgentThread(ctx context.Context, id string) (AgentThread, error)
@@ -211,6 +212,8 @@ type Querier interface {
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
 	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
 	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
+	// The journal of the panel: the newest entries of every thread.
+	ListRecentAgentActions(ctx context.Context, maxRows int64) ([]AgentAction, error)
 	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
 	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
@@ -252,7 +255,7 @@ type Querier interface {
 	// the files; summaries and lecture texts are keyed by the transcript id.
 	// What the recording holds, for the confirmation.
 	RecordingDeletionCounts(ctx context.Context, recordingID string) (RecordingDeletionCountsRow, error)
-	// Compare-and-swap on the loaded version; the call never changes.
+	// Compare-and-swap on the loaded version; the call and its intent never change.
 	UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error)
 	// Compare-and-swap on the loaded version; the key never changes.
 	UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadParams) (int64, error)
