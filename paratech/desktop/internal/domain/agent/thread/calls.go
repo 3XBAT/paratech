@@ -9,14 +9,14 @@ import (
 )
 
 // maxOpenCalls bounds the calls of one step the thread waits for (the Hub returns at most MaxCallsPerStep).
-const maxOpenCalls = 2 * MaxCallsPerStep
+const maxOpenCalls = values.MaxReplyCalls
 
 // OpenCall is a call of the last step that waits for its result. The Hub accepts an echo of calls only when the
 // results of exactly those calls follow it, so every call is answered (by the Driver, by the case for card tools and
 // refusals, or as not done) before the next step.
 type OpenCall struct {
 	ID       string
-	Tool     values.Tool // set when the call was admitted
+	Tool     values.Tool // empty for a name outside the catalog
 	PlanStep int         // the approved step it executes; -1 none
 	Admitted bool        // Admit let it run
 	Answered bool
@@ -31,8 +31,9 @@ type Created struct {
 }
 
 // Expect records the calls of the step that just ended; their results are collected with Answer and taken with
-// TakeResults. The previous set must have been taken.
-func (th *Thread) Expect(callIDs []string, now time.Time) error {
+// TakeResults. The previous set must have been taken. Call IDs must be well formed and distinct; a tool name outside
+// the catalog is kept as unknown.
+func (th *Thread) Expect(calls []values.RawCall, now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
 		return err
@@ -40,15 +41,17 @@ func (th *Thread) Expect(callIDs []string, now time.Time) error {
 	if t.stepOpen || len(t.open) > 0 {
 		return fmt.Errorf("%w: calls expected while a step is open or results are pending", ErrInvalidTransition)
 	}
-	if len(callIDs) == 0 || len(callIDs) > maxOpenCalls || now.IsZero() {
+	if len(calls) == 0 || len(calls) > maxOpenCalls || now.IsZero() {
 		return fmt.Errorf("%w: a step has 1..%d calls", ErrInvalidThread, maxOpenCalls)
 	}
-	open := make([]OpenCall, 0, len(callIDs))
-	for _, id := range callIDs {
-		if id == "" || slices.ContainsFunc(open, func(c OpenCall) bool { return c.ID == id }) {
-			return fmt.Errorf("%w: call ids must be distinct and not empty", ErrInvalidThread)
+	open := make([]OpenCall, 0, len(calls))
+	for _, c := range calls {
+		id := c.CallID
+		if values.CheckCallID(id) != nil || slices.ContainsFunc(open, func(o OpenCall) bool { return o.ID == id }) {
+			return fmt.Errorf("%w: call ids must be distinct and well formed", ErrInvalidThread)
 		}
-		open = append(open, OpenCall{ID: id, PlanStep: -1})
+		tool, _ := values.ParseTool(c.Tool)
+		open = append(open, OpenCall{ID: id, Tool: tool, PlanStep: -1})
 	}
 	t.open = open
 	t.updatedAt, th.updatedAt = now, now

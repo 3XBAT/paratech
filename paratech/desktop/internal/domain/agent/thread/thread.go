@@ -46,6 +46,7 @@ func New(id shared.ThreadID, key Key, now time.Time) (*Thread, error) {
 // TurnState is the stored form of the current request.
 type TurnState struct {
 	Number       int
+	Scope        values.Scope
 	Status       Status
 	Resume       Status
 	StopReason   values.StopReason
@@ -106,6 +107,9 @@ func Restore(s State) (*Thread, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := th.inScope(t.scope); err != nil {
+			return nil, err
+		}
 		th.current = &t
 	}
 	th.version, th.turns, th.historyFrom, th.updatedAt = s.Version, s.Turns, s.HistoryFrom, s.UpdatedAt
@@ -146,7 +150,7 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		return bad("bad created ids")
 	}
 	return Turn{
-		number: s.Number, status: s.Status, resume: s.Resume, stopReason: s.StopReason, budget: s.Budget,
+		number: s.Number, scope: s.Scope, status: s.Status, resume: s.Resume, stopReason: s.StopReason, budget: s.Budget,
 		stepOpen: s.StepOpen, proposed: slices.Clone(s.ProposedPlan), approved: slices.Clone(s.ApprovedPlan),
 		used: slices.Clone(s.Used), retry: s.Retry, open: slices.Clone(s.Open), created: slices.Clone(s.Created),
 		startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
@@ -162,7 +166,7 @@ func (th *Thread) State() State {
 	if th.current != nil {
 		t := th.current
 		s.Current = &TurnState{
-			Number: t.number, Status: t.status, Resume: t.resume, StopReason: t.stopReason, Budget: t.budget,
+			Number: t.number, Scope: t.scope, Status: t.status, Resume: t.resume, StopReason: t.stopReason, Budget: t.budget,
 			StepOpen: t.stepOpen, ProposedPlan: slices.Clone(t.proposed), ApprovedPlan: slices.Clone(t.approved),
 			Used: slices.Clone(t.used), Retry: t.retry, Open: slices.Clone(t.open), Created: slices.Clone(t.created),
 			StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
@@ -221,6 +225,26 @@ func (th *Thread) StartTurn(now time.Time) error {
 	th.turns++
 	th.current = &Turn{number: th.turns, status: StatusPlanning, startedAt: now, updatedAt: now}
 	th.updatedAt = now
+	return nil
+}
+
+// StartRequest is StartTurn in a scope of this thread: the scope's subject must be the thread's key (the context
+// chip picks the thread), so a request never carries another subject.
+func (th *Thread) StartRequest(scope values.Scope, now time.Time) error {
+	if err := th.inScope(scope); err != nil {
+		return err
+	}
+	if err := th.StartTurn(now); err != nil {
+		return err
+	}
+	th.current.scope = scope
+	return nil
+}
+
+func (th *Thread) inScope(scope values.Scope) error {
+	if k, err := KeyOf(scope); err != nil || k != th.key {
+		return fmt.Errorf("%w: the scope belongs to another thread", ErrInvalidThread)
+	}
 	return nil
 }
 
@@ -659,10 +683,11 @@ func (th *Thread) Restart(now time.Time) error {
 	if len(t.open) > 0 {
 		return ErrResultsPending
 	}
+	scope := t.scope
 	if err := th.Cancel(now); err != nil {
 		return err
 	}
-	if err := th.StartTurn(now); err != nil {
+	if err := th.StartRequest(scope, now); err != nil {
 		return err
 	}
 	th.historyFrom = th.turns

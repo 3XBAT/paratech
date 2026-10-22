@@ -13,6 +13,7 @@ const maxRounds = values.MaxQuestionRounds
 // copy returned by Thread.Turn is a read-only view.
 type Turn struct {
 	number     int
+	scope      values.Scope // the context chip and screen of the request
 	status     Status
 	resume     Status            // STOPPED only: where «Продолжить» goes back to
 	stopReason values.StopReason // STOPPED only
@@ -27,6 +28,9 @@ type Turn struct {
 	startedAt  time.Time
 	updatedAt  time.Time
 }
+
+// Scope returns the scope the request was made in.
+func (t Turn) Scope() values.Scope { return t.scope }
 
 // Retry returns how many times the student retried the open step after a permanent failure.
 func (t Turn) Retry() int { return t.retry }

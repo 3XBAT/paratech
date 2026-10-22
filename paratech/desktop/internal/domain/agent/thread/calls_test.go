@@ -27,8 +27,73 @@ func stepWith(t *testing.T, th *Thread, ids ...string) {
 	if err := th.EndStep(len(ids), 10, at(3)); err != nil {
 		t.Fatal(err)
 	}
-	if err := th.Expect(ids, at(3)); err != nil {
+	raw := make([]values.RawCall, len(ids))
+	for i, id := range ids {
+		raw[i] = values.RawCall{CallID: id, Tool: "list_subjects", ArgumentsJSON: `{}`}
+	}
+	if err := th.Expect(raw, at(3)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestExpect(t *testing.T) {
+	bad := [][]values.RawCall{
+		nil,
+		{{CallID: "c1"}, {CallID: "c1"}},
+		{{CallID: "c 1"}},
+	}
+	for i, calls := range bad {
+		th := newThread(t)
+		if err := th.Expect(calls, at(2)); !errors.Is(err, ErrInvalidThread) {
+			t.Errorf("bad calls %d = %v", i, err)
+		}
+	}
+	th := newThread(t)
+	if err := th.Expect([]values.RawCall{{CallID: "c1", Tool: "show_plan"}, {CallID: "c2", Tool: "no_such"}}, at(2)); err != nil {
+		t.Fatal(err)
+	}
+	turn, _ := th.Turn()
+	if open := turn.OpenCalls(); open[0].Tool != values.ToolShowPlan || open[1].Tool != "" || open[0].PlanStep != -1 {
+		t.Fatalf("open calls = %+v", open)
+	}
+	if err := th.Expect([]values.RawCall{{CallID: "c3"}}, at(2)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("second set while the first waits = %v", err)
+	}
+}
+
+func TestStartRequestScope(t *testing.T) {
+	s1 := ref(t, values.KindSubject, "s1")
+	scope, err := values.NewScope(s1, values.ScreenToday, values.Ref{}, values.Ref{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	none, err := New("th1", NoSubject, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := none.StartRequest(scope, at(1)); !errors.Is(err, ErrInvalidThread) {
+		t.Fatalf("subject scope in the no-subject thread = %v", err)
+	}
+	key, _ := SubjectKey(s1)
+	th, err := New("th2", key, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := th.StartRequest(scope, at(1)); err != nil {
+		t.Fatal(err)
+	}
+	st := th.State()
+	st.Version = 1
+	back, err := Restore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn, _ := back.Turn(); turn.Scope() != scope {
+		t.Fatalf("restored scope = %+v", turn.Scope())
+	}
+	st.Current.Scope = values.Scope{}
+	if _, err := Restore(st); !errors.Is(err, ErrInvalidThread) {
+		t.Fatalf("restore with a scope of another thread = %v", err)
 	}
 }
 

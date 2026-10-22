@@ -39,9 +39,10 @@ const (
 	RefuseInvalidPlan   Refusal = "invalid_plan"
 	RefuseTooManyRounds Refusal = "too_many_rounds"
 	RefuseBudget        Refusal = "budget"
-	RefuseNotNow        Refusal = "not_now"  // the request waits for the student or has ended
-	RefuseNotDone       Refusal = "not_done" // cancelled or interrupted before it ran
-	RefuseFailed        Refusal = "failed"   // the use case failed
+	RefuseNotNow        Refusal = "not_now"         // the request waits for the student or has ended
+	RefuseNotDone       Refusal = "not_done"        // cancelled or interrupted before it ran
+	RefuseFailed        Refusal = "failed"          // the use case failed
+	RefuseUnknown       Refusal = "outcome_unknown" // the app stopped while it ran; see the journal
 )
 
 // assumptionsNote tells the planner to go on after a refused third question round (ADR-0021).

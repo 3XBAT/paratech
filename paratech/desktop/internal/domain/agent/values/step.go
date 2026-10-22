@@ -97,6 +97,28 @@ type StepRequest struct {
 	MaxOutputTokens int
 }
 
+// MaxReplyCalls bounds the calls of a reply the desktop records; over the budget of 4 the request stops anyway.
+const MaxReplyCalls = 8
+
+// Validate checks the shape of a reply before anything of it is recorded: 1..MaxReplyCalls calls with well-formed,
+// distinct call IDs, a seal, and non-negative usage. The calls themselves are parsed one by one with ParseCall.
+func (r StepReply) Validate() error {
+	if len(r.Calls.Calls) == 0 || len(r.Calls.Calls) > MaxReplyCalls || len(r.Calls.Seal) == 0 {
+		return fmt.Errorf("%w: a reply has 1..%d sealed calls", ErrInvalidResult, MaxReplyCalls)
+	}
+	if r.InputTokens < 0 || r.OutputTokens < 0 {
+		return fmt.Errorf("%w: negative usage", ErrInvalidResult)
+	}
+	ids := map[string]bool{}
+	for _, c := range r.Calls.Calls {
+		if err := checkCallID(c.CallID); err != nil || ids[c.CallID] {
+			return fmt.Errorf("%w: call ids must be distinct and well formed", ErrInvalidResult)
+		}
+		ids[c.CallID] = true
+	}
+	return nil
+}
+
 // StepReply is the Hub's answer: 1..4 sealed calls and the usage the budget counts.
 type StepReply struct {
 	Calls        SealedCalls
