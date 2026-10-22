@@ -6,7 +6,7 @@
 -- (TestMigrationMatchesContractSchema).
 
 -- +goose Up
--- material_inspections (migration 0024): aggregate library/inspection, one row per material. text_sha256 is the digest
+-- material_inspections (migration 0025): aggregate library/inspection, one row per material. text_sha256 is the digest
 -- of the extracted text the outcome is for; attempt counts the reader calls for it (each refused one is charged).
 -- The answer columns are suggestions only (never acted on alone) and are set exactly when status is 'done';
 -- subject_id is a candidate the reader named, without a foreign key: a subject removed since is dropped when read.
@@ -28,7 +28,7 @@ CREATE TABLE material_inspections (
     CHECK (status = 'done' OR (subject_id IS NULL AND lesson_date IS NULL AND has_homework = 0 AND has_ticket_list = 0 AND mentions_email = 0))
 );
 
--- summaries, assignments (migration 0024): the material a summary or an assignment was made from. Its summary id is
+-- summaries, assignments (migration 0025): the material a summary or an assignment was made from. Its summary id is
 -- "material-<material id>" (summary.IDOfMaterial); an assignment of a material is found again by (material_id,
 -- source_index), as one of a transcript. A deleted material leaves the rows (ON DELETE SET NULL).
 ALTER TABLE summaries ADD COLUMN material_id TEXT REFERENCES materials (id) ON DELETE SET NULL;

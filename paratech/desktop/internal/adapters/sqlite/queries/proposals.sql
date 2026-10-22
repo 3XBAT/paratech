@@ -3,6 +3,14 @@
 -- name: GetProposal :one
 SELECT * FROM proposals WHERE id = sqlc.arg(id);
 
+-- The proposals in one status, newest first (the Today screen lists the VALIDATED ones, TASK-125). The table stays
+-- small (one row per action the student was asked about), so no index.
+-- name: ListProposalsByStatus :many
+SELECT * FROM proposals
+WHERE status = sqlc.arg(status)
+ORDER BY created_at DESC, id
+LIMIT sqlc.arg(max_rows);
+
 -- A never-stored proposal (version 0) is inserted with version 1.
 -- name: InsertProposal :exec
 INSERT INTO proposals (id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256,

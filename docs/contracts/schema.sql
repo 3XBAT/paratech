@@ -657,7 +657,24 @@ ALTER TABLE agent_actions ADD COLUMN intent TEXT CHECK (intent IS NULL OR (json_
 ALTER TABLE agent_actions ADD COLUMN undo_refusal TEXT NOT NULL DEFAULT '' CHECK (undo_refusal IN ('', 'changed', 'result_ready', 'cannot_stop'));
 CREATE INDEX idx_agent_actions_created ON agent_actions (created_at);
 
--- material_inspections (migration 0024): aggregate library/inspection, one row per material. text_sha256 is the digest
+-- ---------------------------------------------------------------------------------------------------------------
+-- today_posts: the post after a lesson (aggregate agent/post). The recording is the identity, so a repeated completion
+-- event adds no second post; it goes with its recording. summary_at is when the summary of transcript_id was stored,
+-- homework_at when its homework was looked for (NULL: not yet). No text: the screen builds it from these facts.
+-- ---------------------------------------------------------------------------------------------------------------
+CREATE TABLE today_posts (
+    recording_id  TEXT    PRIMARY KEY REFERENCES recordings (id) ON DELETE CASCADE,
+    transcript_id TEXT    NOT NULL CHECK (length(transcript_id) BETWEEN 1 AND 128),
+    summary_at    INTEGER,
+    homework_at   INTEGER,
+    version       INTEGER NOT NULL DEFAULT 0,                               -- optimistic concurrency (ADR-0004)
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    CHECK (summary_at IS NOT NULL OR homework_at IS NOT NULL)
+);
+CREATE INDEX idx_today_posts_updated ON today_posts (updated_at);
+
+-- material_inspections (migration 0025): aggregate library/inspection, one row per material. text_sha256 is the digest
 -- of the extracted text the outcome is for; attempt counts the reader calls for it (each refused one is charged).
 -- The answer columns are suggestions only (never acted on alone) and are set exactly when status is 'done';
 -- subject_id is a candidate the reader named, without a foreign key: a subject removed since is dropped when read.
@@ -679,7 +696,7 @@ CREATE TABLE material_inspections (
     CHECK (status = 'done' OR (subject_id IS NULL AND lesson_date IS NULL AND has_homework = 0 AND has_ticket_list = 0 AND mentions_email = 0))
 );
 
--- summaries, assignments (migration 0024): the material a summary or an assignment was made from. Its summary id is
+-- summaries, assignments (migration 0025): the material a summary or an assignment was made from. Its summary id is
 -- "material-<material id>" (summary.IDOfMaterial); an assignment of a material is found again by (material_id,
 -- source_index), as one of a transcript. A deleted material leaves the rows (ON DELETE SET NULL).
 ALTER TABLE summaries ADD COLUMN material_id TEXT REFERENCES materials (id) ON DELETE SET NULL;

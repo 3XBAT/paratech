@@ -35,6 +35,7 @@ func validCore() Core {
 		Agent: AgentCore{
 			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
 		},
+		Today: &fakeToday{},
 	}
 }
 

@@ -96,6 +96,62 @@ func (q *Queries) InsertProposal(ctx context.Context, arg InsertProposalParams) 
 	return err
 }
 
+const listProposalsByStatus = `-- name: ListProposalsByStatus :many
+SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format FROM proposals
+WHERE status = ?1
+ORDER BY created_at DESC, id
+LIMIT ?2
+`
+
+type ListProposalsByStatusParams struct {
+	Status  string
+	MaxRows int64
+}
+
+// The proposals in one status, newest first (the Today screen lists the VALIDATED ones, TASK-125). The table stays
+// small (one row per action the student was asked about), so no index.
+func (q *Queries) ListProposalsByStatus(ctx context.Context, arg ListProposalsByStatusParams) ([]Proposal, error) {
+	rows, err := q.db.QueryContext(ctx, listProposalsByStatus, arg.Status, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Proposal{}
+	for rows.Next() {
+		var i Proposal
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Status,
+			&i.AssignmentID,
+			&i.Title,
+			&i.Body,
+			&i.DueAt,
+			&i.Reason,
+			&i.Recipient,
+			&i.AttachmentSha256,
+			&i.AttachmentSize,
+			&i.AssignmentTitle,
+			&i.ConfirmedAt,
+			&i.ExecutedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AttachmentFormat,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateProposal = `-- name: UpdateProposal :execrows
 UPDATE proposals
 SET status            = ?1,

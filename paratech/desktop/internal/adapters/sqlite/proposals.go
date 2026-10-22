@@ -11,8 +11,9 @@ import (
 
 // Operation names of the proposal repository, used in its error messages.
 const (
-	opGetProposal  = "sqlite: get proposal"
-	opSaveProposal = "sqlite: save proposal"
+	opGetProposal   = "sqlite: get proposal"
+	opSaveProposal  = "sqlite: save proposal"
+	opListProposals = "sqlite: list proposals"
 )
 
 // ProposalRepository stores the action proposals of the LLM (the homeworkflow.ProposalRepository port). The status
@@ -34,6 +35,29 @@ func (r *ProposalRepository) Get(ctx context.Context, id proposal.ID) (*proposal
 		return nil, fmt.Errorf("%s %s: %w", opGetProposal, id, err)
 	}
 	return p, nil
+}
+
+// ListByStatus returns the proposals in status, newest first, at most limit (at least 1); the todayfeed.ProposalList
+// port (TASK-125).
+func (r *ProposalRepository) ListByStatus(ctx context.Context, status proposal.Status, limit int) ([]*proposal.Proposal, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%s: limit %d", opListProposals, limit)
+	}
+	rows, err := r.db.Queries(ctx).ListProposalsByStatus(ctx, sqlcgen.ListProposalsByStatusParams{
+		Status: string(status), MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListProposals, MapError(ctx, err))
+	}
+	out := make([]*proposal.Proposal, 0, len(rows))
+	for _, row := range rows {
+		p, err := proposalFromRow(row)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", opListProposals, err)
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 // Save writes the proposal: an INSERT for version 0, otherwise a version compare-and-swap (ADR-0004(d)). An id that

@@ -358,6 +358,16 @@ type Summary struct {
 	MaterialID    sql.NullString
 }
 
+type TodayPost struct {
+	RecordingID  string
+	TranscriptID string
+	SummaryAt    sql.NullInt64
+	HomeworkAt   sql.NullInt64
+	Version      int64
+	CreatedAt    int64
+	UpdatedAt    int64
+}
+
 type Transcript struct {
 	ID           string
 	RecordingID  string

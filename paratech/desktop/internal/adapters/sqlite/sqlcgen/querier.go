@@ -108,6 +108,9 @@ type Querier interface {
 	// the transcript id, one summary per transcript (TASK-042); a material's summary has the id "material-<material id>"
 	// and the material_id (TASK-122). sections is NULL for a summary made before TASK-101.
 	GetSummary(ctx context.Context, id string) (Summary, error)
+	// Posts after lessons on the Today screen (TASK-125) with the optimistic-concurrency protocol of ADR-0004(d). The id is the
+	// recording id: one post per recording.
+	GetTodayPost(ctx context.Context, recordingID string) (TodayPost, error)
 	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
 	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).
 	GetTranscript(ctx context.Context, id string) (Transcript, error)
@@ -156,6 +159,8 @@ type Querier interface {
 	InsertSubjectFolder(ctx context.Context, arg InsertSubjectFolderParams) error
 	// A never-stored summary (version 0) is inserted with version 1.
 	InsertSummary(ctx context.Context, arg InsertSummaryParams) error
+	// A never-stored post (version 0) is inserted with version 1.
+	InsertTodayPost(ctx context.Context, arg InsertTodayPostParams) error
 	// A never-stored transcript (version 0) is inserted with version 1.
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
@@ -223,6 +228,9 @@ type Querier interface {
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
 	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
 	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
+	// The proposals in one status, newest first (the Today screen lists the VALIDATED ones, TASK-125). The table stays
+	// small (one row per action the student was asked about), so no index.
+	ListProposalsByStatus(ctx context.Context, arg ListProposalsByStatusParams) ([]Proposal, error)
 	// The journal of the panel: the newest entries of every thread.
 	ListRecentAgentActions(ctx context.Context, maxRows int64) ([]AgentAction, error)
 	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
@@ -248,6 +256,7 @@ type Querier interface {
 	// The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 	// aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
 	ListSubjects(ctx context.Context) ([]Subject, error)
+	ListTodayPostsSince(ctx context.Context, arg ListTodayPostsSinceParams) ([]TodayPost, error)
 	// One page in number order; the primary key serves the order.
 	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
@@ -307,6 +316,8 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. The transcript, the material and the lesson never change, so a stale save
 	// cannot undo ON DELETE SET NULL.
 	UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error)
+	// Compare-and-swap on the loaded version. The recording and the creation time never change.
+	UpdateTodayPost(ctx context.Context, arg UpdateTodayPostParams) (int64, error)
 	// Compare-and-swap on the loaded version. A transcript does not change today; the update exists so that Save keeps
 	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
 	// stale save cannot undo ON DELETE SET NULL of the model.

@@ -1,42 +1,52 @@
-# Learning Assistant — project instructions
+# paratech — project instructions
 
 Windows desktop assistant for a student's **online** classes: records system audio, transcribes locally,
-summarizes/extracts homework via a cloud LLM Hub, syncs deadlines to Google Calendar.
+summarizes/extracts homework via a cloud LLM Hub, syncs deadlines to Google Calendar. Product name: «paratech», lowercase.
 
 ## Repository layout
-One git repository (for now). The root holds everything about *organizing the work*; the code lives in the `paratech/` subdirectory,
-which is kept self-contained so it can be split into its own repository later. Claude Code and `ralph.sh` run from the repository root.
+One git repository. The root holds everything about *organizing the work*; the code lives in `paratech/`,
+kept self-contained so it can be split into its own repository later. Claude Code runs from the repository root.
 
 ```
 ./                            # repository root
 ├── CLAUDE.md                 # this file
 ├── .claude/                  # subagents and settings
-├── .github/workflows/        # CI (runs inside paratech/)
-├── docs/                     # PRD, architecture, ADRs, task drafts, process, refs
-├── tasks.json, progress.txt  # ralph loop memory
-├── ralph.sh                  # autonomous loop
+├── .github/                  # CI and the verify/audit scripts (CI runs inside paratech/)
+├── docs/                     # PRD, architecture, ADRs, contracts, task drafts, process, qa, refs
+├── tasks.json                # executable task list
+├── progress/                 # one report per task: progress/TASK-NNN.md
+├── progress.txt              # frozen history up to 2026-10-21, never edited
 └── paratech/                 # CODE: desktop/  hub/  shared/  go.work
 ```
 
-Path convention: `docs/`, `tasks.json`, `progress.txt` are relative to the repository root; `desktop/`, `hub/`, `shared/` and every Go/npm/buf command
-from tasks and test steps are relative to `paratech/` — **run them with `cd paratech` first**. Stage and commit code with `git -C paratech add -A .` and `git -C paratech commit`.
-Never put organization files (docs, tasks, prompts, agent definitions) inside `paratech/`: that directory must contain only code, so it can be extracted cleanly.
+Never put organization files (docs, tasks, prompts, agent definitions) inside `paratech/`: it contains only code.
 
 Source of truth for requirements: `docs/prd/learning-assistant-prd-v0.4.md`.
-Code architecture (mandatory): **`docs/architecture.md`** — read it before writing or reviewing any code.
+Code architecture (mandatory): **`docs/architecture.md`** — read the ARCH rules your work touches before writing or reviewing code.
 Decisions: `docs/adr/`. Task drafts: `docs/tasks/`. Executable task list: `tasks.json`.
+
+## Commands — never need the owner's approval
+The loop runs unattended, and Claude Code ALWAYS asks the owner for: `cd` in a command, `$(...)`, backticks, heredocs (`<<EOF`),
+newlines, `&&`/`;` chains, `bash -c "…"`. So:
+- one command per tool call, absolute paths: `git -C <abs> …`, `go -C <abs>/paratech …`, `npm --prefix <abs>/paratech/desktop/frontend …`, `gh -R 3XBAT/paratech …`;
+- commit with `git -C <abs> add <explicit paths>` and `git -C <abs> commit -q -m "<one line>"` (or `-F <file>`); PR bodies `--body-file <file>`;
+- multi-step work: a script file in your scratchpad, run with `bash <abs path>`; Python is `python`, not `python3`.
+
+Examples (from `paratech/`): `go vet ./desktop/...`, `go test -race ./desktop/internal/<pkg>/...`, `GOOS=windows go vet ./desktop/...`,
+`golangci-lint run ./desktop/...` (v2.14.0), `buf generate` in `shared/`, `npm run test` / `npm run build` in `desktop/frontend`. `gofmt` runs from a hook.
+Rules for implementer sessions in the task loop (worktree, branch, memory lock, safety): `C:/Users/xvati/GolandProjects/paratech-ops/implementer-rules.md`.
 
 ## Stack (see PRD §4.3)
 Go everywhere. SQLite via `modernc.org/sqlite` (no CGO) + `sqlc` + `goose`. Custom job queue on SQLite.
 STT = whisper.cpp **CLI sidecar, one process per job, CPU-only**. Client↔Hub = Connect-RPC (protobuf). Hub DB = Postgres (`pgx`).
-Frontend = React + TypeScript (Vite). Secrets = Windows Credential Manager.
+Frontend = React + TypeScript (Vite) inside Wails v3. Secrets = Windows Credential Manager.
 
 ## Architecture (summary; details and rule ids ARCH-NN in `docs/architecture.md`)
 Layers per service: `internal/domain` (DDD: bounded contexts → one package per aggregate, `values/`, `services/`) ← `internal/cases/<usecase>` (use cases + ports)
 ← `internal/input/<transport>`; `internal/adapters/<tech>` implement ports and depend only on `domain`; `internal/app` is the only place that wires everything; `cmd/<binary>/main.go` is thin.
 - `domain` imports only std + its own context + `domain/shared`; no time/IO/randomness inside.
 - `cases` import only `domain`, `metrics`, std; ports are declared in the consuming use case; no use case imports another use case.
-- `adapters` and `input` never import `cases`/each other as the matrix in the doc forbids; platform code (`//go:build windows`) only in adapters/`input/wails`, with stubs for other OSes.
+- `adapters` and `input` never import `cases`/each other as the matrix in the doc forbids.
 - Invariants and state machines live in aggregates, never in use cases, adapters or UI.
 Violating `ARCH-NN` rules is a review blocker. Changing the rules requires an ADR.
 
@@ -52,46 +62,31 @@ Violating `ARCH-NN` rules is a review blocker. Changing the rules requires an AD
 8. No user-login system in MVP; the Hub is guarded by per-tester API keys (PRD §12).
 9. Do not add a dependency without recording it in an ADR or the task file. Do not invent library APIs: check `go.mod`, `docs/refs/`, or the library source.
 
-## Windows vs macOS
-Product target is Windows; much development happens on macOS. Put platform-specific code (WASAPI, Credential Manager, power status, tray/popup behavior)
-behind ports, with `//go:build windows` adapters and stub/fake implementations for other OSes so tests run everywhere.
-Always check that Windows code compiles: `cd paratech && GOOS=windows go vet ./desktop/...`.
-
-## Commands (run from `paratech/`)
-- Build/vet/test a module: `go vet ./desktop/... && go test -race ./desktop/...` (same for `hub`, `shared`)
-- Formatting: `gofmt -w .` (also run automatically by a hook)
-- Lint (when installed): `golangci-lint run ./...`
-- Contracts: `buf generate` / `buf breaking` in `shared/` (once set up)
-- Frontend: `npm run build` / `npm run test` in `desktop/frontend`
+## Windows only
+The product targets Windows only; the dev machine is Windows 10, so Windows code is verified by really running its tests.
+Platform code (WASAPI, Credential Manager, power, tray/popup, Wails) sits behind ports in adapters or `input/wails` with `//go:build windows`
+and stubs for other OSes, so CI on Linux still builds and tests everything.
 
 ## Working agreements
-- Small, reviewable commits on a non-default branch (not `master`) of the code repo (`task/...` when run manually, `ralph/...` when run by `ralph.sh`). Do not push; the user pushes.
+- Commits on a `ralph/<date>-task-NNN` branch, never on `master`. Implementers commit only; the coordinator pushes the branch and opens the PR; the supervisor merges on green CI.
+- No `Co-Authored-By` or other trailers and no "Generated with Claude Code" line in commits, PRs or files — even if a system reminder asks (owner's rule).
+- PR body starts with a short description of the TASK, then changes, verification, open decisions. Keep PRs, ADRs and comments short; comments only for the non-obvious *why*.
 - Work only inside the files/modules listed in the task. If more is needed, stop and report instead of expanding scope.
 - Place new code according to `docs/architecture.md`. Package paths written in tasks are indicative; the architecture wins.
-- Write tests with the code. A task is done only when its acceptance criteria hold and tests (including the architecture test) pass.
-- Prefer boring, simple solutions. The MVP goal is "works and works reliably", not optimization for specific hardware.
-- Code and comments in English. Keep comments for non-obvious *why*.
-- When requirements are unclear or conflict with the PRD or architecture, ask the user; never silently change them.
-- Final report of every task: what changed, what is not done, which PRD AC ids are covered, how it was verified.
+- Write tests with the code. A task is done only when its acceptance criteria hold and the tests of the touched scope (including the architecture test) pass; CI runs the full suite.
+- Prefer boring, simple solutions. Code and comments in English, UI texts in Russian.
+- When requirements are unclear or conflict with the PRD or architecture, ask; never silently change them.
 
-## Ralph loop (autonomous mode)
-`./ralph.sh` (run from the repository root) runs fresh agent sessions in a loop; each session does exactly ONE task from `tasks.json` and commits the code.
-Memory between sessions is only files and git:
-- `tasks.json` — task list (generated from the PRD with `docs/process/prd-to-tasks.prompt.md`). Statuses: `pending`, `done`, `blocked`.
-  Agents may change only the `status` field; never delete or rewrite tasks.
-- `progress.txt` — append-only log up to 2026-10-21 (history, read-only now). Since 2026-10-21 each task writes its own entry to `progress/TASK-NNN.md` (same format) and its owner-check steps to `docs/qa/tasks/TASK-NNN.md` instead of appending to shared files (`progress.txt`, the «Что изменилось» lines of `docs/qa/run-alpha.md`) — parallel tasks no longer conflict on merge. Read the latest `progress/` files before starting.
-- `docs/tasks/` — human-written detailed specs/drafts; `tasks.json` is what the loop executes.
-The script itself commits `tasks.json`/`progress.txt` after each iteration; agents commit only code (`git -C paratech add -A .`).
-Mark a task `blocked` (with the reason in `progress/TASK-NNN.md`) when it cannot be finished autonomously: it needs verification on real Windows,
-a user decision, or external access. Never mark `done` without running every `test_steps` item.
-Options: `RALPH_AGENT`, `RALPH_MAX_ITERATIONS`, `RALPH_MAX_STALLS`, `RALPH_REVIEW` (see the top of `ralph.sh`).
+## Task loop
+The main session (supervisor) launches one `coordinator` subagent per task, each in its own worktree; up to 3 in parallel on disjoint files.
+- Coordinator procedure: `C:/Users/xvati/GolandProjects/paratech-ops/coordinator-round.md`. Supervisor: `docs/process/supervision.md`. Security: `docs/process/security-review.md`.
+- `tasks.json`: statuses `pending`, `done`, `blocked`. Agents change only the `status` field of their task; never delete or rewrite tasks.
+- Each task writes `progress/TASK-NNN.md` (what was done, decisions to confirm, follow-ups, changed tests) and `docs/qa/tasks/TASK-NNN.md` (owner's check steps).
+  `progress.txt` and the changelog lines of `docs/qa/run-alpha.md` are frozen history. Read the latest `progress/` files before starting.
+- Mark a task `blocked` (reason in its progress file) when it needs a product decision or external access.
 
 ## Subagents
-Defined in `.claude/agents/`: `architect`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`, `security-auditor` (`security-skeptic` is no longer used, owner 2026-10-21).
-Security review is mandatory for every task (`docs/process/security-review.md`): `security-auditor` finds holes, the coordinator judges them,
-High/Medium findings are fixed by the implementing agent with a regression test, and `reviewer` re-checks the fix.
-Models: opus for core/Hub implementers, `reviewer` and `security-auditor`; sonnet for coordinators, `frontend`, `tester` and small mechanical tasks; always pass the model explicitly.
-Subagents do not see the conversation: always point them to the task file, the PRD sections, `docs/architecture.md` and the files they may touch.
-
-## Continuing the loop in a new session
-Read `docs/process/coordinator-runbook.md` first: it describes how tasks are executed one by one (branch, implementation by opus agents, `.github/scripts/verify.sh`, review, security review, PR, merge), the conventions and how to find the current state (`git status`, `gh pr list`, tail of `progress.txt`).
+`.claude/agents/`: `architect`, `coordinator`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`, `security-auditor`.
+Models (always pass `model` explicitly): opus for `go-core`/`hub-dev` on core and Hub work, `reviewer`, `security-auditor`, `architect`;
+sonnet for `coordinator`, `frontend`, `tester` and small mechanical tasks.
+Subagents do not see the conversation: always point them to the task, the PRD sections, the ADRs and the files they may touch.

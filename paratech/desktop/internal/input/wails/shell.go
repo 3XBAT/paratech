@@ -72,6 +72,8 @@ type Core struct {
 	Library LibraryUseCase // «Предметы» (TASK-121); the shell shows its open dialog, Files reads the chosen file
 
 	Agent AgentCore // the agent panel (TASK-119); the shell attaches its panel to the Wails events
+
+	Today TodayUseCase // «Сегодня» (TASK-125)
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -194,6 +196,7 @@ type Services struct {
 	Knowledge   *KnowledgeBaseService
 	Library     *LibraryService
 	Agent       *AgentService
+	Today       *TodayService
 
 	// AgentPanel is not bound: the shell attaches it to the Wails events while the app runs.
 	AgentPanel *AgentPanel
@@ -269,6 +272,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if !core.Agent.complete() {
 		return Services{}, errors.New("wails: open core: no agent")
 	}
+	if core.Today == nil {
+		return Services{}, errors.New("wails: open core: no today screen")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -301,6 +307,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Knowledge:  NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
 		Library:    NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log),
 		Agent:      NewAgentService(core.Agent, s.opts.Log),
+		Today:      NewTodayService(core.Today, s.opts.Log),
 		AgentPanel: core.Agent.Panel,
 	}, nil
 }
