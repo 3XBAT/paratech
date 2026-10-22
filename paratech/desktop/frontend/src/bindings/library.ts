@@ -13,7 +13,6 @@ export const methods = {
   createFolder: `${service}.CreateFolder`,
   materials: `${service}.Materials`,
   importFile: `${service}.ImportFile`,
-  importDroppedFile: `${service}.ImportDroppedFile`,
 } as const;
 
 /** The error texts of the Go binding (library.go); a Go test pins the same strings. */
@@ -38,6 +37,7 @@ export const errorTexts: readonly string[] = [
   "Данные сейчас меняются. Попробуйте ещё раз.",
   "Не удалось прочитать библиотеку. Попробуйте ещё раз.",
   "Этот файл добавить нельзя: перетащите файл с диска этого компьютера.",
+  "За раз можно перетащить не больше 10 файлов.",
 ];
 
 export const genericError = "Не удалось выполнить действие.";
@@ -185,8 +185,6 @@ export interface LibraryApi {
   materials(subjectId: string): Promise<LibraryMaterial[]>;
   /** «Добавить файл»: the native open dialog. */
   importFile(): Promise<LibraryImport>;
-  /** A file dropped on the window; the path is untrusted and the core checks it. */
-  importDroppedFile(path: string): Promise<LibraryImport>;
 }
 
 export function libraryApi(call: CallByName): LibraryApi {
@@ -196,6 +194,5 @@ export function libraryApi(call: CallByName): LibraryApi {
     createFolder: async (subjectId, name) => parseFolder(await call(methods.createFolder, subjectId, name)),
     materials: async (subjectId) => list(await call(methods.materials, subjectId), "materials", parseMaterial),
     importFile: async () => parseImport(await call(methods.importFile)),
-    importDroppedFile: async (path) => parseImport(await call(methods.importDroppedFile, path)),
   };
 }

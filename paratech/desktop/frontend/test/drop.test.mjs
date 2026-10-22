@@ -1,102 +1,76 @@
-// The drop zone (TASK-124): the injectable onFilesDropped, the native event, the DOM fallback. A fake binding stands for
-// LibraryService.ImportDroppedFile; paths are untrusted and never appear in the report.
+// The drop zone (TASK-138): Go imports the dropped files and emits "library:dropped"; the page shows the outcome.
+// The page never sees or sends a path; names are plain text.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
-  createFilesDropped,
+  dropTargetAttr,
   droppedEvent,
   dropTexts,
   hasFiles,
-  maxDropped,
   nextDepth,
-  parseDroppedPaths,
-  pathsFromTransfer,
+  parseDrop,
   subscribeDropped,
 } from "../.test-build/dropFiles.js";
 
 const material = { id: "m1", name: "a.pdf" };
-const imported = { cancelled: false, existing: false, material };
 
-function run(api, paths) {
-  const reports = [];
-  let done = 0;
-  const fn = createFilesDropped({ importDroppedFile: api }, (l) => reports.push(l), () => done++);
-  return fn(paths).then(() => ({ reports, done }));
-}
-
-test("a dropped file is imported through the binding and reported in fixed Russian text", async () => {
-  const seen = [];
-  const { reports, done } = await run(async (p) => (seen.push(p), imported), ["C:\\Users\\me\\Docs\\secret-plan.pdf"]);
-  assert.deepEqual(seen, ["C:\\Users\\me\\Docs\\secret-plan.pdf"]);
-  assert.deepEqual(reports, [[{ ok: true, text: dropTexts.added }]]);
-  assert.equal(done, 1);
-  assert.ok(!JSON.stringify(reports).includes("secret-plan"));
+test("each file of a drop gets its own line: added, already there, or the refusal text", () => {
+  const out = parseDrop({
+    error: "",
+    files: [
+      { name: "a.pdf", existing: false, material, error: "" },
+      { name: "b.pdf", existing: true, material, error: "" },
+      { name: "c.exe", existing: false, material: null, error: "Подходят только DOCX, PPTX, PDF и текст в UTF-8." },
+      { name: "", existing: false, material: null, error: "Этот файл добавить нельзя: перетащите файл с диска этого компьютера." },
+    ],
+  });
+  assert.equal(out.imported, true);
+  assert.deepEqual(out.lines, [
+    { ok: true, text: `a.pdf: ${dropTexts.added}` },
+    { ok: true, text: `b.pdf: ${dropTexts.existing}` },
+    { ok: false, text: "c.exe: Подходят только DOCX, PPTX, PDF и текст в UTF-8." },
+    { ok: false, text: "Этот файл добавить нельзя: перетащите файл с диска этого компьютера." },
+  ]);
+  assert.match(dropTexts.existing, /уже есть/);
 });
 
-test("a file that was in the library already is said so", async () => {
-  const { reports } = await run(async () => ({ ...imported, existing: true }), ["C:\\a.txt"]);
-  assert.deepEqual(reports[0], [{ ok: true, text: dropTexts.existing }]);
+test("a refusal of the whole drop is shown as it is; no files then", () => {
+  const out = parseDrop({ error: "За раз можно перетащить не больше 10 файлов.", files: [] });
+  assert.deepEqual(out, { lines: [{ ok: false, text: "За раз можно перетащить не больше 10 файлов." }], imported: false });
 });
 
-test("a refusal of the core is shown as its Russian text; an unknown error is generic; neither echoes the path", async () => {
-  const known = await run(async () => { throw new Error("Подходят только DOCX, PPTX, PDF и текст в UTF-8."); }, ["C:\\a.exe"]);
-  assert.deepEqual(known.reports[0], [{ ok: false, text: "Подходят только DOCX, PPTX, PDF и текст в UTF-8." }]);
-  const odd = await run(async () => { throw new Error("read C:\\Users\\me\\a.pdf: sharing violation"); }, ["C:\\Users\\me\\a.pdf"]);
-  assert.deepEqual(odd.reports[0], [{ ok: false, text: "Не удалось выполнить действие." }]);
-  assert.ok(!JSON.stringify(odd.reports).includes("Users"));
+test("an unknown error text is replaced by the generic one; a payload in a list of one is read", () => {
+  const out = parseDrop([{ error: "", files: [{ name: "x.txt", material: null, error: "read C:\\Users\\me\\x.txt: denied" }] }]);
+  assert.deepEqual(out.lines, [{ ok: false, text: "x.txt: Не удалось выполнить действие." }]);
+  assert.equal(out.imported, false);
+  assert.ok(!JSON.stringify(out).includes("Users"));
 });
 
-test("one failed file does not stop the next; each gets its own line", async () => {
-  let n = 0;
-  const { reports } = await run(async () => {
-    if (n++ === 0) {
-      throw new Error("Файл пустой.");
-    }
-    return imported;
-  }, ["C:\\1.txt", "C:\\2.txt"]);
-  assert.deepEqual(reports[0], [{ ok: false, text: "Файл пустой." }, { ok: true, text: dropTexts.added }]);
-});
-
-test("a drop without a path says to use «Добавить файл» and calls nothing", async () => {
-  let calls = 0;
-  const { reports, done } = await run(async () => (calls++, imported), []);
-  assert.equal(calls, 0);
-  assert.equal(done, 0);
-  assert.deepEqual(reports, [[{ ok: false, text: dropTexts.noPath }]]);
-  assert.match(dropTexts.noPath, /«Добавить файл»/);
-  const blank = await run(async () => (calls++, imported), ["", 5]);
-  assert.equal(calls, 0);
-  assert.deepEqual(blank.reports, [[{ ok: false, text: dropTexts.noPath }]]);
-});
-
-test("a cancelled result is not reported as added; too many files are cut", async () => {
-  const cancelled = await run(async () => ({ cancelled: true, existing: false, material: null }), ["C:\\a.txt"]);
-  assert.deepEqual(cancelled.reports[0], [{ ok: false, text: dropTexts.nothing }]);
-  let calls = 0;
-  const many = await run(async () => (calls++, imported), Array.from({ length: maxDropped + 3 }, (_, i) => `C:\\f${i}.txt`));
-  assert.equal(calls, maxDropped);
-  assert.equal(many.reports[0].at(-1).text, dropTexts.tooMany);
-});
-
-test("the event payload is read from a list, a list in a list or one path; anything else is no path", () => {
-  assert.deepEqual(parseDroppedPaths(["C:\\a.txt", "C:\\b.txt"]), ["C:\\a.txt", "C:\\b.txt"]);
-  assert.deepEqual(parseDroppedPaths([["C:\\a.txt"]]), ["C:\\a.txt"]);
-  assert.deepEqual(parseDroppedPaths("C:\\a.txt"), ["C:\\a.txt"]);
-  assert.deepEqual(parseDroppedPaths(["C:\\a.txt", 7, null, ""]), ["C:\\a.txt"]);
-  for (const bad of [null, undefined, 5, {}, ""]) {
-    assert.deepEqual(parseDroppedPaths(bad), []);
+test("a malformed or empty payload is no import", () => {
+  for (const bad of [null, undefined, 5, "x"]) {
+    const out = parseDrop(bad);
+    assert.equal(out.imported, false);
+    assert.equal(out.lines.length, 1);
+    assert.equal(out.lines[0].ok, false);
   }
+  assert.deepEqual(parseDrop({ error: "", files: [] }).lines, [{ ok: false, text: dropTexts.nothing }]);
 });
 
-test("the subscription passes the paths of files:dropped on, and does nothing without a Wails runtime", async () => {
-  assert.equal(droppedEvent, "files:dropped");
+test("a long file name is cut", () => {
+  const out = parseDrop({ error: "", files: [{ name: "n".repeat(500), existing: false, material, error: "" }] });
+  assert.ok(out.lines[0].text.length < 200);
+});
+
+test("the subscription listens to library:dropped, passes the outcome on, and does nothing without a Wails runtime", async () => {
+  assert.equal(droppedEvent, "library:dropped");
   let handler;
   let name;
   const got = [];
-  const off = await subscribeDropped(async (n, h) => ((name = n), (handler = h), () => got.push("off")), (p) => got.push(p));
-  assert.equal(name, "files:dropped");
-  handler(["C:\\a.txt"]);
-  assert.deepEqual(got, [["C:\\a.txt"]]);
+  const off = await subscribeDropped(async (n, h) => ((name = n), (handler = h), () => got.push("off")), (o) => got.push(o));
+  assert.equal(name, "library:dropped");
+  handler({ error: "", files: [{ name: "a.pdf", existing: false, material, error: "" }] });
+  assert.equal(got[0].imported, true);
   off();
   assert.equal(got.at(-1), "off");
 
@@ -105,10 +79,21 @@ test("the subscription passes the paths of files:dropped on, and does nothing wi
   absent();
 });
 
-test("the DOM drop gives paths only where the webview exposes them", () => {
-  assert.deepEqual(pathsFromTransfer({ files: [{ name: "a.pdf" }] }), []);
-  assert.deepEqual(pathsFromTransfer({ files: [{ name: "a.pdf", path: "C:\\a.pdf" }, { path: 5 }] }), ["C:\\a.pdf"]);
-  assert.deepEqual(pathsFromTransfer(null), []);
+test("body is the persistent Wails drop target, not the overlay; the page has no path or import binding", () => {
+  assert.equal(dropTargetAttr, "data-file-drop-target");
+  const zone = readFileSync(new URL("../src/pages/DropZone.tsx", import.meta.url), "utf8");
+  assert.match(zone, /document\.body\.setAttribute\(dropTargetAttr/);
+  assert.match(zone, /document\.body\.removeAttribute\(dropTargetAttr/);
+  const overlay = zone.match(/<div className="drop-overlay"[^>]*>/)?.[0] ?? "";
+  assert.ok(overlay && !/dropTargetAttr|data-file-drop-target/.test(overlay));
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /html, body, #root \{ height: 100%/);
+  for (const f of [zone, readFileSync(new URL("../src/dropFiles.ts", import.meta.url), "utf8")]) {
+    assert.ok(!/importDroppedFile|files:dropped|dataTransfer\.files/.test(f));
+  }
+});
+
+test("hasFiles tells a file drag from text or a link", () => {
   assert.equal(hasFiles({ types: ["text/plain", "Files"] }), true);
   assert.equal(hasFiles({ types: ["text/uri-list"] }), false);
   assert.equal(hasFiles(undefined), false);

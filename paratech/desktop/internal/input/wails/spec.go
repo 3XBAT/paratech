@@ -38,6 +38,8 @@ type windowSpec struct {
 	HiddenOnTaskbar bool
 	// HideOnClose turns the close button into "hide", so the app keeps running in the tray.
 	HideOnClose bool
+	// FileDrop lets files be dropped on the window; Go imports them and emits LibraryDropEvent.
+	FileDrop bool
 }
 
 func mainWindowSpec(title string) windowSpec {
@@ -48,6 +50,7 @@ func mainWindowSpec(title string) windowSpec {
 		Width:       1024,
 		Height:      720,
 		HideOnClose: true,
+		FileDrop:    true,
 	}
 }
 

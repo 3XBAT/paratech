@@ -41,8 +41,9 @@ func TestWindowSpecs(t *testing.T) {
 	}
 
 	main := mainWindowSpec("LA")
-	if main.Name != mainWindowName || main.URL != mainPage || main.Hidden || main.Frameless || main.NoActivate || !main.HideOnClose {
-		t.Errorf("main spec = %+v: want a visible framed window that hides on close", main)
+	if main.Name != mainWindowName || main.URL != mainPage || main.Hidden || main.Frameless || main.NoActivate || !main.HideOnClose ||
+		!main.FileDrop {
+		t.Errorf("main spec = %+v: want a visible framed window that hides on close and takes dropped files", main)
 	}
 }
 

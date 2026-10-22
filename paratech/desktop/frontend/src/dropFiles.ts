@@ -1,22 +1,21 @@
-// A file dropped on the window goes to the library. WebView2 gives the page no full path of a dropped file, so the
-// path comes from the native drop of the shell as the Wails event "files:dropped" (payload: a list of paths). The shell
-// does not emit it yet (see the report of TASK-124); until then the DOM drop only says to use «Добавить файл».
-// Paths are untrusted and never shown: the page prints fixed Russian texts from the binding only.
+// A file dropped on the window goes to the library. The drop is handled in Go (Wails native drop on an element with
+// data-file-drop-target): Go imports the files and emits "library:dropped" with the outcome. The page never sees or
+// sends a path; it shows the outcome. File names are text nodes only.
 
-import { genericError, type LibraryApi, libraryErrorText } from "./bindings/library.js";
+import { genericError, libraryErrorText } from "./bindings/library.js";
 
-export const droppedEvent = "files:dropped";
+export const droppedEvent = "library:dropped";
 
-/** At most this many files are taken from one drop. */
-export const maxDropped = 20;
+/** The attribute Wails looks for on the element under the cursor; a drop elsewhere is ignored. */
+export const dropTargetAttr = "data-file-drop-target";
+
+const maxNameLength = 120;
 
 export const dropTexts = {
   overlay: "Отпустите файл, чтобы добавить его в библиотеку",
-  noPath: "Перетащенный файл определить не удаётся — используйте «Добавить файл».",
-  added: "Файл добавлен во «Входящие».",
-  existing: "Этот файл уже есть в библиотеке.",
+  added: "добавлен во «Входящие»",
+  existing: "уже есть в библиотеке",
   nothing: "Нечего добавлять.",
-  tooMany: `Взяты первые ${maxDropped} файлов, остальные не добавлены.`,
   close: "Закрыть",
 } as const;
 
@@ -26,34 +25,55 @@ export interface DropLine {
   text: string;
 }
 
-/** The paths a Wails event carries: a list, a list in a list, or one path; anything else is no path. */
-export function parseDroppedPaths(data: unknown): string[] {
-  if (typeof data === "string") {
-    return data === "" ? [] : [data];
-  }
-  if (!Array.isArray(data)) {
-    return [];
-  }
-  if (data.length === 1 && Array.isArray(data[0])) {
-    return parseDroppedPaths(data[0]);
-  }
-  return data.filter((p): p is string => typeof p === "string" && p !== "");
+/** The report of a drop and whether anything is in the library now. */
+export interface DropOutcome {
+  lines: DropLine[];
+  imported: boolean;
 }
 
-/**
- * The paths of the files of a DOM drop. A browser hides them; a File that still carries a string `path` (some embedded
- * webviews) is taken, otherwise the list is empty.
- */
-export function pathsFromTransfer(transfer: { files?: ArrayLike<unknown> } | null | undefined): string[] {
-  const files = transfer?.files;
-  const out: string[] = [];
-  for (let i = 0; files && i < files.length; i++) {
-    const p = (files[i] as { path?: unknown } | null)?.path;
-    if (typeof p === "string" && p !== "") {
-      out.push(p);
+function record(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function shortName(name: unknown): string {
+  if (typeof name !== "string") {
+    return "";
+  }
+  return name.length > maxNameLength ? `${name.slice(0, maxNameLength)}…` : name;
+}
+
+/** Turns the payload of "library:dropped" into report lines. Refusal texts pass only when known, else a generic one. */
+export function parseDrop(data: unknown): DropOutcome {
+  // Wails may deliver the payload alone or in a list of one.
+  const payload = record(Array.isArray(data) && data.length === 1 ? data[0] : data);
+  if (payload === null) {
+    return { lines: [{ ok: false, text: genericError }], imported: false };
+  }
+  if (typeof payload.error === "string" && payload.error !== "") {
+    return { lines: [{ ok: false, text: libraryErrorText(payload.error) }], imported: false };
+  }
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  if (files.length === 0) {
+    return { lines: [{ ok: false, text: dropTexts.nothing }], imported: false };
+  }
+
+  const lines: DropLine[] = [];
+  let imported = false;
+  for (const raw of files) {
+    const f = record(raw) ?? {};
+    const name = shortName(f.name);
+    if (typeof f.error === "string" && f.error !== "") {
+      const text = libraryErrorText(f.error);
+      lines.push({ ok: false, text: name === "" ? text : `${name}: ${text}` });
+    } else if (record(f.material) !== null) {
+      imported = true;
+      const what = f.existing === true ? dropTexts.existing : dropTexts.added;
+      lines.push({ ok: true, text: name === "" ? what : `${name}: ${what}` });
+    } else {
+      lines.push({ ok: false, text: name === "" ? genericError : `${name}: ${genericError}` });
     }
   }
-  return out;
+  return { lines, imported };
 }
 
 /** True when the drag carries files (not text or a link). */
@@ -75,49 +95,13 @@ export function nextDepth(depth: number, event: "enter" | "leave" | "reset"): nu
   return event === "enter" ? depth + 1 : Math.max(0, depth - 1);
 }
 
-/**
- * Builds onFilesDropped: imports each path through the binding one after another and reports a fixed Russian line per
- * file (never the path or the file name). A failed file does not stop the next. onDone runs after the last one.
- */
-export function createFilesDropped(
-  api: Pick<LibraryApi, "importDroppedFile">,
-  report: (lines: DropLine[]) => void,
-  onDone?: () => void,
-): (paths: string[]) => Promise<void> {
-  return async (paths) => {
-    const taken = paths.filter((p) => typeof p === "string" && p !== "");
-    if (taken.length === 0) {
-      report([{ ok: false, text: dropTexts.noPath }]);
-      return;
-    }
-    const lines: DropLine[] = [];
-    for (const path of taken.slice(0, maxDropped)) {
-      try {
-        const res = await api.importDroppedFile(path);
-        if (res.cancelled || res.material === null) {
-          lines.push({ ok: false, text: dropTexts.nothing });
-        } else {
-          lines.push({ ok: true, text: res.existing ? dropTexts.existing : dropTexts.added });
-        }
-      } catch (err) {
-        lines.push({ ok: false, text: libraryErrorText(err) || genericError });
-      }
-    }
-    if (taken.length > maxDropped) {
-      lines.push({ ok: false, text: dropTexts.tooMany });
-    }
-    report(lines);
-    onDone?.();
-  };
-}
-
-/** Subscribes to the native drop event. Without a Wails runtime (a browser, a test) it does nothing and says so. */
+/** Subscribes to the outcome of a native drop. Without a Wails runtime (a browser, a test) it does nothing. */
 export async function subscribeDropped(
   on: (name: string, handler: (data: unknown) => void) => Promise<() => void>,
-  onFilesDropped: (paths: string[]) => void,
+  onDropped: (outcome: DropOutcome) => void,
 ): Promise<() => void> {
   try {
-    return await on(droppedEvent, (data) => onFilesDropped(parseDroppedPaths(data)));
+    return await on(droppedEvent, (data) => onDropped(parseDrop(data)));
   } catch {
     return () => undefined;
   }
