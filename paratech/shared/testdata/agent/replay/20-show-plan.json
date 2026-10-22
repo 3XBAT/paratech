@@ -1,0 +1,15 @@
+{
+  "name": "20-show-plan",
+  "about": "A plan in the shape the Hub checks (arguments).",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "show_plan",
+      "arguments_json": "{\"summary\":\"План: папка «Лабы» и файл в неё.\",\"steps\":[{\"tool\":\"create_folder\",\"arguments\":{\"subject\":\"s1\",\"name\":\"Лабы\"}},{\"tool\":\"place_upload\",\"arguments\":{\"upload\":\"u1\",\"subject\":\"s1\"}}]}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "card:plan"
+  }
+}
