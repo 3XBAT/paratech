@@ -420,6 +420,7 @@ func (s *Service) load(ctx context.Context, ref TurnRef, op string) (*change, er
 // save writes the thread and its new history entries in one transaction.
 func (s *Service) save(ctx context.Context, c *change) error {
 	// The thread first: a new thread must exist before its history refers to it.
+	before := c.th.Version()
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
 		if err := s.threads.Save(ctx, c.th); err != nil {
 			return err
@@ -432,6 +433,8 @@ func (s *Service) save(ctx context.Context, c *change) error {
 		return nil
 	})
 	if err != nil {
+		// Save set the new version before the transaction rolled back (a later Append failed): keep the stored one.
+		c.th.Persisted(before)
 		return err
 	}
 	c.entries = nil

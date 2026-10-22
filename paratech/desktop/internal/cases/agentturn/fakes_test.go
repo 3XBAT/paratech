@@ -3,6 +3,7 @@ package agentturn
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"testing"
@@ -191,6 +192,7 @@ type memHistory struct {
 	mu      sync.Mutex
 	txMu    sync.Mutex // held by memTx
 	entries map[shared.ThreadID][]values.HistoryEntry
+	failing error // returned by Append when set
 }
 
 func (h *memHistory) Append(_ context.Context, id shared.ThreadID, turn int, e values.HistoryTurn) error {
@@ -199,6 +201,9 @@ func (h *memHistory) Append(_ context.Context, id shared.ThreadID, turn int, e v
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.failing != nil {
+		return h.failing
+	}
 	if h.entries == nil {
 		h.entries = map[shared.ThreadID][]values.HistoryEntry{}
 	}
@@ -231,9 +236,12 @@ type subjects []values.BaseSubject
 
 func (s subjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) { return s, nil }
 
-// memTx rolls the history back when fn fails, like a database transaction; transactions run one at a time, like the
-// single SQLite writer, so a rollback never drops entries of another transaction.
-type memTx struct{ h *memHistory }
+// memTx rolls the history and the threads back when fn fails, like a database transaction; transactions run one at a
+// time, like the single SQLite writer, so a rollback never drops the writes of another transaction.
+type memTx struct {
+	h       *memHistory
+	threads *memThreads
+}
 
 func (tx memTx) Do(ctx context.Context, fn func(ctx context.Context) error) error {
 	tx.h.txMu.Lock()
@@ -244,10 +252,16 @@ func (tx memTx) Do(ctx context.Context, fn func(ctx context.Context) error) erro
 		saved[id] = slices.Clone(es)
 	}
 	tx.h.mu.Unlock()
+	tx.threads.mu.Lock()
+	states := maps.Clone(tx.threads.states)
+	tx.threads.mu.Unlock()
 	if err := fn(ctx); err != nil {
 		tx.h.mu.Lock()
 		tx.h.entries = saved
 		tx.h.mu.Unlock()
+		tx.threads.mu.Lock()
+		tx.threads.states = states
+		tx.threads.mu.Unlock()
 		return err
 	}
 	return nil
@@ -270,7 +284,7 @@ func newEnv(t *testing.T) *env {
 	s1, _ := values.NewRef(values.KindSubject, "s1")
 	svc, err := New(Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
-		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: UnknownFacts{}, Tx: memTx{e.history}, Clock: e.clock, IDs: &seqIDs{},
+		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: UnknownFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
 	})
 	if err != nil {
 		t.Fatal(err)

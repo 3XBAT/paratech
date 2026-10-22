@@ -117,7 +117,8 @@ func (r *AgentThreadRepository) ListRunning(ctx context.Context) ([]*thread.Thre
 
 // Save writes the thread and its current request in one transaction: an INSERT for version 0, otherwise a version
 // compare-and-swap (ADR-0004(d)). A stale version or an id stored first is shared.ErrVersionConflict; a second
-// thread for the same key is shared.ErrDuplicate.
+// thread for the same key is shared.ErrDuplicate. Inside a caller's transaction the new version is set when this
+// write succeeds, before that transaction commits; a caller whose transaction rolls back restores the old version.
 func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) error {
 	st := th.State()
 	if st.Version < 0 {

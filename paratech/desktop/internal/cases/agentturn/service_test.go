@@ -460,6 +460,34 @@ func TestSubmitConcurrentStop(t *testing.T) {
 	}
 }
 
+// A save whose transaction rolls back (the history append failed after the thread was written) keeps the stored
+// version in memory, so the next save of the same thread is not a conflict.
+func TestRolledBackSaveKeepsVersion(t *testing.T) {
+	e := newEnv(t)
+	key, err := thread.KeyOf(subjectScope(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	th, err := thread.New("th1", key, e.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &change{th: th}
+	if err := e.svc.save(t.Context(), c); err != nil || th.Version() != 1 {
+		t.Fatalf("first save = %v, version %d", err, th.Version())
+	}
+
+	e.history.failing = errors.New("disk full")
+	c.add(values.HistoryTurn{StudentText: "текст"})
+	if err := e.svc.save(t.Context(), c); err == nil || th.Version() != 1 {
+		t.Fatalf("failed save = %v, version %d, want 1", err, th.Version())
+	}
+	e.history.failing = nil
+	if err := e.svc.save(t.Context(), c); err != nil {
+		t.Fatalf("save after the rollback = %v", err)
+	}
+}
+
 // At start a request left running stops as offline; calls handed to the Driver get outcome_unknown.
 func TestRecover(t *testing.T) {
 	e := newEnv(t)
