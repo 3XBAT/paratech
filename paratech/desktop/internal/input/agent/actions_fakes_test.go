@@ -479,12 +479,12 @@ func newWorld(t *testing.T) *world {
 		"a1": {ID: "a1", Title: "Задачи 1-5", Due: time.Date(2026, 10, 24, 15, 30, 0, 0, time.UTC), Version: 3},
 		"a2": {ID: "a2", Title: "Реферат", Version: 1},
 	}}
-	w.jobs = &memJobs{activity: w.reads.activity}
+	w.jobs = &memJobs{activity: w.activity}
 	w.drafts = &memDrafts{jobs: w.jobs, active: map[shared.AssignmentID]shared.JobID{}}
 	var err error
 	if w.actions, err = NewActions(ActionDeps{
 		Library: w.lib, Lessons: w.lessons, Assignments: w.assignments, Rerunner: w.jobs, Drafts: w.drafts,
-		Jobs: w.reads.activity, Canceller: w.jobs, Tx: w.tx, Clock: fixedClock{},
+		Jobs: w.activity, Canceller: w.jobs, Tx: w.tx, Clock: fixedClock{},
 	}); err != nil {
 		t.Fatal(err)
 	}

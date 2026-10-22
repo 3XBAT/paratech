@@ -66,7 +66,9 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		return t.result(c, *p.noop, values.Ref{}, nil)
 	}
 
-	entry, err := t.journal.Begin(ctx, agentjournal.BeginInput{Thread: st.Thread, Turn: st.Turn, CallID: id, Tool: tool, Intent: p.intent})
+	entry, err := t.journal.Begin(ctx, agentjournal.BeginInput{
+		Thread: st.Thread, Turn: st.Turn, CallID: id, Tool: tool, Intent: p.intent,
+	})
 	if err != nil {
 		if e, ferr := t.journal.Find(ctx, st.Thread, st.Turn, id); ferr == nil {
 			return t.replay(c, e) // the same call began meanwhile
@@ -84,7 +86,8 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		}
 		return t.result(c, eff.row, values.Ref{}, nil)
 	}
-	if _, err := t.journal.Finish(ctx, entry.ID, agentjournal.Outcome{Compensation: eff.comp, TargetVersion: eff.version}); err != nil {
+	done := agentjournal.Outcome{Compensation: eff.comp, TargetVersion: eff.version}
+	if _, err := t.journal.Finish(ctx, entry.ID, done); err != nil {
 		// The action is done; the entry stays PENDING and Recover settles it from its intent at the next start.
 		t.log.WarnContext(ctx, opJournal, "action", entry.ID.String(), "err", err)
 	}

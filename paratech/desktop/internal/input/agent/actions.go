@@ -117,6 +117,9 @@ func NewActions(d ActionDeps) (*Actions, error) {
 	}, nil
 }
 
+// opUndoJob names the log line of a job the Undo could not cancel.
+const opUndoJob = "agent: undo: job not cancelled"
+
 // jobVersion is the version of a job as a target: the student never edits a job, so a running one is always the
 // one the action started; whether it finished is Target.Final.
 const jobVersion = 1
@@ -192,7 +195,9 @@ func (a *Actions) createSubject(call values.Call) (prepared, error) {
 			if err != nil {
 				return effect{}, err
 			}
-			return effect{comp: action.RemoveSubject{Subject: r}, version: sub.Version(), row: values.WriteRow{ID: r, Changed: true}, created: r}, nil
+			return effect{
+				comp: action.RemoveSubject{Subject: r}, version: sub.Version(), row: values.WriteRow{ID: r, Changed: true}, created: r,
+			}, nil
 		},
 	}, nil
 }
@@ -221,7 +226,10 @@ func (a *Actions) createFolder(ctx context.Context, call values.Call) (prepared,
 				if err != nil {
 					return err
 				}
-				e = effect{comp: action.RemoveFolder{Subject: subRef, Folder: r}, version: after.Version(), row: values.WriteRow{ID: r, Changed: true}, created: r}
+				e = effect{
+					comp: action.RemoveFolder{Subject: subRef, Folder: r}, version: after.Version(),
+					row: values.WriteRow{ID: r, Changed: true}, created: r,
+				}
 				return nil
 			})
 			return e, err
@@ -402,7 +410,9 @@ func (a *Actions) setDue(ctx context.Context, id shared.AssignmentID, before int
 	if v.Version != before {
 		return 0, errMovedOn
 	}
-	v, err = a.assignments.EditAssignment(ctx, homeworkflow.AssignmentEdit{ID: id, Title: v.Title, Description: v.Description, Due: due})
+	v, err = a.assignments.EditAssignment(ctx, homeworkflow.AssignmentEdit{
+		ID: id, Title: v.Title, Description: v.Description, Due: due,
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -482,7 +492,9 @@ func jobEffect(id shared.JobID, created bool) (effect, error) {
 	if err != nil {
 		return effect{}, err
 	}
-	return effect{comp: action.CancelJob{Job: j}, version: jobVersion, row: values.WriteRow{Job: j, Changed: created}, failed: !created}, nil
+	return effect{
+		comp: action.CancelJob{Job: j}, version: jobVersion, row: values.WriteRow{Job: j, Changed: created}, failed: !created,
+	}, nil
 }
 
 // --- Undo: the Compensator of the journal ------------------------------------------------------------------
@@ -614,6 +626,7 @@ func (a *Actions) cancelJob(ctx context.Context, id shared.JobID) error {
 	if err == nil {
 		return nil
 	}
+	a.log.InfoContext(ctx, opUndoJob, "job", id.String(), "err", err)
 	st, serr := a.jobState(ctx, id)
 	switch {
 	case serr != nil:
@@ -725,12 +738,14 @@ func (a *Actions) observeSubject(ctx context.Context, in action.Intent, since ti
 	if err != nil {
 		return action.Observation{}, err
 	}
-	return action.Observation{Known: true, Version: sub.Version(), Effect: true, Compensation: action.RemoveSubject{Subject: r}}, nil
+	return action.Observation{
+		Known: true, Version: sub.Version(), Effect: true, Compensation: action.RemoveSubject{Subject: r},
+	}, nil
 }
 
 // absent is the observation of a target that is gone; other errors are returned (the entry waits for the next start).
 func absent(err error) (action.Observation, error) {
-	if gone(err) != nil && errors.Is(gone(err), shared.ErrNotFound) {
+	if errors.Is(gone(err), shared.ErrNotFound) {
 		return action.Observation{Known: true}, nil
 	}
 	return action.Observation{}, err
