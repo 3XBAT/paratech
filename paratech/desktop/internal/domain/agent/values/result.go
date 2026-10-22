@@ -46,6 +46,7 @@ const (
 	RefuseUnavailable   Refusal = "unavailable"     // this desktop version cannot run the tool yet
 	RefuseNameTaken     Refusal = "name_taken"      // a subject or folder of that name exists
 	RefuseNotFound      Refusal = "not_found"       // the object the call names is gone
+	RefuseNoText        Refusal = "no_text"         // the file of the assignment has no readable text (PDF, empty)
 
 	// Refusals of the proposal tools (class C): nothing was proposed.
 	RefuseNoRecipient   Refusal = "no_recipient"         // no homework recipient in the settings

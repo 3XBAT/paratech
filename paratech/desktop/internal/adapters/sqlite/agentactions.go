@@ -41,6 +41,7 @@ type compensationWire struct {
 	Assignment string `json:"assignment,omitempty"`
 	OldDue     string `json:"old_due,omitempty"`
 	Job        string `json:"job,omitempty"`
+	Work       string `json:"work,omitempty"`
 }
 
 // Get loads an entry; a missing one wraps shared.ErrNotFound.
@@ -289,6 +290,8 @@ func wireOf(c action.Compensation) (compensationWire, error) {
 		}
 	case action.CancelJob:
 		w.Job = v.Job.ID()
+	case action.RemoveWork:
+		w.Work = v.Work.ID()
 	default:
 		return compensationWire{}, fmt.Errorf("unknown compensation %s", c.Kind())
 	}
@@ -338,6 +341,8 @@ func compensationOfWire(w compensationWire) (action.Compensation, error) {
 		return action.RestoreDue{Assignment: ref(values.KindAssignment, w.Assignment), OldDue: due}, nil
 	case action.CompCancelJob:
 		return action.CancelJob{Job: ref(values.KindJob, w.Job)}, nil
+	case action.CompRemoveWork:
+		return action.RemoveWork{Work: ref(values.KindWork, w.Work)}, nil
 	}
 	return nil, fmt.Errorf("unknown compensation kind %q", w.Kind)
 }

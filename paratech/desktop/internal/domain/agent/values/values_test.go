@@ -234,6 +234,9 @@ func TestCards(t *testing.T) {
 		{"reply empty", ReplyCard{}, CardReply, false},
 		{"stopped", StoppedCard{Reason: StopOffline}, CardStopped, true},
 		{"stopped unknown", StoppedCard{Reason: "x"}, CardStopped, false},
+		{"work", WorkCard{Work: mustRef(t, KindWork, "w1"), Outcome: TriageQuestions}, CardWork, true},
+		{"work wrong kind", WorkCard{Work: mustRef(t, KindAssignment, "a1"), Outcome: TriageHelper}, CardWork, false},
+		{"work unknown outcome", WorkCard{Work: mustRef(t, KindWork, "w1"), Outcome: "send"}, CardWork, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

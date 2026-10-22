@@ -8,6 +8,7 @@ import (
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
+	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/coursework/assignment"
@@ -52,7 +53,7 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 
 	// The same call again (the step was replayed): its entry tells what happened, nothing runs twice.
 	if e, err := t.journal.Find(ctx, st.Thread, st.Turn, id); err == nil {
-		return t.replay(c, e)
+		return t.replay(ctx, c, e)
 	} else if !errors.Is(err, shared.ErrNotFound) {
 		t.log.WarnContext(ctx, opJournal, "tool", tool.String(), "err", err)
 		return refuse(values.RefuseFailed)
@@ -73,7 +74,7 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 	})
 	if err != nil {
 		if e, ferr := t.journal.Find(ctx, st.Thread, st.Turn, id); ferr == nil {
-			return t.replay(c, e) // the same call began meanwhile
+			return t.replay(ctx, c, e) // the same call began meanwhile
 		}
 		t.log.WarnContext(ctx, opJournal, "tool", tool.String(), "err", err)
 		return refuse(values.RefuseFailed)
@@ -86,7 +87,8 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		if err != nil {
 			return refuse(t.refusalOf(ctx, tool, err))
 		}
-		return t.result(c, eff.row, values.Ref{}, nil)
+		eff.created = values.Ref{}
+		return t.outcome(c, eff, eff.cards) // not this action's: no «Отменить»
 	}
 	done := agentjournal.Outcome{Compensation: eff.comp, TargetVersion: eff.version}
 	if _, err := t.journal.Finish(ctx, entry.ID, done); err != nil {
@@ -97,7 +99,20 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 	if !eff.row.Job.IsZero() {
 		cards = append(cards, values.ProgressCard{Job: shared.JobID(eff.row.Job.ID())})
 	}
-	return t.result(c, eff.row, eff.created, cards)
+	return t.outcome(c, eff, append(cards, eff.cards...))
+}
+
+// outcome is the result of an action that went through: the triage row of triage_assignment, else its write row.
+func (t tools) outcome(c agentturn.Call, eff effect, cards []values.Card) ran {
+	if eff.triage == nil {
+		return t.result(c, eff.row, eff.created, cards)
+	}
+	res, seen, err := values.TriageResult(c.Call.ID(), *eff.triage)
+	if err != nil {
+		t.log.Warn(opAction, "tool", c.Call.Tool().String(), "err", err)
+		return ran{out: agentturn.Outcome{Result: values.RefusalResult(c.Call.ID(), values.RefuseFailed)}, write: true}
+	}
+	return ran{out: agentturn.Outcome{Result: res, Seen: seen}, write: true, cards: cards}
 }
 
 // result is the outcome of a call that went through.
@@ -110,9 +125,10 @@ func (t tools) result(c agentturn.Call, row values.WriteRow, created values.Ref,
 	return ran{out: agentturn.Outcome{Result: res, Seen: seen, Created: created}, write: true, cards: cards}
 }
 
-// replay is the outcome of a call that has an entry already: the result it had, rebuilt from the compensation. A
-// call ID reused for another tool is refused, never answered with the other tool's result.
-func (t tools) replay(c agentturn.Call, e agentjournal.Entry) ran {
+// replay is the outcome of a call that has an entry already: the result it had, rebuilt from the compensation (a
+// triage from its work as it is now). A call ID reused for another tool is refused, never answered with the other
+// tool's result.
+func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entry) ran {
 	id := c.Call.ID()
 	if e.Tool != c.Call.Tool() {
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseInvalidArgs)}, write: true}
@@ -134,6 +150,12 @@ func (t tools) replay(c agentturn.Call, e agentjournal.Entry) ran {
 		row.ID = v.Material
 	case action.CancelJob:
 		row.Job = v.Job
+	case action.RemoveWork:
+		tr, err := t.actions.triageReplay(ctx, v.Work)
+		if err != nil {
+			return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, t.refusalOf(ctx, c.Call.Tool(), err))}, write: true}
+		}
+		return t.outcome(c, effect{triage: &tr}, nil)
 	}
 	return t.result(c, row, created, nil)
 }
@@ -145,11 +167,14 @@ func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) value
 		return values.RefuseNameTaken
 	case errors.Is(err, library.ErrSubjectNotFound), errors.Is(err, library.ErrFolderNotFound),
 		errors.Is(err, library.ErrMaterialNotFound), errors.Is(err, library.ErrLessonNotFound),
-		errors.Is(err, knowledgebase.ErrRecordingNotFound), errors.Is(err, shared.ErrNotFound):
+		errors.Is(err, knowledgebase.ErrRecordingNotFound), errors.Is(err, shared.ErrNotFound),
+		errors.Is(err, turnkey.ErrSourceNotFound), errors.Is(err, turnkey.ErrNotFound):
 		return values.RefuseNotFound
+	case errors.Is(err, turnkey.ErrNoText):
+		return values.RefuseNoText
 	case errors.Is(err, library.ErrInvalidName), errors.Is(err, library.ErrInvalidFolderName),
 		errors.Is(err, library.ErrInvalidRequest), errors.Is(err, knowledgebase.ErrInvalidLessonInfo),
-		errors.Is(err, assignment.ErrInvalidDetails):
+		errors.Is(err, assignment.ErrInvalidDetails), errors.Is(err, turnkey.ErrInvalidRequest):
 		return values.RefuseInvalidArgs
 	}
 	t.log.WarnContext(ctx, opAction, "tool", tool.String(), "err", err)

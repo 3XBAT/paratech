@@ -23,6 +23,7 @@ const (
 	CompRestoreLessonInfo CompensationKind = "restore_lesson_info" // old subject and kind
 	CompRestoreDue        CompensationKind = "restore_due"         // old due date, or none
 	CompCancelJob         CompensationKind = "cancel_job"          // running: cancel; finished: remove the result
+	CompRemoveWork        CompensationKind = "remove_work"         // the triaged work, if the student has not touched it
 )
 
 // compensationOf is the compensation kind of every U tool; a tool not listed has no Undo.
@@ -37,7 +38,7 @@ var compensationOf = map[values.Tool]CompensationKind{
 	values.ToolMakeLectureText:  CompCancelJob,
 	values.ToolFindHomework:     CompCancelJob,
 	values.ToolGenerateDraft:    CompCancelJob,
-	values.ToolTriageAssignment: CompCancelJob,
+	values.ToolTriageAssignment: CompRemoveWork,
 	values.ToolWriteWork:        CompCancelJob,
 }
 
@@ -145,6 +146,15 @@ type CancelJob struct{ Job values.Ref }
 func (CancelJob) Kind() CompensationKind { return CompCancelJob }
 
 func (c CancelJob) validate() error { return need(c.Job, values.KindJob) }
+
+// RemoveWork undoes triage_assignment: the work it created is removed if it is still as the action left it (the
+// student has not answered, edited or confirmed it since). The paid reader call is not returned.
+type RemoveWork struct{ Work values.Ref }
+
+// Kind returns CompRemoveWork.
+func (RemoveWork) Kind() CompensationKind { return CompRemoveWork }
+
+func (c RemoveWork) validate() error { return need(c.Work, values.KindWork) }
 
 func need(r values.Ref, kind values.IDKind) error {
 	if r.IsZero() || r.Kind() != kind {
