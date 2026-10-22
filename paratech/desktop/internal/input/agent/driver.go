@@ -49,7 +49,7 @@ type Turns interface {
 	Retry(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Restart(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Cancel(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
-	Interrupt(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
+	Interrupt(ctx context.Context, in agentturn.SubmitInput) (agentturn.Step, error)
 }
 
 // Problem is why an operation on a request did not go through, as an enum (no error text reaches the panel).
@@ -91,7 +91,8 @@ type Clock interface {
 	Now() time.Time
 }
 
-// Deps are the dependencies of the Driver; every one except Log is required.
+// Deps are the dependencies of the Driver; every one except Journal, Actions and Log is required. Without Journal
+// and Actions the actions (class U) answer "unavailable".
 type Deps struct {
 	Turns       Turns
 	Sink        Sink
@@ -100,6 +101,8 @@ type Deps struct {
 	Activity    Activity
 	Assignments Assignments
 	Deliveries  Deliveries
+	Journal     Journal
+	Actions     *Actions
 	Clock       Clock
 	Log         *slog.Logger
 }
@@ -124,8 +127,8 @@ type Driver struct {
 // New checks the dependencies.
 func New(d Deps) (*Driver, error) {
 	if d.Turns == nil || d.Sink == nil || d.Library == nil || d.Knowledge == nil || d.Activity == nil ||
-		d.Assignments == nil || d.Deliveries == nil || d.Clock == nil {
-		return nil, fmt.Errorf("%s: %w: every dependency except Log is required", opNew, ErrInvalidConfig)
+		d.Assignments == nil || d.Deliveries == nil || d.Clock == nil || (d.Journal == nil) != (d.Actions == nil) {
+		return nil, fmt.Errorf("%s: %w: every dependency except Log is required (Journal with Actions)", opNew, ErrInvalidConfig)
 	}
 	log := d.Log
 	if log == nil {
@@ -135,7 +138,7 @@ func New(d Deps) (*Driver, error) {
 		turns: d.Turns, sink: d.Sink, log: log, cancels: map[uint64]context.CancelFunc{},
 		tools: tools{
 			library: d.Library, knowledge: d.Knowledge, activity: d.Activity, assignments: d.Assignments,
-			deliveries: d.Deliveries, clock: d.Clock, log: log,
+			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, clock: d.Clock, log: log,
 		},
 	}, nil
 }
@@ -243,7 +246,7 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 			// A failed Hub call already stored the request stopped; only calls handed to us need closing.
 			switch {
 			case err == nil && len(st.Calls) > 0:
-				d.interrupt(ctx, st)
+				d.interrupt(ctx, st, nil)
 			case err == nil:
 				d.publish(st, ProblemNone) // the step is stored; the panel still shows it
 			}
@@ -271,11 +274,23 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 		}
 
 		outcomes := make([]agentturn.Outcome, 0, len(st.Calls))
+		var cards []values.Card
 		for _, c := range st.Calls {
-			outcomes = append(outcomes, d.tools.run(ctx, st.Scope, c))
+			if ctx.Err() != nil {
+				break
+			}
+			r := d.tools.run(ctx, st, c)
+			if ctx.Err() != nil && !r.write {
+				continue // a read cut by the ctx may report a false failure: «not done» instead
+			}
+			outcomes = append(outcomes, r.out)
+			cards = append(cards, r.cards...)
+		}
+		if len(cards) > 0 {
+			d.publish(agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
 		}
 		if ctx.Err() != nil {
-			d.interrupt(ctx, st)
+			d.interrupt(ctx, st, outcomes)
 			return
 		}
 		at = agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope}
@@ -283,11 +298,11 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 	}
 }
 
-// interrupt closes a request whose calls will not run because the ctx ended: they are answered as not done and the
-// request stops continuable («Продолжить»), as when the ctx ends during a Hub call. Results of calls that ran are
-// dropped too: a read cut by the ctx would report a false failure.
-func (d *Driver) interrupt(ctx context.Context, st agentturn.Step) {
-	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), refOf(st))
+// interrupt closes a request whose calls will not run because the ctx ended: the outcomes of the calls that ran (the
+// actions always, journaled DONE or FAILED) are kept, the others are answered as not done, and the request stops
+// continuable («Продолжить»), as when the ctx ends during a Hub call.
+func (d *Driver) interrupt(ctx context.Context, st agentturn.Step, outcomes []agentturn.Outcome) {
+	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
 	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)
 		return

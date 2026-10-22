@@ -54,15 +54,17 @@ type Deliveries interface {
 	ListForAssignment(ctx context.Context, a shared.AssignmentID) ([]senddelivery.View, error)
 }
 
-// tools runs the calls a step admits. Only the read tools of catalog v1 run here; the paid readers
-// (answer_question, inspect_upload), the reversible actions and the proposals come with later tasks and answer
-// "unavailable" until then. A failing use case answers "failed": no error text reaches the planner (ADR-0022).
+// tools runs the calls a step admits: the read tools and the reversible actions (write.go, actions.go). The paid
+// readers (answer_question, inspect_upload), the proposals and the turnkey tools come with later tasks and answer
+// "unavailable" until then. A failing use case answers an error enum: no error text reaches the planner (ADR-0022).
 type tools struct {
 	library     SubjectLibrary
 	knowledge   Knowledge
 	activity    Activity
 	assignments Assignments
 	deliveries  Deliveries
+	journal     Journal
+	actions     *Actions
 	clock       Clock
 	log         *slog.Logger
 }
@@ -88,8 +90,16 @@ func (t tools) reader(tool values.Tool) (read, bool) {
 	return nil, false
 }
 
-// run runs one admitted call and returns its outcome.
-func (t tools) run(ctx context.Context, scope values.Scope, c agentturn.Call) agentturn.Outcome {
+// run runs one admitted call of step st and returns what it gave.
+func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran {
+	if c.Class == actionpolicy.ClassU {
+		return t.write(ctx, st, c)
+	}
+	return ran{out: t.read(ctx, st.Scope, c)}
+}
+
+// read runs one admitted read call and returns its outcome.
+func (t tools) read(ctx context.Context, scope values.Scope, c agentturn.Call) agentturn.Outcome {
 	id := c.Call.ID()
 	fn, ok := t.reader(c.Call.Tool())
 	if !ok || c.Class != actionpolicy.ClassR || c.Paid {

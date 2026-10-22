@@ -28,7 +28,7 @@ import (
 // free of the texts other people wrote.
 func runRead(t *testing.T, r *reads, scope values.Scope, tool values.Tool, args string) agentturn.Outcome {
 	t.Helper()
-	out := r.tools().run(t.Context(), scope, readCall(t, "c1", tool, args))
+	out := r.tools().read(t.Context(), scope, readCall(t, "c1", tool, args))
 	if err := out.Result.Validate(); err != nil {
 		t.Fatalf("%s result: %v", tool, err)
 	}
@@ -212,7 +212,7 @@ func TestSearch(t *testing.T) {
 	}
 
 	// A query the knowledge base refuses is the planner's mistake: invalid arguments, not a failure.
-	out = r.tools().run(t.Context(), values.Scope{}, readCall(t, "c1", values.ToolSearch, `{"query":"я"}`))
+	out = r.tools().read(t.Context(), values.Scope{}, readCall(t, "c1", values.ToolSearch, `{"query":"я"}`))
 	if !out.Result.IsError || out.Result.ResultJSON != `{"error":"invalid_arguments"}` {
 		t.Fatalf("short query = %+v", out.Result)
 	}
@@ -238,7 +238,7 @@ func TestReadFailuresAreEnums(t *testing.T) {
 	for _, tt := range tests {
 		r := newReads()
 		tt.fail(r)
-		out := r.tools().run(t.Context(), values.Scope{}, readCall(t, "c1", tt.tool, tt.args))
+		out := r.tools().read(t.Context(), values.Scope{}, readCall(t, "c1", tt.tool, tt.args))
 		if !out.Result.IsError || out.Result.ResultJSON != `{"error":"failed"}` || len(out.Seen) != 0 {
 			t.Errorf("%s: %+v", tt.tool, out)
 		}

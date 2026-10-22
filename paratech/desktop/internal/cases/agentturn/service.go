@@ -373,25 +373,25 @@ func (s *Service) Cancel(ctx context.Context, ref TurnRef) (Step, error) {
 	return s.drive(ctx, c, opCancel)
 }
 
-// Interrupt closes a request whose calls the Driver will not run because its context ended (the app closes): calls
-// without results are answered as not done and the request stops as «нет связи», so «Продолжить» goes on as after
-// Recover. A request the student already stopped keeps its reason. Only «Отмена» cancels a request.
-func (s *Service) Interrupt(ctx context.Context, ref TurnRef) (Step, error) {
+// Interrupt closes a request whose calls the Driver will not run because its context ended (the app closes). The
+// outcomes of calls that did run (an action that is journaled DONE or FAILED) are recorded as they are; the other
+// calls are answered not done and the request stops as «нет связи» (thread.Interrupt), so «Продолжить» goes on as
+// after Recover. A request the student already stopped keeps its reason. Only «Отмена» cancels a request.
+func (s *Service) Interrupt(ctx context.Context, in SubmitInput) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for attempt := 1; ; attempt++ {
-		c, err := s.load(ctx, ref, opInterrupt)
+		c, err := s.load(ctx, in.Turn, opInterrupt)
 		if err != nil {
 			return Step{}, err
 		}
-		now := s.clock.Now()
-		c.th.Abandon(values.RefuseNotDone, now)
-		c.takeResults(s)
-		if turn, _ := c.th.Turn(); turn.Status() != thread.StatusStopped {
-			if err := c.th.Stop(values.StopOffline, now); err != nil {
-				return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
-			}
+		if err := s.applyOutcomes(c, in.Outcomes); err != nil {
+			return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
 		}
+		if err := c.th.Interrupt(s.clock.Now()); err != nil {
+			return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
+		}
+		c.takeResults(s)
 		err = s.save(ctx, c)
 		if errors.Is(err, shared.ErrVersionConflict) && attempt < maxStopSaves {
 			continue // «Стоп» saved in between (it does not wait for s.mu)
