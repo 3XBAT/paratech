@@ -396,13 +396,17 @@ func (s *Service) load(ctx context.Context, ref TurnRef, op string) (*change, er
 
 // save writes the thread and its new history entries in one transaction.
 func (s *Service) save(ctx context.Context, c *change) error {
+	// The thread first: a new thread must exist before its history refers to it.
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		if err := s.threads.Save(ctx, c.th); err != nil {
+			return err
+		}
 		for _, e := range c.entries {
 			if err := s.history.Append(ctx, c.th.ID(), e.Turn, e.Entry); err != nil {
 				return err
 			}
 		}
-		return s.threads.Save(ctx, c.th)
+		return nil
 	})
 	if err != nil {
 		return err

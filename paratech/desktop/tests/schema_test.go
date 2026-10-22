@@ -30,6 +30,8 @@ import (
 	"strings"
 	"testing"
 
+	"paratech/desktop/internal/domain/agent/action"
+	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -409,6 +411,8 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 		{"recordings", sortedStrings(recording.Statuses())},
 		{"deliveries", sortedStrings(delivery.Statuses())},
 		{"proposals", sortedStrings(proposal.Statuses())},
+		{"agent_turns", sortedStrings(thread.Statuses())},
+		{"agent_actions", sortedStrings(action.Statuses())},
 	}
 	for _, tc := range cases {
 		t.Run(tc.table, func(t *testing.T) {
