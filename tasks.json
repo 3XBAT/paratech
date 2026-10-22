@@ -1,29 +1,15 @@
 {
     "project": {
-        "name": "Learning Assistant",
+        "name": "paratech",
         "version": "1.0",
         "prd_source": "docs/prd/learning-assistant-prd-v0.4.md",
         "created_at": "2026-10-10"
     },
     "agent_instructions": {
-        "before_start": [
-            "Прочитай этот файл, progress.txt, CLAUDE.md, docs/architecture.md и git log --oneline -20 (git log кода: git -C paratech log --oneline -20)",
-            "Выбери ОДНУ задачу со статусом pending и наивысшим приоритетом",
-            "Проверь, что все dependencies этой задачи имеют статус done"
-        ],
-        "during_work": [
-            "Работай только над выбранной задачей",
-            "Делай коммиты после каждого логического изменения",
-            "Не трогай код, не связанный с текущей задачей",
-            "Код пиши в каталоге paratech/ строго по docs/architecture.md: пути пакетов в задачах ориентировочные, архитектура главнее. Go-, npm- и buf-команды из test_steps выполняй из каталога paratech/; docs/, tasks.json и progress.txt лежат в корне репозитория",
-            "Организационные файлы (docs, промпты, определения агентов) никогда не кладутся в paratech/"
-        ],
-        "before_finish": [
-            "Выполни ВСЕ test_steps из задачи; архитектурный тест (tests/arch_test.go) и go vet должны проходить",
-            "Меняй status на done ТОЛЬКО после успешного прохождения всех тестов",
-            "Если задачу нельзя завершить автономно (нужна проверка человеком на Windows, нужное решение пользователя, внешний доступ) — поставь status blocked и опиши причину в progress.txt",
-            "Напиши summary в progress.txt",
-            "ЗАПРЕЩЕНО удалять или редактировать задачи — только менять status"
+        "rules": [
+            "Порядок работы — CLAUDE.md (раздел «Task loop») и инструкция координатора paratech-ops/coordinator-round.md",
+            "Агенты меняют только поле status своей задачи; задачи не удаляются и не переписываются",
+            "Отчёт задачи — progress/TASK-NNN.md, шаги проверки владельцем — docs/qa/tasks/TASK-NNN.md; progress.txt не трогать"
         ]
     },
     "tasks": [
