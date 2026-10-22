@@ -19,7 +19,9 @@ which is kept self-contained so it can be split into its own repository later. C
 ```
 
 Path convention: `docs/`, `tasks.json`, `progress.txt` are relative to the repository root; `desktop/`, `hub/`, `shared/` and every Go/npm/buf command
-from tasks and test steps are relative to `paratech/` — **run them with `cd paratech` first**. Stage and commit code with `git -C paratech add -A .` and `git -C paratech commit`.
+from tasks and test steps are relative to `paratech/` — run them with `go -C <abs>/paratech …`, `npm --prefix <abs>/paratech/desktop/frontend …`, `git -C <abs> …` (abs = your worktree root). Stage and commit with `git -C <abs> add <explicit paths>` and `git -C <abs> commit -q -m "<one line>"`.
+
+**Commands must never need the owner's approval (the loop runs unattended).** Claude Code ALWAYS asks the owner for: `cd` (also `cd …; git …`, `cd … && …`), `$(...)`, backticks, heredocs (`<<EOF`), newlines, `&&`/`;` chains, `bash -c "…"`. So: no `cd` ever; one command per tool call; absolute paths; commit messages one line `-m "…"` or `-F <file>`; PR bodies `--body-file <file>`; multi-step work as a script file in your scratchpad run with `bash <abs path>`. The full per-implementer rules block is `C:/Users/xvati/GolandProjects/paratech-ops/implementer-rules.md`.
 Never put organization files (docs, tasks, prompts, agent definitions) inside `paratech/`: that directory must contain only code, so it can be extracted cleanly.
 
 Source of truth for requirements: `docs/prd/learning-assistant-prd-v0.4.md`.
