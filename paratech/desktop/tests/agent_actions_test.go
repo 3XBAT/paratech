@@ -45,7 +45,9 @@ const lectureAnswer = `{"doc_kind":"lecture","subject":null,"lesson_date":null,"
 // fixedReader stands for the quarantined reader on the Hub: it answers every request with the same text.
 type fixedReader string
 
-func (r fixedReader) InspectMaterial(context.Context, inspection.Request) (string, error) { return string(r), nil }
+func (r fixedReader) InspectMaterial(context.Context, inspection.Request) (string, error) {
+	return string(r), nil
+}
 
 // noUseCase stands for the use cases this scenario does not reach (lessons, assignments, jobs).
 type noUseCase struct{}

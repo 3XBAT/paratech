@@ -15,13 +15,13 @@ import (
 
 // Operation names of the library repositories, used in their error messages.
 const (
-	opListSubjects    = "sqlite: list subjects"
-	opGetSubject      = "sqlite: get subject"
-	opSaveSubject     = "sqlite: save subject"
-	opDeleteSubject   = "sqlite: delete subject"
-	opGetMaterial     = "sqlite: get material"
-	opListMaterials   = "sqlite: list materials"
-	opCountMaterials  = "sqlite: count materials"
+	opListSubjects     = "sqlite: list subjects"
+	opGetSubject       = "sqlite: get subject"
+	opSaveSubject      = "sqlite: save subject"
+	opDeleteSubject    = "sqlite: delete subject"
+	opGetMaterial      = "sqlite: get material"
+	opListMaterials    = "sqlite: list materials"
+	opCountMaterials   = "sqlite: count materials"
 	opSaveMaterial     = "sqlite: save material"
 	opSaveMaterialText = "sqlite: save material text status"
 	opSubjectStrings   = "sqlite: list subject strings"
