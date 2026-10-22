@@ -46,6 +46,7 @@ const (
 
 var kinds = []shared.ArtifactKind{
 	shared.ArtifactRecordings, shared.ArtifactTranscripts, shared.ArtifactModels, shared.ArtifactExports,
+	shared.ArtifactMaterials,
 }
 
 // errNotDir means a non-final path component exists but is not a directory.
