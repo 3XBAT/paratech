@@ -32,4 +32,16 @@ var (
 
 	// ErrInvalidPlan means the proposed plan breaks a rule (size, tool class, provenance).
 	ErrInvalidPlan = errors.New("invalid plan")
+
+	// ErrUnknownCall means a result names a call that is not open (another step, a repeat, a made-up ID).
+	ErrUnknownCall = errors.New("no such open call")
+
+	// ErrResultsPending means a call of the last step still waits for its result.
+	ErrResultsPending = errors.New("results of the last step are pending")
+
+	// ErrRetryRequired means the step failed for good: «Повторить» sends it again with a new key, «Продолжить» cannot.
+	ErrRetryRequired = errors.New("the failed step must be retried")
+
+	// ErrRestartRequired means the Hub no longer keeps the model turn: the request starts again from its text.
+	ErrRestartRequired = errors.New("the request must start again")
 )

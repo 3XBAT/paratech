@@ -152,8 +152,27 @@ func (a *Action) State() State {
 	}
 }
 
+// Persisted records the version the store assigned after a successful Save. It is called by the repository adapter
+// only, after the write succeeded (ADR-0004).
+func (a *Action) Persisted(version int64) { a.version = version }
+
+// Version returns the persisted version: 0 for an entry that was never stored.
+func (a *Action) Version() int64 { return a.version }
+
 // ID returns the action ID.
 func (a *Action) ID() shared.ActionID { return a.id }
+
+// Thread returns the thread of the entry.
+func (a *Action) Thread() shared.ThreadID { return a.thread }
+
+// Turn returns the request number of the entry.
+func (a *Action) Turn() int { return a.turn }
+
+// CallID returns the call ID of the planner.
+func (a *Action) CallID() string { return a.callID }
+
+// CreatedAt returns when the entry was recorded.
+func (a *Action) CreatedAt() time.Time { return a.createdAt }
 
 // Status returns the status.
 func (a *Action) Status() Status { return a.status }

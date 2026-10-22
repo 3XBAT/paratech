@@ -1,6 +1,10 @@
 package values
 
-import "paratech/desktop/internal/domain/shared"
+import (
+	"fmt"
+
+	"paratech/desktop/internal/domain/shared"
+)
 
 // Types of one planner step on the Hub (gateway.proto AgentStep, ADR-0023). They cross the AgentModel port of
 // cases/agentturn, so they live here (ARCH-26); the hubclient adapter maps them to the protobuf messages.
@@ -30,6 +34,56 @@ type HistoryTurn struct {
 	StudentText string
 	Calls       *SealedCalls
 	Results     []ToolResult
+}
+
+// Validate checks that exactly one part of the entry is set and that it is within the Hub limits.
+func (h HistoryTurn) Validate() error {
+	set := 0
+	if h.StudentText != "" {
+		set++
+		if len(h.StudentText) > MaxStudentTextBytes {
+			return fmt.Errorf("%w: student text longer than %d bytes", ErrInvalidResult, MaxStudentTextBytes)
+		}
+	}
+	if h.Calls != nil {
+		set++
+		if len(h.Calls.Calls) == 0 || len(h.Calls.Seal) == 0 {
+			return fmt.Errorf("%w: an echo needs calls and a seal", ErrInvalidResult)
+		}
+	}
+	if len(h.Results) > 0 {
+		set++
+		for _, r := range h.Results {
+			if err := r.Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	if set != 1 {
+		return fmt.Errorf("%w: a history entry holds exactly one of text, calls and results", ErrInvalidResult)
+	}
+	return nil
+}
+
+// Size returns the bytes of the entry that count toward the history window.
+func (h HistoryTurn) Size() int {
+	n := len(h.StudentText)
+	if h.Calls != nil {
+		n += len(h.Calls.Seal)
+		for _, c := range h.Calls.Calls {
+			n += len(c.CallID) + len(c.Tool) + len(c.ArgumentsJSON)
+		}
+	}
+	for _, r := range h.Results {
+		n += len(r.CallID) + len(r.ResultJSON)
+	}
+	return n
+}
+
+// HistoryEntry is a stored history entry with the number of the request it belongs to.
+type HistoryEntry struct {
+	Turn  int
+	Entry HistoryTurn
 }
 
 // StepRequest is one planner step: the key ag:<thread>:<turn>:<step>, the shared base, the current scope and the

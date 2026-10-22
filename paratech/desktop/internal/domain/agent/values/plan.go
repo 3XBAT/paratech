@@ -26,6 +26,15 @@ func (s PlanStep) Tool() Tool { return s.tool }
 // Args returns the planned arguments.
 func (s PlanStep) Args() Args { return s.args }
 
+// Deferred returns the ID arguments an earlier step of the plan creates; the call fills them in.
+func (s PlanStep) Deferred() []string { return slices.Clone(s.deferred) }
+
+// CreatedKind returns the ID kind a create_subject or create_folder call creates for later plan steps.
+func CreatedKind(t Tool) (IDKind, bool) {
+	k, ok := createdKinds[t]
+	return k, ok
+}
+
 // Matches reports whether call is this planned step.
 func (s PlanStep) Matches(call Call) bool {
 	if call.tool != s.tool {
