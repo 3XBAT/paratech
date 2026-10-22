@@ -87,6 +87,11 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
     if (known.update && final.has(known.update.status) && !final.has(u.status)) {
       return s;
     }
+    // A failed button operation: no status, no cards, only a problem. The request itself is unchanged, so keep its
+    // cards and buttons and attach the problem; the next real update replaces it.
+    if (known.update && u.status === "" && u.cards.length === 0) {
+      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, problem: u.problem } }) };
+    }
     return { ...s, entries: replace(s.entries, key, { ...known, update: u }) };
   }
   const local = pendingLocal(s.entries, scopeKey(u));
@@ -165,7 +170,8 @@ export function panelMode(s: PanelState): PanelMode {
     return { inputEnabled: false, offline: false, placeholder: "Загрузка…", staleNote: "" };
   }
   const latest = orderedEntries(s.entries).at(-1);
-  const stoppedOffline = latest?.update?.stopReason === "offline" || latest?.callProblem === "offline";
+  // A local "offline" refusal does not lock the input: the panel re-reads State and link.readOnly decides.
+  const stoppedOffline = latest?.update?.stopReason === "offline";
   const offline = s.link.readOnly || stoppedOffline;
   if (offline) {
     return {

@@ -133,9 +133,9 @@ const updateProblemTexts: Record<string, string> = {
 
 /** Why a request stopped: the text of the stop card and the buttons it offers. */
 const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
-  offline: { text: "Не завершено: нет связи", buttons: ["continue"] },
-  user: { text: "Остановлено", buttons: ["continue"] },
-  quota: { text: "Не завершено: исчерпан лимит", buttons: ["continue"] },
+  offline: { text: "Не завершено: нет связи", buttons: ["continue", "cancel"] },
+  user: { text: "Остановлено", buttons: ["continue", "cancel"] },
+  quota: { text: "Не завершено: исчерпан лимит", buttons: ["continue", "cancel"] },
   failed: { text: "Не получилось выполнить шаг", buttons: ["retry"] },
   expired: { text: "Просьба устарела", buttons: ["restart"] },
   budget: { text: "Остановлено: лимит просьбы", buttons: [] },

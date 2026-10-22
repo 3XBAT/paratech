@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { AnswerInput } from "../bindings/agent.js";
 import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
@@ -9,19 +9,21 @@ import { type ButtonId, type ButtonModel, type CardModel, collectAnswers, type E
 
 /** What a card can ask of the panel; the panel maps it to the call of the request the card belongs to. */
 export interface CardActions {
+  /** A button was pressed and the core has not answered yet: the buttons are off (double-click protection). */
+  busy?: boolean;
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
 }
 
-function Buttons(props: { buttons: ButtonModel[]; onPress: (id: ButtonId) => void }) {
+function Buttons(props: { buttons: ButtonModel[]; busy?: boolean; onPress: (id: ButtonId) => void }) {
   if (props.buttons.length === 0) {
     return null;
   }
   return (
     <div className="ag-actions">
       {props.buttons.map((b, i) => (
-        <Button key={b.id} size="sm" variant={i === 0 ? "primary" : "secondary"} onClick={() => props.onPress(b.id)}>
+        <Button key={b.id} size="sm" variant={i === 0 ? "primary" : "secondary"} disabled={props.busy} onClick={() => props.onPress(b.id)}>
           {b.label}
         </Button>
       ))}
@@ -44,6 +46,7 @@ function PlanCard(props: { card: Extract<CardModel, { type: "plan" }>; actions: 
   const { card } = props;
   const [revising, setRevising] = useState(false);
   const [wish, setWish] = useState("");
+  const wishId = useId();
   return (
     <section className="ag-card">
       <h3 className="ag-card-h">{card.caption}</h3>
@@ -68,17 +71,18 @@ function PlanCard(props: { card: Extract<CardModel, { type: "plan" }>; actions: 
             }
           }}
         >
-          <label className="small muted" htmlFor="ag-wish">
+          <label className="small muted" htmlFor={wishId}>
             {texts.reviseLabel}
           </label>
-          <input id="ag-wish" className="ag-inp" value={wish} maxLength={300} onChange={(e) => setWish(e.target.value)} />
-          <Button size="sm" variant="primary" type="submit" disabled={wish.trim() === ""}>
+          <input id={wishId} className="ag-inp" value={wish} maxLength={300} onChange={(e) => setWish(e.target.value)} />
+          <Button size="sm" variant="primary" type="submit" disabled={wish.trim() === "" || props.actions.busy}>
             {texts.reviseSend}
           </Button>
         </form>
       ) : (
         <Buttons
           buttons={card.buttons}
+          busy={props.actions.busy}
           onPress={(id) => {
             if (id === "revise") {
               setRevising(true);
@@ -128,10 +132,10 @@ function QuestionsCard(props: { card: Extract<CardModel, { type: "questions" }>;
       ))}
       {card.active && (
         <div className="ag-actions">
-          <Button size="sm" variant="primary" disabled={answers === null} onClick={() => answers && props.actions.answer(answers)}>
+          <Button size="sm" variant="primary" disabled={answers === null || props.actions.busy} onClick={() => answers && props.actions.answer(answers)}>
             {card.submit}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => props.actions.answer(skipAnswers(card.questions))}>
+          <Button size="sm" variant="ghost" disabled={props.actions.busy} onClick={() => props.actions.answer(skipAnswers(card.questions))}>
             {card.skip}
           </Button>
         </div>
@@ -154,7 +158,7 @@ function Card(props: { card: CardModel; actions: CardActions }) {
             <span className="ag-dot" aria-hidden="true" />
             {card.caption}
           </h3>
-          <Buttons buttons={card.buttons} onPress={props.actions.press} />
+          <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
         </section>
       );
     case "result":
@@ -228,7 +232,7 @@ function Card(props: { card: CardModel; actions: CardActions }) {
           <Icon name={card.type === "stopped" ? "warn" : "info"} />
           <span className="ag-act-tx">{card.text}</span>
           {card.buttons.map((b) => (
-            <Button key={b.id} size="sm" variant="ghost" onClick={() => props.actions.press(b.id)}>
+            <Button key={b.id} size="sm" variant="ghost" disabled={props.actions.busy} onClick={() => props.actions.press(b.id)}>
               {b.label}
             </Button>
           ))}
@@ -249,7 +253,8 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions })
         </p>
       )}
       {model.cards.map((c, i) => (
-        <Card key={i} card={c} actions={props.actions} />
+        // Kind and caption (the question round) are in the key so a new card does not inherit the typed state of the old one.
+        <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />
       ))}
     </article>
   );

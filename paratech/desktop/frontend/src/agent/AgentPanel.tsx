@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type CallProblem, parseUpdate, updateEvent } from "../bindings/agent.js";
+import { type AgentApi, agentApi, type CallProblem, parseUpdate, type UpdateView, updateEvent } from "../bindings/agent.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
 import { askInput, callProblemText, contextFor, isFocusPanelKey, requestText } from "../agentView.js";
 import { type Entry, initialPanelState, reducePanel } from "../agentState.js";
@@ -61,21 +61,33 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
     };
   }, []);
 
-  useEffect(() => {
-    const load = () =>
+  const loadState = useCallback(
+    () =>
       api.state().then(
         (link) => dispatch({ type: "link", link }),
         // No answer reads as read-only: nothing is sent into the dark.
         () => dispatch({ type: "link", link: { link: "unknown", readOnly: true } }),
-      );
-    void load();
+      ),
+    [],
+  );
+
+  // State is re-read on window focus and when the section changes.
+  useEffect(() => {
+    void loadState();
+  }, [loadState, props.page]);
+
+  useEffect(() => {
+    const load = () => void loadState();
     window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [loadState]);
+
+  useEffect(() => {
     // The history of the thread «Без предмета»; it says "unavailable" until the core can read it, and then nothing is shown.
     api.history("").then(
       (h) => h.problem === "" && dispatch({ type: "history", requests: h.requests }),
       () => undefined,
     );
-    return () => window.removeEventListener("focus", load);
   }, []);
 
   const submit = useCallback(() => {
@@ -89,18 +101,43 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
     setDraft("");
     setNotice("");
     api.ask(ask).then(
-      (problem) => dispatch({ type: "askResult", id, problem }),
+      (problem) => {
+        dispatch({ type: "askResult", id, problem });
+        // An offline refusal may be stale: the Hub link decides, not the refusal.
+        if (problem === "offline") {
+          void loadState();
+        }
+      },
       () => dispatch({ type: "askResult", id, problem: "failed" }),
     );
-  }, [draft, ctx]);
+  }, [draft, ctx, loadState]);
+
+  // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
+  const [pressed, setPressed] = useState<Record<string, UpdateView | null>>({});
 
   const actionsFor = useCallback((e: Entry): CardActions => {
     const ref = { threadId: e.threadId, turn: e.turn };
-    const run = (p: Promise<CallProblem>) =>
+    const busy = e.key in pressed && pressed[e.key] === e.update;
+    const run = (p: Promise<CallProblem>) => {
+      setPressed((m) => ({ ...m, [e.key]: e.update }));
+      // A call the core refused produces no update, so the buttons come back at once.
+      const release = () => setPressed(({ [e.key]: _, ...rest }) => rest);
       void p.then(
-        (problem) => setNotice(callProblemText(problem)),
-        () => setNotice(callProblemText("failed")),
+        (problem) => {
+          setNotice(callProblemText(problem));
+          if (problem !== "") {
+            release();
+          }
+          if (problem === "offline") {
+            void loadState();
+          }
+        },
+        () => {
+          setNotice(callProblemText("failed"));
+          release();
+        },
       );
+    };
     const calls: Record<ButtonId, () => Promise<CallProblem>> = {
       approve: () => api.approvePlan(ref),
       cancel: () => api.cancel(ref),
@@ -113,11 +150,12 @@ export function AgentPanel(props: { page: PageId; assignmentId: string }) {
     // A request the core has not named yet has no buttons to press.
     const named = e.threadId !== "";
     return {
-      press: (id) => named && run(calls[id]()),
-      revise: (wish) => named && run(api.revisePlan(ref, wish)),
-      answer: (answers) => named && run(api.answer(ref, answers)),
+      busy,
+      press: (id) => named && !busy && run(calls[id]()),
+      revise: (wish) => named && !busy && run(api.revisePlan(ref, wish)),
+      answer: (answers) => named && !busy && run(api.answer(ref, answers)),
     };
-  }, []);
+  }, [pressed, loadState]);
 
   return (
     <AgentPanelView

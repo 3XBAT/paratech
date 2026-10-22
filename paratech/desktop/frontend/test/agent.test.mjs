@@ -144,13 +144,30 @@ test("a failed Ask arrives with an empty threadId and is matched by scope", () =
   const s = stateWith(
     { type: "asked", id: 1, text: "первое", scope: { ...scope, screen: "today" } },
     { type: "asked", id: 2, text: "второе", scope: { ...scope, screen: "settings" } },
-    { type: "update", update: update({ threadId: "", turn: 0, screen: "settings", status: "FAILED", problem: "failed" }) },
+    { type: "update", update: update({ threadId: "", turn: 0, screen: "settings", status: "", problem: "failed" }) },
   );
   const [first, second] = s.entries;
   assert.equal(first.update, null);
   assert.equal(second.update.problem, "failed");
   assert.equal(second.text, "второе");
   assert.equal(second.threadId, "");
+});
+
+test("a failed button operation keeps the plan and its buttons and only attaches the problem", () => {
+  const plan = update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan: { summary: "s", steps: [], notes: [] } })] });
+  const s = stateWith(
+    { type: "update", update: plan },
+    { type: "update", update: update({ status: "", cards: [], problem: "invalid" }) },
+  );
+  assert.equal(s.entries.length, 1);
+  assert.equal(s.entries[0].update.status, "AWAITING_PLAN");
+  const m = entryModel(s.entries[0]);
+  assert.equal(m.cards[0].type, "plan");
+  assert.deepEqual(m.cards[0].buttons.map((b) => b.id), ["approve", "revise", "cancel"]);
+  assert.equal(m.cards.at(-1).type, "problem");
+  // The next real update clears the problem.
+  const next = reducePanel(s, { type: "update", update: update({ status: "EXECUTING" }) });
+  assert.equal(next.entries[0].update.problem, "");
 });
 
 test("the first update of a sent request binds to it by scope, and the next ones by thread", () => {
@@ -341,11 +358,12 @@ test("stop reasons: offline continues, failed retries, expired restarts, budget 
   const off = stop("offline");
   assert.equal(off.type, "stopped");
   assert.equal(off.text, "Не завершено: нет связи");
-  assert.deepEqual(off.buttons.map((b) => b.label), ["Продолжить"]);
+  assert.deepEqual(off.buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Начать заново"]);
   assert.deepEqual(stop("budget").buttons, []);
-  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить"]);
+  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
   // A stopped card and the update's reason are one card, not two.
   const both = modelOf(update({ status: "STOPPED", stopReason: "offline", cards: [card({ kind: "stopped", stopReason: "offline" })] }));
   assert.equal(both.cards.filter((c) => c.type === "stopped").length, 1);
@@ -355,7 +373,7 @@ test("stop reasons: offline continues, failed retries, expired restarts, budget 
 });
 
 test("update problems explain themselves and offer the next step", () => {
-  const p = (problem) => modelOf(update({ status: "FAILED", problem })).cards.at(-1);
+  const p = (problem) => modelOf(update({ status: "", problem })).cards.at(-1);
   assert.deepEqual(p("retry_required").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(p("restart_required").buttons.map((b) => b.label), ["Начать заново"]);
   assert.equal(p("busy").type, "problem");
@@ -397,6 +415,11 @@ test("a request stopped for lack of connection also reads as offline until it co
   assert.equal(panelMode(s).inputEnabled, false);
   const back = reducePanel(s, { type: "update", update: update({ status: "EXECUTING" }) });
   assert.equal(panelMode(back).inputEnabled, true);
+});
+
+test("a local offline refusal does not lock the input", () => {
+  const s = reducePanel(stateWith({ type: "asked", id: 3, text: "q", scope }), { type: "askResult", id: 3, problem: "offline" });
+  assert.equal(panelMode(s).inputEnabled, true);
 });
 
 test("online: the input is enabled; before State answers it is not", () => {
