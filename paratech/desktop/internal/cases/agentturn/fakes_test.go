@@ -15,9 +15,17 @@ import (
 
 var moscow = time.FixedZone("Europe/Moscow", 3*3600)
 
-type fixedClock struct{ now time.Time }
+type fixedClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
 
-func (c *fixedClock) Now() time.Time { c.now = c.now.Add(time.Second); return c.now }
+func (c *fixedClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(time.Second)
+	return c.now
+}
 
 type seqIDs struct{ n int }
 
@@ -104,16 +112,24 @@ func raw(id, tool, args string) values.RawCall {
 type memThreads struct {
 	mu     sync.Mutex
 	states map[shared.ThreadID]thread.State
+	// afterGet, when set, runs after every Get (outside the lock), so a test can save a competing change between a
+	// load and a save.
+	afterGet func()
 }
 
 func (r *memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	st, ok := r.states[id]
+	hook := r.afterGet
+	r.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("thread %s: %w", id, shared.ErrNotFound)
 	}
-	return thread.Restore(st)
+	th, err := thread.Restore(st)
+	if hook != nil {
+		hook()
+	}
+	return th, err
 }
 
 func (r *memThreads) GetByKey(ctx context.Context, key thread.Key) (*thread.Thread, error) {
@@ -173,6 +189,7 @@ func (r *memThreads) ListRunning(ctx context.Context) ([]*thread.Thread, error) 
 
 type memHistory struct {
 	mu      sync.Mutex
+	txMu    sync.Mutex // held by memTx
 	entries map[shared.ThreadID][]values.HistoryEntry
 }
 
@@ -214,10 +231,13 @@ type subjects []values.BaseSubject
 
 func (s subjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) { return s, nil }
 
-// memTx rolls the history back when fn fails, like a database transaction.
+// memTx rolls the history back when fn fails, like a database transaction; transactions run one at a time, like the
+// single SQLite writer, so a rollback never drops entries of another transaction.
 type memTx struct{ h *memHistory }
 
 func (tx memTx) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	tx.h.txMu.Lock()
+	defer tx.h.txMu.Unlock()
 	tx.h.mu.Lock()
 	saved := map[shared.ThreadID][]values.HistoryEntry{}
 	for id, es := range tx.h.entries {

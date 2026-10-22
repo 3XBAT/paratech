@@ -3,7 +3,9 @@ package agentturn
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
@@ -396,6 +398,65 @@ func TestStopDuringStep(t *testing.T) {
 	}
 	if all := e.history.all("th1"); len(all) != 2 {
 		t.Fatalf("history after the dropped reply = %d entries, want text and one echo", len(all))
+	}
+}
+
+// «Стоп» saved between Submit's load and save: the Driver's results are applied again to the stopped request, not
+// dropped, and «Продолжить» goes on with them.
+func TestSubmitRacingStop(t *testing.T) {
+	e := newEnv(t)
+	e.model.then(raw("c1", "list_subjects", `{}`)).then(raw("r1", "reply", `{"text":"ок"}`))
+	st := ask(t, e, "мои предметы")
+	fired := false
+	e.threads.afterGet = func() {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := e.svc.Stop(context.Background(), ref(st)); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	}
+
+	got, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c1", `{"subjects":[]}`)}})
+	if err != nil || got.Status != thread.StatusStopped || got.StopReason != values.StopUser {
+		t.Fatalf("Submit after a racing Stop = %+v, %v", got, err)
+	}
+	stored := e.history.all(st.Thread)
+	if last := stored[len(stored)-1].Entry; len(last.Results) != 1 || last.Results[0].CallID != "c1" {
+		t.Fatalf("results dropped: last stored entry = %+v", last)
+	}
+	got, err = e.svc.Continue(t.Context(), ref(got))
+	if err != nil || got.Status != thread.StatusDone {
+		t.Fatalf("Continue = %+v, %v", got, err)
+	}
+	if res := lastResults(t, e); res[0].CallID != "c1" {
+		t.Fatalf("results sent = %+v", res)
+	}
+}
+
+// Submit and «Стоп» at the same time, in any order: the results are stored and no call stays open.
+func TestSubmitConcurrentStop(t *testing.T) {
+	for range 20 {
+		e := newEnv(t)
+		e.model.then(raw("c1", "list_subjects", `{}`)).then(raw("r1", "reply", `{"text":"ок"}`))
+		st := ask(t, e, "мои предметы")
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _ = e.svc.Stop(context.Background(), ref(st)) }) // may find the request done or moved
+		_, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c1", `{}`)}})
+		wg.Wait()
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		th, _ := e.threads.Get(t.Context(), st.Thread)
+		if turn, _ := th.Turn(); len(turn.OpenCalls()) != 0 {
+			t.Fatalf("calls left open: %+v", turn.OpenCalls())
+		}
+		if !slices.ContainsFunc(e.history.all(st.Thread), func(h values.HistoryEntry) bool {
+			return len(h.Entry.Results) == 1 && h.Entry.Results[0].CallID == "c1"
+		}) {
+			t.Fatal("the results of c1 are not stored")
+		}
 	}
 }
 

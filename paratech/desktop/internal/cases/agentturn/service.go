@@ -134,28 +134,50 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 	return s.drive(ctx, c, opAsk)
 }
 
-// Submit records the results of the calls the Driver ran and goes on when every call of the step is answered.
+// maxSubmitSaves bounds the saves of the Driver's results when «Стоп» keeps saving in between.
+const maxSubmitSaves = 3
+
+// Submit records the results of the calls the Driver ran and goes on when every call of the step is answered. The
+// results are stored before the next step: they describe work already done, so a «Стоп» saved in between (Stop does
+// not wait for s.mu) must not drop them; on a version conflict they are applied again to the stored, stopped request.
 func (s *Service) Submit(ctx context.Context, in SubmitInput) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.load(ctx, in.Turn, opSubmit)
-	if err != nil {
-		return Step{}, err
+	for attempt := 1; ; attempt++ {
+		c, err := s.load(ctx, in.Turn, opSubmit)
+		if err != nil {
+			return Step{}, err
+		}
+		if err := s.applyOutcomes(c, in.Outcomes); err != nil {
+			return Step{}, fmt.Errorf("%s: %w", opSubmit, err)
+		}
+		c.takeResults(s)
+		err = s.save(ctx, c)
+		if err == nil {
+			return s.drive(ctx, c, opSubmit)
+		}
+		if !errors.Is(err, shared.ErrVersionConflict) || attempt == maxSubmitSaves {
+			return Step{}, fmt.Errorf("%s: %w", opSubmit, err)
+		}
 	}
+}
+
+// applyOutcomes answers the Driver's calls with their results; Answer works in a stopped request too.
+func (s *Service) applyOutcomes(c *change, outcomes []Outcome) error {
 	now := s.clock.Now()
 	turn, _ := c.th.Turn()
-	for _, o := range in.Outcomes {
+	for _, o := range outcomes {
 		if !driverCall(turn, o.Result.CallID) {
-			return Step{}, fmt.Errorf("%s: %w: %q is not a call the Driver runs", opSubmit, ErrInvalidInput, o.Result.CallID)
+			return fmt.Errorf("%w: %q is not a call the Driver runs", ErrInvalidInput, o.Result.CallID)
 		}
 		if err := c.th.Observe(o.Seen...); err != nil {
-			return Step{}, fmt.Errorf("%s: %w: %w", opSubmit, ErrInvalidInput, err)
+			return fmt.Errorf("%w: %w", ErrInvalidInput, err)
 		}
 		if err := c.th.Answer(o.Result, o.Created, now); err != nil {
-			return Step{}, fmt.Errorf("%s: %w: %w", opSubmit, ErrInvalidInput, err)
+			return fmt.Errorf("%w: %w", ErrInvalidInput, err)
 		}
 	}
-	return s.drive(ctx, c, opSubmit)
+	return nil
 }
 
 // driverCall reports whether id is an admitted call of the step that waits for its result.
