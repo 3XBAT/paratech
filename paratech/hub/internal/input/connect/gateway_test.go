@@ -109,8 +109,13 @@ func TestCompleteMapsOperations(t *testing.T) {
 		hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES: "extract_homework_deadlines",
 		hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT:             "homework_draft",
 		hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT:               "lecture_text",
-		hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED:                "",
-		hubv1.OperationType(99):                                       "",
+		// The agent operations are not served by Complete yet (TASK-114): the domain rejects "".
+		hubv1.OperationType_OPERATION_TYPE_AGENT_STEP:        "",
+		hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL:  "",
+		hubv1.OperationType_OPERATION_TYPE_ANSWER:            "",
+		hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT: "",
+		hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED:       "",
+		hubv1.OperationType(99):                              "",
 	} {
 		req := completeRequest()
 		req.Msg.Spec.OperationType = op
@@ -227,6 +232,19 @@ func TestCompleteStreamIsUnimplemented(t *testing.T) {
 	}
 	if connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
 		t.Fatalf("CompleteStream error = %v, want unimplemented", err)
+	}
+}
+
+func TestAgentStepIsUnimplemented(t *testing.T) {
+	srv := gatewayServer(t, &fakeCompleter{}, nil)
+	client := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
+
+	_, err := client.AgentStep(t.Context(), withKey(connectrpc.NewRequest(&hubv1.AgentStepRequest{}), anyKey))
+	if connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
+		t.Fatalf("AgentStep error = %v, want unimplemented", err)
+	}
+	if _, err := client.AgentStep(t.Context(), connectrpc.NewRequest(&hubv1.AgentStepRequest{})); connectrpc.CodeOf(err) != connectrpc.CodeUnauthenticated {
+		t.Fatalf("AgentStep without a key = %v, want unauthenticated", err)
 	}
 }
 
