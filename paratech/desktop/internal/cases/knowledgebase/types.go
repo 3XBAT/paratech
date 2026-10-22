@@ -18,8 +18,10 @@ type SearchResult struct {
 	Truncated bool
 }
 
-// Deps are the ports the Service needs; Log is optional.
+// Deps are the ports the Service needs. Log is optional; without Library lessons are grouped by their free subject
+// string only (as before ADR-0024).
 type Deps struct {
+	Library      SubjectResolver
 	Lessons      LessonStore
 	Recordings   RecordingRepository
 	Schedule     LessonReader

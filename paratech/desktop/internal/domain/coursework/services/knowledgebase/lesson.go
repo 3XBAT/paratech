@@ -45,7 +45,8 @@ type Facts struct {
 }
 
 // Lesson is one lesson of the knowledge base: a recording with its title, subject and kind. Title is "" for an
-// ad-hoc recording (the page names it by its date); Subject is "" for the group NoSubjectName.
+// ad-hoc recording (the page names it by its date); Subject is "" for the group NoSubjectName. Library is the subject
+// of the library its Subject string resolves to (ADR-0024); zero when it resolves to none.
 type Lesson struct {
 	Recording     shared.RecordingID
 	StartedAt     time.Time
@@ -56,6 +57,34 @@ type Lesson struct {
 	SubjectEdited bool   // the subject is the user's correction
 	KindEdited    bool   // the kind is the user's correction
 	Ready         Readiness
+	Library       LibrarySubject
+}
+
+// LibrarySubject is a subject of the library (ADR-0024) as the knowledge base groups by it: its id and name.
+type LibrarySubject struct {
+	ID   shared.SubjectID
+	Name string
+}
+
+// libraryKeyPrefix starts the key of a library subject group. Keys of free strings are folded to lower case, so no
+// such key starts with an upper-case letter and the two kinds never collide.
+const libraryKeyPrefix = "ID:"
+
+// LibraryKey is the key of the group of a library subject.
+func LibraryKey(id shared.SubjectID) string { return libraryKeyPrefix + string(id) }
+
+// WithLibrary returns a copy of the lessons with Library set for those whose Subject is a key of resolved (the
+// subjects their strings resolve to). The strings themselves are kept: a stored subject is never rewritten.
+func WithLibrary(lessons []Lesson, resolved map[string]LibrarySubject) []Lesson {
+	out := slices.Clone(lessons)
+	for i, l := range out {
+		if sub, ok := resolved[l.Subject]; ok && l.Subject != "" && sub.ID != "" {
+			out[i].Library = sub
+		} else {
+			out[i].Library = LibrarySubject{}
+		}
+	}
+	return out
 }
 
 // SubjectKey is the key of the subject group of a lesson: the subject read case-insensitively ("ё" as "е") after it
@@ -94,21 +123,28 @@ func NewLesson(f Facts) Lesson {
 	return l
 }
 
-// SubjectKey returns the key of the subject group of the lesson.
-func (l Lesson) SubjectKey() string { return SubjectKey(l.Subject) }
+// SubjectKey returns the key of the subject group of the lesson: LibraryKey of its library subject, else the key of
+// its free string.
+func (l Lesson) SubjectKey() string {
+	if l.Library.ID != "" {
+		return LibraryKey(l.Library.ID)
+	}
+	return SubjectKey(l.Subject)
+}
 
 // Subject is one subject of the knowledge base with how many lessons it has. NoSubject marks the group NoSubjectName
-// (key "").
+// (key ""). SubjectID is the library subject of the group; "" for a group of a free string.
 type Subject struct {
 	Key       string
 	Name      string
 	Lessons   int
 	Latest    time.Time // the start of its newest lesson
 	NoSubject bool
+	SubjectID shared.SubjectID
 }
 
-// Subjects groups the lessons by SubjectKey. A group is named as its newest lesson spells it; only groups with a lesson
-// are listed, by name, the group NoSubjectName last.
+// Subjects groups the lessons by SubjectKey. A library subject is named as the library names it, a free string as its
+// newest lesson spells it; only groups with a lesson are listed, by name, the group NoSubjectName last.
 func Subjects(lessons []Lesson) []Subject {
 	groups := map[string]*Subject{}
 	var order []string
@@ -116,9 +152,12 @@ func Subjects(lessons []Lesson) []Subject {
 		key := l.SubjectKey()
 		g, ok := groups[key]
 		if !ok {
-			g = &Subject{Key: key, Name: l.Subject, Latest: l.StartedAt, NoSubject: key == ""}
-			if g.NoSubject {
+			g = &Subject{Key: key, Name: l.Subject, Latest: l.StartedAt, NoSubject: key == "", SubjectID: l.Library.ID}
+			switch {
+			case g.NoSubject:
 				g.Name = NoSubjectName
+			case l.Library.ID != "":
+				g.Name = l.Library.Name
 			}
 			groups[key] = g
 			order = append(order, key)
@@ -137,14 +176,20 @@ func Subjects(lessons []Lesson) []Subject {
 			}
 			return -1
 		}
+		if c := cmp.Compare(SubjectKey(a.Name), SubjectKey(b.Name)); c != 0 {
+			return c
+		}
 		return cmp.Compare(a.Key, b.Key)
 	})
 	return out
 }
 
-// LessonsOf returns the lessons of the subject with key (SubjectKey; "" for NoSubjectName), newest first.
+// LessonsOf returns the lessons of the subject with key (Lesson.SubjectKey: LibraryKey of a library subject, else the
+// key of a free string; "" for NoSubjectName), newest first.
 func LessonsOf(lessons []Lesson, key string) []Lesson {
-	key = SubjectKey(key)
+	if !strings.HasPrefix(key, libraryKeyPrefix) {
+		key = SubjectKey(key)
+	}
 	var out []Lesson
 	for _, l := range Newest(lessons) {
 		if l.SubjectKey() == key {
