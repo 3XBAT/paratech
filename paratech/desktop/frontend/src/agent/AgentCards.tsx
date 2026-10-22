@@ -2,6 +2,9 @@ import { useId, useState } from "react";
 import type { AnswerInput } from "../bindings/agent.js";
 import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
+import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
+import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
+import { ConfirmCard } from "./ConfirmCard.js";
 import {
   type ButtonId,
   type ButtonModel,
@@ -21,6 +24,8 @@ import {
 export interface CardActions {
   /** A button was pressed and the core has not answered yet: the buttons are off (double-click protection). */
   busy?: boolean;
+  /** The core calls of the confirm cards; without them a confirm card only says it is unavailable. */
+  confirm?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
@@ -225,6 +230,9 @@ function Card(props: { card: CardModel; actions: CardActions }) {
         </section>
       );
     case "confirm":
+      if (card.target !== null && props.actions.confirm !== undefined) {
+        return <ConfirmCard api={props.actions.confirm.api} deleteApi={props.actions.confirm.deleteApi} target={card.target} />;
+      }
       return (
         <section className="ag-card ag-confirm">
           <h3 className="ag-card-h">{card.caption}</h3>

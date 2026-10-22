@@ -15,6 +15,10 @@ import {
 } from "../todayView.js";
 import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
+import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
+import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
+import { isDeadlineAction } from "../agentConfirmView.js";
+import { PostCalendar } from "./TodayCalendar.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
 function Section(props: { title: string; count?: number; className?: string; children: ReactNode }) {
@@ -242,7 +246,12 @@ export function DoneSection(props: { done: readonly TodayDone[]; onOpenSummary: 
   );
 }
 
-export function PostsSection(props: { posts: readonly TodayPost[]; onOpenSummary: (recordingId: string) => void }) {
+export function PostsSection(props: {
+  posts: readonly TodayPost[];
+  onOpenSummary: (recordingId: string) => void;
+  /** The core calls of «Да, в календарь»; without them the button is not offered. */
+  calendar?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
+}) {
   return (
     <Section title={texts.posts} count={props.posts.length}>
       {props.posts.length === 0 ? (
@@ -257,6 +266,18 @@ export function PostsSection(props: { posts: readonly TodayPost[]; onOpenSummary
                 <div className="today-main">
                   <div className="today-t today-post">{m.headline}</div>
                   <div className="small muted today-meta num">{m.homework === "" ? m.meta : `${m.meta} · ${m.homework}`}</div>
+                  {props.calendar !== undefined &&
+                    p.calendar
+                      .filter((c, i, all) => isDeadlineAction(c.kind, c.assignmentId) && all.findIndex((x) => x.assignmentId === c.assignmentId) === i)
+                      .map((c) => (
+                        <PostCalendar
+                          key={c.assignmentId}
+                          api={props.calendar!.api}
+                          deleteApi={props.calendar!.deleteApi}
+                          assignmentId={c.assignmentId}
+                          due={c.due}
+                        />
+                      ))}
                 </div>
                 {m.canOpen && (
                   <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
