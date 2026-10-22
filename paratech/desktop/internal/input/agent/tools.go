@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
@@ -19,6 +20,7 @@ import (
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
@@ -49,16 +51,24 @@ type Assignments interface {
 	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
 }
 
+// Inspector reads an upload with the quarantined reader (cases/library, TASK-122): a paid read whose answer is only
+// suggestions (ADR-0022).
+type Inspector interface {
+	Inspect(ctx context.Context, id shared.MaterialID) (library.Inspected, error)
+}
+
 // Deliveries lists the email deliveries of an assignment (cases/senddelivery).
 type Deliveries interface {
 	ListForAssignment(ctx context.Context, a shared.AssignmentID) ([]senddelivery.View, error)
 }
 
-// tools runs the calls a step admits: the read tools and the reversible actions (write.go, actions.go). The paid
-// readers (answer_question, inspect_upload), the proposals and the turnkey tools come with later tasks and answer
-// "unavailable" until then. A failing use case answers an error enum: no error text reaches the planner (ADR-0022).
+// tools runs the calls a step admits: the read tools, the paid reader inspect_upload (TASK-122) and the reversible
+// actions (write.go, actions.go). answer_question, the proposals and the turnkey tools come with later tasks and
+// answer "unavailable" until then. A failing use case answers an error enum: no error text reaches the planner
+// (ADR-0022).
 type tools struct {
 	library     SubjectLibrary
+	inspector   Inspector // nil: inspect_upload answers "unavailable"
 	knowledge   Knowledge
 	activity    Activity
 	assignments Assignments
@@ -86,9 +96,14 @@ func (t tools) reader(tool values.Tool) (read, bool) {
 		return t.deliveryStatus, true
 	case values.ToolSearch:
 		return t.search, true
+	case values.ToolInspectUpload:
+		return t.inspectUpload, t.inspector != nil
 	}
 	return nil, false
 }
+
+// paidReads are the paid read tools this desktop runs: they are reads of the request, not its paid job (TASK-117).
+var paidReads = []values.Tool{values.ToolInspectUpload}
 
 // run runs one admitted call of step st and returns what it gave.
 func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran {
@@ -102,13 +117,15 @@ func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran
 func (t tools) read(ctx context.Context, scope values.Scope, c agentturn.Call) agentturn.Outcome {
 	id := c.Call.ID()
 	fn, ok := t.reader(c.Call.Tool())
-	if !ok || c.Class != actionpolicy.ClassR || c.Paid {
+	if !ok || c.Class != actionpolicy.ClassR || (c.Paid && !slices.Contains(paidReads, c.Call.Tool())) {
 		return agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnavailable)}
 	}
 	res, seen, err := fn(ctx, c.Call, scope)
 	switch {
 	case errors.Is(err, knowledgebase.ErrInvalidQuery):
 		return agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseInvalidArgs)}
+	case errors.Is(err, library.ErrMaterialNotFound), errors.Is(err, library.ErrMaterialRemoved):
+		return agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseNotFound)}
 	case err != nil:
 		t.log.WarnContext(ctx, opTool, "tool", c.Call.Tool().String(), "err", err)
 		return agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseFailed)}
@@ -268,9 +285,9 @@ func workOf(t job.Type) values.JobWork {
 	switch t {
 	case transcribe.JobType:
 		return values.WorkTranscription
-	case homeworkflow.SummarizeJobType:
+	case homeworkflow.SummarizeJobType, homeworkflow.MaterialSummaryJobType:
 		return values.WorkSummary
-	case homeworkflow.ExtractHomeworkJobType:
+	case homeworkflow.ExtractHomeworkJobType, homeworkflow.MaterialHomeworkJobType:
 		return values.WorkHomework
 	case homeworkflow.LectureTextJobType:
 		return values.WorkLectureText
@@ -376,6 +393,42 @@ func sectionOf(s kb.Section) (values.SearchSection, bool) {
 		return values.SectionTranscript, true
 	}
 	return "", false
+}
+
+// --- inspect_upload ------------------------------------------------------------------------------------
+
+// inspectUpload reads an upload with the quarantined reader. The planner gets the upload as a material (the same
+// file, for make_summary and find_homework), how far its text was read and the reader's enum, ID, date and flags;
+// never the text, the file name or the reader's output (ADR-0022).
+func (t tools) inspectUpload(ctx context.Context, call values.Call, _ values.Scope) (values.ToolResult, []values.Ref, error) {
+	up, _ := call.Args().ID("upload")
+	got, err := t.inspector.Inspect(ctx, shared.MaterialID(up.ID()))
+	if err != nil {
+		return values.ToolResult{}, nil, err
+	}
+	row := values.InspectRow{Upload: up, Text: textStateOf(got)}
+	row.Material, _ = refOfID(values.KindMaterial, up.ID())
+	if a := got.Answer; a != nil {
+		row.DocKind = string(a.DocKind)
+		row.Subject, _ = refOfID(values.KindSubject, string(a.Subject))
+		if !a.LessonDate.IsZero() {
+			row.LessonDate, _ = values.NewDate(a.LessonDate.Year(), a.LessonDate.Month(), a.LessonDate.Day())
+		}
+		row.HasHomework, row.HasTicketList, row.MentionsEmail = a.HasHomework, a.HasTicketList, a.MentionsEmail
+	}
+	return values.InspectResult(call.ID(), row)
+}
+
+func textStateOf(in library.Inspected) values.TextState {
+	switch {
+	case in.Text == material.TextPDFNotExtracted:
+		return values.TextNotRead
+	case in.Text == material.TextFailed:
+		return values.TextUnreadable
+	case in.Empty:
+		return values.TextEmpty
+	}
+	return values.TextRead
 }
 
 // --- helpers -------------------------------------------------------------------------------------------
