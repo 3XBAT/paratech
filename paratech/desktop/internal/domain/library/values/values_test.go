@@ -13,7 +13,7 @@ func TestKey(t *testing.T) {
 		{"Тёплые\tсети", "теплые сети"},
 		{"ЁЛКИ", "елки"},
 		{"Матем.\n анализ", "матем. анализ"},
-		{"a​b", "ab"}, // a zero-width space is a format character
+		{"a\u200bb", "ab"}, // a zero-width space is a format character
 		{"\xff", ""},
 		{"", ""},
 	}
