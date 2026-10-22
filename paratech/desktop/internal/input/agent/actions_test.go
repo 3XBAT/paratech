@@ -267,7 +267,7 @@ func TestUndoRefusedAfterTheStudentsChange(t *testing.T) {
 func TestApplyComparesTheVersion(t *testing.T) {
 	w := newWorld(t)
 	_, e := act(t, w, writeCall(t, "c1", values.ToolEditDue, `{"assignment":"a1","due":"2026-10-30"}`))
-	if err := w.actions.Apply(t.Context(), e.Compensation, 3); !errors.Is(err, action.ErrTargetChanged) {
+	if _, err := w.actions.Apply(t.Context(), e.Compensation, 3); !errors.Is(err, action.ErrTargetChanged) {
 		t.Fatalf("Apply on a stale version = %v", err)
 	}
 	if w.assignments.views["a1"].Due.Day() != 30 {
@@ -477,7 +477,7 @@ func TestRecoverAfterACrash(t *testing.T) {
 	if _, err := w.journal.BeginUndo(ctx, e.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.actions.Apply(ctx, e.Compensation, w.lib.materials["m2"].Version()); err != nil {
+	if _, err := w.actions.Apply(ctx, e.Compensation, w.lib.materials["m2"].Version()); err != nil {
 		t.Fatal(err)
 	}
 	rep, err = w.journal.Recover(ctx)
@@ -486,6 +486,89 @@ func TestRecoverAfterACrash(t *testing.T) {
 	}
 	if e := status(t, w, e.ID); e.Status != action.StatusUndone || len(w.lib.materials["m2"].Lessons()) != 0 {
 		t.Fatalf("interrupted Undo = %+v", e)
+	}
+}
+
+// After a crash only the values the action meant to set count as its effect: another change of the lesson or the due
+// date (the student's) leaves the entry UNKNOWN, not DONE with an Undo that would overwrite it.
+func TestRecoverNeedsTheIntendedValues(t *testing.T) {
+	tests := []struct {
+		name string
+		tool values.Tool
+		args string
+		then func(t *testing.T, w *world, p prepared)
+		want action.Status
+	}{
+		{"lesson info set", values.ToolSetLessonInfo, `{"recording":"r1","subject":"s1","kind":"seminar"}`,
+			func(t *testing.T, _ *world, p prepared) { mustRun(t, p) }, action.StatusDone},
+		{"lesson info set otherwise by the student", values.ToolSetLessonInfo, `{"recording":"r1","subject":"s1","kind":"seminar"}`,
+			func(t *testing.T, w *world, _ prepared) {
+				if _, err := w.lessons.SetLessonInfo(t.Context(), "r1", "Физика", "lab"); err != nil {
+					t.Fatal(err)
+				}
+			}, action.StatusUnknown},
+		{"due set", values.ToolEditDue, `{"assignment":"a1","due":"2026-10-30"}`,
+			func(t *testing.T, _ *world, p prepared) { mustRun(t, p) }, action.StatusDone},
+		{"due set otherwise by the student", values.ToolEditDue, `{"assignment":"a1","due":"2026-10-30"}`,
+			func(_ *testing.T, w *world, _ prepared) {
+				v := w.assignments.views["a1"]
+				v.Due, v.Version = time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC), v.Version+1
+				w.assignments.views["a1"] = v
+			}, action.StatusUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			c := writeCall(t, "c1", tt.tool, tt.args)
+			p, ok, err := w.actions.prepare(t.Context(), c.Call)
+			if !ok || err != nil {
+				t.Fatalf("prepare = %v, %v", ok, err)
+			}
+			if _, err := w.journal.Begin(t.Context(), agentjournal.BeginInput{Thread: req.Thread, Turn: req.Turn, CallID: "c1", Tool: tt.tool, Intent: p.intent}); err != nil {
+				t.Fatal(err)
+			}
+			tt.then(t, w, p)
+			if _, err := w.journal.Recover(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if e, err := w.journal.Find(t.Context(), req.Thread, req.Turn, "c1"); err != nil || e.Status != tt.want {
+				t.Fatalf("settled = %+v, %v; want %s", e, err, tt.want)
+			}
+		})
+	}
+}
+
+func mustRun(t *testing.T, p prepared) {
+	t.Helper()
+	if _, err := p.run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A paid job that existed already (an earlier start found by its job key) is not the agent's: the entry is FAILED,
+// the result says nothing changed and no «Отменить» line is shown, so Undo can never cancel the student's job.
+func TestExistingJobIsNotClaimed(t *testing.T) {
+	w := newWorld(t)
+	w.jobs.existing = true
+	r, e := act(t, w, writeCall(t, "c1", values.ToolMakeSummary, `{"recording":"r1"}`))
+	if r.out.Result.IsError || r.out.Result.ResultJSON != `{"changed":false,"done":true,"job":"job1"}` || len(r.cards) != 0 {
+		t.Fatalf("result = %+v, cards %+v", r.out.Result, r.cards)
+	}
+	if e.Status != action.StatusFailed || e.CanUndo {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+// A call ID the planner reuses for another tool is refused, not answered with the first tool's result.
+func TestReusedCallIDWithAnotherTool(t *testing.T) {
+	w := newWorld(t)
+	act(t, w, writeCall(t, "c1", values.ToolCreateSubject, `{"name":"Химия"}`))
+	r, _ := act(t, w, writeCall(t, "c1", values.ToolCreateFolder, `{"subject":"s1","name":"Лабы"}`))
+	if !r.out.Result.IsError || r.out.Result.ResultJSON != `{"error":"`+string(values.RefuseInvalidArgs)+`"}` {
+		t.Fatalf("result = %+v", r.out.Result)
+	}
+	if _, ok := w.lib.subjects["s1"].Folder("f-new1"); ok || len(w.store.order) != 1 {
+		t.Fatalf("the second tool ran: %d entries", len(w.store.order))
 	}
 }
 

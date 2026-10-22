@@ -108,9 +108,13 @@ func (t tools) result(c agentturn.Call, row values.WriteRow, created values.Ref,
 	return ran{out: agentturn.Outcome{Result: res, Seen: seen, Created: created}, write: true, cards: cards}
 }
 
-// replay is the outcome of a call that has an entry already: the result it had, rebuilt from the compensation.
+// replay is the outcome of a call that has an entry already: the result it had, rebuilt from the compensation. A
+// call ID reused for another tool is refused, never answered with the other tool's result.
 func (t tools) replay(c agentturn.Call, e agentjournal.Entry) ran {
 	id := c.Call.ID()
+	if e.Tool != c.Call.Tool() {
+		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseInvalidArgs)}, write: true}
+	}
 	switch e.Status {
 	case action.StatusFailed:
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseFailed)}, write: true}

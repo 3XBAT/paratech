@@ -178,11 +178,12 @@ func actionFromRow(row sqlcgen.AgentAction) (*action.Action, error) {
 	return a, nil
 }
 
-// intentWire is the stored form of action.Intent; prior is a compensation in its own stored form.
+// intentWire is the stored form of action.Intent; prior and next are compensations in their own stored form.
 type intentWire struct {
 	Target string            `json:"target,omitempty"` // "<kind>:<id>"
 	Before int64             `json:"before,omitempty"`
 	Prior  *compensationWire `json:"prior,omitempty"`
+	Next   *compensationWire `json:"next,omitempty"`
 	Name   string            `json:"name,omitempty"`
 }
 
@@ -194,18 +195,29 @@ func intentText(in action.Intent) (sql.NullString, error) {
 	if !in.Target.IsZero() {
 		w.Target = in.Target.String()
 	}
-	if in.Prior != nil {
-		p, err := wireOf(in.Prior)
-		if err != nil {
-			return sql.NullString{}, err
-		}
-		w.Prior = &p
+	var err error
+	if w.Prior, err = optionalWire(in.Prior); err != nil {
+		return sql.NullString{}, err
+	}
+	if w.Next, err = optionalWire(in.Next); err != nil {
+		return sql.NullString{}, err
 	}
 	b, err := json.Marshal(w)
 	if err != nil {
 		return sql.NullString{}, fmt.Errorf("encode intent: %w", err)
 	}
 	return sql.NullString{String: string(b), Valid: true}, nil
+}
+
+func optionalWire(c action.Compensation) (*compensationWire, error) {
+	if c == nil {
+		return nil, nil
+	}
+	w, err := wireOf(c)
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
 }
 
 func intentFrom(s sql.NullString) (action.Intent, error) {
@@ -231,6 +243,13 @@ func intentFrom(s sql.NullString) (action.Intent, error) {
 			return action.Intent{}, err
 		}
 		in.Prior = p
+	}
+	if w.Next != nil {
+		n, err := compensationOfWire(*w.Next)
+		if err != nil {
+			return action.Intent{}, err
+		}
+		in.Next = n
 	}
 	return in, nil
 }

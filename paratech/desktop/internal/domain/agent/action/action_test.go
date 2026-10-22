@@ -97,6 +97,7 @@ func TestOperationsFromEveryStatus(t *testing.T) {
 		"Complete":   func(t *testing.T, a *Action) error { return a.Complete(subjectComp(t), 1, at(9)) },
 		"Fail":       func(_ *testing.T, a *Action) error { return a.Fail(at(9)) },
 		"BeginUndo":  func(_ *testing.T, a *Action) error { return a.BeginUndo(at(9)) },
+		"StartUndo":  func(_ *testing.T, a *Action) error { return a.StartUndo(at(9)) },
 		"FinishUndo": func(_ *testing.T, a *Action) error { return a.FinishUndo(at(9)) },
 		"RefuseUndo": func(_ *testing.T, a *Action) error { return a.RefuseUndo(UndoChanged, at(9)) },
 	}
@@ -104,6 +105,7 @@ func TestOperationsFromEveryStatus(t *testing.T) {
 		"Complete":   {StatusPending: StatusDone},
 		"Fail":       {StatusPending: StatusFailed},
 		"BeginUndo":  {StatusDone: StatusUndoing},
+		"StartUndo":  {StatusDone: StatusUndoing, StatusUndoing: StatusUndoing}, // UNDOING since at(2): stale at at(9)
 		"FinishUndo": {StatusUndoing: StatusUndone},
 		"RefuseUndo": {StatusUndoing: StatusUndoRefused},
 	}
@@ -153,8 +155,8 @@ func TestRecover(t *testing.T) {
 			if err != nil || retry != tt.retry || a.Status() != tt.to {
 				t.Fatalf("Recover = %v, %v; status %s; want %v %s", retry, err, a.Status(), tt.retry, tt.to)
 			}
-			if a.CanUndo() != (tt.to == StatusDone) {
-				t.Fatalf("CanUndo = %v in %s", a.CanUndo(), tt.to)
+			if a.CanUndo(at(2)) != (tt.to == StatusDone) {
+				t.Fatalf("CanUndo = %v in %s", a.CanUndo(at(2)), tt.to)
 			}
 		})
 	}

@@ -38,10 +38,11 @@ type ActionRepository interface {
 // it is already in the state Undo leads to, and whether a paid result is final. Apply must compare-and-swap on
 // expectedVersion in the same transaction as the change: a target that changed after Check is an error wrapping
 // action.ErrTargetChanged, never an overwrite of the newer change; a job that finished meanwhile action.ErrResultReady,
-// one that cannot be stopped action.ErrCannotStop. Both are idempotent.
+// one that cannot be stopped action.ErrCannotStop. Both are idempotent. Apply returns the version of the target
+// after the compensation (0 when it is gone), so an earlier action of the request can follow it (action.Rebase).
 type Compensator interface {
 	Check(ctx context.Context, c action.Compensation) (action.Target, error)
-	Apply(ctx context.Context, c action.Compensation, expectedVersion int64) error
+	Apply(ctx context.Context, c action.Compensation, expectedVersion int64) (after int64, err error)
 }
 
 // Resolver tells Recover what happened to the target of a PENDING entry after a crash between its two transactions:

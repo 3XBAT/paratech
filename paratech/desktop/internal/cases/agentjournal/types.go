@@ -99,9 +99,9 @@ type RecoverReport struct {
 	Left    int // entries left for the next start (no compensator, or reading or compensating failed)
 }
 
-func entryOf(a *action.Action) Entry {
+func entryOf(a *action.Action, now time.Time) Entry {
 	st := a.State()
-	can, why := a.Undoable()
+	can, why := a.Undoable(now)
 	return Entry{
 		ID: st.ID, Thread: st.Thread, Turn: st.Turn, CallID: st.CallID, Tool: st.Tool, Status: st.Status,
 		CanUndo: can, NoUndo: why, Compensation: st.Compensation, Key: a.Key(), Proposal: st.Proposal,

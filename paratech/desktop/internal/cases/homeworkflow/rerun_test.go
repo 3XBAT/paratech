@@ -113,12 +113,12 @@ func TestRetryAfterPermanentFailure(t *testing.T) {
 			}
 
 			e.clock.Advance(time.Minute)
-			id, err := e.rr.Retry(ctx, "r1", tc.work)
-			if err != nil {
-				t.Fatalf("Retry: %v", err)
+			id, created, err := e.rr.Retry(ctx, "r1", tc.work)
+			if err != nil || !created {
+				t.Fatalf("Retry = %v, created %v", err, created)
 			}
 			// The retry is pending now: a second click is refused.
-			if _, err := e.rr.Retry(ctx, "r1", tc.work); !errors.Is(err, job.ErrStillActive) {
+			if _, _, err := e.rr.Retry(ctx, "r1", tc.work); !errors.Is(err, job.ErrStillActive) {
 				t.Fatalf("second click = %v, want ErrStillActive", err)
 			}
 			next := e.latest(tc.typ)
@@ -199,7 +199,7 @@ func TestRetryRefusals(t *testing.T) {
 				work = WorkSummary
 			}
 			before := len(e.jobs)
-			if _, err := e.rr.Retry(context.Background(), rec, work); !errors.Is(err, tc.want) {
+			if _, _, err := e.rr.Retry(context.Background(), rec, work); !errors.Is(err, tc.want) {
 				t.Fatalf("Retry = %v, want %v", err, tc.want)
 			}
 			if len(e.jobs) != before {
@@ -215,8 +215,31 @@ func TestRetryRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rr.Retry(context.Background(), "r1", WorkHomework); !errors.Is(err, shared.ErrNotFound) {
+	if _, _, err := rr.Retry(context.Background(), "r1", WorkHomework); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("Retry without jobs = %v, want ErrNotFound", err)
+	}
+}
+
+// A click that meets the job of an earlier click (the same job key) reports it as not created: the agent must not
+// claim it as its own action (TASK-123).
+func TestRetryReportsAnExistingJob(t *testing.T) {
+	e := newRerunEnv(t)
+	failed := e.latest(SummarizeJobType)
+	_ = failed.Cancel(ppT0)
+	// The earlier click's job, keyed after the failed one; its id sorts before it, so the failed job stays the latest.
+	earlier, err := failed.RetryFailed("a0", rerunKey(SummarizeJobType, "t1", failed.ID()), failed.CreatedAt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, _ := (ppJobs{e.ppStore}).Enqueue(context.Background(), earlier); !created {
+		t.Fatal("setup")
+	}
+	if e.latest(SummarizeJobType).ID() != failed.ID() {
+		t.Fatal("setup: the failed job is not the latest")
+	}
+	id, created, err := e.rr.Retry(context.Background(), "r1", WorkSummary)
+	if err != nil || created || id != "a0" {
+		t.Fatalf("Retry = %s, created %v, %v; want the earlier job, not created", id, created, err)
 	}
 }
 
@@ -228,16 +251,16 @@ func TestRetryStartsAMissingLectureText(t *testing.T) {
 	delete(e.jobs, jobKey(LectureTextJobType, "t1"))
 	before := len(e.jobs)
 
-	id, err := e.rr.Retry(ctx, "r1", WorkLectureText)
-	if err != nil {
-		t.Fatalf("Retry: %v", err)
+	id, created, err := e.rr.Retry(ctx, "r1", WorkLectureText)
+	if err != nil || !created {
+		t.Fatalf("Retry = %v, created %v", err, created)
 	}
 	j := e.latest(LectureTextJobType)
 	if j.ID() != id || j.Key() != jobKey(LectureTextJobType, "t1") || j.Payload() != `{"transcript_id":"t1"}` ||
 		j.Status() != job.StatusQueued || j.MaxAttempts() != DefaultPostProcessAttempts || len(e.jobs) != before+1 {
 		t.Fatalf("job %s key %q payload %s status %s", j.ID(), j.Key(), j.Payload(), j.Status())
 	}
-	if _, err := e.rr.Retry(ctx, "r1", WorkLectureText); !errors.Is(err, job.ErrStillActive) || len(e.jobs) != before+1 {
+	if _, _, err := e.rr.Retry(ctx, "r1", WorkLectureText); !errors.Is(err, job.ErrStillActive) || len(e.jobs) != before+1 {
 		t.Fatalf("second click = %v", err)
 	}
 
@@ -245,12 +268,12 @@ func TestRetryStartsAMissingLectureText(t *testing.T) {
 	if err := e.run(j); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.rr.Retry(ctx, "r1", WorkLectureText); !errors.Is(err, job.ErrNotFailed) {
+	if _, _, err := e.rr.Retry(ctx, "r1", WorkLectureText); !errors.Is(err, job.ErrNotFailed) {
 		t.Fatalf("Retry of a made lecture text = %v, want ErrNotFailed", err)
 	}
 	// Only the lecture text starts when missing: the other works have nothing to retry.
 	delete(e.jobs, jobKey(SummarizeJobType, "t1"))
-	if _, err := e.rr.Retry(ctx, "r1", WorkSummary); !errors.Is(err, shared.ErrNotFound) {
+	if _, _, err := e.rr.Retry(ctx, "r1", WorkSummary); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("Retry of a missing summary job = %v, want ErrNotFound", err)
 	}
 }
@@ -260,7 +283,7 @@ func TestRedoSummaryKeepsTheOldOneUntilANewOnePasses(t *testing.T) {
 	e := newRerunEnv(t)
 	ctx := context.Background()
 
-	if _, err := e.rr.RedoSummary(ctx, "r1"); !errors.Is(err, job.ErrStillActive) {
+	if _, _, err := e.rr.RedoSummary(ctx, "r1"); !errors.Is(err, job.ErrStillActive) {
 		t.Fatalf("RedoSummary of a queued job = %v, want ErrStillActive", err)
 	}
 	e.llm.Answer(values.OperationSummary, summaryAnswer)
@@ -271,7 +294,7 @@ func TestRedoSummaryKeepsTheOldOneUntilANewOnePasses(t *testing.T) {
 
 	// The new answer is invalid: the old summary stays.
 	e.clock.Advance(time.Minute)
-	if _, err := e.rr.RedoSummary(ctx, "r1"); err != nil {
+	if _, _, err := e.rr.RedoSummary(ctx, "r1"); err != nil {
 		t.Fatalf("RedoSummary: %v", err)
 	}
 	e.llm.Answer(values.OperationSummary, "no JSON")
@@ -284,7 +307,7 @@ func TestRedoSummaryKeepsTheOldOneUntilANewOnePasses(t *testing.T) {
 
 	// A redo after the failed redo is allowed, and its valid answer replaces the summary.
 	e.clock.Advance(time.Minute)
-	if _, err := e.rr.RedoSummary(ctx, "r1"); err != nil {
+	if _, _, err := e.rr.RedoSummary(ctx, "r1"); err != nil {
 		t.Fatalf("RedoSummary after a failed redo: %v", err)
 	}
 	e.llm.Answer(values.OperationSummary, `{"sections":[{"heading":"Lakes","text":"Rivers and lakes.","points":[]}],"key_points":["Lakes"]}`)
@@ -303,10 +326,10 @@ func TestRedoSummaryNeedsASummary(t *testing.T) {
 	e := newRerunEnv(t)
 	j := e.latest(SummarizeJobType)
 	_ = j.Cancel(ppT0)
-	if _, err := e.rr.RedoSummary(context.Background(), "r1"); !errors.Is(err, shared.ErrNotFound) {
+	if _, _, err := e.rr.RedoSummary(context.Background(), "r1"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("RedoSummary without a summary = %v, want ErrNotFound", err)
 	}
-	if _, err := e.rr.RedoSummary(context.Background(), "r9"); !errors.Is(err, shared.ErrNotFound) {
+	if _, _, err := e.rr.RedoSummary(context.Background(), "r9"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("RedoSummary of an unknown recording = %v", err)
 	}
 	if n := len(e.jobs); n != 3 {

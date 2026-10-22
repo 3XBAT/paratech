@@ -13,13 +13,17 @@ import (
 const maxIntentName = 512
 
 // Intent is what is known before the use case of an entry runs: the target it changes and the target's version then,
-// the prior state Undo restores (Prior) and the name a create tool makes. Recover compares the world with it after a
-// crash between the two transactions (Settle). A zero Intent says nothing: the outcome then stays unknown.
+// the prior state Undo restores (Prior), the state the action leads to (Next) and the name a create tool makes.
+// Recover compares the world with it after a crash between the two transactions (Settle). A zero Intent says nothing:
+// the outcome then stays unknown.
 type Intent struct {
 	Target values.Ref   // what the use case changes; zero when it creates it (create_subject) or starts a job
 	Before int64        // version of Target before the action; 0 when Target is zero
 	Prior  Compensation // the compensation of the action as far as it is known before it runs; nil for creates
-	Name   string       // create_subject, create_folder: the name of what is made
+	// Next is the state the action leads to, written as the compensation that would restore it (set_lesson_info,
+	// edit_due): only that state counts as the effect after a crash, not any change of the version.
+	Next Compensation
+	Name string // create_subject, create_folder: the name of what is made
 }
 
 // IsZero reports whether the intent says nothing.
@@ -36,8 +40,11 @@ func (in Intent) validate(t values.Tool) error {
 	if len(in.Name) > maxIntentName || !utf8.ValidString(in.Name) {
 		return bad("name too long or not UTF-8")
 	}
-	if in.Prior != nil {
-		if err := checkKind(t, in.Prior); err != nil {
+	for _, c := range []Compensation{in.Prior, in.Next} {
+		if c == nil {
+			continue
+		}
+		if err := checkKind(t, c); err != nil {
 			return err
 		}
 	}
@@ -140,11 +147,14 @@ const (
 	NoUndoCannotStop   NoUndo = "cannot_stop"
 )
 
-// Undoable reports whether «Отменить» is offered and, if not, why.
-func (a *Action) Undoable() (bool, NoUndo) {
-	switch a.status {
-	case StatusDone:
+// Undoable reports whether «Отменить» is offered at now and, if not, why. A stale UNDOING entry is offered again (its
+// retry, StartUndo).
+func (a *Action) Undoable(now time.Time) (bool, NoUndo) {
+	switch {
+	case a.status == StatusDone, a.undoStale(now):
 		return true, NoUndoNone
+	}
+	switch a.status {
 	case StatusPending, StatusUndoing:
 		return false, NoUndoRunning
 	case StatusFailed:

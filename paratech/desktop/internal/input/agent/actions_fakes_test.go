@@ -296,6 +296,7 @@ type memJobs struct {
 	started  []string
 	err      error
 	stuck    bool // Cancel refuses (a running job of an uncancellable type)
+	existing bool // Retry and RedoSummary find the job of an earlier start (created false)
 }
 
 func (j *memJobs) start(what string) (shared.JobID, error) {
@@ -308,12 +309,14 @@ func (j *memJobs) start(what string) (shared.JobID, error) {
 	return id, nil
 }
 
-func (j *memJobs) Retry(_ context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, error) {
-	return j.start(string(work) + ":" + string(rec))
+func (j *memJobs) Retry(_ context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, bool, error) {
+	id, err := j.start(string(work) + ":" + string(rec))
+	return id, !j.existing, err
 }
 
-func (j *memJobs) RedoSummary(_ context.Context, rec shared.RecordingID) (shared.JobID, error) {
-	return j.start("redo:" + string(rec))
+func (j *memJobs) RedoSummary(_ context.Context, rec shared.RecordingID) (shared.JobID, bool, error) {
+	id, err := j.start("redo:" + string(rec))
+	return id, !j.existing, err
 }
 
 func (j *memJobs) set(id shared.JobID, st job.Status) {

@@ -48,10 +48,11 @@ type AssignmentEdits interface {
 	EditAssignment(ctx context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error)
 }
 
-// Rerunner starts the post-processing of a recording again (cases/homeworkflow).
+// Rerunner starts the post-processing of a recording again (cases/homeworkflow); created is false when the job of an
+// earlier start was found instead.
 type Rerunner interface {
-	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, error)
-	RedoSummary(ctx context.Context, rec shared.RecordingID) (shared.JobID, error)
+	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (id shared.JobID, created bool, err error)
+	RedoSummary(ctx context.Context, rec shared.RecordingID) (id shared.JobID, created bool, err error)
 }
 
 // Drafts generates homework drafts (cases/homeworkflow).
@@ -346,9 +347,10 @@ func (a *Actions) setLessonInfo(ctx context.Context, call values.Call) (prepared
 		return prepared{noop: &values.WriteRow{}}, nil
 	}
 	undo := action.RestoreLessonInfo{Recording: recRef, OldSubject: oldSubject, OldKind: oldKind}
+	next := action.RestoreLessonInfo{Recording: recRef, OldSubject: name, OldKind: kind}
 	before := lessonVersion(l)
 	return prepared{
-		intent: action.Intent{Target: recRef, Before: before, Prior: undo},
+		intent: action.Intent{Target: recRef, Before: before, Prior: undo, Next: next},
 		run: func(ctx context.Context) (effect, error) {
 			var e effect
 			err := a.tx.Do(ctx, func(ctx context.Context) error {
@@ -388,7 +390,7 @@ func (a *Actions) editDue(ctx context.Context, call values.Call) (prepared, erro
 	undo := action.RestoreDue{Assignment: aRef, OldDue: v.Due}
 	before := v.Version
 	return prepared{
-		intent: action.Intent{Target: aRef, Before: before, Prior: undo},
+		intent: action.Intent{Target: aRef, Before: before, Prior: undo, Next: action.RestoreDue{Assignment: aRef, OldDue: due}},
 		run: func(ctx context.Context) (effect, error) {
 			var e effect
 			err := a.tx.Do(ctx, func(ctx context.Context) error {
@@ -438,7 +440,7 @@ func (a *Actions) postProcess(ctx context.Context, call values.Call) (prepared, 
 		return prepared{}, errUnavailable
 	}
 	rec := shared.RecordingID(recRef.ID())
-	start := func(ctx context.Context) (shared.JobID, error) {
+	start := func(ctx context.Context) (shared.JobID, bool, error) {
 		switch call.Tool() {
 		case values.ToolMakeLectureText:
 			return a.rerunner.Retry(ctx, rec, homeworkflow.WorkLectureText)
@@ -447,7 +449,7 @@ func (a *Actions) postProcess(ctx context.Context, call values.Call) (prepared, 
 		}
 		l, err := a.lessons.Lesson(ctx, rec)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if l.Ready.Summary {
 			return a.rerunner.RedoSummary(ctx, rec)
@@ -455,11 +457,11 @@ func (a *Actions) postProcess(ctx context.Context, call values.Call) (prepared, 
 		return a.rerunner.Retry(ctx, rec, homeworkflow.WorkSummary)
 	}
 	return prepared{run: func(ctx context.Context) (effect, error) {
-		id, err := start(ctx)
+		id, created, err := start(ctx)
 		if err != nil {
 			return effect{}, err
 		}
-		return jobEffect(id, true)
+		return jobEffect(id, created)
 	}}, nil
 }
 
@@ -555,24 +557,42 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 }
 
 // Apply applies a compensation if its target is still at expectedVersion, in one transaction with that check
-// (agentjournal.Compensator). A job is cancelled through the job runner: a finished one is action.ErrResultReady.
-func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVersion int64) error {
+// (agentjournal.Compensator), and returns the target's version after it (0 when it is gone). A job is cancelled
+// through the job runner: a finished one is action.ErrResultReady.
+func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVersion int64) (int64, error) {
 	if v, ok := c.(action.CancelJob); ok {
-		return a.cancelJob(ctx, shared.JobID(v.Job.ID()))
+		if err := a.cancelJob(ctx, shared.JobID(v.Job.ID())); err != nil {
+			return 0, err
+		}
+		return jobVersion, nil
 	}
-	return a.tx.Do(ctx, func(ctx context.Context) error {
+	var after int64
+	err := a.tx.Do(ctx, func(ctx context.Context) error {
 		t, err := a.Check(ctx, c)
 		if err != nil {
 			return err
 		}
 		if t.Compensated {
+			after = t.Version
 			return nil
 		}
 		if t.Version != expectedVersion {
 			return action.ErrTargetChanged
 		}
-		return changedIfConflict(a.compensate(ctx, c))
+		if err := changedIfConflict(a.compensate(ctx, c)); err != nil {
+			return err
+		}
+		if t, err = a.Check(ctx, c); err == nil {
+			after = t.Version
+		} else if !errors.Is(err, shared.ErrNotFound) {
+			return err
+		}
+		return nil
 	})
+	if err != nil {
+		return 0, err
+	}
+	return after, nil
 }
 
 func (a *Actions) compensate(ctx context.Context, c action.Compensation) error {
@@ -695,14 +715,17 @@ func (a *Actions) Observe(ctx context.Context, tool values.Tool, in action.Inten
 		if err != nil {
 			return absent(err)
 		}
-		return observed(lessonVersion(l), in, true), nil
+		// Only the values the action set are its effect; without them (or with other ones) the outcome is unknown.
+		next, ok := in.Next.(action.RestoreLessonInfo)
+		s, k := correctionOf(l)
+		return observed(lessonVersion(l), in, ok && s == next.OldSubject && k == next.OldKind), nil
 	case values.ToolEditDue:
 		v, err := a.assignments.Assignment(ctx, shared.AssignmentID(in.Target.ID()))
 		if err != nil {
 			return absent(err)
 		}
-		old, _ := in.Prior.(action.RestoreDue)
-		return observed(v.Version, in, !v.Due.Equal(old.OldDue)), nil
+		next, ok := in.Next.(action.RestoreDue)
+		return observed(v.Version, in, ok && !next.OldDue.IsZero() && v.Due.Equal(next.OldDue)), nil
 	}
 	return action.Observation{}, nil
 }

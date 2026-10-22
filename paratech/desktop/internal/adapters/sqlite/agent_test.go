@@ -349,7 +349,8 @@ func TestAgentActionIntentRefusalAndLookups(t *testing.T) {
 		tool values.Tool
 		in   action.Intent
 	}{
-		{values.ToolEditDue, action.Intent{Target: a1, Before: 4, Prior: action.RestoreDue{Assignment: a1, OldDue: time.Date(2026, 11, 1, 18, 0, 0, 0, time.UTC)}}},
+		{values.ToolEditDue, action.Intent{Target: a1, Before: 4, Prior: action.RestoreDue{Assignment: a1, OldDue: time.Date(2026, 11, 1, 18, 0, 0, 0, time.UTC)},
+			Next: action.RestoreDue{Assignment: a1, OldDue: time.Date(2026, 11, 3, 18, 0, 0, 0, time.UTC)}}},
 		{values.ToolPlaceUpload, action.Intent{Target: m1, Before: 2, Prior: action.ReturnToInbox{Material: m1, Lesson: agentRef(t, values.KindLesson, "l1")}}},
 		{values.ToolCreateSubject, action.Intent{Name: "Химия (лаб.)"}},
 		{values.ToolMakeSummary, action.Intent{}},

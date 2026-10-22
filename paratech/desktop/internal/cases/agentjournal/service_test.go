@@ -127,21 +127,21 @@ func (f *fakeComp) Check(_ context.Context, c action.Compensation) (action.Targe
 	return t, nil
 }
 
-func (f *fakeComp) Apply(_ context.Context, c action.Compensation, expectedVersion int64) error {
+func (f *fakeComp) Apply(_ context.Context, c action.Compensation, expectedVersion int64) (int64, error) {
 	switch {
 	case f.failing != nil:
-		return f.failing
+		return 0, f.failing
 	case f.applyErr != nil:
-		return f.applyErr
+		return 0, f.applyErr
 	case f.targets[c.Kind()].Version != expectedVersion:
-		return fmt.Errorf("fake compensator: %w", action.ErrTargetChanged)
+		return 0, fmt.Errorf("fake compensator: %w", action.ErrTargetChanged)
 	}
 	f.applied = append(f.applied, c)
 	t := f.targets[c.Kind()]
 	t.Version++
 	t.Compensated = true
 	f.targets[c.Kind()] = t
-	return nil
+	return t.Version, nil
 }
 
 func at(v int64) map[action.CompensationKind]action.Target {
@@ -164,7 +164,10 @@ func newService(t *testing.T, comp Compensator) (*Service, *memActions) {
 func newServiceWith(t *testing.T, d Deps) (*Service, *memActions) {
 	t.Helper()
 	repo := &memActions{}
-	d.Actions, d.Clock, d.IDs = repo, &clock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)}, &ids{}
+	d.Actions, d.IDs = repo, &ids{}
+	if d.Clock == nil {
+		d.Clock = &clock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)}
+	}
 	s, err := New(d)
 	if err != nil {
 		t.Fatal(err)
@@ -340,6 +343,108 @@ func TestFailedCompensationStaysUndoing(t *testing.T) {
 	}
 }
 
+// An Undo whose Apply failed transiently stays UNDOING: shown running at first, then offered again and retried by
+// «Отменить» without a restart.
+func TestFailedUndoIsRetriedOnceStale(t *testing.T) {
+	comp := &fakeComp{targets: at(1), failing: errors.New("disk")}
+	c := &clock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)}
+	s, _ := newServiceWith(t, Deps{Compensator: comp, Clock: c})
+	e := done(t, s, begin(t, s, "c1").ID)
+	if _, err := s.Undo(t.Context(), e.ID); err == nil {
+		t.Fatal("Undo with a failing compensation succeeded")
+	}
+	comp.failing = nil
+
+	if list, _ := s.ListThread(t.Context(), "th1", 10); list[0].Status != action.StatusUndoing || list[0].CanUndo || list[0].NoUndo != action.NoUndoRunning {
+		t.Fatalf("right after the failure = %+v", list[0])
+	}
+	if _, err := s.Undo(t.Context(), e.ID); !errors.Is(err, action.ErrInvalidTransition) {
+		t.Fatalf("Undo while it may still run = %v", err)
+	}
+
+	c.now = c.now.Add(action.StaleUndo)
+	if list, _ := s.ListThread(t.Context(), "th1", 10); !list[0].CanUndo || list[0].NoUndo != action.NoUndoNone {
+		t.Fatalf("stale UNDOING = %+v, want offered again", list[0])
+	}
+	got, err := s.Undo(t.Context(), e.ID)
+	if err != nil || got.Status != action.StatusUndone || len(comp.applied) != 1 {
+		t.Fatalf("retried Undo = %+v, %v, applied %d", got, err, len(comp.applied))
+	}
+}
+
+// refComp keeps one version per target (a folder's is its subject's), like the library: undoing a folder moves the
+// version of the subject an earlier create_subject left.
+type refComp struct {
+	versions map[values.Ref]int64
+	applied  []int64 // the expected versions Apply was called with
+}
+
+func refOf(c action.Compensation) values.Ref {
+	switch v := c.(type) {
+	case action.RemoveSubject:
+		return v.Subject
+	case action.RemoveFolder:
+		return v.Subject
+	}
+	return values.Ref{}
+}
+
+func (f *refComp) Check(_ context.Context, c action.Compensation) (action.Target, error) {
+	return action.Target{Version: f.versions[refOf(c)]}, nil
+}
+
+func (f *refComp) Apply(_ context.Context, c action.Compensation, expected int64) (int64, error) {
+	r := refOf(c)
+	if f.versions[r] != expected {
+		return 0, action.ErrTargetChanged
+	}
+	f.applied = append(f.applied, expected)
+	f.versions[r]++
+	return f.versions[r], nil
+}
+
+// «Отменить всё» of create_subject + create_folder in it: undoing the folder moves the subject's version, and the
+// subject follows it (action.Rebase), so both are undone; a change by the student in between still refuses.
+func TestUndoRequestFollowsTheTarget(t *testing.T) {
+	tests := []struct {
+		name        string
+		edited      bool // the student renamed the subject between the two actions
+		wantSubject action.Status
+		wantApplied []int64
+	}{
+		{"both undone", false, action.StatusUndone, []int64{2, 3}},
+		{"student change in between", true, action.StatusUndoRefused, []int64{3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s9 := ref(t, values.KindSubject, "s9")
+			comp := &refComp{versions: map[values.Ref]int64{s9: 1}}
+			s, _ := newService(t, comp)
+			sub := done(t, s, begin(t, s, "c1").ID) // RemoveSubject s9 at version 1
+			if tt.edited {
+				comp.versions[s9]++
+			}
+			before := comp.versions[s9]
+			folder := beginIn(t, s, BeginInput{Thread: "th1", Turn: 1, CallID: "c2", Tool: values.ToolCreateFolder,
+				Intent: action.Intent{Target: s9, Before: before, Name: "Лабы"}})
+			comp.versions[s9]++
+			if _, err := s.Finish(t.Context(), folder.ID, Outcome{TargetVersion: comp.versions[s9], Compensation: action.RemoveFolder{
+				Subject: s9, Folder: ref(t, values.KindFolder, "f1"),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := s.UndoRequest(t.Context(), "th1", 1)
+			if err != nil || len(got) != 2 || got[0].ID != folder.ID || got[1].ID != sub.ID {
+				t.Fatalf("UndoRequest = %+v, %v", got, err)
+			}
+			if got[0].Status != action.StatusUndone || got[1].Status != tt.wantSubject || !slices.Equal(comp.applied, tt.wantApplied) {
+				t.Fatalf("statuses %s, %s; applied %v, want %s %v", got[0].Status, got[1].Status, comp.applied, tt.wantSubject, tt.wantApplied)
+			}
+		})
+	}
+}
+
 // A crash after the compensation applied but before UNDONE was saved: at the next start the target is already
 // compensated (its version moved on), which is UNDONE, not «Изменено после».
 func TestUndoInterruptedAfterApply(t *testing.T) {
@@ -349,7 +454,7 @@ func TestUndoInterruptedAfterApply(t *testing.T) {
 	if _, err := s.BeginUndo(t.Context(), e.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := comp.Apply(t.Context(), action.RemoveSubject{}, 1); err != nil { // applied, then the app stopped
+	if _, err := comp.Apply(t.Context(), action.RemoveSubject{}, 1); err != nil { // applied, then the app stopped
 		t.Fatal(err)
 	}
 	rep, err := s.Recover(t.Context())

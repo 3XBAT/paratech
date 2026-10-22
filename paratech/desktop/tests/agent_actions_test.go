@@ -2,15 +2,18 @@ package tests
 
 // Scenario tests of the agent's reversible actions (TASK-123, ADR-0021) on the real SQLite, the real library and the
 // real journal and step use case; only the Hub is a fake. A folder and a subject are made by the planner's calls,
-// journaled, undone (or refused because the student changed the subject since), and a crash between the use case and
-// the journal's second transaction is settled at the next start.
+// journaled, undone (or refused because the student changed the subject since), «Отменить всё» undoes two actions of a
+// request on the same target, and a crash between the use case and the journal's second transaction is settled at the
+// next start.
 
 import (
 	"context"
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/random"
@@ -47,11 +50,11 @@ func (noUseCase) Assignment(context.Context, shared.AssignmentID) (homeworkflow.
 func (noUseCase) EditAssignment(context.Context, homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error) {
 	return homeworkflow.AssignmentView{}, errNoUseCase
 }
-func (noUseCase) Retry(context.Context, shared.RecordingID, homeworkflow.Work) (shared.JobID, error) {
-	return "", errNoUseCase
+func (noUseCase) Retry(context.Context, shared.RecordingID, homeworkflow.Work) (shared.JobID, bool, error) {
+	return "", false, errNoUseCase
 }
-func (noUseCase) RedoSummary(context.Context, shared.RecordingID) (shared.JobID, error) {
-	return "", errNoUseCase
+func (noUseCase) RedoSummary(context.Context, shared.RecordingID) (shared.JobID, bool, error) {
+	return "", false, errNoUseCase
 }
 func (noUseCase) ActiveGeneration(context.Context, shared.AssignmentID) (homeworkflow.GenerationView, bool, error) {
 	return homeworkflow.GenerationView{}, false, errNoUseCase
@@ -65,9 +68,19 @@ func (noUseCase) JobStates(context.Context, []shared.JobID) ([]activity.JobState
 }
 func (noUseCase) Cancel(context.Context, shared.JobID) error { return errNoUseCase }
 
+// actionsActivity lists the recordings (with their schedule lessons) find_lessons maps; the rest is not used.
+type actionsActivity struct {
+	noUseCase
+	recordings []activity.Recording
+}
+
+func (a actionsActivity) ListRecordings(context.Context) ([]activity.Recording, error) { return a.recordings, nil }
+
 type actionsEnv struct {
 	*agentEnv
-	lib     *library.Service
+	knowledge *driverKnowledge
+	activity  actionsActivity
+	lib       *library.Service
 	actions *agentloop.Actions
 	driver  *agentloop.Driver
 	sink    *driverSink
@@ -76,7 +89,7 @@ type actionsEnv struct {
 
 func newActionsEnv(t *testing.T) *actionsEnv {
 	t.Helper()
-	e := &actionsEnv{agentEnv: newAgentEnv(t), sink: &driverSink{}}
+	e := &actionsEnv{agentEnv: newAgentEnv(t), sink: &driverSink{}, knowledge: &driverKnowledge{}}
 	store, err := filestore.New(filepath.Join(t.TempDir(), "artifacts"))
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +136,7 @@ func (e *actionsEnv) restart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.driver, err = agentloop.New(agentloop.Deps{
-		Turns: e.turns, Sink: e.sink, Library: e.lib, Knowledge: &driverKnowledge{}, Activity: noUseCase{},
+		Turns: e.turns, Sink: e.sink, Library: e.lib, Knowledge: e.knowledge, Activity: e.activity,
 		Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Journal: e.journal, Actions: e.actions,
 		Clock: e.clock, Log: log,
 	}); err != nil {
@@ -224,6 +237,146 @@ func TestAgentActionsJournalAndUndoOnSQLite(t *testing.T) {
 	if lines[0].Tool != values.ToolCreateSubject || lines[0].Status != action.StatusUndone || lines[0].Subject != "" ||
 		lines[1].Tool != values.ToolCreateFolder || lines[1].NoUndo != action.NoUndoChanged || lines[1].Subject != e.physics.ID() {
 		t.Fatalf("Journal lines = %+v", lines)
+	}
+}
+
+// run waits for the Driver and returns its last update.
+func (e *actionsEnv) run(t *testing.T, start func(ctx context.Context) error) agentloop.Update {
+	t.Helper()
+	if err := start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	e.driver.Wait()
+	return e.sink.last(t)
+}
+
+// «Отменить всё» of a request that made a subject and then a folder in it: undoing the folder moves the subject's
+// version, and the subject follows it, so both are UNDONE. A folder the student adds to the new subject between the
+// two actions still refuses the subject («Изменено после»).
+func TestAgentUndoRequestOfASubjectAndItsFolderOnSQLite(t *testing.T) {
+	for _, studentEdits := range []bool{false, true} {
+		t.Run(map[bool]string{false: "both undone", true: "student change in between"}[studentEdits], func(t *testing.T) {
+			e := newActionsEnv(t)
+			plan := desktopPlan("План: предмет и папка.",
+				desktopStep("create_subject", `{"name":"Химия"}`), desktopStep("create_folder", `{"name":"Лабы"}`))
+			e.hub.Then(testenv.AgentCall{ID: "p1", Tool: "show_plan", Args: plan}).
+				Then(testenv.AgentCall{ID: "w1", Tool: "create_subject", Args: `{"name":"Химия"}`})
+			up := e.ask(t, values.Scope{}, "добавь химию с папкой Лабы")
+			if up.Status != thread.StatusAwaitingPlan {
+				t.Fatalf("plan = %+v", up)
+			}
+			ref := agentturn.TurnRef{Thread: up.Thread, Turn: up.Turn}
+
+			// The subject is made; the next planner step is not scripted yet, so the request stops here.
+			if up := e.run(t, func(ctx context.Context) error { return e.driver.ApprovePlan(ctx, ref) }); up.StopReason != values.StopOffline {
+				t.Fatalf("after «Да» = %+v, want stopped offline", up)
+			}
+			subj, err := e.journal.Find(t.Context(), up.Thread, up.Turn, "w1")
+			if err != nil || subj.Status != action.StatusDone {
+				t.Fatalf("subject entry = %+v, %v", subj, err)
+			}
+			chem := subj.Compensation.(action.RemoveSubject).Subject.ID()
+			if studentEdits {
+				if _, err := e.lib.AddAlias(t.Context(), shared.SubjectID(chem), "химия орг."); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			e.hub.Then(testenv.AgentCall{ID: "w2", Tool: "create_folder", Args: `{"subject":"` + chem + `","name":"Лабы"}`}).
+				Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Готово"}`})
+			if up := e.run(t, func(ctx context.Context) error { return e.driver.Continue(ctx, ref) }); up.Status != thread.StatusDone {
+				t.Fatalf("after «Продолжить» = %+v", up)
+			}
+			if folder, err := e.journal.Find(t.Context(), up.Thread, up.Turn, "w2"); err != nil || folder.Status != action.StatusDone {
+				t.Fatalf("folder entry = %+v, %v", folder, err)
+			}
+
+			undone, err := e.journal.UndoRequest(t.Context(), up.Thread, up.Turn)
+			if err != nil || len(undone) != 2 || undone[0].Tool != values.ToolCreateFolder || undone[0].Status != action.StatusUndone {
+				t.Fatalf("UndoRequest = %+v, %v", undone, err)
+			}
+			_, left := e.subject(t, shared.SubjectID(chem))
+			if studentEdits {
+				if undone[1].Status != action.StatusUndoRefused || undone[1].NoUndo != action.NoUndoChanged || !left {
+					t.Fatalf("subject after the student's change = %+v, still there %v", undone[1], left)
+				}
+				return
+			}
+			if undone[1].Status != action.StatusUndone || left {
+				t.Fatalf("subject = %+v, still there %v", undone[1], left)
+			}
+		})
+	}
+}
+
+// «Отменить всё» of a request that filed an upload with a lesson and then linked it to another lesson: undoing the
+// link moves the material's version, and the placing follows it, so the file is back in «Входящие» and unlinked. A
+// move by the student between the two actions still refuses the placing.
+func TestAgentUndoRequestOfAPlacedAndLinkedUploadOnSQLite(t *testing.T) {
+	for _, studentMoves := range []bool{false, true} {
+		t.Run(map[bool]string{false: "both undone", true: "student change in between"}[studentMoves], func(t *testing.T) {
+			e := newActionsEnv(t)
+			phys := string(e.physics.ID())
+			lessons := sqlite.NewLessonRepository(e.db)
+			saveScheduleLesson(t, lessons, "l1", "Механика", "Физика", libScenarioT0)
+			saveScheduleLesson(t, lessons, "l2", "Оптика", "Физика", libScenarioT0.Add(24*time.Hour))
+			// find_lessons shows lesson l2 (its recording r2), so the planner may name it.
+			e.knowledge.lessons = []kb.Lesson{{Recording: "r2", StartedAt: libScenarioT0.Add(24 * time.Hour), Subject: "Физика",
+				Kind: "lecture", Library: kb.LibrarySubject{ID: e.physics.ID(), Name: "Физика"}}}
+			e.activity.recordings = []activity.Recording{{ID: "r2", LessonID: "l2"}}
+			e.restart(t)
+
+			imp, err := e.lib.Import(t.Context(), library.Upload{Name: "Лабораторная.docx", Data: libraryDocx(t)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := string(imp.Material.ID())
+			scope, err := values.NewScope(agentRef(t, values.KindSubject, phys), values.ScreenSubjects, agentRef(t, values.KindLesson, "l1"), values.Ref{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			link := `{"material":"` + m + `","lesson":"l2"}`
+			e.hub.Then(testenv.AgentCall{ID: "q1", Tool: "find_lessons", Args: `{}`}).
+				Then(testenv.AgentCall{ID: "w1", Tool: "place_upload", Args: `{"upload":"` + m + `","subject":"` + phys + `","lesson":"l1"}`}).
+				Then(testenv.AgentCall{ID: "p1", Tool: "show_plan", Args: desktopPlan("План: привязать к занятию.", desktopStep("link_material", link))}).
+				Then(testenv.AgentCall{ID: "w2", Tool: "link_material", Args: link}).
+				Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Готово"}`})
+			up := e.run(t, func(ctx context.Context) error {
+				return e.driver.Ask(ctx, agentturn.AskInput{Scope: scope, Text: "положи файл в физику и привяжи",
+					Uploads: []values.Ref{agentRef(t, values.KindUpload, m)}})
+			})
+			if up.Status != thread.StatusAwaitingPlan {
+				t.Fatalf("plan = %+v", up)
+			}
+			if studentMoves {
+				if _, err := e.lib.Place(t.Context(), imp.Material.ID(), e.physics.ID(), subject.SystemFolderID(e.physics.ID(), subject.SystemLectures)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ref := agentturn.TurnRef{Thread: up.Thread, Turn: up.Turn}
+			if up := e.run(t, func(ctx context.Context) error { return e.driver.ApprovePlan(ctx, ref) }); up.Status != thread.StatusDone {
+				t.Fatalf("after «Да» = %+v", up)
+			}
+
+			undone, err := e.journal.UndoRequest(t.Context(), up.Thread, up.Turn)
+			if err != nil || len(undone) != 2 || undone[0].Tool != values.ToolLinkMaterial || undone[0].Status != action.StatusUndone {
+				t.Fatalf("UndoRequest = %+v, %v", undone, err)
+			}
+			after, err := e.lib.Material(t.Context(), imp.Material.ID())
+			if err != nil || slices.Contains(after.Lessons(), "l2") {
+				t.Fatalf("material = %+v, %v; want unlinked from l2", after, err)
+			}
+			if studentMoves {
+				if undone[1].Status != action.StatusUndoRefused || undone[1].NoUndo != action.NoUndoChanged || after.InInbox() ||
+					!slices.Equal(after.Lessons(), []shared.LessonID{"l1"}) {
+					t.Fatalf("placing after the student's move = %+v, in «Входящие» %v, lessons %v", undone[1], after.InInbox(), after.Lessons())
+				}
+				return
+			}
+			if undone[1].Tool != values.ToolPlaceUpload || undone[1].Status != action.StatusUndone || !after.InInbox() || len(after.Lessons()) != 0 {
+				t.Fatalf("placing = %+v, in «Входящие» %v, lessons %v", undone[1], after.InInbox(), after.Lessons())
+			}
+		})
 	}
 }
 

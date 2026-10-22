@@ -205,8 +205,16 @@ func (a *Action) Proposal() values.Ref { return a.proposal }
 // (not the call ID alone, which the planner could repeat in another thread).
 func (a *Action) Key() string { return fmt.Sprintf("ag:%s:act:%s", a.thread, a.id) }
 
-// CanUndo reports whether «Отменить» is offered.
-func (a *Action) CanUndo() bool { return a.status == StatusDone }
+// CanUndo reports whether «Отменить» is offered at now: DONE, or UNDOING whose compensation stopped (a retry).
+func (a *Action) CanUndo(now time.Time) bool { return a.status == StatusDone || a.undoStale(now) }
+
+// StaleUndo is how long an UNDOING entry counts as running. After it the compensation is taken as stopped (a failed
+// Apply leaves the entry UNDOING) and «Отменить» retries it.
+const StaleUndo = time.Minute
+
+func (a *Action) undoStale(now time.Time) bool {
+	return a.status == StatusUndoing && !now.IsZero() && now.Sub(a.updatedAt) >= StaleUndo
+}
 
 func (a *Action) move(to Status, now time.Time) error {
 	if !CanTransition(a.status, to) {
@@ -275,6 +283,56 @@ func (a *Action) Recover(now time.Time) (retryUndo bool, err error) {
 
 // BeginUndo is «Отменить»: DONE -> UNDOING, saved before the compensation runs.
 func (a *Action) BeginUndo(now time.Time) error { return a.move(StatusUndoing, now) }
+
+// StartUndo is «Отменить» including its retry: DONE -> UNDOING, or a stale UNDOING entry stays UNDOING with its time
+// renewed, so a second click while the retry runs sees it running (and the CAS save lets one of them win). Saved
+// before the compensation runs.
+func (a *Action) StartUndo(now time.Time) error {
+	if a.status != StatusUndoing {
+		return a.BeginUndo(now)
+	}
+	if !a.undoStale(now) {
+		return fmt.Errorf("%w: the undo is running", ErrInvalidTransition)
+	}
+	a.updatedAt = now
+	return nil
+}
+
+// TargetRef is the target whose version TargetVersion is (for a folder: its subject); zero for a job.
+func (a *Action) TargetRef() values.Ref {
+	switch v := a.comp.(type) {
+	case RemoveSubject:
+		return v.Subject
+	case RemoveFolder:
+		return v.Subject
+	case ReturnToInbox:
+		return v.Material
+	case UnlinkMaterial:
+		return v.Material
+	case RestoreLessonInfo:
+		return v.Recording
+	case RestoreDue:
+		return v.Assignment
+	}
+	return values.Ref{}
+}
+
+// Rebase lets a DONE action follow its target through the Undo of a later action of the same request on the same
+// target («Отменить всё» goes newest first): the later one started from exactly the version this one left (its intent
+// Before), so the version its compensation left (after) is the one this Undo expects now. A change by the student in
+// between breaks that chain and the Undo is still refused. later must be the last undo applied to the target. It
+// reports whether the expected version moved.
+func (a *Action) Rebase(later *Action, after int64) bool {
+	target := a.TargetRef()
+	switch {
+	case later == nil, a.status != StatusDone, later.status != StatusUndone, later.id == a.id,
+		later.thread != a.thread, later.turn != a.turn, later.createdAt.Before(a.createdAt),
+		target.IsZero(), later.intent.Target != target, later.intent.Before != a.targetVersion, after < 1:
+		return false
+	}
+	a.targetVersion = after
+	return true
+}
 
 // CheckTarget compares the current version of the target with the one right after the action.
 func (a *Action) CheckTarget(current int64) error {

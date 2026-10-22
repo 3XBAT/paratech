@@ -100,41 +100,42 @@ func NewRerunner(d RerunDeps) (*Rerunner, error) {
 // Retry starts work of the recording's newest transcript again after its job failed or was cancelled
 // («Повторить»). WorkLectureText without a job starts the first one. Errors: no transcript or no job of the work wraps
 // shared.ErrNotFound, a job still pending or running job.ErrStillActive, a completed one job.ErrNotFailed, an unknown
-// work ErrUnknownWork.
-func (r *Rerunner) Retry(ctx context.Context, rec shared.RecordingID, work Work) (shared.JobID, error) {
+// work ErrUnknownWork. created is false when the job of an earlier click (the same job key) was found instead.
+func (r *Rerunner) Retry(ctx context.Context, rec shared.RecordingID, work Work) (id shared.JobID, created bool, err error) {
 	typ, ok := work.jobType()
 	if !ok {
-		return "", fmt.Errorf("%s %q: %w", opRetryWork, work, ErrUnknownWork)
+		return "", false, fmt.Errorf("%s %q: %w", opRetryWork, work, ErrUnknownWork)
 	}
-	id, err := r.rerun(ctx, rec, typ, false)
+	id, created, err = r.rerun(ctx, rec, typ, false)
 	if err != nil {
-		return "", fmt.Errorf("%s %s %s: %w", opRetryWork, rec, work, err)
+		return "", false, fmt.Errorf("%s %s %s: %w", opRetryWork, rec, work, err)
 	}
-	return id, nil
+	return id, created, nil
 }
 
 // RedoSummary makes the summary of the recording's newest transcript again («Сделать конспект заново»); the summary
 // stays as it is until the new one passed the checks. Errors: no transcript, no summary job or no summary wraps
-// shared.ErrNotFound, a summary job still pending or running job.ErrStillActive.
-func (r *Rerunner) RedoSummary(ctx context.Context, rec shared.RecordingID) (shared.JobID, error) {
-	id, err := r.rerun(ctx, rec, SummarizeJobType, true)
+// shared.ErrNotFound, a summary job still pending or running job.ErrStillActive. created is false when the job of an
+// earlier click was found instead.
+func (r *Rerunner) RedoSummary(ctx context.Context, rec shared.RecordingID) (id shared.JobID, created bool, err error) {
+	id, created, err = r.rerun(ctx, rec, SummarizeJobType, true)
 	if err != nil {
-		return "", fmt.Errorf("%s %s: %w", opRedoSummary, rec, err)
+		return "", false, fmt.Errorf("%s %s: %w", opRedoSummary, rec, err)
 	}
-	return id, nil
+	return id, created, nil
 }
 
-func (r *Rerunner) rerun(ctx context.Context, rec shared.RecordingID, typ job.Type, redo bool) (shared.JobID, error) {
+func (r *Rerunner) rerun(ctx context.Context, rec shared.RecordingID, typ job.Type, redo bool) (shared.JobID, bool, error) {
 	t, err := r.transcripts.LatestByRecording(ctx, rec)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	prev, err := r.jobs.LatestByKeyPrefix(ctx, typ, values.PostProcessJobKeyPrefix(string(typ), t.ID()))
 	if errors.Is(err, shared.ErrNotFound) && typ == LectureTextJobType && !redo {
 		return r.startMissing(ctx, typ, t.ID())
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	id, key, now := r.ids.NewJobID(), rerunKey(typ, t.ID(), prev.ID()), r.clock.Now()
@@ -145,42 +146,42 @@ func (r *Rerunner) rerun(ctx context.Context, rec shared.RecordingID, typ job.Ty
 		next, err = prev.RetryFailed(id, key, now)
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if redo {
 		if _, err := r.summaries.Get(ctx, summary.IDOf(t.ID())); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	got, created, err := r.jobs.Enqueue(ctx, next)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	r.log.Info("post-processing started again", slog.String("job", got.String()), slog.String("after", prev.ID().String()),
 		slog.String("type", string(typ)), slog.Bool("created", created))
-	return got, nil
+	return got, created, nil
 }
 
 // startMissing creates the first job of typ for transcript t, keyed like the one TranscriptCreated makes, so a repeated
 // click finds it instead of creating a second one.
-func (r *Rerunner) startMissing(ctx context.Context, typ job.Type, t shared.TranscriptID) (shared.JobID, error) {
+func (r *Rerunner) startMissing(ctx context.Context, typ job.Type, t shared.TranscriptID) (shared.JobID, bool, error) {
 	req, err := values.NewPostProcessRequest(t)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	j, err := job.New(job.Spec{
 		ID: r.ids.NewJobID(), Type: typ, Key: jobKey(typ, t), Payload: req.Payload(), MaxAttempts: r.maxAttempts,
 	}, r.clock.Now())
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	got, created, err := r.jobs.Enqueue(ctx, j)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	r.log.Info("post-processing started for an older transcript", slog.String("job", got.String()),
 		slog.String("type", string(typ)), slog.Bool("created", created))
-	return got, nil
+	return got, created, nil
 }
 
 // rerunKey is the job key of the job that follows job prev: the key of the transcript's work plus a digest of prev, so
