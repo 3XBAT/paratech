@@ -231,7 +231,7 @@ func SubjectsResult(callID string, rows []SubjectRow) (ToolResult, []Ref, error)
 		Semester string `json:"semester,omitempty"`
 	}
 	items := make([]item, 0, len(rows))
-	refs := make([]Ref, 0, len(rows))
+	refs := make([][]Ref, 0, len(rows)) // per row
 	for _, r := range rows {
 		if err := wantRef(r.ID, KindSubject, true); err != nil {
 			return ToolResult{}, nil, err
@@ -244,7 +244,7 @@ func SubjectsResult(callID string, rows []SubjectRow) (ToolResult, []Ref, error)
 			it.Semester = r.Semester
 		}
 		items = append(items, it)
-		refs = append(refs, r.ID)
+		refs = append(refs, []Ref{r.ID})
 	}
 	return listResult(callID, "subjects", items, refs)
 }
@@ -262,7 +262,7 @@ func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 		LectureText bool   `json:"lecture_text"`
 	}
 	items := make([]item, 0, len(rows))
-	refs := make([]Ref, 0, len(rows))
+	refs := make([][]Ref, 0, len(rows)) // per row
 	for _, r := range rows {
 		if err := errorsOf(wantRef(r.Recording, KindRecording, true), wantRef(r.Lesson, KindLesson, false),
 			wantRef(r.Subject, KindSubject, false)); err != nil {
@@ -276,7 +276,7 @@ func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 			it.Kind = r.Kind
 		}
 		items = append(items, it)
-		refs = append(refs, r.Recording, r.Lesson, r.Subject)
+		refs = append(refs, []Ref{r.Recording, r.Lesson, r.Subject})
 	}
 	return listResult(callID, "lessons", items, refs)
 }
@@ -291,7 +291,7 @@ func AssignmentsResult(callID string, rows []AssignmentRow) (ToolResult, []Ref, 
 		Status  string `json:"status"`
 	}
 	items := make([]item, 0, len(rows))
-	refs := make([]Ref, 0, len(rows))
+	refs := make([][]Ref, 0, len(rows)) // per row
 	for _, r := range rows {
 		if err := errorsOf(wantRef(r.ID, KindAssignment, true), wantRef(r.Subject, KindSubject, false),
 			wantRef(r.Lesson, KindLesson, false)); err != nil {
@@ -303,7 +303,7 @@ func AssignmentsResult(callID string, rows []AssignmentRow) (ToolResult, []Ref, 
 		items = append(items, item{
 			ID: r.ID.ID(), Subject: r.Subject.ID(), Lesson: r.Lesson.ID(), Due: r.Due.String(), Status: string(r.Status),
 		})
-		refs = append(refs, r.ID, r.Subject, r.Lesson)
+		refs = append(refs, []Ref{r.ID, r.Subject, r.Lesson})
 	}
 	return listResult(callID, "assignments", items, refs)
 }
@@ -328,7 +328,7 @@ func JobsResult(callID string, rows []JobRow) (ToolResult, []Ref, error) {
 		Percent int    `json:"percent"`
 	}
 	items := make([]item, 0, len(rows))
-	refs := make([]Ref, 0, len(rows))
+	refs := make([][]Ref, 0, len(rows)) // per row
 	for _, r := range rows {
 		if err := wantRef(r.ID, KindJob, true); err != nil {
 			return ToolResult{}, nil, err
@@ -337,7 +337,7 @@ func JobsResult(callID string, rows []JobRow) (ToolResult, []Ref, error) {
 			return ToolResult{}, nil, fmt.Errorf("%w: unknown job work or state", ErrInvalidResult)
 		}
 		items = append(items, item{ID: r.ID.ID(), Work: string(r.Work), Status: string(r.State), Percent: min(max(r.Percent, 0), 100)})
-		refs = append(refs, r.ID)
+		refs = append(refs, []Ref{r.ID})
 	}
 	return listResult(callID, "jobs", items, refs)
 }
@@ -401,8 +401,8 @@ func SearchResult(callID string, c SearchCounts) (ToolResult, []Ref, error) {
 }
 
 // listResult encodes {"<name>": items, "count": n, "truncated": bool} with at most MaxReadItems items and within
-// MaxResultBytes; refs are the IDs of the items shown, zero refs dropped.
-func listResult[T any](callID, name string, items []T, refs []Ref) (ToolResult, []Ref, error) {
+// MaxResultBytes; refs[i] are the IDs item i shows. It returns the IDs of the items shown, zero refs dropped.
+func listResult[T any](callID, name string, items []T, refs [][]Ref) (ToolResult, []Ref, error) {
 	total := len(items)
 	n := min(total, MaxReadItems)
 	for {
@@ -413,9 +413,8 @@ func listResult[T any](callID, name string, items []T, refs []Ref) (ToolResult, 
 		}
 		if len(b) <= MaxResultBytes || n == 0 {
 			shown := RefSet{}
-			if total > 0 {
-				per := len(refs) / total // every row adds the same number of refs
-				shown.Add(refs[:n*per]...)
+			for _, row := range refs[:n] {
+				shown.Add(row...)
 			}
 			return ToolResult{CallID: callID, ResultJSON: string(b)}, shown.Sorted(), nil
 		}

@@ -177,6 +177,29 @@ func TestReadResultsAreBounded(t *testing.T) {
 	}
 }
 
+// A cut list shows the IDs of its shown rows only, whatever IDs each row carries.
+func TestCutListSeesShownRows(t *testing.T) {
+	var rows []LessonRow
+	for i := range MaxReadItems + 5 {
+		row := LessonRow{Recording: mustRef(t, KindRecording, fmt.Sprintf("r%d", i))}
+		if i%2 == 0 { // rows differ in how many IDs they carry
+			row.Lesson = mustRef(t, KindLesson, fmt.Sprintf("l%d", i))
+		}
+		rows = append(rows, row)
+	}
+	_, seen, err := LessonsResult("c1", rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := NewRefSet(seen...)
+	for i, r := range rows {
+		shown := i < MaxReadItems
+		if set.Has(r.Recording) != shown || (!r.Lesson.IsZero() && set.Has(r.Lesson) != shown) {
+			t.Fatalf("row %d: seen %v, want %v", i, set.Has(r.Recording), shown)
+		}
+	}
+}
+
 func TestQueries(t *testing.T) {
 	s1, s2 := mustRef(t, KindSubject, "s1"), mustRef(t, KindSubject, "s2")
 	scope, err := NewScope(s1, ScreenSubjects, Ref{}, Ref{})
