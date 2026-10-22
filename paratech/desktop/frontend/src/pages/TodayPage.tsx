@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { activityApi, type RecordingItem } from "../bindings/activity";
-import { callByName } from "../bindings/runtime";
-import { type TodayScreen, todayApi, todayErrorText } from "../bindings/today";
-import { requestDraft } from "../agentDraft";
-import type { PageId } from "../nav";
-import { useOpenSummary } from "../openSummary";
-import { dayTitle, stagesKey, texts } from "../todayView";
-import { Button } from "../ui/Button";
-import { ResultLine } from "../ui/controls";
-import { RecordingsPage } from "./RecordingsPage";
-import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "./TodayParts";
+import { activityApi, type RecordingItem } from "../bindings/activity.js";
+import { callByName } from "../bindings/runtime.js";
+import { type TodayScreen, todayApi, todayErrorText } from "../bindings/today.js";
+import { requestDraft } from "../agentDraft.js";
+import type { PageId } from "../nav.js";
+import { useOpenSummary } from "../openSummary.js";
+import { dayTitle, newestOnly, stagesChanged, stagesKey, texts } from "../todayView.js";
+import { Button } from "../ui/Button.js";
+import { ResultLine } from "../ui/controls.js";
+import { RecordingsPage } from "./RecordingsPage.js";
+import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "./TodayParts.js";
 
 const pollMs = 3000;
 
@@ -23,18 +23,21 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   const [all, setAll] = useState(false);
   const [screen, setScreen] = useState<TodayScreen | null>(null);
   const [error, setError] = useState("");
-  const [recordings, setRecordings] = useState<RecordingItem[]>([]);
+  const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const mounted = useRef(true);
 
+  const requests = useRef(newestOnly());
+
   const load = useCallback(() => {
+    const token = requests.current.next();
     api.today().then(
       (s) => {
-        if (mounted.current) {
+        if (mounted.current && requests.current.isNewest(token)) {
           setScreen(s);
           setError("");
         }
       },
-      (err: unknown) => mounted.current && setError(todayErrorText(err)),
+      (err: unknown) => mounted.current && requests.current.isNewest(token) && setError(todayErrorText(err)),
     );
   }, [api]);
 
@@ -73,18 +76,17 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
     return () => clearInterval(timer);
   }, [all, activity]);
 
-  // A recording that starts, stops or finishes changes the day: the screen is read again.
-  const stages = stagesKey(recordings);
-  const firstStages = useRef(true);
+  // A recording that starts, stops or finishes changes the day: the screen is read again. The first reply of the
+  // list is not a change (the screen is read on entry).
+  const stages = recordings === null ? null : stagesKey(recordings);
+  const prevStages = useRef<string | null>(null);
   useEffect(() => {
-    if (firstStages.current) {
-      firstStages.current = false;
-      return;
-    }
-    if (!all) {
+    const changed = stagesChanged(prevStages.current, stages);
+    prevStages.current = stages;
+    if (changed) {
       load();
     }
-  }, [stages, all, load]);
+  }, [stages, load]);
 
   if (all) {
     return (
@@ -126,12 +128,18 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
           <AskSection chips={screen.chips} onChip={(text) => requestDraft(text)} />
           <div className="today-cols">
             <div>
-              <LessonsSection lessons={screen.lessons} recordings={recordings} onOpenSummary={openSummary} />
+              <LessonsSection
+                lessons={screen.lessons}
+                recordings={recordings ?? []}
+                day={screen.day}
+                onOpenSummary={openSummary}
+                onOpenAll={() => setAll(true)}
+              />
               <PostsSection posts={screen.posts} onOpenSummary={openSummary} />
               <DoneSection done={screen.done} onOpenSummary={openSummary} />
             </div>
             <div>
-              <WaitingSection waiting={screen.waiting} />
+              <WaitingSection waiting={screen.waiting} onOpenAssignment={props.onOpenAssignment} />
               <BurningSection burning={screen.burning} onOpenAssignment={props.onOpenAssignment} />
             </div>
           </div>

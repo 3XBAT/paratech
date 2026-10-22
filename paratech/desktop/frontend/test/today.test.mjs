@@ -14,6 +14,10 @@ import {
   homeworkText,
   lessonLine,
   liveStatus,
+  looseProblems,
+  newestOnly,
+  problemFor,
+  stagesChanged,
   postLine,
   shortDate,
   stagesKey,
@@ -79,6 +83,11 @@ test("parseScreen refuses unknown input", () => {
   assert.throws(() => parseScreen(screen({ burning: [{ assignmentId: "a", title: "t", due: at(1), daysLeft: "2" }] })));
   assert.throws(() => parseScreen(screen({ posts: [{ ...post(), homework: "1" }] })));
   assert.throws(() => parseScreen(screen({ waiting: [null] })));
+  // Fields Go always sends are strict: a missing string or a non-boolean flag is refused.
+  assert.throws(() => parseScreen(screen({ lessons: [{ ...lesson(), teacher: undefined }] })));
+  assert.throws(() => parseScreen(screen({ posts: [{ ...post(), summaryReady: "yes" }] })));
+  assert.throws(() => parseScreen(screen({ posts: [{ ...post(), summaryReady: undefined }] })));
+  assert.throws(() => parseScreen(screen({ burning: [{ assignmentId: "a", title: "t", subject: "", due: at(1), daysLeft: 2, urgent: 1 }] })));
   assert.throws(() => parseScreen(screen({ chips: [{ kind: "x" }] })));
 });
 
@@ -153,6 +162,11 @@ test("lesson, waiting, deadline, done and post lines", () => {
   assert.equal(done.title, "Конспект · Матанализ");
   assert.equal(done.meta, "Лекция · 21.10 · 11:52 · нашлось 1 задание");
   assert.equal(done.canOpen, true);
+  assert.equal(done.icon, "ok");
+  const notReady = doneLine({ recordingId: "r1", lesson: post().lesson, summaryReady: false, homework: 0, at: at(21, 11, 52) });
+  assert.equal(notReady.title, "Конспект готовится · Матанализ");
+  assert.equal(notReady.icon, "clock");
+  assert.equal(notReady.canOpen, false);
 
   const p = postLine(post());
   assert.equal(p.headline, "Конспект готов");
@@ -214,4 +228,47 @@ test("rows: live chip, urgent chip, open only for a ready summary, no confirm bu
 
   const waiting = html(h(WaitingSection, { waiting: [{ proposalId: "p", kind: "create_deadline_event", assignmentId: "a", title: "ДЗ", subject: "", due: at(24), recipient: "", createdAt: "" }] }));
   assert.ok(!waiting.includes("<button"));
+});
+
+test("a failed recording of the day shows a problem chip that opens all records", () => {
+  const failed = (over = {}) => rec({ stage: "failed", errorCode: "transcriptionFailed", status: "COMPLETED", startedAt: at(21, 10, 30), ...over });
+  assert.equal(problemFor("l1", [rec()], at(21)), null);
+  assert.deepEqual(problemFor("l1", [failed()], at(21)), { label: "Проблема с записью", kind: "fail", icon: "warn" });
+  assert.equal(problemFor("l1", [failed({ errorCode: "silentRecording" })], at(21)).label, "Запись без звука");
+  assert.equal(problemFor("l1", [failed({ startedAt: at(1) })], at(21)), null);
+  assert.equal(problemFor("l2", [failed()], at(21)), null);
+  assert.equal(lessonLine(lesson(), [failed()], at(21)).problem.label, "Проблема с записью");
+  assert.equal(looseProblems(["l1"], [failed()], at(21)).length, 0);
+  assert.equal(looseProblems(["l1"], [failed({ lessonId: "" })], at(21)).length, 1);
+
+  let opened = 0;
+  const out = html(h(LessonsSection, { lessons: [lesson()], recordings: [failed()], day: at(21), onOpenSummary: noop, onOpenAll: () => opened++ }));
+  assert.match(out, /Проблема с записью/);
+  assert.match(out, /<button[^>]*today-problem/);
+  const loose = html(h(LessonsSection, { lessons: [], recordings: [failed({ lessonId: "" })], day: at(21), onOpenSummary: noop, onOpenAll: noop }));
+  assert.match(loose, /Проблема с записью/);
+});
+
+test("only the newest reply of the screen is applied", () => {
+  const r = newestOnly();
+  const a = r.next();
+  const b = r.next();
+  assert.equal(r.isNewest(a), false);
+  assert.equal(r.isNewest(b), true);
+});
+
+test("the first reply of the recordings list is not a change", () => {
+  assert.equal(stagesChanged(null, "r:done"), false);
+  assert.equal(stagesChanged("", ""), false);
+  assert.equal(stagesChanged("", "r:recording"), true);
+  assert.equal(stagesChanged("r:recording", "r:saving"), true);
+  assert.equal(stagesChanged("r:done", "r:done"), false);
+});
+
+test("a waiting row opens its assignment, with no confirm buttons", () => {
+  const w = { proposalId: "p", kind: "create_deadline_event", assignmentId: "a1", title: "ДЗ", subject: "", due: at(24), recipient: "", createdAt: "" };
+  const withNav = html(h(WaitingSection, { waiting: [w], onOpenAssignment: noop }));
+  assert.equal((withNav.match(/<button/g) ?? []).length, 1);
+  assert.ok(!/<button[^>]*>[^<]*(Да|Подтвердить)/.test(withNav));
+  assert.ok(!html(h(WaitingSection, { waiting: [{ ...w, assignmentId: "" }], onOpenAssignment: noop })).includes("<button"));
 });

@@ -136,8 +136,12 @@ function str(r: Record<string, unknown>, key: string, what: string): string {
   return v;
 }
 
-function optStr(r: Record<string, unknown>, key: string): string {
-  return typeof r[key] === "string" ? (r[key] as string) : "";
+function bool(r: Record<string, unknown>, key: string, what: string): boolean {
+  const v = r[key];
+  if (typeof v !== "boolean") {
+    throw new Error(`${what}: ${key} is not a boolean`);
+  }
+  return v;
 }
 
 function count(r: Record<string, unknown>, key: string, what: string): number {
@@ -162,20 +166,20 @@ export function parsePostLesson(raw: unknown): TodayPostLesson {
   const w = "post lesson";
   const r = record(raw, w);
   return {
-    lessonId: optStr(r, "lessonId"),
+    lessonId: str(r, "lessonId", w),
     title: str(r, "title", w),
-    subject: optStr(r, "subject"),
-    subjectId: optStr(r, "subjectId"),
-    subjectName: optStr(r, "subjectName"),
-    kind: optStr(r, "kind"),
-    start: optStr(r, "start"),
+    subject: str(r, "subject", w),
+    subjectId: str(r, "subjectId", w),
+    subjectName: str(r, "subjectName", w),
+    kind: str(r, "kind", w),
+    start: str(r, "start", w),
   };
 }
 
 function parseCalendar(raw: unknown): TodayCalendarAction {
   const w = "calendar action";
   const r = record(raw, w);
-  return { kind: str(r, "kind", w), assignmentId: str(r, "assignmentId", w), due: optStr(r, "due") };
+  return { kind: str(r, "kind", w), assignmentId: str(r, "assignmentId", w), due: str(r, "due", w) };
 }
 
 export function parsePost(raw: unknown): TodayPost {
@@ -183,14 +187,14 @@ export function parsePost(raw: unknown): TodayPost {
   const r = record(raw, w);
   return {
     recordingId: str(r, "recordingId", w),
-    transcriptId: optStr(r, "transcriptId"),
+    transcriptId: str(r, "transcriptId", w),
     lesson: parsePostLesson(r.lesson),
     headline: str(r, "headline", w),
-    summaryReady: r.summaryReady === true,
+    summaryReady: bool(r, "summaryReady", w),
     homework: count(r, "homework", w),
-    earliestDue: optStr(r, "earliestDue"),
+    earliestDue: str(r, "earliestDue", w),
     calendar: list(r.calendar, w, parseCalendar),
-    shownAt: optStr(r, "shownAt"),
+    shownAt: str(r, "shownAt", w),
   };
 }
 
@@ -200,11 +204,11 @@ export function parseLesson(raw: unknown): TodayLesson {
   return {
     id: str(r, "id", w),
     title: str(r, "title", w),
-    subject: optStr(r, "subject"),
-    kind: optStr(r, "kind"),
-    teacher: optStr(r, "teacher"),
+    subject: str(r, "subject", w),
+    kind: str(r, "kind", w),
+    teacher: str(r, "teacher", w),
     start: str(r, "start", w),
-    end: optStr(r, "end"),
+    end: str(r, "end", w),
     post: r.post === null || r.post === undefined ? null : parsePost(r.post),
   };
 }
@@ -215,12 +219,12 @@ function parseWaiting(raw: unknown): TodayWaiting {
   return {
     proposalId: str(r, "proposalId", w),
     kind: str(r, "kind", w),
-    assignmentId: optStr(r, "assignmentId"),
+    assignmentId: str(r, "assignmentId", w),
     title: str(r, "title", w),
-    subject: optStr(r, "subject"),
-    due: optStr(r, "due"),
-    recipient: optStr(r, "recipient"),
-    createdAt: optStr(r, "createdAt"),
+    subject: str(r, "subject", w),
+    due: str(r, "due", w),
+    recipient: str(r, "recipient", w),
+    createdAt: str(r, "createdAt", w),
   };
 }
 
@@ -230,10 +234,10 @@ function parseDeadline(raw: unknown): TodayDeadline {
   return {
     assignmentId: str(r, "assignmentId", w),
     title: str(r, "title", w),
-    subject: optStr(r, "subject"),
+    subject: str(r, "subject", w),
     due: str(r, "due", w),
     daysLeft: count(r, "daysLeft", w),
-    urgent: r.urgent === true,
+    urgent: bool(r, "urgent", w),
   };
 }
 
@@ -243,16 +247,16 @@ function parseDone(raw: unknown): TodayDone {
   return {
     recordingId: str(r, "recordingId", w),
     lesson: parsePostLesson(r.lesson),
-    summaryReady: r.summaryReady === true,
+    summaryReady: bool(r, "summaryReady", w),
     homework: count(r, "homework", w),
-    at: optStr(r, "at"),
+    at: str(r, "at", w),
   };
 }
 
 function parseChip(raw: unknown): TodayChip {
   const w = "chip";
   const r = record(raw, w);
-  return { kind: optStr(r, "kind"), text: str(r, "text", w) };
+  return { kind: str(r, "kind", w), text: str(r, "text", w) };
 }
 
 export function parseScreen(raw: unknown): TodayScreen {

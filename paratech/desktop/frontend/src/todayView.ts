@@ -5,6 +5,9 @@
 import type { RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
 import { plural } from "./plural.js";
+import { chainStatusView } from "./recordingRowView.js";
+import type { ChipKind } from "./ui/StatusChip.js";
+import type { IconName } from "./ui/Icon.js";
 
 export const texts = {
   title: "Сегодня",
@@ -29,6 +32,7 @@ export const texts = {
   open: "Открыть",
   summaryReady: "Конспект готов",
   summaryPending: "Конспект готовится",
+  recordingProblem: "Проблема с записью",
   noTitle: "Без названия",
 } as const;
 
@@ -219,6 +223,7 @@ export interface DoneLine {
   key: string;
   title: string;
   meta: string;
+  icon: "ok" | "clock";
   canOpen: boolean;
   recordingId: string;
 }
@@ -228,7 +233,15 @@ export function doneLine(d: TodayDone): DoneLine {
   const name = d.lesson.subjectName || d.lesson.subject || d.lesson.title;
   const found = d.homework > 0 ? `нашлось ${d.homework} ${plural(d.homework, "задание", "задания", "заданий")}` : "";
   const meta = [kindLabel(d.lesson.kind), shortDate(d.lesson.start), timeText(d.at), found].filter((p) => p !== "").join(" · ");
-  return { key: d.recordingId, title: `Конспект · ${titleOf(name)}`, meta, canOpen: d.summaryReady, recordingId: d.recordingId };
+  const head = d.summaryReady ? "Конспект" : texts.summaryPending;
+  return {
+    key: d.recordingId,
+    title: `${head} · ${titleOf(name)}`,
+    meta,
+    icon: d.summaryReady ? "ok" : "clock",
+    canOpen: d.summaryReady,
+    recordingId: d.recordingId,
+  };
 }
 
 export interface PostLine {
@@ -260,11 +273,13 @@ export interface LessonLine {
   title: string;
   meta: string;
   live: Live | null;
+  /** A failed recording of the lesson of this day; null when there is none. */
+  problem: Problem | null;
   /** The chip of the lesson's post; null while it has none. */
   post: { text: string; homework: string; canOpen: boolean; recordingId: string } | null;
 }
 
-export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[]): LessonLine {
+export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[], day = ""): LessonLine {
   const { start, end } = lessonTimes(l);
   return {
     key: l.id,
@@ -273,6 +288,7 @@ export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[])
     title: titleOf(l.title),
     meta: lessonMeta(l),
     live: liveStatus(l.id, recordings),
+    problem: problemFor(l.id, recordings, day),
     post:
       l.post === null
         ? null
@@ -283,4 +299,58 @@ export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[])
             recordingId: l.post.recordingId,
           },
   };
+}
+
+export interface Problem {
+  label: string;
+  kind: ChipKind;
+  icon: IconName | null;
+}
+
+/** Failed recordings that started in the day; an old failure stays on «Записи и задания» only. */
+export function dayProblems(recordings: readonly RecordingItem[], day: string): RecordingItem[] {
+  const from = parseMoment(day);
+  return recordings.filter((r) => {
+    if (r.stage !== "failed") {
+      return false;
+    }
+    const at = parseMoment(r.startedAt);
+    return from === null || (at !== null && at.getTime() >= from.getTime());
+  });
+}
+
+/** The chip of a failed recording: its own status text when the core has one (no sound, no speech), else a fixed one. */
+export function problemOf(r: RecordingItem): Problem {
+  const v = chainStatusView(r, 0);
+  const own = r.errorCode === "silentRecording" || r.errorCode === "noSpeech";
+  return own ? { label: v.label, kind: v.kind, icon: v.icon } : { label: texts.recordingProblem, kind: "fail", icon: "warn" };
+}
+
+export function problemFor(lessonId: string, recordings: readonly RecordingItem[], day: string): Problem | null {
+  if (lessonId === "") {
+    return null;
+  }
+  const r = dayProblems(recordings, day).find((x) => x.lessonId === lessonId);
+  return r === undefined ? null : problemOf(r);
+}
+
+/** The failed recordings of the day that no lesson row of the screen carries. */
+export function looseProblems(lessonIds: readonly string[], recordings: readonly RecordingItem[], day: string): Problem[] {
+  return dayProblems(recordings, day)
+    .filter((r) => r.lessonId === "" || !lessonIds.includes(r.lessonId))
+    .map(problemOf);
+}
+
+/** Answers are applied only if no newer request was started: a slow old reply never replaces a newer one. */
+export function newestOnly(): { next(): number; isNewest(token: number): boolean } {
+  let last = 0;
+  return {
+    next: () => ++last,
+    isNewest: (token) => token === last,
+  };
+}
+
+/** The stages key changed between two replies; null is "no reply yet", so the first reply is not a change. */
+export function stagesChanged(prev: string | null, next: string | null): boolean {
+  return prev !== null && next !== null && prev !== next;
 }

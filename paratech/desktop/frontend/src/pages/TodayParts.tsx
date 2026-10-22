@@ -2,11 +2,13 @@
 // subject, teacher, headline and recipient is text from a file, a schedule or a model and is rendered as a text node.
 import type { ReactNode } from "react";
 import type { RecordingItem } from "../bindings/activity.js";
+import type { Problem } from "../todayView.js";
 import type { TodayChip, TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "../bindings/today.js";
 import {
   deadlineLine,
   doneLine,
   lessonLine,
+  looseProblems,
   postLine,
   texts,
   waitingLine,
@@ -50,19 +52,50 @@ export function AskSection(props: { chips: readonly TodayChip[]; onChip: (text: 
   );
 }
 
+function ProblemChip(props: { problem: Problem; onClick?: () => void }) {
+  const chip = (
+    <StatusChip kind={props.problem.kind} icon={props.problem.icon}>
+      {props.problem.label}
+    </StatusChip>
+  );
+  return props.onClick === undefined ? (
+    chip
+  ) : (
+    <button type="button" className="today-problem" onClick={props.onClick}>
+      {chip}
+    </button>
+  );
+}
+
 export function LessonsSection(props: {
   lessons: readonly TodayLesson[];
   recordings: readonly RecordingItem[];
+  /** The start of the day: only failures of this day are shown. */
+  day?: string;
   onOpenSummary: (recordingId: string) => void;
+  /** Opens «Записи и задания», where a failed recording is dealt with. */
+  onOpenAll?: () => void;
 }) {
+  const day = props.day ?? "";
+  const loose = looseProblems(
+    props.lessons.map((l) => l.id),
+    props.recordings,
+    day,
+  );
   return (
     <Section title={texts.lessons} count={props.lessons.length}>
+      {loose.length > 0 && (
+        <div className="today-loose">
+          <ProblemChip problem={loose[0]} onClick={props.onOpenAll} />
+          {loose.length > 1 && <span className="small muted num"> · {loose.length}</span>}
+        </div>
+      )}
       {props.lessons.length === 0 ? (
         <Empty>{texts.lessonsEmpty}</Empty>
       ) : (
         <div className="card" role="list">
           {props.lessons.map((l) => {
-            const m = lessonLine(l, props.recordings);
+            const m = lessonLine(l, props.recordings, day);
             return (
               <div key={m.key} className={m.live?.kind === "rec" ? "today-row today-lesson live" : "today-row today-lesson"} role="listitem">
                 <div className="today-tm num">
@@ -79,6 +112,7 @@ export function LessonsSection(props: {
                       <span className="num">{m.live.text}</span>
                     </StatusChip>
                   )}
+                  {m.problem !== null && <ProblemChip problem={m.problem} onClick={props.onOpenAll} />}
                   {m.post !== null && (
                     <>
                       <StatusChip kind="neutral" icon={m.post.canOpen ? "ok" : "clock"}>
@@ -104,7 +138,7 @@ export function LessonsSection(props: {
   );
 }
 
-export function WaitingSection(props: { waiting: readonly TodayWaiting[] }) {
+export function WaitingSection(props: { waiting: readonly TodayWaiting[]; onOpenAssignment?: (id: string) => void }) {
   return (
     <Section title={texts.waiting} count={props.waiting.length}>
       {props.waiting.length === 0 ? (
@@ -114,13 +148,26 @@ export function WaitingSection(props: { waiting: readonly TodayWaiting[] }) {
           <div className="card" role="list">
             {props.waiting.map((w) => {
               const m = waitingLine(w);
-              return (
-                <div key={m.key} className="today-row today-wait" role="listitem">
+              const body = (
+                <>
                   <Icon name={m.icon} />
                   <div className="today-main">
                     <div className="today-t">{m.label}</div>
                     <div className="small muted today-meta">{m.meta === "" ? m.title : `${m.title} · ${m.meta}`}</div>
                   </div>
+                </>
+              );
+              // Navigation only: the confirmation stays on the existing path of the assignment.
+              const open = props.onOpenAssignment;
+              return w.assignmentId !== "" && open !== undefined ? (
+                <div key={m.key} role="listitem">
+                  <button type="button" className="today-row today-wait today-dl" onClick={() => open(w.assignmentId)}>
+                    {body}
+                  </button>
+                </div>
+              ) : (
+                <div key={m.key} className="today-row today-wait" role="listitem">
+                  {body}
                 </div>
               );
             })}
@@ -176,7 +223,7 @@ export function DoneSection(props: { done: readonly TodayDone[]; onOpenSummary: 
             const m = doneLine(d);
             return (
               <div key={m.key} className="today-row today-wait" role="listitem">
-                <Icon name="ok" />
+                <Icon name={m.icon} />
                 <div className="today-main">
                   <div className="today-t">{m.title}</div>
                   {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
