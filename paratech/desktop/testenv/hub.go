@@ -27,6 +27,7 @@ type FakeHub struct {
 
 	mu        sync.Mutex
 	outputs   map[hubv1.OperationType]string
+	queue     map[hubv1.OperationType][]string // outputs one per new key; the last one stays
 	results   map[string]*hubv1.CompletionResult // by idempotency key
 	prints    map[string]string                  // fingerprint of the spec, by idempotency key
 	requests  []*hubv1.CompleteRequest
@@ -44,7 +45,8 @@ type FakeHub struct {
 // NewFakeHub returns a Hub without scripted outputs; an operation without one is answered with unavailable.
 func NewFakeHub() *FakeHub {
 	return &FakeHub{
-		outputs: map[hubv1.OperationType]string{}, results: map[string]*hubv1.CompletionResult{}, prints: map[string]string{},
+		outputs: map[hubv1.OperationType]string{}, queue: map[hubv1.OperationType][]string{},
+		results: map[string]*hubv1.CompletionResult{}, prints: map[string]string{},
 		refuse: map[hubv1.OperationType]int{}, refused: map[string]bool{},
 	}
 }
@@ -63,6 +65,21 @@ func (h *FakeHub) RefuseInspect(n int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.refuse[hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL] = n
+}
+
+// AnswerTriage sets the model outputs of TRIAGE_ASSIGNMENT for keys the Hub has not seen yet, one per new key in
+// order; the last one answers every later key. As AnswerInspect, the outputs are returned without the Hub's check.
+func (h *FakeHub) AnswerTriage(outputs ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.queue[hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT] = append([]string(nil), outputs...)
+}
+
+// RefuseTriage makes the next n new keys of TRIAGE_ASSIGNMENT fail as the Hub's schema refusal does.
+func (h *FakeHub) RefuseTriage(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.refuse[hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT] = n
 }
 
 // providerRefusal is the Hub's answer to a reader answer outside its schema (errors.proto).
@@ -126,6 +143,12 @@ func (h *FakeHub) Complete(_ context.Context, r *connect.Request[hubv1.CompleteR
 		return nil, providerRefusal()
 	}
 	out, ok := h.outputs[spec.GetOperationType()]
+	if q := h.queue[spec.GetOperationType()]; len(q) > 0 {
+		out, ok = q[0], true
+		if len(q) > 1 {
+			h.queue[spec.GetOperationType()] = q[1:]
+		}
+	}
 	if !ok {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("fake hub: no output scripted"))
 	}
