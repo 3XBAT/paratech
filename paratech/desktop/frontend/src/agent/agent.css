@@ -2,11 +2,12 @@
 .shell.with-agent { position: relative; grid-template-columns: 64px minmax(0, 1fr) var(--ag-w, 340px); }
 .shell.agent-dragging { user-select: none; cursor: col-resize; }
 .shell.agent-closed .ag { visibility: hidden; overflow: hidden; }
-.shell.agent-closed .sheet { border-right: 0; }
 .shell.with-agent .sheet { border-right: 1px solid var(--edge); border-top-right-radius: var(--r-xl); }
+/* Closed: the sheet stops short of the edge strip so the strip never covers its scrollbar. */
+.shell.with-agent.agent-closed .sheet { border-right: 0; margin-right: 6px; }
 
 /* The drag handle: a strip on the left edge of the panel (on the window edge while the panel is closed). */
-.ag-resize { position: absolute; z-index: 5; top: 0; bottom: 0; right: calc(var(--ag-w, 340px) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
+.ag-resize { position: absolute; z-index: 5; top: 0; bottom: 0; right: calc(var(--ag-w, 340px) - 8px); width: 8px; cursor: col-resize; touch-action: none; }
 .shell.agent-closed .ag-resize { right: 0; width: 6px; }
 .ag-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background var(--t-mid, 120ms); }
 .ag-resize:hover::after, .ag-resize:focus-visible::after, .shell.agent-dragging .ag-resize::after { background: var(--accent-fill); }

@@ -50,7 +50,8 @@ export function keyPref(pref: PanelPref, key: string, viewport: number): PanelPr
   const current = pref.open ? pref.width : 0;
   switch (key) {
     case "ArrowLeft":
-      return { open: true, width: clampWidth(pref.open ? current + keyStep : minWidth, viewport) };
+      // A closed panel opens at the remembered width, like double click and Ctrl+K.
+      return { open: true, width: clampWidth(pref.open ? current + keyStep : pref.width, viewport) };
     case "ArrowRight":
       if (!pref.open) {
         return pref;
@@ -71,14 +72,13 @@ export function togglePref(pref: PanelPref): PanelPref {
   return { open: !pref.open, width: pref.width };
 }
 
-/** The same preference narrowed to what the window allows now. */
-export function fitPref(pref: PanelPref, viewport: number): PanelPref {
-  const width = clampWidth(pref.width, viewport);
-  return width === pref.width ? pref : { open: pref.open, width };
+/** The width drawn now: the stored preference narrowed to the window. The preference itself stays as the user set it. */
+export function effectiveWidth(pref: PanelPref, viewport: number): number {
+  return clampWidth(pref.width, viewport);
 }
 
 /** Open at the default width unless the stored values say otherwise; anything unreadable is the default. */
-export function readPref(store: Store | null, viewport: number): PanelPref {
+export function readPref(store: Store | null, _viewport?: number): PanelPref {
   let width = defaultWidth;
   let open = true;
   try {
@@ -90,7 +90,8 @@ export function readPref(store: Store | null, viewport: number): PanelPref {
   } catch {
     // A storage that refuses to answer gives the default.
   }
-  return { open, width: clampWidth(width, viewport) };
+  // Bounded by the absolute limits only: a narrow window now must not shrink the choice for later.
+  return { open, width: clampWidth(width, Infinity) };
 }
 
 /** A storage that refuses the value only loses the choice. */

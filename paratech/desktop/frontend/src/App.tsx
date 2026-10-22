@@ -90,7 +90,8 @@ export function App() {
   // Counts the files the drop zone added: «Предметы» reads the library again.
   const [library, setLibrary] = useState(0);
   const panel = useResizablePanel();
-  const { open, width } = panel.pref;
+  const open = panel.pref.open;
+  const width = panel.width;
   const overlay = route.transcript !== "" || route.summary !== "";
 
   return (

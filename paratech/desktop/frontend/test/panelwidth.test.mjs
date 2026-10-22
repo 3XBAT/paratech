@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampWidth, closeBelow, defaultWidth, dragPref, fitPref, keyPref, keyStep, maxWidth, maxWidthLimit, minWidth,
+  clampWidth, closeBelow, defaultWidth, dragPref, effectiveWidth, keyPref, keyStep, maxWidth, maxWidthLimit, minWidth,
   openKey, readPref, togglePref, widthKey, writePref,
 } from "../.test-build/agent/panelWidth.js";
 
@@ -31,8 +31,18 @@ test("width is clamped to the minimum and to what leaves the main screen room", 
   assert.equal(maxWidth(700), minWidth);
   assert.equal(maxWidth(1000), 1000 - 64 - 420);
   assert.equal(clampWidth(NaN, vp), defaultWidth);
-  assert.deepEqual(fitPref({ open: true, width: 600 }, 900), { open: true, width: 416 });
-  assert.equal(fitPref(open, vp), open);
+  assert.equal(effectiveWidth({ open: true, width: 600 }, 900), 416);
+  assert.equal(effectiveWidth(open, vp), 340);
+});
+
+test("a temporarily narrow window narrows only the drawn width, the stored one survives", () => {
+  const s = memory();
+  const pref = { open: true, width: 600 };
+  writePref(s, pref);
+  assert.equal(effectiveWidth(pref, 900), 416);
+  assert.equal(effectiveWidth(pref, 700), minWidth);
+  assert.deepEqual(readPref(s, 700), pref);
+  assert.equal(effectiveWidth(readPref(s, 700), 1400), 600);
 });
 
 test("the stored width and open state come back, bad values give the default", () => {
@@ -53,7 +63,8 @@ test("the stored width and open state come back, bad values give the default", (
 test("arrow keys change the width, Left opens a closed panel, Right narrows until it closes", () => {
   assert.equal(keyPref(open, "ArrowLeft", vp).width, 340 + keyStep);
   assert.equal(keyPref(open, "ArrowRight", vp).width, 340 - keyStep);
-  assert.deepEqual(keyPref(closed, "ArrowLeft", vp), { open: true, width: minWidth });
+  assert.deepEqual(keyPref(closed, "ArrowLeft", vp), { open: true, width: 340 });
+  assert.deepEqual(keyPref({ open: false, width: 500 }, "ArrowLeft", vp), { open: true, width: 500 });
   assert.deepEqual(keyPref(closed, "ArrowRight", vp), closed);
   assert.deepEqual(keyPref({ open: true, width: minWidth }, "ArrowRight", vp), { open: false, width: minWidth });
   assert.equal(keyPref({ open: true, width: maxWidth(vp) }, "ArrowLeft", vp).width, maxWidth(vp));

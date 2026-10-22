@@ -1,5 +1,5 @@
 import { type KeyboardEvent, type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
-import { dragPref, fitPref, keyPref, maxWidth, type PanelPref, readPref, togglePref, writePref } from "./panelWidth.js";
+import { dragPref, effectiveWidth, keyPref, maxWidth, type PanelPref, readPref, togglePref, writePref } from "./panelWidth.js";
 
 function browserStore(): Storage | null {
   try {
@@ -11,6 +11,8 @@ function browserStore(): Storage | null {
 
 export interface ResizablePanel {
   pref: PanelPref;
+  /** The width drawn now (the preference narrowed to the window). */
+  width: number;
   viewport: number;
   dragging: boolean;
   /** Opens the panel at its last width (Ctrl+K on a closed panel). */
@@ -33,10 +35,8 @@ export function useResizablePanel(): ResizablePanel {
   live.current = { pref, viewport };
 
   useEffect(() => {
-    const onResize = () => {
-      setViewport(window.innerWidth);
-      setPref((p) => fitPref(p, window.innerWidth));
-    };
+    // Only the viewport changes: the stored preference is narrowed when drawn, never rewritten.
+    const onResize = () => setViewport(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -65,7 +65,10 @@ export function useResizablePanel(): ResizablePanel {
     },
     onPointerUp: (e) => {
       if (dragging) {
-        e.currentTarget.releasePointerCapture?.(e.pointerId);
+        const el = e.currentTarget;
+        if (el.hasPointerCapture?.(e.pointerId)) {
+          el.releasePointerCapture?.(e.pointerId);
+        }
         setDragging(false);
       }
     },
@@ -79,7 +82,7 @@ export function useResizablePanel(): ResizablePanel {
     onDoubleClick: () => setPref(togglePref),
   };
 
-  return { pref, viewport, dragging, reveal, handle };
+  return { pref, width: effectiveWidth(pref, viewport), viewport, dragging, reveal, handle };
 }
 
 /** The strip on the left edge of the panel (on the window edge while closed): drag, arrow keys or double click. */
@@ -93,7 +96,7 @@ export function PanelResizeHandle(props: { panel: ResizablePanel }) {
       aria-label="Ширина панели помощника"
       aria-valuemin={0}
       aria-valuemax={maxWidth(viewport)}
-      aria-valuenow={pref.open ? pref.width : 0}
+      aria-valuenow={pref.open ? props.panel.width : 0}
       tabIndex={0}
       title="Потянуть, чтобы изменить ширину; двойной щелчок открывает и закрывает панель"
       onPointerDown={handle.onPointerDown}

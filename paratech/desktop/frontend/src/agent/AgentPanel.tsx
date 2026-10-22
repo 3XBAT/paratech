@@ -49,12 +49,14 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
       const text = draftText(e);
       if (text !== "") {
         setDraft(text.slice(0, 4000));
-        input.current?.focus();
+        // A closed panel opens first; the input can take focus once it is shown again.
+        props.reveal?.();
+        setTimeout(() => input.current?.focus(), 0);
       }
     };
     window.addEventListener(draftEvent, onDraft);
     return () => window.removeEventListener(draftEvent, onDraft);
-  }, []);
+  }, [props.reveal]);
 
   useEffect(() => {
     let off: (() => void) | undefined;
