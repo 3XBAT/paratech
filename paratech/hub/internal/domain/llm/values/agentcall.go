@@ -93,6 +93,19 @@ func (c AgentCall) Turns() []Turn { return append([]Turn(nil), c.turns...) }
 // MaxOutput is the effective output cap.
 func (c AgentCall) MaxOutput() int64 { return c.maxOutput }
 
+// WithAssistant attaches the kept assistant turn to the last echo of calls (LastCalls), so the provider gets it back
+// unchanged. A call without an echo or a zero turn is an error.
+func (c AgentCall) WithAssistant(turn AssistantTurn) (AgentCall, error) {
+	i := LastCalls(c.turns)
+	if i < 0 || turn.IsZero() {
+		return AgentCall{}, fmt.Errorf("%w: an assistant turn needs an echo of calls", ErrInvalidRequest)
+	}
+	turns := append([]Turn(nil), c.turns...)
+	turns[i].assistant = turn
+	c.turns = turns
+	return c, nil
+}
+
 // InputBytes is the size of everything the call sends as input, the basis of the reservation.
 func (c AgentCall) InputBytes() int64 {
 	n := int64(len(c.system) + len(c.base) + len(c.scope))
@@ -121,7 +134,17 @@ type AgentAnswer struct {
 	toolUse   bool
 	refused   bool
 	malformed bool
+	assistant AssistantTurn
 }
+
+// WithAssistant records the provider's raw assistant content of the answer.
+func (a AgentAnswer) WithAssistant(turn AssistantTurn) AgentAnswer {
+	a.assistant = turn
+	return a
+}
+
+// Assistant is the raw assistant content of the answer, zero when the provider gave none.
+func (a AgentAnswer) Assistant() AssistantTurn { return a.assistant }
 
 // NewAgentAnswer records an answer; whether it is usable is Failure's and the catalog's decision.
 func NewAgentAnswer(calls []ToolCall, usage Usage, toolUse bool) AgentAnswer {
