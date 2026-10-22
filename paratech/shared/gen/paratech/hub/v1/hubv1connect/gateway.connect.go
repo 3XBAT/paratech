@@ -38,6 +38,9 @@ const (
 	// GatewayServiceCompleteStreamProcedure is the fully-qualified name of the GatewayService's
 	// CompleteStream RPC.
 	GatewayServiceCompleteStreamProcedure = "/paratech.hub.v1.GatewayService/CompleteStream"
+	// GatewayServiceAgentStepProcedure is the fully-qualified name of the GatewayService's AgentStep
+	// RPC.
+	GatewayServiceAgentStepProcedure = "/paratech.hub.v1.GatewayService/AgentStep"
 )
 
 // GatewayServiceClient is a client for the paratech.hub.v1.GatewayService service.
@@ -67,6 +70,11 @@ type GatewayServiceClient interface {
 	//   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
 	//     result.
 	CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest]) (*connect.ServerStreamForClient[v1.CompleteStreamResponse], error)
+	// AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
+	// prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
+	// one ledger attempt keyed by AgentStepRequest.idempotency_key with the key life cycle above; the fingerprint covers
+	// the whole AgentStepRequest and never matches a CompletionSpec fingerprint. No streaming: a step is short.
+	AgentStep(context.Context, *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error)
 }
 
 // NewGatewayServiceClient constructs a client for the paratech.hub.v1.GatewayService service. By
@@ -92,6 +100,12 @@ func NewGatewayServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(gatewayServiceMethods.ByName("CompleteStream")),
 			connect.WithClientOptions(opts...),
 		),
+		agentStep: connect.NewClient[v1.AgentStepRequest, v1.AgentStepResponse](
+			httpClient,
+			baseURL+GatewayServiceAgentStepProcedure,
+			connect.WithSchema(gatewayServiceMethods.ByName("AgentStep")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -99,6 +113,7 @@ func NewGatewayServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 type gatewayServiceClient struct {
 	complete       *connect.Client[v1.CompleteRequest, v1.CompleteResponse]
 	completeStream *connect.Client[v1.CompleteStreamRequest, v1.CompleteStreamResponse]
+	agentStep      *connect.Client[v1.AgentStepRequest, v1.AgentStepResponse]
 }
 
 // Complete calls paratech.hub.v1.GatewayService.Complete.
@@ -109,6 +124,11 @@ func (c *gatewayServiceClient) Complete(ctx context.Context, req *connect.Reques
 // CompleteStream calls paratech.hub.v1.GatewayService.CompleteStream.
 func (c *gatewayServiceClient) CompleteStream(ctx context.Context, req *connect.Request[v1.CompleteStreamRequest]) (*connect.ServerStreamForClient[v1.CompleteStreamResponse], error) {
 	return c.completeStream.CallServerStream(ctx, req)
+}
+
+// AgentStep calls paratech.hub.v1.GatewayService.AgentStep.
+func (c *gatewayServiceClient) AgentStep(ctx context.Context, req *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error) {
+	return c.agentStep.CallUnary(ctx, req)
 }
 
 // GatewayServiceHandler is an implementation of the paratech.hub.v1.GatewayService service.
@@ -138,6 +158,11 @@ type GatewayServiceHandler interface {
 	//   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
 	//     result.
 	CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest], *connect.ServerStream[v1.CompleteStreamResponse]) error
+	// AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
+	// prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
+	// one ledger attempt keyed by AgentStepRequest.idempotency_key with the key life cycle above; the fingerprint covers
+	// the whole AgentStepRequest and never matches a CompletionSpec fingerprint. No streaming: a step is short.
+	AgentStep(context.Context, *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error)
 }
 
 // NewGatewayServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -159,12 +184,20 @@ func NewGatewayServiceHandler(svc GatewayServiceHandler, opts ...connect.Handler
 		connect.WithSchema(gatewayServiceMethods.ByName("CompleteStream")),
 		connect.WithHandlerOptions(opts...),
 	)
+	gatewayServiceAgentStepHandler := connect.NewUnaryHandler(
+		GatewayServiceAgentStepProcedure,
+		svc.AgentStep,
+		connect.WithSchema(gatewayServiceMethods.ByName("AgentStep")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/paratech.hub.v1.GatewayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GatewayServiceCompleteProcedure:
 			gatewayServiceCompleteHandler.ServeHTTP(w, r)
 		case GatewayServiceCompleteStreamProcedure:
 			gatewayServiceCompleteStreamHandler.ServeHTTP(w, r)
+		case GatewayServiceAgentStepProcedure:
+			gatewayServiceAgentStepHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -180,4 +213,8 @@ func (UnimplementedGatewayServiceHandler) Complete(context.Context, *connect.Req
 
 func (UnimplementedGatewayServiceHandler) CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest], *connect.ServerStream[v1.CompleteStreamResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("paratech.hub.v1.GatewayService.CompleteStream is not implemented"))
+}
+
+func (UnimplementedGatewayServiceHandler) AgentStep(context.Context, *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("paratech.hub.v1.GatewayService.AgentStep is not implemented"))
 }

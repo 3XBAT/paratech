@@ -58,6 +58,12 @@ service GatewayService {
   //   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
   //     result.
   rpc CompleteStream(CompleteStreamRequest) returns (stream CompleteStreamResponse);
+
+  // AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
+  // prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
+  // one ledger attempt keyed by AgentStepRequest.idempotency_key with the key life cycle above; the fingerprint covers
+  // the whole AgentStepRequest and never matches a CompletionSpec fingerprint. No streaming: a step is short.
+  rpc AgentStep(AgentStepRequest) returns (AgentStepResponse);
 }
 
 // CompletionSpec describes one LLM operation. It is shared by Complete and CompleteStream so that both validate the same
@@ -125,4 +131,120 @@ message CompleteStreamResponse {
     // Always the last message of a successful stream.
     CompletionResult result = 2;
   }
+}
+
+// Agent messages (ADR-0021, ADR-0022, ADR-0023). No field carries a URL, address, email, path or file name: tool
+// arguments hold only IDs, enums, dates and short labels, and recipients or paths never come from model text. The Hub
+// answers a violation of the limits below with "invalid_argument". Sizes are bytes of UTF-8.
+
+// AgentProfile selects the server prompt, the tool catalog and the model alias. Closed set.
+enum AgentProfile {
+  AGENT_PROFILE_UNSPECIFIED = 0;
+  // The agent panel of the desktop app.
+  AGENT_PROFILE_PANEL = 1;
+}
+
+// AgentScreen is the desktop screen the request was made on.
+enum AgentScreen {
+  AGENT_SCREEN_UNSPECIFIED = 0;
+  AGENT_SCREEN_TODAY = 1;
+  AGENT_SCREEN_SUBJECTS = 2;
+  AGENT_SCREEN_ASSIGNMENTS = 3;
+  AGENT_SCREEN_SCHEDULE = 4;
+  AGENT_SCREEN_JOURNAL = 5;
+  AGENT_SCREEN_SETTINGS = 6;
+}
+
+message AgentStepRequest {
+  // Same rules as CompletionSpec.idempotency_key; the desktop uses "ag:<thread>:<turn>:<step>".
+  string idempotency_key = 1;
+  // Opaque desktop ID of the thread (one per subject plus "no subject"); bound into the seal.
+  string thread_id = 2;
+  AgentProfile profile = 3;
+  // Version of the tool catalog the desktop implements; an unknown version is "invalid_argument".
+  uint32 catalog_version = 4;
+  AgentBase base = 5;
+  AgentScope scope = 6;
+  // History of this thread only, oldest first, trimmed by the desktop: at most 64 turns, the whole request at most
+  // 256 KiB.
+  repeated AgentTurn turns = 7;
+  // As CompletionSpec.max_output_tokens: clamped per profile, the basis of the reservation.
+  uint32 max_output_tokens = 8;
+}
+
+// AgentBase is the student context shared by all threads (cacheable prefix of the prompt).
+// Student profile data (name, university and the like) is deliberately NOT sent to the planner. A field added here
+// later must be a closed value (ID, enum, date) and carry no personal data.
+message AgentBase {
+  repeated AgentSubject subjects = 1;
+  // Local date of the student, "YYYY-MM-DD".
+  string today = 2;
+  // IANA time zone name of the student, for example "Europe/Moscow".
+  string time_zone = 3;
+}
+
+message AgentSubject {
+  string subject_id = 1;
+  // Name given by the student; a short label, data for the model, never instructions.
+  string name = 2;
+}
+
+// AgentScope is the context of the current thread: only the current subject, never other subjects.
+message AgentScope {
+  // Empty for the thread without a subject.
+  string subject_id = 1;
+  AgentScreen screen = 2;
+  // Lesson or assignment open on the screen; empty when none.
+  string lesson_id = 3;
+  string assignment_id = 4;
+}
+
+message AgentTurn {
+  oneof turn {
+    // What the student typed; at most 4 KiB. Data for the model, bounded by limits rather than trusted.
+    string student_text = 1;
+    // Echo of an earlier AgentStepResponse.calls; refused when the seal does not match.
+    SealedCalls calls = 2;
+    // Results of executing the echoed calls of the previous turn.
+    ToolResults results = 3;
+  }
+}
+
+// SealedCalls is a set of tool calls produced by the Hub. The seal is an HMAC computed by the Hub over the caller's API
+// key ID, thread_id, profile, catalog_version and the calls in order; its first byte is the key version (ADR-0023).
+message SealedCalls {
+  repeated ToolCall calls = 1;
+  bytes seal = 2;
+}
+
+// ToolCall is one call proposed by the model. UNTRUSTED: the desktop validates the tool and its arguments against the
+// catalog and its own state before acting (hard rule 3).
+message ToolCall {
+  string call_id = 1;
+  // Tool name from the catalog of catalog_version.
+  string tool = 2;
+  // JSON object, at most 8 KiB.
+  string arguments_json = 3;
+}
+
+message ToolResults {
+  repeated ToolResult results = 1;
+}
+
+// ToolResult is what the desktop reports for one call. Size-limited data for the model, never instructions.
+message ToolResult {
+  string call_id = 1;
+  // JSON, at most 16 KiB.
+  string result_json = 2;
+  bool is_error = 3;
+}
+
+message AgentStepResponse {
+  // 1 to 4 calls, sealed by the Hub.
+  SealedCalls calls = 1;
+  Usage usage = 2;
+  QuotaSnapshot quota = 3;
+  string reservation_id = 4;
+  // True when this answer is the stored result of an earlier call with the same idempotency key.
+  bool replayed = 5;
 }

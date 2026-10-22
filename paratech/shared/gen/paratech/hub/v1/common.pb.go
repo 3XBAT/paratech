@@ -58,6 +58,15 @@ const (
 	OperationType_OPERATION_TYPE_HOMEWORK_DRAFT OperationType = 3
 	// Full readable text of the lesson formatted from the transcript.
 	OperationType_OPERATION_TYPE_LECTURE_TEXT OperationType = 4
+	// One step of the agent planner. Names the ledger entries of GatewayService.AgentStep; never valid in a
+	// CompletionSpec (ADR-0023).
+	OperationType_OPERATION_TYPE_AGENT_STEP OperationType = 5
+	// Quarantined reading of an uploaded material; the answer holds only enums, IDs, dates and flags (ADR-0022).
+	OperationType_OPERATION_TYPE_INSPECT_MATERIAL OperationType = 6
+	// Answer to a student's question from lesson and material excerpts, with citations.
+	OperationType_OPERATION_TYPE_ANSWER OperationType = 7
+	// Triage of a homework assignment: type, requirements, feasibility, questions.
+	OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT OperationType = 8
 )
 
 // Enum value maps for OperationType.
@@ -68,6 +77,10 @@ var (
 		2: "OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES",
 		3: "OPERATION_TYPE_HOMEWORK_DRAFT",
 		4: "OPERATION_TYPE_LECTURE_TEXT",
+		5: "OPERATION_TYPE_AGENT_STEP",
+		6: "OPERATION_TYPE_INSPECT_MATERIAL",
+		7: "OPERATION_TYPE_ANSWER",
+		8: "OPERATION_TYPE_TRIAGE_ASSIGNMENT",
 	}
 	OperationType_value = map[string]int32{
 		"OPERATION_TYPE_UNSPECIFIED":                0,
@@ -75,6 +88,10 @@ var (
 		"OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES": 2,
 		"OPERATION_TYPE_HOMEWORK_DRAFT":             3,
 		"OPERATION_TYPE_LECTURE_TEXT":               4,
+		"OPERATION_TYPE_AGENT_STEP":                 5,
+		"OPERATION_TYPE_INSPECT_MATERIAL":           6,
+		"OPERATION_TYPE_ANSWER":                     7,
+		"OPERATION_TYPE_TRIAGE_ASSIGNMENT":          8,
 	}
 )
 
@@ -350,13 +367,17 @@ const file_paratech_hub_v1_common_proto_rawDesc = "" +
 	"\x0eperiod_ends_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\fperiodEndsAt\"O\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
-	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens*\xbe\x01\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens*\xc3\x02\n" +
 	"\rOperationType\x12\x1e\n" +
 	"\x1aOPERATION_TYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16OPERATION_TYPE_SUMMARY\x10\x01\x12-\n" +
 	")OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES\x10\x02\x12!\n" +
 	"\x1dOPERATION_TYPE_HOMEWORK_DRAFT\x10\x03\x12\x1f\n" +
-	"\x1bOPERATION_TYPE_LECTURE_TEXT\x10\x04*>\n" +
+	"\x1bOPERATION_TYPE_LECTURE_TEXT\x10\x04\x12\x1d\n" +
+	"\x19OPERATION_TYPE_AGENT_STEP\x10\x05\x12#\n" +
+	"\x1fOPERATION_TYPE_INSPECT_MATERIAL\x10\x06\x12\x19\n" +
+	"\x15OPERATION_TYPE_ANSWER\x10\a\x12$\n" +
+	" OPERATION_TYPE_TRIAGE_ASSIGNMENT\x10\b*>\n" +
 	"\tQuotaUnit\x12\x1a\n" +
 	"\x16QUOTA_UNIT_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11QUOTA_UNIT_TOKENS\x10\x01B\xab\x01\n" +

@@ -36,7 +36,7 @@ type Completer interface {
 }
 
 // Gateway serves GatewayService.Complete. CompleteStream stays unimplemented: the provider port has no streaming yet
-// (ADR-0010).
+// (ADR-0010). AgentStep is unimplemented until the agentstep use case exists (ADR-0023, TASK-114).
 type Gateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 	svc Completer

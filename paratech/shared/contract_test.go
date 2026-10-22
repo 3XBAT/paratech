@@ -1,7 +1,12 @@
 package shared_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"maps"
+	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -233,6 +238,28 @@ var wantFields = map[string]map[string]string{
 	"ReleaseResponse":      {"reservation": "message paratech.hub.v1.Reservation", "quota": "message paratech.hub.v1.QuotaSnapshot"},
 	"GetRemainingRequest":  {},
 	"GetRemainingResponse": {"quota": "message paratech.hub.v1.QuotaSnapshot"},
+	"AgentStepRequest": {
+		"idempotency_key": "string", "thread_id": "string", "profile": "enum paratech.hub.v1.AgentProfile",
+		"catalog_version": "uint32", "base": "message paratech.hub.v1.AgentBase", "scope": "message paratech.hub.v1.AgentScope",
+		"turns": "repeated message paratech.hub.v1.AgentTurn", "max_output_tokens": "uint32",
+	},
+	"AgentBase":    {"subjects": "repeated message paratech.hub.v1.AgentSubject", "today": "string", "time_zone": "string"},
+	"AgentSubject": {"subject_id": "string", "name": "string"},
+	"AgentScope": {
+		"subject_id": "string", "screen": "enum paratech.hub.v1.AgentScreen", "lesson_id": "string", "assignment_id": "string",
+	},
+	"AgentTurn": {
+		"student_text": "string (oneof turn)", "calls": "message paratech.hub.v1.SealedCalls (oneof turn)",
+		"results": "message paratech.hub.v1.ToolResults (oneof turn)",
+	},
+	"SealedCalls": {"calls": "repeated message paratech.hub.v1.ToolCall", "seal": "bytes"},
+	"ToolCall":    {"call_id": "string", "tool": "string", "arguments_json": "string"},
+	"ToolResults": {"results": "repeated message paratech.hub.v1.ToolResult"},
+	"ToolResult":  {"call_id": "string", "result_json": "string", "is_error": "bool"},
+	"AgentStepResponse": {
+		"calls": "message paratech.hub.v1.SealedCalls", "usage": "message paratech.hub.v1.Usage",
+		"quota": "message paratech.hub.v1.QuotaSnapshot", "reservation_id": "string", "replayed": "bool",
+	},
 }
 
 // Every string and bytes field of the contract. These carry free text, so a new one is a new place where a destination,
@@ -247,6 +274,15 @@ var wantStringFields = map[string][]string{
 	"ReserveRequest":         {"idempotency_key", "model_alias"},
 	"SettleRequest":          {"reservation_id"},
 	"ReleaseRequest":         {"reservation_id"},
+	"AgentStepRequest":       {"idempotency_key", "thread_id"},
+	"AgentBase":              {"time_zone", "today"},
+	"AgentSubject":           {"name", "subject_id"},
+	"AgentScope":             {"assignment_id", "lesson_id", "subject_id"},
+	"AgentTurn":              {"student_text"},
+	"SealedCalls":            {"seal"},
+	"ToolCall":               {"arguments_json", "call_id", "tool"},
+	"ToolResult":             {"call_id", "result_json"},
+	"AgentStepResponse":      {"reservation_id"},
 }
 
 func localName(m protoreflect.MessageDescriptor) string {
@@ -347,6 +383,7 @@ type rpcShape struct {
 var wantRPCs = map[string]rpcShape{
 	"GatewayService.Complete":       {"CompleteRequest", "CompleteResponse", false, public},
 	"GatewayService.CompleteStream": {"CompleteStreamRequest", "CompleteStreamResponse", true, public},
+	"GatewayService.AgentStep":      {"AgentStepRequest", "AgentStepResponse", false, public},
 	"QuotaService.Reserve":          {"ReserveRequest", "ReserveResponse", false, internal},
 	"QuotaService.Settle":           {"SettleRequest", "SettleResponse", false, internal},
 	"QuotaService.Release":          {"ReleaseRequest", "ReleaseResponse", false, internal},
@@ -404,7 +441,9 @@ func TestOnlyGatewayAndGetRemainingArePublic(t *testing.T) {
 	}
 	slices.Sort(publicRPCs)
 	slices.Sort(internalRPCs)
-	if want := []string{"GatewayService.Complete", "GatewayService.CompleteStream", "QuotaService.GetRemaining"}; !slices.Equal(publicRPCs, want) {
+	if want := []string{
+		"GatewayService.AgentStep", "GatewayService.Complete", "GatewayService.CompleteStream", "QuotaService.GetRemaining",
+	}; !slices.Equal(publicRPCs, want) {
 		t.Errorf("public RPCs are %v, want %v", publicRPCs, want)
 	}
 	if want := []string{"QuotaService.Release", "QuotaService.Reserve", "QuotaService.Settle"}; !slices.Equal(internalRPCs, want) {
@@ -416,7 +455,13 @@ func TestEnumsOfTheContract(t *testing.T) {
 	want := map[string][]string{
 		"OperationType": {
 			"OPERATION_TYPE_UNSPECIFIED", "OPERATION_TYPE_SUMMARY", "OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES", "OPERATION_TYPE_HOMEWORK_DRAFT",
-			"OPERATION_TYPE_LECTURE_TEXT",
+			"OPERATION_TYPE_LECTURE_TEXT", "OPERATION_TYPE_AGENT_STEP", "OPERATION_TYPE_INSPECT_MATERIAL", "OPERATION_TYPE_ANSWER",
+			"OPERATION_TYPE_TRIAGE_ASSIGNMENT",
+		},
+		"AgentProfile": {"AGENT_PROFILE_UNSPECIFIED", "AGENT_PROFILE_PANEL"},
+		"AgentScreen": {
+			"AGENT_SCREEN_UNSPECIFIED", "AGENT_SCREEN_TODAY", "AGENT_SCREEN_SUBJECTS", "AGENT_SCREEN_ASSIGNMENTS",
+			"AGENT_SCREEN_SCHEDULE", "AGENT_SCREEN_JOURNAL", "AGENT_SCREEN_SETTINGS",
 		},
 		"QuotaUnit": {"QUOTA_UNIT_UNSPECIFIED", "QUOTA_UNIT_TOKENS"},
 		"ReservationState": {
@@ -439,5 +484,531 @@ func TestEnumsOfTheContract(t *testing.T) {
 		if !slices.Equal(got, values) {
 			t.Errorf("enum %s is %v, want %v", name, got, values)
 		}
+	}
+}
+
+// Agent messages (ADR-0022): on top of forbiddenWords, no field or type of an agent message may name a recipient, a
+// path or a file. Files are addressed by ID and the recipient comes from settings, never from model text.
+var agentForbiddenWords = []string{
+	"email", "emails", "mail", "mails", "mailbox", "recipient", "recipients", "path", "paths", "filepath",
+	"file", "files", "filename", "filenames", "dir", "dirs", "directory", "directories",
+}
+
+// Every string and bytes field reachable from AgentStepRequest and AgentStepResponse, with what it carries. A new
+// free-text field fails TestAgentMessagesHaveOnlyAllowlistedStrings until it is reviewed and added here.
+var agentStringFields = map[string]string{
+	"AgentStepRequest.idempotency_key": "client key, printable ASCII",
+	"AgentStepRequest.thread_id":       "opaque desktop ID",
+	"AgentBase.today":                  "date YYYY-MM-DD",
+	"AgentBase.time_zone":              "IANA zone name",
+	"AgentSubject.subject_id":          "opaque desktop ID",
+	"AgentSubject.name":                "subject name, label of at most 80 characters",
+	"AgentScope.subject_id":            "opaque desktop ID",
+	"AgentScope.lesson_id":             "opaque desktop ID",
+	"AgentScope.assignment_id":         "opaque desktop ID",
+	"AgentTurn.student_text":           "what the student typed, at most 4 KiB",
+	"SealedCalls.seal":                 "HMAC with a key version byte",
+	"ToolCall.call_id":                 "opaque call ID",
+	"ToolCall.tool":                    "tool name of the catalog",
+	"ToolCall.arguments_json":          "JSON object of IDs, enums, dates and labels",
+	"ToolResult.call_id":               "opaque call ID",
+	"ToolResult.result_json":           "JSON built from an allowlist of typed fields",
+	"AgentStepResponse.reservation_id": "quota reservation ID",
+}
+
+// agentMessages returns the messages of the Hub package reachable from the agent RPC, roots included.
+func agentMessages(t *testing.T) []protoreflect.MessageDescriptor {
+	t.Helper()
+	var out []protoreflect.MessageDescriptor
+	seen := map[protoreflect.FullName]bool{}
+	var visit func(m protoreflect.MessageDescriptor)
+	visit = func(m protoreflect.MessageDescriptor) {
+		if seen[m.FullName()] || m.ParentFile().Package() != hubPackage {
+			return
+		}
+		seen[m.FullName()] = true
+		out = append(out, m)
+		for i := range m.Fields().Len() {
+			if sub := m.Fields().Get(i).Message(); sub != nil {
+				visit(sub)
+			}
+		}
+	}
+	visit((&hubv1.AgentStepRequest{}).ProtoReflect().Descriptor())
+	visit((&hubv1.AgentStepResponse{}).ProtoReflect().Descriptor())
+	if len(out) < 10 {
+		t.Fatalf("only %d agent messages reachable, the walk is broken", len(out))
+	}
+	return out
+}
+
+// camelWords splits "MailAddress" into "mail", "address".
+func camelWords(name string) []string {
+	var words []string
+	start := 0
+	for i := 1; i < len(name); i++ {
+		if name[i] >= 'A' && name[i] <= 'Z' {
+			words = append(words, strings.ToLower(name[start:i]))
+			start = i
+		}
+	}
+	return append(words, strings.ToLower(name[start:]))
+}
+
+func badAgentWords(words []string) bool {
+	for _, w := range words {
+		if slices.Contains(agentForbiddenWords, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// agentForbiddenFields returns "Message.field" for every field whose name, or whose message or enum type name, names a
+// destination, a secret, a recipient, a path or a file, and for every untyped container.
+func agentForbiddenFields(msgs []protoreflect.MessageDescriptor) []string {
+	var found []string
+	for _, m := range msgs {
+		for i := range m.Fields().Len() {
+			f := m.Fields().Get(i)
+			name := string(f.Name())
+			bad := badName(name) || badAgentWords(strings.Split(strings.ToLower(name), "_"))
+			var typeName protoreflect.Name
+			switch {
+			case f.Message() != nil:
+				typeName = f.Message().Name()
+				bad = bad || slices.Contains(forbiddenTypes, f.Message().FullName())
+			case f.Enum() != nil:
+				typeName = f.Enum().Name()
+			}
+			if typeName != "" {
+				words := camelWords(string(typeName))
+				bad = bad || badAgentWords(words) || badName(strings.Join(words, "_"))
+			}
+			if bad {
+				found = append(found, string(m.FullName())+"."+name)
+			}
+		}
+	}
+	return found
+}
+
+func TestAgentMessagesHaveNoAddressPathOrFileFields(t *testing.T) {
+	if bad := agentForbiddenFields(agentMessages(t)); len(bad) > 0 {
+		t.Fatalf("agent fields that name a destination, a recipient, a path or a file (ADR-0022): %v", bad)
+	}
+}
+
+// The agent checker must be able to fail, otherwise the test above proves nothing.
+func TestAgentFieldCheckerCatchesBadFields(t *testing.T) {
+	str := descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()
+	field := func(name string, n int32) *descriptorpb.FieldDescriptorProto {
+		return &descriptorpb.FieldDescriptorProto{
+			Name: proto.String(name), Number: proto.Int32(n), Type: str,
+			Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+		}
+	}
+	typed := func(name string, n int32, typeName string) *descriptorpb.FieldDescriptorProto {
+		f := field(name, n)
+		f.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
+		f.TypeName = proto.String(typeName)
+		return f
+	}
+	enumTyped := func(name string, n int32, typeName string) *descriptorpb.FieldDescriptorProto {
+		f := typed(name, n, typeName)
+		f.Type = descriptorpb.FieldDescriptorProto_TYPE_ENUM.Enum()
+		return f
+	}
+	fdp := &descriptorpb.FileDescriptorProto{
+		Name:    proto.String("synthetic_agent.proto"),
+		Package: proto.String("synthetic.agent.v1"),
+		Syntax:  proto.String("proto3"),
+		EnumType: []*descriptorpb.EnumDescriptorProto{{
+			Name: proto.String("FilePathKind"),
+			Value: []*descriptorpb.EnumValueDescriptorProto{
+				{Name: proto.String("FILE_PATH_KIND_UNSPECIFIED"), Number: proto.Int32(0)},
+			},
+		}},
+		MessageType: []*descriptorpb.DescriptorProto{
+			{Name: proto.String("MailAddress"), Field: []*descriptorpb.FieldDescriptorProto{field("value", 1)}},
+			{Name: proto.String("SourceUrl"), Field: []*descriptorpb.FieldDescriptorProto{field("value", 1)}},
+			{
+				Name: proto.String("Call"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					field("recipient_email", 1),
+					field("save_path", 2),
+					field("file_name", 3),
+					field("target_dir", 4),
+					field("callback_url", 5),
+					typed("to", 6, ".synthetic.agent.v1.MailAddress"),
+					typed("source", 7, ".synthetic.agent.v1.SourceUrl"),
+					enumTyped("kind", 11, ".synthetic.agent.v1.FilePathKind"),
+					// Look-alikes that are fine: the word is only a substring.
+					field("profile", 8),
+					field("filed_at", 9),
+					field("pathway", 10),
+				},
+			},
+		},
+	}
+	fd, err := protodesc.NewFile(fdp, protoregistry.GlobalFiles)
+	if err != nil {
+		t.Fatalf("build synthetic descriptor: %v", err)
+	}
+	got := agentForbiddenFields([]protoreflect.MessageDescriptor{fd.Messages().ByName("Call")})
+	want := []string{
+		"synthetic.agent.v1.Call.recipient_email", "synthetic.agent.v1.Call.save_path", "synthetic.agent.v1.Call.file_name",
+		"synthetic.agent.v1.Call.target_dir", "synthetic.agent.v1.Call.callback_url", "synthetic.agent.v1.Call.to",
+		"synthetic.agent.v1.Call.source", "synthetic.agent.v1.Call.kind",
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("checker found %v, want %v", got, want)
+	}
+}
+
+func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
+	got := map[string]bool{}
+	for _, m := range agentMessages(t) {
+		for i := range m.Fields().Len() {
+			f := m.Fields().Get(i)
+			if f.Kind() != protoreflect.StringKind && f.Kind() != protoreflect.BytesKind {
+				continue
+			}
+			key := localName(m) + "." + string(f.Name())
+			got[key] = true
+			if _, ok := agentStringFields[key]; !ok {
+				t.Errorf("%s is a string/bytes field of an agent message that is not in agentStringFields: review it first", key)
+			}
+		}
+	}
+	for key := range agentStringFields {
+		if !got[key] {
+			t.Errorf("%s is in agentStringFields but not a string/bytes field of an agent message", key)
+		}
+	}
+}
+
+// Golden tool catalog v1 (design §2.3, ADR-0021). Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115)
+// must match it.
+const toolCatalogFile = "testdata/tool_catalog_v1.json"
+
+type catalogArgument struct {
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Required bool     `json:"required"`
+	Values   []string `json:"values"`
+}
+
+type catalogTool struct {
+	Name            string            `json:"name"`
+	Class           string            `json:"class"`
+	Paid            bool              `json:"paid"`
+	AgentCanExecute bool              `json:"agent_can_execute"`
+	Arguments       []catalogArgument `json:"arguments"`
+}
+
+type toolCatalog struct {
+	CatalogVersion uint32            `json:"catalog_version"`
+	Types          map[string]string `json:"types"`
+	Notes          map[string]string `json:"notes"`
+	Tools          []catalogTool     `json:"tools"`
+}
+
+var (
+	toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	toolClasses     = []string{"R", "U", "C", "UI"}
+	// Argument types of tools that act or read: only IDs, enums, dates and short labels (ADR-0022).
+	actionArgTypes = []string{"id", "ids", "date", "enum", "label"}
+	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023).
+	uiArgTypes = []string{"text", "text_list", "plan_steps", "questions"}
+	// Class C tools only name trusted local objects: the confirm card shows trusted data, never model text.
+	confirmArgTypes = []string{"id"}
+	uiTools         = []string{"ask_questions", "cannot_do", "reply", "show_plan"}
+	// Argument names that would let a model choose a recipient, a destination or a file outside the app.
+	forbiddenArgWords = []string{"cc", "bcc", "subject_line", "attachment", "attachments", "command", "cmd", "shell"}
+)
+
+func loadToolCatalog(t *testing.T) toolCatalog {
+	t.Helper()
+	raw, err := os.ReadFile(toolCatalogFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", toolCatalogFile, err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var c toolCatalog
+	if err := dec.Decode(&c); err != nil {
+		t.Fatalf("decode %s: %v", toolCatalogFile, err)
+	}
+	return c
+}
+
+// pinnedTools is every tool of catalog v1 with its class. Adding or removing a tool, or moving one to another class
+// (for example demoting propose_send from C), must be a conscious edit here too.
+var pinnedTools = map[string]string{
+	"list_subjects":            "R",
+	"find_lessons":             "R",
+	"list_assignments":         "R",
+	"job_status":               "R",
+	"delivery_status":          "R",
+	"search":                   "R",
+	"answer_question":          "R",
+	"inspect_upload":           "R",
+	"create_subject":           "U",
+	"create_folder":            "U",
+	"place_upload":             "U",
+	"link_material":            "U",
+	"set_lesson_info":          "U",
+	"make_summary":             "U",
+	"make_lecture_text":        "U",
+	"find_homework":            "U",
+	"generate_draft":           "U",
+	"edit_due":                 "U",
+	"triage_assignment":        "U",
+	"write_work":               "U",
+	"propose_deadline":         "C",
+	"propose_send":             "C",
+	"propose_delete_recording": "C",
+	"show_plan":                "UI",
+	"ask_questions":            "UI",
+	"reply":                    "UI",
+	"cannot_do":                "UI",
+}
+
+// Notes the catalog must carry for its implementers (TASK-114, TASK-115).
+var requiredCatalogNotes = []string{"agent_can_execute", "one_of"}
+
+// Forbidden words a tool name may still contain: "link" in link_material is the verb "attach by IDs", not a URL.
+var toolNameExceptions = map[string]string{"link_material": "link"}
+
+// namesForbidden reports whether a tool or argument name names a destination, a recipient, a path, a file or a command.
+func namesForbidden(name string) bool {
+	words := strings.Split(name, "_")
+	return badName(name) || badAgentWords(words) || slices.Contains(forbiddenArgWords, name) ||
+		slices.ContainsFunc(words, func(w string) bool { return slices.Contains(forbiddenArgWords, w) })
+}
+
+func toolNameForbidden(name string) bool {
+	if w, ok := toolNameExceptions[name]; ok {
+		name = strings.Replace(name, w, "verb", 1)
+	}
+	return namesForbidden(name)
+}
+
+// validateCatalog returns every rule of ADR-0021..0023 the catalog breaks; nil means it is valid.
+func validateCatalog(c toolCatalog) []string {
+	var problems []string
+	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+
+	if c.CatalogVersion != 1 {
+		add("catalog_version = %d, want 1", c.CatalogVersion)
+	}
+	declared := slices.Sorted(maps.Keys(c.Types))
+	if want := slices.Sorted(slices.Values(slices.Concat(actionArgTypes, uiArgTypes))); !slices.Equal(declared, want) {
+		add("declared argument types are %v, want %v", declared, want)
+	}
+	for _, n := range requiredCatalogNotes {
+		if strings.TrimSpace(c.Notes[n]) == "" {
+			add("note %q is missing", n)
+		}
+	}
+	if len(c.Tools) == 0 {
+		add("the catalog has no tools")
+	}
+
+	names := map[string]bool{}
+	var gotUI []string
+	for _, tool := range c.Tools {
+		if !toolNamePattern.MatchString(tool.Name) {
+			add("tool name %q is not snake_case of at most 64 characters", tool.Name)
+		}
+		if toolNameForbidden(tool.Name) {
+			add("tool name %q names a destination, a recipient, a path or a file (ADR-0022)", tool.Name)
+		}
+		if names[tool.Name] {
+			add("tool %q is declared twice", tool.Name)
+		}
+		names[tool.Name] = true
+		if !slices.Contains(toolClasses, tool.Class) {
+			add("tool %q has class %q, want one of %v", tool.Name, tool.Class, toolClasses)
+		}
+		// Class C exists only as a confirm card: the student's click executes it, the agent never does.
+		if tool.AgentCanExecute == (tool.Class == "C") {
+			add("tool %q of class %s: agent_can_execute = %v", tool.Name, tool.Class, tool.AgentCanExecute)
+		}
+		if tool.Paid && (tool.Class == "C" || tool.Class == "UI") {
+			add("tool %q of class %s cannot be paid", tool.Name, tool.Class)
+		}
+		if tool.Class == "UI" {
+			gotUI = append(gotUI, tool.Name)
+		}
+
+		allowed := actionArgTypes
+		switch tool.Class {
+		case "UI":
+			allowed = uiArgTypes
+		case "C":
+			allowed = confirmArgTypes
+		}
+		argNames := map[string]bool{}
+		for _, a := range tool.Arguments {
+			where := tool.Name + "." + a.Name
+			if !toolNamePattern.MatchString(a.Name) {
+				add("argument %s is not snake_case", where)
+			}
+			if argNames[a.Name] {
+				add("argument %s is declared twice", where)
+			}
+			argNames[a.Name] = true
+			if namesForbidden(a.Name) {
+				add("argument %s names a destination, a recipient, a path or a file (ADR-0022)", where)
+			}
+			if !slices.Contains(allowed, a.Type) {
+				add("argument %s has type %q, a %s tool allows only %v", where, a.Type, tool.Class, allowed)
+			}
+			if (a.Type == "enum") != (len(a.Values) > 0) {
+				add("argument %s: an enum needs values and only an enum has them", where)
+			}
+			for i, v := range a.Values {
+				if !toolNamePattern.MatchString(v) || slices.Contains(a.Values[:i], v) {
+					add("argument %s: enum value %q is not snake_case or repeats", where, v)
+				}
+			}
+		}
+	}
+	slices.Sort(gotUI)
+	if !slices.Equal(gotUI, uiTools) {
+		add("UI tools are %v, want %v", gotUI, uiTools)
+	}
+	return problems
+}
+
+func TestToolCatalogV1(t *testing.T) {
+	c := loadToolCatalog(t)
+	for _, p := range validateCatalog(c) {
+		t.Error(p)
+	}
+
+	got := map[string]string{}
+	for _, tool := range c.Tools {
+		got[tool.Name] = tool.Class
+	}
+	if !maps.Equal(got, pinnedTools) {
+		for name, class := range pinnedTools {
+			if got[name] != class {
+				t.Errorf("tool %s: class %q, pinned %q", name, got[name], class)
+			}
+		}
+		for name := range got {
+			if _, ok := pinnedTools[name]; !ok {
+				t.Errorf("tool %s is not pinned: add it to pinnedTools consciously", name)
+			}
+		}
+	}
+}
+
+// cloneCatalog deep-copies a catalog, so a test case can break one detail of it.
+func cloneCatalog(c toolCatalog) toolCatalog {
+	out := c
+	out.Types = maps.Clone(c.Types)
+	out.Notes = maps.Clone(c.Notes)
+	out.Tools = make([]catalogTool, len(c.Tools))
+	for i, tool := range c.Tools {
+		tool.Arguments = slices.Clone(tool.Arguments)
+		for j := range tool.Arguments {
+			tool.Arguments[j].Values = slices.Clone(tool.Arguments[j].Values)
+		}
+		out.Tools[i] = tool
+	}
+	return out
+}
+
+func toolIndex(t *testing.T, c toolCatalog, name string) int {
+	t.Helper()
+	i := slices.IndexFunc(c.Tools, func(tool catalogTool) bool { return tool.Name == name })
+	if i < 0 {
+		t.Fatalf("tool %s is not in the catalog", name)
+	}
+	return i
+}
+
+// The catalog checker must be able to fail: each case breaks one rule of a valid catalog.
+func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
+	base := loadToolCatalog(t)
+	if p := validateCatalog(base); len(p) > 0 {
+		t.Fatalf("the golden catalog must be valid, got %v", p)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, c *toolCatalog)
+		want   string
+	}{
+		{"C tool executed by the agent", func(t *testing.T, c *toolCatalog) {
+			c.Tools[toolIndex(t, *c, "propose_send")].AgentCanExecute = true
+		}, `tool "propose_send" of class C: agent_can_execute = true`},
+		{"C tool with a label argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "propose_send")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "note", Type: "label"})
+		}, `argument propose_send.note has type "label"`},
+		{"R tool with a text argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "search")
+			c.Tools[i].Arguments[0].Type = "text"
+		}, `argument search.query has type "text"`},
+		{"argument named recipient_email", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "generate_draft")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "recipient_email", Type: "label"})
+		}, "argument generate_draft.recipient_email names"},
+		{"argument named attachment", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "generate_draft")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "attachment", Type: "id"})
+		}, "argument generate_draft.attachment names"},
+		{"enum without values", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "find_lessons")
+			c.Tools[i].Arguments[3].Values = nil
+		}, "argument find_lessons.kind: an enum needs values"},
+		{"values on a non-enum", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "find_lessons")
+			c.Tools[i].Arguments[0].Values = []string{"math"}
+		}, "argument find_lessons.subject: an enum needs values"},
+		{"repeated enum value", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "find_lessons")
+			c.Tools[i].Arguments[3].Values = append(c.Tools[i].Arguments[3].Values, "lab")
+		}, `enum value "lab" is not snake_case or repeats`},
+		{"duplicate tool", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, c.Tools[toolIndex(t, *c, "search")])
+		}, `tool "search" is declared twice`},
+		{"paid UI tool", func(t *testing.T, c *toolCatalog) {
+			c.Tools[toolIndex(t, *c, "reply")].Paid = true
+		}, `tool "reply" of class UI cannot be paid`},
+		{"tool name with a forbidden word", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, catalogTool{Name: "fetch_url", Class: "R", AgentCanExecute: true})
+		}, `tool name "fetch_url" names`},
+		{"tool name with an agent forbidden word", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, catalogTool{Name: "send_email", Class: "U", AgentCanExecute: true})
+		}, `tool name "send_email" names`},
+		{"link outside the exception", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, catalogTool{Name: "open_link", Class: "U", AgentCanExecute: true})
+		}, `tool name "open_link" names`},
+		{"missing note", func(t *testing.T, c *toolCatalog) {
+			delete(c.Notes, "one_of")
+		}, `note "one_of" is missing`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := cloneCatalog(base)
+			tc.mutate(t, &c)
+			got := validateCatalog(c)
+			if !slices.ContainsFunc(got, func(p string) bool { return strings.Contains(p, tc.want) }) {
+				t.Fatalf("problems %v, want one containing %q", got, tc.want)
+			}
+		})
+	}
+
+	// The clones above must not have leaked into the base catalog.
+	if p := validateCatalog(base); len(p) > 0 {
+		t.Fatalf("a case mutated the base catalog: %v", p)
 	}
 }
