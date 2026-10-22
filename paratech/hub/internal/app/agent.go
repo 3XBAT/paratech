@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"unicode/utf8"
 
@@ -34,7 +35,10 @@ func readerAliases(cfg config.Config) map[values.Operation]string {
 	}
 }
 
-func newAgentParts(cfg config.Config, models *modelallowlist.List) (*agentParts, error) {
+// opServerPromptOff is logged at start for a server-prompt operation whose alias is not in the allowlist.
+const opServerPromptOff = "app: server-prompt operation unavailable, its alias is not in the model allowlist"
+
+func newAgentParts(cfg config.Config, models *modelallowlist.List, log *slog.Logger) (*agentParts, error) {
 	parts := &agentParts{serverPrompts: map[values.Operation]gateway.ServerPrompt{}}
 
 	versions, err := loadPanel()
@@ -56,7 +60,8 @@ func newAgentParts(cfg config.Config, models *modelallowlist.List) (*agentParts,
 		}
 		if _, _, err := models.Resolve(alias, 0); err != nil {
 			// Like AgentStep without a seal key: a Hub whose allowlist lacks the alias still starts, and the
-			// operation is refused as unavailable.
+			// operation is refused as unavailable. The warning tells the operator why.
+			log.Warn(opServerPromptOff, slog.String("operation", string(op)), slog.String("alias", alias))
 			continue
 		}
 		parts.serverPrompts[op] = gateway.ServerPrompt{Alias: alias, Version: "v" + strconv.FormatUint(uint64(version), 10), Text: string(text)}

@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -54,5 +55,38 @@ func TestServeNeedsTheAgentParts(t *testing.T) {
 	off.LLMModels = "default=claude-sonnet-5-5:8192"
 	if _, err := app.New(off, discard()); err != nil {
 		t.Fatalf("agent off without a planner alias: %v", err)
+	}
+}
+
+// A server-prompt operation whose alias is not in the allowlist is off; the start says so, naming operation and alias
+// and nothing secret.
+func TestServeWarnsOfAServerPromptWithoutItsAlias(t *testing.T) {
+	noPlanner := validConfig(":8080")
+	noPlanner.LLMModels = "default=claude-sonnet-5-5:8192"
+	tests := []struct {
+		name string
+		cfg  config.Config
+		warn bool
+	}{
+		{"alias allowed", validConfig(":8080"), false},
+		{"alias not allowed", noPlanner, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf strings.Builder
+			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			if _, err := app.New(tt.cfg, log); err != nil {
+				t.Fatal(err)
+			}
+			out := buf.String()
+			warned := strings.Contains(out, "level=WARN") && strings.Contains(out, "operation=inspect_material") &&
+				strings.Contains(out, "alias=planner")
+			if warned != tt.warn {
+				t.Fatalf("log = %q, want a warning %v", out, tt.warn)
+			}
+			if strings.Contains(out, fakeProviderKey) {
+				t.Fatalf("log leaks the provider key: %q", out)
+			}
+		})
 	}
 }

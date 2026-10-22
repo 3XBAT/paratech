@@ -94,7 +94,7 @@ func New(cfg config.Config, log *slog.Logger, opts ...Option) (*App, error) {
 			return nil, err
 		}
 		a.llm = parts
-		if a.agent, err = newAgentParts(cfg, parts.models); err != nil {
+		if a.agent, err = newAgentParts(cfg, parts.models, log); err != nil {
 			return nil, err
 		}
 	}
