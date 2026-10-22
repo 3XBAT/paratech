@@ -81,15 +81,20 @@ VALUES (sqlc.arg(id), sqlc.arg(sha256), sqlc.arg(size_bytes), sqlc.arg(type), sq
         sqlc.arg(subject_id), sqlc.arg(folder_id), sqlc.arg(status), sqlc.arg(text_status), 1, sqlc.arg(created_at),
         sqlc.arg(updated_at));
 
--- The content (sha256, size, type, name) never changes.
+-- The content (sha256, size, type, name) never changes; the text status changes only through UpdateMaterialText.
 -- name: UpdateMaterial :execrows
 UPDATE materials
-SET subject_id  = sqlc.arg(subject_id),
-    folder_id   = sqlc.arg(folder_id),
-    status      = sqlc.arg(status),
-    text_status = sqlc.arg(text_status),
-    version     = version + 1,
-    updated_at  = sqlc.arg(updated_at)
+SET subject_id = sqlc.arg(subject_id),
+    folder_id  = sqlc.arg(folder_id),
+    status     = sqlc.arg(status),
+    version    = version + 1,
+    updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- The text status is a fact about the content, not a change: checked against the version but keeps it (TASK-122).
+-- name: UpdateMaterialText :execrows
+UPDATE materials
+SET text_status = sqlc.arg(text_status)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
 -- name: ListMaterialLessons :many

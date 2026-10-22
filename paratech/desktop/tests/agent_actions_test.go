@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/doctext"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/adapters/sqlite"
@@ -27,6 +28,8 @@ import (
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
+	"paratech/desktop/internal/domain/library/inspection"
+	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 	agentloop "paratech/desktop/internal/input/agent"
@@ -34,6 +37,17 @@ import (
 )
 
 var errNoUseCase = errors.New("not used in this scenario")
+
+// lectureAnswer is a reader answer inside the schema of INSPECT_MATERIAL.
+const lectureAnswer = `{"doc_kind":"lecture","subject":null,"lesson_date":null,"has_homework":false,` +
+	`"has_ticket_list":false,"mentions_email":false}`
+
+// fixedReader stands for the quarantined reader on the Hub: it answers every request with the same text.
+type fixedReader string
+
+func (r fixedReader) InspectMaterial(context.Context, inspection.Request) (string, error) {
+	return string(r), nil
+}
 
 // noUseCase stands for the use cases this scenario does not reach (lessons, assignments, jobs).
 type noUseCase struct{}
@@ -100,6 +114,7 @@ func newActionsEnv(t *testing.T) *actionsEnv {
 	if e.lib, err = library.New(library.Deps{
 		Subjects: sqlite.NewSubjectRepository(e.db), Materials: sqlite.NewMaterialRepository(e.db), Blobs: store,
 		Lessons: sqlite.NewLessonRepository(e.db), Strings: sqlite.NewSubjectStrings(e.db), Clock: e.clock, IDs: random.IDs{},
+		Texts: doctext.New(), Reader: fixedReader(lectureAnswer), Inspections: sqlite.NewInspectionRepository(e.db),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +153,7 @@ func (e *actionsEnv) restart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.driver, err = agentloop.New(agentloop.Deps{
-		Turns: e.turns, Sink: e.sink, Library: e.lib, Knowledge: e.knowledge, Activity: e.activity,
+		Turns: e.turns, Sink: e.sink, Library: e.lib, Inspector: e.lib, Knowledge: e.knowledge, Activity: e.activity,
 		Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Journal: e.journal, Actions: e.actions,
 		Clock: e.clock, Log: log,
 	}); err != nil {
@@ -377,6 +392,106 @@ func TestAgentUndoRequestOfAPlacedAndLinkedUploadOnSQLite(t *testing.T) {
 			}
 			if undone[1].Tool != values.ToolPlaceUpload || undone[1].Status != action.StatusUndone || !after.InInbox() || len(after.Lessons()) != 0 {
 				t.Fatalf("placing = %+v, in «Входящие» %v, lessons %v", undone[1], after.InInbox(), after.Lessons())
+			}
+		})
+	}
+}
+
+// Reading an upload (inspect_upload) records its text status but is not a change of the material (TASK-122 review): a
+// placing or link before it is still undone, and a placing in the same step as the reading still runs.
+func TestAgentInspectKeepsUndoOfAMaterialOnSQLite(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps func(m, phys, link string) [][]testenv.AgentCall
+		undo  []values.Tool // the journal lines «Отменить всё» undoes, newest first
+	}{
+		{
+			name: "place then inspect",
+			steps: func(m, phys, _ string) [][]testenv.AgentCall {
+				return [][]testenv.AgentCall{
+					{{ID: "w1", Tool: "place_upload", Args: `{"upload":"` + m + `","subject":"` + phys + `","lesson":"l1"}`}},
+					{{ID: "i1", Tool: "inspect_upload", Args: `{"upload":"` + m + `"}`}},
+				}
+			},
+			undo: []values.Tool{values.ToolPlaceUpload},
+		},
+		{
+			name: "place, link, then inspect",
+			steps: func(m, phys, link string) [][]testenv.AgentCall {
+				return [][]testenv.AgentCall{
+					{{ID: "q1", Tool: "find_lessons", Args: `{}`}},
+					{{ID: "w1", Tool: "place_upload", Args: `{"upload":"` + m + `","subject":"` + phys + `","lesson":"l1"}`}},
+					{{ID: "p1", Tool: "show_plan", Args: desktopPlan("План: привязать к занятию.", desktopStep("link_material", link))}},
+					{{ID: "w2", Tool: "link_material", Args: link}},
+					{{ID: "i1", Tool: "inspect_upload", Args: `{"upload":"` + m + `"}`}},
+				}
+			},
+			undo: []values.Tool{values.ToolLinkMaterial, values.ToolPlaceUpload},
+		},
+		{
+			name: "inspect and place in one step",
+			steps: func(m, phys, _ string) [][]testenv.AgentCall {
+				return [][]testenv.AgentCall{{
+					{ID: "i1", Tool: "inspect_upload", Args: `{"upload":"` + m + `"}`},
+					{ID: "w1", Tool: "place_upload", Args: `{"upload":"` + m + `","subject":"` + phys + `","lesson":"l1"}`},
+				}}
+			},
+			undo: []values.Tool{values.ToolPlaceUpload},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newActionsEnv(t)
+			phys := string(e.physics.ID())
+			lessons := sqlite.NewLessonRepository(e.db)
+			saveScheduleLesson(t, lessons, "l1", "Механика", "Физика", libScenarioT0)
+			saveScheduleLesson(t, lessons, "l2", "Оптика", "Физика", libScenarioT0.Add(24*time.Hour))
+			e.knowledge.lessons = []kb.Lesson{{Recording: "r2", StartedAt: libScenarioT0.Add(24 * time.Hour), Subject: "Физика",
+				Kind: "lecture", Library: kb.LibrarySubject{ID: e.physics.ID(), Name: "Физика"}}}
+			e.activity.recordings = []activity.Recording{{ID: "r2", LessonID: "l2"}}
+			e.restart(t)
+
+			imp, err := e.lib.Import(t.Context(), library.Upload{Name: "Лабораторная.docx", Data: libraryDocx(t)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := string(imp.Material.ID())
+			scope, err := values.NewScope(agentRef(t, values.KindSubject, phys), values.ScreenSubjects, agentRef(t, values.KindLesson, "l1"), values.Ref{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, step := range tt.steps(m, phys, `{"material":"`+m+`","lesson":"l2"}`) {
+				e.hub.Then(step...)
+			}
+			e.hub.Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Готово"}`})
+			up := e.run(t, func(ctx context.Context) error {
+				return e.driver.Ask(ctx, agentturn.AskInput{Scope: scope, Text: "посмотри файл и положи в физику",
+					Uploads: []values.Ref{agentRef(t, values.KindUpload, m)}})
+			})
+			if up.Status == thread.StatusAwaitingPlan {
+				ref := agentturn.TurnRef{Thread: up.Thread, Turn: up.Turn}
+				up = e.run(t, func(ctx context.Context) error { return e.driver.ApprovePlan(ctx, ref) })
+			}
+			if up.Status != thread.StatusDone {
+				t.Fatalf("update = %+v", up)
+			}
+			placed, err := e.lib.Material(t.Context(), imp.Material.ID())
+			if err != nil || placed.InInbox() || placed.TextStatus() != material.TextExtracted {
+				t.Fatalf("after the request: %+v, %v; want placed and read", placed.State(), err)
+			}
+
+			undone, err := e.journal.UndoRequest(t.Context(), up.Thread, up.Turn)
+			if err != nil || len(undone) != len(tt.undo) {
+				t.Fatalf("UndoRequest = %+v, %v", undone, err)
+			}
+			for i, tool := range tt.undo {
+				if undone[i].Tool != tool || undone[i].Status != action.StatusUndone {
+					t.Fatalf("undone[%d] = %+v, want %s undone", i, undone[i], tool)
+				}
+			}
+			after, err := e.lib.Material(t.Context(), imp.Material.ID())
+			if err != nil || !after.InInbox() || len(after.Lessons()) != 0 || after.TextStatus() != material.TextExtracted {
+				t.Fatalf("after Undo: %+v, %v", after.State(), err)
 			}
 		})
 	}

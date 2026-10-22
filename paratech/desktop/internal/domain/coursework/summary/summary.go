@@ -19,11 +19,19 @@ const (
 	MaxKeyPointRunes = 300
 )
 
-// ID identifies a summary. It is the id of the transcript it summarises (IDOf).
+// ID identifies a summary. It is the id of the transcript it summarises (IDOf), or of the library material
+// (IDOfMaterial, TASK-122).
 type ID string
 
 // IDOf returns the id of the summary of transcript t.
 func IDOf(t shared.TranscriptID) ID { return ID(t) }
+
+// materialPrefix starts the id of a material's summary. Transcript ids are random tokens of letters and digits, so
+// the two kinds never collide.
+const materialPrefix = "material-"
+
+// IDOfMaterial returns the id of the summary of library material m.
+func IDOfMaterial(m shared.MaterialID) ID { return ID(materialPrefix + string(m)) }
 
 // String returns the identifier as a plain string.
 func (id ID) String() string { return string(id) }
@@ -133,12 +141,14 @@ func (c Content) Equal(o Content) bool {
 		slices.EqualFunc(c.sections, o.sections, Section.equal) && slices.Equal(c.keyPoints, o.keyPoints)
 }
 
-// Summary is the summary of one transcript (PRD section 9). Fields change only through the methods below.
+// Summary is the summary of one transcript (PRD section 9) or of one material of the library (TASK-122). Fields
+// change only through the methods below.
 type Summary struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
 	id      ID
 
-	transcript    shared.TranscriptID // empty after the transcript was deleted (ON DELETE SET NULL)
+	transcript    shared.TranscriptID // empty after the transcript was deleted (ON DELETE SET NULL), or for a material
+	material      shared.MaterialID   // the summarised material; empty for a transcript or after the material was deleted
 	lesson        shared.LessonID     // optional
 	promptVersion int                 // prompts version that produced the content
 
@@ -149,20 +159,34 @@ type Summary struct {
 
 // Spec is what the creator of a summary provides to New.
 type Spec struct {
-	Transcript    shared.TranscriptID
+	Transcript    shared.TranscriptID // exactly one of Transcript and Material
+	Material      shared.MaterialID
 	Lesson        shared.LessonID // optional
 	PromptVersion int             // at least 1
 	Content       Content
 }
 
-// New creates the summary of a transcript, never stored (Version() == 0). Its id is IDOf(spec.Transcript).
+// New creates the summary of a transcript or of a material, never stored (Version() == 0). Its id is
+// IDOf(spec.Transcript) or IDOfMaterial(spec.Material).
 func New(spec Spec, now time.Time) (*Summary, error) {
-	if err := spec.Transcript.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSummary, err)
+	var id ID
+	switch {
+	case spec.Transcript != "" && spec.Material != "":
+		return nil, fmt.Errorf("%w: a transcript and a material", ErrInvalidSummary)
+	case spec.Material != "":
+		if err := spec.Material.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidSummary, err)
+		}
+		id = IDOfMaterial(spec.Material)
+	default:
+		if err := spec.Transcript.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidSummary, err)
+		}
+		id = IDOf(spec.Transcript)
 	}
 	s := &Summary{
-		id: IDOf(spec.Transcript), transcript: spec.Transcript, lesson: spec.Lesson, promptVersion: spec.PromptVersion,
-		content: spec.Content, createdAt: now, updatedAt: now,
+		id: id, transcript: spec.Transcript, material: spec.Material, lesson: spec.Lesson,
+		promptVersion: spec.PromptVersion, content: spec.Content, createdAt: now, updatedAt: now,
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -174,7 +198,8 @@ func New(spec Spec, now time.Time) (*Summary, error) {
 type State struct {
 	Version       int64
 	ID            ID
-	Transcript    shared.TranscriptID // empty: the transcript was deleted
+	Transcript    shared.TranscriptID // empty: the transcript was deleted, or a material's summary
+	Material      shared.MaterialID   // empty: a transcript's summary, or the material was deleted
 	Lesson        shared.LessonID     // empty: none
 	PromptVersion int
 	Text          string    // the plain text; of a sectioned summary its rendering, which Restore derives again
@@ -193,12 +218,17 @@ func Restore(st State) (*Summary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidSummary, err)
 	}
-	if st.Transcript != "" && IDOf(st.Transcript) != st.ID {
+	switch {
+	case st.Transcript != "" && st.Material != "":
+		return nil, fmt.Errorf("%w: a transcript and a material", ErrInvalidSummary)
+	case st.Transcript != "" && IDOf(st.Transcript) != st.ID:
 		return nil, fmt.Errorf("%w: id differs from the transcript", ErrInvalidSummary)
+	case st.Material != "" && IDOfMaterial(st.Material) != st.ID:
+		return nil, fmt.Errorf("%w: id differs from the material", ErrInvalidSummary)
 	}
 	s := &Summary{
-		version: st.Version, id: st.ID, transcript: st.Transcript, lesson: st.Lesson, promptVersion: st.PromptVersion,
-		content: c, createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
+		version: st.Version, id: st.ID, transcript: st.Transcript, material: st.Material, lesson: st.Lesson,
+		promptVersion: st.PromptVersion, content: c, createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -254,6 +284,9 @@ func (s *Summary) ID() ID { return s.id }
 // TranscriptID returns the summarised transcript, empty if it was deleted.
 func (s *Summary) TranscriptID() shared.TranscriptID { return s.transcript }
 
+// MaterialID returns the summarised material, empty for a transcript's summary or if the material was deleted.
+func (s *Summary) MaterialID() shared.MaterialID { return s.material }
+
 // LessonID returns the lesson, empty if unknown.
 func (s *Summary) LessonID() shared.LessonID { return s.lesson }
 
@@ -272,7 +305,7 @@ func (s *Summary) UpdatedAt() time.Time { return s.updatedAt }
 // State returns the stored form of the summary, for the repositories.
 func (s *Summary) State() State {
 	st := State{
-		Version: s.version, ID: s.id, Transcript: s.transcript, Lesson: s.lesson, PromptVersion: s.promptVersion,
+		Version: s.version, ID: s.id, Transcript: s.transcript, Material: s.material, Lesson: s.lesson, PromptVersion: s.promptVersion,
 		Text: s.content.text, KeyPoints: s.content.KeyPoints(), CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
 	}
 	if s.content.Sectioned() {

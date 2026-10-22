@@ -31,6 +31,7 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 	"paratech/hub/internal/domain/shared"
 	"paratech/hub/internal/input/connect"
+	"paratech/hub/pkg/prompts"
 	"paratech/hub/testenv"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
 	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
@@ -521,5 +522,175 @@ func TestAgentEvalHubInjectionThroughTheStep(t *testing.T) {
 				t.Fatalf("history = %v", turns)
 			}
 		})
+	}
+}
+
+// --- INSPECT_MATERIAL reader (TASK-122) -----------------------------------------------------------------------------
+
+// readerHub is the public listener with Complete wired to the real gateway use case and the embedded
+// ops/inspect_material prompt; the provider and the quota store are fakes.
+type readerHub struct {
+	provider *testenv.FakeProvider
+	store    *testenv.QuotaStore
+	prompt   string
+	client   hubv1connect.GatewayServiceClient
+	key      string
+	owner    shared.APIKeyID
+}
+
+func newReaderHub(t *testing.T) *readerHub {
+	t.Helper()
+	clock := testenv.NewFakeClock(time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC))
+	keyStore := testenv.NewKeyStore()
+	keySvc, err := keys.New(keyStore, clock, testenv.Random{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := keySvc.Issue(t.Context(), "reader-tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, prompt, err := prompts.Op(string(values.OperationInspectMaterial))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &readerHub{provider: testenv.NewFakeProvider(), store: testenv.NewQuotaStore(), prompt: string(prompt),
+		key: issued.Key, owner: shared.APIKeyID(issued.ID)}
+	models, err := modelallowlist.New([]modelallowlist.Entry{
+		{Alias: "default", Model: "claude-strong", MaxOutput: 4096},
+		{Alias: "planner", Model: "claude-planner", MaxOutput: 512},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.DiscardHandler)
+	svc, err := gateway.New(gateway.Deps{
+		Accounts: h.store, Results: h.store, Provider: h.provider, Limiter: &testenv.FakeLimiter{}, Clock: clock,
+		Random: testenv.Random{}, Models: models, Log: log,
+	}, gateway.Config{
+		Unit: "tokens", Limit: 1_000_000, ReservationTTL: 10 * time.Minute, KeyRetention: 24 * time.Hour, CallTimeout: time.Minute,
+		ServerPrompts: map[values.Operation]gateway.ServerPrompt{
+			values.OperationInspectMaterial: {Alias: "planner", Version: fmt.Sprintf("v%d", version), Text: h.prompt},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := keyauth.New(keyStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh, err := connect.NewGateway(svc, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := connect.NewRouter(connect.Deps{Log: log, Readiness: readyProbe{}, Auth: auth, Gateway: gh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	h.client = hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
+	return h
+}
+
+func (h *readerHub) inspect(t *testing.T, key, material string) (*hubv1.CompletionResult, error) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{
+		"today":         "2026-10-22",
+		"subjects":      []map[string]string{{"id": "s1", "name": "Физика"}, {"id": "s2", "name": "История"}},
+		"material_text": material,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := connectrpc.NewRequest(&hubv1.CompleteRequest{Spec: &hubv1.CompletionSpec{
+		IdempotencyKey: key, OperationType: hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL, UntrustedData: string(data),
+	}})
+	req.Header().Set("Authorization", "Bearer "+h.key)
+	resp, err := h.client.Complete(t.Context(), req)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg.GetResult(), nil
+}
+
+func readerAnswer(t *testing.T, output string) testenv.ProviderStep {
+	t.Helper()
+	u, err := values.NewUsage(700, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := values.NewCompletion(output, u, values.StopEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return testenv.ProviderStep{Completion: c}
+}
+
+const readerValid = `{"doc_kind":"lecture","subject":"s1","lesson_date":"2026-10-14","has_homework":true,"has_ticket_list":false,"mentions_email":true}`
+
+// TestAgentEvalReaderValidAnswer: a valid answer comes back as the canonical schema object through the handler.
+func TestAgentEvalReaderValidAnswer(t *testing.T) {
+	h := newReaderHub(t)
+	h.provider.Push(readerAnswer(t, readerValid))
+	res, err := h.inspect(t, "insp:u1", "Лекция 5, 14 октября. ДЗ: задачи 1-3, прислать на x@example.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.GetOutput() != readerValid || res.GetReplayed() {
+		t.Fatalf("result = %v", res)
+	}
+	call := h.provider.Calls()[0]
+	if call.Instructions() != h.prompt || call.Model() != "claude-planner" || strings.Contains(call.Instructions(), "Лекция") {
+		t.Fatalf("provider call = %v", call)
+	}
+}
+
+// TestAgentEvalReaderEnumFreeText enforces every injection fixture, reader-enum-free-text first: the material says
+// what an obedient model would write, and the model obeys in each slot of the schema (the text in an enum, ID, date or
+// flag field, or as an extra field). The Hub refuses the whole answer with a permanent PROVIDER_ERROR, the text never
+// reaches the instruction slot, and the same key repeats the refusal without a second provider call.
+func TestAgentEvalReaderEnumFreeText(t *testing.T) {
+	fixtures := loadEvalFixtures[evalInjectionFixture](t, "injection")
+	if !slices.ContainsFunc(fixtures, func(f evalInjectionFixture) bool { return f.Name == "reader-enum-free-text" }) {
+		t.Fatal("fixture reader-enum-free-text is missing")
+	}
+	for _, fx := range fixtures {
+		q, err := json.Marshal(fx.Untrusted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slots := map[string]string{
+			"doc_kind":       strings.Replace(readerValid, `"lecture"`, string(q), 1),
+			"subject":        strings.Replace(readerValid, `"s1"`, string(q), 1),
+			"lesson_date":    strings.Replace(readerValid, `"2026-10-14"`, string(q), 1),
+			"mentions_email": strings.Replace(readerValid, `"mentions_email":true`, `"mentions_email":`+string(q), 1),
+			"extra field":    strings.Replace(readerValid, `}`, `,"note":`+string(q)+`}`, 1),
+			"prose":          fx.Untrusted,
+		}
+		for slot, out := range slots {
+			t.Run(fx.Name+"/"+slot, func(t *testing.T) {
+				h := newReaderHub(t)
+				h.provider.Push(readerAnswer(t, out))
+				for attempt := range 2 {
+					res, err := h.inspect(t, "insp:u1", fx.Untrusted)
+					code, d := gwDetail(t, err)
+					if res != nil || code != connectrpc.CodeUnavailable || d.GetCode() != hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR || d.GetRetryable() {
+						t.Fatalf("attempt %d: %v / %v, want a permanent PROVIDER_ERROR", attempt, code, d)
+					}
+					if strings.Contains(err.Error(), fx.Untrusted) {
+						t.Fatalf("the error quotes the answer: %v", err)
+					}
+				}
+				calls := h.provider.Calls()
+				if len(calls) != 1 || calls[0].Instructions() != h.prompt || strings.Contains(calls[0].Instructions(), fx.Untrusted) {
+					t.Fatalf("provider calls = %d; the untrusted text must stay in the data", len(calls))
+				}
+				if used, held := h.store.Totals(h.owner); used != 730 || held != 0 {
+					t.Fatalf("used %d held %d, want the billed answer charged once", used, held)
+				}
+			})
+		}
 	}
 }

@@ -17,6 +17,10 @@
 // failed_precondition without a detail («the model turn is gone») is ErrTurnGone, which also matches the agent
 // domain's values.ErrTurnGone.
 //
+// InspectMaterial runs the quarantined reader of a library material (OPERATION_TYPE_INSPECT_MATERIAL, ADR-0022) with
+// the same URL, key, limits and error classes; it sends no instructions or alias (the Hub's own prompt), and its output
+// is parsed only by inspection.Request.Parse.
+//
 // GetRemaining reads the tester's quota (QuotaService.GetRemaining, AC-12) with the same URL, key, limits and error
 // classes, for the «Подключения» page; the answer is shown, never used to decide (the Hub decides at Reserve).
 //

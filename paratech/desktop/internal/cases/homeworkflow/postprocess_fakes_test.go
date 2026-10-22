@@ -244,6 +244,38 @@ func (r ppAssignments) ListByTranscript(_ context.Context, t shared.TranscriptID
 	return out, nil
 }
 
+func (r ppAssignments) GetByMaterialSource(_ context.Context, m shared.MaterialID, index int) (*assignment.Assignment, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for _, st := range r.s.assignments {
+		if st.Material == m && st.SourceIndex == index {
+			return assignment.Restore(st)
+		}
+	}
+	return nil, fmt.Errorf("assignment of material %s/%d: %w", m, index, shared.ErrNotFound)
+}
+
+func (r ppAssignments) ListByMaterial(_ context.Context, m shared.MaterialID) ([]*assignment.Assignment, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var states []assignment.State
+	for _, st := range r.s.assignments {
+		if st.Material == m && st.SourceIndex >= 0 {
+			states = append(states, st)
+		}
+	}
+	slices.SortFunc(states, func(a, b assignment.State) int { return a.SourceIndex - b.SourceIndex })
+	out := []*assignment.Assignment{}
+	for _, st := range states {
+		a, err := assignment.Restore(st)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
 func (r ppAssignments) Delete(_ context.Context, a *assignment.Assignment) error {
 	if hook := r.s.beforeDelete; hook != nil {
 		r.s.beforeDelete = nil
@@ -280,7 +312,8 @@ func (r ppAssignments) Save(_ context.Context, a *assignment.Assignment) error {
 	st := a.State()
 	if !exists {
 		for _, other := range r.s.assignments {
-			if st.SourceIndex >= 0 && other.Transcript == st.Transcript && other.SourceIndex == st.SourceIndex {
+			if st.SourceIndex >= 0 && other.Transcript == st.Transcript && other.Material == st.Material &&
+				other.SourceIndex == st.SourceIndex {
 				return shared.ErrDuplicate
 			}
 		}
@@ -509,6 +542,7 @@ var (
 	_ SummaryRepository     = ppSummaries{}
 	_ LectureTextRepository = ppLectures{}
 	_ AssignmentRepository  = ppAssignments{}
+	_ MaterialAssignments   = ppAssignments{}
 	_ JobEnqueuer           = ppJobs{}
 	_ JobReader             = ppJobs{}
 	_ PostJobs              = ppJobs{}

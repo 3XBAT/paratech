@@ -75,6 +75,10 @@ type PostProcessor struct {
 	ids         IDGenerator
 	log         *slog.Logger
 
+	// The text of library materials and their assignments (TASK-122); nil: material jobs fail as unknown.
+	materials           MaterialTexts
+	materialAssignments MaterialAssignments
+
 	modelAlias  string
 	maxAttempts int
 }
@@ -92,10 +96,14 @@ func NewPostProcessor(d PostProcessDeps) (*PostProcessor, error) {
 	if d.MaxAttempts < 0 {
 		return nil, fmt.Errorf("%w: max attempts %d", ErrInvalidConfig, d.MaxAttempts)
 	}
+	if (d.Materials == nil) != (d.MaterialAssignments == nil) {
+		return nil, fmt.Errorf("%w: material texts and material assignments go together", ErrInvalidConfig)
+	}
 	p := &PostProcessor{
 		llm: d.LLM, transcripts: d.Transcripts, recordings: d.Recordings, lessons: d.Lessons, artifacts: d.Artifacts,
 		summaries: d.Summaries, assignments: d.Assignments, lectures: d.LectureTexts, jobs: d.Jobs, clock: d.Clock, ids: d.IDs,
-		log: d.Log, modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts,
+		log: d.Log, modelAlias: d.ModelAlias, maxAttempts: d.MaxAttempts, materials: d.Materials,
+		materialAssignments: d.MaterialAssignments,
 	}
 	if p.maxAttempts == 0 {
 		p.maxAttempts = DefaultPostProcessAttempts
@@ -169,9 +177,9 @@ func buildRequest(modelAlias string, id shared.JobID, sel contextselection.Conte
 // operationOf returns the LLM operation of a post-processing job type.
 func operationOf(t job.Type) (values.Operation, bool) {
 	switch t {
-	case SummarizeJobType:
+	case SummarizeJobType, MaterialSummaryJobType:
 		return values.OperationSummary, true
-	case ExtractHomeworkJobType:
+	case ExtractHomeworkJobType, MaterialHomeworkJobType:
 		return values.OperationExtractHomework, true
 	case LectureTextJobType:
 		return values.OperationLectureText, true
@@ -179,14 +187,16 @@ func operationOf(t job.Type) (values.Operation, bool) {
 	return "", false
 }
 
-// lessonInput is what a job knows about its transcript once loaded.
+// lessonInput is what a job knows about its transcript, or its library material, once loaded.
 type lessonInput struct {
 	transcript shared.TranscriptID
-	lesson     shared.LessonID // empty: an ad-hoc recording or a lesson no longer in the schedule
+	doc        shared.MaterialID // set instead of transcript for a job on a library material (TASK-122)
+	lesson     shared.LessonID   // empty: an ad-hoc recording or a lesson no longer in the schedule
 	material   contextselection.Material
 }
 
 // Handle runs one attempt of a summarize or extract_homework job, or one step of a lecture_text job (jobrunner.Handler).
+// A material_summary or material_homework job runs the same on the text of a library material (TASK-122).
 func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report func(ctx context.Context, pr job.Progress) error) error {
 	if report == nil {
 		report = func(context.Context, job.Progress) error { return nil }
@@ -195,12 +205,7 @@ func (p *PostProcessor) Handle(ctx context.Context, snap job.Snapshot, report fu
 	if !ok {
 		return p.permanent(snap, stepPayload, ErrUnknownJobType, nil)
 	}
-	req, err := values.ParsePostProcessPayload(snap.Payload())
-	if err != nil {
-		return p.permanent(snap, stepPayload, ErrInvalidPayload, err)
-	}
-
-	in, err := p.load(ctx, snap, req.Transcript())
+	in, err := p.loadInput(ctx, snap)
 	if err != nil {
 		return err
 	}
@@ -359,6 +364,22 @@ func versionAttrs(t job.Type) []any {
 	return attrs
 }
 
+// loadInput reads the payload of the job and loads its transcript or its material.
+func (p *PostProcessor) loadInput(ctx context.Context, snap job.Snapshot) (lessonInput, error) {
+	if isMaterialJob(snap.Type()) {
+		req, err := values.ParseMaterialPayload(snap.Payload())
+		if err != nil {
+			return lessonInput{}, p.permanent(snap, stepPayload, ErrInvalidPayload, err)
+		}
+		return p.loadMaterial(ctx, snap, req.Material())
+	}
+	req, err := values.ParsePostProcessPayload(snap.Payload())
+	if err != nil {
+		return lessonInput{}, p.permanent(snap, stepPayload, ErrInvalidPayload, err)
+	}
+	return p.load(ctx, snap, req.Transcript())
+}
+
 // load reads the transcript text and the lesson context of the job.
 func (p *PostProcessor) load(ctx context.Context, snap job.Snapshot, id shared.TranscriptID) (lessonInput, error) {
 	t, err := p.transcripts.Get(ctx, id)
@@ -484,14 +505,13 @@ func (p *PostProcessor) summarize(ctx context.Context, snap job.Snapshot, report
 		return err
 	}
 
+	id, spec := in.summarySpec(content)
 	var last error
 	for range saveAttempts {
-		cur, err := p.summaries.Get(ctx, summary.IDOf(in.transcript))
+		cur, err := p.summaries.Get(ctx, id)
 		switch {
 		case errors.Is(err, shared.ErrNotFound):
-			cur, err = summary.New(summary.Spec{
-				Transcript: in.transcript, Lesson: in.lesson, PromptVersion: prompts.Version, Content: content,
-			}, p.clock.Now())
+			cur, err = summary.New(spec, p.clock.Now())
 			if err != nil {
 				return p.permanent(snap, stepSave, ErrStorage, err)
 			}
@@ -537,7 +557,7 @@ func (p *PostProcessor) extract(ctx context.Context, snap job.Snapshot, report f
 // withdrawSuperseded deletes the extracted assignments of the transcript that an answer of items items left behind,
 // one aggregate per delete (ARCH-23); the aggregate decides which (assignment.Superseded).
 func (p *PostProcessor) withdrawSuperseded(ctx context.Context, snap job.Snapshot, in lessonInput, items int) error {
-	list, err := p.assignments.ListByTranscript(ctx, in.transcript)
+	list, err := p.extracted(ctx, in)
 	if err != nil {
 		return p.retry(snap, stepSave, ErrStorage, err)
 	}
@@ -586,12 +606,12 @@ func (p *PostProcessor) storeAssignment(ctx context.Context, snap job.Snapshot, 
 	hints values.LessonNames) error {
 	var last error
 	for range saveAttempts {
-		a, err := p.assignments.GetBySource(ctx, in.transcript, index)
+		a, err := p.assignmentBySource(ctx, in, index)
 		switch {
 		case errors.Is(err, shared.ErrNotFound):
 			a, err = assignment.NewExtracted(assignment.Spec{
 				ID: p.ids.NewAssignmentID(), Lesson: in.lesson,
-				Origin:        assignment.Origin{Transcript: in.transcript, Index: index},
+				Origin:        in.origin(index),
 				PromptVersion: prompts.Version, Details: d, Hints: hints,
 			}, p.clock.Now())
 			if err != nil {

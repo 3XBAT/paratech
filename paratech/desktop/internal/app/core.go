@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"paratech/desktop/internal/adapters/componentstore"
+	"paratech/desktop/internal/adapters/doctext"
 	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
@@ -176,10 +177,22 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: mail: %w", err)
 	}
 
+	// The library of subjects and files (ADR-0024): files in the artifact store by sha256; a new subject's semester in
+	// the local time zone. Its texts are read locally (doctext); only Inspect asks the Hub's reader (TASK-122).
+	lib, err := library.New(library.Deps{
+		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
+		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
+		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: library: %w", err)
+	}
+
+	// The post-processing also runs the summary and the homework search of a library material (TASK-122).
 	post, err := homeworkflow.NewPostProcessor(homeworkflow.PostProcessDeps{
 		LLM: llm, Transcripts: transcripts, Recordings: recordings, Lessons: lessons, Artifacts: store,
 		Summaries: summaries, Assignments: assignments, LectureTexts: lectureTexts, Jobs: jobs, Clock: e.local, IDs: e.ids,
-		Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
+		Materials: lib, MaterialAssignments: assignments, Log: log, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
 	})
 	if err != nil {
 		return fmt.Errorf("app: post-processing: %w", err)
@@ -192,6 +205,12 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	})
 	if err != nil {
 		return fmt.Errorf("app: post-processing reruns: %w", err)
+	}
+	materialJobs, err := homeworkflow.NewMaterialJobs(homeworkflow.MaterialJobsDeps{
+		Materials: lib, Jobs: jobs, Summaries: summaries, Clock: e.local, IDs: e.ids, Log: log, MaxAttempts: maxAttempts,
+	})
+	if err != nil {
+		return fmt.Errorf("app: material jobs: %w", err)
 	}
 
 	deliveries := sqlite.NewDeliveryRepository(db)
@@ -335,15 +354,6 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: summary viewer: %w", err)
 	}
-	// The library of subjects and files (ADR-0024): local only, files in the artifact store by sha256; a new subject's
-	// semester in the local time zone.
-	lib, err := library.New(library.Deps{
-		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
-		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Log: log,
-	})
-	if err != nil {
-		return fmt.Errorf("app: library: %w", err)
-	}
 	// The knowledge base reads the same local results at query time and groups lessons by library subject; dates of
 	// the export in the local time zone.
 	knowledge, err := knowledgebase.New(knowledgebase.Deps{
@@ -361,7 +371,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
-		rerunner: rerunner,
+		rerunner: rerunner, materials: materialJobs,
 	}, log); err != nil {
 		return err
 	}

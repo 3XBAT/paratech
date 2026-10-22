@@ -31,7 +31,7 @@ func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentPara
 
 const getAssignment = `-- name: GetAssignment :one
 
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher FROM assignments WHERE id = ?1
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE id = ?1
 `
 
 // Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
@@ -57,12 +57,48 @@ func (q *Queries) GetAssignment(ctx context.Context, id string) (Assignment, err
 		&i.HintTeacher,
 		&i.UserSubject,
 		&i.UserTeacher,
+		&i.MaterialID,
+	)
+	return i, err
+}
+
+const getAssignmentByMaterialSource = `-- name: GetAssignmentByMaterialSource :one
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE material_id = ?1 AND source_index = ?2
+`
+
+type GetAssignmentByMaterialSourceParams struct {
+	MaterialID  sql.NullString
+	SourceIndex sql.NullInt64
+}
+
+// Assignments found in a library material (TASK-122), found again by (material_id, source_index).
+func (q *Queries) GetAssignmentByMaterialSource(ctx context.Context, arg GetAssignmentByMaterialSourceParams) (Assignment, error) {
+	row := q.db.QueryRowContext(ctx, getAssignmentByMaterialSource, arg.MaterialID, arg.SourceIndex)
+	var i Assignment
+	err := row.Scan(
+		&i.ID,
+		&i.LessonID,
+		&i.TranscriptID,
+		&i.Title,
+		&i.Description,
+		&i.DueAt,
+		&i.UserEdited,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SourceIndex,
+		&i.PromptVersion,
+		&i.HintSubject,
+		&i.HintTeacher,
+		&i.UserSubject,
+		&i.UserTeacher,
+		&i.MaterialID,
 	)
 	return i, err
 }
 
 const getAssignmentBySource = `-- name: GetAssignmentBySource :one
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher FROM assignments WHERE transcript_id = ?1 AND source_index = ?2
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE transcript_id = ?1 AND source_index = ?2
 `
 
 type GetAssignmentBySourceParams struct {
@@ -90,24 +126,26 @@ func (q *Queries) GetAssignmentBySource(ctx context.Context, arg GetAssignmentBy
 		&i.HintTeacher,
 		&i.UserSubject,
 		&i.UserTeacher,
+		&i.MaterialID,
 	)
 	return i, err
 }
 
 const insertAssignment = `-- name: InsertAssignment :exec
-INSERT INTO assignments (id, lesson_id, transcript_id, title, description, due_at, user_edited, source_index,
+INSERT INTO assignments (id, lesson_id, transcript_id, material_id, title, description, due_at, user_edited, source_index,
                          prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, version, created_at,
                          updated_at)
-VALUES (?1, ?2, ?3, ?4, ?5,
-        ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, ?13, 1,
-        ?14, ?15)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+        ?7, ?8, ?9, ?10,
+        ?11, ?12, ?13, ?14, 1,
+        ?15, ?16)
 `
 
 type InsertAssignmentParams struct {
 	ID            string
 	LessonID      sql.NullString
 	TranscriptID  sql.NullString
+	MaterialID    sql.NullString
 	Title         string
 	Description   string
 	DueAt         sql.NullInt64
@@ -128,6 +166,7 @@ func (q *Queries) InsertAssignment(ctx context.Context, arg InsertAssignmentPara
 		arg.ID,
 		arg.LessonID,
 		arg.TranscriptID,
+		arg.MaterialID,
 		arg.Title,
 		arg.Description,
 		arg.DueAt,
@@ -144,8 +183,53 @@ func (q *Queries) InsertAssignment(ctx context.Context, arg InsertAssignmentPara
 	return err
 }
 
+const listAssignmentsByMaterial = `-- name: ListAssignmentsByMaterial :many
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE material_id = ?1 ORDER BY source_index, id
+`
+
+func (q *Queries) ListAssignmentsByMaterial(ctx context.Context, materialID sql.NullString) ([]Assignment, error) {
+	rows, err := q.db.QueryContext(ctx, listAssignmentsByMaterial, materialID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Assignment{}
+	for rows.Next() {
+		var i Assignment
+		if err := rows.Scan(
+			&i.ID,
+			&i.LessonID,
+			&i.TranscriptID,
+			&i.Title,
+			&i.Description,
+			&i.DueAt,
+			&i.UserEdited,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SourceIndex,
+			&i.PromptVersion,
+			&i.HintSubject,
+			&i.HintTeacher,
+			&i.UserSubject,
+			&i.UserTeacher,
+			&i.MaterialID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssignmentsByTranscript = `-- name: ListAssignmentsByTranscript :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher FROM assignments WHERE transcript_id = ?1 ORDER BY source_index, id
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE transcript_id = ?1 ORDER BY source_index, id
 `
 
 func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error) {
@@ -174,6 +258,7 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 			&i.HintTeacher,
 			&i.UserSubject,
 			&i.UserTeacher,
+			&i.MaterialID,
 		); err != nil {
 			return nil, err
 		}
@@ -189,7 +274,7 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 }
 
 const listRecentAssignments = `-- name: ListRecentAssignments :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher FROM assignments ORDER BY created_at DESC, source_index, id LIMIT ?1
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments ORDER BY created_at DESC, source_index, id LIMIT ?1
 `
 
 // The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
@@ -219,6 +304,7 @@ func (q *Queries) ListRecentAssignments(ctx context.Context, maxRows int64) ([]A
 			&i.HintTeacher,
 			&i.UserSubject,
 			&i.UserTeacher,
+			&i.MaterialID,
 		); err != nil {
 			return nil, err
 		}
@@ -264,8 +350,8 @@ type UpdateAssignmentParams struct {
 	ExpectedVersion int64
 }
 
-// Compare-and-swap on the loaded version. The origin (lesson, transcript, source index) and the creation time never
-// change, so a stale save cannot undo ON DELETE SET NULL of the lesson or the transcript.
+// Compare-and-swap on the loaded version. The origin (lesson, transcript or material, source index) and the creation
+// time never change, so a stale save cannot undo ON DELETE SET NULL of the lesson, the transcript or the material.
 func (q *Queries) UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateAssignment,
 		arg.Title,

@@ -315,6 +315,10 @@ func ValidDate(s string) bool {
 	return err == nil
 }
 
+// ValidSubjectName reports whether s is a subject name the Hub passes to a model as data: 1-MaxLabelRunes letters,
+// digits, spaces and ".,-()", not blank (ADR-0022).
+func ValidSubjectName(s string) bool { return validSubjectName(s) }
+
 func validSubjectName(s string) bool {
 	if !utf8.ValidString(s) || isBlank(s) || utf8.RuneCountInString(s) > MaxLabelRunes {
 		return false

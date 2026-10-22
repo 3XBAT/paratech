@@ -20,12 +20,25 @@ type LessonReadiness interface {
 
 // Facts tells agentturn what the agent domain cannot see in a call before it runs (agentturn.CallFacts). It only
 // reports facts; the domain decides what they mean (ARCH-41).
-//   - ReplacesReady: make_summary or make_lecture_text of a recording whose summary or lecture text is stored. The
-//     results of a material do not exist yet (TASK-122), so they replace nothing.
+//   - ReplacesReady: make_summary or make_lecture_text of a recording whose summary or lecture text is stored, or
+//     make_summary of a material whose summary is stored (TASK-122, with WithMaterials).
 //   - Cost: no estimate exists yet, so it stays unknown (zero) and every paid write needs a plan (D8, conservative).
 //   - Triage: no triage tool runs yet (TASK-103), so none.
 type Facts struct {
-	lessons LessonReadiness
+	lessons   LessonReadiness
+	materials MaterialReadiness // nil: a material's summary is never ready
+}
+
+// MaterialReadiness tells whether the summary of a library material is stored (cases/homeworkflow).
+type MaterialReadiness interface {
+	SummaryReady(ctx context.Context, id shared.MaterialID) (bool, error)
+}
+
+// WithMaterials returns Facts that also know whether a material's summary is stored.
+func (f *Facts) WithMaterials(m MaterialReadiness) *Facts {
+	out := *f
+	out.materials = m
+	return &out
 }
 
 // NewFacts checks the dependency.
@@ -41,6 +54,16 @@ func (f *Facts) Facts(ctx context.Context, call values.Call) (thread.Facts, erro
 	tool := call.Tool()
 	if tool != values.ToolMakeSummary && tool != values.ToolMakeLectureText {
 		return thread.Facts{}, nil
+	}
+	if m, ok := call.Args().ID("material"); ok {
+		if f.materials == nil {
+			return thread.Facts{}, nil
+		}
+		ready, err := f.materials.SummaryReady(ctx, shared.MaterialID(m.ID()))
+		if err != nil {
+			return thread.Facts{}, err
+		}
+		return thread.Facts{ReplacesReady: ready}, nil
 	}
 	rec, ok := call.Args().ID("recording")
 	if !ok {

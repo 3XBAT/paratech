@@ -5,7 +5,8 @@
 // the Provider port (request, completion, usage, stop reason, provider error); llm/services/modelallowlist is the
 // server-side model allowlist; llm/services/requestlimits bounds one call (reserved amount, per-tester rate). For the
 // agent (ADR-0023) llm/values also holds the agent step request, tool calls and results; llm/services/toolcatalog is
-// the tool catalog of one version with the check of returned calls; llm/services/seal signs and checks echoed calls.
+// the tool catalog of one version with the check of returned calls; llm/services/seal signs and checks echoed calls;
+// llm/services/inspect is the input and the strict answer schema of the INSPECT_MATERIAL reader (ADR-0022).
 // The context has no aggregate yet.
 //
 // Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared.

@@ -1,10 +1,12 @@
 package tests
 
 // Injection fixtures (shared/testdata/agent/injection, TASK-135, ADR-0022) at the desktop layers that exist today:
-// the strict argument parser, the name value objects, the policy and the thread, and the agent use case with the
-// real SQLite and Hub client. What needs the Driver (TASK-117) is listed in the fixtures' pending_driver field.
+// the strict argument parser, the name value objects, the policy and the thread, the agent use case with the real
+// SQLite and Hub client, and the INSPECT_MATERIAL reader's answer (TASK-122). What needs the Driver (TASK-117) is
+// listed in the fixtures' pending_driver field.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -12,9 +14,11 @@ import (
 	"time"
 
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/testenv"
 )
@@ -292,4 +296,95 @@ func TestAgentInjectionRefusalsCarryNoText(t *testing.T) {
 			t.Fatalf("%s: refusal result %s", fx.Name, res.ResultJSON)
 		}
 	}
+}
+
+// readerSlots are the fields of an INSPECT_MATERIAL answer; obeyedAnswer puts text into one of them, as a reader that
+// obeyed the material would (a JSON string, also where the schema wants a date, an ID or a boolean).
+var readerSlots = []string{"doc_kind", "subject", "lesson_date", "has_homework", "has_ticket_list", "mentions_email"}
+
+func obeyedAnswer(t *testing.T, slot, text string) string {
+	t.Helper()
+	answer := map[string]any{
+		"doc_kind": "other", "subject": nil, "lesson_date": nil, "has_homework": false, "has_ticket_list": false,
+		"mentions_email": false,
+	}
+	answer[slot] = text
+	b, err := json.Marshal(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestAgentInjectionReaderAnswers: whatever slot of the reader's answer the untrusted text lands in, the desktop
+// parser refuses the whole answer (the Hub's schema check does the same, hub/tests). The free text in an enum field
+// of reader-enum-free-text is one of these cases.
+func TestAgentInjectionReaderAnswers(t *testing.T) {
+	req, err := inspection.NewRequest("m1", time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC),
+		[]inspection.Candidate{{ID: "s1", Name: "Физика"}}, "Лекция 1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := req.Parse(obeyedAnswer(t, "subject", "s1")); err != nil {
+		t.Fatalf("a valid answer is refused: %v", err)
+	}
+	for _, fx := range loadInjectionFixtures(t) {
+		t.Run(fx.Name, func(t *testing.T) {
+			for _, slot := range readerSlots {
+				out := obeyedAnswer(t, slot, fx.Untrusted)
+				if _, err := req.Parse(out); !errors.Is(err, inspection.ErrInvalidAnswer) {
+					t.Errorf("%s: %v, want the answer refused", slot, err)
+				} else if strings.Contains(err.Error(), fx.Untrusted) {
+					t.Errorf("%s: the refusal quotes the text", slot)
+				}
+			}
+			// An extra field carrying the text is refused as well.
+			if _, err := req.Parse(strings.Replace(obeyedAnswer(t, "subject", "s1"), "{", `{"note":`+mustQuote(t, fx.Untrusted)+",", 1)); !errors.Is(err, inspection.ErrInvalidAnswer) {
+				t.Errorf("extra field: %v", err)
+			}
+		})
+	}
+}
+
+// TestAgentInjectionReaderEndToEnd: every fixture as the text of an uploaded file, read through the real stack
+// (extractor, Hub client, fake Hub, SQLite). The reader that obeys it in the enum field is refused, nothing is kept as
+// an answer and the file stays where it was: no move, link or send happens because of a file's text.
+func TestAgentInjectionReaderEndToEnd(t *testing.T) {
+	for _, fx := range loadInjectionFixtures(t) {
+		t.Run(fx.Name, func(t *testing.T) {
+			e := newMaterialScenario(t)
+			ctx := context.Background()
+			up, err := e.lib.Import(ctx, library.Upload{Name: "file.txt", Data: []byte("Методичка.\n" + fx.Untrusted + "\n")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.hub.AnswerInspect(obeyedAnswer(t, "doc_kind", fx.Untrusted))
+			if _, err := e.lib.Inspect(ctx, up.Material.ID()); !errors.Is(err, library.ErrReaderRefused) {
+				t.Fatalf("Inspect = %v, want the answer refused", err)
+			}
+			if ins, err := e.inspections.Get(ctx, up.Material.ID()); err != nil || ins.Status() != inspection.StatusRefused {
+				t.Fatalf("stored = %+v, %v", ins, err)
+			}
+			m, err := e.lib.Material(ctx, up.Material.ID())
+			if err != nil || !m.InInbox() || len(m.Lessons()) != 0 {
+				t.Fatalf("material = %+v, %v", m, err)
+			}
+			// The text reached the reader only as the value of material_text.
+			specs := e.inspectRequests()
+			var data map[string]any
+			if len(specs) != 1 || json.Unmarshal([]byte(specs[0].GetUntrustedData()), &data) != nil ||
+				!strings.Contains(data["material_text"].(string), fx.Untrusted) || specs[0].GetInstructions() != "" {
+				t.Fatalf("reader request %v", specs)
+			}
+		})
+	}
+}
+
+func mustQuote(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

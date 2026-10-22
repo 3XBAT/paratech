@@ -110,6 +110,11 @@ type PostProcessDeps struct {
 	IDs          IDGenerator
 	Log          *slog.Logger
 
+	// Materials and MaterialAssignments run the jobs on a library material (TASK-122); both or neither. Without
+	// them a material job fails as an unknown job type.
+	Materials           MaterialTexts
+	MaterialAssignments MaterialAssignments
+
 	// ModelAlias is the Hub model alias of the requests, from the app configuration (values.NewLLMRequest rules).
 	ModelAlias string
 

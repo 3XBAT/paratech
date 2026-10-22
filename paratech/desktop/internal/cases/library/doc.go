@@ -15,8 +15,11 @@
 //     file needs its place to be restored) and the aggregate refuses a non-empty one; the database RESTRICT closes the
 //     race between the count and the save.
 //
-// The text of a material is not read here (TextStatus only; extraction and the agent tools come later). Nothing here
-// talks to the network. The original file name is shown only, never logged.
+// The text of a material (TASK-122): MaterialText reads the stored bytes again, checks them against the sha256 and
+// extracts the text; Inspect sends the beginning of it with the subjects as candidates to the quarantined reader on
+// the Hub (ADR-0022) and keeps the strictly checked answer per material and text. That answer is a suggestion only:
+// nothing is placed, linked or sent because of it. Inspect is the only call that talks to the network. The original
+// file name is shown only, never logged or sent.
 //
 // Rules that apply: ARCH-20..27.
 package library

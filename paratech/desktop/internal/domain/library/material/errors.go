@@ -24,4 +24,17 @@ var (
 
 	// ErrTooManyLessons means the material is linked to as many lessons as it may be.
 	ErrTooManyLessons = errors.New("too many linked lessons")
+
+	// ErrInvalidText means an extracted text that breaks the rules of Text (locators).
+	ErrInvalidText = errors.New("invalid material text")
+
+	// ErrTextUnreadable means a file whose text cannot be read: damaged, not of its type, or beyond the limits of the
+	// reader (entries, sizes).
+	ErrTextUnreadable = errors.New("material text cannot be read")
+
+	// ErrTextNotExtracted means a type whose text is not read at all: PDF (ADR-0024).
+	ErrTextNotExtracted = errors.New("material text is not extracted for this type")
+
+	// ErrDamaged means the stored bytes no longer have the sha256 of the material.
+	ErrDamaged = errors.New("stored file is damaged")
 )

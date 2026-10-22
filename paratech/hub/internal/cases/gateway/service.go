@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"paratech/hub/internal/domain/llm/services/inspect"
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/services/requestlimits"
 	"paratech/hub/internal/domain/llm/values"
@@ -93,6 +94,8 @@ type call struct {
 	spec    values.Spec
 	reserve account.ReserveRequest
 	request values.Request
+	// reader is set for INSPECT_MATERIAL: the answer must pass its schema before it is stored or returned.
+	reader *inspect.Input
 }
 
 // Complete runs one completion for cmd.Owner. Errors: *RateLimitedError, ErrInvalidRequest, *QuotaExceededError,
@@ -141,6 +144,13 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 		return Result{}, err
 	}
 	attrs = append(attrs, "reservation", rec.ID.String())
+	if stored.Stored && c.reader != nil {
+		// The stored answer is the canonical one or FailedOutput; a refused answer stays refused, never paid twice.
+		if _, err := c.reader.ParseAnswer(stored.Output); err != nil {
+			logCall(outcomeProvider, append(attrs, "replayed", true, "input_tokens", stored.InputTokens, "output_tokens", stored.OutputTokens)...)
+			return Result{}, invalidAnswer()
+		}
+	}
 	if stored.Stored {
 		logCall(outcomeReplayed, append(attrs, "input_tokens", stored.InputTokens, "output_tokens", stored.OutputTokens)...)
 		return Result{
@@ -180,7 +190,24 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	}
 
 	usage := completion.Usage()
-	res, quota, err := s.settle(ctx, c, rec.ID, completion)
+	output := completion.Output()
+	if c.reader != nil {
+		answer, aerr := c.reader.ParseAnswer(output)
+		if aerr != nil {
+			// The provider billed this answer: charged and stored as a refusal, so a retry with the key repeats the
+			// refusal instead of paying again (as AgentStep does, ADR-0023). Nothing of the answer leaves the Hub.
+			if _, _, err := s.settle(ctx, c, rec.ID, inspect.FailedOutput, usage); err != nil {
+				s.log.ErrorContext(ctx, "completion settlement failed", "reservation", rec.ID.String(), "err", err)
+				logCall(outcomeFailed, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output())...)
+				return Result{}, err
+			}
+			logCall(outcomeProvider, append(attrs, "charged", true, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
+				"stop", completion.Stop().String(), "err", aerr)...)
+			return Result{}, invalidAnswer()
+		}
+		output = answer.Encode()
+	}
+	res, quota, err := s.settle(ctx, c, rec.ID, output, usage)
 	if err != nil {
 		s.log.ErrorContext(ctx, "completion settlement failed", "reservation", rec.ID.String(), "err", err)
 		logCall(outcomeFailed, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output())...)
@@ -189,9 +216,14 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	logCall(outcomeCompleted, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
 		"stop", completion.Stop().String(), "charged", res.Charged)...)
 	return Result{
-		Output: completion.Output(), InputTokens: usage.Input(), OutputTokens: usage.Output(), Quota: quota,
+		Output: output, InputTokens: usage.Input(), OutputTokens: usage.Output(), Quota: quota,
 		ReservationID: rec.ID.String(),
 	}, nil
+}
+
+// invalidAnswer is the permanent PROVIDER_ERROR of an answer that breaks the schema of its operation.
+func invalidAnswer() *ProviderFailedError {
+	return &ProviderFailedError{Cause: fmt.Errorf("%w: %w", ErrInvalidAnswer, &values.ProviderError{Kind: values.KindPermanent, Reason: "invalid answer"})}
 }
 
 // PurgeResults clears the stored results whose result window has ended (PRD section 13.2) and returns how many.
@@ -220,6 +252,16 @@ func (s *Service) validate(cmd Command) (call, error) {
 			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 		}
 	}
+	data := spec.Data()
+	var reader *inspect.Input
+	if spec.Operation() == values.OperationInspectMaterial {
+		in, err := inspect.ParseInput(data)
+		if err != nil {
+			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		}
+		// The model reads the checked, re-encoded input; the fingerprint stays over what the client sent.
+		reader, data = &in, in.ModelData()
+	}
 	model, maxOutput, err := s.models.Resolve(spec.Alias(), spec.MaxOutput())
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
@@ -235,11 +277,11 @@ func (s *Service) validate(cmd Command) (call, error) {
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	request, err := values.NewRequest(model, spec.Instructions(), spec.Data(), maxOutput)
+	request, err := values.NewRequest(model, spec.Instructions(), data, maxOutput)
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	return call{owner: cmd.Owner, spec: spec, reserve: reserve, request: request}, nil
+	return call{owner: cmd.Owner, spec: spec, reserve: reserve, request: request, reader: reader}, nil
 }
 
 // start opens a new attempt or finds the stored result of the latest one, in one transaction on a context detached
@@ -281,15 +323,14 @@ func (s *Service) start(ctx context.Context, c call) (account.ReservationRecord,
 	}
 }
 
-// settle charges the provider-reported usage in full and stores the answer in the same transaction, on a context
+// settle charges the provider-reported usage in full and stores output in the same transaction, on a context
 // detached from the client with its own bound.
-func (s *Service) settle(ctx context.Context, c call, id shared.ReservationID, completion values.Completion) (account.ReservationRecord, Snapshot, error) {
-	usage := completion.Usage()
+func (s *Service) settle(ctx context.Context, c call, id shared.ReservationID, output string, usage values.Usage) (account.ReservationRecord, Snapshot, error) {
 	u, err := account.NewUsage(string(s.policy.Unit()), usage.Total(), false)
 	if err != nil {
 		return account.ReservationRecord{}, Snapshot{}, fmt.Errorf("gateway: %s: %w", opSettle, err)
 	}
-	res, err := account.NewResult(completion.Output(), usage.Input(), usage.Output())
+	res, err := account.NewResult(output, usage.Input(), usage.Output())
 	if err != nil {
 		return account.ReservationRecord{}, Snapshot{}, fmt.Errorf("gateway: %s: %w", opSettle, err)
 	}

@@ -11,6 +11,9 @@
 // student changed the draft meanwhile, EditDraft adds the student's version, and ExportDraft writes a chosen version
 // to the export file of the assignment. TASK-090 adds the lecture text (lecturetext.go): a lecture_text job formats the
 // transcript part by part into the full readable text of the lesson, and the Rerunner starts it for older transcripts.
+// TASK-122 adds the work on a library material (material.go): MaterialJobs starts a material_summary or
+// material_homework job, which the PostProcessor runs like summarize and extract_homework on the material's text
+// (headings per page, slide or fragment) instead of a transcript; its outputs are as untrusted as those of a recording.
 //
 // The PostProcessor and the draft job have no side-effect port at all: summaries, assignments, deadlines, lecture texts
 // and draft versions are local data. Exporting a draft is an explicit user action on a version the user picked, to a file the

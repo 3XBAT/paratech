@@ -55,6 +55,12 @@ type Rerunner interface {
 	RedoSummary(ctx context.Context, rec shared.RecordingID) (id shared.JobID, created bool, err error)
 }
 
+// MaterialWork starts the summary or the homework search of a library material (cases/homeworkflow, TASK-122);
+// created is false when a job of the same key was found instead.
+type MaterialWork interface {
+	Start(ctx context.Context, id shared.MaterialID, work homeworkflow.Work) (shared.JobID, bool, error)
+}
+
 // Drafts generates homework drafts (cases/homeworkflow).
 type Drafts interface {
 	ActiveGeneration(ctx context.Context, a shared.AssignmentID) (homeworkflow.GenerationView, bool, error)
@@ -72,12 +78,14 @@ type Tx interface {
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// ActionDeps are the dependencies of Actions; every one except Log is required.
+// ActionDeps are the dependencies of Actions; every one except Materials and Log is required. Without Materials the
+// tools on a material answer "unavailable".
 type ActionDeps struct {
 	Library     Library
 	Lessons     LessonInfo
 	Assignments AssignmentEdits
 	Rerunner    Rerunner
+	Materials   MaterialWork
 	Drafts      Drafts
 	Jobs        Activity
 	Canceller   JobCanceller
@@ -94,6 +102,7 @@ type Actions struct {
 	lessons     LessonInfo
 	assignments AssignmentEdits
 	rerunner    Rerunner
+	materials   MaterialWork
 	drafts      Drafts
 	jobs        Activity
 	canceller   JobCanceller
@@ -113,8 +122,9 @@ func NewActions(d ActionDeps) (*Actions, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Actions{
-		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, rerunner: d.Rerunner, drafts: d.Drafts,
-		jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
+		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, rerunner: d.Rerunner, materials: d.Materials,
+		drafts: d.Drafts,
+		jobs:   d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
 	}, nil
 }
 
@@ -179,7 +189,7 @@ func (a *Actions) prepare(ctx context.Context, call values.Call) (prepared, bool
 	return p, true, err
 }
 
-// errUnavailable marks a variant of a tool that has no use case yet (the results of a material, TASK-122).
+// errUnavailable marks a variant of a tool that has no use case wired (the results of a material without Materials).
 var errUnavailable = errors.New("agent: no use case for this variant yet")
 
 func (a *Actions) createSubject(call values.Call) (prepared, error) {
@@ -441,9 +451,13 @@ func dueOn(day values.Date, old time.Time, loc *time.Location) time.Time {
 }
 
 // postProcess starts the summary, lecture text or homework search of a recording again: a ready summary is made anew
-// (its replacement needed a plan), else the failed or missing job is started. The results of a material have no use
-// case yet (TASK-122). The paid job has no intent: Recover cannot tell whether it started (UNKNOWN).
+// (its replacement needed a plan), else the failed or missing job is started. On a material (TASK-122) it starts the
+// material's summary or homework search, a new job after an earlier one (replacing a ready summary needed a plan).
+// The paid job has no intent: Recover cannot tell whether it started (UNKNOWN).
 func (a *Actions) postProcess(ctx context.Context, call values.Call) (prepared, error) {
+	if matRef, ok := call.Args().ID("material"); ok {
+		return a.materialWork(call.Tool(), shared.MaterialID(matRef.ID()))
+	}
 	recRef, ok := call.Args().ID("recording")
 	if !ok {
 		return prepared{}, errUnavailable
@@ -471,6 +485,29 @@ func (a *Actions) postProcess(ctx context.Context, call values.Call) (prepared, 
 			return effect{}, err
 		}
 		return jobEffect(id, created)
+	}}, nil
+}
+
+// materialWork starts the summary (make_summary) or the homework search (find_homework) of a material. Its Undo is
+// that of every paid job: cancel while it runs, refused once the result is ready.
+func (a *Actions) materialWork(tool values.Tool, id shared.MaterialID) (prepared, error) {
+	work := homeworkflow.WorkSummary
+	switch tool {
+	case values.ToolMakeSummary:
+	case values.ToolFindHomework:
+		work = homeworkflow.WorkHomework
+	default:
+		return prepared{}, errUnavailable
+	}
+	if a.materials == nil {
+		return prepared{}, errUnavailable
+	}
+	return prepared{run: func(ctx context.Context) (effect, error) {
+		job, created, err := a.materials.Start(ctx, id, work)
+		if err != nil {
+			return effect{}, err
+		}
+		return jobEffect(job, created)
 	}}, nil
 }
 

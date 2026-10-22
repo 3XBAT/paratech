@@ -15,17 +15,18 @@ import (
 
 // Operation names of the library repositories, used in their error messages.
 const (
-	opListSubjects    = "sqlite: list subjects"
-	opGetSubject      = "sqlite: get subject"
-	opSaveSubject     = "sqlite: save subject"
-	opDeleteSubject   = "sqlite: delete subject"
-	opGetMaterial     = "sqlite: get material"
-	opListMaterials   = "sqlite: list materials"
-	opCountMaterials  = "sqlite: count materials"
-	opSaveMaterial    = "sqlite: save material"
-	opSubjectStrings  = "sqlite: list subject strings"
-	opRestoreSubject  = "stored subject"
-	opRestoreMaterial = "stored material"
+	opListSubjects     = "sqlite: list subjects"
+	opGetSubject       = "sqlite: get subject"
+	opSaveSubject      = "sqlite: save subject"
+	opDeleteSubject    = "sqlite: delete subject"
+	opGetMaterial      = "sqlite: get material"
+	opListMaterials    = "sqlite: list materials"
+	opCountMaterials   = "sqlite: count materials"
+	opSaveMaterial     = "sqlite: save material"
+	opSaveMaterialText = "sqlite: save material text status"
+	opSubjectStrings   = "sqlite: list subject strings"
+	opRestoreSubject   = "stored subject"
+	opRestoreMaterial  = "stored material"
 )
 
 // SubjectRepository stores the subjects of the library with their aliases and folders (the library.SubjectRepository
@@ -293,8 +294,7 @@ func (r *MaterialRepository) Save(ctx context.Context, m *material.Material) err
 		} else {
 			n, err := q.UpdateMaterial(ctx, sqlcgen.UpdateMaterialParams{
 				SubjectID: jobNullString(string(st.Subject)), FolderID: jobNullString(string(st.Folder)),
-				Status: string(st.Status), TextStatus: string(st.Text), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
-				ExpectedVersion: st.Version,
+				Status: string(st.Status), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
 				return err
@@ -316,6 +316,22 @@ func (r *MaterialRepository) Save(ctx context.Context, m *material.Material) err
 		return fmt.Errorf("%s %s: %w", opSaveMaterial, st.ID, err)
 	}
 	m.Persisted(st.Version + 1)
+	return nil
+}
+
+// SaveText writes only the text status of a stored material, checked against its version but keeping it (see
+// material.SetText); a stale version or a missing material wraps shared.ErrVersionConflict.
+func (r *MaterialRepository) SaveText(ctx context.Context, m *material.Material) error {
+	st := m.State()
+	if st.Version < 1 {
+		return fmt.Errorf("%s %s: text of a material never stored", opSaveMaterialText, st.ID)
+	}
+	n, err := r.db.Queries(ctx).UpdateMaterialText(ctx, sqlcgen.UpdateMaterialTextParams{
+		TextStatus: string(st.Text), ID: string(st.ID), ExpectedVersion: st.Version,
+	})
+	if err := VersionCAS(ctx, n, err); err != nil {
+		return fmt.Errorf("%s %s: %w", opSaveMaterialText, st.ID, err)
+	}
 	return nil
 }
 

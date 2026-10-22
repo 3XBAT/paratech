@@ -85,6 +85,7 @@ type Assignment struct {
 	HintTeacher   string
 	UserSubject   string
 	UserTeacher   string
+	MaterialID    sql.NullString
 }
 
 type DeadlineEventRemoval struct {
@@ -179,6 +180,22 @@ type Material struct {
 	Version      int64
 	CreatedAt    int64
 	UpdatedAt    int64
+}
+
+type MaterialInspection struct {
+	MaterialID    string
+	TextSha256    string
+	Status        string
+	Attempt       int64
+	DocKind       sql.NullString
+	SubjectID     sql.NullString
+	LessonDate    sql.NullString
+	HasHomework   int64
+	HasTicketList int64
+	MentionsEmail int64
+	Version       int64
+	CreatedAt     int64
+	UpdatedAt     int64
 }
 
 type MaterialLesson struct {
@@ -338,6 +355,7 @@ type Summary struct {
 	CreatedAt     int64
 	UpdatedAt     int64
 	Sections      sql.NullString
+	MaterialID    sql.NullString
 }
 
 type TodayPost struct {

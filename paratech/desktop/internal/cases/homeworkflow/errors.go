@@ -92,6 +92,18 @@ var (
 
 	// ErrUnknownWork means Rerunner.Retry got a work that is not post-processing.
 	ErrUnknownWork = errors.New("post-processing: unknown work")
+
+	// ErrMaterialNotFound means the library material of the job no longer exists or was removed. Permanent.
+	ErrMaterialNotFound = errors.New("post-processing: material not found")
+
+	// ErrMaterialUnreadable means the text of the material cannot be read (damaged, a PDF). Permanent.
+	ErrMaterialUnreadable = errors.New("post-processing: the material text cannot be read")
+
+	// ErrMaterialEmpty means the material holds no text. Permanent.
+	ErrMaterialEmpty = errors.New("post-processing: the material has no text")
+
+	// ErrNoMaterialText means MaterialJobs.Start got a material whose text is not read (PDF, ADR-0024).
+	ErrNoMaterialText = errors.New("post-processing: the text of this material is not read")
 )
 
 // Errors of the homework_draft job (Drafts.Handle). They are stored as the job's last error and shown in the UI, so

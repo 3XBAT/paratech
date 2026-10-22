@@ -118,6 +118,9 @@ func TestRegistrationPolicies(t *testing.T) {
 		{typ: homeworkflow.ExtractHomeworkJobType, recovery: jobrunner.RecoveryRequeue},
 		// TASK-090: light like the other LLM jobs; an interrupted attempt continues from the parts it stored.
 		{typ: homeworkflow.LectureTextJobType, recovery: jobrunner.RecoveryRequeue},
+		// TASK-122: the work on a library material runs like the post-processing of a transcript.
+		{typ: homeworkflow.MaterialSummaryJobType, recovery: jobrunner.RecoveryRequeue},
+		{typ: homeworkflow.MaterialHomeworkJobType, recovery: jobrunner.RecoveryRequeue},
 		{typ: homeworkflow.HomeworkDraftJobType, recovery: jobrunner.RecoveryRequeue},
 		// Hard rule 7: the side effect is never Heavy, never requeued blindly and not cancelled mid-send.
 		{typ: senddelivery.JobType, recovery: jobrunner.RecoveryReconcile, reconciler: true, uncancellable: true},
@@ -146,6 +149,8 @@ func TestRegistrationPolicies(t *testing.T) {
 	}{
 		{homeworkflow.SummarizeJobType, homeworkflow.AnswerCalls},
 		{homeworkflow.ExtractHomeworkJobType, homeworkflow.AnswerCalls},
+		{homeworkflow.MaterialSummaryJobType, homeworkflow.AnswerCalls},
+		{homeworkflow.MaterialHomeworkJobType, homeworkflow.AnswerCalls},
 		{homeworkflow.HomeworkDraftJobType, 1},
 	} {
 		if got := registrationOf(t, regs, tt.typ).Timeout; got < time.Duration(2*tt.calls)*hubclient.DefaultRequestTimeout {
@@ -168,7 +173,7 @@ func TestRegisteredTypes(t *testing.T) {
 	want := []job.Type{
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
 		homeworkflow.LectureTextJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
-		schedulesync.CalendarSyncJobType,
+		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -177,16 +182,20 @@ func TestRegisteredTypes(t *testing.T) {
 	}
 }
 
-// Every registered type is classified for «Записи и задачи» (TASK-074): only the calendar sync, which involves no
-// user, is hidden. A new job type must be added here on purpose.
+// Every registered type is classified for «Записи и задачи» (TASK-074): the calendar sync, which involves no user, and
+// the work on a library material, shown in the agent panel (TASK-122), are hidden. A new job type must be added here
+// on purpose.
 func TestHiddenJobTypes(t *testing.T) {
 	shown := []job.Type{
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
 		homeworkflow.LectureTextJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
 	}
 	hidden := hiddenJobTypes()
-	if !slices.Equal(hidden, []job.Type{schedulesync.CalendarSyncJobType}) {
-		t.Fatalf("hidden types %v, want only %s", hidden, schedulesync.CalendarSyncJobType)
+	wantHidden := []job.Type{
+		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
+	}
+	if !slices.Equal(hidden, wantHidden) {
+		t.Fatalf("hidden types %v, want %v", hidden, wantHidden)
 	}
 	for _, r := range registrations(handlersForTest()) {
 		if slices.Contains(hidden, r.Type) == slices.Contains(shown, r.Type) {
@@ -235,6 +244,7 @@ func TestRegistrationsWithoutAnEngine(t *testing.T) {
 	want := []job.Type{
 		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.LectureTextJobType,
 		homeworkflow.HomeworkDraftJobType, senddelivery.JobType, schedulesync.CalendarSyncJobType,
+		homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)

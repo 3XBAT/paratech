@@ -11,17 +11,28 @@ import (
 // noSource is the source index of an assignment that was not extracted from a transcript.
 const noSource = -1
 
-// Origin identifies the item of an extraction answer an assignment was made from: the transcript and the position of
-// the item in the answer (from 0). Reprocessing the transcript finds the assignment again by its origin.
+// Origin identifies the item of an extraction answer an assignment was made from: the transcript, or the material of
+// the library (TASK-122), and the position of the item in the answer (from 0). Reprocessing the source finds the
+// assignment again by its origin.
 type Origin struct {
-	Transcript shared.TranscriptID
+	Transcript shared.TranscriptID // exactly one of Transcript and Material
+	Material   shared.MaterialID
 	Index      int
 }
 
-// Validate checks the transcript id and that the index is not negative.
+// Validate checks that exactly one source id is given and valid and that the index is not negative.
 func (o Origin) Validate() error {
-	if err := o.Transcript.Validate(); err != nil {
-		return err
+	switch {
+	case o.Transcript != "" && o.Material != "":
+		return fmt.Errorf("a transcript and a material")
+	case o.Material != "":
+		if err := o.Material.Validate(); err != nil {
+			return err
+		}
+	default:
+		if err := o.Transcript.Validate(); err != nil {
+			return err
+		}
 	}
 	if o.Index < 0 {
 		return fmt.Errorf("negative source index %d", o.Index)
@@ -36,6 +47,7 @@ type Assignment struct {
 
 	lesson        shared.LessonID     // optional, by ID only (ARCH-13)
 	transcript    shared.TranscriptID // empty after the transcript was deleted (ON DELETE SET NULL)
+	material      shared.MaterialID   // the material it was extracted from (TASK-122); empty for a transcript
 	source        int                 // position in the extraction answer, noSource if not extracted
 	promptVersion int                 // prompts version of the extraction that last set the details, 0 if none
 
@@ -65,7 +77,8 @@ func NewExtracted(spec Spec, now time.Time) (*Assignment, error) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAssignment, err)
 	}
 	a := &Assignment{
-		id: spec.ID, lesson: spec.Lesson, transcript: spec.Origin.Transcript, source: spec.Origin.Index,
+		id: spec.ID, lesson: spec.Lesson, transcript: spec.Origin.Transcript, material: spec.Origin.Material,
+		source:        spec.Origin.Index,
 		promptVersion: spec.PromptVersion, details: spec.Details, hints: spec.Hints, createdAt: now, updatedAt: now,
 	}
 	if err := a.validate(); err != nil {
@@ -80,6 +93,7 @@ type State struct {
 	ID            shared.AssignmentID
 	Lesson        shared.LessonID     // empty: none
 	Transcript    shared.TranscriptID // empty: none, or the transcript was deleted
+	Material      shared.MaterialID   // empty: none, or the material was deleted
 	SourceIndex   int                 // -1: not extracted
 	PromptVersion int                 // 0: none
 	Title         string
@@ -108,8 +122,17 @@ func Restore(s State) (*Assignment, error) {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidAssignment, err)
 		}
 	}
+	if s.Material != "" {
+		if err := s.Material.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidAssignment, err)
+		}
+		if s.Transcript != "" {
+			return nil, fmt.Errorf("%w: a transcript and a material", ErrInvalidAssignment)
+		}
+	}
 	a := &Assignment{
-		version: s.Version, id: s.ID, lesson: s.Lesson, transcript: s.Transcript, source: s.SourceIndex,
+		version: s.Version, id: s.ID, lesson: s.Lesson, transcript: s.Transcript, material: s.Material,
+		source:        s.SourceIndex,
 		promptVersion: s.PromptVersion, details: d, userEdited: s.UserEdited,
 		hints:      values.NewLessonNames(s.HintSubject, s.HintTeacher),
 		correction: values.NewLessonNames(s.UserSubject, s.UserTeacher),
@@ -219,13 +242,16 @@ func (a *Assignment) LessonID() shared.LessonID { return a.lesson }
 // TranscriptID returns the transcript the assignment was extracted from, empty if none.
 func (a *Assignment) TranscriptID() shared.TranscriptID { return a.transcript }
 
+// MaterialID returns the material the assignment was extracted from (TASK-122), empty if none.
+func (a *Assignment) MaterialID() shared.MaterialID { return a.material }
+
 // Origin returns the item of the extraction answer the assignment was made from; ok is false if it was not extracted
-// or its transcript was deleted.
+// or its source was deleted.
 func (a *Assignment) Origin() (o Origin, ok bool) {
-	if a.source == noSource || a.transcript == "" {
+	if a.source == noSource || (a.transcript == "" && a.material == "") {
 		return Origin{}, false
 	}
-	return Origin{Transcript: a.transcript, Index: a.source}, true
+	return Origin{Transcript: a.transcript, Material: a.material, Index: a.source}, true
 }
 
 // SourceIndex returns the position in the extraction answer, -1 if the assignment was not extracted.
@@ -255,7 +281,7 @@ func (a *Assignment) UpdatedAt() time.Time { return a.updatedAt }
 // State returns the stored form of the assignment, for the repositories.
 func (a *Assignment) State() State {
 	return State{
-		Version: a.version, ID: a.id, Lesson: a.lesson, Transcript: a.transcript, SourceIndex: a.source,
+		Version: a.version, ID: a.id, Lesson: a.lesson, Transcript: a.transcript, Material: a.material, SourceIndex: a.source,
 		PromptVersion: a.promptVersion, Title: a.details.title, Description: a.details.description, Due: a.details.due,
 		UserEdited: a.userEdited, HintSubject: a.hints.Subject(), HintTeacher: a.hints.Teacher(),
 		UserSubject: a.correction.Subject(), UserTeacher: a.correction.Teacher(), CreatedAt: a.createdAt, UpdatedAt: a.updatedAt,

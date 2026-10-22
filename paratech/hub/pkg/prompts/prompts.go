@@ -12,9 +12,9 @@ import (
 )
 
 // files is read-only embedded data fixed at build time, not mutable state (ARCH-53); go:embed needs a package-level
-// variable. The reader tasks add "ops" to the pattern with their first operation prompt.
+// variable.
 //
-//go:embed agent
+//go:embed agent ops
 var files embed.FS
 
 // File names inside a version directory.
