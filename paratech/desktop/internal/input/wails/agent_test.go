@@ -476,7 +476,8 @@ func TestAgentPanelPlainText(t *testing.T) {
 		t.Errorf("problem = %q", v.Problem)
 	}
 	b, _ := json.Marshal(v)
-	if strings.Contains(string(b), "<") || strings.Contains(string(b), "secret") {
+	// json.Marshal escapes '<' as <, so look for the escaped form and the payload itself.
+	if s := string(b); strings.Contains(s, `<`) || strings.Contains(s, "img") || strings.Contains(s, "secret") {
 		t.Errorf("event JSON = %s", b)
 	}
 

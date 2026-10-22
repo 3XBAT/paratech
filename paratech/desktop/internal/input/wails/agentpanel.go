@@ -50,8 +50,9 @@ func (p *AgentPanel) Attach(e EventEmitter) {
 	p.emit = e
 }
 
-// Publish emits u. It holds the lock while emitting, so the updates of one request keep their order and none is
-// emitted after Attach(nil) returns.
+// Publish emits u. It holds the lock while emitting, so no update is emitted after Attach(nil) returns and updates
+// published from one Driver goroutine keep their order. Updates of different operations may interleave: consumers
+// must not rely on arrival order across operations.
 func (p *AgentPanel) Publish(u AgentUpdate) {
 	view := p.view(u)
 	p.mu.Lock()

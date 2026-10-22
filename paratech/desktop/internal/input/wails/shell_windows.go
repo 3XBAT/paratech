@@ -69,6 +69,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Agent))
 	media.setSource(b.Transcript.uc) // the media handler plays recordings through the transcript use case
 	b.AgentPanel.Attach(app.Event)
+	defer b.AgentPanel.Attach(nil) // also covers a Run that fails before the shutdown hook
 
 	u := &windowsUI{app: app}
 	var offs []func()
