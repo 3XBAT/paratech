@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { type CSSProperties, useCallback, useState } from "react";
 import {
   closeTranscript,
   initialRoute,
@@ -10,6 +10,7 @@ import {
   routeToTranscript,
 } from "./nav";
 import { AgentPanel } from "./agent/AgentPanel";
+import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -88,10 +89,15 @@ export function App() {
   }, []);
   // Counts the files the drop zone added: «Предметы» reads the library again.
   const [library, setLibrary] = useState(0);
+  const panel = useResizablePanel();
+  const { open, width } = panel.pref;
   const overlay = route.transcript !== "" || route.summary !== "";
 
   return (
-    <div className="shell with-agent">
+    <div
+      className={`shell with-agent${open ? "" : " agent-closed"}${panel.dragging ? " agent-dragging" : ""}`}
+      style={{ "--ag-w": `${open ? width : 0}px` } as CSSProperties}
+    >
       <IconSprite />
       <Rail
         current={current}
@@ -141,7 +147,8 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel page={current} assignmentId={route.assignment} />
+      <AgentPanel page={current} assignmentId={route.assignment} reveal={panel.reveal} />
+      <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>
   );
