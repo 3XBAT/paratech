@@ -31,7 +31,7 @@ const (
 	AgentUndoNameTaken   = "name_taken"   // restoring would clash with a subject or folder of the same name
 	AgentUndoNotFound    = "not_found"    // no such journal entry
 	AgentUndoNotUndoable = "not_undoable" // the entry offers no «Отменить» (already undone, running, failed, ...)
-	AgentUndoBusy        = "busy"         // the target changed at the same moment; the entry is as it was, try again
+	AgentUndoBusy        = "busy"         // the target changed at the same moment; try again
 )
 
 // Kinds of a journal line (AgentJournalLineView.Kind and AgentHistoryFilter.Kind).

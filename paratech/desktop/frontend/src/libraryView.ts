@@ -41,7 +41,6 @@ const systemNames: Readonly<Record<string, string>> = {
 
 const systemOrder = ["lectures", "seminars", "labs", "materials", "homework", "tickets"];
 
-/** The title of a folder: the fixed name of a system folder, the typed name of an own one. */
 /** The line after «Добавить файл»: nothing when the student cancelled the dialog. */
 export function importNote(r: { cancelled: boolean; existing: boolean }): string {
   if (r.cancelled) {
@@ -50,6 +49,7 @@ export function importNote(r: { cancelled: boolean; existing: boolean }): string
   return r.existing ? texts.fileExisting : texts.fileAdded;
 }
 
+/** The title of a folder: the fixed name of a system folder, the typed name of an own one. */
 export function folderTitle(f: LibraryFolder): string {
   return systemNames[f.system] ?? f.name;
 }
