@@ -19,7 +19,7 @@ $env:PARATECH_AGENT_LIVE_HUB_URL = "https://<hub>"      # no default
 $env:PARATECH_AGENT_LIVE_KEY = "<tester key>"           # never commit it
 $env:PARATECH_AGENT_LIVE_REPORT = "C:\temp\agent-live.md" # optional
 $env:PARATECH_AGENT_LIVE_ONLY = "r01,w01"               # optional subset
-go test -tags agentlive -run TestAgentLive -count=1 -v ./desktop/tests/agenteval/
+go test -tags agentlive -run TestAgentLive -count=1 -timeout 60m -v ./desktop/tests/agenteval/
 ```
 
 Read tools get canned results; a run stops at the first card or action, nothing is executed. Attach the report to
