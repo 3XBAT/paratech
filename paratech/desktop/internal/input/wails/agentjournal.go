@@ -31,6 +31,7 @@ const (
 	AgentUndoNameTaken   = "name_taken"   // restoring would clash with a subject or folder of the same name
 	AgentUndoNotFound    = "not_found"    // no such journal entry
 	AgentUndoNotUndoable = "not_undoable" // the entry offers no «Отменить» (already undone, running, failed, ...)
+	AgentUndoBusy        = "busy"         // the target changed at the same moment; the entry is as it was, try again
 )
 
 // Kinds of a journal line (AgentJournalLineView.Kind and AgentHistoryFilter.Kind).
@@ -39,7 +40,7 @@ const (
 	AgentLineProcessing = string(agentjournal.LineProcessing)
 )
 
-// AgentNoUndoSent is the NoUndo of a processing line that sent an email: «Отменить нельзя».
+// AgentNoUndoSent is the NoUndo of a completed email-sending processing line: «Отменить нельзя».
 const AgentNoUndoSent = "sent"
 
 // AgentJournal is the action journal (cases/agentjournal) as the panel and «Журнал» use it; satisfied by
@@ -107,7 +108,8 @@ type AgentUndoView struct {
 }
 
 // AgentUndoRequestView is the outcome of «Отменить всё» of a request: the actions it went through, newest first.
-// Problem is "", invalid, unavailable, closed, or failed when some action could not be undone (the others are listed).
+// Problem is "", invalid, unavailable, closed, busy (a concurrent change stopped it; try again), or failed when some
+// action could not be undone (the others are listed).
 type AgentUndoRequestView struct {
 	Problem string          `json:"problem"`
 	Actions []AgentUndoView `json:"actions"`
@@ -170,6 +172,8 @@ func (s *AgentService) UndoRequest(_ context.Context, ref AgentTurnRef) AgentUnd
 		switch {
 		case errors.Is(err, agentjournal.ErrUndoUnavailable):
 			out.Problem = AgentProblemUnavailable
+		case errors.Is(err, shared.ErrVersionConflict):
+			out.Problem = AgentProblemBusy
 		case s.life.Err() != nil:
 			out.Problem = AgentProblemClosed
 		default:
@@ -192,6 +196,8 @@ func (s *AgentService) undoFailed(op string, err error) AgentUndoView {
 		return AgentUndoView{Refusal: AgentUndoNotUndoable}
 	case errors.Is(err, library.ErrNameTaken), errors.Is(err, library.ErrFolderTaken):
 		return AgentUndoView{Refusal: AgentUndoNameTaken}
+	case errors.Is(err, shared.ErrVersionConflict):
+		return AgentUndoView{Refusal: AgentUndoBusy}
 	case errors.Is(err, agentjournal.ErrUndoUnavailable):
 		return AgentUndoView{Problem: AgentProblemUnavailable}
 	case s.life.Err() != nil:
@@ -241,7 +247,8 @@ func journalLineView(l agentjournal.Line) AgentJournalLineView {
 	}
 	if l.Kind == agentjournal.LineProcessing {
 		v.JobID, v.JobType, v.Status = string(l.Job), string(l.JobType), string(l.JobStatus)
-		if l.JobType == delivery.JobType {
+		// Only a completed send is known to be sent; other statuses say it themselves.
+		if l.JobType == delivery.JobType && l.JobStatus == job.StatusCompleted {
 			v.CannotUndo, v.NoUndo = true, AgentNoUndoSent
 		}
 		return v

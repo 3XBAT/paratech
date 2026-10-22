@@ -34,6 +34,7 @@ const (
 	AgentProblemOffline     = "offline"     // Ask while the Hub is not set up (AgentState says why); the panel is read-only
 	AgentProblemClosed      = "closed"      // the app is closing
 	AgentProblemUnavailable = "unavailable" // Undo is not wired
+	AgentProblemBusy        = "busy"        // UndoRequest met a concurrent change; nothing more was undone, try again
 	AgentProblemFailed      = "failed"
 )
 

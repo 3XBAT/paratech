@@ -138,6 +138,21 @@ func TestAgentHistoryContract(t *testing.T) {
 	}
 }
 
+// Only a completed send_email line is «Отменить нельзя» (sent); every other status says nothing about undo.
+func TestAgentHistorySendEmailNoUndo(t *testing.T) {
+	for _, st := range job.Statuses() {
+		t.Run(string(st), func(t *testing.T) {
+			v := journalLineView(agentjournal.Line{
+				Kind: agentjournal.LineProcessing, At: journalNow, Job: "job-1", JobType: "send_email", JobStatus: st,
+			})
+			sent := st == job.StatusCompleted
+			if v.Undoable || v.CannotUndo != sent || (v.NoUndo == AgentNoUndoSent) != sent || (!sent && v.NoUndo != "") {
+				t.Errorf("line = %+v", v)
+			}
+		})
+	}
+}
+
 func TestAgentHistoryFilters(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -237,6 +252,8 @@ func TestAgentUndo(t *testing.T) {
 			AgentUndoView{ActionID: "act-1", Refusal: AgentUndoCannotStop}, false},
 		{"no compensator", agentjournal.Entry{}, fmt.Errorf("x: %w", agentjournal.ErrUndoUnavailable),
 			AgentUndoView{ActionID: "act-1", Problem: AgentProblemUnavailable}, false},
+		{"concurrent change", agentjournal.Entry{}, fmt.Errorf("agentjournal: finish undo: %w", shared.ErrVersionConflict),
+			AgentUndoView{ActionID: "act-1", Refusal: AgentUndoBusy}, false},
 		{"failed", agentjournal.Entry{}, errors.New(`sqlite: C:\Users\student\secret`),
 			AgentUndoView{ActionID: "act-1", Problem: AgentProblemFailed}, true},
 	}
@@ -308,6 +325,8 @@ func TestAgentUndoRequest(t *testing.T) {
 		{"some failed", entries[:1], errors.New(`action act-1: C:\Users\student\secret`),
 			`{"problem":"failed","actions":[{"problem":"","actionId":"act-2","status":"UNDONE","refusal":""}]}`},
 		{"no compensator", nil, fmt.Errorf("x: %w", agentjournal.ErrUndoUnavailable), `{"problem":"unavailable","actions":[]}`},
+		{"concurrent change", entries[:1], fmt.Errorf("action act-1: %w", shared.ErrVersionConflict),
+			`{"problem":"busy","actions":[{"problem":"","actionId":"act-2","status":"UNDONE","refusal":""}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
