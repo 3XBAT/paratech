@@ -32,6 +32,9 @@ func TestWindowOptions(t *testing.T) {
 	if main.Frameless || main.AlwaysOnTop || main.Hidden || main.Windows.ExStyle != 0 {
 		t.Errorf("main options = %+v: want a normal window with the Wails default extended style", main)
 	}
+	if !main.EnableFileDrop || popup.EnableFileDrop {
+		t.Errorf("file drop main %v, popup %v: want the main window only", main.EnableFileDrop, popup.EnableFileDrop)
+	}
 
 	for _, o := range []application.WebviewWindowOptions{popup, main} {
 		if o.BackgroundColour.Alpha != 255 {

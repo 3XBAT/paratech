@@ -2964,7 +2964,7 @@
             "dependencies": [
                 "TASK-124"
             ],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }
