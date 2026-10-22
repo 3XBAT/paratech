@@ -137,18 +137,21 @@ Not stated for the API. (Only the docs site redirects: `docs.claude.com` -> `pla
 Not re-fetched for TASK-114 (no network in that session); the fields below are the long-standing Messages API ones. Items marked **to verify** must be checked against the live docs before the agent ships.
 
 Request (non-streaming, same endpoint and headers):
-- `tools[]`: `{name, description, input_schema}`; `input_schema` is a JSON Schema object (`type: object`, `properties`, `required`, `additionalProperties`). The Hub builds it from the catalog (`domain/llm/services/toolcatalog`); `maxLength`, `pattern`, `enum` are hints to the model, the Hub re-checks every returned call itself. Strict tool schemas are **not** used (not confirmed here).
-- `tool_choice: {"type": "any"}`: the model must call at least one tool.
+- `tools[]`: `{name, description, input_schema}`; `input_schema` is a JSON Schema object (`type: object`, `properties`, `required`, `additionalProperties`). The Hub builds it from the catalog (`domain/llm/services/toolcatalog`, every object has `additionalProperties: false` and lists `required`); `maxLength`, `pattern`, `enum` are hints to the model, the Hub re-checks every returned call itself.
+- `strict: true` on a tool (structured outputs) is **not sent**. Restrictions as remembered from the structured-outputs docs, **to verify** against the live page: every object needs `additionalProperties: false`; `minLength`/`maxLength`, `minimum`/`maximum`, `maxItems`, `minItems` above 1 and a schema-valued `additionalProperties` are unsupported (400); at most 20 strict tools and 24 optional parameters per request. The catalog has 27 tools and `plan_steps.arguments` is an open map, so strict on every tool would fail every call. Revisit with a strict-compatible catalog version.
+- `tool_choice: {"type": "auto"}`. Forced tool choice (`{"type": "any"}` / `{"type": "tool"}`) returns 400 "tool_choice: type tool and any are not supported for this model" on Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 (per the API reference, reported by the supervisor of TASK-114; not re-fetched here). With `auto` the model may answer in plain text: the system prompt demands a tool call, and a text-only answer is a charged `PROVIDER_ERROR` (ADR-0023).
+- `thinking`: not sent. On Opus 5.5 / Sonnet 5.5 thinking cannot be disabled (`{"type": "disabled"}` returns 400), so the model default (adaptive) applies.
 - Assistant turn with echoed calls: content blocks `{type: "tool_use", id, name, input}` (`input` an object).
 - User turn with results: blocks `{type: "tool_result", tool_use_id, content, is_error}` (`content` a string, here the result JSON; `is_error` only when true). Every `tool_use` must be answered by a `tool_result` in the next user message; the results come first in that message.
 - `cache_control: {"type": "ephemeral"}` on a block marks the end of a cached prefix (order: tools, system, messages). The Hub sets two breakpoints: the student-context system block (tools + system prompt + base) and the last block of the history.
 
-Response: `stop_reason: "tool_use"` when the model called tools; `content` holds `tool_use` blocks (`id`, `name`, `input`), possibly after `thinking`/`text` blocks, which the Hub ignores. Any other stop reason is `PROVIDER_ERROR` (permanent, ADR-0023).
+Response: `stop_reason: "tool_use"` when the model called tools; `content` holds `tool_use` blocks (`id`, `name`, `input`), possibly after `thinking`/`text` blocks, which the Hub ignores. The stop reason is read first: `refusal` is released, not charged. Any other stop reason, or no `tool_use` block, is `PROVIDER_ERROR` (permanent, charged with its usage, ADR-0023).
 
 Usage: unchanged; cache writes and reads are in `cache_creation_input_tokens` / `cache_read_input_tokens` and are settled as input tokens (section 3).
 
 **To verify** before rollout:
 - minimum cacheable prompt length per model (below it `cache_control` is ignored, no error) and whether the planner prefix (tools + system + base, roughly 4-6K tokens) reaches it for Haiku 5.5;
 - current cache write/read prices for Haiku 5.5 and Sonnet 5.5 (section 3 lists multipliers from 2026-10-15);
-- whether adaptive thinking is on by default for the planner model and compatible with `tool_choice: any`, and whether echoed `tool_use` turns then need their `thinking` blocks (the Hub does not keep them);
+- whether echoed `tool_use` turns need their `thinking` blocks when thinking is on by default (the Hub does not keep them);
+- the strict-mode restrictions listed above;
 - the exact charset/length of `tool_use.id` (the Hub accepts 1-128 of `[A-Za-z0-9_-]`).
