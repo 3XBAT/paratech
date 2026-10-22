@@ -98,7 +98,7 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 | `HUB_ANTHROPIC_API_KEY` | none (env only) | none | required to serve (the `keys` commands do not need it); secret, never printed |
 | `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
 | `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
-| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
+| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
 
@@ -107,11 +107,24 @@ A requested `max_output_tokens` of 0 means the alias cap; a larger value is clam
 cost (request bytes + 1024 + the clamped output cap), provider call, then settle the reported usage and store the answer for
 replay, or release. A retry with the same idempotency key replays the stored answer (`replayed=true`); another request with the
 key is `IDEMPOTENCY_CONFLICT`. A gateway key lives 5 minutes less than `HUB_IDEMPOTENCY_RETENTION`; the purge (at start and
-every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` is not implemented yet. Settings (env or flag):
+every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` is not implemented
+(ADR-0010, ADR-0023). `INSPECT_MATERIAL`, `ANSWER` and `TRIAGE_ASSIGNMENT` take no client instructions: the Hub uses its own prompt
+(`hub/pkg/prompts/ops`) and alias; until a prompt ships, the operation is `invalid_argument`. Settings (env or flag):
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
 | `HUB_RATE_LIMIT_PER_MINUTE` | `-rate-limit-per-minute` | `30` | 1..6000 calls a minute per API key, on average |
 | `HUB_RATE_LIMIT_BURST` | `-rate-limit-burst` | `10` | 1..1000 calls per API key at once |
+
+## Hub agent step
+`GatewayService.AgentStep` (ADR-0023): one planner step with tool use. The Hub picks the prompt and tool catalog
+(`hub/pkg/prompts/agent/panel/v<N>`, version = `catalog_version`) and the planner alias; the client sends neither. Rate limit,
+ledger, replay and conflicts work as for `Complete`; echoed tool calls must carry the Hub's seal. Settings:
+
+| Env | Flag | Default | Rule |
+|---|---|---|---|
+| `HUB_AGENT_SEAL_KEYS` | none (env only) | none | `version:hex[,version:hex]`, versions 1..255, secrets >= 32 bytes (e.g. `openssl rand -hex 32`); the first signs, the others are still accepted (rotation). Unset: `AgentStep` is `unimplemented`. Secret, never printed |
+| `HUB_AGENT_PLANNER_ALIAS` | `-agent-planner-alias` | `planner` | allowlist alias of the planner and of `INSPECT_MATERIAL`; must be in `HUB_LLM_MODELS` when seal keys are set |
+| `HUB_AGENT_STRONG_ALIAS` | `-agent-strong-alias` | `default` | allowlist alias of `ANSWER` and `TRIAGE_ASSIGNMENT` |
 
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.

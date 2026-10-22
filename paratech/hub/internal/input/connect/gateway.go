@@ -28,6 +28,9 @@ const (
 	msgConflict        = "the idempotency key was used with a different request"
 	msgRunning         = "a call with this idempotency key is still running"
 	msgInternal        = "internal error"
+	msgNoInstructions  = "the operation takes no instructions: the Hub uses its own prompt"
+	msgServerAlias     = "the operation runs on the Hub's model alias: send none or that one"
+	msgUnavailableOp   = "the operation is not available on this Hub"
 )
 
 // Completer is what the gateway handler needs from the gateway use case (ARCH-42).
@@ -132,6 +135,12 @@ func (g *Gateway) completeError(ctx context.Context, err error) error {
 		return connectrpc.NewError(connectrpc.CodeAborted, errors.New(msgRunning))
 	case errors.Is(err, values.ErrPayloadTooLarge):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgPayloadTooLarge))
+	case errors.Is(err, values.ErrClientInstructions):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgNoInstructions))
+	case errors.Is(err, values.ErrAliasMismatch):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgServerAlias))
+	case errors.Is(err, gateway.ErrOperationUnavailable):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgUnavailableOp))
 	case errors.Is(err, modelallowlist.ErrModelNotAllowed):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgModelNotAllowed))
 	case errors.Is(err, gateway.ErrInvalidRequest):
@@ -154,8 +163,8 @@ func detailedError(code connectrpc.Code, detail *hubv1.ErrorDetail) *connectrpc.
 	return e
 }
 
-// operationOf maps the contract enum to the domain operation; UNSPECIFIED and unknown values map to "", which the
-// domain rejects.
+// operationOf maps the contract enum to the domain operation; UNSPECIFIED, AGENT_STEP (its own RPC) and unknown values
+// map to "", which the domain rejects.
 func operationOf(op hubv1.OperationType) string {
 	switch op {
 	case hubv1.OperationType_OPERATION_TYPE_SUMMARY:
@@ -166,6 +175,12 @@ func operationOf(op hubv1.OperationType) string {
 		return string(values.OperationHomeworkDraft)
 	case hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT:
 		return string(values.OperationLectureText)
+	case hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL:
+		return string(values.OperationInspectMaterial)
+	case hubv1.OperationType_OPERATION_TYPE_ANSWER:
+		return string(values.OperationAnswer)
+	case hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT:
+		return string(values.OperationTriageAssignment)
 	default:
 		return ""
 	}

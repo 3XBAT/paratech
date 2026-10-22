@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -35,6 +36,10 @@ const (
 
 	EnvRateLimitPerMinute = "HUB_RATE_LIMIT_PER_MINUTE"
 	EnvRateLimitBurst     = "HUB_RATE_LIMIT_BURST"
+
+	EnvAgentPlannerAlias = "HUB_AGENT_PLANNER_ALIAS"
+	EnvAgentStrongAlias  = "HUB_AGENT_STRONG_ALIAS"
+	EnvAgentSealKeys     = "HUB_AGENT_SEAL_KEYS" //nolint:gosec // G101: the name of the variable, not a credential
 )
 
 // LLM provider defaults and bounds. The timeout stays at most 10 minutes (the provider discourages longer
@@ -42,12 +47,22 @@ const (
 // before the reservation expires.
 const (
 	DefaultAnthropicBaseURL = "https://api.anthropic.com"
-	DefaultLLMModels        = "default=claude-sonnet-5-5:8192"
+	DefaultLLMModels        = "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024"
 	minLLMTimeout           = 10 * time.Second
 	maxLLMTimeout           = 10 * time.Minute
 )
 
 const maxShutdownTimeout = 5 * time.Minute
+
+// Agent defaults and bounds (ADR-0023). The planner alias is the cheap model of AgentStep and INSPECT_MATERIAL, the
+// strong alias the model of ANSWER and TRIAGE_ASSIGNMENT; both must be in the allowlist when they are used. A seal
+// secret has at least 32 bytes, given as hex.
+const (
+	DefaultAgentPlannerAlias = "planner"
+	DefaultAgentStrongAlias  = "default"
+	minSealSecretBytes       = 32
+	maxSealKeyVersion        = 255
+)
 
 // Rate limit bounds of the gateway, per tester (they mirror requestlimits.NewRate, which config may not import).
 const (
@@ -131,6 +146,20 @@ type Config struct {
 	RateLimitPerMinute int
 	// RateLimitBurst is how many calls one API key may make at once.
 	RateLimitBurst int
+	// AgentPlannerAlias is the allowlist alias of the agent planner (AgentStep) and of INSPECT_MATERIAL.
+	AgentPlannerAlias string
+	// AgentStrongAlias is the allowlist alias of ANSWER and TRIAGE_ASSIGNMENT.
+	AgentStrongAlias string
+	// AgentSealKeys are the secrets that seal the tool calls of AgentStep, "version:hex[,version:hex...]"; the first
+	// signs, the others are still accepted (rotation). It is a secret: read only from the environment and never
+	// printed. Empty disables AgentStep (unimplemented). See SealKeys.
+	AgentSealKeys string
+}
+
+// SealKey is one parsed entry of AgentSealKeys.
+type SealKey struct {
+	Version byte
+	Secret  []byte
 }
 
 // Model is one allowlist entry of LLMModels. Its alias and id rules are checked by the domain when the allowlist is
@@ -148,6 +177,7 @@ func Default() Config {
 		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
 		AnthropicBaseURL: DefaultAnthropicBaseURL, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels,
 		RateLimitPerMinute: 30, RateLimitBurst: 10,
+		AgentPlannerAlias: DefaultAgentPlannerAlias, AgentStrongAlias: DefaultAgentStrongAlias,
 	}
 }
 
@@ -195,6 +225,13 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		}
 	}
 	cfg.AnthropicAPIKey = getenv(EnvAnthropicAPIKey)
+	cfg.AgentSealKeys = getenv(EnvAgentSealKeys)
+	if v := getenv(EnvAgentPlannerAlias); v != "" {
+		cfg.AgentPlannerAlias = v
+	}
+	if v := getenv(EnvAgentStrongAlias); v != "" {
+		cfg.AgentStrongAlias = v
+	}
 	if v := getenv(EnvAnthropicBaseURL); v != "" {
 		cfg.AnthropicBaseURL = v
 	}
@@ -240,6 +277,10 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		"average Complete calls a minute per API key, 1..6000 (env "+EnvRateLimitPerMinute+")")
 	fs.IntVar(&cfg.RateLimitBurst, "rate-limit-burst", cfg.RateLimitBurst,
 		"Complete calls per API key at once, 1..1000 (env "+EnvRateLimitBurst+")")
+	fs.StringVar(&cfg.AgentPlannerAlias, "agent-planner-alias", cfg.AgentPlannerAlias,
+		"allowlist alias of the agent planner (env "+EnvAgentPlannerAlias+"); the seal keys are read only from env "+EnvAgentSealKeys)
+	fs.StringVar(&cfg.AgentStrongAlias, "agent-strong-alias", cfg.AgentStrongAlias,
+		"allowlist alias of the answer and triage operations (env "+EnvAgentStrongAlias+")")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -349,6 +390,7 @@ func (c Config) Validate() error {
 		if c.RateLimitBurst < 1 || c.RateLimitBurst > maxRateLimitBurst {
 			errs = append(errs, fmt.Errorf("rate limit burst %d: must be within 1..%d", c.RateLimitBurst, maxRateLimitBurst))
 		}
+		errs = append(errs, c.validateAgent()...)
 	case CommandKeysCreate:
 		if c.KeyLabel == "" {
 			errs = append(errs, errors.New("keys create: -label is required"))
@@ -402,6 +444,47 @@ func (c Config) validateLLM() []error {
 		errs = append(errs, err)
 	}
 	return errs
+}
+
+// validateAgent checks the agent settings, which only the server uses. Messages never contain a seal secret.
+func (c Config) validateAgent() []error {
+	var errs []error
+	for _, a := range []struct{ name, value string }{{EnvAgentPlannerAlias, c.AgentPlannerAlias}, {EnvAgentStrongAlias, c.AgentStrongAlias}} {
+		if !printableASCII(a.value) {
+			errs = append(errs, fmt.Errorf("%s: must be non-empty printable ASCII without spaces", a.name))
+		}
+	}
+	if _, err := c.SealKeys(); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
+// SealKeys parses AgentSealKeys: entries "version:hex" separated by commas, versions 1..255 and unique, secrets of at
+// least 32 bytes. The first entry signs. Empty gives no keys (AgentStep disabled). Errors never quote a secret.
+func (c Config) SealKeys() ([]SealKey, error) {
+	if c.AgentSealKeys == "" {
+		return nil, nil
+	}
+	var keys []SealKey
+	seen := map[int]bool{}
+	for i, entry := range strings.Split(c.AgentSealKeys, ",") {
+		versionText, secretHex, ok := strings.Cut(strings.TrimSpace(entry), ":")
+		version, err := strconv.Atoi(versionText)
+		if !ok || err != nil || version < 1 || version > maxSealKeyVersion {
+			return nil, fmt.Errorf("%s entry %d: want version:hex with a version of 1..%d", EnvAgentSealKeys, i+1, maxSealKeyVersion)
+		}
+		secret, err := hex.DecodeString(secretHex)
+		if err != nil || len(secret) < minSealSecretBytes {
+			return nil, fmt.Errorf("%s entry %d: the secret must be hex of at least %d bytes", EnvAgentSealKeys, i+1, minSealSecretBytes)
+		}
+		if seen[version] {
+			return nil, fmt.Errorf("%s entry %d: version %d is repeated", EnvAgentSealKeys, i+1, version)
+		}
+		seen[version] = true
+		keys = append(keys, SealKey{Version: byte(version), Secret: secret})
+	}
+	return keys, nil
 }
 
 // validateBaseURL accepts an https URL, or http to a loopback host (local fake provider), without user info, path,
@@ -515,15 +598,15 @@ func validateDatabaseURL(raw string) error {
 	return nil
 }
 
-// String prints the configuration without the database URL and the provider key, so that %v of a Config cannot leak
-// them.
+// String prints the configuration without the database URL, the provider key and the seal keys, so that %v of a
+// Config cannot leak them.
 func (c Config) String() string {
 	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
 		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s LLMTimeout:%s LLMModels:%s "+
-		"RateLimitPerMinute:%d RateLimitBurst:%d}",
+		"RateLimitPerMinute:%d RateLimitBurst:%d AgentPlannerAlias:%s AgentStrongAlias:%s AgentSealKeys:%s}",
 		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
 		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels,
-		c.RateLimitPerMinute, c.RateLimitBurst)
+		c.RateLimitPerMinute, c.RateLimitBurst, c.AgentPlannerAlias, c.AgentStrongAlias, redacted(c.AgentSealKeys))
 }
 
 // GoString is String for %#v, which otherwise prints every field, secrets included.
@@ -549,6 +632,9 @@ func (c Config) LogValue() slog.Value {
 		slog.String("llm_models", c.LLMModels),
 		slog.Int("rate_limit_per_minute", c.RateLimitPerMinute),
 		slog.Int("rate_limit_burst", c.RateLimitBurst),
+		slog.String("agent_planner_alias", c.AgentPlannerAlias),
+		slog.String("agent_strong_alias", c.AgentStrongAlias),
+		slog.String("agent_seal_keys", redacted(c.AgentSealKeys)),
 	)
 }
 

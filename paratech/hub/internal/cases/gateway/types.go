@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
+	"paratech/hub/internal/domain/llm/values"
 	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/domain/shared"
 )
@@ -21,14 +22,25 @@ type Deps struct {
 	Log      *slog.Logger
 }
 
-// Config is the gateway configuration: the quota policy (the same values as the quota use case, ADR-0008) and the
-// bound of one provider call (HUB_LLM_TIMEOUT).
+// Config is the gateway configuration: the quota policy (the same values as the quota use case, ADR-0008), the
+// bound of one provider call (HUB_LLM_TIMEOUT) and the server prompts of the operations that have one (ADR-0023).
 type Config struct {
 	Unit           string
 	Limit          int64
 	ReservationTTL time.Duration
 	KeyRetention   time.Duration
 	CallTimeout    time.Duration
+	// ServerPrompts holds the prompt of each operation with a server prompt (values.Operation.ServerPrompt). Such an
+	// operation without an entry is refused as unavailable.
+	ServerPrompts map[values.Operation]ServerPrompt
+}
+
+// ServerPrompt is the Hub's own prompt of an operation: the allowlist alias it runs on, the prompt version (in the
+// fingerprint) and the text (hub/pkg/prompts ops/<op>/v<N>).
+type ServerPrompt struct {
+	Alias   string
+	Version string
+	Text    string
 }
 
 // Command is one Complete call of the authenticated tester Owner. Operation is a values.Operation string; texts are

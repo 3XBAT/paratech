@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"paratech/hub/internal/domain/quota/account"
@@ -16,6 +17,9 @@ var (
 	// wrapped domain error says which rule.
 	ErrInvalidRequest = errors.New("invalid completion request")
 
+	// ErrOperationUnavailable means the operation needs a server prompt the Hub does not have. It matches
+	// ErrInvalidRequest.
+	ErrOperationUnavailable = fmt.Errorf("%w: the operation is not available on this Hub", ErrInvalidRequest)
 	// ErrIdempotencyConflict means the key was used with a different request (in any state of its attempts).
 	ErrIdempotencyConflict = errors.New("idempotency key used with a different request")
 

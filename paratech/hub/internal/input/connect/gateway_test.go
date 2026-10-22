@@ -109,11 +109,12 @@ func TestCompleteMapsOperations(t *testing.T) {
 		hubv1.OperationType_OPERATION_TYPE_EXTRACT_HOMEWORK_DEADLINES: "extract_homework_deadlines",
 		hubv1.OperationType_OPERATION_TYPE_HOMEWORK_DRAFT:             "homework_draft",
 		hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT:               "lecture_text",
-		// The agent operations are not served by Complete yet (TASK-114): the domain rejects "".
+		// The readers run through Complete with a server prompt (ADR-0023); AGENT_STEP has its own RPC: the domain
+		// rejects "".
+		hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL:  "inspect_material",
+		hubv1.OperationType_OPERATION_TYPE_ANSWER:            "answer",
+		hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT: "triage_assignment",
 		hubv1.OperationType_OPERATION_TYPE_AGENT_STEP:        "",
-		hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL:  "",
-		hubv1.OperationType_OPERATION_TYPE_ANSWER:            "",
-		hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT: "",
 		hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED:       "",
 		hubv1.OperationType(99):                              "",
 	} {
@@ -185,6 +186,9 @@ func TestCompleteErrorMapping(t *testing.T) {
 		{name: "invalid", err: fmt.Errorf("%w: %w", gateway.ErrInvalidRequest, values.ErrInvalidSpec), code: connectrpc.CodeInvalidArgument},
 		{name: "too large", err: fmt.Errorf("%w: %w", gateway.ErrInvalidRequest, values.ErrPayloadTooLarge), code: connectrpc.CodeInvalidArgument},
 		{name: "unknown alias", err: fmt.Errorf("%w: %w", gateway.ErrInvalidRequest, modelallowlist.ErrModelNotAllowed), code: connectrpc.CodeInvalidArgument},
+		{name: "client instructions", err: fmt.Errorf("%w: %w", gateway.ErrInvalidRequest, values.ErrClientInstructions), code: connectrpc.CodeInvalidArgument},
+		{name: "other alias", err: fmt.Errorf("%w: %w", gateway.ErrInvalidRequest, values.ErrAliasMismatch), code: connectrpc.CodeInvalidArgument},
+		{name: "unavailable operation", err: gateway.ErrOperationUnavailable, code: connectrpc.CodeInvalidArgument},
 		{name: "hub failure", err: errors.New("db down at db.internal:5432"), code: connectrpc.CodeInternal},
 		{name: "settlement failure", err: fmt.Errorf("settle: %w", account.ErrInvalidRecord), code: connectrpc.CodeInternal},
 	}
