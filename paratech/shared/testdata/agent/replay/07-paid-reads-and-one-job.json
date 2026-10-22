@@ -1,0 +1,27 @@
+{
+  "name": "07-paid-reads-and-one-job",
+  "about": "Paid reads do not count as the paid job without a plan; one cheap paid job runs.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "inspect_upload",
+      "arguments_json": "{\"upload\":\"u1\"}"
+    },
+    {
+      "call_id": "toolu_02",
+      "tool": "answer_question",
+      "arguments_json": "{\"question\":\"Что такое производная?\",\"scope\":\"subject\"}"
+    },
+    {
+      "call_id": "toolu_03",
+      "tool": "triage_assignment",
+      "arguments_json": "{\"upload\":\"u1\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "driver:R",
+    "toolu_02": "driver:R",
+    "toolu_03": "driver:U"
+  }
+}

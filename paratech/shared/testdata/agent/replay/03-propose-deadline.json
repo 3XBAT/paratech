@@ -1,0 +1,15 @@
+{
+  "name": "03-propose-deadline",
+  "about": "C tool: handed over only as class C (a proposal card), never as an action.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "propose_deadline",
+      "arguments_json": "{\"assignment\":\"a1\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "driver:C"
+  }
+}

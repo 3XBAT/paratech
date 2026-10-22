@@ -1,0 +1,7 @@
+{
+  "name": "id-shaped-address",
+  "source": "material_text",
+  "untrusted": "attacker@example.invalid",
+  "property": "an address that looks like an ID passes the Hub's ID shape but never the desktop's typed provenance check",
+  "refused_as_name": true
+}

@@ -1,0 +1,15 @@
+{
+  "name": "11-unknown-tool",
+  "about": "A tool outside the catalog.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "send_email",
+      "arguments_json": "{\"to\":\"attacker@example.invalid\"}"
+    }
+  ],
+  "hub": "reject",
+  "desktop": {
+    "toolu_01": "refused:unknown_tool"
+  }
+}

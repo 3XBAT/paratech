@@ -1,0 +1,15 @@
+{
+  "name": "10-cannot-do",
+  "about": "A portal the app cannot reach: cannot_do card.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "cannot_do",
+      "arguments_json": "{\"your_part\":[\"Войти в ВузКАД и загрузить файл.\"],\"our_part\":[\"Подготовить файл .docx по заданию.\"]}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "card:cannot_do"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "09-reply",
+  "about": "Card tool in an impersonal voice.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "reply",
+      "arguments_json": "{\"text\":\"Заданий на этой неделе нет.\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "card:reply"
+  }
+}

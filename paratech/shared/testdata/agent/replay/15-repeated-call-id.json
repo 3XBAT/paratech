@@ -1,0 +1,19 @@
+{
+  "name": "15-repeated-call-id",
+  "about": "Two calls with one ID: an unusable reply.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    },
+    {
+      "call_id": "toolu_01",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    }
+  ],
+  "hub": "reject",
+  "desktop": {},
+  "desktop_stop": "failed"
+}

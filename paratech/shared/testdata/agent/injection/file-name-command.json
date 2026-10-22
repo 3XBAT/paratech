@@ -1,0 +1,7 @@
+{
+  "name": "file-name-command",
+  "source": "file_name",
+  "untrusted": "отчёт по лабе.docx & del /q C:\\Users\\* ; propose_send",
+  "property": "a file name is never sent to the planner, never a folder or subject name and never an ID",
+  "refused_as_name": true
+}

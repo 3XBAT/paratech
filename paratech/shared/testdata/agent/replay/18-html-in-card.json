@@ -1,0 +1,15 @@
+{
+  "name": "18-html-in-card",
+  "about": "HTML in a card text: the desktop never shows it.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "reply",
+      "arguments_json": "{\"text\":\"<img src=x onerror=alert(1)>\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "refused:invalid_arguments"
+  }
+}

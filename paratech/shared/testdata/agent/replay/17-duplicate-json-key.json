@@ -1,0 +1,15 @@
+{
+  "name": "17-duplicate-json-key",
+  "about": "A second value hidden behind the first key.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "list_assignments",
+      "arguments_json": "{\"status\":\"upcoming\",\"status\":\"overdue\"}"
+    }
+  ],
+  "hub": "accept",
+  "desktop": {
+    "toolu_01": "refused:invalid_arguments"
+  }
+}

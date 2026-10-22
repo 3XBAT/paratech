@@ -1,0 +1,34 @@
+{
+  "name": "14-five-calls",
+  "about": "More calls than a step may have: the request stops on its budget.",
+  "calls": [
+    {
+      "call_id": "toolu_01",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    },
+    {
+      "call_id": "toolu_02",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    },
+    {
+      "call_id": "toolu_03",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    },
+    {
+      "call_id": "toolu_04",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    },
+    {
+      "call_id": "toolu_05",
+      "tool": "list_subjects",
+      "arguments_json": "{}"
+    }
+  ],
+  "hub": "reject",
+  "desktop": {},
+  "desktop_stop": "budget"
+}
