@@ -28,6 +28,7 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/knowledgebase"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/modelcatalog"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/recordingdelete"
@@ -321,9 +322,19 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: summary viewer: %w", err)
 	}
-	// The knowledge base reads the same local results at query time; dates of the export in the local time zone.
+	// The library of subjects and files (ADR-0024): local only, files in the artifact store by sha256; a new subject's
+	// semester in the local time zone.
+	lib, err := library.New(library.Deps{
+		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
+		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: library: %w", err)
+	}
+	// The knowledge base reads the same local results at query time and groups lessons by library subject; dates of
+	// the export in the local time zone.
 	knowledge, err := knowledgebase.New(knowledgebase.Deps{
-		Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
+		Library: lib, Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
 		Artifacts: store, Summaries: summaries, LectureTexts: lectureTexts, Writer: textfile.New(), Clock: e.local, Log: log,
 	})
 	if err != nil {
@@ -346,6 +357,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Summary:    summaryViewer,
 		Deletion:   c.deletions,
 		Knowledge:  knowledge,
+		Library:    lib,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

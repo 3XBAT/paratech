@@ -68,6 +68,8 @@ type Core struct {
 	Deletion RecordingDeleteUseCase // «Удалить» of the recording rows and the summary screen (TASK-095)
 
 	Knowledge KnowledgeUseCase // the «База знаний» section (TASK-091); the shell shows its save dialog
+
+	Library LibraryUseCase // «Предметы» (TASK-121); the shell shows its open dialog, Files reads the chosen file
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -83,6 +85,7 @@ type ui interface {
 	pickSummaryFile(name, format string) (string, error)
 	pickDocxFile(name string) (string, error)
 	pickKnowledgeFile(name string) (string, error)
+	pickMaterialFile() (string, error)
 	setClipboardText(text string) error
 }
 
@@ -187,6 +190,7 @@ type Services struct {
 	LectureText *LectureTextService
 	Deletion    *RecordingDeleteService
 	Knowledge   *KnowledgeBaseService
+	Library     *LibraryService
 }
 
 // OpenServices opens the core and builds the services bound to the pages, all logging to Options.Log. Run calls it
@@ -253,6 +257,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Knowledge == nil {
 		return Services{}, errors.New("wails: open core: no knowledge base")
 	}
+	if core.Library == nil {
+		return Services{}, errors.New("wails: open core: no library")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -283,6 +290,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			clipboardFunc(s.setClipboardText), s.opts.Log),
 		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
 		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
+		Library:   NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log),
 	}, nil
 }
 
@@ -350,6 +358,15 @@ func (s *Shell) pickKnowledgeFile(_ context.Context, name string) (string, error
 		return "", err
 	}
 	return u.pickKnowledgeFile(name)
+}
+
+// pickMaterialFile shows the open dialog of a file of the library over the main window; "" when the user cancels.
+func (s *Shell) pickMaterialFile(context.Context) (string, error) {
+	u, err := s.current()
+	if err != nil {
+		return "", err
+	}
+	return u.pickMaterialFile()
 }
 
 // setClipboardText puts text on the system clipboard.
