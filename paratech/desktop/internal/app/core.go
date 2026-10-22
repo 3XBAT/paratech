@@ -106,6 +106,7 @@ type core struct {
 	agent   *agentturn.Service
 	journal *agentjournal.Service
 	driver  *agentloop.Driver
+	panel   *wails.AgentPanel // the Driver's updates as UI events
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -373,10 +374,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Deletion:   c.deletions,
 		Knowledge:  knowledge,
 		Library:    lib,
+		// Life is set by openCore: the requests live as long as the app.
+		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel},
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
 	}
+	c.ui.Agent.Link = c.ui.Connections // whether the Hub address and key are set
 	return c.wireSchedule(e, log)
 }
 

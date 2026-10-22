@@ -32,6 +32,9 @@ func validCore() Core {
 		Deletion:   &fakeDeletion{},
 		Knowledge:  &fakeKnowledge{},
 		Library:    &fakeLibrary{},
+		Agent: AgentCore{
+			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
+		},
 	}
 }
 

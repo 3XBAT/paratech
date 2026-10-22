@@ -66,7 +66,10 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Deletion))
 	app.RegisterService(application.NewService(b.Knowledge))
 	app.RegisterService(application.NewService(b.Library))
+	app.RegisterService(application.NewService(b.Agent))
 	media.setSource(b.Transcript.uc) // the media handler plays recordings through the transcript use case
+	b.AgentPanel.Attach(app.Event)
+	defer b.AgentPanel.Attach(nil) // also covers a Run that fails before the shutdown hook
 
 	u := &windowsUI{app: app}
 	var offs []func()
@@ -74,6 +77,7 @@ func (s *Shell) run(ctx context.Context) error {
 	u.popup, offs = newWindow(app, popupWindowSpec(s.opts.Name), offs)
 	// Wails closes every window on shutdown; without the hide-on-close hooks that close would be cancelled.
 	app.OnShutdown(func() {
+		b.AgentPanel.Attach(nil) // the Driver's requests may outlive the Wails app
 		for _, off := range offs {
 			off()
 		}
