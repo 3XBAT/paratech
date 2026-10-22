@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/library"
@@ -183,6 +184,7 @@ type LibraryService struct {
 	picker MaterialFilePicker
 	files  MaterialFileReader
 	log    *slog.Logger
+	drop   sync.Mutex // one drop at a time, so concurrent drops never hold many files in memory
 }
 
 // NewLibraryService returns the binding of the library; all arguments are required.

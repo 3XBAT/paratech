@@ -7,7 +7,9 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/domain/library/material"
 )
@@ -75,8 +77,8 @@ func TestLibraryDropImports(t *testing.T) {
 		t.Fatalf("drop = %+v", d)
 	}
 	f := d.Files[0]
-	if f.Name != "Лекция 1.DOCX" || !f.Existing || f.Error != "" || f.Material == nil || f.Material.ID != "m1" ||
-		f.Material.Type != "pdf" {
+	// The material is the fake use case's fixed one, so its type is not checked here.
+	if f.Name != "Лекция 1.DOCX" || !f.Existing || f.Error != "" || f.Material == nil || f.Material.ID != "m1" {
 		t.Fatalf("file = %+v", f)
 	}
 	if uc.upload.Name != "Лекция 1.DOCX" || string(uc.upload.Data) != "bytes" || files.limit != material.MaxBytes {
@@ -214,6 +216,108 @@ func TestLibraryDropNothing(t *testing.T) {
 	if len(em.events) != 0 {
 		t.Fatalf("events = %+v, want none for an empty drop", em.events)
 	}
+}
+
+// gateFiles blocks every read until release is closed and records the most reads at once.
+type gateFiles struct {
+	entered chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	active  int
+	most    int
+	reads   int
+}
+
+func (g *gateFiles) ReadFile(context.Context, string, int64) ([]byte, error) {
+	g.mu.Lock()
+	g.active++
+	g.reads++
+	g.most = max(g.most, g.active)
+	g.mu.Unlock()
+	g.entered <- struct{}{}
+	<-g.release
+	g.mu.Lock()
+	g.active--
+	g.mu.Unlock()
+	return []byte("x"), nil
+}
+
+func TestLibraryDropsRunOneAtATime(t *testing.T) {
+	s, _, _ := newLibraryBinding(t, "", &memFiles{})
+	g := &gateFiles{entered: make(chan struct{}, 2), release: make(chan struct{})}
+	s.files = g
+	ems := []*fakeEmitter{{}, {}}
+
+	var wg sync.WaitGroup
+	for _, em := range ems {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.importDropped(context.Background(), []string{dropDir + `\a.pdf`}, em)
+		}()
+	}
+	<-g.entered
+	select {
+	case <-g.entered:
+		t.Fatal("a second drop read a file while the first was reading")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(g.release)
+	wg.Wait()
+
+	if g.reads != 2 || g.most != 1 {
+		t.Fatalf("reads %d, most at once %d: want 2 and 1", g.reads, g.most)
+	}
+	for _, em := range ems {
+		if d := dropped(t, em); len(d.Files) != 1 || d.Files[0].Error != "" {
+			t.Fatalf("drop = %+v", d)
+		}
+	}
+}
+
+func TestLibraryDropNoEmitAfterShutdown(t *testing.T) {
+	good := dropDir + `\a.pdf`
+	tests := []struct {
+		name      string
+		cancelNow bool // cancelled before the drop, else during the read
+		wantReads int
+	}{
+		{"cancelled before", true, 0},
+		{"cancelled during the import", false, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s, _, files, _ := newDropBinding(t, map[string][]byte{good: []byte("x")})
+			if tt.cancelNow {
+				cancel()
+			} else {
+				s.files = cancelOnRead{files, cancel}
+			}
+			em := &fakeEmitter{}
+
+			s.importDropped(ctx, []string{good}, em)
+
+			if len(em.events) != 0 {
+				t.Fatalf("events = %+v, want none once the app is shutting down", em.events)
+			}
+			if len(files.read) != tt.wantReads {
+				t.Fatalf("read %q, want %d reads", files.read, tt.wantReads)
+			}
+		})
+	}
+}
+
+// cancelOnRead cancels the context of the drop while reading, as a shutdown would.
+type cancelOnRead struct {
+	*countingFiles
+	cancel context.CancelFunc
+}
+
+func (c cancelOnRead) ReadFile(ctx context.Context, path string, maxBytes int64) ([]byte, error) {
+	c.cancel()
+	return c.countingFiles.ReadFile(ctx, path, maxBytes)
 }
 
 func TestLibraryDropImportFailure(t *testing.T) {

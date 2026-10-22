@@ -31,11 +31,21 @@ type LibraryDropFile struct {
 
 // importDropped puts the files dropped on the main window into «Входящие», each on its own, and emits the outcome.
 // The paths come through the Wails runtime of the page, so they are untrusted and checked as droppedPathError says.
+// Drops run one at a time; nothing is emitted once ctx is done (the app is shutting down).
 func (s *LibraryService) importDropped(ctx context.Context, paths []string, emit EventEmitter) {
 	if len(paths) == 0 {
 		return
 	}
-	emit.Emit(LibraryDropEvent, s.dropOutcome(ctx, paths))
+	s.drop.Lock()
+	defer s.drop.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	out := s.dropOutcome(ctx, paths)
+	if ctx.Err() != nil {
+		return
+	}
+	emit.Emit(LibraryDropEvent, out)
 }
 
 func (s *LibraryService) dropOutcome(ctx context.Context, paths []string) LibraryDrop {
