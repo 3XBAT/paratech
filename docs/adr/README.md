@@ -29,3 +29,4 @@ Open decisions are tracked in PRD §19.
 - [0022](0022-untrusted-input.md) Untrusted input for every call
 - [0023](0023-hub-agentstep.md) Hub: AgentStep and prompts on the server
 - [0024](0024-subjects-library.md) Subjects and library
+- [0025](0025-turnkey-work.md) Turnkey work: triage, questions, helper mode
