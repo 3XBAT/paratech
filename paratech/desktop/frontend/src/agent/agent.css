@@ -11,6 +11,10 @@
 .ag-name { font-weight: 600; }
 .ag-kbd { margin-left: auto; padding: 0 4px; border-radius: var(--r-xs); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line); color: var(--muted); font: inherit; font-size: 11.5px; line-height: 18px; font-weight: 500; }
 .ag-ask-form { display: flex; align-items: center; gap: 8px; }
+.ag-send { flex: none; display: inline-grid; place-items: center; width: var(--h-lg); height: var(--h-lg); padding: 0; border: 0; border-radius: var(--r-lg); background: var(--acc); color: #fff; cursor: pointer; }
+.ag-send:hover:not(:disabled) { filter: brightness(1.08); }
+.ag-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ag-send:disabled { background: var(--fill); color: var(--muted); cursor: not-allowed; }
 .ag-input { flex: 1; min-width: 0; height: var(--h-lg); padding: 0 12px; border: 0; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); color: var(--text); font: inherit; }
 .ag-input::placeholder { color: var(--muted); }
 .ag-input:focus { outline: none; box-shadow: 0 0 0 2px var(--accent); }

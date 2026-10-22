@@ -502,6 +502,16 @@ test("online: the input is enabled; before State answers it is not", () => {
   assert.equal(panelMode(initialPanelState).inputEnabled, false);
 });
 
+test("send is an icon button with an accessible name; disabled while the draft is empty or offline", () => {
+  const empty = panelHtml(stateWith());
+  assert.match(empty, /<button[^>]*class="ag-send"[^>]*aria-label="Отправить"[^>]*title="Отправить"[^>]*disabled=""[^>]*><svg/);
+  assert.doesNotMatch(empty, />Отправить</);
+  const ready = panelHtml(stateWith(), { draft: "привет" });
+  assert.match(ready, /<button(?![^>]*disabled)[^>]*class="ag-send"/);
+  const offline = panelHtml(reducePanel(initialPanelState, { type: "link", link: { link: "no_key", readOnly: true } }), { draft: "привет" });
+  assert.match(offline, /<button[^>]*class="ag-send"[^>]*disabled/);
+});
+
 test("the context chip shows the label and the remove button only while removable", () => {
   const out = panelHtml(stateWith());
   assert.match(out, /Сегодня/);
