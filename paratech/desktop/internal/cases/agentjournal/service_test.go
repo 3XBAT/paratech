@@ -82,24 +82,33 @@ func (r *memActions) ListUnfinished(ctx context.Context) ([]*action.Action, erro
 	return out, nil
 }
 
-// fakeComp keeps target versions by the compensation kind; Apply bumps the version like a real change would.
+// fakeComp keeps target versions by the compensation kind; Apply compares and swaps the version like the adapter
+// must, and bumps it like a real change would. afterCheck runs after TargetVersion, to change the target in between.
 type fakeComp struct {
-	versions map[action.CompensationKind]int64
-	gone     bool
-	failing  error
-	applied  int
+	versions   map[action.CompensationKind]int64
+	gone       bool
+	failing    error
+	applied    int
+	afterCheck func()
 }
 
 func (f *fakeComp) TargetVersion(_ context.Context, c action.Compensation) (int64, error) {
 	if f.gone {
 		return 0, shared.ErrNotFound
 	}
-	return f.versions[c.Kind()], nil
+	v := f.versions[c.Kind()]
+	if f.afterCheck != nil {
+		f.afterCheck()
+	}
+	return v, nil
 }
 
-func (f *fakeComp) Apply(_ context.Context, c action.Compensation) error {
+func (f *fakeComp) Apply(_ context.Context, c action.Compensation, expectedVersion int64) error {
 	if f.failing != nil {
 		return f.failing
+	}
+	if f.versions[c.Kind()] != expectedVersion {
+		return fmt.Errorf("fake compensator: %w", action.ErrTargetChanged)
 	}
 	f.applied++
 	f.versions[c.Kind()]++
@@ -227,6 +236,18 @@ func TestUndo(t *testing.T) {
 	}
 	if got, _ := s.List(t.Context(), "th1", 10); got[0].Status != action.StatusDone {
 		t.Fatalf("refused Undo changed the entry: %+v", got[0])
+	}
+}
+
+// The target changes between the version check and the compensation: Apply's compare-and-swap refuses it.
+func TestUndoTargetChangedAfterCheck(t *testing.T) {
+	comp := &fakeComp{versions: map[action.CompensationKind]int64{action.CompRemoveSubject: 1}}
+	comp.afterCheck = func() { comp.versions[action.CompRemoveSubject]++ } // the student edits the subject meanwhile
+	s, _ := newService(t, comp)
+	e := done(t, s, begin(t, s, "c1").ID)
+	got, err := s.Undo(t.Context(), e.ID)
+	if err != nil || got.Status != action.StatusUndoRefused || comp.applied != 0 {
+		t.Fatalf("Undo = %+v, %v, applied %d", got, err, comp.applied)
 	}
 }
 

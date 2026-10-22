@@ -140,7 +140,12 @@ func (s *Service) undo(ctx context.Context, a *action.Action) error {
 	if err != nil {
 		return err
 	}
-	if err := s.comp.Apply(ctx, c); err != nil {
+	// The check above is advisory; Apply's compare-and-swap decides when the target changes in between.
+	err = s.comp.Apply(ctx, c, a.TargetVersion())
+	if errors.Is(err, action.ErrTargetChanged) {
+		return a.RefuseUndo(s.clock.Now())
+	}
+	if err != nil {
 		return err
 	}
 	return a.FinishUndo(s.clock.Now())

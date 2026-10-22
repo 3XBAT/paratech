@@ -26,9 +26,12 @@ type ActionRepository interface {
 
 // Compensator applies a compensation idempotently. TargetVersion returns the current version of the target, so the
 // journal can refuse Undo when it changed since the action; a target that no longer exists is shared.ErrNotFound.
+// Apply must compare-and-swap on expectedVersion in the same transaction as the change: a target that changed after
+// the TargetVersion check is an error wrapping action.ErrTargetChanged (the entry becomes UNDO_REFUSED), never an
+// overwrite of the newer change.
 type Compensator interface {
 	TargetVersion(ctx context.Context, c action.Compensation) (int64, error)
-	Apply(ctx context.Context, c action.Compensation) error
+	Apply(ctx context.Context, c action.Compensation, expectedVersion int64) error
 }
 
 // Clock returns the current time (ARCH-24).

@@ -258,6 +258,10 @@ func (a *Action) CheckTarget(current int64) error {
 	return nil
 }
 
+// TargetVersion returns the version of the target right after the action (0 before DONE). The compensation applies
+// only while the target still has it.
+func (a *Action) TargetVersion() int64 { return a.targetVersion }
+
 // FinishUndo records the applied compensation: UNDOING -> UNDONE.
 func (a *Action) FinishUndo(now time.Time) error { return a.move(StatusUndone, now) }
 
