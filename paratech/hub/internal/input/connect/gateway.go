@@ -35,22 +35,35 @@ type Completer interface {
 	Complete(ctx context.Context, cmd gateway.Command) (gateway.Result, error)
 }
 
-// Gateway serves GatewayService.Complete. CompleteStream stays unimplemented: the provider port has no streaming yet
-// (ADR-0010). AgentStep is unimplemented until the agentstep use case exists (ADR-0023, TASK-114).
+// Gateway serves GatewayService.Complete and, when an agent stepper is given, AgentStep (ADR-0023). CompleteStream
+// stays unimplemented: the provider port has no streaming yet (ADR-0010).
 type Gateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
-	svc Completer
-	log *slog.Logger
+	svc   Completer
+	agent AgentStepper
+	log   *slog.Logger
 }
 
 var _ hubv1connect.GatewayServiceHandler = (*Gateway)(nil)
 
+// GatewayOption changes a default of NewGateway.
+type GatewayOption func(*Gateway)
+
+// WithAgentStep serves AgentStep with a. Without it AgentStep answers unimplemented.
+func WithAgentStep(a AgentStepper) GatewayOption {
+	return func(g *Gateway) { g.agent = a }
+}
+
 // NewGateway builds the handler.
-func NewGateway(svc Completer, log *slog.Logger) (*Gateway, error) {
+func NewGateway(svc Completer, log *slog.Logger, opts ...GatewayOption) (*Gateway, error) {
 	if svc == nil || log == nil {
 		return nil, errors.New("connect: gateway service and logger are required")
 	}
-	return &Gateway{svc: svc, log: log}, nil
+	g := &Gateway{svc: svc, log: log}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g, nil
 }
 
 // Complete runs one completion for the authenticated caller. The caller comes only from the API key; the request has
