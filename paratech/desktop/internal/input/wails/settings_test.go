@@ -157,6 +157,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "agent life", edit: func(c *Core) { c.Agent.Life = nil }},
 		{name: "agent journal", edit: func(c *Core) { c.Agent.Journal = nil }},
 		{name: "agent clock", edit: func(c *Core) { c.Agent.Clock = nil }},
+		{name: "today screen", edit: func(c *Core) { c.Today = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {
