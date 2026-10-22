@@ -57,6 +57,12 @@ func (s PlanStep) Matches(call Call) bool {
 			return false
 		}
 	}
+	// A deferred ID is part of the step: a call that leaves it out does something else than planned.
+	for _, name := range s.deferred {
+		if _, ok := call.args.vals[name]; !ok {
+			return false
+		}
+	}
 	return true
 }
 
@@ -165,7 +171,9 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 		if _, ok := vals[as.Name]; ok {
 			continue
 		}
-		if as.Type == ArgID && created[as.Kind] {
+		// Only an ID the step needs is deferred: a required one, or one of a one-of pair whose other member is
+		// absent. An optional ID the step leaves out stays out of the call, as every deferred ID must be filled in.
+		if as.Type == ArgID && created[as.Kind] && (as.Required || needsOneOf(spec, vals, as.Name)) {
 			deferred = append(deferred, as.Name)
 			continue
 		}
@@ -183,6 +191,25 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 		}
 	}
 	return PlanStep{tool: t, args: Args{vals: vals}, deferred: deferred}, nil
+}
+
+// needsOneOf reports whether name is in a one-of pair of spec whose other member vals lack.
+func needsOneOf(spec ToolSpec, vals map[string]argValue, name string) bool {
+	for _, pair := range spec.oneOf {
+		other := ""
+		switch name {
+		case pair[0]:
+			other = pair[1]
+		case pair[1]:
+			other = pair[0]
+		default:
+			continue
+		}
+		if _, ok := vals[other]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 // QuestionKind is the kind of a question on a Questions card.

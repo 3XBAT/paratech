@@ -132,13 +132,13 @@ func (th *Thread) TakeResults(now time.Time) ([]values.ToolResult, bool) {
 	return out, true
 }
 
-// deferredBound reports whether every deferred argument the call fills in is an ID created in this request by an
-// approved step that comes before step (so the create ran first).
+// deferredBound reports whether the call fills in every deferred argument with an ID created in this request by an
+// approved step that comes before step (so the create ran first). A missing deferred argument is not bound.
 func (t *Turn) deferredBound(s values.PlanStep, step int, call values.Call) bool {
 	for _, name := range s.Deferred() {
 		ref, ok := call.Args().ID(name)
 		if !ok {
-			continue
+			return false
 		}
 		bound := slices.ContainsFunc(t.created, func(c Created) bool { return c.Ref == ref && c.Step < step })
 		if !bound {

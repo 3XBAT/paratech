@@ -163,6 +163,18 @@ func TestDeferredIDBindsToCreatedID(t *testing.T) {
 			t.Fatalf("place into a folder not created by the plan = %v, want ErrNotInPlan", err)
 		}
 	})
+	t.Run("a call without the deferred folder is refused", func(t *testing.T) {
+		th := approvedFolderPlan(t)
+		if err := th.Observe(ref(t, values.KindLesson, "l1")); err != nil {
+			t.Fatal(err)
+		}
+		createFolder(t, th, "c1", "Папка А", "fa")
+		stepWith(t, th, "c2")
+		call := callID(t, "c2", "place_upload", `{"upload":"u1","subject":"s1","lesson":"l1"}`)
+		if _, err := th.Admit(call, Facts{Context: context(t)}, at(3)); !errors.Is(err, ErrNotInPlan) {
+			t.Fatalf("place without the created folder = %v, want ErrNotInPlan", err)
+		}
+	})
 	t.Run("the folder of a later create step is refused", func(t *testing.T) {
 		th := approvedFolderPlan(t)
 		createFolder(t, th, "c1", "Папка Б", "fb")
