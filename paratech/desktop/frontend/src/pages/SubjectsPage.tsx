@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
 import { callByName } from "../bindings/runtime.js";
-import { texts } from "../libraryView.js";
+import { importNote, texts } from "../libraryView.js";
 import type { PageId } from "../nav.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
@@ -14,7 +14,7 @@ type Form = "none" | "subject" | "folder";
  * semesters, system folders); the page shows what it reports and the text of its refusals.
  * `reload` changes when files were added elsewhere (a drop on the window).
  */
-export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: number }) {
+export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: number; visit?: number }) {
   const api = useMemo(() => libraryApi(callByName), []);
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
   const [inbox, setInbox] = useState<LibraryMaterial[]>([]);
@@ -24,6 +24,8 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [note, setNote] = useState("");
+  const firstVisit = useRef(props.visit);
   const running = useRef(false); // a double click comes before the re-render that disables the button
 
   const load = useCallback(() => {
@@ -53,6 +55,18 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
     };
   }, [api, openId, props.reload]);
 
+  // A click on «Предметы» while a subject is open returns to the list.
+  useEffect(() => {
+    if (props.visit !== firstVisit.current) {
+      firstVisit.current = props.visit;
+      setOpenId("");
+      setMaterials([]);
+      setForm("none");
+      setError("");
+      setNote("");
+    }
+  }, [props.visit]);
+
   const subject = subjects?.find((s) => s.id === openId) ?? null;
 
   async function run(work: () => Promise<void>) {
@@ -62,6 +76,7 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
     running.current = true;
     setBusy(true);
     setError("");
+    setNote("");
     try {
       await work();
     } catch (err) {
@@ -90,7 +105,8 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
 
   const addFile = () =>
     run(async () => {
-      await api.importFile();
+      const r = await api.importFile();
+      setNote(importNote(r));
       load();
     });
 
@@ -141,6 +157,7 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
         <>
           <SubjectList subjects={subjects} onOpen={open} onAdd={() => setForm("subject")} />
           <InboxList materials={inbox} />
+          {note !== "" && <ResultLine kind="ok" role="status">{note}</ResultLine>}
           {form !== "subject" && error !== "" && (
             <ResultLine kind="fail" role="alert">
               {error}

@@ -119,6 +119,7 @@ const callProblemTexts: Record<Exclude<CallProblem, "">, string> = {
   offline: "Нет связи с paratech.",
   closed: "Приложение закрывается.",
   unavailable: "Пока недоступно.",
+  busy: "Действие уже меняется, попробуйте ещё раз.",
   failed: "Не удалось отправить просьбу.",
 };
 

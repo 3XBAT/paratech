@@ -42,7 +42,7 @@ function PageView(props: {
     case "today":
       return <TodayPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
     case "subjects":
-      return <SubjectsPage onOpen={props.onOpen} reload={props.library} />;
+      return <SubjectsPage onOpen={props.onOpen} reload={props.library} visit={props.visit} />;
     case "journal":
       return <JournalPage />;
     case "homework":

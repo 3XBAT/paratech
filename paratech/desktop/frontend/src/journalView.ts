@@ -65,7 +65,8 @@ export const statusOptions: readonly { value: string; label: string }[] = [
   { value: "", label: "Любое" },
   ...["DONE", "COMPLETED", "UNDONE", "UNDO_REFUSED", "FAILED", "RUNNING", "QUEUED"].map((value) => ({
     value,
-    label: statusLabels[value],
+    // RUNNING matches jobs only; PENDING actions are «Выполняется» too, so the filter says which it means.
+    label: value === "RUNNING" ? "Обработка идёт" : statusLabels[value],
   })),
 ];
 
@@ -109,6 +110,8 @@ const noUndoReasons: Readonly<Record<string, string>> = {
   sent: "Письмо отправлено",
 };
 
+const busyText = "Действие уже меняется, попробуйте ещё раз.";
+
 /** The refusals of Undo as the Go binding names them. */
 const refusalTexts: Readonly<Record<string, string>> = {
   changed: "Изменено после — отменить нельзя.",
@@ -117,12 +120,14 @@ const refusalTexts: Readonly<Record<string, string>> = {
   name_taken: "Вернуть нельзя: предмет или папка с таким названием уже есть.",
   not_found: "Запись журнала не найдена: обновите список.",
   not_undoable: "Это действие отменить нельзя.",
+  busy: busyText,
 };
 
 const problemTexts: Readonly<Record<string, string>> = {
   invalid: "Неверный идентификатор: обновите список.",
   unavailable: "Пока недоступно.",
   closed: "Приложение закрывается.",
+  busy: busyText,
   failed: texts.undoFailed,
 };
 

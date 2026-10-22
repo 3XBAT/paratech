@@ -28,9 +28,9 @@ export const methods = {
 } as const;
 
 /** Problems of a call (AgentResult.problem); "" when the operation started. */
-export type CallProblem = "" | "invalid" | "offline" | "closed" | "unavailable" | "failed";
+export type CallProblem = "" | "invalid" | "offline" | "closed" | "unavailable" | "busy" | "failed";
 
-export const callProblems: readonly CallProblem[] = ["", "invalid", "offline", "closed", "unavailable", "failed"];
+export const callProblems: readonly CallProblem[] = ["", "invalid", "offline", "closed", "unavailable", "busy", "failed"];
 
 /** Why the panel is read-only: "ready" is the only state that accepts a request. */
 export type LinkState = "ready" | "no_hub" | "no_key" | "no_key_store" | "unknown";

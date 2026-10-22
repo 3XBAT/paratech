@@ -128,6 +128,8 @@ test("history, undo and undoRequest replies are parsed defensively", () => {
   assert.throws(() => parseHistory({ problem: "", lines: [{ kind: 5 }] }));
   assert.throws(() => parseHistory(null));
   assert.deepEqual(parseUndo({ problem: "unavailable" }), { problem: "unavailable", actionId: "", status: "", refusal: "" });
+  assert.equal(parseUndo({ problem: "busy" }).problem, "busy");
+  assert.equal(parseUndo({ problem: "", refusal: "busy" }).refusal, "busy");
   assert.deepEqual(parseUndoRequest({ problem: "", actions: null }), { problem: "", actions: [] });
 });
 

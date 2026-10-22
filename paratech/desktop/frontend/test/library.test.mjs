@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { errorTexts, genericError, libraryApi, libraryErrorText, methods, parseImport, parseSubject } from "../.test-build/bindings/library.js";
-import { folderCountText, folderTitle, groupBySemester, orderedFolders, sizeText } from "../.test-build/libraryView.js";
+import { folderCountText, folderTitle, groupBySemester, importNote, orderedFolders, sizeText } from "../.test-build/libraryView.js";
 import { InboxList, SubjectDetail, SubjectList } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
@@ -154,4 +154,16 @@ test("the library code builds no markup from text", () => {
   for (const f of ["../src/pages/SubjectsParts.tsx", "../src/pages/SubjectsPage.tsx", "../src/pages/DropZone.tsx", "../src/pages/JournalParts.tsx"]) {
     assert.doesNotMatch(readFileSync(new URL(f, import.meta.url), "utf8"), /dangerouslySetInnerHTML|innerHTML|insertAdjacentHTML/, f);
   }
+});
+
+test("the line after «Добавить файл»: added, already there, nothing when cancelled", () => {
+  assert.equal(importNote({ cancelled: true, existing: false }), "");
+  assert.equal(importNote({ cancelled: false, existing: true }), "Файл уже есть в списке.");
+  assert.equal(importNote({ cancelled: false, existing: false }), "Файл добавлен.");
+});
+
+test("SubjectsPage returns to the list on a new visit", () => {
+  const src = readFileSync(new URL("../src/pages/SubjectsPage.tsx", import.meta.url), "utf8");
+  assert.match(src, /props\.visit !== firstVisit\.current/);
+  assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /<SubjectsPage[^>]*visit=\{props\.visit\}/);
 });

@@ -8,6 +8,8 @@ export const texts = {
   addSubject: "Предмет",
   addFolder: "Папка",
   addFile: "Добавить файл",
+  fileAdded: "Файл добавлен.",
+  fileExisting: "Файл уже есть в списке.",
   knowledge: "База знаний",
   back: "Все предметы",
   subjectName: "Название предмета",
@@ -40,6 +42,14 @@ const systemNames: Readonly<Record<string, string>> = {
 const systemOrder = ["lectures", "seminars", "labs", "materials", "homework", "tickets"];
 
 /** The title of a folder: the fixed name of a system folder, the typed name of an own one. */
+/** The line after «Добавить файл»: nothing when the student cancelled the dialog. */
+export function importNote(r: { cancelled: boolean; existing: boolean }): string {
+  if (r.cancelled) {
+    return "";
+  }
+  return r.existing ? texts.fileExisting : texts.fileAdded;
+}
+
 export function folderTitle(f: LibraryFolder): string {
   return systemNames[f.system] ?? f.name;
 }

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { initialFilter, lineModel, problemText, refusalText, toFilter, undoOutcome } from "../.test-build/journalView.js";
+import { initialFilter, lineModel, statusOptions, problemText, refusalText, toFilter, undoOutcome } from "../.test-build/journalView.js";
 import { FilterBar, JournalList } from "../.test-build/pages/JournalParts.js";
 
 const noop = () => undefined;
@@ -123,4 +123,18 @@ test("the journal code builds no markup from text", () => {
   for (const f of ["../src/pages/JournalParts.tsx", "../src/pages/JournalPage.tsx", "../src/journalView.ts"]) {
     assert.doesNotMatch(readFileSync(new URL(f, import.meta.url), "utf8"), /dangerouslySetInnerHTML|innerHTML|insertAdjacentHTML/, f);
   }
+});
+
+test("busy is worded for Undo refusals and call problems", () => {
+  const text = "Действие уже меняется, попробуйте ещё раз.";
+  assert.equal(undoOutcome({ problem: "", actionId: "a1", status: "", refusal: "busy" }).text, text);
+  assert.equal(undoOutcome({ problem: "busy", actionId: "a1", status: "", refusal: "" }).text, text);
+  assert.equal(problemText("busy"), text);
+  assert.equal(refusalText("busy"), text);
+});
+
+test("the RUNNING status filter says it means processing, not pending actions", () => {
+  const running = statusOptions.find((o) => o.value === "RUNNING");
+  assert.equal(running.label, "Обработка идёт");
+  assert.equal(statusOptions.filter((o) => o.label === "Выполняется").length, 0);
 });
