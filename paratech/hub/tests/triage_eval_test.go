@@ -5,6 +5,7 @@ package tests
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ const triageValid = `{"work_type":"essay",` +
 func (h *readerHub) triage(t *testing.T, key, bearer string, round int, assignment, material string) (*hubv1.CompletionResult, error) {
 	t.Helper()
 	previous := []map[string]string{}
-	if round == 2 {
+	for r := 1; r < round; r++ {
 		previous = append(previous, map[string]string{"question": "Какой стиль?", "answer": assignment})
 	}
 	data, err := json.Marshal(map[string]any{
@@ -45,27 +46,33 @@ func (h *readerHub) triage(t *testing.T, key, bearer string, round int, assignme
 }
 
 // TestAgentEvalTriageInjectionStaysData: each fixture as the assignment, the material and a previous answer reaches
-// the model only inside the data on the server prompt and strong alias; the answer comes back canonical, and in
-// round 2 without questions.
+// the model only inside the data on the server prompt and strong alias; the answer comes back canonical, with its
+// questions in rounds 1 and 2 and without them in round 3, the final call.
 func TestAgentEvalTriageInjectionStaysData(t *testing.T) {
 	for _, fx := range loadEvalFixtures[evalInjectionFixture](t, "injection") {
 		t.Run(fx.Name, func(t *testing.T) {
 			h := newReaderHub(t)
-			h.provider.Push(readerAnswer(t, triageValid), readerAnswer(t, triageValid))
+			h.provider.Push(readerAnswer(t, triageValid), readerAnswer(t, triageValid), readerAnswer(t, triageValid))
 
-			res, err := h.triage(t, "tr:a1:1", h.key, 1, fx.Untrusted, fx.Untrusted)
-			if err != nil {
-				t.Fatal(err)
+			for _, round := range []int{1, 2} {
+				material := ""
+				if round == 1 {
+					material = fx.Untrusted
+				}
+				res, err := h.triage(t, "tr:a1:"+strconv.Itoa(round), h.key, round, fx.Untrusted, material)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.GetOutput() != triageValid || res.GetReplayed() {
+					t.Fatalf("round %d = %v, want the questions kept", round, res)
+				}
 			}
-			if res.GetOutput() != triageValid || res.GetReplayed() {
-				t.Fatalf("round 1 = %v", res)
-			}
-			res, err = h.triage(t, "tr:a1:2", h.key, 2, fx.Untrusted, "")
+			res, err := h.triage(t, "tr:a1:3", h.key, 3, fx.Untrusted, "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(res.GetOutput(), `"questions":[]`) {
-				t.Fatalf("round 2 = %s, want no questions", res.GetOutput())
+				t.Fatalf("round 3 = %s, want no questions", res.GetOutput())
 			}
 
 			for _, call := range h.provider.Calls() {

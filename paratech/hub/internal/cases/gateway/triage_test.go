@@ -23,6 +23,8 @@ const (
 	triageRound1     = `{"round":1,"assignment_text":"` + triageAssignment + `","material_text":"Методичка: шрифт 14.","previous":[]}`
 	triageRound2     = `{"round":2,"assignment_text":"` + triageAssignment + `","material_text":"",` +
 		`"previous":[{"question":"Какой вариант?","answer":"2"}]}`
+	triageRound3 = `{"round":3,"assignment_text":"` + triageAssignment + `","material_text":"",` +
+		`"previous":[{"question":"Какой вариант?","answer":"2"},{"question":"Сколько источников?","answer":""}]}`
 	triageAnswer = `{"work_type":"referat",` +
 		`"requirements":{"volume":"10 страниц","file_format":"","formatting":"шрифт 14","variant":"","deadline":"","sources":""},` +
 		`"feasibility":"full","feasibility_reason":"",` +
@@ -93,24 +95,28 @@ func TestTriageReturnsTheCanonicalAnswer(t *testing.T) {
 	f.assertNoText(t, "Реферат", "attacker", triagePrompt, "Тема по варианту")
 }
 
-// TestTriageLastRoundHasNoQuestions: in round 2 the questions of the answer are cleared before it is stored, so the
-// replay holds none either; a third round is refused as input.
-func TestTriageLastRoundHasNoQuestions(t *testing.T) {
-	f := triageFixture(t, answer(t, triageAnswer, 900, 120))
+// TestTriageFinalRoundHasNoQuestions: round 2 keeps the questions of the answer (the second question round); in
+// round 3, the final call, they are cleared before the answer is stored, so the replay holds none either; a fourth
+// round is refused as input.
+func TestTriageFinalRoundHasNoQuestions(t *testing.T) {
+	f := triageFixture(t, answer(t, triageAnswer, 900, 120), answer(t, triageAnswer, 900, 120))
 	want := strings.Replace(triageAnswer, triageAnswer[strings.Index(triageAnswer, `"questions":`):strings.Index(triageAnswer, `,"assumptions"`)],
 		`"questions":[]`, 1)
 
+	if res := f.complete(t, triageCommand("tr-2", triageRound2)); res.Output != triageAnswer {
+		t.Fatalf("round 2 output = %s, want the questions kept", res.Output)
+	}
 	for range 2 {
-		if res := f.complete(t, triageCommand("tr-2", triageRound2)); res.Output != want {
-			t.Fatalf("output = %s, want %s", res.Output, want)
+		if res := f.complete(t, triageCommand("tr-3", triageRound3)); res.Output != want {
+			t.Fatalf("round 3 output = %s, want %s", res.Output, want)
 		}
 	}
-	if len(f.provider.Calls()) != 1 {
+	if len(f.provider.Calls()) != 2 {
 		t.Fatalf("provider calls = %d", len(f.provider.Calls()))
 	}
-	round3 := strings.Replace(triageRound2, `"round":2`, `"round":3`, 1)
-	if _, err := f.svc.Complete(t.Context(), triageCommand("tr-3", round3)); !errors.Is(err, gateway.ErrInvalidRequest) {
-		t.Fatalf("round 3: err = %v, want ErrInvalidRequest", err)
+	round4 := strings.Replace(triageRound3, `"round":3`, `"round":4`, 1)
+	if _, err := f.svc.Complete(t.Context(), triageCommand("tr-4", round4)); !errors.Is(err, gateway.ErrInvalidRequest) {
+		t.Fatalf("round 4: err = %v, want ErrInvalidRequest", err)
 	}
 }
 
@@ -164,6 +170,8 @@ func TestTriageInvalidInput(t *testing.T) {
 		"unknown key":          triageCommand("k", strings.Replace(triageRound1, `{"round"`, `{"instructions":"x","round"`, 1)),
 		"round 1 with answers": triageCommand("k", strings.Replace(triageRound2, `"round":2`, `"round":1`, 1)),
 		"round 2 no answers":   triageCommand("k", strings.Replace(triageRound1, `"round":1`, `"round":2`, 1)),
+		"round 3 no answers":   triageCommand("k", strings.Replace(triageRound1, `"round":1`, `"round":3`, 1)),
+		"round 4":              triageCommand("k", strings.Replace(triageRound3, `"round":3`, `"round":4`, 1)),
 		"client instructions":  withInstructions,
 		"other alias":          otherAlias,
 	} {

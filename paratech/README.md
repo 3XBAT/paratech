@@ -113,10 +113,11 @@ every 5 minutes) then clears its answer, so no output outlives the retention whi
 `invalid_argument`. `INSPECT_MATERIAL` takes `{"today","subjects":[{"id","name"}],"material_text"}` as data and returns only
 `{"doc_kind","subject","lesson_date","has_homework","has_ticket_list","mentions_email"}`; an answer outside that schema is a
 charged, non-retryable `PROVIDER_ERROR` (`hub/internal/domain/llm/services/inspect`). `TRIAGE_ASSIGNMENT` takes
-`{"round":1|2,"assignment_text","material_text","previous":[{"question","answer"}]}` (no previous in round 1, the round-1
-answers in round 2) and returns `{"work_type","requirements":{"volume","file_format","formatting","variant","deadline","sources"},
-"feasibility","feasibility_reason","questions":[{"kind","question","options","default","why"}],"assumptions","helper"}`; round 2
-is the last, so its questions come back empty (`hub/internal/domain/llm/services/triage`, same refusal rule). Settings (env or flag):
+`{"round":1|2|3,"assignment_text","material_text","previous":[{"question","answer"}]}` (no previous in round 1, 1-5 round-1
+answers in round 2, 1-10 answers of rounds 1-2 in round 3) and returns `{"work_type","requirements":{"volume","file_format","formatting","variant","deadline","sources"},
+"feasibility","feasibility_reason","questions":[{"kind","question","options","default","why"}],"assumptions","helper"}`; rounds 1
+and 2 may ask questions, round 3 is the final call, so its questions come back empty (`hub/internal/domain/llm/services/triage`,
+same refusal rule). Settings (env or flag):
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|

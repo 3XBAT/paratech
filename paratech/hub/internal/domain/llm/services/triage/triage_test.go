@@ -17,6 +17,9 @@ const (
 	round1 = `{"round":1,"assignment_text":"` + assignment + `","material_text":"Методичка: оформление по ГОСТ.","previous":[]}`
 	round2 = `{"round":2,"assignment_text":"` + assignment + `","material_text":"","previous":[` +
 		`{"question":"Какой у вас номер в списке?","answer":"7"},{"question":"Нужен ли титульный лист?","answer":""}]}`
+	round3 = `{"round":3,"assignment_text":"` + assignment + `","material_text":"","previous":[` +
+		`{"question":"Какой у вас номер в списке?","answer":"7"},{"question":"Нужен ли титульный лист?","answer":""},` +
+		`{"question":"Сколько источников?","answer":"5"}]}`
 
 	// fullAnswer is canonical: keys in the order of Encode.
 	fullAnswer = `{"work_type":"referat",` +
@@ -63,13 +66,30 @@ func TestParseInputValid(t *testing.T) {
 	if in := mustInput(t, round1); in.Round() != 1 {
 		t.Fatalf("round = %d", in.Round())
 	}
-	if in := mustInput(t, round2); in.Round() != triage.LastRound {
+	if in := mustInput(t, round2); in.Round() != 2 {
+		t.Fatalf("round = %d", in.Round())
+	}
+	if in := mustInput(t, round3); in.Round() != triage.FinalRound {
 		t.Fatalf("round = %d", in.Round())
 	}
 	// The limits themselves pass.
 	at := fmt.Sprintf(`{"round":1,"assignment_text":%s,"material_text":%s,"previous":[]}`,
 		quote(t, strings.Repeat("a", triage.MaxAssignmentBytes)), quote(t, strings.Repeat("м", triage.MaxMaterialBytes/2)))
 	mustInput(t, at)
+	prev := func(n int) string {
+		items := make([]string, n)
+		for i := range items {
+			items[i] = `{"question":"Q?","answer":"A"}`
+		}
+		return "[" + strings.Join(items, ",") + "]"
+	}
+	in := func(round, previous string) string {
+		return `{"round":` + round + `,"assignment_text":"x","material_text":"","previous":` + previous + `}`
+	}
+	// Each question round adds at most MaxQuestions answers; round 3 may hold those of a skipped round 2 only.
+	mustInput(t, in("2", prev(triage.MaxQuestions)))
+	mustInput(t, in("3", prev(1)))
+	mustInput(t, in("3", prev(triage.MaxPrevious)))
 }
 
 func TestParseInputRefusals(t *testing.T) {
@@ -90,7 +110,9 @@ func TestParseInputRefusals(t *testing.T) {
 		"empty object":         `{}`,
 		"plain text":           assignment,
 		"round 0":              in("0", a, m, "[]"),
-		"round 3":              in("3", a, m, prev(1)),
+		"round 4":              in("4", a, m, prev(1)),
+		"round 3 no answers":   in("3", a, m, "[]"),
+		"round 3 eleven":       in("3", a, m, prev(triage.MaxPrevious+1)),
 		"round as string":      in(`"1"`, a, m, "[]"),
 		"round fraction":       in("1.5", a, m, "[]"),
 		"round 1 with answers": in("1", a, m, prev(1)),
@@ -343,10 +365,10 @@ func TestParseAnswerShape(t *testing.T) {
 	}
 }
 
-// TestLastRoundClearsQuestions: round 2 is the last; its questions are dropped (no third round) and the rest stands.
-// Questions that break the schema still refuse the answer.
-func TestLastRoundClearsQuestions(t *testing.T) {
-	in := mustInput(t, round2)
+// TestFinalRoundClearsQuestions: rounds 1 and 2 keep their questions; round 3 is the final call, its questions are
+// dropped (no further round) and the rest stands. Questions that break the schema still refuse the answer.
+func TestFinalRoundClearsQuestions(t *testing.T) {
+	in := mustInput(t, round3)
 	a, err := in.ParseAnswer(fullAnswer)
 	if err != nil {
 		t.Fatal(err)
@@ -361,8 +383,11 @@ func TestLastRoundClearsQuestions(t *testing.T) {
 	if _, err := in.ParseAnswer(bad); !errors.Is(err, triage.ErrInvalidAnswer) {
 		t.Fatalf("err = %v, want ErrInvalidAnswer", err)
 	}
-	if r1, _ := mustInput(t, round1).ParseAnswer(fullAnswer); len(r1.Questions) != 2 {
-		t.Fatalf("round 1 questions = %d", len(r1.Questions))
+	for _, data := range []string{round1, round2} {
+		a, err := mustInput(t, data).ParseAnswer(fullAnswer)
+		if err != nil || len(a.Questions) != 2 {
+			t.Fatalf("round %d questions = %d, err = %v", mustInput(t, data).Round(), len(a.Questions), err)
+		}
 	}
 }
 

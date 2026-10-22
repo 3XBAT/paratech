@@ -4,7 +4,7 @@
 //
 // Wire shape (CompletionSpec.untrusted_data, no client instructions; CompletionResult.output):
 //
-//	input:  {"round":1|2,"assignment_text":"<text>","material_text":"<text or empty>",
+//	input:  {"round":1|2|3,"assignment_text":"<text>","material_text":"<text or empty>",
 //	         "previous":[{"question":"<text>","answer":"<text>"}]}
 //	answer: {"work_type":"<type>",
 //	         "requirements":{"volume":"","file_format":"","formatting":"","variant":"","deadline":"","sources":""},
@@ -15,9 +15,10 @@
 //	         "helper":null|{"steps":["<text>"],"submit":"<text>","pitfalls":["<text>"],"ready_parts":["<text>"],
 //	                        "placeholders":["<text>"]}}
 //
-// Round 1 has no previous answers and may ask up to MaxQuestions questions. Round 2 carries the answers of round 1
-// and is the last: there is no third round, so the Hub returns its questions empty (the prompt asks for stated
-// assumptions instead).
+// The student gets at most two question rounds. Round 1 has no previous answers; round 2 carries the answers of
+// round 1; both may ask up to MaxQuestions questions. Round 3 is the final call (the student answered or skipped
+// round 2) and carries the answers of rounds 1 and 2: there is no further round, so the Hub returns its questions
+// empty (the prompt asks for stated assumptions instead).
 package triage
 
 import (
@@ -39,8 +40,12 @@ const (
 	MaxAssignmentBytes = 32 << 10
 	// MaxMaterialBytes bounds the teacher's material text, as much as INSPECT_MATERIAL reads.
 	MaxMaterialBytes = 128 << 10
-	// LastRound is the last question round; a round above it is refused.
-	LastRound = 2
+	// QuestionRounds is how many rounds may ask the student questions.
+	QuestionRounds = 2
+	// FinalRound is the call after the last question round: it asks nothing. A round above it is refused.
+	FinalRound = QuestionRounds + 1
+	// MaxPrevious bounds the previous questions with answers: those of every question round.
+	MaxPrevious = QuestionRounds * MaxQuestions
 	// MaxAnswerRunes bounds a student's answer to a previous question.
 	MaxAnswerRunes = 1000
 )
@@ -156,7 +161,7 @@ const (
 	KindText   AnswerKind = "text"
 )
 
-// Previous is a question of round 1 with the student's answer (the chosen option or the typed text).
+// Previous is a question of an earlier round with the student's answer (the chosen option or the typed text).
 type Previous struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
@@ -170,12 +175,13 @@ type Input struct {
 	previous   []Previous
 }
 
-// Round is the question round of the request, 1 or LastRound.
+// Round is the round of the request, 1..FinalRound.
 func (in Input) Round() int { return in.round }
 
-// ParseInput checks the untrusted data of a request: one JSON object with exactly the keys round (1..LastRound),
+// ParseInput checks the untrusted data of a request: one JSON object with exactly the keys round (1..FinalRound),
 // assignment_text (non-blank, at most MaxAssignmentBytes), material_text (at most MaxMaterialBytes, may be empty) and
-// previous (empty in round 1; 1..MaxQuestions questions with answers in round 2). No text may hold NUL.
+// previous (empty in round 1; 1..MaxQuestions questions with answers in round 2; 1..MaxPrevious in the final round).
+// No text may hold NUL.
 func ParseInput(data string) (Input, error) {
 	var (
 		in   Input
@@ -188,8 +194,8 @@ func ParseInput(data string) (Input, error) {
 		case keyRound:
 			var n int64
 			n, ok = strictjson.ReadInt(d)
-			if !ok || n < 1 || n > LastRound {
-				return fmt.Errorf("%w: round must be 1..%d", ErrInvalidInput, LastRound)
+			if !ok || n < 1 || n > FinalRound {
+				return fmt.Errorf("%w: round must be 1..%d", ErrInvalidInput, FinalRound)
 			}
 			in.round = int(n)
 		case keyAssignmentText:
@@ -209,8 +215,9 @@ func ParseInput(data string) (Input, error) {
 				if err != nil {
 					return err
 				}
-				if len(in.previous) == MaxQuestions {
-					return fmt.Errorf("%w: at most %d previous questions", ErrInvalidInput, MaxQuestions)
+				// The round may come after previous: the per-round bound is checked below.
+				if len(in.previous) == MaxPrevious {
+					return fmt.Errorf("%w: at most %d previous questions", ErrInvalidInput, MaxPrevious)
 				}
 				in.previous = append(in.previous, p)
 				return nil
@@ -230,7 +237,11 @@ func ParseInput(data string) (Input, error) {
 		return Input{}, fmt.Errorf("%w: round, assignment_text, material_text and previous are required", ErrInvalidInput)
 	}
 	if (in.round == 1) != (len(in.previous) == 0) {
-		return Input{}, fmt.Errorf("%w: round 1 has no previous answers, round %d has the answers of round 1", ErrInvalidInput, LastRound)
+		return Input{}, fmt.Errorf("%w: round 1 has no previous answers, a later round has the answers of the earlier ones", ErrInvalidInput)
+	}
+	// Round r carries the answers of rounds 1..r-1, at most MaxQuestions each.
+	if len(in.previous) > (in.round-1)*MaxQuestions {
+		return Input{}, fmt.Errorf("%w: round %d has at most %d previous questions", ErrInvalidInput, in.round, (in.round-1)*MaxQuestions)
 	}
 	return in, nil
 }
@@ -326,13 +337,13 @@ type Answer struct {
 // MinOptions..MaxOptions distinct options and a default index among them, a text with no options and a default text),
 // a non-blank reason and a helper unless the work is feasible in full, no helper when it is. Whitespace and one
 // Markdown code fence around the object are tolerated; anything else (another key, free text, a second object)
-// refuses the whole answer. In the last round the questions are cleared: there is no further round.
+// refuses the whole answer. In the final round the questions are cleared: there is no further round.
 func (in Input) ParseAnswer(output string) (Answer, error) {
 	a, err := parseAnswer(output)
 	if err != nil {
 		return Answer{}, err
 	}
-	if in.round == LastRound {
+	if in.round == FinalRound {
 		a.Questions = []Question{}
 	}
 	return a, nil

@@ -70,6 +70,10 @@ func TestEmbeddedTriageAssignmentV1(t *testing.T) {
 			t.Errorf("the prompt does not name %s", key)
 		}
 	}
+	// Two question rounds, then the final call without questions (triage.FinalRound).
+	if !bytes.Contains(system, []byte("Rounds 1 and 2 may ask questions")) || !bytes.Contains(system, []byte("Round 3 is the last call")) {
+		t.Error("the prompt does not state the rounds")
+	}
 }
 
 func TestNoEmbeddedOperationPromptsYet(t *testing.T) {
