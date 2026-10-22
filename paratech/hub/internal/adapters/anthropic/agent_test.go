@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -205,16 +206,43 @@ func TestStepWithoutToolUseIsAFailure(t *testing.T) {
 		if answer.Usage().Total() != 7 {
 			t.Errorf("stop %s: usage = %v", stop, answer.Usage())
 		}
+		if answer.Refused() != (stop == `"refusal"`) {
+			t.Errorf("stop %s: refused = %t", stop, answer.Refused())
+		}
 	}
 }
 
-func TestStepMalformedAnswers(t *testing.T) {
+// TestStepMalformedCallsKeepTheUsage: a tool_use block that is not a valid call is the model's billed output, so it
+// is an unusable answer with its usage, not an error without one.
+func TestStepMalformedCallsKeepTheUsage(t *testing.T) {
 	for name, body := range map[string]string{
 		"array input": `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"reply","input":[]}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
 		"no input":    `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"reply"}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
 		"bad id":      `{"type":"message","content":[{"type":"tool_use","id":"t 1","name":"reply","input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
 		"bad name":    `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"Reply","input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
 		"huge input":  `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"reply","input":{"text":"` + strings.Repeat("x", values.MaxArgumentsBytes) + `"}}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
+	} {
+		var rec recorder
+		srv := rec.serve(t, http.StatusOK, body)
+		answer, err := newClient(t, srv.URL, time.Minute).Step(t.Context(), agentCall(t))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var pe *values.ProviderError
+		if f := answer.Failure(); !errors.As(f, &pe) || pe.Kind != values.KindPermanent || answer.Refused() {
+			t.Errorf("%s: failure = %v, want permanent and not refused", name, f)
+		}
+		if answer.Usage().Total() != 2 || len(answer.Calls()) != 0 {
+			t.Errorf("%s: answer = %v", name, answer)
+		}
+		if strings.Contains(answer.String(), "xxxx") || strings.Contains(fmt.Sprint(answer.Failure()), "xxxx") {
+			t.Errorf("%s: the answer quotes the arguments", name)
+		}
+	}
+}
+
+func TestStepMalformedAnswers(t *testing.T) {
+	for name, body := range map[string]string{
 		"no usage":    `{"type":"message","content":[],"stop_reason":"tool_use"}`,
 		"not message": `{"type":"error"}`,
 		"not JSON":    `{`,

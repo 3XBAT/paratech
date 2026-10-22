@@ -48,8 +48,9 @@ func (e *QuotaExceededError) Error() string { return account.ErrQuotaExceeded.Er
 // Unwrap lets errors.Is see account.ErrQuotaExceeded.
 func (e *QuotaExceededError) Unwrap() error { return account.ErrQuotaExceeded }
 
-// ProviderFailedError means the provider call failed, or its answer was not a valid set of tool calls; the
-// reservation was released and nothing was charged. Transient says whether repeating the same request may help.
+// ProviderFailedError means the provider call failed, or its answer was not a valid set of tool calls. A failed call
+// or a refusal released the reservation and nothing was charged; any other answer was charged its reported usage and
+// a retry with the same key returns this error again. Transient says whether repeating the same request may help.
 type ProviderFailedError struct {
 	Transient  bool
 	RetryAfter time.Duration

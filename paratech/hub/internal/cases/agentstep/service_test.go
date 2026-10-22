@@ -288,15 +288,27 @@ func TestStepCallsTheProviderAndSeals(t *testing.T) {
 }
 
 func TestStepClampsTheOutputCap(t *testing.T) {
-	f := newFixture(t, 1_000_000, twoCalls(t), twoCalls(t))
+	f := newFixture(t, 1_000_000, twoCalls(t), twoCalls(t), twoCalls(t))
 	small := command(alice, "k1")
-	small.MaxOutputTokens = 100
+	small.MaxOutputTokens = 300
 	f.step(t, small)
 	large := command(alice, "k2")
 	large.MaxOutputTokens = plannerCap + 1
 	f.step(t, large)
-	if got := []int64{f.provider.Calls()[0].MaxOutput(), f.provider.Calls()[1].MaxOutput()}; got[0] != 100 || got[1] != plannerCap {
+	tiny := command(alice, "k3")
+	tiny.MaxOutputTokens = 1
+	f.step(t, tiny)
+	calls := f.provider.Calls()
+	if got := []int64{calls[0].MaxOutput(), calls[1].MaxOutput(), calls[2].MaxOutput()}; got[0] != 300 || got[1] != plannerCap || got[2] != agentstep.DefaultMinOutput {
 		t.Fatalf("output caps = %v", got)
+	}
+	// The reservation is made for the raised cap.
+	want, err := requestlimits.AgentReservation(calls[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs := f.store.Reservations(alice); rs[2].Amount != want {
+		t.Fatalf("reservation = %d, want %d", rs[2].Amount, want)
 	}
 }
 
@@ -502,8 +514,9 @@ func TestLimits(t *testing.T) {
 	}
 }
 
-// TestInvalidReturnedCalls: an answer that is not a valid set of catalog calls is a permanent provider error; the
-// hold is released and nothing is charged.
+// TestInvalidReturnedCalls: an answer that is not a valid set of catalog calls is a permanent provider error. The
+// provider billed it, so its usage is charged (F1: no free provider spend) and a retry with the key repeats the error
+// without a second provider call or charge.
 func TestInvalidReturnedCalls(t *testing.T) {
 	u, _ := values.NewUsage(100, 20)
 	long := strings.Repeat("я", toolcatalog.MaxTextRunes+1)
@@ -520,10 +533,41 @@ func TestInvalidReturnedCalls(t *testing.T) {
 		"missing arg":     answer(t, 100, 20, toolCall(t, "toolu_1", "delivery_status", `{}`)),
 		"undeclared arg":  answer(t, 100, 20, toolCall(t, "toolu_1", "list_subjects", `{"recipient":"x@y.z"}`)),
 		"repeated id":     answer(t, 100, 20, toolCall(t, "toolu_1", "list_subjects", `{}`), toolCall(t, "toolu_1", "list_subjects", `{}`)),
-		"permanent error": {Err: &values.ProviderError{Kind: values.KindPermanent, Reason: "rejected", Status: 400}},
+		"malformed calls": {Answer: values.MalformedAgentAnswer(u)},
 	}
 	for name, step := range cases {
 		f := newFixture(t, 1_000_000, step)
+		for attempt := range 2 {
+			_, err := f.svc.Step(t.Context(), command(alice, "ag:1"))
+			var failed *agentstep.ProviderFailedError
+			if !errors.As(err, &failed) || failed.Transient {
+				t.Errorf("%s, attempt %d: err = %v, want a permanent ProviderFailedError", name, attempt, err)
+			}
+		}
+		if used, held := f.store.Totals(alice); used != 120 || held != 0 {
+			t.Errorf("%s: used %d held %d, want the usage charged once", name, used, held)
+		}
+		if rs := f.store.Reservations(alice); len(rs) != 1 || rs[0].State != account.StateSettled || rs[0].Charged != 120 {
+			t.Errorf("%s: reservations %+v", name, rs)
+		}
+		if len(f.provider.Calls()) != 1 {
+			t.Errorf("%s: provider calls = %d, want the retry served from the ledger", name, len(f.provider.Calls()))
+		}
+		if strings.Contains(f.logs.String(), "x@y") || strings.Contains(f.logs.String(), "я") {
+			t.Errorf("%s: the log quotes the model output", name)
+		}
+	}
+}
+
+// TestFailureWithoutBilledAnswerIsReleased: a provider error (no answer) and a refusal are released, not charged, as
+// in Complete; the key stays open for a new attempt.
+func TestFailureWithoutBilledAnswerIsReleased(t *testing.T) {
+	u, _ := values.NewUsage(100, 20)
+	for name, step := range map[string]testenv.AgentProviderStep{
+		"permanent error": {Err: &values.ProviderError{Kind: values.KindPermanent, Reason: "rejected", Status: 400}},
+		"refusal":         {Answer: values.RefusedAgentAnswer(u)},
+	} {
+		f := newFixture(t, 1_000_000, step, twoCalls(t))
 		_, err := f.svc.Step(t.Context(), command(alice, "ag:1"))
 		var failed *agentstep.ProviderFailedError
 		if !errors.As(err, &failed) || failed.Transient {
@@ -536,9 +580,63 @@ func TestInvalidReturnedCalls(t *testing.T) {
 		if rs := f.store.Reservations(alice); len(rs) != 1 || rs[0].State != account.StateReleased || rs[0].Reason != account.ReasonFailed {
 			t.Errorf("%s: reservations %+v", name, rs)
 		}
-		if strings.Contains(f.logs.String(), "x@y") || strings.Contains(f.logs.String(), "я") {
-			t.Errorf("%s: the log quotes the model output", name)
+		if res := f.step(t, command(alice, "ag:1")); res.Replayed || len(f.provider.Calls()) != 2 {
+			t.Errorf("%s: retry = %+v, want a new attempt", name, res)
 		}
+	}
+}
+
+// TestOutputCapStopIsCharged is the F1 regression: a tiny output cap with a large history cannot buy a free
+// provider call. The cap is raised to the profile floor and an answer cut at the cap is charged in full.
+func TestOutputCapStopIsCharged(t *testing.T) {
+	u, _ := values.NewUsage(150_000, 256)
+	f := newFixture(t, 1_000_000, testenv.AgentProviderStep{Answer: values.NewAgentAnswer(nil, u, false)})
+	cmd := command(alice, "ag:1")
+	cmd.MaxOutputTokens = 1
+	_, err := f.svc.Step(t.Context(), cmd)
+	var failed *agentstep.ProviderFailedError
+	if !errors.As(err, &failed) || failed.Transient {
+		t.Fatalf("err = %v, want a permanent ProviderFailedError", err)
+	}
+	if got := f.provider.Calls()[0].MaxOutput(); got != agentstep.DefaultMinOutput {
+		t.Fatalf("output cap = %d, want the floor %d", got, agentstep.DefaultMinOutput)
+	}
+	if used, held := f.store.Totals(alice); used != u.Total() || held != 0 {
+		t.Fatalf("used %d held %d, want %d charged", used, held, u.Total())
+	}
+	if !strings.Contains(f.logs.String(), "outcome=provider_error") || !strings.Contains(f.logs.String(), "charged=true") {
+		t.Fatalf("log: %s", f.logs.String())
+	}
+}
+
+// TestOutputFloorIsPerProfile: a configured floor replaces the default and a negative one is refused.
+func TestOutputFloorIsPerProfile(t *testing.T) {
+	sealer, err := testenv.Sealer(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := testenv.NewFakeAgentProvider(twoCalls(t))
+	deps := agentstep.Deps{
+		Accounts: testenv.NewQuotaStore(), Provider: provider, Limiter: &testenv.FakeLimiter{}, Clock: testenv.NewFakeClock(t0),
+		Random: testenv.Random{}, Models: models(t), Sealer: sealer, Log: slog.New(slog.DiscardHandler),
+	}
+	cfg := config(t, 1_000_000)
+	cfg.Profiles[0].MinOutput = -1
+	if _, err := agentstep.New(deps, cfg); !errors.Is(err, agentstep.ErrInvalidConfig) {
+		t.Fatalf("negative floor: err = %v", err)
+	}
+	cfg.Profiles[0].MinOutput = 400
+	svc, err := agentstep.New(deps, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := command(alice, "ag:1")
+	cmd.MaxOutputTokens = 300
+	if _, err := svc.Step(t.Context(), cmd); err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.Calls()[0].MaxOutput(); got != 400 {
+		t.Fatalf("output cap = %d, want the profile floor 400", got)
 	}
 }
 

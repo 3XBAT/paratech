@@ -18,6 +18,7 @@ const (
 	blockToolUse      = "tool_use"
 	blockToolResult   = "tool_result"
 	stopReasonToolUse = "tool_use"
+	stopReasonRefusal = "refusal"
 	roleUser          = "user"
 	roleAssistant     = "assistant"
 )
@@ -135,7 +136,8 @@ type agentWireBlockRead struct {
 
 // readAgentAnswer decodes a 200 answer to a planner call. Text and thinking blocks are ignored; every tool_use block
 // becomes a call with its input re-encoded canonically (sorted keys, no duplicate keys), so the arguments the Hub
-// checks, seals and returns are one exact string. A block that is not a valid call is a permanent error.
+// checks, seals and returns are one exact string. A block that is not a valid call makes a malformed answer and a
+// refusal a refused one, both with their usage; a body without usage is a permanent error.
 func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != contentTypeJSON {
 		return values.AgentAnswer{}, permanent("unexpected content type")
@@ -155,18 +157,22 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if !ok {
 		return values.AgentAnswer{}, permanent("malformed usage")
 	}
+	if r.StopReason != nil && *r.StopReason == stopReasonRefusal {
+		return values.RefusedAgentAnswer(usage), nil
+	}
 	var calls []values.ToolCall
 	for _, b := range r.Content {
 		if b.Type != blockToolUse {
 			continue
 		}
+		// A bad call is the model's output, billed by the provider: an answer with usage, so the Hub charges it.
 		args, ok := canonicalObject(b.Input)
 		if !ok {
-			return values.AgentAnswer{}, permanent("malformed tool call")
+			return values.MalformedAgentAnswer(usage), nil
 		}
 		call, err := values.NewToolCall(b.ID, b.Name, args)
 		if err != nil {
-			return values.AgentAnswer{}, permanent("malformed tool call")
+			return values.MalformedAgentAnswer(usage), nil
 		}
 		calls = append(calls, call)
 	}

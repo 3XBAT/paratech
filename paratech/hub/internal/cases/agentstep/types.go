@@ -36,12 +36,18 @@ type Config struct {
 }
 
 // Profile is what the Hub uses for one agent profile: the model alias from the server configuration (the client
-// sends none) and the server prompt with the tool catalog of every version.
+// sends none) and the server prompt with the tool catalog of every version. MinOutput is the least output cap a
+// request gets (0: DefaultMinOutput): a smaller one is raised to it, so a tiny cap cannot make a step that bills its
+// whole input end at the cap with no usable call.
 type Profile struct {
-	Name     values.Profile
-	Alias    string
-	Versions []Version
+	Name      values.Profile
+	Alias     string
+	Versions  []Version
+	MinOutput int64
 }
+
+// DefaultMinOutput is the output floor of a profile without MinOutput.
+const DefaultMinOutput = 256
 
 // Version is the server prompt and the tool catalog of one catalog version (hub/pkg/prompts agent/<profile>/v<N>).
 type Version struct {

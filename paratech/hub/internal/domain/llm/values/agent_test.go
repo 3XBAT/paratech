@@ -491,4 +491,18 @@ func TestAgentAnswerFailure(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Kind != KindPermanent || !errors.Is(err, ErrProviderPermanent) {
 		t.Fatalf("no tool use: failure = %v, want a permanent ProviderError", err)
 	}
+	for name, a := range map[string]AgentAnswer{"refused": RefusedAgentAnswer(u), "malformed": MalformedAgentAnswer(u)} {
+		if err := a.Failure(); !errors.As(err, &pe) || pe.Kind != KindPermanent || a.Usage() != u || len(a.Calls()) != 0 {
+			t.Errorf("%s: failure = %v, answer %v", name, err, a)
+		}
+		if a.Refused() != (name == "refused") {
+			t.Errorf("%s: refused = %t", name, a.Refused())
+		}
+	}
+	if _, err := DecodeCalls(FailedStepOutput); err == nil {
+		t.Fatal("the failed step marker decodes as calls")
+	}
+	if EncodeCalls(nil) != FailedStepOutput {
+		t.Fatal("no calls must encode as the failed step marker")
+	}
 }

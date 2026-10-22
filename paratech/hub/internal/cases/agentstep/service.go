@@ -45,8 +45,9 @@ const ledgerTimeout = 5 * time.Second
 
 // profile is a validated Config.Profiles entry.
 type profile struct {
-	alias    string
-	versions map[uint32]Version
+	alias     string
+	versions  map[uint32]Version
+	minOutput int64
 }
 
 // Service runs the agent step scenario (ADR-0023).
@@ -117,7 +118,14 @@ func buildProfiles(models *modelallowlist.List, in []Profile) (map[values.Profil
 		if len(versions) == 0 {
 			return nil, fmt.Errorf("%w: profile %s has no version", ErrInvalidConfig, name)
 		}
-		out[name] = profile{alias: p.Alias, versions: versions}
+		minOutput := p.MinOutput
+		if minOutput == 0 {
+			minOutput = DefaultMinOutput
+		}
+		if minOutput < 0 {
+			return nil, fmt.Errorf("%w: profile %s: the output floor must not be negative", ErrInvalidConfig, name)
+		}
+		out[name] = profile{alias: p.Alias, versions: versions, minOutput: minOutput}
 	}
 	return out, nil
 }
@@ -183,6 +191,11 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 		return Result{}, err
 	}
 	attrs = append(attrs, "reservation", rec.ID.String())
+	if stored.Stored && stored.Output == values.FailedStepOutput {
+		// Charged once already: the same request gets the same failure, never a second paid call.
+		logStep(outcomeProvider, append(attrs, "replayed", true, "input_tokens", stored.InputTokens, "output_tokens", stored.OutputTokens)...)
+		return Result{}, &ProviderFailedError{Cause: &values.ProviderError{Kind: values.KindPermanent, Reason: "no usable tool calls"}}
+	}
 	if stored.Stored {
 		calls, err := values.DecodeCalls(stored.Output)
 		if err != nil {
@@ -209,17 +222,11 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	answer, err := s.provider.Step(callCtx, st.call)
 	cancel()
-	if err == nil {
+	if err == nil && answer.Refused() {
 		err = answer.Failure()
 	}
-	if err == nil {
-		// The model's calls are untrusted: a call outside the catalog schema is the provider's failure (ADR-0023).
-		if cerr := st.version.Catalog.CheckReturned(answer.Calls()); cerr != nil {
-			err = &values.ProviderError{Kind: values.KindPermanent, Reason: "invalid tool calls"}
-		}
-	}
 	if err != nil {
-		// Released, not charged, like a refusal in Complete (accepted gap, ADR-0010).
+		// No answer, or a refusal: released, not charged, like in Complete (accepted gap, ADR-0010).
 		s.release(ctx, st, rec.ID, account.ReasonFailed)
 		failure := providerFailure(err)
 		logStep(outcomeProvider, append(attrs, "transient", failure.Transient, "err", err)...)
@@ -228,7 +235,27 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 
 	usage := answer.Usage()
 	calls := answer.Calls()
-	quota, err = s.settle(ctx, st, rec.ID, calls, usage)
+	unusable := answer.Failure()
+	if unusable == nil {
+		// The model's calls are untrusted: a call outside the catalog schema is the provider's failure (ADR-0023).
+		if cerr := st.version.Catalog.CheckReturned(calls); cerr != nil {
+			unusable = &values.ProviderError{Kind: values.KindPermanent, Reason: "invalid tool calls"}
+		}
+	}
+	if unusable != nil {
+		// The provider billed this answer (output cap, end of turn, invalid calls): charged like Complete charges a
+		// truncated answer, and stored as a failure so a retry with the key repeats it instead of paying again.
+		if _, err := s.settle(ctx, st, rec.ID, values.FailedStepOutput, usage); err != nil {
+			s.log.ErrorContext(ctx, "agent step settlement failed", "reservation", rec.ID.String(), "err", err)
+			logStep(outcomeFailed, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output())...)
+			return Result{}, err
+		}
+		failure := providerFailure(unusable)
+		logStep(outcomeProvider, append(attrs, "charged", true, "input_tokens", usage.Input(), "output_tokens", usage.Output(), "err", unusable)...)
+		return Result{}, failure
+	}
+
+	quota, err = s.settle(ctx, st, rec.ID, values.EncodeCalls(calls), usage)
 	if err != nil {
 		s.log.ErrorContext(ctx, "agent step settlement failed", "reservation", rec.ID.String(), "err", err)
 		logStep(outcomeFailed, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output())...)
@@ -266,7 +293,12 @@ func (s *Service) validate(cmd Command) (step, error) {
 		}
 	}
 
-	model, maxOutput, err := s.models.Resolve(p.alias, req.MaxOutput())
+	// Raised to the floor before the alias cap, so the reservation covers the cap actually sent.
+	requested := req.MaxOutput()
+	if requested > 0 && requested < p.minOutput {
+		requested = p.minOutput
+	}
+	model, maxOutput, err := s.models.Resolve(p.alias, requested)
 	if err != nil {
 		return step{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
@@ -402,13 +434,14 @@ func (s *Service) start(ctx context.Context, st step) (account.ReservationRecord
 	}
 }
 
-// settle charges the provider-reported usage in full and stores the calls in the same transaction.
-func (s *Service) settle(ctx context.Context, st step, id shared.ReservationID, calls []values.ToolCall, usage values.Usage) (Snapshot, error) {
+// settle charges the provider-reported usage in full and stores output (the encoded calls or FailedStepOutput) in the
+// same transaction.
+func (s *Service) settle(ctx context.Context, st step, id shared.ReservationID, output string, usage values.Usage) (Snapshot, error) {
 	u, err := account.NewUsage(string(s.policy.Unit()), usage.Total(), false)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("agentstep: %s: %w", opSettle, err)
 	}
-	res, err := account.NewResult(values.EncodeCalls(calls), usage.Input(), usage.Output())
+	res, err := account.NewResult(output, usage.Input(), usage.Output())
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("agentstep: %s: %w", opSettle, err)
 	}

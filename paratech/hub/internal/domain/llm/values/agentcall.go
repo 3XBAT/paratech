@@ -114,11 +114,13 @@ func (c AgentCall) String() string {
 func (c AgentCall) GoString() string { return "values.AgentCall" + c.String() }
 
 // AgentAnswer is a provider answer to an AgentCall: the tool calls in order, the usage and whether the model stopped
-// to use tools. The calls are UNTRUSTED. Build it with NewAgentAnswer.
+// to use tools. The calls are UNTRUSTED. Build it with NewAgentAnswer, RefusedAgentAnswer or MalformedAgentAnswer.
 type AgentAnswer struct {
-	calls   []ToolCall
-	usage   Usage
-	toolUse bool
+	calls     []ToolCall
+	usage     Usage
+	toolUse   bool
+	refused   bool
+	malformed bool
 }
 
 // NewAgentAnswer records an answer; whether it is usable is Failure's and the catalog's decision.
@@ -126,16 +128,31 @@ func NewAgentAnswer(calls []ToolCall, usage Usage, toolUse bool) AgentAnswer {
 	return AgentAnswer{calls: append([]ToolCall(nil), calls...), usage: usage, toolUse: toolUse}
 }
 
+// RefusedAgentAnswer records an answer the provider's safety classifiers stopped (stop reason refusal).
+func RefusedAgentAnswer(usage Usage) AgentAnswer { return AgentAnswer{usage: usage, refused: true} }
+
+// MalformedAgentAnswer records an answer whose tool calls could not be read as calls; the provider billed it.
+func MalformedAgentAnswer(usage Usage) AgentAnswer { return AgentAnswer{usage: usage, malformed: true} }
+
 // Calls are the proposed calls (a copy).
 func (a AgentAnswer) Calls() []ToolCall { return append([]ToolCall(nil), a.calls...) }
 
 // Usage is the provider-reported token count.
 func (a AgentAnswer) Usage() Usage { return a.usage }
 
+// Refused reports whether the provider declined to answer. Like a refused Completion it is not charged; every other
+// unusable answer is (ADR-0010).
+func (a AgentAnswer) Refused() bool { return a.refused }
+
 // Failure is the provider failure this answer stands for, nil when the model stopped to use tools. With tool choice
 // "any" every answer must be a tool use; anything else (end of turn, output cap, refusal) is permanent (ADR-0023).
 func (a AgentAnswer) Failure() error {
-	if !a.toolUse {
+	switch {
+	case a.refused:
+		return &ProviderError{Kind: KindPermanent, Reason: "refused"}
+	case a.malformed:
+		return &ProviderError{Kind: KindPermanent, Reason: "malformed tool call"}
+	case !a.toolUse:
 		return &ProviderError{Kind: KindPermanent, Reason: "no tool use"}
 	}
 	return nil
@@ -143,7 +160,8 @@ func (a AgentAnswer) Failure() error {
 
 // String prints the answer without the arguments.
 func (a AgentAnswer) String() string {
-	return fmt.Sprintf("{Calls:%d InputTokens:%d OutputTokens:%d ToolUse:%t}", len(a.calls), a.usage.input, a.usage.output, a.toolUse)
+	return fmt.Sprintf("{Calls:%d InputTokens:%d OutputTokens:%d ToolUse:%t Refused:%t Malformed:%t}", len(a.calls),
+		a.usage.input, a.usage.output, a.toolUse, a.refused, a.malformed)
 }
 
 // GoString is String for %#v.
@@ -155,6 +173,10 @@ type storedCall struct {
 	Tool      string `json:"tool"`
 	Arguments string `json:"arguments"`
 }
+
+// FailedStepOutput is the stored result of a step that was charged but had no usable calls, so a retry with the same
+// key repeats the failure instead of calling the provider again. DecodeCalls refuses it (it holds no calls).
+const FailedStepOutput = "[]"
 
 // EncodeCalls is the stored form of the calls an AgentStep returned, so a retry with the same key replays them.
 func EncodeCalls(calls []ToolCall) string {
