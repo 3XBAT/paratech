@@ -3,8 +3,10 @@
 //
 // Layout (docs/architecture.md section 3.1): llm/values holds the client's completion spec and the types that cross
 // the Provider port (request, completion, usage, stop reason, provider error); llm/services/modelallowlist is the
-// server-side model allowlist; llm/services/requestlimits bounds one call (reserved amount, per-tester rate). The
-// context has no aggregate yet.
+// server-side model allowlist; llm/services/requestlimits bounds one call (reserved amount, per-tester rate). For the
+// agent (ADR-0023) llm/values also holds the agent step request, tool calls and results; llm/services/toolcatalog is
+// the tool catalog of one version with the check of returned calls; llm/services/seal signs and checks echoed calls.
+// The context has no aggregate yet.
 //
 // Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared.
 //
@@ -23,4 +25,8 @@
 //   - Completion: the provider's answer. Its output text is UNTRUSTED (CLAUDE.md hard rule 3, PRD section 13.3).
 //   - Usage: provider-reported tokens of a call, used to settle the reservation.
 //   - Transient / permanent: whether repeating the same call can help (ADR-0005(c)).
+//   - Server prompt: the Hub's own prompt of an operation (INSPECT_MATERIAL, ANSWER, TRIAGE_ASSIGNMENT) or agent
+//     profile; the client sends no instructions and its version stands in the fingerprint.
+//   - Agent step: one planner call; the answer is 1-4 tool calls of the catalog, sealed by the Hub.
+//   - Seal: HMAC by the Hub over the caller, thread, profile, catalog version and calls; an echo must carry it.
 package llm

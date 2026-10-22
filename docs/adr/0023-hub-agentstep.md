@@ -35,9 +35,16 @@ calls in the history; the seal stops that. It does not stop free text in student
   ADR-0005(d).
 - **Limits**: ≤ 4 calls per step; `student_text` ≤ 4 KB; `result_json` ≤ 16 KB; request ≤ 256 KB; ≤ 64 turns; tool
   name in the catalog of the version; `arguments_json` a JSON object ≤ 8 KB. Full argument check is on the desktop too.
-- **Provider**: Anthropic tool use with `tool_choice: any`, so every answer is a tool call (cards are UI tools). A stop
-  reason other than `tool_use` is `PROVIDER_ERROR`, not retryable. Prompt caching on the stable prefix (tools + system
-  + base) and the last turn; strict tool schemas only if confirmed in `docs/refs/anthropic.md`.
+- **Provider**: Anthropic tool use with `tool_choice: auto` (forced `any`/`tool` is a 400 on the 5.x models); the
+  system prompt demands a tool call, and UI tools (cards) cover every outcome. A text-only answer or a stop reason
+  other than `tool_use` is `PROVIDER_ERROR`, not retryable. No `thinking` field (disabling it is a 400 on 5.x).
+  Prompt caching on the stable prefix (tools + system + base) and the last turn. Strict tool schemas are not sent
+  (limits in `docs/refs/anthropic.md` section 7); the Hub checks every call itself.
+- **Charging unusable answers**: a billed answer that is unusable (text only, output cap, invalid calls) is settled
+  with its usage and stored as a failure marker, so a retry with the same key replays the same failure without a new
+  call. Refusals and errors without usage are released.
+- **Output floor**: `max_output_tokens` below the profile floor (default 256) is raised to it before the alias cap,
+  so a tiny cap cannot buy a free call; the reservation uses the raised cap.
 - **No streaming**: a planner step is short (~400 output tokens); the desktop shows progress between steps.
   `CompleteStream` stays unimplemented.
 - **Prompts in `hub/pkg/prompts`** (`go:embed`, ARCH-04): `agent/<profile>/v<N>/` (`system.md`, `tools.json`) and
@@ -54,3 +61,5 @@ calls in the history; the seal stops that. It does not stop free text in student
 - The seal is bound to the thread but not to the turn/step position, so a sealed call set could be echoed again within
   the same thread; the desktop provenance and plan checks bound that.
 - Open: minimum cacheable prefix length and prices are to be checked in `docs/refs/anthropic.md` before TASK-114.
+- Open: with default (adaptive) thinking on, whether echoed `tool_use` turns need their `thinking` blocks (the Hub
+  does not keep them); to verify before rollout.

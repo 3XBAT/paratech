@@ -27,17 +27,29 @@ var (
 
 	// ErrPayloadTooLarge means instructions and untrusted data together exceed MaxPayloadBytes. It matches ErrInvalidSpec.
 	ErrPayloadTooLarge = fmt.Errorf("%w: instructions and untrusted data exceed %d bytes", ErrInvalidSpec, MaxPayloadBytes)
+
+	// ErrClientInstructions means a client sent instructions for an operation whose prompt is the server's. It matches
+	// ErrInvalidSpec.
+	ErrClientInstructions = fmt.Errorf("%w: the operation takes no client instructions", ErrInvalidSpec)
+
+	// ErrAliasMismatch means a client named another alias than the server's for an operation with a server prompt. It
+	// matches ErrInvalidSpec.
+	ErrAliasMismatch = fmt.Errorf("%w: the operation uses the server's model alias", ErrInvalidSpec)
 )
 
 // Operation is the LLM operation of a completion; the set mirrors the contract's OperationType.
 type Operation string
 
-// Operations.
+// Operations. OperationAgentStep names the ledger entries of AgentStep and is never valid in a spec (ADR-0023).
 const (
-	OperationSummary         Operation = "summary"
-	OperationExtractHomework Operation = "extract_homework_deadlines"
-	OperationHomeworkDraft   Operation = "homework_draft"
-	OperationLectureText     Operation = "lecture_text"
+	OperationSummary          Operation = "summary"
+	OperationExtractHomework  Operation = "extract_homework_deadlines"
+	OperationHomeworkDraft    Operation = "homework_draft"
+	OperationLectureText      Operation = "lecture_text"
+	OperationAgentStep        Operation = "agent_step"
+	OperationInspectMaterial  Operation = "inspect_material"
+	OperationAnswer           Operation = "answer"
+	OperationTriageAssignment Operation = "triage_assignment"
 )
 
 // Spec is a validated completion request of a client (gateway.proto CompletionSpec). Build it with NewSpec.
@@ -48,13 +60,25 @@ type Spec struct {
 	instructions string
 	data         string
 	maxOutput    int64
+	// promptVersion is set by WithServerPrompt: the instructions are the server prompt of that version.
+	promptVersion string
+}
+
+// ServerPrompt reports whether the Hub writes the prompt of op itself and picks its alias (ADR-0023): the client sends
+// no instructions, and an alias only if it is the server's.
+func (op Operation) ServerPrompt() bool {
+	return op == OperationInspectMaterial || op == OperationAnswer || op == OperationTriageAssignment
 }
 
 // NewSpec checks every rule of a CompletionSpec: key 1-128 printable ASCII without spaces, a known operation, alias
 // 1-64 characters of [a-z0-9_-] starting with a letter or digit, non-empty instructions, both texts valid UTF-8
 // without NUL and together at most MaxPayloadBytes, maxOutput not negative (0 means the alias cap). Whether the alias
-// is allowed is the allowlist's decision.
+// is allowed is the allowlist's decision. For an operation with a server prompt the instructions must be empty and the
+// alias may be empty; the spec is usable only after WithServerPrompt.
 func NewSpec(key, operation, alias, instructions, data string, maxOutput int64) (Spec, error) {
+	if Operation(operation).ServerPrompt() {
+		return newServerSpec(key, Operation(operation), alias, instructions, data, maxOutput)
+	}
 	switch {
 	case !validKey(key):
 		return Spec{}, fmt.Errorf("%w: idempotency key must be 1-%d printable ASCII characters without spaces", ErrInvalidSpec, maxKeyLen)
@@ -76,6 +100,46 @@ func NewSpec(key, operation, alias, instructions, data string, maxOutput int64) 
 	}
 	return Spec{key: key, operation: Operation(operation), alias: alias, instructions: instructions, data: data, maxOutput: maxOutput}, nil
 }
+
+// newServerSpec checks a spec of an operation with a server prompt: no instructions, the alias empty or well formed.
+func newServerSpec(key string, op Operation, alias, instructions, data string, maxOutput int64) (Spec, error) {
+	switch {
+	case !validKey(key):
+		return Spec{}, fmt.Errorf("%w: idempotency key must be 1-%d printable ASCII characters without spaces", ErrInvalidSpec, maxKeyLen)
+	case alias != "" && !validAlias(alias):
+		return Spec{}, fmt.Errorf("%w: model alias must be 1-%d characters of a-z, 0-9, '_' and '-' starting with a letter or digit",
+			ErrInvalidSpec, maxAliasLen)
+	case instructions != "":
+		return Spec{}, ErrClientInstructions
+	case len(data) > MaxPayloadBytes:
+		return Spec{}, ErrPayloadTooLarge
+	case !cleanText(data):
+		return Spec{}, fmt.Errorf("%w: untrusted data is not valid UTF-8 without NUL", ErrInvalidSpec)
+	case maxOutput < 0:
+		return Spec{}, fmt.Errorf("%w: max output tokens must not be negative", ErrInvalidSpec)
+	}
+	return Spec{key: key, operation: op, alias: alias, data: data, maxOutput: maxOutput}, nil
+}
+
+// WithServerPrompt returns the spec of an operation with a server prompt completed by the Hub: alias is the server's
+// alias of the operation, version and text its prompt. A client alias other than the server's is ErrAliasMismatch.
+func (s Spec) WithServerPrompt(alias, version, text string) (Spec, error) {
+	switch {
+	case !s.operation.ServerPrompt() || s.promptVersion != "":
+		return Spec{}, fmt.Errorf("%w: the operation has no server prompt", ErrInvalidSpec)
+	case !validAlias(alias) || version == "" || !cleanText(version) || text == "" || !cleanText(text):
+		return Spec{}, fmt.Errorf("%w: invalid server prompt", ErrInvalidSpec)
+	case s.alias != "" && s.alias != alias:
+		return Spec{}, ErrAliasMismatch
+	case len(text) > MaxPayloadBytes-len(s.data):
+		return Spec{}, ErrPayloadTooLarge
+	}
+	s.alias, s.instructions, s.promptVersion = alias, text, version
+	return s, nil
+}
+
+// PromptVersion is the server prompt version of the spec, empty when the client wrote the instructions.
+func (s Spec) PromptVersion() string { return s.promptVersion }
 
 // Key is the idempotency key.
 func (s Spec) Key() string { return s.key }
@@ -105,11 +169,16 @@ const fingerprintDomain = "paratech.hub.v1.CompletionSpec/1"
 // instructions, data and the requested max output tokens in decimal, each preceded by its length as 8 bytes
 // big-endian. The key is
 // left out because it is what the fingerprint is stored under. Two specs have the same fingerprint only if every
-// field but the key is equal; the texts themselves are never stored (ADR-0005(d)).
+// field but the key is equal; the texts themselves are never stored (ADR-0005(d)). With a server prompt its version
+// stands in for the instructions (ADR-0010 as amended by ADR-0023), so a new prompt version is a new request.
 func (s Spec) Fingerprint() string {
 	h := sha256.New()
 	writeField(h, fingerprintDomain)
-	for _, f := range []string{string(s.operation), s.alias, s.instructions, s.data, strconv.FormatInt(s.maxOutput, 10)} {
+	instructions := s.instructions
+	if s.promptVersion != "" {
+		instructions = "server-prompt/" + s.promptVersion
+	}
+	for _, f := range []string{string(s.operation), s.alias, instructions, s.data, strconv.FormatInt(s.maxOutput, 10)} {
 		writeField(h, f)
 	}
 	return hex.EncodeToString(h.Sum(nil))

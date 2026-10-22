@@ -46,6 +46,17 @@ func Reservation(spec values.Spec, maxOutput int64) (int64, error) {
 	return in + maxOutput, nil
 }
 
+// AgentReservation is the most an agent step may cost: one token per byte of everything call sends (prompt, tools,
+// context, history) plus FramingTokens (message wrappers and the provider's own tool-use prompt) plus the effective
+// output cap. The step reserves it before the provider is called (ADR-0023).
+func AgentReservation(call values.AgentCall) (int64, error) {
+	in := call.InputBytes() + FramingTokens
+	if call.MaxOutput() <= 0 || call.MaxOutput() > math.MaxInt64-in {
+		return 0, ErrInvalidMaxOutput
+	}
+	return in + call.MaxOutput(), nil
+}
+
 // Rate is the per-tester rate policy: on average PerMinute calls a minute, with up to Burst calls at once. It is a
 // GCRA token bucket whose whole state per tester is one time (the theoretical arrival time, TAT).
 type Rate struct {

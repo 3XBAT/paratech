@@ -25,6 +25,11 @@ const (
 	OperationExtractHomework Operation = "extract_homework_deadlines"
 	OperationHomeworkDraft   Operation = "homework_draft"
 	OperationLectureText     Operation = "lecture_text"
+	// The agent operations of ADR-0023: one planner step, and the three quarantined readers.
+	OperationAgentStep        Operation = "agent_step"
+	OperationInspectMaterial  Operation = "inspect_material"
+	OperationAnswer           Operation = "answer"
+	OperationTriageAssignment Operation = "triage_assignment"
 )
 
 // Format limits of ADR-0005(b).
@@ -37,7 +42,8 @@ const (
 // ParseOperation accepts a known operation.
 func ParseOperation(s string) (Operation, error) {
 	switch op := Operation(s); op {
-	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText:
+	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText,
+		OperationAgentStep, OperationInspectMaterial, OperationAnswer, OperationTriageAssignment:
 		return op, nil
 	default:
 		return "", fmt.Errorf("%w: unknown operation type", ErrInvalidArgument)

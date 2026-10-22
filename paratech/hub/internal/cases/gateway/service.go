@@ -54,6 +54,7 @@ type Service struct {
 	log         *slog.Logger
 	policy      account.Policy
 	callTimeout time.Duration
+	prompts     map[values.Operation]ServerPrompt
 }
 
 // New checks the dependencies and the configuration. The provider call plus the start transaction and the settlement
@@ -70,9 +71,19 @@ func New(d Deps, cfg Config) (*Service, error) {
 	if cfg.CallTimeout <= 0 || cfg.CallTimeout+2*ledgerTimeout > cfg.ReservationTTL {
 		return nil, fmt.Errorf("%w: the call timeout plus %s must be above 0 and within the reservation TTL", ErrInvalidConfig, 2*ledgerTimeout)
 	}
+	prompts := make(map[values.Operation]ServerPrompt, len(cfg.ServerPrompts))
+	for op, sp := range cfg.ServerPrompts {
+		if !op.ServerPrompt() || sp.Version == "" || sp.Text == "" {
+			return nil, fmt.Errorf("%w: server prompt of %s: the operation must take one, with a version and a text", ErrInvalidConfig, op)
+		}
+		if _, _, err := d.Models.Resolve(sp.Alias, 0); err != nil {
+			return nil, fmt.Errorf("%w: server prompt of %s: alias %q: %w", ErrInvalidConfig, op, sp.Alias, err)
+		}
+		prompts[op] = sp
+	}
 	return &Service{
 		accounts: d.Accounts, results: d.Results, provider: d.Provider, limiter: d.Limiter, clock: d.Clock, random: d.Random,
-		models: d.Models, log: d.Log, policy: p, callTimeout: cfg.CallTimeout,
+		models: d.Models, log: d.Log, policy: p, callTimeout: cfg.CallTimeout, prompts: prompts,
 	}, nil
 }
 
@@ -198,6 +209,16 @@ func (s *Service) validate(cmd Command) (call, error) {
 	spec, err := values.NewSpec(cmd.IdempotencyKey, cmd.Operation, cmd.ModelAlias, cmd.Instructions, cmd.UntrustedData, cmd.MaxOutputTokens)
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	if spec.Operation().ServerPrompt() {
+		// The Hub's own prompt and alias (ADR-0023); its version, not the text, goes into the fingerprint.
+		p, ok := s.prompts[spec.Operation()]
+		if !ok {
+			return call{}, ErrOperationUnavailable
+		}
+		if spec, err = spec.WithServerPrompt(p.Alias, p.Version, p.Text); err != nil {
+			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		}
 	}
 	model, maxOutput, err := s.models.Resolve(spec.Alias(), spec.MaxOutput())
 	if err != nil {

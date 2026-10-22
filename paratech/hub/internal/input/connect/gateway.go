@@ -28,6 +28,9 @@ const (
 	msgConflict        = "the idempotency key was used with a different request"
 	msgRunning         = "a call with this idempotency key is still running"
 	msgInternal        = "internal error"
+	msgNoInstructions  = "the operation takes no instructions: the Hub uses its own prompt"
+	msgServerAlias     = "the operation runs on the Hub's model alias: send none or that one"
+	msgUnavailableOp   = "the operation is not available on this Hub"
 )
 
 // Completer is what the gateway handler needs from the gateway use case (ARCH-42).
@@ -35,22 +38,35 @@ type Completer interface {
 	Complete(ctx context.Context, cmd gateway.Command) (gateway.Result, error)
 }
 
-// Gateway serves GatewayService.Complete. CompleteStream stays unimplemented: the provider port has no streaming yet
-// (ADR-0010). AgentStep is unimplemented until the agentstep use case exists (ADR-0023, TASK-114).
+// Gateway serves GatewayService.Complete and, when an agent stepper is given, AgentStep (ADR-0023). CompleteStream
+// stays unimplemented: the provider port has no streaming yet (ADR-0010).
 type Gateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
-	svc Completer
-	log *slog.Logger
+	svc   Completer
+	agent AgentStepper
+	log   *slog.Logger
 }
 
 var _ hubv1connect.GatewayServiceHandler = (*Gateway)(nil)
 
+// GatewayOption changes a default of NewGateway.
+type GatewayOption func(*Gateway)
+
+// WithAgentStep serves AgentStep with a. Without it AgentStep answers unimplemented.
+func WithAgentStep(a AgentStepper) GatewayOption {
+	return func(g *Gateway) { g.agent = a }
+}
+
 // NewGateway builds the handler.
-func NewGateway(svc Completer, log *slog.Logger) (*Gateway, error) {
+func NewGateway(svc Completer, log *slog.Logger, opts ...GatewayOption) (*Gateway, error) {
 	if svc == nil || log == nil {
 		return nil, errors.New("connect: gateway service and logger are required")
 	}
-	return &Gateway{svc: svc, log: log}, nil
+	g := &Gateway{svc: svc, log: log}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g, nil
 }
 
 // Complete runs one completion for the authenticated caller. The caller comes only from the API key; the request has
@@ -119,6 +135,12 @@ func (g *Gateway) completeError(ctx context.Context, err error) error {
 		return connectrpc.NewError(connectrpc.CodeAborted, errors.New(msgRunning))
 	case errors.Is(err, values.ErrPayloadTooLarge):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgPayloadTooLarge))
+	case errors.Is(err, values.ErrClientInstructions):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgNoInstructions))
+	case errors.Is(err, values.ErrAliasMismatch):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgServerAlias))
+	case errors.Is(err, gateway.ErrOperationUnavailable):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgUnavailableOp))
 	case errors.Is(err, modelallowlist.ErrModelNotAllowed):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgModelNotAllowed))
 	case errors.Is(err, gateway.ErrInvalidRequest):
@@ -141,8 +163,8 @@ func detailedError(code connectrpc.Code, detail *hubv1.ErrorDetail) *connectrpc.
 	return e
 }
 
-// operationOf maps the contract enum to the domain operation; UNSPECIFIED and unknown values map to "", which the
-// domain rejects.
+// operationOf maps the contract enum to the domain operation; UNSPECIFIED, AGENT_STEP (its own RPC) and unknown values
+// map to "", which the domain rejects.
 func operationOf(op hubv1.OperationType) string {
 	switch op {
 	case hubv1.OperationType_OPERATION_TYPE_SUMMARY:
@@ -153,6 +175,12 @@ func operationOf(op hubv1.OperationType) string {
 		return string(values.OperationHomeworkDraft)
 	case hubv1.OperationType_OPERATION_TYPE_LECTURE_TEXT:
 		return string(values.OperationLectureText)
+	case hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL:
+		return string(values.OperationInspectMaterial)
+	case hubv1.OperationType_OPERATION_TYPE_ANSWER:
+		return string(values.OperationAnswer)
+	case hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT:
+		return string(values.OperationTriageAssignment)
 	default:
 		return ""
 	}

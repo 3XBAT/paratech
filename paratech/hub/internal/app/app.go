@@ -18,6 +18,7 @@ import (
 	"paratech/hub/internal/adapters/postgres"
 	"paratech/hub/internal/adapters/random"
 	"paratech/hub/internal/adapters/ratelimit"
+	"paratech/hub/internal/cases/agentstep"
 	"paratech/hub/internal/cases/gateway"
 	"paratech/hub/internal/cases/keyauth"
 	"paratech/hub/internal/cases/keys"
@@ -45,7 +46,8 @@ type App struct {
 	log *slog.Logger
 	out io.Writer // where the CLI prints its results, stdout by default
 
-	llm *llmParts // built by New for serve only
+	llm   *llmParts   // built by New for serve only
+	agent *agentParts // built by New for serve only
 
 	mu      sync.Mutex
 	started bool
@@ -92,6 +94,9 @@ func New(cfg config.Config, log *slog.Logger, opts ...Option) (*App, error) {
 			return nil, err
 		}
 		a.llm = parts
+		if a.agent, err = newAgentParts(cfg, parts.models); err != nil {
+			return nil, err
+		}
 	}
 	return a, nil
 }
@@ -176,12 +181,28 @@ func (a *App) runServer(ctx context.Context) error {
 		Clock: clock.System{}, Random: random.Source{}, Models: a.llm.models, Log: a.log,
 	}, gateway.Config{
 		Unit: a.cfg.QuotaUnit, Limit: a.cfg.QuotaLimit, ReservationTTL: a.cfg.QuotaReservationTTL,
-		KeyRetention: a.cfg.IdempotencyRetention, CallTimeout: a.cfg.LLMTimeout,
+		KeyRetention: a.cfg.IdempotencyRetention, CallTimeout: a.cfg.LLMTimeout, ServerPrompts: a.agent.serverPrompts,
 	})
 	if err != nil {
 		return err
 	}
-	gatewayHandler, err := connect.NewGateway(gatewaySvc, a.log)
+	var gatewayOpts []connect.GatewayOption
+	if a.agent.sealer != nil {
+		agentSvc, err := agentstep.New(agentstep.Deps{
+			Accounts: db.QuotaAccounts(), Provider: a.llm.provider, Limiter: a.llm.limiter, Clock: clock.System{},
+			Random: random.Source{}, Models: a.llm.models, Sealer: a.agent.sealer, Log: a.log,
+		}, agentstep.Config{
+			Unit: a.cfg.QuotaUnit, Limit: a.cfg.QuotaLimit, ReservationTTL: a.cfg.QuotaReservationTTL,
+			KeyRetention: a.cfg.IdempotencyRetention, CallTimeout: a.cfg.LLMTimeout, Profiles: a.agent.profiles,
+		})
+		if err != nil {
+			return err
+		}
+		gatewayOpts = append(gatewayOpts, connect.WithAgentStep(agentSvc))
+	} else {
+		a.log.Warn("agent steps disabled: no seal key", "env", config.EnvAgentSealKeys)
+	}
+	gatewayHandler, err := connect.NewGateway(gatewaySvc, a.log, gatewayOpts...)
 	if err != nil {
 		return err
 	}

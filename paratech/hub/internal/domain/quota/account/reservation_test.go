@@ -146,7 +146,8 @@ func TestParseValues(t *testing.T) {
 		}
 	}
 
-	for _, op := range []Operation{OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText} {
+	for _, op := range []Operation{OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText,
+		OperationAgentStep, OperationInspectMaterial, OperationAnswer, OperationTriageAssignment} {
 		if got, err := ParseOperation(string(op)); err != nil || got != op {
 			t.Errorf("operation %q: %q, %v", op, got, err)
 		}
