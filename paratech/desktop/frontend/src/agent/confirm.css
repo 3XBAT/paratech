@@ -1,0 +1,8 @@
+/* Confirm card (TASK-128). Red is used on this card only: the frame and the heading come from .ag-confirm, «Да» is the danger button. */
+.ag-conf-rows { display: grid; gap: 6px; margin: 0 0 8px; }
+.ag-conf-row { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.ag-conf-row dt, .ag-conf-row dd { margin: 0; }
+.ag-conf-row dd { font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ag-conf-out { font-weight: 600; }
+.today-cal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.today-main > .ag-confirm { margin-top: 8px; }
