@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { libraryApi } from "../bindings/library.js";
-import { callByName, onEventData } from "../bindings/runtime.js";
+import { useEffect, useRef, useState } from "react";
+import { onEventData } from "../bindings/runtime.js";
 import {
-  createFilesDropped,
   type DropLine,
+  dropTargetAttr,
   dropTexts,
   hasFiles,
   nextDepth,
-  pathsFromTransfer,
   subscribeDropped,
 } from "../dropFiles.js";
 import { Icon } from "../ui/Icon.js";
@@ -44,10 +42,6 @@ export function DropZone(props: { onImported?: () => void }) {
   const depth = useRef(0);
   const done = useRef(props.onImported);
   done.current = props.onImported;
-  const onFilesDropped = useMemo(
-    () => createFilesDropped(libraryApi(callByName), setLines, () => done.current?.()),
-    [],
-  );
 
   useEffect(() => {
     const enter = (e: DragEvent) => {
@@ -66,14 +60,11 @@ export function DropZone(props: { onImported?: () => void }) {
       setOver(depth.current > 0);
     };
     const drop = (e: DragEvent) => {
+      // Cancelled only so the WebView does not navigate to the file; the real drop is handled in Go and arrives as
+      // the "library:dropped" event below.
       e.preventDefault();
       depth.current = nextDepth(depth.current, "reset");
       setOver(false);
-      if (hasFiles(e.dataTransfer)) {
-        // WebView2 hides the path: normally the list is empty and the report says to use «Добавить файл». The native
-        // drop arrives as the "files:dropped" event below.
-        void onFilesDropped(pathsFromTransfer(e.dataTransfer));
-      }
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragover", dragover);
@@ -85,14 +76,18 @@ export function DropZone(props: { onImported?: () => void }) {
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop);
     };
-  }, [onFilesDropped]);
+  }, []);
 
   useEffect(() => {
     let off: (() => void) | undefined;
     let closed = false;
-    void subscribeDropped(onEventData, (paths) => {
+    void subscribeDropped(onEventData, (outcome) => {
+      depth.current = nextDepth(depth.current, "reset");
       setOver(false);
-      void onFilesDropped(paths);
+      setLines(outcome.lines);
+      if (outcome.imported) {
+        done.current?.();
+      }
     }).then((stop) => {
       if (closed) {
         stop();
@@ -104,12 +99,12 @@ export function DropZone(props: { onImported?: () => void }) {
       closed = true;
       off?.();
     };
-  }, [onFilesDropped]);
+  }, []);
 
   return (
     <>
       {over && (
-        <div className="drop-overlay" aria-hidden="true">
+        <div className="drop-overlay" aria-hidden="true" {...{ [dropTargetAttr]: "" }}>
           <div className="drop-box">
             <Icon name="down" />
             <p>{dropTexts.overlay}</p>
