@@ -639,36 +639,54 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 
 const updateMaterial = `-- name: UpdateMaterial :execrows
 UPDATE materials
-SET subject_id  = ?1,
-    folder_id   = ?2,
-    status      = ?3,
-    text_status = ?4,
-    version     = version + 1,
-    updated_at  = ?5
-WHERE id = ?6 AND version = ?7
+SET subject_id = ?1,
+    folder_id  = ?2,
+    status     = ?3,
+    version    = version + 1,
+    updated_at = ?4
+WHERE id = ?5 AND version = ?6
 `
 
 type UpdateMaterialParams struct {
 	SubjectID       sql.NullString
 	FolderID        sql.NullString
 	Status          string
-	TextStatus      string
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
 }
 
-// The content (sha256, size, type, name) never changes.
+// The content (sha256, size, type, name) never changes; the text status changes only through UpdateMaterialText.
 func (q *Queries) UpdateMaterial(ctx context.Context, arg UpdateMaterialParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateMaterial,
 		arg.SubjectID,
 		arg.FolderID,
 		arg.Status,
-		arg.TextStatus,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateMaterialText = `-- name: UpdateMaterialText :execrows
+UPDATE materials
+SET text_status = ?1
+WHERE id = ?2 AND version = ?3
+`
+
+type UpdateMaterialTextParams struct {
+	TextStatus      string
+	ID              string
+	ExpectedVersion int64
+}
+
+// The text status is a fact about the content, not a change: checked against the version but keeps it (TASK-122).
+func (q *Queries) UpdateMaterialText(ctx context.Context, arg UpdateMaterialTextParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateMaterialText, arg.TextStatus, arg.ID, arg.ExpectedVersion)
 	if err != nil {
 		return 0, err
 	}

@@ -297,8 +297,10 @@ type Querier interface {
 	UpdateLectureText(ctx context.Context, arg UpdateLectureTextParams) (int64, error)
 	// Compare-and-swap on the loaded version. The id and the creation time never change.
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (int64, error)
-	// The content (sha256, size, type, name) never changes.
+	// The content (sha256, size, type, name) never changes; the text status changes only through UpdateMaterialText.
 	UpdateMaterial(ctx context.Context, arg UpdateMaterialParams) (int64, error)
+	// The text status is a fact about the content, not a change: checked against the version but keeps it (TASK-122).
+	UpdateMaterialText(ctx context.Context, arg UpdateMaterialTextParams) (int64, error)
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
 	// format the user chose before the validation and the creation time never change, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)

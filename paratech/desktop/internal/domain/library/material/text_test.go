@@ -148,27 +148,33 @@ func TestDecodeText(t *testing.T) {
 // SetText records the reading of the text; a PDF keeps its own status and a removed material refuses.
 func TestSetText(t *testing.T) {
 	m := newMaterial(t, TypeDOCX)
-	if changed, err := m.SetText(TextExtracted, t0); err != nil || !changed || m.TextStatus() != TextExtracted {
+	m.Persisted(3)
+	before := m.State()
+	if changed, err := m.SetText(TextExtracted); err != nil || !changed || m.TextStatus() != TextExtracted {
 		t.Fatalf("SetText = %v, %v", changed, err)
 	}
-	if changed, err := m.SetText(TextExtracted, t0); err != nil || changed {
+	// Not a change of the material: the version and the time of the last change stay (Undo compares the version).
+	if after := m.State(); after.Version != before.Version || !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("SetText changed version or time: %+v", after)
+	}
+	if changed, err := m.SetText(TextExtracted); err != nil || changed {
 		t.Fatalf("SetText again = %v, %v", changed, err)
 	}
-	if changed, err := m.SetText(TextFailed, t0); err != nil || !changed {
+	if changed, err := m.SetText(TextFailed); err != nil || !changed {
 		t.Fatalf("SetText(failed) = %v, %v", changed, err)
 	}
 	for _, s := range []TextStatus{TextPending, TextPDFNotExtracted, "other"} {
-		if _, err := m.SetText(s, t0); !errors.Is(err, ErrInvalidMaterial) {
+		if _, err := m.SetText(s); !errors.Is(err, ErrInvalidMaterial) {
 			t.Errorf("SetText(%q) = %v", s, err)
 		}
 	}
-	if _, err := newMaterial(t, TypePDF).SetText(TextExtracted, t0); !errors.Is(err, ErrInvalidMaterial) {
+	if _, err := newMaterial(t, TypePDF).SetText(TextExtracted); !errors.Is(err, ErrInvalidMaterial) {
 		t.Fatalf("SetText of a PDF = %v", err)
 	}
 	if _, err := m.Remove(t0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SetText(TextExtracted, t0); !errors.Is(err, ErrRemoved) {
+	if _, err := m.SetText(TextExtracted); !errors.Is(err, ErrRemoved) {
 		t.Fatalf("SetText of a removed material = %v", err)
 	}
 }

@@ -473,6 +473,12 @@ func (s *Service) changeSubject(ctx context.Context, id shared.SubjectID, fn fun
 // changeMaterial loads the material, applies fn and saves it when fn changed it, again from the start when the save
 // lost against another change (a newer version, or a subject, folder or lesson gone meanwhile: fn checks them again).
 func (s *Service) changeMaterial(ctx context.Context, id shared.MaterialID, fn func(*material.Material) (bool, error)) (*material.Material, error) {
+	return s.changeMaterialWith(ctx, id, fn, s.materials.Save)
+}
+
+// changeMaterialWith is changeMaterial with the save to use: Save, or SaveText for the text status.
+func (s *Service) changeMaterialWith(ctx context.Context, id shared.MaterialID, fn func(*material.Material) (bool, error),
+	save func(context.Context, *material.Material) error) (*material.Material, error) {
 	if id.Validate() != nil {
 		return nil, ErrInvalidRequest
 	}
@@ -491,7 +497,7 @@ func (s *Service) changeMaterial(ctx context.Context, id shared.MaterialID, fn f
 		if !changed {
 			return m, nil
 		}
-		err = s.materials.Save(ctx, m)
+		err = save(ctx, m)
 		switch {
 		case errors.Is(err, shared.ErrConflict) && attempt < saveAttempts:
 			continue

@@ -45,8 +45,13 @@ type MaterialRepository interface {
 	Count(ctx context.Context, sub shared.SubjectID, folder shared.FolderID) (int, error)
 
 	// Save writes it under its version: a stale one wraps shared.ErrVersionConflict, a stored sha256
-	// shared.ErrDuplicate, a subject, folder or lesson that does not exist shared.ErrConflict.
+	// shared.ErrDuplicate, a subject, folder or lesson that does not exist shared.ErrConflict. The text status is
+	// written on the first save only; later it changes through SaveText.
 	Save(ctx context.Context, m *material.Material) error
+
+	// SaveText writes only the text status of a stored material, under its version and without a new one (see
+	// material.SetText): a stale version wraps shared.ErrVersionConflict.
+	SaveText(ctx context.Context, m *material.Material) error
 }
 
 // BlobStore keeps the bytes of the files in the private artifact store (hard rule 5). Implemented by the filestore
@@ -89,8 +94,9 @@ type TextExtractor interface {
 
 // MaterialReader is the quarantined reader INSPECT_MATERIAL on the Hub (ADR-0022). Implemented by the hubclient
 // adapter. The output is untrusted model text: only inspection.Request.Parse reads it. Errors follow the Hub client:
-// shared.ErrQuotaExceeded, inspection.ErrInvalidAnswer for the Hub's schema refusal of the answer (charged); anything
-// else (no network, no Hub, a refused key) charged nothing as an answer.
+// shared.ErrQuotaExceeded; inspection.ErrInvalidAnswer for any permanent provider error: the Hub's schema refusal of
+// the answer (charged) but also a model refusal the Hub did not charge, both counted as one used attempt; anything
+// else (no network, no Hub, a refused key) uses no attempt.
 type MaterialReader interface {
 	InspectMaterial(ctx context.Context, req inspection.Request) (string, error)
 }

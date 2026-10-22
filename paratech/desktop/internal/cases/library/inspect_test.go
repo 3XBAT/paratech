@@ -91,8 +91,12 @@ func TestInspect(t *testing.T) {
 	if got.Text != material.TextExtracted || got.Empty || got.Answer == nil || *got.Answer != want {
 		t.Fatalf("Inspect = %+v", got)
 	}
-	if got.Material.TextStatus() != material.TextExtracted {
-		t.Fatalf("text status = %s", got.Material.TextStatus())
+	// The text status is recorded without a new version, so an agent's Undo of an earlier place still holds.
+	if got.Material.TextStatus() != material.TextExtracted || got.Material.Version() != m.Version() {
+		t.Fatalf("text status = %s, version %d -> %d", got.Material.TextStatus(), m.Version(), got.Material.Version())
+	}
+	if stored, _ := e.svc.Material(ctx, m.ID()); stored.TextStatus() != material.TextExtracted || stored.Version() != m.Version() {
+		t.Fatalf("stored: %+v", stored.State())
 	}
 
 	// The request: today, the candidate with its fitted name, the text; no file name.

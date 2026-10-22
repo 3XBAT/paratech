@@ -90,8 +90,8 @@ func (s *Service) readBlob(ctx context.Context, ref shared.ArtifactRef) ([]byte,
 // text with nothing in it Empty. The material's text status is recorded once it is known.
 //
 // Errors: ErrMaterialNotFound, ErrMaterialRemoved, ErrFileDamaged, ErrReaderUnavailable (try again later, free),
-// ErrQuota, ErrReaderRefused (the answer broke the schema; the next try is a new, charged attempt, up to
-// inspection.MaxAttempts), ErrUnavailable, ErrNotConfigured.
+// ErrQuota, ErrReaderRefused (the answer broke the schema or the provider refused for good; the attempt is used, the
+// next try is a new one, possibly charged, up to inspection.MaxAttempts), ErrUnavailable, ErrNotConfigured.
 func (s *Service) Inspect(ctx context.Context, id shared.MaterialID) (Inspected, error) {
 	if s.reader == nil || s.inspections == nil {
 		return Inspected{}, ErrNotConfigured
@@ -150,7 +150,8 @@ func (s *Service) Inspect(ctx context.Context, id shared.MaterialID) (Inspected,
 	case errors.Is(err, shared.ErrQuotaExceeded):
 		return Inspected{}, fmt.Errorf("%w: %w", ErrQuota, err)
 	case errors.Is(err, inspection.ErrInvalidAnswer):
-		// The Hub's schema check refused the answer: charged, so the next try must be a new attempt.
+		// A permanent provider error: the Hub's schema refusal (charged) or a model refusal (not charged); the client
+		// cannot tell them apart, so either uses the attempt and the next try is a new one with a new key.
 		s.record(ctx, cur, id, digest, plan.Attempt, nil)
 		return Inspected{}, fmt.Errorf("%w: %w", ErrReaderRefused, err)
 	default:
@@ -196,15 +197,16 @@ func (s *Service) record(ctx context.Context, cur *inspection.Inspection, id sha
 	}
 }
 
-// textStatus records how far the text of m was read, once; a failed save is logged and m returned as it was.
+// textStatus records how far the text of m was read, once; a failed save is logged and m returned as it was. It keeps
+// the material's version (SaveText), so a place or link before it can still be undone.
 func (s *Service) textStatus(ctx context.Context, m *material.Material, st material.TextStatus) *material.Material {
 	if m.TextStatus() == st {
 		return m
 	}
-	got, err := s.changeMaterial(ctx, m.ID(), func(m *material.Material) (bool, error) {
-		changed, err := m.SetText(st, s.clock.Now())
+	got, err := s.changeMaterialWith(ctx, m.ID(), func(m *material.Material) (bool, error) {
+		changed, err := m.SetText(st)
 		return changed, domainError(err)
-	})
+	}, s.materials.SaveText)
 	if err != nil {
 		s.log.Warn(opTextStatus, slog.String("material", string(m.ID())), slog.Any("cause", err))
 		return m

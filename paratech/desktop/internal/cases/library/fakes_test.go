@@ -238,9 +238,33 @@ func (f *fakeMaterials) Save(_ context.Context, m *material.Material) error {
 			return shared.ErrDuplicate
 		}
 	}
+	if st.Version > 0 {
+		st.Text = cur.Text // as the sqlite adapter: the text status changes through SaveText only
+	}
 	st.Version++
 	f.rows[st.ID] = st
 	m.Persisted(st.Version)
+	return nil
+}
+
+func (f *fakeMaterials) SaveText(_ context.Context, m *material.Material) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.saveErrs) > 0 {
+		err := f.saveErrs[0]
+		f.saveErrs = f.saveErrs[1:]
+		return err
+	}
+	if f.err != nil {
+		return f.err
+	}
+	st := m.State()
+	cur, ok := f.rows[st.ID]
+	if !ok || cur.Version != st.Version {
+		return shared.ErrVersionConflict
+	}
+	cur.Text = st.Text
+	f.rows[st.ID] = cur
 	return nil
 }
 

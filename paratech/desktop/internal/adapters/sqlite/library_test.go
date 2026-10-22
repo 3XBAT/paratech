@@ -265,6 +265,65 @@ func TestMaterialSaveConflicts(t *testing.T) {
 	}
 }
 
+// SaveText writes the text status under the version without a new one; Save after it neither bumps it back nor
+// overwrites the status with the one it loaded (TASK-122: inspecting a file must not break the Undo of placing it).
+func TestMaterialSaveText(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewMaterialRepository(db)
+	if err := repo.Save(ctx, newLibMaterial(t, "m1", "a")); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.Get(ctx, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := repo.Get(ctx, "m1") // loaded before the text was read
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loaded.SetText(material.TextExtracted); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveText(ctx, loaded); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, "m1")
+	if err != nil || got.Version() != 1 || got.TextStatus() != material.TextExtracted {
+		t.Fatalf("after SaveText: %+v, %v", got.State(), err)
+	}
+
+	if _, err := stale.Remove(libT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, stale); err != nil {
+		t.Fatalf("Save after SaveText = %v", err)
+	}
+	got, err = repo.Get(ctx, "m1")
+	if err != nil || got.Version() != 2 || got.Active() || got.TextStatus() != material.TextExtracted {
+		t.Fatalf("after Save: %+v, %v", got.State(), err)
+	}
+
+	tests := []struct {
+		name     string
+		id       shared.MaterialID
+		version  int64
+		conflict bool
+	}{
+		{"stale version", "m1", 1, true},
+		{"missing material", "m9", 1, true},
+		{"never stored", "m1", 0, false},
+	}
+	for _, tt := range tests {
+		m := newLibMaterial(t, tt.id, "a")
+		m.Persisted(tt.version)
+		err := repo.SaveText(ctx, m)
+		if err == nil || errors.Is(err, shared.ErrVersionConflict) != tt.conflict {
+			t.Errorf("%s: SaveText = %v", tt.name, err)
+		}
+	}
+}
+
 // A removed folder that holds a file is refused by the database even if the aggregate let it go.
 func TestSubjectSaveKeepsAFolderHoldingAFile(t *testing.T) {
 	db, ctx := openTest(t, nil), context.Background()
