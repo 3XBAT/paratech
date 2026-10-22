@@ -76,6 +76,8 @@ type Core struct {
 	Today TodayUseCase // «Сегодня» (TASK-125)
 
 	AgentConfirm AgentConfirmCore // the confirm cards of the agent panel (TASK-127)
+
+	Turnkey TurnkeyUseCase // the turnkey cards and the helper page (TASK-129)
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -201,6 +203,7 @@ type Services struct {
 	Today       *TodayService
 
 	AgentConfirm *AgentConfirmService
+	Turnkey      *TurnkeyService
 
 	// AgentPanel is not bound: the shell attaches it to the Wails events while the app runs.
 	AgentPanel *AgentPanel
@@ -282,6 +285,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if !core.AgentConfirm.complete() {
 		return Services{}, errors.New("wails: open core: no agent confirm cards")
 	}
+	if core.Turnkey == nil {
+		return Services{}, errors.New("wails: open core: no turnkey work")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -318,6 +324,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		AgentPanel: core.Agent.Panel,
 
 		AgentConfirm: NewAgentConfirmService(core.AgentConfirm, s.opts.Log),
+		Turnkey:      NewTurnkeyService(core.Turnkey, s.opts.Log),
 	}, nil
 }
 

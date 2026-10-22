@@ -135,7 +135,7 @@ func TestTwoQuestionRoundsThenFinal(t *testing.T) {
 	if a, _ := w.Latest(); len(a.Assumptions) != 1 {
 		t.Fatalf("assumptions = %v", a.Assumptions)
 	}
-	if err := w.Confirm(t0); err != nil || w.Status() != StatusConfirmed {
+	if err := w.ConfirmRequirements(t0); err != nil || w.Status() != StatusConfirmed {
 		t.Fatalf("confirm: %v %s", err, w.Status())
 	}
 	if !strings.Contains(w.Instruction(), "Вопрос A — Да") || !strings.Contains(w.Instruction(), "Допущения:") {
@@ -166,7 +166,7 @@ func TestOutcomes(t *testing.T) {
 				if _, qs := w.Questions(); qs != nil {
 					t.Fatal("the helper mode shows questions")
 				}
-				if err := w.Confirm(t0); !errors.Is(err, ErrInvalidTransition) {
+				if err := w.ConfirmRequirements(t0); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("confirm in the helper mode: %v", err)
 				}
 			}
@@ -203,7 +203,7 @@ func TestInvalidMoves(t *testing.T) {
 	if err := w.Answer(nil, t0); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("answer without questions: %v", err)
 	}
-	if err := w.Confirm(t0); !errors.Is(err, ErrInvalidTransition) {
+	if err := w.ConfirmRequirements(t0); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("confirm in triage: %v", err)
 	}
 	if err := w.Edit(Understanding{WorkType: TypeEssay}, t0); !errors.Is(err, ErrInvalidTransition) {
@@ -288,7 +288,7 @@ func TestEditUnderstanding(t *testing.T) {
 			t.Errorf("edit %+v: %v", bad, err)
 		}
 	}
-	if err := w.Confirm(t0); err != nil {
+	if err := w.ConfirmRequirements(t0); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Edit(edit, t0); !errors.Is(err, ErrInvalidTransition) {
@@ -305,7 +305,7 @@ func TestWritingAndDone(t *testing.T) {
 	if err := w.StartWriting(t0); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("write before confirm: %v", err)
 	}
-	for _, step := range []func(time.Time) error{w.Confirm, w.StartWriting, w.Finish} {
+	for _, step := range []func(time.Time) error{w.ConfirmRequirements, w.StartWriting, w.Finish} {
 		if err := step(t0); err != nil {
 			t.Fatal(err)
 		}

@@ -47,6 +47,7 @@ import (
 	"paratech/desktop/internal/cases/supportbundle"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/transcriptview"
+	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/shared"
 	agentloop "paratech/desktop/internal/input/agent"
 	"paratech/desktop/internal/input/wails"
@@ -369,9 +370,19 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 
+	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library. No advisor
+	// for «Спросить по шагу» yet: the Hub has no operation for it (ADR-0025).
+	works, err := turnkey.New(turnkey.Deps{
+		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm, Clock: e.local,
+		IDs: e.ids, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: turnkey works: %w", err)
+	}
+
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
-		rerunner: rerunner, materials: materialJobs,
+		rerunner: rerunner, materials: materialJobs, turnkey: works,
 	}, log); err != nil {
 		return err
 	}
@@ -398,6 +409,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Today: todayScreen,
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
 		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},
+		Turnkey:      works,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

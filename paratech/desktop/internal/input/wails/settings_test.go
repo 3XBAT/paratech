@@ -161,6 +161,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "agent confirm proposals", edit: func(c *Core) { c.AgentConfirm.Proposals = nil }},
 		{name: "agent confirm materials", edit: func(c *Core) { c.AgentConfirm.Materials = nil }},
 		{name: "agent confirm deletions", edit: func(c *Core) { c.AgentConfirm.Deletions = nil }},
+		{name: "turnkey work", edit: func(c *Core) { c.Turnkey = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {

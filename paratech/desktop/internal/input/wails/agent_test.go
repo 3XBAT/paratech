@@ -380,6 +380,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 			values.CannotDoCard{YourPart: []values.Text{"сдать лично"}},
 			values.ReplyCard{Text: "Готово"},
 			values.StoppedCard{Reason: values.StopOffline},
+			values.WorkCard{Work: mustRef(t, values.KindWork, "w-1"), Outcome: values.TriageHelper},
 		},
 	}
 	panel := NewAgentPanel(discard())
@@ -418,7 +419,8 @@ func TestAgentPanelEventContract(t *testing.T) {
 		card(`"kind":"answer","answerId":"ans-1"`) + "," +
 		card(`"kind":"cannot_do","cannotDo":{"yourPart":["сдать лично"],"ourPart":[]}`) + "," +
 		card(`"kind":"reply","text":"Готово"`) + "," +
-		card(`"kind":"stopped","stopReason":"offline"`) + `]}`
+		card(`"kind":"stopped","stopReason":"offline"`) + "," +
+		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + `]}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}
@@ -433,6 +435,7 @@ func card(fields string) string {
 	zero := []struct{ key, val string }{
 		{"kind", `""`}, {"plan", "null"}, {"questions", "null"}, {"jobId", `""`}, {"artifact", `""`}, {"target", "null"},
 		{"actionId", `""`}, {"answerId", `""`}, {"cannotDo", "null"}, {"text", `""`}, {"stopReason", `""`},
+		{"workId", `""`}, {"outcome", `""`},
 	}
 	parts := make([]string, 0, len(zero))
 	for _, z := range zero {

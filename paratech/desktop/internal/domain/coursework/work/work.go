@@ -165,8 +165,8 @@ func (w *Work) Edit(u Understanding, now time.Time) error {
 	return w.move(next, w.status, now)
 }
 
-// Confirm is «Подтвердить» on the card: the requirements are settled.
-func (w *Work) Confirm(now time.Time) error { return w.moveTo(StatusConfirmed, now) }
+// ConfirmRequirements is «Подтвердить» on the card: the requirements are settled.
+func (w *Work) ConfirmRequirements(now time.Time) error { return w.moveTo(StatusConfirmed, now) }
 
 // StartWriting marks the work written (TASK-105).
 func (w *Work) StartWriting(now time.Time) error { return w.moveTo(StatusWriting, now) }

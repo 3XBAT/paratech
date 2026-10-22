@@ -81,7 +81,8 @@ type AgentUpdateView struct {
 
 // AgentCardView is one card; Kind says which field is set: plan, questions, progress (jobId), result (artifact,
 // "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId), answer (answerId), cannot_do
-// (cannotDo), reply (text) or stopped (stopReason).
+// (cannotDo), reply (text), stopped (stopReason) or work (workId and outcome: questions, review, helper, pending,
+// failed or confirmed; the texts come from TurnkeyService.Work).
 type AgentCardView struct {
 	Kind       string              `json:"kind"`
 	Plan       *AgentPlanView      `json:"plan"`
@@ -94,6 +95,8 @@ type AgentCardView struct {
 	CannotDo   *AgentCannotDoView  `json:"cannotDo"`
 	Text       string              `json:"text"`
 	StopReason string              `json:"stopReason"`
+	WorkID     string              `json:"workId"`
+	Outcome    string              `json:"outcome"`
 }
 
 // AgentRefView is a typed id: kind is subject, lesson, proposal, preview, ...
@@ -195,6 +198,8 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.Text = string(c.Text)
 	case values.StoppedCard:
 		v.StopReason = string(c.Reason)
+	case values.WorkCard:
+		v.WorkID, v.Outcome = c.Work.ID(), string(c.Outcome)
 	default:
 		return AgentCardView{}, false
 	}

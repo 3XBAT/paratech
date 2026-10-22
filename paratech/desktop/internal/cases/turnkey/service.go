@@ -113,7 +113,7 @@ func (s *Service) EditUnderstanding(ctx context.Context, id shared.WorkID, u wor
 
 // ConfirmRequirements is «Подтвердить» on the card: the requirements are settled for the writing (TASK-105).
 func (s *Service) ConfirmRequirements(ctx context.Context, id shared.WorkID) (View, error) {
-	w, err := s.change(ctx, id, func(w *work.Work) error { return w.Confirm(s.clock.Now()) })
+	w, err := s.change(ctx, id, func(w *work.Work) error { return w.ConfirmRequirements(s.clock.Now()) })
 	if err != nil {
 		return View{}, err
 	}
