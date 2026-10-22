@@ -1,5 +1,7 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type AgentApi, agentApi, type CallProblem, parseUpdate, type UpdateView, updateEvent } from "../bindings/agent.js";
+import { agentConfirmApi } from "../bindings/agentConfirm.js";
+import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
 import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, requestText, type UndoNote, undoableActions } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
@@ -11,6 +13,7 @@ import { AgentPanelView } from "./AgentPanelView.js";
 import type { CardActions } from "./AgentCards.js";
 
 const api: AgentApi = agentApi(callByName);
+const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
 /** Ctrl+K focuses the input of the panel from anywhere in the window. */
 function useFocusShortcut(input: RefObject<HTMLInputElement | null>, reveal?: () => void) {
@@ -209,6 +212,7 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
     const named = e.threadId !== "";
     return {
       busy,
+      confirm,
       press: (id) => named && !busy && run(calls[id]()),
       revise: (wish) => named && !busy && run(api.revisePlan(ref, wish)),
       answer: (answers) => named && !busy && run(api.answer(ref, answers)),
