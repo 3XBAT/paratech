@@ -95,17 +95,19 @@ SET status         = sqlc.arg(status),
     updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
+-- Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
+-- in reverse.
 -- name: ListAgentActionsByThread :many
 SELECT * FROM agent_actions
 WHERE thread_id = sqlc.arg(thread_id)
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT sqlc.arg(max_rows);
 
 -- The journal of the panel: the newest entries of every thread.
 -- name: ListRecentAgentActions :many
 SELECT * FROM agent_actions
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT sqlc.arg(max_rows);
 
 -- name: ListUnfinishedAgentActions :many
-SELECT * FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, id;
+SELECT * FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, rowid;

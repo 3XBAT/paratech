@@ -358,7 +358,7 @@ func (q *Queries) LastAgentStepSeq(ctx context.Context, threadID string) (int64,
 const listAgentActionsByThread = `-- name: ListAgentActionsByThread :many
 SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions
 WHERE thread_id = ?1
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT ?2
 `
 
@@ -367,6 +367,8 @@ type ListAgentActionsByThreadParams struct {
 	MaxRows  int64
 }
 
+// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
+// in reverse.
 func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error) {
 	rows, err := q.db.QueryContext(ctx, listAgentActionsByThread, arg.ThreadID, arg.MaxRows)
 	if err != nil {
@@ -451,7 +453,7 @@ func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) 
 
 const listRecentAgentActions = `-- name: ListRecentAgentActions :many
 SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT ?1
 `
 
@@ -526,7 +528,7 @@ func (q *Queries) ListRunningAgentThreadIDs(ctx context.Context) ([]string, erro
 }
 
 const listUnfinishedAgentActions = `-- name: ListUnfinishedAgentActions :many
-SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, id
+SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, rowid
 `
 
 func (q *Queries) ListUnfinishedAgentActions(ctx context.Context) ([]AgentAction, error) {

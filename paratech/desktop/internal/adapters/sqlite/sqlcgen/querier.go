@@ -165,6 +165,8 @@ type Querier interface {
 	LatestTranscriptByRecording(ctx context.Context, recordingID string) (Transcript, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
+	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
+	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
 	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
 	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)

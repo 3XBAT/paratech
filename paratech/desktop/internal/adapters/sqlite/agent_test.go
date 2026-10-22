@@ -404,6 +404,46 @@ func TestAgentActionIntentRefusalAndLookups(t *testing.T) {
 	}
 }
 
+// Entries of the same instant are listed in insert order, not by their random ids: «Отменить всё» goes exactly in
+// reverse.
+func TestAgentActionsSameInstantKeepInsertOrder(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAgentActionRepository(db)
+	ids := []shared.ActionID{"zz", "mm", "aa"} // inserted in this order, ids sorted the other way
+	for i, id := range ids {
+		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: values.ToolCreateSubject}, agentAt(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []shared.ActionID{"aa", "mm", "zz"}
+	lists := map[string]func() ([]*action.Action, error){
+		"ListByThread": func() ([]*action.Action, error) { return repo.ListByThread(ctx, "th1", 10) },
+		"ListRecent":   func() ([]*action.Action, error) { return repo.ListRecent(ctx, 10) },
+	}
+	for name, list := range lists {
+		got, err := list()
+		if err != nil || len(got) != len(want) {
+			t.Fatalf("%s = %v, %v", name, got, err)
+		}
+		for i, a := range got {
+			if a.ID() != want[i] {
+				t.Fatalf("%s[%d] = %s, want %s (newest inserted first)", name, i, a.ID(), want[i])
+			}
+		}
+	}
+	unfinished, err := repo.ListUnfinished(ctx)
+	if err != nil || len(unfinished) != 3 || unfinished[0].ID() != "zz" || unfinished[2].ID() != "aa" {
+		t.Fatalf("ListUnfinished = %v, %v", unfinished, err)
+	}
+}
+
 // A row a newer build or a broken tool wrote is refused on read, not half restored.
 func TestAgentRowsAreCheckedOnRead(t *testing.T) {
 	db, ctx := openTest(t, nil), context.Background()
