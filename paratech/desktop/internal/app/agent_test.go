@@ -50,7 +50,7 @@ func TestAgentRecoveryAtStart(t *testing.T) {
 
 	a, _ := newTestAppWith(t, dir)
 	startCore(t, a)
-	if a.core.agent == nil || a.core.journal == nil {
+	if a.core.agent == nil || a.core.journal == nil || a.core.driver == nil {
 		t.Fatal("agent core not wired")
 	}
 	got, err := sqlite.NewAgentThreadRepository(a.core.db).Get(ctx, "th1")

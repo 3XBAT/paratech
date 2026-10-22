@@ -44,6 +44,11 @@ type baseSubjects []values.BaseSubject
 
 func (b baseSubjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) { return b, nil }
 
+// zeroFacts knows nothing of a call: the cost is unknown (a paid write needs a plan), no ready result, no triage.
+type zeroFacts struct{}
+
+func (zeroFacts) Facts(context.Context, values.Call) (thread.Facts, error) { return thread.Facts{}, nil }
+
 type agentEnv struct {
 	db      *sqlite.DB
 	hub     *testenv.FakeAgentHub
@@ -85,7 +90,7 @@ func (e *agentEnv) start(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 	if e.turns, err = agentturn.New(agentturn.Deps{
 		Model: e.model, Threads: sqlite.NewAgentThreadRepository(e.db), History: sqlite.NewAgentHistory(e.db, e.clock),
-		Subjects: baseSubjects{{ID: s1, Name: "Физика"}}, Facts: agentturn.UnknownFacts{}, Tx: e.db, Clock: e.clock,
+		Subjects: baseSubjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: e.db, Clock: e.clock,
 		IDs: e.ids, Log: log,
 	}); err != nil {
 		t.Fatal(err)

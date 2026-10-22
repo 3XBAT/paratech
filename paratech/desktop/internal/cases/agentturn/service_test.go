@@ -401,6 +401,34 @@ func TestStopDuringStep(t *testing.T) {
 	}
 }
 
+// «Стоп» that loses its save to other saves twice still stops the request (bounded retry, TASK-116 follow-up); the
+// step carries the scope of the request for the Driver.
+func TestStopRetriesVersionConflicts(t *testing.T) {
+	e := newEnv(t)
+	e.model.then(raw("c1", "list_subjects", `{}`))
+	st := ask(t, e, "мои предметы")
+	if st.Scope != subjectScope(t) {
+		t.Fatalf("step scope = %+v", st.Scope)
+	}
+	conflicts := 0
+	e.threads.afterGet = func() {
+		if conflicts == maxStopSaves-1 {
+			return
+		}
+		conflicts++
+		// Another save lands between Stop's load and its save.
+		e.threads.mu.Lock()
+		s := e.threads.states[st.Thread]
+		s.Version++
+		e.threads.states[st.Thread] = s
+		e.threads.mu.Unlock()
+	}
+	got, err := e.svc.Stop(t.Context(), ref(st))
+	if err != nil || got.Status != thread.StatusStopped || got.StopReason != values.StopUser {
+		t.Fatalf("Stop after %d conflicts = %+v, %v", conflicts, got, err)
+	}
+}
+
 // «Стоп» saved between Submit's load and save: the Driver's results are applied again to the stopped request, not
 // dropped, and «Продолжить» goes on with them.
 func TestSubmitRacingStop(t *testing.T) {
