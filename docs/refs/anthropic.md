@@ -131,3 +131,24 @@ Not stated for the API. (Only the docs site redirects: `docs.claude.com` -> `pla
 - **Our inference, not a doc fact:** Go's `http.Client` strips only `Authorization`/`Cookie`-like sensitive headers on cross-domain redirects; a custom `x-api-key` header is forwarded. Since the docs never mention API redirects, the client should refuse redirects (`CheckRedirect` returning `http.ErrUseLastResponse` or an error) so the key cannot leak.
 - Cap response body read size (our inference; no response size limit is documented, max output is 128K tokens).
 - Used by `hub/internal/adapters/anthropic` (TASK-034): instructions go to `system`, untrusted data to the one user text block; 8 MiB response cap; redirects refused; a 200 answer cut off mid-body is the transient "answer interrupted" (probably billed).
+
+## 7. Tool use and prompt caching (used by TASK-114, `Step`)
+
+Not re-fetched for TASK-114 (no network in that session); the fields below are the long-standing Messages API ones. Items marked **to verify** must be checked against the live docs before the agent ships.
+
+Request (non-streaming, same endpoint and headers):
+- `tools[]`: `{name, description, input_schema}`; `input_schema` is a JSON Schema object (`type: object`, `properties`, `required`, `additionalProperties`). The Hub builds it from the catalog (`domain/llm/services/toolcatalog`); `maxLength`, `pattern`, `enum` are hints to the model, the Hub re-checks every returned call itself. Strict tool schemas are **not** used (not confirmed here).
+- `tool_choice: {"type": "any"}`: the model must call at least one tool.
+- Assistant turn with echoed calls: content blocks `{type: "tool_use", id, name, input}` (`input` an object).
+- User turn with results: blocks `{type: "tool_result", tool_use_id, content, is_error}` (`content` a string, here the result JSON; `is_error` only when true). Every `tool_use` must be answered by a `tool_result` in the next user message; the results come first in that message.
+- `cache_control: {"type": "ephemeral"}` on a block marks the end of a cached prefix (order: tools, system, messages). The Hub sets two breakpoints: the student-context system block (tools + system prompt + base) and the last block of the history.
+
+Response: `stop_reason: "tool_use"` when the model called tools; `content` holds `tool_use` blocks (`id`, `name`, `input`), possibly after `thinking`/`text` blocks, which the Hub ignores. Any other stop reason is `PROVIDER_ERROR` (permanent, ADR-0023).
+
+Usage: unchanged; cache writes and reads are in `cache_creation_input_tokens` / `cache_read_input_tokens` and are settled as input tokens (section 3).
+
+**To verify** before rollout:
+- minimum cacheable prompt length per model (below it `cache_control` is ignored, no error) and whether the planner prefix (tools + system + base, roughly 4-6K tokens) reaches it for Haiku 5.5;
+- current cache write/read prices for Haiku 5.5 and Sonnet 5.5 (section 3 lists multipliers from 2026-10-15);
+- whether adaptive thinking is on by default for the planner model and compatible with `tool_choice: any`, and whether echoed `tool_use` turns then need their `thinking` blocks (the Hub does not keep them);
+- the exact charset/length of `tool_use.id` (the Hub accepts 1-128 of `[A-Za-z0-9_-]`).

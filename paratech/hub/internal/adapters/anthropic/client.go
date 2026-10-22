@@ -18,6 +18,7 @@ import (
 const (
 	opNew      = "anthropic.New"
 	opComplete = "anthropic.Complete"
+	opStep     = "anthropic.Step"
 )
 
 const (
@@ -116,12 +117,48 @@ func (c *Client) Complete(ctx context.Context, req values.Request) (values.Compl
 	if err != nil {
 		return values.Completion{}, fail(permanent("request encoding failed"))
 	}
+	var completion values.Completion
+	err = c.post(ctx, body, func(resp *http.Response) error {
+		var rerr error
+		completion, rerr = readCompletion(resp)
+		return rerr
+	})
+	if err != nil {
+		return values.Completion{}, fail(err)
+	}
+	return completion, nil
+}
 
+// Step sends one planner call with the catalog tools and tool choice "any" (ADR-0023), with the same deadline and
+// error rules as Complete. The answer's calls are untrusted; whether they are usable is the use case's decision.
+func (c *Client) Step(ctx context.Context, call values.AgentCall) (values.AgentAnswer, error) {
+	if call.Model() == "" || call.System() == "" || call.MaxOutput() <= 0 || len(call.Tools()) == 0 || len(call.Turns()) == 0 {
+		return values.AgentAnswer{}, failStep(permanent("invalid request"))
+	}
+	body, err := json.Marshal(newAgentWireRequest(call))
+	if err != nil {
+		return values.AgentAnswer{}, failStep(permanent("request encoding failed"))
+	}
+	var answer values.AgentAnswer
+	err = c.post(ctx, body, func(resp *http.Response) error {
+		var rerr error
+		answer, rerr = readAgentAnswer(resp)
+		return rerr
+	})
+	if err != nil {
+		return values.AgentAnswer{}, failStep(err)
+	}
+	return answer, nil
+}
+
+// post sends body to the Messages endpoint and hands a 200 answer to read. The deadline is the earlier of ctx and the
+// client timeout. Every failure is a *values.ProviderError.
+func (c *Client) post(ctx context.Context, body []byte, read func(*http.Response) error) error {
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return values.Completion{}, fail(permanent("request build failed"))
+		return permanent("request build failed")
 	}
 	httpReq.Header.Set("x-api-key", c.key)
 	httpReq.Header.Set("anthropic-version", apiVersion)
@@ -131,25 +168,25 @@ func (c *Client) Complete(ctx context.Context, req values.Request) (values.Compl
 	// The endpoint is fixed at New from the server configuration; no request value reaches the URL.
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return values.Completion{}, fail(transportError(ctx, callCtx))
+		return transportError(ctx, callCtx)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return values.Completion{}, fail(statusError(resp))
+		return statusError(resp)
 	}
-	completion, perr := readCompletion(resp)
+	perr := read(resp)
 	if errors.Is(perr, errRead) {
-		return values.Completion{}, fail(interruptedError(ctx, callCtx))
+		return interruptedError(ctx, callCtx)
 	}
-	if perr != nil {
-		return values.Completion{}, fail(perr)
-	}
-	return completion, nil
+	return perr
 }
 
 // fail adds the operation name; errors.Is/As still see the ProviderError.
 func fail(err error) error { return fmt.Errorf("%s: %w", opComplete, err) }
+
+// failStep is fail for Step.
+func failStep(err error) error { return fmt.Errorf("%s: %w", opStep, err) }
 
 // transportError classifies a call that got no complete answer: ctx ended it, the client timeout fired, or the
 // network failed. The raw error is dropped (ARCH-32).
