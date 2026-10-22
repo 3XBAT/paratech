@@ -26,6 +26,7 @@ func TestIDsAreValidAndDistinct(t *testing.T) {
 		{"subject", func() (string, error) { id := g.NewSubjectID(); return string(id), id.Validate() }},
 		{"folder", func() (string, error) { id := g.NewFolderID(); return string(id), id.Validate() }},
 		{"material", func() (string, error) { id := g.NewMaterialID(); return string(id), id.Validate() }},
+		{"work", func() (string, error) { id := g.NewWorkID(); return string(id), id.Validate() }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

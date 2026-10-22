@@ -133,6 +133,15 @@ func TestRequestShapeAndKey(t *testing.T) {
 	if again.Key() != r.Key() || other.Key() == r.Key() {
 		t.Fatal("the key must be stable for the same call and change with the attempt")
 	}
+	// Longer texts are cut to their beginning on a whole character.
+	long, err := newRequest("w1", 1, 1, strings.Repeat("я", MaxAssignmentBytes), strings.Repeat("я", MaxMaterialBytes), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(long.UntrustedData()), &data); err != nil ||
+		len(data["assignment_text"].(string)) != MaxAssignmentBytes || len(data["material_text"].(string)) != MaxMaterialBytes {
+		t.Fatalf("cut texts: %v", err)
+	}
 	first, err := newRequest("w1", 1, 1, "Эссе", "", nil)
 	if err != nil || !strings.Contains(first.UntrustedData(), `"previous":[]`) {
 		t.Fatalf("round 1 data %s, %v", first.UntrustedData(), err)
@@ -145,8 +154,7 @@ func TestRequestShapeAndKey(t *testing.T) {
 		prev                 []Previous
 	}{
 		{"blank assignment", 1, "  ", "", nil},
-		{"long assignment", 1, strings.Repeat("a", MaxAssignmentBytes+1), "", nil},
-		{"long material", 1, "a", strings.Repeat("a", MaxMaterialBytes+1), nil},
+		{"invalid utf-8", 1, "a\xff", "", nil},
 		{"nul", 1, "a\x00", "", nil},
 		{"previous in round 1", 1, "a", "", prev},
 		{"no previous in round 2", 2, "a", "", nil},

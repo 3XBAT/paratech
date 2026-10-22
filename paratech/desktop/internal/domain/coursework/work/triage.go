@@ -191,10 +191,13 @@ type Request struct {
 	key   string
 }
 
-// newRequest checks the input as the Hub does and builds the data and the key. The texts are cut to their limits
-// before (Head of the material text); a longer one here is ErrInvalidRequest.
+// newRequest checks the input as the Hub does and builds the data and the key. A text longer than its limit is cut
+// to its beginning (MaxAssignmentBytes, MaxMaterialBytes) on a whole character.
 func newRequest(id shared.WorkID, round, attempt int, assignment, material string, previous []Previous) (Request, error) {
 	bad := func(why string) (Request, error) { return Request{}, fmt.Errorf("%w: %s", ErrInvalidRequest, why) }
+	if utf8.ValidString(assignment) && utf8.ValidString(material) {
+		assignment, material = cutBytes(assignment, MaxAssignmentBytes), cutBytes(material, MaxMaterialBytes)
+	}
 	switch {
 	case id.Validate() != nil:
 		return bad("work id")

@@ -63,8 +63,8 @@ func New(id shared.WorkID, src Source, now time.Time) (*Work, error) {
 }
 
 // Request builds the reader call that is due: this round and attempt, with the questions and answers of the earlier
-// rounds. The texts are the assignment and the teacher's material (empty if none), cut to their limits by the
-// caller. Errors: ErrInvalidTransition when no call is due, ErrInvalidRequest.
+// rounds. The texts are the assignment and the teacher's material (empty if none); longer ones are cut to their
+// limits. Errors: ErrInvalidTransition when no call is due, ErrInvalidRequest.
 func (w *Work) Request(assignment, material string) (Request, error) {
 	if w.status != StatusTriage {
 		return Request{}, fmt.Errorf("%w: no reader call is due in %s", ErrInvalidTransition, w.status)
@@ -77,7 +77,7 @@ func (w *Work) previous() []Previous {
 	var out []Previous
 	for _, r := range w.rounds {
 		for i, q := range r.Answer.Questions {
-			out = append(out, Previous{Question: q.Text, Answer: answerText(q, r.Replies[i])})
+			out = append(out, Previous{Question: q.Text, Answer: AnswerText(q, r.Replies[i])})
 		}
 	}
 	return out

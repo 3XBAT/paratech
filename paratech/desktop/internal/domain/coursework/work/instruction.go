@@ -126,3 +126,16 @@ func (q StepQuestion) Key() string { return q.key }
 
 // IsZero reports whether q is the zero value.
 func (q StepQuestion) IsZero() bool { return q.data == "" }
+
+// MaxAdviceRunes bounds an answer about a helper step.
+const MaxAdviceRunes = 2000
+
+// CheckAdvice checks an answer about a helper step before it is shown: untrusted text for a card only, trimmed,
+// 1..MaxAdviceRunes characters without control characters other than line breaks and tabs. Error: ErrInvalidAnswer.
+func CheckAdvice(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if !boundedText(s, MaxAdviceRunes, true, false) {
+		return "", fmt.Errorf("%w: an answer about a step has 1..%d characters", ErrInvalidAnswer, MaxAdviceRunes)
+	}
+	return s, nil
+}

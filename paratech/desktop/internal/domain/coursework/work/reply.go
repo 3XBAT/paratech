@@ -58,8 +58,9 @@ func Resolve(questions []Question, replies []Reply) ([]Reply, error) {
 	return out, nil
 }
 
-// answerText is what the student answered to q, as the reader reads it in the next round.
-func answerText(q Question, r Reply) string {
+// AnswerText is what the student answered to q: the chosen option or the typed text, as the reader reads it in the
+// next round.
+func AnswerText(q Question, r Reply) string {
 	if q.Kind == KindChoice {
 		return q.Options[r.Option]
 	}
