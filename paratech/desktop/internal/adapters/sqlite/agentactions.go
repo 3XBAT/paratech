@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/agent/action"
@@ -160,13 +161,16 @@ func compensationText(c action.Compensation) (sql.NullString, error) {
 	case action.RemoveFolder:
 		w.Subject, w.Folder = v.Subject.ID(), v.Folder.ID()
 	case action.ReturnToInbox:
-		w.Material = v.Material.ID()
+		w.Material, w.Lesson = v.Material.ID(), v.Lesson.ID()
 	case action.UnlinkMaterial:
 		w.Material, w.Lesson = v.Material.ID(), v.Lesson.ID()
 	case action.RestoreLessonInfo:
-		w.Recording, w.OldSubject, w.OldKind = v.Recording.ID(), v.OldSubject.ID(), v.OldKind
+		w.Recording, w.OldSubject, w.OldKind = v.Recording.ID(), v.OldSubject, v.OldKind
 	case action.RestoreDue:
-		w.Assignment, w.OldDue = v.Assignment.ID(), v.OldDue.String()
+		w.Assignment = v.Assignment.ID()
+		if !v.OldDue.IsZero() {
+			w.OldDue = v.OldDue.UTC().Format(time.RFC3339Nano)
+		}
 	case action.CancelJob:
 		w.Job = v.Job.ID()
 	default:
@@ -197,23 +201,23 @@ func compensationFrom(s sql.NullString) (action.Compensation, error) {
 	case action.CompRemoveFolder:
 		return action.RemoveFolder{Subject: ref(values.KindSubject, w.Subject), Folder: ref(values.KindFolder, w.Folder)}, nil
 	case action.CompReturnToInbox:
-		return action.ReturnToInbox{Material: ref(values.KindMaterial, w.Material)}, nil
-	case action.CompUnlinkMaterial:
-		return action.UnlinkMaterial{Material: ref(values.KindMaterial, w.Material), Lesson: ref(values.KindLesson, w.Lesson)}, nil
-	case action.CompRestoreLessonInfo:
-		old, err := optionalRef(values.KindSubject, w.OldSubject)
+		lesson, err := optionalRef(values.KindLesson, w.Lesson)
 		if err != nil {
 			return nil, err
 		}
-		return action.RestoreLessonInfo{Recording: ref(values.KindRecording, w.Recording), OldSubject: old, OldKind: w.OldKind}, nil
+		return action.ReturnToInbox{Material: ref(values.KindMaterial, w.Material), Lesson: lesson}, nil
+	case action.CompUnlinkMaterial:
+		return action.UnlinkMaterial{Material: ref(values.KindMaterial, w.Material), Lesson: ref(values.KindLesson, w.Lesson)}, nil
+	case action.CompRestoreLessonInfo:
+		return action.RestoreLessonInfo{Recording: ref(values.KindRecording, w.Recording), OldSubject: w.OldSubject, OldKind: w.OldKind}, nil
 	case action.CompRestoreDue:
-		var due values.Date
+		var due time.Time
 		if w.OldDue != "" {
-			d, err := values.ParseDate(w.OldDue)
+			d, err := time.Parse(time.RFC3339Nano, w.OldDue)
 			if err != nil {
 				return nil, err
 			}
-			due = d
+			due = d.UTC()
 		}
 		return action.RestoreDue{Assignment: ref(values.KindAssignment, w.Assignment), OldDue: due}, nil
 	case action.CompCancelJob:

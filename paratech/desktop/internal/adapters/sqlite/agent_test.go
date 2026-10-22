@@ -247,7 +247,7 @@ func TestAgentActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewAgentActionRepository(db)
-	due, _ := values.NewDate(2026, 11, 1)
+	due := time.Date(2026, 11, 1, 18, 30, 0, 0, time.UTC)
 	comps := []struct {
 		tool values.Tool
 		comp action.Compensation
@@ -255,8 +255,9 @@ func TestAgentActions(t *testing.T) {
 		{values.ToolCreateSubject, action.RemoveSubject{Subject: agentRef(t, values.KindSubject, "s2")}},
 		{values.ToolCreateFolder, action.RemoveFolder{Subject: agentRef(t, values.KindSubject, "s1"), Folder: agentRef(t, values.KindFolder, "f1")}},
 		{values.ToolPlaceUpload, action.ReturnToInbox{Material: agentRef(t, values.KindMaterial, "m1")}},
+		{values.ToolPlaceUpload, action.ReturnToInbox{Material: agentRef(t, values.KindMaterial, "m1"), Lesson: agentRef(t, values.KindLesson, "l1")}},
 		{values.ToolLinkMaterial, action.UnlinkMaterial{Material: agentRef(t, values.KindMaterial, "m1"), Lesson: agentRef(t, values.KindLesson, "l1")}},
-		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r1"), OldSubject: agentRef(t, values.KindSubject, "s1"), OldKind: "lab"}},
+		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r1"), OldSubject: "Физика (лаб.)", OldKind: "lab"}},
 		{values.ToolSetLessonInfo, action.RestoreLessonInfo{Recording: agentRef(t, values.KindRecording, "r2")}},
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a1"), OldDue: due}},
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a2")}},

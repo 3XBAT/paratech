@@ -76,19 +76,6 @@ func Of(t values.Tool) (Rule, error) {
 	return r, nil
 }
 
-// Classify returns the class of a call. A U call that would replace a ready result (a summary or lecture text that
-// already exists) is class C until previous versions are kept (ADR-0021, D7).
-func Classify(t values.Tool, replacesReady bool) (Class, error) {
-	r, err := Of(t)
-	if err != nil {
-		return "", err
-	}
-	if r.Class == ClassU && replacesReady {
-		return ClassC, nil
-	}
-	return r.Class, nil
-}
-
 // PlanThresholdMicroUSD is the cost of one paid job above which a plan is needed (D8, ≈ $0.05).
 const PlanThresholdMicroUSD = 50_000
 
@@ -104,9 +91,10 @@ const (
 
 // Facts are what the case knows about a write before it runs, counted over the whole request.
 type Facts struct {
-	WritesBefore int   // U calls already admitted in this request
-	CostMicroUSD int64 // estimate for a paid call; zero or less means unknown and counts as above the threshold
-	Triage       Triage
+	WritesBefore  int   // U calls already admitted in this request
+	CostMicroUSD  int64 // estimate for a paid call; zero or less means unknown and counts as above the threshold
+	Triage        Triage
+	ReplacesReady bool // the call would replace a ready result (a summary or lecture text that exists)
 }
 
 // Reason tells why a plan is needed.
@@ -119,10 +107,12 @@ const (
 	ReasonCostly      Reason = "costly"
 	ReasonAlwaysPlan  Reason = "always_plan"
 	ReasonTriage      Reason = "triage_not_full"
+	ReasonReplaces    Reason = "replaces_ready"
 )
 
 // NeedsPlan reports whether a U call may run only as a step of an approved plan (ADR-0021, design §2.4, D8): a second
 // write in the request, a paid job above the threshold (or with an unknown cost), lecture text and turnkey writing,
+// a call that would replace a ready result (TASK-123: its Undo can only stop the job, the old result is not kept),
 // or a triage that said «partly» or «impossible». Other classes never need a plan here.
 func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 	r, err := Of(t)
@@ -135,6 +125,8 @@ func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 	switch {
 	case r.AlwaysPlan:
 		return ReasonAlwaysPlan, nil
+	case f.ReplacesReady:
+		return ReasonReplaces, nil
 	case f.WritesBefore > 0:
 		return ReasonSecondWrite, nil
 	case f.Triage == TriagePartly || f.Triage == TriageImpossible:

@@ -43,31 +43,6 @@ func TestClassProperties(t *testing.T) {
 	}
 }
 
-func TestClassify(t *testing.T) {
-	tests := []struct {
-		tool          values.Tool
-		replacesReady bool
-		want          Class
-	}{
-		{values.ToolListSubjects, false, ClassR},
-		{values.ToolListSubjects, true, ClassR},
-		{values.ToolMakeSummary, false, ClassU},
-		{values.ToolMakeSummary, true, ClassC},
-		{values.ToolMakeLectureText, true, ClassC},
-		{values.ToolProposeSend, false, ClassC},
-		{values.ToolReply, true, ClassUI},
-	}
-	for _, tt := range tests {
-		got, err := Classify(tt.tool, tt.replacesReady)
-		if err != nil || got != tt.want {
-			t.Fatalf("Classify(%s, %v) = %s, %v; want %s", tt.tool, tt.replacesReady, got, err, tt.want)
-		}
-	}
-	if _, err := Classify("x", false); !errors.Is(err, ErrUnknownTool) {
-		t.Fatalf("Classify(unknown) = %v", err)
-	}
-}
-
 func TestNeedsPlan(t *testing.T) {
 	tests := []struct {
 		name string
@@ -86,6 +61,8 @@ func TestNeedsPlan(t *testing.T) {
 		{"triage partly", values.ToolEditDue, Facts{Triage: TriagePartly}, ReasonTriage},
 		{"triage impossible", values.ToolEditDue, Facts{Triage: TriageImpossible}, ReasonTriage},
 		{"triage full", values.ToolEditDue, Facts{Triage: TriageFull}, ReasonNone},
+		{"replaces a ready summary", values.ToolMakeSummary, Facts{CostMicroUSD: 1, ReplacesReady: true}, ReasonReplaces},
+		{"replaces a ready lecture text", values.ToolMakeLectureText, Facts{CostMicroUSD: 1, ReplacesReady: true}, ReasonAlwaysPlan},
 		{"read-only never", values.ToolAnswerQuestion, Facts{WritesBefore: 3}, ReasonNone},
 		{"C never", values.ToolProposeSend, Facts{WritesBefore: 3}, ReasonNone},
 		{"UI never", values.ToolShowPlan, Facts{WritesBefore: 3}, ReasonNone},

@@ -16,4 +16,10 @@ var (
 	// ErrTargetChanged means the target was changed after the action; Undo is refused («Изменено после — отменить
 	// нельзя»).
 	ErrTargetChanged = errors.New("target changed since the action")
+
+	// ErrResultReady means a paid job finished: its result stays, as the previous one is not kept (D7).
+	ErrResultReady = errors.New("result is ready and the previous one is not kept")
+
+	// ErrCannotStop means the job of the action runs and cannot be stopped now.
+	ErrCannotStop = errors.New("job cannot be stopped now")
 )
