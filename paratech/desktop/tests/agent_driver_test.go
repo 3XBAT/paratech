@@ -382,7 +382,7 @@ func TestDriverContextEndLeavesRequestContinuable(t *testing.T) {
 }
 
 // Supervisor decisions end to end: paid reads (not available yet) do not count as the paid job without a plan; a
-// summary that would replace a ready one is a proposal (C), a first one needs a plan (cost unknown); a third question
+// summary that would replace a ready one needs a plan (TASK-123), so does a first one (cost unknown); a third question
 // round is refused and the planner goes on with stated assumptions.
 func TestDriverSupervisorDecisions(t *testing.T) {
 	e := newDriverEnv(t)
@@ -399,7 +399,7 @@ func TestDriverSupervisorDecisions(t *testing.T) {
 		t.Fatalf("update = %+v", up)
 	}
 	got := e.resultsOf(t, 2)
-	want := []string{`{"error":"unavailable"}`, `{"error":"unavailable"}`, `{"error":"plan_required"}`}
+	want := []string{`{"error":"unavailable"}`, `{"error":"plan_required"}`, `{"error":"plan_required"}`}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("results = %v, want %v", got, want)
 	}
