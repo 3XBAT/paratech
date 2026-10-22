@@ -16,6 +16,7 @@ const (
 	opGetAssignment         = "sqlite: get assignment"
 	opGetAssignmentBySource = "sqlite: get assignment by source"
 	opListAssignmentsBySrc  = "sqlite: list assignments of a transcript"
+	opListAssignmentsByMat  = "sqlite: list assignments of a material"
 	opListRecentAssignments = "sqlite: list recent assignments"
 	opSaveAssignment        = "sqlite: save assignment"
 	opDeleteAssignment      = "sqlite: delete assignment"
@@ -53,6 +54,36 @@ func (r *AssignmentRepository) GetBySource(ctx context.Context, t shared.Transcr
 		return nil, fmt.Errorf("%s %s/%d: %w", opGetAssignmentBySource, t, index, MapError(ctx, err))
 	}
 	return assignmentFromRow(row)
+}
+
+// GetByMaterialSource loads the assignment extracted as item index of the extraction of library material m
+// (TASK-122); a missing one wraps shared.ErrNotFound.
+func (r *AssignmentRepository) GetByMaterialSource(ctx context.Context, m shared.MaterialID, index int) (*assignment.Assignment, error) {
+	row, err := r.db.Queries(ctx).GetAssignmentByMaterialSource(ctx, sqlcgen.GetAssignmentByMaterialSourceParams{
+		MaterialID: jobNullString(string(m)), SourceIndex: sql.NullInt64{Int64: int64(index), Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s material %s/%d: %w", opGetAssignmentBySource, m, index, MapError(ctx, err))
+	}
+	return assignmentFromRow(row)
+}
+
+// ListByMaterial returns the assignments extracted from library material m, in the order of the extraction answer;
+// none is an empty list.
+func (r *AssignmentRepository) ListByMaterial(ctx context.Context, m shared.MaterialID) ([]*assignment.Assignment, error) {
+	rows, err := r.db.Queries(ctx).ListAssignmentsByMaterial(ctx, jobNullString(string(m)))
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opListAssignmentsByMat, m, MapError(ctx, err))
+	}
+	out := make([]*assignment.Assignment, 0, len(rows))
+	for _, row := range rows {
+		a, err := assignmentFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // ListByTranscript returns the assignments extracted from transcript t, in the order of the extraction answer; none is
@@ -110,6 +141,7 @@ func (r *AssignmentRepository) Save(ctx context.Context, a *assignment.Assignmen
 		if st.Version == 0 {
 			return DuplicateAsVersionConflict(MapError(ctx, q.InsertAssignment(ctx, sqlcgen.InsertAssignmentParams{
 				ID: string(st.ID), LessonID: jobNullString(string(st.Lesson)), TranscriptID: jobNullString(string(st.Transcript)),
+				MaterialID: jobNullString(string(st.Material)),
 				Title: st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
 				SourceIndex: nullSourceIndex(st.SourceIndex), PromptVersion: nullPromptVersion(st.PromptVersion),
 				HintSubject: st.HintSubject, HintTeacher: st.HintTeacher, UserSubject: st.UserSubject, UserTeacher: st.UserTeacher,
@@ -173,7 +205,8 @@ func assignmentFromRow(row sqlcgen.Assignment) (*assignment.Assignment, error) {
 	}
 	a, err := assignment.Restore(assignment.State{
 		Version: row.Version, ID: shared.AssignmentID(row.ID), Lesson: shared.LessonID(row.LessonID.String),
-		Transcript: shared.TranscriptID(row.TranscriptID.String), SourceIndex: source,
+		Transcript: shared.TranscriptID(row.TranscriptID.String), Material: shared.MaterialID(row.MaterialID.String),
+		SourceIndex: source,
 		PromptVersion: int(row.PromptVersion.Int64), Title: row.Title, Description: row.Description,
 		Due: jobFromNullMs(row.DueAt), UserEdited: row.UserEdited != 0,
 		HintSubject: row.HintSubject, HintTeacher: row.HintTeacher, UserSubject: row.UserSubject, UserTeacher: row.UserTeacher,

@@ -12,11 +12,12 @@ import (
 
 const getSummary = `-- name: GetSummary :one
 
-SELECT id, transcript_id, lesson_id, body, key_points, prompt_version, version, created_at, updated_at, sections FROM summaries WHERE id = ?1
+SELECT id, transcript_id, lesson_id, body, key_points, prompt_version, version, created_at, updated_at, sections, material_id FROM summaries WHERE id = ?1
 `
 
 // Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
-// the transcript id, one summary per transcript (TASK-042). sections is NULL for a summary made before TASK-101.
+// the transcript id, one summary per transcript (TASK-042); a material's summary has the id "material-<material id>"
+// and the material_id (TASK-122). sections is NULL for a summary made before TASK-101.
 func (q *Queries) GetSummary(ctx context.Context, id string) (Summary, error) {
 	row := q.db.QueryRowContext(ctx, getSummary, id)
 	var i Summary
@@ -31,19 +32,22 @@ func (q *Queries) GetSummary(ctx context.Context, id string) (Summary, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Sections,
+		&i.MaterialID,
 	)
 	return i, err
 }
 
 const insertSummary = `-- name: InsertSummary :exec
-INSERT INTO summaries (id, transcript_id, lesson_id, body, sections, key_points, prompt_version, version, created_at, updated_at)
+INSERT INTO summaries (id, transcript_id, material_id, lesson_id, body, sections, key_points, prompt_version, version,
+                       created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6,
-        ?7, 1, ?8, ?9)
+        ?7, ?8, 1, ?9, ?10)
 `
 
 type InsertSummaryParams struct {
 	ID            string
 	TranscriptID  sql.NullString
+	MaterialID    sql.NullString
 	LessonID      sql.NullString
 	Body          string
 	Sections      sql.NullString
@@ -58,6 +62,7 @@ func (q *Queries) InsertSummary(ctx context.Context, arg InsertSummaryParams) er
 	_, err := q.db.ExecContext(ctx, insertSummary,
 		arg.ID,
 		arg.TranscriptID,
+		arg.MaterialID,
 		arg.LessonID,
 		arg.Body,
 		arg.Sections,
@@ -90,8 +95,8 @@ type UpdateSummaryParams struct {
 	ExpectedVersion int64
 }
 
-// Compare-and-swap on the loaded version. The transcript and the lesson never change, so a stale save cannot undo
-// ON DELETE SET NULL.
+// Compare-and-swap on the loaded version. The transcript, the material and the lesson never change, so a stale save
+// cannot undo ON DELETE SET NULL.
 func (q *Queries) UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateSummary,
 		arg.Body,

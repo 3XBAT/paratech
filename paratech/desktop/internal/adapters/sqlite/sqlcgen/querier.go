@@ -60,6 +60,8 @@ type Querier interface {
 	// deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
 	// reprocessed (TASK-042).
 	GetAssignment(ctx context.Context, id string) (Assignment, error)
+	// Assignments found in a library material (TASK-122), found again by (material_id, source_index).
+	GetAssignmentByMaterialSource(ctx context.Context, arg GetAssignmentByMaterialSourceParams) (Assignment, error)
 	GetAssignmentBySource(ctx context.Context, arg GetAssignmentBySourceParams) (Assignment, error)
 	// Deliveries, the attempts to email an artifact (PRD section 10, AC-15), with the optimistic-concurrency protocol of
 	// ADR-0004(d). The idempotency key and the Message-ID are UNIQUE: a second delivery under the same key is refused.
@@ -70,6 +72,9 @@ type Querier interface {
 	// The draft with its versions in one statement, so that a concurrent save cannot pair the version of the root with the
 	// versions of another state. A root is never stored without a version, so no row means no draft.
 	GetDraft(ctx context.Context, assignmentID string) ([]GetDraftRow, error)
+	// The reading of a library material by the quarantined reader (TASK-122, ADR-0022): one row per material with the
+	// optimistic-concurrency protocol of ADR-0004(d).
+	GetInspection(ctx context.Context, materialID string) (MaterialInspection, error)
 	// Job store (PRD section 7). Writes run through DB.Do; the repository restores the aggregate and applies the domain
 	// transition, the queries only store the result.
 	GetJob(ctx context.Context, id string) (Job, error)
@@ -100,7 +105,8 @@ type Querier interface {
 	GetSttSpeed(ctx context.Context, arg GetSttSpeedParams) (GetSttSpeedRow, error)
 	GetSubject(ctx context.Context, id string) (Subject, error)
 	// Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
-	// the transcript id, one summary per transcript (TASK-042). sections is NULL for a summary made before TASK-101.
+	// the transcript id, one summary per transcript (TASK-042); a material's summary has the id "material-<material id>"
+	// and the material_id (TASK-122). sections is NULL for a summary made before TASK-101.
 	GetSummary(ctx context.Context, id string) (Summary, error)
 	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
 	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).
@@ -122,6 +128,8 @@ type Querier interface {
 	// A never-stored draft (version 0) is inserted with version 1.
 	InsertDraft(ctx context.Context, assignmentID string) error
 	InsertDraftRevision(ctx context.Context, arg InsertDraftRevisionParams) error
+	// A never-stored inspection (version 0) is inserted with version 1.
+	InsertInspection(ctx context.Context, arg InsertInspectionParams) error
 	// A never-stored job (version 0) is inserted with version 1.
 	InsertJob(ctx context.Context, arg InsertJobParams) error
 	// A never-stored lecture text (version 0) is inserted with version 1.
@@ -172,6 +180,7 @@ type Querier interface {
 	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
 	ListAllSubjectAliases(ctx context.Context) ([]SubjectAlias, error)
 	ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, error)
+	ListAssignmentsByMaterial(ctx context.Context, materialID sql.NullString) ([]Assignment, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
 	// The deadline events left to remove, oldest first (the calendar sync).
 	ListDeadlineEventRemovals(ctx context.Context, maxRows int64) ([]string, error)
@@ -261,8 +270,8 @@ type Querier interface {
 	UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error)
 	// Compare-and-swap on the loaded version; the key never changes.
 	UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadParams) (int64, error)
-	// Compare-and-swap on the loaded version. The origin (lesson, transcript, source index) and the creation time never
-	// change, so a stale save cannot undo ON DELETE SET NULL of the lesson or the transcript.
+	// Compare-and-swap on the loaded version. The origin (lesson, transcript or material, source index) and the creation
+	// time never change, so a stale save cannot undo ON DELETE SET NULL of the lesson, the transcript or the material.
 	UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (int64, error)
 	// Same update for the claim, guarded by the status as well: zero rows means another worker took the job.
 	UpdateClaimedJob(ctx context.Context, arg UpdateClaimedJobParams) (int64, error)
@@ -271,6 +280,7 @@ type Querier interface {
 	UpdateDelivery(ctx context.Context, arg UpdateDeliveryParams) (int64, error)
 	// Compare-and-swap on the loaded version.
 	UpdateDraftVersion(ctx context.Context, arg UpdateDraftVersionParams) (int64, error)
+	UpdateInspection(ctx context.Context, arg UpdateInspectionParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). Type, key, payload and pinned model never change.
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
 	// Compare-and-swap on the loaded version. The transcript and the lesson never change, so a stale save cannot undo
@@ -294,8 +304,8 @@ type Querier interface {
 	// keeps the protocol of every repository.
 	UpdateSttModel(ctx context.Context, arg UpdateSttModelParams) (int64, error)
 	UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (int64, error)
-	// Compare-and-swap on the loaded version. The transcript and the lesson never change, so a stale save cannot undo
-	// ON DELETE SET NULL.
+	// Compare-and-swap on the loaded version. The transcript, the material and the lesson never change, so a stale save
+	// cannot undo ON DELETE SET NULL.
 	UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error)
 	// Compare-and-swap on the loaded version. A transcript does not change today; the update exists so that Save keeps
 	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
