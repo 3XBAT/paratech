@@ -307,6 +307,34 @@ func TestImportConcurrentDuplicate(t *testing.T) {
 	}
 }
 
+// The save that brings a removed file back is retried when it loses and reports a failing store; it never reports
+// success it did not have.
+func TestImportOfARemovedFileSaveErrors(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	m := importText(t, e, "x")
+	if _, err := e.svc.RemoveMaterial(ctx, m.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	e.materials.saveErrs = []error{shared.ErrVersionConflict}
+	res, err := e.svc.Import(ctx, Upload{Data: []byte("x")})
+	if err != nil || !res.Existing || !res.Material.Active() {
+		t.Fatalf("Import after a lost save = %+v, %v", res, err)
+	}
+
+	if _, err := e.svc.RemoveMaterial(ctx, m.ID()); err != nil {
+		t.Fatal(err)
+	}
+	disk := errors.New("disk")
+	e.materials.saveErrs = []error{disk}
+	if _, err := e.svc.Import(ctx, Upload{Data: []byte("x")}); !errors.Is(err, ErrUnavailable) || !errors.Is(err, disk) {
+		t.Fatalf("Import with a failing save = %v", err)
+	}
+	if got, _ := e.materials.Get(ctx, m.ID()); got.Active() {
+		t.Fatal("the failed save was kept")
+	}
+}
+
 func TestPlace(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	phys, chem := createSubject(t, e, "Физика"), createSubject(t, e, "Химия")

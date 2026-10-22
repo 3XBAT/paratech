@@ -229,8 +229,8 @@ func (s *Service) Import(ctx context.Context, up Upload) (Imported, error) {
 		case err != nil:
 			return Imported{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		default:
-			changed, err := m.Reupload(s.clock.Now())
-			if err != nil {
+			var changed bool
+			if changed, err = m.Reupload(s.clock.Now()); err != nil {
 				return Imported{}, domainError(err)
 			}
 			if !changed {
