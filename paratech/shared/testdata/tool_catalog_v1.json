@@ -3,13 +3,17 @@
   "types": {
     "id": "opaque desktop ID; must pass the typed provenance check",
     "ids": "list of IDs, each as id",
-    "date": "calendar date YYYY-MM-DD",
+    "date": "calendar date YYYY-MM-DD; as a deadline (edit_due.due) it means the end of that day in the student's time zone; clearing a deadline is not an agent action",
     "enum": "one of values",
     "label": "short text from the student's request, at most 80 characters",
     "text": "UI card text, at most 300 characters, no HTML",
     "text_list": "list of text",
     "plan_steps": "planned calls: tool name plus argument IDs, rendered by desktop templates",
     "questions": "questions of a card: kind choice|text, options as text, default option index"
+  },
+  "notes": {
+    "agent_can_execute": "false means the planner still calls the tool, but the call only creates a proposal card; nothing happens until the student clicks it",
+    "one_of": "optional argument pairs of make_summary (recording|material), find_homework (recording|material), triage_assignment (assignment|upload) and place_upload (folder|lesson) take exactly one of the pair; the desktop parser enforces it (TASK-115)"
   },
   "tools": [
     {"name": "list_subjects", "class": "R", "paid": false, "agent_can_execute": true, "arguments": []},

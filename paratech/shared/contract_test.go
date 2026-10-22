@@ -3,6 +3,7 @@ package shared_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"regexp"
@@ -613,10 +614,21 @@ func TestAgentFieldCheckerCatchesBadFields(t *testing.T) {
 		f.TypeName = proto.String(typeName)
 		return f
 	}
+	enumTyped := func(name string, n int32, typeName string) *descriptorpb.FieldDescriptorProto {
+		f := typed(name, n, typeName)
+		f.Type = descriptorpb.FieldDescriptorProto_TYPE_ENUM.Enum()
+		return f
+	}
 	fdp := &descriptorpb.FileDescriptorProto{
 		Name:    proto.String("synthetic_agent.proto"),
 		Package: proto.String("synthetic.agent.v1"),
 		Syntax:  proto.String("proto3"),
+		EnumType: []*descriptorpb.EnumDescriptorProto{{
+			Name: proto.String("FilePathKind"),
+			Value: []*descriptorpb.EnumValueDescriptorProto{
+				{Name: proto.String("FILE_PATH_KIND_UNSPECIFIED"), Number: proto.Int32(0)},
+			},
+		}},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{Name: proto.String("MailAddress"), Field: []*descriptorpb.FieldDescriptorProto{field("value", 1)}},
 			{Name: proto.String("SourceUrl"), Field: []*descriptorpb.FieldDescriptorProto{field("value", 1)}},
@@ -630,6 +642,7 @@ func TestAgentFieldCheckerCatchesBadFields(t *testing.T) {
 					field("callback_url", 5),
 					typed("to", 6, ".synthetic.agent.v1.MailAddress"),
 					typed("source", 7, ".synthetic.agent.v1.SourceUrl"),
+					enumTyped("kind", 11, ".synthetic.agent.v1.FilePathKind"),
 					// Look-alikes that are fine: the word is only a substring.
 					field("profile", 8),
 					field("filed_at", 9),
@@ -646,7 +659,7 @@ func TestAgentFieldCheckerCatchesBadFields(t *testing.T) {
 	want := []string{
 		"synthetic.agent.v1.Call.recipient_email", "synthetic.agent.v1.Call.save_path", "synthetic.agent.v1.Call.file_name",
 		"synthetic.agent.v1.Call.target_dir", "synthetic.agent.v1.Call.callback_url", "synthetic.agent.v1.Call.to",
-		"synthetic.agent.v1.Call.source",
+		"synthetic.agent.v1.Call.source", "synthetic.agent.v1.Call.kind",
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -699,6 +712,7 @@ type catalogTool struct {
 type toolCatalog struct {
 	CatalogVersion uint32            `json:"catalog_version"`
 	Types          map[string]string `json:"types"`
+	Notes          map[string]string `json:"notes"`
 	Tools          []catalogTool     `json:"tools"`
 }
 
@@ -731,38 +745,101 @@ func loadToolCatalog(t *testing.T) toolCatalog {
 	return c
 }
 
-func TestToolCatalogV1(t *testing.T) {
-	c := loadToolCatalog(t)
+// pinnedTools is every tool of catalog v1 with its class. Adding or removing a tool, or moving one to another class
+// (for example demoting propose_send from C), must be a conscious edit here too.
+var pinnedTools = map[string]string{
+	"list_subjects":            "R",
+	"find_lessons":             "R",
+	"list_assignments":         "R",
+	"job_status":               "R",
+	"delivery_status":          "R",
+	"search":                   "R",
+	"answer_question":          "R",
+	"inspect_upload":           "R",
+	"create_subject":           "U",
+	"create_folder":            "U",
+	"place_upload":             "U",
+	"link_material":            "U",
+	"set_lesson_info":          "U",
+	"make_summary":             "U",
+	"make_lecture_text":        "U",
+	"find_homework":            "U",
+	"generate_draft":           "U",
+	"edit_due":                 "U",
+	"triage_assignment":        "U",
+	"write_work":               "U",
+	"propose_deadline":         "C",
+	"propose_send":             "C",
+	"propose_delete_recording": "C",
+	"show_plan":                "UI",
+	"ask_questions":            "UI",
+	"reply":                    "UI",
+	"cannot_do":                "UI",
+}
+
+// Notes the catalog must carry for its implementers (TASK-114, TASK-115).
+var requiredCatalogNotes = []string{"agent_can_execute", "one_of"}
+
+// Forbidden words a tool name may still contain: "link" in link_material is the verb "attach by IDs", not a URL.
+var toolNameExceptions = map[string]string{"link_material": "link"}
+
+// namesForbidden reports whether a tool or argument name names a destination, a recipient, a path, a file or a command.
+func namesForbidden(name string) bool {
+	words := strings.Split(name, "_")
+	return badName(name) || badAgentWords(words) || slices.Contains(forbiddenArgWords, name) ||
+		slices.ContainsFunc(words, func(w string) bool { return slices.Contains(forbiddenArgWords, w) })
+}
+
+func toolNameForbidden(name string) bool {
+	if w, ok := toolNameExceptions[name]; ok {
+		name = strings.Replace(name, w, "verb", 1)
+	}
+	return namesForbidden(name)
+}
+
+// validateCatalog returns every rule of ADR-0021..0023 the catalog breaks; nil means it is valid.
+func validateCatalog(c toolCatalog) []string {
+	var problems []string
+	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+
 	if c.CatalogVersion != 1 {
-		t.Fatalf("catalog_version = %d, want 1", c.CatalogVersion)
+		add("catalog_version = %d, want 1", c.CatalogVersion)
 	}
 	declared := slices.Sorted(maps.Keys(c.Types))
 	if want := slices.Sorted(slices.Values(slices.Concat(actionArgTypes, uiArgTypes))); !slices.Equal(declared, want) {
-		t.Fatalf("declared argument types are %v, want %v", declared, want)
+		add("declared argument types are %v, want %v", declared, want)
+	}
+	for _, n := range requiredCatalogNotes {
+		if strings.TrimSpace(c.Notes[n]) == "" {
+			add("note %q is missing", n)
+		}
 	}
 	if len(c.Tools) == 0 {
-		t.Fatal("the catalog has no tools")
+		add("the catalog has no tools")
 	}
 
 	names := map[string]bool{}
 	var gotUI []string
 	for _, tool := range c.Tools {
 		if !toolNamePattern.MatchString(tool.Name) {
-			t.Errorf("tool name %q is not snake_case of at most 64 characters", tool.Name)
+			add("tool name %q is not snake_case of at most 64 characters", tool.Name)
+		}
+		if toolNameForbidden(tool.Name) {
+			add("tool name %q names a destination, a recipient, a path or a file (ADR-0022)", tool.Name)
 		}
 		if names[tool.Name] {
-			t.Errorf("tool %q is declared twice", tool.Name)
+			add("tool %q is declared twice", tool.Name)
 		}
 		names[tool.Name] = true
 		if !slices.Contains(toolClasses, tool.Class) {
-			t.Errorf("tool %q has class %q, want one of %v", tool.Name, tool.Class, toolClasses)
+			add("tool %q has class %q, want one of %v", tool.Name, tool.Class, toolClasses)
 		}
 		// Class C exists only as a confirm card: the student's click executes it, the agent never does.
 		if tool.AgentCanExecute == (tool.Class == "C") {
-			t.Errorf("tool %q of class %s: agent_can_execute = %v", tool.Name, tool.Class, tool.AgentCanExecute)
+			add("tool %q of class %s: agent_can_execute = %v", tool.Name, tool.Class, tool.AgentCanExecute)
 		}
 		if tool.Paid && (tool.Class == "C" || tool.Class == "UI") {
-			t.Errorf("tool %q of class %s cannot be paid", tool.Name, tool.Class)
+			add("tool %q of class %s cannot be paid", tool.Name, tool.Class)
 		}
 		if tool.Class == "UI" {
 			gotUI = append(gotUI, tool.Name)
@@ -779,33 +856,159 @@ func TestToolCatalogV1(t *testing.T) {
 		for _, a := range tool.Arguments {
 			where := tool.Name + "." + a.Name
 			if !toolNamePattern.MatchString(a.Name) {
-				t.Errorf("argument %s is not snake_case", where)
+				add("argument %s is not snake_case", where)
 			}
 			if argNames[a.Name] {
-				t.Errorf("argument %s is declared twice", where)
+				add("argument %s is declared twice", where)
 			}
 			argNames[a.Name] = true
-			words := strings.Split(a.Name, "_")
-			if badName(a.Name) || badAgentWords(words) || slices.ContainsFunc(words, func(w string) bool {
-				return slices.Contains(forbiddenArgWords, w)
-			}) || slices.Contains(forbiddenArgWords, a.Name) {
-				t.Errorf("argument %s names a destination, a recipient, a path or a file (ADR-0022)", where)
+			if namesForbidden(a.Name) {
+				add("argument %s names a destination, a recipient, a path or a file (ADR-0022)", where)
 			}
 			if !slices.Contains(allowed, a.Type) {
-				t.Errorf("argument %s has type %q, a %s tool allows only %v", where, a.Type, tool.Class, allowed)
+				add("argument %s has type %q, a %s tool allows only %v", where, a.Type, tool.Class, allowed)
 			}
 			if (a.Type == "enum") != (len(a.Values) > 0) {
-				t.Errorf("argument %s: an enum needs values and only an enum has them", where)
+				add("argument %s: an enum needs values and only an enum has them", where)
 			}
 			for i, v := range a.Values {
 				if !toolNamePattern.MatchString(v) || slices.Contains(a.Values[:i], v) {
-					t.Errorf("argument %s: enum value %q is not snake_case or repeats", where, v)
+					add("argument %s: enum value %q is not snake_case or repeats", where, v)
 				}
 			}
 		}
 	}
 	slices.Sort(gotUI)
 	if !slices.Equal(gotUI, uiTools) {
-		t.Errorf("UI tools are %v, want %v", gotUI, uiTools)
+		add("UI tools are %v, want %v", gotUI, uiTools)
+	}
+	return problems
+}
+
+func TestToolCatalogV1(t *testing.T) {
+	c := loadToolCatalog(t)
+	for _, p := range validateCatalog(c) {
+		t.Error(p)
+	}
+
+	got := map[string]string{}
+	for _, tool := range c.Tools {
+		got[tool.Name] = tool.Class
+	}
+	if !maps.Equal(got, pinnedTools) {
+		for name, class := range pinnedTools {
+			if got[name] != class {
+				t.Errorf("tool %s: class %q, pinned %q", name, got[name], class)
+			}
+		}
+		for name := range got {
+			if _, ok := pinnedTools[name]; !ok {
+				t.Errorf("tool %s is not pinned: add it to pinnedTools consciously", name)
+			}
+		}
+	}
+}
+
+// cloneCatalog deep-copies a catalog, so a test case can break one detail of it.
+func cloneCatalog(c toolCatalog) toolCatalog {
+	out := c
+	out.Types = maps.Clone(c.Types)
+	out.Notes = maps.Clone(c.Notes)
+	out.Tools = make([]catalogTool, len(c.Tools))
+	for i, tool := range c.Tools {
+		tool.Arguments = slices.Clone(tool.Arguments)
+		for j := range tool.Arguments {
+			tool.Arguments[j].Values = slices.Clone(tool.Arguments[j].Values)
+		}
+		out.Tools[i] = tool
+	}
+	return out
+}
+
+func toolIndex(t *testing.T, c toolCatalog, name string) int {
+	t.Helper()
+	i := slices.IndexFunc(c.Tools, func(tool catalogTool) bool { return tool.Name == name })
+	if i < 0 {
+		t.Fatalf("tool %s is not in the catalog", name)
+	}
+	return i
+}
+
+// The catalog checker must be able to fail: each case breaks one rule of a valid catalog.
+func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
+	base := loadToolCatalog(t)
+	if p := validateCatalog(base); len(p) > 0 {
+		t.Fatalf("the golden catalog must be valid, got %v", p)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, c *toolCatalog)
+		want   string
+	}{
+		{"C tool executed by the agent", func(t *testing.T, c *toolCatalog) {
+			c.Tools[toolIndex(t, *c, "propose_send")].AgentCanExecute = true
+		}, `tool "propose_send" of class C: agent_can_execute = true`},
+		{"C tool with a label argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "propose_send")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "note", Type: "label"})
+		}, `argument propose_send.note has type "label"`},
+		{"R tool with a text argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "search")
+			c.Tools[i].Arguments[0].Type = "text"
+		}, `argument search.query has type "text"`},
+		{"argument named recipient_email", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "generate_draft")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "recipient_email", Type: "label"})
+		}, "argument generate_draft.recipient_email names"},
+		{"argument named attachment", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "generate_draft")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "attachment", Type: "id"})
+		}, "argument generate_draft.attachment names"},
+		{"enum without values", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "find_lessons")
+			c.Tools[i].Arguments[3].Values = nil
+		}, "argument find_lessons.kind: an enum needs values"},
+		{"values on a non-enum", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "find_lessons")
+			c.Tools[i].Arguments[0].Values = []string{"math"}
+		}, "argument find_lessons.subject: an enum needs values"},
+		{"repeated enum value", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "find_lessons")
+			c.Tools[i].Arguments[3].Values = append(c.Tools[i].Arguments[3].Values, "lab")
+		}, `enum value "lab" is not snake_case or repeats`},
+		{"duplicate tool", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, c.Tools[toolIndex(t, *c, "search")])
+		}, `tool "search" is declared twice`},
+		{"paid UI tool", func(t *testing.T, c *toolCatalog) {
+			c.Tools[toolIndex(t, *c, "reply")].Paid = true
+		}, `tool "reply" of class UI cannot be paid`},
+		{"tool name with a forbidden word", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, catalogTool{Name: "fetch_url", Class: "R", AgentCanExecute: true})
+		}, `tool name "fetch_url" names`},
+		{"tool name with an agent forbidden word", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, catalogTool{Name: "send_email", Class: "U", AgentCanExecute: true})
+		}, `tool name "send_email" names`},
+		{"link outside the exception", func(t *testing.T, c *toolCatalog) {
+			c.Tools = append(c.Tools, catalogTool{Name: "open_link", Class: "U", AgentCanExecute: true})
+		}, `tool name "open_link" names`},
+		{"missing note", func(t *testing.T, c *toolCatalog) {
+			delete(c.Notes, "one_of")
+		}, `note "one_of" is missing`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := cloneCatalog(base)
+			tc.mutate(t, &c)
+			got := validateCatalog(c)
+			if !slices.ContainsFunc(got, func(p string) bool { return strings.Contains(p, tc.want) }) {
+				t.Fatalf("problems %v, want one containing %q", got, tc.want)
+			}
+		})
+	}
+
+	// The clones above must not have leaked into the base catalog.
+	if p := validateCatalog(base); len(p) > 0 {
+		t.Fatalf("a case mutated the base catalog: %v", p)
 	}
 }

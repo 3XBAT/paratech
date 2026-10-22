@@ -643,6 +643,8 @@ func (x *AgentStepRequest) GetMaxOutputTokens() uint32 {
 }
 
 // AgentBase is the student context shared by all threads (cacheable prefix of the prompt).
+// Student profile data (name, university and the like) is deliberately NOT sent to the planner. A field added here
+// later must be a closed value (ID, enum, date) and carry no personal data.
 type AgentBase struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Subjects []*AgentSubject        `protobuf:"bytes,1,rep,name=subjects,proto3" json:"subjects,omitempty"`
