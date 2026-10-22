@@ -144,6 +144,28 @@ func (s *Service) ListJobs(ctx context.Context) ([]Job, error) {
 	return out, nil
 }
 
+// JobStates returns the state of the jobs ids, of every type: unlike ListJobs it hides no type, since the agent asks
+// about the chain jobs it started (TASK-117). A job that is not there is left out; ids are read once each.
+func (s *Service) JobStates(ctx context.Context, ids []shared.JobID) ([]JobState, error) {
+	out := make([]JobState, 0, len(ids))
+	seen := make(map[shared.JobID]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		j, err := s.jobs.Get(ctx, id)
+		switch {
+		case errors.Is(err, shared.ErrNotFound):
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("activity: read job %s: %w", id, err)
+		}
+		out = append(out, JobState{ID: j.ID(), Type: j.Type(), Status: j.Status(), Percent: j.Progress().Percent()})
+	}
+	return out, nil
+}
+
 func recordingRow(r *recording.Recording) Recording {
 	d, ok := r.Duration()
 	lesson := r.LessonSnapshot()

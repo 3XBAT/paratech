@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,9 @@ import (
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
+	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/agent/values"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/delivery/delivery"
@@ -150,15 +153,25 @@ func TestListAssignments(t *testing.T) {
 
 func TestJobStatus(t *testing.T) {
 	r := newReads()
-	r.activity.jobs = []activity.Job{
-		{ID: "j1", Type: homeworkflow.SummarizeJobType, Status: job.StatusRunning, Percent: 40, LastError: injection},
-		{ID: "j2", Type: "unknown_type", Status: job.StatusWaitingForQuota, AssignmentTitle: injection},
+	// The chain and calendar jobs the jobs screen hides are the ones the agent asks about.
+	r.activity.jobs = []activity.JobState{
+		{ID: "j1", Type: homeworkflow.SummarizeJobType, Status: job.StatusRunning, Percent: 40},
+		{ID: "j2", Type: "unknown_type", Status: job.StatusWaitingForQuota},
+		{ID: "j3", Type: homeworkflow.LectureTextJobType, Status: job.StatusCompleted, Percent: 100},
+		{ID: "j4", Type: transcribe.JobType, Status: job.StatusRetryWait},
+		{ID: "j5", Type: schedulesync.CalendarSyncJobType, Status: job.StatusFailed},
 	}
-	out := runRead(t, r, values.Scope{}, values.ToolJobStatus, `{"ids":["j1","j2","j9"]}`)
-	want := `{"count":3,"jobs":[{"id":"j1","work":"summary","status":"running","percent":40},` +
-		`{"id":"j2","work":"other","status":"waiting_quota","percent":0},{"id":"j9","status":"not_found","percent":0}],"truncated":false}`
+	out := runRead(t, r, values.Scope{}, values.ToolJobStatus, `{"ids":["j1","j2","j9","j3","j4","j5"]}`)
+	want := `{"count":6,"jobs":[{"id":"j1","work":"summary","status":"running","percent":40},` +
+		`{"id":"j2","work":"other","status":"waiting_quota","percent":0},{"id":"j9","status":"not_found","percent":0},` +
+		`{"id":"j3","work":"lecture_text","status":"done","percent":100},` +
+		`{"id":"j4","work":"transcription","status":"retrying","percent":0},` +
+		`{"id":"j5","work":"calendar","status":"failed","percent":0}],"truncated":false}`
 	if out.Result.ResultJSON != want {
 		t.Fatalf("jobs = %s", out.Result.ResultJSON)
+	}
+	if !slices.Equal(r.activity.asked, []shared.JobID{"j1", "j2", "j9", "j3", "j4", "j5"}) {
+		t.Fatalf("asked = %v", r.activity.asked)
 	}
 }
 

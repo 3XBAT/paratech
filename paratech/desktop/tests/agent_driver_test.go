@@ -6,6 +6,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -19,10 +20,13 @@ import (
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
+	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	libvalues "paratech/desktop/internal/domain/library/values"
@@ -83,13 +87,12 @@ func (k *driverKnowledge) Search(context.Context, string) (knowledgebase.SearchR
 	return knowledgebase.SearchResult{}, nil
 }
 
-type driverActivity struct{}
+// driverActivity is the real activity use case on SQLite for the jobs, with a recording row the test sets.
+type driverActivity struct{ *activity.Service }
 
 func (driverActivity) ListRecordings(context.Context) ([]activity.Recording, error) {
 	return []activity.Recording{{ID: "r1", LessonID: "l1", LessonTitle: lessonInjection}}, nil
 }
-
-func (driverActivity) ListJobs(context.Context) ([]activity.Job, error) { return nil, nil }
 
 type driverAssignments struct{}
 
@@ -161,8 +164,13 @@ func newDriverEnv(t *testing.T) *driverEnv {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	jobs, err := activity.New(sqlite.NewRecordingRepository(e.db), sqlite.NewJobRepository(e.db),
+		sqlite.NewLessonRepository(e.db), nil, schedulesync.CalendarSyncJobType)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if e.driver, err = agentloop.New(agentloop.Deps{
-		Turns: e.turns, Sink: e.sink, Library: lib, Knowledge: e.knowledge, Activity: driverActivity{},
+		Turns: e.turns, Sink: e.sink, Library: lib, Knowledge: e.knowledge, Activity: driverActivity{jobs},
 		Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock,
 	}); err != nil {
 		t.Fatal(err)
@@ -232,6 +240,75 @@ func TestDriverInjectedLessonTitleIsNoCommand(t *testing.T) {
 		if strings.Contains(string(raw), "ignore previous") {
 			t.Fatalf("request %d carries the injected title: %s", i, raw)
 		}
+	}
+}
+
+// jobTurns hands the Driver one admitted job_status call and keeps what it reports. The planner cannot name a job yet
+// (no tool that starts one gives it its id), so the step use case is scripted here.
+type jobTurns struct {
+	agentloop.Turns // the other operations are not used
+	call            agentturn.Call
+	mu              sync.Mutex
+	got             []agentturn.Outcome
+}
+
+func (j *jobTurns) Ask(context.Context, agentturn.AskInput) (agentturn.Step, error) {
+	return agentturn.Step{Thread: "th1", Turn: 1, Status: thread.StatusExecuting, Calls: []agentturn.Call{j.call}}, nil
+}
+
+func (j *jobTurns) Submit(_ context.Context, in agentturn.SubmitInput) (agentturn.Step, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.got = append(j.got, in.Outcomes...)
+	return agentturn.Step{Thread: in.Turn.Thread, Turn: in.Turn.Turn, Status: thread.StatusDone}, nil
+}
+
+// job_status finds the chain jobs (summary, lecture text) and the calendar sync that the jobs screen hides: they are
+// the jobs the agent starts. The jobs are read by the real activity use case from SQLite.
+func TestDriverJobStatusSeesChainJobs(t *testing.T) {
+	e := newDriverEnv(t)
+	repo := sqlite.NewJobRepository(e.db)
+	for i, typ := range []job.Type{homeworkflow.SummarizeJobType, homeworkflow.LectureTextJobType, schedulesync.CalendarSyncJobType} {
+		id := shared.JobID(fmt.Sprintf("j%d", i+1))
+		j, err := job.New(job.Spec{ID: id, Type: typ, Key: string(typ) + ":t1", Payload: `{}`, MaxAttempts: 3}, e.clock.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(t.Context(), j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call, err := values.ParseCall("c1", string(values.ToolJobStatus), `{"ids":["j1","j2","j3","j9"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns := &jobTurns{call: agentturn.Call{Call: call, Class: actionpolicy.ClassR, PlanStep: -1}}
+	jobs, err := activity.New(sqlite.NewRecordingRepository(e.db), repo, sqlite.NewLessonRepository(e.db), nil,
+		schedulesync.CalendarSyncJobType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drv, err := agentloop.New(agentloop.Deps{
+		Turns: turns, Sink: e.sink, Library: driverLibrary{}, Knowledge: e.knowledge, Activity: driverActivity{jobs},
+		Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(drv.Close)
+
+	if err := drv.Ask(t.Context(), agentturn.AskInput{Scope: physicsScope(t), Text: "что с конспектом"}); err != nil {
+		t.Fatal(err)
+	}
+	drv.Wait()
+	want := `{"count":4,"jobs":[{"id":"j1","work":"summary","status":"queued","percent":0},` +
+		`{"id":"j2","work":"lecture_text","status":"queued","percent":0},` +
+		`{"id":"j3","work":"calendar","status":"queued","percent":0},` +
+		`{"id":"j9","status":"not_found","percent":0}],"truncated":false}`
+	turns.mu.Lock()
+	defer turns.mu.Unlock()
+	if len(turns.got) != 1 || turns.got[0].Result.ResultJSON != want {
+		t.Fatalf("job_status outcomes = %+v", turns.got)
 	}
 }
 

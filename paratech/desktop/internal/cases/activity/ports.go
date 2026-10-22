@@ -33,6 +33,9 @@ type JobHistory interface {
 	// returned in unreadable; only other failures are errors.
 	ListForRecordings(ctx context.Context, recs []shared.RecordingID, byRecording, byTranscript []job.Type) (
 		jobs map[shared.RecordingID][]*job.Job, unreadable []shared.JobID, err error)
+
+	// Get returns a job of any type by id (TASK-117); shared.ErrNotFound when there is none.
+	Get(ctx context.Context, id shared.JobID) (*job.Job, error)
 }
 
 // Lessons reads the lesson of a recording for its title (PRD section 6.1). Implemented by the sqlite adapter.

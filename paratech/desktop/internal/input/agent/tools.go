@@ -37,10 +37,11 @@ type Knowledge interface {
 	Search(ctx context.Context, query string) (knowledgebase.SearchResult, error)
 }
 
-// Activity is the recordings and jobs screens (cases/activity): the schedule entry of a recording and the jobs.
+// Activity is the recordings and jobs reads (cases/activity): the schedule entry of a recording and the state of jobs
+// of every type, since the agent asks about the chain jobs the jobs screen hides.
 type Activity interface {
 	ListRecordings(ctx context.Context) ([]activity.Recording, error)
-	ListJobs(ctx context.Context) ([]activity.Job, error)
+	JobStates(ctx context.Context, ids []shared.JobID) ([]activity.JobState, error)
 }
 
 // Assignments lists the assignments (cases/homeworkflow).
@@ -228,15 +229,19 @@ func (t tools) listAssignments(ctx context.Context, call values.Call, scope valu
 // --- job_status ----------------------------------------------------------------------------------------
 
 func (t tools) jobStatus(ctx context.Context, call values.Call, _ values.Scope) (values.ToolResult, []values.Ref, error) {
-	jobs, err := t.activity.ListJobs(ctx)
+	ids := call.Args().IDs("ids")
+	jobIDs := make([]shared.JobID, 0, len(ids))
+	for _, id := range ids {
+		jobIDs = append(jobIDs, shared.JobID(id.ID()))
+	}
+	jobs, err := t.activity.JobStates(ctx, jobIDs)
 	if err != nil {
 		return values.ToolResult{}, nil, err
 	}
-	byID := make(map[shared.JobID]activity.Job, len(jobs))
+	byID := make(map[shared.JobID]activity.JobState, len(jobs))
 	for _, j := range jobs {
 		byID[j.ID] = j
 	}
-	ids := call.Args().IDs("ids")
 	rows := make([]values.JobRow, 0, len(ids))
 	for _, id := range ids {
 		j, ok := byID[shared.JobID(id.ID())]

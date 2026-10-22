@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -144,15 +145,26 @@ func (k *fakeKnowledge) Search(_ context.Context, q string) (knowledgebase.Searc
 
 type fakeActivity struct {
 	recordings []activity.Recording
-	jobs       []activity.Job
+	jobs       []activity.JobState
 	err        error
+	asked      []shared.JobID
 }
 
 func (a *fakeActivity) ListRecordings(context.Context) ([]activity.Recording, error) {
 	return a.recordings, a.err
 }
 
-func (a *fakeActivity) ListJobs(context.Context) ([]activity.Job, error) { return a.jobs, a.err }
+// JobStates returns the asked jobs it holds, of any type, as cases/activity does.
+func (a *fakeActivity) JobStates(_ context.Context, ids []shared.JobID) ([]activity.JobState, error) {
+	a.asked = append(a.asked, ids...)
+	var out []activity.JobState
+	for _, j := range a.jobs {
+		if slices.Contains(ids, j.ID) {
+			out = append(out, j)
+		}
+	}
+	return out, a.err
+}
 
 type fakeAssignments struct {
 	views []homeworkflow.AssignmentView
