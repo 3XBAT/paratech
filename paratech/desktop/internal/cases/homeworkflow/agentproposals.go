@@ -22,7 +22,7 @@ const (
 	opPinnedVersion   = "homeworkflow: version of a pinned attachment"
 )
 
-// maxWaitingScan bounds the waiting proposals ProposeDeadline looks through for the same deadline.
+// maxWaitingScan bounds the waiting proposals looked through for the same deadline or send.
 const maxWaitingScan = 200
 
 // deadlineRequest is the canonical create_deadline_event object.
@@ -35,7 +35,8 @@ type deadlineRequest struct {
 
 // ProposeDeadline proposes the deadline of assignment a for the calendar (the agent's propose_deadline and «Да, в
 // календарь» of «Сегодня», TASK-127). Title and due come from the stored assignment, never from a model answer or a
-// file. A proposal of the same deadline that already waits for «Да» is returned instead of a second one. It takes the
+// file. A proposal of the same deadline that already waits for «Да» is reused; the check is not atomic, so two
+// concurrent calls may store two, which is harmless as the calendar upserts one event per assignment. It takes the
 // Propose path (strict parse, validation against local state); the result is VALIDATED or REJECTED (due out of
 // range). An assignment without a deadline yields ErrNoDue, a missing one shared.ErrNotFound. No side effect happens.
 func (s *Service) ProposeDeadline(ctx context.Context, a shared.AssignmentID) (ProposalView, error) {
@@ -77,7 +78,9 @@ func (s *Service) ProposeDeadline(ctx context.Context, a shared.AssignmentID) (P
 // ProposeEmailOfVersion proposes emailing draft version n of assignment a (the agent's propose_send, TASK-127). The
 // agent never exports: the student's text export must already hold exactly that version, else ErrVersionNotExported
 // and nothing is stored. The recipient comes from the settings and the attachment is pinned by its digest, as for
-// ProposeSend; a REJECTED proposal (no recipient, no export) is stored and returned. A missing assignment, draft or
+// ProposeSend; a send of the same content that already waits for «Да» is returned instead of a second one, so a
+// replayed agent call never makes two sends. A REJECTED proposal (no recipient, no export) is stored and returned. A
+// missing assignment, draft or
 // version wraps shared.ErrNotFound. No side effect happens.
 func (s *Service) ProposeEmailOfVersion(ctx context.Context, a shared.AssignmentID, n int) (ProposalView, error) {
 	if s.drafts == nil {
@@ -106,6 +109,25 @@ func (s *Service) ProposeEmailOfVersion(ctx context.Context, a shared.Assignment
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeVersion, err)
 	}
 	return s.propose(ctx, values.NewUntrustedOutput(string(raw)), proposal.FormatText, &want)
+}
+
+// waitingSend is the VALIDATED send of p's assignment, format and recipient that pins want, or nil. Without the
+// Waiting port every call stores a new proposal.
+func (s *Service) waitingSend(ctx context.Context, p *proposal.Proposal, want proposal.Digest) (*proposal.Proposal, error) {
+	if s.waiting == nil {
+		return nil, nil
+	}
+	list, err := s.waiting.ListByStatus(ctx, proposal.StatusValidated, maxWaitingScan)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range list {
+		if w.AssignmentID() == p.AssignmentID() && w.Attaches(want) && w.AttachmentFormat() == p.AttachmentFormat() &&
+			w.Recipient() == p.Recipient() {
+			return w, nil
+		}
+	}
+	return nil, nil
 }
 
 // pinnedVersion is the draft version whose text export is exactly the attachment p pinned; 0 when none matches, for

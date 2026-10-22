@@ -74,7 +74,7 @@ func (t tools) propose(ctx context.Context, st agentturn.Step, c agentturn.Call)
 	}
 	res, seen, err := values.ProposalResult(id, target)
 	if err != nil {
-		t.log.Warn(opPropose, "tool", tool.String(), "err", err)
+		t.log.WarnContext(ctx, opPropose, "tool", tool.String(), "err", err)
 		return refuse(values.RefuseFailed)
 	}
 	return ran{out: agentturn.Outcome{Result: res, Seen: seen}, write: true, cards: []values.Card{values.ConfirmCard{Target: target}}}

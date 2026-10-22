@@ -157,8 +157,8 @@ type DraftReader interface {
 	Get(ctx context.Context, a shared.AssignmentID) (*homeworkdraft.Draft, error)
 }
 
-// WaitingProposals lists the proposals in one status (PRD section 13.3), so the same deadline proposed again reuses
-// the one that waits for «Да» (TASK-127). Implemented by the sqlite adapter.
+// WaitingProposals lists the proposals in one status (PRD section 13.3), so the same deadline or send of a draft
+// version proposed again reuses the one that waits for «Да» (TASK-127). Implemented by the sqlite adapter.
 type WaitingProposals interface {
 	// ListByStatus returns the proposals in status, newest first, at most limit (PRD section 13.3).
 	ListByStatus(ctx context.Context, status proposal.Status, limit int) ([]*proposal.Proposal, error)

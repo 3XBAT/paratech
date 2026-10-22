@@ -304,6 +304,57 @@ func TestEmailOfVersionShowsTheVersionAndGoesStale(t *testing.T) {
 	}
 }
 
+// A replayed propose_send (crash or journal failure after the save) returns the waiting send, never a second one
+// that a second «Да» could email; a declined send or another version is a new proposal.
+func TestEmailOfVersionReplayKeepsOneSend(t *testing.T) {
+	e := newAgentProposalEnv(t, true)
+	e.exportVersion(t, 2)
+	first, err := e.svc.ProposeEmailOfVersion(t.Context(), "a1", 2)
+	if err != nil || first.Status != proposal.StatusValidated {
+		t.Fatalf("first = %+v, %v", first, err)
+	}
+	// No journal entry was written: the agent calls the use case again.
+	again, err := e.svc.ProposeEmailOfVersion(t.Context(), "a1", 2)
+	if err != nil || again.ID != first.ID || again.DraftVersion != 2 || again.Subject != first.Subject {
+		t.Fatalf("replay = %+v, %v", again, err)
+	}
+	if n := len(e.proposals); n != 1 {
+		t.Fatalf("%d proposals after a replay, want 1", n)
+	}
+
+	if _, err := e.svc.Decline(t.Context(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := e.svc.ProposeEmailOfVersion(t.Context(), "a1", 2)
+	if err != nil || after.ID == first.ID || after.Status != proposal.StatusValidated {
+		t.Fatalf("after a decline = %+v, %v", after, err)
+	}
+	e.exportVersion(t, 1)
+	other, err := e.svc.ProposeEmailOfVersion(t.Context(), "a1", 1)
+	if err != nil || other.ID == after.ID || other.DraftVersion != 1 {
+		t.Fatalf("another version = %+v, %v", other, err)
+	}
+	if e.sideEffects() != 0 {
+		t.Fatal("a proposal had a side effect")
+	}
+}
+
+// A failing Waiting port stores nothing.
+func TestEmailOfVersionWaitingFails(t *testing.T) {
+	e := newAgentProposalEnv(t, true)
+	e.exportVersion(t, 2)
+	e.svc.waiting = failingWaiting{}
+	if _, err := e.svc.ProposeEmailOfVersion(t.Context(), "a1", 2); err == nil || len(e.proposals) != 0 {
+		t.Fatalf("err = %v, %d proposals", err, len(e.proposals))
+	}
+}
+
+type failingWaiting struct{}
+
+func (failingWaiting) ListByStatus(context.Context, proposal.Status, int) ([]*proposal.Proposal, error) {
+	return nil, errors.New("disk")
+}
+
 func TestEmailOfVersionWithoutDrafts(t *testing.T) {
 	e := newAgentProposalEnv(t, false)
 	if _, err := e.svc.ProposeEmailOfVersion(t.Context(), "a1", 1); !errors.Is(err, ErrNoDrafts) {

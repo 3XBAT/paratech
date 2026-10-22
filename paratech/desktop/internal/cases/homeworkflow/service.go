@@ -19,7 +19,7 @@ type Service struct {
 	ids         IDGenerator
 	tx          Tx
 	drafts      DraftReader      // nil: no send of a named draft version, no version on the confirmation
-	waiting     WaitingProposals // nil: a deadline proposed again is a new proposal
+	waiting     WaitingProposals // nil: a deadline or version send proposed again is a new proposal
 }
 
 // New builds the Service; Drafts and Waiting are optional.

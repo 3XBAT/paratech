@@ -57,7 +57,7 @@ type Deps struct {
 	Tx             Tx
 
 	// Optional (TASK-127): the agent's send of a named draft version and the version shown on its confirmation, and
-	// the reuse of a deadline proposal that already waits for «Да».
+	// the reuse of a deadline or version send proposal that already waits for «Да».
 	Drafts  DraftReader
 	Waiting WaitingProposals
 }

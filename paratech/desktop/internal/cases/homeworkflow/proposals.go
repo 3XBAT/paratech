@@ -46,7 +46,7 @@ func (s *Service) Propose(ctx context.Context, out values.UntrustedOutput) (Prop
 
 // propose is Propose; a non-empty format is the attachment the user chose for a send (ProposeSend). A non-nil want is
 // the content the send must attach (ProposeEmailOfVersion): a validated send that pins another file is not stored and
-// ErrVersionNotExported is returned.
+// ErrVersionNotExported is returned, and a send of the same content that already waits for «Да» is returned instead.
 func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, format proposal.Format, want *proposal.Digest) (ProposalView, error) {
 	now := s.clock.Now()
 	p, err := proposal.New(s.ids.NewProposalID(), out, now)
@@ -66,8 +66,19 @@ func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, forma
 	if err := p.Validate(facts, now); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
-	if want != nil && p.Status() == proposal.StatusValidated && !p.Attaches(*want) {
-		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, ErrVersionNotExported)
+	if want != nil && p.Status() == proposal.StatusValidated {
+		if !p.Attaches(*want) {
+			return ProposalView{}, fmt.Errorf("%s: %w", opPropose, ErrVersionNotExported)
+		}
+		// A replay (crash or journal failure after the save) must not store a second send: two «Да» could mean
+		// two emails.
+		w, err := s.waitingSend(ctx, p, *want)
+		if err != nil {
+			return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
+		}
+		if w != nil {
+			return s.proposalView(ctx, w)
+		}
 	}
 
 	if err := s.tx.Do(ctx, func(ctx context.Context) error { return s.proposals.Save(ctx, p) }); err != nil {
