@@ -9,14 +9,18 @@ import { type PageId, pageById } from "./nav.js";
 
 /** The agent screen of the core (values.Screen) for a section of the window; the core refuses unknown screens. */
 const screens: Record<PageId, string> = {
-  recordings: "today",
-  homework: "assignments",
+  today: "today",
+  subjects: "subjects",
   knowledge: "subjects",
+  homework: "assignments",
   schedule: "schedule",
-  connections: "settings",
-  models: "settings",
-  diagnostics: "settings",
+  journal: "journal",
   settings: "settings",
+  models: "settings",
+  connections: "settings",
+  diagnostics: "settings",
+  profile: "settings",
+  appearance: "settings",
 };
 
 export const noSubjectLabel = "Без предмета";
@@ -82,7 +86,9 @@ export const texts = {
   confirmPending: "Подтверждение пока недоступно.",
   actionDone: "Действие выполнено",
   undo: "Отменить",
-  undoUnavailable: "Пока недоступно",
+  undoAll: "Отменить всё",
+  undoBusy: "Отмена…",
+  undoDone: "Отменено",
   skip: "Пропустить — сделай как считаешь",
   submitAnswers: "Ответить",
   reviseLabel: "Что изменить в плане",
@@ -307,7 +313,7 @@ export type CardModel =
   | { type: "reply"; caption: string; text: string }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
   | { type: "confirm"; caption: string; text: string }
-  | { type: "action"; text: string; undo: { label: string; enabled: false; reason: string } }
+  | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean } }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
 
@@ -369,11 +375,24 @@ function cardModel(c: CardView, status: string): CardModel | null {
       return {
         type: "action",
         text: texts.actionDone,
-        undo: { label: texts.undo, enabled: false, reason: texts.undoUnavailable },
+        actionId: c.actionId,
+        undo: { label: texts.undo, enabled: c.actionId !== "" },
       };
     case "stopped":
       return null; // Built once from the stop reason below.
   }
+}
+
+/** What «Отменить» of an action line did: running, done, or the Russian text of a refusal. */
+export interface UndoNote {
+  busy: boolean;
+  done: boolean;
+  text: string;
+}
+
+/** The action lines of a request that offer «Отменить» (for «Отменить всё»). */
+export function undoableActions(cards: readonly CardModel[]): string[] {
+  return cards.flatMap((c) => (c.type === "action" && c.undo.enabled ? [c.actionId] : []));
 }
 
 /** What a request shows: the student's text, the cards in order, and the state line while nothing else says it. */

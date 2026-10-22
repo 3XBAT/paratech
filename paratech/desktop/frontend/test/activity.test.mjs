@@ -199,6 +199,9 @@ test("a draft job row is named by the core and opens its assignment (TASK-094)",
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
   assert.match(page, /onOpenAssignment=\{onOpenAssignment\}/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /<RecordingsPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
+  // «Сегодня» holds the recordings page until TASK-125 replaces it (pages/TodayPage.tsx).
+  const today = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
+  assert.match(today, /<RecordingsPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
+  assert.match(app, /<TodayPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
   assert.match(app, /onOpenAssignment=\{openAssignment\}/);
 });

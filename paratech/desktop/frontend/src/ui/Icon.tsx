@@ -26,7 +26,13 @@ export type IconName =
   | "mail"
   | "retry"
   | "info"
-  | "x";
+  | "x"
+  | "home"
+  | "folder"
+  | "tasks"
+  | "journal"
+  | "plus"
+  | "back";
 
 /** Rendered once per window, before any Icon. */
 export function IconSprite() {
@@ -116,6 +122,27 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-x" viewBox="0 0 24 24">
         <path d="M6 6l12 12M18 6L6 18" />
+      </symbol>
+      <symbol id="i-home" viewBox="0 0 24 24">
+        <path d="M4 11l8-6.5 8 6.5M6 9.5V20h12V9.5" />
+        <path d="M10 20v-5h4v5" />
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4l2 2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
+      </symbol>
+      <symbol id="i-tasks" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="2.5" />
+        <path d="M8 12l2.5 2.5L16 9" />
+      </symbol>
+      <symbol id="i-journal" viewBox="0 0 24 24">
+        <path d="M5 5.5h14M5 12h14M5 18.5h9" />
+        <path d="M3 5.5h.01M3 12h.01M3 18.5h.01" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+      <symbol id="i-back" viewBox="0 0 24 24">
+        <path d="M15 5l-7 7 7 7" />
       </symbol>
     </svg>
   );

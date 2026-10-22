@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { agentApi, methods, parseState, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
+import { agentApi, emptyFilter, methods, parseHistory, parseState, parseUndo, parseUndoRequest, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
 import {
   initialPanelState,
   orderedEntries,
@@ -30,7 +30,7 @@ import { AgentPanelView } from "../.test-build/agent/AgentPanelView.js";
 
 const { renderToStaticMarkup } = server;
 const noop = () => undefined;
-const actions = { press: noop, revise: noop, answer: noop };
+const actions = { press: noop, revise: noop, answer: noop, undo: noop, undoAll: noop, undoNote: () => undefined };
 
 function card(over) {
   return {
@@ -64,7 +64,10 @@ function html(u) {
 // ---- Bindings ----
 
 test("bound method names match the Go AgentService", () => {
-  const go = readFileSync(new URL("../../internal/input/wails/agent.go", import.meta.url), "utf8");
+  // The journal methods (History, Undo, UndoRequest) are in agentjournal.go.
+  const go = ["agent.go", "agentjournal.go"]
+    .map((f) => readFileSync(new URL(`../../internal/input/wails/${f}`, import.meta.url), "utf8"))
+    .join("\n");
   const goMethods = [...go.matchAll(/^func \(s \*AgentService\) ([A-Z]\w*)\(/gm)].map((m) => m[1]);
   const prefix = "paratech/desktop/internal/input/wails.AgentService.";
   const ts = Object.values(methods).map((m) => m.slice(prefix.length));
@@ -87,14 +90,45 @@ test("the api sends the typed arguments and reads the problem of the reply", asy
   assert.equal(await odd.stop({ threadId: "t", turn: 1 }), "failed");
 });
 
-test("history and undo say unavailable until the core can do them, without data", async () => {
-  const api = agentApi(async (method) =>
-    method === methods.history ? { problem: "unavailable", requests: [] } : { problem: "unavailable" },
-  );
-  const hist = await api.history("");
-  assert.equal(hist.problem, "unavailable");
-  assert.deepEqual(hist.requests, []);
-  assert.equal(await api.undo("a1"), "unavailable");
+test("history, undo and undoRequest call the binding with the new shapes and parse the replies", async () => {
+  const calls = [];
+  const api = agentApi(async (method, ...args) => {
+    calls.push([method, ...args]);
+    if (method === methods.history) {
+      return { problem: "", lines: [{ kind: "action", at: "2026-10-22T10:00:00Z", updatedAt: "", subjectId: "s1", actionId: "a1", threadId: "t1", turn: 2, tool: "create_subject", jobId: "", jobType: "", status: "DONE", undoable: true, cannotUndo: false, noUndo: "" }] };
+    }
+    if (method === methods.undo) {
+      return { problem: "", actionId: "a1", status: "UNDO_REFUSED", refusal: "changed" };
+    }
+    return { problem: "failed", actions: [{ problem: "", actionId: "a2", status: "UNDONE", refusal: "" }] };
+  });
+  const filter = { ...emptyFilter, kind: "action", days: 7, undoable: true };
+  const hist = await api.history(filter);
+  assert.deepEqual(calls[0], [methods.history, filter]);
+  assert.equal(hist.problem, "");
+  assert.equal(hist.lines[0].tool, "create_subject");
+  assert.equal(hist.lines[0].undoable, true);
+  const undone = await api.undo("a1");
+  assert.deepEqual(calls[1], [methods.undo, "a1"]);
+  assert.deepEqual(undone, { problem: "", actionId: "a1", status: "UNDO_REFUSED", refusal: "changed" });
+  const all = await api.undoRequest({ threadId: "t1", turn: 2 });
+  assert.deepEqual(calls[2], [methods.undoRequest, { threadId: "t1", turn: 2 }]);
+  assert.equal(all.problem, "failed");
+  assert.equal(all.actions[0].status, "UNDONE");
+});
+
+test("history, undo and undoRequest replies are parsed defensively", () => {
+  assert.deepEqual(parseHistory({ problem: "invalid", lines: null }), { problem: "invalid", lines: [] });
+  assert.equal(parseHistory({ problem: "brand new", lines: [] }).problem, "failed");
+  const line = parseHistory({ problem: "", lines: [{ kind: "processing" }] }).lines[0];
+  assert.equal(line.kind, "processing");
+  assert.equal(line.actionId, "");
+  assert.equal(line.undoable, false);
+  assert.equal(line.turn, 0);
+  assert.throws(() => parseHistory({ problem: "", lines: [{ kind: 5 }] }));
+  assert.throws(() => parseHistory(null));
+  assert.deepEqual(parseUndo({ problem: "unavailable" }), { problem: "unavailable", actionId: "", status: "", refusal: "" });
+  assert.deepEqual(parseUndoRequest({ problem: "", actions: null }), { problem: "", actions: [] });
 });
 
 test("parseUpdate checks the shape, tolerates null lists and drops unknown cards", () => {
@@ -212,12 +246,12 @@ test("a refused Ask marks the request; an accepted one changes nothing", () => {
 // ---- Context and Ctrl+K ----
 
 test("the context label follows the screen and is removable down to «Без предмета»", () => {
-  const home = contextFor("recordings", "", false);
-  assert.equal(home.label, "Записи и задачи");
+  const home = contextFor("today", "", false);
+  assert.equal(home.label, "Сегодня");
   assert.equal(home.ask.screen, "today");
   assert.equal(home.removable, true);
   const hw = contextFor("homework", "a1", false);
-  assert.equal(hw.label, "Домашние задания");
+  assert.equal(hw.label, "Задания");
   assert.deepEqual(hw.ask, { subjectId: "", lessonId: "", assignmentId: "a1", screen: "assignments" });
   assert.equal(contextFor("diagnostics", "", false).ask.screen, "settings");
   const none = contextFor("homework", "a1", true);
@@ -345,13 +379,42 @@ test("cannot-do card: «Целиком не получится» with both parts
 
 // ---- Action line and confirm ----
 
-test("action line: «Отменить» is shown but disabled until the journal exists", () => {
+test("action line: «Отменить» is enabled for a named action and calls the binding", () => {
   const m = modelOf(update({ cards: [card({ kind: "action_line", actionId: "a1" })] })).cards[0];
   assert.equal(m.type, "action");
-  assert.equal(m.undo.enabled, false);
+  assert.equal(m.actionId, "a1");
+  assert.equal(m.undo.enabled, true);
   const out = html(update({ cards: [card({ kind: "action_line", actionId: "a1" })] }));
-  assert.match(out, /<button[^>]*disabled[^>]*>Отменить</);
-  assert.match(out, /Пока недоступно/);
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Отменить</);
+  assert.doesNotMatch(out, /Пока недоступно/);
+  const none = html(update({ cards: [card({ kind: "action_line", actionId: "" })] }));
+  assert.match(none, /<button[^>]*disabled[^>]*>Отменить</);
+});
+
+test("action line after «Отменить»: done hides the button, a refusal stays as text, busy disables it", () => {
+  const u = update({ cards: [card({ kind: "action_line", actionId: "a1" })] });
+  const withNote = (note) =>
+    renderToStaticMarkup(h(AgentRequest, { model: modelOf(u), actions: { ...actions, undoNote: () => note } }));
+  const done = withNote({ busy: false, done: true, text: "" });
+  assert.match(done, /Отменено/);
+  assert.doesNotMatch(done, /<button/);
+  const refused = withNote({ busy: false, done: false, text: "Изменено после — отменить нельзя." });
+  assert.match(refused, /Изменено после — отменить нельзя\./);
+  assert.match(refused, />Отменить</);
+  const busy = withNote({ busy: true, done: false, text: "" });
+  assert.match(busy, /<button[^>]*disabled[^>]*>Отмена…</);
+});
+
+test("«Отменить всё» appears with two or more actions to undo and calls undoAll", () => {
+  const two = update({ cards: [card({ kind: "action_line", actionId: "a1" }), card({ kind: "action_line", actionId: "a2" })] });
+  const out = renderToStaticMarkup(h(AgentRequest, { model: modelOf(two), actions }));
+  assert.match(out, />Отменить всё</);
+  const one = html(update({ cards: [card({ kind: "action_line", actionId: "a1" })] }));
+  assert.doesNotMatch(one, /Отменить всё/);
+  const allDone = renderToStaticMarkup(
+    h(AgentRequest, { model: modelOf(two), actions: { ...actions, undoNote: () => ({ busy: false, done: true, text: "" }) } }),
+  );
+  assert.doesNotMatch(allDone, /Отменить всё/);
 });
 
 test("confirm card offers no buttons yet", () => {
@@ -394,7 +457,7 @@ test("update problems explain themselves and offer the next step", () => {
 function panelHtml(state, over = {}) {
   return renderToStaticMarkup(
     h(AgentPanelView, {
-      state, ctx: contextFor("recordings", "", false), draft: "", notice: "", inputRef: { current: null },
+      state, ctx: contextFor("today", "", false), draft: "", notice: "", inputRef: { current: null },
       onDraft: noop, onSubmit: noop, onRemoveContext: noop, actionsFor: () => actions, ...over,
     }),
   );
@@ -441,9 +504,9 @@ test("online: the input is enabled; before State answers it is not", () => {
 
 test("the context chip shows the label and the remove button only while removable", () => {
   const out = panelHtml(stateWith());
-  assert.match(out, /Записи и задачи/);
+  assert.match(out, /Сегодня/);
   assert.match(out, /aria-label="Убрать контекст"/);
-  const none = panelHtml(stateWith(), { ctx: contextFor("recordings", "", true) });
+  const none = panelHtml(stateWith(), { ctx: contextFor("today", "", true) });
   assert.match(none, /Без предмета/);
   assert.doesNotMatch(none, /Убрать контекст/);
 });

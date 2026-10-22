@@ -1,8 +1,8 @@
 /* Agent panel: the right column of the window (docs/design/concept-agent.html). Neutral surfaces, one accent. */
-.shell.with-agent { grid-template-columns: 108px minmax(0, 1fr) 340px; }
+.shell.with-agent { grid-template-columns: 64px minmax(0, 1fr) 340px; }
 .shell.with-agent .sheet { border-right: 1px solid var(--edge); border-top-right-radius: var(--r-xl); }
 @container app (max-width: 880px) {
-  .shell.with-agent { grid-template-columns: 84px minmax(0, 1fr) 280px; }
+  .shell.with-agent { grid-template-columns: 64px minmax(0, 1fr) 280px; }
 }
 
 .ag { display: flex; flex-direction: column; min-width: 0; min-height: 0; }

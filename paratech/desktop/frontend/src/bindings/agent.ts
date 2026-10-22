@@ -23,6 +23,7 @@ export const methods = {
   restart: `${service}.Restart`,
   cancel: `${service}.Cancel`,
   undo: `${service}.Undo`,
+  undoRequest: `${service}.UndoRequest`,
   history: `${service}.History`,
 } as const;
 
@@ -172,9 +173,59 @@ export interface UpdateView {
   cards: CardView[];
 }
 
+/** What «Журнал» reads: a line is an action of paratech or a processing job. Empty fields match everything. */
+export interface HistoryFilter {
+  /** "", action or processing. */
+  kind: string;
+  subjectId: string;
+  /** An action status (DONE, UNDONE, UNDO_REFUSED, ...) or a job status; "" for any. */
+  status: string;
+  /** 1..90; 0 means 90. */
+  days: number;
+  /** Only the lines that offer «Отменить». */
+  undoable: boolean;
+}
+
+export const emptyFilter: HistoryFilter = { kind: "", subjectId: "", status: "", days: 0, undoable: false };
+
+/** One line of «Журнал»: ids and enums only, the page words them. Times are RFC 3339 (UTC). */
+export interface JournalLine {
+  kind: string;
+  at: string;
+  updatedAt: string;
+  subjectId: string;
+  actionId: string;
+  threadId: string;
+  turn: number;
+  tool: string;
+  jobId: string;
+  jobType: string;
+  status: string;
+  /** «Отменить» is offered. */
+  undoable: boolean;
+  /** «Отменить нельзя»: a proposal or a sent email. */
+  cannotUndo: boolean;
+  /** Why there is no «Отменить»: running, failed, undone, irreversible, changed, result_ready, cannot_stop, sent, ... */
+  noUndo: string;
+}
+
 export interface HistoryView {
   problem: CallProblem;
-  requests: UpdateView[];
+  lines: JournalLine[];
+}
+
+/** The outcome of «Отменить» of one action: a problem, or the status after the call, or a refusal. */
+export interface UndoView {
+  problem: CallProblem;
+  actionId: string;
+  status: string;
+  refusal: string;
+}
+
+/** The outcome of «Отменить всё» of a request. */
+export interface UndoRequestView {
+  problem: CallProblem;
+  actions: UndoView[];
 }
 
 function record(raw: unknown, what: string): Record<string, unknown> {
@@ -351,13 +402,57 @@ export function parseCallProblem(raw: unknown): CallProblem {
   return (callProblems as readonly string[]).includes(p) ? (p as CallProblem) : "failed";
 }
 
+function flag(r: Record<string, unknown>, key: string): boolean {
+  return r[key] === true;
+}
+
+/** Text fields of a journal line are optional for the page: a missing one reads as "". */
+function optStr(r: Record<string, unknown>, key: string, what: string): string {
+  return r[key] === undefined || r[key] === null ? "" : str(r, key, what);
+}
+
+export function parseJournalLine(raw: unknown): JournalLine {
+  const w = "journal line";
+  const r = record(raw, w);
+  return {
+    kind: str(r, "kind", w),
+    at: optStr(r, "at", w),
+    updatedAt: optStr(r, "updatedAt", w),
+    subjectId: optStr(r, "subjectId", w),
+    actionId: optStr(r, "actionId", w),
+    threadId: optStr(r, "threadId", w),
+    turn: typeof r.turn === "number" && Number.isFinite(r.turn) ? r.turn : 0,
+    tool: optStr(r, "tool", w),
+    jobId: optStr(r, "jobId", w),
+    jobType: optStr(r, "jobType", w),
+    status: optStr(r, "status", w),
+    undoable: flag(r, "undoable"),
+    cannotUndo: flag(r, "cannotUndo"),
+    noUndo: optStr(r, "noUndo", w),
+  };
+}
+
 export function parseHistory(raw: unknown): HistoryView {
   const w = "agent history";
   const r = record(raw, w);
+  return { problem: parseCallProblem(r), lines: items(r.lines, w, parseJournalLine) };
+}
+
+export function parseUndo(raw: unknown): UndoView {
+  const w = "agent undo";
+  const r = record(raw, w);
   return {
     problem: parseCallProblem(r),
-    requests: items(r.requests, w, parseUpdate),
+    actionId: optStr(r, "actionId", w),
+    status: optStr(r, "status", w),
+    refusal: optStr(r, "refusal", w),
   };
+}
+
+export function parseUndoRequest(raw: unknown): UndoRequestView {
+  const w = "agent undo request";
+  const r = record(raw, w);
+  return { problem: parseCallProblem(r), actions: items(r.actions, w, parseUndo) };
 }
 
 export interface AgentApi {
@@ -373,10 +468,12 @@ export interface AgentApi {
   retry(ref: TurnRef): Promise<CallProblem>;
   restart(ref: TurnRef): Promise<CallProblem>;
   cancel(ref: TurnRef): Promise<CallProblem>;
-  /** «Отменить» of an action line: "unavailable" until the journal exists (TASK-123). */
-  undo(actionId: string): Promise<CallProblem>;
-  /** Stored requests of the thread of subjectId ("" «Без предмета»): "unavailable" until TASK-123. */
-  history(subjectId: string): Promise<HistoryView>;
+  /** «Отменить» of an action line. */
+  undo(actionId: string): Promise<UndoView>;
+  /** «Отменить всё» of a request: every action of it that can still be undone. */
+  undoRequest(ref: TurnRef): Promise<UndoRequestView>;
+  /** «Журнал»: actions and processing jobs of the last days, newest first. */
+  history(filter: HistoryFilter): Promise<HistoryView>;
 }
 
 /** Builds the agent API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -393,7 +490,8 @@ export function agentApi(call: CallByName): AgentApi {
     retry: turn(methods.retry),
     restart: turn(methods.restart),
     cancel: turn(methods.cancel),
-    undo: async (actionId) => parseCallProblem(await call(methods.undo, actionId)),
-    history: async (subjectId) => parseHistory(await call(methods.history, subjectId)),
+    undo: async (actionId) => parseUndo(await call(methods.undo, actionId)),
+    undoRequest: async (ref) => parseUndoRequest(await call(methods.undoRequest, ref)),
+    history: async (filter) => parseHistory(await call(methods.history, filter)),
   };
 }

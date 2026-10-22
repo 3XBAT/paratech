@@ -1,10 +1,9 @@
 import { useCallback, useState } from "react";
 import {
-  bottomGroupStart,
   closeTranscript,
   initialRoute,
   type PageId,
-  pages,
+  railItemOf,
   routeToAssignment,
   routeToPage,
   routeToSummary,
@@ -18,23 +17,34 @@ import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { HomeworkPage } from "./pages/HomeworkPage";
 import { KnowledgeBasePage } from "./pages/KnowledgeBasePage";
 import { ModelsPage } from "./pages/ModelsPage";
-import { RecordingsPage } from "./pages/RecordingsPage";
+import { DropZone } from "./pages/DropZone";
+import { JournalPage } from "./pages/JournalPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SettingsTabs } from "./pages/SettingsTabs";
+import { SubjectsPage } from "./pages/SubjectsPage";
 import { SummaryPage } from "./pages/SummaryPage";
+import { TodayPage } from "./pages/TodayPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
-import { Icon, IconSprite } from "./ui/Icon";
+import { IconSprite } from "./ui/Icon";
+import { Rail } from "./ui/Rail";
 
 function PageView(props: {
   id: PageId;
   visit: number;
   assignment: string;
+  /** Counts the files added elsewhere (a drop on the window): the library pages read again. */
+  library: number;
   onOpen: (id: PageId) => void;
   onOpenAssignment: (id: string) => void;
 }) {
   switch (props.id) {
-    case "recordings":
-      return <RecordingsPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
+    case "today":
+      return <TodayPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
+    case "subjects":
+      return <SubjectsPage onOpen={props.onOpen} reload={props.library} />;
+    case "journal":
+      return <JournalPage />;
     case "homework":
       return <HomeworkPage openAssignment={props.assignment} />;
     case "knowledge":
@@ -49,6 +59,10 @@ function PageView(props: {
       return <DiagnosticsPage />;
     case "settings":
       return <SettingsPage />;
+    case "profile":
+      return <SettingsPage part="profile" />;
+    case "appearance":
+      return <SettingsPage part="appearance" />;
   }
 }
 
@@ -72,38 +86,32 @@ export function App() {
     setRoute(routeToAssignment(id));
     setJump((j) => j + 1);
   }, []);
+  // Counts the files the drop zone added: «Предметы» reads the library again.
+  const [library, setLibrary] = useState(0);
   const overlay = route.transcript !== "" || route.summary !== "";
 
   return (
     <div className="shell with-agent">
       <IconSprite />
-      <nav className="rail" aria-label="Разделы">
-        {pages.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={p.id === bottomGroupStart ? "low" : undefined}
-            aria-current={p.id === current ? "page" : undefined}
-            onClick={() => {
-              openPage(p.id);
-              setVisit((v) => v + 1);
-            }}
-          >
-            <Icon name={p.icon} />
-            {p.label}
-          </button>
-        ))}
-      </nav>
+      <Rail
+        current={current}
+        onOpen={(id) => {
+          openPage(id);
+          setVisit((v) => v + 1);
+        }}
+      />
       <main className="sheet">
         {/* A new key per section replays the entry animation. The section stays mounted under an open transcript or
             summary, so «Назад» finds it as the user left it. */}
         <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
+          {railItemOf(current).id === "settings" && <SettingsTabs current={current} onOpen={openPage} />}
           <OpenTranscriptContext.Provider value={openTranscript}>
             <OpenSummaryContext.Provider value={openSummary}>
               <PageView
                 id={current}
                 visit={visit}
                 assignment={route.assignment}
+                library={library}
                 onOpen={openPage}
                 onOpenAssignment={openAssignment}
               />
@@ -127,13 +135,14 @@ export function App() {
               onBack={() => setRoute(closeTranscript)}
               onOpenTranscript={openTranscript}
               onOpenAssignment={openAssignment}
-              onDeleted={() => openPage("recordings")}
+              onDeleted={() => openPage("today")}
               onCheckSound={() => openPage("diagnostics")}
             />
           </div>
         )}
       </main>
       <AgentPanel page={current} assignmentId={route.assignment} />
+      <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>
   );
 }
