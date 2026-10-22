@@ -557,11 +557,16 @@ func TestGatewayQuotaExceededAgainstPostgres(t *testing.T) {
 func TestGatewayInvalidRequestsAgainstPostgres(t *testing.T) {
 	e := newGatewayEnv(t, gatewayOptions{})
 	for name, mutate := range map[string]func(*hubv1.CompletionSpec){
-		"unknown alias":      func(s *hubv1.CompletionSpec) { s.ModelAlias = "gpt" },
-		"unspecified op":     func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED },
-		"empty instructions": func(s *hubv1.CompletionSpec) { s.Instructions = "" },
-		"key with space":     func(s *hubv1.CompletionSpec) { s.IdempotencyKey = "a b" },
-		"over 1 MiB":         func(s *hubv1.CompletionSpec) { s.UntrustedData = strings.Repeat("d", values.MaxPayloadBytes) },
+		"unknown alias":  func(s *hubv1.CompletionSpec) { s.ModelAlias = "gpt" },
+		"unspecified op": func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED },
+		// Agent operations are never valid in a CompletionSpec (ADR-0023).
+		"agent step op":        func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_AGENT_STEP },
+		"inspect material op":  func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL },
+		"answer op":            func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_ANSWER },
+		"triage assignment op": func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT },
+		"empty instructions":   func(s *hubv1.CompletionSpec) { s.Instructions = "" },
+		"key with space":       func(s *hubv1.CompletionSpec) { s.IdempotencyKey = "a b" },
+		"over 1 MiB":           func(s *hubv1.CompletionSpec) { s.UntrustedData = strings.Repeat("d", values.MaxPayloadBytes) },
 	} {
 		spec := gwSpec("job-1")
 		mutate(spec)
