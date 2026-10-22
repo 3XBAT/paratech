@@ -307,8 +307,9 @@ func TestStepClampsTheOutputCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rs := f.store.Reservations(alice); rs[2].Amount != want {
-		t.Fatalf("reservation = %d, want %d", rs[2].Amount, want)
+	// Looked up by key: the fake clock is frozen, so the reservation list is ordered by random id.
+	if k, ok := f.store.Key(alice, "k3"); !ok || k.Fingerprint.Amount != want {
+		t.Fatalf("reservation = %d, want %d", k.Fingerprint.Amount, want)
 	}
 }
 
@@ -529,7 +530,7 @@ func TestInvalidReturnedCalls(t *testing.T) {
 		"unknown tool":    answer(t, 100, 20, toolCall(t, "toolu_1", "send_email", `{}`)),
 		"five calls":      answer(t, 100, 20, five...),
 		"no calls":        answer(t, 100, 20),
-		"no tool use":     {Answer: values.NewAgentAnswer(nil, u, false)},
+		"text only":       {Answer: values.NewAgentAnswer(nil, u, false)}, // tool choice auto: the model answered in text
 		"missing arg":     answer(t, 100, 20, toolCall(t, "toolu_1", "delivery_status", `{}`)),
 		"undeclared arg":  answer(t, 100, 20, toolCall(t, "toolu_1", "list_subjects", `{"recipient":"x@y.z"}`)),
 		"repeated id":     answer(t, 100, 20, toolCall(t, "toolu_1", "list_subjects", `{}`), toolCall(t, "toolu_1", "list_subjects", `{}`)),
@@ -549,6 +550,9 @@ func TestInvalidReturnedCalls(t *testing.T) {
 		}
 		if rs := f.store.Reservations(alice); len(rs) != 1 || rs[0].State != account.StateSettled || rs[0].Charged != 120 {
 			t.Errorf("%s: reservations %+v", name, rs)
+		}
+		if k, ok := f.store.Key(alice, "ag:1"); !ok || !k.Result.Stored || k.Result.Output != values.FailedStepOutput {
+			t.Errorf("%s: key record %+v, want the failure marker", name, k)
 		}
 		if len(f.provider.Calls()) != 1 {
 			t.Errorf("%s: provider calls = %d, want the retry served from the ledger", name, len(f.provider.Calls()))

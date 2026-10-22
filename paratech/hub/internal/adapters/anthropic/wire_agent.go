@@ -10,9 +10,10 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 )
 
-// Tool use values of the Messages API (docs/refs/anthropic.md section 7).
+// Tool use values of the Messages API (docs/refs/anthropic.md section 7). Forced tool choice ("any"/"tool") is a 400
+// on the 5.x models, so the choice is "auto" and the system prompt demands a tool call.
 const (
-	toolChoiceAny     = "any"
+	toolChoiceAuto    = "auto"
 	cacheEphemeral    = "ephemeral"
 	blockText         = "text"
 	blockToolUse      = "tool_use"
@@ -23,6 +24,8 @@ const (
 	roleAssistant     = "assistant"
 )
 
+// agentWireRequest has no thinking field on purpose: the 5.x models reject a disabled thinking config with 400, so the
+// model's default is kept.
 type agentWireRequest struct {
 	Model      string             `json:"model"`
 	MaxTokens  int64              `json:"max_tokens"`
@@ -83,7 +86,7 @@ func newAgentWireRequest(call values.AgentCall) agentWireRequest {
 		},
 		Messages:   agentMessages(call.Turns()),
 		Tools:      tools,
-		ToolChoice: wireToolChoice{Type: toolChoiceAny},
+		ToolChoice: wireToolChoice{Type: toolChoiceAuto},
 	}
 }
 
@@ -136,8 +139,9 @@ type agentWireBlockRead struct {
 
 // readAgentAnswer decodes a 200 answer to a planner call. Text and thinking blocks are ignored; every tool_use block
 // becomes a call with its input re-encoded canonically (sorted keys, no duplicate keys), so the arguments the Hub
-// checks, seals and returns are one exact string. A block that is not a valid call makes a malformed answer and a
-// refusal a refused one, both with their usage; a body without usage is a permanent error.
+// checks, seals and returns are one exact string. The stop reason is checked first: a refusal is a refused answer.
+// A block that is not a valid call makes a malformed answer and a text-only answer one without tool use, all with
+// their usage; a body without usage is a permanent error.
 func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != contentTypeJSON {
 		return values.AgentAnswer{}, permanent("unexpected content type")
@@ -176,7 +180,8 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 		}
 		calls = append(calls, call)
 	}
-	toolUse := r.StopReason != nil && *r.StopReason == stopReasonToolUse
+	// With tool choice auto the model may answer in plain text: no tool_use block is an unusable, billed answer.
+	toolUse := r.StopReason != nil && *r.StopReason == stopReasonToolUse && len(calls) > 0
 	return values.NewAgentAnswer(calls, usage, toolUse), nil
 }
 

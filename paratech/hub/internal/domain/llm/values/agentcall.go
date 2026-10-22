@@ -144,8 +144,8 @@ func (a AgentAnswer) Usage() Usage { return a.usage }
 // unusable answer is (ADR-0010).
 func (a AgentAnswer) Refused() bool { return a.refused }
 
-// Failure is the provider failure this answer stands for, nil when the model stopped to use tools. With tool choice
-// "any" every answer must be a tool use; anything else (end of turn, output cap, refusal) is permanent (ADR-0023).
+// Failure is the provider failure this answer stands for, nil when the model stopped to use tools. Every usable answer
+// is a tool use; anything else (plain text, end of turn, output cap, refusal) is permanent (ADR-0023).
 func (a AgentAnswer) Failure() error {
 	switch {
 	case a.refused:

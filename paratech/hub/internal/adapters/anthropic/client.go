@@ -129,7 +129,7 @@ func (c *Client) Complete(ctx context.Context, req values.Request) (values.Compl
 	return completion, nil
 }
 
-// Step sends one planner call with the catalog tools and tool choice "any" (ADR-0023), with the same deadline and
+// Step sends one planner call with the catalog tools and tool choice "auto" (ADR-0023), with the same deadline and
 // error rules as Complete. The answer's calls are untrusted; whether they are usable is the use case's decision.
 func (c *Client) Step(ctx context.Context, call values.AgentCall) (values.AgentAnswer, error) {
 	if call.Model() == "" || call.System() == "" || call.MaxOutput() <= 0 || len(call.Tools()) == 0 || len(call.Turns()) == 0 {

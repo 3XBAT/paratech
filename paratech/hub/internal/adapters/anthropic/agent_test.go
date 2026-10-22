@@ -138,7 +138,8 @@ func TestStepRequestShape(t *testing.T) {
 	if body["model"] != "claude-haiku-5-5" || body["max_tokens"] != float64(400) {
 		t.Fatalf("model/max_tokens = %v/%v", body["model"], body["max_tokens"])
 	}
-	if tc := body["tool_choice"].(map[string]any); len(tc) != 1 || tc["type"] != "any" {
+	// Forced tool choice ("any"/"tool") is a 400 on the 5.x models (docs/refs/anthropic.md section 7).
+	if tc := body["tool_choice"].(map[string]any); len(tc) != 1 || tc["type"] != "auto" {
 		t.Fatalf("tool_choice = %v", tc)
 	}
 	tools := body["tools"].([]any)
@@ -182,7 +183,8 @@ func TestStepRequestShape(t *testing.T) {
 	if text["cache_control"].(map[string]any)["type"] != "ephemeral" || res1["cache_control"] != nil || res2["cache_control"] != nil {
 		t.Fatalf("the cache breakpoint must be on the last block only: %v", m2)
 	}
-	for _, unwanted := range []string{"temperature", "top_p", "top_k", "stream"} {
+	// thinking: a disabled config is a 400 on the 5.x models, so the field is never sent.
+	for _, unwanted := range []string{"temperature", "top_p", "top_k", "stream", "thinking"} {
 		if _, ok := body[unwanted]; ok {
 			t.Errorf("request has %s", unwanted)
 		}
@@ -190,7 +192,8 @@ func TestStepRequestShape(t *testing.T) {
 }
 
 func TestStepWithoutToolUseIsAFailure(t *testing.T) {
-	for _, stop := range []string{`"end_turn"`, `"max_tokens"`, `"refusal"`, `null`, `"pause_turn"`} {
+	// "tool_use": a text-only answer is unusable even when the stop reason claims tool use.
+	for _, stop := range []string{`"end_turn"`, `"max_tokens"`, `"refusal"`, `null`, `"pause_turn"`, `"tool_use"`} {
 		body := `{"type":"message","content":[{"type":"text","text":"plain text"}],"stop_reason":` + stop +
 			`,"usage":{"input_tokens":5,"output_tokens":2}}`
 		var rec recorder
@@ -209,6 +212,21 @@ func TestStepWithoutToolUseIsAFailure(t *testing.T) {
 		if answer.Refused() != (stop == `"refusal"`) {
 			t.Errorf("stop %s: refused = %t", stop, answer.Refused())
 		}
+	}
+}
+
+// TestStepRefusalWinsOverContent: the stop reason is read before the blocks, so a refusal with a call is refused.
+func TestStepRefusalWinsOverContent(t *testing.T) {
+	body := `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"reply","input":{"text":"x"}}],` +
+		`"stop_reason":"refusal","usage":{"input_tokens":5,"output_tokens":2}}`
+	var rec recorder
+	srv := rec.serve(t, http.StatusOK, body)
+	answer, err := newClient(t, srv.URL, time.Minute).Step(t.Context(), agentCall(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !answer.Refused() || len(answer.Calls()) != 0 || answer.Failure() == nil {
+		t.Fatalf("answer = %v, want refused without calls", answer)
 	}
 }
 
