@@ -10,10 +10,15 @@ import (
 )
 
 type Querier interface {
+	// Only the current request of a thread can be unfinished: a new request cancels a waiting one (thread.StartTurn), so
+	// the stored rows of earlier requests follow.
+	CancelEarlierAgentTurns(ctx context.Context, arg CancelEarlierAgentTurnsParams) error
 	CountJobsByStatus(ctx context.Context) ([]CountJobsByStatusRow, error)
 	// Rows that ListJobIDsByStatus leaves out for a NULL id, so the caller can report them.
 	CountJobsWithoutIDByStatus(ctx context.Context, statuses []string) (int64, error)
 	CountTranscriptParts(ctx context.Context, recordingID string) (int64, error)
+	// The current request is replaced as a whole in the transaction of its thread's compare-and-swap.
+	DeleteAgentTurn(ctx context.Context, arg DeleteAgentTurnParams) error
 	// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
 	// (ON DELETE RESTRICT), and the row is kept.
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
@@ -32,6 +37,12 @@ type Querier interface {
 	DeleteSummariesOfRecording(ctx context.Context, recordingID string) error
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
+	GetAgentAction(ctx context.Context, id string) (AgentAction, error)
+	// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
+	// journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
+	GetAgentThread(ctx context.Context, id string) (AgentThread, error)
+	GetAgentThreadByKey(ctx context.Context, subjectKey string) (AgentThread, error)
+	GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (AgentTurn, error)
 	// Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
 	// deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
 	// reprocessed (TASK-042).
@@ -81,6 +92,12 @@ type Querier interface {
 	// Whether a job of the type has an idempotency key that starts with the prefix, in any status (TASK-060: one automatic
 	// STT job per recording). substr and length both count characters, so the comparison is exact for any text.
 	HasJobKeyPrefix(ctx context.Context, arg HasJobKeyPrefixParams) (bool, error)
+	// A never-stored entry (version 0) is inserted with version 1.
+	InsertAgentAction(ctx context.Context, arg InsertAgentActionParams) error
+	InsertAgentStep(ctx context.Context, arg InsertAgentStepParams) error
+	// A never-stored thread (version 0) is inserted with version 1.
+	InsertAgentThread(ctx context.Context, arg InsertAgentThreadParams) error
+	InsertAgentTurn(ctx context.Context, arg InsertAgentTurnParams) error
 	// A never-stored assignment (version 0) is inserted with version 1.
 	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
 	InsertDeadlineEventRemoval(ctx context.Context, arg InsertDeadlineEventRemovalParams) error
@@ -111,6 +128,7 @@ type Querier interface {
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
+	LastAgentStepSeq(ctx context.Context, threadID string) (int64, error)
 	// The newest job of the type in one of the statuses (a JSON array of status names), by its last change, leaving out
 	// the ids of except_ids (a JSON array) (TASK-074: the last finished calendar sync that really ran).
 	LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error)
@@ -123,6 +141,9 @@ type Querier interface {
 	LatestTranscriptByRecording(ctx context.Context, recordingID string) (Transcript, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
+	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
+	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
+	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
 	// The deadline events left to remove, oldest first (the calendar sync).
 	ListDeadlineEventRemovals(ctx context.Context, maxRows int64) ([]string, error)
@@ -171,12 +192,15 @@ type Querier interface {
 	// The assignments found in the transcripts of the recording, with whether a draft or any email exists.
 	ListRecordingAssignments(ctx context.Context, recordingID string) ([]ListRecordingAssignmentsRow, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
+	// Threads whose current request was running (startup recovery).
+	ListRunningAgentThreadIDs(ctx context.Context) ([]string, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
 	// One page in number order; the primary key serves the order.
 	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)
 	// Transcripts of a recording, for its deletion (PRD section 13.1).
 	ListTranscriptRefsByRecording(ctx context.Context, recordingID string) ([]string, error)
+	ListUnfinishedAgentActions(ctx context.Context) ([]AgentAction, error)
 	// Recordings in the status with a final track and no transcript, in id order after the given id (TASK-060: the
 	// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082), nor those
 	// marked for deletion (TASK-095). Ids only: the caller loads each one and its aggregate decides.
@@ -190,6 +214,10 @@ type Querier interface {
 	// the files; summaries and lecture texts are keyed by the transcript id.
 	// What the recording holds, for the confirmation.
 	RecordingDeletionCounts(ctx context.Context, recordingID string) (RecordingDeletionCountsRow, error)
+	// Compare-and-swap on the loaded version; the call never changes.
+	UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error)
+	// Compare-and-swap on the loaded version; the key never changes.
+	UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadParams) (int64, error)
 	// Compare-and-swap on the loaded version. The origin (lesson, transcript, source index) and the creation time never
 	// change, so a stale save cannot undo ON DELETE SET NULL of the lesson or the transcript.
 	UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (int64, error)

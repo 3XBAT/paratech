@@ -19,7 +19,7 @@ import (
 )
 
 var contractTables = []string{
-	"assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts", "proposals", "recordings",
+	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts", "proposals", "recordings",
 	"schedule_entries", "settings", "stt_models", "stt_speeds", "summaries", "transcript_parts", "transcripts",
 }
 
@@ -27,8 +27,11 @@ var contractTables = []string{
 // column (ADR-0004(d)). Draft versions are append-only rows below homework_drafts, which carries the version.
 // Live transcript parts are replaced by their number, never saved through an aggregate (TASK-079); so are the
 // measured recognition speeds (TASK-084). The deadline events left to remove are only inserted and removed (TASK-095).
+// Agent requests are saved with their thread, which carries the version, and the agent history is append-only
+// (TASK-116).
 var unversionedTables = map[string]bool{
 	"homework_draft_revisions": true, "transcript_parts": true, "stt_speeds": true, "deadline_event_removals": true,
+	"agent_turns": true, "agent_steps": true,
 }
 
 func tableNames(t *testing.T, q interface {
@@ -81,8 +84,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 20 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 20", first, err)
+	if err != nil || first != 21 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 21", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
