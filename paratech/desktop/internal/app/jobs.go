@@ -68,10 +68,13 @@ func sttRegistration(h jobrunner.Handler) jobrunner.Registration {
 
 // hiddenJobTypes are the job types of background service work that involves no user; «Записи и задачи» leaves them
 // out (TASK-074). The calendar sync runs after every trigger and its result is shown in the Google section instead.
+// The work on a library material belongs to a request of the agent and is shown in its panel (TASK-122).
 // STT, summaries and homework belong to a lesson: the activity use case shows them in the row of their recording
 // (TASK-076); drafts and sending belong to an action of the user and stay listed.
 func hiddenJobTypes() []job.Type {
-	return []job.Type{schedulesync.CalendarSyncJobType}
+	return []job.Type{
+		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
+	}
 }
 
 // registrations binds every job type to its handler and policies (PRD sections 7.2-7.4, hard rule 7). Without a
@@ -90,6 +93,8 @@ func registrations(h jobHandlers) []jobrunner.Registration {
 		llm(homeworkflow.SummarizeJobType, h.postProcess, postProcessJobTimeout),
 		llm(homeworkflow.ExtractHomeworkJobType, h.postProcess, postProcessJobTimeout),
 		llm(homeworkflow.LectureTextJobType, h.postProcess, lectureTextJobTimeout),
+		llm(homeworkflow.MaterialSummaryJobType, h.postProcess, postProcessJobTimeout),
+		llm(homeworkflow.MaterialHomeworkJobType, h.postProcess, postProcessJobTimeout),
 		llm(homeworkflow.HomeworkDraftJobType, h.drafts, llmJobTimeout),
 		// An external side effect: never Heavy (a flapping power source must not loop it), never rerun blindly.
 		jobrunner.Registration{

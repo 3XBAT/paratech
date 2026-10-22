@@ -25,6 +25,7 @@ type agentReads struct {
 	assignments *homeworkflow.Service
 	deliveries  *senddelivery.Service
 	rerunner    *homeworkflow.Rerunner
+	materials   *homeworkflow.MaterialJobs // the summary and homework search of a library material (TASK-122)
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, ADR-0021): the steps of a request on the Hub's
@@ -35,6 +36,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
 	}
+	facts = facts.WithMaterials(reads.materials)
 	subjects, err := agentloop.NewBaseSubjects(reads.library)
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -50,7 +52,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	// commit in one transaction of the local database.
 	actions, err := agentloop.NewActions(agentloop.ActionDeps{
 		Library: reads.library, Lessons: reads.knowledge, Assignments: reads.assignments, Rerunner: reads.rerunner,
-		Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner, Tx: c.db, Clock: e.local, Log: log,
+		Materials: reads.materials, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner, Tx: c.db, Clock: e.local, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent actions: %w", err)
@@ -65,7 +67,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	}
 	c.panel = wails.NewAgentPanel(log)
 	c.driver, err = agentloop.New(agentloop.Deps{
-		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Knowledge: reads.knowledge, Activity: reads.activity,
+		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library,
+		Knowledge: reads.knowledge, Activity: reads.activity,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions, Clock: e.local,
 		Log: log,
 	})
