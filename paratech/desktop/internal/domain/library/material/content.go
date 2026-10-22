@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/shared"
@@ -41,14 +42,16 @@ const (
 	pdfMagic      = "%PDF-"
 	zipMagic      = "PK\x03\x04"
 	utf8BOM       = "\xef\xbb\xbf"
+	utf16LEBOM    = "\xff\xfe"
+	utf16BEBOM    = "\xfe\xff"
 	docxMainPart  = "word/document.xml"
 	pptxMainPart  = "ppt/presentation.xml"
 	maxZipEntries = 100_000
 )
 
 // DetectType tells the type of a file from its content, never from its name: PDF by its signature, DOCX and PPTX by
-// the main part in the ZIP directory (nothing is decompressed), text by being valid UTF-8 without NUL. Errors:
-// ErrEmpty, ErrTooLarge, ErrUnsupportedType.
+// the main part in the ZIP directory (nothing is decompressed), text by being valid UTF-8, or UTF-16 with a byte
+// order mark, without NUL (DecodeText). Errors: ErrEmpty, ErrTooLarge, ErrUnsupportedType.
 func DetectType(data []byte) (Type, error) {
 	switch {
 	case len(data) == 0:
@@ -60,11 +63,48 @@ func DetectType(data []byte) (Type, error) {
 	case bytes.HasPrefix(data, []byte(zipMagic)):
 		return officeType(data)
 	}
-	text := bytes.TrimPrefix(data, []byte(utf8BOM))
-	if len(text) > 0 && utf8.Valid(text) && bytes.IndexByte(text, 0) < 0 {
+	if _, err := DecodeText(data); err == nil {
 		return TypeTXT, nil
 	}
 	return "", ErrUnsupportedType
+}
+
+// DecodeText reads the bytes of a text file: UTF-8 (a byte order mark is dropped) or UTF-16 LE/BE with its byte order
+// mark. A text that is empty, not valid in its encoding or holds NUL (a binary file) is ErrUnsupportedType.
+func DecodeText(data []byte) (string, error) {
+	var s string
+	switch {
+	case bytes.HasPrefix(data, []byte(utf16LEBOM)), bytes.HasPrefix(data, []byte(utf16BEBOM)):
+		body := data[2:]
+		if len(body)%2 != 0 {
+			return "", ErrUnsupportedType
+		}
+		units := make([]uint16, len(body)/2)
+		for i := range units {
+			lo, hi := body[2*i], body[2*i+1]
+			if data[0] == 0xfe {
+				lo, hi = hi, lo
+			}
+			units[i] = uint16(lo) | uint16(hi)<<8
+		}
+		runes := utf16.Decode(units)
+		for _, r := range runes {
+			if r == utf8.RuneError { // an unpaired surrogate
+				return "", ErrUnsupportedType
+			}
+		}
+		s = string(runes)
+	default:
+		text := bytes.TrimPrefix(data, []byte(utf8BOM))
+		if !utf8.Valid(text) {
+			return "", ErrUnsupportedType
+		}
+		s = string(text)
+	}
+	if s == "" || bytes.IndexByte([]byte(s), 0) >= 0 {
+		return "", ErrUnsupportedType
+	}
+	return s, nil
 }
 
 // officeType reads the ZIP directory of data; exactly one of the two main parts makes it DOCX or PPTX.

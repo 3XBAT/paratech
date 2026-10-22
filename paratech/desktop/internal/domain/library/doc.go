@@ -1,7 +1,8 @@
 // Package library is the bounded context of the student's subjects and the files filed under them (ADR-0024).
-// Aggregates: domain/library/subject (name, aliases, semester and folders) and domain/library/material (one file of
-// the library by its sha256). Value objects shared by both live in domain/library/values (the semester, the matching
-// key of a name). Domain service: domain/library/services/subjectmatch (a free subject string → subject id, and the
+// Aggregates: domain/library/subject (name, aliases, semester and folders), domain/library/material (one file of
+// the library by its sha256, and its extracted text) and domain/library/inspection (the reading of a material by the
+// quarantined reader, ADR-0022: suggestions only). Value objects shared by them live in domain/library/values (the
+// semester, the matching key of a name). Domain service: domain/library/services/subjectmatch (a free subject string → subject id, and the
 // subjects to suggest from the schedule).
 //
 // The library is virtual: folders live in SQLite, the bytes of a file sit once in the private artifact store under

@@ -284,6 +284,26 @@ func (m *Material) Reupload(now time.Time) (changed bool, err error) {
 	return true, nil
 }
 
+// SetText records how far the text was read: TextExtracted or TextFailed. A PDF keeps TextPDFNotExtracted (its text
+// is not read, ADR-0024). The same status changes nothing. Errors: ErrRemoved, ErrInvalidMaterial for another status
+// or a PDF.
+func (m *Material) SetText(s TextStatus, now time.Time) (changed bool, err error) {
+	if s != TextExtracted && s != TextFailed {
+		return false, fmt.Errorf("%w: text status %q", ErrInvalidMaterial, s)
+	}
+	if m.typ == TypePDF {
+		return false, fmt.Errorf("%w: the text of a PDF is not read", ErrInvalidMaterial)
+	}
+	if m.status != StatusActive {
+		return false, ErrRemoved
+	}
+	if m.text == s {
+		return false, nil
+	}
+	m.text, m.updatedAt = s, now
+	return true, nil
+}
+
 func (m *Material) transition(to Status, now time.Time) error {
 	if !slices.Contains(transitions[m.status], to) {
 		return fmt.Errorf("%w: %s to %s", ErrInvalidTransition, m.status, to)
