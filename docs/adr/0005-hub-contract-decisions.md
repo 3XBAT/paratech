@@ -25,6 +25,8 @@ without NUL, `len(instructions) + len(untrusted_data) <= 1 MiB`, model alias 1-6
 digit, idempotency key 1-128 printable ASCII characters without spaces. The Hub enforces them again (`invalid_argument`) and bounds
 the message with `connect.WithReadMaxBytes` (1 MiB plus envelope headroom). Where the numbers differ in the future, the proto is aligned
 to the desktop. `max_output_tokens` is clamped silently to a per-alias cap and is the basis of the reservation.
+*Amended by ADR-0023*: for `INSPECT_MATERIAL`, `ANSWER`, `TRIAGE_ASSIGNMENT` the Hub uses its own prompt and alias; non-empty
+`instructions` or a different alias from the client is `invalid_argument`.
 
 ### c. Error codes and Connect mapping
 The four codes of the task (QUOTA_EXCEEDED, RATE_LIMITED, INVALID_API_KEY, PROVIDER_ERROR) are extended with

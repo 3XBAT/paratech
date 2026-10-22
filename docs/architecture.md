@@ -44,12 +44,12 @@ flowchart LR
 <service>/
 ├── cmd/<binary>/main.go          # тонкая точка входа: конфиг, логгер, signal ctx, app.New, Run
 ├── config/                       # загрузка и валидация конфигурации (env, .env)
-├── pkg/                          # артефакты, привязанные к технологии, не слой и не бизнес-код; сейчас pkg/migrations (см. ARCH-04)
+├── pkg/                          # артефакты, привязанные к технологии, не слой и не бизнес-код; pkg/migrations, в hub также pkg/prompts (см. ARCH-04)
 ├── internal/
 │   ├── domain/                   # доменный слой, см. раздел 3
 │   ├── cases/<usecase>/          # прикладной слой, см. раздел 4
 │   ├── adapters/<tech>/          # реализации портов, см. раздел 5
-│   ├── input/<transport>/        # входящие интерфейсы, см. раздел 6
+│   ├── input/<transport>/        # входящие интерфейсы (в desktop также input/agent — цикл агента), см. раздел 6
 │   ├── app/                      # composition root и жизненный цикл, см. раздел 7
 │   └── metrics/                  # метрики и наблюдаемость (прометеевские счетчики и т.п.)
 ├── testenv/                      # фейки внешнего мира и сборка тестового окружения
@@ -59,7 +59,7 @@ flowchart LR
 - **ARCH-01.** Код сервиса лежит только в перечисленных каталогах (`cmd`, `config`, `internal`, `pkg`, `testenv`, `tests`). Новые каталоги верхнего уровня модуля и внутри `internal/` создаются только через ADR.
 - **ARCH-02.** Каталог `shared/` (контракты protobuf и сгенерированный код) не содержит бизнес-логики и не импортирует `desktop` или `hub`.
 - **ARCH-03.** Имена пакетов короткие, в нижнем регистре, без подчеркиваний и без повторения пути (`job.Status`, а не `job.JobStatus`).
-- **ARCH-04.** `pkg/` содержит только нейтральные к бизнесу артефакты, привязанные к технологии и общие для адаптеров и `app`, но не являющиеся кодом слоя: встроенные (`go:embed`) SQL-миграции и в будущем подобные ресурсы. Каждый пакет в `pkg/` имеет `doc.go`. `pkg` импортирует только стандартную библиотеку (и свое дерево во внешних тестах), не содержит бизнес-логики и не знает про слои сервиса. Его импортируют только `adapters` и `app` (а также тесты); `domain`, `cases`, `input`, `cmd`, `config`, `metrics` не импортируют `pkg`. Миграции любой базы данных всегда лежат в `pkg/migrations` (для SQLite desktop — `desktop/pkg/migrations`, для Postgres hub — `hub/pkg/migrations`); адаптер БД только исполняет их. См. ADR-0006.
+- **ARCH-04.** `pkg/` содержит только нейтральные к бизнесу артефакты, привязанные к технологии и общие для адаптеров и `app`, но не являющиеся кодом слоя: встроенные (`go:embed`) SQL-миграции и в будущем подобные ресурсы. Каждый пакет в `pkg/` имеет `doc.go`. `pkg` импортирует только стандартную библиотеку (и свое дерево во внешних тестах), не содержит бизнес-логики и не знает про слои сервиса. Его импортируют только `adapters` и `app` (а также тесты); `domain`, `cases`, `input`, `cmd`, `config`, `metrics` не импортируют `pkg`. Миграции любой базы данных всегда лежат в `pkg/migrations` (для SQLite desktop — `desktop/pkg/migrations`, для Postgres hub — `hub/pkg/migrations`); адаптер БД только исполняет их. Промпты и каталоги инструментов Hub лежат в `hub/pkg/prompts` (`go:embed`, версия в пути): `app` загружает и проверяет их при старте и передает use case как данные, сам use case `pkg` не импортирует. См. ADR-0006, ADR-0023.
 
 ## 3. Домен (`internal/domain`)
 
@@ -129,7 +129,7 @@ internal/cases/<usecase>/
 - **ARCH-24.** Время только через порт `Clock`; случайность и генерация ID — через порты. Прямой `time.Now()` в `cases` и `domain` запрещен.
 - **ARCH-25.** Все внешние вызовы принимают `context.Context` первым параметром; сценарии учитывают отмену и таймауты.
 - **ARCH-26.** Типы, пересекающие порт, — типы домена или примитивы. DTO use case не передаются в адаптеры.
-- **ARCH-27.** Побочные эффекты наружу (email, календарь, файлы) выполняются только через порты и только после проверки, подтверждения и политики. Вывод LLM — недоверенные данные (см. `CLAUDE.md`, правило 3).
+- **ARCH-27.** Побочные эффекты наружу (email, календарь, файлы) выполняются только через порты и только после проверки, подтверждения и политики. Вывод LLM — недоверенные данные (см. `CLAUDE.md`, правило 3). Толкование для обратимых локальных действий агента — ADR-0021.
 
 ## 5. Адаптеры (`internal/adapters/<tech>`)
 
@@ -145,10 +145,12 @@ internal/cases/<usecase>/
 
 ## 6. Входной слой (`internal/input/<transport>`)
 
-`input/wails` (биндинги десктопа к UI), `input/connect` (Connect-RPC обработчики Hub), `input/cli` (команды выпуска ключей Hub).
+`input/wails` (биндинги десктопа к UI), `input/agent` (цикл агента десктопа, ADR-0021), `input/connect` (Connect-RPC обработчики Hub), `input/cli` (команды выпуска ключей Hub).
+
+`input/agent` — входной слой, потому что вызывает несколько use cases (ARCH-20): `Driver` проводит просьбу по шагам и передает вызовы инструментов use cases через свои узкие интерфейсы. Решения (класс действия, план, происхождение ID, бюджет) он не принимает: их дает `cases/agentturn` и домен `agent` (ARCH-41). `input/wails` не импортирует `input/agent` (матрица раздела 9): он объявляет свой интерфейс `Agent` (ARCH-42), `app` подставляет `agent.Driver`; через этот интерфейс проходят только типы домена и примитивы. Необратимые действия агенту недоступны: их выполняет только `input/wails` по клику пользователя (ADR-0021, ADR-0022).
 
 - **ARCH-40.** `input` импортирует `cases/*`, `domain/**`, стандартную библиотеку, `internal/metrics`. Адаптеры импортировать нельзя.
-- **ARCH-41.** Входной слой тонкий: парсинг и валидация формата запроса, аутентификация транспортного уровня, вызов use case, преобразование результата и ошибок в ответ. Бизнес-решений здесь нет.
+- **ARCH-41.** Входной слой тонкий: парсинг и валидация формата запроса, аутентификация транспортного уровня, вызов use case, преобразование результата и ошибок в ответ. Бизнес-решений здесь нет. Цикл агента `input/agent` (`Driver`) — см. ADR-0021.
 - **ARCH-42.** `input` объявляет собственные узкие интерфейсы на используемые use cases (как `CheckInService` в эталоне), чтобы его можно было тестировать на фейках.
 - **ARCH-43.** Кодирование данных, специфичных для транспорта (например идентификаторы кнопок), лежит внутри `input`, а не в адаптерах.
 - **ARCH-44.** UI (React) не содержит бизнес-правил и секретов; весь доступ к данным идет через биндинги `input/wails`.
@@ -226,11 +228,14 @@ internal/cases/<usecase>/
 | `jobs` | `job` (статусы PRD §7.2, попытки, ключ идемпотентности) | `backoff`, `powerpolicy` |
 | `transcription` | `sttmodel` (версии, pin), `transcript` | `modelselection` |
 | `schedule` | `lesson` | `importplan` (превью и конфликты) |
-| `coursework` | `assignment`, `homeworkdraft` (версии) | `contextselection` (минимальный контекст для LLM) |
+| `coursework` | `assignment`, `homeworkdraft` (версии), `work` (работа под ключ: разбор, вопросы, требования, написание) | `contextselection` (минимальный контекст для LLM), `citation` (проверка цитат) |
 | `delivery` | `delivery` (включая UNKNOWN и сверку) | |
 | `settings` | `settings` | |
+| `agent` | `thread` (нить предмета, просьба, шаги, бюджет, раунды вопросов), `action` (журнал действий и Undo) | `actionpolicy` (классы R/U/C/UI, план, происхождение ID) |
+| `library` | `subject` (имя, алиасы, семестр, папки), `material` (файл по sha256, предмет, папка, связь с лекцией) | `subjectmatch` (строка расписания → ID предмета) |
 
 Use cases (пример): `cases/recordingsession`, `cases/jobrunner`, `cases/transcribe`, `cases/modelcatalog`, `cases/schedulesync`, `cases/homeworkflow`, `cases/senddelivery`.
+Агент и библиотека (ADR-0021, ADR-0024): `cases/agentturn`, `cases/agentjournal`, `cases/library`, `cases/answering`, `cases/todayfeed`, `cases/turnkey`; входной слой `input/agent`.
 
 **hub**
 
@@ -240,4 +245,4 @@ Use cases (пример): `cases/recordingsession`, `cases/jobrunner`, `cases/tr
 | `quota` | `account` (баланс, резервы, журнал), `reservation` | |
 | `llm` | | `modelallowlist`, `requestlimits` |
 
-Use cases (пример): `cases/gateway`, `cases/quota`, `cases/keys`. Адаптеры: `postgres`, `anthropic`. Входной слой: `input/connect`, `input/cli`.
+Use cases (пример): `cases/gateway`, `cases/agentstep` (ADR-0023), `cases/quota`, `cases/keys`. Адаптеры: `postgres`, `anthropic`. Входной слой: `input/connect`, `input/cli`. Ресурсы: `pkg/migrations`, `pkg/prompts`.
