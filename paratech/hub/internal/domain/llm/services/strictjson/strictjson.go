@@ -1,4 +1,4 @@
-// Package strictjson is the strict JSON reader of the quarantined readers (inspect, triage; ADR-0022): exactly one
+// Package strictjson is the strict JSON reader of the quarantined readers (inspect, triage, answer; ADR-0022): exactly one
 // object, keys matched byte for byte, no repeated key, nothing after the object. encoding/json alone would match keys
 // case-insensitively and keep the last of two equal keys, so a model answer could shadow a field.
 package strictjson

@@ -1,5 +1,5 @@
-// Package toolcatalog is the agent tool catalog of one version (ADR-0021..0023, golden file
-// shared/testdata/tool_catalog_v1.json): which tools the planner may call, the JSON Schema the provider gets for each,
+// Package toolcatalog is the agent tool catalog of one version (ADR-0021..0023, golden files
+// shared/testdata/tool_catalog_v<N>.json): which tools the planner may call, the JSON Schema the provider gets for each,
 // and the check of the calls the provider returns. The catalog text comes from the server (hub/pkg/prompts) and is
 // passed in as bytes; the package has no I/O.
 package toolcatalog
@@ -23,10 +23,11 @@ var (
 	ErrInvalidCall = errors.New("tool call does not match the catalog")
 )
 
-// Bounds of the argument types beyond the catalog text. The catalog fixes label (80) and text (300); the list sizes
-// are the Hub's.
+// Bounds of the argument types beyond the catalog text. The catalog fixes label (80), query (500, catalog v2) and text
+// (300); the list sizes are the Hub's.
 const (
 	MaxLabelRunes    = values.MaxLabelRunes
+	MaxQueryRunes    = 500
 	MaxTextRunes     = 300
 	maxIDsItems      = 20
 	maxTextListItems = 10
@@ -44,6 +45,7 @@ const (
 	typeDate      = "date"
 	typeEnum      = "enum"
 	typeLabel     = "label"
+	typeQuery     = "query"
 	typeText      = "text"
 	typeTextList  = "text_list"
 	typePlanSteps = "plan_steps"
@@ -59,7 +61,7 @@ const (
 )
 
 var (
-	actionTypes = []string{typeID, typeIDs, typeDate, typeEnum, typeLabel}
+	actionTypes = []string{typeID, typeIDs, typeDate, typeEnum, typeLabel, typeQuery}
 	uiTypes     = []string{typeText, typeTextList, typePlanSteps, typeQuestions}
 )
 
@@ -98,7 +100,7 @@ type Catalog struct {
 
 // Parse reads a catalog text and checks it: known fields only, a version above 0, unique snake_case tool and argument
 // names, known classes, argument types allowed for the class (UI tools only card types, other tools only IDs, enums,
-// dates and labels), enum values only on enums. The deeper policy checks of the golden file live in the contract
+// dates, labels and queries), enum values only on enums. The deeper policy checks of the golden file live in the contract
 // test.
 func Parse(raw []byte) (*Catalog, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))

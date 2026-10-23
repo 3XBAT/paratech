@@ -117,7 +117,11 @@ charged, non-retryable `PROVIDER_ERROR` (`hub/internal/domain/llm/services/inspe
 answers in round 2, 1-10 answers of rounds 1-2 in round 3) and returns `{"work_type","requirements":{"volume","file_format","formatting","variant","deadline","sources"},
 "feasibility","feasibility_reason","questions":[{"kind","question","options","default","why"}],"assumptions","helper"}`; rounds 1
 and 2 may ask questions, round 3 is the final call, so its questions come back empty (`hub/internal/domain/llm/services/triage`,
-same refusal rule). Settings (env or flag):
+same refusal rule). `ANSWER` takes `{"question","fragments":[{"chunk_id","text"}]}` (question up to 500 characters, 1-40
+fragments with distinct chunk IDs, up to 8 KiB each and 128 KiB together) and returns
+`{"claims":[{"text","cites":[{"chunk_id","quote"}]}],"missing":[]}`: up to 8 claims, each with 1-3 citations of chunk IDs that
+were sent, up to 5 unanswered parts, at least one of the two; whether a quote is really in its fragment is the desktop's check
+(`hub/internal/domain/llm/services/answer`, same refusal rule). Settings (env or flag):
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
@@ -126,7 +130,8 @@ same refusal rule). Settings (env or flag):
 
 ## Hub agent step
 `GatewayService.AgentStep` (ADR-0023): one planner step with tool use. The Hub picks the prompt and tool catalog
-(`hub/pkg/prompts/agent/panel/v<N>`, version = `catalog_version`) and the planner alias; the client sends neither. Rate limit,
+(`hub/pkg/prompts/agent/panel/v<N>`, version = `catalog_version`; v1 and v2 are served, v2 is current) and the planner
+alias; the client sends neither. Rate limit,
 ledger, replay and conflicts work as for `Complete`; echoed tool calls must carry the Hub's seal. The model's raw turn
 (thinking with its signature) is kept in `agent_turns` per API key and sent back with the next step; the client never sees
 it, and it is purged with the stored answers. A continuation whose kept turn is gone is `failed_precondition`, not charged.
