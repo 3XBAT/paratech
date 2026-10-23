@@ -313,13 +313,19 @@ export type CardModel =
   | { type: "answer"; caption: string; text: string }
   | { type: "reply"; caption: string; text: string }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
-  | { type: "confirm"; caption: string; text: string }
+  | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean } }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
 
 function buttons(ids: ButtonId[]): ButtonModel[] {
   return ids.map((id) => ({ id, label: buttonLabels[id] }));
+}
+
+/** The target a confirm card names; anything but a proposal or a deletion preview has no card to show. */
+function confirmTarget(c: CardView): { kind: "proposal" | "preview"; id: string } | null {
+  const t = c.target;
+  return t !== null && (t.kind === "proposal" || t.kind === "preview") && t.id !== "" ? { kind: t.kind, id: t.id } : null;
 }
 
 const activeStatuses = new Set(["PLANNING", "EXECUTING"]);
@@ -371,7 +377,7 @@ function cardModel(c: CardView, status: string): CardModel | null {
         ourPart: c.cannotDo.ourPart,
       };
     case "confirm":
-      return { type: "confirm", caption: texts.confirmCaption, text: texts.confirmPending };
+      return { type: "confirm", caption: texts.confirmCaption, text: texts.confirmPending, target: confirmTarget(c) };
     case "action_line":
       return {
         type: "action",

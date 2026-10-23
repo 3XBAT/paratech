@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/library"
@@ -42,6 +43,7 @@ const (
 	ErrLibraryBusy            = libraryError("Данные сейчас меняются. Попробуйте ещё раз.")
 	ErrLibraryUnavailable     = libraryError("Не удалось прочитать библиотеку. Попробуйте ещё раз.")
 	ErrLibraryDroppedPath     = libraryError("Этот файл добавить нельзя: перетащите файл с диска этого компьютера.")
+	ErrLibraryTooManyDropped  = libraryError("За раз можно перетащить не больше 10 файлов.")
 )
 
 // maxDroppedPath bounds a dropped path in bytes (the longest Windows path is 32767 UTF-16 units).
@@ -182,6 +184,7 @@ type LibraryService struct {
 	picker MaterialFilePicker
 	files  MaterialFileReader
 	log    *slog.Logger
+	drop   sync.Mutex // one drop at a time, so concurrent drops never hold many files in memory
 }
 
 // NewLibraryService returns the binding of the library; all arguments are required.
@@ -273,18 +276,7 @@ func (s *LibraryService) ImportFile(ctx context.Context) (LibraryImport, error) 
 	return s.importPath(ctx, path)
 }
 
-// ImportDroppedFile puts a file dropped on the window into «Входящие», as ImportFile does. The path comes from the
-// page, so it is untrusted: only a local absolute path to a DOCX, PPTX, PDF or TXT file is read (no network or device
-// paths, no "..", no alternate streams); the reader takes regular files only.
-func (s *LibraryService) ImportDroppedFile(ctx context.Context, path string) (LibraryImport, error) {
-	if err := droppedPathError(path); err != nil {
-		s.log.Info(opLibraryDrop, "result", err.Error())
-		return LibraryImport{}, err
-	}
-	return s.importPath(ctx, path)
-}
-
-// droppedPathError checks a path the page passed; the error is the page's text. Only a drive-letter path ("C:\...")
+// droppedPathError checks a dropped path; the error is the page's text. Only a drive-letter path ("C:\...")
 // is accepted: an allow-list, because Windows reads mixed separators ("\/host/share") as UNC and "\x" as rooted on
 // the current drive. The check is plain string work, so it means the same on every OS the tests run on.
 func droppedPathError(path string) error {

@@ -419,7 +419,7 @@ test("«Отменить всё» appears with two or more actions to undo and c
   assert.doesNotMatch(allDone, /Отменить всё/);
 });
 
-test("confirm card offers no buttons yet", () => {
+test("confirm card without the confirm calls offers no buttons", () => {
   const out = html(update({ cards: [card({ kind: "confirm", target: { kind: "proposal", id: "p1" } })] }));
   assert.match(out, /Нужно подтверждение/);
   assert.doesNotMatch(out, /<button/);

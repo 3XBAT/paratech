@@ -78,6 +78,10 @@ func (s *Shell) run(ctx context.Context) error {
 	var offs []func()
 	u.main, offs = newWindow(app, mainWindowSpec(s.opts.Name), offs)
 	u.popup, offs = newWindow(app, popupWindowSpec(s.opts.Name), offs)
+	// Wails runs each drop's listeners on a goroutine of their own, so the import may block.
+	offs = append(offs, u.main.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		b.Library.importDropped(ctx, e.Context().DroppedFiles(), app.Event)
+	}))
 	// Wails closes every window on shutdown; without the hide-on-close hooks that close would be cancelled.
 	app.OnShutdown(func() {
 		b.AgentPanel.Attach(nil) // the Driver's requests may outlive the Wails app
@@ -190,6 +194,9 @@ func windowOptions(spec windowSpec) application.WebviewWindowOptions {
 		AlwaysOnTop:   spec.AlwaysOnTop,
 		Hidden:        spec.Hidden,
 		DisableResize: spec.DisableResize,
+		// WebView2 gives the page no path of a dropped file; with this Wails resolves the paths and fires
+		// WindowFilesDropped.
+		EnableFileDrop: spec.FileDrop,
 		// The zero colour is transparent black, which shows through until the page paints.
 		BackgroundColour: application.NewRGB(255, 255, 255),
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: spec.HiddenOnTaskbar},

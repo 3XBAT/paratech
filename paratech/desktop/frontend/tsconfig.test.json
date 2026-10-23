@@ -85,6 +85,11 @@
     "src/bindings/today.ts",
     "src/todayView.ts",
     "src/agentDraft.ts",
-    "src/pages/TodayParts.tsx"
+    "src/pages/TodayParts.tsx",
+    "src/agent/panelWidth.ts",
+    "src/bindings/agentConfirm.ts",
+    "src/agentConfirmView.ts",
+    "src/agent/ConfirmCard.tsx",
+    "src/pages/TodayCalendar.tsx"
   ]
 }

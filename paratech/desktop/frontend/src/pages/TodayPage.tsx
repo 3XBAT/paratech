@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type RecordingItem } from "../bindings/activity.js";
+import { agentConfirmApi } from "../bindings/agentConfirm.js";
+import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName } from "../bindings/runtime.js";
 import { type TodayScreen, todayApi, todayErrorText } from "../bindings/today.js";
 import { requestDraft } from "../agentDraft.js";
@@ -19,6 +21,7 @@ const pollMs = 3000;
 export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignment: (id: string) => void }) {
   const api = useMemo(() => todayApi(callByName), []);
   const activity = useMemo(() => activityApi(callByName), []);
+  const calendar = useMemo(() => ({ api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) }), []);
   const openSummary = useOpenSummary();
   const [all, setAll] = useState(false);
   const [screen, setScreen] = useState<TodayScreen | null>(null);
@@ -135,7 +138,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 onOpenSummary={openSummary}
                 onOpenAll={() => setAll(true)}
               />
-              <PostsSection posts={screen.posts} onOpenSummary={openSummary} />
+              <PostsSection posts={screen.posts} onOpenSummary={openSummary} calendar={calendar} />
               <DoneSection done={screen.done} onOpenSummary={openSummary} />
             </div>
             <div>
