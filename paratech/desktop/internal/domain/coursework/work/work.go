@@ -84,9 +84,9 @@ func (w *Work) previous() []Previous {
 }
 
 // Record keeps the checked answer of round: an impossible work goes to the helper mode; questions in round 1 or 2 go
-// to the student; otherwise the card «Как я понял задание» is ready. Questions in the final round are refused
-// (ErrTooManyRounds): there is no third question round. Errors: ErrInvalidTransition, ErrStaleRound,
-// ErrTooManyRounds, ErrInvalidAnswer.
+// to the student; otherwise the card «Как я понял задание» is ready. Questions in the final round are dropped, as the
+// Hub does: there is no third question round, the answer goes on with its assumptions. Errors: ErrInvalidTransition,
+// ErrStaleRound, ErrInvalidAnswer.
 func (w *Work) Record(round int, a Answer, now time.Time) error {
 	if w.status != StatusTriage {
 		return fmt.Errorf("%w: no reader call is due in %s", ErrInvalidTransition, w.status)
@@ -94,8 +94,8 @@ func (w *Work) Record(round int, a Answer, now time.Time) error {
 	if round != w.round {
 		return fmt.Errorf("%w: answer of round %d, due %d", ErrStaleRound, round, w.round)
 	}
-	if len(a.Questions) > 0 && round > QuestionRounds {
-		return ErrTooManyRounds
+	if round == FinalRound {
+		a.Questions = []Question{}
 	}
 	if err := a.check(round); err != nil {
 		return err

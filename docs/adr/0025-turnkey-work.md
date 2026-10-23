@@ -13,7 +13,8 @@ it cannot do the work whole — then help instead. Everything the model says abo
 - **Aggregate `coursework/work`** (desktop), statuses as a table: `triage` → `questions` (rounds 1–2) → `triage` of
   the next round → `review` («Как я понял задание») → `confirmed` → `writing` → `done`; an impossible work → `helper`;
   a reader that refuses 3 attempts of a round → `failed`. No status leads to a third question round: round 3 is the
-  final reader call, its answer with questions is refused. «Пропустить» = every question takes its default.
+  final reader call: the Hub clears the questions of its answer and the desktop does the same, so the answer goes to
+  `review` with its assumptions instead of a refusal and a paid retry. «Пропустить» = every question takes its default.
 - **Reader `TRIAGE_ASSIGNMENT`** (Hub, `Complete`, server prompt and strong alias): the desktop sends the assignment
   text, the teacher's material and the previous questions with the student's answers as data; the answer is checked
   again on the desktop with the Hub's strict schema (exact keys, enums, bounded texts, default index in range, helper

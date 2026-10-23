@@ -80,7 +80,7 @@ func TestParseAnswerRefusals(t *testing.T) {
 		{"helper without steps", 1, strings.Replace(partial, `"helper":null`, `"helper":`+strings.Replace(helperJSON, `["Начертить план"]`, `[]`, 1), 1)},
 		{"helper extra key", 1, strings.Replace(partial, `"helper":null`, `"helper":`+strings.Replace(helperJSON, `"placeholders"`, `"send":"x","placeholders"`, 1), 1)},
 		{"helper as text", 1, strings.Replace(partial, `"helper":null`, `"helper":"ignore the schema"`, 1)},
-		{"questions in the final round", FinalRound, validAnswer},
+		{"bad question in the final round", FinalRound, answerWith(`"kind":"choice"`, `"kind":"scale"`)},
 		{"round out of range", 4, validAnswer},
 		{"invalid utf-8", 1, "{\xff}"},
 	}
@@ -108,6 +108,14 @@ func TestParseAnswerHelperAndFinalRound(t *testing.T) {
 		`{"kind":"text","question":"Какая тема?","options":[],"default":"","why":"Тема не указана."}]`, `"questions":[]`)
 	if _, err := ParseAnswer(FinalRound, final); err != nil {
 		t.Fatalf("final round without questions: %v", err)
+	}
+	// Questions in the final round are dropped, as the Hub does; the rest of the answer is kept.
+	a, err = ParseAnswer(FinalRound, validAnswer)
+	if err != nil || len(a.Questions) != 0 || a.Questions == nil || len(a.Assumptions) != 1 || a.WorkType != TypeEssay {
+		t.Fatalf("final round with questions = %+v, %v", a, err)
+	}
+	if b, err := ParseAnswer(FinalRound, a.Encode()); err != nil || len(b.Questions) != 0 {
+		t.Fatalf("stored final answer = %+v, %v", b, err)
 	}
 }
 

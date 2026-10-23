@@ -16,9 +16,6 @@ var (
 	// ErrInvalidAnswer means the reader's answer breaks the schema; the whole answer is refused.
 	ErrInvalidAnswer = errors.New("invalid triage_assignment answer")
 
-	// ErrTooManyRounds means an answer asked questions after the second round: there is no third question round.
-	ErrTooManyRounds = errors.New("work: no third question round")
-
 	// ErrStaleRound means an answer or a refusal is for another round than the one the work waits for.
 	ErrStaleRound = errors.New("work: answer of another round")
 

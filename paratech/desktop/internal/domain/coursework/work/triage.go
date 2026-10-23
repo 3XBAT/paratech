@@ -258,8 +258,8 @@ func (r Request) Parse(output string) (Answer, error) { return ParseAnswer(r.rou
 // ParseAnswer checks an answer of round against the schema: exactly the seven keys once each, enums of the closed
 // sets, every text bounded and without control characters, at most MaxQuestions questions (a choice with
 // MinOptions..MaxOptions distinct options and a default index among them, a text with no options and a default
-// text), a non-blank reason and a helper unless the work is feasible in full, no helper when it is, and no questions
-// in the final round. Anything else (another key, free text in an enum, a second object, a code fence) refuses the
+// text), a non-blank reason and a helper unless the work is feasible in full, no helper when it is. In the final
+// round the questions are dropped, as the Hub does. Anything else (another key, free text in an enum, a second object, a code fence) refuses the
 // whole answer with ErrInvalidAnswer; the error never quotes the output. Stored answers are read back with it too.
 func ParseAnswer(round int, output string) (Answer, error) {
 	if round < 1 || round > FinalRound {
@@ -328,6 +328,9 @@ func ParseAnswer(round int, output string) (Answer, error) {
 		if !seen[k] {
 			return Answer{}, fmt.Errorf("%w: %s is missing", ErrInvalidAnswer, k)
 		}
+	}
+	if round == FinalRound {
+		a.Questions = []Question{} // as the Hub does: there is no further round, the answer goes on without them
 	}
 	if err := a.check(round); err != nil {
 		return Answer{}, err

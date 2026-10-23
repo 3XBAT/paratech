@@ -97,21 +97,21 @@ func TestTwoRoundsThenFinal(t *testing.T) {
 	}
 }
 
-// A third question round from the reader (an answer of the final round with questions) is a refused answer.
-func TestThirdQuestionRoundRefused(t *testing.T) {
+// A third question round from the reader (an answer of the final round with questions) is not a refusal: as the Hub
+// does, the questions are dropped and the answer goes to review with its assumptions, without a paid retry.
+func TestThirdQuestionRoundDropped(t *testing.T) {
 	e := newEnv(t)
-	e.reader.then(out(work.FeasibleFull, 1)).then(out(work.FeasibleFull, 1)).then(out(work.FeasibleFull, 1)).
-		then(out(work.FeasibleFull, 0))
+	e.reader.then(out(work.FeasibleFull, 1)).then(out(work.FeasibleFull, 1)).then(out(work.FeasibleFull, 1))
 	ctx := t.Context()
 	st, _ := e.svc.Triage(ctx, work.Source{Assignment: "a1"})
 	v, _ := e.svc.SkipQuestions(ctx, st.View.ID)
 	v, err := e.svc.SkipQuestions(ctx, v.ID)
-	if !errors.Is(err, ErrReaderRefused) || v.Status != work.StatusTriage || v.Attempt != 2 {
+	if err != nil || v.Status != work.StatusReview || v.Round != work.FinalRound || v.Attempt != 1 ||
+		len(v.Questions) != 0 || len(v.Assumptions) != 1 {
 		t.Fatalf("questions in the final round = %+v, %v", v, err)
 	}
-	v, err = e.svc.Retry(ctx, v.ID)
-	if err != nil || v.Status != work.StatusReview {
-		t.Fatalf("retry = %+v, %v", v, err)
+	if e.reader.paid() != 3 {
+		t.Fatalf("paid calls = %d", e.reader.paid())
 	}
 }
 

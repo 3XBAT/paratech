@@ -121,19 +121,13 @@ func TestTwoQuestionRoundsThenFinal(t *testing.T) {
 		t.Fatalf("final data = %s, %v", req.UntrustedData(), err)
 	}
 
-	// A third question round is refused; nothing changes.
-	if err := w.Record(FinalRound, answerOf(FeasibleFull, 1), t0); !errors.Is(err, ErrTooManyRounds) {
-		t.Fatalf("third question round: %v", err)
-	}
-	if w.Status() != StatusTriage {
-		t.Fatalf("status after the refused round = %s", w.Status())
-	}
-	mustRecord(t, w, answerOf(FeasibleFull, 0))
+	// There is no third question round: the questions of the final answer are dropped and it goes to review.
+	mustRecord(t, w, answerOf(FeasibleFull, 1))
 	if w.Status() != StatusReview {
 		t.Fatalf("final round: %s", w.Status())
 	}
-	if a, _ := w.Latest(); len(a.Assumptions) != 1 {
-		t.Fatalf("assumptions = %v", a.Assumptions)
+	if a, _ := w.Latest(); len(a.Assumptions) != 1 || len(a.Questions) != 0 {
+		t.Fatalf("final answer = %+v", a)
 	}
 	if err := w.ConfirmRequirements(t0); err != nil || w.Status() != StatusConfirmed {
 		t.Fatalf("confirm: %v %s", err, w.Status())

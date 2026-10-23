@@ -26,8 +26,8 @@ func Statuses() []Status {
 }
 
 // transitions is the status machine: from -> allowed targets. A status without targets is terminal. No status leads
-// to a third question round: questions → triage raises the round, and an answer of the final round with questions is
-// refused (ErrTooManyRounds).
+// to a third question round: questions → triage raises the round, and the questions of a final-round answer are
+// dropped (Record).
 var transitions = map[Status][]Status{
 	StatusTriage: {
 		StatusQuestions, // the reader asked, in round 1 or 2
