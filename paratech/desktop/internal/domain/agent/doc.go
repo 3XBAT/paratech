@@ -12,7 +12,7 @@
 //     to the planner.
 //   - Turn (request): one request of the student and the steps it takes until DONE, STOPPED, FAILED or CANCELLED.
 //   - Step: one planner call on the Hub with the key ag:<thread>:<turn>:<step>; it returns 1 to 4 tool calls.
-//   - Tool: a closed catalog entry (golden list shared/testdata/tool_catalog_v1.json) with strictly typed arguments.
+//   - Tool: a closed catalog entry (golden list shared/testdata/tool_catalog_v2.json) with strictly typed arguments.
 //   - Class: R read-only, U reversible local (done at once, with Undo), C irreversible (proposal card, the student
 //     clicks), UI card only.
 //   - Plan: approved list of steps; later writes of the request must match an unused approved step.

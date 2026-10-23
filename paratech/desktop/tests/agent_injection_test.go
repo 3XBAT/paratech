@@ -47,6 +47,8 @@ func baselineValue(a values.ArgSpec) any {
 			return "Лабы"
 		}
 		return "производная"
+	case values.ArgQuery:
+		return "Что такое производная сложной функции?"
 	case values.ArgText:
 		return "Готово."
 	case values.ArgTextList:
@@ -191,14 +193,14 @@ func TestAgentInjectionSlotSweep(t *testing.T) {
 	}
 }
 
-// injectionMayPass is where untrusted text is allowed: words from the student's request (labels, which the planner
-// copies from the request it saw; it never saw the sources) and card texts the student reads. Stored names only when
-// the fixture says the text is a valid name.
+// injectionMayPass is where untrusted text is allowed: words from the student's request (labels and queries, which
+// the planner copies from the request it saw; it never saw the sources) and card texts the student reads. Stored names
+// only when the fixture says the text is a valid name.
 func injectionMayPass(a values.ArgSpec, fx injectionFixture) bool {
 	switch a.Type {
 	case values.ArgLabel:
 		return !a.Persistent || !fx.RefusedAsName
-	case values.ArgText, values.ArgTextList, values.ArgQuestions:
+	case values.ArgQuery, values.ArgText, values.ArgTextList, values.ArgQuestions:
 		return true
 	}
 	return false

@@ -389,7 +389,7 @@ func deliveryStateOf(s delivery.Status) values.DeliveryState {
 // --- search --------------------------------------------------------------------------------------------
 
 func (t tools) search(ctx context.Context, call values.Call, scope values.Scope) (values.ToolResult, []values.Ref, error) {
-	query, _ := call.Args().Label("query")
+	query, _ := call.Args().Query("query")
 	sub := values.SearchSubjectOf(call.Args(), scope)
 	found, err := t.knowledge.Search(ctx, string(query))
 	if err != nil {
