@@ -9,18 +9,23 @@ import (
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // opTriage names the log line of a triage whose reader call did not finish (the work stays, its call due).
 const opTriage = "agent: triage reader call not finished"
 
-// Turnkey is the turnkey work (cases/turnkey) as triage_assignment and its Undo use it. It has no method that writes
-// the work or confirms anything for the student: answers, edits and «Подтвердить» come only from input/wails.
+// Turnkey is the turnkey work (cases/turnkey) as triage_assignment, write_work and their Undo use it. It has no method
+// that confirms anything for the student: answers, edits, «Подтвердить» and regenerations come only from input/wails;
+// the agent writes only a work whose requirements the student confirmed.
 type Turnkey interface {
 	Triage(ctx context.Context, src work.Source) (turnkey.Started, error)
 	Work(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 	Remove(ctx context.Context, id shared.WorkID, expected int64) error
+	StartWriting(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
+	ActiveWriting(ctx context.Context, id shared.WorkID) (shared.JobID, bool, error)
 }
 
 // triage starts the work of an assignment or an uploaded file and asks the reader (TASK-129). The planner gets the
@@ -127,4 +132,125 @@ func (a *Actions) removeWork(ctx context.Context, c action.RemoveWork, expectedV
 		return fmt.Errorf("%w: %w", action.ErrTargetChanged, err)
 	}
 	return err
+}
+
+// --- write_work (TASK-131) ------------------------------------------------------------------------------
+
+// writeWork starts the writing of a confirmed work: one paid job that writes the outline, one section per step and
+// files the .docx into the subject's «ДЗ». It always runs on an approved plan (actionpolicy). The planner gets the
+// job only (ADR-0022); the progress card follows it («Раздел N из M»), the result card is the work's file
+// (turnkey.View.Writing.Result). A work done already, or one whose writing job runs, is no action of this call.
+// Undo (StopWork): the job is cancelled while it runs; once the paper is filed it goes back to «Входящие».
+func (a *Actions) writeWork(ctx context.Context, call values.Call) (prepared, error) {
+	if a.turnkey == nil {
+		return prepared{}, errUnavailable
+	}
+	ref, _ := call.Args().ID("work")
+	id := shared.WorkID(ref.ID())
+	v, err := a.turnkey.Work(ctx, id)
+	if err != nil {
+		return prepared{}, err
+	}
+	if v.Status == work.StatusDone {
+		return prepared{noop: &values.WriteRow{}}, nil
+	}
+	if running, ok, err := a.turnkey.ActiveWriting(ctx, id); err != nil {
+		return prepared{}, err
+	} else if ok {
+		j, err := values.NewRef(values.KindJob, string(running))
+		if err != nil {
+			return prepared{}, err
+		}
+		return prepared{noop: &values.WriteRow{Job: j}}, nil
+	}
+	return prepared{run: func(ctx context.Context) (effect, error) {
+		st, err := a.turnkey.StartWriting(ctx, id)
+		if err != nil {
+			return effect{}, err
+		}
+		e, err := jobEffect(st.Job, st.Created)
+		if err != nil {
+			return effect{}, err
+		}
+		e.comp = action.StopWork{Work: ref, Job: e.row.Job}
+		return e, nil
+	}}, nil
+}
+
+// checkWriting reads the target of a StopWork compensation: the job while it has not completed; then the paper it
+// filed, compensated once back in «Входящие», changed when the student moved it elsewhere or the work was written
+// again since.
+func (a *Actions) checkWriting(ctx context.Context, c action.StopWork) (action.Target, error) {
+	st, err := a.jobState(ctx, shared.JobID(c.Job.ID()))
+	if err != nil {
+		return action.Target{}, err
+	}
+	if st != job.StatusCompleted {
+		return action.Target{Version: jobVersion, Compensated: st == job.StatusCancelled || st == job.StatusFailed}, nil
+	}
+	if a.turnkey == nil {
+		return action.Target{}, errUnavailable
+	}
+	v, err := a.turnkey.Work(ctx, shared.WorkID(c.Work.ID()))
+	if err != nil {
+		return action.Target{}, gone(err)
+	}
+	if v.Writing == nil || v.Writing.Material == "" {
+		return action.Target{Version: jobVersion + 1}, nil
+	}
+	m, err := a.library.Material(ctx, v.Writing.Material)
+	if err != nil {
+		return action.Target{}, gone(err)
+	}
+	switch {
+	case m.InInbox():
+		return action.Target{Version: jobVersion, Compensated: true}, nil
+	case m.Folder() != subject.SystemFolderID(m.Subject(), subject.SystemHomework):
+		return action.Target{Version: jobVersion + 1}, nil
+	}
+	return action.Target{Version: jobVersion}, nil
+}
+
+// stopWork applies a StopWork compensation: a running job is cancelled; a filed paper still in «ДЗ» goes back to
+// «Входящие» in one transaction with the check.
+func (a *Actions) stopWork(ctx context.Context, c action.StopWork, expectedVersion int64) (int64, error) {
+	t, err := a.checkWriting(ctx, c)
+	switch {
+	case err != nil:
+		return 0, err
+	case t.Compensated:
+		return 0, nil
+	case t.Version != expectedVersion:
+		return 0, action.ErrTargetChanged
+	}
+	if st, err := a.jobState(ctx, shared.JobID(c.Job.ID())); err != nil {
+		return 0, err
+	} else if st != job.StatusCompleted {
+		err := a.cancelJob(ctx, shared.JobID(c.Job.ID()))
+		if !errors.Is(err, action.ErrResultReady) {
+			return jobVersion, err
+		}
+		// It completed meanwhile: its paper goes back to «Входящие» instead.
+	}
+	err = a.tx.Do(ctx, func(ctx context.Context) error {
+		t, err := a.checkWriting(ctx, c)
+		switch {
+		case err != nil:
+			return err
+		case t.Compensated:
+			return nil
+		case t.Version != expectedVersion:
+			return action.ErrTargetChanged
+		}
+		v, err := a.turnkey.Work(ctx, shared.WorkID(c.Work.ID()))
+		if err != nil {
+			return err
+		}
+		_, err = a.library.MoveToInbox(ctx, v.Writing.Material)
+		return changedIfConflict(err)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return jobVersion, nil
 }

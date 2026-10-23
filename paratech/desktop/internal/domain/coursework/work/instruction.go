@@ -5,61 +5,44 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
-
-	"paratech/desktop/internal/domain/coursework/values"
 )
 
-// typeNames are the Russian names of the work types, for the instruction text.
+// typeNames are the Russian names of the work types.
 var typeNames = map[WorkType]string{
 	TypeReferat: "реферат", TypeDoklad: "доклад", TypeEssay: "эссе", TypeAnswers: "ответы на вопросы",
 	TypeProblems: "решение задач", TypeLabReport: "отчёт по лабораторной", TypePresentation: "презентация",
-	TypeOther: "другое",
+	TypeOther: "работа",
 }
 
-// fieldNames are the Russian names of the requirement fields, for the instruction text.
-var fieldNames = map[Field]string{
-	FieldVolume: "Объём", FieldFileFormat: "Формат файла", FieldFormatting: "Оформление", FieldVariant: "Вариант",
-	FieldDeadline: "Срок", FieldSources: "Источники",
+// TypeName returns the Russian name of a work type («реферат»); "" for an unknown one.
+func TypeName(t WorkType) string { return typeNames[t] }
+
+// Brief is what the writer is told about a confirmed work (TASK-131): the card «Как я понял задание» with the
+// student's edits, the questions of the rounds with the student's answers and the reader's assumptions. The questions,
+// the assumptions and the card fields the student left were written by the reader model, so the brief is DATA: it goes
+// into the untrusted data block of a writing request as one JSON field, never into the instructions (ADR-0022).
+type Brief struct {
+	WorkType     WorkType     `json:"work_type"`
+	Requirements Requirements `json:"requirements"`
+	Answers      []Previous   `json:"answers"`     // "" answer: the student skipped the question
+	Assumptions  []string     `json:"assumptions"` // stated by the reader, not confirmed one by one
+	Partial      bool         `json:"partial"`     // only a part can be done (TASK-107)
 }
 
-// Instruction is the student's channel of the writing (TASK-094, the instruction of a generation): the confirmed card,
-// the answers to the questions and the stated assumptions, as plain lines. It is cut to values.MaxInstructionBytes
-// and cleaned with values.CleanInstruction. Only a confirmed (or later) work has one; before it is "".
-func (w *Work) Instruction() string {
+// Brief returns the brief of a confirmed (or later) work; ok is false before the requirements are confirmed.
+func (w *Work) Brief() (b Brief, ok bool) {
 	if w.status != StatusConfirmed && w.status != StatusWriting && w.status != StatusDone {
-		return ""
+		return Brief{}, false
 	}
 	u, _ := w.Understanding()
-	var b strings.Builder
-	fmt.Fprintf(&b, "Тип работы: %s\n", typeNames[u.WorkType])
-	for _, f := range Fields()[1:] {
-		if v := u.get(f); v != "" {
-			fmt.Fprintf(&b, "%s: %s\n", fieldNames[f], v)
-		}
-	}
-	if prev := w.previous(); len(prev) > 0 {
-		b.WriteString("Ответы на вопросы:\n")
-		for _, p := range prev {
-			answer := p.Answer
-			if answer == "" {
-				answer = "на усмотрение"
-			}
-			fmt.Fprintf(&b, "- %s — %s\n", p.Question, answer)
-		}
-	}
-	if a, ok := w.Latest(); ok && len(a.Assumptions) > 0 {
-		b.WriteString("Допущения:\n")
-		for _, s := range a.Assumptions {
-			fmt.Fprintf(&b, "- %s\n", s)
-		}
-	}
-	text, err := values.CleanInstruction(cutBytes(b.String(), values.MaxInstructionBytes))
-	if err != nil {
-		return "" // the parts are checked texts; a failure here means nothing safe to pass on
-	}
-	return text
+	a, _ := w.Latest()
+	return Brief{
+		WorkType: u.WorkType, Requirements: u.Requirements, Answers: append([]Previous{}, w.previous()...),
+		Assumptions: nonNil(slices.Clone(a.Assumptions)), Partial: w.Partial(),
+	}, true
 }
 
 // cutBytes returns the longest prefix of s of at most n bytes that ends on a whole character.

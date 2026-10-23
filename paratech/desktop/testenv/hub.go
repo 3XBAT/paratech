@@ -75,6 +75,14 @@ func (h *FakeHub) AnswerTriage(outputs ...string) {
 	h.queue[hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT] = append([]string(nil), outputs...)
 }
 
+// AnswerInOrder sets the model outputs of operation for keys the Hub has not seen yet, one per new key in order; the
+// last one answers every later key (the turnkey writing: the outline, then one section per call).
+func (h *FakeHub) AnswerInOrder(op values.Operation, outputs ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.queue[hubOperation(op)] = append([]string(nil), outputs...)
+}
+
 // RefuseTriage makes the next n new keys of TRIAGE_ASSIGNMENT fail as the Hub's schema refusal does.
 func (h *FakeHub) RefuseTriage(n int) {
 	h.mu.Lock()

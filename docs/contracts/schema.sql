@@ -741,3 +741,8 @@ CREATE TABLE work_rounds (
     replies  TEXT    CHECK (replies IS NULL OR json_valid(replies)),
     PRIMARY KEY (work_id, round)
 );
+
+-- works.writing (migration 0027): the writing state of a work in its canonical JSON (work.Writing.Encode), read back
+-- with work.ParseWriting and checked by the aggregate; NULL before the writing starts. Saved with the work under its
+-- version.
+ALTER TABLE works ADD COLUMN writing TEXT CHECK (writing IS NULL OR json_valid(writing));

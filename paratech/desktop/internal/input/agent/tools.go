@@ -15,6 +15,7 @@ import (
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/values"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
@@ -325,7 +326,7 @@ func workOf(t job.Type) values.JobWork {
 		return values.WorkHomework
 	case homeworkflow.LectureTextJobType:
 		return values.WorkLectureText
-	case homeworkflow.HomeworkDraftJobType:
+	case homeworkflow.HomeworkDraftJobType, turnkey.WritingJobType:
 		return values.WorkDraft
 	case senddelivery.JobType:
 		return values.WorkEmail

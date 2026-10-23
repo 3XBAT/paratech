@@ -29,7 +29,7 @@ func (q *Queries) DeleteWork(ctx context.Context, arg DeleteWorkParams) (int64, 
 }
 
 const getActiveWorkOfAssignment = `-- name: GetActiveWorkOfAssignment :one
-SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at FROM works WHERE assignment_id = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at, writing FROM works WHERE assignment_id = ?1 AND status <> 'failed'
 `
 
 // The work of an assignment that has not failed; at most one (idx_works_assignment).
@@ -53,12 +53,13 @@ func (q *Queries) GetActiveWorkOfAssignment(ctx context.Context, assignmentID sq
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Writing,
 	)
 	return i, err
 }
 
 const getActiveWorkOfMaterial = `-- name: GetActiveWorkOfMaterial :one
-SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at FROM works WHERE material_id = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at, writing FROM works WHERE material_id = ?1 AND status <> 'failed'
 `
 
 // The work of a library material that has not failed; at most one (idx_works_material).
@@ -82,13 +83,14 @@ func (q *Queries) GetActiveWorkOfMaterial(ctx context.Context, materialID sql.Nu
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Writing,
 	)
 	return i, err
 }
 
 const getWork = `-- name: GetWork :one
 
-SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at FROM works WHERE id = ?1
+SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at, writing FROM works WHERE id = ?1
 `
 
 // Turnkey works (TASK-129, ADR-0025): the aggregate coursework/work with its answered reader rounds, saved with the
@@ -113,18 +115,19 @@ func (q *Queries) GetWork(ctx context.Context, id string) (Work, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Writing,
 	)
 	return i, err
 }
 
 const insertWork = `-- name: InsertWork :exec
 INSERT INTO works (id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume,
-                   edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at,
-                   updated_at)
+                   edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version,
+                   created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, ?13, 1,
-        ?14, ?15)
+        ?10, ?11, ?12, ?13,
+        ?14, 1, ?15, ?16)
 `
 
 type InsertWorkParams struct {
@@ -141,6 +144,7 @@ type InsertWorkParams struct {
 	EditVariant    sql.NullString
 	EditDeadline   sql.NullString
 	EditSources    sql.NullString
+	Writing        sql.NullString
 	CreatedAt      int64
 	UpdatedAt      int64
 }
@@ -161,6 +165,7 @@ func (q *Queries) InsertWork(ctx context.Context, arg InsertWorkParams) error {
 		arg.EditVariant,
 		arg.EditDeadline,
 		arg.EditSources,
+		arg.Writing,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -211,9 +216,10 @@ SET status           = ?1,
     edit_variant     = ?8,
     edit_deadline    = ?9,
     edit_sources     = ?10,
+    writing          = ?11,
     version          = version + 1,
-    updated_at       = ?11
-WHERE id = ?12 AND version = ?13
+    updated_at       = ?12
+WHERE id = ?13 AND version = ?14
 `
 
 type UpdateWorkParams struct {
@@ -227,6 +233,7 @@ type UpdateWorkParams struct {
 	EditVariant     sql.NullString
 	EditDeadline    sql.NullString
 	EditSources     sql.NullString
+	Writing         sql.NullString
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -244,6 +251,7 @@ func (q *Queries) UpdateWork(ctx context.Context, arg UpdateWorkParams) (int64, 
 		arg.EditVariant,
 		arg.EditDeadline,
 		arg.EditSources,
+		arg.Writing,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

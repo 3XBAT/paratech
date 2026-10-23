@@ -20,8 +20,9 @@ const (
 )
 
 // WorkRepository stores the turnkey works (the turnkey.WorkRepository port, TASK-129). The reader's answer of a round
-// is kept in its canonical JSON and read back through work.ParseAnswer: stored model output passes the same strict
-// schema as a fresh one. Validation stays in the aggregate; the repository only converts rows.
+// is kept in its canonical JSON and read back through work.ParseAnswer, the writing (TASK-131) through
+// work.ParseWriting: stored model output passes the same strict checks as a fresh one. Validation stays in the
+// aggregate; the repository only converts rows.
 type WorkRepository struct{ db *DB }
 
 // NewWorkRepository returns the work repository of db.
@@ -66,6 +67,10 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 		v, ok := st.Edits[f]
 		return sql.NullString{String: v, Valid: ok}
 	}
+	var writing sql.NullString
+	if st.Writing != nil {
+		writing = sql.NullString{String: st.Writing.Encode(), Valid: true}
+	}
 	err := r.db.Do(ctx, func(ctx context.Context) error {
 		q := r.db.Queries(ctx)
 		if st.Version == 0 {
@@ -75,7 +80,8 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 				Attempt: int64(st.Attempt), EditWorkType: edit(work.FieldWorkType), EditVolume: edit(work.FieldVolume),
 				EditFileFormat: edit(work.FieldFileFormat), EditFormatting: edit(work.FieldFormatting),
 				EditVariant: edit(work.FieldVariant), EditDeadline: edit(work.FieldDeadline),
-				EditSources: edit(work.FieldSources), CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				EditSources: edit(work.FieldSources), Writing: writing, CreatedAt: jobMs(st.CreatedAt),
+				UpdatedAt: jobMs(st.UpdatedAt),
 			})
 			if err := DuplicateAsVersionConflict(MapError(ctx, err)); err != nil {
 				return err
@@ -86,7 +92,7 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 				EditWorkType: edit(work.FieldWorkType), EditVolume: edit(work.FieldVolume),
 				EditFileFormat: edit(work.FieldFileFormat), EditFormatting: edit(work.FieldFormatting),
 				EditVariant: edit(work.FieldVariant), EditDeadline: edit(work.FieldDeadline),
-				EditSources: edit(work.FieldSources), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
+				EditSources: edit(work.FieldSources), Writing: writing, UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
 				ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
@@ -191,11 +197,19 @@ func (r *WorkRepository) restore(ctx context.Context, row sqlcgen.Work) (*work.W
 			edits[f] = v.String
 		}
 	}
+	var writing *work.Writing
+	if row.Writing.Valid {
+		wr, err := work.ParseWriting(row.Writing.String)
+		if err != nil {
+			return bad("writing", err)
+		}
+		writing = &wr
+	}
 	w, err := work.Restore(work.State{
 		Version: row.Version, ID: shared.WorkID(row.ID),
 		Source: work.Source{Assignment: shared.AssignmentID(row.AssignmentID.String), Material: shared.MaterialID(row.MaterialID.String)},
 		Status: work.Status(row.Status), Round: int(row.Round), Attempt: int(row.Attempt), Rounds: rounds, Edits: edits,
-		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		Writing: writing, CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})
 	if err != nil {
 		return bad("state", err)

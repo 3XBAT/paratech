@@ -137,7 +137,13 @@ func (f fakeMaterials) MaterialText(_ context.Context, id shared.MaterialID) (*m
 	if s == "" {
 		text, err = material.NewText(nil, false)
 	}
-	return nil, text, err
+	if err != nil {
+		return nil, material.Text{}, err
+	}
+	m, err := material.New(material.Spec{
+		ID: id, Digest: material.DigestOf([]byte(id)), Size: 1, Type: material.TypeTXT, Name: string(id) + ".txt",
+	}, t0)
+	return m, text, err
 }
 
 // fakeReader answers the reader calls in order, like the Hub: a key seen before replays its first answer.

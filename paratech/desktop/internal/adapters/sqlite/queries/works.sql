@@ -15,12 +15,12 @@ SELECT * FROM works WHERE material_id = sqlc.arg(material_id) AND status <> 'fai
 -- A never-stored work (version 0) is inserted with version 1.
 -- name: InsertWork :exec
 INSERT INTO works (id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume,
-                   edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at,
-                   updated_at)
+                   edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version,
+                   created_at, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(assignment_id), sqlc.arg(material_id), sqlc.arg(status), sqlc.arg(round),
         sqlc.arg(attempt), sqlc.arg(edit_work_type), sqlc.arg(edit_volume), sqlc.arg(edit_file_format),
-        sqlc.arg(edit_formatting), sqlc.arg(edit_variant), sqlc.arg(edit_deadline), sqlc.arg(edit_sources), 1,
-        sqlc.arg(created_at), sqlc.arg(updated_at));
+        sqlc.arg(edit_formatting), sqlc.arg(edit_variant), sqlc.arg(edit_deadline), sqlc.arg(edit_sources),
+        sqlc.arg(writing), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
 
 -- name: UpdateWork :execrows
 UPDATE works
@@ -34,6 +34,7 @@ SET status           = sqlc.arg(status),
     edit_variant     = sqlc.arg(edit_variant),
     edit_deadline    = sqlc.arg(edit_deadline),
     edit_sources     = sqlc.arg(edit_sources),
+    writing          = sqlc.arg(writing),
     version          = version + 1,
     updated_at       = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);

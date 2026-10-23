@@ -264,6 +264,23 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 
+	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library. No advisor
+	// for «Спросить по шагу» yet: the Hub has no operation for it (ADR-0025). The writing (TASK-131) runs as a job on
+	// the Hub's homework_draft operation; the title page from the profile and the lesson the assignment shows, the
+	// paper filed into the subject's «ДЗ».
+	works, err := turnkey.New(turnkey.Deps{
+		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm, Clock: e.local,
+		IDs: e.ids, Log: log,
+		Writing: &turnkey.WritingDeps{
+			Writer: llm, Jobs: jobs, JobIDs: e.ids, Profiles: settings, Renderer: docx.New(), Lessons: c.proposals,
+			Shelf: lib, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("app: turnkey works: %w", err)
+	}
+	handlers.works = works
+
 	c.runner, err = jobrunner.New(jobrunner.Deps{
 		Jobs: jobs, Clock: e.clock, Sleeper: e.clock, Jitter: e.jitter, Log: log,
 		Power: e.power, Settings: settings,
@@ -368,16 +385,6 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	todayScreen, err := c.newTodayScreen(e, lib, log)
 	if err != nil {
 		return err
-	}
-
-	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library. No advisor
-	// for «Спросить по шагу» yet: the Hub has no operation for it (ADR-0025).
-	works, err := turnkey.New(turnkey.Deps{
-		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm, Clock: e.local,
-		IDs: e.ids, Log: log,
-	})
-	if err != nil {
-		return fmt.Errorf("app: turnkey works: %w", err)
 	}
 
 	if err := c.wireAgent(e, llm, agentReads{

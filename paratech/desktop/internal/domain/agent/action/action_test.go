@@ -205,7 +205,9 @@ func TestCompensationMatchesTool(t *testing.T) {
 		{"restore due", values.ToolEditDue, RestoreDue{Assignment: a1, OldDue: due}, true},
 		{"restore no due", values.ToolEditDue, RestoreDue{Assignment: a1}, true},
 		{"cancel job", values.ToolMakeSummary, CancelJob{Job: j1}, true},
-		{"cancel turnkey job", values.ToolWriteWork, CancelJob{Job: j1}, true},
+		{"stop turnkey writing", values.ToolWriteWork, StopWork{Work: ref(t, values.KindWork, "w1"), Job: j1}, true},
+		{"turnkey writing without its job", values.ToolWriteWork, StopWork{Work: ref(t, values.KindWork, "w1")}, false},
+		{"turnkey writing as a plain job", values.ToolWriteWork, CancelJob{Job: j1}, false},
 
 		{"nil", values.ToolCreateSubject, nil, false},
 		{"other tool's compensation", values.ToolCreateSubject, CancelJob{Job: j1}, false},
