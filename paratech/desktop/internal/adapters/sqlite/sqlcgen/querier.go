@@ -49,6 +49,12 @@ type Querier interface {
 	DeleteSummariesOfRecording(ctx context.Context, recordingID string) error
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
+	// Removes the work with its rounds (CASCADE) if it is still at the version the caller saw.
+	DeleteWork(ctx context.Context, arg DeleteWorkParams) (int64, error)
+	// The work of an assignment that has not failed; at most one (idx_works_assignment).
+	GetActiveWorkOfAssignment(ctx context.Context, assignmentID sql.NullString) (Work, error)
+	// The work of a library material that has not failed; at most one (idx_works_material).
+	GetActiveWorkOfMaterial(ctx context.Context, materialID sql.NullString) (Work, error)
 	GetAgentAction(ctx context.Context, id string) (AgentAction, error)
 	GetAgentActionByCall(ctx context.Context, arg GetAgentActionByCallParams) (AgentAction, error)
 	// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
@@ -114,6 +120,9 @@ type Querier interface {
 	// Transcripts (PRD section 8, AC-08) with the optimistic-concurrency protocol of ADR-0004(d). model_name and
 	// model_version are copies of the model identity, so they stay after the model row is removed (model_id SET NULL).
 	GetTranscript(ctx context.Context, id string) (Transcript, error)
+	// Turnkey works (TASK-129, ADR-0025): the aggregate coursework/work with its answered reader rounds, saved with the
+	// optimistic-concurrency protocol of ADR-0004(d); the rounds carry no version of their own.
+	GetWork(ctx context.Context, id string) (Work, error)
 	// Whether a job of the type has an idempotency key that starts with the prefix, in any status (TASK-060: one automatic
 	// STT job per recording). substr and length both count characters, so the comparison is exact for any text.
 	HasJobKeyPrefix(ctx context.Context, arg HasJobKeyPrefixParams) (bool, error)
@@ -163,6 +172,8 @@ type Querier interface {
 	InsertTodayPost(ctx context.Context, arg InsertTodayPostParams) error
 	// A never-stored transcript (version 0) is inserted with version 1.
 	InsertTranscript(ctx context.Context, arg InsertTranscriptParams) error
+	// A never-stored work (version 0) is inserted with version 1.
+	InsertWork(ctx context.Context, arg InsertWorkParams) error
 	// The caller passes the unfinished statuses (job.ActiveStatuses); the adapter holds no rule about them.
 	IsSttModelPinned(ctx context.Context, arg IsSttModelPinnedParams) (bool, error)
 	LastAgentStepSeq(ctx context.Context, threadID string) (int64, error)
@@ -266,6 +277,7 @@ type Querier interface {
 	// startup sweep that enqueues their transcription). Silent recordings are never transcribed (TASK-082), nor those
 	// marked for deletion (TASK-095). Ids only: the caller loads each one and its aggregate decides.
 	ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error)
+	ListWorkRounds(ctx context.Context, workID string) ([]WorkRound, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
@@ -324,10 +336,13 @@ type Querier interface {
 	// the protocol of every repository. The recording, the model reference and the pinned identity never change, so a
 	// stale save cannot undo ON DELETE SET NULL of the model.
 	UpdateTranscript(ctx context.Context, arg UpdateTranscriptParams) (int64, error)
+	UpdateWork(ctx context.Context, arg UpdateWorkParams) (int64, error)
 	UpsertSttSpeed(ctx context.Context, arg UpsertSttSpeedParams) error
 	// Live transcript parts (TASK-079). A row is replaced by (recording_id, seq): a rerun of the engine numbers from 0
 	// again. The STT job deletes the rows of a recording once its transcript is stored.
 	UpsertTranscriptPart(ctx context.Context, arg UpsertTranscriptPartParams) error
+	// A round is written once with its answer; its replies are set when the student answers.
+	UpsertWorkRound(ctx context.Context, arg UpsertWorkRoundParams) error
 }
 
 var _ Querier = (*Queries)(nil)

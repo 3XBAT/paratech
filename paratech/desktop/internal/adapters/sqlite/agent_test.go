@@ -263,10 +263,11 @@ func TestAgentActions(t *testing.T) {
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a1"), OldDue: due}},
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a2")}},
 		{values.ToolMakeSummary, action.CancelJob{Job: agentRef(t, values.KindJob, "j1")}},
+		{values.ToolTriageAssignment, action.RemoveWork{Work: agentRef(t, values.KindWork, "w1")}},
 	}
 	for i, tc := range comps {
-		id := shared.ActionID("a" + string(rune('0'+i)))
-		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: "c" + string(rune('0'+i)), Tool: tc.tool}, agentAt(i))
+		id := shared.ActionID(fmt.Sprintf("a%d", i))
+		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: tc.tool}, agentAt(i))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -49,8 +49,35 @@ func TestEmbeddedInspectMaterialV1(t *testing.T) {
 	}
 }
 
+func TestEmbeddedTriageAssignmentV1(t *testing.T) {
+	v, system, err := Op("triage_assignment")
+	if err != nil || v != 1 {
+		t.Fatalf("Op(triage_assignment) = v%d, %v; want v1", v, err)
+	}
+	if len(bytes.TrimSpace(system)) == 0 || !utf8.Valid(system) || bytes.IndexByte(system, 0) >= 0 {
+		t.Fatal("ops/triage_assignment/v1/system.md must be non-empty UTF-8 without NUL")
+	}
+	// The prompt names every key and enum value of the schema the Hub checks (domain/llm/services/triage).
+	for _, key := range []string{
+		"round", "previous", "assignment_text", "material_text",
+		"work_type", "requirements", "volume", "file_format", "formatting", "variant", "deadline", "sources",
+		"feasibility", "feasibility_reason", "questions", "kind", "question", "options", "default", "why", "assumptions",
+		"helper", "steps", "submit", "pitfalls", "ready_parts", "placeholders",
+		"referat", "doklad", "essay", "answers", "problems", "lab_report", "presentation", "other",
+		"full", "partial", "impossible", "choice", "text",
+	} {
+		if !bytes.Contains(system, []byte(`"`+key+`"`)) {
+			t.Errorf("the prompt does not name %s", key)
+		}
+	}
+	// Two question rounds, then the final call without questions (triage.FinalRound).
+	if !bytes.Contains(system, []byte("Rounds 1 and 2 may ask questions")) || !bytes.Contains(system, []byte("Round 3 is the last call")) {
+		t.Error("the prompt does not state the rounds")
+	}
+}
+
 func TestNoEmbeddedOperationPromptsYet(t *testing.T) {
-	for _, op := range []string{"answer", "triage_assignment"} {
+	for _, op := range []string{"answer"} {
 		if _, _, err := Op(op); !errors.Is(err, ErrNotFound) {
 			t.Errorf("Op(%s): err = %v, want ErrNotFound", op, err)
 		}

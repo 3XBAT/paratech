@@ -23,7 +23,8 @@ type LessonReadiness interface {
 //   - ReplacesReady: make_summary or make_lecture_text of a recording whose summary or lecture text is stored, or
 //     make_summary of a material whose summary is stored (TASK-122, with WithMaterials).
 //   - Cost: no estimate exists yet, so it stays unknown (zero) and every paid write needs a plan (D8, conservative).
-//   - Triage: no triage tool runs yet (TASK-103), so none.
+//   - Triage: not reported (TASK-129 follow-up). triage_assignment is a paid write of unknown cost, so it runs only as
+//     a step of an approved plan, and every later write of the request must match that plan anyway.
 type Facts struct {
 	lessons   LessonReadiness
 	materials MaterialReadiness // nil: a material's summary is never ready

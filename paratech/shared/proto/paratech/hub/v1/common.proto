@@ -44,7 +44,9 @@ enum OperationType {
   OPERATION_TYPE_INSPECT_MATERIAL = 6;
   // Answer to a student's question from lesson and material excerpts, with citations.
   OPERATION_TYPE_ANSWER = 7;
-  // Triage of a homework assignment: type, requirements, feasibility, questions.
+  // Triage of a homework assignment: type, requirements, feasibility, questions (at most 2 rounds), helper plan. Served
+  // by Complete with the Hub's prompt; untrusted_data and output are the JSON objects of the triage reader
+  // (paratech/README.md, hub/internal/domain/llm/services/triage).
   OPERATION_TYPE_TRIAGE_ASSIGNMENT = 8;
 }
 

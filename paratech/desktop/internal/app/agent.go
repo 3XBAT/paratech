@@ -12,6 +12,7 @@ import (
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/cases/turnkey"
 	agentloop "paratech/desktop/internal/input/agent"
 	"paratech/desktop/internal/input/wails"
 )
@@ -26,6 +27,7 @@ type agentReads struct {
 	deliveries  *senddelivery.Service
 	rerunner    *homeworkflow.Rerunner
 	materials   *homeworkflow.MaterialJobs // the summary and homework search of a library material (TASK-122)
+	turnkey     *turnkey.Service           // triage_assignment and its Undo (TASK-129)
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, TASK-127, ADR-0021): the steps of a request on the
@@ -54,7 +56,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	// commit in one transaction of the local database.
 	actions, err := agentloop.NewActions(agentloop.ActionDeps{
 		Library: reads.library, Lessons: reads.knowledge, Assignments: reads.assignments, Rerunner: reads.rerunner,
-		Materials: reads.materials, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner, Tx: c.db, Clock: e.local, Log: log,
+		Materials: reads.materials, Turnkey: reads.turnkey, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner,
+		Tx: c.db, Clock: e.local, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent actions: %w", err)

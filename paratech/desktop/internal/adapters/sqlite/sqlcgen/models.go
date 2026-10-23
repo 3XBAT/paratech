@@ -387,3 +387,29 @@ type TranscriptPart struct {
 	EndMs       int64
 	Text        string
 }
+
+type Work struct {
+	ID             string
+	AssignmentID   sql.NullString
+	MaterialID     sql.NullString
+	Status         string
+	Round          int64
+	Attempt        int64
+	EditWorkType   sql.NullString
+	EditVolume     sql.NullString
+	EditFileFormat sql.NullString
+	EditFormatting sql.NullString
+	EditVariant    sql.NullString
+	EditDeadline   sql.NullString
+	EditSources    sql.NullString
+	Version        int64
+	CreatedAt      int64
+	UpdatedAt      int64
+}
+
+type WorkRound struct {
+	WorkID  string
+	Round   int64
+	Answer  string
+	Replies sql.NullString
+}

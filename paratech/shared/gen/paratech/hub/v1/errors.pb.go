@@ -38,7 +38,11 @@ const (
 //	                                                         released. Whether a retry can help is ErrorDetail.retryable:
 //	                                                         true for a transient failure (timeout, overload), false for
 //	                                                         a permanent one (context too long, refusal). A retry with
-//	                                                         the same idempotency key opens a new attempt
+//	                                                         the same idempotency key opens a new attempt. Exception: an
+//	                                                         answer of a reader operation (INSPECT_MATERIAL,
+//	                                                         TRIAGE_ASSIGNMENT) or of AgentStep that breaks its schema was
+//	                                                         billed, so it is charged, not retryable, and a retry with
+//	                                                         the key replays the same error without a provider call
 //	ERROR_CODE_IDEMPOTENCY_CONFLICT  -> failed_precondition  the idempotency key was already used with a different
 //	                                                         request; the client has a bug, do not retry
 //

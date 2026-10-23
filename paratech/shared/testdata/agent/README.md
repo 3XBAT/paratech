@@ -19,13 +19,17 @@ a paid call costs 10 000 µ$ (below the plan threshold).
 ## injection/
 
 Untrusted text and the property it must never break: `name`, `source` (`material_text`, `file_name`, `transcript`,
-`ics_title`, `reader_enum`), `untrusted`, `property`, `refused_as_name` (never a stored subject/folder name),
+`ics_title`, `reader_enum`, `reader_text`), `untrusted`, `property`, `refused_as_name` (never a stored subject/folder name),
 `pending_driver` (what only the Driver, TASK-117, can check end to end).
 
 Tests: `desktop/tests/agent_injection_test.go` (every argument of every tool, names, tool results through the use case,
 and the INSPECT_MATERIAL answer: every fixture in every answer slot is refused by the desktop parser, and as the text
 of an uploaded file read end to end it moves nothing) and `hub/tests/agent_eval_test.go` (catalog check, the step through the handler, and the INSPECT_MATERIAL reader:
 every fixture as the material text, obeyed by the model in each answer slot, is a permanent `PROVIDER_ERROR`).
+
+The TRIAGE_ASSIGNMENT reader (TASK-129): every fixture as a triage question and a helper step stays card data and never
+reaches the planner, and obeyed in a schema slot it is refused (`desktop/tests/turnkey_test.go`,
+`hub/tests/triage_eval_test.go`).
 
 The C tools run end to end through the Driver to a confirm card in `desktop/tests/agent_propose_test.go` (TASK-127):
 the methodichka fixture is the source file of the assignment, its address never becomes the recipient.

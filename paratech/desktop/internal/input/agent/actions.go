@@ -78,14 +78,15 @@ type Tx interface {
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// ActionDeps are the dependencies of Actions; every one except Materials and Log is required. Without Materials the
-// tools on a material answer "unavailable".
+// ActionDeps are the dependencies of Actions; every one except Materials, Turnkey and Log is required. Without
+// Materials the tools on a material answer "unavailable", without Turnkey triage_assignment does.
 type ActionDeps struct {
 	Library     Library
 	Lessons     LessonInfo
 	Assignments AssignmentEdits
 	Rerunner    Rerunner
 	Materials   MaterialWork
+	Turnkey     Turnkey
 	Drafts      Drafts
 	Jobs        Activity
 	Canceller   JobCanceller
@@ -103,6 +104,7 @@ type Actions struct {
 	assignments AssignmentEdits
 	rerunner    Rerunner
 	materials   MaterialWork
+	turnkey     Turnkey
 	drafts      Drafts
 	jobs        Activity
 	canceller   JobCanceller
@@ -123,8 +125,8 @@ func NewActions(d ActionDeps) (*Actions, error) {
 	}
 	return &Actions{
 		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, rerunner: d.Rerunner, materials: d.Materials,
-		drafts: d.Drafts,
-		jobs:   d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
+		turnkey: d.Turnkey, drafts: d.Drafts,
+		jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
 	}, nil
 }
 
@@ -154,7 +156,10 @@ type effect struct {
 	version int64
 	row     values.WriteRow
 	created values.Ref // the subject or folder a create made
-	failed  bool       // the use case changed nothing (a job that existed already)
+	failed  bool       // the use case changed nothing (a job or a work that existed already)
+	// triage is what triage_assignment shows the planner instead of row; cards are the cards it adds.
+	triage *values.TriageRow
+	cards  []values.Card
 }
 
 // prepare looks at the target of call and returns how to run it; ok is false for a tool this desktop does not run.
@@ -180,6 +185,8 @@ func (a *Actions) prepare(ctx context.Context, call values.Call) (prepared, bool
 		p, err = a.postProcess(ctx, call)
 	case values.ToolGenerateDraft:
 		p, err = a.generateDraft(ctx, call)
+	case values.ToolTriageAssignment:
+		p, err = a.triage(call)
 	default:
 		return prepared{}, false, nil
 	}
@@ -598,6 +605,8 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 		return action.Target{
 			Version: jobVersion, Compensated: st == job.StatusCancelled || st == job.StatusFailed, Final: st == job.StatusCompleted,
 		}, nil
+	case action.RemoveWork:
+		return a.checkWork(ctx, v)
 	}
 	return action.Target{}, fmt.Errorf("%w: %T", action.ErrInvalidCompensation, c)
 }
@@ -612,6 +621,10 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 			return 0, err
 		}
 		return jobVersion, nil
+	}
+	if v, ok := c.(action.RemoveWork); ok {
+		// The repository removes the work under its version itself; nothing is left to rebase on.
+		return 0, a.removeWork(ctx, v, expectedVersion)
 	}
 	var after int64
 	err := a.tx.Do(ctx, func(ctx context.Context) error {

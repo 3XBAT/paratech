@@ -33,6 +33,7 @@ import (
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/inspection"
@@ -365,7 +366,7 @@ func TestSchemaVersionColumns(t *testing.T) {
 	tables := readSchema(t)
 	for _, name := range []string{
 		"jobs", "recordings", "transcripts", "assignments", "schedule_entries", "stt_models", "deliveries", "settings",
-		"homework_drafts", "proposals", "subjects", "materials", "material_inspections",
+		"homework_drafts", "proposals", "subjects", "materials", "material_inspections", "works",
 	} {
 		body, ok := tables[name]
 		if !ok {
@@ -417,6 +418,7 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 		{"agent_actions", sortedStrings(action.Statuses())},
 		{"materials", sortedStrings(material.Statuses())},
 		{"material_inspections", sortedStrings(inspection.Statuses())},
+		{"works", sortedStrings(work.Statuses())},
 	}
 	for _, tc := range cases {
 		t.Run(tc.table, func(t *testing.T) {

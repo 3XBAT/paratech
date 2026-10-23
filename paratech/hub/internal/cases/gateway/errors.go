@@ -26,7 +26,7 @@ var (
 	// ErrAttemptRunning means an attempt with the same key is still running; retry with backoff.
 	ErrAttemptRunning = errors.New("an attempt with this idempotency key is still running")
 
-	// ErrInvalidAnswer means the model's answer broke the strict schema of its operation (INSPECT_MATERIAL) and was
+	// ErrInvalidAnswer means the model's answer broke the strict schema of its reader operation (INSPECT_MATERIAL, TRIAGE_ASSIGNMENT) and was
 	// refused whole. It comes inside a permanent *ProviderFailedError; unlike other provider failures the answer was
 	// charged, and a retry with the same key repeats the refusal without a provider call.
 	ErrInvalidAnswer = errors.New("the model answer breaks the operation schema")
