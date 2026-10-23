@@ -27,7 +27,7 @@ type FakeHub struct {
 
 	mu        sync.Mutex
 	outputs   map[hubv1.OperationType]string
-	queue     map[hubv1.OperationType][]string // outputs one per new key; the last one stays
+	queue     map[hubv1.OperationType][]string   // outputs one per new key; the last one stays
 	results   map[string]*hubv1.CompletionResult // by idempotency key
 	prints    map[string]string                  // fingerprint of the spec, by idempotency key
 	requests  []*hubv1.CompleteRequest

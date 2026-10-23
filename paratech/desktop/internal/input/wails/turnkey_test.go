@@ -22,7 +22,9 @@ type fakeTurnkey struct {
 	src     work.Source
 }
 
-func (f *fakeTurnkey) Work(context.Context, shared.WorkID) (turnkey.View, error) { return f.view, f.err }
+func (f *fakeTurnkey) Work(context.Context, shared.WorkID) (turnkey.View, error) {
+	return f.view, f.err
+}
 
 func (f *fakeTurnkey) WorkOf(_ context.Context, src work.Source) (turnkey.View, error) {
 	f.src = src
@@ -34,7 +36,9 @@ func (f *fakeTurnkey) AnswerQuestions(_ context.Context, _ shared.WorkID, r []wo
 	return f.view, f.err
 }
 
-func (f *fakeTurnkey) SkipQuestions(context.Context, shared.WorkID) (turnkey.View, error) { return f.view, f.err }
+func (f *fakeTurnkey) SkipQuestions(context.Context, shared.WorkID) (turnkey.View, error) {
+	return f.view, f.err
+}
 
 func (f *fakeTurnkey) EditUnderstanding(_ context.Context, _ shared.WorkID, u work.Understanding) (turnkey.View, error) {
 	f.edit = u
@@ -45,7 +49,9 @@ func (f *fakeTurnkey) ConfirmRequirements(context.Context, shared.WorkID) (turnk
 	return f.view, f.err
 }
 
-func (f *fakeTurnkey) Retry(context.Context, shared.WorkID) (turnkey.View, error) { return f.view, f.err }
+func (f *fakeTurnkey) Retry(context.Context, shared.WorkID) (turnkey.View, error) {
+	return f.view, f.err
+}
 
 func (f *fakeTurnkey) AskStep(context.Context, shared.WorkID, int, string) (string, error) {
 	return f.advice, f.err

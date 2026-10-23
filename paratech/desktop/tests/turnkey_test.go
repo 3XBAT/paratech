@@ -114,7 +114,9 @@ func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
 
 type noListedAssignments struct{}
 
-func (noListedAssignments) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) { return nil, nil }
+func (noListedAssignments) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
+	return nil, nil
+}
 
 // triageOutput is a canonical reader answer: a partial work with one choice question and a helper plan, whose
 // question and first step carry text.
