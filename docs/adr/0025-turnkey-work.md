@@ -59,6 +59,23 @@ it cannot do the work whole — then help instead. Everything the model says abo
   `works.writing` (migration 0028) as canonical JSON read back through the strict parser.
 - **Deleting the assignment** cancels the work and its writing job.
 
+## Addendum (TASK-133): exam tickets
+- **Aggregate** `coursework/ticketset`: proposed → confirmed → answering → done | failed | cancelled.
+- **Parser**: deterministic, on the desktop (no Hub operation): numbered lines («1.», «1)», «Билет 1»), at most 100
+  tickets of at most 500 characters; the list is untrusted data, never an instruction.
+- **Confirm** only by the student (`input/wails` `TicketService`; the agent has no port to it). A run whose estimate
+  is over the cap needs the student's acceptance of the cost; the estimate and cap shown are stored with the set and
+  a stored set is checked against them, never against the current constants. The estimate is typical, not a bound.
+- **Coverage** per ticket from its answer: covered (every claim supported by a checked citation), partial,
+  not_covered («нет в ваших лекциях»: no supported claim); a refused answer is failed for that ticket only.
+- **Job `ticket_answers`**: one ticket per queue step (`answering.Ask` through a port of the tickets use case), a
+  stored result is never asked again. No connection or quota waits; a permanent Hub error fails the job, and the set
+  shows as stalled until the student confirms again.
+- **Result**: a `.docx` filed into the subject's «Билеты»; Undo moves it back to «Входящие», the file kept, only while
+  it is still there. Files dedupe by sha256: two sets with identical bytes share one material, so an Undo of one
+  moves the file of both.
+- **Agent tool** `prepare_tickets` is deferred: it needs Hub tool catalog v3.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.
