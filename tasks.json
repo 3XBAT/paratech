@@ -3089,7 +3089,7 @@
                 "go test -race ./hub/internal/adapters/anthropic/... и golangci-lint"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-145",
