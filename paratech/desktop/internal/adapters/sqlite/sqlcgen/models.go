@@ -68,6 +68,18 @@ type AgentTurn struct {
 	UpdatedAt      int64
 }
 
+type Answer struct {
+	ID         string
+	RequestKey string
+	SubjectID  sql.NullString
+	Question   string
+	Fragments  int64
+	Claims     string
+	Missing    string
+	Sources    string
+	CreatedAt  int64
+}
+
 type Assignment struct {
 	ID            string
 	LessonID      sql.NullString
