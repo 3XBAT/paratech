@@ -65,6 +65,9 @@ func (IDs) NewWorkID() shared.WorkID { return shared.WorkID(token()) }
 // NewAnswerID returns a fresh identifier of an answer with citations.
 func (IDs) NewAnswerID() shared.AnswerID { return shared.AnswerID(token()) }
 
+// NewTicketSetID returns a fresh identifier of a set of exam tickets.
+func (IDs) NewTicketSetID() shared.TicketSetID { return shared.TicketSetID(token()) }
+
 // NewMessageID returns a fresh RFC 5322 Message-ID "<random@paratech.invalid>".
 func (IDs) NewMessageID() string { return "<" + token() + "@" + messageIDDomain + ">" }
 

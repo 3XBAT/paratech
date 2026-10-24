@@ -26,8 +26,6 @@ func (s *Service) MaterialText(ctx context.Context, id shared.MaterialID) (*mate
 	}
 	m, err := s.Material(ctx, id)
 	switch {
-	case errors.Is(err, ErrMaterialNotFound):
-		return nil, material.Text{}, fmt.Errorf("%w: %w", err, shared.ErrNotFound)
 	case err != nil:
 		return nil, material.Text{}, err
 	case !m.Active():

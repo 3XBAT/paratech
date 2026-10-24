@@ -370,6 +370,17 @@ type Summary struct {
 	MaterialID    sql.NullString
 }
 
+type TicketSet struct {
+	ID         string
+	SubjectID  string
+	MaterialID sql.NullString
+	Status     string
+	Content    string
+	Version    int64
+	CreatedAt  int64
+	UpdatedAt  int64
+}
+
 type TodayPost struct {
 	RecordingID  string
 	TranscriptID string

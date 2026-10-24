@@ -46,6 +46,7 @@ import (
 	"paratech/desktop/internal/cases/sttspeed"
 	"paratech/desktop/internal/cases/summaryview"
 	"paratech/desktop/internal/cases/supportbundle"
+	"paratech/desktop/internal/cases/tickets"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/transcriptview"
 	"paratech/desktop/internal/cases/turnkey"
@@ -282,6 +283,36 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	}
 	handlers.works = works
 
+	// The knowledge base reads the same local results at query time and groups lessons by library subject; dates of
+	// the export in the local time zone.
+	knowledge, err := knowledgebase.New(knowledgebase.Deps{
+		Library: lib, Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
+		Artifacts: store, Summaries: summaries, LectureTexts: lectureTexts, Writer: textfile.New(), Clock: e.local, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: knowledge base: %w", err)
+	}
+	// Answers with citations (TASK-118): passages of the knowledge base, the ANSWER reader on the Hub, the answers kept
+	// locally for their cards.
+	answers, err := answering.New(answering.Deps{
+		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Clock: e.clock, IDs: e.ids, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: answers: %w", err)
+	}
+	// Exam tickets (TASK-133): one answer with citations per ticket as a job, the file filed into the subject's
+	// «Билеты»; the title page from the profile, the lesson dates in the local time zone. The runner that cancels a
+	// run is built next.
+	ticketSets, err := tickets.New(tickets.Deps{
+		Sets: sqlite.NewTicketSetRepository(db), Materials: lib, Answerer: ticketAnswers{answers: answers}, Shelf: lib,
+		Jobs: jobs, Canceller: runnerCanceller{c: c}, Profiles: settings, Renderer: docx.New(), Clock: e.local,
+		IDs: e.ids, Log: log, MaxAttempts: maxAttempts,
+	})
+	if err != nil {
+		return fmt.Errorf("app: tickets: %w", err)
+	}
+	handlers.tickets = ticketSets
+
 	c.runner, err = jobrunner.New(jobrunner.Deps{
 		Jobs: jobs, Clock: e.clock, Sleeper: e.clock, Jitter: e.jitter, Log: log,
 		Power: e.power, Settings: settings,
@@ -373,28 +404,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: summary viewer: %w", err)
 	}
-	// The knowledge base reads the same local results at query time and groups lessons by library subject; dates of
-	// the export in the local time zone.
-	knowledge, err := knowledgebase.New(knowledgebase.Deps{
-		Library: lib, Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
-		Artifacts: store, Summaries: summaries, LectureTexts: lectureTexts, Writer: textfile.New(), Clock: e.local, Log: log,
-	})
-	if err != nil {
-		return fmt.Errorf("app: knowledge base: %w", err)
-	}
-
 	todayScreen, err := c.newTodayScreen(e, lib, log)
 	if err != nil {
 		return err
-	}
-
-	// Answers with citations (TASK-118): passages of the knowledge base, the ANSWER reader on the Hub, the answers kept
-	// locally for their cards.
-	answers, err := answering.New(answering.Deps{
-		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Clock: e.clock, IDs: e.ids, Log: log,
-	})
-	if err != nil {
-		return fmt.Errorf("app: answers: %w", err)
 	}
 
 	if err := c.wireAgent(e, llm, agentReads{
@@ -428,6 +440,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},
 		Turnkey:      works,
 		Answers:      answers,
+		Tickets:      ticketSets,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

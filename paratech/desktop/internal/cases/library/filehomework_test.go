@@ -37,3 +37,22 @@ func TestFileHomework(t *testing.T) {
 		t.Fatalf("a gone subject = %+v, %v", gone, err)
 	}
 }
+
+// TestFileTickets: the answers to a ticket set land in «Билеты» of their subject (TASK-133), never in «ДЗ».
+func TestFileTickets(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	sub := createSubject(t, e, "Физика")
+	tickets, _ := sub.SystemFolder(subject.SystemTickets)
+
+	m, err := e.svc.FileTickets(ctx, sub.ID(), "Билеты Физика.docx", docx(t))
+	if err != nil || m.Subject() != sub.ID() || m.Folder() != tickets.ID() {
+		t.Fatalf("FileTickets = %+v, %v", m, err)
+	}
+	if again, err := e.svc.FileTickets(ctx, sub.ID(), "Билеты Физика.docx", docx(t)); err != nil || again.ID() != m.ID() {
+		t.Fatalf("again = %+v, %v", again, err)
+	}
+	if again, err := e.svc.FileHomework(ctx, sub.ID(), "Билеты Физика.docx", docx(t)); err != nil || again.Folder() == tickets.ID() {
+		t.Fatalf("the same file as homework = %+v, %v", again, err)
+	}
+}

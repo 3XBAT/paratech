@@ -9,6 +9,7 @@ import (
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
+	"paratech/desktop/internal/cases/tickets"
 	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -50,6 +51,7 @@ type jobHandlers struct {
 	postProcess jobrunner.Handler // summarize, extract_homework and lecture_text
 	drafts      jobrunner.Handler
 	works       jobrunner.Handler // the writing of a turnkey work (TASK-131)
+	tickets     jobrunner.Handler // the answers to a set of exam tickets (TASK-133)
 	delivery    deliveryJobs
 	calendar    jobrunner.Handler // the calendar sync of the schedule
 }
@@ -71,13 +73,13 @@ func sttRegistration(h jobrunner.Handler) jobrunner.Registration {
 // hiddenJobTypes are the job types of background service work that involves no user; «Записи и задачи» leaves them
 // out (TASK-074). The calendar sync runs after every trigger and its result is shown in the Google section instead.
 // The work on a library material belongs to a request of the agent and is shown in its panel (TASK-122), as does the
-// writing of a turnkey work (TASK-131, its progress card).
+// writing of a turnkey work (TASK-131, its progress card) and the answers to a ticket set (TASK-133, the tickets screen).
 // STT, summaries and homework belong to a lesson: the activity use case shows them in the row of their recording
 // (TASK-076); drafts and sending belong to an action of the user and stay listed.
 func hiddenJobTypes() []job.Type {
 	return []job.Type{
 		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
-		turnkey.WritingJobType,
+		turnkey.WritingJobType, tickets.JobType,
 	}
 }
 
@@ -103,6 +105,9 @@ func registrations(h jobHandlers) []jobrunner.Registration {
 		// One step is one call (the outline or a section) or the local file; a step that times out is repeated
 		// under the same key (a free replay).
 		llm(turnkey.WritingJobType, h.works, llmJobTimeout),
+		// One step is one answer with citations (one Hub call) or the local file; a repeated step finds the stored
+		// answer or is replayed by the Hub under the same key.
+		llm(tickets.JobType, h.tickets, llmJobTimeout),
 		// An external side effect: never Heavy (a flapping power source must not loop it), never rerun blindly.
 		jobrunner.Registration{
 			Type: senddelivery.JobType, Handler: h.delivery, Reconciler: h.delivery, Recovery: jobrunner.RecoveryReconcile,

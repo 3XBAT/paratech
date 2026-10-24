@@ -202,7 +202,8 @@ func (s *Service) Materials(ctx context.Context, sub shared.SubjectID) ([]*mater
 	return list, nil
 }
 
-// Material returns one file of the library in any status; a missing one is ErrMaterialNotFound.
+// Material returns one file of the library in any status; a missing one is ErrMaterialNotFound (also
+// shared.ErrNotFound, for callers that cannot import this package).
 func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
 	if id.Validate() != nil {
 		return nil, ErrInvalidRequest
@@ -210,7 +211,7 @@ func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material
 	m, err := s.materials.Get(ctx, id)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil, ErrMaterialNotFound
+		return nil, fmt.Errorf("%w: %w", ErrMaterialNotFound, shared.ErrNotFound)
 	case err != nil:
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -322,6 +323,18 @@ func (s *Service) Place(ctx context.Context, id shared.MaterialID, sub shared.Su
 // no subject, or one that is gone, it stays in «Входящие». The same bytes again give the material that exists, filed
 // in «ДЗ» again, so a repeated job step files one material.
 func (s *Service) FileHomework(ctx context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error) {
+	return s.fileInto(ctx, sub, subject.SystemHomework, name, data)
+}
+
+// FileTickets stores the answers to a ticket set (TASK-133) and files them in «Билеты» of sub, as FileHomework does
+// for «ДЗ».
+func (s *Service) FileTickets(ctx context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error) {
+	return s.fileInto(ctx, sub, subject.SystemTickets, name, data)
+}
+
+// fileInto imports a file the app made and places it in the system folder of sub; with no subject, or one that is
+// gone, it stays in «Входящие».
+func (s *Service) fileInto(ctx context.Context, sub shared.SubjectID, folder subject.System, name string, data []byte) (*material.Material, error) {
 	im, err := s.Import(ctx, Upload{Name: name, Data: data})
 	if err != nil || sub == "" {
 		return im.Material, err
@@ -333,7 +346,7 @@ func (s *Service) FileHomework(ctx context.Context, sub shared.SubjectID, name s
 	case err != nil:
 		return nil, err
 	}
-	f, ok := target.SystemFolder(subject.SystemHomework)
+	f, ok := target.SystemFolder(folder)
 	if !ok {
 		return im.Material, nil
 	}

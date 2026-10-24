@@ -21,8 +21,8 @@ import (
 var contractTables = []string{
 	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "answers", "assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
 	"material_inspections", "material_lessons", "materials", "proposals", "recordings", "schedule_entries", "settings", "stt_models", "stt_speeds",
-	"subject_aliases", "subject_folders", "subjects", "summaries", "today_posts", "transcript_parts", "transcripts",
-	"work_rounds", "works",
+	"subject_aliases", "subject_folders", "subjects", "summaries", "ticket_sets", "today_posts", "transcript_parts",
+	"transcripts", "work_rounds", "works",
 }
 
 // unversionedTables hold rows that are written once and never saved again, so they have no Save port and no version
@@ -89,8 +89,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 28 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 28", first, err)
+	if err != nil || first != 29 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 29", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")

@@ -118,6 +118,9 @@ type Querier interface {
 	// the transcript id, one summary per transcript (TASK-042); a material's summary has the id "material-<material id>"
 	// and the material_id (TASK-122). sections is NULL for a summary made before TASK-101.
 	GetSummary(ctx context.Context, id string) (Summary, error)
+	// Exam ticket sets (TASK-133): the aggregate coursework/ticketset, saved with the optimistic-concurrency protocol of
+	// ADR-0004(d).
+	GetTicketSet(ctx context.Context, id string) (TicketSet, error)
 	// Posts after lessons on the Today screen (TASK-125) with the optimistic-concurrency protocol of ADR-0004(d). The id is the
 	// recording id: one post per recording.
 	GetTodayPost(ctx context.Context, recordingID string) (TodayPost, error)
@@ -173,6 +176,8 @@ type Querier interface {
 	InsertSubjectFolder(ctx context.Context, arg InsertSubjectFolderParams) error
 	// A never-stored summary (version 0) is inserted with version 1.
 	InsertSummary(ctx context.Context, arg InsertSummaryParams) error
+	// A never-stored set (version 0) is inserted with version 1.
+	InsertTicketSet(ctx context.Context, arg InsertTicketSetParams) error
 	// A never-stored post (version 0) is inserted with version 1.
 	InsertTodayPost(ctx context.Context, arg InsertTodayPostParams) error
 	// A never-stored transcript (version 0) is inserted with version 1.
@@ -272,6 +277,8 @@ type Querier interface {
 	// The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 	// aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
 	ListSubjects(ctx context.Context) ([]Subject, error)
+	// The sets of one subject for the tickets screen, newest first (idx_ticket_sets_subject).
+	ListTicketSetsBySubject(ctx context.Context, arg ListTicketSetsBySubjectParams) ([]TicketSet, error)
 	ListTodayPostsSince(ctx context.Context, arg ListTodayPostsSinceParams) ([]TodayPost, error)
 	// One page in number order; the primary key serves the order.
 	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)
@@ -335,6 +342,8 @@ type Querier interface {
 	// Compare-and-swap on the loaded version. The transcript, the material and the lesson never change, so a stale save
 	// cannot undo ON DELETE SET NULL.
 	UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (int64, error)
+	// Compare-and-swap on the loaded version. The subject, the material and the creation time never change.
+	UpdateTicketSet(ctx context.Context, arg UpdateTicketSetParams) (int64, error)
 	// Compare-and-swap on the loaded version. The recording and the creation time never change.
 	UpdateTodayPost(ctx context.Context, arg UpdateTodayPostParams) (int64, error)
 	// Compare-and-swap on the loaded version. A transcript does not change today; the update exists so that Save keeps

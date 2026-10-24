@@ -431,7 +431,7 @@ func TestMaterial(t *testing.T) {
 	if err != nil || got.ID() != m.ID() || !got.InInbox() || got.Version() != m.Version() {
 		t.Fatalf("Material = %+v, %v", got, err)
 	}
-	if _, err := e.svc.Material(ctx, "nope"); !errors.Is(err, ErrMaterialNotFound) {
+	if _, err := e.svc.Material(ctx, "nope"); !errors.Is(err, ErrMaterialNotFound) || !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("Material(unknown) = %v", err)
 	}
 	if _, err := e.svc.Material(ctx, "a b"); !errors.Is(err, ErrInvalidRequest) {
