@@ -3,7 +3,7 @@ import { type LibraryMaterial, type LibrarySubject, libraryApi } from "../bindin
 import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
-import { isRunning, texts, ticketsPollMs } from "../ticketsView.js";
+import { needsPolling, texts, ticketsPollMs } from "../ticketsView.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
 import { SetCard } from "./TicketsParts.js";
@@ -77,7 +77,7 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
     };
   }, [api, lib, subjectId]);
 
-  const anyRunning = (sets ?? []).some(isRunning);
+  const anyRunning = (sets ?? []).some(needsPolling);
   useEffect(() => {
     if (!anyRunning || subjectId === "") {
       return;
@@ -230,7 +230,8 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
                   key={s.id}
                   set={s}
                   subjectName={subject.name}
-                  busy={blocked}
+                  busy={busy === s.id}
+                  blocked={blocked}
                   error={setErrors[s.id] ?? ""}
                   onConfirm={(accept) => void onSetAction(s.id, () => api.confirm(s.id, accept))}
                   onCancel={() => void onSetAction(s.id, () => api.cancel(s.id))}

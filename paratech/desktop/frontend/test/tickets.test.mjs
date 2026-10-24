@@ -12,6 +12,7 @@ import {
   fileNote,
   moves,
   needsCostConsent,
+  needsPolling,
   percent,
   progressText,
   reportParts,
@@ -94,8 +95,10 @@ test("status mapping: proposed, running, waits, stalled, done, failed, cancelled
   assert.equal(statusView(set()).label, "Ждёт подтверждения");
   assert.equal(statusView(set({ status: "answering", jobStatus: "RUNNING" })).kind, "run");
   assert.equal(statusView(set({ status: "confirmed", jobStatus: "QUEUED" })).label, "В очереди");
-  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_NETWORK" })).kind, "net");
-  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_QUOTA" })).kind, "wait");
+  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_NETWORK" })).kind, "net");
+  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_QUOTA" })).label, "Минуты обработки закончились");
+  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_POWER" })).label, "Ждёт зарядку");
+  assert.equal(statusView(set({ status: "answering", jobStatus: "RETRY_WAIT" })).label, "Ждёт повтора");
   const stalled = statusView(set({ status: "answering", jobStatus: "FAILED", stalled: true }));
   assert.equal(stalled.label, "Застряло");
   assert.equal(stalled.kind, "fail");
@@ -130,10 +133,16 @@ test("a run over the cap is never allowed without the ticked consent; acceptCost
   assert.deepEqual(confirmGate(over, false), { allowed: false, acceptCost: false });
   assert.deepEqual(confirmGate(over, true), { allowed: true, acceptCost: true });
 
-  // The ticket count is a second guard when the core's flag is absent.
+  // Only the core's flag decides, not the ticket count.
   const many = set({ total: 34, budget: { tickets: 34, estimateMicroUsd: 1, capMicroUsd: 3000000, overCap: false } });
-  assert.equal(needsCostConsent(many), true);
-  assert.equal(confirmGate(many, false).allowed, false);
+  assert.equal(needsCostConsent(many), false);
+  assert.equal(confirmGate(many, false).allowed, true);
+
+  // A stalled restart never asks for the cost again.
+  const stalled = set({ status: "answering", stalled: true, budget: over.budget });
+  assert.deepEqual(confirmGate(stalled, false), { allowed: true, acceptCost: false });
+  assert.equal(needsPolling(stalled), false);
+  assert.equal(needsPolling(set({ status: "answering" })), true);
 });
 
 test("not-covered mapping: a missing answer is «Не покрыто», never green", () => {
@@ -199,6 +208,7 @@ test("the stalled card shows «Застряло» and the restart button", () =>
   );
   assert.ok(html.includes("Застряло"));
   assert.ok(html.includes("Запустить снова"));
+  assert.ok(!html.includes('type="checkbox"'), "no cost checkbox on a restart");
 });
 
 test("no source of the tickets screen uses raw HTML, and Confirm is only called from the page", () => {

@@ -53,8 +53,9 @@ export const texts = {
   notCoveredHint: "Не найдено в лекциях.",
   generatedNote: "Ответы сгенерированы по лекциям: перед сдачей их нужно прочитать и проверить.",
   openNote:
-    "Кнопки «Открыть .docx» здесь пока нет: файл лежит в папке «Билеты» этого предмета, открыть его можно из «Предметов».",
+    "Кнопки «Открыть .docx» пока нет: файл лежит в папке «Билеты» этого предмета.",
   costConsent: "Стоимость больше обычной, согласие на неё обязательно.",
+  restartNote: "Подбор продолжится с того места, где встал: уже готовые ответы повторно не оплачиваются.",
 } as const;
 
 /** Money for people: micro-USD to dollars with cents, "$2,70"; a positive amount is never shown as zero. */
@@ -84,14 +85,19 @@ export function costConsentLabel(s: TicketSet): string {
   return `Оплата около ${usd(s.budget.estimateMicroUsd)} подтверждена: это больше обычного предела ${usd(s.budget.capMicroUsd)}`;
 }
 
-/** The run is over the cap: the core says so; the ticket count is a second guard. */
+/** The run is over the cap: only the core's flag decides. */
 export function needsCostConsent(s: TicketSet): boolean {
-  return s.budget.overCap || s.budget.tickets > capTickets || s.total > capTickets;
+  return s.budget.overCap;
 }
 
-/** The set is being answered (or waits to be): the page keeps asking the core. */
+/** The set is being answered (or waits to be). */
 export function isRunning(s: TicketSet): boolean {
   return s.status === "confirmed" || s.status === "answering";
+}
+
+/** The page keeps asking the core only for a live run; a stalled one does not move by itself. */
+export function needsPolling(s: TicketSet): boolean {
+  return isRunning(s) && !s.stalled;
 }
 
 /** Progress in percent, 0..100; an empty set is 0. */
@@ -126,11 +132,14 @@ function runningView(s: TicketSet): ChipView {
     return { kind: "fail", icon: "warn", label: texts.stalledTitle, hint: texts.stalledHint };
   }
   const js = s.jobStatus;
-  if (js === "WAITING_NETWORK") {
+  if (js === "WAITING_FOR_NETWORK") {
     return { kind: "net", icon: "off", label: "Ждёт интернет", hint: "Подбор продолжится, когда появится связь." };
   }
-  if (js === "WAITING_QUOTA") {
-    return { kind: "wait", icon: "clock", label: "Лимит обработки исчерпан", hint: "Подбор продолжится, когда лимит восстановится." };
+  if (js === "WAITING_FOR_QUOTA") {
+    return { kind: "wait", icon: "clock", label: "Минуты обработки закончились", hint: "Подбор продолжится, когда минуты пополнятся." };
+  }
+  if (js === "WAITING_FOR_POWER") {
+    return { kind: "wait", icon: "plug", label: "Ждёт зарядку", hint: "Подбор начнётся сам после подключения питания." };
   }
   if (js === "RETRY_WAIT" || js.startsWith("WAITING_")) {
     return { kind: "wait", icon: "clock", label: "Ждёт повтора", hint: "Подбор продолжится сам." };
@@ -165,6 +174,10 @@ export interface ConfirmGate {
 }
 
 export function confirmGate(s: TicketSet, consentTicked: boolean): ConfirmGate {
+  // A stalled run continues: answered tickets are not paid again, so there is no new cost to consent to.
+  if (moves(s).confirm === "restart") {
+    return { allowed: true, acceptCost: false };
+  }
   if (needsCostConsent(s)) {
     return { allowed: consentTicked, acceptCost: consentTicked };
   }
@@ -176,8 +189,6 @@ export interface TicketRow {
   number: number;
   title: string;
   chip: ChipView;
-  /** The ticket has a stored answer to open. */
-  hasAnswer: boolean;
 }
 
 const coverageLooks: Readonly<Record<Exclude<Coverage, "">, ChipView>> = {
@@ -205,7 +216,7 @@ export function ticketRow(t: TicketItem, s: TicketSet): TicketRow {
   } else {
     chip = coverageLooks.not_covered;
   }
-  return { number: t.number, title: t.title, chip, hasAnswer };
+  return { number: t.number, title: t.title, chip };
 }
 
 export function ticketRows(s: TicketSet): TicketRow[] {

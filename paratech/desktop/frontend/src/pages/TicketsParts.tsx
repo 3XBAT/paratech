@@ -64,11 +64,11 @@ function ConfirmPanel(props: {
 }) {
   const [ticked, setTicked] = useState(false);
   const checkId = useId();
-  const over = needsCostConsent(props.set);
+  const over = !props.restart && needsCostConsent(props.set);
   const gate = confirmGate(props.set, ticked);
   return (
     <div className="tk-confirm">
-      <p className="small">{budgetLine(props.set)}</p>
+      <p className="small">{props.restart ? texts.restartNote : budgetLine(props.set)}</p>
       {over && (
         <p className="tk-consent">
           <input id={checkId} type="checkbox" checked={ticked} disabled={props.busy} onChange={(e) => setTicked(e.target.checked)} />
@@ -91,7 +91,10 @@ function ConfirmPanel(props: {
 export function SetCard(props: {
   set: TicketSet;
   subjectName: string;
+  /** An action of this very card runs. */
   busy: boolean;
+  /** An action of any card runs: every button is disabled. */
+  blocked: boolean;
   error: string;
   onConfirm: (acceptCost: boolean) => void;
   onCancel: () => void;
@@ -123,7 +126,7 @@ export function SetCard(props: {
       )}
       <CoverageReport set={s} />
       {m.confirm !== "none" && (
-        <ConfirmPanel key={s.version} set={s} restart={m.confirm === "restart"} busy={props.busy} onConfirm={props.onConfirm} />
+        <ConfirmPanel key={s.version} set={s} restart={m.confirm === "restart"} busy={props.blocked || props.busy} onConfirm={props.onConfirm} />
       )}
       {s.status === "done" && (
         <div className="tk-done">
@@ -134,12 +137,12 @@ export function SetCard(props: {
       )}
       <div className="acts start">
         {m.cancel && (
-          <Button size="sm" variant="ghost" busy={props.busy} busyLabel={texts.cancelBusy} disabled={props.busy} onClick={props.onCancel}>
+          <Button size="sm" variant="ghost" busy={props.busy} busyLabel={texts.cancelBusy} disabled={props.blocked || props.busy} onClick={props.onCancel}>
             {texts.cancel}
           </Button>
         )}
         {m.undo && (
-          <Button size="sm" variant="ghost" disabled={props.busy} onClick={props.onUndo}>
+          <Button size="sm" variant="ghost" disabled={props.blocked || props.busy} onClick={props.onUndo}>
             {texts.undo}
           </Button>
         )}
