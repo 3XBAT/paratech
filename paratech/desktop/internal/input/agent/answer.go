@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
@@ -12,6 +13,21 @@ import (
 // shown only in its card (ADR-0022).
 type Answerer interface {
 	Ask(ctx context.Context, question string, subject shared.SubjectID) (answering.Asked, error)
+}
+
+// answerCards is the card of an answer_question that made an answer: the panel reads its text by ID from the core
+// (AnswerService), so neither the planner nor the step carries it.
+func answerCards(c agentturn.Call, out agentturn.Outcome) []values.Card {
+	if c.Call.Tool() != values.ToolAnswerQuestion || out.Result.IsError {
+		return nil
+	}
+	var cards []values.Card
+	for _, r := range out.Seen {
+		if r.Kind() == values.KindAnswer {
+			cards = append(cards, values.AnswerCard{Answer: r})
+		}
+	}
+	return cards
 }
 
 // answerQuestion asks the reader ANSWER about the lessons of the subject in scope, or of the whole base for scope

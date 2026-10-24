@@ -119,6 +119,20 @@ func TestAnswerQuestion(t *testing.T) {
 		})
 	}
 
+	// The Driver shows an answer as its card (ID only); no answer or a refusal shows none.
+	tl := newWorld(t).tools(t)
+	tl.answerer = &fakeAnswerer{got: answering.Asked{Answer: madeAnswer(t)}}
+	r := tl.run(t.Context(), agentturn.Step{Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
+	if len(r.cards) != 1 || r.cards[0] != (values.AnswerCard{Answer: mustRef(t, values.KindAnswer, "an1")}) {
+		t.Fatalf("cards = %+v", r.cards)
+	}
+	for _, ans := range []*fakeAnswerer{{}, {err: answering.ErrNoConnection}} {
+		tl.answerer = ans
+		if r := tl.run(t.Context(), agentturn.Step{}, answerCall(t, `{"question":"Что такое ряд?"}`)); len(r.cards) != 0 {
+			t.Fatalf("cards without an answer = %+v", r.cards)
+		}
+	}
+
 	// Without an answerer the paid reader stays unavailable and nothing is asked.
 	if out := newWorld(t).tools(t).read(t.Context(), values.Scope{}, answerCall(t, `{"question":"Что такое ряд?"}`)); out.Result.ResultJSON != `{"error":"unavailable"}` {
 		t.Fatalf("no answerer: %s", out.Result.ResultJSON)

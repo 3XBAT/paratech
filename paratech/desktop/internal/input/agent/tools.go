@@ -120,7 +120,8 @@ func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran
 	case actionpolicy.ClassC:
 		return t.propose(ctx, st, c)
 	}
-	return ran{out: t.read(ctx, st.Scope, c)}
+	out := t.read(ctx, st.Scope, c)
+	return ran{out: out, cards: answerCards(c, out)}
 }
 
 // read runs one admitted read call and returns its outcome.
