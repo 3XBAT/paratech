@@ -44,6 +44,7 @@ export const workTexts = {
   editPlan: "Изменить план",
   rewrite: "Написать заново",
   cancel: "Отмена",
+  retry: "Повторить",
   addSection: "Добавить раздел",
   titleLabel: "Название раздела",
   wordsLabel: "Объём, слов",
@@ -375,6 +376,21 @@ async function afterEdit(api: TurnkeyApi, workId: string, items: readonly Editor
     }
     return { ok: false, error, fresh };
   }
+}
+
+export type ActionErrorEvent = { type: "fail"; text: string } | { type: "start" } | { type: "ok" } | { type: "poll" };
+
+/**
+ * The error of the last button call. It lives in the parent of the keyed card body: a call can change the step, which
+ * re-mounts the body. Only a new call or its success clears it; a poll never does.
+ */
+export function nextActionError(prev: string, ev: ActionErrorEvent): string {
+  return ev.type === "fail" ? ev.text : ev.type === "poll" ? prev : "";
+}
+
+/** «Повторить» of a running step whose last call failed: StartWriting on a writing work only enqueues the step again. */
+export function retryWriting(api: TurnkeyApi, workId: string): Promise<TurnkeyWork> {
+  return api.startWriting(workId);
 }
 
 /** «Утвердить план»: EditOutline if edited, then ApproveOutline. */

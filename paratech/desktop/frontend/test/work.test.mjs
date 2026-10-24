@@ -24,6 +24,8 @@ import {
   limits,
   moveItem,
   noteOf,
+  nextActionError,
+  retryWriting,
   pollDelay,
   pollMs,
   progressLine,
@@ -586,6 +588,36 @@ test("the new sources use no HTML-writing API, links, browser storage or console
       assert.ok(!text.includes(banned), `${f} has ${banned}`);
     }
   }
+});
+
+test("a failed call keeps its error across the re-mount: it is shown on a running step with «Повторить»", () => {
+  const running = work({ writing: writing({ step: "section", generation: 2, done: 0, total: 3 }) });
+  const out = renderToStaticMarkup(h(WorkBody, { work: running, api: fakeApi(), onWork: noop, error: "Не удалось запустить", onError: noop }));
+  assert.match(out, /Не удалось запустить/);
+  assert.match(out, /Повторить/);
+  assert.match(out, /Раздел 1 из 3/);
+  // Without an error a running step has no button.
+  assert.ok(!render(running).includes("<button"));
+});
+
+test("the action error is cleared by a new call or a success, never by a poll", () => {
+  assert.equal(nextActionError("", { type: "fail", text: "e" }), "e");
+  assert.equal(nextActionError("e", { type: "poll" }), "e");
+  assert.equal(nextActionError("e", { type: "start" }), "");
+  assert.equal(nextActionError("e", { type: "ok" }), "");
+  // EditOutline replies (the step changes), then StartWriting fails: the failure comes last and stays.
+  let s = nextActionError("", { type: "start" });
+  s = nextActionError(s, { type: "ok" });
+  s = nextActionError(s, { type: "fail", text: "e" });
+  s = nextActionError(s, { type: "poll" });
+  assert.equal(s, "e");
+});
+
+test("«Повторить» calls StartWriting with the work id", async () => {
+  const log = [];
+  const api = { ...fakeApi(), startWriting: async (...a) => (log.push(a), work()) };
+  await retryWriting(api, "w9");
+  assert.deepEqual(log, [["w9"]]);
 });
 
 test("buttons without a binding are not offered", () => {

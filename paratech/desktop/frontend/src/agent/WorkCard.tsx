@@ -5,7 +5,9 @@ import {
   acceptWork,
   addItem,
   approvePlan,
+  nextActionError,
   regenerateBlocked,
+  retryWriting,
   rewriteWork,
   singleFlight,
   startPolling,
@@ -86,8 +88,17 @@ type Mode = "view" | "edit" | "revise";
  * The card of a work that was loaded. It owns the typed state (plan editor, note) and maps the buttons to the core; a
  * parent re-mounts it when the step changes. No hooks outside: the tests render it with a fake API.
  */
-export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: TurnkeyWork): void }) {
+export function WorkBody(props: {
+  work: TurnkeyWork;
+  api: TurnkeyApi;
+  onWork(w: TurnkeyWork): void;
+  /** The error of the last call and its setter live in the parent: this body is re-mounted when the step changes. */
+  error?: string;
+  onError?(text: string): void;
+}) {
   const { work, api } = props;
+  const error = props.error ?? "";
+  const setError = props.onError ?? (() => undefined);
   const model = workCardModel(work);
   const sections = work.writing?.sections ?? [];
   const [items, setItems] = useState<EditorItem[]>(() => editorFromSections(sections));
@@ -95,7 +106,6 @@ export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: 
   const [reviseNumber, setReviseNumber] = useState(0);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   // One call at a time: the guard answers a second click before the state has disabled the buttons.
   const [flight] = useState(singleFlight);
   const noteId = useId();
@@ -166,6 +176,14 @@ export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: 
             {model.caption}
           </h3>
           <p role="status">{model.line}</p>
+          {errorLine}
+          {error !== "" && (
+            <div className="ag-actions">
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await retryWriting(api, work.id)))}>
+                {workTexts.retry}
+              </Button>
+            </div>
+          )}
         </section>
       );
 
@@ -315,6 +333,7 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
   const { api, workId } = props;
   const [work, setWork] = useState<TurnkeyWork | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
   const latest = useRef<TurnkeyWork | null>(null);
 
   // An older reply never replaces a newer one.
@@ -324,6 +343,16 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
     setWork(latest.current);
     setLoadError("");
   }, []);
+
+  // The body reports a call: "" starts one, a text fails it; a reply of a call clears the error, a poll does not.
+  const onError = useCallback((text: string) => setActionError((p) => nextActionError(p, text === "" ? { type: "start" } : { type: "fail", text })), []);
+  const onWork = useCallback(
+    (w: TurnkeyWork) => {
+      apply(w);
+      setActionError((p) => nextActionError(p, { type: "ok" }));
+    },
+    [apply],
+  );
 
   const running = isRunning(work);
   useEffect(
@@ -339,7 +368,7 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
 
   return (
     <>
-      {work !== null && <WorkBody key={`${work.writing?.step ?? "-"}:${work.writing?.generation ?? 0}`} work={work} api={api} onWork={apply} />}
+      {work !== null && <WorkBody key={`${work.writing?.step ?? "-"}:${work.writing?.generation ?? 0}`} work={work} api={api} onWork={onWork} error={actionError} onError={onError} />}
       {loadError !== "" && (
         <p className="small muted" role="status">
           {loadError}
