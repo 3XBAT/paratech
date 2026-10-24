@@ -12,6 +12,7 @@ const screens: Record<PageId, string> = {
   today: "today",
   subjects: "subjects",
   knowledge: "subjects",
+  tickets: "subjects",
   homework: "assignments",
   schedule: "schedule",
   journal: "journal",

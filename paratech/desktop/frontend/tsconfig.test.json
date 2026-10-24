@@ -95,6 +95,9 @@
     "src/workView.ts",
     "src/agent/WorkCard.tsx",
     "src/turnkeyView.ts",
-    "src/agent/TurnkeyCards.tsx"
+    "src/agent/TurnkeyCards.tsx",
+    "src/bindings/tickets.ts",
+    "src/ticketsView.ts",
+    "src/pages/TicketsParts.tsx"
   ]
 }

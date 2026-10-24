@@ -31,6 +31,20 @@ Phases correspond to PRD §17. Items without a file yet are epics: ask the `arch
 | 9 | Security and reliability hardening | |
 | 10 | Closed pilot | |
 
+## Agent panel: waiting, «Стоп», repeat, streaming (ADR-0026, 2026-10-24)
+| ID | Title | Agent | Depends |
+|---|---|---|---|
+| [TASK-139](TASK-139-agent-waiting-indicator.md) | Waiting indicator | frontend | - |
+| [TASK-140](TASK-140-agent-stop-in-flight.md) | «Стоп» during a running step (core) | go-core | - |
+| [TASK-141](TASK-141-agent-rerun.md) | «Повторить» a finished request (core) | go-core | 140 |
+| [TASK-142](TASK-142-answer-key-per-request.md) | Answer key scoped to the request | go-core | - |
+| [TASK-143](TASK-143-agent-stop-rerun-ui.md) | «Стоп» and «Повторить» (UI) | frontend | 139, 140, 141 |
+| [TASK-144](TASK-144-anthropic-streaming-probe.md) | Anthropic streaming + gateway probe | hub-dev | - |
+| [TASK-145](TASK-145-hub-completestream.md) | Hub `CompleteStream` for ANSWER | hub-dev | 144 |
+| [TASK-146](TASK-146-desktop-answer-stream.md) | Desktop streamed ANSWER and draft | go-core | 142 |
+| [TASK-147](TASK-147-agent-draft-event.md) | Draft to the panel (Driver, Wails event) | go-core | 141, 146 |
+| [TASK-148](TASK-148-agent-draft-render.md) | Progressive answer text (UI) | frontend | 143, 147 |
+
 ## Next tasks to be written by `architect` after T-002
 - T-003 SQLite schema, migrations and Storage Manager
 - T-004 Persistent Job Store and worker pool (with power-aware states)

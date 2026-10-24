@@ -15,6 +15,7 @@ import "./agent/agent.css";
 import "./agent/confirm.css";
 import "./agent/turnkey.css";
 import "./pages/today.css";
+import "./pages/tickets.css";
 
 // Before the first render: the CSP forbids an inline script in index.html.
 initTheme();
