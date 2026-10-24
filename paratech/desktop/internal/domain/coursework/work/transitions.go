@@ -10,11 +10,11 @@ const (
 	StatusTriage    Status = "triage"    // the reader call of the current round is due (asked again on a retry)
 	StatusQuestions Status = "questions" // the reader asked (round 1 or 2): the student answers or skips
 	StatusReview    Status = "review"    // «Как я понял задание» is ready: the student edits and confirms
-	StatusConfirmed Status = "confirmed" // the requirements are confirmed: the work may be written (TASK-105)
-	StatusWriting   Status = "writing"
-	StatusDone      Status = "done"
-	StatusHelper    Status = "helper" // the app cannot do the work: the helper mode
-	StatusFailed    Status = "failed" // the reader refused MaxAttempts answers of a round
+	StatusConfirmed Status = "confirmed" // the requirements are confirmed: the work may be written (TASK-131)
+	StatusWriting   Status = "writing"   // the outline, the sections and the file are written step by step
+	StatusDone      Status = "done"      // the file of the written sections is in the library
+	StatusHelper    Status = "helper"    // the app cannot do the work: the helper mode
+	StatusFailed    Status = "failed"    // the reader refused MaxAttempts answers of a round
 )
 
 // Statuses returns every status, for the schema checks.
@@ -47,7 +47,9 @@ var transitions = map[Status][]Status{
 	StatusWriting: {
 		StatusDone,
 	},
-	StatusDone:   nil,
+	StatusDone: {
+		StatusWriting, // an edit of the outline or a regeneration writes it again
+	},
 	StatusHelper: nil,
 	StatusFailed: nil,
 }

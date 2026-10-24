@@ -5,8 +5,13 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/services/subjectmatch"
+	"paratech/desktop/internal/domain/library/subject"
+	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -55,12 +60,61 @@ type StepAdvisor interface {
 	AdviseStep(ctx context.Context, q work.StepQuestion) (string, error)
 }
 
-// Clock supplies the current time (ARCH-24).
+// Clock supplies the current time in the student's zone (ARCH-24); the year of a title page is read from it.
 type Clock interface {
 	Now() time.Time
+}
+
+// Writer is the strong model that writes a work (TASK-131), through the Hub's homework_draft operation. Implemented
+// by the hubclient adapter. The output is untrusted: only work.ParseOutline and work.ParseSection read it. Errors:
+// shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded let the job wait; others are retried or permanent.
+type Writer interface {
+	Complete(ctx context.Context, req cvalues.LLMRequest) (cvalues.LLMResult, error)
+}
+
+// Jobs creates and reads the work_writing jobs. Implemented by the sqlite job repository.
+type Jobs interface {
+	// Enqueue stores a new job; a job of the same key is returned instead with created false.
+	Enqueue(ctx context.Context, j *job.Job) (id shared.JobID, created bool, err error)
+	// Get loads a job; none wraps shared.ErrNotFound.
+	Get(ctx context.Context, id shared.JobID) (*job.Job, error)
+	// LatestByKeyPrefix returns the newest job of typ whose key starts with prefix; none wraps shared.ErrNotFound.
+	LatestByKeyPrefix(ctx context.Context, typ job.Type, prefix string) (*job.Job, error)
+}
+
+// Profiles reads the student profile for the title page (TASK-094). Implemented by the sqlite settings repository.
+type Profiles interface {
+	Load(ctx context.Context) (*settings.Settings, error)
+}
+
+// Renderer renders a paper as a Word file; the same document gives the same bytes. Implemented by the docx adapter.
+type Renderer interface {
+	Render(ctx context.Context, doc cvalues.Document) ([]byte, error)
+}
+
+// LessonLabels tells what an assignment shows of its lesson: the subject and the teacher of the title page, from the
+// snapshot its recording kept (TASK-088). Implemented by cases/homeworkflow (wired by the app). None of the assignment
+// wraps shared.ErrNotFound.
+type LessonLabels interface {
+	LessonLabel(ctx context.Context, id shared.AssignmentID) (cvalues.LessonLabel, error)
+}
+
+// Shelf is the library as the writing uses it (cases/library, wired by the app): the subject of the work, the
+// filing of the finished paper into its «ДЗ» (into «Входящие» without a subject or when the subject is gone), and
+// MoveToInbox, which takes a paper the work replaced back to «Входящие» (the file kept).
+type Shelf interface {
+	Subjects(ctx context.Context) ([]*subject.Subject, error)
+	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
+	FileHomework(ctx context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error)
+	MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 }
 
 // IDs generates the identifiers of new works (ARCH-24).
 type IDs interface {
 	NewWorkID() shared.WorkID
+}
+
+// JobIDs generates the identifiers of new jobs (ARCH-24).
+type JobIDs interface {
+	NewJobID() shared.JobID
 }

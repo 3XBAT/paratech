@@ -24,6 +24,7 @@ const (
 	CompRestoreDue        CompensationKind = "restore_due"         // old due date, or none
 	CompCancelJob         CompensationKind = "cancel_job"          // running: cancel; finished: remove the result
 	CompRemoveWork        CompensationKind = "remove_work"         // the triaged work, if the student has not touched it
+	CompStopWork          CompensationKind = "stop_work"           // writing: the job cancelled; done: the paper back to «Входящие»
 )
 
 // compensationOf is the compensation kind of every U tool; a tool not listed has no Undo.
@@ -39,7 +40,7 @@ var compensationOf = map[values.Tool]CompensationKind{
 	values.ToolFindHomework:     CompCancelJob,
 	values.ToolGenerateDraft:    CompCancelJob,
 	values.ToolTriageAssignment: CompRemoveWork,
-	values.ToolWriteWork:        CompCancelJob,
+	values.ToolWriteWork:        CompStopWork,
 }
 
 // CompensationFor returns the compensation kind of a tool.
@@ -155,6 +156,18 @@ type RemoveWork struct{ Work values.Ref }
 func (RemoveWork) Kind() CompensationKind { return CompRemoveWork }
 
 func (c RemoveWork) validate() error { return need(c.Work, values.KindWork) }
+
+// StopWork undoes write_work (TASK-131): while its job runs the job is cancelled (the sections written stay, a later
+// write_work continues from them); once the paper is filed in «ДЗ» it goes back to «Входящие», the file kept
+// (ADR-0024). The paid calls are not returned.
+type StopWork struct{ Work, Job values.Ref }
+
+// Kind returns CompStopWork.
+func (StopWork) Kind() CompensationKind { return CompStopWork }
+
+func (c StopWork) validate() error {
+	return firstErr(need(c.Work, values.KindWork), need(c.Job, values.KindJob))
+}
 
 func need(r values.Ref, kind values.IDKind) error {
 	if r.IsZero() || r.Kind() != kind {

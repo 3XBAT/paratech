@@ -21,6 +21,8 @@ const (
 	ErrTurnkeyInvalid     = turnkeyError("Это действие сейчас недоступно: обновите карточку.")
 	ErrTurnkeyNoStepHelp  = turnkeyError("Вопросы по шагу пока недоступны.")
 	ErrTurnkeyUnavailable = turnkeyError("Не удалось выполнить. Попробуйте ещё раз.")
+	ErrTurnkeyWriting     = turnkeyError("Работа ещё пишется: дождитесь окончания.")
+	ErrTurnkeyWritten     = turnkeyError("Работа уже написана: измените план или сгенерируйте раздел заново.")
 )
 
 // Problems of a work view after a reader call that did not go through; the work is saved, its call waits.
@@ -48,6 +50,8 @@ const (
 	opTurnkeyEdit    = "ui: turnkey card edit"
 	opTurnkeyConfirm = "ui: turnkey confirm requirements"
 	opTurnkeyStep    = "ui: turnkey step question"
+	opTurnkeyWrite   = "ui: turnkey writing"
+	opTurnkeyOutline = "ui: turnkey outline"
 )
 
 // TurnkeyUseCase is the turnkey work (cases/turnkey) as its cards and the helper page use it (ARCH-42).
@@ -60,6 +64,12 @@ type TurnkeyUseCase interface {
 	ConfirmRequirements(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 	Retry(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 	AskStep(ctx context.Context, id shared.WorkID, step int, question string) (string, error)
+
+	// The writing (TASK-131): the student's own moves, never the agent's.
+	StartWriting(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
+	ApproveOutline(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
+	EditOutline(ctx context.Context, id shared.WorkID, items []work.OutlineItem) (turnkey.View, error)
+	Regenerate(ctx context.Context, id shared.WorkID, number int, note string) (turnkey.WritingStarted, error)
 }
 
 // TurnkeyWork is a turnkey work for the QuestionsCard, the card «Как я понял задание», the CannotDoCard and the helper
@@ -67,7 +77,8 @@ type TurnkeyUseCase interface {
 //
 // Status is triage (a reader call waits: Problem tells why, «Повторить» is Retry), questions, review, confirmed,
 // writing, done, helper or failed. Questions are set in questions (QuestionRound 1 or 2); Card and Edited once the
-// reader answered (HasCard); Helper in the helper mode and for a partial work (its Placeholders).
+// reader answered (HasCard); Helper in the helper mode and for a partial work (its Placeholders); Writing from the
+// start of the writing on (TASK-131).
 type TurnkeyWork struct {
 	ID                string            `json:"id"`
 	AssignmentID      string            `json:"assignmentId"`
@@ -85,9 +96,53 @@ type TurnkeyWork struct {
 	Assumptions       []string          `json:"assumptions"`
 	Helper            *TurnkeyHelper    `json:"helper"`
 	Answered          []TurnkeyAnswered `json:"answered"`
+	Writing           *TurnkeyWriting   `json:"writing"` // from the start of the writing on
 	Version           int64             `json:"version"`
 	Problem           string            `json:"problem"` // "", offline, quota, refused, no_text, source_gone
 	Message           string            `json:"message"`
+}
+
+// TurnkeyWriting is the writing of a work: the outline the student edits and approves, the progress «Раздел N из M»
+// and the result. Step is outline (the plan is being written), approve (the plan waits for «Утвердить план»), section,
+// assemble, blocked (a step used its attempts: «Сгенерировать заново») or none (done). Every text was written by the
+// model: render it as plain text only.
+type TurnkeyWriting struct {
+	Step       string           `json:"step"`
+	Generation int              `json:"generation"`
+	Topic      string           `json:"topic"`
+	Sections   []TurnkeySection `json:"sections"`
+	Done       int              `json:"done"`
+	Total      int              `json:"total"`
+	SubjectID  string           `json:"subjectId"`  // the subject whose «ДЗ» gets the file; "" «Входящие»
+	MaterialID string           `json:"materialId"` // the file in the library, once done
+	Result     string           `json:"result"`     // the artifact of the ResultCard, once done
+	Job        string           `json:"job"`        // the job the call started (the progress card); "" otherwise
+}
+
+// TurnkeySection is a section of the outline; Paragraphs and Sources once written. A source with verify set was named
+// by the model, not taken from the student's materials («проверить источник»).
+type TurnkeySection struct {
+	Number     int             `json:"number"`
+	Title      string          `json:"title"`
+	Words      int             `json:"words"`
+	Note       string          `json:"note"`
+	Written    bool            `json:"written"`
+	Paragraphs []string        `json:"paragraphs"`
+	Sources    []TurnkeySource `json:"sources"`
+}
+
+// TurnkeySource is an entry of the bibliography of a section.
+type TurnkeySource struct {
+	Text       string `json:"text"`
+	MaterialID string `json:"materialId"`
+	Verify     bool   `json:"verify"`
+}
+
+// TurnkeyOutlineItem is a section of the student's outline; number 0 is a new section.
+type TurnkeyOutlineItem struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Words  int    `json:"words"`
 }
 
 // TurnkeyQuestion is one question: kind choice (options, default index) or text (defaultText; "" may be skipped).
@@ -139,8 +194,9 @@ type TurnkeyAnswer struct {
 }
 
 // TurnkeyService is bound to the turnkey cards and the helper page: every exported method is callable from the page
-// by its full name. None of them sends, exports or writes the work: AnswerQuestions, SkipQuestions and Retry ask the
-// reader (a paid call), the rest change only local data.
+// by its full name. None of them sends or exports the work: AnswerQuestions, SkipQuestions and Retry ask the reader
+// (a paid call); StartWriting, ApproveOutline and Regenerate start a paid writing job whose paper is filed in the
+// local library; the rest change only local data.
 type TurnkeyService struct {
 	core TurnkeyUseCase
 	log  *slog.Logger
@@ -204,6 +260,49 @@ func (s *TurnkeyService) Retry(ctx context.Context, id string) (TurnkeyWork, err
 	return s.reply(opTurnkeyAnswer, v, err)
 }
 
+// StartWriting is «Написать работу» on a confirmed work (a paid job): the plan is written first and waits for
+// ApproveOutline.
+func (s *TurnkeyService) StartWriting(ctx context.Context, id string) (TurnkeyWork, error) {
+	st, err := s.core.StartWriting(ctx, shared.WorkID(id))
+	return s.started(opTurnkeyWrite, st, err)
+}
+
+// ApproveOutline is «Утвердить план»: the sections are written (a paid job, «Раздел N из M»).
+func (s *TurnkeyService) ApproveOutline(ctx context.Context, id string) (TurnkeyWork, error) {
+	st, err := s.core.ApproveOutline(ctx, shared.WorkID(id))
+	return s.started(opTurnkeyOutline, st, err)
+}
+
+// EditOutline saves the student's plan: the sections in their order, unchanged ones keep their text. A plan that
+// waits for the approval still waits; a done work is written again by StartWriting.
+func (s *TurnkeyService) EditOutline(ctx context.Context, id string, items []TurnkeyOutlineItem) (TurnkeyWork, error) {
+	outline := make([]work.OutlineItem, 0, len(items))
+	for _, it := range items {
+		outline = append(outline, work.OutlineItem{Number: it.Number, Title: it.Title, Words: it.Words})
+	}
+	v, err := s.core.EditOutline(ctx, shared.WorkID(id), outline)
+	return s.reply(opTurnkeyOutline, v, err)
+}
+
+// Regenerate is «Дополнительные указания → Сгенерировать заново» for section number (0: every section) with the
+// student's note (a paid job for those sections only); 0 on a blocked outline asks for the outline again.
+func (s *TurnkeyService) Regenerate(ctx context.Context, id string, number int, note string) (TurnkeyWork, error) {
+	st, err := s.core.Regenerate(ctx, shared.WorkID(id), number, note)
+	return s.started(opTurnkeyWrite, st, err)
+}
+
+// started maps the outcome of a call that starts a writing job: the work with the job of its progress card.
+func (s *TurnkeyService) started(op string, st turnkey.WritingStarted, err error) (TurnkeyWork, error) {
+	if err != nil {
+		return TurnkeyWork{}, s.fail(op, err)
+	}
+	out := workView(st.View)
+	if out.Writing != nil {
+		out.Writing.Job = string(st.Job)
+	}
+	return out, nil
+}
+
 // TurnkeyStepAnswer is the answer about a helper step: plain text only.
 type TurnkeyStepAnswer struct {
 	Text string `json:"text"`
@@ -258,7 +357,12 @@ func (s *TurnkeyService) fail(op string, err error) error {
 	switch {
 	case errors.Is(err, turnkey.ErrNotFound):
 		return ErrTurnkeyNotFound
-	case errors.Is(err, turnkey.ErrInvalidRequest):
+	case errors.Is(err, turnkey.ErrWritingRunning):
+		return ErrTurnkeyWriting
+	case errors.Is(err, turnkey.ErrAlreadyWritten):
+		return ErrTurnkeyWritten
+	case errors.Is(err, turnkey.ErrInvalidRequest), errors.Is(err, turnkey.ErrNotWritable),
+		errors.Is(err, turnkey.ErrWritingRetries):
 		return ErrTurnkeyInvalid
 	}
 	return ErrTurnkeyUnavailable
@@ -298,6 +402,29 @@ func workView(v turnkey.View) TurnkeyWork {
 	}
 	for _, a := range v.Answered {
 		out.Answered = append(out.Answered, TurnkeyAnswered{Round: a.Round, Question: a.Question, Answer: a.Answer, Default: a.Default})
+	}
+	out.Writing = writingView(v.Writing)
+	return out
+}
+
+// writingView maps the writing of a work; nil before it starts, empty lists are [].
+func writingView(w *turnkey.WritingView) *TurnkeyWriting {
+	if w == nil {
+		return nil
+	}
+	out := &TurnkeyWriting{
+		Step: string(w.Step), Generation: w.Generation, Topic: w.Topic, Sections: []TurnkeySection{}, Done: w.Done,
+		Total: w.Total, SubjectID: string(w.Subject), MaterialID: string(w.Material), Result: w.Result.String(),
+	}
+	for _, s := range w.Sections {
+		sec := TurnkeySection{
+			Number: s.Number, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written,
+			Paragraphs: nonNilStrings(s.Paragraphs), Sources: []TurnkeySource{},
+		}
+		for _, r := range s.Sources {
+			sec.Sources = append(sec.Sources, TurnkeySource{Text: r.Text, MaterialID: string(r.Material), Verify: r.Material == ""})
+		}
+		out.Sections = append(out.Sections, sec)
 	}
 	return out
 }

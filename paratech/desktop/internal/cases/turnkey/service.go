@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/shared"
@@ -30,6 +31,7 @@ type Service struct {
 	materials   MaterialTexts
 	reader      Reader
 	advisor     StepAdvisor
+	writing     *WritingDeps
 	clock       Clock
 	ids         IDs
 	log         *slog.Logger
@@ -40,13 +42,29 @@ func New(d Deps) (*Service, error) {
 	if d.Works == nil || d.Assignments == nil || d.Materials == nil || d.Reader == nil || d.Clock == nil || d.IDs == nil {
 		return nil, fmt.Errorf("%w: every port except the advisor and the logger is required", ErrInvalidConfig)
 	}
+	var writing *WritingDeps
+	if wd := d.Writing; wd != nil {
+		if wd.Writer == nil || wd.Jobs == nil || wd.JobIDs == nil || wd.Profiles == nil || wd.Renderer == nil ||
+			wd.Lessons == nil || wd.Shelf == nil || wd.MaxAttempts < 0 {
+			return nil, fmt.Errorf("%w: every writing port is required", ErrInvalidConfig)
+		}
+		// The alias rules belong to the request value; a throwaway request checks them once, at wiring time.
+		if _, err := cvalues.NewLLMRequest(cvalues.OperationHomeworkDraft, wd.ModelAlias, "check", "", "check"); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+		}
+		c := *wd
+		if c.MaxAttempts == 0 {
+			c.MaxAttempts = DefaultJobAttempts
+		}
+		writing = &c
+	}
 	log := d.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
 		works: d.Works, assignments: d.Assignments, materials: d.Materials, reader: d.Reader, advisor: d.Advisor,
-		clock: d.Clock, ids: d.IDs, log: log,
+		writing: writing, clock: d.Clock, ids: d.IDs, log: log,
 	}, nil
 }
 

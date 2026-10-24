@@ -49,7 +49,7 @@ func TestTransitionTable(t *testing.T) {
 	allowed := map[[2]Status]bool{
 		{StatusTriage, StatusQuestions}: true, {StatusTriage, StatusReview}: true, {StatusTriage, StatusHelper}: true,
 		{StatusTriage, StatusFailed}: true, {StatusQuestions, StatusTriage}: true, {StatusReview, StatusConfirmed}: true,
-		{StatusConfirmed, StatusWriting}: true, {StatusWriting, StatusDone}: true,
+		{StatusConfirmed, StatusWriting}: true, {StatusWriting, StatusDone}: true, {StatusDone, StatusWriting}: true,
 	}
 	for _, from := range Statuses() {
 		for _, to := range Statuses() {
@@ -58,7 +58,7 @@ func TestTransitionTable(t *testing.T) {
 			}
 		}
 	}
-	for _, s := range []Status{StatusDone, StatusHelper, StatusFailed} {
+	for _, s := range []Status{StatusHelper, StatusFailed} {
 		if !s.IsTerminal() {
 			t.Errorf("%s is not terminal", s)
 		}
@@ -132,8 +132,9 @@ func TestTwoQuestionRoundsThenFinal(t *testing.T) {
 	if err := w.ConfirmRequirements(t0); err != nil || w.Status() != StatusConfirmed {
 		t.Fatalf("confirm: %v %s", err, w.Status())
 	}
-	if !strings.Contains(w.Instruction(), "Вопрос A — Да") || !strings.Contains(w.Instruction(), "Допущения:") {
-		t.Fatalf("instruction = %q", w.Instruction())
+	b, ok := w.Brief()
+	if !ok || !slices.Contains(b.Answers, Previous{Question: "Вопрос A", Answer: "Да"}) || len(b.Assumptions) != 1 {
+		t.Fatalf("brief = %+v, %v", b, ok)
 	}
 }
 
@@ -288,24 +289,8 @@ func TestEditUnderstanding(t *testing.T) {
 	if err := w.Edit(edit, t0); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("edit after confirm: %v", err)
 	}
-	if !strings.Contains(w.Instruction(), "Тип работы: доклад") || !strings.Contains(w.Instruction(), "Вариант: 3") {
-		t.Fatalf("instruction = %q", w.Instruction())
-	}
-}
-
-func TestWritingAndDone(t *testing.T) {
-	w := newWork(t)
-	mustRecord(t, w, answerOf(FeasibleFull, 0))
-	if err := w.StartWriting(t0); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("write before confirm: %v", err)
-	}
-	for _, step := range []func(time.Time) error{w.ConfirmRequirements, w.StartWriting, w.Finish} {
-		if err := step(t0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if w.Status() != StatusDone {
-		t.Fatalf("status = %s", w.Status())
+	if b, ok := w.Brief(); !ok || b.WorkType != TypeDoklad || b.Requirements.Variant != "3" {
+		t.Fatalf("brief = %+v, %v", b, ok)
 	}
 }
 

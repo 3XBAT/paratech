@@ -2,22 +2,71 @@ package turnkey
 
 import (
 	"log/slog"
+	"slices"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Deps are the ports of the service; every one except Advisor and Log is required.
+// Deps are the ports of the service; every one except Advisor, Writing and Log is required.
 type Deps struct {
 	Works       WorkRepository
 	Assignments Assignments
 	Materials   MaterialTexts
 	Reader      Reader
-	Advisor     StepAdvisor // nil: AskStep answers ErrNotConfigured
+	Advisor     StepAdvisor  // nil: AskStep answers ErrNotConfigured
+	Writing     *WritingDeps // nil: the writing answers ErrNotConfigured
 	Clock       Clock
 	IDs         IDs
 	Log         *slog.Logger
+}
+
+// WritingDeps are the ports of the writing (TASK-131); every port is required.
+type WritingDeps struct {
+	Writer   Writer
+	Jobs     Jobs
+	JobIDs   JobIDs
+	Profiles Profiles
+	Renderer Renderer
+	Lessons  LessonLabels
+	Shelf    Shelf
+
+	ModelAlias  string // the Hub alias of the writing calls
+	MaxAttempts int    // attempts of a job; 0: DefaultJobAttempts
+}
+
+// WritingStarted is the outcome of StartWriting and Regenerate: the work and its job; Created is false when a job of
+// the same writing runs (or ran to its end) already.
+type WritingStarted struct {
+	View    View
+	Job     shared.JobID
+	Created bool
+}
+
+// WritingView is the writing of a work as the progress card, the result card and the preview show it. Every text was
+// written by the model and is shown as plain text only.
+type WritingView struct {
+	Step       work.StepKind // StepApprove: the outline waits for «Утвердить план»
+	Generation int           // grows each time a done work is written again
+	Topic      string
+	Sections   []SectionView
+	Done       int // «Раздел N из M»: the written sections
+	Total      int
+	Subject    shared.SubjectID   // the library subject whose «ДЗ» gets the file; "" «Входящие»
+	Material   shared.MaterialID  // the file in the library, once done
+	Result     shared.ArtifactRef // the ResultCard of the file, once done
+}
+
+// SectionView is a section of the outline with its text, when written for its current revision.
+type SectionView struct {
+	Number     int
+	Title      string
+	Words      int
+	Note       string
+	Written    bool
+	Paragraphs []string
+	Sources    []work.Reference
 }
 
 // View is a work as the cards and the helper page show it (TASK-130). Every text the reader wrote is untrusted and
@@ -44,8 +93,8 @@ type View struct {
 	Assumptions       []string     // stated assumptions of the last answer («Предположил вариант 3 — поправьте»)
 	Helper            *work.Helper // the helper mode (CannotDoCard, the helper page); nil for a work done whole
 
-	Answered    []Answered // the questions of the earlier rounds with the student's answers
-	Instruction string     // the student's channel of the writing, once confirmed (TASK-094)
+	Answered []Answered   // the questions of the earlier rounds with the student's answers
+	Writing  *WritingView // from the start of the writing on (TASK-131)
 
 	Version   int64
 	UpdatedAt time.Time
@@ -69,7 +118,7 @@ type Started struct {
 func viewOf(w *work.Work) View {
 	v := View{
 		ID: w.ID(), Source: w.Source(), Status: w.Status(), Round: w.Round(), Attempt: w.Attempt(),
-		Partial: w.Partial(), Instruction: w.Instruction(), Version: w.Version(), UpdatedAt: w.UpdatedAt(),
+		Partial: w.Partial(), Writing: writingViewOf(w), Version: w.Version(), UpdatedAt: w.UpdatedAt(),
 	}
 	v.QuestionRound, v.Questions = w.Questions()
 	if a, ok := w.Latest(); ok {
@@ -91,6 +140,27 @@ func viewOf(w *work.Work) View {
 				Round: r.Number, Question: q.Text, Answer: work.AnswerText(q, rep), Default: rep.Default,
 			})
 		}
+	}
+	return v
+}
+
+// writingViewOf builds the view of the writing; nil before it starts.
+func writingViewOf(w *work.Work) *WritingView {
+	wr, ok := w.Writing()
+	if !ok {
+		return nil
+	}
+	v := &WritingView{Step: w.Next().Kind, Generation: wr.Generation, Topic: wr.Topic, Subject: wr.Snapshot.Subject}
+	v.Done, v.Total = w.Progress()
+	for _, s := range wr.Sections {
+		sv := SectionView{Number: s.Number, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written()}
+		if sv.Written {
+			sv.Paragraphs, sv.Sources = slices.Clone(s.Text.Paragraphs), slices.Clone(s.Text.Sources)
+		}
+		v.Sections = append(v.Sections, sv)
+	}
+	if f := wr.File; f != nil && w.Status() == work.StatusDone {
+		v.Material, v.Result = f.Material, f.ArtifactRef()
 	}
 	return v
 }

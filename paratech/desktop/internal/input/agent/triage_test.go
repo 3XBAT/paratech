@@ -12,12 +12,38 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// fakeTurnkey keeps works as views; Triage answers what the test set.
+// fakeTurnkey keeps works as views; Triage answers what the test set, StartWriting runs onStart.
 type fakeTurnkey struct {
 	views   map[shared.WorkID]turnkey.View
 	started turnkey.Started
 	err     error
 	calls   []work.Source
+	onStart func(id shared.WorkID) (turnkey.WritingStarted, error)
+	active  map[shared.WorkID]shared.JobID
+	writes  []shared.WorkID
+
+	generations map[shared.JobID]int
+}
+
+func (f *fakeTurnkey) StartWriting(_ context.Context, id shared.WorkID) (turnkey.WritingStarted, error) {
+	f.writes = append(f.writes, id)
+	if f.onStart == nil {
+		return turnkey.WritingStarted{}, turnkey.ErrNotConfigured
+	}
+	return f.onStart(id)
+}
+
+func (f *fakeTurnkey) ActiveWriting(_ context.Context, id shared.WorkID) (shared.JobID, bool, error) {
+	j, ok := f.active[id]
+	return j, ok, nil
+}
+
+// WritingGeneration answers generations[id], 1 for a job not listed.
+func (f *fakeTurnkey) WritingGeneration(_ context.Context, id shared.JobID) (int, error) {
+	if g, ok := f.generations[id]; ok {
+		return g, nil
+	}
+	return 1, nil
 }
 
 func (f *fakeTurnkey) Triage(_ context.Context, src work.Source) (turnkey.Started, error) {

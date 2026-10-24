@@ -28,7 +28,10 @@ func transcriptJobTypes() []job.Type {
 	return []job.Type{coursework.SummarizeJobType, coursework.ExtractHomeworkJobType, coursework.LectureTextJobType}
 }
 
-func assignmentJobTypes() []job.Type { return []job.Type{coursework.HomeworkDraftJobType} }
+// The writing of a turnkey work names its assignment too (TASK-131): deleting the assignment stops it.
+func assignmentJobTypes() []job.Type {
+	return []job.Type{coursework.HomeworkDraftJobType, coursework.WorkWritingJobType}
+}
 
 // Service deletes recordings; see the package documentation for the order of the steps.
 type Service struct {

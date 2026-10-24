@@ -132,7 +132,15 @@ func TestAssignmentShowsTheLesson(t *testing.T) {
 					t.Fatalf("lesson date = %v, want %v in the clock's zone", v.LessonDate, tc.date)
 				}
 			}
+			// The title page of a turnkey work shows the same subject and teacher (TASK-131).
+			label, err := e.svc.LessonLabel(context.Background(), list[0].ID)
+			if err != nil || label.Subject() != tc.subject || label.Teacher() != tc.teacher {
+				t.Fatalf("LessonLabel = %q %q, %v", label.Subject(), label.Teacher(), err)
+			}
 		})
+	}
+	if _, err := newLessonEnv(t, nil, extractAnswer).svc.LessonLabel(context.Background(), "missing"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("a missing assignment: %v", err)
 	}
 }
 

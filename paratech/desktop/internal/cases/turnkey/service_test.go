@@ -92,7 +92,8 @@ func TestTwoRoundsThenFinal(t *testing.T) {
 		t.Fatalf("edit = %+v, %v", v, err)
 	}
 	v, err = e.svc.ConfirmRequirements(ctx, v.ID)
-	if err != nil || v.Status != work.StatusConfirmed || !strings.Contains(v.Instruction, "Объём: 12 страниц") {
+	// The confirmed card reaches the writer as data (work.Brief), not as an instruction text (TASK-131).
+	if err != nil || v.Status != work.StatusConfirmed || v.Writing != nil || v.Understanding.Requirements.Volume != "12 страниц" {
 		t.Fatalf("confirm = %+v, %v", v, err)
 	}
 }

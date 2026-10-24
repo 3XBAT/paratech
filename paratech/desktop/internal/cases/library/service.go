@@ -318,6 +318,28 @@ func (s *Service) Place(ctx context.Context, id shared.MaterialID, sub shared.Su
 	})
 }
 
+// FileHomework stores a file the app made for the student (a turnkey work, TASK-131) and files it in «ДЗ» of sub. With
+// no subject, or one that is gone, it stays in «Входящие». The same bytes again give the material that exists, filed
+// in «ДЗ» again, so a repeated job step files one material.
+func (s *Service) FileHomework(ctx context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error) {
+	im, err := s.Import(ctx, Upload{Name: name, Data: data})
+	if err != nil || sub == "" {
+		return im.Material, err
+	}
+	target, err := s.subject(ctx, sub)
+	switch {
+	case errors.Is(err, ErrSubjectNotFound):
+		return im.Material, nil
+	case err != nil:
+		return nil, err
+	}
+	f, ok := target.SystemFolder(subject.SystemHomework)
+	if !ok {
+		return im.Material, nil
+	}
+	return s.Place(ctx, im.Material.ID(), sub, f.ID())
+}
+
 // MoveToInbox returns a material to «Входящие» (the undo of Place); the file is kept.
 func (s *Service) MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
 	return s.changeMaterial(ctx, id, func(m *material.Material) (bool, error) {

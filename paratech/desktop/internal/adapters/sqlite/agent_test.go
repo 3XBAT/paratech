@@ -264,6 +264,7 @@ func TestAgentActions(t *testing.T) {
 		{values.ToolEditDue, action.RestoreDue{Assignment: agentRef(t, values.KindAssignment, "a2")}},
 		{values.ToolMakeSummary, action.CancelJob{Job: agentRef(t, values.KindJob, "j1")}},
 		{values.ToolTriageAssignment, action.RemoveWork{Work: agentRef(t, values.KindWork, "w1")}},
+		{values.ToolWriteWork, action.StopWork{Work: agentRef(t, values.KindWork, "w1"), Job: agentRef(t, values.KindJob, "j2")}},
 	}
 	for i, tc := range comps {
 		id := shared.ActionID(fmt.Sprintf("a%d", i))

@@ -150,6 +150,8 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 		row.ID = v.Material
 	case action.CancelJob:
 		row.Job = v.Job
+	case action.StopWork:
+		row.Job = v.Job
 	case action.RemoveWork:
 		tr, err := t.actions.triageReplay(ctx, v.Work)
 		if err != nil {
@@ -172,6 +174,10 @@ func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) value
 		return values.RefuseNotFound
 	case errors.Is(err, turnkey.ErrNoText):
 		return values.RefuseNoText
+	case errors.Is(err, turnkey.ErrNotWritable):
+		return values.RefuseNotNow // the student confirms the requirements first
+	case errors.Is(err, turnkey.ErrNotConfigured):
+		return values.RefuseUnavailable
 	case errors.Is(err, library.ErrInvalidName), errors.Is(err, library.ErrInvalidFolderName),
 		errors.Is(err, library.ErrInvalidRequest), errors.Is(err, knowledgebase.ErrInvalidLessonInfo),
 		errors.Is(err, assignment.ErrInvalidDetails), errors.Is(err, turnkey.ErrInvalidRequest):

@@ -24,6 +24,7 @@ import (
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/jobs/job"
 	tvalues "paratech/desktop/internal/domain/transcription/values"
 	"paratech/desktop/internal/input/wails"
@@ -173,7 +174,7 @@ func TestRegisteredTypes(t *testing.T) {
 	want := []job.Type{
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
 		homeworkflow.LectureTextJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
-		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
+		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType, turnkey.WritingJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -193,6 +194,7 @@ func TestHiddenJobTypes(t *testing.T) {
 	hidden := hiddenJobTypes()
 	wantHidden := []job.Type{
 		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
+		turnkey.WritingJobType,
 	}
 	if !slices.Equal(hidden, wantHidden) {
 		t.Fatalf("hidden types %v, want %v", hidden, wantHidden)
@@ -244,7 +246,7 @@ func TestRegistrationsWithoutAnEngine(t *testing.T) {
 	want := []job.Type{
 		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.LectureTextJobType,
 		homeworkflow.HomeworkDraftJobType, senddelivery.JobType, schedulesync.CalendarSyncJobType,
-		homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
+		homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType, turnkey.WritingJobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)

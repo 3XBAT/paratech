@@ -23,6 +23,16 @@ func (s *Service) Assignment(ctx context.Context, id shared.AssignmentID) (Assig
 	return s.view(ctx, s.lessons, a)
 }
 
+// LessonLabel returns what an assignment shows of its lesson (the subject and the teacher), for the title page of a
+// turnkey work (TASK-131; the turnkey LessonLabels port, wired by the app). A missing one wraps shared.ErrNotFound.
+func (s *Service) LessonLabel(ctx context.Context, id shared.AssignmentID) (values.LessonLabel, error) {
+	a, err := s.assignments.Get(ctx, id)
+	if err != nil {
+		return values.LessonLabel{}, err
+	}
+	return s.lessons.label(ctx, a)
+}
+
 // ListAssignments returns the newest assignments for the homework screen, at most MaxListedAssignments (PRD section
 // 10 step 1). None is an empty list.
 func (s *Service) ListAssignments(ctx context.Context) ([]AssignmentView, error) {

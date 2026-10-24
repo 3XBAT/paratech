@@ -187,6 +187,8 @@ func (a *Actions) prepare(ctx context.Context, call values.Call) (prepared, bool
 		p, err = a.generateDraft(ctx, call)
 	case values.ToolTriageAssignment:
 		p, err = a.triage(call)
+	case values.ToolWriteWork:
+		p, err = a.writeWork(ctx, call)
 	default:
 		return prepared{}, false, nil
 	}
@@ -607,6 +609,8 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 		}, nil
 	case action.RemoveWork:
 		return a.checkWork(ctx, v)
+	case action.StopWork:
+		return a.checkWriting(ctx, v)
 	}
 	return action.Target{}, fmt.Errorf("%w: %T", action.ErrInvalidCompensation, c)
 }
@@ -625,6 +629,9 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 	if v, ok := c.(action.RemoveWork); ok {
 		// The repository removes the work under its version itself; nothing is left to rebase on.
 		return 0, a.removeWork(ctx, v, expectedVersion)
+	}
+	if v, ok := c.(action.StopWork); ok {
+		return a.stopWork(ctx, v, expectedVersion)
 	}
 	var after int64
 	err := a.tx.Do(ctx, func(ctx context.Context) error {

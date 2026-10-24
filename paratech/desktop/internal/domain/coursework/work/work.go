@@ -45,6 +45,7 @@ type Work struct {
 	attempt int // the attempt of the pending call of round, 1..MaxAttempts
 	rounds  []Round
 	edits   map[Field]string // the student's card where it differs from the reader's
+	writing *Writing         // from StartWriting on (TASK-131)
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -168,12 +169,6 @@ func (w *Work) Edit(u Understanding, now time.Time) error {
 // ConfirmRequirements is «Подтвердить» on the card: the requirements are settled.
 func (w *Work) ConfirmRequirements(now time.Time) error { return w.moveTo(StatusConfirmed, now) }
 
-// StartWriting marks the work written (TASK-105).
-func (w *Work) StartWriting(now time.Time) error { return w.moveTo(StatusWriting, now) }
-
-// Finish marks the work written.
-func (w *Work) Finish(now time.Time) error { return w.moveTo(StatusDone, now) }
-
 func (w *Work) moveTo(to Status, now time.Time) error { return w.move(w.clone(), to, now) }
 
 // move checks the transition and the state next would have, then takes it.
@@ -193,6 +188,10 @@ func (w *Work) clone() *Work {
 	c := *w
 	c.rounds = slices.Clone(w.rounds)
 	c.edits = maps.Clone(w.edits)
+	if w.writing != nil {
+		wr := w.writing.clone()
+		c.writing = &wr
+	}
 	return &c
 }
 
@@ -206,12 +205,13 @@ type State struct {
 	Attempt   int
 	Rounds    []Round
 	Edits     map[Field]string
+	Writing   *Writing // nil before StartWriting
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
 // Restore rebuilds a stored work without side effects; it only checks that the state is consistent. The answers of
-// the rounds must have been read back with ParseAnswer.
+// the rounds must have been read back with ParseAnswer, the writing with ParseWriting.
 func Restore(st State) (*Work, error) {
 	if st.Version < 1 {
 		return nil, fmt.Errorf("%w: stored version %d", ErrInvalidWork, st.Version)
@@ -219,6 +219,10 @@ func Restore(st State) (*Work, error) {
 	w := &Work{
 		version: st.Version, id: st.ID, source: st.Source, status: st.Status, round: st.Round, attempt: st.Attempt,
 		rounds: slices.Clone(st.Rounds), edits: maps.Clone(st.Edits), createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
+	}
+	if st.Writing != nil {
+		wr := st.Writing.clone()
+		w.writing = &wr
 	}
 	if w.edits == nil {
 		w.edits = map[Field]string{}
@@ -278,6 +282,21 @@ func (w *Work) validate() error {
 		return bad("the next round follows answers")
 	case len(w.edits) > 0 && len(w.rounds) == 0:
 		return bad("an edit needs the reader's card")
+	}
+	writing := w.status == StatusWriting || w.status == StatusDone
+	switch {
+	case writing != (w.writing != nil):
+		return bad("a writing state exactly while writing or done")
+	case w.writing != nil:
+		if err := w.writing.validate(); err != nil {
+			return err
+		}
+		if (w.status == StatusDone) != (w.writing.File != nil && w.writing.File.Content == w.ContentKey()) {
+			return bad("a done work has the file of its sections")
+		}
+		if done, total := w.Progress(); w.status == StatusDone && done != total {
+			return bad("a done work has every section")
+		}
 	}
 	if pending {
 		return nil
@@ -369,10 +388,14 @@ func (w *Work) Understanding() (Understanding, []Field) {
 
 // State returns the stored form.
 func (w *Work) State() State {
-	return State{
+	st := State{
 		Version: w.version, ID: w.id, Source: w.source, Status: w.status, Round: w.round, Attempt: w.attempt,
 		Rounds: w.Rounds(), Edits: maps.Clone(w.edits), CreatedAt: w.createdAt, UpdatedAt: w.updatedAt,
 	}
+	if wr, ok := w.Writing(); ok {
+		st.Writing = &wr
+	}
+	return st
 }
 
 // CreatedAt returns when the work started.

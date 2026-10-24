@@ -417,6 +417,7 @@ type Work struct {
 	Version        int64
 	CreatedAt      int64
 	UpdatedAt      int64
+	Writing        sql.NullString
 }
 
 type WorkRound struct {

@@ -97,6 +97,62 @@ func TestWorkSaveGetDelete(t *testing.T) {
 	}
 }
 
+// TestWorkWritingRoundTrip: the writing (TASK-131) is saved with the work under its version and read back through
+// the same checks; a tampered writing column is not loaded.
+func TestWorkWritingRoundTrip(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewMaterialRepository(db).Save(ctx, newLibMaterial(t, "m1", "текст")); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewWorkRepository(db)
+	w, _ := work.New("w1", work.Source{Material: "m1"}, libT0)
+	if err := w.Record(1, worksAnswer(work.FeasibleFull, 0), libT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ConfirmRequirements(libT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.StartWriting(work.Snapshot{Subject: "s1", SubjectName: "История", Teacher: "Петров"}, libT0); err != nil {
+		t.Fatal(err)
+	}
+	o, err := work.ParseOutline(`{"topic":"Русь","sections":[{"title":"Введение","words":200},{"title":"Итоги","words":100}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetOutline(o, libT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ApproveOutline(libT0); err != nil {
+		t.Fatal(err)
+	}
+	text, err := work.ParseSection(`{"paragraphs":["Абзац."],"sources":[{"material":"","text":"Книга"}]}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteSection(1, 1, text, libT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, "w1")
+	if err != nil || !reflect.DeepEqual(got.State(), w.State()) || got.Next() != w.Next() {
+		t.Fatalf("Get = %+v, %v\nwant %+v", got.State(), err, w.State())
+	}
+
+	for _, tampered := range []string{
+		`{"snapshot":{"subject":"","subject_name":"","teacher":"","title":""},"generation":1,"outline_attempt":1,"topic":"","sections":[],"file":null,"send_to":"x@y.ru"}`,
+		`{"snapshot":{"subject":"","subject_name":"","teacher":"","title":""},"generation":0,"outline_attempt":1,"topic":"","sections":[],"file":null}`,
+	} {
+		if _, err := db.sql.ExecContext(ctx, `UPDATE works SET writing = ? WHERE id = 'w1'`, tampered); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.Get(ctx, "w1"); !errors.Is(err, work.ErrInvalidWork) {
+			t.Fatalf("Get with a tampered writing = %v", err)
+		}
+	}
+}
+
 // A stored answer that no longer passes the strict schema (an edited database, a changed rule) is not loaded.
 func TestWorkStoredAnswerIsCheckedAgain(t *testing.T) {
 	db, ctx := openTest(t, nil), context.Background()

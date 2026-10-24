@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/adapters/doctext"
+	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/random"
@@ -44,6 +45,8 @@ type turnkeyEnv struct {
 	driver  *agentloop.Driver
 	sink    *driverSink
 	upload  values.Ref
+	lib     *library.Service
+	jobs    *sqlite.JobRepository // the writing jobs (TASK-131); the scenario that writes runs them
 }
 
 func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
@@ -79,9 +82,14 @@ func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.lib, e.jobs = lib, sqlite.NewJobRepository(e.db)
 	if e.works, err = turnkey.New(turnkey.Deps{
 		Works: sqlite.NewWorkRepository(e.db), Assignments: sqlite.NewAssignmentRepository(e.db), Materials: lib, Reader: hub,
 		Clock: e.clock, IDs: random.IDs{}, Log: log,
+		Writing: &turnkey.WritingDeps{
+			Writer: hub, Jobs: e.jobs, JobIDs: random.IDs{}, Profiles: sqlite.NewSettingsRepository(e.db),
+			Renderer: docx.New(), Lessons: noLessonLabels{}, Shelf: lib, ModelAlias: "default", MaxAttempts: 3,
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +259,7 @@ func TestTurnkeyTriageThroughTheAgentAndTwoRounds(t *testing.T) {
 
 	// The confirmed work survives a restart of the use case: it is read back from SQLite through the strict schema.
 	again, err := e.works.Work(ctx, shared.WorkID(v.ID))
-	if err != nil || again.Status != work.StatusConfirmed || !strings.Contains(again.Instruction, "Вариант: 3") {
+	if err != nil || again.Status != work.StatusConfirmed || again.Understanding.Requirements.Variant != "3" {
 		t.Fatalf("stored = %+v, %v", again, err)
 	}
 }

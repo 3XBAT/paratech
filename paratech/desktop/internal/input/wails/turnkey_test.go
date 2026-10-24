@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"paratech/desktop/internal/cases/turnkey"
@@ -20,6 +21,8 @@ type fakeTurnkey struct {
 	replies []work.Reply
 	edit    work.Understanding
 	src     work.Source
+	outline []work.OutlineItem
+	calls   []string
 }
 
 func (f *fakeTurnkey) Work(context.Context, shared.WorkID) (turnkey.View, error) {
@@ -57,6 +60,106 @@ func (f *fakeTurnkey) AskStep(context.Context, shared.WorkID, int, string) (stri
 	return f.advice, f.err
 }
 
+func (f *fakeTurnkey) StartWriting(context.Context, shared.WorkID) (turnkey.WritingStarted, error) {
+	f.calls = append(f.calls, "start")
+	return turnkey.WritingStarted{View: f.view, Job: "j1", Created: true}, f.err
+}
+
+func (f *fakeTurnkey) ApproveOutline(context.Context, shared.WorkID) (turnkey.WritingStarted, error) {
+	f.calls = append(f.calls, "approve")
+	return turnkey.WritingStarted{View: f.view, Job: "j2", Created: true}, f.err
+}
+
+func (f *fakeTurnkey) EditOutline(_ context.Context, _ shared.WorkID, items []work.OutlineItem) (turnkey.View, error) {
+	f.calls, f.outline = append(f.calls, "edit"), items
+	return f.view, f.err
+}
+
+func (f *fakeTurnkey) Regenerate(_ context.Context, _ shared.WorkID, number int, note string) (turnkey.WritingStarted, error) {
+	f.calls = append(f.calls, fmt.Sprintf("regenerate %d %s", number, note))
+	return turnkey.WritingStarted{View: f.view, Job: "j3", Created: true}, f.err
+}
+
+// writingWork is a work whose outline waits for the approval: section 1 written for the test of the mapping.
+func writingWork() turnkey.View {
+	return turnkey.View{
+		ID: "w1", Source: work.Source{Assignment: "a1"}, Status: work.StatusWriting, Round: 1, Version: 7,
+		Writing: &turnkey.WritingView{
+			Step: work.StepApprove, Generation: 1, Topic: "Древняя Русь", Done: 1, Total: 2, Subject: "s1",
+			Sections: []turnkey.SectionView{
+				{Number: 1, Title: "Введение", Words: 200, Written: true, Paragraphs: []string{"Абзац."},
+					Sources: []work.Reference{{Text: "Методичка.docx", Material: "m1"}, {Text: "Иванов И. И."}}},
+				{Number: 2, Title: "Итоги", Words: 150},
+			},
+		},
+	}
+}
+
+func TestTurnkeyWritingJSON(t *testing.T) {
+	s := NewTurnkeyService(&fakeTurnkey{view: writingWork()}, discard())
+	got, err := s.Work(t.Context(), "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(got.Writing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"step":"approve","generation":1,"topic":"Древняя Русь","sections":[` +
+		`{"number":1,"title":"Введение","words":200,"note":"","written":true,"paragraphs":["Абзац."],` +
+		`"sources":[{"text":"Методичка.docx","materialId":"m1","verify":false},{"text":"Иванов И. И.","materialId":"","verify":true}]},` +
+		`{"number":2,"title":"Итоги","words":150,"note":"","written":false,"paragraphs":[],"sources":[]}],` +
+		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","job":""}`
+	if string(b) != want {
+		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// The writing moves of the student reach the use case; those that start a job give its ID for the progress card.
+func TestTurnkeyWritingCalls(t *testing.T) {
+	f := &fakeTurnkey{view: writingWork()}
+	s := NewTurnkeyService(f, discard())
+	ctx := t.Context()
+	for name, tt := range map[string]struct {
+		call func() (TurnkeyWork, error)
+		job  string
+	}{
+		"start":      {func() (TurnkeyWork, error) { return s.StartWriting(ctx, "w1") }, "j1"},
+		"approve":    {func() (TurnkeyWork, error) { return s.ApproveOutline(ctx, "w1") }, "j2"},
+		"regenerate": {func() (TurnkeyWork, error) { return s.Regenerate(ctx, "w1", 2, "Подробнее") }, "j3"},
+		"edit": {func() (TurnkeyWork, error) {
+			return s.EditOutline(ctx, "w1", []TurnkeyOutlineItem{{Number: 2, Title: "Итоги", Words: 150}, {Title: "Новый", Words: 100}})
+		}, ""},
+	} {
+		v, err := tt.call()
+		if err != nil || v.ID != "w1" || v.Writing == nil || v.Writing.Job != tt.job {
+			t.Errorf("%s = %+v, %v", name, v.Writing, err)
+		}
+	}
+	if len(f.outline) != 2 || f.outline[0] != (work.OutlineItem{Number: 2, Title: "Итоги", Words: 150}) || f.outline[1].Number != 0 {
+		t.Fatalf("outline = %+v", f.outline)
+	}
+	if !slices.Contains(f.calls, "regenerate 2 Подробнее") {
+		t.Fatalf("calls = %v", f.calls)
+	}
+
+	for _, tt := range []struct {
+		err  error
+		want error
+	}{
+		{turnkey.ErrWritingRunning, ErrTurnkeyWriting},
+		{turnkey.ErrAlreadyWritten, ErrTurnkeyWritten},
+		{fmt.Errorf("%w: the outline waits", turnkey.ErrNotWritable), ErrTurnkeyInvalid},
+		{turnkey.ErrWritingRetries, ErrTurnkeyInvalid},
+		{fmt.Errorf("%w: %w", turnkey.ErrNotFound, shared.ErrNotFound), ErrTurnkeyNotFound},
+	} {
+		f.err = tt.err
+		if _, err := s.ApproveOutline(ctx, "w1"); !errors.Is(err, tt.want) {
+			t.Errorf("%v: %v", tt.err, err)
+		}
+	}
+}
+
 func helperView() turnkey.View {
 	return turnkey.View{
 		ID: "w1", Source: work.Source{Assignment: "a1"}, Status: work.StatusHelper, Round: 1, HasAnswer: true,
@@ -84,7 +187,7 @@ func TestTurnkeyWorkJSON(t *testing.T) {
 		`"deadline":"","sources":""},"edited":["file_format"],"feasibility":"impossible",` +
 		`"feasibilityReason":"Чертёж в программе вуза","partial":false,"assumptions":[],` +
 		`"helper":{"steps":["Открыть программу"],"submit":"Файл .dwg","pitfalls":[],"readyParts":["Записка"],"placeholders":[]},` +
-		`"answered":[{"round":1,"question":"Вариант?","answer":"3","default":true}],"version":4,"problem":"","message":""}`
+		`"answered":[{"round":1,"question":"Вариант?","answer":"3","default":true}],"writing":null,"version":4,"problem":"","message":""}`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}
