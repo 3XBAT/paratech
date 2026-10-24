@@ -42,7 +42,13 @@ it cannot do the work whole — then help instead. Everything the model says abo
 - **The student approves the outline**: the job ends once the outline is stored (no attempt used while it waits).
   Only the student, through `input/wails`, edits it and presses «Утвердить план» (`ApproveOutline`), which starts
   the sections job; a regeneration is the student's own request and approves it too. The agent's port has none of
-  these moves, and its `write_work` on a work whose outline waits is `not_now`.
+  these moves, and its `write_work` on a work whose outline waits is `not_now`. The student's `EditOutline` of a
+  done work counts as approval: the new generation is written without a new «Утвердить план».
+- **Blocked outline**: an outline call that used its attempts is not a dead end: the student's `Regenerate(0, note)`
+  (`input/wails` only) asks for the outline again with new attempts and keys (no free replay of a refused answer)
+  and the note in the student's section; that outline waits for the approval again.
+- **Agent's job**: the `write_work` job completes at the outline; an Undo of it after that is «target changed». The UI shows a completed outline job as «план готов, утвердите», and never shows
+  `Writing.Material` as the current paper while a step is running.
 - **Untrusted text**: the brief (card, questions and answers, the reader's assumptions) goes to the writer as one
   JSON data field inside the delimited data block, never into the instructions; section texts are checked again
   and are paper text only.

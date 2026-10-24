@@ -124,6 +124,7 @@ func (s *Service) EditOutline(ctx context.Context, id shared.WorkID, items []wor
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново» for section number (0: every section) with the
 // student's note, then the writing job (paid again for those sections only); it approves an outline that waits.
+// Number 0 on an outline call that used its attempts asks for the outline again (it then waits for the approval).
 // Errors: those of EditOutline and StartWriting.
 func (s *Service) Regenerate(ctx context.Context, id shared.WorkID, number int, note string) (WritingStarted, error) {
 	if err := s.idle(ctx, id); err != nil {

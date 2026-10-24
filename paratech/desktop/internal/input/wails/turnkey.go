@@ -285,7 +285,7 @@ func (s *TurnkeyService) EditOutline(ctx context.Context, id string, items []Tur
 }
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново» for section number (0: every section) with the
-// student's note (a paid job for those sections only).
+// student's note (a paid job for those sections only); 0 on a blocked outline asks for the outline again.
 func (s *TurnkeyService) Regenerate(ctx context.Context, id string, number int, note string) (TurnkeyWork, error) {
 	st, err := s.core.Regenerate(ctx, shared.WorkID(id), number, note)
 	return s.started(opTurnkeyWrite, st, err)

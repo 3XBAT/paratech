@@ -103,15 +103,18 @@ type File struct {
 
 // Writing is the writing state of a work from StartWriting on. Generation grows each time a done work is written
 // again (an edit or a regeneration), so its job is a new one. Approved is the student's «Утвердить план»: no section
-// is written before it (TASK-105).
+// is written before it (TASK-105). OutlineRevision grows and OutlineNote is set when the student asks again for an
+// outline whose call used its attempts, so the new calls have new keys.
 type Writing struct {
-	Snapshot       Snapshot  `json:"snapshot"`
-	Generation     int       `json:"generation"`
-	OutlineAttempt int       `json:"outline_attempt"`
-	Topic          string    `json:"topic"`
-	Sections       []Section `json:"sections"` // empty until the outline is stored
-	Approved       bool      `json:"approved"`
-	File           *File     `json:"file"`
+	Snapshot        Snapshot  `json:"snapshot"`
+	Generation      int       `json:"generation"`
+	OutlineAttempt  int       `json:"outline_attempt"`
+	OutlineRevision int       `json:"outline_revision,omitempty"`
+	OutlineNote     string    `json:"outline_note,omitempty"`
+	Topic           string    `json:"topic"`
+	Sections        []Section `json:"sections"` // empty until the outline is stored
+	Approved        bool      `json:"approved"`
+	File            *File     `json:"file"`
 }
 
 // OutlineItem is a section of an outline as the model or the student gives it; Number 0 is a new section.
@@ -173,9 +176,9 @@ func (w *Work) Next() Step {
 	wr := w.writing
 	if len(wr.Sections) == 0 {
 		if wr.OutlineAttempt > MaxAttempts {
-			return Step{Kind: StepBlocked}
+			return Step{Kind: StepBlocked, Revision: wr.OutlineRevision}
 		}
-		return Step{Kind: StepOutline, Attempt: wr.OutlineAttempt}
+		return Step{Kind: StepOutline, Revision: wr.OutlineRevision, Attempt: wr.OutlineAttempt}
 	}
 	if !wr.Approved {
 		return Step{Kind: StepApprove}
@@ -264,16 +267,26 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново»: section number (0: every section) is written again
 // with the student's note (may be empty). It is the student's own request to write, so it approves an outline that
-// waits. Errors: ErrInvalidTransition, ErrInvalidReply.
+// waits. Without an outline, when the outline call used its attempts, number 0 asks for the outline again with the
+// note (new attempts and keys); that outline waits for the approval as the first one. Errors: ErrInvalidTransition,
+// ErrInvalidReply.
 func (w *Work) Regenerate(number int, note string, now time.Time) error {
-	if err := w.outlined(); err != nil {
-		return err
+	blockedOutline := number == 0 && w.Next().Kind == StepBlocked && len(w.writing.Sections) == 0
+	if !blockedOutline {
+		if err := w.outlined(); err != nil {
+			return err
+		}
 	}
 	note = strings.TrimSpace(note)
 	if !boundedText(note, MaxNoteRunes, true, true) {
 		return fmt.Errorf("%w: a note has at most %d characters", ErrInvalidReply, MaxNoteRunes)
 	}
 	next := w.clone()
+	if blockedOutline {
+		next.writing.OutlineRevision++
+		next.writing.OutlineAttempt, next.writing.OutlineNote = 1, note
+		return w.move(next, StatusWriting, now)
+	}
 	found := false
 	for i, s := range next.writing.Sections {
 		if number == 0 || s.Number == number {
@@ -482,6 +495,9 @@ func (w *Work) StepData(st Step, t Texts) (data, note string, err error) {
 	}
 	for i, m := range t.Materials {
 		d.Materials = append(d.Materials, materialData{Ref: refOf(i), Name: m.Name})
+	}
+	if st.Kind == StepOutline {
+		note = w.writing.OutlineNote
 	}
 	if st.Kind == StepSection {
 		d.Topic = w.writing.Topic
@@ -763,8 +779,10 @@ func (wr Writing) validate() error {
 		return bad("snapshot subject")
 	case wr.Generation < 1:
 		return bad("generation")
-	case wr.OutlineAttempt < 1 || wr.OutlineAttempt > MaxAttempts+1:
+	case wr.OutlineAttempt < 1 || wr.OutlineAttempt > MaxAttempts+1 || wr.OutlineRevision < 0:
 		return bad("outline attempt")
+	case !boundedText(wr.OutlineNote, MaxNoteRunes, true, true):
+		return bad("outline note")
 	case len(wr.Sections) == 0 && (wr.Topic != "" || wr.File != nil || wr.Approved):
 		return bad("a topic, a file or an approval without an outline")
 	}

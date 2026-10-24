@@ -157,7 +157,8 @@ func TestRepeatedStepAsksNoStoredSection(t *testing.T) {
 }
 
 // TestRefusedAnswersUseAttempts: a malformed answer is refused (never stored) and uses an attempt with a new key;
-// after the last attempt the job fails for good and the work waits for a regeneration.
+// after the last attempt the job fails for good and the work waits for a regeneration: the student's Regenerate(0,
+// note) asks for the outline again under new keys (no free replay of a refused answer), and it waits for approval.
 func TestRefusedAnswersUseAttempts(t *testing.T) {
 	e := newWriteEnv(t)
 	ctx := t.Context()
@@ -186,6 +187,29 @@ func TestRefusedAnswersUseAttempts(t *testing.T) {
 	jobs := len(e.jobs.order)
 	if _, err := e.svc.StartWriting(ctx, id); !errors.Is(err, ErrNotWritable) || len(e.jobs.order) != jobs {
 		t.Fatalf("start a blocked writing: %v, jobs %d", err, len(e.jobs.order))
+	}
+
+	// The runner fails the job; the student asks for the outline again with a note: a new job, new keys.
+	j := e.job(t, st.Job)
+	if err := errors.Join(j.Claim(t0), j.Fail(t0, "blocked")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Regenerate(ctx, id, 1, ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("regenerate a section of no outline: %v", err)
+	}
+	re, err := e.svc.Regenerate(ctx, id, 0, "Тема про Новгород")
+	if err != nil || !re.Created || re.Job == st.Job || re.View.Writing.Step != work.StepOutline {
+		t.Fatalf("Regenerate a blocked outline = %+v, %v", re, err)
+	}
+	if steps, err := e.run(t, re.Job, 10); err != nil || steps != 1 || e.writer.paid() != work.MaxAttempts+1 {
+		t.Fatalf("outline job = %v after %d steps, paid %d", err, steps, e.writer.paid())
+	}
+	last := e.writer.reqs[len(e.writer.reqs)-1]
+	if !strings.Contains(last.UntrustedData(), prompts.StudentOpen) || !strings.Contains(last.UntrustedData(), "Новгород") {
+		t.Fatal("the note is not in the student's section of the outline call")
+	}
+	if v, _ := e.svc.Work(ctx, id); v.Writing.Step != work.StepApprove || len(v.Writing.Sections) != 3 {
+		t.Fatalf("after the new outline = %+v", v.Writing)
 	}
 }
 

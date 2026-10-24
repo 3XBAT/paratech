@@ -214,6 +214,74 @@ func TestRefusedStepsBlock(t *testing.T) {
 	}
 }
 
+// TestRegenerateBlockedOutline: an outline call that used its attempts is not a dead end: Regenerate(0, note) asks for
+// the outline again under new keys with the note, and that outline waits for the approval.
+func TestRegenerateBlockedOutline(t *testing.T) {
+	w := confirmedWork(t)
+	if err := w.StartWriting(snap, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Regenerate(0, "", t0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("regenerate an outline call that is still due: %v", err)
+	}
+	first := w.Next()
+	firstData, _, _ := w.StepData(first, Texts{Assignment: "a"})
+	for range MaxAttempts {
+		if err := w.RefuseStep(w.Next(), t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w.Next().Kind != StepBlocked {
+		t.Fatalf("outline not blocked: %+v", w.Next())
+	}
+
+	for _, tc := range []struct {
+		name   string
+		number int
+		note   string
+		want   error
+	}{
+		{"a section of no outline", 1, "", ErrInvalidTransition},
+		{"a long note", 0, strings.Repeat("я", MaxNoteRunes+1), ErrInvalidReply},
+	} {
+		if err := w.Regenerate(tc.number, tc.note, t0); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	if w.Next().Kind != StepBlocked {
+		t.Fatalf("a refused regeneration changed the writing: %+v", w.Next())
+	}
+
+	if err := w.Regenerate(0, "  Тема про Новгород  ", t0); err != nil {
+		t.Fatal(err)
+	}
+	st := w.Next()
+	if st.Kind != StepOutline || st.Attempt != 1 || st.Revision != 1 || w.Status() != StatusWriting {
+		t.Fatalf("after the regeneration: %+v %s", st, w.Status())
+	}
+	data, note, err := w.StepData(st, Texts{Assignment: "a"})
+	if err != nil || note != "Тема про Новгород" || data != firstData {
+		t.Fatalf("outline data = %q, note %q, %v", data, note, err)
+	}
+	if w.StepKey(st, "i", data) == w.StepKey(first, "i", firstData) {
+		t.Fatal("the outline asked again has the key of the first attempt: the Hub would replay the refused answer")
+	}
+	wr, _ := w.Writing()
+	if wr.Generation != 1 || wr.Approved {
+		t.Fatalf("writing = %+v", wr)
+	}
+	// The stored form keeps the revision and the note.
+	back, err := ParseWriting(wr.Encode())
+	if err != nil || back.OutlineRevision != 1 || back.OutlineNote != "Тема про Новгород" {
+		t.Fatalf("stored = %+v, %v", back, err)
+	}
+
+	o, _ := ParseOutline(outlineJSON)
+	if err := w.SetOutline(o, t0); err != nil || w.Next().Kind != StepApprove {
+		t.Fatalf("the new outline waits for the approval: %v %+v", err, w.Next())
+	}
+}
+
 func TestEditOutlineAndRegenerate(t *testing.T) {
 	w := confirmedWork(t)
 	if err := w.EditOutline([]OutlineItem{{Title: "x", Words: 100}}, t0); !errors.Is(err, ErrInvalidTransition) {
@@ -457,6 +525,8 @@ func TestRestoreWriting(t *testing.T) {
 			s.Writing.Sections, s.Writing.Topic = nil, ""
 		}},
 		{"bad snapshot", func(s *State) { s.Writing.Snapshot.Teacher = "a\x00b" }},
+		{"negative outline revision", func(s *State) { s.Writing.OutlineRevision = -1 }},
+		{"long outline note", func(s *State) { s.Writing.OutlineNote = strings.Repeat("я", MaxNoteRunes+1) }},
 		{"file without an outline", func(s *State) {
 			s.Writing.Sections = nil
 			s.Writing.Topic = ""
