@@ -104,7 +104,7 @@ export function sectionTexts(sections: readonly WorkSection[]): SectionText[] {
 
 /**
  * The card of a work. A work that is not confirmed and has no writing shows nothing here (its questions, its card and
- * the helper are TASK-130). Writing.sections hold the material of a step that runs: it is never shown as a result.
+ * the helper are turnkeyCardModel, TASK-130). Writing.sections hold the material of a step that runs: it is never shown as a result.
  */
 export function workCardModel(w: TurnkeyWork): WorkCardModel {
   const wr = w.writing;
@@ -154,9 +154,14 @@ export function isRunning(w: TurnkeyWork | null): boolean {
   return step === "outline" || step === "section" || step === "assemble";
 }
 
+/** A reader call is in flight (triage without a problem, TASK-130): the card re-reads the work until it is not. */
+export function isTriaging(w: TurnkeyWork | null): boolean {
+  return w !== null && w.writing === null && w.status === "triage" && w.problem === "";
+}
+
 /** The wait before the next read, or null to stop. Nothing is read again once a loaded work does not run. */
 export function pollDelay(w: TurnkeyWork | null, failed: boolean): number | null {
-  if (w !== null && !isRunning(w)) {
+  if (w !== null && !isRunning(w) && !isTriaging(w)) {
     return null;
   }
   return failed ? retryMs : pollMs;

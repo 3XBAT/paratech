@@ -18,6 +18,7 @@ import {
   editorFromSections,
   isEdited,
   isRunning,
+  isTriaging,
   limits,
   moveItem,
   noteOf,
@@ -27,6 +28,8 @@ import {
   workCardModel,
   workTexts,
 } from "../workView.js";
+import { turnkeyCardModel } from "../turnkeyView.js";
+import { FailedCard, HelperCard, QuestionsCard, TriageCard, UnderstandingCard } from "./TurnkeyCards.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
@@ -149,6 +152,25 @@ export function WorkBody(props: {
       {error}
     </ResultLine>
   );
+
+  // Questions, «Как понято задание» and the helper (TASK-130): works that have no writing yet.
+  const early = turnkeyCardModel(work);
+  if (early !== null) {
+    const ctx = { work, api, busy, run, step, onWork: props.onWork, errorLine };
+    switch (early.type) {
+      case "triage":
+        return <TriageCard ctx={ctx} caption={early.caption} line={early.line} problem={early.problem} />;
+      case "failed":
+        return <FailedCard caption={early.caption} text={early.text} message={work.problem === "" ? "" : work.message} />;
+      case "questions":
+        // A new round is a new form: the typed answers of the old one are dropped.
+        return <QuestionsCard key={`${work.questionRound}:${work.version}`} ctx={ctx} />;
+      case "understanding":
+        return <UnderstandingCard key={work.version} ctx={ctx} />;
+      case "helper":
+        return <HelperCard ctx={ctx} />;
+    }
+  }
 
   switch (model.type) {
     case "none":
@@ -354,7 +376,7 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
     [apply],
   );
 
-  const running = isRunning(work);
+  const running = isRunning(work) || isTriaging(work);
   useEffect(
     () =>
       startPolling({

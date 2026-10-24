@@ -13,6 +13,14 @@ export const methods = {
   approveOutline: `${service}.ApproveOutline`,
   editOutline: `${service}.EditOutline`,
   regenerate: `${service}.Regenerate`,
+  // TASK-130: questions, «Как понято задание», the helper.
+  workOfAssignment: `${service}.WorkOfAssignment`,
+  answerQuestions: `${service}.AnswerQuestions`,
+  skipQuestions: `${service}.SkipQuestions`,
+  editUnderstanding: `${service}.EditUnderstanding`,
+  confirmRequirements: `${service}.ConfirmRequirements`,
+  retry: `${service}.Retry`,
+  askStep: `${service}.AskStep`,
 } as const;
 
 export type WorkStatus = "triage" | "questions" | "review" | "confirmed" | "writing" | "done" | "helper" | "failed";
@@ -55,7 +63,51 @@ export interface WorkWriting {
   job: string;
 }
 
-/** The part of TurnkeyWork the writing cards need; the questions, the card and the helper are TASK-130. */
+/** One question of the reader: a choice (options, default index) or a text (defaultText; "" may be skipped). */
+export interface WorkQuestion {
+  kind: "choice" | "text";
+  text: string;
+  options: string[];
+  default: number;
+  defaultText: string;
+  why: string;
+}
+
+/** «Как я понял задание»: the type of the work and one line per requirement, "" unknown. */
+export interface WorkCardFields {
+  workType: string;
+  volume: string;
+  fileFormat: string;
+  formatting: string;
+  variant: string;
+  deadline: string;
+  sources: string;
+}
+
+export interface WorkHelper {
+  steps: string[];
+  submit: string;
+  pitfalls: string[];
+  readyParts: string[];
+  placeholders: string[];
+}
+
+/** A question of an earlier round with the answer ("" skipped; default: the default was taken). */
+export interface WorkAnswered {
+  round: number;
+  question: string;
+  answer: string;
+  default: boolean;
+}
+
+/** The student's answer to question number `question` (from 0): `option` for a choice, `text` for a text question. */
+export interface QuestionAnswer {
+  question: number;
+  option: number;
+  text: string;
+}
+
+/** The part of TurnkeyWork the cards read. Every text but `message` was written by the reader or the student: text nodes only. */
 export interface TurnkeyWork {
   id: string;
   status: WorkStatus;
@@ -65,6 +117,18 @@ export interface TurnkeyWork {
   workType: string;
   problem: string;
   message: string;
+  questionRound: number;
+  questions: WorkQuestion[];
+  hasCard: boolean;
+  card: WorkCardFields;
+  /** Wire names of the fields the student changed (work_type, volume, ...). */
+  edited: string[];
+  feasibility: "" | "full" | "partial" | "impossible";
+  feasibilityReason: string;
+  partial: boolean;
+  assumptions: string[];
+  helper: WorkHelper | null;
+  answered: WorkAnswered[];
 }
 
 /** A section of the plan the student sends; number 0 is a new section. */
@@ -197,20 +261,101 @@ function parseWriting(raw: unknown): WorkWriting {
   };
 }
 
+// A field an older build did not send is the default; a field of a wrong type is an error.
+function optStr(r: Record<string, unknown>, key: string, what: string): string {
+  return r[key] === undefined || r[key] === null ? "" : str(r, key, what);
+}
+
+function optBool(r: Record<string, unknown>, key: string, what: string): boolean {
+  return r[key] === undefined || r[key] === null ? false : bool(r, key, what);
+}
+
+function optCount(r: Record<string, unknown>, key: string, what: string): number {
+  return r[key] === undefined || r[key] === null ? 0 : count(r, key, what);
+}
+
+function strings(r: Record<string, unknown>, key: string, what: string): string[] {
+  return list(r, key, what, (p) => {
+    if (typeof p !== "string") {
+      throw new Error(`${what}: ${key} item is not a string`);
+    }
+    return p;
+  });
+}
+
+function parseQuestion(raw: unknown): WorkQuestion {
+  const w = "work question";
+  const r = record(raw, w);
+  return {
+    kind: oneOf(r, "kind", ["choice", "text"] as const, w),
+    text: str(r, "text", w),
+    options: strings(r, "options", w),
+    default: optCount(r, "default", w),
+    defaultText: optStr(r, "defaultText", w),
+    why: optStr(r, "why", w),
+  };
+}
+
+function parseCardFields(raw: unknown): WorkCardFields {
+  const w = "work card";
+  const r = record(raw, w);
+  return {
+    workType: str(r, "workType", w),
+    volume: optStr(r, "volume", w),
+    fileFormat: optStr(r, "fileFormat", w),
+    formatting: optStr(r, "formatting", w),
+    variant: optStr(r, "variant", w),
+    deadline: optStr(r, "deadline", w),
+    sources: optStr(r, "sources", w),
+  };
+}
+
+const emptyCard: WorkCardFields = { workType: "", volume: "", fileFormat: "", formatting: "", variant: "", deadline: "", sources: "" };
+
+function parseHelper(raw: unknown): WorkHelper {
+  const w = "work helper";
+  const r = record(raw, w);
+  return {
+    steps: strings(r, "steps", w),
+    submit: str(r, "submit", w),
+    pitfalls: strings(r, "pitfalls", w),
+    readyParts: strings(r, "readyParts", w),
+    placeholders: strings(r, "placeholders", w),
+  };
+}
+
+function parseAnswered(raw: unknown): WorkAnswered {
+  const w = "work answered";
+  const r = record(raw, w);
+  return { round: optCount(r, "round", w), question: str(r, "question", w), answer: str(r, "answer", w), default: optBool(r, "default", w) };
+}
+
 /** Checks the shape of a work; a malformed reply is an error, not a default. */
 export function parseWork(raw: unknown): TurnkeyWork {
   const w = "turnkey work";
   const r = record(raw, w);
   const writing = r.writing === null || r.writing === undefined ? null : parseWriting(r.writing);
-  const card = r.card === null || r.card === undefined ? null : record(r.card, w);
+  const card = r.card === null || r.card === undefined ? emptyCard : parseCardFields(r.card);
+  const feasibility = r.feasibility === undefined || r.feasibility === null || r.feasibility === "" ? "" : oneOf(r, "feasibility", ["full", "partial", "impossible"] as const, w);
   return {
     id: str(r, "id", w),
     status: oneOf(r, "status", workStatuses, w),
     version: count(r, "version", w),
     writing,
-    workType: card === null ? "" : str(card, "workType", w),
+    workType: card.workType,
     problem: str(r, "problem", w),
     message: str(r, "message", w),
+    questionRound: optCount(r, "questionRound", w),
+    questions: list(r, "questions", w, parseQuestion),
+    hasCard: optBool(r, "hasCard", w),
+    card,
+    edited: strings(r, "edited", w),
+    feasibility,
+    feasibilityReason: optStr(r, "feasibilityReason", w),
+    partial: optBool(r, "partial", w),
+    assumptions: strings(r, "assumptions", w),
+    helper: r.helper === null || r.helper === undefined ? null : parseHelper(r.helper),
+    answered: list(r, "answered", w, parseAnswered),
   };
 }
 
@@ -225,7 +370,24 @@ export interface TurnkeyApi {
   editOutline(workId: string, items: OutlineItem[]): Promise<TurnkeyWork>;
   /** Section `number` again with the student's note; 0 is every section (or the plan of a blocked outline). */
   regenerate(workId: string, number: number, note: string): Promise<TurnkeyWork>;
+  /** The work of an assignment; a missing one is the not-found error. */
+  workOfAssignment(assignmentId: string): Promise<TurnkeyWork>;
+  /** Sends the answers of the questions card; the next round is asked at once (a paid call). */
+  answerQuestions(workId: string, answers: QuestionAnswer[]): Promise<TurnkeyWork>;
+  /** «Пропустить»: every question takes its default. */
+  skipQuestions(workId: string): Promise<TurnkeyWork>;
+  /** Saves the student's card; unchanged fields follow the reader. */
+  editUnderstanding(workId: string, card: WorkCardFields): Promise<TurnkeyWork>;
+  /** «Подтвердить» on the card. */
+  confirmRequirements(workId: string): Promise<TurnkeyWork>;
+  /** Asks the waiting reader call again. */
+  retry(workId: string): Promise<TurnkeyWork>;
+  /** A question about helper step `step` (from 0); the answer is plain text. The core may refuse: stepHelpUnavailableText. */
+  askStep(workId: string, step: number, question: string): Promise<string>;
 }
+
+/** The core's answer while the step help has no backend; shown calmly, not as a failure. */
+export const stepHelpUnavailableText = "Вопросы по шагу пока недоступны.";
 
 /** Builds the turnkey API over a call function (the Wails runtime in the app, a fake in tests). */
 export function turnkeyApi(call: CallByName): TurnkeyApi {
@@ -236,5 +398,27 @@ export function turnkeyApi(call: CallByName): TurnkeyApi {
     editOutline: async (id, items) =>
       parseWork(await call(methods.editOutline, id, items.map((i) => ({ number: i.number, title: i.title, words: i.words })))),
     regenerate: async (id, number, note) => parseWork(await call(methods.regenerate, id, number, note)),
+    workOfAssignment: async (id) => parseWork(await call(methods.workOfAssignment, id)),
+    answerQuestions: async (id, answers) =>
+      parseWork(await call(methods.answerQuestions, id, answers.map((a) => ({ question: a.question, option: a.option, text: a.text })))),
+    skipQuestions: async (id) => parseWork(await call(methods.skipQuestions, id)),
+    editUnderstanding: async (id, card) =>
+      parseWork(
+        await call(methods.editUnderstanding, id, {
+          workType: card.workType,
+          volume: card.volume,
+          fileFormat: card.fileFormat,
+          formatting: card.formatting,
+          variant: card.variant,
+          deadline: card.deadline,
+          sources: card.sources,
+        }),
+      ),
+    confirmRequirements: async (id) => parseWork(await call(methods.confirmRequirements, id)),
+    retry: async (id) => parseWork(await call(methods.retry, id)),
+    askStep: async (id, step, question) => {
+      const r = record(await call(methods.askStep, id, step, question), "step answer");
+      return str(r, "text", "step answer");
+    },
   };
 }
