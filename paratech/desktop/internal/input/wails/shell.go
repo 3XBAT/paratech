@@ -80,6 +80,8 @@ type Core struct {
 	Turnkey TurnkeyUseCase // the turnkey cards and the helper page (TASK-129)
 
 	Answers AnswersUseCase // the answer cards of the agent panel (TASK-118)
+
+	Tickets TicketsUseCase // the tickets screen (TASK-133)
 }
 
 // ui is the running platform shell; window commands are forwarded to it.
@@ -207,6 +209,7 @@ type Services struct {
 	AgentConfirm *AgentConfirmService
 	Turnkey      *TurnkeyService
 	Answers      *AnswerService
+	Tickets      *TicketService
 
 	// AgentPanel is not bound: the shell attaches it to the Wails events while the app runs.
 	AgentPanel *AgentPanel
@@ -294,6 +297,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Answers == nil {
 		return Services{}, errors.New("wails: open core: no answers")
 	}
+	if core.Tickets == nil {
+		return Services{}, errors.New("wails: open core: no tickets")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -332,6 +338,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		AgentConfirm: NewAgentConfirmService(core.AgentConfirm, s.opts.Log),
 		Turnkey:      NewTurnkeyService(core.Turnkey, s.opts.Log),
 		Answers:      NewAnswerService(core.Answers, s.opts.Log),
+		Tickets:      NewTicketService(core.Tickets, s.opts.Log),
 	}, nil
 }
 

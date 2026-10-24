@@ -24,6 +24,7 @@ import (
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/speechcomponent"
 	"paratech/desktop/internal/cases/transcribe"
+	"paratech/desktop/internal/cases/tickets"
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/jobs/job"
 	tvalues "paratech/desktop/internal/domain/transcription/values"
@@ -90,7 +91,7 @@ func handlersForTest() jobHandlers {
 	var s *senddelivery.Service
 	return jobHandlers{
 		stt: &transcribe.Service{}, postProcess: &homeworkflow.PostProcessor{}, drafts: &homeworkflow.Drafts{}, delivery: s,
-		calendar: &schedulesync.CalendarSync{},
+		calendar: &schedulesync.CalendarSync{}, tickets: &tickets.Service{},
 	}
 }
 
@@ -127,6 +128,8 @@ func TestRegistrationPolicies(t *testing.T) {
 		{typ: senddelivery.JobType, recovery: jobrunner.RecoveryReconcile, reconciler: true, uncancellable: true},
 		// Idempotent writes by stable event ids: requeued after an interruption, never Heavy.
 		{typ: schedulesync.CalendarSyncJobType, recovery: jobrunner.RecoveryRequeue},
+		// TASK-133: one answer per step, idempotent by its key; an interrupted step is asked again for free.
+		{typ: tickets.JobType, recovery: jobrunner.RecoveryRequeue},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.typ), func(t *testing.T) {
@@ -175,6 +178,7 @@ func TestRegisteredTypes(t *testing.T) {
 		transcribe.JobType, homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType,
 		homeworkflow.LectureTextJobType, homeworkflow.HomeworkDraftJobType, senddelivery.JobType,
 		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType, turnkey.WritingJobType,
+		tickets.JobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -194,7 +198,7 @@ func TestHiddenJobTypes(t *testing.T) {
 	hidden := hiddenJobTypes()
 	wantHidden := []job.Type{
 		schedulesync.CalendarSyncJobType, homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType,
-		turnkey.WritingJobType,
+		turnkey.WritingJobType, tickets.JobType,
 	}
 	if !slices.Equal(hidden, wantHidden) {
 		t.Fatalf("hidden types %v, want %v", hidden, wantHidden)
@@ -246,7 +250,7 @@ func TestRegistrationsWithoutAnEngine(t *testing.T) {
 	want := []job.Type{
 		homeworkflow.SummarizeJobType, homeworkflow.ExtractHomeworkJobType, homeworkflow.LectureTextJobType,
 		homeworkflow.HomeworkDraftJobType, senddelivery.JobType, schedulesync.CalendarSyncJobType,
-		homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType, turnkey.WritingJobType,
+		homeworkflow.MaterialSummaryJobType, homeworkflow.MaterialHomeworkJobType, turnkey.WritingJobType, tickets.JobType,
 	}
 	slices.Sort(got)
 	slices.Sort(want)

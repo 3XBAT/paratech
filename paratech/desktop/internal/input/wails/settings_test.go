@@ -163,6 +163,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "agent confirm deletions", edit: func(c *Core) { c.AgentConfirm.Deletions = nil }},
 		{name: "turnkey work", edit: func(c *Core) { c.Turnkey = nil }},
 		{name: "answers", edit: func(c *Core) { c.Answers = nil }},
+		{name: "tickets", edit: func(c *Core) { c.Tickets = nil }},
 	}
 	for _, tt := range incomplete {
 		t.Run("missing "+tt.name, func(t *testing.T) {

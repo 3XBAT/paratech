@@ -40,6 +40,7 @@ func validCore() Core {
 		AgentConfirm: AgentConfirmCore{Proposals: newConfirmProposals(), Materials: fakeMaterials{}, Deletions: &fakeDeletion{}},
 		Turnkey:      &fakeTurnkey{},
 		Answers:      &fakeAnswers{},
+		Tickets:      &fakeTickets{},
 	}
 }
 
