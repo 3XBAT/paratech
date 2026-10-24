@@ -82,6 +82,21 @@ func (h *FakeHub) RefuseTriage(n int) {
 	h.refuse[hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT] = n
 }
 
+// AnswerQuestion sets the model output of ANSWER for keys the Hub has not seen yet. As AnswerInspect, it is returned
+// without the Hub's check.
+func (h *FakeHub) AnswerQuestion(output string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.outputs[hubv1.OperationType_OPERATION_TYPE_ANSWER] = output
+}
+
+// RefuseAnswerQuestion makes the next n new keys of ANSWER fail as the Hub's schema refusal does.
+func (h *FakeHub) RefuseAnswerQuestion(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.refuse[hubv1.OperationType_OPERATION_TYPE_ANSWER] = n
+}
+
 // providerRefusal is the Hub's answer to a reader answer outside its schema (errors.proto).
 func providerRefusal() error {
 	e := connect.NewError(connect.CodeUnavailable, errors.New("fake hub: answer refused by the schema"))

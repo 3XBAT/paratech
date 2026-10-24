@@ -381,9 +381,10 @@ func TestDriverContextEndLeavesRequestContinuable(t *testing.T) {
 	}
 }
 
-// Supervisor decisions end to end: paid reads (not available yet) do not count as the paid job without a plan; a
-// summary that would replace a ready one needs a plan (TASK-123), so does a first one (cost unknown); a third question
-// round is refused and the planner goes on with stated assumptions.
+// Supervisor decisions end to end: paid reads (not wired here, so "unavailable"; run in
+// TestDriverAnswerQuestionIsAPaidRead) do not count as the paid job without a plan; a summary that would replace a
+// ready one needs a plan (TASK-123), so does a first one (cost unknown); a third question round is refused and the
+// planner goes on with stated assumptions.
 func TestDriverSupervisorDecisions(t *testing.T) {
 	e := newDriverEnv(t)
 	q := `{"questions":[{"kind":"text","question":"Объём?"}]}`
