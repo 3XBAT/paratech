@@ -81,7 +81,7 @@ type CaseSet struct {
 }
 
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v1.json).
+// (shared/testdata/tool_catalog_v2.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {

@@ -13,6 +13,7 @@ import (
 const (
 	MaxTextRunes  = 300 // card text from show_plan, reply, cannot_do, ask_questions
 	MaxLabelRunes = 80  // label from the student's request and names
+	MaxQueryRunes = 500 // the student's question or search text (catalog v2)
 )
 
 // Text is model text for a card: at most 300 characters, printable, no HTML angle brackets; line breaks allowed.
@@ -38,6 +39,18 @@ func ParseLabel(s string) (Label, error) {
 		return "", err
 	}
 	return Label(s), nil
+}
+
+// Query is the student's question or search text in their own words (answer_question.question, search.query).
+type Query string
+
+// ParseQuery trims s and checks it as a Label of up to 500 characters: printable, one line, no HTML angle brackets.
+func ParseQuery(s string) (Query, error) {
+	s = strings.TrimSpace(s)
+	if err := checkPrintable(s, MaxQueryRunes, false); err != nil {
+		return "", err
+	}
+	return Query(s), nil
 }
 
 // Name is model text that persists as a subject, folder or semester name and is later shown to the planner as data

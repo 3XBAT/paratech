@@ -62,6 +62,9 @@ func (IDs) NewMaterialID() shared.MaterialID { return shared.MaterialID(token())
 // NewWorkID returns a fresh turnkey work identifier.
 func (IDs) NewWorkID() shared.WorkID { return shared.WorkID(token()) }
 
+// NewAnswerID returns a fresh identifier of an answer with citations.
+func (IDs) NewAnswerID() shared.AnswerID { return shared.AnswerID(token()) }
+
 // NewMessageID returns a fresh RFC 5322 Message-ID "<random@paratech.invalid>".
 func (IDs) NewMessageID() string { return "<" + token() + "@" + messageIDDomain + ">" }
 

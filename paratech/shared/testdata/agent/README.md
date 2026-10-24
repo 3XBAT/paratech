@@ -31,6 +31,10 @@ The TRIAGE_ASSIGNMENT reader (TASK-129): every fixture as a triage question and 
 reaches the planner, and obeyed in a schema slot it is refused (`desktop/tests/turnkey_test.go`,
 `hub/tests/triage_eval_test.go`).
 
+The ANSWER reader (TASK-118): every fixture as a lesson fragment stays data for the model, and obeyed in a slot that is
+not claim text (a chunk ID, an extra field, a claim without a citation) or as prose it is refused
+(`hub/tests/answer_eval_test.go`).
+
 The C tools run end to end through the Driver to a confirm card in `desktop/tests/agent_propose_test.go` (TASK-127):
 the methodichka fixture is the source file of the assignment, its address never becomes the recipient.
 

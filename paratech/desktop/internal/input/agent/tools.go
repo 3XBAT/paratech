@@ -9,6 +9,7 @@ import (
 
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/cases/answering"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
@@ -62,13 +63,14 @@ type Deliveries interface {
 	ListForAssignment(ctx context.Context, a shared.AssignmentID) ([]senddelivery.View, error)
 }
 
-// tools runs the calls a step admits: the read tools, the paid reader inspect_upload (TASK-122), the reversible
-// actions (write.go, actions.go) and the proposals of class C (propose.go, TASK-127), which only make a confirm card.
-// answer_question and the turnkey tools come with later tasks and answer "unavailable" until then. A failing use case answers an error enum: no error text reaches the planner
-// (ADR-0022).
+// tools runs the calls a step admits: the read tools, the paid readers inspect_upload (TASK-122) and answer_question
+// (answer.go, TASK-118), the reversible actions (write.go, actions.go) and the proposals of class C (propose.go,
+// TASK-127), which only make a confirm card. The turnkey tools come with later tasks and answer "unavailable" until
+// then. A failing use case answers an error enum: no error text reaches the planner (ADR-0022).
 type tools struct {
 	library     SubjectLibrary
 	inspector   Inspector // nil: inspect_upload answers "unavailable"
+	answerer    Answerer  // nil: answer_question answers "unavailable"
 	knowledge   Knowledge
 	activity    Activity
 	assignments Assignments
@@ -101,12 +103,14 @@ func (t tools) reader(tool values.Tool) (read, bool) {
 		return t.search, true
 	case values.ToolInspectUpload:
 		return t.inspectUpload, t.inspector != nil
+	case values.ToolAnswerQuestion:
+		return t.answerQuestion, t.answerer != nil
 	}
 	return nil, false
 }
 
 // paidReads are the paid read tools this desktop runs: they are reads of the request, not its paid job (TASK-117).
-var paidReads = []values.Tool{values.ToolInspectUpload}
+var paidReads = []values.Tool{values.ToolInspectUpload, values.ToolAnswerQuestion}
 
 // run runs one admitted call of step st and returns what it gave.
 func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran {
@@ -116,7 +120,8 @@ func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran
 	case actionpolicy.ClassC:
 		return t.propose(ctx, st, c)
 	}
-	return ran{out: t.read(ctx, st.Scope, c)}
+	out := t.read(ctx, st.Scope, c)
+	return ran{out: out, cards: answerCards(c, out)}
 }
 
 // read runs one admitted read call and returns its outcome.
@@ -128,7 +133,7 @@ func (t tools) read(ctx context.Context, scope values.Scope, c agentturn.Call) a
 	}
 	res, seen, err := fn(ctx, c.Call, scope)
 	switch {
-	case errors.Is(err, knowledgebase.ErrInvalidQuery):
+	case errors.Is(err, knowledgebase.ErrInvalidQuery), errors.Is(err, answering.ErrInvalidQuestion):
 		return agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseInvalidArgs)}
 	case errors.Is(err, library.ErrMaterialNotFound), errors.Is(err, library.ErrMaterialRemoved):
 		return agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseNotFound)}
@@ -389,7 +394,7 @@ func deliveryStateOf(s delivery.Status) values.DeliveryState {
 // --- search --------------------------------------------------------------------------------------------
 
 func (t tools) search(ctx context.Context, call values.Call, scope values.Scope) (values.ToolResult, []values.Ref, error) {
-	query, _ := call.Args().Label("query")
+	query, _ := call.Args().Query("query")
 	sub := values.SearchSubjectOf(call.Args(), scope)
 	found, err := t.knowledge.Search(ctx, string(query))
 	if err != nil {

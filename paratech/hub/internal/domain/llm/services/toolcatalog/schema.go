@@ -69,6 +69,8 @@ func (c *Catalog) typeSchema(a argument) object {
 		return object{"type": "string", "enum": a.Values}
 	case typeLabel:
 		return stringSchema(MaxLabelRunes)
+	case typeQuery:
+		return stringSchema(MaxQueryRunes)
 	case typeText:
 		return stringSchema(MaxTextRunes)
 	case typeTextList:
@@ -138,6 +140,9 @@ func (c *Catalog) valid(a argument, v any) bool {
 		return ok && slices.Contains(a.Values, s)
 	case typeLabel:
 		return label(v)
+	case typeQuery:
+		s, ok := v.(string)
+		return ok && boundedText(s, MaxQueryRunes, false)
 	case typeText:
 		return text(v)
 	case typeTextList:

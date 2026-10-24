@@ -12,7 +12,12 @@ import (
 	"paratech/hub/testenv"
 )
 
-const answerPrompt = "Answer only from the chunks, with citations."
+const (
+	answerPrompt = "Answer only from the chunks, with citations."
+	// answerData is a valid ANSWER input already in the re-encoded form the model reads.
+	answerData   = `{"question":"Что это?","fragments":[{"chunk_id":"c-1","text":"` + data + `"}]}`
+	answerOutput = `{"claims":[{"text":"Ответ.","cites":[{"chunk_id":"c-1","quote":"lecture"}]}],"missing":[]}`
+)
 
 // promptService is a gateway with a server prompt for ANSWER on the "strong" alias; TRIAGE_ASSIGNMENT has none.
 func promptService(t *testing.T, store *testenv.QuotaStore, provider *testenv.FakeProvider, version string) *gateway.Service {
@@ -39,12 +44,12 @@ func promptService(t *testing.T, store *testenv.QuotaStore, provider *testenv.Fa
 }
 
 func answerCommand(key, alias, instructions string) gateway.Command {
-	return gateway.Command{Owner: alice, IdempotencyKey: key, Operation: "answer", ModelAlias: alias, Instructions: instructions, UntrustedData: data}
+	return gateway.Command{Owner: alice, IdempotencyKey: key, Operation: "answer", ModelAlias: alias, Instructions: instructions, UntrustedData: answerData}
 }
 
 // TestServerPromptOperation: the client sends no prompt and no (or the server's) alias; the Hub uses its own.
 func TestServerPromptOperation(t *testing.T) {
-	store, provider := testenv.NewQuotaStore(), testenv.NewFakeProvider(answer(t, "a", 1, 1), answer(t, "b", 1, 1))
+	store, provider := testenv.NewQuotaStore(), testenv.NewFakeProvider(answer(t, answerOutput, 1, 1), answer(t, answerOutput, 1, 1))
 	svc := promptService(t, store, provider, "v1")
 	for i, alias := range []string{"", "strong"} {
 		key := []string{"k1", "k2"}[i]
@@ -52,7 +57,7 @@ func TestServerPromptOperation(t *testing.T) {
 			t.Fatalf("alias %q: %v", alias, err)
 		}
 		call := provider.Calls()[i]
-		if call.Instructions() != answerPrompt || call.Model() != "claude-strong-model" || call.MaxOutput() != 2000 || call.Data() != data {
+		if call.Instructions() != answerPrompt || call.Model() != "claude-strong-model" || call.MaxOutput() != 2000 || call.Data() != answerData {
 			t.Fatalf("alias %q: provider call = %v", alias, call)
 		}
 		if k, _ := store.Key(alice, account.IdempotencyKey(key)); k.Fingerprint.Alias != "strong" || string(k.Fingerprint.Operation) != "answer" {
@@ -87,7 +92,7 @@ func TestServerPromptOperationRefusals(t *testing.T) {
 
 // TestServerPromptVersionInFingerprint: a retry after a prompt version change is another request under the key.
 func TestServerPromptVersionInFingerprint(t *testing.T) {
-	store, provider := testenv.NewQuotaStore(), testenv.NewFakeProvider(answer(t, "a", 1, 1))
+	store, provider := testenv.NewQuotaStore(), testenv.NewFakeProvider(answer(t, answerOutput, 1, 1))
 	if _, err := promptService(t, store, provider, "v1").Complete(t.Context(), answerCommand("k", "", "")); err != nil {
 		t.Fatal(err)
 	}

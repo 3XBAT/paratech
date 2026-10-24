@@ -13,7 +13,7 @@ import (
 	"paratech/desktop/internal/domain/agent/values"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v1.json (TASK-113), the tool list the Hub serves.
+// goldenCatalog is shared/testdata/tool_catalog_v2.json (TASK-113, v2 since TASK-118), the tool list the Hub serves.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
 	Notes          map[string]string `json:"notes"`
@@ -33,7 +33,7 @@ type goldenCatalog struct {
 
 func loadGoldenCatalog(t *testing.T) goldenCatalog {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v1.json"))
+	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v2.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

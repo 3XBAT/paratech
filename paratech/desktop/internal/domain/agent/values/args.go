@@ -158,6 +158,15 @@ func (a Args) Label(name string) (Label, bool) {
 	return Label(v.str), true
 }
 
+// Query returns a query argument (the student's question or search text).
+func (a Args) Query(name string) (Query, bool) {
+	v, ok := a.vals[name]
+	if !ok || v.typ != ArgQuery {
+		return "", false
+	}
+	return Query(v.str), true
+}
+
 // Name returns a persistent label argument (a subject, folder or semester name), checked as a Name.
 func (a Args) Name(name string) (Name, bool) {
 	v, ok := a.vals[name]
@@ -339,6 +348,16 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 			v.str = string(l)
 		}
 		v.canon = v.str
+	case ArgQuery:
+		s, err := decodeString(raw)
+		if err != nil {
+			return v, err
+		}
+		q, err := ParseQuery(s)
+		if err != nil {
+			return v, err
+		}
+		v.str, v.canon = string(q), string(q)
 	case ArgText:
 		s, err := decodeString(raw)
 		if err != nil {

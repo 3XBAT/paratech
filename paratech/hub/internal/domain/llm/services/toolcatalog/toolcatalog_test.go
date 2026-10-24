@@ -10,12 +10,21 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 )
 
-// golden is the contract's catalog v1; the Hub embeds a byte-identical copy (hub/pkg/prompts).
-const golden = "../../../../../../shared/testdata/tool_catalog_v1.json"
+// golden is the contract's current catalog (v2); the Hub embeds a byte-identical copy (hub/pkg/prompts). goldenV1 is
+// the frozen catalog v1, still served to clients of that version.
+const (
+	golden   = "../../../../../../shared/testdata/tool_catalog_v2.json"
+	goldenV1 = "../../../../../../shared/testdata/tool_catalog_v1.json"
+)
 
 func goldenCatalog(t *testing.T) *Catalog {
 	t.Helper()
-	raw, err := os.ReadFile(golden)
+	return parseFile(t, golden)
+}
+
+func parseFile(t *testing.T, file string) *Catalog {
+	t.Helper()
+	raw, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +33,44 @@ func goldenCatalog(t *testing.T) *Catalog {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// TestQueryArguments: catalog v2 bounds the question of answer_question and the query of search at MaxQueryRunes on
+// one line; v1 keeps them labels of MaxLabelRunes.
+func TestQueryArguments(t *testing.T) {
+	v1, v2 := parseFile(t, goldenV1), goldenCatalog(t)
+	if v1.Version() != 1 || v2.Version() != 2 {
+		t.Fatalf("versions %d and %d", v1.Version(), v2.Version())
+	}
+	for _, tc := range []struct {
+		tool, arg string
+	}{{"search", "query"}, {"answer_question", "question"}} {
+		at := func(n int, r string) string { return `{"` + tc.arg + `":"` + strings.Repeat(r, n) + `"}` }
+		if err := v2.Check(call(t, tc.tool, at(MaxQueryRunes, "я"))); err != nil {
+			t.Errorf("v2 %s at the limit: %v", tc.tool, err)
+		}
+		for name, args := range map[string]string{
+			"long":    at(MaxQueryRunes+1, "я"),
+			"newline": `{"` + tc.arg + `":"a\nb"}`,
+			"blank":   `{"` + tc.arg + `":"   "}`,
+		} {
+			if err := v2.Check(call(t, tc.tool, args)); !errors.Is(err, ErrInvalidCall) {
+				t.Errorf("v2 %s %s: err = %v, want ErrInvalidCall", tc.tool, name, err)
+			}
+		}
+		if err := v1.Check(call(t, tc.tool, at(MaxLabelRunes+1, "я"))); !errors.Is(err, ErrInvalidCall) {
+			t.Errorf("v1 %s over the label bound: err = %v, want ErrInvalidCall", tc.tool, err)
+		}
+
+		var schema map[string]any
+		if err := json.Unmarshal([]byte(specFor(t, v2, tc.tool).Schema()), &schema); err != nil {
+			t.Fatal(err)
+		}
+		if p := schema["properties"].(map[string]any)[tc.arg].(map[string]any); p["maxLength"] != float64(MaxQueryRunes) ||
+			!strings.Contains(p["description"].(string), "500") {
+			t.Errorf("v2 %s schema = %v", tc.tool, p)
+		}
+	}
 }
 
 func call(t *testing.T, tool, args string) values.ToolCall {
@@ -37,7 +84,7 @@ func call(t *testing.T, tool, args string) values.ToolCall {
 
 func TestParseGolden(t *testing.T) {
 	c := goldenCatalog(t)
-	if c.Version() != 1 || len(c.Specs()) != 27 || !c.Has("show_plan") || c.Has("send_email") {
+	if c.Version() != 2 || len(c.Specs()) != 27 || !c.Has("show_plan") || c.Has("send_email") {
 		t.Fatalf("catalog version %d, %d tools", c.Version(), len(c.Specs()))
 	}
 	specs := c.Specs()
@@ -92,8 +139,12 @@ func TestSchemaShapes(t *testing.T) {
 		t.Fatalf("reply schema = %v", reply)
 	}
 	search := schema("search")["properties"].(map[string]any)
-	if search["query"].(map[string]any)["maxLength"] != float64(MaxLabelRunes) {
-		t.Fatalf("label schema = %v", search["query"])
+	if search["query"].(map[string]any)["maxLength"] != float64(MaxQueryRunes) {
+		t.Fatalf("query schema = %v", search["query"])
+	}
+	instruction := schema("generate_draft")["properties"].(map[string]any)["instruction"].(map[string]any)
+	if instruction["maxLength"] != float64(MaxLabelRunes) {
+		t.Fatalf("label schema = %v", instruction)
 	}
 	if enum := search["scope"].(map[string]any)["enum"].([]any); len(enum) != 2 || enum[0] != "subject" {
 		t.Fatalf("enum schema = %v", search["scope"])
@@ -119,7 +170,9 @@ func TestCheckAcceptsValidCalls(t *testing.T) {
 		"list_subjects":     `{}`,
 		"find_lessons":      `{"subject":"subj-1","from":"2026-10-01","to":"2026-10-31","kind":"lecture"}`,
 		"job_status":        `{"ids":["job-1","job-2"]}`,
-		"search":            `{"query":"` + strings.Repeat("я", MaxLabelRunes) + `"}`,
+		"search":            `{"query":"` + strings.Repeat("я", MaxQueryRunes) + `"}`,
+		"answer_question":   `{"question":"` + strings.Repeat("я", MaxQueryRunes) + `","scope":"all"}`,
+		"create_folder":     `{"subject":"subj-1","name":"` + strings.Repeat("я", MaxLabelRunes) + `"}`,
 		"edit_due":          `{"assignment":"a-1","due":"2026-12-31"}`,
 		"generate_draft":    `{"assignment":"a-1"}`,
 		"propose_send":      `{"assignment":"a-1","version":"v-2"}`,
@@ -150,9 +203,11 @@ func TestCheckRejectsInvalidCalls(t *testing.T) {
 		"bad date":             {"edit_due", `{"assignment":"a","due":"2026-02-30"}`},
 		"date format":          {"edit_due", `{"assignment":"a","due":"31.12.2026"}`},
 		"unknown enum":         {"find_lessons", `{"kind":"exam"}`},
-		"long label":           {"search", `{"query":"` + strings.Repeat("a", MaxLabelRunes+1) + `"}`},
-		"blank label":          {"search", `{"query":"  "}`},
-		"label newline":        {"search", `{"query":"a\nb"}`},
+		"long label":           {"generate_draft", `{"assignment":"a","instruction":"` + strings.Repeat("a", MaxLabelRunes+1) + `"}`},
+		"blank label":          {"generate_draft", `{"assignment":"a","instruction":"  "}`},
+		"label newline":        {"generate_draft", `{"assignment":"a","instruction":"a\nb"}`},
+		"long query":           {"search", `{"query":"` + strings.Repeat("a", MaxQueryRunes+1) + `"}`},
+		"blank query":          {"search", `{"query":"  "}`},
 		"long text":            {"reply", `{"text":"` + long + `"}`},
 		"empty text":           {"reply", `{"text":""}`},
 		"text control":         {"reply", `{"text":"a\u0007"}`},
@@ -221,18 +276,19 @@ func TestParseRejectsBadCatalogs(t *testing.T) {
 	base := string(raw)
 	for name, text := range map[string]string{
 		"not JSON":        "{",
-		"unknown field":   strings.Replace(base, `"catalog_version": 1,`, `"catalog_version": 1, "extra": true,`, 1),
-		"no version":      strings.Replace(base, `"catalog_version": 1,`, `"catalog_version": 0,`, 1),
+		"unknown field":   strings.Replace(base, `"catalog_version": 2,`, `"catalog_version": 2, "extra": true,`, 1),
+		"no version":      strings.Replace(base, `"catalog_version": 2,`, `"catalog_version": 0,`, 1),
 		"trailing data":   base + "{}",
-		"no tools":        `{"catalog_version": 1, "tools": []}`,
+		"no tools":        `{"catalog_version": 2, "tools": []}`,
 		"bad tool name":   strings.Replace(base, `"name": "reply"`, `"name": "Reply"`, 1),
 		"duplicate tool":  strings.Replace(base, `"name": "reply"`, `"name": "cannot_do"`, 1),
 		"unknown class":   strings.Replace(base, `"class": "UI"`, `"class": "X"`, 1),
-		"UI type on R":    strings.Replace(base, `{"name": "query", "type": "label"`, `{"name": "query", "type": "text"`, 1),
+		"UI type on R":    strings.Replace(base, `{"name": "query", "type": "query"`, `{"name": "query", "type": "text"`, 1),
 		"action type UI":  strings.Replace(base, `{"name": "text", "type": "text"`, `{"name": "text", "type": "label"`, 1),
-		"unknown type":    strings.Replace(base, `{"name": "query", "type": "label"`, `{"name": "query", "type": "url"`, 1),
+		"query type UI":   strings.Replace(base, `{"name": "text", "type": "text"`, `{"name": "text", "type": "query"`, 1),
+		"unknown type":    strings.Replace(base, `{"name": "query", "type": "query"`, `{"name": "query", "type": "url"`, 1),
 		"enum no values":  strings.Replace(base, `"values": ["subject", "all"]`, `"values": []`, 1),
-		"values on label": strings.Replace(base, `{"name": "query", "type": "label", "required": true}`, `{"name": "query", "type": "label", "required": true, "values": ["a"]}`, 1),
+		"values on query": strings.Replace(base, `{"name": "query", "type": "query", "required": true}`, `{"name": "query", "type": "query", "required": true, "values": ["a"]}`, 1),
 		"repeated value":  strings.Replace(base, `"values": ["subject", "all"]`, `"values": ["all", "all"]`, 1),
 		"repeated arg":    strings.Replace(base, `{"name": "to", "type": "date"`, `{"name": "from", "type": "date"`, 1),
 	} {

@@ -11,12 +11,17 @@ import (
 
 // PanelV1 returns the embedded server prompt and tool catalog of the panel profile, version 1, as app loads them.
 func PanelV1() (system string, catalog *toolcatalog.Catalog, err error) {
+	return Panel(1)
+}
+
+// Panel returns the embedded server prompt and tool catalog of the panel profile of the version, as app loads them.
+func Panel(version uint32) (system string, catalog *toolcatalog.Catalog, err error) {
 	versions, err := prompts.Agent("panel")
 	if err != nil {
 		return "", nil, err
 	}
 	for _, v := range versions {
-		if v.Version != 1 {
+		if v.Version != version {
 			continue
 		}
 		c, err := toolcatalog.Parse(v.Tools)
@@ -25,7 +30,7 @@ func PanelV1() (system string, catalog *toolcatalog.Catalog, err error) {
 		}
 		return string(v.System), c, nil
 	}
-	return "", nil, fmt.Errorf("testenv: no panel v1")
+	return "", nil, fmt.Errorf("testenv: no panel v%d", version)
 }
 
 // SealKey is an obviously fake seal key of the given version (never a real secret).

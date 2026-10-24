@@ -10,6 +10,7 @@ func TestAgentIDValidate(t *testing.T) {
 		"ThreadID": func(s string) error { return ThreadID(s).Validate() },
 		"ActionID": func(s string) error { return ActionID(s).Validate() },
 		"WorkID":   func(s string) error { return WorkID(s).Validate() },
+		"AnswerID": func(s string) error { return AnswerID(s).Validate() },
 	}
 	cases := []struct {
 		name    string

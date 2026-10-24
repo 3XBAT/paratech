@@ -62,6 +62,10 @@ type Querier interface {
 	GetAgentThread(ctx context.Context, id string) (AgentThread, error)
 	GetAgentThreadByKey(ctx context.Context, subjectKey string) (AgentThread, error)
 	GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (AgentTurn, error)
+	// Answers with citations (TASK-118, ADR-0022): the aggregate coursework/answer, written once and never saved again.
+	GetAnswer(ctx context.Context, id string) (Answer, error)
+	// The answer of a reader request key; at most one (request_key is UNIQUE).
+	GetAnswerByKey(ctx context.Context, requestKey string) (Answer, error)
 	// Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
 	// deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
 	// reprocessed (TASK-042).
@@ -132,6 +136,7 @@ type Querier interface {
 	// A never-stored thread (version 0) is inserted with version 1.
 	InsertAgentThread(ctx context.Context, arg InsertAgentThreadParams) error
 	InsertAgentTurn(ctx context.Context, arg InsertAgentTurnParams) error
+	InsertAnswer(ctx context.Context, arg InsertAnswerParams) error
 	// A never-stored assignment (version 0) is inserted with version 1.
 	InsertAssignment(ctx context.Context, arg InsertAssignmentParams) error
 	InsertDeadlineEventRemoval(ctx context.Context, arg InsertDeadlineEventRemovalParams) error
