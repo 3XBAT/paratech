@@ -7,6 +7,7 @@ import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import type { TurnkeyApi } from "../bindings/turnkey.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
+import { Waiting } from "./Waiting.js";
 import {
   type ButtonId,
   type ButtonModel,
@@ -186,6 +187,13 @@ function Card(props: { card: CardModel; actions: CardActions }) {
           <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
         </section>
       );
+    case "waiting":
+      return (
+        <section className="ag-card ag-card-wait">
+          <Waiting />
+          <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
+        </section>
+      );
     case "result":
       return (
         <section className="ag-card">
@@ -288,6 +296,7 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions })
   return (
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
+      {model.waiting && <Waiting />}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">
           {model.callLine}
