@@ -1,0 +1,11 @@
+/* Questions, «Как понято задание» and the helper of a turnkey work (TASK-130). One accent: the existing tokens only. */
+.ag-q { margin: 0 0 12px; }
+.ag-q-set { margin: 0; padding: 0; border: 0; min-width: 0; }
+.ag-q-set legend { padding: 0; margin-bottom: 4px; font-weight: 600; overflow-wrap: anywhere; }
+.ag-q label.ag-text { display: block; margin-bottom: 4px; font-weight: 600; overflow-wrap: anywhere; }
+.ag-q-opt { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0; overflow-wrap: anywhere; }
+.ag-q-opt input { flex: none; margin-top: 4px; accent-color: var(--accent); }
+.ag-kv { display: grid; gap: 6px; margin: 0 0 8px; }
+.ag-kv-row { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.ag-kv-row dt, .ag-kv-row dd { margin: 0; }
+.ag-kv-row dd { overflow-wrap: anywhere; }
