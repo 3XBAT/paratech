@@ -93,6 +93,9 @@
     "src/pages/TodayCalendar.tsx",
     "src/bindings/turnkey.ts",
     "src/workView.ts",
-    "src/agent/WorkCard.tsx"
+    "src/agent/WorkCard.tsx",
+    "src/bindings/tickets.ts",
+    "src/ticketsView.ts",
+    "src/pages/TicketsParts.tsx"
   ]
 }

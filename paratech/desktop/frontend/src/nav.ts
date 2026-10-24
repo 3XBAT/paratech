@@ -10,6 +10,7 @@ export type PageId =
   | "today"
   | "subjects"
   | "knowledge"
+  | "tickets"
   | "homework"
   | "schedule"
   | "journal"
@@ -29,6 +30,7 @@ export const pages: readonly Page[] = [
   { id: "today", label: "Сегодня" },
   { id: "subjects", label: "Предметы" },
   { id: "knowledge", label: "База знаний" },
+  { id: "tickets", label: "Билеты" },
   { id: "homework", label: "Задания" },
   { id: "schedule", label: "Расписание" },
   { id: "journal", label: "Журнал" },
@@ -51,7 +53,7 @@ export interface RailItem {
 /** The six icons of the rail, in order. */
 export const rail: readonly RailItem[] = [
   { id: "today", label: "Сегодня", icon: "home", covers: ["today"] },
-  { id: "subjects", label: "Предметы", icon: "folder", covers: ["subjects", "knowledge"] },
+  { id: "subjects", label: "Предметы", icon: "folder", covers: ["subjects", "knowledge", "tickets"] },
   { id: "homework", label: "Задания", icon: "tasks", covers: ["homework"] },
   { id: "schedule", label: "Расписание", icon: "cal", covers: ["schedule"] },
   { id: "journal", label: "Журнал", icon: "journal", covers: ["journal"] },

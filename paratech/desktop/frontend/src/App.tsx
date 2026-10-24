@@ -25,6 +25,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SettingsTabs } from "./pages/SettingsTabs";
 import { SubjectsPage } from "./pages/SubjectsPage";
 import { SummaryPage } from "./pages/SummaryPage";
+import { TicketsPage } from "./pages/TicketsPage";
 import { TodayPage } from "./pages/TodayPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
 import { IconSprite } from "./ui/Icon";
@@ -50,6 +51,8 @@ function PageView(props: {
       return <HomeworkPage openAssignment={props.assignment} />;
     case "knowledge":
       return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} />;
+    case "tickets":
+      return <TicketsPage onOpen={props.onOpen} />;
     case "schedule":
       return <SchedulePage />;
     case "connections":
