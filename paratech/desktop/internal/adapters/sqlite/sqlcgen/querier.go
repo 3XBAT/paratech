@@ -277,6 +277,8 @@ type Querier interface {
 	// The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 	// aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
 	ListSubjects(ctx context.Context) ([]Subject, error)
+	// The sets of one subject for the tickets screen, newest first (idx_ticket_sets_subject).
+	ListTicketSetsBySubject(ctx context.Context, arg ListTicketSetsBySubjectParams) ([]TicketSet, error)
 	ListTodayPostsSince(ctx context.Context, arg ListTodayPostsSinceParams) ([]TodayPost, error)
 	// One page in number order; the primary key serves the order.
 	ListTranscriptParts(ctx context.Context, arg ListTranscriptPartsParams) ([]ListTranscriptPartsRow, error)

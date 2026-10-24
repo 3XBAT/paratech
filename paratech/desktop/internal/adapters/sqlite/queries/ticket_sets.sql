@@ -4,6 +4,13 @@
 -- name: GetTicketSet :one
 SELECT * FROM ticket_sets WHERE id = sqlc.arg(id);
 
+-- The sets of one subject for the tickets screen, newest first (idx_ticket_sets_subject).
+-- name: ListTicketSetsBySubject :many
+SELECT * FROM ticket_sets
+WHERE subject_id = sqlc.arg(subject_id)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(max_rows);
+
 -- A never-stored set (version 0) is inserted with version 1.
 -- name: InsertTicketSet :exec
 INSERT INTO ticket_sets (id, subject_id, material_id, status, content, version, created_at, updated_at)

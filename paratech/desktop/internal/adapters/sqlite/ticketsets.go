@@ -12,6 +12,7 @@ import (
 // Operation names of the ticket set repository, used in its error messages.
 const (
 	opGetTicketSet     = "sqlite: get ticket set"
+	opListTicketSets   = "sqlite: list ticket sets"
 	opSaveTicketSet    = "sqlite: save ticket set"
 	opRestoreTicketSet = "stored ticket set"
 )
@@ -30,6 +31,32 @@ func (r *TicketSetRepository) Get(ctx context.Context, id shared.TicketSetID) (*
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opGetTicketSet, id, MapError(ctx, err))
 	}
+	return ticketSetFromRow(row)
+}
+
+// ListBySubject returns the newest sets of a subject, at most limit (at least 1), newest first; none is an empty list.
+func (r *TicketSetRepository) ListBySubject(ctx context.Context, sub shared.SubjectID, limit int) ([]*ticketset.Set, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%s: limit %d, want at least 1", opListTicketSets, limit)
+	}
+	rows, err := r.db.Queries(ctx).ListTicketSetsBySubject(ctx, sqlcgen.ListTicketSetsBySubjectParams{
+		SubjectID: string(sub), MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opListTicketSets, sub, MapError(ctx, err))
+	}
+	out := make([]*ticketset.Set, 0, len(rows))
+	for _, row := range rows {
+		s, err := ticketSetFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+func ticketSetFromRow(row sqlcgen.TicketSet) (*ticketset.Set, error) {
 	c, err := ticketset.ParseContent(row.Content)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: content: %w", opRestoreTicketSet, row.ID, err)

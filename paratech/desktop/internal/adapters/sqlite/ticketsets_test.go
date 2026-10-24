@@ -84,6 +84,42 @@ func TestTicketSetSaveGet(t *testing.T) {
 	}
 }
 
+func TestTicketSetListBySubject(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewTicketSetRepository(db)
+	if got, err := repo.ListBySubject(ctx, "sub1", 10); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("no sets = %v, %v", got, err)
+	}
+	if _, err := repo.ListBySubject(ctx, "sub1", 0); err == nil {
+		t.Fatal("limit 0 accepted")
+	}
+	for i, spec := range []struct {
+		id  shared.TicketSetID
+		sub shared.SubjectID
+	}{{"ts1", "sub1"}, {"ts2", "sub2"}, {"ts3", "sub1"}, {"ts4", "sub1"}} {
+		s, err := ticketset.New(spec.id, spec.sub, "", []ticketset.Item{{Number: 1, Title: "А"}}, tsT0.Add(time.Duration(i)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.ListBySubject(ctx, "sub1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID() != "ts4" || got[1].ID() != "ts3" || got[0].Version() != 1 {
+		t.Fatalf("list = %v", got)
+	}
+
+	// A row edited outside the app is refused, not shown.
+	mustExec(t, db, `UPDATE ticket_sets SET content = json_set(content, '$.send', 1) WHERE id = 'ts3'`)
+	if _, err := repo.ListBySubject(ctx, "sub1", 10); !errors.Is(err, ticketset.ErrInvalidSet) {
+		t.Fatalf("corrupt row = %v", err)
+	}
+}
+
 // A row edited outside the app is refused on load: stored titles and results pass the same checks as fresh ones.
 func TestTicketSetCorruptRow(t *testing.T) {
 	tests := map[string]string{
@@ -93,6 +129,8 @@ func TestTicketSetCorruptRow(t *testing.T) {
 		"result too soon": `UPDATE ticket_sets SET content = json_set(content, '$.tickets[0].result', json('{"answer":"","coverage":"not_covered"}'))`,
 		"no tickets":      `UPDATE ticket_sets SET content = json_set(content, '$.tickets', json('[]'))`,
 		"done no file":    `UPDATE ticket_sets SET status = 'done'`,
+		"figures, not confirmed": `UPDATE ticket_sets SET content = json_set(content, '$.accepted', ` +
+			`json('{"estimate_micro_usd":1,"cap_micro_usd":2}'))`,
 	}
 	for name, stmt := range tests {
 		t.Run(name, func(t *testing.T) {

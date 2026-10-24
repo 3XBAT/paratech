@@ -63,6 +63,51 @@ func (q *Queries) InsertTicketSet(ctx context.Context, arg InsertTicketSetParams
 	return err
 }
 
+const listTicketSetsBySubject = `-- name: ListTicketSetsBySubject :many
+SELECT id, subject_id, material_id, status, content, version, created_at, updated_at FROM ticket_sets
+WHERE subject_id = ?1
+ORDER BY created_at DESC, id DESC
+LIMIT ?2
+`
+
+type ListTicketSetsBySubjectParams struct {
+	SubjectID string
+	MaxRows   int64
+}
+
+// The sets of one subject for the tickets screen, newest first (idx_ticket_sets_subject).
+func (q *Queries) ListTicketSetsBySubject(ctx context.Context, arg ListTicketSetsBySubjectParams) ([]TicketSet, error) {
+	rows, err := q.db.QueryContext(ctx, listTicketSetsBySubject, arg.SubjectID, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TicketSet{}
+	for rows.Next() {
+		var i TicketSet
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubjectID,
+			&i.MaterialID,
+			&i.Status,
+			&i.Content,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateTicketSet = `-- name: UpdateTicketSet :execrows
 UPDATE ticket_sets
 SET status     = ?1,
