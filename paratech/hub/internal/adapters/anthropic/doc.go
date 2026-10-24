@@ -1,6 +1,7 @@
-// Package anthropic is the Hub's LLM provider adapter for the Anthropic Messages API (non-streaming), written on
-// net/http and encoding/json (facts used: docs/refs/anthropic.md). It implements the gateway's Provider port
-// (Complete) and the agent step's Provider port (Step: tools, tool choice "auto", prompt caching; ADR-0023).
+// Package anthropic is the Hub's LLM provider adapter for the Anthropic Messages API, written on net/http and
+// encoding/json (facts used: docs/refs/anthropic.md). It implements the gateway's Provider port (Complete), its
+// streaming variant (Stream: the same text call with "stream": true read as SSE; ADR-0026) and the agent step's
+// Provider port (Step: tools, tool choice "auto", prompt caching; ADR-0023).
 //
 // Trust rules:
 //   - the API key comes only from the server configuration, is sent only in the x-api-key header and never appears
