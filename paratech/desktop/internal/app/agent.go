@@ -8,6 +8,7 @@ import (
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/cases/answering"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
@@ -28,6 +29,7 @@ type agentReads struct {
 	rerunner    *homeworkflow.Rerunner
 	materials   *homeworkflow.MaterialJobs // the summary and homework search of a library material (TASK-122)
 	turnkey     *turnkey.Service           // triage_assignment and its Undo (TASK-129)
+	answers     *answering.Service         // answer_question (TASK-118)
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, TASK-127, ADR-0021): the steps of a request on the
@@ -72,7 +74,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	}
 	c.panel = wails.NewAgentPanel(log)
 	c.driver, err = agentloop.New(agentloop.Deps{
-		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library,
+		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
 		Knowledge: reads.knowledge, Activity: reads.activity,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions,
 		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Clock: e.local, Log: log,
