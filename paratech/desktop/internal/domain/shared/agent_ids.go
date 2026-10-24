@@ -36,6 +36,15 @@ func (id AnswerID) String() string { return string(id) }
 // Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id AnswerID) Validate() error { return validateID("answer", string(id)) }
 
+// TicketSetID identifies a set of exam tickets with their answers (coursework/ticketset, TASK-133).
+type TicketSetID string
+
+// String returns the identifier as a plain string.
+func (id TicketSetID) String() string { return string(id) }
+
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
+func (id TicketSetID) Validate() error { return validateID("ticket set", string(id)) }
+
 // NameSegmentProblem returns why s cannot be a single Windows file-name segment, or "" when it can: forbidden or
 // control characters, "." or "..", a trailing dot or space, a reserved device name. s must be non-empty. Contexts
 // use it to check names that may later become folder or file names (ADR-0022).
