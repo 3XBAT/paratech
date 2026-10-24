@@ -202,7 +202,8 @@ func (s *Service) Materials(ctx context.Context, sub shared.SubjectID) ([]*mater
 	return list, nil
 }
 
-// Material returns one file of the library in any status; a missing one is ErrMaterialNotFound.
+// Material returns one file of the library in any status; a missing one is ErrMaterialNotFound (also
+// shared.ErrNotFound, for callers that cannot import this package).
 func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
 	if id.Validate() != nil {
 		return nil, ErrInvalidRequest
@@ -210,7 +211,7 @@ func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material
 	m, err := s.materials.Get(ctx, id)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil, ErrMaterialNotFound
+		return nil, fmt.Errorf("%w: %w", ErrMaterialNotFound, shared.ErrNotFound)
 	case err != nil:
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}

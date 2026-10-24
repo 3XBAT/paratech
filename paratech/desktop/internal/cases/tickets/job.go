@@ -14,7 +14,6 @@ import (
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/library/material"
-	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -247,7 +246,7 @@ func (s *Service) failRun(ctx context.Context, snap job.Snapshot, set *ticketset
 
 // unfile takes a file of the set back from «Билеты» to «Входящие»; a file the student moved is left alone.
 func (s *Service) unfile(ctx context.Context, set *ticketset.Set, m *material.Material) error {
-	if !m.Active() || m.Folder() != subject.SystemFolderID(set.Subject(), subject.SystemTickets) {
+	if !inTickets(set, m) {
 		return nil
 	}
 	_, err := s.shelf.MoveToInbox(ctx, m.ID())

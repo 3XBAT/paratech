@@ -19,6 +19,10 @@ type Repository interface {
 	// Get loads a set; none wraps shared.ErrNotFound.
 	Get(ctx context.Context, id shared.TicketSetID) (*ticketset.Set, error)
 
+	// ListBySubject returns the newest sets of a subject, at most limit (at least 1), newest first; none is an empty
+	// list.
+	ListBySubject(ctx context.Context, sub shared.SubjectID, limit int) ([]*ticketset.Set, error)
+
 	// Save writes it under its version: a stale one wraps shared.ErrVersionConflict.
 	Save(ctx context.Context, s *ticketset.Set) error
 }
@@ -42,11 +46,12 @@ type Answerer interface {
 	Answer(ctx context.Context, id shared.AnswerID) (*answer.Answer, error)
 }
 
-// Shelf is the library as the tickets use it (cases/library, wired by the app): the subjects, the filing of the file
-// into the subject's «Билеты» (into «Входящие» when the subject is gone) and MoveToInbox, the Undo of that filing (the
-// file kept).
+// Shelf is the library as the tickets use it (cases/library, wired by the app): the subjects, one material in any
+// status (none wraps shared.ErrNotFound), the filing of the file into the subject's «Билеты» (into «Входящие» when the
+// subject is gone) and MoveToInbox, the Undo of that filing (the file kept).
 type Shelf interface {
 	Subjects(ctx context.Context) ([]*subject.Subject, error)
+	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	FileTickets(ctx context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error)
 	MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 }

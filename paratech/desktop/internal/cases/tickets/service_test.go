@@ -358,6 +358,87 @@ func TestUnfileAndMissingAnswer(t *testing.T) {
 	if _, err := e.svc.Unfile(t.Context(), v.ID); !errors.Is(err, ErrChanged) {
 		t.Fatalf("unfile a moved file = %v", err)
 	}
+
+	e.shelf.getErr = errors.New("disk")
+	if _, err := e.svc.Unfile(t.Context(), v.ID); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unfile on a broken library = %v", err)
+	}
+	e.shelf.getErr = fmt.Errorf("gone: %w", shared.ErrNotFound)
+	if _, err := e.svc.Unfile(t.Context(), v.ID); !errors.Is(err, ErrChanged) {
+		t.Fatalf("unfile a deleted file = %v", err)
+	}
+}
+
+// List finds the sets of a subject; Set and List carry the newest job, and a run whose job ended without a result
+// (attempts used up, cancelled by the runner) is Stalled so the screen can offer «Подтвердить» again.
+func TestListAndJobState(t *testing.T) {
+	e := newEnv(t)
+	first := e.proposed(t, threeTickets)
+	second := e.proposed(t, "1. Ряды")
+
+	list, err := e.svc.List(t.Context(), "sub1")
+	if err != nil || len(list) != 2 || list[0].ID != second.ID || list[1].ID != first.ID {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	if v := list[1]; v.Job != "" || v.JobStatus != "" || v.Stalled {
+		t.Fatalf("a proposal has a job: %+v", v)
+	}
+	if got, err := e.svc.List(t.Context(), "sub2"); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("List of another subject = %+v, %v", got, err)
+	}
+
+	st, err := e.svc.Confirm(t.Context(), first.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.svc.Set(t.Context(), first.ID)
+	if err != nil || v.Job != st.Job || v.JobStatus.IsTerminal() || v.Stalled {
+		t.Fatalf("a run with a live job = %+v, %v", v, err)
+	}
+
+	// The job ends without a result: the set stays answering, nothing runs it.
+	if err := e.svc.Handle(t.Context(), e.job(t, st.Job).Snapshot(), nil); !errors.Is(err, job.ErrContinueLater) {
+		t.Fatal(err)
+	}
+	if err := e.job(t, st.Job).Cancel(t0); err != nil {
+		t.Fatal(err)
+	}
+	v, err = e.svc.Set(t.Context(), first.ID)
+	if err != nil || v.Status != ticketset.StatusAnswering || v.Job != st.Job || v.JobStatus != job.StatusCancelled || !v.Stalled {
+		t.Fatalf("a stalled run = %+v, %v", v, err)
+	}
+	re, err := e.svc.Confirm(t.Context(), first.ID, false)
+	if err != nil || !re.Created {
+		t.Fatalf("confirm a stalled run = %+v, %v", re, err)
+	}
+	if v, _ := e.svc.Set(t.Context(), first.ID); v.Job != re.Job || v.Stalled {
+		t.Fatalf("after confirming again = %+v", v)
+	}
+
+	if _, err := e.svc.List(t.Context(), ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("List without a subject = %v", err)
+	}
+	e.sets.listErr = errors.New("disk")
+	if _, err := e.svc.List(t.Context(), "sub1"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("List on a broken store = %v", err)
+	}
+}
+
+// A Hub refusal marked permanent fails the job at once even though the tickets port also names it a lost connection
+// (app.ticketAnswers joins shared.ErrNetworkUnavailable to answering.ErrNoConnection): the runner reads the permanent
+// marker first (backoff.WaitStatus), so the run does not wait for a network that would not help.
+func TestPermanentHubErrorFailsTheJob(t *testing.T) {
+	e := newEnv(t)
+	e.answerer.on("Сходимость рядов", outcome{err: errors.Join(backoff.Permanent(errors.New("hub: rejected")), shared.ErrNetworkUnavailable)})
+	v := e.proposed(t, threeTickets)
+	st, _ := e.svc.Confirm(t.Context(), v.ID, false)
+	err := e.svc.Handle(t.Context(), e.job(t, st.Job).Snapshot(), nil)
+	if _, waits := backoff.WaitStatus(err); waits || backoff.Classify(err) != backoff.ClassPermanent || err.Error() != ErrJobAnswer.Error() {
+		t.Fatalf("step = %v (waits %v)", err, waits)
+	}
+	if got, _ := e.svc.Set(t.Context(), v.ID); got.Done != 0 {
+		t.Fatalf("the ticket was recorded: %+v", got.Tickets)
+	}
 }
 
 func TestFileThatCannotBeBuiltFailsTheSet(t *testing.T) {

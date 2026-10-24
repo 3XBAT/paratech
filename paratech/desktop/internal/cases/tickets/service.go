@@ -26,6 +26,9 @@ const runRounds = 10
 // saveAttempts bounds the saves of one change that lose against another save of the same set.
 const saveAttempts = 3
 
+// ListLimit bounds the sets List returns for one subject.
+const ListLimit = 50
+
 // Operation names of the log. The log never holds the list, a title or an answer.
 const (
 	opProposed  = "tickets: set proposed"
@@ -129,13 +132,49 @@ func (s *Service) propose(ctx context.Context, sub shared.SubjectID, source shar
 	return viewOf(set), nil
 }
 
-// Set returns a set. Errors: ErrNotFound, ErrUnavailable.
+// Set returns a set with its newest job. Errors: ErrNotFound, ErrUnavailable.
 func (s *Service) Set(ctx context.Context, id shared.TicketSetID) (View, error) {
 	set, err := s.get(ctx, id)
 	if err != nil {
 		return View{}, err
 	}
-	return viewOf(set), nil
+	return s.viewWithJob(ctx, set)
+}
+
+// List returns the newest sets of a subject (at most ListLimit, newest first) with their jobs, for the tickets
+// screen. A subject with none is an empty list. Errors: ErrInvalidRequest, ErrUnavailable.
+func (s *Service) List(ctx context.Context, sub shared.SubjectID) ([]View, error) {
+	if sub.Validate() != nil {
+		return nil, fmt.Errorf("%w: subject id", ErrInvalidRequest)
+	}
+	sets, err := s.sets.ListBySubject(ctx, sub, ListLimit)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	out := make([]View, 0, len(sets))
+	for _, set := range sets {
+		v, err := s.viewWithJob(ctx, set)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// viewWithJob is the view of a set with its newest job and whether its run stalled.
+func (s *Service) viewWithJob(ctx context.Context, set *ticketset.Set) (View, error) {
+	v := viewOf(set)
+	j, err := s.latestJob(ctx, set.ID())
+	if err != nil {
+		return View{}, err
+	}
+	live := false
+	if j != nil {
+		v.Job, v.JobStatus, live = j.ID(), j.Status(), !j.Status().IsTerminal()
+	}
+	v.Stalled = (set.Status() == ticketset.StatusConfirmed || set.Status() == ticketset.StatusAnswering) && !live
+	return v, nil
 }
 
 // Confirm is the student's «Подтвердить» (input/wails only, never the agent): the paid run starts as a ticket_answers
@@ -195,15 +234,15 @@ func (s *Service) Unfile(ctx context.Context, id shared.TicketSetID) (View, erro
 	if !ok {
 		return viewOf(set), fmt.Errorf("%w: no file", ErrInvalidRequest)
 	}
-	m, _, err := s.materials.MaterialText(ctx, f.Material)
+	m, err := s.shelf.Material(ctx, f.Material)
 	switch {
-	case m == nil && errors.Is(err, shared.ErrNotFound):
+	case errors.Is(err, shared.ErrNotFound):
 		return viewOf(set), fmt.Errorf("%w: %w", ErrChanged, err)
-	case m == nil && err != nil:
+	case err != nil:
 		return viewOf(set), fmt.Errorf("%w: %w", ErrUnavailable, err)
 	case m.Active() && m.InInbox():
 		return viewOf(set), nil
-	case !m.Active() || m.Folder() != subject.SystemFolderID(set.Subject(), subject.SystemTickets):
+	case !inTickets(set, m):
 		return viewOf(set), ErrChanged
 	}
 	if _, err := s.shelf.MoveToInbox(ctx, f.Material); err != nil {
@@ -213,18 +252,31 @@ func (s *Service) Unfile(ctx context.Context, id shared.TicketSetID) (View, erro
 	return viewOf(set), nil
 }
 
-// ActiveJob returns the job of a set that is pending or running; ok is false when there is none.
+// inTickets reports whether m is still the file of set where the run filed it: live, in the subject's «Билеты». Only
+// such a file is taken back to «Входящие»; one the student moved or removed is left alone.
+func inTickets(set *ticketset.Set, m *material.Material) bool {
+	return m.Active() && m.Folder() == subject.SystemFolderID(set.Subject(), subject.SystemTickets)
+}
+
+// ActiveJob returns the job of a set that is pending, running or waiting; ok is false when there is none.
 func (s *Service) ActiveJob(ctx context.Context, id shared.TicketSetID) (shared.JobID, bool, error) {
+	j, err := s.latestJob(ctx, id)
+	if err != nil || j == nil || j.Status().IsTerminal() {
+		return "", false, err
+	}
+	return j.ID(), true, nil
+}
+
+// latestJob returns the newest job of a set; nil when it has none.
+func (s *Service) latestJob(ctx context.Context, id shared.TicketSetID) (*job.Job, error) {
 	j, err := s.jobs.LatestByKeyPrefix(ctx, JobType, keyPrefix(id))
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return "", false, nil
+		return nil, nil
 	case err != nil:
-		return "", false, fmt.Errorf("%w: %w", ErrUnavailable, err)
-	case j.Status().IsTerminal():
-		return "", false, nil
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	return j.ID(), true, nil
+	return j, nil
 }
 
 // keyPrefix starts the key of every job of a set; a set id holds no ':'.

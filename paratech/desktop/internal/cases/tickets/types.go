@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/ticketset"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -41,6 +42,13 @@ type View struct {
 
 	Material shared.MaterialID  // the file in «Билеты», once done
 	Result   shared.ArtifactRef // the artifact of the file, once done
+
+	// The newest ticket_answers job of the set and its status (Set and List only; "" when it has none). Stalled: the
+	// run is confirmed or answering but no job is live (the last one failed after its attempts or was cancelled), so
+	// the screen offers «Подтвердить» again; computed, never stored.
+	Job       shared.JobID
+	JobStatus job.Status
+	Stalled   bool
 
 	Version   int64
 	UpdatedAt time.Time

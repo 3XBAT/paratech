@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ type fakeSets struct {
 	mu      sync.Mutex
 	states  map[shared.TicketSetID]ticketset.State
 	saveErr error // the next Save fails with it once
+	listErr error // ListBySubject fails with it
 }
 
 func (f *fakeSets) Get(_ context.Context, id shared.TicketSetID) (*ticketset.Set, error) {
@@ -49,6 +51,37 @@ func (f *fakeSets) Get(_ context.Context, id shared.TicketSetID) (*ticketset.Set
 	}
 	st.Content = c
 	return ticketset.Restore(st)
+}
+
+// ListBySubject lists the sets of sub newest first (by creation, then id, like the sqlite query).
+func (f *fakeSets) ListBySubject(ctx context.Context, sub shared.SubjectID, limit int) ([]*ticketset.Set, error) {
+	f.mu.Lock()
+	if err := f.listErr; err != nil {
+		f.mu.Unlock()
+		return nil, err
+	}
+	var ids []shared.TicketSetID
+	for id, st := range f.states {
+		if st.Subject == sub {
+			ids = append(ids, id)
+		}
+	}
+	slices.SortFunc(ids, func(a, b shared.TicketSetID) int {
+		if c := f.states[b].CreatedAt.Compare(f.states[a].CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(string(b), string(a))
+	})
+	f.mu.Unlock()
+	out := []*ticketset.Set{}
+	for _, id := range ids[:min(limit, len(ids))] {
+		s, err := f.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func (f *fakeSets) Save(_ context.Context, s *ticketset.Set) error {
@@ -172,6 +205,7 @@ type fakeShelf struct {
 	byData map[string]shared.MaterialID
 	names  []string
 	moves  []shared.MaterialID
+	getErr error // Material fails with it
 }
 
 func (f *fakeShelf) Subjects(context.Context) ([]*subject.Subject, error) {
@@ -205,6 +239,19 @@ func (f *fakeShelf) FileTickets(_ context.Context, sub shared.SubjectID, name st
 		return nil, err
 	}
 	return m, nil
+}
+
+// Material returns a filed file; the others are not found (or getErr, when set).
+func (f *fakeShelf) Material(_ context.Context, id shared.MaterialID) (*material.Material, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	if m, ok := f.papers[id]; ok {
+		return m, nil
+	}
+	return nil, fmt.Errorf("fake shelf: %w", shared.ErrNotFound)
 }
 
 func (f *fakeShelf) MoveToInbox(_ context.Context, id shared.MaterialID) (*material.Material, error) {
