@@ -61,6 +61,8 @@ export interface TurnkeyWork {
   status: WorkStatus;
   version: number;
   writing: WorkWriting | null;
+  /** card.workType of the Go view ("" without a card); "presentation" is not written as a paper. */
+  workType: string;
   problem: string;
   message: string;
 }
@@ -72,9 +74,11 @@ export interface OutlineItem {
   words: number;
 }
 
+export const notFoundText = "Работа не найдена: возможно, её отменили.";
+
 /** The fixed Russian texts of the Go binding (turnkey.go); anything else gets the generic one. */
 export const errorTexts: readonly string[] = [
-  "Работа не найдена: возможно, её отменили.",
+  notFoundText,
   "Это действие сейчас недоступно: обновите карточку.",
   "Вопросы по шагу пока недоступны.",
   "Не удалось выполнить. Попробуйте ещё раз.",
@@ -198,11 +202,13 @@ export function parseWork(raw: unknown): TurnkeyWork {
   const w = "turnkey work";
   const r = record(raw, w);
   const writing = r.writing === null || r.writing === undefined ? null : parseWriting(r.writing);
+  const card = r.card === null || r.card === undefined ? null : record(r.card, w);
   return {
     id: str(r, "id", w),
     status: oneOf(r, "status", workStatuses, w),
     version: count(r, "version", w),
     writing,
+    workType: card === null ? "" : str(card, "workType", w),
     problem: str(r, "problem", w),
     message: str(r, "message", w),
   };

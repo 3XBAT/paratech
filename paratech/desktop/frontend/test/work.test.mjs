@@ -5,13 +5,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { errorTexts, genericError, methods, parseWork, turnkeyApi, turnkeyErrorText } from "../.test-build/bindings/turnkey.js";
+import { errorTexts, genericError, methods, notFoundText, parseWork, turnkeyApi, turnkeyErrorText } from "../.test-build/bindings/turnkey.js";
 import { parseCard, parseUpdate } from "../.test-build/bindings/agent.js";
 import { entryModel } from "../.test-build/agentView.js";
 import {
   acceptWork,
   addItem,
+  approvePlan,
+  blockedNumber,
   checkEditor,
+  regenerateBlocked,
+  rewriteWork,
+  singleFlight,
+  startPolling,
   editorFromSections,
   isEdited,
   isRunning,
@@ -223,7 +229,7 @@ test("approve: the editor with the sections, both buttons, the limits", () => {
   assert.match(out, /value="Введение"/);
   assert.match(out, /value="Основная часть"/);
   assert.match(out, /value="1500"/);
-  assert.match(out, /maxLength="200"/);
+  assert.match(out, /maxLength="150"/);
   assert.match(out, /Утвердить план/);
   assert.match(out, /Сохранить план/);
   assert.match(out, /Добавить раздел/);
@@ -239,16 +245,113 @@ test("approve: the editor with the sections, both buttons, the limits", () => {
 
 test("approve with no sections does not crash and cannot be approved", () => {
   const out = render(work({ writing: writing({ step: "approve", sections: [] }) }));
-  assert.match(out, /Нужно от 1 до 30 разделов/);
+  assert.match(out, /Нужно от 1 до 12 разделов/);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Утвердить план/);
 });
 
 test("blocked: the text, the note field with its limit and «Сгенерировать заново»", () => {
-  const out = render(work({ writing: writing({ step: "blocked" }) }));
+  const out = render(work({ writing: writing({ step: "blocked", sections: [section({ written: true }), section({ number: 2 })] }) }));
   assert.match(out, /Не удалось написать раздел\. Можно сгенерировать заново\./);
   assert.match(out, /Дополнительные указания/);
-  assert.match(out, /maxLength="300"/);
+  assert.match(out, /maxLength="1000"/);
   assert.match(out, /Сгенерировать заново/);
+});
+
+test("blocked outline (no sections) says so and offers to make the plan again", () => {
+  const out = render(work({ writing: writing({ step: "blocked", sections: [] }) }));
+  assert.match(out, /Не удалось составить план\. Можно составить заново\./);
+  assert.ok(!out.includes("написать раздел"));
+});
+
+test("blocked regenerate sends 0 only without sections, else the first section not written", async () => {
+  const log = [];
+  const api = fakeApi(log);
+  const blocked = (sections) => work({ writing: writing({ step: "blocked", sections }) });
+  assert.equal(blockedNumber(blocked([]).writing), 0);
+  await regenerateBlocked(api, blocked([]), "  план  ");
+  const some = [section({ number: 1, written: true }), section({ number: 2, written: true }), section({ number: 3 }), section({ number: 4 })];
+  await regenerateBlocked(api, blocked(some), "короче");
+  await regenerateBlocked(api, blocked(some.slice(0, 2)), "");
+  assert.deepEqual(log, [["w1", 0, "план"], ["w1", 3, "короче"], ["w1", 0, ""]]);
+});
+
+test("a presentation is not offered «Написать работу»", () => {
+  assert.deepEqual(workCardModel(work({ status: "confirmed", workType: "presentation" })), { type: "none" });
+  assert.equal(workCardModel(work({ status: "confirmed", workType: "referat" })).type, "start");
+  assert.equal(parseWork({ ...raw(), card: { workType: "presentation" } }).workType, "presentation");
+  assert.equal(parseWork(raw()).workType, "");
+});
+
+// ---- Steps after a plan edit ----
+
+function callApi(log, over = {}) {
+  const mk = (name, ret) => async (...args) => {
+    log.push([name, ...args]);
+    const r = over[name];
+    if (r instanceof Error) {
+      throw r;
+    }
+    return r ?? ret;
+  };
+  return {
+    work: mk("work", work({ version: 9 })),
+    startWriting: mk("startWriting", work({ version: 3 })),
+    approveOutline: mk("approveOutline", work({ version: 3 })),
+    editOutline: mk("editOutline", work({ version: 2 })),
+    regenerate: mk("regenerate", work()),
+  };
+}
+
+const planItems = [{ number: 1, title: " Введение ", words: "300" }];
+
+test("approve: EditOutline when edited then ApproveOutline; only the final reply is returned", async () => {
+  const log = [];
+  const r = await approvePlan(callApi(log), "w1", planItems, true);
+  assert.deepEqual(log, [["editOutline", "w1", [{ number: 1, title: "Введение", words: 300 }]], ["approveOutline", "w1"]]);
+  assert.equal(r.ok, true);
+  assert.equal(r.work.version, 3);
+
+  const plain = [];
+  await approvePlan(callApi(plain), "w1", planItems, false);
+  assert.deepEqual(plain, [["approveOutline", "w1"]]);
+});
+
+test("rewrite: EditOutline then StartWriting; a failing StartWriting keeps the error and re-reads the work", async () => {
+  const log = [];
+  const r = await rewriteWork(callApi(log, { startWriting: new Error(errorTexts[3]) }), "w1", planItems, true);
+  assert.deepEqual(log.map((c) => c[0]), ["editOutline", "startWriting", "work"]);
+  assert.equal(r.ok, false);
+  assert.equal(turnkeyErrorText(r.error), errorTexts[3]);
+  assert.equal(r.fresh.version, 9);
+});
+
+test("a failing EditOutline stops the sequence and re-reads nothing", async () => {
+  const log = [];
+  const r = await rewriteWork(callApi(log, { editOutline: new Error("x") }), "w1", planItems, true);
+  assert.deepEqual(log.map((c) => c[0]), ["editOutline"]);
+  assert.equal(r.ok, false);
+  assert.equal(r.fresh, null);
+});
+
+test("an unreadable work after a failed step gives no fresh work", async () => {
+  const log = [];
+  const r = await approvePlan(callApi(log, { approveOutline: new Error("x"), work: new Error("y") }), "w1", planItems, true);
+  assert.equal(r.ok, false);
+  assert.equal(r.fresh, null);
+});
+
+test("single flight: a second call while one runs is dropped", async () => {
+  const flight = singleFlight();
+  let release;
+  let calls = 0;
+  const first = flight(() => new Promise((res) => { calls++; release = res; }));
+  assert.equal(await flight(async () => { calls++; }), false);
+  release();
+  assert.equal(await first, true);
+  assert.equal(await flight(async () => { calls++; }), true);
+  assert.equal(calls, 2);
+  await assert.rejects(flight(async () => { throw new Error("x"); }));
+  assert.equal(await flight(async () => undefined), true);
 });
 
 test("done: the file line, the notice, the sections as details, the marker of a source to verify", () => {
@@ -308,24 +411,34 @@ test("moving at the edge and adding past the limit change nothing", () => {
   assert.equal(many.length, limits.maxSections);
 });
 
-test("the editor check: sections 1..30, a title, words 1..20000 as an integer", () => {
+test("the editor check follows the domain: 1..12 sections, a title of 150 runes, 50..3000 words, 15000 in total", () => {
+  assert.deepEqual([limits.maxSections, limits.minWords, limits.maxWords, limits.totalWordsMax, limits.titleMax, limits.noteMax], [12, 50, 3000, 15000, 150, 1000]);
   const ok = [{ number: 1, title: "A", words: "100" }];
   assert.equal(checkEditor(ok).ok, true);
   assert.equal(checkEditor([]).ok, false);
-  assert.equal(checkEditor(Array.from({ length: 31 }, () => ok[0])).ok, false);
-  assert.equal(checkEditor(Array.from({ length: 30 }, () => ok[0])).ok, true);
+  assert.equal(checkEditor(Array.from({ length: 13 }, () => ok[0])).ok, false);
+  assert.equal(checkEditor(Array.from({ length: 12 }, () => ok[0])).ok, true);
   const empty = checkEditor([{ number: 1, title: "   ", words: "100" }]);
   assert.equal(empty.ok, false);
   assert.deepEqual(empty.badTitles, [true]);
-  assert.equal(checkEditor([{ number: 1, title: "x".repeat(201), words: "100" }]).ok, false);
-  for (const words of ["0", "20001", "1.5", "-3", "", "abc", "1e3", " "]) {
+  assert.equal(checkEditor([{ number: 1, title: "x".repeat(151), words: "100" }]).ok, false);
+  assert.equal(checkEditor([{ number: 1, title: "x".repeat(150), words: "100" }]).ok, true);
+  // 150 astral characters are 300 UTF-16 units but 150 runes.
+  assert.equal(checkEditor([{ number: 1, title: "😀".repeat(150), words: "100" }]).ok, true);
+  assert.equal(checkEditor([{ number: 1, title: "😀".repeat(151), words: "100" }]).ok, false);
+  for (const words of ["0", "49", "3001", "20001", "1.5", "-3", "", "abc", "1e3", " "]) {
     const c = checkEditor([{ number: 1, title: "A", words }]);
     assert.equal(c.ok, false, words);
     assert.deepEqual(c.badWords, [true], words);
   }
-  for (const words of ["1", "20000", " 50 "]) {
+  for (const words of ["50", "3000", " 50 "]) {
     assert.equal(checkEditor([{ number: 1, title: "A", words }]).ok, true, words);
   }
+  const five = (words) => Array.from({ length: 5 }, () => ({ number: 1, title: "A", words }));
+  assert.equal(checkEditor(five("3000")).ok, true);
+  const over = checkEditor([...five("3000"), { number: 1, title: "A", words: "50" }]);
+  assert.equal(over.ok, false);
+  assert.match(over.problem, /15000/);
 });
 
 test("revise: the choice is every section or one section; the note is trimmed and cut", () => {
@@ -333,7 +446,8 @@ test("revise: the choice is every section or one section; the note is trimmed an
   assert.deepEqual(opts.map((o) => o.value), [0, 1, 4]);
   assert.equal(opts[0].label, "Весь текст");
   assert.equal(noteOf("  короче  "), "короче");
-  assert.equal(noteOf("x".repeat(500)).length, 300);
+  assert.equal(noteOf("x".repeat(1500)).length, 1000);
+  assert.equal([...noteOf("😀".repeat(1200))].length, 1000);
 });
 
 // ---- Polling and stale replies ----
@@ -354,6 +468,79 @@ test("polling: while a step runs every 3 s, slowly after a failure, stops when n
   }
   assert.equal(pollDelay(work({ status: "confirmed" }), false), null);
   assert.equal(isRunning(null), false);
+});
+
+// Lets the pending promises of a read settle.
+const settle = () => new Promise((res) => setImmediate(res));
+
+function poller(reads) {
+  const seen = { works: [], errors: [], reads: 0 };
+  let latest = null;
+  const stop = startPolling({
+    read: async () => {
+      const r = reads[Math.min(seen.reads++, reads.length - 1)];
+      if (r instanceof Error) {
+        throw r;
+      }
+      return r;
+    },
+    onWork: (w) => {
+      latest = w;
+      seen.works.push(w);
+    },
+    onError: (t) => seen.errors.push(t),
+    current: () => latest,
+  });
+  return { seen, stop };
+}
+
+test("poller: reads every 3 s while running, stops by itself once nothing runs", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const run = work({ writing: writing({ step: "section" }) });
+  const done = work({ version: 2, writing: writing({ step: "none", result: "x" }) });
+  const { seen } = poller([run, run, done]);
+  await settle();
+  assert.equal(seen.reads, 1);
+  t.mock.timers.tick(pollMs - 1);
+  await settle();
+  assert.equal(seen.reads, 1);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(seen.reads, 2);
+  t.mock.timers.tick(pollMs);
+  await settle();
+  assert.equal(seen.reads, 3);
+  t.mock.timers.tick(pollMs * 5);
+  await settle();
+  assert.equal(seen.reads, 3);
+});
+
+test("poller: a failed read retries slowly; stop cancels the next read", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const run = work({ writing: writing({ step: "section" }) });
+  const { seen, stop } = poller([new Error("net"), run]);
+  await settle();
+  assert.deepEqual(seen.errors, [genericError]);
+  t.mock.timers.tick(pollMs);
+  await settle();
+  assert.equal(seen.reads, 1);
+  t.mock.timers.tick(retryMs - pollMs);
+  await settle();
+  assert.equal(seen.reads, 2);
+  stop();
+  t.mock.timers.tick(pollMs * 3);
+  await settle();
+  assert.equal(seen.reads, 2);
+});
+
+test("poller: «Работа не найдена» is shown and not retried", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { seen } = poller([new Error(notFoundText)]);
+  await settle();
+  assert.deepEqual(seen.errors, [notFoundText]);
+  t.mock.timers.tick(retryMs * 4);
+  await settle();
+  assert.equal(seen.reads, 1);
 });
 
 test("an older reply never replaces a newer one", () => {

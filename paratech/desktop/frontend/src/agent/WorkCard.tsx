@@ -4,6 +4,12 @@ import { type TurnkeyApi, type TurnkeyWork, turnkeyErrorText } from "../bindings
 import {
   acceptWork,
   addItem,
+  approvePlan,
+  regenerateBlocked,
+  rewriteWork,
+  singleFlight,
+  startPolling,
+  type StepResult,
   checkEditor,
   type EditorCheck,
   type EditorItem,
@@ -13,7 +19,6 @@ import {
   limits,
   moveItem,
   noteOf,
-  pollDelay,
   removeItem,
   reviseOptions,
   toOutlineItems,
@@ -91,38 +96,42 @@ export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: 
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const guard = useRef(false);
+  // One call at a time: the guard answers a second click before the state has disabled the buttons.
+  const [flight] = useState(singleFlight);
   const noteId = useId();
   const selectId = useId();
 
   const check = checkEditor(items);
   const edited = isEdited(items, sections);
 
-  // One call at a time: the ref answers a second click before the state has disabled the buttons.
   const run = async (call: () => Promise<void>) => {
-    if (guard.current) {
-      return;
-    }
-    guard.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      await call();
-    } catch (e) {
-      setError(turnkeyErrorText(e));
-    } finally {
-      guard.current = false;
-      setBusy(false);
-    }
+    await flight(async () => {
+      setBusy(true);
+      setError("");
+      try {
+        await call();
+      } catch (e) {
+        setError(turnkeyErrorText(e));
+      } finally {
+        setBusy(false);
+      }
+    });
   };
   const saved = (w: TurnkeyWork) => {
     props.onWork(w);
     setItems(editorFromSections(w.writing?.sections ?? []));
   };
-  const saveIfEdited = async () => {
-    if (edited) {
-      saved(await api.editOutline(work.id, toOutlineItems(items)));
+  // Only the final reply is applied; after a failure the error stays on this card and the work is re-read.
+  const step = async (result: Promise<StepResult>) => {
+    const r = await result;
+    if (r.ok) {
+      props.onWork(r.work);
+      return;
     }
+    if (r.fresh !== null) {
+      props.onWork(r.fresh);
+    }
+    setError(turnkeyErrorText(r.error));
   };
 
   const errorLine = error !== "" && (
@@ -172,12 +181,7 @@ export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: 
               size="sm"
               variant="primary"
               disabled={busy || !check.ok}
-              onClick={() =>
-                void run(async () => {
-                  await saveIfEdited();
-                  props.onWork(await api.approveOutline(work.id));
-                })
-              }
+              onClick={() => void run(() => step(approvePlan(api, work.id, items, edited)))}
             >
               {workTexts.approve}
             </Button>
@@ -199,7 +203,7 @@ export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: 
           <input id={noteId} className="ag-inp" value={note} maxLength={limits.noteMax} disabled={busy} onChange={(e) => setNote(e.target.value)} />
           {errorLine}
           <div className="ag-actions">
-            <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await api.regenerate(work.id, 0, noteOf(note))))}>
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await regenerateBlocked(api, work, note)))}>
               {model.button}
             </Button>
           </div>
@@ -290,13 +294,8 @@ export function WorkBody(props: { work: TurnkeyWork; api: TurnkeyApi; onWork(w: 
                 <Button
                   size="sm"
                   variant="primary"
-                  disabled={busy || !check.ok}
-                  onClick={() =>
-                    void run(async () => {
-                      await saveIfEdited();
-                      props.onWork(await api.startWriting(work.id));
-                    })
-                  }
+                  disabled={busy || !check.ok || !edited}
+                  onClick={() => void run(() => step(rewriteWork(api, work.id, items, edited)))}
                 >
                   {workTexts.rewrite}
                 </Button>
@@ -319,42 +318,24 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
   const latest = useRef<TurnkeyWork | null>(null);
 
   // An older reply never replaces a newer one.
+  // A reply that came (a read or a call) clears an earlier read error.
   const apply = useCallback((w: TurnkeyWork) => {
     latest.current = acceptWork(latest.current, w);
     setWork(latest.current);
+    setLoadError("");
   }, []);
 
   const running = isRunning(work);
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = async () => {
-      let failed = false;
-      try {
-        const w = await api.work(workId);
-        if (!alive) {
-          return;
-        }
-        apply(w);
-        setLoadError("");
-      } catch (e) {
-        if (!alive) {
-          return;
-        }
-        failed = true;
-        setLoadError(turnkeyErrorText(e));
-      }
-      const wait = pollDelay(latest.current, failed);
-      if (wait !== null) {
-        timer = setTimeout(() => void read(), wait);
-      }
-    };
-    void read();
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [api, workId, running, apply]);
+  useEffect(
+    () =>
+      startPolling({
+        read: () => api.work(workId),
+        onWork: apply,
+        onError: setLoadError,
+        current: () => latest.current,
+      }),
+    [api, workId, running, apply],
+  );
 
   return (
     <>
