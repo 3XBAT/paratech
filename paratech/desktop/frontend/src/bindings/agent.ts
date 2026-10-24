@@ -122,7 +122,8 @@ export type CardKind =
   | "answer"
   | "cannot_do"
   | "reply"
-  | "stopped";
+  | "stopped"
+  | "work";
 
 export const cardKinds: readonly CardKind[] = [
   "plan",
@@ -135,6 +136,7 @@ export const cardKinds: readonly CardKind[] = [
   "cannot_do",
   "reply",
   "stopped",
+  "work",
 ];
 
 /** One card; `kind` says which field is set. */
@@ -151,6 +153,10 @@ export interface CardView {
   cannotDo: CannotDoView | null;
   text: string;
   stopReason: string;
+  /** A `work` card: the work whose texts TurnkeyService.Work returns; "" for other cards. */
+  workId: string;
+  /** A `work` card: questions, review, helper, pending, failed or confirmed. */
+  outcome: string;
 }
 
 /**
@@ -356,6 +362,9 @@ export function parseCard(raw: unknown): CardView {
     cannotDo: nested(r, "cannotDo", parseCannotDo),
     text: str(r, "text", w),
     stopReason: str(r, "stopReason", w),
+    // An older core does not send them; only a `work` card needs its workId (checked where the card is built).
+    workId: optStr(r, "workId", w),
+    outcome: optStr(r, "outcome", w),
   };
 }
 

@@ -90,6 +90,9 @@
     "src/bindings/agentConfirm.ts",
     "src/agentConfirmView.ts",
     "src/agent/ConfirmCard.tsx",
-    "src/pages/TodayCalendar.tsx"
+    "src/pages/TodayCalendar.tsx",
+    "src/bindings/turnkey.ts",
+    "src/workView.ts",
+    "src/agent/WorkCard.tsx"
   ]
 }

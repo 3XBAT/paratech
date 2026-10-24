@@ -4,7 +4,9 @@ import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
+import type { TurnkeyApi } from "../bindings/turnkey.js";
 import { ConfirmCard } from "./ConfirmCard.js";
+import { WorkWritingCard } from "./WorkCard.js";
 import {
   type ButtonId,
   type ButtonModel,
@@ -26,6 +28,8 @@ export interface CardActions {
   busy?: boolean;
   /** The core calls of the confirm cards; without them a confirm card only says it is unavailable. */
   confirm?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
+  /** The core calls of the `work` cards; without them such a card shows nothing. */
+  turnkey?: TurnkeyApi;
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
@@ -239,6 +243,8 @@ function Card(props: { card: CardModel; actions: CardActions }) {
           <p className="muted">{card.text}</p>
         </section>
       );
+    case "work":
+      return props.actions.turnkey ? <WorkWritingCard key={card.workId} api={props.actions.turnkey} workId={card.workId} /> : null;
     case "action": {
       const note = props.actions.undoNote(card.actionId);
       return (
