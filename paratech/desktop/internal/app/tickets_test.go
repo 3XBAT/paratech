@@ -29,7 +29,9 @@ func (ticketLessons) Texts(context.Context, shared.SubjectID) ([]kb.LessonText, 
 
 type ticketReader struct{ err error }
 
-func (r ticketReader) AnswerQuestion(context.Context, answer.Request) (string, error) { return "", r.err }
+func (r ticketReader) AnswerQuestion(context.Context, answer.Request) (string, error) {
+	return "", r.err
+}
 
 type ticketAnswerStore struct{}
 
