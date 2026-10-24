@@ -78,6 +78,18 @@
 .ag-file-kind { color: var(--muted); }
 .ag-file-name { font-weight: 600; overflow-wrap: anywhere; }
 
+/* Work card (TASK-132): the plan editor and the written sections. */
+.ag-wk-editor { display: flex; flex-direction: column; gap: 8px; }
+.ag-wk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ag-wk-n { width: 20px; text-align: right; }
+.ag-wk-title { flex: 1 1 140px; width: auto; min-width: 0; }
+.ag-wk-words { flex: none; width: 76px; }
+.ag-wk-sec { margin: 0 0 8px; }
+.ag-wk-sec summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+.ag-wk-sec p { margin-top: 8px; }
+.ag-wk-verify { color: var(--accent); }
+.ag-card select.ag-inp { padding: 0 4px; }
+
 .ag-act, .ag-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: var(--fs-small); line-height: var(--lh-small); }
 .ag-act .i, .ag-stop .i { flex: none; width: 14px; height: 14px; color: var(--muted); }
 .ag-act-tx { flex: 1; min-width: 0; overflow-wrap: anywhere; }
