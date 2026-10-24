@@ -316,6 +316,7 @@ export type CardModel =
   | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean } }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
+  | { type: "work"; workId: string }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
 
 function buttons(ids: ButtonId[]): ButtonModel[] {
@@ -385,6 +386,9 @@ function cardModel(c: CardView, status: string): CardModel | null {
         actionId: c.actionId,
         undo: { label: texts.undo, enabled: c.actionId !== "" },
       };
+    case "work":
+      // The card reads the work itself (TurnkeyService.Work); a work card without an id has nothing to read.
+      return c.workId !== "" ? { type: "work", workId: c.workId } : null;
     case "stopped":
       return null; // Built once from the stop reason below.
   }
