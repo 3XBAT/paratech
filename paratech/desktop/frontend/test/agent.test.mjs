@@ -342,9 +342,65 @@ test("progress card: shown while working, with «Стоп» only while executing
   assert.equal(m.length, 1);
   assert.deepEqual(m[0].buttons.map((b) => b.label), ["Стоп"]);
   const planning = modelOf(update({ status: "PLANNING" })).cards;
-  assert.equal(planning[0].type, "progress");
+  assert.equal(m[0].type, "progress");
+  assert.equal(planning.length, 1);
+  assert.equal(planning[0].type, "waiting");
   assert.deepEqual(planning[0].buttons, []);
   assert.match(html(u), /Работа идёт/);
+});
+
+// ---- Waiting indicator (TASK-139) ----
+
+const pending = (over) => ({ key: "k", seq: 1, threadId: "", turn: 0, text: "q", scope: null, callProblem: "", update: null, ...over });
+
+test("waiting: shown while the call runs, hidden on refusal and on any card that ends the wait", () => {
+  const running = entryModel(pending({}));
+  assert.equal(running.waiting, true);
+  assert.equal(running.callLine, "");
+  const refused = entryModel(pending({ callProblem: "offline" }));
+  assert.equal(refused.waiting, false);
+  assert.equal(refused.callLine, "Нет связи с paratech.");
+  const ends = [
+    update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan: { summary: "s", steps: [], notes: [] } })] }),
+    update({ status: "AWAITING_ANSWERS", cards: [card({ kind: "questions", questions: { round: 1, questions: [] } })] }),
+    update({ cards: [card({ kind: "reply", text: "ok" })] }),
+    update({ status: "STOPPED", stopReason: "user" }),
+    update({ status: "FAILED", problem: "failed" }),
+    update({ status: "DONE" }),
+  ];
+  for (const u of ends) {
+    assert.equal(modelOf(u).waiting, false, u.status);
+    assert.doesNotMatch(html(u), /ag-wdot/);
+  }
+});
+
+test("waiting: job-less PLANNING and EXECUTING give a waiting card, EXECUTING keeps «Стоп»", () => {
+  const planning = modelOf(update({ status: "PLANNING" })).cards;
+  assert.deepEqual(planning, [{ type: "waiting", buttons: [] }]);
+  const executing = modelOf(update({ status: "EXECUTING" })).cards;
+  assert.deepEqual(executing.map((c) => c.type), ["waiting"]);
+  assert.deepEqual(executing[0].buttons.map((b) => b.label), ["Стоп"]);
+  const out = html(update({ status: "EXECUTING" }));
+  assert.match(out, />Стоп</);
+  assert.doesNotMatch(out, /Работа идёт/);
+});
+
+test("waiting: three dots, role=status, hidden text, no visible «Отправка…»", () => {
+  const out = renderToStaticMarkup(h(AgentRequest, { model: entryModel(pending({})), actions }));
+  assert.match(out, /role="status"/);
+  assert.match(out, /Запрос выполняется/);
+  assert.equal((out.match(/class="ag-wdot"/g) ?? []).length, 3);
+  assert.doesNotMatch(out, /Отправка…|Работа идёт|ag-callline/);
+  const card = html(update({ status: "PLANNING" }));
+  assert.match(card, /Запрос выполняется/);
+  assert.doesNotMatch(card, /Работа идёт/);
+});
+
+test("waiting css: staggered breath, static and visible under reduced motion", () => {
+  const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
+  assert.match(css, /\.ag-wdot\s*\{[^}]*var\(--accent-fill\)[^}]*animation: ag-breath/);
+  assert.match(css, /\.ag-wdot:nth-child\(3\)\s*\{\s*animation-delay/);
+  assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.ag-wdot\s*\{\s*animation: none; opacity: 1;/);
 });
 
 // ---- Result card ----
