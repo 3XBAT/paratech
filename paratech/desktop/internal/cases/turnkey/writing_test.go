@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
+	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -56,8 +57,35 @@ func TestWritingRunsToTheFile(t *testing.T) {
 		t.Fatalf("edit while the job runs: %v", err)
 	}
 
+	// The first job ends at the outline: it waits for the student, the agent cannot go on.
 	steps, err := e.run(t, st.Job, 10)
-	if err != nil || steps != 5 { // the outline, three sections, the file
+	if err != nil || steps != 1 || e.writer.paid() != 1 {
+		t.Fatalf("outline job = %v after %d steps, paid %d", err, steps, e.writer.paid())
+	}
+	v, err := e.svc.Work(ctx, id)
+	if err != nil || v.Status != work.StatusWriting || v.Writing.Step != work.StepApprove || v.Writing.Total != 3 ||
+		v.Writing.Done != 0 || v.Writing.Generation != 1 {
+		t.Fatalf("after the outline = %+v, %v", v.Writing, err)
+	}
+	if _, err := e.svc.StartWriting(ctx, id); !errors.Is(err, ErrNotWritable) {
+		t.Fatalf("start while the outline waits: %v", err)
+	}
+	// The student edits the outline (it still waits), then approves it: a new job writes the sections.
+	edit := []work.OutlineItem{
+		{Number: 1, Title: "Введение", Words: 200}, {Number: 2, Title: "Основная часть", Words: 900}, {Number: 3, Title: "Заключение", Words: 200},
+	}
+	if v, err := e.svc.EditOutline(ctx, id, edit); err != nil || v.Writing.Step != work.StepApprove || v.Writing.Sections[1].Words != 900 {
+		t.Fatalf("EditOutline = %+v, %v", v.Writing, err)
+	}
+	ap, err := e.svc.ApproveOutline(ctx, id)
+	if err != nil || !ap.Created || ap.Job == st.Job || ap.View.Writing.Step != work.StepSection {
+		t.Fatalf("ApproveOutline = %+v, %v", ap, err)
+	}
+	if _, err := e.svc.ApproveOutline(ctx, id); !errors.Is(err, ErrWritingRunning) {
+		t.Fatalf("approve again while the job runs: %v", err)
+	}
+	steps, err = e.run(t, ap.Job, 10)
+	if err != nil || steps != 4 { // three sections, the file
 		t.Fatalf("run = %v after %d steps", err, steps)
 	}
 	if e.writer.paid() != 4 || len(e.writer.reqs) != 4 {
@@ -69,7 +97,7 @@ func TestWritingRunsToTheFile(t *testing.T) {
 		}
 	}
 
-	v, err := e.svc.Work(ctx, id)
+	v, err = e.svc.Work(ctx, id)
 	if err != nil || v.Status != work.StatusDone || v.Writing.Done != 3 || v.Writing.Total != 3 ||
 		v.Writing.Material != "mat-paper" || v.Writing.Result.IsZero() {
 		t.Fatalf("done = %+v, %v", v.Writing, err)
@@ -88,12 +116,15 @@ func TestWritingRunsToTheFile(t *testing.T) {
 		t.Fatalf("bibliography = %v", bib)
 	}
 
-	// Done: the job does nothing more; a new start is refused, the file is ready.
-	if err := e.svc.Handle(ctx, e.job(t, st.Job).Snapshot(), nil); err != nil {
+	// Done: the job does nothing more; a new start is refused, the file is ready; the outline as it is changes nothing.
+	if err := e.svc.Handle(ctx, e.job(t, ap.Job).Snapshot(), nil); err != nil {
 		t.Fatalf("a step after the end: %v", err)
 	}
 	if _, err := e.svc.StartWriting(ctx, id); !errors.Is(err, ErrAlreadyWritten) {
 		t.Fatalf("start a done work: %v", err)
+	}
+	if v, err := e.svc.EditOutline(ctx, id, edit); err != nil || v.Status != work.StatusDone {
+		t.Fatalf("an unchanged outline of a done work = %s, %v", v.Status, err)
 	}
 }
 
@@ -103,14 +134,7 @@ func TestRepeatedStepAsksNoStoredSection(t *testing.T) {
 	e := newWriteEnv(t)
 	ctx := t.Context()
 	id := e.confirmed(t)
-	st, err := e.svc.StartWriting(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snap := e.job(t, st.Job).Snapshot()
-	if err := e.svc.Handle(ctx, snap, nil); !errors.Is(err, job.ErrContinueLater) {
-		t.Fatalf("outline step: %v", err)
-	}
+	snap := e.job(t, e.approved(t, id).Job).Snapshot()
 
 	e.works.saveErr = errors.New("disk full")
 	if err := e.svc.Handle(ctx, snap, nil); err == nil || errors.Is(err, backoff.ErrPermanent) {
@@ -158,26 +182,46 @@ func TestRefusedAnswersUseAttempts(t *testing.T) {
 	if err := e.svc.Handle(ctx, snap, nil); !errors.Is(err, backoff.ErrPermanent) || e.writer.paid() != work.MaxAttempts {
 		t.Fatalf("a blocked step is not asked: %v", err)
 	}
+	// A blocked writing is not started again (the student regenerates first): no job is created.
+	jobs := len(e.jobs.order)
+	if _, err := e.svc.StartWriting(ctx, id); !errors.Is(err, ErrNotWritable) || len(e.jobs.order) != jobs {
+		t.Fatalf("start a blocked writing: %v, jobs %d", err, len(e.jobs.order))
+	}
 }
 
 // TestRegenerateWritesOnlyTheSection: «Сгенерировать заново» for one section with a note runs a new job that asks
-// that section only (with the note in the student's section), then files the paper again.
+// that section only (with the note in the student's section), then files the paper again; the paper it replaces
+// goes back from «ДЗ» to «Входящие».
 func TestRegenerateWritesOnlyTheSection(t *testing.T) {
 	e := newWriteEnv(t)
 	ctx := t.Context()
 	id := e.confirmed(t)
-	st, _ := e.svc.StartWriting(ctx, id)
+	st := e.approved(t, id)
 	if _, err := e.run(t, st.Job, 10); err != nil {
 		t.Fatal(err)
 	}
 	paid := e.writer.paid()
 
 	re, err := e.svc.Regenerate(ctx, id, 2, "Добавь пример про Новгород")
-	if err != nil || !re.Created || re.Job == st.Job || re.View.Status != work.StatusWriting {
+	if err != nil || !re.Created || re.Job == st.Job || re.View.Status != work.StatusWriting || re.View.Writing.Generation != 2 {
 		t.Fatalf("Regenerate = %+v, %v", re, err)
 	}
+	e.writer.scripted = []string{`{"paragraphs":["Пример про Новгород."],"sources":[]}`}
 	if steps, err := e.run(t, re.Job, 10); err != nil || steps != 2 {
 		t.Fatalf("run = %v after %d steps", err, steps)
+	}
+	v, _ := e.svc.Work(ctx, id)
+	old, _ := e.shelf.paper("mat-paper")
+	paper, _ := e.shelf.paper(v.Writing.Material)
+	if v.Writing.Material != "mat-paper-2" || !old.InInbox() || paper.InInbox() || len(e.shelf.moves) != 1 {
+		t.Fatalf("papers: current %s in inbox %v, old in inbox %v, moves %v", v.Writing.Material, paper.InInbox(),
+			old.InInbox(), e.shelf.moves)
+	}
+	if g, err := e.svc.WritingGeneration(ctx, re.Job); err != nil || g != 2 {
+		t.Fatalf("generation of the job = %d, %v", g, err)
+	}
+	if g, err := e.svc.WritingGeneration(ctx, st.Job); err != nil || g != 1 {
+		t.Fatalf("generation of the first job = %d, %v", g, err)
 	}
 	if e.writer.paid() != paid+1 {
 		t.Fatalf("paid %d, want %d", e.writer.paid(), paid+1)
@@ -194,7 +238,7 @@ func TestRegenerateWritesOnlyTheSection(t *testing.T) {
 		t.Fatalf("an unknown section: %v", err)
 	}
 
-	v, err := e.svc.EditOutline(ctx, id, []work.OutlineItem{{Number: 1, Title: "Введение", Words: 200}, {Title: "Новый раздел", Words: 300}})
+	v, err = e.svc.EditOutline(ctx, id, []work.OutlineItem{{Number: 1, Title: "Введение", Words: 200}, {Title: "Новый раздел", Words: 300}})
 	if err != nil || v.Status != work.StatusWriting || v.Writing.Done != 1 || v.Writing.Total != 2 {
 		t.Fatalf("EditOutline = %+v, %v", v.Writing, err)
 	}
@@ -268,10 +312,7 @@ func TestHostileTextsStayData(t *testing.T) {
 		`{"topic":"` + hostile + `","sections":[{"title":"` + hostile + `","words":300}]}`,
 		`{"paragraphs":["` + hostile + `"],"sources":[{"material":"","text":"` + hostile + `"}]}`,
 	}
-	st, err := e.svc.StartWriting(ctx, tri.View.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := e.approved(t, tri.View.ID)
 	if _, err := e.run(t, st.Job, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -288,5 +329,86 @@ func TestHostileTextsStayData(t *testing.T) {
 	}
 	if !strings.Contains(e.shelf.files[0].data, hostile+homeworkdoc.VerifySource) {
 		t.Fatal("a source the model named is not marked")
+	}
+}
+
+// TestStaleFinishTakesThePaperBack: the outline changed while the file was built (a save lost against the student's
+// regeneration): the paper filed is no paper of the work, it goes back to «Входящие»; the next steps write anew.
+func TestStaleFinishTakesThePaperBack(t *testing.T) {
+	e := newWriteEnv(t)
+	ctx := t.Context()
+	id := e.confirmed(t)
+	snap := e.job(t, e.approved(t, id).Job).Snapshot()
+	for range 3 {
+		if err := e.svc.Handle(ctx, snap, nil); !errors.Is(err, job.ErrContinueLater) {
+			t.Fatalf("section step: %v", err)
+		}
+	}
+	e.works.beforeSave = func() {
+		w, err := e.works.Get(ctx, id)
+		if err == nil {
+			err = w.Regenerate(1, "", t0)
+		}
+		if err == nil {
+			err = e.works.Save(ctx, w)
+		}
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	if err := e.svc.Handle(ctx, snap, nil); !errors.Is(err, job.ErrContinueLater) {
+		t.Fatalf("the file step: %v", err)
+	}
+	v, _ := e.svc.Work(ctx, id)
+	paper, ok := e.shelf.paper("mat-paper")
+	if v.Status != work.StatusWriting || v.Writing.Material != "" || !ok || !paper.InInbox() || len(e.shelf.moves) != 1 {
+		t.Fatalf("work %s, material %q, paper in inbox %v, moves %v", v.Status, v.Writing.Material, ok && paper.InInbox(), e.shelf.moves)
+	}
+	e.writer.scripted = []string{`{"paragraphs":["Новое введение."],"sources":[]}`}
+	if steps, err := e.run(t, snap.ID(), 10); err != nil || steps != 2 {
+		t.Fatalf("the rest = %v after %d steps", err, steps)
+	}
+	if v, _ := e.svc.Work(ctx, id); v.Status != work.StatusDone || v.Writing.Material != "mat-paper-2" {
+		t.Fatalf("done = %s %s", v.Status, v.Writing.Material)
+	}
+}
+
+// TestWritingTextsFailuresAreRetried: a local failure to read the assignment or its material is retried (the key of
+// the call stays the same), never taken for «no material»; a material without readable text is left out.
+func TestWritingTextsFailuresAreRetried(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		assignment error
+		material   error
+		asked      bool
+	}{
+		{"assignment unreadable", errors.New("disk"), nil, false},
+		{"material unreadable", nil, errors.New("disk"), false},
+		{"material is a scan", nil, material.ErrTextNotExtracted, true},
+		{"material gone", nil, shared.ErrNotFound, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newWriteEnv(t)
+			ctx := t.Context()
+			id := e.confirmed(t)
+			st, err := e.svc.StartWriting(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.assignmentErr = tt.assignment
+			if tt.material != nil {
+				e.materials.errs["m1"] = tt.material
+			}
+			err = e.svc.Handle(ctx, e.job(t, st.Job).Snapshot(), nil)
+			if tt.asked {
+				if err != nil || len(e.writer.reqs) != 1 || strings.Contains(e.writer.reqs[0].UntrustedData(), "m1.txt") {
+					t.Fatalf("Handle = %v, calls %d", err, len(e.writer.reqs))
+				}
+				return
+			}
+			if !errors.Is(err, ErrWriteStorage) || errors.Is(err, backoff.ErrPermanent) || len(e.writer.reqs) != 0 {
+				t.Fatalf("Handle = %v, calls %d", err, len(e.writer.reqs))
+			}
+		})
 	}
 }

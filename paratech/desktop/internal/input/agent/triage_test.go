@@ -21,6 +21,8 @@ type fakeTurnkey struct {
 	onStart func(id shared.WorkID) (turnkey.WritingStarted, error)
 	active  map[shared.WorkID]shared.JobID
 	writes  []shared.WorkID
+
+	generations map[shared.JobID]int
 }
 
 func (f *fakeTurnkey) StartWriting(_ context.Context, id shared.WorkID) (turnkey.WritingStarted, error) {
@@ -34,6 +36,14 @@ func (f *fakeTurnkey) StartWriting(_ context.Context, id shared.WorkID) (turnkey
 func (f *fakeTurnkey) ActiveWriting(_ context.Context, id shared.WorkID) (shared.JobID, bool, error) {
 	j, ok := f.active[id]
 	return j, ok, nil
+}
+
+// WritingGeneration answers generations[id], 1 for a job not listed.
+func (f *fakeTurnkey) WritingGeneration(_ context.Context, id shared.JobID) (int, error) {
+	if g, ok := f.generations[id]; ok {
+		return g, nil
+	}
+	return 1, nil
 }
 
 func (f *fakeTurnkey) Triage(_ context.Context, src work.Source) (turnkey.Started, error) {

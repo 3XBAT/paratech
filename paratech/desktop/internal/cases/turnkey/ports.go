@@ -99,12 +99,14 @@ type LessonLabels interface {
 	LessonLabel(ctx context.Context, id shared.AssignmentID) (cvalues.LessonLabel, error)
 }
 
-// Shelf is the library as the writing uses it (cases/library, wired by the app): the subject of the work and the
-// filing of the finished paper into its «ДЗ» (into «Входящие» without a subject or when the subject is gone).
+// Shelf is the library as the writing uses it (cases/library, wired by the app): the subject of the work, the
+// filing of the finished paper into its «ДЗ» (into «Входящие» without a subject or when the subject is gone), and
+// MoveToInbox, which takes a paper the work replaced back to «Входящие» (the file kept).
 type Shelf interface {
 	Subjects(ctx context.Context) ([]*subject.Subject, error)
 	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
 	FileHomework(ctx context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error)
+	MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 }
 
 // IDs generates the identifiers of new works (ARCH-24).

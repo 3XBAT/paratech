@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"paratech/desktop/internal/domain/coursework/assignment"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -144,11 +145,37 @@ func (fakeLabels) LessonLabel(_ context.Context, id shared.AssignmentID) (cvalue
 		cvalues.LessonNames{}), nil
 }
 
-// fakeShelf is the library: subject s1 «История»; FileHomework records the files.
+// fakeShelf is the library: subject s1 «История»; FileHomework records the files and keeps one paper per content
+// (the first is mat-paper), filed into «ДЗ» of the subject; MoveToInbox takes one back to «Входящие».
 type fakeShelf struct {
-	mu    sync.Mutex
-	files []filed
-	err   error
+	mu     sync.Mutex
+	files  []filed
+	papers map[shared.MaterialID]*material.Material
+	byData map[string]shared.MaterialID
+	moves  []shared.MaterialID
+	err    error
+}
+
+// paper returns a paper the shelf keeps.
+func (f *fakeShelf) paper(id shared.MaterialID) (*material.Material, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.papers[id]
+	return m, ok
+}
+
+func (f *fakeShelf) MoveToInbox(_ context.Context, id shared.MaterialID) (*material.Material, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.papers[id]
+	if !ok {
+		return nil, errors.New("fake shelf: no such material")
+	}
+	if _, err := m.MoveToInbox(t0); err != nil {
+		return nil, err
+	}
+	f.moves = append(f.moves, id)
+	return m, nil
 }
 
 type filed struct {
@@ -182,26 +209,78 @@ func (f *fakeShelf) FileHomework(_ context.Context, sub shared.SubjectID, name s
 		return nil, f.err
 	}
 	f.files = append(f.files, filed{sub: sub, name: name, data: string(data)})
-	return material.New(material.Spec{
-		ID: "mat-paper", Digest: material.DigestOf(data), Size: int64(len(data)), Type: material.TypeDOCX, Name: name,
-	}, t0)
+	if f.papers == nil {
+		f.papers, f.byData = map[shared.MaterialID]*material.Material{}, map[string]shared.MaterialID{}
+	}
+	id, ok := f.byData[string(data)]
+	if !ok {
+		id = "mat-paper"
+		if n := len(f.papers); n > 0 {
+			id = shared.MaterialID(fmt.Sprintf("mat-paper-%d", n+1))
+		}
+		m, err := material.New(material.Spec{
+			ID: id, Digest: material.DigestOf(data), Size: int64(len(data)), Type: material.TypeDOCX, Name: name,
+		}, t0)
+		if err != nil {
+			return nil, err
+		}
+		f.papers[id], f.byData[string(data)] = m, id
+	}
+	m := f.papers[id]
+	if sub != "" {
+		if _, err := m.Place(sub, subject.SystemFolderID(sub, subject.SystemHomework), t0); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
+}
+
+// writeMaterials is the library's MaterialText: the papers of the shelf, else the materials of the triage env.
+type writeMaterials struct {
+	base  fakeMaterials
+	shelf *fakeShelf
+}
+
+func (f writeMaterials) MaterialText(ctx context.Context, id shared.MaterialID) (*material.Material, material.Text, error) {
+	if m, ok := f.shelf.paper(id); ok {
+		text, err := material.NewText(nil, false)
+		return m, text, err
+	}
+	return f.base.MaterialText(ctx, id)
+}
+
+// failingAssignments is the assignments port whose reads fail with err once set.
+type failingAssignments struct {
+	Assignments
+	err *error
+}
+
+func (f failingAssignments) Get(ctx context.Context, id shared.AssignmentID) (*assignment.Assignment, error) {
+	if *f.err != nil {
+		return nil, *f.err
+	}
+	return f.Assignments.Get(ctx, id)
 }
 
 // writeEnv is a service with the writing over fakes, and a work w1 of assignment a1 with confirmed requirements.
 type writeEnv struct {
 	*env
-	writer   *fakeWriter
-	jobs     *fakeJobs
-	renderer *fakeRenderer
-	shelf    *fakeShelf
+	writer        *fakeWriter
+	jobs          *fakeJobs
+	renderer      *fakeRenderer
+	shelf         *fakeShelf
+	materials     fakeMaterials
+	assignmentErr error // the next reads of the assignment fail with it
 }
 
 func newWriteEnv(t *testing.T) *writeEnv {
 	t.Helper()
 	e := newEnv(t)
 	we := &writeEnv{env: e, writer: &fakeWriter{}, jobs: &fakeJobs{}, renderer: &fakeRenderer{}, shelf: &fakeShelf{}}
+	we.materials = e.svc.materials.(fakeMaterials)
 	svc, err := New(Deps{
-		Works: e.works, Assignments: e.svc.assignments, Materials: e.svc.materials, Reader: e.reader,
+		Works: e.works, Assignments: failingAssignments{Assignments: e.svc.assignments, err: &we.assignmentErr},
+		Materials: writeMaterials{base: we.materials, shelf: we.shelf}, Reader: e.reader,
 		Writing: &WritingDeps{
 			Writer: we.writer, Jobs: we.jobs, JobIDs: &seqJobIDs{}, Profiles: fakeProfiles{}, Renderer: we.renderer,
 			Lessons: fakeLabels{}, Shelf: we.shelf, ModelAlias: "default",
@@ -236,6 +315,24 @@ func (e *writeEnv) job(t *testing.T, id shared.JobID) *job.Job {
 		t.Fatal(err)
 	}
 	return j
+}
+
+// approved starts the writing of confirmed work id, runs its outline job (it ends at the outline) and approves the
+// outline as the student does; it returns the job of the sections.
+func (e *writeEnv) approved(t *testing.T, id shared.WorkID) WritingStarted {
+	t.Helper()
+	st, err := e.svc.StartWriting(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if steps, err := e.run(t, st.Job, 10); err != nil || steps != 1 {
+		t.Fatalf("outline job = %v after %d steps", err, steps)
+	}
+	ap, err := e.svc.ApproveOutline(t.Context(), id)
+	if err != nil || !ap.Created || ap.Job == st.Job {
+		t.Fatalf("ApproveOutline = %+v, %v", ap, err)
+	}
+	return ap
 }
 
 // run runs the steps of job id until it ends; it returns the result of the last step and the steps run.

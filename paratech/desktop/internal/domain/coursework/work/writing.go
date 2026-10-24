@@ -16,7 +16,7 @@ import (
 )
 
 // The writing of a confirmed work (TASK-131, absorbs TASK-105): an outline the model proposes (sections with their
-// volume, the student may edit it), then the text of one section per job step, then the file. The texts the model
+// volume, the student edits and approves it), then the text of one section per job step, then the file. The texts the model
 // wrote are untrusted data: they are checked here (ParseOutline, ParseSection) and only ever rendered into the paper.
 //
 //	outline answer: {"topic":"<line>","sections":[{"title":"<line>","words":<int>}]}
@@ -102,13 +102,15 @@ type File struct {
 }
 
 // Writing is the writing state of a work from StartWriting on. Generation grows each time a done work is written
-// again (an edit or a regeneration), so its job is a new one.
+// again (an edit or a regeneration), so its job is a new one. Approved is the student's «Утвердить план»: no section
+// is written before it (TASK-105).
 type Writing struct {
 	Snapshot       Snapshot  `json:"snapshot"`
 	Generation     int       `json:"generation"`
 	OutlineAttempt int       `json:"outline_attempt"`
 	Topic          string    `json:"topic"`
 	Sections       []Section `json:"sections"` // empty until the outline is stored
+	Approved       bool      `json:"approved"`
 	File           *File     `json:"file"`
 }
 
@@ -132,6 +134,7 @@ type StepKind string
 const (
 	StepNone     StepKind = "none"     // nothing to do: not writing
 	StepOutline  StepKind = "outline"  // ask for the outline
+	StepApprove  StepKind = "approve"  // the outline waits for the student: edit it, then ApproveOutline
 	StepSection  StepKind = "section"  // ask for the text of Section
 	StepAssemble StepKind = "assemble" // build the file from the written sections
 	StepBlocked  StepKind = "blocked"  // the attempts of the due call are used up: the student regenerates
@@ -161,8 +164,8 @@ func (w *Work) StartWriting(snap Snapshot, now time.Time) error {
 	return w.move(next, StatusWriting, now)
 }
 
-// Next returns the next step of the writing: the outline, the first section without its text, the file, or blocked
-// when the due call used its attempts.
+// Next returns the next step of the writing: the outline, the student's approval of it, the first section without its
+// text, the file, or blocked when the due call used its attempts.
 func (w *Work) Next() Step {
 	if w.status != StatusWriting || w.writing == nil {
 		return Step{Kind: StepNone}
@@ -173,6 +176,9 @@ func (w *Work) Next() Step {
 			return Step{Kind: StepBlocked}
 		}
 		return Step{Kind: StepOutline, Attempt: wr.OutlineAttempt}
+	}
+	if !wr.Approved {
+		return Step{Kind: StepApprove}
 	}
 	for _, s := range wr.Sections {
 		if s.Written() {
@@ -186,8 +192,8 @@ func (w *Work) Next() Step {
 	return Step{Kind: StepAssemble}
 }
 
-// SetOutline stores the outline the model proposed: the sections get the numbers 1..n. Errors: ErrStaleStep when no
-// outline is due, ErrInvalidAnswer for an outline out of bounds.
+// SetOutline stores the outline the model proposed: the sections get the numbers 1..n and wait for the student's
+// approval. Errors: ErrStaleStep when no outline is due, ErrInvalidAnswer for an outline out of bounds.
 func (w *Work) SetOutline(o Outline, now time.Time) error {
 	if w.Next().Kind != StepOutline {
 		return ErrStaleStep
@@ -203,15 +209,30 @@ func (w *Work) SetOutline(o Outline, now time.Time) error {
 	return w.move(next, StatusWriting, now)
 }
 
+// ApproveOutline is the student's «Утвердить план»: the sections are written from now on. Error: ErrInvalidTransition
+// when no outline waits for the approval.
+func (w *Work) ApproveOutline(now time.Time) error {
+	if w.Next().Kind != StepApprove {
+		return fmt.Errorf("%w: no outline waits for the approval in %s", ErrInvalidTransition, w.status)
+	}
+	next := w.clone()
+	next.writing.Approved = true
+	return w.move(next, StatusWriting, now)
+}
+
 // EditOutline is the student's edit of the outline: the sections in the new order, a known Number keeps its text when
 // its title and volume stay, a changed one is written again, Number 0 is a new section. A done work is written again
-// (a new generation). Errors: ErrInvalidTransition (no outline yet), ErrInvalidReply.
+// (a new generation). The outline as it is changes nothing. An edit before the approval still waits for it. Errors:
+// ErrInvalidTransition (no outline yet), ErrInvalidReply.
 func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 	if err := w.outlined(); err != nil {
 		return err
 	}
 	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidReply, err)
+	}
+	if w.sameOutline(items) {
+		return nil
 	}
 	next := w.clone()
 	old := map[int]Section{}
@@ -242,7 +263,8 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 }
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново»: section number (0: every section) is written again
-// with the student's note (may be empty). Errors: ErrInvalidTransition, ErrInvalidReply.
+// with the student's note (may be empty). It is the student's own request to write, so it approves an outline that
+// waits. Errors: ErrInvalidTransition, ErrInvalidReply.
 func (w *Work) Regenerate(number int, note string, now time.Time) error {
 	if err := w.outlined(); err != nil {
 		return err
@@ -262,6 +284,7 @@ func (w *Work) Regenerate(number int, note string, now time.Time) error {
 	if !found {
 		return fmt.Errorf("%w: no section %d", ErrInvalidReply, number)
 	}
+	next.writing.Approved = true
 	return w.rewrite(next, now)
 }
 
@@ -321,6 +344,19 @@ func (w *Work) outlined() error {
 		return fmt.Errorf("%w: no outline to change in %s", ErrInvalidTransition, w.status)
 	}
 	return nil
+}
+
+// sameOutline reports whether items are the sections as they are, in their order.
+func (w *Work) sameOutline(items []OutlineItem) bool {
+	if len(items) != len(w.writing.Sections) {
+		return false
+	}
+	for i, s := range w.writing.Sections {
+		if it := items[i]; it.Number != s.Number || it.Title != s.Title || it.Words != s.Words {
+			return false
+		}
+	}
+	return true
 }
 
 // rewrite takes next as the writing state: a done work is written again under a new generation.
@@ -729,8 +765,11 @@ func (wr Writing) validate() error {
 		return bad("generation")
 	case wr.OutlineAttempt < 1 || wr.OutlineAttempt > MaxAttempts+1:
 		return bad("outline attempt")
-	case len(wr.Sections) == 0 && (wr.Topic != "" || wr.File != nil):
-		return bad("a topic or a file without an outline")
+	case len(wr.Sections) == 0 && (wr.Topic != "" || wr.File != nil || wr.Approved):
+		return bad("a topic, a file or an approval without an outline")
+	}
+	if !wr.Approved && slices.ContainsFunc(wr.Sections, func(s Section) bool { return s.Text != nil }) {
+		return bad("a section written before the approval")
 	}
 	if len(wr.Sections) > 0 {
 		items := make([]OutlineItem, len(wr.Sections))

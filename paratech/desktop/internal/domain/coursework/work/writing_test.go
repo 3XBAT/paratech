@@ -3,8 +3,10 @@ package work
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -33,6 +35,7 @@ func confirmedWork(t *testing.T) *Work {
 	return w
 }
 
+// mustOutline stores the outline and approves it as the student does.
 func mustOutline(t *testing.T, w *Work) {
 	t.Helper()
 	o, err := ParseOutline(outlineJSON)
@@ -40,6 +43,9 @@ func mustOutline(t *testing.T, w *Work) {
 		t.Fatal(err)
 	}
 	if err := w.SetOutline(o, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ApproveOutline(t0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -81,7 +87,44 @@ func TestWritingFlow(t *testing.T) {
 	if err := w.WriteSection(1, 1, SectionText{Paragraphs: []string{"x"}}, t0); !errors.Is(err, ErrStaleStep) {
 		t.Fatalf("a section before the outline: %v", err)
 	}
-	mustOutline(t, w)
+	if err := w.ApproveOutline(t0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("approve before the outline: %v", err)
+	}
+	o, err := ParseOutline(outlineJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetOutline(o, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	// The outline waits for the student: no section is due; the student edits it, then approves.
+	if st := w.Next(); st.Kind != StepApprove {
+		t.Fatalf("after the outline = %+v", st)
+	}
+	if _, _, err := w.StepData(Step{Kind: StepSection, Section: 1, Revision: 1, Attempt: 1}, Texts{Assignment: "x"}); !errors.Is(err, ErrStaleStep) {
+		t.Fatalf("section data before the approval: %v", err)
+	}
+	if err := w.WriteSection(1, 1, SectionText{Paragraphs: []string{"x"}}, t0); !errors.Is(err, ErrStaleStep) {
+		t.Fatalf("a section before the approval: %v", err)
+	}
+	before := w.State()
+	if err := w.EditOutline([]OutlineItem{
+		{Number: 1, Title: "Введение", Words: 200}, {Number: 2, Title: "Основная часть", Words: 800}, {Number: 3, Title: "Заключение", Words: 200},
+	}, t0.Add(time.Hour)); err != nil || !reflect.DeepEqual(w.State(), before) {
+		t.Fatalf("an unchanged outline: %v", err)
+	}
+	if err := w.EditOutline([]OutlineItem{
+		{Number: 1, Title: "Введение", Words: 200}, {Number: 2, Title: "Основная часть", Words: 900}, {Number: 3, Title: "Заключение", Words: 200},
+	}, t0); err != nil || w.Next().Kind != StepApprove {
+		t.Fatalf("an edit before the approval: %v %+v", err, w.Next())
+	}
+	if err := w.ApproveOutline(t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ApproveOutline(t0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("approve twice: %v", err)
+	}
 	if done, total := w.Progress(); done != 0 || total != 3 {
 		t.Fatalf("progress = %d/%d", done, total)
 	}
@@ -190,6 +233,14 @@ func TestEditOutlineAndRegenerate(t *testing.T) {
 	if wr.Generation != 1 {
 		t.Fatalf("generation = %d", wr.Generation)
 	}
+	// The outline as it is: a done work stays done.
+	same := make([]OutlineItem, 0, len(wr.Sections))
+	for _, s := range wr.Sections {
+		same = append(same, OutlineItem{Number: s.Number, Title: s.Title, Words: s.Words})
+	}
+	if err := w.EditOutline(same, t0); err != nil || w.Status() != StatusDone {
+		t.Fatalf("an unchanged outline of a done work: %v %s", err, w.Status())
+	}
 
 	// Keep 1, change the volume of 2, drop 3, add a new one: only 2 and the new one are written again.
 	err := w.EditOutline([]OutlineItem{
@@ -247,6 +298,24 @@ func TestEditOutlineAndRegenerate(t *testing.T) {
 	text, _ := ParseSection(sectionJSON, mats)
 	if err := w.WriteSection(1, 1, text, t0); !errors.Is(err, ErrStaleStep) {
 		t.Fatalf("a stale section: %v", err)
+	}
+}
+
+// A regeneration is the student's own request to write: it approves an outline that waits.
+func TestRegenerateApprovesAWaitingOutline(t *testing.T) {
+	w := confirmedWork(t)
+	if err := w.StartWriting(snap, t0); err != nil {
+		t.Fatal(err)
+	}
+	o, _ := ParseOutline(outlineJSON)
+	if err := w.SetOutline(o, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Regenerate(2, "Подробнее", t0); err != nil {
+		t.Fatal(err)
+	}
+	if st := w.Next(); st.Kind != StepSection || st.Section != 1 {
+		t.Fatalf("next = %+v", st)
 	}
 }
 
@@ -383,6 +452,10 @@ func TestRestoreWriting(t *testing.T) {
 			s.Writing.Sections[0].Text.Paragraphs[0] = strings.Repeat("я", MaxParagraphRunes+1)
 		}},
 		{"repeated number", func(s *State) { s.Writing.Sections[1].Number = 1 }},
+		{"written before the approval", func(s *State) { s.Writing.Approved = false }},
+		{"approved without an outline", func(s *State) {
+			s.Writing.Sections, s.Writing.Topic = nil, ""
+		}},
 		{"bad snapshot", func(s *State) { s.Writing.Snapshot.Teacher = "a\x00b" }},
 		{"file without an outline", func(s *State) {
 			s.Writing.Sections = nil

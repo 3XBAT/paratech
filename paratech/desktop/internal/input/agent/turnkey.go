@@ -18,14 +18,16 @@ import (
 const opTriage = "agent: triage reader call not finished"
 
 // Turnkey is the turnkey work (cases/turnkey) as triage_assignment, write_work and their Undo use it. It has no method
-// that confirms anything for the student: answers, edits, «Подтвердить» and regenerations come only from input/wails;
-// the agent writes only a work whose requirements the student confirmed.
+// that confirms anything for the student: answers, edits, «Подтвердить», «Утвердить план» and regenerations come only
+// from input/wails; the agent writes only a work whose requirements the student confirmed, and its job stops at the
+// outline until the student approves it.
 type Turnkey interface {
 	Triage(ctx context.Context, src work.Source) (turnkey.Started, error)
 	Work(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 	Remove(ctx context.Context, id shared.WorkID, expected int64) error
 	StartWriting(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
 	ActiveWriting(ctx context.Context, id shared.WorkID) (shared.JobID, bool, error)
+	WritingGeneration(ctx context.Context, job shared.JobID) (int, error)
 }
 
 // triage starts the work of an assignment or an uploaded file and asks the reader (TASK-129). The planner gets the
@@ -136,8 +138,9 @@ func (a *Actions) removeWork(ctx context.Context, c action.RemoveWork, expectedV
 
 // --- write_work (TASK-131) ------------------------------------------------------------------------------
 
-// writeWork starts the writing of a confirmed work: one paid job that writes the outline, one section per step and
-// files the .docx into the subject's «ДЗ». It always runs on an approved plan (actionpolicy). The planner gets the
+// writeWork starts the writing of a confirmed work: a paid job that writes the outline and ends there; once the
+// student approved the outline (input/wails), the next job writes one section per step and files the .docx into the
+// subject's «ДЗ». It always runs on an approved plan (actionpolicy). The planner gets the
 // job only (ADR-0022); the progress card follows it («Раздел N из M»), the result card is the work's file
 // (turnkey.View.Writing.Result). A work done already, or one whose writing job runs, is no action of this call.
 // Undo (StopWork): the job is cancelled while it runs; once the paper is filed it goes back to «Входящие».
@@ -177,9 +180,9 @@ func (a *Actions) writeWork(ctx context.Context, call values.Call) (prepared, er
 	}}, nil
 }
 
-// checkWriting reads the target of a StopWork compensation: the job while it has not completed; then the paper it
-// filed, compensated once back in «Входящие», changed when the student moved it elsewhere or the work was written
-// again since.
+// checkWriting reads the target of a StopWork compensation: the job while it has not completed; then the paper of
+// its generation, compensated once back in «Входящие», changed when the student moved it elsewhere or the work was
+// written again since (another generation: that paper is not this action's).
 func (a *Actions) checkWriting(ctx context.Context, c action.StopWork) (action.Target, error) {
 	st, err := a.jobState(ctx, shared.JobID(c.Job.ID()))
 	if err != nil {
@@ -196,6 +199,13 @@ func (a *Actions) checkWriting(ctx context.Context, c action.StopWork) (action.T
 		return action.Target{}, gone(err)
 	}
 	if v.Writing == nil || v.Writing.Material == "" {
+		return action.Target{Version: jobVersion + 1}, nil
+	}
+	gen, err := a.turnkey.WritingGeneration(ctx, shared.JobID(c.Job.ID()))
+	if err != nil {
+		return action.Target{}, gone(err)
+	}
+	if gen != v.Writing.Generation {
 		return action.Target{Version: jobVersion + 1}, nil
 	}
 	m, err := a.library.Material(ctx, v.Writing.Material)

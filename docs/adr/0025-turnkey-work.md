@@ -39,11 +39,18 @@ it cannot do the work whole — then help instead. Everything the model says abo
 - **Steps**: outline first, then one section per queue step (one Hub `Complete` call each, key = work, revision,
   step, attempt). A repeated step reads the stored section and asks nothing, so a crash or retry never pays twice.
   Editing the outline or regenerating a section rewrites only what changed.
+- **The student approves the outline**: the job ends once the outline is stored (no attempt used while it waits).
+  Only the student, through `input/wails`, edits it and presses «Утвердить план» (`ApproveOutline`), which starts
+  the sections job; a regeneration is the student's own request and approves it too. The agent's port has none of
+  these moves, and its `write_work` on a work whose outline waits is `not_now`.
 - **Untrusted text**: the brief (card, questions and answers, the reader's assumptions) goes to the writer as one
   JSON data field inside the delimited data block, never into the instructions; section texts are checked again
   and are paper text only.
-- **Result**: a GOST `.docx` filed into the subject's ДЗ through the library port; Undo removes it. The writing is
-  stored in `works.writing` (migration 0027) as canonical JSON read back through the strict parser.
+- **Result**: a GOST `.docx` filed into the subject's ДЗ through the library port; Undo of `write_work` moves the
+  paper back to «Входящие», the file kept — only the paper of its own generation, untouched by the student. When a
+  new generation (an edit or a regeneration of a done work) files its paper, the previous paper leaves ДЗ for
+  «Входящие» the same way, as does a paper filed by a step whose outline changed meanwhile. The writing is stored in
+  `works.writing` (migration 0027) as canonical JSON read back through the strict parser.
 - **Deleting the assignment** cancels the work and its writing job.
 
 ## Consequences

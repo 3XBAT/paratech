@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -15,6 +16,7 @@ import (
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -36,11 +38,13 @@ const (
 	opWriteDone    = "turnkey: work written" //nolint:gosec // G101 false positive: a log line, not a credential
 )
 
-// StartWriting starts (or resumes) the writing of a confirmed work as one work_writing job (TASK-131): the outline,
-// one section per job step, then the .docx filed into the subject's «ДЗ». The lesson snapshot of the title page and
-// the subject are taken now. A job of the same writing that runs or finished is returned with Created false; after a
-// failed or cancelled one a new job continues from the sections stored (none is asked again). Errors:
-// ErrNotConfigured, ErrNotFound, ErrNotWritable, ErrAlreadyWritten, ErrWritingRetries, ErrUnavailable.
+// StartWriting starts (or resumes) the writing of a confirmed work as work_writing jobs (TASK-131): the outline, then
+// — once the student approved it (ApproveOutline) — one section per job step and the .docx filed into the subject's
+// «ДЗ». The lesson snapshot of the title page and the subject are taken now. A job of the same writing that runs or
+// finished is returned with Created false; after a failed or cancelled one a new job continues from the sections
+// stored (none is asked again). An outline that waits for the student, or a step that used its attempts (the student
+// regenerates first), is ErrNotWritable. Errors: ErrNotConfigured, ErrNotFound, ErrNotWritable, ErrAlreadyWritten,
+// ErrWritingRetries, ErrUnavailable.
 func (s *Service) StartWriting(ctx context.Context, id shared.WorkID) (WritingStarted, error) {
 	if s.writing == nil {
 		return WritingStarted{}, ErrNotConfigured
@@ -57,15 +61,56 @@ func (s *Service) StartWriting(ctx context.Context, id shared.WorkID) (WritingSt
 			return WritingStarted{}, err
 		}
 	case work.StatusWriting:
+		switch w.Next().Kind {
+		case work.StepApprove:
+			return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: the outline waits for the student", ErrNotWritable)
+		case work.StepBlocked:
+			return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: a step used its attempts, regenerate it", ErrNotWritable)
+		}
 	default:
 		return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: the requirements are not confirmed", ErrNotWritable)
 	}
 	return s.enqueueWriting(ctx, w)
 }
 
+// ApproveOutline is the student's «Утвердить план» (input/wails only, never the agent): the sections are written by
+// a new job. Errors: those of EditOutline and StartWriting.
+func (s *Service) ApproveOutline(ctx context.Context, id shared.WorkID) (WritingStarted, error) {
+	if err := s.idle(ctx, id); err != nil {
+		return WritingStarted{}, err
+	}
+	w, err := s.change(ctx, id, func(w *work.Work) error { return w.ApproveOutline(s.clock.Now()) })
+	if err != nil {
+		return WritingStarted{}, err
+	}
+	return s.enqueueWriting(ctx, w)
+}
+
+// WritingGeneration returns the generation of the writing a work_writing job wrote (its key), so the Undo of an older
+// write_work leaves the paper of a newer one alone. Errors: ErrNotConfigured, ErrNotFound, ErrInvalidRequest (not a
+// writing job), ErrUnavailable.
+func (s *Service) WritingGeneration(ctx context.Context, id shared.JobID) (int, error) {
+	if s.writing == nil {
+		return 0, ErrNotConfigured
+	}
+	j, err := s.writing.Jobs.Get(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return 0, fmt.Errorf("%w: %w", ErrNotFound, err)
+	case err != nil:
+		return 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	g, ok := generationOf(j)
+	if !ok {
+		return 0, fmt.Errorf("%w: not a writing job", ErrInvalidRequest)
+	}
+	return g, nil
+}
+
 // EditOutline keeps the student's outline: unchanged sections keep their text, changed and new ones are written
-// again by the next StartWriting. Refused while the writing job runs (ErrWritingRunning). Errors: ErrNotConfigured,
-// ErrNotFound, ErrInvalidRequest, ErrWritingRunning, ErrUnavailable.
+// again by the next StartWriting; an outline that waits for the approval still waits. Refused while the writing job
+// runs (ErrWritingRunning). Errors: ErrNotConfigured, ErrNotFound, ErrInvalidRequest, ErrWritingRunning,
+// ErrUnavailable.
 func (s *Service) EditOutline(ctx context.Context, id shared.WorkID, items []work.OutlineItem) (View, error) {
 	if err := s.idle(ctx, id); err != nil {
 		return View{}, err
@@ -78,8 +123,8 @@ func (s *Service) EditOutline(ctx context.Context, id shared.WorkID, items []wor
 }
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново» for section number (0: every section) with the
-// student's note, then the writing job (paid again for those sections only). Errors: those of EditOutline and
-// StartWriting.
+// student's note, then the writing job (paid again for those sections only); it approves an outline that waits.
+// Errors: those of EditOutline and StartWriting.
 func (s *Service) Regenerate(ctx context.Context, id shared.WorkID, number int, note string) (WritingStarted, error) {
 	if err := s.idle(ctx, id); err != nil {
 		return WritingStarted{}, err
@@ -205,6 +250,20 @@ func cleanSnapshot(s work.Snapshot) work.Snapshot {
 // writingKeyPrefix starts the key of every writing job of a work; a work id holds no ':'.
 func writingKeyPrefix(id shared.WorkID) string { return fmt.Sprintf("%s:%s:", WritingJobType, id) }
 
+// The key of a writing job is work_writing:<work>:g<generation>[:a][:r<round>]: ":a" marks the jobs after the
+// student's approval of the outline (the job before it ends once the outline is stored).
+const approvedKeyPart = "a"
+
+// generationOf reads the generation from the key of a writing job.
+func generationOf(j *job.Job) (int, bool) {
+	parts := strings.Split(j.Key(), ":")
+	if j.Type() != WritingJobType || len(parts) < 3 || !strings.HasPrefix(parts[2], "g") {
+		return 0, false
+	}
+	g, err := strconv.Atoi(strings.TrimPrefix(parts[2], "g"))
+	return g, err == nil && g > 0
+}
+
 // enqueueWriting creates the job of the current generation under the first round of its key whose job did not end
 // without a result, or returns the live or finished job of that round.
 func (s *Service) enqueueWriting(ctx context.Context, w *work.Work) (WritingStarted, error) {
@@ -215,6 +274,9 @@ func (s *Service) enqueueWriting(ctx context.Context, w *work.Work) (WritingStar
 	}
 	for round := range writingRounds {
 		key := fmt.Sprintf("%sg%d", writingKeyPrefix(w.ID()), wr.Generation)
+		if wr.Approved {
+			key += ":" + approvedKeyPart
+		}
 		if round > 0 {
 			key += fmt.Sprintf(":r%d", round)
 		}
@@ -246,7 +308,8 @@ func (s *Service) enqueueWriting(ctx context.Context, w *work.Work) (WritingStar
 // --- the job --------------------------------------------------------------------------------------------
 
 // Handle runs one step of a work_writing job (jobrunner.Handler): the outline, the first section without its text,
-// or the file. After the outline and after each section the job yields (job.ErrContinueLater), so other jobs run in
+// or the file. Once the outline is stored the job ends: it waits for the student (ApproveOutline starts the next job;
+// no attempt is used meanwhile). After each section the job yields (job.ErrContinueLater), so other jobs run in
 // between; a repeated step asks the Hub under the same key (a free replay) and a stored section is never asked again.
 // The model answer is data (hard rule 3): it is checked strictly and only rendered into the paper. A refused answer
 // uses an attempt of the step (a new key); after the last one the job fails. A work gone (its assignment deleted)
@@ -282,6 +345,8 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		return s.writeStep(ctx, snap, report, w, st)
 	case work.StepAssemble:
 		return s.assemble(ctx, snap, report, w)
+	case work.StepApprove:
+		return nil // the outline waits for the student
 	default:
 		return s.permanent(snap, ErrWriteBlocked, nil)
 	}
@@ -340,6 +405,9 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 	if err := s.progress(ctx, snap, report, got); err != nil {
 		return err
 	}
+	if got.Next().Kind == work.StepApprove {
+		return nil // the outline waits for the student
+	}
 	return job.ErrContinueLater
 }
 
@@ -392,6 +460,13 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 	if err := s.progress(ctx, snap, report, w); err != nil {
 		return err
 	}
+	// The paper of the previous generation leaves «ДЗ» first: a crash after it repeats the step, never loses the
+	// reference to it. The same bytes filed again put that material back into «ДЗ».
+	if prev := wr.File; prev != nil {
+		if err := s.unfile(ctx, prev.Material); err != nil {
+			return s.retry(snap, ErrWriteStorage, err)
+		}
+	}
 	name := homeworkdoc.PaperFileName(work.TypeName(brief.WorkType), wr.Topic)
 	m, err := s.writing.Shelf.FileHomework(ctx, wr.Snapshot.Subject, name, content)
 	if err != nil {
@@ -407,7 +482,13 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 		return s.retry(snap, ErrWriteStorage, err)
 	}
 	if got.Status() != work.StatusDone {
-		// The outline changed while the file was built: the next step writes what changed.
+		// The outline changed while the file was built: the paper just filed is no paper of the work; the next step
+		// writes what changed.
+		if cur, _ := got.Writing(); cur.File == nil || cur.File.Material != m.ID() {
+			if err := s.unfile(ctx, m.ID()); err != nil {
+				return s.retry(snap, ErrWriteStorage, err)
+			}
+		}
 		return job.ErrContinueLater
 	}
 	s.log.InfoContext(ctx, opWriteDone, slog.String("work", string(w.ID())), slog.String("material", string(m.ID())))
@@ -415,30 +496,76 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 }
 
 // writingTexts are the texts of a writing call: the assignment, the teacher's material and the student's materials
-// that may be cited (the assignment's material, or the uploaded file that is the assignment).
+// that may be cited (the assignment's material, or the uploaded file that is the assignment). They are part of the
+// key of the call, so a local failure to read them is retried (ErrWriteStorage), never taken for «no material»; only
+// a material that is gone, removed or has no readable text is left out.
 func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, error) {
-	assignmentText, materialText, err := s.texts(ctx, w.Source())
+	src := w.Source()
+	if src.Material != "" {
+		m, text, err := s.materials.MaterialText(ctx, src.Material)
+		switch {
+		case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrRemoved), noMaterialText(err):
+			return work.Texts{}, backoff.Permanent(fail(ErrWriteGone, err))
+		case err != nil:
+			return work.Texts{}, fail(ErrWriteStorage, err)
+		case text.Empty():
+			return work.Texts{}, backoff.Permanent(fail(ErrWriteGone, ErrNoText))
+		}
+		return work.Texts{Assignment: text.String(), Materials: citable(m)}, nil
+	}
+
+	a, err := s.assignments.Get(ctx, src.Assignment)
 	switch {
-	case errors.Is(err, ErrSourceNotFound):
-		return work.Texts{}, backoff.Permanent(fail(ErrWriteGone, err))
-	case errors.Is(err, ErrNoText):
+	case errors.Is(err, shared.ErrNotFound):
 		return work.Texts{}, backoff.Permanent(fail(ErrWriteGone, err))
 	case err != nil:
 		return work.Texts{}, fail(ErrWriteStorage, err)
 	}
-	t := work.Texts{Assignment: assignmentText, Material: materialText}
-	mid := w.Source().Material
-	if mid == "" {
-		if a, err := s.assignments.Get(ctx, w.Source().Assignment); err == nil {
-			mid = a.MaterialID()
-		}
-	}
-	if mid != "" {
-		if m, _, err := s.materials.MaterialText(ctx, mid); err == nil && m != nil && m.Name() != "" {
-			t.Materials = []work.MaterialRef{{ID: m.ID(), Name: m.Name()}}
+	d := a.Details()
+	t := work.Texts{Assignment: strings.TrimSpace(d.Title() + "\n\n" + d.Description())}
+	if mid := a.MaterialID(); mid != "" {
+		m, text, err := s.materials.MaterialText(ctx, mid)
+		switch {
+		case err == nil:
+			t.Material, t.Materials = text.String(), citable(m)
+		case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrRemoved), noMaterialText(err):
+			// The assignment is written from alone, as the reader read it.
+		default:
+			return work.Texts{}, fail(ErrWriteStorage, err)
 		}
 	}
 	return t, nil
+}
+
+// noMaterialText reports an error of a material whose text cannot be read at all (a scan, a damaged file): it stays
+// so, a retry would not help.
+func noMaterialText(err error) bool {
+	return errors.Is(err, material.ErrTextNotExtracted) || errors.Is(err, material.ErrTextUnreadable) ||
+		errors.Is(err, material.ErrDamaged)
+}
+
+// citable is the material the writer may cite; none without a name.
+func citable(m *material.Material) []work.MaterialRef {
+	if m == nil || m.Name() == "" {
+		return nil
+	}
+	return []work.MaterialRef{{ID: m.ID(), Name: m.Name()}}
+}
+
+// unfile takes a paper of the work back from «ДЗ» to «Входящие» (the file kept), as the Undo of write_work does. A
+// paper gone, removed, or moved by the student elsewhere is left as it is.
+func (s *Service) unfile(ctx context.Context, id shared.MaterialID) error {
+	m, _, err := s.materials.MaterialText(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil
+	case m == nil && err != nil:
+		return err
+	case m == nil, !m.Active(), m.InInbox(), m.Folder() != subject.SystemFolderID(m.Subject(), subject.SystemHomework):
+		return nil
+	}
+	_, err = s.writing.Shelf.MoveToInbox(ctx, id)
+	return err
 }
 
 // saveStep applies fn to w and saves it, again on the stored work after a lost save. A step that is not due any more

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -68,28 +69,32 @@ func TestWriteWorkStartsTheJobAndUndoStopsIt(t *testing.T) {
 	}
 }
 
-// Once the paper is filed in «ДЗ», Undo takes it back to «Входящие» (the file kept); a paper the student moved since
-// is not touched.
+// Once the paper is filed in «ДЗ», Undo takes it back to «Входящие» (the file kept); a paper the student moved since,
+// or the paper of a newer generation (the work was written again since), is not touched.
 func TestWriteWorkUndoOfAFiledPaper(t *testing.T) {
 	for _, tt := range []struct {
-		name   string
-		folder subject.System
-		want   action.Status
-		inbox  bool
+		name       string
+		folder     subject.System
+		generation int // of the work now; the job wrote generation 1
+		want       action.Status
+		inbox      bool
 	}{
-		{"still in ДЗ: back to Входящие", subject.SystemHomework, action.StatusUndone, true},
-		{"moved by the student: refused", subject.SystemMaterials, action.StatusUndoRefused, false},
+		{"still in ДЗ: back to Входящие", subject.SystemHomework, 1, action.StatusUndone, true},
+		{"moved by the student: refused", subject.SystemMaterials, 1, action.StatusUndoRefused, false},
+		{"a newer generation's paper: refused", subject.SystemHomework, 2, action.StatusUndoRefused, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w, f := withWriting(t)
 			_, e := act(t, w, writeCall(t, "c1", values.ToolWriteWork, `{"work":"w1"}`))
 			w.jobs.set("job1", job.StatusCompleted)
+			f.generations = map[shared.JobID]int{"job1": 1}
 			m := w.lib.materials["m1"]
 			if _, err := m.Place("s1", subject.SystemFolderID("s1", tt.folder), now); err != nil {
 				t.Fatal(err)
 			}
 			v := f.views["w1"]
-			v.Status, v.Writing = work.StatusDone, &turnkey.WritingView{Material: "m1", Done: 2, Total: 2}
+			v.Status = work.StatusDone
+			v.Writing = &turnkey.WritingView{Generation: tt.generation, Material: "m1", Done: 2, Total: 2}
 			f.views["w1"] = v
 
 			u, err := w.journal.Undo(t.Context(), e.ID)
@@ -97,6 +102,16 @@ func TestWriteWorkUndoOfAFiledPaper(t *testing.T) {
 				t.Fatalf("Undo = %s, %v; in inbox %v", u.Status, err, m.InInbox())
 			}
 		})
+	}
+}
+
+// The agent cannot approve, edit or regenerate the outline for the student: its port has no such method.
+func TestTurnkeyPortHasNoStudentMoves(t *testing.T) {
+	port := reflect.TypeFor[Turnkey]()
+	for _, name := range []string{"ApproveOutline", "EditOutline", "Regenerate", "ConfirmRequirements", "AnswerQuestions"} {
+		if _, ok := port.MethodByName(name); ok {
+			t.Errorf("the agent's Turnkey has %s", name)
+		}
 	}
 }
 

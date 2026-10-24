@@ -47,14 +47,15 @@ type WritingStarted struct {
 // WritingView is the writing of a work as the progress card, the result card and the preview show it. Every text was
 // written by the model and is shown as plain text only.
 type WritingView struct {
-	Step     work.StepKind
-	Topic    string
-	Sections []SectionView
-	Done     int // «Раздел N из M»: the written sections
-	Total    int
-	Subject  shared.SubjectID   // the library subject whose «ДЗ» gets the file; "" «Входящие»
-	Material shared.MaterialID  // the file in the library, once done
-	Result   shared.ArtifactRef // the ResultCard of the file, once done
+	Step       work.StepKind // StepApprove: the outline waits for «Утвердить план»
+	Generation int           // grows each time a done work is written again
+	Topic      string
+	Sections   []SectionView
+	Done       int // «Раздел N из M»: the written sections
+	Total      int
+	Subject    shared.SubjectID   // the library subject whose «ДЗ» gets the file; "" «Входящие»
+	Material   shared.MaterialID  // the file in the library, once done
+	Result     shared.ArtifactRef // the ResultCard of the file, once done
 }
 
 // SectionView is a section of the outline with its text, when written for its current revision.
@@ -149,7 +150,7 @@ func writingViewOf(w *work.Work) *WritingView {
 	if !ok {
 		return nil
 	}
-	v := &WritingView{Step: w.Next().Kind, Topic: wr.Topic, Subject: wr.Snapshot.Subject}
+	v := &WritingView{Step: w.Next().Kind, Generation: wr.Generation, Topic: wr.Topic, Subject: wr.Snapshot.Subject}
 	v.Done, v.Total = w.Progress()
 	for _, s := range wr.Sections {
 		sv := SectionView{Number: s.Number, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written()}

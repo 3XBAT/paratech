@@ -27,6 +27,7 @@ import (
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/input/wails"
 	"paratech/desktop/testenv"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
 )
@@ -136,6 +137,32 @@ func (e *turnkeyEnv) waitWritten(t *testing.T, id shared.WorkID, jobID shared.Jo
 	return v
 }
 
+// waitOutline waits until the outline job ended and checks that the outline waits for the student.
+func (e *turnkeyEnv) waitOutline(t *testing.T, id shared.WorkID, jobID shared.JobID) turnkey.View {
+	t.Helper()
+	testenv.Eventually(t, fmt.Sprintf("outline job %s ended", jobID), func() bool {
+		j, err := e.jobs.Get(context.Background(), jobID)
+		return err == nil && j.Status().IsTerminal()
+	}, func() { e.clock.Advance(time.Second) })
+	j, _ := e.jobs.Get(context.Background(), jobID)
+	v, err := e.works.Work(context.Background(), id)
+	if err != nil || j.Status() != job.StatusCompleted || v.Status != work.StatusWriting || v.Writing.Step != work.StepApprove {
+		t.Fatalf("after the outline job (%s): %+v, %v", j.Status(), v.Writing, err)
+	}
+	return v
+}
+
+// approveAndWait approves the outline as the student does (the binding) and waits until the work is written.
+func (e *turnkeyEnv) approveAndWait(t *testing.T, id shared.WorkID) (turnkey.View, shared.JobID) {
+	t.Helper()
+	v, err := e.binding.ApproveOutline(t.Context(), string(id))
+	if err != nil || v.Writing == nil || v.Writing.Job == "" || v.Writing.Step != string(work.StepSection) {
+		t.Fatalf("ApproveOutline = %+v, %v", v.Writing, err)
+	}
+	jobID := shared.JobID(v.Writing.Job)
+	return e.waitWritten(t, id, jobID), jobID
+}
+
 // writerRequests are the writing calls the Hub got, with the number of distinct keys.
 func (e *turnkeyEnv) writerRequests() ([]*hubv1.CompletionSpec, int) {
 	var out []*hubv1.CompletionSpec
@@ -163,13 +190,15 @@ func (e *turnkeyEnv) jobOfCall(t *testing.T, callID string) shared.JobID {
 	return shared.JobID(stop.Job.ID())
 }
 
-// TestTurnkeyWriteWorkEndToEnd: the agent writes a confirmed work on an approved plan; the job writes the outline and
-// one section per step, files the .docx into «ДЗ» of the subject; each section is asked once; the planner saw the job
-// only.
+// TestTurnkeyWriteWorkEndToEnd: the agent writes a confirmed work on an approved plan; its job writes the outline and
+// ends there; the student edits and approves it (the binding), the next job writes one section per step and files the
+// .docx into «ДЗ» of the subject; each section is asked once; the planner saw the job only. A regeneration files a new
+// paper and takes the old one back to «Входящие».
 func TestTurnkeyWriteWorkEndToEnd(t *testing.T) {
 	e := newTurnkeyEnv(t, "Реферат по истории Древней Руси: введение и заключение.")
 	ctx := t.Context()
 	w := e.confirmedByAgent(t)
+	id := shared.WorkID(w.ID())
 	sub := e.fileUnder(t, "История")
 	e.reader.AnswerInOrder(cvalues.OperationHomeworkDraft, writingOutline, writingSection("Текст раздела."))
 	e.startRunner(t)
@@ -179,8 +208,22 @@ func TestTurnkeyWriteWorkEndToEnd(t *testing.T) {
 	if !ok || r.GetIsError() || !strings.Contains(r.GetResultJson(), `"job":`) || strings.Contains(r.GetResultJson(), "Русь") {
 		t.Fatalf("write_work result = %v", r)
 	}
-	jobID := e.jobOfCall(t, "ww1")
-	v := e.waitWritten(t, shared.WorkID(w.ID()), jobID)
+	outlineJob := e.jobOfCall(t, "ww1")
+	e.waitOutline(t, id, outlineJob)
+	if specs, _ := e.writerRequests(); len(specs) != 1 {
+		t.Fatalf("writer calls before the approval = %d", len(specs))
+	}
+	// The agent cannot go on by itself.
+	if _, err := e.works.StartWriting(ctx, id); err == nil {
+		t.Fatal("the writing went on without the student's approval")
+	}
+	edited, err := e.binding.EditOutline(ctx, w.ID(), []wails.TurnkeyOutlineItem{
+		{Number: 1, Title: "Введение", Words: 250}, {Number: 2, Title: "Заключение", Words: 150},
+	})
+	if err != nil || edited.Writing.Step != string(work.StepApprove) || edited.Writing.Sections[0].Words != 250 {
+		t.Fatalf("EditOutline = %+v, %v", edited.Writing, err)
+	}
+	v, jobID := e.approveAndWait(t, id)
 
 	// The paper is in «ДЗ» of the subject, a Word file with the mark, the sections and the marked source.
 	if v.Writing.Done != 2 || v.Writing.Total != 2 || v.Writing.Result.IsZero() || v.Writing.Subject != sub.ID() {
@@ -222,8 +265,27 @@ func TestTurnkeyWriteWorkEndToEnd(t *testing.T) {
 	}
 
 	// Done: write_work again in a new request is no action.
-	if _, err := e.works.StartWriting(ctx, shared.WorkID(w.ID())); err == nil {
+	if _, err := e.works.StartWriting(ctx, id); err == nil {
 		t.Fatal("a done work started writing again")
+	}
+
+	// «Сгенерировать заново»: a new paper in «ДЗ», the old one back in «Входящие» (the file kept).
+	e.reader.AnswerInOrder(cvalues.OperationHomeworkDraft, writingSection("Короче и точнее."))
+	re, err := e.binding.Regenerate(ctx, w.ID(), 1, "Короче")
+	if err != nil || re.Writing == nil || re.Writing.Job == "" || re.Writing.Generation != 2 {
+		t.Fatalf("Regenerate = %+v, %v", re.Writing, err)
+	}
+	again := e.waitWritten(t, id, shared.JobID(re.Writing.Job))
+	if again.Writing.Material == v.Writing.Material {
+		t.Fatal("the regeneration filed no new paper")
+	}
+	old, err := e.lib.Material(ctx, v.Writing.Material)
+	if err != nil || !old.InInbox() || !old.Active() {
+		t.Fatalf("the old paper = %+v, %v", old, err)
+	}
+	paper, err := e.lib.Material(ctx, again.Writing.Material)
+	if err != nil || paper.Folder() != subject.SystemFolderID(sub.ID(), subject.SystemHomework) {
+		t.Fatalf("the new paper = %+v, %v", paper, err)
 	}
 }
 
@@ -242,19 +304,33 @@ func TestTurnkeyWritingCancelledAndResumed(t *testing.T) {
 	}
 	e.reader.AnswerInOrder(cvalues.OperationHomeworkDraft, writingOutline, writingSection("Абзац."))
 
-	first, err := e.works.StartWriting(ctx, st.View.ID)
-	if err != nil || !first.Created {
-		t.Fatalf("StartWriting = %+v, %v", first, err)
+	outline, err := e.works.StartWriting(ctx, st.View.ID)
+	if err != nil || !outline.Created {
+		t.Fatalf("StartWriting = %+v, %v", outline, err)
 	}
-	// One step by hand (the outline is stored), then the job is cancelled before the runner takes it.
-	j, err := e.jobs.Get(ctx, first.Job)
+	// The outline job by hand: it ends at the outline (the runner never takes it).
+	runner := e.startRunnerStopped(t)
+	j, err := e.jobs.Get(ctx, outline.Job)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.works.Handle(ctx, j.Snapshot(), nil); err == nil {
-		t.Fatal("the outline step completed the job")
+	if err := e.works.Handle(ctx, j.Snapshot(), nil); err != nil {
+		t.Fatalf("the outline step: %v", err)
 	}
-	runner := e.startRunnerStopped(t)
+	if err := runner.Cancel(ctx, outline.Job); err != nil {
+		t.Fatal(err)
+	}
+	first, err := e.works.ApproveOutline(ctx, st.View.ID)
+	if err != nil || !first.Created {
+		t.Fatalf("ApproveOutline = %+v, %v", first, err)
+	}
+	// One section by hand, then the job is cancelled before the runner takes it.
+	if j, err = e.jobs.Get(ctx, first.Job); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.works.Handle(ctx, j.Snapshot(), nil); err == nil {
+		t.Fatal("the first section completed the job")
+	}
 	if err := runner.Cancel(ctx, first.Job); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +413,8 @@ func TestTurnkeyWritingInjectionStaysPaperText(t *testing.T) {
 			e.reader.AnswerInOrder(cvalues.OperationHomeworkDraft, writingOutline, writingSection(line))
 			e.startRunner(t)
 			e.runWriteWork(t, w)
-			v := e.waitWritten(t, shared.WorkID(w.ID()), e.jobOfCall(t, "ww1"))
+			e.waitOutline(t, shared.WorkID(w.ID()), e.jobOfCall(t, "ww1"))
+			v, _ := e.approveAndWait(t, shared.WorkID(w.ID()))
 
 			_, text, err := e.lib.MaterialText(ctx, v.Writing.Material)
 			if err != nil || !strings.Contains(text.String(), line) {

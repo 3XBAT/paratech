@@ -17,6 +17,7 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingdelete"
+	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
@@ -54,8 +55,8 @@ type deleteEnv struct {
 }
 
 // newDeleteEnv runs the post-processing of r1 until its lecture text job, handled by lecture, is RUNNING, and adds a
-// live part, a lecture text row and a chunk file.
-func newDeleteEnv(t *testing.T, lecture func(ctx context.Context) error) *deleteEnv {
+// live part, a lecture text row and a chunk file. extra are more job handlers of the runner.
+func newDeleteEnv(t *testing.T, lecture func(ctx context.Context) error, extra ...jobrunner.Registration) *deleteEnv {
 	t.Helper()
 	llm := testenv.NewFakeLLM()
 	llm.Answer(values.OperationSummary, ppSummary)
@@ -73,6 +74,11 @@ func newDeleteEnv(t *testing.T, lecture func(ctx context.Context) error) *delete
 		Type: homeworkflow.LectureTextJobType, Handler: h, Recovery: jobrunner.RecoveryRequeue,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	for _, r := range extra {
+		if err := e.runner.Register(r); err != nil {
+			t.Fatal(err)
+		}
 	}
 	e.start()
 	e.waitPost(homeworkflow.SummarizeJobType, job.StatusCompleted)
@@ -191,6 +197,69 @@ func TestDeleteRecordingWithARunningJob(t *testing.T) {
 		t.Fatalf("Delete = %+v, %v; want deleted with 2 assignments", res, err)
 	}
 	e.checkGone()
+}
+
+// A turnkey work of an assignment of the recording with its writing job RUNNING (TASK-131): the deletion cancels the
+// job and the work goes with its assignment.
+func TestDeleteRecordingWithARunningWorkWriting(t *testing.T) {
+	writing := make(chan struct{}, 1)
+	e := newDeleteEnv(t, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}, jobrunner.Registration{
+		Type: turnkey.WritingJobType, Recovery: jobrunner.RecoveryRequeue,
+		Handler: handlerFn(func(ctx context.Context, _ job.Snapshot, _ progressFn) error {
+			select {
+			case writing <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}),
+	})
+	ctx := context.Background()
+	a := e.storedAssignments()[0].ID()
+	if _, err := e.db.DBTX(ctx).ExecContext(ctx,
+		"INSERT INTO works (id, assignment_id, status, round, attempt, created_at, updated_at) VALUES ('w-del', ?, 'triage', 1, 1, 0, 0)",
+		string(a)); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := values.NewWorkJob("w-del", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := job.New(job.Spec{
+		ID: "j-write", Type: turnkey.WritingJobType, Key: "work_writing:w-del:g1:a", Payload: payload.Payload(), MaxAttempts: 3,
+	}, e.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.jobs.Enqueue(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, "the writing job runs", func() bool {
+		got, err := e.jobs.Get(ctx, "j-write")
+		return err == nil && got.Status() == job.StatusRunning
+	}, func() { e.clock.Advance(time.Second) })
+	<-writing
+
+	s := e.service(10 * time.Second)
+	p, err := s.Preview(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := recordingdelete.Request{Recording: "r1"}
+	for _, as := range p.Contents.Assignments {
+		req.Assignments = append(req.Assignments, as.ID)
+	}
+	res, err := s.Delete(ctx, req)
+	if err != nil || res.Outcome != recordingdelete.OutcomeDeleted || len(res.Deleted) != 2 {
+		t.Fatalf("Delete = %+v, %v; want deleted with 2 assignments", res, err)
+	}
+	e.checkGone()
+	if n := e.count("works"); n != 0 {
+		t.Fatalf("works: %d rows left", n)
+	}
 }
 
 // A job that ignores its cancellation longer than the wait leaves the deletion pending; once it ends, the next start

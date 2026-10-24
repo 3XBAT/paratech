@@ -122,6 +122,9 @@ func TestWorkWritingRoundTrip(t *testing.T) {
 	if err := w.SetOutline(o, libT0); err != nil {
 		t.Fatal(err)
 	}
+	if err := w.ApproveOutline(libT0); err != nil {
+		t.Fatal(err)
+	}
 	text, err := work.ParseSection(`{"paragraphs":["Абзац."],"sources":[{"material":"","text":"Книга"}]}`, nil)
 	if err != nil {
 		t.Fatal(err)
