@@ -3,9 +3,11 @@ package wails
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"paratech/desktop/internal/cases/tickets"
+	"paratech/desktop/internal/domain/coursework/ticketset"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -14,28 +16,36 @@ type ticketsError string
 
 func (e ticketsError) Error() string { return string(e) }
 
+// Errors of the tickets screen whose texts name the bounds of the list (ticketset).
+var (
+	ErrTicketsTooMany = ticketsError(fmt.Sprintf("Слишком много билетов: не больше %d за один раз.",
+		ticketset.MaxTickets))
+	ErrTicketsTicketTooLong = ticketsError(fmt.Sprintf("Один из билетов длиннее %d символов: сократите его.",
+		ticketset.MaxTitleRunes))
+)
+
 // Errors of the tickets screen. Causes are logged, never shown.
 const (
-	ErrTicketsNotFound      = ticketsError("Билеты не найдены: возможно, их отменили.")
-	ErrTicketsNoTickets     = ticketsError("Билеты не найдены: нужен нумерованный список («1.», «1)» или «Билет 1»).")
-	ErrTicketsTooMany       = ticketsError("Слишком много билетов: не больше 100 за один раз.")
-	ErrTicketsListTooLong   = ticketsError("Список слишком длинный.")
-	ErrTicketsTicketTooLong = ticketsError("Один из билетов длиннее 500 символов: сократите его.")
-	ErrTicketsNoSubject     = ticketsError("Сначала положите файл со списком в предмет.")
-	ErrTicketsSubject       = ticketsError("Предмет не найден.")
-	ErrTicketsSource        = ticketsError("Файл со списком удалён.")
-	ErrTicketsNoText        = ticketsError("В файле нет текста, который можно прочитать.")
-	ErrTicketsCost          = ticketsError("Прогон дороже обычного: подтвердите стоимость.")
-	ErrTicketsDone          = ticketsError("Ответы уже готовы: файл в папке «Билеты».")
-	ErrTicketsChanged       = ticketsError("Файл уже перемещён или удалён: оставлен как есть.")
-	ErrTicketsInvalid       = ticketsError("Это действие сейчас недоступно: обновите экран.")
-	ErrTicketsUnavailable   = ticketsError("Не удалось выполнить. Попробуйте ещё раз.")
+	ErrTicketsNotFound    = ticketsError("Билеты не найдены: возможно, их отменили.")
+	ErrTicketsNoTickets   = ticketsError("Билеты не найдены: нужен нумерованный список («1.», «1)» или «Билет 1»).")
+	ErrTicketsListTooLong = ticketsError("Список слишком длинный.")
+	ErrTicketsNoSubject   = ticketsError("Сначала положите файл со списком в предмет.")
+	ErrTicketsSubject     = ticketsError("Предмет не найден.")
+	ErrTicketsSource      = ticketsError("Файл со списком удалён.")
+	ErrTicketsNoText      = ticketsError("В файле нет текста, который можно прочитать.")
+	ErrTicketsCost        = ticketsError("Прогон дороже обычного: подтвердите стоимость.")
+	ErrTicketsDone        = ticketsError("Ответы уже готовы: файл в папке «Билеты».")
+	ErrTicketsChanged     = ticketsError("Файл уже перемещён или удалён: оставлен как есть.")
+	ErrTicketsInvalid     = ticketsError("Это действие недоступно: билеты уже отменены или завершены, либо ответы ещё не готовы.")
+	ErrTicketsRetries     = ticketsError("Подбор ответов перезапускали слишком много раз. Добавьте список билетов заново.")
+	ErrTicketsUnavailable = ticketsError("Не удалось выполнить. Попробуйте ещё раз.")
 )
 
 // Operation names of the log.
 const (
 	opTicketsPropose = "ui: tickets propose"
 	opTicketsGet     = "ui: tickets get"
+	opTicketsList    = "ui: tickets list"
 	opTicketsConfirm = "ui: tickets confirm"
 	opTicketsCancel  = "ui: tickets cancel"
 	opTicketsUndo    = "ui: tickets undo filing"
@@ -47,6 +57,7 @@ type TicketsUseCase interface {
 	Propose(ctx context.Context, sub shared.SubjectID, text string) (tickets.View, error)
 	ProposeFromMaterial(ctx context.Context, id shared.MaterialID) (tickets.View, error)
 	Set(ctx context.Context, id shared.TicketSetID) (tickets.View, error)
+	List(ctx context.Context, sub shared.SubjectID) ([]tickets.View, error)
 	Confirm(ctx context.Context, id shared.TicketSetID, acceptCost bool) (tickets.Started, error)
 	Cancel(ctx context.Context, id shared.TicketSetID) (tickets.View, error)
 	Unfile(ctx context.Context, id shared.TicketSetID) (tickets.View, error)
@@ -68,8 +79,13 @@ type TicketSet struct {
 	Report       TicketReport `json:"report"`
 	MaterialID   string       `json:"materialId"` // the file in «Билеты» (open it through the library), once done
 	Result       string       `json:"result"`     // the artifact of the ResultCard, once done
-	Job          string       `json:"job"`        // the job Confirm started (the progress card); "" otherwise
-	Version      int64        `json:"version"`
+	Job          string       `json:"job"`        // the newest job of the run (the progress card); "" none
+	// JobStatus is the status of that job (Get and List): QUEUED, RUNNING, RETRY_WAIT or WAITING_* while it lives,
+	// COMPLETED, FAILED or CANCELLED after; "" none. Stalled: the run is confirmed or answering but no job runs it
+	// any more; «Подтвердить» starts it again.
+	JobStatus string `json:"jobStatus"`
+	Stalled   bool   `json:"stalled"`
+	Version   int64  `json:"version"`
 }
 
 // TicketItem is one ticket: coverage covered, partial, not_covered or failed once answered; answerId opens the
@@ -130,6 +146,19 @@ func (s *TicketService) Get(ctx context.Context, id string) (TicketSet, error) {
 	return s.reply(opTicketsGet, v, err)
 }
 
+// List returns the newest sets of a subject, newest first; none is [].
+func (s *TicketService) List(ctx context.Context, subjectID string) ([]TicketSet, error) {
+	vs, err := s.core.List(ctx, shared.SubjectID(subjectID))
+	if err != nil {
+		return nil, s.fail(opTicketsList, err)
+	}
+	out := make([]TicketSet, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, ticketSetView(v))
+	}
+	return out, nil
+}
+
 // Confirm is «Подтвердить» (a paid run, «Билет N из M»); acceptCost is the student's «Да, подтверждаю стоимость» of a
 // run over the cap.
 func (s *TicketService) Confirm(ctx context.Context, id string, acceptCost bool) (TicketSet, error) {
@@ -180,7 +209,7 @@ func (s *TicketService) fail(op string, err error) error {
 		{tickets.ErrAlreadyDone, ErrTicketsDone},
 		{tickets.ErrChanged, ErrTicketsChanged},
 		{tickets.ErrInvalidRequest, ErrTicketsInvalid},
-		{tickets.ErrRetries, ErrTicketsInvalid},
+		{tickets.ErrRetries, ErrTicketsRetries},
 	} {
 		if errors.Is(err, m.cause) {
 			return m.text
@@ -202,7 +231,8 @@ func ticketSetView(v tickets.View) TicketSet {
 			Covered: v.Report.Covered, Partial: v.Report.Partial, NotCovered: v.Report.NotCovered, Failed: v.Report.Failed,
 			Pending: v.Report.Pending,
 		},
-		MaterialID: string(v.Material), Result: v.Result.String(), Version: v.Version,
+		MaterialID: string(v.Material), Result: v.Result.String(), Job: string(v.Job), JobStatus: string(v.JobStatus),
+		Stalled: v.Stalled, Version: v.Version,
 	}
 	for _, t := range v.Tickets {
 		out.Tickets = append(out.Tickets, TicketItem{

@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/cases/tickets"
 	"paratech/desktop/internal/domain/coursework/answer"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
+	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -79,6 +80,21 @@ func TestTicketAnswersMapsErrors(t *testing.T) {
 				t.Fatalf("Ask = %v, want %v", err, tt.want)
 			}
 		})
+	}
+
+	// A Hub refusal marked permanent (hubclient: rejected request, bad API key) also reads as a lost connection here,
+	// but keeps its marker: the runner, which reads the marker first, fails the job instead of waiting.
+	perm, err := answering.New(answering.Deps{
+		Knowledge: ticketLessons{}, Reader: ticketReader{err: backoff.Permanent(errors.New("hub: rejected"))},
+		Answers: ticketAnswerStore{}, Clock: ticketClock{}, IDs: ticketIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (ticketAnswers{answers: perm}).Ask(t.Context(), "Когда ряд сходится абсолютно?", "sub1")
+	if _, waits := backoff.WaitStatus(err); waits || backoff.Classify(err) != backoff.ClassPermanent ||
+		!errors.Is(err, shared.ErrNetworkUnavailable) {
+		t.Fatalf("permanent = %v (waits %v)", err, waits)
 	}
 
 	svc, err := answering.New(answering.Deps{

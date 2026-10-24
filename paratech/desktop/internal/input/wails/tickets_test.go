@@ -4,16 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	"paratech/desktop/internal/cases/tickets"
 	"paratech/desktop/internal/domain/coursework/ticketset"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // fakeTickets records the calls and answers with view, or err.
 type fakeTickets struct {
 	view       tickets.View
+	list       []tickets.View
 	err        error
 	calls      []string
 	acceptCost bool
@@ -32,6 +36,14 @@ func (f *fakeTickets) ProposeFromMaterial(_ context.Context, id shared.MaterialI
 func (f *fakeTickets) Set(_ context.Context, id shared.TicketSetID) (tickets.View, error) {
 	f.calls = append(f.calls, "Set "+string(id))
 	return f.view, f.err
+}
+
+func (f *fakeTickets) List(_ context.Context, sub shared.SubjectID) ([]tickets.View, error) {
+	f.calls = append(f.calls, "List "+string(sub))
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.list, nil
 }
 
 func (f *fakeTickets) Confirm(_ context.Context, id shared.TicketSetID, acceptCost bool) (tickets.Started, error) {
@@ -97,6 +109,36 @@ func TestTicketServiceMapsTheSet(t *testing.T) {
 	if err != nil || empty.Tickets == nil {
 		t.Fatalf("empty lists are []: %+v, %v", empty, err)
 	}
+	none, err := NewTicketService(&fakeTickets{}, discard()).List(t.Context(), "sub1")
+	if err != nil || none == nil || len(none) != 0 {
+		t.Fatalf("no sets = %v, %v", none, err)
+	}
+}
+
+func TestTicketServiceListsWithTheJob(t *testing.T) {
+	f := &fakeTickets{list: []tickets.View{
+		{ID: "ts2", Subject: "sub1", Status: ticketset.StatusAnswering, Job: "j2", JobStatus: job.StatusFailed, Stalled: true},
+		{ID: "ts1", Subject: "sub1", Status: ticketset.StatusConfirmed, Job: "j1", JobStatus: job.StatusWaitingForNetwork},
+	}}
+	got, err := NewTicketService(f, discard()).List(t.Context(), "sub1")
+	if err != nil || len(got) != 2 || f.calls[0] != "List sub1" {
+		t.Fatalf("List = %+v, %v, calls %v", got, err, f.calls)
+	}
+	if got[0].ID != "ts2" || got[0].Job != "j2" || got[0].JobStatus != "FAILED" || !got[0].Stalled ||
+		got[1].JobStatus != "WAITING_FOR_NETWORK" || got[1].Stalled || got[1].Tickets == nil {
+		t.Fatalf("List = %+v", got)
+	}
+	if _, err := NewTicketService(&fakeTickets{err: tickets.ErrInvalidRequest}, discard()).List(t.Context(), ""); !errors.Is(err, ErrTicketsInvalid) {
+		t.Fatalf("List error = %v", err)
+	}
+}
+
+// The bounds in the texts are the parser's own.
+func TestTicketsErrorTextsNameTheBounds(t *testing.T) {
+	if !strings.Contains(ErrTicketsTicketTooLong.Error(), strconv.Itoa(ticketset.MaxTitleRunes)) ||
+		!strings.Contains(ErrTicketsTooMany.Error(), strconv.Itoa(ticketset.MaxTickets)) {
+		t.Fatalf("texts %q, %q", ErrTicketsTicketTooLong, ErrTicketsTooMany)
+	}
 }
 
 func TestTicketServiceErrors(t *testing.T) {
@@ -117,7 +159,7 @@ func TestTicketServiceErrors(t *testing.T) {
 		{tickets.ErrAlreadyDone, ErrTicketsDone},
 		{tickets.ErrChanged, ErrTicketsChanged},
 		{tickets.ErrInvalidRequest, ErrTicketsInvalid},
-		{tickets.ErrRetries, ErrTicketsInvalid},
+		{tickets.ErrRetries, ErrTicketsRetries},
 		{fmt.Errorf("%w: disk full", tickets.ErrUnavailable), ErrTicketsUnavailable},
 	}
 	for _, tt := range tests {
