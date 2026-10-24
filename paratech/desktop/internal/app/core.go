@@ -17,6 +17,7 @@ import (
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/logfile"
+	"paratech/desktop/internal/adapters/pptx"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/sysinfo"
@@ -269,13 +270,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library. No advisor
 	// for «Спросить по шагу» yet: the Hub has no operation for it (ADR-0025). The writing (TASK-131) runs as a job on
 	// the Hub's homework_draft operation; the title page from the profile and the lesson the assignment shows, the
-	// paper filed into the subject's «ДЗ».
+	// paper filed into the subject's «ДЗ»; a presentation (TASK-106) files its .pptx and the speaker text there.
 	works, err := turnkey.New(turnkey.Deps{
 		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm, Clock: e.local,
 		IDs: e.ids, Log: log,
 		Writing: &turnkey.WritingDeps{
-			Writer: llm, Jobs: jobs, JobIDs: e.ids, Profiles: settings, Renderer: docx.New(), Lessons: c.proposals,
-			Shelf: lib, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
+			Writer: llm, Jobs: jobs, JobIDs: e.ids, Profiles: settings, Renderer: docx.New(), Slides: pptx.New(),
+			Lessons: c.proposals, Shelf: lib, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
 		},
 	})
 	if err != nil {

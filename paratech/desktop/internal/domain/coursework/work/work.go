@@ -294,6 +294,13 @@ func (w *Work) validate() error {
 		if (w.status == StatusDone) != (w.writing.File != nil && w.writing.File.Content == w.ContentKey()) {
 			return bad("a done work has the file of its sections")
 		}
+		if u, _ := w.Understanding(); (w.writing.Deck != nil) != (u.WorkType == TypePresentation) {
+			return bad("a presentation is written as slides, any other work as a paper")
+		}
+		if d := w.writing.Deck; w.status == StatusDone && d != nil && (d.Talk == nil || d.Talk.Content != w.ContentKey() ||
+			d.Questions == nil || d.Questions.Revision != d.QuestionsRevision) {
+			return bad("a done presentation has the questions and the speaker text of its slides")
+		}
 		if done, total := w.Progress(); w.status == StatusDone && done != total {
 			return bad("a done work has every section")
 		}

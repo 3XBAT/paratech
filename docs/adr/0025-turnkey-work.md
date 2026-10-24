@@ -76,6 +76,21 @@ it cannot do the work whole — then help instead. Everything the model says abo
   moves the file of both.
 - **Agent tool** `prepare_tickets` is deferred: it needs Hub tool catalog v3.
 
+## Addendum (TASK-106): presentations
+- A confirmed `presentation` is written by the same `write_work` flow and job (no new Hub operation, catalog or proto:
+  `homework_draft`, prompts version 2). The outline is the slide list (8–12 slides: title first, `bullets` or
+  `two_columns`, conclusion last; planned words of the notes 600–1200 in all for a talk of 5–7 minutes); the student
+  approves it as a paper's outline; then one slide per queue step (bullets ≤ 6, notes), then one call for 5 likely
+  questions with short answers, then the files. Same key discipline: a stored slide or question set is never asked again.
+- A talk already in the assignment or the material is built into the notes (prompt rule).
+- Every answer is parsed strictly on the desktop (exact keys, bounds, `values.Presentation.Validate`), control and
+  format (bidi, zero-width) characters are dropped; stored state is checked again on load (no migration: `works.writing`
+  gains optional fields; a paper's stored form and content key are unchanged).
+- Any change of the slides asks the questions again; `Regenerate(0, note)` on blocked questions asks only them again.
+- Result: the `.pptx` (local renderer, template `paper` by default; no picker yet) and a speaker text `.docx` (notes by
+  slide, the questions, «Сгенерировано — прочитайте перед сдачей»), both filed into the subject's «ДЗ»; Undo of
+  `write_work` moves both back to «Входящие» (files kept), refused if the student moved either.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.
