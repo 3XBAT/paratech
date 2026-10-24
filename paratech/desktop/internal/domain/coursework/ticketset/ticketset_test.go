@@ -233,7 +233,7 @@ func TestContentRoundTripAndRestore(t *testing.T) {
 	}
 
 	for name, raw := range map[string]string{
-		"unknown field": `{"tickets":[],"cost_accepted":false,"file":null,"x":1}`,
+		"unknown field": `{"tickets":[],"accepted":null,"cost_accepted":false,"file":null,"x":1}`,
 		"data after":    st.Content.Encode() + `{}`,
 		"not json":      `[`,
 	} {
@@ -258,6 +258,72 @@ func TestContentRoundTripAndRestore(t *testing.T) {
 		if _, err := Restore(st); !errors.Is(err, ErrInvalidSet) {
 			t.Errorf("edit %d restored: %v", i, err)
 		}
+	}
+}
+
+// A stored set is checked against the figures the student confirmed, never the current constants: a set accepted
+// above an old cap, or confirmed under it, restores after the pricing changed.
+func TestRestoreUsesTheConfirmedFigures(t *testing.T) {
+	tests := []struct {
+		name     string
+		tickets  int
+		accepted Accepted
+		cost     bool
+		ok       bool
+	}{
+		// Under the current constants 3 tickets are under the cap; the stored figures were over it.
+		{"accepted over an old cap", 3, Accepted{EstimateMicroUSD: 300_000, CapMicroUSD: 100_000}, true, true},
+		// Under the current constants MaxTickets are over the cap; the stored figures were under it.
+		{"confirmed under an old cap", MaxTickets, Accepted{EstimateMicroUSD: 1_000, CapMicroUSD: 50_000_000}, false, true},
+		{"acceptance missing for the stored figures", 3, Accepted{EstimateMicroUSD: 300_000, CapMicroUSD: 100_000}, false, false},
+		{"acceptance under the stored cap", MaxTickets, Accepted{EstimateMicroUSD: 1_000, CapMicroUSD: 50_000_000}, true, false},
+		{"zero figures", 3, Accepted{}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := answering(t, tt.tickets)
+			s.Persisted(2)
+			st := s.State()
+			a := tt.accepted
+			st.Content.Accepted, st.Content.CostAccepted = &a, tt.cost
+			c, err := ParseContent(st.Content.Encode())
+			if err != nil {
+				t.Fatal(err)
+			}
+			st.Content = c
+			got, err := Restore(st)
+			if !tt.ok {
+				if !errors.Is(err, ErrInvalidSet) {
+					t.Fatalf("Restore = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b := got.Budget(); b.EstimateMicroUSD != a.EstimateMicroUSD || b.CapMicroUSD != a.CapMicroUSD || b.OverCap != tt.cost {
+				t.Fatalf("budget = %+v, want the stored figures", b)
+			}
+		})
+	}
+
+	// A proposed set holds no figures; a confirmed one keeps what the card showed.
+	p := newSet(t, 3)
+	st := p.State()
+	st.Version, st.Content.Accepted = 1, &Accepted{EstimateMicroUSD: 1, CapMicroUSD: 2}
+	if _, err := Restore(st); !errors.Is(err, ErrInvalidSet) {
+		t.Fatalf("figures on a proposal = %v", err)
+	}
+	if err := p.Confirm(false, t0); err != nil {
+		t.Fatal(err)
+	}
+	if a := p.State().Content.Accepted; a == nil || a.EstimateMicroUSD != 3*TicketCostMicroUSD || a.CapMicroUSD != RunCapMicroUSD {
+		t.Fatalf("confirmed figures = %+v", a)
+	}
+	st = p.State()
+	st.Version, st.Content.Accepted = 1, nil
+	if _, err := Restore(st); !errors.Is(err, ErrInvalidSet) {
+		t.Fatalf("a confirmed set without figures = %v", err)
 	}
 }
 

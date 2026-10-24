@@ -59,12 +59,25 @@ func (f File) ArtifactRef() shared.ArtifactRef {
 	return r
 }
 
-// Content is the stored body of a set beside its columns: the tickets with their results, the student's acceptance
-// of a cost above the cap and the file. Stored as canonical JSON (Encode), read back with ParseContent.
+// Accepted is the estimate and the cap the confirm card showed when the student confirmed the run. A stored set is
+// checked against these figures, never against the current constants, so a later change of the pricing keeps every
+// stored set readable.
+type Accepted struct {
+	EstimateMicroUSD int64 `json:"estimate_micro_usd"`
+	CapMicroUSD      int64 `json:"cap_micro_usd"`
+}
+
+// overCap reports whether the run was above the cap the student saw.
+func (a Accepted) overCap() bool { return a.EstimateMicroUSD > a.CapMicroUSD }
+
+// Content is the stored body of a set beside its columns: the tickets with their results, the figures the student
+// confirmed, their acceptance of a cost above the cap and the file. Stored as canonical JSON (Encode), read back with
+// ParseContent.
 type Content struct {
-	Tickets      []Ticket `json:"tickets"`
-	CostAccepted bool     `json:"cost_accepted"`
-	File         *File    `json:"file"`
+	Tickets      []Ticket  `json:"tickets"`
+	Accepted     *Accepted `json:"accepted"`
+	CostAccepted bool      `json:"cost_accepted"`
+	File         *File     `json:"file"`
 }
 
 // StepKind is what the next step of a run does.
@@ -77,8 +90,9 @@ const (
 	StepAssemble StepKind = "assemble" // build and file the .docx
 )
 
-// Step is the next step of a run. Key is the idempotency key of a ticket step: a digest of the set, the ticket and its
-// title, so a result is recorded only for the step it was asked for.
+// Step is the next step of a run. Key is a staleness token of a ticket step, a digest of the set, the ticket and its
+// title: Record keeps a result only for the step it was asked for. It is not the Hub's idempotency key, which is the
+// key of the answer request (answer.Request.Key in cases/answering).
 type Step struct {
 	Kind   StepKind
 	Ticket int
@@ -115,21 +129,30 @@ func New(id shared.TicketSetID, sub shared.SubjectID, source shared.MaterialID, 
 	return s, nil
 }
 
-// Budget returns the estimate of the run of the set.
-func (s *Set) Budget() Budget { return Estimate(len(s.content.Tickets)) }
+// Budget returns the estimate of the run of the set: the figures the student confirmed once confirmed, else the
+// current estimate.
+func (s *Set) Budget() Budget {
+	n := len(s.content.Tickets)
+	if a := s.content.Accepted; a != nil {
+		return Budget{Tickets: n, EstimateMicroUSD: a.EstimateMicroUSD, CapMicroUSD: a.CapMicroUSD, OverCap: a.overCap()}
+	}
+	return Estimate(n)
+}
 
 // Confirm is the student's «Подтвердить» of a proposed set: the paid run may start. A run whose estimate is over the
-// cap needs acceptCost (the card says so). Errors: ErrInvalidTransition, ErrCostNotAccepted.
+// cap needs acceptCost (the card says so). The figures shown are kept with the set. Errors: ErrInvalidTransition,
+// ErrCostNotAccepted.
 func (s *Set) Confirm(acceptCost bool, now time.Time) error {
 	if s.status != StatusProposed {
 		return fmt.Errorf("%w: confirm a %s set", ErrInvalidTransition, s.status)
 	}
-	over := s.Budget().OverCap
-	if over && !acceptCost {
+	b := Estimate(len(s.content.Tickets))
+	if b.OverCap && !acceptCost {
 		return ErrCostNotAccepted
 	}
 	next := s.clone()
-	next.content.CostAccepted = over
+	next.content.Accepted = &Accepted{EstimateMicroUSD: b.EstimateMicroUSD, CapMicroUSD: b.CapMicroUSD}
+	next.content.CostAccepted = b.OverCap
 	return s.move(next, StatusConfirmed, now)
 }
 
@@ -215,6 +238,10 @@ func (c Content) clone() Content {
 			out.Tickets[i].Result = &r
 		}
 	}
+	if c.Accepted != nil {
+		a := *c.Accepted
+		out.Accepted = &a
+	}
 	if c.File != nil {
 		f := *c.File
 		out.File = &f
@@ -263,12 +290,25 @@ func (s *Set) validate() error {
 			return bad("a done set has every result")
 		}
 	}
-	over := s.Budget().OverCap
+	// The acceptance is checked against the stored figures, never the current constants (Accepted).
+	if a := s.content.Accepted; a == nil {
+		switch {
+		case s.content.CostAccepted:
+			return bad("a cost accepted without its figures")
+		case s.status != StatusProposed && s.status != StatusCancelled:
+			return bad("a run without the figures the student confirmed")
+		}
+	} else {
+		switch {
+		case s.status == StatusProposed:
+			return bad("figures of a set not confirmed")
+		case a.EstimateMicroUSD <= 0 || a.CapMicroUSD <= 0:
+			return bad("confirmed figures")
+		case s.content.CostAccepted != a.overCap():
+			return bad("a cost acceptance that does not match the confirmed figures")
+		}
+	}
 	switch {
-	case s.content.CostAccepted && !over:
-		return bad("a cost accepted under the cap")
-	case over && !s.content.CostAccepted && s.status != StatusProposed && s.status != StatusCancelled:
-		return bad("a run over the cap without the student's acceptance")
 	case (s.status == StatusDone) != (s.content.File != nil):
 		return bad("a file exactly when done")
 	}
