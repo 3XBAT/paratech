@@ -13,10 +13,10 @@ export const turnkeyLimits = { answerMax: 1000, requirementMax: 200, stepQuestio
 
 export const turnkeyTexts = {
   triageCaption: "Разбор задания",
-  triageLine: "Задание разбирается",
+  triageLine: "Задание ещё не разобрано.",
   retry: "Повторить",
   failedCaption: "Разбор задания",
-  failedText: "Задание не удалось разобрать. Требования можно уточнить вручную или повторить позже.",
+  failedText: "Задание не удалось разобрать.",
 
   questionsCaption: "Нужно уточнить",
   roundLine: (round: number) => `Уточнение ${Math.min(Math.max(round, 1), turnkeyLimits.maxRounds)} из ${turnkeyLimits.maxRounds}`,

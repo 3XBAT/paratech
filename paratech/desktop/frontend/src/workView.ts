@@ -154,14 +154,12 @@ export function isRunning(w: TurnkeyWork | null): boolean {
   return step === "outline" || step === "section" || step === "assemble";
 }
 
-/** A reader call is in flight (triage without a problem, TASK-130): the card re-reads the work until it is not. */
-export function isTriaging(w: TurnkeyWork | null): boolean {
-  return w !== null && w.writing === null && w.status === "triage" && w.problem === "";
-}
-
-/** The wait before the next read, or null to stop. Nothing is read again once a loaded work does not run. */
+/**
+ * The wait before the next read, or null to stop. Nothing is read again once a loaded work does not run. A stored
+ * triage is not polled: the core keeps no problem, so it cannot tell a call in flight from a call that is due («Повторить»).
+ */
 export function pollDelay(w: TurnkeyWork | null, failed: boolean): number | null {
-  if (w !== null && !isRunning(w) && !isTriaging(w)) {
+  if (w !== null && !isRunning(w)) {
     return null;
   }
   return failed ? retryMs : pollMs;
@@ -228,9 +226,21 @@ export function singleFlight(): (call: () => Promise<void>) => Promise<boolean> 
   };
 }
 
-/** The newest of two replies: an older version never replaces a newer one. */
+/**
+ * The newest of two replies: an older version never replaces a newer one. The core does not store the problem of a
+ * reader call, so a read of the same version without one keeps the problem the reply carried.
+ */
 export function acceptWork(current: TurnkeyWork | null, next: TurnkeyWork): TurnkeyWork {
-  return current !== null && next.version < current.version ? current : next;
+  if (current === null) {
+    return next;
+  }
+  if (next.version < current.version) {
+    return current;
+  }
+  if (next.version === current.version && next.problem === "" && current.problem !== "" && next.status === current.status) {
+    return { ...next, problem: current.problem, message: current.message };
+  }
+  return next;
 }
 
 // ---- Plan editor ----

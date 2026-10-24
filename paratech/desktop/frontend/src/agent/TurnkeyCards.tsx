@@ -77,13 +77,11 @@ export function TriageCard(props: { ctx: CardContext; caption: string; line: str
         </ResultLine>
       )}
       {ctx.errorLine}
-      {props.problem !== "" && (
-        <div className="ag-actions">
-          <Button size="sm" variant="primary" disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.retry(ctx.work.id)))}>
-            {turnkeyTexts.retry}
-          </Button>
-        </div>
-      )}
+      <div className="ag-actions">
+        <Button size="sm" variant="primary" disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.retry(ctx.work.id)))}>
+          {turnkeyTexts.retry}
+        </Button>
+      </div>
     </section>
   );
 }
@@ -185,10 +183,11 @@ export function QuestionsCard(props: { ctx: CardContext }) {
 
 // ---- «Как понято задание» ----
 
-export function UnderstandingCard(props: { ctx: CardContext }) {
+/** `startEditing` opens the editor at once (the tests render the edit mode statically). */
+export function UnderstandingCard(props: { ctx: CardContext; startEditing?: boolean }) {
   const { ctx } = props;
   const { work } = ctx;
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(props.startEditing === true);
   const [draft, setDraft] = useState<WorkCardFields>(() => cardDraft(work.card));
   const base = useId();
 

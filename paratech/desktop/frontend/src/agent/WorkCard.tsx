@@ -18,7 +18,6 @@ import {
   editorFromSections,
   isEdited,
   isRunning,
-  isTriaging,
   limits,
   moveItem,
   noteOf,
@@ -376,7 +375,7 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
     [apply],
   );
 
-  const running = isRunning(work) || isTriaging(work);
+  const running = isRunning(work);
   useEffect(
     () =>
       startPolling({

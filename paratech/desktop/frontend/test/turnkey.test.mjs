@@ -24,7 +24,7 @@ import {
   turnkeyLimits,
   turnkeyTexts,
 } from "../.test-build/turnkeyView.js";
-import { isTriaging, pollDelay, workCardModel } from "../.test-build/workView.js";
+import { acceptWork, pollDelay, workCardModel } from "../.test-build/workView.js";
 import { WorkBody } from "../.test-build/agent/WorkCard.js";
 import { HelperCard, QuestionsCard, UnderstandingCard } from "../.test-build/agent/TurnkeyCards.js";
 
@@ -138,12 +138,23 @@ test("turnkeyCardModel maps every status without a writing", () => {
   assert.equal(workCardModel(work({ status: "confirmed" })).type, "start");
 });
 
-test("a triage in flight is polled, one with a problem waits for «Повторить»", () => {
-  assert.equal(isTriaging(work({ status: "triage" })), true);
-  assert.equal(isTriaging(work({ status: "triage", problem: "offline", message: "Нет связи" })), false);
-  assert.equal(isTriaging(work({ status: "review" })), false);
-  assert.equal(pollDelay(work({ status: "triage" }), false), 3000);
+test("a stored triage is not polled indefinitely", () => {
+  assert.equal(pollDelay(work({ status: "triage" }), false), null);
+  assert.equal(pollDelay(work({ status: "triage", problem: "offline", message: "Нет связи" }), false), null);
   assert.equal(pollDelay(work({ status: "questions", questions: [choice] }), false), null);
+});
+
+test("a reply with a problem keeps it and «Повторить» over a same-version read without one", () => {
+  const reply = work({ status: "triage", version: 3, problem: "offline", message: "Нет связи с paratech" });
+  const read = work({ status: "triage", version: 3 });
+  const kept = acceptWork(reply, read);
+  assert.equal(kept.problem, "offline");
+  assert.equal(kept.message, "Нет связи с paratech");
+  const out = render(kept);
+  assert.ok(out.includes("Нет связи с paratech") && out.includes(turnkeyTexts.retry));
+  // A newer version or another status drops the old problem.
+  assert.equal(acceptWork(reply, work({ status: "triage", version: 4 })).problem, "");
+  assert.equal(acceptWork(reply, work({ status: "questions", version: 3 })).problem, "");
 });
 
 // ---- Questions ----
@@ -191,8 +202,9 @@ test("a failed answer keeps the card and shows the problem of the reader call", 
   const failed = work({ status: "triage", problem: "offline", message: "Нет связи с paratech: разбор не завершён. Повторите позже." });
   const out = render(failed);
   assert.ok(out.includes("Нет связи с paratech") && out.includes(turnkeyTexts.retry));
-  const waiting = render(work({ status: "triage" }));
-  assert.ok(waiting.includes(turnkeyTexts.triageLine) && !waiting.includes(turnkeyTexts.retry));
+  // A stored triage without a problem means a reader call is due: «Повторить» is offered.
+  const stored = render(work({ status: "triage" }));
+  assert.ok(stored.includes(turnkeyTexts.triageLine) && stored.includes(turnkeyTexts.retry));
   const err = render(work({ status: "questions", questionRound: 1, questions: [choice] }), fakeApi(), { error: "Не удалось выполнить. Попробуйте ещё раз.", onError: noop });
   assert.ok(err.includes('role="alert"') && err.includes("Не удалось выполнить"));
   assert.ok(render(work({ status: "failed" })).includes(turnkeyTexts.failedText));
@@ -271,11 +283,25 @@ test("a failed save does not confirm; a failed confirm re-reads the saved work",
   assert.equal(r3.fresh, null);
 });
 
-test("the editor renders an input per requirement and a work type list", () => {
-  // The static render shows the view mode; the editor controls are checked through the card in edit state below.
+test("the view mode of the card has no inputs", () => {
   const ctx = { work: work({ status: "review", hasCard: true }), api: fakeApi(), busy: false, run: async () => undefined, step: async () => undefined, onWork: noop, errorLine: false };
   const out = renderToStaticMarkup(h(UnderstandingCard, { ctx }));
   assert.ok(!out.includes("<select") && !out.includes("<input"));
+});
+
+test("the editor renders an input per requirement, a work type list with the unknown type, aria-invalid and a disabled Save", () => {
+  const ctxOf = (c) => ({ work: work({ status: "review", hasCard: true, card: c }), api: fakeApi(), busy: false, run: async () => undefined, step: async () => undefined, onWork: noop, errorLine: false });
+  const out = renderToStaticMarkup(h(UnderstandingCard, { ctx: ctxOf(card), startEditing: true }));
+  assert.equal((out.match(/<input/g) ?? []).length, 6);
+  assert.equal((out.match(/<select/g) ?? []).length, 1);
+  assert.ok(out.includes('value="referat" selected=""') || /<option[^>]*value="referat"[^>]*selected/.test(out) || out.includes(">Реферат<"));
+  assert.ok(!out.includes("aria-invalid"));
+  assert.ok(/<button[^>]*disabled=""[^>]*>[^<]*(<[^>]*>)*[^<]*Сохранить/.test(out), out);
+
+  const odd = renderToStaticMarkup(h(UnderstandingCard, { ctx: ctxOf({ ...card, workType: "mystery", volume: "я".repeat(300) }), startEditing: true }));
+  assert.ok(odd.includes('value="mystery"') && odd.includes(turnkeyTexts.notSet));
+  assert.equal((odd.match(/aria-invalid="true"/g) ?? []).length, 2);
+  assert.ok(odd.includes(turnkeyTexts.lineTooLong));
 });
 
 // ---- Helper ----
