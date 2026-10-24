@@ -239,7 +239,7 @@ func (e *writeEnv) job(t *testing.T, id shared.JobID) *job.Job {
 }
 
 // run runs the steps of job id until it ends; it returns the result of the last step and the steps run.
-func (e *writeEnv) run(t *testing.T, id shared.JobID, maxSteps int) (error, int) {
+func (e *writeEnv) run(t *testing.T, id shared.JobID, maxSteps int) (int, error) {
 	t.Helper()
 	j := e.job(t, id)
 	for step := 1; step <= maxSteps; step++ {
@@ -250,8 +250,8 @@ func (e *writeEnv) run(t *testing.T, id shared.JobID, maxSteps int) (error, int)
 					t.Fatal(cerr)
 				}
 			}
-			return err, step
+			return step, err
 		}
 	}
-	return errors.New("still running"), maxSteps
+	return maxSteps, errors.New("still running")
 }

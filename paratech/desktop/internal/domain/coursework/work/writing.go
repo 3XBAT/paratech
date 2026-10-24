@@ -363,7 +363,7 @@ func (w *Work) ContentKey() string {
 	h := sha256.New()
 	h.Write([]byte(w.writing.Topic))
 	for _, s := range w.writing.Sections {
-		fmt.Fprintf(h, "\x00%d\x00%d\x00%s\x00%d", s.Number, s.Revision, s.Title, s.Words)
+		h.Write(fmt.Appendf(nil, "\x00%d\x00%d\x00%s\x00%d", s.Number, s.Revision, s.Title, s.Words))
 	}
 	return fmt.Sprintf("c:%x", h.Sum(nil)[:16])
 }

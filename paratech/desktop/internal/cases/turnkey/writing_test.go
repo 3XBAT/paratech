@@ -56,7 +56,7 @@ func TestWritingRunsToTheFile(t *testing.T) {
 		t.Fatalf("edit while the job runs: %v", err)
 	}
 
-	err, steps := e.run(t, st.Job, 10)
+	steps, err := e.run(t, st.Job, 10)
 	if err != nil || steps != 5 { // the outline, three sections, the file
 		t.Fatalf("run = %v after %d steps", err, steps)
 	}
@@ -167,7 +167,7 @@ func TestRegenerateWritesOnlyTheSection(t *testing.T) {
 	ctx := t.Context()
 	id := e.confirmed(t)
 	st, _ := e.svc.StartWriting(ctx, id)
-	if err, _ := e.run(t, st.Job, 10); err != nil {
+	if _, err := e.run(t, st.Job, 10); err != nil {
 		t.Fatal(err)
 	}
 	paid := e.writer.paid()
@@ -176,7 +176,7 @@ func TestRegenerateWritesOnlyTheSection(t *testing.T) {
 	if err != nil || !re.Created || re.Job == st.Job || re.View.Status != work.StatusWriting {
 		t.Fatalf("Regenerate = %+v, %v", re, err)
 	}
-	if err, steps := e.run(t, re.Job, 10); err != nil || steps != 2 {
+	if steps, err := e.run(t, re.Job, 10); err != nil || steps != 2 {
 		t.Fatalf("run = %v after %d steps", err, steps)
 	}
 	if e.writer.paid() != paid+1 {
@@ -272,7 +272,7 @@ func TestHostileTextsStayData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err, _ := e.run(t, st.Job, 10); err != nil {
+	if _, err := e.run(t, st.Job, 10); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range e.writer.reqs {

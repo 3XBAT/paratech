@@ -33,7 +33,7 @@ const (
 	opWriteRefused = "turnkey: writing answer refused"
 	opWriteStale   = "turnkey: writing answer dropped, the step is not due any more"
 	opWriteStopped = "turnkey: writing stopped"
-	opWriteDone    = "turnkey: work written"
+	opWriteDone    = "turnkey: work written" //nolint:gosec // G101 false positive: a log line, not a credential
 )
 
 // StartWriting starts (or resumes) the writing of a confirmed work as one work_writing job (TASK-131): the outline,
