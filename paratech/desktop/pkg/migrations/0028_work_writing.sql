@@ -6,7 +6,7 @@
 -- (TestMigrationMatchesContractSchema).
 
 -- +goose Up
--- works.writing (migration 0027): the writing state of a work in its canonical JSON (work.Writing.Encode), read back
+-- works.writing (migration 0028): the writing state of a work in its canonical JSON (work.Writing.Encode), read back
 -- with work.ParseWriting and checked by the aggregate; NULL before the writing starts. Saved with the work under its
 -- version.
 ALTER TABLE works ADD COLUMN writing TEXT CHECK (writing IS NULL OR json_valid(writing));

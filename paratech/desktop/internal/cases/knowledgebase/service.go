@@ -169,6 +169,32 @@ func (s *Service) Search(ctx context.Context, query string) (SearchResult, error
 	return out, nil
 }
 
+// Texts returns the lessons of a library subject with everything searched of them, newest first, for the answers
+// with citations (TASK-118); a zero subject gives every lesson of the base. Like Search it reads at query time and
+// leaves out a section that cannot be read.
+func (s *Service) Texts(ctx context.Context, subject shared.SubjectID) ([]kb.LessonText, error) {
+	all, err := s.all(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lessons := kb.Newest(all)
+	if subject != "" {
+		lessons = kb.LessonsOf(all, kb.LibraryKey(subject))
+	}
+	out := make([]kb.LessonText, 0, len(lessons))
+	for _, l := range lessons {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		doc, err := s.document(ctx, l)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, kb.LessonText{Lesson: l, Document: doc})
+	}
+	return out, nil
+}
+
 // SubjectFileName returns the file name the save dialog proposes for the subject with key: the subject, safe for
 // Windows, with ".md". A subject without lessons is ErrSubjectNotFound.
 func (s *Service) SubjectFileName(ctx context.Context, key string) (string, error) {

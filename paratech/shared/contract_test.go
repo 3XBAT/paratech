@@ -690,9 +690,14 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog v1 (design §2.3, ADR-0021). Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115)
-// must match it.
-const toolCatalogFile = "testdata/tool_catalog_v1.json"
+// Golden tool catalog (design §2.3, ADR-0021), the current version 2 (TASK-118: question and search query of up to 500
+// characters). Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Version 1 is frozen:
+// the Hub still serves it to clients of that version.
+const (
+	toolCatalogVersion = 2
+	toolCatalogFile    = "testdata/tool_catalog_v2.json"
+	toolCatalogV1File  = "testdata/tool_catalog_v1.json"
+)
 
 type catalogArgument struct {
 	Name     string   `json:"name"`
@@ -719,8 +724,9 @@ type toolCatalog struct {
 var (
 	toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	toolClasses     = []string{"R", "U", "C", "UI"}
-	// Argument types of tools that act or read: only IDs, enums, dates and short labels (ADR-0022).
-	actionArgTypes = []string{"id", "ids", "date", "enum", "label"}
+	// Argument types of tools that act or read: only IDs, enums, dates, short labels and the student's question or
+	// search text (ADR-0022, TASK-118).
+	actionArgTypes = []string{"id", "ids", "date", "enum", "label", "query"}
 	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023).
 	uiArgTypes = []string{"text", "text_list", "plan_steps", "questions"}
 	// Class C tools only name trusted local objects: the confirm card shows trusted data, never model text.
@@ -732,20 +738,25 @@ var (
 
 func loadToolCatalog(t *testing.T) toolCatalog {
 	t.Helper()
-	raw, err := os.ReadFile(toolCatalogFile)
+	return loadToolCatalogFile(t, toolCatalogFile)
+}
+
+func loadToolCatalogFile(t *testing.T, file string) toolCatalog {
+	t.Helper()
+	raw, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatalf("read %s: %v", toolCatalogFile, err)
+		t.Fatalf("read %s: %v", file, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var c toolCatalog
 	if err := dec.Decode(&c); err != nil {
-		t.Fatalf("decode %s: %v", toolCatalogFile, err)
+		t.Fatalf("decode %s: %v", file, err)
 	}
 	return c
 }
 
-// pinnedTools is every tool of catalog v1 with its class. Adding or removing a tool, or moving one to another class
+// pinnedTools is every tool of the current catalog with its class. Adding or removing a tool, or moving one to another class
 // (for example demoting propose_send from C), must be a conscious edit here too.
 var pinnedTools = map[string]string{
 	"list_subjects":            "R",
@@ -802,8 +813,8 @@ func validateCatalog(c toolCatalog) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
-	if c.CatalogVersion != 1 {
-		add("catalog_version = %d, want 1", c.CatalogVersion)
+	if c.CatalogVersion != toolCatalogVersion {
+		add("catalog_version = %d, want %d", c.CatalogVersion, toolCatalogVersion)
 	}
 	declared := slices.Sorted(maps.Keys(c.Types))
 	if want := slices.Sorted(slices.Values(slices.Concat(actionArgTypes, uiArgTypes))); !slices.Equal(declared, want) {
@@ -885,10 +896,26 @@ func validateCatalog(c toolCatalog) []string {
 	return problems
 }
 
-func TestToolCatalogV1(t *testing.T) {
+// queryArguments are the only arguments of type query: the student's question and search text, at most 500
+// characters (TASK-118). A query is longer free text than a label, so a new one must be a conscious edit here.
+var queryArguments = []string{"answer_question.question", "search.query"}
+
+func TestToolCatalog(t *testing.T) {
 	c := loadToolCatalog(t)
 	for _, p := range validateCatalog(c) {
 		t.Error(p)
+	}
+	var queries []string
+	for _, tool := range c.Tools {
+		for _, a := range tool.Arguments {
+			if a.Type == "query" {
+				queries = append(queries, tool.Name+"."+a.Name)
+			}
+		}
+	}
+	slices.Sort(queries)
+	if !slices.Equal(queries, queryArguments) || !strings.Contains(c.Types["query"], "500 characters") {
+		t.Errorf("query arguments %v (%q), want %v of at most 500 characters", queries, c.Types["query"], queryArguments)
 	}
 
 	got := map[string]string{}
@@ -905,6 +932,26 @@ func TestToolCatalogV1(t *testing.T) {
 			if _, ok := pinnedTools[name]; !ok {
 				t.Errorf("tool %s is not pinned: add it to pinnedTools consciously", name)
 			}
+		}
+	}
+}
+
+// TestToolCatalogV1IsFrozen: catalog v1 stays as released: version 1, the same tools and classes, labels where v2 has
+// queries; everything else equal to v2.
+func TestToolCatalogV1IsFrozen(t *testing.T) {
+	v1, v2 := loadToolCatalogFile(t, toolCatalogV1File), loadToolCatalog(t)
+	if v1.CatalogVersion != 1 || len(v1.Tools) != len(v2.Tools) || v1.Types["query"] != "" {
+		t.Fatalf("v1: version %d, %d tools, query type %q", v1.CatalogVersion, len(v1.Tools), v1.Types["query"])
+	}
+	for i, tool := range v2.Tools {
+		for j, a := range tool.Arguments {
+			if a.Type == "query" {
+				a.Type = "label"
+			}
+			tool.Arguments[j] = a
+		}
+		if fmt.Sprint(tool) != fmt.Sprint(v1.Tools[i]) {
+			t.Errorf("tool %d: v1 %+v, v2 %+v", i, v1.Tools[i], tool)
 		}
 	}
 }

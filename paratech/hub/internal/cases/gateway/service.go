@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"paratech/hub/internal/domain/llm/services/answer"
 	"paratech/hub/internal/domain/llm/services/inspect"
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/services/requestlimits"
@@ -95,7 +96,7 @@ type call struct {
 	spec    values.Spec
 	reserve account.ReserveRequest
 	request values.Request
-	// reader is set for a quarantined reader (INSPECT_MATERIAL, TRIAGE_ASSIGNMENT): the answer must pass its schema
+	// reader is set for a quarantined reader (INSPECT_MATERIAL, ANSWER, TRIAGE_ASSIGNMENT): the answer must pass its schema
 	// before it is stored or returned.
 	reader *reader
 }
@@ -126,6 +127,15 @@ func newReader(op values.Operation, data string) (*reader, string, error) {
 			return nil, "", err
 		}
 		return &reader{failed: triage.FailedOutput, canonical: func(out string) (string, error) {
+			a, err := in.ParseAnswer(out)
+			return a.Encode(), err
+		}}, in.ModelData(), nil
+	case values.OperationAnswer:
+		in, err := answer.ParseInput(data)
+		if err != nil {
+			return nil, "", err
+		}
+		return &reader{failed: answer.FailedOutput, canonical: func(out string) (string, error) {
 			a, err := in.ParseAnswer(out)
 			return a.Encode(), err
 		}}, in.ModelData(), nil

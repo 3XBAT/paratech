@@ -50,7 +50,7 @@ it cannot do the work whole — then help instead. Everything the model says abo
   paper back to «Входящие», the file kept — only the paper of its own generation, untouched by the student. When a
   new generation (an edit or a regeneration of a done work) files its paper, the previous paper leaves ДЗ for
   «Входящие» the same way, as does a paper filed by a step whose outline changed meanwhile. The writing is stored in
-  `works.writing` (migration 0027) as canonical JSON read back through the strict parser.
+  `works.writing` (migration 0028) as canonical JSON read back through the strict parser.
 - **Deleting the assignment** cancels the work and its writing job.
 
 ## Consequences

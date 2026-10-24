@@ -115,7 +115,7 @@ func TestStepSendsExactlyTheContractFields(t *testing.T) {
 	}
 
 	want := &hubv1.AgentStepRequest{
-		IdempotencyKey: "ag:th1:1:2", ThreadId: "th1", Profile: hubv1.AgentProfile_AGENT_PROFILE_PANEL, CatalogVersion: 1,
+		IdempotencyKey: "ag:th1:1:2", ThreadId: "th1", Profile: hubv1.AgentProfile_AGENT_PROFILE_PANEL, CatalogVersion: 2,
 		Base: &hubv1.AgentBase{
 			Subjects: []*hubv1.AgentSubject{{SubjectId: "s1", Name: "Физика"}}, Today: "2026-10-22", TimeZone: "Europe/Moscow",
 		},

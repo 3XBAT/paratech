@@ -394,7 +394,7 @@ func evalBaseline(typ string, enum []string) any {
 		return "2026-10-22"
 	case "enum":
 		return enum[0]
-	case "label", "text":
+	case "label", "query", "text":
 		return "a"
 	case "text_list":
 		return []string{"a"}
@@ -419,10 +419,10 @@ func evalInjected(typ, text string) any {
 // TestAgentEvalHubInjectionSweep puts each untrusted text into every argument of every tool and runs the Hub's check
 // of returned calls. Enum and date arguments never take it; an ID argument takes it only when it has the shape of an
 // ID (no spaces): such a call reaches the desktop, whose typed provenance check refuses it
-// (desktop/tests/agent_injection_test.go, same fixtures). Labels, card texts and plan step arguments are free text
-// for the Hub; the desktop checks them.
+// (desktop/tests/agent_injection_test.go, same fixtures). Labels, queries, card texts and plan step arguments are free
+// text for the Hub; the desktop checks them. The sweep runs on the current catalog (v2).
 func TestAgentEvalHubInjectionSweep(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v1.json"))
+	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v2.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestAgentEvalHubInjectionSweep(t *testing.T) {
 	if err := json.Unmarshal(raw, &cat); err != nil {
 		t.Fatal(err)
 	}
-	_, catalog, err := testenv.PanelV1()
+	_, catalog, err := testenv.Panel(2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,12 +528,13 @@ func TestAgentEvalHubInjectionThroughTheStep(t *testing.T) {
 // --- INSPECT_MATERIAL reader (TASK-122) -----------------------------------------------------------------------------
 
 // readerHub is the public listener with Complete wired to the real gateway use case and the embedded
-// ops/inspect_material and ops/triage_assignment prompts; the provider and the quota store are fakes.
+// ops/inspect_material, ops/triage_assignment and ops/answer prompts; the provider and the quota store are fakes.
 type readerHub struct {
 	provider     *testenv.FakeProvider
 	store        *testenv.QuotaStore
 	prompt       string
 	triagePrompt string
+	answerPrompt string
 	client       hubv1connect.GatewayServiceClient
 	key          string
 	owner        shared.APIKeyID
@@ -559,8 +560,12 @@ func newReaderHub(t *testing.T) *readerHub {
 	if err != nil {
 		t.Fatal(err)
 	}
+	answerVersion, answerPrompt, err := prompts.Op(string(values.OperationAnswer))
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := &readerHub{provider: testenv.NewFakeProvider(), store: testenv.NewQuotaStore(), prompt: string(prompt),
-		triagePrompt: string(triagePrompt), key: issued.Key, owner: shared.APIKeyID(issued.ID)}
+		triagePrompt: string(triagePrompt), answerPrompt: string(answerPrompt), key: issued.Key, owner: shared.APIKeyID(issued.ID)}
 	models, err := modelallowlist.New([]modelallowlist.Entry{
 		{Alias: "default", Model: "claude-strong", MaxOutput: 4096},
 		{Alias: "planner", Model: "claude-planner", MaxOutput: 512},
@@ -577,6 +582,7 @@ func newReaderHub(t *testing.T) *readerHub {
 		ServerPrompts: map[values.Operation]gateway.ServerPrompt{
 			values.OperationInspectMaterial:  {Alias: "planner", Version: fmt.Sprintf("v%d", version), Text: h.prompt},
 			values.OperationTriageAssignment: {Alias: "default", Version: fmt.Sprintf("v%d", triageVersion), Text: h.triagePrompt},
+			values.OperationAnswer:           {Alias: "default", Version: fmt.Sprintf("v%d", answerVersion), Text: h.answerPrompt},
 		},
 	})
 	if err != nil {

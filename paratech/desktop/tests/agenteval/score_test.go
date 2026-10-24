@@ -11,7 +11,7 @@ import (
 
 func catalogClasses(t *testing.T) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", "tool_catalog_v1.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", "tool_catalog_v2.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

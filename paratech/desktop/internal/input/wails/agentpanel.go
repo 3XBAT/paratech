@@ -120,7 +120,8 @@ type AgentPlanStepView struct {
 }
 
 // AgentArgView is one argument of a plan step. Type is id (idKind, value), ids (idKind, values), date (value,
-// YYYY-MM-DD), enum (value) or label (value: a short text, plain text only).
+// YYYY-MM-DD), enum (value), label (value: a short text, plain text only) or query (value: the student's question or
+// search text, up to 500 characters, plain text only).
 type AgentArgView struct {
 	Name   string   `json:"name"`
 	Type   string   `json:"type"`
@@ -222,7 +223,7 @@ func planView(c values.PlanCard) *AgentPlanView {
 	return &AgentPlanView{Summary: string(c.Summary), Steps: steps, Notes: texts(c.Notes)}
 }
 
-// argView maps one plan step argument; a plan step holds only ids, dates, enums and labels.
+// argView maps one plan step argument; a plan step holds only ids, dates, enums, labels and queries.
 func argView(args values.Args, name string) AgentArgView {
 	v := AgentArgView{Name: name, Values: []string{}}
 	if r, ok := args.ID(name); ok {
@@ -247,6 +248,9 @@ func argView(args values.Args, name string) AgentArgView {
 	}
 	if l, ok := args.Label(name); ok {
 		v.Type, v.Value = "label", string(l)
+	}
+	if q, ok := args.Query(name); ok {
+		v.Type, v.Value = "query", string(q)
 	}
 	return v
 }

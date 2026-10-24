@@ -6,8 +6,8 @@ import (
 	"slices"
 )
 
-// PlanStep is one planned call of a plan card: a tool and its arguments. Only ID, date, enum and label arguments may
-// appear, so the desktop renders the step from templates. A step carries every required argument (and one of each
+// PlanStep is one planned call of a plan card: a tool and its arguments. Only ID, date, enum, label and query
+// arguments may appear, so the desktop renders the step from templates. A step carries every required argument (and one of each
 // one-of pair) except an ID of a subject or folder that an earlier step of the plan creates; such IDs are deferred. A
 // later call matches the step when it has the same tool and exactly the step's arguments with the same values, plus
 // only deferred IDs, so an approved step is never a wildcard.
@@ -97,7 +97,7 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 				args[name] = ids
 			case ArgDate:
 				args[name] = v.date.String()
-			case ArgEnum, ArgLabel:
+			case ArgEnum, ArgLabel, ArgQuery:
 				args[name] = v.str
 			default:
 				return "", fmt.Errorf("%w: plan step argument %q cannot be stored", ErrInvalidArguments, name)
@@ -116,7 +116,7 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 func DecodePlanSteps(s string) ([]PlanStep, error) { return parsePlanSteps(json.RawMessage(s)) }
 
 // planStepArgTypes are the argument types a plan step may carry.
-var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgEnum, ArgLabel}
+var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgEnum, ArgLabel, ArgQuery}
 
 func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) {
 	items, err := decodeArray(raw, 1, MaxPlanSteps)

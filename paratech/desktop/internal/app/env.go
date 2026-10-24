@@ -62,6 +62,7 @@ type idSource interface {
 	NewThreadID() shared.ThreadID
 	NewActionID() shared.ActionID
 	NewWorkID() shared.WorkID
+	NewAnswerID() shared.AnswerID
 }
 
 // secretStore is a credential store of one service: what senddelivery.CredentialStore writes and what the adapter of

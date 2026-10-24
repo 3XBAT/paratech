@@ -27,6 +27,7 @@ import (
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/cases/answering"
 	"paratech/desktop/internal/cases/googlesignin"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
@@ -387,9 +388,18 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 
+	// Answers with citations (TASK-118): passages of the knowledge base, the ANSWER reader on the Hub, the answers kept
+	// locally for their cards.
+	answers, err := answering.New(answering.Deps{
+		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Clock: e.clock, IDs: e.ids, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: answers: %w", err)
+	}
+
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
-		rerunner: rerunner, materials: materialJobs, turnkey: works,
+		rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers,
 	}, log); err != nil {
 		return err
 	}
@@ -417,6 +427,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
 		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},
 		Turnkey:      works,
+		Answers:      answers,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err

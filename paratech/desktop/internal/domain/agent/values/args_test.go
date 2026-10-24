@@ -55,7 +55,9 @@ func TestParseCall(t *testing.T) {
 		{name: "short date", tool: "edit_due", args: `{"assignment":"a1","due":"2026-1-1"}`, wantErr: ErrInvalidArguments},
 		{name: "date with time", tool: "edit_due", args: `{"assignment":"a1","due":"2026-11-03T10:00"}`, wantErr: ErrInvalidArguments},
 		{name: "to before from", tool: "find_lessons", args: `{"from":"2026-10-31","to":"2026-10-01"}`, wantErr: ErrInvalidArguments},
-		{name: "label too long", tool: "search", args: `{"query":"` + long + `"}`, wantErr: ErrInvalidArguments},
+		// search.query is a query of up to 500 characters since catalog v2 (TASK-118); instruction stays a label.
+		{name: "label too long", tool: "generate_draft", args: `{"assignment":"a1","instruction":"` + long + `"}`, wantErr: ErrInvalidArguments},
+		{name: "query too long", tool: "search", args: `{"query":"` + strings.Repeat("я", MaxQueryRunes+1) + `"}`, wantErr: ErrInvalidArguments},
 		{name: "label with newline", tool: "search", args: `{"query":"a\nb"}`, wantErr: ErrInvalidArguments},
 		{name: "label with bidi override", tool: "search", args: `{"query":"a\u202eb"}`, wantErr: ErrInvalidArguments},
 		{name: "label with zero width", tool: "search", args: `{"query":"a\u200bb"}`, wantErr: ErrInvalidArguments},

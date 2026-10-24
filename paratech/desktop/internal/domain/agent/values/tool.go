@@ -5,13 +5,13 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v1.json).
-const CatalogVersion = 1
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v2.json).
+const CatalogVersion = 2
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
 
-// Tools of catalog v1, in catalog order.
+// Tools of catalog v2, in catalog order.
 const (
 	ToolListSubjects           Tool = "list_subjects"
 	ToolFindLessons            Tool = "find_lessons"
@@ -79,6 +79,7 @@ const (
 	ArgDate      ArgType = "date"
 	ArgEnum      ArgType = "enum"
 	ArgLabel     ArgType = "label"
+	ArgQuery     ArgType = "query" // the student's question or search text (catalog v2)
 	ArgText      ArgType = "text"
 	ArgTextList  ArgType = "text_list"
 	ArgPlanSteps ArgType = "plan_steps"
@@ -165,7 +166,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v1 (shared/testdata/tool_catalog_v1.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v2 (shared/testdata/tool_catalog_v2.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},
@@ -179,8 +180,8 @@ var catalog = []ToolSpec{
 	}},
 	{tool: ToolJobStatus, args: []ArgSpec{{Name: "ids", Type: ArgIDs, Required: true, Kind: KindJob}}},
 	{tool: ToolDeliveryStatus, args: []ArgSpec{id("assignment", KindAssignment, true)}},
-	{tool: ToolSearch, args: []ArgSpec{typed("query", ArgLabel, true), enum("scope", false, "subject", "all")}},
-	{tool: ToolAnswerQuestion, args: []ArgSpec{typed("question", ArgLabel, true), enum("scope", false, "subject", "all")}},
+	{tool: ToolSearch, args: []ArgSpec{typed("query", ArgQuery, true), enum("scope", false, "subject", "all")}},
+	{tool: ToolAnswerQuestion, args: []ArgSpec{typed("question", ArgQuery, true), enum("scope", false, "subject", "all")}},
 	{tool: ToolInspectUpload, args: []ArgSpec{id("upload", KindUpload, true)}},
 	{tool: ToolCreateSubject, args: []ArgSpec{persistent("name", true), persistent("semester", false)}},
 	{tool: ToolCreateFolder, args: []ArgSpec{id("subject", KindSubject, true), persistent("name", true)}},
