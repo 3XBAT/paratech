@@ -21,7 +21,7 @@ func TestMatches(t *testing.T) {
 		{"dash variants", "Производная функции - это предел", true},
 		{"ellipsis and quotation marks at the ends", "«…предел отношения приращения…»", true},
 		{"final period the text lacks there", "предел отношения.", true},
-		{"zero-width character in the quote", "пре​дел отношения", true},
+		{"zero-width character in the quote", "пре\u200bдел отношения", true},
 
 		{"paraphrase", "производная есть предел отношения", false},
 		{"another word inside", "предел большого отношения", false},
@@ -43,7 +43,7 @@ func TestMatches(t *testing.T) {
 func TestNormalize(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"  Ёлка \n\t ЁЖ  ", "елка еж"},
-		{"a​‮b", "ab"},
+		{"a\u200b\u202eb", "ab"},
 		{"x — y – z", "x - y - z"},
 		{"", ""},
 	}

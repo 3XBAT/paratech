@@ -22,7 +22,7 @@ const (
 	// transcriptWindow is how many consecutive transcript segments make one passage.
 	transcriptWindow = 6
 	// leadRunes is how much text before the first match a cut passage keeps.
-	leadRunes = 300
+	leadRunes    = 300
 	minTermRunes = 3
 )
 

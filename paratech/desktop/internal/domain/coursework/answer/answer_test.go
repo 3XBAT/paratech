@@ -76,7 +76,7 @@ func TestNewRequestRefuses(t *testing.T) {
 		{"blank question", "   ", excerpts(), ErrInvalidQuestion},
 		{"long question", strings.Repeat("я", MaxQuestionRunes+1), excerpts(), ErrInvalidQuestion},
 		{"two lines", "Что такое\nпроизводная?", excerpts(), ErrInvalidQuestion},
-		{"bidi override", "Что‮такое", excerpts(), ErrInvalidQuestion},
+		{"bidi override", "Что\u202eтакое", excerpts(), ErrInvalidQuestion},
 		{"no fragments", "Что такое ряд?", nil, ErrInvalidRequest},
 		{"too many fragments", "Что такое ряд?", many, ErrInvalidRequest},
 		{"fragment too big", "Что такое ряд?", big, ErrInvalidRequest},

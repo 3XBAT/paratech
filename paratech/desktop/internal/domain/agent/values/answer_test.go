@@ -28,7 +28,7 @@ func TestQueryArguments(t *testing.T) {
 			"too long":   long + "я",
 			"blank":      "   ",
 			"two lines":  `a\nb`,
-			"bidi":       "a‮b",
+			"bidi":       "a\u202eb",
 			"not string": "",
 		} {
 			raw := `{"` + tc.arg + `":"` + v + `"}`

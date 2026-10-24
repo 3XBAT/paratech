@@ -51,7 +51,7 @@ func TestPassages(t *testing.T) {
 		Segments: []Segment{
 			{StartMs: 0, Text: "Сегодня ряды."}, {StartMs: 1000, Text: "Производной"}, {StartMs: 2000, Text: "здесь"},
 			{StartMs: 3000, Text: "нет"}, {StartMs: 4000, Text: "совсем"}, {StartMs: 5000, Text: "ничего"},
-			{StartMs: 6000, Text: "А производная функции‮ снова"},
+			{StartMs: 6000, Text: "А производная функции\u202e снова"},
 		},
 	})
 	got := Passages("Что такое производная функции?", []LessonText{older, newer})
