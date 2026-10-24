@@ -10,6 +10,13 @@ import (
 	"paratech/desktop/internal/domain/coursework/answer"
 )
 
+// Invisible characters a hostile list may carry, built from their code points so the source shows none.
+const (
+	zeroWidth    = string(rune(0x200B))
+	bidiOverride = string(rune(0x202E))
+	noBreakSpace = string(rune(0x00A0))
+)
+
 func TestParseListFormats(t *testing.T) {
 	tests := []struct {
 		name string
@@ -53,7 +60,7 @@ func TestParseListFormats(t *testing.T) {
 		},
 		{
 			name: "control, zero-width and bidi characters are removed, spaces collapsed",
-			text: "1.\tПонятие​‮  права\x07\r\n2. Нормы права",
+			text: "1.\tПонятие" + zeroWidth + bidiOverride + "  права\x07\r\n2. Нормы" + noBreakSpace + "права",
 			want: []Item{{1, "Понятие права"}, {2, "Нормы права"}},
 		},
 		{

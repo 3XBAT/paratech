@@ -79,7 +79,7 @@ func TestNewRefusesBadInput(t *testing.T) {
 		{"bad id", "", "sub1", items(1)},
 		{"numbers not rising", "ts1", "sub1", []Item{{2, "а"}, {1, "б"}}},
 		{"title on two lines", "ts1", "sub1", []Item{{1, "а\nб"}}},
-		{"title with a format character", "ts1", "sub1", []Item{{1, "а‮б"}}},
+		{"title with a format character", "ts1", "sub1", []Item{{1, "а" + string(rune(0x202E)) + "б"}}},
 		{"title too long", "ts1", "sub1", []Item{{1, strings.Repeat("я", MaxTitleRunes+1)}}},
 	}
 	for _, tt := range tests {

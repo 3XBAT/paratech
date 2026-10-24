@@ -17,7 +17,7 @@ func TestBuildTickets(t *testing.T) {
 		Student: Student{FullName: "Иванов Иван", Group: "ИВТ-21", University: "Университет", City: "Москва"},
 		Subject: "Матанализ", Year: 2026,
 		Tickets: []TicketEntry{
-			{Number: 1, Title: "Сходимость‮ рядов", Coverage: ticketset.CoverageCovered, Claims: []TicketClaim{
+			{Number: 1, Title: "Сходимость" + string(rune(0x202E)) + " рядов", Coverage: ticketset.CoverageCovered, Claims: []TicketClaim{
 				{Text: "Ряд сходится,\nесли <w:p>сходится</w:p> ряд модулей.", Sources: []TicketSource{lesson, lesson,
 					{Section: answer.SectionTranscript}}},
 			}},
