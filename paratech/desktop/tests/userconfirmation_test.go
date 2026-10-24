@@ -32,6 +32,8 @@ var userOnlyCallers = map[string]bool{
 	"internal/cases/homeworkflow/proposals.go": true, // ConfirmSend = proposal.Confirm, then Execute
 	"internal/cases/senddelivery/service.go":   true, // MarkSent and SendAgain on the delivery aggregate
 	"internal/cases/senddelivery/job.go":       true, // the reconciler's resolution on the delivery aggregate
+	"internal/input/wails/tickets.go":          true, // «Подтвердить» of a ticket set, the paid run (TASK-133)
+	"internal/cases/tickets/service.go":        true, // Confirm = ticketset.Confirm, then the job
 }
 
 // checkUserOnlyCalls reports every selector of a user-only method name in a production file outside userOnlyCallers.
