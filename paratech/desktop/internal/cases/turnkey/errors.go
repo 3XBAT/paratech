@@ -38,8 +38,8 @@ var (
 	// ErrUnavailable means local storage could not be read or written.
 	ErrUnavailable = errors.New("turnkey: local storage failed")
 
-	// ErrNotWritable means the work cannot be written (yet): its requirements are not confirmed, or it is a
-	// presentation.
+	// ErrNotWritable means the work cannot be written (yet): its requirements are not confirmed, its outline waits
+	// for the student, a step used its attempts, or it is a presentation and no presentation renderer is wired.
 	ErrNotWritable = errors.New("turnkey: the work cannot be written")
 
 	// ErrAlreadyWritten means the work is done: its file is ready; Regenerate or EditOutline writes it again.

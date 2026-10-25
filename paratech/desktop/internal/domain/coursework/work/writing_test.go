@@ -387,19 +387,6 @@ func TestRegenerateApprovesAWaitingOutline(t *testing.T) {
 	}
 }
 
-func TestPresentationIsNotWritten(t *testing.T) {
-	w := newWork(t)
-	a := answerOf(FeasibleFull, 0)
-	a.WorkType = TypePresentation
-	mustRecord(t, w, a)
-	if err := w.ConfirmRequirements(t0); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.StartWriting(snap, t0); !errors.Is(err, ErrNotWritable) {
-		t.Fatalf("a presentation: %v", err)
-	}
-}
-
 func TestParseOutline(t *testing.T) {
 	if o, err := ParseOutline(outlineJSON); err != nil || o.Topic != "История Древней Руси" || len(o.Items) != 3 {
 		t.Fatalf("outline = %+v, %v", o, err)

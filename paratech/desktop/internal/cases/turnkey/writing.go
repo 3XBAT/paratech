@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -40,7 +41,8 @@ const (
 
 // StartWriting starts (or resumes) the writing of a confirmed work as work_writing jobs (TASK-131): the outline, then
 // — once the student approved it (ApproveOutline) — one section per job step and the .docx filed into the subject's
-// «ДЗ». The lesson snapshot of the title page and the subject are taken now. A job of the same writing that runs or
+// «ДЗ». A presentation (TASK-106) is written the same way with slides for sections, then its likely questions, and
+// files a .pptx and the speaker text .docx. The lesson snapshot of the title page and the subject are taken now. A job of the same writing that runs or
 // finished is returned with Created false; after a failed or cancelled one a new job continues from the sections
 // stored (none is asked again). An outline that waits for the student, or a step that used its attempts (the student
 // regenerates first), is ErrNotWritable. Errors: ErrNotConfigured, ErrNotFound, ErrNotWritable, ErrAlreadyWritten,
@@ -57,6 +59,9 @@ func (s *Service) StartWriting(ctx context.Context, id shared.WorkID) (WritingSt
 	case work.StatusDone:
 		return WritingStarted{View: viewOf(w)}, ErrAlreadyWritten
 	case work.StatusConfirmed:
+		if u, _ := w.Understanding(); u.WorkType == work.TypePresentation && s.writing.Slides == nil {
+			return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: no presentation renderer", ErrNotWritable)
+		}
 		if w, err = s.startWriting(ctx, w); err != nil {
 			return WritingStarted{}, err
 		}
@@ -174,8 +179,6 @@ func (s *Service) startWriting(ctx context.Context, w *work.Work) (*work.Work, e
 	}
 	got, err := s.save(ctx, w, func(w *work.Work) error { return w.StartWriting(snap, s.clock.Now()) })
 	switch {
-	case errors.Is(err, work.ErrNotWritable):
-		return nil, fmt.Errorf("%w: %w", ErrNotWritable, err)
 	case err != nil:
 		return nil, err
 	case got.Status() != work.StatusWriting:
@@ -342,9 +345,12 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 	}
 
 	switch st := w.Next(); st.Kind {
-	case work.StepOutline, work.StepSection:
+	case work.StepOutline, work.StepSection, work.StepQuestions:
 		return s.writeStep(ctx, snap, report, w, st)
 	case work.StepAssemble:
+		if w.Presentation() {
+			return s.assembleDeck(ctx, snap, report, w)
+		}
 		return s.assemble(ctx, snap, report, w)
 	case work.StepApprove:
 		return nil // the outline waits for the student
@@ -353,7 +359,8 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 	}
 }
 
-// writeStep asks the model for the outline or a section, checks the answer and stores it.
+// writeStep asks the model for the outline, a section (a slide) or the likely questions of a presentation, checks the
+// answer and stores it.
 func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	w *work.Work, st work.Step) error {
 	texts, err := s.writingTexts(ctx, w)
@@ -364,10 +371,7 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 	if err != nil {
 		return s.permanent(snap, ErrWriteGone, err)
 	}
-	step := prompts.WorkSection
-	if st.Kind == work.StepOutline {
-		step = prompts.WorkOutline
-	}
+	step := promptOf(w, st)
 	key := w.StepKey(st, prompts.WorkInstructions(step), data+"\x00"+note)
 	req, err := prompts.BuildWork(step, data, note, s.writing.ModelAlias, key)
 	if err != nil {
@@ -378,21 +382,9 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 		return s.retry(snap, ErrWriteLLM, err)
 	}
 
-	raw := res.Output.Unvalidated()
-	var change func(*work.Work) error
-	switch st.Kind {
-	case work.StepOutline:
-		o, perr := work.ParseOutline(raw)
-		if perr != nil {
-			return s.refusedStep(ctx, snap, w, st, perr)
-		}
-		change = func(w *work.Work) error { return w.SetOutline(o, s.clock.Now()) }
-	default:
-		t, perr := work.ParseSection(raw, texts.Materials)
-		if perr != nil {
-			return s.refusedStep(ctx, snap, w, st, perr)
-		}
-		change = func(w *work.Work) error { return w.WriteSection(st.Section, st.Revision, t, s.clock.Now()) }
+	change, perr := s.parseStep(w, st, res.Output.Unvalidated(), texts.Materials)
+	if perr != nil {
+		return s.refusedStep(ctx, snap, w, st, perr)
 	}
 
 	// The unchanged progress first: a job cancelled during the call stores nothing.
@@ -410,6 +402,44 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 		return nil // the outline waits for the student
 	}
 	return job.ErrContinueLater
+}
+
+// promptOf is the prompt of step st of w: a paper's outline or section, a presentation's slides, slide or questions.
+func promptOf(w *work.Work, st work.Step) prompts.WorkStep {
+	deck := w.Presentation()
+	switch {
+	case st.Kind == work.StepQuestions:
+		return prompts.WorkQuestions
+	case st.Kind == work.StepOutline && deck:
+		return prompts.WorkSlideOutline
+	case st.Kind == work.StepOutline:
+		return prompts.WorkOutline
+	case deck:
+		return prompts.WorkSlide
+	}
+	return prompts.WorkSection
+}
+
+// parseStep checks the untrusted answer of step st strictly and returns the move that stores it.
+func (s *Service) parseStep(w *work.Work, st work.Step, raw string, materials []work.MaterialRef) (func(*work.Work) error, error) {
+	switch {
+	case st.Kind == work.StepOutline:
+		parse := work.ParseOutline
+		if w.Presentation() {
+			parse = work.ParseSlideOutline
+		}
+		o, err := parse(raw)
+		return func(w *work.Work) error { return w.SetOutline(o, s.clock.Now()) }, err
+	case st.Kind == work.StepQuestions:
+		qs, err := work.ParseQuestions(raw)
+		return func(w *work.Work) error { return w.SetQuestions(st.Revision, qs, s.clock.Now()) }, err
+	case w.Presentation():
+		sec, _ := w.Section(st.Section)
+		t, err := work.ParseSlide(raw, sec.Kind)
+		return func(w *work.Work) error { return w.WriteSection(st.Section, st.Revision, t, s.clock.Now()) }, err
+	}
+	t, err := work.ParseSection(raw, materials)
+	return func(w *work.Work) error { return w.WriteSection(st.Section, st.Revision, t, s.clock.Now()) }, err
 }
 
 // refusedStep records a refused answer of step st (an attempt used) and leaves the retry to the runner.
@@ -431,17 +461,13 @@ func (s *Service) refusedStep(ctx context.Context, snap job.Snapshot, w *work.Wo
 func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	w *work.Work) error {
 	wr, _ := w.Writing()
-	prefs, err := s.writing.Profiles.Load(ctx)
+	student, err := s.student(ctx)
 	if err != nil {
 		return s.retry(snap, ErrWriteStorage, err)
 	}
-	p := prefs.Profile().Fields()
 	brief, _ := w.Brief()
 	in := homeworkdoc.PaperInput{
-		Student: homeworkdoc.Student{
-			FullName: p.FullName, Group: p.Group, University: p.University, Faculty: p.Faculty, City: p.City,
-		},
-		Subject: wr.Snapshot.SubjectName, Teacher: wr.Snapshot.Teacher, Kind: work.TypeName(brief.WorkType),
+		Student: student, Subject: wr.Snapshot.SubjectName, Teacher: wr.Snapshot.Teacher, Kind: work.TypeName(brief.WorkType),
 		Topic: wr.Topic, Year: s.clock.Now().Year(),
 	}
 	for _, sec := range wr.Sections {
@@ -458,42 +484,118 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 	if err != nil {
 		return s.permanent(snap, ErrWriteFile, err)
 	}
+	name := homeworkdoc.PaperFileName(work.TypeName(brief.WorkType), wr.Topic)
+	return s.fileWriting(ctx, snap, report, w, []output{{name, content}}, func(w *work.Work, f []work.File) error {
+		return w.Finish(f[0], s.clock.Now())
+	})
+}
+
+// assembleDeck builds the .pptx of the written slides and the .docx of the speaker text with the likely questions,
+// files both into the subject's «ДЗ» and marks the work done, as assemble does for a paper.
+func (s *Service) assembleDeck(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
+	w *work.Work) error {
+	if s.writing.Slides == nil {
+		return s.permanent(snap, ErrWriteFile, errors.New("no presentation renderer"))
+	}
+	wr, _ := w.Writing()
+	student, err := s.student(ctx)
+	if err != nil {
+		return s.retry(snap, ErrWriteStorage, err)
+	}
+	in := homeworkdoc.TalkInput{
+		Student: student, Subject: wr.Snapshot.SubjectName, Teacher: wr.Snapshot.Teacher, Topic: wr.Topic,
+		Year: s.clock.Now().Year(), Template: wr.Deck.Template,
+	}
+	for _, sec := range wr.Sections {
+		sl, _ := sec.Slide()
+		in.Slides = append(in.Slides, sl)
+	}
+	for _, q := range w.TalkQuestions() {
+		in.Questions = append(in.Questions, homeworkdoc.TalkQuestion{Question: q.Question, Answer: q.Answer})
+	}
+	deck := homeworkdoc.BuildPresentation(in)
+	if err := deck.Validate(); err != nil {
+		return s.permanent(snap, ErrWriteFile, err)
+	}
+	slides, err := s.writing.Slides.Render(ctx, deck)
+	if err != nil {
+		return s.permanent(snap, ErrWriteFile, err)
+	}
+	talk := homeworkdoc.BuildTalk(in)
+	if err := talk.Validate(); err != nil {
+		return s.permanent(snap, ErrWriteFile, err)
+	}
+	text, err := s.writing.Renderer.Render(ctx, talk)
+	if err != nil {
+		return s.permanent(snap, ErrWriteFile, err)
+	}
+	outs := []output{{homeworkdoc.PresentationFileName(wr.Topic), slides}, {homeworkdoc.TalkFileName(wr.Topic), text}}
+	return s.fileWriting(ctx, snap, report, w, outs, func(w *work.Work, f []work.File) error {
+		return w.FinishDeck(f[0], f[1], s.clock.Now())
+	})
+}
+
+// output is a file the writing files into «ДЗ».
+type output struct {
+	name string
+	data []byte
+}
+
+// fileWriting files outs into the subject's «ДЗ» and keeps them with finish (Finish or FinishDeck). The files of the
+// previous generation leave «ДЗ» first: a crash after it repeats the step, never loses the reference to them. The same
+// bytes filed again put that material back into «ДЗ», so a repeated step finds the materials it filed.
+func (s *Service) fileWriting(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
+	w *work.Work, outs []output, finish func(*work.Work, []work.File) error) error {
 	if err := s.progress(ctx, snap, report, w); err != nil {
 		return err
 	}
-	// The paper of the previous generation leaves «ДЗ» first: a crash after it repeats the step, never loses the
-	// reference to it. The same bytes filed again put that material back into «ДЗ».
-	if prev := wr.File; prev != nil {
+	wr, _ := w.Writing()
+	for _, prev := range wr.Files() {
 		if err := s.unfile(ctx, prev.Material); err != nil {
 			return s.retry(snap, ErrWriteStorage, err)
 		}
 	}
-	name := homeworkdoc.PaperFileName(work.TypeName(brief.WorkType), wr.Topic)
-	m, err := s.writing.Shelf.FileHomework(ctx, wr.Snapshot.Subject, name, content)
-	if err != nil {
-		return s.retry(snap, ErrWriteStorage, err)
+	files := make([]work.File, 0, len(outs))
+	for _, o := range outs {
+		m, err := s.writing.Shelf.FileHomework(ctx, wr.Snapshot.Subject, o.name, o.data)
+		if err != nil {
+			return s.retry(snap, ErrWriteStorage, err)
+		}
+		ref, err := material.BlobRef(m.Digest())
+		if err != nil {
+			return s.permanent(snap, ErrWriteStorage, err)
+		}
+		files = append(files, work.File{Material: m.ID(), Artifact: ref.String(), Content: w.ContentKey()})
 	}
-	ref, err := material.BlobRef(m.Digest())
-	if err != nil {
-		return s.permanent(snap, ErrWriteStorage, err)
-	}
-	file := work.File{Material: m.ID(), Artifact: ref.String(), Content: w.ContentKey()}
-	got, err := s.saveStep(ctx, w, func(w *work.Work) error { return w.Finish(file, s.clock.Now()) })
+	got, err := s.saveStep(ctx, w, func(w *work.Work) error { return finish(w, files) })
 	if err != nil {
 		return s.retry(snap, ErrWriteStorage, err)
 	}
 	if got.Status() != work.StatusDone {
-		// The outline changed while the file was built: the paper just filed is no paper of the work; the next step
-		// writes what changed.
-		if cur, _ := got.Writing(); cur.File == nil || cur.File.Material != m.ID() {
-			if err := s.unfile(ctx, m.ID()); err != nil {
-				return s.retry(snap, ErrWriteStorage, err)
+		// The outline changed while the files were built: the files just filed are no files of the work; the next
+		// step writes what changed.
+		cur, _ := got.Writing()
+		for _, f := range files {
+			if !slices.ContainsFunc(cur.Files(), func(c work.File) bool { return c.Material == f.Material }) {
+				if err := s.unfile(ctx, f.Material); err != nil {
+					return s.retry(snap, ErrWriteStorage, err)
+				}
 			}
 		}
 		return job.ErrContinueLater
 	}
-	s.log.InfoContext(ctx, opWriteDone, slog.String("work", string(w.ID())), slog.String("material", string(m.ID())))
+	s.log.InfoContext(ctx, opWriteDone, slog.String("work", string(w.ID())), slog.String("material", string(files[0].Material)))
 	return nil
+}
+
+// student is the profile of the title page.
+func (s *Service) student(ctx context.Context) (homeworkdoc.Student, error) {
+	prefs, err := s.writing.Profiles.Load(ctx)
+	if err != nil {
+		return homeworkdoc.Student{}, err
+	}
+	p := prefs.Profile().Fields()
+	return homeworkdoc.Student{FullName: p.FullName, Group: p.Group, University: p.University, Faculty: p.Faculty, City: p.City}, nil
 }
 
 // writingTexts are the texts of a writing call: the assignment, the teacher's material and the student's materials
