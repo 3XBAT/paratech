@@ -9,8 +9,9 @@ import (
 
 // WorkVersion identifies the prompts of the turnkey writing (TASK-131), apart from Version. Bump it on any change of
 // them; the instructions enter the idempotency key of every call (work.StepKey), so a change is a new call. Version 2
-// adds the presentation steps (TASK-106); the prompts of a paper are unchanged.
-const WorkVersion = 2
+// adds the presentation steps (TASK-106), version 3 the lab report steps (TASK-107); the prompts of a paper are
+// unchanged.
+const WorkVersion = 3
 
 // WorkStep names the call of a turnkey writing step.
 type WorkStep string
@@ -91,6 +92,9 @@ func WorkInstructions(step WorkStep) string {
 		return preamble + workRules + workOutlineTask + answerRule + workOutlineSchema
 	case WorkSection:
 		return preamble + workRules + workSectionTask + workNoteRule + answerRule + workSectionSchema
+	}
+	if in := labInstructions(step); in != "" {
+		return in
 	}
 	return presentationInstructions(step)
 }

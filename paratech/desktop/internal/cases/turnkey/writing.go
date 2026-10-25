@@ -42,7 +42,8 @@ const (
 // StartWriting starts (or resumes) the writing of a confirmed work as work_writing jobs (TASK-131): the outline, then
 // — once the student approved it (ApproveOutline) — one section per job step and the .docx filed into the subject's
 // «ДЗ». A presentation (TASK-106) is written the same way with slides for sections, then its likely questions, and
-// files a .pptx and the speaker text .docx. The lesson snapshot of the title page and the subject are taken now. A job of the same writing that runs or
+// files a .pptx and the speaker text .docx. A lab report (TASK-107) is a paper with placeholders for the student's data
+// and «Что доделать самому». The lesson snapshot of the title page and the subject are taken now. A job of the same writing that runs or
 // finished is returned with Created false; after a failed or cancelled one a new job continues from the sections
 // stored (none is asked again). An outline that waits for the student, or a step that used its attempts (the student
 // regenerates first), is ErrNotWritable. Errors: ErrNotConfigured, ErrNotFound, ErrNotWritable, ErrAlreadyWritten,
@@ -382,7 +383,7 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 		return s.retry(snap, ErrWriteLLM, err)
 	}
 
-	change, perr := s.parseStep(w, st, res.Output.Unvalidated(), texts.Materials)
+	change, perr := s.parseStep(w, st, res.Output.Unvalidated(), texts)
 	if perr != nil {
 		return s.refusedStep(ctx, snap, w, st, perr)
 	}
@@ -404,31 +405,43 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 	return job.ErrContinueLater
 }
 
-// promptOf is the prompt of step st of w: a paper's outline or section, a presentation's slides, slide or questions.
+// promptOf is the prompt of step st of w: a paper's outline or section, a presentation's slides, slide or questions,
+// a lab report's outline or section.
 func promptOf(w *work.Work, st work.Step) prompts.WorkStep {
-	deck := w.Presentation()
+	deck, lab, outline := w.Presentation(), w.LabReport(), st.Kind == work.StepOutline
 	switch {
 	case st.Kind == work.StepQuestions:
 		return prompts.WorkQuestions
-	case st.Kind == work.StepOutline && deck:
+	case outline && deck:
 		return prompts.WorkSlideOutline
-	case st.Kind == work.StepOutline:
+	case outline && lab:
+		return prompts.WorkLabOutline
+	case outline:
 		return prompts.WorkOutline
 	case deck:
 		return prompts.WorkSlide
+	case lab:
+		return prompts.WorkLabSection
 	}
 	return prompts.WorkSection
 }
 
-// parseStep checks the untrusted answer of step st strictly and returns the move that stores it.
-func (s *Service) parseStep(w *work.Work, st work.Step, raw string, materials []work.MaterialRef) (func(*work.Work) error, error) {
+// parseStep checks the untrusted answer of step st strictly and returns the move that stores it. The outline of a
+// lab report keeps what became of the manual of texts.
+func (s *Service) parseStep(w *work.Work, st work.Step, raw string, texts work.Texts) (func(*work.Work) error, error) {
 	switch {
 	case st.Kind == work.StepOutline:
 		parse := work.ParseOutline
-		if w.Presentation() {
+		switch {
+		case w.Presentation():
 			parse = work.ParseSlideOutline
+		case w.LabReport():
+			parse = work.ParseLabOutline
 		}
 		o, err := parse(raw)
+		if w.LabReport() {
+			o.Manual = texts.Manual
+		}
 		return func(w *work.Work) error { return w.SetOutline(o, s.clock.Now()) }, err
 	case st.Kind == work.StepQuestions:
 		qs, err := work.ParseQuestions(raw)
@@ -437,8 +450,12 @@ func (s *Service) parseStep(w *work.Work, st work.Step, raw string, materials []
 		sec, _ := w.Section(st.Section)
 		t, err := work.ParseSlide(raw, sec.Kind)
 		return func(w *work.Work) error { return w.WriteSection(st.Section, st.Revision, t, s.clock.Now()) }, err
+	case w.LabReport():
+		sec, _ := w.Section(st.Section)
+		t, err := work.ParseLabSection(raw, texts.Materials, sec.Part)
+		return func(w *work.Work) error { return w.WriteSection(st.Section, st.Revision, t, s.clock.Now()) }, err
 	}
-	t, err := work.ParseSection(raw, materials)
+	t, err := work.ParseSection(raw, texts.Materials)
 	return func(w *work.Work) error { return w.WriteSection(st.Section, st.Revision, t, s.clock.Now()) }, err
 }
 
@@ -476,7 +493,12 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 			in.Sources = append(in.Sources, homeworkdoc.PaperSource{Text: r.Text, Verify: r.Material == ""})
 		}
 	}
-	doc := homeworkdoc.BuildPaper(in)
+	var doc cvalues.Document
+	if w.LabReport() {
+		doc = homeworkdoc.BuildLabReport(labInput(w, in))
+	} else {
+		doc = homeworkdoc.BuildPaper(in)
+	}
 	if err := doc.Validate(); err != nil {
 		return s.permanent(snap, ErrWriteFile, err)
 	}
@@ -488,6 +510,31 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 	return s.fileWriting(ctx, snap, report, w, []output{{name, content}}, func(w *work.Work, f []work.File) error {
 		return w.Finish(f[0], s.clock.Now())
 	})
+}
+
+// labInput is the lab report of the written sections of w: the placeholders the domain recognised, the conclusions
+// and the note about a manual that was not read; the rest of the paper is paper.
+func labInput(w *work.Work, paper homeworkdoc.PaperInput) homeworkdoc.LabInput {
+	wr, _ := w.Writing()
+	in := homeworkdoc.LabInput{Paper: paper}
+	switch w.Manual() {
+	case work.ManualNotRead:
+		in.Manual = homeworkdoc.ManualNotRead
+	case work.ManualNoText:
+		in.Manual = homeworkdoc.ManualNoText
+	}
+	for _, sec := range wr.Sections {
+		ls := homeworkdoc.LabSection{Title: sec.Title, Conclusions: sec.Part == work.LabConclusions}
+		for _, p := range sec.Text.Paragraphs {
+			if prompt, ok := work.PromptOf(p); ok {
+				ls.Paragraphs = append(ls.Paragraphs, homeworkdoc.LabParagraph{Text: prompt, Placeholder: true})
+			} else {
+				ls.Paragraphs = append(ls.Paragraphs, homeworkdoc.LabParagraph{Text: p})
+			}
+		}
+		in.Sections = append(in.Sections, ls)
+	}
+	return in
 }
 
 // assembleDeck builds the .pptx of the written slides and the .docx of the speaker text with the likely questions,
@@ -601,7 +648,8 @@ func (s *Service) student(ctx context.Context) (homeworkdoc.Student, error) {
 // writingTexts are the texts of a writing call: the assignment, the teacher's material and the student's materials
 // that may be cited (the assignment's material, or the uploaded file that is the assignment). They are part of the
 // key of the call, so a local failure to read them is retried (ErrWriteStorage), never taken for «no material»; only
-// a material that is gone, removed or has no readable text is left out.
+// a material that is gone, removed or has no readable text is left out. A lab report started from a material has
+// its manual in Assignment, read; an uploaded file without text leaves nothing to write from, so it is gone.
 func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, error) {
 	src := w.Source()
 	if src.Material != "" {
@@ -614,7 +662,11 @@ func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, e
 		case text.Empty():
 			return work.Texts{}, backoff.Permanent(fail(ErrWriteGone, ErrNoText))
 		}
-		return work.Texts{Assignment: text.String(), Materials: citable(m)}, nil
+		t := work.Texts{Assignment: text.String(), Materials: citable(m)}
+		if w.LabReport() {
+			t.Manual = work.ManualRead
+		}
+		return t, nil
 	}
 
 	a, err := s.assignments.Get(ctx, src.Assignment)
@@ -625,19 +677,39 @@ func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, e
 		return work.Texts{}, fail(ErrWriteStorage, err)
 	}
 	d := a.Details()
-	t := work.Texts{Assignment: strings.TrimSpace(d.Title() + "\n\n" + d.Description())}
+	t := work.Texts{Assignment: strings.TrimSpace(d.Title() + "\n\n" + d.Description()), Manual: work.ManualNone}
 	if mid := a.MaterialID(); mid != "" {
-		m, text, err := s.materials.MaterialText(ctx, mid)
+		m, gone, err := s.manualText(ctx, mid)
 		switch {
-		case err == nil:
-			t.Material, t.Materials = text.String(), citable(m)
-		case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrRemoved), noMaterialText(err):
+		case gone:
 			// The assignment is written from alone, as the reader read it.
-		default:
+		case err != nil:
 			return work.Texts{}, fail(ErrWriteStorage, err)
+		default:
+			t.Material, t.Materials, t.Manual = m.Material, m.Materials, m.Manual
 		}
 	}
 	return t, nil
+}
+
+// manualText reads material id as a manual: its text in Material with the file to cite (ManualRead), or what became
+// of it without text, nothing to cite (ManualNotRead for a PDF, ADR-0027; ManualNoText). gone reports a material gone
+// or removed; err alone is a local failure to retry.
+func (s *Service) manualText(ctx context.Context, id shared.MaterialID) (t work.Texts, gone bool, err error) {
+	m, text, err := s.materials.MaterialText(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrRemoved):
+		return work.Texts{}, true, err
+	case errors.Is(err, material.ErrTextNotExtracted):
+		return work.Texts{Manual: work.ManualNotRead}, false, nil
+	case noMaterialText(err):
+		return work.Texts{Manual: work.ManualNoText}, false, nil
+	case err != nil:
+		return work.Texts{}, false, err
+	case text.Empty():
+		return work.Texts{Manual: work.ManualNoText}, false, nil
+	}
+	return work.Texts{Material: text.String(), Materials: citable(m), Manual: work.ManualRead}, false, nil
 }
 
 // noMaterialText reports an error of a material whose text cannot be read at all (a scan, a damaged file): it stays

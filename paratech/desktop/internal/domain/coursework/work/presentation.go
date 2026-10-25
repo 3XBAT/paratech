@@ -196,7 +196,7 @@ func ParseSlideOutline(raw string) (Outline, error) {
 		err = errShape
 	}
 	if err == nil {
-		err = o.check(true)
+		err = o.check(formDeck)
 	}
 	if err != nil {
 		return Outline{}, fmt.Errorf("%w: slide outline: %w", ErrInvalidAnswer, err)
@@ -384,7 +384,7 @@ func (o Outline) checkDeck() error {
 	total := 0
 	for i, it := range o.Items {
 		switch {
-		case !slideKindAt(i, n, it.Kind):
+		case !slideKindAt(i, n, it.Kind) || it.Part != "":
 			return bad("slide kind")
 		case !cleanText(it.Title, values.MaxSlideTitleRunes, false):
 			return bad("slide title")
