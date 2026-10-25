@@ -17,6 +17,15 @@ type Provider interface {
 	Complete(ctx context.Context, req values.Request) (values.Completion, error)
 }
 
+// StreamingProvider runs one LLM call with the output streamed (ADR-0026). Implemented by the anthropic adapter;
+// testenv has a scripted fake.
+type StreamingProvider interface {
+	// Stream is Provider.Complete with the same request and error rules. onDelta gets the non-empty text chunks in
+	// order, from the calling goroutine, before Stream returns; on success their concatenation is the completion
+	// output. Chunks are UNTRUSTED, and a failure may follow some of them.
+	Stream(ctx context.Context, req values.Request, onDelta func(chunk string)) (values.Completion, error)
+}
+
 // Accounts stores quota accounts. It has the shape of the quota use case's port (ARCH-20 forbids importing it,
 // ADR-0008); the postgres adapter and the account aggregate serve both.
 type Accounts interface {
