@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -21,6 +22,8 @@ import (
 //
 //	outline answer: {"topic":"<line>","sections":[{"title":"<line>","words":<int>}]}
 //	section answer: {"paragraphs":["<text>"],"sources":[{"material":"<ref or empty>","text":"<line>"}]}
+//
+// A presentation is written the same way, with slides for sections (presentation.go).
 
 // Limits of the writing.
 const (
@@ -52,9 +55,6 @@ const (
 // edited the outline or regenerated meanwhile); the answer is dropped.
 var ErrStaleStep = errors.New("work: the writing step is not due any more")
 
-// ErrNotWritable means the work cannot be written whole as a paper (a presentation, the helper mode).
-var ErrNotWritable = errors.New("work: this work is not written as a paper")
-
 // Snapshot is what the paper takes from the assignment's lesson when the writing starts: the library subject whose
 // «ДЗ» gets the file ("" none: the file stays in «Входящие») and the names of the title page. Plain local data.
 type Snapshot struct {
@@ -71,24 +71,28 @@ type Reference struct {
 	Material shared.MaterialID `json:"material"`
 }
 
-// SectionText is the checked text of a section for one of its revisions.
+// SectionText is the checked text of a section for one of its revisions. The text of a slide keeps its speaker notes
+// in Paragraphs and its bullets or columns; a paper has none of them.
 type SectionText struct {
 	Revision   int         `json:"revision"`
 	Paragraphs []string    `json:"paragraphs"`
 	Sources    []Reference `json:"sources"`
+	Bullets    []string    `json:"bullets,omitempty"`
+	Columns    []Column    `json:"columns,omitempty"`
 }
 
 // Section is a section of the outline. Number is stable across edits; Revision grows with every edit or regeneration
 // of the section, and the text counts only for the revision it was written for. Attempt is the attempt of the call of
-// the current revision: a refused answer uses one.
+// the current revision: a refused answer uses one. Kind is set for the slide of a presentation only.
 type Section struct {
-	Number   int          `json:"number"`
-	Title    string       `json:"title"`
-	Words    int          `json:"words"`
-	Revision int          `json:"revision"`
-	Attempt  int          `json:"attempt"`
-	Note     string       `json:"note"` // the student's additional instructions of the last regeneration
-	Text     *SectionText `json:"text"`
+	Number   int              `json:"number"`
+	Kind     values.SlideKind `json:"kind,omitempty"`
+	Title    string           `json:"title"`
+	Words    int              `json:"words"`
+	Revision int              `json:"revision"`
+	Attempt  int              `json:"attempt"`
+	Note     string           `json:"note"` // the student's additional instructions of the last regeneration
+	Text     *SectionText     `json:"text"`
 }
 
 // Written reports whether the section has its text for the current revision.
@@ -101,10 +105,22 @@ type File struct {
 	Content  string            `json:"content"`  // ContentKey of the sections the file holds
 }
 
+// validate checks a stored file.
+func (f File) validate() error {
+	if f.Material.Validate() != nil || f.Content == "" {
+		return errors.New("file")
+	}
+	if _, err := shared.ParseArtifactRef(f.Artifact); err != nil {
+		return errors.New("file artifact")
+	}
+	return nil
+}
+
 // Writing is the writing state of a work from StartWriting on. Generation grows each time a done work is written
 // again (an edit or a regeneration), so its job is a new one. Approved is the student's «Утвердить план»: no section
 // is written before it (TASK-105). OutlineRevision grows and OutlineNote is set when the student asks again for an
-// outline whose call used its attempts, so the new calls have new keys.
+// outline whose call used its attempts, so the new calls have new keys. Deck is set for a presentation only (TASK-106):
+// File is then the .pptx and Deck.Talk the speaker text.
 type Writing struct {
 	Snapshot        Snapshot  `json:"snapshot"`
 	Generation      int       `json:"generation"`
@@ -115,11 +131,15 @@ type Writing struct {
 	Sections        []Section `json:"sections"` // empty until the outline is stored
 	Approved        bool      `json:"approved"`
 	File            *File     `json:"file"`
+	Deck            *Deck     `json:"deck,omitempty"`
 }
 
-// OutlineItem is a section of an outline as the model or the student gives it; Number 0 is a new section.
+// OutlineItem is a section of an outline as the model or the student gives it; Number 0 is a new section. Kind is
+// the kind of a slide; in the student's edit of a presentation an empty one keeps the kind of a known slide and makes
+// a new one a bullets slide.
 type OutlineItem struct {
 	Number int
+	Kind   values.SlideKind
 	Title  string
 	Words  int
 }
@@ -135,12 +155,13 @@ type StepKind string
 
 // Step kinds.
 const (
-	StepNone     StepKind = "none"     // nothing to do: not writing
-	StepOutline  StepKind = "outline"  // ask for the outline
-	StepApprove  StepKind = "approve"  // the outline waits for the student: edit it, then ApproveOutline
-	StepSection  StepKind = "section"  // ask for the text of Section
-	StepAssemble StepKind = "assemble" // build the file from the written sections
-	StepBlocked  StepKind = "blocked"  // the attempts of the due call are used up: the student regenerates
+	StepNone      StepKind = "none"      // nothing to do: not writing
+	StepOutline   StepKind = "outline"   // ask for the outline
+	StepApprove   StepKind = "approve"   // the outline waits for the student: edit it, then ApproveOutline
+	StepSection   StepKind = "section"   // ask for the text of Section
+	StepQuestions StepKind = "questions" // a presentation: ask for the likely questions of the written slides
+	StepAssemble  StepKind = "assemble"  // build the file from the written sections
+	StepBlocked   StepKind = "blocked"   // the attempts of the due call are used up: the student regenerates
 )
 
 // Step is the next step of the writing.
@@ -154,21 +175,22 @@ type Step struct {
 // --- moves ----------------------------------------------------------------------------------------------
 
 // StartWriting starts the writing of a confirmed work with what the paper takes from its lesson: the outline call is
-// due. Errors: ErrInvalidTransition, ErrNotWritable (a presentation), ErrInvalidWork for a snapshot out of bounds.
+// due. A presentation is written as slides in the default template. Errors: ErrInvalidTransition, ErrInvalidWork for a
+// snapshot out of bounds.
 func (w *Work) StartWriting(snap Snapshot, now time.Time) error {
 	if w.status != StatusConfirmed {
 		return fmt.Errorf("%w: write a %s work", ErrInvalidTransition, w.status)
 	}
-	if u, _ := w.Understanding(); u.WorkType == TypePresentation {
-		return fmt.Errorf("%w: a presentation", ErrNotWritable)
-	}
 	next := w.clone()
 	next.writing = &Writing{Snapshot: snap, Generation: 1, OutlineAttempt: 1, Sections: []Section{}}
+	if u, _ := w.Understanding(); u.WorkType == TypePresentation {
+		next.writing.Deck = &Deck{Template: values.PresentationTemplates()[0], QuestionsRevision: 1, QuestionsAttempt: 1}
+	}
 	return w.move(next, StatusWriting, now)
 }
 
 // Next returns the next step of the writing: the outline, the student's approval of it, the first section without its
-// text, the file, or blocked when the due call used its attempts.
+// text, the likely questions of a presentation, the file, or blocked when the due call used its attempts.
 func (w *Work) Next() Step {
 	if w.status != StatusWriting || w.writing == nil {
 		return Step{Kind: StepNone}
@@ -192,22 +214,31 @@ func (w *Work) Next() Step {
 		}
 		return Step{Kind: StepSection, Section: s.Number, Revision: s.Revision, Attempt: s.Attempt}
 	}
+	if d := wr.Deck; d != nil && (d.Questions == nil || d.Questions.Revision != d.QuestionsRevision) {
+		if d.QuestionsAttempt > MaxAttempts {
+			return Step{Kind: StepBlocked, Revision: d.QuestionsRevision}
+		}
+		return Step{Kind: StepQuestions, Revision: d.QuestionsRevision, Attempt: d.QuestionsAttempt}
+	}
 	return Step{Kind: StepAssemble}
 }
 
-// SetOutline stores the outline the model proposed: the sections get the numbers 1..n and wait for the student's
-// approval. Errors: ErrStaleStep when no outline is due, ErrInvalidAnswer for an outline out of bounds.
+// SetOutline stores the outline the model proposed (ParseOutline, or ParseSlideOutline for a presentation): the
+// sections get the numbers 1..n and wait for the student's approval. Errors: ErrStaleStep when no outline is due,
+// ErrInvalidAnswer for an outline out of bounds.
 func (w *Work) SetOutline(o Outline, now time.Time) error {
 	if w.Next().Kind != StepOutline {
 		return ErrStaleStep
 	}
-	if err := o.check(); err != nil {
+	if err := o.check(w.Presentation()); err != nil {
 		return err
 	}
 	next := w.clone()
 	next.writing.Topic = o.Topic
 	for i, it := range o.Items {
-		next.writing.Sections = append(next.writing.Sections, Section{Number: i + 1, Title: it.Title, Words: it.Words, Revision: 1, Attempt: 1})
+		next.writing.Sections = append(next.writing.Sections, Section{
+			Number: i + 1, Kind: it.Kind, Title: it.Title, Words: it.Words, Revision: 1, Attempt: 1,
+		})
 	}
 	return w.move(next, StatusWriting, now)
 }
@@ -231,19 +262,22 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 	if err := w.outlined(); err != nil {
 		return err
 	}
-	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidReply, err)
-	}
-	if w.sameOutline(items) {
-		return nil
-	}
-	next := w.clone()
 	old := map[int]Section{}
 	top := 0
 	for _, s := range w.writing.Sections {
 		old[s.Number] = s
 		top = max(top, s.Number)
 	}
+	if w.Presentation() {
+		items = slideItems(items, old)
+	}
+	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(w.Presentation()); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidReply, err)
+	}
+	if w.sameOutline(items) {
+		return nil
+	}
+	next := w.clone()
 	seen := map[int]bool{}
 	sections := make([]Section, 0, len(items))
 	for _, it := range items {
@@ -254,24 +288,46 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 		case !known:
 			top++
 			s = Section{Number: top, Revision: 1, Attempt: 1}
-		case s.Title != it.Title || s.Words != it.Words:
+		case s.Title != it.Title || s.Words != it.Words || s.Kind != it.Kind:
 			s.Revision, s.Attempt, s.Note = s.Revision+1, 1, ""
 		}
 		seen[s.Number] = true
-		s.Title, s.Words = it.Title, it.Words
+		s.Kind, s.Title, s.Words = it.Kind, it.Title, it.Words
 		sections = append(sections, s)
 	}
 	next.writing.Sections = sections
 	return w.rewrite(next, now)
 }
 
+// slideItems is the student's edit of a slide list with clean titles and the kinds filled: an empty kind keeps the
+// kind of a known slide, a new slide shows bullets.
+func slideItems(items []OutlineItem, old map[int]Section) []OutlineItem {
+	out := slices.Clone(items)
+	for i, it := range out {
+		out[i].Title = oneLine(it.Title)
+		if it.Kind != "" {
+			continue
+		}
+		if s, ok := old[it.Number]; ok && it.Number != 0 {
+			out[i].Kind = s.Kind
+		} else {
+			out[i].Kind = values.SlideBullets
+		}
+	}
+	return out
+}
+
 // Regenerate is «Дополнительные указания → Сгенерировать заново»: section number (0: every section) is written again
 // with the student's note (may be empty). It is the student's own request to write, so it approves an outline that
 // waits. Without an outline, when the outline call used its attempts, number 0 asks for the outline again with the
-// note (new attempts and keys); that outline waits for the approval as the first one. Errors: ErrInvalidTransition,
-// ErrInvalidReply.
+// note (new attempts and keys); that outline waits for the approval as the first one. Likewise number 0 asks again for
+// the likely questions of a presentation whose call used its attempts, with the note; the slides stay. Errors:
+// ErrInvalidTransition, ErrInvalidReply.
 func (w *Work) Regenerate(number int, note string, now time.Time) error {
-	blockedOutline := number == 0 && w.Next().Kind == StepBlocked && len(w.writing.Sections) == 0
+	st := w.Next()
+	blocked := number == 0 && st.Kind == StepBlocked && st.Section == 0
+	blockedOutline := blocked && len(w.writing.Sections) == 0
+	blockedQuestions := blocked && !blockedOutline && w.Presentation()
 	if !blockedOutline {
 		if err := w.outlined(); err != nil {
 			return err
@@ -282,9 +338,15 @@ func (w *Work) Regenerate(number int, note string, now time.Time) error {
 		return fmt.Errorf("%w: a note has at most %d characters", ErrInvalidReply, MaxNoteRunes)
 	}
 	next := w.clone()
-	if blockedOutline {
+	switch {
+	case blockedOutline:
 		next.writing.OutlineRevision++
 		next.writing.OutlineAttempt, next.writing.OutlineNote = 1, note
+		return w.move(next, StatusWriting, now)
+	case blockedQuestions:
+		d := next.writing.Deck
+		d.QuestionsRevision++
+		d.QuestionsAttempt, d.QuestionsNote = 1, note
 		return w.move(next, StatusWriting, now)
 	}
 	found := false
@@ -301,14 +363,16 @@ func (w *Work) Regenerate(number int, note string, now time.Time) error {
 	return w.rewrite(next, now)
 }
 
-// WriteSection stores the checked text of the due section of revision; any other is ErrStaleStep.
+// WriteSection stores the checked text of the due section (ParseSection, or ParseSlide for a slide) of revision; any
+// other is ErrStaleStep.
 func (w *Work) WriteSection(number, revision int, text SectionText, now time.Time) error {
 	st := w.Next()
 	if st.Kind != StepSection || st.Section != number || st.Revision != revision {
 		return ErrStaleStep
 	}
+	sec, _ := w.Section(number)
 	text.Revision = revision
-	if err := text.check(); err != nil {
+	if err := text.checkFor(sec.Kind); err != nil {
 		return err
 	}
 	next := w.clone()
@@ -324,12 +388,15 @@ func (w *Work) WriteSection(number, revision int, text SectionText, now time.Tim
 // RefuseStep records a refused answer of the due step: the next call is a new attempt; after the last one the step
 // is blocked until the student regenerates. A step that is not due any more is ErrStaleStep.
 func (w *Work) RefuseStep(st Step, now time.Time) error {
-	if cur := w.Next(); cur != st || (st.Kind != StepOutline && st.Kind != StepSection) {
+	if cur := w.Next(); cur != st || !st.Kind.asks() {
 		return ErrStaleStep
 	}
 	next := w.clone()
-	if st.Kind == StepOutline {
+	switch st.Kind {
+	case StepOutline:
 		next.writing.OutlineAttempt++
+	case StepQuestions:
+		next.writing.Deck.QuestionsAttempt++
 	}
 	for i, s := range next.writing.Sections {
 		if st.Kind == StepSection && s.Number == st.Section {
@@ -339,10 +406,11 @@ func (w *Work) RefuseStep(st Step, now time.Time) error {
 	return w.move(next, StatusWriting, now)
 }
 
-// Finish keeps the file built from the written sections (f.Content must be ContentKey) and marks the work done.
-// Errors: ErrStaleStep when the file is not due or was built from other sections, ErrInvalidWork for a bad file.
+// Finish keeps the paper built from the written sections (f.Content must be ContentKey) and marks the work done; a
+// presentation finishes with FinishDeck. Errors: ErrStaleStep when the file is not due or was built from other
+// sections, ErrInvalidWork for a bad file.
 func (w *Work) Finish(f File, now time.Time) error {
-	if w.Next().Kind != StepAssemble || f.Content != w.ContentKey() {
+	if w.Presentation() || w.Next().Kind != StepAssemble || f.Content != w.ContentKey() {
 		return ErrStaleStep
 	}
 	next := w.clone()
@@ -365,20 +433,28 @@ func (w *Work) sameOutline(items []OutlineItem) bool {
 		return false
 	}
 	for i, s := range w.writing.Sections {
-		if it := items[i]; it.Number != s.Number || it.Title != s.Title || it.Words != s.Words {
+		if it := items[i]; it.Number != s.Number || it.Title != s.Title || it.Words != s.Words || it.Kind != s.Kind {
 			return false
 		}
 	}
 	return true
 }
 
-// rewrite takes next as the writing state: a done work is written again under a new generation.
+// rewrite takes next as the writing state: a done work is written again under a new generation. The likely questions
+// of a presentation are asked again for the changed slides.
 func (w *Work) rewrite(next *Work, now time.Time) error {
 	if w.status == StatusDone {
 		next.writing.Generation++
 	}
+	if d := next.writing.Deck; d != nil {
+		d.QuestionsRevision++
+		d.QuestionsAttempt, d.QuestionsNote = 1, ""
+	}
 	return w.move(next, StatusWriting, now)
 }
+
+// asks reports whether a step of this kind is a call to the writer.
+func (k StepKind) asks() bool { return k == StepOutline || k == StepSection || k == StepQuestions }
 
 // --- reads ----------------------------------------------------------------------------------------------
 
@@ -403,8 +479,9 @@ func (w *Work) Progress() (done, total int) {
 	return done, len(w.writing.Sections)
 }
 
-// ContentKey is a digest of what the paper is built from: the topic and every section with its revision. The file
-// of another key is stale.
+// ContentKey is a digest of what the paper is built from: the topic and every section with its revision; for a
+// presentation also the kinds of the slides, the template and the revision of the questions. The file of another key
+// is stale.
 func (w *Work) ContentKey() string {
 	if w.writing == nil {
 		return ""
@@ -413,6 +490,13 @@ func (w *Work) ContentKey() string {
 	h.Write([]byte(w.writing.Topic))
 	for _, s := range w.writing.Sections {
 		h.Write(fmt.Appendf(nil, "\x00%d\x00%d\x00%s\x00%d", s.Number, s.Revision, s.Title, s.Words))
+	}
+	// A paper keeps the key it had before presentations existed, so a stored done paper stays done.
+	if d := w.writing.Deck; d != nil {
+		h.Write(fmt.Appendf(nil, "\x00deck\x00%s\x00%d", d.Template, d.QuestionsRevision))
+		for _, s := range w.writing.Sections {
+			h.Write(fmt.Appendf(nil, "\x00%s", s.Kind))
+		}
 	}
 	return fmt.Sprintf("c:%x", h.Sum(nil)[:16])
 }
@@ -457,9 +541,19 @@ type materialData struct {
 }
 
 type outlineData struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Words  int    `json:"words"`
+	Number int              `json:"number"`
+	Kind   values.SlideKind `json:"kind,omitempty"`
+	Title  string           `json:"title"`
+	Words  int              `json:"words"`
+}
+
+// slideData is a written slide as the questions call reads it.
+type slideData struct {
+	Number  int      `json:"number"`
+	Title   string   `json:"title"`
+	Bullets []string `json:"bullets"`
+	Columns []Column `json:"columns"`
+	Notes   []string `json:"notes"`
 }
 
 type stepData struct {
@@ -473,14 +567,22 @@ type stepData struct {
 	Outline        []outlineData  `json:"outline,omitempty"`
 	Section        *outlineData   `json:"section,omitempty"`
 	PreviousEnd    string         `json:"previous_section_end,omitempty"`
+	Slides         []slideData    `json:"slides,omitempty"`
 }
 
-// StepData builds the untrusted data of the call of step st (an outline or a section) as one JSON object: the brief,
-// the texts, and for a section the topic, the outline, the section and the end of the previous one. The student's
-// note of the section is returned apart: it is the student's own channel (TASK-094), not data. Errors:
-// ErrStaleStep for a step that is not due, ErrInvalidRequest without an assignment text.
+// Tasks of the data of a presentation's calls (the outline keeps "outline").
+const (
+	taskSlide     = "slide"
+	taskQuestions = "questions"
+)
+
+// StepData builds the untrusted data of the call of step st (an outline, a section or slide, or the likely questions)
+// as one JSON object: the brief, the texts, for a section the topic, the outline, the section and the end of the
+// previous one, and for the questions the topic and the written slides. The student's note of the step is returned
+// apart: it is the student's own channel (TASK-094), not data. Errors: ErrStaleStep for a step that is not due,
+// ErrInvalidRequest without an assignment text.
 func (w *Work) StepData(st Step, t Texts) (data, note string, err error) {
-	if cur := w.Next(); cur != st || (st.Kind != StepOutline && st.Kind != StepSection) {
+	if cur := w.Next(); cur != st || !st.Kind.asks() {
 		return "", "", ErrStaleStep
 	}
 	brief, _ := w.Brief()
@@ -496,14 +598,27 @@ func (w *Work) StepData(st Step, t Texts) (data, note string, err error) {
 	for i, m := range t.Materials {
 		d.Materials = append(d.Materials, materialData{Ref: refOf(i), Name: m.Name})
 	}
-	if st.Kind == StepOutline {
+	switch st.Kind {
+	case StepOutline:
 		note = w.writing.OutlineNote
-	}
-	if st.Kind == StepSection {
+	case StepQuestions:
+		d.Task, d.Topic, note = taskQuestions, w.writing.Topic, w.writing.Deck.QuestionsNote
+		for _, s := range w.writing.Sections {
+			sd := slideData{Number: s.Number, Title: s.Title, Bullets: nonNil(s.Text.Bullets), Columns: s.Text.Columns,
+				Notes: s.Text.Paragraphs}
+			if sd.Columns == nil {
+				sd.Columns = []Column{}
+			}
+			d.Slides = append(d.Slides, sd)
+		}
+	case StepSection:
+		if w.Presentation() {
+			d.Task = taskSlide
+		}
 		d.Topic = w.writing.Topic
 		var prev *Section
 		for i, s := range w.writing.Sections {
-			d.Outline = append(d.Outline, outlineData{Number: s.Number, Title: s.Title, Words: s.Words})
+			d.Outline = append(d.Outline, outlineData{Number: s.Number, Kind: s.Kind, Title: s.Title, Words: s.Words})
 			if s.Number == st.Section {
 				d.Section, note = &d.Outline[len(d.Outline)-1], s.Note
 				if i > 0 {
@@ -568,7 +683,7 @@ func ParseOutline(raw string) (Outline, error) {
 		err = errShape
 	}
 	if err == nil {
-		err = o.check()
+		err = o.check(false)
 	}
 	if err != nil {
 		return Outline{}, fmt.Errorf("%w: outline: %w", ErrInvalidAnswer, err)
@@ -604,9 +719,15 @@ func readOutlineItem(d *json.Decoder) (OutlineItem, error) {
 	return it, err
 }
 
-// check checks the bounds of an outline.
-func (o Outline) check() error {
+// check checks the bounds of an outline: of a paper, or of a presentation (checkDeck).
+func (o Outline) check(deck bool) error {
+	if deck {
+		return o.checkDeck()
+	}
 	bad := func(why string) error { return fmt.Errorf("%w: %s", ErrInvalidAnswer, why) }
+	if slices.ContainsFunc(o.Items, func(it OutlineItem) bool { return it.Kind != "" }) {
+		return bad("a section of a paper is no slide")
+	}
 	if !boundedText(o.Topic, MaxTopicRunes, false, false) {
 		return bad("topic")
 	}
@@ -709,10 +830,16 @@ func trimAll(ss []string) []string {
 	return out
 }
 
-// check checks a stored section text: a revision and the bounds of its content.
-func (t SectionText) check() error {
-	if t.Revision < 1 {
+// checkFor checks a stored section text of a paper section (kind empty) or of a slide of kind: a revision and the
+// bounds of its content.
+func (t SectionText) checkFor(kind values.SlideKind) error {
+	switch {
+	case t.Revision < 1:
 		return fmt.Errorf("%w: revision", ErrInvalidAnswer)
+	case kind != "":
+		return t.checkSlide(kind)
+	case len(t.Bullets) > 0 || len(t.Columns) > 0:
+		return fmt.Errorf("%w: a paper section has no bullets", ErrInvalidAnswer)
 	}
 	return t.checkContent()
 }
@@ -793,7 +920,7 @@ func (wr Writing) validate() error {
 		items := make([]OutlineItem, len(wr.Sections))
 		numbers := map[int]bool{}
 		for i, s := range wr.Sections {
-			items[i] = OutlineItem{Number: s.Number, Title: s.Title, Words: s.Words}
+			items[i] = OutlineItem{Number: s.Number, Kind: s.Kind, Title: s.Title, Words: s.Words}
 			switch {
 			case s.Number < 1 || numbers[s.Number]:
 				return bad("section numbers")
@@ -801,22 +928,30 @@ func (wr Writing) validate() error {
 				return bad("section revision or attempt")
 			case !boundedText(s.Note, MaxNoteRunes, true, true):
 				return bad("section note")
-			case s.Text != nil && (s.Text.Revision > s.Revision || s.Text.check() != nil):
+			case s.Text != nil && (s.Text.Revision > s.Revision || s.Text.checkFor(s.Kind) != nil):
 				return bad("section text")
 			}
 			numbers[s.Number] = true
 		}
-		if err := (Outline{Topic: wr.Topic, Items: items}).check(); err != nil {
+		if err := (Outline{Topic: wr.Topic, Items: items}).check(wr.Deck != nil); err != nil {
 			return bad("outline")
 		}
 	}
 	if f := wr.File; f != nil {
-		if f.Material.Validate() != nil || f.Content == "" {
-			return bad("file")
+		if err := f.validate(); err != nil {
+			return bad(err.Error())
 		}
-		if _, err := shared.ParseArtifactRef(f.Artifact); err != nil {
-			return bad("file artifact")
+	}
+	if d := wr.Deck; d != nil {
+		current := d.Questions != nil && d.Questions.Revision == d.QuestionsRevision
+		written := len(wr.Sections) > 0 && !slices.ContainsFunc(wr.Sections, func(s Section) bool { return !s.Written() })
+		switch {
+		case len(wr.Sections) == 0 && (d.Questions != nil || d.Talk != nil):
+			return bad("questions or a talk without an outline")
+		case current && !written:
+			return bad("questions before every slide is written")
 		}
+		return d.validate()
 	}
 	return nil
 }
@@ -829,12 +964,21 @@ func (wr Writing) clone() Writing {
 			t := *s.Text
 			t.Paragraphs = slices.Clone(t.Paragraphs)
 			t.Sources = slices.Clone(t.Sources)
+			t.Bullets = slices.Clone(t.Bullets)
+			t.Columns = slices.Clone(t.Columns)
+			for j, col := range t.Columns {
+				t.Columns[j].Bullets = slices.Clone(col.Bullets)
+			}
 			c.Sections[i].Text = &t
 		}
 	}
 	if wr.File != nil {
 		f := *wr.File
 		c.File = &f
+	}
+	if wr.Deck != nil {
+		d := wr.Deck.clone()
+		c.Deck = &d
 	}
 	return c
 }

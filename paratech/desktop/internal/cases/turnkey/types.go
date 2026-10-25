@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -22,13 +23,14 @@ type Deps struct {
 	Log         *slog.Logger
 }
 
-// WritingDeps are the ports of the writing (TASK-131); every port is required.
+// WritingDeps are the ports of the writing (TASK-131); every port is required but Slides.
 type WritingDeps struct {
 	Writer   Writer
 	Jobs     Jobs
 	JobIDs   JobIDs
 	Profiles Profiles
 	Renderer Renderer
+	Slides   SlideRenderer // nil: a presentation is not written (ErrNotWritable)
 	Lessons  LessonLabels
 	Shelf    Shelf
 
@@ -54,19 +56,30 @@ type WritingView struct {
 	Done       int // «Раздел N из M»: the written sections
 	Total      int
 	Subject    shared.SubjectID   // the library subject whose «ДЗ» gets the file; "" «Входящие»
-	Material   shared.MaterialID  // the file in the library, once done
+	Material   shared.MaterialID  // the file in the library (the .pptx of a presentation), once done
 	Result     shared.ArtifactRef // the ResultCard of the file, once done
+
+	// A presentation (TASK-106): its template, the likely questions and the speaker text .docx once done.
+	Presentation bool
+	Template     cvalues.PresentationTemplate
+	Questions    []work.TalkQuestion
+	Talk         shared.MaterialID
+	TalkResult   shared.ArtifactRef
 }
 
-// SectionView is a section of the outline with its text, when written for its current revision.
+// SectionView is a section of the outline with its text, when written for its current revision. A slide has its Kind,
+// its speaker notes in Paragraphs and its Bullets or Columns.
 type SectionView struct {
 	Number     int
+	Kind       cvalues.SlideKind
 	Title      string
 	Words      int
 	Note       string
 	Written    bool
 	Paragraphs []string
 	Sources    []work.Reference
+	Bullets    []string
+	Columns    []work.Column
 }
 
 // View is a work as the cards and the helper page show it (TASK-130). Every text the reader wrote is untrusted and
@@ -153,14 +166,22 @@ func writingViewOf(w *work.Work) *WritingView {
 	v := &WritingView{Step: w.Next().Kind, Generation: wr.Generation, Topic: wr.Topic, Subject: wr.Snapshot.Subject}
 	v.Done, v.Total = w.Progress()
 	for _, s := range wr.Sections {
-		sv := SectionView{Number: s.Number, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written()}
+		sv := SectionView{Number: s.Number, Kind: s.Kind, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written()}
 		if sv.Written {
 			sv.Paragraphs, sv.Sources = slices.Clone(s.Text.Paragraphs), slices.Clone(s.Text.Sources)
+			sv.Bullets, sv.Columns = slices.Clone(s.Text.Bullets), slices.Clone(s.Text.Columns)
 		}
 		v.Sections = append(v.Sections, sv)
 	}
-	if f := wr.File; f != nil && w.Status() == work.StatusDone {
+	done := w.Status() == work.StatusDone
+	if f := wr.File; f != nil && done {
 		v.Material, v.Result = f.Material, f.ArtifactRef()
+	}
+	if d := wr.Deck; d != nil {
+		v.Presentation, v.Template, v.Questions = true, d.Template, w.TalkQuestions()
+		if d.Talk != nil && done {
+			v.Talk, v.TalkResult = d.Talk.Material, d.Talk.ArtifactRef()
+		}
 	}
 	return v
 }

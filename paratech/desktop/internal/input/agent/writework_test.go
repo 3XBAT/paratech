@@ -105,6 +105,46 @@ func TestWriteWorkUndoOfAFiledPaper(t *testing.T) {
 	}
 }
 
+// A presentation has two files (the .pptx and the speaker text): Undo takes both back to «Входящие»; one the student
+// moved elsewhere refuses the Undo and touches neither; one already in «Входящие» is left as it is.
+func TestWriteWorkUndoOfAPresentation(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		talk        subject.System // "" in «Входящие» already
+		want        action.Status
+		deck, talks bool // in «Входящие» after the Undo
+	}{
+		{"both in ДЗ: both back", subject.SystemHomework, action.StatusUndone, true, true},
+		{"the talk moved by the student: refused", subject.SystemMaterials, action.StatusUndoRefused, false, false},
+		{"the talk in Входящие already: the deck back", "", action.StatusUndone, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w, f := withWriting(t)
+			_, e := act(t, w, writeCall(t, "c1", values.ToolWriteWork, `{"work":"w1"}`))
+			w.jobs.set("job1", job.StatusCompleted)
+			f.generations = map[shared.JobID]int{"job1": 1}
+			deck, talk := w.lib.materials["m1"], w.lib.materials["m2"]
+			if _, err := deck.Place("s1", subject.SystemFolderID("s1", subject.SystemHomework), now); err != nil {
+				t.Fatal(err)
+			}
+			if tt.talk != "" {
+				if _, err := talk.Place("s1", subject.SystemFolderID("s1", tt.talk), now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			v := f.views["w1"]
+			v.Status = work.StatusDone
+			v.Writing = &turnkey.WritingView{Generation: 1, Material: "m1", Talk: "m2", Presentation: true, Done: 10, Total: 10}
+			f.views["w1"] = v
+
+			u, err := w.journal.Undo(t.Context(), e.ID)
+			if err != nil || u.Status != tt.want || deck.InInbox() != tt.deck || talk.InInbox() != tt.talks {
+				t.Fatalf("Undo = %s, %v; deck in inbox %v, talk in inbox %v", u.Status, err, deck.InInbox(), talk.InInbox())
+			}
+		})
+	}
+}
+
 // The agent cannot approve, edit or regenerate the outline for the student: its port has no such method.
 func TestTurnkeyPortHasNoStudentMoves(t *testing.T) {
 	port := reflect.TypeFor[Turnkey]()

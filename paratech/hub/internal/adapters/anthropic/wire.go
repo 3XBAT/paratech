@@ -49,6 +49,7 @@ type wireRequest struct {
 	MaxTokens int64         `json:"max_tokens"`
 	System    string        `json:"system"`
 	Messages  []wireMessage `json:"messages"`
+	Stream    bool          `json:"stream,omitempty"`
 }
 
 type wireMessage struct {
@@ -128,17 +129,21 @@ func readCompletion(resp *http.Response) (values.Completion, error) {
 			text.WriteString(b.Text)
 		}
 	}
-	stop := values.StopOther
-	if r.StopReason != nil {
-		if s, known := stopReasons[*r.StopReason]; known {
-			stop = s
-		}
-	}
-	completion, err := values.NewCompletion(text.String(), usage, stop)
+	completion, err := values.NewCompletion(text.String(), usage, stopReason(r.StopReason))
 	if err != nil {
 		return values.Completion{}, permanent("malformed response")
 	}
 	return completion, nil
+}
+
+// stopReason maps a stop_reason; null and unknown values are StopOther.
+func stopReason(raw *string) values.StopReason {
+	if raw != nil {
+		if s, known := stopReasons[*raw]; known {
+			return s
+		}
+	}
+	return values.StopOther
 }
 
 // toUsage sums all input tokens (base, cache writes, cache reads; nullable cache fields count as 0), as billed.

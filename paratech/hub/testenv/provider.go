@@ -23,15 +23,19 @@ type ProviderStep struct {
 	// Wait, when not nil, holds the call until Wait is closed (then the step is played) or its context ends (then it
 	// fails like Block). It models a slow provider that finishes on its own.
 	Wait chan struct{}
+	// Chunks are the deltas Stream sends first, before Entered and Wait, so a test can act mid-stream; nil sends the
+	// completion output as one chunk when the step succeeds. Complete ignores them.
+	Chunks []string
 }
 
-// FakeProvider is a scripted provider for the gateway's Provider port. Each call takes the next step; a call without
-// a step left fails with a permanent error. Calls are recorded. Safe for concurrent use.
+// FakeProvider is a scripted provider for the gateway's Provider and StreamingProvider ports. Each call takes the next
+// step; a call without a step left fails with a permanent error. Calls are recorded. Safe for concurrent use.
 type FakeProvider struct {
 	mu      sync.Mutex
 	steps   []ProviderStep
 	calls   []values.Request
 	budgets []time.Duration
+	streams int
 }
 
 // NewFakeProvider returns a provider that answers with steps in order.
@@ -49,8 +53,31 @@ func (p *FakeProvider) Push(steps ...ProviderStep) {
 // Complete records req and plays the next step. A context that has already ended fails the call like the real
 // adapter does, without consuming a step.
 func (p *FakeProvider) Complete(ctx context.Context, req values.Request) (values.Completion, error) {
+	return p.play(ctx, req, nil)
+}
+
+// Stream is Complete for the StreamingProvider port: it sends the step's chunks to onDelta from the calling goroutine,
+// then plays the step like Complete. The calls of both methods are recorded together; Streams counts these.
+func (p *FakeProvider) Stream(ctx context.Context, req values.Request, onDelta func(chunk string)) (values.Completion, error) {
+	if onDelta == nil {
+		onDelta = func(string) {}
+	}
+	return p.play(ctx, req, onDelta)
+}
+
+// Streams returns how many recorded calls were Stream calls.
+func (p *FakeProvider) Streams() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.streams
+}
+
+func (p *FakeProvider) play(ctx context.Context, req values.Request, onDelta func(string)) (values.Completion, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, req)
+	if onDelta != nil {
+		p.streams++
+	}
 	budget := time.Duration(-1)
 	if deadline, ok := ctx.Deadline(); ok {
 		budget = time.Until(deadline)
@@ -68,6 +95,11 @@ func (p *FakeProvider) Complete(ctx context.Context, req values.Request) (values
 	p.steps = p.steps[1:]
 	p.mu.Unlock()
 
+	if onDelta != nil {
+		for _, c := range step.Chunks {
+			onDelta(c)
+		}
+	}
 	if step.Entered != nil {
 		close(step.Entered)
 	}
@@ -85,6 +117,9 @@ func (p *FakeProvider) Complete(ctx context.Context, req values.Request) (values
 	case step.Err != nil:
 		return values.Completion{}, step.Err
 	default:
+		if onDelta != nil && step.Chunks == nil && step.Completion.Output() != "" {
+			onDelta(step.Completion.Output())
+		}
 		return step.Completion, nil
 	}
 }

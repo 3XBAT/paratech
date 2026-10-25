@@ -66,7 +66,8 @@ type Clock interface {
 }
 
 // Writer is the strong model that writes a work (TASK-131), through the Hub's homework_draft operation. Implemented
-// by the hubclient adapter. The output is untrusted: only work.ParseOutline and work.ParseSection read it. Errors:
+// by the hubclient adapter. The output is untrusted: only the parsers of work (ParseOutline, ParseSection,
+// ParseSlideOutline, ParseSlide, ParseQuestions) read it. Errors:
 // shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded let the job wait; others are retried or permanent.
 type Writer interface {
 	Complete(ctx context.Context, req cvalues.LLMRequest) (cvalues.LLMResult, error)
@@ -90,6 +91,12 @@ type Profiles interface {
 // Renderer renders a paper as a Word file; the same document gives the same bytes. Implemented by the docx adapter.
 type Renderer interface {
 	Render(ctx context.Context, doc cvalues.Document) ([]byte, error)
+}
+
+// SlideRenderer renders a presentation as a PowerPoint file; the same presentation gives the same bytes. Implemented
+// by the pptx adapter.
+type SlideRenderer interface {
+	Render(ctx context.Context, p cvalues.Presentation) ([]byte, error)
 }
 
 // LessonLabels tells what an assignment shows of its lesson: the subject and the teacher of the title page, from the

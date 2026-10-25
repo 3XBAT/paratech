@@ -1,4 +1,4 @@
-# Anthropic Messages API (non-streaming) — reference for TASK-034
+# Anthropic Messages API — reference for TASK-034 (non-streaming) and TASK-144 (streaming, section 8)
 
 Retrieved: 2026-10-15
 
@@ -155,3 +155,44 @@ Usage: unchanged; cache writes and reads are in `cache_creation_input_tokens` / 
 - current cache write/read prices for Haiku 5.5 and Sonnet 5.5 (section 3 lists multipliers from 2026-10-15);
 - the strict-mode restrictions listed above;
 - the exact charset/length of `tool_use.id` (the Hub accepts 1-128 of `[A-Za-z0-9_-]`).
+
+## 8. Streaming (used by TASK-144)
+
+Retrieved: 2026-10-24 from https://platform.claude.com/docs/en/build-with-claude/streaming (docs.anthropic.com 301-redirects there). Facts below are from that page; anything marked **our inference** is not a doc fact. Not verified against the owner's gateway (ai.starimg.ru) — the TASK-144 probe is that check.
+
+Request: same endpoint and headers, body field `"stream": true`. The response is server-sent events (SSE).
+
+SSE framing: each event is an `event: <name>` line followed by a `data: <json>` line; events are separated by a blank line. The `data` JSON carries a `type` equal to the event name. Example verbatim:
+```
+event: content_block_delta
+data: {"type": "content_block_delta","index": 0,"delta": {"type": "text_delta", "text": "ello frien"}}
+```
+
+Event flow (docs, in order):
+1. `message_start` — a `Message` object with empty `content`. Example: `{"type": "message_start", "message": {"id": "msg_...", "type": "message", "role": "assistant", "content": [], "model": "claude-opus-5-5", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}`. In the thinking example `usage` is absent from `message_start`, so it must be treated as optional.
+2. Content blocks, each: `content_block_start` (`{"type":"content_block_start","index":N,"content_block":{...}}` — e.g. `{"type":"text","text":""}`, `{"type":"tool_use","id":"toolu_...","name":"get_weather","input":{}}`, `{"type":"thinking","thinking":"","signature":""}`), one or more `content_block_delta`, then `content_block_stop` (`{"type":"content_block_stop","index":N}`). `index` = position in the final `content` array. Exception: during server-side fallback a `fallback` block arrives as a start/stop pair with no deltas.
+3. One or more `message_delta` — top-level changes: `{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":89}}`. **The token counts in `message_delta.usage` are cumulative** (docs warning). In the thinking example `usage` is absent here too.
+4. `message_stop` — `{"type":"message_stop"}`.
+
+`ping` events (`{"type": "ping"}`) may appear any number of times anywhere.
+
+Error events can arrive mid-stream (HTTP status is already 200): 
+```
+event: error
+data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+```
+`overloaded_error` "would normally correspond to an HTTP 529 in a non-streaming context". `error.type` values are those of section 4.
+
+Unknown event types: "new event types may be added, and your code should handle unknown event types gracefully."
+
+Delta types (`content_block_delta.delta.type`):
+- `text_delta` — `{"type": "text_delta", "text": "..."}`; append to the `text` block.
+- `input_json_delta` — `{"type": "input_json_delta", "partial_json": "{\"location\":"}`; partial JSON strings for `tool_use.input`; the first delta may be `""`. Accumulate the strings and parse once at `content_block_stop`; the final `input` is always an object. Current models emit one complete key/value at a time, so there may be pauses between events.
+- `thinking_delta` — `{"type": "thinking_delta", "thinking": "..."}`; append to the `thinking` field.
+- `signature_delta` — `{"type": "signature_delta", "signature": "..."}`; sent just before `content_block_stop` of a thinking block; it verifies the block's integrity (so it must be kept with the block for the next turn, section 7). With `display: "omitted"` a thinking block gets one `thinking_delta` with an empty string, then one `signature_delta`.
+
+stop_reason: `null` in `message_start`, delivered in `message_delta.delta.stop_reason` (values as in section 3).
+
+Interrupted streams (docs "Error recovery"): for Claude 4.6+ the documented resume is a NEW request with a user message containing the partial text and an instruction to continue; tool_use and thinking blocks "cannot be partially recovered". **Our inference:** the Hub does not resume; an interrupted stream is a failed attempt like a body cut off mid-answer in the unary adapter (section 6 notes): the reservation is released, nothing is charged, and the call is never retried once a delta went out (ADR-0026, ADR-0010).
+
+**Our inference** for the adapter: read line by line, ignore `ping` and unknown event names, and keep only what the gateway uses: the text of `text_delta`s (also the text of a `content_block_start` text block), the stop reason and the usage (`message_start.usage` input fields + the last cumulative `message_delta.usage` values). It does not rebuild the full Message (thinking, signatures and tool blocks are dropped; `Stream` serves only the ANSWER reader). Apply a response-size cap, and map an `error` event by `error.type` like the HTTP statuses of section 4.

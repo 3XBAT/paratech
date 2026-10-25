@@ -208,21 +208,34 @@ func (a *Actions) checkWriting(ctx context.Context, c action.StopWork) (action.T
 	if gen != v.Writing.Generation {
 		return action.Target{Version: jobVersion + 1}, nil
 	}
-	m, err := a.library.Material(ctx, v.Writing.Material)
-	if err != nil {
-		return action.Target{}, gone(err)
+	files := writingFiles(v.Writing)
+	inbox := 0
+	for _, id := range files {
+		m, err := a.library.Material(ctx, id)
+		if err != nil {
+			return action.Target{}, gone(err)
+		}
+		switch {
+		case m.InInbox():
+			inbox++
+		case m.Folder() != subject.SystemFolderID(m.Subject(), subject.SystemHomework):
+			return action.Target{Version: jobVersion + 1}, nil
+		}
 	}
-	switch {
-	case m.InInbox():
-		return action.Target{Version: jobVersion, Compensated: true}, nil
-	case m.Folder() != subject.SystemFolderID(m.Subject(), subject.SystemHomework):
-		return action.Target{Version: jobVersion + 1}, nil
-	}
-	return action.Target{Version: jobVersion}, nil
+	return action.Target{Version: jobVersion, Compensated: inbox == len(files)}, nil
 }
 
-// stopWork applies a StopWork compensation: a running job is cancelled; a filed paper still in «ДЗ» goes back to
-// «Входящие» in one transaction with the check.
+// writingFiles are the files of a done writing: the paper, or the .pptx and the speaker text of a presentation.
+func writingFiles(w *turnkey.WritingView) []shared.MaterialID {
+	files := []shared.MaterialID{w.Material}
+	if w.Talk != "" {
+		files = append(files, w.Talk)
+	}
+	return files
+}
+
+// stopWork applies a StopWork compensation: a running job is cancelled; the filed files still in «ДЗ» (the paper,
+// or both files of a presentation) go back to «Входящие» in one transaction with the check.
 func (a *Actions) stopWork(ctx context.Context, c action.StopWork, expectedVersion int64) (int64, error) {
 	t, err := a.checkWriting(ctx, c)
 	switch {
@@ -256,8 +269,19 @@ func (a *Actions) stopWork(ctx context.Context, c action.StopWork, expectedVersi
 		if err != nil {
 			return err
 		}
-		_, err = a.library.MoveToInbox(ctx, v.Writing.Material)
-		return changedIfConflict(err)
+		for _, id := range writingFiles(v.Writing) {
+			m, err := a.library.Material(ctx, id)
+			if err != nil {
+				return gone(err)
+			}
+			if m.InInbox() {
+				continue
+			}
+			if _, err := a.library.MoveToInbox(ctx, id); err != nil {
+				return changedIfConflict(err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return 0, err

@@ -8,8 +8,9 @@ import (
 )
 
 // WorkVersion identifies the prompts of the turnkey writing (TASK-131), apart from Version. Bump it on any change of
-// them; the instructions enter the idempotency key of every call (work.StepKey), so a change is a new call.
-const WorkVersion = 1
+// them; the instructions enter the idempotency key of every call (work.StepKey), so a change is a new call. Version 2
+// adds the presentation steps (TASK-106); the prompts of a paper are unchanged.
+const WorkVersion = 2
 
 // WorkStep names the call of a turnkey writing step.
 type WorkStep string
@@ -91,7 +92,7 @@ func WorkInstructions(step WorkStep) string {
 	case WorkSection:
 		return preamble + workRules + workSectionTask + workNoteRule + answerRule + workSectionSchema
 	}
-	return ""
+	return presentationInstructions(step)
 }
 
 // BuildWork builds the request of a writing call. data is the JSON object of the step (work.StepData) and goes

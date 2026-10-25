@@ -10,11 +10,13 @@ import (
 	"paratech/hub/internal/domain/shared"
 )
 
-// Deps are the ports and domain services of the gateway; all are required.
+// Deps are the ports and domain services of the gateway; all are required, except Streamer, which is required only
+// when Config.ProviderStream is on.
 type Deps struct {
 	Accounts Accounts
 	Results  Results
 	Provider Provider
+	Streamer StreamingProvider
 	Limiter  RateLimiter
 	Clock    Clock
 	Random   Random
@@ -33,6 +35,9 @@ type Config struct {
 	// ServerPrompts holds the prompt of each operation with a server prompt (values.Operation.ServerPrompt). Such an
 	// operation without an entry is refused as unavailable.
 	ServerPrompts map[values.Operation]ServerPrompt
+	// ProviderStream makes CompleteStream call StreamingProvider.Stream (HUB_PROVIDER_STREAM, ADR-0026); off, it calls
+	// Provider.Complete and sends the whole output as one chunk.
+	ProviderStream bool
 }
 
 // ServerPrompt is the Hub's own prompt of an operation: the allowlist alias it runs on, the prompt version (in the
@@ -43,7 +48,7 @@ type ServerPrompt struct {
 	Text    string
 }
 
-// Command is one Complete call of the authenticated tester Owner. Operation is a values.Operation string; texts are
+// Command is one Complete or CompleteStream call of the authenticated tester Owner. Operation is a values.Operation string; texts are
 // passed as received and validated by the domain.
 type Command struct {
 	Owner           shared.APIKeyID

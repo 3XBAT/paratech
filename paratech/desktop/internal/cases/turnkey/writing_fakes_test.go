@@ -28,10 +28,11 @@ const (
 )
 
 // fakeWriter answers like the Hub: a key seen before replays its first answer for free; otherwise the next scripted
-// answer, or the outline or a section by the task of the data.
+// answer, the answer of answer when set, or the outline or a section by the task of the data.
 type fakeWriter struct {
 	mu       sync.Mutex
 	scripted []string
+	answer   func(req cvalues.LLMRequest) string
 	seen     map[string]string
 	reqs     []cvalues.LLMRequest
 	err      error
@@ -52,6 +53,8 @@ func (f *fakeWriter) Complete(_ context.Context, req cvalues.LLMRequest) (cvalue
 	case ok:
 	case len(f.scripted) > 0:
 		out, f.scripted = f.scripted[0], f.scripted[1:]
+	case f.answer != nil:
+		out = f.answer(req)
 	case strings.Contains(req.UntrustedData(), `"task":"outline"`):
 		out = outlineAnswer
 	default:
@@ -131,6 +134,19 @@ func (f *fakeRenderer) Render(_ context.Context, doc cvalues.Document) ([]byte, 
 	b.WriteString(doc.Title.Heading + "\n" + doc.Title.Topic + "\n")
 	for _, bl := range doc.Blocks {
 		b.WriteString(strings.Join(bl.Lines, "\n") + "\n")
+	}
+	return []byte(b.String()), nil
+}
+
+// fakeSlides renders a presentation as its slide titles and notes, so a test can read what the deck holds.
+type fakeSlides struct{ decks []cvalues.Presentation }
+
+func (f *fakeSlides) Render(_ context.Context, p cvalues.Presentation) ([]byte, error) {
+	f.decks = append(f.decks, p)
+	var b strings.Builder
+	b.WriteString("pptx:" + string(p.Template) + "\n")
+	for _, s := range p.Slides {
+		b.WriteString(s.Title + "\n" + s.Notes + "\n")
 	}
 	return []byte(b.String()), nil
 }
@@ -268,6 +284,7 @@ type writeEnv struct {
 	writer        *fakeWriter
 	jobs          *fakeJobs
 	renderer      *fakeRenderer
+	slides        *fakeSlides
 	shelf         *fakeShelf
 	materials     fakeMaterials
 	assignmentErr error // the next reads of the assignment fail with it
@@ -276,14 +293,16 @@ type writeEnv struct {
 func newWriteEnv(t *testing.T) *writeEnv {
 	t.Helper()
 	e := newEnv(t)
-	we := &writeEnv{env: e, writer: &fakeWriter{}, jobs: &fakeJobs{}, renderer: &fakeRenderer{}, shelf: &fakeShelf{}}
+	we := &writeEnv{
+		env: e, writer: &fakeWriter{}, jobs: &fakeJobs{}, renderer: &fakeRenderer{}, slides: &fakeSlides{}, shelf: &fakeShelf{},
+	}
 	we.materials = e.svc.materials.(fakeMaterials)
 	svc, err := New(Deps{
 		Works: e.works, Assignments: failingAssignments{Assignments: e.svc.assignments, err: &we.assignmentErr},
 		Materials: writeMaterials{base: we.materials, shelf: we.shelf}, Reader: e.reader,
 		Writing: &WritingDeps{
 			Writer: we.writer, Jobs: we.jobs, JobIDs: &seqJobIDs{}, Profiles: fakeProfiles{}, Renderer: we.renderer,
-			Lessons: fakeLabels{}, Shelf: we.shelf, ModelAlias: "default",
+			Slides: we.slides, Lessons: fakeLabels{}, Shelf: we.shelf, ModelAlias: "default",
 		},
 		Clock: fixedClock{}, IDs: &seqIDs{},
 	})

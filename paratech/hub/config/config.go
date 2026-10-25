@@ -33,6 +33,7 @@ const (
 	EnvAnthropicBaseURL = "HUB_ANTHROPIC_BASE_URL"
 	EnvLLMTimeout       = "HUB_LLM_TIMEOUT"
 	EnvLLMModels        = "HUB_LLM_MODELS"
+	EnvProviderStream   = "HUB_PROVIDER_STREAM"
 
 	EnvRateLimitPerMinute = "HUB_RATE_LIMIT_PER_MINUTE"
 	EnvRateLimitBurst     = "HUB_RATE_LIMIT_BURST"
@@ -142,6 +143,9 @@ type Config struct {
 	// LLMModels is the model allowlist, "alias=model-id:max_output_tokens[,...]" (see Models). Kept as text so that
 	// Config stays comparable.
 	LLMModels string
+	// ProviderStream makes CompleteStream stream from the provider (ADR-0026). Off (the default), CompleteStream makes
+	// one non-streaming call and sends the whole answer at once; the owner turns it on after the gateway probe passes.
+	ProviderStream bool
 	// RateLimitPerMinute is the average number of Complete calls a minute one API key may make.
 	RateLimitPerMinute int
 	// RateLimitBurst is how many calls one API key may make at once.
@@ -238,6 +242,13 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	if v := getenv(EnvLLMModels); v != "" {
 		cfg.LLMModels = v
 	}
+	if v := getenv(EnvProviderStream); v != "" {
+		if b, err := strconv.ParseBool(v); err != nil {
+			envErrs = append(envErrs, fmt.Errorf("%s %q: not a boolean (want true or false)", EnvProviderStream, v))
+		} else {
+			cfg.ProviderStream = b
+		}
+	}
 	for _, d := range []struct {
 		env string
 		dst *time.Duration
@@ -273,6 +284,8 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		"limit of one provider call, 10s..10m, at most half the reservation TTL (env "+EnvLLMTimeout+")")
 	fs.StringVar(&cfg.LLMModels, "llm-models", cfg.LLMModels,
 		"model allowlist alias=model-id:max_output_tokens[,...] (env "+EnvLLMModels+")")
+	fs.BoolVar(&cfg.ProviderStream, "provider-stream", cfg.ProviderStream,
+		"stream answers from the provider in CompleteStream; off sends the whole answer at once (env "+EnvProviderStream+")")
 	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute,
 		"average Complete calls a minute per API key, 1..6000 (env "+EnvRateLimitPerMinute+")")
 	fs.IntVar(&cfg.RateLimitBurst, "rate-limit-burst", cfg.RateLimitBurst,
@@ -603,10 +616,10 @@ func validateDatabaseURL(raw string) error {
 func (c Config) String() string {
 	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
 		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s LLMTimeout:%s LLMModels:%s "+
-		"RateLimitPerMinute:%d RateLimitBurst:%d AgentPlannerAlias:%s AgentStrongAlias:%s AgentSealKeys:%s}",
+		"ProviderStream:%t RateLimitPerMinute:%d RateLimitBurst:%d AgentPlannerAlias:%s AgentStrongAlias:%s AgentSealKeys:%s}",
 		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
 		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels,
-		c.RateLimitPerMinute, c.RateLimitBurst, c.AgentPlannerAlias, c.AgentStrongAlias, redacted(c.AgentSealKeys))
+		c.ProviderStream, c.RateLimitPerMinute, c.RateLimitBurst, c.AgentPlannerAlias, c.AgentStrongAlias, redacted(c.AgentSealKeys))
 }
 
 // GoString is String for %#v, which otherwise prints every field, secrets included.
@@ -630,6 +643,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("anthropic_base_url", printableURL(c.AnthropicBaseURL)),
 		slog.Duration("llm_timeout", c.LLMTimeout),
 		slog.String("llm_models", c.LLMModels),
+		slog.Bool("provider_stream", c.ProviderStream),
 		slog.Int("rate_limit_per_minute", c.RateLimitPerMinute),
 		slog.Int("rate_limit_burst", c.RateLimitBurst),
 		slog.String("agent_planner_alias", c.AgentPlannerAlias),
