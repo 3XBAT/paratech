@@ -27,6 +27,7 @@ type stopTurns struct {
 	askCtx      error          // ctx.Err() of Ask when it returned
 	reason      values.StopReason
 	stops       int
+	continues   int
 	submitted   []agentturn.SubmitInput
 	interrupted []agentturn.SubmitInput
 }
@@ -69,6 +70,7 @@ func (s *stopTurns) Interrupt(_ context.Context, in agentturn.SubmitInput) (agen
 func (s *stopTurns) Continue(context.Context, agentturn.TurnRef) (agentturn.Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.continues++
 	s.reason = ""
 	return s.resumed, nil
 }
@@ -105,7 +107,7 @@ func (s *stopTurns) Cancel(context.Context, agentturn.TurnRef) (agentturn.Step, 
 }
 
 type stopReport struct {
-	stops                  int
+	stops, continues       int
 	submitted, interrupted []agentturn.SubmitInput
 	askCtx                 error
 }
@@ -113,7 +115,8 @@ type stopReport struct {
 func (s *stopTurns) report() stopReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return stopReport{stops: s.stops, submitted: slices.Clone(s.submitted), interrupted: slices.Clone(s.interrupted), askCtx: s.askCtx}
+	return stopReport{stops: s.stops, continues: s.continues, submitted: slices.Clone(s.submitted),
+		interrupted: slices.Clone(s.interrupted), askCtx: s.askCtx}
 }
 
 // lastStop is the reason of the last stopped update the panel got.
@@ -204,6 +207,71 @@ func TestStopBetweenTwoActions(t *testing.T) {
 	}
 	if got := lastStop(sink.all()); got != values.StopUser {
 		t.Fatalf("stop reason = %q, want user", got)
+	}
+}
+
+// «Стоп» during an action, then «Продолжить» before the action returns: the resume is refused as busy (the loop still
+// runs), so the mark stays, the read and the action after the cut call never run, nothing is submitted with missing
+// outcomes and the request ends stopped through Interrupt; once the loop has closed the step «Продолжить» goes through.
+func TestContinueDuringAnActionCutByStop(t *testing.T) {
+	w := newWorld(t)
+	turns := &stopTurns{
+		first: step(thread.StatusExecuting, []agentturn.Call{
+			writeCall(t, "c1", values.ToolCreateSubject, `{"name":"Химия"}`),
+			readCall(t, "c2", values.ToolJobStatus, `{"ids":["j1"]}`),
+			writeCall(t, "c3", values.ToolCreateFolder, `{"subject":"s1","name":"Лабы"}`),
+		}),
+		resumed: step(thread.StatusDone, nil),
+	}
+	sink := &chanSink{}
+	d, err := New(w.deps(turns, sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	w.lib.onCreate = func() {
+		if err := d.Stop(context.Background(), ref1); err != nil {
+			t.Error(err)
+		}
+		d.mu.Lock()
+		m := d.stops[ref1]
+		d.mu.Unlock()
+		<-m.done // the stop is stored and the calls context is cut
+		if err := d.Continue(context.Background(), ref1); err != nil {
+			t.Error(err)
+		}
+	}
+
+	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+
+	rep := turns.report()
+	if rep.stops != 1 || rep.continues != 0 || len(rep.submitted) != 0 || len(rep.interrupted) != 1 {
+		t.Fatalf("report %+v", rep)
+	}
+	if outs := rep.interrupted[0].Outcomes; len(outs) != 1 || outs[0].Result.CallID != "c1" || outs[0].Result.IsError {
+		t.Fatalf("outcomes kept = %+v", outs)
+	}
+	if !slices.Equal(w.lib.calls, []string{"CreateSubject"}) || len(w.activity.asked) != 0 {
+		t.Fatalf("a call ran after «Стоп»: library %v, job_status %v", w.lib.calls, w.activity.asked)
+	}
+	ups := sink.all()
+	if !slices.ContainsFunc(ups, func(u Update) bool { return u.Problem == ProblemBusy && u.Thread == th1 && u.Turn == 1 }) {
+		t.Fatalf("no busy update: %+v", ups)
+	}
+	if got := lastStop(ups); got != values.StopUser {
+		t.Fatalf("stop reason = %q, want user", got)
+	}
+
+	w.lib.onCreate = nil
+	if err := d.Continue(t.Context(), ref1); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	if rep := turns.report(); rep.continues != 1 {
+		t.Fatalf("after the loop ended: report %+v", rep)
 	}
 }
 

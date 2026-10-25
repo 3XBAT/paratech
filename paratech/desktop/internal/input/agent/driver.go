@@ -166,7 +166,8 @@ func New(d Deps) (*Driver, error) {
 }
 
 // opMarks is what an operation does with the «Стоп» marks: an operation that resumes a request clears the marks of
-// its thread, Stop replaces them with its own; Ask (its thread is not known yet) and Cancel (the request ends) keep them.
+// its thread (it is refused as busy while a loop of the thread runs calls), Stop replaces them with its own; Ask (its
+// thread is not known yet) and Cancel (the request ends) keep them.
 type opMarks struct {
 	clear bool
 	stop  *stopping
@@ -268,6 +269,15 @@ func (d *Driver) start(ctx context.Context, at agentturn.Step, marks opMarks, op
 	if d.closed {
 		return ErrClosed
 	}
+	if marks.clear && d.callsRunning(at.Thread) {
+		// A loop of the thread still runs calls (an action finishing after «Стоп») or closes its step: clearing the
+		// mark would let it go on with cut calls and submit partial outcomes. Refusing as busy is simpler than letting
+		// two loops share a request; the student presses again once the loop has closed the step.
+		marks = opMarks{}
+		op = func(context.Context) (agentturn.Step, error) {
+			return agentturn.Step{}, fmt.Errorf("%s: %w", opRequest, thread.ErrTurnInProgress)
+		}
+	}
 	// A «Стоп» drops the older marks of its thread too: Ask keeps them, so they would pile up otherwise.
 	if marks.clear || marks.stop != nil {
 		for ref := range d.stops {
@@ -322,7 +332,18 @@ func (d *Driver) stopRequested(ctx context.Context, ref agentturn.TurnRef) bool 
 	}
 }
 
-// callsContext is the context of the calls loop id runs for ref; «Стоп» cancels it. release must be called after.
+// callsRunning reports whether a loop runs the calls of a request of thread th or closes their step. d.mu is held.
+func (d *Driver) callsRunning(th shared.ThreadID) bool {
+	for ref := range d.inflight {
+		if ref.Thread == th {
+			return true
+		}
+	}
+	return false
+}
+
+// callsContext is the context of the calls loop id runs for ref; «Стоп» cancels it. release must be called once the
+// step of the calls is closed (Submit or Interrupt returned), so a resume never meets a loop that is still closing it.
 func (d *Driver) callsContext(ctx context.Context, id uint64, ref agentturn.TurnRef) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	d.mu.Lock()
@@ -387,27 +408,27 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 			return
 		}
 
-		outcomes, cards, stopped := d.runCalls(ctx, id, st)
+		callCtx, release := d.callsContext(ctx, id, refOf(st))
+		outcomes, cards, stopped := d.runCalls(ctx, callCtx, st)
 		if len(cards) > 0 {
 			d.publish(agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
 		}
 		if ctx.Err() != nil || stopped {
 			d.interrupt(ctx, st, outcomes)
+			release()
 			return
 		}
 		at = agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope}
 		st, err = d.turns.Submit(ctx, agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
+		release()
 	}
 }
 
-// runCalls runs the calls of step st in order and returns their outcomes, the cards they add and whether a stored
-// «Стоп» ended them. No call starts after «Стоп»; a read cut by «Стоп» or by ctx may report a false failure, so it
-// gets no outcome («not done»); an action runs to its end and keeps its real outcome.
-func (d *Driver) runCalls(ctx context.Context, id uint64, st agentturn.Step) ([]agentturn.Outcome, []values.Card, bool) {
+// runCalls runs the calls of step st in order with callCtx and returns their outcomes, the cards they add and whether
+// a stored «Стоп» ended them. No call starts after «Стоп»; a read cut by «Стоп» or by ctx may report a false failure,
+// so it gets no outcome («not done»); an action runs to its end and keeps its real outcome.
+func (d *Driver) runCalls(ctx, callCtx context.Context, st agentturn.Step) ([]agentturn.Outcome, []values.Card, bool) {
 	ref := refOf(st)
-	callCtx, release := d.callsContext(ctx, id, ref)
-	defer release()
-
 	outcomes := make([]agentturn.Outcome, 0, len(st.Calls))
 	var cards []values.Card
 	for _, c := range st.Calls {
@@ -418,11 +439,14 @@ func (d *Driver) runCalls(ctx context.Context, id uint64, st agentturn.Step) ([]
 			return outcomes, cards, true
 		}
 		r := d.tools.run(callCtx, st, c)
-		if callCtx.Err() != nil && !r.write {
-			continue
+		if callCtx.Err() == nil || r.write {
+			outcomes = append(outcomes, r.out)
+			cards = append(cards, r.cards...)
 		}
-		outcomes = append(outcomes, r.out)
-		cards = append(cards, r.cards...)
+		if callCtx.Err() != nil && ctx.Err() == nil {
+			// Only a stored «Стоп» cuts callCtx while ctx lives: the step is closed whatever the mark says now.
+			return outcomes, cards, true
+		}
 	}
 	// A «Стоп» during the last call closes the step too: Submit would start the next Hub step.
 	return outcomes, cards, ctx.Err() == nil && d.stopRequested(ctx, ref)
