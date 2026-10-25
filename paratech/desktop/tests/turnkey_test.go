@@ -19,8 +19,10 @@ import (
 	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/pptx"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -88,7 +90,8 @@ func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
 		Clock: e.clock, IDs: random.IDs{}, Log: log,
 		Writing: &turnkey.WritingDeps{
 			Writer: hub, Jobs: e.jobs, JobIDs: random.IDs{}, Profiles: sqlite.NewSettingsRepository(e.db),
-			Renderer: docx.New(), Lessons: noLessonLabels{}, Shelf: lib, ModelAlias: "default", MaxAttempts: 3,
+			Renderer: docx.New(), Slides: pptx.New(), Lessons: noLessonLabels{}, Shelf: lib, ModelAlias: "default",
+			MaxAttempts: 3,
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -97,7 +100,7 @@ func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
 
 	actions, err := agentloop.NewActions(agentloop.ActionDeps{
 		Library: lib, Lessons: noUseCase{}, Assignments: noUseCase{}, Rerunner: noUseCase{}, Drafts: noUseCase{},
-		Turnkey: e.works, Jobs: noUseCase{}, Canceller: noUseCase{}, Tx: e.db, Clock: e.clock, Log: log,
+		Turnkey: e.works, Jobs: writingJobs{jobs: e.jobs}, Canceller: noUseCase{}, Tx: e.db, Clock: e.clock, Log: log,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +121,23 @@ func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
 	}
 	t.Cleanup(e.driver.Close)
 	return e
+}
+
+// writingJobs reads the states of the writing jobs for the Undo of write_work (TASK-106); nothing else is listed.
+type writingJobs struct{ jobs *sqlite.JobRepository }
+
+func (writingJobs) ListRecordings(context.Context) ([]activity.Recording, error) { return nil, nil }
+
+func (w writingJobs) JobStates(ctx context.Context, ids []shared.JobID) ([]activity.JobState, error) {
+	out := make([]activity.JobState, 0, len(ids))
+	for _, id := range ids {
+		j, err := w.jobs.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, activity.JobState{ID: id, Type: j.Type(), Status: j.Status()})
+	}
+	return out, nil
 }
 
 type noListedAssignments struct{}
