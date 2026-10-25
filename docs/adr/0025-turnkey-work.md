@@ -91,6 +91,23 @@ it cannot do the work whole — then help instead. Everything the model says abo
   slide, the questions, «Сгенерировано — прочитайте перед сдачей»), both filed into the subject's «ДЗ»; Undo of
   `write_work` moves both back to «Входящие» (files kept), refused if the student moved either.
 
+## Addendum (TASK-107): lab reports
+- A confirmed `lab_report` is written by the same `write_work` flow (no Hub, catalog or proto change: `homework_draft`,
+  prompts version 3, steps `lab_outline`/`lab_section`). Each outline section has a `part` (goal, equipment, theory,
+  procedure, results, conclusions, other); the manual's own headings and order win, else the standard structure; at
+  least one results and one conclusions section.
+- The model never writes the student's data: a gap is a paragraph «▢ Вставьте …» (one clean line, ≤ 200 characters,
+  ≤ 20 per section). The domain recognises and checks placeholders strictly; a results section without one is a
+  refused answer (an attempt used). Conclusions are written conditionally (prompt rule).
+- The app, not the model, adds to the .docx: placeholders as highlighted blocks, a note under the conclusions that
+  they depend on the student's data, and the final block «Что доделать самому» (every placeholder by section, the
+  conclusions, an unread manual).
+- The teacher's material reaches the writer as `material_text` in the data block (cut to the writing limit) with
+  `manual` = read | none | not_read (PDF, ADR-0027) | no_text (scan, empty, damaged). An unread manual is told to the
+  writer, shown in the paper and in the view; the report is written from the assignment alone. No PDF reader is added.
+- Storage: `works.writing` gains optional `lab` and section `part` (no migration); a paper's stored form and content
+  key are unchanged; a lab report written as a paper before this stays a paper.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.
