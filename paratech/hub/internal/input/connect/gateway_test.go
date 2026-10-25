@@ -20,6 +20,7 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 	"paratech/hub/internal/domain/quota/account"
 	"paratech/hub/internal/input/connect"
+	"paratech/hub/testenv"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
 	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
 )
@@ -224,19 +225,315 @@ func TestCompleteErrorMapping(t *testing.T) {
 	}
 }
 
-func TestCompleteStreamIsUnimplemented(t *testing.T) {
-	srv := gatewayServer(t, &fakeCompleter{}, nil)
-	stream, err := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL).CompleteStream(t.Context(),
-		withKey(connectrpc.NewRequest(&hubv1.CompleteStreamRequest{}), anyKey))
-	if err == nil {
-		for stream.Receive() {
+// fakeStreamer sends chunks, then answers with res or err, and remembers the commands.
+type fakeStreamer struct {
+	chunks []string
+	res    gateway.Result
+	err    error
+
+	mu   sync.Mutex
+	cmds []gateway.Command
+}
+
+func (f *fakeStreamer) CompleteStream(_ context.Context, cmd gateway.Command, onDelta func(string)) (gateway.Result, error) {
+	f.mu.Lock()
+	f.cmds = append(f.cmds, cmd)
+	f.mu.Unlock()
+	for _, c := range f.chunks {
+		onDelta(c)
+	}
+	return f.res, f.err
+}
+
+// notifyingStreamer reports on done when the use case has returned, whatever happened to the client.
+type notifyingStreamer struct {
+	connect.Streamer
+	done chan error
+}
+
+func (n notifyingStreamer) CompleteStream(ctx context.Context, cmd gateway.Command, onDelta func(string)) (gateway.Result, error) {
+	res, err := n.Streamer.CompleteStream(ctx, cmd, onDelta)
+	n.done <- err
+	return res, err
+}
+
+func streamServer(t *testing.T, s connect.Streamer, log *slog.Logger) *httptest.Server {
+	t.Helper()
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	g, err := connect.NewGateway(&fakeCompleter{}, log, connect.WithCompleteStream(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := connect.NewRouter(connect.Deps{Log: log, Readiness: fakeProbe{}, Auth: acceptAll{}, Gateway: g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func streamRequest(key, data string) *connectrpc.Request[hubv1.CompleteStreamRequest] {
+	return withKey(connectrpc.NewRequest(&hubv1.CompleteStreamRequest{Spec: &hubv1.CompletionSpec{
+		IdempotencyKey: key, OperationType: hubv1.OperationType_OPERATION_TYPE_ANSWER, UntrustedData: data,
+	}}), anyKey)
+}
+
+// readStream reads a whole stream: the deltas joined, how many there were, the result and the end-of-stream error. A
+// delta after the result or a second result fails the test.
+func readStream(t *testing.T, ctx context.Context, client hubv1connect.GatewayServiceClient,
+	req *connectrpc.Request[hubv1.CompleteStreamRequest]) (string, int, *hubv1.CompletionResult, error) {
+	t.Helper()
+	stream, err := client.CompleteStream(ctx, req)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	defer func() { _ = stream.Close() }()
+	var (
+		text   strings.Builder
+		n      int
+		result *hubv1.CompletionResult
+	)
+	for stream.Receive() {
+		if result != nil {
+			t.Fatal("a message after the result")
 		}
-		err = stream.Err()
-		_ = stream.Close()
+		switch e := stream.Msg().GetEvent().(type) {
+		case *hubv1.CompleteStreamResponse_Delta:
+			text.WriteString(e.Delta)
+			n++
+		case *hubv1.CompleteStreamResponse_Result:
+			result = e.Result
+		default:
+			t.Fatalf("event %T", e)
+		}
 	}
-	if connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
-		t.Fatalf("CompleteStream error = %v, want unimplemented", err)
+	return text.String(), n, result, stream.Err()
+}
+
+func TestCompleteStreamSendsDeltasThenTheResult(t *testing.T) {
+	s := &fakeStreamer{chunks: []string{`{"cl`, "aims \xff", `"}`}, res: gateway.Result{
+		Output: `{"claims"}`, InputTokens: 10, OutputTokens: 5, ReservationID: strings.Repeat("ab", 16),
+		Quota: gateway.Snapshot{Unit: "tokens", Remaining: 900, Limit: 1000},
+	}}
+	srv := streamServer(t, s, nil)
+	for codec, opts := range codecs {
+		client := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL, opts...)
+		text, n, r, err := readStream(t, t.Context(), client, streamRequest("ans-1", "data"))
+		if err != nil {
+			t.Fatalf("%s: %v", codec, err)
+		}
+		// Chunks may be joined into fewer deltas, never reordered or changed beyond UTF-8 repair.
+		if text != `{"claims �"}` || n < 1 || n > 3 {
+			t.Fatalf("%s: deltas %q in %d messages", codec, text, n)
+		}
+		if r.GetOutput() != `{"claims"}` || r.GetUsage().GetInputTokens() != 10 || r.GetReservationId() != strings.Repeat("ab", 16) ||
+			r.GetReplayed() || r.GetQuota().GetRemaining().GetValue() != 900 {
+			t.Fatalf("%s: result = %v", codec, r)
+		}
 	}
+	want := gateway.Command{Owner: "00000000000000aa", IdempotencyKey: "ans-1", Operation: "answer", UntrustedData: "data"}
+	if len(s.cmds) != len(codecs) || s.cmds[0] != want {
+		t.Fatalf("commands = %+v, want %+v", s.cmds, want)
+	}
+}
+
+// TestCompleteStreamErrors: an error ends the stream without a result, with the code and detail of Complete.
+func TestCompleteStreamErrors(t *testing.T) {
+	for name, tt := range map[string]struct {
+		err    error
+		code   connectrpc.Code
+		detail hubv1.ErrorCode
+	}{
+		"provider error after deltas": {err: &gateway.ProviderFailedError{Transient: true, Cause: &values.ProviderError{Kind: values.KindTransient, Reason: "overloaded"}},
+			code: connectrpc.CodeUnavailable, detail: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR},
+		"invalid answer": {err: &gateway.ProviderFailedError{Cause: fmt.Errorf("%w: x", gateway.ErrInvalidAnswer)},
+			code: connectrpc.CodeUnavailable, detail: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR},
+		"not streamable":  {err: fmt.Errorf("x: %w", gateway.ErrNotStreamable), code: connectrpc.CodeInvalidArgument},
+		"rate limited":    {err: &gateway.RateLimitedError{RetryAfter: time.Second}, code: connectrpc.CodeResourceExhausted, detail: hubv1.ErrorCode_ERROR_CODE_RATE_LIMITED},
+		"conflict":        {err: gateway.ErrIdempotencyConflict, code: connectrpc.CodeFailedPrecondition, detail: hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT},
+		"hub failure":     {err: errors.New("db down at db.internal:5432"), code: connectrpc.CodeInternal},
+		"invalid request": {err: gateway.ErrInvalidRequest, code: connectrpc.CodeInvalidArgument},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := streamServer(t, &fakeStreamer{chunks: []string{"draft ", "text"}, err: tt.err}, nil)
+			_, _, r, err := readStream(t, t.Context(), hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL), streamRequest("k", "d"))
+			if r != nil {
+				t.Fatalf("a result after the error: %v", r)
+			}
+			code, d, msg := detailOf(t, err)
+			if code != tt.code || (tt.detail != hubv1.ErrorCode_ERROR_CODE_UNSPECIFIED && d.GetCode() != tt.detail) {
+				t.Fatalf("code %v detail %v, want %v %v", code, d, tt.code, tt.detail)
+			}
+			for _, leak := range []string{"overloaded", "db.internal", "draft"} {
+				if strings.Contains(msg, leak) {
+					t.Fatalf("message %q leaks %q", msg, leak)
+				}
+			}
+		})
+	}
+}
+
+const (
+	streamPrompt   = "Answer from the fragments only."
+	streamFragment = "Теорема Ролля: производная обращается в ноль."
+	streamInput    = `{"question":"Что говорит теорема Ролля?","fragments":[{"chunk_id":"rec-1:t00:12:00","text":"` + streamFragment + `"}]}`
+	streamAnswer   = `{"claims":[{"text":"Производная обращается в ноль.","cites":[{"chunk_id":"rec-1:t00:12:00",` +
+		`"quote":"производная обращается в ноль"}]}],"missing":[]}`
+)
+
+// streamChunks is streamAnswer as the model writes it, fenced, in three chunks.
+var streamChunks = []string{"```json\n" + streamAnswer[:20], streamAnswer[20:60], streamAnswer[60:] + "\n```"}
+
+// answerService is the real gateway use case over the testenv fakes with the ANSWER server prompt.
+func answerService(t *testing.T, providerStream bool, log *slog.Logger, steps ...testenv.ProviderStep) (*gateway.Service, *testenv.QuotaStore, *testenv.FakeProvider) {
+	t.Helper()
+	models, err := modelallowlist.New([]modelallowlist.Entry{{Alias: "strong", Model: "claude-strong-model", MaxOutput: 2000}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, provider := testenv.NewQuotaStore(), testenv.NewFakeProvider(steps...)
+	svc, err := gateway.New(gateway.Deps{
+		Accounts: store, Results: store, Provider: provider, Streamer: provider, Limiter: &testenv.FakeLimiter{},
+		Clock: testenv.NewFakeClock(time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)), Random: testenv.Random{}, Models: models, Log: log,
+	}, gateway.Config{
+		Unit: "tokens", Limit: 100_000, ReservationTTL: 10 * time.Minute, KeyRetention: 24 * time.Hour, CallTimeout: 5 * time.Minute,
+		ServerPrompts:  map[values.Operation]gateway.ServerPrompt{values.OperationAnswer: {Alias: "strong", Version: "v1", Text: streamPrompt}},
+		ProviderStream: providerStream,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc, store, provider
+}
+
+func completionStep(t *testing.T, output string, chunks []string) testenv.ProviderStep {
+	t.Helper()
+	u, err := values.NewUsage(900, 120)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := values.NewCompletion(output, u, values.StopEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return testenv.ProviderStep{Completion: c, Chunks: chunks}
+}
+
+// TestCompleteStreamWithTheGatewayService runs the real use case behind the handler: deltas, the canonical result,
+// replays across Complete and CompleteStream, and other operations refused.
+func TestCompleteStreamWithTheGatewayService(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		var logged bytes.Buffer
+		log := slog.New(slog.NewTextHandler(&syncBuffer{w: &logged}, nil))
+		svc, store, provider := answerService(t, on, log, completionStep(t, strings.Join(streamChunks, ""), streamChunks))
+		g, err := connect.NewGateway(svc, log, connect.WithCompleteStream(svc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := connect.NewRouter(connect.Deps{Log: log, Readiness: fakeProbe{}, Auth: acceptAll{}, Gateway: g})
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		client := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
+
+		text, _, r, err := readStream(t, t.Context(), client, streamRequest("ans-1", streamInput))
+		if err != nil || r.GetOutput() != streamAnswer || r.GetReplayed() {
+			t.Fatalf("provider_stream=%t: result %v, err %v", on, r, err)
+		}
+		wantText := streamAnswer // off: the checked output as one delta
+		if on {
+			wantText = strings.Join(streamChunks, "") // on: the model's raw text as it was written
+		}
+		if text != wantText {
+			t.Fatalf("provider_stream=%t: deltas %q, want %q", on, text, wantText)
+		}
+
+		res, err := client.Complete(t.Context(), withKey(connectrpc.NewRequest(&hubv1.CompleteRequest{Spec: streamRequest("ans-1", streamInput).Msg.GetSpec()}), anyKey))
+		if err != nil || !res.Msg.GetResult().GetReplayed() || res.Msg.GetResult().GetOutput() != streamAnswer {
+			t.Fatalf("provider_stream=%t: Complete replay %v, %v", on, res, err)
+		}
+		text, n, r, err := readStream(t, t.Context(), client, streamRequest("ans-1", streamInput))
+		if err != nil || !r.GetReplayed() || text != streamAnswer || n != 1 {
+			t.Fatalf("provider_stream=%t: stream replay %q in %d deltas, %v, %v", on, text, n, r, err)
+		}
+		if len(provider.Calls()) != 1 || (provider.Streams() == 1) != on {
+			t.Fatalf("provider_stream=%t: calls %d, streams %d", on, len(provider.Calls()), provider.Streams())
+		}
+		if used, held := store.Totals("00000000000000aa"); used != 1020 || held != 0 {
+			t.Fatalf("provider_stream=%t: used %d held %d", on, used, held)
+		}
+
+		req := streamRequest("sum-1", "lesson")
+		req.Msg.Spec.OperationType = hubv1.OperationType_OPERATION_TYPE_SUMMARY
+		req.Msg.Spec.Instructions, req.Msg.Spec.ModelAlias = "Summarize.", "strong"
+		if _, _, _, err := readStream(t, t.Context(), client, req); connectrpc.CodeOf(err) != connectrpc.CodeInvalidArgument {
+			t.Fatalf("provider_stream=%t: SUMMARY over CompleteStream = %v, want invalid_argument", on, err)
+		}
+		for _, text := range []string{"Ролля", "обращается", streamPrompt} {
+			if strings.Contains(logged.String(), text) {
+				t.Fatalf("provider_stream=%t: the log holds %q", on, text)
+			}
+		}
+	}
+}
+
+// TestCompleteStreamClientCancelsMidStream: the client cancels after the first delta; the Hub reads the provider to the
+// end, settles once in full and stores the answer; the next call with the key replays it free.
+func TestCompleteStreamClientCancelsMidStream(t *testing.T) {
+	wait, entered := make(chan struct{}), make(chan struct{})
+	step := completionStep(t, strings.Join(streamChunks, ""), streamChunks[:1])
+	step.Wait, step.Entered = wait, entered
+	svc, store, provider := answerService(t, true, slog.New(slog.DiscardHandler), step)
+	done := make(chan error, 4)
+	srv := streamServer(t, notifyingStreamer{Streamer: svc, done: done}, nil)
+	client := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	stream, err := client.CompleteStream(ctx, streamRequest("ans-1", streamInput))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() || stream.Msg().GetDelta() != streamChunks[0] {
+		t.Fatalf("first message %v, err %v; want the first chunk", stream.Msg(), stream.Err())
+	}
+	<-entered
+	cancel()
+	_ = stream.Close()
+	close(wait)
+	if err := <-done; err != nil {
+		t.Fatalf("the use case ended with %v after the cancel, want the call finished", err)
+	}
+	if used, held := store.Totals("00000000000000aa"); used != 1020 || held != 0 {
+		t.Fatalf("used %d held %d, want one full settlement", used, held)
+	}
+
+	text, n, r, err := readStream(t, t.Context(), client, streamRequest("ans-1", streamInput))
+	if err != nil || !r.GetReplayed() || r.GetOutput() != streamAnswer || text != streamAnswer || n != 1 {
+		t.Fatalf("retry %q in %d deltas, result %v, err %v", text, n, r, err)
+	}
+	if len(provider.Calls()) != 1 {
+		t.Fatalf("provider calls = %d", len(provider.Calls()))
+	}
+	if used, _ := store.Totals("00000000000000aa"); used != 1020 {
+		t.Fatalf("the replay was charged: used %d", used)
+	}
+}
+
+// syncBuffer lets the race detector see that log writes and the final read do not overlap.
+type syncBuffer struct {
+	mu sync.Mutex
+	w  *bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }
 
 func TestAgentStepIsUnimplemented(t *testing.T) {
@@ -252,8 +549,8 @@ func TestAgentStepIsUnimplemented(t *testing.T) {
 	}
 }
 
-// TestGatewayExposure pins ADR-0005(f) with the real handler mounted: Complete needs an API key, CompleteStream is
-// unimplemented, the internal quota RPCs are not routed.
+// TestGatewayExposure pins ADR-0005(f) with the real handler mounted: Complete and CompleteStream need an API key,
+// CompleteStream without a streamer is unimplemented, the internal quota RPCs are not routed.
 func TestGatewayExposure(t *testing.T) {
 	svc := &fakeCompleter{res: gateway.Result{Output: "ok", Quota: gateway.Snapshot{Unit: "tokens"}}}
 	srv := gatewayServer(t, svc, nil)
@@ -269,6 +566,20 @@ func TestGatewayExposure(t *testing.T) {
 	}
 	if _, err := client.Complete(t.Context(), completeRequest()); err != nil {
 		t.Fatalf("Complete with a key: %v", err)
+	}
+	if _, _, _, err := readStream(t, t.Context(), client, streamRequest("k", "d")); connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
+		t.Fatalf("CompleteStream without a streamer: %v, want unimplemented", err)
+	}
+
+	s := &fakeStreamer{res: gateway.Result{Quota: gateway.Snapshot{Unit: "tokens"}}}
+	streaming := hubv1connect.NewGatewayServiceClient(srv.Client(), streamServer(t, s, nil).URL)
+	unauthenticated := streamRequest("k", "d")
+	unauthenticated.Header().Del("Authorization")
+	if _, _, _, err := readStream(t, t.Context(), streaming, unauthenticated); connectrpc.CodeOf(err) != connectrpc.CodeUnauthenticated {
+		t.Fatalf("CompleteStream without a key: %v, want unauthenticated", err)
+	}
+	if len(s.cmds) != 0 {
+		t.Fatal("an unauthenticated stream reached the use case")
 	}
 	for _, p := range []string{hubv1connect.QuotaServiceReserveProcedure, hubv1connect.QuotaServiceSettleProcedure, hubv1connect.QuotaServiceReleaseProcedure} {
 		if code := postJSON(t, srv.URL+p, "{}", "Bearer "+anyKey); code != http.StatusNotFound {

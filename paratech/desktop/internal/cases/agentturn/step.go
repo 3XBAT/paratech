@@ -61,6 +61,9 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (Step, error)
 			MaxOutputTokens: MaxOutputTokens,
 		}
 
+		if s.progress != nil {
+			s.progress.Started(ctx, progressOf(c.th))
+		}
 		reply, err := s.model.Step(ctx, req)
 		if err == nil {
 			err = reply.Validate()
@@ -124,20 +127,30 @@ func (s *Service) fail(ctx context.Context, c *change, cause error, silent bool)
 	return false, nil
 }
 
+// progressOf is the request state a Progress gets: no calls, no cards.
+func progressOf(th *thread.Thread) Step {
+	turn, _ := th.Turn()
+	return Step{Thread: th.ID(), Turn: turn.Number(), Scope: turn.Scope(), Status: turn.Status(), StopReason: turn.StopReason()}
+}
+
 // abort stores the request stopped (step open, so it can be repeated) after a local failure in the middle of a step;
-// the work of the step is dropped.
+// the work of the step is dropped. The stored request comes back with the error, so the panel shows what is stored.
 func (s *Service) abort(ctx context.Context, c *change, op string, reason values.StopReason, cause error) (Step, error) {
-	th, err := s.threads.Get(context.WithoutCancel(ctx), c.th.ID())
-	if err == nil {
-		c = &change{th: th}
-		if turn, _ := th.Turn(); running(turn) {
-			err = th.Stop(reason, s.clock.Now())
+	ctx = context.WithoutCancel(ctx)
+	th, err := s.threads.Get(ctx, c.th.ID())
+	if err != nil {
+		return Step{}, fmt.Errorf("%s: %w", op, errors.Join(cause, err))
+	}
+	stored := &change{th: th}
+	if turn, _ := th.Turn(); running(turn) {
+		if err := th.Stop(reason, s.clock.Now()); err != nil {
+			return Step{}, fmt.Errorf("%s: %w", op, errors.Join(cause, err))
 		}
-		if err == nil {
-			err = s.save(context.WithoutCancel(ctx), c)
+		if err := s.save(ctx, stored); err != nil {
+			return Step{}, fmt.Errorf("%s: %w", op, errors.Join(cause, err))
 		}
 	}
-	return Step{}, fmt.Errorf("%s: %w", op, errors.Join(cause, err))
+	return stepOf(stored), fmt.Errorf("%s: %w", op, cause)
 }
 
 // finish saves the change and returns the step.
@@ -149,7 +162,8 @@ func (s *Service) finish(ctx context.Context, c *change, op string) (Step, error
 }
 
 // conflict handles a failed save. A version conflict means «Стоп» saved meanwhile: the stored, stopped request wins
-// and the reply of the step is dropped (its step stays open, so «Продолжить» replays it for free).
+// and the reply of the step is dropped (its step stays open, so «Продолжить» replays it for free). Another stored
+// state comes back with the error, so the panel shows what is stored.
 func (s *Service) conflict(ctx context.Context, c *change, op string, err error) (Step, error) {
 	if !errors.Is(err, shared.ErrVersionConflict) {
 		return Step{}, fmt.Errorf("%s: %w", op, err)
@@ -161,7 +175,7 @@ func (s *Service) conflict(ctx context.Context, c *change, op string, err error)
 	if turn, ok := th.Turn(); ok && turn.Status() == thread.StatusStopped {
 		return stepOf(&change{th: th}), nil
 	}
-	return Step{}, fmt.Errorf("%s: %w", op, err)
+	return stepOf(&change{th: th}), fmt.Errorf("%s: %w", op, err)
 }
 
 // base is the shared context of every step: the subjects, today and the time zone of the student.

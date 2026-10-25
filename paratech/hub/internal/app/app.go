@@ -177,16 +177,17 @@ func (a *App) runServer(ctx context.Context) error {
 		return err
 	}
 	gatewaySvc, err := gateway.New(gateway.Deps{
-		Accounts: db.QuotaAccounts(), Results: db.QuotaAccounts(), Provider: a.llm.provider, Limiter: a.llm.limiter,
-		Clock: clock.System{}, Random: random.Source{}, Models: a.llm.models, Log: a.log,
+		Accounts: db.QuotaAccounts(), Results: db.QuotaAccounts(), Provider: a.llm.provider, Streamer: a.llm.provider,
+		Limiter: a.llm.limiter, Clock: clock.System{}, Random: random.Source{}, Models: a.llm.models, Log: a.log,
 	}, gateway.Config{
 		Unit: a.cfg.QuotaUnit, Limit: a.cfg.QuotaLimit, ReservationTTL: a.cfg.QuotaReservationTTL,
 		KeyRetention: a.cfg.IdempotencyRetention, CallTimeout: a.cfg.LLMTimeout, ServerPrompts: a.agent.serverPrompts,
+		ProviderStream: a.cfg.ProviderStream,
 	})
 	if err != nil {
 		return err
 	}
-	var gatewayOpts []connect.GatewayOption
+	gatewayOpts := []connect.GatewayOption{connect.WithCompleteStream(gatewaySvc)}
 	toPurge := purgers{gatewaySvc}
 	if a.agent.sealer != nil {
 		agentSvc, err := agentstep.New(agentstep.Deps{
@@ -224,7 +225,7 @@ func (a *App) runServer(ctx context.Context) error {
 		<-purged
 	}()
 
-	a.log.Info("hub started", "log_level", a.cfg.LogLevel, "listen_addr", ln.Addr().String())
+	a.log.Info("hub started", "log_level", a.cfg.LogLevel, "listen_addr", ln.Addr().String(), "provider_stream", a.cfg.ProviderStream)
 	err = serve(ctx, a.log, newServer(handler, a.log), ln, a.cfg.ShutdownTimeout)
 	a.log.Info("hub stopped")
 	return err

@@ -165,8 +165,9 @@ func TestAPIKeyLifecycleAgainstPostgres(t *testing.T) {
 	if err := getRemaining(t, base, key); err != nil {
 		t.Fatalf("GetRemaining with the key = %v, want the snapshot", err)
 	}
-	if err := completeStream(t, base, key); connectrpc.CodeOf(err) != connectrpc.CodeUnimplemented {
-		t.Fatalf("CompleteStream with the key = %v, want unimplemented", err)
+	// CompleteStream is served (ADR-0026): an empty spec gets past authentication and is refused by the use case.
+	if err := completeStream(t, base, key); connectrpc.CodeOf(err) != connectrpc.CodeInvalidArgument {
+		t.Fatalf("CompleteStream with the key = %v, want invalid_argument", err)
 	}
 	requireInvalidKey(t, getRemaining(t, base, ""))
 

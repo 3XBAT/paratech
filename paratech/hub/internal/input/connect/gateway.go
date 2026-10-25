@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	connectrpc "connectrpc.com/connect"
@@ -13,6 +14,7 @@ import (
 	"paratech/hub/internal/cases/gateway"
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/values"
+	"paratech/hub/internal/domain/shared"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
 	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
 )
@@ -31,6 +33,8 @@ const (
 	msgNoInstructions  = "the operation takes no instructions: the Hub uses its own prompt"
 	msgServerAlias     = "the operation runs on the Hub's model alias: send none or that one"
 	msgUnavailableOp   = "the operation is not available on this Hub"
+	msgNotStreamable   = "only the answer operation is streamed: use Complete"
+	msgStreamDisabled  = "CompleteStream is not served by this Hub"
 )
 
 // Completer is what the gateway handler needs from the gateway use case (ARCH-42).
@@ -38,13 +42,18 @@ type Completer interface {
 	Complete(ctx context.Context, cmd gateway.Command) (gateway.Result, error)
 }
 
-// Gateway serves GatewayService.Complete and, when an agent stepper is given, AgentStep (ADR-0023). CompleteStream
-// stays unimplemented: the provider port has no streaming yet (ADR-0010).
+// Streamer is what the CompleteStream handler needs from the gateway use case. onDelta must not block.
+type Streamer interface {
+	CompleteStream(ctx context.Context, cmd gateway.Command, onDelta func(chunk string)) (gateway.Result, error)
+}
+
+// Gateway serves GatewayService.Complete and, when given, CompleteStream (ADR-0026) and AgentStep (ADR-0023).
 type Gateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
-	svc   Completer
-	agent AgentStepper
-	log   *slog.Logger
+	svc    Completer
+	stream Streamer
+	agent  AgentStepper
+	log    *slog.Logger
 }
 
 var _ hubv1connect.GatewayServiceHandler = (*Gateway)(nil)
@@ -55,6 +64,11 @@ type GatewayOption func(*Gateway)
 // WithAgentStep serves AgentStep with a. Without it AgentStep answers unimplemented.
 func WithAgentStep(a AgentStepper) GatewayOption {
 	return func(g *Gateway) { g.agent = a }
+}
+
+// WithCompleteStream serves CompleteStream with s. Without it CompleteStream answers unimplemented.
+func WithCompleteStream(s Streamer) GatewayOption {
+	return func(g *Gateway) { g.stream = s }
 }
 
 // NewGateway builds the handler.
@@ -76,29 +90,148 @@ func (g *Gateway) Complete(ctx context.Context, req *connectrpc.Request[hubv1.Co
 	if !ok || owner == "" {
 		return nil, rejectedError() // the auth middleware is missing; fail closed
 	}
-	spec := req.Msg.GetSpec()
-	res, err := g.svc.Complete(ctx, gateway.Command{
-		Owner: owner, IdempotencyKey: spec.GetIdempotencyKey(), Operation: operationOf(spec.GetOperationType()),
-		ModelAlias: spec.GetModelAlias(), Instructions: spec.GetInstructions(), UntrustedData: spec.GetUntrustedData(),
-		MaxOutputTokens: int64(spec.GetMaxOutputTokens()),
-	})
+	res, err := g.svc.Complete(ctx, commandOf(owner, req.Msg.GetSpec()))
 	if err != nil {
 		return nil, g.completeError(ctx, err)
 	}
+	result, err := g.resultOf(ctx, res)
+	if err != nil {
+		return nil, err
+	}
+	return connectrpc.NewResponse(&hubv1.CompleteResponse{Result: result}), nil
+}
 
+// CompleteStream runs one ANSWER completion and streams it (ADR-0026, gateway.proto): deltas, then the result. The
+// use case never waits for the client: chunks are queued and sent by a separate goroutine, so a slow or gone client
+// does not hold the provider call. After an error no queued delta is sent.
+func (g *Gateway) CompleteStream(ctx context.Context, req *connectrpc.Request[hubv1.CompleteStreamRequest],
+	stream *connectrpc.ServerStream[hubv1.CompleteStreamResponse]) error {
+	if g.stream == nil {
+		return connectrpc.NewError(connectrpc.CodeUnimplemented, errors.New(msgStreamDisabled))
+	}
+	owner, ok := APIKeyFrom(ctx)
+	if !ok || owner == "" {
+		return rejectedError() // the auth middleware is missing; fail closed
+	}
+
+	out := newDeltaSender(func(chunk string) error {
+		return stream.Send(&hubv1.CompleteStreamResponse{Event: &hubv1.CompleteStreamResponse_Delta{Delta: strings.ToValidUTF8(chunk, "�")}})
+	})
+	res, err := g.stream.CompleteStream(ctx, commandOf(owner, req.Msg.GetSpec()), out.push)
+	if err != nil {
+		_ = out.finish(true)
+		return g.completeError(ctx, err)
+	}
+	if err := out.finish(false); err != nil {
+		// The client is gone; the call is settled and stored, a retry with the key replays it.
+		return connectrpc.NewError(connectrpc.CodeCanceled, errors.New(msgCanceled))
+	}
+	result, err := g.resultOf(ctx, res)
+	if err != nil {
+		return err
+	}
+	return stream.Send(&hubv1.CompleteStreamResponse{Event: &hubv1.CompleteStreamResponse_Result{Result: result}})
+}
+
+// commandOf maps a spec to the use case command of owner.
+func commandOf(owner shared.APIKeyID, spec *hubv1.CompletionSpec) gateway.Command {
+	return gateway.Command{
+		Owner: owner, IdempotencyKey: spec.GetIdempotencyKey(), Operation: operationOf(spec.GetOperationType()),
+		ModelAlias: spec.GetModelAlias(), Instructions: spec.GetInstructions(), UntrustedData: spec.GetUntrustedData(),
+		MaxOutputTokens: int64(spec.GetMaxOutputTokens()),
+	}
+}
+
+// resultOf encodes a result of the use case.
+func (g *Gateway) resultOf(ctx context.Context, res gateway.Result) (*hubv1.CompletionResult, error) {
 	quota, err := quotaToProto(res.Quota.Unit, res.Quota.Remaining, res.Quota.Reserved, res.Quota.Limit)
 	if err != nil {
 		g.log.ErrorContext(ctx, "completion quota cannot be encoded", "err", err)
 		return nil, connectrpc.NewError(connectrpc.CodeInternal, errors.New(msgInternal))
 	}
-	return connectrpc.NewResponse(&hubv1.CompleteResponse{Result: &hubv1.CompletionResult{
+	return &hubv1.CompletionResult{
 		// Protobuf strings must be UTF-8; the output stays untrusted text for the client to validate.
 		Output:        strings.ToValidUTF8(res.Output, "�"),
 		Usage:         &hubv1.Usage{InputTokens: res.InputTokens, OutputTokens: res.OutputTokens},
 		Quota:         quota,
 		ReservationId: res.ReservationID,
 		Replayed:      res.Replayed,
-	}}), nil
+	}, nil
+}
+
+// deltaSender sends the chunks of one stream from its own goroutine. push never blocks: chunks that arrive while a
+// send is in flight are joined into the next delta. The first send error stops it (the client is gone).
+type deltaSender struct {
+	send func(string) error
+	wake chan struct{}
+	done chan struct{}
+
+	mu      sync.Mutex
+	pending strings.Builder
+	closed  bool
+	err     error
+}
+
+func newDeltaSender(send func(string) error) *deltaSender {
+	d := &deltaSender{send: send, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	go d.loop()
+	return d
+}
+
+// push queues chunk; after finish or a send error it is dropped.
+func (d *deltaSender) push(chunk string) {
+	d.mu.Lock()
+	if !d.closed && d.err == nil {
+		d.pending.WriteString(chunk)
+	}
+	d.mu.Unlock()
+	d.signal()
+}
+
+// finish stops the sender after it has sent what is queued, or dropped it when discard is set, and returns the send
+// error. It waits for a send in flight, so nothing is sent after it returns.
+func (d *deltaSender) finish(discard bool) error {
+	d.mu.Lock()
+	d.closed = true
+	if discard {
+		d.pending.Reset()
+	}
+	d.mu.Unlock()
+	d.signal()
+	<-d.done
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.err
+}
+
+func (d *deltaSender) signal() {
+	select {
+	case d.wake <- struct{}{}:
+	default: // a wake-up is already due
+	}
+}
+
+func (d *deltaSender) loop() {
+	defer close(d.done)
+	for range d.wake {
+		d.mu.Lock()
+		chunk, closed := d.pending.String(), d.closed
+		d.pending.Reset()
+		d.mu.Unlock()
+
+		if chunk != "" {
+			if err := d.send(chunk); err != nil {
+				d.mu.Lock()
+				d.err = err
+				d.mu.Unlock()
+				return
+			}
+		}
+		if closed {
+			return
+		}
+	}
 }
 
 // completeError maps a gateway error to its Connect code and ErrorDetail (ADR-0005(c), errors.proto).
@@ -139,6 +272,8 @@ func (g *Gateway) completeError(ctx context.Context, err error) error {
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgNoInstructions))
 	case errors.Is(err, values.ErrAliasMismatch):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgServerAlias))
+	case errors.Is(err, gateway.ErrNotStreamable):
+		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgNotStreamable))
 	case errors.Is(err, gateway.ErrOperationUnavailable):
 		return connectrpc.NewError(connectrpc.CodeInvalidArgument, errors.New(msgUnavailableOp))
 	case errors.Is(err, modelallowlist.ErrModelNotAllowed):

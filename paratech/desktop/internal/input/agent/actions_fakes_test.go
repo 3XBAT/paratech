@@ -297,9 +297,15 @@ type memJobs struct {
 	err      error
 	stuck    bool // Cancel refuses (a running job of an uncancellable type)
 	existing bool // Retry and RedoSummary find the job of an earlier start (created false)
+	cancels  int  // Cancel calls
+	// onStart, when set, runs when a job starts (to press «Стоп» meanwhile).
+	onStart func()
 }
 
 func (j *memJobs) start(what string) (shared.JobID, error) {
+	if j.onStart != nil {
+		j.onStart()
+	}
 	if j.err != nil {
 		return "", j.err
 	}
@@ -328,6 +334,7 @@ func (j *memJobs) set(id shared.JobID, st job.Status) {
 }
 
 func (j *memJobs) Cancel(_ context.Context, id shared.JobID) error {
+	j.cancels++
 	for _, s := range j.activity.jobs {
 		if s.ID != id {
 			continue

@@ -3004,7 +3004,7 @@
                 "GOOS=windows go vet ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-141",
@@ -3111,7 +3111,7 @@
             "dependencies": [
                 "TASK-144"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-146",
@@ -3178,6 +3178,445 @@
                 "TASK-147"
             ],
             "status": "pending"
+        },
+        {
+            "id": "TASK-149",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Агрегат library/note («Мой конспект» лекции): предмет, якорь (запись / пара расписания / дата / без даты) со снимком, части-материалы, хранение в SQLite",
+            "acceptance_criteria": [
+                "ADR-0027 «Model», черновик docs/tasks/TASK-149-note-aggregate.md; жёсткое правило 5",
+                "shared.NoteID; note.New/Restore: предмет обязателен, заголовок в одну строку ≤ 120 символов, 1…200 частей (ID материалов без повторов), статус active/removed таблицей переходов (ARCH-19)",
+                "Якорь: recording, lesson, day, undated; у каждого снимок (дата, вид пары, заголовок); FallBackToDay() для удалённой записи или пары",
+                "Методы AddParts, ReplacePart, Reorder, Reanchor, Retitle, Remove, Restore; недопустимые ходы — sentinel-ошибки; тесты на все переходы (ARCH-62)",
+                "Миграция notes + note_parts (FK на materials; у якоря нет FK на записи и пары, очистка ADR-0018 и переимпорт расписания конспекты не трогают); Save с версией, Get, ListBySubject, ListByRecording, ListByLesson; тесты на настоящем SQLite; строка note в §12 docs/architecture.md",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/adapters/sqlite/... и тест архитектуры",
+                "sqlc generate без дрейфа"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-150",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Текст конспектов: Markdown (экспорт Obsidian/Notion) и заголовки DOCX как разделы-локаторы, кэш извлечённого текста",
+            "acceptance_criteria": [
+                "ADR-0027 «Text», черновик docs/tasks/TASK-150-note-text-sections.md; ADR-0019 (без индекса), ADR-0022",
+                "LocatorSection («Раздел»): фрагмент начинается со своего заголовка",
+                "Чистый разбор Markdown в домене: front matter убирается, его date/subject/tags отдаются только как подсказки; [[x|y]] → y, вложения и HTML убираются; заголовки # … ### дают разделы, если их не меньше двух; обычный TXT не меняется",
+                "DOCX: абзацы со стилями Heading 1–3 дают разделы",
+                "Извлечённый текст кэшируется производным артефактом по дайджесту через Storage Manager, битый кэш пересобирается из файла; fuzz-тест разбора Markdown; фикстура с командой в тексте остаётся данными",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/adapters/doctext/... ./desktop/internal/cases/library/... и тест архитектуры"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-151",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] cases/notes и биндинг NotesService: добавить файлы или вставленный текст к лекции, заменить, упорядочить, перепривязать, удалить с отменой",
+            "acceptance_criteria": [
+                "ADR-0027 «Model», «Trust, storage, deletion, limits», черновик docs/tasks/TASK-151-notes-usecase.md; ARCH-20, ARCH-44; жёсткие правила 3 и 5",
+                "Add, Paste (TXT-материал ≤ 1 МиБ), ReplacePart, Reorder, Reanchor, Retitle, Remove, Restore, ForLesson, ForSubject",
+                "Материалы через порт, реализованный library.Service (связка в app): импорт по sha256 (те же байты — «уже добавлено»), часть из «Входящих» кладётся в «Лекции»/«Семинары»/«Лабораторные» по виду пары, разложенная в другую папку остаётся там",
+                "Якорь проверяется через порты (запись завершена и не помечена на удаление; пара существует); конспект удалённой записи или пары читается по снимку как day, очистка ADR-0018 не меняется и конспект не удаляет",
+                "Биндинг: диалог открытия с множественным выбором (API Wails v3 сверить с docs/refs/wails.md или исходником), перетаскивание на лекцию через allow-list TASK-138; пути не уходят на страницу; имена файлов — только текст для показа; frontend/src/bindings/notes.ts",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/notes/... ./desktop/internal/cases/library/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-149"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-152",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] «База знаний» видит конспекты: лекции без записи по предмету и дате, поиск по тексту студента, экспорт предмета с «Мой конспект»",
+            "acceptance_criteria": [
+                "ADR-0027 «Knowledge base, answers, tickets», черновик docs/tasks/TASK-152-notes-in-knowledge-base.md; ADR-0019, ADR-0024",
+                "Ключ урока базы: запись или лекция только с конспектом (lesson:<id>, day:<предмет>:<дата>, note:<id> без даты); конспект записи или пары с записью присоединяется к уроку этой записи",
+                "Document получает фрагменты конспектов (конспект, материал, локатор, текст); попадания раздела ownNote с пометкой происхождения; лимиты ADR-0019 сохраняются",
+                "Экспорт предмета включает «Мой конспект» каждой лекции с пометкой, что это текст студента; удалённые конспекты и материалы не попадают, битая часть пропускается с записью в лог",
+                "Тесты домена (группировка, ключи, порядок по дате, без даты в конце) и use case на фейках",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/knowledgebase/... ./desktop/internal/input/wails/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-149",
+                "TASK-150"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-153",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Ответы ссылаются на конспект студента («ваш конспект · стр./раздел N»), конспекты учитываются в покрытии билетов",
+            "acceptance_criteria": [
+                "ADR-0027 «Knowledge base, answers, tickets», черновик docs/tasks/TASK-153-notes-citations-coverage.md; ADR-0022, ADR-0025 (билеты), TASK-118; жёсткое правило 3",
+                "answer.Source: раздел ownNote с ID конспекта, материала и локатором (вид, N); запись для него пуста, для остальных обязательна; ответы TASK-118 загружаются как раньше",
+                "Passages берёт фрагменты конспектов; при равном счёте фрагмент студента выше конспекта paratech; проверка цитат не меняется, цитата только из конспекта действительна",
+                "Билеты: билет, ответ на который опирается на конспект, covered; текст непокрытого — «нет в ваших лекциях и конспектах»",
+                "Фикстура: команда во фрагменте конспекта остаётся данными, планировщик получает только счётчики; промпты Hub не меняются",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/answering/... ./desktop/internal/cases/tickets/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-152"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-154",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Конспекты · UI] Блок «Мой конспект» на странице лекции: файлы, вставка текста, перетаскивание, рядом с «Конспектом» paratech, без смешивания",
+            "acceptance_criteria": [
+                "ADR-0027 «Coexistence», «Trust», черновик docs/tasks/TASK-154-lesson-own-notes-ui.md; ARCH-44",
+                "«Добавить файлы», «Вставить текст» (с видимым лимитом), перетаскивание; части с именем, типом и числом разделов/страниц/фрагментов; «уже добавлено» для дубликатов",
+                "Текст студента и «Конспект» paratech — отдельные блоки с метками «ваш конспект» / «paratech»; тексты только текстовыми узлами (никогда HTML или ссылки Markdown)",
+                "Замена, порядок, удаление с «Отменить»; отказы по-русски из причин биндинга",
+                "Тесты: модель вида, дубликат, удаление/отмена, отсутствие HTML-инъекции",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-151"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-155",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Конспекты · UI] Лекции без записи в предмете, «Добавить конспект прошедшей пары», подписи источников «ваш конспект · стр. 3» в поиске, ответах и билетах",
+            "acceptance_criteria": [
+                "ADR-0027 «Knowledge base, answers, tickets», черновик docs/tasks/TASK-155-kb-own-notes-ui.md",
+                "Предмет показывает записанные лекции и лекции только с конспектом по дате, «без даты» в конце, с меткой «ваш конспект»",
+                "«Добавить конспект прошедшей пары»: прошедшая пара предмета, дата или «без даты», затем открывается блок TASK-154",
+                "Попадания поиска и цитаты ответа раздела ownNote: «ваш конспект · стр. 3» / «· раздел „…“» / «· фрагмент 2», открывают конспект в этом месте; удалённый источник — «источник удалён»",
+                "Тесты подписей, порядка и сценария добавления",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-152",
+                "TASK-153",
+                "TASK-154"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-156",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Текст PDF на чистом Go с локаторами страниц; PDF без текстового слоя — «скан, текст не извлечён»",
+            "acceptance_criteria": [
+                "ADR-0027 «Text», вопрос 5 владельцу; дополняет ADR-0024 «Text extraction»; черновик docs/tasks/TASK-156-pdf-text.md; жёсткие правила 1 и 9",
+                "Одна зависимость на чистом Go (без CGO), лицензия MIT/BSD/Apache, выбрана по исходнику и записана в дополнении ADR-0027 с версией и причиной; если ни одна не читает кириллицу с ToUnicode надёжно — остановиться и сообщить",
+                "Локаторы страниц; лимиты ADR-0024 плюс предел страниц и время на файл; паника библиотеки перехватывается, файл failed",
+                "Фикстуры: PDF с кириллицей, скан без текста, зашифрованный, битый (fuzz без паник)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/doctext/... ./desktop/internal/domain/library/... и тест архитектуры (включая отсутствие CGO)"
+            ],
+            "dependencies": [
+                "TASK-150"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-157",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Импорт конспектов · ядро] Сопоставление файлов с прошедшими парами без модели: notematch (предмет, дата, пара, уверенность, причины) и pastslots (недельный шаблон назад до начала семестра)",
+            "acceptance_criteria": [
+                "ADR-0027 «Bulk import», вопрос 2 владельцу; черновик docs/tasks/TASK-157-note-matching.md; ARCH-11, ARCH-15, ARCH-17",
+                "schedule/services/pastslots: группы текущих пар по предмету, дню недели, времени и виду, период неделя или две, проекция назад до начала семестра; помечены как предполагаемые; не больше 400; в расписание и Google не пишутся",
+                "library/services/notematch: предмет по папкам, front matter и имени через subjectmatch; дата по front matter, имени или первым строкам (дд.мм.гггг, гггг-мм-дд, «12 сентября»); время файла — только слабый довод; лекция — запись или пара этого предмета и даты, иначе предполагаемая, иначе day, иначе undated",
+                "Уверенность sure / likely / none и перечисление причин; две пары в один день — likely с обеими",
+                "Табличные тесты: «ё», алиасы, неоднозначный предмет, двухнедельный шаблон, имя ежедневной заметки Obsidian, имя файла с командой",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/domain/schedule/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-149"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-158",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Импорт конспектов · ядро] Адаптер notesource: чтение выбранной папки (хранилище Obsidian, распакованный экспорт Notion) и .zip с лимитами, только чтение",
+            "acceptance_criteria": [
+                "ADR-0027 «Bulk import», «Limits», черновик docs/tasks/TASK-158-notesource-adapter.md; ARCH-31, ARCH-33; ревью безопасности (пути)",
+                "Обход: глубина ≤ 8, ≤ 5000 записей, ≤ 500 файлов, ≤ 2 ГиБ; скрытые, .obsidian, .trash, .git, node_modules пропускаются; точки повторной обработки (симлинки, junction, незагруженные файлы OneDrive) не открываются и сообщаются; открытие только на чтение",
+                "Zip: ≤ 1 ГиБ распакованного, сжатие ≤ 100:1 на запись, имена очищены (без .., абсолютных путей, дисков, NUL), вложенные zip не открываются",
+                "Запись: относительный путь (для показа и подсказок), размер, reader; тип определяется позже по содержимому",
+                "Тесты на Windows с настоящими junction во временном каталоге; на других ОС сборка (заглушка при необходимости)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/notesource/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-159",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Импорт конспектов · ядро] Пакет импорта: файлы, папка, zip или перетаскивание → предложения по лекциям → правки студента → добавление задачей по одному файлу за шаг",
+            "acceptance_criteria": [
+                "ADR-0027 «Bulk import», черновик docs/tasks/TASK-159-notes-import-batch.md; PRD §11.2 (превью и подтверждение), §7; ARCH-23; жёсткие правила 5 и 7",
+                "Агрегат library/importbatch: ≤ 500 элементов; draft → committing → done | cancelled таблицей; на элемент — предложение notematch, выбор студента (предмет, якорь, пропуск), итог; тесты на все переходы",
+                "Байты складываются в хранилище по sha256; файл, уже входящий в конспект, — duplicate; неподдерживаемые типы перечислены с причиной; пакет переживает перезапуск",
+                "Proposals, Choose, ChooseMany, CreateSubjectFromSuggestion (через порт библиотеки), Commit, Cancel; биндинг и frontend/src/bindings/notesImport.ts",
+                "Commit — задача notes_import, один элемент за шаг очереди (job.Yield как TASK-097), элемент добавляется один раз; отмена удаляет складированные байты, на которые не ссылается материал; ни текст, ни имя файла, ни путь не уходят в Hub",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/notesimport/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-151",
+                "TASK-157",
+                "TASK-158"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-160",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Импорт конспектов · UI] Экран проверки импорта: куда пойдёт каждый файл, быстрые исправления по строке и группой, «создать предмет» из расписания, добавление с прогрессом",
+            "acceptance_criteria": [
+                "ADR-0027 «Bulk import», вопрос 9 владельцу; черновик docs/tasks/TASK-160-notes-import-review-ui.md; PRD §11.2",
+                "Вход из «Предметов» и «Базы знаний»: «Выбрать файлы», «Выбрать папку», перетаскивание",
+                "Плитки-фильтры как у импорта расписания: точно / вероятно / не определено / дубликаты / не поддерживается",
+                "Строка: имя, папка, вид (конспект; «запись», когда ядро её присылает), предложенные предмет и лекция («предполагаемая пара» помечена), причины по-русски; правка строки и выбранных строк (предмет, пара, дата, «без даты», «пропустить»)",
+                "«Добавить N», прогресс по элементам, пакет открывается после перезапуска, «Отменить импорт»; тексты только текстовыми узлами; тесты фильтров, группового выбора и состояния добавления",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-159",
+                "TASK-155"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-161",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Старые записи · ядро] Импорт аудиофайла лекции, записанной вне paratech: запись с origin imported на дату лекции, копия в хранилище, обычное локальное распознавание",
+            "acceptance_criteria": [
+                "ADR-0027 «Old recordings», черновик docs/tasks/TASK-161-import-old-recording.md; PRD §6.2, §7.4, §8; AC-06, AC-08, AC-21; ADR-0016, ADR-0018; жёсткое правило 2: звук не покидает компьютер",
+                "recording.NewImported: сразу COMPLETED, origin imported, startedAt — выбранные дата и время лекции, пара или снимок (предмет, вид, заголовок) из якоря; переходы захвата отклоняются; миграция recordings.origin",
+                "Тип по содержимому (RIFF/WAVE, fLaC, ID3/кадр MPEG, OggS) — только то, что whisper-cli v1.9.5 декодирует сам (docs/refs/whisper.md); ≤ 2 ГиБ; длительность WAV по заголовку (≤ 4 ч), иначе неизвестна до расшифровки",
+                "Копия в recordings/<id>.<ext> через Storage Manager атомарно, затем обычная задача распознавания (питание, закреплённая модель); тест, что порт Hub не используется; те же байты — та же запись",
+                "Удаление по ADR-0018 убирает только копию, исходный файл не трогается (тест с временным файлом); новый use case cases/recordingimport и биндинг",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/recording/... ./desktop/internal/cases/recordingimport/... ./desktop/internal/adapters/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-162",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Старые записи · UI] «Импортировать запись лекции»: файл, затем лекция (прошедшая пара или дата и предмет), строка «импортирована» с оценкой распознавания",
+            "acceptance_criteria": [
+                "ADR-0027 «Old recordings», черновик docs/tasks/TASK-162-import-recording-ui.md; ADR-0016",
+                "Вход в «Записи и задачи» и на странице предмета; пояснение «Звук не покидает компьютер, распознаётся локально»",
+                "Строка помечена «импортирована», оценка времени и ожидание питания как у других записей; отказы биндинга (формат, размер, дубликат) по-русски",
+                "Тесты",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-161"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-163",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Старые записи · ядро] Аудиофайлы в пакетном импорте становятся импортированными записями сопоставленной лекции",
+            "acceptance_criteria": [
+                "ADR-0027 «Bulk import», «Old recordings», черновик docs/tasks/TASK-163-batch-audio-items.md; жёсткое правило 2",
+                "Аудио типов TASK-161 складывается как элемент вида recording; сопоставление как у конспектов (дата и время из имени)",
+                "Шаг добавления аудио вызывает импорт записи один раз (идемпотентно по sha256) через порт, реализованный cases/recordingimport (связка в app); задачи распознавания идут друг за другом и по политике питания",
+                "Тесты на фейках и один сценарный тест",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/... ./desktop/tests/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-159",
+                "TASK-161"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-164",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Старые записи · ядро] Видео и M4A/AAC/WMA: локальное извлечение звука (ЗАБЛОКИРОВАНО: нужен выбор владельца — Media Foundation, ffmpeg или «конвертируйте сами», ADR-0027 вопрос 4)",
+            "acceptance_criteria": [
+                "Блокировка: решение владельца по ADR-0027 вопрос 4; черновик docs/tasks/TASK-164-video-audio-decode.md предполагает Windows Media Foundation через COM-вызовы без CGO (как WASAPI); при другом выборе переписать",
+                "Адаптер mediadecode (_windows.go и заглушка _other.go): первая звуковая дорожка в WAV 16 кГц моно в приватном каталоге, потоково, с отменой и пределом времени; кадры видео на диск не пишутся",
+                "Нет Media Foundation (Windows N) — «нужен Media Feature Pack», без падения",
+                "Тесты на Windows на маленьких фикстурах (mp4/aac, m4a, webm/opus при поддержке); проверка отсутствия CGO",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/mediadecode/... ./desktop/internal/cases/recordingimport/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-161"
+            ],
+            "status": "blocked"
+        },
+        {
+            "id": "TASK-165",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Фото конспектов · ядро] Фото и сканы рукописных конспектов как страницы без текста: JPEG/PNG, перекодирование без EXIF/GPS, лимиты, показ по ID",
+            "acceptance_criteria": [
+                "ADR-0027 «Handwriting and scans» (вариант E), «Limits», черновик docs/tasks/TASK-165-photo-pages.md; ревью безопасности (изображения)",
+                "Типы jpeg и png по сигнатуре; декодирование стандартной библиотекой ≤ 25 МиБ и ≤ 40 Мпикс (заголовок проверяется до декодирования); перекодирование без EXIF/GPS, хранятся и показываются чистые байты; HEIC — не поддерживается",
+                "Страницы конспекта по порядку, статус текста no_text («текст не распознан»): не ищутся и не цитируются",
+                "Отдаются странице только по ID как image/jpeg или image/png, никогда SVG; пути через биндинг не идут",
+                "Фикстуры: огромные размеры, обрезанный файл, PNG-бомба; fuzz обёртки декодера",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/adapters/imagepage/... ./desktop/internal/cases/notes/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-151"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-166",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Фото конспектов · UI] Страницы-фото в «Мой конспект»: миниатюры, порядок, просмотр, «текст не распознан — вставить текст вручную»",
+            "acceptance_criteria": [
+                "ADR-0027 «Handwriting and scans» (вариант E), черновик docs/tasks/TASK-166-photo-pages-ui.md",
+                "Миниатюры, перестановка, просмотр в полный размер с листанием клавиатурой; «Вставить текст» сохраняет текст страницы рядом как TXT-часть",
+                "Изображения только по адресу биндинга по ID; подписи alt по-русски",
+                "Тесты",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-154",
+                "TASK-165"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-167",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Фото конспектов · ядро] Распознавание страниц-фото и сканов (ЗАБЛОКИРОВАНО: движок выбирает владелец — Windows OCR, Tesseract или модель через Hub, ADR-0027 вопрос 3)",
+            "acceptance_criteria": [
+                "Блокировка: решение владельца по ADR-0027 вопрос 3 (отправлять ли изображения в облако — вопрос приватности и цены); черновик docs/tasks/TASK-167-page-recognition-core.md",
+                "Порт PageReader и задача note_ocr: одна страница за шаг, идемпотентно по дайджесту страницы и версии движка, с отменой; локальный движок — по политике питания",
+                "Распознанный текст с локаторами страниц и пометкой «распознано» ищется и цитируется только после того, как студент открыл и принял (или поправил) его",
+                "С движком Hub — согласие на каждый импорт с пояснением о приватности и оценкой цены, без него ничего не отправляется; распознанный текст — недоверенные данные (фикстура)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/noterecognition/... ./desktop/internal/domain/library/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-165"
+            ],
+            "status": "blocked"
+        },
+        {
+            "id": "TASK-168",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Фото конспектов · Hub] Операция Hub чтения рукописной страницы моделью со зрением (ЗАБЛОКИРОВАНО: только если владелец выберет вариант D ADR-0027 вопрос 3)",
+            "acceptance_criteria": [
+                "Блокировка: владелец выбирает отправку изображений страниц в облако (вариант D); черновик docs/tasks/TASK-168-hub-read-handwriting.md; PRD §9.2, §13.2; AC-11, AC-25",
+                "Одно изображение за вызов, JPEG/PNG ≤ 5 МиБ и предел пикселей провайдера, проверка до резерва квоты; buf breaking зелёный",
+                "Строгая схема вывода (строки с флагом неуверенности), свободный текст отклоняется, без инструментов; факты о вводе изображений — в docs/refs/anthropic.md по официальной документации",
+                "Своя метка операции в журнале квоты, идемпотентность по ключу; изображения не пишутся в лог и не хранятся после вызова",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... (Postgres-тесты при доступной базе) и тест архитектуры",
+                "buf lint и buf breaking в shared/"
+            ],
+            "dependencies": [],
+            "status": "blocked"
+        },
+        {
+            "id": "TASK-169",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Фото конспектов · UI] Проверка распознанных страниц: фото и текст рядом, правка и «Принять» (ЗАБЛОКИРОВАНО вместе с TASK-167)",
+            "acceptance_criteria": [
+                "Блокировка: ждёт решения владельца по ADR-0027 вопрос 3 и TASK-167; черновик docs/tasks/TASK-169-recognized-text-review-ui.md",
+                "«Распознать» (с согласием и ценой для движка Hub), прогресс по страницам, «Принять» / правка; неуверенные строки подсвечены; принятые страницы — «ваш конспект · распознано»",
+                "Тесты",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-166",
+                "TASK-167"
+            ],
+            "status": "blocked"
         }
     ]
 }

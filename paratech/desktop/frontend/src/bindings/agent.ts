@@ -176,6 +176,8 @@ export interface UpdateView {
   stopReason: string;
   /** "", busy, stale, invalid, budget, retry_required, restart_required or failed. */
   problem: string;
+  /** A step went to the Hub: no cards; apply the status only and keep the cards shown. False from an older core. */
+  progress: boolean;
   cards: CardView[];
 }
 
@@ -390,6 +392,7 @@ export function parseUpdate(raw: unknown): UpdateView {
     status: str(r, "status", w),
     stopReason: str(r, "stopReason", w),
     problem: str(r, "problem", w),
+    progress: flag(r, "progress"),
     cards,
   };
 }

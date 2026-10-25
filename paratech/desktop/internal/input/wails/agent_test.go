@@ -399,7 +399,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":3,"subjectId":"sub-1","lessonId":"les-1","assignmentId":"","screen":"today",` +
-		`"status":"AWAITING_PLAN","stopReason":"","problem":"","cards":[` +
+		`"status":"AWAITING_PLAN","stopReason":"","problem":"","progress":false,"cards":[` +
 		card(`"kind":"plan","plan":{"summary":"Понял так","steps":[`+
 			`{"tool":"list_assignments","args":[`+
 			`{"name":"due_before","type":"date","idKind":"","value":"2026-10-30","values":[]},`+
@@ -421,6 +421,26 @@ func TestAgentPanelEventContract(t *testing.T) {
 		card(`"kind":"reply","text":"Готово"`) + "," +
 		card(`"kind":"stopped","stopReason":"offline"`) + "," +
 		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + `]}`
+	if string(got) != want {
+		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// The update of a step that went to the Hub says so and carries no cards (ADR-0026).
+func TestAgentPanelProgressContract(t *testing.T) {
+	panel := NewAgentPanel(discard())
+	em := &fakeEmitter{}
+	panel.Attach(em)
+	panel.Publish(AgentUpdate{Thread: "th1", Turn: 2, Status: "PLANNING", Progress: true})
+	if len(em.events) != 1 {
+		t.Fatalf("events = %+v", em.events)
+	}
+	got, err := json.Marshal(em.events[0].data[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"threadId":"th1","turn":2,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
+		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"cards":[]}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}
