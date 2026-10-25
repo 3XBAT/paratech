@@ -75,6 +75,12 @@ func stepData(t *testing.T, req cvalues.LLMRequest) map[string]any {
 	return d
 }
 
+// cited is the number of materials a writing request offers for citation.
+func cited(d map[string]any) int {
+	m, _ := d["materials"].([]any)
+	return len(m)
+}
+
 // TestLabReportRunsToAPaper: the outline from the manual, one section per step under the lab prompts, then the .docx
 // with the highlighted placeholders, the note under the conclusions and «Что доделать самому», filed into «ДЗ».
 func TestLabReportRunsToAPaper(t *testing.T) {
@@ -217,13 +223,89 @@ func TestLabManualNotRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i, r := range e.writer.reqs {
-				if d := stepData(t, r); d["material_text"] != "" || d["manual"] != string(tt.manual) || d["assignment_text"] == "" {
+				// A manual without text is no file to cite.
+				if d := stepData(t, r); d["material_text"] != "" || d["manual"] != string(tt.manual) || d["assignment_text"] == "" ||
+					cited(d) != 0 {
 					t.Fatalf("request %d data = %v", i, d)
 				}
 			}
 			v, _ := e.svc.Work(ctx, id)
 			if v.Status != work.StatusDone || !strings.Contains(e.shelf.files[0].data, tt.note) {
 				t.Fatalf("done = %s, paper %s", v.Status, e.shelf.files[0].data)
+			}
+		})
+	}
+}
+
+// TestLabFromManualFile: a lab report the student starts from the manual file itself has the manual in
+// assignment_text, told as read and offered for citation. A file that turns unreadable before the writing leaves
+// nothing to write from (the domain needs an assignment text): the outline job fails for good, no call is paid.
+func TestLabFromManualFile(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+	}{
+		{"read", nil},
+		{"pdf", material.ErrTextNotExtracted},
+		{"damaged", material.ErrDamaged},
+		{"removed", material.ErrRemoved},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newWriteEnv(t)
+			ctx := t.Context()
+			e.writer.answer = labAnswer
+			e.materials.texts["m2"] = "Методичка: лабораторная работа «Математический маятник»"
+			e.reader.then(strings.Replace(out(work.FeasibleFull, 0), `"referat"`, `"lab_report"`, 1))
+			st, err := e.svc.Triage(ctx, work.Source{Material: "m2"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := st.View.ID
+			if _, err := e.svc.ConfirmRequirements(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			sw, err := e.svc.StartWriting(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The file turns unreadable after the start (a file without text is never triaged).
+			if tt.err != nil {
+				e.materials.errs["m2"] = tt.err
+			}
+			steps, err := e.run(t, sw.Job, 10)
+			if tt.err != nil {
+				if !errors.Is(err, ErrWriteGone) || !errors.Is(err, backoff.ErrPermanent) || steps != 1 || len(e.writer.reqs) != 0 {
+					t.Fatalf("outline job = %v after %d steps, %d calls", err, steps, len(e.writer.reqs))
+				}
+				return
+			}
+			if err != nil || steps != 1 {
+				t.Fatalf("outline job = %v after %d steps", err, steps)
+			}
+			ap, err := e.svc.ApproveOutline(ctx, id)
+			if err != nil || !ap.Created {
+				t.Fatalf("ApproveOutline = %+v, %v", ap, err)
+			}
+			if v, _ := e.svc.Work(ctx, id); !v.Writing.Lab || v.Writing.Manual != work.ManualRead {
+				t.Fatalf("manual = %q", v.Writing.Manual)
+			}
+			if _, err := e.run(t, ap.Job, 20); err != nil {
+				t.Fatal(err)
+			}
+			if len(e.writer.reqs) != 5 {
+				t.Fatalf("calls %d", len(e.writer.reqs))
+			}
+			for i, r := range e.writer.reqs {
+				d := stepData(t, r)
+				at, _ := d["assignment_text"].(string)
+				if d["manual"] != string(work.ManualRead) || d["material_text"] != "" || !strings.Contains(at, "Методичка") || cited(d) != 1 {
+					t.Fatalf("request %d data = %v", i, d)
+				}
+			}
+			v, _ := e.svc.Work(ctx, id)
+			paper := e.shelf.files[0].data
+			if v.Status != work.StatusDone || strings.Contains(paper, homeworkdoc.ManualNotRead) || strings.Contains(paper, homeworkdoc.ManualNoText) {
+				t.Fatalf("done = %s, paper %s", v.Status, paper)
 			}
 		})
 	}

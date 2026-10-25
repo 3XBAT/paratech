@@ -648,7 +648,8 @@ func (s *Service) student(ctx context.Context) (homeworkdoc.Student, error) {
 // writingTexts are the texts of a writing call: the assignment, the teacher's material and the student's materials
 // that may be cited (the assignment's material, or the uploaded file that is the assignment). They are part of the
 // key of the call, so a local failure to read them is retried (ErrWriteStorage), never taken for «no material»; only
-// a material that is gone, removed or has no readable text is left out.
+// a material that is gone, removed or has no readable text is left out. A lab report started from a material has
+// its manual in Assignment, read; an uploaded file without text leaves nothing to write from, so it is gone.
 func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, error) {
 	src := w.Source()
 	if src.Material != "" {
@@ -661,7 +662,11 @@ func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, e
 		case text.Empty():
 			return work.Texts{}, backoff.Permanent(fail(ErrWriteGone, ErrNoText))
 		}
-		return work.Texts{Assignment: text.String(), Materials: citable(m)}, nil
+		t := work.Texts{Assignment: text.String(), Materials: citable(m)}
+		if w.LabReport() {
+			t.Manual = work.ManualRead
+		}
+		return t, nil
 	}
 
 	a, err := s.assignments.Get(ctx, src.Assignment)
@@ -674,24 +679,37 @@ func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, e
 	d := a.Details()
 	t := work.Texts{Assignment: strings.TrimSpace(d.Title() + "\n\n" + d.Description()), Manual: work.ManualNone}
 	if mid := a.MaterialID(); mid != "" {
-		m, text, err := s.materials.MaterialText(ctx, mid)
+		m, gone, err := s.manualText(ctx, mid)
 		switch {
-		case err == nil:
-			t.Material, t.Materials, t.Manual = text.String(), citable(m), work.ManualRead
-			if text.Empty() {
-				t.Manual = work.ManualNoText // a scan or an empty file
-			}
-		case errors.Is(err, material.ErrTextNotExtracted):
-			t.Manual = work.ManualNotRead // a PDF (ADR-0027)
-		case noMaterialText(err):
-			t.Manual = work.ManualNoText
-		case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrRemoved):
+		case gone:
 			// The assignment is written from alone, as the reader read it.
-		default:
+		case err != nil:
 			return work.Texts{}, fail(ErrWriteStorage, err)
+		default:
+			t.Material, t.Materials, t.Manual = m.Material, m.Materials, m.Manual
 		}
 	}
 	return t, nil
+}
+
+// manualText reads material id as a manual: its text in Material with the file to cite (ManualRead), or what became
+// of it without text, nothing to cite (ManualNotRead for a PDF, ADR-0027; ManualNoText). gone reports a material gone
+// or removed; err alone is a local failure to retry.
+func (s *Service) manualText(ctx context.Context, id shared.MaterialID) (t work.Texts, gone bool, err error) {
+	m, text, err := s.materials.MaterialText(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrRemoved):
+		return work.Texts{}, true, err
+	case errors.Is(err, material.ErrTextNotExtracted):
+		return work.Texts{Manual: work.ManualNotRead}, false, nil
+	case noMaterialText(err):
+		return work.Texts{Manual: work.ManualNoText}, false, nil
+	case err != nil:
+		return work.Texts{}, false, err
+	case text.Empty():
+		return work.Texts{Manual: work.ManualNoText}, false, nil
+	}
+	return work.Texts{Material: text.String(), Materials: citable(m), Manual: work.ManualRead}, false, nil
 }
 
 // noMaterialText reports an error of a material whose text cannot be read at all (a scan, a damaged file): it stays

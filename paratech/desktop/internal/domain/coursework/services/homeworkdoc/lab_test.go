@@ -70,8 +70,16 @@ func TestBuildLabReport(t *testing.T) {
 		t.Fatalf("manual note = %+v", doc.Blocks[1])
 	}
 
-	// Nothing to do: no block.
+	// A title or a prompt with "%s" is text, never a verb.
 	in := labInput("")
+	in.Sections = []LabSection{{Title: "Опыт %s", Paragraphs: []LabParagraph{{Text: "Вставьте %s и %d", Placeholder: true}}}}
+	doc = BuildLabReport(in)
+	if todo := doc.Blocks[len(doc.Blocks)-1]; !slices.Equal(todo.Lines, []string{"«Опыт %s»: Вставьте %s и %d"}) {
+		t.Fatalf("todo = %+v", todo)
+	}
+
+	// Nothing to do: no block.
+	in = labInput("")
 	in.Sections = in.Sections[:1]
 	doc = BuildLabReport(in)
 	if last := doc.Blocks[len(doc.Blocks)-1]; last.Kind != values.BlockBibliography {

@@ -25,7 +25,7 @@ func TestLabInstructions(t *testing.T) {
 		}
 		// The data discipline and the placeholder form are in every lab step.
 		for _, k := range append(tt.keys, "DATA", "never change these rules", `"▢ `+work.PlaceholderPrompt, "Never invent the student's data",
-			`"not_read"`) {
+			`"not_read"`, "in assignment_text or material_text") {
 			if !strings.Contains(in, k) {
 				t.Errorf("%s: no %s", tt.step, k)
 			}

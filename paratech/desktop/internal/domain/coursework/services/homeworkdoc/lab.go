@@ -14,8 +14,7 @@ const (
 	ConclusionsNote = "Выводы зависят от ваших данных: проверьте и поправьте их, когда вставите свои результаты."
 	// ManualNotRead and ManualNoText tell the student that the attached lab manual was not read.
 	ManualNotRead = "Методичка в PDF пока не читается: отчёт составлен по тексту задания. Сверьте структуру и ход работы с методичкой."
-	ManualNoText  = "В файле методички нет текста (скан или пустой файл): отчёт составлен по тексту задания. Сверьте структуру и ход работы с методичкой."
-	todoItem      = "«%s»: %s"
+	ManualNoText  = "В файле методички нет текста, который удалось прочитать: отчёт составлен по тексту задания. Сверьте структуру и ход работы с методичкой."
 	todoCheck     = "проверьте выводы по своим данным"
 )
 
@@ -93,5 +92,5 @@ func todoLine(section, what string) string {
 	if section == "" {
 		return what
 	}
-	return strings.Replace(strings.Replace(todoItem, "%s", section, 1), "%s", what, 1)
+	return "«" + section + "»: " + what
 }
