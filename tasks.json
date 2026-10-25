@@ -2965,6 +2965,219 @@
                 "TASK-124"
             ],
             "status": "done"
+        },
+        {
+            "id": "TASK-139",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Агент · UI] Индикатор ожидания в панели: три мягко пульсирующие точки вместо «Отправка…» и пустой карточки «Работа идёт»",
+            "acceptance_criteria": [
+                "Владелец 2026-10-24 (бета): после отправки видно только слово «отправка…»; нужна минимальная тихая анимация, как у других чат-ассистентов. ADR-0026 «Waiting», черновик docs/tasks/TASK-139-agent-waiting-indicator.md",
+                "Пока вызов идёт (update === null без ошибки) и пока статус PLANNING или EXECUTING без карточки хода работы с job, у просьбы один элемент ожидания: три точки цвета акцента (--accent-fill), анимация прозрачности breath из paratech-ops/design/concept-agent.html со сдвигом по точкам, без видимого слова",
+                "role=status и скрытый текст «Запрос выполняется»; экранный диктор не повторяет его на каждом обновлении",
+                "prefers-reduced-motion: reduce — точки статичны и видны",
+                "Карточки хода работы с job и их «Стоп», тексты отказов — как раньше; точки исчезают с первой карточкой, которая завершает ожидание (план, вопросы, ответ, остановка, проблема, готово)",
+                "Тесты фронтенда на модель вида: когда индикатор показан и когда скрыт",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [],
+            "status": "done"
+        },
+        {
+            "id": "TASK-140",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] «Стоп» во время шага: панель узнаёт нить и номер просьбы до ответа Hub, после «Стоп» Driver не запускает остальные вызовы шага",
+            "acceptance_criteria": [
+                "Владелец 2026-10-24: студент может прервать идущую просьбу. ADR-0026 «Стоп», черновик docs/tasks/TASK-140-agent-stop-in-flight.md; решение супервизора: Interrupt сохраняет настоящие исходы",
+                "Необязательный порт agentturn.Progress { Started(ctx, Step) } в Deps: drive вызывает его после сохранения открытого шага и до AgentModel.Step, с состоянием просьбы без карточек; реализация в input/agent поверх Sink (Update с Progress: true), app связывает без цикла Driver и Service; в виде обновления поле progress",
+                "После Driver.Stop(ref) цикл этой просьбы не начинает следующий вызов шага; идущее чтение (класс R) обрывается своим контекстом и отвечается «не выполнено»; идущая запись (класс U) доходит до конца, её исход из журнала сохраняется; затем Interrupt оставляет просьбу STOPPED с причиной user",
+                "Идущий шаг Hub при «Стоп» не отменяется; «Продолжить» повторяет его ключ бесплатно; «Стоп» не останавливает платные jobs (их останавливает «Отменить» строки действия)",
+                "Тесты: progress до вызова модели; Стоп между двумя U-вызовами выполняет только первый; Стоп во время чтения — «не выполнено» и причина user; -race",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/agentturn/... ./desktop/internal/input/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-141",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] «Повторить» завершённую просьбу: новая просьба с тем же текстом, без повтора записей и предложений",
+            "acceptance_criteria": [
+                "Владелец 2026-10-24: повторный запуск последней просьбы (regenerate). ADR-0026 «Повторить», черновик docs/tasks/TASK-141-agent-rerun.md",
+                "thread.Rerun(live, now): только текущая просьба в DONE, FAILED, CANCELLED или STOPPED, иначе ErrInvalidTransition; live — ErrRerunBlocked без изменений; остановленная просьба отменяется, её открытые вызовы закрываются «не выполнено»; новая просьба (следующий номер, пустой бюджет) в той же области",
+                "agentturn.Rerun(ctx, ref) читает порт Effects.Live(ctx, thread, turn) (true, если у просьбы есть запись журнала не FAILED и не UNDONE или открытое предложение), снова добавляет сохранённый текст студента и ведёт новую просьбу; порт реализует cases/agentjournal, связывает app (без импорта case в case)",
+                "Driver.Rerun и AgentService.Rerun(ref); проблема rerun_blocked в перечне Driver и в списке разрешённых Wails; биндинг rerun в frontend/src/bindings/agent.ts",
+                "Новые ключи шагов ag:<thread>:<turn+1>:…; второй Rerun по старому turn — stale, по идущей просьбе — busy; интерфейсы input/agent по-прежнему без Confirm/Execute/Delete/Send",
+                "Тесты: разрешённые и запрещённые статусы; живые эффекты (DONE, открытое предложение) запрещают, после UNDONE можно; двойной клик; повтор из STOPPED offline с открытыми вызовами",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов domain/agent/thread, cases/agentturn, cases/agentjournal, input/agent, input/wails и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-140"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-142",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] Ключ читателя ANSWER привязан к просьбе: повтор даёт свежий ответ, «Продолжить» в той же просьбе — бесплатный replay",
+            "acceptance_criteria": [
+                "ADR-0026 «Повторить» (идемпотентность), открытый вопрос 1 владельцу; черновик docs/tasks/TASK-142-answer-key-per-request.md. Если владелец решит отдавать при повторе сохранённый ответ — задачу пометить blocked с этой причиной",
+                "answer.NewRequest принимает область повторного использования (непрозрачная, ограниченный печатный ASCII); ключ ans:v2: + SHA-256 от данных, мест и области; пустая область отклоняется",
+                "answering.Ask принимает область; Driver передаёт ag:<thread>:<turn>",
+                "Тот же вопрос, те же фрагменты, та же просьба — тот же ключ; другой turn — другой ключ; ответы с ключом ans:v1: по-прежнему загружаются",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/answer/... ./desktop/internal/cases/answering/... ./desktop/internal/input/agent/... и тест архитектуры"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-143",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Агент · UI] Кнопки «Стоп» у индикатора ожидания и «Повторить» у последней завершённой просьбы",
+            "acceptance_criteria": [
+                "ADR-0026 «Стоп» и «Повторить», черновик docs/tasks/TASK-143-agent-stop-rerun-ui.md",
+                "Обновление с progress: true меняет только статус и причину остановки своей просьбы, карточки остаются",
+                "Пока PLANNING или EXECUTING, у строки ожидания тихая текстовая кнопка «Стоп» (доступна с клавиатуры); один вызов stop(ref), на время вызова неактивна; затем карточка «Остановлено · Продолжить · Отмена»",
+                "У последней просьбы нити в DONE, FAILED, CANCELLED или STOPPED — «Повторить» (круглая стрелка, подсказка «Запустить просьбу заново»), кроме случаев, когда карточка остановки уже предлагает «Повторить» шага (retry) или «Начать заново»; вызывает rerun(ref); новая просьба появляется ниже с тем же текстом",
+                "Проблема rerun_blocked: «Повтор недоступен: просьба уже изменила данные. Можно отменить действия или задать вопрос заново.»; у старых просьб «Повторить» нет; тексты безличные, по-русски",
+                "Тесты: слияние progress сохраняет карточки; Стоп только во время работы; правила «Повторить» по статусу и причине; двойной клик даёт один вызов",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-139",
+                "TASK-140",
+                "TASK-141"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-144",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub · провайдер] Потоковый вызов Anthropic в адаптере и проба шлюза владельца (ai.starimg.ru)",
+            "acceptance_criteria": [
+                "Владелец 2026-10-24: ответ агента появляется постепенно (не нужно для беты). ADR-0026 «Streaming», черновик docs/tasks/TASK-144-anthropic-streaming-probe.md; поддержка потока шлюзом не проверена",
+                "docs/refs/anthropic.md: раздел о потоке по официальной документации (события message_start, content_block_start/delta/stop с text_delta, message_delta с usage и stop_reason, message_stop, ping, error; заголовки; как сообщается usage)",
+                "(*Client).Stream(ctx, req values.Request, onDelta func(chunk string)) (values.Completion, error) по сигнатуре ADR-0026: тело как у Complete плюс stream: true; SSE с ограничением длины строки и общего объёма; onDelta по порядку; вывод равен склейке; usage из message_start и message_delta; классы ошибок как у Complete; событие error или поток без message_stop — ошибка провайдера; неизвестные события пропускаются",
+                "Тесты на записанных SSE: обычный, разрезанные куски, ping, ошибка посреди, обрыв, слишком длинная строка, неизвестное событие, stop max_tokens",
+                "probe_test.go запускается только при PARATECH_PROBE_ANTHROPIC_URL и PARATECH_PROBE_ANTHROPIC_KEY (в CI пропуск): один короткий потоковый вызов, не меньше 2 delta до конца и usage; в лог только имена событий и времена, никогда ключ и текст; шаги владельцу в docs/qa/tasks/TASK-144.md",
+                "Без SDK и без новых зависимостей; если шлюз буферизует поток, provider_stream остаётся выключенным (запасной путь в TASK-145)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/internal/adapters/anthropic/... и golangci-lint"
+            ],
+            "dependencies": [],
+            "status": "done"
+        },
+        {
+            "id": "TASK-145",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub] CompleteStream для читателя ANSWER: правила учёта Complete, ровно один расчёт, флаг provider_stream с запасным непотоковым путём",
+            "acceptance_criteria": [
+                "ADR-0026 «Streaming», черновик docs/tasks/TASK-145-hub-completestream.md; ADR-0005(d), ADR-0008, ADR-0023",
+                "gateway.proto (только комментарии): при отмене клиентом провайдер доходит до конца, расчёт полный, результат сохраняется, как у Complete; только OPERATION_TYPE_ANSWER (остальные invalid_argument); buf lint и buf breaking зелёные",
+                "Та же проверка, серверный промпт, отпечаток и жизненный цикл ключа, что у Complete; Complete и CompleteStream с одним ключом и spec воспроизводят результат друг друга; replay — одна delta и result",
+                "Вызов провайдера на контексте, не связанном с клиентом; клиент ушёл посреди потока — Hub дочитывает, один полный расчёт, результат сохранён, следующий вызов с ключом — бесплатный replay (тест с отменённым клиентом)",
+                "Сбой провайдера до конца — PROVIDER_ERROR, резерв снят; проверка схемы ANSWER по всему выводу с правилом оплаченного маркера сбоя из ADR-0023; после ошибки delta не отправляются",
+                "provider_stream=false (по умолчанию): Provider.Complete, весь вывод одной delta; true: StreamingProvider.Stream; Hub не пишет тексты в лог; тесты, закрепляющие Unimplemented, заменены тестами поведения",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... (Postgres как в CI), golangci-lint, buf lint и buf breaking в paratech/shared"
+            ],
+            "dependencies": [
+                "TASK-144"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-146",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Десктоп читает ANSWER потоком (CompleteStream с откатом на Complete) и строит из частичного вывода черновые тексты утверждений",
+            "acceptance_criteria": [
+                "ADR-0026 «Streaming», черновик docs/tasks/TASK-146-desktop-answer-stream.md; жёсткое правило 3: черновик только показывается",
+                "answer.Draft(partial string) []string в domain/coursework/answer: тексты claims, написанные к этому моменту (последний может быть оборван), JSON-экранирование раскрыто, управляющие символы убраны, не больше 8 текстов по 400 символов; fuzz-тест без паник",
+                "Порт answering.Reader.AnswerQuestion(ctx, req, partial func(soFar string)), partial может быть nil; hubclient вызывает CompleteStream с тем же spec и ключом, отдаёт накопленный вывод по порядку; Unimplemented — откат на Complete с тем же ключом; поток без result — ошибка, его текст отбрасывается; классы ошибок как сейчас",
+                "answering.Ask принимает необязательный DraftSink { Draft(texts []string) }, вызывает его только при изменении, никогда не хранит и не возвращает черновик; разбор и проверка цитат — только по полному выводу",
+                "Тесты: потоковый фейковый сервер (delta, result, ошибка после delta, откат при Unimplemented, replay одной delta); фикстуры черновика; тест архитектуры",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/answer/... ./desktop/internal/cases/answering/... ./desktop/internal/adapters/hubclient/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-142"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-147",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Черновик ответа в панель: Driver привязывает его к просьбе и вызову, input/wails шлёт событие agent:draft не чаще 10 раз в секунду",
+            "acceptance_criteria": [
+                "ADR-0026 «Streaming», черновик docs/tasks/TASK-147-agent-draft-event.md",
+                "Sink получает Draft(d Draft) с Draft{Thread, Turn, CallID, Texts}; Driver передаёт в Answerer.Ask DraftSink, привязанный к (thread, turn, call); текст черновика больше нигде не используется (не в результатах, истории, журнале и логе)",
+                "input/wails шлёт agent:draft {threadId, turn, callId, texts} не чаще 10 раз в секунду на вызов, побеждает последнее значение, финальная отправка до обновления шага; после «Стоп» или оборванного чтения черновиков этого вызова больше нет",
+                "frontend/src/bindings/agent.ts: draftEvent и разбор полезной нагрузки",
+                "Тесты: троттлинг на фейковых часах, порядок (черновик до обновления с карточкой), Стоп обрывает черновики, форма полезной нагрузки",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-141",
+                "TASK-146"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-148",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Агент · UI] Текст ответа появляется постепенно как черновик и заменяется проверенной карточкой ответа",
+            "acceptance_criteria": [
+                "ADR-0026 «Streaming», черновик docs/tasks/TASK-148-agent-draft-render.md",
+                "События agent:draft привязываются к своей просьбе (thread, turn) и вызову; блок с подписью «Ответ пишется · черновик», тексты только текстовыми узлами (никогда HTML), приглушённо, точки ожидания после последней строки",
+                "Черновик убирается, когда обновление этой просьбы приносит карточку ответа, остановку, проблему или конечный статус; черновики старых просьб игнорируются",
+                "Без скачков прокрутки: панель следует за черновиком, только если была внизу; prefers-reduced-motion учитывается",
+                "Тесты: привязка, замена карточкой, удаление при Стоп, устаревший черновик, отсутствие HTML-инъекции",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-143",
+                "TASK-147"
+            ],
+            "status": "pending"
         }
     ]
 }

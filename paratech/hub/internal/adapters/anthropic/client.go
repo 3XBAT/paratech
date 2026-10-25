@@ -19,6 +19,7 @@ const (
 	opNew      = "anthropic.New"
 	opComplete = "anthropic.Complete"
 	opStep     = "anthropic.Step"
+	opStream   = "anthropic.Stream"
 )
 
 const (
@@ -118,7 +119,7 @@ func (c *Client) Complete(ctx context.Context, req values.Request) (values.Compl
 		return values.Completion{}, fail(permanent("request encoding failed"))
 	}
 	var completion values.Completion
-	err = c.post(ctx, body, func(resp *http.Response) error {
+	err = c.post(ctx, body, contentTypeJSON, func(resp *http.Response) error {
 		var rerr error
 		completion, rerr = readCompletion(resp)
 		return rerr
@@ -140,7 +141,7 @@ func (c *Client) Step(ctx context.Context, call values.AgentCall) (values.AgentA
 		return values.AgentAnswer{}, failStep(permanent("request encoding failed"))
 	}
 	var answer values.AgentAnswer
-	err = c.post(ctx, body, func(resp *http.Response) error {
+	err = c.post(ctx, body, contentTypeJSON, func(resp *http.Response) error {
 		var rerr error
 		answer, rerr = readAgentAnswer(resp)
 		return rerr
@@ -152,8 +153,8 @@ func (c *Client) Step(ctx context.Context, call values.AgentCall) (values.AgentA
 }
 
 // post sends body to the Messages endpoint and hands a 200 answer to read. The deadline is the earlier of ctx and the
-// client timeout. Every failure is a *values.ProviderError.
-func (c *Client) post(ctx context.Context, body []byte, read func(*http.Response) error) error {
+// client timeout, for the whole body too. Every failure is a *values.ProviderError.
+func (c *Client) post(ctx context.Context, body []byte, accept string, read func(*http.Response) error) error {
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, c.endpoint, bytes.NewReader(body))
@@ -163,7 +164,7 @@ func (c *Client) post(ctx context.Context, body []byte, read func(*http.Response
 	httpReq.Header.Set("x-api-key", c.key)
 	httpReq.Header.Set("anthropic-version", apiVersion)
 	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("accept", "application/json")
+	httpReq.Header.Set("accept", accept)
 
 	// The endpoint is fixed at New from the server configuration; no request value reaches the URL.
 	resp, err := c.http.Do(httpReq)
@@ -187,6 +188,9 @@ func fail(err error) error { return fmt.Errorf("%s: %w", opComplete, err) }
 
 // failStep is fail for Step.
 func failStep(err error) error { return fmt.Errorf("%s: %w", opStep, err) }
+
+// failStream is fail for Stream.
+func failStream(err error) error { return fmt.Errorf("%s: %w", opStream, err) }
 
 // transportError classifies a call that got no complete answer: ctx ended it, the client timeout fired, or the
 // network failed. The raw error is dropped (ARCH-32).

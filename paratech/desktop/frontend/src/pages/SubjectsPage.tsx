@@ -134,6 +134,9 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
               <Button icon="book" onClick={() => props.onOpen("knowledge")}>
                 {texts.knowledge}
               </Button>
+              <Button icon="doc" onClick={() => props.onOpen("tickets")}>
+                Билеты
+              </Button>
               <Button icon="up" disabled={busy} onClick={() => void addFile()}>
                 {texts.addFile}
               </Button>

@@ -12,6 +12,7 @@ const screens: Record<PageId, string> = {
   today: "today",
   subjects: "subjects",
   knowledge: "subjects",
+  tickets: "subjects",
   homework: "assignments",
   schedule: "schedule",
   journal: "journal",
@@ -70,7 +71,8 @@ export const texts = {
   title: "paratech",
   hint: "Ctrl+K",
   send: "Отправить",
-  sending: "Отправка…",
+  /** Visually hidden text of the waiting dots. */
+  waiting: "Запрос выполняется",
   removeContext: "Убрать контекст",
   offlineBanner: "Нет связи с paratech",
   empty: "Можно задать вопрос или попросить что-нибудь сделать.",
@@ -309,6 +311,7 @@ export type CardModel =
   | { type: "plan"; caption: string; summary: string; steps: string[]; notes: string[]; buttons: ButtonModel[] }
   | { type: "questions"; caption: string; questions: QuestionView[]; active: boolean; skip: string; submit: string }
   | { type: "progress"; caption: string; detail: string; buttons: ButtonModel[] }
+  | { type: "waiting"; buttons: ButtonModel[] }
   | { type: "result"; caption: string; artifact: ArtifactLabel | null; fallback: string }
   | { type: "answer"; caption: string; text: string }
   | { type: "reply"; caption: string; text: string }
@@ -411,14 +414,16 @@ export interface EntryModel {
   key: string;
   /** What the student typed; "" for a request from the history. */
   userText: string;
-  /** "Отправка…" while the call runs, the refusal text when it failed, "" otherwise. */
+  /** The refusal text when the call failed, "" otherwise. */
   callLine: string;
+  /** The call runs and nothing has come back yet: the waiting dots show instead of a line. */
+  waiting: boolean;
   cards: CardModel[];
 }
 
 export function entryModel(e: Entry): EntryModel {
-  const callLine = e.callProblem !== "" ? callProblemText(e.callProblem) : e.update === null ? texts.sending : "";
-  const base = { key: e.key, userText: e.text, callLine };
+  const callLine = e.callProblem !== "" ? callProblemText(e.callProblem) : "";
+  const base = { key: e.key, userText: e.text, callLine, waiting: e.callProblem === "" && e.update === null };
   const u = e.update;
   if (u === null) {
     return { ...base, cards: [] };
@@ -432,7 +437,7 @@ export function entryModel(e: Entry): EntryModel {
     }
   }
   if (!cards.some((c) => c.type === "progress") && activeStatuses.has(u.status)) {
-    cards.push({ type: "progress", caption: texts.progressCaption, detail: "", buttons: u.status === "EXECUTING" ? buttons(["stop"]) : [] });
+    cards.push({ type: "waiting", buttons: u.status === "EXECUTING" ? buttons(["stop"]) : [] });
   }
 
   // One stop card, from the stopped card or the update's own reason; the problem adds a button for what to do next.
