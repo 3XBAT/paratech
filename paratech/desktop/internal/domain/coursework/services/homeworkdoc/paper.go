@@ -49,6 +49,23 @@ type PaperInput struct {
 // contents, the mark GeneratedMark, every section under a level-1 heading on a new page, and the bibliography with
 // each source once. One-line texts are cleaned (values.CleanName); a paragraph keeps its printable characters.
 func BuildPaper(in PaperInput) values.Document {
+	doc := paperStart(in)
+	for _, s := range in.Sections {
+		if title := values.CleanName(s.Title); title != "" {
+			doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockHeading, Level: values.MinHeadingLevel, Lines: []string{title}})
+		}
+		for _, p := range s.Paragraphs {
+			if line := strings.TrimSpace(printable(p)); line != "" {
+				doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockParagraph, Lines: []string{line}})
+			}
+		}
+	}
+	doc.Blocks = append(doc.Blocks, bibliography(in.Sources)...)
+	return doc
+}
+
+// paperStart is a finished paper up to its sections: the title page, the table of contents and GeneratedMark.
+func paperStart(in PaperInput) values.Document {
 	st := in.Student
 	kind := capitalized(values.CleanName(in.Kind))
 	if kind == "" {
@@ -73,19 +90,14 @@ func BuildPaper(in PaperInput) values.Document {
 
 	doc := values.Document{Title: t, TableOfContents: true, SectionsOnNewPage: true}
 	doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockParagraph, Lines: []string{GeneratedMark}})
-	for _, s := range in.Sections {
-		if title := values.CleanName(s.Title); title != "" {
-			doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockHeading, Level: values.MinHeadingLevel, Lines: []string{title}})
-		}
-		for _, p := range s.Paragraphs {
-			if line := strings.TrimSpace(printable(p)); line != "" {
-				doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockParagraph, Lines: []string{line}})
-			}
-		}
-	}
+	return doc
+}
+
+// bibliography is the block of the sources, each once; none without a source.
+func bibliography(sources []PaperSource) []values.Block {
 	var entries []string
 	seen := map[string]bool{}
-	for _, s := range in.Sources {
+	for _, s := range sources {
 		text := values.CleanName(s.Text)
 		if text == "" {
 			continue
@@ -98,10 +110,10 @@ func BuildPaper(in PaperInput) values.Document {
 			entries = append(entries, text)
 		}
 	}
-	if len(entries) > 0 {
-		doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockBibliography, Lines: entries})
+	if len(entries) == 0 {
+		return nil
 	}
-	return doc
+	return []values.Block{{Kind: values.BlockBibliography, Lines: entries}}
 }
 
 // PaperFileName is the name of the file of a paper: its kind and topic, safe for Windows, with DocxExtension.

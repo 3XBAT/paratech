@@ -297,6 +297,10 @@ func (w *Work) validate() error {
 		if u, _ := w.Understanding(); (w.writing.Deck != nil) != (u.WorkType == TypePresentation) {
 			return bad("a presentation is written as slides, any other work as a paper")
 		}
+		// A lab report written before TASK-107 stays a paper.
+		if u, _ := w.Understanding(); w.writing.Lab != nil && u.WorkType != TypeLabReport {
+			return bad("only a lab report is written as one")
+		}
 		if d := w.writing.Deck; w.status == StatusDone && d != nil && (d.Talk == nil || d.Talk.Content != w.ContentKey() ||
 			d.Questions == nil || d.Questions.Revision != d.QuestionsRevision) {
 			return bad("a done presentation has the questions and the speaker text of its slides")

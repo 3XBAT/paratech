@@ -65,13 +65,21 @@ type WritingView struct {
 	Questions    []work.TalkQuestion
 	Talk         shared.MaterialID
 	TalkResult   shared.ArtifactRef
+
+	// A lab report (TASK-107): what became of the attached manual (ManualNotRead, ManualNoText: the student is told
+	// it was not read) and «Что доделать самому», the placeholders of the written sections.
+	Lab          bool
+	Manual       work.Manual
+	Placeholders []work.Placeholder
 }
 
 // SectionView is a section of the outline with its text, when written for its current revision. A slide has its Kind,
-// its speaker notes in Paragraphs and its Bullets or Columns.
+// its speaker notes in Paragraphs and its Bullets or Columns; a section of a lab report its Part, and its placeholders
+// among the Paragraphs («▢ Вставьте …», work.PromptOf).
 type SectionView struct {
 	Number     int
 	Kind       cvalues.SlideKind
+	Part       work.LabPart
 	Title      string
 	Words      int
 	Note       string
@@ -166,7 +174,7 @@ func writingViewOf(w *work.Work) *WritingView {
 	v := &WritingView{Step: w.Next().Kind, Generation: wr.Generation, Topic: wr.Topic, Subject: wr.Snapshot.Subject}
 	v.Done, v.Total = w.Progress()
 	for _, s := range wr.Sections {
-		sv := SectionView{Number: s.Number, Kind: s.Kind, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written()}
+		sv := SectionView{Number: s.Number, Kind: s.Kind, Part: s.Part, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written()}
 		if sv.Written {
 			sv.Paragraphs, sv.Sources = slices.Clone(s.Text.Paragraphs), slices.Clone(s.Text.Sources)
 			sv.Bullets, sv.Columns = slices.Clone(s.Text.Bullets), slices.Clone(s.Text.Columns)
@@ -182,6 +190,9 @@ func writingViewOf(w *work.Work) *WritingView {
 		if d.Talk != nil && done {
 			v.Talk, v.TalkResult = d.Talk.Material, d.Talk.ArtifactRef()
 		}
+	}
+	if w.LabReport() {
+		v.Lab, v.Manual, v.Placeholders = true, w.Manual(), w.Placeholders()
 	}
 	return v
 }

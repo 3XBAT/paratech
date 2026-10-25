@@ -2,6 +2,7 @@ package work
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -83,10 +84,12 @@ type SectionText struct {
 
 // Section is a section of the outline. Number is stable across edits; Revision grows with every edit or regeneration
 // of the section, and the text counts only for the revision it was written for. Attempt is the attempt of the call of
-// the current revision: a refused answer uses one. Kind is set for the slide of a presentation only.
+// the current revision: a refused answer uses one. Kind is set for the slide of a presentation only, Part for a
+// section of a lab report only.
 type Section struct {
 	Number   int              `json:"number"`
 	Kind     values.SlideKind `json:"kind,omitempty"`
+	Part     LabPart          `json:"part,omitempty"`
 	Title    string           `json:"title"`
 	Words    int              `json:"words"`
 	Revision int              `json:"revision"`
@@ -120,7 +123,7 @@ func (f File) validate() error {
 // again (an edit or a regeneration), so its job is a new one. Approved is the student's «Утвердить план»: no section
 // is written before it (TASK-105). OutlineRevision grows and OutlineNote is set when the student asks again for an
 // outline whose call used its attempts, so the new calls have new keys. Deck is set for a presentation only (TASK-106):
-// File is then the .pptx and Deck.Talk the speaker text.
+// File is then the .pptx and Deck.Talk the speaker text. Lab is set for a lab report only (TASK-107).
 type Writing struct {
 	Snapshot        Snapshot  `json:"snapshot"`
 	Generation      int       `json:"generation"`
@@ -132,22 +135,27 @@ type Writing struct {
 	Approved        bool      `json:"approved"`
 	File            *File     `json:"file"`
 	Deck            *Deck     `json:"deck,omitempty"`
+	Lab             *Lab      `json:"lab,omitempty"`
 }
 
 // OutlineItem is a section of an outline as the model or the student gives it; Number 0 is a new section. Kind is
 // the kind of a slide; in the student's edit of a presentation an empty one keeps the kind of a known slide and makes
-// a new one a bullets slide.
+// a new one a bullets slide. Part is the part of a lab report section; in the student's edit an empty one keeps the
+// part of a known section and makes a new one LabOther.
 type OutlineItem struct {
 	Number int
 	Kind   values.SlideKind
+	Part   LabPart
 	Title  string
 	Words  int
 }
 
-// Outline is a checked outline answer.
+// Outline is a checked outline answer. Manual is set by the use case for a lab report from the texts of the call
+// (Texts.Manual), never by a parser; "" is ManualNone.
 type Outline struct {
-	Topic string
-	Items []OutlineItem
+	Topic  string
+	Items  []OutlineItem
+	Manual Manual
 }
 
 // StepKind is what the next step of the writing does.
@@ -175,16 +183,19 @@ type Step struct {
 // --- moves ----------------------------------------------------------------------------------------------
 
 // StartWriting starts the writing of a confirmed work with what the paper takes from its lesson: the outline call is
-// due. A presentation is written as slides in the default template. Errors: ErrInvalidTransition, ErrInvalidWork for a
-// snapshot out of bounds.
+// due. A presentation is written as slides in the default template, a lab report as one (TASK-107). Errors:
+// ErrInvalidTransition, ErrInvalidWork for a snapshot out of bounds.
 func (w *Work) StartWriting(snap Snapshot, now time.Time) error {
 	if w.status != StatusConfirmed {
 		return fmt.Errorf("%w: write a %s work", ErrInvalidTransition, w.status)
 	}
 	next := w.clone()
 	next.writing = &Writing{Snapshot: snap, Generation: 1, OutlineAttempt: 1, Sections: []Section{}}
-	if u, _ := w.Understanding(); u.WorkType == TypePresentation {
+	switch u, _ := w.Understanding(); u.WorkType {
+	case TypePresentation:
 		next.writing.Deck = &Deck{Template: values.PresentationTemplates()[0], QuestionsRevision: 1, QuestionsAttempt: 1}
+	case TypeLabReport:
+		next.writing.Lab = &Lab{}
 	}
 	return w.move(next, StatusWriting, now)
 }
@@ -223,22 +234,31 @@ func (w *Work) Next() Step {
 	return Step{Kind: StepAssemble}
 }
 
-// SetOutline stores the outline the model proposed (ParseOutline, or ParseSlideOutline for a presentation): the
-// sections get the numbers 1..n and wait for the student's approval. Errors: ErrStaleStep when no outline is due,
-// ErrInvalidAnswer for an outline out of bounds.
+// SetOutline stores the outline the model proposed (ParseOutline, ParseSlideOutline for a presentation,
+// ParseLabOutline for a lab report, with its Manual): the sections get the numbers 1..n and wait for the student's
+// approval. Errors: ErrStaleStep when no outline is due, ErrInvalidAnswer for an outline out of bounds.
 func (w *Work) SetOutline(o Outline, now time.Time) error {
 	if w.Next().Kind != StepOutline {
 		return ErrStaleStep
 	}
-	if err := o.check(w.Presentation()); err != nil {
+	if err := o.check(w.writing.form()); err != nil {
 		return err
 	}
 	next := w.clone()
 	next.writing.Topic = o.Topic
 	for i, it := range o.Items {
 		next.writing.Sections = append(next.writing.Sections, Section{
-			Number: i + 1, Kind: it.Kind, Title: it.Title, Words: it.Words, Revision: 1, Attempt: 1,
+			Number: i + 1, Kind: it.Kind, Part: it.Part, Title: it.Title, Words: it.Words, Revision: 1, Attempt: 1,
 		})
+	}
+	if l := next.writing.Lab; l != nil {
+		l.Manual = o.Manual
+		if l.Manual == "" {
+			l.Manual = ManualNone
+		}
+		if !knownManual(l.Manual) {
+			return fmt.Errorf("%w: manual %q", ErrInvalidRequest, o.Manual)
+		}
 	}
 	return w.move(next, StatusWriting, now)
 }
@@ -268,10 +288,13 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 		old[s.Number] = s
 		top = max(top, s.Number)
 	}
-	if w.Presentation() {
+	switch w.writing.form() {
+	case formDeck:
 		items = slideItems(items, old)
+	case formLab:
+		items = labItems(items, old)
 	}
-	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(w.Presentation()); err != nil {
+	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(w.writing.form()); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidReply, err)
 	}
 	if w.sameOutline(items) {
@@ -288,11 +311,11 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 		case !known:
 			top++
 			s = Section{Number: top, Revision: 1, Attempt: 1}
-		case s.Title != it.Title || s.Words != it.Words || s.Kind != it.Kind:
+		case s.Title != it.Title || s.Words != it.Words || s.Kind != it.Kind || s.Part != it.Part:
 			s.Revision, s.Attempt, s.Note = s.Revision+1, 1, ""
 		}
 		seen[s.Number] = true
-		s.Kind, s.Title, s.Words = it.Kind, it.Title, it.Words
+		s.Kind, s.Part, s.Title, s.Words = it.Kind, it.Part, it.Title, it.Words
 		sections = append(sections, s)
 	}
 	next.writing.Sections = sections
@@ -363,8 +386,8 @@ func (w *Work) Regenerate(number int, note string, now time.Time) error {
 	return w.rewrite(next, now)
 }
 
-// WriteSection stores the checked text of the due section (ParseSection, or ParseSlide for a slide) of revision; any
-// other is ErrStaleStep.
+// WriteSection stores the checked text of the due section (ParseSection, ParseSlide for a slide, ParseLabSection for
+// a section of a lab report) of revision; any other is ErrStaleStep.
 func (w *Work) WriteSection(number, revision int, text SectionText, now time.Time) error {
 	st := w.Next()
 	if st.Kind != StepSection || st.Section != number || st.Revision != revision {
@@ -372,7 +395,7 @@ func (w *Work) WriteSection(number, revision int, text SectionText, now time.Tim
 	}
 	sec, _ := w.Section(number)
 	text.Revision = revision
-	if err := text.checkFor(sec.Kind); err != nil {
+	if err := text.checkFor(sec.Kind, sec.Part); err != nil {
 		return err
 	}
 	next := w.clone()
@@ -433,7 +456,8 @@ func (w *Work) sameOutline(items []OutlineItem) bool {
 		return false
 	}
 	for i, s := range w.writing.Sections {
-		if it := items[i]; it.Number != s.Number || it.Title != s.Title || it.Words != s.Words || it.Kind != s.Kind {
+		if it := items[i]; it.Number != s.Number || it.Title != s.Title || it.Words != s.Words || it.Kind != s.Kind ||
+			it.Part != s.Part {
 			return false
 		}
 	}
@@ -480,8 +504,8 @@ func (w *Work) Progress() (done, total int) {
 }
 
 // ContentKey is a digest of what the paper is built from: the topic and every section with its revision; for a
-// presentation also the kinds of the slides, the template and the revision of the questions. The file of another key
-// is stale.
+// presentation also the kinds of the slides, the template and the revision of the questions; for a lab report the
+// parts and the state of the manual. The file of another key is stale.
 func (w *Work) ContentKey() string {
 	if w.writing == nil {
 		return ""
@@ -496,6 +520,12 @@ func (w *Work) ContentKey() string {
 		h.Write(fmt.Appendf(nil, "\x00deck\x00%s\x00%d", d.Template, d.QuestionsRevision))
 		for _, s := range w.writing.Sections {
 			h.Write(fmt.Appendf(nil, "\x00%s", s.Kind))
+		}
+	}
+	if l := w.writing.Lab; l != nil {
+		h.Write(fmt.Appendf(nil, "\x00lab\x00%s", l.Manual))
+		for _, s := range w.writing.Sections {
+			h.Write(fmt.Appendf(nil, "\x00%s", s.Part))
 		}
 	}
 	return fmt.Sprintf("c:%x", h.Sum(nil)[:16])
@@ -525,11 +555,13 @@ type MaterialRef struct {
 }
 
 // Texts are the texts a writing call is made from: the assignment, the teacher's material and the student's
-// materials that may be cited. They are cut to the writing limits.
+// materials that may be cited. They are cut to the writing limits. Manual is what became of the teacher's material
+// ("" ManualNone); only a lab report tells the writer.
 type Texts struct {
 	Assignment string
 	Material   string
 	Materials  []MaterialRef
+	Manual     Manual
 }
 
 // refOf is the ref the writer cites material i by.
@@ -543,6 +575,7 @@ type materialData struct {
 type outlineData struct {
 	Number int              `json:"number"`
 	Kind   values.SlideKind `json:"kind,omitempty"`
+	Part   LabPart          `json:"part,omitempty"`
 	Title  string           `json:"title"`
 	Words  int              `json:"words"`
 }
@@ -562,6 +595,7 @@ type stepData struct {
 	Brief          Brief          `json:"brief"`
 	AssignmentText string         `json:"assignment_text"`
 	MaterialText   string         `json:"material_text"`
+	Manual         Manual         `json:"manual,omitempty"` // a lab report only
 	Materials      []materialData `json:"materials"`
 	Topic          string         `json:"topic,omitempty"`
 	Outline        []outlineData  `json:"outline,omitempty"`
@@ -598,6 +632,13 @@ func (w *Work) StepData(st Step, t Texts) (data, note string, err error) {
 	for i, m := range t.Materials {
 		d.Materials = append(d.Materials, materialData{Ref: refOf(i), Name: m.Name})
 	}
+	if l := w.writing.Lab; l != nil {
+		// The sections are written with the manual the outline was made from.
+		d.Manual = l.Manual
+		if st.Kind == StepOutline {
+			d.Manual = cmp.Or(t.Manual, ManualNone)
+		}
+	}
 	switch st.Kind {
 	case StepOutline:
 		note = w.writing.OutlineNote
@@ -618,7 +659,7 @@ func (w *Work) StepData(st Step, t Texts) (data, note string, err error) {
 		d.Topic = w.writing.Topic
 		var prev *Section
 		for i, s := range w.writing.Sections {
-			d.Outline = append(d.Outline, outlineData{Number: s.Number, Kind: s.Kind, Title: s.Title, Words: s.Words})
+			d.Outline = append(d.Outline, outlineData{Number: s.Number, Kind: s.Kind, Part: s.Part, Title: s.Title, Words: s.Words})
 			if s.Number == st.Section {
 				d.Section, note = &d.Outline[len(d.Outline)-1], s.Note
 				if i > 0 {
@@ -683,7 +724,7 @@ func ParseOutline(raw string) (Outline, error) {
 		err = errShape
 	}
 	if err == nil {
-		err = o.check(false)
+		err = o.check(formPaper)
 	}
 	if err != nil {
 		return Outline{}, fmt.Errorf("%w: outline: %w", ErrInvalidAnswer, err)
@@ -719,15 +760,43 @@ func readOutlineItem(d *json.Decoder) (OutlineItem, error) {
 	return it, err
 }
 
-// check checks the bounds of an outline: of a paper, or of a presentation (checkDeck).
-func (o Outline) check(deck bool) error {
-	if deck {
+// form is what a writing builds: a paper, a presentation or a lab report.
+type form int
+
+const (
+	formPaper form = iota
+	formDeck
+	formLab
+)
+
+// form returns what the writing builds.
+func (wr Writing) form() form {
+	switch {
+	case wr.Deck != nil:
+		return formDeck
+	case wr.Lab != nil:
+		return formLab
+	}
+	return formPaper
+}
+
+// check checks the bounds of an outline: of a paper, of a presentation (checkDeck) or of a lab report (checkLab).
+func (o Outline) check(f form) error {
+	switch f {
+	case formDeck:
 		return o.checkDeck()
+	case formLab:
+		return o.checkLab()
 	}
+	if slices.ContainsFunc(o.Items, func(it OutlineItem) bool { return it.Kind != "" || it.Part != "" }) {
+		return fmt.Errorf("%w: a section of a paper is no slide and no part of a lab report", ErrInvalidAnswer)
+	}
+	return o.checkPaper()
+}
+
+// checkPaper checks the bounds of the topic and the sections of a paper (or a lab report).
+func (o Outline) checkPaper() error {
 	bad := func(why string) error { return fmt.Errorf("%w: %s", ErrInvalidAnswer, why) }
-	if slices.ContainsFunc(o.Items, func(it OutlineItem) bool { return it.Kind != "" }) {
-		return bad("a section of a paper is no slide")
-	}
 	if !boundedText(o.Topic, MaxTopicRunes, false, false) {
 		return bad("topic")
 	}
@@ -830,14 +899,16 @@ func trimAll(ss []string) []string {
 	return out
 }
 
-// checkFor checks a stored section text of a paper section (kind empty) or of a slide of kind: a revision and the
-// bounds of its content.
-func (t SectionText) checkFor(kind values.SlideKind) error {
+// checkFor checks a stored section text of a paper section (kind and part empty), of a slide of kind or of a lab
+// report section of part: a revision and the bounds of its content.
+func (t SectionText) checkFor(kind values.SlideKind, part LabPart) error {
 	switch {
 	case t.Revision < 1:
 		return fmt.Errorf("%w: revision", ErrInvalidAnswer)
 	case kind != "":
 		return t.checkSlide(kind)
+	case part != "":
+		return t.checkLab(part)
 	case len(t.Bullets) > 0 || len(t.Columns) > 0:
 		return fmt.Errorf("%w: a paper section has no bullets", ErrInvalidAnswer)
 	}
@@ -920,7 +991,7 @@ func (wr Writing) validate() error {
 		items := make([]OutlineItem, len(wr.Sections))
 		numbers := map[int]bool{}
 		for i, s := range wr.Sections {
-			items[i] = OutlineItem{Number: s.Number, Kind: s.Kind, Title: s.Title, Words: s.Words}
+			items[i] = OutlineItem{Number: s.Number, Kind: s.Kind, Part: s.Part, Title: s.Title, Words: s.Words}
 			switch {
 			case s.Number < 1 || numbers[s.Number]:
 				return bad("section numbers")
@@ -928,13 +999,21 @@ func (wr Writing) validate() error {
 				return bad("section revision or attempt")
 			case !boundedText(s.Note, MaxNoteRunes, true, true):
 				return bad("section note")
-			case s.Text != nil && (s.Text.Revision > s.Revision || s.Text.checkFor(s.Kind) != nil):
+			case s.Text != nil && (s.Text.Revision > s.Revision || s.Text.checkFor(s.Kind, s.Part) != nil):
 				return bad("section text")
 			}
 			numbers[s.Number] = true
 		}
-		if err := (Outline{Topic: wr.Topic, Items: items}).check(wr.Deck != nil); err != nil {
+		if err := (Outline{Topic: wr.Topic, Items: items}).check(wr.form()); err != nil {
 			return bad("outline")
+		}
+	}
+	if wr.Deck != nil && wr.Lab != nil {
+		return bad("a presentation and a lab report")
+	}
+	if l := wr.Lab; l != nil {
+		if err := l.validate(len(wr.Sections) > 0); err != nil {
+			return err
 		}
 	}
 	if f := wr.File; f != nil {
@@ -979,6 +1058,10 @@ func (wr Writing) clone() Writing {
 	if wr.Deck != nil {
 		d := wr.Deck.clone()
 		c.Deck = &d
+	}
+	if wr.Lab != nil {
+		l := *wr.Lab
+		c.Lab = &l
 	}
 	return c
 }
