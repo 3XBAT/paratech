@@ -9,7 +9,8 @@
 // produced is replayed for free. «Повторить» (Retry) after a failure the Hub keeps for its key (a refusal, a provider
 // error without retry, an unusable reply) sends ag:<thread>:<turn>:<step>:r<N>. When the Hub no longer keeps the model
 // turn (values.ErrTurnGone) the request starts again from the student's text: by itself while nothing was done yet,
-// else by Restart.
+// else by Restart. «Повторить» of a finished or stopped request (Rerun, ADR-0026) starts a new request with the same
+// text and scope under ag:<thread>:<turn+1>:<step>, refused while the request has live effects (port Effects).
 //
 // Rules that apply: ARCH-20..27. Decisions (class, plan, provenance, budget) are made by the agent domain, not here.
 package agentturn

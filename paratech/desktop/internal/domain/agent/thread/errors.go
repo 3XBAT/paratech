@@ -44,4 +44,8 @@ var (
 
 	// ErrRestartRequired means the Hub no longer keeps the model turn: the request starts again from its text.
 	ErrRestartRequired = errors.New("the request must start again")
+
+	// ErrRerunBlocked means the request left live effects (an action not failed or undone, a proposal): a repeat would
+	// double them (ADR-0026).
+	ErrRerunBlocked = errors.New("the request left effects and cannot run again")
 )

@@ -54,13 +54,6 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
 	}
-	c.agent, err = agentturn.New(agentturn.Deps{
-		Model: model, Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
-		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Log: log,
-	})
-	if err != nil {
-		return fmt.Errorf("app: agent: %w", err)
-	}
 	// The actions and their Undo run on the same use cases as the screens; checks of a target's version and the change
 	// commit in one transaction of the local database.
 	actions, err := agentloop.NewActions(agentloop.ActionDeps{
@@ -78,6 +71,16 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent journal: %w", err)
+	}
+	// «Повторить» of a finished request asks the journal whether the request left effects (ADR-0026); agentturn does
+	// not import agentjournal (ARCH-20).
+	c.agent, err = agentturn.New(agentturn.Deps{
+		Model: model, Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
+		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Effects: c.journal,
+		Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: agent: %w", err)
 	}
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,

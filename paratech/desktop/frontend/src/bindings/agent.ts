@@ -21,6 +21,7 @@ export const methods = {
   continueTurn: `${service}.Continue`,
   retry: `${service}.Retry`,
   restart: `${service}.Restart`,
+  rerun: `${service}.Rerun`,
   cancel: `${service}.Cancel`,
   undo: `${service}.Undo`,
   undoRequest: `${service}.UndoRequest`,
@@ -174,7 +175,10 @@ export interface UpdateView {
   status: string;
   /** "", budget, offline, user, quota, failed or expired. */
   stopReason: string;
-  /** "", busy, stale, invalid, budget, retry_required, restart_required or failed. */
+  /**
+   * "", busy, stale, invalid, budget, retry_required, restart_required, rerun_blocked («Повторить» over effects of the
+   * request: «Отменить всё» first) or failed.
+   */
   problem: string;
   /** A step went to the Hub: no cards; apply the status only and keep the cards shown. False from an older core. */
   progress: boolean;
@@ -479,6 +483,8 @@ export interface AgentApi {
   continueTurn(ref: TurnRef): Promise<CallProblem>;
   retry(ref: TurnRef): Promise<CallProblem>;
   restart(ref: TurnRef): Promise<CallProblem>;
+  /** «Повторить» of the last finished or stopped request: a new request with its text and scope; "offline" like ask. */
+  rerun(ref: TurnRef): Promise<CallProblem>;
   cancel(ref: TurnRef): Promise<CallProblem>;
   /** «Отменить» of an action line. */
   undo(actionId: string): Promise<UndoView>;
@@ -501,6 +507,7 @@ export function agentApi(call: CallByName): AgentApi {
     continueTurn: turn(methods.continueTurn),
     retry: turn(methods.retry),
     restart: turn(methods.restart),
+    rerun: turn(methods.rerun),
     cancel: turn(methods.cancel),
     undo: async (actionId) => parseUndo(await call(methods.undo, actionId)),
     undoRequest: async (ref) => parseUndoRequest(await call(methods.undoRequest, ref)),

@@ -23,6 +23,7 @@ const (
 	opFinishUndo  = "agentjournal: finish undo"
 	opUndoRequest = "agentjournal: undo the request"
 	opList        = "agentjournal: list"
+	opLive        = "agentjournal: live effects"
 	opRecover     = "agentjournal: recover"
 	opLineSubject = "agentjournal: subject of a journal line unknown"
 	opObserve     = "agentjournal: pending entry not settled"
@@ -260,6 +261,23 @@ func (s *Service) UndoRequest(ctx context.Context, th shared.ThreadID, turn int)
 		return out, fmt.Errorf("%s: %w", opUndoRequest, errors.Join(errs...))
 	}
 	return out, nil
+}
+
+// Live reports whether request turn of a thread left effects a repeat would double (agentturn.Effects, ADR-0026): an
+// entry that is not FAILED or UNDONE. A proposal counts whatever the student did with it, and so does an action whose
+// outcome is unknown or whose undo was refused or has not finished.
+func (s *Service) Live(ctx context.Context, th shared.ThreadID, turn int) (bool, error) {
+	// The request is the newest of its thread, so its entries are among the newest MaxList (at most a few per request).
+	as, err := s.actions.ListByThread(ctx, th, MaxList)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", opLive, err)
+	}
+	for _, a := range as {
+		if a.Turn() == turn && a.Status() != action.StatusFailed && a.Status() != action.StatusUndone {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ListThread returns the entries of a thread, newest first, at most limit (1..MaxList).

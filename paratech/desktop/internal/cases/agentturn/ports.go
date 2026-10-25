@@ -27,6 +27,13 @@ type Progress interface {
 	Started(ctx context.Context, st Step)
 }
 
+// Effects tells «Повторить» of a finished request (Rerun) whether the request left effects a repeat would double:
+// Live is true when request turn of the thread has a journal entry that is not FAILED or UNDONE (an action that ran,
+// one whose outcome is unknown, a proposal). Implemented by cases/agentjournal and wired by app (ARCH-20).
+type Effects interface {
+	Live(ctx context.Context, thread shared.ThreadID, turn int) (bool, error)
+}
+
 // ThreadRepository stores agent threads (one per subject key) in the local database. Implemented by the sqlite
 // adapter.
 type ThreadRepository interface {

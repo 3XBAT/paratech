@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -131,6 +132,8 @@ func TestDriverPublishesProblems(t *testing.T) {
 		{thread.ErrBudgetExceeded, ProblemBudget},
 		{thread.ErrRetryRequired, ProblemRetry},
 		{thread.ErrRestartRequired, ProblemRestart},
+		{fmt.Errorf("agentturn: rerun: %w", thread.ErrRerunBlocked), ProblemRerun},
+		{fmt.Errorf("%w: %w: planning", thread.ErrTurnInProgress, thread.ErrInvalidTransition), ProblemBusy},
 		{agentturn.ErrInvalidInput, ProblemInvalid},
 		{thread.ErrInvalidTransition, ProblemInvalid},
 		{errors.New("disk full"), ProblemFailed},
