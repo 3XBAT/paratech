@@ -28,6 +28,7 @@ type stopTurns struct {
 	reason      values.StopReason
 	stops       int
 	continues   int
+	reruns      int
 	submitted   []agentturn.SubmitInput
 	interrupted []agentturn.SubmitInput
 }
@@ -102,20 +103,29 @@ func (s *stopTurns) Restart(context.Context, agentturn.TurnRef) (agentturn.Step,
 	return agentturn.Step{}, errNotScripted
 }
 
+// Rerun starts the next request, done at once.
+func (s *stopTurns) Rerun(_ context.Context, ref agentturn.TurnRef) (agentturn.Step, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reruns++
+	s.reason = ""
+	return agentturn.Step{Thread: ref.Thread, Turn: ref.Turn + 1, Status: thread.StatusDone}, nil
+}
+
 func (s *stopTurns) Cancel(context.Context, agentturn.TurnRef) (agentturn.Step, error) {
 	return agentturn.Step{}, errNotScripted
 }
 
 type stopReport struct {
-	stops, continues       int
-	submitted, interrupted []agentturn.SubmitInput
-	askCtx                 error
+	stops, continues, reruns int
+	submitted, interrupted   []agentturn.SubmitInput
+	askCtx                   error
 }
 
 func (s *stopTurns) report() stopReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return stopReport{stops: s.stops, continues: s.continues, submitted: slices.Clone(s.submitted),
+	return stopReport{stops: s.stops, continues: s.continues, reruns: s.reruns, submitted: slices.Clone(s.submitted),
 		interrupted: slices.Clone(s.interrupted), askCtx: s.askCtx}
 }
 
@@ -272,6 +282,57 @@ func TestContinueDuringAnActionCutByStop(t *testing.T) {
 	d.Wait()
 	if rep := turns.report(); rep.continues != 1 {
 		t.Fatalf("after the loop ended: report %+v", rep)
+	}
+}
+
+// «Повторить» of a stopped request while its loop still finishes an action: refused as busy (a repeat would start
+// while the old step is open); once the loop has closed the step the repeat runs as the next request.
+func TestRerunDuringAnActionCutByStop(t *testing.T) {
+	w := newWorld(t)
+	turns := &stopTurns{first: step(thread.StatusExecuting, []agentturn.Call{
+		writeCall(t, "c1", values.ToolCreateSubject, `{"name":"Химия"}`),
+		writeCall(t, "c2", values.ToolCreateFolder, `{"subject":"s1","name":"Лабы"}`),
+	})}
+	sink := &chanSink{}
+	d, err := New(w.deps(turns, sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	w.lib.onCreate = func() {
+		if err := d.Stop(context.Background(), ref1); err != nil {
+			t.Error(err)
+		}
+		d.mu.Lock()
+		m := d.stops[ref1]
+		d.mu.Unlock()
+		<-m.done
+		if err := d.Rerun(context.Background(), ref1); err != nil {
+			t.Error(err)
+		}
+	}
+
+	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+
+	rep := turns.report()
+	if rep.reruns != 0 || len(rep.submitted) != 0 || len(rep.interrupted) != 1 || !slices.Equal(w.lib.calls, []string{"CreateSubject"}) {
+		t.Fatalf("report %+v, library %v", rep, w.lib.calls)
+	}
+	if !slices.ContainsFunc(sink.all(), func(u Update) bool { return u.Problem == ProblemBusy && u.Thread == th1 && u.Turn == 1 }) {
+		t.Fatalf("no busy update: %+v", sink.all())
+	}
+
+	w.lib.onCreate = nil
+	if err := d.Rerun(t.Context(), ref1); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	ups := sink.all()
+	if last := ups[len(ups)-1]; turns.report().reruns != 1 || last.Turn != 2 || last.Status != thread.StatusDone || last.Problem != ProblemNone {
+		t.Fatalf("after the loop ended: reruns %d, last %+v", turns.report().reruns, last)
 	}
 }
 

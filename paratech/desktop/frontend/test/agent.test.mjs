@@ -86,6 +86,9 @@ test("the api sends the typed arguments and reads the problem of the reply", asy
   assert.equal(await api.approvePlan({ threadId: "t", turn: 2 }), "offline");
   assert.deepEqual(calls[1], [methods.ask, scope]);
   assert.deepEqual(calls[2], [methods.approvePlan, { threadId: "t", turn: 2 }]);
+  assert.equal(await api.rerun({ threadId: "t", turn: 2 }), "offline");
+  assert.deepEqual(calls[3], [methods.rerun, { threadId: "t", turn: 2 }]);
+  assert.equal(methods.rerun, "paratech/desktop/internal/input/wails.AgentService.Rerun");
   const odd = agentApi(async () => ({ problem: "something new" }));
   assert.equal(await odd.stop({ threadId: "t", turn: 1 }), "failed");
 });

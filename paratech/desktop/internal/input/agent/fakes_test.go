@@ -292,6 +292,10 @@ func (s *scriptedTurns) Restart(context.Context, agentturn.TurnRef) (agentturn.S
 	return s.next()
 }
 
+func (s *scriptedTurns) Rerun(context.Context, agentturn.TurnRef) (agentturn.Step, error) {
+	return s.next()
+}
+
 func (s *scriptedTurns) Cancel(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

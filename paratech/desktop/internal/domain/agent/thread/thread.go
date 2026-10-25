@@ -695,6 +695,45 @@ func (th *Thread) Restart(now time.Time) error {
 	return nil
 }
 
+// Rerun is «Повторить» of the current request once it is DONE, FAILED, CANCELLED or STOPPED (ADR-0026): a stopped
+// request is cancelled, its calls without a result are answered not done, and a new request (next turn, empty
+// budget) starts in the same scope; the case adds the student's text again. live tells that the request left effects
+// (a journal entry not FAILED or UNDONE, a proposal): a repeat would double them, so it is ErrRerunBlocked and
+// nothing changes. A running request is ErrTurnInProgress (also ErrInvalidTransition). It returns the results of the
+// closed calls: they belong to the history of the old request, before the new text.
+func (th *Thread) Rerun(live bool, now time.Time) ([]values.ToolResult, error) {
+	t, err := th.turn()
+	if err != nil {
+		return nil, err
+	}
+	switch t.status {
+	case StatusDone, StatusFailed, StatusCancelled, StatusStopped:
+	case StatusPlanning, StatusExecuting:
+		return nil, fmt.Errorf("%w: %w: %s", ErrTurnInProgress, ErrInvalidTransition, t.status)
+	default:
+		return nil, fmt.Errorf("%w: rerun from %s", ErrInvalidTransition, t.status)
+	}
+	if live {
+		return nil, ErrRerunBlocked
+	}
+	if now.IsZero() {
+		return nil, fmt.Errorf("%w: no time", ErrInvalidThread)
+	}
+
+	scope := t.scope
+	if t.status == StatusStopped {
+		if err := th.Cancel(now); err != nil {
+			return nil, err
+		}
+	}
+	th.Abandon(values.RefuseNotDone, now)
+	results, _ := th.TakeResults(now)
+	if err := th.StartRequest(scope, now); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 // Interrupt closes a request whose Driver stops running its calls (its context ended, the app closes). Calls the
 // Driver answered before (Answer) keep their results: a write that ran reports its real outcome, never «not done».
 // Calls without a result are answered not done, and a running request stops as «нет связи», so «Продолжить» goes on;

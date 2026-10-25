@@ -23,6 +23,7 @@ const (
 	opAgentContinue = "ui: agent continue"
 	opAgentRetry    = "ui: agent retry"
 	opAgentRestart  = "ui: agent restart"
+	opAgentRerun    = "ui: agent rerun"
 	opAgentCancel   = "ui: agent cancel"
 	opAgentLink     = "ui: agent hub link"
 )
@@ -31,7 +32,7 @@ const (
 const (
 	AgentProblemNone        = ""
 	AgentProblemInvalid     = "invalid"     // malformed ids, turn or answers
-	AgentProblemOffline     = "offline"     // Ask while the Hub is not set up (AgentState says why); the panel is read-only
+	AgentProblemOffline     = "offline"     // Ask or Rerun while the Hub is not set up (AgentState says why); the panel is read-only
 	AgentProblemClosed      = "closed"      // the app is closing
 	AgentProblemUnavailable = "unavailable" // Undo is not wired
 	AgentProblemBusy        = "busy"        // UndoRequest met a concurrent change; nothing more was undone, try again
@@ -50,7 +51,7 @@ const (
 // agentUpdateProblems are the problems of the Driver the panel knows; any other becomes "failed".
 var agentUpdateProblems = map[string]bool{
 	"busy": true, "stale": true, "invalid": true, "budget": true, "retry_required": true, "restart_required": true,
-	"failed": true,
+	"rerun_blocked": true, "failed": true,
 }
 
 // AgentDriver is the agent loop (input/agent.Driver) as the panel uses it (ARCH-42); app wires it in, as input/wails
@@ -64,6 +65,7 @@ type AgentDriver interface {
 	Continue(ctx context.Context, ref agentturn.TurnRef) error
 	Retry(ctx context.Context, ref agentturn.TurnRef) error
 	Restart(ctx context.Context, ref agentturn.TurnRef) error
+	Rerun(ctx context.Context, ref agentturn.TurnRef) error
 	Cancel(ctx context.Context, ref agentturn.TurnRef) error
 }
 
@@ -200,6 +202,19 @@ func (s *AgentService) Retry(_ context.Context, ref AgentTurnRef) AgentResult {
 // Restart starts an expired request again from its text.
 func (s *AgentService) Restart(_ context.Context, ref AgentTurnRef) AgentResult {
 	return s.onTurn(opAgentRestart, ref, s.driver.Restart)
+}
+
+// Rerun is «Повторить» of the last finished or stopped request: a new request with the same text and scope. Like Ask
+// it is refused with "offline" while the Hub is not set up, so no new request starts only to stop.
+func (s *AgentService) Rerun(ctx context.Context, ref AgentTurnRef) AgentResult {
+	r := agentturn.TurnRef{Thread: shared.ThreadID(ref.ThreadID), Turn: ref.Turn}
+	if r.Thread.Validate() != nil || r.Turn < 1 {
+		return AgentResult{Problem: AgentProblemInvalid}
+	}
+	if s.linkState(ctx) != AgentLinkReady {
+		return AgentResult{Problem: AgentProblemOffline}
+	}
+	return s.started(opAgentRerun, s.driver.Rerun(s.life, r))
 }
 
 // Cancel is «Отмена».

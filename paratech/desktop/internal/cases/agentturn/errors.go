@@ -3,7 +3,8 @@ package agentturn
 import "errors"
 
 // Errors of the use case. Domain errors (thread.ErrTurnInProgress, thread.ErrInvalidTransition,
-// thread.ErrRetryRequired, thread.ErrRestartRequired, thread.ErrBudgetExceeded) pass through wrapped.
+// thread.ErrRetryRequired, thread.ErrRestartRequired, thread.ErrBudgetExceeded, thread.ErrRerunBlocked) pass through
+// wrapped.
 var (
 	// ErrInvalidConfig means a required port is missing.
 	ErrInvalidConfig = errors.New("agentturn: invalid configuration")

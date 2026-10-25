@@ -71,6 +71,10 @@ func (f *fakeAgentDriver) Restart(ctx context.Context, ref agentturn.TurnRef) er
 	return f.record(agentCall{op: "restart", ctx: ctx, ref: ref})
 }
 
+func (f *fakeAgentDriver) Rerun(ctx context.Context, ref agentturn.TurnRef) error {
+	return f.record(agentCall{op: "rerun", ctx: ctx, ref: ref})
+}
+
 func (f *fakeAgentDriver) Cancel(ctx context.Context, ref agentturn.TurnRef) error {
 	return f.record(agentCall{op: "cancel", ctx: ctx, ref: ref})
 }
@@ -128,14 +132,15 @@ func TestAgentForwardsOnTheAppContext(t *testing.T) {
 		{"retry", func(s *AgentService, ctx context.Context) AgentResult { return s.Retry(ctx, ref) }, agentCall{ref: want}},
 		{"restart", func(s *AgentService, ctx context.Context) AgentResult { return s.Restart(ctx, ref) },
 			agentCall{ref: want}},
+		{"rerun", func(s *AgentService, ctx context.Context) AgentResult { return s.Rerun(ctx, ref) }, agentCall{ref: want}},
 		{"cancel", func(s *AgentService, ctx context.Context) AgentResult { return s.Cancel(ctx, ref) }, agentCall{ref: want}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.op, func(t *testing.T) {
 			s, d, _, _ := newAgent(t, readyLink())
-			// Only the link read of Ask uses the call's ctx; the operation must not.
+			// Only the link read of Ask and Rerun uses the call's ctx; the operation must not.
 			callCtx := endedCall()
-			if tt.op == "ask" {
+			if tt.op == "ask" || tt.op == "rerun" {
 				callCtx = context.Background()
 			}
 			if got := tt.call(s, callCtx); got != (AgentResult{}) {
@@ -217,6 +222,10 @@ func TestAgentRefusesMalformedInput(t *testing.T) {
 		{"turn 0", func(s *AgentService) AgentResult {
 			return s.ApprovePlan(context.Background(), AgentTurnRef{ThreadID: "th1"})
 		}},
+		{"rerun thread id", func(s *AgentService) AgentResult {
+			return s.Rerun(context.Background(), AgentTurnRef{ThreadID: "a/b", Turn: 1})
+		}},
+		{"rerun turn 0", func(s *AgentService) AgentResult { return s.Rerun(context.Background(), AgentTurnRef{ThreadID: "th1"}) }},
 		{"no answers", func(s *AgentService) AgentResult { return s.Answer(context.Background(), good, nil) }},
 		{"too many answers", func(s *AgentService) AgentResult {
 			return s.Answer(context.Background(), good, make([]AgentAnswerInput, values.MaxQuestions+1))
@@ -235,7 +244,8 @@ func TestAgentRefusesMalformedInput(t *testing.T) {
 	}
 }
 
-// Without a Hub address or key the panel is read-only: Ask is refused, the buttons of a stored request still work.
+// Without a Hub address or key the panel is read-only: Ask and Rerun (a new request) are refused, the buttons of a
+// stored request still work.
 func TestAgentOffline(t *testing.T) {
 	tests := []struct {
 		name string
@@ -265,17 +275,24 @@ func TestAgentOffline(t *testing.T) {
 			if ready != (res.Problem == "") || !ready && res.Problem != AgentProblemOffline {
 				t.Errorf("Ask = %+v", res)
 			}
+			res = s.Rerun(context.Background(), AgentTurnRef{ThreadID: "th1", Turn: 1})
+			if ready != (res.Problem == "") || !ready && res.Problem != AgentProblemOffline {
+				t.Errorf("Rerun = %+v", res)
+			}
 			if res := s.Continue(context.Background(), AgentTurnRef{ThreadID: "th1", Turn: 1}); res.Problem != "" {
 				t.Errorf("Continue = %+v", res)
 			}
-			asks := 0
+			asks, reruns := 0, 0
 			for _, c := range d.calls {
-				if c.op == "ask" {
+				switch c.op {
+				case "ask":
 					asks++
+				case "rerun":
+					reruns++
 				}
 			}
-			if ready != (asks == 1) {
-				t.Errorf("asks forwarded = %d", asks)
+			if ready != (asks == 1) || ready != (reruns == 1) {
+				t.Errorf("forwarded: asks %d, reruns %d", asks, reruns)
 			}
 		})
 	}

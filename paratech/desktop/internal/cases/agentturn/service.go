@@ -25,6 +25,7 @@ const (
 	opContinue  = "agentturn: continue"
 	opRetry     = "agentturn: retry"
 	opRestart   = "agentturn: restart"
+	opRerun     = "agentturn: rerun"
 	opCancel    = "agentturn: cancel"
 	opInterrupt = "agentturn: interrupt"
 	opRecover   = "agentturn: recover"
@@ -49,6 +50,7 @@ type Service struct {
 	clock    Clock
 	ids      IDGenerator
 	progress Progress // nil: none
+	effects  Effects  // nil: no Rerun
 	log      *slog.Logger
 
 	mu sync.Mutex
@@ -58,11 +60,11 @@ type Service struct {
 func New(d Deps) (*Service, error) {
 	if d.Model == nil || d.Threads == nil || d.History == nil || d.Subjects == nil || d.Facts == nil || d.Tx == nil ||
 		d.Clock == nil || d.IDs == nil {
-		return nil, fmt.Errorf("%s: %w: every port except Progress and Log is required", opNew, ErrInvalidConfig)
+		return nil, fmt.Errorf("%s: %w: every port except Progress, Effects and Log is required", opNew, ErrInvalidConfig)
 	}
 	s := &Service{
 		model: d.Model, threads: d.Threads, history: d.History, subjects: d.Subjects, facts: d.Facts, tx: d.Tx,
-		clock: d.Clock, ids: d.IDs, progress: d.Progress, log: d.Log,
+		clock: d.Clock, ids: d.IDs, progress: d.Progress, effects: d.Effects, log: d.Log,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -339,6 +341,39 @@ func (s *Service) restart(ctx context.Context, c *change) error {
 	}
 	c.add(values.HistoryTurn{StudentText: text})
 	return nil
+}
+
+// Rerun is «Повторить» of the last finished or stopped request (ADR-0026): unless the request left effects
+// (Effects.Live), a new request starts in its scope with its stored text and runs under new step keys
+// ag:<thread>:<turn+1>:<step>, paid again. A button of the old request after that is ErrStaleTurn.
+func (s *Service) Rerun(ctx context.Context, ref TurnRef) (Step, error) {
+	if s.effects == nil {
+		return Step{}, fmt.Errorf("%s: %w: no Effects port", opRerun, ErrInvalidConfig)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.load(ctx, ref, opRerun)
+	if err != nil {
+		return Step{}, err
+	}
+	live, err := s.effects.Live(ctx, ref.Thread, ref.Turn)
+	if err != nil {
+		return Step{}, fmt.Errorf("%s: effects: %w", opRerun, err)
+	}
+	text, err := s.studentText(ctx, c, ref.Turn)
+	if err != nil {
+		return Step{}, fmt.Errorf("%s: %w", opRerun, err)
+	}
+	results, err := c.th.Rerun(live, s.clock.Now())
+	if err != nil {
+		return Step{}, fmt.Errorf("%s: %w", opRerun, err)
+	}
+	if len(results) > 0 {
+		// The old request's echo is followed by its results, under the old turn.
+		c.entries = append(c.entries, values.HistoryEntry{Turn: ref.Turn, Entry: values.HistoryTurn{Results: results}})
+	}
+	c.add(values.HistoryTurn{StudentText: text})
+	return s.drive(ctx, c, opRerun)
 }
 
 // studentText finds the text of request turn, in the entries of this change or in the stored history.

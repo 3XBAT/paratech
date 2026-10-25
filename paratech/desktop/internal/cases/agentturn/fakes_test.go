@@ -278,12 +278,38 @@ func (tx memTx) Do(ctx context.Context, fn func(ctx context.Context) error) erro
 	return nil
 }
 
+// fakeEffects says which requests left live effects; it records what it was asked.
+type fakeEffects struct {
+	mu    sync.Mutex
+	live  map[TurnRef]bool
+	err   error
+	asked []TurnRef
+}
+
+func (f *fakeEffects) Live(_ context.Context, th shared.ThreadID, turn int) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := TurnRef{Thread: th, Turn: turn}
+	f.asked = append(f.asked, r)
+	return f.live[r], f.err
+}
+
+func (f *fakeEffects) set(r TurnRef, live bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.live == nil {
+		f.live = map[TurnRef]bool{}
+	}
+	f.live[r] = live
+}
+
 type env struct {
 	svc     *Service
 	model   *fakeModel
 	threads *memThreads
 	history *memHistory
 	clock   *fixedClock
+	effects *fakeEffects
 }
 
 func newEnv(t *testing.T) *env {
@@ -319,13 +345,13 @@ func newEnvWith(t *testing.T, progress Progress) *env {
 	t.Helper()
 	e := &env{
 		model: &fakeModel{}, threads: &memThreads{}, history: &memHistory{},
-		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)},
+		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)}, effects: &fakeEffects{},
 	}
 	s1, _ := values.NewRef(values.KindSubject, "s1")
 	svc, err := New(Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
 		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
-		Progress: progress,
+		Progress: progress, Effects: e.effects,
 	})
 	if err != nil {
 		t.Fatal(err)

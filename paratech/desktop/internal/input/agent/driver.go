@@ -48,6 +48,7 @@ type Turns interface {
 	Continue(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Retry(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Restart(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
+	Rerun(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Cancel(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Interrupt(ctx context.Context, in agentturn.SubmitInput) (agentturn.Step, error)
 }
@@ -64,6 +65,7 @@ const (
 	ProblemBudget  Problem = "budget"           // the request used its budget
 	ProblemRetry   Problem = "retry_required"   // the step failed for good: «Повторить»
 	ProblemRestart Problem = "restart_required" // the Hub forgot the request: start it again
+	ProblemRerun   Problem = "rerun_blocked"    // «Повторить» over effects of the request: «Отменить всё» first
 	ProblemFailed  Problem = "failed"           // a local failure
 )
 
@@ -236,6 +238,14 @@ func (d *Driver) Retry(ctx context.Context, ref agentturn.TurnRef) error {
 func (d *Driver) Restart(ctx context.Context, ref agentturn.TurnRef) error {
 	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
 		return d.turns.Restart(ctx, ref)
+	})
+}
+
+// Rerun is «Повторить» of the last finished or stopped request: a new request with the same text and scope. Refused
+// as busy while a loop of the thread still runs calls (an action finishing after «Стоп»).
+func (d *Driver) Rerun(ctx context.Context, ref agentturn.TurnRef) error {
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
+		return d.turns.Rerun(ctx, ref)
 	})
 }
 
@@ -500,6 +510,8 @@ func problemOf(err error) Problem {
 		return ProblemRetry
 	case errors.Is(err, thread.ErrRestartRequired):
 		return ProblemRestart
+	case errors.Is(err, thread.ErrRerunBlocked):
+		return ProblemRerun
 	case errors.Is(err, agentturn.ErrInvalidInput), errors.Is(err, thread.ErrInvalidTransition):
 		return ProblemInvalid
 	}
