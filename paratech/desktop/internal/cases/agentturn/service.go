@@ -48,6 +48,7 @@ type Service struct {
 	tx       Tx
 	clock    Clock
 	ids      IDGenerator
+	progress Progress // nil: none
 	log      *slog.Logger
 
 	mu sync.Mutex
@@ -57,11 +58,11 @@ type Service struct {
 func New(d Deps) (*Service, error) {
 	if d.Model == nil || d.Threads == nil || d.History == nil || d.Subjects == nil || d.Facts == nil || d.Tx == nil ||
 		d.Clock == nil || d.IDs == nil {
-		return nil, fmt.Errorf("%s: %w: every port except Log is required", opNew, ErrInvalidConfig)
+		return nil, fmt.Errorf("%s: %w: every port except Progress and Log is required", opNew, ErrInvalidConfig)
 	}
 	s := &Service{
 		model: d.Model, threads: d.Threads, history: d.History, subjects: d.Subjects, facts: d.Facts, tx: d.Tx,
-		clock: d.Clock, ids: d.IDs, log: d.Log,
+		clock: d.Clock, ids: d.IDs, progress: d.Progress, log: d.Log,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)

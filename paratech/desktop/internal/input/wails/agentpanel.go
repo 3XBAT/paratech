@@ -13,7 +13,7 @@ import (
 const opAgentCard = "ui: agent card dropped"
 
 // AgentUpdate is one update of a request as the Driver publishes it; app maps the Driver's own type to it. Problem is
-// one of the Driver's problem enums.
+// one of the Driver's problem enums; Progress marks the update of a step that went to the Hub (no cards).
 type AgentUpdate struct {
 	Thread     shared.ThreadID
 	Turn       int
@@ -22,6 +22,7 @@ type AgentUpdate struct {
 	StopReason values.StopReason
 	Cards      []values.Card
 	Problem    string
+	Progress   bool
 }
 
 // EventEmitter sends a Wails event to the pages; satisfied by Wails' event manager.
@@ -65,7 +66,8 @@ func (p *AgentPanel) Publish(u AgentUpdate) {
 // AgentUpdateView is the JSON form of an update: ids, enums and the checked plain texts of the cards, never HTML.
 // The texts (the model's) must be rendered as plain text. Problem is "" or busy, stale, invalid, budget,
 // retry_required, restart_required or failed; the panel words the status and the stop reason itself (offline:
-// «Не завершено: нет связи · Продолжить»).
+// «Не завершено: нет связи · Продолжить»). Progress is true for the update of a step that went to the Hub: it has no
+// cards, and the panel applies its status only and keeps the cards it shows.
 type AgentUpdateView struct {
 	ThreadID     string          `json:"threadId"` // "" when an Ask failed before its thread existed
 	Turn         int             `json:"turn"`
@@ -76,6 +78,7 @@ type AgentUpdateView struct {
 	Status       string          `json:"status"`
 	StopReason   string          `json:"stopReason"`
 	Problem      string          `json:"problem"`
+	Progress     bool            `json:"progress"`
 	Cards        []AgentCardView `json:"cards"`
 }
 
@@ -160,7 +163,7 @@ func (p *AgentPanel) view(u AgentUpdate) AgentUpdateView {
 	v := AgentUpdateView{
 		ThreadID: string(u.Thread), Turn: u.Turn, SubjectID: u.Scope.Subject().ID(), LessonID: u.Scope.Lesson().ID(),
 		AssignmentID: u.Scope.Assignment().ID(), Screen: string(u.Scope.Screen()), Status: string(u.Status),
-		StopReason: string(u.StopReason), Problem: problem, Cards: make([]AgentCardView, 0, len(u.Cards)),
+		StopReason: string(u.StopReason), Problem: problem, Progress: u.Progress, Cards: make([]AgentCardView, 0, len(u.Cards)),
 	}
 	for _, c := range u.Cards {
 		cv, ok := cardView(c)

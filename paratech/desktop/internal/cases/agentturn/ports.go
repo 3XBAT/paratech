@@ -19,6 +19,14 @@ type AgentModel interface {
 	Step(ctx context.Context, req values.StepRequest) (values.StepReply, error)
 }
 
+// Progress learns that a step of a request goes to the Hub, after the open step is stored and before the call, so the
+// panel names the request (and offers «Стоп») before the step returns (ADR-0026). It is called under the service's
+// lock: it must only publish, never block and never call back into the service. Implemented by input/agent over its
+// Sink; optional.
+type Progress interface {
+	Started(ctx context.Context, st Step)
+}
+
 // ThreadRepository stores agent threads (one per subject key) in the local database. Implemented by the sqlite
 // adapter.
 type ThreadRepository interface {
