@@ -144,6 +144,8 @@ test("parseUpdate checks the shape, tolerates null lists and drops unknown cards
   };
   const u = parseUpdate(raw);
   assert.equal(u.cards.length, 1);
+  assert.equal(u.progress, false); // an older core does not send it
+  assert.equal(parseUpdate({ ...raw, progress: true, cards: [] }).progress, true);
   assert.equal(parseUpdate({ ...raw, cards: null }).cards.length, 0);
   assert.throws(() => parseUpdate({ ...raw, turn: "1" }));
   assert.throws(() => parseUpdate(null));

@@ -47,9 +47,16 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
 	}
+	// The panel learns a request before its first Hub step returns, so «Стоп» works at once (ADR-0026); the progress
+	// goes straight to the panel, not through the Driver, so the Driver and the step use case form no cycle.
+	c.panel = wails.NewAgentPanel(log)
+	progress, err := agentloop.NewProgress(panelSink{c.panel})
+	if err != nil {
+		return fmt.Errorf("app: agent: %w", err)
+	}
 	c.agent, err = agentturn.New(agentturn.Deps{
 		Model: model, Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
-		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Log: log,
+		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -72,7 +79,6 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent journal: %w", err)
 	}
-	c.panel = wails.NewAgentPanel(log)
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
 		Knowledge: reads.knowledge, Activity: reads.activity,
@@ -103,6 +109,6 @@ type panelSink struct {
 func (s panelSink) Publish(u agentloop.Update) {
 	s.panel.Publish(wails.AgentUpdate{
 		Thread: u.Thread, Turn: u.Turn, Scope: u.Scope, Status: u.Status, StopReason: u.StopReason, Cards: u.Cards,
-		Problem: string(u.Problem),
+		Problem: string(u.Problem), Progress: u.Progress,
 	})
 }

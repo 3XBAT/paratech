@@ -70,7 +70,7 @@ const (
 // Update is what the panel gets after each move of a request: its state and the cards to show, in order. Cards hold
 // only IDs, enums and the short checked texts of show_plan, ask_questions, reply and cannot_do (no HTML). An update of
 // a failed operation names the request it acted on: Thread and Turn for a button, only Scope for an Ask whose thread
-// may not exist yet.
+// may not exist yet. A Progress update (a step went to the Hub) has no cards: the panel applies its status only.
 type Update struct {
 	Thread     shared.ThreadID
 	Turn       int
@@ -79,6 +79,7 @@ type Update struct {
 	StopReason values.StopReason
 	Cards      []values.Card
 	Problem    Problem
+	Progress   bool
 }
 
 // Sink receives the updates of every request, from the Driver's goroutines; it must not block for long.
@@ -128,7 +129,19 @@ type Driver struct {
 	closed  bool
 	next    uint64
 	cancels map[uint64]context.CancelFunc
-	wg      sync.WaitGroup
+	// stops are the «Стоп» marks of requests; the next operation that resumes the thread clears them.
+	stops map[agentturn.TurnRef]*stopping
+	// inflight cancels the calls a loop (by operation id) runs for a request, for «Стоп».
+	inflight map[agentturn.TurnRef]map[uint64]context.CancelFunc
+	wg       sync.WaitGroup
+}
+
+// stopping is a «Стоп» of a request: once it is set no call of the request starts. When Turns.Stop has stored the
+// request stopped (ok) the calls in flight are cut and the loop closes the step with Interrupt, which keeps the
+// student's reason; a refused Stop (ok false) lets the loop go on.
+type stopping struct {
+	done chan struct{} // closed when Turns.Stop returned
+	ok   bool          // written before done is closed
 }
 
 // New checks the dependencies.
@@ -143,6 +156,7 @@ func New(d Deps) (*Driver, error) {
 	}
 	return &Driver{
 		turns: d.Turns, sink: d.Sink, log: log, cancels: map[uint64]context.CancelFunc{},
+		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
@@ -151,54 +165,84 @@ func New(d Deps) (*Driver, error) {
 	}, nil
 }
 
+// opMarks is what an operation does with the «Стоп» marks: an operation that resumes a request clears the marks of
+// its thread, Stop replaces them with its own; Ask (its thread is not known yet) and Cancel (the request ends) keep them.
+type opMarks struct {
+	clear bool
+	stop  *stopping
+}
+
+// resumes clears the «Стоп» marks of the thread.
+var resumes = opMarks{clear: true}
+
 // Ask starts a request typed in the panel.
 func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
 	at := agentturn.Step{Scope: in.Scope}
-	return d.start(ctx, at, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Ask(ctx, in) })
+	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Ask(ctx, in) })
 }
 
 // ApprovePlan is «Да» on the plan card.
 func (d *Driver) ApprovePlan(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.ApprovePlan(ctx, ref) })
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
+		return d.turns.ApprovePlan(ctx, ref)
+	})
 }
 
 // RevisePlan is «Изменить» on the plan card with the change the student typed.
 func (d *Driver) RevisePlan(ctx context.Context, ref agentturn.TurnRef, wish string) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) {
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
 		return d.turns.RevisePlan(ctx, ref, wish)
 	})
 }
 
 // AnswerQuestions sends the answers of a Questions card.
 func (d *Driver) AnswerQuestions(ctx context.Context, ref agentturn.TurnRef, answers []values.Answer) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) {
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
 		return d.turns.AnswerQuestions(ctx, ref, answers)
 	})
 }
 
-// Stop is «Стоп»; a running step's reply is dropped and «Продолжить» replays it.
+// Stop is «Стоп». A Hub step in flight is not cancelled: its reply is dropped and «Продолжить» replays its key. From
+// now on the loop of the request starts no further call; once the stop is stored, a read in flight is cut (not done)
+// and an action in flight finishes with its real outcome, then the loop closes the step (ADR-0026). Paid jobs the
+// request started keep running.
 func (d *Driver) Stop(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Stop(ctx, ref) })
+	m := &stopping{done: make(chan struct{})}
+	err := d.start(ctx, stepAt(ref), opMarks{stop: m}, func(ctx context.Context) (agentturn.Step, error) {
+		st, err := d.turns.Stop(ctx, ref)
+		d.stopped(ref, m, err == nil)
+		return st, err
+	})
+	if err != nil {
+		d.stopped(ref, m, false)
+	}
+	return err
 }
 
 // Continue is «Продолжить» after a stop, a lost connection or the quota: the same step key, a free replay.
 func (d *Driver) Continue(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Continue(ctx, ref) })
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
+		return d.turns.Continue(ctx, ref)
+	})
 }
 
 // Retry is «Повторить» after a step failed for good.
 func (d *Driver) Retry(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Retry(ctx, ref) })
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Retry(ctx, ref) })
 }
 
 // Restart starts an expired request again from its text.
 func (d *Driver) Restart(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Restart(ctx, ref) })
+	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
+		return d.turns.Restart(ctx, ref)
+	})
 }
 
 // Cancel is «Отмена»: the request ends.
 func (d *Driver) Cancel(ctx context.Context, ref agentturn.TurnRef) error {
-	return d.start(ctx, stepAt(ref), func(ctx context.Context) (agentturn.Step, error) { return d.turns.Cancel(ctx, ref) })
+	return d.start(ctx, stepAt(ref), opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
+		return d.turns.Cancel(ctx, ref)
+	})
 }
 
 // Wait blocks until every operation started so far has ended. It is for tests: no operation may start while it waits
@@ -216,12 +260,24 @@ func (d *Driver) Close() {
 	d.wg.Wait()
 }
 
-// start runs op and its loop in a goroutine; at is the request it acts on, for an update when op fails.
-func (d *Driver) start(ctx context.Context, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) error {
+// start runs op and its loop in a goroutine; at is the request it acts on, for an update when op fails. The marks
+// change before op runs, so a call that starts after start returns sees them.
+func (d *Driver) start(ctx context.Context, at agentturn.Step, marks opMarks, op func(ctx context.Context) (agentturn.Step, error)) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
 		return ErrClosed
+	}
+	// A «Стоп» drops the older marks of its thread too: Ask keeps them, so they would pile up otherwise.
+	if marks.clear || marks.stop != nil {
+		for ref := range d.stops {
+			if ref.Thread == at.Thread {
+				delete(d.stops, ref)
+			}
+		}
+	}
+	if marks.stop != nil {
+		d.stops[refOf(at)] = marks.stop
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	id := d.next
@@ -231,9 +287,59 @@ func (d *Driver) start(ctx context.Context, at agentturn.Step, op func(ctx conte
 	go func() {
 		defer d.wg.Done()
 		defer d.forget(id)
-		d.run(ctx, at, op)
+		d.run(ctx, id, at, op)
 	}()
 	return nil
+}
+
+// stopped settles a «Стоп» of ref: when it is stored the calls in flight of the request are cut.
+func (d *Driver) stopped(ref agentturn.TurnRef, m *stopping, ok bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	m.ok = ok
+	if ok {
+		for _, cancel := range d.inflight[ref] {
+			cancel()
+		}
+	}
+	close(m.done)
+}
+
+// stopRequested reports whether a stored «Стоп» ends the calls of ref. A mark whose Stop still runs is waited for
+// (Turns.Stop does not wait for a running step); false when ctx ends meanwhile, which the loop handles itself.
+func (d *Driver) stopRequested(ctx context.Context, ref agentturn.TurnRef) bool {
+	d.mu.Lock()
+	m := d.stops[ref]
+	d.mu.Unlock()
+	if m == nil {
+		return false
+	}
+	select {
+	case <-m.done:
+		return m.ok
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// callsContext is the context of the calls loop id runs for ref; «Стоп» cancels it. release must be called after.
+func (d *Driver) callsContext(ctx context.Context, id uint64, ref agentturn.TurnRef) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	d.mu.Lock()
+	if d.inflight[ref] == nil {
+		d.inflight[ref] = map[uint64]context.CancelFunc{}
+	}
+	d.inflight[ref][id] = cancel
+	d.mu.Unlock()
+	return ctx, func() {
+		d.mu.Lock()
+		delete(d.inflight[ref], id)
+		if len(d.inflight[ref]) == 0 {
+			delete(d.inflight, ref)
+		}
+		d.mu.Unlock()
+		cancel()
+	}
 }
 
 func (d *Driver) forget(id uint64) {
@@ -245,9 +351,9 @@ func (d *Driver) forget(id uint64) {
 	}
 }
 
-// run is the loop of one operation: show the step, run its calls, report their results, until no call is left. at is
+// run is the loop of operation id: show the step, run its calls, report their results, until no call is left. at is
 // the request the operation acts on; it names the request in an update of a failed operation.
-func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
+func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
 	st, err := op(ctx)
 	for submits := 0; ; submits++ {
 		if ctx.Err() != nil {
@@ -281,23 +387,11 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 			return
 		}
 
-		outcomes := make([]agentturn.Outcome, 0, len(st.Calls))
-		var cards []values.Card
-		for _, c := range st.Calls {
-			if ctx.Err() != nil {
-				break
-			}
-			r := d.tools.run(ctx, st, c)
-			if ctx.Err() != nil && !r.write {
-				continue // a read cut by the ctx may report a false failure: «not done» instead
-			}
-			outcomes = append(outcomes, r.out)
-			cards = append(cards, r.cards...)
-		}
+		outcomes, cards, stopped := d.runCalls(ctx, id, st)
 		if len(cards) > 0 {
 			d.publish(agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
 		}
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || stopped {
 			d.interrupt(ctx, st, outcomes)
 			return
 		}
@@ -306,9 +400,37 @@ func (d *Driver) run(ctx context.Context, at agentturn.Step, op func(ctx context
 	}
 }
 
-// interrupt closes a request whose calls will not run because the ctx ended: the outcomes of the calls that ran (the
-// actions always, journaled DONE or FAILED) are kept, the others are answered as not done, and the request stops
-// continuable («Продолжить»), as when the ctx ends during a Hub call.
+// runCalls runs the calls of step st in order and returns their outcomes, the cards they add and whether a stored
+// «Стоп» ended them. No call starts after «Стоп»; a read cut by «Стоп» or by ctx may report a false failure, so it
+// gets no outcome («not done»); an action runs to its end and keeps its real outcome.
+func (d *Driver) runCalls(ctx context.Context, id uint64, st agentturn.Step) ([]agentturn.Outcome, []values.Card, bool) {
+	ref := refOf(st)
+	callCtx, release := d.callsContext(ctx, id, ref)
+	defer release()
+
+	outcomes := make([]agentturn.Outcome, 0, len(st.Calls))
+	var cards []values.Card
+	for _, c := range st.Calls {
+		if ctx.Err() != nil {
+			return outcomes, cards, false
+		}
+		if d.stopRequested(ctx, ref) {
+			return outcomes, cards, true
+		}
+		r := d.tools.run(callCtx, st, c)
+		if callCtx.Err() != nil && !r.write {
+			continue
+		}
+		outcomes = append(outcomes, r.out)
+		cards = append(cards, r.cards...)
+	}
+	// A «Стоп» during the last call closes the step too: Submit would start the next Hub step.
+	return outcomes, cards, ctx.Err() == nil && d.stopRequested(ctx, ref)
+}
+
+// interrupt closes a request whose calls will not run because the ctx ended or «Стоп» was stored: the outcomes of the
+// calls that ran (the actions always, journaled DONE or FAILED) are kept, the others are answered as not done, and the
+// request stops continuable («Продолжить»), as when the ctx ends during a Hub call; a «Стоп» keeps its reason.
 func (d *Driver) interrupt(ctx context.Context, st agentturn.Step, outcomes []agentturn.Outcome) {
 	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
 	if err != nil {

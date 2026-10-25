@@ -193,6 +193,7 @@ type memHistory struct {
 	txMu    sync.Mutex // held by memTx
 	entries map[shared.ThreadID][]values.HistoryEntry
 	failing error // returned by Append when set
+	reading error // returned by Since when set
 }
 
 func (h *memHistory) Append(_ context.Context, id shared.ThreadID, turn int, e values.HistoryTurn) error {
@@ -214,6 +215,9 @@ func (h *memHistory) Append(_ context.Context, id shared.ThreadID, turn int, e v
 func (h *memHistory) Since(_ context.Context, id shared.ThreadID, from, limit int) ([]values.HistoryEntry, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.reading != nil {
+		return nil, h.reading
+	}
 	var out []values.HistoryEntry
 	for _, e := range h.entries[id] {
 		if e.Turn >= from {
@@ -284,6 +288,35 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	return newEnvWith(t, nil)
+}
+
+// recProgress records what the case published before each Hub step, with the step stored then.
+type recProgress struct {
+	mu      sync.Mutex
+	threads *memThreads
+	steps   []Step
+	stored  []thread.State
+}
+
+func (p *recProgress) Started(_ context.Context, st Step) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.steps = append(p.steps, st)
+	p.threads.mu.Lock()
+	p.stored = append(p.stored, p.threads.states[st.Thread])
+	p.threads.mu.Unlock()
+}
+
+func (p *recProgress) got() ([]Step, []thread.State) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.steps), slices.Clone(p.stored)
+}
+
+// newEnvWith is newEnv with a Progress port (nil: none).
+func newEnvWith(t *testing.T, progress Progress) *env {
+	t.Helper()
 	e := &env{
 		model: &fakeModel{}, threads: &memThreads{}, history: &memHistory{},
 		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)},
@@ -292,6 +325,7 @@ func newEnv(t *testing.T) *env {
 	svc, err := New(Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
 		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
+		Progress: progress,
 	})
 	if err != nil {
 		t.Fatal(err)
