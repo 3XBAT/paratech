@@ -19,11 +19,12 @@ import (
 
 // Operation names used in errors and logs.
 const (
-	opComplete = "complete"
-	opStart    = "start"
-	opSettle   = "settle"
-	opRelease  = "release"
-	opPurge    = "purge results"
+	opComplete       = "complete"
+	opCompleteStream = "complete stream"
+	opStart          = "start"
+	opSettle         = "settle"
+	opRelease        = "release"
+	opPurge          = "purge results"
 )
 
 // Outcomes in the log line of a call.
@@ -50,6 +51,7 @@ type Service struct {
 	accounts    Accounts
 	results     Results
 	provider    Provider
+	streamer    StreamingProvider // nil when providerStream is off
 	limiter     RateLimiter
 	clock       Clock
 	random      Random
@@ -71,6 +73,13 @@ func New(d Deps, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
+	if cfg.ProviderStream && d.Streamer == nil {
+		return nil, fmt.Errorf("%w: provider streaming needs a streaming provider", ErrInvalidConfig)
+	}
+	streamer := d.Streamer
+	if !cfg.ProviderStream {
+		streamer = nil
+	}
 	if cfg.CallTimeout <= 0 || cfg.CallTimeout+2*ledgerTimeout > cfg.ReservationTTL {
 		return nil, fmt.Errorf("%w: the call timeout plus %s must be above 0 and within the reservation TTL", ErrInvalidConfig, 2*ledgerTimeout)
 	}
@@ -85,7 +94,7 @@ func New(d Deps, cfg Config) (*Service, error) {
 		prompts[op] = sp
 	}
 	return &Service{
-		accounts: d.Accounts, results: d.Results, provider: d.Provider, limiter: d.Limiter, clock: d.Clock, random: d.Random,
+		accounts: d.Accounts, results: d.Results, provider: d.Provider, streamer: streamer, limiter: d.Limiter, clock: d.Clock, random: d.Random,
 		models: d.Models, log: d.Log, policy: p, callTimeout: cfg.CallTimeout, prompts: prompts,
 	}, nil
 }
@@ -147,16 +156,40 @@ func newReader(op values.Operation, data string) (*reader, string, error) {
 // ErrIdempotencyConflict, ErrAttemptRunning, *ProviderFailedError, the client's context error, anything else is a
 // Hub failure. A provider call that has started is finished, settled and stored even if the client goes away.
 func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
+	return s.run(ctx, cmd, opComplete, nil)
+}
+
+// CompleteStream is Complete for the ANSWER operation with the output streamed (ADR-0026): the same validation, key
+// life cycle and ledger, so Complete and CompleteStream with one key and spec replay each other's stored result. Other
+// operations are ErrNotStreamable. onDelta gets chunks in order, from the calling goroutine, before CompleteStream
+// returns; it must not block, as the provider call waits for it. With provider streaming on, the chunks are the
+// model's raw text as it is written: a draft, as the result's output is the checked canonical answer and a failure may
+// follow them. Otherwise, and on a replay, onDelta gets the result's output once, after the settlement. A client that
+// goes away mid-stream does not stop the call: it is read to the end, settled in full and stored. Nothing is retried.
+func (s *Service) CompleteStream(ctx context.Context, cmd Command, onDelta func(chunk string)) (Result, error) {
+	if onDelta == nil {
+		onDelta = func(string) {}
+	}
+	return s.run(ctx, cmd, opCompleteStream, onDelta)
+}
+
+// run is Complete (onDelta nil) or CompleteStream.
+func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(string)) (Result, error) {
 	// One log line per call: outcome, operation, alias, reservation, usage and duration; never texts or output.
 	begin := s.clock.Now()
+	streaming := onDelta != nil
 	logCall := func(outcome string, attrs ...any) {
-		attrs = append([]any{"outcome", outcome, "duration", s.clock.Now().Sub(begin)}, attrs...)
+		attrs = append([]any{"outcome", outcome, "duration", s.clock.Now().Sub(begin), "stream", streaming}, attrs...)
 		s.log.InfoContext(ctx, "completion", attrs...)
 	}
 
 	if err := cmd.Owner.Validate(); err != nil {
 		logCall(outcomeInvalid)
-		return Result{}, fmt.Errorf("gateway: %s: %w: %w", opComplete, ErrInvalidRequest, err)
+		return Result{}, fmt.Errorf("gateway: %s: %w: %w", op, ErrInvalidRequest, err)
+	}
+	if streaming && cmd.Operation != string(values.OperationAnswer) {
+		logCall(outcomeInvalid)
+		return Result{}, fmt.Errorf("gateway: %s: %w", op, ErrNotStreamable)
 	}
 	// Before anything else, so a limited call costs no validation of a large body and writes no ledger row.
 	if wait, ok := s.limiter.Allow(cmd.Owner, begin); !ok {
@@ -166,7 +199,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	c, err := s.validate(cmd)
 	if err != nil {
 		logCall(outcomeInvalid)
-		return Result{}, fmt.Errorf("gateway: %s: %w", opComplete, err)
+		return Result{}, fmt.Errorf("gateway: %s: %w", op, err)
 	}
 	attrs := []any{"operation", string(c.spec.Operation()), "alias", c.spec.Alias()}
 
@@ -198,6 +231,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	}
 	if stored.Stored {
 		logCall(outcomeReplayed, append(attrs, "input_tokens", stored.InputTokens, "output_tokens", stored.OutputTokens)...)
+		sendWhole(onDelta, stored.Output)
 		return Result{
 			Output: stored.Output, InputTokens: stored.InputTokens, OutputTokens: stored.OutputTokens, Quota: quota,
 			ReservationID: rec.ID.String(), Replayed: true,
@@ -208,7 +242,7 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		s.release(ctx, c, rec.ID, account.ReasonExplicit)
 		logCall(outcomeCanceled, attrs...)
-		return Result{}, fmt.Errorf("gateway: %s: %w", opComplete, err)
+		return Result{}, fmt.Errorf("gateway: %s: %w", op, err)
 	}
 
 	// The call gets what is left of the hold after the settlement's own bound, at most the configured timeout.
@@ -216,18 +250,29 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	if timeout <= 0 {
 		s.release(ctx, c, rec.ID, account.ReasonFailed)
 		logCall(outcomeFailed, attrs...)
-		return Result{}, fmt.Errorf("gateway: %s: no time left for the provider call before the reservation expires", opComplete)
+		return Result{}, fmt.Errorf("gateway: %s: no time left for the provider call before the reservation expires", op)
 	}
-	// Detached from the client (unary rule, gateway.proto): a started call finishes and is paid for and stored.
+	// Detached from the client (gateway.proto): a started call finishes, also mid-stream, and is paid for and stored.
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-	completion, err := s.provider.Complete(callCtx, c.request)
+	streamed := streaming && s.streamer != nil
+	chunks := 0
+	var completion values.Completion
+	if streamed {
+		completion, err = s.streamer.Stream(callCtx, c.request, func(chunk string) {
+			chunks++
+			onDelta(chunk)
+		})
+		attrs = append(attrs, "provider_stream", true, "chunks", chunks)
+	} else {
+		completion, err = s.provider.Complete(callCtx, c.request)
+	}
 	cancel()
 	if err == nil {
 		err = completion.Failure()
 	}
 	if err != nil {
-		// Also after an answer cut off mid-body: the provider may have billed it, the tester is not charged
-		// (accepted gap, ADR-0005(e), ADR-0010).
+		// Also after an answer cut off mid-body or mid-stream: the provider may have billed it, the tester is not
+		// charged (accepted gap, ADR-0005(e), ADR-0010, ADR-0026). Never retried: chunks may have gone out already.
 		s.release(ctx, c, rec.ID, account.ReasonFailed)
 		failure := providerFailure(err)
 		logCall(outcomeProvider, append(attrs, "transient", failure.Transient, "err", err)...)
@@ -260,10 +305,20 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 	}
 	logCall(outcomeCompleted, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
 		"stop", completion.Stop().String(), "charged", res.Charged)...)
+	if !streamed {
+		sendWhole(onDelta, output)
+	}
 	return Result{
 		Output: output, InputTokens: usage.Input(), OutputTokens: usage.Output(), Quota: quota,
 		ReservationID: rec.ID.String(),
 	}, nil
+}
+
+// sendWhole hands a settled or stored output to a stream as one chunk (none for an empty output or a unary call).
+func sendWhole(onDelta func(string), output string) {
+	if onDelta != nil && output != "" {
+		onDelta(output)
+	}
 }
 
 // invalidAnswer is the permanent PROVIDER_ERROR of an answer that breaks the schema of its operation.

@@ -99,6 +99,7 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 | `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
 | `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
 | `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
+| `HUB_PROVIDER_STREAM` | `-provider-stream` | `false` | `CompleteStream` streams from the provider; off, it makes one unary call and sends the whole answer (ADR-0026) |
 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
 
@@ -107,8 +108,8 @@ A requested `max_output_tokens` of 0 means the alias cap; a larger value is clam
 cost (request bytes + 1024 + the clamped output cap), provider call, then settle the reported usage and store the answer for
 replay, or release. A retry with the same idempotency key replays the stored answer (`replayed=true`); another request with the
 key is `IDEMPOTENCY_CONFLICT`. A gateway key lives 5 minutes less than `HUB_IDEMPOTENCY_RETENTION`; the purge (at start and
-every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` is not implemented
-(ADR-0010, ADR-0023). `INSPECT_MATERIAL`, `ANSWER` and `TRIAGE_ASSIGNMENT` take no client instructions: the Hub uses its own prompt
+every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` serves only
+`ANSWER` with the same ledger and key (deltas, then the result; ADR-0026). `INSPECT_MATERIAL`, `ANSWER` and `TRIAGE_ASSIGNMENT` take no client instructions: the Hub uses its own prompt
 (`hub/pkg/prompts/ops`) and alias; until a prompt ships, or while its alias is not in `HUB_LLM_MODELS`, the operation is
 `invalid_argument`. `INSPECT_MATERIAL` takes `{"today","subjects":[{"id","name"}],"material_text"}` as data and returns only
 `{"doc_kind","subject","lesson_date","has_homework","has_ticket_list","mentions_email"}`; an answer outside that schema is a

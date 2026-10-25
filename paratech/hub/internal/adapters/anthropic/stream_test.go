@@ -302,6 +302,42 @@ func TestStreamErrorEvent(t *testing.T) {
 	}
 }
 
+// TestStreamErrorAsTheFirstEvent: an error before message_start is classified like any error event, with no delta.
+func TestStreamErrorAsTheFirstEvent(t *testing.T) {
+	for name, tt := range map[string]struct {
+		stream string
+		kind   values.ErrorKind
+		reason string
+	}{
+		"overloaded": {
+			stream: sseEvent("error", `{"type": "error", "error": {"type": "overloaded_error", "message": "`+bodyMarker+`"}}`),
+			kind:   values.KindTransient, reason: "overloaded",
+		},
+		"invalid request, then a message": {
+			stream: sseEvent("error", `{"type": "error", "error": {"type": "invalid_request_error", "message": "`+bodyMarker+`"}}`) +
+				sseNormal(),
+			kind: values.KindPermanent, reason: "request rejected",
+		},
+		"no event line": {
+			stream: `data: {"type": "error", "error": {"type": "api_error", "message": "` + bodyMarker + `"}}` + "\n\n",
+			kind:   values.KindTransient, reason: "server error",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			deltas, onDelta := collect()
+			_, err := newClient(t, serveSSE(t, tt.stream).URL, time.Minute).Stream(t.Context(), newRequest(t, "x"), onDelta)
+			pe := streamError(t, err)
+			wantKind(t, err, tt.kind)
+			if pe.Reason != tt.reason || pe.Status != 0 {
+				t.Fatalf("got %+v, want reason %q", pe, tt.reason)
+			}
+			if len(*deltas) != 0 {
+				t.Fatalf("deltas = %q, want none", *deltas)
+			}
+		})
+	}
+}
+
 func TestStreamTruncated(t *testing.T) {
 	head := sseHead() + sseText(1, "part")
 	tests := map[string]*sseServer{

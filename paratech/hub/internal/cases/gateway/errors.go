@@ -20,6 +20,10 @@ var (
 	// ErrOperationUnavailable means the operation needs a server prompt the Hub does not have. It matches
 	// ErrInvalidRequest.
 	ErrOperationUnavailable = fmt.Errorf("%w: the operation is not available on this Hub", ErrInvalidRequest)
+
+	// ErrNotStreamable means CompleteStream got an operation other than ANSWER (ADR-0026). It matches ErrInvalidRequest.
+	ErrNotStreamable = fmt.Errorf("%w: only the answer operation is streamed", ErrInvalidRequest)
+
 	// ErrIdempotencyConflict means the key was used with a different request (in any state of its attempts).
 	ErrIdempotencyConflict = errors.New("idempotency key used with a different request")
 
