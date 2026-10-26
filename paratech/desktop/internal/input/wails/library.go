@@ -79,6 +79,7 @@ const (
 	opLibraryRemove      = "ui: remove a material"
 	opLibraryRestore     = "ui: restore a material"
 	opLibrarySuggestions = "ui: subject suggestions"
+	opLibraryOpen        = "ui: open a material"
 )
 
 // msgPDFNotExtracted is the note of a PDF, whose text is not read (ADR-0024).
@@ -93,6 +94,7 @@ type LibraryUseCase interface {
 	RemoveFolder(ctx context.Context, id shared.SubjectID, folder shared.FolderID) error
 	RemoveSubject(ctx context.Context, id shared.SubjectID) error
 	Materials(ctx context.Context, sub shared.SubjectID) ([]*material.Material, error)
+	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	Import(ctx context.Context, up library.Upload) (library.Imported, error)
 	Place(ctx context.Context, id shared.MaterialID, sub shared.SubjectID, folder shared.FolderID) (*material.Material, error)
 	MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error)
@@ -183,6 +185,8 @@ type LibraryService struct {
 	uc     LibraryUseCase
 	picker MaterialFilePicker
 	files  MaterialFileReader
+	views  MaterialViews // «Открыть»: set by withOpener
+	opener FileOpener
 	log    *slog.Logger
 	drop   sync.Mutex // one drop at a time, so concurrent drops never hold many files in memory
 }
@@ -362,6 +366,25 @@ func (s *LibraryService) RemoveMaterial(ctx context.Context, materialID string) 
 // RestoreMaterial brings a removed material back where it was.
 func (s *LibraryService) RestoreMaterial(ctx context.Context, materialID string) (LibraryMaterial, error) {
 	return s.material(opLibraryRestore)(s.uc.RestoreMaterial(ctx, shared.MaterialID(materialID)))
+}
+
+// OpenMaterial opens a file of the library with the program Windows associates with its type (Word, PowerPoint).
+// The page passes only the ID; the file is found from the material, and no path goes back. The program gets a copy
+// under the file's name, made once per material and then kept, so the student's edits in it stay. The outcome is a
+// status with a fixed Russian text (library_open.go); the log gets only the ID and a code.
+func (s *LibraryService) OpenMaterial(ctx context.Context, materialID string) LibraryOpen {
+	id := shared.MaterialID(materialID)
+	if id.Validate() != nil {
+		s.log.Info(opLibraryOpen, "result", "invalid_id")
+		return openResult(OpenStatusRefused)
+	}
+	status, code := s.openMaterial(ctx, id)
+	if status == OpenStatusFailed {
+		s.log.Warn(opLibraryOpen, "material", string(id), "result", code)
+	} else {
+		s.log.Info(opLibraryOpen, "material", string(id), "result", code)
+	}
+	return openResult(status)
 }
 
 // Suggestions lists the subject strings of the schedule and the recordings that match no subject, the most used
