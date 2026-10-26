@@ -263,11 +263,12 @@ func (a *Actions) checkWriting(ctx context.Context, c action.StopWork) (action.T
 	inbox := 0
 	for _, id := range files {
 		m, err := a.library.Material(ctx, id)
-		if err != nil {
-			return action.Target{}, gone(err)
+		if err != nil && !errors.Is(gone(err), shared.ErrNotFound) {
+			return action.Target{}, err
 		}
 		switch {
-		case m.InInbox():
+		case m == nil, !m.Active(), m.InInbox():
+			// A file the student removed (or one gone) counts as taken back, as cases/turnkey unfile leaves it.
 			inbox++
 		case m.Folder() != subject.SystemFolderID(m.Subject(), subject.SystemHomework):
 			return action.Target{Version: jobVersion + 1}, nil
@@ -326,10 +327,10 @@ func (a *Actions) stopWork(ctx context.Context, c action.StopWork, expectedVersi
 		}
 		for _, id := range writingFiles(v.Writing) {
 			m, err := a.library.Material(ctx, id)
-			if err != nil {
-				return gone(err)
+			if err != nil && !errors.Is(gone(err), shared.ErrNotFound) {
+				return err
 			}
-			if m.InInbox() {
+			if m == nil || !m.Active() || m.InInbox() {
 				continue
 			}
 			if _, err := a.library.MoveToInbox(ctx, id); err != nil {

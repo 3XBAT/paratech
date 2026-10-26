@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -142,6 +143,33 @@ func TestWriteWorkUndoOfAPresentation(t *testing.T) {
 				t.Fatalf("Undo = %s, %v; deck in inbox %v, talk in inbox %v", u.Status, err, deck.InInbox(), talk.InInbox())
 			}
 		})
+	}
+}
+
+// A saved PDF the student removed since counts as taken back: Undo takes the .docx back to «Входящие» and leaves the
+// removed PDF as it is (TASK-198).
+func TestWriteWorkUndoWithARemovedPDF(t *testing.T) {
+	w, f := withWriting(t)
+	_, e := act(t, w, writeCall(t, "c1", values.ToolWriteWork, `{"work":"w1"}`))
+	w.jobs.set("job1", job.StatusCompleted)
+	f.generations = map[shared.JobID]int{"job1": 1}
+	doc, pdf := w.lib.materials["m1"], w.lib.materials["m2"]
+	for _, m := range []*material.Material{doc, pdf} {
+		if _, err := m.Place("s1", subject.SystemFolderID("s1", subject.SystemHomework), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pdf.Remove(now); err != nil {
+		t.Fatal(err)
+	}
+	v := f.views["w1"]
+	v.Status = work.StatusDone
+	v.Writing = &turnkey.WritingView{Generation: 1, Material: "m1", PDF: "m2", Done: 2, Total: 2}
+	f.views["w1"] = v
+
+	u, err := w.journal.Undo(t.Context(), e.ID)
+	if err != nil || u.Status != action.StatusUndone || !doc.InInbox() || pdf.Active() {
+		t.Fatalf("Undo = %s, %v; docx in inbox %v, pdf active %v", u.Status, err, doc.InInbox(), pdf.Active())
 	}
 }
 
