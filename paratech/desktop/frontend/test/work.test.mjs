@@ -32,6 +32,10 @@ import {
   openLabel,
   openTarget,
   openWork,
+  openPdf,
+  pdfOffered,
+  pdfTarget,
+  exportPdf,
   stopWork,
   isStopped,
   singleFlight,
@@ -1121,4 +1125,93 @@ test("a double click on «Доработать по замечаниям» is on
   release();
   await first;
   assert.equal(log.length, 1);
+});
+
+// ---- «Скачать PDF» (TASK-199) ----
+
+const pdfPaper = (over) => work({ workType: "referat", writing: doneWriting(over) });
+
+test("pdf: parseWork reads pdfMaterialId, missing is empty, a wrong type throws", () => {
+  assert.equal(parseWork(raw({ writing: writing({ pdfMaterialId: "p1" }) })).writing.pdfMaterialId, "p1");
+  assert.equal(parseWork(raw({ writing: writing() })).writing.pdfMaterialId, "");
+  assert.throws(() => parseWork(raw({ writing: writing({ pdfMaterialId: 5 }) })));
+});
+
+test("pdf: exportPdf calls ExportPDF with the id and parses the work", async () => {
+  const calls = [];
+  const api = turnkeyApi(async (...a) => (calls.push(a), raw({ writing: writing({ step: "none", result: "ok", pdfMaterialId: "p1" }) })));
+  const w = await api.exportPdf("w1");
+  assert.deepEqual(calls, [[methods.exportPdf, "w1"]]);
+  assert.equal(w.writing.pdfMaterialId, "p1");
+  await assert.rejects(turnkeyApi(async () => ({ id: 1 })).exportPdf("w1"));
+});
+
+test("pdf: the core's PDF error texts are fixed and shown as they are", () => {
+  for (const t of ["Не удалось сохранить PDF: на компьютере нет нужного компонента Windows (WebView2).", "Не удалось сохранить PDF. Попробуйте ещё раз."]) {
+    assert.ok(errorTexts.includes(t));
+    assert.equal(turnkeyErrorText(new Error(t)), t);
+  }
+});
+
+test("pdf: «Скачать PDF» shows for a ready paper and lab report, not for a presentation or a running work", () => {
+  assert.ok(renderWith(pdfPaper()).includes(">Скачать PDF<"));
+  assert.ok(renderWith(labWork()).includes(">Скачать PDF<"));
+  const deckWork = work({ workType: "presentation", writing: doneWriting({ presentation: true }) });
+  assert.equal(pdfOffered(deckWork), false);
+  assert.ok(!renderWith(deckWork, { library }).includes("PDF"));
+  const running = work({ workType: "referat", writing: writing({ step: "section", total: 2, active: true }) });
+  assert.ok(!renderWith(running, { library }).includes("PDF"));
+  assert.ok(!renderWith(pdfPaper({ result: "" })).includes("PDF"));
+});
+
+test("pdf: a saved PDF shows the line and «Открыть PDF» at once, with the copy caption", () => {
+  const out = renderWith(pdfPaper({ pdfMaterialId: "p1" }), { library });
+  assert.ok(out.includes("PDF сохранён в библиотеке рядом с файлом Word."));
+  assert.ok(out.includes(">Открыть PDF<"));
+  assert.ok(!out.includes(">Скачать PDF<"));
+  assert.ok(out.includes("правки в ней в приложение не возвращаются"));
+  // A new generation has no PDF: the download button is back.
+  const fresh = renderWith(pdfPaper({ pdfMaterialId: "", generation: 2 }), { library });
+  assert.ok(fresh.includes(">Скачать PDF<") && !fresh.includes("Открыть PDF"));
+});
+
+test("pdf: «Открыть PDF» opens the PDF id only; a refusal is a fixed text", async () => {
+  const calls = [];
+  const lib = { openMaterial: async (...a) => (calls.push(a), { status: "refused", message: "Этот файл нельзя открыть отсюда." }) };
+  const w = pdfPaper({ pdfMaterialId: "p7" });
+  assert.equal(pdfTarget(w), "p7");
+  assert.deepEqual(await openPdf(lib, w), { kind: "fail", text: "Этот файл нельзя открыть отсюда." });
+  assert.deepEqual(calls, [["p7"]]);
+  assert.equal(await openPdf(lib, pdfPaper()), null);
+  assert.equal(calls.length, 1);
+});
+
+test("pdf: an error of the call shows in the error line and the button stays", () => {
+  const out = renderWith(pdfPaper(), { error: "Не удалось сохранить PDF. Попробуйте ещё раз.", onError: noop });
+  assert.ok(out.includes("Не удалось сохранить PDF. Попробуйте ещё раз."));
+  assert.ok(out.includes(">Скачать PDF<"));
+  assert.ok(!out.includes("Повторить"));
+});
+
+test("pdf: a double click is one call; no call without a PDF to make", async () => {
+  const log = [];
+  let release;
+  const api = { exportPdf: (...a) => new Promise((res) => { log.push(a); release = () => res(pdfPaper({ pdfMaterialId: "p1" })); }) };
+  const w = pdfPaper();
+  const flight = singleFlight();
+  const click = () => flight(async () => { await exportPdf(api, w); });
+  const first = click();
+  assert.equal(await click(), false);
+  release();
+  await first;
+  assert.deepEqual(log, [["w1"]]);
+  assert.equal(exportPdf(api, pdfPaper({ pdfMaterialId: "p1" })), null);
+  assert.equal(exportPdf(api, work({ workType: "presentation", writing: doneWriting({ presentation: true }) })), null);
+});
+
+test("pdf: the button reads «Сохранение PDF…» while the call runs and goes through the guard", () => {
+  const src = readFileSync(new URL("../src/agent/WorkCard.tsx", import.meta.url), "utf8");
+  assert.match(src, /pdfBusy \? workTexts\.savingPdf : workTexts\.downloadPdf/);
+  assert.match(src, /onClick=\{\(\) => void run\(savePdf\)\}/);
+  assert.equal(workTexts.savingPdf, "Сохранение PDF…");
 });

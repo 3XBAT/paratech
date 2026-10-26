@@ -28,6 +28,10 @@ const (
 	ErrTurnkeyNotStopped  = turnkeyError("Не удалось остановить написание. Попробуйте ещё раз.")
 	ErrTurnkeyNoSource    = turnkeyError("Задание не найдено: возможно, его удалили.")
 
+	// ExportPDF (TASK-198): no WebView2 on this computer, or a print that did not go through.
+	ErrTurnkeyPDFUnsupported = turnkeyError("Не удалось сохранить PDF: на компьютере нет нужного компонента Windows (WebView2).")
+	ErrTurnkeyPDFFailed      = turnkeyError("Не удалось сохранить PDF. Попробуйте ещё раз.")
+
 	// AskStep: a question whose call did not go through; the work is not touched.
 	ErrTurnkeyStepOffline = turnkeyError("Нет связи с paratech: вопрос не отправлен. Повторите позже.")
 	ErrTurnkeyStepQuota   = turnkeyError("Лимит запросов исчерпан: ответить на вопрос сейчас нельзя.")
@@ -83,6 +87,7 @@ const (
 	opTurnkeyWrite   = "ui: turnkey writing"
 	opTurnkeyOutline = "ui: turnkey outline"
 	opTurnkeyStop    = "ui: turnkey stop writing"
+	opTurnkeyPDF     = "ui: turnkey pdf"
 )
 
 // TurnkeyUseCase is the turnkey work (cases/turnkey) as its cards and the helper page use it (ARCH-42).
@@ -104,6 +109,7 @@ type TurnkeyUseCase interface {
 	EditOutlineAt(ctx context.Context, id shared.WorkID, version int64, items []work.OutlineItem) (turnkey.View, error)
 	Regenerate(ctx context.Context, id shared.WorkID, number int, note string) (turnkey.WritingStarted, error)
 	StopWriting(ctx context.Context, id shared.WorkID) (turnkey.View, error)
+	ExportPDF(ctx context.Context, id shared.WorkID) (turnkey.PDFSaved, error)
 }
 
 // TurnkeyWork is a turnkey work for the QuestionsCard, the card «Как я понял задание», the CannotDoCard and the helper
@@ -165,10 +171,11 @@ type TurnkeyWriting struct {
 	Sections   []TurnkeySection `json:"sections"`
 	Done       int              `json:"done"`
 	Total      int              `json:"total"`
-	SubjectID  string           `json:"subjectId"`  // the subject whose «ДЗ» gets the file; "" «Входящие»
-	MaterialID string           `json:"materialId"` // the file in the library, once done
-	Result     string           `json:"result"`     // the artifact of the ResultCard, once done
-	Job        string           `json:"job"`        // the job the call started, else the active one; "" when none
+	SubjectID  string           `json:"subjectId"`     // the subject whose «ДЗ» gets the file; "" «Входящие»
+	MaterialID string           `json:"materialId"`    // the file in the library, once done
+	Result     string           `json:"result"`        // the artifact of the ResultCard, once done
+	PDF        string           `json:"pdfMaterialId"` // the PDF next to the file (ExportPDF); "" none yet or for a new generation
+	Job        string           `json:"job"`           // the job the call started, else the active one; "" when none
 	Active     bool             `json:"active"`
 	JobState   string           `json:"jobState"`
 
@@ -286,8 +293,9 @@ type TurnkeyAnswer struct {
 // TurnkeyService is bound to the turnkey cards and the helper page: every exported method is callable from the page
 // by its full name. None of them sends or exports the work: StartForAssignment, AnswerQuestions, SkipQuestions and
 // Retry ask the reader (a paid call); StartWriting, ApproveOutline and Regenerate start a paid writing job whose paper
-// is filed in the local library; the rest change only local data. The student's click is the consent to a paid call:
-// unlike the agent's triage_assignment, StartForAssignment leaves no entry in the agent's journal.
+// is filed in the local library; ExportPDF files the PDF of a done paper there too; the rest change only local data.
+// The student's click is the consent to a paid call: unlike the agent's triage_assignment, StartForAssignment leaves no
+// entry in the agent's journal.
 type TurnkeyService struct {
 	core TurnkeyUseCase
 	log  *slog.Logger
@@ -486,24 +494,76 @@ func turnkeyProblemOf(err error) string {
 	return ""
 }
 
+// ExportPDF is «Скачать PDF» of a done paper or lab report (TASK-198, ADR-0020): the PDF is saved next to the .docx in
+// the library and Writing.PDF (pdfMaterialId) opens it like any material; a second click returns the saved one. No
+// WebView2 on this computer and a print that did not go through have texts of their own (ErrTurnkeyPDFUnsupported,
+// ErrTurnkeyPDFFailed); the rest are those of the other calls. The log gets the work id and a code only.
+func (s *TurnkeyService) ExportPDF(ctx context.Context, id string) (TurnkeyWork, error) {
+	saved, err := s.core.ExportPDF(ctx, shared.WorkID(id))
+	if err != nil {
+		code, text := pdfFailure(err)
+		logged := ""
+		if shared.WorkID(id).Validate() == nil {
+			logged = id
+		}
+		s.log.Warn(opTurnkeyPDF, "work", logged, "code", code)
+		return TurnkeyWork{}, text
+	}
+	out := workView(saved.View)
+	if out.Writing != nil {
+		out.Writing.PDF = string(saved.Material)
+	}
+	return out, nil
+}
+
+// Codes of the failures in the log.
+const (
+	turnkeyCodePDFUnsupported = "pdf_unsupported"
+	turnkeyCodePDFFailed      = "pdf_failed"
+	turnkeyCodeNotFound       = "not_found"
+	turnkeyCodeWriting        = "writing"
+	turnkeyCodeWritten        = "written"
+	turnkeyCodeStale          = "stale"
+	turnkeyCodeNotStopped     = "not_stopped"
+	turnkeyCodeInvalid        = "invalid"
+	turnkeyCodeUnavailable    = "unavailable"
+)
+
+// pdfFailure is the code for the log and the text of a failed ExportPDF.
+func pdfFailure(err error) (string, error) {
+	switch {
+	case errors.Is(err, turnkey.ErrPDFUnsupported):
+		return turnkeyCodePDFUnsupported, ErrTurnkeyPDFUnsupported
+	case errors.Is(err, turnkey.ErrPDFFailed):
+		return turnkeyCodePDFFailed, ErrTurnkeyPDFFailed
+	}
+	return turnkeyFailure(err)
+}
+
 func (s *TurnkeyService) fail(op string, err error) error {
 	s.log.Warn(op, "err", err)
+	_, text := turnkeyFailure(err)
+	return text
+}
+
+// turnkeyFailure is the code and the fixed text of an error of the use case.
+func turnkeyFailure(err error) (string, error) {
 	switch {
 	case errors.Is(err, turnkey.ErrNotFound):
-		return ErrTurnkeyNotFound
+		return turnkeyCodeNotFound, ErrTurnkeyNotFound
 	case errors.Is(err, turnkey.ErrWritingRunning):
-		return ErrTurnkeyWriting
+		return turnkeyCodeWriting, ErrTurnkeyWriting
 	case errors.Is(err, turnkey.ErrAlreadyWritten):
-		return ErrTurnkeyWritten
+		return turnkeyCodeWritten, ErrTurnkeyWritten
 	case errors.Is(err, turnkey.ErrChanged):
-		return ErrTurnkeyStale
+		return turnkeyCodeStale, ErrTurnkeyStale
 	case errors.Is(err, turnkey.ErrNotStopped):
-		return ErrTurnkeyNotStopped
+		return turnkeyCodeNotStopped, ErrTurnkeyNotStopped
 	case errors.Is(err, turnkey.ErrInvalidRequest), errors.Is(err, turnkey.ErrNotWritable),
 		errors.Is(err, turnkey.ErrWritingRetries):
-		return ErrTurnkeyInvalid
+		return turnkeyCodeInvalid, ErrTurnkeyInvalid
 	}
-	return ErrTurnkeyUnavailable
+	return turnkeyCodeUnavailable, ErrTurnkeyUnavailable
 }
 
 // workView maps a work; empty lists are [] for the page.
@@ -553,7 +613,7 @@ func writingView(w *turnkey.WritingView) *TurnkeyWriting {
 	}
 	out := &TurnkeyWriting{
 		Step: string(w.Step), Generation: w.Generation, Topic: w.Topic, Sections: []TurnkeySection{}, Done: w.Done,
-		Total: w.Total, SubjectID: string(w.Subject), MaterialID: string(w.Material), Result: w.Result.String(),
+		Total: w.Total, SubjectID: string(w.Subject), MaterialID: string(w.Material), Result: w.Result.String(), PDF: string(w.PDF),
 		Presentation: w.Presentation, Template: string(w.Template), Questions: []TurnkeyTalkQuestion{},
 		TalkMaterialID: string(w.Talk), TalkResult: w.TalkResult.String(),
 		Lab: w.Lab, Manual: string(w.Manual), Placeholders: []TurnkeyPlaceholder{},

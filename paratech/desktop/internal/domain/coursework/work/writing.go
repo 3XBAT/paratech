@@ -102,15 +102,21 @@ type Section struct {
 func (s Section) Written() bool { return s.Text != nil && s.Text.Revision == s.Revision }
 
 // File is the finished paper: the library material that holds it, its artifact and the content it was built from.
+// Year is the year of its title page (TASK-198), so a PDF built later has the title page of the .docx; 0 for a file
+// stored before it.
 type File struct {
 	Material shared.MaterialID `json:"material"`
 	Artifact string            `json:"artifact"` // shared.ArtifactRef in its string form
 	Content  string            `json:"content"`  // ContentKey of the sections the file holds
+	Year     int               `json:"year,omitempty"`
 }
+
+// MaxFileYear bounds the year of a title page.
+const MaxFileYear = 9999
 
 // validate checks a stored file.
 func (f File) validate() error {
-	if f.Material.Validate() != nil || f.Content == "" {
+	if f.Material.Validate() != nil || f.Content == "" || f.Year < 0 || f.Year > MaxFileYear {
 		return errors.New("file")
 	}
 	if _, err := shared.ParseArtifactRef(f.Artifact); err != nil {
@@ -123,7 +129,8 @@ func (f File) validate() error {
 // again (an edit or a regeneration), so its job is a new one. Approved is the student's «Утвердить план»: no section
 // is written before it (TASK-105). OutlineRevision grows and OutlineNote is set when the student asks again for an
 // outline whose call used its attempts, so the new calls have new keys. Deck is set for a presentation only (TASK-106):
-// File is then the .pptx and Deck.Talk the speaker text. Lab is set for a lab report only (TASK-107).
+// File is then the .pptx and Deck.Talk the speaker text. Lab is set for a lab report only (TASK-107). PDF is the PDF of
+// a done paper or lab report (TASK-198, AttachPDF); a work written again keeps it until the new file replaces it.
 type Writing struct {
 	Snapshot        Snapshot  `json:"snapshot"`
 	Generation      int       `json:"generation"`
@@ -136,6 +143,7 @@ type Writing struct {
 	File            *File     `json:"file"`
 	Deck            *Deck     `json:"deck,omitempty"`
 	Lab             *Lab      `json:"lab,omitempty"`
+	PDF             *File     `json:"pdf,omitempty"`
 }
 
 // OutlineItem is a section of an outline as the model or the student gives it; Number 0 is a new section. Kind is
@@ -448,15 +456,16 @@ func (w *Work) RefuseStep(st Step, now time.Time) error {
 }
 
 // Finish keeps the paper built from the written sections (f.Content must be ContentKey) and marks the work done; a
-// presentation finishes with FinishDeck. Errors: ErrStaleStep when the file is not due or was built from other
-// sections, ErrInvalidWork for a bad file.
+// presentation finishes with FinishDeck. The PDF of an earlier generation is dropped: the use case took it out of «ДЗ»
+// with the old paper (Files). Errors: ErrStaleStep when the file is not due or was built from other sections,
+// ErrInvalidWork for a bad file.
 func (w *Work) Finish(f File, now time.Time) error {
 	if w.Presentation() || w.Next().Kind != StepAssemble || f.Content != w.ContentKey() {
 		return ErrStaleStep
 	}
 	next := w.clone()
 	file := f
-	next.writing.File = &file
+	next.writing.File, next.writing.PDF = &file, nil
 	return w.move(next, StatusDone, now)
 }
 
@@ -1039,6 +1048,14 @@ func (wr Writing) validate() error {
 			return bad(err.Error())
 		}
 	}
+	if p := wr.PDF; p != nil {
+		switch {
+		case p.validate() != nil:
+			return bad("pdf")
+		case wr.File == nil || wr.Deck != nil:
+			return bad("a pdf without the paper, or of a presentation")
+		}
+	}
 	if d := wr.Deck; d != nil {
 		current := d.Questions != nil && d.Questions.Revision == d.QuestionsRevision
 		written := len(wr.Sections) > 0 && !slices.ContainsFunc(wr.Sections, func(s Section) bool { return !s.Written() })
@@ -1072,6 +1089,10 @@ func (wr Writing) clone() Writing {
 	if wr.File != nil {
 		f := *wr.File
 		c.File = &f
+	}
+	if wr.PDF != nil {
+		p := *wr.PDF
+		c.PDF = &p
 	}
 	if wr.Deck != nil {
 		d := wr.Deck.clone()

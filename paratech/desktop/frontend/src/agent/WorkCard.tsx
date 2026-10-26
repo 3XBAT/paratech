@@ -36,6 +36,10 @@ import {
   openLabel,
   openTarget,
   openWork,
+  openPdf,
+  pdfOffered,
+  pdfTarget,
+  exportPdf,
   talkTarget,
   stopWork,
   savePlanAt,
@@ -157,6 +161,8 @@ export function WorkBody(props: {
   const [reviseNumber, setReviseNumber] = useState(0);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  // The running call is «Скачать PDF»: its button reads «Сохранение PDF…».
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [openView, setOpenView] = useState<OpenView | null>(null);
   // The last failure came from «Остановить»: «Повторить» (StartWriting) is no answer to it.
   const [stopFailed, setStopFailed] = useState(false);
@@ -236,6 +242,25 @@ export function WorkBody(props: {
       setOpenView(await openTalk(props.library, work));
     }
   };
+  const savePdf = async () => {
+    setPdfBusy(true);
+    try {
+      const p = exportPdf(api, work);
+      if (p !== null) {
+        props.onWork(await p);
+      }
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+  const openPdfCopy = async () => {
+    if (props.library !== undefined) {
+      setOpenView(await openPdf(props.library, work));
+    }
+  };
+  const pdfId = pdfTarget(work);
+  const canSavePdf = pdfOffered(work) && pdfId === "";
+  const canOpenPdf = props.library !== undefined && pdfId !== "";
   const canOpen = props.library !== undefined && openTarget(work) !== "";
   const canOpenTalk = props.library !== undefined && talkTarget(work) !== "";
   // «Доработать по замечаниям»: an empty note makes no call.
@@ -495,7 +520,14 @@ export function WorkBody(props: {
             </ResultLine>
           )}
 
-          {(canOpen || canOpenTalk) && mode === "view" && <p className="small muted">{workTexts.copyNote}</p>}
+          {pdfId !== "" && mode === "view" && (
+            <p className="ag-note">
+              <Icon name="info" />
+              <span>{workTexts.pdfSaved}</span>
+            </p>
+          )}
+
+          {(canOpen || canOpenTalk || canOpenPdf) && mode === "view" && <p className="small muted">{workTexts.copyNote}</p>}
 
           <div className="ag-actions">
             {mode === "view" && (
@@ -509,6 +541,16 @@ export function WorkBody(props: {
                 {canOpen && (
                   <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(open)}>
                     {openLabel(work)}
+                  </Button>
+                )}
+                {canSavePdf && (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(savePdf)}>
+                    {pdfBusy ? workTexts.savingPdf : workTexts.downloadPdf}
+                  </Button>
+                )}
+                {canOpenPdf && (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(openPdfCopy)}>
+                    {workTexts.openPdf}
                   </Button>
                 )}
                 {canOpenTalk && (
