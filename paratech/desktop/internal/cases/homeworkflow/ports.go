@@ -11,8 +11,10 @@ import (
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/settings/settings"
@@ -162,6 +164,19 @@ type DraftReader interface {
 type WaitingProposals interface {
 	// ListByStatus returns the proposals in status, newest first, at most limit (PRD section 13.3).
 	ListByStatus(ctx context.Context, status proposal.Status, limit int) ([]*proposal.Proposal, error)
+}
+
+// WorkFiles reads a turnkey work and the library around its finished file, for the send of the work to the teacher
+// (TASK-180). Implemented by the app over the work repository and cases/library.
+type WorkFiles interface {
+	// Work loads a work (ADR-0025); none wraps shared.ErrNotFound.
+	Work(ctx context.Context, id shared.WorkID) (*work.Work, error)
+
+	// Material returns a library material in any status (ADR-0024); none wraps shared.ErrNotFound.
+	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
+
+	// Subjects lists the subjects of the library with their folders (ADR-0024).
+	Subjects(ctx context.Context) ([]*subject.Subject, error)
 }
 
 // RecipientSource reads the configured homework recipient from the local settings, the trusted source of the address a

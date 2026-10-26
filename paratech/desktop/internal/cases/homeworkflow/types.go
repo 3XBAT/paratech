@@ -60,6 +60,9 @@ type Deps struct {
 	// the reuse of a deadline or version send proposal that already waits for «Да».
 	Drafts  DraftReader
 	Waiting WaitingProposals
+
+	// Optional (TASK-180): the send of a turnkey work's file to the teacher.
+	Works WorkFiles
 }
 
 // ProposalView is a proposal as the confirmation dialog shows it (PRD section 13.3, AC-14): what will happen, to which
@@ -86,13 +89,20 @@ type ProposalView struct {
 	// DraftVersion is the draft version whose text is exactly the pinned attachment (a text export); 0 when none is
 	// (a Word file, an edit since the export) or the drafts are not wired (TASK-127).
 	DraftVersion int
+	// WorkID is the work whose file a send_work_email sends (TASK-180); its AttachmentName is the name the copy and the
+	// email give the file.
+	WorkID shared.WorkID
 }
 
 func viewOf(p *proposal.Proposal) ProposalView {
 	v := ProposalView{
 		ID: p.ID(), Kind: p.Kind(), Status: p.Status(), Reason: p.Reason(), AssignmentID: p.AssignmentID(),
 		Title: p.Title(), Body: p.Body(), Due: p.Due(), Recipient: p.Recipient().Address(),
-		CreatedAt: p.CreatedAt(), ConfirmedAt: p.ConfirmedAt(), AttachmentFormat: p.AttachmentFormat(),
+		CreatedAt: p.CreatedAt(), ConfirmedAt: p.ConfirmedAt(), AttachmentFormat: p.AttachmentFormat(), WorkID: p.WorkID(),
+	}
+	if p.Kind() == proposal.KindSendWork {
+		v.AttachmentSize = p.AttachmentDigest().Size() // the name is the library's (Service.proposalView)
+		return v
 	}
 	if d := p.AttachmentDigest(); !d.IsZero() {
 		// The ref of a stored proposal's assignment is valid: the id was checked when it was parsed.

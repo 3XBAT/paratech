@@ -59,7 +59,7 @@ func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, forma
 		}
 	}
 
-	facts, err := s.facts(ctx, p)
+	facts, _, err := s.facts(ctx, p)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
@@ -93,12 +93,18 @@ func (s *Service) propose(ctx context.Context, out values.UntrustedOutput, forma
 
 // proposalView is the view of p with the email subject of a validated send, for the confirmation dialog. ConfirmSend
 // carries it back, and Execute sends it only if it is still the subject the core builds (proposal.Facts.Subject).
+// The send of a work shows the name its file goes under.
 func (s *Service) proposalView(ctx context.Context, p *proposal.Proposal) (ProposalView, error) {
 	v := viewOf(p)
-	if p.Kind() != proposal.KindSendHomework || p.Status() != proposal.StatusValidated {
+	var err error
+	if p.Kind() == proposal.KindSendWork {
+		if v.AttachmentName, err = s.workAttachmentName(ctx, p); err != nil {
+			return v, err
+		}
+	}
+	if !p.Kind().NeedsSubject() || p.Status() != proposal.StatusValidated {
 		return v, nil
 	}
-	var err error
 	if v.Subject, err = s.emailSubject(ctx, p.AssignmentID()); err != nil {
 		return v, err
 	}
@@ -155,9 +161,9 @@ func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID, format
 	return s.propose(ctx, values.NewUntrustedOutput(string(raw)), format, nil)
 }
 
-// facts reads the trusted local state a proposal is checked against, only what its kind needs. It runs outside a
-// transaction because it reads a file.
-func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Facts, error) {
+// facts reads the trusted local state a proposal is checked against, only what its kind needs, and for the send of a
+// work the library name of its file. It runs outside a transaction because it reads a file.
+func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Facts, string, error) {
 	var f proposal.Facts
 
 	switch a, err := s.assignments.Get(ctx, p.AssignmentID()); {
@@ -166,29 +172,37 @@ func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Fac
 		f.AssignmentTitle = a.Details().Title() // the export heading comes from the stored assignment, not the model
 		if p.Kind().NeedsSubject() {
 			if f.Subject, err = s.subjectOf(ctx, a); err != nil {
-				return f, err
+				return f, "", err
 			}
 		}
 	case !errors.Is(err, shared.ErrNotFound):
-		return f, err
+		return f, "", err
 	}
 
 	if p.Kind().NeedsRecipient() {
 		r, err := s.recipients.HomeworkRecipient(ctx)
 		if err != nil {
-			return f, err
+			return f, "", err
 		}
 		f.Recipient = r
 	}
 
-	if p.Kind().NeedsAttachment() {
+	switch {
+	case p.Kind().NeedsWorkFile():
+		wf, err := s.workFileOf(ctx, p.WorkID(), p.AttachmentFormat())
+		if err != nil {
+			return f, "", err
+		}
+		f.Attachment, f.AttachmentRef, f.Filed = wf.digest, wf.ref, wf.filed
+		return f, wf.name, nil
+	case p.Kind().NeedsAttachment():
 		d, err := s.exportDigest(ctx, p.AssignmentID(), p.AttachmentFormat())
 		if err != nil {
-			return f, err
+			return f, "", err
 		}
 		f.Attachment = d
 	}
-	return f, nil
+	return f, "", nil
 }
 
 // exportDigest streams the export file of the assignment in format f through SHA-256; a missing file yields the zero
@@ -198,6 +212,11 @@ func (s *Service) exportDigest(ctx context.Context, a shared.AssignmentID, f pro
 	if err != nil {
 		return proposal.Digest{}, err
 	}
+	return s.fileDigest(ctx, ref)
+}
+
+// fileDigest streams an artifact through SHA-256; a missing file yields the zero digest.
+func (s *Service) fileDigest(ctx context.Context, ref shared.ArtifactRef) (proposal.Digest, error) {
 	rc, err := s.artifacts.Open(ctx, ref)
 	if errors.Is(err, shared.ErrNotFound) {
 		return proposal.Digest{}, nil
@@ -343,7 +362,7 @@ func (s *Service) execute(ctx context.Context, id proposal.ID, seen *shown) (Pro
 		return viewOf(p), nil
 	}
 
-	facts, err := s.facts(ctx, p)
+	facts, name, err := s.facts(ctx, p)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
@@ -361,7 +380,7 @@ func (s *Service) execute(ctx context.Context, id proposal.ID, seen *shown) (Pro
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
 
-	if err := s.perform(ctx, p, facts); err != nil {
+	if err := s.perform(ctx, p, facts, name); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opExecute, err)
 	}
 
@@ -390,18 +409,24 @@ func (s *Service) execute(ctx context.Context, id proposal.ID, seen *shown) (Pro
 
 // perform obtains the command from the proposal (which refuses unless CONFIRMED) and hands it to the port of its kind.
 // The email subject is the one Recheck accepted (f); the lesson of a deadline event comes from trusted local state and
-// the cleaned hints (TASK-092).
-func (s *Service) perform(ctx context.Context, p *proposal.Proposal, f proposal.Facts) error {
+// the cleaned hints (TASK-092). The send of a work first writes the named copy of its file (name: the library name).
+func (s *Service) perform(ctx context.Context, p *proposal.Proposal, f proposal.Facts, name string) error {
 	switch p.Kind() {
 	case proposal.KindSendHomework:
 		cmd, err := p.EmailCommand()
 		if err != nil {
 			return err
 		}
-		if cmd, err = cmd.WithSubject(f.Subject); err != nil {
+		return s.send(ctx, cmd, f.Subject)
+	case proposal.KindSendWork:
+		cmd, err := p.WorkEmailCommand(name)
+		if err != nil {
 			return err
 		}
-		return s.mailer.SendHomework(ctx, cmd)
+		if err := s.copyWorkFile(ctx, p, cmd); err != nil {
+			return err
+		}
+		return s.send(ctx, cmd, f.Subject)
 	case proposal.KindExportHomework:
 		cmd, err := p.ExportCommand()
 		if err != nil {
@@ -424,4 +449,13 @@ func (s *Service) perform(ctx context.Context, p *proposal.Proposal, f proposal.
 		return s.calendar.UpsertDeadline(ctx, cmd.WithLesson(l))
 	}
 	return fmt.Errorf("%w: %s", ErrUnsupportedKind, p.Kind())
+}
+
+// send hands an email command with the subject Recheck accepted to the mailer.
+func (s *Service) send(ctx context.Context, cmd proposal.EmailCommand, subject string) error {
+	cmd, err := cmd.WithSubject(subject)
+	if err != nil {
+		return err
+	}
+	return s.mailer.SendHomework(ctx, cmd)
 }
