@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func newAnswer(t *testing.T, id shared.AnswerID, subject shared.SubjectID, quest
 				Title: "Матанализ", StartedAt: ansT0.Add(-time.Hour)}},
 		{Text: "Ключевые понятия: производная, дифференциал.",
 			Source: answer.Source{Recording: "rec2", Section: answer.SectionSummary}},
-	})
+	}, "ag:th1:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +79,85 @@ func TestAnswerInsertGet(t *testing.T) {
 	}
 	if err := repo.Insert(ctx, newAnswer(t, "an1", "s1", "Что такое ряд производных?")); !errors.Is(err, shared.ErrDuplicate) {
 		t.Fatalf("same id = %v", err)
+	}
+}
+
+// Keys of both versions are stored and found: v2 (with the reuse scope) and v1, made before it (migration 0030).
+func TestAnswerKeyVersions(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAnswerRepository(db)
+	v2 := newAnswer(t, "an1", "s1", "Что такое производная?")
+	st := newAnswer(t, "an2", "s1", "Что такое дифференциал?").State()
+	st.Key = "ans:v1:" + strings.Repeat("0f", 32)
+	v1, err := answer.Restore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(v2.Key(), "ans:v2:") {
+		t.Fatalf("new key %q", v2.Key())
+	}
+	for _, a := range []*answer.Answer{v2, v1} {
+		if err := repo.Insert(ctx, a); err != nil {
+			t.Fatalf("Insert %s: %v", a.Key(), err)
+		}
+		if got, err := repo.FindByKey(ctx, a.Key()); err != nil || got.ID() != a.ID() {
+			t.Fatalf("FindByKey(%s) = %v, %v", a.Key(), got, err)
+		}
+	}
+
+	// The schema still refuses a key of another shape.
+	if _, err := db.sql.ExecContext(ctx, `UPDATE answers SET request_key = 'ans:v3:' || substr(request_key, 8) WHERE id = 'an1'`); err == nil {
+		t.Fatal("a v3 key was stored")
+	}
+}
+
+// Version 30 rebuilds answers keeping the rows of version 29 (keys v1) and accepting v2; down to 29 keeps v1 only.
+func TestMigrationToVersion30KeepsAnswers(t *testing.T) {
+	t.Parallel() // uses a database of its own
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 29); err != nil {
+		t.Fatalf("up to 29: %v", err)
+	}
+	st := newAnswer(t, "an1", "s1", "Что такое производная?").State()
+	st.Key = "ans:v1:" + strings.Repeat("0f", 32)
+	v1, err := answer.Restore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAnswerRepository(db)
+	if err := repo.Insert(ctx, v1); err != nil {
+		t.Fatalf("Insert at 29: %v", err)
+	}
+	if err := repo.Insert(ctx, newAnswer(t, "an2", "s1", "Что такое дифференциал?")); err == nil {
+		t.Fatal("a v2 key was stored at version 29")
+	}
+
+	if _, err := p.UpTo(ctx, 30); err != nil {
+		t.Fatalf("up to 30: %v", err)
+	}
+	if got, err := repo.FindByKey(ctx, v1.Key()); err != nil || !reflect.DeepEqual(got.State(), v1.State()) {
+		t.Fatalf("v1 answer after the migration = %v, %v", got, err)
+	}
+	if err := repo.Insert(ctx, newAnswer(t, "an2", "s1", "Что такое дифференциал?")); err != nil {
+		t.Fatalf("Insert v2 at 30: %v", err)
+	}
+	if err := repo.Insert(ctx, newAnswer(t, "an3", "s1", "Что такое дифференциал?")); !errors.Is(err, shared.ErrDuplicate) {
+		t.Fatalf("same key after the rebuild = %v", err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM sqlite_master WHERE name LIKE 'answers\\_v%' ESCAPE '\\'"); n != 0 {
+		t.Fatalf("%d leftover objects of the rebuild", n)
+	}
+
+	if _, err := p.DownTo(ctx, 29); err != nil {
+		t.Fatalf("down to 29: %v", err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM answers"); n != 1 {
+		t.Fatalf("answers after down = %d, want the v1 one", n)
 	}
 }
 

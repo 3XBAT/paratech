@@ -72,7 +72,7 @@ func (l subjectLessons) Texts(_ context.Context, sub shared.SubjectID) ([]kb.Les
 type answersPort struct{ s *answering.Service }
 
 func (p answersPort) Ask(ctx context.Context, q string, sub shared.SubjectID) (*answer.Answer, error) {
-	asked, err := p.s.Ask(ctx, q, sub)
+	asked, err := p.s.Ask(ctx, q, sub, "tk:v1")
 	switch {
 	case err == nil:
 		return asked.Answer, nil

@@ -150,7 +150,7 @@ func (f *fakeAnswerer) Ask(_ context.Context, q string, sub shared.SubjectID) (*
 	}
 	req, err := answer.NewRequest(q, []answer.Excerpt{{Text: lessonText, Source: answer.Source{
 		Recording: "r1", Section: answer.SectionSummary, Title: "Ряды", StartedAt: time.Date(2026, 10, 20, 7, 0, 0, 0, time.UTC),
-	}}})
+	}}}, "tk:v1")
 	if err != nil {
 		return nil, err
 	}

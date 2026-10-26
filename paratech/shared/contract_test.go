@@ -691,12 +691,14 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 3 (TASK-172: reply lists up to 10 assignment IDs; v2,
-// TASK-118: question and search query of up to 500 characters). Both the Hub catalog (TASK-114) and the desktop Tool
-// enum (TASK-115) must match it. Versions 1 and 2 are frozen: the Hub still serves them to clients of those versions.
+// Golden tool catalog (design §2.3, ADR-0021), the current version 4 (TASK-182: no generate_draft, triage_assignment by
+// topic; v3, TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500
+// characters). Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 3 are
+// frozen: the Hub still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 3
-	toolCatalogFile    = "testdata/tool_catalog_v3.json"
+	toolCatalogVersion = 4
+	toolCatalogFile    = "testdata/tool_catalog_v4.json"
+	toolCatalogV3File  = "testdata/tool_catalog_v3.json"
 	toolCatalogV2File  = "testdata/tool_catalog_v2.json"
 	toolCatalogV1File  = "testdata/tool_catalog_v1.json"
 )
@@ -778,7 +780,6 @@ var pinnedTools = map[string]string{
 	"make_summary":             "U",
 	"make_lecture_text":        "U",
 	"find_homework":            "U",
-	"generate_draft":           "U",
 	"edit_due":                 "U",
 	"triage_assignment":        "U",
 	"write_work":               "U",
@@ -900,8 +901,20 @@ func validateCatalog(c toolCatalog) []string {
 }
 
 // queryArguments are the only arguments of type query: the student's question and search text, at most 500
-// characters (TASK-118). A query is longer free text than a label, so a new one must be a conscious edit here.
-var queryArguments = []string{"answer_question.question", "search.query"}
+// characters (TASK-118), and the topic of a work without an assignment (TASK-182). A query is longer free text than a
+// label, so a new one must be a conscious edit here.
+var queryArguments = []string{"answer_question.question", "search.query", "triage_assignment.topic"}
+
+// oneOfGroups are the one-of groups of the current catalog's note (tool -> arguments), which the desktop parser and,
+// from catalog 4, the Hub enforce: exactly one of the group per call.
+var oneOfGroups = map[string][]string{
+	"make_summary":      {"recording", "material"},
+	"find_homework":     {"recording", "material"},
+	"triage_assignment": {"assignment", "upload", "topic"},
+	"place_upload":      {"folder", "lesson"},
+}
+
+var oneOfGroupPattern = regexp.MustCompile(`([a-z][a-z0-9_]*) \(([a-z][a-z0-9_]*(?:\|[a-z][a-z0-9_]*)+)\)`)
 
 // cardIDArguments are the only arguments of type card_ids: the assignments a reply lists, at most 10 (TASK-172). The
 // desktop checks their provenance like any ID; a new one must be a conscious edit here.
@@ -936,6 +949,22 @@ func TestToolCatalog(t *testing.T) {
 		t.Errorf("reply.assignments must be optional: %+v", reply.Arguments)
 	}
 
+	groups := map[string][]string{}
+	for _, m := range oneOfGroupPattern.FindAllStringSubmatch(c.Notes["one_of"], -1) {
+		groups[m[1]] = strings.Split(m[2], "|")
+	}
+	if !maps.EqualFunc(groups, oneOfGroups, slices.Equal) {
+		t.Errorf("one_of groups %v, want %v", groups, oneOfGroups)
+	}
+	for name, group := range groups {
+		tool := c.Tools[toolIndex(t, c, name)]
+		for _, a := range group {
+			if i := slices.IndexFunc(tool.Arguments, func(d catalogArgument) bool { return d.Name == a }); i < 0 || tool.Arguments[i].Required {
+				t.Errorf("one_of: %s.%s must be a declared optional argument", name, a)
+			}
+		}
+	}
+
 	got := map[string]string{}
 	for _, tool := range c.Tools {
 		got[tool.Name] = tool.Class
@@ -954,9 +983,31 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV3IsFrozen: catalog v3 stays as released: catalog v4 with generate_draft before edit_due, without
+// triage_assignment.topic, and with the one_of note of pairs.
+func TestToolCatalogV3IsFrozen(t *testing.T) {
+	v3, v4 := loadToolCatalogFile(t, toolCatalogV3File), loadToolCatalog(t)
+	if v3.CatalogVersion != 3 || !strings.Contains(v3.Notes["one_of"], "triage_assignment (assignment|upload) and") {
+		t.Fatalf("v3: version %d, one_of %q", v3.CatalogVersion, v3.Notes["one_of"])
+	}
+	draft := catalogTool{Name: "generate_draft", Class: "U", Paid: true, AgentCanExecute: true, Arguments: []catalogArgument{
+		{Name: "assignment", Type: "id", Required: true},
+		{Name: "instruction", Type: "label"},
+	}}
+	want := cloneCatalog(v4)
+	want.CatalogVersion = 3
+	want.Notes["one_of"] = v3.Notes["one_of"]
+	i := toolIndex(t, want, "triage_assignment")
+	want.Tools[i].Arguments = slices.DeleteFunc(want.Tools[i].Arguments, func(a catalogArgument) bool { return a.Name == "topic" })
+	want.Tools = slices.Insert(want.Tools, toolIndex(t, want, "edit_due"), draft)
+	if fmt.Sprint(want) != fmt.Sprint(v3) {
+		t.Errorf("v3 differs from v4 beyond generate_draft and triage_assignment.topic:\nv3 %+v\nv4 %+v", v3, want)
+	}
+}
+
 // TestToolCatalogV2IsFrozen: catalog v2 stays as released: catalog v3 without the card_ids type and reply.assignments.
 func TestToolCatalogV2IsFrozen(t *testing.T) {
-	v2, v3 := loadToolCatalogFile(t, toolCatalogV2File), loadToolCatalog(t)
+	v2, v3 := loadToolCatalogFile(t, toolCatalogV2File), loadToolCatalogFile(t, toolCatalogV3File)
 	if v2.CatalogVersion != 2 || v2.Types["card_ids"] != "" {
 		t.Fatalf("v2: version %d, card_ids type %q", v2.CatalogVersion, v2.Types["card_ids"])
 	}
@@ -1047,13 +1098,13 @@ func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
 			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "others", Type: "card_ids"})
 		}, `argument propose_send.others has type "card_ids"`},
 		{"argument named recipient_email", func(t *testing.T, c *toolCatalog) {
-			i := toolIndex(t, *c, "generate_draft")
+			i := toolIndex(t, *c, "triage_assignment")
 			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "recipient_email", Type: "label"})
-		}, "argument generate_draft.recipient_email names"},
+		}, "argument triage_assignment.recipient_email names"},
 		{"argument named attachment", func(t *testing.T, c *toolCatalog) {
-			i := toolIndex(t, *c, "generate_draft")
+			i := toolIndex(t, *c, "triage_assignment")
 			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "attachment", Type: "id"})
-		}, "argument generate_draft.attachment names"},
+		}, "argument triage_assignment.attachment names"},
 		{"enum without values", func(t *testing.T, c *toolCatalog) {
 			i := toolIndex(t, *c, "find_lessons")
 			c.Tools[i].Arguments[3].Values = nil

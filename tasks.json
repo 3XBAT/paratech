@@ -3045,7 +3045,7 @@
                 "go test -race ./desktop/internal/domain/coursework/answer/... ./desktop/internal/cases/answering/... ./desktop/internal/input/agent/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-143",
@@ -3921,7 +3921,7 @@
                 "go test ./shared/... и buf lint в paratech/shared"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-183",
