@@ -276,11 +276,15 @@ func (a *Actions) checkWriting(ctx context.Context, c action.StopWork) (action.T
 	return action.Target{Version: jobVersion, Compensated: inbox == len(files)}, nil
 }
 
-// writingFiles are the files of a done writing: the paper, or the .pptx and the speaker text of a presentation.
+// writingFiles are the files of a done writing: the paper with its PDF once saved (TASK-198), or the .pptx and the
+// speaker text of a presentation.
 func writingFiles(w *turnkey.WritingView) []shared.MaterialID {
 	files := []shared.MaterialID{w.Material}
 	if w.Talk != "" {
 		files = append(files, w.Talk)
+	}
+	if w.PDF != "" {
+		files = append(files, w.PDF)
 	}
 	return files
 }
