@@ -171,11 +171,11 @@ type TurnkeyWriting struct {
 	Sections   []TurnkeySection `json:"sections"`
 	Done       int              `json:"done"`
 	Total      int              `json:"total"`
-	SubjectID  string           `json:"subjectId"`  // the subject whose «ДЗ» gets the file; "" «Входящие»
-	MaterialID string           `json:"materialId"` // the file in the library, once done
-	Result     string           `json:"result"`     // the artifact of the ResultCard, once done
+	SubjectID  string           `json:"subjectId"`     // the subject whose «ДЗ» gets the file; "" «Входящие»
+	MaterialID string           `json:"materialId"`    // the file in the library, once done
+	Result     string           `json:"result"`        // the artifact of the ResultCard, once done
 	PDF        string           `json:"pdfMaterialId"` // the PDF next to the file (ExportPDF); "" none yet or for a new generation
-	Job       string           `json:"job"`        // the job the call started, else the active one; "" when none
+	Job        string           `json:"job"`           // the job the call started, else the active one; "" when none
 	Active     bool             `json:"active"`
 	JobState   string           `json:"jobState"`
 
