@@ -13,9 +13,10 @@ export const turnkeyLimits = { answerMax: 1000, requirementMax: 200, stepQuestio
 
 export const turnkeyTexts = {
   triageCaption: "Разбор задания",
-  triageLine: "Задание ещё не разобрано.",
   triageFailed: "Разбор задания не завершён. Можно повторить.",
-  retry: "Повторить",
+  /** No attempt yet: the first start. After a failed attempt the button is retry. */
+  triageStart: "Разобрать задание",
+  retry: "Попробовать снова",
   failedCaption: "Разбор задания",
   failedText: "Задание не удалось разобрать.",
 
@@ -67,7 +68,7 @@ export const turnkeyTexts = {
 // ---- Which card ----
 
 export type TurnkeyCardModel =
-  | { type: "triage"; caption: string; line: string; problem: string }
+  | { type: "triage"; caption: string; problem: string }
   | { type: "failed"; caption: string; text: string }
   | { type: "questions" }
   | { type: "understanding" }
@@ -83,7 +84,8 @@ export function triageReason(w: TurnkeyWork): string {
 
 /**
  * The card of a work that has no writing yet, or null (the writing cards decide). A reader call that did not go
- * through keeps the work in triage with its problem; «Повторить» asks again.
+ * through keeps the work in triage with its problem; «Попробовать снова» asks again. Without a problem
+ * no attempt was made: the card only offers «Разобрать задание».
  */
 export function turnkeyCardModel(w: TurnkeyWork): TurnkeyCardModel | null {
   if (w.writing !== null) {
@@ -91,7 +93,7 @@ export function turnkeyCardModel(w: TurnkeyWork): TurnkeyCardModel | null {
   }
   switch (w.status) {
     case "triage":
-      return { type: "triage", caption: turnkeyTexts.triageCaption, line: turnkeyTexts.triageLine, problem: triageReason(w) };
+      return { type: "triage", caption: turnkeyTexts.triageCaption, problem: triageReason(w) };
     case "questions":
       return w.questions.length > 0 ? { type: "questions" } : null;
     case "review":

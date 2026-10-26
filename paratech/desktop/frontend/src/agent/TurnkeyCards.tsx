@@ -60,7 +60,7 @@ function TextList(props: { items: readonly string[] }) {
 
 // ---- Reader call that waits or failed ----
 
-export function TriageCard(props: { ctx: CardContext; caption: string; line: string; problem: string }) {
+export function TriageCard(props: { ctx: CardContext; caption: string; problem: string }) {
   const { ctx } = props;
   return (
     <section className="ag-card">
@@ -68,9 +68,7 @@ export function TriageCard(props: { ctx: CardContext; caption: string; line: str
         <span className="ag-dot" aria-hidden="true" />
         {props.caption}
       </h3>
-      {props.problem === "" ? (
-        <p role="status">{props.line}</p>
-      ) : (
+      {props.problem !== "" && (
         <ResultLine kind="wait" role="status">
           {props.problem}
         </ResultLine>
@@ -78,7 +76,7 @@ export function TriageCard(props: { ctx: CardContext; caption: string; line: str
       {ctx.errorLine}
       <div className="ag-actions">
         <Button size="sm" variant="primary" disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.retry(ctx.work.id)))}>
-          {turnkeyTexts.retry}
+          {props.problem === "" ? turnkeyTexts.triageStart : turnkeyTexts.retry}
         </Button>
       </div>
     </section>

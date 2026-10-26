@@ -267,9 +267,12 @@ test("a failed answer keeps the card and shows the problem of the reader call", 
   const failed = work({ status: "triage", problem: "offline", message: "Нет связи с paratech: разбор не завершён. Повторите позже." });
   const out = render(failed);
   assert.ok(out.includes("Нет связи с paratech") && out.includes(turnkeyTexts.retry));
-  // A stored triage without a problem means a reader call is due: «Повторить» is offered.
+  assert.ok(!out.includes(turnkeyTexts.triageStart));
+  // A stored triage without a problem: no attempt made, only «Разобрать задание» without the old line.
   const stored = render(work({ status: "triage" }));
-  assert.ok(stored.includes(turnkeyTexts.triageLine) && stored.includes(turnkeyTexts.retry));
+  assert.ok(stored.includes("Разобрать задание") && !stored.includes("Попробовать снова"));
+  assert.ok(!stored.includes("ещё не разобрано") && !stored.includes("Повторить"));
+  assert.equal(turnkeyTexts.retry, "Попробовать снова");
   const err = render(work({ status: "questions", questionRound: 1, questions: [choice] }), fakeApi(), { error: "Не удалось выполнить. Попробуйте ещё раз.", onError: noop });
   assert.ok(err.includes('role="alert"') && err.includes("Не удалось выполнить"));
   assert.ok(render(work({ status: "failed" })).includes(turnkeyTexts.failedText));

@@ -233,7 +233,7 @@ export function WorkBody(props: {
     const ctx = { work, api, busy, run, step, onWork: props.onWork, errorLine };
     switch (early.type) {
       case "triage":
-        return <TriageCard ctx={ctx} caption={early.caption} line={early.line} problem={early.problem} />;
+        return <TriageCard ctx={ctx} caption={early.caption} problem={early.problem} />;
       case "failed":
         return <FailedCard caption={early.caption} text={early.text} message={triageReason(work)} />;
       case "questions":
