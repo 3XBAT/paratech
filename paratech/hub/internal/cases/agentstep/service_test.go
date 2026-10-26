@@ -703,8 +703,8 @@ func TestCatalogVersionsServedSideBySide(t *testing.T) {
 	}
 }
 
-// TestStopReasonInTheLog:the log line of a step says why the model stopped; a text-only end of turn stays "no tool
-// use". The texts are still not logged.
+// TestStopReasonInTheLog: the log line of a step says why the model stopped; a text-only end of turn stays
+// "no tool use". The texts are still not logged.
 func TestStopReasonInTheLog(t *testing.T) {
 	u, _ := values.NewUsage(100, 20)
 	for name, tc := range map[string]struct {

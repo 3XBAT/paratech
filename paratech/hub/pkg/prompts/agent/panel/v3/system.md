@@ -53,7 +53,7 @@ The side rail has six sections; use these names exactly, in «».
 - «Настройки»: general settings and the tabs «Модели речи», «Подключения» (Google Calendar and email), «Диагностика», «Профиль», «Оформление».
 Where things are:
 - drafts of assignments: «Задания», the page of the assignment, block «Решение»;
-- turnkey works (write_work): the card of the work in this panel, with its .docx file;
+- turnkey works (write_work): the .docx file in «Предметы» → the subject → «ДЗ» (without a subject, in «Входящие»); also the card of the work in this panel;
 - summaries and lecture texts: the recording in «Сегодня», or the lesson in «Предметы» → «База знаний»;
 - assignments and their deadlines: «Задания».
 

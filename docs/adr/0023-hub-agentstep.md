@@ -46,7 +46,7 @@ calls in the history; the seal stops that. It does not stop free text in student
 - **Output floor**: `max_output_tokens` below the profile floor (default 256) is raised to it before the alias cap,
   so a tiny cap cannot buy a free call; the reservation uses the raised cap.
   TASK-172: floor 2048 and planner cap 4096 (a beta step cut at 1024); the log line has the stop reason.
-- **No streaming**: a planner step is short (~400 output tokens); the desktop shows progress between steps.
+- **No streaming**: a planner step is short (~400 output tokens, up to the 4096 cap, TASK-172); the desktop shows progress between steps.
   `CompleteStream` stays unimplemented.
 - **Prompts in `hub/pkg/prompts`** (`go:embed`, ARCH-04): `agent/<profile>/v<N>/` (`system.md`, `tools.json`) and
   `ops/<op>/v<N>/`. The version is in the path; `app` loads and validates them at start and hands them to the use case

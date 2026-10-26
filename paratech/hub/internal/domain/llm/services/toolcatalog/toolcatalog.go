@@ -102,8 +102,8 @@ type Catalog struct {
 
 // Parse reads a catalog text and checks it: known fields only, a version above 0, unique snake_case tool and argument
 // names, known classes, argument types allowed for the class (UI tools only card types, among them the IDs a card
-// lists; other tools only IDs, enums, dates, labels and queries), enum values only on enums. The deeper policy checks of the golden file live in the contract
-// test.
+// lists; other tools only IDs, enums, dates, labels and queries), enum values only on enums. The deeper policy checks
+// of the golden file live in the contract test.
 func Parse(raw []byte) (*Catalog, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()

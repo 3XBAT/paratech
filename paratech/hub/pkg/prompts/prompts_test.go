@@ -57,6 +57,8 @@ func TestPanelV3Prompt(t *testing.T) {
 		// the screens of the app (desktop/frontend/src/nav.ts)
 		"«Сегодня»", "«Предметы»", "«ДЗ»", "«Входящие»", "«База знаний»", "«Билеты»", "«Задания»", "«Решение»", "Word",
 		"«Расписание»", "«Журнал»", "«Отменить»", "«Настройки»",
+		// turnkey works are filed into the subject's «ДЗ», or «Входящие» without a subject
+		"«Предметы» → the subject → «ДЗ»", "without a subject, in «Входящие»",
 		// a reference question is a reply with the screen, never cannot_do
 		"gets reply at once", "Never answer such a question with cannot_do",
 		// cannot_do only for a missing program or the student's own action, without contradictions
