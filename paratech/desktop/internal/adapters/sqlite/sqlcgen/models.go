@@ -235,6 +235,7 @@ type Proposal struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	AttachmentFormat string
+	WorkID           string
 }
 
 type Recording struct {

@@ -328,7 +328,8 @@ type Querier interface {
 	// The text status is a fact about the content, not a change: checked against the version but keeps it (TASK-122).
 	UpdateMaterialText(ctx context.Context, arg UpdateMaterialTextParams) (int64, error)
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
-	// format the user chose before the validation and the creation time never change, so they are not written again.
+	// format chosen before the validation, the work of a send and the creation time never change, so they are not written
+	// again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). The user's correction of the lesson (TASK-091) is mutable; the
 	// lesson, its snapshot, the cap, the chunk directory and the creation time never change; lesson_id is left alone so

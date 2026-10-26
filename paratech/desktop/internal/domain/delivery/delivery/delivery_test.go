@@ -500,6 +500,9 @@ func TestAttachmentMediaType(t *testing.T) {
 		"a1/homework.docx": MediaTypeDocx,
 		"a1/HOMEWORK.DOCX": MediaTypeDocx,
 		"a1/homework.txt":  MediaTypeText,
+		"sent/p1/Доклад.pptx": MediaTypePptx,
+		"sent/p1/ДОКЛАД.PPTX": MediaTypePptx,
+		"sent/p1/pptx":        MediaTypeText,
 	} {
 		r, err := shared.NewArtifactRef(shared.ArtifactExports, path)
 		if err != nil {

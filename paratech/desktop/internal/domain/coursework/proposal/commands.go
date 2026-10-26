@@ -15,7 +15,8 @@ import (
 // from raw data: the only way to get one is the method of the same name on a CONFIRMED proposal. A port that takes a
 // command therefore cannot be fed model output directly (AC-18). Adapters reject the zero value (IsZero).
 
-// EmailCommand sends the exported homework of an assignment to the trusted recipient (PRD section 10, AC-14).
+// EmailCommand sends the exported homework of an assignment, or the file of its turnkey work (TASK-180), to the
+// trusted recipient (PRD section 10, AC-14).
 type EmailCommand struct {
 	key        string
 	assignment shared.AssignmentID
@@ -64,6 +65,31 @@ func (p *Proposal) EmailCommand() (EmailCommand, error) {
 		return EmailCommand{}, err
 	}
 	ref, err := ExportRefOf(p.assignment, p.format)
+	if err != nil {
+		return EmailCommand{}, err
+	}
+	return EmailCommand{key: p.idempotencyKey(), assignment: p.assignment, recipient: p.recipient, attachment: ref, digest: p.attachment,
+		confirmed: p.confirmedAt}, nil
+}
+
+// WorkCopyRef is the copy of the work's file that a send_work_email attaches: exports/sent/<proposal id>/ and
+// CopyName of materialName, the library name of the file. One directory per proposal, so a repeated execution writes
+// the same file and another send never overwrites it. Another kind wraps ErrWrongKind.
+func (p *Proposal) WorkCopyRef(materialName string) (shared.ArtifactRef, error) {
+	if p.kind != KindSendWork {
+		return shared.ArtifactRef{}, fmt.Errorf("%w: %s, not %s", ErrWrongKind, p.kind, KindSendWork)
+	}
+	return shared.NewArtifactRef(shared.ArtifactExports, sentDir+"/"+p.id.String()+"/"+CopyName(materialName, p.format))
+}
+
+// WorkEmailCommand returns the command of a CONFIRMED send_work_email proposal: the copy WorkCopyRef(materialName)
+// as the attachment, with the content pinned at validation. The use case writes the copy from AttachmentSource before
+// the command reaches the mailer, which sends it only if the bytes match the pinned digest.
+func (p *Proposal) WorkEmailCommand(materialName string) (EmailCommand, error) {
+	if err := p.ready(KindSendWork); err != nil {
+		return EmailCommand{}, err
+	}
+	ref, err := p.WorkCopyRef(materialName)
 	if err != nil {
 		return EmailCommand{}, err
 	}

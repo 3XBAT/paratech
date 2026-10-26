@@ -2,6 +2,7 @@ package proposal
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -37,31 +38,51 @@ const (
 	KindSendHomework   Kind = "send_homework_email"   // email the exported homework of an assignment (PRD section 10)
 	KindExportHomework Kind = "export_homework"       // write the homework text of an assignment to its export file
 	KindDeadlineEvent  Kind = "create_deadline_event" // put the deadline of an assignment into the app calendar (PRD section 11.3)
+
+	// KindSendWork emails the finished file of a turnkey work (TASK-180). Only the core proposes it (NewWorkSend, on the
+	// student's action); a model answer naming it is malformed.
+	KindSendWork Kind = "send_work_email"
 )
 
-// Kinds returns every kind.
+// Kinds returns the kinds a model answer may propose (New).
 func Kinds() []Kind { return []Kind{KindSendHomework, KindExportHomework, KindDeadlineEvent} }
 
+// AllKinds returns every kind, those of the core included, for the schema checks.
+func AllKinds() []Kind { return append(Kinds(), KindSendWork) }
+
 // Valid reports whether k is a known kind.
-func (k Kind) Valid() bool {
-	switch k {
-	case KindSendHomework, KindExportHomework, KindDeadlineEvent:
-		return true
-	}
-	return false
-}
+func (k Kind) Valid() bool { return slices.Contains(AllKinds(), k) }
+
+// fromModel reports whether a model answer may propose k.
+func (k Kind) fromModel() bool { return slices.Contains(Kinds(), k) }
 
 // NeedsRecipient reports whether the kind is checked against the configured recipient.
-func (k Kind) NeedsRecipient() bool { return k == KindSendHomework }
+func (k Kind) NeedsRecipient() bool { return k == KindSendHomework || k == KindSendWork }
 
-// NeedsAttachment reports whether the kind is checked against the content of the export file.
-func (k Kind) NeedsAttachment() bool { return k == KindSendHomework }
+// NeedsAttachment reports whether the kind is checked against the content of the file it attaches: the export file of
+// the assignment or the file of the work.
+func (k Kind) NeedsAttachment() bool { return k == KindSendHomework || k == KindSendWork }
 
 // NeedsSubject reports whether the kind is checked against the email subject the user confirmed.
-func (k Kind) NeedsSubject() bool { return k == KindSendHomework }
+func (k Kind) NeedsSubject() bool { return k == KindSendHomework || k == KindSendWork }
 
 // NeedsAssignmentTitle reports whether the kind takes the stored title of the assignment (the heading of an export).
 func (k Kind) NeedsAssignmentTitle() bool { return k == KindExportHomework }
+
+// NeedsWorkFile reports whether the kind attaches the library file of a work and is checked against where it is filed.
+func (k Kind) NeedsWorkFile() bool { return k == KindSendWork }
+
+// allows reports whether a proposal of kind k may attach format f: the text or Word export for a homework send, the
+// Word or PowerPoint file for the send of a work.
+func (k Kind) allows(f Format) bool {
+	switch k {
+	case KindSendHomework:
+		return f == FormatText || f == FormatDocx
+	case KindSendWork:
+		return f == FormatDocx || f == FormatPptx
+	}
+	return false
+}
 
 // RejectReason tells why a proposal was rejected at validation or went stale before execution. The set is closed and
 // written by the core, never by the model.
@@ -79,16 +100,21 @@ const (
 	ReasonArtifactChanged  RejectReason = "homework_artifact_changed" // the export file is not the confirmed content
 	ReasonSubjectChanged   RejectReason = "email_subject_changed"     // the email subject is not the one the user saw
 	ReasonFormatChanged    RejectReason = "attachment_format_changed" // the attachment format is not the one the user saw
+
+	// Send of a work, rejected or stale: its file is no longer in «ДЗ» (or in «Входящие» where a work without a
+	// subject leaves it).
+	ReasonFileMoved RejectReason = "work_file_moved"
 )
 
 // validFor reports whether r is a reason a proposal in status s may carry.
 func (r RejectReason) validFor(s Status) bool {
 	switch s {
 	case StatusRejected:
-		return r == ReasonUnknownAssignment || r == ReasonNoRecipient || r == ReasonNoArtifact || r == ReasonDueOutOfRange
+		return r == ReasonUnknownAssignment || r == ReasonNoRecipient || r == ReasonNoArtifact || r == ReasonDueOutOfRange ||
+			r == ReasonFileMoved
 	case StatusStale:
 		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact ||
-			r == ReasonArtifactChanged || r == ReasonSubjectChanged || r == ReasonFormatChanged
+			r == ReasonArtifactChanged || r == ReasonSubjectChanged || r == ReasonFormatChanged || r == ReasonFileMoved
 	}
 	return false
 }
@@ -179,19 +205,27 @@ type Facts struct {
 	// ShownFormat is the attachment format the confirmation dialog showed (send only, read before execution); Recheck
 	// is STALE when it is not the format the proposal pinned.
 	ShownFormat Format
+
+	// Send of a work only (Kind.NeedsWorkFile): the stored library file the work points at now (zero: none; Attachment
+	// is the digest of its content) and whether it is still filed where the work put it: in «ДЗ», or in «Входящие» for
+	// a work whose subject is none or gone.
+	AttachmentRef shared.ArtifactRef
+	Filed         bool
 }
 
-// Format is the file a send_homework_email attaches (TASK-094): the text export or the Word export of the assignment.
+// Format is the file a send attaches: the text export or the Word export of the assignment (TASK-094), or the Word or
+// PowerPoint file of a work (TASK-180).
 type Format string
 
 // Attachment formats.
 const (
 	FormatText Format = "txt"  // the text export (ExportRef), as before TASK-094
-	FormatDocx Format = "docx" // the Word export with the title page
+	FormatDocx Format = "docx" // the Word export with the title page, or the paper of a work
+	FormatPptx Format = "pptx" // the presentation of a work
 )
 
 // Valid reports whether f is a known format.
-func (f Format) Valid() bool { return f == FormatText || f == FormatDocx }
+func (f Format) Valid() bool { return f == FormatText || f == FormatDocx || f == FormatPptx }
 
 // File names of the exported homework inside exports/<assignment id>/, by format.
 const (
@@ -221,4 +255,37 @@ func ExportRefOf(a shared.AssignmentID, f Format) (shared.ArtifactRef, error) {
 		return shared.ArtifactRef{}, fmt.Errorf("%w: unknown attachment format %q", ErrInvalidProposal, string(f))
 	}
 	return shared.NewArtifactRef(shared.ArtifactExports, a.String()+"/"+name)
+}
+
+// The copy of a work's file a send attaches lives in exports/<sentDir>/<proposal id>/<name>.<format>: the library
+// keeps its files without an extension, and the teacher gets the file under its name.
+const (
+	sentDir          = "sent"
+	copyFallbackName = "работа"
+	maxCopyNameRunes = 64 // Word refuses long full paths, as for the copies of «Открыть в Word»
+)
+
+// storedFileRef is where the library keeps the content of digest d (ADR-0024): materials/<sha256>.
+func storedFileRef(d Digest) (shared.ArtifactRef, error) {
+	if d.IsZero() {
+		return shared.ArtifactRef{}, fmt.Errorf("%w: no pinned content", ErrInvalidProposal)
+	}
+	return shared.NewArtifactRef(shared.ArtifactMaterials, d.SHA256())
+}
+
+// CopyName is the file name the copy of a work's file gets: the library name of the material without its extension,
+// made a safe file name (shared.SafeFileName, at most maxCopyNameRunes characters), "работа" when nothing is left, and
+// the extension of format f. The name is local data the student imported or the app made, never model text.
+func CopyName(materialName string, f Format) string {
+	if i := strings.LastIndexByte(materialName, '.'); i >= 0 {
+		materialName = materialName[:i]
+	}
+	if r := []rune(materialName); len(r) > maxCopyNameRunes {
+		materialName = string(r[:maxCopyNameRunes])
+	}
+	name := shared.SafeFileName(materialName)
+	if strings.Trim(name, "_ ") == "" {
+		name = copyFallbackName
+	}
+	return name + "." + string(f)
 }

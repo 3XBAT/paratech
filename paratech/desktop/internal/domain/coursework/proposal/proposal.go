@@ -39,6 +39,7 @@ type Proposal struct {
 	due        time.Time
 
 	// Set by the core.
+	work            shared.WorkID // the work whose file is sent; send_work_email only
 	reason          RejectReason
 	recipient       Recipient // the trusted recipient frozen at validation; email proposals only
 	attachment      Digest    // the export content pinned at validation; email proposals only
@@ -91,16 +92,39 @@ func New(id ID, out values.UntrustedOutput, now time.Time) (*Proposal, error) {
 	return p, nil
 }
 
+// NewWorkSend is the student's request to email the finished file of work w, a work of assignment a (TASK-180), as
+// format (docx for a paper, pptx for a presentation). It is built by the core from trusted local state only; there is
+// no path from model output to this kind. The result is PROPOSED: Validate pins the recipient and the file. Errors:
+// ErrInvalidID, ErrInvalidProposal.
+func NewWorkSend(id ID, a shared.AssignmentID, w shared.WorkID, f Format, now time.Time) (*Proposal, error) {
+	if err := id.Validate(); err != nil {
+		return nil, err
+	}
+	switch {
+	case now.IsZero():
+		return nil, fmt.Errorf("%w: no creation time", ErrInvalidProposal)
+	case a.Validate() != nil:
+		return nil, fmt.Errorf("%w: invalid assignment", ErrInvalidProposal)
+	case w.Validate() != nil:
+		return nil, fmt.Errorf("%w: invalid work", ErrInvalidProposal)
+	case !KindSendWork.allows(f):
+		return nil, fmt.Errorf("%w: a work is sent as docx or pptx, not %q", ErrInvalidProposal, string(f))
+	}
+	return &Proposal{
+		id: id, kind: KindSendWork, status: StatusProposed, assignment: a, work: w, format: f, createdAt: now, updatedAt: now,
+	}, nil
+}
+
 // ChooseFormat sets the attachment of a PROPOSED send_homework_email proposal (TASK-094): the user picks it in the
 // confirmation dialog before the proposal is validated, so the digest pinned at validation is the one of that file.
-// Another status yields ErrInvalidTransition, another kind or an unknown format ErrInvalidProposal.
+// Another status yields ErrInvalidTransition, another kind or a format the kind does not attach ErrInvalidProposal.
 func (p *Proposal) ChooseFormat(f Format) error {
 	switch {
 	case p.status != StatusProposed:
 		return fmt.Errorf("%w: choose the format in %s", ErrInvalidTransition, p.status)
-	case !p.kind.NeedsAttachment():
-		return fmt.Errorf("%w: kind %s has no attachment", ErrInvalidProposal, p.kind)
-	case !f.Valid():
+	case p.kind != KindSendHomework:
+		return fmt.Errorf("%w: kind %s has no format to choose", ErrInvalidProposal, p.kind)
+	case !p.kind.allows(f):
 		return fmt.Errorf("%w: unknown attachment format %q", ErrInvalidProposal, string(f))
 	}
 	p.format = f
@@ -133,7 +157,7 @@ func decode(text string) (wire, error) {
 }
 
 func (p *Proposal) fill(w wire) error {
-	if w.Kind == nil || !Kind(*w.Kind).Valid() {
+	if w.Kind == nil || !Kind(*w.Kind).fromModel() {
 		return malformed("missing or unknown kind")
 	}
 	p.kind = Kind(*w.Kind)
@@ -218,6 +242,7 @@ type State struct {
 	AttachmentSize   int64
 	AssignmentTitle  string // export proposals once validated; else empty
 	AttachmentFormat Format // email proposals; empty: FormatText (stored before TASK-094); else empty
+	WorkID           shared.WorkID // send_work_email only; else empty
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	ConfirmedAt      time.Time
@@ -244,20 +269,31 @@ func Restore(s State) (*Proposal, error) {
 		return bad("inconsistent timestamps")
 	}
 
-	// The model-supplied part is checked by the same rules as New.
 	p := &Proposal{}
-	w := wire{Kind: ptr(string(s.Kind)), AssignmentID: ptr(s.AssignmentID.String())}
-	if s.Title != "" {
-		w.Title = ptr(s.Title)
-	}
-	if s.Body != "" {
-		w.Body = ptr(s.Body)
-	}
-	if !s.Due.IsZero() {
-		w.Due = ptr(s.Due.UTC().Format(time.RFC3339Nano))
-	}
-	if err := p.fill(w); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidProposal, err)
+	if s.Kind == KindSendWork {
+		// The core's own kind: an assignment and a work, nothing a model supplies.
+		if s.AssignmentID.Validate() != nil || s.WorkID.Validate() != nil || s.Title != "" || s.Body != "" || !s.Due.IsZero() {
+			return bad("a send of a work has an assignment and a work only")
+		}
+		p.kind, p.assignment, p.work = s.Kind, s.AssignmentID, s.WorkID
+	} else {
+		// The model-supplied part is checked by the same rules as New.
+		w := wire{Kind: ptr(string(s.Kind)), AssignmentID: ptr(s.AssignmentID.String())}
+		if s.Title != "" {
+			w.Title = ptr(s.Title)
+		}
+		if s.Body != "" {
+			w.Body = ptr(s.Body)
+		}
+		if !s.Due.IsZero() {
+			w.Due = ptr(s.Due.UTC().Format(time.RFC3339Nano))
+		}
+		if err := p.fill(w); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidProposal, err)
+		}
+		if s.WorkID != "" {
+			return bad("a work exists exactly for the send of a work")
+		}
 	}
 
 	if hasReason := s.Status == StatusRejected || s.Status == StatusStale; hasReason != s.Reason.validFor(s.Status) ||
@@ -293,10 +329,10 @@ func Restore(s State) (*Proposal, error) {
 	}
 	format := s.AttachmentFormat
 	switch {
-	case p.kind.NeedsAttachment() && format == "":
+	case p.kind == KindSendHomework && format == "":
 		format = FormatText
-	case p.kind.NeedsAttachment() && !format.Valid(), !p.kind.NeedsAttachment() && format != "":
-		return bad("an attachment format exists exactly for an email proposal")
+	case p.kind.NeedsAttachment() && !p.kind.allows(format), !p.kind.NeedsAttachment() && format != "":
+		return bad("an attachment format the kind attaches exists exactly for an email proposal")
 	}
 	confirmed := s.Status == StatusConfirmed || s.Status == StatusExecuted || s.Status == StatusStale
 	if confirmed == s.ConfirmedAt.IsZero() || (s.Status == StatusExecuted) == s.ExecutedAt.IsZero() {
@@ -324,7 +360,8 @@ func (p *Proposal) State() State {
 		Version: p.version, ID: p.id, Kind: p.kind, Status: p.status, AssignmentID: p.assignment,
 		Title: p.title, Body: p.body, Due: p.due, Reason: p.reason, Recipient: p.recipient.Address(),
 		AttachmentSHA256: p.attachment.SHA256(), AttachmentSize: p.attachment.Size(), AssignmentTitle: p.assignmentTitle,
-		AttachmentFormat: p.format, CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt, ExecutedAt: p.executedAt,
+		AttachmentFormat: p.format, WorkID: p.work, CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt,
+		ExecutedAt: p.executedAt,
 	}
 }
 
@@ -349,7 +386,9 @@ func (p *Proposal) move(to Status, now time.Time) error {
 //     that will be sent;
 //   - export_homework: the stored title of the assignment is frozen into the proposal as the heading of the file (the
 //     model may not send one);
-//   - create_deadline_event: the due time is not in the past and at most MaxDueAhead ahead.
+//   - create_deadline_event: the due time is not in the past and at most MaxDueAhead ahead;
+//   - send_work_email: as a send, with the stored file of the work as the attachment (its reference must be the one of
+//     its content), and the file must still be filed where the work put it (ReasonFileMoved).
 //
 // Facts of an existing assignment without a valid title, for an export, are an error of the caller.
 func (p *Proposal) Validate(f Facts, now time.Time) error {
@@ -394,6 +433,14 @@ func (p *Proposal) check(f Facts, now time.Time) RejectReason {
 	if p.kind.NeedsAttachment() && f.Attachment.IsZero() {
 		return ReasonNoArtifact
 	}
+	if p.kind.NeedsWorkFile() {
+		if ref, err := storedFileRef(f.Attachment); err != nil || ref != f.AttachmentRef {
+			return ReasonNoArtifact
+		}
+		if !f.Filed {
+			return ReasonFileMoved
+		}
+	}
 	if p.kind == KindDeadlineEvent && (p.due.Before(now) || p.due.After(now.Add(MaxDueAhead))) {
 		return ReasonDueOutOfRange
 	}
@@ -401,7 +448,8 @@ func (p *Proposal) check(f Facts, now time.Time) RejectReason {
 }
 
 // Recheck compares a CONFIRMED proposal with fresh trusted facts right before execution. If what the user confirmed
-// no longer holds (the assignment is gone; for an email the recipient, the export content or the subject differs),
+// no longer holds (the assignment is gone; for an email the recipient, the attached content or the subject differs;
+// for the send of a work also the file the work points at, or the file left «ДЗ»),
 // the proposal moves to the terminal STALE status with the reason and Recheck returns an error wrapping ErrStale; the
 // caller saves the proposal and calls no port. Any other status yields ErrNotConfirmed. The due time is not checked
 // again: the user confirmed it.
@@ -431,6 +479,10 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 		return ReasonNoArtifact
 	case p.kind.NeedsAttachment() && f.Attachment != p.attachment:
 		return ReasonArtifactChanged
+	case p.kind.NeedsWorkFile() && f.AttachmentRef != p.mustSource():
+		return ReasonArtifactChanged
+	case p.kind.NeedsWorkFile() && !f.Filed:
+		return ReasonFileMoved
 	case p.kind.NeedsAttachment() && f.ShownFormat != p.format:
 		return ReasonFormatChanged
 	case p.kind.NeedsSubject() && f.Subject != f.ShownSubject:
@@ -493,6 +545,15 @@ func (p *Proposal) Attaches(d Digest) bool {
 	return p.kind == KindSendHomework && p.status == StatusValidated && !d.IsZero() && p.attachment == d
 }
 
+// WaitsAsWorkSend reports whether the proposal is a VALIDATED send of the same work, file, format and recipient as
+// other, which is VALIDATED too: proposing the send of a work again reuses the one that waits for «Да» (TASK-180), so
+// two confirmations can never mean two emails of one file.
+func (p *Proposal) WaitsAsWorkSend(other *Proposal) bool {
+	return p.kind == KindSendWork && p.status == StatusValidated && other.kind == KindSendWork &&
+		other.status == StatusValidated && p.id != other.id && p.assignment == other.assignment && p.work == other.work &&
+		p.attachment == other.attachment && p.format == other.format && p.recipient == other.recipient
+}
+
 // WaitsAsDeadline reports whether the proposal is a VALIDATED deadline event of assignment a with this title and due
 // time: proposing the same deadline again reuses it instead of a second «Да» (TASK-127).
 func (p *Proposal) WaitsAsDeadline(a shared.AssignmentID, title string, due time.Time) bool {
@@ -515,14 +576,33 @@ func (p *Proposal) Due() time.Time { return p.due }
 // Reason returns why the proposal was rejected or went stale; empty unless REJECTED or STALE.
 func (p *Proposal) Reason() RejectReason { return p.reason }
 
-// Recipient returns the trusted recipient frozen at validation (send_homework_email only).
+// Recipient returns the trusted recipient frozen at validation (email proposals only).
 func (p *Proposal) Recipient() Recipient { return p.recipient }
 
-// AttachmentDigest returns the export content pinned at validation (send_homework_email only).
+// AttachmentDigest returns the attached content pinned at validation (email proposals only).
 func (p *Proposal) AttachmentDigest() Digest { return p.attachment }
 
-// AttachmentFormat returns the attachment the user chose (send_homework_email only; empty for the other kinds).
+// AttachmentFormat returns the attachment the user chose, or the file type of a work (email proposals only; empty for
+// the other kinds).
 func (p *Proposal) AttachmentFormat() Format { return p.format }
+
+// WorkID returns the work whose file is sent (send_work_email only; empty for the other kinds).
+func (p *Proposal) WorkID() shared.WorkID { return p.work }
+
+// AttachmentSource returns the stored library file a send_work_email pinned at validation, materials/<sha256> of its
+// content; the copy the email attaches is made from it. Another kind or nothing pinned wraps ErrInvalidProposal.
+func (p *Proposal) AttachmentSource() (shared.ArtifactRef, error) {
+	if p.kind != KindSendWork {
+		return shared.ArtifactRef{}, fmt.Errorf("%w: kind %s attaches no library file", ErrInvalidProposal, p.kind)
+	}
+	return storedFileRef(p.attachment)
+}
+
+// mustSource is AttachmentSource for a send of a work past validation, which always has its content pinned.
+func (p *Proposal) mustSource() shared.ArtifactRef {
+	ref, _ := storedFileRef(p.attachment)
+	return ref
+}
 
 // AssignmentTitle returns the trusted heading of the export file, frozen at validation (export_homework only).
 func (p *Proposal) AssignmentTitle() string { return p.assignmentTitle }
