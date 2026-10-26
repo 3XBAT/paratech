@@ -117,7 +117,7 @@ it cannot do the work whole — then help instead. Everything the model says abo
   Hub, catalog or proto change. Same keys per work, round and attempt; the writing gets it as its assignment text.
 - **Request key**: a topic carries the key of the explicit action that asked for it (the agent's call, the student's
   press). The same key gets its work back (a replay pays nothing); a new action is a new work even for the same text;
-  a key is never reused for another topic. Storage: `works.topic_request`, `topic`, `topic_subject_id` (migration
+  while its work has not failed, a key is never reused for another topic. Storage: `works.topic_request`, `topic`, `topic_subject_id` (migration
   0031 rebuilds `works` and `work_rounds` for the three-way CHECK).
 - **Rules**: written and exported like any work; never sent to a teacher (`work.ErrNoAssignment`, `no_assignment` for
   the send of TASK-180); `View.Sendable` is false. File names and titles go through the existing safe-name rules.
