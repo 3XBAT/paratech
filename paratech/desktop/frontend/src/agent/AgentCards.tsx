@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import type { AnswerInput, AssignmentLineView } from "../bindings/agent.js";
+import type { AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -323,11 +323,27 @@ function Card(props: { card: CardModel; actions: CardActions }) {
   }
 }
 
+/** Unchecked answer text while it is read: plain text nodes only, muted, the waiting dots after the last line. */
+export function AnswerDraft(props: { draft: DraftView; dots: boolean }) {
+  return (
+    <div className="ag-draft" aria-live="off">
+      <p className="ag-draft-cap small muted">{texts.draftCaption}</p>
+      {props.draft.texts.map((t, i) => (
+        <p key={i} className="ag-draft-line muted">
+          {t}
+        </p>
+      ))}
+      {props.dots && <Waiting />}
+    </div>
+  );
+}
+
 /** One request of the thread: the student's text, then the cards. */
-export function AgentRequest(props: { model: EntryModel; actions: CardActions }) {
+export function AgentRequest(props: { model: EntryModel; actions: CardActions; drafts?: readonly DraftView[] }) {
   const { model } = props;
   // «Отменить всё» only when there is more than one action left to undo.
   const open = undoableActions(model.cards).filter((id) => !props.actions.undoNote(id)?.done);
+  const hasWaitingCard = model.cards.some((c) => c.type === "waiting");
   return (
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
@@ -337,10 +353,15 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions })
           {model.callLine}
         </p>
       )}
-      {model.cards.map((c, i) => (
+      {model.cards.map((c, i) =>
         // Kind and caption (the question round) are in the key so a new card does not inherit the typed state of the old one.
-        <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />
+        // The draft goes before the waiting card, so its dots (with «Стоп») stay after the last line.
+        c.type === "waiting" ? null : <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />,
+      )}
+      {(props.drafts ?? []).map((d, i) => (
+        <AnswerDraft key={i} draft={d} dots={!hasWaitingCard} />
       ))}
+      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} /> : null))}
       {model.rerun && (
         <div className="ag-rerun">
           <IconButton icon="retry" label={texts.rerunTitle} busy={props.actions.busy} onClick={() => props.actions.press("rerun")} />

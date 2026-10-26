@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 import { type AgentContext, composerKey, entryModel, inputPlacement, texts } from "../agentView.js";
-import { blockingEntry, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
+import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 
@@ -31,6 +31,15 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [entries.length]);
+
+  // A draft grows often: the panel follows it only when the reader is at the bottom, so reading above never jumps.
+  const atBottom = useRef(true);
+  const draftSize = state.drafts.reduce((n, d) => n + d.texts.reduce((m, t) => m + t.length, d.texts.length), 0);
+  useEffect(() => {
+    if (draftSize > 0 && atBottom.current) {
+      end.current?.scrollIntoView?.({ block: "end", behavior: "auto" });
+    }
+  }, [draftSize]);
 
   // The field grows with its text; the CSS max-height (six lines) stops it and the rest scrolls.
   const { inputRef, draft } = props;
@@ -105,7 +114,13 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           </p>
         )}
       </div>
-      <div className="ag-thread">
+      <div
+        className="ag-thread"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
         {entries.length === 0 && <p className="ag-empty muted">{texts.empty}</p>}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
         {entries.map((e) => (
@@ -113,6 +128,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
             key={e.key}
             model={entryModel(e, { last: e.key === last?.key, blocked: blockingEntry(entries, e) !== undefined })}
             actions={props.actionsFor(e)}
+            drafts={draftsFor(state, e)}
           />
         ))}
         {props.notice !== "" && (
