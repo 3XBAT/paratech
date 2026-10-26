@@ -4113,7 +4113,7 @@
                 "go test -race ./hub/... (Postgres как в CI) и golangci-lint"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }

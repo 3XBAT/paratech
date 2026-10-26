@@ -540,7 +540,6 @@ func jsonServer(t *testing.T, body string) (*httptest.Server, *atomic.Int32, *at
 	return srv, &hits, &streamed
 }
 
-// captureLog points the default slog logger at a buffer for the test.
 // newLoggedClient is newClient with its own logger writing into the returned buffer.
 func newLoggedClient(t *testing.T, baseURL string) (*anthropic.Client, *bytes.Buffer) {
 	t.Helper()
