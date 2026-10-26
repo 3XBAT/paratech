@@ -556,7 +556,9 @@ test("the Go literal extractor keeps each literal whole", () => {
 // TASK-102: the student sees «решение», never «черновик»; internal names (draft…) and comments may keep it.
 test("no user-facing text says «черновик»", () => {
   for (const rel of sourceFiles()) {
-    assert.doesNotMatch(code(rel), /чернов/i, rel);
+    // The one exception: the caption of the agent's answer being written (TASK-148, ADR-0026), not the homework draft.
+    const text = rel === "agentView.ts" ? code(rel).replace("Ответ пишется · черновик", "") : code(rel);
+    assert.doesNotMatch(text, /чернов/i, rel);
   }
   // The core's texts the page shows as they are: the string literals of the bindings.
   for (const go of ["homework.go", "activity.go"]) {
