@@ -8,6 +8,9 @@ import type { CallByName } from "./settings";
 /** The Wails event of the panel; its data is one AgentUpdate. */
 export const updateEvent = "agent:update";
 
+/** The Wails event of a draft answer; its data is one DraftView. */
+export const draftEvent = "agent:draft";
+
 const service = "paratech/desktop/internal/input/wails.AgentService";
 
 /** Bound method names: "<Go package path>.<type>.<method>". */
@@ -196,6 +199,18 @@ export interface UpdateView {
   /** A step went to the Hub: no cards; apply the status only and keep the cards shown. False from an older core. */
   progress: boolean;
   cards: CardView[];
+}
+
+/**
+ * The draft of an answer being read by answer_question callId of a request (agentdraft.go): the claim texts so far,
+ * at most 10 a second, the last texts winning. Unchecked model text: show it as plain text marked «черновик»; the
+ * update with the call's answer card, or the request stopped, replaces it.
+ */
+export interface DraftView {
+  threadId: string;
+  turn: number;
+  callId: string;
+  texts: string[];
 }
 
 /** What «Журнал» reads: a line is an action of paratech or a processing job. Empty fields match everything. */
@@ -419,6 +434,18 @@ export function parseUpdate(raw: unknown): UpdateView {
     problem: str(r, "problem", w),
     progress: flag(r, "progress"),
     cards,
+  };
+}
+
+/** Checks one draft; a malformed draft is an error (the caller drops it). */
+export function parseDraft(raw: unknown): DraftView {
+  const w = "agent draft";
+  const r = record(raw, w);
+  return {
+    threadId: str(r, "threadId", w),
+    turn: num(r, "turn", w),
+    callId: str(r, "callId", w),
+    texts: strings(r, "texts", w),
   };
 }
 

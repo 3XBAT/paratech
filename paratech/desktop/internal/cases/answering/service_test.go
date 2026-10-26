@@ -380,6 +380,64 @@ func TestAskDrafts(t *testing.T) {
 	}
 }
 
+// tickClock moves on by step at every reading.
+type tickClock struct {
+	now  time.Time
+	step time.Duration
+}
+
+func (c *tickClock) Now() time.Time {
+	c.now = c.now.Add(c.step)
+	return c.now
+}
+
+// A stream of many small deltas is scanned a bounded number of times: on a clock that stands still only when the
+// output doubled, then once more after a successful read, so the last draft is the whole output's; a failed read
+// gets no last scan. A clock past the interval at every delta scans each one.
+func TestAskDraftsThrottled(t *testing.T) {
+	const q = "Что такое производная функции?"
+	claim := strings.Repeat("я", 300)
+	var partials []string
+	for i := 1; i <= len([]rune(claim)); i++ {
+		partials = append(partials, `{"claims":[{"text":"`+string([]rune(claim)[:i]))
+	}
+	whole := []string{claim}
+
+	tests := []struct {
+		name      string
+		step      time.Duration
+		err       error
+		maxDrafts int
+		wantLast  bool // the last draft is the whole claim
+	}{
+		{"clock stands still", 0, nil, 8, true},
+		{"failed read", 0, shared.ErrNetworkUnavailable, 7, false},
+		{"slow deltas", draftEvery, nil, len(partials), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.reader.partials, e.reader.err = partials, tt.err
+			svc, err := New(Deps{Knowledge: e.knowledge, Reader: e.reader, Answers: e.answers,
+				Clock: &tickClock{now: t0, step: tt.step}, IDs: &seqIDs{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sink := &draftLog{}
+			_, _ = svc.Ask(context.Background(), q, "", scope, sink)
+			if len(sink.got) == 0 || len(sink.got) > tt.maxDrafts {
+				t.Fatalf("%d drafts, want 1..%d", len(sink.got), tt.maxDrafts)
+			}
+			if tt.step >= draftEvery && len(sink.got) != len(partials) {
+				t.Fatalf("%d drafts, want one per delta", len(sink.got))
+			}
+			if got := slices.Equal(sink.got[len(sink.got)-1], whole); got != tt.wantLast {
+				t.Fatalf("last draft is the whole claim: %v, want %v", got, tt.wantLast)
+			}
+		})
+	}
+}
+
 func TestAnswer(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	if _, err := e.svc.Answer(ctx, "missing"); !errors.Is(err, ErrNotFound) {
