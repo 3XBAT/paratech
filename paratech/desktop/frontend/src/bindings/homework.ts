@@ -150,12 +150,41 @@ export interface DeliveryItem {
   notice: string;
 }
 
+/**
+ * The add-assignment form (ADR-0029). requestId is the form's token (crypto.randomUUID when the form opens; 1..64
+ * characters of [A-Za-z0-9-]): sending the same form again stores one assignment. "" in subjectId, lessonId, date and
+ * time means no value; date is YYYY-MM-DD, time HH:MM (no time: the end of that day).
+ */
+export interface CreateAssignmentRequest {
+  requestId: string;
+  title: string;
+  subjectId: string;
+  lessonId: string;
+  date: string;
+  time: string;
+  note: string;
+}
+
+/** "" = created; the page owns the texts of the others. */
+export type CreateProblem = "" | "invalid" | "subject_not_found" | "lesson_not_found" | "failed";
+
+/** The input an "invalid" problem names; "" when the core does not know (or the problem is not "invalid"). */
+export type CreateField = "" | "requestId" | "title" | "note" | "due" | "time";
+
+/** assignment is set exactly when problem is "". */
+export interface CreateAssignmentResult {
+  problem: CreateProblem;
+  field: CreateField;
+  assignment: AssignmentItem | null;
+}
+
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {
   listAssignments: "paratech/desktop/internal/input/wails.HomeworkService.ListAssignments",
   openAssignment: "paratech/desktop/internal/input/wails.HomeworkService.OpenAssignment",
   draftStatus: "paratech/desktop/internal/input/wails.HomeworkService.DraftStatus",
   correctLesson: "paratech/desktop/internal/input/wails.HomeworkService.CorrectLesson",
+  createAssignment: "paratech/desktop/internal/input/wails.HomeworkService.CreateAssignment",
   draftVersion: "paratech/desktop/internal/input/wails.HomeworkService.DraftVersion",
   generate: "paratech/desktop/internal/input/wails.HomeworkService.Generate",
   generationStatus: "paratech/desktop/internal/input/wails.HomeworkService.GenerationStatus",
@@ -212,6 +241,10 @@ export const generationStates: readonly GenerationState[] = [
 ];
 
 export const sendStatuses: readonly SendStatus[] = ["ready", "rejected"];
+
+export const createProblems: readonly CreateProblem[] = ["", "invalid", "subject_not_found", "lesson_not_found", "failed"];
+
+export const createFields: readonly CreateField[] = ["", "requestId", "title", "note", "due", "time"];
 
 export const sendFormats: readonly SendFormat[] = ["docx", "txt"];
 
@@ -284,6 +317,21 @@ export function parseAssignment(raw: unknown): AssignmentItem {
     correctedSubject: str(r, "correctedSubject", w),
     correctedTeacher: str(r, "correctedTeacher", w),
   };
+}
+
+/** A created assignment comes with problem ""; any other problem comes without one. */
+export function parseCreateAssignmentResult(raw: unknown): CreateAssignmentResult {
+  const w = "create assignment result";
+  const r = record(raw, w);
+  const problem = oneOf(r, "problem", createProblems, w);
+  const field = oneOf(r, "field", createFields, w);
+  if (problem === "") {
+    return { problem, field, assignment: parseAssignment(r.assignment) };
+  }
+  if (r.assignment !== null) {
+    throw new Error(`${w}: a problem comes with an assignment`);
+  }
+  return { problem, field, assignment: null };
 }
 
 export function parseVersionItem(raw: unknown): VersionItem {
@@ -414,6 +462,8 @@ export interface HomeworkApi {
   draftStatus(id: string): Promise<DraftStatus>;
   /** Stores the student's subject and teacher of the assignment; "" removes that correction. Returns it as shown. */
   correctLesson(id: string, subject: string, teacher: string): Promise<AssignmentItem>;
+  /** Adds an assignment or a reminder the student typed in; a problem is a code, not a thrown error. */
+  createAssignment(req: CreateAssignmentRequest): Promise<CreateAssignmentResult>;
   draftVersion(id: string, version: number): Promise<VersionText>;
   /** Generates from version base, the one the page shows (0: no draft yet). */
   generate(id: string, base: number, instruction: string): Promise<GenerateStarted>;
@@ -448,6 +498,7 @@ export function homeworkApi(call: CallByName): HomeworkApi {
     draftStatus: async (id) => parseDraftStatus(await call(methods.draftStatus, id)),
     correctLesson: async (id, subject, teacher) =>
       parseAssignment(await call(methods.correctLesson, id, subject, teacher)),
+    createAssignment: async (req) => parseCreateAssignmentResult(await call(methods.createAssignment, req)),
     draftVersion: async (id, version) => parseVersionText(await call(methods.draftVersion, id, version)),
     generate: async (id, base, instruction) =>
       parseGenerateStarted(await call(methods.generate, id, base, instruction)),
