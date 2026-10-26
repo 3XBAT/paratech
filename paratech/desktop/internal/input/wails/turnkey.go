@@ -7,6 +7,7 @@ import (
 
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -23,7 +24,29 @@ const (
 	ErrTurnkeyUnavailable = turnkeyError("Не удалось выполнить. Попробуйте ещё раз.")
 	ErrTurnkeyWriting     = turnkeyError("Работа ещё пишется: дождитесь окончания.")
 	ErrTurnkeyWritten     = turnkeyError("Работа уже написана: измените план или сгенерируйте раздел заново.")
+	ErrTurnkeyStale       = turnkeyError("Работа изменилась: обновите карточку.")
+	ErrTurnkeyNotStopped  = turnkeyError("Не удалось остановить написание. Попробуйте ещё раз.")
 )
+
+// States of the writing job (TurnkeyWriting.JobState) while it is active.
+const (
+	turnkeyJobQueued         = "queued"
+	turnkeyJobRunning        = "running"
+	turnkeyJobWaitingNetwork = "waiting_network"
+	turnkeyJobWaitingQuota   = "waiting_quota"
+	turnkeyJobWaitingPower   = "waiting_power"
+	turnkeyJobRetrying       = "retrying"
+)
+
+// turnkeyJobStates maps the active job statuses; a terminal one is no active job.
+var turnkeyJobStates = map[job.Status]string{
+	job.StatusQueued:            turnkeyJobQueued,
+	job.StatusRunning:           turnkeyJobRunning,
+	job.StatusWaitingForNetwork: turnkeyJobWaitingNetwork,
+	job.StatusWaitingForQuota:   turnkeyJobWaitingQuota,
+	job.StatusWaitingForPower:   turnkeyJobWaitingPower,
+	job.StatusRetryWait:         turnkeyJobRetrying,
+}
 
 // Problems of a work view after a reader call that did not go through; the work is saved, its call waits.
 const (
@@ -52,6 +75,7 @@ const (
 	opTurnkeyStep    = "ui: turnkey step question"
 	opTurnkeyWrite   = "ui: turnkey writing"
 	opTurnkeyOutline = "ui: turnkey outline"
+	opTurnkeyStop    = "ui: turnkey stop writing"
 )
 
 // TurnkeyUseCase is the turnkey work (cases/turnkey) as its cards and the helper page use it (ARCH-42).
@@ -69,7 +93,9 @@ type TurnkeyUseCase interface {
 	StartWriting(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
 	ApproveOutline(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
 	EditOutline(ctx context.Context, id shared.WorkID, items []work.OutlineItem) (turnkey.View, error)
+	EditOutlineAt(ctx context.Context, id shared.WorkID, version int64, items []work.OutlineItem) (turnkey.View, error)
 	Regenerate(ctx context.Context, id shared.WorkID, number int, note string) (turnkey.WritingStarted, error)
+	StopWriting(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 }
 
 // TurnkeyWork is a turnkey work for the QuestionsCard, the card «Как я понял задание», the CannotDoCard and the helper
@@ -104,8 +130,10 @@ type TurnkeyWork struct {
 
 // TurnkeyWriting is the writing of a work: the outline the student edits and approves, the progress «Раздел N из M»
 // and the result. Step is outline (the plan is being written), approve (the plan waits for «Утвердить план»), section,
-// assemble, blocked (a step used its attempts: «Сгенерировать заново») or none (done). Every text was written by the
-// model: render it as plain text only.
+// assemble, blocked (a step used its attempts: «Сгенерировать заново») or none (done). Active is read with every work:
+// a writing job runs for it («Остановить»), JobState queued, running, waiting_network, waiting_quota, waiting_power or
+// retrying ("" when not active). A step other than approve, blocked or none without Active was stopped or ended
+// early: «Продолжить» is StartWriting. Every text was written by the model: render it as plain text only.
 type TurnkeyWriting struct {
 	Step       string           `json:"step"`
 	Generation int              `json:"generation"`
@@ -116,7 +144,9 @@ type TurnkeyWriting struct {
 	SubjectID  string           `json:"subjectId"`  // the subject whose «ДЗ» gets the file; "" «Входящие»
 	MaterialID string           `json:"materialId"` // the file in the library, once done
 	Result     string           `json:"result"`     // the artifact of the ResultCard, once done
-	Job        string           `json:"job"`        // the job the call started (the progress card); "" otherwise
+	Job        string           `json:"job"`        // the job the call started, else the active one (the progress card)
+	Active     bool             `json:"active"`
+	JobState   string           `json:"jobState"`
 }
 
 // TurnkeySection is a section of the outline; Paragraphs and Sources once written. A source with verify set was named
@@ -276,12 +306,29 @@ func (s *TurnkeyService) ApproveOutline(ctx context.Context, id string) (Turnkey
 // EditOutline saves the student's plan: the sections in their order, unchanged ones keep their text. A plan that
 // waits for the approval still waits; a done work is written again by StartWriting.
 func (s *TurnkeyService) EditOutline(ctx context.Context, id string, items []TurnkeyOutlineItem) (TurnkeyWork, error) {
+	v, err := s.core.EditOutline(ctx, shared.WorkID(id), outlineOf(items))
+	return s.reply(opTurnkeyOutline, v, err)
+}
+
+// EditOutlineAt is EditOutline of the plan as the editor showed it at version (the work's version): a work that
+// changed since is ErrTurnkeyStale and nothing is saved.
+func (s *TurnkeyService) EditOutlineAt(ctx context.Context, id string, version int64, items []TurnkeyOutlineItem) (TurnkeyWork, error) {
+	v, err := s.core.EditOutlineAt(ctx, shared.WorkID(id), version, outlineOf(items))
+	return s.reply(opTurnkeyOutline, v, err)
+}
+
+// StopWriting is «Остановить»: the writing job is cancelled, the sections written stay. Without a job nothing changes.
+func (s *TurnkeyService) StopWriting(ctx context.Context, id string) (TurnkeyWork, error) {
+	v, err := s.core.StopWriting(ctx, shared.WorkID(id))
+	return s.reply(opTurnkeyStop, v, err)
+}
+
+func outlineOf(items []TurnkeyOutlineItem) []work.OutlineItem {
 	outline := make([]work.OutlineItem, 0, len(items))
 	for _, it := range items {
 		outline = append(outline, work.OutlineItem{Number: it.Number, Title: it.Title, Words: it.Words})
 	}
-	v, err := s.core.EditOutline(ctx, shared.WorkID(id), outline)
-	return s.reply(opTurnkeyOutline, v, err)
+	return outline
 }
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново» for section number (0: every section) with the
@@ -361,6 +408,10 @@ func (s *TurnkeyService) fail(op string, err error) error {
 		return ErrTurnkeyWriting
 	case errors.Is(err, turnkey.ErrAlreadyWritten):
 		return ErrTurnkeyWritten
+	case errors.Is(err, turnkey.ErrChanged):
+		return ErrTurnkeyStale
+	case errors.Is(err, turnkey.ErrNotStopped):
+		return ErrTurnkeyNotStopped
 	case errors.Is(err, turnkey.ErrInvalidRequest), errors.Is(err, turnkey.ErrNotWritable),
 		errors.Is(err, turnkey.ErrWritingRetries):
 		return ErrTurnkeyInvalid
@@ -415,6 +466,9 @@ func writingView(w *turnkey.WritingView) *TurnkeyWriting {
 	out := &TurnkeyWriting{
 		Step: string(w.Step), Generation: w.Generation, Topic: w.Topic, Sections: []TurnkeySection{}, Done: w.Done,
 		Total: w.Total, SubjectID: string(w.Subject), MaterialID: string(w.Material), Result: w.Result.String(),
+	}
+	if state, ok := turnkeyJobStates[w.JobState]; ok && w.Active {
+		out.Job, out.Active, out.JobState = string(w.Job), true, state
 	}
 	for _, s := range w.Sections {
 		sec := TurnkeySection{

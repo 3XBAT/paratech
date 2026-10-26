@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -279,6 +280,42 @@ func TestRegenerateBlockedOutline(t *testing.T) {
 	o, _ := ParseOutline(outlineJSON)
 	if err := w.SetOutline(o, t0); err != nil || w.Next().Kind != StepApprove {
 		t.Fatalf("the new outline waits for the approval: %v %+v", err, w.Next())
+	}
+}
+
+func TestSameOutline(t *testing.T) {
+	w := confirmedWork(t)
+	if w.SameOutline(nil) {
+		t.Fatal("a work without an outline has no same outline")
+	}
+	if err := w.StartWriting(snap, t0); err != nil {
+		t.Fatal(err)
+	}
+	mustOutline(t, w)
+	wr, _ := w.Writing()
+	same := make([]OutlineItem, 0, len(wr.Sections))
+	for _, s := range wr.Sections {
+		same = append(same, OutlineItem{Number: s.Number, Title: s.Title, Words: s.Words})
+	}
+	changed := slices.Clone(same)
+	changed[0].Words += 50
+
+	for _, tc := range []struct {
+		name  string
+		items []OutlineItem
+		want  bool
+	}{
+		{"as it is", same, true},
+		{"a volume changed", changed, false},
+		{"reordered", append([]OutlineItem{same[1], same[0]}, same[2:]...), false},
+		{"a section dropped", same[:len(same)-1], false},
+		{"invalid", []OutlineItem{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := w.SameOutline(tc.items); got != tc.want {
+				t.Fatalf("SameOutline = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

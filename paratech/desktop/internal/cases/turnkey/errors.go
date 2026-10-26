@@ -29,8 +29,13 @@ var (
 	// attempt the work fails.
 	ErrReaderRefused = errors.New("turnkey: the reader's answer was refused")
 
-	// ErrChanged means the work changed since it was read (Undo of a work the student has answered or edited).
+	// ErrChanged means the work changed since it was read (Undo of a work the student has answered or edited, an
+	// outline edited in a stale editor).
 	ErrChanged = errors.New("turnkey: the work changed")
+
+	// ErrNotStopped means the writing job could not be cancelled and has not ended (its attempt is ending, or it was
+	// left RUNNING by a crash until the startup recovery).
+	ErrNotStopped = errors.New("turnkey: the writing could not be stopped")
 
 	// ErrNotConfigured means «Спросить по шагу» has no advisor yet.
 	ErrNotConfigured = errors.New("turnkey: questions about a step are not available")

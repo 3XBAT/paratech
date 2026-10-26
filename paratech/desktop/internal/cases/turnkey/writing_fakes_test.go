@@ -114,6 +114,33 @@ func (f *fakeJobs) LatestByKeyPrefix(_ context.Context, typ job.Type, prefix str
 	return nil, shared.ErrNotFound
 }
 
+// fakeCanceller cancels a job of jobs as the runner does once the handler returned; a finished job is refused. before
+// (when set) runs on the job first, as a run that goes on meanwhile; err (when set) then refuses the job, as for a
+// RUNNING job no handler of this process runs.
+type fakeCanceller struct {
+	jobs   *fakeJobs
+	before func(j *job.Job)
+	err    error
+	calls  []shared.JobID
+}
+
+func (f *fakeCanceller) Cancel(ctx context.Context, id shared.JobID) error {
+	f.calls = append(f.calls, id)
+	j, err := f.jobs.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	f.jobs.mu.Lock()
+	defer f.jobs.mu.Unlock()
+	if f.before != nil {
+		f.before(j)
+	}
+	if f.err != nil {
+		return f.err
+	}
+	return j.Cancel(t0)
+}
+
 type seqJobIDs struct{ n int }
 
 func (s *seqJobIDs) NewJobID() shared.JobID {
@@ -283,6 +310,7 @@ type writeEnv struct {
 	*env
 	writer        *fakeWriter
 	jobs          *fakeJobs
+	canceller     *fakeCanceller
 	renderer      *fakeRenderer
 	slides        *fakeSlides
 	shelf         *fakeShelf
@@ -297,12 +325,14 @@ func newWriteEnv(t *testing.T) *writeEnv {
 		env: e, writer: &fakeWriter{}, jobs: &fakeJobs{}, renderer: &fakeRenderer{}, slides: &fakeSlides{}, shelf: &fakeShelf{},
 	}
 	we.materials = e.svc.materials.(fakeMaterials)
+	we.canceller = &fakeCanceller{jobs: we.jobs}
 	svc, err := New(Deps{
 		Works: e.works, Assignments: failingAssignments{Assignments: e.svc.assignments, err: &we.assignmentErr},
 		Materials: writeMaterials{base: we.materials, shelf: we.shelf}, Reader: e.reader,
 		Writing: &WritingDeps{
-			Writer: we.writer, Jobs: we.jobs, JobIDs: &seqJobIDs{}, Profiles: fakeProfiles{}, Renderer: we.renderer,
-			Slides: we.slides, Lessons: fakeLabels{}, Shelf: we.shelf, ModelAlias: "default",
+			Writer: we.writer, Jobs: we.jobs, JobIDs: &seqJobIDs{}, Canceller: we.canceller, Profiles: fakeProfiles{},
+			Renderer: we.renderer,
+			Slides:   we.slides, Lessons: fakeLabels{}, Shelf: we.shelf, ModelAlias: "default",
 		},
 		Clock: fixedClock{}, IDs: &seqIDs{},
 	})
