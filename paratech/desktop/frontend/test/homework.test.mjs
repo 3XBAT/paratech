@@ -192,7 +192,7 @@ test("while a draft is prepared, generate and the instructions are off with «Г
 test("a refused second generation is recognised and shown as the core's text", () => {
   assert.equal(generationRunning(new Error(errorMessages.generationRunning)), true);
   assert.equal(generationRunning(new Error(errorMessages.draftStale)), false);
-  assert.equal(errorText(new Error(errorMessages.generationRunning)), "Решение уже готовится. Дождитесь окончания и повторите.");
+  assert.equal(errorText(new Error(errorMessages.generationRunning)), errorMessages.generationRunning);
   assert.equal(errorText(new Error(errorMessages.sendFormat)), errorMessages.sendFormat);
 });
 
@@ -556,15 +556,15 @@ test("the Go literal extractor keeps each literal whole", () => {
 // TASK-102: the student sees «решение», never «черновик»; internal names (draft…) and comments may keep it.
 // TASK-186 (owner decision 2026-10-26): the homework page itself calls the quick text «Быстрый черновик»; those files are
 // exempt and pinned by the test below.
-const draftWordFiles = ["pages/HomeworkPage.tsx", "pages/HomeworkDialogs.tsx", "homeworkView.ts"];
+const draftWordFiles = ["pages/HomeworkPage.tsx", "pages/HomeworkDialogs.tsx", "homeworkView.ts", "bindings/homework.ts"];
 test("no other user-facing text says «черновик»", () => {
   for (const rel of sourceFiles().filter((f) => !draftWordFiles.includes(f))) {
     // The one exception: the caption of the agent's answer being written (TASK-148, ADR-0026), not the homework draft.
     const text = rel === "agentView.ts" ? code(rel).replace("Ответ пишется · черновик", "") : code(rel);
     assert.doesNotMatch(text, /чернов/i, rel);
   }
-  // The core's texts the page shows as they are: the string literals of the bindings.
-  for (const go of ["homework.go", "activity.go"]) {
+  // The core's texts of the homework page may say «черновик» now (TASK-192); only activity.go stays free of it.
+  for (const go of ["activity.go"]) {
     const text = readFileSync(new URL(`../../internal/input/wails/${go}`, import.meta.url), "utf8");
     for (const lit of goStrings(text)) {
       assert.doesNotMatch(lit, /чернов/i, `${go}: ${lit}`);
