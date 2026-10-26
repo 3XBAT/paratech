@@ -90,7 +90,7 @@ func TestAnswersWithCitationsOnTheRealStack(t *testing.T) {
 		`],"missing":["Why rivers flow there"]}`)
 
 	// 1. The question is answered from the lessons; the citation that is in its fragment is kept.
-	asked, err := svc.Ask(ctx, "What do rivers flow to?", "", askScope)
+	asked, err := svc.Ask(ctx, "What do rivers flow to?", "", askScope, nil)
 	if err != nil || asked.Answer == nil || asked.Reused {
 		t.Fatalf("Ask = %+v, %v", asked, err)
 	}
@@ -130,20 +130,20 @@ func TestAnswersWithCitationsOnTheRealStack(t *testing.T) {
 	}
 
 	// 3. The same question again: the stored answer, no Hub call.
-	again, err := svc.Ask(ctx, "What do rivers flow to?", "", askScope)
+	again, err := svc.Ask(ctx, "What do rivers flow to?", "", askScope, nil)
 	if err != nil || !again.Reused || again.Answer.ID() != asked.Answer.ID() || len(hub.Requests()) != 1 {
 		t.Fatalf("again = %+v, %v; %d hub calls", again, err, len(hub.Requests()))
 	}
 
 	// 4. No passage matches: nothing asked, nothing stored.
-	if none, err := svc.Ask(ctx, "Что такое ротор векторного поля?", "", askScope); err != nil || none.Answer != nil || len(hub.Requests()) != 1 {
+	if none, err := svc.Ask(ctx, "Что такое ротор векторного поля?", "", askScope, nil); err != nil || none.Answer != nil || len(hub.Requests()) != 1 {
 		t.Fatalf("no fragments = %+v, %v", none, err)
 	}
 
 	// 5. The Hub refuses the reader's answer: refused, charged once, the same question repeats the refusal free.
 	hub.RefuseAnswerQuestion(1)
 	for range 2 {
-		if _, err := svc.Ask(ctx, "Where do rivers and deltas meet?", "", askScope); !errors.Is(err, answering.ErrReaderRefused) {
+		if _, err := svc.Ask(ctx, "Where do rivers and deltas meet?", "", askScope, nil); !errors.Is(err, answering.ErrReaderRefused) {
 			t.Fatalf("refused = %v", err)
 		}
 	}
@@ -152,7 +152,7 @@ func TestAnswersWithCitationsOnTheRealStack(t *testing.T) {
 	}
 
 	// 6. No connection: the Hub answers nothing; nothing is stored.
-	if _, err := newService(testenv.NewFakeHub()).Ask(ctx, "Where are the deltas of rivers?", "", askScope); !errors.Is(err, answering.ErrNoConnection) {
+	if _, err := newService(testenv.NewFakeHub()).Ask(ctx, "Where are the deltas of rivers?", "", askScope, nil); !errors.Is(err, answering.ErrNoConnection) {
 		t.Fatalf("no connection = %v", err)
 	}
 	if n := answerCount(t, e.db); n != 1 {
@@ -160,7 +160,7 @@ func TestAnswersWithCitationsOnTheRealStack(t *testing.T) {
 	}
 
 	// 7. The same question in another request (a repeat): a fresh paid answer under another key, stored next to the first.
-	fresh, err := svc.Ask(ctx, "What do rivers flow to?", "", "ag:th1:2")
+	fresh, err := svc.Ask(ctx, "What do rivers flow to?", "", "ag:th1:2", nil)
 	if err != nil || fresh.Answer == nil || fresh.Reused || fresh.Answer.ID() == asked.Answer.ID() ||
 		fresh.Answer.Key() == asked.Answer.Key() || hub.Charged() != 3 {
 		t.Fatalf("other request = %+v, %v; charged %d", fresh, err, hub.Charged())
