@@ -32,3 +32,4 @@ Open decisions are tracked in PRD §19.
 - [0025](0025-turnkey-work.md) Turnkey work: triage, questions, helper mode
 - [0026](0026-agent-stop-rerun-streaming.md) Agent panel: waiting, «Стоп», repeat and streamed answers (Proposed)
 - [0027](0027-own-notes.md) The student's own notes («Мой конспект») for lectures (Proposed)
+- [0029](0029-student-assignments.md) Assignments the student adds (by hand or through the agent)
