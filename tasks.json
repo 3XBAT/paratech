@@ -2318,7 +2318,7 @@
                 "TASK-104",
                 "TASK-131"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-107",
@@ -2339,7 +2339,7 @@
                 "TASK-122",
                 "TASK-131"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-110",
@@ -4183,6 +4183,152 @@
                 "TASK-192"
             ],
             "status": "done"
+        },
+        {
+            "id": "TASK-194",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[ДЗ под ключ · input/wails] Данные презентации и отчёта по лабораторной в DTO карточки работы (TurnkeyWriting, TurnkeySection)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26: у презентаций и отчётов по лабораторной нет отдельных экранов. Как в Claude: карточка работы показывает, что получилось (слайды; разделы отчёта и места, которые студент заполняет сам), даёт «Открыть в PowerPoint/Word» (openMaterial, TASK-177/191) и поле «Замечания» через существующий Regenerate. Ядро уже отдаёт эти данные: cases/turnkey/types.go:70-81 и :87-99 (TASK-106/107), а Wails-DTO их не передаёт (progress/TASK-106.md, progress/TASK-107.md)",
+                "TurnkeyWriting (input/wails/turnkey.go:142-155) получает поля: presentation (bool), template (string), questions [{question, answer}], talkMaterialId, talkResult (ArtifactRef.String()), lab (bool), manual (none | read | not_read | no_text; \"\" для работы, которая не лабораторная), placeholders [{section, title, prompt}]",
+                "TurnkeySection (turnkey.go:159-167) получает: kind (значение cvalues.SlideKind; \"\" у раздела, который не слайд), part (work.LabPart; \"\" у работы, которая не лабораторная), bullets [] и columns [{heading, bullets}]. Заполняется в writingView (turnkey.go:483-505); пустые списки отдаются как [] (nonNilStrings)",
+                "Задача только про отображение: без новых методов, без изменений use case, домена и миграций. TurnkeyOutlineItem не меняется: домен сам сохраняет kind/part известных разделов, а новому слайду ставит bullets (domain/coursework/work/writing.go:343-359)",
+                "Комментарии типов обновлены: все тексты пишет модель, на странице они выводятся только как текст",
+                "Тесты в input/wails/turnkey_test.go: презентация (kind, bullets, columns, questions, talk), лабораторная (part, manual, placeholders), обычная работа (новые поля пустые или [], прежние поля не меняются)",
+                "Файлы: paratech/desktop/internal/input/wails/turnkey.go, turnkey_test.go",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "из paratech/: go test -race ./desktop/internal/input/wails/... ; GOOS=windows go vet ./desktop/... ; golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-192"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-195",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[ДЗ под ключ · UI] Карточка работы для презентации и отчёта по лабораторной: что получилось и «Замечания» (без отдельных экранов)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26: отдельных экранов нет, всё в существующей карточке работы (agent/WorkCard.tsx). Доработка идёт через существующий путь Regenerate(id, number, note): заметка уходит писателю как блок студента, то есть как данные, а не инструкция (ADR-0025). Новых областей, пунктов меню и Go-методов не добавлять",
+                "bindings/turnkey.ts: WorkSection (:51) и WorkWriting (:62), parseSection (:243) и parseWriting (:262) строго читают поля TASK-194. Если ядро не прислало поле, это пусто или false",
+                "Презентацию можно написать: условие в workView.ts:121-122 больше не скрывает «Написать работу» у презентации, комментарий в bindings/turnkey.ts:128 исправлен. Прогресс презентации показывается как «Слайд N из M»",
+                "Редактор плана (workView.ts:11-19 limits и проверки) учитывает границы домена. Презентация (work/presentation.go:27-32, values/presentation.go:59): 8–12 слайдов, 15–250 слов на слайд, 600–1200 слов всего, заголовок не длиннее 120 знаков; первый (титульный) и последний (заключение) слайды нельзя удалить или сдвинуть. Лабораторная: нельзя удалить последний раздел с part results или conclusions. Для обычной работы всё как сейчас",
+                "Готовая презентация: список «N. Заголовок слайда»; каждый пункт раскрывается в <details> и показывает тезисы или две колонки и заметки докладчика. Отдельный <details> «Вероятные вопросы» (вопрос и ответ). Кнопки: «Открыть в PowerPoint» (уже есть, workView.ts:490-492) и «Открыть текст выступления» (libraryApi.openMaterial(talkMaterialId)) с той же подписью, что открывается копия",
+                "Готовый отчёт по лабораторной: у каждого раздела подпись части (Цель, Оборудование, Теория, Ход работы, Результаты, Выводы); заглушки «▢ …» в тексте выделены. Блок «Что доделать самому»: placeholders по разделам и строка «Выводы зависят от ваших данных». При manual not_read: «Методичка не прочитана: отчёт написан по тексту задания.»; при no_text: «В методичке нет текста, который можно прочитать: отчёт написан по тексту задания.»",
+                "«Замечания» есть у любой готовой работы (обычная работа, презентация, отчёт), в режиме «Доработать» (WorkCard.tsx:354-371, :385-387, :398-407). Многострочное поле «Замечания» (не длиннее limits.noteMax рун, через noteOf). Выбор «К чему»: «Вся работа» (0) или «Слайд N. …» / «Раздел N. …» (reviseOptions, workView.ts:376-378). Кнопка «Доработать по замечаниям» неактивна при пустом поле и вызывает существующий api.regenerate(id, number, note). При «Вся работа» показывается подпись «Работа будет написана заново целиком с учётом замечаний (платно)». Дальше обычный прогресс и опрос. Состояние blocked и его «Дополнительные указания» не меняются",
+                "Тексты модели и имена файлов выводятся только как текст; тексты интерфейса безличные; двойной щелчок даёт один вызов (run/singleFlight)",
+                "Тесты фронтенда (test/work.test.mjs): разбор новых полей; редактор слайдов и лабораторной на границах; список слайдов, вопросы, «Открыть текст выступления»; «Что доделать самому» и строки о методичке; «Замечания» вызывает regenerate(id, 0 или N, note), пустое поле не отправляется; у презентации есть «Написать работу»",
+                "Файлы: paratech/desktop/frontend/src/bindings/turnkey.ts, src/workView.ts, src/agent/WorkCard.tsx (и стили карточки при необходимости), test/work.test.mjs, tsconfig.test.json (только если появились новые файлы)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "[владельцу] презентация: план, слайды, «Открыть в PowerPoint», «Открыть текст выступления», замечание ко всей работе; отчёт по лабораторной с методичкой: «Что доделать самому»"
+            ],
+            "dependencies": [
+                "TASK-193",
+                "TASK-194"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-196",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[PDF · адаптер] ADR-0020 принят (вариант (b): свой вызов WebView2 PrintToPdf); HTML для печати из values.Document",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26: у PDF своя кнопка «Скачать PDF». PDF делается собственным вызовом WebView2 print-to-PDF (ADR-0020, вариант (b)), а не через диалог печати. Файл кладётся рядом с .docx в библиотеке и открывается так же, как другие файлы",
+                "docs/adr/0020-document-pdf.md: Status Accepted (2026-10-26, владелец), раздел Decision = вариант (b). В ADR записаны: факты проверки (wails v3.0.0-beta.29: PrintToPdf есть только в internal/webview2/pkg/webview2/ICoreWebView2_7.go:37, загрузчик в internal/webview2/webviewloader/env_create.go:40-117, импортировать их нельзя; публичного доступа к контроллеру окна нет); свой адаптер adapters/pdf; отдельный WebView2 environment со своей папкой данных; скрипты выключены; любая навигация, кроме начальной, отменяется; CSP без сети; HTML строится только из values.Document, весь текст экранирован; новых зависимостей нет (golang.org/x/sys уже в go.mod); vtable по WebView2.h, а если переносится код из Wails internal, то с уведомлением MIT. Область: работа и отчёт по лабораторной; презентация (.pptx) — вопрос владельцу (Open). Варианты (a) и (d) не выбраны; Consequences обновлены",
+                "adapters/pdf/html.go (все ОС, без build tag): printHTML(doc cvalues.Document) ([]byte, error) отдаёт полную страницу HTML5 в UTF-8: meta CSP «default-src 'none'; style-src 'unsafe-inline'», без скриптов, ссылок и внешних ресурсов; @page A4; поля, шрифт, кегль, интервал, абзацный отступ, выравнивание и разрывы страниц те же, что в adapters/docx (числа брать оттуда, не придумывать); заглушки лабораторной выделены так же, как в .docx",
+                "Каждый вид блока values.Document (domain/coursework/values/document.go, разбор см. adapters/docx/body.go) переводится в HTML; неизвестный вид даёт ошибку, а не молча пропускается. Весь текст экранируется (html/template или html.EscapeString)",
+                "Тесты: структура страницы для работы и для отчёта по лабораторной (homeworkdoc.BuildPaper и BuildLabReport); инъекции (<script>, </style>, \"><img onerror=…>, bidi-символы) остаются текстом; в выводе нет http:, https:, src= и <script; одинаковый документ даёт одинаковые байты",
+                "Файлы: paratech/desktop/internal/adapters/pdf/doc.go, html.go, html_test.go; docs/adr/0020-document-pdf.md; строка в docs/architecture.md, если там есть перечень адаптеров",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "из paratech/: go test -race ./desktop/internal/adapters/pdf/... ; go vet ./desktop/... ; golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-197",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[PDF · адаптер Windows] Печать HTML в PDF через собственный WebView2 (PrintToPdf) за build tag windows, заглушка для других ОС",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26 и ADR-0020, вариант (b) (оформляется в TASK-196): тихий PDF без диалога печати",
+                "adapters/pdf/webview_windows.go (//go:build windows): Printer (NewPrinter(dataDir string, log *slog.Logger)) с методом Print(ctx context.Context, html []byte) ([]byte, error). В adapters/pdf/webview_other.go Print возвращает ErrUnsupported. Типизированные ошибки (ARCH-32): ErrUnsupported (нет WebView2 Runtime или его версия ниже 98.0.1108.43, см. wails internal/webview2/pkg/edge/capabilities.go:46) и ErrFailed",
+                "Вызовы, найденные в wails v3.0.0-beta.29 (это internal: код свой, Wails только образец; порядок методов vtable и IID сверить с WebView2.h, не угадывать). (1) Найти рантайм по реестру Software\\Microsoft\\EdgeUpdate\\ClientState\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5} в HKLM и HKCU (webviewloader/find_dll_installed.go:13-57) и загрузить EmbeddedBrowserWebView.dll. (2) CreateWebViewEnvironmentWithOptionsInternal(1, 0, userDataFolder, options, handler) (env_create.go:90-117). (3) ICoreWebView2Environment::CreateCoreWebView2Controller(hwnd, handler) на скрытом окне (CreateWindowEx, окно не показывается). (4) ICoreWebView2Controller::get_CoreWebView2; через ICoreWebView2::get_Settings выполнить put_IsScriptEnabled(FALSE). (5) add_NavigationStarting отменяет всё, кроме начальной навигации. (6) NavigateToString (pkg/webview2/ICoreWebView2.go:131; HTML больше 2 МБ даёт ErrFailed) и ожидание add_NavigationCompleted с IsSuccess. (7) QueryInterface ICoreWebView2_7 {79c24d83-09a3-45ae-9418-487f32a58740}, затем PrintToPdf(path, settings, handler) (ICoreWebView2_7.go:28, :37-55). Настройки через ICoreWebView2Environment6::CreatePrintSettings (ICoreWebView2Environment6.go:37): портрет, ShouldPrintHeaderAndFooter=false, ShouldPrintBackgrounds=true, поля 0 (их задаёт @page в HTML)",
+                "Отдельная OS-нить (runtime.LockOSThread), CoInitializeEx STA, свой цикл сообщений до конца вызова. По ctx (таймаут задаёт вызывающий) закрываются контроллер и окно, COM-объекты освобождаются. Окна и WebView2 Wails не трогаются; папка данных своя (dataDir, её передаёт app); одновременно идёт один вызов (mutex)",
+                "PDF пишется во временный файл внутри dataDir (os.CreateTemp), читается и удаляется; результат начинается с %PDF-. В библиотеку адаптер ничего не пишет (это делает use case TASK-198)",
+                "Тесты на Windows (реальный WebView2, на машине разработчика): простой HTML с кириллицей даёт PDF с сигнатурой %PDF- и ненулевым размером; отмена ctx; два вызова подряд; скрипт в HTML не выполняется (как проверено, записать в progress). Если WebView2 нет, тест вызывает t.Skip. На других ОС проверяется заглушка",
+                "Без CGO и без новых зависимостей (golang.org/x/sys/windows уже в go.mod); unsafe только в этом адаптере; комментарии объясняют, почему так",
+                "Файлы: paratech/desktop/internal/adapters/pdf/webview_windows.go, webview_other.go, вспомогательные *_windows.go для COM, тесты. doc.go пакета создаёт TASK-196: если её ещё нет в master, doc.go не создавать",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "из paratech/: go test -race ./desktop/internal/adapters/pdf/... (на Windows) ; GOOS=windows go vet ./desktop/... ; GOOS=linux go vet ./desktop/... ; golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-198",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[ДЗ под ключ · ядро] «Скачать PDF»: PDF готовой работы рядом с .docx в «ДЗ» (порт, домен, use case, биндинг, сборка)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26: кнопка «Скачать PDF» сохраняет PDF рядом с .docx в библиотеке; открывается он через openMaterial, как другие файлы. ADR-0020 (вариант (b)), адаптер из TASK-196/197",
+                "Порт в cases/turnkey/ports.go рядом с Renderer (:98-101): PaperPDF { RenderPDF(ctx context.Context, doc cvalues.Document) ([]byte, error) }. Реализация в adapters/pdf/pdf.go: Renderer, который делает printHTML (TASK-196), затем Printer.Print (TASK-197); ошибки адаптера переводятся в типизированные",
+                "PDF строится из того же документа, что и .docx: сборка документа вынесена из assemble (cases/turnkey/writing.go:583-599) в одну функцию для обоих путей. Год титула должен совпадать с .docx, а не браться с часов в момент нажатия. Вариант выбирает исполнитель: год сборки в work.File (необязательное поле JSON, без миграции) или время готовности работы; выбор записать в progress. Профиль читается в момент нажатия (если имя сменилось, в PDF будет новое имя), это тоже записать в progress",
+                "Домен (domain/coursework/work): готовая работа хранит PDF своего содержания. AttachPDF(f File, now) разрешён только в StatusDone, не для презентации и только при f.Content == ContentKey(). Новое поколение (правка плана, Regenerate) сбрасывает PDF. Files() включает PDF, поэтому смена поколения и Undo write_work уводят его в «Входящие» так же, как .docx (cases/turnkey/writing.go:697-702). Отправка преподавателю (proposal.NewWorkSend, ADR-0025 addendum TASK-180) по-прежнему прикладывает .docx или .pptx, не PDF (тест). PDF хранится в works.writing как необязательное поле, при загрузке разбирается строго; ContentKey и сохранённый вид старой работы не меняются (тест)",
+                "Use case ExportPDF(ctx, id) в cases/turnkey возвращает работу и материал PDF. Работа не готова: ErrNotWritable; пишется: ErrWritingRunning; презентация: ErrNotWritable. Если PDF текущего содержания уже есть и материал на месте, он возвращается без новой печати. Иначе: собрать документ, RenderPDF, Shelf.FileHomework(subject, имя .docx с расширением .pdf (homeworkdoc: PaperPDFName рядом с PaperFileName, paper.go:119-126), bytes), то есть в ту же папку «ДЗ» (или во «Входящие», как .docx), и сохранить с проверкой версии. Если работа изменилась за время печати, PDF уходит во «Входящие» и возвращается ErrChanged. Вызов синхронный, не задание очереди (локальный файл, без внешних побочных эффектов), таймаут 60 с",
+                "input/wails: TurnkeyService.ExportPDF(ctx, id) (TurnkeyWork, error); в TurnkeyWriting добавлено поле pdfMaterialId. Новые фиксированные тексты: ErrTurnkeyPDFUnsupported «Не удалось сохранить PDF: на компьютере нет нужного компонента Windows (WebView2).» и ErrTurnkeyPDFFailed «Не удалось сохранить PDF. Попробуйте ещё раз.»; остальные ошибки как в fail (turnkey.go:423-441). В лог пишутся только id работы и код",
+                "app: adapters/pdf.NewPrinter(<папка данных>/webview-pdf) и Renderer подключены к turnkey (там же, где собираются Renderer и SlideRenderer); на других ОС подключается заглушка",
+                "ADR-0025: addendum (TASK-198) про PDF, 3–5 строк",
+                "Тесты: домен (AttachPDF, сброс при новом поколении, Files, сохранение и загрузка); use case с фейками PaperPDF и Shelf (повторное нажатие без новой печати, изменение работы во время печати, отказ для презентации, ошибка рендера не меняет работу); маппинг в input/wails; сценарий в desktop/tests с фейковым принтером и настоящим SQLite",
+                "Файлы: paratech/desktop/internal/domain/coursework/work/*, domain/coursework/services/homeworkdoc/paper.go, cases/turnkey/*, adapters/pdf/pdf.go, input/wails/turnkey.go, app/* (только сборка), desktop/tests/*, docs/adr/0025-turnkey-work.md (вместе с тестами)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "из paratech/: go vet ./desktop/... ; GOOS=windows go vet ./desktop/... ; go test -race ./desktop/... ; golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-194",
+                "TASK-196",
+                "TASK-197"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-199",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[ДЗ под ключ · UI] Кнопка «Скачать PDF» в карточке готовой работы и отчёта по лабораторной",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26: своя кнопка «Скачать PDF»; PDF лежит рядом с .docx в библиотеке и открывается как другие файлы (TASK-198)",
+                "bindings/turnkey.ts: exportPdf(id) вызывает TurnkeyService.ExportPDF и строго разбирает pdfMaterialId; тексты ошибок ядра выводятся как есть (они фиксированные)",
+                "Карточка готовой работы или отчёта (не презентации): пока pdfMaterialId пуст, есть кнопка «Скачать PDF». Во время вызова она неактивна и подписана «Сохранение PDF…». После успеха появляется строка «PDF сохранён в библиотеке рядом с файлом Word.» и кнопка «Открыть PDF» (libraryApi.openMaterial(pdfMaterialId), с подписью, что открывается копия). Если pdfMaterialId уже есть, сразу видна «Открыть PDF». У нового поколения pdfMaterialId пуст, и снова видна «Скачать PDF»",
+                "Ошибка показывается строкой ошибки карточки, как у других действий; кнопка остаётся, отдельного «Повторить» нет",
+                "Пока работа пишется, кнопки нет; двойной щелчок даёт один вызов",
+                "Тесты фронтенда (test/work.test.mjs): кнопка видна или скрыта по состоянию и типу работы; успешный вызов, затем «Открыть PDF»; ошибка; один вызов на двойной щелчок",
+                "Файлы: paratech/desktop/frontend/src/bindings/turnkey.ts, src/workView.ts, src/agent/WorkCard.tsx, test/work.test.mjs",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "[владельцу] готовая работа: «Скачать PDF», затем «Открыть PDF»; файл лежит в «ДЗ» предмета рядом с .docx"
+            ],
+            "dependencies": [
+                "TASK-195",
+                "TASK-198"
+            ],
+            "status": "pending"
         }
     ]
 }
