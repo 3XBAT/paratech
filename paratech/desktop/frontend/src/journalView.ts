@@ -71,6 +71,7 @@ export const statusOptions: readonly { value: string; label: string }[] = [
 ];
 
 const toolLabels: Readonly<Record<string, string>> = {
+  create_assignment: "Добавлено задание",
   create_subject: "Создан предмет",
   create_folder: "Создана папка",
   place_upload: "Файл положен в папку",

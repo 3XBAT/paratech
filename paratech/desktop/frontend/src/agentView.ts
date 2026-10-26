@@ -3,7 +3,7 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, FreeWorkRef, PlanStepView, QuestionView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, FreeWorkRef, PlanStepView, QuestionView } from "./bindings/agent.js";
 import { type Entry, isBusyRefused } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { daysLeftText, dueText, parseMoment } from "./todayView.js";
@@ -43,6 +43,29 @@ export function assignmentRow(a: AssignmentLineView, subjects: Readonly<Record<s
   }
   const subject = Object.prototype.hasOwnProperty.call(subjects, a.subjectId) ? subjects[a.subjectId] : "";
   return { id: a.id, title: a.title.trim() === "" ? noTitleLabel : a.title, subject, due, overdue };
+}
+
+export const addedAssignmentPrefix = "Задание добавлено";
+export const openAssignmentLabel = "Открыть";
+
+/**
+ * «Задание добавлено: <название> · <предмет> · срок <дата>, <время>». The DTO does not say whether the student named a
+ * time (none arrives as 23:59), so date and time are always shown; the parts that are absent are left out.
+ */
+export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<Record<string, string>>, now: Date): string {
+  const title = a.title.trim() === "" ? noTitleLabel : a.title;
+  const parts = [title];
+  if (Object.prototype.hasOwnProperty.call(subjects, a.subjectId) && subjects[a.subjectId] !== "") {
+    parts.push(subjects[a.subjectId]);
+  }
+  const d = parseDue(a.due);
+  if (d !== null) {
+    const days = Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
+    // «до пт, 30 окт.» without «до ».
+    const day = days === 0 || days === 1 ? daysLeftText(days) : dueText(d.toISOString()).slice(3);
+    parts.push(`срок ${day}${a.time === "" ? "" : `, ${a.time}`}`);
+  }
+  return `${addedAssignmentPrefix}: ${parts.join(" · ")}`;
 }
 
 /** The agent screen of the core (values.Screen) for a section of the window; the core refuses unknown screens. */
@@ -227,6 +250,7 @@ const toolTexts: Record<string, string> = {
   search: "Поиск по материалам",
   answer_question: "Ответ по материалам",
   inspect_upload: "Просмотр загруженного файла",
+  create_assignment: "Добавление задания",
   create_subject: "Создание предмета",
   create_folder: "Создание папки",
   place_upload: "Размещение файла",
@@ -382,7 +406,7 @@ export type CardModel =
   | { type: "reply"; caption: string; text: string; assignments: AssignmentLineView[] }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
   | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
-  | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean } }
+  | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean }; assignment: AddedAssignmentView | null }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "work"; workId: string }
   | { type: "free_work"; ref: FreeWorkRef }
@@ -454,6 +478,7 @@ function cardModel(c: CardView, status: string): CardModel | null {
         text: texts.actionDone,
         actionId: c.actionId,
         undo: { label: texts.undo, enabled: c.actionId !== "" },
+        assignment: c.assignment ?? null,
       };
     case "work":
       // The card reads the work itself (TurnkeyService.Work); a work card without an id has nothing to read.
