@@ -35,6 +35,7 @@ type Service struct {
 	clock       Clock
 	ids         IDs
 	log         *slog.Logger
+	pdfLocks    workLocks
 }
 
 // New checks that every required port is given (see Deps).

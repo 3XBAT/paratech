@@ -18,6 +18,7 @@ import (
 	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/logfile"
+	"paratech/desktop/internal/adapters/pdf"
 	"paratech/desktop/internal/adapters/pptx"
 	"paratech/desktop/internal/adapters/smtp"
 	"paratech/desktop/internal/adapters/sqlite"
@@ -65,6 +66,8 @@ const (
 	artifactsDir = "artifacts"
 	sttWorkDir   = "stt-work"
 	logsDir      = "logs" // the log files of the logfile adapter, read back by the support bundle
+	// webviewPDFDir is the WebView2 profile folder of the PDF printer (ADR-0020) and its temporary PDFs, exclusive to it.
+	webviewPDFDir = "webview-pdf"
 )
 
 // core is the opened core: the resources to release and the services the lifecycle starts and stops.
@@ -273,14 +276,17 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// «Спросить по шагу» (TASK-179) on homework_draft with the desktop's prompt and the writing alias. The writing
 	// (TASK-131) runs as a job on the Hub's homework_draft operation; the title page from the profile and the lesson the
 	// assignment shows, the paper filed into the subject's «ДЗ»; a presentation (TASK-106) files its .pptx and the
-	// speaker text there. «Остановить» (TASK-178) cancels through the runner built below.
+	// speaker text there. «Остановить» (TASK-178) cancels through the runner built below. «Скачать PDF» (TASK-198)
+	// prints with the one Printer of the process, whose WebView2 profile folder is its own (never the windows' one); off
+	// Windows the printer is a stub that answers unsupported.
+	printer := pdf.NewPrinter(filepath.Join(dataDir, webviewPDFDir), log)
 	works, err := turnkey.New(turnkey.Deps{
 		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm,
 		Advisor: llm.StepAdvisor(modelAlias), Clock: e.local, IDs: e.ids, Log: log,
 		Writing: &turnkey.WritingDeps{
 			Writer: llm, Jobs: jobs, JobIDs: e.ids, Canceller: runnerCanceller{c: c}, Profiles: settings,
-			Renderer: docx.New(), Slides: pptx.New(), Lessons: c.proposals, Shelf: lib, ModelAlias: modelAlias,
-			MaxAttempts: maxAttempts,
+			Renderer: docx.New(), Slides: pptx.New(), PDF: pdf.NewRenderer(printer), Lessons: c.proposals, Shelf: lib,
+			ModelAlias: modelAlias, MaxAttempts: maxAttempts,
 		},
 	})
 	if err != nil {
