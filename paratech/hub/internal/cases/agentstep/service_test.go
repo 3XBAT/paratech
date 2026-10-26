@@ -28,7 +28,7 @@ const (
 	ttl                         = 10 * time.Minute
 	retention                   = 24 * time.Hour
 	callTimeout                 = 5 * time.Minute
-	plannerCap                  = 512
+	plannerCap                  = 4096
 	studentText                 = "secret-student-text: что задали по матану?"
 	resultJSON                  = `{"secret_result":"lessons"}`
 )
@@ -285,15 +285,16 @@ func TestStepCallsTheProviderAndSeals(t *testing.T) {
 		t.Fatalf("quota = %+v", res.Quota)
 	}
 	f.assertNoText(t)
-	if logs := f.logs.String(); !strings.Contains(logs, "outcome=completed") || !strings.Contains(logs, "calls=2") {
+	if logs := f.logs.String(); !strings.Contains(logs, "outcome=completed") || !strings.Contains(logs, "calls=2") ||
+		!strings.Contains(logs, "stop_reason=tool_use") {
 		t.Fatalf("log: %s", logs)
 	}
 }
 
 func TestStepClampsTheOutputCap(t *testing.T) {
-	f := newFixture(t, 1_000_000, twoCalls(t), twoCalls(t), twoCalls(t))
+	f := newFixture(t, 1_000_000, twoCalls(t), twoCalls(t), twoCalls(t), twoCalls(t))
 	small := command(alice, "k1")
-	small.MaxOutputTokens = 300
+	small.MaxOutputTokens = 3000
 	f.step(t, small)
 	large := command(alice, "k2")
 	large.MaxOutputTokens = plannerCap + 1
@@ -301,8 +302,13 @@ func TestStepClampsTheOutputCap(t *testing.T) {
 	tiny := command(alice, "k3")
 	tiny.MaxOutputTokens = 1
 	f.step(t, tiny)
+	// The cap of a desktop before catalog 3 (TASK-172): raised to the floor.
+	legacy := command(alice, "k4")
+	legacy.MaxOutputTokens = 1024
+	f.step(t, legacy)
 	calls := f.provider.Calls()
-	if got := []int64{calls[0].MaxOutput(), calls[1].MaxOutput(), calls[2].MaxOutput()}; got[0] != 300 || got[1] != plannerCap || got[2] != agentstep.DefaultMinOutput {
+	if got := []int64{calls[0].MaxOutput(), calls[1].MaxOutput(), calls[2].MaxOutput(), calls[3].MaxOutput()}; got[0] != 3000 ||
+		got[1] != plannerCap || got[2] != agentstep.DefaultMinOutput || got[3] != 2048 || agentstep.DefaultMinOutput != 2048 {
 		t.Fatalf("output caps = %v", got)
 	}
 	// The reservation is made for the raised cap.
@@ -313,6 +319,23 @@ func TestStepClampsTheOutputCap(t *testing.T) {
 	// Looked up by key: the fake clock is frozen, so the reservation list is ordered by random id.
 	if k, ok := f.store.Key(alice, "k3"); !ok || k.Fingerprint.Amount != want {
 		t.Fatalf("reservation = %d, want %d", k.Fingerprint.Amount, want)
+	}
+	if want, err = requestlimits.AgentReservation(calls[3]); err != nil {
+		t.Fatal(err)
+	}
+	if k, ok := f.store.Key(alice, "k4"); !ok || k.Fingerprint.Amount != want {
+		t.Fatalf("reservation of the raised 1024 = %d, want %d", k.Fingerprint.Amount, want)
+	}
+	// The default alias cap is in the reservation of a request without a cap.
+	full := command(alice, "k5")
+	g := newFixture(t, 1_000_000, twoCalls(t))
+	g.step(t, full)
+	want, err = requestlimits.AgentReservation(g.provider.Calls()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, ok := g.store.Key(alice, "k5"); !ok || k.Fingerprint.Amount != want || g.provider.Calls()[0].MaxOutput() != plannerCap {
+		t.Fatalf("reservation = %d, want %d with the cap %d", k.Fingerprint.Amount, want, plannerCap)
 	}
 }
 
@@ -596,14 +619,19 @@ func TestFailureWithoutBilledAnswerIsReleased(t *testing.T) {
 // TestOutputCapStopIsCharged is the F1 regression: a tiny output cap with a large history cannot buy a free
 // provider call. The cap is raised to the profile floor and an answer cut at the cap is charged in full.
 func TestOutputCapStopIsCharged(t *testing.T) {
-	u, _ := values.NewUsage(150_000, 256)
-	f := newFixture(t, 1_000_000, testenv.AgentProviderStep{Answer: values.NewAgentAnswer(nil, u, false)})
+	u, _ := values.NewUsage(150_000, agentstep.DefaultMinOutput)
+	cut := values.NewAgentAnswer(nil, u, false).WithStop(values.StopMaxTokens)
+	f := newFixture(t, 1_000_000, testenv.AgentProviderStep{Answer: cut})
 	cmd := command(alice, "ag:1")
 	cmd.MaxOutputTokens = 1
 	_, err := f.svc.Step(t.Context(), cmd)
 	var failed *agentstep.ProviderFailedError
 	if !errors.As(err, &failed) || failed.Transient {
 		t.Fatalf("err = %v, want a permanent ProviderFailedError", err)
+	}
+	// The cut is named in the error and in the log line (TASK-172).
+	if !strings.Contains(err.Error(), "output cap") || !strings.Contains(f.logs.String(), "stop_reason=max_tokens") {
+		t.Fatalf("err = %v, log: %s", err, f.logs.String())
 	}
 	if got := f.provider.Calls()[0].MaxOutput(); got != agentstep.DefaultMinOutput {
 		t.Fatalf("output cap = %d, want the floor %d", got, agentstep.DefaultMinOutput)
@@ -613,6 +641,98 @@ func TestOutputCapStopIsCharged(t *testing.T) {
 	}
 	if !strings.Contains(f.logs.String(), "outcome=provider_error") || !strings.Contains(f.logs.String(), "charged=true") {
 		t.Fatalf("log: %s", f.logs.String())
+	}
+}
+
+// TestCatalogVersionsServedSideBySide: v2 stays served next to v3 (TASK-172), each with its own prompt and schema:
+// reply.assignments passes v3 and is an invalid call under v2; eleven IDs are invalid under v3.
+func TestCatalogVersionsServedSideBySide(t *testing.T) {
+	var versions []agentstep.Version
+	systems := map[uint32]string{}
+	for _, v := range []uint32{1, 2, 3} {
+		system, catalog, err := testenv.Panel(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		systems[v] = system
+		versions = append(versions, agentstep.Version{System: system, Catalog: catalog})
+	}
+	sealer, err := testenv.Sealer(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := `{"assignments":["asg-1","asg-2"],"text":"Два задания, ближайший срок — 2026-10-28."}`
+	eleven := `{"assignments":["a1","a2","a3","a4","a5","a6","a7","a8","a9","a10","a11"],"text":"Много."}`
+	for name, tc := range map[string]struct {
+		version uint32
+		args    string
+		ok      bool
+	}{
+		"v3 with assignments":  {3, listed, true},
+		"v3 without":           {3, `{"text":"Заданий нет."}`, true},
+		"v3 eleven":            {3, eleven, false},
+		"v3 not an id":         {3, `{"assignments":["a 1"],"text":"t"}`, false},
+		"v2 plain reply":       {2, `{"text":"Готово."}`, true},
+		"v2 with assignments":  {2, listed, false},
+		"v1 still served":      {1, `{"text":"Готово."}`, true},
+	} {
+		provider := testenv.NewFakeAgentProvider(answer(t, 100, 20, toolCall(t, "toolu_01", "reply", tc.args)))
+		svc, err := agentstep.New(agentstep.Deps{
+			Accounts: testenv.NewQuotaStore(), Turns: testenv.NewAgentTurns(), Provider: provider, Limiter: &testenv.FakeLimiter{},
+			Clock: testenv.NewFakeClock(t0), Random: testenv.Random{}, Models: models(t), Sealer: sealer, Log: slog.New(slog.DiscardHandler),
+		}, agentstep.Config{Unit: "tokens", Limit: 1_000_000, ReservationTTL: ttl, KeyRetention: retention, CallTimeout: callTimeout,
+			Profiles: []agentstep.Profile{{Name: values.ProfilePanel, Alias: "planner", Versions: versions}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := command(alice, "ag:1")
+		cmd.CatalogVersion = tc.version
+		res, err := svc.Step(t.Context(), cmd)
+		if tc.ok != (err == nil) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if !tc.ok && (err == nil || !strings.Contains(err.Error(), "invalid tool calls")) {
+			t.Errorf("%s: err = %v, want invalid tool calls", name, err)
+		}
+		if tc.ok && (len(res.Calls) != 1 || res.Calls[0].Arguments != tc.args) {
+			t.Errorf("%s: calls = %+v", name, res.Calls)
+		}
+		if got := provider.Calls()[0]; got.System() != systems[tc.version] {
+			t.Errorf("%s: the provider got another version's prompt", name)
+		}
+	}
+}
+
+// TestStopReasonInTheLog:the log line of a step says why the model stopped; a text-only end of turn stays "no tool
+// use". The texts are still not logged.
+func TestStopReasonInTheLog(t *testing.T) {
+	u, _ := values.NewUsage(100, 20)
+	for name, tc := range map[string]struct {
+		step    testenv.AgentProviderStep
+		outcome string
+		stop    string
+		reason  string
+	}{
+		"end of turn": {testenv.AgentProviderStep{Answer: values.NewAgentAnswer(nil, u, false).WithStop(values.StopEnd)}, "provider_error", "end", "no tool use"},
+		"output cap":  {testenv.AgentProviderStep{Answer: values.NewAgentAnswer(nil, u, false).WithStop(values.StopMaxTokens)}, "provider_error", "max_tokens", "output cap"},
+		"refusal":     {testenv.AgentProviderStep{Answer: values.RefusedAgentAnswer(u)}, "provider_error", "refusal", "refused"},
+		"tool use":    {twoCalls(t), "completed", "tool_use", ""},
+	} {
+		f := newFixture(t, 1_000_000, tc.step)
+		_, err := f.svc.Step(t.Context(), command(alice, "ag:1"))
+		if (tc.reason == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.reason)) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.reason)
+		}
+		logs := f.logs.String()
+		if !strings.Contains(logs, "outcome="+tc.outcome) || !strings.Contains(logs, "stop_reason="+tc.stop+" ") {
+			t.Errorf("%s: log: %s", name, logs)
+		}
+		f.assertNoText(t)
+	}
+	// A provider error has no answer, so no stop reason.
+	f := newFixture(t, 1_000_000, testenv.AgentProviderStep{Err: &values.ProviderError{Kind: values.KindPermanent, Reason: "rejected", Status: 400}})
+	if _, err := f.svc.Step(t.Context(), command(alice, "ag:1")); err == nil || strings.Contains(f.logs.String(), "stop_reason") {
+		t.Errorf("provider error: err = %v, log: %s", err, f.logs.String())
 	}
 }
 

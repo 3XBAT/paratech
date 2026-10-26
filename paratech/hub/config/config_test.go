@@ -38,7 +38,7 @@ func TestLoad(t *testing.T) {
 			env:  withDB(nil),
 			want: config.Config{LogLevel: "info", ListenAddr: ":8080", DatabaseURL: devURL, ShutdownTimeout: 15 * time.Second,
 				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
-				AnthropicBaseURL: "https://api.anthropic.com", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024",
+				AnthropicBaseURL: "https://api.anthropic.com", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096",
 				RateLimitPerMinute: 30, RateLimitBurst: 10, AgentPlannerAlias: "planner", AgentStrongAlias: "default"},
 		},
 		{
@@ -48,7 +48,7 @@ func TestLoad(t *testing.T) {
 			}),
 			want: config.Config{LogLevel: "debug", ListenAddr: "127.0.0.1:9000", DatabaseURL: devURL, ShutdownTimeout: 3 * time.Second,
 				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
-				AnthropicBaseURL: "https://api.anthropic.com", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024",
+				AnthropicBaseURL: "https://api.anthropic.com", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096",
 				RateLimitPerMinute: 30, RateLimitBurst: 10, AgentPlannerAlias: "planner", AgentStrongAlias: "default"},
 		},
 		{name: "bad level", env: withDB(map[string]string{config.EnvLogLevel: "loud"}), wantErr: "unknown log level"},

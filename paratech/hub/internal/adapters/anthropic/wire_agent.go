@@ -164,7 +164,7 @@ type agentWireBlockRead struct {
 // checks, seals and returns are one exact string. The whole content array is kept raw in the answer (the assistant
 // turn the next step sends back). The stop reason is checked first: a refusal is a refused answer. A block that is
 // not a valid call, or content too large to keep, makes a malformed answer and a text-only answer one without tool
-// use, all with their usage; a body without usage is a permanent error.
+// use, all with their usage and stop reason; a body without usage is a permanent error.
 func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != contentTypeJSON {
 		return values.AgentAnswer{}, permanent("unexpected content type")
@@ -195,6 +195,8 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if r.StopReason != nil && *r.StopReason == stopReasonRefusal {
 		return values.RefusedAgentAnswer(usage), nil
 	}
+	stop := agentStopReason(r.StopReason)
+	malformed := values.MalformedAgentAnswer(usage).WithStop(stop)
 	var calls []values.ToolCall
 	for _, b := range blocks {
 		if b.Type != blockToolUse {
@@ -203,25 +205,34 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 		// A bad call is the model's output, billed by the provider: an answer with usage, so the Hub charges it.
 		args, ok := canonicalObject(b.Input)
 		if !ok {
-			return values.MalformedAgentAnswer(usage), nil
+			return malformed, nil
 		}
 		call, err := values.NewToolCall(b.ID, b.Name, args)
 		if err != nil {
-			return values.MalformedAgentAnswer(usage), nil
+			return malformed, nil
 		}
 		calls = append(calls, call)
 	}
 	// With tool choice auto the model may answer in plain text: no tool_use block is an unusable, billed answer.
-	toolUse := r.StopReason != nil && *r.StopReason == stopReasonToolUse && len(calls) > 0
-	answer := values.NewAgentAnswer(calls, usage, toolUse)
+	toolUse := stop == values.StopToolUse && len(calls) > 0
+	answer := values.NewAgentAnswer(calls, usage, toolUse).WithStop(stop)
 	if !toolUse {
 		return answer, nil
 	}
 	turn, err := values.NewAssistantTurn(string(r.Content))
 	if err != nil {
-		return values.MalformedAgentAnswer(usage), nil
+		return malformed, nil
 	}
 	return answer.WithAssistant(turn), nil
+}
+
+// agentStopReason maps a stop_reason of a planner answer: tool_use is the usable end of a step, the rest as in a
+// completion.
+func agentStopReason(raw *string) values.StopReason {
+	if raw != nil && *raw == stopReasonToolUse {
+		return values.StopToolUse
+	}
+	return stopReason(raw)
 }
 
 // canonicalObject re-encodes a JSON object with sorted keys, exact numbers and no HTML escaping.

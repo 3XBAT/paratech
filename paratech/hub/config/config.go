@@ -45,10 +45,11 @@ const (
 
 // LLM provider defaults and bounds. The timeout stays at most 10 minutes (the provider discourages longer
 // non-streaming calls) and twice the timeout must fit in the reservation TTL, so the call and its settlement finish
-// before the reservation expires.
+// before the reservation expires. The planner cap is 4096 (a step cut at 1024 in the beta, TASK-172), far below the
+// 128K max output of the 5.5 models (docs/refs/anthropic.md).
 const (
 	DefaultAnthropicBaseURL = "https://api.anthropic.com"
-	DefaultLLMModels        = "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024"
+	DefaultLLMModels        = "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096"
 	minLLMTimeout           = 10 * time.Second
 	maxLLMTimeout           = 10 * time.Minute
 )

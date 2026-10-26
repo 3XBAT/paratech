@@ -502,6 +502,42 @@ func TestAgentAnswerFailure(t *testing.T) {
 	if _, err := DecodeCalls(FailedStepOutput); err == nil {
 		t.Fatal("the failed step marker decodes as calls")
 	}
+}
+
+// TestAgentAnswerStop: the answer carries the provider's stop reason; a cut at the output cap fails as "output cap",
+// not as "no tool use" (TASK-172).
+func TestAgentAnswerStop(t *testing.T) {
+	u, _ := NewUsage(10, 1024)
+	calls := []ToolCall{mustCall(t, "a", "reply", "{}")}
+	reason := func(a AgentAnswer) string {
+		var pe *ProviderError
+		if err := a.Failure(); errors.As(err, &pe) {
+			return pe.Reason
+		}
+		return ""
+	}
+	for name, tc := range map[string]struct {
+		answer AgentAnswer
+		stop   StopReason
+		reason string
+	}{
+		"tool use":            {NewAgentAnswer(calls, u, true), StopToolUse, ""},
+		"tool use, explicit":  {NewAgentAnswer(calls, u, true).WithStop(StopToolUse), StopToolUse, ""},
+		"end of turn":         {NewAgentAnswer(nil, u, false).WithStop(StopEnd), StopEnd, "no tool use"},
+		"no stop reason":      {NewAgentAnswer(nil, u, false), StopOther, "no tool use"},
+		"output cap":          {NewAgentAnswer(nil, u, false).WithStop(StopMaxTokens), StopMaxTokens, "output cap"},
+		"output cap, broken":  {MalformedAgentAnswer(u).WithStop(StopMaxTokens), StopMaxTokens, "output cap"},
+		"malformed tool use":  {MalformedAgentAnswer(u).WithStop(StopToolUse), StopToolUse, "malformed tool call"},
+		"refusal":             {RefusedAgentAnswer(u), StopRefusal, "refused"},
+		"unknown stop reason": {NewAgentAnswer(nil, u, false).WithStop(StopReason(99)), StopOther, "no tool use"},
+	} {
+		if tc.answer.Stop() != tc.stop || reason(tc.answer) != tc.reason {
+			t.Errorf("%s: stop %s, failure %q; want %s, %q", name, tc.answer.Stop(), reason(tc.answer), tc.stop, tc.reason)
+		}
+	}
+	if s := NewAgentAnswer(nil, u, false).WithStop(StopMaxTokens).String(); !strings.Contains(s, "Stop:max_tokens") {
+		t.Errorf("String() = %s", s)
+	}
 	if EncodeCalls(nil) != FailedStepOutput {
 		t.Fatal("no calls must encode as the failed step marker")
 	}

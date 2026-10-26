@@ -150,8 +150,8 @@ type step struct {
 // context error; anything else is a Hub failure. A provider call that has started is finished, settled and stored even
 // if the client goes away.
 func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
-	// One log line per step: outcome, profile, catalog version, alias, reservation, usage, number of calls, duration;
-	// never texts, arguments, results or prompts.
+	// One log line per step: outcome, profile, catalog version, alias, reservation, usage, stop reason of a provider
+	// answer, number of calls, duration; never texts, arguments, results or prompts.
 	begin := s.clock.Now()
 	logStep := func(outcome string, attrs ...any) {
 		attrs = append([]any{"outcome", outcome, "duration", s.clock.Now().Sub(begin)}, attrs...)
@@ -241,8 +241,12 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	answer, err := s.provider.Step(callCtx, call)
 	cancel()
-	if err == nil && answer.Refused() {
-		err = answer.Failure()
+	if err == nil {
+		// Says why a step failed, for example an answer cut at the output cap.
+		attrs = append(attrs, "stop_reason", answer.Stop().String())
+		if answer.Refused() {
+			err = answer.Failure()
+		}
 	}
 	if err != nil {
 		// No answer, or a refusal: released, not charged, like in Complete (accepted gap, ADR-0010).
