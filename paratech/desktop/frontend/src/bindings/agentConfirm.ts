@@ -13,6 +13,7 @@ export const methods = {
   confirm: `${service}.Confirm`,
   decline: `${service}.Decline`,
   proposeDeadline: `${service}.ProposeDeadline`,
+  proposeSendWork: `${service}.ProposeSendWork`,
 } as const;
 
 export type CardKind = "deadline" | "send" | "delete_recording";
@@ -62,6 +63,10 @@ export interface ConfirmCard {
   deletion: ConfirmDeletion | null;
 }
 
+/** The refusal no_assignment of proposeSendWork: a work not made for an assignment is never sent (TASK-180). */
+export const noAssignmentText =
+  "Работа сделана не по заданию из списка ДЗ: её можно сохранить, но не отправить преподавателю.";
+
 /** The fixed Russian texts of the Go binding (agentconfirm.go, homework.go); anything else gets the generic one. */
 export const errorTexts: readonly string[] = [
   "Неверная карточка подтверждения: обновите панель.",
@@ -74,6 +79,7 @@ export const errorTexts: readonly string[] = [
   "Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.",
   "Неизвестный формат вложения: выберите .docx или .txt.",
   "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
+  noAssignmentText,
 ];
 
 export const genericError = "Не удалось выполнить действие. Попробуйте ещё раз.";
@@ -191,6 +197,11 @@ export interface AgentConfirmApi {
   decline(target: ConfirmTarget): Promise<ConfirmCard>;
   /** «Да, в календарь» of «Сегодня»: the stored deadline of the assignment becomes a proposal; nothing goes out yet. */
   proposeDeadline(assignmentId: string): Promise<ConfirmCard>;
+  /**
+   * «Отправить преподавателю» of a finished work: its file becomes a send card (kind "send", .docx or .pptx); nothing
+   * is sent before «Да». A work without an assignment is refused with noAssignmentText.
+   */
+  proposeSendWork(workId: string): Promise<ConfirmCard>;
 }
 
 /** Builds the confirm API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -201,5 +212,6 @@ export function agentConfirmApi(call: CallByName): AgentConfirmApi {
       parseConfirmCard(await call(methods.confirm, c.targetKind, c.targetId, c.emailSubject, c.attachmentFormat)),
     decline: async (t) => parseConfirmCard(await call(methods.decline, t.kind, t.id)),
     proposeDeadline: async (id) => parseConfirmCard(await call(methods.proposeDeadline, id)),
+    proposeSendWork: async (id) => parseConfirmCard(await call(methods.proposeSendWork, id)),
   };
 }

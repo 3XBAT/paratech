@@ -131,6 +131,20 @@ it cannot do the work whole — then help instead. Everything the model says abo
   the same question again is a free replay. A model refusal or an answer failing `work.CheckAdvice` is refused;
   quota and Hub errors map as for the reader. The answer is card text only and triggers nothing; nothing is stored.
 
+## Addendum (TASK-180): «Отправить преподавателю»
+- The send of a finished work is a class C proposal (ADR-0021) of the core's own kind `send_work_email`: made only by
+  `proposal.NewWorkSend` on the student's `AgentConfirmService.ProposeSendWork`; a model answer naming the kind is
+  malformed, and the agent has no path to it. Only a work of an assignment (`Work.Sendable`); else `no_assignment`,
+  nothing stored.
+- Recipient from the settings and subject from the assignment, as the homework send. The attachment is the work's
+  library file (`.docx`, a presentation `.pptx`), pinned at the proposal by its stored reference `materials/<sha256>`,
+  SHA-256 and size, and required where the writing filed it: «ДЗ», or «Входящие» for a work whose subject is none or gone.
+- At «Да» the file is checked again: changed, replaced, deleted or moved out of «ДЗ», another recipient, subject or
+  format — STALE (`work_file_moved` for a move), no email. Then it is copied to `exports/sent/<proposal id>/<name>.<ext>`
+  (the library name through `shared.SafeFileName`, never model text) and the copy goes through the delivery flow keyed
+  `proposal:<id>` (hard rule 7: one email; an unknown outcome is reconciled, never resent).
+- Storage: migration 0032 rebuilds `proposals` (kind, `attachment_format` 'pptx', `work_id`).
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.

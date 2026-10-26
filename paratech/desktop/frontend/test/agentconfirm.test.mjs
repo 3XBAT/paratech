@@ -4,7 +4,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { agentConfirmApi, confirmErrorText, genericError, methods, parseConfirmCard } from "../.test-build/bindings/agentConfirm.js";
+import {
+  agentConfirmApi,
+  confirmErrorText,
+  genericError,
+  methods,
+  noAssignmentText,
+  parseConfirmCard,
+} from "../.test-build/bindings/agentConfirm.js";
 import {
   ConfirmFlow,
   ProposeFlow,
@@ -82,6 +89,23 @@ test("binding: method names, arguments and strict parsing", async () => {
   assert.throws(() => parseConfirmCard({ ...card(), kind: "mail" }));
   assert.throws(() => parseConfirmCard(null));
   assert.equal(parseConfirmCard({ ...card(), deletion: null }).deletion, null);
+});
+
+test("proposeSendWork: the work id goes in, a send card of the work's file comes back; no_assignment is a known text", async () => {
+  const seen = [];
+  const work = card({ attachmentName: "Реферат.docx", attachmentFormat: "docx", draftVersion: 0 });
+  const api = agentConfirmApi(async (m, ...a) => (seen.push([m, a]), work));
+  const got = await api.proposeSendWork("w1");
+  assert.deepEqual(seen, [[methods.proposeSendWork, ["w1"]]]);
+  assert.equal(methods.proposeSendWork, "paratech/desktop/internal/input/wails.AgentConfirmService.ProposeSendWork");
+  assert.equal(got.kind, "send");
+  assert.equal(got.state, "waiting");
+  assert.equal(got.attachmentName, "Реферат.docx");
+  assert.equal(got.attachmentFormat, "docx");
+  const bad = agentConfirmApi(async () => ({ ...work, attachmentSize: -1 }));
+  await assert.rejects(bad.proposeSendWork("w1"));
+  assert.equal(confirmErrorText(noAssignmentText), noAssignmentText);
+  assert.match(noAssignmentText, /не отправить преподавателю/);
 });
 
 test("errors: only the core's fixed texts are shown", () => {
