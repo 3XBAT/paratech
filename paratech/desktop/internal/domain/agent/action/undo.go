@@ -17,8 +17,10 @@ const maxIntentName = 512
 // Recover compares the world with it after a crash between the two transactions (Settle). A zero Intent says nothing:
 // the outcome then stays unknown.
 type Intent struct {
-	Target values.Ref   // what the use case changes; zero when it creates it (create_subject) or starts a job
-	Before int64        // version of Target before the action; 0 when Target is zero
+	// Target is what the use case changes; zero when it creates it (create_subject) or starts a job. A create whose ID
+	// is known before it runs (create_assignment, createsTarget) names that ID here, with Before 0: it did not exist.
+	Target values.Ref
+	Before int64        // version of Target before the action; 0 when Target is zero or not made yet
 	Prior  Compensation // the compensation of the action as far as it is known before it runs; nil for creates
 	// Next is the state the action leads to, written as the compensation that would restore it (set_lesson_info,
 	// edit_due): only that state counts as the effect after a crash, not any change of the version.
@@ -26,15 +28,28 @@ type Intent struct {
 	Name string // create_subject, create_folder: the name of what is made
 }
 
+// createsTarget are the create tools whose ID the desktop derives before the use case runs, so after a crash the
+// target tells the outcome: there -> DONE, absent -> FAILED (ADR-0029).
+var createsTarget = map[values.Tool]values.IDKind{values.ToolCreateAssignment: values.KindAssignment}
+
 // IsZero reports whether the intent says nothing.
 func (in Intent) IsZero() bool { return in == Intent{} }
 
 func (in Intent) validate(t values.Tool) error {
+	bad := func(what string) error { return fmt.Errorf("%w: intent: %s", ErrInvalidAction, what) }
+	kind, creates := createsTarget[t]
 	if in.IsZero() {
+		if creates {
+			// Its Undo removes exactly the ID named here; without it the compensation could name any assignment.
+			return bad("a create names the id it makes")
+		}
 		return nil
 	}
-	bad := func(what string) error { return fmt.Errorf("%w: intent: %s", ErrInvalidAction, what) }
-	if in.Target.IsZero() != (in.Before == 0) || in.Before < 0 {
+	if creates {
+		if in.Target.Kind() != kind || in.Before != 0 {
+			return bad("a create names the id it makes, with no version before")
+		}
+	} else if in.Target.IsZero() != (in.Before == 0) || in.Before < 0 {
 		return bad("a target exactly with its version before")
 	}
 	if len(in.Name) > maxIntentName || !utf8.ValidString(in.Name) {

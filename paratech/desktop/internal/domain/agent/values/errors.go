@@ -18,6 +18,9 @@ var (
 	// ErrInvalidDate is returned for a value that is not a calendar date YYYY-MM-DD.
 	ErrInvalidDate = errors.New("invalid date")
 
+	// ErrInvalidTime is returned for a value that is not a time of day HH:MM, 24 h (catalog v6).
+	ErrInvalidTime = errors.New("invalid time of day")
+
 	// ErrInvalidText is returned for a card text, label or name that breaks its length or character rules.
 	ErrInvalidText = errors.New("invalid text")
 

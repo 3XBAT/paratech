@@ -37,6 +37,12 @@ func TestIntentValidation(t *testing.T) {
 		{"edit due with next", values.ToolEditDue, Intent{Target: a1, Before: 3, Prior: RestoreDue{Assignment: a1}, Next: RestoreDue{Assignment: a1}}, true},
 		{"next of another tool", values.ToolEditDue, Intent{Target: a1, Before: 3, Next: ReturnToInbox{Material: m1}}, false},
 		{"long name", values.ToolCreateSubject, Intent{Name: string(make([]byte, maxIntentName+1))}, false},
+		// create_assignment names the ID it will make; it has no version before (ADR-0029).
+		{"added assignment", values.ToolCreateAssignment, Intent{Target: a1}, true},
+		{"added assignment with a version", values.ToolCreateAssignment, Intent{Target: a1, Before: 1}, false},
+		{"added assignment of another kind", values.ToolCreateAssignment, Intent{Target: m1}, false},
+		{"added assignment without its id", values.ToolCreateAssignment, Intent{Name: "Эссе"}, false},
+		{"added assignment with no intent", values.ToolCreateAssignment, Intent{}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -64,6 +70,7 @@ func TestSettle(t *testing.T) {
 	edit := Intent{Target: a1, Before: 3, Prior: prior}
 	create := Intent{Name: "Химия"}
 	s9 := RemoveSubject{Subject: ref(t, values.KindSubject, "s9")}
+	added := Intent{Target: a1}
 	tests := []struct {
 		name string
 		tool values.Tool
@@ -81,6 +88,10 @@ func TestSettle(t *testing.T) {
 		{"job cannot be told", values.ToolMakeSummary, Intent{}, Observation{}, StatusUnknown, 0},
 		{"no intent", values.ToolEditDue, Intent{}, Observation{Known: true, Version: 3}, StatusUnknown, 0},
 		{"effect with a wrong compensation", values.ToolEditDue, edit, Observation{Known: true, Version: 4, Effect: true, Compensation: s9}, StatusUnknown, 0},
+		{"added assignment there", values.ToolCreateAssignment, added, Observation{Known: true, Version: 1, Effect: true, Compensation: RemoveAssignment{Assignment: a1}}, StatusDone, 1},
+		{"added assignment absent", values.ToolCreateAssignment, added, Observation{Known: true}, StatusFailed, 0},
+		{"another assignment there", values.ToolCreateAssignment, added, Observation{Known: true, Version: 1, Effect: true,
+			Compensation: RemoveAssignment{Assignment: ref(t, values.KindAssignment, "a2")}}, StatusUnknown, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,6 +106,39 @@ func TestSettle(t *testing.T) {
 	}
 	if err := reach(t, StatusDone).Settle(Observation{Known: true}, at(5)); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Settle of a DONE entry = %v", err)
+	}
+}
+
+// The Undo of create_assignment removes exactly the assignment its intent named (ADR-0029), on Complete and Restore.
+func TestAddedAssignmentUndoesOnlyItsTarget(t *testing.T) {
+	a1, a2 := ref(t, values.KindAssignment, "a1"), ref(t, values.KindAssignment, "a2")
+	tests := []struct {
+		name string
+		comp Compensation
+		ok   bool
+	}{
+		{"its assignment", RemoveAssignment{Assignment: a1}, true},
+		{"another assignment", RemoveAssignment{Assignment: a2}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := pendingWith(t, values.ToolCreateAssignment, Intent{Target: a1})
+			err := a.Complete(tt.comp, 1, at(1))
+			if tt.ok != (err == nil) {
+				t.Fatalf("Complete = %v, want ok=%v", err, tt.ok)
+			}
+			if err != nil && (!errors.Is(err, ErrInvalidCompensation) || a.Status() != StatusPending) {
+				t.Fatalf("refused Complete: %v, status %s", err, a.Status())
+			}
+			st := State{Version: 1, ID: "act1", Thread: "th1", Turn: 1, CallID: "toolu_1", Tool: values.ToolCreateAssignment,
+				Status: StatusDone, Intent: Intent{Target: a1}, Compensation: tt.comp, TargetVersion: 1, CreatedAt: t0, UpdatedAt: at(1)}
+			if _, err := Restore(st); tt.ok != (err == nil) {
+				t.Fatalf("Restore = %v, want ok=%v", err, tt.ok)
+			}
+		})
+	}
+	if _, err := New(spec(values.ToolCreateAssignment), t0); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("create_assignment with no intent = %v", err)
 	}
 }
 
@@ -341,5 +385,19 @@ func TestRebase(t *testing.T) {
 		CancelJob{Job: ref(t, values.KindJob, "j1")}, 1)
 	if !job.TargetRef().IsZero() {
 		t.Fatal("a job has a target version that moves")
+	}
+
+	// A plan «добавить задание → перенести срок»: undoing the deadline first moves the assignment on, and its creation
+	// follows it, so «Отменить всё» removes it.
+	a1 := ref(t, values.KindAssignment, "ag-1")
+	created := done(t, Spec{ID: "a4", Thread: "th1", Turn: 1, CallID: "c4", Tool: values.ToolCreateAssignment,
+		Intent: Intent{Target: a1}}, t0, RemoveAssignment{Assignment: a1}, 1)
+	if created.TargetRef() != a1 {
+		t.Fatalf("target of an added assignment = %v", created.TargetRef())
+	}
+	due := undone(t, done(t, Spec{ID: "a5", Thread: "th1", Turn: 1, CallID: "c5", Tool: values.ToolEditDue,
+		Intent: Intent{Target: a1, Before: 1, Prior: RestoreDue{Assignment: a1}}}, at(1), RestoreDue{Assignment: a1}, 2))
+	if !created.Rebase(due, 3) || created.TargetVersion() != 3 {
+		t.Fatalf("added assignment not rebased: %d", created.TargetVersion())
 	}
 }

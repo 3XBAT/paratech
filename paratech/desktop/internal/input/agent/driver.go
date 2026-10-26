@@ -662,12 +662,16 @@ func unknownWrites(calls []agentturn.Call, outcomes []agentturn.Outcome) []agent
 }
 
 // publish hands the step to the panel; a card that breaks its rules is dropped, never shown. A reply that lists
-// assignments gets their titles and deadlines from the local data here (ctx may have ended: the read is local).
+// assignments, and the action line of an added assignment, get their titles and deadlines from the local data here
+// (ctx may have ended: the read is local).
 func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
 	cards := make([]values.Card, 0, len(st.Cards))
 	for _, c := range st.Cards {
 		if r, ok := c.(values.ReplyCard); ok && r.Validate() == nil {
 			c = d.tools.replyLines(context.WithoutCancel(ctx), r)
+		}
+		if l, ok := c.(values.ActionLine); ok && !l.Assignment.Assignment.IsZero() {
+			c = d.tools.actionLine(context.WithoutCancel(ctx), l)
 		}
 		if c == nil || c.Validate() != nil {
 			d.log.Warn(opBadCard, "thread", st.Thread.String())

@@ -7,11 +7,12 @@ import (
 	"strings"
 )
 
-// PlanStep is one planned call of a plan card: a tool and its arguments. Only ID, date, enum, label and query
+// PlanStep is one planned call of a plan card: a tool and its arguments. Only ID, date, time, enum, label and query
 // arguments may appear, so the desktop renders the step from templates. A step carries every required argument (and one of each
-// one-of group) except an ID of a subject or folder that an earlier step of the plan creates; such IDs are deferred. A
-// later call matches the step when it has the same tool and exactly the step's arguments with the same values, plus
-// only deferred IDs, so an approved step is never a wildcard.
+// one-of group) except an ID of a subject, folder or assignment that an earlier step of the plan creates; such IDs are
+// deferred. A later call matches the step when it has the same tool and exactly the step's arguments with the same
+// values, plus only deferred IDs, so an approved step is never a wildcard. The only exception is the unplannedArgs
+// free text of a tool (the note of create_assignment), which matching ignores.
 type PlanStep struct {
 	tool     Tool
 	args     Args
@@ -19,7 +20,24 @@ type PlanStep struct {
 }
 
 // createdKinds maps a step tool to the ID kind it creates for later steps of the same plan.
-var createdKinds = map[Tool]IDKind{ToolCreateSubject: KindSubject, ToolCreateFolder: KindFolder}
+var createdKinds = map[Tool]IDKind{
+	ToolCreateSubject: KindSubject, ToolCreateFolder: KindFolder, ToolCreateAssignment: KindAssignment,
+}
+
+// unplannedArgs are the arguments a call may give, leave out or change against its approved step: free text the plan
+// step cannot carry, as plan-step arguments are at most 80 characters on the Hub (TASK-216). The note of an assignment
+// is its display text only; what the step fixes (title, subject, lesson, due, time) still has to match.
+var unplannedArgs = map[Tool][]string{ToolCreateAssignment: {"note"}}
+
+// IsCreatedKind reports whether a create tool of the catalog makes IDs of kind k for later plan steps.
+func IsCreatedKind(k IDKind) bool {
+	for _, c := range createdKinds {
+		if c == k {
+			return true
+		}
+	}
+	return false
+}
 
 // Tool returns the planned tool.
 func (s PlanStep) Tool() Tool { return s.tool }
@@ -30,7 +48,8 @@ func (s PlanStep) Args() Args { return s.args }
 // Deferred returns the ID arguments an earlier step of the plan creates; the call fills them in.
 func (s PlanStep) Deferred() []string { return slices.Clone(s.deferred) }
 
-// CreatedKind returns the ID kind a create_subject or create_folder call creates for later plan steps.
+// CreatedKind returns the ID kind a create_subject, create_folder or create_assignment call creates for later plan
+// steps.
 func CreatedKind(t Tool) (IDKind, bool) {
 	k, ok := createdKinds[t]
 	return k, ok
@@ -41,7 +60,11 @@ func (s PlanStep) Matches(call Call) bool {
 	if call.tool != s.tool {
 		return false
 	}
+	free := unplannedArgs[s.tool]
 	for name, got := range call.args.vals {
+		if slices.Contains(free, name) {
+			continue
+		}
 		want, ok := s.args.vals[name]
 		if !ok {
 			if !slices.Contains(s.deferred, name) {
@@ -54,7 +77,7 @@ func (s PlanStep) Matches(call Call) bool {
 		}
 	}
 	for name := range s.args.vals {
-		if _, ok := call.args.vals[name]; !ok {
+		if _, ok := call.args.vals[name]; !ok && !slices.Contains(free, name) {
 			return false
 		}
 	}
@@ -98,6 +121,8 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 				args[name] = ids
 			case ArgDate:
 				args[name] = v.date.String()
+			case ArgTime:
+				args[name] = v.tod.String()
 			case ArgEnum, ArgLabel, ArgQuery:
 				args[name] = v.str
 			default:
@@ -118,7 +143,7 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 func DecodePlanSteps(s string) ([]PlanStep, error) { return decodePlanSteps(json.RawMessage(s), true) }
 
 // planStepArgTypes are the argument types a plan step may carry.
-var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgEnum, ArgLabel, ArgQuery}
+var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgTime, ArgEnum, ArgLabel, ArgQuery}
 
 // parsePlanSteps parses the planner's plan_steps: current catalog tools only.
 func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) { return decodePlanSteps(raw, false) }
@@ -183,6 +208,9 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool) (P
 			}
 			vals[n] = v
 		}
+	}
+	if err := checkTimeWithDue(vals); err != nil {
+		return PlanStep{}, fmt.Errorf("%w: plan step %s: %w", ErrInvalidArguments, t, err)
 	}
 	var deferred []string
 	for _, as := range spec.args {

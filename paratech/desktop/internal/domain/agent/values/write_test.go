@@ -23,6 +23,8 @@ func TestWriteResult(t *testing.T) {
 		{"created", WriteRow{ID: s1, Changed: true}, `{"changed":true,"done":true,"id":"s1"}`, 1},
 		{"job", WriteRow{Job: j1, Changed: true}, `{"changed":true,"done":true,"job":"j1"}`, 1},
 		{"nothing to do", WriteRow{}, `{"changed":false,"done":true}`, 0},
+		// create_assignment (v6): the ID only, never a title.
+		{"added assignment", WriteRow{ID: mk(KindAssignment, "ag-1"), Changed: true}, `{"changed":true,"done":true,"id":"ag-1"}`, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -32,7 +34,7 @@ func TestWriteResult(t *testing.T) {
 			}
 		})
 	}
-	for _, bad := range []WriteRow{{ID: mk(KindAssignment, "a1")}, {Job: s1}} {
+	for _, bad := range []WriteRow{{ID: mk(KindWork, "w1")}, {Job: s1}} {
 		if _, _, err := WriteResult("c1", bad); !errors.Is(err, ErrInvalidResult) {
 			t.Errorf("WriteResult(%+v) = %v", bad, err)
 		}

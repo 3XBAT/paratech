@@ -5,14 +5,14 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v5.json). v5 has
-// the tools of v4; only the Hub panel prompt changed (TASK-200).
-const CatalogVersion = 5
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v6.json). v6 is v5
+// plus create_assignment and the argument type time (TASK-216, ADR-0029).
+const CatalogVersion = 6
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
 
-// Tools of catalog v5, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
+// Tools of catalog v6, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
 // черновик»): the planner can no longer call it, but stored actions, plans and calls that name it still read
 // (RetiredTools).
 const (
@@ -34,6 +34,7 @@ const (
 	ToolFindHomework           Tool = "find_homework"
 	ToolGenerateDraft          Tool = "generate_draft" // retired in v4
 	ToolEditDue                Tool = "edit_due"
+	ToolCreateAssignment       Tool = "create_assignment" // since v6
 	ToolTriageAssignment       Tool = "triage_assignment"
 	ToolWriteWork              Tool = "write_work"
 	ToolProposeDeadline        Tool = "propose_deadline"
@@ -86,6 +87,7 @@ const (
 	ArgID        ArgType = "id"
 	ArgIDs       ArgType = "ids"
 	ArgDate      ArgType = "date"
+	ArgTime      ArgType = "time" // HH:MM, 24 h; only together with an argument "due" (catalog v6)
 	ArgEnum      ArgType = "enum"
 	ArgLabel     ArgType = "label"
 	ArgQuery     ArgType = "query" // the student's question or search text (since catalog v2)
@@ -202,7 +204,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v5 (shared/testdata/tool_catalog_v5.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v6 (shared/testdata/tool_catalog_v6.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},
@@ -237,6 +239,11 @@ var catalog = []ToolSpec{
 		id("recording", KindRecording, false), id("material", KindMaterial, false),
 	}, oneOf: [][]string{{"recording", "material"}}},
 	{tool: ToolEditDue, args: []ArgSpec{id("assignment", KindAssignment, true), typed("due", ArgDate, true)}},
+	// title and note (v6) are the student's own words: display text of the assignment, never a recipient or a path.
+	{tool: ToolCreateAssignment, args: []ArgSpec{
+		typed("title", ArgLabel, true), id("subject", KindSubject, false), id("lesson", KindLesson, false),
+		typed("due", ArgDate, false), typed("time", ArgTime, false), typed("note", ArgQuery, false),
+	}},
 	// topic (catalog v4) is the student's words for a work without an assignment: free model text, a Query.
 	{tool: ToolTriageAssignment, args: []ArgSpec{
 		id("assignment", KindAssignment, false), id("upload", KindUpload, false), typed("topic", ArgQuery, false),

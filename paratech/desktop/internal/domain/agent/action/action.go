@@ -141,7 +141,7 @@ func Restore(s State) (*Action, error) {
 	}
 	undoable := s.Status == StatusDone || s.Status == StatusUndoing || s.Status == StatusUndone || s.Status == StatusUndoRefused
 	if undoable {
-		if err := checkCompensation(s.Tool, s.Compensation, s.TargetVersion); err != nil {
+		if err := checkCompensation(s.Tool, s.Intent, s.Compensation, s.TargetVersion); err != nil {
 			return nil, err
 		}
 	} else if s.Compensation != nil || s.TargetVersion != 0 {
@@ -228,12 +228,17 @@ func (a *Action) move(to Status, now time.Time) error {
 	return nil
 }
 
-func checkCompensation(t values.Tool, c Compensation, targetVersion int64) error {
+// checkCompensation checks the compensation of a DONE action of tool t with intent in. A create of createsTarget
+// undoes exactly the target its intent named, never another one.
+func checkCompensation(t values.Tool, in Intent, c Compensation, targetVersion int64) error {
 	if err := checkKind(t, c); err != nil {
 		return err
 	}
 	if targetVersion < 1 {
 		return fmt.Errorf("%w: no target version", ErrInvalidCompensation)
+	}
+	if _, creates := createsTarget[t]; creates && targetOf(c) != in.Target {
+		return fmt.Errorf("%w: %s undoes only the target of its intent", ErrInvalidCompensation, t)
 	}
 	return nil
 }
@@ -256,7 +261,7 @@ func (a *Action) Refusal() UndoRefusal { return a.refusal }
 // Complete records success: PENDING -> DONE with the compensation of the tool and the target version right after
 // the action.
 func (a *Action) Complete(c Compensation, targetVersion int64, now time.Time) error {
-	if err := checkCompensation(a.tool, c, targetVersion); err != nil {
+	if err := checkCompensation(a.tool, a.intent, c, targetVersion); err != nil {
 		return err
 	}
 	if err := a.move(StatusDone, now); err != nil {
@@ -299,8 +304,10 @@ func (a *Action) StartUndo(now time.Time) error {
 }
 
 // TargetRef is the target whose version TargetVersion is (for a folder: its subject); zero for a job.
-func (a *Action) TargetRef() values.Ref {
-	switch v := a.comp.(type) {
+func (a *Action) TargetRef() values.Ref { return targetOf(a.comp) }
+
+func targetOf(c Compensation) values.Ref {
+	switch v := c.(type) {
 	case RemoveSubject:
 		return v.Subject
 	case RemoveFolder:
@@ -312,6 +319,8 @@ func (a *Action) TargetRef() values.Ref {
 	case RestoreLessonInfo:
 		return v.Recording
 	case RestoreDue:
+		return v.Assignment
+	case RemoveAssignment:
 		return v.Assignment
 	}
 	return values.Ref{}

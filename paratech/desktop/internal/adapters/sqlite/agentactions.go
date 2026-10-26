@@ -294,6 +294,8 @@ func wireOf(c action.Compensation) (compensationWire, error) {
 		w.Work = v.Work.ID()
 	case action.StopWork:
 		w.Work, w.Job = v.Work.ID(), v.Job.ID()
+	case action.RemoveAssignment:
+		w.Assignment = v.Assignment.ID()
 	default:
 		return compensationWire{}, fmt.Errorf("unknown compensation %s", c.Kind())
 	}
@@ -347,6 +349,8 @@ func compensationOfWire(w compensationWire) (action.Compensation, error) {
 		return action.RemoveWork{Work: ref(values.KindWork, w.Work)}, nil
 	case action.CompStopWork:
 		return action.StopWork{Work: ref(values.KindWork, w.Work), Job: ref(values.KindJob, w.Job)}, nil
+	case action.CompRemoveAssignment:
+		return action.RemoveAssignment{Assignment: ref(values.KindAssignment, w.Assignment)}, nil
 	}
 	return nil, fmt.Errorf("unknown compensation kind %q", w.Kind)
 }
