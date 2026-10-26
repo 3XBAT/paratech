@@ -129,6 +129,19 @@ export interface AssignmentLineView {
   due: string;
 }
 
+/**
+ * The assignment an `action_line` of create_assignment added (catalog v6). The core reads it from the local data,
+ * never from the model; the title is still shown as plain text. subjectId, due ("YYYY-MM-DD") and time ("HH:MM";
+ * "23:59" when the student named no time) are "" when there is none.
+ */
+export interface AddedAssignmentView {
+  id: string;
+  title: string;
+  subjectId: string;
+  due: string;
+  time: string;
+}
+
 export type CardKind =
   | "plan"
   | "questions"
@@ -215,6 +228,8 @@ export interface CardView {
   text: string;
   /** A `reply` card: the assignments it lists, from the student's own data; empty for other cards. */
   assignments: AssignmentLineView[];
+  /** An `action_line` of create_assignment: the assignment it added; null for other cards, when gone or from an older core. */
+  assignment: AddedAssignmentView | null;
   stopReason: string;
   /** A `work` card: the work whose texts TurnkeyService.Work returns; "" for other cards. */
   workId: string;
@@ -429,6 +444,18 @@ function parseAssignmentLine(raw: unknown): AssignmentLineView {
   return { id: str(r, "id", w), title: str(r, "title", w), subjectId: str(r, "subjectId", w), due: str(r, "due", w) };
 }
 
+function parseAddedAssignment(raw: unknown): AddedAssignmentView {
+  const w = "added assignment";
+  const r = record(raw, w);
+  return {
+    id: str(r, "id", w),
+    title: str(r, "title", w),
+    subjectId: str(r, "subjectId", w),
+    due: str(r, "due", w),
+    time: str(r, "time", w),
+  };
+}
+
 function parseFreeWorkRef(raw: unknown): FreeWorkRef {
   const w = "free work";
   const r = record(raw, w);
@@ -463,6 +490,7 @@ export function parseCard(raw: unknown): CardView {
     text: str(r, "text", w),
     // null on other cards and from an older core.
     assignments: items(r.assignments, w, parseAssignmentLine),
+    assignment: nested(r, "assignment", parseAddedAssignment),
     stopReason: str(r, "stopReason", w),
     // An older core does not send them; only a `work` card needs its workId (checked where the card is built).
     workId: optStr(r, "workId", w),
