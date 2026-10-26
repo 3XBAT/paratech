@@ -167,15 +167,15 @@ type WaitingProposals interface {
 }
 
 // WorkFiles reads a turnkey work and the library around its finished file, for the send of the work to the teacher
-// (TASK-180). Implemented by the app over the work repository and cases/library.
+// (PRD section 10 steps 7-10, TASK-180). Implemented by the app over the work repository and cases/library.
 type WorkFiles interface {
-	// Work loads a work (ADR-0025); none wraps shared.ErrNotFound.
+	// Work loads a work (PRD section 10, ADR-0025); none wraps shared.ErrNotFound.
 	Work(ctx context.Context, id shared.WorkID) (*work.Work, error)
 
-	// Material returns a library material in any status (ADR-0024); none wraps shared.ErrNotFound.
+	// Material returns a library material in any status (PRD section 10, ADR-0024); none wraps shared.ErrNotFound.
 	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 
-	// Subjects lists the subjects of the library with their folders (ADR-0024).
+	// Subjects lists the subjects of the library with their folders (PRD section 10, ADR-0024).
 	Subjects(ctx context.Context) ([]*subject.Subject, error)
 }
 
