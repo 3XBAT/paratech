@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
-	"sync"
 
 	"paratech/hub/internal/domain/llm/values"
 )
@@ -61,7 +59,7 @@ func (c *Client) Stream(ctx context.Context, req values.Request, onDelta func(ch
 	err = c.post(ctx, body, contentTypeSSE, func(resp *http.Response) error {
 		var rerr error
 		if isJSON(resp) {
-			completion, rerr = readBuffered(resp, onDelta)
+			completion, rerr = c.readBuffered(resp, onDelta)
 			return rerr
 		}
 		completion, rerr = readStream(resp, onDelta)
@@ -73,9 +71,6 @@ func (c *Client) Stream(ctx context.Context, req values.Request, onDelta func(ch
 	return completion, nil
 }
 
-// noSSELogged makes the "provider answered without SSE" line appear once per process; a pointer so tests can reset it.
-var noSSELogged = new(sync.Once)
-
 func isJSON(resp *http.Response) bool {
 	mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	return err == nil && mt == contentTypeJSON
@@ -83,8 +78,8 @@ func isJSON(resp *http.Response) bool {
 
 // readBuffered reads a JSON answer to a streaming request (a gateway that buffers or ignores "stream") the way
 // Complete does and sends the whole output as one delta: the call is already paid, so a second one is never made.
-func readBuffered(resp *http.Response, onDelta func(string)) (values.Completion, error) {
-	noSSELogged.Do(func() { slog.Warn("provider answered without SSE") })
+func (c *Client) readBuffered(resp *http.Response, onDelta func(string)) (values.Completion, error) {
+	c.noSSE.Do(func() { c.log.Warn("provider answered without SSE") })
 	completion, err := readCompletion(resp)
 	if err != nil {
 		return values.Completion{}, err

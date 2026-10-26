@@ -89,7 +89,7 @@ func New(cfg config.Config, log *slog.Logger, opts ...Option) (*App, error) {
 		return nil, errors.New("app: output is required")
 	}
 	if cfg.Command == config.CommandServe {
-		parts, err := newLLMParts(cfg)
+		parts, err := newLLMParts(cfg, log)
 		if err != nil {
 			return nil, err
 		}
@@ -103,7 +103,7 @@ func New(cfg config.Config, log *slog.Logger, opts ...Option) (*App, error) {
 
 // newLLMParts builds the allowlist (the domain rules of alias, model id and cap), the provider client and the rate
 // limiter. Error messages never contain the provider key.
-func newLLMParts(cfg config.Config) (*llmParts, error) {
+func newLLMParts(cfg config.Config, log *slog.Logger) (*llmParts, error) {
 	if cfg.AnthropicAPIKey == "" {
 		return nil, fmt.Errorf("app: %s is required to serve", config.EnvAnthropicAPIKey)
 	}
@@ -115,7 +115,8 @@ func newLLMParts(cfg config.Config) (*llmParts, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: %s: %w", config.EnvLLMModels, err)
 	}
-	provider, err := anthropic.New(anthropic.Options{APIKey: cfg.AnthropicAPIKey, BaseURL: cfg.AnthropicBaseURL, Timeout: cfg.LLMTimeout})
+	provider, err := anthropic.New(anthropic.Options{APIKey: cfg.AnthropicAPIKey, BaseURL: cfg.AnthropicBaseURL, Timeout: cfg.LLMTimeout,
+		Log: log})
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
 	}

@@ -541,13 +541,16 @@ func jsonServer(t *testing.T, body string) (*httptest.Server, *atomic.Int32, *at
 }
 
 // captureLog points the default slog logger at a buffer for the test.
-func captureLog(t *testing.T) *bytes.Buffer {
+// newLoggedClient is newClient with its own logger writing into the returned buffer.
+func newLoggedClient(t *testing.T, baseURL string) (*anthropic.Client, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return &buf
+	c, err := anthropic.New(anthropic.Options{APIKey: testKey, BaseURL: baseURL, Timeout: time.Minute,
+		Log: slog.New(slog.NewTextHandler(&buf, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, &buf
 }
 
 // TestStreamReadsAJSONAnswer: a 200 JSON answer to a streaming request is read like Complete reads it and sent as one
@@ -617,10 +620,8 @@ func TestStreamMalformedJSONAnswer(t *testing.T) {
 
 // TestStreamLogsAJSONAnswerOnce: concurrent JSON answers write the line once, without texts or the key.
 func TestStreamLogsAJSONAnswerOnce(t *testing.T) {
-	logged := captureLog(t)
-	anthropic.ResetNoSSELog()
 	srv, hits, _ := jsonServer(t, bufferedJSON)
-	c := newClient(t, srv.URL, time.Minute)
+	c, logged := newLoggedClient(t, srv.URL)
 
 	const n = 8
 	var wg sync.WaitGroup
@@ -658,11 +659,24 @@ func TestStreamLogsAJSONAnswerOnce(t *testing.T) {
 	}
 }
 
+// TestStreamLogsOncePerClient: the once guard belongs to the client, not the process.
+func TestStreamLogsOncePerClient(t *testing.T) {
+	srv, _, _ := jsonServer(t, bufferedJSON)
+	for i := range 2 {
+		c, logged := newLoggedClient(t, srv.URL)
+		if _, err := c.Stream(t.Context(), newRequest(t, "x"), nil); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(logged.String(), "provider answered without SSE") != 1 {
+			t.Fatalf("client %d: log = %q, want the line once", i, logged.String())
+		}
+	}
+}
+
 // TestStreamSSELogsNothing: a real stream does not write the fallback line.
 func TestStreamSSELogsNothing(t *testing.T) {
-	logged := captureLog(t)
-	anthropic.ResetNoSSELog()
-	if _, err := newClient(t, serveSSE(t, sseNormal()).URL, time.Minute).Stream(t.Context(), newRequest(t, "x"), nil); err != nil {
+	c, logged := newLoggedClient(t, serveSSE(t, sseNormal()).URL)
+	if _, err := c.Stream(t.Context(), newRequest(t, "x"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if logged.Len() != 0 {
