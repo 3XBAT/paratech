@@ -293,8 +293,9 @@ type TurnkeyAnswer struct {
 // TurnkeyService is bound to the turnkey cards and the helper page: every exported method is callable from the page
 // by its full name. None of them sends or exports the work: StartForAssignment, AnswerQuestions, SkipQuestions and
 // Retry ask the reader (a paid call); StartWriting, ApproveOutline and Regenerate start a paid writing job whose paper
-// is filed in the local library; ExportPDF files the PDF of a done paper there too; the rest change only local data. The student's click is the consent to a paid call:
-// unlike the agent's triage_assignment, StartForAssignment leaves no entry in the agent's journal.
+// is filed in the local library; ExportPDF files the PDF of a done paper there too; the rest change only local data.
+// The student's click is the consent to a paid call: unlike the agent's triage_assignment, StartForAssignment leaves no
+// entry in the agent's journal.
 type TurnkeyService struct {
 	core TurnkeyUseCase
 	log  *slog.Logger
