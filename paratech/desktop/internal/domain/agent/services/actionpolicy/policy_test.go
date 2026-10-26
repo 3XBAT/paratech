@@ -80,6 +80,36 @@ func TestNeedsPlan(t *testing.T) {
 	}
 }
 
+// TestPaidWriteWithoutPlan pins the money rule over every tool (TASK-170): a paid write of unknown cost never runs
+// without a plan, and no write after the first one of a request does, whatever the cost estimate or triage say.
+func TestPaidWriteWithoutPlan(t *testing.T) {
+	costs := []int64{-1, 0, 1, PlanThresholdMicroUSD}
+	triages := []Triage{"", TriageFull}
+	for tool, r := range rules {
+		if r.Class != ClassU {
+			continue
+		}
+		for _, cost := range costs {
+			for _, tr := range triages {
+				first, err := NeedsPlan(tool, Facts{CostMicroUSD: cost, Triage: tr})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.Paid && cost <= 0 && first == ReasonNone {
+					t.Errorf("%s: paid write of unknown cost (%d) runs without a plan", tool, cost)
+				}
+				second, err := NeedsPlan(tool, Facts{WritesBefore: 1, CostMicroUSD: cost, Triage: tr})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if second == ReasonNone {
+					t.Errorf("%s: second write (cost %d, triage %q) runs without a plan", tool, cost, tr)
+				}
+			}
+		}
+	}
+}
+
 func TestCheckProvenance(t *testing.T) {
 	ref := func(k values.IDKind, id string) values.Ref {
 		r, err := values.NewRef(k, id)
