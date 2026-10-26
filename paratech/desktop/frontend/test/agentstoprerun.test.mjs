@@ -59,6 +59,19 @@ test("a progress update of an unknown request is shown as it is", () => {
   assert.equal(s.entries.length, 1);
 });
 
+test("a running request shows neither the old stopped card nor the old problem", () => {
+  const stopped = card({ kind: "stopped", stopReason: "user" });
+  let s = reducePanel(initialPanelState, { type: "update", update: update({ status: "STOPPED", stopReason: "user", cards: [stopped] }) });
+  s = reducePanel(s, { type: "update", update: update({ status: "EXECUTING", progress: true }) });
+  const m = entryModel(s.entries[0], last);
+  assert.equal(m.cards.some((c) => c.type === "stopped"), false);
+  assert.deepEqual(buttonIds(m), ["stop"]);
+
+  s = reducePanel(initialPanelState, { type: "update", update: update({ status: "FAILED", problem: "retry_required" }) });
+  s = reducePanel(s, { type: "update", update: update({ status: "PLANNING", progress: true }) });
+  assert.equal(entryModel(s.entries[0], last).cards.some((c) => c.type === "problem"), false);
+});
+
 // ---- Стоп ----
 
 test("«Стоп» is offered at the waiting line only while PLANNING or EXECUTING", () => {
@@ -101,7 +114,10 @@ test("«Повторить» is not offered where the stop card offers the next 
   assert.equal(modelOf(update({ status: "STOPPED", stopReason: "expired" })).rerun, false);
   assert.equal(modelOf(update({ status: "FAILED", problem: "retry_required" })).rerun, false);
   assert.equal(modelOf(update({ status: "FAILED", problem: "restart_required" })).rerun, false);
-  assert.equal(modelOf(update({ status: "STOPPED", problem: "rerun_blocked" })).rerun, false);
+  // After rerun_blocked it stays (the core checks again) and the reason stays shown.
+  const blocked = modelOf(update({ status: "STOPPED", problem: "rerun_blocked" }));
+  assert.equal(blocked.rerun, true);
+  assert.match(blocked.cards.find((c) => c.type === "problem").text, /Повтор недоступен/);
   // The other stop reasons keep it next to «Продолжить».
   for (const stopReason of ["user", "offline", "quota", "budget"]) {
     assert.equal(modelOf(update({ status: "STOPPED", stopReason })).rerun, true, stopReason);
@@ -136,6 +152,30 @@ test("the new request of a rerun is a new entry; the old one loses «Повто�
   const entries = orderedEntries(s.entries);
   assert.equal(entries.length, 2);
   assert.equal(entryModel(entries[0], { last: false, blocked: false }).rerun, false);
+});
+
+test("a rerun shows the new request at once with the same text; the update fills it", () => {
+  const sc = { text: "сделай", subjectId: "", lessonId: "", assignmentId: "", screen: "today" };
+  let s = reducePanel(initialPanelState, { type: "asked", id: 1, text: "сделай", scope: sc });
+  s = reducePanel(s, { type: "update", update: update({ turn: 1 }) });
+  s = reducePanel(s, { type: "rerunAsked", from: { threadId: "t1", turn: 1, text: "сделай", scope: sc } });
+  s = reducePanel(s, { type: "rerunAsked", from: { threadId: "t1", turn: 1, text: "сделай", scope: sc } });
+  assert.equal(s.entries.length, 2, "a repeat adds nothing");
+  const fresh = orderedEntries(s.entries).at(-1);
+  assert.equal(fresh.key, "thread:t1:2");
+  assert.equal(fresh.text, "сделай");
+  assert.equal(fresh.update, null);
+  assert.equal(entryModel(fresh, last).waiting, true);
+  const filled = reducePanel(s, { type: "update", update: update({ turn: 2, status: "PLANNING" }) });
+  assert.equal(filled.entries.length, 2);
+  assert.equal(orderedEntries(filled.entries).at(-1).update.status, "PLANNING");
+  assert.equal(orderedEntries(filled.entries).at(-1).text, "сделай");
+  // A refused call takes it back; a filled one stays.
+  assert.equal(reducePanel(s, { type: "rerunRefused", key: "thread:t1:2" }).entries.length, 1);
+  assert.equal(reducePanel(filled, { type: "rerunRefused", key: "thread:t1:2" }).entries.length, 2);
+  // A refusal that arrives as a problem update of the old request takes it back too.
+  const blocked = reducePanel(s, { type: "update", update: update({ turn: 1, status: "", problem: "rerun_blocked" }) });
+  assert.equal(blocked.entries.length, 1);
 });
 
 // ---- Busy-refused request ----
@@ -192,4 +232,17 @@ test("a second press on the same update is not a second call", () => {
   t.release("k");
   press();
   assert.equal(calls, 2, "a refused call frees the buttons");
+});
+
+test("both «Стоп» of a busy-refused request are one mark on the blocker; «Отправить ещё раз» has its own key", () => {
+  const s = busyState();
+  const refused = orderedEntries(s.entries).at(-1);
+  const blocking = blockingEntry(s.entries, refused);
+  const t = new PressTracker();
+  assert.equal(t.mark(blocking.key, blocking.update), true);
+  assert.equal(t.mark(blocking.key, blocking.update), false, "the blocker's own «Стоп» is a repeat");
+  assert.equal(t.mark(refused.key, refused.update), true, "resend is separate");
+  const stopped = reducePanel(s, { type: "update", update: update({ status: "STOPPED", stopReason: "user" }) });
+  const now = stopped.entries.find((x) => x.key === blocking.key);
+  assert.equal(t.busy(blocking.key, now.update), false, "the next update of the blocker frees it");
 });

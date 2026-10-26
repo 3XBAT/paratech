@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type AskInput, type CallProblem, parseUpdate, updateEvent } from "../bindings/agent.js";
+import { type AgentApi, agentApi, type AskInput, type CallProblem, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -188,22 +188,37 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
 
   const actionsFor = useCallback((e: Entry): CardActions => {
     const ref = { threadId: e.threadId, turn: e.turn };
-    const busy = pressed.current.busy(e.key, e.update);
-    // `always`: the buttons come back when the call ends (the call acts on another request, so no update of this one follows).
-    const run = (make: () => Promise<CallProblem>, always = false) => {
-      if (!pressed.current.mark(e.key, e.update)) {
+    const named = e.threadId !== "";
+    // A request the core has not named yet has no buttons of its own: one refused as busy stops the running request
+    // that blocks it, or is sent again.
+    const blocking = named ? undefined : blockingEntry(state.entries, e);
+    // Own buttons are off while a call runs; the refused request's «Стоп» is guarded on the blocker (below).
+    const busy = named && pressed.current.busy(e.key, e.update);
+    // `target`: the request whose update frees the buttons (default: this one). `onSuccess`: also free them when the
+    // call is accepted. A call the core refused produces no update, so the buttons come back at once.
+    const run = (
+      make: () => Promise<CallProblem>,
+      o: { key?: string; update?: UpdateView | null; onSuccess?: boolean; onRefused?: () => void } = {},
+    ) => {
+      const key = o.key ?? e.key;
+      if (!pressed.current.mark(key, o.update === undefined ? e.update : o.update)) {
         return;
       }
       redraw();
-      // A call the core refused produces no update, so the buttons come back at once.
       const release = () => {
-        pressed.current.release(e.key);
+        pressed.current.release(key);
         redraw();
+      };
+      const refused = () => {
+        o.onRefused?.();
+        release();
       };
       void make().then(
         (problem) => {
           setNotice(callProblemText(problem));
-          if (problem !== "" || always) {
+          if (problem !== "") {
+            refused();
+          } else if (o.onSuccess) {
             release();
           }
           if (problem === "offline") {
@@ -212,7 +227,7 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
         },
         () => {
           setNotice(callProblemText("failed"));
-          release();
+          refused();
         },
       );
     };
@@ -227,18 +242,28 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
       revise: () => Promise.resolve("invalid"), // Handled by the plan card, which asks for the wish first.
       resend: () => Promise.resolve("invalid"), // Handled below: it asks again, not a call on this request.
     };
-    // A request the core has not named yet has no buttons of its own: one refused as busy stops the running request
-    // that blocks it, or is sent again.
-    const named = e.threadId !== "";
-    const blocking = named ? undefined : blockingEntry(state.entries, e);
     const press = (id: ButtonId) => {
       if (!named) {
         if (id === "stop" && blocking) {
-          run(() => api.stop({ threadId: blocking.threadId, turn: blocking.turn }), true);
+          // Marked on the blocker, so both «Стоп» (its own and this one) and a double click make one call; the mark
+          // goes with the blocker's next update.
+          run(() => api.stop({ threadId: blocking.threadId, turn: blocking.turn }), { key: blocking.key, update: blocking.update });
         } else if (id === "resend" && e.scope !== null && e.text !== "" && pressed.current.mark(e.key, e.update)) {
           redraw();
           send(e.scope);
         }
+        return;
+      }
+      if (id === "rerun") {
+        // The new request shows at once with the same text; taken back if the call is refused.
+        const next = `thread:${e.threadId}:${e.turn + 1}`;
+        run(
+          () => {
+            dispatch({ type: "rerunAsked", from: { threadId: e.threadId, turn: e.turn, text: e.text, scope: e.scope } });
+            return api.rerun(ref);
+          },
+          { onSuccess: true, onRefused: () => dispatch({ type: "rerunRefused", key: next }) },
+        );
         return;
       }
       run(calls[id]);

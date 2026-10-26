@@ -35,6 +35,8 @@ export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: nu
 export type PanelAction =
   | { type: "asked"; id: number; text: string; scope: AskInput }
   | { type: "askResult"; id: number; problem: CallProblem }
+  | { type: "rerunAsked"; from: { threadId: string; turn: number; text: string; scope: AskInput | null } }
+  | { type: "rerunRefused"; key: string }
   | { type: "update"; update: UpdateView }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
@@ -84,7 +86,8 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   const key = threadKey(u.threadId, u.turn);
   const known = s.entries.find((e) => e.key === key);
   if (known) {
-    if (known.update && final.has(known.update.status) && !final.has(u.status)) {
+    // A problem-only update (a refused button) is no status: it must reach a finished request (a refused rerun).
+    if (known.update && final.has(known.update.status) && !final.has(u.status) && u.status !== "") {
       return s;
     }
     // A step went to the Hub: only the status and the stop reason move, the cards shown stay.
@@ -94,9 +97,14 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
     // A failed button operation: no status, no cards, only a problem. The request itself is unchanged, so keep its
     // cards and buttons and attach the problem; the next real update replaces it.
     if (known.update && u.status === "" && u.cards.length === 0) {
-      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, problem: u.problem } }) };
+      // A refused rerun comes this way too (the problem lands on the old request): take the shown new one back.
+      const next = threadKey(u.threadId, u.turn + 1);
+      const entries = replace(s.entries, key, { ...known, update: { ...known.update, problem: u.problem } });
+      return { ...s, entries: entries.filter((x) => !(x.key === next && x.update === null)) };
     }
-    return { ...s, entries: replace(s.entries, key, { ...known, update: u }) };
+    const replaced = replace(s.entries, key, { ...known, update: u });
+    const pending = threadKey(u.threadId, u.turn + 1);
+    return { ...s, entries: u.problem === "" ? replaced : replaced.filter((x) => !(x.key === pending && x.update === null)) };
   }
   const local = pendingLocal(s.entries, scopeKey(u));
   if (local) {
@@ -129,6 +137,27 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       }
       return { ...s, entries: replace(s.entries, e.key, { ...e, callProblem: a.problem }) };
     }
+    case "rerunAsked": {
+      // The new request is shown at once with the same text; the core's update for the next turn fills it by key.
+      const key = threadKey(a.from.threadId, a.from.turn + 1);
+      if (s.entries.some((x) => x.key === key)) {
+        return s;
+      }
+      const e: Entry = {
+        key,
+        seq: s.nextSeq,
+        threadId: a.from.threadId,
+        turn: a.from.turn + 1,
+        text: a.from.text,
+        scope: a.from.scope,
+        callProblem: "",
+        update: null,
+      };
+      return { ...s, entries: [...s.entries, e], nextSeq: s.nextSeq + 1 };
+    }
+    case "rerunRefused":
+      // Only a request the core never answered for is taken back.
+      return { ...s, entries: s.entries.filter((x) => !(x.key === a.key && x.update === null)) };
     case "update":
       return applyUpdate(s, a.update);
     case "history":

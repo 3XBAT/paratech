@@ -457,30 +457,34 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   }
 
   // One stop card, from the stopped card or the update's own reason; the problem adds a button for what to do next.
-  const stopCard = u.cards.find((c) => c.kind === "stopped");
-  const reason = stopCard?.stopReason || u.stopReason;
+  // A running request shows neither: the stopped card and the problem are leftovers of the previous run (progress
+  // updates keep the cards and move only the status).
+  const running = activeStatuses.has(u.status);
+  const problem = running ? "" : u.problem;
+  const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
+  const reason = running ? "" : stopCard?.stopReason || u.stopReason;
   const stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
   if (stop) {
     cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
   }
-  if (u.problem !== "") {
-    let next: ButtonId[] = u.problem === "retry_required" ? ["retry"] : u.problem === "restart_required" ? ["restart"] : [];
+  if (problem !== "") {
+    let next: ButtonId[] = problem === "retry_required" ? ["retry"] : problem === "restart_required" ? ["restart"] : [];
     // A request refused as busy has no thread: it can stop the one that blocks it, or be sent again. Only the last one.
     if (isBusyRefused(e) && ctx.last) {
       next = [...(ctx.blocked ? (["stop"] as const) : []), ...(e.text !== "" && e.scope !== null ? (["resend"] as const) : [])];
     }
-    cards.push({ type: "problem", text: updateProblemTexts[u.problem] ?? updateProblemTexts.failed, buttons: buttons(next) });
+    cards.push({ type: "problem", text: updateProblemTexts[problem] ?? updateProblemTexts.failed, buttons: buttons(next) });
   } else if (!stop && u.status === "CANCELLED") {
     cards.push({ type: "stopped", text: "Отменено", buttons: [] });
   }
 
   // «Повторить» only under the last request, and not where the stop card or the problem already offers the next step.
-  const offered = [...(stop?.buttons ?? []), ...(u.problem === "retry_required" ? ["retry" as const] : []), ...(u.problem === "restart_required" ? ["restart" as const] : [])];
+  const offered = [...(stop?.buttons ?? []), ...(problem === "retry_required" ? ["retry" as const] : []), ...(problem === "restart_required" ? ["restart" as const] : [])];
+  // After rerun_blocked it stays: the core checks again (the effects may have been undone since).
   const rerun =
     ctx.last &&
     e.threadId !== "" &&
     finishedStatuses.has(u.status) &&
-    u.problem !== "rerun_blocked" &&
     !offered.includes("retry") &&
     !offered.includes("restart");
   return { ...base, cards, rerun };
