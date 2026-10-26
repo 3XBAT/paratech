@@ -359,16 +359,32 @@ func (s *scriptedTurns) report() turnsReport {
 	}
 }
 
-// chanSink collects the updates; tests read them after Driver.Wait.
+// chanSink collects the updates and the drafts; tests read them after Driver.Wait. seq holds both in arrival order.
 type chanSink struct {
 	mu      sync.Mutex
 	updates []Update
+	drafts  []Draft
+	seq     []any
 }
 
 func (s *chanSink) Publish(u Update) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.updates = append(s.updates, u)
+	s.seq = append(s.seq, u)
+}
+
+func (s *chanSink) Draft(d Draft) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.drafts = append(s.drafts, d)
+	s.seq = append(s.seq, d)
+}
+
+func (s *chanSink) events() []any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.seq)
 }
 
 func (s *chanSink) all() []Update {

@@ -91,9 +91,11 @@ type Update struct {
 	Progress   bool
 }
 
-// Sink receives the updates of every request, from the Driver's goroutines; it must not block for long.
+// Sink receives the updates of every request, from the Driver's goroutines; it must not block for long. Draft gets
+// the draft of an answer being read (answer.go); the drafts of a call come before the update that shows its outcome.
 type Sink interface {
 	Publish(u Update)
+	Draft(d Draft)
 }
 
 // Clock gives today and the student's time zone for the dates of the read results.
@@ -175,7 +177,7 @@ func New(d Deps) (*Driver, error) {
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
-			deletions: d.Deletions, drafts: d.Drafts, clock: d.Clock, log: log,
+			deletions: d.Deletions, drafts: d.Drafts, clock: d.Clock, log: log, sink: d.Sink,
 		},
 	}, nil
 }

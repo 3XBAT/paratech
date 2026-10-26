@@ -83,7 +83,9 @@ type tools struct {
 	drafts      DraftVersions    // nil: list_assignments shows no draft version
 	clock       Clock
 	log         *slog.Logger
-	reuse       string // the answer reuse scope of the step run sets on its copy (answerScope)
+	reuse       string            // the answer reuse scope of the step run sets on its copy (answerScope)
+	sink        Sink              // the drafts of answer_question go to it
+	turn        agentturn.TurnRef // the request of the step run sets on its copy, for the drafts
 }
 
 // read is one read tool: it returns the result for the planner and the IDs the result shows.
@@ -122,7 +124,7 @@ func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran
 	case actionpolicy.ClassC:
 		return t.propose(ctx, st, c)
 	}
-	t.reuse = answerScope(st)
+	t.reuse, t.turn = answerScope(st), refOf(st)
 	out := t.read(ctx, st.Scope, c)
 	return ran{out: out, cards: answerCards(c, out)}
 }

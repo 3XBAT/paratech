@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { agentApi, emptyFilter, methods, parseHistory, parseState, parseUndo, parseUndoRequest, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
+import { agentApi, draftEvent, emptyFilter, methods, parseDraft, parseHistory, parseState, parseUndo, parseUndoRequest, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
 import {
   initialPanelState,
   orderedEntries,
@@ -156,6 +156,17 @@ test("parseUpdate checks the shape, tolerates null lists and drops unknown cards
   assert.throws(() => parseUpdate({ ...raw, turn: "1" }));
   assert.throws(() => parseUpdate(null));
   assert.throws(() => parseState({ link: "weird", readOnly: false }));
+});
+
+test("parseDraft reads the draft event: ids, turn and texts as strings only", () => {
+  assert.equal(draftEvent, "agent:draft");
+  const raw = { threadId: "th1", turn: 2, callId: "c1", texts: ["Ряд сходится", "второе"] };
+  assert.deepEqual(parseDraft(raw), raw);
+  assert.deepEqual(parseDraft({ ...raw, texts: null }).texts, []);
+  assert.throws(() => parseDraft({ ...raw, texts: ["ok", { html: "<b>x</b>" }] }));
+  assert.throws(() => parseDraft({ ...raw, turn: "2" }));
+  assert.throws(() => parseDraft({ ...raw, callId: 1 }));
+  assert.throws(() => parseDraft(null));
 });
 
 test("parseUpdate reads the assignments of a reply; null or missing is an empty list, a broken line drops the card", () => {
