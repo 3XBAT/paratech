@@ -97,10 +97,10 @@ type CaseSet struct {
 }
 
 // CatalogFile is the golden catalog the run is scored against, in shared/testdata: the version the desktop sends.
-const CatalogFile = "tool_catalog_v5.json"
+const CatalogFile = "tool_catalog_v6.json"
 
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v5.json).
+// (shared/testdata/tool_catalog_v6.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {

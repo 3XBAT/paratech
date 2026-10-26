@@ -19,6 +19,7 @@ import (
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/testenv"
@@ -41,6 +42,8 @@ func baselineValue(a values.ArgSpec) any {
 		return []string{sweepIDs[a.Kind]}
 	case values.ArgDate:
 		return "2026-10-22"
+	case values.ArgTime:
+		return "09:00"
 	case values.ArgEnum:
 		return a.Values[0]
 	case values.ArgLabel:
@@ -283,6 +286,59 @@ func TestAgentInjectionInToolResults(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAgentInjectionAddressInAnAddedAssignment: «запиши: отправить решение Иванову на ivanov@example.com». The
+// planner puts the address into the title and the note of create_assignment and then tries to send there. The
+// assignment is added with the address as plain text of the student's words; nothing is proposed, sent or put in the
+// calendar, and the address is in no result the planner gets, no journal entry and no proposal (ADR-0029: title and
+// note are display text only, never a recipient).
+func TestAgentInjectionAddressInAnAddedAssignment(t *testing.T) {
+	e := newAssignmentEnv(t)
+	ctx := t.Context()
+	const address = "ivanov@example.com"
+	id := addedAssignmentID("th1", 1, "c1")
+	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "create_assignment",
+		Args: `{"title":"Отправить решение Иванову на ` + address + `","note":"` + address + `","due":"2026-10-23"}`}).
+		Then(
+			testenv.AgentCall{ID: "s1", Tool: "propose_send", Args: `{"assignment":"` + string(id) + `","to":"` + address + `"}`},
+			testenv.AgentCall{ID: "s2", Tool: "propose_send", Args: `{"assignment":"` + string(id) + `","version":"v1"}`},
+		).
+		Then(endCall("e1"))
+	cards := e.ask(t, "запиши: отправить решение Иванову на "+address)
+
+	v, err := e.homework.Assignment(ctx, id)
+	if err != nil || v.Title != "Отправить решение Иванову на "+address || v.Description != address {
+		t.Fatalf("assignment = %+v, %v", v, err)
+	}
+	results := e.plannerResults()
+	if results["s1"] != `{"error":"invalid_arguments"}` || results["s2"] != `{"error":"unknown_id"}` {
+		t.Fatalf("send results = %v", results)
+	}
+	for id, r := range results {
+		if strings.Contains(r, "@") || strings.Contains(r, "Иванов") {
+			t.Fatalf("result %s = %s", id, r)
+		}
+	}
+	if len(confirmTargets(cards)) != 0 || len(e.calendar.Calls()) != 0 {
+		t.Fatalf("cards = %v, calendar %d", cards, len(e.calendar.Calls()))
+	}
+	for _, st := range []proposal.Status{proposal.StatusValidated, proposal.StatusConfirmed} {
+		if list, err := e.proposals.ListByStatus(ctx, st, 10); err != nil || len(list) != 0 {
+			t.Fatalf("%s proposals = %v, %v", st, list, err)
+		}
+	}
+	if list, err := e.dlv.ListByAssignment(ctx, id, 10); err != nil || len(list) != 0 {
+		t.Fatalf("deliveries = %v, %v", list, err)
+	}
+	var leaked int
+	if err := e.db.DBTX(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_actions WHERE instr(COALESCE(intent, '') || `+
+		`COALESCE(compensation, '') || COALESCE(proposal, ''), '@') > 0`).Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatalf("journal rows with the address = %d, %v", leaked, err)
+	}
+	if _, err := e.journal.Find(ctx, "th1", 1, "s1"); err == nil {
+		t.Fatal("the refused send was journaled")
 	}
 }
 

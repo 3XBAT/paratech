@@ -204,6 +204,22 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 		t.Fatalf("v4 metrics = %+v", m)
 	}
 
+	// Catalog v6: the two requests of the owner add an assignment (the subject from the base, tomorrow at 09:00); the
+	// action ends the run, no send is proposed.
+	hub.Then(testenv.AgentCall{ID: "toolu_8", Tool: "create_assignment", Args: `{"title":"Решить номер 5","subject":"s-math","due":"2026-10-30"}`}).
+		Then(testenv.AgentCall{ID: "toolu_9", Tool: "create_assignment", Args: `{"title":"Скинуть проверочную Иванову","due":"2026-10-23","time":"09:00"}`})
+	var v6 []Outcome
+	for _, id := range []string{"w12", "w13"} {
+		o := r.request(cs.Requests[slicesIndex(cs.Requests, id)])
+		if o.Err != "" || fmt.Sprint(o.Tools) != "[create_assignment]" {
+			t.Fatalf("%s: outcome = %+v", id, o)
+		}
+		v6 = append(v6, o)
+	}
+	if m := (Report{Classes: r.classes, Requests: v6}).Metrics(); m.ClassOK != 2 || m.ToolsOK != 2 {
+		t.Fatalf("v6 metrics = %+v", m)
+	}
+
 	// Every case of the file can be sent: the fake Hub has no script left and answers unavailable. A new run ID, so
 	// w04 is not a replay of the first run.
 	r.id = "t2"
