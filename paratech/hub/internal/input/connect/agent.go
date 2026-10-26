@@ -83,6 +83,8 @@ func turnOf(t *hubv1.AgentTurn) agentstep.Turn {
 	switch v := t.GetTurn().(type) {
 	case *hubv1.AgentTurn_StudentText:
 		return agentstep.Turn{Kind: values.TurnStudentText, StudentText: v.StudentText}
+	case *hubv1.AgentTurn_AgentReply:
+		return agentstep.Turn{Kind: values.TurnAgentReply, AgentReply: v.AgentReply}
 	case *hubv1.AgentTurn_Calls:
 		out := agentstep.Turn{Kind: values.TurnCalls, Seal: v.Calls.GetSeal()}
 		for _, c := range v.Calls.GetCalls() {

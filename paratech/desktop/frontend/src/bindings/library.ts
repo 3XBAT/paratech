@@ -13,6 +13,7 @@ export const methods = {
   createFolder: `${service}.CreateFolder`,
   materials: `${service}.Materials`,
   importFile: `${service}.ImportFile`,
+  openMaterial: `${service}.OpenMaterial`,
 } as const;
 
 /** The error texts of the Go binding (library.go); a Go test pins the same strings. */
@@ -176,6 +177,34 @@ export function parseImport(raw: unknown): LibraryImport {
   };
 }
 
+/** The outcome of «Открыть в Word / PowerPoint». */
+export type OpenStatus = "opened" | "not_found" | "refused" | "failed";
+
+export interface LibraryOpen {
+  status: OpenStatus;
+  /** The Russian text to show (never a path). */
+  message: string;
+}
+
+/** The texts of OpenMaterial by status; test/libraryOpen.test.mjs pins them to library_open.go. */
+export const openTexts: Readonly<Record<OpenStatus, string>> = {
+  opened: "Файл открывается в программе по умолчанию.",
+  not_found: "Файл не найден: возможно, его удалили.",
+  refused: "Этот файл нельзя открыть отсюда.",
+  failed: "Не удалось открыть файл. Попробуйте ещё раз.",
+};
+
+function isOpenStatus(v: unknown): v is OpenStatus {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(openTexts, v);
+}
+
+/** Reads the reply of OpenMaterial; an unknown reply is "failed". The text shown is always one of openTexts. */
+export function parseOpen(raw: unknown): LibraryOpen {
+  const r = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const status: OpenStatus = isOpenStatus(r.status) ? r.status : "failed";
+  return { status, message: openTexts[status] };
+}
+
 export interface LibraryApi {
   subjects(): Promise<LibrarySubject[]>;
   /** semester is a code or "" for the current one. */
@@ -185,6 +214,8 @@ export interface LibraryApi {
   materials(subjectId: string): Promise<LibraryMaterial[]>;
   /** «Добавить файл»: the native open dialog. */
   importFile(): Promise<LibraryImport>;
+  /** «Открыть в Word / PowerPoint»: only the ID crosses; a failed call is "failed". */
+  openMaterial(id: string): Promise<LibraryOpen>;
 }
 
 export function libraryApi(call: CallByName): LibraryApi {
@@ -194,5 +225,12 @@ export function libraryApi(call: CallByName): LibraryApi {
     createFolder: async (subjectId, name) => parseFolder(await call(methods.createFolder, subjectId, name)),
     materials: async (subjectId) => list(await call(methods.materials, subjectId), "materials", parseMaterial),
     importFile: async () => parseImport(await call(methods.importFile)),
+    openMaterial: async (id) => {
+      try {
+        return parseOpen(await call(methods.openMaterial, id));
+      } catch {
+        return parseOpen(null);
+      }
+    },
   };
 }

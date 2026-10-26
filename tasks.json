@@ -3045,7 +3045,7 @@
                 "go test -race ./desktop/internal/domain/coursework/answer/... ./desktop/internal/cases/answering/... ./desktop/internal/input/agent/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-143",
@@ -3803,7 +3803,7 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-178",
@@ -3898,7 +3898,7 @@
                 "buf lint, buf breaking и buf generate в paratech/shared; go build ./desktop/... (новое поле не ломает десктоп)"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-182",

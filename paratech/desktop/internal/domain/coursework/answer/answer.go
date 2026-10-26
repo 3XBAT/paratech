@@ -3,7 +3,6 @@ package answer
 import (
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/services/citation"
@@ -104,7 +103,7 @@ func check(st State) error {
 	switch {
 	case st.ID.Validate() != nil:
 		return bad("id")
-	case !strings.HasPrefix(st.Key, keyPrefix) || len(st.Key) != len(keyPrefix)+64:
+	case !validKey(st.Key):
 		return bad("key")
 	case st.Subject != "" && st.Subject.Validate() != nil:
 		return bad("subject")
