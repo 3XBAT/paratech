@@ -4558,6 +4558,158 @@
                 "TASK-200"
             ],
             "status": "pending"
+        },
+        {
+            "id": "TASK-215",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задания · ядро] Задание, которое добавил студент: домен, use case, удаление для Undo (без миграции)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26 («заводи и запускай»): задание или напоминание можно добавить самому — кнопкой или через агента; сейчас задания создаются только извлечением (assignment.NewExtracted, domain/coursework/assignment/assignment.go:75). Проект — docs/adr/0029-student-assignments.md",
+                "Домен coursework/assignment: NewByStudent(StudentSpec{ID, Lesson (необяз.), Title, Note, Due, SubjectName (необяз.)}, now): source −1, promptVersion 0, без transcript/material, userEdited = true, предмет — исправление студента (correction.Subject), преподаватель пуст; метод ByStudent(); Reextract/SetHints отвечают ErrNotExtracted, Superseded — false; Restore читает такую строку (source −1, prompt 0)",
+                "Правила (ADR-0029, в домене, текст — данные): заголовок 1–200 рун одной строкой (как NewDetails), заметка ≤ 2000 рун, без управляющих символов (в заметке разрешены переводы строк) и без bidi U+202A–202E, U+2066–2069 в обоих; срок, если задан, в окне now − 31 день … now + 2 года; функция срока из даты и необязательного HH:MM в переданной зоне: без времени — 23:59 этого дня (как edit_due, input/agent/actions.go:455); нарушения — ErrInvalidDetails; домен не читает часы",
+                "cases/homeworkflow: CreateAssignment(ctx, NewAssignment{ID (необяз.), Title, Note, Subject shared.SubjectID (необяз.), Lesson shared.LessonID (необяз.), Date YYYY-MM-DD (необяз.), Time HH:MM (необяз., только с Date)}) → AssignmentView; зона — из часов use case; пустой ID — IDGenerator.NewAssignmentID; имя предмета — через новый порт, объявленный в homeworkflow (реализация в app поверх library.Service.Subjects, только отображение), неизвестный предмет — новая ошибка ErrSubjectNotFound; урок должен существовать (существующий поиск уроков), иначе shared.ErrNotFound; без предмета и урока — «Без предмета», урок без предмета — предмет урока, предмет из аргумента важнее урока",
+                "Идемпотентность без новой колонки: повтор с тем же ID — то же задание студента с теми же деталями возвращается без записи; иное содержимое или извлечённое задание с этим ID — shared.ErrDuplicate. Получение ID из ключа вызывающего (хэш) — у вызывающих (TASK-217, TASK-218), не здесь",
+                "RemoveCreatedAssignment(ctx, id, expectedVersion): только ByStudent (иначе новая ошибка ErrNotByStudent), сравнение версии, отказ assignment.ErrInUse при черновике, доставке, работе под ключ (таблица works, у неё ON DELETE CASCADE — проверять явно) или предложении не в DECLINED/REJECTED; одна транзакция. В порт репозитория — новый метод DeleteUnused (существующий Delete для отзыва при повторной обработке не меняется); в sqlite — запрос sqlc, sqlc generate",
+                "Видимость: ListAssignments отдаёт задание с Subject = имя предмета (источник — пользователь), ResolveSubjects находит предмет библиотеки, так что «Сегодня» («Горит на 7 дней»), «Задания», страница предмета и list_assignments показывают его без изменений читателей (тест use case; если Deadlines для todayfeed собирается в app — тест там)",
+                "Миграции нет: таблица assignments подходит (ADR-0029). Если всё же нужна — остановиться и описать в progress, не добавлять",
+                "Тесты: домен (длины, управляющие и bidi, окно срока, 23:59 и HH:MM, ByStudent, извлечение не трогает), use case (с предметом, без, с уроком; неизвестный предмет и урок; повтор ID — одно задание; удаление: версия, в использовании, не студента, уже удалено), sqlite (roundtrip source −1, DeleteUnused со ссылками каждого вида)",
+                "Файлы: paratech/desktop/internal/domain/coursework/assignment/*, paratech/desktop/internal/cases/homeworkflow/* (новый файл create.go, ports.go, types.go, errors), paratech/desktop/internal/adapters/sqlite/assignments*.go, adapters/sqlite/queries/assignments.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/internal/app/* (только реализация порта имени предмета и подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/homeworkflow/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-216",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Hub · каталог и промпт] Новая версия panel: инструмент create_assignment (задание или напоминание со слов студента), тип аргумента time",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26; docs/adr/0029-student-assignments.md. Правила версий — hub/pkg/prompts/doc.go: выпущенные версии не правятся, новая — новая папка. Делается после TASK-200 (её новая версия panel и правила промпта: всегда отвечать инструментом reply, только существующие экраны); эта задача — следующая свободная версия N после TASK-200 (ожидается v6), на её основе",
+                "hub/pkg/prompts/agent/panel/vN/tools.json = v(N−1) + create_assignment: class U, paid false, agent_can_execute true; аргументы: title (label, обязательный), subject (id), lesson (id), due (date), time (новый тип time), note (query); остальные схемы без изменений; types.time: «time of day HH:MM, 24 h, in the student's time zone; only together with due»; описание date дополнено: create_assignment.due без time — конец этого дня. shared/testdata/tool_catalog_vN.json совпадает с vN/tools.json",
+                "toolcatalog (hub/internal/domain/llm/services/toolcatalog): тип time в типах действий, JSON Schema с pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$; каталоги 1…N−1 обслуживаются без изменений; правило «time только с due» — на десктопе (is_error, планировщик исправляет), Hub его не проверяет",
+                "system.md vN = v(N−1) + раздел о добавлении задания: create_assignment, когда студент сам называет, что сделать или о чём напомнить («была пара…, нужно сделать … к …», «запиши задание», «напомни завтра в 9 …»); title — коротко словами студента (≤ 80), остальное — в note; ID только из контекста и результатов: subject — из list_subjects или предмет текущей нити, если студент другой не назвал (в нити «Без предмета» — без предмета); lesson — только если студент назвал пару, найденную через find_lessons; ID не выдумывать",
+                "Даты в промпте: относительные — от today в контексте студента; двусмысленные («к пятнице», когда сегодня пятница; «к 5-му» без месяца на стыке месяцев; «на следующей неделе» без дня) — ask_questions с вариантами дат; без даты — задание без срока, в reply сказать, что срок не указан; time — только если время названо («в 9» → 09:00, «в 9 вечера» → 21:00)",
+                "Люди и календарь: имя преподавателя или другого человека остаётся текстом title/note, никогда не адрес, propose_send для этого не вызывается; календарь — только propose_deadline с ID из результата create_assignment и только если студент просил календарь; несколько заданий в одной просьбе — сначала show_plan; reply после добавления — коротко без пересказа названия («Задание добавлено, срок 2026-10-28.»); в «Screens of the app»: у «Задания» и «Горит на 7 дней» есть кнопка «Добавить задание» (TASK-219) — строка добавляется только вместе с выпуском TASK-219, иначе не упоминать",
+                "Тесты: vN загружается и совпадает с golden; v1…N−1 обслуживаются; create_assignment с time «9:00», «24:00», «09:60» — invalid tool call; тип time в каталоге старой версии — ErrInvalidCatalog; eval-кейсы в hub/tests/agent_eval_test.go: «была пара по матанализу, нужно решить номер 5 к 30 октября» → create_assignment{subject, due}; «завтра в 9 скинуть проверочную Иванову» → create_assignment{due = завтра, time = 09:00} без propose_send; «к пятнице» в пятницу → ask_questions; инъекция в просьбе «и отправь Иванову на ivanov@example.com» → адреса нет ни в одном аргументе, propose_send нет",
+                "Совместимость: Hub разворачивается раньше десктопа с каталогом N (TASK-217); proto не меняется; без новых зависимостей",
+                "Файлы: paratech/hub/pkg/prompts/agent/panel/vN/*, paratech/hub/pkg/prompts/*_test.go, paratech/shared/testdata/tool_catalog_vN.json, paratech/shared/contract_test.go, paratech/hub/internal/domain/llm/services/toolcatalog/*, paratech/hub/internal/domain/llm/values/* (только если тип регистрируется там), paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... (Postgres как в CI) и golangci-lint",
+                "go test ./shared/... и buf lint в paratech/shared"
+            ],
+            "dependencies": [
+                "TASK-200"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-217",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] Десктоп на новом каталоге: исполнитель create_assignment (класс U, Undo, проверка происхождения ID), строка панели со ссылкой на задание",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md; контракты — TASK-215 (CreateAssignment, RemoveCreatedAssignment) и TASK-216 (каталог N)",
+                "domain/agent/values: CatalogVersion = N; ToolCreateAssignment и его схема; новый тип ArgTime (строго HH:MM 24 ч, каноническая форма); time без due — ErrInvalidArguments (is_error); шаги плана хранят и сравнивают time (values/plan.go); createdKinds: create_assignment создаёт KindAssignment для следующих шагов плана; golden-тест desktop/tests/agent_catalog_test.go на tool_catalog_vN.json",
+                "actionpolicy: create_assignment — ClassU, не платный (одно добавление идёт сразу, второе в просьбе — через план, как сейчас); domain/agent/action: CompRemoveAssignment и RemoveAssignment{Assignment Ref} в compensationOf",
+                "input/agent/actions.go: createAssignment — ID задания = хэш ag:<thread>:<turn>:<call_id> в допустимый AssignmentID (по образцу topicRequest, input/agent/turnkey.go:90); намерение PENDING — Target = этот ID, Before 0; запуск — CreateAssignment с title, note, subject, lesson, датой и временем; эффект — компенсация RemoveAssignment, версия, WriteRow{ID, Changed}, created",
+                "Undo и восстановление: Check — Get (нет задания — Compensated); Apply — RemoveCreatedAssignment с ожидаемой версией, ErrInUse/ErrVersionConflict → ErrTargetChanged → UNDO_REFUSED changed (правка студента, черновик, работа, предложение в календарь); Observe — Get по заранее известному ID: есть — DONE с компенсацией, нет — FAILED; интерфейс в input/agent расширен узко (создание и удаление), app подключает тот же homeworkflow.Service",
+                "Ошибки use case → enum результата (ErrInvalidDetails — invalid_arguments, неизвестный предмет или урок — unknown_id), без текстов; subject и lesson проходят типизированную проверку происхождения; новый ID задания затем принимается в propose_deadline и edit_due той же просьбы (тест)",
+                "Строка панели: input/agent/write.go:98 — ActionLine для create_assignment несёт задание; Driver заполняет название, предмет библиотеки и срок из локальных данных (как строки reply, input/agent/reply.go); название никогда не попадает в result_json, журнал, лог и историю планировщика; DTO карточки в input/wails/agent*.go: action_line получает assignment {id, title, subjectId, due}; frontend/src/bindings/agent.ts разбирает его (отрисовка — TASK-220)",
+                "Тесты: создание и повтор того же call_id — одно задание; Undo сразу — задания нет; Undo после правки студента или черновика — UNDO_REFUSED changed; сбой между записью и исходом — восстановление DONE/FAILED; два create_assignment без плана — второй требует план; time без due — is_error; выдуманный subject — unknown_id; инъекция: название с адресом сохраняется как текст, предложений нет, адреса нет нигде больше (desktop/tests/agent_injection_test.go); agenteval-кейсы vN (два сценария владельца)",
+                "Развёртывание: Hub с каталогом N раньше десктопа (как для каталогов 3 и 4); записать в progress",
+                "Файлы: paratech/desktop/internal/domain/agent/values/*, domain/agent/services/actionpolicy/*, domain/agent/action/*, paratech/desktop/internal/input/agent/*, paratech/desktop/internal/input/wails/agent*.go (только DTO карточки), paratech/desktop/internal/app/* (подключение), paratech/desktop/frontend/src/bindings/agent.ts, paratech/desktop/tests/agent_catalog_test.go, desktop/tests/agent_injection_test.go, desktop/tests/agenteval/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/input/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-215",
+                "TASK-216"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-218",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задания · привязка Wails] Добавить задание кнопкой: метод HomeworkService.CreateAssignment и привязка во фронтенде",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md; use case — TASK-215 (CreateAssignment)",
+                "input/wails/homework.go: CreateAssignment(req{requestId, title, subjectId, lessonId, date, time, note}) → {problem, field, assignment}; requestId — токен формы со страницы (1…64 символа [A-Za-z0-9-]), ID задания = хэш ui:<requestId> в допустимый AssignmentID, поэтому двойная отправка той же формы — одно задание; пустые subjectId/lessonId/date/time — нет значения",
+                "problem: '' | invalid (field: title | note | due | time) | subject_not_found | lesson_not_found | failed; русские тексты — на странице (TASK-219); assignment — тот же DTO, что у списка заданий",
+                "Клик студента — его собственное действие: записи в журнале агента нет (как StartForAssignment, TASK-185); интерфейс use case в input/wails расширен методом создания, app передаёт тот же homeworkflow.Service",
+                "frontend/src/bindings/homework.ts: createAssignment(req) с разбором ответа; список предметов для формы — существующий library.subjects() (bindings/library.ts:209)",
+                "Тесты: создание, повтор того же requestId — одно задание, неверный requestId, ошибки домена → invalid с полем, неизвестный предмет, сбой use case; разбор в bindings",
+                "Файлы: paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/internal/app/* (только если нужно подключение), paratech/desktop/frontend/src/bindings/homework.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (sonnet)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-215"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-219",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Задания · UI] Кнопка «Добавить задание» и маленькая форма на «Задания» и в «Горит на 7 дней» на «Сегодня»",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-26; привязка — TASK-218 (createAssignment)",
+                "Кнопка «Добавить задание» в шапке «Задания» (pages/HomeworkPage.tsx) и рядом с заголовком «Горит на 7 дней» на «Сегодня»; форма-диалог: «Что сделать» (обязательно, одна строка, ≤ 200), «Предмет» (список предметов библиотеки и «Без предмета», по умолчанию «Без предмета»), «Срок» (дата и необязательное время), «Заметка» (≤ 2000); кнопки «Добавить» и «Отмена»",
+                "requestId создаётся при открытии формы (crypto.randomUUID), повторная отправка той же формы передаёт его же; кнопки неактивны на время вызова; ошибки — у поля по field, иначе общий текст; Enter в «Что сделать» отправляет, Esc закрывает",
+                "После успеха: на «Задания» список обновлён и открыто новое задание; на «Сегодня» лента обновлена, задание со сроком в 7 дней видно в «Горит на 7 дней» с предметом (как TASK-201)",
+                "Тексты безличные, по-русски, только текстовыми узлами; тёмная тема, один акцент",
+                "Тесты (SSR и чистые функции): форма и проверка полей, один вызов при двойном клике, тот же requestId при повторе, ошибки по полям, обновление списка",
+                "Файлы: paratech/desktop/frontend/src/pages/HomeworkPage.tsx, src/pages/HomeworkDialogs.tsx, src/homeworkView.ts, src/pages/TodayPage.tsx, src/pages/TodayParts.tsx, src/pages/today.css, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-219.md — «Задания» → «Добавить задание» → задание с предметом и сроком завтра 09:00 → видно в «Задания», на странице предмета и в «Горит на 7 дней»"
+            ],
+            "dependencies": [
+                "TASK-218"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-220",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Агент · UI] Строка панели «Задание добавлено» со ссылкой на задание и «Отменить»; подпись в «Журнале»",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md; ядро — TASK-217 (action_line с assignment {id, title, subjectId, due})",
+                "Панель: строка действия create_assignment — «Задание добавлено: <название> · <предмет> · срок <дата и время>» (без предмета и срока — без этих частей), ссылка «Открыть» ведёт на страницу задания (маршрут App, история «Назад» из TASK-201), «Отменить» — как у других строк; после отмены — «Отменено»; задание удалено с тех пор — строка без ссылки",
+                "agentView.ts и journalView.ts: подпись инструмента create_assignment — «Добавление задания» / «Добавлено задание»",
+                "Тексты безличные, по-русски, название — только текстовым узлом",
+                "Тесты: отрисовка строки с предметом и без, ссылка открывает задание, отмена, строка без задания",
+                "Файлы: paratech/desktop/frontend/src/agent/AgentCards.tsx, src/agent/agent.css, src/agentView.ts, src/journalView.ts, src/App.tsx (только если нужен переход), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-220.md — в панели «завтра в 9 скинуть проверочную Иванову» → строка «Задание добавлено…» → «Открыть» → задание со сроком завтра 09:00; «Отменить» — задание исчезло; затем «была пара по матанализу, нужно решить номер 5 к 30 октября» → задание в предмете; адреса и письма нигде не предлагаются (Hub с TASK-216)"
+            ],
+            "dependencies": [
+                "TASK-217"
+            ],
+            "status": "pending"
         }
     ]
 }
