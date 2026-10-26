@@ -37,6 +37,12 @@ type TurnRef struct {
 	Turn   int
 }
 
+// IdleInput names the thread whose request an operation found running: by its ID, else by the scope of an Ask.
+type IdleInput struct {
+	Thread shared.ThreadID
+	Scope  values.Scope
+}
+
 // Outcome is what the Driver reports for one call it ran: the result built by the domain mapper (ADR-0022), the IDs
 // it showed the planner (they become known to the provenance check) and the ID a create call made.
 type Outcome struct {

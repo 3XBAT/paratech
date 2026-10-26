@@ -54,9 +54,30 @@ export function askInput(ctx: AgentContext, text: string): AskInput {
   return { ...ctx.ask, text };
 }
 
-/** True for Ctrl+K (Cmd+K on a Mac keyboard layout), the shortcut that focuses the panel input. */
-export function isFocusPanelKey(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {
-  return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k";
+/**
+ * True for Ctrl+K (Cmd+K on a Mac keyboard layout), the shortcut of the panel. It reads the physical key: on the
+ * Russian layout `key` is «л», `code` stays "KeyK".
+ */
+export function isFocusPanelKey(e: { code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {
+  return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "KeyK";
+}
+
+/** What Ctrl+K does: a closed panel opens (and takes focus), an open one closes. */
+export function panelShortcut(open: boolean): "open" | "close" {
+  return open ? "close" : "open";
+}
+
+/** What a key does in the request field: Enter sends, Shift+Enter breaks the line, Enter confirming an IME word does neither. */
+export function composerKey(e: { key: string; shiftKey: boolean; isComposing?: boolean; keyCode?: number }): "send" | "none" {
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing === true || e.keyCode === 229) {
+    return "none";
+  }
+  return "send";
+}
+
+/** The request field sits under the header until the first request, then at the bottom of the panel like in a chat. */
+export function inputPlacement(entryCount: number): "top" | "bottom" {
+  return entryCount === 0 ? "top" : "bottom";
 }
 
 /** A request text to send: trimmed, null when empty. */

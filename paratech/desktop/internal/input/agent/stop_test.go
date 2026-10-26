@@ -13,6 +13,7 @@ import (
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/shared"
 )
 
 var ref1 = agentturn.TurnRef{Thread: th1, Turn: 1}
@@ -114,6 +115,10 @@ func (s *stopTurns) Rerun(_ context.Context, ref agentturn.TurnRef) (agentturn.S
 
 func (s *stopTurns) Cancel(context.Context, agentturn.TurnRef) (agentturn.Step, error) {
 	return agentturn.Step{}, errNotScripted
+}
+
+func (s *stopTurns) RecoverIdle(context.Context, agentturn.IdleInput, func(shared.ThreadID) bool) (bool, error) {
+	return false, nil
 }
 
 type stopReport struct {

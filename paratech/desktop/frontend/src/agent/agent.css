@@ -15,16 +15,21 @@
 @media (prefers-reduced-motion: reduce) { .ag-resize::after { transition: none; } }
 
 .ag { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.ag-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 4px 12px 8px 16px; }
+.ag-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 4px 12px 0 16px; }
+.ag-ctx-wrap { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 8px 16px; }
+/* The request field is one element: before the first request it is under the title, after it at the bottom. */
+.ag-in-bottom .ag-ctx-wrap { order: 1; padding-bottom: 4px; }
+.ag-in-bottom .ag-thread { order: 2; }
+.ag-in-bottom .ag-ask-form { order: 3; padding: 8px 12px 12px 16px; }
 .ag-title { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .ag-name { font-weight: 600; }
 .ag-kbd { margin-left: auto; padding: 0 4px; border-radius: var(--r-xs); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line); color: var(--muted); font: inherit; font-size: 11.5px; line-height: 18px; font-weight: 500; }
-.ag-ask-form { display: flex; align-items: center; gap: 8px; }
+.ag-ask-form { flex: none; display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px 0 16px; }
 .ag-send { flex: none; display: inline-grid; place-items: center; width: var(--h-lg); height: var(--h-lg); padding: 0; border: 0; border-radius: var(--r-lg); background: var(--acc); color: #fff; cursor: pointer; }
 .ag-send:hover:not(:disabled) { filter: brightness(1.08); }
 .ag-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ag-send:disabled { background: var(--fill); color: var(--muted); cursor: not-allowed; }
-.ag-input { flex: 1; min-width: 0; height: var(--h-lg); padding: 0 12px; border: 0; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); color: var(--text); font: inherit; }
+.ag-input { flex: 1; min-width: 0; box-sizing: border-box; min-height: var(--h-lg); max-height: calc(6 * 20px + 16px); padding: 8px 12px; line-height: 20px; resize: none; overflow-y: auto; scrollbar-width: thin; border: 0; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--btn-line), var(--sh-btn); color: var(--text); font: inherit; }
 .ag-input::placeholder { color: var(--muted); }
 .ag-input:focus { outline: none; box-shadow: 0 0 0 2px var(--accent); }
 .ag-input:disabled { background: var(--fill); cursor: not-allowed; }
@@ -80,7 +85,8 @@
 .ag-wdot:nth-child(3) { animation-delay: .4s; }
 @media (prefers-reduced-motion: reduce) { .ag-wdot { animation: none; opacity: 1; } }
 .ag-vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.ag-card-wait { display: flex; flex-direction: column; align-items: flex-start; }
+.ag-card-wait { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 16px; }
+.ag-card-wait .ag-actions { justify-content: center; margin-top: 8px; }
 .ag-file { display: flex; align-items: center; gap: 8px; }
 .ag-file .i { flex: none; color: var(--muted); }
 .ag-file-kind { color: var(--muted); }

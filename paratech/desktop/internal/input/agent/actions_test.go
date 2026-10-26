@@ -362,7 +362,7 @@ func TestUndoOfAPaidJob(t *testing.T) {
 		status job.Status
 	}{
 		{"queued", func(*world) {}, action.StatusUndone, action.NoUndoUndone, job.StatusCancelled},
-		{"finished", func(w *world) { w.jobs.set("job1", job.StatusCompleted) }, action.StatusUndoRefused, action.NoUndoResultReady, job.StatusCompleted},
+		{"finished", func(w *world) { w.jobs.set("job1", job.StatusCompleted) }, action.StatusDone, "", job.StatusCompleted},
 		{"running, not stoppable", func(w *world) { w.jobs.set("job1", job.StatusRunning); w.jobs.stuck = true },
 			action.StatusUndoRefused, action.NoUndoCannotStop, job.StatusRunning},
 		{"failed by itself", func(w *world) { w.jobs.set("job1", job.StatusFailed) }, action.StatusUndone, action.NoUndoUndone, job.StatusFailed},
@@ -373,7 +373,13 @@ func TestUndoOfAPaidJob(t *testing.T) {
 			_, e := act(t, w, writeCall(t, "c1", values.ToolMakeSummary, `{"recording":"r1"}`))
 			tt.before(w)
 			u, err := w.journal.Undo(t.Context(), e.ID)
-			if err != nil || u.Status != tt.want || u.NoUndo != tt.why {
+			if tt.name == "finished" {
+				// The result is ready: Undo is an error and the entry stays DONE.
+				got, gerr := w.store.Get(t.Context(), e.ID)
+				if !errors.Is(err, action.ErrResultReady) || gerr != nil || got.Status() != tt.want {
+					t.Fatalf("Undo = %+v, %v; entry %v, %v", u, err, got, gerr)
+				}
+			} else if err != nil || u.Status != tt.want || u.NoUndo != tt.why {
 				t.Fatalf("Undo = %+v, %v", u, err)
 			}
 			if st := w.activity.jobs[0].Status; st != tt.status {
