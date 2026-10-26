@@ -787,3 +787,8 @@ CREATE TABLE ticket_sets (
     updated_at  INTEGER NOT NULL
 );
 CREATE INDEX idx_ticket_sets_subject ON ticket_sets (subject_id);
+
+-- Migration 0032.
+-- settings: 1 when the agent shows «Такого задания нет — могу сделать как свободную работу» before a work on a topic
+-- (settings.FreeWorkNotice, on by default), 0 after «Больше не показывать».
+ALTER TABLE settings ADD COLUMN free_work_notice INTEGER NOT NULL DEFAULT 1 CHECK (free_work_notice IN (0, 1));

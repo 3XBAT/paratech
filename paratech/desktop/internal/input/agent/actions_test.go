@@ -476,20 +476,44 @@ func TestActionRefusals(t *testing.T) {
 	}
 }
 
-// triage_assignment with a topic (catalog v4) has no use case until TASK-188: "unavailable", nothing journaled, no
-// work started, as a free call and as a step of an approved plan; the topic is not in the result.
-func TestTriageTopicUnavailable(t *testing.T) {
+// triage_assignment with a topic (TASK-188) runs the topic triage with the call's key and the thread's subject, as a
+// free call (the card was off) and as a step of an approved plan: journaled with Undo RemoveWork, the planner sees the
+// work and enums only, never the topic.
+func TestTriageTopicRuns(t *testing.T) {
 	for _, step := range []int{-1, 0} {
 		w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
 		c := writeCall(t, "c1", values.ToolTriageAssignment, `{"topic":"Реформы Петра I, презентация"}`)
 		c.PlanStep = step
-		r, e := act(t, w, c)
-		if !r.out.Result.IsError || r.out.Result.ResultJSON != `{"error":"unavailable"}` || len(r.cards) != 0 {
-			t.Fatalf("plan step %d: result %+v, cards %+v", step, r.out.Result, r.cards)
+		at := req
+		at.Scope = mustScope(t, "s1")
+		r := w.tools(t).write(t.Context(), at, c)
+		e, err := w.journal.Find(t.Context(), req.Thread, req.Turn, "c1")
+		if err != nil || e.Status != action.StatusDone || e.Compensation != (action.RemoveWork{Work: mustRef(t, values.KindWork, "w1")}) {
+			t.Fatalf("plan step %d: journal %+v, %v", step, e, err)
 		}
-		if e.Status != "" || len(w.store.order) != 0 || len(f.calls) != 0 {
-			t.Fatalf("plan step %d: journal %+v (%d entries), triage calls %+v", step, e, len(w.store.order), f.calls)
+		if r.out.Result.IsError || strings.Contains(r.out.Result.ResultJSON, "Петра") {
+			t.Fatalf("plan step %d: result %+v", step, r.out.Result)
 		}
+		want := topicCall{request: "ag:" + string(req.Thread) + ":1:c1", text: "Реформы Петра I, презентация", subject: "s1"}
+		if len(f.topics) != 1 || f.topics[0] != want || len(f.calls) != 0 {
+			t.Fatalf("plan step %d: topic calls %+v, triage calls %+v", step, f.topics, f.calls)
+		}
+		u, err := w.journal.Undo(t.Context(), e.ID)
+		if err != nil || u.Status != action.StatusUndone {
+			t.Fatalf("plan step %d: Undo = %+v, %v", step, u, err)
+		}
+	}
+}
+
+// The request key of a topic work fits the work's limit: a long one is hashed, and keys of other calls differ.
+func TestTopicRequestKey(t *testing.T) {
+	short := topicRequest(origin{thread: "th1", turn: 3}, "toolu_01")
+	if short != "ag:th1:3:toolu_01" {
+		t.Fatalf("key = %q", short)
+	}
+	long := topicRequest(origin{thread: shared.ThreadID(strings.Repeat("t", 100)), turn: 3}, strings.Repeat("c", 64))
+	if len(long) != 64 || long == topicRequest(origin{thread: shared.ThreadID(strings.Repeat("t", 100)), turn: 4}, strings.Repeat("c", 64)) {
+		t.Fatalf("long key = %q", long)
 	}
 }
 
@@ -524,7 +548,7 @@ func TestRecoverAfterACrash(t *testing.T) {
 	ctx := t.Context()
 	begin := func(t *testing.T, w *world, c agentturn.Call) (prepared, agentjournal.Entry) {
 		t.Helper()
-		p, ok, err := w.actions.prepare(ctx, c.Call)
+		p, ok, err := w.actions.prepare(ctx, originOf(req), c.Call)
 		if !ok || err != nil {
 			t.Fatalf("prepare = %v, %v", ok, err)
 		}
@@ -633,7 +657,7 @@ func TestRecoverNeedsTheIntendedValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := newWorld(t)
 			c := writeCall(t, "c1", tt.tool, tt.args)
-			p, ok, err := w.actions.prepare(t.Context(), c.Call)
+			p, ok, err := w.actions.prepare(t.Context(), originOf(req), c.Call)
 			if !ok || err != nil {
 				t.Fatalf("prepare = %v, %v", ok, err)
 			}

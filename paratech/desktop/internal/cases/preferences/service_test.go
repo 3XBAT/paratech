@@ -46,6 +46,7 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 		DefaultSttModel:         s.DefaultSttModel(),
 		RecognitionLoad:         s.RecognitionLoad(),
 		Profile:                 s.Profile().Fields(),
+		FreeWorkNotice:          s.FreeWorkNotice(),
 		UpdatedAt:               s.UpdatedAt(),
 	}
 	s.Persisted(r.stored.Version)
@@ -79,7 +80,7 @@ func TestGetReturnsDefaults(t *testing.T) {
 	}
 	want := Toggles{
 		RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower,
-		RecognitionLoad: shared.DefaultRecognitionLoad,
+		RecognitionLoad: shared.DefaultRecognitionLoad, FreeWorkNotice: settings.DefaultFreeWorkNotice,
 	}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
@@ -103,7 +104,7 @@ func TestSetToggles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (Toggles{RecognitionLoad: shared.LoadGentle}) {
+	if got != (Toggles{RecognitionLoad: shared.LoadGentle, FreeWorkNotice: true}) {
 		t.Fatalf("after AC off: %+v, want both off", got)
 	}
 	if !repo.stored.UpdatedAt.Equal(start) {
@@ -175,6 +176,25 @@ func TestSetRecognitionLoad(t *testing.T) {
 	}
 	if read, err := s.Get(ctx); err != nil || read.RecognitionLoad != shared.LoadMax {
 		t.Fatalf("Get = %+v, %v; want max kept", read, err)
+	}
+}
+
+// TASK-188: «Больше не показывать» turns the free-work card off, the toggle of «Настройки» on again; the other
+// toggles stay.
+func TestSetFreeWorkNotice(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	s := newService(t, repo)
+
+	got, err := s.SetFreeWorkNotice(ctx, false)
+	if err != nil || got.FreeWorkNotice || repo.stored.FreeWorkNotice || !got.RecordingPromptsEnabled {
+		t.Fatalf("off = %+v, %v; stored %+v", got, err, repo.stored)
+	}
+	if read, err := s.Get(ctx); err != nil || read.FreeWorkNotice {
+		t.Fatalf("Get = %+v, %v; want off", read, err)
+	}
+	if got, err = s.SetFreeWorkNotice(ctx, true); err != nil || !got.FreeWorkNotice || !repo.stored.FreeWorkNotice {
+		t.Fatalf("on = %+v, %v", got, err)
 	}
 }
 

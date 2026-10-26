@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"paratech/desktop/internal/cases/knowledgebase"
+	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
@@ -25,9 +27,24 @@ type LessonReadiness interface {
 //   - Cost: no estimate exists yet, so it stays unknown (zero) and every paid write needs a plan (D8, conservative).
 //   - Triage: not reported (TASK-129 follow-up). triage_assignment is a paid write of unknown cost, so it runs only as
 //     a step of an approved plan, and every later write of the request must match that plan anyway.
+//   - FreeWorkNotice: for triage_assignment on a topic, whether the student wants the free-work card (the setting,
+//     WithNotice; on without it, so nothing is paid without the card).
 type Facts struct {
 	lessons   LessonReadiness
 	materials MaterialReadiness // nil: a material's summary is never ready
+	notice    NoticeReader      // nil: the free-work card is always shown
+}
+
+// NoticeReader reads whether the free-work card is on (cases/preferences, TASK-188).
+type NoticeReader interface {
+	Get(ctx context.Context) (preferences.Toggles, error)
+}
+
+// WithNotice returns Facts that read the free-work card setting.
+func (f *Facts) WithNotice(n NoticeReader) *Facts {
+	out := *f
+	out.notice = n
+	return &out
 }
 
 // MaterialReadiness tells whether the summary of a library material is stored (cases/homeworkflow).
@@ -53,6 +70,16 @@ func NewFacts(lessons LessonReadiness) (*Facts, error) {
 // Facts returns the facts of one call.
 func (f *Facts) Facts(ctx context.Context, call values.Call) (thread.Facts, error) {
 	tool := call.Tool()
+	if actionpolicy.FreeTopic(call) {
+		if f.notice == nil {
+			return thread.Facts{FreeWorkNotice: true}, nil
+		}
+		t, err := f.notice.Get(ctx)
+		if err != nil {
+			return thread.Facts{}, err
+		}
+		return thread.Facts{FreeWorkNotice: t.FreeWorkNotice}, nil
+	}
 	if tool != values.ToolMakeSummary && tool != values.ToolMakeLectureText {
 		return thread.Facts{}, nil
 	}

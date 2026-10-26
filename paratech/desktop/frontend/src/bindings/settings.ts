@@ -18,6 +18,11 @@ export interface Settings {
   loadEstimates: ModelLoadEstimates | null;
   /** The name of that model; "" with null estimates. */
   loadEstimatesModel: string;
+  /**
+   * «Предупреждать перед свободной работой» (TASK-188): the agent shows «Такого задания нет — могу сделать как свободную
+   * работу» before a work on a topic; off after «Больше не показывать» on that card.
+   */
+  freeWorkNotice: boolean;
 }
 
 /** «Профиль студента» (TASK-094): the title page of a homework Word file names these; "" is not set. */
@@ -48,6 +53,7 @@ export const methods = {
   setRecognitionLoad: "paratech/desktop/internal/input/wails.SettingsService.SetRecognitionLoad",
   getProfile: "paratech/desktop/internal/input/wails.SettingsService.GetProfile",
   saveProfile: "paratech/desktop/internal/input/wails.SettingsService.SaveProfile",
+  setFreeWorkNotice: "paratech/desktop/internal/input/wails.SettingsService.SetFreeWorkNotice",
 } as const;
 
 /** Checks the shape of a reply; a malformed reply is an error, not a default. */
@@ -62,12 +68,16 @@ export function parseSettings(raw: unknown): Settings {
   if (typeof r.loadEstimatesModel !== "string") {
     throw new Error("settings: loadEstimatesModel is not a string");
   }
+  if (typeof r.freeWorkNotice !== "boolean") {
+    throw new Error("settings: freeWorkNotice is not a boolean");
+  }
   return {
     recordingPromptsEnabled: r.recordingPromptsEnabled,
     processOnlyOnAcPower: r.processOnlyOnAcPower,
     recognitionLoad: parseRecognitionLoad(r.recognitionLoad, "settings"),
     loadEstimates: parseModelLoadEstimates(r.loadEstimates),
     loadEstimatesModel: r.loadEstimatesModel,
+    freeWorkNotice: r.freeWorkNotice,
   };
 }
 
@@ -92,6 +102,8 @@ export interface SettingsApi {
   setRecordingPromptsEnabled(enabled: boolean): Promise<Settings>;
   setProcessOnlyOnAcPower(enabled: boolean): Promise<Settings>;
   setRecognitionLoad(load: RecognitionLoad): Promise<Settings>;
+  /** «Предупреждать перед свободной работой» on or off (TASK-188). */
+  setFreeWorkNotice(on: boolean): Promise<Settings>;
   getProfile(): Promise<StudentProfile>;
   /** Stores the profile; returns it as stored (trimmed). */
   saveProfile(profile: StudentProfile): Promise<StudentProfile>;
@@ -105,6 +117,7 @@ export function settingsApi(call: CallByName): SettingsApi {
       parseSettings(await call(methods.setRecordingPromptsEnabled, enabled)),
     setProcessOnlyOnAcPower: async (enabled) => parseSettings(await call(methods.setProcessOnlyOnAcPower, enabled)),
     setRecognitionLoad: async (load) => parseSettings(await call(methods.setRecognitionLoad, load)),
+    setFreeWorkNotice: async (on) => parseSettings(await call(methods.setFreeWorkNotice, on)),
     getProfile: async () => parseProfile(await call(methods.getProfile)),
     saveProfile: async (profile) => parseProfile(await call(methods.saveProfile, profile)),
   };

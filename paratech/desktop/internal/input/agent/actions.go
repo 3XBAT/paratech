@@ -13,6 +13,7 @@ import (
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/domain/agent/action"
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/values"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/jobs/job"
@@ -161,8 +162,9 @@ type effect struct {
 	cards  []values.Card
 }
 
-// prepare looks at the target of call and returns how to run it; ok is false for a tool this desktop does not run.
-func (a *Actions) prepare(ctx context.Context, call values.Call) (prepared, bool, error) {
+// prepare looks at the target of call, made at at, and returns how to run it; ok is false for a tool this desktop
+// does not run.
+func (a *Actions) prepare(ctx context.Context, at origin, call values.Call) (prepared, bool, error) {
 	var (
 		p   prepared
 		err error
@@ -183,10 +185,9 @@ func (a *Actions) prepare(ctx context.Context, call values.Call) (prepared, bool
 	case values.ToolMakeSummary, values.ToolMakeLectureText, values.ToolFindHomework:
 		p, err = a.postProcess(ctx, call)
 	case values.ToolTriageAssignment:
-		if call.Args().Has("topic") {
-			// A work on a free topic has no use case yet (TASK-188): "unavailable", nothing journaled or started.
-			// The topic is never logged or stored here.
-			return prepared{}, false, nil
+		if actionpolicy.FreeTopic(call) {
+			p, err = a.triageTopic(at, call)
+			break
 		}
 		p, err = a.triage(call)
 	case values.ToolWriteWork:

@@ -23,6 +23,37 @@ type fakeTurnkey struct {
 	writes  []shared.WorkID
 
 	generations map[shared.JobID]int
+
+	topics  []topicCall              // every TriageTopic call
+	byKey   map[string]shared.WorkID // the work of a request key, as the real store finds it again
+	paidFor map[string]int           // reader calls per request key (a found work asks nothing)
+	subject map[shared.WorkID]shared.SubjectID
+}
+
+// topicCall is one TriageTopic call.
+type topicCall struct {
+	request, text string
+	subject       shared.SubjectID
+}
+
+// TriageTopic answers started for a new request key and the same work, not created, for a known one (TASK-187).
+func (f *fakeTurnkey) TriageTopic(_ context.Context, request, text string, subject shared.SubjectID) (turnkey.Started, error) {
+	f.topics = append(f.topics, topicCall{request: request, text: text, subject: subject})
+	if f.byKey == nil {
+		f.byKey, f.paidFor, f.subject = map[string]shared.WorkID{}, map[string]int{}, map[shared.WorkID]shared.SubjectID{}
+	}
+	if id, ok := f.byKey[request]; ok {
+		if v, ok := f.views[id]; ok {
+			return turnkey.Started{View: v}, nil
+		}
+	}
+	f.paidFor[request]++
+	if id := f.started.View.ID; id != "" {
+		f.views[id] = f.started.View
+		f.byKey[request] = id
+		f.subject[id] = subject
+	}
+	return f.started, f.err
 }
 
 func (f *fakeTurnkey) StartWriting(_ context.Context, id shared.WorkID) (turnkey.WritingStarted, error) {

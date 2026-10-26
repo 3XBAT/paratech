@@ -68,6 +68,22 @@ func RefusalResult(callID string, why Refusal) ToolResult {
 	return ToolResult{CallID: callID, ResultJSON: mustJSON(body), IsError: true}
 }
 
+// RefusalOf returns the enum of a result RefusalResult made; false for any other result.
+func RefusalOf(r ToolResult) (Refusal, bool) {
+	if !r.IsError {
+		return "", false
+	}
+	var body map[string]string
+	if err := json.Unmarshal([]byte(r.ResultJSON), &body); err != nil || body["error"] == "" {
+		return "", false
+	}
+	why := Refusal(body["error"])
+	if RefusalResult(r.CallID, why) != r {
+		return "", false
+	}
+	return why, true
+}
+
 // ShownResult is the result of a card tool the student has seen (reply, cannot_do).
 func ShownResult(callID string) ToolResult {
 	return ToolResult{CallID: callID, ResultJSON: `{"shown":true}`}

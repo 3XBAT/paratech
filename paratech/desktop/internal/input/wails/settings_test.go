@@ -49,6 +49,31 @@ func (f *fakeSettings) SetRecognitionLoad(_ context.Context, l shared.Recognitio
 	return f.t, nil
 }
 
+func (f *fakeSettings) SetFreeWorkNotice(_ context.Context, on bool) (preferences.Toggles, error) {
+	if f.err != nil {
+		return preferences.Toggles{}, f.err
+	}
+	f.t.FreeWorkNotice = on
+	return f.t, nil
+}
+
+// TASK-188: «Предупреждать перед свободной работой» is read and changed with the other toggles.
+func TestSettingsServiceFreeWorkNotice(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeSettings{t: preferences.Toggles{RecordingPromptsEnabled: true, FreeWorkNotice: true}}
+	s := NewSettingsService(f, discard())
+	if got, err := s.GetSettings(ctx); err != nil || !got.FreeWorkNotice {
+		t.Fatalf("GetSettings = %+v, %v", got, err)
+	}
+	got, err := s.SetFreeWorkNotice(ctx, false)
+	if err != nil || got != (Settings{RecordingPromptsEnabled: true}) {
+		t.Fatalf("SetFreeWorkNotice(false) = %+v, %v", got, err)
+	}
+	if got, err = s.SetFreeWorkNotice(ctx, true); err != nil || !got.FreeWorkNotice {
+		t.Fatalf("SetFreeWorkNotice(true) = %+v, %v", got, err)
+	}
+}
+
 func TestSettingsServiceMapsToggles(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeSettings{t: preferences.Toggles{RecordingPromptsEnabled: true, ProcessOnlyOnACPower: true}}
@@ -74,7 +99,7 @@ func TestSettingsJSONNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true,"recognitionLoad":"",` +
-		`"loadEstimates":null,"loadEstimatesModel":""}`
+		`"loadEstimates":null,"loadEstimatesModel":"","freeWorkNotice":false}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s, want %s (frontend/src/bindings/settings.ts reads these names)", raw, want)
 	}
@@ -89,6 +114,7 @@ func TestSettingsServiceHidesErrorDetails(t *testing.T) {
 		"GetSettings":                func() (Settings, error) { return s.GetSettings(context.Background()) },
 		"SetRecordingPromptsEnabled": func() (Settings, error) { return s.SetRecordingPromptsEnabled(context.Background(), true) },
 		"SetProcessOnlyOnACPower":    func() (Settings, error) { return s.SetProcessOnlyOnACPower(context.Background(), true) },
+		"SetFreeWorkNotice":          func() (Settings, error) { return s.SetFreeWorkNotice(context.Background(), true) },
 	}
 	for name, call := range calls {
 		_, err := call()
@@ -201,7 +227,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		typ     reflect.Type
 		methods int
 	}{
-		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 6}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094)
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 7}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094), +SetFreeWorkNotice (TASK-188)
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 9}, // +SwitchSource, DismissAdvice (TASK-082), +RetryPostProcessing, RedoSummary (TASK-086), +RecordingSound (TASK-099)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 7},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},

@@ -23,7 +23,8 @@ const (
 	CardCannotDo   CardKind = "cannot_do"
 	CardReply      CardKind = "reply"
 	CardStopped    CardKind = "stopped"
-	CardWork       CardKind = "work" // a turnkey work: questions, «Как я понял задание» or the helper mode (TASK-129)
+	CardWork       CardKind = "work"      // a turnkey work: questions, «Как я понял задание» or the helper mode (TASK-129)
+	CardFreeWork   CardKind = "free_work" // a work on a topic waits for the student's «Сделать» (TASK-188)
 )
 
 // Card is a typed card. Texts other than the model fields of show_plan, reply, cannot_do and ask_questions are

@@ -59,7 +59,7 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		return refuse(values.RefuseFailed)
 	}
 
-	p, ok, err := t.actions.prepare(ctx, c.Call)
+	p, ok, err := t.actions.prepare(ctx, originOf(st), c.Call)
 	switch {
 	case !ok:
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnavailable)}}

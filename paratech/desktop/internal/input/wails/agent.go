@@ -2,6 +2,7 @@ package wails
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"paratech/desktop/internal/cases/agentturn"
@@ -83,6 +84,8 @@ type AgentCore struct {
 	Life    context.Context
 	Journal AgentJournal
 	Clock   AgentClock
+	// FreeWork answers the free-work cards (TASK-188); nil: they answer ErrFreeWorkUnavailable.
+	FreeWork AgentFreeWork
 }
 
 func (c AgentCore) complete() bool {
@@ -126,18 +129,21 @@ type AgentState struct {
 
 // AgentService is bound to the agent panel ("<package path>.AgentService.<Method>").
 type AgentService struct {
-	driver  AgentDriver
-	link    AgentLink
-	journal AgentJournal
-	clock   AgentClock
-	life    context.Context
-	log     *slog.Logger
+	driver   AgentDriver
+	link     AgentLink
+	journal  AgentJournal
+	clock    AgentClock
+	freeWork AgentFreeWork
+	life     context.Context
+	log      *slog.Logger
 }
 
 // NewAgentService returns the binding of the agent panel; OpenServices checks the core first. The shell attaches
 // c.Panel to its events itself.
 func NewAgentService(c AgentCore, log *slog.Logger) *AgentService {
-	return &AgentService{driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, life: c.Life, log: log}
+	return &AgentService{
+		driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, freeWork: c.FreeWork, life: c.Life, log: log,
+	}
 }
 
 // State returns the Hub link of the panel; it calls no Hub.
@@ -220,6 +226,75 @@ func (s *AgentService) Rerun(ctx context.Context, ref AgentTurnRef) AgentResult 
 // Cancel is «Отмена».
 func (s *AgentService) Cancel(_ context.Context, ref AgentTurnRef) AgentResult {
 	return s.onTurn(opAgentCancel, ref, s.driver.Cancel)
+}
+
+// AgentFreeWork answers the free-work cards (input/agent.FreeWorks, TASK-188); app wires it in. The card names a call
+// only: the topic and the subject come from the stored call and its thread, never from the page.
+type AgentFreeWork interface {
+	FreeWorkCard(ctx context.Context, card values.FreeWorkCard) (values.FreeWorkOutcome, error)
+	FreeWork(ctx context.Context, card values.FreeWorkCard, accept, dontShowAgain bool) (values.FreeWorkOutcome, error)
+}
+
+// agentFreeWorkError is an error of the free-work card: a fixed Russian text the panel shows as it is.
+type agentFreeWorkError string
+
+func (e agentFreeWorkError) Error() string { return string(e) }
+
+// Errors of the free-work card. Causes are logged, never shown.
+const (
+	ErrFreeWorkNotFound    = agentFreeWorkError("Карточка устарела: обновите панель.")
+	ErrFreeWorkUnavailable = agentFreeWorkError("Свободная работа пока недоступна.")
+	ErrFreeWorkFailed      = agentFreeWorkError("Не удалось начать свободную работу.")
+)
+
+// opAgentFreeWork is the log name of the free-work card.
+const opAgentFreeWork = "ui: agent free work"
+
+// AgentFreeWorkState is where a free-work card stands: State waiting («Сделать» / «Не надо»), done (WorkID: show the
+// work card, TurnkeyService.Work), undone (the work was removed with «Отменить») or failed. «Не надо» stores nothing,
+// so a declined card reads as waiting again.
+type AgentFreeWorkState struct {
+	State  string `json:"state"`
+	WorkID string `json:"workId"`
+}
+
+// FreeWorkCard reads the state of a free-work card; it starts nothing.
+func (s *AgentService) FreeWorkCard(ctx context.Context, ref AgentFreeWorkRef) (AgentFreeWorkState, error) {
+	if s.freeWork == nil {
+		return AgentFreeWorkState{}, ErrFreeWorkUnavailable
+	}
+	out, err := s.freeWork.FreeWorkCard(ctx, freeWorkCardOf(ref))
+	return s.freeWorkReply(out, err)
+}
+
+// FreeWork is the student's answer on a free-work card: accept is «Сделать» (the consent to the paid triage of the
+// topic, once: a second press returns the same work), otherwise «Не надо» (nothing is stored or asked);
+// dontShowAgain is «Больше не показывать» (the setting of «Настройки», for either answer).
+func (s *AgentService) FreeWork(ctx context.Context, ref AgentFreeWorkRef, accept, dontShowAgain bool) (AgentFreeWorkState, error) {
+	if s.freeWork == nil {
+		return AgentFreeWorkState{}, ErrFreeWorkUnavailable
+	}
+	out, err := s.freeWork.FreeWork(ctx, freeWorkCardOf(ref), accept, dontShowAgain)
+	return s.freeWorkReply(out, err)
+}
+
+func freeWorkCardOf(ref AgentFreeWorkRef) values.FreeWorkCard {
+	return values.FreeWorkCard{Thread: shared.ThreadID(ref.ThreadID), Turn: ref.Turn, CallID: ref.CallID}
+}
+
+func (s *AgentService) freeWorkReply(out values.FreeWorkOutcome, err error) (AgentFreeWorkState, error) {
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		s.log.Info(opAgentFreeWork, "result", "not found")
+		return AgentFreeWorkState{}, ErrFreeWorkNotFound
+	case errors.Is(err, shared.ErrServiceNotConfigured):
+		s.log.Info(opAgentFreeWork, "result", "unavailable")
+		return AgentFreeWorkState{}, ErrFreeWorkUnavailable
+	case err != nil:
+		s.log.Warn(opAgentFreeWork, "err", err)
+		return AgentFreeWorkState{}, ErrFreeWorkFailed
+	}
+	return AgentFreeWorkState{State: string(out.State), WorkID: string(out.Work)}, nil
 }
 
 // onTurn checks ref and runs op on the app-lifetime ctx: the call's ctx ends with the call.

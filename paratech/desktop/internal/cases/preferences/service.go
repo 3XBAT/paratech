@@ -61,6 +61,14 @@ func (s *Service) SetRecognitionLoad(ctx context.Context, load shared.Recognitio
 	})
 }
 
+// SetFreeWorkNotice turns the free-work card of the agent on or off (TASK-188): off is «Больше не показывать» on the
+// card, on is the toggle in «Настройки». It returns the stored toggles.
+func (s *Service) SetFreeWorkNotice(ctx context.Context, on bool) (Toggles, error) {
+	return s.change(ctx, "set free work notice", func(st *settings.Settings, now time.Time) error {
+		return st.SetFreeWorkNotice(on, now)
+	})
+}
+
 // Profile returns the student profile (TASK-094); every field is empty while none is set.
 func (s *Service) Profile(ctx context.Context) (settings.ProfileFields, error) {
 	st, err := s.repo.Load(ctx)
@@ -129,5 +137,6 @@ func toggles(st *settings.Settings) Toggles {
 		RecordingPromptsEnabled: st.RecordingPromptsEnabled(),
 		ProcessOnlyOnACPower:    st.ProcessOnlyOnACPower(),
 		RecognitionLoad:         st.RecognitionLoad(),
+		FreeWorkNotice:          st.FreeWorkNotice(),
 	}
 }

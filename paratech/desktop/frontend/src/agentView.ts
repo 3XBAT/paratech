@@ -459,6 +459,8 @@ function cardModel(c: CardView, status: string): CardModel | null {
       return c.workId !== "" ? { type: "work", workId: c.workId } : null;
     case "stopped":
       return null; // Built once from the stop reason below.
+    case "free_work":
+      return null; // Drawn by TASK-189 (AgentApi.freeWork); until then not shown.
   }
 }
 
