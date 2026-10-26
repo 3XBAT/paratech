@@ -575,28 +575,12 @@ func (s *Service) refusedStep(ctx context.Context, snap job.Snapshot, w *work.Wo
 // same sections give the same bytes, so a repeated step finds the material it filed.
 func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	w *work.Work) error {
-	wr, _ := w.Writing()
 	student, err := s.student(ctx)
 	if err != nil {
 		return s.retry(snap, ErrWriteStorage, err)
 	}
-	brief, _ := w.Brief()
-	in := homeworkdoc.PaperInput{
-		Student: student, Subject: wr.Snapshot.SubjectName, Teacher: wr.Snapshot.Teacher, Kind: work.TypeName(brief.WorkType),
-		Topic: wr.Topic, Year: s.clock.Now().Year(),
-	}
-	for _, sec := range wr.Sections {
-		in.Sections = append(in.Sections, homeworkdoc.PaperSection{Title: sec.Title, Paragraphs: sec.Text.Paragraphs})
-		for _, r := range sec.Text.Sources {
-			in.Sources = append(in.Sources, homeworkdoc.PaperSource{Text: r.Text, Verify: r.Material == ""})
-		}
-	}
-	var doc cvalues.Document
-	if w.LabReport() {
-		doc = homeworkdoc.BuildLabReport(labInput(w, in))
-	} else {
-		doc = homeworkdoc.BuildPaper(in)
-	}
+	year := s.clock.Now().Year()
+	doc := paperDocument(w, student, year)
 	if err := doc.Validate(); err != nil {
 		return s.permanent(snap, ErrWriteFile, err)
 	}
@@ -604,10 +588,38 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 	if err != nil {
 		return s.permanent(snap, ErrWriteFile, err)
 	}
-	name := homeworkdoc.PaperFileName(work.TypeName(brief.WorkType), wr.Topic)
-	return s.fileWriting(ctx, snap, report, w, []output{{name, content}}, func(w *work.Work, f []work.File) error {
+	return s.fileWriting(ctx, snap, report, w, year, []output{{paperName(w), content}}, func(w *work.Work, f []work.File) error {
 		return w.Finish(f[0], s.clock.Now())
 	})
+}
+
+// paperDocument is the document of the written sections of w with the title page of student and year: the .docx
+// (assemble) and the PDF (ExportPDF) are both built from it, never one from the other.
+func paperDocument(w *work.Work, student homeworkdoc.Student, year int) cvalues.Document {
+	wr, _ := w.Writing()
+	brief, _ := w.Brief()
+	in := homeworkdoc.PaperInput{
+		Student: student, Subject: wr.Snapshot.SubjectName, Teacher: wr.Snapshot.Teacher, Kind: work.TypeName(brief.WorkType),
+		Topic: wr.Topic, Year: year,
+	}
+	// Every section is written: assemble runs at StepAssemble, ExportPDF on a done work.
+	for _, sec := range wr.Sections {
+		in.Sections = append(in.Sections, homeworkdoc.PaperSection{Title: sec.Title, Paragraphs: sec.Text.Paragraphs})
+		for _, r := range sec.Text.Sources {
+			in.Sources = append(in.Sources, homeworkdoc.PaperSource{Text: r.Text, Verify: r.Material == ""})
+		}
+	}
+	if w.LabReport() {
+		return homeworkdoc.BuildLabReport(labInput(w, in))
+	}
+	return homeworkdoc.BuildPaper(in)
+}
+
+// paperName is the file name of the paper of w (PaperFileName).
+func paperName(w *work.Work) string {
+	wr, _ := w.Writing()
+	brief, _ := w.Brief()
+	return homeworkdoc.PaperFileName(work.TypeName(brief.WorkType), wr.Topic)
 }
 
 // labInput is the lab report of the written sections of w: the placeholders the domain recognised, the conclusions
@@ -647,9 +659,10 @@ func (s *Service) assembleDeck(ctx context.Context, snap job.Snapshot, report fu
 	if err != nil {
 		return s.retry(snap, ErrWriteStorage, err)
 	}
+	year := s.clock.Now().Year()
 	in := homeworkdoc.TalkInput{
 		Student: student, Subject: wr.Snapshot.SubjectName, Teacher: wr.Snapshot.Teacher, Topic: wr.Topic,
-		Year: s.clock.Now().Year(), Template: wr.Deck.Template,
+		Year: year, Template: wr.Deck.Template,
 	}
 	for _, sec := range wr.Sections {
 		sl, _ := sec.Slide()
@@ -675,7 +688,7 @@ func (s *Service) assembleDeck(ctx context.Context, snap job.Snapshot, report fu
 		return s.permanent(snap, ErrWriteFile, err)
 	}
 	outs := []output{{homeworkdoc.PresentationFileName(wr.Topic), slides}, {homeworkdoc.TalkFileName(wr.Topic), text}}
-	return s.fileWriting(ctx, snap, report, w, outs, func(w *work.Work, f []work.File) error {
+	return s.fileWriting(ctx, snap, report, w, year, outs, func(w *work.Work, f []work.File) error {
 		return w.FinishDeck(f[0], f[1], s.clock.Now())
 	})
 }
@@ -686,11 +699,12 @@ type output struct {
 	data []byte
 }
 
-// fileWriting files outs into the subject's «ДЗ» and keeps them with finish (Finish or FinishDeck). The files of the
-// previous generation leave «ДЗ» first: a crash after it repeats the step, never loses the reference to them. The same
-// bytes filed again put that material back into «ДЗ», so a repeated step finds the materials it filed.
+// fileWriting files outs into the subject's «ДЗ» and keeps them with finish (Finish or FinishDeck), with the year of
+// their title page. The files of the previous generation (its PDF too) leave «ДЗ» first: a crash after it repeats the
+// step, never loses the reference to them. The same bytes filed again put that material back into «ДЗ», so a
+// repeated step finds the materials it filed.
 func (s *Service) fileWriting(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
-	w *work.Work, outs []output, finish func(*work.Work, []work.File) error) error {
+	w *work.Work, year int, outs []output, finish func(*work.Work, []work.File) error) error {
 	if err := s.progress(ctx, snap, report, w); err != nil {
 		return err
 	}
@@ -710,7 +724,7 @@ func (s *Service) fileWriting(ctx context.Context, snap job.Snapshot, report fun
 		if err != nil {
 			return s.permanent(snap, ErrWriteStorage, err)
 		}
-		files = append(files, work.File{Material: m.ID(), Artifact: ref.String(), Content: w.ContentKey()})
+		files = append(files, work.File{Material: m.ID(), Artifact: ref.String(), Content: w.ContentKey(), Year: year})
 	}
 	got, err := s.saveStep(ctx, w, func(w *work.Work) error { return finish(w, files) })
 	if err != nil {

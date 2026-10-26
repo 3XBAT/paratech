@@ -24,7 +24,7 @@ type Deps struct {
 	Log         *slog.Logger
 }
 
-// WritingDeps are the ports of the writing (TASK-131); every port is required but Slides and Canceller.
+// WritingDeps are the ports of the writing (TASK-131); every port is required but Slides, PDF and Canceller.
 type WritingDeps struct {
 	Writer    Writer
 	Jobs      Jobs
@@ -33,6 +33,7 @@ type WritingDeps struct {
 	Profiles  Profiles
 	Renderer  Renderer
 	Slides    SlideRenderer // nil: a presentation is not written (ErrNotWritable)
+	PDF       PaperPDF      // nil: ExportPDF answers ErrNotConfigured (TASK-198)
 	Lessons   LessonLabels
 	Shelf     Shelf
 
@@ -48,6 +49,12 @@ type WritingStarted struct {
 	Created bool
 }
 
+// PDFSaved is the outcome of ExportPDF: the work and its PDF in the library.
+type PDFSaved struct {
+	View     View
+	Material shared.MaterialID
+}
+
 // WritingView is the writing of a work as the progress card, the result card and the preview show it. Every text was
 // written by the model and is shown as plain text only.
 type WritingView struct {
@@ -60,6 +67,7 @@ type WritingView struct {
 	Subject    shared.SubjectID   // the library subject whose «ДЗ» gets the file; "" «Входящие»
 	Material   shared.MaterialID  // the file in the library (the .pptx of a presentation), once done
 	Result     shared.ArtifactRef // the ResultCard of the file, once done
+	PDF        shared.MaterialID  // the PDF of the done paper next to it (ExportPDF, TASK-198); "" none yet
 
 	// The writing job that runs for the work, read with the view (TASK-178): none once it ended. A stopped running
 	// step stays active (RUNNING) until it returns, so the UI keeps polling until Active is false.
@@ -197,6 +205,9 @@ func writingViewOf(w *work.Work) *WritingView {
 	done := w.Status() == work.StatusDone
 	if f := wr.File; f != nil && done {
 		v.Material, v.Result = f.Material, f.ArtifactRef()
+	}
+	if p, ok := w.PDF(); ok {
+		v.PDF = p.Material
 	}
 	if d := wr.Deck; d != nil {
 		v.Presentation, v.Template, v.Questions = true, d.Template, w.TalkQuestions()
