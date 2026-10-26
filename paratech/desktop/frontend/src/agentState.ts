@@ -80,10 +80,15 @@ function clearsDrafts(u: UpdateView): boolean {
 
 function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   const next = applyUpdateEntries(s, u);
-  if (!clearsDrafts(u) || !next.drafts.some((d) => d.threadId === u.threadId && d.turn === u.turn)) {
+  if (u.threadId === "") {
     return next;
   }
-  return { ...next, drafts: next.drafts.filter((d) => !(d.threadId === u.threadId && d.turn === u.turn)) };
+  // Older turns of the thread are over; the own turn's drafts end only with a clearing update.
+  const drop = (d: DraftView) => d.threadId === u.threadId && (d.turn < u.turn || (clearsDrafts(u) && d.turn === u.turn));
+  if (!next.drafts.some(drop)) {
+    return next;
+  }
+  return { ...next, drafts: next.drafts.filter((d) => !drop(d)) };
 }
 
 /** The newest turn the thread has shown or been told about, -1 if none. */
@@ -99,7 +104,8 @@ function applyDraft(s: PanelState, d: DraftView): PanelState {
   }
   const own = s.entries.find((e) => e.threadId === d.threadId && e.turn === d.turn);
   // A finished request has no draft: a late event must not outlive the end.
-  if (own?.update && final.has(own.update.status)) {
+  // Any non-running status (done, stopped, failed, cancelled) means the same.
+  if (own?.update && own.update.status !== "" && own.update.status !== "PLANNING" && own.update.status !== "EXECUTING") {
     return s;
   }
   const same = (x: DraftView) => x.threadId === d.threadId && x.turn === d.turn && x.callId === d.callId;

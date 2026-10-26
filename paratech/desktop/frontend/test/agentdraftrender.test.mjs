@@ -55,6 +55,24 @@ test("a late draft of a finished request is ignored", () => {
   assert.equal(s.drafts.length, 0);
 });
 
+test("a draft after a stopped or failed update is ignored", () => {
+  const s = apply(initialPanelState, upd({ status: "STOPPED", problem: "failed" }), drf({}));
+  assert.equal(s.drafts.length, 0);
+});
+
+test("an update of a newer turn drops stored drafts of older turns", () => {
+  const s = apply(initialPanelState, upd({ turn: 1 }), drf({ turn: 1 }), upd({ turn: 2, progress: true }));
+  assert.equal(s.drafts.length, 0);
+});
+
+test("with several drafts only the last one carries the waiting dots", () => {
+  const s = apply(initialPanelState, upd({}), drf({}), drf({ callId: "c2", texts: ["другой"] }));
+  const e = s.entries[0];
+  const html = renderToStaticMarkup(h(AgentRequest, { model: entryModel(e), actions, drafts: draftsFor(s, e) }));
+  assert.equal(html.split("ag-wait").length - 1, 1);
+  assert.ok(html.indexOf("другой") < html.indexOf("ag-wait"));
+});
+
 test("the draft renders with caption, muted text nodes only and the waiting dots after the last line", () => {
   const s = apply(initialPanelState, upd({}), drf({ texts: ["<script>alert(1)</script>", "a <b>bold</b> & c"], callId: "x\" onclick=\"y" }));
   const e = s.entries[0];

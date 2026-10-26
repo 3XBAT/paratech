@@ -359,7 +359,7 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
         c.type === "waiting" ? null : <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />,
       )}
       {(props.drafts ?? []).map((d, i) => (
-        <AnswerDraft key={i} draft={d} dots={!hasWaitingCard} />
+        <AnswerDraft key={i} draft={d} dots={!hasWaitingCard && i === (props.drafts ?? []).length - 1} />
       ))}
       {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} /> : null))}
       {model.rerun && (
