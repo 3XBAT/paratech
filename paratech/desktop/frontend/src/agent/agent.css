@@ -63,6 +63,7 @@
 .ag-note { display: flex; gap: 8px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
 .ag-note .i { flex: none; width: 14px; height: 14px; margin-top: 2px; }
 .ag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.ag-rerun { display: flex; justify-content: flex-start; margin-top: 4px; }
 .ag-revise { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .ag-inp { width: 100%; height: var(--h-ctl); padding: 0 8px; border: 1px solid var(--control); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: inherit; }
 .ag-inp:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
