@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
@@ -270,9 +271,14 @@ func (s *Service) decide(ctx context.Context, c *change, raw values.RawCall) err
 		}
 		c.cards = append(c.cards, values.QuestionsCard{Round: round, Questions: args.Questions("questions")})
 	case values.ToolReply, values.ToolCannotDo:
+		// The assignments a reply lists pass the provenance check as any ID (ADR-0022); a refused reply shows nothing and
+		// the planner goes on.
+		if err := actionpolicy.CheckProvenance(call.Refs(), c.known(call.Refs())); err != nil {
+			return c.refuse(call.ID(), err, now)
+		}
 		var card values.Card
 		if text, ok := args.Text("text"); ok {
-			card = values.ReplyCard{Text: text}
+			card = values.ReplyCard{Text: text, Assignments: args.CardIDs("assignments")}
 		} else {
 			card = values.CannotDoCard{YourPart: args.TextList("your_part"), OurPart: args.TextList("our_part")}
 		}
@@ -295,6 +301,18 @@ func (s *Service) decide(ctx context.Context, c *change, raw values.RawCall) err
 		c.calls = append(c.calls, Call{Call: call, Class: adm.Class, Paid: adm.Paid, PlanStep: adm.PlanStep})
 	}
 	return nil
+}
+
+// known is the set the provenance check of a card's refs uses: the base and the scope of the step, and those of refs
+// the thread saw in tool results.
+func (c *change) known(refs []values.Ref) values.RefSet {
+	k := c.context.Clone()
+	for _, r := range refs {
+		if c.th.Seen(r) {
+			k.Add(r)
+		}
+	}
+	return k
 }
 
 func (c *change) answer(r values.ToolResult, now time.Time) error {

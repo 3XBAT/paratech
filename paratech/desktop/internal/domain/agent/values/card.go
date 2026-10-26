@@ -2,6 +2,8 @@ package values
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -186,18 +188,57 @@ func (c CannotDoCard) Validate() error {
 	return validTexts(c.OurPart, "our part")
 }
 
-// ReplyCard is a short answer of the planner (reply).
+// ReplyCard is a short answer of the planner (reply). Assignments are the IDs the reply lists (catalog v3), each
+// passed the provenance check; Lines are what the desktop shows of them, filled from local data by the Driver
+// (ADR-0022): the planner never sees or writes a title.
 type ReplyCard struct {
-	Text Text
+	Text        Text
+	Assignments []Ref
+	Lines       []AssignmentLine
+}
+
+// AssignmentLine is one assignment a reply lists, as the local data has it: its title (trusted local data, shown
+// as plain text), its library subject (zero when none) and its deadline (zero when none).
+type AssignmentLine struct {
+	Assignment Ref
+	Title      string
+	Subject    Ref
+	Due        Date
 }
 
 // Kind returns CardReply.
 func (ReplyCard) Kind() CardKind { return CardReply }
 
-// Validate checks the card.
+// Validate checks the card: at most MaxCardIDs distinct assignment IDs, and lines only of those, each with a title.
 func (c ReplyCard) Validate() error {
 	if _, err := ParseText(string(c.Text)); err != nil {
 		return fmt.Errorf("%w: reply: %w", ErrInvalidCard, err)
+	}
+	if len(c.Assignments) > MaxCardIDs {
+		return fmt.Errorf("%w: a reply lists at most %d assignments", ErrInvalidCard, MaxCardIDs)
+	}
+	listed := RefSet{}
+	for _, r := range c.Assignments {
+		if r.Kind() != KindAssignment || listed.Has(r) {
+			return fmt.Errorf("%w: a reply lists distinct assignment ids", ErrInvalidCard)
+		}
+		listed.Add(r)
+	}
+	if len(c.Lines) > len(c.Assignments) {
+		return fmt.Errorf("%w: more lines than listed assignments", ErrInvalidCard)
+	}
+	shown := RefSet{}
+	for _, l := range c.Lines {
+		if !listed.Has(l.Assignment) || shown.Has(l.Assignment) {
+			return fmt.Errorf("%w: a line of an assignment the reply does not list", ErrInvalidCard)
+		}
+		shown.Add(l.Assignment)
+		if strings.TrimSpace(l.Title) == "" || !utf8.ValidString(l.Title) {
+			return fmt.Errorf("%w: a line without a title", ErrInvalidCard)
+		}
+		if !l.Subject.IsZero() && l.Subject.Kind() != KindSubject {
+			return fmt.Errorf("%w: a line subject is not a subject", ErrInvalidCard)
+		}
 	}
 	return nil
 }

@@ -71,6 +71,18 @@ func TestParseCall(t *testing.T) {
 		{name: "text list too long", tool: "cannot_do", args: `{"your_part":[` + strings.Repeat(`"a",`, MaxTextListItems) + `"a"],"our_part":["b"]}`, wantErr: ErrInvalidArguments},
 		{name: "cannot do with nothing", tool: "cannot_do", args: `{"your_part":[],"our_part":[]}`, wantErr: ErrInvalidArguments},
 		{name: "too large", tool: "search", args: `{"query":"a","x":"` + strings.Repeat("x", MaxArgumentsBytes) + `"}`, wantErr: ErrInvalidArguments},
+
+		// reply.assignments (card_ids, catalog v3)
+		{name: "reply with assignments", tool: "reply", args: `{"text":"Два задания.","assignments":["a1","a2"]}`},
+		{name: "reply with no assignments", tool: "reply", args: `{"text":"Заданий нет.","assignments":[]}`},
+		{name: "reply with null assignments", tool: "reply", args: `{"text":"Заданий нет.","assignments":null}`},
+		{name: "reply with ten assignments", tool: "reply", args: `{"text":"x","assignments":[` + strings.Repeat(`"a1",`, MaxCardIDs-1) + `"a2"]}`},
+		{name: "reply with eleven assignments", tool: "reply", args: `{"text":"x","assignments":[` + strings.Repeat(`"a1",`, MaxCardIDs) + `"a2"]}`, wantErr: ErrInvalidArguments},
+		{name: "assignments not a list", tool: "reply", args: `{"text":"x","assignments":"a1"}`, wantErr: ErrInvalidArguments},
+		{name: "assignment as number", tool: "reply", args: `{"text":"x","assignments":[12]}`, wantErr: ErrInvalidArguments},
+		{name: "assignment as title", tool: "reply", args: `{"text":"x","assignments":["Эссе по истории"]}`, wantErr: ErrInvalidArguments},
+		{name: "assignment as object", tool: "reply", args: `{"text":"x","assignments":[{"id":"a1","title":"Эссе"}]}`, wantErr: ErrInvalidArguments},
+		{name: "assignments without text", tool: "reply", args: `{"assignments":["a1"]}`, wantErr: ErrInvalidArguments},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,6 +104,33 @@ func TestParseCall(t *testing.T) {
 				t.Fatalf("ParseCall error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestCardIDs: the assignments of a reply keep the planner's order, are typed and shown once each, and go into Refs so
+// the provenance check sees every one.
+func TestCardIDs(t *testing.T) {
+	call, err := ParseCall("c1", "reply", `{"text":"x","assignments":["a2","a1","a2"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1, a2 := mustRef(t, KindAssignment, "a1"), mustRef(t, KindAssignment, "a2")
+	if got := call.Args().CardIDs("assignments"); len(got) != 2 || got[0] != a2 || got[1] != a1 {
+		t.Fatalf("CardIDs = %v", got)
+	}
+	if refs := call.Refs(); len(refs) != 2 || refs[0] != a1 || refs[1] != a2 {
+		t.Fatalf("Refs = %v", refs)
+	}
+	if call.Args().IDs("assignments") != nil || call.Args().CardIDs("text") != nil {
+		t.Fatal("accessors of other types return card ids")
+	}
+
+	empty, err := ParseCall("c2", "reply", `{"text":"x","assignments":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Args().CardIDs("assignments") != nil || len(empty.Refs()) != 0 {
+		t.Fatal("an empty list has ids")
 	}
 }
 

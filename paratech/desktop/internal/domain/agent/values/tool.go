@@ -5,13 +5,13 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v2.json).
-const CatalogVersion = 2
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v3.json).
+const CatalogVersion = 3
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
 
-// Tools of catalog v2, in catalog order.
+// Tools of catalog v3, in catalog order.
 const (
 	ToolListSubjects           Tool = "list_subjects"
 	ToolFindLessons            Tool = "find_lessons"
@@ -79,9 +79,10 @@ const (
 	ArgDate      ArgType = "date"
 	ArgEnum      ArgType = "enum"
 	ArgLabel     ArgType = "label"
-	ArgQuery     ArgType = "query" // the student's question or search text (catalog v2)
+	ArgQuery     ArgType = "query" // the student's question or search text (since catalog v2)
 	ArgText      ArgType = "text"
 	ArgTextList  ArgType = "text_list"
+	ArgCardIDs   ArgType = "card_ids" // 0..MaxCardIDs IDs a card lists; the desktop shows their local data (catalog v3)
 	ArgPlanSteps ArgType = "plan_steps"
 	ArgQuestions ArgType = "questions"
 )
@@ -92,7 +93,7 @@ type ArgSpec struct {
 	Type     ArgType
 	Required bool
 	Values   []string // enum values
-	Kind     IDKind   // ID kind of an id or ids argument
+	Kind     IDKind   // ID kind of an id, ids or card_ids argument
 	// Persistent marks a label that is stored and later shown to the planner (subject, folder and semester names);
 	// it is parsed as a Name, not a Label.
 	Persistent bool
@@ -166,7 +167,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v2 (shared/testdata/tool_catalog_v2.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v3 (shared/testdata/tool_catalog_v3.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},
@@ -213,6 +214,8 @@ var catalog = []ToolSpec{
 		typed("summary", ArgText, true), typed("steps", ArgPlanSteps, true), typed("notes", ArgTextList, false),
 	}},
 	{tool: ToolAskQuestions, args: []ArgSpec{typed("questions", ArgQuestions, true)}},
-	{tool: ToolReply, args: []ArgSpec{typed("text", ArgText, true)}},
+	{tool: ToolReply, args: []ArgSpec{
+		typed("text", ArgText, true), {Name: "assignments", Type: ArgCardIDs, Kind: KindAssignment},
+	}},
 	{tool: ToolCannotDo, args: []ArgSpec{typed("your_part", ArgTextList, true), typed("our_part", ArgTextList, true)}},
 }

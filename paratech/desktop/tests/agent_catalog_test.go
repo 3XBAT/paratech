@@ -2,10 +2,12 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"paratech/desktop/internal/domain/agent/action"
@@ -13,9 +15,11 @@ import (
 	"paratech/desktop/internal/domain/agent/values"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v2.json (TASK-113, v2 since TASK-118), the tool list the Hub serves.
+// goldenCatalog is shared/testdata/tool_catalog_v3.json (TASK-113; v2 since TASK-118, v3 since TASK-173), the tool
+// list the Hub serves for the catalog version the desktop sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
+	Types          map[string]string `json:"types"`
 	Notes          map[string]string `json:"notes"`
 	Tools          []struct {
 		Name            string `json:"name"`
@@ -33,7 +37,7 @@ type goldenCatalog struct {
 
 func loadGoldenCatalog(t *testing.T) goldenCatalog {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v2.json"))
+	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v3.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,6 +94,36 @@ func TestToolCatalogMatchesGolden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestArgumentTypesMatchGolden: every argument type of the desktop parser is a golden type, and card_ids keeps the
+// bounds the golden states (0-10 IDs, TASK-173) and names an ID kind, so its IDs pass the provenance check.
+func TestArgumentTypesMatchGolden(t *testing.T) {
+	golden := loadGoldenCatalog(t)
+	for _, tool := range values.Tools() {
+		spec, err := values.SpecOf(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range spec.Args() {
+			if _, ok := golden.Types[string(a.Type)]; !ok {
+				t.Errorf("%s.%s has type %q, not a golden type", tool, a.Name, a.Type)
+			}
+			if a.Type == values.ArgCardIDs && !a.Kind.Valid() {
+				t.Errorf("%s.%s: card_ids without an ID kind", tool, a.Name)
+			}
+		}
+	}
+	if note := golden.Types["card_ids"]; !strings.Contains(note, fmt.Sprintf("0-%d IDs", values.MaxCardIDs)) {
+		t.Fatalf("card_ids note %q does not say 0-%d IDs", note, values.MaxCardIDs)
+	}
+	reply, err := values.SpecOf(values.ToolReply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := reply.Args(); len(args) != 2 || args[1].Kind != values.KindAssignment {
+		t.Fatalf("reply arguments = %+v, want assignments of kind assignment", args)
 	}
 }
 
