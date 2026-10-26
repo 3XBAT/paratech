@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { AnswerInput } from "../bindings/agent.js";
-import { Button } from "../ui/Button.js";
+import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -49,7 +49,7 @@ function Buttons(props: { buttons: ButtonModel[]; busy?: boolean; onPress: (id: 
   return (
     <div className="ag-actions">
       {props.buttons.map((b, i) => (
-        <Button key={b.id} size="sm" variant={i === 0 ? "primary" : "secondary"} disabled={props.busy} onClick={() => props.onPress(b.id)}>
+        <Button key={b.id} size="sm" variant={b.id === "stop" ? "ghost" : i === 0 ? "primary" : "secondary"} disabled={props.busy} onClick={() => props.onPress(b.id)}>
           {b.label}
         </Button>
       ))}
@@ -306,6 +306,11 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions })
         // Kind and caption (the question round) are in the key so a new card does not inherit the typed state of the old one.
         <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />
       ))}
+      {model.rerun && (
+        <div className="ag-rerun">
+          <IconButton icon="retry" label={texts.rerunTitle} busy={props.actions.busy} onClick={() => props.actions.press("rerun")} />
+        </div>
+      )}
       {open.length > 1 && (
         <div className="ag-actions">
           <Button size="sm" variant="ghost" disabled={open.some((id) => props.actions.undoNote(id)?.busy)} onClick={props.actions.undoAll}>

@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useRef } from "react";
 import { type AgentContext, entryModel, texts } from "../agentView.js";
-import { type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
+import { blockingEntry, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 
@@ -22,6 +22,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   const { state, ctx } = props;
   const mode = panelMode(state);
   const entries = orderedEntries(state.entries);
+  const last = entries.at(-1);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
@@ -86,7 +87,11 @@ export function AgentPanelView(props: AgentPanelViewProps) {
         {entries.length === 0 && <p className="ag-empty muted">{texts.empty}</p>}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
         {entries.map((e) => (
-          <AgentRequest key={e.key} model={entryModel(e)} actions={props.actionsFor(e)} />
+          <AgentRequest
+            key={e.key}
+            model={entryModel(e, { last: e.key === last?.key, blocked: blockingEntry(entries, e) !== undefined })}
+            actions={props.actionsFor(e)}
+          />
         ))}
         {props.notice !== "" && (
           <p className="ag-callline small muted" role="status">

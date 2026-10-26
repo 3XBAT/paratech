@@ -4,7 +4,7 @@
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
 import type { AnswerInput, ArgView, AskInput, CallProblem, CardView, PlanStepView, QuestionView } from "./bindings/agent.js";
-import type { Entry } from "./agentState.js";
+import { type Entry, isBusyRefused } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 
 /** The agent screen of the core (values.Screen) for a section of the window; the core refuses unknown screens. */
@@ -101,10 +101,11 @@ export const texts = {
   answerReady: "Ответ с источниками подготовлен.",
   stale: "нет связи — может быть неактуально",
   threadNote: "Последняя беседа",
+  rerunTitle: "Запустить просьбу заново",
 } as const;
 
 /** Button ids of a request; the panel maps them to the calls. */
-export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "retry" | "restart";
+export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "retry" | "restart" | "rerun" | "resend";
 
 export const buttonLabels: Record<ButtonId, string> = {
   approve: "Да",
@@ -114,6 +115,8 @@ export const buttonLabels: Record<ButtonId, string> = {
   continue: "Продолжить",
   retry: "Повторить",
   restart: "Начать заново",
+  rerun: "Повторить",
+  resend: "Отправить ещё раз",
 };
 
 const callProblemTexts: Record<Exclude<CallProblem, "">, string> = {
@@ -137,6 +140,7 @@ const updateProblemTexts: Record<string, string> = {
   budget: "Остановлено: лимит просьбы.",
   retry_required: "Шаг не удался.",
   restart_required: "Просьба устарела.",
+  rerun_blocked: "Повтор недоступен: просьба уже изменила данные. Можно отменить действия или задать вопрос заново.",
   failed: "Не удалось выполнить просьбу.",
 };
 
@@ -361,7 +365,7 @@ function cardModel(c: CardView, status: string): CardModel | null {
         submit: texts.submitAnswers,
       };
     case "progress":
-      return { type: "progress", caption: texts.progressCaption, detail: "", buttons: status === "EXECUTING" ? buttons(["stop"]) : [] };
+      return { type: "progress", caption: texts.progressCaption, detail: "", buttons: activeStatuses.has(status) ? buttons(["stop"]) : [] };
     case "result":
       return { type: "result", caption: texts.resultCaption, artifact: parseArtifact(c.artifact), fallback: texts.noArtifact };
     case "answer":
@@ -419,11 +423,23 @@ export interface EntryModel {
   /** The call runs and nothing has come back yet: the waiting dots show instead of a line. */
   waiting: boolean;
   cards: CardModel[];
+  /** «Повторить» is offered under the request. */
+  rerun: boolean;
 }
 
-export function entryModel(e: Entry): EntryModel {
+/** What the thread says about a request that the request alone does not know. */
+export interface EntryContext {
+  /** The request is the last one of the thread. */
+  last: boolean;
+  /** A running request blocks this refused one, and «Стоп» can stop it. */
+  blocked: boolean;
+}
+
+const finishedStatuses = new Set(["DONE", "FAILED", "CANCELLED", "STOPPED"]);
+
+export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked: false }): EntryModel {
   const callLine = e.callProblem !== "" ? callProblemText(e.callProblem) : "";
-  const base = { key: e.key, userText: e.text, callLine, waiting: e.callProblem === "" && e.update === null };
+  const base = { key: e.key, userText: e.text, callLine, waiting: e.callProblem === "" && e.update === null, rerun: false };
   const u = e.update;
   if (u === null) {
     return { ...base, cards: [] };
@@ -437,21 +453,39 @@ export function entryModel(e: Entry): EntryModel {
     }
   }
   if (!cards.some((c) => c.type === "progress") && activeStatuses.has(u.status)) {
-    cards.push({ type: "waiting", buttons: u.status === "EXECUTING" ? buttons(["stop"]) : [] });
+    cards.push({ type: "waiting", buttons: buttons(["stop"]) });
   }
 
   // One stop card, from the stopped card or the update's own reason; the problem adds a button for what to do next.
-  const stopCard = u.cards.find((c) => c.kind === "stopped");
-  const reason = stopCard?.stopReason || u.stopReason;
+  // A running request hides the stopped card: it is a leftover of the previous run (progress updates keep the cards
+  // and move only the status). The problem is fresh: a progress update clears the old one in the state.
+  const running = activeStatuses.has(u.status);
+  const problem = u.problem;
+  const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
+  const reason = running ? "" : stopCard?.stopReason || u.stopReason;
   const stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
   if (stop) {
     cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
   }
-  if (u.problem !== "") {
-    const next: ButtonId[] = u.problem === "retry_required" ? ["retry"] : u.problem === "restart_required" ? ["restart"] : [];
-    cards.push({ type: "problem", text: updateProblemTexts[u.problem] ?? updateProblemTexts.failed, buttons: buttons(next) });
+  if (problem !== "") {
+    let next: ButtonId[] = problem === "retry_required" ? ["retry"] : problem === "restart_required" ? ["restart"] : [];
+    // A request refused as busy has no thread: it can stop the one that blocks it, or be sent again. Only the last one.
+    if (isBusyRefused(e) && ctx.last) {
+      next = [...(ctx.blocked ? (["stop"] as const) : []), ...(e.text !== "" && e.scope !== null ? (["resend"] as const) : [])];
+    }
+    cards.push({ type: "problem", text: updateProblemTexts[problem] ?? updateProblemTexts.failed, buttons: buttons(next) });
   } else if (!stop && u.status === "CANCELLED") {
     cards.push({ type: "stopped", text: "Отменено", buttons: [] });
   }
-  return { ...base, cards };
+
+  // «Повторить» only under the last request, and not where the stop card or the problem already offers the next step.
+  const offered = [...(stop?.buttons ?? []), ...(problem === "retry_required" ? ["retry" as const] : []), ...(problem === "restart_required" ? ["restart" as const] : [])];
+  // After rerun_blocked it stays: the core checks again (the effects may have been undone since).
+  const rerun =
+    ctx.last &&
+    e.threadId !== "" &&
+    finishedStatuses.has(u.status) &&
+    !offered.includes("retry") &&
+    !offered.includes("restart");
+  return { ...base, cards, rerun };
 }

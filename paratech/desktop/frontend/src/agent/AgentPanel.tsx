@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type CallProblem, parseUpdate, type UpdateView, updateEvent } from "../bindings/agent.js";
+import { type AgentApi, agentApi, type AskInput, type CallProblem, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -7,7 +7,7 @@ import { callByName, onEventData } from "../bindings/runtime.js";
 import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, requestText, type UndoNote, undoableActions } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { type Entry, initialPanelState, reducePanel } from "../agentState.js";
+import { blockingEntry, type Entry, initialPanelState, PressTracker, reducePanel } from "../agentState.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
 import { AgentPanelView } from "./AgentPanelView.js";
@@ -106,30 +106,38 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
     return () => window.removeEventListener("focus", load);
   }, [loadState]);
 
+  const send = useCallback(
+    (ask: AskInput) => {
+      const id = ++askId.current;
+      dispatch({ type: "asked", id, text: ask.text, scope: ask });
+      setNotice("");
+      api.ask(ask).then(
+        (problem) => {
+          dispatch({ type: "askResult", id, problem });
+          // An offline refusal may be stale: the Hub link decides, not the refusal.
+          if (problem === "offline") {
+            void loadState();
+          }
+        },
+        () => dispatch({ type: "askResult", id, problem: "failed" }),
+      );
+    },
+    [loadState],
+  );
+
   const submit = useCallback(() => {
     const text = requestText(draft);
     if (text === null) {
       return;
     }
-    const id = ++askId.current;
-    const ask = askInput(ctx, text);
-    dispatch({ type: "asked", id, text, scope: ask });
     setDraft("");
-    setNotice("");
-    api.ask(ask).then(
-      (problem) => {
-        dispatch({ type: "askResult", id, problem });
-        // An offline refusal may be stale: the Hub link decides, not the refusal.
-        if (problem === "offline") {
-          void loadState();
-        }
-      },
-      () => dispatch({ type: "askResult", id, problem: "failed" }),
-    );
-  }, [draft, ctx, loadState]);
+    send(askInput(ctx, text));
+  }, [draft, ctx, send]);
 
   // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
-  const [pressed, setPressed] = useState<Record<string, UpdateView | null>>({});
+  // The tracker is read synchronously, so a double click before the next render makes one call.
+  const pressed = useRef(new PressTracker());
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
 
   // What «Отменить» did, per action. The journal itself is «Журнал»; here only the lines of the thread.
   const [undoNotes, setUndoNotes] = useState<Record<string, UndoNote>>({});
@@ -180,15 +188,37 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
 
   const actionsFor = useCallback((e: Entry): CardActions => {
     const ref = { threadId: e.threadId, turn: e.turn };
-    const busy = e.key in pressed && pressed[e.key] === e.update;
-    const run = (p: Promise<CallProblem>) => {
-      setPressed((m) => ({ ...m, [e.key]: e.update }));
-      // A call the core refused produces no update, so the buttons come back at once.
-      const release = () => setPressed(({ [e.key]: _, ...rest }) => rest);
-      void p.then(
+    const named = e.threadId !== "";
+    // A request the core has not named yet has no buttons of its own: one refused as busy stops the running request
+    // that blocks it, or is sent again.
+    const blocking = named ? undefined : blockingEntry(state.entries, e);
+    // Buttons are off while a call runs; the refused request's «Стоп» is guarded on the blocker, so it shows that mark.
+    const busy = named ? pressed.current.busy(e.key, e.update) : blocking ? pressed.current.busy(blocking.key, blocking.update) : false;
+    // `target`: the request whose update frees the buttons (default: this one). `onSuccess`: also free them when the
+    // call is accepted. A call the core refused produces no update, so the buttons come back at once.
+    const run = (
+      make: () => Promise<CallProblem>,
+      o: { key?: string; update?: UpdateView | null; onSuccess?: boolean; onRefused?: () => void } = {},
+    ) => {
+      const key = o.key ?? e.key;
+      if (!pressed.current.mark(key, o.update === undefined ? e.update : o.update)) {
+        return;
+      }
+      redraw();
+      const release = () => {
+        pressed.current.release(key);
+        redraw();
+      };
+      const refused = () => {
+        o.onRefused?.();
+        release();
+      };
+      void make().then(
         (problem) => {
           setNotice(callProblemText(problem));
           if (problem !== "") {
+            refused();
+          } else if (o.onSuccess) {
             release();
           }
           if (problem === "offline") {
@@ -197,7 +227,7 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
         },
         () => {
           setNotice(callProblemText("failed"));
-          release();
+          refused();
         },
       );
     };
@@ -208,17 +238,43 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
       continue: () => api.continueTurn(ref),
       retry: () => api.retry(ref),
       restart: () => api.restart(ref),
+      rerun: () => api.rerun(ref),
       revise: () => Promise.resolve("invalid"), // Handled by the plan card, which asks for the wish first.
+      resend: () => Promise.resolve("invalid"), // Handled below: it asks again, not a call on this request.
     };
-    // A request the core has not named yet has no buttons to press.
-    const named = e.threadId !== "";
+    const press = (id: ButtonId) => {
+      if (!named) {
+        if (id === "stop" && blocking) {
+          // Marked on the blocker, so both «Стоп» (its own and this one) and a double click make one call; the mark
+          // goes with the blocker's next update.
+          run(() => api.stop({ threadId: blocking.threadId, turn: blocking.turn }), { key: blocking.key, update: blocking.update });
+        } else if (id === "resend" && e.scope !== null && e.text !== "" && pressed.current.mark(e.key, e.update)) {
+          redraw();
+          send(e.scope);
+        }
+        return;
+      }
+      if (id === "rerun") {
+        // The new request shows at once with the same text; taken back if the call is refused.
+        const next = `thread:${e.threadId}:${e.turn + 1}`;
+        run(
+          () => {
+            dispatch({ type: "rerunAsked", from: { threadId: e.threadId, turn: e.turn, text: e.text, scope: e.scope } });
+            return api.rerun(ref);
+          },
+          { onSuccess: true, onRefused: () => dispatch({ type: "rerunRefused", key: next }) },
+        );
+        return;
+      }
+      run(calls[id]);
+    };
     return {
       busy,
       confirm,
       turnkey,
-      press: (id) => named && !busy && run(calls[id]()),
-      revise: (wish) => named && !busy && run(api.revisePlan(ref, wish)),
-      answer: (answers) => named && !busy && run(api.answer(ref, answers)),
+      press,
+      revise: (wish) => named && run(() => api.revisePlan(ref, wish)),
+      answer: (answers) => named && run(() => api.answer(ref, answers)),
       undo: (actionId) => named && undoOne(actionId),
       undoAll: () => {
         const ids = undoableActions(entryModel(e).cards).filter((id) => !undoNotes[id]?.done && !undoNotes[id]?.busy);
@@ -228,7 +284,7 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [pressed, loadState, undoNotes, undoOne, undoAll]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll]);
 
   return (
     <AgentPanelView
