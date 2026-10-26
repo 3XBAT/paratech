@@ -113,6 +113,42 @@ func TestCreateAssignmentCalls(t *testing.T) {
 	}
 }
 
+// TestPlanStepNoteLimit (TASK-221): a planned create_assignment note keeps the catalog's own limit, every other step
+// argument stays a label of at most MaxLabelRunes.
+func TestPlanStepNoteLimit(t *testing.T) {
+	c := parseFile(t, goldenV6)
+	plan := func(tool, args string) string {
+		return `{"summary":"План.","steps":[{"tool":"` + tool + `","arguments":` + args + `}]}`
+	}
+	note := func(n int) string { return `{"title":"t","note":"` + strings.Repeat("я", n) + `"}` }
+
+	for name, args := range map[string]string{
+		"note 81":    note(MaxLabelRunes + 1),
+		"note limit": note(MaxQueryRunes),
+	} {
+		if err := c.Check(call(t, "show_plan", plan("create_assignment", args))); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	for name, args := range map[string]string{
+		"note over limit": note(MaxQueryRunes + 1),
+		"note newline":    `{"note":"a\nb"}`,
+		"note blank":      `{"note":"  "}`,
+		"note number":     `{"note":5}`,
+		"title over 80":   `{"title":"` + strings.Repeat("я", MaxLabelRunes+1) + `"}`,
+		"subject over 80": `{"subject":"` + strings.Repeat("я", MaxLabelRunes+1) + `"}`,
+	} {
+		if err := c.Check(call(t, "show_plan", plan("create_assignment", args))); !errors.Is(err, ErrInvalidCall) {
+			t.Errorf("%s: err = %v, want ErrInvalidCall", name, err)
+		}
+	}
+
+	if err := c.Check(call(t, "show_plan", plan("edit_due", note(MaxLabelRunes+1)))); !errors.Is(err, ErrInvalidCall) {
+		t.Errorf("note of another tool over 80: err = %v, want ErrInvalidCall", err)
+	}
+}
+
 // TestTimeTypeOnlyFromCatalog6: the time type in a catalog before 6 is a catalog error, so a released catalog cannot
 // grow it; UI tools never take it.
 func TestTimeTypeOnlyFromCatalog6(t *testing.T) {

@@ -27,6 +27,11 @@ const (
 	minChoices     = 2
 )
 
+const (
+	toolCreateAssignment = "create_assignment"
+	argNote              = "note"
+)
+
 // datePattern is the JSON Schema form of values.ValidDate's shape; the check also rejects impossible dates.
 const datePattern = `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`
 
@@ -185,7 +190,7 @@ func (c *Catalog) planStep(v any) bool {
 				return false
 			}
 			for argName, argValue := range args {
-				if !values.ValidToolName(argName) || !label(argValue) {
+				if !values.ValidToolName(argName) || !c.stepArgument(name, argName, argValue) {
 					return false
 				}
 			}
@@ -194,6 +199,22 @@ func (c *Catalog) planStep(v any) bool {
 		}
 	}
 	return true
+}
+
+// stepArgument checks one plan-step argument: a label, except the note of create_assignment, which keeps the catalog's
+// own query limit (a planned note was otherwise refused above 80 characters). The provider schema keeps the 80-character
+// bound for every step argument, because changing it would change the frozen catalog text; only this check is looser.
+func (c *Catalog) stepArgument(toolName, argName string, v any) bool {
+	if toolName == toolCreateAssignment && argName == argNote {
+		if t, ok := c.tools[toolName]; ok && slices.ContainsFunc(t.Arguments, func(a argument) bool {
+			return a.Name == argName && a.Type == typeQuery
+		}) {
+			s, ok := v.(string)
+			return ok && boundedText(s, MaxQueryRunes, false)
+		}
+	}
+
+	return label(v)
 }
 
 func question(v any) bool {
