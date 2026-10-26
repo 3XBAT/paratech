@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/services/homeworkdoc"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/settings/settings"
 	"paratech/desktop/internal/domain/shared"
@@ -283,6 +286,139 @@ func TestExportPDFWorkChangedMeanwhile(t *testing.T) {
 	if wr := mustWriting(t, e, id); wr.PDF != nil {
 		t.Fatalf("the work kept the pdf: %+v", wr.PDF)
 	}
+}
+
+// A second click while the first PDF prints waits for it and gets the same PDF: one print, one PDF in «ДЗ», nothing
+// taken to «Входящие», no ErrChanged.
+func TestExportPDFDoubleClick(t *testing.T) {
+	e, p := pdfEnv(t)
+	ctx := t.Context()
+	id := e.confirmed(t)
+	e.done(t, id)
+	files := len(e.shelf.files)
+	type result struct {
+		got PDFSaved
+		err error
+	}
+	second := make(chan result, 1)
+	var once sync.Once
+	p.during = func() {
+		once.Do(func() {
+			go func() {
+				got, err := e.svc.ExportPDF(ctx, id)
+				second <- result{got, err}
+			}()
+			// The print goes on once the second click waits for it.
+			for e.svc.pdfLocks.waiting(id) < 2 {
+				runtime.Gosched()
+			}
+		})
+	}
+	first, err := e.svc.ExportPDF(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := <-second
+	if r.err != nil || r.got.Material != first.Material {
+		t.Fatalf("second click = %+v, %v; first %s", r.got.Material, r.err, first.Material)
+	}
+	if len(p.docs) != 1 || len(e.shelf.files) != files+1 || len(e.shelf.moves) != 0 {
+		t.Fatalf("%d prints, %d filed, moved %v", len(p.docs), len(e.shelf.files)-files, e.shelf.moves)
+	}
+	if m, _ := e.shelf.paper(first.Material); m.Folder() != subject.SystemFolderID("s1", subject.SystemHomework) {
+		t.Fatalf("the pdf is not in «ДЗ»: %+v", m.State())
+	}
+	if e.svc.pdfLocks.waiting(id) != 0 {
+		t.Fatal("the lock of the work outlived the prints")
+	}
+}
+
+// A PDF of the same content kept by someone else during the print (past the lock: another process) is the answer:
+// our copy leaves «ДЗ», no ErrChanged.
+func TestExportPDFKeptMeanwhile(t *testing.T) {
+	e, p := pdfEnv(t)
+	ctx := t.Context()
+	id := e.confirmed(t)
+	e.done(t, id)
+	var theirs shared.MaterialID
+	p.during = func() {
+		w, err := e.works.Get(ctx, id)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		m, err := e.shelf.FileHomework(ctx, "s1", "other.pdf", []byte("%PDF-1.7 other print"))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		ref, err := material.BlobRef(m.Digest())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f := work.File{Material: m.ID(), Artifact: ref.String(), Content: w.ContentKey(), Year: w.PaperYear(time.UTC)}
+		if err := w.AttachPDF(f, t0); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := e.works.Save(ctx, w); err != nil {
+			t.Error(err)
+			return
+		}
+		theirs = m.ID()
+	}
+	got, err := e.svc.ExportPDF(ctx, id)
+	if err != nil || theirs == "" || got.Material != theirs || got.View.Writing.PDF != theirs {
+		t.Fatalf("ExportPDF = %+v, %v; theirs %s", got.Material, err, theirs)
+	}
+	if len(e.shelf.moves) != 1 || e.shelf.moves[0] == theirs {
+		t.Fatalf("moved %v", e.shelf.moves)
+	}
+	if m, _ := e.shelf.paper(e.shelf.moves[0]); !m.InInbox() {
+		t.Fatalf("our copy stayed in «ДЗ»: %+v", m.State())
+	}
+	if m, _ := e.shelf.paper(theirs); m.Folder() != subject.SystemFolderID("s1", subject.SystemHomework) {
+		t.Fatalf("their pdf is not in «ДЗ»: %+v", m.State())
+	}
+}
+
+// The lock of a work waits for its holder or the caller's end; other works do not wait.
+func TestWorkLocks(t *testing.T) {
+	var l workLocks
+	unlock, err := l.lock(t.Context(), "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := l.lock(t.Context(), "w2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := l.lock(ctx, "w1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a held lock = %v", err)
+	}
+	unlock()
+	again, err := l.lock(t.Context(), "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again()
+	if l.waiting("w1") != 0 || l.waiting("w2") != 0 {
+		t.Fatal("locks outlived their users")
+	}
+}
+
+// waiting is the number of callers that hold or wait for the lock of id.
+func (l *workLocks) waiting(id shared.WorkID) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if k, ok := l.locks[id]; ok {
+		return k.users
+	}
+	return 0
 }
 
 // A new generation takes the PDF out of «ДЗ» with the old paper; the new paper has no PDF until the next click.

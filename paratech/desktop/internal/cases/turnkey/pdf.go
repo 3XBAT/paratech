@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/services/homeworkdoc"
@@ -34,6 +35,13 @@ func (s *Service) ExportPDF(ctx context.Context, id shared.WorkID) (PDFSaved, er
 	if s.writing == nil || s.writing.PDF == nil {
 		return PDFSaved{}, ErrNotConfigured
 	}
+	// One print per work at a time: two prints differ byte for byte, so a double click would file two PDFs and lose
+	// the save of one; the second click waits and finds the first one's PDF.
+	unlock, err := s.pdfLocks.lock(ctx, id)
+	if err != nil {
+		return PDFSaved{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	defer unlock()
 	w, err := s.get(ctx, id)
 	if err != nil {
 		return PDFSaved{}, err
@@ -89,10 +97,17 @@ func (s *Service) ExportPDF(ctx context.Context, id shared.WorkID) (PDFSaved, er
 	err = s.works.Save(ctx, w)
 	switch {
 	case errors.Is(err, shared.ErrVersionConflict):
-		// A second click may have kept this very file (the same bytes are one material): then it is the answer.
+		// Another print of the same content may have been kept meanwhile (the same bytes are one material): then it is
+		// the answer, and our copy leaves «ДЗ».
 		if cur, gerr := s.get(ctx, id); gerr == nil {
-			if p, ok := cur.PDF(); ok && p.Material == m.ID() {
-				return PDFSaved{View: s.view(ctx, cur), Material: m.ID()}, nil
+			if p, ok := cur.PDF(); ok && p.Content == f.Content {
+				if p.Material == m.ID() {
+					return PDFSaved{View: s.view(ctx, cur), Material: m.ID()}, nil
+				}
+				if there, terr := s.materialThere(ctx, p.Material); terr == nil && there {
+					_ = s.dropPDF(ctx, m.ID(), nil)
+					return PDFSaved{View: s.view(ctx, cur), Material: p.Material}, nil
+				}
 			}
 		}
 		return PDFSaved{}, s.dropPDF(ctx, m.ID(), fmt.Errorf("%w: %w", ErrChanged, err))
@@ -122,6 +137,48 @@ func (s *Service) dropPDF(ctx context.Context, id shared.MaterialID, cause error
 		s.log.WarnContext(ctx, opPDFUnfiled, slog.String("material", string(id)), slog.Any("cause", err))
 	}
 	return cause
+}
+
+// workLocks serializes the prints of one work (the zero value is ready); an entry lives while someone holds or waits
+// for it.
+type workLocks struct {
+	mu    sync.Mutex
+	locks map[shared.WorkID]*workLock
+}
+
+type workLock struct {
+	ch    chan struct{} // holds a token while locked
+	users int
+}
+
+// lock waits for the lock of id or the end of ctx; the returned func unlocks it.
+func (l *workLocks) lock(ctx context.Context, id shared.WorkID) (func(), error) {
+	l.mu.Lock()
+	if l.locks == nil {
+		l.locks = map[shared.WorkID]*workLock{}
+	}
+	k, ok := l.locks[id]
+	if !ok {
+		k = &workLock{ch: make(chan struct{}, 1)}
+		l.locks[id] = k
+	}
+	k.users++
+	l.mu.Unlock()
+
+	release := func() {
+		l.mu.Lock()
+		if k.users--; k.users == 0 {
+			delete(l.locks, id)
+		}
+		l.mu.Unlock()
+	}
+	select {
+	case k.ch <- struct{}{}:
+		return func() { <-k.ch; release() }, nil
+	case <-ctx.Done():
+		release()
+		return nil, ctx.Err()
+	}
 }
 
 // materialThere reports whether material id is still in the library (not removed); it may be in any folder.
