@@ -5,13 +5,14 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v4.json).
-const CatalogVersion = 4
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v5.json). v5 has
+// the tools of v4; only the Hub panel prompt changed (TASK-200).
+const CatalogVersion = 5
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
 
-// Tools of catalog v4, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
+// Tools of catalog v5, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
 // черновик»): the planner can no longer call it, but stored actions, plans and calls that name it still read
 // (RetiredTools).
 const (
@@ -201,7 +202,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v4 (shared/testdata/tool_catalog_v4.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v5 (shared/testdata/tool_catalog_v5.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},

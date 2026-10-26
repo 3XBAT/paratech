@@ -20,8 +20,8 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v4.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
-// TASK-184), the tool list the Hub serves for the catalog version the desktop sends.
+// goldenCatalog is shared/testdata/tool_catalog_v5.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
+// TASK-184, v5 since TASK-210), the tool list the Hub serves for the catalog version the desktop sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
 	Types          map[string]string `json:"types"`
@@ -42,7 +42,12 @@ type goldenCatalog struct {
 
 func loadGoldenCatalog(t *testing.T) goldenCatalog {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v4.json"))
+	return loadGoldenCatalogFile(t, fmt.Sprintf("tool_catalog_v%d.json", values.CatalogVersion))
+}
+
+func loadGoldenCatalogFile(t *testing.T, name string) goldenCatalog {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +56,28 @@ func loadGoldenCatalog(t *testing.T) goldenCatalog {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// TestToolCatalogV5KeepsTheToolsOfV4: v5 changed only the Hub panel prompt (TASK-200), so a desktop on v5 runs the
+// same tools, arguments and policy as on v4: the files differ only in catalog_version.
+func TestToolCatalogV5KeepsTheToolsOfV4(t *testing.T) {
+	dir := filepath.Join(codeRoot(t), "shared", "testdata")
+	v4, err := os.ReadFile(filepath.Join(dir, "tool_catalog_v4.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v5, err := os.ReadFile(filepath.Join(dir, "tool_catalog_v5.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const v4Line, v5Line = `"catalog_version": 4,`, `"catalog_version": 5,`
+	if strings.Count(string(v4), v4Line) != 1 || strings.Count(string(v5), v5Line) != 1 {
+		t.Fatal("catalog_version lines changed")
+	}
+	if strings.Replace(string(v4), v4Line, v5Line, 1) != string(v5) {
+		t.Fatal("tool_catalog_v5.json differs from tool_catalog_v4.json beyond catalog_version")
+	}
 }
 
 // TestToolCatalogMatchesGolden keeps the desktop's closed tool enum, argument schemas and policy classes equal to the
@@ -252,5 +279,52 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 		if turn.GetCalls() != nil {
 			t.Fatal("the new request echoed calls of the older catalog")
 		}
+	}
+}
+
+// The update to catalog 5 (TASK-210): calls sealed for a request stopped on catalog 4 no longer pass the Hub's check
+// once the desktop sends 5, so «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
+func TestAgentRequestOfCatalog4AfterTheUpdateTo5(t *testing.T) {
+	e := newAgentEnv(t)
+	ctx := context.Background()
+
+	// Before the update: the Hub seals and checks the calls for catalog 4.
+	e.hub.AsCatalog(values.CatalogVersion - 1).Then(testenv.AgentCall{ID: "toolu_1", Tool: "list_subjects", Args: `{}`})
+	st, err := e.turns.Ask(ctx, agentturn.AskInput{Text: "какие предметы?"})
+	if err != nil || len(st.Calls) != 1 {
+		t.Fatalf("Ask = %+v, %v", st, err)
+	}
+	st = e.submit(t, st, agentturn.Outcome{Result: values.ToolResult{CallID: "toolu_1", ResultJSON: `{"subjects":[]}`}})
+	if st.Status != thread.StatusStopped || st.StopReason != values.StopOffline {
+		t.Fatalf("stopped = %+v", st)
+	}
+
+	// The update: the Hub binds the catalog the desktop now sends (5), and the app starts again.
+	e.hub.AsCatalog(0)
+	e.start(t)
+
+	before := len(e.hub.Requests())
+	st, err = e.turns.Continue(ctx, turnOf(st))
+	if err != nil || st.Status != thread.StatusStopped || st.StopReason != values.StopFailed {
+		t.Fatalf("Continue = %+v, %v", st, err)
+	}
+	st, err = e.turns.Retry(ctx, turnOf(st))
+	if err != nil || st.Status != thread.StatusStopped || st.StopReason != values.StopFailed {
+		t.Fatalf("Retry = %+v, %v", st, err)
+	}
+	reqs := e.hub.Requests()
+	if len(reqs) != before+2 || e.hub.Executed() != 1 {
+		t.Fatalf("hub saw %d new requests, ran %d", len(reqs)-before, e.hub.Executed())
+	}
+	for _, r := range reqs[before:] {
+		if r.GetCatalogVersion() != 5 {
+			t.Fatalf("catalog version %d", r.GetCatalogVersion())
+		}
+	}
+
+	e.hub.Then(testenv.AgentCall{ID: "toolu_2", Tool: "reply", Args: `{"text":"Предметов пока нет."}`})
+	st, err = e.turns.Ask(ctx, agentturn.AskInput{Text: "а что сейчас?"})
+	if err != nil || st.Status != thread.StatusDone || st.Turn != 2 {
+		t.Fatalf("new request = %+v, %v", st, err)
 	}
 }
