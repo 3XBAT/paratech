@@ -41,11 +41,13 @@ type Config struct {
 }
 
 // ServerPrompt is the Hub's own prompt of an operation: the allowlist alias it runs on, the prompt version (in the
-// fingerprint) and the text (hub/pkg/prompts ops/<op>/v<N>).
+// fingerprint) and the text (hub/pkg/prompts ops/<op>/v<N>). Reask is the note of that version added to the text when
+// the model is asked once more after a refusal it can fix (TRIAGE_ASSIGNMENT, ADR-0025); empty, it is never asked again.
 type ServerPrompt struct {
 	Alias   string
 	Version string
 	Text    string
+	Reask   string
 }
 
 // Command is one Complete or CompleteStream call of the authenticated tester Owner. Operation is a values.Operation string; texts are

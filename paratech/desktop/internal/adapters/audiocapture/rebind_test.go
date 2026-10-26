@@ -371,7 +371,11 @@ func TestRecorderRebindRightAfterStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(2 * time.Second) // the re-bind happens meanwhile; polling would take a lock
-	e.waitDiag(t, "zoom2 is captured", func(d audiocapture.Diagnostics) bool { return d.Rebinds == 1 && d.TargetPID == 301 })
+	// Running: the new child has started. The re-bind shows before its launch, and a stop then would leave a cold
+	// start of the child on a busy runner only StopGrace to start and stop.
+	e.waitDiag(t, "zoom2 is captured", func(d audiocapture.Diagnostics) bool {
+		return d.Rebinds == 1 && d.TargetPID == 301 && d.Running
+	})
 	if err := stop(t, e); err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,8 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 )
 
-// golden is the contract's current catalog (v4); the Hub embeds a byte-identical copy (hub/pkg/prompts). goldenV1 to
-// goldenV3 are frozen, still served to clients of those versions.
+// golden is the contract's catalog v4, whose tools the current v5 keeps (TestCatalogV5); the Hub embeds byte-identical
+// copies (hub/pkg/prompts). goldenV1 to goldenV3 are frozen, still served to clients of those versions.
 const (
 	golden   = "../../../../../../shared/testdata/tool_catalog_v4.json"
 	goldenV3 = "../../../../../../shared/testdata/tool_catalog_v3.json"

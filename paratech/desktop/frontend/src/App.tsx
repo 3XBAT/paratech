@@ -5,7 +5,9 @@ import {
   type PageId,
   railItemOf,
   routeToAssignment,
+  routeToOpenedAssignment,
   routeToPage,
+  routeToSubject,
   routeToSummary,
   routeToTranscript,
 } from "./nav";
@@ -37,20 +39,24 @@ function PageView(props: {
   id: PageId;
   visit: number;
   assignment: string;
+  subject: string;
   /** Counts the files added elsewhere (a drop on the window): the library pages read again. */
   library: number;
   onOpen: (id: PageId) => void;
   onOpenAssignment: (id: string) => void;
+  /** Shows a card of «Задания» or a subject of «Предметы» ("" the list): an entry of the history. */
+  onSelectAssignment: (id: string) => void;
+  onSelectSubject: (id: string) => void;
 }) {
   switch (props.id) {
     case "today":
       return <TodayPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
     case "subjects":
-      return <SubjectsPage onOpen={props.onOpen} reload={props.library} visit={props.visit} />;
+      return <SubjectsPage onOpen={props.onOpen} reload={props.library} subjectId={props.subject} onSelect={props.onSelectSubject} />;
     case "journal":
       return <JournalPage />;
     case "homework":
-      return <HomeworkPage openAssignment={props.assignment} />;
+      return <HomeworkPage openAssignment={props.assignment} onSelect={props.onSelectAssignment} />;
     case "knowledge":
       return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} />;
     case "tickets":
@@ -92,6 +98,9 @@ export function App() {
     setRoute(routeToAssignment(id));
     setJump((j) => j + 1);
   }, []);
+  // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
+  const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
+  const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
   // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
   useNavHistory(route, setRoute, (r, from) => {
     setSummarySection(undefined);
@@ -130,9 +139,12 @@ export function App() {
                 id={current}
                 visit={visit}
                 assignment={route.assignment}
+                subject={route.subject}
                 library={library}
                 onOpen={openPage}
                 onOpenAssignment={openAssignment}
+                onSelectAssignment={selectAssignment}
+                onSelectSubject={selectSubject}
               />
             </OpenSummaryContext.Provider>
           </OpenTranscriptContext.Provider>
