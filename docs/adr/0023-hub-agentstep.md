@@ -69,3 +69,21 @@ calls in the history; the seal stops that. It does not stop free text in student
   The next step sends it in place of the last echo (earlier echoes stay plain `tool_use`). No kept turn:
   `failed_precondition` before the provider call, nothing charged; a replay does not need it. A failed write is only
   logged (the answer stands, its continuation fails). The kept turn is not in the reservation; usage is settled as is.
+
+## Addendum: History pairs (TASK-181, 2026-10-26)
+Earlier requests went as bare student texts, merged into one user message, so the model answered all of them
+(TASK-140). Owner's decision (variant «а»): the model sees pairs «student request → app's answer» and answers only
+the last request.
+- **Turn kind** `agent_reply` (`AgentTurn` oneof field 4, additive): what the app showed the student in answer to an
+  earlier request of the thread, built by the desktop (TASK-183). Non-blank UTF-8 without NUL, ≤ 2 KiB.
+- **Order**: directly after a student text and directly before a student text (never first, last, next to an echo or
+  results, or two in a row). Counted in the 64-turn and 256 KiB limits; the fingerprint encodes the turn kind.
+- **Wire**: an assistant message with one text block, so pairs alternate user/assistant; the current request's
+  echo and kept thinking turn and the cache point on the last block are unchanged.
+- **No seal**: like a student text, it is bounded client data and chooses no action (plan and provenance checks stay
+  on the desktop).
+- **Old desktops** (catalogs 1–3, no `agent_reply`): when a request has no agent reply at all, the Hub puts the fixed
+  assistant text "(earlier request; its answer is not available)" between consecutive student texts instead of
+  merging them; it counts in the reservation.
+- **Deployment**: the Hub with this change goes out before a desktop that sends `agent_reply`; an older Hub answers
+  `invalid_argument` to the unknown turn kind.

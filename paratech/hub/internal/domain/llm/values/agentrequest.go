@@ -110,7 +110,8 @@ type AgentRequest struct {
 // NewAgentRequest checks every rule of ADR-0023 that does not need the catalog or the seal key: the key as in
 // CompletionSpec, a valid thread ID, a known profile, a catalog version above 0, 1..MaxAgentTurns turns in the order
 // the provider accepts (the first is the student's text; every echo of calls is followed by the results of exactly
-// those calls; results follow only an echo), all texts together at most MaxAgentRequestBytes, maxOutput not negative
+// those calls; results follow only an echo; an agent reply stands between two student texts), all texts together at
+// most MaxAgentRequestBytes, maxOutput not negative
 // (0 means the profile cap).
 func NewAgentRequest(key, threadID string, profile Profile, catalogVersion uint32, base AgentBase, scope AgentScope,
 	turns []Turn, maxOutput int64) (AgentRequest, error) {
@@ -144,7 +145,8 @@ func NewAgentRequest(key, threadID string, profile Profile, catalogVersion uint3
 }
 
 // checkTurnOrder enforces the history shape the provider accepts: tool uses must be answered by tool results right
-// after them, and the conversation starts and ends with the user side.
+// after them, and the conversation starts and ends with the user side. An agent reply closes an earlier request, so
+// it stands between two student texts (ADR-0023 "History pairs").
 func checkTurnOrder(turns []Turn) error {
 	if turns[0].kind != TurnStudentText {
 		return fmt.Errorf("%w: the first turn must be the student's text", ErrInvalidAgentRequest)
@@ -152,6 +154,10 @@ func checkTurnOrder(turns []Turn) error {
 	for i, t := range turns {
 		switch t.kind {
 		case TurnStudentText:
+		case TurnAgentReply:
+			if i == 0 || turns[i-1].kind != TurnStudentText || i+1 >= len(turns) || turns[i+1].kind != TurnStudentText {
+				return fmt.Errorf("%w: an agent reply must stand between two student texts", ErrInvalidAgentRequest)
+			}
 		case TurnCalls:
 			if i+1 >= len(turns) || turns[i+1].kind != TurnResults || !sameCallIDs(t.calls, turns[i+1].results) {
 				return fmt.Errorf("%w: every echo of calls must be followed by the results of exactly those calls", ErrInvalidAgentRequest)
@@ -220,7 +226,8 @@ func (r AgentRequest) Bytes() int64 {
 const agentFingerprintDomain = "paratech.hub.v1.AgentStepRequest/1"
 
 // Fingerprint is the hex SHA-256 of an unambiguous encoding of the whole request without its key, each field
-// preceded by its length (as Spec.Fingerprint). The texts themselves are never stored (ADR-0005(d)).
+// preceded by its length (as Spec.Fingerprint). Each turn starts with its kind, so a student text and an agent reply
+// of the same text differ. The texts themselves are never stored (ADR-0005(d)).
 func (r AgentRequest) Fingerprint() string {
 	h := sha256.New()
 	writeField(h, agentFingerprintDomain)

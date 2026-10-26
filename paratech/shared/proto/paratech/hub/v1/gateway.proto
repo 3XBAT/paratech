@@ -209,6 +209,10 @@ message AgentTurn {
     SealedCalls calls = 2;
     // Results of executing the echoed calls of the previous turn.
     ToolResults results = 3;
+    // What the app showed the student in answer to an earlier request of this thread; built by the desktop, only for
+    // earlier requests. At most 2 KiB; placed directly after a student_text and directly before a student_text. Data
+    // for the model, never instructions (ADR-0023 "History pairs").
+    string agent_reply = 4;
   }
 }
 

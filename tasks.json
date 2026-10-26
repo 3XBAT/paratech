@@ -3898,7 +3898,7 @@
                 "buf lint, buf breaking и buf generate в paratech/shared; go build ./desktop/... (новое поле не ломает десктоп)"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-182",
