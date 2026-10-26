@@ -11,10 +11,13 @@ import {
   currentRoute,
   goBack,
   goForward,
+  handleKey,
+  handleMouse,
   isEditableTarget,
   keyDirection,
   maxDepth,
   mouseDirection,
+  needsRemount,
   newHistory,
   pushRoute,
 } from "../.test-build/navHistory.js";
@@ -95,12 +98,46 @@ test("mouse buttons 3 and 4 are back and forward", () => {
   assert.equal(mouseDirection(1), null);
 });
 
-test("the hook cancels the events and acts on mouseup", () => {
-  const src = readFileSync(new URL("../src/useNavHistory.ts", import.meta.url), "utf8");
-  assert.match(src, /"mouseup"/);
-  assert.match(src, /"auxclick"/);
-  assert.match(src, /preventDefault/);
-  assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /useNavHistory\(/);
+const twoEntries = () => goBack(pushRoute(newHistory(initialRoute), routeToPage("journal")));
+
+test("mousedown and auxclick on buttons 3/4 are cancelled without navigating", () => {
+  const hist = twoEntries();
+  for (const type of ["mousedown", "auxclick"]) {
+    assert.deepEqual(handleMouse({ button: 4, type }, hist), { prevent: true, next: null });
+    assert.deepEqual(handleMouse({ button: 3, type }, hist), { prevent: true, next: null });
+  }
+});
+
+test("mouseup on a side button navigates", () => {
+  const hist = twoEntries();
+  const fwd = handleMouse({ button: 4, type: "mouseup" }, hist);
+  assert.equal(fwd.prevent, true);
+  assert.equal(currentRoute(fwd.next).page, "journal");
+  // «back» at the start: cancelled, nowhere to go.
+  assert.deepEqual(handleMouse({ button: 3, type: "mouseup" }, hist), { prevent: true, next: null });
+  assert.deepEqual(handleMouse({ button: 0, type: "mouseup" }, hist), { prevent: false, next: null });
+});
+
+test("a prevented or repeated keydown is ignored", () => {
+  const hist = twoEntries();
+  const ok = handleKey(key({ key: "ArrowRight" }), hist);
+  assert.equal(ok.prevent, true);
+  assert.notEqual(ok.next, null);
+  assert.deepEqual(handleKey(key({ key: "ArrowRight", defaultPrevented: true }), hist), { prevent: false, next: null });
+  assert.deepEqual(handleKey(key({ key: "ArrowRight", repeat: true }), hist), { prevent: false, next: null });
+});
+
+test("a keydown in an editable target is ignored", () => {
+  const a = handleKey(key({ key: "ArrowRight", target: { tagName: "INPUT" } }), twoEntries());
+  assert.deepEqual(a, { prevent: false, next: null });
+});
+
+test("going back from a summary opened over an assignment does not remount the page", () => {
+  const over = routeToSummary(routeToAssignment("a1"), "r1");
+  assert.equal(needsRemount(routeToAssignment("a1"), over), false);
+  assert.equal(needsRemount(routeToAssignment("a2"), routeToAssignment("a1")), true);
+  assert.equal(needsRemount(routeToAssignment("a1"), routeToPage("journal")), true);
+  assert.equal(needsRemount(routeToPage("journal"), over), false);
 });
 
 test("the subject is shown in the rows of «Горит» and «Ждёт»; no subject, no line", () => {

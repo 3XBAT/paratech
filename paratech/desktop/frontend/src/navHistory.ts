@@ -84,3 +84,39 @@ export function mouseDirection(button: number): Direction | null {
   }
   return button === 4 ? "forward" : null;
 }
+
+/** What a window event asks for: cancel it, and move to `next` (null: stay). */
+export interface NavAction {
+  prevent: boolean;
+  next: NavHistory | null;
+}
+
+const ignored: NavAction = { prevent: false, next: null };
+
+function step(h: NavHistory, d: Direction): NavHistory | null {
+  const next = d === "back" ? goBack(h) : goForward(h);
+  return next === h ? null : next;
+}
+
+/** A key press that was already handled (tabs, the resize handle) or is auto-repeated is left alone. */
+export function handleKey(e: KeyLike & { defaultPrevented?: boolean; repeat?: boolean }, h: NavHistory): NavAction {
+  if (e.defaultPrevented === true || e.repeat === true) {
+    return ignored;
+  }
+  const d = keyDirection(e);
+  return d === null ? ignored : { prevent: true, next: step(h, d) };
+}
+
+/** The side buttons are cancelled on press and click; the move happens on mouseup only. */
+export function handleMouse(e: { button: number; type: string }, h: NavHistory): NavAction {
+  const d = mouseDirection(e.button);
+  if (d === null) {
+    return ignored;
+  }
+  return { prevent: true, next: e.type === "mouseup" ? step(h, d) : null };
+}
+
+/** True when going from one route to another swaps the page or the assignment, so the page must open afresh. */
+export function needsRemount(to: Route, from: Route): boolean {
+  return to.assignment !== "" && (to.page !== from.page || to.assignment !== from.assignment);
+}

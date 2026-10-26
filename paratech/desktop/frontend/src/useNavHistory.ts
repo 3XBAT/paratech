@@ -1,22 +1,13 @@
 import { useEffect, useRef } from "react";
 import type { Route } from "./nav";
-import {
-  currentRoute,
-  type Direction,
-  goBack,
-  goForward,
-  keyDirection,
-  mouseDirection,
-  newHistory,
-  pushRoute,
-} from "./navHistory";
+import { currentRoute, handleKey, handleMouse, type NavAction, newHistory, pushRoute } from "./navHistory";
 
 /**
  * Records every route change into the history and walks it on Alt+←/Alt+→ and the mouse side buttons. A restored
  * route is already the current entry, so the effect adds nothing for it. The events are cancelled so the WebView
  * never navigates away from the app.
  */
-export function useNavHistory(route: Route, setRoute: (r: Route) => void, onRestore: (r: Route) => void): void {
+export function useNavHistory(route: Route, setRoute: (r: Route) => void, onRestore: (r: Route, from: Route) => void): void {
   const history = useRef(newHistory(route));
   const restore = useRef(onRestore);
   restore.current = onRestore;
@@ -26,33 +17,21 @@ export function useNavHistory(route: Route, setRoute: (r: Route) => void, onRest
   }, [route]);
 
   useEffect(() => {
-    const go = (d: Direction) => {
-      const next = d === "back" ? goBack(history.current) : goForward(history.current);
-      if (next === history.current) {
-        return;
-      }
-      history.current = next;
-      const r = currentRoute(next);
-      setRoute(r);
-      restore.current(r);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      const d = keyDirection(e);
-      if (d !== null) {
+    const apply = (e: Event, a: NavAction) => {
+      if (a.prevent) {
         e.preventDefault();
-        go(d);
       }
-    };
-    const onMouse = (e: MouseEvent) => {
-      const d = mouseDirection(e.button);
-      if (d === null) {
+      if (a.next === null) {
         return;
       }
-      e.preventDefault();
-      if (e.type === "mouseup") {
-        go(d);
-      }
+      const from = currentRoute(history.current);
+      history.current = a.next;
+      const r = currentRoute(a.next);
+      setRoute(r);
+      restore.current(r, from);
     };
+    const onKey = (e: KeyboardEvent) => apply(e, handleKey(e, history.current));
+    const onMouse = (e: MouseEvent) => apply(e, handleMouse(e, history.current));
     window.addEventListener("keydown", onKey);
     for (const t of ["mousedown", "mouseup", "auxclick"]) {
       window.addEventListener(t, onMouse as EventListener);
