@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
+	"sync"
 
 	"paratech/hub/internal/domain/llm/values"
 )
@@ -39,7 +41,8 @@ var errStreamTooLarge = errors.New("stream too large")
 // Stream is Complete with "stream": true: the same request, deadline and error rules. onDelta (may be nil) gets every
 // non-empty text delta in order, from the calling goroutine, before Stream returns; their concatenation is the
 // output. An error event is classified by its error.type; a stream that ends or breaks before message_stop is the
-// transient "answer interrupted" (probably billed), unless ctx ended it.
+// transient "answer interrupted" (probably billed), unless ctx ended it. A 200 JSON answer is read as Complete reads
+// it (TASK-190); any other content type is a permanent error.
 func (c *Client) Stream(ctx context.Context, req values.Request, onDelta func(chunk string)) (values.Completion, error) {
 	if req.Model() == "" || req.Instructions() == "" || req.MaxOutput() <= 0 {
 		return values.Completion{}, failStream(permanent("invalid request"))
@@ -57,11 +60,37 @@ func (c *Client) Stream(ctx context.Context, req values.Request, onDelta func(ch
 	var completion values.Completion
 	err = c.post(ctx, body, contentTypeSSE, func(resp *http.Response) error {
 		var rerr error
+		if isJSON(resp) {
+			completion, rerr = readBuffered(resp, onDelta)
+			return rerr
+		}
 		completion, rerr = readStream(resp, onDelta)
 		return rerr
 	})
 	if err != nil {
 		return values.Completion{}, failStream(err)
+	}
+	return completion, nil
+}
+
+// noSSELogged makes the "provider answered without SSE" line appear once per process; a pointer so tests can reset it.
+var noSSELogged = new(sync.Once)
+
+func isJSON(resp *http.Response) bool {
+	mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return err == nil && mt == contentTypeJSON
+}
+
+// readBuffered reads a JSON answer to a streaming request (a gateway that buffers or ignores "stream") the way
+// Complete does and sends the whole output as one delta: the call is already paid, so a second one is never made.
+func readBuffered(resp *http.Response, onDelta func(string)) (values.Completion, error) {
+	noSSELogged.Do(func() { slog.Warn("provider answered without SSE") })
+	completion, err := readCompletion(resp)
+	if err != nil {
+		return values.Completion{}, err
+	}
+	if out := completion.Output(); out != "" {
+		onDelta(out)
 	}
 	return completion, nil
 }

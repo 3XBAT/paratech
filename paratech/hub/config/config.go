@@ -144,8 +144,8 @@ type Config struct {
 	// LLMModels is the model allowlist, "alias=model-id:max_output_tokens[,...]" (see Models). Kept as text so that
 	// Config stays comparable.
 	LLMModels string
-	// ProviderStream makes CompleteStream stream from the provider (ADR-0026). Off (the default), CompleteStream makes
-	// one non-streaming call and sends the whole answer at once; the owner turns it on after the gateway probe passes.
+	// ProviderStream makes CompleteStream stream from the provider (ADR-0026); on by default (owner, 2026-10-26, no
+	// gateway probe). Off, CompleteStream makes one non-streaming call and sends the whole answer at once.
 	ProviderStream bool
 	// RateLimitPerMinute is the average number of Complete calls a minute one API key may make.
 	RateLimitPerMinute int
@@ -180,7 +180,7 @@ func Default() Config {
 	return Config{
 		LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second,
 		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
-		AnthropicBaseURL: DefaultAnthropicBaseURL, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels,
+		AnthropicBaseURL: DefaultAnthropicBaseURL, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels, ProviderStream: true,
 		RateLimitPerMinute: 30, RateLimitBurst: 10,
 		AgentPlannerAlias: DefaultAgentPlannerAlias, AgentStrongAlias: DefaultAgentStrongAlias,
 	}
@@ -286,7 +286,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.StringVar(&cfg.LLMModels, "llm-models", cfg.LLMModels,
 		"model allowlist alias=model-id:max_output_tokens[,...] (env "+EnvLLMModels+")")
 	fs.BoolVar(&cfg.ProviderStream, "provider-stream", cfg.ProviderStream,
-		"stream answers from the provider in CompleteStream; off sends the whole answer at once (env "+EnvProviderStream+")")
+		"stream answers from the provider in CompleteStream, on by default; =false sends the whole answer at once (env "+EnvProviderStream+")")
 	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute,
 		"average Complete calls a minute per API key, 1..6000 (env "+EnvRateLimitPerMinute+")")
 	fs.IntVar(&cfg.RateLimitBurst, "rate-limit-burst", cfg.RateLimitBurst,

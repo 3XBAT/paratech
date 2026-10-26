@@ -97,3 +97,14 @@ contract but is not implemented. Streaming through the owner's gateway (`ai.star
 3. A limit on repeats of one request (proposed: none beyond the quota)?
 4. Showing unverified claim texts as a draft before the citation check: acceptable (proposed: yes, marked «черновик»)?
 5. Who runs the gateway probe with a real key, and may `provider_stream` be on for beta testers once it passes?
+
+## Addendum 2026-10-26 (TASK-190, owner's decision)
+- `provider_stream` is **on by default**, without waiting for the gateway probe (answers open question 5).
+  `HUB_PROVIDER_STREAM=false` or `-provider-stream=false` turns it off.
+- **JSON fallback**: if the provider (or a buffering gateway) answers the streaming request with 200 and
+  `application/json`, the adapter reads it as `Complete` does and sends the whole output as one delta, with the usage
+  of that call. No second paid call. The first such answer logs «provider answered without SSE» once per process, no
+  texts. Any other non-SSE answer stays a provider error. The desktop fallback to `Complete` on `Unimplemented` stays.
+- **Deltas vs result** (TASK-145): deltas are untrusted draft text. The joined deltas may differ from
+  `CompletionResult.output` (for example a code fence the check strips); the checked result is what is stored, settled
+  and replayed.
