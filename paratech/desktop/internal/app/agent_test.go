@@ -127,6 +127,16 @@ func TestAgentPanelWiring(t *testing.T) {
 	}
 }
 
+// draftEvents records the draft events of the panel.
+type draftEvents struct{ data []any }
+
+func (d *draftEvents) Emit(name string, data ...any) bool {
+	if name == wails.AgentDraftEvent && len(data) == 1 {
+		d.data = append(d.data, data[0])
+	}
+	return true
+}
+
 // panelSink maps every field of the Driver's update.
 func TestPanelSinkMapsUpdates(t *testing.T) {
 	events := &panelEvents{}
@@ -148,5 +158,24 @@ func TestPanelSinkMapsUpdates(t *testing.T) {
 	if v.ThreadID != "th1" || v.Turn != 2 || v.SubjectID != "sub-1" || v.Screen != "today" || v.Status != "STOPPED" ||
 		v.StopReason != "offline" || v.Problem != "busy" || len(v.Cards) != 1 || v.Cards[0].StopReason != "offline" {
 		t.Errorf("view = %+v", v)
+	}
+
+	// A draft keeps its request, call and texts; the Driver's ends are the panel's: an answered end emits nothing new,
+	// a dropped one drops the texts still waiting.
+	drafts := &draftEvents{}
+	p.Attach(drafts)
+	panelSink{p}.Draft(agentloop.Draft{Thread: "th1", Turn: 3, CallID: "c1", Texts: []string{"черновик"}})
+	panelSink{p}.Draft(agentloop.Draft{Thread: "th1", Turn: 3, CallID: "c1", End: agentloop.DraftAnswered})
+	if len(drafts.data) != 1 {
+		t.Fatalf("draft events = %+v", drafts.data)
+	}
+	d, ok := drafts.data[0].(wails.AgentDraftView)
+	if !ok || d.ThreadID != "th1" || d.Turn != 3 || d.CallID != "c1" || len(d.Texts) != 1 || d.Texts[0] != "черновик" {
+		t.Errorf("draft event = %+v", drafts.data[0])
+	}
+	if wails.AgentDraftAnswered != wails.AgentDraftEnd(agentloop.DraftAnswered) ||
+		wails.AgentDraftDropped != wails.AgentDraftEnd(agentloop.DraftDropped) ||
+		wails.AgentDraftReading != wails.AgentDraftEnd(agentloop.DraftReading) {
+		t.Error("the ends of a draft differ between the Driver and the panel")
 	}
 }

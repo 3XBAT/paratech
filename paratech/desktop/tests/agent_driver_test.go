@@ -117,6 +117,8 @@ func (s *driverSink) Publish(u agentloop.Update) {
 	s.updates = append(s.updates, u)
 }
 
+func (s *driverSink) Draft(agentloop.Draft) {}
+
 func (s *driverSink) last(t *testing.T) agentloop.Update {
 	t.Helper()
 	s.mu.Lock()

@@ -30,18 +30,21 @@ type EventEmitter interface {
 	Emit(name string, data ...any) bool
 }
 
-// AgentPanel turns the Driver's updates into AgentUpdateEvent events. Until the shell attaches its emitter (and after
-// it detaches) the updates are dropped: no page is there to show them.
+// AgentPanel turns the Driver's updates into AgentUpdateEvent events and its drafts into AgentDraftEvent events
+// (agentdraft.go). Until the shell attaches its emitter (and after it detaches) they are dropped: no page is there to
+// show them.
 type AgentPanel struct {
-	log *slog.Logger
+	log   *slog.Logger
+	clock draftClock
 
-	mu   sync.Mutex
-	emit EventEmitter
+	mu     sync.Mutex
+	emit   EventEmitter
+	drafts map[shared.ThreadID]*draftTurn // the drafts of the latest request of each thread
 }
 
 // NewAgentPanel returns a panel with no emitter.
 func NewAgentPanel(log *slog.Logger) *AgentPanel {
-	return &AgentPanel{log: log}
+	return &AgentPanel{log: log, clock: wallClock{}, drafts: map[shared.ThreadID]*draftTurn{}}
 }
 
 // Attach sets the emitter; nil detaches it.
@@ -53,11 +56,12 @@ func (p *AgentPanel) Attach(e EventEmitter) {
 
 // Publish emits u. It holds the lock while emitting, so no update is emitted after Attach(nil) returns and updates
 // published from one Driver goroutine keep their order. Updates of different operations may interleave: consumers
-// must not rely on arrival order across operations.
+// must not rely on arrival order across operations. The drafts of the request are settled first (draftsBefore).
 func (p *AgentPanel) Publish(u AgentUpdate) {
 	view := p.view(u)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.draftsBefore(u)
 	if p.emit != nil {
 		p.emit.Emit(AgentUpdateEvent, view)
 	}

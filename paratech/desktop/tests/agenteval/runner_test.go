@@ -87,6 +87,9 @@ func (r *liveRun) request(req Request) Outcome {
 			o.Tools = append(o.Tools, c.Tool)
 			o.Texts = append(o.Texts, CardTexts(c.Tool, c.ArgumentsJSON)...)
 			o.Listed = append(o.Listed, ReplyAssignments(c.Tool, c.ArgumentsJSON)...)
+			if s := TriageSource(c.Tool, c.ArgumentsJSON); s != "" {
+				o.Sources = append(o.Sources, s)
+			}
 			result, ok := cannedResults[c.Tool]
 			if r.classes[c.Tool] != "R" {
 				stop, result = true, `{"ok":true}`
@@ -170,7 +173,7 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 		t.Fatal("the outcome does not score as a write with a first-person text")
 	}
 
-	// Catalog v3: «что горит на неделе» lists the assignments of the result in its reply; the reply text names none.
+	// Since catalog v3: «что горит на неделе» lists the assignments of the result in its reply; the reply text names none.
 	hub.Then(testenv.AgentCall{ID: "toolu_4", Tool: "list_assignments", Args: `{"due_before":"2026-10-28"}`}).
 		Then(testenv.AgentCall{ID: "toolu_5", Tool: "reply", Args: `{"text":"Два задания, ближайший срок — 2026-10-24.","assignments":["a-12","a-20"]}`})
 	b03 := cs.Requests[slicesIndex(cs.Requests, "b03")]
@@ -183,6 +186,22 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 	}
 	if reqs := hub.Requests(); reqs[len(reqs)-1].GetCatalogVersion() != values.CatalogVersion {
 		t.Fatalf("catalog version = %d", reqs[len(reqs)-1].GetCatalogVersion())
+	}
+
+	// Catalog v4: a draft of an assignment goes to triage_assignment (generate_draft is gone), and a work on a topic
+	// without an assignment to triage_assignment{topic}; the action ends the run.
+	hub.Then(testenv.AgentCall{ID: "toolu_6", Tool: "triage_assignment", Args: `{"assignment":"a-31"}`}).
+		Then(testenv.AgentCall{ID: "toolu_7", Tool: "triage_assignment", Args: `{"topic":"Реформы Петра I"}`})
+	var v4 []Outcome
+	for _, id := range []string{"w08", "b05"} {
+		o := r.request(cs.Requests[slicesIndex(cs.Requests, id)])
+		if o.Err != "" || fmt.Sprint(o.Tools) != "[triage_assignment]" {
+			t.Fatalf("%s: outcome = %+v", id, o)
+		}
+		v4 = append(v4, o)
+	}
+	if m := (Report{Classes: r.classes, Requests: v4}).Metrics(); m.ClassOK != 2 || m.ToolsOK != 2 || m.Sources != 2 || m.SourcesOK != 2 {
+		t.Fatalf("v4 metrics = %+v", m)
 	}
 
 	// Every case of the file can be sent: the fake Hub has no script left and answers unavailable. A new run ID, so

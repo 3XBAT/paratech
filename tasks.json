@@ -3155,7 +3155,7 @@
                 "TASK-141",
                 "TASK-146"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-148",
@@ -3177,7 +3177,7 @@
                 "TASK-143",
                 "TASK-147"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-149",
@@ -3972,7 +3972,7 @@
                 "TASK-173",
                 "TASK-182"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-185",
@@ -4114,6 +4114,29 @@
             ],
             "dependencies": [],
             "status": "done"
+        },
+        {
+            "id": "TASK-191",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[ДЗ под ключ · UI] Кнопки карточки работы: «Остановить», правка плана с версией, «Открыть в Word/PowerPoint» (копия)",
+            "acceptance_criteria": [
+                "Супервизор 2026-10-26: UI-хвосты TASK-132/106/107 после ядра TASK-177 и TASK-178 (progress/TASK-177.md, progress/TASK-178.md)",
+                "«Остановить» в карточке работы, пока writing.active: вызывает stopWriting; остановка асинхронная — карточка опрашивает работу, пока writing.active не станет false; отказ ErrNotStopped показывает «Не удалось остановить написание. Попробуйте ещё раз.»",
+                "Правка плана через editOutlineAt(id, version, items) вместо editOutline; устаревшая версия — «Работа изменилась: обновите карточку.» и перечитывание карточки",
+                "«Открыть в Word» / «Открыть в PowerPoint» у готовой работы, презентации и отчёта по лабораторной через libraryApi.openMaterial(id) (только id); подпись, что открывается копия и правки не возвращаются в приложение",
+                "Двойной щелчок — один вызов; тексты безличные; тексты модели и имена файлов только как текст",
+                "Тесты фронтенда на каждую кнопку и на опрос после «Остановить»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-177",
+                "TASK-178"
+            ],
+            "status": "pending"
         }
     ]
 }

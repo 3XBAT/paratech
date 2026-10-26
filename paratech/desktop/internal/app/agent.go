@@ -115,3 +115,10 @@ func (s panelSink) Publish(u agentloop.Update) {
 		Problem: string(u.Problem), Progress: u.Progress,
 	})
 }
+
+// Draft forwards d.
+func (s panelSink) Draft(d agentloop.Draft) {
+	s.panel.Draft(wails.AgentDraft{
+		Thread: d.Thread, Turn: d.Turn, CallID: d.CallID, Texts: d.Texts, End: wails.AgentDraftEnd(d.End),
+	})
+}

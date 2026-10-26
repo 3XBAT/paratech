@@ -44,7 +44,9 @@ func TestQueryArguments(t *testing.T) {
 	if _, err := ParseCall("c1", string(ToolAnswerQuestion), `{"question":"<b>Что</b>"}`); !errors.Is(err, ErrInvalidArguments) {
 		t.Fatalf("a question with markup: %v", err)
 	}
-	if _, err := ParseCall("c1", string(ToolGenerateDraft), `{"assignment":"a1","instruction":"`+strings.Repeat("я", MaxLabelRunes+1)+`"}`); err == nil {
+	// No catalog v4 argument is a plain label any more (generate_draft.instruction left with its tool); the type keeps
+	// its limit.
+	if _, err := ParseLabel(strings.Repeat("я", MaxLabelRunes+1)); err == nil {
 		t.Fatal("a label of 81 characters is accepted")
 	}
 

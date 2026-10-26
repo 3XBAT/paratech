@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type AskInput, type CallProblem, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
+import { type AgentApi, agentApi, type AskInput, type CallProblem, draftEvent as draftEventName, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { libraryApi } from "../bindings/library.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
@@ -102,6 +102,28 @@ export function AgentPanel(props: {
         dispatch({ type: "update", update: parseUpdate(data) });
       } catch {
         // An update the panel cannot read is ignored: the core validated it before it was sent.
+      }
+    }).then((stop) => {
+      if (closed) {
+        stop();
+      } else {
+        off = stop;
+      }
+    }, () => undefined);
+    return () => {
+      closed = true;
+      off?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let closed = false;
+    onEventData(draftEventName, (data) => {
+      try {
+        dispatch({ type: "draft", draft: parseDraft(data) });
+      } catch {
+        // A draft the panel cannot read is dropped: the verified answer card follows anyway.
       }
     }).then((stop) => {
       if (closed) {
