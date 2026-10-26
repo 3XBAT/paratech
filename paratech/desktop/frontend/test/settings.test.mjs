@@ -3,8 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { methods, parseSettings, settingsApi } from "../.test-build/bindings/settings.js";
 
-// The load mode fields of every reply (TASK-084): without a model in use there are no estimates.
-const load = { recognitionLoad: "gentle", loadEstimates: null, loadEstimatesModel: "" };
+// The load mode fields of every reply (TASK-084): without a model in use there are no estimates; the free-work card
+// setting (TASK-188) comes with them.
+const load = { recognitionLoad: "gentle", loadEstimates: null, loadEstimatesModel: "", freeWorkNotice: true };
 
 function fakeCall(reply) {
   const calls = [];
@@ -59,6 +60,18 @@ test("extra fields of a reply are dropped", () => {
     token: "x",
   });
   assert.deepEqual(got, { recordingPromptsEnabled: true, processOnlyOnAcPower: true, ...load });
+});
+
+// TASK-188: «Предупреждать перед свободной работой» is read with the toggles and set by its bound method.
+test("the free-work card setting is read and set", async () => {
+  const reply = { recordingPromptsEnabled: true, processOnlyOnAcPower: true, ...load, freeWorkNotice: false };
+  const { call, calls } = fakeCall(reply);
+  const api = settingsApi(call);
+  assert.equal((await api.setFreeWorkNotice(false)).freeWorkNotice, false);
+  assert.deepEqual(calls, [["paratech/desktop/internal/input/wails.SettingsService.SetFreeWorkNotice", false]]);
+  for (const bad of [{ ...reply, freeWorkNotice: undefined }, { ...reply, freeWorkNotice: "no" }]) {
+    assert.throws(() => parseSettings(bad), /freeWorkNotice/);
+  }
 });
 
 test("a failing call rejects", async () => {
