@@ -46,6 +46,7 @@ type evalHub struct {
 	sealer   *seal.Sealer
 	catalog  *toolcatalog.Catalog
 	system   string
+	version  uint32 // the panel catalog the Hub serves here
 	client   hubv1connect.GatewayServiceClient
 	keys     map[shared.APIKeyID]string // issued key ID -> bearer key
 	owner    shared.APIKeyID
@@ -64,13 +65,19 @@ func (readyProbe) Ping(context.Context) error { return nil }
 
 func newEvalHub(t *testing.T) *evalHub {
 	t.Helper()
+	return newEvalHubAt(t, 1)
+}
+
+// newEvalHubAt is the Hub serving only the panel catalog of the version.
+func newEvalHubAt(t *testing.T, version uint32) *evalHub {
+	t.Helper()
 	clock := testenv.NewFakeClock(time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC))
 	keyStore := testenv.NewKeyStore()
 	keySvc, err := keys.New(keyStore, clock, testenv.Random{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &evalHub{provider: testenv.NewFakeAgentProvider(), store: testenv.NewQuotaStore(), keys: map[shared.APIKeyID]string{}}
+	h := &evalHub{provider: testenv.NewFakeAgentProvider(), store: testenv.NewQuotaStore(), keys: map[shared.APIKeyID]string{}, version: version}
 	for _, label := range []string{"eval-tester", "other-tester"} {
 		issued, err := keySvc.Issue(t.Context(), label)
 		if err != nil {
@@ -92,7 +99,7 @@ func newEvalHub(t *testing.T) *evalHub {
 	if h.sealer, err = testenv.Sealer(1); err != nil {
 		t.Fatal(err)
 	}
-	if h.system, h.catalog, err = testenv.PanelV1(); err != nil {
+	if h.system, h.catalog, err = testenv.Panel(version); err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.DiscardHandler)
@@ -207,7 +214,14 @@ func modelCallsOf(t *testing.T, resp *hubv1.AgentStepResponse) []values.ToolCall
 }
 
 func (h *evalHub) binding(owner shared.APIKeyID) seal.Binding {
-	return seal.Binding{Owner: owner, ThreadID: evalThread, Profile: values.ProfilePanel, CatalogVersion: 1}
+	return seal.Binding{Owner: owner, ThreadID: evalThread, Profile: values.ProfilePanel, CatalogVersion: h.version}
+}
+
+// request is evalRequest for the catalog this Hub serves.
+func (h *evalHub) request(key string, turns ...*hubv1.AgentTurn) *hubv1.AgentStepRequest {
+	msg := evalRequest(key, turns...)
+	msg.CatalogVersion = h.version
+	return msg
 }
 
 // --- fixtures -------------------------------------------------------------------------------------------------------
@@ -522,6 +536,136 @@ func TestAgentEvalHubInjectionThroughTheStep(t *testing.T) {
 				t.Fatalf("history = %v", turns)
 			}
 		})
+	}
+}
+
+// --- panel v4 (TASK-182) --------------------------------------------------------------------------------------------
+
+func studentText(text string) *hubv1.AgentTurn {
+	return &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_StudentText{StudentText: text}}
+}
+
+// acceptedAsIs fails unless resp carries exactly want (tool and arguments), sealed for the owner and the thread.
+func (h *evalHub) acceptedAsIs(t *testing.T, resp *hubv1.AgentStepResponse, err error, want ...[3]string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("catalog %d: %v", h.version, err)
+	}
+	got := resp.GetCalls().GetCalls()
+	if len(got) != len(want) {
+		t.Fatalf("calls = %v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i].GetCallId() != w[0] || got[i].GetTool() != w[1] || got[i].GetArgumentsJson() != w[2] {
+			t.Fatalf("call %d = %v, want %v", i, got[i], w)
+		}
+	}
+	if err := h.sealer.Verify(h.binding(h.owner), modelCallsOf(t, resp), resp.GetCalls().GetSeal()); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+}
+
+// refused fails unless err is the permanent PROVIDER_ERROR of calls outside the catalog.
+func refused(t *testing.T, err error) {
+	t.Helper()
+	code, d := gwDetail(t, err)
+	if code != connectrpc.CodeUnavailable || d.GetCode() != hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR || d.GetRetryable() {
+		t.Fatalf("%v / %v, want a permanent PROVIDER_ERROR", code, d)
+	}
+}
+
+// TestAgentEvalHubV4DraftRequest: «напиши черновик по заданию X» on catalog 4. The prompt sends it to triage_assignment
+// (then write_work); that answer passes. generate_draft is no agent tool there: an answer that calls it is refused,
+// while catalog 3 is still served and still has it.
+func TestAgentEvalHubV4DraftRequest(t *testing.T) {
+	const ask = "напиши черновик по заданию a1"
+	triage := [3]string{"toolu_01", "triage_assignment", `{"assignment":"a1"}`}
+	draft := [3]string{"toolu_01", "generate_draft", `{"assignment":"a1"}`}
+
+	h := newEvalHubAt(t, 4)
+	h.provider.Push(answerWith(t, triage))
+	resp, err := h.step(t, h.request("ag:th-eval:1:1", studentText(ask)))
+	h.acceptedAsIs(t, resp, err, triage)
+	system := h.provider.Calls()[0].System()
+	for _, rule := range []string{"never writes the draft of an assignment", "triage_assignment on that assignment, then write_work"} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("the v4 prompt does not state %q", rule)
+		}
+	}
+	for _, s := range h.provider.Calls()[0].Tools() {
+		if s.Name() == "generate_draft" {
+			t.Fatal("the provider was offered generate_draft on catalog 4")
+		}
+	}
+
+	h = newEvalHubAt(t, 4)
+	h.provider.Push(answerWith(t, draft))
+	_, err = h.step(t, h.request("ag:th-eval:1:1", studentText(ask)))
+	refused(t, err)
+
+	h = newEvalHubAt(t, 3)
+	h.provider.Push(answerWith(t, draft))
+	resp, err = h.step(t, h.request("ag:th-eval:1:1", studentText(ask)))
+	h.acceptedAsIs(t, resp, err, draft)
+}
+
+// TestAgentEvalHubV4TopicWithoutAssignment: «сделай презентацию на тему X» when list_assignments finds no fitting
+// assignment: triage_assignment with the topic in the student's words passes; a call with the topic and an
+// assignment, or a topic over 500 characters, is refused.
+func TestAgentEvalHubV4TopicWithoutAssignment(t *testing.T) {
+	const ask = "сделай презентацию на тему «Фотосинтез у растений»"
+	list := [3]string{"toolu_01", "list_assignments", `{"subject":"s1"}`}
+	byTopic := [3]string{"toolu_02", "triage_assignment", `{"topic":"презентация на тему «Фотосинтез у растений»"}`}
+
+	h := newEvalHubAt(t, 4)
+	h.provider.Push(answerWith(t, list), answerWith(t, byTopic))
+	first, err := h.step(t, h.request("ag:th-eval:1:1", studentText(ask)))
+	h.acceptedAsIs(t, first, err, list)
+	resp, err := h.step(t, h.request("ag:th-eval:1:2", echoTurns(ask, first, `{"assignments":[]}`)...))
+	h.acceptedAsIs(t, resp, err, byTopic)
+	if !strings.Contains(h.provider.Calls()[1].System(), "When none fits, triage_assignment with topic") {
+		t.Error("the v4 prompt does not state the topic rule")
+	}
+
+	for name, args := range map[string]string{
+		"topic and assignment": `{"assignment":"a1","topic":"Фотосинтез"}`,
+		"topic over 500":       `{"topic":"` + strings.Repeat("я", toolcatalog.MaxQueryRunes+1) + `"}`,
+		"no source":            `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newEvalHubAt(t, 4)
+			h.provider.Push(answerWith(t, [3]string{"toolu_01", "triage_assignment", args}))
+			_, err := h.step(t, h.request("ag:th-eval:1:1", studentText(ask)))
+			refused(t, err)
+		})
+	}
+}
+
+// TestAgentEvalHubV4AnswersOnlyTheLast: after an earlier pair (a question and the app's reply) a new question comes.
+// The provider gets the earlier pair as history before the new text, which is the last turn, and a prompt that says
+// to answer only it; the answer to the last question alone passes.
+func TestAgentEvalHubV4AnswersOnlyTheLast(t *testing.T) {
+	const earlier, last = "что задали на неделю?", "где конспект лекции по физике?"
+	listed := [3]string{"toolu_01", "reply", `{"text":"Два задания до пятницы."}`}
+	where := [3]string{"toolu_02", "reply", `{"text":"Конспект — в «Сегодня», у записи лекции, или в «Предметы» → «База знаний»."}`}
+
+	h := newEvalHubAt(t, 4)
+	h.provider.Push(answerWith(t, listed), answerWith(t, where))
+	first, err := h.step(t, h.request("ag:th-eval:1:1", studentText(earlier)))
+	h.acceptedAsIs(t, first, err, listed)
+	turns := append(echoTurns(earlier, first, `{"shown":true}`), studentText(last))
+	resp, err := h.step(t, h.request("ag:th-eval:2:1", turns...))
+	h.acceptedAsIs(t, resp, err, where)
+
+	call := h.provider.Calls()[1]
+	got := call.Turns()
+	if len(got) != 4 || got[0].Text() != earlier || got[1].Kind() != values.TurnCalls || got[3].Kind() != values.TurnStudentText || got[3].Text() != last {
+		t.Fatalf("history = %v, want the earlier pair, then the last text", got)
+	}
+	for _, rule := range []string{"Earlier pairs are context only", "Answer only the last message of the student"} {
+		if !strings.Contains(call.System(), rule) {
+			t.Errorf("the v4 prompt does not state %q", rule)
+		}
 	}
 }
 
