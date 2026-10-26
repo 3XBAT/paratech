@@ -123,10 +123,25 @@ func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran
 		return t.write(ctx, st, c)
 	case actionpolicy.ClassC:
 		return t.propose(ctx, st, c)
+	case actionpolicy.ClassUI:
+		return freeWorkCard(st, c)
 	}
 	t.reuse, t.turn = answerScope(st), refOf(st)
 	out := t.read(ctx, st.Scope, c)
 	return ran{out: out, cards: answerCards(c, out)}
+}
+
+// freeWorkCard answers a work on a free topic the thread admitted as a card (TASK-188): nothing runs, nothing is
+// journaled and the topic goes nowhere; the panel gets the free-work card, the planner {"status":"awaiting_student"}.
+// Any other card admission is "unavailable".
+func freeWorkCard(st agentturn.Step, c agentturn.Call) ran {
+	id := c.Call.ID()
+	card := values.FreeWorkCard{Thread: st.Thread, Turn: st.Turn, CallID: id}
+	res, err := values.FreeWorkResult(id)
+	if !actionpolicy.FreeTopic(c.Call) || err != nil || card.Validate() != nil {
+		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnavailable)}}
+	}
+	return ran{out: agentturn.Outcome{Result: res}, cards: []values.Card{card}}
 }
 
 // read runs one admitted read call and returns its outcome.

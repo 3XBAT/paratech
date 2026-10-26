@@ -32,6 +32,23 @@ func (c FreeWorkCard) Validate() error {
 	return nil
 }
 
+// FreeWorkState is where the work of a free-work card stands, for the panel.
+type FreeWorkState string
+
+// Free-work states.
+const (
+	FreeWorkWaiting FreeWorkState = "waiting" // nothing ran: «Сделать» / «Не надо» are offered («Не надо» stores nothing)
+	FreeWorkDone    FreeWorkState = "done"    // the work was started (Work); its card shows where it stands
+	FreeWorkUndone  FreeWorkState = "undone"  // the work was removed with «Отменить»
+	FreeWorkFailed  FreeWorkState = "failed"  // the start failed, or its outcome is not known yet
+)
+
+// FreeWorkOutcome is the state of a free-work card and the work it started (empty while none).
+type FreeWorkOutcome struct {
+	State FreeWorkState
+	Work  shared.WorkID
+}
+
 // freeWorkResultJSON is the whole result the planner gets for a call that waits on the free-work card (allowlist:
 // one fixed field, never the topic).
 const freeWorkResultJSON = `{"status":"awaiting_student"}`

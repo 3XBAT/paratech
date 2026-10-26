@@ -29,6 +29,24 @@ func TestFreeWorkCard(t *testing.T) {
 	}
 }
 
+func TestRefusalOf(t *testing.T) {
+	for _, why := range []Refusal{RefuseNotFound, RefuseTooManyRounds, RefuseUnknown} {
+		if got, ok := RefusalOf(RefusalResult("c1", why)); !ok || got != why {
+			t.Fatalf("RefusalOf(%s) = %s, %v", why, got, ok)
+		}
+	}
+	for _, other := range []ToolResult{
+		ShownResult("c1"),
+		{CallID: "c1", ResultJSON: `{"error":"failed"}`},
+		{CallID: "c1", ResultJSON: `{"error":"failed","extra":"x"}`, IsError: true},
+		{CallID: "c1", ResultJSON: `{"ok":false}`, IsError: true},
+	} {
+		if why, ok := RefusalOf(other); ok {
+			t.Fatalf("RefusalOf(%+v) = %s", other, why)
+		}
+	}
+}
+
 // The planner gets one fixed field for a call that waits on the card: never the topic.
 func TestFreeWorkResult(t *testing.T) {
 	r, err := FreeWorkResult("c1")

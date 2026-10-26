@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
+	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/values"
@@ -23,6 +26,7 @@ const opTriage = "agent: triage reader call not finished"
 // outline until the student approves it.
 type Turnkey interface {
 	Triage(ctx context.Context, src work.Source) (turnkey.Started, error)
+	TriageTopic(ctx context.Context, request, text string, subject shared.SubjectID) (turnkey.Started, error)
 	Work(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 	Remove(ctx context.Context, id shared.WorkID, expected int64) error
 	StartWriting(ctx context.Context, id shared.WorkID) (turnkey.WritingStarted, error)
@@ -47,24 +51,71 @@ func (a *Actions) triage(call values.Call) (prepared, error) {
 	}
 	return prepared{run: func(ctx context.Context) (effect, error) {
 		st, err := a.turnkey.Triage(ctx, src)
-		if st.View.ID == "" {
-			if err == nil {
-				err = fmt.Errorf("%w: no work", turnkey.ErrUnavailable)
-			}
-			return effect{}, err
-		}
-		if err != nil {
-			a.log.InfoContext(ctx, opTriage, "work", string(st.View.ID), "err", err)
-		}
-		row, err := triageRowOf(st.View, st.Created)
-		if err != nil {
-			return effect{}, err
-		}
-		return effect{
-			comp: action.RemoveWork{Work: row.Work}, version: st.View.Version, triage: &row, failed: !st.Created,
-			cards: []values.Card{values.WorkCard{Work: row.Work, Outcome: row.Outcome}},
-		}, nil
+		return a.triageEffect(ctx, st, err)
 	}}, nil
+}
+
+// origin is where a call comes from: its thread, its request and the subject of the thread ("" «Без предмета»).
+type origin struct {
+	thread  shared.ThreadID
+	turn    int
+	subject shared.SubjectID
+}
+
+// originOf is the origin of the calls of step st: the scope's subject is the thread's key (thread.StartRequest).
+func originOf(st agentturn.Step) origin {
+	return origin{thread: st.Thread, turn: st.Turn, subject: shared.SubjectID(st.Scope.Subject().ID())}
+}
+
+// triageTopic starts a work on a free topic (TASK-187, TASK-188), in the subject of the call's thread. It runs as a
+// step of an approved plan, as the paid job of a request whose student turned the free-work card off, or after «Сделать»
+// on the card (FreeWorks): each is the student's consent. The request key is the call's (thread, request, call ID), so
+// a replay or a second «Сделать» finds the same work, and a call of another request never does. The topic is free
+// model text: data for the reader, never logged here; file names and titles take it through the safe-name rules of
+// the work (TASK-187).
+func (a *Actions) triageTopic(at origin, call values.Call) (prepared, error) {
+	if a.turnkey == nil || at.thread == "" || at.turn < 1 {
+		return prepared{}, errUnavailable
+	}
+	topic, _ := call.Args().Query("topic")
+	key := topicRequest(at, call.ID())
+	return prepared{run: func(ctx context.Context) (effect, error) {
+		st, err := a.turnkey.TriageTopic(ctx, key, string(topic), at.subject)
+		return a.triageEffect(ctx, st, err)
+	}}, nil
+}
+
+// topicRequest is the request key of a topic work: ag:<thread>:<turn>:<call_id>, or its sha256 when longer than a
+// key may be.
+func topicRequest(at origin, callID string) string {
+	key := fmt.Sprintf("ag:%s:%d:%s", at.thread, at.turn, callID)
+	if len(key) <= work.MaxTopicRequestBytes {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
+
+// triageEffect is the effect of a triage that returned st: the work this call created (Undo removes it) or one that
+// existed (no action of this call).
+func (a *Actions) triageEffect(ctx context.Context, st turnkey.Started, err error) (effect, error) {
+	if st.View.ID == "" {
+		if err == nil {
+			err = fmt.Errorf("%w: no work", turnkey.ErrUnavailable)
+		}
+		return effect{}, err
+	}
+	if err != nil {
+		a.log.InfoContext(ctx, opTriage, "work", string(st.View.ID), "err", err)
+	}
+	row, err := triageRowOf(st.View, st.Created)
+	if err != nil {
+		return effect{}, err
+	}
+	return effect{
+		comp: action.RemoveWork{Work: row.Work}, version: st.View.Version, triage: &row, failed: !st.Created,
+		cards: []values.Card{values.WorkCard{Work: row.Work, Outcome: row.Outcome}},
+	}, nil
 }
 
 // triageRowOf maps a work to what the planner sees of it.
