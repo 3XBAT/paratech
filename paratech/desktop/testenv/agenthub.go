@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -46,6 +47,23 @@ type FakeAgentHub struct {
 	failures map[string]func() error
 	prints   map[string][]byte
 	requests []*hubv1.AgentStepRequest
+	catalog  uint32
+}
+
+// AsCatalog makes the Hub treat the next requests as sent by a desktop on catalog version v (one before an update):
+// it seals and checks calls for v instead of the request's version. Zero restores the request's version.
+func (h *FakeAgentHub) AsCatalog(v uint32) *FakeAgentHub {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.catalog = v
+	return h
+}
+
+func (h *FakeAgentHub) catalogOf(req *hubv1.AgentStepRequest) uint32 {
+	if h.catalog != 0 {
+		return h.catalog
+	}
+	return req.GetCatalogVersion()
 }
 
 // NewFakeAgentHub returns a Hub without scripted steps; a step without one is answered with unavailable.
@@ -130,7 +148,7 @@ func (h *FakeAgentHub) AgentStep(_ context.Context, r *connect.Request[hubv1.Age
 			return connect.NewResponse(replay), nil
 		}
 	}
-	if err := checkAgentHistory(req); err != nil {
+	if err := checkAgentHistory(req, h.catalogOf(req)); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	if len(h.script) == 0 {
@@ -149,7 +167,7 @@ func (h *FakeAgentHub) AgentStep(_ context.Context, r *connect.Request[hubv1.Age
 	for _, c := range next.calls {
 		resp.Calls.Calls = append(resp.Calls.Calls, &hubv1.ToolCall{CallId: c.ID, Tool: c.Tool, ArgumentsJson: c.Args})
 	}
-	resp.Calls.Seal = agentSeal(req.GetThreadId(), resp.Calls.Calls)
+	resp.Calls.Seal = agentSeal(req.GetThreadId(), h.catalogOf(req), resp.Calls.Calls)
 	h.answers[key] = resp
 	if next.lost {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("fake hub: connection reset"))
@@ -157,10 +175,12 @@ func (h *FakeAgentHub) AgentStep(_ context.Context, r *connect.Request[hubv1.Age
 	return connect.NewResponse(resp), nil
 }
 
-// agentSeal stands for the Hub's HMAC: bound to the thread and the calls in order.
-func agentSeal(thread string, calls []*hubv1.ToolCall) []byte {
+// agentSeal stands for the Hub's HMAC: bound to the thread, the catalog version and the calls in order.
+func agentSeal(thread string, catalog uint32, calls []*hubv1.ToolCall) []byte {
 	s := sha256.New()
 	s.Write([]byte(thread))
+	s.Write([]byte{0})
+	s.Write([]byte(strconv.FormatUint(uint64(catalog), 10)))
 	for _, c := range calls {
 		s.Write([]byte{0})
 		s.Write([]byte(c.GetCallId() + "\x00" + c.GetTool() + "\x00" + c.GetArgumentsJson()))
@@ -168,7 +188,7 @@ func agentSeal(thread string, calls []*hubv1.ToolCall) []byte {
 	return s.Sum(nil)
 }
 
-func checkAgentHistory(req *hubv1.AgentStepRequest) error {
+func checkAgentHistory(req *hubv1.AgentStepRequest, catalog uint32) error {
 	turns := req.GetTurns()
 	if len(turns) == 0 || turns[0].GetStudentText() == "" {
 		return errors.New("fake hub: the first turn must be the student's text")
@@ -177,7 +197,7 @@ func checkAgentHistory(req *hubv1.AgentStepRequest) error {
 		switch {
 		case t.GetCalls() != nil:
 			calls := t.GetCalls()
-			if string(calls.GetSeal()) != string(agentSeal(req.GetThreadId(), calls.GetCalls())) {
+			if string(calls.GetSeal()) != string(agentSeal(req.GetThreadId(), catalog, calls.GetCalls())) {
 				return errors.New("fake hub: the seal of echoed calls does not match")
 			}
 			if i+1 >= len(turns) || turns[i+1].GetResults() == nil || !sameAgentCalls(calls.GetCalls(), turns[i+1].GetResults().GetResults()) {

@@ -9,7 +9,7 @@ an address or greeting (ты/вы/привет), replies that list the assignmen
 `triage_assignment` with the expected source (`source`: assignment, upload or topic; catalog v4), share of valid
 citations (not measured until the Hub has the ANSWER prompt, TASK-118). Cases `b01`–`b05` are the beta questions of
 TASK-172/173 (greeting, «где черновики», «что горит», «помоги с пр 2-4», a topic without an assignment, which goes
-to `triage_assignment{topic}` since catalog v4). The run is scored against `shared/testdata/tool_catalog_v4.json`.
+to `triage_assignment{topic}` since catalog v4). The run is scored against `shared/testdata/tool_catalog_v5.json`.
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.
 
