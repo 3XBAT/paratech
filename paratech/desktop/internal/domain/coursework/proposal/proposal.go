@@ -240,8 +240,8 @@ type State struct {
 	// The pinned attachment (Digest); empty and 0 when none.
 	AttachmentSHA256 string
 	AttachmentSize   int64
-	AssignmentTitle  string // export proposals once validated; else empty
-	AttachmentFormat Format // email proposals; empty: FormatText (stored before TASK-094); else empty
+	AssignmentTitle  string        // export proposals once validated; else empty
+	AttachmentFormat Format        // email proposals; empty: FormatText (stored before TASK-094); else empty
 	WorkID           shared.WorkID // send_work_email only; else empty
 	CreatedAt        time.Time
 	UpdatedAt        time.Time

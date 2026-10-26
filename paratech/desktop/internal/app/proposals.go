@@ -44,10 +44,14 @@ type workFiles struct {
 	lib   *library.Service
 }
 
-func (f workFiles) Work(ctx context.Context, id shared.WorkID) (*work.Work, error) { return f.works.Get(ctx, id) }
+func (f workFiles) Work(ctx context.Context, id shared.WorkID) (*work.Work, error) {
+	return f.works.Get(ctx, id)
+}
 
 func (f workFiles) Material(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
 	return f.lib.Material(ctx, id)
 }
 
-func (f workFiles) Subjects(ctx context.Context) ([]*subject.Subject, error) { return f.lib.Subjects(ctx) }
+func (f workFiles) Subjects(ctx context.Context) ([]*subject.Subject, error) {
+	return f.lib.Subjects(ctx)
+}

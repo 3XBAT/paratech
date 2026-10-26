@@ -162,7 +162,9 @@ func (e *workEnv) addDoneWork(t *testing.T, id shared.WorkID, src work.Source, s
 	for _, step := range []func() error{
 		func() error { return w.Record(1, answer, t0) },
 		func() error { return w.ConfirmRequirements(t0) },
-		func() error { return w.StartWriting(work.Snapshot{Subject: sub, SubjectName: "История", Title: "Реферат"}, t0) },
+		func() error {
+			return w.StartWriting(work.Snapshot{Subject: sub, SubjectName: "История", Title: "Реферат"}, t0)
+		},
 		func() error { return w.SetOutline(o, t0) },
 		func() error { return w.ApproveOutline(t0) },
 		func() error { return w.WriteSection(1, 1, text, t0) },

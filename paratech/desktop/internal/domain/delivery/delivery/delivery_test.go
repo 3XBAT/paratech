@@ -496,10 +496,10 @@ func TestStatusPredicates(t *testing.T) {
 // TASK-094: a Word attachment is declared as one; everything else stays plain text.
 func TestAttachmentMediaType(t *testing.T) {
 	for path, want := range map[string]string{
-		"a1/homework.md":   MediaTypeText,
-		"a1/homework.docx": MediaTypeDocx,
-		"a1/HOMEWORK.DOCX": MediaTypeDocx,
-		"a1/homework.txt":  MediaTypeText,
+		"a1/homework.md":      MediaTypeText,
+		"a1/homework.docx":    MediaTypeDocx,
+		"a1/HOMEWORK.DOCX":    MediaTypeDocx,
+		"a1/homework.txt":     MediaTypeText,
 		"sent/p1/Доклад.pptx": MediaTypePptx,
 		"sent/p1/ДОКЛАД.PPTX": MediaTypePptx,
 		"sent/p1/pptx":        MediaTypeText,

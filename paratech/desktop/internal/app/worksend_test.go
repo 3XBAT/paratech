@@ -89,7 +89,9 @@ func doneWork(t *testing.T, a *App, id shared.WorkID, src work.Source, data []by
 	for _, step := range []func() error{
 		func() error { return w.Record(1, answer, now) },
 		func() error { return w.ConfirmRequirements(now) },
-		func() error { return w.StartWriting(work.Snapshot{Subject: sub.ID(), SubjectName: "История", Title: "Реферат"}, now) },
+		func() error {
+			return w.StartWriting(work.Snapshot{Subject: sub.ID(), SubjectName: "История", Title: "Реферат"}, now)
+		},
 		func() error { return w.SetOutline(o, now) },
 		func() error { return w.ApproveOutline(now) },
 		func() error { return w.WriteSection(1, 1, text, now) },
