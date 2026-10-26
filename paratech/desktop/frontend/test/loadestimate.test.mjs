@@ -120,7 +120,7 @@ test("the setting shows the model in use in the selected mode, only when measure
 test("settings: the load mode is sent by its bound method and parsed strictly", async () => {
   const reply = {
     recordingPromptsEnabled: true, processOnlyOnAcPower: false, recognitionLoad: "max",
-    loadEstimates: large, loadEstimatesModel: "large-v3-f16",
+    loadEstimates: large, loadEstimatesModel: "large-v3-f16", freeWorkNotice: true,
   };
   const calls = [];
   const api = settingsApi(async (method, ...args) => {

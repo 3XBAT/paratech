@@ -96,6 +96,15 @@ type Facts struct {
 	CostMicroUSD  int64 // estimate for a paid call; zero or less means unknown and counts as above the threshold
 	Triage        Triage
 	ReplacesReady bool // the call would replace a ready result (a summary or lecture text that exists)
+	// FreeTopic: the call is a work on a free topic (FreeTopic) the student allowed without the free-work card
+	// («Больше не показывать», TASK-188): its unknown cost does not ask for a plan; it is the paid job without a plan.
+	FreeTopic bool
+}
+
+// FreeTopic reports whether call is a work on a free topic: triage_assignment with a topic instead of an assignment
+// or an upload (catalog v4, TASK-188).
+func FreeTopic(call values.Call) bool {
+	return call.Tool() == values.ToolTriageAssignment && call.Args().Has("topic")
 }
 
 // Reason tells why a plan is needed.
@@ -114,7 +123,9 @@ const (
 // NeedsPlan reports whether a U call may run only as a step of an approved plan (ADR-0021, design §2.4, D8): a second
 // write in the request, a paid job above the threshold (or with an unknown cost), lecture text and turnkey writing,
 // a call that would replace a ready result (TASK-123: its Undo can only stop the job, the old result is not kept),
-// or a triage that said «partly» or «impossible». Other classes never need a plan here.
+// or a triage that said «partly» or «impossible». A free topic the student allowed without the card is not costly
+// (Facts.FreeTopic): the student's standing choice stands for the plan of that one call. Other classes never need a
+// plan here.
 func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 	r, err := Of(t)
 	if err != nil {
@@ -132,7 +143,8 @@ func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 		return ReasonSecondWrite, nil
 	case f.Triage == TriagePartly || f.Triage == TriageImpossible:
 		return ReasonTriage, nil
-	case r.Paid && (f.CostMicroUSD <= 0 || f.CostMicroUSD > PlanThresholdMicroUSD):
+	case r.Paid && (!f.FreeTopic || t != values.ToolTriageAssignment) &&
+		(f.CostMicroUSD <= 0 || f.CostMicroUSD > PlanThresholdMicroUSD):
 		return ReasonCostly, nil
 	}
 	return ReasonNone, nil

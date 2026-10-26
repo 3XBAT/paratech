@@ -394,6 +394,9 @@ type Facts struct {
 	CostMicroUSD  int64         // estimate for a paid call; zero means unknown
 	ReplacesReady bool          // the call would replace a ready result
 	Triage        actionpolicy.Triage
+	// FreeWorkNotice: the student wants the free-work card before a work on a free topic (the setting, on by default;
+	// off after «Больше не показывать», TASK-188).
+	FreeWorkNotice bool
 }
 
 // Admission is the decision on one call.
@@ -408,6 +411,11 @@ type Admission struct {
 // ready result needs one too); a paid U call without a plan counts toward MaxPaidUnplanned. C calls only
 // create a proposal (Admission.Class tells), UI calls are handled by ProposePlan, AskQuestions and Complete. A
 // refused call is never executed; over the write limit the request stops (budget).
+//
+// A work on a free topic (actionpolicy.FreeTopic, TASK-188) outside an approved plan is admitted as class UI while
+// the student wants the free-work card: nothing runs and nothing is counted; the card's «Сделать» is the student's one
+// confirmation, no plan card comes on top. Without the card it is the paid job without a plan (counted); a second
+// write of the request still needs a plan. As a step of an approved plan it runs as any step.
 func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, error) {
 	t, err := th.ready()
 	if err != nil {
@@ -420,6 +428,12 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 	class := rule.Class
 	if err := actionpolicy.CheckProvenance(call.Refs(), th.known(f.Context)); err != nil {
 		return Admission{}, err
+	}
+	free := actionpolicy.FreeTopic(call)
+	if free && len(t.approved) == 0 && f.FreeWorkNotice {
+		adm := Admission{Class: actionpolicy.ClassUI, PlanStep: -1}
+		t.admitted(call, adm)
+		return adm, nil
 	}
 	adm := Admission{Class: class, Paid: rule.Paid, PlanStep: -1}
 	if !class.IsWrite() {
@@ -445,6 +459,7 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 	} else {
 		reason, err := actionpolicy.NeedsPlan(call.Tool(), actionpolicy.Facts{
 			WritesBefore: t.budget.Writes, CostMicroUSD: f.CostMicroUSD, Triage: f.Triage, ReplacesReady: f.ReplacesReady,
+			FreeTopic: free,
 		})
 		if err != nil {
 			return Admission{}, err

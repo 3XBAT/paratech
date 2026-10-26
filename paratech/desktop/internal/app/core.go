@@ -109,10 +109,11 @@ type core struct {
 	advice adviceRelay
 
 	// The agent core (wireAgent): the steps of a request, the action journal and the Driver of the requests.
-	agent   *agentturn.Service
-	journal *agentjournal.Service
-	driver  *agentloop.Driver
-	panel   *wails.AgentPanel // the Driver's updates as UI events
+	agent     *agentturn.Service
+	journal   *agentjournal.Service
+	driver    *agentloop.Driver
+	panel     *wails.AgentPanel    // the Driver's updates as UI events
+	freeWorks *agentloop.FreeWorks // the free-work cards (TASK-188)
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -415,7 +416,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
-		rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers,
+		rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers, prefs: prefs,
 	}, log); err != nil {
 		return err
 	}
@@ -441,7 +442,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		MaterialViews: store,
 		Opener:        fileopen.New(filepath.Join(dataDir, artifactsDir)),
 		// Life is set by openCore: the requests live as long as the app.
-		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock},
+		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, FreeWork: c.freeWorks},
 		Today: todayScreen,
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
 		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},

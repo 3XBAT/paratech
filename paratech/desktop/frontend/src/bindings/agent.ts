@@ -29,6 +29,8 @@ export const methods = {
   undo: `${service}.Undo`,
   undoRequest: `${service}.UndoRequest`,
   history: `${service}.History`,
+  freeWorkCard: `${service}.FreeWorkCard`,
+  freeWork: `${service}.FreeWork`,
 } as const;
 
 /** Problems of a call (AgentResult.problem); "" when the operation started. */
@@ -138,7 +140,8 @@ export type CardKind =
   | "cannot_do"
   | "reply"
   | "stopped"
-  | "work";
+  | "work"
+  | "free_work";
 
 export const cardKinds: readonly CardKind[] = [
   "plan",
@@ -152,7 +155,50 @@ export const cardKinds: readonly CardKind[] = [
   "reply",
   "stopped",
   "work",
+  "free_work",
 ];
+
+/**
+ * A `free_work` card «Такого задания нет — могу сделать как свободную работу» (TASK-188): the call that waits on it.
+ * The page words the card itself; the topic never comes to the page and is never sent back.
+ */
+export interface FreeWorkRef {
+  threadId: string;
+  turn: number;
+  callId: string;
+}
+
+/**
+ * Where a free-work card stands: waiting («Сделать» / «Не надо»; «Не надо» stores nothing, so a declined card reads as
+ * waiting again), done (workId: show the work card), undone (removed with «Отменить») or failed.
+ */
+export type FreeWorkStateKind = "waiting" | "done" | "undone" | "failed";
+
+export const freeWorkStates: readonly FreeWorkStateKind[] = ["waiting", "done", "undone", "failed"];
+
+export interface FreeWorkState {
+  state: FreeWorkStateKind;
+  /** "" unless done or undone. */
+  workId: string;
+}
+
+/** The fixed Russian texts of the free-work card errors (agent.go, checked by a Go test). */
+export const freeWorkErrors = {
+  notFound: "Карточка устарела: обновите панель.",
+  unavailable: "Свободная работа пока недоступна.",
+  failed: "Не удалось начать свободную работу.",
+} as const;
+
+/** The core's text of a refused free-work call when it is a known one; the generic «failed» text otherwise. */
+export function freeWorkErrorText(err: unknown): string {
+  const msg =
+    typeof err === "string"
+      ? err
+      : typeof err === "object" && err !== null && typeof (err as { message?: unknown }).message === "string"
+        ? (err as { message: string }).message
+        : "";
+  return (Object.values(freeWorkErrors) as string[]).includes(msg) ? msg : freeWorkErrors.failed;
+}
 
 /** One card; `kind` says which field is set. */
 export interface CardView {
@@ -174,6 +220,8 @@ export interface CardView {
   workId: string;
   /** A `work` card: questions, review, helper, pending, failed or confirmed. */
   outcome: string;
+  /** A `free_work` card: the call it names (AgentApi.freeWork); null for other cards. */
+  freeWork: FreeWorkRef | null;
 }
 
 /**
@@ -381,6 +429,18 @@ function parseAssignmentLine(raw: unknown): AssignmentLineView {
   return { id: str(r, "id", w), title: str(r, "title", w), subjectId: str(r, "subjectId", w), due: str(r, "due", w) };
 }
 
+function parseFreeWorkRef(raw: unknown): FreeWorkRef {
+  const w = "free work";
+  const r = record(raw, w);
+  return { threadId: str(r, "threadId", w), turn: num(r, "turn", w), callId: str(r, "callId", w) };
+}
+
+export function parseFreeWorkState(raw: unknown): FreeWorkState {
+  const w = "free work state";
+  const r = record(raw, w);
+  return { state: oneOf(r, "state", freeWorkStates, w), workId: str(r, "workId", w) };
+}
+
 function nested<T>(r: Record<string, unknown>, key: string, parse: (raw: unknown) => T): T | null {
   const v = r[key];
   return v === null || v === undefined ? null : parse(v);
@@ -407,6 +467,7 @@ export function parseCard(raw: unknown): CardView {
     // An older core does not send them; only a `work` card needs its workId (checked where the card is built).
     workId: optStr(r, "workId", w),
     outcome: optStr(r, "outcome", w),
+    freeWork: nested(r, "freeWork", parseFreeWorkRef),
   };
 }
 
@@ -540,6 +601,18 @@ export interface AgentApi {
   undoRequest(ref: TurnRef): Promise<UndoRequestView>;
   /** «Журнал»: actions and processing jobs of the last days, newest first. */
   history(filter: HistoryFilter): Promise<HistoryView>;
+  /** The state of a free-work card; starts nothing. Rejects with a freeWorkErrors text. */
+  freeWorkCard(ref: FreeWorkRef): Promise<FreeWorkState>;
+  /**
+   * The answer on a free-work card: accept is «Сделать» (once: a second press returns the same work), otherwise «Не
+   * надо»; dontShowAgain is «Больше не показывать». Rejects with a freeWorkErrors text.
+   */
+  freeWork(ref: FreeWorkRef, accept: boolean, dontShowAgain: boolean): Promise<FreeWorkState>;
+}
+
+/** Only the three fields of the ref go to the core. */
+function freeWorkArg(ref: FreeWorkRef): FreeWorkRef {
+  return { threadId: ref.threadId, turn: ref.turn, callId: ref.callId };
 }
 
 /** Builds the agent API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -560,5 +633,8 @@ export function agentApi(call: CallByName): AgentApi {
     undo: async (actionId) => parseUndo(await call(methods.undo, actionId)),
     undoRequest: async (ref) => parseUndoRequest(await call(methods.undoRequest, ref)),
     history: async (filter) => parseHistory(await call(methods.history, filter)),
+    freeWorkCard: async (ref) => parseFreeWorkState(await call(methods.freeWorkCard, freeWorkArg(ref))),
+    freeWork: async (ref, accept, dontShowAgain) =>
+      parseFreeWorkState(await call(methods.freeWork, freeWorkArg(ref), accept, dontShowAgain)),
   };
 }

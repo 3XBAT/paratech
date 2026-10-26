@@ -12,6 +12,7 @@ import (
 const (
 	DefaultRecordingPromptsEnabled = true // AC-02: prompts are on until the user turns them off
 	DefaultProcessOnlyOnACPower    = true // AC-21: heavy jobs wait for AC power by default
+	DefaultFreeWorkNotice          = true // TASK-188: the free-work card comes before a work on a topic
 )
 
 // Settings is the typed set of user settings of the installation (PRD sections 6.1 and 7.4). It is a singleton:
@@ -41,6 +42,10 @@ type Settings struct {
 	// profile is the student profile of the title page of a homework document (TASK-094); not a secret.
 	profile Profile
 
+	// freeWorkNotice: the agent shows «Такого задания нет — могу сделать как свободную работу» before a work on a
+	// topic (TASK-188); off after «Больше не показывать», back on from «Настройки».
+	freeWorkNotice bool
+
 	updatedAt time.Time // zero: never changed by the user
 }
 
@@ -51,6 +56,7 @@ func New() *Settings {
 		processOnlyOnACPower:    DefaultProcessOnlyOnACPower,
 		smtpSecurity:            DefaultMailSecurity,
 		recognitionLoad:         shared.DefaultRecognitionLoad,
+		freeWorkNotice:          DefaultFreeWorkNotice,
 	}
 }
 
@@ -69,6 +75,7 @@ type State struct {
 	RecordingSource         shared.AppName         // empty: the whole computer
 	RecognitionLoad         shared.RecognitionLoad // empty or unknown: shared.DefaultRecognitionLoad
 	Profile                 ProfileFields          // the student profile; empty fields: not set
+	FreeWorkNotice          bool                   // the free-work card before a work on a topic
 	UpdatedAt               time.Time              // zero: stored defaults that the user never changed
 }
 
@@ -116,6 +123,7 @@ func Restore(s State) (*Settings, error) {
 		// An unknown stored mode (an older or tampered row) falls back to the gentlest instead of failing the load.
 		recognitionLoad: s.RecognitionLoad.OrDefault(),
 		profile:         profile,
+		freeWorkNotice:  s.FreeWorkNotice,
 		updatedAt:       s.UpdatedAt,
 	}, nil
 }
@@ -281,6 +289,15 @@ func (s *Settings) SetRecognitionLoad(l shared.RecognitionLoad, now time.Time) e
 		return fmt.Errorf("%w: unknown recognition load %q", ErrInvalidSettings, l)
 	}
 	return change(s, &s.recognitionLoad, l, now)
+}
+
+// FreeWorkNotice reports whether the agent shows the free-work card before a work on a topic (TASK-188).
+func (s *Settings) FreeWorkNotice() bool { return s.freeWorkNotice }
+
+// SetFreeWorkNotice turns the free-work card on or off: off is «Больше не показывать» on the card, on is the toggle
+// in «Настройки».
+func (s *Settings) SetFreeWorkNotice(on bool, now time.Time) error {
+	return change(s, &s.freeWorkNotice, on, now)
 }
 
 // change sets one field. Setting the current value is a no-op, so repeating a request does not move UpdatedAt.

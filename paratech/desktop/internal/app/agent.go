@@ -12,6 +12,7 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
+	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/turnkey"
 	agentloop "paratech/desktop/internal/input/agent"
@@ -30,6 +31,7 @@ type agentReads struct {
 	materials   *homeworkflow.MaterialJobs // the summary and homework search of a library material (TASK-122)
 	turnkey     *turnkey.Service           // triage_assignment and its Undo (TASK-129)
 	answers     *answering.Service         // answer_question (TASK-118)
+	prefs       *preferences.Service       // the free-work card setting (TASK-188)
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, TASK-127, ADR-0021): the steps of a request on the
@@ -42,7 +44,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
 	}
-	facts = facts.WithMaterials(reads.materials)
+	facts = facts.WithMaterials(reads.materials).WithNotice(reads.prefs)
 	subjects, err := agentloop.NewBaseSubjects(reads.library)
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -90,6 +92,15 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent driver: %w", err)
+	}
+	// «Сделать» on the free-work card runs the topic triage through the same journaled action path (TASK-188); the
+	// card's call is read from its own thread's history.
+	c.freeWorks, err = agentloop.NewFreeWorks(agentloop.FreeWorkDeps{
+		Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock), Journal: c.journal,
+		Actions: actions, Settings: reads.prefs, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: agent free works: %w", err)
 	}
 	// A request left running stops as «нет связи»; a journal entry left PENDING is settled from its intent (DONE,
 	// FAILED or UNKNOWN), one left UNDOING has its compensation retried.
