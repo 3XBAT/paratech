@@ -36,7 +36,8 @@ type Rule struct {
 // ErrUnknownTool is returned for a tool outside the table.
 var ErrUnknownTool = errors.New("tool has no policy")
 
-// rules is the class table of catalog v3 (a test in desktop/tests compares it with the golden catalog).
+// rules is the class table of catalog v4 (a test in desktop/tests compares it with the golden catalog) and of the
+// retired tools (values.RetiredTools), so the journal entries and Undo of their stored actions keep working.
 var rules = map[values.Tool]Rule{
 	values.ToolListSubjects:           {Class: ClassR},
 	values.ToolFindLessons:            {Class: ClassR},

@@ -5,13 +5,15 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v3.json).
-const CatalogVersion = 3
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v4.json).
+const CatalogVersion = 4
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
 
-// Tools of catalog v3, in catalog order.
+// Tools of catalog v4, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
+// черновик»): the planner can no longer call it, but stored actions, plans and calls that name it still read
+// (RetiredTools).
 const (
 	ToolListSubjects           Tool = "list_subjects"
 	ToolFindLessons            Tool = "find_lessons"
@@ -29,7 +31,7 @@ const (
 	ToolMakeSummary            Tool = "make_summary"
 	ToolMakeLectureText        Tool = "make_lecture_text"
 	ToolFindHomework           Tool = "find_homework"
-	ToolGenerateDraft          Tool = "generate_draft"
+	ToolGenerateDraft          Tool = "generate_draft" // retired in v4
 	ToolEditDue                Tool = "edit_due"
 	ToolTriageAssignment       Tool = "triage_assignment"
 	ToolWriteWork              Tool = "write_work"
@@ -43,15 +45,20 @@ const (
 )
 
 // Tools returns every tool in catalog order.
-func Tools() []Tool {
-	out := make([]Tool, len(catalog))
-	for i, s := range catalog {
+func Tools() []Tool { return toolsOf(catalog) }
+
+// RetiredTools returns the tools that left the catalog but may still be named by stored data.
+func RetiredTools() []Tool { return toolsOf(retired) }
+
+func toolsOf(specs []ToolSpec) []Tool {
+	out := make([]Tool, len(specs))
+	for i, s := range specs {
 		out[i] = s.tool
 	}
 	return out
 }
 
-// ParseTool returns the tool named s.
+// ParseTool returns the tool named s. A retired tool is ErrUnknownTool: the planner cannot call it.
 func ParseTool(s string) (Tool, error) {
 	t := Tool(s)
 	if _, ok := specOf(t); !ok {
@@ -60,9 +67,10 @@ func ParseTool(s string) (Tool, error) {
 	return t, nil
 }
 
-// Valid reports whether t is in the catalog.
+// Valid reports whether t is in the catalog or retired, so stored calls, plans and actions of an older catalog
+// restore. Planner input goes through ParseTool, which knows the current catalog only.
 func (t Tool) Valid() bool {
-	_, ok := specOf(t)
+	_, ok := storedSpecOf(t)
 	return ok
 }
 
@@ -103,7 +111,7 @@ type ArgSpec struct {
 type ToolSpec struct {
 	tool  Tool
 	args  []ArgSpec
-	oneOf [][2]string // pairs of optional arguments of which exactly one must be given
+	oneOf [][]string // groups of optional arguments of which exactly one must be given
 }
 
 // Tool returns the tool.
@@ -119,8 +127,24 @@ func (s ToolSpec) Args() []ArgSpec {
 	return out
 }
 
-// OneOf returns the pairs of arguments of which exactly one must be given.
-func (s ToolSpec) OneOf() [][2]string { return slices.Clone(s.oneOf) }
+// OneOf returns the groups of arguments of which exactly one must be given.
+func (s ToolSpec) OneOf() [][]string {
+	out := make([][]string, len(s.oneOf))
+	for i, g := range s.oneOf {
+		out[i] = slices.Clone(g)
+	}
+	return out
+}
+
+// oneOfGroup returns the one-of group that holds name.
+func (s ToolSpec) oneOfGroup(name string) ([]string, bool) {
+	for _, g := range s.oneOf {
+		if slices.Contains(g, name) {
+			return g, true
+		}
+	}
+	return nil, false
+}
 
 func (s ToolSpec) arg(name string) (ArgSpec, bool) {
 	for _, a := range s.args {
@@ -140,8 +164,18 @@ func SpecOf(t Tool) (ToolSpec, error) {
 	return s, nil
 }
 
-func specOf(t Tool) (ToolSpec, bool) {
-	for _, s := range catalog {
+func specOf(t Tool) (ToolSpec, bool) { return findSpec(catalog, t) }
+
+// storedSpecOf finds the schema of a tool in the catalog or among the retired ones, for stored data only.
+func storedSpecOf(t Tool) (ToolSpec, bool) {
+	if s, ok := findSpec(catalog, t); ok {
+		return s, true
+	}
+	return findSpec(retired, t)
+}
+
+func findSpec(specs []ToolSpec, t Tool) (ToolSpec, bool) {
+	for _, s := range specs {
 		if s.tool == t {
 			return s, true
 		}
@@ -167,7 +201,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v3 (shared/testdata/tool_catalog_v3.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v4 (shared/testdata/tool_catalog_v4.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},
@@ -189,23 +223,23 @@ var catalog = []ToolSpec{
 	{tool: ToolPlaceUpload, args: []ArgSpec{
 		id("upload", KindUpload, true), id("subject", KindSubject, true), id("folder", KindFolder, false),
 		id("lesson", KindLesson, false),
-	}, oneOf: [][2]string{{"folder", "lesson"}}},
+	}, oneOf: [][]string{{"folder", "lesson"}}},
 	{tool: ToolLinkMaterial, args: []ArgSpec{id("material", KindMaterial, true), id("lesson", KindLesson, true)}},
 	{tool: ToolSetLessonInfo, args: []ArgSpec{
 		id("recording", KindRecording, true), id("subject", KindSubject, true), enum("kind", true, lessonKinds...),
 	}},
 	{tool: ToolMakeSummary, args: []ArgSpec{
 		id("recording", KindRecording, false), id("material", KindMaterial, false),
-	}, oneOf: [][2]string{{"recording", "material"}}},
+	}, oneOf: [][]string{{"recording", "material"}}},
 	{tool: ToolMakeLectureText, args: []ArgSpec{id("recording", KindRecording, true)}},
 	{tool: ToolFindHomework, args: []ArgSpec{
 		id("recording", KindRecording, false), id("material", KindMaterial, false),
-	}, oneOf: [][2]string{{"recording", "material"}}},
-	{tool: ToolGenerateDraft, args: []ArgSpec{id("assignment", KindAssignment, true), typed("instruction", ArgLabel, false)}},
+	}, oneOf: [][]string{{"recording", "material"}}},
 	{tool: ToolEditDue, args: []ArgSpec{id("assignment", KindAssignment, true), typed("due", ArgDate, true)}},
+	// topic (catalog v4) is the student's words for a work without an assignment: free model text, a Query.
 	{tool: ToolTriageAssignment, args: []ArgSpec{
-		id("assignment", KindAssignment, false), id("upload", KindUpload, false),
-	}, oneOf: [][2]string{{"assignment", "upload"}}},
+		id("assignment", KindAssignment, false), id("upload", KindUpload, false), typed("topic", ArgQuery, false),
+	}, oneOf: [][]string{{"assignment", "upload", "topic"}}},
 	{tool: ToolWriteWork, args: []ArgSpec{id("work", KindWork, true)}},
 	{tool: ToolProposeDeadline, args: []ArgSpec{id("assignment", KindAssignment, true)}},
 	{tool: ToolProposeSend, args: []ArgSpec{id("assignment", KindAssignment, true), id("version", KindVersion, true)}},
@@ -218,4 +252,10 @@ var catalog = []ToolSpec{
 		typed("text", ArgText, true), {Name: "assignments", Type: ArgCardIDs, Kind: KindAssignment},
 	}},
 	{tool: ToolCannotDo, args: []ArgSpec{typed("your_part", ArgTextList, true), typed("our_part", ArgTextList, true)}},
+}
+
+// retired are the schemas of tools that left the catalog, as their last catalog had them: a stored plan step that
+// names one still decodes. Read-only like catalog.
+var retired = []ToolSpec{
+	{tool: ToolGenerateDraft, args: []ArgSpec{id("assignment", KindAssignment, true), typed("instruction", ArgLabel, false)}},
 }

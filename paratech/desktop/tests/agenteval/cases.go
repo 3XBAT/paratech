@@ -41,7 +41,8 @@ type Subject struct {
 
 // Request is a student request and the expected routing: the class and the non-card tools in order (others may
 // come in between). Also are other classes the prompt allows as well. ListsAssignments marks a request whose reply
-// should list the assignments found (catalog v3).
+// should list the assignments found (catalog v3). Source is the argument triage_assignment should be given (one of
+// TriageSources, catalog v4).
 type Request struct {
 	ID               string   `json:"id"`
 	Text             string   `json:"text"`
@@ -52,6 +53,7 @@ type Request struct {
 	Also             []string `json:"also,omitempty"`
 	Tools            []string `json:"tools"`
 	ListsAssignments bool     `json:"lists_assignments,omitempty"`
+	Source           string   `json:"source,omitempty"`
 }
 
 // Accepts reports whether a run of class class routed the request right.
@@ -95,10 +97,10 @@ type CaseSet struct {
 }
 
 // CatalogFile is the golden catalog the run is scored against, in shared/testdata: the version the desktop sends.
-const CatalogFile = "tool_catalog_v3.json"
+const CatalogFile = "tool_catalog_v4.json"
 
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v3.json).
+// (shared/testdata/tool_catalog_v4.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {
@@ -171,6 +173,9 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 		}
 		if r.ListsAssignments && (r.Class != ClassRead || !slices.Contains(r.Tools, "list_assignments")) {
 			return bad("request %s: a reply lists assignments only after list_assignments in a read", r.ID)
+		}
+		if r.Source != "" && (!slices.Contains(TriageSources(), r.Source) || !slices.Contains(r.Tools, triageTool)) {
+			return bad("request %s: source %q needs triage_assignment and one of %v", r.ID, r.Source, TriageSources())
 		}
 	}
 	for _, r := range cs.CannotDo {
