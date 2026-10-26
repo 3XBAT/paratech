@@ -243,9 +243,24 @@ func (zeroFacts) Facts(context.Context, values.Call) (thread.Facts, error) {
 	return thread.Facts{}, nil
 }
 
-type subjects []values.BaseSubject
+// subjects is the base of every step; err, when set, fails it.
+type subjects struct {
+	mu   sync.Mutex
+	list []values.BaseSubject
+	err  error
+}
 
-func (s subjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) { return s, nil }
+func (s *subjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.list, s.err
+}
+
+func (s *subjects) fail(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = err
+}
 
 // memTx rolls the history and the threads back when fn fails, like a database transaction; transactions run one at a
 // time, like the single SQLite writer, so a rollback never drops the writes of another transaction.
@@ -304,12 +319,13 @@ func (f *fakeEffects) set(r TurnRef, live bool) {
 }
 
 type env struct {
-	svc     *Service
-	model   *fakeModel
-	threads *memThreads
-	history *memHistory
-	clock   *fixedClock
-	effects *fakeEffects
+	svc      *Service
+	model    *fakeModel
+	threads  *memThreads
+	history  *memHistory
+	clock    *fixedClock
+	effects  *fakeEffects
+	subjects *subjects
 }
 
 func newEnv(t *testing.T) *env {
@@ -348,9 +364,10 @@ func newEnvWith(t *testing.T, progress Progress) *env {
 		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)}, effects: &fakeEffects{},
 	}
 	s1, _ := values.NewRef(values.KindSubject, "s1")
+	e.subjects = &subjects{list: []values.BaseSubject{{ID: s1, Name: "Физика"}}}
 	svc, err := New(Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
-		Subjects: subjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
+		Subjects: e.subjects, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
 		Progress: progress, Effects: e.effects,
 	})
 	if err != nil {

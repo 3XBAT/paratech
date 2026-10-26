@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"paratech/desktop/internal/domain/agent/thread"
@@ -12,6 +13,9 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
+// errPanic wraps a panic of a step, which drive turns into a stop.
+var errPanic = errors.New("agentturn: step panicked")
+
 func running(turn thread.Turn) bool {
 	return turn.Status() == thread.StatusPlanning || turn.Status() == thread.StatusExecuting
 }
@@ -19,7 +23,16 @@ func running(turn thread.Turn) bool {
 // drive runs planner steps while the request can go on by itself, then saves the change. It stops when calls wait
 // for the Driver, the request waits for the student (plan, questions), has ended or has stopped. A step whose calls
 // were all answered by the case (refusals, a refused third question round) is followed by the next step at once.
-func (s *Service) drive(ctx context.Context, c *change, op string) (Step, error) {
+// Every failure, a panic included, returns after the stored request was stopped (abort): a request must never stay
+// PLANNING or EXECUTING without a Driver loop, or every next request of the thread is busy (TASK-171).
+func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.ErrorContext(ctx, opPanic, "thread", c.th.ID().String(), "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+			st, err = s.abort(ctx, c, op, values.StopOffline, fmt.Errorf("%w: %v", errPanic, r))
+		}
+	}()
+
 	silent := true // an expired first step restarts once without asking the student
 	for {
 		c.takeResults(s)
@@ -33,17 +46,17 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (Step, error)
 				if errors.Is(err, thread.ErrBudgetExceeded) {
 					return s.finish(ctx, c, op)
 				}
-				return Step{}, fmt.Errorf("%s: %w", op, err)
+				return s.abort(ctx, c, op, values.StopOffline, err)
 			}
 		}
 
 		key, err := c.th.StepKey()
 		if err != nil {
-			return Step{}, fmt.Errorf("%s: %w", op, err)
+			return s.abort(ctx, c, op, values.StopOffline, err)
 		}
 		base, err := s.base(ctx)
 		if err != nil {
-			return Step{}, fmt.Errorf("%s: base: %w", op, err)
+			return s.abort(ctx, c, op, values.StopOffline, fmt.Errorf("base: %w", err))
 		}
 		// The open step is stored before the call: a crash or a lost answer leaves a step «Продолжить» can repeat.
 		if err := s.save(ctx, c); err != nil {
@@ -69,9 +82,10 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (Step, error)
 			err = reply.Validate()
 		}
 		if err != nil {
-			again, ferr := s.fail(ctx, c, err, silent)
+			reason := reasonOf(ctx, err)
+			again, ferr := s.fail(ctx, c, err, reason, silent)
 			if ferr != nil {
-				return Step{}, fmt.Errorf("%s: %w", op, ferr)
+				return s.abort(ctx, c, op, reason, ferr)
 			}
 			if again {
 				silent = false
@@ -100,13 +114,17 @@ func stopReasonOf(err error) values.StopReason {
 	return values.StopOffline
 }
 
-// fail stops the request after a failed Hub call, the step left open. It reports true when an expired first step
-// was restarted from the student's text and the loop goes on.
-func (s *Service) fail(ctx context.Context, c *change, cause error, silent bool) (bool, error) {
-	reason := stopReasonOf(cause)
+// reasonOf is the stop reason of a failed Hub call; the caller going away is a lost connection whatever the error.
+func reasonOf(ctx context.Context, err error) values.StopReason {
 	if ctx.Err() != nil {
-		reason = values.StopOffline
+		return values.StopOffline
 	}
+	return stopReasonOf(err)
+}
+
+// fail stops the request with reason after a failed Hub call, the step left open. It reports true when an expired
+// first step was restarted from the student's text and the loop goes on.
+func (s *Service) fail(ctx context.Context, c *change, cause error, reason values.StopReason, silent bool) (bool, error) {
 	s.log.WarnContext(ctx, "agent step failed", "thread", c.th.ID().String(), "reason", string(reason), "err", cause)
 	if err := c.th.Stop(reason, s.clock.Now()); err != nil {
 		return false, err
@@ -133,8 +151,9 @@ func progressOf(th *thread.Thread) Step {
 	return Step{Thread: th.ID(), Turn: turn.Number(), Scope: turn.Scope(), Status: turn.Status(), StopReason: turn.StopReason()}
 }
 
-// abort stores the request stopped (step open, so it can be repeated) after a local failure in the middle of a step;
-// the work of the step is dropped. The stored request comes back with the error, so the panel shows what is stored.
+// abort stores the request stopped (an open step stays open, so it can be repeated) after a failure once a step may
+// have begun; the work of the change is dropped. A request that was never stored or is not running stays as stored.
+// The stored request comes back with the error, so the panel shows what is stored.
 func (s *Service) abort(ctx context.Context, c *change, op string, reason values.StopReason, cause error) (Step, error) {
 	ctx = context.WithoutCancel(ctx)
 	th, err := s.threads.Get(ctx, c.th.ID())
@@ -163,10 +182,10 @@ func (s *Service) finish(ctx context.Context, c *change, op string) (Step, error
 
 // conflict handles a failed save. A version conflict means «Стоп» saved meanwhile: the stored, stopped request wins
 // and the reply of the step is dropped (its step stays open, so «Продолжить» replays it for free). Another stored
-// state comes back with the error, so the panel shows what is stored.
+// state comes back with the error, so the panel shows what is stored. Any other failure stops the stored request.
 func (s *Service) conflict(ctx context.Context, c *change, op string, err error) (Step, error) {
 	if !errors.Is(err, shared.ErrVersionConflict) {
-		return Step{}, fmt.Errorf("%s: %w", op, err)
+		return s.abort(ctx, c, op, values.StopOffline, err)
 	}
 	th, gerr := s.threads.Get(ctx, c.th.ID())
 	if gerr != nil {

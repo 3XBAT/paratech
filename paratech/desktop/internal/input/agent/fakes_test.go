@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -87,9 +88,13 @@ type fakeLibrary struct {
 	// block, when set, makes Subjects wait for its context after signalling started.
 	block   bool
 	started chan struct{}
+	panics  bool // Subjects panics (a bug in a tool)
 }
 
 func (l *fakeLibrary) Subjects(ctx context.Context) ([]*subject.Subject, error) {
+	if l.panics {
+		panic("library: broken")
+	}
 	if l.block {
 		close(l.started)
 		<-ctx.Done()
@@ -228,6 +233,22 @@ type scriptedTurns struct {
 	endless     agentturn.Step
 	// beforeAnswer, when set, runs before an answer of the script is returned (a ctx ending meanwhile).
 	beforeAnswer func()
+	// idle, when set, answers RecoverIdle; idles records the inputs and what live said of their thread.
+	idle  func(in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error)
+	idles []agentturn.IdleInput
+	// refuseOutcomes makes Interrupt refuse a report with outcomes, as agentturn does for a call it does not know.
+	refuseOutcomes bool
+}
+
+func (s *scriptedTurns) RecoverIdle(_ context.Context, in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error) {
+	s.mu.Lock()
+	s.idles = append(s.idles, in)
+	idle := s.idle
+	s.mu.Unlock()
+	if idle == nil {
+		return false, nil
+	}
+	return idle(in, live)
 }
 
 func (s *scriptedTurns) then(st agentturn.Step, err error) *scriptedTurns {
@@ -309,9 +330,12 @@ func (s *scriptedTurns) Interrupt(ctx context.Context, in agentturn.SubmitInput)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ref := in.Turn
-	s.stopped = append(s.stopped, ref)
 	s.interrupted = append(s.interrupted, in)
 	s.opCtx = append(s.opCtx, ctx.Err())
+	if s.refuseOutcomes && len(in.Outcomes) > 0 {
+		return agentturn.Step{}, fmt.Errorf("agentturn: interrupt: %w: unknown call", agentturn.ErrInvalidInput)
+	}
+	s.stopped = append(s.stopped, ref)
 	return agentturn.Step{
 		Thread: ref.Thread, Turn: ref.Turn, Status: thread.StatusStopped, StopReason: values.StopOffline,
 		Cards: []values.Card{values.StoppedCard{Reason: values.StopOffline}},
