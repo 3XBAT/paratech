@@ -341,7 +341,7 @@ test("question card: round N of 2, skip text, defaults and typed answers", () =>
 
 // ---- Progress card ----
 
-test("progress card: shown while working, with «Стоп» only while executing", () => {
+test("progress card: shown while working, with «Стоп» (TASK-143: also while planning)", () => {
   const u = update({ status: "EXECUTING", cards: [card({ kind: "progress", jobId: "j1" })] });
   const m = modelOf(u).cards;
   assert.equal(m.length, 1);
@@ -350,7 +350,7 @@ test("progress card: shown while working, with «Стоп» only while executing
   assert.equal(m[0].type, "progress");
   assert.equal(planning.length, 1);
   assert.equal(planning[0].type, "waiting");
-  assert.deepEqual(planning[0].buttons, []);
+  assert.deepEqual(planning[0].buttons.map((b) => b.label), ["Стоп"]);
   assert.match(html(u), /Работа идёт/);
 });
 
@@ -379,9 +379,9 @@ test("waiting: shown while the call runs, hidden on refusal and on any card that
   }
 });
 
-test("waiting: job-less PLANNING and EXECUTING give a waiting card, EXECUTING keeps «Стоп»", () => {
+test("waiting: job-less PLANNING and EXECUTING give a waiting card, both keep «Стоп» (TASK-143)", () => {
   const planning = modelOf(update({ status: "PLANNING" })).cards;
-  assert.deepEqual(planning, [{ type: "waiting", buttons: [] }]);
+  assert.deepEqual(planning, [{ type: "waiting", buttons: [{ id: "stop", label: "Стоп" }] }]);
   const executing = modelOf(update({ status: "EXECUTING" })).cards;
   assert.deepEqual(executing.map((c) => c.type), ["waiting"]);
   assert.deepEqual(executing[0].buttons.map((b) => b.label), ["Стоп"]);

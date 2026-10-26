@@ -87,6 +87,10 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
     if (known.update && final.has(known.update.status) && !final.has(u.status)) {
       return s;
     }
+    // A step went to the Hub: only the status and the stop reason move, the cards shown stay.
+    if (u.progress && known.update) {
+      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, status: u.status, stopReason: u.stopReason } }) };
+    }
     // A failed button operation: no status, no cards, only a problem. The request itself is unchanged, so keep its
     // cards and buttons and attach the problem; the next real update replaces it.
     if (known.update && u.status === "" && u.cards.length === 0) {
@@ -149,6 +153,60 @@ export function orderedEntries(entries: readonly Entry[]): Entry[] {
     const fb = first.get(b.threadId || b.key)!;
     return fa - fb || a.turn - b.turn || a.seq - b.seq;
   });
+}
+
+/** A request the core is working on: «Стоп» applies to it. */
+export function isRunning(status: string): boolean {
+  return status === "PLANNING" || status === "EXECUTING";
+}
+
+/** The last request of the thread: the only one that offers «Повторить». */
+export function lastEntry(entries: readonly Entry[]): Entry | undefined {
+  return orderedEntries(entries).at(-1);
+}
+
+/**
+ * The request that made the core refuse a new one as busy: the latest running request of the same subject. The refused
+ * request has no thread of its own, so «Стоп» on it stops this one.
+ */
+export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry | undefined {
+  const u = refused.update;
+  if (!u) {
+    return undefined;
+  }
+  return orderedEntries(entries)
+    .filter((e) => e.threadId !== "" && e.update !== null && isRunning(e.update.status) && e.update.subjectId === u.subjectId)
+    .at(-1);
+}
+
+/** A refused-as-busy request that never got a thread, with the text it can be sent with again. */
+export function isBusyRefused(e: Entry): boolean {
+  return e.threadId === "" && e.update?.problem === "busy";
+}
+
+/**
+ * Double-click guard for buttons: a request is marked on the update it was pressed on and stays off until a newer
+ * update arrives or the call is refused. Synchronous, so two clicks before the next render make one call.
+ */
+export class PressTracker {
+  private marks = new Map<string, UpdateView | null>();
+
+  busy(key: string, update: UpdateView | null): boolean {
+    return this.marks.has(key) && this.marks.get(key) === update;
+  }
+
+  /** False when this press is a repeat. */
+  mark(key: string, update: UpdateView | null): boolean {
+    if (this.busy(key, update)) {
+      return false;
+    }
+    this.marks.set(key, update);
+    return true;
+  }
+
+  release(key: string): void {
+    this.marks.delete(key);
+  }
 }
 
 export interface PanelMode {
