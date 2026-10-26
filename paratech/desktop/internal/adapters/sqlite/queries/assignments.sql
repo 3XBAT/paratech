@@ -49,7 +49,18 @@ SET title          = sqlc.arg(title),
     updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
--- Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+-- Compare-and-swap delete of an assignment reprocessing withdrew, or of one the student added (after
+-- AssignmentInUse). A delivery that references it makes the delete fail
 -- (ON DELETE RESTRICT), and the row is kept.
 -- name: DeleteAssignment :execrows
 DELETE FROM assignments WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
+-- cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
+-- statuses that leave the assignment free.
+-- name: AssignmentInUse :one
+SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = sqlc.arg(id))
+    OR EXISTS (SELECT 1 FROM deliveries v WHERE v.assignment_id = sqlc.arg(id))
+    OR EXISTS (SELECT 1 FROM works w WHERE w.assignment_id = sqlc.arg(id))
+    OR EXISTS (SELECT 1 FROM proposals p WHERE p.assignment_id = sqlc.arg(id)
+                                          AND p.status NOT IN (sqlc.slice('free_statuses'))) AS INTEGER) AS in_use;

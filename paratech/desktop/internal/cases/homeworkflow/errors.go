@@ -49,6 +49,14 @@ var (
 	// ErrNoPath is returned by Drafts.SaveDocx without a target path.
 	ErrNoPath = errors.New("homework draft: no file to save to")
 
+	// ErrSubjectNotFound is returned by Service.CreateAssignment for a subject the library does not have (ADR-0029).
+	// It is not shared.ErrNotFound, which stands for an unknown lesson there.
+	ErrSubjectNotFound = errors.New("homework workflow: subject not found")
+
+	// ErrNotByStudent is returned by Service.RemoveCreatedAssignment for an assignment the student did not add
+	// (an extracted one); nothing is removed.
+	ErrNotByStudent = errors.New("homework workflow: the student did not add this assignment")
+
 	// ErrGenerationRunning is returned by Drafts.Generate while another generation of the assignment is pending or
 	// running (TASK-094): one draft job per assignment at a time. The same request again returns that job instead.
 	ErrGenerationRunning = errors.New("homework draft: a generation of the assignment is already running")

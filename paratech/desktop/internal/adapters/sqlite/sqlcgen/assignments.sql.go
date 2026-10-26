@@ -8,7 +8,42 @@ package sqlcgen
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
+
+const assignmentInUse = `-- name: AssignmentInUse :one
+SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = ?1)
+    OR EXISTS (SELECT 1 FROM deliveries v WHERE v.assignment_id = ?1)
+    OR EXISTS (SELECT 1 FROM works w WHERE w.assignment_id = ?1)
+    OR EXISTS (SELECT 1 FROM proposals p WHERE p.assignment_id = ?1
+                                          AND p.status NOT IN (/*SLICE:free_statuses*/?)) AS INTEGER) AS in_use
+`
+
+type AssignmentInUseParams struct {
+	ID           string
+	FreeStatuses []string
+}
+
+// What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
+// cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
+// statuses that leave the assignment free.
+func (q *Queries) AssignmentInUse(ctx context.Context, arg AssignmentInUseParams) (int64, error) {
+	query := assignmentInUse
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.ID)
+	if len(arg.FreeStatuses) > 0 {
+		for _, v := range arg.FreeStatuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:free_statuses*/?", strings.Repeat(",?", len(arg.FreeStatuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:free_statuses*/?", "NULL", 1)
+	}
+	row := q.db.QueryRowContext(ctx, query, queryParams...)
+	var in_use int64
+	err := row.Scan(&in_use)
+	return in_use, err
+}
 
 const deleteAssignment = `-- name: DeleteAssignment :execrows
 DELETE FROM assignments WHERE id = ?1 AND version = ?2
@@ -19,7 +54,8 @@ type DeleteAssignmentParams struct {
 	ExpectedVersion int64
 }
 
-// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+// Compare-and-swap delete of an assignment reprocessing withdrew, or of one the student added (after
+// AssignmentInUse). A delivery that references it makes the delete fail
 // (ON DELETE RESTRICT), and the row is kept.
 func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteAssignment, arg.ID, arg.ExpectedVersion)
