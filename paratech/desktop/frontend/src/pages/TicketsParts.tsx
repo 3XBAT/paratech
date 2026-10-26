@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import type { TicketSet } from "../bindings/tickets.js";
 import {
   budgetLine,
+  canOpenDocx,
   confirmGate,
   costConsentLabel,
   fileNote,
@@ -99,6 +100,11 @@ export function SetCard(props: {
   onConfirm: (acceptCost: boolean) => void;
   onCancel: () => void;
   onUndo: () => void;
+  /** Opens the filed .docx (a copy); only the set's material id goes to the core. */
+  onOpen: () => void;
+  /** The opening of this card runs. */
+  openBusy: boolean;
+  openResult: { kind: "ok" | "fail"; text: string } | null;
 }) {
   const s = props.set;
   const [open, setOpen] = useState(s.status === "proposed" || isRunning(s));
@@ -131,8 +137,20 @@ export function SetCard(props: {
       {s.status === "done" && (
         <div className="tk-done">
           <p className="small">{fileNote(props.subjectName)}</p>
-          <p className="small muted">{texts.openNote}</p>
+          {canOpenDocx(s) && <p className="small muted">{texts.openNote}</p>}
           <p className="small muted">{texts.generatedNote}</p>
+          {canOpenDocx(s) && (
+            <div className="acts start">
+              <Button size="sm" busy={props.openBusy} busyLabel={texts.openBusy} disabled={props.blocked || props.busy} onClick={props.onOpen}>
+                {texts.open}
+              </Button>
+            </div>
+          )}
+          {canOpenDocx(s) && props.openResult && (
+            <ResultLine kind={props.openResult.kind} role={props.openResult.kind === "fail" ? "alert" : "status"}>
+              {props.openResult.text}
+            </ResultLine>
+          )}
         </div>
       )}
       <div className="acts start">

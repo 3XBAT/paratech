@@ -1,6 +1,6 @@
 // Bindings of the exam tickets screen (TASK-134): calls into internal/input/wails/tickets.go. The page never talks to
 // the Hub and keeps nothing in browser storage. Ticket titles come from the student's list: show them as text nodes
-// only. Errors of the binding are fixed Russian texts, shown as they are. There is no binding that opens the .docx.
+// only. Errors of the binding are fixed Russian texts, shown as they are. The .docx is opened by libraryApi.openMaterial(materialId).
 
 import type { CallByName } from "./settings";
 

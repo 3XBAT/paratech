@@ -3,7 +3,7 @@ import { type LibraryMaterial, type LibrarySubject, libraryApi } from "../bindin
 import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
-import { needsPolling, texts, ticketsPollMs } from "../ticketsView.js";
+import { needsPolling, openResultView, texts, ticketsPollMs } from "../ticketsView.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
 import { SetCard } from "./TicketsParts.js";
@@ -25,6 +25,7 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
   const [loadError, setLoadError] = useState("");
   const [formError, setFormError] = useState("");
   const [setErrors, setSetErrors] = useState<Record<string, string>>({});
+  const [openResults, setOpenResults] = useState<Record<string, { kind: "ok" | "fail"; text: string }>>({});
   const [busy, setBusy] = useState("");
   const running = useRef(false); // a double click comes before the re-render that disables the button
 
@@ -120,6 +121,13 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
       replace(await work());
       setSetErrors((e) => ({ ...e, [id]: "" }));
     }, (t) => setSetErrors((e) => ({ ...e, [id]: t })));
+
+  // Opens a copy of the filed .docx through the library binding; only the id is passed.
+  const onOpenDocx = (set: TicketSet) =>
+    run(`open:${set.id}`, async () => {
+      const r = await lib.openMaterial(set.materialId);
+      setOpenResults((o) => ({ ...o, [set.id]: openResultView(r) }));
+    }, (t) => t !== "" && setOpenResults((o) => ({ ...o, [set.id]: { kind: "fail", text: t } })));
 
   const subject = subjects?.find((s) => s.id === subjectId) ?? null;
   const blocked = busy !== "";
@@ -232,6 +240,9 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
                   subjectName={subject.name}
                   busy={busy === s.id}
                   blocked={blocked}
+                  openBusy={busy === `open:${s.id}`}
+                  openResult={openResults[s.id] ?? null}
+                  onOpen={() => void onOpenDocx(s)}
                   error={setErrors[s.id] ?? ""}
                   onConfirm={(accept) => void onSetAction(s.id, () => api.confirm(s.id, accept))}
                   onCancel={() => void onSetAction(s.id, () => api.cancel(s.id))}
