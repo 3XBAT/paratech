@@ -88,7 +88,7 @@ export function ConfirmCard(props: {
   target?: ConfirmTarget;
   /** A card the page already has (a proposal just made). */
   initial?: CardData;
-  /** Called with every card the flow shows after a «Да» / «Нет» (the work card tracks a sent work). */
+  /** Called with every card the flow shows, the initial one and each reload (the work card tracks a sent work). */
   onCard?: (card: CardData) => void;
 }) {
   const [state, setState] = useState<FlowState>(initialFlow);
