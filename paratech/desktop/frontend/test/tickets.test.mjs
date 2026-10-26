@@ -8,7 +8,9 @@ import server from "react-dom/server";
 import { methods, parseSet, ticketsApi, ticketsErrorText } from "../.test-build/bindings/tickets.js";
 import {
   budgetLine,
+  canOpenDocx,
   confirmGate,
+  openResultView,
   fileNote,
   moves,
   needsCostConsent,
@@ -188,7 +190,54 @@ test("titles are rendered as plain text, not markup or links", () => {
   assert.ok(html.includes("**bold**"), "no markdown");
   assert.ok(html.includes("Билеты"), "the folder is named");
   assert.ok(html.includes("Вернуть файл во «Входящие»"));
-  assert.ok(!html.includes("Открыть .docx</button>"), "there is no open button");
+  assert.ok(html.includes("Открыть .docx"), "the open button is there");
+});
+
+const card = (s, over = {}) =>
+  server.renderToStaticMarkup(
+    h(SetCard, { set: s, subjectName: "Физика", busy: false, blocked: false, error: "", openBusy: false, openResult: null, onConfirm() {}, onCancel() {}, onUndo() {}, onOpen() {}, ...over }),
+  );
+
+test("«Открыть .docx» is shown only for a done set with a material, with the copy note", () => {
+  const done = card(set({ status: "done", done: 2, materialId: "m-1" }));
+  assert.ok(done.includes("Открыть .docx"));
+  assert.ok(done.includes("Открывается копия файла: правки в Word в библиотеку не попадают."));
+  for (const over of [{ status: "proposed" }, { status: "answering" }, { status: "confirmed" }, { status: "done", materialId: "" }]) {
+    const html = card(set(over));
+    assert.ok(!html.includes("Открыть .docx"), JSON.stringify(over));
+    assert.ok(!html.includes("копия файла"), JSON.stringify(over));
+  }
+});
+
+test("the open button is blocked while an action runs and shows the busy label", () => {
+  const s = set({ status: "done", done: 2, materialId: "m-1" });
+  assert.match(card(s, { blocked: true }), /<button[^>]*disabled=""[^>]*>[^]*?Открыть \.docx/);
+  assert.ok(card(s, { openBusy: true, blocked: true }).includes("Открывается…"));
+});
+
+test("the open result line: success says a copy was opened, a failure shows the binding text", () => {
+  assert.deepEqual(openResultView({ status: "opened", message: "Файл открывается в программе по умолчанию." }), {
+    kind: "ok",
+    text: "Открыта копия файла: правки в Word в библиотеку не попадают.",
+  });
+  assert.deepEqual(openResultView({ status: "not_found", message: "Файл не найден: возможно, его удалили." }), {
+    kind: "fail",
+    text: "Файл не найден: возможно, его удалили.",
+  });
+  const s = set({ status: "done", done: 2, materialId: "m-1" });
+  assert.ok(card(s, { openResult: { kind: "ok", text: "Открыта копия файла: x" } }).includes("Открыта копия файла: x"));
+});
+
+test("canOpenDocx needs a done set with a material id", () => {
+  assert.equal(canOpenDocx(set({ status: "done", materialId: "m-1" })), true);
+  assert.equal(canOpenDocx(set({ status: "done", materialId: "" })), false);
+  assert.equal(canOpenDocx(set({ status: "failed", materialId: "m-1" })), false);
+});
+
+test("the page opens the file through the library binding with the material id only", () => {
+  const page = readFileSync(new URL("../src/pages/TicketsPage.tsx", import.meta.url), "utf8");
+  assert.equal((page.match(/lib\.openMaterial\(/g) ?? []).length, 1);
+  assert.ok(page.includes("lib.openMaterial(set.materialId)"), "only the id is passed");
 });
 
 test("the confirm card of a run over the cap shows the estimate and a disabled button until the consent", () => {
