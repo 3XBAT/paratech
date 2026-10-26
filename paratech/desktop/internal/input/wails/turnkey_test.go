@@ -28,6 +28,11 @@ type fakeTurnkey struct {
 	reused  bool // StartWriting found its job (Created false)
 }
 
+func (f *fakeTurnkey) Triage(_ context.Context, src work.Source) (turnkey.Started, error) {
+	f.src = src
+	return turnkey.Started{View: f.view, Created: true}, f.err
+}
+
 func (f *fakeTurnkey) Work(context.Context, shared.WorkID) (turnkey.View, error) {
 	return f.view, f.err
 }
