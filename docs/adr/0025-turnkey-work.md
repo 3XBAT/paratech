@@ -146,6 +146,15 @@ it cannot do the work whole — then help instead. Everything the model says abo
   `proposal:<id>` (hard rule 7: one email; an unknown outcome is reconciled, never resent).
 - Storage: migration 0033 rebuilds `proposals` (kind, `attachment_format` 'pptx', `work_id`).
 
+## Addendum (TASK-198): «Скачать PDF»
+- `ExportPDF` (input/wails only, synchronous, no job, 60 s timeout) prints a done paper or lab report through `PaperPDF`
+  (`adapters/pdf`, ADR-0020) from the same `values.Document` as the .docx, never from the .docx; no presentation.
+- The PDF is filed next to the .docx (same «ДЗ» or «Входящие», same name with `.pdf`) and kept as `Writing.PDF` (optional
+  JSON, no migration); a PDF of the current content still in the library is returned without a new print.
+- Title page: the year stored with the paper (`File.Year`; an older paper takes its first PDF's) and the profile read
+  at the click. A new generation or the Undo of write_work takes the PDF to «Входящие» with the paper; the send still
+  attaches the .docx. A work changed during the print keeps nothing: the PDF goes to «Входящие», `ErrChanged`.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.
