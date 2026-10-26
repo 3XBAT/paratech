@@ -268,14 +268,14 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 
-	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library. No advisor
-	// for «Спросить по шагу» yet: the Hub has no operation for it (ADR-0025). The writing (TASK-131) runs as a job on
-	// the Hub's homework_draft operation; the title page from the profile and the lesson the assignment shows, the
-	// paper filed into the subject's «ДЗ»; a presentation (TASK-106) files its .pptx and the speaker text there.
-	// «Остановить» (TASK-178) cancels through the runner built below.
+	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library;
+	// «Спросить по шагу» (TASK-179) on homework_draft with the desktop's prompt and the writing alias. The writing
+	// (TASK-131) runs as a job on the Hub's homework_draft operation; the title page from the profile and the lesson the
+	// assignment shows, the paper filed into the subject's «ДЗ»; a presentation (TASK-106) files its .pptx and the
+	// speaker text there. «Остановить» (TASK-178) cancels through the runner built below.
 	works, err := turnkey.New(turnkey.Deps{
-		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm, Clock: e.local,
-		IDs: e.ids, Log: log,
+		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm,
+		Advisor: llm.StepAdvisor(modelAlias), Clock: e.local, IDs: e.ids, Log: log,
 		Writing: &turnkey.WritingDeps{
 			Writer: llm, Jobs: jobs, JobIDs: e.ids, Canceller: runnerCanceller{c: c}, Profiles: settings,
 			Renderer: docx.New(), Slides: pptx.New(), Lessons: c.proposals, Shelf: lib, ModelAlias: modelAlias,

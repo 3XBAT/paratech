@@ -54,7 +54,7 @@ type Reader interface {
 }
 
 // StepAdvisor answers «Спросить по шагу» from the narrow context of one helper step (work.StepQuestion), with no
-// tools. No implementation exists yet: the Hub has no operation for it (ADR-0025); without one AskStep answers
+// tools. Implemented by the hubclient adapter on homework_draft (ADR-0025 addendum); without one AskStep answers
 // ErrNotConfigured. The answer is untrusted text for a card only.
 type StepAdvisor interface {
 	AdviseStep(ctx context.Context, q work.StepQuestion) (string, error)
