@@ -3,7 +3,8 @@
 // an impersonal voice. Topic, titles, paragraphs, notes and sources are model or student text: pass them through
 // untouched and render them as text nodes only.
 
-import { notFoundText, turnkeyErrorText } from "./bindings/turnkey.js";
+import { errorTexts, notFoundText, turnkeyErrorText } from "./bindings/turnkey.js";
+import type { LibraryApi } from "./bindings/library.js";
 import type { OutlineItem, TurnkeyApi, TurnkeyWork, WorkSection, WorkWriting } from "./bindings/turnkey.js";
 
 // The limits of the domain (domain/coursework/work/writing.go); titles and notes are counted in runes, as there.
@@ -45,6 +46,13 @@ export const workTexts = {
   rewrite: "Написать заново",
   cancel: "Отмена",
   retry: "Повторить",
+  stop: "Остановить",
+  stopping: "Остановка…",
+  stoppedCaption: "Написание остановлено",
+  resume: "Продолжить",
+  openWord: "Открыть в Word",
+  openPowerPoint: "Открыть в PowerPoint",
+  copyNote: "Файл открывается как копия: правки в ней в приложение не возвращаются.",
   addSection: "Добавить раздел",
   titleLabel: "Название раздела",
   wordsLabel: "Объём, слов",
@@ -77,6 +85,7 @@ export type WorkCardModel =
   | { type: "none" }
   | { type: "start"; caption: string; hint: string; button: string }
   | { type: "running"; caption: string; line: string }
+  | { type: "stopped"; caption: string; line: string; button: string }
   | { type: "approve"; caption: string; hint: string }
   | { type: "blocked"; caption: string; text: string; noteLabel: string; button: string }
   | { type: "done"; caption: string; file: { kind: string; name: string }; notice: string; sections: SectionText[] };
@@ -118,6 +127,9 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
     case "outline":
     case "section":
     case "assemble":
+      if (wr.active === false) {
+        return { type: "stopped", caption: workTexts.stoppedCaption, line: progressLine(wr), button: workTexts.resume };
+      }
       return { type: "running", caption: workTexts.caption, line: progressLine(wr) };
     case "approve":
       return { type: "approve", caption: workTexts.approveCaption, hint: workTexts.approveHint };
@@ -136,7 +148,7 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
       return {
         type: "done",
         caption: workTexts.doneCaption,
-        file: { kind: workTexts.fileKind, name: wr.topic.trim() === "" ? workTexts.fallbackName : wr.topic },
+        file: { kind: w.workType === "presentation" ? ".pptx" : workTexts.fileKind, name: wr.topic.trim() === "" ? workTexts.fallbackName : wr.topic },
         notice: workTexts.generated,
         sections: sectionTexts(wr.sections),
       };
@@ -148,21 +160,45 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
 export const pollMs = 3000;
 export const retryMs = 15000;
 
-/** A step of the writing is running: the card re-reads the work until it is not. */
-export function isRunning(w: TurnkeyWork | null): boolean {
+function isWritingStep(w: TurnkeyWork | null): boolean {
   const step = w?.writing?.step;
   return step === "outline" || step === "section" || step === "assemble";
 }
 
 /**
- * The wait before the next read, or null to stop. Nothing is read again once a loaded work does not run. A stored
- * triage is not polled: the core keeps no problem, so it cannot tell a call in flight from a call that is due («Повторить»).
+ * A step of the writing is running: the card re-reads the work until it is not. The core sets writing.active from the
+ * existence of a pending/running job and StartWriting enqueues it before it replies, so active=false on a writing step
+ * means the job is gone (stopped or failed), not "not started yet". parseWork always gives a boolean; the undefined
+ * branch (counted as running) exists only for test fixtures that omit the flag.
+ */
+export function isRunning(w: TurnkeyWork | null): boolean {
+  return isWritingStep(w) && w?.writing?.active !== false;
+}
+
+/** A writing step without a job: «Написание остановлено», offers «Продолжить». */
+export function isStopped(w: TurnkeyWork | null): boolean {
+  return isWritingStep(w) && w?.writing?.active === false;
+}
+
+/**
+ * The wait before the next read, or null to stop. A running step is read every pollMs. A stopped step is still read,
+ * slowly (retryMs), so a job that is in fact alive after a transient read error reappears; the loop ends on unmount.
+ * Other loaded works are not polled. A stored triage is not polled: the core keeps no problem, so it cannot tell a call
+ * in flight from a call that is due («Повторить»).
  */
 export function pollDelay(w: TurnkeyWork | null, failed: boolean): number | null {
+  if (w !== null && isStopped(w)) {
+    return retryMs;
+  }
   if (w !== null && !isRunning(w)) {
     return null;
   }
   return failed ? retryMs : pollMs;
+}
+
+/** «Остановка…» lasts while the job is active; once it is gone the flag is dropped so a later «Продолжить» shows «Остановить». */
+export function nextStopping(prev: boolean, w: TurnkeyWork | null): boolean {
+  return prev && w !== null && canStop(w);
 }
 
 export interface PollOptions {
@@ -370,12 +406,13 @@ export type StepResult = { ok: true; work: TurnkeyWork } | { ok: false; error: u
  * Saves the plan when edited, then runs `next`. Only the reply of `next` is returned for the card: the reply of
  * EditOutline is not applied, as it could re-mount the card and drop an error shown on it.
  */
-async function afterEdit(api: TurnkeyApi, workId: string, items: readonly EditorItem[], edited: boolean, next: () => Promise<TurnkeyWork>): Promise<StepResult> {
+async function afterEdit(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, next: () => Promise<TurnkeyWork>): Promise<StepResult> {
   if (edited) {
     try {
-      await api.editOutline(workId, toOutlineItems(items));
+      await api.editOutlineAt(workId, version, toOutlineItems(items));
     } catch (error) {
-      return { ok: false, error, fresh: null };
+      // A stale plan: the card shows the error and the work is read again.
+      return { ok: false, error, fresh: turnkeyErrorText(error) === staleText ? await readOrNull(api, workId) : null };
     }
   }
   try {
@@ -408,12 +445,71 @@ export function retryWriting(api: TurnkeyApi, workId: string): Promise<TurnkeyWo
   return api.startWriting(workId);
 }
 
-/** «Утвердить план»: EditOutline if edited, then ApproveOutline. */
-export function approvePlan(api: TurnkeyApi, workId: string, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
-  return afterEdit(api, workId, items, edited, () => api.approveOutline(workId));
+/** «Утвердить план»: EditOutlineAt (the version the plan was shown at) if edited, then ApproveOutline. */
+export function approvePlan(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
+  return afterEdit(api, workId, version, items, edited, () => api.approveOutline(workId));
 }
 
-/** «Написать заново» of a done work: EditOutline, then StartWriting. */
-export function rewriteWork(api: TurnkeyApi, workId: string, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
-  return afterEdit(api, workId, items, edited, () => api.startWriting(workId));
+/** «Написать заново» of a done work: EditOutlineAt, then StartWriting. */
+export function rewriteWork(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
+  return afterEdit(api, workId, version, items, edited, () => api.startWriting(workId));
+}
+
+/** «Сохранить план»: the same stale rule, the saved work is the result. */
+export async function savePlanAt(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[]): Promise<StepResult> {
+  try {
+    return { ok: true, work: await api.editOutlineAt(workId, version, toOutlineItems(items)) };
+  } catch (error) {
+    return { ok: false, error, fresh: turnkeyErrorText(error) === staleText ? await readOrNull(api, workId) : null };
+  }
+}
+
+async function readOrNull(api: TurnkeyApi, workId: string): Promise<TurnkeyWork | null> {
+  try {
+    return await api.work(workId);
+  } catch {
+    return null;
+  }
+}
+
+/** The core's refusal of a plan edit made on an old version (TASK-178). */
+export const staleText = errorTexts[6];
+
+/** The core's refusal when a writing job could not be cancelled (TASK-178). */
+export const notStoppedText = errorTexts[7];
+
+/**
+ * «Остановить»: the reply of the core. `watch` is true while the job is still active (a running step ends
+ * asynchronously); the single poller then keeps reading while the step runs. A refusal (ErrNotStopped) rejects.
+ */
+export async function stopWork(api: Pick<TurnkeyApi, "stopWriting">, workId: string): Promise<{ work: TurnkeyWork; watch: boolean }> {
+  const work = await api.stopWriting(workId);
+  return { work, watch: canStop(work) };
+}
+
+/** «Открыть в Word / PowerPoint»: a presentation is a .pptx, every other ready work a .docx. */
+export function openLabel(w: TurnkeyWork): string {
+  return w.workType === "presentation" ? workTexts.openPowerPoint : workTexts.openWord;
+}
+
+/** The material to open: the ready file, "" if there is none. Only this id crosses to the core. */
+export function openTarget(w: TurnkeyWork): string {
+  return w.writing?.step === "none" && w.writing.result !== "" ? w.writing.materialId : "";
+}
+
+export type OpenView = { kind: "ok" | "fail"; text: string };
+
+/** Opens the copy of the ready file; a refused or failed open is a fixed text, never a path. */
+export async function openWork(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
+  const id = openTarget(w);
+  if (id === "") {
+    return null;
+  }
+  const r = await library.openMaterial(id);
+  return r.status === "opened" ? { kind: "ok", text: r.message } : { kind: "fail", text: r.message };
+}
+
+/** A stop button shows while a writing job runs. */
+export function canStop(w: TurnkeyWork): boolean {
+  return w.writing?.active === true;
 }

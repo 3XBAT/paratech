@@ -98,6 +98,8 @@
     "src/agent/TurnkeyCards.tsx",
     "src/bindings/tickets.ts",
     "src/ticketsView.ts",
-    "src/pages/TicketsParts.tsx"
+    "src/pages/TicketsParts.tsx",
+    "src/homeworkTurnkey.ts",
+    "src/pages/HomeworkTurnkey.tsx"
   ]
 }

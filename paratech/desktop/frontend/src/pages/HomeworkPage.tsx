@@ -13,6 +13,7 @@ import {
   type VersionText,
 } from "../bindings/homework";
 import { callByName } from "../bindings/runtime";
+import { turnkeyApi } from "../bindings/turnkey";
 import {
   assignmentDeliveryView,
   blockedByEmail,
@@ -44,6 +45,7 @@ import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
 import { SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { TranscriptLinks } from "./TranscriptLinks";
 
@@ -154,7 +156,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         !error && <p className="muted">Загрузка…</p>
       ) : items.length === 0 ? (
         <EmptyState label="Заданий пока нет" title="Здесь появятся домашние задания">
-          Задание находится само в записи пары, после конспекта. Здесь можно сгенерировать по нему решение, поправить его
+          Задание находится само в записи пары, после конспекта. Здесь можно сгенерировать по нему черновик, поправить его
           и отправить преподавателю по почте.
         </EmptyState>
       ) : (
@@ -197,6 +199,7 @@ interface SendOpen {
 
 function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => void }) {
   const { api, id } = props;
+  const turnkey = useMemo(() => turnkeyApi(callByName), []);
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loadError, setLoadError] = useState("");
   // The version shown in the editor (its saved text) and the text in the fields.
@@ -663,9 +666,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       <TranscriptLinks lessonId={a.lessonId} />
 
       <Card className="box">
-        <h2>Решение</h2>
+        <h2>Быстрый черновик</h2>
         {shown === null ? (
-          <p className="small muted box-desc">Решения ещё нет: его подготовит сервис конспектов по тексту задания.</p>
+          <p className="small muted box-desc">Черновика ещё нет: его подготовит сервис конспектов по тексту задания.</p>
         ) : (
           <>
             <span className="small muted box-desc num">
@@ -744,7 +747,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       </Card>
 
       <Card className="box">
-        <h2>{latest === null ? "Новое решение" : "Доработать решение"}</h2>
+        <h2>{latest === null ? "Новый черновик" : "Доработать черновик"}</h2>
         <Field
           label="Дополнительные указания"
           hint="Необязательно. Например: «короче», «добавь пример решения», «по-английски»."
@@ -779,6 +782,8 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           </div>
         )}
       </Card>
+
+      <HomeworkTurnkey api={turnkey} assignmentId={id} />
 
       {versions.length > 0 && (
         <>

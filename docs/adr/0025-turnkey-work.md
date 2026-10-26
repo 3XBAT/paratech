@@ -23,8 +23,8 @@ it cannot do the work whole — then help instead. Everything the model says abo
   `work_rounds` (the canonical answer JSON, read back through the same strict parser, and the resolved replies).
   Local data is the system of record.
 - **Partial** works are written with placeholders the student fills (flag; TASK-107). **Helper mode**: steps, what to
-  submit, pitfalls, ready parts, placeholders; «Спросить по шагу» gets only that step and the requirements. The Hub
-  has no operation for it yet: the port `StepAdvisor` stays unwired and the binding says «пока недоступны».
+  submit, pitfalls, ready parts, placeholders; «Спросить по шагу» gets only that step and the requirements (wired by
+  the TASK-179 addendum).
 - **Agent tool `triage_assignment`** (class U, paid): it counts as the paid job without a plan, and with no cost
   estimate it always runs on an approved plan (supervisor rule). The planner gets the work ID, an outcome enum, the
   feasibility enum and the number of questions — never a text (ADR-0022). The panel gets a work card (ID + outcome);
@@ -122,7 +122,15 @@ it cannot do the work whole — then help instead. Everything the model says abo
 - **Rules**: written and exported like any work; never sent to a teacher (`work.ErrNoAssignment`, `no_assignment` for
   the send of TASK-180); `View.Sendable` is false. File names and titles go through the existing safe-name rules.
 
+## Addendum (TASK-179): «Спросить по шагу»
+- `StepAdvisor` (hubclient) calls `Complete` on `homework_draft` with the writing alias and a desktop prompt
+  (`prompts.BuildStepAdvice`, `StepAdviceVersion` 1): no Hub, proto or catalog change, no tools.
+- The step, the requirements and the student's question are one escaped JSON object in the data block, never
+  instructions; a command in the question is answered as text at most.
+- One paid call per question; key = `work.StepQuestion.Key` (work, requirements, step, question) + prompt version, so
+  the same question again is a free replay. A model refusal or an answer failing `work.CheckAdvice` is refused;
+  quota and Hub errors map as for the reader. The answer is card text only and triggers nothing; nothing is stored.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.
-- «Спросить по шагу» needs a Hub operation (a later task).
