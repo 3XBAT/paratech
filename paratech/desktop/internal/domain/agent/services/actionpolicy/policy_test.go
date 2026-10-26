@@ -61,6 +61,9 @@ func TestNeedsPlan(t *testing.T) {
 		{"paid job at the threshold", values.ToolFindHomework, Facts{CostMicroUSD: PlanThresholdMicroUSD}, ReasonNone},
 		{"paid job above the threshold", values.ToolGenerateDraft, Facts{CostMicroUSD: PlanThresholdMicroUSD + 1}, ReasonCostly},
 		{"paid job with unknown cost", values.ToolTriageAssignment, Facts{}, ReasonCostly},
+		{"free topic allowed without the card", values.ToolTriageAssignment, Facts{FreeTopic: true}, ReasonNone},
+		{"free topic as a second write", values.ToolTriageAssignment, Facts{FreeTopic: true, WritesBefore: 1}, ReasonSecondWrite},
+		{"free topic flag on another paid tool", values.ToolMakeSummary, Facts{FreeTopic: true}, ReasonCostly},
 		{"lecture text always", values.ToolMakeLectureText, Facts{CostMicroUSD: 1}, ReasonAlwaysPlan},
 		{"turnkey writing always", values.ToolWriteWork, Facts{CostMicroUSD: 1}, ReasonAlwaysPlan},
 		{"triage partly", values.ToolEditDue, Facts{Triage: TriagePartly}, ReasonTriage},
@@ -111,6 +114,27 @@ func TestPaidWriteWithoutPlan(t *testing.T) {
 					t.Errorf("%s: second write (cost %d, triage %q) runs without a plan", tool, cost, tr)
 				}
 			}
+		}
+	}
+}
+
+func TestFreeTopic(t *testing.T) {
+	tests := []struct {
+		tool, args string
+		want       bool
+	}{
+		{"triage_assignment", `{"topic":"Реформы Петра I"}`, true},
+		{"triage_assignment", `{"assignment":"a1"}`, false},
+		{"triage_assignment", `{"upload":"u1"}`, false},
+		{"search", `{"query":"Реформы Петра I"}`, false},
+	}
+	for _, tt := range tests {
+		c, err := values.ParseCall("c1", tt.tool, tt.args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := FreeTopic(c); got != tt.want {
+			t.Errorf("FreeTopic(%s %s) = %v", tt.tool, tt.args, got)
 		}
 	}
 }
