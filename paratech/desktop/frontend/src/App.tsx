@@ -151,7 +151,7 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} />
+      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} />
       <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>
