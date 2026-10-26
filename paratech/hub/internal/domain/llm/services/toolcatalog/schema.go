@@ -75,6 +75,8 @@ func (c *Catalog) typeSchema(a argument) object {
 		return stringSchema(MaxTextRunes)
 	case typeTextList:
 		return object{"type": "array", "items": stringSchema(MaxTextRunes), "maxItems": maxTextListItems}
+	case typeCardIDs:
+		return object{"type": "array", "items": idSchema(), "maxItems": MaxCardIDs}
 	case typePlanSteps:
 		step := object{
 			"type": "object",
@@ -125,13 +127,9 @@ func (c *Catalog) actionTools() []string {
 func (c *Catalog) valid(a argument, v any) bool {
 	switch a.Type {
 	case typeID:
-		s, ok := v.(string)
-		return ok && values.ValidID(s)
+		return id(v)
 	case typeIDs:
-		return eachOf(v, 1, maxIDsItems, func(item any) bool {
-			s, ok := item.(string)
-			return ok && values.ValidID(s)
-		})
+		return eachOf(v, 1, maxIDsItems, id)
 	case typeDate:
 		s, ok := v.(string)
 		return ok && values.ValidDate(s)
@@ -147,6 +145,8 @@ func (c *Catalog) valid(a argument, v any) bool {
 		return text(v)
 	case typeTextList:
 		return eachOf(v, 0, maxTextListItems, text)
+	case typeCardIDs:
+		return eachOf(v, 0, MaxCardIDs, id)
 	case typePlanSteps:
 		return eachOf(v, 1, maxPlanSteps, c.planStep)
 	case typeQuestions:
@@ -234,6 +234,11 @@ func eachOf(v any, minItems, maxItems int, ok func(any) bool) bool {
 		}
 	}
 	return true
+}
+
+func id(v any) bool {
+	s, ok := v.(string)
+	return ok && values.ValidID(s)
 }
 
 // label is a short single-line text from the student's request.

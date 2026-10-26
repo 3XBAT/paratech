@@ -11,7 +11,8 @@ type StopReason uint8
 
 // Stop reasons.
 const (
-	// StopOther is a reason the Hub does not model (also tool use or a paused turn, which the Hub never asks for).
+	// StopOther is a reason the Hub does not model (also a paused turn, and tool use in a completion, which the Hub
+	// never asks for).
 	StopOther StopReason = iota
 	// StopEnd means the model finished its answer.
 	StopEnd
@@ -23,9 +24,11 @@ const (
 	StopRefusal
 	// StopContextWindow means the input and output reached the model's context window.
 	StopContextWindow
+	// StopToolUse means the model stopped to use tools: the usable end of an agent step.
+	StopToolUse
 )
 
-var stopNames = [...]string{"other", "end", "max_tokens", "stop_sequence", "refusal", "context_window"}
+var stopNames = [...]string{"other", "end", "max_tokens", "stop_sequence", "refusal", "context_window", "tool_use"}
 
 // String names the reason for logs.
 func (s StopReason) String() string {

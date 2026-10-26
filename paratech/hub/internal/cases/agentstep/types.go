@@ -47,8 +47,9 @@ type Profile struct {
 	MinOutput int64
 }
 
-// DefaultMinOutput is the output floor of a profile without MinOutput.
-const DefaultMinOutput = 256
+// DefaultMinOutput is the output floor of a profile without MinOutput. A planner step of up to 4 calls with card texts
+// did not fit in 1024 tokens in the beta (TASK-172), so an older desktop's 1024 is raised to it.
+const DefaultMinOutput = 2048
 
 // Version is the server prompt and the tool catalog of one catalog version (hub/pkg/prompts agent/<profile>/v<N>).
 type Version struct {

@@ -4,7 +4,7 @@ import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
-import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, requestText, type UndoNote, undoableActions } from "../agentView.js";
+import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, panelShortcut, requestText, type UndoNote, undoableActions } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
 import { blockingEntry, type Entry, initialPanelState, PressTracker, reducePanel } from "../agentState.js";
@@ -17,36 +17,46 @@ const api: AgentApi = agentApi(callByName);
 const turnkey = turnkeyApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
-/** Ctrl+K focuses the input of the panel from anywhere in the window. */
-function useFocusShortcut(input: RefObject<HTMLInputElement | null>, reveal?: () => void) {
+/** Ctrl+K from anywhere in the window: a closed panel opens with focus in the input, an open one closes. */
+function useFocusShortcut(input: RefObject<HTMLTextAreaElement | null>, open: boolean, reveal?: () => void, hide?: () => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isFocusPanelKey(e)) {
-        e.preventDefault();
-        // A closed panel opens first; the input can take focus once it is shown again.
-        reveal?.();
-        setTimeout(() => input.current?.focus(), 0);
+      if (!isFocusPanelKey(e)) {
+        return;
       }
+      e.preventDefault();
+      if (panelShortcut(open) === "close") {
+        // Focus goes back to the page rather than into the hidden panel.
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.closest(".ag") !== null) {
+          active.blur();
+        }
+        hide?.();
+        return;
+      }
+      // A closed panel opens first; the input can take focus once it is shown again.
+      reveal?.();
+      setTimeout(() => input.current?.focus(), 0);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [input, reveal]);
+  }, [input, open, reveal, hide]);
 }
 
 /**
  * The agent panel: talks to the core through the bindings only. The Hub is the core's business; the panel holds no
  * keys and keeps nothing in browser storage.
  */
-export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?: () => void }) {
+export function AgentPanel(props: { page: PageId; assignmentId: string; open?: boolean; reveal?: () => void; hide?: () => void }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState("");
   // The context chip is removed per section: a new section brings its own label back.
   const [removedOn, setRemovedOn] = useState<PageId | null>(null);
   const ctx = contextFor(props.page, props.assignmentId, removedOn === props.page);
-  const input = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   const askId = useRef(0);
-  useFocusShortcut(input, props.reveal);
+  useFocusShortcut(input, props.open ?? true, props.reveal, props.hide);
 
   // A hint chip elsewhere in the window puts its text into the input; sending stays with the user.
   useEffect(() => {
