@@ -2880,7 +2880,7 @@
                 "TASK-133",
                 "TASK-124"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-135",
@@ -3132,7 +3132,7 @@
             "dependencies": [
                 "TASK-142"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-147",
@@ -3712,7 +3712,7 @@
                 "TASK-171",
                 "TASK-172"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-174",
@@ -3779,7 +3779,7 @@
                 "TASK-173",
                 "TASK-175"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-177",
@@ -3948,7 +3948,7 @@
             "dependencies": [
                 "TASK-181"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-184",
@@ -4113,7 +4113,7 @@
                 "go test -race ./hub/... (Postgres как в CI) и golangci-lint"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }

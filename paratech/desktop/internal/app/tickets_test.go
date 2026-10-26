@@ -30,7 +30,7 @@ func (ticketLessons) Texts(context.Context, shared.SubjectID) ([]kb.LessonText, 
 
 type ticketReader struct{ err error }
 
-func (r ticketReader) AnswerQuestion(context.Context, answer.Request) (string, error) {
+func (r ticketReader) AnswerQuestion(context.Context, answer.Request, func(string)) (string, error) {
 	return "", r.err
 }
 

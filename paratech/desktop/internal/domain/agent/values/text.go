@@ -13,7 +13,7 @@ import (
 const (
 	MaxTextRunes  = 300 // card text from show_plan, reply, cannot_do, ask_questions
 	MaxLabelRunes = 80  // label from the student's request and names
-	MaxQueryRunes = 500 // the student's question or search text (catalog v2)
+	MaxQueryRunes = 500 // the student's question or search text (since catalog v2)
 )
 
 // Text is model text for a card: at most 300 characters, printable, no HTML angle brackets; line breaks allowed.

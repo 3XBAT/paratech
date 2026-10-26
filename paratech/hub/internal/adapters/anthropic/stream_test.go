@@ -1,11 +1,13 @@
 package anthropic_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/hub/internal/adapters/anthropic"
 	"paratech/hub/internal/domain/llm/values"
 )
 
@@ -372,7 +375,8 @@ func TestStreamRejectsMalformedStreams(t *testing.T) {
 	tests := []struct {
 		name, contentType, body, reason string
 	}{
-		{name: "JSON answer", contentType: "application/json", body: okJSON, reason: "unexpected content type"},
+		{name: "HTML answer", contentType: "text/html", body: "<html>" + bodyMarker + "</html>", reason: "unexpected content type"},
+		{name: "plain text answer", contentType: "text/plain", body: okJSON, reason: "unexpected content type"},
 		{name: "no content type", contentType: "none", body: sseNormal(), reason: "unexpected content type"},
 		{name: "delta before start", body: sseText(0, bodyMarker) + sseNormal(), reason: "malformed response"},
 		{name: "stop before start", body: stop, reason: "malformed response"},
@@ -509,5 +513,172 @@ func TestStreamThenCompleteOnOneClient(t *testing.T) {
 	}
 	if got, err := c.Complete(t.Context(), newRequest(t, "x")); err != nil || got.Output() != "done" {
 		t.Fatalf("Complete = %v, %v", got, err)
+	}
+}
+
+// bufferedJSON is a whole message, as a gateway that buffers or ignores "stream" answers a streaming request.
+const bufferedJSON = `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-5-5",
+	"content":[{"type":"thinking","thinking":"hidden reasoning","signature":"sig"},
+		{"type":"text","text":"Hello "},{"type":"text","text":"world"}],
+	"stop_reason":"end_turn","stop_sequence":null,
+	"usage":{"input_tokens":25,"cache_read_input_tokens":5,"output_tokens":15}}`
+
+// jsonServer answers every call with 200 and body as JSON and counts the calls and those asking for a stream.
+func jsonServer(t *testing.T, body string) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+	var hits, streamed atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		var req map[string]any
+		if json.NewDecoder(r.Body).Decode(&req) == nil && req["stream"] == true {
+			streamed.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits, &streamed
+}
+
+// newLoggedClient is newClient with its own logger writing into the returned buffer.
+func newLoggedClient(t *testing.T, baseURL string) (*anthropic.Client, *bytes.Buffer) {
+	t.Helper()
+	var buf bytes.Buffer
+	c, err := anthropic.New(anthropic.Options{APIKey: testKey, BaseURL: baseURL, Timeout: time.Minute,
+		Log: slog.New(slog.NewTextHandler(&buf, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, &buf
+}
+
+// TestStreamReadsAJSONAnswer: a 200 JSON answer to a streaming request is read like Complete reads it and sent as one
+// delta, with Complete's usage, from the one paid call (TASK-190).
+func TestStreamReadsAJSONAnswer(t *testing.T) {
+	srv, hits, streamed := jsonServer(t, bufferedJSON)
+	c := newClient(t, srv.URL, time.Minute)
+
+	deltas, onDelta := collect()
+	got, err := c.Stream(t.Context(), newRequest(t, "x"), onDelta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(*deltas) != "[Hello world]" || got.Output() != "Hello world" {
+		t.Fatalf("deltas = %q, output %q; want the whole text output as one delta", *deltas, got.Output())
+	}
+	if got.Usage().Input() != 30 || got.Usage().Output() != 15 || got.Stop() != values.StopEnd {
+		t.Fatalf("got %v, want usage 30/15 and end_turn", got)
+	}
+	if hits.Load() != 1 || streamed.Load() != 1 {
+		t.Fatalf("upstream calls %d (streaming %d), want exactly one streaming call", hits.Load(), streamed.Load())
+	}
+
+	completed, err := c.Complete(t.Context(), newRequest(t, "x"))
+	if err != nil || completed.Output() != got.Output() || completed.Usage() != got.Usage() || completed.Stop() != got.Stop() {
+		t.Fatalf("Complete on the same body = %v, %v; want what Stream returned: %v", completed, err, got)
+	}
+}
+
+func TestStreamJSONAnswerWithoutText(t *testing.T) {
+	body := `{"type":"message","content":[{"type":"thinking","thinking":"hidden reasoning"}],"stop_reason":"max_tokens",
+		"usage":{"input_tokens":10,"output_tokens":256}}`
+	srv, hits, _ := jsonServer(t, body)
+	deltas, onDelta := collect()
+	got, err := newClient(t, srv.URL, time.Minute).Stream(t.Context(), newRequest(t, "x"), onDelta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*deltas) != 0 || got.Output() != "" || got.Stop() != values.StopMaxTokens || got.Usage().Total() != 266 {
+		t.Fatalf("got %v, deltas %q; want no delta and the usage", got, *deltas)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("upstream calls = %d", hits.Load())
+	}
+}
+
+// TestStreamMalformedJSONAnswer: a broken JSON answer fails as Complete's would, with no delta and no second call.
+func TestStreamMalformedJSONAnswer(t *testing.T) {
+	for name, tt := range map[string]struct{ body, reason string }{
+		"not a message": {body: `{"type":"error","error":{"type":"api_error","message":"` + bodyMarker + `"}}`, reason: "malformed response"},
+		"not JSON":      {body: "<html>" + bodyMarker, reason: "malformed response"},
+		"no usage":      {body: `{"type":"message","content":[{"type":"text","text":"` + bodyMarker + `"}]}`, reason: "malformed response"},
+		"bad usage":     {body: `{"type":"message","content":[],"usage":{"input_tokens":-1,"output_tokens":1}}`, reason: "malformed usage"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, hits, _ := jsonServer(t, tt.body)
+			deltas, onDelta := collect()
+			_, err := newClient(t, srv.URL, time.Minute).Stream(t.Context(), newRequest(t, "x"), onDelta)
+			pe := streamError(t, err)
+			wantKind(t, err, values.KindPermanent)
+			if pe.Reason != tt.reason || len(*deltas) != 0 || hits.Load() != 1 {
+				t.Fatalf("got %+v, deltas %q, calls %d; want reason %q, no delta, one call", pe, *deltas, hits.Load(), tt.reason)
+			}
+		})
+	}
+}
+
+// TestStreamLogsAJSONAnswerOnce: concurrent JSON answers write the line once, without texts or the key.
+func TestStreamLogsAJSONAnswerOnce(t *testing.T) {
+	srv, hits, _ := jsonServer(t, bufferedJSON)
+	c, logged := newLoggedClient(t, srv.URL)
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			deltas, onDelta := collect()
+			got, err := c.Stream(t.Context(), newRequest(t, "lesson-data"), onDelta)
+			if err == nil && (len(*deltas) != 1 || (*deltas)[0] != got.Output()) {
+				err = fmt.Errorf("deltas %q for output %q", *deltas, got.Output())
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	if hits.Load() != n {
+		t.Fatalf("upstream calls = %d, want %d", hits.Load(), n)
+	}
+	if strings.Count(logged.String(), "provider answered without SSE") != 1 {
+		t.Fatalf("log = %q, want the line once", logged.String())
+	}
+	for _, leak := range []string{"Hello", "world", "hidden reasoning", "lesson-data", "Summarize", testKey} {
+		if strings.Contains(logged.String(), leak) {
+			t.Fatalf("log %q leaks %q", logged.String(), leak)
+		}
+	}
+}
+
+// TestStreamLogsOncePerClient: the once guard belongs to the client, not the process.
+func TestStreamLogsOncePerClient(t *testing.T) {
+	srv, _, _ := jsonServer(t, bufferedJSON)
+	for i := range 2 {
+		c, logged := newLoggedClient(t, srv.URL)
+		if _, err := c.Stream(t.Context(), newRequest(t, "x"), nil); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(logged.String(), "provider answered without SSE") != 1 {
+			t.Fatalf("client %d: log = %q, want the line once", i, logged.String())
+		}
+	}
+}
+
+// TestStreamSSELogsNothing: a real stream does not write the fallback line.
+func TestStreamSSELogsNothing(t *testing.T) {
+	c, logged := newLoggedClient(t, serveSSE(t, sseNormal()).URL)
+	if _, err := c.Stream(t.Context(), newRequest(t, "x"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if logged.Len() != 0 {
+		t.Fatalf("log = %q, want nothing", logged.String())
 	}
 }

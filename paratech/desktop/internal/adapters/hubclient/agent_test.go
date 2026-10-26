@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -115,7 +116,7 @@ func TestStepSendsExactlyTheContractFields(t *testing.T) {
 	}
 
 	want := &hubv1.AgentStepRequest{
-		IdempotencyKey: "ag:th1:1:2", ThreadId: "th1", Profile: hubv1.AgentProfile_AGENT_PROFILE_PANEL, CatalogVersion: 2,
+		IdempotencyKey: "ag:th1:1:2", ThreadId: "th1", Profile: hubv1.AgentProfile_AGENT_PROFILE_PANEL, CatalogVersion: agent.CatalogVersion,
 		Base: &hubv1.AgentBase{
 			Subjects: []*hubv1.AgentSubject{{SubjectId: "s1", Name: "Физика"}}, Today: "2026-10-22", TimeZone: "Europe/Moscow",
 		},
@@ -137,6 +138,32 @@ func TestStepSendsExactlyTheContractFields(t *testing.T) {
 	}
 	if h := f.headers[0].Get("Authorization"); h != "Bearer "+testKey {
 		t.Fatalf("Authorization = %q", h)
+	}
+}
+
+func TestStepSendsHistoryPairs(t *testing.T) {
+	f := &fakeAgentHub{answer: agentOK}
+	c := startAgentHub(t, f)
+	req := stepRequest(t)
+	req.History = append([]agent.HistoryTurn{{StudentText: "что такое горутина"}, {AgentReply: "reply: горутина — это"}}, req.History...)
+
+	if _, err := c.Step(t.Context(), req); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	reqs := f.seen()
+	if len(reqs) != 1 || len(reqs[0].GetTurns()) != 5 {
+		t.Fatalf("requests on the wire: %v", reqs)
+	}
+	turns := reqs[0].GetTurns()
+	want := []*hubv1.AgentTurn{
+		{Turn: &hubv1.AgentTurn_StudentText{StudentText: "что такое горутина"}},
+		{Turn: &hubv1.AgentTurn_AgentReply{AgentReply: "reply: горутина — это"}},
+		{Turn: &hubv1.AgentTurn_StudentText{StudentText: "какие пары"}},
+	}
+	for i, w := range want {
+		if !proto.Equal(turns[i], w) {
+			t.Fatalf("turn %d = %v, want %v", i, turns[i], w)
+		}
 	}
 }
 
@@ -232,6 +259,10 @@ func TestStepRefusesBadRequestsLocally(t *testing.T) {
 		"bad entry":   func(r *agent.StepRequest) { r.History[0] = agent.HistoryTurn{} },
 		"huge output": func(r *agent.StepRequest) { r.MaxOutputTokens = 1 << 30 },
 		"bad result":  func(r *agent.StepRequest) { r.History[2].Results[0].ResultJSON = "{" },
+		"long reply": func(r *agent.StepRequest) {
+			r.History[1] = agent.HistoryTurn{AgentReply: strings.Repeat("a", agent.MaxAgentReplyBytes+1)}
+		},
+		"reply and text": func(r *agent.StepRequest) { r.History[0].AgentReply = "reply: x" },
 	} {
 		req := stepRequest(t)
 		mut(&req)

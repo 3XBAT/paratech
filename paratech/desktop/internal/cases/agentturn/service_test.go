@@ -302,8 +302,8 @@ func TestMalformedReplyFails(t *testing.T) {
 	}
 }
 
-// A request a day after the previous one keeps the thread: the earlier request goes as its text (its echo, whose model
-// turn the Hub has purged, is not sent), and the echo of every step is one of the current request.
+// A request a day after the previous one keeps the thread: the earlier request goes as its text and reply (its echo,
+// whose model turn the Hub has purged, is not sent), and the echo of every step is one of the current request.
 func TestEarlierRequestSentAsText(t *testing.T) {
 	e := newEnv(t)
 	e.model.then(raw("c1", "find_lessons", `{"subject":"s1"}`)).then(raw("r1", "reply", `{"text":"две пары"}`)).
@@ -317,14 +317,15 @@ func TestEarlierRequestSentAsText(t *testing.T) {
 	if st.Turn != 2 {
 		t.Fatalf("second request = %+v", st)
 	}
-	if h := e.model.last(t).History; len(h) != 2 || h[0].StudentText != "какие пары" || h[1].StudentText != "а предметы" {
+	if h := e.model.last(t).History; len(h) != 3 || h[0].StudentText != "какие пары" ||
+		h[1].AgentReply != "reply: две пары\nactions: find_lessons ok" || h[2].StudentText != "а предметы" {
 		t.Fatalf("first step of the next request = %+v", h)
 	}
 	if _, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c2", `{"subjects":[]}`)}}); err != nil {
 		t.Fatal(err)
 	}
 	h := e.model.last(t).History
-	if len(h) != 4 || h[0].StudentText != "какие пары" || h[2].Calls == nil || h[2].Calls.Calls[0].CallID != "c2" {
+	if len(h) != 5 || h[0].StudentText != "какие пары" || h[3].Calls == nil || h[3].Calls.Calls[0].CallID != "c2" {
 		t.Fatalf("second step of the next request = %+v", h)
 	}
 }
@@ -340,8 +341,9 @@ func TestTurnGone(t *testing.T) {
 	if st.Status != thread.StatusDone || st.Turn != 3 {
 		t.Fatalf("silent restart = %+v", st)
 	}
-	// The expired attempt carried no echo of the first request: earlier requests are sent as texts only.
-	if h := e.model.requests()[1].History; len(h) != 2 || h[0].StudentText != "первый вопрос" || h[1].StudentText != "второй вопрос" {
+	// The expired attempt carried no echo of the first request: earlier requests are sent as text and reply only.
+	if h := e.model.requests()[1].History; len(h) != 3 || h[0].StudentText != "первый вопрос" || h[1].AgentReply != "reply: первый" ||
+		h[2].StudentText != "второй вопрос" {
 		t.Fatalf("expired attempt history = %+v", h)
 	}
 	req := e.model.last(t)
@@ -654,8 +656,9 @@ func TestAskClosesWaitingRequest(t *testing.T) {
 	if len(stored) != 6 || stored[2].Entry.Results[0].ResultJSON != `{"error":"not_done"}` || stored[3].Entry.StudentText != "нет, другое" {
 		t.Fatalf("stored history = %+v", stored)
 	}
-	// The planner gets the earlier request as its text only.
-	if h := e.model.last(t).History; len(h) != 2 || h[1].StudentText != "нет, другое" {
+	// The planner gets the earlier request as its text and the plan it was shown, no echo.
+	if h := e.model.last(t).History; len(h) != 3 || h[0].StudentText != "добавь" || h[1].AgentReply != "plan: План" ||
+		h[2].StudentText != "нет, другое" {
 		t.Fatalf("history = %+v", h)
 	}
 	if _, err := e.svc.ApprovePlan(t.Context(), ref(st)); !errors.Is(err, ErrStaleTurn) {

@@ -14,6 +14,7 @@ const (
 	MaxArgumentsBytes = 8 << 10 // arguments_json of one call
 	MaxCallIDBytes    = 64
 	MaxIDsPerArg      = 20 // job_status.ids
+	MaxCardIDs        = 10 // reply.assignments (card_ids, catalog v3)
 	MaxTextListItems  = 10 // 0..10 as the Hub; cannot_do needs one item in either list
 	MaxPlanSteps      = 8
 	MaxQuestions      = 3 // stricter than the Hub (5): the planner is told at most 3 per round
@@ -129,6 +130,15 @@ func (a Args) ID(name string) (Ref, bool) {
 func (a Args) IDs(name string) []Ref {
 	v, ok := a.vals[name]
 	if !ok || v.typ != ArgIDs {
+		return nil
+	}
+	return slices.Clone(v.refs)
+}
+
+// CardIDs returns a card_ids argument in the planner's order, duplicates dropped; nil when absent or empty.
+func (a Args) CardIDs(name string) []Ref {
+	v, ok := a.vals[name]
+	if !ok || v.typ != ArgCardIDs {
 		return nil
 	}
 	return slices.Clone(v.refs)
@@ -311,6 +321,27 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 			parts = append(parts, r.String())
 		}
 		v.canon = strings.Join(parts, ",")
+	case ArgCardIDs:
+		// A repeated ID is harmless in a list the card shows (the Hub accepts it): it is shown once.
+		items, err := decodeArray(raw, 0, MaxCardIDs)
+		if err != nil {
+			return v, err
+		}
+		set := RefSet{}
+		for _, it := range items {
+			s, err := decodeString(it)
+			if err != nil {
+				return v, err
+			}
+			r, err := NewRef(as.Kind, s)
+			if err != nil {
+				return v, err
+			}
+			if !set.Has(r) {
+				set.Add(r)
+				v.refs = append(v.refs, r)
+			}
+		}
 	case ArgDate:
 		s, err := decodeString(raw)
 		if err != nil {

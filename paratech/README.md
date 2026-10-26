@@ -90,7 +90,7 @@ and Release are Hub-internal (ADR-0005(f), ADR-0008). Settings (env or flag):
 | `HUB_IDEMPOTENCY_RETENTION` | `-idempotency-retention` | `24h` | 1h..24h |
 
 ## Hub LLM provider
-The Hub calls the Anthropic Messages API (non-streaming, std `net/http`). Clients send only a model alias; the Hub resolves it
+The Hub calls the Anthropic Messages API (std `net/http`; streaming only for `CompleteStream`). Clients send only a model alias; the Hub resolves it
 through its allowlist and never takes a model id or URL from a client. Settings (env or flag):
 
 | Env | Flag | Default | Rule |
@@ -99,7 +99,7 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 | `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
 | `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
 | `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
-| `HUB_PROVIDER_STREAM` | `-provider-stream` | `false` | `CompleteStream` streams from the provider; off, it makes one unary call and sends the whole answer (ADR-0026) |
+| `HUB_PROVIDER_STREAM` | `-provider-stream` | `true` | `CompleteStream` streams from the provider (a JSON answer from a buffering gateway is sent as one delta); `HUB_PROVIDER_STREAM=false` or `-provider-stream=false` makes one unary call and sends the whole answer (ADR-0026) |
 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
 

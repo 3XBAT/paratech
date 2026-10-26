@@ -18,10 +18,7 @@ export interface ChipView {
 /** How often a running set is asked for. */
 export const ticketsPollMs = 3000;
 
-/** The ticket count above which a run is over the cap and needs the explicit cost consent (docs ADR-0025). */
-export const capTickets = 33;
-
-/** The place of the finished file; there is no binding that opens a .docx from this screen. */
+/** The place of the finished file. */
 export const filedFolder = "Билеты";
 
 export const texts = {
@@ -52,8 +49,10 @@ export const texts = {
   stalledHint: "Подбор ответов остановился и сам не продолжится. «Запустить снова» продолжит с того места, где он встал.",
   notCoveredHint: "Не найдено в лекциях.",
   generatedNote: "Ответы сгенерированы по лекциям: перед сдачей их нужно прочитать и проверить.",
-  openNote:
-    "Кнопки «Открыть .docx» пока нет: файл лежит в папке «Билеты» этого предмета.",
+  openNote: "Открывается копия файла: правки в Word в библиотеку не попадают.",
+  open: "Открыть .docx",
+  openBusy: "Открывается…",
+  openedCopy: "Открыта копия файла: правки в Word в библиотеку не попадают.",
   costConsent: "Стоимость больше обычной, согласие на неё обязательно.",
   restartNote: "Подбор продолжится с того места, где встал: уже готовые ответы повторно не оплачиваются.",
 } as const;
@@ -243,6 +242,16 @@ export function showReport(s: TicketSet): boolean {
 /** «Файл в папке „Билеты“ предмета …»: where the finished file is. */
 export function fileNote(subjectName: string): string {
   return subjectName === "" ? `Файл лежит в папке «${filedFolder}» предмета.` : `Файл лежит в папке «${filedFolder}» предмета «${subjectName}».`;
+}
+
+/** The button opens the filed .docx only for a finished set that has one. */
+export function canOpenDocx(s: TicketSet): boolean {
+  return s.status === "done" && s.materialId !== "";
+}
+
+/** The line under «Открыть .docx»: the binding's fixed text; success says that a copy was opened. */
+export function openResultView(r: { status: string; message: string }): { kind: "ok" | "fail"; text: string } {
+  return r.status === "opened" ? { kind: "ok", text: texts.openedCopy } : { kind: "fail", text: r.message };
 }
 
 /** The first ticket as a short caption of a set; plain text, cut for the list. */

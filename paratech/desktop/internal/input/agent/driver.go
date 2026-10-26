@@ -492,7 +492,7 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 			case err == nil && len(st.Calls) > 0:
 				d.interrupt(ctx, st, nil)
 			case err == nil:
-				d.publish(st, ProblemNone) // the step is stored; the panel still shows it
+				d.publish(ctx, st, ProblemNone) // the step is stored; the panel still shows it
 			}
 			return
 		}
@@ -501,10 +501,10 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 				st = at
 			}
 			d.log.WarnContext(ctx, opRequest, "thread", st.Thread.String(), "err", err)
-			d.publish(st, problemOf(err))
+			d.publish(ctx, st, problemOf(err))
 			return
 		}
-		d.publish(st, ProblemNone)
+		d.publish(ctx, st, ProblemNone)
 		if st.Thread != "" {
 			at = agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope}
 		}
@@ -531,7 +531,7 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 		outcomes, cards, stopped := d.runCalls(ctx, callCtx, st)
 		got = outcomes
 		if len(cards) > 0 {
-			d.publish(agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
+			d.publish(ctx, agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
 		}
 		if ctx.Err() != nil || stopped {
 			d.interrupt(ctx, st, outcomes)
@@ -558,21 +558,21 @@ func running(s thread.Status) bool { return s == thread.StatusPlanning || s == t
 func (d *Driver) closeLeft(ctx context.Context, at agentturn.Step, calls []agentturn.Call, outcomes []agentturn.Outcome, p Problem) {
 	ref := refOf(at)
 	if ref.Thread == "" {
-		d.publish(at, p) // an Ask that failed before its thread was stored: nothing runs
+		d.publish(ctx, at, p) // an Ask that failed before its thread was stored: nothing runs
 		return
 	}
 	closed, err := d.close(ctx, ref, calls, outcomes)
 	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", ref.Thread.String(), "err", err)
 		if p != ProblemNone {
-			d.publish(at, p)
+			d.publish(ctx, at, p)
 		}
 		return
 	}
 	if closed.Scope == (values.Scope{}) {
 		closed.Scope = at.Scope
 	}
-	d.publish(closed, p)
+	d.publish(ctx, closed, p)
 }
 
 // runCalls runs the calls of step st in order with callCtx and returns their outcomes, the cards they add and whether
@@ -629,7 +629,7 @@ func (d *Driver) interrupt(ctx context.Context, st agentturn.Step, outcomes []ag
 		d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)
 		return
 	}
-	d.publish(stopped, ProblemNone)
+	d.publish(ctx, stopped, ProblemNone)
 }
 
 // close is Turns.Interrupt of ref with the outcomes of calls. Should the use case refuse the outcomes, it is tried once
@@ -659,10 +659,14 @@ func unknownWrites(calls []agentturn.Call, outcomes []agentturn.Outcome) []agent
 	return out
 }
 
-// publish hands the step to the panel; a card that breaks its rules is dropped, never shown.
-func (d *Driver) publish(st agentturn.Step, p Problem) {
+// publish hands the step to the panel; a card that breaks its rules is dropped, never shown. A reply that lists
+// assignments gets their titles and deadlines from the local data here (ctx may have ended: the read is local).
+func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
 	cards := make([]values.Card, 0, len(st.Cards))
 	for _, c := range st.Cards {
+		if r, ok := c.(values.ReplyCard); ok && r.Validate() == nil {
+			c = d.tools.replyLines(context.WithoutCancel(ctx), r)
+		}
 		if c == nil || c.Validate() != nil {
 			d.log.Warn(opBadCard, "thread", st.Thread.String())
 			continue

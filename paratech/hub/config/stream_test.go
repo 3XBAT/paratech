@@ -16,12 +16,14 @@ func TestLoadProviderStream(t *testing.T) {
 		env  map[string]string
 		want bool
 	}{
-		"off by default":   {},
-		"environment":      {env: map[string]string{config.EnvProviderStream: "true"}, want: true},
-		"environment off":  {env: map[string]string{config.EnvProviderStream: "0"}},
-		"flag wins":        {args: []string{"--provider-stream=false"}, env: map[string]string{config.EnvProviderStream: "true"}},
-		"flag":             {args: []string{"--provider-stream"}, want: true},
-		"empty env is off": {env: map[string]string{config.EnvProviderStream: ""}},
+		"on by default":         {want: true},
+		"environment":           {env: map[string]string{config.EnvProviderStream: "true"}, want: true},
+		"environment off":       {env: map[string]string{config.EnvProviderStream: "false"}},
+		"environment off as 0":  {env: map[string]string{config.EnvProviderStream: "0"}},
+		"flag off":              {args: []string{"-provider-stream=false"}},
+		"flag wins over env":    {args: []string{"--provider-stream=false"}, env: map[string]string{config.EnvProviderStream: "true"}},
+		"flag wins over env on": {args: []string{"--provider-stream"}, env: map[string]string{config.EnvProviderStream: "false"}, want: true},
+		"empty env keeps on":    {env: map[string]string{config.EnvProviderStream: ""}, want: true},
 	} {
 		env := withDB(tt.env)
 		cfg, err := config.Load(tt.args, io.Discard, func(k string) string { return env[k] })
@@ -37,8 +39,12 @@ func TestLoadProviderStream(t *testing.T) {
 	if _, err := config.Load(nil, io.Discard, func(k string) string { return env[k] }); err == nil || !strings.Contains(err.Error(), config.EnvProviderStream) {
 		t.Fatalf("a non-boolean value: err = %v, want naming %s", err, config.EnvProviderStream)
 	}
-	if config.Default().ProviderStream {
-		t.Fatal("provider streaming is on by default")
+}
+
+// TestProviderStreamOnByDefault pins the owner's decision of 2026-10-26 (TASK-190): streaming without a gateway probe.
+func TestProviderStreamOnByDefault(t *testing.T) {
+	if !config.Default().ProviderStream {
+		t.Fatal("provider streaming is off by default")
 	}
 }
 

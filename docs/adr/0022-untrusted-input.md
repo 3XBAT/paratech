@@ -15,6 +15,13 @@ foreign text and pick tools.
   dates, counters, statuses), names of subjects the student created or confirmed (letters, digits, spaces, `.,-()`,
   ≤ 80 characters, as data). Schedule strings are matched to subjects by `subjectmatch` on the desktop and never sent
   as text.
+- **Planner sees (addendum, TASK-183)**: its own card texts of earlier requests of this thread and the names of the
+  tools those requests called with `ok | error`, as one `agent_reply` per earlier request (ADR-0023 "History pairs").
+  `thread.Reply` builds it on the desktop from stored steps, with fixed labels `reply:`, `plan:`, `cannot_do:`,
+  `asked:`, `actions:`: only `reply.text`, `show_plan.summary`, `cannot_do.your_part/our_part` of calls that passed
+  argument checks and were not refused; `ask_questions` as a fixed line without the questions; outcome by `is_error`,
+  no call IDs, no `result_json`. Never reader texts (ANSWER, TRIAGE, summaries), titles or file names. A request with no
+  such text gets `no answer: the request ended without a reply`. At most 2 KiB, cut on a rune boundary.
 - **Tool results**: each `result_json` is built by a mapper in `domain/agent/values` from an explicit allowlist of typed
   fields (IDs, enums, dates, counters). Use-case views are never serialized whole; error texts become an error enum.
 - **Answers to Questions cards** reach the planner only as `{question_id, option_index}` or the student's own typed
@@ -39,6 +46,14 @@ foreign text and pick tools.
   labels; every ID must pass the provenance check (ADR-0021).
 - **Forged history**: the Hub signs every echo of its tool calls (`seal`, ADR-0023).
 - **Irreversible actions** only by the student's click in `input/wails`; the agent has no path to them.
+
+## Addendum (TASK-173, catalog v3): a reply that lists assignments
+- `reply.assignments` (type `card_ids`): 0–10 assignment IDs, no text. Each ID passes the same typed provenance check
+  (base, scope, tool results of the thread); one of unknown origin refuses the whole reply with `unknown_id`, no card is
+  shown and the planner goes on.
+- The desktop fills the list from local data: title, library subject and deadline of each assignment; one deleted
+  since is skipped. The planner still never sees a title and never writes one; nothing read for the card goes back to
+  it (the result stays `{"shown":true}`) or into the log.
 
 ## Consequences
 - Some answers are less helpful (the planner cannot quote a title); cards show the trusted data instead.

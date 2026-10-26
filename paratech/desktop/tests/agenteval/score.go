@@ -70,6 +70,45 @@ func FirstPersonWords(text string) []string {
 	return out
 }
 
+// address are the words of addressing the student or greeting (system prompt v3, «Voice»): the panel speaks
+// impersonally, with no «ты»/«вы», no «Привет».
+var address = map[string]bool{
+	"ты": true, "тебя": true, "тебе": true, "тобой": true, "твой": true, "твоя": true, "твоё": true, "твое": true,
+	"твои": true, "твоего": true, "твоей": true, "твоему": true, "твоим": true, "твоих": true, "твою": true,
+	"твоём": true, "твоем": true, "твоими": true,
+	"вы": true, "вас": true, "вам": true, "вами": true, "ваш": true, "ваша": true, "ваше": true, "ваши": true,
+	"вашего": true, "вашей": true, "вашему": true, "вашим": true, "ваших": true, "вашу": true, "вашем": true,
+	"вашими": true,
+	"привет": true, "здравствуй": true, "здравствуйте": true,
+	"you": true, "your": true, "yours": true, "hello": true, "hi": true,
+}
+
+// AddressWords returns the words of an agent text that address or greet the student, lowercased, in order.
+func AddressWords(text string) []string {
+	var out []string
+	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) }) {
+		if address[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// ReplyAssignments returns the assignment IDs a reply lists (catalog v3); other tools and unreadable arguments give
+// none.
+func ReplyAssignments(tool, argumentsJSON string) []string {
+	if tool != "reply" {
+		return nil
+	}
+	var args struct {
+		Assignments []string `json:"assignments"`
+	}
+	if json.Unmarshal([]byte(argumentsJSON), &args) != nil {
+		return nil
+	}
+	return args.Assignments
+}
+
 // CardTexts returns the model texts of a card call that the student reads: reply text, plan summary and notes,
 // cannot_do parts, question texts and options. Other tools and unreadable arguments give none.
 func CardTexts(tool, argumentsJSON string) []string {

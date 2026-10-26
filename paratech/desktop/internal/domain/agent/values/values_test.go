@@ -2,6 +2,7 @@ package values
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -169,7 +170,7 @@ func TestToolsAreUniqueAndParse(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, a := range spec.Args() {
-			if (a.Type == ArgID || a.Type == ArgIDs) != a.Kind.Valid() {
+			if (a.Type == ArgID || a.Type == ArgIDs || a.Type == ArgCardIDs) != a.Kind.Valid() {
 				t.Fatalf("%s.%s: id kind %q", tool, a.Name, a.Kind)
 			}
 		}
@@ -205,6 +206,15 @@ func TestCards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	a1, a2 := mustRef(t, KindAssignment, "a1"), mustRef(t, KindAssignment, "a2")
+	due, err := NewDate(2026, time.October, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eleven []Ref
+	for i := range MaxCardIDs + 1 {
+		eleven = append(eleven, mustRef(t, KindAssignment, fmt.Sprintf("a%d", i)))
+	}
 	tests := []struct {
 		name string
 		card Card
@@ -232,6 +242,21 @@ func TestCards(t *testing.T) {
 		{"cannot do empty", CannotDoCard{}, CardCannotDo, false},
 		{"reply", ReplyCard{Text: "Готово"}, CardReply, true},
 		{"reply empty", ReplyCard{}, CardReply, false},
+		{"reply with lines", ReplyCard{Text: "Два", Assignments: []Ref{a1, a2}, Lines: []AssignmentLine{
+			{Assignment: a2, Title: "Лабораторная 2", Subject: mustRef(t, KindSubject, "s1"), Due: due},
+			{Assignment: a1, Title: "Эссе"},
+		}}, CardReply, true},
+		{"reply lists a subject", ReplyCard{Text: "x", Assignments: []Ref{mustRef(t, KindSubject, "s1")}}, CardReply, false},
+		{"reply lists twice", ReplyCard{Text: "x", Assignments: []Ref{a1, a1}}, CardReply, false},
+		{"reply lists eleven", ReplyCard{Text: "x", Assignments: eleven}, CardReply, false},
+		{"reply line not listed", ReplyCard{Text: "x", Assignments: []Ref{a1}, Lines: []AssignmentLine{{Assignment: a2, Title: "Эссе"}}}, CardReply, false},
+		{"reply line twice", ReplyCard{Text: "x", Assignments: []Ref{a1, a2}, Lines: []AssignmentLine{
+			{Assignment: a1, Title: "Эссе"}, {Assignment: a1, Title: "Эссе"},
+		}}, CardReply, false},
+		{"reply line without title", ReplyCard{Text: "x", Assignments: []Ref{a1}, Lines: []AssignmentLine{{Assignment: a1, Title: " "}}}, CardReply, false},
+		{"reply line subject of another kind", ReplyCard{Text: "x", Assignments: []Ref{a1}, Lines: []AssignmentLine{
+			{Assignment: a1, Title: "Эссе", Subject: mustRef(t, KindLesson, "l1")},
+		}}, CardReply, false},
 		{"stopped", StoppedCard{Reason: StopOffline}, CardStopped, true},
 		{"stopped unknown", StoppedCard{Reason: "x"}, CardStopped, false},
 		{"work", WorkCard{Work: mustRef(t, KindWork, "w1"), Outcome: TriageQuestions}, CardWork, true},
