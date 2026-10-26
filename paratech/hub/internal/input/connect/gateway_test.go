@@ -181,6 +181,10 @@ func TestCompleteErrorMapping(t *testing.T) {
 		{name: "provider 401 is not an API key problem", err: &gateway.ProviderFailedError{Cause: permanent},
 			code: connectrpc.CodeUnavailable, detail: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR,
 			check: func(d *hubv1.ErrorDetail) bool { return d.GetRetryAfter() == nil }},
+		// TASK-200: a refused reader answer says the model answered, not that the provider failed.
+		{name: "invalid answer", err: &gateway.ProviderFailedError{Cause: fmt.Errorf("%w: %w", gateway.ErrInvalidAnswer, permanent)},
+			code: connectrpc.CodeUnavailable, detail: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR,
+			check: func(d *hubv1.ErrorDetail) bool { return strings.Contains(d.GetMessage(), "does not match the schema") }},
 		{name: "conflict", err: fmt.Errorf("x: %w", gateway.ErrIdempotencyConflict), code: connectrpc.CodeFailedPrecondition,
 			detail: hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT},
 		{name: "running", err: fmt.Errorf("x: %w", gateway.ErrAttemptRunning), code: connectrpc.CodeAborted},

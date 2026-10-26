@@ -215,6 +215,31 @@ func TestStepWithoutToolUseIsAFailure(t *testing.T) {
 	}
 }
 
+// TestStepReadsTheTextOfAnEndOfTurn: a text-only end of turn carries its text blocks joined (thinking skipped) for the
+// reply card of TASK-200; any other stop reason carries none.
+func TestStepReadsTheTextOfAnEndOfTurn(t *testing.T) {
+	const content = `[{"type":"thinking","thinking":"secret-thinking","signature":"sig"},` +
+		`{"type":"text","text":"Горутина — "},{"type":"text","text":"лёгкий поток."}]`
+	for stop, want := range map[string]string{
+		`"end_turn"`: "Горутина — лёгкий поток.", `"max_tokens"`: "", `"stop_sequence"`: "", `"pause_turn"`: "", `null`: "",
+	} {
+		body := `{"type":"message","content":` + content + `,"stop_reason":` + stop + `,"usage":{"input_tokens":5,"output_tokens":2}}`
+		var rec recorder
+		srv := rec.serve(t, http.StatusOK, body)
+		answer, err := newClient(t, srv.URL, time.Minute).Step(t.Context(), agentCall(t))
+		if err != nil {
+			t.Fatalf("%s: %v", stop, err)
+		}
+		text, ok := answer.PlainText()
+		if text != want || ok != (want != "") || answer.Failure() == nil || !answer.Assistant().IsZero() {
+			t.Errorf("stop %s: text %q %t, failure %v", stop, text, ok, answer.Failure())
+		}
+		if strings.Contains(answer.String(), "Горутина") {
+			t.Errorf("stop %s: String prints the text: %s", stop, answer)
+		}
+	}
+}
+
 // TestStepKeepsTheStopReason: the answer carries the stop reason for the log line, and a cut at the output cap fails as
 // "output cap" (TASK-172), also when the cut left a broken call.
 func TestStepKeepsTheStopReason(t *testing.T) {

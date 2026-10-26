@@ -5,6 +5,7 @@
 //	agent/<profile>/v<N>/system.md   system prompt of an agent profile
 //	agent/<profile>/v<N>/tools.json  tool catalog version N (agent/panel/v<N>/tools.json is shared/testdata/tool_catalog_v<N>.json)
 //	ops/<operation>/v<N>/system.md   server prompt of an operation served by Complete (inspect_material, answer, triage_assignment)
+//	ops/<operation>/v<N>/reask.md    optional note added to that prompt for one more call after a fixable refusal
 //
 // The package only finds and returns the bytes; app parses and checks them at start and hands them to the use cases
 // as data. A prompt change is a new version directory, never an edit of a released one. The package imports only the

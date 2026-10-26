@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { initialRoute, routeToPage, routeToSummary, routeToAssignment } from "../.test-build/nav.js";
+import { initialRoute, routeToPage, routeToSummary, routeToAssignment, routeToSubject, routeToOpenedAssignment } from "../.test-build/nav.js";
 import {
   canGoBack,
   canGoForward,
@@ -70,6 +70,68 @@ test("the depth is limited and the oldest entry goes first", () => {
   assert.equal(hist.entries.length, maxDepth);
   assert.equal(currentRoute(hist).assignment, `a${maxDepth + 19}`);
   assert.equal(hist.entries[0].assignment, `a${20}`);
+});
+
+test("an open subject is an entry: back leaves it for the list, forward opens it again (TASK-202)", () => {
+  let hist = newHistory(routeToPage("subjects"));
+  hist = pushRoute(hist, routeToSubject(currentRoute(hist), "s1"));
+  hist = pushRoute(hist, routeToSubject(currentRoute(hist), "s2"));
+  assert.deepEqual(hist.entries.map((r) => r.subject), ["", "s1", "s2"]);
+  hist = goBack(hist);
+  assert.equal(currentRoute(hist).subject, "s1");
+  hist = goBack(hist);
+  assert.equal(currentRoute(hist).subject, "");
+  assert.equal(currentRoute(hist).page, "subjects");
+  assert.equal(currentRoute(goForward(hist)).subject, "s1");
+  // Another section forgets the subject; «Назад» brings the section back with it.
+  const away = pushRoute(goForward(hist), routeToPage("journal"));
+  assert.equal(currentRoute(away).subject, "");
+  assert.equal(currentRoute(goBack(away)).subject, "s1");
+});
+
+test("a card opened from the list of «Задания» is an entry; the back to the list is one too", () => {
+  let hist = newHistory(routeToPage("homework"));
+  hist = pushRoute(hist, routeToOpenedAssignment(currentRoute(hist), "a1"));
+  assert.equal(currentRoute(hist).assignment, "a1");
+  assert.equal(currentRoute(hist).page, "homework");
+  assert.equal(currentRoute(goBack(hist)).assignment, "");
+  // The page's own «Назад» to the list adds an entry, as in a browser.
+  hist = pushRoute(hist, routeToOpenedAssignment(currentRoute(hist), ""));
+  assert.deepEqual(hist.entries.map((r) => r.assignment), ["", "a1", ""]);
+  // Opening the card again from history needs the page remounted on the card; leaving it does not.
+  assert.equal(needsRemount(hist.entries[1], hist.entries[0]), true);
+  assert.equal(needsRemount(hist.entries[0], hist.entries[1]), false);
+});
+
+test("a subject does not leak into other routes: a summary over «Предметы» keeps it, a jump to an assignment drops it", () => {
+  const r = routeToSubject(routeToPage("subjects"), "s1");
+  assert.equal(routeToSummary(r, "r1").subject, "s1");
+  assert.equal(routeToAssignment("a1").subject, "");
+  const toCard = routeToOpenedAssignment(r, "a1");
+  assert.equal(toCard.page, "homework");
+  assert.equal(toCard.subject, "");
+  assert.equal(toCard.assignment, "a1");
+  const toSubject = routeToSubject(toCard, "s2");
+  assert.equal(toSubject.page, "subjects");
+  assert.equal(toSubject.assignment, "");
+  assert.equal(toSubject.subject, "s2");
+});
+
+test("a rail click to «Предметы» from an open subject shows the list; back returns to the subject", () => {
+  let hist = newHistory(routeToPage("subjects"));
+  hist = pushRoute(hist, routeToSubject(currentRoute(hist), "s1"));
+  hist = pushRoute(hist, routeToPage("subjects"));
+  assert.equal(currentRoute(hist).subject, "");
+  assert.equal(currentRoute(goBack(hist)).subject, "s1");
+});
+
+test("App wires the subject and the card through the route, not through page state", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /routeToSubject\(r, id\)/);
+  assert.match(app, /routeToOpenedAssignment\(r, id\)/);
+  assert.match(app, /onSelect=\{props\.onSelectAssignment\}/);
+  const page = readFileSync(new URL("../src/pages/HomeworkPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /props\.onSelect \? \(props\.openAssignment \?\? ""\) : own/);
 });
 
 const key = (over) => ({ key: "ArrowLeft", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, target: { tagName: "DIV" }, ...over });
