@@ -389,6 +389,8 @@ func turnOf(t Turn) (values.Turn, error) {
 	switch t.Kind {
 	case values.TurnStudentText:
 		return values.StudentTurn(t.StudentText)
+	case values.TurnAgentReply:
+		return values.AgentReplyTurn(t.AgentReply)
 	case values.TurnCalls:
 		if len(t.Calls) > values.MaxAgentCalls {
 			return values.Turn{}, fmt.Errorf("%w: an echo holds 1-%d calls", values.ErrInvalidAgentRequest, values.MaxAgentCalls)

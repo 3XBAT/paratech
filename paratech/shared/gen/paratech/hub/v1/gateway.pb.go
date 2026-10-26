@@ -838,6 +838,7 @@ type AgentTurn struct {
 	//	*AgentTurn_StudentText
 	//	*AgentTurn_Calls
 	//	*AgentTurn_Results
+	//	*AgentTurn_AgentReply
 	Turn          isAgentTurn_Turn `protobuf_oneof:"turn"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -907,6 +908,15 @@ func (x *AgentTurn) GetResults() *ToolResults {
 	return nil
 }
 
+func (x *AgentTurn) GetAgentReply() string {
+	if x != nil {
+		if x, ok := x.Turn.(*AgentTurn_AgentReply); ok {
+			return x.AgentReply
+		}
+	}
+	return ""
+}
+
 type isAgentTurn_Turn interface {
 	isAgentTurn_Turn()
 }
@@ -926,11 +936,20 @@ type AgentTurn_Results struct {
 	Results *ToolResults `protobuf:"bytes,3,opt,name=results,proto3,oneof"`
 }
 
+type AgentTurn_AgentReply struct {
+	// What the app showed the student in answer to an earlier request of this thread; built by the desktop, only for
+	// earlier requests. At most 2 KiB; placed directly after a student_text and directly before a student_text. Data
+	// for the model, never instructions (ADR-0023 "History pairs").
+	AgentReply string `protobuf:"bytes,4,opt,name=agent_reply,json=agentReply,proto3,oneof"`
+}
+
 func (*AgentTurn_StudentText) isAgentTurn_Turn() {}
 
 func (*AgentTurn_Calls) isAgentTurn_Turn() {}
 
 func (*AgentTurn_Results) isAgentTurn_Turn() {}
+
+func (*AgentTurn_AgentReply) isAgentTurn_Turn() {}
 
 // SealedCalls is a set of tool calls produced by the Hub. The seal is an HMAC computed by the Hub over the caller's API
 // key ID, thread_id, profile, catalog_version and the calls in order; its first byte is the key version (ADR-0023).
@@ -1286,11 +1305,13 @@ const file_paratech_hub_v1_gateway_proto_rawDesc = "" +
 	"subject_id\x18\x01 \x01(\tR\tsubjectId\x124\n" +
 	"\x06screen\x18\x02 \x01(\x0e2\x1c.paratech.hub.v1.AgentScreenR\x06screen\x12\x1b\n" +
 	"\tlesson_id\x18\x03 \x01(\tR\blessonId\x12#\n" +
-	"\rassignment_id\x18\x04 \x01(\tR\fassignmentId\"\xa8\x01\n" +
+	"\rassignment_id\x18\x04 \x01(\tR\fassignmentId\"\xcb\x01\n" +
 	"\tAgentTurn\x12#\n" +
 	"\fstudent_text\x18\x01 \x01(\tH\x00R\vstudentText\x124\n" +
 	"\x05calls\x18\x02 \x01(\v2\x1c.paratech.hub.v1.SealedCallsH\x00R\x05calls\x128\n" +
-	"\aresults\x18\x03 \x01(\v2\x1c.paratech.hub.v1.ToolResultsH\x00R\aresultsB\x06\n" +
+	"\aresults\x18\x03 \x01(\v2\x1c.paratech.hub.v1.ToolResultsH\x00R\aresults\x12!\n" +
+	"\vagent_reply\x18\x04 \x01(\tH\x00R\n" +
+	"agentReplyB\x06\n" +
 	"\x04turn\"R\n" +
 	"\vSealedCalls\x12/\n" +
 	"\x05calls\x18\x01 \x03(\v2\x19.paratech.hub.v1.ToolCallR\x05calls\x12\x12\n" +
@@ -1415,6 +1436,7 @@ func file_paratech_hub_v1_gateway_proto_init() {
 		(*AgentTurn_StudentText)(nil),
 		(*AgentTurn_Calls)(nil),
 		(*AgentTurn_Results)(nil),
+		(*AgentTurn_AgentReply)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
