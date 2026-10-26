@@ -28,6 +28,8 @@ import { SummaryPage } from "./pages/SummaryPage";
 import { TicketsPage } from "./pages/TicketsPage";
 import { TodayPage } from "./pages/TodayPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
+import { needsRemount } from "./navHistory";
+import { useNavHistory } from "./useNavHistory";
 import { IconSprite } from "./ui/Icon";
 import { Rail } from "./ui/Rail";
 
@@ -90,6 +92,13 @@ export function App() {
     setRoute(routeToAssignment(id));
     setJump((j) => j + 1);
   }, []);
+  // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
+  useNavHistory(route, setRoute, (r, from) => {
+    setSummarySection(undefined);
+    if (needsRemount(r, from)) {
+      setJump((j) => j + 1);
+    }
+  });
   // Counts the files the drop zone added: «Предметы» reads the library again.
   const [library, setLibrary] = useState(0);
   const panel = useResizablePanel();
