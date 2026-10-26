@@ -96,20 +96,32 @@ export function pageById(id: string): Page {
 /**
  * Where the window is: a page and, over it, the transcript (TASK-079) or the summary (TASK-087) of a recording.
  * Neither is a page: they open from a recording ("" when closed), one at a time, and the page under them
- * stays as the user left it. assignment: the assignment «Задания» opens with ("" for the list).
+ * stays as the user left it. assignment: the assignment «Задания» shows ("" for the list). subject: the subject
+ * «Предметы» shows ("" for the list of subjects).
  */
 export interface Route {
   page: PageId;
   transcript: string;
   summary: string;
   assignment: string;
+  subject: string;
 }
 
-export const initialRoute: Route = { page: defaultPage, transcript: "", summary: "", assignment: "" };
+export const initialRoute: Route = { page: defaultPage, transcript: "", summary: "", assignment: "", subject: "" };
 
 /** A rail click: the page, with the transcript and the summary closed. */
 export function routeToPage(id: PageId): Route {
-  return { page: id, transcript: "", summary: "", assignment: "" };
+  return { page: id, transcript: "", summary: "", assignment: "", subject: "" };
+}
+
+/** Opens a subject in «Предметы» ("" returns to the list); an entry of its own in the history. */
+export function routeToSubject(r: Route, subjectId: string): Route {
+  return { ...r, page: "subjects", transcript: "", summary: "", subject: subjectId };
+}
+
+/** Shows an assignment on «Задания» from its list ("" returns to the list); an entry of its own in the history. */
+export function routeToOpenedAssignment(r: Route, assignmentId: string): Route {
+  return { ...r, page: "homework", transcript: "", summary: "", assignment: assignmentId };
 }
 
 /** Opens the transcript of a recording over the current section (in place of an open summary). */
@@ -129,5 +141,5 @@ export function closeTranscript(r: Route): Route {
 
 /** Opens an assignment in «Задания» (from the summary). */
 export function routeToAssignment(assignmentId: string): Route {
-  return { page: "homework", transcript: "", summary: "", assignment: assignmentId };
+  return { page: "homework", transcript: "", summary: "", assignment: assignmentId, subject: "" };
 }

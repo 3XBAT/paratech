@@ -55,15 +55,19 @@ import { TranscriptLinks } from "./TranscriptLinks";
 // page shows it. Whether a draft is being generated comes from the core too (TASK-094): the page asks it while open,
 // so a generation started earlier or elsewhere and a version made meanwhile show up without opening the page again. Assignment, draft and instruction texts may be model output: they are plain React text and textarea
 // values only, never HTML (hard rule 3).
-// openAssignment: the assignment to open at once (a jump from the summary, TASK-087); "" shows the list.
-export function HomeworkPage(props: { openAssignment?: string }) {
+// openAssignment: the assignment shown (a jump from the summary, TASK-087, or a card opened from the list); "" shows the
+// list. It comes from the window route, so «Назад» and «Вперёд» restore it (TASK-202); onSelect asks the route to change.
+// Without onSelect (a test, a bare page) the page keeps the choice itself.
+export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: string) => void }) {
   const api = useMemo(() => homeworkApi(callByName), []);
-  const [openId, setOpenId] = useState(props.openAssignment ?? "");
+  const [own, setOwn] = useState(props.openAssignment ?? "");
+  const openId = props.onSelect ? (props.openAssignment ?? "") : own;
+  const select = props.onSelect ?? setOwn;
 
   return openId === "" ? (
-    <AssignmentList api={api} onOpen={setOpenId} />
+    <AssignmentList api={api} onOpen={select} />
   ) : (
-    <AssignmentEditor api={api} id={openId} onBack={() => setOpenId("")} />
+    <AssignmentEditor api={api} id={openId} onBack={() => select("")} />
   );
 }
 

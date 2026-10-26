@@ -13,6 +13,8 @@ Compared by code with `docs/design/concept-agent.html` (templates tpl-today, tpl
 7. «Ближайшее» (deadlines of the subject), teacher and the lesson schedule line in the head, «Лекции» as lessons with status chips, «новая» mark on a fresh folder, «Ещё действия» menu: follow-up (needs data: the library binding gives no deadlines, teacher, schedule or lessons per subject).
 8. State: the open subject was page-local, «Назад» skipped it. Fixed: `Route.subject`.
 
+Note: the subject page keeps «Все предметы» as a button; the folder form (new folder) opens above the folders.
+
 ### Задания
 9. The opened card was page-local (`HomeworkPage.openId`). Fixed: `Route.assignment` is the single source; list opens and «Назад» go through the route.
 10. Prototype list: day/date column, filter segmented control with counters (Активные / Ждут «Да» / Сданные), status chips, «Открыть» small buttons: follow-up (needs data: counters and states; list is the TASK-195 area, not restyled).

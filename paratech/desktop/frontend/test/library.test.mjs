@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { errorTexts, genericError, libraryApi, libraryErrorText, methods, parseImport, parseSubject } from "../.test-build/bindings/library.js";
-import { folderCountText, folderTitle, groupBySemester, importNote, orderedFolders, sizeText } from "../.test-build/libraryView.js";
-import { InboxList, SubjectDetail, SubjectList } from "../.test-build/pages/SubjectsParts.js";
+import { folderCountText, folderCounts, folderTitle, groupBySemester, importNote, orderedFolders, sizeText, treeCount } from "../.test-build/libraryView.js";
+import { InboxList, SubjectDetail, SubjectList, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
 
@@ -104,11 +104,11 @@ test("the list shows semesters and subjects with «Открыть»; an empty li
   assert.match(empty, />Предмет</);
 });
 
-test("the subject page lists the folders with their files and offers «Папка»", () => {
+test("the subject page lists the folders with their files; «Папка» is in the tree", () => {
   const out = renderToStaticMarkup(
     h(SubjectDetail, {
       subject: subject(), materials: [material(), material({ id: "m2", name: "удалён.pdf", removed: true }), material({ id: "m3", name: "входящий.txt", folderId: "", inbox: true })],
-      folderForm: false, busy: false, error: "", onAddFolder: noop, onCreateFolder: noop, onCancelFolder: noop,
+      folderForm: false, busy: false, error: "", onCreateFolder: noop, onCancelFolder: noop,
     }),
   );
   assert.match(out, /Лекции[\s\S]*1 файл/);
@@ -117,11 +117,15 @@ test("the subject page lists the folders with their files and offers «Папк�
   assert.doesNotMatch(out, /удалён\.pdf/);
   assert.doesNotMatch(out, /входящий\.txt/);
   assert.match(out, /В этой папке пока нет файлов/);
-  assert.match(out, />Папка</);
+  const tree = renderToStaticMarkup(
+    h(SubjectTree, { subjects: [subject()], currentId: "s1", counts: new Map(), busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }),
+  );
+  assert.match(tree, />Папка</);
+  assert.match(tree, />Предмет</);
   const form = renderToStaticMarkup(
     h(SubjectDetail, {
       subject: subject(), materials: [], folderForm: true, busy: false, error: "Папка с таким именем уже есть.",
-      onAddFolder: noop, onCreateFolder: noop, onCancelFolder: noop,
+      onCreateFolder: noop, onCancelFolder: noop,
     }),
   );
   assert.match(form, /Название папки/);
@@ -136,8 +140,11 @@ test("names of subjects, folders and files are text nodes, never markup", () => 
     renderToStaticMarkup(
       h(SubjectDetail, {
         subject: s, materials: [material({ name: evil, folderId: "f1" })], folderForm: false, busy: false, error: "",
-        onAddFolder: noop, onCreateFolder: noop, onCancelFolder: noop,
+        onCreateFolder: noop, onCancelFolder: noop,
       }),
+    ) +
+    renderToStaticMarkup(
+      h(SubjectTree, { subjects: [s], currentId: "s1", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }),
     ) +
     renderToStaticMarkup(h(InboxList, { materials: [material({ name: evil })] }));
   assert.ok(!out.includes("<img"));
@@ -156,8 +163,33 @@ test("the line after «Добавить файл»: added, already there, nothin
   assert.equal(importNote({ cancelled: false, existing: false }), "Файл добавлен.");
 });
 
-test("SubjectsPage returns to the list on a new visit", () => {
+test("the open subject is part of the window route: a rail click returns to the list, «Назад» restores it", () => {
   const src = readFileSync(new URL("../src/pages/SubjectsPage.tsx", import.meta.url), "utf8");
-  assert.match(src, /props\.visit !== firstVisit\.current/);
-  assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /<SubjectsPage[^>]*visit=\{props\.visit\}/);
+  assert.match(src, /const openId = props\.subjectId/);
+  assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /<SubjectsPage[^>]*subjectId=\{props\.subject\}[^>]*onSelect=\{props\.onSelectSubject\}/);
+});
+
+test("the tree: semesters, the subjects, the folders of the open subject with counts, «—» for none", () => {
+  const other = subject({ id: "s2", name: "Физика" });
+  const spring = subject({ id: "s3", name: "Химия", semester: "2026-spring", semesterLabel: "Весна 2026" });
+  const counts = folderCounts(other.folders, [material({ subjectId: "s2", folderId: "f1" }), material({ id: "m2", subjectId: "s2", folderId: "f1" })]);
+  assert.equal(counts.get("f1"), 2);
+  assert.equal(counts.get("f2"), 0);
+  assert.equal(treeCount(counts.get("f1")), "2");
+  assert.equal(treeCount(counts.get("f2")), "—");
+  assert.equal(treeCount(undefined), "—");
+  const out = renderToStaticMarkup(
+    h(SubjectTree, { subjects: [subject(), other, spring], currentId: "s2", counts, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }),
+  );
+  assert.match(out, /Осень 2026[\s\S]*Весна 2026/);
+  assert.match(out, /aria-current="page"[^>]*>[\s\S]*Физика/);
+  // Only the open subject shows its folders.
+  assert.equal((out.match(/<div class="ti">/g) ?? []).length, 7, "seven folders of the open subject");
+  assert.match(out, /Лекции[\s\S]*?cnt num">2</);
+});
+
+test("the cards of the list open a subject by a click on the card", () => {
+  const out = renderToStaticMarkup(h(SubjectList, { subjects: [subject(), subject({ id: "s2", name: "Физика" })], onOpen: noop, onAdd: noop }));
+  assert.equal((out.match(/class="subj-card"/g) ?? []).length, 2);
+  assert.match(out, /Осень 2026 <span class="cnt num">· (<!-- -->)?2</);
 });
