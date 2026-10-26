@@ -89,7 +89,8 @@ type AgentUpdateView struct {
 // AgentCardView is one card; Kind says which field is set: plan, questions, progress (jobId), result (artifact,
 // "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId), answer (answerId), cannot_do
 // (cannotDo), reply (text and assignments), stopped (stopReason) or work (workId and outcome: questions, review,
-// helper, pending, failed or confirmed; the texts come from TurnkeyService.Work).
+// helper, pending, failed or confirmed; the texts come from TurnkeyService.Work) or free_work (freeWork: the call the
+// card names, answered with AgentService.FreeWork; the page words the card itself, the topic never comes here).
 type AgentCardView struct {
 	Kind        string                `json:"kind"`
 	Plan        *AgentPlanView        `json:"plan"`
@@ -105,6 +106,15 @@ type AgentCardView struct {
 	StopReason  string                `json:"stopReason"`
 	WorkID      string                `json:"workId"`
 	Outcome     string                `json:"outcome"`
+	FreeWork    *AgentFreeWorkRef     `json:"freeWork"`
+}
+
+// AgentFreeWorkRef names a free-work card «Такого задания нет — могу сделать как свободную работу» (TASK-188): the
+// request and the call that waits on it.
+type AgentFreeWorkRef struct {
+	ThreadID string `json:"threadId"`
+	Turn     int    `json:"turn"`
+	CallID   string `json:"callId"`
 }
 
 // AgentAssignmentView is an assignment a reply lists, from the local data, never from the model (TASK-173): its title
@@ -224,6 +234,8 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.StopReason = string(c.Reason)
 	case values.WorkCard:
 		v.WorkID, v.Outcome = c.Work.ID(), string(c.Outcome)
+	case values.FreeWorkCard:
+		v.FreeWork = &AgentFreeWorkRef{ThreadID: string(c.Thread), Turn: c.Turn, CallID: c.CallID}
 	default:
 		return AgentCardView{}, false
 	}

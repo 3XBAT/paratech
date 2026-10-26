@@ -31,6 +31,7 @@ type SettingsUseCase interface {
 	SetRecordingPromptsEnabled(ctx context.Context, enabled bool) (preferences.Toggles, error)
 	SetProcessOnlyOnACPower(ctx context.Context, enabled bool) (preferences.Toggles, error)
 	SetRecognitionLoad(ctx context.Context, load shared.RecognitionLoad) (preferences.Toggles, error)
+	SetFreeWorkNotice(ctx context.Context, on bool) (preferences.Toggles, error)
 	Profile(ctx context.Context) (settings.ProfileFields, error)
 	SaveProfile(ctx context.Context, f settings.ProfileFields) (settings.ProfileFields, error)
 }
@@ -58,6 +59,10 @@ type Settings struct {
 	LoadEstimates *ModelLoadEstimates `json:"loadEstimates"`
 	// LoadEstimatesModel is the name of that model; "" with null estimates.
 	LoadEstimatesModel string `json:"loadEstimatesModel"`
+
+	// FreeWorkNotice («Предупреждать перед свободной работой», TASK-188): the agent shows «Такого задания нет — могу
+	// сделать как свободную работу» before a work on a topic; off after «Больше не показывать» on that card.
+	FreeWorkNotice bool `json:"freeWorkNotice"`
 }
 
 // SettingsService is bound to the UI: every exported method is callable from the page by its full name
@@ -108,6 +113,12 @@ func (s *SettingsService) SetRecognitionLoad(ctx context.Context, load string) (
 	return s.reply(ctx, "set recognition load", t, err)
 }
 
+// SetFreeWorkNotice turns the free-work card of the agent on or off (TASK-188).
+func (s *SettingsService) SetFreeWorkNotice(ctx context.Context, on bool) (Settings, error) {
+	t, err := s.uc.SetFreeWorkNotice(ctx, on)
+	return s.reply(ctx, "set free work notice", t, err)
+}
+
 // GetProfile returns the student profile.
 func (s *SettingsService) GetProfile(ctx context.Context) (StudentProfile, error) {
 	f, err := s.uc.Profile(ctx)
@@ -145,7 +156,7 @@ func (s *SettingsService) reply(ctx context.Context, op string, t preferences.To
 	}
 	out := Settings{
 		RecordingPromptsEnabled: t.RecordingPromptsEnabled, ProcessOnlyOnACPower: t.ProcessOnlyOnACPower,
-		RecognitionLoad: t.RecognitionLoad.String(),
+		RecognitionLoad: t.RecognitionLoad.String(), FreeWorkNotice: t.FreeWorkNotice,
 	}
 	if s.speed == nil {
 		return out, nil
