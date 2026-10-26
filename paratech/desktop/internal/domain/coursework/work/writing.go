@@ -279,26 +279,16 @@ func (w *Work) ApproveOutline(now time.Time) error {
 // (a new generation). The outline as it is changes nothing. An edit before the approval still waits for it. Errors:
 // ErrInvalidTransition (no outline yet), ErrInvalidReply.
 func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
-	if err := w.outlined(); err != nil {
+	items, old, err := w.outlineEdit(items)
+	if err != nil {
 		return err
-	}
-	old := map[int]Section{}
-	top := 0
-	for _, s := range w.writing.Sections {
-		old[s.Number] = s
-		top = max(top, s.Number)
-	}
-	switch w.writing.form() {
-	case formDeck:
-		items = slideItems(items, old)
-	case formLab:
-		items = labItems(items, old)
-	}
-	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(w.writing.form()); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidReply, err)
 	}
 	if w.sameOutline(items) {
 		return nil
+	}
+	top := 0
+	for n := range old {
+		top = max(top, n)
 	}
 	next := w.clone()
 	seen := map[int]bool{}
@@ -320,6 +310,34 @@ func (w *Work) EditOutline(items []OutlineItem, now time.Time) error {
 	}
 	next.writing.Sections = sections
 	return w.rewrite(next, now)
+}
+
+// SameOutline reports whether EditOutline(items) would change nothing: a valid edit that is the outline as it is.
+func (w *Work) SameOutline(items []OutlineItem) bool {
+	items, _, err := w.outlineEdit(items)
+	return err == nil && w.sameOutline(items)
+}
+
+// outlineEdit checks the student's edit of the outline and returns its items as the form keeps them (slide kinds,
+// lab parts filled) with the current sections by number.
+func (w *Work) outlineEdit(items []OutlineItem) ([]OutlineItem, map[int]Section, error) {
+	if err := w.outlined(); err != nil {
+		return nil, nil, err
+	}
+	old := map[int]Section{}
+	for _, s := range w.writing.Sections {
+		old[s.Number] = s
+	}
+	switch w.writing.form() {
+	case formDeck:
+		items = slideItems(items, old)
+	case formLab:
+		items = labItems(items, old)
+	}
+	if err := (Outline{Topic: w.writing.Topic, Items: items}).check(w.writing.form()); err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidReply, err)
+	}
+	return items, old, nil
 }
 
 // slideItems is the student's edit of a slide list with clean titles and the kinds filled: an empty kind keeps the

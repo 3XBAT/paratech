@@ -32,11 +32,12 @@ const writingRounds = 10
 
 // Log lines of the writing; none holds a text of the work or of the model.
 const (
-	opWriteStep    = "turnkey: writing step failed"
-	opWriteRefused = "turnkey: writing answer refused"
-	opWriteStale   = "turnkey: writing answer dropped, the step is not due any more"
-	opWriteStopped = "turnkey: writing stopped"
-	opWriteDone    = "turnkey: work written" //nolint:gosec // G101 false positive: a log line, not a credential
+	opWriteStep     = "turnkey: writing step failed"
+	opWriteRefused  = "turnkey: writing answer refused"
+	opWriteStale    = "turnkey: writing answer dropped, the step is not due any more"
+	opWriteStopped  = "turnkey: writing stopped"
+	opWriteJobState = "turnkey: writing job not read"
+	opWriteDone     = "turnkey: work written" //nolint:gosec // G101 false positive: a log line, not a credential
 )
 
 // StartWriting starts (or resumes) the writing of a confirmed work as work_writing jobs (TASK-131): the outline, then
@@ -58,10 +59,10 @@ func (s *Service) StartWriting(ctx context.Context, id shared.WorkID) (WritingSt
 	}
 	switch w.Status() {
 	case work.StatusDone:
-		return WritingStarted{View: viewOf(w)}, ErrAlreadyWritten
+		return WritingStarted{View: s.view(ctx, w)}, ErrAlreadyWritten
 	case work.StatusConfirmed:
 		if u, _ := w.Understanding(); u.WorkType == work.TypePresentation && s.writing.Slides == nil {
-			return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: no presentation renderer", ErrNotWritable)
+			return WritingStarted{View: s.view(ctx, w)}, fmt.Errorf("%w: no presentation renderer", ErrNotWritable)
 		}
 		if w, err = s.startWriting(ctx, w); err != nil {
 			return WritingStarted{}, err
@@ -69,12 +70,12 @@ func (s *Service) StartWriting(ctx context.Context, id shared.WorkID) (WritingSt
 	case work.StatusWriting:
 		switch w.Next().Kind {
 		case work.StepApprove:
-			return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: the outline waits for the student", ErrNotWritable)
+			return WritingStarted{View: s.view(ctx, w)}, fmt.Errorf("%w: the outline waits for the student", ErrNotWritable)
 		case work.StepBlocked:
-			return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: a step used its attempts, regenerate it", ErrNotWritable)
+			return WritingStarted{View: s.view(ctx, w)}, fmt.Errorf("%w: a step used its attempts, regenerate it", ErrNotWritable)
 		}
 	default:
-		return WritingStarted{View: viewOf(w)}, fmt.Errorf("%w: the requirements are not confirmed", ErrNotWritable)
+		return WritingStarted{View: s.view(ctx, w)}, fmt.Errorf("%w: the requirements are not confirmed", ErrNotWritable)
 	}
 	return s.enqueueWriting(ctx, w)
 }
@@ -114,18 +115,86 @@ func (s *Service) WritingGeneration(ctx context.Context, id shared.JobID) (int, 
 }
 
 // EditOutline keeps the student's outline: unchanged sections keep their text, changed and new ones are written
-// again by the next StartWriting; an outline that waits for the approval still waits. Refused while the writing job
-// runs (ErrWritingRunning). Errors: ErrNotConfigured, ErrNotFound, ErrInvalidRequest, ErrWritingRunning,
-// ErrUnavailable.
+// again by the next StartWriting; an outline that waits for the approval still waits. The outline as it is saves
+// nothing (the version stays). Refused while the writing job runs (ErrWritingRunning). Errors: ErrNotConfigured,
+// ErrNotFound, ErrInvalidRequest, ErrWritingRunning, ErrUnavailable.
 func (s *Service) EditOutline(ctx context.Context, id shared.WorkID, items []work.OutlineItem) (View, error) {
+	return s.editOutline(ctx, id, nil, items)
+}
+
+// EditOutlineAt is EditOutline of the work as the student saw it at version: a work that changed since is ErrChanged
+// and nothing is written (the editor was stale). Errors: those of EditOutline and ErrChanged.
+func (s *Service) EditOutlineAt(ctx context.Context, id shared.WorkID, version int64, items []work.OutlineItem) (View, error) {
+	return s.editOutline(ctx, id, &version, items)
+}
+
+// editOutline applies the edit, at version expected when it is set: the save compares the version it loaded, so an
+// edit that lost against another save is stale too.
+func (s *Service) editOutline(ctx context.Context, id shared.WorkID, expected *int64, items []work.OutlineItem) (View, error) {
 	if err := s.idle(ctx, id); err != nil {
 		return View{}, err
 	}
-	w, err := s.change(ctx, id, func(w *work.Work) error { return w.EditOutline(items, s.clock.Now()) })
+	for range saveAttempts {
+		w, err := s.get(ctx, id)
+		if err != nil {
+			return View{}, err
+		}
+		if expected != nil && w.Version() != *expected {
+			return View{}, fmt.Errorf("%w: version %d, the editor had %d", ErrChanged, w.Version(), *expected)
+		}
+		if w.SameOutline(items) {
+			return s.view(ctx, w), nil
+		}
+		if err := w.EditOutline(items, s.clock.Now()); err != nil {
+			return View{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		}
+		err = s.works.Save(ctx, w)
+		switch {
+		case err == nil:
+			return s.view(ctx, w), nil
+		case !errors.Is(err, shared.ErrVersionConflict):
+			return View{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		case expected != nil:
+			return View{}, fmt.Errorf("%w: %w", ErrChanged, err)
+		}
+		s.log.InfoContext(ctx, opSaveLost, slog.String("work", string(id)))
+	}
+	return View{}, fmt.Errorf("%w: the work keeps changing", ErrUnavailable)
+}
+
+// StopWriting is «Остановить»: the writing job of the work is cancelled. A queued or waiting job ends at once; a
+// running step gets its context cancelled and ends without storing its answer, so the job shows as active until the
+// step returns. The work is read again after the cancel: a step that ended meanwhile shows. The sections written stay;
+// StartWriting continues and Regenerate writes again. No job of the work runs: nothing changes. Errors:
+// ErrNotConfigured, ErrNotFound, ErrNotStopped, ErrUnavailable.
+func (s *Service) StopWriting(ctx context.Context, id shared.WorkID) (View, error) {
+	if s.writing == nil || s.writing.Canceller == nil {
+		return View{}, ErrNotConfigured
+	}
+	w, err := s.get(ctx, id)
 	if err != nil {
 		return View{}, err
 	}
-	return viewOf(w), nil
+	j, err := s.activeWriting(ctx, id)
+	if err != nil || j == nil {
+		return s.view(ctx, w), err
+	}
+	if cerr := s.writing.Canceller.Cancel(ctx, j.ID()); cerr != nil {
+		// The job may have ended meanwhile: then there is nothing to stop.
+		got, err := s.writing.Jobs.Get(ctx, j.ID())
+		switch {
+		case err != nil:
+			return View{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		case !got.Status().IsTerminal():
+			return View{}, fmt.Errorf("%w: %w", ErrNotStopped, cerr)
+		}
+	}
+	s.log.InfoContext(ctx, opWriteStopped, slog.String("work", string(id)), slog.String("job", j.ID().String()))
+	// A step may have saved a section or the file between the first read and the cancel.
+	if w, err = s.get(ctx, id); err != nil {
+		return View{}, err
+	}
+	return s.view(ctx, w), nil
 }
 
 // Regenerate is «Дополнительные указания → Сгенерировать заново» for section number (0: every section) with the
@@ -148,16 +217,42 @@ func (s *Service) ActiveWriting(ctx context.Context, id shared.WorkID) (shared.J
 	if s.writing == nil {
 		return "", false, ErrNotConfigured
 	}
+	j, err := s.activeWriting(ctx, id)
+	if err != nil || j == nil {
+		return "", false, err
+	}
+	return j.ID(), true, nil
+}
+
+// activeWriting returns the writing job of a work that is pending or running; nil when there is none.
+func (s *Service) activeWriting(ctx context.Context, id shared.WorkID) (*job.Job, error) {
 	j, err := s.writing.Jobs.LatestByKeyPrefix(ctx, WritingJobType, writingKeyPrefix(id))
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return "", false, nil
+		return nil, nil
 	case err != nil:
-		return "", false, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	case j.Status().IsTerminal():
-		return "", false, nil
+		return nil, nil
 	}
-	return j.ID(), true, nil
+	return j, nil
+}
+
+// view is the view of w with the writing job that runs for it, read now: a job that ended (or was stopped) shows no
+// more. A job that cannot be read is logged and left out, so the move the student made still answers.
+func (s *Service) view(ctx context.Context, w *work.Work) View {
+	v := viewOf(w)
+	if v.Writing == nil || s.writing == nil {
+		return v
+	}
+	j, err := s.activeWriting(ctx, w.ID())
+	switch {
+	case err != nil:
+		s.log.WarnContext(ctx, opWriteJobState, slog.String("work", string(w.ID())), slog.Any("cause", err))
+	case j != nil:
+		v.Writing.Active, v.Writing.Job, v.Writing.JobState = true, j.ID(), j.Status()
+	}
+	return v
 }
 
 // idle refuses a change of the outline while a writing job of the work runs.
@@ -297,14 +392,14 @@ func (s *Service) enqueueWriting(ctx context.Context, w *work.Work) (WritingStar
 			return WritingStarted{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		if created {
-			return WritingStarted{View: viewOf(w), Job: id, Created: true}, nil
+			return WritingStarted{View: s.view(ctx, w), Job: id, Created: true}, nil
 		}
 		existing, err := s.writing.Jobs.Get(ctx, id)
 		if err != nil {
 			return WritingStarted{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		if st := existing.Status(); !st.IsTerminal() || st == job.StatusCompleted {
-			return WritingStarted{View: viewOf(w), Job: id}, nil
+			return WritingStarted{View: s.view(ctx, w), Job: id}, nil
 		}
 	}
 	return WritingStarted{}, ErrWritingRetries
