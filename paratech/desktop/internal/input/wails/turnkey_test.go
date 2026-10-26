@@ -285,7 +285,7 @@ func TestTurnkeyWritingJobState(t *testing.T) {
 
 func helperView() turnkey.View {
 	return turnkey.View{
-		ID: "w1", Source: work.Source{Assignment: "a1"}, Status: work.StatusHelper, Round: 1, HasAnswer: true,
+		ID: "w1", Source: work.Source{Assignment: "a1"}, Sendable: true, Status: work.StatusHelper, Round: 1, HasAnswer: true,
 		Understanding: work.Understanding{WorkType: work.TypeLabReport, Requirements: work.Requirements{FileFormat: "dwg"}},
 		Edited:        []work.Field{work.FieldFileFormat}, Feasibility: work.FeasibleImpossible,
 		FeasibilityReason: "Чертёж в программе вуза",
@@ -305,7 +305,8 @@ func TestTurnkeyWorkJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"id":"w1","assignmentId":"a1","materialId":"","status":"helper","round":1,"questionRound":0,"questions":[],` +
+	want := `{"id":"w1","assignmentId":"a1","materialId":"","topic":"","subjectId":"","sendable":true,"status":"helper",` +
+		`"round":1,"questionRound":0,"questions":[],` +
 		`"hasCard":true,"card":{"workType":"lab_report","volume":"","fileFormat":"dwg","formatting":"","variant":"",` +
 		`"deadline":"","sources":""},"edited":["file_format"],"feasibility":"impossible",` +
 		`"feasibilityReason":"Чертёж в программе вуза","partial":false,"assumptions":[],` +
@@ -313,6 +314,59 @@ func TestTurnkeyWorkJSON(t *testing.T) {
 		`"answered":[{"round":1,"question":"Вариант?","answer":"3","default":true}],"writing":null,"version":4,"problem":"","message":""}`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// TASK-192: a work on a topic carries its text and subject, and is not sendable; an uploaded file is not either.
+func TestTurnkeyWorkOfATopic(t *testing.T) {
+	topic, err := work.NewTopic("ui:press-1", "История  Древней Руси", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name             string
+		src              work.Source
+		topic, subjectID string
+	}{
+		{"topic with a subject", work.Source{Topic: topic}, "История Древней Руси", "s1"},
+		{"uploaded file", work.Source{Material: "m1"}, "", ""},
+	}
+	for _, tt := range tests {
+		v := helperView()
+		v.Source, v.Sendable = tt.src, false
+		got, err := NewTurnkeyService(&fakeTurnkey{view: v}, discard()).Work(t.Context(), "w1")
+		if err != nil || got.Topic != tt.topic || got.SubjectID != tt.subjectID || got.Sendable || got.AssignmentID != "" {
+			t.Errorf("%s: %+v, %v", tt.name, got, err)
+		}
+	}
+}
+
+// TASK-192: AskStep words no connection, the quota and a refused answer apart from the generic error.
+func TestTurnkeyAskStepErrors(t *testing.T) {
+	tests := []struct {
+		err  error
+		want error
+	}{
+		{fmt.Errorf("%w: %w", turnkey.ErrReaderUnavailable, shared.ErrNetworkUnavailable), ErrTurnkeyStepOffline},
+		{fmt.Errorf("%w: %w", turnkey.ErrQuota, shared.ErrQuotaExceeded), ErrTurnkeyStepQuota},
+		{fmt.Errorf("%w: %w", turnkey.ErrReaderRefused, work.ErrInvalidAnswer), ErrTurnkeyStepRefused},
+		{turnkey.ErrNotConfigured, ErrTurnkeyNoStepHelp},
+		{turnkey.ErrInvalidRequest, ErrTurnkeyInvalid},
+		{fmt.Errorf("%w: %w", turnkey.ErrNotFound, shared.ErrNotFound), ErrTurnkeyNotFound},
+		{errors.New("disk"), ErrTurnkeyUnavailable},
+	}
+	texts := map[string]bool{}
+	for _, tt := range tests {
+		_, err := NewTurnkeyService(&fakeTurnkey{err: tt.err}, discard()).AskStep(t.Context(), "w1", 0, "Как начать?")
+		if !errors.Is(err, tt.want) {
+			t.Errorf("%v: AskStep = %v, want %v", tt.err, err, tt.want)
+		}
+		if err != nil && texts[err.Error()] {
+			t.Errorf("%v: the text %q is not its own", tt.err, err)
+		}
+		if err != nil {
+			texts[err.Error()] = true
+		}
 	}
 }
 

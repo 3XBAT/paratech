@@ -164,15 +164,17 @@ func specOf(req values.LLMRequest) (*hubv1.CompletionSpec, error) {
 		return nil, permanent(opComplete, ErrInvalidRequest)
 	}
 	op, ok := operationType(req.Operation())
-	if !ok {
+	maxOutput := req.MaxOutputTokens()
+	if !ok || maxOutput < 0 || maxOutput > values.MaxOutputTokensLimit {
 		return nil, permanent(opComplete, ErrInvalidRequest)
 	}
 	return &hubv1.CompletionSpec{
-		IdempotencyKey: req.IdempotencyKey(),
-		OperationType:  op,
-		ModelAlias:     req.ModelAlias(),
-		Instructions:   req.Instructions(),
-		UntrustedData:  req.UntrustedData(),
+		IdempotencyKey:  req.IdempotencyKey(),
+		OperationType:   op,
+		ModelAlias:      req.ModelAlias(),
+		Instructions:    req.Instructions(),
+		UntrustedData:   req.UntrustedData(),
+		MaxOutputTokens: uint32(maxOutput),
 	}, nil
 }
 
@@ -246,6 +248,7 @@ func resultOf(resp *hubv1.CompleteResponse) (values.LLMResult, error) {
 	if err != nil {
 		return values.LLMResult{}, permanent(opComplete, ErrBadResponse)
 	}
+	out.Replayed = res.GetReplayed()
 	return out, nil
 }
 

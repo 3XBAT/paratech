@@ -27,13 +27,13 @@ const (
 	ErrHomeworkUnavailable   = homeworkError("Не удалось выполнить действие. Попробуйте ещё раз.")
 	ErrHomeworkInvalidID     = homeworkError("Неверный идентификатор.")
 	ErrHomeworkNotFound      = homeworkError("Задание не найдено: обновите список.")
-	ErrDraftVersionNotFound  = homeworkError("Такой версии решения нет: обновите страницу.")
-	ErrDraftStale            = homeworkError("Решение изменилось: появилась новая версия. Обновите страницу и повторите.")
+	ErrDraftVersionNotFound  = homeworkError("Такой версии черновика нет: обновите страницу.")
+	ErrDraftStale            = homeworkError("Черновик изменился: появилась новая версия. Обновите страницу и повторите.")
 	ErrDraftInvalid          = homeworkError("Заголовок: одна строка до 200 символов, текст: до 16000 символов; оба не пустые.")
-	ErrDraftFull             = homeworkError("У решения уже 100 версий: больше добавить нельзя.")
+	ErrDraftFull             = homeworkError("У черновика уже 100 версий: больше добавить нельзя.")
 	ErrInstructionInvalid    = homeworkError("Инструкция слишком длинная (больше 4 КБ) или содержит недопустимые символы.")
-	ErrGenerateRetries       = homeworkError("Эта генерация уже много раз не удалась. Измените инструкцию или текст решения.")
-	ErrGenerationRunning     = homeworkError("Решение уже готовится. Дождитесь окончания и повторите.")
+	ErrGenerateRetries       = homeworkError("Эта генерация уже много раз не удалась. Измените инструкцию или текст черновика.")
+	ErrGenerationRunning     = homeworkError("Черновик уже готовится. Дождитесь окончания и повторите.")
 	ErrSendFormat            = homeworkError("Неизвестный формат вложения: выберите .docx или .txt.")
 	ErrGenerationNotFound    = homeworkError("Генерация не найдена: обновите страницу.")
 	ErrSendNotFound          = homeworkError("Отправка не найдена: подготовьте её ещё раз.")
@@ -97,10 +97,10 @@ var generationMessages = []struct {
 	err error
 	msg string
 }{
-	{homeworkflow.ErrDraftChanged, "Решение изменилось во время генерации. Сгенерируйте ещё раз."},
+	{homeworkflow.ErrDraftChanged, "Черновик изменился во время генерации. Сгенерируйте ещё раз."},
 	{homeworkflow.ErrDraftFull, string(ErrDraftFull)},
 	{homeworkflow.ErrDraftAssignmentGone, "Задание удалено."},
-	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: решение не подготовить."},
+	{homeworkflow.ErrDraftContextRefused, "Задание слишком длинное или содержит недопустимый текст: черновик не подготовить."},
 	{homeworkflow.ErrDraftInvalidAnswer, "Сервис конспектов ответил в неверном виде. Попробуйте ещё раз."},
 }
 

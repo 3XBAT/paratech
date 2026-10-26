@@ -27,6 +27,11 @@ const (
 	ErrTurnkeyStale       = turnkeyError("Работа изменилась: обновите карточку.")
 	ErrTurnkeyNotStopped  = turnkeyError("Не удалось остановить написание. Попробуйте ещё раз.")
 	ErrTurnkeyNoSource    = turnkeyError("Задание не найдено: возможно, его удалили.")
+
+	// AskStep: a question whose call did not go through; the work is not touched.
+	ErrTurnkeyStepOffline = turnkeyError("Нет связи с paratech: вопрос не отправлен. Повторите позже.")
+	ErrTurnkeyStepQuota   = turnkeyError("Лимит запросов исчерпан: ответить на вопрос сейчас нельзя.")
+	ErrTurnkeyStepRefused = turnkeyError("Ответ на вопрос не прошёл проверку. Спросите ещё раз или переформулируйте вопрос.")
 )
 
 // States of the writing job (TurnkeyWriting.JobState) while it is active.
@@ -108,10 +113,18 @@ type TurnkeyUseCase interface {
 // writing, done, helper or failed. Questions are set in questions (QuestionRound 1 or 2); Card and Edited once the
 // reader answered (HasCard); Helper in the helper mode and for a partial work (its Placeholders); Writing from the
 // start of the writing on (TASK-131).
+//
+// One of AssignmentID, MaterialID and Topic is set (TASK-187): Topic is the text of a work on a topic (the student's or
+// the agent's words: plain text only) and SubjectID its library subject ("" none, or a subject removed since: the
+// paper goes to «Входящие»). Sendable is true for a work of an assignment only: «Отправить преподавателю» is offered
+// for it alone (work.Sendable).
 type TurnkeyWork struct {
 	ID                string            `json:"id"`
 	AssignmentID      string            `json:"assignmentId"`
 	MaterialID        string            `json:"materialId"`
+	Topic             string            `json:"topic"`
+	SubjectID         string            `json:"subjectId"`
+	Sendable          bool              `json:"sendable"`
 	Status            string            `json:"status"`
 	Round             int               `json:"round"`
 	QuestionRound     int               `json:"questionRound"`
@@ -376,7 +389,9 @@ type TurnkeyStepAnswer struct {
 	Text string `json:"text"`
 }
 
-// AskStep is «Спросить по шагу»: a question about helper step number step (from 0).
+// AskStep is «Спросить по шагу»: a question about helper step number step (from 0). No connection, the quota and a
+// refused answer have texts of their own (ErrTurnkeyStepOffline, ErrTurnkeyStepQuota, ErrTurnkeyStepRefused): asking
+// again is a new try.
 func (s *TurnkeyService) AskStep(ctx context.Context, id string, step int, question string) (TurnkeyStepAnswer, error) {
 	text, err := s.core.AskStep(ctx, shared.WorkID(id), step, question)
 	switch {
@@ -384,6 +399,15 @@ func (s *TurnkeyService) AskStep(ctx context.Context, id string, step int, quest
 		return TurnkeyStepAnswer{Text: text}, nil
 	case errors.Is(err, turnkey.ErrNotConfigured):
 		return TurnkeyStepAnswer{}, ErrTurnkeyNoStepHelp
+	case errors.Is(err, turnkey.ErrReaderUnavailable):
+		s.log.Info(opTurnkeyStep, "err", err)
+		return TurnkeyStepAnswer{}, ErrTurnkeyStepOffline
+	case errors.Is(err, turnkey.ErrQuota):
+		s.log.Info(opTurnkeyStep, "err", err)
+		return TurnkeyStepAnswer{}, ErrTurnkeyStepQuota
+	case errors.Is(err, turnkey.ErrReaderRefused):
+		s.log.Info(opTurnkeyStep, "err", err)
+		return TurnkeyStepAnswer{}, ErrTurnkeyStepRefused
 	}
 	return TurnkeyStepAnswer{}, s.fail(opTurnkeyStep, err)
 }
@@ -444,6 +468,7 @@ func (s *TurnkeyService) fail(op string, err error) error {
 func workView(v turnkey.View) TurnkeyWork {
 	out := TurnkeyWork{
 		ID: string(v.ID), AssignmentID: string(v.Source.Assignment), MaterialID: string(v.Source.Material),
+		Topic: v.Source.Topic.Text(), SubjectID: string(v.Source.Topic.Subject()), Sendable: v.Sendable,
 		Status: string(v.Status), Round: v.Round, QuestionRound: v.QuestionRound, Questions: []TurnkeyQuestion{},
 		HasCard: v.HasAnswer, Edited: []string{}, Feasibility: string(v.Feasibility),
 		FeasibilityReason: v.FeasibilityReason, Partial: v.Partial, Assumptions: nonNilStrings(v.Assumptions),

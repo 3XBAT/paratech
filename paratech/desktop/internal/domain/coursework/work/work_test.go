@@ -320,6 +320,32 @@ func TestAskStep(t *testing.T) {
 	}
 }
 
+// TASK-192: every attempt of a question has the same data and a key of its own; attempt 1 keeps the question's key.
+func TestStepQuestionAttempt(t *testing.T) {
+	w := newWork(t)
+	mustRecord(t, w, answerOf(FeasibleImpossible, 0))
+	q, err := w.AskStep(1, "Какой масштаб?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]bool{}
+	for n := 1; n <= MaxAdviceAttempts; n++ {
+		a, ok := q.Attempt(n)
+		if !ok || a.Data() != q.Data() || keys[a.Key()] || (n == 1) != (a.Key() == q.Key()) {
+			t.Fatalf("attempt %d = %s, %v", n, a.Key(), ok)
+		}
+		keys[a.Key()] = true
+	}
+	for _, n := range []int{0, -1, MaxAdviceAttempts + 1} {
+		if a, ok := q.Attempt(n); ok || !a.IsZero() {
+			t.Errorf("attempt %d accepted", n)
+		}
+	}
+	if _, ok := (StepQuestion{}).Attempt(1); ok {
+		t.Error("an attempt of the zero question")
+	}
+}
+
 func TestRestore(t *testing.T) {
 	w := newWork(t)
 	mustRecord(t, w, answerOf(FeasibleFull, 1))

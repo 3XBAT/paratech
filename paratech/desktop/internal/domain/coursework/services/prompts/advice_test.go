@@ -44,8 +44,8 @@ func TestBuildStepAdvice(t *testing.T) {
 
 	data := req.UntrustedData()
 	if req.Operation() != values.OperationHomeworkDraft || req.ModelAlias() != "default" ||
-		req.IdempotencyKey() != q.Key()+":p1" {
-		t.Fatalf("request = %s %s %s", req.Operation(), req.ModelAlias(), req.IdempotencyKey())
+		req.IdempotencyKey() != q.Key()+":p2" || req.MaxOutputTokens() != StepAdviceMaxOutputTokens {
+		t.Fatalf("request = %s %s %s %d", req.Operation(), req.ModelAlias(), req.IdempotencyKey(), req.MaxOutputTokens())
 	}
 	// The step and the question stay inside the one data block: the markers in them are escaped.
 	if strings.Count(data, DataClose) != 1 || !strings.HasPrefix(data, DataOpen+"\n") || !strings.HasSuffix(data, "\n"+DataClose) ||
