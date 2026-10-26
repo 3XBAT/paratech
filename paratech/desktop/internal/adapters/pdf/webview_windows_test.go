@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -309,6 +310,61 @@ func TestPrintDoesNotRunScripts(t *testing.T) {
 	}
 }
 
+// fivePages is a static document of five pages. Single quotes only: it is also embedded in a double-quoted
+// attribute.
+const fivePages = `<p>1</p><div style='break-before:page'>2</div><div style='break-before:page'>3</div>` +
+	`<div style='break-before:page'>4</div><div style='break-before:page'>5</div>`
+
+var fontObject = regexp.MustCompile(`/Type\s*/Font\b`)
+
+// TestPrintCancelsOtherNavigations holds the loaded page before printing so that a later navigation would have
+// happened. Both checks fail when the NavigationStarting cancels are disabled. A refresh to a data: URL would not
+// do: Chromium blocks top-level data: navigations itself; and an iframe cannot change the outer page count, so
+// the iframe case checks that its text (the only text there) never reached the PDF.
+func TestPrintCancelsOtherNavigations(t *testing.T) {
+	requireRuntime(t)
+	tests := []struct {
+		name      string
+		html      string
+		wantPages int
+		wantFonts bool
+	}{
+		{
+			name: "meta refresh to a one-page document",
+			html: `<!DOCTYPE html><html><head><meta charset="utf-8">` +
+				`<meta http-equiv="refresh" content="0;url=about:blank"></head>` +
+				`<body>` + fivePages + `</body></html>`,
+			wantPages: 5,
+			wantFonts: true,
+		},
+		{
+			name: "iframe with a data: document",
+			html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>` +
+				`<iframe src="data:text/html,` + fivePages + `"></iframe></body></html>`,
+			wantPages: 1,
+			wantFonts: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := newTestPrinter(t)
+			p.holdBeforePrint = 2 * time.Second
+
+			out, err := p.Print(printCtx(t), []byte(tt.html))
+
+			if err != nil {
+				t.Fatalf("Print: %v", err)
+			}
+			if n := pages(t, out); n != tt.wantPages {
+				t.Fatalf("pages = %d, want %d", n, tt.wantPages)
+			}
+			if fonts := fontObject.Match(out); fonts != tt.wantFonts {
+				t.Fatalf("PDF has fonts = %v, want %v", fonts, tt.wantFonts)
+			}
+		})
+	}
+}
+
 func TestRemoveStaleResultsOnlyOurTempFiles(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]bool{ // name → removed
@@ -345,5 +401,11 @@ func TestOpErrorKeepsKind(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "0x80004005") || !strings.Contains(err.Error(), opPrint) {
 		t.Fatalf("error text lacks step or hresult: %q", err.Error())
+	}
+
+	// Garbage above the low 32 bits of a register is not an HRESULT.
+	high := ^uintptr(0) &^ math.MaxUint32
+	if msg := failure(opPrint, high, "").Error(); strings.Contains(msg, "hresult") {
+		t.Fatalf("zero HRESULT printed: %q", msg)
 	}
 }

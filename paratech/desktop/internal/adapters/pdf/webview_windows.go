@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ErrUnsupported means this computer cannot print to PDF: no WebView2 Runtime or one older than 98.0.1108.43.
@@ -64,7 +65,7 @@ type opError struct {
 
 func (e *opError) Error() string {
 	msg := "pdf: " + e.op
-	if e.hr != 0 {
+	if hresult(e.hr) != 0 {
 		msg += fmt.Sprintf(": hresult 0x%08x", hresult(e.hr))
 	}
 	if e.detail != "" {
@@ -89,9 +90,14 @@ type Printer struct {
 
 	// enableScripts is set only by tests, to prove that the script check would notice a running script.
 	enableScripts bool
+	// holdBeforePrint is set only by tests: the page stays loaded this long before printing, so a later
+	// navigation (meta refresh, iframe) has time to happen unless it is cancelled.
+	holdBeforePrint time.Duration
 }
 
-// NewPrinter returns a Printer that keeps the WebView2 profile and temporary files under dataDir.
+// NewPrinter returns a Printer that keeps the WebView2 profile and temporary files under dataDir. dataDir must be
+// exclusive to this Printer: not the app's (Wails) WebView2 profile folder and not shared with a second Printer;
+// stale print-*.pdf files in it are deleted.
 func NewPrinter(dataDir string, log *slog.Logger) *Printer {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -159,11 +165,12 @@ func (p *Printer) print(ctx context.Context, html string) ([]byte, error) {
 	}
 
 	s := &session{
-		runtime:       rt,
-		userDataDir:   dataDir,
-		html:          html,
-		pdfPath:       path,
-		enableScripts: p.enableScripts,
+		runtime:         rt,
+		userDataDir:     dataDir,
+		html:            html,
+		pdfPath:         path,
+		enableScripts:   p.enableScripts,
+		holdBeforePrint: p.holdBeforePrint,
 	}
 	done := make(chan error, 1)
 	go func() { done <- s.run(ctx) }()

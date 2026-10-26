@@ -7,6 +7,7 @@ import (
 	"errors"
 	"runtime"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -60,6 +61,8 @@ const (
 	createEnvironmentInternalFlag = 1 // first argument of the internal entry point, as the official loader passes it
 )
 
+// IIDs checked against WebView2.h (vendored in github.com/webview/webview_go, libs/mswebview2/include) and, for
+// the environment ones, github.com/wailsapp/go-webview2.
 var (
 	iidEnvironmentCompletedHandler = windows.GUID{Data1: 0x4e8a3389, Data2: 0xc9d8, Data3: 0x4bd2,
 		Data4: [8]byte{0xb6, 0xb5, 0x12, 0x4f, 0xee, 0x6c, 0xc1, 0x4d}}
@@ -84,6 +87,8 @@ type session struct {
 	html          string
 	pdfPath       string
 	enableScripts bool
+
+	holdBeforePrint time.Duration
 }
 
 // run owns a locked OS thread for the whole call: WebView2 objects belong to the STA thread that created them
@@ -138,6 +143,9 @@ func (s *session) run(ctx context.Context) error {
 	if err := s.navigate(ctx, webview); err != nil {
 		return err
 	}
+	if err := s.hold(ctx); err != nil {
+		return err
+	}
 	return s.printToPdf(ctx, env, webview)
 }
 
@@ -172,6 +180,8 @@ func (s *session) createEnvironment(ctx context.Context) (*comObject, error) {
 	defer handlerRelease(handler)
 
 	// No options object: defaults are what we need, and the user data folder is a plain argument.
+	// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and similar env/registry overrides are not neutralised here (the app
+	// clears them process-wide through Wails); per the WebView2 docs they take precedence over an options object too.
 	if hr := createEnvironment(proc, createEnvironmentInternalFlag, runtimeTypeInstalled, folder, handler); failed(hr) {
 		return nil, failure(opEnvironment, hr, "create")
 	}
@@ -256,16 +266,20 @@ func (s *session) navigate(ctx context.Context, webview *comObject) error {
 		done       bool
 		success    bool
 	)
+	// A renderer crash is noticed only at the ctx deadline (no ProcessFailed handler); the caller sets the timeout.
 	starting := newEventHandler(iidNavigationStartingHandler, func(args *comObject) {
-		if allowOne {
-			allowOne = false
-			id, hr := args.getUint64(slotStartingGetNavigationID)
-			if !failed(hr) {
-				ownID, ownStarted = id, true
-				return
-			}
+		if !allowOne {
+			_ = args.putBool(slotStartingPutCancel, true)
+			return
 		}
-		_ = args.putBool(slotStartingPutCancel, true)
+		allowOne = false
+		id, hr := args.getUint64(slotStartingGetNavigationID)
+		if failed(hr) {
+			// Without the id our completion cannot be recognised; fail now instead of waiting for the deadline.
+			done, success = true, false
+			return
+		}
+		ownID, ownStarted = id, true
 	})
 	defer handlerRelease(starting)
 
@@ -308,6 +322,17 @@ func (s *session) navigate(ctx context.Context, webview *comObject) error {
 		return failure(opNavigate, 0, "navigation failed")
 	}
 	return nil
+}
+
+// hold keeps the message loop running for holdBeforePrint (tests only; zero in production).
+func (s *session) hold(ctx context.Context) error {
+	if s.holdBeforePrint <= 0 {
+		return nil
+	}
+	holdCtx, cancel := context.WithTimeout(ctx, s.holdBeforePrint)
+	defer cancel()
+	_ = pumpUntil(holdCtx, func() bool { return false })
+	return ctx.Err()
 }
 
 func (s *session) printToPdf(ctx context.Context, env, webview *comObject) error {
