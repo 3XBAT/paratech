@@ -143,7 +143,7 @@ func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 		return ReasonSecondWrite, nil
 	case f.Triage == TriagePartly || f.Triage == TriageImpossible:
 		return ReasonTriage, nil
-	case r.Paid && !(f.FreeTopic && t == values.ToolTriageAssignment) &&
+	case r.Paid && (!f.FreeTopic || t != values.ToolTriageAssignment) &&
 		(f.CostMicroUSD <= 0 || f.CostMicroUSD > PlanThresholdMicroUSD):
 		return ReasonCostly, nil
 	}
