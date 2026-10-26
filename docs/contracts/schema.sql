@@ -705,14 +705,21 @@ ALTER TABLE assignments ADD COLUMN material_id TEXT REFERENCES materials (id) ON
 CREATE UNIQUE INDEX idx_assignments_material_source ON assignments (material_id, source_index)
     WHERE material_id IS NOT NULL AND source_index IS NOT NULL;
 
--- works (migration 0026): aggregate coursework/work. Exactly one source: an assignment or a library material (an
--- uploaded assignment file); a source has at most one work that has not failed. round is the round of the pending or
--- last reader call, attempt the attempt of the pending one. edit_* are the student's edits of the card (NULL: the
--- reader's value is shown).
+-- works (migration 0026, rebuilt by 0031): aggregate coursework/work. Exactly one source: an assignment, a library
+-- material (an uploaded assignment file) or a topic without an assignment (TASK-187: topic is the clean one-line text,
+-- untrusted data; topic_request the key of the request that asked for it; topic_subject_id the subject chosen, without
+-- a foreign key, so a work outlives a removed subject). A source (a topic by its request) has at most one work that
+-- has not failed. round is the round of the pending or last reader call, attempt the attempt of the pending one.
+-- edit_* are the student's edits of the card (NULL: the reader's value is shown). writing (migration 0028) is the
+-- writing state in its canonical JSON (work.Writing.Encode), read back with work.ParseWriting and checked by the
+-- aggregate; NULL before the writing starts.
 CREATE TABLE works (
     id                 TEXT    NOT NULL PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
     assignment_id      TEXT    REFERENCES assignments (id) ON DELETE CASCADE,
     material_id        TEXT    REFERENCES materials (id) ON DELETE CASCADE,
+    topic_request      TEXT    CHECK (topic_request IS NULL OR length(topic_request) BETWEEN 1 AND 128),
+    topic              TEXT    CHECK (topic IS NULL OR length(topic) BETWEEN 1 AND 500),
+    topic_subject_id   TEXT    CHECK (topic_subject_id IS NULL OR length(topic_subject_id) BETWEEN 1 AND 128),
     status             TEXT    NOT NULL CHECK (status IN ('triage', 'questions', 'review', 'confirmed', 'writing', 'done', 'helper', 'failed')),
     round              INTEGER NOT NULL CHECK (round BETWEEN 1 AND 3),
     attempt            INTEGER NOT NULL CHECK (attempt BETWEEN 1 AND 3),
@@ -723,13 +730,17 @@ CREATE TABLE works (
     edit_variant       TEXT    CHECK (edit_variant IS NULL OR length(edit_variant) <= 200),
     edit_deadline      TEXT    CHECK (edit_deadline IS NULL OR length(edit_deadline) <= 200),
     edit_sources       TEXT    CHECK (edit_sources IS NULL OR length(edit_sources) <= 200),
+    writing            TEXT    CHECK (writing IS NULL OR json_valid(writing)),
     version            INTEGER NOT NULL DEFAULT 0,                          -- optimistic concurrency (ADR-0004)
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL,
-    CHECK ((assignment_id IS NULL) <> (material_id IS NULL))
+    CHECK ((assignment_id IS NOT NULL) + (material_id IS NOT NULL) + (topic IS NOT NULL) = 1),
+    CHECK ((topic IS NULL) = (topic_request IS NULL)),
+    CHECK (topic IS NOT NULL OR topic_subject_id IS NULL)
 );
 CREATE UNIQUE INDEX idx_works_assignment ON works (assignment_id) WHERE assignment_id IS NOT NULL AND status <> 'failed';
 CREATE UNIQUE INDEX idx_works_material ON works (material_id) WHERE material_id IS NOT NULL AND status <> 'failed';
+CREATE UNIQUE INDEX idx_works_topic ON works (topic_request) WHERE topic_request IS NOT NULL AND status <> 'failed';
 
 -- work_rounds (migration 0026): one row per answered reader call of a work, saved with it (the work carries the
 -- version). answer is the reader's checked answer in its canonical JSON (work.Answer.Encode), untrusted data read back
@@ -759,11 +770,6 @@ CREATE TABLE answers (
     sources     TEXT    NOT NULL CHECK (json_valid(sources)),
     created_at  INTEGER NOT NULL
 );
-
--- works.writing (migration 0028): the writing state of a work in its canonical JSON (work.Writing.Encode), read back
--- with work.ParseWriting and checked by the aggregate; NULL before the writing starts. Saved with the work under its
--- version.
-ALTER TABLE works ADD COLUMN writing TEXT CHECK (writing IS NULL OR json_valid(writing));
 
 -- ticket_sets (migration 0029): aggregate coursework/ticketset, saved with the optimistic-concurrency protocol of
 -- ADR-0004(d). subject_id is the subject whose lessons answer the tickets, material_id the material the list was read

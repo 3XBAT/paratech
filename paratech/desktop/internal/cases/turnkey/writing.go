@@ -287,6 +287,9 @@ func (s *Service) startWriting(ctx context.Context, w *work.Work) (*work.Work, e
 // shows them (cases/homeworkflow), the library subject they name; for an uploaded file its subject. Local names only.
 func (s *Service) snapshot(ctx context.Context, w *work.Work) (work.Snapshot, error) {
 	src := w.Source()
+	if !src.Topic.IsZero() {
+		return s.topicSnapshot(ctx, src.Topic)
+	}
 	var snap work.Snapshot
 	if src.Material != "" {
 		m, _, err := s.materials.MaterialText(ctx, src.Material)
@@ -747,6 +750,9 @@ func (s *Service) student(ctx context.Context) (homeworkdoc.Student, error) {
 // its manual in Assignment, read; an uploaded file without text leaves nothing to write from, so it is gone.
 func (s *Service) writingTexts(ctx context.Context, w *work.Work) (work.Texts, error) {
 	src := w.Source()
+	if !src.Topic.IsZero() {
+		return work.Texts{Assignment: src.Topic.Text(), Manual: work.ManualNone}, nil
+	}
 	if src.Material != "" {
 		m, text, err := s.materials.MaterialText(ctx, src.Material)
 		switch {

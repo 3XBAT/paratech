@@ -107,6 +107,10 @@ type View struct {
 	Round   int // the round of the pending or last reader call, 1..3
 	Attempt int // the attempt of the pending reader call
 
+	// A work of a topic (Source.Topic, TASK-187) has no assignment, its text untrusted: it is written and exported,
+	// never sent to a teacher. Sendable is set for a work of an assignment only (work.Sendable).
+	Sendable bool
+
 	// QuestionRound (1 or 2) and Questions are set while questions wait (QuestionsCard).
 	QuestionRound int
 	Questions     []work.Question
@@ -149,6 +153,7 @@ func viewOf(w *work.Work) View {
 		ID: w.ID(), Source: w.Source(), Status: w.Status(), Round: w.Round(), Attempt: w.Attempt(),
 		Partial: w.Partial(), Writing: writingViewOf(w), Version: w.Version(), UpdatedAt: w.UpdatedAt(),
 	}
+	v.Sendable = w.Sendable() == nil
 	v.QuestionRound, v.Questions = w.Questions()
 	if a, ok := w.Latest(); ok {
 		v.HasAnswer = true

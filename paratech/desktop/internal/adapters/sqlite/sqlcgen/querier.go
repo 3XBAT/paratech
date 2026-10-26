@@ -55,6 +55,8 @@ type Querier interface {
 	GetActiveWorkOfAssignment(ctx context.Context, assignmentID sql.NullString) (Work, error)
 	// The work of a library material that has not failed; at most one (idx_works_material).
 	GetActiveWorkOfMaterial(ctx context.Context, materialID sql.NullString) (Work, error)
+	// The work of a topic request that has not failed; at most one (idx_works_topic).
+	GetActiveWorkOfTopic(ctx context.Context, topicRequest sql.NullString) (Work, error)
 	GetAgentAction(ctx context.Context, id string) (AgentAction, error)
 	GetAgentActionByCall(ctx context.Context, arg GetAgentActionByCallParams) (AgentAction, error)
 	// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action

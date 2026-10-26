@@ -108,6 +108,20 @@ it cannot do the work whole — then help instead. Everything the model says abo
 - Storage: `works.writing` gains optional `lab` and section `part` (no migration); a paper's stored form and content
   key are unchanged; a lab report written as a paper before this stays a paper.
 
+## Addendum (TASK-187): a work without an assignment
+- **Source «topic»**: a work may be made from a topic instead of an assignment or an uploaded file (exactly one of
+  the three). The topic is one clean line: format characters (bidi, zero-width) dropped, spaces collapsed, at most 500
+  characters; empty, a line break or another control character is refused. An optional library subject goes with it
+  (none: the paper is filed into «Входящие», as for a subject removed since).
+- **Reader**: `TRIAGE_ASSIGNMENT` gets the topic as the assignment text, data and never an instruction (ADR-0022); no
+  Hub, catalog or proto change. Same keys per work, round and attempt; the writing gets it as its assignment text.
+- **Request key**: a topic carries the key of the explicit action that asked for it (the agent's call, the student's
+  press). The same key gets its work back (a replay pays nothing); a new action is a new work even for the same text;
+  a key is never reused for another topic. Storage: `works.topic_request`, `topic`, `topic_subject_id` (migration
+  0031 rebuilds `works` and `work_rounds` for the three-way CHECK).
+- **Rules**: written and exported like any work; never sent to a teacher (`work.ErrNoAssignment`, `no_assignment` for
+  the send of TASK-180); `View.Sendable` is false. File names and titles go through the existing safe-name rules.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.

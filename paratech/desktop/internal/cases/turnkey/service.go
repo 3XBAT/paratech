@@ -68,10 +68,10 @@ func New(d Deps) (*Service, error) {
 	}, nil
 }
 
-// Triage starts the work of an assignment or an uploaded file and asks the reader (a paid call, round 1). A source
-// that has a work already (not failed) gets it back with Created false: its due call is asked again if it has one,
-// else nothing is paid. The call is idempotent per work, round and attempt: a repeat after a lost answer is replayed
-// by the Hub for free.
+// Triage starts the work of an assignment, an uploaded file or a topic (TriageTopic) and asks the reader (a paid call,
+// round 1). A source that has a work already (not failed) gets it back with Created false: its due call is asked
+// again if it has one, else nothing is paid; a topic is found by its request key. The call is idempotent per work,
+// round and attempt: a repeat after a lost answer is replayed by the Hub for free.
 //
 // A failed reader call keeps the work with its call due: the view comes back with the error. Errors:
 // ErrInvalidRequest, ErrSourceNotFound, ErrNoText, ErrReaderUnavailable, ErrQuota, ErrReaderRefused, ErrUnavailable.
@@ -149,8 +149,8 @@ func (s *Service) Work(ctx context.Context, id shared.WorkID) (View, error) {
 
 // WorkOf returns the work of a source that has not failed. Errors: ErrNotFound, ErrInvalidRequest, ErrUnavailable.
 func (s *Service) WorkOf(ctx context.Context, src work.Source) (View, error) {
-	if (src.Assignment == "") == (src.Material == "") {
-		return View{}, fmt.Errorf("%w: exactly one source", ErrInvalidRequest)
+	if err := src.Validate(); err != nil {
+		return View{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
 	w, err := s.works.ActiveOf(ctx, src)
 	if err != nil {
@@ -206,10 +206,13 @@ func (s *Service) Remove(ctx context.Context, id shared.WorkID, expected int64) 
 
 // workOf returns the active work of src, or a new saved one (created).
 func (s *Service) workOf(ctx context.Context, src work.Source) (*work.Work, bool, error) {
+	if err := src.Validate(); err != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
 	w, err := s.works.ActiveOf(ctx, src)
 	switch {
 	case err == nil:
-		return w, false, nil
+		return sameSource(w, src)
 	case !errors.Is(err, shared.ErrNotFound):
 		return nil, false, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -227,7 +230,7 @@ func (s *Service) workOf(ctx context.Context, src work.Source) (*work.Work, bool
 		if gerr != nil {
 			return nil, false, s.loadError(gerr)
 		}
-		return got, false, nil
+		return sameSource(got, src)
 	case errors.Is(err, shared.ErrConflict):
 		return nil, false, fmt.Errorf("%w: %w", ErrSourceNotFound, err)
 	}
@@ -356,8 +359,12 @@ func (s *Service) readerError(err error) error {
 }
 
 // texts reads the assignment text and the teacher's material of a source. An assignment's own material is optional
-// context: when it cannot be read the assignment is asked about alone. An uploaded file is the assignment itself.
+// context: when it cannot be read the assignment is asked about alone. An uploaded file is the assignment itself, as is
+// a topic: the reader gets it as the assignment text, data and never an instruction (ADR-0022).
 func (s *Service) texts(ctx context.Context, src work.Source) (assignmentText, materialText string, err error) {
+	if !src.Topic.IsZero() {
+		return src.Topic.Text(), "", nil
+	}
 	if src.Material != "" {
 		_, text, err := s.materials.MaterialText(ctx, src.Material)
 		if err != nil {
