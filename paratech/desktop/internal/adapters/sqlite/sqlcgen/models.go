@@ -415,6 +415,9 @@ type Work struct {
 	ID             string
 	AssignmentID   sql.NullString
 	MaterialID     sql.NullString
+	TopicRequest   sql.NullString
+	Topic          sql.NullString
+	TopicSubjectID sql.NullString
 	Status         string
 	Round          int64
 	Attempt        int64
@@ -425,10 +428,10 @@ type Work struct {
 	EditVariant    sql.NullString
 	EditDeadline   sql.NullString
 	EditSources    sql.NullString
+	Writing        sql.NullString
 	Version        int64
 	CreatedAt      int64
 	UpdatedAt      int64
-	Writing        sql.NullString
 }
 
 type WorkRound struct {

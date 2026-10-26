@@ -49,11 +49,19 @@ func (f *fakeWorks) ActiveOf(_ context.Context, src work.Source) (*work.Work, er
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, st := range f.rows {
-		if st.Source == src && st.Status != work.StatusFailed {
+		if sourceKey(st.Source) == sourceKey(src) && st.Status != work.StatusFailed {
 			return work.Restore(st)
 		}
 	}
 	return nil, shared.ErrNotFound
+}
+
+// sourceKey identifies a source as the store does: its id, or the request key of a topic.
+func sourceKey(s work.Source) string {
+	if !s.Topic.IsZero() {
+		return "topic:" + s.Topic.Request()
+	}
+	return string(s.Assignment) + string(s.Material)
 }
 
 func (f *fakeWorks) Save(_ context.Context, w *work.Work) error {
@@ -71,12 +79,12 @@ func (f *fakeWorks) Save(_ context.Context, w *work.Work) error {
 	switch {
 	case st.Version == 0 && ok, st.Version > 0 && (!ok || stored.Version != st.Version):
 		return shared.ErrVersionConflict
-	case st.Version == 0 && !f.sources[string(st.Source.Assignment)+string(st.Source.Material)]:
+	case st.Version == 0 && st.Source.Topic.IsZero() && !f.sources[sourceKey(st.Source)]:
 		return shared.ErrConflict
 	}
 	if st.Version == 0 {
 		for _, other := range f.rows {
-			if other.Source == st.Source && other.Status != work.StatusFailed {
+			if sourceKey(other.Source) == sourceKey(st.Source) && other.Status != work.StatusFailed {
 				return shared.ErrDuplicate
 			}
 		}
