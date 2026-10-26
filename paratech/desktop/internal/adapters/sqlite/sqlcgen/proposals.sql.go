@@ -12,7 +12,7 @@ import (
 
 const getProposal = `-- name: GetProposal :one
 
-SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format, work_id FROM proposals WHERE id = ?1
+SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format, work_id, attachment_name FROM proposals WHERE id = ?1
 `
 
 // Action proposals of the LLM (PRD section 13.3) with the optimistic-concurrency protocol of ADR-0004(d).
@@ -39,18 +39,19 @@ func (q *Queries) GetProposal(ctx context.Context, id string) (Proposal, error) 
 		&i.UpdatedAt,
 		&i.AttachmentFormat,
 		&i.WorkID,
+		&i.AttachmentName,
 	)
 	return i, err
 }
 
 const insertProposal = `-- name: InsertProposal :exec
 INSERT INTO proposals (id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256,
-                       attachment_size, assignment_title, attachment_format, work_id, confirmed_at, executed_at, version,
-                       created_at, updated_at)
+                       attachment_size, assignment_title, attachment_format, work_id, attachment_name, confirmed_at,
+                       executed_at, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6,
         ?7, ?8, ?9, ?10, ?11,
         ?12, ?13, ?14, ?15,
-        ?16, 1, ?17, ?18)
+        ?16, ?17, 1, ?18, ?19)
 `
 
 type InsertProposalParams struct {
@@ -68,6 +69,7 @@ type InsertProposalParams struct {
 	AssignmentTitle  string
 	AttachmentFormat string
 	WorkID           string
+	AttachmentName   string
 	ConfirmedAt      sql.NullInt64
 	ExecutedAt       sql.NullInt64
 	CreatedAt        int64
@@ -91,6 +93,7 @@ func (q *Queries) InsertProposal(ctx context.Context, arg InsertProposalParams) 
 		arg.AssignmentTitle,
 		arg.AttachmentFormat,
 		arg.WorkID,
+		arg.AttachmentName,
 		arg.ConfirmedAt,
 		arg.ExecutedAt,
 		arg.CreatedAt,
@@ -100,7 +103,7 @@ func (q *Queries) InsertProposal(ctx context.Context, arg InsertProposalParams) 
 }
 
 const listProposalsByStatus = `-- name: ListProposalsByStatus :many
-SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format, work_id FROM proposals
+SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format, work_id, attachment_name FROM proposals
 WHERE status = ?1
 ORDER BY created_at DESC, id
 LIMIT ?2
@@ -142,6 +145,7 @@ func (q *Queries) ListProposalsByStatus(ctx context.Context, arg ListProposalsBy
 			&i.UpdatedAt,
 			&i.AttachmentFormat,
 			&i.WorkID,
+			&i.AttachmentName,
 		); err != nil {
 			return nil, err
 		}
@@ -186,8 +190,8 @@ type UpdateProposalParams struct {
 }
 
 // Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
-// format chosen before the validation, the work of a send and the creation time never change, so they are not written
-// again.
+// format chosen before the validation, the work of a send, its file name pinned before the first save and the creation
+// time never change, so they are not written again.
 func (q *Queries) UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateProposal,
 		arg.Status,

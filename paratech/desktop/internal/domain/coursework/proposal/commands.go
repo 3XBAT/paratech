@@ -72,18 +72,23 @@ func (p *Proposal) EmailCommand() (EmailCommand, error) {
 		confirmed: p.confirmedAt}, nil
 }
 
-// WorkCopyRef is the copy of the work's file that a send_work_email attaches: exports/sent/<proposal id>/ and
-// CopyName of materialName, the library name of the file. One directory per proposal, so a repeated execution writes
-// the same file and another send never overwrites it. Another kind wraps ErrWrongKind.
+// WorkCopyRef is the copy of the work's file that a send_work_email attaches: exports/sent/<proposal id>/ and the name
+// pinned at validation (AttachmentName). materialName, the library name of the file now, is read only for a send
+// stored before the name was pinned (its CopyName). One directory per proposal, so a repeated execution writes the
+// same file and another send never overwrites it. Another kind wraps ErrWrongKind.
 func (p *Proposal) WorkCopyRef(materialName string) (shared.ArtifactRef, error) {
 	if p.kind != KindSendWork {
 		return shared.ArtifactRef{}, fmt.Errorf("%w: %s, not %s", ErrWrongKind, p.kind, KindSendWork)
 	}
-	return shared.NewArtifactRef(shared.ArtifactExports, sentDir+"/"+p.id.String()+"/"+CopyName(materialName, p.format))
+	name := p.copyName
+	if name == "" {
+		name = CopyName(materialName, p.format)
+	}
+	return shared.NewArtifactRef(shared.ArtifactExports, sentDir+"/"+p.id.String()+"/"+name)
 }
 
-// WorkEmailCommand returns the command of a CONFIRMED send_work_email proposal: the copy WorkCopyRef(materialName)
-// as the attachment, with the content pinned at validation. The use case writes the copy from AttachmentSource before
+// WorkEmailCommand returns the command of a CONFIRMED send_work_email proposal: the copy WorkCopyRef (materialName
+// only for a send without a pinned name) as the attachment, with the content pinned at validation. The use case writes the copy from AttachmentSource before
 // the command reaches the mailer, which sends it only if the bytes match the pinned digest.
 func (p *Proposal) WorkEmailCommand(materialName string) (EmailCommand, error) {
 	if err := p.ready(KindSendWork); err != nil {

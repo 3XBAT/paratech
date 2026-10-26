@@ -45,6 +45,7 @@ type Proposal struct {
 	attachment      Digest    // the export content pinned at validation; email proposals only
 	assignmentTitle string    // the heading of the export file, frozen at validation; export proposals only
 	format          Format    // the attachment chosen before validation; email proposals only
+	copyName        string    // the file name the teacher gets, pinned at validation; send_work_email only
 	createdAt       time.Time
 	updatedAt       time.Time
 	confirmedAt     time.Time
@@ -243,10 +244,13 @@ type State struct {
 	AssignmentTitle  string        // export proposals once validated; else empty
 	AttachmentFormat Format        // email proposals; empty: FormatText (stored before TASK-094); else empty
 	WorkID           shared.WorkID // send_work_email only; else empty
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	ConfirmedAt      time.Time
-	ExecutedAt       time.Time
+	// AttachmentName is the CopyName pinned at validation (send_work_email only; empty before validation and for a
+	// send stored before TASK-192, which takes the library name at execution).
+	AttachmentName string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ConfirmedAt    time.Time
+	ExecutedAt     time.Time
 }
 
 // Restore rebuilds a stored proposal without side effects; it checks that the state is consistent, so a tampered row
@@ -334,6 +338,9 @@ func Restore(s State) (*Proposal, error) {
 	case p.kind.NeedsAttachment() && !p.kind.allows(format), !p.kind.NeedsAttachment() && format != "":
 		return bad("an attachment format the kind attaches exists exactly for an email proposal")
 	}
+	if s.AttachmentName != "" && (p.kind != KindSendWork || !past[s.Status] || !validCopyName(s.AttachmentName, format)) {
+		return bad("a pinned file name exists only for a validated send of a work")
+	}
 	confirmed := s.Status == StatusConfirmed || s.Status == StatusExecuted || s.Status == StatusStale
 	if confirmed == s.ConfirmedAt.IsZero() || (s.Status == StatusExecuted) == s.ExecutedAt.IsZero() {
 		return bad("confirmation and execution times do not match the status")
@@ -347,6 +354,7 @@ func Restore(s State) (*Proposal, error) {
 	p.attachment = attachment
 	p.assignmentTitle = strings.TrimSpace(s.AssignmentTitle)
 	p.format = format
+	p.copyName = s.AttachmentName
 	p.createdAt, p.updatedAt = s.CreatedAt, s.UpdatedAt
 	p.confirmedAt, p.executedAt = s.ConfirmedAt, s.ExecutedAt
 	return p, nil
@@ -360,7 +368,7 @@ func (p *Proposal) State() State {
 		Version: p.version, ID: p.id, Kind: p.kind, Status: p.status, AssignmentID: p.assignment,
 		Title: p.title, Body: p.body, Due: p.due, Reason: p.reason, Recipient: p.recipient.Address(),
 		AttachmentSHA256: p.attachment.SHA256(), AttachmentSize: p.attachment.Size(), AssignmentTitle: p.assignmentTitle,
-		AttachmentFormat: p.format, WorkID: p.work, CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt,
+		AttachmentFormat: p.format, WorkID: p.work, AttachmentName: p.copyName, CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, ConfirmedAt: p.confirmedAt,
 		ExecutedAt: p.executedAt,
 	}
 }
@@ -388,7 +396,8 @@ func (p *Proposal) move(to Status, now time.Time) error {
 //     model may not send one);
 //   - create_deadline_event: the due time is not in the past and at most MaxDueAhead ahead;
 //   - send_work_email: as a send, with the stored file of the work as the attachment (its reference must be the one of
-//     its content), and the file must still be filed where the work put it (ReasonFileMoved).
+//     its content), and the file must still be filed where the work put it (ReasonFileMoved); the CopyName of its
+//     library name is pinned, the name the teacher gets.
 //
 // Facts of an existing assignment without a valid title, for an export, are an error of the caller.
 func (p *Proposal) Validate(f Facts, now time.Time) error {
@@ -419,6 +428,9 @@ func (p *Proposal) Validate(f Facts, now time.Time) error {
 	}
 	if p.kind.NeedsAssignmentTitle() {
 		p.assignmentTitle = strings.TrimSpace(f.AssignmentTitle)
+	}
+	if p.kind.NeedsWorkFile() {
+		p.copyName = CopyName(f.AttachmentName, p.format)
 	}
 	return nil
 }
@@ -588,6 +600,10 @@ func (p *Proposal) AttachmentFormat() Format { return p.format }
 
 // WorkID returns the work whose file is sent (send_work_email only; empty for the other kinds).
 func (p *Proposal) WorkID() shared.WorkID { return p.work }
+
+// AttachmentName returns the file name of a send_work_email pinned at validation; empty before it, for the other
+// kinds and for a send stored before the name was pinned.
+func (p *Proposal) AttachmentName() string { return p.copyName }
 
 // AttachmentSource returns the stored library file a send_work_email pinned at validation, materials/<sha256> of its
 // content; the copy the email attaches is made from it. Another kind or nothing pinned wraps ErrInvalidProposal.

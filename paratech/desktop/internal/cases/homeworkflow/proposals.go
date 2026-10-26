@@ -193,7 +193,7 @@ func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Fac
 		if err != nil {
 			return f, "", err
 		}
-		f.Attachment, f.AttachmentRef, f.Filed = wf.digest, wf.ref, wf.filed
+		f.Attachment, f.AttachmentRef, f.Filed, f.AttachmentName = wf.digest, wf.ref, wf.filed, wf.name
 		return f, wf.name, nil
 	case p.Kind().NeedsAttachment():
 		d, err := s.exportDigest(ctx, p.AssignmentID(), p.AttachmentFormat())

@@ -243,6 +243,30 @@ func TestSendWorkConfirmPath(t *testing.T) {
 	}
 }
 
+// TASK-192: the name the teacher gets is pinned when the send is proposed; a rename in the library before «Да» changes
+// neither the card nor the attachment.
+func TestSendWorkKeepsTheProposedName(t *testing.T) {
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	v := e.propose(t, "w1")
+	e.works.mu.Lock()
+	st := e.works.materials["m1"]
+	st.Name = "Другое имя.docx"
+	e.works.materials["m1"] = st
+	e.works.mu.Unlock()
+
+	if got, err := e.svc.Get(ctx, v.ID); err != nil || got.AttachmentName != "Реферат.docx" {
+		t.Fatalf("card after a rename: %+v, %v", got, err)
+	}
+	if _, err := e.svc.ConfirmSendWork(ctx, v.ID, v.Subject, v.AttachmentFormat); err != nil {
+		t.Fatal(err)
+	}
+	calls := e.mailer.Calls()
+	if len(calls) != 1 || calls[0].Attachment().String() != "exports/sent/"+string(v.ID)+"/Реферат.docx" {
+		t.Fatalf("emails %+v", calls)
+	}
+}
+
 // A second «Да», also after a failed send, is safe: an executed send sends nothing more, and a confirmed one whose
 // mailer call failed (an outcome the mailer could not tell) repeats the same command under the same key, which the
 // delivery flow never turns into a second email.
@@ -508,8 +532,15 @@ func TestSendWorkKindsAndWiring(t *testing.T) {
 	if _, err := e.svc.ProposeSendWork(ctx, "../w"); err == nil {
 		t.Fatal("an invalid work id was accepted")
 	}
+	// The card needs no read of the work (its name is pinned); «Да» does, and a failed read sends nothing.
 	e.works.err = errors.New("disk I/O error")
-	if _, err := e.svc.Get(ctx, v.ID); err == nil {
+	if got, err := e.svc.Get(ctx, v.ID); err != nil || got.AttachmentName != "Реферат.docx" {
+		t.Fatalf("Get with the works failing = %+v, %v", got, err)
+	}
+	if _, err := e.svc.ConfirmSendWork(ctx, v.ID, v.Subject, v.AttachmentFormat); err == nil {
 		t.Fatal("a failed read of the work was hidden")
+	}
+	if n := len(e.mailer.Calls()); n != 0 {
+		t.Fatalf("%d emails", n)
 	}
 }
