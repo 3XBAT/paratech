@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/adapters/componentstore"
 	"paratech/desktop/internal/adapters/doctext"
 	"paratech/desktop/internal/adapters/docx"
+	"paratech/desktop/internal/adapters/fileopen"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/googleauth"
 	"paratech/desktop/internal/adapters/googlecal"
@@ -434,6 +435,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Deletion:   c.deletions,
 		Knowledge:  knowledge,
 		Library:    lib,
+		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
+		MaterialViews: store,
+		Opener:        fileopen.New(filepath.Join(dataDir, artifactsDir)),
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock},
 		Today: todayScreen,
