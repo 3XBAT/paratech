@@ -42,6 +42,7 @@ func TestIntentValidation(t *testing.T) {
 		{"added assignment with a version", values.ToolCreateAssignment, Intent{Target: a1, Before: 1}, false},
 		{"added assignment of another kind", values.ToolCreateAssignment, Intent{Target: m1}, false},
 		{"added assignment without its id", values.ToolCreateAssignment, Intent{Name: "Эссе"}, false},
+		{"added assignment with no intent", values.ToolCreateAssignment, Intent{}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,6 +90,8 @@ func TestSettle(t *testing.T) {
 		{"effect with a wrong compensation", values.ToolEditDue, edit, Observation{Known: true, Version: 4, Effect: true, Compensation: s9}, StatusUnknown, 0},
 		{"added assignment there", values.ToolCreateAssignment, added, Observation{Known: true, Version: 1, Effect: true, Compensation: RemoveAssignment{Assignment: a1}}, StatusDone, 1},
 		{"added assignment absent", values.ToolCreateAssignment, added, Observation{Known: true}, StatusFailed, 0},
+		{"another assignment there", values.ToolCreateAssignment, added, Observation{Known: true, Version: 1, Effect: true,
+			Compensation: RemoveAssignment{Assignment: ref(t, values.KindAssignment, "a2")}}, StatusUnknown, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,6 +106,39 @@ func TestSettle(t *testing.T) {
 	}
 	if err := reach(t, StatusDone).Settle(Observation{Known: true}, at(5)); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Settle of a DONE entry = %v", err)
+	}
+}
+
+// The Undo of create_assignment removes exactly the assignment its intent named (ADR-0029), on Complete and Restore.
+func TestAddedAssignmentUndoesOnlyItsTarget(t *testing.T) {
+	a1, a2 := ref(t, values.KindAssignment, "a1"), ref(t, values.KindAssignment, "a2")
+	tests := []struct {
+		name string
+		comp Compensation
+		ok   bool
+	}{
+		{"its assignment", RemoveAssignment{Assignment: a1}, true},
+		{"another assignment", RemoveAssignment{Assignment: a2}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := pendingWith(t, values.ToolCreateAssignment, Intent{Target: a1})
+			err := a.Complete(tt.comp, 1, at(1))
+			if tt.ok != (err == nil) {
+				t.Fatalf("Complete = %v, want ok=%v", err, tt.ok)
+			}
+			if err != nil && (!errors.Is(err, ErrInvalidCompensation) || a.Status() != StatusPending) {
+				t.Fatalf("refused Complete: %v, status %s", err, a.Status())
+			}
+			st := State{Version: 1, ID: "act1", Thread: "th1", Turn: 1, CallID: "toolu_1", Tool: values.ToolCreateAssignment,
+				Status: StatusDone, Intent: Intent{Target: a1}, Compensation: tt.comp, TargetVersion: 1, CreatedAt: t0, UpdatedAt: at(1)}
+			if _, err := Restore(st); tt.ok != (err == nil) {
+				t.Fatalf("Restore = %v, want ok=%v", err, tt.ok)
+			}
+		})
+	}
+	if _, err := New(spec(values.ToolCreateAssignment), t0); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("create_assignment with no intent = %v", err)
 	}
 }
 

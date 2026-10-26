@@ -36,11 +36,16 @@ var createsTarget = map[values.Tool]values.IDKind{values.ToolCreateAssignment: v
 func (in Intent) IsZero() bool { return in == Intent{} }
 
 func (in Intent) validate(t values.Tool) error {
+	bad := func(what string) error { return fmt.Errorf("%w: intent: %s", ErrInvalidAction, what) }
+	kind, creates := createsTarget[t]
 	if in.IsZero() {
+		if creates {
+			// Its Undo removes exactly the ID named here; without it the compensation could name any assignment.
+			return bad("a create names the id it makes")
+		}
 		return nil
 	}
-	bad := func(what string) error { return fmt.Errorf("%w: intent: %s", ErrInvalidAction, what) }
-	if kind, ok := createsTarget[t]; ok {
+	if creates {
 		if in.Target.Kind() != kind || in.Before != 0 {
 			return bad("a create names the id it makes, with no version before")
 		}

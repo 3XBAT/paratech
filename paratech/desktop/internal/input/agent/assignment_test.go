@@ -183,9 +183,18 @@ func TestUndoRequestOfAnAddedAssignmentAndItsDeadline(t *testing.T) {
 }
 
 // A crash between the journal's PENDING and its outcome is settled by the ID the intent named: the assignment is there
-// -> DONE with Undo, absent -> FAILED.
+// -> DONE with Undo, absent -> FAILED. A student edit between the crash and Recover is not taken as the action's effect:
+// the entry expects the version the create wrote, so its Undo is refused and the edit stays.
 func TestRecoverOfAnAddedAssignment(t *testing.T) {
-	for _, ran := range []bool{true, false} {
+	for name, tt := range map[string]struct {
+		ran, edited bool
+		undo        action.Status
+	}{
+		"ran":               {ran: true, undo: action.StatusUndone},
+		"did not run":       {},
+		"ran, edited after": {ran: true, edited: true, undo: action.StatusUndoRefused},
+	} {
+		ran := tt.ran
 		w := newWorld(t)
 		ctx := t.Context()
 		c := writeCall(t, "c1", values.ToolCreateAssignment, `{"title":"Эссе"}`)
@@ -202,25 +211,36 @@ func TestRecoverOfAnAddedAssignment(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		if tt.edited {
+			v := w.assignments.views[addedID()]
+			v.Version++
+			w.assignments.views[addedID()] = v
+		}
 		rep, err := w.journal.Recover(ctx)
 		want := agentjournal.RecoverReport{Failed: 1}
 		if ran {
 			want = agentjournal.RecoverReport{Done: 1}
 		}
 		if err != nil || rep != want {
-			t.Fatalf("ran %v: Recover = %+v, %v", ran, rep, err)
+			t.Fatalf("%s: Recover = %+v, %v", name, rep, err)
 		}
 		got, err := w.journal.Find(ctx, req.Thread, req.Turn, "c1")
 		if err != nil || got.ID != e.ID {
 			t.Fatal(err)
 		}
 		if ran && (got.Status != action.StatusDone || !got.CanUndo) || !ran && got.Status != action.StatusFailed {
-			t.Fatalf("ran %v: entry = %+v", ran, got)
+			t.Fatalf("%s: entry = %+v", name, got)
 		}
-		if ran {
-			if u, err := w.journal.Undo(ctx, e.ID); err != nil || u.Status != action.StatusUndone || len(w.assignments.views) != 2 {
-				t.Fatalf("Undo of the settled entry = %+v, %v", u, err)
-			}
+		if !ran {
+			continue
+		}
+		u, err := w.journal.Undo(ctx, e.ID)
+		if err != nil || u.Status != tt.undo {
+			t.Fatalf("%s: Undo of the settled entry = %+v, %v", name, u, err)
+		}
+		_, kept := w.assignments.views[addedID()]
+		if tt.edited != kept || tt.edited && u.NoUndo != action.NoUndoChanged {
+			t.Fatalf("%s: assignment kept %v, refusal %q", name, kept, u.NoUndo)
 		}
 	}
 }

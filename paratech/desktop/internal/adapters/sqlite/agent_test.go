@@ -269,7 +269,11 @@ func TestAgentActions(t *testing.T) {
 	}
 	for i, tc := range comps {
 		id := shared.ActionID(fmt.Sprintf("a%d", i))
-		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: tc.tool}, agentAt(i))
+		spec := action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: tc.tool}
+		if rm, ok := tc.comp.(action.RemoveAssignment); ok {
+			spec.Intent = action.Intent{Target: rm.Assignment} // a create names the ID it makes (ADR-0029)
+		}
+		a, err := action.New(spec, agentAt(i))
 		if err != nil {
 			t.Fatal(err)
 		}

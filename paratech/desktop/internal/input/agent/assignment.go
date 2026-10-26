@@ -96,18 +96,22 @@ func (a *Actions) removeAdded(ctx context.Context, c action.RemoveAssignment, ex
 	return err
 }
 
+// createdVersion is the version CreateAssignment stores a new assignment at (the first save, ADR-0004).
+const createdVersion int64 = 1
+
 // observeAdded settles a PENDING create_assignment after a crash by the ID its intent named: there -> DONE with its
-// Undo, absent -> FAILED (the version before was 0).
+// Undo, absent -> FAILED (the version before was 0). The version reported is the one the create wrote, not the current
+// one: an edit by the student between the crash and Recover then makes Undo refuse («Изменено после») instead of
+// removing the edit.
 func (a *Actions) observeAdded(ctx context.Context, in action.Intent) (action.Observation, error) {
 	if in.Target.Kind() != values.KindAssignment {
 		return action.Observation{}, nil
 	}
-	v, err := a.assignments.Assignment(ctx, shared.AssignmentID(in.Target.ID()))
-	if err != nil {
+	if _, err := a.assignments.Assignment(ctx, shared.AssignmentID(in.Target.ID())); err != nil {
 		return absent(err)
 	}
 	return action.Observation{
-		Known: true, Version: v.Version, Effect: true, Compensation: action.RemoveAssignment{Assignment: in.Target},
+		Known: true, Version: createdVersion, Effect: true, Compensation: action.RemoveAssignment{Assignment: in.Target},
 	}, nil
 }
 

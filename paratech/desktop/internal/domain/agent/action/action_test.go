@@ -212,6 +212,8 @@ func TestCompensationMatchesTool(t *testing.T) {
 		{"remove added assignment without id", values.ToolCreateAssignment, RemoveAssignment{}, false},
 		{"remove added assignment of a work", values.ToolCreateAssignment, RemoveAssignment{Assignment: ref(t, values.KindWork, "w1")}, false},
 		{"added assignment undone as a due", values.ToolCreateAssignment, RestoreDue{Assignment: a1}, false},
+		// Its intent names a1 (below): the Undo of an added assignment never removes another one.
+		{"remove another assignment", values.ToolCreateAssignment, RemoveAssignment{Assignment: ref(t, values.KindAssignment, "a2")}, false},
 
 		{"nil", values.ToolCreateSubject, nil, false},
 		{"other tool's compensation", values.ToolCreateSubject, CancelJob{Job: j1}, false},
@@ -225,7 +227,11 @@ func TestCompensationMatchesTool(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a, err := New(spec(tt.tool), t0)
+			s := spec(tt.tool)
+			if _, creates := createsTarget[tt.tool]; creates {
+				s.Intent = Intent{Target: a1}
+			}
+			a, err := New(s, t0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -258,7 +264,11 @@ func TestCompensationMatchesTool(t *testing.T) {
 func TestEveryUToolHasACompensation(t *testing.T) {
 	for _, tool := range values.Tools() {
 		_, hasComp := CompensationFor(tool)
-		_, err := New(spec(tool), t0)
+		s := spec(tool)
+		if kind, creates := createsTarget[tool]; creates {
+			s.Intent = Intent{Target: ref(t, kind, "x1")} // a create names the ID it makes
+		}
+		_, err := New(s, t0)
 		if hasComp != (err == nil) {
 			t.Fatalf("%s: compensation %v, journaled as U: %v", tool, hasComp, err)
 		}
