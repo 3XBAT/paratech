@@ -10,10 +10,11 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 )
 
-// golden is the contract's current catalog (v3); the Hub embeds a byte-identical copy (hub/pkg/prompts). goldenV1 and
-// goldenV2 are frozen, still served to clients of those versions.
+// golden is the contract's current catalog (v4); the Hub embeds a byte-identical copy (hub/pkg/prompts). goldenV1 to
+// goldenV3 are frozen, still served to clients of those versions.
 const (
-	golden   = "../../../../../../shared/testdata/tool_catalog_v3.json"
+	golden   = "../../../../../../shared/testdata/tool_catalog_v4.json"
+	goldenV3 = "../../../../../../shared/testdata/tool_catalog_v3.json"
 	goldenV2 = "../../../../../../shared/testdata/tool_catalog_v2.json"
 	goldenV1 = "../../../../../../shared/testdata/tool_catalog_v1.json"
 )
@@ -76,7 +77,7 @@ func TestQueryArguments(t *testing.T) {
 
 // TestReplyAssignments: catalog v3 lets reply list 0-MaxCardIDs assignment IDs (TASK-172); v2 has no such argument.
 func TestReplyAssignments(t *testing.T) {
-	v2, v3 := parseFile(t, goldenV2), goldenCatalog(t)
+	v2, v3 := parseFile(t, goldenV2), parseFile(t, goldenV3)
 	ids := func(n int) string {
 		items := make([]string, n)
 		for i := range items {
@@ -118,6 +119,108 @@ func TestReplyAssignments(t *testing.T) {
 	}
 }
 
+// TestCatalogV4 (TASK-182): generate_draft is no agent tool; triage_assignment takes exactly one of assignment, upload
+// and topic (a query of at most MaxQueryRunes on one line), and so do the other one-of groups. Catalog 3 stays as
+// released: the Hub leaves its pairs to the desktop.
+func TestCatalogV4(t *testing.T) {
+	v3, v4 := parseFile(t, goldenV3), goldenCatalog(t)
+	if v4.Version() != 4 || v4.Has("generate_draft") || !v3.Has("generate_draft") || len(v4.Specs()) != len(v3.Specs())-1 {
+		t.Fatalf("v4: version %d, %d tools, generate_draft %v", v4.Version(), len(v4.Specs()), v4.Has("generate_draft"))
+	}
+	if err := v4.Check(call(t, "generate_draft", `{"assignment":"a-1"}`)); !errors.Is(err, ErrInvalidCall) {
+		t.Errorf("v4 generate_draft: err = %v, want ErrInvalidCall", err)
+	}
+	if err := v4.CheckReturned([]values.ToolCall{call(t, "generate_draft", `{"assignment":"a-1"}`)}); !errors.Is(err, ErrInvalidCall) {
+		t.Errorf("v4 returned generate_draft: err = %v, want ErrInvalidCall", err)
+	}
+
+	topic := func(s string) string { return `"topic":"` + s + `"` }
+	for _, args := range []string{
+		`{"assignment":"a-1"}`, `{"upload":"up-1"}`, `{` + topic("Презентация про фотосинтез") + `}`,
+		`{` + topic(strings.Repeat("я", MaxQueryRunes)) + `}`,
+	} {
+		if err := v4.Check(call(t, "triage_assignment", args)); err != nil {
+			t.Errorf("v4 triage_assignment %.60s: %v", args, err)
+		}
+	}
+	for name, args := range map[string]string{
+		"none":                `{}`,
+		"assignment, upload":  `{"assignment":"a-1","upload":"up-1"}`,
+		"assignment, topic":   `{"assignment":"a-1",` + topic("Эссе") + `}`,
+		"upload, topic":       `{"upload":"up-1",` + topic("Эссе") + `}`,
+		"all three":           `{"assignment":"a-1","upload":"up-1",` + topic("Эссе") + `}`,
+		"topic over 500":      `{` + topic(strings.Repeat("я", MaxQueryRunes+1)) + `}`,
+		"topic newline":       `{` + topic(`a\nb`) + `}`,
+		"blank topic":         `{` + topic("  ") + `}`,
+		"topic not a string":  `{"topic":["Эссе"]}`,
+		"null topic":          `{"topic":null,"assignment":"a-1"}`,
+		"make_summary both":   `{"recording":"r-1","material":"m-1"}`,
+		"place_upload no one": `{"upload":"up-1","subject":"s-1"}`,
+	} {
+		tool := "triage_assignment"
+		switch name {
+		case "make_summary both":
+			tool = "make_summary"
+		case "place_upload no one":
+			tool = "place_upload"
+		}
+		err := v4.Check(call(t, tool, args))
+		if !errors.Is(err, ErrInvalidCall) {
+			t.Errorf("v4 %s %s: err = %v, want ErrInvalidCall", tool, name, err)
+		} else if strings.Contains(err.Error(), "Эссе") || strings.Contains(err.Error(), "я") {
+			t.Errorf("%s: the error quotes the call: %v", name, err)
+		}
+	}
+
+	// Catalog 3 has no topic, and its pairs stay the desktop's check.
+	if err := v3.Check(call(t, "triage_assignment", `{`+topic("Эссе")+`}`)); !errors.Is(err, ErrInvalidCall) {
+		t.Errorf("v3 triage_assignment with topic: err = %v, want ErrInvalidCall", err)
+	}
+	if err := v3.Check(call(t, "triage_assignment", `{"assignment":"a-1","upload":"up-1"}`)); err != nil {
+		t.Errorf("v3 triage_assignment with both: %v, want it left to the desktop", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(specFor(t, v4, "triage_assignment").Schema()), &schema); err != nil {
+		t.Fatal(err)
+	}
+	p := schema["properties"].(map[string]any)["topic"].(map[string]any)
+	if p["maxLength"] != float64(MaxQueryRunes) || schema["required"] != nil {
+		t.Errorf("v4 triage_assignment schema = %v", schema)
+	}
+	if d := specFor(t, v4, "triage_assignment").Description(); !strings.Contains(d, "exactly one of: assignment, upload, topic") {
+		t.Errorf("v4 triage_assignment description = %q", d)
+	}
+	if d := specFor(t, v3, "triage_assignment").Description(); strings.Contains(d, "exactly one") {
+		t.Errorf("v3 description changed: %q", d)
+	}
+}
+
+// TestParseRejectsBadOneOf: from catalog 4 the one_of note must name groups of optional arguments of declared tools.
+func TestParseRejectsBadOneOf(t *testing.T) {
+	raw, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := string(raw)
+	group := "triage_assignment (assignment|upload|topic)"
+	for name, text := range map[string]string{
+		"no groups":         strings.Replace(base, `"one_of": "optional`, `"one_of_x": "`, 1),
+		"unknown tool":      strings.Replace(base, group, "generate_draft (assignment|upload|topic)", 1),
+		"unknown argument":  strings.Replace(base, group, "triage_assignment (assignment|upload|subject)", 1),
+		"required argument": strings.Replace(base, group, "triage_assignment (assignment|upload|topic), write_work (work|topic)", 1),
+		"repeated argument": strings.Replace(base, group, "triage_assignment (assignment|topic|topic)", 1),
+		"two groups":        strings.Replace(base, group, group+", triage_assignment (assignment|upload)", 1),
+	} {
+		if text == base {
+			t.Fatalf("%s: the mutation did not apply", name)
+		}
+		if _, err := Parse([]byte(text)); !errors.Is(err, ErrInvalidCatalog) {
+			t.Errorf("%s: err = %v, want ErrInvalidCatalog", name, err)
+		}
+	}
+}
+
 func call(t *testing.T, tool, args string) values.ToolCall {
 	t.Helper()
 	c, err := values.NewToolCall("toolu_1", tool, args)
@@ -129,7 +232,7 @@ func call(t *testing.T, tool, args string) values.ToolCall {
 
 func TestParseGolden(t *testing.T) {
 	c := goldenCatalog(t)
-	if c.Version() != 3 || len(c.Specs()) != 27 || !c.Has("show_plan") || c.Has("send_email") {
+	if c.Version() != 4 || len(c.Specs()) != 26 || !c.Has("show_plan") || c.Has("send_email") {
 		t.Fatalf("catalog version %d, %d tools", c.Version(), len(c.Specs()))
 	}
 	specs := c.Specs()
@@ -187,9 +290,9 @@ func TestSchemaShapes(t *testing.T) {
 	if search["query"].(map[string]any)["maxLength"] != float64(MaxQueryRunes) {
 		t.Fatalf("query schema = %v", search["query"])
 	}
-	instruction := schema("generate_draft")["properties"].(map[string]any)["instruction"].(map[string]any)
-	if instruction["maxLength"] != float64(MaxLabelRunes) {
-		t.Fatalf("label schema = %v", instruction)
+	name := schema("create_folder")["properties"].(map[string]any)["name"].(map[string]any)
+	if name["maxLength"] != float64(MaxLabelRunes) {
+		t.Fatalf("label schema = %v", name)
 	}
 	if enum := search["scope"].(map[string]any)["enum"].([]any); len(enum) != 2 || enum[0] != "subject" {
 		t.Fatalf("enum schema = %v", search["scope"])
@@ -204,8 +307,8 @@ func TestSchemaShapes(t *testing.T) {
 			t.Fatalf("a plan step may name UI tool %s", name)
 		}
 	}
-	if len(tools) != 23 {
-		t.Fatalf("plan step tools = %d, want the 23 non-UI tools", len(tools))
+	if len(tools) != 22 {
+		t.Fatalf("plan step tools = %d, want the 22 non-UI tools", len(tools))
 	}
 }
 
@@ -219,7 +322,7 @@ func TestCheckAcceptsValidCalls(t *testing.T) {
 		"answer_question":   `{"question":"` + strings.Repeat("я", MaxQueryRunes) + `","scope":"all"}`,
 		"create_folder":     `{"subject":"subj-1","name":"` + strings.Repeat("я", MaxLabelRunes) + `"}`,
 		"edit_due":          `{"assignment":"a-1","due":"2026-12-31"}`,
-		"generate_draft":    `{"assignment":"a-1"}`,
+		"create_subject":    `{"name":"Матан","semester":"Осень 2026"}`,
 		"propose_send":      `{"assignment":"a-1","version":"v-2"}`,
 		"reply":             `{"text":"Готово.\nДва задания."}`,
 		"cannot_do":         `{"your_part":["Сдать в ВузКАД"],"our_part":[]}`,
@@ -248,9 +351,9 @@ func TestCheckRejectsInvalidCalls(t *testing.T) {
 		"bad date":             {"edit_due", `{"assignment":"a","due":"2026-02-30"}`},
 		"date format":          {"edit_due", `{"assignment":"a","due":"31.12.2026"}`},
 		"unknown enum":         {"find_lessons", `{"kind":"exam"}`},
-		"long label":           {"generate_draft", `{"assignment":"a","instruction":"` + strings.Repeat("a", MaxLabelRunes+1) + `"}`},
-		"blank label":          {"generate_draft", `{"assignment":"a","instruction":"  "}`},
-		"label newline":        {"generate_draft", `{"assignment":"a","instruction":"a\nb"}`},
+		"long label":           {"create_folder", `{"subject":"s","name":"` + strings.Repeat("a", MaxLabelRunes+1) + `"}`},
+		"blank label":          {"create_folder", `{"subject":"s","name":"  "}`},
+		"label newline":        {"create_folder", `{"subject":"s","name":"a\nb"}`},
 		"long query":           {"search", `{"query":"` + strings.Repeat("a", MaxQueryRunes+1) + `"}`},
 		"blank query":          {"search", `{"query":"  "}`},
 		"long text":            {"reply", `{"text":"` + long + `"}`},
@@ -321,10 +424,10 @@ func TestParseRejectsBadCatalogs(t *testing.T) {
 	base := string(raw)
 	for name, text := range map[string]string{
 		"not JSON":        "{",
-		"unknown field":   strings.Replace(base, `"catalog_version": 3,`, `"catalog_version": 3, "extra": true,`, 1),
-		"no version":      strings.Replace(base, `"catalog_version": 3,`, `"catalog_version": 0,`, 1),
+		"unknown field":   strings.Replace(base, `"catalog_version": 4,`, `"catalog_version": 4, "extra": true,`, 1),
+		"no version":      strings.Replace(base, `"catalog_version": 4,`, `"catalog_version": 0,`, 1),
 		"trailing data":   base + "{}",
-		"no tools":        `{"catalog_version": 3, "tools": []}`,
+		"no tools":        `{"catalog_version": 4, "tools": []}`,
 		"card ids on R":   strings.Replace(base, `{"name": "ids", "type": "ids"`, `{"name": "ids", "type": "card_ids"`, 1),
 		"bad tool name":   strings.Replace(base, `"name": "reply"`, `"name": "Reply"`, 1),
 		"duplicate tool":  strings.Replace(base, `"name": "reply"`, `"name": "cannot_do"`, 1),

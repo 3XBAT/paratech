@@ -15,14 +15,19 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 and v2 stay served to clients of those catalogs; v3 is the current version.
+// TestEmbeddedPanel: v1 to v3 stay served to clients of those catalogs; v4 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 3 || versions[0].Version != 1 || versions[1].Version != 2 || versions[2].Version != 3 {
-		t.Fatalf("versions: %d, want v1, v2 and v3", len(versions))
+	if len(versions) != 4 {
+		t.Fatalf("versions: %d, want v1 to v4", len(versions))
+	}
+	for i, v := range versions {
+		if v.Version != uint32(i+1) {
+			t.Fatalf("version %d at %d, want v1 to v4 in order", v.Version, i)
+		}
 	}
 	for _, v := range versions {
 		golden, err := os.ReadFile(fmt.Sprintf(goldenCatalog, v.Version))
@@ -44,13 +49,25 @@ func TestEmbeddedPanel(t *testing.T) {
 	}
 }
 
-// TestPanelV3Prompt: the rules of the beta feedback (TASK-172) are stated in the v3 prompt.
-func TestPanelV3Prompt(t *testing.T) {
+// panelSystem is the system prompt of the panel version.
+func panelSystem(t *testing.T, version uint32) string {
+	t.Helper()
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	system := string(versions[len(versions)-1].System)
+	for _, v := range versions {
+		if v.Version == version {
+			return string(v.System)
+		}
+	}
+	t.Fatalf("no panel v%d", version)
+	return ""
+}
+
+// TestPanelV3Prompt: the rules of the beta feedback (TASK-172) are stated in the v3 prompt.
+func TestPanelV3Prompt(t *testing.T) {
+	system := panelSystem(t, 3)
 	for _, rule := range []string{
 		// voice: no greetings, no address
 		"No greetings and no address", "«Привет»", "«ты»", "«вы»", "good:", "bad:",
@@ -68,6 +85,43 @@ func TestPanelV3Prompt(t *testing.T) {
 	} {
 		if !strings.Contains(system, rule) {
 			t.Errorf("agent/panel/v3/system.md does not state %q", rule)
+		}
+	}
+}
+
+// TestPanelV4Prompt: v4 keeps the rules of v3 that still hold and adds the owner's decisions of 26.10 (TASK-182): only
+// the last message is answered, the planner never writes a draft, a topic without an assignment is triaged by topic,
+// and the assignment page has «Быстрый черновик» next to «Сделать под ключ».
+func TestPanelV4Prompt(t *testing.T) {
+	system := panelSystem(t, 4)
+	for _, rule := range []string{
+		// voice: no greetings, no address
+		"No greetings and no address", "«Привет»", "«ты»", "«вы»", "good:", "bad:",
+		// the screens of the app
+		"«Сегодня»", "«Предметы»", "«ДЗ»", "«Входящие»", "«База знаний»", "«Билеты»", "«Задания»", "Word",
+		"«Расписание»", "«Журнал»", "«Отменить»", "«Настройки»",
+		"block «Быстрый черновик»", "next to it the block «Сделать под ключ»",
+		"«Предметы» → the subject → «ДЗ»", "without a subject, in «Входящие»",
+		"gets reply at once", "Never answer such a question with cannot_do",
+		"cannot_do is only for", "our_part lists only what the app really does", "never contradict",
+		"list_assignments", "assignments argument", "never names an assignment",
+		// (a) earlier pairs are context; only the last message is answered
+		"Earlier pairs are context only", "Answer only the last message of the student",
+		"Never carry out an earlier request again",
+		// (b) no drafts by the planner: triage, then write_work; the quick draft is the student's button
+		"never writes the draft of an assignment", "triage_assignment on that assignment, then write_work",
+		"the student's own button «Быстрый черновик»",
+		// (c) a topic without an assignment
+		"When none fits, triage_assignment with topic", "never cannot_do", "takes the subject from the current thread",
+		"exactly one of assignment, upload and topic",
+	} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("agent/panel/v4/system.md does not state %q", rule)
+		}
+	}
+	for _, gone := range []string{"generate_draft", "«Решение»", "ask with ask_questions which assignment"} {
+		if strings.Contains(system, gone) {
+			t.Errorf("agent/panel/v4/system.md still says %q", gone)
 		}
 	}
 }

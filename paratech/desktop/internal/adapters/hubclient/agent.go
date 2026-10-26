@@ -123,6 +123,8 @@ func turnOf(h agent.HistoryTurn) (*hubv1.AgentTurn, error) {
 	switch {
 	case h.StudentText != "":
 		return &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_StudentText{StudentText: h.StudentText}}, nil
+	case h.AgentReply != "":
+		return &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_AgentReply{AgentReply: h.AgentReply}}, nil
 	case h.Calls != nil:
 		sealed := &hubv1.SealedCalls{Seal: h.Calls.Seal}
 		for _, c := range h.Calls.Calls {

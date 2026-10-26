@@ -15,6 +15,13 @@ foreign text and pick tools.
   dates, counters, statuses), names of subjects the student created or confirmed (letters, digits, spaces, `.,-()`,
   ≤ 80 characters, as data). Schedule strings are matched to subjects by `subjectmatch` on the desktop and never sent
   as text.
+- **Planner sees (addendum, TASK-183)**: its own card texts of earlier requests of this thread and the names of the
+  tools those requests called with `ok | error`, as one `agent_reply` per earlier request (ADR-0023 "History pairs").
+  `thread.Reply` builds it on the desktop from stored steps, with fixed labels `reply:`, `plan:`, `cannot_do:`,
+  `asked:`, `actions:`: only `reply.text`, `show_plan.summary`, `cannot_do.your_part/our_part` of calls that passed
+  argument checks and were not refused; `ask_questions` as a fixed line without the questions; outcome by `is_error`,
+  no call IDs, no `result_json`. Never reader texts (ANSWER, TRIAGE, summaries), titles or file names. A request with no
+  such text gets `no answer: the request ended without a reply`. At most 2 KiB, cut on a rune boundary.
 - **Tool results**: each `result_json` is built by a mapper in `domain/agent/values` from an explicit allowlist of typed
   fields (IDs, enums, dates, counters). Use-case views are never serialized whole; error texts become an error enum.
 - **Answers to Questions cards** reach the planner only as `{question_id, option_index}` or the student's own typed

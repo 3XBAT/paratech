@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 
 	"paratech/hub/internal/domain/llm/values"
 )
@@ -70,6 +72,16 @@ var (
 // Question kinds of ask_questions.
 var questionKinds = []string{"choice", "text"}
 
+// One-of groups (notes.one_of, for example "triage_assignment (assignment|upload|topic)"): optional arguments of which
+// a call gives exactly one. The Hub enforces them from catalog oneOfFrom on; catalogs 1-3 were released leaving them
+// to the desktop, whose refusal is an is_error result the planner can correct, not a failed step.
+const (
+	noteOneOf = "one_of"
+	oneOfFrom = 4
+)
+
+var oneOfGroup = regexp.MustCompile(`([a-z][a-z0-9_]*) \(([a-z][a-z0-9_]*(?:\|[a-z][a-z0-9_]*)+)\)`)
+
 type argument struct {
 	Name     string   `json:"name"`
 	Type     string   `json:"type"`
@@ -97,13 +109,15 @@ type Catalog struct {
 	version uint32
 	tools   map[string]tool
 	order   []string
+	oneOf   map[string][]string // tool -> its one-of group, enforced only from catalog oneOfFrom
 	specs   []values.ToolSpec
 }
 
 // Parse reads a catalog text and checks it: known fields only, a version above 0, unique snake_case tool and argument
 // names, known classes, argument types allowed for the class (UI tools only card types, among them the IDs a card
-// lists; other tools only IDs, enums, dates, labels and queries), enum values only on enums. The deeper policy checks
-// of the golden file live in the contract test.
+// lists; other tools only IDs, enums, dates, labels and queries), enum values only on enums; from catalog oneOfFrom on,
+// a one_of note whose groups name optional arguments of declared tools. The deeper policy checks of the golden file
+// live in the contract test.
 func Parse(raw []byte) (*Catalog, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -131,8 +145,15 @@ func Parse(raw []byte) (*Catalog, error) {
 		c.tools[t.Name] = t
 		c.order = append(c.order, t.Name)
 	}
+	if c.version >= oneOfFrom {
+		groups, err := parseOneOf(doc.Notes[noteOneOf], c.tools)
+		if err != nil {
+			return nil, err
+		}
+		c.oneOf = groups
+	}
 	for _, name := range c.order {
-		spec, err := values.NewToolSpec(name, description(c.tools[name]), c.schema(c.tools[name], doc.Types))
+		spec, err := values.NewToolSpec(name, c.description(c.tools[name]), c.schema(c.tools[name], doc.Types))
 		if err != nil {
 			return nil, fmt.Errorf("%w: tool %s: %w", ErrInvalidCatalog, name, err)
 		}
@@ -172,6 +193,31 @@ func checkTool(t tool) error {
 		}
 	}
 	return nil
+}
+
+// parseOneOf reads the groups of the one_of note: at least one, each of a declared tool, at most one per tool, of 2+
+// distinct optional arguments of that tool.
+func parseOneOf(note string, tools map[string]tool) (map[string][]string, error) {
+	matches := oneOfGroup.FindAllStringSubmatch(note, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("%w: the one_of note names no groups", ErrInvalidCatalog)
+	}
+	groups := make(map[string][]string, len(matches))
+	for _, m := range matches {
+		name, args := m[1], strings.Split(m[2], "|")
+		t, ok := tools[name]
+		if _, dup := groups[name]; !ok || dup {
+			return nil, fmt.Errorf("%w: one_of: %s is not a tool or has two groups", ErrInvalidCatalog, name)
+		}
+		for i, a := range args {
+			k := slices.IndexFunc(t.Arguments, func(d argument) bool { return d.Name == a })
+			if k < 0 || t.Arguments[k].Required || slices.Contains(args[:i], a) {
+				return nil, fmt.Errorf("%w: one_of: %s.%s is not a distinct optional argument", ErrInvalidCatalog, name, a)
+			}
+		}
+		groups[name] = args
+	}
+	return groups, nil
 }
 
 // Version is the catalog version.
@@ -217,7 +263,7 @@ func (c *Catalog) CheckReturned(calls []values.ToolCall) error {
 }
 
 // Check checks one call against the schema of its tool: a known tool, only declared arguments, every required one,
-// each of its type (see schema). UI card texts are at most MaxTextRunes characters.
+// each of its type (see schema), exactly one of its one-of group. UI card texts are at most MaxTextRunes characters.
 func (c *Catalog) Check(call values.ToolCall) error {
 	t, ok := c.tools[call.Tool()]
 	if !ok {
@@ -243,6 +289,17 @@ func (c *Catalog) Check(call values.ToolCall) error {
 			return fmt.Errorf("%w: %s: argument %s does not match its type", ErrInvalidCall, t.Name, a.Name)
 		}
 	}
+	if group := c.oneOf[t.Name]; len(group) > 0 {
+		given := 0
+		for _, name := range group {
+			if _, present := args[name]; present {
+				given++
+			}
+		}
+		if given != 1 {
+			return fmt.Errorf("%w: %s: exactly one of %s is needed", ErrInvalidCall, t.Name, strings.Join(group, ", "))
+		}
+	}
 	return nil
 }
 
@@ -257,7 +314,7 @@ func decodeObject(s string) (map[string]any, error) {
 	return v, nil
 }
 
-func description(t tool) string {
+func (c *Catalog) description(t tool) string {
 	var d string
 	switch t.Class {
 	case classRead:
@@ -271,6 +328,10 @@ func description(t tool) string {
 	}
 	if t.Paid {
 		d += " Paid: it uses the student's quota."
+	}
+	// JSON Schema at the top of a tool input cannot say it for the provider, so the description does.
+	if group := c.oneOf[t.Name]; len(group) > 0 {
+		d += " Give exactly one of: " + strings.Join(group, ", ") + "."
 	}
 	return d
 }
