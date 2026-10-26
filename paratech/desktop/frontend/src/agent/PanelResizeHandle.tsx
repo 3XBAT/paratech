@@ -17,6 +17,8 @@ export interface ResizablePanel {
   dragging: boolean;
   /** Opens the panel at its last width (Ctrl+K on a closed panel). */
   reveal(): void;
+  /** Closes the panel (a second Ctrl+K). */
+  hide(): void;
   handle: {
     onPointerDown(e: PointerEvent<HTMLDivElement>): void;
     onPointerMove(e: PointerEvent<HTMLDivElement>): void;
@@ -50,6 +52,8 @@ export function useResizablePanel(): ResizablePanel {
 
   const reveal = useCallback(() => setPref((p) => (p.open ? p : { ...p, open: true })), []);
 
+  const hide = useCallback(() => setPref((p) => (p.open ? { ...p, open: false } : p)), []);
+
   const handle: ResizablePanel["handle"] = {
     onPointerDown: (e) => {
       if (e.button !== 0) {
@@ -82,7 +86,7 @@ export function useResizablePanel(): ResizablePanel {
     onDoubleClick: () => setPref(togglePref),
   };
 
-  return { pref, width: effectiveWidth(pref, viewport), viewport, dragging, reveal, handle };
+  return { pref, width: effectiveWidth(pref, viewport), viewport, dragging, reveal, hide, handle };
 }
 
 /** The strip on the left edge of the panel (on the window edge while closed): drag, arrow keys or double click. */
