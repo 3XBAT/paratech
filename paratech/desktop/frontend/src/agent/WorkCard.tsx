@@ -5,6 +5,15 @@ import {
   acceptWork,
   addItem,
   approvePlan,
+  canMove,
+  canRemove,
+  canSubmitNote,
+  editorMode,
+  type EditorMode,
+  openTalk,
+  reviseCaption,
+  reviseWork,
+  slideLimits,
   nextActionError,
   regenerateBlocked,
   retryWriting,
@@ -20,24 +29,30 @@ import {
   isRunning,
   limits,
   moveItem,
-  noteOf,
   removeItem,
   reviseOptions,
   canStop,
   nextStopping,
-  notStoppedText,
   openLabel,
   openTarget,
   openWork,
+  talkTarget,
   stopWork,
   savePlanAt,
+  retryOffered,
+  metaLine,
+  workMeta,
   type OpenView,
   workCardModel,
   workTexts,
 } from "../workView.js";
+import { type AgentConfirmApi, agentConfirmApi } from "../bindings/agentConfirm.js";
 import { libraryApi, type LibraryApi } from "../bindings/library.js";
+import { type RecordingDeleteApi, recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName } from "../bindings/runtime.js";
-import { turnkeyCardModel } from "../turnkeyView.js";
+import { canOfferSend } from "../sendWorkView.js";
+import { WorkSend } from "./WorkSend.js";
+import { triageReason, turnkeyCardModel } from "../turnkeyView.js";
 import { FailedCard, HelperCard, QuestionsCard, TriageCard, UnderstandingCard } from "./TurnkeyCards.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
@@ -46,8 +61,13 @@ import { Icon } from "../ui/Icon.js";
 // Topic, titles, paragraphs, notes and sources reach the page as React text nodes: React escapes them, so markup in
 // them stays visible text. No element, link or markdown is built from them, and nothing is kept in browser storage.
 
-function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disabled: boolean; onChange(items: EditorItem[]): void }) {
-  const { items, check, disabled } = props;
+function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disabled: boolean; mode: EditorMode; onChange(items: EditorItem[]): void }) {
+  const { items, check, disabled, mode } = props;
+  const slides = mode === "presentation";
+  const titleMax = slides ? slideLimits.titleMax : limits.titleMax;
+  const minWords = slides ? slideLimits.minWords : limits.minWords;
+  const maxWords = slides ? slideLimits.maxWords : limits.maxWords;
+  const maxCount = slides ? slideLimits.maxSlides : limits.maxSections;
   const set = (i: number, patch: Partial<EditorItem>) => props.onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   return (
     <div className="ag-wk-editor">
@@ -59,15 +79,15 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
             aria-label={workTexts.titleLabel}
             aria-invalid={check.badTitles[i] || undefined}
             value={it.title}
-            maxLength={limits.titleMax}
+            maxLength={titleMax}
             disabled={disabled}
             onChange={(e) => set(i, { title: e.target.value })}
           />
           <input
             className="ag-inp ag-wk-words"
             type="number"
-            min={limits.minWords}
-            max={limits.maxWords}
+            min={minWords}
+            max={maxWords}
             step={1}
             aria-label={workTexts.wordsLabel}
             aria-invalid={check.badWords[i] || undefined}
@@ -75,13 +95,13 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
             disabled={disabled}
             onChange={(e) => set(i, { words: e.target.value })}
           />
-          <IconButton icon="up" label={workTexts.moveUp} disabled={disabled || i === 0} onClick={() => props.onChange(moveItem(items, i, -1))} />
-          <IconButton icon="down" label={workTexts.moveDown} disabled={disabled || i === items.length - 1} onClick={() => props.onChange(moveItem(items, i, 1))} />
-          <IconButton icon="x" label={workTexts.remove} disabled={disabled} onClick={() => props.onChange(removeItem(items, i))} />
+          <IconButton icon="up" label={workTexts.moveUp} disabled={disabled || !canMove(items, i, -1)} onClick={() => props.onChange(moveItem(items, i, -1))} />
+          <IconButton icon="down" label={workTexts.moveDown} disabled={disabled || !canMove(items, i, 1)} onClick={() => props.onChange(moveItem(items, i, 1))} />
+          <IconButton icon="x" label={workTexts.remove} disabled={disabled || !canRemove(items, i)} onClick={() => props.onChange(removeItem(items, i))} />
         </div>
       ))}
       <div className="ag-actions">
-        <Button size="sm" variant="ghost" icon="plus" disabled={disabled || items.length >= limits.maxSections} onClick={() => props.onChange(addItem(items))}>
+        <Button size="sm" variant="ghost" icon="plus" disabled={disabled || items.length >= maxCount} onClick={() => props.onChange(addItem(items, mode))}>
           {workTexts.addSection}
         </Button>
       </div>
@@ -95,6 +115,13 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
 }
 
 const defaultLibrary = libraryApi(callByName);
+const defaultSend = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
+
+/** The calls that sending a ready work to the teacher needs; without them nothing about sending is shown. */
+export interface SendApis {
+  api: AgentConfirmApi;
+  deleteApi: RecordingDeleteApi;
+}
 
 type Mode = "view" | "edit" | "revise";
 
@@ -115,6 +142,10 @@ export function WorkBody(props: {
   stopping?: boolean;
   /** The core accepted «Остановить»: the parent keeps reading the work until the job is gone. */
   onStopped?(): void;
+  /** Sending a ready work to the teacher (see WorkSend); without it nothing about sending is shown. */
+  send?: SendApis;
+  /** Subject names by library id, for the subject line of the card. */
+  subjects?: ReadonlyMap<string, string>;
 }) {
   const { work, api } = props;
   const error = props.error ?? "";
@@ -127,19 +158,23 @@ export function WorkBody(props: {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [openView, setOpenView] = useState<OpenView | null>(null);
+  // The last failure came from «Остановить»: «Повторить» (StartWriting) is no answer to it.
+  const [stopFailed, setStopFailed] = useState(false);
   // One call at a time: the guard answers a second click before the state has disabled the buttons.
   const [flight] = useState(singleFlight);
   const noteId = useId();
   const selectId = useId();
 
-  const check = checkEditor(items);
-  const edited = isEdited(items, sections);
+  const emode = editorMode(work.writing);
+  const check = checkEditor(items, emode);
+  const edited = isEdited(items, sections, emode);
 
   const run = async (call: () => Promise<void>) => {
     await flight(async () => {
       setBusy(true);
       setError("");
       setOpenView(null);
+      setStopFailed(false);
       try {
         await call();
       } catch (e) {
@@ -168,7 +203,7 @@ export function WorkBody(props: {
 
   // «Сохранить план»: a stale version shows the error, re-reads the card and drops the typed plan.
   const savePlan = async () => {
-    const r = await savePlanAt(api, work.id, work.version, items);
+    const r = await savePlanAt(api, work.id, work.version, items, emode);
     if (r.ok) {
       saved(r.work);
       return;
@@ -179,7 +214,13 @@ export function WorkBody(props: {
     setError(turnkeyErrorText(r.error));
   };
   const stop = async () => {
-    const r = await stopWork(api, work.id);
+    let r;
+    try {
+      r = await stopWork(api, work.id);
+    } catch (e) {
+      setStopFailed(true);
+      throw e;
+    }
     props.onWork(r.work);
     if (r.watch) {
       props.onStopped?.();
@@ -190,7 +231,23 @@ export function WorkBody(props: {
       setOpenView(await openWork(props.library, work));
     }
   };
+  const openTalkText = async () => {
+    if (props.library !== undefined) {
+      setOpenView(await openTalk(props.library, work));
+    }
+  };
   const canOpen = props.library !== undefined && openTarget(work) !== "";
+  const canOpenTalk = props.library !== undefined && talkTarget(work) !== "";
+  // «Доработать по замечаниям»: an empty note makes no call.
+  const reviseNow = async () => {
+    const p = reviseWork(api, work.id, reviseNumber, note);
+    if (p !== null) {
+      props.onWork(await p);
+    }
+  };
+
+  const metaText = metaLine(workMeta(work, props.subjects ?? new Map()));
+  const metaEl = metaText !== "" && <p className="small muted ag-text">{metaText}</p>;
 
   const errorLine = error !== "" && (
     <ResultLine kind="fail" role="alert">
@@ -204,9 +261,9 @@ export function WorkBody(props: {
     const ctx = { work, api, busy, run, step, onWork: props.onWork, errorLine };
     switch (early.type) {
       case "triage":
-        return <TriageCard ctx={ctx} caption={early.caption} line={early.line} problem={early.problem} />;
+        return <TriageCard ctx={ctx} caption={early.caption} problem={early.problem} />;
       case "failed":
-        return <FailedCard caption={early.caption} text={early.text} message={work.problem === "" ? "" : work.message} />;
+        return <FailedCard caption={early.caption} text={early.text} message={triageReason(work)} />;
       case "questions":
         // A new round is a new form: the typed answers of the old one are dropped.
         return <QuestionsCard key={`${work.questionRound}:${work.version}`} ctx={ctx} />;
@@ -225,6 +282,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p>{model.hint}</p>
           {errorLine}
           <div className="ag-actions">
@@ -242,10 +300,11 @@ export function WorkBody(props: {
             <span className="ag-dot" aria-hidden="true" />
             {model.caption}
           </h3>
+          {metaEl}
           <p role="status">{model.line}</p>
           {errorLine}
           <div className="ag-actions">
-            {error !== "" && error !== notStoppedText && (
+            {retryOffered(error, stopFailed) && (
               <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await retryWriting(api, work.id)))}>
                 {workTexts.retry}
               </Button>
@@ -263,6 +322,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p role="status">{model.line}</p>
           {errorLine}
           <div className="ag-actions">
@@ -277,15 +337,16 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p className="small muted">{model.hint}</p>
-          <OutlineEditor items={items} check={check} disabled={busy} onChange={setItems} />
+          <OutlineEditor items={items} check={check} disabled={busy} mode={emode} onChange={setItems} />
           {errorLine}
           <div className="ag-actions">
             <Button
               size="sm"
               variant="primary"
               disabled={busy || !check.ok}
-              onClick={() => void run(() => step(approvePlan(api, work.id, work.version, items, edited)))}
+              onClick={() => void run(() => step(approvePlan(api, work.id, work.version, items, edited, emode)))}
             >
               {workTexts.approve}
             </Button>
@@ -300,6 +361,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p>{model.text}</p>
           <label className="small muted" htmlFor={noteId}>
             {model.noteLabel}
@@ -318,6 +380,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p className="ag-file">
             <Icon name="doc" />
             <span className="ag-file-kind">{model.file.kind}</span>
@@ -327,11 +390,36 @@ export function WorkBody(props: {
             <Icon name="info" />
             <span>{model.notice}</span>
           </p>
+          {model.manualLine !== "" && (
+            <p className="ag-note">
+              <Icon name="info" />
+              <span>{model.manualLine}</span>
+            </p>
+          )}
           {model.sections.map((s) => (
             <details key={s.key} className="ag-wk-sec">
               <summary>{s.heading}</summary>
+              {s.partLabel !== "" && <p className="ag-sub">{s.partLabel}</p>}
+              {s.bullets.length > 0 && (
+                <ul className="ag-list small">
+                  {s.bullets.map((b, i) => (
+                    <li key={i}>{b}</li>
+                  ))}
+                </ul>
+              )}
+              {s.columns.map((c, ci) => (
+                <div key={ci}>
+                  <p className="ag-sub">{c.heading !== "" ? c.heading : `${workTexts.columnFallback} ${ci + 1}`}</p>
+                  <ul className="ag-list small">
+                    {c.bullets.map((b, i) => (
+                      <li key={i}>{b}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {s.slide && s.paragraphs.length > 0 && <p className="ag-sub">{workTexts.slideNotes}</p>}
               {s.paragraphs.map((p, i) => (
-                <p key={i} className="ag-text">
+                <p key={i} className={s.marks[i] ? "ag-text ag-wk-ph" : "ag-text"}>
                   {p}
                 </p>
               ))}
@@ -350,6 +438,35 @@ export function WorkBody(props: {
               )}
             </details>
           ))}
+          {model.questions.length > 0 && (
+            <details className="ag-wk-sec">
+              <summary>{workTexts.questionsCaption}</summary>
+              {model.questions.map((q, i) => (
+                <div key={i}>
+                  <p className="ag-text">
+                    <strong>{q.question}</strong>
+                  </p>
+                  <p className="ag-text">
+                    <span className="ag-sub">{workTexts.answerLabel}. </span>
+                    {q.answer}
+                  </p>
+                </div>
+              ))}
+            </details>
+          )}
+          {model.todo !== null && (
+            <div className="ag-wk-todo">
+              <p className="ag-sub">{workTexts.todoCaption}</p>
+              <ul className="ag-list small">
+                {model.todo.items.map((t) => (
+                  <li key={t.key}>
+                    {t.title}: {t.prompt}
+                  </li>
+                ))}
+                <li>{model.todo.depends}</li>
+              </ul>
+            </div>
+          )}
 
           {mode === "revise" && (
             <div className="ag-revise">
@@ -357,19 +474,20 @@ export function WorkBody(props: {
                 {workTexts.reviseSection}
               </label>
               <select id={selectId} className="ag-inp" value={reviseNumber} disabled={busy} onChange={(e) => setReviseNumber(Number(e.target.value))}>
-                {reviseOptions(sections).map((o) => (
+                {reviseOptions(sections, emode).map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
                 ))}
               </select>
+              {reviseCaption(reviseNumber) !== "" && <p className="small muted">{reviseCaption(reviseNumber)}</p>}
               <label className="small muted" htmlFor={noteId}>
-                {workTexts.noteLabel}
+                {workTexts.reviseNote}
               </label>
-              <input id={noteId} className="ag-inp" value={note} maxLength={limits.noteMax} disabled={busy} onChange={(e) => setNote(e.target.value)} />
+              <textarea id={noteId} className="ag-inp ag-area" rows={4} value={note} maxLength={limits.noteMax} disabled={busy} onChange={(e) => setNote(e.target.value)} />
             </div>
           )}
-          {mode === "edit" && <OutlineEditor items={items} check={check} disabled={busy} onChange={setItems} />}
+          {mode === "edit" && <OutlineEditor items={items} check={check} disabled={busy} mode={emode} onChange={setItems} />}
           {errorLine}
           {openView !== null && (
             <ResultLine kind={openView.kind} role={openView.kind === "fail" ? "alert" : "status"}>
@@ -377,7 +495,7 @@ export function WorkBody(props: {
             </ResultLine>
           )}
 
-          {canOpen && mode === "view" && <p className="small muted">{workTexts.copyNote}</p>}
+          {(canOpen || canOpenTalk) && mode === "view" && <p className="small muted">{workTexts.copyNote}</p>}
 
           <div className="ag-actions">
             {mode === "view" && (
@@ -393,12 +511,17 @@ export function WorkBody(props: {
                     {openLabel(work)}
                   </Button>
                 )}
+                {canOpenTalk && (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(openTalkText)}>
+                    {workTexts.openTalk}
+                  </Button>
+                )}
               </>
             )}
             {mode === "revise" && (
               <>
-                <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await api.regenerate(work.id, reviseNumber, noteOf(note))))}>
-                  {workTexts.regenerate}
+                <Button size="sm" variant="primary" disabled={busy || !canSubmitNote(note)} onClick={() => void run(reviseNow)}>
+                  {workTexts.reviseSubmit}
                 </Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
                   {workTexts.cancel}
@@ -411,7 +534,7 @@ export function WorkBody(props: {
                   size="sm"
                   variant="primary"
                   disabled={busy || !check.ok || !edited}
-                  onClick={() => void run(() => step(rewriteWork(api, work.id, work.version, items, edited)))}
+                  onClick={() => void run(() => step(rewriteWork(api, work.id, work.version, items, edited, emode)))}
                 >
                   {workTexts.rewrite}
                 </Button>
@@ -421,20 +544,46 @@ export function WorkBody(props: {
               </>
             )}
           </div>
+          {mode === "view" && props.send !== undefined && (
+            <WorkSend api={props.send.api} deleteApi={props.send.deleteApi} workId={work.id} sendable={canOfferSend(work)} />
+          )}
         </section>
       );
   }
 }
 
 /** Loads the work of a `work` card, re-reads it while a step runs, and shows the card of its step. */
-export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; library?: LibraryApi }) {
+// `initial`: the work as the call that made it replied (it may carry the problem of a reader call, which the core does not store).
+export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; library?: LibraryApi; send?: SendApis; initial?: TurnkeyWork }) {
   const { api, workId } = props;
   const library = props.library ?? defaultLibrary;
-  const [work, setWork] = useState<TurnkeyWork | null>(null);
+  const send = props.send ?? defaultSend;
+  const [work, setWork] = useState<TurnkeyWork | null>(() => (props.initial !== undefined && props.initial.id === workId ? props.initial : null));
   const [stopping, setStopping] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
-  const latest = useRef<TurnkeyWork | null>(null);
+  const latest = useRef<TurnkeyWork | null>(work);
+  const [subjects, setSubjects] = useState<ReadonlyMap<string, string>>(() => new Map());
+
+  // Subject names for the subject line: read once the work names a subject; a failed read just leaves «Входящие».
+  const subjectId = work?.subjectId ?? "";
+  useEffect(() => {
+    if (subjectId === "") {
+      return;
+    }
+    let live = true;
+    library
+      .subjects()
+      .then((list) => {
+        if (live) {
+          setSubjects(new Map(list.map((s) => [s.id, s.name])));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [library, subjectId]);
 
   // An older reply never replaces a newer one.
   // A reply that came (a read or a call) clears an earlier read error.
@@ -483,6 +632,8 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; librar
           error={actionError}
           onError={onError}
           library={library}
+          send={send}
+          subjects={subjects}
           stopping={stoppingNow}
           onStopped={() => setStopping(true)}
         />

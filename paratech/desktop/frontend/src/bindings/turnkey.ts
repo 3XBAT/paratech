@@ -48,6 +48,22 @@ export interface WorkSource {
   verify: boolean;
 }
 
+/** The kind of a slide ("" for a section of a paper). */
+export type SlideKind = "" | "title" | "bullets" | "two_columns" | "conclusion";
+
+export const slideKinds: readonly SlideKind[] = ["", "title", "bullets", "two_columns", "conclusion"];
+
+/** The part of a lab report a section is ("" for another work). */
+export type LabPart = "" | "goal" | "equipment" | "theory" | "procedure" | "results" | "conclusions" | "other";
+
+export const labParts: readonly LabPart[] = ["", "goal", "equipment", "theory", "procedure", "results", "conclusions", "other"];
+
+/** A column of a two-column slide. */
+export interface WorkColumn {
+  heading: string;
+  bullets: string[];
+}
+
 export interface WorkSection {
   /** 1-based number of a section of the plan. */
   number: number;
@@ -55,9 +71,34 @@ export interface WorkSection {
   words: number;
   note: string;
   written: boolean;
+  /** The text of a section; of a slide the speaker notes; of a lab report the placeholders («▢ …») are among them. */
   paragraphs: string[];
   sources: WorkSource[];
+  /** TASK-194: "" when the field is missing or the work is not a presentation. */
+  kind: SlideKind;
+  /** TASK-194: "" when the field is missing or the work is not a lab report. */
+  part: LabPart;
+  bullets: string[];
+  columns: WorkColumn[];
 }
+
+/** A likely question after the talk with its answer. */
+export interface WorkTalkQuestion {
+  question: string;
+  answer: string;
+}
+
+/** A place of section `section` (its `title`) the student fills; `prompt` is «Вставьте …». */
+export interface WorkPlaceholder {
+  section: number;
+  title: string;
+  prompt: string;
+}
+
+/** What became of the lab manual: "" until the outline is set. */
+export type ManualState = "" | "none" | "read" | "not_read" | "no_text";
+
+export const manualStates: readonly ManualState[] = ["", "none", "read", "not_read", "no_text"];
 
 export interface WorkWriting {
   step: WritingStep;
@@ -73,6 +114,16 @@ export interface WorkWriting {
   /** A writing job runs for the work («Остановить»). */
   active: boolean;
   jobState: WritingJobState;
+  /** TASK-194: the fields below are false / "" / [] when the core did not send them. */
+  presentation: boolean;
+  template: string;
+  questions: WorkTalkQuestion[];
+  /** The speaker text in the library, once done. */
+  talkMaterialId: string;
+  talkResult: string;
+  lab: boolean;
+  manual: ManualState;
+  placeholders: WorkPlaceholder[];
 }
 
 /** One question of the reader: a choice (options, default index) or a text (defaultText; "" may be skipped). */
@@ -125,7 +176,7 @@ export interface TurnkeyWork {
   status: WorkStatus;
   version: number;
   writing: WorkWriting | null;
-  /** card.workType of the Go view ("" without a card); "presentation" is not written as a paper. */
+  /** card.workType of the Go view ("" without a card); a presentation is written as slides (TASK-106). */
   workType: string;
   problem: string;
   message: string;
@@ -141,6 +192,12 @@ export interface TurnkeyWork {
   assumptions: string[];
   helper: WorkHelper | null;
   answered: WorkAnswered[];
+  /** The topic of a work on a topic (student's or agent's words: text only); "" for a work of an assignment. */
+  topic: string;
+  /** The library subject of the work; "" none, or a subject removed since. */
+  subjectId: string;
+  /** «Отправить преподавателю» is offered: a work of an assignment only. */
+  sendable: boolean;
 }
 
 /** A section of the plan the student sends; number 0 is a new section. */
@@ -163,6 +220,10 @@ export const errorTexts: readonly string[] = [
   "Работа изменилась: обновите карточку.",
   "Не удалось остановить написание. Попробуйте ещё раз.",
   "Задание не найдено: возможно, его удалили.",
+  // AskStep (TASK-192): no reader wired, offline, quota, refused answer.
+  "Нет связи с paratech: вопрос не отправлен. Повторите позже.",
+  "Лимит запросов исчерпан: ответить на вопрос сейчас нельзя.",
+  "Ответ на вопрос не прошёл проверку. Спросите ещё раз или переформулируйте вопрос.",
 ];
 
 export const genericError = "Не удалось выполнить. Попробуйте ещё раз.";
@@ -256,7 +317,33 @@ function parseSection(raw: unknown): WorkSection {
       return p;
     }),
     sources: list(r, "sources", w, parseSource),
+    kind: optOneOf(r, "kind", slideKinds, w),
+    part: optOneOf(r, "part", labParts, w),
+    bullets: strings(r, "bullets", w),
+    columns: list(r, "columns", w, parseColumn),
   };
+}
+
+function optOneOf<T extends string>(r: Record<string, unknown>, key: string, allowed: readonly T[], what: string): T {
+  return r[key] === undefined || r[key] === null ? allowed[0] : oneOf(r, key, allowed, what);
+}
+
+function parseColumn(raw: unknown): WorkColumn {
+  const w = "work column";
+  const r = record(raw, w);
+  return { heading: optStr(r, "heading", w), bullets: strings(r, "bullets", w) };
+}
+
+function parseTalkQuestion(raw: unknown): WorkTalkQuestion {
+  const w = "work talk question";
+  const r = record(raw, w);
+  return { question: str(r, "question", w), answer: str(r, "answer", w) };
+}
+
+function parsePlaceholder(raw: unknown): WorkPlaceholder {
+  const w = "work placeholder";
+  const r = record(raw, w);
+  return { section: optCount(r, "section", w), title: optStr(r, "title", w), prompt: str(r, "prompt", w) };
 }
 
 function parseWriting(raw: unknown): WorkWriting {
@@ -275,6 +362,14 @@ function parseWriting(raw: unknown): WorkWriting {
     job: str(r, "job", w),
     active: optBool(r, "active", w),
     jobState: r.jobState === undefined || r.jobState === null ? "" : oneOf(r, "jobState", writingJobStates, w),
+    presentation: optBool(r, "presentation", w),
+    template: optStr(r, "template", w),
+    questions: list(r, "questions", w, parseTalkQuestion),
+    talkMaterialId: optStr(r, "talkMaterialId", w),
+    talkResult: optStr(r, "talkResult", w),
+    lab: optBool(r, "lab", w),
+    manual: optOneOf(r, "manual", manualStates, w),
+    placeholders: list(r, "placeholders", w, parsePlaceholder),
   };
 }
 
@@ -373,6 +468,9 @@ export function parseWork(raw: unknown): TurnkeyWork {
     assumptions: strings(r, "assumptions", w),
     helper: r.helper === null || r.helper === undefined ? null : parseHelper(r.helper),
     answered: list(r, "answered", w, parseAnswered),
+    topic: optStr(r, "topic", w),
+    subjectId: optStr(r, "subjectId", w),
+    sendable: optBool(r, "sendable", w),
   };
 }
 
@@ -408,12 +506,9 @@ export interface TurnkeyApi {
   confirmRequirements(workId: string): Promise<TurnkeyWork>;
   /** Asks the waiting reader call again. */
   retry(workId: string): Promise<TurnkeyWork>;
-  /** A question about helper step `step` (from 0); the answer is plain text. The core may refuse: stepHelpUnavailableText. */
+  /** A question about helper step `step` (from 0); the answer is plain text. A refusal carries one of the fixed texts. */
   askStep(workId: string, step: number, question: string): Promise<string>;
 }
-
-/** The core's answer while the step help has no backend; shown calmly, not as a failure. */
-export const stepHelpUnavailableText = "Вопросы по шагу пока недоступны.";
 
 /** Builds the turnkey API over a call function (the Wails runtime in the app, a fake in tests). */
 export function turnkeyApi(call: CallByName): TurnkeyApi {

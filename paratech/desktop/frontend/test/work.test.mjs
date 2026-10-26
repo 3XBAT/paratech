@@ -14,6 +14,15 @@ import {
   approvePlan,
   blockedNumber,
   checkEditor,
+  canMove,
+  canRemove,
+  canSubmitNote,
+  editorMode,
+  openTalk,
+  reviseCaption,
+  reviseWork,
+  sectionTexts,
+  talkTarget,
   regenerateBlocked,
   rewriteWork,
   savePlanAt,
@@ -53,13 +62,17 @@ const { renderToStaticMarkup } = server;
 const noop = () => undefined;
 
 function section(over) {
-  return { number: 1, title: "Введение", words: 300, note: "", written: false, paragraphs: [], sources: [], ...over };
+  return {
+    number: 1, title: "Введение", words: 300, note: "", written: false, paragraphs: [], sources: [],
+    kind: "", part: "", bullets: [], columns: [], ...over,
+  };
 }
 
 function writing(over) {
   return {
     step: "none", generation: 1, topic: "Тема работы", sections: [], done: 0, total: 0, subjectId: "", materialId: "",
-    result: "", job: "", ...over,
+    result: "", job: "", presentation: false, template: "", questions: [], talkMaterialId: "", talkResult: "",
+    lab: false, manual: "", placeholders: [], ...over,
   };
 }
 
@@ -287,9 +300,10 @@ test("blocked regenerate sends 0 only without sections, else the first section n
   assert.deepEqual(log, [["w1", 0, "план"], ["w1", 3, "короче"], ["w1", 0, ""]]);
 });
 
-test("a presentation is not offered «Написать работу»", () => {
-  assert.deepEqual(workCardModel(work({ status: "confirmed", workType: "presentation" })), { type: "none" });
+test("a presentation is offered «Написать работу» like any confirmed work (TASK-195)", () => {
+  assert.equal(workCardModel(work({ status: "confirmed", workType: "presentation" })).type, "start");
   assert.equal(workCardModel(work({ status: "confirmed", workType: "referat" })).type, "start");
+  assert.match(render(work({ status: "confirmed", workType: "presentation" })), /Написать работу/);
   assert.equal(parseWork({ ...raw(), card: { workType: "presentation" } }).workType, "presentation");
   assert.equal(parseWork(raw()).workType, "");
 });
@@ -479,7 +493,8 @@ test("the editor check follows the domain: 1..12 sections, a title of 150 runes,
 test("revise: the choice is every section or one section; the note is trimmed and cut", () => {
   const opts = reviseOptions([section({ number: 1, title: "A" }), section({ number: 4, title: "B" })]);
   assert.deepEqual(opts.map((o) => o.value), [0, 1, 4]);
-  assert.equal(opts[0].label, "Весь текст");
+  assert.equal(opts[0].label, "Вся работа");
+  assert.deepEqual(opts.slice(1).map((o) => o.label), ["Раздел 1. A", "Раздел 4. B"]);
   assert.equal(noteOf("  короче  "), "короче");
   assert.equal(noteOf("x".repeat(1500)).length, 1000);
   assert.equal([...noteOf("😀".repeat(1200))].length, 1000);
@@ -821,4 +836,289 @@ test("a double click on «Остановить» is one call", async () => {
   release();
   await first;
   assert.equal(calls, 1);
+});
+
+// ---- Presentation and lab report (TASK-195) ----
+
+const slide = (n, kind, over) => section({ number: n, title: `Слайд-${n}`, words: 60, kind, written: true, ...over });
+const deck = (extra = {}) => [
+  slide(1, "title"),
+  ...Array.from({ length: 8 }, (_, i) => slide(i + 2, "bullets", extra)),
+  slide(10, "conclusion"),
+];
+const talkQuestions = [{ question: "Почему так?", answer: "Потому что." }];
+
+test("parseWork reads the fields of TASK-194 and takes a missing field as empty or false", () => {
+  const full = parseWork(
+    raw({
+      writing: {
+        ...writing({ step: "none" }),
+        presentation: true, template: "plain", talkMaterialId: "t1", talkResult: "talk.docx", lab: true, manual: "not_read",
+        questions: [{ question: "Q", answer: "A" }],
+        placeholders: [{ section: 2, title: "Результаты", prompt: "Вставьте график" }],
+        sections: [{ ...section({ kind: "two_columns", part: "results", bullets: ["b"], columns: [{ heading: "H", bullets: ["x"] }] }) }],
+      },
+    }),
+  ).writing;
+  assert.equal(full.presentation, true);
+  assert.equal(full.talkMaterialId, "t1");
+  assert.equal(full.manual, "not_read");
+  assert.deepEqual(full.questions, [{ question: "Q", answer: "A" }]);
+  assert.deepEqual(full.placeholders, [{ section: 2, title: "Результаты", prompt: "Вставьте график" }]);
+  assert.equal(full.sections[0].kind, "two_columns");
+  assert.equal(full.sections[0].part, "results");
+  assert.deepEqual(full.sections[0].columns, [{ heading: "H", bullets: ["x"] }]);
+
+  // An older core sends none of them.
+  const old = { step: "none", generation: 1, topic: "T", sections: [{ number: 1, title: "A", words: 100, note: "", written: true, paragraphs: [], sources: [] }], done: 0, total: 0, subjectId: "", materialId: "", result: "", job: "" };
+  const w = parseWork(raw({ writing: old })).writing;
+  assert.deepEqual([w.presentation, w.lab, w.template, w.talkMaterialId, w.talkResult, w.manual], [false, false, "", "", "", ""]);
+  assert.deepEqual([w.questions, w.placeholders], [[], []]);
+  assert.deepEqual([w.sections[0].kind, w.sections[0].part, w.sections[0].bullets, w.sections[0].columns], ["", "", [], []]);
+  // null lists and an empty manual are accepted.
+  assert.equal(parseWork(raw({ writing: { ...old, questions: null, placeholders: null, manual: "" } })).writing.manual, "");
+
+  for (const bad of [{ presentation: "yes" }, { manual: "weird" }, { questions: [{ question: 1, answer: "a" }] }, { placeholders: [{ prompt: 5 }] }, { talkMaterialId: 7 }]) {
+    assert.throws(() => parseWork(raw({ writing: { ...old, ...bad } })), bad.toString());
+  }
+  for (const bad of [{ kind: "huge" }, { part: "x" }, { bullets: [1] }, { columns: [{ heading: 1, bullets: [] }] }, { columns: "x" }]) {
+    assert.throws(() => parseWork(raw({ writing: { ...old, sections: [{ ...old.sections[0], ...bad }] } })), JSON.stringify(bad));
+  }
+});
+
+test("progress of a presentation is «Слайд N из M»", () => {
+  const w = (over) => writing({ step: "section", presentation: true, total: 9, done: 2, ...over });
+  assert.equal(progressLine(w()), "Слайд 3 из 9");
+  assert.equal(progressLine(w({ step: "assemble" })), "Слайд 9 из 9");
+  assert.equal(progressLine(writing({ step: "section", total: 4, done: 0 })), "Раздел 1 из 4");
+  assert.match(render(work({ writing: w({ active: true }) })), /Слайд 3 из 9/);
+});
+
+test("slide editor: 8..12 slides, 15..250 words, 600..1200 in total, a title of 120 runes", () => {
+  const item = (words, title = "A") => ({ number: 1, title, words });
+  const ok = (n, words) => Array.from({ length: n }, () => item(words));
+  assert.equal(checkEditor(ok(8, "75"), "presentation").ok, true);
+  assert.equal(checkEditor(ok(12, "100"), "presentation").ok, true);
+  assert.equal(checkEditor(ok(7, "100"), "presentation").ok, false);
+  assert.match(checkEditor(ok(7, "100"), "presentation").problem, /от 8 до 12 слайдов/);
+  assert.equal(checkEditor(ok(13, "50"), "presentation").ok, false);
+  // a slide of 14 and of 251 words
+  assert.equal(checkEditor([...ok(7, "100"), item("14")], "presentation").ok, false);
+  assert.equal(checkEditor([...ok(7, "100"), item("15")], "presentation").ok, true);
+  assert.equal(checkEditor([...ok(7, "80"), item("250")], "presentation").ok, true);
+  assert.equal(checkEditor([...ok(7, "80"), item("251")], "presentation").ok, false);
+  // totals: 8 x 74 = 592 < 600; 8 x 75 = 600; 12 x 100 = 1200; 12 x 101 over
+  assert.match(checkEditor(ok(8, "74"), "presentation").problem, /не меньше 600/);
+  assert.equal(checkEditor(ok(12, "101"), "presentation").ok, false);
+  assert.match(checkEditor(ok(12, "101"), "presentation").problem, /не больше 1200/);
+  // titles: 120 runes pass, 121 do not (the paper allows 150)
+  assert.equal(checkEditor([...ok(7, "100"), item("100", "😀".repeat(120))], "presentation").ok, true);
+  assert.equal(checkEditor([...ok(7, "100"), item("100", "x".repeat(121))], "presentation").ok, false);
+  assert.equal(checkEditor([{ number: 1, title: "x".repeat(121), words: "100" }]).ok, true);
+  // the paper keeps its limits
+  assert.equal(checkEditor([{ number: 1, title: "A", words: "20" }]).ok, false);
+  assert.equal(checkEditor([{ number: 1, title: "A", words: "20" }], "lab").ok, false);
+  // what is sent keeps the slide words
+  assert.deepEqual(toOutlineItems([{ number: 3, title: " A ", words: "20" }], "presentation"), [{ number: 3, title: "A", words: 20 }]);
+  assert.equal(isEdited(editorFromSections([slide(1, "title")]), [slide(1, "title")], "presentation"), false);
+});
+
+test("the title and the conclusion slide cannot be removed or moved; a new slide goes before the conclusion", () => {
+  const items = editorFromSections(deck());
+  assert.equal(items.length, 10);
+  assert.equal(canRemove(items, 0), false);
+  assert.equal(canRemove(items, 9), false);
+  assert.equal(canRemove(items, 4), true);
+  assert.deepEqual(removeItem(items, 0), items);
+  assert.deepEqual(removeItem(items, 9), items);
+  assert.equal(removeItem(items, 4).length, 9);
+  assert.equal(canMove(items, 0, 1), false);
+  assert.equal(canMove(items, 1, -1), false);
+  assert.equal(canMove(items, 8, 1), false);
+  assert.equal(canMove(items, 9, -1), false);
+  assert.equal(canMove(items, 3, 1), true);
+  assert.deepEqual(moveItem(items, 1, -1), items);
+  assert.deepEqual(moveItem(items, 8, 1), items);
+  assert.deepEqual(moveItem(items, 2, 1).map((i) => i.number), [1, 2, 4, 3, 5, 6, 7, 8, 9, 10]);
+  const added = addItem(items, "presentation");
+  assert.equal(added.length, 11);
+  assert.equal(added[9].number, 0);
+  assert.equal(added[9].words, "60");
+  assert.equal(added[10].kind, "conclusion");
+  assert.equal(checkEditor(added.map((i, n) => (n === 9 ? { ...i, title: "Новый" } : i)), "presentation").ok, true);
+  // the maximum of 12 slides
+  assert.equal(addItem(addItem(addItem(items, "presentation"), "presentation"), "presentation").length, 12);
+  assert.equal(addItem(addItem(addItem(addItem(items, "presentation"), "presentation"), "presentation"), "presentation").length, 12);
+});
+
+test("lab report editor: the last section with the part results or conclusions cannot be removed", () => {
+  const lab = editorFromSections([
+    section({ number: 1, part: "goal" }), section({ number: 2, part: "results" }), section({ number: 3, part: "conclusions" }),
+  ]);
+  assert.equal(canRemove(lab, 0), true);
+  assert.equal(canRemove(lab, 1), false);
+  assert.equal(canRemove(lab, 2), false);
+  assert.equal(removeItem(lab, 1).length, 3);
+  const twoResults = editorFromSections([section({ number: 1, part: "results" }), section({ number: 2, part: "results" }), section({ number: 3, part: "conclusions" })]);
+  assert.equal(canRemove(twoResults, 0), true);
+  assert.equal(removeItem(twoResults, 0).length, 2);
+  // the paper: everything can go
+  assert.equal(canRemove(editorFromSections([section({ number: 1 })]), 0), true);
+  // the editor mode follows the writing
+  assert.deepEqual([editorMode(null), editorMode(writing({ lab: true })), editorMode(writing({ presentation: true }))], ["paper", "lab", "presentation"]);
+  // the editor in the card disables the buttons of a fixed slide
+  const out = render(work({ writing: writing({ step: "approve", presentation: true, sections: deck() }) }));
+  assert.ok(out.split("disabled").length - 1 >= 6, "move and remove buttons of the title and the conclusion are disabled");
+  assert.match(out, /Заголовок|aria-label="Название раздела"/);
+});
+
+test("a ready presentation: the list of slides, bullets, columns, notes, questions and the buttons", () => {
+  const sections = [
+    slide(1, "title", { paragraphs: ["Привет, коллеги"] }),
+    slide(2, "bullets", { bullets: ["Тезис один", "Тезис два"], paragraphs: ["Заметка про тезисы"] }),
+    slide(3, "two_columns", { columns: [{ heading: "Плюсы", bullets: ["П1"] }, { heading: "", bullets: ["М1"] }] }),
+    slide(4, "conclusion", { bullets: ["Итог"] }),
+  ];
+  const w = work({ workType: "presentation", writing: doneWriting({ presentation: true, talkMaterialId: "t9", talkResult: "talk", questions: talkQuestions, sections }) });
+  const m = workCardModel(w);
+  assert.equal(m.kind, "presentation");
+  assert.equal(m.file.kind, ".pptx");
+  assert.deepEqual(m.sections.map((s) => s.heading), ["1. Слайд-1", "2. Слайд-2", "3. Слайд-3", "4. Слайд-4"]);
+  assert.equal(talkTarget(w), "t9");
+  const out = renderWith(w, { library });
+  assert.equal(out.split("<details").length - 1, 5, "four slides and the questions");
+  assert.match(out, /<details[^>]*><summary>2\. Слайд-2<\/summary>/);
+  assert.match(out, /<li>Тезис один<\/li><li>Тезис два<\/li>/);
+  assert.match(out, /Плюсы/);
+  assert.match(out, /Колонка 2/);
+  assert.match(out, /Заметки докладчика/);
+  assert.match(out, /Заметка про тезисы/);
+  assert.match(out, /<summary>Вероятные вопросы<\/summary>/);
+  assert.match(out, /Почему так\?/);
+  assert.match(out, /Потому что\./);
+  assert.match(out, /Открыть в PowerPoint/);
+  assert.match(out, /Открыть текст выступления/);
+  assert.match(out, /правки в ней в приложение не возвращаются/);
+  assert.match(out, /Доработать/);
+  // not ready: no questions, no talk button
+  const early = work({ workType: "presentation", writing: doneWriting({ presentation: true, sections }) });
+  assert.equal(talkTarget(early), "");
+  const o2 = renderWith(early, { library });
+  assert.ok(!o2.includes("Открыть текст выступления"));
+  assert.ok(!o2.includes("Вероятные вопросы"));
+  // without the binding nothing is offered
+  assert.ok(!renderWith(w).includes("Открыть текст выступления"));
+  // a paper has neither
+  assert.ok(!renderWith(work({ writing: doneWriting() }), { library }).includes("Открыть текст выступления"));
+});
+
+test("«Открыть текст выступления» opens by id only, a refusal is a fixed text", async () => {
+  const calls = [];
+  const lib = { openMaterial: async (...a) => (calls.push(a), { status: "refused", message: "Этот файл нельзя открыть отсюда." }) };
+  const w = work({ writing: doneWriting({ presentation: true, talkMaterialId: "t5", materialId: "m1" }) });
+  assert.deepEqual(await openTalk(lib, w), { kind: "fail", text: "Этот файл нельзя открыть отсюда." });
+  assert.deepEqual(calls, [["t5"]]);
+  assert.equal(await openTalk(lib, work({ writing: doneWriting({ presentation: true }) })), null);
+  assert.equal(await openTalk(lib, work({ writing: doneWriting({ talkMaterialId: "t5" }) })), null);
+  assert.equal(calls.length, 1);
+  const src = readFileSync(new URL("../src/agent/WorkCard.tsx", import.meta.url), "utf8");
+  assert.match(src, /void run\(openTalkText\)/);
+});
+
+const labSections = [
+  section({ number: 1, title: "Цель работы", part: "goal", written: true, paragraphs: ["Изучить закон."] }),
+  section({ number: 2, title: "Измерения", part: "results", written: true, paragraphs: ["Измерения таковы.", "▢ Вставьте таблицу измерений"] }),
+  section({ number: 3, title: "Итог", part: "conclusions", written: true, paragraphs: ["Выводы."] }),
+  section({ number: 4, title: "Прочее", part: "other", written: true, paragraphs: ["Ещё текст."] }),
+];
+const placeholders = [{ section: 2, title: "Измерения", prompt: "Вставьте таблицу измерений" }];
+const labWork = (over) => work({ workType: "lab_report", writing: doneWriting({ lab: true, manual: "read", placeholders, sections: labSections, ...over }) });
+
+test("a ready lab report: part labels, highlighted placeholders, «Что доделать самому», lines about the manual", () => {
+  const out = renderWith(labWork());
+  for (const label of ["Цель", "Результаты", "Выводы"]) {
+    assert.match(out, new RegExp(`<p class="ag-sub">${label}</p>`));
+  }
+  assert.equal(out.split('<p class="ag-sub">').length - 1, 4, "three parts and the todo caption; «other» has no label");
+  assert.match(out, /<p class="ag-text ag-wk-ph">▢ Вставьте таблицу измерений<\/p>/);
+  assert.match(out, /<p class="ag-text">Измерения таковы\.<\/p>/);
+  assert.match(out, /Что доделать самому/);
+  assert.match(out, /2\. Измерения: Вставьте таблицу измерений/);
+  assert.match(out, /Выводы зависят от ваших данных/);
+  assert.ok(!out.includes("Методичка не прочитана"));
+  assert.ok(!out.includes("В методичке нет текста"));
+  // The manual: not read, no text; "" before the outline and the other states say nothing.
+  assert.match(renderWith(labWork({ manual: "not_read" })), /Методичка не прочитана: отчёт написан по тексту задания\./);
+  assert.match(renderWith(labWork({ manual: "no_text" })), /В методичке нет текста, который можно прочитать: отчёт написан по тексту задания\./);
+  for (const manual of ["", "none"]) {
+    const o = renderWith(labWork({ manual }));
+    assert.ok(!o.includes("Методичка") && !o.includes("В методичке"), manual);
+    assert.match(o, /Выводы зависят от ваших данных/);
+  }
+  // A paper and a presentation have no such block.
+  assert.ok(!renderWith(work({ writing: doneWriting({ sections: labSections }) })).includes("Что доделать самому"));
+  assert.match(renderWith(labWork(), { library }), /Открыть в Word/);
+  assert.match(renderWith(labWork()), /Доработать/);
+});
+
+test("model text of the new fields stays text", () => {
+  const sections = [
+    slide(1, "two_columns", { title: evil, bullets: [evil], columns: [{ heading: evil, bullets: [evil] }], paragraphs: [evil], part: "results" }),
+  ];
+  const w = work({
+    writing: doneWriting({ presentation: true, lab: true, manual: "not_read", sections, questions: [{ question: evil, answer: evil }], placeholders: [{ section: 1, title: evil, prompt: evil }] }),
+  });
+  const out = renderWith(w, { library });
+  assert.ok(!out.includes("<img"));
+  assert.ok(!/<a[ >]/.test(out));
+  assert.ok(!out.includes("onerror=alert(1)>"));
+  assert.ok(out.includes("&lt;img src=x onerror=alert(1)&gt;"));
+  assert.deepEqual(sectionTexts([section({ paragraphs: ["▢ x", "y"] })])[0].marks, [true, false]);
+});
+
+test("«Замечания»: any finished work revises with Regenerate(id, 0 or N, note); an empty note sends nothing", async () => {
+  const log = [];
+  const api = { ...fakeApi(), regenerate: async (...a) => (log.push(a), work()) };
+  assert.equal(reviseWork(api, "w1", 0, "   \n "), null);
+  assert.equal(canSubmitNote(""), false);
+  assert.equal(canSubmitNote(" \n "), false);
+  assert.equal(canSubmitNote(" короче "), true);
+  await reviseWork(api, "w1", 0, "  переписать\nвсё  ");
+  await reviseWork(api, "w1", 4, "короче");
+  await reviseWork(api, "w1", 2, "😀".repeat(1200));
+  assert.deepEqual(log.slice(0, 2), [["w1", 0, "переписать\nвсё"], ["w1", 4, "короче"]]);
+  assert.equal([...log[2][2]].length, 1000);
+  assert.equal(log.length, 3);
+
+  assert.equal(reviseCaption(0), "Работа будет написана заново целиком с учётом замечаний (платно)");
+  assert.equal(reviseCaption(3), "");
+
+  const slideOpts = reviseOptions(deck(), "presentation");
+  assert.deepEqual(slideOpts.slice(0, 2).map((o) => o.label), ["Вся работа", "Слайд 1. Слайд-1"]);
+  assert.equal(reviseOptions(labSections, "lab")[1].label, "Раздел 1. Цель работы");
+
+  // Every kind of a ready work offers «Доработать»; the card calls the note path through run and a textarea.
+  for (const w of [work({ writing: doneWriting() }), work({ writing: doneWriting({ presentation: true, sections: deck() }) }), labWork()]) {
+    assert.match(renderWith(w), /Доработать/);
+  }
+  const src = readFileSync(new URL("../src/agent/WorkCard.tsx", import.meta.url), "utf8");
+  assert.match(src, /<textarea id=\{noteId\}/);
+  assert.match(src, /disabled=\{busy \|\| !canSubmitNote\(note\)\} onClick=\{\(\) => void run\(reviseNow\)\}/);
+  assert.match(src, /reviseWork\(api, work\.id, reviseNumber, note\)/);
+  // «Дополнительные указания» of a blocked work is unchanged.
+  assert.match(render(work({ writing: writing({ step: "blocked", sections: [section()] }) })), /Дополнительные указания/);
+});
+
+test("a double click on «Доработать по замечаниям» is one call", async () => {
+  const flight = singleFlight();
+  const log = [];
+  const api = { ...fakeApi(), regenerate: async (...a) => (log.push(a), work()) };
+  let release;
+  const slow = { ...api, regenerate: (...a) => new Promise((res) => { log.push(a); release = () => res(work()); }) };
+  const click = () => flight(async () => { await reviseWork(slow, "w1", 0, "замечание"); });
+  const first = click();
+  assert.equal(await click(), false);
+  release();
+  await first;
+  assert.equal(log.length, 1);
 });

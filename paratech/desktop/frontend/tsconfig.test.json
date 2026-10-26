@@ -51,6 +51,7 @@
     "src/sourcePicker/SourceAdvice.tsx",
     "src/manualStartView.ts",
     "src/nav.ts",
+    "src/navHistory.ts",
     "src/listView.ts",
     "src/CollapsibleList.tsx",
     "src/pages/SchedulePage.tsx",

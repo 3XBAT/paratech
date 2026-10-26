@@ -3,7 +3,7 @@
 // impersonal voice. Questions, assumptions, requirements, steps and pitfalls were written by the reader (untrusted):
 // pass them through untouched and render them as text nodes only, never as links or markup.
 
-import { stepHelpUnavailableText, turnkeyErrorText } from "./bindings/turnkey.js";
+import { turnkeyErrorText } from "./bindings/turnkey.js";
 import type { QuestionAnswer, TurnkeyApi, TurnkeyWork, WorkAnswered, WorkCardFields, WorkQuestion } from "./bindings/turnkey.js";
 import type { StepResult } from "./workView.js";
 import { runeLen } from "./workView.js";
@@ -13,8 +13,10 @@ export const turnkeyLimits = { answerMax: 1000, requirementMax: 200, stepQuestio
 
 export const turnkeyTexts = {
   triageCaption: "Разбор задания",
-  triageLine: "Задание ещё не разобрано.",
-  retry: "Повторить",
+  triageFailed: "Разбор задания не завершён. Можно повторить.",
+  /** No attempt yet: the first start. After a failed attempt the button is retry. */
+  triageStart: "Разобрать задание",
+  retry: "Попробовать снова",
   failedCaption: "Разбор задания",
   failedText: "Задание не удалось разобрать.",
 
@@ -66,15 +68,24 @@ export const turnkeyTexts = {
 // ---- Which card ----
 
 export type TurnkeyCardModel =
-  | { type: "triage"; caption: string; line: string; problem: string }
+  | { type: "triage"; caption: string; problem: string }
   | { type: "failed"; caption: string; text: string }
   | { type: "questions" }
   | { type: "understanding" }
   | { type: "helper" };
 
+/** Why the reader call did not go through: the core's message, a general line if only the problem code came; "" without a problem. */
+export function triageReason(w: TurnkeyWork): string {
+  if (w.problem === "") {
+    return "";
+  }
+  return w.message !== "" ? w.message : turnkeyTexts.triageFailed;
+}
+
 /**
  * The card of a work that has no writing yet, or null (the writing cards decide). A reader call that did not go
- * through keeps the work in triage with its problem; «Повторить» asks again.
+ * through keeps the work in triage with its problem; «Попробовать снова» asks again. Without a problem
+ * no attempt was made: the card only offers «Разобрать задание».
  */
 export function turnkeyCardModel(w: TurnkeyWork): TurnkeyCardModel | null {
   if (w.writing !== null) {
@@ -82,7 +93,7 @@ export function turnkeyCardModel(w: TurnkeyWork): TurnkeyCardModel | null {
   }
   switch (w.status) {
     case "triage":
-      return { type: "triage", caption: turnkeyTexts.triageCaption, line: turnkeyTexts.triageLine, problem: w.problem === "" ? "" : w.message };
+      return { type: "triage", caption: turnkeyTexts.triageCaption, problem: triageReason(w) };
     case "questions":
       return w.questions.length > 0 ? { type: "questions" } : null;
     case "review":
@@ -269,15 +280,14 @@ export function isPartial(w: TurnkeyWork): boolean {
 
 // ---- Helper ----
 
-export type StepOutcome = { kind: "answer"; text: string } | { kind: "unavailable"; text: string } | { kind: "error"; text: string };
+export type StepOutcome = { kind: "answer"; text: string } | { kind: "error"; text: string };
 
-/** «Спросить по шагу»: the answer, the calm «пока недоступны» (no backend yet) or a failure. */
+/** «Спросить по шагу»: the answer or the fixed text of the refusal (offline, quota, refused answer, ...). Both are plain text. */
 export async function askStepOutcome(api: TurnkeyApi, workId: string, step: number, question: string): Promise<StepOutcome> {
   try {
     return { kind: "answer", text: await api.askStep(workId, step, question) };
   } catch (e) {
-    const text = turnkeyErrorText(e);
-    return text === stepHelpUnavailableText ? { kind: "unavailable", text } : { kind: "error", text };
+    return { kind: "error", text: turnkeyErrorText(e) };
   }
 }
 
