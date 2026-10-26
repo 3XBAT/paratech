@@ -168,7 +168,8 @@ function isWritingStep(w: TurnkeyWork | null): boolean {
 /**
  * A step of the writing is running: the card re-reads the work until it is not. The core sets writing.active from the
  * existence of a pending/running job and StartWriting enqueues it before it replies, so active=false on a writing step
- * means the job is gone (stopped or failed), not "not started yet". Only an explicit false counts as stopped.
+ * means the job is gone (stopped or failed), not "not started yet". parseWork always gives a boolean; the undefined
+ * branch (counted as running) exists only for test fixtures that omit the flag.
  */
 export function isRunning(w: TurnkeyWork | null): boolean {
   return isWritingStep(w) && w?.writing?.active !== false;
@@ -180,14 +181,24 @@ export function isStopped(w: TurnkeyWork | null): boolean {
 }
 
 /**
- * The wait before the next read, or null to stop. Nothing is read again once a loaded work does not run. A stored
- * triage is not polled: the core keeps no problem, so it cannot tell a call in flight from a call that is due («Повторить»).
+ * The wait before the next read, or null to stop. A running step is read every pollMs. A stopped step is still read,
+ * slowly (retryMs), so a job that is in fact alive after a transient read error reappears; the loop ends on unmount.
+ * Other loaded works are not polled. A stored triage is not polled: the core keeps no problem, so it cannot tell a call
+ * in flight from a call that is due («Повторить»).
  */
 export function pollDelay(w: TurnkeyWork | null, failed: boolean): number | null {
+  if (w !== null && isStopped(w)) {
+    return retryMs;
+  }
   if (w !== null && !isRunning(w)) {
     return null;
   }
   return failed ? retryMs : pollMs;
+}
+
+/** «Остановка…» lasts while the job is active; once it is gone the flag is dropped so a later «Продолжить» shows «Остановить». */
+export function nextStopping(prev: boolean, w: TurnkeyWork | null): boolean {
+  return prev && w !== null && canStop(w);
 }
 
 export interface PollOptions {

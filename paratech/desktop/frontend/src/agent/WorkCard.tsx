@@ -24,6 +24,7 @@ import {
   removeItem,
   reviseOptions,
   canStop,
+  nextStopping,
   notStoppedText,
   openLabel,
   openTarget,
@@ -466,9 +467,10 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; librar
   );
 
   // A stop of a running step is asynchronous, but the one poller above keeps reading while writing.active is true.
-  // «Остановка…» shows only while the job is still active; a new work resets it.
+  // «Остановка…» shows only while the job is still active; it is dropped once the job is gone, and for a new work.
   useEffect(() => setStopping(false), [workId]);
-  const stoppingNow = stopping && work !== null && canStop(work);
+  useEffect(() => setStopping((p) => nextStopping(p, work)), [work, stopping]);
+  const stoppingNow = nextStopping(stopping, work);
 
   return (
     <>

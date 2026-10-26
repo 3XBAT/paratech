@@ -32,6 +32,7 @@ import {
   isRunning,
   limits,
   moveItem,
+  nextStopping,
   noteOf,
   nextActionError,
   retryWriting,
@@ -696,7 +697,7 @@ test("one poller serves a pending stop: it reads while active, backs off after a
   const act = (active) => work({ version: 1, writing: writing({ step: "section", active }) });
   assert.equal(pollDelay(act(true), false), pollMs);
   assert.equal(pollDelay(act(true), true), retryMs);
-  assert.equal(pollDelay(act(false), false), null);
+  assert.equal(pollDelay(act(false), false), retryMs);
   const { seen } = poller([act(true), new Error("net"), act(true), act(false)]);
   await settle();
   assert.equal(seen.reads, 1);
@@ -711,16 +712,36 @@ test("one poller serves a pending stop: it reads while active, backs off after a
   t.mock.timers.tick(pollMs);
   await settle();
   assert.equal(seen.reads, 4);
-  t.mock.timers.tick(retryMs * 3);
+  t.mock.timers.tick(retryMs - 1);
   await settle();
-  assert.equal(seen.reads, 4, "no reads once inactive");
+  assert.equal(seen.reads, 4, "a stopped card is read only slowly");
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(seen.reads, 5, "a stopped card keeps a slow read-only poll");
 });
 
-test("a writing step without a job is «Написание остановлено» with «Продолжить», no dot, no polling", () => {
+test("«Остановка…» is dropped once the job is gone: stop, job ends, «Продолжить» shows «Остановить» again", () => {
+  const act = (active) => work({ writing: writing({ step: "section", total: 2, active }) });
+  let s = false;
+  s = true; // «Остановить» pressed
+  s = nextStopping(s, act(true));
+  assert.equal(s, true, "still active: stopping");
+  s = nextStopping(s, act(false));
+  assert.equal(s, false, "job gone");
+  s = nextStopping(s, act(true));
+  assert.equal(s, false, "«Продолжить»: active again, not stopping");
+  const out = renderWith(act(true), { stopping: s });
+  assert.ok(out.includes("Остановить"));
+  assert.ok(!out.includes("Остановка…"));
+  assert.equal(nextStopping(true, null), false);
+});
+
+test("a writing step without a job is «Написание остановлено» with «Продолжить», no dot, slow read-only polling", () => {
   const stopped = work({ writing: writing({ step: "section", total: 3, done: 1, active: false }) });
   assert.equal(isStopped(stopped), true);
   assert.equal(isRunning(stopped), false);
-  assert.equal(pollDelay(stopped, false), null);
+  assert.equal(pollDelay(stopped, false), retryMs);
+  assert.equal(pollDelay(stopped, true), retryMs);
   const m = workCardModel(stopped);
   assert.equal(m.type, "stopped");
   assert.equal(m.line, "Раздел 2 из 3");
@@ -729,7 +750,7 @@ test("a writing step without a job is «Написание остановлен�
   assert.ok(out.includes("Продолжить"));
   assert.ok(!out.includes("ag-dot"));
   assert.ok(!out.includes("Остановить"));
-  // A started job (active true) and an unknown flag are running.
+  // A started job (active true) is running; the undefined flag is only a fixture case (parseWork always gives a boolean).
   assert.equal(workCardModel(work({ writing: writing({ step: "section", active: true }) })).type, "running");
   assert.equal(isStopped(work({ writing: writing({ step: "approve", active: false }) })), false);
 });
