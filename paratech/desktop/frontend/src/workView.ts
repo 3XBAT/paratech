@@ -716,7 +716,7 @@ export async function openPdf(library: Pick<LibraryApi, "openMaterial">, w: Turn
   return openById(library, pdfTarget(w));
 }
 
-export type OpenView ={ kind: "ok" | "fail"; text: string };
+export type OpenView = { kind: "ok" | "fail"; text: string };
 
 /** Opens the copy of the ready file; a refused or failed open is a fixed text, never a path. */
 export async function openWork(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
