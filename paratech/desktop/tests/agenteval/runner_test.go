@@ -24,15 +24,15 @@ var liveToday = time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 
 // cannedResults are what read tools return in the run (fake data, the shapes the Driver will send).
 var cannedResults = map[string]string{
-	"list_subjects":    `{"subjects":[{"id":"s-math"},{"id":"s-phys"},{"id":"s-prog"},{"id":"s-hist"}]}`,
-	"find_lessons":     `{"lessons":[{"id":"l-7","date":"2026-10-21","kind":"lecture","recording":"rec-7","has_summary":false,"has_text":false}]}`,
+	"list_subjects": `{"subjects":[{"id":"s-math"},{"id":"s-phys"},{"id":"s-prog"},{"id":"s-hist"}]}`,
+	"find_lessons":  `{"lessons":[{"id":"l-7","date":"2026-10-21","kind":"lecture","recording":"rec-7","has_summary":false,"has_text":false}]}`,
 	"list_assignments": `{"assignments":[{"id":"a-12","due":"2026-10-24","status":"upcoming","subject":"s-math"},` +
 		`{"id":"a-20","due":"2026-10-27","status":"upcoming","subject":"s-phys"}]}`,
-	"job_status":       `{"jobs":[{"id":"j-1","status":"running","done":3,"total":8}]}`,
-	"delivery_status":  `{"status":"not_sent"}`,
-	"search":           `{"lectures":2,"materials":1}`,
-	"answer_question":  `{"answer_id":"an-1","claims":2,"not_in_materials":false}`,
-	"inspect_upload":   `{"kind":"assignment","subject":"s-prog","has_homework":true,"mentions_email":false}`,
+	"job_status":      `{"jobs":[{"id":"j-1","status":"running","done":3,"total":8}]}`,
+	"delivery_status": `{"status":"not_sent"}`,
+	"search":          `{"lectures":2,"materials":1}`,
+	"answer_question": `{"answer_id":"an-1","claims":2,"not_in_materials":false}`,
+	"inspect_upload":  `{"kind":"assignment","subject":"s-prog","has_homework":true,"mentions_email":false}`,
 }
 
 // liveRun sends requests of the case set to a Hub through the real Hub client.
