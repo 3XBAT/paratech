@@ -10,7 +10,9 @@ import { WorkWritingCard } from "./WorkCard.js";
 import { FreeWorkCard } from "./FreeWorkCard.js";
 import { Waiting } from "./Waiting.js";
 import {
+  addedAssignmentText,
   assignmentRow,
+  openAssignmentLabel,
   type ButtonId,
   type ButtonModel,
   type CardModel,
@@ -300,7 +302,14 @@ function Card(props: { card: CardModel; actions: CardActions }) {
       return (
         <div className="ag-act">
           <Icon name={note?.done ? "back" : "ok"} />
-          <span className="ag-act-tx">{note?.done ? texts.undoDone : card.text}</span>
+          <span className="ag-act-tx">
+            {note?.done ? texts.undoDone : card.assignment ? addedAssignmentText(card.assignment, props.actions.subjects ?? {}, props.actions.now ?? new Date()) : card.text}
+          </span>
+          {!note?.done && card.assignment && props.actions.openAssignment && (
+            <Button size="sm" variant="ghost" onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)}>
+              {openAssignmentLabel}
+            </Button>
+          )}
           {!note?.done && (
             <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
               {note?.busy ? texts.undoBusy : card.undo.label}
