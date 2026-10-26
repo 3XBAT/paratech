@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
@@ -26,7 +27,7 @@ type stuckTurns struct {
 	calls     []agentturn.Call // what the next Ask hands to the Driver
 	submitErr error            // Submit fails with it and changes nothing
 	noRecover bool             // RecoverIdle reports a stop but the request stays running (a broken recovery)
-	busy      chan struct{}    // closed when Ask is first refused as busy
+	looked    chan struct{}    // closed when RecoverIdle has first asked live
 	asks      int
 	submits   int
 	recovered int
@@ -45,10 +46,6 @@ func (s *stuckTurns) Ask(context.Context, agentturn.AskInput) (agentturn.Step, e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if running(s.status) {
-		if s.busy != nil {
-			close(s.busy)
-			s.busy = nil
-		}
 		return agentturn.Step{}, fmt.Errorf("agentturn: ask: %w", thread.ErrTurnInProgress)
 	}
 	s.asks++
@@ -123,6 +120,10 @@ func (s *stuckTurns) RecoverIdle(_ context.Context, _ agentturn.IdleInput, live 
 	}
 	l := live(th1)
 	s.idleLive = append(s.idleLive, l)
+	if s.looked != nil {
+		close(s.looked)
+		s.looked = nil
+	}
 	if l {
 		return false, nil
 	}
@@ -248,8 +249,8 @@ func TestRecoveryIsTriedOnce(t *testing.T) {
 func TestHungToolStopsAndTheNextRequestPasses(t *testing.T) {
 	r := newReads()
 	r.library.block, r.library.started = true, make(chan struct{})
-	busy := make(chan struct{})
-	turns := &stuckTurns{calls: []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}, busy: busy}
+	looked := make(chan struct{})
+	turns := &stuckTurns{calls: []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}, looked: looked}
 	d, sink := newDriver(t, r, turns)
 
 	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
@@ -259,7 +260,7 @@ func TestHungToolStopsAndTheNextRequestPasses(t *testing.T) {
 	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
 		t.Fatal(err)
 	}
-	<-busy
+	<-looked
 	if err := d.Stop(t.Context(), ref1); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +270,7 @@ func TestHungToolStopsAndTheNextRequestPasses(t *testing.T) {
 	if rep.status != thread.StatusStopped || rep.reason != values.StopUser || rep.recs != 0 || rep.submits != 0 {
 		t.Fatalf("after «Стоп»: %+v", rep)
 	}
-	if slices.Contains(rep.idleLive, false) { // empty when «Стоп» landed before the recovery looked
+	if !slices.Equal(rep.idleLive, []bool{true}) {
 		t.Fatalf("live loop not seen: %v", rep.idleLive)
 	}
 	if !slices.ContainsFunc(sink.all(), func(u Update) bool { return u.Problem == ProblemBusy }) {
@@ -317,23 +318,44 @@ func TestSubmitErrorOfAClosedRequest(t *testing.T) {
 	}
 }
 
-// Interrupt refusing the outcomes of a failed Submit is retried without them: the request is closed all the same.
-func TestCloseDropsRefusedOutcomes(t *testing.T) {
-	turns := (&scriptedTurns{refuseOutcomes: true}).
-		then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil).
-		then(agentturn.Step{}, errors.New("disk full"))
-	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
-		t.Fatal(err)
+// Interrupt refusing the outcomes of a failed Submit is retried: a read is dropped (not done), an action becomes
+// outcome_unknown, never not done, since it may have acted (hard rule 7); the request is closed all the same.
+func TestCloseReplacesRefusedOutcomes(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(t *testing.T) agentturn.Call
+		want []string // the results of the retry
+	}{
+		{"read", func(t *testing.T) agentturn.Call { return readCall(t, "c1", values.ToolListSubjects, `{}`) }, nil},
+		{"action", func(t *testing.T) agentturn.Call {
+			return agentturn.Call{Call: mustCall(t, "w1", values.ToolCreateSubject, `{"name":"Химия"}`), Class: actionpolicy.ClassU, PlanStep: -1}
+		}, []string{`{"error":"outcome_unknown"}`}},
 	}
-	d.Wait()
-	rep := turns.report()
-	if len(rep.interrupted) != 2 || len(rep.interrupted[0].Outcomes) != 1 || len(rep.interrupted[1].Outcomes) != 0 ||
-		len(rep.stopped) != 1 {
-		t.Fatalf("report %+v", rep)
-	}
-	if up := lastUpdate(t, sink); up.Status != thread.StatusStopped || up.Problem != ProblemFailed {
-		t.Fatalf("last update = %+v", up)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			turns := (&scriptedTurns{refuseOutcomes: true}).
+				then(step(thread.StatusExecuting, []agentturn.Call{tt.call(t)}), nil).
+				then(agentturn.Step{}, errors.New("disk full"))
+			d, sink := newDriver(t, newReads(), turns)
+			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+				t.Fatal(err)
+			}
+			d.Wait()
+			rep := turns.report()
+			if len(rep.interrupted) != 2 || len(rep.interrupted[0].Outcomes) != 1 || len(rep.stopped) != 1 {
+				t.Fatalf("report %+v", rep)
+			}
+			var got []string
+			for _, o := range rep.interrupted[1].Outcomes {
+				got = append(got, o.Result.ResultJSON)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("retried with %v, want %v", got, tt.want)
+			}
+			if up := lastUpdate(t, sink); up.Status != thread.StatusStopped || up.Problem != ProblemFailed {
+				t.Fatalf("last update = %+v", up)
+			}
+		})
 	}
 }
 
@@ -379,8 +401,8 @@ func (panicTurns) Submit(context.Context, agentturn.SubmitInput) (agentturn.Step
 	panic("submit: broken")
 }
 
-// A panic in the loop closes the request through Interrupt and releases the calls of its thread, so «Продолжить» is
-// not refused as busy afterwards.
+// A panic in the loop closes the request through Interrupt with the outcomes the calls gave, and releases the calls of
+// its thread, so «Продолжить» is not refused as busy afterwards.
 func TestLoopPanicClosesTheRequest(t *testing.T) {
 	turns := (&scriptedTurns{}).
 		then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil).
@@ -390,7 +412,8 @@ func TestLoopPanicClosesTheRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Wait()
-	if rep := turns.report(); len(rep.stopped) != 1 {
+	if rep := turns.report(); len(rep.stopped) != 1 || len(rep.interrupted) != 1 || len(rep.interrupted[0].Outcomes) != 1 ||
+		rep.interrupted[0].Outcomes[0].Result.CallID != "c1" || rep.interrupted[0].Outcomes[0].Result.IsError {
 		t.Fatalf("report %+v", rep)
 	}
 	if up := lastUpdate(t, sink); up.Status != thread.StatusStopped || up.Problem != ProblemFailed {

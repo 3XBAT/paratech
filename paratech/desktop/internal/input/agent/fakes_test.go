@@ -236,7 +236,7 @@ type scriptedTurns struct {
 	// idle, when set, answers RecoverIdle; idles records the inputs and what live said of their thread.
 	idle  func(in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error)
 	idles []agentturn.IdleInput
-	// refuseOutcomes makes Interrupt refuse a report with outcomes, as agentturn does for a call it does not know.
+	// refuseOutcomes makes Interrupt refuse the first report with outcomes (a use case that refuses what it gets).
 	refuseOutcomes bool
 }
 
@@ -333,6 +333,7 @@ func (s *scriptedTurns) Interrupt(ctx context.Context, in agentturn.SubmitInput)
 	s.interrupted = append(s.interrupted, in)
 	s.opCtx = append(s.opCtx, ctx.Err())
 	if s.refuseOutcomes && len(in.Outcomes) > 0 {
+		s.refuseOutcomes = false
 		return agentturn.Step{}, fmt.Errorf("agentturn: interrupt: %w: unknown call", agentturn.ErrInvalidInput)
 	}
 	s.stopped = append(s.stopped, ref)

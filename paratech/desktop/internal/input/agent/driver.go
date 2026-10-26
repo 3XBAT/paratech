@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
@@ -280,13 +281,20 @@ func (d *Driver) unstick(ctx context.Context, err error, in agentturn.IdleInput)
 	if !errors.Is(err, thread.ErrTurnInProgress) {
 		return false
 	}
-	self, _ := ctx.Value(loopKey{}).(uint64)
-	ok, rerr := d.turns.RecoverIdle(ctx, in, func(th shared.ThreadID) bool { return d.liveOther(self, th) })
-	if rerr != nil {
-		d.log.WarnContext(ctx, opIdle, "thread", in.Thread.String(), "err", rerr)
+	self, ok := ctx.Value(loopKey{}).(uint64)
+	if !ok {
 		return false
 	}
-	return ok // the use case logs the request it stopped
+	stopped, rerr := d.turns.RecoverIdle(ctx, in, func(th shared.ThreadID) bool { return d.liveOther(self, th) })
+	if rerr != nil {
+		if in.Thread != "" {
+			d.log.WarnContext(ctx, opIdle, "thread", in.Thread.String(), "err", rerr)
+		} else {
+			d.log.WarnContext(ctx, opIdle, "err", rerr) // an Ask: only its scope names the thread
+		}
+		return false
+	}
+	return stopped // the use case logs the request it stopped
 }
 
 // liveOther reports whether a loop other than self acts on thread th, or may (an Ask that has not named its thread).
@@ -451,11 +459,15 @@ func (d *Driver) forget(id uint64) {
 // No path leaves a request running without this loop (TASK-171): a failed Submit, a panic and a running step without
 // calls close the request through Interrupt.
 func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
-	var release func() // set while the calls of a step are in flight
+	var (
+		release func()              // set while the calls of a step are in flight
+		calls   []agentturn.Call    // the calls of the last step run
+		got     []agentturn.Outcome // their outcomes until a Submit stored them
+	)
 	defer func() {
 		if r := recover(); r != nil {
 			d.log.ErrorContext(ctx, opPanic, "thread", at.Thread.String(), "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
-			d.closeLeft(ctx, at, nil, ProblemFailed)
+			d.closeLeft(ctx, at, calls, got, ProblemFailed)
 		}
 		if release != nil {
 			release()
@@ -463,7 +475,6 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 	}()
 
 	st, err := op(ctx)
-	var sent []agentturn.Outcome // the results of the last Submit
 	submitted := false
 	for submits := 0; ; submits++ {
 		if st.Thread != "" {
@@ -472,7 +483,7 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 		if err != nil && submitted && !errors.Is(err, agentturn.ErrStaleTurn) && (st.Thread == "" || running(st.Status)) {
 			// Submit failed and the request may still run: close it, keeping the outcomes of the calls that ran.
 			d.log.WarnContext(ctx, opRequest, "thread", at.Thread.String(), "err", err)
-			d.closeLeft(ctx, at, sent, problemOf(err))
+			d.closeLeft(ctx, at, calls, got, problemOf(err))
 			return
 		}
 		if ctx.Err() != nil {
@@ -501,7 +512,7 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 			if running(st.Status) && !d.liveOther(id, st.Thread) {
 				// A broken invariant: nothing would ever run this request, and every next one would be busy.
 				d.log.ErrorContext(ctx, opNoCalls, "thread", st.Thread.String(), "status", st.Status.String())
-				d.closeLeft(ctx, at, nil, ProblemNone)
+				d.closeLeft(ctx, at, nil, nil, ProblemNone)
 			}
 			return
 		}
@@ -516,7 +527,9 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 
 		var callCtx context.Context
 		callCtx, release = d.callsContext(ctx, id, refOf(st))
+		calls, got = st.Calls, nil
 		outcomes, cards, stopped := d.runCalls(ctx, callCtx, st)
+		got = outcomes
 		if len(cards) > 0 {
 			d.publish(agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
 		}
@@ -526,10 +539,13 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 			release = nil
 			return
 		}
-		sent, submitted = outcomes, true
+		submitted = true
 		st, err = d.turns.Submit(ctx, agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
 		release()
 		release = nil
+		if err == nil {
+			got = nil // stored
+		}
 	}
 }
 
@@ -537,22 +553,15 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 func running(s thread.Status) bool { return s == thread.StatusPlanning || s == thread.StatusExecuting }
 
 // closeLeft closes request at that its loop leaves (a failed Submit, a panic, a running step without calls) as
-// interrupt does: the outcomes of the calls that ran are kept, the other calls are not done and the request stops
-// continuable. Outcomes the use case refuses are dropped rather than leaving the request open. The panel gets the
-// closed request with problem p.
-func (d *Driver) closeLeft(ctx context.Context, at agentturn.Step, outcomes []agentturn.Outcome, p Problem) {
+// interrupt does: the outcomes of calls that ran are kept, the other calls are not done and the request stops
+// continuable. The panel gets the closed request with problem p.
+func (d *Driver) closeLeft(ctx context.Context, at agentturn.Step, calls []agentturn.Call, outcomes []agentturn.Outcome, p Problem) {
 	ref := refOf(at)
 	if ref.Thread == "" {
 		d.publish(at, p) // an Ask that failed before its thread was stored: nothing runs
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
-	in := agentturn.SubmitInput{Turn: ref, Outcomes: outcomes}
-	closed, err := d.turns.Interrupt(ctx, in)
-	if err != nil && len(outcomes) > 0 && errors.Is(err, agentturn.ErrInvalidInput) {
-		in.Outcomes = nil
-		closed, err = d.turns.Interrupt(ctx, in)
-	}
+	closed, err := d.close(ctx, ref, calls, outcomes)
 	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", ref.Thread.String(), "err", err)
 		if p != ProblemNone {
@@ -615,12 +624,39 @@ func (d *Driver) runCall(ctx context.Context, st agentturn.Step, c agentturn.Cal
 // calls that ran (the actions always, journaled DONE or FAILED) are kept, the others are answered as not done, and the
 // request stops continuable («Продолжить»), as when the ctx ends during a Hub call; a «Стоп» keeps its reason.
 func (d *Driver) interrupt(ctx context.Context, st agentturn.Step, outcomes []agentturn.Outcome) {
-	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
+	stopped, err := d.close(ctx, refOf(st), st.Calls, outcomes)
 	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)
 		return
 	}
 	d.publish(stopped, ProblemNone)
+}
+
+// close is Turns.Interrupt of ref with the outcomes of calls. Should the use case refuse the outcomes, it is tried once
+// more with unknownWrites of them; a request still left open is recovered with every call outcome_unknown (unstick).
+func (d *Driver) close(ctx context.Context, ref agentturn.TurnRef, calls []agentturn.Call, outcomes []agentturn.Outcome) (agentturn.Step, error) {
+	ctx = context.WithoutCancel(ctx)
+	closed, err := d.turns.Interrupt(ctx, agentturn.SubmitInput{Turn: ref, Outcomes: outcomes})
+	if err != nil && len(outcomes) > 0 && errors.Is(err, agentturn.ErrInvalidInput) {
+		d.log.WarnContext(ctx, opAbandon, "thread", ref.Thread.String(), "err", err)
+		closed, err = d.turns.Interrupt(ctx, agentturn.SubmitInput{Turn: ref, Outcomes: unknownWrites(calls, outcomes)})
+	}
+	return closed, err
+}
+
+// unknownWrites replaces refused outcomes: an action or proposal (any call not known as a read) may have acted, so it
+// becomes outcome_unknown, which the journal settles, never not done (hard rule 7); a read is dropped (not done).
+func unknownWrites(calls []agentturn.Call, outcomes []agentturn.Outcome) []agentturn.Outcome {
+	var out []agentturn.Outcome
+	for _, o := range outcomes {
+		id := o.Result.CallID
+		i := slices.IndexFunc(calls, func(c agentturn.Call) bool { return c.Call.ID() == id })
+		if i >= 0 && calls[i].Class == actionpolicy.ClassR {
+			continue
+		}
+		out = append(out, agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnknown)})
+	}
+	return out
 }
 
 // publish hands the step to the panel; a card that breaks its rules is dropped, never shown.

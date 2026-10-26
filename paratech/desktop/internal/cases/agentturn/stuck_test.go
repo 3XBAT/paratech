@@ -214,3 +214,72 @@ func TestRecoverIdle(t *testing.T) {
 		t.Fatalf("RecoverIdle of a missing thread = %v, %v", ok, err)
 	}
 }
+
+// A «Стоп» saved while RecoverIdle looks (Stop does not take the lock of the case) wins: the request no longer runs,
+// so RecoverIdle reports false without an error and the student's reason stays.
+func TestRecoverIdleAfterAStopInBetween(t *testing.T) {
+	e := newEnv(t)
+	e.model.then(raw("w1", "create_subject", `{"name":"Химия"}`))
+	st := ask(t, e, "создай предмет")
+	fired := false
+	e.threads.afterGet = func() {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := e.svc.Stop(context.Background(), ref(st)); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	}
+	ok, err := e.svc.RecoverIdle(t.Context(), IdleInput{Thread: st.Thread}, func(shared.ThreadID) bool { return false })
+	if ok || err != nil {
+		t.Fatalf("RecoverIdle = %v, %v", ok, err)
+	}
+	if turn := storedTurn(t, e, st.Thread); turn.Status() != thread.StatusStopped || turn.StopReason() != values.StopUser {
+		t.Fatalf("stored = %s %s", turn.Status(), turn.StopReason())
+	}
+}
+
+// Interrupt closes the request whatever the report holds (TASK-171): an outcome of a call that is not open for the
+// Driver is skipped, and one the thread refuses answers its call outcome_unknown, never not done, since it ran.
+func TestInterruptKeepsWhatItCan(t *testing.T) {
+	done := func(t *testing.T) Outcome {
+		return Outcome{Result: values.ToolResult{CallID: "c1", ResultJSON: `{"changed":true,"done":true,"id":"s9"}`},
+			Created: mustRef(t, values.KindSubject, "s9")}
+	}
+	tests := []struct {
+		name     string
+		outcomes func(t *testing.T) []Outcome
+		first    func(t *testing.T) string // the result of c1 the planner gets
+	}{
+		{"a call answered already", func(t *testing.T) []Outcome {
+			return []Outcome{done(t), okResult("c1", `{"changed":false}`)}
+		}, func(t *testing.T) string { return done(t).Result.ResultJSON }},
+		{"a call that is not open", func(t *testing.T) []Outcome {
+			return []Outcome{okResult("zz", `{}`), done(t)}
+		}, func(t *testing.T) string { return done(t).Result.ResultJSON }},
+		{"an outcome the thread refuses", func(t *testing.T) []Outcome {
+			// A failed result cannot create an ID: the thread refuses it, yet the action ran.
+			return []Outcome{{Result: values.RefusalResult("c1", values.RefuseFailed), Created: mustRef(t, values.KindSubject, "s9")}}
+		}, func(*testing.T) string { return `{"error":"outcome_unknown"}` }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.model.then(raw("c1", "create_subject", `{"name":"Химия"}`), raw("c2", "list_subjects", `{}`)).
+				then(raw("r1", "reply", `{"text":"ок"}`))
+			st := ask(t, e, "добавь химию")
+			got, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st), Outcomes: tt.outcomes(t)})
+			if err != nil || got.Status != thread.StatusStopped || got.StopReason != values.StopOffline {
+				t.Fatalf("Interrupt = %+v, %v", got, err)
+			}
+			if _, err := e.svc.Continue(t.Context(), ref(st)); err != nil {
+				t.Fatal(err)
+			}
+			res := lastResults(t, e)
+			if len(res) != 2 || res[0].ResultJSON != tt.first(t) || res[1].ResultJSON != `{"error":"not_done"}` {
+				t.Fatalf("results sent = %+v", res)
+			}
+		})
+	}
+}

@@ -186,6 +186,29 @@ func (s *Service) applyOutcomes(c *change, outcomes []Outcome) error {
 	return nil
 }
 
+// keepOutcomes is applyOutcomes for Interrupt, which must close the request whatever the report holds: an outcome of a
+// call that no longer waits for the Driver (a failed Submit that stored it) is skipped, and one the thread refuses
+// answers its call outcome_unknown, since the call ran and must never read as not done (hard rule 7).
+func (s *Service) keepOutcomes(ctx context.Context, c *change, outcomes []Outcome) {
+	now := s.clock.Now()
+	for _, o := range outcomes {
+		id := o.Result.CallID
+		if turn, _ := c.th.Turn(); !driverCall(turn, id) {
+			continue
+		}
+		err := c.th.Answer(o.Result, o.Created, now)
+		if err == nil {
+			// IDs the planner sees but the check does not know only make later calls refused.
+			err = c.th.Observe(o.Seen...)
+		} else if aerr := c.th.Answer(values.RefusalResult(id, values.RefuseUnknown), values.Ref{}, now); aerr != nil {
+			err = errors.Join(err, aerr)
+		}
+		if err != nil {
+			s.log.WarnContext(ctx, opInterrupt, "thread", c.th.ID().String(), "call", id, "err", err)
+		}
+	}
+}
+
 // driverCall reports whether id is an admitted call of the step that waits for its result.
 func driverCall(turn thread.Turn, id string) bool {
 	for _, oc := range turn.OpenCalls() {
@@ -412,8 +435,8 @@ func (s *Service) Cancel(ctx context.Context, ref TurnRef) (Step, error) {
 }
 
 // Interrupt closes a request whose calls the Driver will not run because its context ended (the app closes). The
-// outcomes of calls that did run (an action that is journaled DONE or FAILED) are recorded as they are; the other
-// calls are answered not done and the request stops as «нет связи» (thread.Interrupt), so «Продолжить» goes on as
+// outcomes of calls that did run (an action that is journaled DONE or FAILED) are recorded as they are (see
+// keepOutcomes: a report that does not fit never refuses the close); the other calls are answered not done and the request stops as «нет связи» (thread.Interrupt), so «Продолжить» goes on as
 // after Recover. A request the student already stopped keeps its reason. Only «Отмена» cancels a request.
 func (s *Service) Interrupt(ctx context.Context, in SubmitInput) (Step, error) {
 	s.mu.Lock()
@@ -423,9 +446,7 @@ func (s *Service) Interrupt(ctx context.Context, in SubmitInput) (Step, error) {
 		if err != nil {
 			return Step{}, err
 		}
-		if err := s.applyOutcomes(c, in.Outcomes); err != nil {
-			return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
-		}
+		s.keepOutcomes(ctx, c, in.Outcomes)
 		if err := c.th.Interrupt(s.clock.Now()); err != nil {
 			return Step{}, fmt.Errorf("%s: %w", opInterrupt, err)
 		}
@@ -480,9 +501,10 @@ func (s *Service) stopLeft(ctx context.Context, th *thread.Thread) error {
 }
 
 // RecoverIdle is Recover for one thread while the app runs (TASK-171): its request, PLANNING or EXECUTING, is stopped
-// as at start unless live reports that a loop of this process still drives the thread. live runs under the lock of
-// the case, so no operation of the case moves the request meanwhile. It reports whether a request was stopped; a
-// missing thread or a request that does not run is false.
+// as at start unless live reports that a loop of this process still drives the thread. live runs under s.mu, so no
+// operation that takes it moves the request meanwhile; Stop does not take it, and a «Стоп» saved in between makes the
+// save a version conflict: the request no longer runs, so that is false too. It reports whether a request was
+// stopped; a missing thread or a request that does not run is false.
 func (s *Service) RecoverIdle(ctx context.Context, in IdleInput, live func(shared.ThreadID) bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -506,7 +528,11 @@ func (s *Service) RecoverIdle(ctx context.Context, in IdleInput, live func(share
 	if turn, ok := th.Turn(); !ok || !running(turn) || (live != nil && live(th.ID())) {
 		return false, nil
 	}
-	if err := s.stopLeft(ctx, th); err != nil {
+	err = s.stopLeft(ctx, th)
+	if errors.Is(err, shared.ErrVersionConflict) {
+		return false, nil
+	}
+	if err != nil {
 		return false, fmt.Errorf("%s: %w", opIdle, err)
 	}
 	s.log.WarnContext(ctx, opIdle, "thread", th.ID().String())
