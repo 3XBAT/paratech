@@ -43,7 +43,7 @@ export const errorMessages = {
 } as const;
 
 /** The two switches of the page. */
-export type SettingsToggle = "recordingPromptsEnabled" | "processOnlyOnAcPower";
+export type SettingsToggle = "recordingPromptsEnabled" | "processOnlyOnAcPower" | "freeWorkNotice";
 
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {

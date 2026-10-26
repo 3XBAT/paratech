@@ -3,7 +3,7 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, PlanStepView, QuestionView } from "./bindings/agent.js";
+import type { AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, FreeWorkRef, PlanStepView, QuestionView } from "./bindings/agent.js";
 import { type Entry, isBusyRefused } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { daysLeftText, dueText, parseMoment } from "./todayView.js";
@@ -385,6 +385,7 @@ export type CardModel =
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean } }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "work"; workId: string }
+  | { type: "free_work"; ref: FreeWorkRef }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
 
 function buttons(ids: ButtonId[]): ButtonModel[] {
@@ -460,7 +461,8 @@ function cardModel(c: CardView, status: string): CardModel | null {
     case "stopped":
       return null; // Built once from the stop reason below.
     case "free_work":
-      return null; // Drawn by TASK-189 (AgentApi.freeWork); until then not shown.
+      // The card reads its own state (AgentApi.freeWorkCard); a card without the call it names has nothing to answer.
+      return c.freeWork !== null ? { type: "free_work", ref: c.freeWork } : null;
   }
 }
 
