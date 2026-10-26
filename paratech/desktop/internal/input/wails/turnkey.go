@@ -150,8 +150,14 @@ type TurnkeyWork struct {
 // a writing job runs for it («Остановить»), JobState queued, running, waiting_network, waiting_quota, waiting_power or
 // retrying ("" when not active). StopWriting of a running step leaves it active (running) until the step ends: the
 // page keeps polling Work until Active is false. A step other than approve, blocked or none without Active was
-// stopped or ended early: «Продолжить» is StartWriting. Every text was written by the model: render it as plain
-// text only.
+// stopped or ended early: «Продолжить» is StartWriting.
+//
+// A presentation (Presentation): its template (paper, graphite, white), the likely questions with their answers and,
+// once done, the speaker text .docx (TalkMaterialID, TalkResult); MaterialID is its .pptx. A lab report (Lab): what
+// became of the manual (none, read, not_read, no_text) and «Что доделать самому», the placeholders of the written
+// sections. For another work these are false, "" and [].
+//
+// Every text (titles, bullets, questions, answers, prompts) was written by the model: render it as plain text only.
 type TurnkeyWriting struct {
 	Step       string           `json:"step"`
 	Generation int              `json:"generation"`
@@ -165,18 +171,54 @@ type TurnkeyWriting struct {
 	Job        string           `json:"job"`        // the job the call started, else the active one; "" when none
 	Active     bool             `json:"active"`
 	JobState   string           `json:"jobState"`
+
+	Presentation   bool                  `json:"presentation"`
+	Template       string                `json:"template"`
+	Questions      []TurnkeyTalkQuestion `json:"questions"`
+	TalkMaterialID string                `json:"talkMaterialId"` // the speaker text in the library, once done
+	TalkResult     string                `json:"talkResult"`
+
+	Lab          bool                 `json:"lab"`
+	Manual       string               `json:"manual"`
+	Placeholders []TurnkeyPlaceholder `json:"placeholders"`
 }
 
 // TurnkeySection is a section of the outline; Paragraphs and Sources once written. A source with verify set was named
-// by the model, not taken from the student's materials («проверить источник»).
+// by the model, not taken from the student's materials («проверить источник»). A slide has its Kind (title, bullets,
+// two_columns, conclusion), its speaker notes in Paragraphs and, once written, its Bullets or Columns; a section of a
+// lab report its Part (goal, equipment, theory, procedure, results, conclusions, other) and its placeholders
+// («▢ …») among the Paragraphs. Kind and Part are "" otherwise.
 type TurnkeySection struct {
 	Number     int             `json:"number"`
+	Kind       string          `json:"kind"`
+	Part       string          `json:"part"`
 	Title      string          `json:"title"`
 	Words      int             `json:"words"`
 	Note       string          `json:"note"`
 	Written    bool            `json:"written"`
 	Paragraphs []string        `json:"paragraphs"`
 	Sources    []TurnkeySource `json:"sources"`
+	Bullets    []string        `json:"bullets"`
+	Columns    []TurnkeyColumn `json:"columns"`
+}
+
+// TurnkeyColumn is a column of a two-column slide.
+type TurnkeyColumn struct {
+	Heading string   `json:"heading"`
+	Bullets []string `json:"bullets"`
+}
+
+// TurnkeyTalkQuestion is a likely question after the talk with its answer.
+type TurnkeyTalkQuestion struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// TurnkeyPlaceholder is a place of section number Section (titled Title) the student fills: Prompt is «Вставьте …».
+type TurnkeyPlaceholder struct {
+	Section int    `json:"section"`
+	Title   string `json:"title"`
+	Prompt  string `json:"prompt"`
 }
 
 // TurnkeySource is an entry of the bibliography of a section.
@@ -512,19 +554,32 @@ func writingView(w *turnkey.WritingView) *TurnkeyWriting {
 	out := &TurnkeyWriting{
 		Step: string(w.Step), Generation: w.Generation, Topic: w.Topic, Sections: []TurnkeySection{}, Done: w.Done,
 		Total: w.Total, SubjectID: string(w.Subject), MaterialID: string(w.Material), Result: w.Result.String(),
+		Presentation: w.Presentation, Template: string(w.Template), Questions: []TurnkeyTalkQuestion{},
+		TalkMaterialID: string(w.Talk), TalkResult: w.TalkResult.String(),
+		Lab: w.Lab, Manual: string(w.Manual), Placeholders: []TurnkeyPlaceholder{},
 	}
 	if state, ok := turnkeyJobStates[w.JobState]; ok && w.Active {
 		out.Job, out.Active, out.JobState = string(w.Job), true, state
 	}
 	for _, s := range w.Sections {
 		sec := TurnkeySection{
-			Number: s.Number, Title: s.Title, Words: s.Words, Note: s.Note, Written: s.Written,
-			Paragraphs: nonNilStrings(s.Paragraphs), Sources: []TurnkeySource{},
+			Number: s.Number, Kind: string(s.Kind), Part: string(s.Part), Title: s.Title, Words: s.Words, Note: s.Note,
+			Written: s.Written, Paragraphs: nonNilStrings(s.Paragraphs), Sources: []TurnkeySource{},
+			Bullets: nonNilStrings(s.Bullets), Columns: []TurnkeyColumn{},
 		}
 		for _, r := range s.Sources {
 			sec.Sources = append(sec.Sources, TurnkeySource{Text: r.Text, MaterialID: string(r.Material), Verify: r.Material == ""})
 		}
+		for _, c := range s.Columns {
+			sec.Columns = append(sec.Columns, TurnkeyColumn{Heading: c.Heading, Bullets: nonNilStrings(c.Bullets)})
+		}
 		out.Sections = append(out.Sections, sec)
+	}
+	for _, q := range w.Questions {
+		out.Questions = append(out.Questions, TurnkeyTalkQuestion{Question: q.Question, Answer: q.Answer})
+	}
+	for _, p := range w.Placeholders {
+		out.Placeholders = append(out.Placeholders, TurnkeyPlaceholder{Section: p.Section, Title: p.Title, Prompt: p.Prompt})
 	}
 	return out
 }

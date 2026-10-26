@@ -26,7 +26,6 @@ import {
 import type { StepResult } from "../workView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
-import { Icon } from "../ui/Icon.js";
 
 // Questions, assumptions, requirements, steps, pitfalls and answers about a step were written by the reader or the
 // student (untrusted). They reach the page as React text nodes only: no element, link or markdown is built from them,
@@ -61,7 +60,7 @@ function TextList(props: { items: readonly string[] }) {
 
 // ---- Reader call that waits or failed ----
 
-export function TriageCard(props: { ctx: CardContext; caption: string; line: string; problem: string }) {
+export function TriageCard(props: { ctx: CardContext; caption: string; problem: string }) {
   const { ctx } = props;
   return (
     <section className="ag-card">
@@ -69,9 +68,7 @@ export function TriageCard(props: { ctx: CardContext; caption: string; line: str
         <span className="ag-dot" aria-hidden="true" />
         {props.caption}
       </h3>
-      {props.problem === "" ? (
-        <p role="status">{props.line}</p>
-      ) : (
+      {props.problem !== "" && (
         <ResultLine kind="wait" role="status">
           {props.problem}
         </ResultLine>
@@ -79,7 +76,7 @@ export function TriageCard(props: { ctx: CardContext; caption: string; line: str
       {ctx.errorLine}
       <div className="ag-actions">
         <Button size="sm" variant="primary" disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.retry(ctx.work.id)))}>
-          {turnkeyTexts.retry}
+          {props.problem === "" ? turnkeyTexts.triageStart : turnkeyTexts.retry}
         </Button>
       </div>
     </section>
@@ -318,13 +315,12 @@ export function UnderstandingCard(props: { ctx: CardContext; startEditing?: bool
 
 // ---- Helper mode ----
 
-/** One step of the helper with «Спросить по шагу». The answer is plain text; «пока недоступны» is a calm note. */
+/** One step of the helper with «Спросить по шагу». The answer and the refusal are plain text. */
 function HelperStep(props: { ctx: CardContext; index: number; text: string }) {
   const { ctx, index } = props;
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
-  const [note, setNote] = useState("");
   const [failure, setFailure] = useState("");
   const [asking, setAsking] = useState(false);
   const id = useId();
@@ -336,13 +332,10 @@ function HelperStep(props: { ctx: CardContext; index: number; text: string }) {
     }
     setAsking(true);
     setAnswer("");
-    setNote("");
     setFailure("");
     const r = await askStepOutcome(ctx.api, ctx.work.id, index, check.text);
     if (r.kind === "answer") {
       setAnswer(r.text);
-    } else if (r.kind === "unavailable") {
-      setNote(r.text);
     } else {
       setFailure(r.text);
     }
@@ -373,12 +366,6 @@ function HelperStep(props: { ctx: CardContext; index: number; text: string }) {
               {turnkeyTexts.askSend}
             </Button>
           </div>
-          {note !== "" && (
-            <p className="ag-note" role="status">
-              <Icon name="info" />
-              <span>{note}</span>
-            </p>
-          )}
           {failure !== "" && (
             <ResultLine kind="fail" role="alert">
               {failure}

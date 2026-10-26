@@ -23,7 +23,8 @@ export type FreeWorkPhase =
   | "done" // the work card
   | "declined" // «Не делаем»
   | "undone" // the work was removed with «Отменить»
-  | "unknown"; // the state could not be read
+  | "unknown" // the state could not be read
+  | "failed"; // the stored state is «failed»: «Обновить», not the same call again
 
 export interface FreeWorkFlowState {
   phase: FreeWorkPhase;
@@ -57,6 +58,7 @@ export function freeWorkModel(s: FreeWorkFlowState): FreeWorkModel {
     case "undone":
       return { kind: "line", line: freeWorkTexts.undone, buttonsOff: true };
     case "unknown":
+    case "failed":
       return { kind: "unknown", line: "", buttonsOff: false };
   }
 }
@@ -117,7 +119,7 @@ export class FreeWorkFlow {
     try {
       const s = await this.api.freeWorkCard(this.ref);
       if (s.state === "failed") {
-        this.set({ phase: "waiting", error: freeWorkErrors.failed });
+        this.set({ phase: "failed", workId: "", busy: false, error: freeWorkErrors.failed });
       } else {
         this.apply(s);
       }
@@ -163,6 +165,11 @@ export class FreeWorkFlow {
       const s = await this.api.freeWorkCard(this.ref);
       if (s.state === "done" || s.state === "undone") {
         this.apply(s);
+        return;
+      }
+      if (s.state === "failed") {
+        // The core stored the failure: «Сделать» would replay it.
+        this.set({ phase: "failed", workId: "", busy: false, error });
         return;
       }
     } catch {

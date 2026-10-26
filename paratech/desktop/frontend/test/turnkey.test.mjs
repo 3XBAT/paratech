@@ -267,9 +267,12 @@ test("a failed answer keeps the card and shows the problem of the reader call", 
   const failed = work({ status: "triage", problem: "offline", message: "Нет связи с paratech: разбор не завершён. Повторите позже." });
   const out = render(failed);
   assert.ok(out.includes("Нет связи с paratech") && out.includes(turnkeyTexts.retry));
-  // A stored triage without a problem means a reader call is due: «Повторить» is offered.
+  assert.ok(!out.includes(turnkeyTexts.triageStart));
+  // A stored triage without a problem: no attempt made, only «Разобрать задание» without the old line.
   const stored = render(work({ status: "triage" }));
-  assert.ok(stored.includes(turnkeyTexts.triageLine) && stored.includes(turnkeyTexts.retry));
+  assert.ok(stored.includes("Разобрать задание") && !stored.includes("Попробовать снова"));
+  assert.ok(!stored.includes("ещё не разобрано") && !stored.includes("Повторить"));
+  assert.equal(turnkeyTexts.retry, "Попробовать снова");
   const err = render(work({ status: "questions", questionRound: 1, questions: [choice] }), fakeApi(), { error: "Не удалось выполнить. Попробуйте ещё раз.", onError: noop });
   assert.ok(err.includes('role="alert"') && err.includes("Не удалось выполнить"));
   assert.ok(render(work({ status: "failed" })).includes(turnkeyTexts.failedText));
@@ -399,17 +402,18 @@ test("an empty helper says so instead of showing empty blocks", () => {
   assert.ok(blank.includes(turnkeyTexts.helperEmpty));
 });
 
-test("«Спросить по шагу»: the answer is shown, «пока недоступны» is a calm note, other errors fail", async () => {
+test("«Спросить по шагу»: the answer is shown, every refusal is a fixed error text (no «backend missing» mode)", async () => {
   const log = [];
   const ok = await askStepOutcome(fakeApi(log), "w1", 1, "почему?");
   assert.deepEqual(ok, { kind: "answer", text: "Ответ" });
   assert.deepEqual(log[0], ["askStep", "w1", 1, "почему?"]);
 
+  // The no-advisor text of the core is an error like the others now.
   const none = await askStepOutcome(fakeApi([], { askStep: async () => { throw "Вопросы по шагу пока недоступны."; } }), "w1", 0, "q");
-  assert.deepEqual(none, { kind: "unavailable", text: "Вопросы по шагу пока недоступны." });
+  assert.deepEqual(none, { kind: "error", text: "Вопросы по шагу пока недоступны." });
 
   const wails = await askStepOutcome(fakeApi([], { askStep: async () => { throw new Error("Вопросы по шагу пока недоступны."); } }), "w1", 0, "q");
-  assert.equal(wails.kind, "unavailable");
+  assert.equal(wails.kind, "error");
 
   const bad = await askStepOutcome(fakeApi([], { askStep: async () => { throw new Error("secret internal detail"); } }), "w1", 0, "q");
   assert.deepEqual(bad, { kind: "error", text: "Не удалось выполнить. Попробуйте ещё раз." });

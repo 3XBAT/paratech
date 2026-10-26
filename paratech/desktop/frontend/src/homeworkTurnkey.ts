@@ -1,7 +1,7 @@
 // «Сделать под ключ» on the assignment page (TASK-186): what the block shows and the guarded start. Pure, so the tests
 // run it without a browser. The click is the consent for the paid triage; nothing here marks it as paid.
 
-import { notFoundText, type TurnkeyApi, turnkeyErrorText } from "./bindings/turnkey.js";
+import { notFoundText, type TurnkeyApi, type TurnkeyWork, turnkeyErrorText } from "./bindings/turnkey.js";
 
 export const turnkeyTexts = {
   title: "Сделать под ключ",
@@ -15,7 +15,7 @@ export const turnkeyTexts = {
 export type TurnkeyBlockState =
   | { phase: "loading" }
   | { phase: "none"; error: string }
-  | { phase: "work"; workId: string };
+  | { phase: "work"; workId: string; work?: TurnkeyWork };
 
 /** The block on page open: an existing work shows its card, a missing one the button; any other failure shows its text. */
 export async function loadTurnkeyBlock(api: TurnkeyApi, assignmentId: string): Promise<TurnkeyBlockState> {
@@ -41,7 +41,8 @@ export async function startTurnkeyOnce(
   await flight(async () => {
     try {
       const w = await api.startForAssignment(assignmentId);
-      next = { phase: "work", workId: w.id };
+      // The reply carries the problem of a reader call that did not go through; the core does not store it, so the card is seeded with it.
+      next = { phase: "work", workId: w.id, work: w };
     } catch (err) {
       next = { phase: "none", error: turnkeyErrorText(err) };
     }

@@ -42,7 +42,8 @@
   .today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }
   .today-lesson .today-st { grid-column: auto; }
 }
-/* Two columns only when the left one keeps at least 30rem; otherwise the right column goes below. */
+/* Two columns only when the left one keeps at least 28rem; otherwise the right column goes below.
+   The right one is 40% of the page, 24-32rem: ordinary titles take 1-2 lines (TASK-193). */
 @container (min-width: 62rem) {
-  .today-cols { grid-template-columns: minmax(30rem, 1fr) minmax(0, 22rem); }
+  .today-cols { grid-template-columns: minmax(28rem, 1fr) minmax(0, clamp(24rem, 40%, 32rem)); }
 }

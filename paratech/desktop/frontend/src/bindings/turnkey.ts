@@ -141,6 +141,12 @@ export interface TurnkeyWork {
   assumptions: string[];
   helper: WorkHelper | null;
   answered: WorkAnswered[];
+  /** The topic of a work on a topic (student's or agent's words: text only); "" for a work of an assignment. */
+  topic: string;
+  /** The library subject of the work; "" none, or a subject removed since. */
+  subjectId: string;
+  /** «Отправить преподавателю» is offered: a work of an assignment only. */
+  sendable: boolean;
 }
 
 /** A section of the plan the student sends; number 0 is a new section. */
@@ -163,6 +169,10 @@ export const errorTexts: readonly string[] = [
   "Работа изменилась: обновите карточку.",
   "Не удалось остановить написание. Попробуйте ещё раз.",
   "Задание не найдено: возможно, его удалили.",
+  // AskStep (TASK-192): no reader wired, offline, quota, refused answer.
+  "Нет связи с paratech: вопрос не отправлен. Повторите позже.",
+  "Лимит запросов исчерпан: ответить на вопрос сейчас нельзя.",
+  "Ответ на вопрос не прошёл проверку. Спросите ещё раз или переформулируйте вопрос.",
 ];
 
 export const genericError = "Не удалось выполнить. Попробуйте ещё раз.";
@@ -373,6 +383,9 @@ export function parseWork(raw: unknown): TurnkeyWork {
     assumptions: strings(r, "assumptions", w),
     helper: r.helper === null || r.helper === undefined ? null : parseHelper(r.helper),
     answered: list(r, "answered", w, parseAnswered),
+    topic: optStr(r, "topic", w),
+    subjectId: optStr(r, "subjectId", w),
+    sendable: optBool(r, "sendable", w),
   };
 }
 
@@ -408,12 +421,9 @@ export interface TurnkeyApi {
   confirmRequirements(workId: string): Promise<TurnkeyWork>;
   /** Asks the waiting reader call again. */
   retry(workId: string): Promise<TurnkeyWork>;
-  /** A question about helper step `step` (from 0); the answer is plain text. The core may refuse: stepHelpUnavailableText. */
+  /** A question about helper step `step` (from 0); the answer is plain text. A refusal carries one of the fixed texts. */
   askStep(workId: string, step: number, question: string): Promise<string>;
 }
-
-/** The core's answer while the step help has no backend; shown calmly, not as a failure. */
-export const stepHelpUnavailableText = "Вопросы по шагу пока недоступны.";
 
 /** Builds the turnkey API over a call function (the Wails runtime in the app, a fake in tests). */
 export function turnkeyApi(call: CallByName): TurnkeyApi {

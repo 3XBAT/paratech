@@ -88,8 +88,17 @@ export function ConfirmCard(props: {
   target?: ConfirmTarget;
   /** A card the page already has (a proposal just made). */
   initial?: CardData;
+  /** Called with every card the flow shows, the initial one and each reload (the work card tracks a sent work). */
+  onCard?: (card: CardData) => void;
 }) {
   const [state, setState] = useState<FlowState>(initialFlow);
+  const { onCard } = props;
+  const shown = state.card;
+  useEffect(() => {
+    if (shown !== null) {
+      onCard?.(shown);
+    }
+  }, [shown, onCard]);
   const flow = useMemo(() => new ConfirmFlow(props.api, setState), [props.api]);
   const initial = useRef(props.initial);
   const targetKind = props.target?.kind;
