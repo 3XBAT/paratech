@@ -289,7 +289,7 @@ func TestAgentRequestOfCatalog4AfterTheUpdateTo5(t *testing.T) {
 	ctx := context.Background()
 
 	// Before the update: the Hub seals and checks the calls for catalog 4.
-	e.hub.AsCatalog(values.CatalogVersion - 1).Then(testenv.AgentCall{ID: "toolu_1", Tool: "list_subjects", Args: `{}`})
+	e.hub.AsCatalog(4).Then(testenv.AgentCall{ID: "toolu_1", Tool: "list_subjects", Args: `{}`})
 	st, err := e.turns.Ask(ctx, agentturn.AskInput{Text: "какие предметы?"})
 	if err != nil || len(st.Calls) != 1 {
 		t.Fatalf("Ask = %+v, %v", st, err)
