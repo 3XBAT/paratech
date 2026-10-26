@@ -58,3 +58,19 @@ func TestBuildPaper(t *testing.T) {
 		t.Fatalf("file name = %q", got)
 	}
 }
+
+func TestPaperPDFName(t *testing.T) {
+	tests := []struct {
+		kind, topic string
+	}{
+		{"реферат", "Русь: <история>"},
+		{"", ""},
+		{"доклад", "Отчёт.docx"},
+	}
+	for _, tt := range tests {
+		docx, pdf := PaperFileName(tt.kind, tt.topic), PaperPDFName(tt.kind, tt.topic)
+		if !strings.HasSuffix(pdf, PDFExtension) || strings.TrimSuffix(pdf, PDFExtension) != strings.TrimSuffix(docx, DocxExtension) {
+			t.Errorf("%q %q: pdf %q next to %q", tt.kind, tt.topic, pdf, docx)
+		}
+	}
+}

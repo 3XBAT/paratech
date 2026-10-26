@@ -125,6 +125,15 @@ func PaperFileName(kind, topic string) string {
 	return FileName(name)
 }
 
+// PDFExtension is the extension of the PDF of a paper.
+const PDFExtension = ".pdf"
+
+// PaperPDFName is the name of the PDF of a paper (TASK-198): PaperFileName with PDFExtension, so it lies next to the
+// .docx under the same name.
+func PaperPDFName(kind, topic string) string {
+	return strings.TrimSuffix(PaperFileName(kind, topic), DocxExtension) + PDFExtension
+}
+
 func capitalized(s string) string {
 	r, n := utf8.DecodeRuneInString(s)
 	if n == 0 {

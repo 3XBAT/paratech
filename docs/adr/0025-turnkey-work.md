@@ -146,6 +146,15 @@ it cannot do the work whole — then help instead. Everything the model says abo
   `proposal:<id>` (hard rule 7: one email; an unknown outcome is reconciled, never resent).
 - Storage: migration 0033 rebuilds `proposals` (kind, `attachment_format` 'pptx', `work_id`).
 
+## Addendum (TASK-198): «Скачать PDF»
+- `ExportPDF` (input/wails only, synchronous, no job, 60 s timeout) prints a done paper or lab report through `PaperPDF`
+  (`adapters/pdf`, ADR-0020) from the same `values.Document` as the .docx, never from the .docx; no presentation.
+- The PDF is filed next to the .docx (same «ДЗ» or «Входящие», same name with `.pdf`) and kept as `Writing.PDF` (optional
+  JSON, no migration); a PDF of the current content still in the library is returned without a new print.
+- Title page: the year stored with the paper (`File.Year`; an older paper takes its first PDF's) and the profile read
+  at the click. A new generation or the Undo of write_work takes the PDF to «Входящие» with the paper; the send still
+  attaches the .docx. A work changed during the print keeps nothing: the PDF goes to «Входящие», `ErrChanged`.
+
 ## Addendum (TASK-200): a partial or impossible work without its helper
 - The Hub asks the model once more within the same reservation and attempt (fixed server note `ops/triage_assignment/v2/reask.md`, same data; triage prompt v2 demands the helper); both calls are charged at their usage, once; a second answer without it is the refusal; a second call that fails without an answer is charged only for the first usage (accepted gap, ADR-0010).
 

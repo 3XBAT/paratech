@@ -147,8 +147,8 @@ func (w *Work) FinishDeck(slides, talk File, now time.Time) error {
 	return w.move(next, StatusDone, now)
 }
 
-// Files returns the files of the writing: the paper or the slides, then the speaker text of a presentation. A file of
-// an earlier generation stays until the new one replaces it.
+// Files returns the files of the writing: the paper or the slides, then the speaker text of a presentation, then the
+// PDF of a paper. A file of an earlier generation stays until the new one replaces it.
 func (wr Writing) Files() []File {
 	var out []File
 	if wr.File != nil {
@@ -156,6 +156,9 @@ func (wr Writing) Files() []File {
 	}
 	if wr.Deck != nil && wr.Deck.Talk != nil {
 		out = append(out, *wr.Deck.Talk)
+	}
+	if wr.PDF != nil {
+		out = append(out, *wr.PDF)
 	}
 	return out
 }

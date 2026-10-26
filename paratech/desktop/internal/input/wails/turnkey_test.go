@@ -99,6 +99,14 @@ func (f *fakeTurnkey) Regenerate(_ context.Context, _ shared.WorkID, number int,
 	return turnkey.WritingStarted{View: f.view, Job: "j3", Created: true}, f.err
 }
 
+func (f *fakeTurnkey) ExportPDF(context.Context, shared.WorkID) (turnkey.PDFSaved, error) {
+	f.calls = append(f.calls, "pdf")
+	if f.err != nil {
+		return turnkey.PDFSaved{}, f.err
+	}
+	return turnkey.PDFSaved{View: f.view, Material: "m-pdf"}, nil
+}
+
 // writingWork is a work whose outline waits for the approval: section 1 written for the test of the mapping.
 func writingWork() turnkey.View {
 	return turnkey.View{
@@ -130,7 +138,7 @@ func TestTurnkeyWritingJSON(t *testing.T) {
 		`"bullets":[],"columns":[]},` +
 		`{"number":2,"kind":"","part":"","title":"Итоги","words":150,"note":"","written":false,"paragraphs":[],"sources":[],` +
 		`"bullets":[],"columns":[]}],` +
-		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","job":"","active":false,"jobState":"",` +
+		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","pdfMaterialId":"","job":"","active":false,"jobState":"",` +
 		`"presentation":false,"template":"","questions":[],"talkMaterialId":"","talkResult":"",` +
 		`"lab":false,"manual":"","placeholders":[]}`
 	if string(b) != want {
@@ -171,7 +179,7 @@ func TestTurnkeyWritingKinds(t *testing.T) {
 		view turnkey.View
 		want string
 	}{
-		"presentation": {deck, `"materialId":"m-pptx","result":"","job":"","active":false,"jobState":"",` +
+		"presentation": {deck, `"materialId":"m-pptx","result":"","pdfMaterialId":"","job":"","active":false,"jobState":"",` +
 			`"presentation":true,"template":"graphite","questions":[{"question":"Почему так?","answer":"Потому что."}],` +
 			`"talkMaterialId":"m-talk","talkResult":"exports/homework/w1-talk.docx","lab":false,"manual":"","placeholders":[]}`},
 		"lab": {lab, `"presentation":false,"template":"","questions":[],"talkMaterialId":"","talkResult":"",` +

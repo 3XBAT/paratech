@@ -306,6 +306,9 @@ func (w *Work) validate() error {
 		if (w.status == StatusDone) != (w.writing.File != nil && w.writing.File.Content == w.ContentKey()) {
 			return bad("a done work has the file of its sections")
 		}
+		if p := w.writing.PDF; w.status == StatusDone && p != nil && p.Content != w.ContentKey() {
+			return bad("a done work has the pdf of its sections")
+		}
 		if u, _ := w.Understanding(); (w.writing.Deck != nil) != (u.WorkType == TypePresentation) {
 			return bad("a presentation is written as slides, any other work as a paper")
 		}

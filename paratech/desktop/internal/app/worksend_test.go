@@ -148,6 +148,39 @@ func TestWiredSendWorkCreatesOneDelivery(t *testing.T) {
 	}
 }
 
+// TASK-198: a work with its PDF next to the paper still sends the .docx (ADR-0025 addendum TASK-180), never the PDF.
+func TestWiredSendWorkAttachesThePaperNotThePDF(t *testing.T) {
+	ctx := context.Background()
+	a, _ := proposalCore(t, teacher)
+	data := docxBytes(t, "Реферат о Руси")
+	m := doneWork(t, a, "w1", work.Source{Assignment: "a1"}, data)
+	im, err := a.core.ui.Library.Import(ctx, library.Upload{Name: "Реферат.pdf", Data: []byte("%PDF-1.7 fake print")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	works := sqlite.NewWorkRepository(a.core.db)
+	w, err := works.Get(ctx, "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := material.BlobRef(im.Material.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdf := work.File{Material: im.Material.ID(), Artifact: blob.String(), Content: w.ContentKey(), Year: 2026}
+	if err := w.AttachPDF(pdf, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := works.Save(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+
+	card, err := confirmCards(a).ProposeSendWork(ctx, "w1")
+	if err != nil || card.AttachmentName != "Реферат.docx" || card.AttachmentFormat != "docx" || card.AttachmentSize != int64(len(data)) {
+		t.Fatalf("card = %+v, %v (paper %s)", card, err, m.ID())
+	}
+}
+
 // Hard rule 7: the app stopped after the delivery was created but before the proposal was marked EXECUTED, and the
 // outcome of the email is UNKNOWN. «Да» again finds the delivery by the proposal's key and sends nothing.
 func TestWiredSendWorkUnknownOutcomeIsNotResent(t *testing.T) {

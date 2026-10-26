@@ -102,6 +102,14 @@ type Renderer interface {
 	Render(ctx context.Context, doc cvalues.Document) ([]byte, error)
 }
 
+// PaperPDF prints a paper as PDF (ADR-0020, TASK-198) from the same document the Renderer makes the .docx of.
+// Implemented by the pdf adapter. Errors: one wrapping errors.ErrUnsupported means this computer cannot make a PDF (no
+// WebView2 Runtime); context.Canceled means the caller gave up; anything else (a print that failed or ran out of time)
+// is a failed print that may succeed when asked again.
+type PaperPDF interface {
+	RenderPDF(ctx context.Context, doc cvalues.Document) ([]byte, error)
+}
+
 // SlideRenderer renders a presentation as a PowerPoint file; the same presentation gives the same bytes. Implemented
 // by the pptx adapter.
 type SlideRenderer interface {

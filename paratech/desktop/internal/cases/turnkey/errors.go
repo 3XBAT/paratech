@@ -53,6 +53,12 @@ var (
 	// ErrWritingRunning means a writing job of the work runs: the outline cannot change meanwhile.
 	ErrWritingRunning = errors.New("turnkey: the work is being written")
 
+	// ErrPDFUnsupported means this computer cannot make a PDF (ExportPDF): the .docx stays.
+	ErrPDFUnsupported = errors.New("turnkey: pdf is not available on this computer")
+
+	// ErrPDFFailed means the PDF could not be printed this time; nothing was saved.
+	ErrPDFFailed = errors.New("turnkey: the pdf could not be made")
+
 	// ErrWritingRetries means the writing was started again too often after failed or cancelled jobs.
 	ErrWritingRetries = errors.New("turnkey: the writing was retried too often")
 )
