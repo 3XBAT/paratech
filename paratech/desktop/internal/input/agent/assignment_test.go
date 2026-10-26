@@ -265,7 +265,7 @@ func TestCreateAssignmentRefusals(t *testing.T) {
 // data; the planner got only the ID, and neither its result nor the log carries the title.
 func TestActionLineOfAnAddedAssignment(t *testing.T) {
 	w := newWorld(t)
-	w.reads.library.resolve = map[string]subjectmatch.Match{"Физика": {ID: "s1", Name: "Физика"}}
+	w.library.resolve = map[string]subjectmatch.Match{"Физика": {ID: "s1", Name: "Физика"}}
 	turns := (&scriptedTurns{}).
 		then(agentturn.Step{Thread: th1, Turn: 1, Status: thread.StatusExecuting, Calls: []agentturn.Call{
 			writeCall(t, "c1", values.ToolCreateAssignment, `{"title":"Скинуть проверочную Иванову","due":"2026-10-23","time":"09:00","subject":"s1"}`),
