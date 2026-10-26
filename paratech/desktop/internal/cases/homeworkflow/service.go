@@ -21,9 +21,10 @@ type Service struct {
 	drafts      DraftReader      // nil: no send of a named draft version, no version on the confirmation
 	waiting     WaitingProposals // nil: a deadline or version send proposed again is a new proposal
 	works       WorkFiles        // nil: no send of a work (ErrNoWorks)
+	subjects    SubjectNames     // nil: CreateAssignment with a subject is ErrInvalidConfig
 }
 
-// New builds the Service; Drafts, Waiting and Works are optional.
+// New builds the Service; Drafts, Waiting, Works and Subjects are optional.
 func New(d Deps) (*Service, error) {
 	if d.Proposals == nil || d.Assignments == nil || d.AssignmentList == nil || d.Artifacts == nil ||
 		d.Recipients == nil || d.Mailer == nil || d.Exporter == nil || d.Calendar == nil || d.Recordings == nil ||
@@ -35,6 +36,6 @@ func New(d Deps) (*Service, error) {
 		proposals: d.Proposals, assignments: d.Assignments, list: d.AssignmentList, artifacts: d.Artifacts,
 		recipients: d.Recipients, mailer: d.Mailer, exporter: d.Exporter, calendar: d.Calendar, clock: d.Clock,
 		ids: d.IDs, tx: d.Tx, lessons: lessonFinder{recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock},
-		drafts: d.Drafts, waiting: d.Waiting, works: d.Works,
+		drafts: d.Drafts, waiting: d.Waiting, works: d.Works, subjects: d.Subjects,
 	}, nil
 }

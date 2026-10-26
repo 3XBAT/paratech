@@ -10,6 +10,12 @@ import (
 )
 
 type Querier interface {
+	// What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
+	// cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
+	// statuses that leave the assignment free. A draft generation that has not finished has no homework_drafts row yet,
+	// so a job of the draft type in one of the passed active statuses whose payload names the assignment counts too.
+	// Both status lists are JSON arrays: sqlc.slice next to a repeated named argument binds the wrong values.
+	AssignmentInUse(ctx context.Context, arg AssignmentInUseParams) (int64, error)
 	// Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
 	// a soft-deleted lesson get a new version (Undo compares material versions).
 	BumpMaterialsLinkedToDeletedLesson(ctx context.Context, id string) error
@@ -25,7 +31,8 @@ type Querier interface {
 	CountTranscriptParts(ctx context.Context, recordingID string) (int64, error)
 	// The current request is replaced as a whole in the transaction of its thread's compare-and-swap.
 	DeleteAgentTurn(ctx context.Context, arg DeleteAgentTurnParams) error
-	// Compare-and-swap delete of an assignment reprocessing withdrew. A delivery that references it makes the delete fail
+	// Compare-and-swap delete of an assignment reprocessing withdrew, or of one the student added (after
+	// AssignmentInUse). A delivery that references it makes the delete fail
 	// (ON DELETE RESTRICT), and the row is kept.
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
 	// An assignment chosen for deletion, decided in the same transaction. A delivery referencing it fails the delete

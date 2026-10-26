@@ -107,6 +107,11 @@ func (r assignmentRepo) Delete(context.Context, *assignment.Assignment) error {
 	return nil
 }
 
+func (r assignmentRepo) DeleteUnused(context.Context, *assignment.Assignment) error {
+	r.s.t.Error("the proposal pipeline must not delete assignments")
+	return nil
+}
+
 func (r assignmentRepo) Save(context.Context, *assignment.Assignment) error {
 	r.s.t.Error("the proposal pipeline must not write assignments")
 	return nil

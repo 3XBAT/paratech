@@ -63,6 +63,9 @@ type Deps struct {
 
 	// Optional (TASK-180): the send of a turnkey work's file to the teacher.
 	Works WorkFiles
+
+	// Optional (TASK-215): the subject of an assignment the student adds; without it a subject is ErrInvalidConfig.
+	Subjects SubjectNames
 }
 
 // ProposalView is a proposal as the confirmation dialog shows it (PRD section 13.3, AC-14): what will happen, to which
@@ -147,6 +150,20 @@ type AssignmentEdit struct {
 	Title       string
 	Description string
 	Due         time.Time
+}
+
+// NewAssignment is an assignment or a reminder the student adds by hand or through the agent (ADR-0029). The texts
+// are the student's words: data, never instructions.
+type NewAssignment struct {
+	// ID is the caller's idempotency key (a hash of the agent call or of the form's request token): the same ID with
+	// the same content returns the stored assignment. Empty: a new ID.
+	ID      shared.AssignmentID
+	Title   string
+	Note    string           // optional; the description
+	Subject shared.SubjectID // optional: a library subject; it wins over the lesson's
+	Lesson  shared.LessonID  // optional: a lesson of the schedule
+	Date    string           // optional: YYYY-MM-DD in the student's zone
+	Time    string           // optional: HH:MM, 24 h, only with Date; without it 23:59
 }
 
 // AssignmentView is an assignment as the UI shows it. Title and Description may be model text: show them as data.

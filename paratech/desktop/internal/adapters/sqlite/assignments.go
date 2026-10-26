@@ -3,23 +3,28 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/proposal"
+	cvalues "paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // Operation names of the assignment repository, used in its error messages.
 const (
-	opGetAssignment         = "sqlite: get assignment"
-	opGetAssignmentBySource = "sqlite: get assignment by source"
-	opListAssignmentsBySrc  = "sqlite: list assignments of a transcript"
-	opListAssignmentsByMat  = "sqlite: list assignments of a material"
-	opListRecentAssignments = "sqlite: list recent assignments"
-	opSaveAssignment        = "sqlite: save assignment"
-	opDeleteAssignment      = "sqlite: delete assignment"
+	opGetAssignment          = "sqlite: get assignment"
+	opGetAssignmentBySource  = "sqlite: get assignment by source"
+	opListAssignmentsBySrc   = "sqlite: list assignments of a transcript"
+	opListAssignmentsByMat   = "sqlite: list assignments of a material"
+	opListRecentAssignments  = "sqlite: list recent assignments"
+	opSaveAssignment         = "sqlite: save assignment"
+	opDeleteAssignment       = "sqlite: delete assignment"
+	opDeleteUnusedAssignment = "sqlite: delete unused assignment"
 )
 
 // Values of assignment.State that are NULL in the row.
@@ -180,6 +185,62 @@ func (r *AssignmentRepository) Delete(ctx context.Context, a *assignment.Assignm
 	}
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", opDeleteAssignment, a.ID(), err)
+	}
+	return nil
+}
+
+// freeProposalStatuses are the proposal statuses that leave an assignment free for DeleteUnused: nothing was or will
+// be done with it (ADR-0029).
+var freeProposalStatuses = []string{string(proposal.StatusDeclined), string(proposal.StatusRejected)}
+
+// activeJobStatuses are the job statuses of a draft generation that is queued, running or waiting and has no draft
+// row yet, which also keep an assignment for DeleteUnused.
+var activeJobStatuses = func() []string {
+	var out []string
+	for _, s := range job.ActiveStatuses() {
+		out = append(out, string(s))
+	}
+	return out
+}()
+
+// DeleteUnused removes an assignment the student added (ADR-0029): in one transaction, an assignment that a draft, an
+// unfinished draft generation, a delivery, a work or a proposal other than a declined or rejected one references is
+// kept and yields assignment.ErrInUse, otherwise the delete is the version compare-and-swap of Delete.
+func (r *AssignmentRepository) DeleteUnused(ctx context.Context, a *assignment.Assignment) error {
+	if a.Version() < 1 {
+		return fmt.Errorf("%s %s: never stored: %w", opDeleteUnusedAssignment, a.ID(), shared.ErrVersionConflict)
+	}
+
+	free, err := json.Marshal(freeProposalStatuses)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opDeleteUnusedAssignment, a.ID(), err)
+	}
+	active, err := json.Marshal(activeJobStatuses)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opDeleteUnusedAssignment, a.ID(), err)
+	}
+
+	err = r.db.Do(ctx, func(ctx context.Context) error {
+		q := r.db.Queries(ctx)
+		used, err := q.AssignmentInUse(ctx, sqlcgen.AssignmentInUseParams{
+			ID: string(a.ID()), FreeStatuses: string(free),
+			DraftJobType: cvalues.HomeworkDraftJobType, ActiveJobStatuses: string(active),
+		})
+		switch {
+		case err != nil:
+			return MapError(ctx, err)
+		case used != 0:
+			return assignment.ErrInUse
+		}
+		n, err := q.DeleteAssignment(ctx, sqlcgen.DeleteAssignmentParams{ID: string(a.ID()), ExpectedVersion: a.Version()})
+		err = VersionCAS(ctx, n, err)
+		if errors.Is(err, shared.ErrConflict) && !errors.Is(err, shared.ErrVersionConflict) {
+			return assignment.ErrInUse // a reference that appeared despite the checks: the foreign key held
+		}
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opDeleteUnusedAssignment, a.ID(), err)
 	}
 	return nil
 }

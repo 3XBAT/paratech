@@ -30,7 +30,8 @@ func (c *core) wireProposals(e env, settings settingsLoader, lib *library.Servic
 		Calendar: deadlineCalendar{c.calendar}, Recordings: sqlite.NewRecordingRepository(c.db),
 		Lessons: sqlite.NewLessonRepository(c.db), Clock: e.local, IDs: e.ids, Tx: c.db,
 		Drafts: sqlite.NewDraftRepository(c.db), Waiting: proposals,
-		Works: workFiles{works: sqlite.NewWorkRepository(c.db), lib: lib},
+		Works:    workFiles{works: sqlite.NewWorkRepository(c.db), lib: lib},
+		Subjects: subjectNames{lib},
 	})
 	if err != nil {
 		return fmt.Errorf("app: action proposals: %w", err)
@@ -54,4 +55,21 @@ func (f workFiles) Material(ctx context.Context, id shared.MaterialID) (*materia
 
 func (f workFiles) Subjects(ctx context.Context) ([]*subject.Subject, error) {
 	return f.lib.Subjects(ctx)
+}
+
+// subjectNames is the homeworkflow.SubjectNames of an assignment the student adds (ADR-0029): the current name of a
+// library subject; lookup only.
+type subjectNames struct{ lib *library.Service }
+
+func (n subjectNames) SubjectName(ctx context.Context, id shared.SubjectID) (string, error) {
+	list, err := n.lib.Subjects(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range list {
+		if s.ID() == id {
+			return s.Name().String(), nil
+		}
+	}
+	return "", fmt.Errorf("app: subject %s: %w", id, shared.ErrNotFound)
 }

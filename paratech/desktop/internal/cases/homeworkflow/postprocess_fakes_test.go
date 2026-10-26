@@ -299,6 +299,21 @@ func (r ppAssignments) Delete(_ context.Context, a *assignment.Assignment) error
 	return nil
 }
 
+// DeleteUnused is Delete with the in-use refusal first, as the sqlite adapter checks the references before the delete.
+func (r ppAssignments) DeleteUnused(_ context.Context, a *assignment.Assignment) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.inUse[a.ID()] {
+		return assignment.ErrInUse
+	}
+	stored, ok := r.s.assignments[a.ID()]
+	if !ok || stored.Version != a.Version() {
+		return shared.ErrVersionConflict
+	}
+	delete(r.s.assignments, a.ID())
+	return nil
+}
+
 func (r ppAssignments) Save(_ context.Context, a *assignment.Assignment) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
