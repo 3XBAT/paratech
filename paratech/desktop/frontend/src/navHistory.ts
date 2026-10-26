@@ -20,7 +20,13 @@ export function currentRoute(h: NavHistory): Route {
 }
 
 export function sameRoute(a: Route, b: Route): boolean {
-  return a.page === b.page && a.transcript === b.transcript && a.summary === b.summary && a.assignment === b.assignment;
+  return (
+    a.page === b.page &&
+    a.transcript === b.transcript &&
+    a.summary === b.summary &&
+    a.assignment === b.assignment &&
+    a.subject === b.subject
+  );
 }
 
 /** A new place: forward entries are cut off; the same place as the current one adds nothing. */

@@ -27,6 +27,7 @@ const (
 	msgRateLimited     = "too many requests, retry later"
 	msgQuotaExceeded   = "quota exceeded"
 	msgProviderFailed  = "the LLM provider failed"
+	msgInvalidAnswer   = "the model answered, but its answer does not match the schema of the operation"
 	msgConflict        = "the idempotency key was used with a different request"
 	msgRunning         = "a call with this idempotency key is still running"
 	msgInternal        = "internal error"
@@ -255,7 +256,11 @@ func (g *Gateway) completeError(ctx context.Context, err error) error {
 		}
 		return detailedError(connectrpc.CodeResourceExhausted, detail)
 	case errors.As(err, &failed):
-		detail := &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: msgProviderFailed, Retryable: failed.Transient}
+		msg := msgProviderFailed
+		if errors.Is(err, gateway.ErrInvalidAnswer) {
+			msg = msgInvalidAnswer
+		}
+		detail := &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: msg, Retryable: failed.Transient}
 		if failed.Transient && failed.RetryAfter > 0 {
 			detail.RetryAfter = durationpb.New(failed.RetryAfter)
 		}

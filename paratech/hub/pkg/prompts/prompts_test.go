@@ -15,18 +15,18 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 to v3 stay served to clients of those catalogs; v4 is the current version.
+// TestEmbeddedPanel: v1 to v4 stay served to clients of those catalogs; v5 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 4 {
-		t.Fatalf("versions: %d, want v1 to v4", len(versions))
+	if len(versions) != 5 {
+		t.Fatalf("versions: %d, want v1 to v5", len(versions))
 	}
 	for i, v := range versions {
 		if v.Version != uint32(i+1) {
-			t.Fatalf("version %d at %d, want v1 to v4 in order", v.Version, i)
+			t.Fatalf("version %d at %d, want v1 to v5 in order", v.Version, i)
 		}
 	}
 	for _, v := range versions {
@@ -126,6 +126,43 @@ func TestPanelV4Prompt(t *testing.T) {
 	}
 }
 
+// TestPanelV5Prompt: v5 keeps every rule of v4 (its catalog is v4's with the version raised) and adds the beta
+// feedback of 26.10 (TASK-200): even a general question is answered with reply, and the prompt names only what the
+// app has: no import of a ready recording.
+func TestPanelV5Prompt(t *testing.T) {
+	v4, system := panelSystem(t, 4), panelSystem(t, 5)
+	for _, line := range strings.Split(v4, "\n") {
+		// The screens and the line about summaries are reworded: «Записи и задачи» is where recordings are. The first
+		// line is reworded too: since TASK-200 a plain text answer may become a plain reply, it no longer always fails.
+		if strings.HasPrefix(line, "- «Сегодня»") || strings.HasPrefix(line, "- summaries and lecture texts") ||
+			strings.HasPrefix(line, "You are the planner") {
+			continue
+		}
+		if !strings.Contains(system, line) {
+			t.Errorf("agent/panel/v5/system.md drops the v4 line %q", line)
+		}
+	}
+	for _, rule := range []string{
+		// (a) a plain text answer loses the cards: reply even to a general question
+		"You work only by calling tools", "Never answer with plain text", "at best shown as a plain reply",
+		"Always answer with the reply tool, even to a general question", "«что такое горутина»",
+		// (b) only what exists
+		"Name only screens, blocks and features listed", "the app does not have it",
+		"«Записи и задачи»", "«Начать запись»", "«Пары дня»", "«Горит на 7 дней»",
+		"There is no import or upload of a ready audio or video recording", "Never offer it",
+		"goes to «Входящие» as a material, never as a recording",
+	} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("agent/panel/v5/system.md does not state %q", rule)
+		}
+	}
+	for _, gone := range []string{"generate_draft", "«Решение»", "the recording in «Сегодня»", "A recording opens its transcript"} {
+		if strings.Contains(system, gone) {
+			t.Errorf("agent/panel/v5/system.md still says %q", gone)
+		}
+	}
+}
+
 func TestEmbeddedInspectMaterialV1(t *testing.T) {
 	v, system, err := Op("inspect_material")
 	if err != nil || v != 1 {
@@ -142,13 +179,32 @@ func TestEmbeddedInspectMaterialV1(t *testing.T) {
 	}
 }
 
-func TestEmbeddedTriageAssignmentV1(t *testing.T) {
+// TestEmbeddedTriageAssignmentV2: the newest triage prompt is v2 (TASK-200: the helper is demanded for a partial or
+// impossible work); it keeps every key and rule of v1.
+func TestEmbeddedTriageAssignmentV2(t *testing.T) {
 	v, system, err := Op("triage_assignment")
-	if err != nil || v != 1 {
-		t.Fatalf("Op(triage_assignment) = v%d, %v; want v1", v, err)
+	if err != nil || v != 2 {
+		t.Fatalf("Op(triage_assignment) = v%d, %v; want v2", v, err)
 	}
 	if len(bytes.TrimSpace(system)) == 0 || !utf8.Valid(system) || bytes.IndexByte(system, 0) >= 0 {
-		t.Fatal("ops/triage_assignment/v1/system.md must be non-empty UTF-8 without NUL")
+		t.Fatal("ops/triage_assignment/v2/system.md must be non-empty UTF-8 without NUL")
+	}
+	v1, err := files.ReadFile("ops/triage_assignment/v1/system.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range bytes.Split(v1, []byte("\n")) {
+		if !bytes.Contains(system, line) {
+			t.Errorf("v2 drops the v1 line %q", line)
+		}
+	}
+	for _, rule := range []string{
+		`The helper is required for "partial" and "impossible"`, `"helper" is always an object, never null`,
+		`"full" goes with null; "partial" and "impossible" go with a helper object`,
+	} {
+		if !bytes.Contains(system, []byte(rule)) {
+			t.Errorf("the prompt does not state %q", rule)
+		}
 	}
 	// The prompt names every key and enum value of the schema the Hub checks (domain/llm/services/triage).
 	for _, key := range []string{
@@ -166,6 +222,28 @@ func TestEmbeddedTriageAssignmentV1(t *testing.T) {
 	// Two question rounds, then the final call without questions (triage.FinalRound).
 	if !bytes.Contains(system, []byte("Rounds 1 and 2 may ask questions")) || !bytes.Contains(system, []byte("Round 3 is the last call")) {
 		t.Error("the prompt does not state the rounds")
+	}
+}
+
+// TestEmbeddedTriageReask: the reask note of triage v2 (TASK-200) is trusted server text about the missing helper
+// only; it quotes no data and states the rule of the prompt. The other operations have none.
+func TestEmbeddedTriageReask(t *testing.T) {
+	v, note, err := OpReask("triage_assignment")
+	if err != nil || v != 2 {
+		t.Fatalf("OpReask(triage_assignment) = v%d, %v; want v2", v, err)
+	}
+	if len(bytes.TrimSpace(note)) == 0 || !utf8.Valid(note) || bytes.IndexByte(note, 0) >= 0 {
+		t.Fatal("ops/triage_assignment/v2/reask.md must be non-empty UTF-8 without NUL")
+	}
+	for _, rule := range []string{`"helper" was null`, "Answer again with the whole JSON object", `"steps"`, `"submit"`} {
+		if !bytes.Contains(note, []byte(rule)) {
+			t.Errorf("the note does not state %q", rule)
+		}
+	}
+	for _, op := range []string{"inspect_material", "answer", "summary"} {
+		if _, _, err := OpReask(op); !errors.Is(err, ErrNotFound) {
+			t.Errorf("OpReask(%s): err = %v, want ErrNotFound", op, err)
+		}
 	}
 }
 
@@ -215,6 +293,20 @@ func TestVersionDirectories(t *testing.T) {
 	v, system, err := opIn(fsys, "answer")
 	if err != nil || v != 3 || string(system) != "new" {
 		t.Fatalf("opIn = %d %q %v, want the newest", v, system, err)
+	}
+	// The reask note is read from the newest version only.
+	withNote := fstest.MapFS{
+		"ops/answer/v1/system.md": {Data: []byte("old")},
+		"ops/answer/v1/reask.md":  {Data: []byte("old note")},
+		"ops/answer/v2/system.md": {Data: []byte("new")},
+		"ops/triage/v1/system.md": {Data: []byte("p")},
+		"ops/triage/v1/reask.md":  {Data: []byte("note")},
+	}
+	if _, _, err := opReaskIn(withNote, "answer"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("opReaskIn(answer): err = %v, want ErrNotFound for the newest version", err)
+	}
+	if v, note, err := opReaskIn(withNote, "triage"); err != nil || v != 1 || string(note) != "note" {
+		t.Errorf("opReaskIn(triage) = %d %q %v", v, note, err)
 	}
 	for _, name := range []string{"half", "odd", "file"} {
 		if _, err := agentIn(fsys, name); err == nil {

@@ -1,8 +1,19 @@
 import { type FormEvent, useState } from "react";
 import type { LibraryMaterial, LibrarySubject } from "../bindings/library.js";
-import { filesOfFolder, folderCountText, folderTitle, groupBySemester, orderedFolders, sizeText, texts, typeLabel } from "../libraryView.js";
+import {
+  filesOfFolder,
+  folderCountText,
+  folderTitle,
+  groupBySemester,
+  orderedFolders,
+  sizeText,
+  texts,
+  treeCount,
+  typeLabel,
+} from "../libraryView.js";
 import { Button } from "../ui/Button.js";
-import { Card, EmptyState, Field, Input, ResultLine, Row } from "../ui/controls.js";
+import { Card, EmptyState, Field, Input, ResultLine } from "../ui/controls.js";
+import { Icon } from "../ui/Icon.js";
 
 // Names of subjects, folders and files are typed or imported text: only text nodes here, never markup.
 
@@ -58,32 +69,137 @@ export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen
   return (
     <>
       {groupBySemester(props.subjects).map((g) => (
-        <div className="gsec" key={g.code}>
-          <h2 className="group-cap">{g.label}</h2>
-          <Card className="rows" label={g.label}>
+        <section className="section" key={g.code}>
+          <h2 className="sec-h">
+            {g.label} <span className="cnt num">· {g.subjects.length}</span>
+          </h2>
+          <ul className="subj-cards">
             {g.subjects.map((s) => (
-              <Row
-                key={s.id}
-                title={s.name}
-                meta={orderedFolders(s.folders).map(folderTitle).join(" · ")}
-                actions={
-                  <Button size="sm" onClick={() => props.onOpen(s.id)}>
-                    Открыть
-                  </Button>
-                }
-              />
+              <li key={s.id}>
+                <button type="button" className="subj-card" onClick={() => props.onOpen(s.id)}>
+                  <span className="subj-card-head">
+                    <Icon name="folder" />
+                    <span className="t">{s.name}</span>
+                  </span>
+                  <span className="small muted">{orderedFolders(s.folders).map(folderTitle).join(" · ")}</span>
+                  <span className="subj-card-open small">
+                    <span>Открыть</span>
+                    <Icon name="chevr" />
+                  </span>
+                </button>
+              </li>
             ))}
-          </Card>
-        </div>
+          </ul>
+        </section>
       ))}
     </>
+  );
+}
+
+/**
+ * The tree of the subject page: semesters (collapsible), their subjects, and the folders of the open subject with the
+ * number of files in each. `counts` maps a folder id to its files; null while the files are being read.
+ */
+export function SubjectTree(props: {
+  subjects: readonly LibrarySubject[];
+  currentId: string;
+  counts: ReadonlyMap<string, number> | null;
+  busy: boolean;
+  onOpen(id: string): void;
+  onAddSubject(): void;
+  onAddFolder(): void;
+}) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (code: string) =>
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (!next.delete(code)) {
+        next.add(code);
+      }
+      return next;
+    });
+  return (
+    <nav className="tree" aria-label={texts.title}>
+      <ul className="lv0">
+        {groupBySemester(props.subjects).map((g) => {
+          const shut = collapsed.has(g.code);
+          return (
+            <li key={g.code}>
+              <button type="button" className="ti sem" aria-expanded={!shut} onClick={() => toggle(g.code)}>
+                <Icon name={shut ? "chevr" : "chev"} />
+                <span className="nm">{g.label}</span>
+                {shut && <span className="cnt num">{g.subjects.length}</span>}
+              </button>
+              {!shut && (
+                <ul className="lv1">
+                  {g.subjects.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        className={s.id === props.currentId ? "ti cur" : "ti"}
+                        aria-current={s.id === props.currentId ? "page" : undefined}
+                        onClick={() => props.onOpen(s.id)}
+                      >
+                        <Icon name={s.id === props.currentId ? "chev" : "chevr"} />
+                        <span className="nm">{s.name}</span>
+                      </button>
+                      {s.id === props.currentId && (
+                        <ul className="lv2">
+                          {orderedFolders(s.folders).map((f) => (
+                            <li key={f.id}>
+                              <div className="ti">
+                                <Icon name="folder" />
+                                <span className="nm">{folderTitle(f)}</span>
+                                <span className="cnt num">{treeCount(props.counts?.get(f.id))}</span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="tree-acts">
+        <Button size="sm" icon="plus" disabled={props.busy} onClick={props.onAddSubject}>
+          {texts.addSubject}
+        </Button>
+        {props.currentId !== "" && (
+          <Button size="sm" icon="plus" disabled={props.busy} onClick={props.onAddFolder}>
+            {texts.addFolder}
+          </Button>
+        )}
+      </div>
+    </nav>
   );
 }
 
 function FileRow(props: { m: LibraryMaterial }) {
   const { m } = props;
   const meta = [typeLabel(m.type), sizeText(m.sizeBytes), m.textNote].filter((x) => x !== "").join(" · ");
-  return <Row title={m.name} meta={meta} />;
+  return (
+    <div className="lrow" role="listitem">
+      <Icon name="doc" />
+      <div className="tx">
+        <p className="t">{m.name}</p>
+        {meta !== "" && <div className="meta num">{meta}</div>}
+      </div>
+    </div>
+  );
+}
+
+function FileRows(props: { files: readonly LibraryMaterial[] }) {
+  return (
+    <div role="list">
+      {props.files.map((m) => (
+        <FileRow key={m.id} m={m} />
+      ))}
+    </div>
+  );
 }
 
 /** The page of a subject: its folders (system ones first), the files of each, «＋ Папка». */
@@ -93,39 +209,27 @@ export function SubjectDetail(props: {
   folderForm: boolean;
   busy: boolean;
   error: string;
-  onAddFolder(): void;
   onCreateFolder(name: string): void;
   onCancelFolder(): void;
 }) {
   const { subject } = props;
   return (
     <>
-      {subject.aliases.length > 0 && (
-        <p className="small muted">
-          {texts.aliases}: {subject.aliases.join(", ")}
-        </p>
-      )}
       {orderedFolders(subject.folders).map((f) => {
         const files = filesOfFolder(props.materials, f.id);
         return (
-          <div className="gsec" key={f.id}>
-            <h2 className="group-cap">
-              {folderTitle(f)} <span className="muted">· {folderCountText(files.length)}</span>
+          <section className="section" key={f.id}>
+            <h2 className="sec-h">
+              {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
             </h2>
-            <Card className="rows" label={folderTitle(f)}>
-              {files.length === 0 ? <p className="small muted empty-folder">{texts.emptyFolder}</p> : files.map((m) => <FileRow key={m.id} m={m} />)}
+            <Card className="lrows" label={folderTitle(f)}>
+              {files.length === 0 ? <p className="small muted empty-folder">{texts.emptyFolder}</p> : <FileRows files={files} />}
             </Card>
-          </div>
+          </section>
         );
       })}
-      {props.folderForm ? (
+      {props.folderForm && (
         <NameForm label={texts.folderName} busy={props.busy} error={props.error} onSubmit={props.onCreateFolder} onCancel={props.onCancelFolder} />
-      ) : (
-        <div className="acts start group-acts">
-          <Button icon="plus" onClick={props.onAddFolder}>
-            {texts.addFolder}
-          </Button>
-        </div>
       )}
       {!props.folderForm && props.error !== "" && (
         <ResultLine kind="fail" role="alert">
@@ -143,16 +247,14 @@ export function InboxList(props: { materials: readonly LibraryMaterial[] }) {
     return null;
   }
   return (
-    <div className="gsec">
-      <h2 className="group-cap">
-        {texts.inbox} <span className="muted">· {folderCountText(files.length)}</span>
+    <section className="section">
+      <h2 className="sec-h">
+        {texts.inbox} <span className="cnt num">· {folderCountText(files.length)}</span>
       </h2>
-      <Card className="rows" label={texts.inbox}>
-        {files.map((m) => (
-          <FileRow key={m.id} m={m} />
-        ))}
+      <Card className="lrows" label={texts.inbox}>
+        <FileRows files={files} />
       </Card>
       <p className="small muted group-foot">{texts.inboxHint}</p>
-    </div>
+    </section>
   );
 }

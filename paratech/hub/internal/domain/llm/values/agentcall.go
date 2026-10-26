@@ -3,6 +3,7 @@ package values
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // maxToolDescriptionBytes bounds the description of a tool sent to the provider.
@@ -142,6 +143,23 @@ type AgentAnswer struct {
 	malformed bool
 	stop      StopReason
 	assistant AssistantTurn
+	text      string
+}
+
+// WithText records the plain text of an answer without tool calls. UNTRUSTED; never logged.
+func (a AgentAnswer) WithText(text string) AgentAnswer {
+	a.text = text
+	return a
+}
+
+// PlainText is the trimmed text of an answer that ended its turn with text only (no call, no refusal, no broken call),
+// which the planner may turn into a reply card (TASK-200); ok is false for any other answer or a blank text. UNTRUSTED.
+func (a AgentAnswer) PlainText() (text string, ok bool) {
+	if a.toolUse || a.refused || a.malformed || a.stop != StopEnd || len(a.calls) > 0 {
+		return "", false
+	}
+	text = strings.TrimSpace(a.text)
+	return text, text != ""
 }
 
 // WithStop records the stop reason the provider gave; an unknown value is StopOther.

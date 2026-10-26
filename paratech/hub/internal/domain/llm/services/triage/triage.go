@@ -115,6 +115,10 @@ var (
 	ErrInvalidInput = errors.New("invalid triage_assignment input")
 	// ErrInvalidAnswer means the model's answer breaks the reader schema; the whole answer is refused.
 	ErrInvalidAnswer = errors.New("invalid triage_assignment answer")
+	// ErrMissingHelper is the ErrInvalidAnswer of a partial or impossible work without its helper, an answer otherwise
+	// within the schema: the one defect the Hub asks the model once more to fix, with the server's reask note of the
+	// prompt version (hub/pkg/prompts, ADR-0025).
+	ErrMissingHelper = fmt.Errorf("%w: a partial or impossible work needs a helper", ErrInvalidAnswer)
 )
 
 // WorkType is the kind of work an assignment asks for. Closed set.
@@ -420,7 +424,7 @@ func parseAnswer(output string) (Answer, error) {
 	case full && a.Helper != nil:
 		return Answer{}, fmt.Errorf("%w: a work feasible in full has no helper", ErrInvalidAnswer)
 	case !full && a.Helper == nil:
-		return Answer{}, fmt.Errorf("%w: a partial or impossible work needs a helper", ErrInvalidAnswer)
+		return Answer{}, ErrMissingHelper
 	case !full && strings.TrimSpace(a.FeasibilityReason) == "":
 		return Answer{}, fmt.Errorf("%w: a partial or impossible work needs a reason", ErrInvalidAnswer)
 	}
